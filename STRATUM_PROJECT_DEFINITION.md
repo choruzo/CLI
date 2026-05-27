@@ -433,12 +433,12 @@ stratum config set provider.default litellm-proxy
 ## 9. Hitos del Proyecto (Roadmap)
 
 ### Hito 0 — Scaffolding del proyecto *(~2 días)*
-- [ ] Inicializar proyecto TypeScript con tsup
-- [ ] CLI entry point con Commander.js
-- [ ] Sistema de configuración (`.stratumrc.json` + Zod schema)
-- [ ] Estructura de directorios base
-- [ ] Script de desarrollo con hot-reload
-- [ ] Vitest configurado
+- [x] Inicializar proyecto TypeScript con tsup
+- [x] CLI entry point con Commander.js
+- [x] Sistema de configuración (`.stratumrc.json` + Zod schema)
+- [x] Estructura de directorios base
+- [x] Script de desarrollo con hot-reload
+- [x] Vitest configurado
 
 **Entregable:** `stratum --version` funciona. Config se carga correctamente.
 

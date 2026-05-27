@@ -1,1 +1,15 @@
 /CLAUDE.md
+
+# Claude Code — overrides locales (no compartir en repo)
+.claude/settings.local.json
+
+# Node.js
+node_modules/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+*.swp
+*.swo

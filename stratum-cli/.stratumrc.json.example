@@ -1,0 +1,55 @@
+{
+  "provider": {
+    "default": "local-ollama",
+    "providers": {
+      "local-ollama": {
+        "type": "openai-compatible",
+        "baseUrl": "http://localhost:11434/v1",
+        "model": "qwen2.5-coder:32b",
+        "apiKey": "ollama",
+        "contextWindow": 32768
+      },
+      "litellm-proxy": {
+        "type": "openai-compatible",
+        "baseUrl": "http://localhost:4000/v1",
+        "model": "claude-sonnet-4-5",
+        "apiKey": "${LITELLM_API_KEY}",
+        "contextWindow": 200000
+      }
+    }
+  },
+  "memory": {
+    "projectFile": "./STRATUM.md",
+    "globalFile": "~/.stratum/STRATUM.md",
+    "decisionsFile": "~/.stratum/memory/decisions.json",
+    "vectorDb": "~/.stratum/memory/vectors.db",
+    "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "retrievalTopK": 5,
+    "embeddingWarmup": false
+  },
+  "tools": {
+    "confirmDestructive": true,
+    "bashTimeout": 30000,
+    "webSearch": {
+      "backend": "brave",
+      "apiKey": "${BRAVE_API_KEY}"
+    },
+    "destructivePatterns": ["rm", "rmdir", "dd", "mkfs", "format", "DROP", "DELETE", "truncate", "shred", "wipefs"]
+  },
+  "mcp": {
+    "servers": [
+      {
+        "name": "filesystem",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+      }
+    ],
+    "heartbeatInterval": 30000
+  },
+  "agent": {
+    "maxIterations": 50,
+    "maxToolRetries": 3,
+    "toolErrorFormat": "xml",
+    "compressionKeepRounds": 6
+  }
+}
