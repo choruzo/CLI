@@ -566,6 +566,16 @@ stratum config set provider.default litellm-proxy
 
 ---
 
+---
+
+## 13. Documentos Relacionados
+
+| Documento | Descripción |
+|---|---|
+| [STRATUM_UI_SPECIFICATION.md](./STRATUM_UI_SPECIFICATION.md) | Especificación completa de la interfaz de terminal (Ink): layout, componentes, colores, animaciones, atajos de teclado y mapeo de componentes React |
+
+---
+
 *Documento generado: 2026-05-27 | Versión: 0.1.0-draft*
 
 ---
