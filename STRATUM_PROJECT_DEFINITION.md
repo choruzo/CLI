@@ -453,6 +453,8 @@ stratum config set provider.default litellm-proxy
 - [ ] System prompt base
 - [ ] Ink UI: ChatView con streaming
 
+> **UI:** Implementar el esqueleto completo de la interfaz. Ver [§2 — Layout y Zonas](./STRATUM_UI_SPECIFICATION.md#2-layout-y-zonas), [§3 — Banner de Arranque](./STRATUM_UI_SPECIFICATION.md#3-estado-a--banner-de-arranque) (typewriter + transición), [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar), [§4.2 — Área de Conversación](./STRATUM_UI_SPECIFICATION.md#42-área-de-conversación) (streaming text + cursor parpadeante), [§5.2 — Input Area](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (modo normal únicamente), [§6 — Paleta de Colores](./STRATUM_UI_SPECIFICATION.md#6-paleta-de-colores), [§8 — Animaciones](./STRATUM_UI_SPECIFICATION.md#8-animaciones-y-transiciones), [§10 — Atajos de Teclado](./STRATUM_UI_SPECIFICATION.md#10-atajos-de-teclado), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (`App`, `Banner`, `ConversationView`, `StatusBar`, `StreamingText`, `InputArea`).
+
 **Entregable:** `stratum chat` funciona. El agente puede leer archivos y ejecutar comandos básicos.
 
 ---
@@ -463,6 +465,8 @@ stratum config set provider.default litellm-proxy
 - [ ] `SessionContext`: historial de conversación
 - [ ] Compresión de contexto básica (truncation con resumen)
 - [ ] Comando `stratum memory show`
+
+> **UI:** El porcentaje de contexto en el status bar pasa a ser funcional (cambia de color según el umbral: verde / ámbar / rojo). Activar el comando `/memory show` en el input. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de contexto %), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/memory show`).
 
 **Entregable:** El agente recuerda el contexto del proyecto entre iteraciones dentro de una sesión.
 
@@ -477,6 +481,8 @@ stratum config set provider.default litellm-proxy
 - [ ] Timeout y cancelación de tools
 - [ ] ToolCall UI (renderizado de tool calls en Ink)
 
+> **UI:** El bloque de tool calls es la pieza central de este hito. Implementar los cuatro estados (`pending`, `running`, `completed`, `error`), el spinner animado, el timer incremental, el toggle de expansión con output colapsable, y el prompt de confirmación para operaciones destructivas. Ver [§5.1 — Tool Call Block — Estados](./STRATUM_UI_SPECIFICATION.md#51-tool-call-block--estados) (todos los estados y el bloque expandido), [§8 — Animaciones](./STRATUM_UI_SPECIFICATION.md#8-animaciones-y-transiciones) (spinner + timer), [§10 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (`ToolCallBlock`).
+
 **Entregable:** Agente con toolset completo del día 1. Puede realizar tareas de código completas.
 
 ---
@@ -487,6 +493,8 @@ stratum config set provider.default litellm-proxy
 - [ ] Auto-registro de MCP tools en `ToolRegistry`
 - [ ] Listado de tools MCP disponibles
 - [ ] Comando `stratum mcp list`
+
+> **UI:** Cubrir el estado de error específico de MCP en el tool call block (`tool_error` con mensaje "MCP server unavailable") y activar `/tools` en el autocompletado del input. El indicador `●` del status bar refleja también la conectividad de MCP servers. Ver [§5.1 — estado `error`](./STRATUM_UI_SPECIFICATION.md#51-tool-call-block--estados), [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/tools`).
 
 **Entregable:** Cualquier MCP server se puede conectar y sus tools son utilizables por el agente.
 
@@ -501,6 +509,8 @@ stratum config set provider.default litellm-proxy
 - [ ] Inyección de memoria relevante en context
 - [ ] Comandos `stratum memory list/search/forget`
 
+> **UI:** Activar los comandos `/memory list`, `/memory search` y `/memory forget` en el autocompletado. Añadir indicador visual discreto cuando el agente recupera memoria semántica (evento `memory_retrieved` del `AgentEvent` schema). Mostrar la barra de progreso de descarga del modelo ONNX en el primer arranque. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/memory list/search/forget`), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (evento `memory_retrieved`), [§12 — Consideraciones Windows vs Linux](./STRATUM_UI_SPECIFICATION.md#12-consideraciones-windows-vs-linux) (carga ONNX).
+
 **Entregable:** El agente recuerda decisiones entre sesiones y puede recuperarlas semánticamente.
 
 ---
@@ -514,6 +524,8 @@ stratum config set provider.default litellm-proxy
 - [ ] Fallback automático a provider secundario
 - [ ] Comando `stratum providers list`
 
+> **UI:** El indicador `●` del status bar refleja el estado del provider en tiempo real (verde / rojo / gris según health check). El `/provider <name>` y `/model <name>` pasan a estar operativos en el autocompletado. En caso de fallback automático, notificar al usuario con un mensaje inline en el área de conversación. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/provider`, `/model`).
+
 **Entregable:** El agente funciona de forma transparente con cualquier backend LLM.
 
 ---
@@ -526,6 +538,8 @@ stratum config set provider.default litellm-proxy
 - [ ] Flag `--plan` en `stratum run`
 - [ ] UI de plan en Ink
 
+> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar la implementación.* Necesita diseñar: vista de plan (lista numerada de pasos con estado `pending / in_progress / done / skipped`), prompt de aprobación interactivo (aprobar / editar / rechazar), y la transición de la vista de plan a la vista de conversación durante la ejecución. Activar `/plan` en el autocompletado. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/plan`).
+
 **Entregable:** `stratum run --plan "task"` muestra plan, pide aprobación, ejecuta paso a paso.
 
 ---
@@ -537,6 +551,8 @@ stratum config set provider.default litellm-proxy
 - [ ] Agregación de resultados
 - [ ] Agentes especializados: `CodeAgent`, `ShellAgent`, `ResearchAgent`
 - [ ] Visualización de árbol de agentes en Ink
+
+> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar la implementación.* Necesita diseñar: árbol de agentes activos (orquestador + subagentes con sus tool call blocks anidados), indicador de qué agente está "hablando" en cada momento, vista de resultados agregados, y cómo representar la delegación de tareas en el flujo de conversación.
 
 **Entregable:** Tareas complejas se distribuyen entre subagentes especializados con resultados agregados.
 
