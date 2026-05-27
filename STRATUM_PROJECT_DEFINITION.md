@@ -567,3 +567,491 @@ stratum config set provider.default litellm-proxy
 ---
 
 *Documento generado: 2026-05-27 | Versión: 0.1.0-draft*
+
+---
+
+## 12. Especificaciones Técnicas Detalladas
+
+Esta sección resuelve los puntos de ambigüedad identificados antes de comenzar el desarrollo. Cada decisión está justificada y es vinculante para la implementación.
+
+---
+
+### 12.1 — Schema de `AgentEvent`
+
+Todos los módulos que consuman el generador `StratumAgent.run()` deben depender de esta definición y solo de esta.
+
+```typescript
+// src/agent/types.ts
+
+type AgentEvent =
+  | { type: 'text_delta';       delta: string }
+  | { type: 'tool_call_start';  id: string; name: string; input_so_far: string }
+  | { type: 'tool_call_ready';  id: string; name: string; input: Record<string, unknown> }
+  | { type: 'tool_result';      id: string; name: string; result: string; durationMs: number }
+  | { type: 'tool_error';       id: string; name: string; error: string; recoverable: boolean }
+  | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
+  | { type: 'thinking';         text: string }          // reasoning interno del modelo
+  | { type: 'error';            message: string; fatal: boolean }
+  | { type: 'done';             stopReason: 'stop' | 'max_iterations' | 'cancelled' }
+```
+
+**Invariantes:**
+- Todo `tool_call_start` tiene exactamente un `tool_call_ready` posterior (o un `tool_error` si el parsing falla).
+- Todo `tool_call_ready` tiene exactamente un `tool_result` o `tool_error` posterior.
+- El evento `done` es siempre el último evento del generador. Nunca hay eventos después.
+- `fatal: true` en `error` significa que el loop se abortó. `fatal: false` es un error recuperado.
+
+La UI (Ink) y los comandos `chat` / `run` consumen exclusivamente este stream de eventos. Ningún módulo accede al estado interno del agente directamente.
+
+---
+
+### 12.2 — Parsing de tool calls en streaming SSE
+
+El protocolo OpenAI-compatible envía tool calls fragmentadas en chunks SSE. El `ResponseParser` (en `src/providers/openai-compatible.ts`) debe acumularlas y emitir eventos completos.
+
+**Estructura del chunk SSE con tool call:**
+```json
+{
+  "choices": [{
+    "delta": {
+      "tool_calls": [{
+        "index": 0,
+        "id": "call_abc123",
+        "type": "function",
+        "function": {
+          "name": "read_file",
+          "arguments": "{\"path\": \"/src/"
+        }
+      }]
+    }
+  }]
+}
+```
+
+Los argumentos llegan fragmentados. El parser debe acumularlos en un `StreamBuffer` por `index`:
+
+```typescript
+class StreamBuffer {
+  private toolBuffers: Map<number, { id: string; name: string; args: string }> = new Map();
+
+  feed(chunk: OpenAIStreamChunk): AgentEvent[] {
+    const events: AgentEvent[] = [];
+    const delta = chunk.choices[0]?.delta;
+
+    // Texto normal
+    if (delta?.content) {
+      events.push({ type: 'text_delta', delta: delta.content });
+    }
+
+    // Tool call chunks
+    for (const tc of delta?.tool_calls ?? []) {
+      if (!this.toolBuffers.has(tc.index)) {
+        // Primera vez que vemos este índice: emitir start
+        this.toolBuffers.set(tc.index, { id: tc.id, name: tc.function.name, args: '' });
+        events.push({ type: 'tool_call_start', id: tc.id, name: tc.function.name, input_so_far: '' });
+      }
+      const buf = this.toolBuffers.get(tc.index)!;
+      buf.args += tc.function.arguments ?? '';
+      // Actualizar el start event con el input acumulado (para la UI progresiva)
+      events.push({ type: 'tool_call_start', id: buf.id, name: buf.name, input_so_far: buf.args });
+    }
+
+    // finish_reason: 'tool_calls' → parsear todos los buffers acumulados
+    if (chunk.choices[0]?.finish_reason === 'tool_calls') {
+      for (const [, buf] of this.toolBuffers) {
+        try {
+          const input = JSON.parse(buf.args);
+          events.push({ type: 'tool_call_ready', id: buf.id, name: buf.name, input });
+        } catch {
+          events.push({ type: 'tool_error', id: buf.id, name: buf.name,
+            error: `Invalid JSON in tool arguments: ${buf.args}`, recoverable: false });
+        }
+      }
+      this.toolBuffers.clear();
+    }
+
+    return events;
+  }
+}
+```
+
+**Modelos que envían múltiples tool calls en un turno** (Claude, GPT-4o): el buffer soporta `index` 0..N de forma natural, acumulando en paralelo.
+
+---
+
+### 12.3 — Política de errores en el ReAct loop
+
+**Decisión: Inject & Recover con límite de reintentos por tool.**
+
+Cuando una tool falla, el error se inyecta como `tool_result` con el mensaje de error y el agente decide cómo proceder (reintentar, buscar alternativa, abortar). El loop nunca aborta automáticamente por un error de tool, excepto cuando se supera el máximo de iteraciones global.
+
+```typescript
+// Configuración en .stratumrc.json
+{
+  "agent": {
+    "maxIterations": 50,        // iteraciones totales del loop
+    "maxToolRetries": 3,        // reintentos por tool por sesión (no por llamada)
+    "toolErrorFormat": "xml"    // formato del error inyectado
+  }
+}
+```
+
+**Formato del tool_result de error inyectado al LLM:**
+```xml
+<tool_error>
+  <tool>bash</tool>
+  <error>Command failed with exit code 1: permission denied</error>
+  <suggestion>Consider using sudo or checking file permissions first.</suggestion>
+</tool_error>
+```
+
+**Errores no recuperables** (fallos del propio sistema, no de la tool):
+- Error de red al llamar al LLM → reintento con backoff exponencial (3 intentos, 1s/2s/4s), luego `{ type: 'error', fatal: true }`.
+- JSON inválido en argumentos de tool → `tool_error` con `recoverable: false`, el loop sigue pero el agente recibe el error.
+
+---
+
+### 12.4 — Compresión de contexto
+
+**Decisión: umbral al 80% del `context_window` del modelo activo, compresión via LLM call.**
+
+El `ContextManager` (parte de `src/agent/harness.ts`) evalúa el tamaño del historial antes de cada iteración.
+
+**Estimación de tokens:** sin tokenizador universal, se usa `chars / 3.5` como proxy (conservador para español/inglés mezclado). El `context_window` del modelo se toma de la config del provider.
+
+```typescript
+// .stratumrc.json
+{
+  "providers": {
+    "local-ollama": {
+      "model": "qwen2.5-coder:32b",
+      "contextWindow": 32768        // tokens máximos del modelo
+    }
+  }
+}
+```
+
+**Algoritmo de compresión:**
+```
+1. Estimar tokens actuales: sum(chars) / 3.5
+2. Si tokens_estimados > contextWindow * 0.80:
+   a. Separar "zona protegida": [system_prompt] + últimas 6 rondas (configurable)
+   b. Comprimir el historial antiguo con un LLM call:
+      prompt: "Resume esta conversación en máximo 500 palabras preservando decisiones técnicas y contexto clave:"
+      model: el mismo provider activo (o un modelo pequeño si se configura compressor_model)
+   c. Reemplazar historial antiguo por: [{ role: 'assistant', content: '<summary>...</summary>' }]
+3. Emitir evento interno de compresión (visible en --debug mode)
+```
+
+**Zona protegida (nunca comprimida):**
+- System prompt completo
+- Últimas N rondas (default: 6, configurable `agent.compressionKeepRounds`)
+- Tool results de la iteración actual
+
+---
+
+### 12.5 — Tools destructivas en modo `stratum run`
+
+**Decisión: Pausar y pedir confirmación interactiva (selector sí/no) incluso en modo non-interactive.**
+
+`stratum run` no es completamente no-interactivo: puede pausarse para confirmar operaciones destructivas. Esto es más seguro que bloquearlo completamente y más explícito que el flag `--allow-destructive` silencioso.
+
+**Flujo:**
+```
+stratum run "limpia los logs viejos"
+  → Agente decide ejecutar: rm -rf /var/log/app/*.log
+  → Sistema detecta patrón destructivo
+
+  ⚠  El agente quiere ejecutar una operación destructiva:
+     bash: rm -rf /var/log/app/*.log
+
+  ¿Continuar? (s/N) _
+```
+
+**Flags disponibles:**
+```bash
+stratum run "tarea"                   # Pausa y pregunta en destructivas
+stratum run --allow-destructive "task" # Aprueba todas las destructivas sin preguntar
+stratum run --deny-destructive "task"  # Bloquea todas las destructivas y las inyecta como error
+```
+
+**Patrones destructivos detectados (lista configurable en `.stratumrc.json`):**
+```
+rm, rmdir, dd, mkfs, format, DROP, DELETE, truncate, shred, wipefs, > (overwrite redirect)
+```
+
+**En piped/CI mode** (stdin no es TTY): si no se puede mostrar el prompt, se comporta como `--deny-destructive` automáticamente. El agente recibe el error y puede buscar alternativas.
+
+---
+
+### 12.6 — Persistencia y reanudación de sesiones
+
+**Decisión: Sesión arranca limpia por defecto. `--resume session_id` restaura historial exacto.**
+
+**Almacenamiento de sesiones:**
+```
+~/.stratum/sessions/
+  sess_20260527_143022_abc.json   # historial completo
+  sess_20260527_091511_xyz.json
+```
+
+**Schema de sesión guardada:**
+```json
+{
+  "id": "sess_20260527_143022_abc",
+  "createdAt": "2026-05-27T14:30:22Z",
+  "updatedAt": "2026-05-27T15:12:08Z",
+  "provider": "local-ollama",
+  "model": "qwen2.5-coder:32b",
+  "project": "/home/javi/proyectos/mi-repo",
+  "messages": [
+    { "role": "user", "content": "..." },
+    { "role": "assistant", "content": "..." }
+  ],
+  "toolCallCount": 12,
+  "summary": "Sesión de refactoring del módulo de autenticación"
+}
+```
+
+**Ciclo de vida:**
+- Al iniciar `stratum chat`: crea nueva sesión en memoria.
+- Al terminar (Ctrl+C, `exit`, `/quit`): guarda automáticamente en `~/.stratum/sessions/`.
+- Con `--resume sess_20260527_143022_abc`: carga el historial completo y continúa.
+
+**Comandos de gestión:**
+```bash
+stratum sessions list              # Lista sesiones guardadas con fecha y resumen
+stratum sessions list --last 5     # Últimas 5
+stratum sessions resume <id>       # Equivalente a stratum chat --resume <id>
+stratum sessions delete <id>       # Elimina una sesión
+stratum sessions prune --older 30d # Limpia sesiones de más de 30 días
+```
+
+**Auto-generación del resumen:** al guardar, si la sesión tiene más de 5 rondas, se hace un LLM call para generar el campo `summary` (máx 100 chars). Se usa para el listado de sesiones.
+
+---
+
+### 12.7 — Detección y persistencia de decisiones importantes
+
+**Decisión: `store_decision` como tool interna que el agente invoca él mismo.**
+
+El agente tiene disponible en todo momento la tool `store_decision`. El system prompt le indica cuándo usarla. No hay LLM call extra ni clasificador externo. El costo es cero si el agente decide que no hubo decisión relevante.
+
+**Tool definition:**
+```typescript
+{
+  name: 'store_decision',
+  description: `Persiste una decisión importante tomada durante esta sesión en la memoria a largo plazo.
+Úsala cuando: (1) elijas entre alternativas técnicas significativas, (2) definas convenciones del proyecto,
+(3) resuelvas un bug no trivial, (4) el usuario te dé una preferencia explícita que debas recordar.
+NO la uses para acciones rutinarias o pasos intermedios.`,
+  schema: z.object({
+    title:   z.string().max(100).describe('Título breve de la decisión'),
+    content: z.string().describe('Explicación detallada: contexto, alternativas consideradas, razón de la elección'),
+    type:    z.enum(['architectural', 'tooling', 'convention', 'bug_fix', 'security', 'user_preference']),
+    tags:    z.array(z.string()).max(5).describe('Tags para búsqueda semántica'),
+    importance: z.enum(['low', 'medium', 'high']),
+  }),
+  destructive: false,
+  execute: async (params) => decisionStore.save(params)
+}
+```
+
+**Instrucción en system prompt:**
+```
+Tienes acceso a la tool store_decision. Úsala proactivamente cuando tomes decisiones técnicas 
+significativas o cuando el usuario exprese preferencias que deban persistir entre sesiones. 
+Piensa en ello como escribir en tu cuaderno de notas a largo plazo.
+```
+
+---
+
+### 12.8 — Ciclo de vida de los MCP servers
+
+**Política: inicio eager al arrancar el proceso, reconexión automática con backoff.**
+
+```
+Al iniciar stratum:
+  1. Leer lista de MCP servers en .stratumrc.json
+  2. Lanzar cada server (spawn proceso hijo o conectar vía HTTP/stdio)
+  3. Descubrir tools disponibles (tools/list)
+  4. Registrar tools en ToolRegistry con prefijo del server: "filesystem/read_file"
+  5. Si un server falla al iniciar: warning en UI, no abortar el arranque
+
+Durante la sesión:
+  - Heartbeat cada 30s (configurable, mcp.heartbeatInterval)
+  - Si heartbeat falla: marcar tools del server como unavailable
+  - Reconexión: backoff exponencial 2s → 4s → 8s (máx 3 intentos)
+  - Si no reconecta: las tools quedan disabled, el agente recibe error descriptivo al intentar usarlas
+
+Al terminar stratum:
+  - Shutdown graceful: SIGTERM a cada proceso hijo, esperar 2s, SIGKILL si no responde
+```
+
+**Comportamiento cuando una tool MCP no está disponible:**
+```xml
+<tool_error>
+  <tool>filesystem/read_file</tool>
+  <error>MCP server 'filesystem' is currently unavailable (reconnecting...)</error>
+  <suggestion>Try again in a few seconds or use the built-in read_file tool instead.</suggestion>
+</tool_error>
+```
+
+---
+
+### 12.9 — Paralelismo de tool calls
+
+**Decisión: ejecución paralela con `Promise.allSettled`, habilitada por defecto.**
+
+Cuando el LLM emite múltiples tool calls en un turno (posible en Claude y GPT-4o), el `ToolDispatcher` las ejecuta en paralelo:
+
+```typescript
+async function dispatchToolCalls(calls: ToolCallReady[]): Promise<ToolResult[]> {
+  if (calls.length === 1) {
+    return [await dispatchSingle(calls[0])];
+  }
+
+  // Ejecución paralela
+  const results = await Promise.allSettled(calls.map(dispatchSingle));
+
+  return results.map((r, i) =>
+    r.status === 'fulfilled'
+      ? r.value
+      : { id: calls[i].id, name: calls[i].name, error: r.reason.message, recoverable: true }
+  );
+}
+```
+
+**Consideraciones de seguridad en paralelo:**
+- Tools marcadas como `serialized: true` en su definición se ejecutan siempre de forma secuencial, incluso si el modelo las emite juntas. Por defecto: `bash` es `serialized: true`, las tools de filesystem son paralelas.
+- Las confirmaciones destructivas se resuelven secuencialmente (no se muestran dos prompts a la vez).
+
+**Orden de resultados:** los `tool_result` se envían al LLM en el mismo orden en que el modelo los emitió, independientemente del orden de finalización.
+
+---
+
+### 12.10 — Carga del modelo ONNX (`@xenova/transformers`)
+
+**Decisión: lazy load en primer uso, con warm-up opcional en config.**
+
+El modelo ONNX (`all-MiniLM-L6-v2`, ~23MB) se descarga en `~/.stratum/models/` en el primer uso y se cachea localmente. Las descargas posteriores son instantáneas.
+
+**Estrategia de carga:**
+```typescript
+class EmbeddingService {
+  private pipeline: Pipeline | null = null;
+  private loadPromise: Promise<Pipeline> | null = null;
+
+  async embed(text: string): Promise<Float32Array> {
+    if (!this.pipeline) {
+      // Lazy load: solo cuando se necesita por primera vez
+      if (!this.loadPromise) {
+        this.loadPromise = pipeline('feature-extraction', 'Xenova/all-MiniLM-L6-v2', {
+          cache_dir: path.join(os.homedir(), '.stratum', 'models'),
+        });
+      }
+      this.pipeline = await this.loadPromise;
+    }
+    return this.pipeline(text, { pooling: 'mean', normalize: true }).then(r => r.data);
+  }
+}
+```
+
+**Warm-up configurable:**
+```json
+{
+  "memory": {
+    "embeddingWarmup": true    // precarga ONNX al arrancar el proceso
+  }
+}
+```
+
+Con `embeddingWarmup: true`, el modelo se carga en background durante el splash de arranque. La UI muestra un indicador discreto "Cargando modelos de memoria..." que desaparece cuando termina (3-10s en el primer arranque, <1s desde caché).
+
+**Primera ejecución (descarga del modelo):**
+```
+stratum chat
+  ⟳ Descargando modelo de embeddings (23 MB)... [████████░░] 82%
+  ✓ Modelo listo — ~/.stratum/models/all-MiniLM-L6-v2
+```
+
+---
+
+### 12.11 — Distribución e instalación
+
+**Decisión: `npm install -g stratum-cli` como canal principal.**
+
+**Resolución de rutas en instalación global:**
+- `~/.stratum/` para datos del usuario (sesiones, memoria, modelos ONNX)
+- La config del proyecto (`.stratumrc.json`) se busca en el directorio de trabajo actual subiendo hasta la raíz, igual que hace Git con `.git/`
+
+**package.json relevante:**
+```json
+{
+  "name": "stratum-cli",
+  "bin": {
+    "stratum": "./dist/index.js"
+  },
+  "files": ["dist/", "STRATUM.md.template"],
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}
+```
+
+**Canales de distribución:**
+```bash
+# Producción (canal principal)
+npm install -g stratum-cli
+
+# Desarrollo local (link simbólico)
+npm run build && npm link
+
+# Prueba sin instalar
+npx stratum-cli@latest chat
+```
+
+**Inicialización en nuevo proyecto:**
+```bash
+stratum init        # Crea .stratumrc.json + STRATUM.md con plantillas en el directorio actual
+```
+
+---
+
+### 12.12 — Cancelación con Ctrl+C (señales del proceso)
+
+**Decisión: shutdown graceful con cleanup definido por etapa.**
+
+El `ReactLoop` registra un `AbortController` por sesión. El handler de `SIGINT` activa el abort y espera el cleanup.
+
+```typescript
+// En cli/commands/chat.ts
+const controller = new AbortController();
+
+process.on('SIGINT', async () => {
+  console.log('\n⏸  Cancelando...');
+  controller.abort();
+});
+
+// El ReactLoop recibe el signal
+for await (const event of agent.run(input, { signal: controller.signal })) {
+  // render events...
+}
+```
+
+**Comportamiento por etapa al recibir Ctrl+C:**
+
+| Etapa | Comportamiento |
+|---|---|
+| LLM streaming | Cancela el fetch (AbortSignal). El chunk parcial se descarta. |
+| Tool en ejecución | La tool recibe el signal. `bash` hace SIGTERM al proceso hijo (SIGKILL tras 2s). Tools de filesystem terminan la operación actual antes de salir. |
+| Confirmación pendiente | Respuesta automática "No" y loop termina. |
+| Entre iteraciones | Loop termina limpiamente en el siguiente checkpoint. |
+
+**Cleanup al terminar (Ctrl+C o exit normal):**
+1. Cerrar MCP servers (SIGTERM → SIGKILL fallback)
+2. Guardar sesión en `~/.stratum/sessions/` (si hay historial)
+3. Escribir decisiones pendientes al JSON store
+4. Emitir `{ type: 'done', stopReason: 'cancelled' }` al stream
+
+**Segundo Ctrl+C:** si el usuario presiona Ctrl+C por segunda vez durante el cleanup, se hace `process.exit(1)` inmediato sin más espera.
