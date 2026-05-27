@@ -96,35 +96,59 @@ La transición entre estados es la única animación de "pantalla completa". El 
 
 ### 3.2 Efecto de aparición del ASCII art (typewriter)
 
-El texto del banner aparece **carácter a carácter de izquierda a derecha, línea por línea**, emulando una impresora de alta velocidad. El ritmo es rápido (~3-4 chars por frame a 60fps) para que la animación dure ~400ms sin sentirse lenta.
+El texto del banner aparece **carácter a carácter de izquierda a derecha, línea por línea**, emulando una impresora de alta velocidad. El ritmo es rápido (~4 chars por frame a 60fps) para que la animación dure ~400ms sin sentirse lenta.
+
+**Importante:** Ink renderiza en terminal — no existe CSS ni `opacity`. Las "apariciones suaves" posteriores al typewriter se implementan con **color stepping**: el texto pasa de `text-invisible` (`#374151`) a su color final en 3-4 pasos de 50ms, cambiando el color vía `chalk`. No hay fade real, pero el efecto visual es suficientemente suave.
 
 **Secuencia:**
 ```
 t=0ms     → Pantalla en negro, cursor parpadeando
-t=0ms     → Inicia el typewriter del ASCII art (carácter a carácter, 3-4 por frame)
-t=~400ms  → ASCII art completo
-t=~600ms  → Fade in suave de versión + tagline (opacity 0→1, 200ms)
-t=~800ms  → Fade in suave de la sección de tips (opacity 0→1, 200ms)
-t=~1000ms → Fade in del prompt ❯❯ con cursor parpadeante
-t=~1200ms → Simulación de typing del placeholder si el usuario no interactúa (opcional)
+t=0ms     → Inicia el typewriter del ASCII art (4 chars por tick, ~60fps)
+t=~400ms  → ASCII art completo en color accent (#F59E0B)
+t=~400ms  → Versión + tagline aparece: #374151 → #4B5563 → #6B7280 (3 pasos × 50ms)
+t=~550ms  → Sección de tips aparece: mismo color stepping
+t=~700ms  → Prompt ❯❯ aparece con cursor parpadeante
 ```
 
-**Implementación Ink aproximada:**
+**Implementación Ink — corrección de anti-patterns:**
+
+El índice `i` debe vivir en un `useRef`, no en el closure de `setArtText`. Mutar una variable capturada dentro del actualizador de estado es un anti-pattern en React: `setState` puede ejecutarse de forma diferida y el closure captura el valor de `i` en el momento del `setInterval`, no en el momento de la ejecución.
+
 ```tsx
 // src/cli/ui/Banner.tsx
-const [phase, setPhase] = useState<'typing' | 'tips' | 'ready'>('typing');
+type Phase = 'typing' | 'appearing' | 'ready';
+const [phase, setPhase] = useState<Phase>('typing');
 const [artText, setArtText] = useState('');
+const indexRef = useRef(0);           // ← índice en useRef, no en closure
 
 useEffect(() => {
-  let i = 0;
   const chars = ASCII_ART.split('');
   const iv = setInterval(() => {
-    setArtText(prev => prev + chars[i++] + (chars[i] ?? '') + (chars[i+1] ?? ''));
-    i += 2;
-    if (i >= chars.length) { clearInterval(iv); setPhase('tips'); }
-  }, 16); // ~60fps
+    const i = indexRef.current;
+    if (i >= chars.length) {
+      clearInterval(iv);
+      setPhase('appearing');
+      return;
+    }
+    // Avanza 4 caracteres por tick
+    const chunk = chars.slice(i, i + 4).join('');
+    setArtText(prev => prev + chunk);
+    indexRef.current = i + 4;
+  }, 16);
   return () => clearInterval(iv);
 }, []);
+
+// Color stepping para la aparición de tips/meta
+useEffect(() => {
+  if (phase !== 'appearing') return;
+  const steps = ['#374151', '#4B5563', '#6B7280'];
+  let step = 0;
+  const iv = setInterval(() => {
+    setSubtitleColor(steps[step]);
+    if (++step >= steps.length) { clearInterval(iv); setPhase('ready'); }
+  }, 50);
+  return () => clearInterval(iv);
+}, [phase]);
 ```
 
 ### 3.3 Transición al Estado B
@@ -170,18 +194,18 @@ Scrollable verticalmente. Ink no tiene scroll nativo — se implementa con `ink-
   You
   ▏ texto del mensaje aquí
 ```
-- Label `You`: gris muted `#6B7280`, 11px
-- Barra vertical `▏`: gris `#374151` (indica inicio del mensaje)
-- Texto: blanco `#E5E5E5`, 12px
+- Label `You`: `chalk.hex('#6B7280')` — texto atenuado (`dim`)
+- Barra vertical `▏`: `chalk.hex('#374151')` — casi invisible, indica inicio del mensaje
+- Texto: `chalk.hex('#E5E5E5')` — texto normal sin modificador
 
 #### Respuesta del agente
 ```
   Stratum
   Texto de la respuesta que aparece en streaming...█
 ```
-- Label `Stratum`: ámbar `#F59E0B`, 11px
-- Texto: gris claro `#D1D5DB`, 12px
-- Cursor de streaming `█`: ámbar parpadeante, desaparece al completar
+- Label `Stratum`: `chalk.hex('#F59E0B').bold` — acento en negrita
+- Texto: `chalk.hex('#D1D5DB')` — texto normal sin modificador
+- Cursor de streaming `█`: `chalk.hex('#F59E0B')`, toggle visible/invisible cada 500ms, desaparece al completar
 
 #### Separación entre turnos
 Un espacio en blanco de 1 línea entre cada turno de usuario/agente. No hay líneas divisorias horizontales.
@@ -215,23 +239,30 @@ Cada tool call pasa por una secuencia de estados visuales:
 ```
   ✓ read_file  │ 0.4s  │ src/agent/core.ts                          ▸
 ```
-- Icono `✓`: verde `#22C55E`
-- Tool name: ámbar `#F59E0B`
-- Duración: gris `#6B7280`
-- Descripción del input: gris `#6B7280`
-- Chevron `▸` / `▾`: indica colapsado / expandido, clic para toggle
-- Fondo del bloque: `#161616`
-- Borde: `0.5px solid #2A2A2A`
+- Icono `✓`: `chalk.hex('#22C55E')`
+- Tool name: `chalk.hex('#F59E0B').bold`
+- Duración: `chalk.hex('#6B7280')`
+- Descripción del input: `chalk.hex('#6B7280')`
+- Chevron `▸` / `▾`: indica colapsado / expandido
+- **Borde en Ink:** usar la prop `borderStyle="single"` del componente `<Box>` de Ink con `borderColor="#2A2A2A"`. Ink renderiza box-drawing characters (`┌─┐│└┘`), no CSS. No hay fracciones de píxel.
+
+#### Estado: `focused` (bloque seleccionado para toggle)
+```
+  ▶ ✓ read_file  │ 0.4s  │ src/agent/core.ts                        ▸
+```
+- Indicador `▶` a la izquierda: `chalk.hex('#F59E0B')` — muestra qué bloque tiene foco
+- El bloque seleccionado cambia el borde a `borderColor="#F59E0B"` (ámbar)
+- Ver §10 para los atajos de navegación entre bloques
 
 #### Estado: `error` (error recuperable)
 ```
   ✗ bash  │ 0.8s  │ permission denied                              ▸
 ```
-- Icono `✗`: rojo `#EF4444`
-- Tool name: rojo atenuado `#FCA5A5`
-- Descripción del error: rojo muted
+- Icono `✗`: `chalk.hex('#EF4444')`
+- Tool name: `chalk.hex('#FCA5A5')` — rojo atenuado
+- Descripción del error: `chalk.hex('#FCA5A5').dim`
 
-#### Estado expandido (toggle con tecla `Space` o clic)
+#### Estado expandido (toggle con `Space` sobre el bloque enfocado)
 ```
   ✓ read_file  │ 0.4s  │ src/agent/core.ts                          ▾
   ┌────────────────────────────────────────────────────────────┐
@@ -240,8 +271,8 @@ Cada tool call pasa por una secuencia de estados visuales:
   │ → setInterval at line 201 (no clearInterval found)        │
   └────────────────────────────────────────────────────────────┘
 ```
-- Borde interno: `#2A2A2A`
-- Texto de output: gris `#6B7280`, 11px, monospace
+- Borde del área expandida: `borderStyle="single"`, `borderColor="#2A2A2A"` — Ink box-drawing characters
+- Texto de output: `chalk.hex('#6B7280').dim` — atenuado, monospace del terminal
 - Máximo 10 líneas visibles. Si hay más, truncar con `[+N more lines]`
 
 #### Múltiples tool calls paralelas
@@ -268,8 +299,9 @@ El área de input tiene tres modos:
 
 **Modo /comando:**
 - Al escribir `/`, aparece inmediatamente el dropdown de autocompletado
-- Dropdown: fondo `#1C1C1C`, borde `#2A2A2A`, radio 6px
-- Ítem activo: fondo `#2A2A2A`, texto ámbar `#F59E0B`
+- El dropdown se renderiza como un bloque `<Box>` con `borderStyle="single"` y `borderColor="#2A2A2A"` — box-drawing characters (`┌─┐│└┘`). No hay `border-radius` en terminal.
+- Ítem activo: texto en `chalk.hex('#F59E0B').bold`, prefijado con `▶`
+- Ítem inactivo: `chalk.hex('#9CA3AF')`
 - Navegación: flechas `↑↓`, selección `Enter`, cancelar `Esc`
 
 **Modo waiting (agente procesando):**
@@ -289,7 +321,7 @@ El área de input tiene tres modos:
 | `/memory forget <id>` | Elimina una decisión por ID |
 | `/memory show` | Muestra el contenido del STRATUM.md activo |
 | `/sessions list` | Lista sesiones guardadas |
-| `/sessions resume <id>` | Carga una sesión anterior |
+| `/sessions resume <id>` | Carga una sesión anterior y la continúa en el chat actual. Equivalente a salir y ejecutar `stratum sessions resume <id>` desde la terminal — las tres formas hacen exactamente lo mismo. |
 | `/plan` | Activa modo plan-and-execute para el próximo mensaje |
 | `/provider <name>` | Cambia el proveedor activo en caliente |
 | `/model <name>` | Cambia el modelo activo en caliente |
@@ -302,6 +334,26 @@ El área de input tiene tres modos:
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).
+
+### Compatibilidad de colores y niveles de degradación
+
+Todos los colores se especifican en hex (truecolor, 24-bit). Chalk detecta automáticamente el nivel de soporte del terminal con `chalk.level`:
+
+| `chalk.level` | Soporte | Comportamiento |
+|---|---|---|
+| `3` (truecolor) | Windows Terminal, iTerm2, VS Code, Warp | Colores hex exactos — paleta completa |
+| `2` (256 colores) | Terminales modernas sin truecolor | Chalk degrada automáticamente al color ANSI-256 más cercano |
+| `1` (16 colores básicos) | Terminales legacy, SSH básico | Chalk mapea al color básico más cercano. El ámbar se convierte en `yellow`, el verde en `green`, etc. |
+| `0` (sin color) | TTY no interactivo, `NO_COLOR=1` | Sin colores, solo texto plano. Layout sigue siendo correcto. |
+
+**No se definen paletas de fallback manuales.** Chalk gestiona la degradación automáticamente. El objetivo son terminales de nivel 2 o superior. Nivel 1 es aceptable pero la experiencia visual es limitada — documentarlo en el README como advertencia, no como bloqueo.
+
+**Detección en código:**
+```tsx
+import chalk from 'chalk';
+// chalk.level se establece automáticamente al importar
+// Si se necesita override: new Chalk({ level: 3 })
+```
 
 ### Fondos
 
@@ -348,18 +400,23 @@ La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre
 
 ## 7. Tipografía
 
-**Fuente principal:** `monospace` del sistema. Ink renderiza en el terminal del usuario, por lo que la fuente depende de su configuración (Fira Code, JetBrains Mono, Cascadia Code, Menlo, Consolas...).
+**Fuente principal:** la del terminal del usuario (Fira Code, JetBrains Mono, Cascadia Code, Menlo, Consolas...). Ink no controla la fuente — renderiza caracteres normales a stdout.
 
-**Tamaños de texto** (en Ink, los tamaños son relativos y se expresan como número de caracteres o con `ink-text`):
+**Importante:** en Ink no existe el concepto de "tamaño de fuente en px". Todos los caracteres tienen el mismo tamaño. Los únicos modificadores tipográficos disponibles son los que proporciona `chalk`: `bold`, `dim`, `italic`, `underline`, `strikethrough`. No hay `font-size`.
 
-| Elemento | Tamaño equivalente | Bold |
+**Modificadores por elemento:**
+
+| Elemento | Modificador chalk | Equivalente visual |
 |---|---|---|
-| ASCII art | 11px (pequeño para caber en 80 cols) | No |
-| Label usuario/agente | 11px | No |
-| Texto conversacional | 12px | No |
-| Tool name en bloque | 11px | Sí |
-| Output de tool | 11px | No |
-| Status bar | 11px | No |
+| ASCII art | ninguno | Normal, color ámbar |
+| Label `You` | `.dim` | Más apagado que el texto |
+| Label `Stratum` | `.bold` | Más prominente que el texto |
+| Texto conversacional | ninguno | Normal |
+| Tool name en bloque | `.bold` | Prominente |
+| Output de tool | `.dim` | Apagado, secundario |
+| Status bar | `.dim` en labels, ninguno en valores | Contraste bajo/alto |
+| Separadores de línea | `.dim` | Casi invisibles |
+| Texto deshabilitado | `.dim` | Atenuado |
 
 **Longitud de línea:** el contenido de la conversación se limita a `min(cols - 4, 100)` caracteres de ancho para mantener legibilidad. Las respuestas más largas hacen word-wrap automático de Ink.
 
@@ -369,9 +426,9 @@ La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre
 
 | Animación | Elemento | Implementación | Duración |
 |---|---|---|---|
-| Typewriter ASCII art | Banner arranque | `setInterval` incrementando string | ~400ms total |
-| Fade in tips/meta | Banner arranque | `opacity` 0→1 via estado React | 200ms |
-| Cursor parpadeante | Input prompt `❯❯ _` | `setInterval` toggle visibility | 500ms on/off |
+| Typewriter ASCII art | Banner arranque | `setInterval` + `useRef` para índice, 4 chars/tick | ~400ms total |
+| Aparición tips/meta | Banner arranque | Color stepping: `#374151 → #4B5563 → #6B7280`, 3 pasos × 50ms | ~150ms |
+| Cursor parpadeante | Input prompt `❯❯ _` | `setInterval` toggle visible/invisible | 500ms on/off |
 | Spinner tool running | Icono `◌` | Frames `◌◎●◉○`, `setInterval` | 150ms/frame |
 | Timer tool running | Duración `Ns` | `setInterval` +0.1s | 100ms tick |
 | Streaming text cursor | Respuesta agente | Carácter `█` al final | 500ms on/off |
@@ -423,9 +480,13 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | `Ctrl+C` × 2 | Salir del CLI (si no hay respuesta en curso: salir directamente) |
 | `Ctrl+L` | Clear screen (equivalente a `/clear`) |
 | `Ctrl+U` | Borrar línea de input actual |
-| `Tab` | Autocompletar /comando actual |
-| `Space` | En un tool call block seleccionado: expandir/colapsar |
+| `Tab` | Autocompletar /comando actual / mover foco al siguiente tool call block |
+| `Shift+Tab` | Mover foco al tool call block anterior |
+| `Space` | En un tool call block enfocado: expandir/colapsar output |
+| `Esc` (fuera de input) | Quitar foco del tool call block seleccionado |
 | `PgUp / PgDn` | Scroll en el historial de conversación |
+
+**Navegación de tool call blocks:** `Tab` / `Shift+Tab` mueven el foco (indicado con `▶` y borde ámbar) entre los bloques del turno actual. `Space` expande/colapsa el bloque enfocado. `Esc` devuelve el foco al input. Si no hay ningún bloque enfocado, `Tab` autocompleta el /comando en el input (comportamiento por defecto).
 
 ---
 
@@ -481,16 +542,181 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 - `contextTokens: number`, `contextMax: number`
 
 **AgentEvent → Componente:** el `<MessageList>` consume el stream de `AgentEvent` y los reduce a la representación visual:
-- `text_delta` → actualiza el último `<StreamingText>`
-- `tool_call_start` → crea `<ToolCallBlock status="running">`
-- `tool_call_ready` → actualiza el bloque con input completo
-- `tool_result` → actualiza bloque a `status="completed"` con output y duración
-- `tool_error` → actualiza bloque a `status="error"`
-- `done` → quita cursor de streaming, habilita input
+
+| Evento | Componente / Acción |
+|---|---|
+| `text_delta` | Actualiza el último `<StreamingText>` con el delta acumulado |
+| `tool_call_start` | Crea `<ToolCallBlock status="running">` con spinner activo |
+| `tool_call_ready` | Actualiza el bloque con input parseado completo |
+| `tool_result` | Actualiza bloque a `status="completed"` con output y duración |
+| `tool_error` | Actualiza bloque a `status="error"` con mensaje |
+| `memory_retrieved` | Renderiza una línea dim `↺ N decisiones recuperadas de memoria` justo antes del siguiente `<AgentMessage>`. Si `decisions.length === 0`, no se renderiza nada. |
+| `thinking` | **No se renderiza por defecto.** Solo visible en modo `--debug`: se muestra como un bloque `<Box>` colapsado con borde dim y prefijo `⊙ thinking`. |
+| `error { fatal: false }` | Igual que `tool_error` — el loop continúa, el error es parte del flujo normal. |
+| `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'`. |
+| `done` | Quita el cursor de streaming del último `<StreamingText>`. Habilita el input. Actualiza la sesión guardada. |
+
+**Componente `<FatalError>`:**
+```
+  ┌─────────────────────────────────────────────────────────────┐
+  │ ✗  Error fatal — el agente no puede continuar               │
+  │                                                             │
+  │  LLM connection lost: ECONNREFUSED localhost:11434          │
+  │  Verifica que Ollama esté en ejecución: ollama serve        │
+  └─────────────────────────────────────────────────────────────┘
+```
+- Borde: `borderStyle="single"`, `borderColor="#EF4444"`
+- Título: `chalk.hex('#EF4444').bold`
+- Mensaje: `chalk.hex('#FCA5A5')`
+- Sugerencia: `chalk.hex('#6B7280').dim`
 
 ---
 
-## 12. Consideraciones Windows vs Linux
+## 12. Componente de Confirmación Destructiva
+
+Cuando el `ToolDispatcher` detecta que una tool tiene `destructive: true`, pausa la ejecución y renderiza un bloque de confirmación **entre el área de conversación y el input**. El input queda bloqueado hasta que el usuario responda.
+
+### Layout
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚠  Operación destructiva                                             │
+│                                                                      │
+│  bash: rm -rf /var/log/app/*.log                                     │
+│                                                                      │
+│  ¿Continuar? [ S ] continuar  [ N ] cancelar  [ ! ] permitir todo   │
+└──────────────────────────────────────────────────────────────────────┘
+  ❯❯ _  (bloqueado)
+```
+
+- Borde: `borderStyle="single"`, `borderColor="#F59E0B"` — ámbar de advertencia
+- Icono `⚠`: `chalk.hex('#F59E0B').bold`
+- Título: `chalk.hex('#F59E0B').bold`
+- Comando: `chalk.hex('#F3F4F6')` — visible claramente para que el usuario sepa qué va a ejecutarse
+- Opciones: `[ S ]` en ámbar, `[ N ]` en rojo, `[ ! ]` en naranja
+
+### Opciones disponibles
+
+| Tecla | Acción |
+|---|---|
+| `S` / `Y` / `Enter` | Aprobar esta tool y continuar |
+| `N` / `Esc` | Cancelar esta tool (se inyecta como `tool_error` recuperable) |
+| `!` | Activar modo `--allow-destructive` para el resto de la sesión (sin más confirmaciones) |
+
+### Posicionamiento
+
+El componente `<DestructiveConfirm>` se renderiza como un hijo de `<ConversationView>`, entre `<MessageList>` y `<InputArea>`. Su altura es fija (4 líneas + bordes = 6 líneas). Cuando está visible, el área scrollable de conversación se reduce en esas 6 líneas. Cuando se responde, el componente se desmonta y el espacio se libera.
+
+El bloque **no desplaza** el historial de mensajes — el scroll permanece donde estaba.
+
+### Componente Ink
+
+```tsx
+<ConversationView>
+  <StatusBar ... />
+  <MessageList ... />              ← altura = rows - statusBar - confirmHeight - inputHeight
+  {pendingConfirm && (
+    <DestructiveConfirm           ← aparece entre MessageList e InputArea
+      command={pendingConfirm.command}
+      toolName={pendingConfirm.name}
+      onApprove={() => dispatch({ type: 'CONFIRM_TOOL' })}
+      onDeny={() => dispatch({ type: 'DENY_TOOL' })}
+      onAllowAll={() => dispatch({ type: 'ALLOW_ALL_DESTRUCTIVE' })}
+    />
+  )}
+  <InputArea disabled={!!pendingConfirm} ... />
+</ConversationView>
+```
+
+---
+
+## 13. Modo `stratum run` — Salida Plain Text
+
+`stratum run "tarea"` es modo **one-shot no interactivo**. No usa Ink. La salida va directamente a `stdout` como texto plano, haciendo el comando compatible con pipes, redirecciones y entornos CI.
+
+**Principio:** `stratum chat` es para humanos. `stratum run` es para máquinas.
+
+### Formato de salida
+
+```bash
+$ stratum run "lista los archivos TypeScript en src/ y cuenta cuántos hay"
+
+[tool] read_file: src/
+[tool] bash: find src/ -name "*.ts" | wc -l  (0.3s)
+[result] Hay 24 archivos TypeScript en src/.
+```
+
+| Elemento | Formato | Canal |
+|---|---|---|
+| Tool call ejecutada | `[tool] nombre: input_resumido` | `stderr` |
+| Tool completada con duración | `[tool] nombre: input  (Xs)` | `stderr` |
+| Tool con error | `[error] nombre: mensaje de error` | `stderr` |
+| Respuesta final del agente | Texto plano sin prefijo | `stdout` |
+| Error fatal | `[fatal] mensaje` seguido de `exit 1` | `stderr` |
+
+**Las tool calls van a `stderr`** para que la respuesta final del agente sea la única salida en `stdout`. Esto permite:
+```bash
+stratum run "genera un resumen del repo" > resumen.md
+stratum run "extrae los imports de main.ts" | jq .
+```
+
+### Colores en `stratum run`
+
+- Si `stdout` es un TTY (uso directo en terminal): los prefijos `[tool]`, `[error]`, `[fatal]` se colorean con chalk si el nivel lo permite.
+- Si `stdout` no es TTY (pipe, redirección): chalk desactiva los colores automáticamente (`chalk.level = 0`). La salida es texto limpio.
+
+### Confirmación destructiva en `stratum run`
+
+Según lo definido en `§12.5` de `STRATUM_PROJECT_DEFINITION.md`:
+- Sin flags: pausa y muestra prompt `¿Continuar? (S/N)` en `stderr`
+- `--allow-destructive`: aprueba todas sin prompt
+- `--deny-destructive`: rechaza todas, el agente recibe el error y busca alternativa
+- Si no hay TTY disponible (CI/pipe): se comporta como `--deny-destructive` automáticamente
+
+---
+
+## 14. Estado de Arranque — Conexión MCP Servers
+
+Al iniciar `stratum chat`, los MCP servers se conectan de forma eager (§12.8 de `STRATUM_PROJECT_DEFINITION.md`). Si hay servers configurados, esta fase puede durar varios segundos. Se renderiza en el banner, antes de que el prompt `❯❯` aparezca.
+
+### Layout durante el arranque
+
+```
+   ╔═══════════════════════════════════════╗
+   ║           (ASCII art STRATUM)         ║
+   ╚═══════════════════════════════════════╝
+
+   Conectando servicios...
+   ✓ filesystem  (120ms)
+   ◌ github      (conectando...)
+   ○ docker      (en cola)
+```
+
+- Título `Conectando servicios...`: `chalk.hex('#6B7280').dim`
+- Server completado `✓`: `chalk.hex('#22C55E')` + nombre + duración en dim
+- Server conectando `◌`: spinner animado en ámbar + nombre
+- Server en cola `○`: `chalk.hex('#4B5563')` + nombre
+- Server con error `✗`: `chalk.hex('#EF4444')` + nombre + `(no disponible)`
+
+### Comportamiento
+
+- La sección de MCP startup aparece **debajo del ASCII art**, en el mismo estado A (banner), antes de mostrar los tips y el prompt.
+- El prompt `❯❯` y los tips solo aparecen una vez que **todos los servers han terminado** (conectado o fallado).
+- Si no hay servers configurados, esta sección no se renderiza (el banner va directo a los tips).
+- Si un server tarda más de 5 segundos, se marca como `(timeout)` en rojo y se continúa.
+
+### Componente Ink
+
+```tsx
+// Fase de arranque: antes del phase 'ready' del banner
+{mcpServers.length > 0 && phase === 'connecting' && (
+  <MCPStartup servers={mcpServers} onAllSettled={() => setPhase('typing')} />
+)}
+```
+
+---
+
+## 15. Consideraciones Windows vs Linux
 
 | Aspecto | Linux / macOS | Windows (PowerShell / CMD) |
 |---|---|---|
@@ -507,5 +733,5 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 
 ---
 
-*Documento generado: 2026-05-27 | Versión: 0.1.0-draft*
+*Documento generado: 2026-05-27 | Versión: 0.2.0-draft | Revisión: correcciones de compatibilidad Ink/terminal, nuevas secciones §12–§14*
 *Documento relacionado: [Definición del Proyecto](./STRATUM_PROJECT_DEFINITION.md)*
