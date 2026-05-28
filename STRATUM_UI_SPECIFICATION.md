@@ -345,6 +345,7 @@ El área de input tiene tres modos:
 | Comando | Descripción |
 |---|---|
 | `/help` | Lista todos los comandos disponibles con descripción |
+| `/init` | Escanea el proyecto y genera o actualiza `STRATUM.md`. Ver [§12.13 de STRATUM_PROJECT_DEFINITION.md](./STRATUM_PROJECT_DEFINITION.md#1213----comando-init-y-stratum-init). |
 | `/clear` | Purga el área de conversación **y** el historial de mensajes enviado al LLM. El agente pierde todo el contexto previo. La sesión sigue activa (mismo `sessionId`) pero arranca con contexto vacío. Equivalente a empezar un chat nuevo sin salir del proceso. |
 | `/quit` o `/exit` | Termina la sesión, guarda el historial |
 | `/memory list` | Lista las decisiones almacenadas |
@@ -359,6 +360,45 @@ El área de input tiene tres modos:
 | `/tools` | Lista las tools disponibles (built-in + MCP) |
 | `/context` | Muestra estadísticas de uso del contexto actual |
 | `/debug` | Toggle del modo debug (muestra chunks SSE raw) |
+
+#### Flujo visual de `/init` en el chat
+
+Cuando el usuario escribe `/init`, el `InitAgent` emite `InitEvent`s que `<MessageList>` traduce a un bloque de progreso dedicado (`<InitProgressBlock>`), renderizado como un `<AgentMessage>` especial con borde tenue.
+
+```
+  Stratum
+  ┌─ Escaneando proyecto ──────────────────────────────────────────┐
+  │  ⟳ Estructura de directorios...          ✓ 47 archivos         │
+  │  ⟳ Detectando stack tecnológico...       ✓ TypeScript · Vitest │
+  │  ⟳ Leyendo configuración...              ✓ tsconfig · ESLint   │
+  │  ⟳ Generando STRATUM.md...              ◌                      │
+  └────────────────────────────────────────────────────────────────┘
+```
+
+- Borde: `borderStyle="single"`, `borderColor="#2A2A2A"` — discreto, igual que el dropdown
+- Icono de paso completado `✓`: `chalk.hex('#34D399')` — verde
+- Icono de paso en curso `◌` → animado: `chalk.hex('#F59E0B')` — ámbar
+- Texto de paso: `chalk.hex('#9CA3AF')` — gris secundario
+
+**Si hay conflicto de merge** (sección con contenido manual existente), el bloque se pausa y se renderiza un sub-prompt de confirmación integrado en el mismo bloque:
+
+```
+  │  ⚠  "## Convenciones" tiene contenido escrito a mano.          │
+  │     ¿Actualizar con el scan? [ S ] sí  [ N ] preservar         │
+```
+
+- El input principal queda bloqueado hasta que el usuario responda con `S` o `N`.
+- Estilo del sub-prompt: igual que `<DestructiveConfirmation>` (§12) pero con borde ámbar dentro del bloque, sin ocupar toda la pantalla.
+
+**Al terminar** (`InitEvent { type: 'done' }`), el bloque de progreso colapsa a una línea de resumen y el input se reactiva:
+
+```
+  Stratum
+  ✓ STRATUM.md actualizado — 5 secciones · 47 archivos inspeccionados
+    Tip: edita STRATUM.md para añadir instrucciones permanentes al agente.
+```
+
+- El nuevo `STRATUM.md` se recarga en el system prompt automáticamente, efectivo desde la siguiente iteración del agente.
 
 ### 5.3 Renderizado de Markdown en Respuestas del Agente
 

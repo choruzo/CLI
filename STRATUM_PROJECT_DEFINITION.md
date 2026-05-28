@@ -254,6 +254,8 @@ Decisiones importantes almacenadas durante el funcionamiento del agente como JSO
 
 **Generación de IDs:** `decisionStore.save()` genera el `id` con el formato `dec_YYYYMMDD_<nanoid6>` antes de escribir en disco (sin leer el JSON previo, sin riesgo de colisión entre sesiones concurrentes). El `embedding_ref` se deriva del `id` como `vec_${id}` y se asigna en el mismo paso; la capa vectorial usa ese string como clave al hacer el INSERT en sqlite-vec.
 
+**Generación de IDs:** `decisionStore.save()` genera el `id` con el formato `dec_YYYYMMDD_<nanoid6>` antes de escribir en disco (sin leer el JSON previo, sin riesgo de colisión entre sesiones concurrentes). El `embedding_ref` se deriva del `id` como `vec_${id}` y se asigna en el mismo paso; la capa vectorial usa ese string como clave al hacer el INSERT en sqlite-vec.
+
 **Tipos de decisión**: `architectural`, `tooling`, `convention`, `bug_fix`, `security`, `user_preference`.
 
 ### Capa 3 — Vector DB (`~/.stratum/memory/vectors.db`)
@@ -300,6 +302,14 @@ INSERT en sqlite-vec usando embedding_ref como clave
 ---
 
 ## 6. Configuración (`.stratumrc.json`)
+
+**Expansión de variables de entorno:** los valores con formato `${VAR_NAME}` se expanden al cargar la config. Si la variable no está definida en el entorno, el proceso **aborta con error fatal** antes de arrancar, indicando qué variable falta:
+```
+Error: Variable de entorno requerida no definida: LITELLM_API_KEY
+       Referenciada en: provider.providers.litellm-proxy.apiKey
+```
+
+**Seguridad de secretos:** los valores de `apiKey` **nunca se persisten** en los archivos de sesión (`~/.stratum/sessions/*.json`). En modo `--debug`, los headers `Authorization` se enmascaran como `Bearer sk-***...` en todos los logs. Ver §12.6 para el schema de sesión.
 
 **Expansión de variables de entorno:** los valores con formato `${VAR_NAME}` se expanden al cargar la config. Si la variable no está definida en el entorno, el proceso **aborta con error fatal** antes de arrancar, indicando qué variable falta:
 ```
@@ -441,6 +451,11 @@ stratum memory show                    # Muestra STRATUM.md activo
 # Configuración
 stratum config get provider.default
 stratum config set provider.default litellm-proxy
+
+# Inicialización y onboarding de proyecto
+stratum init                           # Escanea el proyecto y genera/actualiza STRATUM.md
+stratum init --force                   # Sobreescribe STRATUM.md sin preguntar por secciones manuales
+stratum init --dry-run                 # Muestra el STRATUM.md que generaría sin escribirlo
 ```
 
 ---
@@ -480,6 +495,7 @@ stratum config set provider.default litellm-proxy
 - [ ] `SessionContext`: historial de conversación
 - [ ] Compresión de contexto básica (truncation con resumen)
 - [ ] Comando `stratum memory show`
+- [ ] `stratum init` y `/init` — scan de proyecto y generación/actualización de `STRATUM.md` (ver §12.13)
 
 > **UI:** El porcentaje de contexto en el status bar pasa a ser funcional (cambia de color según el umbral: verde / ámbar / rojo). Activar el comando `/memory show` en el input. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de contexto %), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/memory show`).
 
@@ -1121,6 +1137,229 @@ for await (const event of agent.run(input, { signal: controller.signal })) {
 4. Emitir `{ type: 'done', stopReason: 'cancelled' }` al stream
 
 **Segundo Ctrl+C:** si el usuario presiona Ctrl+C por segunda vez durante el cleanup, se hace `process.exit(1)` inmediato sin más espera.
+
+---
+
+### 12.13 — Comando `/init` y `stratum init`
+
+**Decisión: inspección de superficie inteligente del proyecto + generación/actualización de `STRATUM.md` con secciones fijas.**
+
+Este comando es el equivalente Stratum del `CLAUDE.md` auto-generado de Claude Code: permite que el agente conozca el proyecto desde el primer mensaje, sin que el usuario tenga que escribir nada manualmente.
+
+---
+
+#### Puntos de entrada
+
+El comportamiento es idéntico en ambos contextos:
+
+| Contexto | Invocación | Descripción |
+|---|---|---|
+| CLI (onboarding inicial) | `stratum init` | Se ejecuta antes de entrar al chat. Genera `STRATUM.md` y termina el proceso. Sin UI Ink. Salida plain text al stdout. |
+| Chat en curso | `/init` | Se ejecuta dentro de una sesión activa. El agente muestra el progreso en el área de conversación. Al terminar, el `STRATUM.md` generado se carga en el system prompt de la iteración siguiente. |
+
+---
+
+#### Algoritmo de scan (superficie inteligente)
+
+El agente inspecciona el directorio de trabajo en este orden. El proceso completo tarda ~5s en proyectos de tamaño medio; respeta `.gitignore`.
+
+```
+1. Estructura de directorios
+   - Árbol de carpetas, max depth 3
+   - Excluir: node_modules/, .git/, dist/, __pycache__/, .venv/, target/
+
+2. Archivos de manifiesto (stack tecnológico)
+   - package.json / package-lock.json
+   - pyproject.toml / setup.py / requirements.txt
+   - Cargo.toml
+   - go.mod
+   - pom.xml / build.gradle
+   - composer.json
+   - Gemfile
+
+3. Archivos de configuración conocidos (convenciones y tooling)
+   - tsconfig.json, .eslintrc*, .prettierrc*
+   - .editorconfig, .nvmrc, .python-version
+   - Dockerfile, docker-compose.yml
+   - .github/workflows/*.yml (CI/CD)
+   - Makefile
+
+4. Documentación existente
+   - README.md (o README.rst / README.txt)
+   - CONTRIBUTING.md
+   - CHANGELOG.md (solo las primeras 50 líneas)
+
+5. Entry points del código (solo si el manifiesto los referencia explícitamente)
+   - El campo "main" / "bin" de package.json
+   - El campo [tool.poetry.scripts] de pyproject.toml
+   - src/main.rs, cmd/main.go, etc.
+```
+
+---
+
+#### Lógica update/merge (cuando `STRATUM.md` ya existe)
+
+`/init` nunca destruye trabajo manual. El proceso de merge es:
+
+```
+1. Leer STRATUM.md existente
+2. Parsear secciones por encabezado H2 (## Sección)
+3. Para cada sección del template fijo:
+   a. Si la sección existe en el archivo actual Y tiene contenido no vacío:
+      → Marcarla como "manual" — el agente la muestra al usuario y pregunta
+        si quiere actualizarla o preservarla.
+   b. Si la sección existe pero está vacía o tiene solo el placeholder:
+      → Rellenarla automáticamente con lo encontrado en el scan.
+   c. Si la sección no existe:
+      → Añadirla al final del bloque de secciones fijas.
+4. Secciones extra (no parte del template) que el usuario haya añadido:
+   → Siempre preservadas, sin tocarlas.
+```
+
+Para secciones con contenido manual, el agente muestra en el chat:
+
+```
+  ⚠  La sección "## Convenciones" tiene contenido escrito a mano.
+     ¿Actualizar con la información del scan? (s/N)
+```
+
+Si el usuario responde N, esa sección se deja intacta. Si responde S, el agente fusiona el contenido existente con los nuevos hallazgos (no reemplaza — añade lo que falta).
+
+---
+
+#### Estructura fija del `STRATUM.md` generado
+
+Las cinco secciones son siempre las mismas, en este orden:
+
+```markdown
+# Stratum Memory
+
+## Proyecto
+<!-- Nombre del proyecto, descripción breve, propósito principal -->
+
+## Stack Tecnológico
+<!-- Lenguajes, frameworks, librerías principales, versiones clave -->
+
+## Estructura
+<!-- Árbol de directorios relevante con descripción de cada carpeta -->
+
+## Convenciones
+<!-- Estilo de código, naming, reglas de commits, patrones detectados -->
+
+## Comandos Clave
+<!-- Scripts de build, test, dev, lint — exactamente como aparecen en el manifiesto -->
+```
+
+**Ejemplo de output real** para un proyecto TypeScript:
+
+```markdown
+# Stratum Memory
+
+## Proyecto
+Nombre: stratum-cli
+Descripción: Agente CLI extensible construido sobre un loop ReAct.
+Repositorio: /home/javi/proyectos/CLI
+
+## Stack Tecnológico
+- Runtime: Node.js >=22.0.0
+- Lenguaje: TypeScript 5.x
+- Build: tsup (ESM + CJS)
+- Test: Vitest
+- UI terminal: Ink 4 + React 18
+- LLM client: implementación propia OpenAI-compatible
+
+## Estructura
+src/
+  agent/     — Loop ReAct: StratumAgent, ReactLoop, ContextManager
+  providers/ — ProviderRouter + OpenAICompatible
+  tools/     — ToolRegistry, ToolDispatcher, tools built-in
+  memory/    — MemoryManager (STRATUM.md + decisions.json + sqlite-vec)
+  cli/       — Entry point Commander.js, comandos, UI Ink
+
+## Convenciones
+- Imports ESM con extensión explícita (.js)
+- Zod para validación de schemas en runtime
+- snake_case para archivos, PascalCase para clases
+- Commits en inglés, imperativo
+
+## Comandos Clave
+- npm run dev      → desarrollo con hot-reload
+- npm run build    → compilar a dist/ (ESM + CJS)
+- npm test         → Vitest en modo watch
+- npm run lint     → ESLint
+- npm run format   → Prettier
+```
+
+---
+
+#### Heurísticas de detección de stack
+
+El agente usa estas reglas para inferir el stack a partir de los archivos de manifiesto:
+
+| Señal detectada | Inferencia |
+|---|---|
+| `package.json` con `"typescript"` en devDependencies | TypeScript |
+| `package.json` con `"react"` + `"ink"` | UI terminal con Ink |
+| `package.json` con `"vitest"` o `"jest"` | Framework de test |
+| `pyproject.toml` con `[tool.poetry]` | Python + Poetry |
+| `Cargo.toml` con `[package]` | Rust |
+| `go.mod` con `module` | Go |
+| `Dockerfile` presente | Containerizado |
+| `.github/workflows/` con archivos `.yml` | CI/CD en GitHub Actions |
+| `docker-compose.yml` | Orquestación multi-servicio |
+
+Si no se detecta ningún manifiesto conocido, la sección **Stack Tecnológico** se genera con la lista de extensiones de archivo más frecuentes en `src/` o la raíz.
+
+---
+
+#### Implementación
+
+```
+src/cli/commands/init.ts     ← comando `stratum init` (Commander.js)
+src/agent/init-agent.ts      ← lógica de scan + generación del STRATUM.md
+```
+
+`InitAgent` es un agente especializado (no el `StratumAgent` principal) que tiene acceso a un subconjunto reducido de tools: `read_file`, `list_directory`, `bash` (solo lectura). No usa tools destructivas, no persiste sesión, no guarda decisiones.
+
+```typescript
+class InitAgent {
+  async run(cwd: string, options: InitOptions): AsyncGenerator<InitEvent> {
+    // 1. Scan del proyecto
+    // 2. Síntesis via LLM call
+    // 3. Merge con STRATUM.md existente (si aplica)
+    // 4. Escritura del archivo
+  }
+}
+
+type InitEvent =
+  | { type: 'scan_progress'; file: string }
+  | { type: 'section_ready'; section: string; content: string }
+  | { type: 'merge_conflict'; section: string }   // espera respuesta del usuario
+  | { type: 'done'; path: string }
+  | { type: 'error'; message: string }
+```
+
+---
+
+#### Comportamiento en `stratum init` (CLI sin Ink)
+
+```
+$ stratum init
+
+  Stratum — Inicializando proyecto
+
+  ⟳ Escaneando estructura...        ✓ 47 archivos inspeccionados
+  ⟳ Detectando stack...             ✓ TypeScript · Node.js · Vitest
+  ⟳ Generando STRATUM.md...         ✓
+
+  ✓ STRATUM.md creado en /home/javi/proyectos/CLI/STRATUM.md
+
+  Tip: edita STRATUM.md para añadir convenciones o instrucciones
+  permanentes al agente. Se carga automáticamente en cada sesión.
+```
+
+Si `STRATUM.md` ya existe y hay secciones con contenido manual, se muestra el prompt de confirmación por sección en el terminal (stdin interactivo), exactamente igual que las confirmaciones destructivas.
+
 
 ## 13. Documentos Relacionados
 
