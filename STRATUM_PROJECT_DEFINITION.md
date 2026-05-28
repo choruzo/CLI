@@ -141,11 +141,13 @@ interface CompletionRequest {
 
 interface IProvider {
   complete(req: CompletionRequest): AsyncGenerator<CompletionChunk>;
-  healthCheck(): Promise<boolean>;
+  healthCheck(): Promise<boolean>;  // cableado en Hito 6; ver nota de status bar abajo
 }
 ```
 
 Providers soportados desde v1: `OpenAICompatible` (cubre Ollama, llama.cpp, vLLM, LiteLLM proxy, OpenAI, Anthropic vía proxy).
+
+> **Indicador `●` de provider (Hitos 1-5):** `healthCheck()` no está activo hasta el Hito 6. En los hitos anteriores, el indicador de la status bar se basa en el resultado de la **última llamada al LLM**: verde si completó sin error, rojo si la última request falló. No hay polling activo. Cuando `healthCheck()` se cablee en el Hito 6, reemplaza esta lógica y el indicador pasa a reflejar el estado real del provider.
 
 #### `ToolRegistry` (src/tools/registry.ts)
 Registro central de herramientas. Soporta:
@@ -237,7 +239,7 @@ Decisiones importantes almacenadas durante el funcionamiento del agente como JSO
 
 ```json
 {
-  "id": "dec_20260527_001",
+  "id": "dec_20260527_k3xP9q",
   "timestamp": "2026-05-27T10:30:00Z",
   "session_id": "sess_abc123",
   "type": "architectural",
@@ -245,10 +247,12 @@ Decisiones importantes almacenadas durante el funcionamiento del agente como JSO
   "content": "Se decidió sqlite-vec por ser embebido y sin dependencias de servidor. Chroma requería Docker.",
   "tags": ["database", "vectors", "infraestructura"],
   "importance": "high",
-  "embedding_ref": "vec_001",
+  "embedding_ref": "vec_dec_20260527_k3xP9q",
   "project": "stratum-cli"
 }
 ```
+
+**Generación de IDs:** `decisionStore.save()` genera el `id` con el formato `dec_YYYYMMDD_<nanoid6>` antes de escribir en disco (sin leer el JSON previo, sin riesgo de colisión entre sesiones concurrentes). El `embedding_ref` se deriva del `id` como `vec_${id}` y se asigna en el mismo paso; la capa vectorial usa ese string como clave al hacer el INSERT en sqlite-vec.
 
 **Tipos de decisión**: `architectural`, `tooling`, `convention`, `bug_fix`, `security`, `user_preference`.
 
@@ -276,23 +280,34 @@ Carga de entradas completas desde decisions.json
 Inyección en contexto del agente
 ```
 
-**Pipeline de escritura** (trigger: agente detecta decisión importante):
+**Pipeline de escritura** (trigger: agente invoca `store_decision`):
 ```
-Decisión detectada
+Agente invoca store_decision (serialized: true)
         │
         ▼
-Append a decisions.json
+decisionStore.save():
+  1. Generar id = dec_YYYYMMDD_<nanoid6>
+  2. Derivar embedding_ref = vec_${id}
+  3. Append entrada completa a decisions.json
         │
         ▼
-Generar embedding (ONNX local)
+Generar embedding del content (ONNX local)
         │
         ▼
-INSERT en sqlite-vec con ID de referencia
+INSERT en sqlite-vec usando embedding_ref como clave
 ```
 
 ---
 
 ## 6. Configuración (`.stratumrc.json`)
+
+**Expansión de variables de entorno:** los valores con formato `${VAR_NAME}` se expanden al cargar la config. Si la variable no está definida en el entorno, el proceso **aborta con error fatal** antes de arrancar, indicando qué variable falta:
+```
+Error: Variable de entorno requerida no definida: LITELLM_API_KEY
+       Referenciada en: provider.providers.litellm-proxy.apiKey
+```
+
+**Seguridad de secretos:** los valores de `apiKey` **nunca se persisten** en los archivos de sesión (`~/.stratum/sessions/*.json`). En modo `--debug`, los headers `Authorization` se enmascaran como `Bearer sk-***...` en todos los logs. Ver §12.6 para el schema de sesión.
 
 ```json
 {
@@ -583,19 +598,6 @@ stratum config set provider.default litellm-proxy
 
 ---
 
----
-
-## 13. Documentos Relacionados
-
-| Documento | Descripción |
-|---|---|
-| [STRATUM_UI_SPECIFICATION.md](./STRATUM_UI_SPECIFICATION.md) | Especificación completa de la interfaz de terminal (Ink): layout, componentes, colores, animaciones, atajos de teclado y mapeo de componentes React |
-
----
-
-*Documento generado: 2026-05-27 | Versión: 0.1.0-draft*
-
----
 
 ## 12. Especificaciones Técnicas Detalladas
 
@@ -732,6 +734,21 @@ Cuando una tool falla, el error se inyecta como `tool_result` con el mensaje de 
 </tool_error>
 ```
 
+**Comportamiento al agotar `maxToolRetries`:**
+
+El contador de reintentos por tool lo lleva el `ToolDispatcher` (mapa `toolRetries: Map<toolName, number>` por sesión, no por llamada). Cuando una tool alcanza el límite:
+
+1. `ToolDispatcher` elimina la tool del schema que se envía al LLM en las iteraciones siguientes (`ToolRegistry.disableForSession(toolName)`).
+2. Se inyecta un `tool_result` final con `recoverable: false` para que el agente conozca el motivo:
+```xml
+<tool_error>
+  <tool>bash</tool>
+  <error>Tool 'bash' has been disabled for this session after 3 consecutive failures.</error>
+  <suggestion>This tool is no longer available. Consider an alternative approach.</suggestion>
+</tool_error>
+```
+3. El loop **no aborta**: el agente puede seguir usando otras tools o responder al usuario directamente.
+
 **Errores no recuperables** (fallos del propio sistema, no de la tool):
 - Error de red al llamar al LLM → reintento con backoff exponencial (3 intentos, 1s/2s/4s), luego `{ type: 'error', fatal: true }`.
 - JSON inválido en argumentos de tool → `tool_error` con `recoverable: false`, el loop sigue pero el agente recibe el error.
@@ -744,7 +761,11 @@ Cuando una tool falla, el error se inyecta como `tool_result` con el mensaje de 
 
 El `ContextManager` (parte de `src/agent/harness.ts`) evalúa el tamaño del historial antes de cada iteración.
 
-**Estimación de tokens:** sin tokenizador universal, se usa `chars / 3.5` como proxy (conservador para español/inglés mezclado). El `context_window` del modelo se toma de la config del provider.
+**Estimación de tokens:** el `ContextManager` usa la siguiente estrategia en cascada:
+1. Si la respuesta del provider incluye `usage.prompt_tokens` (la mayoría de APIs OpenAI-compat lo devuelven), ese valor se usa como referencia para la iteración siguiente.
+2. Si `usage` no está disponible (primera iteración o provider que no lo reporta), se usa `chars / 3.5` como proxy conservador (español/inglés mezclado).
+
+La status bar muestra el conteo con prefijo `~` mientras se usa el proxy (`~4.2k / 32k`) y sin prefijo cuando hay dato real del provider (`4.2k / 32k`). El `context_window` del modelo se toma de la config del provider.
 
 ```typescript
 // .stratumrc.json
@@ -774,6 +795,23 @@ El `ContextManager` (parte de `src/agent/harness.ts`) evalúa el tamaño del his
 - System prompt completo
 - Últimas N rondas (default: 6, configurable `agent.compressionKeepRounds`)
 - Tool results de la iteración actual
+
+**Política de fallback cuando la compresión falla o no reduce suficiente:**
+
+```
+Caso A — El LLM call de resumen falla (timeout, error de red):
+  → No reintentar. Ejecutar el fallback del Caso B directamente.
+
+Caso B — El resumen generado no reduce el contexto por debajo del 80%
+         (p.ej. zona protegida + system prompt ya superan el umbral):
+  → Truncar duro: eliminar los mensajes más antiguos fuera de la zona protegida
+    en bloques de 2 rondas (user+assistant) hasta bajar del 80%, o hasta que
+    no quede historial antiguo que eliminar.
+  → Si tras truncar todo el historial antiguo el contexto sigue sobre el 80%,
+    emitir evento { type: 'warning', message: 'context_window_pressure' } y
+    continuar — la zona protegida nunca se toca.
+  → Registrar el evento en --debug mode indicando cuántas rondas se eliminaron.
+```
 
 ---
 
@@ -839,6 +877,7 @@ rm, rmdir, dd, mkfs, format, DROP, DELETE, truncate, shred, wipefs, > (overwrite
   "summary": "Sesión de refactoring del módulo de autenticación"
 }
 ```
+> **Nota de seguridad:** el campo `provider` guarda solo el nombre del provider (`"local-ollama"`), nunca el `apiKey` ni la `baseUrl`. Los secretos de configuración no se persisten en disco bajo ningún formato.
 
 **Ciclo de vida:**
 - Al iniciar `stratum chat`: crea nueva sesión en memoria.
@@ -880,6 +919,7 @@ NO la uses para acciones rutinarias o pasos intermedios.`,
     importance: z.enum(['low', 'medium', 'high']),
   }),
   destructive: false,
+  serialized: true,   // escribe en decisions.json + sqlite-vec; nunca en paralelo consigo misma
   execute: async (params) => decisionStore.save(params)
 }
 ```
@@ -954,7 +994,6 @@ async function dispatchToolCalls(calls: ToolCallReady[]): Promise<ToolResult[]> 
 - Las confirmaciones destructivas se resuelven secuencialmente (no se muestran dos prompts a la vez).
 
 **Orden de resultados:** los `tool_result` se envían al LLM en el mismo orden en que el modelo los emitió, independientemente del orden de finalización.
-
 ---
 
 ### 12.10 — Carga del modelo ONNX (`@xenova/transformers`)
@@ -1082,3 +1121,16 @@ for await (const event of agent.run(input, { signal: controller.signal })) {
 4. Emitir `{ type: 'done', stopReason: 'cancelled' }` al stream
 
 **Segundo Ctrl+C:** si el usuario presiona Ctrl+C por segunda vez durante el cleanup, se hace `process.exit(1)` inmediato sin más espera.
+
+## 13. Documentos Relacionados
+
+| Documento | Descripción |
+|---|---|
+| [STRATUM_UI_SPECIFICATION.md](./STRATUM_UI_SPECIFICATION.md) | Especificación completa de la interfaz de terminal (Ink): layout, componentes, colores, animaciones, atajos de teclado y mapeo de componentes React |
+
+---
+
+*Documento generado: 2026-05-27 | Versión: 0.1.0-draft*
+
+---
+
