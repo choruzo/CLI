@@ -16,9 +16,9 @@ declare const __VERSION__: string;
 function resolveVersion(): string {
   if (typeof __VERSION__ !== 'undefined') return __VERSION__;
   const thisDir = dirname(fileURLToPath(import.meta.url));
-  const pkg = JSON.parse(
-    readFileSync(join(thisDir, '..', '..', 'package.json'), 'utf-8'),
-  ) as { version: string };
+  const pkg = JSON.parse(readFileSync(join(thisDir, '..', '..', 'package.json'), 'utf-8')) as {
+    version: string;
+  };
   return pkg.version;
 }
 

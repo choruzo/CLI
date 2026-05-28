@@ -19,16 +19,12 @@ export class ProviderRouter {
     if (!provCfg) {
       throw new Error(
         `Provider "${this.activeKey}" not found in config. ` +
-        `Available: ${Object.keys(config.provider.providers).join(', ')}`,
+          `Available: ${Object.keys(config.provider.providers).join(', ')}`,
       );
     }
 
     this.activeConfig = provCfg;
-    this.provider = new OpenAICompatible(
-      provCfg.baseUrl,
-      provCfg.apiKey,
-      provCfg.model,
-    );
+    this.provider = new OpenAICompatible(provCfg.baseUrl, provCfg.apiKey, provCfg.model);
   }
 
   getActive(): IProvider {

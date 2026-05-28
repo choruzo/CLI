@@ -28,18 +28,22 @@ export class MockProvider implements IProvider {
 export function makeTextRound(text: string): OpenAIStreamChunk[] {
   return [
     {
-      choices: [{
-        delta: { content: text },
-        finish_reason: null,
-        index: 0,
-      }],
+      choices: [
+        {
+          delta: { content: text },
+          finish_reason: null,
+          index: 0,
+        },
+      ],
     },
     {
-      choices: [{
-        delta: { content: '' },
-        finish_reason: 'stop',
-        index: 0,
-      }],
+      choices: [
+        {
+          delta: { content: '' },
+          finish_reason: 'stop',
+          index: 0,
+        },
+      ],
     },
   ];
 }
@@ -53,37 +57,47 @@ export function makeToolCallRound(
   const half = Math.floor(argsStr.length / 2);
   return [
     {
-      choices: [{
-        delta: {
-          tool_calls: [{
-            index: 0,
-            id,
-            type: 'function',
-            function: { name, arguments: argsStr.slice(0, half) },
-          }],
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                id,
+                type: 'function',
+                function: { name, arguments: argsStr.slice(0, half) },
+              },
+            ],
+          },
+          finish_reason: null,
+          index: 0,
         },
-        finish_reason: null,
-        index: 0,
-      }],
+      ],
     },
     {
-      choices: [{
-        delta: {
-          tool_calls: [{
-            index: 0,
-            function: { arguments: argsStr.slice(half) },
-          }],
+      choices: [
+        {
+          delta: {
+            tool_calls: [
+              {
+                index: 0,
+                function: { arguments: argsStr.slice(half) },
+              },
+            ],
+          },
+          finish_reason: null,
+          index: 0,
         },
-        finish_reason: null,
-        index: 0,
-      }],
+      ],
     },
     {
-      choices: [{
-        delta: {},
-        finish_reason: 'tool_calls',
-        index: 0,
-      }],
+      choices: [
+        {
+          delta: {},
+          finish_reason: 'tool_calls',
+          index: 0,
+        },
+      ],
     },
   ];
 }

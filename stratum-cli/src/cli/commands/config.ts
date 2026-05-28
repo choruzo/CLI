@@ -47,7 +47,9 @@ const configGet = new Command('get')
         process.stderr.write(`Key not found: ${key}\n`);
         process.exit(1);
       }
-      process.stdout.write(typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value));
+      process.stdout.write(
+        typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
+      );
       process.stdout.write('\n');
     } catch (err) {
       process.stderr.write(`Error loading config: ${(err as Error).message}\n`);

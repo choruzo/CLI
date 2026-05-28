@@ -38,9 +38,14 @@ export function StatusBar({ providerName, model, contextUsed, contextMax }: Prop
       <Text color={theme.textInvisible}>│</Text>
       <Text color={theme.textPrimary}> {model}</Text>
       <Text>{gap}</Text>
-      <Text color={theme.textMuted} dimColor>ctx </Text>
+      <Text color={theme.textMuted} dimColor>
+        ctx{' '}
+      </Text>
       <Text color={ctxColor}>{formatTokens(contextUsed)}</Text>
-      <Text color={theme.textMuted} dimColor> / {formatTokens(contextMax)}</Text>
+      <Text color={theme.textMuted} dimColor>
+        {' '}
+        / {formatTokens(contextMax)}
+      </Text>
       <Text color={theme.textInvisible}> │</Text>
       <Text color={ctxColor}> {pct}%</Text>
     </Box>

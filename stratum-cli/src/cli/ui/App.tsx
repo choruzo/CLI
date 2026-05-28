@@ -14,9 +14,7 @@ export type AgentConvItem = {
   streaming: boolean;
 };
 
-export type ConvItem =
-  | { kind: 'user'; text: string }
-  | AgentConvItem;
+export type ConvItem = { kind: 'user'; text: string } | AgentConvItem;
 
 interface AppState {
   phase: 'banner' | 'conversation';
@@ -47,7 +45,7 @@ function updateToolCall(
   id: string,
   updater: (tc: ToolCallState) => ToolCallState,
 ): ToolCallState[] {
-  return toolCalls.map(tc => (tc.id === id ? updater(tc) : tc));
+  return toolCalls.map((tc) => (tc.id === id ? updater(tc) : tc));
 }
 
 function reducer(state: AppState, action: AppAction): AppState {
@@ -76,7 +74,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'text_delta') {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, item => ({
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
             text: item.text + ev.delta,
           })),
@@ -86,12 +84,12 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'tool_call_start') {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, item => {
-            const exists = item.toolCalls.find(tc => tc.id === ev.id);
+          currentItem: updateCurrentAgent(state.currentItem, (item) => {
+            const exists = item.toolCalls.find((tc) => tc.id === ev.id);
             if (exists) {
               return {
                 ...item,
-                toolCalls: updateToolCall(item.toolCalls, ev.id, tc => ({
+                toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({
                   ...tc,
                   inputSoFar: ev.input_so_far,
                 })),
@@ -116,9 +114,9 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'tool_call_ready') {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, item => ({
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            toolCalls: updateToolCall(item.toolCalls, ev.id, tc => ({
+            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({
               ...tc,
               input: ev.input,
             })),
@@ -129,9 +127,9 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'tool_result') {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, item => ({
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            toolCalls: updateToolCall(item.toolCalls, ev.id, tc => ({
+            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({
               ...tc,
               status: 'completed' as const,
               output: ev.result,
@@ -144,9 +142,9 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'tool_error') {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, item => ({
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            toolCalls: updateToolCall(item.toolCalls, ev.id, tc => ({
+            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({
               ...tc,
               status: 'error' as const,
               errorMsg: ev.error,
@@ -157,14 +155,13 @@ function reducer(state: AppState, action: AppAction): AppState {
 
       if (ev.type === 'done') {
         const rawCurrent = state.currentItem;
-        const finalItem: ConvItem | null = rawCurrent && rawCurrent.kind === 'agent'
-          ? { ...rawCurrent, streaming: false }
-          : rawCurrent;
+        const finalItem: ConvItem | null =
+          rawCurrent && rawCurrent.kind === 'agent'
+            ? { ...rawCurrent, streaming: false }
+            : rawCurrent;
         return {
           ...state,
-          completedItems: finalItem
-            ? [...state.completedItems, finalItem]
-            : state.completedItems,
+          completedItems: finalItem ? [...state.completedItems, finalItem] : state.completedItems,
           currentItem: null,
           thinking: false,
         };
@@ -173,7 +170,7 @@ function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'error' && ev.fatal) {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, item => ({
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
             text: item.text + (item.text ? '\n' : '') + `[Error: ${ev.message}]`,
             streaming: false,
@@ -238,19 +235,22 @@ export function App({ agent, version }: Props) {
     }
   });
 
-  const handleSend = useCallback((text: string) => {
-    if (!text.trim() || state.thinking) return;
-    if (text.trim() === '/quit' || text.trim() === '/exit') {
-      exit();
-      return;
-    }
-    void send(text.trim());
-  }, [send, state.thinking, exit]);
+  const handleSend = useCallback(
+    (text: string) => {
+      if (!text.trim() || state.thinking) return;
+      if (text.trim() === '/quit' || text.trim() === '/exit') {
+        exit();
+        return;
+      }
+      void send(text.trim());
+    },
+    [send, state.thinking, exit],
+  );
 
   if (state.phase === 'banner') {
     return (
       <Box>
-        <Banner version={version} onSend={text => void send(text)} />
+        <Banner version={version} onSend={(text) => void send(text)} />
       </Box>
     );
   }
@@ -261,7 +261,7 @@ export function App({ agent, version }: Props) {
         completedItems={state.completedItems}
         currentItem={state.currentItem}
         inputValue={state.inputValue}
-        onInputChange={value => dispatch({ type: 'INPUT_CHANGE', value })}
+        onInputChange={(value) => dispatch({ type: 'INPUT_CHANGE', value })}
         onInputSubmit={handleSend}
         thinking={state.thinking}
         providerName={agent.providerName}

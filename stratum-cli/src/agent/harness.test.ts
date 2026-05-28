@@ -31,7 +31,7 @@ describe('ContextManager', () => {
   it('estimates tokens as chars / 3.5', () => {
     const cm = new ContextManager(32768, 6);
     const messages = [
-      { role: 'user' as const, content: 'hello world' },  // 11 chars
+      { role: 'user' as const, content: 'hello world' }, // 11 chars
     ];
     const { used } = cm.usage(messages);
     expect(used).toBe(Math.ceil(11 / 3.5));
@@ -54,10 +54,10 @@ describe('ReactLoop', () => {
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
 
-    const textDeltas = events.filter(e => e.type === 'text_delta');
+    const textDeltas = events.filter((e) => e.type === 'text_delta');
     expect(textDeltas.length).toBeGreaterThan(0);
 
-    const done = events.find(e => e.type === 'done');
+    const done = events.find((e) => e.type === 'done');
     expect(done).toEqual({ type: 'done', stopReason: 'stop' });
   });
 
@@ -74,14 +74,14 @@ describe('ReactLoop', () => {
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
 
-    const toolResult = events.find(e => e.type === 'tool_result');
+    const toolResult = events.find((e) => e.type === 'tool_result');
     expect(toolResult).toMatchObject({
       type: 'tool_result',
       name: 'read_file',
       result: 'file content here',
     });
 
-    const done = events.find(e => e.type === 'done');
+    const done = events.find((e) => e.type === 'done');
     expect(done).toEqual({ type: 'done', stopReason: 'stop' });
   });
 
@@ -98,7 +98,7 @@ describe('ReactLoop', () => {
     const loop = new ReactLoop(provider, registry, messages, config, 'test-model', 32768);
     const events = await collectEvents(loop.run());
 
-    const done = events.find(e => e.type === 'done');
+    const done = events.find((e) => e.type === 'done');
     expect(done).toEqual({ type: 'done', stopReason: 'max_iterations' });
   });
 
@@ -123,11 +123,11 @@ describe('ReactLoop', () => {
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
 
-    const toolErr = events.find(e => e.type === 'tool_error');
+    const toolErr = events.find((e) => e.type === 'tool_error');
     expect(toolErr).toMatchObject({ type: 'tool_error', name: 'fail_tool', recoverable: true });
 
     // Loop should continue and eventually stop
-    const done = events.find(e => e.type === 'done');
+    const done = events.find((e) => e.type === 'done');
     expect(done).toEqual({ type: 'done', stopReason: 'stop' });
   });
 
@@ -142,7 +142,7 @@ describe('ReactLoop', () => {
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run({ signal: controller.signal }));
 
-    const done = events.find(e => e.type === 'done');
+    const done = events.find((e) => e.type === 'done');
     expect(done).toMatchObject({ type: 'done', stopReason: 'cancelled' });
   });
 });

@@ -47,7 +47,18 @@ export const StratumConfigSchema = z.object({
         .default({}),
       destructivePatterns: z
         .array(z.string())
-        .default(['rm', 'rmdir', 'dd', 'mkfs', 'format', 'DROP', 'DELETE', 'truncate', 'shred', 'wipefs']),
+        .default([
+          'rm',
+          'rmdir',
+          'dd',
+          'mkfs',
+          'format',
+          'DROP',
+          'DELETE',
+          'truncate',
+          'shred',
+          'wipefs',
+        ]),
     })
     .default({}),
 

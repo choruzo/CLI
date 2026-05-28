@@ -4,7 +4,12 @@ import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.
 
 const schema = z.object({
   path: z.string().describe('Absolute or relative path to the file'),
-  offset: z.number().int().nonnegative().optional().describe('Starting line number (1-based, inclusive)'),
+  offset: z
+    .number()
+    .int()
+    .nonnegative()
+    .optional()
+    .describe('Starting line number (1-based, inclusive)'),
   limit: z.number().int().positive().optional().describe('Maximum number of lines to read'),
 });
 

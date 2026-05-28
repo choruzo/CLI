@@ -11,7 +11,11 @@ const ctx: ToolContext = {
   config,
 };
 
-function makeTool(name: string, result: ToolResult, opts?: Partial<ToolDefinition>): ToolDefinition {
+function makeTool(
+  name: string,
+  result: ToolResult,
+  opts?: Partial<ToolDefinition>,
+): ToolDefinition {
   return {
     name,
     description: `Test ${name}`,
@@ -35,7 +39,7 @@ describe('ToolRegistry', () => {
     const reg = new ToolRegistry();
     reg.register(makeTool('a', { ok: true, output: '' }));
     reg.register(makeTool('b', { ok: true, output: '' }));
-    expect(reg.list().map(t => t.name)).toEqual(['a', 'b']);
+    expect(reg.list().map((t) => t.name)).toEqual(['a', 'b']);
   });
 
   it('converts to tool schemas for LLM', () => {
@@ -66,7 +70,10 @@ describe('ToolDispatcher', () => {
     const dispatcher = new ToolDispatcher(reg);
 
     const results = await dispatcher.dispatch([{ id: 'c1', name: 'unknown', input: {} }], ctx);
-    expect(results[0]!.result).toMatchObject({ ok: false, error: expect.stringContaining('not found') });
+    expect(results[0]!.result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('not found'),
+    });
   });
 
   it('returns error for invalid params (Zod validation)', async () => {
@@ -86,7 +93,10 @@ describe('ToolDispatcher', () => {
       [{ id: 'c1', name: 'strict_tool', input: { name: 123 } }],
       ctx,
     );
-    expect(results[0]!.result).toMatchObject({ ok: false, error: expect.stringContaining('Invalid') });
+    expect(results[0]!.result).toMatchObject({
+      ok: false,
+      error: expect.stringContaining('Invalid'),
+    });
   });
 
   it('runs serialized tools sequentially', async () => {
@@ -100,7 +110,7 @@ describe('ToolDispatcher', () => {
       serialized: true,
       async execute(params): Promise<ToolResult> {
         const n = (params as { n: number }).n;
-        await new Promise(r => setTimeout(r, 10 - n)); // later tools resolve faster
+        await new Promise((r) => setTimeout(r, 10 - n)); // later tools resolve faster
         order.push(n);
         return { ok: true, output: String(n) };
       },
@@ -132,7 +142,7 @@ describe('ToolDispatcher', () => {
       async execute(): Promise<ToolResult> {
         concurrency++;
         maxConcurrency = Math.max(maxConcurrency, concurrency);
-        await new Promise(r => setTimeout(r, 20));
+        await new Promise((r) => setTimeout(r, 20));
         concurrency--;
         return { ok: true, output: 'ok' };
       },

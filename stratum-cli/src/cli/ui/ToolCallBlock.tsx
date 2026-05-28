@@ -39,18 +39,25 @@ export function ToolCallBlock({ state }: Props) {
 
   useEffect(() => {
     if (state.status !== 'running') return;
-    const spinIv = setInterval(() => setFrame(f => (f + 1) % SPINNER_FRAMES.length), 150);
-    const timerIv = setInterval(() => setElapsedMs(e => e + 100), 100);
-    return () => { clearInterval(spinIv); clearInterval(timerIv); };
+    const spinIv = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 150);
+    const timerIv = setInterval(() => setElapsedMs((e) => e + 100), 100);
+    return () => {
+      clearInterval(spinIv);
+      clearInterval(timerIv);
+    };
   }, [state.status]);
 
   if (state.status === 'running') {
     return (
       <Box marginBottom={0}>
         <Text color={theme.accent}>{SPINNER_FRAMES[frame]} </Text>
-        <Text color={theme.accent} bold>{state.name}</Text>
-        <Text color={theme.textFaint}>  │  {formatDuration(elapsedMs)}  │  </Text>
-        <Text color={theme.textFaint} dimColor>{state.inputSoFar?.slice(0, 60) ?? ''}</Text>
+        <Text color={theme.accent} bold>
+          {state.name}
+        </Text>
+        <Text color={theme.textFaint}> │ {formatDuration(elapsedMs)} │ </Text>
+        <Text color={theme.textFaint} dimColor>
+          {state.inputSoFar?.slice(0, 60) ?? ''}
+        </Text>
       </Box>
     );
   }
@@ -61,9 +68,11 @@ export function ToolCallBlock({ state }: Props) {
     return (
       <Box marginBottom={0}>
         <Text color={theme.success}>✓ </Text>
-        <Text color={theme.accent} bold>{state.name}</Text>
-        {dur && <Text color={theme.textFaint}>  │  {dur}</Text>}
-        {label && <Text color={theme.textFaint}>  │  {label}</Text>}
+        <Text color={theme.accent} bold>
+          {state.name}
+        </Text>
+        {dur && <Text color={theme.textFaint}> │ {dur}</Text>}
+        {label && <Text color={theme.textFaint}> │ {label}</Text>}
       </Box>
     );
   }
@@ -71,8 +80,13 @@ export function ToolCallBlock({ state }: Props) {
   return (
     <Box marginBottom={0}>
       <Text color={theme.error}>✗ </Text>
-      <Text color={theme.errorMuted} bold>{state.name}</Text>
-      <Text color={theme.errorMuted} dimColor>  │  {state.errorMsg ?? 'error'}</Text>
+      <Text color={theme.errorMuted} bold>
+        {state.name}
+      </Text>
+      <Text color={theme.errorMuted} dimColor>
+        {' '}
+        │ {state.errorMsg ?? 'error'}
+      </Text>
     </Box>
   );
 }

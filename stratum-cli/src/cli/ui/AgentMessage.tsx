@@ -16,13 +16,13 @@ export function AgentMessage({ text, toolCalls, streaming }: Props) {
 
   return (
     <Box flexDirection="column" marginBottom={1}>
-      <Text color={theme.accent} bold>Stratum</Text>
-      {toolCalls.map(tc => (
+      <Text color={theme.accent} bold>
+        Stratum
+      </Text>
+      {toolCalls.map((tc) => (
         <ToolCallBlock key={tc.id} state={tc} />
       ))}
-      {text && (
-        <StreamingText text={text} streaming={streaming} />
-      )}
+      {text && <StreamingText text={text} streaming={streaming} />}
     </Box>
   );
 }

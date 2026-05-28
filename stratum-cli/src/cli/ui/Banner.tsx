@@ -40,7 +40,7 @@ export function Banner({ version, onSend }: Props) {
         return;
       }
       const chunk = chars.slice(i, i + 4).join('');
-      setArtText(prev => prev + chunk);
+      setArtText((prev) => prev + chunk);
       indexRef.current = i + 4;
     }, 16);
     return () => clearInterval(iv);
@@ -94,7 +94,9 @@ export function Banner({ version, onSend }: Props) {
           <Text color={theme.textInvisible}>{sep}</Text>
           <Text> </Text>
           <Box>
-            <Text color={theme.accent} bold>❯❯ </Text>
+            <Text color={theme.accent} bold>
+              ❯❯{' '}
+            </Text>
             <TextInput
               value={inputValue}
               onChange={setInputValue}

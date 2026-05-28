@@ -26,9 +26,7 @@ function renderItem(item: ConvItem, key: string | number) {
 export function MessageList({ completedItems, currentItem }: Props) {
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>
-      <Static items={completedItems}>
-        {(item, i) => renderItem(item, i)}
-      </Static>
+      <Static items={completedItems}>{(item, i) => renderItem(item, i)}</Static>
       {currentItem && renderItem(currentItem, 'current')}
     </Box>
   );

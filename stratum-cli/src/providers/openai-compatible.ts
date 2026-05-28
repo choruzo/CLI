@@ -99,7 +99,7 @@ export class OpenAICompatible implements IProvider {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': `Bearer ${this.apiKey}`,
+        Authorization: `Bearer ${this.apiKey}`,
       },
       body: JSON.stringify(body),
       signal: req.signal,
@@ -133,13 +133,10 @@ export class OpenAICompatible implements IProvider {
 
   async healthCheck(): Promise<boolean> {
     try {
-      const response = await fetch(
-        `${this.baseUrl.replace(/\/$/, '')}/models`,
-        {
-          headers: { 'Authorization': `Bearer ${this.apiKey}` },
-          signal: AbortSignal.timeout(5000),
-        },
-      );
+      const response = await fetch(`${this.baseUrl.replace(/\/$/, '')}/models`, {
+        headers: { Authorization: `Bearer ${this.apiKey}` },
+        signal: AbortSignal.timeout(5000),
+      });
       return response.ok;
     } catch {
       return false;

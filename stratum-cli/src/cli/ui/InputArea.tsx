@@ -13,9 +13,13 @@ interface Props {
 export function InputArea({ value, onChange, onSubmit, disabled }: Props) {
   return (
     <Box borderStyle="single" borderColor={theme.borderMedium} paddingX={1}>
-      <Text color={disabled ? theme.textDisabled : theme.accent} bold>❯❯ </Text>
+      <Text color={disabled ? theme.textDisabled : theme.accent} bold>
+        ❯❯{' '}
+      </Text>
       {disabled ? (
-        <Text color={theme.textDisabled} dimColor>Stratum is thinking...</Text>
+        <Text color={theme.textDisabled} dimColor>
+          Stratum is thinking...
+        </Text>
       ) : (
         <TextInput
           value={value}

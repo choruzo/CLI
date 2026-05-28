@@ -38,10 +38,7 @@ export function ConversationView({
         contextUsed={contextUsed}
         contextMax={contextMax}
       />
-      <MessageList
-        completedItems={completedItems}
-        currentItem={currentItem}
-      />
+      <MessageList completedItems={completedItems} currentItem={currentItem} />
       <InputArea
         value={inputValue}
         onChange={onInputChange}

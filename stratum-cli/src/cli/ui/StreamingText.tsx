@@ -16,16 +16,14 @@ export function StreamingText({ text, streaming }: Props) {
       return;
     }
     setCursorVisible(true);
-    const iv = setInterval(() => setCursorVisible(v => !v), 500);
+    const iv = setInterval(() => setCursorVisible((v) => !v), 500);
     return () => clearInterval(iv);
   }, [streaming]);
 
   return (
     <Text color={theme.textResponse} wrap="wrap">
       {text}
-      {streaming && (
-        <Text color={cursorVisible ? theme.accent : 'black'}>█</Text>
-      )}
+      {streaming && <Text color={cursorVisible ? theme.accent : 'black'}>█</Text>}
     </Text>
   );
 }

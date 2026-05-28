@@ -22,15 +22,17 @@ export interface ToolCallDelta {
 }
 
 export interface OpenAIStreamChunk {
-  choices: [{
-    delta: {
-      content?: string | null;
-      role?: string;
-      tool_calls?: ToolCallDelta[];
-    };
-    finish_reason: string | null;
-    index: number;
-  }];
+  choices: [
+    {
+      delta: {
+        content?: string | null;
+        role?: string;
+        tool_calls?: ToolCallDelta[];
+      };
+      finish_reason: string | null;
+      index: number;
+    },
+  ];
 }
 
 export interface CompletionRequest {

@@ -9,7 +9,8 @@ const schema = z.object({
 
 export const bashTool: ToolDefinition = {
   name: 'bash',
-  description: 'Execute a shell command and return stdout and stderr. Timeouts after 30s by default.',
+  description:
+    'Execute a shell command and return stdout and stderr. Timeouts after 30s by default.',
   schema,
   destructive: false,
   serialized: true,

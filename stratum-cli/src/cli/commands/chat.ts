@@ -57,9 +57,7 @@ export const chatCommand = new Command('chat')
     const agent = new StratumAgent(config, router, registry);
     const version = resolveVersion();
 
-    const { waitUntilExit } = render(
-      React.createElement(App, { agent, version }),
-    );
+    const { waitUntilExit } = render(React.createElement(App, { agent, version }));
 
     try {
       await waitUntilExit();

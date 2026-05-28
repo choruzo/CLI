@@ -10,7 +10,8 @@ const schema = z.object({
 
 export const writeFileTool: ToolDefinition = {
   name: 'write_file',
-  description: 'Create or overwrite a file with the given content. Parent directories are created automatically.',
+  description:
+    'Create or overwrite a file with the given content. Parent directories are created automatically.',
   schema,
   destructive: false,
 
