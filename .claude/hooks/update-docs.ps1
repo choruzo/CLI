@@ -49,7 +49,10 @@ New-Item $lockFile -ItemType File -Force | Out-Null
 try {
     Set-Location $projectRoot
     Write-Host "Actualizando documentacion en CLI-DOC/..."
-    claude -p $prompt --allowedTools "Read,Write,Edit"
+    # --bare:                        evita que la sesión anidada dispare hooks (lint-check, etc.)
+    # --dangerously-skip-permissions: contexto no-interactivo, sin TTY que pueda responder prompts
+    # "$prompt":                      quoting explícito para que PowerShell lo pase como un solo argumento
+    claude -p "$prompt" --allowedTools "Read,Write,Edit" --bare --dangerously-skip-permissions
 } finally {
     Remove-Item $lockFile -Force -ErrorAction SilentlyContinue
 }

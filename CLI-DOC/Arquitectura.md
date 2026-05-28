@@ -36,8 +36,8 @@ CLI (Commander.js)
 ### [[Módulos/cli]] — CLI & UI
 
 - Entry point: `cli/index.ts` (Commander.js)
-- UI terminal: Ink (React para CLIs) — `App.tsx` → `ChatView.tsx` + `ToolCall.tsx`
-- Comandos: `chat`, `run`, `memory`, `sessions`, `config`, `init`
+- UI terminal: Ink v5 (React 18) — `App.tsx` → Banner / `ConversationView.tsx`
+- Comandos implementados: `chat`, `run`, `config`, `init` (stubs: `memory`, `sessions`)
 
 ### [[Módulos/config]] — Configuración
 
@@ -45,22 +45,35 @@ CLI (Commander.js)
 - Archivo: `.stratumrc.json` — providers, rutas de memoria, tools, MCP servers
 - Variables de entorno `${VAR}` expandidas automáticamente
 
+### [[Módulos/agent]] — Agent Core (Hito 1)
+
+- `StratumAgent` (`core.ts`) — estado de sesión, orquesta subsistemas
+- `ReactLoop` + `ContextManager` (`harness.ts`) — bucle ReAct, estimación de tokens
+- `AgentEvent` union type — fuente única de verdad para todos los eventos del agente
+
+### [[Módulos/providers]] — Providers (Hito 1)
+
+- `OpenAICompatible` — cliente SSE con `eventsource-parser`
+- `StreamBuffer` — acumula chunks fragmentados de tool calls (§12.2)
+- `ProviderRouter` — selección de provider activo desde config
+
+### [[Módulos/tools]] — Tools (Hito 1)
+
+- `ToolRegistry` + `ToolDispatcher` — registro central y dispatch paralelo/serializado
+- Built-ins: `read_file`, `write_file`, `bash`
+
 ---
 
 ## Módulos pendientes de implementar
 
 | Módulo | Archivo principal | Hito |
 |--------|------------------|------|
-| StratumAgent | `agent/core.ts` | 1 |
-| ReactLoop | `agent/harness.ts` | 1 |
-| ContextManager | `agent/harness.ts` | 1 |
-| StreamBuffer | `agent/harness.ts` | 1 |
-| ProviderRouter | `providers/router.ts` | 1 |
-| OpenAICompatible | `providers/openai.ts` | 1 |
-| ToolRegistry | `tools/registry.ts` | 1 |
-| ToolDispatcher | `tools/dispatcher.ts` | 1 |
 | MemoryManager | `memory/manager.ts` | 2–5 |
+| Compresión de contexto | `agent/harness.ts` | 2 |
+| `edit_file`, `glob`, `grep` | `tools/fs/` | 3 |
+| Guard destructivo en `bash` | `tools/shell/bash.ts` | 3 |
 | MCP Bridge | `mcp/bridge.ts` | 4 |
+| Decision Store + embeddings ONNX | `memory/` | 5 |
 
 ---
 

@@ -11,7 +11,7 @@ status: en-progreso
 | Hito | Descripción | Duración est. | Estado |
 |------|-------------|---------------|--------|
 | [[#Hito 0]] | Scaffolding | ~2 días | ✅ Completado |
-| [[#Hito 1]] | Core Agent Loop | ~5 días | ⏳ Pendiente |
+| [[#Hito 1]] | Core Agent Loop | ~5 días | ✅ Completado |
 | [[#Hito 2]] | Memory Layer 1 | ~3 días | ⏳ Pendiente |
 | [[#Hito 3]] | Tools Day 1 | ~4 días | ⏳ Pendiente |
 | [[#Hito 4]] | MCP Client | ~4 días | ⏳ Pendiente |
@@ -35,19 +35,21 @@ status: en-progreso
 
 ---
 
-## Hito 1 — Core Agent Loop ⏳
+## Hito 1 — Core Agent Loop ✅
 
-- [ ] `ProviderRouter` con cliente OpenAI-compatible
-- [ ] Streaming de responses (SSE parser)
-- [ ] `ReactLoop` básico (sin tools)
-- [ ] `ToolRegistry` con dispatch
-- [ ] Tools básicas: `read_file`, `write_file`, `bash`
-- [ ] System prompt base
-- [ ] Ink UI: ChatView con streaming
+- [x] `ProviderRouter` con cliente OpenAI-compatible
+- [x] Streaming de responses (SSE parser via `eventsource-parser`)
+- [x] `ReactLoop` con retry de red (backoff 1s/2s/4s) y política inject & recover
+- [x] `ToolRegistry` con `ToolDispatcher` (paralelo + serializado §12.9)
+- [x] Tools básicas: `read_file`, `write_file`, `bash`
+- [x] `StreamBuffer` para parsing de tool calls SSE fragmentadas (§12.2)
+- [x] System prompt base (identidad Stratum + instrucciones ReAct)
+- [x] Ink UI: Banner con typewriter, ConversationView con streaming cursor
+- [x] `stratum run` en modo plain-text (stdout/stderr separados)
 
-**Entregable:** `stratum chat` funciona. El agente puede leer archivos y ejecutar comandos básicos.
+**Entregable:** `stratum chat` arranca la UI interactiva. El agente puede leer archivos y ejecutar comandos. `stratum run "tarea"` funciona en modo plain-text contra Ollama local. 42 tests pasando.
 
-Ver [[Módulos/agent]], [[Módulos/providers]], [[Arquitectura]].
+Ver [[Módulos/agent]], [[Módulos/providers]], [[Módulos/tools]], [[Módulos/cli]].
 
 ---
 

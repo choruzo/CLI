@@ -1,0 +1,38 @@
+import { useCallback, useRef } from 'react';
+import type { StratumAgent } from '../../agent/core.js';
+import type { AgentEvent } from '../../agent/types.js';
+import type { AppAction } from './App.js';
+
+export function useAgentStream(agent: StratumAgent, dispatch: (action: AppAction) => void) {
+  const abortRef = useRef<AbortController | null>(null);
+
+  const send = useCallback(async (input: string) => {
+    const controller = new AbortController();
+    abortRef.current = controller;
+
+    dispatch({ type: 'AGENT_START', input });
+
+    try {
+      for await (const event of agent.run(input, { signal: controller.signal })) {
+        if (controller.signal.aborted) break;
+        dispatch({ type: 'AGENT_EVENT', event });
+
+        const ctx = agent.getContextUsage();
+        dispatch({ type: 'CONTEXT_UPDATE', used: ctx.used, max: ctx.max });
+      }
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      const ev: AgentEvent = { type: 'error', message: msg, fatal: true };
+      dispatch({ type: 'AGENT_EVENT', event: ev });
+      dispatch({ type: 'AGENT_EVENT', event: { type: 'done', stopReason: 'error' } });
+    } finally {
+      abortRef.current = null;
+    }
+  }, [agent, dispatch]);
+
+  const cancel = useCallback(() => {
+    abortRef.current?.abort();
+  }, []);
+
+  return { send, cancel };
+}

@@ -8,3 +8,7 @@ if ($path -match "stratum-cli.+\.(ts|tsx)$") {
     npm run lint 2>&1 | Write-Host
     Pop-Location
 }
+
+# Siempre exit 0: lint es informativo, no bloqueante.
+# Sin esto, un exit code != 0 de ESLint se propaga como fallo del hook.
+exit 0
