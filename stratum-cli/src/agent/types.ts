@@ -10,7 +10,7 @@ export type AgentEvent =
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   | { type: 'thinking'; text: string }
   | { type: 'error'; message: string; fatal: boolean }
-  | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' };
+  | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' };
 
 export interface DecisionEntry {
   id: string;

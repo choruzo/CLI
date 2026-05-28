@@ -2,27 +2,22 @@ import type { StratumConfig } from '../config/schema.js';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
 import { StreamBuffer } from '../providers/openai-compatible.js';
-import type {
-  AgentEvent,
-  Message,
-  ToolCallReady,
-  ToolContext,
-  RunOptions,
-} from './types.js';
+import type { AgentEvent, Message, ToolCallReady, ToolContext, RunOptions } from './types.js';
 import type { ToolRegistry, DispatchResult } from '../tools/registry.js';
 import { ToolDispatcher } from '../tools/registry.js';
 
 function delay(ms: number): Promise<void> {
-  return new Promise(resolve => setTimeout(resolve, ms));
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
+// Fix #5: 4 intentos totales = 3 retries con delays 1s/2s/4s (spec 12.3)
 async function* streamWithRetry(
   provider: IProvider,
   request: CompletionRequest,
-  maxRetries = 3,
+  maxAttempts = 4,
 ): AsyncGenerator<OpenAIStreamChunk> {
   let lastErr: unknown;
-  for (let attempt = 0; attempt < maxRetries; attempt++) {
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     if (attempt > 0) await delay(1000 * Math.pow(2, attempt - 1));
     try {
       const gen = provider.complete(request);
@@ -38,8 +33,12 @@ async function* streamWithRetry(
   throw lastErr;
 }
 
-function formatXmlError(tool: string, error: string): string {
-  return `<tool_error>\n  <tool>${tool}</tool>\n  <error>${error}</error>\n</tool_error>`;
+// Fix #4: respeta toolErrorFormat de config (spec 12.3)
+function formatToolError(toolName: string, error: string, format: 'xml' | 'json' = 'xml'): string {
+  if (format === 'json') {
+    return JSON.stringify({ tool: toolName, error });
+  }
+  return `<tool_error>\n  <tool>${toolName}</tool>\n  <error>${error}</error>\n</tool_error>`;
 }
 
 export class ContextManager {
@@ -84,16 +83,15 @@ export class ReactLoop {
     private readonly model: string,
     contextWindow: number,
   ) {
-    this.dispatcher = new ToolDispatcher(registry);
-    this.contextManager = new ContextManager(
-      contextWindow,
-      config.agent.compressionKeepRounds,
-    );
+    // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
+    this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
+    this.contextManager = new ContextManager(contextWindow, config.agent.compressionKeepRounds);
   }
 
   async *run(opts?: RunOptions): AsyncGenerator<AgentEvent> {
     const signal = opts?.signal ?? new AbortController().signal;
     const tools: ToolSchema[] = this.registry.toToolSchemas();
+    const fmt = this.config.agent.toolErrorFormat;
 
     for (let iter = 0; iter < this.config.agent.maxIterations; iter++) {
       if (signal.aborted) {
@@ -114,21 +112,34 @@ export class ReactLoop {
       const buffer = new StreamBuffer();
       let assistantText = '';
       const readyCalls: ToolCallReady[] = [];
+      // Fix #2: rastrear parse errors del buffer para inject & recover (spec 12.3)
+      type ParseError = {
+        type: 'tool_error';
+        id: string;
+        name: string;
+        error: string;
+        recoverable: boolean;
+      };
+      const parseErrors: ParseError[] = [];
+      const toolArgBuffers = new Map<string, string>(); // id → args raw acumulados
       let fatalError: string | null = null;
 
       try {
-        for await (const chunk of streamWithRetry(this.provider, request, 3)) {
+        for await (const chunk of streamWithRetry(this.provider, request)) {
           if (signal.aborted) break;
           for (const ev of buffer.feed(chunk)) {
             if (ev.type === 'text_delta') {
               assistantText += ev.delta;
               yield ev;
             } else if (ev.type === 'tool_call_start') {
+              toolArgBuffers.set(ev.id, ev.input_so_far);
               yield ev;
             } else if (ev.type === 'tool_call_ready') {
+              toolArgBuffers.delete(ev.id);
               readyCalls.push(ev);
               yield ev;
             } else if (ev.type === 'tool_error') {
+              parseErrors.push(ev as ParseError);
               yield ev;
             } else {
               yield ev;
@@ -144,73 +155,94 @@ export class ReactLoop {
         return;
       }
 
+      // Fix #1: error fatal → done con 'stop' (spec 12.1 solo permite stop/max_iterations/cancelled)
       if (fatalError !== null) {
         yield { type: 'error', message: fatalError, fatal: true };
-        yield { type: 'done', stopReason: 'error' };
-        return;
-      }
-
-      // Build assistant message for history
-      const assistantMsg: Message = {
-        role: 'assistant',
-        content: assistantText || null,
-      };
-      if (readyCalls.length > 0) {
-        assistantMsg.tool_calls = readyCalls.map(rc => ({
-          id: rc.id,
-          type: 'function',
-          function: {
-            name: rc.name,
-            arguments: JSON.stringify(rc.input),
-          },
-        }));
-      }
-      this.messages.push(assistantMsg);
-
-      if (readyCalls.length === 0) {
         yield { type: 'done', stopReason: 'stop' };
         return;
       }
 
-      // Dispatch tools
-      const ctx: ToolContext = {
-        signal,
-        cwd: process.cwd(),
-        config: this.config,
-        allowDestructive: opts?.allowDestructive,
+      // Construir mensaje del asistente incluyendo tanto calls válidas como las que fallaron parse
+      const assistantMsg: Message = {
+        role: 'assistant',
+        content: assistantText || null,
       };
 
-      const results: DispatchResult[] = await this.dispatcher.dispatch(readyCalls, ctx);
+      const allToolCalls = [
+        ...readyCalls.map((rc) => ({
+          id: rc.id,
+          type: 'function' as const,
+          function: { name: rc.name, arguments: JSON.stringify(rc.input) },
+        })),
+        ...parseErrors.map((pe) => ({
+          id: pe.id,
+          type: 'function' as const,
+          function: { name: pe.name, arguments: toolArgBuffers.get(pe.id) ?? '' },
+        })),
+      ];
 
-      for (const res of results) {
-        if (res.result.ok) {
-          yield {
-            type: 'tool_result',
-            id: res.callId,
-            name: res.toolName,
-            result: res.result.output,
-            durationMs: res.durationMs,
-          };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: res.callId,
-            name: res.toolName,
-            content: res.result.output,
-          });
-        } else {
-          yield {
-            type: 'tool_error',
-            id: res.callId,
-            name: res.toolName,
-            error: res.result.error,
-            recoverable: res.result.recoverable,
-          };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: res.callId,
-            name: res.toolName,
-            content: formatXmlError(res.toolName, res.result.error),
-          });
+      if (allToolCalls.length > 0) {
+        assistantMsg.tool_calls = allToolCalls;
+      }
+      this.messages.push(assistantMsg);
+
+      // Parar solo cuando no hay ningún tool call (ni válido ni con parse error)
+      if (readyCalls.length === 0 && parseErrors.length === 0) {
+        yield { type: 'done', stopReason: 'stop' };
+        return;
+      }
+
+      // Inyectar parse errors al historial para que el LLM pueda recuperarse
+      for (const pe of parseErrors) {
+        this.messages.push({
+          role: 'tool',
+          tool_call_id: pe.id,
+          name: pe.name,
+          content: formatToolError(pe.name, pe.error, fmt),
+        });
+      }
+
+      // Despachar tool calls con JSON válido
+      if (readyCalls.length > 0) {
+        const ctx: ToolContext = {
+          signal,
+          cwd: process.cwd(),
+          config: this.config,
+          allowDestructive: opts?.allowDestructive,
+        };
+
+        const results: DispatchResult[] = await this.dispatcher.dispatch(readyCalls, ctx);
+
+        for (const res of results) {
+          if (res.result.ok) {
+            yield {
+              type: 'tool_result',
+              id: res.callId,
+              name: res.toolName,
+              result: res.result.output,
+              durationMs: res.durationMs,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: res.callId,
+              name: res.toolName,
+              content: res.result.output,
+            });
+          } else {
+            yield {
+              type: 'tool_error',
+              id: res.callId,
+              name: res.toolName,
+              error: res.result.error,
+              recoverable: res.result.recoverable,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: res.callId,
+              name: res.toolName,
+              content: formatToolError(res.toolName, res.result.error, fmt),
+            });
+          }
         }
       }
     }

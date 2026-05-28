@@ -18,7 +18,7 @@ export class ToolRegistry {
   }
 
   toToolSchemas(): ToolSchema[] {
-    return this.list().map(tool => {
+    return this.list().map((tool) => {
       const full = zodToJsonSchema(tool.schema, {
         $refStrategy: 'none',
         target: 'jsonSchema7',
@@ -44,7 +44,12 @@ export interface DispatchResult {
 }
 
 export class ToolDispatcher {
-  constructor(private readonly registry: ToolRegistry) {}
+  private readonly toolFailureCounts = new Map<string, number>();
+
+  constructor(
+    private readonly registry: ToolRegistry,
+    private readonly maxToolRetries: number = 3,
+  ) {}
 
   async dispatch(calls: ToolCallReady[], ctx: ToolContext): Promise<DispatchResult[]> {
     if (calls.length === 0) return [];
@@ -52,7 +57,7 @@ export class ToolDispatcher {
       return [await this.dispatchOne(calls[0]!, ctx)];
     }
 
-    const hasSerializedCall = calls.some(c => {
+    const hasSerializedCall = calls.some((c) => {
       const tool = this.registry.get(c.name);
       return tool?.serialized === true;
     });
@@ -65,9 +70,7 @@ export class ToolDispatcher {
       return results;
     }
 
-    const settled = await Promise.allSettled(
-      calls.map(call => this.dispatchOne(call, ctx)),
-    );
+    const settled = await Promise.allSettled(calls.map((call) => this.dispatchOne(call, ctx)));
 
     return settled.map((r, i) => {
       if (r.status === 'fulfilled') return r.value;
@@ -75,10 +78,18 @@ export class ToolDispatcher {
       return {
         callId: call.id,
         toolName: call.name,
-        result: { ok: false, error: String((r as PromiseRejectedResult).reason), recoverable: true },
+        result: {
+          ok: false,
+          error: String((r as PromiseRejectedResult).reason),
+          recoverable: true,
+        },
         durationMs: 0,
       };
     });
+  }
+
+  private recordFailure(name: string): void {
+    this.toolFailureCounts.set(name, (this.toolFailureCounts.get(name) ?? 0) + 1);
   }
 
   private async dispatchOne(call: ToolCallReady, ctx: ToolContext): Promise<DispatchResult> {
@@ -89,9 +100,20 @@ export class ToolDispatcher {
       return {
         callId: call.id,
         toolName: call.name,
+        result: { ok: false, error: `Tool "${call.name}" not found`, recoverable: false },
+        durationMs: Date.now() - start,
+      };
+    }
+
+    // Fix #3: bloquear tool que superó maxToolRetries fallos en la sesión (spec 12.3)
+    const failCount = this.toolFailureCounts.get(call.name) ?? 0;
+    if (failCount >= this.maxToolRetries) {
+      return {
+        callId: call.id,
+        toolName: call.name,
         result: {
           ok: false,
-          error: `Tool "${call.name}" not found`,
+          error: `Tool "${call.name}" has failed ${failCount} times this session and is disabled.`,
           recoverable: false,
         },
         durationMs: Date.now() - start,
@@ -100,6 +122,7 @@ export class ToolDispatcher {
 
     const parsed = tool.schema.safeParse(call.input);
     if (!parsed.success) {
+      this.recordFailure(call.name);
       return {
         callId: call.id,
         toolName: call.name,
@@ -117,11 +140,16 @@ export class ToolDispatcher {
       const result = await Promise.race([
         tool.execute(parsed.data, ctx),
         new Promise<never>((_, reject) =>
-          setTimeout(() => reject(new Error(`Tool "${call.name}" timed out after ${timeoutMs}ms`)), timeoutMs),
+          setTimeout(
+            () => reject(new Error(`Tool "${call.name}" timed out after ${timeoutMs}ms`)),
+            timeoutMs,
+          ),
         ),
       ]);
+      if (!result.ok) this.recordFailure(call.name);
       return { callId: call.id, toolName: call.name, result, durationMs: Date.now() - start };
     } catch (err) {
+      this.recordFailure(call.name);
       return {
         callId: call.id,
         toolName: call.name,
