@@ -85,16 +85,17 @@ describe('runCommand', () => {
 
   it('waits for done(cancelled) before exiting with code 130 after SIGINT', async () => {
     const gate = deferred<void>();
-    mockState.agentRun.mockImplementationOnce(
-      async function* (_task: string, opts?: { signal?: AbortSignal }) {
-        await gate.promise;
-        if (opts?.signal?.aborted) {
-          yield { type: 'done' as const, stopReason: 'cancelled' as const };
-          return;
-        }
-        yield { type: 'done' as const, stopReason: 'stop' as const };
-      },
-    );
+    mockState.agentRun.mockImplementationOnce(async function* (
+      _task: string,
+      opts?: { signal?: AbortSignal },
+    ) {
+      await gate.promise;
+      if (opts?.signal?.aborted) {
+        yield { type: 'done' as const, stopReason: 'cancelled' as const };
+        return;
+      }
+      yield { type: 'done' as const, stopReason: 'stop' as const };
+    });
 
     vi.spyOn(process, 'on').mockImplementation(((event: string, listener: () => void) => {
       if (event === 'SIGINT') {
@@ -105,11 +106,11 @@ describe('runCommand', () => {
 
     const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation(((code?: string | number | null) => {
-        throw new ExitError(Number(code ?? 0));
-      }) as typeof process.exit);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+      code?: string | number | null,
+    ) => {
+      throw new ExitError(Number(code ?? 0));
+    }) as typeof process.exit);
 
     const { runCommand } = await import('./run.js');
     const action = runCommand.parseAsync(['demo-task'], { from: 'user' });
@@ -129,14 +130,15 @@ describe('runCommand', () => {
 
   it('forces exit code 1 on a second SIGINT during cancellation', async () => {
     const gate = deferred<void>();
-    mockState.agentRun.mockImplementationOnce(
-      async function* (_task: string, opts?: { signal?: AbortSignal }) {
-        await gate.promise;
-        if (opts?.signal?.aborted) {
-          yield { type: 'done' as const, stopReason: 'cancelled' as const };
-        }
-      },
-    );
+    mockState.agentRun.mockImplementationOnce(async function* (
+      _task: string,
+      opts?: { signal?: AbortSignal },
+    ) {
+      await gate.promise;
+      if (opts?.signal?.aborted) {
+        yield { type: 'done' as const, stopReason: 'cancelled' as const };
+      }
+    });
 
     vi.spyOn(process, 'on').mockImplementation(((event: string, listener: () => void) => {
       if (event === 'SIGINT') {
@@ -147,11 +149,11 @@ describe('runCommand', () => {
 
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation(((code?: string | number | null) => {
-        throw new ExitError(Number(code ?? 0));
-      }) as typeof process.exit);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+      code?: string | number | null,
+    ) => {
+      throw new ExitError(Number(code ?? 0));
+    }) as typeof process.exit);
 
     const { runCommand } = await import('./run.js');
     const action = runCommand.parseAsync(['demo-task'], { from: 'user' }).catch(() => undefined);
