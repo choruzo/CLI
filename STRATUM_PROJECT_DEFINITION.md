@@ -445,13 +445,13 @@ stratum config set provider.default litellm-proxy
 ---
 
 ### Hito 1 — Core Agent Loop *(~5 días)*
-- [ ] `ProviderRouter` con cliente OpenAI-compatible
-- [ ] Streaming de responses (SSE parser)
-- [ ] `ReactLoop` básico (sin tools)
-- [ ] `ToolRegistry` con dispatch
-- [ ] Tools básicas: `read_file`, `write_file`, `bash`
-- [ ] System prompt base
-- [ ] Ink UI: ChatView con streaming
+- [x] `ProviderRouter` con cliente OpenAI-compatible
+- [x] Streaming de responses (SSE parser)
+- [x] `ReactLoop` básico (sin tools)
+- [x] `ToolRegistry` con dispatch
+- [x] Tools básicas: `read_file`, `write_file`, `bash`
+- [x] System prompt base
+- [x] Ink UI: ChatView con streaming
 
 > **UI:** Implementar el esqueleto completo de la interfaz. Ver [§2 — Layout y Zonas](./STRATUM_UI_SPECIFICATION.md#2-layout-y-zonas), [§3 — Banner de Arranque](./STRATUM_UI_SPECIFICATION.md#3-estado-a--banner-de-arranque) (typewriter + transición), [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar), [§4.2 — Área de Conversación](./STRATUM_UI_SPECIFICATION.md#42-área-de-conversación) (streaming text + cursor parpadeante), [§5.2 — Input Area](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (modo normal únicamente), [§6 — Paleta de Colores](./STRATUM_UI_SPECIFICATION.md#6-paleta-de-colores), [§8 — Animaciones](./STRATUM_UI_SPECIFICATION.md#8-animaciones-y-transiciones), [§10 — Atajos de Teclado](./STRATUM_UI_SPECIFICATION.md#10-atajos-de-teclado), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (`App`, `Banner`, `ConversationView`, `StatusBar`, `StreamingText`, `InputArea`).
 
