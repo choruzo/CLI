@@ -480,8 +480,9 @@ stratum config set provider.default litellm-proxy
 - [ ] Confirmación interactiva en tools destructivas
 - [ ] Timeout y cancelación de tools
 - [ ] ToolCall UI (renderizado de tool calls en Ink)
+- [ ] Markdown rendering de respuestas del agente (`<MarkdownText>` con `marked` + Ink components manuales)
 
-> **UI:** El bloque de tool calls es la pieza central de este hito. Implementar los cuatro estados (`pending`, `running`, `completed`, `error`), el spinner animado, el timer incremental, el toggle de expansión con output colapsable, y el prompt de confirmación para operaciones destructivas. Ver [§5.1 — Tool Call Block — Estados](./STRATUM_UI_SPECIFICATION.md#51-tool-call-block--estados) (todos los estados y el bloque expandido), [§8 — Animaciones](./STRATUM_UI_SPECIFICATION.md#8-animaciones-y-transiciones) (spinner + timer), [§10 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (`ToolCallBlock`).
+> **UI:** El bloque de tool calls y el markdown rendering son las piezas centrales de este hito. Implementar los cuatro estados de tool call (`pending`, `running`, `completed`, `error`), el spinner animado, el timer incremental, el toggle de expansión con output colapsable, y el prompt de confirmación para operaciones destructivas. Implementar también el sistema dual-mode de renderizado de markdown: `<StreamingText>` durante la generación, `<MarkdownText>` (usando `marked` + Ink components) al recibir el evento `done`. Ver [§5.1 — Tool Call Block — Estados](./STRATUM_UI_SPECIFICATION.md#51-tool-call-block--estados) (todos los estados y el bloque expandido), [§5.3 — Renderizado de Markdown](./STRATUM_UI_SPECIFICATION.md#53-renderizado-de-markdown-en-respuestas-del-agente) (dual-mode, estructura de componentes, elementos soportados), [§8 — Animaciones](./STRATUM_UI_SPECIFICATION.md#8-animaciones-y-transiciones) (spinner + timer + transición StreamingText→MarkdownText), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (`ToolCallBlock`, `MarkdownText`, `CodeBlock`).
 
 **Entregable:** Agente con toolset completo del día 1. Puede realizar tareas de código completas.
 

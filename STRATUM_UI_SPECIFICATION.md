@@ -329,6 +329,116 @@ El área de input tiene tres modos:
 | `/context` | Muestra estadísticas de uso del contexto actual |
 | `/debug` | Toggle del modo debug (muestra chunks SSE raw) |
 
+### 5.3 Renderizado de Markdown en Respuestas del Agente
+
+Las respuestas del agente contienen markdown (encabezados, código, listas, negritas…). Renderizarlas como texto plano degrada la legibilidad. Esta sección define el sistema de renderizado.
+
+#### Estrategia: Dual-mode
+
+| Fase | Componente | Comportamiento |
+|---|---|---|
+| `streaming = true` | `<StreamingText>` | Texto plano + cursor `█`. Sin parseo. El LLM puede emitir tokens de markdown incompletos (un ` ``` ` sin cerrar rompe cualquier parser). |
+| `streaming = false` | `<MarkdownText>` | Re-render completo con markdown parseado. El salto visual coincide exactamente con la desaparición del cursor — el usuario no lo percibe como un flash. |
+
+La transición es el propio evento `done` del `AgentEvent`: cuando `streaming` pasa a `false`, `<AgentMessage>` desmonta `<StreamingText>` y monta `<MarkdownText>` con el mismo `text`. Ambos componentes reciben la misma prop — el intercambio es transparente.
+
+#### Librería: `marked` + renderizado manual a componentes Ink
+
+**No** se usa `marked-terminal` (inserta ANSI strings raw que colisionan con el layout de Ink v4+). **No** se usa `ink-markdown` (abandonado desde 2019).
+
+El enfoque es: `marked.lexer(text)` produce el token tree; un renderer propio mapea cada token a componentes `<Text>` y `<Box>` de Ink con los props correctos.
+
+```
+src/cli/ui/
+├── MarkdownText.tsx          ← componente raíz, recibe `text: string`
+└── markdown/
+    ├── renderTokens.tsx      ← función recursiva: Token[] → JSX.Element[]
+    ├── CodeBlock.tsx         ← bloque de código con highlight + box bordeado
+    └── InlineCode.tsx        ← código inline con color `code` (#6EE7B7)
+```
+
+#### Elementos soportados (v1)
+
+| Elemento Markdown | Renderizado Ink |
+|---|---|
+| `# H1` | `<Text bold color={accent}>` + separador `─────` debajo |
+| `## H2` | `<Text bold color={accent}>` (sin separador) |
+| `### H3` | `<Text bold color={textMuted}>` |
+| `**negrita**` | `<Text bold>` |
+| `*cursiva*` | `<Text italic>` |
+| `` `inline code` `` | `<InlineCode>` → `<Text color="#6EE7B7">` (token `code` de la paleta) |
+| ` ```lang\n...\n``` ` | `<CodeBlock>` → box bordeado + `cli-highlight` para sintaxis |
+| `- item` / `* item` | `<Text>• item</Text>` con `marginLeft={2}` |
+| `1. item` | `<Text>N. item</Text>` con `marginLeft={2}` |
+| `> blockquote` | `<Box borderLeft>` con borde `│` en `textDisabled` + texto en `textFaint` |
+| `---` | Línea de `─` hasta `min(cols - 4, 100)` chars, color `textDisabled` |
+| Párrafos | `<Text wrap="wrap" color={textResponse}>` con `marginBottom={1}` |
+
+**Elementos no soportados en v1** (se renderizan como texto plano sin parsear): tablas, imágenes, HTML inline, footnotes, task lists. Se añadirán en iteraciones posteriores si el uso lo justifica.
+
+#### Especificación de `<CodeBlock>`
+
+```
+  ┌─ typescript ────────────────────────────────────────────────────┐
+  │ const agent = new StratumAgent(config);                         │
+  │ await agent.run('analiza este repo');                            │
+  └─────────────────────────────────────────────────────────────────┘
+```
+
+- Borde: `borderStyle="single"`, `borderColor="#2A2A2A"` (`border-subtle`)
+- Header de lenguaje: ` typescript ` en `chalk.hex('#6B7280').dim` — solo si el bloque especifica lenguaje. Si no hay lenguaje, no se muestra header.
+- Contenido: procesado con `cli-highlight` (paquete `cli-highlight`). Si el lenguaje no es reconocido por `cli-highlight`, se muestra texto plano sin color.
+- Padding: `paddingLeft={1}` y `paddingRight={1}` en el `<Box>` interno.
+- Ancho máximo: el mismo límite global de `min(cols - 4, 100)` chars. El código no hace word-wrap — si una línea supera el ancho, se trunca con `…` al final.
+- Máximo de líneas visibles: sin límite (a diferencia del output de tools, el código del agente se muestra completo).
+
+#### Especificación de `<InlineCode>`
+
+```tsx
+// InlineCode.tsx
+<Text color={theme.code}>{children}</Text>   // theme.code = '#6EE7B7'
+```
+
+Sin caja, sin borde — solo un cambio de color que distingue visualmente el token del texto circundante. Compatible con el flow de `<Text wrap="wrap">` del párrafo padre.
+
+#### Nota de implementación — renderTokens.tsx
+
+`marked.lexer()` devuelve tokens de tipo `Token[]`. Algunos tokens tienen hijos (`tokens` anidados para inline content dentro de un párrafo o list item). La función `renderTokens` es recursiva:
+
+```tsx
+function renderTokens(tokens: marked.Token[], key = 0): JSX.Element[] {
+  return tokens.map((token, i) => {
+    const k = `${key}-${i}`;
+    switch (token.type) {
+      case 'heading':   return <HeadingBlock key={k} depth={token.depth} tokens={token.tokens} />;
+      case 'paragraph': return <ParagraphBlock key={k} tokens={token.tokens} />;
+      case 'code':      return <CodeBlock key={k} lang={token.lang} text={token.text} />;
+      case 'list':      return <ListBlock key={k} ordered={token.ordered} items={token.items} />;
+      case 'blockquote':return <QuoteBlock key={k} tokens={token.tokens} />;
+      case 'hr':        return <HRBlock key={k} />;
+      case 'strong':    return <Text key={k} bold>{renderInline(token.tokens)}</Text>;
+      case 'em':        return <Text key={k} italic>{renderInline(token.tokens)}</Text>;
+      case 'codespan':  return <InlineCode key={k}>{token.text}</InlineCode>;
+      case 'text':      return <Text key={k}>{token.text}</Text>;
+      default:          return <Text key={k}>{token.raw}</Text>; // fallback plano
+    }
+  });
+}
+```
+
+El `default` como fallback garantiza que ningún elemento no soportado rompa el render — simplemente se muestra el markdown raw.
+
+#### Dependencias añadidas
+
+```json
+{
+  "marked": "^12.0.0",       // parser markdown → token tree
+  "cli-highlight": "^2.1.11" // syntax highlighting ANSI para code blocks
+}
+```
+
+`marked` es zero-dependency y esm-compatible. `cli-highlight` produce strings ANSI que Ink renderiza correctamente dentro de un `<Text>` (a diferencia de `marked-terminal`, que toca el layout de Ink al envolver párrafos completos).
+
 ---
 
 ## 6. Paleta de Colores
@@ -434,6 +544,7 @@ import chalk from 'chalk';
 | Streaming text cursor | Respuesta agente | Carácter `█` al final | 500ms on/off |
 | Toggle tool block | Expandir/colapsar | Sin animación, toggle inmediato | Instantáneo |
 | Transición banner→chat | Estado completo | Desmontaje/montaje de componentes | Instantáneo |
+| StreamingText → MarkdownText | Respuesta completada | Desmontaje de `<StreamingText>` + montaje de `<MarkdownText>` al recibir evento `done`. Sin delay adicional — la transición ocurre en el mismo tick que la desaparición del cursor. | Instantáneo |
 
 **Principio:** las animaciones de "estado de carga" (spinner, streaming cursor, timer) son continuas mientras dura el estado. Las animaciones de "aparición de contenido" (typewriter, fade) ocurren una sola vez.
 
@@ -518,10 +629,15 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
           output={...}
           duration={...}
         />
-        <StreamingText          → Texto del agente, cursor parpadeante al final
-          text={...}
-          streaming={boolean}
-        />
+        {streaming
+          ? <StreamingText      → Durante streaming: texto plano + cursor parpadeante
+              text={...}
+              streaming={true}
+            />
+          : <MarkdownText       → Tras evento `done`: texto parseado con marked + Ink components
+              text={...}
+            />
+        }
       </AgentMessage>
     </MessageList>
     <InputArea                  → Input fijo abajo
@@ -554,7 +670,7 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | `thinking` | **No se renderiza por defecto.** Solo visible en modo `--debug`: se muestra como un bloque `<Box>` colapsado con borde dim y prefijo `⊙ thinking`. |
 | `error { fatal: false }` | Igual que `tool_error` — el loop continúa, el error es parte del flujo normal. |
 | `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'`. |
-| `done` | Quita el cursor de streaming del último `<StreamingText>`. Habilita el input. Actualiza la sesión guardada. |
+| `done` | Quita el cursor de streaming del último `<StreamingText>` y lo reemplaza con `<MarkdownText>` (re-render con markdown formateado). Habilita el input. Actualiza la sesión guardada. Ver [§5.3 — Renderizado de Markdown](./STRATUM_UI_SPECIFICATION.md#53-renderizado-de-markdown-en-respuestas-del-agente). |
 
 **Componente `<FatalError>`:**
 ```
@@ -733,5 +849,5 @@ Al iniciar `stratum chat`, los MCP servers se conectan de forma eager (§12.8 de
 
 ---
 
-*Documento generado: 2026-05-27 | Versión: 0.2.0-draft | Revisión: correcciones de compatibilidad Ink/terminal, nuevas secciones §12–§14*
+*Documento generado: 2026-05-27 | Versión: 0.3.0-draft | Revisión: correcciones de compatibilidad Ink/terminal, nuevas secciones §12–§14; §5.3 Renderizado de Markdown (dual-mode, marked + Ink components, CodeBlock, InlineCode)*
 *Documento relacionado: [Definición del Proyecto](./STRATUM_PROJECT_DEFINITION.md)*
