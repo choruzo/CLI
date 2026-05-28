@@ -27,6 +27,7 @@ async function* streamWithRetry(
       yield* gen;
       return;
     } catch (err) {
+      if (err instanceof Error && err.name === 'AbortError') throw err;
       lastErr = err;
     }
   }
@@ -34,11 +35,18 @@ async function* streamWithRetry(
 }
 
 // Fix #4: respeta toolErrorFormat de config (spec 12.3)
-function formatToolError(toolName: string, error: string, format: 'xml' | 'json' = 'xml'): string {
+function formatToolError(
+  toolName: string,
+  error: string,
+  format: 'xml' | 'json' = 'xml',
+  suggestion?: string,
+): string {
+  const hint =
+    suggestion ?? 'Review the error above and adjust the tool call parameters accordingly.';
   if (format === 'json') {
-    return JSON.stringify({ tool: toolName, error });
+    return JSON.stringify({ tool: toolName, error, suggestion: hint });
   }
-  return `<tool_error>\n  <tool>${toolName}</tool>\n  <error>${error}</error>\n</tool_error>`;
+  return `<tool_error>\n  <tool>${toolName}</tool>\n  <error>${error}</error>\n  <suggestion>${hint}</suggestion>\n</tool_error>`;
 }
 
 export class ContextManager {
@@ -198,7 +206,12 @@ export class ReactLoop {
           role: 'tool',
           tool_call_id: pe.id,
           name: pe.name,
-          content: formatToolError(pe.name, pe.error, fmt),
+          content: formatToolError(
+            pe.name,
+            pe.error,
+            fmt,
+            'Ensure the tool call arguments are valid JSON.',
+          ),
         });
       }
 
@@ -240,7 +253,7 @@ export class ReactLoop {
               role: 'tool',
               tool_call_id: res.callId,
               name: res.toolName,
-              content: formatToolError(res.toolName, res.result.error, fmt),
+              content: formatToolError(res.toolName, res.result.error, fmt, undefined),
             });
           }
         }

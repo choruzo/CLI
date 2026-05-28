@@ -45,10 +45,14 @@ export const runCommand = new Command('run')
       const agent = new StratumAgent(config, router, registry);
 
       const controller = new AbortController();
+      let aborting = false;
       process.on('SIGINT', () => {
-        controller.abort();
+        if (aborting) {
+          process.exit(1);
+        }
+        aborting = true;
         process.stderr.write('\n[cancelled]\n');
-        process.exit(130);
+        controller.abort();
       });
 
       const isColorTty = process.stdout.isTTY;
@@ -116,6 +120,10 @@ export const runCommand = new Command('run')
       } catch (err) {
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
         process.exit(1);
+      }
+
+      if (controller.signal.aborted) {
+        process.exit(130);
       }
 
       if (finalText) {

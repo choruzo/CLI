@@ -15,7 +15,6 @@ export function useAgentStream(agent: StratumAgent, dispatch: (action: AppAction
 
       try {
         for await (const event of agent.run(input, { signal: controller.signal })) {
-          if (controller.signal.aborted) break;
           dispatch({ type: 'AGENT_EVENT', event });
 
           const ctx = agent.getContextUsage();
