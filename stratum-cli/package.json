@@ -1,6 +1,6 @@
 {
   "name": "stratum-cli",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Extensible CLI agent powered by a ReAct loop",
   "type": "module",
   "bin": {
