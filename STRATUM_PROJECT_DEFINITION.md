@@ -1083,20 +1083,124 @@ stratum chat
 
 **Canales de distribución:**
 ```bash
-# Producción (canal principal)
+# Producción — canal estable
 npm install -g stratum-cli
+
+# Producción — canal beta (pre-releases)
+npm install -g stratum-cli@beta
 
 # Desarrollo local (link simbólico)
 npm run build && npm link
 
 # Prueba sin instalar
 npx stratum-cli@latest chat
+npx stratum-cli@beta chat
 ```
 
 **Inicialización en nuevo proyecto:**
 ```bash
 stratum init        # Crea .stratumrc.json + STRATUM.md con plantillas en el directorio actual
 ```
+
+---
+
+**Estrategia de versionado (semver + canal beta):**
+
+Stratum sigue semver estricto con dos canales npm:
+
+| Canal npm | Patrón de versión | Cuándo se publica |
+|---|---|---|
+| `latest` | `X.Y.Z` | Release estable desde rama `main` |
+| `beta` | `X.Y.Z-beta.N` | Pre-release desde rama `beta` o commit candidato |
+
+Reglas:
+- `MAJOR` — cambios breaking en API de tools, schema de config o formato de eventos `AgentEvent`
+- `MINOR` — nuevas features compatibles hacia atrás (nuevas tools, nuevos comandos, nuevo provider)
+- `PATCH` — bugfixes y mejoras de rendimiento sin cambios de API
+
+El campo `"version"` en `package.json` es la fuente de verdad. Nunca editar la versión a mano: se gestiona mediante tags Git (ver pipeline más abajo).
+
+---
+
+**Pipeline de release (GitHub Actions):**
+
+El workflow `.github/workflows/release.yml` se dispara únicamente cuando se hace push de un tag con el patrón `v*.*.*` o `v*.*.*-beta.*`:
+
+```
+Push tag vX.Y.Z  ──►  CI: build + test + lint
+                           │
+                           ▼ (solo si pasan todos)
+                       npm publish --tag latest
+                       gh release create vX.Y.Z (con changelog)
+
+Push tag vX.Y.Z-beta.N  ──►  CI: build + test + lint
+                                  │
+                                  ▼
+                              npm publish --tag beta
+```
+
+Pasos del job de release:
+1. `npm ci` — instala dependencias exactas del lockfile
+2. `npm run build` — compila con tsup (ESM + CJS)
+3. `npm test -- --run` — ejecuta todos los tests sin modo watch
+4. `npm run lint` — verifica formato
+5. `npm publish --access public [--tag beta]` — publica en npm con el tag correcto
+6. `gh release create` — crea GitHub Release con tag y CHANGELOG generado desde commits convencionales
+
+**Protecciones:**
+- El job de publish requiere el secret `NPM_TOKEN` configurado en el repositorio.
+- Los tags solo los crea el maintainer localmente y los pushea; no hay auto-tagging desde CI.
+- `npm publish` falla si la versión del `package.json` no coincide con el tag del push (validación explícita al inicio del job).
+
+**Flujo de trabajo del maintainer para publicar:**
+```bash
+# Release estable
+npm version minor -m "chore: release v%s"   # actualiza package.json + crea commit + tag
+git push && git push --tags                  # dispara el workflow
+
+# Pre-release beta
+npm version prerelease --preid=beta -m "chore: release v%s"
+git push && git push --tags
+```
+
+---
+
+**Notificación de updates al usuario:**
+
+Al arrancar cualquier comando (`chat`, `run`, `memory`, etc.), Stratum comprueba silenciosamente en background si existe una versión más reciente en el registro npm. La comprobación:
+- Se ejecuta con un timeout de **2 segundos**; si no responde, se ignora silenciosamente.
+- El resultado se **cachea en `~/.stratum/update-check.json`** con un TTL de **24 horas** para no spamear el registro npm en cada invocación.
+- La notificación se muestra **al final** de la sesión (nunca al inicio, para no bloquear el arranque).
+
+**Formato de la notificación** (solo se muestra si hay versión más nueva):
+```
+╭─────────────────────────────────────────────────╮
+│  Nueva versión disponible: 1.2.0 → 1.3.0        │
+│  Ejecuta: npm install -g stratum-cli             │
+╰─────────────────────────────────────────────────╯
+```
+
+Si la versión instalada es una beta y hay una nueva beta, también se notifica indicando el canal:
+```
+│  Nueva versión beta disponible: 1.3.0-beta.1 → 1.3.0-beta.2  │
+│  Ejecuta: npm install -g stratum-cli@beta                      │
+```
+
+**Implementación** (`src/utils/update-check.ts`):
+```typescript
+interface UpdateCache {
+  checkedAt: string;      // ISO timestamp
+  latestVersion: string;  // versión en npm
+  latestBeta: string;     // versión beta en npm
+}
+
+// Se llama desde cli/index.ts justo después de parsear el comando,
+// sin await — fire-and-forget con AbortSignal(timeout: 2000)
+export async function checkForUpdate(): Promise<string | null>
+// Devuelve el mensaje de notificación a mostrar al final, o null si no hay update o falló.
+```
+
+**La comprobación se puede deshabilitar** con la variable de entorno `STRATUM_NO_UPDATE_CHECK=1` o el campo `"updateCheck": false` en `.stratumrc.json`.
 
 ---
 
