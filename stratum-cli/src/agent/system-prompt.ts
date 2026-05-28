@@ -1,7 +1,32 @@
 import type { StratumConfig } from '../config/schema.js';
 
+function getShellInfo(): { platform: string; shellInstructions: string } {
+  if (process.platform === 'win32') {
+    return {
+      platform: 'Windows (PowerShell 7 / pwsh.exe)',
+      shellInstructions:
+        'Shell commands run in PowerShell 7 (pwsh.exe). ' +
+        'Basic aliases like `ls`, `cat`, `pwd`, `echo` work. ' +
+        'Do NOT use Linux-specific flags or tools: `ls -la` → `Get-ChildItem -Force`, ' +
+        '`find` → `Get-ChildItem -Recurse`, `grep` → `Select-String`, ' +
+        '`tree -L 2` → `tree /f` or `Get-ChildItem -Depth 2`. ' +
+        'The `&&` operator is available in PowerShell 7.',
+    };
+  }
+  if (process.platform === 'darwin') {
+    return { platform: 'macOS (zsh/bash)', shellInstructions: 'Shell commands run in /bin/sh.' };
+  }
+  return { platform: 'Linux (bash)', shellInstructions: 'Shell commands run in /bin/sh.' };
+}
+
 export function buildSystemPrompt(_config: StratumConfig): string {
+  const { platform, shellInstructions } = getShellInfo();
+
   return `You are Stratum, an extensible CLI agent powered by a ReAct loop (Reason → Act → Observe).
+
+## Environment
+- Platform: ${platform}
+- ${shellInstructions}
 
 ## Identity
 You are a capable, precise assistant for software development, DevOps, and system administration tasks. You operate directly in the user's terminal with access to their filesystem, shell, and configured tools.

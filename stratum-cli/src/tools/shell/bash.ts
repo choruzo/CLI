@@ -7,6 +7,8 @@ const schema = z.object({
   timeout: z.number().int().positive().optional().describe('Timeout in milliseconds'),
 });
 
+const SHELL: string | boolean = process.platform === 'win32' ? 'pwsh.exe' : true;
+
 export const bashTool: ToolDefinition = {
   name: 'bash',
   description:
@@ -21,7 +23,7 @@ export const bashTool: ToolDefinition = {
 
     try {
       const result = await execa(command, {
-        shell: true,
+        shell: SHELL,
         timeout: timeoutMs,
         forceKillAfterDelay: 500,
         cancelSignal: ctx.signal,
