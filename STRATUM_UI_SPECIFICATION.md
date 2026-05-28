@@ -187,7 +187,38 @@ Una sola línea fija en la parte superior, con fondo ligeramente más claro que 
 
 ### 4.2 Área de Conversación
 
-Scrollable verticalmente. Ink no tiene scroll nativo — se implementa con `ink-scroll-component` o capturando `scrollDown`/`scrollUp` del proceso.
+Scrollable verticalmente. Esta sección especifica la estrategia concreta de scroll, que es el punto más frágil de la UI dado que Ink no tiene scroll real de viewport.
+
+#### Estrategia: ventana virtual de N líneas
+
+`<MessageList>` no renderiza todos los mensajes del historial — mantiene una **ventana deslizante** de `viewportLines = terminalHeight × 3` líneas como máximo. Esto acota el trabajo de Ink independientemente del tamaño del historial.
+
+**Anclaje al fondo (streaming):**
+- Mientras `streaming = true`, la ventana se ancla automáticamente al último mensaje. Cualquier nuevo `text_delta` empuja la vista hacia abajo.
+- El usuario no puede hacer scroll hacia arriba durante el streaming (PgUp se ignora). Cuando el streaming termina (`done`), el scroll se habilita.
+
+**Navegación manual (post-streaming):**
+- `PgUp` / `PgDn`: desplazan la ventana en incrementos de `terminalHeight - 2` líneas.
+- `↓` hasta el final: re-ancla la vista al fondo.
+- Un indicador discreto `↓ N líneas más` aparece en la esquina inferior derecha del área de conversación cuando hay contenido por debajo de la vista.
+
+**Implementación:**
+```typescript
+// En <MessageList>:
+const [scrollOffset, setScrollOffset] = useState(0);
+const [anchored, setAnchored] = useState(true);
+
+useInput((input, key) => {
+  if (streaming) return;          // ignorar scroll durante streaming
+  if (key.pageDown) setScrollOffset(o => Math.max(0, o - pageSize));
+  if (key.pageUp)   setScrollOffset(o => o + pageSize);
+});
+
+// Al recibir text_delta mientras anchored === true:
+// scrollOffset = 0 (siempre fondo)
+```
+
+Los mensajes fuera de la ventana no se desmontan — se excluyen del render calculando qué slice del array de líneas está dentro del offset visible.
 
 #### Mensaje del usuario
 ```
@@ -314,7 +345,7 @@ El área de input tiene tres modos:
 | Comando | Descripción |
 |---|---|
 | `/help` | Lista todos los comandos disponibles con descripción |
-| `/clear` | Limpia el área de conversación (mantiene la sesión activa) |
+| `/clear` | Purga el área de conversación **y** el historial de mensajes enviado al LLM. El agente pierde todo el contexto previo. La sesión sigue activa (mismo `sessionId`) pero arranca con contexto vacío. Equivalente a empezar un chat nuevo sin salir del proceso. |
 | `/quit` o `/exit` | Termina la sesión, guarda el historial |
 | `/memory list` | Lista las decisiones almacenadas |
 | `/memory search <query>` | Búsqueda semántica en decisiones |
@@ -341,6 +372,8 @@ Las respuestas del agente contienen markdown (encabezados, código, listas, negr
 | `streaming = false` | `<MarkdownText>` | Re-render completo con markdown parseado. El salto visual coincide exactamente con la desaparición del cursor — el usuario no lo percibe como un flash. |
 
 La transición es el propio evento `done` del `AgentEvent`: cuando `streaming` pasa a `false`, `<AgentMessage>` desmonta `<StreamingText>` y monta `<MarkdownText>` con el mismo `text`. Ambos componentes reciben la misma prop — el intercambio es transparente.
+
+**Nota de rendimiento:** el swap es síncrono (ocurre en el mismo tick que el evento `done`). En la práctica, `marked.lexer()` sobre textos de hasta ~5 000 caracteres es imperceptible en Node.js. Si durante el desarrollo se observa un flash visible en respuestas más largas, diferir el swap con `setImmediate(() => setStreaming(false))` es suficiente — no se define un umbral fijo en v1.
 
 #### Librería: `marked` + renderizado manual a componentes Ink
 
@@ -585,7 +618,7 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | Atajo | Acción |
 |---|---|
 | `Enter` | Enviar mensaje / seleccionar en dropdown |
-| `↑ / ↓` | Navegar historial de mensajes en input (igual que shell) / navegar dropdown |
+| `↑ / ↓` | Navegar historial de inputs enviados en la sesión actual (igual que shell) / navegar dropdown. El historial vive en memoria (`string[]` en el estado de `<InputArea>`); no persiste entre sesiones. |
 | `Esc` | Cerrar dropdown de /comandos / cancelar input |
 | `Ctrl+C` | Interrumpir respuesta del agente en curso (graceful cancel) |
 | `Ctrl+C` × 2 | Salir del CLI (si no hay respuesta en curso: salir directamente) |
@@ -596,6 +629,36 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | `Space` | En un tool call block enfocado: expandir/colapsar output |
 | `Esc` (fuera de input) | Quitar foco del tool call block seleccionado |
 | `PgUp / PgDn` | Scroll en el historial de conversación |
+
+**Máquina de estados de foco** (resuelve la ambigüedad de `Tab` y `Esc`):
+
+```
+        ┌─────────────────────────────────────────────────────────┐
+        │                       input                             │
+        │  Tab (con texto /) → dropdown                           │
+        │  Tab (sin / activo) → block-focus (si hay bloques)      │
+        └────────────┬────────────────────────────────────────────┘
+                     │
+         ┌───────────┴────────────┐
+         ▼                        ▼
+    dropdown                 block-focus
+  Tab / Enter: selecciona   Tab / Shift+Tab: mueve entre bloques
+  Esc: → input              Space: expande/colapsa
+                            Esc: → input
+```
+
+| Estado actual | Tecla | Acción |
+|---|---|---|
+| `input` | `Tab` (con `/` en input) | → `dropdown` |
+| `input` | `Tab` (sin `/` activo) | → `block-focus` (si hay bloques en pantalla) |
+| `input` | `Esc` | Sin efecto |
+| `dropdown` | `Tab` / `Enter` | Selecciona opción, → `input` |
+| `dropdown` | `Esc` | Cierra dropdown, → `input` |
+| `block-focus` | `Tab` / `Shift+Tab` | Mueve foco entre bloques |
+| `block-focus` | `Space` | Expande/colapsa bloque enfocado |
+| `block-focus` | `Esc` | Quita foco, → `input` |
+
+El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dropdown' | 'block-focus'`. **Nunca hay ambigüedad**: `Esc` con dropdown abierto cierra el dropdown (→ `input`); `Esc` con bloque enfocado quita el foco (→ `input`); los dos casos son mutuamente excluyentes porque `dropdown` y `block-focus` no pueden estar activos simultáneamente.
 
 **Navegación de tool call blocks:** `Tab` / `Shift+Tab` mueven el foco (indicado con `▶` y borde ámbar) entre los bloques del turno actual. `Space` expande/colapsa el bloque enfocado. `Esc` devuelve el foco al input. Si no hay ningún bloque enfocado, `Tab` autocompleta el /comando en el input (comportamiento por defecto).
 
@@ -651,11 +714,14 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 
 **Gestión de estado:** `useReducer` en `<App>` con un estado global que incluye:
 - `phase: 'banner' | 'conversation'`
-- `messages: Message[]`
-- `events: AgentEvent[]`
+- `messages: Message[]` — historial enviado al LLM en cada request
+- `events: AgentEvent[]` — eventos del turno actual para renderizado
 - `sessionId: string`
 - `provider: string`, `model: string`
 - `contextTokens: number`, `contextMax: number`
+- `focusState: 'input' | 'dropdown' | 'block-focus'` — ver §10
+
+**Acción `/clear` en el reducer:** despacha `{ type: 'CLEAR' }`, que reinicia tanto `messages: []` como `events: []`. El `sessionId` se mantiene; el agente pierde todo el contexto conversacional anterior. `Ctrl+L` despacha la misma acción.
 
 **AgentEvent → Componente:** el `<MessageList>` consume el stream de `AgentEvent` y los reduce a la representación visual:
 
@@ -669,7 +735,7 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | `memory_retrieved` | Renderiza una línea dim `↺ N decisiones recuperadas de memoria` justo antes del siguiente `<AgentMessage>`. Si `decisions.length === 0`, no se renderiza nada. |
 | `thinking` | **No se renderiza por defecto.** Solo visible en modo `--debug`: se muestra como un bloque `<Box>` colapsado con borde dim y prefijo `⊙ thinking`. |
 | `error { fatal: false }` | Igual que `tool_error` — el loop continúa, el error es parte del flujo normal. |
-| `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'`. |
+| `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'` (valor incluido en el enum de `AgentEvent.done` — ver §12.1 de `STRATUM_PROJECT_DEFINITION.md`). |
 | `done` | Quita el cursor de streaming del último `<StreamingText>` y lo reemplaza con `<MarkdownText>` (re-render con markdown formateado). Habilita el input. Actualiza la sesión guardada. Ver [§5.3 — Renderizado de Markdown](./STRATUM_UI_SPECIFICATION.md#53-renderizado-de-markdown-en-respuestas-del-agente). |
 
 **Componente `<FatalError>`:**

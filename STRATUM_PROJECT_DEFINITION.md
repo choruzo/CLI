@@ -621,7 +621,7 @@ type AgentEvent =
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   | { type: 'thinking';         text: string }          // reasoning interno del modelo
   | { type: 'error';            message: string; fatal: boolean }
-  | { type: 'done';             stopReason: 'stop' | 'max_iterations' | 'cancelled' }
+  | { type: 'done';             stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' }
 ```
 
 **Invariantes:**
