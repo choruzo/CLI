@@ -75,7 +75,7 @@ else
   npm version "$TYPE" -m "chore: release v%s"
 fi
 
-VERSION=$(node -p "require('./package.json').version")
+VERSION=$(npm pkg get version | tr -d '"')
 echo "✓  Versión → $VERSION"
 
 # ── Push ──────────────────────────────────────
