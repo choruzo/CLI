@@ -70,13 +70,19 @@ echo ""
 echo "▶  Bumpeando versión ($TYPE)..."
 
 if [ "$TYPE" = "beta" ]; then
-  npm version prerelease --preid=beta -m "chore: release v%s"
+  npm version prerelease --preid=beta --no-git-tag-version
 else
-  npm version "$TYPE" -m "chore: release v%s"
+  npm version "$TYPE" --no-git-tag-version
 fi
 
 VERSION=$(npm pkg get version | tr -d '"')
 echo "✓  Versión → $VERSION"
+
+# ── Commit y tag manual ───────────────────────
+
+git add package.json package-lock.json
+git commit -m "chore: release v$VERSION"
+git tag "v$VERSION"
 
 # ── Push ──────────────────────────────────────
 
