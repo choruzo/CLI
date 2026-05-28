@@ -5,7 +5,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NonInteractive -File .claude/hooks/update-docs.ps1"
+            "command": "pwsh -NonInteractive -File \"D:\\Archivos\\Javier\\Proyectos\\CLI\\.claude\\hooks\\update-docs.ps1\""
           }
         ]
       }
@@ -16,7 +16,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NonInteractive -File .claude/hooks/lint-check.ps1"
+            "command": "pwsh -NonInteractive -File \"D:\\Archivos\\Javier\\Proyectos\\CLI\\.claude\\hooks\\lint-check.ps1\""
           }
         ]
       }
@@ -27,7 +27,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "pwsh -NonInteractive -File .claude/hooks/block-dist.ps1"
+            "command": "pwsh -NonInteractive -File \"D:\\Archivos\\Javier\\Proyectos\\CLI\\.claude\\hooks\\block-dist.ps1\""
           }
         ]
       }
