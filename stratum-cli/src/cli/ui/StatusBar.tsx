@@ -7,6 +7,8 @@ interface Props {
   model: string;
   contextUsed: number;
   contextMax: number;
+  /** true cuando el conteo es estimado (proxy chars/3.5) — muestra prefijo `~` */
+  estimated?: boolean;
 }
 
 function formatTokens(n: number): string {
@@ -20,13 +22,14 @@ function contextColor(pct: number): string {
   return theme.error;
 }
 
-export function StatusBar({ providerName, model, contextUsed, contextMax }: Props) {
+export function StatusBar({ providerName, model, contextUsed, contextMax, estimated }: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
   const pct = contextMax > 0 ? Math.round((contextUsed / contextMax) * 100) : 0;
   const ctxColor = contextColor(pct);
+  const prefix = estimated ? '~' : '';
 
-  const right = ` ctx ${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%`;
+  const right = ` ctx ${prefix}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%`;
   const left = ` ● ${providerName} │ ${model}`;
   const spacer = cols - left.length - right.length;
   const gap = spacer > 0 ? ' '.repeat(spacer) : ' ';
@@ -41,6 +44,11 @@ export function StatusBar({ providerName, model, contextUsed, contextMax }: Prop
       <Text color={theme.textMuted} dimColor>
         ctx{' '}
       </Text>
+      {estimated && (
+        <Text color={theme.textMuted} dimColor>
+          ~
+        </Text>
+      )}
       <Text color={ctxColor}>{formatTokens(contextUsed)}</Text>
       <Text color={theme.textMuted} dimColor>
         {' '}

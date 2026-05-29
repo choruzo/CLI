@@ -16,6 +16,7 @@ interface Props {
   model: string;
   contextUsed: number;
   contextMax: number;
+  contextEstimated?: boolean;
 }
 
 export function ConversationView({
@@ -29,6 +30,7 @@ export function ConversationView({
   model,
   contextUsed,
   contextMax,
+  contextEstimated,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -37,6 +39,7 @@ export function ConversationView({
         model={model}
         contextUsed={contextUsed}
         contextMax={contextMax}
+        estimated={contextEstimated}
       />
       <MessageList completedItems={completedItems} currentItem={currentItem} />
       <InputArea

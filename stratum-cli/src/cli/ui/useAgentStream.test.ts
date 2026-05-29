@@ -28,7 +28,7 @@ describe('useAgentStream', () => {
           stopReason: opts?.signal?.aborted ? ('cancelled' as const) : ('stop' as const),
         };
       }),
-      getContextUsage: vi.fn(() => ({ used: 1, max: 10 })),
+      getContextUsage: vi.fn(() => ({ used: 1, max: 10, estimated: true })),
     };
 
     const { send, cancel } = useAgentStream(agent as never, dispatch);
@@ -45,5 +45,9 @@ describe('useAgentStream', () => {
       type: 'AGENT_EVENT',
       event: { type: 'done', stopReason: 'cancelled' },
     });
+    // CONTEXT_UPDATE debe propagar estimated
+    expect(dispatch).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'CONTEXT_UPDATE', estimated: true }),
+    );
   });
 });

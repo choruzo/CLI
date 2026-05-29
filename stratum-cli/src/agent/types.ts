@@ -9,6 +9,13 @@ export type AgentEvent =
   | { type: 'tool_error'; id: string; name: string; error: string; recoverable: boolean }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   | { type: 'thinking'; text: string }
+  | { type: 'warning'; message: string }
+  | {
+      type: 'context_compressed';
+      tokensBefore: number;
+      tokensAfter: number;
+      roundsCompressed: number;
+    }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' };
 

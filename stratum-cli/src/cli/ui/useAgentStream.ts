@@ -18,7 +18,12 @@ export function useAgentStream(agent: StratumAgent, dispatch: (action: AppAction
           dispatch({ type: 'AGENT_EVENT', event });
 
           const ctx = agent.getContextUsage();
-          dispatch({ type: 'CONTEXT_UPDATE', used: ctx.used, max: ctx.max });
+          dispatch({
+            type: 'CONTEXT_UPDATE',
+            used: ctx.used,
+            max: ctx.max,
+            estimated: ctx.estimated,
+          });
         }
       } catch (err) {
         const msg = err instanceof Error ? err.message : String(err);

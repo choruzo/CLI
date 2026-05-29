@@ -75,6 +75,8 @@ export const StratumConfigSchema = z.object({
       maxToolRetries: z.number().int().positive().default(3),
       toolErrorFormat: z.enum(['xml', 'json']).default('xml'),
       compressionKeepRounds: z.number().int().positive().default(6),
+      compressionThreshold: z.number().min(0.1).max(1).default(0.8),
+      compressorModel: z.string().optional(),
     })
     .default({}),
 });

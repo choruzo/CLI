@@ -89,6 +89,7 @@ export class OpenAICompatible implements IProvider {
       model: req.model,
       messages: req.messages,
       stream: true,
+      stream_options: { include_usage: true },
     };
     if (req.tools && req.tools.length > 0) {
       body['tools'] = req.tools;
@@ -123,7 +124,8 @@ export class OpenAICompatible implements IProvider {
         if (event.data === '[DONE]') break;
         try {
           const chunk = JSON.parse(event.data) as OpenAIStreamChunk;
-          if (chunk.choices?.[0]) yield chunk;
+          // Yield tanto chunks con choices como el chunk final de usage (choices vacío)
+          if (chunk.choices?.[0] || chunk.usage) yield chunk;
         } catch {
           // skip malformed chunks
         }

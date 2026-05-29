@@ -105,6 +105,17 @@ export const runCommand = new Command('run')
               toolStartTimes.delete(event.id);
               break;
 
+            case 'warning':
+              process.stderr.write(`${errorLabel} [warning] ${event.message}\n`);
+              break;
+
+            case 'context_compressed':
+              process.stderr.write(
+                `[ctx] Contexto comprimido: ${event.tokensBefore} → ${event.tokensAfter} tokens ` +
+                  `(${event.roundsCompressed} rondas)\n`,
+              );
+              break;
+
             case 'error':
               if (event.fatal) {
                 process.stderr.write(`${fatalLabel} ${event.message}\n`);

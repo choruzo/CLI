@@ -49,13 +49,42 @@ function formatToolError(
   return `<tool_error>\n  <tool>${toolName}</tool>\n  <error>${error}</error>\n  <suggestion>${hint}</suggestion>\n</tool_error>`;
 }
 
+// ---------------------------------------------------------------------------
+// Resultado de compresión (para emitir eventos desde el loop)
+// ---------------------------------------------------------------------------
+export type CompressionResult =
+  | { kind: 'skipped' }
+  | { kind: 'compressed'; tokensBefore: number; tokensAfter: number; roundsCompressed: number }
+  | { kind: 'truncated'; tokensBefore: number; tokensAfter: number; roundsRemoved: number }
+  | { kind: 'pressure' }; // zona protegida sola ya supera umbral
+
+// ---------------------------------------------------------------------------
+// ContextManager — §12.4
+// ---------------------------------------------------------------------------
 export class ContextManager {
+  /** Dato real de `usage.prompt_tokens` del último LLM call (null = no disponible aún). */
+  private lastPromptTokens: number | null = null;
+
   constructor(
     private readonly contextWindow: number,
     private readonly keepRounds: number,
+    private readonly provider?: IProvider,
+    private readonly model?: string,
+    private readonly compressionThreshold = 0.8,
+    private readonly compressorModel?: string,
   ) {}
 
-  estimateTokens(messages: Message[]): number {
+  // -------------------------------------------------------------------------
+  // Estimación de tokens — cascada §12.4
+  // -------------------------------------------------------------------------
+
+  /** Registra el `usage.prompt_tokens` reportado por el provider. */
+  recordUsage(promptTokens: number): void {
+    this.lastPromptTokens = promptTokens;
+  }
+
+  /** Estima tokens a partir de chars cuando no hay dato del provider. */
+  private estimateFromChars(messages: Message[]): number {
     let chars = 0;
     for (const msg of messages) {
       if (msg.content) chars += msg.content.length;
@@ -68,17 +97,251 @@ export class ContextManager {
     return Math.ceil(chars / 3.5);
   }
 
-  usage(messages: Message[]): { used: number; max: number; pct: number } {
-    const used = this.estimateTokens(messages);
+  /** Devuelve uso actual del contexto. `estimated=true` cuando se usa proxy chars/3.5. */
+  usage(messages: Message[]): { used: number; max: number; pct: number; estimated: boolean } {
+    let used: number;
+    let estimated: boolean;
+
+    if (this.lastPromptTokens !== null) {
+      used = this.lastPromptTokens;
+      estimated = false;
+    } else {
+      used = this.estimateFromChars(messages);
+      estimated = true;
+    }
+
     const max = this.contextWindow;
-    const pct = Math.round((used / max) * 100);
-    return { used, max, pct };
+    const pct = max > 0 ? Math.round((used / max) * 100) : 0;
+    return { used, max, pct, estimated };
   }
 
-  // Stub — compression implemented in Hito 2
-  maybeCompress(_messages: Message[]): void {}
+  // Mantener firma compatible con los tests existentes
+  estimateTokens(messages: Message[]): number {
+    return this.estimateFromChars(messages);
+  }
+
+  // -------------------------------------------------------------------------
+  // Compresión — §12.4
+  // -------------------------------------------------------------------------
+
+  /**
+   * Comprime el historial si supera el umbral configurado (default 80%).
+   * Modifica `messages` en el lugar. Devuelve el resultado para emitir eventos.
+   */
+  async maybeCompress(messages: Message[]): Promise<CompressionResult> {
+    const { pct, used } = this.usage(messages);
+    if (pct / 100 <= this.compressionThreshold) return { kind: 'skipped' };
+
+    const tokensBefore = used;
+
+    // -----------------------------------------------------------------------
+    // Identificar zona protegida:
+    // - messages[0] (system prompt)
+    // - últimas keepRounds rondas: recorremos desde el final
+    // -----------------------------------------------------------------------
+    const protectedSet = this.buildProtectedSet(messages);
+
+    // Mensajes candidatos a comprimir (fuera de la zona protegida)
+    const oldMessages = messages.filter((_, i) => !protectedSet.has(i));
+
+    if (oldMessages.length === 0) {
+      // Toda la conversación está en zona protegida — presión irresolvible
+      return { kind: 'pressure' };
+    }
+
+    // -----------------------------------------------------------------------
+    // Intento 1: compresión vía LLM call
+    // -----------------------------------------------------------------------
+    let summary: string | null = null;
+    if (this.provider) {
+      try {
+        summary = await this.callCompressor(oldMessages);
+      } catch {
+        // Caso A: falla → no reintentar → ir a truncado duro
+        summary = null;
+      }
+    }
+
+    if (summary !== null) {
+      // Reemplazar historial antiguo por el resumen
+      const summaryMsg: Message = {
+        role: 'assistant',
+        content: `<summary>${summary}</summary>`,
+      };
+
+      // Reconstruir messages en el lugar: system + summaryMsg + zona protegida (sin system)
+      const protectedMessages = messages.filter((_, i) => protectedSet.has(i) && i !== 0);
+      messages.splice(0, messages.length, messages[0]!, summaryMsg, ...protectedMessages);
+
+      const tokensAfter = this.estimateFromChars(messages);
+      // Invalidar cache de tokens reales (el historial cambió)
+      this.lastPromptTokens = null;
+
+      // Verificar si la compresión fue suficiente
+      const newPct = this.contextWindow > 0 ? tokensAfter / this.contextWindow : 0;
+      if (newPct <= this.compressionThreshold) {
+        return {
+          kind: 'compressed',
+          tokensBefore,
+          tokensAfter,
+          roundsCompressed: oldMessages.length,
+        };
+      }
+      // Si no bajó suficiente → caer a truncado duro
+    }
+
+    // -----------------------------------------------------------------------
+    // Caso B: truncado duro en bloques de 2 rondas
+    // -----------------------------------------------------------------------
+    return this.hardTruncate(messages, tokensBefore, protectedSet);
+  }
+
+  // -------------------------------------------------------------------------
+  // Helpers privados
+  // -------------------------------------------------------------------------
+
+  /**
+   * Construye el Set de índices de la zona protegida:
+   * - índice 0 (system prompt)
+   * - últimas `keepRounds` rondas (par user+assistant + sus tool messages asociados)
+   */
+  private buildProtectedSet(messages: Message[]): Set<number> {
+    const protected_ = new Set<number>();
+    protected_.add(0); // system prompt
+
+    // Recorrer desde el final contando "rondas" (user+assistant)
+    let rounds = 0;
+    let i = messages.length - 1;
+    while (i > 0 && rounds < this.keepRounds) {
+      const msg = messages[i];
+      if (!msg) {
+        i--;
+        continue;
+      }
+
+      if (msg.role === 'assistant') {
+        protected_.add(i);
+        // incluir los tool results que siguen a este assistant
+        let j = i + 1;
+        while (j < messages.length && messages[j]?.role === 'tool') {
+          protected_.add(j);
+          j++;
+        }
+        // incluir el user message anterior
+        if (i - 1 > 0 && messages[i - 1]?.role === 'user') {
+          protected_.add(i - 1);
+          i -= 2;
+        } else {
+          i--;
+        }
+        rounds++;
+      } else {
+        protected_.add(i);
+        i--;
+      }
+    }
+
+    return protected_;
+  }
+
+  /** Truncado duro: elimina mensajes fuera de la zona protegida en bloques de 2 rondas. */
+  private hardTruncate(
+    messages: Message[],
+    tokensBefore: number,
+    protectedSet: Set<number>,
+  ): CompressionResult {
+    let roundsRemoved = 0;
+
+    const belowThreshold = () => {
+      const tokens = this.estimateFromChars(messages);
+      return this.contextWindow > 0 && tokens / this.contextWindow <= this.compressionThreshold;
+    };
+
+    while (!belowThreshold()) {
+      // Encontrar el bloque no-protegido más antiguo (después del system)
+      let removed = false;
+      for (let i = 1; i < messages.length; i++) {
+        if (protectedSet.has(i)) continue;
+
+        // Eliminar hasta 2 mensajes no protegidos consecutivos (user+assistant)
+        const toRemove: number[] = [];
+        let j = i;
+        let blockRounds = 0;
+        while (j < messages.length && !protectedSet.has(j) && blockRounds < 2) {
+          toRemove.push(j);
+          if (messages[j]?.role === 'user' || messages[j]?.role === 'assistant') blockRounds++;
+          j++;
+        }
+
+        if (toRemove.length === 0) break;
+
+        // Eliminar en orden inverso para no alterar índices
+        for (let k = toRemove.length - 1; k >= 0; k--) {
+          messages.splice(toRemove[k]!, 1);
+          // Ajustar protectedSet (desplazar índices mayores)
+          const newProtected = new Set<number>();
+          for (const idx of protectedSet) {
+            if (idx < toRemove[k]!) newProtected.add(idx);
+            else if (idx > toRemove[k]!) newProtected.add(idx - 1);
+          }
+          protectedSet.clear();
+          for (const idx of newProtected) protectedSet.add(idx);
+        }
+
+        roundsRemoved += blockRounds;
+        removed = true;
+        break;
+      }
+
+      if (!removed) break; // No queda nada que eliminar
+    }
+
+    const tokensAfter = this.estimateFromChars(messages);
+    this.lastPromptTokens = null;
+
+    const newPct = this.contextWindow > 0 ? tokensAfter / this.contextWindow : 0;
+    if (newPct > this.compressionThreshold) {
+      return { kind: 'pressure' };
+    }
+
+    return { kind: 'truncated', tokensBefore, tokensAfter, roundsRemoved };
+  }
+
+  /** Llama al LLM para comprimir el historial antiguo. */
+  private async callCompressor(oldMessages: Message[]): Promise<string> {
+    if (!this.provider || !this.model) throw new Error('No provider para compresión');
+
+    const conversationText = oldMessages.map((m) => `${m.role}: ${m.content ?? ''}`).join('\n');
+
+    const compressorMessages: Message[] = [
+      {
+        role: 'user',
+        content:
+          'Resume esta conversación en máximo 500 palabras preservando decisiones técnicas y contexto clave:\n\n' +
+          conversationText,
+      },
+    ];
+
+    const model = this.compressorModel ?? this.model;
+    let result = '';
+
+    for await (const chunk of this.provider.complete({
+      messages: compressorMessages,
+      stream: true,
+      model,
+      signal: AbortSignal.timeout(30000),
+    })) {
+      const content = chunk.choices[0]?.delta?.content;
+      if (content) result += content;
+    }
+
+    return result.trim();
+  }
 }
 
+// ---------------------------------------------------------------------------
+// ReactLoop
+// ---------------------------------------------------------------------------
 export class ReactLoop {
   private readonly dispatcher: ToolDispatcher;
   private readonly contextManager: ContextManager;
@@ -93,7 +356,14 @@ export class ReactLoop {
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
     this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
-    this.contextManager = new ContextManager(contextWindow, config.agent.compressionKeepRounds);
+    this.contextManager = new ContextManager(
+      contextWindow,
+      config.agent.compressionKeepRounds,
+      provider,
+      model,
+      config.agent.compressionThreshold,
+      config.agent.compressorModel,
+    );
   }
 
   async *run(opts?: RunOptions): AsyncGenerator<AgentEvent> {
@@ -107,7 +377,25 @@ export class ReactLoop {
         return;
       }
 
-      this.contextManager.maybeCompress(this.messages);
+      // Comprimir contexto antes de cada iteración (§12.4)
+      const comprResult = await this.contextManager.maybeCompress(this.messages);
+      if (comprResult.kind === 'compressed') {
+        yield {
+          type: 'context_compressed',
+          tokensBefore: comprResult.tokensBefore,
+          tokensAfter: comprResult.tokensAfter,
+          roundsCompressed: comprResult.roundsCompressed,
+        };
+      } else if (comprResult.kind === 'truncated') {
+        yield {
+          type: 'context_compressed',
+          tokensBefore: comprResult.tokensBefore,
+          tokensAfter: comprResult.tokensAfter,
+          roundsCompressed: comprResult.roundsRemoved,
+        };
+      } else if (comprResult.kind === 'pressure') {
+        yield { type: 'warning', message: 'context_window_pressure' };
+      }
 
       const request: CompletionRequest = {
         messages: this.messages,
@@ -135,6 +423,12 @@ export class ReactLoop {
       try {
         for await (const chunk of streamWithRetry(this.provider, request)) {
           if (signal.aborted) break;
+
+          // Registrar usage real si viene en el chunk (§12.4)
+          if (chunk.usage?.prompt_tokens) {
+            this.contextManager.recordUsage(chunk.usage.prompt_tokens);
+          }
+
           for (const ev of buffer.feed(chunk)) {
             if (ev.type === 'text_delta') {
               assistantText += ev.delta;
@@ -263,7 +557,7 @@ export class ReactLoop {
     yield { type: 'done', stopReason: 'max_iterations' };
   }
 
-  getContextUsage(): { used: number; max: number; pct: number } {
+  getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {
     return this.contextManager.usage(this.messages);
   }
 }

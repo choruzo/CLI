@@ -21,16 +21,29 @@ interface AppState {
   completedItems: ConvItem[];
   currentItem: ConvItem | null;
   inputValue: string;
+  /** true cuando el agente o el init están procesando (deshabilita input normal) */
   thinking: boolean;
   contextUsed: number;
   contextMax: number;
+  contextEstimated: boolean;
+  /**
+   * Cuando /init está esperando que el usuario responda un merge_conflict,
+   * guarda el nombre de la sección. El input se usa para la respuesta s/N.
+   */
+  mergeConflictSection: string | null;
 }
 
 export type AppAction =
   | { type: 'AGENT_START'; input: string }
   | { type: 'AGENT_EVENT'; event: AgentEvent }
-  | { type: 'CONTEXT_UPDATE'; used: number; max: number }
-  | { type: 'INPUT_CHANGE'; value: string };
+  | { type: 'CONTEXT_UPDATE'; used: number; max: number; estimated: boolean }
+  | { type: 'INPUT_CHANGE'; value: string }
+  | { type: 'SYSTEM_MESSAGE'; text: string }
+  | { type: 'INIT_START' }
+  | { type: 'INIT_PROGRESS'; text: string }
+  | { type: 'INIT_CONFLICT'; section: string }
+  | { type: 'INIT_CONFLICT_DONE' }
+  | { type: 'INIT_DONE' };
 
 function updateCurrentAgent(
   current: ConvItem | null,
@@ -52,12 +65,7 @@ function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'AGENT_START': {
       const userItem: ConvItem = { kind: 'user', text: action.input };
-      const agentItem: AgentConvItem = {
-        kind: 'agent',
-        text: '',
-        toolCalls: [],
-        streaming: true,
-      };
+      const agentItem: AgentConvItem = { kind: 'agent', text: '', toolCalls: [], streaming: true };
       return {
         ...state,
         phase: 'conversation',
@@ -65,6 +73,80 @@ function reducer(state: AppState, action: AppAction): AppState {
         currentItem: agentItem,
         inputValue: '',
         thinking: true,
+      };
+    }
+
+    case 'SYSTEM_MESSAGE': {
+      const item: ConvItem = { kind: 'agent', text: action.text, toolCalls: [], streaming: false };
+      return {
+        ...state,
+        phase: 'conversation',
+        completedItems: [...state.completedItems, item],
+      };
+    }
+
+    case 'INIT_START': {
+      const item: AgentConvItem = {
+        kind: 'agent',
+        text: '⟳ Escaneando proyecto...',
+        toolCalls: [],
+        streaming: true,
+      };
+      return {
+        ...state,
+        phase: 'conversation',
+        completedItems: [...state.completedItems],
+        currentItem: item,
+        inputValue: '',
+        thinking: true,
+        mergeConflictSection: null,
+      };
+    }
+
+    case 'INIT_PROGRESS': {
+      return {
+        ...state,
+        currentItem: updateCurrentAgent(state.currentItem, (item) => ({
+          ...item,
+          text: action.text,
+        })),
+      };
+    }
+
+    case 'INIT_CONFLICT': {
+      // Mostrar la pregunta, desbloquear el input para recibir s/N
+      return {
+        ...state,
+        currentItem: updateCurrentAgent(state.currentItem, (item) => ({
+          ...item,
+          text:
+            item.text +
+            `\n\n⚠  La sección "## ${action.section}" tiene contenido manual.\n   ¿Actualizar con la información del scan? (s/N)`,
+        })),
+        thinking: false, // desbloquear input
+        mergeConflictSection: action.section,
+      };
+    }
+
+    case 'INIT_CONFLICT_DONE': {
+      return {
+        ...state,
+        thinking: true, // volver a bloquear mientras continúa
+        mergeConflictSection: null,
+      };
+    }
+
+    case 'INIT_DONE': {
+      const finalItem =
+        state.currentItem && state.currentItem.kind === 'agent'
+          ? { ...state.currentItem, streaming: false }
+          : state.currentItem;
+      return {
+        ...state,
+        completedItems: finalItem ? [...state.completedItems, finalItem] : state.completedItems,
+        currentItem: null,
+        thinking: false,
+        mergeConflictSection: null,
       };
     }
 
@@ -116,10 +198,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           ...state,
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({
-              ...tc,
-              input: ev.input,
-            })),
+            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({ ...tc, input: ev.input })),
           })),
         };
       }
@@ -155,7 +234,7 @@ function reducer(state: AppState, action: AppAction): AppState {
 
       if (ev.type === 'done') {
         const rawCurrent = state.currentItem;
-        const finalItem: ConvItem | null =
+        const finalItem =
           rawCurrent && rawCurrent.kind === 'agent'
             ? { ...rawCurrent, streaming: false }
             : rawCurrent;
@@ -183,7 +262,12 @@ function reducer(state: AppState, action: AppAction): AppState {
     }
 
     case 'CONTEXT_UPDATE':
-      return { ...state, contextUsed: action.used, contextMax: action.max };
+      return {
+        ...state,
+        contextUsed: action.used,
+        contextMax: action.max,
+        contextEstimated: action.estimated,
+      };
 
     case 'INPUT_CHANGE':
       return { ...state, inputValue: action.value };
@@ -210,9 +294,14 @@ export function App({ agent, version }: Props) {
     thinking: false,
     contextUsed: ctxInit.used,
     contextMax: ctxInit.max,
+    contextEstimated: ctxInit.estimated,
+    mergeConflictSection: null,
   });
 
   const { send, cancel } = useAgentStream(agent, dispatch);
+
+  // Ref para resolver conflictos de merge desde el input del usuario
+  const mergeResolverRef = useRef<((update: boolean) => void) | null>(null);
 
   const ctrlCCountRef = useRef(0);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -235,16 +324,115 @@ export function App({ agent, version }: Props) {
     }
   });
 
+  /** Lanza /init conduciendo InitAgent en el área de conversación. */
+  const runInit = useCallback(() => {
+    dispatch({ type: 'INIT_START' });
+
+    (async () => {
+      try {
+        const [{ InitAgent }, { loadConfig }] = await Promise.all([
+          import('../../agent/init-agent.js'),
+          import('../../config/loader.js'),
+        ]);
+
+        const config = loadConfig();
+        const provider = agent.getProvider();
+        const model = agent.model;
+        const initAgent = new InitAgent(provider, model);
+
+        let scannedCount = 0;
+        let detectedStack = '';
+
+        const resolveConflict = (
+          section: string,
+          _existing: string,
+          _proposed: string,
+        ): Promise<boolean> => {
+          return new Promise((resolve) => {
+            dispatch({ type: 'INIT_CONFLICT', section });
+            mergeResolverRef.current = resolve;
+          });
+        };
+
+        for await (const ev of initAgent.run(process.cwd(), { resolveConflict })) {
+          if (ev.type === 'scan_progress') {
+            scannedCount++;
+            dispatch({
+              type: 'INIT_PROGRESS',
+              text: `⟳ Escaneando proyecto... (${scannedCount} archivos)`,
+            });
+          } else if (ev.type === 'section_ready') {
+            if (ev.section === 'Stack Tecnológico') detectedStack = ev.content.split('\n')[0] ?? '';
+            dispatch({
+              type: 'INIT_PROGRESS',
+              text: `⟳ Generando secciones... (${ev.section} listo)${detectedStack ? '\n   Stack: ' + detectedStack : ''}`,
+            });
+          } else if (ev.type === 'merge_conflict') {
+            // El reducer INIT_CONFLICT ya actualiza el texto y desbloquea el input
+          } else if (ev.type === 'merge_conflict_resolved') {
+            dispatch({ type: 'INIT_CONFLICT_DONE' });
+          } else if (ev.type === 'done') {
+            dispatch({
+              type: 'INIT_PROGRESS',
+              text: `✓ STRATUM.md generado en ${ev.path}\n\nEl contexto del proyecto se cargará en el próximo mensaje.`,
+            });
+            agent.reloadMemory();
+          } else if (ev.type === 'error') {
+            dispatch({ type: 'INIT_PROGRESS', text: `✗ Error: ${ev.message}` });
+          }
+        }
+      } catch (err) {
+        dispatch({ type: 'INIT_PROGRESS', text: `✗ Error inesperado: ${String(err)}` });
+      } finally {
+        dispatch({ type: 'INIT_DONE' });
+      }
+    })();
+  }, [agent]);
+
   const handleSend = useCallback(
     (text: string) => {
-      if (!text.trim() || state.thinking) return;
-      if (text.trim() === '/quit' || text.trim() === '/exit') {
+      if (!text.trim()) return;
+
+      // Si hay un conflicto de merge pendiente, redirigir la respuesta al resolver
+      if (state.mergeConflictSection !== null && mergeResolverRef.current) {
+        const update = text.trim().toLowerCase() === 's';
+        mergeResolverRef.current(update);
+        mergeResolverRef.current = null;
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        // INIT_CONFLICT_DONE se disparará desde el generador al recibir merge_conflict_resolved
+        return;
+      }
+
+      if (state.thinking) return;
+
+      const cmd = text.trim();
+
+      if (cmd === '/quit' || cmd === '/exit') {
         exit();
         return;
       }
-      void send(text.trim());
+
+      if (cmd === '/memory show') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        import('../../memory/show.js')
+          .then(({ renderMemoryShow }) => {
+            const config = agent.getConfig();
+            dispatch({ type: 'SYSTEM_MESSAGE', text: renderMemoryShow(config) });
+          })
+          .catch((err: unknown) => {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al cargar memoria: ${String(err)}` });
+          });
+        return;
+      }
+
+      if (cmd === '/init') {
+        runInit();
+        return;
+      }
+
+      void send(cmd);
     },
-    [send, state.thinking, exit],
+    [send, state.thinking, state.mergeConflictSection, exit, runInit, agent],
   );
 
   if (state.phase === 'banner') {
@@ -263,11 +451,12 @@ export function App({ agent, version }: Props) {
         inputValue={state.inputValue}
         onInputChange={(value) => dispatch({ type: 'INPUT_CHANGE', value })}
         onInputSubmit={handleSend}
-        thinking={state.thinking}
+        thinking={state.thinking && state.mergeConflictSection === null}
         providerName={agent.providerName}
         model={agent.model}
         contextUsed={state.contextUsed}
         contextMax={state.contextMax}
+        contextEstimated={state.contextEstimated}
       />
     </Box>
   );

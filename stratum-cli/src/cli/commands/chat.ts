@@ -9,6 +9,8 @@ import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { StratumAgent } from '../../agent/core.js';
+import { SessionStore } from '../../session/store.js';
+import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
 
 declare const __VERSION__: string;
@@ -29,12 +31,8 @@ function resolveVersion(): string {
 export const chatCommand = new Command('chat')
   .description('Start an interactive REPL session with the agent')
   .option('--provider <name>', 'use a specific provider from config')
-  .option('--resume <session-id>', 'resume a previous session (not yet implemented)')
+  .option('--resume <session-id>', 'resume a previous session')
   .action(async (opts: { provider?: string; resume?: string }) => {
-    if (opts.resume) {
-      process.stderr.write('--resume is not yet implemented (coming in Hito 2).\n');
-    }
-
     let config;
     try {
       config = loadConfig();
@@ -54,14 +52,56 @@ export const chatCommand = new Command('chat')
     const registry = new ToolRegistry();
     registerBuiltinTools(registry, config);
 
-    const agent = new StratumAgent(config, router, registry);
+    // -----------------------------------------------------------------------
+    // Sesiones: cargar historial previo si --resume
+    // -----------------------------------------------------------------------
+    const paths = resolveMemoryPaths(config);
+    const store = new SessionStore(paths.sessionsDir);
+
+    let sessionId: string | undefined;
+    let sessionCreatedAt: string | undefined;
+    let agentOptions = {};
+
+    if (opts.resume) {
+      try {
+        const saved = store.load(opts.resume);
+        agentOptions = { initialMessages: saved.messages };
+        sessionId = saved.id;
+        sessionCreatedAt = saved.createdAt;
+        process.stderr.write(`Reanudando sesión ${saved.id}\n`);
+      } catch (err) {
+        process.stderr.write(`Error al cargar sesión: ${String(err)}\n`);
+        process.exit(1);
+      }
+    }
+
+    const agent = new StratumAgent(config, router, registry, agentOptions);
     const version = resolveVersion();
+    const sessionStart = new Date().toISOString();
 
     const { waitUntilExit } = render(React.createElement(App, { agent, version }));
 
     try {
       await waitUntilExit();
     } catch {
-      // exit() was called
+      // exit() was called — normal shutdown
+    }
+
+    // -----------------------------------------------------------------------
+    // Guardar sesión al salir
+    // -----------------------------------------------------------------------
+    try {
+      await store.save({
+        existingId: sessionId,
+        createdAt: sessionCreatedAt ?? sessionStart,
+        provider: router.providerName,
+        model: router.model,
+        project: process.cwd(),
+        messages: agent.getMessages(),
+        toolCallCount: agent.toolCallCount,
+        llmProvider: router.getActive(),
+      });
+    } catch {
+      // No bloquear la salida por un fallo al guardar
     }
   });

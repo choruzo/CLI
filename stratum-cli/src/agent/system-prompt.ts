@@ -19,10 +19,10 @@ function getShellInfo(): { platform: string; shellInstructions: string } {
   return { platform: 'Linux (bash)', shellInstructions: 'Shell commands run in /bin/sh.' };
 }
 
-export function buildSystemPrompt(_config: StratumConfig): string {
+export function buildSystemPrompt(_config: StratumConfig, memory?: string): string {
   const { platform, shellInstructions } = getShellInfo();
 
-  return `You are Stratum, an extensible CLI agent powered by a ReAct loop (Reason → Act → Observe).
+  let prompt = `You are Stratum, an extensible CLI agent powered by a ReAct loop (Reason → Act → Observe).
 
 ## Environment
 - Platform: ${platform}
@@ -49,4 +49,10 @@ You are a capable, precise assistant for software development, DevOps, and syste
 
 ## Language
 Respond in the same language the user uses. If the user writes in Spanish, respond in Spanish.`;
+
+  if (memory && memory.trim()) {
+    prompt += `\n\n## Project Memory\nThe following is persistent context for this project (from STRATUM.md). Honor these instructions and conventions:\n\n${memory.trim()}`;
+  }
+
+  return prompt;
 }

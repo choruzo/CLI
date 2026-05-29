@@ -60,13 +60,14 @@ function makeInvalidToolCallRound(id: string, name: string, args: string) {
 }
 
 describe('ContextManager', () => {
-  it('estimates tokens as chars / 3.5', () => {
+  it('estimates tokens as chars / 3.5 (proxy mode)', () => {
     const cm = new ContextManager(32768, 6);
     const messages = [
       { role: 'user' as const, content: 'hello world' }, // 11 chars
     ];
-    const { used } = cm.usage(messages);
+    const { used, estimated } = cm.usage(messages);
     expect(used).toBe(Math.ceil(11 / 3.5));
+    expect(estimated).toBe(true);
   });
 
   it('computes pct correctly', () => {
@@ -74,6 +75,42 @@ describe('ContextManager', () => {
     const messages = [{ role: 'user' as const, content: 'a'.repeat(350) }]; // 350 chars → ~100 tokens
     const { pct } = cm.usage(messages);
     expect(pct).toBe(10); // 100/1000 = 10%
+  });
+
+  it('uses real usage when recordUsage is called (estimated=false)', () => {
+    const cm = new ContextManager(32768, 6);
+    cm.recordUsage(5000);
+    const messages = [{ role: 'user' as const, content: 'hello' }];
+    const { used, estimated } = cm.usage(messages);
+    expect(used).toBe(5000);
+    expect(estimated).toBe(false);
+  });
+
+  it('maybeCompress returns skipped when below threshold', async () => {
+    const cm = new ContextManager(100000, 6, undefined, undefined, 0.8);
+    const messages = [
+      { role: 'system' as const, content: 'sys' },
+      { role: 'user' as const, content: 'hello' },
+    ];
+    const result = await cm.maybeCompress(messages);
+    expect(result.kind).toBe('skipped');
+  });
+
+  it('maybeCompress truncates when over threshold and no provider', async () => {
+    const cm = new ContextManager(10, 1, undefined, undefined, 0.8); // tiny window
+    // Build a history that will definitely exceed 80% of 10 tokens
+    const messages: import('./types.js').Message[] = [
+      { role: 'system' as const, content: 'sys' },
+      { role: 'user' as const, content: 'a'.repeat(40) }, // ~11 tokens alone
+      { role: 'assistant' as const, content: 'b'.repeat(40) },
+      { role: 'user' as const, content: 'c' },
+      { role: 'assistant' as const, content: 'd' },
+    ];
+    const result = await cm.maybeCompress(messages);
+    // Either truncated or pressure — either way it ran
+    expect(['truncated', 'pressure']).toContain(result.kind);
+    // System prompt must be preserved (index 0)
+    expect(messages[0]?.role).toBe('system');
   });
 });
 

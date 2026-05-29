@@ -22,17 +22,21 @@ export interface ToolCallDelta {
 }
 
 export interface OpenAIStreamChunk {
-  choices: [
-    {
-      delta: {
-        content?: string | null;
-        role?: string;
-        tool_calls?: ToolCallDelta[];
-      };
-      finish_reason: string | null;
-      index: number;
-    },
-  ];
+  choices: Array<{
+    delta: {
+      content?: string | null;
+      role?: string;
+      tool_calls?: ToolCallDelta[];
+    };
+    finish_reason: string | null;
+    index: number;
+  }>;
+  /** Presente solo en el chunk final cuando se solicita `stream_options.include_usage`. */
+  usage?: {
+    prompt_tokens: number;
+    completion_tokens: number;
+    total_tokens: number;
+  };
 }
 
 export interface CompletionRequest {
