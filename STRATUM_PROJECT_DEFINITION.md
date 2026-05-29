@@ -456,6 +456,23 @@ stratum config set provider.default litellm-proxy
 stratum init                           # Escanea el proyecto y genera/actualiza STRATUM.md
 stratum init --force                   # Sobreescribe STRATUM.md sin preguntar por secciones manuales
 stratum init --dry-run                 # Muestra el STRATUM.md que generaría sin escribirlo
+
+# Diagnóstico del entorno
+stratum doctor                         # Valida config, prueba conexión a providers y MCP servers, verifica modelo ONNX
+
+# Gestión de sesiones
+stratum sessions list                  # Lista sesiones guardadas con fecha y resumen
+stratum sessions list --last 5         # Últimas 5
+stratum sessions resume <id>           # Equivalente a stratum chat --resume <id>
+stratum sessions delete <id>           # Elimina una sesión
+stratum sessions prune --older 30d     # Limpia sesiones de más de 30 días
+stratum sessions export <id>           # Exporta una sesión a un archivo JSON portable
+stratum sessions export <id> --output ./backup.json
+stratum sessions import <file>         # Importa una sesión desde un archivo exportado
+
+# Actualizaciones
+stratum update                         # Actualiza Stratum a la última versión publicada en npm
+stratum update --check                 # Solo comprueba si hay versión nueva sin instalar
 ```
 
 ---

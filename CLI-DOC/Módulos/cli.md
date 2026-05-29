@@ -127,8 +127,48 @@ Lee el STRATUM.md activo (proyecto + global) y lo imprime con rutas. Si no hay n
 | `resume <id>` | Equivalente a `stratum chat --resume <id>` |
 | `delete <id>` | Elimina la sesión |
 | `prune [--older 30d]` | Limpia sesiones antiguas |
+| `export <id> [--output <file>]` | Exporta una sesión a un archivo JSON portable |
+| `import <file>` | Importa una sesión desde un archivo exportado |
 
 Ver [[Módulos/sessions]] para la especificación completa.
+
+---
+
+## Comando `stratum doctor`
+
+```
+stratum doctor
+```
+
+Diagnóstico del entorno sin interacción. Salida plain-text al stdout. Comprueba en orden:
+
+```
+  Stratum Doctor
+
+  ✓ .stratumrc.json — válido (Zod schema ok)
+  ✓ Provider "ollama" — conexión ok (llama3.2:3b responde en 312ms)
+  ✓ MCP server "filesystem" — iniciado y responde
+  ✗ MCP server "github" — timeout al arrancar (npx @modelcontextprotocol/server-github)
+  ✓ Modelo ONNX — cargado (xenova/all-MiniLM-L6-v2, 23 MB)
+  ✓ sqlite-vec — extensión cargada
+
+  1 problema encontrado. Revisa la configuración del servidor MCP "github".
+```
+
+Sale con código 0 si todo ok, código 1 si hay algún problema.
+
+---
+
+## Comando `stratum update`
+
+```
+stratum update [--check]
+```
+
+- Sin flags: actualiza Stratum a la última versión en npm (`npm install -g stratum-cli@latest`).
+- `--check`: solo comprueba si hay versión nueva e imprime el resultado; no instala nada.
+
+Relacionado con el auto-check en background que se ejecuta al arrancar cualquier comando (ver §12 de STRATUM_PROJECT_DEFINITION.md).
 
 ---
 
@@ -158,8 +198,14 @@ type AppAction =
 | Comando | Comportamiento |
 |---------|---------------|
 | `/quit`, `/exit` | Cierra la app |
+| `/clear` | Purga historial de conversación y contexto LLM; la sesión sigue activa |
 | `/memory show` | Muestra STRATUM.md activo sin round LLM (SYSTEM_MESSAGE) |
+| `/sessions delete <id>` | Elimina una sesión guardada por ID |
 | `/init` | Lanza `InitAgent`, muestra progreso en conversación; manejo interactivo de conflictos de merge |
+| `/compact` | Fuerza compresión de contexto inmediata (mismo algoritmo que el auto al 80%, sin esperar umbral) |
+| `/mcp reload` | Detiene y reinicia todos los MCP servers del proceso actual |
+| `/config get <key>` | Imprime el valor de una clave de `.stratumrc.json` como SYSTEM_MESSAGE |
+| `/config set <key> <value>` | Actualiza una clave en caliente y persiste el cambio en `.stratumrc.json` |
 
 Durante `/init`:
 - `thinking: true` → input deshabilitado

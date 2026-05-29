@@ -354,11 +354,16 @@ El área de input tiene tres modos:
 | `/memory show` | Muestra el contenido del STRATUM.md activo |
 | `/sessions list` | Lista sesiones guardadas |
 | `/sessions resume <id>` | Carga una sesión anterior y la continúa en el chat actual. Equivalente a salir y ejecutar `stratum sessions resume <id>` desde la terminal — las tres formas hacen exactamente lo mismo. |
+| `/sessions delete <id>` | Elimina una sesión guardada por ID |
 | `/plan` | Activa modo plan-and-execute para el próximo mensaje |
+| `/compact` | Fuerza la compresión del contexto actual sin esperar al umbral automático del 80% |
 | `/provider <name>` | Cambia el proveedor activo en caliente |
 | `/model <name>` | Cambia el modelo activo en caliente |
 | `/tools` | Lista las tools disponibles (built-in + MCP) |
+| `/mcp reload` | Reinicia todos los MCP servers sin salir del proceso (útil tras cambiar la config) |
 | `/context` | Muestra estadísticas de uso del contexto actual |
+| `/config get <key>` | Muestra el valor actual de una clave de configuración |
+| `/config set <key> <value>` | Cambia una clave de configuración en caliente (persiste en `.stratumrc.json`) |
 | `/debug` | Toggle del modo debug (muestra chunks SSE raw) |
 
 #### Flujo visual de `/init` en el chat
