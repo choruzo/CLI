@@ -50,17 +50,24 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Pack
+        run: |
+          TARBALL=$(npm pack --json | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');console.log(JSON.parse(d)[0].filename)")
+          echo "TARBALL=$TARBALL" >> $GITHUB_ENV
+
       - name: Create GitHub Release
         run: |
           if [[ "${GITHUB_REF_NAME}" == *"-beta."* ]]; then
             gh release create "${GITHUB_REF_NAME}" \
               --title "${GITHUB_REF_NAME}" \
               --generate-notes \
-              --prerelease
+              --prerelease \
+              "$TARBALL"
           else
             gh release create "${GITHUB_REF_NAME}" \
               --title "${GITHUB_REF_NAME}" \
-              --generate-notes
+              --generate-notes \
+              "$TARBALL"
           fi
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
