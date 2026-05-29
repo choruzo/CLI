@@ -28,7 +28,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Validate version matches tag
         run: |
@@ -50,20 +49,6 @@ jobs:
 
       - name: Lint
         run: npm run lint
-
-      - name: Determine npm publish tag
-        id: npm-tag
-        run: |
-          if [[ "${GITHUB_REF_NAME}" == *"-beta."* ]]; then
-            echo "tag=beta" >> "$GITHUB_OUTPUT"
-          else
-            echo "tag=latest" >> "$GITHUB_OUTPUT"
-          fi
-
-      - name: Publish to npm
-        run: npm publish --access public --tag ${{ steps.npm-tag.outputs.tag }}
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         run: |
