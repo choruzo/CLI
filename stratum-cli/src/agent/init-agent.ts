@@ -12,7 +12,7 @@ export type InitEvent =
   | { type: 'section_ready'; section: string; content: string }
   | { type: 'merge_conflict'; section: string; existing: string; proposed: string }
   | { type: 'merge_conflict_resolved'; section: string; kept: 'existing' | 'proposed' }
-  | { type: 'done'; path: string }
+  | { type: 'done'; path: string; isNew: boolean }
   | { type: 'error'; message: string };
 
 export interface InitOptions {
@@ -82,6 +82,15 @@ const FIXED_SECTIONS = [
   'Comandos Clave',
 ];
 
+const SECTION_PLACEHOLDERS: Record<string, string> = {
+  Proyecto: '<!-- Nombre del proyecto, descripción breve, propósito principal -->',
+  'Stack Tecnológico': '<!-- Lenguajes, frameworks, librerías principales, versiones clave -->',
+  Estructura: '<!-- Árbol de directorios relevante con descripción de cada carpeta -->',
+  Convenciones: '<!-- Estilo de código, naming, reglas de commits, patrones detectados -->',
+  'Comandos Clave':
+    '<!-- Scripts de build, test, dev, lint — exactamente como aparecen en el manifiesto -->',
+};
+
 // ---------------------------------------------------------------------------
 // InitAgent
 // ---------------------------------------------------------------------------
@@ -94,6 +103,7 @@ export class InitAgent {
 
   async *run(cwd: string, options: InitOptions = {}): AsyncGenerator<InitEvent> {
     const stratumMdPath = join(cwd, 'STRATUM.md');
+    const isNew = !existsSync(stratumMdPath);
 
     // -----------------------------------------------------------------------
     // 1. Scan del proyecto
@@ -123,10 +133,9 @@ export class InitAgent {
     // -----------------------------------------------------------------------
     let finalContent: string;
 
-    if (existsSync(stratumMdPath) && !options.force) {
+    if (!isNew && !options.force) {
       const existing = readFileSync(stratumMdPath, 'utf-8');
 
-      // performMerge: generador que emite eventos Y devuelve las secciones finales
       const mergeGen = this.performMerge(existing, generatedSections, options);
       let mergedSections!: Record<string, string>;
       while (true) {
@@ -150,7 +159,7 @@ export class InitAgent {
       writeFileSync(stratumMdPath, finalContent, 'utf-8');
     }
 
-    yield { type: 'done', path: stratumMdPath };
+    yield { type: 'done', path: stratumMdPath, isNew };
   }
 
   // -------------------------------------------------------------------------
@@ -162,8 +171,10 @@ export class InitAgent {
     const manifests: Record<string, string> = {};
     const configs: Record<string, string> = {};
     const docs: Record<string, string> = {};
+    const ciFiles: Record<string, string> = {};
 
-    // Leer .gitignore ANTES de construir el árbol para aplicarlo al scan
+    // Leer .gitignore ANTES de construir el árbol para aplicarlo al scan.
+    // Conservar negaciones (!) — se procesan en orden dentro de isGitignored.
     let gitignorePatterns: string[] = [];
     const gitignorePath = join(cwd, '.gitignore');
     if (existsSync(gitignorePath)) {
@@ -171,16 +182,17 @@ export class InitAgent {
         gitignorePatterns = readFileSync(gitignorePath, 'utf-8')
           .split('\n')
           .map((l) => l.trim())
-          .filter((l) => l && !l.startsWith('#') && !l.startsWith('!'));
+          .filter((l) => l && !l.startsWith('#'));
       } catch {
         // ignorar
       }
     }
 
-    const dirTree = this.buildDirTree(cwd, 0, 3, gitignorePatterns);
+    const dirTree = this.buildDirTree(cwd, 0, 3, gitignorePatterns, '');
 
     // Leer manifiestos
     for (const name of MANIFEST_FILES) {
+      if (this.isGitignored(name, gitignorePatterns)) continue;
       const path = join(cwd, name);
       if (existsSync(path)) {
         scannedFiles.push(name);
@@ -189,7 +201,7 @@ export class InitAgent {
           manifests[name] =
             name === 'CHANGELOG.md'
               ? content.split('\n').slice(0, 50).join('\n')
-              : content.slice(0, 4000); // límite para no exceder contexto
+              : content.slice(0, 4000);
         } catch {
           // ignorar errores de lectura
         }
@@ -198,6 +210,7 @@ export class InitAgent {
 
     // Leer configs conocidas
     for (const name of CONFIG_FILES) {
+      if (this.isGitignored(name, gitignorePatterns)) continue;
       const path = join(cwd, name);
       if (existsSync(path)) {
         scannedFiles.push(name);
@@ -209,8 +222,31 @@ export class InitAgent {
       }
     }
 
+    // Leer .github/workflows/*.yml (CI/CD) — §12.13 paso 3
+    const workflowsDir = join(cwd, '.github', 'workflows');
+    if (existsSync(workflowsDir) && !this.isGitignored('.github', gitignorePatterns)) {
+      try {
+        const ymlFiles = readdirSync(workflowsDir).filter(
+          (f) => f.endsWith('.yml') || f.endsWith('.yaml'),
+        );
+        for (const f of ymlFiles) {
+          const relPath = `.github/workflows/${f}`;
+          if (this.isGitignored(relPath, gitignorePatterns)) continue;
+          scannedFiles.push(relPath);
+          try {
+            ciFiles[f] = readFileSync(join(workflowsDir, f), 'utf-8').slice(0, 1000);
+          } catch {
+            // ignorar
+          }
+        }
+      } catch {
+        // ignorar
+      }
+    }
+
     // Leer docs
     for (const name of DOC_FILES) {
+      if (this.isGitignored(name, gitignorePatterns)) continue;
       const path = join(cwd, name);
       if (existsSync(path)) {
         scannedFiles.push(name);
@@ -225,8 +261,10 @@ export class InitAgent {
       }
     }
 
-    // Leer entry points desde package.json
+    // Leer entry points — §12.13 paso 5
     const entryPoints: Record<string, string> = {};
+
+    // package.json: "main" y "bin"
     if (manifests['package.json']) {
       try {
         const pkg = JSON.parse(manifests['package.json']) as Record<string, unknown>;
@@ -252,11 +290,41 @@ export class InitAgent {
       }
     }
 
+    // pyproject.toml: [tool.poetry.scripts]
+    if (manifests['pyproject.toml']) {
+      const scriptMatch = manifests['pyproject.toml'].match(
+        /\[tool\.poetry\.scripts\]([\s\S]*?)(?=\n\[|$)/,
+      );
+      if (scriptMatch?.[1]) {
+        for (const line of scriptMatch[1].trim().split('\n')) {
+          const eqIdx = line.indexOf('=');
+          if (eqIdx > 0) {
+            const scriptName = line.slice(0, eqIdx).trim();
+            entryPoints[`pyproject:${scriptName}`] = line.trim();
+          }
+        }
+      }
+    }
+
+    // Rust / Go: entry points estáticos — §12.13 paso 5
+    for (const ep of ['src/main.rs', 'cmd/main.go', 'main.go']) {
+      const epPath = join(cwd, ep);
+      if (existsSync(epPath)) {
+        scannedFiles.push(ep);
+        try {
+          entryPoints[ep] = readFileSync(epPath, 'utf-8').slice(0, 1000);
+        } catch {
+          // ignorar
+        }
+      }
+    }
+
     return {
       scannedFiles,
       manifests,
       configs,
       docs,
+      ciFiles,
       entryPoints,
       dirTree,
       gitignorePatterns,
@@ -267,7 +335,8 @@ export class InitAgent {
     dir: string,
     depth: number,
     maxDepth: number,
-    gitignorePatterns: string[] = [],
+    gitignorePatterns: string[],
+    relDir: string,
   ): string {
     if (depth >= maxDepth) return '';
     const lines: string[] = [];
@@ -280,8 +349,9 @@ export class InitAgent {
     }
 
     for (const entry of entries) {
-      if (EXCLUDED_DIRS.has(entry) || entry.startsWith('.')) continue;
-      if (this.isGitignored(entry, gitignorePatterns)) continue;
+      if (EXCLUDED_DIRS.has(entry)) continue;
+      const relPath = relDir ? `${relDir}/${entry}` : entry;
+      if (this.isGitignored(relPath, gitignorePatterns)) continue;
       const fullPath = join(dir, entry);
       let stat;
       try {
@@ -292,7 +362,7 @@ export class InitAgent {
       const indent = '  '.repeat(depth);
       if (stat.isDirectory()) {
         lines.push(`${indent}${entry}/`);
-        const sub = this.buildDirTree(fullPath, depth + 1, maxDepth, gitignorePatterns);
+        const sub = this.buildDirTree(fullPath, depth + 1, maxDepth, gitignorePatterns, relPath);
         if (sub) lines.push(sub);
       }
     }
@@ -301,26 +371,53 @@ export class InitAgent {
   }
 
   /**
-   * Matcher sencillo de patrones .gitignore sobre el nombre de entrada.
-   * Soporta: nombre exacto, wildcard `*`, y sufijo `/**`.
+   * Evalúa si una ruta relativa (desde cwd, separador `/`) está ignorada según
+   * los patrones de .gitignore. Procesa los patrones en orden para que las
+   * negaciones `!pattern` anulen exclusiones previas (comportamiento real de git).
+   * Soporta: nombres simples, wildcards `*`/`**`, rutas con `/`.
    */
-  private isGitignored(name: string, patterns: string[]): boolean {
+  private isGitignored(relPath: string, patterns: string[]): boolean {
+    const name = relPath.includes('/') ? (relPath.split('/').pop() ?? relPath) : relPath;
+    let ignored = false;
+
     for (const raw of patterns) {
-      // Normalizar: quitar trailing slash (aplica a directorios y archivos por igual)
-      const pattern = raw.replace(/\/$/, '');
+      const isNegation = raw.startsWith('!');
+      const stripped = isNegation ? raw.slice(1) : raw;
+      const pattern = stripped.endsWith('/') ? stripped.slice(0, -1) : stripped;
       if (!pattern) continue;
 
-      // Wildcard simple: "*.ext" o "prefix*"
-      if (pattern.includes('*')) {
-        const [prefix, suffix] = pattern.split('*') as [string, string];
-        if (name.startsWith(prefix) && name.endsWith(suffix)) return true;
-        continue;
+      let matches: boolean;
+      if (pattern.includes('/')) {
+        const normalized = pattern.startsWith('/') ? pattern.slice(1) : pattern;
+        matches =
+          this.matchGlob(relPath, normalized) ||
+          (!pattern.startsWith('/') && this.matchGlob(relPath, `**/${normalized}`));
+      } else {
+        matches = this.matchGlob(name, pattern);
       }
 
-      // Nombre exacto
-      if (pattern === name) return true;
+      if (matches) ignored = !isNegation;
     }
-    return false;
+    return ignored;
+  }
+
+  /** Convierte un glob básico (con `*` y `**`) a RegExp y evalúa la cadena. */
+  private matchGlob(str: string, pattern: string): boolean {
+    // Dividir en segmentos `**` para procesarlos por separado
+    const regexStr = pattern
+      .split('**')
+      .map((part) =>
+        part
+          .split('*')
+          .map((s) => s.replace(/[.+^${}()|[\]\\]/g, '\\$&'))
+          .join('[^/]*'),
+      )
+      .join('.*');
+    try {
+      return new RegExp(`^${regexStr}$`).test(str);
+    } catch {
+      return false;
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -346,6 +443,25 @@ export class InitAgent {
 
     for (const [name, content] of Object.entries(data.configs)) {
       contextLines.push(`## ${name} (resumen)`, content.slice(0, 500), '');
+    }
+
+    if (Object.keys(data.ciFiles).length > 0) {
+      contextLines.push('## CI/CD (.github/workflows)');
+      for (const [name, content] of Object.entries(data.ciFiles)) {
+        contextLines.push(`### ${name}`, '```yaml', content, '```', '');
+      }
+    }
+
+    if (Object.keys(data.entryPoints).length > 0) {
+      contextLines.push('## Entry points');
+      for (const [name, content] of Object.entries(data.entryPoints)) {
+        if (name.startsWith('pyproject:')) {
+          contextLines.push(`- ${name.slice('pyproject:'.length)}: ${content}`);
+        } else {
+          contextLines.push(`### ${name}`, '```', content, '```', '');
+        }
+      }
+      contextLines.push('');
     }
 
     const contextStr = contextLines.join('\n');
@@ -383,7 +499,6 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
   private parseGeneratedSections(raw: string): Record<string, string> {
     const sections: Record<string, string> = {};
 
-    // Parsear por encabezados H2
     const regex = /^## (.+)$/gm;
     const matches = [...raw.matchAll(regex)];
 
@@ -396,7 +511,6 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
       sections[sectionName] = content;
     }
 
-    // Garantizar que todas las secciones fijas existen
     for (const fixed of FIXED_SECTIONS) {
       if (!(fixed in sections)) {
         sections[fixed] = '';
@@ -410,11 +524,6 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
   // Merge — §12.13 (una sola pasada: emite eventos Y devuelve secciones)
   // -------------------------------------------------------------------------
 
-  /**
-   * Generador que emite eventos de merge y devuelve las secciones finales.
-   * Usa `AsyncGenerator<InitEvent, Record<string,string>>` para combinar
-   * streaming de eventos con un valor de retorno.
-   */
   private async *performMerge(
     existing: string,
     generated: Record<string, string>,
@@ -462,7 +571,6 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
   }
 
   private mergeContent(existing: string, proposed: string): string {
-    // Añadir contenido propuesto que no existe ya
     const existingLines = new Set(
       existing
         .split('\n')
@@ -501,19 +609,17 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
   }
 
   // -------------------------------------------------------------------------
-  // Construcción del STRATUM.md final
+  // Construcción del STRATUM.md final — §12.13
   // -------------------------------------------------------------------------
 
   buildStratumMd(sections: Record<string, string>): string {
     const lines: string[] = ['# Stratum Memory', ''];
 
-    // Secciones fijas en orden
+    // Secciones fijas en orden, con placeholder si están vacías
     for (const name of FIXED_SECTIONS) {
       const content = sections[name] ?? '';
       lines.push(`## ${name}`);
-      if (content) {
-        lines.push(content);
-      }
+      lines.push(content || SECTION_PLACEHOLDERS[name] || '');
       lines.push('');
     }
 
@@ -540,6 +646,7 @@ interface ScanData {
   manifests: Record<string, string>;
   configs: Record<string, string>;
   docs: Record<string, string>;
+  ciFiles: Record<string, string>;
   entryPoints: Record<string, string>;
   dirTree: string;
   gitignorePatterns: string[];

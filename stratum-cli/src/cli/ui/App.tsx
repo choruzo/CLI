@@ -372,9 +372,10 @@ export function App({ agent, version }: Props) {
           } else if (ev.type === 'merge_conflict_resolved') {
             dispatch({ type: 'INIT_CONFLICT_DONE' });
           } else if (ev.type === 'done') {
+            const verb = ev.isNew ? 'creado' : 'actualizado';
             dispatch({
               type: 'INIT_PROGRESS',
-              text: `✓ STRATUM.md generado en ${ev.path}\n\nEl contexto del proyecto se cargará en el próximo mensaje.`,
+              text: `✓ STRATUM.md ${verb} en ${ev.path}\n\nEl contexto del proyecto se cargará en el próximo mensaje.`,
             });
             agent.reloadMemory();
           } else if (ev.type === 'error') {

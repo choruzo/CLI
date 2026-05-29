@@ -144,7 +144,7 @@ export const initCommand = new Command('init')
               process.stdout.write(`\n  (dry-run) Se habría escrito: ${ev.path}\n`);
             } else {
               process.stdout.write(
-                `\n  ✓ STRATUM.md ${existsSync(ev.path) ? 'actualizado' : 'creado'} en ${ev.path}\n`,
+                `\n  ✓ STRATUM.md ${ev.isNew ? 'creado' : 'actualizado'} en ${ev.path}\n`,
               );
             }
             process.stdout.write(
