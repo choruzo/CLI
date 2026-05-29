@@ -32,6 +32,7 @@
 | Embeddings | @xenova/transformers (ONNX local) | Embeddings locales sin API key |
 | Build | tsup (esbuild-based) | Bundle rápido, ESM + CJS, single binary |
 | Testing | Vitest | Rápido, TS nativo, compatible con ESM |
+| SSH | ssh2 | Cliente SSH puro Node.js — exec, SFTP, agent forwarding, jump hosts. Sin dependencia del binario `ssh` del sistema. |
 | Linting | ESLint + Prettier | Consistencia de código |
 
 ### Dependencias de producción clave
@@ -50,7 +51,9 @@
   "eventsource-parser": "Streaming SSE para LLM responses",
   "diff": "Generación de patches para edit_file",
   "glob": "File globbing para tools",
-  "execa": "Shell execution con mejor API que child_process"
+  "execa": "Shell execution con mejor API que child_process",
+  "ssh2": "Cliente SSH puro Node.js: exec remoto, SFTP, agent forwarding, jump hosts",
+  "keytar": "Acceso al keychain del SO para passwords SSH (opcional)"
 }
 ```
 
@@ -362,6 +365,30 @@ Error: Variable de entorno requerida no definida: LITELLM_API_KEY
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
       }
     ]
+  },
+  "ssh": {
+    "hosts": {
+      "bastion": {
+        "host": "bastion.example.com",
+        "port": 22,
+        "user": "javi",
+        "privateKey": "~/.ssh/id_ed25519"
+      },
+      "prod-web": {
+        "host": "192.168.1.10",
+        "port": 22,
+        "user": "javi",
+        "privateKey": "~/.ssh/id_ed25519",
+        "jumpHost": "bastion",
+        "confirmAll": true
+      },
+      "dev-server": {
+        "host": "10.0.0.5",
+        "port": 22,
+        "user": "javi",
+        "agentForwarding": true
+      }
+    }
   }
 }
 ```
@@ -397,9 +424,14 @@ stratum-cli/
 │   │   ├── web/
 │   │   │   ├── search.ts
 │   │   │   └── fetch.ts
-│   │   └── mcp/
-│   │       ├── client.ts      # MCP client wrapper
-│   │       └── bridge.ts      # MCP tools → ToolRegistry bridge
+│   │   ├── mcp/
+│   │   │   ├── client.ts      # MCP client wrapper
+│   │   │   └── bridge.ts      # MCP tools → ToolRegistry bridge
+│   │   └── ssh/
+│   │       ├── pool.ts        # SSHConnectionPool — conexiones persistentes por alias
+│   │       ├── exec.ts        # ssh_exec tool
+│   │       ├── sftp.ts        # ssh_upload / ssh_download tools
+│   │       └── inventory.ts   # Carga y validación del inventario de hosts
 │   ├── memory/
 │   │   ├── manager.ts         # MemoryManager — orquesta las 3 capas
 │   │   ├── project.ts         # Capa 1: STRATUM.md loader
@@ -607,6 +639,25 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 
 ---
 
+### Hito 9 — SSH Nativo *(~7 días)*
+
+El diferenciador operacional de Stratum: capacidad SSH integrada en el loop ReAct sin depender del binario `ssh` del sistema. El agente puede administrar infraestructura remota con la misma naturalidad con que maneja archivos locales.
+
+- [ ] `SSHConnectionPool`: pool de conexiones persistentes por alias de host
+- [ ] Tool `ssh_exec`: ejecución remota con detección de patrones destructivos
+- [ ] Tools `ssh_upload` / `ssh_download`: transferencia de ficheros vía SFTP
+- [ ] Inventario de hosts en `.stratumrc.json` + Zod schema de validación
+- [ ] Autenticación: clave privada, SSH agent forwarding, password (keychain SO), jump hosts
+- [ ] Reconexión automática con backoff si la conexión cae durante la sesión
+- [ ] Comando `stratum ssh list` — lista hosts con estado de conectividad en tiempo real
+- [ ] Limpieza de conexiones en el ciclo de SIGINT (integrado en §12.12)
+
+> **UI:** Adaptar el `ToolCallBlock` para mostrar el host remoto como contexto en las tools SSH (icono de servidor + alias). Mostrar un indicador de latencia en el resultado de `ssh_exec` cuando `durationMs > 1000`. El comando `stratum ssh list` funciona sin UI Ink (plain text), igual que `stratum init`.
+
+**Entregable:** El agente puede ejecutar comandos y transferir ficheros en hosts remotos del inventario, sin binarios del sistema. Administración de infraestructura VMware/Linux desde el loop ReAct.
+
+---
+
 ## 10. Próximos Pasos Inmediatos
 
 1. **Crear repositorio Git** en `D:\Archivos\Javier\Proyectos\CLI\stratum-cli`
@@ -628,6 +679,7 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 | Config | .stratumrc.json + Zod | dotenv, yaml | Tipado, validación en runtime |
 | Shell tool | execa | child_process directo | API async limpia, manejo de errores |
 | Build | tsup | tsc, webpack, rollup | Rápido, zero-config, ESM+CJS |
+| SSH client | ssh2 | binario `ssh` del sistema, node-forge | Puro Node.js, sin dependencias del SO; soporta SFTP, agent forwarding y jump hosts en Windows/Linux/macOS sin configuración extra |
 
 ---
 
@@ -1481,6 +1533,226 @@ $ stratum init
 
 Si `STRATUM.md` ya existe y hay secciones con contenido manual, se muestra el prompt de confirmación por sección en el terminal (stdin interactivo), exactamente igual que las confirmaciones destructivas.
 
+
+### 12.14 — SSH Nativo
+
+**Decisión: `ssh2` como cliente SSH puro Node.js. Pool de conexiones persistentes. Tools registradas en `ToolRegistry` como cualquier otra.**
+
+Stratum no invoca el binario `ssh` del sistema. Todo el protocolo SSH corre dentro del proceso Node.js, lo que garantiza portabilidad (Windows, Linux, macOS) y control total sobre el ciclo de vida de las conexiones.
+
+---
+
+#### Tools disponibles
+
+```typescript
+// ssh_exec — ejecución remota
+{
+  name: 'ssh_exec',
+  description: `Ejecuta un comando en un host remoto del inventario SSH.
+Usa el alias definido en .stratumrc.json → ssh.hosts.<alias>.`,
+  schema: z.object({
+    host:    z.string().describe('Alias del host en el inventario SSH'),
+    command: z.string().describe('Comando a ejecutar en el host remoto'),
+    cwd:     z.string().optional().describe('Directorio de trabajo remoto'),
+    timeout: z.number().optional().describe('Timeout en ms (default: 30000)'),
+  }),
+  destructive: true,    // misma política que bash — el dispatcher evalúa patrones peligrosos
+  serialized: false,    // puede ejecutarse en paralelo en hosts distintos
+  execute: async (params, ctx) => sshPool.exec(params),
+}
+
+// ssh_upload — subir fichero
+{
+  name: 'ssh_upload',
+  description: 'Sube un archivo local a un host remoto vía SFTP.',
+  schema: z.object({
+    host:       z.string().describe('Alias del host'),
+    localPath:  z.string().describe('Ruta local del archivo a subir'),
+    remotePath: z.string().describe('Ruta de destino en el host remoto'),
+  }),
+  destructive: false,
+  serialized: false,
+  execute: async (params) => sshPool.sftp.upload(params),
+}
+
+// ssh_download — descargar fichero
+{
+  name: 'ssh_download',
+  description: 'Descarga un archivo de un host remoto vía SFTP.',
+  schema: z.object({
+    host:       z.string().describe('Alias del host'),
+    remotePath: z.string().describe('Ruta remota del archivo a descargar'),
+    localPath:  z.string().describe('Ruta local de destino'),
+  }),
+  destructive: false,
+  serialized: false,
+  execute: async (params) => sshPool.sftp.download(params),
+}
+```
+
+---
+
+#### Schema de inventario SSH (`.stratumrc.json`)
+
+```typescript
+// src/config/schema.ts (extensión del schema Zod existente)
+
+const SSHHostSchema = z.object({
+  host:            z.string(),
+  port:            z.number().default(22),
+  user:            z.string(),
+  // Auth — al menos uno requerido
+  privateKey:      z.string().optional(),      // ruta expandida con ~
+  agentForwarding: z.boolean().optional(),     // usa SSH_AUTH_SOCK del entorno
+  password:        z.string().optional(),      // clave en keychain del SO (via keytar)
+  // Topología
+  jumpHost:        z.string().optional(),      // alias de otro host como bastión
+  // Seguridad
+  confirmAll:      z.boolean().default(false), // requerir confirmación en TODOS los comandos
+});
+
+const SSHConfigSchema = z.object({
+  hosts: z.record(z.string(), SSHHostSchema).default({}),
+});
+```
+
+Si no hay sección `ssh` en la config, las tools SSH no se registran en el `ToolRegistry` y el LLM no las ve.
+
+---
+
+#### `SSHConnectionPool` (`src/tools/ssh/pool.ts`)
+
+```typescript
+class SSHConnectionPool {
+  private connections: Map<string, ssh2.Client> = new Map();
+
+  // Obtiene una conexión activa o la crea (lazy)
+  async getConnection(hostAlias: string): Promise<ssh2.Client>
+
+  // Tool calls
+  async exec(params: SSHExecParams): Promise<SSHExecResult>
+  async upload(params: SSHUploadParams): Promise<void>
+  async download(params: SSHDownloadParams): Promise<void>
+
+  // Cleanup — llamado desde el handler de SIGINT (§12.12)
+  async closeAll(): Promise<void>
+}
+```
+
+**Ciclo de vida de las conexiones:**
+- Las conexiones se abren **lazy**: la primera tool call para un alias abre la conexión y la cachea.
+- Una vez abiertas, permanecen activas durante toda la sesión del agente.
+- Si una conexión cae (timeout, error de red): reintento con backoff 2s → 4s → 8s (máx 3 intentos). Si no reconecta, la tool devuelve `tool_error` con `recoverable: true`.
+- Al terminar la sesión (SIGINT o exit normal), `SSHConnectionPool.closeAll()` se llama en la fase de cleanup de §12.12, **antes** de guardar la sesión.
+
+---
+
+#### Estrategias de autenticación
+
+| Método | Configuración | Comportamiento |
+|---|---|---|
+| Clave privada | `privateKey: "~/.ssh/id_ed25519"` | La ruta se expande con `~`. El archivo se lee al abrir la conexión. |
+| SSH agent | `agentForwarding: true` | Se conecta al socket `SSH_AUTH_SOCK` del entorno. Si la variable no está definida, falla con error descriptivo. |
+| Password | `password: "keychain:mi-servidor"` | Valor prefijado con `keychain:` indica que se recupera del keychain del SO vía `keytar`. El password nunca se guarda en texto plano en la config. |
+| Jump host | `jumpHost: "bastion"` | Se abre TCP forwarding dentro de la conexión al bastión, sin depender del binario `ssh`. Ver algoritmo abajo. |
+
+**Algoritmo de jump host:**
+```
+SSHConnectionPool.getConnection("prod-web"):
+  1. Leer config: prod-web.jumpHost = "bastion"
+  2. getConnection("bastion")      → Client abierto al bastión
+  3. bastion.forwardOut(           → stream TCP hacia prod-web
+       prod-web.host, prod-web.port, 'localhost', 0
+     )
+  4. new ssh2.Client().connect({
+       sock: stream,               → túnel sobre la conexión del bastión
+       ...prod-web-config
+     })
+  5. Cachear "prod-web" en el pool
+```
+
+El bastión también pasa por el pool: si ya estaba conectado, se reutiliza. Si no, se abre primero.
+
+---
+
+#### Política destructiva en `ssh_exec`
+
+El `ToolDispatcher` aplica la misma lista de patrones destructivos de §12.5 al campo `command` antes de ejecutar remotamente. Si detecta un patrón peligroso, solicita confirmación interactiva.
+
+Adicionalmente, si el host tiene `confirmAll: true`, **cualquier** `ssh_exec` sobre ese host requiere confirmación, independientemente del comando:
+
+```
+⚠  El agente quiere ejecutar un comando en prod-web (host con confirmación obligatoria):
+   ssh_exec [prod-web]: ls -la /var/www/html
+
+¿Continuar? (s/N) _
+```
+
+---
+
+#### Formato del resultado para el LLM
+
+```xml
+<ssh_result host="prod-web" exitCode="0" duration="342ms">
+  <stdout>
+    total 48
+    drwxr-xr-x 5 javi javi 4096 May 29 10:30 app
+  </stdout>
+</ssh_result>
+```
+
+Si `exitCode !== 0`, el resultado se inyecta como `tool_error` con `recoverable: true`:
+
+```xml
+<tool_error>
+  <tool>ssh_exec</tool>
+  <error>Command failed on prod-web (exit code 1): bash: comando_inexistente: command not found</error>
+  <suggestion>Verify the command exists on the remote host. Use ssh_exec with 'which <command>' to check.</suggestion>
+</tool_error>
+```
+
+Si el host alias no existe en el inventario:
+```xml
+<tool_error>
+  <tool>ssh_exec</tool>
+  <error>SSH host 'unknown-host' not found in inventory. Available hosts: bastion, prod-web, dev-server</error>
+  <suggestion>Check .stratumrc.json → ssh.hosts for the correct alias.</suggestion>
+</tool_error>
+```
+
+---
+
+#### Comando `stratum ssh list`
+
+```
+$ stratum ssh list
+
+  Hosts SSH configurados (3):
+
+  ● bastion      bastion.example.com:22   auth: key              [conectado  ~12ms]
+  ○ prod-web     192.168.1.10:22          auth: key   via bastion [no conectado]
+  ○ dev-server   10.0.0.5:22              auth: agent            [no conectado]
+```
+
+El comando funciona sin UI Ink (plain text al stdout). Los hosts marcados con `confirmAll: true` muestran un indicador `⚠` junto al alias.
+
+---
+
+#### Implementación
+
+```
+src/tools/ssh/
+  pool.ts        ← SSHConnectionPool (gestión de conexiones, reconnect, closeAll)
+  exec.ts        ← tool ssh_exec
+  sftp.ts        ← tools ssh_upload / ssh_download
+  inventory.ts   ← carga del inventario desde config, validación Zod, helper de auth
+src/cli/commands/
+  ssh.ts         ← subcomando `stratum ssh list`
+```
+
+Las tres tools se registran en el `ToolRegistry` desde `StratumAgent.init()`, solo si `config.ssh.hosts` tiene al menos una entrada. Mismo patrón que las tools de filesystem y web.
+
+---
 
 ## 13. Documentos Relacionados
 
