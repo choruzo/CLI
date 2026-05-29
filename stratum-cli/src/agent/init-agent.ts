@@ -528,7 +528,7 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
       messages,
       stream: true,
       model: this.model,
-      signal: AbortSignal.timeout(60000),
+      signal: AbortSignal.timeout(300000),
     })) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) rawResponse += content;
