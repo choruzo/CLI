@@ -349,11 +349,9 @@ export class InitAgent {
     } catch {
       return '';
     }
-
     for (const entry of entries) {
       if (EXCLUDED_DIRS.has(entry)) continue;
       const relPath = relDir ? `${relDir}/${entry}` : entry;
-      if (this.isGitignored(relPath, gitignorePatterns)) continue;
       const fullPath = join(dir, entry);
       let stat;
       try {
@@ -363,15 +361,8 @@ export class InitAgent {
       }
       const indent = '  '.repeat(depth);
       if (stat.isDirectory()) {
-        // Aunque el directorio esté ignorado, recursamos si hay negaciones para hijos
-        // (p.ej. .gitignore tiene `.github` pero también `!.github/workflows`).
-        const prefix = relPath + '/';
-        const hasNegatedDescendants = gitignorePatterns.some((p) => {
-          if (!p.startsWith('!')) return false;
-          const neg = p.slice(1).startsWith('/') ? p.slice(2) : p.slice(1);
-          return neg.startsWith(prefix);
-        });
-        if (this.isGitignored(relPath, gitignorePatterns) && !hasNegatedDescendants) continue;
+        const isIgnored = this.isGitignored(relPath, gitignorePatterns);
+        if (isIgnored && !this.hasNegatedDescendants(relPath, gitignorePatterns)) continue;
         lines.push(`${indent}${entry}/`);
         const sub = this.buildDirTree(fullPath, depth + 1, maxDepth, gitignorePatterns, relPath);
         if (sub) lines.push(sub);
@@ -388,28 +379,67 @@ export class InitAgent {
    * Soporta: nombres simples, wildcards `*`/`**`, rutas con `/`.
    */
   private isGitignored(relPath: string, patterns: string[]): boolean {
-    const name = relPath.includes('/') ? (relPath.split('/').pop() ?? relPath) : relPath;
+    const normalizedPath = this.normalizeGitignorePath(relPath);
+    const segments = normalizedPath ? normalizedPath.split('/') : [];
     let ignored = false;
 
     for (const raw of patterns) {
       const isNegation = raw.startsWith('!');
       const stripped = isNegation ? raw.slice(1) : raw;
-      const pattern = stripped.endsWith('/') ? stripped.slice(0, -1) : stripped;
+      const rootAnchored = stripped.startsWith('/');
+      const pattern = this.normalizeGitignorePath(stripped);
       if (!pattern) continue;
 
-      let matches: boolean;
-      if (pattern.includes('/')) {
-        const normalized = pattern.startsWith('/') ? pattern.slice(1) : pattern;
-        matches =
-          this.matchGlob(relPath, normalized) ||
-          (!pattern.startsWith('/') && this.matchGlob(relPath, `**/${normalized}`));
-      } else {
-        matches = this.matchGlob(name, pattern);
-      }
+      const matches = rootAnchored
+        ? this.matchesRootAnchoredPattern(normalizedPath, pattern)
+        : pattern.includes('/')
+          ? this.matchesPathOrAncestor(normalizedPath, pattern)
+          : segments.some((segment) => this.matchGlob(segment, pattern));
 
       if (matches) ignored = !isNegation;
     }
     return ignored;
+  }
+
+  private hasNegatedDescendants(relPath: string, patterns: string[]): boolean {
+    const normalizedPath = this.normalizeGitignorePath(relPath);
+    const prefix = normalizedPath ? `${normalizedPath}/` : '';
+
+    return patterns.some((pattern) => {
+      if (!pattern.startsWith('!')) return false;
+      const normalized = this.normalizeGitignorePath(pattern.slice(1));
+      return Boolean(normalized) && normalized.startsWith(prefix);
+    });
+  }
+
+  private matchesRootAnchoredPattern(relPath: string, pattern: string): boolean {
+    const candidates = this.listPathCandidates(relPath);
+    return candidates.some((candidate) => {
+      if (!candidate) return false;
+      if (this.matchGlob(candidate, pattern)) return true;
+      return pattern.includes('/') ? false : candidate.split('/')[0] === pattern;
+    });
+  }
+
+  private matchesPathOrAncestor(relPath: string, pattern: string): boolean {
+    return this.listPathCandidates(relPath).some((candidate) => this.matchGlob(candidate, pattern));
+  }
+
+  private listPathCandidates(relPath: string): string[] {
+    const normalizedPath = this.normalizeGitignorePath(relPath);
+    if (!normalizedPath) return [];
+
+    const candidates = [normalizedPath];
+    const segments = normalizedPath.split('/');
+    for (let i = segments.length - 1; i > 0; i--) {
+      candidates.push(segments.slice(0, i).join('/'));
+    }
+
+    return candidates;
+  }
+
+  private normalizeGitignorePath(path: string): string {
+    return path.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
   }
 
   /** Convierte un glob básico (con `*` y `**`) a RegExp y evalúa la cadena. */

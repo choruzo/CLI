@@ -17,7 +17,7 @@ export type AgentEvent =
       roundsCompressed: number;
     }
   | { type: 'error'; message: string; fatal: boolean }
-  | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' };
+  | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' };
 
 export interface DecisionEntry {
   id: string;

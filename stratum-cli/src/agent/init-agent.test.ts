@@ -16,7 +16,10 @@ function makeTextChunks(text: string): OpenAIStreamChunk[] {
 }
 
 class SynthesisProvider implements IProvider {
-  async *complete(_req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
+  lastPrompt = '';
+
+  async *complete(req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
+    this.lastPrompt = req.messages.at(-1)?.content ?? '';
     const response = `## Proyecto
 Nombre: test-project
 Descripción: Proyecto de prueba.
@@ -65,10 +68,12 @@ async function collectInitEvents(gen: AsyncGenerator<import('./init-agent.js').I
 describe('InitAgent', () => {
   let tmpDir: string;
   let agent: InitAgent;
+  let provider: SynthesisProvider;
 
   beforeEach(() => {
     tmpDir = makeTmpDir();
-    agent = new InitAgent(new SynthesisProvider(), 'test-model');
+    provider = new SynthesisProvider();
+    agent = new InitAgent(provider, 'test-model');
   });
 
   afterEach(() => {
@@ -108,6 +113,49 @@ describe('InitAgent', () => {
     );
     const events = await collectInitEvents(agent.run(tmpDir));
     expect(events.some((e) => e.type === 'scan_progress' && e.file === 'package.json')).toBe(true);
+  });
+
+  it('respeta negaciones de .gitignore para workflows re-incluidos', async () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.github\n!.github/workflows\n', 'utf-8');
+    mkdirSync(join(tmpDir, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(tmpDir, '.github', 'workflows', 'ci.yml'), 'name: CI\n', 'utf-8');
+
+    const events = await collectInitEvents(agent.run(tmpDir));
+
+    expect(
+      events.some((e) => e.type === 'scan_progress' && e.file === '.github/workflows/ci.yml'),
+    ).toBe(true);
+    expect(provider.lastPrompt).toContain('.github/');
+    expect(provider.lastPrompt).toContain('workflows/');
+    expect(provider.lastPrompt).toContain('CI/CD (.github/workflows)');
+    expect(provider.lastPrompt).toContain('### ci.yml');
+  });
+
+  it('omite directorios ignorados por .gitignore cuando no hay negaciones', async () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '.github\n', 'utf-8');
+    mkdirSync(join(tmpDir, '.github', 'workflows'), { recursive: true });
+    writeFileSync(join(tmpDir, '.github', 'workflows', 'ci.yml'), 'name: CI\n', 'utf-8');
+
+    const events = await collectInitEvents(agent.run(tmpDir));
+
+    expect(
+      events.some((e) => e.type === 'scan_progress' && e.file === '.github/workflows/ci.yml'),
+    ).toBe(false);
+    expect(provider.lastPrompt).not.toContain('.github/');
+    expect(provider.lastPrompt).not.toContain('CI/CD (.github/workflows)');
+  });
+
+  it('re-incluye archivos negados en .gitignore', async () => {
+    writeFileSync(join(tmpDir, '.gitignore'), '*.md\n!README.md\n', 'utf-8');
+    writeFileSync(join(tmpDir, 'README.md'), '# Keep me\n', 'utf-8');
+    writeFileSync(join(tmpDir, 'CONTRIBUTING.md'), '# Ignore me\n', 'utf-8');
+
+    const events = await collectInitEvents(agent.run(tmpDir));
+
+    expect(events.some((e) => e.type === 'scan_progress' && e.file === 'README.md')).toBe(true);
+    expect(events.some((e) => e.type === 'scan_progress' && e.file === 'CONTRIBUTING.md')).toBe(
+      false,
+    );
   });
 
   it('merge: preserva sección manual cuando resolveConflict devuelve false', async () => {
