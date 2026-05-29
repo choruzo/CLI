@@ -1,13 +1,13 @@
 ---
-date: 2026-05-28
+date: 2026-05-29
 tags: [módulo, providers, llm, streaming, stratum-cli]
 status: implementado
-hito: 1
+hito: 1-2
 ---
 
 # Módulo providers — LLM Client
 
-Implementado en Hito 1. Ver [[Arquitectura]] y [[Módulos/agent]].
+Implementado en Hito 1, ampliado en Hito 2. Ver [[Arquitectura]] y [[Módulos/agent]].
 
 ---
 
@@ -35,6 +35,21 @@ interface CompletionRequest {
   tools?: ToolSchema[]
   stream: true
   model: string
+  signal?: AbortSignal
+}
+
+interface OpenAIStreamChunk {
+  choices: Array<{
+    delta: { content?: string | null; tool_calls?: ToolCallDelta[] }
+    finish_reason: string | null
+    index: number
+  }>
+  // Presente solo en el chunk final cuando se solicita stream_options.include_usage
+  usage?: {
+    prompt_tokens: number
+    completion_tokens: number
+    total_tokens: number
+  }
 }
 ```
 
@@ -49,17 +64,22 @@ Implementación propia del cliente. **No usa `openai` npm ni `ai-sdk`** (decisi�
 ### Flujo de streaming
 
 ```
-fetch(baseUrl + '/chat/completions', { body: JSON, signal })
+fetch(baseUrl + '/chat/completions', {
+  body: { ..., stream: true, stream_options: { include_usage: true } },
+  signal
+})
   → ReadableStream<Uint8Array>
   → TextDecoderStream
   → EventSourceParserStream   ← eventsource-parser v3 (WHATWG TransformStream)
   → filtrar '[DONE]'
-  → yield JSON.parse(data) as OpenAIStreamChunk
+  → yield chunk si chunk.choices[0] ó chunk.usage
 ```
+
+**`stream_options.include_usage`** (añadido en Hito 2): solicita al provider que incluya los tokens reales en el último chunk. El `ContextManager` llama a `recordUsage(chunk.usage.prompt_tokens)` al recibir ese chunk, lo que activa la estimación real (`estimated: false`) en lugar del proxy `chars/3.5` (`estimated: true`).
 
 ### healthCheck()
 
-`GET baseUrl/models` — devuelve `true` si responde 2xx. Indicador `●` dinámico diferido a Hito 6.
+`GET baseUrl/models` — devuelve `true` si responde 2xx. El indicador `●` dinámico en StatusBar está diferido a Hito 6.
 
 ---
 
@@ -86,6 +106,7 @@ class StreamBuffer {
      - `JSON.parse(args)` OK → emite `tool_call_ready`
      - `JSON.parse` falla → emite `tool_error { recoverable: false }`
    - Llama `reset()`
+4. Chunks con `choices: []` + `usage` → **no generan AgentEvent** (son consumidos por `ReactLoop` para `recordUsage`)
 
 ### Casos cubiertos
 
@@ -95,6 +116,7 @@ class StreamBuffer {
 | Args fragmentados en N chunks | Un único `tool_call_ready` al final |
 | Dos tool calls paralelas (`index` 0 y 1) | Dos `tool_call_ready` independientes |
 | JSON inválido en args | `tool_error { recoverable: false }` |
+| Chunk de usage (choices vacío) | Sin AgentEvent — consumido por ReactLoop |
 
 ---
 
@@ -103,9 +125,11 @@ class StreamBuffer {
 ```typescript
 class ProviderRouter {
   getActive(): IProvider
+  getActiveConfig(): ProviderConfig
   get providerName(): string
   get model(): string
   get contextWindow(): number
+  async healthCheck(): Promise<boolean>
 }
 ```
 
@@ -120,11 +144,11 @@ Usado exclusivamente en tests. Acepta un guion de rondas:
 ```typescript
 const mock = new MockProvider([
   makeTextRound('Hola, ¿en qué puedo ayudarte?'),
-  makeToolCallRound('read_file', { path: './foo.ts' }),
+  makeToolCallRound('c1', 'read_file', { path: './foo.ts' }),
 ])
 ```
 
-Helpers exportados: `makeTextRound(text)`, `makeToolCallRound(name, input)`.
+Helpers exportados: `makeTextRound(text)`, `makeToolCallRound(id, name, input)`.
 
 ---
 

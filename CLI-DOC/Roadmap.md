@@ -1,5 +1,5 @@
 ---
-date: 2026-05-28
+date: 2026-05-29
 tags: [roadmap, hitos, stratum-cli]
 status: en-progreso
 ---
@@ -12,7 +12,7 @@ status: en-progreso
 |------|-------------|---------------|--------|
 | [[#Hito 0]] | Scaffolding | ~2 días | ✅ Completado |
 | [[#Hito 1]] | Core Agent Loop | ~5 días | ✅ Completado |
-| [[#Hito 2]] | Memory Layer 1 | ~3 días | ⏳ Pendiente |
+| [[#Hito 2]] | Memory Layer 1 | ~3 días | ✅ Completado |
 | [[#Hito 3]] | Tools Day 1 | ~4 días | ⏳ Pendiente |
 | [[#Hito 4]] | MCP Client | ~4 días | ⏳ Pendiente |
 | [[#Hito 5]] | Memory Layers 2 y 3 | ~6 días | ⏳ Pendiente |
@@ -53,15 +53,24 @@ Ver [[Módulos/agent]], [[Módulos/providers]], [[Módulos/tools]], [[Módulos/c
 
 ---
 
-## Hito 2 — Memory Layer 1 ⏳
+## Hito 2 — Memory Layer 1 ✅
 
-- [ ] `STRATUM.md` loader (proyecto + global)
-- [ ] Inyección en system prompt
-- [ ] `SessionContext`: historial de conversación
-- [ ] Compresión de contexto (umbral 80%)
-- [ ] Comando `stratum memory show`
+- [x] `STRATUM.md` loader (proyecto + global) — `src/memory/project.ts`
+- [x] Inyección en system prompt — `buildSystemPrompt(config, memory?)`
+- [x] `MemoryManager` capa 1 — `src/memory/manager.ts`
+- [x] Compresión de contexto completa (§12.4): usage real + proxy `~`, LLM call, fallback truncado duro, presión irresolvible
+- [x] `stratum memory show` — muestra STRATUM.md activo
+- [x] `stratum init` reescrito — scan inteligente + síntesis LLM + merge interactivo (§12.13)
+- [x] `/init` en chat — conduce `InitAgent` mostrando progreso en la conversación
+- [x] `/memory show` en chat — sin round LLM
+- [x] `SessionStore` — persistencia a `~/.stratum/sessions/` (§12.6)
+- [x] `stratum chat --resume <id>` — restaura historial completo
+- [x] `stratum sessions list/resume/delete/prune` — gestión completa
+- [x] StatusBar prefijo `~` cuando el conteo es estimado
 
-**Entregable:** El agente recuerda el contexto del proyecto entre iteraciones dentro de una sesión.
+**Entregable:** El agente inyecta el contexto del proyecto al arrancar, comprime el historial al 80%, persiste sesiones a disco y las reanuda. 73 tests pasando.
+
+Ver [[Módulos/memory]], [[Módulos/sessions]], [[Módulos/agent]], [[Módulos/cli]].
 
 ---
 
@@ -73,9 +82,10 @@ Ver [[Módulos/agent]], [[Módulos/providers]], [[Módulos/tools]], [[Módulos/c
 - [ ] Safety check en `bash` (patrones destructivos)
 - [ ] Confirmación interactiva en tools destructivas
 - [ ] Timeout y cancelación de tools
-- [ ] ToolCall UI (Ink)
+- [ ] ToolCall UI (Ink): estados pending/running/completed/error, spinner, toggle
+- [ ] Markdown rendering de respuestas (`<MarkdownText>` con `marked`)
 
-**Entregable:** Agente con toolset completo del día 1.
+**Entregable:** Agente con toolset completo del día 1. Puede realizar tareas de código completas.
 
 ---
 
@@ -92,19 +102,23 @@ Ver [[Módulos/agent]], [[Módulos/providers]], [[Módulos/tools]], [[Módulos/c
 
 ## Hito 5 — Memory Layers 2 y 3 ⏳
 
-- [ ] `DecisionStore`: schema JSON + CRUD
+- [ ] `DecisionStore`: schema JSON + CRUD + tool `store_decision`
+- [ ] Detección automática de decisiones (LLM-based, sin clasificador externo)
 - [ ] Pipeline de embedding con `@xenova/transformers` (ONNX local)
 - [ ] `sqlite-vec` setup e integración
-- [ ] Búsqueda semántica KNN
+- [ ] Búsqueda semántica KNN — inyección de decisiones relevantes en contexto
 - [ ] Comandos `stratum memory list/search/forget`
+
+**Entregable:** El agente recuerda decisiones entre sesiones y puede recuperarlas semánticamente.
 
 ---
 
 ## Hito 6 — Multi-provider Polishing ⏳
 
-- [ ] Soporte Ollama completo
+- [ ] Soporte Ollama completo (listado de modelos, pull)
 - [ ] Soporte llama.cpp server / vLLM / LiteLLM
 - [ ] Fallback automático a provider secundario
+- [ ] Provider health check al startup
 - [ ] Comando `stratum providers list`
 
 ---
@@ -113,6 +127,7 @@ Ver [[Módulos/agent]], [[Módulos/providers]], [[Módulos/tools]], [[Módulos/c
 
 - [ ] `Planner`: genera plan estructurado antes de ejecutar
 - [ ] Checkpoints de aprobación del usuario
+- [ ] Ejecución paso a paso con posibilidad de editar plan
 - [ ] Flag `--plan` en `stratum run`
 
 ---
@@ -122,3 +137,4 @@ Ver [[Módulos/agent]], [[Módulos/providers]], [[Módulos/tools]], [[Módulos/c
 - [ ] `Orchestrator`: agente principal que delega en subagentes
 - [ ] Spawning de subagentes con contexto aislado
 - [ ] Agentes especializados: `CodeAgent`, `ShellAgent`, `ResearchAgent`
+- [ ] Visualización de árbol de agentes en Ink

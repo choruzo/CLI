@@ -1,13 +1,13 @@
 ---
-date: 2026-05-28
+date: 2026-05-29
 tags: [módulo, config, zod, stratum-cli]
 status: implementado
-hito: 0
+hito: 0-2
 ---
 
 # Módulo config — Configuración
 
-Implementado en Hito 0. Ver [[Arquitectura]] y [[Roadmap]].
+Implementado en Hito 0, ampliado en Hito 2. Ver [[Arquitectura]] y [[Roadmap]].
 
 ---
 
@@ -16,7 +16,8 @@ Implementado en Hito 0. Ver [[Arquitectura]] y [[Roadmap]].
 | Archivo | Responsabilidad |
 |---------|----------------|
 | `src/config/schema.ts` | Schema Zod del `.stratumrc.json` |
-| `src/config/loader.ts` | `loadConfig()` — carga, valida y expande variables |
+| `src/config/loader.ts` | `loadConfig()` — carga, valida y expande `${VAR}` |
+| `src/config/paths.ts` | `expandHome()`, `resolveMemoryPaths()` — expande `~` |
 
 ---
 
@@ -36,10 +37,23 @@ Implementado en Hito 0. Ver [[Arquitectura]] y [[Roadmap]].
       }
     }
   },
+  "memory": {
+    "projectFile": "./STRATUM.md",
+    "globalFile": "~/.stratum/STRATUM.md",
+    "decisionsFile": "~/.stratum/memory/decisions.json",
+    "vectorDb": "~/.stratum/memory/vectors.db",
+    "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "retrievalTopK": 5
+  },
   "agent": {
-    "maxIterations": 20
+    "maxIterations": 50,
+    "maxToolRetries": 3,
+    "compressionKeepRounds": 6,
+    "compressionThreshold": 0.8,
+    "compressorModel": "qwen3.5:9b"
   },
   "tools": {
+    "confirmDestructive": true,
     "bashTimeout": 30000
   }
 }
@@ -49,9 +63,9 @@ Los campos no definidos reciben sus valores por defecto del schema Zod (`Stratum
 
 ---
 
-## Variables de entorno
+## Variables de entorno (`${VAR}`)
 
-Las cadenas en la config que sigan el patrón `${VAR_NAME}` son expandidas automáticamente por `loadConfig()` antes de la validación Zod. Útil para claves de API:
+Las cadenas que sigan el patrón `${VAR_NAME}` son expandidas por `loadConfig()` antes de la validación Zod:
 
 ```json
 { "apiKey": "${OPENAI_API_KEY}" }
@@ -59,11 +73,40 @@ Las cadenas en la config que sigan el patrón `${VAR_NAME}` son expandidas autom
 
 ---
 
+## Expansión de `~` (`paths.ts`)
+
+El loader no expande `~`. Las rutas de memoria y sesiones usan `expandHome()`:
+
+```typescript
+expandHome('~/.stratum/sessions')
+// → '/home/user/.stratum/sessions' (Linux/macOS)
+// → 'C:\Users\user\.stratum\sessions' (Windows)
+
+resolveMemoryPaths(config): MemoryPaths
+// → { projectFile, globalFile, decisionsFile, vectorDb, sessionsDir }
+//   todas con rutas absolutas
+```
+
+---
+
+## Campos del agente añadidos en Hito 2
+
+| Campo | Default | Descripción |
+|-------|---------|-------------|
+| `agent.compressionThreshold` | `0.8` | Umbral (0–1) para activar compresión de contexto |
+| `agent.compressorModel` | _(activo)_ | Modelo alternativo para el LLM call de compresión; si no se define, usa el provider activo |
+
+---
+
 ## Acceso desde código
 
 ```typescript
 import { loadConfig } from './config/loader.js'
-const config = await loadConfig()   // busca .stratumrc.json desde cwd hacia arriba
+const config = loadConfig()  // busca .stratumrc.json desde cwd hacia arriba
+
+import { resolveMemoryPaths } from './config/paths.js'
+const paths = resolveMemoryPaths(config)
+// paths.sessionsDir → '~/.stratum/sessions' expandido
 
 // En tests:
 import { StratumConfigSchema } from './config/schema.js'
