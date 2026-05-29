@@ -1538,7 +1538,7 @@ Si `STRATUM.md` ya existe y hay secciones con contenido manual, se muestra el pr
 
 **Decisión: `ssh2` como cliente SSH puro Node.js. Pool de conexiones persistentes. Tools registradas en `ToolRegistry` como cualquier otra.**
 
-Stratum no invoca el binario `ssh` del sistema. Todo el protocolo SSH corre dentro del proceso Node.js, lo que garantiza portabilidad (Windows, Linux, macOS) y control total sobre el ciclo de vida de las conexiones.
+Stratum no invoca el binario `ssh` del sistema. Todo el protocolo SSH corre dentro del proceso Node.js, garantizando portabilidad (Windows, Linux, macOS) y control total sobre el ciclo de vida de las conexiones.
 
 ---
 
@@ -1549,15 +1549,27 @@ Stratum no invoca el binario `ssh` del sistema. Todo el protocolo SSH corre dent
 {
   name: 'ssh_exec',
   description: `Ejecuta un comando en un host remoto del inventario SSH.
-Usa el alias definido en .stratumrc.json → ssh.hosts.<alias>.`,
+Usa el alias definido en .stratumrc.json → ssh.hosts.<alias>.
+AVISO: la detección de patrones destructivos es orientativa, no un control de seguridad real.
+Para hosts de producción, usa confirmAll: true en la config del host.`,
   schema: z.object({
-    host:    z.string().describe('Alias del host en el inventario SSH'),
-    command: z.string().describe('Comando a ejecutar en el host remoto'),
-    cwd:     z.string().optional().describe('Directorio de trabajo remoto'),
-    timeout: z.number().optional().describe('Timeout en ms (default: 30000)'),
+    host:     z.string().describe('Alias del host en el inventario SSH'),
+    command:  z.string().describe('Comando a ejecutar en el host remoto'),
+    cwd:      z.string().optional().describe('Directorio de trabajo remoto'),
+    pty:      z.boolean().optional().describe(
+      'Allocate pseudo-terminal. Necesario para sudo con password, apt/dnf interactivo, ' +
+      'cualquier comando que requiera TTY. Default: false. ' +
+      'Con PTY activo, stdout y stderr se mezclan y el exit code puede no ser fiable.'
+    ),
+    stdin:    z.string().optional().describe(
+      'Texto a enviar al stdin del comando (sin PTY). Útil para "sudo -S", ' +
+      'respuestas a prompts predecibles. No usar para interacción real — usar pty: true.'
+    ),
+    timeout:  z.number().optional().describe('Timeout del comando en ms (default: 30000). Al expirar, el proceso remoto recibe SIGKILL.'),
+    maxBytes: z.number().optional().describe('Límite de stdout+stderr en bytes (default: 262144 = 256 KB). El output se trunca si supera este límite.'),
   }),
-  destructive: true,    // misma política que bash — el dispatcher evalúa patrones peligrosos
-  serialized: false,    // puede ejecutarse en paralelo en hosts distintos
+  destructive: true,   // pide confirmación si detecta patrones peligrosos (red de seguridad blanda — ver nota)
+  serialized: false,   // ejecución paralela permitida en hosts distintos
   execute: async (params, ctx) => sshPool.exec(params),
 }
 
@@ -1598,21 +1610,42 @@ Usa el alias definido en .stratumrc.json → ssh.hosts.<alias>.`,
 // src/config/schema.ts (extensión del schema Zod existente)
 
 const SSHHostSchema = z.object({
-  host:            z.string(),
-  port:            z.number().default(22),
-  user:            z.string(),
+  host:           z.string(),
+  port:           z.number().default(22),
+  user:           z.string(),
+
   // Auth — al menos uno requerido
-  privateKey:      z.string().optional(),      // ruta expandida con ~
-  agentForwarding: z.boolean().optional(),     // usa SSH_AUTH_SOCK del entorno
-  password:        z.string().optional(),      // clave en keychain del SO (via keytar)
+  privateKey:     z.string().optional(),    // ruta expandida con ~ al archivo de clave
+  passphrase:     z.string().optional(),    // passphrase de la clave privada;
+                                            // prefijo "keychain:<alias>" para leer del SO
+  useAgent:       z.boolean().optional(),   // usar ssh-agent del sistema para autenticar
+                                            // (distinto de agentForwarding, ver §Auth)
+  password:       z.string().optional(),    // prefijo "keychain:<alias>" o "env:<VAR>"
+
   // Topología
-  jumpHost:        z.string().optional(),      // alias de otro host como bastión
-  // Seguridad
-  confirmAll:      z.boolean().default(false), // requerir confirmación en TODOS los comandos
+  jumpHost:       z.string().optional(),    // alias de otro host como bastión
+
+  // Verificación de host key — ver §Host Key
+  hostKeyPolicy:  z.enum(['tofu', 'strict', 'insecure']).default('tofu'),
+  hostKeyHash:    z.string().optional(),    // SHA-256 hex pinneado (solo con 'strict')
+
+  // Seguridad operacional
+  confirmAll:     z.boolean().default(false), // requerir confirmación en TODOS los comandos
+
+  // Timeouts
+  connectTimeout: z.number().default(10000),  // ms para establecer la conexión SSH
+  commandTimeout: z.number().default(30000),  // ms por defecto para comandos (override por call)
+
+  // Salida
+  maxBytes:       z.number().default(262144), // bytes por defecto para outputs (override por call)
 });
 
 const SSHConfigSchema = z.object({
-  hosts: z.record(z.string(), SSHHostSchema).default({}),
+  hosts:    z.record(z.string(), SSHHostSchema).default({}),
+  auditLog: z.union([z.boolean(), z.string()]).default(true),
+           // true → ~/.stratum/logs/ssh-audit.jsonl
+           // string → ruta personalizada
+           // false → deshabilitado
 });
 ```
 
@@ -1624,69 +1657,350 @@ Si no hay sección `ssh` en la config, las tools SSH no se registran en el `Tool
 
 ```typescript
 class SSHConnectionPool {
-  private connections: Map<string, ssh2.Client> = new Map();
+  // Conexiones activas ya establecidas
+  private connections:  Map<string, ssh2.Client> = new Map();
+  // Promesas en vuelo: evita la carrera en getConnection() con serialized: false
+  private inflight:     Map<string, Promise<ssh2.Client>> = new Map();
 
-  // Obtiene una conexión activa o la crea (lazy)
-  async getConnection(hostAlias: string): Promise<ssh2.Client>
+  // Obtiene una conexión activa, reutiliza la inflight si existe, o crea una nueva (lazy)
+  async getConnection(hostAlias: string): Promise<ssh2.Client> {
+    if (this.connections.has(hostAlias)) return this.connections.get(hostAlias)!;
+    if (this.inflight.has(hostAlias))   return this.inflight.get(hostAlias)!;
+
+    const promise = this._openConnection(hostAlias)
+      .then(client => {
+        this.connections.set(hostAlias, client);
+        this.inflight.delete(hostAlias);
+        return client;
+      })
+      .catch(err => {
+        this.inflight.delete(hostAlias);
+        throw err;
+      });
+
+    this.inflight.set(hostAlias, promise);
+    return promise;
+  }
 
   // Tool calls
   async exec(params: SSHExecParams): Promise<SSHExecResult>
   async upload(params: SSHUploadParams): Promise<void>
   async download(params: SSHDownloadParams): Promise<void>
 
-  // Cleanup — llamado desde el handler de SIGINT (§12.12)
+  // Cleanup graceful — ver §Ciclo de vida y teardown
   async closeAll(): Promise<void>
 }
 ```
 
-**Ciclo de vida de las conexiones:**
-- Las conexiones se abren **lazy**: la primera tool call para un alias abre la conexión y la cachea.
-- Una vez abiertas, permanecen activas durante toda la sesión del agente.
-- Si una conexión cae (timeout, error de red): reintento con backoff 2s → 4s → 8s (máx 3 intentos). Si no reconecta, la tool devuelve `tool_error` con `recoverable: true`.
-- Al terminar la sesión (SIGINT o exit normal), `SSHConnectionPool.closeAll()` se llama en la fase de cleanup de §12.12, **antes** de guardar la sesión.
+**El `Map<string, Promise>` en `inflight` es el mutex de establecimiento:** dos tool calls paralelas al mismo alias comparten la misma promesa de conexión en lugar de abrir dos sockets.
 
 ---
 
 #### Estrategias de autenticación
 
-| Método | Configuración | Comportamiento |
+| Método | Campo en config | Comportamiento |
 |---|---|---|
-| Clave privada | `privateKey: "~/.ssh/id_ed25519"` | La ruta se expande con `~`. El archivo se lee al abrir la conexión. |
-| SSH agent | `agentForwarding: true` | Se conecta al socket `SSH_AUTH_SOCK` del entorno. Si la variable no está definida, falla con error descriptivo. |
-| Password | `password: "keychain:mi-servidor"` | Valor prefijado con `keychain:` indica que se recupera del keychain del SO vía `keytar`. El password nunca se guarda en texto plano en la config. |
-| Jump host | `jumpHost: "bastion"` | Se abre TCP forwarding dentro de la conexión al bastión, sin depender del binario `ssh`. Ver algoritmo abajo. |
+| Clave privada (sin passphrase) | `privateKey: "~/.ssh/id_ed25519"` | Ruta expandida con `~`. El archivo se lee al abrir la conexión. |
+| Clave privada (con passphrase) | `privateKey: "~/.ssh/id_ed25519"` + `passphrase: "keychain:mi-clave"` | La passphrase se resuelve según el prefijo (ver §Resolución de secretos). |
+| SSH agent | `useAgent: true` | **Usa el agente para autenticarse** — `ssh2` se conecta al socket del agente (`SSH_AUTH_SOCK` en Linux/macOS, named pipe en Windows). No confundir con agent forwarding (reenviar el agente al host remoto), que es una feature distinta y no está soportada en v1. |
+| Password | `password: "keychain:prod"` | Se resuelve según §Resolución de secretos. El password nunca se guarda en texto plano. |
+| Jump host | `jumpHost: "bastion"` | TCP forwarding dentro de la conexión al bastión (ver §Jump hosts). |
 
-**Algoritmo de jump host:**
+**Resolución de secretos** (para `password` y `passphrase`):
+
 ```
-SSHConnectionPool.getConnection("prod-web"):
-  1. Leer config: prod-web.jumpHost = "bastion"
-  2. getConnection("bastion")      → Client abierto al bastión
-  3. bastion.forwardOut(           → stream TCP hacia prod-web
-       prod-web.host, prod-web.port, 'localhost', 0
-     )
-  4. new ssh2.Client().connect({
-       sock: stream,               → túnel sobre la conexión del bastión
-       ...prod-web-config
-     })
-  5. Cachear "prod-web" en el pool
+"keychain:<alias>"  → keytar.getPassword('stratum-ssh', alias)
+                      Fallback si keytar falla o no hay sesión de escritorio:
+                        1. Variable de entorno STRATUM_SSH_<ALIAS_UPPER>_SECRET
+                        2. Prompt interactivo (solo si stdin es TTY)
+                        3. Error fatal descriptivo
+"env:<VAR>"         → process.env[VAR]
+                      Si no definida → error fatal descriptivo
+"<valor literal>"   → el valor tal cual (no recomendado; queda en disco en la config)
 ```
 
-El bastión también pasa por el pool: si ya estaba conectado, se reutiliza. Si no, se abre primero.
+**Windows y SSH agent:**
+
+```typescript
+// src/tools/ssh/inventory.ts
+function resolveAgentSocket(): string {
+  if (process.platform === 'win32') {
+    // Intentar primero el named pipe de OpenSSH for Windows
+    const opensshPipe = '\\\\.\\pipe\\openssh-ssh-agent';
+    // Si no existe, intentar Pageant (PuTTY agent)
+    return fs.existsSync(opensshPipe) ? opensshPipe : 'pageant';
+  }
+  const sock = process.env.SSH_AUTH_SOCK;
+  if (!sock) throw new Error(
+    'useAgent: true requiere SSH_AUTH_SOCK definido en el entorno. ' +
+    'Ejecuta eval $(ssh-agent) o conecta un agente SSH.'
+  );
+  return sock;
+}
+```
 
 ---
 
-#### Política destructiva en `ssh_exec`
+#### Verificación de host key (TOFU y `known_hosts`)
 
-El `ToolDispatcher` aplica la misma lista de patrones destructivos de §12.5 al campo `command` antes de ejecutar remotamente. Si detecta un patrón peligroso, solicita confirmación interactiva.
+> **Por qué es crítico:** `ssh2` sin `hostVerifier` no verifica la clave del servidor. Eso expone cada conexión a ataques MITM. Para una herramienta de administración de infraestructura, esto no es aceptable por defecto.
 
-Adicionalmente, si el host tiene `confirmAll: true`, **cualquier** `ssh_exec` sobre ese host requiere confirmación, independientemente del comando:
+**Política por defecto: TOFU (Trust On First Use)**
 
 ```
-⚠  El agente quiere ejecutar un comando en prod-web (host con confirmación obligatoria):
+Primera conexión a un host:
+  1. ssh2 presenta la clave pública del servidor
+  2. Stratum busca el alias en ~/.stratum/known_hosts (formato propio — ver abajo)
+  3. Si no existe entrada:
+     a. Mostrar fingerprint SHA-256 al usuario:
+        ⚠  Host nuevo: prod-web (192.168.1.10)
+           Fingerprint: SHA256:xK3m... (ED25519)
+           ¿Confiar y añadir a known_hosts? (s/N)
+     b. Si el usuario acepta: guardar la clave y continuar
+     c. Si rechaza o no es TTY: abortar con tool_error
+  4. Si existe entrada y la clave coincide: continuar (silencioso)
+  5. Si existe entrada pero la clave NO coincide:
+     → Abortar SIEMPRE (no hay override interactivo)
+     → Emitir tool_error con recoverable: false:
+```
+
+```xml
+<tool_error>
+  <tool>ssh_exec</tool>
+  <error>HOST KEY MISMATCH for 'prod-web' (192.168.1.10).
+  Stored:   SHA256:xK3m... (ED25519)
+  Received: SHA256:9pQr... (ED25519)
+  This may indicate a MITM attack or the host was reinstalled.
+  To update the key: stratum ssh trust prod-web --force</error>
+</tool_error>
+```
+
+**Políticas disponibles:**
+
+| `hostKeyPolicy` | Comportamiento |
+|---|---|
+| `"tofu"` (default) | TOFU: primera vez pregunta, después verifica. |
+| `"strict"` | Requiere `hostKeyHash` (SHA-256 hex) en la config. Rechaza si no coincide exactamente. Para hosts críticos de producción. |
+| `"insecure"` | Sin verificación. Solo para entornos de lab/desarrollo controlados. Emite warning al conectar. |
+
+**Almacenamiento de `known_hosts`:** `~/.stratum/known_hosts.json` (no el formato OpenSSH, para evitar conflictos):
+
+```json
+{
+  "prod-web": {
+    "fingerprint": "SHA256:xK3m...",
+    "algorithm":   "ssh-ed25519",
+    "addedAt":     "2026-05-29T10:30:00Z",
+    "host":        "192.168.1.10"
+  }
+}
+```
+
+**Comando para gestionar host keys:**
+```bash
+stratum ssh trust <alias>          # muestra el fingerprint actual y pregunta si confiar
+stratum ssh trust <alias> --force  # actualiza la entrada (tras reinstalación del host)
+stratum ssh trust <alias> --remove # elimina la entrada
+```
+
+---
+
+#### Seguridad operacional: detección destructiva y `confirmAll`
+
+**La detección de patrones destructivos en `ssh_exec` es una red de seguridad blanda, no un control real.**
+
+Motivo: el campo `command` es un string que pasa a un shell remoto. Es trivialmente evasible — variable expansion, `base64 -d | sh`, here-docs, scripts que ya residen en el host. El escáner ve la cadena, no lo que se ejecuta.
+
+Lo que sí hace: atrapar errores del LLM (comandos destructivos literales generados por descuido), igual que `bash` local.
+
+**La defensa real en hosts remotos es `confirmAll: true`.**
+
+```
+Recomendación en el system prompt y en la config de ejemplo:
+  - Hosts de producción → confirmAll: true siempre
+  - Hosts de desarrollo/staging → confirmAll: false aceptable
+```
+
+Con `confirmAll: true`, **cualquier** `ssh_exec` sobre ese host requiere confirmación explícita del usuario, independientemente del comando:
+
+```
+⚠  El agente quiere ejecutar un comando en prod-web [confirmAll: true]:
    ssh_exec [prod-web]: ls -la /var/www/html
 
 ¿Continuar? (s/N) _
 ```
+
+El `.stratumrc.json.example` incluirá los hosts de producción con `confirmAll: true` preconfigurado.
+
+---
+
+#### PTY y stdin — comandos interactivos
+
+`ssh_exec` por defecto hace `exec` sin TTY. Esto cubre la mayoría de comandos de administración (`systemctl`, `df`, `ls`, scripts no interactivos). Pero **los siguientes casos fallan o se cuelgan** sin PTY:
+
+- `sudo <comando>` cuando sudo pide password (bloquea hasta timeout)
+- `apt install`, `dnf install` sin `-y` (pide confirmación en TTY)
+- Cualquier herramienta que detecte `isatty()` y cambie comportamiento
+- Editores (`vim`, `nano`) — no soportados en ningún modo
+
+**Soluciones según el caso:**
+
+```typescript
+// Caso 1: sudo sin password en el host (mejor solución para automatización)
+// Configurar NOPASSWD en /etc/sudoers del host — no requiere PTY ni stdin
+
+// Caso 2: sudo con password — usar stdin (sin PTY)
+ssh_exec({ host: 'prod-web', command: 'sudo -S systemctl restart nginx', stdin: 'mypassword\n' })
+// stdin envía el password al prompt de sudo -S (lee de stdin, no de TTY)
+
+// Caso 3: comando que necesita TTY real — usar pty: true
+ssh_exec({ host: 'prod-web', command: 'sudo visudo', pty: true })
+// Con PTY: stdout y stderr se mezclan, exit code puede ser 0 aunque el comando falle
+// El LLM debe ser informado de esta limitación en la descripción del tool
+```
+
+**Comportamiento con `pty: true`:**
+- `ssh2` alloca un pseudo-terminal en el servidor
+- stdout y stderr se mezclan en un único stream
+- El exit code puede no reflejar el resultado real en algunos casos
+- El output incluye caracteres de control del terminal (escape sequences); `ssh_exec` los filtra antes de devolver el resultado al LLM
+
+**Documentar en el system prompt:** el LLM debe saber que `sudo` en hosts remotos requiere `NOPASSWD` o `stdin` con la contraseña, y que `pty: true` mezcla stdout/stderr.
+
+---
+
+#### Límite de salida y protección del contexto
+
+Un `journalctl`, `tail -f`, `cat /var/log/syslog` o cualquier comando de larga salida puede volcar megabytes al contexto del LLM, disparando compresión (§12.4) o reventando la ventana.
+
+**Límites aplicados por `ssh_exec`:**
+
+```typescript
+const DEFAULT_MAX_BYTES = 256 * 1024; // 256 KB
+
+// Dentro de _handleExec():
+let totalBytes = 0;
+let truncated  = false;
+
+stream.on('data', (chunk: Buffer) => {
+  if (truncated) return;
+  totalBytes += chunk.length;
+  if (totalBytes > maxBytes) {
+    truncated = true;
+    stream.signal('KILL');   // SIGKILL al proceso remoto
+    return;
+  }
+  outputBuffer += chunk.toString();
+});
+```
+
+Cuando se trunca, el resultado incluye un aviso explícito:
+
+```xml
+<ssh_result host="prod-web" exitCode="truncated" duration="1204ms" truncated="true" maxBytes="262144">
+  <stdout>
+    ... primeros 256 KB del output ...
+    [OUTPUT TRUNCATED at 262144 bytes. Use head/grep/tail to limit output, or increase maxBytes in the tool call.]
+  </stdout>
+</ssh_result>
+```
+
+**Comandos no-terminantes** (`tail -f`, `watch`): el `timeout` (default 30s) los mata con SIGKILL en el host remoto. El resultado se devuelve truncado igual que arriba. El LLM debe evitar comandos que no terminan; se documenta en la descripción de la tool.
+
+---
+
+#### Jump hosts — algoritmo completo
+
+```
+SSHConnectionPool.getConnection("prod-web"):
+
+  1. Leer config: prod-web.jumpHost = "bastion"
+
+  2. getConnection("bastion")
+     — si "bastion" tiene otro jumpHost, recursión (máx depth: 2)
+     — si "bastion" está en inflight, await de la promesa existente (sin carrera)
+     — connectTimeout: bastion.connectTimeout (default 10s); si expira → error fatal
+
+  3. bastion.forwardOut(prod-web.host, prod-web.port, 'localhost', 0) → stream TCP
+
+  4. new ssh2.Client().connect({
+       sock:           stream,        // túnel TCP sobre la conexión del bastión
+       connectTimeout: prod-web.connectTimeout,
+       hostVerifier:   (key) => verifyHostKey('prod-web', key),  // SIEMPRE verificar
+       ...prod-web-auth-config
+     })
+
+  5. Cachear "prod-web" en el pool
+```
+
+**Timeout total de la cadena:** cada hop tiene su propio `connectTimeout`. Un host muerto falla en `connectTimeout` ms, no en el timeout del comando. Ejemplo: bastión con 10s + host final con 10s = hasta 20s antes de fallar, dentro del timeout de comando (default 30s).
+
+---
+
+#### Ciclo de vida de las conexiones y reconexión
+
+**Apertura:** lazy al primer uso — no al arrancar Stratum.
+
+**Reconexión:** se distinguen dos escenarios:
+
+| Escenario | Comportamiento |
+|---|---|
+| Conexión que se cae **durante la sesión** (ya establecida, error de red posterior) | Reintento en background con backoff: 2s → 4s → 8s (máx 3 intentos). Si hay una tool call esperando, se cola hasta que reconecte o supere el `commandTimeout`. |
+| **Primera** apertura de una conexión que falla | No hay backoff. Falla inmediatamente con `tool_error` descriptivo. El agente puede reintentar si lo considera oportuno. |
+
+Para reconexiones con jump host: primero se reconecta el bastión (si está caído), luego el host dependiente. El `inflight` Map previene la carrera.
+
+**Teardown (`closeAll()`) — orden de cierre:**
+
+```
+1. Identificar dependencias: qué conexiones usan jump hosts
+2. Cerrar primero las conexiones hoja (las que son destino, no bastiones)
+3. Después cerrar los bastiones
+4. Timeout por cierre: 2s por conexión; SIGKILL al proceso ssh2 si no responde
+```
+
+Cerrar el bastión antes que las conexiones que dependen de él causa errores en los streams dependientes. El orden inverso al de apertura es siempre seguro.
+
+---
+
+#### Log de auditoría
+
+Todos los comandos remotos ejecutados se registran en `~/.stratum/logs/ssh-audit.jsonl`:
+
+```json
+{"timestamp":"2026-05-29T10:30:00Z","sessionId":"sess_abc","host":"prod-web","command":"systemctl restart nginx","exitCode":0,"durationMs":342,"truncated":false}
+{"timestamp":"2026-05-29T10:31:00Z","sessionId":"sess_abc","host":"prod-web","command":"rm -rf /tmp/cache","exitCode":0,"durationMs":89,"truncated":false}
+```
+
+- Rotación por tamaño: 10 MB → `ssh-audit.jsonl.1` (se guardan los 3 últimos archivos)
+- El `password` / `passphrase` nunca se loguea
+- Configurable con `ssh.auditLog: false` para deshabilitar o `ssh.auditLog: "/ruta/custom.jsonl"` para ruta alternativa
+- `sftp_upload` y `sftp_download` también se loguean (con campos `localPath`/`remotePath` en lugar de `command`)
+
+---
+
+#### `stratum ssh list` — conectividad sin autenticación
+
+El comando **no establece conexiones SSH completas** para listar hosts. Solo hace TCP connect al puerto para comprobar alcanzabilidad:
+
+```
+$ stratum ssh list
+
+  Hosts SSH configurados (3):
+
+  ⚡ bastion      bastion.example.com:22   auth: key              [alcanzable  ~12ms]
+  ○  prod-web     192.168.1.10:22          auth: key   via bastion [no alcanzable] ⚠ confirmAll
+  ?  dev-server   10.0.0.5:22              auth: agent            [tiempo de espera]
+```
+
+- `⚡` — TCP connect exitoso (no implica auth válida)
+- `○` — no alcanzable (TCP refused o timeout de 3s)
+- `?` — timeout sin respuesta
+- `⚠ confirmAll` — indicador visible para hosts marcados con `confirmAll: true`
+
+Si el host ya tiene una conexión SSH activa en el pool (sesión en curso), se muestra `[conectado]` en lugar de hacer TCP check.
+
+Los hosts con `hostKeyPolicy: "insecure"` muestran `⚠ insecure` como aviso.
 
 ---
 
@@ -1701,17 +2015,16 @@ Adicionalmente, si el host tiene `confirmAll: true`, **cualquier** `ssh_exec` so
 </ssh_result>
 ```
 
-Si `exitCode !== 0`, el resultado se inyecta como `tool_error` con `recoverable: true`:
-
+Si `exitCode !== 0`:
 ```xml
 <tool_error>
   <tool>ssh_exec</tool>
-  <error>Command failed on prod-web (exit code 1): bash: comando_inexistente: command not found</error>
+  <error>Command failed on prod-web (exit code 1): bash: cmd_inexistente: command not found</error>
   <suggestion>Verify the command exists on the remote host. Use ssh_exec with 'which <command>' to check.</suggestion>
 </tool_error>
 ```
 
-Si el host alias no existe en el inventario:
+Si el alias no existe en el inventario:
 ```xml
 <tool_error>
   <tool>ssh_exec</tool>
@@ -1722,35 +2035,34 @@ Si el host alias no existe en el inventario:
 
 ---
 
-#### Comando `stratum ssh list`
-
-```
-$ stratum ssh list
-
-  Hosts SSH configurados (3):
-
-  ● bastion      bastion.example.com:22   auth: key              [conectado  ~12ms]
-  ○ prod-web     192.168.1.10:22          auth: key   via bastion [no conectado]
-  ○ dev-server   10.0.0.5:22              auth: agent            [no conectado]
-```
-
-El comando funciona sin UI Ink (plain text al stdout). Los hosts marcados con `confirmAll: true` muestran un indicador `⚠` junto al alias.
-
----
-
 #### Implementación
 
 ```
 src/tools/ssh/
-  pool.ts        ← SSHConnectionPool (gestión de conexiones, reconnect, closeAll)
-  exec.ts        ← tool ssh_exec
-  sftp.ts        ← tools ssh_upload / ssh_download
-  inventory.ts   ← carga del inventario desde config, validación Zod, helper de auth
+  pool.ts        ← SSHConnectionPool (inflight map, reconnect, closeAll con orden de teardown)
+  exec.ts        ← tool ssh_exec (PTY, stdin, maxBytes, audit log)
+  sftp.ts        ← tools ssh_upload / ssh_download (audit log)
+  hostkeys.ts    ← TOFU / strict / insecure — lectura y escritura de ~/.stratum/known_hosts.json
+  auth.ts        ← resolución de secretos (keychain, env, passphrase), agent socket por plataforma
+  inventory.ts   ← carga del inventario desde config, validación Zod
 src/cli/commands/
-  ssh.ts         ← subcomando `stratum ssh list`
+  ssh.ts         ← subcomandos: stratum ssh list, stratum ssh trust <alias> [--force|--remove]
 ```
 
-Las tres tools se registran en el `ToolRegistry` desde `StratumAgent.init()`, solo si `config.ssh.hosts` tiene al menos una entrada. Mismo patrón que las tools de filesystem y web.
+Las tools se registran en el `ToolRegistry` desde `StratumAgent.init()`, solo si `config.ssh.hosts` tiene al menos una entrada. Mismo patrón que las tools de filesystem y web.
+
+**Items del Hito 9 revisados** (sustituyen a los del roadmap §9):
+- Pool con in-flight mutex y reconexión diferenciada (drop vs. first-connect)
+- `ssh_exec` con PTY opcional, stdin, maxBytes y truncado explícito
+- Verificación de host key: TOFU por defecto, strict con hash pinnado, insecure explícito
+- `known_hosts.json` + comandos `stratum ssh trust`
+- Resolución de secretos: keychain → env var → prompt → error
+- Soporte de SSH agent multiplataforma (Linux/macOS `SSH_AUTH_SOCK`, Windows Pageant/named pipe)
+- `passphrase` en claves privadas cifradas
+- Reencuadre de la detección destructiva como soft net; `confirmAll: true` en el ejemplo de config de hosts de producción
+- Log de auditoría `ssh-audit.jsonl` con rotación
+- `stratum ssh list` con TCP-only check (no autenticación al listar)
+- Orden de teardown en `closeAll()`: hojas antes que bastiones
 
 ---
 
