@@ -457,10 +457,9 @@ export class ReactLoop {
         return;
       }
 
-      // Fix #1: error fatal → done con 'stop' (spec 12.1 solo permite stop/max_iterations/cancelled)
       if (fatalError !== null) {
         yield { type: 'error', message: fatalError, fatal: true };
-        yield { type: 'done', stopReason: 'stop' };
+        yield { type: 'done', stopReason: 'error' };
         return;
       }
 

@@ -4,6 +4,7 @@ import type { ToolSchema } from '../providers/base.js';
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
+  private disabledTools = new Set<string>();
 
   register(tool: ToolDefinition): void {
     this.tools.set(tool.name, tool);
@@ -13,26 +14,33 @@ export class ToolRegistry {
     return this.tools.get(name);
   }
 
+  /** Elimina la tool del schema enviado al LLM para el resto de la sesión (spec 12.3). */
+  disableForSession(name: string): void {
+    this.disabledTools.add(name);
+  }
+
   list(): ToolDefinition[] {
     return Array.from(this.tools.values());
   }
 
   toToolSchemas(): ToolSchema[] {
-    return this.list().map((tool) => {
-      const full = zodToJsonSchema(tool.schema, {
-        $refStrategy: 'none',
-        target: 'jsonSchema7',
-      }) as Record<string, unknown>;
-      const { $schema: _unused, ...parameters } = full;
-      return {
-        type: 'function',
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: parameters as Record<string, unknown>,
-        },
-      } satisfies ToolSchema;
-    });
+    return this.list()
+      .filter((tool) => !this.disabledTools.has(tool.name))
+      .map((tool) => {
+        const full = zodToJsonSchema(tool.schema, {
+          $refStrategy: 'none',
+          target: 'jsonSchema7',
+        }) as Record<string, unknown>;
+        const { $schema: _unused, ...parameters } = full;
+        return {
+          type: 'function',
+          function: {
+            name: tool.name,
+            description: tool.description,
+            parameters: parameters as Record<string, unknown>,
+          },
+        } satisfies ToolSchema;
+      });
   }
 }
 
@@ -105,15 +113,15 @@ export class ToolDispatcher {
       };
     }
 
-    // Fix #3: bloquear tool que superó maxToolRetries fallos en la sesión (spec 12.3)
     const failCount = this.toolFailureCounts.get(call.name) ?? 0;
     if (failCount >= this.maxToolRetries) {
+      this.registry.disableForSession(call.name);
       return {
         callId: call.id,
         toolName: call.name,
         result: {
           ok: false,
-          error: `Tool "${call.name}" has failed ${failCount} times this session and is disabled.`,
+          error: `Tool "${call.name}" has been disabled for this session after ${failCount} consecutive failures.`,
           recoverable: false,
         },
         durationMs: Date.now() - start,
