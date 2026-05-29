@@ -439,7 +439,7 @@ export function App({ agent, version }: Props) {
   if (state.phase === 'banner') {
     return (
       <Box>
-        <Banner version={version} onSend={(text) => void send(text)} />
+        <Banner version={version} onSend={handleSend} />
       </Box>
     );
   }
