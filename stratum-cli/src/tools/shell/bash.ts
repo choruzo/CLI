@@ -21,16 +21,45 @@ export const bashTool: ToolDefinition = {
     const { command, timeout } = schema.parse(params);
     const timeoutMs = timeout ?? ctx.config.tools.bashTimeout;
 
+    // On Linux/Mac, detached puts the child in its own process group so we can
+    // kill the entire group (sh + its children) on timeout, preventing orphaned
+    // processes from keeping the stdout/stderr pipes open indefinitely.
+    const subprocess = execa(command, {
+      shell: SHELL,
+      cancelSignal: ctx.signal,
+      all: true,
+      reject: false,
+      cwd: ctx.cwd,
+      ...(process.platform !== 'win32' && { detached: true }),
+    });
+
+    let timedOut = false;
+
+    const timeoutId = setTimeout(() => {
+      timedOut = true;
+      const pid = subprocess.pid;
+      if (pid !== undefined && process.platform !== 'win32') {
+        try {
+          process.kill(-pid, 'SIGTERM');
+        } catch {}
+        setTimeout(() => {
+          try {
+            process.kill(-pid, 'SIGKILL');
+          } catch {}
+        }, 500);
+      } else {
+        subprocess.kill('SIGTERM');
+        setTimeout(() => subprocess.kill('SIGKILL'), 500);
+      }
+    }, timeoutMs);
+
     try {
-      const result = await execa(command, {
-        shell: SHELL,
-        timeout: timeoutMs,
-        forceKillAfterDelay: 500,
-        cancelSignal: ctx.signal,
-        all: true,
-        reject: false,
-        cwd: ctx.cwd,
-      });
+      const result = await subprocess;
+      clearTimeout(timeoutId);
+
+      if (timedOut) {
+        return { ok: false, error: `Command timed out after ${timeoutMs}ms`, recoverable: true };
+      }
 
       const output = result.all ?? result.stdout ?? '';
       const stderr = result.stderr;
@@ -45,6 +74,7 @@ export const bashTool: ToolDefinition = {
 
       return { ok: true, output: text.trim() || '(no output)' };
     } catch (err) {
+      clearTimeout(timeoutId);
       const msg = err instanceof Error ? err.message : String(err);
       return { ok: false, error: msg, recoverable: true };
     }
