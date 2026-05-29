@@ -29,7 +29,8 @@ src/cli/
     ├── ConversationView.tsx    StatusBar + MessageList + InputArea
     ├── MessageList.tsx         <Static> + currentItem (scroll pattern)
     ├── StatusBar.tsx           ● provider │ model [gap] ctx ~N/Nk │ % (~ si estimado)
-    ├── InputArea.tsx           ink-text-input con ❯❯ prompt
+    ├── InputArea.tsx           ink-text-input con ❯❯ prompt + CommandPalette encima al escribir /
+    ├── CommandPalette.tsx      Panel de /comandos: dos columnas (nombre + descripción), filtrado en tiempo real, scroll
     ├── AgentMessage.tsx        Label "Stratum" + ToolCallBlock[] + StreamingText
     ├── UserMessage.tsx         Label "You" + texto
     ├── StreamingText.tsx       Texto + cursor █ parpadeante (500ms)

@@ -311,16 +311,6 @@ Cuando el modelo emite varias tool calls en un turno, se muestran en stack verti
 
 ### 5.2 Input Area — /comandos y autocompletado
 
-```
-  ❯❯ /mem|
-         ┌──────────────────────────────┐
-         │ /memory list                 │
-         │ /memory search <query>       │
-         │ /memory forget <id>          │
-         │ /memory show                 │
-         └──────────────────────────────┘
-```
-
 El área de input tiene tres modos:
 
 **Modo normal:**
@@ -329,11 +319,38 @@ El área de input tiene tres modos:
 - Placeholder: `Type a message or / for commands...` en gris `#4B5563`
 
 **Modo /comando:**
-- Al escribir `/`, aparece inmediatamente el dropdown de autocompletado
-- El dropdown se renderiza como un bloque `<Box>` con `borderStyle="single"` y `borderColor="#2A2A2A"` — box-drawing characters (`┌─┐│└┘`). No hay `border-radius` en terminal.
-- Ítem activo: texto en `chalk.hex('#F59E0B').bold`, prefijado con `▶`
-- Ítem inactivo: `chalk.hex('#9CA3AF')`
-- Navegación: flechas `↑↓`, selección `Enter`, cancelar `Esc`
+
+Al escribir `/` aparece inmediatamente un panel de autocompletado **encima** del input. El panel ocupa el ancho completo del terminal y muestra hasta 8 ítems antes de hacer scroll. Se filtra en tiempo real conforme el usuario sigue escribiendo (ej. `/mem` filtra a los cuatro comandos `/memory *`).
+
+```
+  ┌─────────────────────────────────────────────────────────────────────┐
+  │ ▶ /clear          Purga la conversación y el contexto del LLM       │
+  │   /compact        Fuerza la compresión de contexto ahora            │
+  │   /config get     Muestra el valor de una clave de configuración    │
+  │   /config set     Cambia una clave de configuración en caliente     │
+  │   /context        Estadísticas de uso del contexto actual           │
+  └─────────────────────────────────────────────────────────────────────┘
+  ❯❯ /c|
+```
+
+**Layout del panel:**
+- El panel se renderiza como `<Box flexDirection="column">` posicionado con `marginBottom={1}` respecto al input — siempre visible encima, nunca solapa el texto del historial.
+- Borde: `borderStyle="single"`, `borderColor="#2A2A2A"`.
+- Dos columnas fijas separadas por dos espacios: comando (ancho fijo al comando más largo del set filtrado) + descripción (resto del ancho disponible, truncada con `…` si no cabe).
+- Ítem activo: nombre del comando en `chalk.hex('#F59E0B').bold`, prefijado con `▶`, descripción en `chalk.hex('#D1D5DB')`.
+- Ítem inactivo: nombre en `chalk.hex('#9CA3AF')`, descripción en `chalk.hex('#4B5563')`.
+- Si los ítems filtrados superan 8, se muestra un indicador de scroll `↑↓ para navegar` en la última línea del panel en gris `#4B5563`.
+
+**Filtrado:**
+- La búsqueda coincide con cualquier parte del nombre del comando (substring match), no solo el prefijo. Ej. `/mem` filtra `/memory *`, pero `/show` también muestra `/memory show`.
+- Si el input no coincide con ningún comando (ej. `/xyzxyz`), el panel se oculta — no se muestra vacío.
+- Al seleccionar un comando con subcomandos (`/memory`, `/sessions`, `/config`), el texto del input se reemplaza por el prefijo elegido y el panel se actualiza al siguiente nivel (ej. seleccionar `/memory` → input muestra `/memory `, panel filtra a `list`, `search`, `forget`, `show`).
+
+**Navegación:**
+- `↑↓` — mueve la selección; al llegar al extremo, hace wrap.
+- `Enter` — completa el comando en el input. Si el comando no tiene argumentos, lo ejecuta directamente.
+- `Tab` — igual que `Enter` para completar (consistente con el modelo mental de shell).
+- `Esc` — cierra el panel, el texto escrito permanece en el input.
 
 **Modo waiting (agente procesando):**
 - Prompt `❯❯` en gris `#4B5563` (deshabilitado)

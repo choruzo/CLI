@@ -224,7 +224,7 @@ export class InitAgent {
 
     // Leer .github/workflows/*.yml (CI/CD) — §12.13 paso 3
     const workflowsDir = join(cwd, '.github', 'workflows');
-    if (existsSync(workflowsDir) && !this.isGitignored('.github', gitignorePatterns)) {
+    if (existsSync(workflowsDir) && !this.isGitignored('.github/workflows', gitignorePatterns)) {
       try {
         const ymlFiles = readdirSync(workflowsDir).filter(
           (f) => f.endsWith('.yml') || f.endsWith('.yaml'),
@@ -275,6 +275,7 @@ export class InitAgent {
           candidates.push(...Object.values(pkg['bin'] as Record<string, string>));
         }
         for (const ep of candidates) {
+          if (this.isGitignored(ep, gitignorePatterns)) continue;
           const epPath = join(cwd, ep);
           if (existsSync(epPath)) {
             scannedFiles.push(ep);
@@ -308,6 +309,7 @@ export class InitAgent {
 
     // Rust / Go: entry points estáticos — §12.13 paso 5
     for (const ep of ['src/main.rs', 'cmd/main.go', 'main.go']) {
+      if (this.isGitignored(ep, gitignorePatterns)) continue;
       const epPath = join(cwd, ep);
       if (existsSync(epPath)) {
         scannedFiles.push(ep);
@@ -361,6 +363,15 @@ export class InitAgent {
       }
       const indent = '  '.repeat(depth);
       if (stat.isDirectory()) {
+        // Aunque el directorio esté ignorado, recursamos si hay negaciones para hijos
+        // (p.ej. .gitignore tiene `.github` pero también `!.github/workflows`).
+        const prefix = relPath + '/';
+        const hasNegatedDescendants = gitignorePatterns.some((p) => {
+          if (!p.startsWith('!')) return false;
+          const neg = p.slice(1).startsWith('/') ? p.slice(2) : p.slice(1);
+          return neg.startsWith(prefix);
+        });
+        if (this.isGitignored(relPath, gitignorePatterns) && !hasNegatedDescendants) continue;
         lines.push(`${indent}${entry}/`);
         const sub = this.buildDirTree(fullPath, depth + 1, maxDepth, gitignorePatterns, relPath);
         if (sub) lines.push(sub);
