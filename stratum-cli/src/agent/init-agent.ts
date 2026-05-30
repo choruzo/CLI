@@ -154,6 +154,7 @@ export class InitAgent {
   constructor(
     private readonly provider: IProvider,
     private readonly model: string,
+    private readonly providerInfo?: { name: string; baseUrl: string },
   ) {}
 
   async *run(cwd: string, options: InitOptions = {}): AsyncGenerator<InitEvent> {
@@ -181,7 +182,27 @@ export class InitAgent {
     try {
       generatedSections = await this.synthesize(scanData);
     } catch (err) {
-      yield { type: 'error', message: `Error generando STRATUM.md: ${String(err)}` };
+      const msg = String(err);
+      const isNetworkError =
+        msg.includes('fetch failed') ||
+        msg.includes('ECONNREFUSED') ||
+        msg.includes('ENOTFOUND') ||
+        msg.includes('connect ETIMEDOUT');
+
+      if (isNetworkError) {
+        const name = this.providerInfo?.name ?? 'desconocido';
+        const baseUrl = this.providerInfo?.baseUrl ?? 'desconocida';
+        yield {
+          type: 'error',
+          message:
+            `No se pudo conectar al proveedor LLM "${name}" (${baseUrl}).\n` +
+            `  Verifica que el servidor esté corriendo y accesible.\n` +
+            `  Si usas Ollama: ejecuta \`ollama serve\` antes de \`stratum init\`.\n` +
+            `  Para cambiar el proveedor: edita .stratumrc.json o usa \`stratum config set\`.`,
+        };
+      } else {
+        yield { type: 'error', message: `Error generando STRATUM.md: ${msg}` };
+      }
       return;
     }
 

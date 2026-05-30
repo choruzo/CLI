@@ -97,7 +97,13 @@ export const initCommand = new Command('init')
     // -----------------------------------------------------------------------
     // Ejecutar InitAgent
     // -----------------------------------------------------------------------
-    const agent = new InitAgent(router.getActive(), router.model);
+    const activeProviderName = config.provider?.default ?? 'desconocido';
+    const activeProviderBaseUrl =
+      config.provider?.providers?.[activeProviderName]?.baseUrl ?? 'desconocida';
+    const agent = new InitAgent(router.getActive(), router.model, {
+      name: activeProviderName,
+      baseUrl: activeProviderBaseUrl,
+    });
 
     const stopScan = spin('Escaneando estructura...');
     let scanDone = false;
