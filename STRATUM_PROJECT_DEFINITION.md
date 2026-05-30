@@ -539,12 +539,12 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 ---
 
 ### Hito 2 — Memory Layer 1 *(~3 días)*
-- [ ] `STRATUM.md` loader (proyecto + global)
-- [ ] Inyección en system prompt
-- [ ] `SessionContext`: historial de conversación
-- [ ] Compresión de contexto básica (truncation con resumen)
-- [ ] Comando `stratum memory show`
-- [ ] `stratum init` y `/init` — scan de proyecto y generación/actualización de `STRATUM.md` (ver §12.13)
+- [x] `STRATUM.md` loader (proyecto + global)
+- [x] Inyección en system prompt
+- [x] `SessionContext`: historial de conversación
+- [x] Compresión de contexto básica (truncation con resumen)
+- [x] Comando `stratum memory show`
+- [x] `stratum init` y `/init` — scan de proyecto y generación/actualización de `STRATUM.md` (ver §12.13)
 
 > **UI:** El porcentaje de contexto en el status bar pasa a ser funcional (cambia de color según el umbral: verde / ámbar / rojo). Activar el comando `/memory show` en el input. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de contexto %), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/memory show`).
 
