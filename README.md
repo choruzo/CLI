@@ -1,41 +1,72 @@
 # Stratum CLI
 
-Agente de línea de comandos extensible construido sobre un loop ReAct (Reason → Act → Observe). Provider-agnostic: compatible con cualquier API OpenAI-compatible — Ollama, llama.cpp, vLLM, LiteLLM, OpenAI nativo, y más.
+Stratum CLI es un agente de linea de comandos extensible basado en un loop ReAct (Reason -> Act -> Observe). El proyecto esta pensado para ser **provider-agnostic** mediante APIs OpenAI-compatible y para combinar ejecucion de herramientas, memoria de proyecto y sesiones persistentes.
 
-## Características
+> **Estado actual:** este repositorio contiene la especificacion completa del producto y una implementacion funcional en `stratum-cli/`. Hoy ya funciona con providers OpenAI-compatible, sesiones persistidas, `STRATUM.md` como memoria de proyecto y tres tools integradas (`read_file`, `write_file`, `bash`). Varias capacidades del roadmap siguen en progreso.
 
-- **Loop ReAct** — el agente razona, actúa y observa en iteraciones hasta completar la tarea
-- **Provider-agnostic** — un cliente OpenAI-compatible universal; sin dependencia de SDKs de terceros
-- **Local-first** — no requiere servicios externos; todo puede correr en local
-- **Memoria en 3 capas** — contexto de proyecto (Markdown), decision store (JSON), búsqueda semántica (SQLite + embeddings ONNX)
-- **Tools extensibles** — filesystem, shell, web, SSH remoto; más cualquier herramienta MCP externa
-- **SSH nativo** — cliente puro Node.js con connection pooling, SFTP y soporte de jump hosts
-- **UI reactiva** — interfaz terminal con Ink (React para CLIs)
+## Que incluye hoy
 
-## Instalación
+- **CLI operativa** con comandos `chat`, `run`, `init`, `config`, `sessions` y `memory show`
+- **Provider router** para configuraciones OpenAI-compatible
+- **Loop ReAct** con streaming, tool calls y compresion de contexto
+- **Memoria de proyecto** cargada desde `STRATUM.md`
+- **Sesiones persistentes** para listar, reanudar y limpiar conversaciones
+- **UI de terminal** basada en Ink para el modo interactivo
 
-```bash
-npm install -g stratum-cli
-```
+## Estado de implementacion
+
+| Area | Disponible hoy | Notas |
+|---|---|---|
+| Providers | `openai-compatible` | Compatible con Ollama, llama.cpp, vLLM, LiteLLM, OpenAI y proxies equivalentes |
+| Tools built-in | `read_file`, `write_file`, `bash` | Son las unicas registradas por defecto actualmente |
+| Memoria | `STRATUM.md`, `memory show` | `memory list/search/forget` aun no estan implementados |
+| Sesiones | `list`, `resume`, `delete`, `prune` | Persistencia local de conversaciones |
+| MCP / SSH / web tools | En roadmap | La especificacion y el schema ya contemplan estas areas, pero no forman parte del runtime actual |
+
+## Estructura del repositorio
+
+| Ruta | Contenido |
+|---|---|
+| `stratum-cli/` | Implementacion actual del CLI |
+| `STRATUM_PROJECT_DEFINITION.md` | Definicion del producto, arquitectura e invariantes |
+| `STRATUM_UI_SPECIFICATION.md` | Especificacion de la UI de terminal |
+| `CLI-DOC/` | Documentacion complementaria del proyecto |
+
+## Inicio rapido para desarrollo
 
 Requiere **Node.js 22+**.
 
-## Inicio rápido
-
 ```bash
-# Inicializa la config en el directorio actual
-stratum init
-
-# Abre el REPL interactivo
-stratum chat
-
-# Ejecuta una tarea en modo one-shot
-stratum run "Analiza ./src y encuentra posibles memory leaks"
+cd stratum-cli
+npm install
+npm run build
+node dist/index.js --help
 ```
 
-## Configuración
+Ejemplos:
 
-Crea `.stratumrc.json` en la raíz del proyecto (o ejecuta `stratum init`):
+```bash
+# Inicializa .stratumrc.json y genera/actualiza STRATUM.md
+node dist/index.js init
+
+# Abre el modo interactivo
+node dist/index.js chat
+
+# Ejecuta una tarea one-shot
+node dist/index.js run "Analiza ./src y resume la arquitectura"
+```
+
+Si prefieres usar el binario `stratum` durante el desarrollo:
+
+```bash
+cd stratum-cli
+npm link
+stratum --help
+```
+
+## Configuracion
+
+`stratum init` crea una configuracion minima, pero tambien puedes escribir `.stratumrc.json` manualmente:
 
 ```json
 {
@@ -46,128 +77,105 @@ Crea `.stratumrc.json` en la raíz del proyecto (o ejecuta `stratum init`):
         "type": "openai-compatible",
         "baseUrl": "http://localhost:11434/v1",
         "model": "qwen2.5-coder:32b",
-        "apiKey": "ollama"
-      },
-      "litellm-proxy": {
-        "type": "openai-compatible",
-        "baseUrl": "http://localhost:4000/v1",
-        "model": "claude-sonnet-4-5",
-        "apiKey": "${LITELLM_API_KEY}"
+        "apiKey": "ollama",
+        "contextWindow": 32768
       }
     }
-  },
-  "memory": {
-    "projectFile": "./STRATUM.md",
-    "globalFile": "~/.stratum/STRATUM.md",
-    "decisionsFile": "~/.stratum/memory/decisions.json",
-    "vectorDb": "~/.stratum/memory/vectors.db"
-  },
-  "tools": {
-    "confirmDestructive": true,
-    "bashTimeout": 30000
   }
 }
 ```
 
-Las variables `${VAR_NAME}` se expanden desde el entorno al cargar la config. Si una variable requerida no está definida, el proceso aborta con un mensaje claro.
+Notas utiles:
 
-Ver `.stratumrc.json.example` para la estructura completa con SSH y MCP.
+- Las variables `${VAR_NAME}` se expanden desde el entorno al cargar la configuracion.
+- El ejemplo completo esta en `stratum-cli/.stratumrc.json.example`.
+- El schema actual tambien contempla bloques `memory`, `tools`, `mcp` y `agent`.
 
-## Comandos
+## Comandos disponibles
 
-| Comando | Descripción |
+### Implementados
+
+| Comando | Descripcion |
 |---|---|
-| `stratum chat` | REPL interactivo |
+| `stratum chat` | Abre una sesion interactiva |
+| `stratum chat --resume <session-id>` | Reanuda una sesion guardada |
 | `stratum run "<tarea>"` | Ejecuta una tarea en modo one-shot |
-| `stratum run --allow-destructive "<tarea>"` | One-shot sin confirmación en operaciones destructivas |
-| `stratum memory list` | Lista decisiones almacenadas |
-| `stratum memory search "<query>"` | Búsqueda semántica en memoria |
-| `stratum memory forget <id>` | Elimina una decisión |
-| `stratum sessions list` | Lista sesiones guardadas |
-| `stratum sessions resume <id>` | Retoma una sesión anterior |
-| `stratum sessions prune` | Elimina sesiones antiguas |
-| `stratum config get <clave>` | Lee un valor de la config |
-| `stratum config set <clave> <valor>` | Actualiza la config |
-| `stratum init` | Crea `.stratumrc.json` + `STRATUM.md` en el directorio actual |
+| `stratum run --allow-destructive "<tarea>"` | Ejecuta la tarea activando la politica de aprobacion para tools destructivas |
+| `stratum run --deny-destructive "<tarea>"` | Ejecuta la tarea con politica restrictiva para tools destructivas |
+| `stratum init [--force] [--dry-run]` | Inicializa el proyecto y genera/actualiza `STRATUM.md` |
+| `stratum config get <clave>` | Lee una clave de configuracion |
+| `stratum config set <clave> <valor>` | Actualiza una clave de configuracion |
+| `stratum sessions list [--last <n>]` | Lista sesiones guardadas |
+| `stratum sessions resume <id>` | Reanuda una sesion |
+| `stratum sessions delete <id>` | Elimina una sesion |
+| `stratum sessions prune [--older <duracion>]` | Borra sesiones antiguas |
+| `stratum memory show` | Muestra el `STRATUM.md` activo |
 
-## Tools disponibles
+### Previstos pero no implementados aun
 
-### Filesystem
-`read_file`, `write_file`, `edit_file`, `list_directory`, `glob`, `grep`
+| Comando | Estado actual |
+|---|---|
+| `stratum memory list` | Placeholder; devuelve mensaje de "Coming in Hito 5" |
+| `stratum memory search "<query>"` | Placeholder; devuelve mensaje de "Coming in Hito 5" |
+| `stratum memory forget <id>` | Placeholder; devuelve mensaje de "Coming in Hito 5" |
 
-### Shell
-`bash` — ejecuta comandos. Los patrones destructivos (`rm`, `dd`, `mkfs`, etc.) requieren confirmación explícita.
+## Tools built-in actuales
 
-### Web
-`web_search`, `web_fetch`
+| Tool | Descripcion |
+|---|---|
+| `read_file` | Lee un archivo completo o por rangos de lineas |
+| `write_file` | Crea o sobreescribe archivos |
+| `bash` | Ejecuta comandos shell con timeout y salida combinada |
 
-### SSH
-`ssh_exec`, `ssh_upload`, `ssh_download` — acceso remoto con connection pooling. Los hosts se definen en `.stratumrc.json` bajo la clave `ssh.hosts`.
+El runtime esta preparado para crecer con mas tools y registro dinamico, pero la instalacion actual solo registra esas tres de forma nativa.
 
-### MCP
-Cualquier herramienta de servidores MCP externos se registra automáticamente al iniciar el agente. Se configuran en `.stratumrc.json` bajo `mcp.servers`.
+> Nota: las flags `--allow-destructive` y `--deny-destructive` ya existen en la CLI, pero las tools built-in actuales no se registran como destructivas.
 
-## Memoria del proyecto (`STRATUM.md`)
+## Arquitectura actual
 
-El archivo `STRATUM.md` en la raíz del proyecto se carga en el system prompt al inicio de cada sesión. Úsalo para dar contexto permanente al agente:
-
-```markdown
-# Stratum Memory
-
-## Proyecto
-Stack: Node.js + TypeScript + Ansible
-Convenciones: comentarios en español, usar ESM
-
-## Restricciones
-- Siempre confirmar antes de ejecutar comandos destructivos
-- No modificar archivos fuera de ./src sin preguntar
+```text
+StratumAgent
+  |- ReactLoop / ContextManager
+  |- ProviderRouter
+  |- ToolRegistry / ToolDispatcher
+  |- MemoryManager
+  `- SessionStore
 ```
+
+Directorios clave dentro de `stratum-cli/src/`:
+
+- `agent/` - loop ReAct, eventos, contexto y prompts
+- `providers/` - contrato `IProvider`, router y provider OpenAI-compatible
+- `tools/` - definiciones y registro de tools
+- `memory/` - carga de `STRATUM.md` y utilidades relacionadas
+- `session/` - persistencia y gestion de sesiones
+- `cli/` - comandos Commander.js e interfaz Ink
 
 ## Desarrollo
 
 ```bash
-# Instalar dependencias
-npm install
+cd stratum-cli
 
 # Desarrollo con hot-reload
 npm run dev
 
-# Build (ESM + CJS en dist/)
+# Build
 npm run build
 
 # Tests
 npm test
-npm test -- --run
+npm run test:run
 
 # Lint y formato
 npm run lint
 npm run format
 ```
 
-## Arquitectura
+## Documentacion principal
 
-```
-StratumAgent (core.ts)
-    │
-    ├── MemoryManager     — carga STRATUM.md, decisions.json, sqlite-vec
-    ├── ProviderRouter    — selección de provider y fallback
-    ├── ReactLoop         — iteraciones Reason → Act → Observe
-    │       └── StreamBuffer  — parsing SSE de tool calls fragmentadas
-    ├── ToolDispatcher    — ejecución paralela respetando flags serialized/destructive
-    └── ContextManager    — compresión del historial al superar el 80% del context window
-```
-
-Los providers implementan `IProvider` con un único método `complete(req): AsyncGenerator<CompletionChunk>`. El tipo soportado en v1 es `openai-compatible`, que cubre Ollama, llama.cpp, vLLM, LiteLLM, OpenAI y Anthropic vía proxy.
-
-## Decisiones técnicas
-
-| Área | Decisión |
-|---|---|
-| LLM client | Implementación propia OpenAI-compatible; sin `ai-sdk` ni `openai` npm |
-| Vector DB | `sqlite-vec` embebido; sin Chroma/Qdrant |
-| Embeddings | ONNX local con `@xenova/transformers`; sin OpenAI Embeddings API |
-| Shell | `execa`; sin `child_process` directo |
-| Build | `tsup`; genera ESM + CJS |
+- `STRATUM_PROJECT_DEFINITION.md` - vision del producto, roadmap y especificaciones vinculantes
+- `STRATUM_UI_SPECIFICATION.md` - comportamiento esperado de la UI
+- `CLAUDE.md` - guia operativa del repositorio y convenciones de implementacion
 
 ## Licencia
 
