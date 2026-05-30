@@ -792,6 +792,11 @@ export class InitAgent {
       contextStr = `${monoInfo}\n\n${contextStr}`;
     }
 
+    // Gestor de paquetes detectado — §1.4 punto 4
+    if (data.packageManager) {
+      contextStr = `Gestor de paquetes detectado: ${data.packageManager}\n\n${contextStr}`;
+    }
+
     // --- Prompt --- §2.4
     const prompt = `Eres un asistente técnico que documenta proyectos de software.
 Genera SOLO las secciones pedidas. Usa ÚNICAMENTE la evidencia proporcionada.
