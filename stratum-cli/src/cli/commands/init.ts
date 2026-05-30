@@ -17,7 +17,7 @@ const DEFAULT_CONFIG = {
       'local-ollama': {
         type: 'openai-compatible',
         baseUrl: 'http://localhost:11434/v1',
-        model: 'qwen2.5-coder:32b',
+        model: 'qwen3.5:9b',
         apiKey: 'ollama',
         contextWindow: 32768,
       },
