@@ -45,6 +45,8 @@ export interface CompletionRequest {
   stream: boolean;
   model: string;
   signal?: AbortSignal;
+  /** Temperatura de muestreo (0–2). Si se omite, el provider usa el valor por defecto del backend. */
+  temperature?: number;
 }
 
 export interface IProvider {

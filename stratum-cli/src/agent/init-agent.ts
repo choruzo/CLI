@@ -1,5 +1,7 @@
+import ignore from 'ignore';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { join } from 'path';
+import { execa } from 'execa';
 import type { IProvider } from '../providers/base.js';
 import type { Message } from './types.js';
 
@@ -42,7 +44,6 @@ const EXCLUDED_DIRS = new Set([
 
 const MANIFEST_FILES = [
   'package.json',
-  'package-lock.json',
   'pyproject.toml',
   'setup.py',
   'requirements.txt',
@@ -52,7 +53,19 @@ const MANIFEST_FILES = [
   'build.gradle',
   'composer.json',
   'Gemfile',
+  'mix.exs',
+  'pubspec.yaml',
+  'Package.swift',
+  'deno.json',
+  'deno.jsonc',
 ];
+
+const LOCKFILES: Record<string, string> = {
+  'package-lock.json': 'npm',
+  'pnpm-lock.yaml': 'pnpm',
+  'yarn.lock': 'yarn',
+  'bun.lockb': 'bun',
+};
 
 const CONFIG_FILES = [
   'tsconfig.json',
@@ -80,6 +93,7 @@ const FIXED_SECTIONS = [
   'Estructura',
   'Convenciones',
   'Comandos Clave',
+  'Instrucciones para el agente',
 ];
 
 const SECTION_PLACEHOLDERS: Record<string, string> = {
@@ -89,7 +103,48 @@ const SECTION_PLACEHOLDERS: Record<string, string> = {
   Convenciones: '<!-- Estilo de código, naming, reglas de commits, patrones detectados -->',
   'Comandos Clave':
     '<!-- Scripts de build, test, dev, lint — exactamente como aparecen en el manifiesto -->',
+  'Instrucciones para el agente': `<!-- Escribe aquí las instrucciones permanentes que el agente debe respetar en cada sesión.
+Ejemplos:
+- Confirmar siempre antes de ejecutar comandos destructivos
+- Responder en español
+- Al tocar archivos de configuración de VMware, mostrar un diff antes de aplicar
+- Preferir editar archivos existentes antes de crear nuevos
+-->`,
 };
+
+const MAX_FILES_PER_DIR = 20;
+const CONTEXT_BUDGET_CHARS = 12_000;
+
+// ---------------------------------------------------------------------------
+// Tipos internos
+// ---------------------------------------------------------------------------
+
+interface ProjectLayout {
+  root: string;
+  isMonorepo: boolean;
+  packages: string[];
+}
+
+interface GitMetadata {
+  branch: string;
+  remote?: string; // ya saneado — sin credenciales
+  recentCommits: string[];
+}
+
+interface ScanData {
+  scannedFiles: string[];
+  manifests: Record<string, string>;
+  configs: Record<string, string>;
+  docs: Record<string, string>;
+  ciFiles: Record<string, string>;
+  entryPoints: Record<string, string>;
+  dirTree: string;
+  packageManager?: string;
+  projectRoot: string;
+  isMonorepo: boolean;
+  packages: string[];
+  git?: GitMetadata;
+}
 
 // ---------------------------------------------------------------------------
 // InitAgent
@@ -106,25 +161,35 @@ export class InitAgent {
     const isNew = !existsSync(stratumMdPath);
 
     // -----------------------------------------------------------------------
+    // 0. Detectar raíz real del proyecto (monorepos, proyectos anidados)
+    // -----------------------------------------------------------------------
+    const ig = this.buildIgnore(cwd);
+    const layout = this.detectProjectRoot(cwd, ig);
+
+    // -----------------------------------------------------------------------
     // 1. Scan del proyecto
     // -----------------------------------------------------------------------
-    const scanData = await this.scan(cwd, options);
+    const scanData = await this.scan(layout, cwd, options);
     for (const file of scanData.scannedFiles) {
       yield { type: 'scan_progress', file };
     }
 
     // -----------------------------------------------------------------------
-    // 2. Síntesis vía LLM
+    // 2. Síntesis vía LLM + secciones deterministas
     // -----------------------------------------------------------------------
     let generatedSections: Record<string, string>;
     try {
-      generatedSections = await this.synthesize(cwd, scanData);
+      generatedSections = await this.synthesize(scanData);
     } catch (err) {
       yield { type: 'error', message: `Error generando STRATUM.md: ${String(err)}` };
       return;
     }
 
-    for (const [section, content] of Object.entries(generatedSections)) {
+    // Fusionar con secciones deterministas (Estructura, Comandos Clave)
+    const deterministicSections = this.buildDeterministicSections(scanData);
+    const allSections = { ...generatedSections, ...deterministicSections };
+
+    for (const [section, content] of Object.entries(allSections)) {
       yield { type: 'section_ready', section, content };
     }
 
@@ -136,7 +201,7 @@ export class InitAgent {
     if (!isNew && !options.force) {
       const existing = readFileSync(stratumMdPath, 'utf-8');
 
-      const mergeGen = this.performMerge(existing, generatedSections, options);
+      const mergeGen = this.performMerge(existing, allSections, options);
       let mergedSections!: Record<string, string>;
       while (true) {
         const step = await mergeGen.next();
@@ -149,7 +214,7 @@ export class InitAgent {
 
       finalContent = this.buildStratumMd(mergedSections);
     } else {
-      finalContent = this.buildStratumMd(generatedSections);
+      finalContent = this.buildStratumMd(allSections);
     }
 
     // -----------------------------------------------------------------------
@@ -163,91 +228,197 @@ export class InitAgent {
   }
 
   // -------------------------------------------------------------------------
+  // Detección de raíz del proyecto
+  // -------------------------------------------------------------------------
+
+  private buildIgnore(cwd: string): ReturnType<typeof ignore> {
+    const ig = ignore();
+    const gitignorePath = join(cwd, '.gitignore');
+    if (existsSync(gitignorePath)) {
+      try {
+        ig.add(readFileSync(gitignorePath, 'utf-8'));
+      } catch {
+        /* ignorar */
+      }
+    }
+    const excludePath = join(cwd, '.git', 'info', 'exclude');
+    if (existsSync(excludePath)) {
+      try {
+        ig.add(readFileSync(excludePath, 'utf-8'));
+      } catch {
+        /* ignorar */
+      }
+    }
+    return ig;
+  }
+
+  /**
+   * Si cwd no tiene manifiesto conocido, busca en subdirectorios directos (depth 1).
+   * - Raíz con manifiesto → root = cwd, isMonorepo según workspaces/turbo/nx
+   * - Raíz sin manifiesto y 1 hijo con manifiesto → root = ese hijo
+   * - N>1 hijos con manifiestos → isMonorepo, root = cwd, packages = hijos
+   */
+  private detectProjectRoot(cwd: string, ig: ReturnType<typeof ignore>): ProjectLayout {
+    const hasRootManifest = MANIFEST_FILES.some((f) => existsSync(join(cwd, f)));
+
+    if (hasRootManifest) {
+      let isMonorepo = false;
+      const packages: string[] = [];
+
+      const pkgPath = join(cwd, 'package.json');
+      if (existsSync(pkgPath)) {
+        try {
+          const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as Record<string, unknown>;
+          if (Array.isArray(pkg['workspaces'])) isMonorepo = true;
+        } catch {
+          /* ignorar */
+        }
+      }
+      if (!isMonorepo) {
+        isMonorepo = ['pnpm-workspace.yaml', 'turbo.json', 'nx.json'].some((f) =>
+          existsSync(join(cwd, f)),
+        );
+      }
+      if (isMonorepo) {
+        for (const dir of this.listDirs(cwd, ig)) {
+          if (MANIFEST_FILES.some((f) => existsSync(join(cwd, dir, f)))) {
+            packages.push(dir);
+          }
+        }
+      }
+      return { root: cwd, isMonorepo, packages };
+    }
+
+    // Sin manifiesto en raíz → buscar en hijos directos
+    const childrenWithManifest = this.listDirs(cwd, ig).filter((dir) =>
+      MANIFEST_FILES.some((f) => existsSync(join(cwd, dir, f))),
+    );
+
+    if (childrenWithManifest.length === 1) {
+      return { root: join(cwd, childrenWithManifest[0]!), isMonorepo: false, packages: [] };
+    }
+    if (childrenWithManifest.length > 1) {
+      return { root: cwd, isMonorepo: true, packages: childrenWithManifest };
+    }
+    return { root: cwd, isMonorepo: false, packages: [] };
+  }
+
+  private listDirs(dir: string, ig: ReturnType<typeof ignore>): string[] {
+    try {
+      return readdirSync(dir)
+        .filter((e) => !EXCLUDED_DIRS.has(e) && !ig.ignores(e))
+        .filter((e) => {
+          try {
+            return statSync(join(dir, e)).isDirectory();
+          } catch {
+            return false;
+          }
+        });
+    } catch {
+      return [];
+    }
+  }
+
+  // -------------------------------------------------------------------------
   // Scan
   // -------------------------------------------------------------------------
 
-  private async scan(cwd: string, _options: InitOptions): Promise<ScanData> {
+  private async scan(
+    layout: ProjectLayout,
+    _cwd: string,
+    _options: InitOptions,
+  ): Promise<ScanData> {
+    const root = layout.root;
     const scannedFiles: string[] = [];
     const manifests: Record<string, string> = {};
     const configs: Record<string, string> = {};
     const docs: Record<string, string> = {};
     const ciFiles: Record<string, string> = {};
 
-    // Leer .gitignore ANTES de construir el árbol para aplicarlo al scan.
-    // Conservar negaciones (!) — se procesan en orden dentro de isGitignored.
-    let gitignorePatterns: string[] = [];
-    const gitignorePath = join(cwd, '.gitignore');
-    if (existsSync(gitignorePath)) {
-      try {
-        gitignorePatterns = readFileSync(gitignorePath, 'utf-8')
-          .split('\n')
-          .map((l) => l.trim())
-          .filter((l) => l && !l.startsWith('#'));
-      } catch {
-        // ignorar
-      }
-    }
+    // Construir instancia de ignore para la raíz real del proyecto (puede diferir de cwd)
+    const ig = this.buildIgnore(root);
 
-    const dirTree = this.buildDirTree(cwd, 0, 3, gitignorePatterns, '');
+    const dirTree = this.buildDirTree(root, 0, 3, ig, '');
 
     // Leer manifiestos
     for (const name of MANIFEST_FILES) {
-      if (this.isGitignored(name, gitignorePatterns)) continue;
-      const path = join(cwd, name);
+      if (ig.ignores(name)) continue;
+      const path = join(root, name);
       if (existsSync(path)) {
         scannedFiles.push(name);
         try {
-          const content = readFileSync(path, 'utf-8');
-          manifests[name] =
-            name === 'CHANGELOG.md'
-              ? content.split('\n').slice(0, 50).join('\n')
-              : content.slice(0, 4000);
+          manifests[name] = readFileSync(path, 'utf-8').slice(0, 4000);
         } catch {
-          // ignorar errores de lectura
+          /* ignorar */
         }
+      }
+    }
+
+    // Detección extra: .csproj / .sln (nombre no fijo)
+    try {
+      const dotNetFile = readdirSync(root).find((f) => f.endsWith('.csproj') || f.endsWith('.sln'));
+      if (dotNetFile && !ig.ignores(dotNetFile)) {
+        scannedFiles.push(dotNetFile);
+        try {
+          manifests[dotNetFile] = readFileSync(join(root, dotNetFile), 'utf-8').slice(0, 4000);
+        } catch {
+          /* ignorar */
+        }
+      }
+    } catch {
+      /* ignorar */
+    }
+
+    // Detectar gestor de paquetes por lockfile (solo presencia, no contenido)
+    let packageManager: string | undefined;
+    for (const [lockfile, manager] of Object.entries(LOCKFILES)) {
+      if (existsSync(join(root, lockfile))) {
+        packageManager = manager;
+        scannedFiles.push(lockfile);
+        break;
       }
     }
 
     // Leer configs conocidas
     for (const name of CONFIG_FILES) {
-      if (this.isGitignored(name, gitignorePatterns)) continue;
-      const path = join(cwd, name);
+      if (ig.ignores(name)) continue;
+      const path = join(root, name);
       if (existsSync(path)) {
         scannedFiles.push(name);
         try {
           configs[name] = readFileSync(path, 'utf-8').slice(0, 2000);
         } catch {
-          // ignorar
+          /* ignorar */
         }
       }
     }
 
     // Leer .github/workflows/*.yml (CI/CD) — §12.13 paso 3
-    const workflowsDir = join(cwd, '.github', 'workflows');
-    if (existsSync(workflowsDir) && !this.isGitignored('.github/workflows', gitignorePatterns)) {
+    const workflowsDir = join(root, '.github', 'workflows');
+    if (existsSync(workflowsDir) && !ig.ignores('.github/workflows')) {
       try {
         const ymlFiles = readdirSync(workflowsDir).filter(
           (f) => f.endsWith('.yml') || f.endsWith('.yaml'),
         );
         for (const f of ymlFiles) {
           const relPath = `.github/workflows/${f}`;
-          if (this.isGitignored(relPath, gitignorePatterns)) continue;
+          if (ig.ignores(relPath)) continue;
           scannedFiles.push(relPath);
           try {
             ciFiles[f] = readFileSync(join(workflowsDir, f), 'utf-8').slice(0, 1000);
           } catch {
-            // ignorar
+            /* ignorar */
           }
         }
       } catch {
-        // ignorar
+        /* ignorar */
       }
     }
 
     // Leer docs
     for (const name of DOC_FILES) {
-      if (this.isGitignored(name, gitignorePatterns)) continue;
-      const path = join(cwd, name);
+      if (ig.ignores(name)) continue;
+      const path = join(root, name);
       if (existsSync(path)) {
         scannedFiles.push(name);
         try {
@@ -256,7 +427,7 @@ export class InitAgent {
             ? content.split('\n').slice(0, 50).join('\n')
             : content.slice(0, 3000);
         } catch {
-          // ignorar
+          /* ignorar */
         }
       }
     }
@@ -264,7 +435,6 @@ export class InitAgent {
     // Leer entry points — §12.13 paso 5
     const entryPoints: Record<string, string> = {};
 
-    // package.json: "main" y "bin"
     if (manifests['package.json']) {
       try {
         const pkg = JSON.parse(manifests['package.json']) as Record<string, unknown>;
@@ -275,23 +445,22 @@ export class InitAgent {
           candidates.push(...Object.values(pkg['bin'] as Record<string, string>));
         }
         for (const ep of candidates) {
-          if (this.isGitignored(ep, gitignorePatterns)) continue;
-          const epPath = join(cwd, ep);
+          if (ig.ignores(ep)) continue;
+          const epPath = join(root, ep);
           if (existsSync(epPath)) {
             scannedFiles.push(ep);
             try {
               entryPoints[ep] = readFileSync(epPath, 'utf-8').slice(0, 1000);
             } catch {
-              // ignorar
+              /* ignorar */
             }
           }
         }
       } catch {
-        // JSON inválido
+        /* ignorar */
       }
     }
 
-    // pyproject.toml: [tool.poetry.scripts]
     if (manifests['pyproject.toml']) {
       const scriptMatch = manifests['pyproject.toml'].match(
         /\[tool\.poetry\.scripts\]([\s\S]*?)(?=\n\[|$)/,
@@ -307,19 +476,21 @@ export class InitAgent {
       }
     }
 
-    // Rust / Go: entry points estáticos — §12.13 paso 5
     for (const ep of ['src/main.rs', 'cmd/main.go', 'main.go']) {
-      if (this.isGitignored(ep, gitignorePatterns)) continue;
-      const epPath = join(cwd, ep);
+      if (ig.ignores(ep)) continue;
+      const epPath = join(root, ep);
       if (existsSync(epPath)) {
         scannedFiles.push(ep);
         try {
           entryPoints[ep] = readFileSync(epPath, 'utf-8').slice(0, 1000);
         } catch {
-          // ignorar
+          /* ignorar */
         }
       }
     }
+
+    // Metadatos de Git
+    const git = await this.readGitMetadata(root);
 
     return {
       scannedFiles,
@@ -329,7 +500,11 @@ export class InitAgent {
       ciFiles,
       entryPoints,
       dirTree,
-      gitignorePatterns,
+      packageManager,
+      projectRoot: root,
+      isMonorepo: layout.isMonorepo,
+      packages: layout.packages,
+      git,
     };
   }
 
@@ -337,7 +512,7 @@ export class InitAgent {
     dir: string,
     depth: number,
     maxDepth: number,
-    gitignorePatterns: string[],
+    ig: ReturnType<typeof ignore>,
     relDir: string,
   ): string {
     if (depth >= maxDepth) return '';
@@ -349,6 +524,9 @@ export class InitAgent {
     } catch {
       return '';
     }
+
+    const fileEntries: string[] = [];
+
     for (const entry of entries) {
       if (EXCLUDED_DIRS.has(entry)) continue;
       const relPath = relDir ? `${relDir}/${entry}` : entry;
@@ -360,205 +538,374 @@ export class InitAgent {
         continue;
       }
       const indent = '  '.repeat(depth);
+
       if (stat.isDirectory()) {
-        const isIgnored = this.isGitignored(relPath, gitignorePatterns);
-        if (isIgnored && !this.hasNegatedDescendants(relPath, gitignorePatterns)) continue;
+        // Con la librería `ignore`, no podamos un directorio a menos que todas sus rutas
+        // hijas también estén ignoradas. Probamos si el directorio en sí está ignorado
+        // sin verificar rutas hijas (la librería maneja negaciones correctamente).
+        if (ig.ignores(relPath)) continue;
         lines.push(`${indent}${entry}/`);
-        const sub = this.buildDirTree(fullPath, depth + 1, maxDepth, gitignorePatterns, relPath);
+        const sub = this.buildDirTree(fullPath, depth + 1, maxDepth, ig, relPath);
         if (sub) lines.push(sub);
+      } else if (depth <= 2) {
+        if (ig.ignores(relPath)) continue;
+        fileEntries.push(`${indent}${entry}`);
       }
+    }
+
+    // Añadir archivos después de directorios, con límite
+    if (fileEntries.length > 0) {
+      const slice = fileEntries.slice(0, MAX_FILES_PER_DIR);
+      const overflow = fileEntries.length - slice.length;
+      lines.push(...slice);
+      if (overflow > 0) lines.push(`${'  '.repeat(depth)}  … +${overflow} más`);
     }
 
     return lines.join('\n');
   }
 
-  /**
-   * Evalúa si una ruta relativa (desde cwd, separador `/`) está ignorada según
-   * los patrones de .gitignore. Procesa los patrones en orden para que las
-   * negaciones `!pattern` anulen exclusiones previas (comportamiento real de git).
-   * Soporta: nombres simples, wildcards `*`/`**`, rutas con `/`.
-   */
-  private isGitignored(relPath: string, patterns: string[]): boolean {
-    const normalizedPath = this.normalizeGitignorePath(relPath);
-    const segments = normalizedPath ? normalizedPath.split('/') : [];
-    let ignored = false;
+  // -------------------------------------------------------------------------
+  // Metadatos de Git con saneo de credenciales — §1.5
+  // -------------------------------------------------------------------------
 
-    for (const raw of patterns) {
-      const isNegation = raw.startsWith('!');
-      const stripped = isNegation ? raw.slice(1) : raw;
-      const rootAnchored = stripped.startsWith('/');
-      const pattern = this.normalizeGitignorePath(stripped);
-      if (!pattern) continue;
-
-      const matches = rootAnchored
-        ? this.matchesRootAnchoredPattern(normalizedPath, pattern)
-        : pattern.includes('/')
-          ? this.matchesPathOrAncestor(normalizedPath, pattern)
-          : segments.some((segment) => this.matchGlob(segment, pattern));
-
-      if (matches) ignored = !isNegation;
-    }
-    return ignored;
-  }
-
-  private hasNegatedDescendants(relPath: string, patterns: string[]): boolean {
-    const normalizedPath = this.normalizeGitignorePath(relPath);
-    const prefix = normalizedPath ? `${normalizedPath}/` : '';
-
-    return patterns.some((pattern) => {
-      if (!pattern.startsWith('!')) return false;
-      const normalized = this.normalizeGitignorePath(pattern.slice(1));
-      return Boolean(normalized) && normalized.startsWith(prefix);
-    });
-  }
-
-  private matchesRootAnchoredPattern(relPath: string, pattern: string): boolean {
-    const candidates = this.listPathCandidates(relPath);
-    return candidates.some((candidate) => {
-      if (!candidate) return false;
-      if (this.matchGlob(candidate, pattern)) return true;
-      return pattern.includes('/') ? false : candidate.split('/')[0] === pattern;
-    });
-  }
-
-  private matchesPathOrAncestor(relPath: string, pattern: string): boolean {
-    return this.listPathCandidates(relPath).some((candidate) => this.matchGlob(candidate, pattern));
-  }
-
-  private listPathCandidates(relPath: string): string[] {
-    const normalizedPath = this.normalizeGitignorePath(relPath);
-    if (!normalizedPath) return [];
-
-    const candidates = [normalizedPath];
-    const segments = normalizedPath.split('/');
-    for (let i = segments.length - 1; i > 0; i--) {
-      candidates.push(segments.slice(0, i).join('/'));
-    }
-
-    return candidates;
-  }
-
-  private normalizeGitignorePath(path: string): string {
-    return path.replace(/\\/g, '/').replace(/^\/+/, '').replace(/\/+$/, '');
-  }
-
-  /** Convierte un glob básico (con `*` y `**`) a RegExp y evalúa la cadena. */
-  private matchGlob(str: string, pattern: string): boolean {
-    // Dividir en segmentos `**` para procesarlos por separado
-    const regexStr = pattern
-      .split('**')
-      .map((part) =>
-        part
-          .split('*')
-          .map((s) => s.replace(/[.+^${}()|[\]\\]/g, '\\$&'))
-          .join('[^/]*'),
-      )
-      .join('.*');
+  private async readGitMetadata(root: string): Promise<GitMetadata | undefined> {
     try {
-      return new RegExp(`^${regexStr}$`).test(str);
+      const branchResult = await execa('git', ['rev-parse', '--abbrev-ref', 'HEAD'], {
+        cwd: root,
+        reject: false,
+      });
+      if (branchResult.exitCode !== 0) return undefined;
+      const branch = branchResult.stdout.trim();
+
+      let remote: string | undefined;
+      try {
+        const remoteResult = await execa('git', ['remote', 'get-url', 'origin'], {
+          cwd: root,
+          reject: false,
+        });
+        if (remoteResult.exitCode === 0) {
+          const rawRemote = remoteResult.stdout.trim();
+          // Saneo OBLIGATORIO: eliminar credenciales user:token@ de URLs https
+          remote = rawRemote.replace(/https?:\/\/[^@]+@/, 'https://');
+        }
+      } catch {
+        /* sin remote */
+      }
+
+      const logResult = await execa('git', ['log', '--oneline', '-5', '--pretty=format:%s'], {
+        cwd: root,
+        reject: false,
+      });
+      const recentCommits =
+        logResult.exitCode === 0 ? logResult.stdout.trim().split('\n').filter(Boolean) : [];
+
+      return { branch, remote, recentCommits };
     } catch {
-      return false;
+      return undefined;
     }
   }
 
   // -------------------------------------------------------------------------
-  // Síntesis vía LLM
+  // Fallback por extensiones — §1.3
   // -------------------------------------------------------------------------
 
-  private async synthesize(cwd: string, data: ScanData): Promise<Record<string, string>> {
-    const contextLines: string[] = [
-      `Directorio de trabajo: ${cwd}`,
-      '',
-      '## Estructura de directorios',
-      data.dirTree || '(vacío)',
-      '',
-    ];
+  private collectExtensionStats(root: string): Record<string, number> {
+    const srcDir = existsSync(join(root, 'src')) ? join(root, 'src') : root;
+    const counts: Record<string, number> = {};
+    const walk = (dir: string, depth: number) => {
+      if (depth > 3) return;
+      try {
+        for (const entry of readdirSync(dir)) {
+          if (EXCLUDED_DIRS.has(entry)) continue;
+          const full = join(dir, entry);
+          try {
+            const s = statSync(full);
+            if (s.isDirectory()) walk(full, depth + 1);
+            else {
+              const ext = entry.includes('.') ? `.${entry.split('.').pop()}` : '(sin extensión)';
+              counts[ext] = (counts[ext] ?? 0) + 1;
+            }
+          } catch {
+            /* ignorar */
+          }
+        }
+      } catch {
+        /* ignorar */
+      }
+    };
+    walk(srcDir, 0);
+    return Object.fromEntries(
+      Object.entries(counts)
+        .sort((a, b) => b[1] - a[1])
+        .slice(0, 8),
+    );
+  }
 
-    for (const [name, content] of Object.entries(data.manifests)) {
-      contextLines.push(`## ${name}`, '```', content, '```', '');
-    }
+  // -------------------------------------------------------------------------
+  // Secciones deterministas — §2.2
+  // -------------------------------------------------------------------------
 
-    for (const [name, content] of Object.entries(data.docs)) {
-      contextLines.push(`## ${name}`, content, '');
-    }
+  private buildDeterministicSections(data: ScanData): Record<string, string> {
+    const sections: Record<string, string> = {};
 
-    for (const [name, content] of Object.entries(data.configs)) {
-      contextLines.push(`## ${name} (resumen)`, content.slice(0, 500), '');
-    }
+    // Estructura — árbol real
+    sections['Estructura'] = data.dirTree
+      ? `\`\`\`\n${data.dirTree}\n\`\`\``
+      : SECTION_PLACEHOLDERS['Estructura']!;
 
-    if (Object.keys(data.ciFiles).length > 0) {
-      contextLines.push('## CI/CD (.github/workflows)');
-      for (const [name, content] of Object.entries(data.ciFiles)) {
-        contextLines.push(`### ${name}`, '```yaml', content, '```', '');
+    // Comandos Clave — extraídos del manifiesto
+    const runner = data.packageManager ?? 'npm';
+    const cmds: string[] = [];
+
+    if (data.manifests['package.json']) {
+      try {
+        const pkg = JSON.parse(data.manifests['package.json']) as Record<string, unknown>;
+        const scripts = pkg['scripts'] as Record<string, string> | undefined;
+        if (scripts) {
+          for (const [name, cmd] of Object.entries(scripts)) {
+            cmds.push(`${runner} run ${name}   # ${cmd}`);
+          }
+        }
+      } catch {
+        /* ignorar */
       }
     }
 
+    if (data.configs['Makefile']) {
+      const targets = data.configs['Makefile']
+        .split('\n')
+        .filter((l) => /^[a-zA-Z][a-zA-Z0-9_-]*:/.test(l))
+        .map((l) => `make ${l.split(':')[0]}`);
+      cmds.push(...targets);
+    }
+
+    sections['Comandos Clave'] = cmds.length
+      ? cmds.join('\n')
+      : SECTION_PLACEHOLDERS['Comandos Clave']!;
+
+    return sections;
+  }
+
+  // -------------------------------------------------------------------------
+  // Síntesis vía LLM — §2.3 / §2.4
+  // -------------------------------------------------------------------------
+
+  private async synthesize(data: ScanData): Promise<Record<string, string>> {
+    // --- Construir contexto con presupuesto de tokens --- §1.7
+    const parts: { priority: number; label: string; content: string }[] = [];
+
+    // Prioridad 1: manifiesto principal (hasta 4000 chars — ya limitado en scan)
+    const mainManifest = ['package.json', 'Cargo.toml', 'go.mod', 'pyproject.toml', 'Gemfile']
+      .map((n) => (data.manifests[n] ? { name: n, content: data.manifests[n]! } : null))
+      .find(Boolean);
+    if (mainManifest) {
+      parts.push({
+        priority: 1,
+        label: `## ${mainManifest.name}`,
+        content: `\`\`\`\n${mainManifest.content}\n\`\`\``,
+      });
+    }
+
+    // Resto de manifiestos
+    for (const [name, content] of Object.entries(data.manifests)) {
+      if (name === mainManifest?.name) continue;
+      parts.push({ priority: 4, label: `## ${name}`, content: `\`\`\`\n${content}\n\`\`\`` });
+    }
+
+    // Fallback por extensiones si no hay manifiestos
+    if (Object.keys(data.manifests).length === 0) {
+      const stats = this.collectExtensionStats(data.projectRoot);
+      if (Object.keys(stats).length > 0) {
+        const statsStr = Object.entries(stats)
+          .map(([ext, count]) => `${ext}: ${count}`)
+          .join(', ');
+        parts.push({
+          priority: 1,
+          label: '## Extensiones de archivo detectadas (sin manifiesto conocido)',
+          content: statsStr,
+        });
+      }
+    }
+
+    // Docs (prioridad 3)
+    for (const [name, content] of Object.entries(data.docs)) {
+      parts.push({ priority: 3, label: `## ${name}`, content });
+    }
+
+    // Configs (prioridad 4)
+    for (const [name, content] of Object.entries(data.configs)) {
+      parts.push({ priority: 4, label: `## ${name} (resumen)`, content: content.slice(0, 500) });
+    }
+
+    // CI/CD (prioridad 5)
+    if (Object.keys(data.ciFiles).length > 0) {
+      let ciContent = '';
+      for (const [name, content] of Object.entries(data.ciFiles)) {
+        ciContent += `### ${name}\n\`\`\`yaml\n${content}\n\`\`\`\n\n`;
+      }
+      parts.push({ priority: 5, label: '## CI/CD (.github/workflows)', content: ciContent });
+    }
+
+    // Entry points (prioridad 6)
     if (Object.keys(data.entryPoints).length > 0) {
-      contextLines.push('## Entry points');
+      let epContent = '';
       for (const [name, content] of Object.entries(data.entryPoints)) {
         if (name.startsWith('pyproject:')) {
-          contextLines.push(`- ${name.slice('pyproject:'.length)}: ${content}`);
+          epContent += `- ${name.slice('pyproject:'.length)}: ${content}\n`;
         } else {
-          contextLines.push(`### ${name}`, '```', content, '```', '');
+          epContent += `### ${name}\n\`\`\`\n${content}\n\`\`\`\n\n`;
         }
       }
-      contextLines.push('');
+      parts.push({ priority: 6, label: '## Entry points', content: epContent });
     }
 
-    const contextStr = contextLines.join('\n');
+    // Aplicar presupuesto de tokens (truncar de menor a mayor prioridad)
+    const always = parts.filter((p) => p.priority <= 2);
+    const optional = parts.filter((p) => p.priority > 2).sort((a, b) => a.priority - b.priority);
 
-    const prompt = `Analiza el siguiente proyecto y genera las 5 secciones de un archivo STRATUM.md.
+    const alwaysStr = always.map((p) => `${p.label}\n${p.content}`).join('\n\n');
+    let contextStr = alwaysStr;
+    for (const part of optional) {
+      const addition = `\n\n${part.label}\n${part.content}`;
+      if ((contextStr + addition).length <= CONTEXT_BUDGET_CHARS) {
+        contextStr += addition;
+      }
+      // si no cabe, se omite (truncación de menor a mayor prioridad)
+    }
 
-CONTEXTO DEL PROYECTO:
+    // Metadatos de Git
+    const gitLines: string[] = [];
+    if (data.git) {
+      gitLines.push(`## Git`);
+      gitLines.push(`Rama por defecto: ${data.git.branch}`);
+      if (data.git.remote) gitLines.push(`Remote: ${data.git.remote}`);
+      if (data.git.recentCommits.length > 0) {
+        gitLines.push(`Commits recientes (inferir convención de mensajes):`);
+        for (const c of data.git.recentCommits) gitLines.push(`  - ${c}`);
+      }
+      contextStr = `${gitLines.join('\n')}\n\n${contextStr}`;
+    }
+
+    // Info de monorepo
+    if (data.isMonorepo && data.packages.length > 0) {
+      const monoInfo = `## Monorepo — paquetes detectados\n${data.packages.join(', ')}`;
+      contextStr = `${monoInfo}\n\n${contextStr}`;
+    }
+
+    // --- Prompt --- §2.4
+    const prompt = `Eres un asistente técnico que documenta proyectos de software.
+Genera SOLO las secciones pedidas. Usa ÚNICAMENTE la evidencia proporcionada.
+Si no hay evidencia suficiente para una afirmación, OMÍTELA — nunca inventes convenciones ni versiones.
+Responde en español.
+
+HEURÍSTICAS DE STACK (aplica las que correspondan):
+  package.json + "typescript" en devDependencies → TypeScript
+  "react" + "ink" en dependencies → UI terminal con Ink
+  "vitest" o "jest" → framework de test
+  gestor detectado por lockfile: pnpm-lock.yaml → pnpm, yarn.lock → yarn, bun.lockb → bun
+  Cargo.toml → Rust; go.mod → Go; pyproject.toml → Python; Gemfile → Ruby
+  tsup o esbuild en devDependencies → bundler TypeScript
+  "execa" → shell commands vía execa (no child_process directo)
+
+EJEMPLO DE SALIDA CORRECTA:
+<<<PROYECTO>>>
+Stratum CLI — agente de línea de comandos extensible construido sobre un loop ReAct.
+Provider-agnostic: compatible con cualquier API OpenAI-compatible (Ollama, llama.cpp, OpenAI).
+<<<END>>>
+
+<<<STACK>>>
+- TypeScript 5.x (ESM + CJS via tsup)
+- Node.js 20+
+- Commander.js (CLI), Ink (UI terminal)
+- Vitest (tests), ESLint + Prettier (lint/formato)
+- sqlite-vec (vector DB), @xenova/transformers (embeddings ONNX)
+<<<END>>>
+
+<<<CONVENCIONES>>>
+- Archivos: kebab-case; clases: PascalCase (inferido de src/)
+- Commits: Conventional Commits (feat:, fix:, chore: — inferido de git log)
+- Tests: co-ubicados con el módulo (*.test.ts)
+<<<END>>>
+
+Estructura y Comandos Clave se generan de forma determinista; NO los incluyas.
+
+EVIDENCIA DEL PROYECTO:
 ${contextStr}
 
-Genera EXACTAMENTE las 5 secciones en este orden, usando encabezados H2 (##):
-1. ## Proyecto — nombre, descripción breve, propósito principal
-2. ## Stack Tecnológico — lenguajes, frameworks, librerías principales, versiones clave
-3. ## Estructura — árbol de directorios relevante con descripción de cada carpeta
-4. ## Convenciones — estilo de código, naming, reglas de commits, patrones detectados
-5. ## Comandos Clave — scripts de build, test, dev, lint exactamente como aparecen en el manifiesto
-
-Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
+Genera las 3 secciones siguiendo exactamente el formato del ejemplo:`;
 
     const messages: Message[] = [{ role: 'user', content: prompt }];
-    let rawResponse = '';
 
+    // Primera llamada
+    let rawResponse = await this.callProvider(messages);
+    let parsed = this.parseDelimitedSections(rawResponse);
+
+    // Reintento único si el parse falla
+    if (!parsed) {
+      const retryMessages: Message[] = [
+        ...messages,
+        { role: 'assistant', content: rawResponse },
+        {
+          role: 'user',
+          content:
+            'ATENCIÓN: Tu respuesta anterior no incluyó los delimitadores <<<CLAVE>>> requeridos. ' +
+            'Responde SOLO con los tres bloques delimitados (<<<PROYECTO>>>, <<<STACK>>>, <<<CONVENCIONES>>>), ' +
+            'sin texto adicional fuera de ellos.',
+        },
+      ];
+      rawResponse = await this.callProvider(retryMessages);
+      parsed = this.parseDelimitedSections(rawResponse);
+    }
+
+    // Si tras el reintento sigue fallando, caer a placeholders
+    if (!parsed) {
+      const fallback: Record<string, string> = {};
+      for (const fixed of FIXED_SECTIONS) {
+        fallback[fixed] = '';
+      }
+      return fallback;
+    }
+
+    // Rellenar secciones que el LLM no debe generar con string vacío (se asignan luego)
+    const result: Record<string, string> = { ...parsed };
+    for (const fixed of FIXED_SECTIONS) {
+      if (!(fixed in result)) result[fixed] = '';
+    }
+    return result;
+  }
+
+  private async callProvider(messages: Message[]): Promise<string> {
+    let raw = '';
     for await (const chunk of this.provider.complete({
       messages,
       stream: true,
       model: this.model,
+      temperature: 0.2,
       signal: AbortSignal.timeout(300000),
     })) {
       const content = chunk.choices[0]?.delta?.content;
-      if (content) rawResponse += content;
+      if (content) raw += content;
     }
-
-    return this.parseGeneratedSections(rawResponse);
+    return raw;
   }
 
-  private parseGeneratedSections(raw: string): Record<string, string> {
-    const sections: Record<string, string> = {};
+  private parseDelimitedSections(raw: string): Record<string, string> | null {
+    const KEY_MAP: Record<string, string> = {
+      PROYECTO: 'Proyecto',
+      STACK: 'Stack Tecnológico',
+      CONVENCIONES: 'Convenciones',
+    };
+    const result: Record<string, string> = {};
 
-    const regex = /^## (.+)$/gm;
-    const matches = [...raw.matchAll(regex)];
-
-    for (let i = 0; i < matches.length; i++) {
-      const match = matches[i]!;
-      const sectionName = match[1]!.trim();
-      const start = (match.index ?? 0) + match[0].length;
-      const end = matches[i + 1]?.index ?? raw.length;
-      const content = raw.slice(start, end).trim();
-      sections[sectionName] = content;
-    }
-
-    for (const fixed of FIXED_SECTIONS) {
-      if (!(fixed in sections)) {
-        sections[fixed] = '';
+    for (const [key, sectionName] of Object.entries(KEY_MAP)) {
+      const match = raw.match(new RegExp(`<<<${key}>>>([\\s\\S]*?)<<<END>>>`, 'i'));
+      if (match?.[1]) {
+        result[sectionName] = match[1].trim();
       }
     }
 
-    return sections;
+    const missing = Object.values(KEY_MAP).filter((s) => !result[s]);
+    return missing.length === 0 ? result : null;
   }
 
   // -------------------------------------------------------------------------
@@ -591,9 +938,8 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
           section: fixed,
           kept: update ? 'proposed' : 'existing',
         };
-        result[fixed] = update
-          ? this.mergeContent(existingContent, proposedContent)
-          : existingContent;
+        // §2.6: usar la versión propuesta íntegra en lugar de concatenar
+        result[fixed] = update ? proposedContent : existingContent;
       } else if (isManual) {
         result[fixed] = existingContent;
       } else {
@@ -611,26 +957,8 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
     return result;
   }
 
-  private mergeContent(existing: string, proposed: string): string {
-    const existingLines = new Set(
-      existing
-        .split('\n')
-        .map((l) => l.trim())
-        .filter(Boolean),
-    );
-    const newLines = proposed.split('\n').filter((l) => !existingLines.has(l.trim()) && l.trim());
-
-    if (newLines.length === 0) return existing;
-    return `${existing}\n${newLines.join('\n')}`;
-  }
-
   private isPlaceholder(content: string): boolean {
-    const trimmed = content.trim();
-    return (
-      !trimmed ||
-      trimmed.startsWith('<!--') ||
-      trimmed === '<!-- Describe tu proyecto, stack y convenciones aquí -->'
-    );
+    return !content.trim() || content.trim().startsWith('<!--');
   }
 
   private parseExistingSections(content: string): Record<string, string> {
@@ -676,19 +1004,4 @@ Empieza directamente con "## Proyecto" sin preámbulo. Sé conciso y técnico.`;
 
     return lines.join('\n').trimEnd() + '\n';
   }
-}
-
-// ---------------------------------------------------------------------------
-// Tipos internos del scan
-// ---------------------------------------------------------------------------
-
-interface ScanData {
-  scannedFiles: string[];
-  manifests: Record<string, string>;
-  configs: Record<string, string>;
-  docs: Record<string, string>;
-  ciFiles: Record<string, string>;
-  entryPoints: Record<string, string>;
-  dirTree: string;
-  gitignorePatterns: string[];
 }

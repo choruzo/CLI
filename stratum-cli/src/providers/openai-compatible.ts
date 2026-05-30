@@ -95,6 +95,9 @@ export class OpenAICompatible implements IProvider {
       body['tools'] = req.tools;
       body['tool_choice'] = 'auto';
     }
+    if (req.temperature !== undefined) {
+      body['temperature'] = req.temperature;
+    }
 
     const response = await fetch(url, {
       method: 'POST',
