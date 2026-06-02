@@ -552,6 +552,62 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 
 ---
 
+### Hito 2.5 — Init Agent ReAct Explorer *(~3 días)*
+
+Mejora del comando `stratum init` combinando el scan determinista actual con una fase de exploración libre basada en el loop ReAct en modo read-only. El objetivo es que el `STRATUM.md` generado capture contexto que el scan hardcodeado no puede detectar: entrypoints no convencionales, instrucciones en archivos existentes (`CLAUDE.md`, `.cursorrules`), patrones de arquitectura visibles solo leyendo código fuente.
+
+#### Motivación
+
+El scan actual lee un conjunto fijo de archivos conocidos. Funciona bien para proyectos convencionales pero falla cuando la estructura no sigue los patrones esperados. opencode resuelve esto delegando todo en el agente general (sin scan), lo que sacrifica predictibilidad. La solución híbrida mantiene el scan como base garantizada y añade una fase ReAct acotada para cubrir lo que el scan no alcanza.
+
+#### Diseño
+
+**Fase 1 — Scan determinista** *(lo que ya existe, sin cambios)*
+- Manifests, lockfiles, configs, CI workflows, entrypoints conocidos
+- Rápido, sin LLM, resultado garantizado
+
+**Fase 2 — ReAct Explorer** *(nueva)*
+- El agente recibe el resultado del scan como contexto inicial
+- Herramientas disponibles exclusivamente: `read_file`, `glob`, `list_directory`
+- Presupuesto fijo de iteraciones: máximo 8 pasos ReAct
+- El agente guía su exploración con el criterio de opencode: *"¿lo perdería un agente sin esta información?"*
+- Puede leer archivos de instrucciones existentes (`CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `opencode.json`, `AGENTS.md`) y preservar su contenido relevante
+- Puede inspeccionar entrypoints no convencionales, subdirectorios de monorepo, o archivos de arquitectura (`ARCHITECTURE.md`, `docs/`)
+- Si el presupuesto se agota sin nuevos hallazgos, la fase termina sin error
+
+**Fase 3 — Síntesis** *(llamada LLM única, igual que ahora)*
+- Recibe el contexto combinado: output del scan + hallazgos del explorer
+- Aplica el criterio editorial de opencode: generar contenido solo si responde "¿lo perdería el agente sin ayuda?"
+- Las secciones sin evidencia suficiente se omiten o quedan como placeholder
+
+**Fase 4 — Merge** *(sin cambios)*
+
+#### Implementación
+
+- `InitAgent.run()` orquesta las 4 fases en secuencia
+- `InitReActExplorer` — clase nueva en `src/agent/init-explorer.ts`:
+  - Instancia un `ReactLoop` con `ToolRegistry` restringido (solo read tools)
+  - Recibe el `ScanData` como contexto inicial y emite `InitEvent`s de progreso (`explorer_step`)
+  - System prompt especializado: investigar sin modificar, criterio de señal, presupuesto explícito
+  - Devuelve `ExplorerFindings`: lista de archivos leídos + contenido relevante extraído
+- El `synthesize()` actual acepta `ExplorerFindings` como argumento adicional y lo incluye en el contexto LLM con prioridad 2 (entre el manifiesto principal y los docs)
+- Nuevo `InitEvent`: `{ type: 'explorer_step'; iteration: number; action: string; file?: string }`
+
+#### Items
+
+- [ ] `InitReActExplorer` en `src/agent/init-explorer.ts` con `ReactLoop` restringido
+- [ ] System prompt del explorer (criterio de señal, presupuesto, lista de archivos de instrucciones a priorizar)
+- [ ] `ExplorerFindings` type + integración en `synthesize()`
+- [ ] Nuevo evento `explorer_step` en `InitEvent` union
+- [ ] UI: mostrar iteraciones del explorer en `stratum init` (spinner + acción actual)
+- [ ] Tests: explorer con proyecto de estructura no convencional, con `CLAUDE.md` existente, con budget agotado sin hallazgos
+
+> **Dependencia:** Requiere que el `ReactLoop` de Hito 1 soporte inicialización con `ToolRegistry` externo (actualmente está acoplado al registry global). Añadir parámetro `toolRegistry?: ToolRegistry` al constructor de `ReactLoop` antes de comenzar este hito.
+
+**Entregable:** `stratum init` en un proyecto con `CLAUDE.md` existente preserva sus instrucciones en el `STRATUM.md` generado. En un monorepo con estructura no estándar, el agente encuentra y documenta los paquetes correctamente.
+
+---
+
 ### Hito 3 — Tools completos Day 1 *(~4 días)*
 - [ ] `edit_file` con diff patches
 - [ ] `list_directory`, `glob`, `grep`
