@@ -61,7 +61,8 @@ export const initCommand = new Command('init')
   )
   .option('--force', 'overwrite existing STRATUM.md without merge prompts')
   .option('--dry-run', 'show what would be generated without writing files')
-  .action(async (options: { force?: boolean; dryRun?: boolean }) => {
+  .option('--no-explore', 'skip the ReAct exploration phase (faster, less context)')
+  .action(async (options: { force?: boolean; dryRun?: boolean; explore?: boolean }) => {
     const cwd = process.cwd();
 
     process.stdout.write('\n  Stratum — Inicializando proyecto\n\n');
@@ -101,12 +102,15 @@ export const initCommand = new Command('init')
     const activeProviderBaseUrl =
       config.provider?.providers?.[activeProviderName]?.baseUrl ?? 'desconocida';
     const agent = new InitAgent(router.getActive(), router.model, {
-      name: activeProviderName,
-      baseUrl: activeProviderBaseUrl,
+      providerInfo: { name: activeProviderName, baseUrl: activeProviderBaseUrl },
+      config,
+      contextWindow: router.contextWindow,
     });
 
     const stopScan = spin('Escaneando estructura...');
     let scanDone = false;
+    let stopExplore: (() => void) | null = null;
+    let exploreDone = false;
     let stopDetect: (() => void) | null = null;
 
     const resolveConflict = async (section: string): Promise<boolean> => {
@@ -119,19 +123,40 @@ export const initCommand = new Command('init')
       for await (const ev of agent.run(cwd, {
         force: options.force,
         dryRun: options.dryRun,
+        noExplore: options.explore === false,
         resolveConflict,
       })) {
         switch (ev.type) {
           case 'scan_progress':
-            if (!scanDone) {
-              // aún en fase de scan — el spinner ya está activo
-            }
+            // spinner de scan ya activo
             break;
 
-          case 'section_ready':
+          case 'explorer_step': {
             if (!scanDone) {
               stopScan();
               scanDone = true;
+              stopExplore = spin(
+                `Explorando proyecto... (paso ${ev.iteration}: ${ev.action}${ev.file ? ' ' + ev.file : ''})`,
+              );
+            } else if (stopExplore && !exploreDone) {
+              stopExplore();
+              stopExplore = spin(
+                `Explorando proyecto... (paso ${ev.iteration}: ${ev.action}${ev.file ? ' ' + ev.file : ''})`,
+              );
+            }
+            break;
+          }
+
+          case 'section_ready':
+            if (!exploreDone && stopExplore) {
+              stopExplore();
+              exploreDone = true;
+              stopExplore = null;
+            } else if (!scanDone) {
+              stopScan();
+              scanDone = true;
+            }
+            if (!stopDetect) {
               stopDetect = spin('Detectando stack y generando STRATUM.md...');
             }
             break;
@@ -141,8 +166,11 @@ export const initCommand = new Command('init')
             break;
 
           case 'done':
+            // Cerrar cualquier spinner activo
             if (stopDetect) {
               stopDetect();
+            } else if (stopExplore) {
+              stopExplore();
             } else if (!scanDone) {
               stopScan();
             }
@@ -163,6 +191,7 @@ export const initCommand = new Command('init')
 
           case 'error':
             if (stopDetect) stopDetect();
+            else if (stopExplore) stopExplore();
             else if (!scanDone) stopScan();
             process.stderr.write(`\n  [error] ${ev.message}\n`);
             process.exit(1);

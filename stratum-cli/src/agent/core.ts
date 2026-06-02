@@ -106,6 +106,11 @@ export class StratumAgent {
     return this.router.getActive();
   }
 
+  /** Tamaño del contexto del provider activo (para pasarlo al InitAgent). */
+  get contextWindow(): number {
+    return this.router.contextWindow;
+  }
+
   /** Expone la config para que comandos internos del chat puedan cargar rutas de memoria. */
   getConfig(): StratumConfig {
     return this.config;

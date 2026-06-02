@@ -3,6 +3,7 @@ import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from '
 import { join } from 'path';
 import { execa } from 'execa';
 import type { IProvider } from '../providers/base.js';
+import type { StratumConfig } from '../config/schema.js';
 import type { Message } from './types.js';
 
 // ---------------------------------------------------------------------------
@@ -11,6 +12,7 @@ import type { Message } from './types.js';
 
 export type InitEvent =
   | { type: 'scan_progress'; file: string }
+  | { type: 'explorer_step'; iteration: number; action: string; file?: string }
   | { type: 'section_ready'; section: string; content: string }
   | { type: 'merge_conflict'; section: string; existing: string; proposed: string }
   | { type: 'merge_conflict_resolved'; section: string; kept: 'existing' | 'proposed' }
@@ -20,6 +22,8 @@ export type InitEvent =
 export interface InitOptions {
   force?: boolean;
   dryRun?: boolean;
+  /** Si es true, omite la fase ReAct Explorer (Hito 2.5). */
+  noExplore?: boolean;
   /** Resuelve los conflictos de merge sin interacción (usado en tests). */
   resolveConflict?: (section: string, existing: string, proposed: string) => Promise<boolean>;
 }
@@ -131,7 +135,7 @@ interface GitMetadata {
   recentCommits: string[];
 }
 
-interface ScanData {
+export interface ScanData {
   scannedFiles: string[];
   manifests: Record<string, string>;
   configs: Record<string, string>;
@@ -151,11 +155,23 @@ interface ScanData {
 // ---------------------------------------------------------------------------
 
 export class InitAgent {
+  private readonly providerInfo?: { name: string; baseUrl: string };
+  private readonly config?: StratumConfig;
+  private readonly contextWindow?: number;
+
   constructor(
     private readonly provider: IProvider,
     private readonly model: string,
-    private readonly providerInfo?: { name: string; baseUrl: string },
-  ) {}
+    opts?: {
+      providerInfo?: { name: string; baseUrl: string };
+      config?: StratumConfig;
+      contextWindow?: number;
+    },
+  ) {
+    this.providerInfo = opts?.providerInfo;
+    this.config = opts?.config;
+    this.contextWindow = opts?.contextWindow;
+  }
 
   async *run(cwd: string, options: InitOptions = {}): AsyncGenerator<InitEvent> {
     const stratumMdPath = join(cwd, 'STRATUM.md');
@@ -176,11 +192,38 @@ export class InitAgent {
     }
 
     // -----------------------------------------------------------------------
+    // 1.5. ReAct Explorer — Fase 2 (Hito 2.5, §569)
+    // -----------------------------------------------------------------------
+    let explorerFindings: { filesRead: string[]; findings: string } | undefined;
+    if (!options.noExplore && this.config !== undefined && this.contextWindow !== undefined) {
+      try {
+        const { InitReActExplorer } = await import('./init-explorer.js');
+        const explorer = new InitReActExplorer(
+          this.provider,
+          this.model,
+          this.config,
+          this.contextWindow,
+        );
+        const gen = explorer.explore(scanData, cwd);
+        while (true) {
+          const step = await gen.next();
+          if (step.done) {
+            explorerFindings = step.value;
+            break;
+          }
+          yield step.value;
+        }
+      } catch {
+        // Degradar silenciosamente: continuar sin hallazgos del explorer
+      }
+    }
+
+    // -----------------------------------------------------------------------
     // 2. Síntesis vía LLM + secciones deterministas
     // -----------------------------------------------------------------------
     let generatedSections: Record<string, string>;
     try {
-      generatedSections = await this.synthesize(scanData);
+      generatedSections = await this.synthesize(scanData, explorerFindings);
     } catch (err) {
       const msg = String(err);
       const isNetworkError =
@@ -711,7 +754,10 @@ export class InitAgent {
   // Síntesis vía LLM — §2.3 / §2.4
   // -------------------------------------------------------------------------
 
-  private async synthesize(data: ScanData): Promise<Record<string, string>> {
+  private async synthesize(
+    data: ScanData,
+    findings?: { filesRead: string[]; findings: string },
+  ): Promise<Record<string, string>> {
     // --- Construir contexto con presupuesto de tokens --- §1.7
     const parts: { priority: number; label: string; content: string }[] = [];
 
@@ -724,6 +770,19 @@ export class InitAgent {
         priority: 1,
         label: `## ${mainManifest.name}`,
         content: `\`\`\`\n${mainManifest.content}\n\`\`\``,
+      });
+    }
+
+    // Prioridad 2: hallazgos del ReAct Explorer (§593 — siempre incluido, no truncable)
+    if (findings && findings.findings && findings.findings !== 'Sin hallazgos adicionales.') {
+      const filesNote =
+        findings.filesRead.length > 0
+          ? `\nArchivos inspeccionados: ${findings.filesRead.join(', ')}`
+          : '';
+      parts.push({
+        priority: 2,
+        label: '## Hallazgos del explorer (exploración libre)',
+        content: findings.findings + filesNote,
       });
     }
 

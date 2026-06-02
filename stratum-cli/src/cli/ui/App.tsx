@@ -324,71 +324,80 @@ export function App({ agent, version }: Props) {
     }
   });
 
-  /** Lanza /init conduciendo InitAgent en el área de conversación. */
-  const runInit = useCallback(() => {
-    dispatch({ type: 'INIT_START' });
+  /** Lanza /init [--no-explore] conduciendo InitAgent en el área de conversación. */
+  const runInit = useCallback(
+    (noExplore = false) => {
+      dispatch({ type: 'INIT_START' });
 
-    (async () => {
-      try {
-        const [{ InitAgent }, { loadConfig }] = await Promise.all([
-          import('../../agent/init-agent.js'),
-          import('../../config/loader.js'),
-        ]);
+      (async () => {
+        try {
+          const [{ InitAgent }] = await Promise.all([import('../../agent/init-agent.js')]);
 
-        const config = loadConfig();
-        const provider = agent.getProvider();
-        const model = agent.model;
-        const initAgent = new InitAgent(provider, model);
+          const provider = agent.getProvider();
+          const model = agent.model;
+          const config = agent.getConfig();
+          const contextWindow = agent.contextWindow;
 
-        let scannedCount = 0;
-        let detectedStack = '';
+          const initAgent = new InitAgent(provider, model, { config, contextWindow });
 
-        const resolveConflict = (
-          section: string,
-          _existing: string,
-          _proposed: string,
-        ): Promise<boolean> => {
-          return new Promise((resolve) => {
-            dispatch({ type: 'INIT_CONFLICT', section });
-            mergeResolverRef.current = resolve;
-          });
-        };
+          let scannedCount = 0;
+          let detectedStack = '';
 
-        for await (const ev of initAgent.run(process.cwd(), { resolveConflict })) {
-          if (ev.type === 'scan_progress') {
-            scannedCount++;
-            dispatch({
-              type: 'INIT_PROGRESS',
-              text: `⟳ Escaneando proyecto... (${scannedCount} archivos)`,
+          const resolveConflict = (
+            section: string,
+            _existing: string,
+            _proposed: string,
+          ): Promise<boolean> => {
+            return new Promise((resolve) => {
+              dispatch({ type: 'INIT_CONFLICT', section });
+              mergeResolverRef.current = resolve;
             });
-          } else if (ev.type === 'section_ready') {
-            if (ev.section === 'Stack Tecnológico') detectedStack = ev.content.split('\n')[0] ?? '';
-            dispatch({
-              type: 'INIT_PROGRESS',
-              text: `⟳ Generando secciones... (${ev.section} listo)${detectedStack ? '\n   Stack: ' + detectedStack : ''}`,
-            });
-          } else if (ev.type === 'merge_conflict') {
-            // El reducer INIT_CONFLICT ya actualiza el texto y desbloquea el input
-          } else if (ev.type === 'merge_conflict_resolved') {
-            dispatch({ type: 'INIT_CONFLICT_DONE' });
-          } else if (ev.type === 'done') {
-            const verb = ev.isNew ? 'creado' : 'actualizado';
-            dispatch({
-              type: 'INIT_PROGRESS',
-              text: `✓ STRATUM.md ${verb} en ${ev.path}\n\nEl contexto del proyecto se cargará en el próximo mensaje.`,
-            });
-            agent.reloadMemory();
-          } else if (ev.type === 'error') {
-            dispatch({ type: 'INIT_PROGRESS', text: `✗ Error: ${ev.message}` });
+          };
+
+          for await (const ev of initAgent.run(process.cwd(), { noExplore, resolveConflict })) {
+            if (ev.type === 'scan_progress') {
+              scannedCount++;
+              dispatch({
+                type: 'INIT_PROGRESS',
+                text: `⟳ Escaneando proyecto... (${scannedCount} archivos)`,
+              });
+            } else if (ev.type === 'explorer_step') {
+              const fileNote = ev.file ? ` ${ev.file}` : '';
+              dispatch({
+                type: 'INIT_PROGRESS',
+                text: `⟳ Explorando proyecto... (paso ${ev.iteration}: ${ev.action}${fileNote})`,
+              });
+            } else if (ev.type === 'section_ready') {
+              if (ev.section === 'Stack Tecnológico')
+                detectedStack = ev.content.split('\n')[0] ?? '';
+              dispatch({
+                type: 'INIT_PROGRESS',
+                text: `⟳ Generando secciones... (${ev.section} listo)${detectedStack ? '\n   Stack: ' + detectedStack : ''}`,
+              });
+            } else if (ev.type === 'merge_conflict') {
+              // El reducer INIT_CONFLICT ya actualiza el texto y desbloquea el input
+            } else if (ev.type === 'merge_conflict_resolved') {
+              dispatch({ type: 'INIT_CONFLICT_DONE' });
+            } else if (ev.type === 'done') {
+              const verb = ev.isNew ? 'creado' : 'actualizado';
+              dispatch({
+                type: 'INIT_PROGRESS',
+                text: `✓ STRATUM.md ${verb} en ${ev.path}\n\nEl contexto del proyecto se cargará en el próximo mensaje.`,
+              });
+              agent.reloadMemory();
+            } else if (ev.type === 'error') {
+              dispatch({ type: 'INIT_PROGRESS', text: `✗ Error: ${ev.message}` });
+            }
           }
+        } catch (err) {
+          dispatch({ type: 'INIT_PROGRESS', text: `✗ Error inesperado: ${String(err)}` });
+        } finally {
+          dispatch({ type: 'INIT_DONE' });
         }
-      } catch (err) {
-        dispatch({ type: 'INIT_PROGRESS', text: `✗ Error inesperado: ${String(err)}` });
-      } finally {
-        dispatch({ type: 'INIT_DONE' });
-      }
-    })();
-  }, [agent]);
+      })();
+    },
+    [agent],
+  );
 
   const handleSend = useCallback(
     (text: string) => {
@@ -426,8 +435,9 @@ export function App({ agent, version }: Props) {
         return;
       }
 
-      if (cmd === '/init') {
-        runInit();
+      if (cmd === '/init' || cmd.startsWith('/init ')) {
+        const noExplore = cmd.includes('--no-explore');
+        runInit(noExplore);
         return;
       }
 
