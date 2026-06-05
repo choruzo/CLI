@@ -480,9 +480,15 @@ stratum memory search "sqlite"         # Búsqueda semántica
 stratum memory forget dec_20260527_001 # Elimina una decisión
 stratum memory show                    # Muestra STRATUM.md activo
 
-# Configuración
+# Configuración (clave-valor)
 stratum config get provider.default
 stratum config set provider.default litellm-proxy
+
+# Gestión de providers (wizard interactivo)
+stratum provider add                   # Wizard guiado: tipo → URL → API key → modelo → activa el provider
+stratum provider list                  # Lista providers configurados con estado de conectividad
+stratum provider use <name>            # Cambia el provider activo sin tocar el archivo a mano
+stratum provider remove <name>        # Elimina un provider de la config
 
 # Inicialización y onboarding de proyecto
 stratum init                           # Escanea el proyecto y genera/actualiza STRATUM.md
@@ -624,6 +630,60 @@ El scan actual lee un conjunto fijo de archivos conocidos. Funciona bien para pr
 
 ---
 
+### Hito 3.5 — Provider & Model UX *(~3 días)*
+
+Eliminar la necesidad de editar `.stratumrc.json` a mano para configurar providers o cambiar de modelo. Todo gestionable desde la CLI y desde comandos de sesión.
+
+#### Comando `stratum provider add` — wizard interactivo
+
+Flujo paso a paso con selección por teclado (Ink `<SelectInput>`):
+
+1. **Tipo de provider** — menú: `Ollama (local)`, `LiteLLM proxy`, `OpenAI`, `vLLM`, `Otro (OpenAI-compatible)`
+2. **Base URL** — input de texto con valor por defecto según el tipo elegido (ej. `http://localhost:11434` para Ollama)
+3. **API key** — input enmascarado; se omite si el tipo no lo requiere (Ollama local)
+4. **Nombre del provider** — alias libre que se usará en la config (ej. `mi-ollama`, `litellm-prod`)
+5. **Fetch de modelos** — llamada al endpoint `/models` del provider; si falla, permite entrada manual
+6. **Modelo por defecto** — menú con los modelos devueltos por la API (o entrada libre)
+7. **¿Activar ahora?** — confirma si este provider pasa a ser el activo
+8. **Escritura en `.stratumrc.json`** — añade el bloque `providers[name]` y opcionalmente actualiza `provider.default`; hace backup del archivo antes de modificar (`.stratumrc.json.bak`)
+
+Si `.stratumrc.json` no existe, el wizard lo crea desde cero. Si ya hay providers configurados, el nuevo se añade sin tocar los existentes.
+
+#### Comando `/model` — selector de modelo en sesión
+
+Comando de sesión (disponible en el input area junto a `/memory`, `/tools`, etc.) que permite cambiar el modelo activo sin salir de `stratum chat`:
+
+1. Llama al endpoint `/models` del provider activo
+2. Muestra lista navegable con el modelo actual marcado
+3. Al confirmar, actualiza el provider en caliente para la sesión actual (sin reiniciar)
+4. No modifica `.stratumrc.json` — el cambio es solo para la sesión en curso
+
+Si se quiere persistir el cambio: `stratum config set provider.default.<name>.model <model>` o volver a correr `stratum provider add`.
+
+#### Comando `/config_provider` — edición guiada del provider activo
+
+Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-rellenado con los valores actuales del provider activo, permitiendo editar cualquier campo (URL, API key, modelo) y guardar los cambios en `.stratumrc.json`.
+
+#### Items
+
+- [ ] `src/cli/commands/provider.ts` — subcomandos `add`, `list`, `use`, `remove`
+- [ ] `ProviderWizard` — componente Ink con flujo de pasos: `SelectInput` para tipo y modelo, `TextInput` para URL/alias, `MaskedInput` para API key
+- [ ] `fetchModels(baseUrl, apiKey)` en `src/providers/utils.ts` — GET `/v1/models`, timeout 5s, graceful fallback a entrada manual
+- [ ] Backup automático de `.stratumrc.json` antes de cualquier escritura del wizard
+- [ ] Comando de sesión `/model` en `InputArea` — integrado en el sistema de `/comandos` existente
+- [ ] Comando de sesión `/config_provider` en `InputArea`
+- [ ] `useModelSwitcher` hook — actualiza el provider activo en el `StratumAgent` sin reiniciar la sesión (señal directa al `ProviderRouter`)
+- [ ] `stratum provider list` — tabla con columnas: alias, tipo, baseUrl, modelo activo, estado (● verde / rojo según ping)
+- [ ] Tests: wizard con Ollama mock (200 OK), wizard con provider sin `/models` (fallback), cambio de modelo en sesión
+
+> **UI:** El wizard es la pieza central. Reutilizar los patrones de confirmación interactiva de Hito 3. El `/model` y `/config_provider` se añaden al autocompletado del `InputArea`. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado).
+
+**Dependencia:** Requiere los patrones de UI interactiva de Hito 3 (confirmación, Ink input components).
+
+**Entregable:** Un usuario nuevo puede configurar su primer provider y elegir modelo sin abrir ningún archivo. Un usuario existente puede cambiar de modelo en mitad de una sesión con `/model`.
+
+---
+
 ### Hito 4 — MCP Client *(~4 días)*
 - [ ] Integración `@modelcontextprotocol/sdk`
 - [ ] Conexión a MCP servers desde `.stratumrc.json`
@@ -661,7 +721,7 @@ El scan actual lee un conjunto fijo de archivos conocidos. Funciona bien para pr
 - [ ] Fallback automático a provider secundario
 - [ ] Comando `stratum providers list`
 
-> **UI:** El indicador `●` del status bar refleja el estado del provider en tiempo real (verde / rojo / gris según health check). El `/provider <name>` y `/model <name>` pasan a estar operativos en el autocompletado. En caso de fallback automático, notificar al usuario con un mensaje inline en el área de conversación. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/provider`, `/model`).
+> **UI:** El indicador `●` del status bar refleja el estado del provider en tiempo real (verde / rojo / gris según health check). El `/provider <name>` se añade al autocompletado (`/model` y `/config_provider` ya operativos desde Hito 3.5). En caso de fallback automático, notificar al usuario con un mensaje inline en el área de conversación. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/provider`, `/model`).
 
 **Entregable:** El agente funciona de forma transparente con cualquier backend LLM.
 
