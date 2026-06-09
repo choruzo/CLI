@@ -15,13 +15,13 @@ import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 
 const DEFAULT_CONFIG = {
   provider: {
-    default: 'local-ollama',
+    default: 'litellm',
     providers: {
-      'local-ollama': {
+      litellm: {
         type: 'openai-compatible',
-        baseUrl: 'http://localhost:11434/v1',
-        model: 'qwen3.5:9b',
-        apiKey: 'ollama',
+        baseUrl: 'http://localhost:4000/v1',
+        model: 'gpt-oss',
+        apiKey: 'sk-1234',
         contextWindow: 32768,
       },
     },
