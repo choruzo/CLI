@@ -6,6 +6,7 @@ import type { ToolCallState } from './ToolCallBlock.js';
 import { Banner } from './Banner.js';
 import { ConversationView } from './ConversationView.js';
 import { useAgentStream } from './useAgentStream.js';
+import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 
 export type AgentConvItem = {
   kind: 'agent';
@@ -21,16 +22,10 @@ interface AppState {
   completedItems: ConvItem[];
   currentItem: ConvItem | null;
   inputValue: string;
-  /** true cuando el agente o el init están procesando (deshabilita input normal) */
   thinking: boolean;
   contextUsed: number;
   contextMax: number;
   contextEstimated: boolean;
-  /**
-   * Cuando /init está esperando que el usuario responda un merge_conflict,
-   * guarda el nombre de la sección. El input se usa para la respuesta s/N.
-   */
-  mergeConflictSection: string | null;
 }
 
 export type AppAction =
@@ -38,12 +33,7 @@ export type AppAction =
   | { type: 'AGENT_EVENT'; event: AgentEvent }
   | { type: 'CONTEXT_UPDATE'; used: number; max: number; estimated: boolean }
   | { type: 'INPUT_CHANGE'; value: string }
-  | { type: 'SYSTEM_MESSAGE'; text: string }
-  | { type: 'INIT_START' }
-  | { type: 'INIT_PROGRESS'; text: string }
-  | { type: 'INIT_CONFLICT'; section: string }
-  | { type: 'INIT_CONFLICT_DONE' }
-  | { type: 'INIT_DONE' };
+  | { type: 'SYSTEM_MESSAGE'; text: string };
 
 function updateCurrentAgent(
   current: ConvItem | null,
@@ -82,71 +72,6 @@ function reducer(state: AppState, action: AppAction): AppState {
         ...state,
         phase: 'conversation',
         completedItems: [...state.completedItems, item],
-      };
-    }
-
-    case 'INIT_START': {
-      const item: AgentConvItem = {
-        kind: 'agent',
-        text: '⟳ Escaneando proyecto...',
-        toolCalls: [],
-        streaming: true,
-      };
-      return {
-        ...state,
-        phase: 'conversation',
-        completedItems: [...state.completedItems],
-        currentItem: item,
-        inputValue: '',
-        thinking: true,
-        mergeConflictSection: null,
-      };
-    }
-
-    case 'INIT_PROGRESS': {
-      return {
-        ...state,
-        currentItem: updateCurrentAgent(state.currentItem, (item) => ({
-          ...item,
-          text: action.text,
-        })),
-      };
-    }
-
-    case 'INIT_CONFLICT': {
-      // Mostrar la pregunta, desbloquear el input para recibir s/N
-      return {
-        ...state,
-        currentItem: updateCurrentAgent(state.currentItem, (item) => ({
-          ...item,
-          text:
-            item.text +
-            `\n\n⚠  La sección "## ${action.section}" tiene contenido manual.\n   ¿Actualizar con la información del scan? (s/N)`,
-        })),
-        thinking: false, // desbloquear input
-        mergeConflictSection: action.section,
-      };
-    }
-
-    case 'INIT_CONFLICT_DONE': {
-      return {
-        ...state,
-        thinking: true, // volver a bloquear mientras continúa
-        mergeConflictSection: null,
-      };
-    }
-
-    case 'INIT_DONE': {
-      const finalItem =
-        state.currentItem && state.currentItem.kind === 'agent'
-          ? { ...state.currentItem, streaming: false }
-          : state.currentItem;
-      return {
-        ...state,
-        completedItems: finalItem ? [...state.completedItems, finalItem] : state.completedItems,
-        currentItem: null,
-        thinking: false,
-        mergeConflictSection: null,
       };
     }
 
@@ -295,13 +220,9 @@ export function App({ agent, version }: Props) {
     contextUsed: ctxInit.used,
     contextMax: ctxInit.max,
     contextEstimated: ctxInit.estimated,
-    mergeConflictSection: null,
   });
 
   const { send, cancel } = useAgentStream(agent, dispatch);
-
-  // Ref para resolver conflictos de merge desde el input del usuario
-  const mergeResolverRef = useRef<((update: boolean) => void) | null>(null);
 
   const ctrlCCountRef = useRef(0);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -324,95 +245,28 @@ export function App({ agent, version }: Props) {
     }
   });
 
-  /** Lanza /init [--no-explore] conduciendo InitAgent en el área de conversación. */
+  /**
+   * Lanza /init enviando el prompt de inicialización al agente regular.
+   * El agente explora el repo con sus tools (read_file, write_file, bash)
+   * y escribe STRATUM.md directamente, igual que opencode.
+   */
   const runInit = useCallback(
-    (noExplore = false) => {
-      dispatch({ type: 'INIT_START' });
+    (focus?: string) => {
+      const prompt = INITIALIZE_PROMPT
+        .replace('${path}', process.cwd())
+        .replace('$ARGUMENTS', focus?.trim() || '(none)');
 
-      (async () => {
-        try {
-          const [{ InitAgent }] = await Promise.all([import('../../agent/init-agent.js')]);
-
-          const provider = agent.getProvider();
-          const model = agent.model;
-          const config = agent.getConfig();
-          const contextWindow = agent.contextWindow;
-
-          const initAgent = new InitAgent(provider, model, { config, contextWindow });
-
-          let scannedCount = 0;
-          let detectedStack = '';
-
-          const resolveConflict = (
-            section: string,
-            _existing: string,
-            _proposed: string,
-          ): Promise<boolean> => {
-            return new Promise((resolve) => {
-              dispatch({ type: 'INIT_CONFLICT', section });
-              mergeResolverRef.current = resolve;
-            });
-          };
-
-          for await (const ev of initAgent.run(process.cwd(), { noExplore, resolveConflict })) {
-            if (ev.type === 'scan_progress') {
-              scannedCount++;
-              dispatch({
-                type: 'INIT_PROGRESS',
-                text: `⟳ Escaneando proyecto... (${scannedCount} archivos)`,
-              });
-            } else if (ev.type === 'explorer_step') {
-              const fileNote = ev.file ? ` ${ev.file}` : '';
-              dispatch({
-                type: 'INIT_PROGRESS',
-                text: `⟳ Explorando proyecto... (paso ${ev.iteration}: ${ev.action}${fileNote})`,
-              });
-            } else if (ev.type === 'section_ready') {
-              if (ev.section === 'Stack Tecnológico')
-                detectedStack = ev.content.split('\n')[0] ?? '';
-              dispatch({
-                type: 'INIT_PROGRESS',
-                text: `⟳ Generando secciones... (${ev.section} listo)${detectedStack ? '\n   Stack: ' + detectedStack : ''}`,
-              });
-            } else if (ev.type === 'merge_conflict') {
-              // El reducer INIT_CONFLICT ya actualiza el texto y desbloquea el input
-            } else if (ev.type === 'merge_conflict_resolved') {
-              dispatch({ type: 'INIT_CONFLICT_DONE' });
-            } else if (ev.type === 'done') {
-              const verb = ev.isNew ? 'creado' : 'actualizado';
-              dispatch({
-                type: 'INIT_PROGRESS',
-                text: `✓ STRATUM.md ${verb} en ${ev.path}\n\nEl contexto del proyecto se cargará en el próximo mensaje.`,
-              });
-              agent.reloadMemory();
-            } else if (ev.type === 'error') {
-              dispatch({ type: 'INIT_PROGRESS', text: `✗ Error: ${ev.message}` });
-            }
-          }
-        } catch (err) {
-          dispatch({ type: 'INIT_PROGRESS', text: `✗ Error inesperado: ${String(err)}` });
-        } finally {
-          dispatch({ type: 'INIT_DONE' });
-        }
+      void (async () => {
+        await send(prompt);
+        agent.reloadMemory();
       })();
     },
-    [agent],
+    [agent, send],
   );
 
   const handleSend = useCallback(
     (text: string) => {
       if (!text.trim()) return;
-
-      // Si hay un conflicto de merge pendiente, redirigir la respuesta al resolver
-      if (state.mergeConflictSection !== null && mergeResolverRef.current) {
-        const update = text.trim().toLowerCase() === 's';
-        mergeResolverRef.current(update);
-        mergeResolverRef.current = null;
-        dispatch({ type: 'INPUT_CHANGE', value: '' });
-        // INIT_CONFLICT_DONE se disparará desde el generador al recibir merge_conflict_resolved
-        return;
-      }
-
       if (state.thinking) return;
 
       const cmd = text.trim();
@@ -436,14 +290,14 @@ export function App({ agent, version }: Props) {
       }
 
       if (cmd === '/init' || cmd.startsWith('/init ')) {
-        const noExplore = cmd.includes('--no-explore');
-        runInit(noExplore);
+        const focus = cmd.startsWith('/init ') ? cmd.slice('/init '.length).trim() : undefined;
+        runInit(focus);
         return;
       }
 
       void send(cmd);
     },
-    [send, state.thinking, state.mergeConflictSection, exit, runInit, agent],
+    [send, state.thinking, exit, runInit, agent],
   );
 
   if (state.phase === 'banner') {
@@ -462,7 +316,7 @@ export function App({ agent, version }: Props) {
         inputValue={state.inputValue}
         onInputChange={(value) => dispatch({ type: 'INPUT_CHANGE', value })}
         onInputSubmit={handleSend}
-        thinking={state.thinking && state.mergeConflictSection === null}
+        thinking={state.thinking}
         providerName={agent.providerName}
         model={agent.model}
         contextUsed={state.contextUsed}
