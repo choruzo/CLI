@@ -375,7 +375,8 @@ Al escribir `/` aparece inmediatamente un panel de autocompletado **encima** del
 | `/plan` | Activa modo plan-and-execute para el próximo mensaje |
 | `/compact` | Fuerza la compresión del contexto actual sin esperar al umbral automático del 80% |
 | `/provider <name>` | Cambia el proveedor activo en caliente |
-| `/model <name>` | Cambia el modelo activo en caliente |
+| `/model` | Abre selector interactivo de modelos del provider activo (fetch de `/models` + menú navegable con `↑↓`). El cambio aplica a la sesión actual sin reiniciar; no persiste en `.stratumrc.json`. |
+| `/config_provider` | Abre el wizard de configuración de provider pre-rellenado con el provider activo. Permite editar URL, API key y modelo por defecto. Los cambios se guardan en `.stratumrc.json` (con backup automático). |
 | `/tools` | Lista las tools disponibles (built-in + MCP) |
 | `/mcp reload` | Reinicia todos los MCP servers sin salir del proceso (útil tras cambiar la config) |
 | `/context` | Muestra estadísticas de uso del contexto actual |

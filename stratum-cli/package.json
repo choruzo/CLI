@@ -16,6 +16,7 @@
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "build": "tsup",
+    "prepare": "tsup",
     "test": "vitest",
     "test:run": "vitest run",
     "lint": "eslint src/",

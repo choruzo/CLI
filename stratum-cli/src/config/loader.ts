@@ -1,8 +1,10 @@
 import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
+import { homedir } from 'os';
 import { StratumConfigSchema, type StratumConfig } from './schema.js';
 
 const CONFIG_FILENAME = '.stratumrc.json';
+const GLOBAL_CONFIG_PATH = join(homedir(), '.stratum', CONFIG_FILENAME);
 
 export function findConfigFile(startDir: string): string | null {
   let current = startDir;
@@ -37,15 +39,53 @@ export function expandEnvVars(obj: unknown): unknown {
   return obj;
 }
 
+function readRawConfig(filePath: string): Record<string, unknown> {
+  const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+  return expandEnvVars(raw) as Record<string, unknown>;
+}
+
+function mergeConfigs(
+  base: Record<string, unknown>,
+  override: Record<string, unknown>,
+): Record<string, unknown> {
+  const result = { ...base };
+  for (const [key, value] of Object.entries(override)) {
+    const baseVal = base[key];
+    if (
+      value !== null &&
+      typeof value === 'object' &&
+      !Array.isArray(value) &&
+      baseVal !== null &&
+      typeof baseVal === 'object' &&
+      !Array.isArray(baseVal)
+    ) {
+      // Para provider.providers hacemos merge de claves, no reemplazo
+      result[key] = mergeConfigs(
+        baseVal as Record<string, unknown>,
+        value as Record<string, unknown>,
+      );
+    } else {
+      result[key] = value;
+    }
+  }
+  return result;
+}
+
 export function loadConfig(startDir?: string): StratumConfig {
   const searchDir = startDir ?? process.cwd();
-  const configPath = findConfigFile(searchDir);
 
-  if (!configPath) {
-    return StratumConfigSchema.parse({});
+  // 1. Config global (~/.stratum/.stratumrc.json)
+  let merged: Record<string, unknown> = {};
+  if (existsSync(GLOBAL_CONFIG_PATH)) {
+    merged = readRawConfig(GLOBAL_CONFIG_PATH);
   }
 
-  const raw = JSON.parse(readFileSync(configPath, 'utf-8')) as unknown;
-  const expanded = expandEnvVars(raw);
-  return StratumConfigSchema.parse(expanded);
+  // 2. Config de proyecto (sube desde cwd hasta encontrar uno)
+  const projectConfigPath = findConfigFile(searchDir);
+  if (projectConfigPath) {
+    const projectRaw = readRawConfig(projectConfigPath);
+    merged = mergeConfigs(merged, projectRaw);
+  }
+
+  return StratumConfigSchema.parse(merged);
 }
