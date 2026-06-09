@@ -485,7 +485,11 @@ export class ReactLoop {
       if (allToolCalls.length > 0) {
         assistantMsg.tool_calls = allToolCalls;
       }
-      this.messages.push(assistantMsg);
+      // Solo guardar si tiene contenido real — un mensaje {content:null, sin tool_calls}
+      // es inválido en la spec OpenAI y causa error 400 en la siguiente llamada.
+      if (assistantMsg.content !== null || assistantMsg.tool_calls) {
+        this.messages.push(assistantMsg);
+      }
 
       // Parar solo cuando no hay ningún tool call (ni válido ni con parse error)
       if (readyCalls.length === 0 && parseErrors.length === 0) {
