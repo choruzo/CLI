@@ -309,28 +309,67 @@ export function App({ agent, version }: Props) {
         try {
           let currentTool = '';
           let toolCount = 0;
+          let wroteStratum = false;
+          let agentText = '';
+          // ids de write_file apuntando a STRATUM.md, para confirmar la escritura real
+          const stratumWriteIds = new Set<string>();
 
-          for await (const event of agent.run(prompt, { compressionMode: 'conservative' })) {
-            if (event.type === 'tool_call_start' && currentTool !== event.name + event.id) {
-              currentTool = event.name + event.id;
-              toolCount++;
-              dispatch({
-                type: 'INIT_PROGRESS',
-                text: `[${toolCount}] ${event.name}...`,
-              });
-            } else if (event.type === 'tool_result') {
-              dispatch({
-                type: 'INIT_PROGRESS',
-                text: `[${toolCount}] ${event.name} OK`,
-              });
-              currentTool = '';
-            } else if (event.type === 'error' && event.fatal) {
-              dispatch({ type: 'INIT_PROGRESS', text: `Error: ${event.message}` });
+          const consume = async (input: string): Promise<void> => {
+            agentText = '';
+            for await (const event of agent.run(input, { compressionMode: 'conservative' })) {
+              if (event.type === 'text_delta') {
+                agentText += event.delta;
+              } else if (event.type === 'tool_call_start' && currentTool !== event.name + event.id) {
+                currentTool = event.name + event.id;
+                toolCount++;
+                dispatch({
+                  type: 'INIT_PROGRESS',
+                  text: `[${toolCount}] ${event.name}...`,
+                });
+              } else if (event.type === 'tool_call_ready') {
+                if (
+                  event.name === 'write_file' &&
+                  String((event.input as { path?: unknown }).path ?? '').includes('STRATUM.md')
+                ) {
+                  stratumWriteIds.add(event.id);
+                }
+              } else if (event.type === 'tool_result') {
+                if (stratumWriteIds.has(event.id)) wroteStratum = true;
+                dispatch({
+                  type: 'INIT_PROGRESS',
+                  text: `[${toolCount}] ${event.name} OK`,
+                });
+                currentTool = '';
+              } else if (event.type === 'error' && event.fatal) {
+                dispatch({ type: 'INIT_PROGRESS', text: `Error: ${event.message}` });
+              }
             }
+          };
+
+          await consume(prompt);
+
+          // Mitigación para modelos pequeños: si el run terminó sin escribir el
+          // fichero, reinyectar una instrucción directa una única vez.
+          if (!wroteStratum) {
+            dispatch({
+              type: 'INIT_PROGRESS',
+              text: 'El agente no escribió STRATUM.md — reintentando con instrucción directa...',
+            });
+            await consume(
+              `You have not written the file yet. Based on your investigation so far, call the write_file tool NOW with the complete contents of STRATUM.md at path ${cwd}/STRATUM.md. Do not reply with text only — make the tool call.`,
+            );
           }
 
-          agent.reloadMemory();
-          dispatch({ type: 'INIT_PROGRESS', text: 'STRATUM.md generado. Contexto recargado.' });
+          if (wroteStratum) {
+            agent.reloadMemory();
+            dispatch({ type: 'INIT_PROGRESS', text: 'STRATUM.md generado. Contexto recargado.' });
+          } else {
+            const detail = agentText.trim() ? ` Respuesta del agente: ${agentText.trim().slice(0, 500)}` : '';
+            dispatch({
+              type: 'INIT_PROGRESS',
+              text: `El agente terminó sin escribir STRATUM.md.${detail}`,
+            });
+          }
         } catch (err) {
           dispatch({ type: 'INIT_PROGRESS', text: `Error: ${String(err)}` });
         } finally {

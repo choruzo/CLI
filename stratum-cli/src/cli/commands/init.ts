@@ -29,7 +29,7 @@ const DEFAULT_CONFIG = {
 };
 
 // ---------------------------------------------------------------------------
-// Comando
+// Comando init
 // ---------------------------------------------------------------------------
 
 export const initCommand = new Command('init')
@@ -93,14 +93,25 @@ export const initCommand = new Command('init')
       const fatalLabel = isColorTty ? chalk.hex('#EF4444').bold('[fatal]') : '[fatal]';
 
       const toolStartTimes = new Map<string, number>();
+      let wroteStratum = false;
+      const stratumWriteIds = new Set<string>();
 
-      try {
-        for await (const event of agent.run(prompt, {
+      const consume = async (input: string): Promise<void> => {
+        for await (const event of agent.run(input, {
           signal: controller.signal,
           allowDestructive: opts.allowDestructive,
           compressionMode: 'conservative',
         })) {
           switch (event.type) {
+            case 'tool_call_ready':
+              if (
+                event.name === 'write_file' &&
+                String((event.input as { path?: unknown }).path ?? '').includes('STRATUM.md')
+              ) {
+                stratumWriteIds.add(event.id);
+              }
+              break;
+
             case 'text_delta':
               process.stdout.write(event.delta);
               break;
@@ -113,6 +124,7 @@ export const initCommand = new Command('init')
               break;
 
             case 'tool_result': {
+              if (stratumWriteIds.has(event.id)) wroteStratum = true;
               const duration = (
                 (Date.now() - (toolStartTimes.get(event.id) ?? Date.now())) / 1000
               ).toFixed(1);
@@ -143,6 +155,21 @@ export const initCommand = new Command('init')
               break;
           }
         }
+      };
+
+      try {
+        await consume(prompt);
+
+        // Mitigación para modelos pequeños: si el run terminó sin escribir el
+        // fichero, reinyectar una instrucción directa una única vez.
+        if (!wroteStratum && !controller.signal.aborted) {
+          process.stderr.write(
+            `${errorLabel} El agente no escribió STRATUM.md — reintentando con instrucción directa...\n`,
+          );
+          await consume(
+            `You have not written the file yet. Based on your investigation so far, call the write_file tool NOW with the complete contents of STRATUM.md at path ${cwd}/STRATUM.md. Do not reply with text only — make the tool call.`,
+          );
+        }
       } catch (err) {
         process.stderr.write(`\n${fatalLabel} ${String(err)}\n`);
         process.exit(1);
@@ -152,8 +179,15 @@ export const initCommand = new Command('init')
         process.exit(130);
       }
 
-      process.stdout.write(
-        '\n  Tip: versiona STRATUM.md en git — se carga automáticamente en cada sesión.\n\n',
-      );
+      if (wroteStratum) {
+        process.stdout.write(
+          '\n  Tip: versiona STRATUM.md en git — se carga automáticamente en cada sesión.\n\n',
+        );
+      } else {
+        process.stderr.write(
+          `\n${errorLabel} El agente terminó sin escribir STRATUM.md. Vuelve a intentarlo o usa un modelo mayor.\n\n`,
+        );
+        process.exit(1);
+      }
     },
   );
