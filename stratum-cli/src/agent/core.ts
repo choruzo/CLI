@@ -107,12 +107,12 @@ export class StratumAgent {
     return this.router.model;
   }
 
-  /** Expone el provider activo para que el InitAgent pueda hacer LLM calls. */
+  /** Expone el provider activo para subsistemas que necesiten hacer LLM calls directas. */
   getProvider(): IProvider {
     return this.router.getActive();
   }
 
-  /** Tamaño del contexto del provider activo (para pasarlo al InitAgent). */
+  /** Tamaño del contexto del provider activo. */
   get contextWindow(): number {
     return this.router.contextWindow;
   }

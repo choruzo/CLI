@@ -3,7 +3,7 @@ import { join } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 
-// Directorios que siempre se excluyen (mismo set que init-agent.ts)
+// Directorios que siempre se excluyen (mismo set que list.ts y grep.ts)
 const EXCLUDED_DIRS = new Set([
   'node_modules',
   '.git',

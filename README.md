@@ -18,8 +18,8 @@ Stratum CLI es un agente de linea de comandos extensible basado en un loop ReAct
 | Area | Disponible hoy | Notas |
 |---|---|---|
 | Providers | `openai-compatible` | Compatible con Ollama, llama.cpp, vLLM, LiteLLM, OpenAI y proxies equivalentes |
-| Tools built-in | `read_file`, `write_file`, `bash` | Son las unicas registradas por defecto actualmente |
-| Memoria | `STRATUM.md`, `memory show` | `memory list/search/forget` aun no estan implementados |
+| Tools built-in | `read_file`, `write_file`, `glob`, `list_directory`, `grep`, `bash` | Registradas por defecto; salida truncada a ~30k chars |
+| Memoria | `STRATUM.md` (proyecto + global), `memory show` | `memory list/search/forget` aun no estan implementados (Hito 5) |
 | Sesiones | `list`, `resume`, `delete`, `prune` | Persistencia local de conversaciones |
 | MCP / SSH / web tools | En roadmap | La especificacion y el schema ya contemplan estas areas, pero no forman parte del runtime actual |
 

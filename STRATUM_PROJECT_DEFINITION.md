@@ -544,7 +544,7 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 
 ---
 
-### Hito 2 — Memory Layer 1 *(~3 días)*
+### Hito 2 — Memory Layer 1 ✅ *(cerrado 2026-06-11)*
 - [x] `STRATUM.md` loader (proyecto + global)
 - [x] Inyección en system prompt
 - [x] `SessionContext`: historial de conversación
@@ -556,61 +556,35 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 
 **Entregable:** El agente recuerda el contexto del proyecto entre iteraciones dentro de una sesión.
 
+> **Cierre:** la capa global (`~/.stratum/STRATUM.md`) y el orden de fusión global→proyecto de `getInjectableMemory()` quedaron cubiertos por tests (`src/memory/project.test.ts`: carga global vía `memory.globalFile`, fusión con separador `---`, `hasMemory()`, `reload()` tras `/init`). El status bar con umbrales de color (<60% verde, <85% ámbar, resto rojo) y `/memory show` están implementados en `StatusBar.tsx` y `App.tsx`.
+
 ---
 
-### Hito 2.5 — Init Agent ReAct Explorer *(~3 días)*
+### Hito 2.5 — Init Agent ReAct Explorer ✅ *(cerrado 2026-06-11 — resuelto con un diseño distinto al planificado)*
 
-Mejora del comando `stratum init` combinando el scan determinista actual con una fase de exploración libre basada en el loop ReAct en modo read-only. El objetivo es que el `STRATUM.md` generado capture contexto que el scan hardcodeado no puede detectar: entrypoints no convencionales, instrucciones en archivos existentes (`CLAUDE.md`, `.cursorrules`), patrones de arquitectura visibles solo leyendo código fuente.
+Mejora del comando `stratum init` para que el `STRATUM.md` generado capture contexto que un scan hardcodeado no puede detectar: entrypoints no convencionales, instrucciones en archivos existentes (`CLAUDE.md`, `.cursorrules`), patrones de arquitectura visibles solo leyendo código fuente.
 
-#### Motivación
+#### Cómo se cerró realmente
 
-El scan actual lee un conjunto fijo de archivos conocidos. Funciona bien para proyectos convencionales pero falla cuando la estructura no sigue los patrones esperados. opencode resuelve esto delegando todo en el agente general (sin scan), lo que sacrifica predictibilidad. La solución híbrida mantiene el scan como base garantizada y añade una fase ReAct acotada para cubrir lo que el scan no alcanza.
+El diseño híbrido original (scan determinista + `InitReActExplorer` acotado a 8 pasos + fase de síntesis + merge) **se descartó** en favor del enfoque puro de opencode: `stratum init` y `/init` inyectan `INITIALIZE_PROMPT` (adaptación de `initialize.txt` de opencode, en `src/agent/initialize-prompt.ts`) como mensaje de usuario del agente general, que explora libremente y escribe `STRATUM.md` directamente con `write_file`. El scan determinista (`init-agent.ts`) fue eliminado. La calidad no viene de un pipeline especial sino del stack completo (ver `stratum-init-fix-reporte.md` y `opencode-init-implementacion.md`):
 
-#### Diseño
+- **Tools de exploración**: `glob`, `list_directory` y `grep` (nueva, ripgrep con fallback Node) registradas; descripciones alineadas con opencode incluyendo búsquedas especulativas en paralelo
+- **`read_file` con contrato opencode**: líneas numeradas `N: contenido`, tope 2000 líneas, paginación via `offset`
+- **Truncado genérico de tool results** (~30k chars, cabeza+cola) en `ToolDispatcher` para proteger el contexto de modelos locales
+- **System prompt estilo `default.txt`** con bloque `<env>` dinámico (cwd, worktree, git, plataforma, fecha, model id)
+- **Compresión conservadora durante init** (`compressionMode: 'conservative'`: umbral ≥92%, doble de rondas protegidas) — el valor del init está en el contexto acumulado y comprimirlo lo destruye
+- **Detección de escritura real + auto-retry**: si el run termina sin un `write_file` exitoso a `STRATUM.md`, se reinyecta una instrucción directa una única vez; el mensaje final de la UI solo reporta éxito si hubo escritura
 
-**Fase 1 — Scan determinista** *(lo que ya existe, sin cambios)*
-- Manifests, lockfiles, configs, CI workflows, entrypoints conocidos
-- Rápido, sin LLM, resultado garantizado
+#### Items (mapeo al cierre)
 
-**Fase 2 — ReAct Explorer** *(nueva)*
-- El agente recibe el resultado del scan como contexto inicial
-- Herramientas disponibles exclusivamente: `read_file`, `glob`, `list_directory`
-- Presupuesto fijo de iteraciones: máximo 8 pasos ReAct
-- El agente guía su exploración con el criterio de opencode: *"¿lo perdería un agente sin esta información?"*
-- Puede leer archivos de instrucciones existentes (`CLAUDE.md`, `.cursorrules`, `.github/copilot-instructions.md`, `opencode.json`, `AGENTS.md`) y preservar su contenido relevante
-- Puede inspeccionar entrypoints no convencionales, subdirectorios de monorepo, o archivos de arquitectura (`ARCHITECTURE.md`, `docs/`)
-- Si el presupuesto se agota sin nuevos hallazgos, la fase termina sin error
+- [x] Exploración libre con criterio de señal — vía `INITIALIZE_PROMPT` + agente general (sustituye a `InitReActExplorer`)
+- [x] Preservación de archivos de instrucciones existentes (`CLAUDE.md`, `.cursorrules`, `AGENTS.md`) — instruido en el prompt y validado manualmente
+- [x] UI: progreso de exploración en `/init` (`[N] tool...` vía `INIT_PROGRESS`) y en `stratum init` (stderr con duración por tool)
+- [x] Tests: sustitución de placeholders (`initialize-prompt.test.ts`), formato de `read_file`, truncado de outputs, modo de compresión conservador
+- [ ] *(pendiente, opcional)* Tool `question` para la tanda única de preguntas al usuario que contempla el prompt de opencode (F7 del reporte)
+- ~~`InitReActExplorer` / `ExplorerFindings` / `synthesize()` / evento `explorer_step`~~ — descartados con el cambio de diseño
 
-**Fase 3 — Síntesis** *(llamada LLM única, igual que ahora)*
-- Recibe el contexto combinado: output del scan + hallazgos del explorer
-- Aplica el criterio editorial de opencode: generar contenido solo si responde "¿lo perdería el agente sin ayuda?"
-- Las secciones sin evidencia suficiente se omiten o quedan como placeholder
-
-**Fase 4 — Merge** *(sin cambios)*
-
-#### Implementación
-
-- `InitAgent.run()` orquesta las 4 fases en secuencia
-- `InitReActExplorer` — clase nueva en `src/agent/init-explorer.ts`:
-  - Instancia un `ReactLoop` con `ToolRegistry` restringido (solo read tools)
-  - Recibe el `ScanData` como contexto inicial y emite `InitEvent`s de progreso (`explorer_step`)
-  - System prompt especializado: investigar sin modificar, criterio de señal, presupuesto explícito
-  - Devuelve `ExplorerFindings`: lista de archivos leídos + contenido relevante extraído
-- El `synthesize()` actual acepta `ExplorerFindings` como argumento adicional y lo incluye en el contexto LLM con prioridad 2 (entre el manifiesto principal y los docs)
-- Nuevo `InitEvent`: `{ type: 'explorer_step'; iteration: number; action: string; file?: string }`
-
-#### Items
-
-- [ ] `InitReActExplorer` en `src/agent/init-explorer.ts` con `ReactLoop` restringido
-- [ ] System prompt del explorer (criterio de señal, presupuesto, lista de archivos de instrucciones a priorizar)
-- [ ] `ExplorerFindings` type + integración en `synthesize()`
-- [ ] Nuevo evento `explorer_step` en `InitEvent` union
-- [ ] UI: mostrar iteraciones del explorer en `stratum init` (spinner + acción actual)
-- [ ] Tests: explorer con proyecto de estructura no convencional, con `CLAUDE.md` existente, con budget agotado sin hallazgos
-
-> **Dependencia:** Requiere que el `ReactLoop` de Hito 1 soporte inicialización con `ToolRegistry` externo (actualmente está acoplado al registry global). Añadir parámetro `toolRegistry?: ToolRegistry` al constructor de `ReactLoop` antes de comenzar este hito.
-
-**Entregable:** `stratum init` en un proyecto con `CLAUDE.md` existente preserva sus instrucciones en el `STRATUM.md` generado. En un monorepo con estructura no estándar, el agente encuentra y documenta los paquetes correctamente.
+**Entregable validado** (A/B manual sobre FinControl, qwen3-9b vía LiteLLM): el `STRATUM.md` generado preserva las instrucciones del `CLAUDE.md` existente, documenta los límites entre servicios del monorepo (backend/frontend/ml-service) y contiene comandos exactos verificables sin relleno genérico, a nivel comparable al `AGENTS.md` de opencode.
 
 ---
 
@@ -1431,9 +1405,11 @@ for await (const event of agent.run(input, { signal: controller.signal })) {
 
 ### 12.13 — Comando `/init` y `stratum init`
 
-**Decisión: inspección de superficie inteligente del proyecto + generación/actualización de `STRATUM.md` con secciones fijas.**
+**Decisión (revisada 2026-06-11): comando-plantilla estilo opencode — el agente general explora libremente y escribe `STRATUM.md` directamente. Sin pipeline especial.**
 
 Este comando es el equivalente Stratum del `CLAUDE.md` auto-generado de Claude Code: permite que el agente conozca el proyecto desde el primer mensaje, sin que el usuario tenga que escribir nada manualmente.
+
+> **Nota histórica:** el diseño original (scan determinista + plantilla de 5 secciones fijas + clase `InitAgent` + merge interactivo por sección) se descartó tras comparar resultados con el `/init` de opencode sobre el mismo modelo local. La calidad emerge del stack completo (system prompt, diseño de tools, loop sin recortes), no de un pipeline dedicado. Ver `stratum-init-fix-reporte.md` y `opencode-init-implementacion.md` en la raíz del repo.
 
 ---
 
@@ -1448,206 +1424,36 @@ El comportamiento es idéntico en ambos contextos:
 
 ---
 
-#### Algoritmo de scan (superficie inteligente)
+#### Mecánica (comando-plantilla)
 
-El agente inspecciona el directorio de trabajo en este orden. El proceso completo tarda ~5s en proyectos de tamaño medio; respeta `.gitignore`.
+`INITIALIZE_PROMPT` (en `src/agent/initialize-prompt.ts`, adaptación del `initialize.txt` de opencode) se inyecta como **mensaje de usuario normal** del `StratumAgent`, con dos sustituciones que deben hacerse con `replaceAll` (el placeholder `${path}` aparece varias veces):
 
-```
-1. Estructura de directorios
-   - Árbol de carpetas, max depth 3
-   - Excluir: node_modules/, .git/, dist/, __pycache__/, .venv/, target/
-
-2. Archivos de manifiesto (stack tecnológico)
-   - package.json / package-lock.json
-   - pyproject.toml / setup.py / requirements.txt
-   - Cargo.toml
-   - go.mod
-   - pom.xml / build.gradle
-   - composer.json
-   - Gemfile
-
-3. Archivos de configuración conocidos (convenciones y tooling)
-   - tsconfig.json, .eslintrc*, .prettierrc*
-   - .editorconfig, .nvmrc, .python-version
-   - Dockerfile, docker-compose.yml
-   - .github/workflows/*.yml (CI/CD)
-   - Makefile
-
-4. Documentación existente
-   - README.md (o README.rst / README.txt)
-   - CONTRIBUTING.md
-   - CHANGELOG.md (solo las primeras 50 líneas)
-
-5. Entry points del código (solo si el manifiesto los referencia explícitamente)
-   - El campo "main" / "bin" de package.json
-   - El campo [tool.poetry.scripts] de pyproject.toml
-   - src/main.rs, cmd/main.go, etc.
+```ts
+const prompt = INITIALIZE_PROMPT
+  .replaceAll('${path}', cwd)
+  .replaceAll('$ARGUMENTS', focus?.trim() || '(none)');
 ```
 
----
+A partir de ahí corre el loop ReAct estándar con todas las tools registradas (`read_file`, `write_file`, `glob`, `list_directory`, `grep`, `bash`). No hay código específico de generación: el propio prompt instruye la estrategia de investigación (README → manifests → configs de build/test/lint → CI → archivos de instrucciones existentes), el criterio editorial ("¿lo perdería un agente sin esta información?") y la escritura final con `write_file`.
 
-#### Lógica update/merge (cuando `STRATUM.md` ya existe)
+**Invariantes del run de init:**
 
-`/init` nunca destruye trabajo manual. El proceso de merge es:
-
-```
-1. Leer STRATUM.md existente
-2. Parsear secciones por encabezado H2 (## Sección)
-3. Para cada sección del template fijo:
-   a. Si la sección existe en el archivo actual Y tiene contenido no vacío:
-      → Marcarla como "manual" — el agente la muestra al usuario y pregunta
-        si quiere actualizarla o preservarla.
-   b. Si la sección existe pero está vacía o tiene solo el placeholder:
-      → Rellenarla automáticamente con lo encontrado en el scan.
-   c. Si la sección no existe:
-      → Añadirla al final del bloque de secciones fijas.
-4. Secciones extra (no parte del template) que el usuario haya añadido:
-   → Siempre preservadas, sin tocarlas.
-```
-
-Para secciones con contenido manual, el agente muestra en el chat:
-
-```
-  ⚠  La sección "## Convenciones" tiene contenido escrito a mano.
-     ¿Actualizar con la información del scan? (s/N)
-```
-
-Si el usuario responde N, esa sección se deja intacta. Si responde S, el agente fusiona el contenido existente con los nuevos hallazgos (no reemplaza — añade lo que falta).
-
----
-
-#### Estructura fija del `STRATUM.md` generado
-
-Las cinco secciones son siempre las mismas, en este orden:
-
-```markdown
-# Stratum Memory
-
-## Proyecto
-<!-- Nombre del proyecto, descripción breve, propósito principal -->
-
-## Stack Tecnológico
-<!-- Lenguajes, frameworks, librerías principales, versiones clave -->
-
-## Estructura
-<!-- Árbol de directorios relevante con descripción de cada carpeta -->
-
-## Convenciones
-<!-- Estilo de código, naming, reglas de commits, patrones detectados -->
-
-## Comandos Clave
-<!-- Scripts de build, test, dev, lint — exactamente como aparecen en el manifiesto -->
-```
-
-**Ejemplo de output real** para un proyecto TypeScript:
-
-```markdown
-# Stratum Memory
-
-## Proyecto
-Nombre: stratum-cli
-Descripción: Agente CLI extensible construido sobre un loop ReAct.
-Repositorio: /home/javi/proyectos/CLI
-
-## Stack Tecnológico
-- Runtime: Node.js >=22.0.0
-- Lenguaje: TypeScript 5.x
-- Build: tsup (ESM + CJS)
-- Test: Vitest
-- UI terminal: Ink 4 + React 18
-- LLM client: implementación propia OpenAI-compatible
-
-## Estructura
-src/
-  agent/     — Loop ReAct: StratumAgent, ReactLoop, ContextManager
-  providers/ — ProviderRouter + OpenAICompatible
-  tools/     — ToolRegistry, ToolDispatcher, tools built-in
-  memory/    — MemoryManager (STRATUM.md + decisions.json + sqlite-vec)
-  cli/       — Entry point Commander.js, comandos, UI Ink
-
-## Convenciones
-- Imports ESM con extensión explícita (.js)
-- Zod para validación de schemas en runtime
-- snake_case para archivos, PascalCase para clases
-- Commits en inglés, imperativo
-
-## Comandos Clave
-- npm run dev      → desarrollo con hot-reload
-- npm run build    → compilar a dist/ (ESM + CJS)
-- npm test         → Vitest en modo watch
-- npm run lint     → ESLint
-- npm run format   → Prettier
-```
-
----
-
-#### Heurísticas de detección de stack
-
-El agente usa estas reglas para inferir el stack a partir de los archivos de manifiesto:
-
-| Señal detectada | Inferencia |
-|---|---|
-| `package.json` con `"typescript"` en devDependencies | TypeScript |
-| `package.json` con `"react"` + `"ink"` | UI terminal con Ink |
-| `package.json` con `"vitest"` o `"jest"` | Framework de test |
-| `pyproject.toml` con `[tool.poetry]` | Python + Poetry |
-| `Cargo.toml` con `[package]` | Rust |
-| `go.mod` con `module` | Go |
-| `Dockerfile` presente | Containerizado |
-| `.github/workflows/` con archivos `.yml` | CI/CD en GitHub Actions |
-| `docker-compose.yml` | Orquestación multi-servicio |
-
-Si no se detecta ningún manifiesto conocido, la sección **Stack Tecnológico** se genera con la lista de extensiones de archivo más frecuentes en `src/` o la raíz.
+1. **Compresión conservadora** — ambos puntos de entrada pasan `compressionMode: 'conservative'` a `agent.run()`: umbral de compresión ≥0.92 y doble de `compressionKeepRounds`. El valor del init está en el contexto acumulado durante la exploración; si aun así se comprime, se emite un `warning` visible sugiriendo configurar el `contextWindow` real del servidor.
+2. **Detección de escritura real** — se rastrean los `tool_call_ready` de `write_file` cuyo `path` contiene `STRATUM.md` y se confirma con su `tool_result`. El mensaje de éxito solo se muestra si hubo escritura confirmada.
+3. **Auto-retry para modelos pequeños** — si el run termina sin escritura confirmada, se reinyecta una única vez una instrucción directa ("call the write_file tool NOW... Do not reply with text only"). Si tras el retry sigue sin escribirse: el chat muestra el texto final del agente; el comando CLI sale con código 1.
+4. **Update in-place** — si `STRATUM.md` ya existe, no hay lógica especial de merge: el prompt instruye leerlo primero y mejorarlo conservando lo verificado y eliminando lo obsoleto.
 
 ---
 
 #### Implementación
 
 ```
-src/cli/commands/init.ts     ← comando `stratum init` (Commander.js)
-src/agent/init-agent.ts      ← lógica de scan + generación del STRATUM.md
+src/agent/initialize-prompt.ts   ← INITIALIZE_PROMPT (plantilla, en inglés)
+src/cli/commands/init.ts         ← comando `stratum init` (sin Ink, output plain text)
+src/cli/ui/App.tsx (runInit)     ← comando de sesión `/init` (progreso vía INIT_PROGRESS)
 ```
 
-`InitAgent` es un agente especializado (no el `StratumAgent` principal) que tiene acceso a un subconjunto reducido de tools: `read_file`, `list_directory`, `bash` (solo lectura). No usa tools destructivas, no persiste sesión, no guarda decisiones.
-
-```typescript
-class InitAgent {
-  async run(cwd: string, options: InitOptions): AsyncGenerator<InitEvent> {
-    // 1. Scan del proyecto
-    // 2. Síntesis via LLM call
-    // 3. Merge con STRATUM.md existente (si aplica)
-    // 4. Escritura del archivo
-  }
-}
-
-type InitEvent =
-  | { type: 'scan_progress'; file: string }
-  | { type: 'section_ready'; section: string; content: string }
-  | { type: 'merge_conflict'; section: string }   // espera respuesta del usuario
-  | { type: 'done'; path: string }
-  | { type: 'error'; message: string }
-```
-
----
-
-#### Comportamiento en `stratum init` (CLI sin Ink)
-
-```
-$ stratum init
-
-  Stratum — Inicializando proyecto
-
-  ⟳ Escaneando estructura...        ✓ 47 archivos inspeccionados
-  ⟳ Detectando stack...             ✓ TypeScript · Node.js · Vitest
-  ⟳ Generando STRATUM.md...         ✓
-
-  ✓ STRATUM.md creado en /home/javi/proyectos/CLI/STRATUM.md
-
-  Tip: edita STRATUM.md para añadir convenciones o instrucciones
-  permanentes al agente. Se carga automáticamente en cada sesión.
-```
-
-Si `STRATUM.md` ya existe y hay secciones con contenido manual, se muestra el prompt de confirmación por sección en el terminal (stdin interactivo), exactamente igual que las confirmaciones destructivas.
+En `/init` (chat), los `text_delta` no se renderizan durante la exploración para evitar el parpadeo de Ink; la UI muestra `[N] <tool>...` / `[N] <tool> OK` por cada tool call. En `stratum init` (CLI) el texto del agente sí se emite a stdout y cada tool a stderr con su duración. Tras una escritura exitosa en chat, `agent.reloadMemory()` recarga el `STRATUM.md` en el system prompt de la sesión en curso.
 
 
 ### 12.14 — SSH Nativo
