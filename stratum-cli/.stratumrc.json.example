@@ -31,8 +31,9 @@
     "confirmDestructive": true,
     "bashTimeout": 30000,
     "webSearch": {
-      "backend": "brave",
-      "apiKey": "${BRAVE_API_KEY}"
+      "backend": "meta",
+      "tavilyApiKey": "${TAVILY_API_KEY}",
+      "maxResults": 10
     },
     "destructivePatterns": ["rm", "rmdir", "dd", "mkfs", "format", "DROP", "DELETE", "truncate", "shred", "wipefs"]
   },

@@ -588,15 +588,15 @@ El diseño híbrido original (scan determinista + `InitReActExplorer` acotado a 
 
 ---
 
-### Hito 3 — Tools completos Day 1 *(~4 días)*
-- [ ] `edit_file` con diff patches
-- [ ] `list_directory`, `glob`, `grep`
-- [ ] `web_search` + `web_fetch`
-- [ ] Safety check en `bash` (patrones destructivos)
-- [ ] Confirmación interactiva en tools destructivas
-- [ ] Timeout y cancelación de tools
-- [ ] ToolCall UI (renderizado de tool calls en Ink)
-- [ ] Markdown rendering de respuestas del agente (`<MarkdownText>` con `marked` + Ink components manuales)
+### Hito 3 — Tools completos Day 1 ✅ *(cerrado 2026-06-11)*
+- [x] `edit_file` con diff patches — reemplazo exacto `old_string → new_string` con validación de unicidad, `replace_all` opcional y unified diff generado con LCS propio (`fs/diff.ts`, sin dependencias)
+- [x] `list_directory`, `glob`, `grep` — cerradas previamente en el Hito 2.5
+- [x] `web_search` + `web_fetch` — metabúsqueda: DuckDuckGo (HTML scraping, sin API key) + Tavily (si hay key), unificación de URLs, dedupe por URL normalizada y re-rank con Reciprocal Rank Fusion → top 10 al agente. `web_fetch` con `Accept: text/markdown` preferente, límite 5 MB y conversor HTML→markdown propio (`web/html-to-text.ts`)
+- [x] Safety check en `bash` (patrones destructivos) — predicado `isDestructive()` por llamada con `tools.destructivePatterns`, matching por palabra completa (no marca `formidable` ni `rmdir_helper`)
+- [x] Confirmación interactiva en tools destructivas — fase de confirmación secuencial en el `ToolDispatcher` previa a la ejecución; `<DestructiveConfirm>` en chat (S/N/!), readline en `stratum run`, deny automático en piped/CI (§12.5); `!` activa allow-all de sesión
+- [x] Timeout y cancelación de tools — `AbortSignal.any(usuario, timeout)` pasado a `execute()` + `Promise.race` como red de seguridad para tools que ignoren el signal
+- [x] ToolCall UI (renderizado de tool calls en Ink) — 4 estados (`pending`/`running`/`completed`/`error`), spinner `◌◎●◉○`, timer 100ms, foco con Tab/Shift+Tab (`▶`), expansión con Space (máx. 10 líneas + `[+N more lines]`); el último turno se mantiene fuera de `<Static>` para seguir siendo interactivo
+- [x] Markdown rendering de respuestas del agente — `<MarkdownText>` dual-mode (`StreamingText` durante streaming → swap en `done`), `marked.lexer` + renderer recursivo a componentes Ink (`markdown/renderTokens.tsx`), `<CodeBlock>` con `cli-highlight`, `<InlineCode>`, fallback plano para elementos no soportados
 
 > **UI:** El bloque de tool calls y el markdown rendering son las piezas centrales de este hito. Implementar los cuatro estados de tool call (`pending`, `running`, `completed`, `error`), el spinner animado, el timer incremental, el toggle de expansión con output colapsable, y el prompt de confirmación para operaciones destructivas. Implementar también el sistema dual-mode de renderizado de markdown: `<StreamingText>` durante la generación, `<MarkdownText>` (usando `marked` + Ink components) al recibir el evento `done`. Ver [§5.1 — Tool Call Block — Estados](./STRATUM_UI_SPECIFICATION.md#51-tool-call-block--estados) (todos los estados y el bloque expandido), [§5.3 — Renderizado de Markdown](./STRATUM_UI_SPECIFICATION.md#53-renderizado-de-markdown-en-respuestas-del-agente) (dual-mode, estructura de componentes, elementos soportados), [§8 — Animaciones](./STRATUM_UI_SPECIFICATION.md#8-animaciones-y-transiciones) (spinner + timer + transición StreamingText→MarkdownText), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (`ToolCallBlock`, `MarkdownText`, `CodeBlock`).
 

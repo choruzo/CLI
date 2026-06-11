@@ -3,7 +3,8 @@ import { Box } from 'ink';
 import { StatusBar } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
-import type { ConvItem } from './App.js';
+import { DestructiveConfirm } from './DestructiveConfirm.js';
+import type { ConvItem, PendingConfirm } from './App.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -17,6 +18,12 @@ interface Props {
   contextUsed: number;
   contextMax: number;
   contextEstimated?: boolean;
+  focusedBlockId?: string | null;
+  expandedBlockIds?: ReadonlySet<string>;
+  pendingConfirm?: PendingConfirm | null;
+  onConfirmApprove?: () => void;
+  onConfirmDeny?: () => void;
+  onConfirmAllowAll?: () => void;
 }
 
 export function ConversationView({
@@ -31,6 +38,12 @@ export function ConversationView({
   contextUsed,
   contextMax,
   contextEstimated,
+  focusedBlockId,
+  expandedBlockIds,
+  pendingConfirm,
+  onConfirmApprove,
+  onConfirmDeny,
+  onConfirmAllowAll,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -41,12 +54,26 @@ export function ConversationView({
         contextMax={contextMax}
         estimated={contextEstimated}
       />
-      <MessageList completedItems={completedItems} currentItem={currentItem} />
+      <MessageList
+        completedItems={completedItems}
+        currentItem={currentItem}
+        focusedBlockId={focusedBlockId}
+        expandedBlockIds={expandedBlockIds}
+      />
+      {pendingConfirm && (
+        <DestructiveConfirm
+          toolName={pendingConfirm.toolName}
+          description={pendingConfirm.description}
+          onApprove={onConfirmApprove ?? (() => undefined)}
+          onDeny={onConfirmDeny ?? (() => undefined)}
+          onAllowAll={onConfirmAllowAll ?? (() => undefined)}
+        />
+      )}
       <InputArea
         value={inputValue}
         onChange={onInputChange}
         onSubmit={onInputSubmit}
-        disabled={thinking}
+        disabled={thinking || !!pendingConfirm}
       />
     </Box>
   );

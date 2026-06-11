@@ -1,5 +1,11 @@
 import { Command } from 'commander';
+import { createInterface } from 'readline';
 import chalk from 'chalk';
+import type {
+  ConfirmRequest,
+  DestructiveDecision,
+  DestructivePolicy,
+} from '../../agent/types.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
@@ -55,6 +61,33 @@ export const runCommand = new Command('run')
         controller.abort();
       });
 
+      // Política destructiva (§12.5):
+      // --allow-destructive → 'allow'; --deny-destructive → 'deny';
+      // sin flags → 'ask' con prompt interactivo si stdin es TTY, 'deny' si no (CI/piped).
+      let policy: DestructivePolicy = 'ask';
+      if (opts.allowDestructive) policy = 'allow';
+      else if (opts.denyDestructive) policy = 'deny';
+      else if (!process.stdin.isTTY) policy = 'deny';
+
+      const confirmDestructive = async (req: ConfirmRequest): Promise<DestructiveDecision> => {
+        process.stderr.write(
+          `\n⚠  El agente quiere ejecutar una operación destructiva:\n   ${req.description}\n\n`,
+        );
+        const rl = createInterface({ input: process.stdin, output: process.stderr });
+        try {
+          const answer = await new Promise<string>((resolve) =>
+            rl.question('¿Continuar? (s/N/!) ', resolve),
+          );
+          const a = answer.trim().toLowerCase();
+          if (a === '!') return 'allow-all';
+          return a === 's' || a === 'y' || a === 'si' || a === 'sí' || a === 'yes'
+            ? 'approve'
+            : 'deny';
+        } finally {
+          rl.close();
+        }
+      };
+
       const isColorTty = process.stdout.isTTY;
       const toolLabel = isColorTty ? chalk.hex('#9CA3AF')('[tool]') : '[tool]';
       const errorLabel = isColorTty ? chalk.hex('#EF4444')('[error]') : '[error]';
@@ -67,6 +100,8 @@ export const runCommand = new Command('run')
         for await (const event of agent.run(task, {
           signal: controller.signal,
           allowDestructive: opts.allowDestructive,
+          destructivePolicy: policy,
+          onConfirmDestructive: policy === 'ask' ? confirmDestructive : undefined,
         })) {
           switch (event.type) {
             case 'text_delta':

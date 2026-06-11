@@ -1,5 +1,11 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
-import type { ToolDefinition, ToolContext, ToolResult, ToolCallReady } from '../agent/types.js';
+import type {
+  ToolDefinition,
+  ToolContext,
+  ToolResult,
+  ToolCallReady,
+  DestructiveDecision,
+} from '../agent/types.js';
 import type { ToolSchema } from '../providers/base.js';
 import { truncateToolOutput } from './truncate.js';
 
@@ -54,6 +60,8 @@ export interface DispatchResult {
 
 export class ToolDispatcher {
   private readonly toolFailureCounts = new Map<string, number>();
+  /** El usuario respondió `!` (allow-all): no volver a preguntar en esta sesión. */
+  private allowAllDestructive = false;
 
   constructor(
     private readonly registry: ToolRegistry,
@@ -61,6 +69,101 @@ export class ToolDispatcher {
   ) {}
 
   async dispatch(calls: ToolCallReady[], ctx: ToolContext): Promise<DispatchResult[]> {
+    if (calls.length === 0) return [];
+
+    // -------------------------------------------------------------------
+    // Fase de confirmación destructiva (§12.5 / UI §12).
+    // Se resuelve secuencialmente ANTES de ejecutar nada (§12.9: nunca dos
+    // prompts a la vez), así las aprobadas pueden correr en paralelo después.
+    // -------------------------------------------------------------------
+    const denied = new Map<string, ToolResult>();
+    for (const call of calls) {
+      const verdict = await this.confirmIfDestructive(call, ctx);
+      if (verdict !== null) denied.set(call.id, verdict);
+    }
+
+    const approved = calls.filter((c) => !denied.has(c.id));
+
+    const deniedResults: DispatchResult[] = calls
+      .filter((c) => denied.has(c.id))
+      .map((c) => ({
+        callId: c.id,
+        toolName: c.name,
+        result: denied.get(c.id)!,
+        durationMs: 0,
+      }));
+
+    const executed = await this.dispatchApproved(approved, ctx);
+
+    // Mantener el orden original de las calls
+    const byId = new Map<string, DispatchResult>();
+    for (const r of [...deniedResults, ...executed]) byId.set(r.callId, r);
+    return calls.map((c) => byId.get(c.id)!);
+  }
+
+  /**
+   * Devuelve `null` si la call puede ejecutarse, o un ToolResult de error si
+   * fue bloqueada (denegada por el usuario o por política).
+   */
+  private async confirmIfDestructive(
+    call: ToolCallReady,
+    ctx: ToolContext,
+  ): Promise<ToolResult | null> {
+    const tool = this.registry.get(call.name);
+    if (!tool) return null; // dispatchOne reportará "not found"
+
+    if (!ctx.config.tools.confirmDestructive) return null;
+
+    const isDestructive =
+      tool.destructive === true || (tool.isDestructive?.(call.input, ctx) ?? false);
+    if (!isDestructive) return null;
+
+    const policy =
+      ctx.destructivePolicy ?? (ctx.allowDestructive === true ? 'allow' : 'ask');
+
+    if (policy === 'allow' || this.allowAllDestructive) return null;
+
+    const description = describeCall(call);
+
+    if (policy === 'deny' || !ctx.confirmDestructive) {
+      // --deny-destructive explícito, o modo piped/CI sin TTY (§12.5)
+      return {
+        ok: false,
+        error:
+          `Destructive operation blocked: ${description}. ` +
+          'Destructive operations are not allowed in this session. Consider a non-destructive alternative.',
+        recoverable: true,
+      };
+    }
+
+    let decision: DestructiveDecision;
+    try {
+      decision = await ctx.confirmDestructive({
+        callId: call.id,
+        toolName: call.name,
+        description,
+      });
+    } catch {
+      decision = 'deny';
+    }
+
+    if (decision === 'allow-all') {
+      this.allowAllDestructive = true;
+      return null;
+    }
+    if (decision === 'approve') return null;
+
+    return {
+      ok: false,
+      error: `User denied execution of: ${description}. Ask the user how to proceed or try a non-destructive alternative.`,
+      recoverable: true,
+    };
+  }
+
+  private async dispatchApproved(
+    calls: ToolCallReady[],
+    ctx: ToolContext,
+  ): Promise<DispatchResult[]> {
     if (calls.length === 0) return [];
     if (calls.length === 1) {
       return [await this.dispatchOne(calls[0]!, ctx)];
@@ -144,17 +247,39 @@ export class ToolDispatcher {
       };
     }
 
+    // Timeout y cancelación: el signal derivado combina la cancelación del
+    // usuario (Ctrl+C → ctx.signal) con el timeout de la tool, y se pasa a
+    // execute() para que las tools bien portadas aborten su trabajo subyacente
+    // (fetch, execa...). El Promise.race actúa de red de seguridad para tools
+    // que ignoren el signal.
     const timeoutMs = tool.timeout ?? 30000;
+    const timeoutController = new AbortController();
+    const timeoutId = setTimeout(
+      () => timeoutController.abort(new Error(`Tool "${call.name}" timed out after ${timeoutMs}ms`)),
+      timeoutMs,
+    );
+    const combinedSignal = AbortSignal.any([ctx.signal, timeoutController.signal]);
+    const execCtx: ToolContext = { ...ctx, signal: combinedSignal };
+
     try {
       const result = await Promise.race([
-        tool.execute(parsed.data, ctx),
-        new Promise<never>((_, reject) =>
-          setTimeout(
-            () => reject(new Error(`Tool "${call.name}" timed out after ${timeoutMs}ms`)),
-            timeoutMs,
-          ),
-        ),
+        tool.execute(parsed.data, execCtx),
+        new Promise<never>((_, reject) => {
+          combinedSignal.addEventListener(
+            'abort',
+            () => {
+              const reason: unknown = combinedSignal.reason;
+              reject(
+                reason instanceof Error
+                  ? reason
+                  : new Error(`Tool "${call.name}" was cancelled`),
+              );
+            },
+            { once: true },
+          );
+        }),
       ]);
+      clearTimeout(timeoutId);
       if (!result.ok) this.recordFailure(call.name);
       // F4: truncar cualquier salida de tool antes de que entre al historial,
       // para proteger el contexto del modelo (cabeza 80% + cola 20%).
@@ -168,6 +293,7 @@ export class ToolDispatcher {
         durationMs: Date.now() - start,
       };
     } catch (err) {
+      clearTimeout(timeoutId);
       this.recordFailure(call.name);
       return {
         callId: call.id,
@@ -181,4 +307,14 @@ export class ToolDispatcher {
       };
     }
   }
+}
+
+/** Descripción legible de una tool call para el prompt de confirmación. */
+export function describeCall(call: ToolCallReady): string {
+  if (call.name === 'bash' && typeof call.input.command === 'string') {
+    return `bash: ${call.input.command}`;
+  }
+  const compact = JSON.stringify(call.input);
+  const summary = compact.length > 120 ? compact.slice(0, 117) + '...' : compact;
+  return `${call.name}: ${summary}`;
 }

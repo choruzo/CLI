@@ -1,9 +1,13 @@
 import { useCallback, useRef } from 'react';
 import type { StratumAgent } from '../../agent/core.js';
-import type { AgentEvent } from '../../agent/types.js';
+import type { AgentEvent, RunOptions } from '../../agent/types.js';
 import type { AppAction } from './App.js';
 
-export function useAgentStream(agent: StratumAgent, dispatch: (action: AppAction) => void) {
+export function useAgentStream(
+  agent: StratumAgent,
+  dispatch: (action: AppAction) => void,
+  getRunOptions?: () => Partial<RunOptions>,
+) {
   const abortRef = useRef<AbortController | null>(null);
 
   const send = useCallback(
@@ -14,7 +18,10 @@ export function useAgentStream(agent: StratumAgent, dispatch: (action: AppAction
       dispatch({ type: 'AGENT_START', input });
 
       try {
-        for await (const event of agent.run(input, { signal: controller.signal })) {
+        for await (const event of agent.run(input, {
+          ...(getRunOptions?.() ?? {}),
+          signal: controller.signal,
+        })) {
           dispatch({ type: 'AGENT_EVENT', event });
 
           const ctx = agent.getContextUsage();
@@ -34,7 +41,7 @@ export function useAgentStream(agent: StratumAgent, dispatch: (action: AppAction
         abortRef.current = null;
       }
     },
-    [agent, dispatch],
+    [agent, dispatch, getRunOptions],
   );
 
   const cancel = useCallback(() => {

@@ -553,6 +553,9 @@ export class ReactLoop {
           cwd: process.cwd(),
           config: this.config,
           allowDestructive: opts?.allowDestructive,
+          destructivePolicy:
+            opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
+          confirmDestructive: opts?.onConfirmDestructive,
         };
 
         const results: DispatchResult[] = await this.dispatcher.dispatch(readyCalls, ctx);

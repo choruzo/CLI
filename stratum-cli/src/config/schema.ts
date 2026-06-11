@@ -41,8 +41,15 @@ export const StratumConfigSchema = z.object({
       bashTimeout: z.number().int().positive().default(30000),
       webSearch: z
         .object({
-          backend: z.enum(['brave', 'serpapi', 'tavily', 'duckduckgo']).default('brave'),
+          /**
+           * 'meta' (default): DuckDuckGo siempre + Tavily si hay API key,
+           * con merge, dedupe y re-rank (RRF). 'duckduckgo'/'tavily' fuerzan
+           * un único motor. 'brave'/'serpapi' reservados (no implementados).
+           */
+          backend: z.enum(['meta', 'duckduckgo', 'tavily', 'brave', 'serpapi']).default('meta'),
           apiKey: z.string().default(''),
+          tavilyApiKey: z.string().default(''),
+          maxResults: z.number().int().positive().max(20).default(10),
         })
         .default({}),
       destructivePatterns: z

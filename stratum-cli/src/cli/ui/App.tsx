@@ -1,7 +1,12 @@
 import React, { useReducer, useCallback, useRef } from 'react';
 import { Box, useApp, useInput } from 'ink';
 import type { StratumAgent } from '../../agent/core.js';
-import type { AgentEvent } from '../../agent/types.js';
+import type {
+  AgentEvent,
+  ConfirmRequest,
+  DestructiveDecision,
+  RunOptions,
+} from '../../agent/types.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import { Banner } from './Banner.js';
 import { ConversationView } from './ConversationView.js';
@@ -17,6 +22,12 @@ export type AgentConvItem = {
 
 export type ConvItem = { kind: 'user'; text: string } | AgentConvItem;
 
+export interface PendingConfirm {
+  callId: string;
+  toolName: string;
+  description: string;
+}
+
 interface AppState {
   phase: 'banner' | 'conversation';
   completedItems: ConvItem[];
@@ -26,6 +37,13 @@ interface AppState {
   contextUsed: number;
   contextMax: number;
   contextEstimated: boolean;
+  /** Máquina de foco (§10): input ↔ block-focus. */
+  focusState: 'input' | 'block-focus';
+  focusedBlockIndex: number;
+  /** ids de tool call blocks con output expandido (Space). */
+  expandedBlockIds: ReadonlySet<string>;
+  /** Confirmación destructiva pendiente (UI §12). */
+  pendingConfirm: PendingConfirm | null;
 }
 
 export type AppAction =
@@ -36,7 +54,26 @@ export type AppAction =
   | { type: 'SYSTEM_MESSAGE'; text: string }
   | { type: 'INIT_START' }
   | { type: 'INIT_PROGRESS'; text: string }
-  | { type: 'INIT_DONE' };
+  | { type: 'INIT_DONE' }
+  | { type: 'CONFIRM_SHOW'; request: PendingConfirm }
+  | { type: 'CONFIRM_RESOLVE' }
+  | { type: 'FOCUS_BLOCKS' }
+  | { type: 'FOCUS_MOVE'; delta: number }
+  | { type: 'FOCUS_EXIT' }
+  | { type: 'TOGGLE_EXPAND' };
+
+/**
+ * Bloques navegables con Tab: los del turno en curso, o los del último turno
+ * completado (que MessageList mantiene fuera de <Static> precisamente para esto).
+ */
+function getActiveBlocks(state: AppState): ToolCallState[] {
+  if (state.currentItem?.kind === 'agent' && state.currentItem.toolCalls.length > 0) {
+    return state.currentItem.toolCalls;
+  }
+  const last = state.completedItems[state.completedItems.length - 1];
+  if (last?.kind === 'agent') return last.toolCalls;
+  return [];
+}
 
 function updateCurrentAgent(
   current: ConvItem | null,
@@ -66,6 +103,8 @@ function reducer(state: AppState, action: AppAction): AppState {
         currentItem: agentItem,
         inputValue: '',
         thinking: true,
+        focusState: 'input',
+        focusedBlockIndex: 0,
       };
     }
 
@@ -118,6 +157,39 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     }
 
+    case 'CONFIRM_SHOW':
+      return { ...state, pendingConfirm: action.request };
+
+    case 'CONFIRM_RESOLVE':
+      return { ...state, pendingConfirm: null };
+
+    case 'FOCUS_BLOCKS': {
+      const blocks = getActiveBlocks(state);
+      if (blocks.length === 0) return state;
+      return { ...state, focusState: 'block-focus', focusedBlockIndex: 0 };
+    }
+
+    case 'FOCUS_MOVE': {
+      const blocks = getActiveBlocks(state);
+      if (blocks.length === 0) return { ...state, focusState: 'input' };
+      const next =
+        (state.focusedBlockIndex + action.delta + blocks.length) % blocks.length;
+      return { ...state, focusedBlockIndex: next };
+    }
+
+    case 'FOCUS_EXIT':
+      return { ...state, focusState: 'input' };
+
+    case 'TOGGLE_EXPAND': {
+      const blocks = getActiveBlocks(state);
+      const block = blocks[state.focusedBlockIndex];
+      if (!block) return state;
+      const expanded = new Set(state.expandedBlockIds);
+      if (expanded.has(block.id)) expanded.delete(block.id);
+      else expanded.add(block.id);
+      return { ...state, expandedBlockIds: expanded };
+    }
+
     case 'AGENT_EVENT': {
       const ev = action.event;
 
@@ -152,7 +224,8 @@ function reducer(state: AppState, action: AppAction): AppState {
                 {
                   id: ev.id,
                   name: ev.name,
-                  status: 'running' as const,
+                  // §5.1: pending = en cola (args aún streameando / esperando dispatch)
+                  status: 'pending' as const,
                   inputSoFar: ev.input_so_far,
                 },
               ],
@@ -166,7 +239,11 @@ function reducer(state: AppState, action: AppAction): AppState {
           ...state,
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({ ...tc, input: ev.input })),
+            toolCalls: updateToolCall(item.toolCalls, ev.id, (tc) => ({
+              ...tc,
+              status: 'running' as const,
+              input: ev.input,
+            })),
           })),
         };
       }
@@ -211,6 +288,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           completedItems: finalItem ? [...state.completedItems, finalItem] : state.completedItems,
           currentItem: null,
           thinking: false,
+          pendingConfirm: null,
         };
       }
 
@@ -263,15 +341,59 @@ export function App({ agent, version }: Props) {
     contextUsed: ctxInit.used,
     contextMax: ctxInit.max,
     contextEstimated: ctxInit.estimated,
+    focusState: 'input',
+    focusedBlockIndex: 0,
+    expandedBlockIds: new Set<string>(),
+    pendingConfirm: null,
   });
 
-  const { send, cancel } = useAgentStream(agent, dispatch);
+  // -------------------------------------------------------------------------
+  // Confirmación destructiva (UI §12): el dispatcher pausa la ejecución y
+  // espera la promesa; el usuario resuelve con S/N/! desde <DestructiveConfirm>.
+  // -------------------------------------------------------------------------
+  const confirmResolverRef = useRef<((d: DestructiveDecision) => void) | null>(null);
+  const allowAllRef = useRef(false);
+
+  const onConfirmDestructive = useCallback(
+    (req: ConfirmRequest): Promise<DestructiveDecision> => {
+      return new Promise<DestructiveDecision>((resolve) => {
+        confirmResolverRef.current = resolve;
+        dispatch({
+          type: 'CONFIRM_SHOW',
+          request: { callId: req.callId, toolName: req.toolName, description: req.description },
+        });
+      });
+    },
+    [],
+  );
+
+  const resolveConfirm = useCallback((decision: DestructiveDecision) => {
+    if (decision === 'allow-all') allowAllRef.current = true;
+    const resolver = confirmResolverRef.current;
+    confirmResolverRef.current = null;
+    dispatch({ type: 'CONFIRM_RESOLVE' });
+    resolver?.(decision);
+  }, []);
+
+  const getRunOptions = useCallback(
+    (): Partial<RunOptions> => ({
+      destructivePolicy: allowAllRef.current ? 'allow' : 'ask',
+      onConfirmDestructive,
+    }),
+    [onConfirmDestructive],
+  );
+
+  const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
   const ctrlCCountRef = useRef(0);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  useInput((_, key) => {
-    if (key.ctrl && key.name === 'c') {
+  useInput((input, key) => {
+    if (key.ctrl && (input === 'c' || (key as { name?: string }).name === 'c')) {
+      if (state.pendingConfirm) {
+        resolveConfirm('deny');
+        return;
+      }
       if (state.thinking) {
         cancel();
         return;
@@ -284,6 +406,28 @@ export function App({ agent, version }: Props) {
       } else {
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         exit();
+      }
+      return;
+    }
+
+    // El prompt de confirmación gestiona su propio input (S/N/!)
+    if (state.pendingConfirm) return;
+
+    // ----- Máquina de foco (§10): input ↔ block-focus -----
+    if (key.tab) {
+      if (state.focusState === 'block-focus') {
+        dispatch({ type: 'FOCUS_MOVE', delta: key.shift ? -1 : 1 });
+      } else if (!state.inputValue.startsWith('/')) {
+        dispatch({ type: 'FOCUS_BLOCKS' });
+      }
+      return;
+    }
+
+    if (state.focusState === 'block-focus') {
+      if (input === ' ') {
+        dispatch({ type: 'TOGGLE_EXPAND' });
+      } else if (key.escape) {
+        dispatch({ type: 'FOCUS_EXIT' });
       }
     }
   });
@@ -424,6 +568,10 @@ export function App({ agent, version }: Props) {
     );
   }
 
+  const activeBlocks = getActiveBlocks(state);
+  const focusedBlockId =
+    state.focusState === 'block-focus' ? (activeBlocks[state.focusedBlockIndex]?.id ?? null) : null;
+
   return (
     <Box flexDirection="column" width="100%">
       <ConversationView
@@ -438,6 +586,12 @@ export function App({ agent, version }: Props) {
         contextUsed={state.contextUsed}
         contextMax={state.contextMax}
         contextEstimated={state.contextEstimated}
+        focusedBlockId={focusedBlockId}
+        expandedBlockIds={state.expandedBlockIds}
+        pendingConfirm={state.pendingConfirm}
+        onConfirmApprove={() => resolveConfirm('approve')}
+        onConfirmDeny={() => resolveConfirm('deny')}
+        onConfirmAllowAll={() => resolveConfirm('allow-all')}
       />
     </Box>
   );
