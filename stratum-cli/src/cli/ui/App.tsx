@@ -302,15 +302,15 @@ export function App({ agent, version }: Props) {
 
       const cwd = process.cwd();
       const prompt = INITIALIZE_PROMPT
-        .replace('${path}', cwd)
-        .replace('$ARGUMENTS', focus?.trim() || '(none)');
+        .replaceAll('${path}', cwd)
+        .replaceAll('$ARGUMENTS', focus?.trim() || '(none)');
 
       void (async () => {
         try {
           let currentTool = '';
           let toolCount = 0;
 
-          for await (const event of agent.run(prompt)) {
+          for await (const event of agent.run(prompt, { compressionMode: 'conservative' })) {
             if (event.type === 'tool_call_start' && currentTool !== event.name + event.id) {
               currentTool = event.name + event.id;
               toolCount++;

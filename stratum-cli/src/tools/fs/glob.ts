@@ -103,8 +103,11 @@ const schema = z.object({
 export const globTool: ToolDefinition = {
   name: 'glob',
   description:
-    'Find files matching a glob pattern. Supports **, *, ?. ' +
-    'Returns up to 200 matching relative paths. Excludes node_modules, .git, dist, etc.',
+    '- Fast file pattern matching tool that works with any codebase size\n' +
+    '- Supports glob patterns like "**/*.js" or "src/**/*.ts" (also * and ?)\n' +
+    '- Returns up to 200 matching relative paths. Excludes node_modules, .git, dist, etc.\n' +
+    '- Use this tool when you need to find files by name patterns\n' +
+    '- You have the capability to call multiple tools in a single response. It is always better to speculatively perform multiple searches as a batch that are potentially useful.',
   schema,
   destructive: false,
 

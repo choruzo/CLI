@@ -1,6 +1,7 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import type { ToolDefinition, ToolContext, ToolResult, ToolCallReady } from '../agent/types.js';
 import type { ToolSchema } from '../providers/base.js';
+import { truncateToolOutput } from './truncate.js';
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
@@ -155,7 +156,17 @@ export class ToolDispatcher {
         ),
       ]);
       if (!result.ok) this.recordFailure(call.name);
-      return { callId: call.id, toolName: call.name, result, durationMs: Date.now() - start };
+      // F4: truncar cualquier salida de tool antes de que entre al historial,
+      // para proteger el contexto del modelo (cabeza 80% + cola 20%).
+      const truncated: ToolResult = result.ok
+        ? { ok: true, output: truncateToolOutput(result.output) }
+        : { ...result, error: truncateToolOutput(result.error) };
+      return {
+        callId: call.id,
+        toolName: call.name,
+        result: truncated,
+        durationMs: Date.now() - start,
+      };
     } catch (err) {
       this.recordFailure(call.name);
       return {

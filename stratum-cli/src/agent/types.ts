@@ -76,4 +76,11 @@ export interface ToolCallReady {
 export interface RunOptions {
   signal?: AbortSignal;
   allowDestructive?: boolean;
+  /**
+   * Modo de compresión de contexto (F6).
+   * 'conservative' sube el umbral de compresión y conserva más rondas —
+   * pensado para `/init`, donde el valor está en el contexto acumulado
+   * durante la exploración y comprimirlo lo destruye.
+   */
+  compressionMode?: 'normal' | 'conservative';
 }

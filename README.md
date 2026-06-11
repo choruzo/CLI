@@ -90,6 +90,7 @@ Notas utiles:
 - Las variables `${VAR_NAME}` se expanden desde el entorno al cargar la configuracion.
 - El ejemplo completo esta en `stratum-cli/.stratumrc.json.example`.
 - El schema actual tambien contempla bloques `memory`, `tools`, `mcp` y `agent`.
+- `contextWindow` debe reflejar el contexto **real** que sirve tu servidor (llama.cpp `--ctx-size`, Ollama `num_ctx`, etc.). Esto es especialmente importante para `stratum init`: su calidad depende del contexto acumulado durante la exploracion, y un `contextWindow` menor al real dispara la compresion antes de tiempo y degrada el `STRATUM.md` resultante. Si tu servidor sirve 64k+, configuralo aqui en vez de dejar el default 32768. Durante `init` el agente ya usa un modo de compresion conservador (umbral ≥92%), pero no sustituye a un `contextWindow` bien configurado.
 
 ## Comandos disponibles
 
@@ -123,11 +124,14 @@ Notas utiles:
 
 | Tool | Descripcion |
 |---|---|
-| `read_file` | Lee un archivo completo o por rangos de lineas |
+| `read_file` | Lee un archivo con lineas numeradas (`N: contenido`), tope de 2000 lineas por llamada y paginacion via `offset` |
 | `write_file` | Crea o sobreescribe archivos |
+| `glob` | Busca archivos por patron (`**/*.ts`, `src/*.json`); excluye node_modules, dist, .git, etc. |
+| `list_directory` | Lista archivos y directorios con profundidad configurable |
+| `grep` | Busca contenido por regex (usa ripgrep si esta disponible, con fallback en Node) |
 | `bash` | Ejecuta comandos shell con timeout y salida combinada |
 
-El runtime esta preparado para crecer con mas tools y registro dinamico, pero la instalacion actual solo registra esas tres de forma nativa.
+Toda salida de tool se trunca a ~30k caracteres (cabeza + cola con marcador) antes de entrar al historial, para proteger el contexto de modelos locales.
 
 > Nota: las flags `--allow-destructive` y `--deny-destructive` ya existen en la CLI, pero las tools built-in actuales no se registran como destructivas.
 

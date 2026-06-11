@@ -75,8 +75,8 @@ export const initCommand = new Command('init')
 
       // Construir el prompt reemplazando las variables
       const prompt = INITIALIZE_PROMPT
-        .replace('${path}', cwd)
-        .replace('$ARGUMENTS', focus?.trim() || '(none)');
+        .replaceAll('${path}', cwd)
+        .replaceAll('$ARGUMENTS', focus?.trim() || '(none)');
 
       const controller = new AbortController();
       let aborting = false;
@@ -98,6 +98,7 @@ export const initCommand = new Command('init')
         for await (const event of agent.run(prompt, {
           signal: controller.signal,
           allowDestructive: opts.allowDestructive,
+          compressionMode: 'conservative',
         })) {
           switch (event.type) {
             case 'text_delta':
@@ -123,6 +124,10 @@ export const initCommand = new Command('init')
             case 'tool_error':
               process.stderr.write(`${errorLabel} ${event.name}: ${event.error}\n`);
               toolStartTimes.delete(event.id);
+              break;
+
+            case 'warning':
+              process.stderr.write(`${errorLabel} ${event.message}\n`);
               break;
 
             case 'error':

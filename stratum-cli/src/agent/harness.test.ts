@@ -112,6 +112,28 @@ describe('ContextManager', () => {
     // System prompt must be preserved (index 0)
     expect(messages[0]?.role).toBe('system');
   });
+
+  it('conservative mode raises the threshold so it skips where normal would compress (F6)', async () => {
+    // 1000 tokens window, threshold 0.8 → ~850 tokens supera el umbral normal
+    // pero queda por debajo del 0.92 efectivo en modo conservative.
+    const content = 'a'.repeat(Math.floor(850 * 3.5));
+    const build = (): import('./types.js').Message[] => [
+      { role: 'system' as const, content: 'sys' },
+      { role: 'user' as const, content },
+      { role: 'assistant' as const, content: 'x' },
+      { role: 'user' as const, content: 'y' },
+      { role: 'assistant' as const, content: 'z' },
+    ];
+
+    const normal = new ContextManager(1000, 1, undefined, undefined, 0.8);
+    const normalResult = await normal.maybeCompress(build());
+    expect(normalResult.kind).not.toBe('skipped');
+
+    const conservative = new ContextManager(1000, 1, undefined, undefined, 0.8);
+    conservative.setCompressionMode('conservative');
+    const conservativeResult = await conservative.maybeCompress(build());
+    expect(conservativeResult.kind).toBe('skipped');
+  });
 });
 
 describe('ReactLoop', () => {

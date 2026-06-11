@@ -65,14 +65,33 @@ export class ContextManager {
   /** Dato real de `usage.prompt_tokens` del último LLM call (null = no disponible aún). */
   private lastPromptTokens: number | null = null;
 
+  /** Modo de compresión activo (F6). 'conservative' sube el umbral y conserva más rondas. */
+  private mode: 'normal' | 'conservative' = 'normal';
+
   constructor(
     private readonly contextWindow: number,
-    private readonly keepRounds: number,
+    private readonly baseKeepRounds: number,
     private readonly provider?: IProvider,
     private readonly model?: string,
-    private readonly compressionThreshold = 0.8,
+    private readonly baseCompressionThreshold = 0.8,
     private readonly compressorModel?: string,
   ) {}
+
+  setCompressionMode(mode: 'normal' | 'conservative'): void {
+    this.mode = mode;
+  }
+
+  /** Umbral efectivo según el modo (F6: en conservative se sube a ≥0.92). */
+  private get compressionThreshold(): number {
+    return this.mode === 'conservative'
+      ? Math.max(this.baseCompressionThreshold, 0.92)
+      : this.baseCompressionThreshold;
+  }
+
+  /** Rondas protegidas efectivas según el modo (F6: en conservative se duplican). */
+  private get keepRounds(): number {
+    return this.mode === 'conservative' ? this.baseKeepRounds * 2 : this.baseKeepRounds;
+  }
 
   // -------------------------------------------------------------------------
   // Estimación de tokens — cascada §12.4
@@ -370,6 +389,8 @@ export class ReactLoop {
     const signal = opts?.signal ?? new AbortController().signal;
     const tools: ToolSchema[] = this.registry.toToolSchemas();
     const fmt = this.config.agent.toolErrorFormat;
+    const compressionMode = opts?.compressionMode ?? 'normal';
+    this.contextManager.setCompressionMode(compressionMode);
 
     for (let iter = 0; iter < this.config.agent.maxIterations; iter++) {
       if (signal.aborted) {
@@ -379,6 +400,19 @@ export class ReactLoop {
 
       // Comprimir contexto antes de cada iteración (§12.4)
       const comprResult = await this.contextManager.maybeCompress(this.messages);
+      // F6: en modo conservative (p. ej. /init) la compresión destruye el
+      // contexto investigado — avisar de forma visible si llegó a activarse.
+      if (
+        compressionMode === 'conservative' &&
+        (comprResult.kind === 'compressed' || comprResult.kind === 'truncated')
+      ) {
+        yield {
+          type: 'warning',
+          message:
+            'context_compressed_during_init: el historial superó el umbral incluso en modo conservador; ' +
+            'considera configurar un contextWindow mayor en .stratumrc.json',
+        };
+      }
       if (comprResult.kind === 'compressed') {
         yield {
           type: 'context_compressed',

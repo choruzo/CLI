@@ -72,8 +72,10 @@ const schema = z.object({
 export const listDirectoryTool: ToolDefinition = {
   name: 'list_directory',
   description:
-    'List files and directories. Marks directories with /. ' +
-    'Excludes common build artifacts (node_modules, dist, .git, etc.).',
+    '- Lists files and directories, one entry per line, with a trailing `/` for subdirectories\n' +
+    '- Use the depth parameter to list nested levels (default: 1)\n' +
+    '- Excludes common build artifacts (node_modules, dist, .git, etc.)\n' +
+    '- Use the glob tool for filtering files by name pattern, and grep for searching file contents',
   schema,
   destructive: false,
 

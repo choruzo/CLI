@@ -1,0 +1,72 @@
+  ---
+  Instalar Stratum CLI globalmente en Windows
+
+  Opción 1 — npm link (desarrollo, recomendada ahora)
+
+  Usa el código actual directamente sin necesidad de publicar en npm.
+
+  cd D:\Archivos\Javier\Proyectos\CLI\stratum-cli
+
+  # 1. Compilar
+  npm run build
+
+  # 2. Crear el enlace global
+  npm link
+
+  Después de esto, stratum quedará disponible en cualquier terminal:
+
+  stratum --help
+  stratum chat
+
+  Para desinstalar el enlace:
+
+  npm unlink -g stratum-cli
+
+  Para actualizar tras cambios en el código:
+
+  npm run build   # re-compilar es suficiente; el link ya apunta a dist/
+
+  ---
+  Opción 2 — npm install -g (desde el directorio)
+
+
+  # 1. Compilar
+  npm run build
+
+  # 2. Crear el enlace global
+  npm link
+
+  Después de esto, stratum quedará disponible en cualquier terminal:
+
+  stratum --help
+  stratum chat
+
+  Para desinstalar el enlace:
+
+  npm unlink -g stratum-cli
+
+  Para actualizar tras cambios en el código:
+
+  npm run build   # re-compilar es suficiente; el link ya apunta a dist/
+
+  ---
+  Opción 2 — npm install -g (desde el directorio)
+
+  Instala una copia en el directorio global de npm, sin vínculo al código fuente.
+
+  cd D:\Archivos\Javier\Proyectos\CLI\stratum-cli
+  npm run build
+  npm install -g .
+
+  Requiere re-ejecutar npm install -g . cada vez que quieras actualizar.
+
+  ---
+  Verificar que funciona
+
+  # Confirmar que el comando existe
+  where.exe stratum
+
+  # Probar
+  stratum --version
+
+  ---

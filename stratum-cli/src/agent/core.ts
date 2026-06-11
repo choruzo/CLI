@@ -35,7 +35,10 @@ export class StratumAgent {
       this.messages = [
         {
           role: 'system',
-          content: buildSystemPrompt(config, memory || undefined),
+          content: buildSystemPrompt(config, memory || undefined, {
+            modelId: router.model,
+            providerName: router.providerName,
+          }),
         },
       ];
     }
@@ -67,7 +70,10 @@ export class StratumAgent {
   reloadMemory(): void {
     this.memoryManager.reload();
     const memory = this.memoryManager.getInjectableMemory();
-    const newSystemContent = buildSystemPrompt(this.config, memory || undefined);
+    const newSystemContent = buildSystemPrompt(this.config, memory || undefined, {
+      modelId: this.router.model,
+      providerName: this.router.providerName,
+    });
     if (this.messages[0]?.role === 'system') {
       this.messages[0] = { role: 'system', content: newSystemContent };
     } else {

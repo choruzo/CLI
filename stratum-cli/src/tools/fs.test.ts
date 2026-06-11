@@ -53,6 +53,66 @@ describe('read_file', () => {
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.recoverable).toBe(true);
   });
+
+  it('prefixes each line with its 1-indexed line number', async () => {
+    const path = join(testDir, 'numbered.txt');
+    writeFileSync(path, 'foo\nbar\nbaz');
+
+    const result = await readFileTool.execute({ path }, ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output).toBe('1: foo\n2: bar\n3: baz');
+    }
+  });
+
+  it('numbers respect the offset', async () => {
+    const path = join(testDir, 'offset.txt');
+    writeFileSync(path, 'L1\nL2\nL3\nL4\nL5');
+
+    const result = await readFileTool.execute({ path, offset: 3, limit: 2 }, ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output).toContain('3: L3');
+      expect(result.output).toContain('4: L4');
+      expect(result.output).toContain("(File has more lines. Use 'offset' to read beyond line 4)");
+    }
+  });
+
+  it('caps output at 2000 lines and appends the continuation hint', async () => {
+    const path = join(testDir, 'big.txt');
+    const lines = Array.from({ length: 2500 }, (_, i) => `line-${i + 1}`);
+    writeFileSync(path, lines.join('\n'));
+
+    const result = await readFileTool.execute({ path }, ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output).toContain('2000: line-2000');
+      expect(result.output).not.toContain('2001: line-2001');
+      expect(result.output).toContain("Use 'offset' to read beyond line 2000");
+    }
+  });
+
+  it('truncates lines longer than 2000 characters', async () => {
+    const path = join(testDir, 'long-line.txt');
+    writeFileSync(path, 'x'.repeat(3000));
+
+    const result = await readFileTool.execute({ path }, ctx);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output.startsWith('1: ')).toBe(true);
+      expect(result.output.length).toBeLessThan(2100);
+      expect(result.output.endsWith('…')).toBe(true);
+    }
+  });
+
+  it('returns error when offset is beyond end of file', async () => {
+    const path = join(testDir, 'short.txt');
+    writeFileSync(path, 'one\ntwo');
+
+    const result = await readFileTool.execute({ path, offset: 100 }, ctx);
+    expect(result.ok).toBe(false);
+    if (!result.ok) expect(result.recoverable).toBe(true);
+  });
 });
 
 describe('write_file', () => {
@@ -71,7 +131,7 @@ describe('write_file', () => {
     expect(result.ok).toBe(true);
 
     const check = await readFileTool.execute({ path }, ctx);
-    if (check.ok) expect(check.output).toBe('new content');
+    if (check.ok) expect(check.output).toBe('1: new content');
   });
 
   it('creates parent directories recursively', async () => {
