@@ -219,24 +219,31 @@ Esto permite un futuro sistema de temas sin cambiar componentes.
 
 Una sola ventana OS con múltiples conversaciones en paralelo.
 
+Dimensiones de ventana:
+
+- **Ancho mínimo: 900px.** Sidebar colapsado (40px) + chat area (860px). Con sidebar
+  abierto (260px) quedan 640px para el chat — suficiente para código de 80 columnas
+  sin scroll horizontal.
+- **Alto mínimo: 620px.** TitleBar 32px + TabBar 40px + ConversationView ~450px +
+  InputArea 60px + StatusBar 38px.
+
 ```
-┌─────────────────────────────────────────────────────────────┐
-│  ◈ Stratum                                    _ □ ×         │  ← chrome nativo
-├──────────────┬──────────────────────────────────────────────┤
-│  [Chat 1 ×] [Chat 2 ×] [+]                                  │  ← TabBar
-├──────┬───────────────────────────────────────────────────────┤
-│      │                                                       │
-│ [S]  │   ConversationView (pestaña activa)                  │
-│ [H]  │                                                       │
-│ [M]  │                                                       │
-│      │                                                       │
-│      ├───────────────────────────────────────────────────────┤
-│      │  InputArea                                            │
-├──────┴───────────────────────────────────────────────────────┤
+┌─────────────────────────────────────────────────────────────┐  ← frameless
+│  ◈ Stratum  [Chat 1 ×] [Chat 2 ×] [+]          ─  □  ×    │  ← TitleBar (32px)
+├──┬──────────────────────────────────────────────────────────┤
+│  │                                                           │
+│🗂│   ConversationView (pestaña activa)                      │
+│⏱│                                                           │
+│🧠│                                                           │
+│  ├───────────────────────────────────────────────────────────┤
+│  │  InputArea                                                │
+├──┴───────────────────────────────────────────────────────────┤
 │  ● ollama / llama3.2  │  ctx 12%  │  3 tools disponibles    │  ← StatusBar
 └─────────────────────────────────────────────────────────────┘
    ↑
-   Sidebar (colapsable): Sessions [S], History [H], Memory [M]
+   Sidebar colapsado (40px, solo iconos) por defecto.
+   Expande a 260px con click o hover en el icono activo.
+   Estado abierto/cerrado persiste en localStorage.
 ```
 
 ### TabBar
@@ -249,11 +256,15 @@ Una sola ventana OS con múltiples conversaciones en paralelo.
 - Las pestañas persisten mientras la app está abierta. Al cerrar la app, la sesión
   activa de cada pestaña se guarda en `SessionStore`.
 
-### Sidebar (colapsable, ancho 260px)
+### Sidebar
 
-- **Sessions:** lista de sesiones pasadas (resume con click).
-- **History:** historial de la conversación activa en formato compacto.
-- **Memory:** vista de `STRATUM.md` activo (global + proyecto), solo lectura.
+- **Colapsado por defecto** (40px, solo iconos con tooltip).
+- **Expandido:** 260px, con animación CSS `width` de 150ms ease-out.
+- El estado se persiste en `localStorage` (`sidebar_open: boolean`).
+- Secciones:
+  - 🗂 **Sessions:** lista de sesiones pasadas, resume con click.
+  - ⏱ **History:** historial de la conversación activa en formato compacto.
+  - 🧠 **Memory:** vista de `STRATUM.md` activo (global + proyecto), solo lectura.
 
 ---
 
@@ -327,11 +338,24 @@ a mano:
 El JSON raw de `.stratumrc.json` también es accesible en una pestaña "Avanzado"
 con editor con syntax highlighting y validación en tiempo real contra el schema Zod.
 
-### Ventana sin frame (frameless opcional)
+### Ventana frameless con barra de título personalizada
 
-Opcionalmente: `decorations: false` en `tauri.conf.json` + drag area CSS para
-implementar una barra de título personalizada con los mismos colores del tema.
-Decisión de diseño a tomar en Hito D2.
+`decorations: false` en `tauri.conf.json`. La barra de título es un componente React
+de 32px de alto con `data-tauri-drag-region` que permite mover la ventana. Usa
+`bgPanel (#111111)` y se fusiona visualmente con el TabBar.
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  ◈ Stratum  [Chat 1 ×] [Chat 2 ×] [+]          ─  □  ×    │  ← TitleBar (32px)
+├─────────────────────────────────────────────────────────────┤
+```
+
+Los botones de control (─ □ ×) se renderizan manualmente en el extremo derecho de
+la barra con los colores del tema. Comportamiento: hover → `borderMedium`, click ×
+cierra la ventana via `appWindow.close()`.
+
+El TitleBar y el TabBar pueden coexistir en la misma fila horizontal si el ancho
+lo permite, o en filas separadas (decisión de maquetación a validar en D2).
 
 ---
 
