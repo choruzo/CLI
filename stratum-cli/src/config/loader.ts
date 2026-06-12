@@ -3,8 +3,8 @@ import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { StratumConfigSchema, type StratumConfig } from './schema.js';
 
-const CONFIG_FILENAME = '.stratumrc.json';
-const GLOBAL_CONFIG_PATH = join(homedir(), '.stratum', CONFIG_FILENAME);
+export const CONFIG_FILENAME = '.stratumrc.json';
+export const GLOBAL_CONFIG_PATH = join(homedir(), '.stratum', CONFIG_FILENAME);
 
 export function findConfigFile(startDir: string): string | null {
   let current = startDir;

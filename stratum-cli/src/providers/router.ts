@@ -23,8 +23,27 @@ export class ProviderRouter {
       );
     }
 
-    this.activeConfig = provCfg;
+    // Copia propia: los cambios en caliente (switchModel/reconfigure) no deben
+    // mutar el objeto de config cargado desde disco.
+    this.activeConfig = { ...provCfg };
     this.provider = new OpenAICompatible(provCfg.baseUrl, provCfg.apiKey, provCfg.model);
+  }
+
+  /**
+   * Cambia el modelo activo en caliente (comando `/model`, Hito 3.5).
+   * Solo afecta a la sesión en curso — no persiste en `.stratumrc.json`.
+   */
+  switchModel(model: string): void {
+    this.activeConfig = { ...this.activeConfig, model };
+  }
+
+  /**
+   * Reaplica la configuración del provider activo en caliente
+   * (comando `/config_provider`, Hito 3.5). Recrea el cliente HTTP.
+   */
+  reconfigure(cfg: ProviderConfig): void {
+    this.activeConfig = { ...cfg };
+    this.provider = new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model);
   }
 
   getActive(): IProvider {

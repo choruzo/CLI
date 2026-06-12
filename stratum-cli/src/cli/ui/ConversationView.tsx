@@ -24,6 +24,10 @@ interface Props {
   onConfirmApprove?: () => void;
   onConfirmDeny?: () => void;
   onConfirmAllowAll?: () => void;
+  /** Panel de autocompletado de /comandos (§5.2), renderizado encima del input. */
+  palette?: React.ReactNode;
+  /** Overlay interactivo (/model, /config_provider). Sustituye al input mientras está activo. */
+  overlay?: React.ReactNode;
 }
 
 export function ConversationView({
@@ -44,6 +48,8 @@ export function ConversationView({
   onConfirmApprove,
   onConfirmDeny,
   onConfirmAllowAll,
+  palette,
+  overlay,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -69,12 +75,16 @@ export function ConversationView({
           onAllowAll={onConfirmAllowAll ?? (() => undefined)}
         />
       )}
-      <InputArea
-        value={inputValue}
-        onChange={onInputChange}
-        onSubmit={onInputSubmit}
-        disabled={thinking || !!pendingConfirm}
-      />
+      {overlay}
+      {!overlay && palette}
+      {!overlay && (
+        <InputArea
+          value={inputValue}
+          onChange={onInputChange}
+          onSubmit={onInputSubmit}
+          disabled={thinking || !!pendingConfirm}
+        />
+      )}
     </Box>
   );
 }

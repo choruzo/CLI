@@ -1,4 +1,4 @@
-import type { StratumConfig } from '../config/schema.js';
+import type { StratumConfig, ProviderConfig } from '../config/schema.js';
 import type { ProviderRouter } from '../providers/router.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { IProvider } from '../providers/base.js';
@@ -81,6 +81,24 @@ export class StratumAgent {
     }
   }
 
+  /**
+   * Cambia el modelo activo en caliente (comando `/model`, Hito 3.5).
+   * Solo afecta a la sesión actual; no persiste en `.stratumrc.json`.
+   * Reconstruye el system prompt para que el bloque <env> refleje el modelo nuevo.
+   */
+  switchModel(model: string): void {
+    this.router.switchModel(model);
+    this.reloadMemory();
+  }
+
+  /**
+   * Reaplica la config del provider activo en caliente (comando `/config_provider`).
+   */
+  reconfigureProvider(cfg: ProviderConfig): void {
+    this.router.reconfigure(cfg);
+    this.reloadMemory();
+  }
+
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {
     if (this.currentLoop) return this.currentLoop.getContextUsage();
     const chars = this.messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
@@ -120,5 +138,10 @@ export class StratumAgent {
   /** Expone la config para que comandos internos del chat puedan cargar rutas de memoria. */
   getConfig(): StratumConfig {
     return this.config;
+  }
+
+  /** Config del provider activo (con cambios en caliente aplicados). Para /model y /config_provider. */
+  getActiveProviderConfig(): ProviderConfig {
+    return this.router.getActiveConfig();
   }
 }

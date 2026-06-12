@@ -604,7 +604,7 @@ El diseño híbrido original (scan determinista + `InitReActExplorer` acotado a 
 
 ---
 
-### Hito 3.5 — Provider & Model UX *(~3 días)*
+### Hito 3.5 — Provider & Model UX ✅ *(cerrado 2026-06-12)*
 
 Eliminar la necesidad de editar `.stratumrc.json` a mano para configurar providers o cambiar de modelo. Todo gestionable desde la CLI y desde comandos de sesión.
 
@@ -640,15 +640,17 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 #### Items
 
-- [ ] `src/cli/commands/provider.ts` — subcomandos `add`, `list`, `use`, `remove`
-- [ ] `ProviderWizard` — componente Ink con flujo de pasos: `SelectInput` para tipo y modelo, `TextInput` para URL/alias, `MaskedInput` para API key
-- [ ] `fetchModels(baseUrl, apiKey)` en `src/providers/utils.ts` — GET `/v1/models`, timeout 5s, graceful fallback a entrada manual
-- [ ] Backup automático de `.stratumrc.json` antes de cualquier escritura del wizard
-- [ ] Comando de sesión `/model` en `InputArea` — integrado en el sistema de `/comandos` existente
-- [ ] Comando de sesión `/config_provider` en `InputArea`
-- [ ] `useModelSwitcher` hook — actualiza el provider activo en el `StratumAgent` sin reiniciar la sesión (señal directa al `ProviderRouter`)
-- [ ] `stratum provider list` — tabla con columnas: alias, tipo, baseUrl, modelo activo, estado (● verde / rojo según ping)
-- [ ] Tests: wizard con Ollama mock (200 OK), wizard con provider sin `/models` (fallback), cambio de modelo en sesión
+- [x] `src/cli/commands/provider.tsx` — subcomandos `add`, `list`, `use`, `remove` (`.tsx` porque `add` monta el wizard Ink)
+- [x] `ProviderWizard` — componente Ink con flujo de pasos; selección por teclado con `SelectList` propio (`src/cli/ui/components/SelectList.tsx`, sin dependencia ink-select-input), `TextInput` para URL/alias, `MaskedInput` propio (`mask="*"` sobre ink-text-input) para API key. Lógica pura testeable en `src/cli/ui/wizard-logic.ts` (presets de tipos, validaciones, `discoverModels` con fallback)
+- [x] `fetchModels(baseUrl, apiKey)` en `src/providers/utils.ts` — GET `{baseUrl}/models`, timeout 5s, `fetchFn` inyectable para tests; el fallback graceful a entrada manual vive en `discoverModels()`
+- [x] Backup automático `.stratumrc.json` → `.stratumrc.json.bak` antes de cualquier escritura — `src/config/writer.ts` (`upsertProvider`/`removeProvider`/`setDefaultProvider`), que opera sobre el JSON **crudo** para preservar placeholders `${VAR}` sin expandir en disco. Si no existe ningún `.stratumrc.json`, el wizard crea el global `~/.stratum/.stratumrc.json`
+- [x] Comando de sesión `/model` — overlay con `SelectList`, modelo actual marcado `(actual)`, cambio en caliente solo-sesión vía `agent.switchModel()` → `ProviderRouter.switchModel()`
+- [x] Comando de sesión `/config_provider` — mismo wizard en modo `edit`, pre-rellenado con los valores crudos del provider activo (`readRawProvider`); al guardar aplica también en caliente (`agent.reconfigureProvider()` con env vars expandidas)
+- [x] Cambio en caliente sin reiniciar — resuelto con `ProviderRouter.switchModel()/reconfigure()` + métodos en `StratumAgent` (reconstruyen el system prompt) en lugar del hook `useModelSwitcher` planificado; el `ReactLoop` lee `router.model` al inicio de cada `run()`, así que el cambio aplica al siguiente turno
+- [x] `stratum provider list` — tabla alias/tipo/baseUrl/modelo/estado, ping `healthCheck()` en paralelo (● verde/rojo), `▶` marca el activo
+- [x] Tests (29 nuevos): `providers/utils.test.ts` (200 OK, sin Authorization con key vacía, HTTP 404, shape inválido), `cli/ui/wizard-logic.test.ts` (Ollama mock 200 OK, provider sin `/models` → fallback manual, presets, validaciones), `providers/router.test.ts` (cambio de modelo en sesión, no-mutación de la config en disco, reconfigure), `config/writer.test.ts` (backup, preservación de `${VAR}` y del resto de la config, remove con promoción de default), `cli/ui/session-commands.test.ts` (filtrado del panel §5.2)
+
+**Extra implementado:** panel de autocompletado de `/comandos` completo (UI §5.2) — `CommandPalette.tsx` + registro central `session-commands.ts`: filtrado substring en tiempo real, máx. 8 ítems, ↑↓ con wrap, Tab completa, Enter ejecuta, Esc cierra; comando `/help`. Los hitos 4-6 solo tienen que añadir entradas a `SESSION_COMMANDS`.
 
 > **UI:** El wizard es la pieza central. Reutilizar los patrones de confirmación interactiva de Hito 3. El `/model` y `/config_provider` se añaden al autocompletado del `InputArea`. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado).
 

@@ -1,5 +1,5 @@
-import React, { useReducer, useCallback, useRef } from 'react';
-import { Box, useApp, useInput } from 'ink';
+import React, { useReducer, useCallback, useRef, useState } from 'react';
+import { Box, Text, useApp, useInput } from 'ink';
 import type { StratumAgent } from '../../agent/core.js';
 import type {
   AgentEvent,
@@ -7,11 +7,29 @@ import type {
   DestructiveDecision,
   RunOptions,
 } from '../../agent/types.js';
+import type { ProviderConfig } from '../../config/schema.js';
+import { expandEnvVars } from '../../config/loader.js';
+import { upsertProvider, readRawProvider } from '../../config/writer.js';
+import { fetchModels } from '../../providers/utils.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import { Banner } from './Banner.js';
 import { ConversationView } from './ConversationView.js';
+import { CommandPalette } from './CommandPalette.js';
+import { ProviderWizard } from './ProviderWizard.js';
+import { SelectList } from './components/SelectList.js';
+import { SESSION_COMMANDS, filterCommands } from './session-commands.js';
+import { theme } from './theme.js';
 import { useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
+
+/** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
+type OverlayState =
+  | { kind: 'model-loading' }
+  | { kind: 'model-select'; models: string[] }
+  | {
+      kind: 'wizard';
+      initial: { name: string; baseUrl: string; apiKey: string; model: string; contextWindow: number };
+    };
 
 export type AgentConvItem = {
   kind: 'agent';
@@ -385,11 +403,51 @@ export function App({ agent, version }: Props) {
 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
+  // -------------------------------------------------------------------------
+  // Overlays de sesión (Hito 3.5): /model y /config_provider
+  // -------------------------------------------------------------------------
+  const [overlay, setOverlay] = useState<OverlayState | null>(null);
+
+  // -------------------------------------------------------------------------
+  // Paleta de /comandos (UI §5.2)
+  // -------------------------------------------------------------------------
+  const [paletteIndex, setPaletteIndex] = useState(0);
+  const [paletteDismissed, setPaletteDismissed] = useState(false);
+
+  const paletteEligible =
+    !state.thinking &&
+    !state.pendingConfirm &&
+    !overlay &&
+    state.focusState === 'input' &&
+    !paletteDismissed &&
+    state.inputValue.trimStart().startsWith('/');
+  const paletteItems = paletteEligible ? filterCommands(state.inputValue, SESSION_COMMANDS) : [];
+  const effPaletteIndex = Math.min(paletteIndex, Math.max(paletteItems.length - 1, 0));
+
+  const handleInputChange = useCallback((value: string) => {
+    setPaletteDismissed(false);
+    setPaletteIndex(0);
+    dispatch({ type: 'INPUT_CHANGE', value });
+  }, []);
+
+  /** Completa el comando seleccionado en el input (Tab, o Enter en comandos con args). */
+  const completePaletteSelection = useCallback(
+    (cmdName: string, hasArgs: boolean) => {
+      dispatch({ type: 'INPUT_CHANGE', value: hasArgs ? `${cmdName} ` : cmdName });
+      setPaletteIndex(0);
+    },
+    [],
+  );
+
   const ctrlCCountRef = useRef(0);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useInput((input, key) => {
     if (key.ctrl && (input === 'c' || (key as { name?: string }).name === 'c')) {
+      if (overlay) {
+        setOverlay(null);
+        return;
+      }
       if (state.pendingConfirm) {
         resolveConfirm('deny');
         return;
@@ -410,8 +468,33 @@ export function App({ agent, version }: Props) {
       return;
     }
 
+    // Los overlays gestionan su propio input (SelectList / wizard)
+    if (overlay) return;
+
     // El prompt de confirmación gestiona su propio input (S/N/!)
     if (state.pendingConfirm) return;
+
+    // ----- Paleta de /comandos (§5.2): ↑↓ navega, Tab completa, Esc cierra -----
+    if (paletteItems.length > 0) {
+      const len = paletteItems.length;
+      if (key.upArrow) {
+        setPaletteIndex((effPaletteIndex - 1 + len) % len);
+        return;
+      }
+      if (key.downArrow) {
+        setPaletteIndex((effPaletteIndex + 1) % len);
+        return;
+      }
+      if (key.tab) {
+        const sel = paletteItems[effPaletteIndex];
+        if (sel) completePaletteSelection(sel.name, sel.hasArgs);
+        return;
+      }
+      if (key.escape) {
+        setPaletteDismissed(true);
+        return;
+      }
+    }
 
     // ----- Máquina de foco (§10): input ↔ block-focus -----
     if (key.tab) {
@@ -524,15 +607,95 @@ export function App({ agent, version }: Props) {
     [agent],
   );
 
-  const handleSend = useCallback(
-    (text: string) => {
-      if (!text.trim()) return;
-      if (state.thinking) return;
+  // -------------------------------------------------------------------------
+  // /model — selector de modelo en sesión (Hito 3.5)
+  // -------------------------------------------------------------------------
+  const openModelSelector = useCallback(() => {
+    setOverlay({ kind: 'model-loading' });
+    const cfg = agent.getActiveProviderConfig();
+    fetchModels(cfg.baseUrl, cfg.apiKey)
+      .then((models) => {
+        if (models.length === 0) {
+          setOverlay(null);
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `El endpoint ${cfg.baseUrl}/models no devolvió modelos.`,
+          });
+          return;
+        }
+        setOverlay({ kind: 'model-select', models });
+      })
+      .catch((err: unknown) => {
+        setOverlay(null);
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text:
+            `No se pudieron obtener los modelos de ${cfg.baseUrl}: ${String(err)}\n` +
+            `Puedes fijar el modelo a mano con: stratum config set provider.providers.${agent.providerName}.model <modelo>`,
+        });
+      });
+  }, [agent]);
 
-      const cmd = text.trim();
+  // -------------------------------------------------------------------------
+  // /config_provider — wizard pre-rellenado con el provider activo (Hito 3.5)
+  // -------------------------------------------------------------------------
+  const openProviderEditor = useCallback(() => {
+    const name = agent.providerName;
+    const active = agent.getActiveProviderConfig();
+    // Valores crudos del archivo (preservan placeholders ${VAR}); si el provider
+    // no está en el archivo escribible, se cae a los valores activos en memoria.
+    const raw = readRawProvider(name);
+    setOverlay({
+      kind: 'wizard',
+      initial: {
+        name,
+        baseUrl: typeof raw?.['baseUrl'] === 'string' ? (raw['baseUrl'] as string) : active.baseUrl,
+        apiKey: typeof raw?.['apiKey'] === 'string' ? (raw['apiKey'] as string) : active.apiKey,
+        model: typeof raw?.['model'] === 'string' ? (raw['model'] as string) : active.model,
+        contextWindow:
+          typeof raw?.['contextWindow'] === 'number'
+            ? (raw['contextWindow'] as number)
+            : active.contextWindow,
+      },
+    });
+  }, [agent]);
 
+  const handleWizardComplete = useCallback(
+    (result: { name: string; config: ProviderConfig; makeDefault: boolean }) => {
+      setOverlay(null);
+      try {
+        const { configPath, backupPath } = upsertProvider(result.name, result.config, false);
+        if (result.name === agent.providerName) {
+          // Aplicar en caliente a la sesión (con env vars expandidas)
+          const expanded = expandEnvVars(result.config) as ProviderConfig;
+          agent.reconfigureProvider(expanded);
+        }
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text:
+            `Provider "${result.name}" guardado en ${configPath}` +
+            (backupPath ? ` (backup: ${backupPath})` : '') +
+            '. Cambios aplicados a la sesión actual.',
+        });
+      } catch (err) {
+        dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al guardar la config: ${String(err)}` });
+      }
+    },
+    [agent],
+  );
+
+  const executeCommand = useCallback(
+    (cmd: string) => {
       if (cmd === '/quit' || cmd === '/exit') {
         exit();
+        return;
+      }
+
+      if (cmd === '/help') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const width = Math.max(...SESSION_COMMANDS.map((c) => c.name.length)) + 2;
+        const lines = SESSION_COMMANDS.map((c) => `  ${c.name.padEnd(width)} ${c.description}`);
+        dispatch({ type: 'SYSTEM_MESSAGE', text: `Comandos disponibles:\n\n${lines.join('\n')}` });
         return;
       }
 
@@ -555,9 +718,46 @@ export function App({ agent, version }: Props) {
         return;
       }
 
+      if (cmd === '/model') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        openModelSelector();
+        return;
+      }
+
+      if (cmd === '/config_provider') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        openProviderEditor();
+        return;
+      }
+
       void send(cmd);
     },
-    [send, state.thinking, exit, runInit, agent],
+    [send, exit, runInit, agent, openModelSelector, openProviderEditor],
+  );
+
+  const handleSend = useCallback(
+    (text: string) => {
+      if (!text.trim()) return;
+      if (state.thinking) return;
+
+      const cmd = text.trim();
+
+      // Enter con la paleta abierta: ejecutar (o completar) el comando seleccionado
+      if (paletteItems.length > 0) {
+        const sel = paletteItems[effPaletteIndex];
+        if (sel && sel.name !== cmd) {
+          if (sel.hasArgs) {
+            completePaletteSelection(sel.name, true);
+            return;
+          }
+          executeCommand(sel.name);
+          return;
+        }
+      }
+
+      executeCommand(cmd);
+    },
+    [state.thinking, paletteItems, effPaletteIndex, completePaletteSelection, executeCommand],
   );
 
   if (state.phase === 'banner') {
@@ -572,13 +772,72 @@ export function App({ agent, version }: Props) {
   const focusedBlockId =
     state.focusState === 'block-focus' ? (activeBlocks[state.focusedBlockIndex]?.id ?? null) : null;
 
+  // ----- Overlays de sesión (Hito 3.5) -----
+  let overlayNode: React.ReactNode = null;
+  if (overlay?.kind === 'model-loading') {
+    overlayNode = (
+      <Box borderStyle="single" borderColor={theme.borderSubtle} paddingX={1}>
+        <Text color={theme.textMuted}>◌ Obteniendo modelos del provider activo...</Text>
+      </Box>
+    );
+  } else if (overlay?.kind === 'model-select') {
+    const current = agent.model;
+    overlayNode = (
+      <Box flexDirection="column" borderStyle="single" borderColor={theme.borderAccent} paddingX={1}>
+        <Text color={theme.accent} bold>
+          Modelo
+          <Text color={theme.textMuted} bold={false}>
+            {'  ·  '}
+            {agent.providerName} · solo esta sesión
+          </Text>
+        </Text>
+        <Text> </Text>
+        <SelectList
+          items={overlay.models.map((m) => ({
+            label: m,
+            value: m,
+            hint: m === current ? '(actual)' : undefined,
+          }))}
+          initialIndex={Math.max(overlay.models.indexOf(current), 0)}
+          onSelect={(item) => {
+            setOverlay(null);
+            if (item.value !== current) {
+              agent.switchModel(item.value);
+              dispatch({
+                type: 'SYSTEM_MESSAGE',
+                text: `Modelo cambiado a ${item.value} (solo esta sesión; no se ha modificado .stratumrc.json).`,
+              });
+            }
+          }}
+          onCancel={() => setOverlay(null)}
+        />
+        <Text color={theme.textDisabled}>  Esc para cancelar</Text>
+      </Box>
+    );
+  } else if (overlay?.kind === 'wizard') {
+    overlayNode = (
+      <ProviderWizard
+        mode="edit"
+        existingNames={[]}
+        initial={overlay.initial}
+        onComplete={handleWizardComplete}
+        onCancel={() => setOverlay(null)}
+      />
+    );
+  }
+
+  const paletteNode =
+    paletteItems.length > 0 ? (
+      <CommandPalette items={paletteItems} selectedIndex={effPaletteIndex} />
+    ) : null;
+
   return (
     <Box flexDirection="column" width="100%">
       <ConversationView
         completedItems={state.completedItems}
         currentItem={state.currentItem}
         inputValue={state.inputValue}
-        onInputChange={(value) => dispatch({ type: 'INPUT_CHANGE', value })}
+        onInputChange={handleInputChange}
         onInputSubmit={handleSend}
         thinking={state.thinking}
         providerName={agent.providerName}
@@ -592,6 +851,8 @@ export function App({ agent, version }: Props) {
         onConfirmApprove={() => resolveConfirm('approve')}
         onConfirmDeny={() => resolveConfirm('deny')}
         onConfirmAllowAll={() => resolveConfirm('allow-all')}
+        palette={paletteNode}
+        overlay={overlayNode}
       />
     </Box>
   );
