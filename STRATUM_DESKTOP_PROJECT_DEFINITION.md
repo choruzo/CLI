@@ -821,3 +821,218 @@ aislamiento que tiene la CLI cuando se ejecuta en terminal.
 | Estilos | CSS variables desde `theme.ts`; no Tailwind ni styled-components |
 | Estado de pestañas | Zustand o `useContext` + `useReducer`; no Redux |
 | Sidecar | `stratum-core` es el mismo binario que la CLI con `STRATUM_DESKTOP=1`; no hay fork del core |
+
+---
+
+## 15. Puntos ciegos detectados (revisión de diseño)
+
+Revisión crítica del plan. Cada punto indica severidad, el hueco concreto y una
+recomendación. Los **🔴 críticos** deben resolverse antes de D1; los **🟠
+importantes** antes del hito donde aparecen; los **🟡 menores** son deuda
+asumible para v1 pero conviene anotarlos.
+
+### 15.1 🔴 El WebSocket local no está autenticado — riesgo de RCE
+
+`ws://127.0.0.1:<puerto>` sin autenticación es accesible por **cualquier proceso
+local y por cualquier página web abierta en un navegador** (los navegadores
+permiten conexiones a WebSockets de localhost desde cualquier origen). Como el
+canal acepta mensajes `{ type: 'chat' }` que disparan `bash`, `write_file` y
+`edit_file`, una web maliciosa podría escanear puertos locales y ejecutar tools
+arbitrarias en la máquina del usuario. Es el agujero más serio del diseño.
+
+**Recomendación:** Tauri genera un token aleatorio al arrancar, lo pasa al sidecar
+por argumento/env y al frontend por el evento `sidecar://ready`. El sidecar exige
+ese token en el handshake (primer mensaje o header) y valida el header `Origin`,
+rechazando cualquier conexión sin token válido. Considerar un named pipe / unix
+socket en lugar de TCP, que no es alcanzable desde el navegador.
+
+### 15.2 🔴 Empaquetado del sidecar Node — contradice el binario de 5–10 MB
+
+El plan vende "binario de ~5–10 MB frente a 150 MB de Electron", pero el sidecar
+es Node.js con dependencias nativas pesadas: `sqlite-vec`, `better-sqlite3` y
+`@xenova/transformers` (ONNX runtime trae binarios por plataforma de decenas de
+MB). No se decide **cómo se distribuye**: ¿se asume Node del sistema (frágil, y el
+propio doc lo lista como causa de fallo "Node no instalado"), se empaqueta con
+`pkg`/`nexe`, o se incluye `node_modules` + runtime? Cualquiera de las opciones
+realistas dispara el tamaño muy por encima de 10 MB y exige builds por plataforma
+de los módulos nativos.
+
+**Recomendación:** decidir y documentar la estrategia (recomendado: sidecar
+empaquetado como binario autónomo por plataforma con los `.node` nativos
+incluidos), y corregir la cifra de tamaño esperada. El "5–10 MB" solo aplica al
+shell Tauri, no a la app instalada.
+
+### 15.3 🔴 No hay modelo de directorio de trabajo (cwd) / abrir proyecto
+
+La CLI opera relativa a un cwd: `STRATUM.md` de proyecto, rutas relativas en las
+tools, `/init`. Una app lanzada desde el menú del SO tiene cwd = home o el dir de
+la app, **no un proyecto**. El doc menciona "directorio de trabajo activo del
+sidecar" (sección 7.3) en singular, pero no existe ninguna UI para **elegir o
+cambiar la carpeta de trabajo**, ni se resuelve si cada pestaña puede apuntar a un
+proyecto distinto (un sidecar único ⇒ un solo cwd, pero las pestañas sugieren
+proyectos independientes). Para un agente de código de escritorio esto es
+fundamental.
+
+**Recomendación:** añadir un selector "Abrir carpeta/proyecto" (por ventana o por
+pestaña) y definir si el cwd es global al sidecar o por pestaña. Si es por
+pestaña, cada `StratumAgent` necesita su propio cwd y el panel Memory/Proyecto
+debe seguir a la pestaña activa.
+
+### 15.4 🟠 Confirmación destructiva sobre WebSocket — protocolo sin definir
+
+La CLI resuelve `onConfirmDestructive` con un callback síncrono-async local. Sobre
+WS hace falta un **request/response con id de correlación**: el sidecar emite
+`confirm_request` y bloquea la ejecución hasta recibir `confirm_response`. El doc
+muestra el componente `DestructiveConfirm` pero no el protocolo ni los casos
+límite: ¿qué pasa si el usuario cierra la pestaña/app con una confirmación
+pendiente? ¿Dónde vive el estado `allow-all` (`!`) — por pestaña o por sidecar?
+¿Un timeout convierte la espera en deny?
+
+**Recomendación:** especificar mensajes `confirm_request`/`confirm_response` con
+`callId`, default a `deny` si la pestaña se cierra o hay timeout, y `allow-all`
+con alcance por pestaña (coherente con "instancias aisladas").
+
+### 15.5 🟠 Estado del agente vs. reconexión — contradicción
+
+La sección 9 dice que al crashear el sidecar "el historial se preserva en el
+estado React, no se pierde al reconectar". Pero el `StratumAgent` y su contexto
+**viven en memoria del sidecar**: si el sidecar cae, el contexto del LLM, el
+historial comprimido y el estado de tools se pierden. Reconectar da un agente
+nuevo sin memoria de la conversación. El frontend mostraría los mensajes pero el
+agente no tendría el contexto para continuar. Además, "acepta una conexión"
+(sección 3) choca con multiplexar varias pestañas y con reconexión.
+
+**Recomendación:** al reconectar, rehidratar el agente del sidecar reenviando el
+historial que conserva el frontend (o persistiendo el estado de sesión de cada
+tab para recargarlo). Aclarar que el WS acepta multiplexado por `tabId`, no una
+única conexión.
+
+### 15.6 🟠 Versión del core: bundle vs. CLI global — promesa de "config compartida"
+
+La decisión dice "el sidecar es el mismo binario que la CLI". Pero no se aclara si
+es la **CLI instalada globalmente por npm** o una **copia empaquetada** con la
+app. Si va empaquetada, su versión puede divergir de la CLI del usuario; si el
+schema de `.stratumrc.json` o el formato de `SessionStore`/`STRATUM.md` cambia
+entre versiones, la promesa de "config y memoria compartidas sin fricción" se
+rompe silenciosamente. El auto-updater de Tauri (sección 10) actualiza el shell,
+no necesariamente el core.
+
+**Recomendación:** empaquetar una versión pineada del core con la app (para no
+depender de instalación previa) y versionar el schema de config/sesiones con
+migración hacia adelante y detección de versión incompatible.
+
+### 15.7 🟠 Escritura concurrente de config — pérdida de updates, no solo torn reads
+
+La escritura atómica (temp + rename) evita lecturas a medias, pero **no evita
+lost updates**: si CLI y desktop editan config casi a la vez, el último en escribir
+pisa al otro sin aviso. Peor: el `watch_config` puede entrar en bucle (desktop
+escribe → watcher dispara → recarga → re-render) y si hay ediciones sin guardar en
+el Settings Panel abierto, una escritura de la CLI las descarta.
+
+**Recomendación:** comparar mtime/hash antes de escribir y avisar si cambió bajo
+los pies del usuario; ignorar en el watcher los eventos generados por la propia
+escritura (debounce + flag de auto-write).
+
+### 15.8 🟠 Alcance de permisos fs de Tauri demasiado estrecho
+
+`capabilities/default.json` solo permite `$HOME/.stratum/**` y `$APPDATA/stratum/**`.
+Pero "Abrir en editor" (`shell.open`) sobre el `STRATUM.md` de un proyecto
+arbitrario, y la resolución de rutas del drag & drop, caen fuera de ese scope. El
+trabajo de archivos lo hace el sidecar (acceso OS completo), pero las acciones que
+sí pasan por Tauri necesitan un scope más amplio o un patrón distinto.
+
+**Recomendación:** ampliar el scope de `shell:open`/`fs` a las rutas de proyecto, o
+enrutar esas acciones por el sidecar en lugar de por capacidades Tauri.
+
+### 15.9 🟠 Plano de control partido en dos transportes (cancel)
+
+El streaming va por WS pero `cancel` va por Tauri `invoke` → Rust → sidecar
+(sección 3). Dividir control y datos en dos canales introduce **carreras de
+orden**: el `cancel` puede llegar antes/después de chunks en vuelo y debe alcanzar
+el `AbortSignal` correcto del agente. Mantener cancel/new_tab/close_tab por el
+mismo WS (ya están en el protocolo de entrada) es más simple y ordenado.
+
+**Recomendación:** enviar también `cancel` por WS (ya está tipado en la sección 3),
+reservando los `invoke` de Tauri solo para operaciones realmente request-response
+sin relación con el stream (leer/escribir config, abrir editor).
+
+### 15.10 🟠 Captura de puerto por stdout + firewall
+
+Parsear el puerto del stdout del sidecar es frágil: logs y el mensaje de puerto
+pueden intercalarse. Además, abrir un servidor TCP en localhost puede **disparar el
+diálogo del Firewall de Windows** en el primer arranque, una mala primera
+impresión.
+
+**Recomendación:** que Tauri elija el puerto (o use named pipe/unix socket) y lo
+pase al sidecar por argumento, eliminando el parsing de stdout y, con socket
+local, el aviso de firewall.
+
+### 15.11 🟠 Ciclo de vida del sidecar — procesos huérfanos y MCP
+
+No se especifica el **kill del sidecar** cuando Tauri se cierra o crashea: Node
+puede quedar huérfano reteniendo el puerto. Con MCP (Hito 4 de la CLI) el sidecar
+arranca subprocesos de servidores MCP — su arranque eager, su coste en el inicio de
+la app y su cierre al salir tampoco están contemplados en el contexto desktop.
+
+**Recomendación:** matar el sidecar en el `exit`/`window-close` de Tauri y en
+señales; el sidecar a su vez debe cerrar sus subprocesos MCP. Documentar el arranque
+de MCP como parte del flujo de inicio (impacta el tiempo a "primera pestaña lista").
+
+### 15.12 🟡 Persistencia de sesión solo al cerrar — pérdida en crash
+
+"Las sesiones se escriben al cerrarse, no durante la conversación activa"
+(sección 4). Un crash del sidecar o de la app **pierde la conversación activa** que
+no se llegó a guardar. La reconexión preserva el estado React, pero un crash total
+del proceso del webview no.
+
+**Recomendación:** checkpoint periódico / autosave incremental de la sesión activa.
+
+### 15.13 🟡 Rendimiento del markdown en streaming
+
+`react-markdown + rehype-highlight` re-parsea el mensaje completo en cada chunk SSE.
+En respuestas largas con bloques de código esto degrada el frame rate. La CLI no
+sufre esto igual por su modelo de render.
+
+**Recomendación:** render incremental (parsear solo el delta o memoizar bloques
+estables) y/o virtualización de la lista de mensajes para conversaciones largas.
+
+### 15.14 🟡 Ventana frameless rompe features del SO + restauración multi-monitor
+
+`decorations: false` con barra propia pierde Aero Snap, alto contraste y la
+exposición de controles a lectores de pantalla; hay que reimplementar snapping y
+accesibilidad de los botones ─ □ ×. Además, restaurar posición desde
+`window-state` puede dejar la ventana **fuera de pantalla** si el monitor ya no está
+conectado.
+
+**Recomendación:** validar accesibilidad de los controles custom (sección 9 ya lo
+deja "a validar en D2") y clamping de la posición restaurada al área visible actual.
+
+### 15.15 🟡 Concurrencia entre pestañas en un único sidecar
+
+Varias pestañas generando a la vez comparten proceso: compresión de contexto (LLM
+call), límites de conexión/rate del provider y el `serialized` de `bash` que es por
+agente, no global. No es bloqueante para v1 pero conviene anotar el comportamiento
+esperado bajo carga.
+
+**Recomendación:** documentar que cada tab tiene su `StratumAgent` independiente y
+evaluar un límite de generaciones concurrentes si el provider lo requiere.
+
+### Resumen de prioridades
+
+| # | Punto ciego | Severidad | Resolver antes de |
+|---|-------------|-----------|-------------------|
+| 15.1 | WebSocket sin autenticar (RCE) | 🔴 | D1 |
+| 15.2 | Empaquetado del sidecar Node / tamaño real | 🔴 | D0 |
+| 15.3 | Sin modelo de cwd / abrir proyecto | 🔴 | D1 |
+| 15.4 | Protocolo de confirmación destructiva | 🟠 | D1 |
+| 15.5 | Estado del agente vs. reconexión | 🟠 | D1 |
+| 15.6 | Versión core bundle vs. CLI global | 🟠 | D0 |
+| 15.7 | Lost updates en config concurrente | 🟠 | D3 |
+| 15.8 | Scope fs de Tauri demasiado estrecho | 🟠 | D2 |
+| 15.9 | Cancel en transporte separado | 🟠 | D1 |
+| 15.10 | Captura de puerto por stdout + firewall | 🟠 | D0 |
+| 15.11 | Ciclo de vida del sidecar / MCP huérfanos | 🟠 | D0 |
+| 15.12 | Persistencia de sesión solo al cerrar | 🟡 | D2 |
+| 15.13 | Rendimiento markdown en streaming | 🟡 | D1 |
+| 15.14 | Frameless rompe SO + multi-monitor | 🟡 | D5 |
+| 15.15 | Concurrencia entre pestañas | 🟡 | D2 |
