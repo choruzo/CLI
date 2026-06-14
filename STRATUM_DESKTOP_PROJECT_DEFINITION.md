@@ -258,17 +258,197 @@ Dimensiones de ventana:
 
 ### Sidebar
 
-- **Colapsado por defecto** (40px, solo iconos con tooltip).
-- **Expandido:** 260px, con animación CSS `width` de 150ms ease-out.
+- **Colapsado por defecto** (40px, solo iconos con tooltip al hacer hover).
+- **Expandido:** 260px, animación CSS `width` de 150ms ease-out.
 - El estado se persiste en `localStorage` (`sidebar_open: boolean`).
-- Secciones:
-  - 🗂 **Sessions:** lista de sesiones pasadas, resume con click.
-  - ⏱ **History:** historial de la conversación activa en formato compacto.
-  - 🧠 **Memory:** vista de `STRATUM.md` activo (global + proyecto), solo lectura.
+- Estructura vertical:
+
+```
+┌────┐
+│ 🗂 │  ← Sessions   (panel activo: fondo accent tenue, borde izquierdo accent)
+│ 📋 │  ← Outline
+│ 🧠 │  ← Memory
+│    │
+│    │  (espacio flexible)
+│    │
+│ ⚙  │  ← Settings   (parte inferior, siempre visible)
+└────┘
+```
+
+Solo un panel está activo a la vez. Click en el icono activo colapsa el sidebar.
 
 ---
 
-## 7. Componentes del frontend
+## 7. Sidebar — Especificación detallada
+
+### 7.1 Panel Sessions (🗂)
+
+**Estructura:**
+
+```
+┌─────────────────────────┐
+│ 🔍  Buscar sesiones...  │  ← search input, filtra en tiempo real
+├─────────────────────────┤
+│ HOY                     │
+│ ▌ Refactor auth module  │  ← sesión activa (borde accent izquierdo)
+│   llama3.2 · hace 5min  │
+│                         │
+│   Análisis de logs      │
+│   mistral · hace 2h     │
+├─────────────────────────┤
+│ AYER                    │
+│   Setup VMware vSAN     │
+│   llama3.2 · 12 mar     │
+├─────────────────────────┤
+│ ÚLTIMOS 7 DÍAS          │
+│   ...                   │
+├─────────────────────────┤
+│ ANTERIORES              │
+│   ...                   │
+└─────────────────────────┘
+```
+
+**Agrupación por fecha:** Hoy / Ayer / Últimos 7 días / Anteriores. Los grupos
+vacíos no se renderizan.
+
+**Metadatos por item:**
+- Título: primeras ~45 chars del primer mensaje del usuario. Si aún no hay mensaje,
+  "Nueva conversación".
+- Segunda línea: nombre del modelo + fecha relativa (`hace 5min`, `12 mar`,
+  `3 feb 2025`).
+
+**Acciones:**
+
+| Trigger | Acción |
+|---------|--------|
+| Click | Abre la sesión en la pestaña activa (o en una nueva si la activa tiene cambios sin guardar) |
+| Hover | Aparecen iconos ✏ (renombrar) y 🗑 (eliminar) al extremo derecho del item |
+| Click 🗑 | Diálogo de confirmación inline (no modal): "¿Eliminar esta sesión? [Cancelar] [Eliminar]" |
+| Click ✏ | El título se convierte en `<input>` editable in-place; Enter guarda, Escape cancela |
+| Clic derecho | Context menu: Abrir en nueva pestaña / Renombrar / Eliminar |
+
+**Búsqueda:** el campo filtra por título de sesión (case-insensitive, substring).
+Si no hay resultados: "No se encontraron sesiones para «término»".
+
+**Empty state (sin sesiones):**
+```
+  Sin sesiones guardadas.
+  Inicia una conversación
+  para verla aquí.
+```
+
+---
+
+### 7.2 Panel Outline (📋)
+
+Lista los mensajes del usuario de la conversación activa como anchors de
+navegación. Permite saltar a cualquier punto sin hacer scroll manual.
+
+**Estructura:**
+
+```
+┌─────────────────────────┐
+│ CONVERSACIÓN ACTIVA     │
+├─────────────────────────┤
+│ ▌ Explícame cómo fun... │  ← mensaje visible actualmente (accent)
+│   Ahora muéstrame el... │
+│   ¿Puedes refactorizar  │
+│   ¿Qué hace exactame... │
+│   Ok, y si cambiamos... │
+└─────────────────────────┘
+```
+
+**Comportamiento:**
+- Cada item muestra los primeros ~50 chars del mensaje del usuario.
+- Click → scroll suave (`behavior: 'smooth'`) hasta ese mensaje en `ConversationView`.
+- El item correspondiente al mensaje más cercano a la vista se marca como activo
+  (borde izquierdo accent, texto `textPrimary`).
+- Se actualiza en tiempo real al recibir nuevos mensajes del usuario.
+- Los mensajes del agente y tool calls no aparecen — solo los del usuario.
+
+**Empty state:**
+```
+  La conversación está vacía.
+  Escribe un mensaje para
+  empezar.
+```
+
+---
+
+### 7.3 Panel Memory (🧠)
+
+Muestra el contenido de los archivos `STRATUM.md` activos, con dos tabs.
+
+**Estructura:**
+
+```
+┌─────────────────────────┐
+│ [Global] [Proyecto]     │  ← tabs
+├─────────────────────────┤
+│                         │
+│  # Mi contexto          │
+│                         │
+│  Soy administrador de   │
+│  plataformas VMware...  │
+│                         │
+│  ## Preferencias        │
+│  ...                    │
+│                         │
+├─────────────────────────┤
+│ [↗ Abrir en editor]     │  ← abre el archivo con el editor de sistema
+└─────────────────────────┘
+```
+
+**Tab Global** — `~/.stratum/STRATUM.md`
+**Tab Proyecto** — `.stratum/STRATUM.md` del directorio de trabajo activo del sidecar.
+
+Si el tab activo no tiene archivo:
+```
+  No hay STRATUM.md global.
+  Ejecuta: stratum init
+  [Ejecutar ahora]          ← lanza stratum init via sidecar
+```
+
+**Comportamiento:**
+- Solo lectura. El contenido se renderiza como markdown (mismo `MarkdownRenderer`
+  que el chat) pero sin interactividad.
+- Se refresca automáticamente via Tauri `fs.watch` cuando el archivo cambia
+  (p.ej., porque la CLI ejecutó `stratum init` en la terminal).
+- El botón "Abrir en editor" invoca `shell.open(filePath)` de Tauri, que abre
+  el archivo con el editor predeterminado del sistema.
+- La tab "Proyecto" está deshabilitada (gris, tooltip "No hay proyecto activo")
+  si el sidecar no tiene cwd con `.stratum/` detectado.
+
+---
+
+### 7.4 Icono inferior — Settings (⚙)
+
+Siempre visible en la parte inferior del rail de iconos, independientemente del
+panel activo.
+
+- Click → abre el Settings Panel como overlay a pantalla completa sobre la ventana
+  (no reemplaza la vista, se superpone con backdrop oscuro semitransparente).
+- No tiene panel propio en el sidebar — Settings es una vista separada.
+- Atajo de teclado: `Ctrl+,`
+
+---
+
+### 7.5 Comportamiento de colapso/expansión
+
+| Acción | Resultado |
+|--------|-----------|
+| Click en icono de panel no activo | Expande sidebar + activa ese panel |
+| Click en icono de panel activo | Colapsa sidebar |
+| Click fuera del sidebar (en ConversationView) | Colapsa sidebar |
+| `Ctrl+B` | Toggle expand/collapse |
+| Resize manual | No soportado en v1; ancho fijo 260px expandido |
+
+El estado del panel activo se persiste en `localStorage` (`sidebar_panel:
+'sessions' | 'outline' | 'memory' | null`).
+
+---
+
+## 8. Componentes del frontend (chat)
 
 Todos son equivalentes funcionales de los componentes Ink, pero en HTML/CSS.
 
@@ -296,7 +476,7 @@ El bloque es expandible (click) para ver input/output completo.
 
 ---
 
-## 8. Features desktop-específicas
+## 9. Features desktop-específicas
 
 ### Drag & drop de archivos
 
@@ -359,7 +539,7 @@ lo permite, o en filas separadas (decisión de maquetación a validar en D2).
 
 ---
 
-## 9. Build y distribución
+## 10. Build y distribución
 
 ### Targets
 
@@ -400,7 +580,7 @@ GitHub Releases (JSON con url + signature). Activado en Hito D3.
 
 ---
 
-## 10. Gestión de permisos Tauri v2
+## 11. Gestión de permisos Tauri v2
 
 `capabilities/default.json` define los permisos mínimos necesarios:
 
@@ -432,7 +612,7 @@ aislamiento que tiene la CLI cuando se ejecuta en terminal.
 
 ---
 
-## 11. Lo que NO está en scope de v1
+## 12. Lo que NO está en scope de v1
 
 - **macOS** — prioridad baja; requiere firma + notarización de Apple. Se añade en v2.
 - **Múltiples ventanas OS** — el modelo de pestañas cubre el caso de uso.
@@ -447,7 +627,7 @@ aislamiento que tiene la CLI cuando se ejecuta en terminal.
 
 ---
 
-## 12. Hitos
+## 13. Hitos
 
 | Hito | Contenido | Dependencia |
 |------|-----------|-------------|
@@ -460,7 +640,7 @@ aislamiento que tiene la CLI cuando se ejecuta en terminal.
 
 ---
 
-## 13. Decisiones técnicas que no deben revertirse
+## 14. Decisiones técnicas que no deben revertirse
 
 | Área | Decisión |
 |------|----------|
