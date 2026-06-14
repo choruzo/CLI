@@ -251,10 +251,25 @@ Dimensiones de ventana:
 - Cada pestaña tiene un `tabId` UUID, un título (primeras palabras del primer mensaje)
   y un indicador de estado (idle / generando / error).
 - `[+]` abre una nueva pestaña con nueva sesión.
-- `[×]` cierra la pestaña; si hay generación activa, pide confirmación.
+- `[×]` cierra la pestaña; si hay generación activa, pide confirmación inline.
 - Máximo recomendado: 8 pestañas simultáneas (no hay límite técnico duro).
 - Las pestañas persisten mientras la app está abierta. Al cerrar la app, la sesión
   activa de cada pestaña se guarda en `SessionStore`.
+
+**Título de ventana en la taskbar — dinámico.** Se sincroniza con la pestaña
+activa via `appWindow.setTitle()`:
+
+| Estado | Título |
+|--------|--------|
+| Pestaña con título | `Stratum — Refactor auth module` |
+| Pestaña sin título aún | `Stratum — Nueva conversación` |
+| Generando respuesta | `Stratum — ⠸ Refactor auth module` |
+| Error en sidecar | `Stratum — ⚠ Sin conexión` |
+
+**Persistencia de posición y tamaño.** El Tauri `window-state` plugin guarda
+posición, tamaño y estado maximizado al cerrar la ventana, y los restaura al
+reabrir. Archivo: `%APPDATA%\stratum-desktop\window-state.json` (Windows) /
+`~/.config/stratum-desktop/window-state.json` (Linux).
 
 ### Sidebar
 
@@ -536,6 +551,162 @@ cierra la ventana via `appWindow.close()`.
 
 El TitleBar y el TabBar pueden coexistir en la misma fila horizontal si el ancho
 lo permite, o en filas separadas (decisión de maquetación a validar en D2).
+
+### Onboarding — primer arranque
+
+Se activa cuando el sidecar no encuentra `.stratumrc.json` al iniciar.
+
+**Flujo:**
+
+```
+1. Splash de bienvenida (pantalla completa, fondo bgApp)
+      ◈  Stratum
+      Tu agente de línea de comandos, ahora en escritorio.
+      Funciona con cualquier API OpenAI-compatible:
+      Ollama · llama.cpp · vLLM · OpenAI · LiteLLM
+
+      [Configurar provider →]
+
+2. ProviderWizard (modal fullscreen, mismo flujo que la CLI)
+      → Alias del provider
+      → Base URL
+      → API key (opcional)
+      → Selección de modelo
+      → Test de conexión
+      → [Guardar y empezar]
+
+3. Primera pestaña abierta con empty state de bienvenida
+```
+
+La pantalla de bienvenida no tiene botón de "saltar" — sin un provider configurado
+la app no puede hacer nada útil. Si el usuario cierra la ventana durante el wizard,
+al reabrir vuelve al paso 1.
+
+Si `.stratumrc.json` existe pero no tiene providers configurados (archivo vacío o
+creado manualmente), se aplica el mismo flujo desde el paso 2.
+
+### Manejo de errores del sidecar
+
+El sidecar Node.js puede fallar al arrancar (Node no instalado, puerto ocupado,
+error de config) o caerse durante el uso.
+
+**Al arrancar — fallo de inicio:**
+
+```
+┌─────────────────────────────────────────────────────────┐
+│                                                         │
+│              ⚠  No se pudo iniciar Stratum              │
+│                                                         │
+│  El proceso interno encontró un error al arrancar.      │
+│                                                         │
+│  Error: Cannot find module 'stratum-core'               │
+│  (detalle técnico, plegable)                            │
+│                                                         │
+│  Posibles causas:                                       │
+│  · Node.js no está instalado (requiere v18+)            │
+│  · La instalación está dañada                           │
+│                                                         │
+│       [Reintentar]      [Ver logs]                      │
+│                                                         │
+└─────────────────────────────────────────────────────────┘
+```
+
+**Durante el uso — sidecar crashea:**
+
+- Se muestra un banner no bloqueante en la parte superior de la
+  `ConversationView` activa:
+
+```
+⚠  Conexión con el agente perdida.  [Reconectar]
+```
+
+- La app intenta reconexión automática con backoff: 1s → 2s → 5s → 10s
+  (máximo 4 reintentos). Si todos fallan, el banner pasa a estado de error
+  permanente con botón manual.
+- El historial de la conversación activa se preserva en el estado React — no
+  se pierde al reconectar.
+- Si el sidecar no responde en 5s al arrancar una pestaña nueva, se muestra
+  el spinner con "Iniciando agente..." antes de pasar al error.
+
+**Logs:** `[Ver logs]` abre `%APPDATA%\stratum-desktop\logs\sidecar.log`
+con el editor de sistema. El sidecar redirige stdout/stderr a ese archivo.
+
+### Atajos de teclado
+
+Todos los atajos operan sobre la ventana en foco y no interfieren con los
+atajos globales del OS.
+
+| Atajo | Acción |
+|-------|--------|
+| `Ctrl+T` | Nueva pestaña |
+| `Ctrl+W` | Cerrar pestaña activa |
+| `Ctrl+Tab` | Siguiente pestaña |
+| `Ctrl+Shift+Tab` | Pestaña anterior |
+| `Ctrl+1` … `Ctrl+8` | Ir a pestaña N |
+| `Ctrl+,` | Abrir Settings Panel |
+| `Ctrl+B` | Toggle sidebar |
+| `Ctrl+L` | Enfocar InputArea (limpiar selección y poner cursor) |
+| `Ctrl+K` | Abrir command palette de slash-commands |
+| `Escape` | Cerrar modal activo / colapsar sidebar / cancelar generación |
+| `Ctrl+Enter` | Enviar mensaje (alternativa a Enter) |
+| `Ctrl+Shift+Space` | Global: enfocar/restaurar ventana desde cualquier app |
+
+`Ctrl+W` sobre la última pestaña cierra la ventana (con confirmación si hay
+generación activa). No cierra la app si hay más pestañas abiertas.
+
+Los atajos se registran con el hook `useHotkeys` (librería `react-hotkeys-hook`,
+sin dependencias nativas). El global hotkey sigue usando el plugin Tauri.
+
+### Slash commands
+
+Hereda el catálogo completo de la CLI y añade tres comandos específicos del
+desktop. Se activan escribiendo `/` en el `InputArea`, que muestra un dropdown
+con filtrado en tiempo real.
+
+**Heredados de la CLI:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `/model` | Cambia el modelo activo |
+| `/memory show` | Muestra el contenido de STRATUM.md en el chat |
+| `/memory forget <texto>` | Elimina una entrada de memoria |
+| `/init` | Escanea el proyecto y actualiza STRATUM.md |
+| `/config_provider` | Edita la config del provider activo |
+| `/clear` | Limpia el historial visible de la conversación |
+
+**Exclusivos del desktop:**
+
+| Comando | Descripción |
+|---------|-------------|
+| `/settings` | Abre el Settings Panel (equivalente a `Ctrl+,`) |
+| `/new-tab` | Abre una nueva pestaña (equivalente a `Ctrl+T`) |
+| `/open <ruta>` | Adjunta un archivo al mensaje por ruta absoluta o relativa al cwd |
+
+El dropdown de slash-commands muestra: icono · nombre · descripción corta.
+Navegación con ↑↓, selección con Enter o Tab, cierre con Escape.
+
+### Empty states
+
+**Nueva pestaña (sin mensajes):**
+
+```
+         ◈
+
+   ¿En qué trabajamos hoy?
+
+   Algunos ejemplos:
+   · "Explícame este error de logs de vCenter"
+   · "Refactoriza src/auth/middleware.ts"
+   · "Busca documentación sobre Tauri IPC"
+
+   Escribe /help para ver todos los comandos.
+```
+
+El texto de ejemplos rota aleatoriamente entre un conjunto de 12 sugerencias
+relevantes para el perfil del proyecto. No es interactivo (no son botones).
+
+**Sessions vacío** — ya definido en sección 7.1.
+**Memory sin archivo** — ya definido en sección 7.3.
 
 ---
 
