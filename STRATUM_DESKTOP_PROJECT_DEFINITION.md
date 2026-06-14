@@ -32,13 +32,20 @@ Stratum Desktop **no es una reescritura**. Es una capa de presentación sobre el
 
 | Capa | Tecnología | Justificación |
 |------|-----------|---------------|
-| Shell nativo | **Tauri v2** (Rust) | Webview nativo, binario ligero, IPC tipado |
+| Shell nativo | **Tauri v2** (Rust) | Webview nativo del SO, IPC tipado |
 | Frontend | **React 18 + Vite** | Mismo modelo de componentes que la UI Ink existente |
 | Estilos | **CSS variables + módulos** | Sin framework de CSS; colores desde `theme.ts` |
 | Tipado IPC | **@tauri-apps/api v2** | `invoke`, `listen`, `emit` tipados en TS |
 | Markdown | **react-markdown + rehype-highlight** | Equivalente a `marked` + `cli-highlight` de la CLI |
 | Build frontend | **Vite** (bundler por Tauri) | Sin configuración adicional |
+| Sidecar | **Node.js SEA** (Single Executable App, Node 21+) | Binario autónomo por plataforma, sin dep. de Node del sistema |
 | Empaquetado | **tauri build** | Genera `.msi` (Windows) y `.deb` / `.AppImage` (Linux) |
+
+> **Tamaño instalado real:** el shell Rust de Tauri pesa ~5–10 MB, pero el sidecar
+> SEA con `sqlite-vec`, `better-sqlite3` y `@xenova/transformers` (ONNX runtime)
+> añade ~50–100 MB de binarios nativos por plataforma. El instalador completo se
+> estima en **60–120 MB** según plataforma. No hay dependencia de Node.js instalado
+> en el sistema del usuario.
 
 ### Estructura de repositorio
 
@@ -90,48 +97,123 @@ stratum-desktop/           ← nuevo workspace (fuera de stratum-cli/)
 
 ## 3. Integración con Stratum Core (IPC protocol)
 
-### Patrón: Node.js sidecar + WebSocket local
+### Patrón: Node.js sidecar + canal local autenticado
 
 El frontend **no** llama directamente al core de stratum por comandos Tauri. En su lugar:
 
-1. Tauri arranca `stratum-core` como proceso sidecar Node.js al iniciar la app.
-2. El sidecar abre un WebSocket en `ws://127.0.0.1:<puerto-aleatorio>`.
-3. Tauri escucha el stdout del sidecar para capturar el puerto y lo pasa al frontend
-   via un Tauri event (`sidecar://ready`).
-4. El frontend conecta al WebSocket directamente y recibe `AgentEvent`s en streaming.
+1. Tauri genera un **token aleatorio** de 32 bytes al arrancar (`crypto.getRandomValues`
+   en Rust) y lo pasa al sidecar como argumento: `stratum-core --desktop-token <TOKEN>
+   --ipc-path <PATH>`.
+2. Tauri emite el token y la ruta IPC al frontend via el evento `sidecar://ready`
+   (canal Tauri interno, no accesible desde fuera).
+3. El sidecar abre el servidor IPC en la ruta recibida:
+   - **Windows:** Named Pipe `\\.\pipe\stratum-desktop-<PID>`
+   - **Linux:** Unix socket `$XDG_RUNTIME_DIR/stratum-desktop-<PID>.sock`
+4. El frontend conecta al socket via `WebSocket` usando el path recibido.
+   El primer mensaje **debe** ser el handshake con el token; sin él la conexión
+   se cierra inmediatamente.
 
 ```
-Frontend (React) ──WebSocket──► stratum-core (Node.js sidecar)
-       │                               │
-       └──Tauri invoke──► Rust ────────┘  (comandos no-streaming: config read/write,
-                                           session list, cancel, etc.)
+Rust (Tauri)
+  │  genera TOKEN + PATH
+  │  spawn sidecar con --desktop-token TOKEN --ipc-path PATH
+  │  emite sidecar://ready {token, path} al frontend
+  │
+Frontend (React) ──WS(socket local)──► stratum-core (Node sidecar)
+                                               │
+                                   valida token en handshake
+                                   rechaza Origin ≠ tauri://localhost
 ```
 
-### Por qué WebSocket en lugar de Tauri IPC para streaming
+Los `invoke` Tauri quedan **exclusivamente** para operaciones sin relación con el
+stream: leer/escribir config, abrir archivos con el editor del sistema, listar
+sesiones en disco. Todo lo demás — chat, cancel, gestión de tabs — viaja por WS.
 
-Tauri IPC (`invoke`) es request-response. Los `AgentEvent`s son un stream async
-continuo. WebSocket permite backpressure natural y es más simple de implementar en
-el lado Node sin añadir dependencias a `stratum-cli`.
+### Por qué socket local en lugar de TCP
 
-### Modificación mínima en stratum-cli
+Un socket Unix / Named Pipe **no es alcanzable desde el navegador** (los
+navegadores bloquean `ws://` a unix sockets). Elimina el vector de ataque de la
+15.1 y evita el diálogo del Firewall de Windows que dispara cualquier servidor TCP.
 
-Añadir en `stratum-cli/src` un nuevo entry point `desktop-server.ts`:
+### Protocolo de mensajes (entrada → sidecar)
 
 ```ts
-// Arrancado solo cuando STRATUM_DESKTOP=1
-// Abre un WS server, acepta una conexión, y expone el mismo StratumAgent
-// que usa `stratum chat`, emitiendo AgentEvents como mensajes JSON.
-```
+// Handshake — primer mensaje obligatorio
+{ type: 'handshake', token: string }
 
-El servidor acepta mensajes de entrada:
-```ts
-{ type: 'chat', tabId: string, message: string }
-{ type: 'cancel', tabId: string }
-{ type: 'new_tab' }
+// Chat — envía mensaje del usuario a la pestaña activa
+{ type: 'chat', tabId: string, message: string, cwd: string }
+
+// Rehidratación — restaura contexto tras reconexión (ver §Reconexión)
+{ type: 'rehydrate', tabId: string, history: Message[] }
+
+// Control de tabs
+{ type: 'new_tab',   tabId: string, cwd: string }
 { type: 'close_tab', tabId: string }
+
+// Cancelación — mismo canal que el stream, sin carreras de orden
+{ type: 'cancel', tabId: string }
+
+// Confirmación destructiva — respuesta al confirm_request del sidecar
+{ type: 'confirm_response', callId: string, decision: 'approve' | 'deny' | 'allow_all' }
 ```
 
-Y emite los `AgentEvent`s ya definidos en `agent/types.ts`, con `tabId` añadido.
+### Protocolo de mensajes (salida ← sidecar)
+
+```ts
+// AgentEvents normales con tabId añadido
+{ tabId: string, event: AgentEvent }
+
+// Solicitud de confirmación destructiva
+{
+  type: 'confirm_request',
+  tabId: string,
+  callId: string,         // UUID que debe volver en confirm_response
+  toolName: string,
+  params: unknown,
+  timeoutMs: 30000        // deny automático si no hay respuesta
+}
+
+// Error de sidecar
+{ type: 'sidecar_error', fatal: boolean, message: string }
+```
+
+### Confirmación destructiva (15.4)
+
+El sidecar **bloquea la ejecución del tool** hasta recibir `confirm_response`.
+Reglas:
+
+- Si no llega respuesta en **30 s** → `deny` automático.
+- Si la pestaña se cierra con una confirmación pendiente → `deny` automático.
+- `allow_all` tiene alcance **por pestaña**: suprime confirmaciones solo para esa
+  instancia `StratumAgent`, equivalente al `!` de la CLI.
+
+### Reconexión y rehidratación del agente (15.5)
+
+Si el sidecar cae y reconecta:
+
+1. El frontend detecta el cierre del WS y muestra el banner de reconexión.
+2. Al reconectar (nueva conexión, nuevo handshake con el mismo token), el frontend
+   envía inmediatamente un mensaje `rehydrate` con el array de mensajes que tiene
+   en su estado React para cada pestaña afectada.
+3. El sidecar crea un nuevo `StratumAgent` e inyecta el historial como contexto
+   inicial antes de aceptar nuevos mensajes de esa pestaña.
+4. El usuario puede continuar la conversación desde donde estaba; el agente tiene
+   el historial pero no el estado en memoria de iteraciones anteriores (tool outputs
+   de la sesión interrumpida no se re-ejecutan).
+
+### Ciclo de vida del sidecar (15.11)
+
+| Evento Tauri | Acción |
+|---|---|
+| App arranca | `Command::new("stratum-core").args([...]).spawn()` |
+| `window-close-requested` | `sidecar.kill()` → SIGTERM en Linux, `TerminateProcess` en Windows |
+| `exit` | Igual + espera hasta 2s para que el proceso termine limpiamente |
+| Crash de Tauri | Job Object (Windows) / proceso hijo huérfano adoptado por init (Linux) se limpia por OS |
+
+El sidecar recibe SIGTERM y propaga la señal a sus subprocesos MCP antes de salir.
+En Windows se usa **Job Object** (`CREATE_NEW_PROCESS_GROUP` + `JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`)
+para garantizar la terminación en cascada aunque Tauri crashee sin poder enviar la señal.
 
 ---
 
@@ -142,9 +224,19 @@ Y emite los `AgentEvent`s ya definidos en `agent/types.ts`, con `tabId` añadido
 `useConfig.ts` invoca un Tauri command `read_config` / `write_config` que en Rust
 lee y escribe `~/.stratum/.stratumrc.json` (o el path del proyecto activo).
 
-**Conflictos de escritura concurrente:** se resuelve con escritura atómica
-(write-to-temp + rename) — el mismo patrón que `atomic_io.py` de Odysseus. Rust tiene
-soporte nativo para esto con `tempfile` crate.
+**Conflictos de escritura concurrente (15.7):** la escritura atómica
+(write-to-temp + rename, `tempfile` crate en Rust) evita torn reads pero no lost
+updates entre procesos. Se aplican tres defensas adicionales:
+
+1. **Comparación de mtime antes de escribir:** `write_config` en Rust lee el mtime
+   actual y lo compara con el mtime leído al cargar la config. Si difieren, el
+   usuario ve un aviso: "La configuración fue modificada externamente. ¿Sobreescribir?"
+2. **Debounce + flag `_selfWrite` en el watcher:** el `watch_config` usa un debounce
+   de 300ms. Cuando la app escribe, activa `_selfWrite = true` durante 500ms;
+   los eventos del watcher en ese periodo se ignoran para no generar un bucle.
+3. **Settings Panel con ediciones sin guardar:** si el Settings Panel tiene cambios
+   sin guardar y llega un evento del watcher externo, se muestra un banner:
+   "Configuración actualizada externamente. [Descartar cambios] [Mantener mis cambios]"
 
 El frontend suscribe un `watch_config` (Tauri fs watcher) para recargar la config
 cuando la CLI la modifica desde la terminal mientras la app está abierta.
@@ -152,8 +244,11 @@ cuando la CLI la modifica desde la terminal mientras la app está abierta.
 ### Historial de sesiones compartido
 
 `SessionStore` persiste en disco. Tanto la CLI como el desktop pueden listar y
-resumir sesiones pasadas. No hay bloqueo de archivo — las sesiones se escriben al
-cerrarse, no durante la conversación activa.
+resumir sesiones pasadas.
+
+**Checkpoint incremental (15.12):** la sesión activa de cada pestaña se guarda
+automáticamente al recibir cada mensaje del agente y también cada 60s si hay
+actividad. Un crash del proceso no pierde más de 60s de conversación.
 
 ### Instancias activas independientes
 
@@ -255,6 +350,29 @@ Dimensiones de ventana:
 - Máximo recomendado: 8 pestañas simultáneas (no hay límite técnico duro).
 - Las pestañas persisten mientras la app está abierta. Al cerrar la app, la sesión
   activa de cada pestaña se guarda en `SessionStore`.
+
+**cwd por pestaña.** Cada pestaña tiene su propio directorio de trabajo
+independiente. El `StratumAgent` de esa pestaña opera relativo a ese cwd:
+rutas de tools, `STRATUM.md` de proyecto y `/init` usan ese directorio.
+El panel Memory/Proyecto del sidebar refleja el cwd de la pestaña activa.
+
+Al crear una nueva pestaña, el cwd inicial es el último cwd usado (persiste en
+`localStorage`). El usuario puede cambiarlo via:
+
+- **Botón de carpeta en la TitleBar** (junto al título de pestaña): abre el
+  diálogo nativo de selección de carpeta via Tauri `dialog.open({ directory: true })`.
+- **Comando `/open-folder`** en el InputArea: equivalente al botón.
+
+El cwd activo se muestra abreviado en la TitleBar (solo el nombre del directorio
+final, p.ej. `~/proyectos/stratum-cli` → `stratum-cli`) con tooltip de ruta
+completa al hacer hover.
+
+```
+┌──────────────────────────────────────────────────────────────┐
+│  ◈  [Chat 1 ×] [Chat 2 ×] [+]   📁 stratum-cli   ─  □  ×  │
+└──────────────────────────────────────────────────────────────┘
+         pestañas                    cwd pestaña activa
+```
 
 **Título de ventana en la taskbar — dinámico.** Se sincroniza con la pestaña
 activa via `appWindow.setTitle()`:
@@ -477,6 +595,19 @@ Todos son equivalentes funcionales de los componentes Ink, pero en HTML/CSS.
 | `MarkdownText.tsx` | `MarkdownRenderer.tsx` | react-markdown + rehype-highlight |
 | `CommandPalette.tsx` | `CommandPalette.tsx` | Dropdown sobre el InputArea; mismo catálogo de `/comandos` |
 | `Banner.tsx` | — | No aplica en desktop (la ventana ya tiene título) |
+
+### Rendimiento del markdown en streaming (15.13)
+
+`react-markdown` re-parsea el mensaje completo en cada chunk SSE. En respuestas
+largas con bloques de código esto degrada el frame rate. Se aplican dos mitigaciones:
+
+- **Memoización de bloques estabilizados:** cada `AgentMessage` divide su contenido
+  en dos partes: el texto anterior al chunk actual (estable, memoizado con
+  `React.memo` + `useMemo`) y el fragmento en curso (re-renderizado en cada chunk).
+  Solo el tail activo re-parsea en cada frame.
+- **Virtualización de la lista de mensajes:** para conversaciones con más de 50
+  mensajes, `MessageList` usa `react-window` (`VariableSizeList`) para renderizar
+  solo los mensajes visibles en el viewport. Los mensajes off-screen no se montan.
 
 ### ToolCallBlock — estados visuales
 
@@ -722,20 +853,35 @@ relevantes para el perfil del proyecto. No es interactivo (no son botones).
 
 ### Pipeline de build
 
+Cada plataforma produce su propio binario SEA con los módulos nativos compilados
+para esa arquitectura. Los pasos de CI son:
+
 ```yaml
-# GitHub Actions (cuando exista repo desktop)
+# GitHub Actions
 jobs:
   build-windows:
     runs-on: windows-latest
     steps:
-      - build stratum-cli (npm run build)
+      - npm run build               # compila stratum-cli a dist/
+      - node scripts/build-sea.mjs  # genera stratum-core.exe (SEA)
       - cargo tauri build --target x86_64-pc-windows-msvc
+      # output: src-tauri/target/release/bundle/msi/Stratum_x.y.z_x64.msi
+
   build-linux:
     runs-on: ubuntu-latest
     steps:
-      - build stratum-cli
-      - cargo tauri build   # genera .deb + .AppImage automáticamente
+      - npm run build
+      - node scripts/build-sea.mjs  # genera stratum-core (ELF)
+      - cargo tauri build
+      # outputs: .deb + .AppImage
 ```
+
+`build-sea.mjs` compila el sidecar con Node SEA:
+1. `node --experimental-sea-config sea-config.json` genera el blob.
+2. `postject stratum-core NODE_SEA_BLOB sea.blob` lo inyecta en el binario Node
+   base descargado de nodejs.org (firmado, correcto para la plataforma de CI).
+3. Los módulos nativos (`.node`) se copian al directorio `resources/` de Tauri
+   para que el sidecar los localice en runtime via `process.resourcesPath`.
 
 ### Firma de código
 
@@ -764,22 +910,31 @@ GitHub Releases (JSON con url + signature). Activado en Hito D3.
     "fs:write-files",
     "shell:execute",
     "notification:default",
-    "global-shortcut:default"
+    "global-shortcut:default",
+    "dialog:default",
+    "window-state:default"
   ],
   "scope": {
     "fs": {
       "allow": [
         "$HOME/.stratum/**",
-        "$APPDATA/stratum/**"
+        "$APPDATA/stratum-desktop/**",
+        "$APPDATA/stratum-desktop/logs/**"
       ]
     }
   }
 }
 ```
 
-El sidecar Node.js tiene sus propios permisos de OS (acceso completo al fs, red, etc.)
-porque es un proceso hijo, no una capacidad Tauri. Esto es correcto: el mismo
-aislamiento que tiene la CLI cuando se ejecuta en terminal.
+**Acciones de fs que NO pasan por capacidades Tauri (15.8):** "Abrir en editor"
+(`shell.open`) sobre archivos de proyecto arbitrarios, resolución de rutas de
+drag & drop y apertura del diálogo de carpeta se enrutan **por el sidecar**
+(que tiene acceso OS completo), no como capacidades Tauri directas. Tauri solo
+gestiona los archivos de la propia app (config, logs, window-state). Esto mantiene
+el scope de Tauri mínimo y consistente con el modelo de seguridad de Tauri v2.
+
+El sidecar Node.js tiene acceso completo al OS porque es un proceso hijo normal,
+con el mismo aislamiento que la CLI cuando se ejecuta en la terminal.
 
 ---
 
@@ -816,11 +971,19 @@ aislamiento que tiene la CLI cuando se ejecuta en terminal.
 | Área | Decisión |
 |------|----------|
 | Shell nativo | Tauri v2; no Electron |
-| Streaming | WebSocket local desde sidecar; no Tauri IPC para AgentEvents |
-| Config | Escritura atómica (write-to-temp + rename); no escritura directa |
+| IPC streaming | Socket local (named pipe / unix socket); no TCP abierto en red |
+| IPC auth | Token aleatorio 32 bytes en handshake; sin token → conexión rechazada inmediatamente |
+| Config | Escritura atómica + comparación mtime + debounce 300ms en watcher; no escritura directa sin guard |
 | Estilos | CSS variables desde `theme.ts`; no Tailwind ni styled-components |
 | Estado de pestañas | Zustand o `useContext` + `useReducer`; no Redux |
-| Sidecar | `stratum-core` es el mismo binario que la CLI con `STRATUM_DESKTOP=1`; no hay fork del core |
+| Sidecar core | Misma codebase que la CLI (`STRATUM_DESKTOP=1`); no fork |
+| Sidecar distribución | Node.js SEA por plataforma; no depende de Node del sistema |
+| Versión core | Pineada con la app; schema de config/sesiones versionado con migración forward |
+| cwd | Un `StratumAgent` por pestaña con su propio cwd; no cwd global del sidecar |
+| Cancel | Por WS (mismo canal que el stream); los `invoke` Tauri solo para config/fs |
+| Acceso fs desde UI | Enrutado por sidecar; el scope Tauri fs solo cubre logs y config de la app |
+| Frameless | Botones ─ □ × con `role="button"` + `aria-label`; posición restaurada con clamping al área visible |
+| Concurrencia | Cada pestaña tiene su `StratumAgent` independiente; límite configurable `desktop.maxConcurrentGenerations` (default 3) |
 
 ---
 
@@ -840,182 +1003,136 @@ canal acepta mensajes `{ type: 'chat' }` que disparan `bash`, `write_file` y
 `edit_file`, una web maliciosa podría escanear puertos locales y ejecutar tools
 arbitrarias en la máquina del usuario. Es el agujero más serio del diseño.
 
-**Recomendación:** Tauri genera un token aleatorio al arrancar, lo pasa al sidecar
-por argumento/env y al frontend por el evento `sidecar://ready`. El sidecar exige
-ese token en el handshake (primer mensaje o header) y valida el header `Origin`,
-rechazando cualquier conexión sin token válido. Considerar un named pipe / unix
-socket en lugar de TCP, que no es alcanzable desde el navegador.
+**Resolución aplicada en sección 3:** Tauri genera un token aleatorio al arrancar,
+lo pasa al sidecar por argumento y al frontend por el evento `sidecar://ready`.
+El sidecar exige ese token en el primer mensaje del handshake y valida el header
+`Origin`, rechazando cualquier conexión sin token válido. Se usa named pipe /
+unix socket en lugar de TCP siempre que el SO lo permita.
 
 ### 15.2 🔴 Empaquetado del sidecar Node — contradice el binario de 5–10 MB
 
-El plan vende "binario de ~5–10 MB frente a 150 MB de Electron", pero el sidecar
-es Node.js con dependencias nativas pesadas: `sqlite-vec`, `better-sqlite3` y
-`@xenova/transformers` (ONNX runtime trae binarios por plataforma de decenas de
-MB). No se decide **cómo se distribuye**: ¿se asume Node del sistema (frágil, y el
-propio doc lo lista como causa de fallo "Node no instalado"), se empaqueta con
-`pkg`/`nexe`, o se incluye `node_modules` + runtime? Cualquiera de las opciones
-realistas dispara el tamaño muy por encima de 10 MB y exige builds por plataforma
-de los módulos nativos.
+El plan vendía "binario de ~5–10 MB frente a 150 MB de Electron", pero el sidecar
+incluye `sqlite-vec`, `better-sqlite3` y `@xenova/transformers` (ONNX runtime,
+binarios nativos por plataforma de decenas de MB). Asumir Node del sistema es
+frágil; es además la primera causa de fallo documentada.
 
-**Recomendación:** decidir y documentar la estrategia (recomendado: sidecar
-empaquetado como binario autónomo por plataforma con los `.node` nativos
-incluidos), y corregir la cifra de tamaño esperada. El "5–10 MB" solo aplica al
-shell Tauri, no a la app instalada.
+**Resolución aplicada en secciones 2 y 10:** el sidecar se distribuye como
+binario autónomo via **Node.js SEA** (Single Executable Application, estable desde
+Node 21) o `pkg` como fallback. Cada plataforma tiene su propio build que incluye
+el runtime y los `.node` nativos compilados. El tamaño instalado estimado es
+**60–120 MB total** (shell Tauri + sidecar + webview del sistema). La promesa
+"5–10 MB" se restringe al shell Rust de Tauri.
 
 ### 15.3 🔴 No hay modelo de directorio de trabajo (cwd) / abrir proyecto
 
-La CLI opera relativa a un cwd: `STRATUM.md` de proyecto, rutas relativas en las
-tools, `/init`. Una app lanzada desde el menú del SO tiene cwd = home o el dir de
-la app, **no un proyecto**. El doc menciona "directorio de trabajo activo del
-sidecar" (sección 7.3) en singular, pero no existe ninguna UI para **elegir o
-cambiar la carpeta de trabajo**, ni se resuelve si cada pestaña puede apuntar a un
-proyecto distinto (un sidecar único ⇒ un solo cwd, pero las pestañas sugieren
-proyectos independientes). Para un agente de código de escritorio esto es
-fundamental.
+La CLI opera relativa a un cwd. Una app lanzada desde el menú del SO tiene
+cwd = home. Sin UI para elegir carpeta de trabajo, `STRATUM.md` de proyecto,
+rutas relativas y `/init` no funcionan.
 
-**Recomendación:** añadir un selector "Abrir carpeta/proyecto" (por ventana o por
-pestaña) y definir si el cwd es global al sidecar o por pestaña. Si es por
-pestaña, cada `StratumAgent` necesita su propio cwd y el panel Memory/Proyecto
-debe seguir a la pestaña activa.
+**Resolución aplicada en sección 6:** cada pestaña tiene su propio cwd
+seleccionable. La TitleBar muestra la carpeta activa. El panel Memory/Proyecto
+sigue a la pestaña activa.
 
 ### 15.4 🟠 Confirmación destructiva sobre WebSocket — protocolo sin definir
 
 La CLI resuelve `onConfirmDestructive` con un callback síncrono-async local. Sobre
-WS hace falta un **request/response con id de correlación**: el sidecar emite
-`confirm_request` y bloquea la ejecución hasta recibir `confirm_response`. El doc
-muestra el componente `DestructiveConfirm` pero no el protocolo ni los casos
-límite: ¿qué pasa si el usuario cierra la pestaña/app con una confirmación
-pendiente? ¿Dónde vive el estado `allow-all` (`!`) — por pestaña o por sidecar?
-¿Un timeout convierte la espera en deny?
+WS hace falta un request/response con id de correlación.
 
-**Recomendación:** especificar mensajes `confirm_request`/`confirm_response` con
-`callId`, default a `deny` si la pestaña se cierra o hay timeout, y `allow-all`
-con alcance por pestaña (coherente con "instancias aisladas").
+**Resolución aplicada en sección 3:** mensajes `confirm_request` / `confirm_response`
+con `callId`. Default `deny` si la pestaña se cierra o hay timeout de 30s.
+`allow-all` con alcance por pestaña.
 
 ### 15.5 🟠 Estado del agente vs. reconexión — contradicción
 
-La sección 9 dice que al crashear el sidecar "el historial se preserva en el
-estado React, no se pierde al reconectar". Pero el `StratumAgent` y su contexto
-**viven en memoria del sidecar**: si el sidecar cae, el contexto del LLM, el
-historial comprimido y el estado de tools se pierden. Reconectar da un agente
-nuevo sin memoria de la conversación. El frontend mostraría los mensajes pero el
-agente no tendría el contexto para continuar. Además, "acepta una conexión"
-(sección 3) choca con multiplexar varias pestañas y con reconexión.
+Si el sidecar cae, el `StratumAgent` en memoria se pierde. Reconectar da un agente
+nuevo sin contexto de la conversación.
 
-**Recomendación:** al reconectar, rehidratar el agente del sidecar reenviando el
-historial que conserva el frontend (o persistiendo el estado de sesión de cada
-tab para recargarlo). Aclarar que el WS acepta multiplexado por `tabId`, no una
-única conexión.
+**Resolución aplicada en sección 3:** al reconectar, el frontend envía el historial
+completo de la pestaña (array de mensajes) como mensaje `rehydrate`. El sidecar
+crea un nuevo `StratumAgent` e inyecta ese historial como contexto inicial.
 
-### 15.6 🟠 Versión del core: bundle vs. CLI global — promesa de "config compartida"
+### 15.6 🟠 Versión del core: bundle vs. CLI global
 
-La decisión dice "el sidecar es el mismo binario que la CLI". Pero no se aclara si
-es la **CLI instalada globalmente por npm** o una **copia empaquetada** con la
-app. Si va empaquetada, su versión puede divergir de la CLI del usuario; si el
-schema de `.stratumrc.json` o el formato de `SessionStore`/`STRATUM.md` cambia
-entre versiones, la promesa de "config y memoria compartidas sin fricción" se
-rompe silenciosamente. El auto-updater de Tauri (sección 10) actualiza el shell,
-no necesariamente el core.
+Si el schema de `.stratumrc.json` o `SessionStore` cambia entre versiones, la
+promesa de "config compartida sin fricción" se rompe silenciosamente.
 
-**Recomendación:** empaquetar una versión pineada del core con la app (para no
-depender de instalación previa) y versionar el schema de config/sesiones con
-migración hacia adelante y detección de versión incompatible.
+**Resolución aplicada en sección 14:** el core va pineado con la app. El schema
+de config y sesiones se versiona con campo `schemaVersion` y migración hacia
+adelante. Si la versión es incompatible, se muestra aviso y se ofrece migración.
 
-### 15.7 🟠 Escritura concurrente de config — pérdida de updates, no solo torn reads
+### 15.7 🟠 Escritura concurrente de config — lost updates
 
-La escritura atómica (temp + rename) evita lecturas a medias, pero **no evita
-lost updates**: si CLI y desktop editan config casi a la vez, el último en escribir
-pisa al otro sin aviso. Peor: el `watch_config` puede entrar en bucle (desktop
-escribe → watcher dispara → recarga → re-render) y si hay ediciones sin guardar en
-el Settings Panel abierto, una escritura de la CLI las descarta.
+La escritura atómica evita torn reads pero no lost updates entre procesos.
 
-**Recomendación:** comparar mtime/hash antes de escribir y avisar si cambió bajo
-los pies del usuario; ignorar en el watcher los eventos generados por la propia
-escritura (debounce + flag de auto-write).
+**Resolución aplicada en sección 4:** comparación de mtime antes de escribir,
+debounce de 300ms en el watcher y flag `_selfWrite` para ignorar eventos propios.
 
 ### 15.8 🟠 Alcance de permisos fs de Tauri demasiado estrecho
 
-`capabilities/default.json` solo permite `$HOME/.stratum/**` y `$APPDATA/stratum/**`.
-Pero "Abrir en editor" (`shell.open`) sobre el `STRATUM.md` de un proyecto
-arbitrario, y la resolución de rutas del drag & drop, caen fuera de ese scope. El
-trabajo de archivos lo hace el sidecar (acceso OS completo), pero las acciones que
-sí pasan por Tauri necesitan un scope más amplio o un patrón distinto.
+`shell.open` sobre rutas de proyecto arbitrarias y drag & drop caen fuera del
+scope `$HOME/.stratum/**`.
 
-**Recomendación:** ampliar el scope de `shell:open`/`fs` a las rutas de proyecto, o
-enrutar esas acciones por el sidecar en lugar de por capacidades Tauri.
+**Resolución aplicada en sección 11:** `shell:open` se enruta por el sidecar
+(que tiene acceso OS completo), no como capacidad Tauri directa. El scope fs de
+Tauri se amplía solo para los paths de config/log de la app.
 
-### 15.9 🟠 Plano de control partido en dos transportes (cancel)
+### 15.9 🟠 Plano de control partido en dos transportes
 
-El streaming va por WS pero `cancel` va por Tauri `invoke` → Rust → sidecar
-(sección 3). Dividir control y datos en dos canales introduce **carreras de
-orden**: el `cancel` puede llegar antes/después de chunks en vuelo y debe alcanzar
-el `AbortSignal` correcto del agente. Mantener cancel/new_tab/close_tab por el
-mismo WS (ya están en el protocolo de entrada) es más simple y ordenado.
+Cancel por `invoke` Tauri introduce carreras de orden con chunks en vuelo por WS.
 
-**Recomendación:** enviar también `cancel` por WS (ya está tipado en la sección 3),
-reservando los `invoke` de Tauri solo para operaciones realmente request-response
-sin relación con el stream (leer/escribir config, abrir editor).
+**Resolución aplicada en sección 3:** `cancel`, `new_tab` y `close_tab` viajan
+por el mismo WS. Los `invoke` Tauri quedan reservados para config/fs.
 
-### 15.10 🟠 Captura de puerto por stdout + firewall
+### 15.10 🟠 Captura de puerto por stdout + Firewall de Windows
 
-Parsear el puerto del stdout del sidecar es frágil: logs y el mensaje de puerto
-pueden intercalarse. Además, abrir un servidor TCP en localhost puede **disparar el
-diálogo del Firewall de Windows** en el primer arranque, una mala primera
-impresión.
+Parsear el puerto del stdout es frágil (logs intercalados). Un servidor TCP
+en localhost puede disparar el diálogo del Firewall en el primer arranque.
 
-**Recomendación:** que Tauri elija el puerto (o use named pipe/unix socket) y lo
-pase al sidecar por argumento, eliminando el parsing de stdout y, con socket
-local, el aviso de firewall.
+**Resolución aplicada en sección 3:** Tauri elige el puerto (o socket local) y
+lo pasa al sidecar por argumento. En Windows se usa named pipe para evitar el
+diálogo de firewall.
 
 ### 15.11 🟠 Ciclo de vida del sidecar — procesos huérfanos y MCP
 
-No se especifica el **kill del sidecar** cuando Tauri se cierra o crashea: Node
-puede quedar huérfano reteniendo el puerto. Con MCP (Hito 4 de la CLI) el sidecar
-arranca subprocesos de servidores MCP — su arranque eager, su coste en el inicio de
-la app y su cierre al salir tampoco están contemplados en el contexto desktop.
+El sidecar puede quedar huérfano si Tauri se cierra o crashea. Los servidores MCP
+que arranque tampoco tienen cleanup definido.
 
-**Recomendación:** matar el sidecar en el `exit`/`window-close` de Tauri y en
-señales; el sidecar a su vez debe cerrar sus subprocesos MCP. Documentar el arranque
-de MCP como parte del flujo de inicio (impacta el tiempo a "primera pestaña lista").
+**Resolución aplicada en sección 3:** el sidecar es hijo de Tauri; se mata
+con `SIGTERM` en el evento `exit`/`window-close`. El sidecar propaga la señal
+a sus hijos MCP antes de salir. En Windows se usa Job Object para garantizar
+la terminación en cascada.
 
-### 15.12 🟡 Persistencia de sesión solo al cerrar — pérdida en crash
+### 15.12 🟡 Persistencia de sesión solo al cerrar
 
-"Las sesiones se escriben al cerrarse, no durante la conversación activa"
-(sección 4). Un crash del sidecar o de la app **pierde la conversación activa** que
-no se llegó a guardar. La reconexión preserva el estado React, pero un crash total
-del proceso del webview no.
+Un crash del proceso pierde la conversación activa.
 
-**Recomendación:** checkpoint periódico / autosave incremental de la sesión activa.
+**Resolución aplicada en sección 4:** checkpoint incremental cada 60s y al
+recibir cada mensaje del agente.
 
 ### 15.13 🟡 Rendimiento del markdown en streaming
 
-`react-markdown + rehype-highlight` re-parsea el mensaje completo en cada chunk SSE.
-En respuestas largas con bloques de código esto degrada el frame rate. La CLI no
-sufre esto igual por su modelo de render.
+`react-markdown` re-parsea el mensaje completo en cada chunk SSE.
 
-**Recomendación:** render incremental (parsear solo el delta o memoizar bloques
-estables) y/o virtualización de la lista de mensajes para conversaciones largas.
+**Resolución aplicada en sección 8:** los bloques de texto estabilizados
+(anteriores al chunk actual) se memoizan con `React.memo`. La lista de mensajes
+se virtualiza con `react-window` para conversaciones largas (> 50 mensajes).
 
-### 15.14 🟡 Ventana frameless rompe features del SO + restauración multi-monitor
+### 15.14 🟡 Ventana frameless rompe features del SO + multi-monitor
 
-`decorations: false` con barra propia pierde Aero Snap, alto contraste y la
-exposición de controles a lectores de pantalla; hay que reimplementar snapping y
-accesibilidad de los botones ─ □ ×. Además, restaurar posición desde
-`window-state` puede dejar la ventana **fuera de pantalla** si el monitor ya no está
-conectado.
+`decorations: false` pierde Aero Snap y accesibilidad de controles nativos.
+La posición restaurada puede caer fuera de pantalla si el monitor ya no está.
 
-**Recomendación:** validar accesibilidad de los controles custom (sección 9 ya lo
-deja "a validar en D2") y clamping de la posición restaurada al área visible actual.
+**Resolución aplicada en sección 14:** los botones ─ □ × llevan `role="button"`
+y `aria-label`. La posición restaurada se clampa al área visible del monitor
+actual antes de aplicarse.
 
 ### 15.15 🟡 Concurrencia entre pestañas en un único sidecar
 
-Varias pestañas generando a la vez comparten proceso: compresión de contexto (LLM
-call), límites de conexión/rate del provider y el `serialized` de `bash` que es por
-agente, no global. No es bloqueante para v1 pero conviene anotar el comportamiento
-esperado bajo carga.
+Múltiples pestañas generando a la vez comparten proceso Node y límites del provider.
 
-**Recomendación:** documentar que cada tab tiene su `StratumAgent` independiente y
-evaluar un límite de generaciones concurrentes si el provider lo requiere.
+**Resolución aplicada en sección 14:** cada pestaña tiene su `StratumAgent`
+independiente. El `ProviderRouter` del sidecar puede aplicar un límite configurable
+de generaciones concurrentes (`desktop.maxConcurrentGenerations`, default 3).
 
 ### Resumen de prioridades
 
@@ -1036,3 +1153,4 @@ evaluar un límite de generaciones concurrentes si el provider lo requiere.
 | 15.13 | Rendimiento markdown en streaming | 🟡 | D1 |
 | 15.14 | Frameless rompe SO + multi-monitor | 🟡 | D5 |
 | 15.15 | Concurrencia entre pestañas | 🟡 | D2 |
+
