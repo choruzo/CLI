@@ -68,12 +68,15 @@ export function htmlToText(html: string): string {
     const text = inner.replace(/<[^>]+>/g, '').trim();
     return `\n\n${'#'.repeat(parseInt(level, 10))} ${text}\n\n`;
   });
-  s = s.replace(/<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi, (_, href: string, inner: string) => {
-    const text = inner.replace(/<[^>]+>/g, '').trim();
-    if (!text) return '';
-    if (href.startsWith('#') || href.startsWith('javascript:')) return text;
-    return `[${text}](${href})`;
-  });
+  s = s.replace(
+    /<a\b[^>]*href="([^"]+)"[^>]*>([\s\S]*?)<\/a>/gi,
+    (_, href: string, inner: string) => {
+      const text = inner.replace(/<[^>]+>/g, '').trim();
+      if (!text) return '';
+      if (href.startsWith('#') || href.startsWith('javascript:')) return text;
+      return `[${text}](${href})`;
+    },
+  );
   // \b tras el nombre del tag: evita que <li> matchee <link>, <b> matchee
   // <body> o <i> matchee <img>.
   s = s.replace(/<li\b[^>]*>/gi, '\n- ');

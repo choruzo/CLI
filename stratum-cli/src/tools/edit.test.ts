@@ -67,10 +67,7 @@ describe('edit_file', () => {
     const path = join(testDir, 'c.txt');
     writeFileSync(path, 'foo\nfoo\n');
 
-    const result = await editFileTool.execute(
-      { path, old_string: 'foo', new_string: 'bar' },
-      ctx,
-    );
+    const result = await editFileTool.execute({ path, old_string: 'foo', new_string: 'bar' }, ctx);
 
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('2 times');

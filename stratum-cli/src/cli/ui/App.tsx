@@ -1,4 +1,4 @@
-import React, { useReducer, useCallback, useRef, useState } from 'react';
+import React, { useReducer, useCallback, useRef, useState, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
 import type { StratumAgent } from '../../agent/core.js';
 import type {
@@ -11,6 +11,8 @@ import type { ProviderConfig } from '../../config/schema.js';
 import { expandEnvVars } from '../../config/loader.js';
 import { upsertProvider, readRawProvider } from '../../config/writer.js';
 import { fetchModels } from '../../providers/utils.js';
+import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
+import { parseMcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import { Banner } from './Banner.js';
 import { ConversationView } from './ConversationView.js';
@@ -28,7 +30,13 @@ type OverlayState =
   | { kind: 'model-select'; models: string[] }
   | {
       kind: 'wizard';
-      initial: { name: string; baseUrl: string; apiKey: string; model: string; contextWindow: number };
+      initial: {
+        name: string;
+        baseUrl: string;
+        apiKey: string;
+        model: string;
+        contextWindow: number;
+      };
     };
 
 export type AgentConvItem = {
@@ -190,8 +198,7 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'FOCUS_MOVE': {
       const blocks = getActiveBlocks(state);
       if (blocks.length === 0) return { ...state, focusState: 'input' };
-      const next =
-        (state.focusedBlockIndex + action.delta + blocks.length) % blocks.length;
+      const next = (state.focusedBlockIndex + action.delta + blocks.length) % blocks.length;
       return { ...state, focusedBlockIndex: next };
     }
 
@@ -344,9 +351,10 @@ function reducer(state: AppState, action: AppAction): AppState {
 interface Props {
   agent: StratumAgent;
   version: string;
+  mcpManager?: McpManager;
 }
 
-export function App({ agent, version }: Props) {
+export function App({ agent, version, mcpManager }: Props) {
   const { exit } = useApp();
 
   const ctxInit = agent.getContextUsage();
@@ -366,24 +374,36 @@ export function App({ agent, version }: Props) {
   });
 
   // -------------------------------------------------------------------------
+  // Estado MCP: polling del resumen de conectividad para el status bar.
+  // Se actualiza cada 5 s mientras haya servers configurados.
+  // -------------------------------------------------------------------------
+  const [mcpStatus, setMcpStatus] = useState<McpStatusSummary | undefined>(
+    mcpManager ? mcpManager.getStatusSummary() : undefined,
+  );
+  useEffect(() => {
+    if (!mcpManager) return;
+    const id = setInterval(() => {
+      setMcpStatus(mcpManager.getStatusSummary());
+    }, 5000);
+    return () => clearInterval(id);
+  }, [mcpManager]);
+
+  // -------------------------------------------------------------------------
   // Confirmación destructiva (UI §12): el dispatcher pausa la ejecución y
   // espera la promesa; el usuario resuelve con S/N/! desde <DestructiveConfirm>.
   // -------------------------------------------------------------------------
   const confirmResolverRef = useRef<((d: DestructiveDecision) => void) | null>(null);
   const allowAllRef = useRef(false);
 
-  const onConfirmDestructive = useCallback(
-    (req: ConfirmRequest): Promise<DestructiveDecision> => {
-      return new Promise<DestructiveDecision>((resolve) => {
-        confirmResolverRef.current = resolve;
-        dispatch({
-          type: 'CONFIRM_SHOW',
-          request: { callId: req.callId, toolName: req.toolName, description: req.description },
-        });
+  const onConfirmDestructive = useCallback((req: ConfirmRequest): Promise<DestructiveDecision> => {
+    return new Promise<DestructiveDecision>((resolve) => {
+      confirmResolverRef.current = resolve;
+      dispatch({
+        type: 'CONFIRM_SHOW',
+        request: { callId: req.callId, toolName: req.toolName, description: req.description },
       });
-    },
-    [],
-  );
+    });
+  }, []);
 
   const resolveConfirm = useCallback((decision: DestructiveDecision) => {
     if (decision === 'allow-all') allowAllRef.current = true;
@@ -431,13 +451,10 @@ export function App({ agent, version }: Props) {
   }, []);
 
   /** Completa el comando seleccionado en el input (Tab, o Enter en comandos con args). */
-  const completePaletteSelection = useCallback(
-    (cmdName: string, hasArgs: boolean) => {
-      dispatch({ type: 'INPUT_CHANGE', value: hasArgs ? `${cmdName} ` : cmdName });
-      setPaletteIndex(0);
-    },
-    [],
-  );
+  const completePaletteSelection = useCallback((cmdName: string, hasArgs: boolean) => {
+    dispatch({ type: 'INPUT_CHANGE', value: hasArgs ? `${cmdName} ` : cmdName });
+    setPaletteIndex(0);
+  }, []);
 
   const ctrlCCountRef = useRef(0);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -528,9 +545,10 @@ export function App({ agent, version }: Props) {
       dispatch({ type: 'INIT_START' });
 
       const cwd = process.cwd();
-      const prompt = INITIALIZE_PROMPT
-        .replaceAll('${path}', cwd)
-        .replaceAll('$ARGUMENTS', focus?.trim() || '(none)');
+      const prompt = INITIALIZE_PROMPT.replaceAll('${path}', cwd).replaceAll(
+        '$ARGUMENTS',
+        focus?.trim() || '(none)',
+      );
 
       void (async () => {
         try {
@@ -546,7 +564,10 @@ export function App({ agent, version }: Props) {
             for await (const event of agent.run(input, { compressionMode: 'conservative' })) {
               if (event.type === 'text_delta') {
                 agentText += event.delta;
-              } else if (event.type === 'tool_call_start' && currentTool !== event.name + event.id) {
+              } else if (
+                event.type === 'tool_call_start' &&
+                currentTool !== event.name + event.id
+              ) {
                 currentTool = event.name + event.id;
                 toolCount++;
                 dispatch({
@@ -591,7 +612,9 @@ export function App({ agent, version }: Props) {
             agent.reloadMemory();
             dispatch({ type: 'INIT_PROGRESS', text: 'STRATUM.md generado. Contexto recargado.' });
           } else {
-            const detail = agentText.trim() ? ` Respuesta del agente: ${agentText.trim().slice(0, 500)}` : '';
+            const detail = agentText.trim()
+              ? ` Respuesta del agente: ${agentText.trim().slice(0, 500)}`
+              : '';
             dispatch({
               type: 'INIT_PROGRESS',
               text: `El agente terminó sin escribir STRATUM.md.${detail}`,
@@ -730,9 +753,59 @@ export function App({ agent, version }: Props) {
         return;
       }
 
+      if (cmd === '/tools') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        // Obtener todas las tools registradas en el agente via el registry del agent
+        // Las tools MCP tienen nombre mcp__server__tool; las built-in no.
+        import('../../tools/registry.js')
+          .then(() => {
+            // El registry no es accesible directamente desde App; construimos el
+            // listado a partir del catálogo de tools disponibles en el agent.
+            // Como el agent no expone el registry, usamos el mcpManager y la
+            // lista de tools built-in conocidas.
+            const builtins = [
+              'read_file',
+              'write_file',
+              'edit_file',
+              'glob',
+              'list_directory',
+              'grep',
+              'bash',
+              'web_search',
+              'web_fetch',
+            ];
+            const lines: string[] = ['Tools disponibles:\n'];
+
+            lines.push('  Built-in:');
+            for (const t of builtins) lines.push(`    • ${t}`);
+
+            if (mcpManager) {
+              const clients = mcpManager.getClients();
+              if (clients.length > 0) {
+                lines.push('\n  MCP:');
+                for (const client of clients) {
+                  const icon = client.status === 'connected' ? '●' : '○';
+                  lines.push(`    ${icon} ${client.name} [${client.status}]`);
+                  for (const t of client.tools) {
+                    const parsed = parseMcpToolName(`mcp__${client.name}__${t.name}`);
+                    const display = parsed ? `${parsed.server}/${parsed.tool}` : t.name;
+                    lines.push(`        • ${display}`);
+                  }
+                }
+              }
+            }
+
+            dispatch({ type: 'SYSTEM_MESSAGE', text: lines.join('\n') });
+          })
+          .catch((err: unknown) => {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error: ${String(err)}` });
+          });
+        return;
+      }
+
       void send(cmd);
     },
-    [send, exit, runInit, agent, openModelSelector, openProviderEditor],
+    [send, exit, runInit, agent, openModelSelector, openProviderEditor, mcpManager],
   );
 
   const handleSend = useCallback(
@@ -783,7 +856,12 @@ export function App({ agent, version }: Props) {
   } else if (overlay?.kind === 'model-select') {
     const current = agent.model;
     overlayNode = (
-      <Box flexDirection="column" borderStyle="single" borderColor={theme.borderAccent} paddingX={1}>
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={theme.borderAccent}
+        paddingX={1}
+      >
         <Text color={theme.accent} bold>
           Modelo
           <Text color={theme.textMuted} bold={false}>
@@ -811,7 +889,7 @@ export function App({ agent, version }: Props) {
           }}
           onCancel={() => setOverlay(null)}
         />
-        <Text color={theme.textDisabled}>  Esc para cancelar</Text>
+        <Text color={theme.textDisabled}> Esc para cancelar</Text>
       </Box>
     );
   } else if (overlay?.kind === 'wizard') {
@@ -853,6 +931,7 @@ export function App({ agent, version }: Props) {
         onConfirmAllowAll={() => resolveConfirm('allow-all')}
         palette={paletteNode}
         overlay={overlayNode}
+        mcpStatus={mcpStatus}
       />
     </Box>
   );

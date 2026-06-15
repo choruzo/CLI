@@ -1,15 +1,12 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
 import chalk from 'chalk';
-import type {
-  ConfirmRequest,
-  DestructiveDecision,
-  DestructivePolicy,
-} from '../../agent/types.js';
+import type { ConfirmRequest, DestructiveDecision, DestructivePolicy } from '../../agent/types.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
+import { McpManager } from '../../tools/mcp/manager.js';
 import { StratumAgent } from '../../agent/core.js';
 
 function summarizeInput(input: Record<string, unknown>): string {
@@ -48,6 +45,17 @@ export const runCommand = new Command('run')
 
       const registry = new ToolRegistry();
       registerBuiltinTools(registry, config);
+
+      // MCP servers: conexión eager antes de lanzar el agente (§12.8)
+      const mcpManager = new McpManager(config);
+      if (config.mcp.servers.length > 0) {
+        const mcpWarnings = await mcpManager.connectAll();
+        for (const w of mcpWarnings) {
+          process.stderr.write(`[mcp] ${w.message}\n`);
+        }
+        mcpManager.registerInto(registry);
+      }
+
       const agent = new StratumAgent(config, router, registry);
 
       const controller = new AbortController();
@@ -55,6 +63,7 @@ export const runCommand = new Command('run')
       process.on('SIGINT', () => {
         if (aborting) {
           process.exit(1);
+          return;
         }
         aborting = true;
         process.stderr.write('\n[cancelled]\n');
@@ -164,9 +173,12 @@ export const runCommand = new Command('run')
           }
         }
       } catch (err) {
+        await mcpManager.shutdownAll();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
         process.exit(1);
       }
+
+      await mcpManager.shutdownAll();
 
       if (controller.signal.aborted) {
         process.exit(130);

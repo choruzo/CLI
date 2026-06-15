@@ -8,6 +8,7 @@ import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
+import { McpManager } from '../../tools/mcp/manager.js';
 import { StratumAgent } from '../../agent/core.js';
 import { SessionStore } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
@@ -53,6 +54,19 @@ export const chatCommand = new Command('chat')
     registerBuiltinTools(registry, config);
 
     // -----------------------------------------------------------------------
+    // MCP servers: conexión eager (§12.8). Un fallo de un server no aborta.
+    // -----------------------------------------------------------------------
+    const mcpManager = new McpManager(config);
+    if (config.mcp.servers.length > 0) {
+      const mcpWarnings = await mcpManager.connectAll();
+      for (const w of mcpWarnings) {
+        process.stderr.write(`[mcp] ${w.message}\n`);
+      }
+      mcpManager.registerInto(registry);
+      mcpManager.startHeartbeat();
+    }
+
+    // -----------------------------------------------------------------------
     // Sesiones: cargar historial previo si --resume
     // -----------------------------------------------------------------------
     const paths = resolveMemoryPaths(config);
@@ -79,13 +93,15 @@ export const chatCommand = new Command('chat')
     const version = resolveVersion();
     const sessionStart = new Date().toISOString();
 
-    const { waitUntilExit } = render(React.createElement(App, { agent, version }));
+    const { waitUntilExit } = render(React.createElement(App, { agent, version, mcpManager }));
 
     try {
       await waitUntilExit();
     } catch {
       // exit() was called — normal shutdown
     }
+
+    await mcpManager.shutdownAll();
 
     // -----------------------------------------------------------------------
     // Guardar sesión al salir

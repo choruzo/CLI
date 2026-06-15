@@ -57,7 +57,11 @@ export const PROVIDER_TYPE_PRESETS: ProviderTypePreset[] = [
 ];
 
 /** Valida el alias del provider. Devuelve mensaje de error o null si es válido. */
-export function validateAlias(name: string, existingNames: string[], allowExisting = false): string | null {
+export function validateAlias(
+  name: string,
+  existingNames: string[],
+  allowExisting = false,
+): string | null {
   const trimmed = name.trim();
   if (!trimmed) return 'El nombre no puede estar vacío';
   if (!/^[a-zA-Z0-9_-]+$/.test(trimmed)) {

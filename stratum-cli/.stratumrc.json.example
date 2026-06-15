@@ -43,6 +43,11 @@
         "name": "filesystem",
         "command": "npx",
         "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+      },
+      {
+        "name": "chrome-devtools",
+        "command": "npx",
+        "args": ["-y", "chrome-devtools-mcp@latest"]
       }
     ],
     "heartbeatInterval": 30000

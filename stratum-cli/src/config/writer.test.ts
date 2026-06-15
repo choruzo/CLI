@@ -64,8 +64,12 @@ describe('upsertProvider', () => {
     expect(provider.default).toBe('mi-ollama'); // no cambió
     expect(Object.keys(provider.providers)).toEqual(['mi-ollama', 'litellm-prod']);
     // el backup contiene el estado anterior
-    const backup = JSON.parse(readFileSync(`${configPath}.bak`, 'utf-8')) as Record<string, unknown>;
-    const backupProviders = (backup['provider'] as { providers: Record<string, unknown> }).providers;
+    const backup = JSON.parse(readFileSync(`${configPath}.bak`, 'utf-8')) as Record<
+      string,
+      unknown
+    >;
+    const backupProviders = (backup['provider'] as { providers: Record<string, unknown> })
+      .providers;
     expect(Object.keys(backupProviders)).toEqual(['mi-ollama']);
   });
 
@@ -102,7 +106,10 @@ describe('removeProvider', () => {
 
     const result = removeProvider('a', configPath);
     expect(result.newDefault).toBe('b');
-    const provider = readJson()['provider'] as { default: string; providers: Record<string, unknown> };
+    const provider = readJson()['provider'] as {
+      default: string;
+      providers: Record<string, unknown>;
+    };
     expect(provider.default).toBe('b');
     expect(Object.keys(provider.providers)).toEqual(['b']);
   });

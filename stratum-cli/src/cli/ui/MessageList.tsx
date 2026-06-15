@@ -45,7 +45,8 @@ export function MessageList({
   expandedBlockIds,
 }: Props) {
   const staticItems = completedItems.slice(0, -1);
-  const lastCompleted = completedItems.length > 0 ? completedItems[completedItems.length - 1] : null;
+  const lastCompleted =
+    completedItems.length > 0 ? completedItems[completedItems.length - 1] : null;
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1}>

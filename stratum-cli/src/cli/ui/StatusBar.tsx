@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { theme } from './theme.js';
+import type { McpStatusSummary } from '../../tools/mcp/manager.js';
 
 interface Props {
   providerName: string;
@@ -9,6 +10,8 @@ interface Props {
   contextMax: number;
   /** true cuando el conteo es estimado (proxy chars/3.5) — muestra prefijo `~` */
   estimated?: boolean;
+  /** Estado de conectividad MCP. Undefined si no hay servers configurados. */
+  mcpStatus?: McpStatusSummary;
 }
 
 function formatTokens(n: number): string {
@@ -22,21 +25,35 @@ function contextColor(pct: number): string {
   return theme.error;
 }
 
-export function StatusBar({ providerName, model, contextUsed, contextMax, estimated }: Props) {
+function mcpDotColor(status: McpStatusSummary): string {
+  if (status.total === 0) return theme.success;
+  if (status.disconnected === status.total) return theme.error;
+  if (status.reconnecting > 0 || status.disconnected > 0) return theme.accent;
+  return theme.success;
+}
+
+export function StatusBar({
+  providerName,
+  model,
+  contextUsed,
+  contextMax,
+  estimated,
+  mcpStatus,
+}: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
   const pct = contextMax > 0 ? Math.round((contextUsed / contextMax) * 100) : 0;
   const ctxColor = contextColor(pct);
-  const prefix = estimated ? '~' : '';
+  const dotColor = mcpStatus ? mcpDotColor(mcpStatus) : theme.success;
 
-  const right = ` ctx ${prefix}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%`;
-  const left = ` ● ${providerName} │ ${model}`;
-  const spacer = cols - left.length - right.length;
+  const ctxSuffix = ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%`;
+  const leftLen = ` ● ${providerName} │ ${model}`.length;
+  const spacer = cols - leftLen - ctxSuffix.length;
   const gap = spacer > 0 ? ' '.repeat(spacer) : ' ';
 
   return (
     <Box>
-      <Text color={theme.success}>●</Text>
+      <Text color={dotColor}>●</Text>
       <Text color={theme.textMuted}> {providerName} </Text>
       <Text color={theme.textInvisible}>│</Text>
       <Text color={theme.textPrimary}> {model}</Text>

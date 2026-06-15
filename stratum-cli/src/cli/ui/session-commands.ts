@@ -21,7 +21,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     description: 'Escanea el proyecto y genera o actualiza STRATUM.md',
     hasArgs: false,
   },
-  { name: '/memory show', description: 'Muestra el contenido del STRATUM.md activo', hasArgs: false },
+  {
+    name: '/memory show',
+    description: 'Muestra el contenido del STRATUM.md activo',
+    hasArgs: false,
+  },
   {
     name: '/model',
     description: 'Selector de modelos del provider activo (solo esta sesión)',
@@ -30,6 +34,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   {
     name: '/config_provider',
     description: 'Edita el provider activo y guarda en .stratumrc.json',
+    hasArgs: false,
+  },
+  {
+    name: '/tools',
+    description: 'Lista todas las tools disponibles (built-in + MCP)',
     hasArgs: false,
   },
   { name: '/quit', description: 'Termina la sesión y guarda el historial', hasArgs: false },

@@ -83,9 +83,7 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
   const expandable =
     (state.status === 'completed' && !!state.output) ||
     (state.status === 'error' && !!state.errorMsg);
-  const chevron = expandable ? (
-    <Text color={theme.textFaint}>  {expanded ? '▾' : '▸'}</Text>
-  ) : null;
+  const chevron = expandable ? <Text color={theme.textFaint}> {expanded ? '▾' : '▸'}</Text> : null;
 
   if (state.status === 'pending') {
     return (

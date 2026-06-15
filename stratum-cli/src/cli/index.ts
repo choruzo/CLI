@@ -10,6 +10,7 @@ import { sessionsCommand } from './commands/sessions.js';
 import { configCommand } from './commands/config.js';
 import { initCommand } from './commands/init.js';
 import { providerCommand } from './commands/provider.js';
+import { mcpCommand } from './commands/mcp.js';
 
 // Injected by tsup at build time; falls back to package.json in tsx dev mode
 declare const __VERSION__: string;
@@ -37,5 +38,6 @@ program.addCommand(sessionsCommand);
 program.addCommand(configCommand);
 program.addCommand(initCommand);
 program.addCommand(providerCommand);
+program.addCommand(mcpCommand);
 
 program.parse();

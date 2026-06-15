@@ -31,7 +31,13 @@ export interface ProviderWizardProps {
   /** Aliases ya existentes en la config (para validar colisiones en modo add). */
   existingNames: string[];
   /** Valores iniciales (modo edit, o re-ejecución). */
-  initial?: { name?: string; baseUrl?: string; apiKey?: string; model?: string; contextWindow?: number };
+  initial?: {
+    name?: string;
+    baseUrl?: string;
+    apiKey?: string;
+    model?: string;
+    contextWindow?: number;
+  };
   onComplete: (result: WizardResult) => void;
   onCancel: () => void;
 }
@@ -53,7 +59,13 @@ const STEP_TITLES: Record<Step, string> = {
  * Flujo: tipo → URL → API key → alias → fetch /models → modelo → activar.
  * Esc en cualquier paso cancela el wizard completo.
  */
-export function ProviderWizard({ mode, existingNames, initial, onComplete, onCancel }: ProviderWizardProps) {
+export function ProviderWizard({
+  mode,
+  existingNames,
+  initial,
+  onComplete,
+  onCancel,
+}: ProviderWizardProps) {
   const [step, setStep] = useState<Step>(mode === 'edit' ? 'baseUrl' : 'type');
   const [preset, setPreset] = useState<ProviderTypePreset | null>(null);
 
@@ -67,32 +79,40 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
 
   // Esc global: cancela el wizard (SelectList ya maneja su propio Esc → onCancel)
   useInput((_input, key) => {
-    if (key.escape && step !== 'type' && step !== 'model-select' && step !== 'activate' && step !== 'confirm-edit') {
+    if (
+      key.escape &&
+      step !== 'type' &&
+      step !== 'model-select' &&
+      step !== 'activate' &&
+      step !== 'confirm-edit'
+    ) {
       onCancel();
     }
   });
 
-  const startFetch = useCallback(
-    (url: string, key: string) => {
-      setStep('fetching');
-      void discoverModels(url, key).then((discovery) => {
-        if (discovery.manualFallback) {
-          setFetchError(discovery.error ?? null);
-          setStep('model-manual');
-        } else {
-          setModels(discovery.models);
-          setStep('model-select');
-        }
-      });
-    },
-    [],
-  );
+  const startFetch = useCallback((url: string, key: string) => {
+    setStep('fetching');
+    void discoverModels(url, key).then((discovery) => {
+      if (discovery.manualFallback) {
+        setFetchError(discovery.error ?? null);
+        setStep('model-manual');
+      } else {
+        setModels(discovery.models);
+        setStep('model-select');
+      }
+    });
+  }, []);
 
   const finish = useCallback(
     (makeDefault: boolean) => {
       onComplete({
         name: name.trim(),
-        config: buildProviderEntry({ baseUrl, apiKey, model, contextWindow: initial?.contextWindow }),
+        config: buildProviderEntry({
+          baseUrl,
+          apiKey,
+          model,
+          contextWindow: initial?.contextWindow,
+        }),
         makeDefault,
       });
     },
@@ -106,7 +126,9 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
       case 'type':
         return (
           <SelectList
-            items={PROVIDER_TYPE_PRESETS.map((p): SelectItem<ProviderTypePreset> => ({ label: p.label, value: p }))}
+            items={PROVIDER_TYPE_PRESETS.map(
+              (p): SelectItem<ProviderTypePreset> => ({ label: p.label, value: p }),
+            )}
             onSelect={(item) => {
               setPreset(item.value);
               setBaseUrl(item.value.defaultBaseUrl);
@@ -143,7 +165,7 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
                 showCursor
               />
             </Box>
-            <Text color={theme.textFaint}>  Debe incluir el prefijo de la API (ej. /v1)</Text>
+            <Text color={theme.textFaint}> Debe incluir el prefijo de la API (ej. /v1)</Text>
           </Box>
         );
 
@@ -192,26 +214,29 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
                 showCursor
               />
             </Box>
-            <Text color={theme.textFaint}>  Alias en la config (ej. local-ollama, litellm-prod)</Text>
+            <Text color={theme.textFaint}>
+              {' '}
+              Alias en la config (ej. local-ollama, litellm-prod)
+            </Text>
           </Box>
         );
 
       case 'fetching':
         return (
-          <Text color={theme.textMuted}>
-            ◌ Consultando {baseUrl.replace(/\/$/, '')}/models...
-          </Text>
+          <Text color={theme.textMuted}>◌ Consultando {baseUrl.replace(/\/$/, '')}/models...</Text>
         );
 
       case 'model-select':
         return (
           <Box flexDirection="column">
             <SelectList
-              items={models.map((m): SelectItem => ({
-                label: m,
-                value: m,
-                hint: m === model ? '(actual)' : undefined,
-              }))}
+              items={models.map(
+                (m): SelectItem => ({
+                  label: m,
+                  value: m,
+                  hint: m === model ? '(actual)' : undefined,
+                }),
+              )}
               initialIndex={Math.max(models.indexOf(model), 0)}
               onSelect={(item) => {
                 setModel(item.value);
@@ -219,7 +244,7 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
               }}
               onCancel={onCancel}
             />
-            <Text color={theme.textFaint}>  {models.length} modelos disponibles</Text>
+            <Text color={theme.textFaint}> {models.length} modelos disponibles</Text>
           </Box>
         );
 
@@ -227,7 +252,7 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
         return (
           <Box flexDirection="column">
             {fetchError && (
-              <Text color={theme.warning}>  ⚠ No se pudieron listar modelos: {fetchError}</Text>
+              <Text color={theme.warning}> ⚠ No se pudieron listar modelos: {fetchError}</Text>
             )}
             <Box>
               <Text color={theme.accent}>❯ </Text>
@@ -286,7 +311,8 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
   const summaryParts: string[] = [];
   if (baseUrl && step !== 'baseUrl') summaryParts.push(baseUrl);
   if (name && step !== 'name') summaryParts.push(`alias: ${name}`);
-  if (model && step !== 'model-select' && step !== 'model-manual') summaryParts.push(`modelo: ${model}`);
+  if (model && step !== 'model-select' && step !== 'model-manual')
+    summaryParts.push(`modelo: ${model}`);
 
   return (
     <Box flexDirection="column" borderStyle="single" borderColor={theme.borderAccent} paddingX={1}>
@@ -297,13 +323,11 @@ export function ProviderWizard({ mode, existingNames, initial, onComplete, onCan
           {STEP_TITLES[step]}
         </Text>
       </Text>
-      {summaryParts.length > 0 && (
-        <Text color={theme.textFaint}>{summaryParts.join('  ·  ')}</Text>
-      )}
+      {summaryParts.length > 0 && <Text color={theme.textFaint}>{summaryParts.join('  ·  ')}</Text>}
       <Text> </Text>
       {renderStep()}
-      {validationError && <Text color={theme.error}>  ✗ {validationError}</Text>}
-      <Text color={theme.textDisabled}>  Esc para cancelar</Text>
+      {validationError && <Text color={theme.error}> ✗ {validationError}</Text>}
+      <Text color={theme.textDisabled}> Esc para cancelar</Text>
     </Box>
   );
 }

@@ -5,6 +5,7 @@ import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
 import type { ConvItem, PendingConfirm } from './App.js';
+import type { McpStatusSummary } from '../../tools/mcp/manager.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -28,6 +29,8 @@ interface Props {
   palette?: React.ReactNode;
   /** Overlay interactivo (/model, /config_provider). Sustituye al input mientras está activo. */
   overlay?: React.ReactNode;
+  /** Estado de conectividad MCP para el indicador del status bar. */
+  mcpStatus?: McpStatusSummary;
 }
 
 export function ConversationView({
@@ -50,6 +53,7 @@ export function ConversationView({
   onConfirmAllowAll,
   palette,
   overlay,
+  mcpStatus,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -59,6 +63,7 @@ export function ConversationView({
         contextUsed={contextUsed}
         contextMax={contextMax}
         estimated={contextEstimated}
+        mcpStatus={mcpStatus}
       />
       <MessageList
         completedItems={completedItems}

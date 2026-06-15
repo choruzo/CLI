@@ -163,10 +163,7 @@ describe('web_search', () => {
   });
 
   it('rejects tavily backend without api key', async () => {
-    const result = await webSearchTool.execute(
-      { query: 'q' },
-      makeCtx({ backend: 'tavily' }),
-    );
+    const result = await webSearchTool.execute({ query: 'q' }, makeCtx({ backend: 'tavily' }));
     expect(result.ok).toBe(false);
     if (!result.ok) expect(result.error).toContain('API key');
   });
@@ -220,10 +217,13 @@ describe('web_fetch', () => {
       'fetch',
       vi.fn(
         async () =>
-          new Response('<html><head><title>T</title></head><body><h2>Sec</h2><p>body text</p></body></html>', {
-            status: 200,
-            headers: { 'content-type': 'text/html; charset=utf-8' },
-          }),
+          new Response(
+            '<html><head><title>T</title></head><body><h2>Sec</h2><p>body text</p></body></html>',
+            {
+              status: 200,
+              headers: { 'content-type': 'text/html; charset=utf-8' },
+            },
+          ),
       ),
     );
 
@@ -242,7 +242,10 @@ describe('web_fetch', () => {
       'fetch',
       vi.fn(
         async () =>
-          new Response('{"a": 1}', { status: 200, headers: { 'content-type': 'application/json' } }),
+          new Response('{"a": 1}', {
+            status: 200,
+            headers: { 'content-type': 'application/json' },
+          }),
       ),
     );
 
@@ -263,7 +266,10 @@ describe('web_fetch', () => {
   });
 
   it('fails recoverably on http errors', async () => {
-    vi.stubGlobal('fetch', vi.fn(async () => new Response('nope', { status: 404, statusText: 'Not Found' })));
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response('nope', { status: 404, statusText: 'Not Found' })),
+    );
 
     const result = await webFetchTool.execute({ url: 'https://example.com/missing' }, makeCtx());
     expect(result.ok).toBe(false);

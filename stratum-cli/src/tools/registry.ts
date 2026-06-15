@@ -34,17 +34,24 @@ export class ToolRegistry {
     return this.list()
       .filter((tool) => !this.disabledTools.has(tool.name))
       .map((tool) => {
-        const full = zodToJsonSchema(tool.schema, {
-          $refStrategy: 'none',
-          target: 'jsonSchema7',
-        }) as Record<string, unknown>;
-        const { $schema: _unused, ...parameters } = full;
+        // Tools MCP traen su propio JSON Schema — usarlo directamente para
+        // evitar una conversión lossy (JSON Schema → Zod → JSON Schema).
+        const parameters: Record<string, unknown> = tool.rawParameters
+          ? tool.rawParameters
+          : (() => {
+              const full = zodToJsonSchema(tool.schema, {
+                $refStrategy: 'none',
+                target: 'jsonSchema7',
+              }) as Record<string, unknown>;
+              const { $schema: _unused, ...rest } = full;
+              return rest;
+            })();
         return {
           type: 'function',
           function: {
             name: tool.name,
             description: tool.description,
-            parameters: parameters as Record<string, unknown>,
+            parameters,
           },
         } satisfies ToolSchema;
       });
@@ -118,8 +125,7 @@ export class ToolDispatcher {
       tool.destructive === true || (tool.isDestructive?.(call.input, ctx) ?? false);
     if (!isDestructive) return null;
 
-    const policy =
-      ctx.destructivePolicy ?? (ctx.allowDestructive === true ? 'allow' : 'ask');
+    const policy = ctx.destructivePolicy ?? (ctx.allowDestructive === true ? 'allow' : 'ask');
 
     if (policy === 'allow' || this.allowAllDestructive) return null;
 
@@ -255,7 +261,8 @@ export class ToolDispatcher {
     const timeoutMs = tool.timeout ?? 30000;
     const timeoutController = new AbortController();
     const timeoutId = setTimeout(
-      () => timeoutController.abort(new Error(`Tool "${call.name}" timed out after ${timeoutMs}ms`)),
+      () =>
+        timeoutController.abort(new Error(`Tool "${call.name}" timed out after ${timeoutMs}ms`)),
       timeoutMs,
     );
     const combinedSignal = AbortSignal.any([ctx.signal, timeoutController.signal]);
@@ -270,9 +277,7 @@ export class ToolDispatcher {
             () => {
               const reason: unknown = combinedSignal.reason;
               reject(
-                reason instanceof Error
-                  ? reason
-                  : new Error(`Tool "${call.name}" was cancelled`),
+                reason instanceof Error ? reason : new Error(`Tool "${call.name}" was cancelled`),
               );
             },
             { once: true },

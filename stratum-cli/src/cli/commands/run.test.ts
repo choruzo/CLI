@@ -4,7 +4,7 @@ const mockState = vi.hoisted(() => {
   let sigintHandler: (() => void) | undefined;
 
   return {
-    loadConfig: vi.fn(() => ({})),
+    loadConfig: vi.fn(() => ({ mcp: { servers: [], heartbeatInterval: 30000 } })),
     registerBuiltinTools: vi.fn(),
     agentRun: vi.fn(),
     getContextUsage: vi.fn(() => ({ used: 1, max: 10, pct: 10 })),
@@ -17,7 +17,9 @@ const mockState = vi.hoisted(() => {
     reset() {
       sigintHandler = undefined;
       this.loadConfig.mockReset();
-      this.loadConfig.mockImplementation(() => ({}));
+      this.loadConfig.mockImplementation(() => ({
+        mcp: { servers: [], heartbeatInterval: 30000 },
+      }));
       this.registerBuiltinTools.mockReset();
       this.agentRun.mockReset();
       this.getContextUsage.mockReset();
@@ -32,6 +34,19 @@ vi.mock('../../config/loader.js', () => ({
 
 vi.mock('../../tools/index.js', () => ({
   registerBuiltinTools: mockState.registerBuiltinTools,
+}));
+
+vi.mock('../../tools/mcp/manager.js', () => ({
+  McpManager: class McpManager {
+    connectAll() {
+      return Promise.resolve([]);
+    }
+    registerInto() {}
+    startHeartbeat() {}
+    shutdownAll() {
+      return Promise.resolve();
+    }
+  },
 }));
 
 vi.mock('../../providers/router.js', () => ({

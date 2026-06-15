@@ -34,14 +34,14 @@ const DEFAULT_CONFIG = {
 
 export const initCommand = new Command('init')
   .description('Explore the project and create or update STRATUM.md')
-  .argument('[focus]', 'Optional focus or constraints for the agent (e.g. "focus on the test setup")')
+  .argument(
+    '[focus]',
+    'Optional focus or constraints for the agent (e.g. "focus on the test setup")',
+  )
   .option('--provider <name>', 'use a specific provider from config')
   .option('--allow-destructive', 'approve all destructive operations without prompting')
   .action(
-    async (
-      focus: string | undefined,
-      opts: { provider?: string; allowDestructive?: boolean },
-    ) => {
+    async (focus: string | undefined, opts: { provider?: string; allowDestructive?: boolean }) => {
       const cwd = process.cwd();
 
       process.stdout.write('\n  Stratum — Inicializando proyecto\n\n');
@@ -74,9 +74,10 @@ export const initCommand = new Command('init')
       const agent = new StratumAgent(config, router, registry);
 
       // Construir el prompt reemplazando las variables
-      const prompt = INITIALIZE_PROMPT
-        .replaceAll('${path}', cwd)
-        .replaceAll('$ARGUMENTS', focus?.trim() || '(none)');
+      const prompt = INITIALIZE_PROMPT.replaceAll('${path}', cwd).replaceAll(
+        '$ARGUMENTS',
+        focus?.trim() || '(none)',
+      );
 
       const controller = new AbortController();
       let aborting = false;
@@ -126,7 +127,8 @@ export const initCommand = new Command('init')
             case 'tool_result': {
               if (stratumWriteIds.has(event.id)) wroteStratum = true;
               const duration = (
-                (Date.now() - (toolStartTimes.get(event.id) ?? Date.now())) / 1000
+                (Date.now() - (toolStartTimes.get(event.id) ?? Date.now())) /
+                1000
               ).toFixed(1);
               process.stderr.write(`${toolLabel} ${event.name}  (${duration}s)\n`);
               toolStartTimes.delete(event.id);

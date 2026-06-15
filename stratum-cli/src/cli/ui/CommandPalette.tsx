@@ -43,9 +43,7 @@ export function CommandPalette({ items, selectedIndex, maxVisible = 8 }: Props) 
           </Text>
         );
       })}
-      {items.length > maxVisible && (
-        <Text color={theme.textDisabled}>  ↑↓ para navegar</Text>
-      )}
+      {items.length > maxVisible && <Text color={theme.textDisabled}> ↑↓ para navegar</Text>}
     </Box>
   );
 }

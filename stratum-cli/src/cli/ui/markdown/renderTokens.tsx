@@ -127,11 +127,7 @@ function QuoteBlock({ token, k }: { token: Tokens.Blockquote; k: string }) {
  * Función recursiva principal: Token[] (block-level) → JSX.Element[].
  * `inline=true` aplana párrafos a texto (para blockquotes).
  */
-export function renderTokens(
-  tokens: Token[],
-  keyPrefix = 't',
-  inline = false,
-): React.ReactNode[] {
+export function renderTokens(tokens: Token[], keyPrefix = 't', inline = false): React.ReactNode[] {
   return tokens.map((token, i) => {
     const k = `${keyPrefix}-${i}`;
     switch (token.type) {

@@ -90,6 +90,12 @@ export interface ToolDefinition {
   serialized?: boolean;
   timeout?: number;
   /**
+   * JSON Schema raw pasado directamente al LLM en lugar de derivarlo via
+   * zodToJsonSchema(schema). Usado por las tools MCP, que ya traen su propio
+   * inputSchema y convertirlo sería lossy.
+   */
+  rawParameters?: Record<string, unknown>;
+  /**
    * Predicado dinámico: marca una llamada concreta como destructiva según sus
    * parámetros (p. ej. bash con `rm -rf`). Complementa al flag estático
    * `destructive`. Se evalúa con los parámetros ya validados por el schema.

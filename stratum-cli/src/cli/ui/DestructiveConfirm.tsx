@@ -38,7 +38,7 @@ export function DestructiveConfirm({ description, onApprove, onDeny, onAllowAll 
       marginTop={0}
     >
       <Text color={theme.accent} bold>
-        ⚠  Operación destructiva
+        ⚠ Operación destructiva
       </Text>
       <Text> </Text>
       <Text color={theme.textPrimary} wrap="truncate-end">
@@ -52,11 +52,11 @@ export function DestructiveConfirm({ description, onApprove, onDeny, onAllowAll 
         <Text color={theme.accent} bold>
           [ S ]
         </Text>
-        <Text color={theme.textMuted}> continuar  </Text>
+        <Text color={theme.textMuted}> continuar </Text>
         <Text color={theme.error} bold>
           [ N ]
         </Text>
-        <Text color={theme.textMuted}> cancelar  </Text>
+        <Text color={theme.textMuted}> cancelar </Text>
         <Text color={theme.warning} bold>
           [ ! ]
         </Text>

@@ -8,7 +8,10 @@ import { INITIALIZE_PROMPT } from './initialize-prompt.js';
  */
 describe('INITIALIZE_PROMPT placeholder substitution', () => {
   const render = (cwd: string, focus?: string) =>
-    INITIALIZE_PROMPT.replaceAll('${path}', cwd).replaceAll('$ARGUMENTS', focus?.trim() || '(none)');
+    INITIALIZE_PROMPT.replaceAll('${path}', cwd).replaceAll(
+      '$ARGUMENTS',
+      focus?.trim() || '(none)',
+    );
 
   it('contains the ${path} placeholder more than once (precondition)', () => {
     const count = INITIALIZE_PROMPT.split('${path}').length - 1;

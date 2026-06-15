@@ -91,11 +91,7 @@ function includeToRegExp(include: string): RegExp {
   return new RegExp('^' + regStr + '$');
 }
 
-function searchWithNode(
-  pattern: string,
-  include: string | undefined,
-  baseDir: string,
-): string[] {
+function searchWithNode(pattern: string, include: string | undefined, baseDir: string): string[] {
   const re = new RegExp(pattern);
   const includeRe = include ? includeToRegExp(include) : null;
   const matches: string[] = [];
@@ -157,7 +153,9 @@ function searchWithNode(
 const schema = z.object({
   pattern: z
     .string()
-    .describe('Regular expression to search for in file contents (eg. "log.*Error", "function\\s+\\w+")'),
+    .describe(
+      'Regular expression to search for in file contents (eg. "log.*Error", "function\\s+\\w+")',
+    ),
   include: z
     .string()
     .optional()
