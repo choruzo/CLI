@@ -661,11 +661,11 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 ---
 
 ### Hito 4 — MCP Client *(~4 días)*
-- [ ] Integración `@modelcontextprotocol/sdk`
-- [ ] Conexión a MCP servers desde `.stratumrc.json`
-- [ ] Auto-registro de MCP tools en `ToolRegistry`
-- [ ] Listado de tools MCP disponibles
-- [ ] Comando `stratum mcp list`
+- [x] Integración `@modelcontextprotocol/sdk`
+- [x] Conexión a MCP servers desde `.stratumrc.json`
+- [x] Auto-registro de MCP tools en `ToolRegistry`
+- [x] Listado de tools MCP disponibles
+- [x] Comando `stratum mcp list`
 
 > **UI:** Cubrir el estado de error específico de MCP en el tool call block (`tool_error` con mensaje "MCP server unavailable") y activar `/tools` en el autocompletado del input. El indicador `●` del status bar refleja también la conectividad de MCP servers. Ver [§5.1 — estado `error`](./STRATUM_UI_SPECIFICATION.md#51-tool-call-block--estados), [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/tools`).
 
