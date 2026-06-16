@@ -3,3 +3,10 @@ dist/
 *.js.map
 *.d.ts.map
 .stratumrc.json
+
+# Artefactos de build / FUSE (no deben commitearse)
+tsup.config.bundled_*.mjs
+.fuse_hidden*
+
+# Datos locales de memoria del agente
+*.fallback.json

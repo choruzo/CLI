@@ -7,8 +7,12 @@ describe('filterCommands (panel §5.2)', () => {
   });
 
   it('filtra por substring, no solo prefijo', () => {
+    // "/mem" encuentra todos los comandos de memoria (Hito 5)
     const byPrefix = filterCommands('/mem').map((c) => c.name);
-    expect(byPrefix).toEqual(['/memory show']);
+    expect(byPrefix).toEqual(
+      expect.arrayContaining(['/memory show', '/memory list', '/memory search', '/memory forget']),
+    );
+    expect(byPrefix.every((n) => n.startsWith('/memory'))).toBe(true);
 
     // "/show" también encuentra "/memory show" (substring)
     const bySubstring = filterCommands('/show').map((c) => c.name);

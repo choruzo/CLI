@@ -5,6 +5,7 @@ import { StreamBuffer } from '../providers/openai-compatible.js';
 import type { AgentEvent, Message, ToolCallReady, ToolContext, RunOptions } from './types.js';
 import type { ToolRegistry, DispatchResult } from '../tools/registry.js';
 import { ToolDispatcher } from '../tools/registry.js';
+import { getDecisionMemory } from '../memory/decision-memory.js';
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -575,6 +576,26 @@ export class ReactLoop {
               name: res.toolName,
               content: res.result.output,
             });
+            // Señal semántica de recuperación de memoria (§5/UI §11): el agente
+            // ejecutó recall_decisions con éxito. Emitir el evento con las
+            // decisiones estructuradas que el orquestador acaba de devolver.
+            if (res.toolName === 'recall_decisions') {
+              const recalled = getDecisionMemory(this.config).takeLastRecall();
+              if (recalled.length > 0) {
+                yield {
+                  type: 'memory_retrieved',
+                  decisions: recalled.map((r) => ({
+                    id: r.record.id,
+                    title: r.record.title,
+                    content: r.record.content,
+                    type: r.record.type,
+                    tags: r.record.tags,
+                    importance: r.record.importance,
+                    timestamp: r.record.timestamp,
+                  })),
+                };
+              }
+            }
           } else {
             yield {
               type: 'tool_error',

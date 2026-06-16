@@ -42,6 +42,8 @@ export class DecisionMemory {
   readonly embedder: EmbeddingService;
   private readonly topK: number;
   private readonly threshold: number;
+  /** Últimos resultados de search(); consumidos por el loop para emitir memory_retrieved. */
+  private lastRecall: RecallResult[] = [];
 
   constructor(config: StratumConfig, opts?: DecisionMemoryOptions) {
     const paths = resolveMemoryPaths(config);
@@ -92,7 +94,15 @@ export class DecisionMemory {
         out.push({ record, score: m.score });
       }
     }
+    this.lastRecall = out;
     return out;
+  }
+
+  /** Devuelve y limpia los resultados del último search() (consumo único). */
+  takeLastRecall(): RecallResult[] {
+    const r = this.lastRecall;
+    this.lastRecall = [];
+    return r;
   }
 
   /** Elimina una decisión del store y del índice vectorial. */

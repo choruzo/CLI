@@ -27,6 +27,21 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/memory list',
+    description: 'Lista las decisiones almacenadas en memoria a largo plazo',
+    hasArgs: false,
+  },
+  {
+    name: '/memory search',
+    description: 'Búsqueda semántica de decisiones (requiere consulta)',
+    hasArgs: true,
+  },
+  {
+    name: '/memory forget',
+    description: 'Elimina una decisión por id (requiere id)',
+    hasArgs: true,
+  },
+  {
     name: '/model',
     description: 'Selector de modelos del provider activo (solo esta sesión)',
     hasArgs: false,

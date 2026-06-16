@@ -302,6 +302,18 @@ function reducer(state: AppState, action: AppAction): AppState {
         };
       }
 
+      if (ev.type === 'memory_retrieved') {
+        // Indicador discreto (§UI 11): el agente recuperó memoria semántica.
+        const n = ev.decisions.length;
+        const note: ConvItem = {
+          kind: 'agent',
+          text: `↳ memoria recuperada: ${n} decisión${n === 1 ? '' : 'es'} relevante${n === 1 ? '' : 's'}`,
+          toolCalls: [],
+          streaming: false,
+        };
+        return { ...state, completedItems: [...state.completedItems, note] };
+      }
+
       if (ev.type === 'done') {
         const rawCurrent = state.currentItem;
         const finalItem =
@@ -735,6 +747,82 @@ export function App({ agent, version, mcpManager }: Props) {
         return;
       }
 
+      if (cmd === '/memory list') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        import('../../memory/decision-memory.js')
+          .then(({ getDecisionMemory }) => {
+            const decisions = getDecisionMemory(agent.getConfig()).list();
+            if (decisions.length === 0) {
+              dispatch({ type: 'SYSTEM_MESSAGE', text: 'No hay decisiones almacenadas.' });
+              return;
+            }
+            const lines = [...decisions]
+              .sort((a, b) => b.timestamp.localeCompare(a.timestamp))
+              .map(
+                (d) =>
+                  `  ${d.id}  [${d.type}/${d.importance}]  ${d.timestamp.slice(0, 10)}\n    ${d.title}`,
+              );
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `Decisiones almacenadas (${decisions.length}):\n\n${lines.join('\n')}`,
+            });
+          })
+          .catch((err: unknown) => {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al listar memoria: ${String(err)}` });
+          });
+        return;
+      }
+
+      if (cmd === '/memory search' || cmd.startsWith('/memory search ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const query = cmd.slice('/memory search'.length).trim();
+        if (!query) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /memory search <consulta>' });
+          return;
+        }
+        import('../../memory/decision-memory.js')
+          .then(async ({ getDecisionMemory }) => {
+            const results = await getDecisionMemory(agent.getConfig()).search(query);
+            if (results.length === 0) {
+              dispatch({ type: 'SYSTEM_MESSAGE', text: 'Sin resultados relevantes.' });
+              return;
+            }
+            const lines = results.map(
+              (r) =>
+                `  ${r.record.id}  [${r.record.type}/${r.record.importance}]  score ${r.score.toFixed(2)}\n    ${r.record.title}`,
+            );
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `Decisiones relevantes para "${query}":\n\n${lines.join('\n')}`,
+            });
+          })
+          .catch((err: unknown) => {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error en la búsqueda: ${String(err)}` });
+          });
+        return;
+      }
+
+      if (cmd === '/memory forget' || cmd.startsWith('/memory forget ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const id = cmd.slice('/memory forget'.length).trim();
+        if (!id) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /memory forget <id>' });
+          return;
+        }
+        import('../../memory/decision-memory.js')
+          .then(async ({ getDecisionMemory }) => {
+            const removed = await getDecisionMemory(agent.getConfig()).remove(id);
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: removed ? `Decisión ${id} eliminada.` : `No se encontró la decisión ${id}.`,
+            });
+          })
+          .catch((err: unknown) => {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al eliminar: ${String(err)}` });
+          });
+        return;
+      }
+
       if (cmd === '/init' || cmd.startsWith('/init ')) {
         const focus = cmd.startsWith('/init ') ? cmd.slice('/init '.length).trim() : undefined;
         runInit(focus);
@@ -773,6 +861,8 @@ export function App({ agent, version, mcpManager }: Props) {
               'bash',
               'web_search',
               'web_fetch',
+              'store_decision',
+              'recall_decisions',
             ];
             const lines: string[] = ['Tools disponibles:\n'];
 

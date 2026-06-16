@@ -98,6 +98,16 @@ export const chatCommand = new Command('chat')
     }
 
     const agent = new StratumAgent(config, router, registry, agentOptions);
+
+    // Warm-up opcional del modelo de embeddings (§12.10): precarga el ONNX en
+    // background durante el arranque para que la primera recuperación/escritura
+    // de memoria no pague la latencia de carga. No bloquea la UI ni lanza.
+    if (config.memory.embeddingWarmup) {
+      void import('../../memory/decision-memory.js').then(({ getDecisionMemory }) =>
+        getDecisionMemory(config).embedder.warmup(),
+      );
+    }
+
     const version = resolveVersion();
     const sessionStart = new Date().toISOString();
 

@@ -99,6 +99,16 @@ describe('DecisionMemory', () => {
     expect(await mem.search('sqlite')).toHaveLength(0);
   });
 
+  it('takeLastRecall devuelve los resultados del último search y luego se limpia', async () => {
+    const mem = makeMemory(dir);
+    const { record } = await mem.save(sqliteDecision);
+    await mem.search('sqlite embeddings');
+    const recalled = mem.takeLastRecall();
+    expect(recalled.map((r) => r.record.id)).toContain(record.id);
+    // Segundo take sin nuevo search → vacío (consumo único)
+    expect(mem.takeLastRecall()).toEqual([]);
+  });
+
   it('degrada sin embedder: persiste pero no indexa semánticamente', async () => {
     const config = StratumConfigSchema.parse({
       memory: { decisionsFile: join(dir, 'd.json'), vectorDb: join(dir, 'v.db') },
