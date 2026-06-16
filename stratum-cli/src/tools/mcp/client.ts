@@ -9,6 +9,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import type { McpServer } from '../../config/schema.js';
+import { resolveServerCommand, type McpRuntimeOptions } from './installer.js';
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -31,10 +32,22 @@ export class McpServerClient {
   private transport: StdioClientTransport | null = null;
   private _status: McpServerStatus = 'connecting';
   private _tools: McpToolInfo[] = [];
+  /** Conexión en vuelo, para deduplicar llamadas concurrentes (lazy/§12.8). */
+  private connectInFlight: Promise<void> | null = null;
 
   readonly name: string;
 
-  constructor(private readonly serverConfig: McpServer) {
+  /**
+   * @param serverConfig configuración del server en `.stratumrc.json`
+   * @param runtime opciones de la carpeta gestionada (installDir, autoInstall).
+   *   Por defecto desactiva la carpeta gestionada (modo `command`/`args` puro),
+   *   útil en tests; el `McpManager` siempre las inyecta desde la config.
+   */
+  constructor(
+    private readonly serverConfig: McpServer,
+    private readonly runtime: McpRuntimeOptions = { installDir: '~/.stratum/mcp', autoInstall: true },
+    private readonly onLog?: (line: string) => void,
+  ) {
     this.name = serverConfig.name;
     this.client = new Client({ name: 'stratum', version: '1' });
   }
@@ -54,10 +67,14 @@ export class McpServerClient {
   async connect(): Promise<void> {
     this._status = 'connecting';
 
+    // Resuelve el ejecutable: con `package`, instala en la carpeta gestionada
+    // (si procede) y devuelve `node <entry>`, evitando npx (§12.8, opción 2).
+    const resolved = await resolveServerCommand(this.serverConfig, this.runtime, this.onLog);
+
     this.transport = new StdioClientTransport({
-      command: this.serverConfig.command,
-      args: this.serverConfig.args,
-      env: this.serverConfig.env,
+      command: resolved.command,
+      args: resolved.args,
+      env: resolved.env,
     });
 
     // Registrar el handler de cierre inesperado del transport antes de connect()
@@ -67,9 +84,35 @@ export class McpServerClient {
       }
     };
 
-    await this.client.connect(this.transport);
+    // startupTimeout: un server que no arranca a tiempo no debe colgar el
+    // proceso (§12.8, opción 3). Si vence, abortamos y matamos el hijo.
+    try {
+      await withTimeout(
+        this.client.connect(this.transport),
+        this.serverConfig.startupTimeout,
+        `MCP server '${this.name}' no arrancó en ${this.serverConfig.startupTimeout}ms`,
+      );
+    } catch (err) {
+      await this._killTransport();
+      this._status = 'disconnected';
+      throw err;
+    }
+
     await this._discoverTools();
     this._status = 'connected';
+  }
+
+  /**
+   * Conecta sólo si no está ya conectado/conectando. Idempotente y seguro ante
+   * llamadas concurrentes: usado por el modo lazy y por la conexión bajo demanda.
+   */
+  async ensureConnected(): Promise<void> {
+    if (this._status === 'connected') return;
+    if (this.connectInFlight) return this.connectInFlight;
+    this.connectInFlight = this.connect().finally(() => {
+      this.connectInFlight = null;
+    });
+    return this.connectInFlight;
   }
 
   /**
@@ -155,4 +198,36 @@ export class McpServerClient {
       inputSchema: (t.inputSchema as Record<string, unknown>) ?? { type: 'object', properties: {} },
     }));
   }
+
+  /** Cierra/mata el transport tras un fallo de arranque, sin propagar errores. */
+  private async _killTransport(): Promise<void> {
+    if (!this.transport) return;
+    try {
+      await this.transport.close();
+    } catch {
+      // ignorar — el proceso pudo no haber arrancado
+    }
+    this.transport = null;
+  }
+}
+
+/**
+ * Envuelve una promesa con un timeout. Si vence, rechaza con `message`.
+ * La promesa original se deja correr (su rechazo se ignora).
+ */
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    if (typeof timer === 'object' && 'unref' in timer) timer.unref();
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e);
+      },
+    );
+  });
 }

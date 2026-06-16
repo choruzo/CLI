@@ -54,15 +54,23 @@ export const chatCommand = new Command('chat')
     registerBuiltinTools(registry, config);
 
     // -----------------------------------------------------------------------
-    // MCP servers: conexión eager (§12.8). Un fallo de un server no aborta.
+    // MCP servers (§12.8). 'lazy' (default): conexión en background, no bloquea
+    // el arranque de la UI. 'eager': espera a que conecten antes del prompt.
+    // Un fallo de un server nunca aborta.
     // -----------------------------------------------------------------------
     const mcpManager = new McpManager(config);
     if (config.mcp.servers.length > 0) {
-      const mcpWarnings = await mcpManager.connectAll();
-      for (const w of mcpWarnings) {
-        process.stderr.write(`[mcp] ${w.message}\n`);
+      if (config.mcp.startup === 'eager') {
+        const mcpWarnings = await mcpManager.connectAll();
+        for (const w of mcpWarnings) {
+          process.stderr.write(`[mcp] ${w.message}\n`);
+        }
+        mcpManager.registerInto(registry);
+      } else {
+        mcpManager.startBackground(registry, (w) => {
+          process.stderr.write(`[mcp] ${w.message}\n`);
+        });
       }
-      mcpManager.registerInto(registry);
       mcpManager.startHeartbeat();
     }
 

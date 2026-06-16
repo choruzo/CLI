@@ -1141,6 +1141,57 @@ Al terminar stratum:
 </tool_error>
 ```
 
+#### 12.8.1 — Carpeta gestionada de servers y arranque no bloqueante
+
+**Problema.** Lanzar cada server con `npx -y <pkg>` revalida el paquete contra el registro npm en **cada** arranque del CLI (resolución de versión, incluso con el paquete ya cacheado), y con la conexión eager esto se paga por cada server al abrir `chat`. El resultado es un retardo perceptible en el arranque. Ninguna CLI de referencia (Claude Code, Codex, Copilot CLI) auto-instala los servers: todas hacen `spawn` del comando configurado, por lo que el coste de `npx` recae en el usuario. La solución estándar es **delegar la instalación al gestor de paquetes una sola vez y arrancar un binario ya resuelto**.
+
+**Decisión (opción 2): carpeta gestionada `~/.stratum/mcp/`.** Replica el patrón del modelo ONNX (§12.10, cache en `~/.stratum/models/`). Un server puede declarar el campo `package` en lugar de (o además de) `command`/`args`:
+
+```jsonc
+{
+  "name": "filesystem",
+  "package": "@modelcontextprotocol/server-filesystem@2025.8.21",
+  "args": ["/home/user/projects"]
+}
+```
+
+Flujo de resolución (`tools/mcp/installer.ts`):
+
+```
+resolveServerCommand(serverCfg):
+  1. Sin `package`  → devolver { command, args, env } tal cual (comportamiento previo, sin cambios)
+  2. Con `package`:
+     a. ensureInstallDir(installDir)             # crea ~/.stratum/mcp/ si no existe (recursivo)
+     b. si NO está instalado en <installDir>/<server>/:
+          - autoInstall=true  → npm install <package> --prefix <installDir>/<server>
+          - autoInstall=false → error "ejecuta: stratum mcp install <server>"
+     c. resolver el entry-point leyendo `bin`/`main` del package.json instalado
+     d. devolver { command: 'node', args: [<entry>, ...serverCfg.args], env }
+```
+
+Cada server se instala en su **subdirectorio aislado** (`<installDir>/<server>/`, con un `package.json` mínimo `private:true` para que npm no escale a directorios padre), de modo que las versiones de distintos servers no colisionan. El nombre del subdirectorio se sanitiza con `sanitizeSegment`. Arranques posteriores no tocan la red ni invocan `npx`: lanzan `node <entry>` directamente, lo que además evita el problema de ejecución de shims `.cmd` en Windows.
+
+La carpeta gestionada **se crea automáticamente** (`mkdirSync(..., { recursive: true })`) la primera vez que se resuelve un server con `package` o al ejecutar `stratum mcp install`.
+
+**Comando:** `stratum mcp install [server] [--force]` instala todos los servers con `package` (o uno concreto) en la carpeta gestionada; idempotente, salta los ya instalados salvo `--force`.
+
+**Decisión (opción 3): arranque no bloqueante + `startupTimeout`.** Dos mecanismos independientes:
+
+- **`mcp.startup`** (`'lazy'` por defecto · `'eager'`). En `chat`, `lazy` conecta los servers en **background** (`McpManager.startBackground`) y registra sus tools a medida que cada uno queda listo, sin bloquear el arranque de la UI; `eager` espera a `connectAll()` antes de mostrar el prompt (tools garantizadas en el primer turno, a costa del retardo). `stratum run` (one-shot) **siempre** espera a `connectAll()`, ya que el agente puede necesitar las tools de inmediato.
+- **`startupTimeout`** (por server, 15 000 ms por defecto). `connect()` corre contra un timeout; si vence, se aborta y se mata el proceso hijo, marcando el server como `disconnected` con un warning. Un server lento o colgado nunca bloquea el proceso más allá de su `startupTimeout`. Equivale al `startup_timeout_sec` de Codex.
+
+**Campos de config añadidos (`config/schema.ts`):**
+
+| Campo | Ámbito | Default | Rol |
+|---|---|---|---|
+| `mcp.startup` | global | `'lazy'` | `'lazy'` (background en `chat`) / `'eager'` (bloqueante) |
+| `mcp.installDir` | global | `'~/.stratum/mcp'` | Carpeta gestionada; auto-creada |
+| `mcp.autoInstall` | global | `true` | Instalar al primer arranque si falta |
+| `package` | por server | — | Paquete npm a instalar (recomendado pinear versión) |
+| `startupTimeout` | por server | `15000` | ms antes de abortar el arranque del server |
+
+`command`/`args`/`env` siguen soportados sin cambios para servers sin `package` (binarios locales, scripts propios, servers ya instalados globalmente).
+
 ---
 
 ### 12.9 — Paralelismo de tool calls

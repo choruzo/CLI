@@ -9,6 +9,8 @@ import type { StratumConfig } from '../../config/schema.js';
 import type { ToolRegistry } from '../registry.js';
 import { McpServerClient } from './client.js';
 import { buildMcpTool } from './bridge.js';
+import { expandHome } from '../../config/paths.js';
+import type { McpRuntimeOptions } from './installer.js';
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -36,8 +38,12 @@ export class McpManager {
   private registry: ToolRegistry | null = null;
 
   constructor(private readonly config: StratumConfig) {
+    const runtime: McpRuntimeOptions = {
+      installDir: expandHome(config.mcp.installDir),
+      autoInstall: config.mcp.autoInstall,
+    };
     for (const serverCfg of config.mcp.servers) {
-      this.clients.push(new McpServerClient(serverCfg));
+      this.clients.push(new McpServerClient(serverCfg, runtime));
     }
   }
 
@@ -63,6 +69,28 @@ export class McpManager {
     }
 
     return warnings;
+  }
+
+  /**
+   * Arranque NO bloqueante (§12.8, opción 3 — modo `lazy`).
+   *
+   * Lanza la conexión de cada server en background y registra sus tools en
+   * cuanto cada uno queda listo. Devuelve de inmediato para que la UI de `chat`
+   * arranque sin esperar a la red. Los fallos se notifican por `onWarn`.
+   */
+  startBackground(registry: ToolRegistry, onWarn?: (w: McpManagerWarning) => void): void {
+    this.registry = registry;
+    for (const client of this.clients) {
+      void client
+        .connect()
+        .then(() => this._registerClientTools(client, registry))
+        .catch((reason) => {
+          onWarn?.({
+            serverName: client.name,
+            message: `MCP server '${client.name}' failed to connect: ${reason instanceof Error ? reason.message : String(reason)}`,
+          });
+        });
+    }
   }
 
   /**

@@ -126,7 +126,13 @@ const baseCtx = {
       webSearch: { backend: 'meta' as const, apiKey: '', tavilyApiKey: '', maxResults: 10 },
       destructivePatterns: [],
     },
-    mcp: { servers: [], heartbeatInterval: 30000 },
+    mcp: {
+      servers: [],
+      heartbeatInterval: 30000,
+      startup: 'lazy' as const,
+      installDir: '~/.stratum/mcp',
+      autoInstall: true,
+    },
     memory: {
       projectFile: '',
       globalFile: '',

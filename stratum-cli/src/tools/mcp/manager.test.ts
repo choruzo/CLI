@@ -27,8 +27,17 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       destructivePatterns: [],
     },
     mcp: {
-      servers: servers.map((s) => ({ name: s.name, command: 'npx', args: [], env: undefined })),
+      servers: servers.map((s) => ({
+        name: s.name,
+        command: 'npx',
+        args: [],
+        env: undefined,
+        startupTimeout: 15000,
+      })),
       heartbeatInterval: 30000,
+      startup: 'lazy',
+      installDir: '~/.stratum/mcp',
+      autoInstall: true,
     },
     agent: {
       maxIterations: 50,

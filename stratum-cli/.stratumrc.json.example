@@ -38,19 +38,27 @@
     "destructivePatterns": ["rm", "rmdir", "dd", "mkfs", "format", "DROP", "DELETE", "truncate", "shred", "wipefs"]
   },
   "mcp": {
+    "startup": "lazy",
+    "installDir": "~/.stratum/mcp",
+    "autoInstall": true,
+    "heartbeatInterval": 30000,
     "servers": [
       {
         "name": "filesystem",
-        "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/home/user/projects"]
+        "package": "@modelcontextprotocol/server-filesystem@2025.8.21",
+        "args": ["/home/user/projects"],
+        "startupTimeout": 15000
       },
       {
         "name": "chrome-devtools",
+        "package": "chrome-devtools-mcp@0.6.0"
+      },
+      {
+        "name": "legacy-npx",
         "command": "npx",
-        "args": ["-y", "chrome-devtools-mcp@latest"]
+        "args": ["-y", "some-mcp-server@latest"]
       }
-    ],
-    "heartbeatInterval": 30000
+    ]
   },
   "agent": {
     "maxIterations": 50,
