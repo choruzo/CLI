@@ -1,13 +1,13 @@
 ---
-date: 2026-05-29
+date: 2026-06-16
 tags: [módulo, providers, llm, streaming, stratum-cli]
 status: implementado
-hito: 1-2
+hito: 1-3.5
 ---
 
 # Módulo providers — LLM Client
 
-Implementado en Hito 1, ampliado en Hito 2. Ver [[Arquitectura]] y [[Módulos/agent]].
+Implementado en Hito 1, ampliado en Hitos 2 y 3.5. Ver [[Arquitectura]] y [[Módulos/agent]].
 
 ---
 
@@ -17,8 +17,11 @@ Implementado en Hito 1, ampliado en Hito 2. Ver [[Arquitectura]] y [[Módulos/ag
 |---------|----------------|
 | `src/providers/base.ts` | `IProvider`, tipos de request/response |
 | `src/providers/openai-compatible.ts` | `OpenAICompatible` + `StreamBuffer` |
-| `src/providers/router.ts` | `ProviderRouter` — selección del provider activo |
+| `src/providers/router.ts` | `ProviderRouter` — selección del provider activo + fallback |
+| `src/providers/utils.ts` | Utilidades compartidas de provider |
 | `src/providers/mock.ts` | `MockProvider` — guion de chunks para tests |
+
+> **Hito 3.5 — Provider & Model UX:** wizard `stratum provider add` (`ProviderWizard.tsx` + `wizard-logic.ts`), `provider list/use/remove`, y slash commands `/model` (cambio de modelo en caliente) y `/config_provider` (selección de provider activo). Ver [[Módulos/cli]].
 
 ---
 
@@ -133,7 +136,7 @@ class ProviderRouter {
 }
 ```
 
-Lee `config.provider.default` (o el override `--provider` del CLI) e instancia el proveedor correspondiente. Actualmente solo soporta `type: 'openai-compatible'`. El fallback automático está diferido al [[Roadmap#Hito 6]].
+Lee `config.provider.default` (o el override `--provider` del CLI) e instancia el proveedor correspondiente. Solo hay un tipo en v1: `type: 'openai-compatible'`. Gestiona el **fallback automático** a un provider secundario. El pulido restante (health check al startup, listado/pull de modelos) está en el [[Roadmap#Hito 6]].
 
 ---
 

@@ -1,13 +1,13 @@
 ---
-date: 2026-05-29
+date: 2026-06-16
 tags: [módulo, agente, react-loop, stratum-cli]
 status: implementado
-hito: 1-2
+hito: 1-5
 ---
 
 # Módulo agent — Core Agent Loop
 
-Implementado en Hitos 1 y 2. Ver [[Arquitectura]] y [[Roadmap]].
+Implementado en Hitos 1–5. Ver [[Arquitectura]] y [[Roadmap]].
 
 ---
 
@@ -18,8 +18,8 @@ Implementado en Hitos 1 y 2. Ver [[Arquitectura]] y [[Roadmap]].
 | `src/agent/types.ts` | Tipos centrales: `AgentEvent`, `Message`, `ToolDefinition`, `ToolResult` |
 | `src/agent/core.ts` | `StratumAgent` — estado de sesión, punto de entrada público |
 | `src/agent/harness.ts` | `ReactLoop`, `ContextManager`, `streamWithRetry` |
-| `src/agent/system-prompt.ts` | `buildSystemPrompt(config, memory?)` — identidad + memoria inyectada |
-| `src/agent/init-agent.ts` | `InitAgent` — scan de proyecto + síntesis LLM + merge STRATUM.md (§12.13) |
+| `src/agent/system-prompt.ts` | `buildSystemPrompt(config, memory?)` — default.txt + bloque `<env>` + memoria |
+| `src/agent/initialize-prompt.ts` | `INITIALIZE_PROMPT` — comando-plantilla de init estilo opencode (§12.13) |
 
 ---
 
@@ -54,7 +54,7 @@ class StratumAgent {
   reloadMemory(): void                  // reconstruye el system prompt con STRATUM.md actualizado
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean }
   getMessages(): Message[]              // copia del historial (para SessionStore)
-  getProvider(): IProvider              // acceso al provider activo (para InitAgent en chat)
+  getProvider(): IProvider              // acceso al provider activo
   getConfig(): StratumConfig            // acceso a la config (para /memory show en chat)
 
   get toolCallCount(): number
@@ -151,42 +151,32 @@ type CompressionResult =
 
 ---
 
-## InitAgent (`init-agent.ts`) — §12.13
+## Init estilo opencode (`initialize-prompt.ts`) — §12.13
+
+Desde el Hito 2.5 **no hay agente especializado de init**. El init es un **comando-plantilla**: el `INITIALIZE_PROMPT` se inyecta como mensaje de usuario del **agente general**, que usa sus tools normales (`glob`, `list_directory`, `grep`, `read_file`, `write_file`) para escanear el proyecto y escribir `STRATUM.md`.
+
+- Los placeholders del prompt (`${path}` aparece varias veces) se sustituyen **siempre con `replaceAll`**
+- El agente genera las 5 secciones fijas: `Proyecto`, `Stack Tecnológico`, `Estructura`, `Convenciones`, `Comandos Clave`; preserva las secciones extra del usuario
+- Compresión conservadora durante el init: `RunOptions.compressionMode: 'conservative'` sube el umbral a ≥0.92 y duplica las rondas protegidas
+- Auto-retry de escritura del `STRATUM.md`
+
+| Contexto | Invocación |
+|----------|-----------|
+| CLI | `stratum init [--force] [--dry-run]` (plain-text) |
+| Chat | `/init` — progreso en la conversación; `agent.reloadMemory()` al terminar |
+
+---
+
+## RunOptions
 
 ```typescript
-class InitAgent {
-  constructor(provider: IProvider, model: string)
-
-  async *run(cwd: string, options?: InitOptions): AsyncGenerator<InitEvent>
-  buildStratumMd(sections: Record<string, string>): string
+interface RunOptions {
+  signal?: AbortSignal
+  destructivePolicy?: 'ask' | 'allow' | 'deny'   // política de tools destructivas
+  onConfirmDestructive?: (call) => Promise<Decision>
+  compressionMode?: 'normal' | 'conservative'    // 'conservative' usado por /init
 }
-
-type InitEvent =
-  | { type: 'scan_progress';         file: string }
-  | { type: 'section_ready';         section: string; content: string }
-  | { type: 'merge_conflict';        section: string; existing: string; proposed: string }
-  | { type: 'merge_conflict_resolved'; section: string; kept: 'existing' | 'proposed' }
-  | { type: 'done';                  path: string }
-  | { type: 'error';                 message: string }
 ```
-
-### Flujo de `run()`
-
-1. **Scan** — árbol de directorios (depth ≤ 3, respeta `.gitignore`), manifiestos, configs conocidas, docs, entry points
-2. **Síntesis** — 1 LLM call que genera las 5 secciones fijas: `Proyecto`, `Stack Tecnológico`, `Estructura`, `Convenciones`, `Comandos Clave`
-3. **Merge** (si `STRATUM.md` existe) — `performMerge()`: generador único que emite eventos y devuelve secciones:
-   - Sección con contenido manual → emitir `merge_conflict`, llamar `resolveConflict()`
-   - Sección vacía/placeholder → rellenar con lo generado
-   - Sección ausente → añadir
-   - Secciones extra del usuario → preservar siempre
-4. **Escritura** — salvo `--dry-run`
-
-### Puntos de entrada
-
-| Contexto | Invocación | Comportamiento |
-|----------|-----------|----------------|
-| CLI | `stratum init` | Plain-text con spinners, readline interactivo para conflictos |
-| Chat | `/init` | `App.tsx` conduce `InitAgent`, muestra progreso en la conversación, desbloquea el input para s/N en conflictos; llama `agent.reloadMemory()` al terminar |
 
 ---
 
@@ -196,14 +186,7 @@ type InitEvent =
 buildSystemPrompt(config: StratumConfig, memory?: string): string
 ```
 
-Si `memory` no está vacío, añade al final:
-
-```markdown
-## Project Memory
-The following is persistent context for this project (from STRATUM.md)...
-
-<contenido del STRATUM.md>
-```
+System prompt estilo opencode (`default.txt`) + un bloque `<env>` dinámico generado en cada arranque (cwd, worktree, git, plataforma, fecha, model id). Si `memory` no está vacío, inyecta el STRATUM.md del proyecto al final bajo `## Project Memory`.
 
 ---
 
@@ -217,10 +200,6 @@ The following is persistent context for this project (from STRATUM.md)...
 - Inject & recover (error de tool y error de parse JSON)
 - `AbortSignal` → `done('cancelled')`
 
-`src/agent/init-agent.test.ts` (8 tests):
-- Emite `scan_progress`, `section_ready`, `done`
-- Genera las 5 secciones fijas
-- `--dry-run` no escribe archivo
-- Detecta `package.json` en el scan
-- Merge: preserva sección manual, actualiza vacía, preserva secciones extra del usuario
-- `buildStratumMd` genera estructura correcta
+`src/agent/initialize-prompt.test.ts`:
+- Sustitución de placeholders con `replaceAll` (`${path}` en múltiples posiciones)
+- El prompt contiene las 5 secciones fijas esperadas

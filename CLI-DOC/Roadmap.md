@@ -1,5 +1,5 @@
 ---
-date: 2026-05-29
+date: 2026-06-16
 tags: [roadmap, hitos, stratum-cli]
 status: en-progreso
 ---
@@ -13,10 +13,13 @@ status: en-progreso
 | [[#Hito 0]] | Scaffolding | ~2 días | ✅ Completado |
 | [[#Hito 1]] | Core Agent Loop | ~5 días | ✅ Completado |
 | [[#Hito 2]] | Memory Layer 1 | ~3 días | ✅ Completado |
-| [[#Hito 3]] | Tools Day 1 | ~4 días | ⏳ Pendiente |
-| [[#Hito 4]] | MCP Client | ~4 días | ⏳ Pendiente |
-| [[#Hito 5]] | Memory Layers 2 y 3 | ~6 días | ⏳ Pendiente |
-| [[#Hito 6]] | Multi-provider Polishing | ~3 días | ⏳ Pendiente |
+| [[#Hito 2.5]] | Init estilo opencode | ~2 días | ✅ Completado |
+| [[#Hito 3]] | Tools Day 1 | ~4 días | ✅ Completado |
+| [[#Hito 3.5]] | Provider & Model UX | ~2 días | ✅ Completado |
+| [[#Hito 4]] | MCP Client | ~4 días | ✅ Completado |
+| [[#Hito 4.1]] | MCP carpeta gestionada + arranque no bloqueante | ~2 días | ✅ Completado |
+| [[#Hito 5]] | Memory Layers 2 y 3 | ~6 días | ✅ Completado |
+| [[#Hito 6]] | Multi-provider Polishing | ~3 días | ⏳ Siguiente |
 | [[#Hito 7]] | Plan & Execute Mode | ~7 días | ⏳ Pendiente |
 | [[#Hito 8]] | Multi-agent Foundation | ~10 días | ⏳ Pendiente |
 
@@ -74,46 +77,98 @@ Ver [[Módulos/memory]], [[Módulos/sessions]], [[Módulos/agent]], [[Módulos/c
 
 ---
 
-## Hito 3 — Tools completos Day 1 ⏳
+## Hito 2.5 — Init estilo opencode ✅
 
-- [ ] `edit_file` con diff patches
-- [ ] `list_directory`, `glob`, `grep`
-- [ ] `web_search` + `web_fetch`
-- [ ] Safety check en `bash` (patrones destructivos)
-- [ ] Confirmación interactiva en tools destructivas
-- [ ] Timeout y cancelación de tools
-- [ ] ToolCall UI (Ink): estados pending/running/completed/error, spinner, toggle
-- [ ] Markdown rendering de respuestas (`<MarkdownText>` con `marked`)
+*(cerrado 2026-06-11)*
+
+- [x] `INITIALIZE_PROMPT` como comando-plantilla (`initialize-prompt.ts`), inyectado como mensaje de usuario del agente general
+- [x] Tools `glob`, `list_directory`, `grep`
+- [x] `read_file` con líneas numeradas (`N: contenido`, tope 2000, paginación por `offset`)
+- [x] Truncado de tool outputs (~30k chars, cabeza 80% + cola 20%, `tools/truncate.ts`)
+- [x] System prompt con bloque `<env>` dinámico (cwd, worktree, git, plataforma, fecha, model id)
+- [x] Compresión conservadora en init (`compressionMode: 'conservative'`, umbral ≥0.92, rondas protegidas duplicadas)
+- [x] Auto-retry de escritura de STRATUM.md
+
+**Entregable:** `stratum init` y `/init` operan como comando-plantilla estilo opencode, sin agente especializado. Ver §12.13.
+
+---
+
+## Hito 3 — Tools completos Day 1 ✅
+
+*(cerrado 2026-06-11)*
+
+- [x] `edit_file` — reemplazo exacto `old_string → new_string` (única ocurrencia o `replace_all`) con unified diff propio (`fs/diff.ts`, LCS sin dependencias)
+- [x] `list_directory`, `glob`, `grep`
+- [x] `web_search` — metabúsqueda DuckDuckGo (scraping HTML) + Tavily (opcional), merge + dedupe + re-rank RRF, top 10
+- [x] `web_fetch` — descarga (límite 5 MB) + conversor HTML→markdown propio
+- [x] Safety check en `bash` — `isDestructive?()` con `tools.destructivePatterns` y límites de palabra
+- [x] Confirmación interactiva en tools destructivas (chat Ink + `stratum run` readline + deny automático en CI sin TTY)
+- [x] Timeout y cancelación de tools con `AbortSignal` combinado (`AbortSignal.any`)
+- [x] ToolCall UI (Ink): 4 estados pending/running/completed/error, foco Tab, expansión Space
+- [x] Markdown rendering dual-mode (`<MarkdownText>` con `marked` + `cli-highlight`)
 
 **Entregable:** Agente con toolset completo del día 1. Puede realizar tareas de código completas.
 
 ---
 
-## Hito 4 — MCP Client ⏳
+## Hito 3.5 — Provider & Model UX ✅
 
-- [ ] Integración `@modelcontextprotocol/sdk`
-- [ ] Conexión a MCP servers desde `.stratumrc.json`
-- [ ] Auto-registro de MCP tools en `ToolRegistry`
-- [ ] Comando `stratum mcp list`
+*(cerrado 2026-06-11)*
+
+- [x] Wizard `stratum provider add`
+- [x] `/model` en chat — cambio de modelo en caliente
+- [x] `/config_provider` en chat — selección de provider activo
+
+**Entregable:** Alta y cambio de provider/modelo guiado, sin editar `.stratumrc.json` a mano.
+
+---
+
+## Hito 4 — MCP Client ✅
+
+*(cerrado 2026-06-15)*
+
+- [x] `McpServerClient` (`mcp/client.ts`) — conexión stdio a un server
+- [x] Conexión a MCP servers desde `.stratumrc.json`
+- [x] Auto-registro de MCP tools como `mcp__<server>__<tool>` (`buildMcpTool`, `bridge.ts`)
+- [x] `McpManager` (`manager.ts`) — arranque, heartbeat 30 s, backoff 2→4→8 s
+- [x] Comando `stratum mcp list`; `/tools` en chat; indicador de conectividad MCP en StatusBar
 
 **Entregable:** Cualquier MCP server se puede conectar y sus tools son utilizables.
 
 ---
 
-## Hito 5 — Memory Layers 2 y 3 ⏳
+## Hito 4.1 — MCP carpeta gestionada + arranque no bloqueante ✅
 
-- [ ] `DecisionStore`: schema JSON + CRUD + tool `store_decision`
-- [ ] Detección automática de decisiones (LLM-based, sin clasificador externo)
-- [ ] Pipeline de embedding con `@xenova/transformers` (ONNX local)
-- [ ] `sqlite-vec` setup e integración
-- [ ] Búsqueda semántica KNN — inyección de decisiones relevantes en contexto
-- [ ] Comandos `stratum memory list/search/forget`
+*(cerrado 2026-06-16)*
 
-**Entregable:** El agente recuerda decisiones entre sesiones y puede recuperarlas semánticamente.
+- [x] Carpeta gestionada `~/.stratum/mcp/` (campo `package` npm; instala una vez, lanza `node` directo, evita overhead de `npx`; `installer.ts`)
+- [x] Comando `stratum mcp install [server]`
+- [x] `mcp.startup`: `'lazy'` (default, conexión en background con `startBackground`, no bloquea la UI) / `'eager'`
+- [x] `startupTimeout` por server (15 s) aborta servers que cuelgan
+- [x] Auto-creación de la carpeta gestionada
+
+**Entregable:** Servers MCP por paquete npm sin coste de `npx` en cada arranque; el chat arranca sin esperar a los servers. Ver §12.8.1.
 
 ---
 
-## Hito 6 — Multi-provider Polishing ⏳
+## Hito 5 — Memory Layers 2 y 3 ✅
+
+*(cerrado 2026-06-16)*
+
+- [x] `DecisionStore` (`decisions.ts`) — CRUD JSON atómico, id `dec_YYYYMMDD_<nanoid6>`, `embedding_ref = vec_${id}`
+- [x] Tool `store_decision` (serialized) + extracción automática LLM-based en background (`extractor.ts`)
+- [x] `EmbeddingService` (`embeddings.ts`) — `@xenova/transformers` ONNX local lazy + endpoint HTTP `/v1/embeddings` opcional (fast-fail + latch), guard de symlinks en Windows
+- [x] `VectorStore` (`vectors.ts`) — backend `sqlite-vec` cosine (import dinámico) + fallback brute-force JS persistente (`*.fallback.json`)
+- [x] Orquestador `DecisionMemory` (`decision-memory.ts`, singleton por ruta) — dedup semántico al guardar + KNN al recuperar
+- [x] Tool `recall_decisions` + evento `memory_retrieved` (vía `takeLastRecall`) con indicador discreto en la UI
+- [x] Comandos `stratum memory list/search/forget` (CLI) y `/memory list|search|forget` en chat
+- [x] Warm-up ONNX opcional (`memory.embeddingWarmup`); deps opcionales en `optionalDependencies` + `external` en tsup
+
+**Entregable:** El agente recuerda decisiones entre sesiones y las recupera semánticamente. Invariante: `decisions.json` nunca se pierde aunque el índice/embedder fallen. 29 tests nuevos. Ver §5, §9, §12.7 y §12.10.
+
+---
+
+## Hito 6 — Multi-provider Polishing ⏳ (siguiente)
 
 - [ ] Soporte Ollama completo (listado de modelos, pull)
 - [ ] Soporte llama.cpp server / vLLM / LiteLLM

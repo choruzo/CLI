@@ -1,13 +1,13 @@
 ---
-date: 2026-05-29
-tags: [módulo, memoria, stratum-cli]
-status: implementado-parcial
-hito: 2
+date: 2026-06-16
+tags: [módulo, memoria, decisiones, embeddings, stratum-cli]
+status: implementado
+hito: 2-5
 ---
 
 # Módulo memory — Sistema de Memoria
 
-Implementado en Hito 2 (Capa 1). Capas 2 y 3 en [[Roadmap#Hito 5]]. Ver [[Arquitectura]].
+Las 3 capas están activas: Capa 1 (Hito 2), Capas 2 y 3 (Hito 5). Ver [[Arquitectura]].
 
 ---
 
@@ -15,9 +15,14 @@ Implementado en Hito 2 (Capa 1). Capas 2 y 3 en [[Roadmap#Hito 5]]. Ver [[Arquit
 
 | Archivo | Responsabilidad |
 |---------|----------------|
-| `src/memory/project.ts` | `loadProjectMemory()` — carga STRATUM.md del proyecto y global |
+| `src/memory/project.ts` | `loadProjectMemory()` — STRATUM.md proyecto + global |
 | `src/memory/manager.ts` | `MemoryManager` — orquesta las 3 capas |
-| `src/memory/show.ts` | `renderMemoryShow()` — salida compartida entre CLI y chat |
+| `src/memory/show.ts` | `renderMemoryShow()` — salida compartida CLI/chat |
+| `src/memory/decisions.ts` | `DecisionStore` — CRUD JSON atómico (Capa 2) |
+| `src/memory/embeddings.ts` | `EmbeddingService` — ONNX local + endpoint HTTP |
+| `src/memory/vectors.ts` | `VectorStore` — sqlite-vec + fallback JS (Capa 3) |
+| `src/memory/decision-memory.ts` | `DecisionMemory` — orquestador singleton |
+| `src/memory/extractor.ts` | Extracción automática LLM-based en background |
 
 ---
 
@@ -25,33 +30,80 @@ Implementado en Hito 2 (Capa 1). Capas 2 y 3 en [[Roadmap#Hito 5]]. Ver [[Arquit
 
 ```
 MemoryManager
-    ├── Capa 1 — STRATUM.md (activa desde Hito 2)
+    ├── Capa 1 — STRATUM.md (activa, Hito 2)
     │       ├── ./STRATUM.md           ← memoria del proyecto (cwd)
     │       └── ~/.stratum/STRATUM.md  ← memoria global del usuario
-    ├── Capa 2 — decisions.json        ← Hito 5
-    │       └── ~/.stratum/memory/decisions.json
-    └── Capa 3 — sqlite-vec            ← Hito 5
-            └── ~/.stratum/memory/vectors.db
+    └── DecisionMemory (singleton por ruta, Hito 5)
+            ├── Capa 2 — DecisionStore  → ~/.stratum/memory/decisions.json
+            └── Capa 3 — VectorStore    → ~/.stratum/memory/vectors.db
+                    └── EmbeddingService (ONNX local / HTTP)
 ```
+
+**Invariante clave:** `decisions.json` es la fuente de verdad y **nunca se pierde** aunque el índice vectorial o el embedder fallen.
 
 ---
 
 ## Capa 1 — STRATUM.md (`project.ts`)
 
 ```typescript
-interface ProjectMemory {
-  projectContent: string  // contenido del ./STRATUM.md (vacío si no existe)
-  globalContent:  string  // contenido del ~/.stratum/STRATUM.md (vacío si no existe)
-  projectPath:    string  // ruta absoluta resuelta
-  globalPath:     string  // ruta absoluta resuelta
-}
-
 function loadProjectMemory(config: StratumConfig): ProjectMemory
+// { projectContent, globalContent, projectPath, globalPath }
 ```
 
 - Nunca lanza error por ausencia de archivos — devuelve strings vacíos
-- `projectFile` se resuelve desde `process.cwd()` (relativo al proyecto)
-- `globalFile` expande `~` via `config/paths.ts`
+- `projectFile` se resuelve desde `process.cwd()`; `globalFile` expande `~`
+- `getInjectableMemory()` concatena global (primero) + proyecto (último, mayor prioridad) separados por `---`; el resultado va a `buildSystemPrompt(config, memory)`
+
+---
+
+## Capa 2 — DecisionStore (`decisions.ts`)
+
+Decision store JSON estructurado, **fuente de verdad**.
+
+- Escritura atómica
+- id `dec_YYYYMMDD_<nanoid6>`
+- `embedding_ref = vec_${id}` enlaza con la Capa 3
+- Se escribe vía la tool `store_decision` (el agente, §12.7) y vía extracción automática LLM-based en background (`extractor.ts`)
+
+---
+
+## Capa 3 — VectorStore + EmbeddingService
+
+### VectorStore (`vectors.ts`)
+
+Índice semántico con dos backends:
+
+- **`sqlite-vec`** — tabla `vec0` con `distance_metric=cosine`, import dinámico de `better-sqlite3` + `sqlite-vec`
+- **Fallback brute-force JS** persistente (`*.fallback.json`) cuando las deps nativas faltan
+
+### EmbeddingService (`embeddings.ts`)
+
+- `@xenova/transformers` ONNX local (lazy, guard de symlinks en Windows)
+- Endpoint HTTP `/v1/embeddings` opcional (fast-fail + latch)
+- Warm-up opcional cableado en `chat` (`memory.embeddingWarmup`)
+
+Deps opcionales (`@xenova/transformers`, `better-sqlite3`, `sqlite-vec`) declaradas en `optionalDependencies` y `external` en `tsup.config.ts`.
+
+---
+
+## DecisionMemory (`decision-memory.ts`)
+
+Orquestador singleton por ruta:
+
+- **Al guardar** → dedup semántico (no duplica decisiones casi idénticas)
+- **Al recuperar** → KNN sobre el índice; alimenta la tool `recall_decisions`
+- Mantiene el invariante: si el índice/embedder fallan, la decisión igualmente se persiste en `decisions.json`
+
+---
+
+## Tools del agente (§12.7)
+
+| Tool | Rol |
+|------|-----|
+| `store_decision` | `serialized`. Guarda una decisión estructurada con dedup semántico |
+| `recall_decisions` | KNN semántico; emite el evento `memory_retrieved` |
+
+El system prompt incluye instrucción para usar ambas. El evento `memory_retrieved` se emite en `harness.ts` (vía `takeLastRecall`) y la UI lo muestra con un indicador discreto.
 
 ---
 
@@ -59,103 +111,51 @@ function loadProjectMemory(config: StratumConfig): ProjectMemory
 
 ```typescript
 class MemoryManager {
-  constructor(config: StratumConfig)
-
-  reload(): void                       // recarga desde disco (tras /init)
-  getProjectMemory(): ProjectMemory    // datos brutos
-  getInjectableMemory(): string        // bloque listo para system prompt
+  reload(): void                       // recarga STRATUM.md (tras /init)
+  getProjectMemory(): ProjectMemory
+  getInjectableMemory(): string        // bloque para system prompt
   hasMemory(): boolean
-
-  // Hito 5 (stubs que lanzan error)
-  async storeDecision(params: unknown): Promise<void>
-  async searchDecisions(query: string): Promise<unknown[]>
+  // Capas 2 y 3 vía DecisionMemory (ya no son stubs)
 }
-```
-
-`getInjectableMemory()` concatena global (primero) + proyecto (último, mayor prioridad) separados por `---`. El resultado se pasa a `buildSystemPrompt(config, memory)`.
-
----
-
-## Integración con el agente
-
-```
-Arranque de sesión:
-  MemoryManager.getInjectableMemory()
-    → buildSystemPrompt(config, memory)
-      → messages[0] = { role: 'system', content: prompt }
-
-Tras /init:
-  InitAgent.run() → emite done
-    → App.tsx llama agent.reloadMemory()
-      → MemoryManager.reload()
-        → messages[0] se reconstruye con el nuevo STRATUM.md
 ```
 
 ---
 
 ## `stratum init` / `/init` — §12.13
 
-Ver [[Módulos/agent#InitAgent]] para la implementación completa.
+Init opera como **comando-plantilla** (`INITIALIZE_PROMPT` en `agent/initialize-prompt.ts`), inyectado como mensaje de usuario del agente general — no hay agente especializado. Ver [[Módulos/agent]].
 
-### Estructura fija del STRATUM.md generado
-
-```markdown
-# Stratum Memory
-
-## Proyecto
-<!-- nombre, descripción, propósito -->
-
-## Stack Tecnológico
-<!-- lenguajes, frameworks, versiones clave -->
-
-## Estructura
-<!-- árbol de directorios relevante con descripción -->
-
-## Convenciones
-<!-- estilo, naming, commits, patrones -->
-
-## Comandos Clave
-<!-- scripts exactamente como en el manifiesto -->
-```
-
-Las secciones extra que el usuario añada se preservan siempre.
-
-### Flags de `stratum init`
-
-| Flag | Comportamiento |
-|------|---------------|
-| _(ninguno)_ | Scan + síntesis + merge interactivo si STRATUM.md existe |
-| `--force` | Sobrescribe sin preguntar por secciones manuales |
-| `--dry-run` | Muestra qué generaría sin escribir |
+Estructura fija del STRATUM.md: `Proyecto`, `Stack Tecnológico`, `Estructura`, `Convenciones`, `Comandos Clave`. Las secciones extra del usuario se preservan siempre.
 
 ---
 
-## `stratum memory show` / `/memory show`
+## Comandos de memoria
 
-`renderMemoryShow(config): string` — función compartida entre CLI y chat.
+### CLI
 
-- Si no hay ningún STRATUM.md → aviso con rutas buscadas + sugerencia `stratum init`
-- Si hay global y/o proyecto → muestra ruta + contenido de cada uno
+| Comando | Descripción |
+|---------|-------------|
+| `stratum memory show` | STRATUM.md activo (proyecto + global) con rutas |
+| `stratum memory list` | Lista decisiones almacenadas |
+| `stratum memory search <query>` | Búsqueda semántica KNN |
+| `stratum memory forget <id>` | Elimina una decisión |
+
+### Chat (slash commands)
+
+`/memory show`, `/memory list`, `/memory search <query>`, `/memory forget <id>` — autocompletado en `session-commands.ts`, handlers en `App.tsx`.
 
 ---
 
-## Rutas de memoria (`config/paths.ts`)
+## Configuración (`memory.*`)
 
-```typescript
-function expandHome(p: string): string
-// "~/.stratum/..." → "/home/user/.stratum/..."
-
-function resolveMemoryPaths(config: StratumConfig): MemoryPaths
-// { projectFile, globalFile, decisionsFile, vectorDb, sessionsDir }
 ```
-
-El loader de config solo expande `${ENV}`, no `~`. Este módulo completa esa responsabilidad.
+embeddingDimension, embeddingEndpoint, autoExtract,
+extractionModel, similarityThreshold, embeddingWarmup
+```
 
 ---
 
 ## Tests
 
-`src/memory/project.test.ts` (4 tests):
-- Devuelve strings vacíos cuando no existe STRATUM.md
-- Carga y hace trim del contenido cuando existe
-- Devuelve la ruta correcta aunque el archivo no exista
+- `src/memory/project.test.ts` — Capa 1 (strings vacíos sin archivo, carga+trim, ruta correcta)
+- Capa 2/3 (Hito 5, 29 tests nuevos) — `DecisionStore` CRUD atómico, dedup semántico, KNN, fallback JS cuando faltan deps nativas, invariante de no-pérdida de `decisions.json`
