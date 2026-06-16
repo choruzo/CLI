@@ -142,8 +142,6 @@ const baseCtx = {
       embeddingDimension: 384,
       retrievalTopK: 5,
       embeddingWarmup: false,
-      autoExtract: false,
-      similarityThreshold: 0.9,
     },
     agent: {
       maxIterations: 50,

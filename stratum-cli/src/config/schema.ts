@@ -42,8 +42,38 @@ export const StratumConfigSchema = z.object({
       decisionsFile: z.string().default('~/.stratum/memory/decisions.json'),
       vectorDb: z.string().default('~/.stratum/memory/vectors.db'),
       embeddingModel: z.string().default('Xenova/all-MiniLM-L6-v2'),
+      /**
+       * Dimensión del vector de embeddings del modelo activo.
+       * 384 para all-MiniLM-L6-v2 (default). Ajustar si se cambia de modelo.
+       */
+      embeddingDimension: z.number().int().positive().default(384),
       retrievalTopK: z.number().int().positive().default(5),
       embeddingWarmup: z.boolean().default(false),
+      /**
+       * Endpoint HTTP OpenAI-compatible para generar embeddings (Ollama, vLLM,
+       * llama.cpp, LiteLLM…). Cuando se define, se intenta primero con
+       * fast-fail y se cae a `@xenova` local si el endpoint no responde
+       * (patrón provider-agnostic). Si se omite, se usa siempre el ONNX local.
+       */
+      embeddingEndpoint: z
+        .object({
+          url: z.string().url(),
+          model: z.string().default(''),
+          apiKey: z.string().default(''),
+        })
+        .optional(),
+      /**
+       * Extracción automática de decisiones en background tras cada respuesta
+       * del agente (además de la tool `store_decision`). Usa el LLM activo.
+       */
+      autoExtract: z.boolean().default(true),
+      /** Modelo a usar para la extracción automática. Si se omite, el modelo activo. */
+      extractionModel: z.string().optional(),
+      /**
+       * Umbral de similitud coseno (0–1) para considerar dos decisiones
+       * duplicadas al persistir y para filtrar resultados de recuperación.
+       */
+      similarityThreshold: z.number().min(0).max(1).default(0.9),
     })
     .default({}),
 

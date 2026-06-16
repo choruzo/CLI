@@ -1,17 +1,27 @@
 import type { StratumConfig } from '../config/schema.js';
 import { loadProjectMemory, type ProjectMemory } from './project.js';
+import { getDecisionMemory, type DecisionMemory } from './decision-memory.js';
+import type { DecisionInput, DecisionRecord } from './decisions.js';
 
 /**
  * Orquesta las 3 capas de memoria de Stratum.
  *
- * Hito 2 — solo la Capa 1 está activa (STRATUM.md proyecto + global).
- * Capas 2 (decisions.json) y 3 (sqlite-vec) se implementan en Hito 5.
+ * Capa 1 — STRATUM.md proyecto + global (Hito 2).
+ * Capas 2 (decisions.json) y 3 (vectores semánticos) — Hito 5, vía
+ * `DecisionMemory`.
  */
 export class MemoryManager {
   private memory: ProjectMemory;
+  private decisions: DecisionMemory | null = null;
 
   constructor(private readonly config: StratumConfig) {
     this.memory = loadProjectMemory(config);
+  }
+
+  /** Acceso perezoso a las Capas 2/3 (carga el modelo de embeddings al usarse). */
+  getDecisionMemory(): DecisionMemory {
+    if (!this.decisions) this.decisions = getDecisionMemory(this.config);
+    return this.decisions;
   }
 
   /** Recarga la memoria desde disco (útil tras `/init` o edición manual). */
@@ -43,15 +53,17 @@ export class MemoryManager {
     return !!(this.memory.globalContent || this.memory.projectContent);
   }
 
-  // --- Hito 5: stubs para Capas 2 y 3 ---
+  // --- Capas 2 y 3 (Hito 5) ---
 
-  /** (Hito 5) Persiste una decisión en decisions.json + sqlite-vec. */
-  async storeDecision(_params: unknown): Promise<void> {
-    throw new Error('storeDecision no está implementado hasta Hito 5.');
+  /** Persiste una decisión en decisions.json + índice vectorial (con dedup). */
+  async storeDecision(params: DecisionInput): Promise<DecisionRecord> {
+    const result = await this.getDecisionMemory().save(params);
+    return result.record;
   }
 
-  /** (Hito 5) Búsqueda semántica KNN en sqlite-vec. */
-  async searchDecisions(_query: string): Promise<unknown[]> {
-    throw new Error('searchDecisions no está implementado hasta Hito 5.');
+  /** Búsqueda semántica KNN de decisiones. */
+  async searchDecisions(query: string, k?: number): Promise<DecisionRecord[]> {
+    const results = await this.getDecisionMemory().search(query, k);
+    return results.map((r) => r.record);
   }
 }

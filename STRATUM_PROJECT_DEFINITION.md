@@ -673,14 +673,14 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 ---
 
-### Hito 5 — Memory Layers 2 y 3 *(~6 días)*
-- [ ] `DecisionStore`: schema JSON + CRUD
-- [ ] Detección automática de decisiones importantes (LLM-based)
-- [ ] Pipeline de embedding con `@xenova/transformers` (ONNX local)
-- [ ] `sqlite-vec` setup e integración
-- [ ] Búsqueda semántica KNN
-- [ ] Inyección de memoria relevante en context
-- [ ] Comandos `stratum memory list/search/forget`
+### Hito 5 — Memory Layers 2 y 3 ✅ *(cerrado 2026-06-16)*
+- [x] `DecisionStore`: schema JSON + CRUD (`src/memory/decisions.ts`, escritura atómica, id `dec_YYYYMMDD_<nanoid6>`)
+- [x] Detección automática de decisiones importantes (LLM-based) (`src/memory/extractor.ts`, background tras cada respuesta, parsing tolerante a `<think>`/fences)
+- [x] Pipeline de embedding con `@xenova/transformers` (ONNX local) (`src/memory/embeddings.ts`, lazy load + warm-up + guard de symlinks Windows; además endpoint HTTP `/v1/embeddings` opcional con fast-fail)
+- [x] `sqlite-vec` setup e integración (`src/memory/vectors.ts`, tabla `vec0` cosine vía import dinámico; fallback brute-force JS persistente cuando las deps nativas no están)
+- [x] Búsqueda semántica KNN (`DecisionMemory.search`, umbral de recuperación independiente del de dedup)
+- [x] Inyección de memoria relevante en context (tool `recall_decisions`; el agente decide cuándo recuperar)
+- [x] Comandos `stratum memory list/search/forget` (`src/cli/commands/memory.ts`)
 
 > **UI:** Activar los comandos `/memory list`, `/memory search` y `/memory forget` en el autocompletado. Añadir indicador visual discreto cuando el agente recupera memoria semántica (evento `memory_retrieved` del `AgentEvent` schema). Mostrar la barra de progreso de descarga del modelo ONNX en el primer arranque. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/memory list/search/forget`), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (evento `memory_retrieved`), [§15 — Consideraciones Windows vs Linux](./STRATUM_UI_SPECIFICATION.md#15-consideraciones-windows-vs-linux) (carga ONNX).
 
@@ -1947,109 +1947,4 @@ Todos los comandos remotos ejecutados se registran en `~/.stratum/logs/ssh-audit
 {"timestamp":"2026-05-29T10:31:00Z","sessionId":"sess_abc","host":"prod-web","command":"rm -rf /tmp/cache","exitCode":0,"durationMs":89,"truncated":false}
 ```
 
-- Rotación por tamaño: 10 MB → `ssh-audit.jsonl.1` (se guardan los 3 últimos archivos)
-- El `password` / `passphrase` nunca se loguea
-- Configurable con `ssh.auditLog: false` para deshabilitar o `ssh.auditLog: "/ruta/custom.jsonl"` para ruta alternativa
-- `sftp_upload` y `sftp_download` también se loguean (con campos `localPath`/`remotePath` en lugar de `command`)
-
----
-
-#### `stratum ssh list` — conectividad sin autenticación
-
-El comando **no establece conexiones SSH completas** para listar hosts. Solo hace TCP connect al puerto para comprobar alcanzabilidad:
-
-```
-$ stratum ssh list
-
-  Hosts SSH configurados (3):
-
-  ⚡ bastion      bastion.example.com:22   auth: key              [alcanzable  ~12ms]
-  ○  prod-web     192.168.1.10:22          auth: key   via bastion [no alcanzable] ⚠ confirmAll
-  ?  dev-server   10.0.0.5:22              auth: agent            [tiempo de espera]
-```
-
-- `⚡` — TCP connect exitoso (no implica auth válida)
-- `○` — no alcanzable (TCP refused o timeout de 3s)
-- `?` — timeout sin respuesta
-- `⚠ confirmAll` — indicador visible para hosts marcados con `confirmAll: true`
-
-Si el host ya tiene una conexión SSH activa en el pool (sesión en curso), se muestra `[conectado]` en lugar de hacer TCP check.
-
-Los hosts con `hostKeyPolicy: "insecure"` muestran `⚠ insecure` como aviso.
-
----
-
-#### Formato del resultado para el LLM
-
-```xml
-<ssh_result host="prod-web" exitCode="0" duration="342ms">
-  <stdout>
-    total 48
-    drwxr-xr-x 5 javi javi 4096 May 29 10:30 app
-  </stdout>
-</ssh_result>
-```
-
-Si `exitCode !== 0`:
-```xml
-<tool_error>
-  <tool>ssh_exec</tool>
-  <error>Command failed on prod-web (exit code 1): bash: cmd_inexistente: command not found</error>
-  <suggestion>Verify the command exists on the remote host. Use ssh_exec with 'which <command>' to check.</suggestion>
-</tool_error>
-```
-
-Si el alias no existe en el inventario:
-```xml
-<tool_error>
-  <tool>ssh_exec</tool>
-  <error>SSH host 'unknown-host' not found in inventory. Available hosts: bastion, prod-web, dev-server</error>
-  <suggestion>Check .stratumrc.json → ssh.hosts for the correct alias.</suggestion>
-</tool_error>
-```
-
----
-
-#### Implementación
-
-```
-src/tools/ssh/
-  pool.ts        ← SSHConnectionPool (inflight map, reconnect, closeAll con orden de teardown)
-  exec.ts        ← tool ssh_exec (PTY, stdin, maxBytes, audit log)
-  sftp.ts        ← tools ssh_upload / ssh_download (audit log)
-  hostkeys.ts    ← TOFU / strict / insecure — lectura y escritura de ~/.stratum/known_hosts.json
-  auth.ts        ← resolución de secretos (keychain, env, passphrase), agent socket por plataforma
-  inventory.ts   ← carga del inventario desde config, validación Zod
-src/cli/commands/
-  ssh.ts         ← subcomandos: stratum ssh list, stratum ssh trust <alias> [--force|--remove]
-```
-
-Las tools se registran en el `ToolRegistry` desde `StratumAgent.init()`, solo si `config.ssh.hosts` tiene al menos una entrada. Mismo patrón que las tools de filesystem y web.
-
-**Items del Hito 9 revisados** (sustituyen a los del roadmap §9):
-- Pool con in-flight mutex y reconexión diferenciada (drop vs. first-connect)
-- `ssh_exec` con PTY opcional, stdin, maxBytes y truncado explícito
-- Verificación de host key: TOFU por defecto, strict con hash pinnado, insecure explícito
-- `known_hosts.json` + comandos `stratum ssh trust`
-- Resolución de secretos: keychain → env var → prompt → error
-- Soporte de SSH agent multiplataforma (Linux/macOS `SSH_AUTH_SOCK`, Windows Pageant/named pipe)
-- `passphrase` en claves privadas cifradas
-- Reencuadre de la detección destructiva como soft net; `confirmAll: true` en el ejemplo de config de hosts de producción
-- Log de auditoría `ssh-audit.jsonl` con rotación
-- `stratum ssh list` con TCP-only check (no autenticación al listar)
-- Orden de teardown en `closeAll()`: hojas antes que bastiones
-
----
-
-## 13. Documentos Relacionados
-
-| Documento | Descripción |
-|---|---|
-| [STRATUM_UI_SPECIFICATION.md](./STRATUM_UI_SPECIFICATION.md) | Especificación completa de la interfaz de terminal (Ink): layout, componentes, colores, animaciones, atajos de teclado y mapeo de componentes React |
-
----
-
-*Documento generado: 2026-05-27 | Versión: 0.1.0-draft*
-
----
-
+- Rotación por tamaño: 10 MB → `ssh-audit.jsonl

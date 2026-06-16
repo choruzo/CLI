@@ -16,16 +16,21 @@ export interface MemoryPaths {
   globalFile: string; // ruta absoluta del STRATUM.md global (~/.stratum/STRATUM.md)
   decisionsFile: string; // ruta absoluta de decisions.json
   vectorDb: string; // ruta absoluta de vectors.db
+  vectorFallback: string; // sidecar JSON para el índice brute-force (sin sqlite-vec)
+  modelsDir: string; // caché de modelos ONNX (~/.stratum/models)
   sessionsDir: string; // ruta absoluta del directorio de sesiones
 }
 
 /** Resuelve las rutas de memoria a rutas absolutas, expandiendo `~`. */
 export function resolveMemoryPaths(config: StratumConfig): MemoryPaths {
+  const vectorDb = expandHome(config.memory.vectorDb);
   return {
     projectFile: expandHome(config.memory.projectFile),
     globalFile: expandHome(config.memory.globalFile),
     decisionsFile: expandHome(config.memory.decisionsFile),
-    vectorDb: expandHome(config.memory.vectorDb),
+    vectorDb,
+    vectorFallback: vectorDb.replace(/\.db$/i, '') + '.fallback.json',
+    modelsDir: expandHome('~/.stratum/models'),
     sessionsDir: expandHome('~/.stratum/sessions'),
   };
 }

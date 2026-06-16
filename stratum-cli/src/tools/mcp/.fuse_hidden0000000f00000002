@@ -20,8 +20,6 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       embeddingDimension: 384,
       retrievalTopK: 5,
       embeddingWarmup: false,
-      autoExtract: false,
-      similarityThreshold: 0.9,
     },
     tools: {
       confirmDestructive: false,

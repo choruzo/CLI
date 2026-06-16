@@ -176,6 +176,10 @@ export function buildSystemPrompt(
 
   prompt += `\n\n${buildEnvBlock(env ?? {})}`;
   prompt += `\n\n# Shell\n${getShellInstructions()}`;
+  prompt += `\n\n# Long-term memory
+You have two tools backed by long-term memory that persists across sessions:
+- store_decision: use it proactively when you make a significant technical decision (choosing between alternatives, defining a project convention, fixing a non-trivial bug) or when the user states a preference that should persist. Think of it as writing in your long-term notebook. Do NOT use it for routine actions or intermediate steps.
+- recall_decisions: use it to retrieve past decisions semantically before acting, when you need to remember why something was chosen, a project convention, a previous bug fix, or a user preference.`;
 
   if (memory && memory.trim()) {
     prompt += `\n\n## Project Memory\nThe following is persistent context for this project (from STRATUM.md). Honor these instructions and conventions:\n\n${memory.trim()}`;

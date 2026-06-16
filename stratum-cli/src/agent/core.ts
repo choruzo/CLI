@@ -6,6 +6,7 @@ import type { AgentEvent, Message, RunOptions } from './types.js';
 import { ReactLoop } from './harness.js';
 import { buildSystemPrompt } from './system-prompt.js';
 import { MemoryManager } from '../memory/manager.js';
+import { extractAndStore } from '../memory/extractor.js';
 
 export interface StratumAgentOptions {
   /** Mensajes iniciales para reanudar una sesión guardada (incluye el system prompt original). */
@@ -56,11 +57,33 @@ export class StratumAgent {
       this.router.contextWindow,
     );
 
+    let stopReason: string | null = null;
     for await (const event of this.currentLoop.run(opts)) {
       if (event.type === 'tool_result') this._toolCallCount++;
+      if (event.type === 'done') stopReason = event.stopReason;
       yield event;
     }
     this.currentLoop = null;
+
+    // Extracción automática de decisiones en background (§9, detección
+    // LLM-based). Fire-and-forget: nunca bloquea ni interrumpe la respuesta.
+    if (stopReason === 'stop' && this.config.memory.autoExtract) {
+      void this.maybeAutoExtract();
+    }
+  }
+
+  /** Lanza la extracción automática de decisiones. Best-effort, no lanza. */
+  private async maybeAutoExtract(): Promise<void> {
+    try {
+      await extractAndStore({
+        provider: this.router.getActive(),
+        model: this.config.memory.extractionModel ?? this.router.model,
+        messages: this.getMessages(),
+        memory: this.memoryManager.getDecisionMemory(),
+      });
+    } catch {
+      /* la memoria es auxiliar: un fallo nunca debe afectar a la sesión */
+    }
   }
 
   /**

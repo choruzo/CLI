@@ -9,6 +9,8 @@ import { grepTool } from './fs/grep.js';
 import { bashTool } from './shell/bash.js';
 import { webSearchTool } from './web/search.js';
 import { webFetchTool } from './web/fetch.js';
+import { storeDecisionTool } from './memory/store-decision.js';
+import { recallDecisionsTool } from './memory/recall-decisions.js';
 
 export function registerBuiltinTools(registry: ToolRegistry, _config: StratumConfig): void {
   registry.register(readFileTool);
@@ -20,4 +22,6 @@ export function registerBuiltinTools(registry: ToolRegistry, _config: StratumCon
   registry.register(bashTool);
   registry.register(webSearchTool);
   registry.register(webFetchTool);
+  registry.register(storeDecisionTool);
+  registry.register(recallDecisionsTool);
 }
