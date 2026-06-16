@@ -1,0 +1,256 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Stratum — Memoria de Decisiones (Capas 2 y 3)</title>
+<style>
+  :root{
+    --bg:#0d1117; --panel:#161b22; --panel2:#1c2330; --border:#30363d;
+    --text:#c9d1d9; --muted:#8b949e; --dim:#5b6573;
+    --teal:#2dd4bf; --amber:#f59e0b; --blue:#58a6ff; --green:#3fb950; --red:#f85149;
+    --mono:'SFMono-Regular',Consolas,'Liberation Mono',Menlo,monospace;
+    --sans:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--text);font-family:var(--sans);
+       line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1080px;margin:0 auto;padding:28px 20px 60px}
+  header h1{font-size:1.5rem;margin:0 0 4px;letter-spacing:-.3px}
+  header h1 .tag{font-family:var(--mono);color:var(--teal);font-size:.95rem}
+  header p{color:var(--muted);margin:0 0 22px;font-size:.95rem}
+
+  .modebar{display:flex;gap:8px;margin-bottom:18px}
+  .modebtn{flex:0 0 auto;background:var(--panel);border:1px solid var(--border);
+    color:var(--muted);padding:8px 18px;border-radius:8px;cursor:pointer;
+    font-family:var(--mono);font-size:.85rem;transition:.18s}
+  .modebtn:hover{border-color:var(--dim);color:var(--text)}
+  .modebtn.active[data-mode="write"]{border-color:var(--amber);color:var(--amber);box-shadow:0 0 0 1px var(--amber) inset}
+  .modebtn.active[data-mode="read"]{border-color:var(--blue);color:var(--blue);box-shadow:0 0 0 1px var(--blue) inset}
+
+  .stage{display:grid;grid-template-columns:1fr 320px;gap:18px}
+  @media(max-width:860px){.stage{grid-template-columns:1fr}}
+
+  .canvas{background:var(--panel);border:1px solid var(--border);border-radius:12px;
+    padding:10px;position:relative;overflow:hidden}
+  svg{width:100%;height:auto;display:block}
+
+  .node rect{fill:var(--panel2);stroke:var(--border);stroke-width:1.5;rx:10;transition:.25s}
+  .node .label{fill:var(--text);font-family:var(--mono);font-size:13px;font-weight:600}
+  .node .sub{fill:var(--muted);font-family:var(--mono);font-size:10.5px}
+  .node.dim rect{opacity:.4}
+  .node.dim .label,.node.dim .sub{opacity:.45}
+  .node.active rect{stroke-width:2.5}
+  .edge{stroke:var(--dim);stroke-width:1.6;fill:none;opacity:.35}
+  .edge.hot{stroke-width:2.6;opacity:1;stroke-dasharray:7 6;animation:flow 1s linear infinite}
+  @keyframes flow{to{stroke-dashoffset:-26}}
+
+  /* acentos por modo */
+  body[data-mode="write"] .node.active rect{stroke:var(--amber)}
+  body[data-mode="write"] .edge.hot{stroke:var(--amber)}
+  body[data-mode="read"] .node.active rect{stroke:var(--blue)}
+  body[data-mode="read"] .edge.hot{stroke:var(--blue)}
+
+  .side{display:flex;flex-direction:column;gap:14px}
+  .stepcard{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:16px 18px;min-height:188px}
+  .stepcard .kicker{font-family:var(--mono);font-size:.72rem;letter-spacing:.5px;text-transform:uppercase;color:var(--muted)}
+  body[data-mode="write"] .stepcard .kicker b{color:var(--amber)}
+  body[data-mode="read"] .stepcard .kicker b{color:var(--blue)}
+  .stepcard h3{margin:6px 0 8px;font-size:1.05rem}
+  .stepcard p{margin:0;color:var(--text);font-size:.92rem}
+  .stepcard code{font-family:var(--mono);background:var(--panel2);padding:1px 5px;border-radius:4px;font-size:.85em;color:var(--teal)}
+
+  .controls{display:flex;align-items:center;gap:8px}
+  .controls button{background:var(--panel);border:1px solid var(--border);color:var(--text);
+    width:40px;height:40px;border-radius:8px;cursor:pointer;font-size:1rem;transition:.15s}
+  .controls button:hover{border-color:var(--dim)}
+  .controls .play{flex:1;width:auto;font-family:var(--mono);font-size:.85rem;display:flex;align-items:center;justify-content:center;gap:8px}
+  body[data-mode="write"] .controls .play{color:var(--amber)}
+  body[data-mode="read"] .controls .play{color:var(--blue)}
+  .dots{display:flex;gap:6px;justify-content:center;padding-top:4px}
+  .dots i{width:8px;height:8px;border-radius:50%;background:var(--border);transition:.2s;cursor:pointer}
+  body[data-mode="write"] .dots i.on{background:var(--amber)}
+  body[data-mode="read"] .dots i.on{background:var(--blue)}
+
+  .legend{background:var(--panel);border:1px solid var(--border);border-radius:12px;padding:14px 16px}
+  .legend h4{margin:0 0 8px;font-size:.8rem;text-transform:uppercase;letter-spacing:.5px;color:var(--muted)}
+  .legend .row{display:flex;gap:10px;font-size:.82rem;padding:4px 0;color:var(--muted)}
+  .legend .row b{color:var(--text);font-family:var(--mono);font-weight:600;flex:0 0 118px}
+  .invariant{margin-top:18px;border:1px dashed var(--green);border-radius:10px;padding:12px 16px;
+    background:rgba(63,185,80,.06);font-size:.85rem;color:var(--text)}
+  .invariant b{color:var(--green);font-family:var(--mono)}
+  footer{margin-top:26px;color:var(--dim);font-size:.78rem;font-family:var(--mono)}
+</style>
+</head>
+<body data-mode="write">
+<div class="wrap">
+  <header>
+    <h1>Stratum — Memoria de Decisiones <span class="tag">// Capas 2 y 3</span></h1>
+    <p>Memoria semántica persistente: el agente guarda decisiones técnicas y las recupera por significado. Elige un flujo y reprodúcelo paso a paso.</p>
+  </header>
+
+  <div class="modebar">
+    <button class="modebtn active" data-mode="write">✎ Escritura</button>
+    <button class="modebtn" data-mode="read">⌕ Lectura</button>
+  </div>
+
+  <div class="stage">
+    <div class="canvas">
+      <svg id="svg" viewBox="0 0 760 540" role="img" aria-label="Diagrama de la memoria de decisiones"></svg>
+    </div>
+
+    <div class="side">
+      <div class="stepcard">
+        <div class="kicker"><b id="kick">Escritura</b> · paso <span id="stepno">1</span>/<span id="steptot">6</span></div>
+        <h3 id="stitle">—</h3>
+        <p id="sdesc">—</p>
+      </div>
+      <div class="controls">
+        <button id="prev" title="Anterior">‹</button>
+        <button id="play" class="play"><span id="playicon">▶</span> <span id="playtxt">Reproducir</span></button>
+        <button id="next" title="Siguiente">›</button>
+      </div>
+      <div class="dots" id="dots"></div>
+
+      <div class="legend">
+        <h4>Las tres piezas</h4>
+        <div class="row"><b>decisions.json</b><span>Fuente de verdad (DecisionStore)</span></div>
+        <div class="row"><b>vectors.db</b><span>Índice de búsqueda (VectorStore: sqlite-vec o brute-force JS)</span></div>
+        <div class="row"><b>Embeddings</b><span>HTTP /v1/embeddings → fallback ONNX local</span></div>
+      </div>
+    </div>
+  </div>
+
+  <div class="invariant">
+    <b>Invariante:</b> <code>decisions.json</code> nunca se pierde. Si el embedder o el índice vectorial fallan, la decisión igual se persiste; solo se degrada la búsqueda semántica hasta el próximo <code>reindex()</code>. La memoria es auxiliar: jamás tumba una sesión.
+  </div>
+
+  <footer>stratum-cli/src/memory · doc: CLI-DOC/MEMORIA.md</footer>
+</div>
+
+<script>
+// ---- Nodos del diagrama (coordenadas del centro) ----
+const N = {
+  agente:   {x:380,y:48,  w:150,h:48, label:'Agente',         sub:'ReAct loop'},
+  store:    {x:175,y:150, w:172,h:50, label:'store_decision',  sub:'tool · serialized'},
+  extractor:{x:380,y:150, w:150,h:50, label:'extractor',       sub:'auto · background'},
+  recall:   {x:585,y:150, w:172,h:50, label:'recall_decisions',sub:'tool'},
+  embed:    {x:380,y:268, w:210,h:52, label:'EmbeddingService', sub:'texto → vector 384d (norm.)'},
+  vector:   {x:185,y:398, w:200,h:54, label:'VectorStore',      sub:'sqlite-vec / brute-force'},
+  store_json:{x:575,y:398,w:200,h:54, label:'DecisionStore',    sub:'decisions.json (verdad)'},
+  ui:       {x:380,y:500, w:230,h:46, label:'memory_retrieved → UI', sub:'↳ indicador discreto'},
+};
+// aristas base (tenues)
+const BASE = [
+  ['agente','store'],['agente','extractor'],['agente','recall'],
+  ['store','embed'],['extractor','embed'],['recall','embed'],
+  ['embed','vector'],['vector','store_json'],['store_json','vector'],
+  ['store_json','ui'],['vector','ui'],
+];
+
+const STEPS = {
+  write:[
+    {from:'agente',to:'store',act:['agente','store','extractor'],t:'Disparador',
+     d:'El agente invoca <code>store_decision</code> al tomar una decisión significativa, o el <code>extractor</code> la detecta en background tras la respuesta (source: auto).'},
+    {from:'store',to:'embed',act:['embed'],t:'Embedding',
+     d:'El texto (<code>title</code> + <code>content</code>) se convierte en un vector de 384 dimensiones, normalizado L2.'},
+    {from:'embed',to:'vector',act:['vector'],t:'Dedup semántico',
+     d:'<code>findSimilar</code> busca un near-duplicado en el índice. Si la similitud coseno ≥ 0.9, NO se duplica: se devuelve la decisión existente.'},
+    {from:'embed',to:'store_json',act:['store_json'],t:'Persistir (verdad)',
+     d:'Si es nueva: append atómico a <code>decisions.json</code> con id <code>dec_YYYYMMDD_&lt;nanoid6&gt;</code> y <code>embedding_ref</code>.'},
+    {from:'store_json',to:'vector',act:['vector'],t:'Indexar',
+     d:'El vector se inserta en el índice (<code>sqlite-vec</code> o, si faltan deps nativas, el fallback brute-force JS) con clave <code>embedding_ref</code>.'},
+    {from:null,to:null,act:['store_json','vector'],t:'Listo',
+     d:'La decisión vive en dos sitios: el JSON como verdad y el índice como buscador. Un fallo del índice nunca pierde el JSON.'},
+  ],
+  read:[
+    {from:'agente',to:'recall',act:['agente','recall'],t:'Disparador',
+     d:'El agente invoca <code>recall_decisions</code> con una consulta en lenguaje natural ("¿por qué elegimos sqlite-vec?").'},
+    {from:'recall',to:'embed',act:['embed'],t:'Embedding',
+     d:'La consulta se embebe al mismo espacio vectorial que las decisiones guardadas.'},
+    {from:'embed',to:'vector',act:['vector'],t:'Búsqueda KNN',
+     d:'<code>VectorStore.search</code> devuelve los K vecinos más cercanos por similitud coseno (K = <code>retrievalTopK</code>, 5 por defecto).'},
+    {from:'vector',to:'store_json',act:['store_json'],t:'Cargar registros',
+     d:'Por cada match se carga la decisión completa desde <code>decisions.json</code> usando su <code>embedding_ref</code>.'},
+    {from:'store_json',to:'ui',act:['ui'],t:'Filtrar y emitir',
+     d:'Se filtran los scores &lt; 0.2 (ruido) y el harness emite <code>memory_retrieved</code>: la UI muestra "↳ memoria recuperada: N decisiones".'},
+  ],
+};
+
+// ---- Render SVG ----
+const svg = document.getElementById('svg');
+const SVGNS='http://www.w3.org/2000/svg';
+function el(tag,attrs){const e=document.createElementNS(SVGNS,tag);for(const k in attrs)e.setAttribute(k,attrs[k]);return e;}
+function anchor(id){const n=N[id];return {x:n.x,y:n.y,w:n.w,h:n.h,
+  top:{x:n.x,y:n.y-n.h/2}, bot:{x:n.x,y:n.y+n.h/2}, l:{x:n.x-n.w/2,y:n.y}, r:{x:n.x+n.w/2,y:n.y}};}
+// punto de borde más cercano entre dos nodos (vertical priority)
+function ports(a,b){
+  const A=anchor(a),B=anchor(b);
+  let pA,pB;
+  if(B.y>A.y+10){pA=A.bot;pB=B.top;}
+  else if(B.y<A.y-10){pA=A.top;pB=B.bot;}
+  else if(B.x>A.x){pA=A.r;pB=B.l;}
+  else{pA=A.l;pB=B.r;}
+  return [pA,pB];
+}
+const edgeEls={};
+BASE.forEach(([a,b])=>{
+  const [p,q]=ports(a,b);
+  const mx=(p.x+q.x)/2;
+  const path=`M ${p.x} ${p.y} C ${mx} ${p.y}, ${mx} ${q.y}, ${q.x} ${q.y}`;
+  const e=el('path',{d:path,class:'edge'});
+  svg.appendChild(e);
+  edgeEls[a+'>'+b]=e; edgeEls[b+'>'+a]=el('path',{d:`M ${q.x} ${q.y} C ${mx} ${q.y}, ${mx} ${p.y}, ${p.x} ${p.y}`,class:'edge'});
+  svg.appendChild(edgeEls[b+'>'+a]);
+});
+const nodeEls={};
+for(const id in N){
+  const n=N[id];
+  const g=el('g',{class:'node'});
+  g.appendChild(el('rect',{x:n.x-n.w/2,y:n.y-n.h/2,width:n.w,height:n.h,rx:10}));
+  const t1=el('text',{x:n.x,y:n.y-(n.sub?4:-4),'text-anchor':'middle',class:'label'});t1.textContent=n.label;
+  g.appendChild(t1);
+  if(n.sub){const t2=el('text',{x:n.x,y:n.y+13,'text-anchor':'middle',class:'sub'});t2.textContent=n.sub;g.appendChild(t2);}
+  svg.appendChild(g); nodeEls[id]=g;
+}
+
+// ---- Player ----
+let mode='write', idx=0, timer=null;
+const $=id=>document.getElementById(id);
+function hotEdge(from,to){
+  for(const k in edgeEls) edgeEls[k].classList.remove('hot');
+  if(from&&to&&edgeEls[from+'>'+to]) edgeEls[from+'>'+to].classList.add('hot');
+}
+function render(){
+  const steps=STEPS[mode]; const s=steps[idx];
+  document.body.dataset.mode=mode;
+  for(const id in nodeEls){
+    nodeEls[id].classList.toggle('active', s.act.includes(id));
+    nodeEls[id].classList.toggle('dim', !s.act.includes(id));
+  }
+  hotEdge(s.from,s.to);
+  $('kick').textContent = mode==='write'?'Escritura':'Lectura';
+  $('stepno').textContent=idx+1; $('steptot').textContent=steps.length;
+  $('stitle').textContent=s.t; $('sdesc').innerHTML=s.d;
+  // dots
+  const dots=$('dots'); dots.innerHTML='';
+  steps.forEach((_,i)=>{const d=document.createElement('i');if(i===idx)d.className='on';
+    d.onclick=()=>{idx=i;stop();render();};dots.appendChild(d);});
+}
+function next(){const len=STEPS[mode].length; idx=(idx+1)%len; render();}
+function prev(){const len=STEPS[mode].length; idx=(idx-1+len)%len; render();}
+function play(){ if(timer){stop();return;} $('playicon').textContent='❚❚';$('playtxt').textContent='Pausa';
+  timer=setInterval(()=>{ if(idx===STEPS[mode].length-1){stop();return;} next(); },1700); }
+function stop(){ if(timer)clearInterval(timer); timer=null; $('playicon').textContent='▶';$('playtxt').textContent='Reproducir'; }
+$('next').onclick=()=>{stop();next();};
+$('prev').onclick=()=>{stop();prev();};
+$('play').onclick=play;
+document.querySelectorAll('.modebtn').forEach(b=>b.onclick=()=>{
+  stop(); mode=b.dataset.mode; idx=0;
+  document.querySelectorAll('.modebtn').forEach(x=>x.classList.toggle('active',x===b));
+  render();
+});
+render();
+</script>
+</body>
+</html>

@@ -681,6 +681,8 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 - [x] Búsqueda semántica KNN (`DecisionMemory.search`, umbral de recuperación independiente del de dedup)
 - [x] Inyección de memoria relevante en context (tool `recall_decisions`; el agente decide cuándo recuperar)
 - [x] Comandos `stratum memory list/search/forget` (`src/cli/commands/memory.ts`)
+- [x] UI: `/memory list/search/forget` en el autocompletado (`session-commands.ts`) y manejados en `App.tsx`; indicador discreto al recuperar memoria (evento `memory_retrieved` emitido en `harness.ts` y manejado en el reducer); warm-up ONNX cableado en `chat` (`memory.embeddingWarmup`)
+- [x] Build saludable: `@xenova/transformers`, `better-sqlite3` y `sqlite-vec` marcados como `external` en `tsup.config.ts` (resolución dinámica en runtime)
 
 > **UI:** Activar los comandos `/memory list`, `/memory search` y `/memory forget` en el autocompletado. Añadir indicador visual discreto cuando el agente recupera memoria semántica (evento `memory_retrieved` del `AgentEvent` schema). Mostrar la barra de progreso de descarga del modelo ONNX en el primer arranque. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/memory list/search/forget`), [§11 — Mapeo a Componentes Ink](./STRATUM_UI_SPECIFICATION.md#11-mapeo-a-componentes-ink) (evento `memory_retrieved`), [§15 — Consideraciones Windows vs Linux](./STRATUM_UI_SPECIFICATION.md#15-consideraciones-windows-vs-linux) (carga ONNX).
 
