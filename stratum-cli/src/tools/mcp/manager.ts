@@ -11,6 +11,7 @@ import { McpServerClient } from './client.js';
 import { buildMcpTool } from './bridge.js';
 import { expandHome } from '../../config/paths.js';
 import type { McpRuntimeOptions } from './installer.js';
+import { mcpLog } from './diagnostics.js';
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -37,13 +38,22 @@ export class McpManager {
   private heartbeatHandle: ReturnType<typeof setInterval> | null = null;
   private registry: ToolRegistry | null = null;
 
-  constructor(private readonly config: StratumConfig) {
+  /**
+   * @param config configuración de Stratum
+   * @param onLog sink para el diagnóstico de los servers (stderr, instalador).
+   *   Por defecto va a `~/.stratum/logs/mcp.log` vía `mcpLog`; los tests pueden
+   *   inyectar un sink propio (o un no-op).
+   */
+  constructor(
+    private readonly config: StratumConfig,
+    onLog: (line: string) => void = mcpLog,
+  ) {
     const runtime: McpRuntimeOptions = {
       installDir: expandHome(config.mcp.installDir),
       autoInstall: config.mcp.autoInstall,
     };
     for (const serverCfg of config.mcp.servers) {
-      this.clients.push(new McpServerClient(serverCfg, runtime));
+      this.clients.push(new McpServerClient(serverCfg, runtime, onLog));
     }
   }
 
