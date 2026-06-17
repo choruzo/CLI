@@ -75,6 +75,11 @@ export class McpServerClient {
       command: resolved.command,
       args: resolved.args,
       env: resolved.env,
+      // Por defecto el SDK usa 'inherit', lo que vuelca el stderr del server
+      // (banners, avisos de telemetría, etc.) directamente a la terminal de
+      // Stratum y ensucia la UI de arranque. Lo capturamos con 'pipe' para que
+      // no llegue a la consola y lo drenamos hacia onLog (diagnóstico).
+      stderr: 'pipe',
     });
 
     // Registrar el handler de cierre inesperado del transport antes de connect()
@@ -98,8 +103,29 @@ export class McpServerClient {
       throw err;
     }
 
+    // El proceso hijo ya está spawneado: drenamos su stderr (capturado con
+    // stderr='pipe') para que no quede bufferizado ni aparezca en la UI.
+    this._drainStderr();
+
     await this._discoverTools();
     this._status = 'connected';
+  }
+
+  /**
+   * Drena el stderr del proceso hijo (disponible cuando stderr='pipe'),
+   * reenviando cada línea no vacía a onLog en vez de a la consola.
+   */
+  private _drainStderr(): void {
+    const childStderr = this.transport?.stderr;
+    if (!childStderr) return;
+    childStderr.on('data', (chunk: Buffer) => {
+      const text = chunk.toString('utf8');
+      for (const line of text.split(/\r?\n/)) {
+        if (line.trim().length > 0) this.onLog?.(`[${this.name}] ${line}`);
+      }
+    });
+    // Evitar que un error en el stream tumbe el proceso.
+    childStderr.on('error', () => {});
   }
 
   /**
