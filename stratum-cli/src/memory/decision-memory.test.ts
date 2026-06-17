@@ -56,8 +56,9 @@ describe('DecisionMemory', () => {
 
   it('save persiste y luego search recupera la decisión', async () => {
     const mem = makeMemory(dir);
-    const { record, deduped } = await mem.save(sqliteDecision);
+    const { record, deduped, indexed } = await mem.save(sqliteDecision);
     expect(deduped).toBe(false);
+    expect(indexed).toBe(true);
     expect(record.source).toBe(undefined);
 
     const results = await mem.search('por qué elegimos sqlite embeddings');
@@ -118,7 +119,20 @@ describe('DecisionMemory', () => {
       embedding: { embedFn: async () => [] },
       forceFallbackVectors: true,
     });
-    const { record } = await mem.save(sqliteDecision);
+    const { record, indexed } = await mem.save(sqliteDecision);
+    expect(indexed).toBe(false);
     expect(mem.store.get(record.id)).toBeDefined();
+  });
+
+  it('search auto-reindexa si el índice está vacío pero hay decisiones guardadas', async () => {
+    const mem = makeMemory(dir);
+    // Simular una decisión guardada SIN indexar (embedder caído en su momento):
+    // se inserta directamente en el store, el índice queda vacío.
+    mem.store.add(sqliteDecision);
+    expect(await mem.vectors.count()).toBe(0);
+    // Ahora con embedder operativo, search debe reconstruir el índice y encontrarla.
+    const res = await mem.search('sqlite embeddings');
+    expect(res.length).toBeGreaterThanOrEqual(1);
+    expect(await mem.vectors.count()).toBe(1);
   });
 });

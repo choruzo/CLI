@@ -177,7 +177,7 @@ export class EmbeddingService {
       process.env.HF_HUB_DISABLE_SYMLINKS_WARNING ??= '1';
     }
 
-    this.pipelinePromise = (async () => {
+    const p = (async () => {
       // Import dinámico: @xenova/transformers es opcional. Si no está instalado
       // el throw se propaga a embed() que degrada a memoria sin índice.
       const mod = (await import(
@@ -192,7 +192,13 @@ export class EmbeddingService {
       });
     })();
 
-    return this.pipelinePromise;
+    // Si la carga falla (modelo no descargable, dep ausente), NO dejar cacheada
+    // una promesa rechazada: limpiarla para que un próximo intento reintente.
+    this.pipelinePromise = p;
+    p.catch(() => {
+      if (this.pipelinePromise === p) this.pipelinePromise = null;
+    });
+    return p;
   }
 
   private warn(msg: string): void {

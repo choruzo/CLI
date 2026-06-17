@@ -35,6 +35,20 @@ export const storeDecisionTool: ToolDefinition = {
           output: `Decisión ya registrada (near-duplicado de ${result.duplicateOf}). No se creó una entrada nueva.`,
         };
       }
+      if (!result.indexed) {
+        // La decisión se persistió en decisions.json pero NO se indexó: el
+        // servicio de embeddings no está disponible (sin @xenova/transformers
+        // instalado y sin memory.embeddingEndpoint accesible). Avisar para que
+        // no se asuma que será recuperable con recall_decisions.
+        return {
+          ok: true,
+          output:
+            `Decisión almacenada: ${result.record.id} — "${result.record.title}". ` +
+            'AVISO: no se pudo generar el embedding (servicio de embeddings no disponible), ' +
+            'así que NO será recuperable por búsqueda semántica hasta que haya un embedder activo ' +
+            '(instala @xenova/transformers o configura memory.embeddingEndpoint).',
+        };
+      }
       return { ok: true, output: `Decisión almacenada: ${result.record.id} — "${result.record.title}"` };
     } catch (err) {
       return {

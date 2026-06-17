@@ -9,6 +9,9 @@ export interface SaveResult {
   /** true si se detectó un near-duplicado y NO se creó una entrada nueva. */
   deduped: boolean;
   duplicateOf?: string;
+  /** false si el embedder no estaba disponible: la decisión se guardó en
+   *  decisions.json pero NO se indexó (no será recuperable semánticamente). */
+  indexed: boolean;
 }
 
 export interface RecallResult {
@@ -72,20 +75,26 @@ export class DecisionMemory {
       if (dupRef) {
         const existing = this.store.getByRef(dupRef);
         if (existing) {
-          return { record: existing, deduped: true, duplicateOf: existing.id };
+          return { record: existing, deduped: true, duplicateOf: existing.id, indexed: true };
         }
       }
     }
 
     const record = this.store.add(input);
     if (vec) await this.vectors.add(record.embedding_ref, vec);
-    return { record, deduped: false };
+    return { record, deduped: false, indexed: vec !== null };
   }
 
   /** Búsqueda semántica KNN. Devuelve decisiones por encima del umbral de score. */
   async search(query: string, k?: number): Promise<RecallResult[]> {
     const vec = await this.embedder.embedOne(query);
     if (!vec) return [];
+    // Auto-reparación: si el índice está vacío pero hay decisiones guardadas
+    // (p. ej. se guardaron mientras el embedder estaba caído y ahora funciona),
+    // reconstruir el índice desde decisions.json antes de buscar.
+    if ((await this.vectors.count()) === 0 && this.store.all().length > 0) {
+      await this.reindex();
+    }
     const matches = await this.vectors.search(vec, k ?? this.topK);
     const out: RecallResult[] = [];
     for (const m of matches) {
