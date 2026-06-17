@@ -24,7 +24,16 @@
     "decisionsFile": "~/.stratum/memory/decisions.json",
     "vectorDb": "~/.stratum/memory/vectors.db",
     "embeddingModel": "Xenova/all-MiniLM-L6-v2",
+    "embeddingDimension": 384,
+    "embeddingEndpoint": {
+      "url": "http://localhost:11434/v1/embeddings",
+      "model": "all-minilm",
+      "apiKey": ""
+    },
     "retrievalTopK": 5,
+    "similarityThreshold": 0.9,
+    "autoExtract": true,
+    "extractionModel": "qwen3.5:9b",
     "embeddingWarmup": false
   },
   "tools": {
