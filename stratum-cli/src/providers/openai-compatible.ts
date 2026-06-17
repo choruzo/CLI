@@ -1,6 +1,9 @@
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from './base.js';
 import type { AgentEvent } from '../agent/types.js';
+import { getLogger } from '../logging/index.js';
+
+const log = getLogger('provider');
 
 interface ToolBuffer {
   id: string;
@@ -99,6 +102,16 @@ export class OpenAICompatible implements IProvider {
       body['temperature'] = req.temperature;
     }
 
+    // El apiKey nunca se registra: solo metadatos no sensibles del request.
+    log.debug('request', {
+      model: req.model,
+      url,
+      messages: req.messages.length,
+      tools: req.tools?.length ?? 0,
+      stream: true,
+    });
+    const endTimer = log.startTimer();
+
     const response = await fetch(url, {
       method: 'POST',
       headers: {
@@ -111,29 +124,51 @@ export class OpenAICompatible implements IProvider {
 
     if (!response.ok) {
       const text = await response.text();
+      log.error('http error', {
+        status: response.status,
+        model: req.model,
+        durationMs: endTimer(),
+        body: text.slice(0, 500),
+      });
       throw new Error(`LLM API error ${response.status}: ${text}`);
     }
 
     if (!response.body) {
+      log.error('empty response body', { model: req.model, status: response.status });
       throw new Error('LLM API returned no response body');
     }
+
+    log.trace('response headers', { status: response.status, ttfbMs: endTimer() });
 
     const eventStream = response.body
       .pipeThrough(new TextDecoderStream())
       .pipeThrough(new EventSourceParserStream());
 
+    let chunks = 0;
+    let lastUsage: OpenAIStreamChunk['usage'];
     for await (const event of eventStream) {
       if ('data' in event) {
         if (event.data === '[DONE]') break;
         try {
           const chunk = JSON.parse(event.data) as OpenAIStreamChunk;
           // Yield tanto chunks con choices como el chunk final de usage (choices vacío)
-          if (chunk.choices?.[0] || chunk.usage) yield chunk;
+          if (chunk.choices?.[0] || chunk.usage) {
+            chunks++;
+            if (chunk.usage) lastUsage = chunk.usage;
+            yield chunk;
+          }
         } catch {
           // skip malformed chunks
         }
       }
     }
+    log.debug('response complete', {
+      model: req.model,
+      chunks,
+      durationMs: endTimer(),
+      promptTokens: lastUsage?.prompt_tokens,
+      completionTokens: lastUsage?.completion_tokens,
+    });
   }
 
   async healthCheck(): Promise<boolean> {

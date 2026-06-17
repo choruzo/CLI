@@ -74,5 +74,16 @@
     "maxToolRetries": 3,
     "toolErrorFormat": "xml",
     "compressionKeepRounds": 6
+  },
+  "logging": {
+    "level": "info",
+    "stderr": true,
+    "redact": true,
+    "file": {
+      "enabled": false,
+      "dir": "~/.stratum/logs",
+      "maxBytes": 5242880,
+      "maxFiles": 5
+    }
   }
 }

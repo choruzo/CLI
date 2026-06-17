@@ -13,6 +13,7 @@ import { StratumAgent } from '../../agent/core.js';
 import { SessionStore } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
+import { configureLogging, flushLogging, getLogger, isLogLevel, type LogLevel } from '../../logging/index.js';
 
 declare const __VERSION__: string;
 
@@ -33,7 +34,20 @@ export const chatCommand = new Command('chat')
   .description('Start an interactive REPL session with the agent')
   .option('--provider <name>', 'use a specific provider from config')
   .option('--resume <session-id>', 'resume a previous session')
-  .action(async (opts: { provider?: string; resume?: string }) => {
+  .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
+  .option('--debug', 'enable verbose debug logging (level debug + file sink)')
+  .action(
+    async (opts: {
+      provider?: string;
+      resume?: string;
+      logLevel?: string;
+      debug?: boolean;
+    }) => {
+    if (opts.logLevel && !isLogLevel(opts.logLevel)) {
+      process.stderr.write(`Invalid --log-level: ${opts.logLevel}\n`);
+      process.exit(1);
+    }
+
     let config;
     try {
       config = loadConfig();
@@ -41,6 +55,16 @@ export const chatCommand = new Command('chat')
       process.stderr.write(`Config error: ${String(err)}\n`);
       process.exit(1);
     }
+
+    // Ink es dueño de stdout; el sink de stderr se mantiene en warn+ por defecto
+    // para no entrelazarse con la UI. --debug/--log-level lo elevan, y el sink de
+    // fichero (si está activo) recibe el nivel completo igualmente.
+    configureLogging(config, {
+      level: opts.logLevel as LogLevel | undefined,
+      debug: opts.debug,
+      stderrLevel: 'warn',
+    });
+    getLogger('cli').debug('chat start', { provider: opts.provider, resume: opts.resume });
 
     let router;
     try {
@@ -120,6 +144,7 @@ export const chatCommand = new Command('chat')
     }
 
     await mcpManager.shutdownAll();
+    await flushLogging();
 
     // -----------------------------------------------------------------------
     // Guardar sesión al salir

@@ -12,6 +12,9 @@ import { buildMcpTool } from './bridge.js';
 import { expandHome } from '../../config/paths.js';
 import type { McpRuntimeOptions } from './installer.js';
 import { mcpLog } from './diagnostics.js';
+import { getLogger } from '../../logging/index.js';
+
+const log = getLogger('mcp');
 
 // ---------------------------------------------------------------------------
 // Tipos
@@ -71,10 +74,13 @@ export class McpManager {
       const result = results[i]!;
       const client = this.clients[i]!;
       if (result.status === 'rejected') {
+        log.error('connect failed', { server: client.name, err: result.reason });
         warnings.push({
           serverName: client.name,
           message: `MCP server '${client.name}' failed to connect: ${result.reason instanceof Error ? result.reason.message : String(result.reason)}`,
         });
+      } else {
+        log.info('connected', { server: client.name, tools: client.tools.length });
       }
     }
 
@@ -93,8 +99,12 @@ export class McpManager {
     for (const client of this.clients) {
       void client
         .connect()
-        .then(() => this._registerClientTools(client, registry))
+        .then(() => {
+          log.info('connected (background)', { server: client.name, tools: client.tools.length });
+          this._registerClientTools(client, registry);
+        })
         .catch((reason) => {
+          log.error('connect failed (background)', { server: client.name, err: reason });
           onWarn?.({
             serverName: client.name,
             message: `MCP server '${client.name}' failed to connect: ${reason instanceof Error ? reason.message : String(reason)}`,
@@ -178,6 +188,7 @@ export class McpManager {
         await client.ping();
       } catch {
         // El ping falló: iniciar reconexión con backoff exponencial (§12.8)
+        log.warn('heartbeat lost, reconnecting', { server: client.name });
         void this._reconnectWithBackoff(client);
       }
     }
@@ -193,6 +204,7 @@ export class McpManager {
       try {
         await client.reconnect();
         // Reconexión exitosa: re-registrar tools si hay registry disponible
+        log.info('reconnected', { server: client.name, afterMs: delay });
         if (this.registry) {
           this._registerClientTools(client, this.registry);
         }
@@ -201,6 +213,7 @@ export class McpManager {
         // Sigue intentando con el siguiente delay
       }
     }
+    log.error('reconnect exhausted', { server: client.name });
     // Agotados los reintentos → disconnected (status ya lo fija reconnect internamente)
   }
 }

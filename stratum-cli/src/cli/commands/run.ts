@@ -8,6 +8,7 @@ import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
 import { StratumAgent } from '../../agent/core.js';
+import { configureLogging, flushLogging, getLogger, isLogLevel, type LogLevel } from '../../logging/index.js';
 
 function summarizeInput(input: Record<string, unknown>): string {
   const keys = Object.keys(input);
@@ -22,11 +23,24 @@ export const runCommand = new Command('run')
   .option('--provider <name>', 'use a specific provider from config')
   .option('--allow-destructive', 'approve all destructive operations without prompting')
   .option('--deny-destructive', 'block all destructive operations automatically')
+  .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
+  .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
     async (
       task: string,
-      opts: { provider?: string; allowDestructive?: boolean; denyDestructive?: boolean },
+      opts: {
+        provider?: string;
+        allowDestructive?: boolean;
+        denyDestructive?: boolean;
+        logLevel?: string;
+        debug?: boolean;
+      },
     ) => {
+      if (opts.logLevel && !isLogLevel(opts.logLevel)) {
+        process.stderr.write(`[fatal] Invalid --log-level: ${opts.logLevel}\n`);
+        process.exit(1);
+      }
+
       let config;
       try {
         config = loadConfig();
@@ -34,6 +48,15 @@ export const runCommand = new Command('run')
         process.stderr.write(`[fatal] Config error: ${String(err)}\n`);
         process.exit(1);
       }
+
+      configureLogging(config, {
+        level: opts.logLevel as LogLevel | undefined,
+        debug: opts.debug,
+        // Por defecto stderr solo muestra warn+ para no duplicar la UI de run;
+        // --debug o --log-level lo elevan al nivel solicitado.
+        stderrLevel: 'warn',
+      });
+      getLogger('cli').debug('run start', { task: task.slice(0, 120) });
 
       let router;
       try {
@@ -174,11 +197,14 @@ export const runCommand = new Command('run')
         }
       } catch (err) {
         await mcpManager.shutdownAll();
+        getLogger('cli').error('run aborted with error', { err });
+        await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
         process.exit(1);
       }
 
       await mcpManager.shutdownAll();
+      await flushLogging();
 
       if (controller.signal.aborted) {
         process.exit(130);

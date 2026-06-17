@@ -145,6 +145,32 @@ export const StratumConfigSchema = z.object({
     })
     .default({}),
 
+  logging: z
+    .object({
+      /**
+       * Nivel base de log: trace|debug|info|warn|error|silent.
+       * Sobrescribible con `--log-level`, `STRATUM_LOG_LEVEL` o `--debug`.
+       */
+      level: z.enum(['trace', 'debug', 'info', 'warn', 'error', 'silent']).default('info'),
+      /** Salida legible y coloreada a stderr (en `chat` se eleva a warn+ para no romper Ink). */
+      stderr: z.boolean().default(true),
+      /** Redacta secretos (apiKey, Authorization, tokens…) antes de escribir cualquier log. */
+      redact: z.boolean().default(true),
+      file: z
+        .object({
+          /** Persistir logs en JSON Lines. Default off; `--debug`/`STRATUM_LOG_FILE=1` lo activan. */
+          enabled: z.boolean().default(false),
+          /** Carpeta del fichero `stratum.jsonl`. */
+          dir: z.string().default('~/.stratum/logs'),
+          /** Tamaño máximo antes de rotar (bytes). */
+          maxBytes: z.number().int().positive().default(5 * 1024 * 1024),
+          /** Ficheros rotados a conservar (`.1`…`.N`). */
+          maxFiles: z.number().int().positive().default(5),
+        })
+        .default({}),
+    })
+    .default({}),
+
   agent: z
     .object({
       maxIterations: z.number().int().positive().default(50),

@@ -6,6 +6,9 @@ import type { AgentEvent, Message, ToolCallReady, ToolContext, RunOptions } from
 import type { ToolRegistry, DispatchResult } from '../tools/registry.js';
 import { ToolDispatcher } from '../tools/registry.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { getLogger } from '../logging/index.js';
+
+const log = getLogger('agent');
 
 function delay(ms: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, ms));
@@ -19,7 +22,16 @@ async function* streamWithRetry(
 ): AsyncGenerator<OpenAIStreamChunk> {
   let lastErr: unknown;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) await delay(1000 * Math.pow(2, attempt - 1));
+    if (attempt > 0) {
+      const backoff = 1000 * Math.pow(2, attempt - 1);
+      log.warn('stream retry', {
+        attempt,
+        maxAttempts,
+        backoffMs: backoff,
+        err: lastErr,
+      });
+      await delay(backoff);
+    }
     try {
       const gen = provider.complete(request);
       const first = await gen.next();
@@ -32,6 +44,7 @@ async function* streamWithRetry(
       lastErr = err;
     }
   }
+  log.error('stream failed after retries', { maxAttempts, err: lastErr });
   throw lastErr;
 }
 
@@ -393,14 +406,39 @@ export class ReactLoop {
     const compressionMode = opts?.compressionMode ?? 'normal';
     this.contextManager.setCompressionMode(compressionMode);
 
+    const loopLog = log.child('loop', { model: this.model });
+    loopLog.debug('run start', {
+      tools: tools.length,
+      messages: this.messages.length,
+      maxIterations: this.config.agent.maxIterations,
+      compressionMode,
+    });
+
     for (let iter = 0; iter < this.config.agent.maxIterations; iter++) {
       if (signal.aborted) {
+        loopLog.info('cancelled', { iter });
         yield { type: 'done', stopReason: 'cancelled' };
         return;
       }
 
+      const ctxUsage = this.contextManager.usage(this.messages);
+      loopLog.debug('iteration', {
+        iter,
+        messages: this.messages.length,
+        ctxPct: ctxUsage.pct,
+        ctxEstimated: ctxUsage.estimated,
+      });
+
       // Comprimir contexto antes de cada iteración (§12.4)
       const comprResult = await this.contextManager.maybeCompress(this.messages);
+      if (comprResult.kind === 'compressed' || comprResult.kind === 'truncated') {
+        loopLog.info(`context ${comprResult.kind}`, {
+          tokensBefore: comprResult.tokensBefore,
+          tokensAfter: comprResult.tokensAfter,
+        });
+      } else if (comprResult.kind === 'pressure') {
+        loopLog.warn('context window pressure', { ctxPct: ctxUsage.pct });
+      }
       // F6: en modo conservative (p. ej. /init) la compresión destruye el
       // contexto investigado — avisar de forma visible si llegó a activarse.
       if (
@@ -493,6 +531,7 @@ export class ReactLoop {
       }
 
       if (fatalError !== null) {
+        loopLog.error('fatal stream error', { iter, message: fatalError });
         yield { type: 'error', message: fatalError, fatal: true };
         yield { type: 'done', stopReason: 'error' };
         return;
@@ -528,8 +567,18 @@ export class ReactLoop {
 
       // Parar solo cuando no hay ningún tool call (ni válido ni con parse error)
       if (readyCalls.length === 0 && parseErrors.length === 0) {
+        loopLog.debug('done', { iter, stopReason: 'stop', textChars: assistantText.length });
         yield { type: 'done', stopReason: 'stop' };
         return;
+      }
+
+      if (readyCalls.length > 0 || parseErrors.length > 0) {
+        loopLog.debug('dispatching tool calls', {
+          iter,
+          ready: readyCalls.length,
+          parseErrors: parseErrors.length,
+          tools: readyCalls.map((c) => c.name),
+        });
       }
 
       // Inyectar parse errors al historial para que el LLM pueda recuperarse
@@ -615,6 +664,7 @@ export class ReactLoop {
       }
     }
 
+    loopLog.warn('max iterations reached', { maxIterations: this.config.agent.maxIterations });
     yield { type: 'done', stopReason: 'max_iterations' };
   }
 

@@ -8,6 +8,9 @@ import type {
 } from '../agent/types.js';
 import type { ToolSchema } from '../providers/base.js';
 import { truncateToolOutput } from './truncate.js';
+import { getLogger } from '../logging/index.js';
+
+const log = getLogger('tools');
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
@@ -133,6 +136,7 @@ export class ToolDispatcher {
 
     if (policy === 'deny' || !ctx.confirmDestructive) {
       // --deny-destructive explícito, o modo piped/CI sin TTY (§12.5)
+      log.warn('destructive blocked', { tool: call.name, policy, description });
       return {
         ok: false,
         error:
@@ -152,6 +156,8 @@ export class ToolDispatcher {
     } catch {
       decision = 'deny';
     }
+
+    log.info('destructive decision', { tool: call.name, decision, description });
 
     if (decision === 'allow-all') {
       this.allowAllDestructive = true;
@@ -215,6 +221,7 @@ export class ToolDispatcher {
     const tool = this.registry.get(call.name);
 
     if (!tool) {
+      log.warn('tool not found', { tool: call.name });
       return {
         callId: call.id,
         toolName: call.name,
@@ -225,6 +232,7 @@ export class ToolDispatcher {
 
     const failCount = this.toolFailureCounts.get(call.name) ?? 0;
     if (failCount >= this.maxToolRetries) {
+      log.warn('tool disabled for session', { tool: call.name, failures: failCount });
       this.registry.disableForSession(call.name);
       return {
         callId: call.id,
@@ -238,9 +246,12 @@ export class ToolDispatcher {
       };
     }
 
+    log.debug('tool start', { tool: call.name });
+
     const parsed = tool.schema.safeParse(call.input);
     if (!parsed.success) {
       this.recordFailure(call.name);
+      log.warn('tool invalid params', { tool: call.name, error: parsed.error.message });
       return {
         callId: call.id,
         toolName: call.name,
@@ -286,6 +297,17 @@ export class ToolDispatcher {
       ]);
       clearTimeout(timeoutId);
       if (!result.ok) this.recordFailure(call.name);
+      const durationMs = Date.now() - start;
+      if (result.ok) {
+        log.debug('tool ok', { tool: call.name, durationMs, outputChars: result.output.length });
+      } else {
+        log.warn('tool error', {
+          tool: call.name,
+          durationMs,
+          recoverable: result.recoverable,
+          error: result.error,
+        });
+      }
       // F4: truncar cualquier salida de tool antes de que entre al historial,
       // para proteger el contexto del modelo (cabeza 80% + cola 20%).
       const truncated: ToolResult = result.ok
@@ -295,11 +317,12 @@ export class ToolDispatcher {
         callId: call.id,
         toolName: call.name,
         result: truncated,
-        durationMs: Date.now() - start,
+        durationMs,
       };
     } catch (err) {
       clearTimeout(timeoutId);
       this.recordFailure(call.name);
+      log.warn('tool threw', { tool: call.name, durationMs: Date.now() - start, err });
       return {
         callId: call.id,
         toolName: call.name,
