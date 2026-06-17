@@ -141,7 +141,8 @@ export async function resolveServerCommand(
   onLog?: (line: string) => void,
 ): Promise<ResolvedCommand> {
   if (!serverCfg.package) {
-    return { command: serverCfg.command, args: serverCfg.args, env: serverCfg.env };
+    // El schema garantiza que command está definido cuando package está ausente.
+    return { command: serverCfg.command!, args: serverCfg.args, env: serverCfg.env };
   }
 
   ensureInstallDir(options.installDir);

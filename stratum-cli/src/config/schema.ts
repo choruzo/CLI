@@ -8,24 +8,30 @@ const ProviderConfigSchema = z.object({
   contextWindow: z.number().int().positive().default(32768),
 });
 
-const McpServerSchema = z.object({
-  name: z.string(),
-  command: z.string(),
-  args: z.array(z.string()).default([]),
-  env: z.record(z.string()).optional(),
-  /**
-   * Paquete npm a instalar en la carpeta gestionada (`mcp.installDir`).
-   * Cuando se define, Stratum instala el paquete una sola vez en
-   * `<installDir>/<server>/` y lanza el binario resuelto con `node`
-   * directamente, evitando el coste de resolución de `npx` en cada arranque
-   * (§12.8). `command`/`args` se ignoran como ejecutable: `args` se conserva
-   * y se pasa al binario resuelto. Formato: `nombre`, `nombre@version` o
-   * `@scope/nombre@version` (pinear versión es lo recomendado).
-   */
-  package: z.string().optional(),
-  /** Timeout de arranque por server en ms (§12.8, opción 3). */
-  startupTimeout: z.number().int().positive().default(15000),
-});
+const McpServerSchema = z
+  .object({
+    name: z.string(),
+    /** Requerido cuando no se define `package`; ignorado como ejecutable cuando `package` sí se define. */
+    command: z.string().optional(),
+    args: z.array(z.string()).default([]),
+    env: z.record(z.string()).optional(),
+    /**
+     * Paquete npm a instalar en la carpeta gestionada (`mcp.installDir`).
+     * Cuando se define, Stratum instala el paquete una sola vez en
+     * `<installDir>/<server>/` y lanza el binario resuelto con `node`
+     * directamente, evitando el coste de resolución de `npx` en cada arranque
+     * (§12.8). `command`/`args` se ignoran como ejecutable: `args` se conserva
+     * y se pasa al binario resuelto. Formato: `nombre`, `nombre@version` o
+     * `@scope/nombre@version` (pinear versión es lo recomendado).
+     */
+    package: z.string().optional(),
+    /** Timeout de arranque por server en ms (§12.8, opción 3). */
+    startupTimeout: z.number().int().positive().default(15000),
+  })
+  .refine((s) => s.package !== undefined || (s.command !== undefined && s.command.length > 0), {
+    message: "Se requiere 'command' cuando no se define 'package'",
+    path: ['command'],
+  });
 
 export const StratumConfigSchema = z.object({
   provider: z
