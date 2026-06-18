@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest';
 import { packageNameFromSpec, serverInstallPath } from './installer.js';
 import type { McpServer } from '../../config/schema.js';
 import { isServerInstalled } from './installer.js';
+import { dirname, normalize } from 'path';
 
 describe('packageNameFromSpec', () => {
   it('paquete sin versión', () => {
@@ -29,9 +30,10 @@ describe('packageNameFromSpec', () => {
 
 describe('serverInstallPath', () => {
   it('sanitiza el nombre del server', () => {
-    const p = serverInstallPath('/base/mcp', 'my/server name');
+    const base = process.platform === 'win32' ? 'C:\\base\\mcp' : '/base/mcp';
+    const p = serverInstallPath(base, 'my/server name');
     expect(p.endsWith('my_server_name')).toBe(true);
-    expect(p.startsWith('/base/mcp')).toBe(true);
+    expect(normalize(dirname(p))).toBe(normalize(base));
   });
 });
 

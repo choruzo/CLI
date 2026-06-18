@@ -1,8 +1,22 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { mkdirSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { expandEnvVars, findConfigFile, loadConfig } from './loader.js';
+import { StratumConfigSchema } from './schema.js';
+
+function cleanupDir(dir: string): void {
+  try {
+    rmSync(dir, { recursive: true, force: true });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    // En Windows es relativamente común ver locks transitorios (EBUSY/EPERM).
+    // Ignorarlos en teardown evita flakes sin afectar la semántica del test.
+    if (code !== 'EBUSY' && code !== 'EPERM' && code !== 'ENOTEMPTY') {
+      throw error;
+    }
+  }
+}
 
 describe('expandEnvVars', () => {
   beforeEach(() => {
@@ -61,7 +75,7 @@ describe('findConfigFile', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    cleanupDir(tmpDir);
   });
 
   it('encuentra el archivo en el directorio actual', () => {
@@ -92,14 +106,39 @@ describe('loadConfig', () => {
   });
 
   afterEach(() => {
-    rmSync(tmpDir, { recursive: true, force: true });
+    cleanupDir(tmpDir);
   });
 
-  it('retorna defaults cuando no existe .stratumrc.json', () => {
-    const config = loadConfig(tmpDir);
-    expect(config.agent.maxIterations).toBe(50);
-    expect(config.tools.confirmDestructive).toBe(true);
-    expect(config.memory.retrievalTopK).toBe(5);
+  it('retorna defaults cuando no existe .stratumrc.json', async () => {
+    const fakeHome = join(tmpDir, 'fake-home');
+    mkdirSync(join(fakeHome, '.stratum'), { recursive: true });
+
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+
+    try {
+      vi.resetModules();
+      const { loadConfig: isolatedLoadConfig } = await import('./loader.js');
+      const defaults = StratumConfigSchema.parse({});
+      const config = isolatedLoadConfig(tmpDir);
+      expect(config.agent.maxIterations).toBe(defaults.agent.maxIterations);
+      expect(config.tools.confirmDestructive).toBe(defaults.tools.confirmDestructive);
+      expect(config.memory.retrievalTopK).toBe(defaults.memory.retrievalTopK);
+    } finally {
+      if (prevHome === undefined) {
+        delete process.env.HOME;
+      } else {
+        process.env.HOME = prevHome;
+      }
+      if (prevUserProfile === undefined) {
+        delete process.env.USERPROFILE;
+      } else {
+        process.env.USERPROFILE = prevUserProfile;
+      }
+      vi.resetModules();
+    }
   });
 
   it('carga y valida una config válida', () => {
