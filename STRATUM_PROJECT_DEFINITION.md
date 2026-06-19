@@ -708,15 +708,16 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 ---
 
-### Hito 7 — Plan & Execute Mode *(~7 días)*
-- [ ] `Planner`: genera plan estructurado antes de ejecutar
-- [ ] Representación de plan (lista de pasos con dependencias)
-- [ ] Checkpoints de aprobación del usuario
-- [ ] Ejecución paso a paso con posibilidad de editar plan
-- [ ] Flag `--plan` en `stratum run`
-- [ ] UI de plan en Ink
+### Hito 7 — Plan & Execute Mode *(~7 días)* ✅ (cerrado 2026-06-19)
+- [x] `Planner`: fase de planificación read-only en el loop ReAct (modo `plan`, `PLAN_MODE_PROMPT`, allowlist) que cierra con la tool `present_plan` (análoga a `ExitPlanMode`)
+- [x] Representación de plan (`Plan`/`PlanStep` con estados `pending/in_progress/done/skipped`)
+- [x] Checkpoints de aprobación del usuario (gate Fase 2 vía `RunOptions.onApprovePlan`)
+- [x] Ejecución paso a paso (`update_plan` → `plan_step_update`) con edición del plan en la aprobación (inline)
+- [x] Flag `--plan` (+ `--yes`/`--approve-plan`) en `stratum run`
+- [x] UI de plan en Ink (`PlanView`, `PlanApproval`, `PlanSteps`, badge `◑ PLAN`/`▸ EXEC`)
+- [x] Persistencia incremental en `.stratum/plans/` + reanudación de plan `in_progress` en `chat --resume`
 
-> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar la implementación.* Necesita diseñar: vista de plan (lista numerada de pasos con estado `pending / in_progress / done / skipped`), prompt de aprobación interactivo (aprobar / editar / rechazar), y la transición de la vista de plan a la vista de conversación durante la ejecución. Activar `/plan` en el autocompletado. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/plan`).
+> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar la implementación.* Necesita diseñar: vista de plan (lista numerada de pasos con estado `pending / in_progress / done / skipped`), prompt de aprobación interactivo (aprobar / editar / rechazar), y la transición de la vista de plan a la vista de conversación durante la ejecución. Activar `/plan` en el autocompletado. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/plan`). 5.4 Modo Plan & Execute
 
 **Entregable:** `stratum run --plan "task"` o dentro de la CLI /plan "task" muestra plan, pide aprobación, ejecuta paso a paso
 
@@ -2155,3 +2156,17 @@ src/agent/plan-store.ts     ← NUEVO: ruta .stratum/plans/, ensurePlanDir (auto
 - `harness.test.ts`: la suspensión tras `present_plan` espera `onApprovePlan`; `reject` emite `done` sin tool calls de escritura; `edit` re-emite `plan_proposed`.
 - `plan-store.test.ts`: crea `.stratum/plans/` si no existe; escritura atómica en cada `plan_step_update`; degradación a memoria + `warning` si el FS es de solo lectura; `load` reconstruye el `Plan` para reanudar.
 - `run` (integración): `--plan` sin TTY y sin `--yes` imprime el plan y sale `0` sin ejecutar.
+
+#### Estado de implementación (Hito 7, cerrado 2026-06-19)
+
+Implementado y verificado (290/290 tests, lint y typecheck limpios, build `tsup` OK). La implementación sigue esta sección salvo las **desviaciones** que se documentan aquí para que la spec refleje el código real:
+
+- **`PlanDecision` sin variante `edit`.** El tipo quedó `{ decision: 'approve'; plan: Plan } | { decision: 'reject' }`. La edición del plan **no** cruza el límite del protocolo ni re-emite `plan_proposed`: ocurre dentro de `<PlanApproval>` sobre una copia de trabajo local (teclas E → edición inline ↑↓/Enter/d/n, luego A). Al aprobar, `approve` lleva el plan final (posiblemente editado) y el loop lo usa tal cual. Resultado equivalente al `edit` de la spec, pero el re-gate es local de la UI, no del `ReactLoop`.
+- **`approve` lleva el plan.** Derivado de lo anterior: `approve` incluye `plan: Plan` (el editado o el original), en vez de `{ decision: 'approve' }` a secas.
+- **`AgentMode` expone `'execute'`.** `RunOptions.mode` es `'normal' | 'plan' | 'execute'` (no solo `'normal' | 'plan'`). `'execute'` se usa internamente en la transición de Fase 3 y también permite inyectar un plan ya aprobado directamente (`RunOptions.plan`) para la reanudación, sin pasar por la Fase 1/2.
+- **`--yes` sin `autoApprovePlan`.** No se añadió `RunOptions.autoApprovePlan`; `stratum run --plan --yes`/`--approve-plan` se resuelve dentro del `onApprovePlan` de `run.ts` (devuelve `approve` directo). Mismo comportamiento, un campo menos.
+- **Preámbulos por mensaje, no en `system-prompt.ts`.** El preámbulo de plan se inyecta envolviendo la tarea con `PLAN_MODE_PROMPT` como mensaje de usuario (igual que `INITIALIZE_PROMPT` en `/init`); el checklist de ejecución se inyecta como **tool result** de `present_plan` al aprobar. `system-prompt.ts` no se tocó.
+- **Layout de ficheros.** Los helpers viven en `src/agent/plan.ts` (no `planner.ts`); las tools de control en `src/tools/plan/{present-plan,update-plan}.ts` (registradas en `tools/index.ts` e **interceptadas por el loop**, no despachadas); el filtro de allowlist es `isToolVisibleInMode` + `toToolSchemas(mode)` en `tools/registry.ts`; el store es `src/session/plan-store.ts` (no `src/agent/plan-store.ts`).
+- **Allowlist con nombres reales.** `PLAN_ALLOWLIST` usa `list_directory` (nombre real de la tool), no `list` como aparece en el pseudocódigo de arriba.
+- **Fichero de plan.** Nombrado por id propio (`plan_YYYYMMDD_HHMMSS_<rnd>`), no por `sessionId`; schema `{ task, status, plan, createdAt, updatedAt }`. La sesión guarda `planRef` (nombre relativo en `.stratum/plans/`) y la reanudación inyecta `buildResumePreamble` (verifica el paso `in_progress` antes de darlo por bueno). Persistencia best-effort (escritura atómica temp+rename); un fallo de FS no aborta el loop (degrada a sin-persistencia). **Pendiente respecto a la spec:** no se añade automáticamente `.stratum/` al `.gitignore` ni se emite un `warning` explícito al usuario si la carpeta no se puede crear (solo se registra en el log).
+- **Tests.** `agent/plan.test.ts` (helpers: roundtrip markdown, allowlist, `makePlanFromProposal`, `isPlanComplete`) y `agent/plan-flow.test.ts` (flujo en `ReactLoop`: `plan_proposed`, rechazo sin ejecutar, aprobación→`execute`+`plan_step_update`, rechazo de tool mutante en modo plan).
