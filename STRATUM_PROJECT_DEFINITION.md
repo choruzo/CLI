@@ -717,7 +717,7 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 > **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar la implementación.* Necesita diseñar: vista de plan (lista numerada de pasos con estado `pending / in_progress / done / skipped`), prompt de aprobación interactivo (aprobar / editar / rechazar), y la transición de la vista de plan a la vista de conversación durante la ejecución. Activar `/plan` en el autocompletado. Ver [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/plan`).
 
-**Entregable:** `stratum run --plan "task"` muestra plan, pide aprobación, ejecuta paso a paso.
+**Entregable:** `stratum run --plan "task"` o dentro de la CLI /plan "task" muestra plan, pide aprobación, ejecuta paso a paso
 
 ---
 
