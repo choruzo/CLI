@@ -169,21 +169,32 @@
         <h2>Estado visual actual del CLI</h2>
         <div class="shots">
           <figure>
-            <img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI" loading="lazy" />
+            <img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI" loading="lazy" class="zoomable" />
             <figcaption>Banner de arranque</figcaption>
           </figure>
           <figure>
-            <img src="./assets/chat.png" alt="Vista de conversación y status bar del CLI" loading="lazy" />
+            <img src="./assets/chat.png" alt="Vista de conversación y status bar del CLI" loading="lazy" class="zoomable" />
             <figcaption>Conversación con tool calls</figcaption>
           </figure>
           <figure>
-            <img src="./assets/help.png" alt="Paleta de comandos /help del CLI" loading="lazy" />
+            <img src="./assets/help.png" alt="Paleta de comandos /help del CLI" loading="lazy" class="zoomable" />
             <figcaption>Comandos disponibles</figcaption>
           </figure>
         </div>
       </section>
 
     </main>
+
+    <!-- LIGHTBOX -->
+    <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Vista ampliada" hidden>
+      <button class="lightbox-close" aria-label="Cerrar">
+        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+      <div class="lightbox-backdrop"></div>
+      <img class="lightbox-img" src="" alt="" />
+    </div>
 
     <!-- FOOTER -->
     <footer>

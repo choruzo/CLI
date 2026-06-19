@@ -667,17 +667,87 @@ figure figcaption {
 img {
   display: block;
   width: 100%;
-  aspect-ratio: 16 / 10;
+  height: auto;
   border-radius: 8px;
   border: 1px solid var(--line);
-  object-fit: cover;
-  object-position: top;
   transition: border-color 200ms, box-shadow 200ms;
 }
 
 img:hover {
   border-color: var(--line-bright);
   box-shadow: 0 4px 18px rgba(0, 0, 0, 0.35);
+}
+
+.zoomable {
+  cursor: zoom-in;
+}
+
+/* ===================================================================
+   LIGHTBOX
+   =================================================================== */
+.lightbox {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+}
+
+.lightbox[hidden] { display: none; }
+
+.lightbox-backdrop {
+  position: absolute;
+  inset: 0;
+  background: rgba(4, 6, 12, 0.92);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  cursor: zoom-out;
+}
+
+.lightbox-img {
+  position: relative;
+  z-index: 1;
+  max-width: min(92vw, 1100px);
+  max-height: 88vh;
+  width: auto;
+  height: auto;
+  border-radius: 10px;
+  border: 1px solid var(--line-bright);
+  box-shadow: 0 32px 80px rgba(0, 0, 0, 0.7), 0 0 0 1px rgba(245, 158, 11, 0.1);
+  animation: lb-in 180ms ease-out;
+  cursor: zoom-out;
+}
+
+@keyframes lb-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+.lightbox-close {
+  position: absolute;
+  top: 16px;
+  right: 16px;
+  z-index: 2;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 36px;
+  height: 36px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.07);
+  border: 1px solid var(--line-bright);
+  color: var(--muted);
+  cursor: pointer;
+  transition: background 150ms, color 150ms;
+}
+
+.lightbox-close:hover,
+.lightbox-close:focus-visible {
+  background: rgba(255, 255, 255, 0.12);
+  color: var(--text);
+  outline: none;
 }
 
 /* ===================================================================

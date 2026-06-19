@@ -208,6 +208,40 @@ async function init() {
   setStatusCards(commits);
   renderCommitTable(commits);
   renderCharts(commits);
+  initLightbox();
+}
+
+function initLightbox() {
+  const lb        = document.getElementById("lightbox");
+  const lbImg     = lb.querySelector(".lightbox-img");
+  const lbClose   = lb.querySelector(".lightbox-close");
+  const lbBdrop   = lb.querySelector(".lightbox-backdrop");
+
+  function open(img) {
+    lbImg.src = img.src;
+    lbImg.alt = img.alt;
+    lb.hidden = false;
+    document.body.style.overflow = "hidden";
+    lbClose.focus();
+  }
+
+  function close() {
+    lb.hidden = true;
+    lbImg.src = "";
+    document.body.style.overflow = "";
+  }
+
+  document.querySelectorAll(".zoomable").forEach(img => {
+    img.addEventListener("click", () => open(img));
+  });
+
+  lbClose.addEventListener("click", close);
+  lbBdrop.addEventListener("click", close);
+  lbImg.addEventListener("click", close);
+
+  document.addEventListener("keydown", e => {
+    if (e.key === "Escape" && !lb.hidden) close();
+  });
 }
 
 init();
