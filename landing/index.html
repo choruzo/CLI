@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Stratum CLI · Roadmap & Evolution</title>
+    <meta
+      name="description"
+      content="Landing oficial de Stratum CLI con hitos, evolución de commits, estado actual y próximos pasos."
+    />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <header class="hero">
+      <div class="container">
+        <p class="eyebrow">Stratum CLI · v0.2.0</p>
+        <h1>Roadmap, estado actual y evolución real del proyecto</h1>
+        <p class="subtitle">
+          Vista ejecutiva con hitos cerrados, ejecución futura y gráficos sobre actividad de commits.
+        </p>
+        <div class="hero-actions">
+          <a class="btn btn-primary" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">Ver repositorio</a>
+          <a class="btn btn-secondary" href="#charts">Ver gráficos</a>
+        </div>
+      </div>
+    </header>
+
+    <main class="container">
+      <section class="kpis" aria-label="Estado general">
+        <article class="card"><p>Estado general</p><h3 id="general-status">Cargando…</h3></article>
+        <article class="card"><p>Hito actual</p><h3 id="current-milestone">Cargando…</h3></article>
+        <article class="card"><p>Commits totales</p><h3 id="total-commits">-</h3></article>
+        <article class="card"><p>Commits 30 días</p><h3 id="commits-30d">-</h3></article>
+      </section>
+
+      <section id="charts" class="panel">
+        <h2>Gráficos de evolución</h2>
+        <div class="chart-grid">
+          <div class="chart-card"><h3>Actividad diaria (45 días)</h3><canvas id="dailyChart"></canvas></div>
+          <div class="chart-card"><h3>Commits por tipo</h3><canvas id="typeChart"></canvas></div>
+          <div class="chart-card"><h3>Progreso del roadmap</h3><canvas id="roadmapChart"></canvas></div>
+          <div class="chart-card"><h3>Evolución mensual</h3><canvas id="monthlyChart"></canvas></div>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Hitos del proyecto</h2>
+        <div id="milestone-list" class="milestones"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Ejecuciones futuras</h2>
+        <div id="future-list" class="future-grid"></div>
+      </section>
+
+      <section class="panel">
+        <h2>Últimos commits</h2>
+        <div class="table-wrap">
+          <table>
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>SHA</th>
+                <th>Autor</th>
+                <th>Descripción</th>
+              </tr>
+            </thead>
+            <tbody id="commit-table"></tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="panel">
+        <h2>Estado visual actual del CLI</h2>
+        <div class="shots">
+          <figure><img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI" loading="lazy" /></figure>
+          <figure><img src="./assets/chat.png" alt="Vista de conversación y status bar del CLI" loading="lazy" /></figure>
+          <figure><img src="./assets/help.png" alt="Paleta de comandos help del CLI" loading="lazy" /></figure>
+        </div>
+      </section>
+    </main>
+
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <script src="./data/commits-data.js"></script>
+    <script src="./app.js" type="module"></script>
+  </body>
+</html>
