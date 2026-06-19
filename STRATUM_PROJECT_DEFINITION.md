@@ -801,8 +801,15 @@ type AgentEvent =
   | { type: 'tool_error';       id: string; name: string; error: string; recoverable: boolean }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   | { type: 'thinking';         text: string }          // reasoning interno del modelo
+  | { type: 'plan_proposed';    plan: Plan }            // Hito 7 — fin de la fase de planificación
+  | { type: 'plan_step_update'; stepId: string; status: PlanStepStatus }  // Hito 7
   | { type: 'error';            message: string; fatal: boolean }
   | { type: 'done';             stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' }
+
+// Hito 7 — Plan & Execute (ver §12.15)
+type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped';
+interface PlanStep { id: string; title: string; detail?: string; status: PlanStepStatus }
+interface Plan { summary: string; steps: PlanStep[] }
 ```
 
 **Invariantes:**
@@ -810,6 +817,8 @@ type AgentEvent =
 - Todo `tool_call_ready` tiene exactamente un `tool_result` o `tool_error` posterior.
 - El evento `done` es siempre el último evento del generador. Nunca hay eventos después.
 - `fatal: true` en `error` significa que el loop se abortó. `fatal: false` es un error recuperado.
+- `plan_proposed` se emite como mucho una vez por turno y solo en `mode: 'plan'`; marca el fin de la Fase 1. El siguiente `plan_step_update`/`tool_call_*` solo ocurre tras la aprobación del usuario (resuelta vía `RunOptions.onApprovePlan`).
+- Todo `plan_step_update.stepId` referencia un `PlanStep.id` del último `plan_proposed`.
 
 La UI (Ink) y los comandos `chat` / `run` consumen exclusivamente este stream de eventos. Ningún módulo accede al estado interno del agente directamente.
 
@@ -1951,4 +1960,137 @@ Todos los comandos remotos ejecutados se registran en `~/.stratum/logs/ssh-audit
 {"timestamp":"2026-05-29T10:31:00Z","sessionId":"sess_abc","host":"prod-web","command":"rm -rf /tmp/cache","exitCode":0,"durationMs":89,"truncated":false}
 ```
 
-- Rotación por tamaño: 10 MB → `ssh-audit.jsonl
+- Rotación por tamaño: 10 MB → `ssh-audit.jsonl`
+
+---
+
+### 12.15 — Modo Plan & Execute
+
+**Decisión: el modo plan es el loop ReAct con el toolset restringido + un tool de cierre (`present_plan`), no un `Planner` con una sola llamada estructurada. Misma filosofía que cerró el Hito 2.5 para `/init`: la calidad del plan emerge del stack completo (system prompt + exploración real + loop sin recortes), no de un pipeline dedicado.**
+
+Tres fases secuenciales dentro de la misma sesión. La UI de cada fase está en [§5.4 de STRATUM_UI_SPECIFICATION.md](./STRATUM_UI_SPECIFICATION.md#54-modo-plan--execute).
+
+#### Activación y `RunOptions`
+
+```typescript
+// src/agent/types.ts — extensión de RunOptions
+interface RunOptions {
+  // ...campos existentes (destructivePolicy, onConfirmDestructive, compressionMode)...
+  mode?: 'normal' | 'plan';                 // default 'normal'. 'plan' arranca la Fase 1
+  onApprovePlan?: (plan: Plan) => Promise<PlanDecision>;
+  autoApprovePlan?: boolean;                // run --yes / --approve-plan
+}
+
+type PlanDecision =
+  | { decision: 'approve' }
+  | { decision: 'edit'; plan: Plan }        // plan editado por el usuario → re-gate
+  | { decision: 'reject' };
+```
+
+- Chat: `/plan <tarea>` despacha un turno con `mode: 'plan'`; `onApprovePlan` lo resuelve `<PlanApproval>`.
+- `run`: `stratum run --plan "tarea"`; `onApprovePlan` se resuelve por readline (TTY) o por `autoApprovePlan` (`--yes`). Sin TTY y sin `--yes` → el plan es el entregable, no se ejecuta (sale `0`).
+- CI/piped: igual que arriba — nunca ejecuta sin aprobación explícita.
+
+#### Fase 1 — Planificación (ReAct read-only)
+
+El `ReactLoop` arranca con `mode: 'plan'`. El `ToolDispatcher` aplica un **allowlist read-only**:
+
+```typescript
+const PLAN_MODE_ALLOWLIST = new Set([
+  'read_file', 'glob', 'list', 'grep',
+  'web_search', 'web_fetch', 'recall_decisions',
+  'present_plan',                            // el tool de cierre
+]);
+```
+
+Toda tool fuera del allowlist (incluidas las MCP de escritura) se rechaza ANTES de ejecutar con un `tool_error` recuperable inyectado al modelo: `"Plan mode: tool '<name>' is disabled until the plan is approved. Use read-only tools to explore, then call present_plan."`. Esto reaprovecha el mecanismo de "inject & recover" de §12.3 — el modelo recibe el error y reorienta, no aborta.
+
+El system prompt recibe un preámbulo de modo plan (inyectado solo cuando `mode === 'plan'`):
+
+```
+You are in PLAN MODE. Explore the codebase with read-only tools to understand the
+task. Do NOT make any changes. When you have a concrete, ordered plan, call
+present_plan with the steps. Each step must be a single, verifiable unit of work.
+```
+
+Tool de cierre:
+
+```typescript
+// src/agent/planner.ts
+{
+  name: 'present_plan',
+  description: 'Present the final ordered plan for user approval. Call this once, '
+    + 'when exploration is complete. After this you cannot use read-only tools again '
+    + 'in this phase.',
+  schema: z.object({
+    summary: z.string().describe('One-line description of what the plan accomplishes'),
+    steps: z.array(z.object({
+      title:  z.string().describe('Short imperative title of the step'),
+      detail: z.string().optional().describe('Optional implementation note'),
+    })).min(1),
+  }),
+}
+```
+
+Al ejecutarse `present_plan`, el loop:
+1. Construye el `Plan` (asigna `id = step_<n>` y `status: 'pending'` a cada paso).
+2. Emite `{ type: 'plan_proposed', plan }`.
+3. **Suspende** y espera `RunOptions.onApprovePlan(plan)` (Fase 2). No se emite `done` aún — el turno sigue vivo.
+
+#### Fase 2 — Gate de aprobación
+
+`onApprovePlan` devuelve un `PlanDecision`:
+
+- `approve` → Fase 3.
+- `edit` → el loop adopta el `plan` editado (los `id` se re-asignan), re-emite `plan_proposed` y vuelve a llamar a `onApprovePlan`. No se re-explora.
+- `reject` → el loop emite `{ type: 'done', stopReason: 'stop' }` sin ejecutar nada; la sesión vuelve a `mode: 'normal'`.
+
+El plan aprobado se persiste en la sesión (`session/types.ts` gana un campo opcional `plan?: Plan` para que `/sessions resume` muestre el último plan).
+
+#### Fase 3 — Ejecución (ReAct full, estados vivos)
+
+El loop conmuta a `mode: 'execute'`:
+- Se restaura el `ToolRegistry` completo; la **política destructiva normal vuelve a aplicar** (un paso con `bash rm` dispara la confirmación de §12.5 igual que en modo normal).
+- El plan aprobado se inyecta en el contexto como mensaje de sistema/usuario: el checklist de trabajo con sus `id`.
+- Se añade el tool `update_plan` al registry:
+
+```typescript
+{
+  name: 'update_plan',
+  description: 'Update the status of a plan step. Call when you start a step '
+    + '(in_progress), finish it (done), or decide to skip it (skipped).',
+  schema: z.object({
+    stepId: z.string(),
+    status: z.enum(['in_progress', 'done', 'skipped']),
+  }),
+}
+```
+
+Cada `update_plan` válido emite `{ type: 'plan_step_update', stepId, status }`. La UI actualiza `<PlanView>` in-place. El modelo es instruido en el preámbulo de ejecución para marcar `in_progress` antes de trabajar un paso y `done` al terminarlo.
+
+> **Aprobar-una-vez (no checkpoints por paso):** tras `approve`, el agente ejecuta el plan de corrido en un único turno ReAct. No hay re-aprobación entre pasos (decisión del diseño, estilo Codex/Claude Code). El control fino sigue existiendo vía la confirmación destructiva por tool de §12.5, que es ortogonal al plan.
+
+**Cierre:** cuando el loop alcanza `stop` (o `max_iterations`/`cancelled`/`error`), emite `done` con el `plan` final adjunto a la sesión. La UI colapsa `<PlanView>` a una línea de resumen (completado vs. incompleto según queden pasos `pending`).
+
+#### Archivos afectados
+
+```
+src/agent/planner.ts        ← NUEVO: Plan/PlanStep types, present_plan + update_plan tools,
+                              allowlist read-only, preámbulos de plan/execute
+src/agent/types.ts          ← +eventos plan_proposed/plan_step_update, +RunOptions.mode/onApprovePlan
+src/agent/harness.ts        ← ReactLoop: ramas mode==='plan'/'execute', filtro del dispatcher,
+                              suspensión en present_plan
+src/agent/core.ts           ← StratumAgent.run() acepta mode; reset por turno
+src/agent/system-prompt.ts  ← preámbulos condicionales de plan/execute
+src/cli/commands/run.ts     ← flag --plan, --yes/--approve-plan, onApprovePlan readline
+src/cli/ui/PlanView.tsx     ← NUEVO (pinned, estados vivos)
+src/cli/ui/PlanApproval.tsx ← NUEVO (gate A/E/R)
+src/cli/ui/session-commands.ts ← /plan en autocompletado
+src/session/types.ts        ← +plan?: Plan
+```
+
+#### Tests mínimos
+
+- `planner.test.ts`: allowlist rechaza tools mutantes en `mode:'plan'`; `present_plan` produce `plan_proposed` con ids/estados correctos; `update_plan` con `stepId` inexistente → `tool_error`.
+- `harness.test.ts`: la suspensión tras `present_plan` espera `onApprovePlan`; `reject` emite `done` sin tool calls de escritura; `edit` re-emite `plan_proposed`.
+- `run` (integración): `--plan` sin TTY y sin `--yes` imprime el plan y sale `0` sin ejecutar.

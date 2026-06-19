@@ -537,6 +537,178 @@ El `default` como fallback garantiza que ningún elemento no soportado rompa el 
 
 ---
 
+### 5.4 Modo Plan & Execute
+
+Activado con `/plan <tarea>` en el chat o `stratum run --plan "tarea"`. Implementa el flujo plan-and-execute del Hito 7 en **tres fases secuenciales dentro de la misma sesión**. La filosofía es la misma que cerró el Hito 2.5 para `/init`: no hay un pipeline determinista ni un agente especializado; es el loop ReAct con el toolset restringido y un tool de cierre (`present_plan`), análogo a `ExitPlanMode` de Claude Code.
+
+```
+  Fase 1                  Fase 2                    Fase 3
+  ───────────             ───────────               ───────────
+  Planificación     →     Gate de aprobación   →    Ejecución
+  (ReAct read-only)       (PlanView + prompt)       (ReAct full, estados vivos)
+  emite present_plan      A / E / R                 update_plan por paso
+```
+
+Mecánica del agente (eventos, tools, `RunOptions`): ver [§12.15 de STRATUM_PROJECT_DEFINITION.md](./STRATUM_PROJECT_DEFINITION.md#1215----modo-plan--execute).
+
+#### Fase 1 — Planificación (exploración read-only)
+
+`RunOptions.mode = 'plan'` filtra el `ToolRegistry` a un allowlist read-only (`read_file`, `glob`, `list`, `grep`, `web_search`, `web_fetch`, `recall_decisions`). Cualquier tool mutante (`write_file`, `edit_file`, `bash`, `store_decision`, MCP de escritura) se rechaza con un `tool_error` recuperable inyectado: *"Plan mode: tool '<name>' deshabilitada hasta aprobar el plan"*.
+
+Visualmente la Fase 1 es idéntica a un turno normal del agente — `<ToolCallBlock>`s de exploración con su spinner — pero con un **badge de modo** en la `<StatusBar>` para que quede claro que nada se va a modificar todavía:
+
+```
+  stratum · ollama · qwen2.5-coder:14c · ctx 12%              ◑ PLAN
+```
+
+- Segmento `◑ PLAN`: `chalk.hex('#F59E0B').bold` — ámbar, alineado a la derecha de la status bar. Solo visible mientras `mode !== 'normal'`.
+- En Fase 1 el badge es `◑ PLAN`; en Fase 3 cambia a `▸ EXEC` (`chalk.hex('#34D399')`).
+
+La fase termina cuando el modelo llama a `present_plan(steps[], summary)` → se emite `plan_proposed` y la UI monta `<PlanView>`.
+
+#### Fase 2 — Gate de aprobación
+
+`<PlanView>` renderiza la lista numerada (todos los pasos en `pending`) seguida del sub-prompt de aprobación. Bloquea el input hasta que el usuario decida, igual que `<DestructiveConfirm>`.
+
+```
+  Stratum
+  ┌─ Plan propuesto ─────────────────────────────────────────────────────┐
+  │  Refactor del ProviderRouter para soportar fallback ponderado        │
+  │                                                                      │
+  │  ○ 1. Extraer la selección de provider a un método weightedPick()    │
+  │  ○ 2. Añadir campo `weight` al schema Zod de provider (config)       │
+  │  ○ 3. Cablear weightedPick() en advanceProvider()                    │
+  │  ○ 4. Tests en router.test.ts para el reparto ponderado              │
+  │                                                                      │
+  │  [ A ] aprobar   [ E ] editar   [ R ] rechazar                       │
+  └──────────────────────────────────────────────────────────────────────┘
+  ❯❯ _  (bloqueado)
+```
+
+- Borde del bloque: `borderStyle="single"`, `borderColor="#2A2A2A"` — neutro, igual que el dropdown e `<InitProgressBlock>`.
+- Título `Plan propuesto`: `chalk.hex('#F59E0B').bold`.
+- Resumen (1ª línea): `chalk.hex('#F3F4F6')`.
+- Pasos en `pending`: icono `○` en `chalk.hex('#4B5563')` + texto en `chalk.hex('#9CA3AF')`.
+- Línea de opciones: `[ A ]` ámbar, `[ E ]` cian `#22D3EE`, `[ R ]` rojo `#EF4444`.
+
+Acciones del gate:
+
+| Tecla | Acción |
+|---|---|
+| `A` / `Enter` | Aprueba el plan → transición a Fase 3 (resuelve `onApprovePlan` con `{ decision: 'approve' }`). |
+| `E` | Editar: abre el plan en modo edición (ver abajo). |
+| `R` / `Esc` | Rechaza: descarta el plan, `<PlanView>` se desmonta y vuelve el chat normal (`mode='normal'`). En `run`, termina con `exit 0` sin ejecutar. |
+
+**Edición del plan (`E`):** se abre `$EDITOR` (fallback `$VISUAL`, luego `nano`/`notepad`) con el plan serializado como markdown — una línea por paso, editable, reordenable, borrable; añadir un paso es añadir una línea. Al cerrar el editor, el texto se re-parsea a `Step[]` y `<PlanView>` se re-renderiza con el plan editado y vuelve a pedir aprobación. Si el repo no tiene `$EDITOR` o el terminal no lo permite, se cae a edición inline: cada paso pasa a ser editable con `↑↓` para navegar, `Enter` para editar el texto del paso enfocado, `d` para borrarlo, `a` para añadir uno nuevo, y `A` para volver a aprobar.
+
+> El plan editado **no** vuelve a la Fase 1: el usuario es la fuente de verdad del plan aprobado. No se re-explora salvo que el usuario rechace (`R`) y reformule la tarea.
+
+#### Fase 3 — Ejecución (estados vivos)
+
+Al aprobar, `RunOptions.mode = 'execute'`, se restaura el toolset completo (la política destructiva normal vuelve a aplicar — un paso que ejecute `bash rm` dispara `<DestructiveConfirm>` como siempre) y el plan se inyecta en el contexto como checklist de trabajo. `<PlanView>` **no se desmonta**: se ancla de forma compacta encima del flujo de conversación y actualiza el estado de cada paso conforme el modelo llama a `update_plan(stepId, status)`.
+
+```
+  ┌─ Plan · 2/4 ─────────────────────────────────────────────────────────┐
+  │  ✓ 1. Extraer la selección de provider a weightedPick()              │
+  │  ✓ 2. Añadir campo `weight` al schema Zod de provider               │
+  │  ◐ 3. Cablear weightedPick() en advanceProvider()                   │
+  │  ○ 4. Tests en router.test.ts para el reparto ponderado             │
+  └──────────────────────────────────────────────────────────────────────┘
+
+  Stratum
+  ⟳ edit_file: src/providers/router.ts
+  ...la conversación normal del agente fluye debajo...
+```
+
+- Cabecera `Plan · N/total`: contador de pasos `done` sobre el total, en `chalk.hex('#6B7280')`.
+- El bloque queda **pinned** justo debajo de la `<StatusBar>` y encima de `<MessageList>`; el área scrollable se reduce en su altura. Los `<ToolCallBlock>` de cada paso aparecen en el flujo normal de conversación debajo.
+
+**Iconos de estado de paso** (compartidos entre Fase 2 y Fase 3):
+
+| Estado | Icono | Color |
+|---|---|---|
+| `pending` | `○` | `chalk.hex('#4B5563')` |
+| `in_progress` | `◐` (spinner) | `chalk.hex('#F59E0B')` — ámbar |
+| `done` | `✓` | `chalk.hex('#34D399')` — verde |
+| `skipped` | `⊘` | `chalk.hex('#6B7280').dim` |
+
+**Cierre:** al emitirse `done`, si todos los pasos están `done`/`skipped`, `<PlanView>` colapsa a una línea de resumen (igual que `<InitProgressBlock>`):
+
+```
+  ✓ Plan completado — 4 pasos · 3 ejecutados · 1 omitido
+```
+
+Si el loop termina con pasos aún `pending` (max-iterations, cancelación, error), el resumen lo refleja en ámbar: `⚠ Plan incompleto — 2/4 pasos · interrumpido`.
+
+#### Componentes Ink
+
+```tsx
+<ConversationView>
+  <StatusBar ... mode={planMode} />        ← badge ◑ PLAN / ▸ EXEC
+  {plan && planMode === 'execute' && (
+    <PlanView plan={plan} compact />       ← pinned bajo la StatusBar durante la ejecución
+  )}
+  <MessageList ... />
+  {plan && pendingApproval && (
+    <PlanApproval                          ← gate Fase 2, entre MessageList e InputArea
+      plan={plan}
+      onApprove={() => dispatch({ type: 'APPROVE_PLAN' })}
+      onEdit={(edited) => dispatch({ type: 'EDIT_PLAN', plan: edited })}
+      onReject={() => dispatch({ type: 'REJECT_PLAN' })}
+    />
+  )}
+  <InputArea disabled={!!pendingApproval} ... />
+</ConversationView>
+```
+
+- `<PlanView compact>` y `<PlanApproval>` comparten el render de la lista de pasos (`<PlanSteps>`); difieren en el borde, la cabecera y si muestran el sub-prompt de teclas.
+- Estado nuevo en el `useReducer` global de `<App>`:
+  - `planMode: 'normal' | 'plan' | 'execute'`
+  - `plan: Plan | null` — el plan propuesto/aprobado con sus pasos y estados
+  - `pendingApproval: boolean` — gate de Fase 2 activo
+
+**Mapeo `AgentEvent` → componente** (eventos nuevos, ver §11 y §12.1 de STRATUM_PROJECT_DEFINITION.md):
+
+| Evento | Componente / Acción |
+|---|---|
+| `plan_proposed { plan }` | Monta `<PlanApproval>`, `pendingApproval = true`, bloquea input. |
+| `plan_step_update { stepId, status }` | Actualiza el icono/estado del paso en `<PlanView>` in-place. No re-scrollea. |
+| `done` (con `plan` activo) | Colapsa `<PlanView>` a línea de resumen; `planMode = 'normal'`. |
+
+#### Atajos de teclado (añadidos a §10)
+
+| Estado | Tecla | Acción |
+|---|---|---|
+| `plan-approval` | `A` / `Enter` | Aprueba el plan |
+| `plan-approval` | `E` | Editar plan |
+| `plan-approval` | `R` / `Esc` | Rechaza plan |
+
+`plan-approval` es un cuarto valor de `focusState`, mutuamente excluyente con `input`/`dropdown`/`block-focus` (igual que el gate destructivo se modela como estado bloqueante).
+
+#### Modo `stratum run --plan` (añadido a §13)
+
+`run` es no interactivo. El plan se imprime en `stderr` como lista numerada y la aprobación se resuelve por flags (sin TTY no hay prompt):
+
+```bash
+$ stratum run --plan "refactor del provider router"
+
+[plan] 1. Extraer weightedPick()
+[plan] 2. Añadir campo weight al schema
+[plan] 3. Cablear weightedPick() en advanceProvider()
+[plan] 4. Tests del reparto ponderado
+[plan] ¿Ejecutar? (S/N)        ← solo si stdout es TTY
+```
+
+| Flag | Comportamiento |
+|---|---|
+| (sin flag, TTY) | Imprime el plan y pide `¿Ejecutar? (S/N)` por `stderr`. |
+| `--yes` / `--approve-plan` | Aprueba el plan automáticamente y ejecuta. |
+| sin TTY (CI/pipe) y sin `--yes` | Imprime el plan y termina con `exit 0` **sin ejecutar** (el plan se considera el entregable). |
+
+Durante la ejecución, cada cambio de estado de paso se emite como `[plan] N. <título>  (done)` en `stderr`, manteniendo `stdout` reservado para la respuesta final del agente (consistente con §13).
+
+---
+
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).
