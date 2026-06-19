@@ -52,7 +52,7 @@ jobs:
 
       - name: Pack
         run: |
-          TARBALL=$(npm pack --ignore-scripts --json | node -e "const d=require('fs').readFileSync('/dev/stdin','utf8');console.log(JSON.parse(d)[0].filename)")
+          TARBALL=$(npm pack --ignore-scripts --silent | tail -n 1)
           echo "TARBALL=$TARBALL" >> $GITHUB_ENV
 
       - name: Create GitHub Release
