@@ -403,7 +403,8 @@ stratum-cli/
 │   ├── agent/
 │   │   ├── core.ts            # StratumAgent — clase principal
 │   │   ├── harness.ts         # ReactLoop — bucle Reason/Act/Observe
-│   │   ├── planner.ts         # Plan-and-execute mode (Hito 7)
+│   │   ├── planner.ts         # Plan-and-execute mode (Hito 7): present_plan/update_plan, allowlist
+│   │   ├── plan-store.ts      # Persistencia incremental del plan en <proyecto>/.stratum/plans/ (Hito 7)
 │   │   ├── orchestrator.ts    # Multi-agent orchestrator (Hito 8)
 │   │   └── types.ts           # Tipos compartidos del agente
 │   ├── providers/
@@ -1084,6 +1085,17 @@ stratum sessions prune --older 30d # Limpia sesiones de más de 30 días
 ```
 
 **Auto-generación del resumen:** al guardar, si la sesión tiene más de 5 rondas, se hace un LLM call para generar el campo `summary` (máx 100 chars). Se usa para el listado de sesiones.
+
+**Reanudación de un plan interrumpido (Hito 7):** la sesión puede llevar un campo `planRef` (ruta relativa al fichero de plan en `<projectRoot>/.stratum/plans/`, ver §12.15). Al reanudar:
+
+1. Se carga el fichero de plan referenciado. Si no existe (borrado, otro checkout), se ignora el `planRef` y la sesión continúa como conversación normal.
+2. Si el plan tiene `status: 'in_progress'` (quedaron pasos `pending`/`in_progress`), se inyecta un preámbulo de reanudación con el estado de cada paso, instruyendo al agente a:
+   - dar por buenos los pasos `done`,
+   - **verificar** el paso que quedó `in_progress` (releer archivos/estado real) antes de marcarlo `done` — pudo aplicarse a medias,
+   - continuar desde el primer paso no terminado.
+3. Si el plan ya está completo (`done`), no se inyecta nada; el `planRef` solo sirve como historial.
+
+A diferencia del guardado de sesión (que ocurre al cierre limpio), el fichero de plan se escribe de forma **incremental** en cada cambio de estado de paso (§12.15), de modo que la reanudación funciona incluso tras un cuelgue duro donde el guardado de sesión nunca llegó a ejecutarse.
 
 ---
 
@@ -2045,7 +2057,7 @@ Al ejecutarse `present_plan`, el loop:
 - `edit` → el loop adopta el `plan` editado (los `id` se re-asignan), re-emite `plan_proposed` y vuelve a llamar a `onApprovePlan`. No se re-explora.
 - `reject` → el loop emite `{ type: 'done', stopReason: 'stop' }` sin ejecutar nada; la sesión vuelve a `mode: 'normal'`.
 
-El plan aprobado se persiste en la sesión (`session/types.ts` gana un campo opcional `plan?: Plan` para que `/sessions resume` muestre el último plan).
+Al aprobarse, el plan se escribe por primera vez al disco del proyecto (ver *Persistencia y reanudación* abajo). Ese fichero —no la sesión— es la fuente de verdad del progreso.
 
 #### Fase 3 — Ejecución (ReAct full, estados vivos)
 
@@ -2070,7 +2082,53 @@ Cada `update_plan` válido emite `{ type: 'plan_step_update', stepId, status }`.
 
 > **Aprobar-una-vez (no checkpoints por paso):** tras `approve`, el agente ejecuta el plan de corrido en un único turno ReAct. No hay re-aprobación entre pasos (decisión del diseño, estilo Codex/Claude Code). El control fino sigue existiendo vía la confirmación destructiva por tool de §12.5, que es ortogonal al plan.
 
-**Cierre:** cuando el loop alcanza `stop` (o `max_iterations`/`cancelled`/`error`), emite `done` con el `plan` final adjunto a la sesión. La UI colapsa `<PlanView>` a una línea de resumen (completado vs. incompleto según queden pasos `pending`).
+**Cierre:** cuando el loop alcanza `stop` (o `max_iterations`/`cancelled`/`error`), emite `done`. La UI colapsa `<PlanView>` a una línea de resumen (completado vs. incompleto según queden pasos `pending`). El fichero de plan se conserva hasta que se complete o el usuario lo descarte.
+
+#### Persistencia y reanudación tras caída
+
+**Decisión: el plan es la fuente de verdad del progreso y se persiste de forma incremental en la carpeta `.stratum/` del proyecto, no en la sesión global (`~/.stratum/sessions/`).** El objetivo es que un cuelgue duro (crash, `kill`, corte de luz) no pierda el avance — análogo a la invariante de `decisions.json` (§12.7): el dato sobrevive aunque el proceso muera.
+
+**Ubicación — carpeta `.stratum/` de proyecto (concepto nuevo):**
+
+```
+<projectRoot>/.stratum/
+  plans/
+    sess_20260619_143022_abc.json   # un fichero por sesión, nombrado por sessionId
+```
+
+- `<projectRoot>` es la raíz del proyecto activo (la misma que resuelve el cwd / git root para `STRATUM.md` y `.stratumrc.json`).
+- **La CLI crea `.stratum/` y `.stratum/plans/` de forma recursiva si no existen** (al aprobar el primer plan), igual que `ensureInstallDir` hace con `~/.stratum/mcp/` (§12.8.1). Si la creación falla (permisos, FS de solo lectura), el modo plan degrada con un `warning` y cae a persistencia en memoria — el plan sigue ejecutándose, solo se pierde la recuperación ante caída.
+- Se recomienda añadir `.stratum/` al `.gitignore` (estado de trabajo transitorio, no artefacto versionable). El `/init` y `stratum init` añadirán la línea si generan/actualizan un `.gitignore`.
+
+**Escritura incremental (escritura atómica `write-temp + rename`, patrón de `decisions.ts`):**
+
+1. Al **aprobar** (Fase 2): se escribe el fichero completo con todos los pasos en `pending`/el estado editado.
+2. En **cada `plan_step_update`** (Fase 3): se reescribe el fichero con el nuevo estado del paso antes de continuar el loop. Coste despreciable (objeto pequeño).
+3. Al **cerrar** con todos los pasos `done`/`skipped`: el fichero se conserva (auditoría); un `stratum plan clean` opcional o el `prune` lo elimina pasado un TTL.
+
+**Schema del fichero de plan:**
+
+```json
+{
+  "sessionId": "sess_20260619_143022_abc",
+  "createdAt": "2026-06-19T14:30:22Z",
+  "updatedAt": "2026-06-19T14:41:08Z",
+  "status": "in_progress",
+  "plan": {
+    "summary": "Refactor del ProviderRouter para fallback ponderado",
+    "steps": [
+      { "id": "step_1", "title": "Extraer weightedPick()",        "status": "done" },
+      { "id": "step_2", "title": "Añadir campo weight al schema",  "status": "done" },
+      { "id": "step_3", "title": "Cablear en advanceProvider()",   "status": "in_progress" },
+      { "id": "step_4", "title": "Tests del reparto ponderado",    "status": "pending" }
+    ]
+  }
+}
+```
+
+La sesión global (`~/.stratum/sessions/*.json`) guarda solo una **referencia** (`planRef`: ruta relativa al `.stratum/plans/` del proyecto), no una copia del plan, para evitar divergencia entre las dos fuentes.
+
+**Reanudación (`stratum sessions resume <id>` / `--resume`):** ver §12.6. En resumen: si la sesión trae un `planRef` a un plan con `status: 'in_progress'`, el preámbulo de reanudación re-inyecta el estado y el agente continúa desde el primer paso no terminado. El paso que quedó `in_progress` se considera **ambiguo** (pudo aplicarse a medias): el preámbulo instruye al agente a **verificar** ese paso (releer el fichero/estado real) antes de marcarlo `done`; los pasos `done` se dan por buenos.
 
 #### Archivos afectados
 
@@ -2086,11 +2144,14 @@ src/cli/commands/run.ts     ← flag --plan, --yes/--approve-plan, onApprovePlan
 src/cli/ui/PlanView.tsx     ← NUEVO (pinned, estados vivos)
 src/cli/ui/PlanApproval.tsx ← NUEVO (gate A/E/R)
 src/cli/ui/session-commands.ts ← /plan en autocompletado
-src/session/types.ts        ← +plan?: Plan
+src/session/types.ts        ← +planRef?: string (ruta relativa al plan en .stratum/plans/)
+src/agent/plan-store.ts     ← NUEVO: ruta .stratum/plans/, ensurePlanDir (auto-crea),
+                              escritura atómica incremental, load para resume
 ```
 
 #### Tests mínimos
 
 - `planner.test.ts`: allowlist rechaza tools mutantes en `mode:'plan'`; `present_plan` produce `plan_proposed` con ids/estados correctos; `update_plan` con `stepId` inexistente → `tool_error`.
 - `harness.test.ts`: la suspensión tras `present_plan` espera `onApprovePlan`; `reject` emite `done` sin tool calls de escritura; `edit` re-emite `plan_proposed`.
+- `plan-store.test.ts`: crea `.stratum/plans/` si no existe; escritura atómica en cada `plan_step_update`; degradación a memoria + `warning` si el FS es de solo lectura; `load` reconstruye el `Plan` para reanudar.
 - `run` (integración): `--plan` sin TTY y sin `--yes` imprime el plan y sale `0` sin ejecutar.
