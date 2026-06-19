@@ -32,12 +32,15 @@ const futureExecutions = [
   }
 ];
 
+/* Chart palette aligned with CLI spec (STRATUM_UI_SPECIFICATION.md) */
 const COLORS = {
-  accent: "#ffb800",
-  cyan: "#31a2ff",
-  green: "#26d07c",
-  muted: "#94a3c7",
-  grid: "#223456"
+  accent: "#F59E0B",   /* amber — CLI spec */
+  cyan:   "#60A5FA",   /* softer blue */
+  green:  "#22C55E",   /* CLI spec connected/good */
+  purple: "#A78BFA",
+  red:    "#F87171",
+  muted:  "#9CA3AF",   /* CLI spec muted */
+  grid:   "#374151"    /* CLI spec separator */
 };
 
 function getCommitType(subject = "") {
@@ -159,7 +162,7 @@ function renderCharts(commits) {
     type: "line",
     data: {
       labels: dayLabels,
-      datasets: [{ label: "Commits", data: dayValues, borderColor: COLORS.cyan, backgroundColor: "rgba(49,162,255,.15)", fill: true, tension: 0.25 }]
+      datasets: [{ label: "Commits", data: dayValues, borderColor: COLORS.cyan, backgroundColor: "rgba(96,165,250,0.12)", fill: true, tension: 0.3 }]
     },
     options: baseChartOptions()
   });
@@ -168,7 +171,7 @@ function renderCharts(commits) {
     type: "bar",
     data: {
       labels: typeLabels,
-      datasets: [{ label: "Commits", data: typeValues, backgroundColor: [COLORS.accent, COLORS.cyan, COLORS.green, "#8b7dff", "#ff7a7a", "#7dd3fc", "#fbbf24"] }]
+      datasets: [{ label: "Commits", data: typeValues, backgroundColor: [COLORS.accent, COLORS.cyan, COLORS.green, COLORS.purple, COLORS.red, "#7dd3fc", "#fbbf24"] }]
     },
     options: baseChartOptions()
   });
@@ -190,7 +193,7 @@ function renderCharts(commits) {
     type: "bar",
     data: {
       labels: monthLabels,
-      datasets: [{ label: "Commits/mes", data: monthValues, backgroundColor: COLORS.accent }]
+      datasets: [{ label: "Commits/mes", data: monthValues, backgroundColor: COLORS.accent, borderRadius: 4 }]
     },
     options: baseChartOptions()
   });

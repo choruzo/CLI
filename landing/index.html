@@ -11,45 +11,134 @@
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&display=swap"
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+
+    <!-- NAV -->
+    <nav class="nav" aria-label="Navegación principal">
+      <div class="nav-inner">
+        <a href="#" class="nav-logo" aria-label="Stratum CLI inicio">
+          <span class="nav-logo-text">STRATUM</span>
+          <span class="nav-logo-badge">CLI</span>
+        </a>
+        <ul class="nav-links" role="list">
+          <li><a href="#charts">Gráficos</a></li>
+          <li><a href="#milestones">Hitos</a></li>
+          <li><a href="#commits">Commits</a></li>
+        </ul>
+        <a class="btn btn-nav-cta" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer" aria-label="Ver repositorio en GitHub">
+          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true" focusable="false">
+            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+          </svg>
+          GitHub
+        </a>
+      </div>
+    </nav>
+
+    <!-- HERO -->
     <header class="hero">
       <div class="container">
-        <p class="eyebrow">Stratum CLI · v0.2.0</p>
-        <h1>Roadmap, estado actual y evolución real del proyecto</h1>
-        <p class="subtitle">
-          Vista ejecutiva con hitos cerrados, ejecución futura y gráficos sobre actividad de commits.
-        </p>
-        <div class="hero-actions">
-          <a class="btn btn-primary" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">Ver repositorio</a>
-          <a class="btn btn-secondary" href="#charts">Ver gráficos</a>
+        <div class="hero-inner">
+          <div class="hero-content">
+            <p class="eyebrow">Stratum CLI &nbsp;·&nbsp; v0.2.0</p>
+            <h1>Roadmap, estado actual y evolución real del proyecto</h1>
+            <p class="subtitle">
+              Vista ejecutiva con hitos cerrados, ejecución futura y actividad de commits en tiempo real.
+            </p>
+            <div class="hero-actions">
+              <a class="btn btn-primary" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false">
+                  <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
+                </svg>
+                Ver repositorio
+              </a>
+              <a class="btn btn-secondary" href="#charts">Ver gráficos</a>
+            </div>
+          </div>
+
+          <!-- Terminal mockup (hidden on mobile/tablet) -->
+          <div class="terminal-preview-wrapper" aria-hidden="true">
+            <div class="terminal-window">
+              <div class="terminal-topbar">
+                <div class="terminal-dots">
+                  <span></span><span></span><span></span>
+                </div>
+                <span class="terminal-title">stratum chat</span>
+              </div>
+              <div class="terminal-statusbar">
+                <span class="t-dot t-connected">●</span>
+                <span class="t-provider">ollama</span>
+                <span class="t-sep">│</span>
+                <span class="t-model">qwen2.5-coder:32b</span>
+                <span class="t-ctx-right">ctx 2.1k / 32k <span class="t-sep">│</span> <span class="t-pct">6%</span></span>
+              </div>
+              <div class="terminal-body">
+                <div class="t-turn">
+                  <div class="t-label t-label-user">You</div>
+                  <div class="t-text t-user-text"><span class="t-bar">▏</span> Refactoriza src/auth.ts con error handling</div>
+                </div>
+                <div class="t-turn">
+                  <div class="t-label t-label-agent">Stratum</div>
+                  <div class="t-text t-agent-text">Voy a analizar el archivo primero.</div>
+                  <div class="t-tool t-tool-done">
+                    <span class="t-tool-icon">✓</span>
+                    <span class="t-tool-name">read_file</span>
+                    <span class="t-tool-meta">│ 0.4s │ src/auth.ts</span>
+                  </div>
+                  <div class="t-tool t-tool-done">
+                    <span class="t-tool-icon">✓</span>
+                    <span class="t-tool-name">edit_file</span>
+                    <span class="t-tool-meta">│ 0.9s │ +47 / -23 líneas</span>
+                  </div>
+                  <div class="t-text t-agent-text">He refactorizado con error boundaries...<span class="t-cursor" aria-hidden="true"></span></div>
+                </div>
+              </div>
+              <div class="terminal-prompt-line">
+                <span class="t-prompt">❯❯</span> <span class="t-cursor-input" aria-hidden="true">_</span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
     </header>
 
+    <!-- MAIN -->
     <main class="container">
+
       <section class="kpis" aria-label="Estado general">
-        <article class="card"><p>Estado general</p><h3 id="general-status">Cargando…</h3></article>
-        <article class="card"><p>Hito actual</p><h3 id="current-milestone">Cargando…</h3></article>
-        <article class="card"><p>Commits totales</p><h3 id="total-commits">-</h3></article>
-        <article class="card"><p>Commits 30 días</p><h3 id="commits-30d">-</h3></article>
+        <article class="card card-status">
+          <p>Estado general</p>
+          <h3 id="general-status">Cargando…</h3>
+        </article>
+        <article class="card card-milestone">
+          <p>Hito actual</p>
+          <h3 id="current-milestone">Cargando…</h3>
+        </article>
+        <article class="card card-commits">
+          <p>Commits totales</p>
+          <h3 id="total-commits">-</h3>
+        </article>
+        <article class="card card-recent">
+          <p>Commits 30 días</p>
+          <h3 id="commits-30d">-</h3>
+        </article>
       </section>
 
       <section id="charts" class="panel">
         <h2>Gráficos de evolución</h2>
         <div class="chart-grid">
-          <div class="chart-card"><h3>Actividad diaria (45 días)</h3><canvas id="dailyChart"></canvas></div>
+          <div class="chart-card"><h3>Actividad diaria — 45 días</h3><canvas id="dailyChart"></canvas></div>
           <div class="chart-card"><h3>Commits por tipo</h3><canvas id="typeChart"></canvas></div>
           <div class="chart-card"><h3>Progreso del roadmap</h3><canvas id="roadmapChart"></canvas></div>
           <div class="chart-card"><h3>Evolución mensual</h3><canvas id="monthlyChart"></canvas></div>
         </div>
       </section>
 
-      <section class="panel">
+      <section id="milestones" class="panel">
         <h2>Hitos del proyecto</h2>
         <div id="milestone-list" class="milestones"></div>
       </section>
@@ -59,7 +148,7 @@
         <div id="future-list" class="future-grid"></div>
       </section>
 
-      <section class="panel">
+      <section id="commits" class="panel">
         <h2>Últimos commits</h2>
         <div class="table-wrap">
           <table>
@@ -79,15 +168,38 @@
       <section class="panel">
         <h2>Estado visual actual del CLI</h2>
         <div class="shots">
-          <figure><img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI" loading="lazy" /></figure>
-          <figure><img src="./assets/chat.png" alt="Vista de conversación y status bar del CLI" loading="lazy" /></figure>
-          <figure><img src="./assets/help.png" alt="Paleta de comandos help del CLI" loading="lazy" /></figure>
+          <figure>
+            <img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI" loading="lazy" />
+            <figcaption>Banner de arranque</figcaption>
+          </figure>
+          <figure>
+            <img src="./assets/chat.png" alt="Vista de conversación y status bar del CLI" loading="lazy" />
+            <figcaption>Conversación con tool calls</figcaption>
+          </figure>
+          <figure>
+            <img src="./assets/help.png" alt="Paleta de comandos /help del CLI" loading="lazy" />
+            <figcaption>Comandos disponibles</figcaption>
+          </figure>
         </div>
       </section>
+
     </main>
+
+    <!-- FOOTER -->
+    <footer>
+      <div class="footer-inner">
+        <span class="footer-brand"><span>STRATUM</span> CLI &nbsp;·&nbsp; v0.2.0</span>
+        <ul class="footer-links" role="list">
+          <li><a href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">GitHub</a></li>
+          <li><a href="#charts">Gráficos</a></li>
+          <li><a href="#milestones">Hitos</a></li>
+          <li><a href="#commits">Commits</a></li>
+        </ul>
+      </div>
+    </footer>
 
     <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
     <script src="./data/commits-data.js"></script>
-    <script src="./app.js" type="module"></script>
+    <script src="./app.js" defer></script>
   </body>
 </html>
