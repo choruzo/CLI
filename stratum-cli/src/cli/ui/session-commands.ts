@@ -47,6 +47,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/provider',
+    description: 'Cambia el provider activo en esta sesión (sin args: lista los configurados)',
+    hasArgs: true,
+  },
+  {
     name: '/config_provider',
     description: 'Edita el provider activo y guarda en .stratumrc.json',
     hasArgs: false,

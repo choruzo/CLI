@@ -386,6 +386,18 @@ export class ReactLoop {
     private readonly config: StratumConfig,
     private readonly model: string,
     contextWindow: number,
+    /**
+     * Router opcional (Hito 6). Cuando se pasa, el loop usa el provider activo
+     * del router en cada intento y, si el activo falla antes de emitir tokens,
+     * conmuta automáticamente al siguiente provider (`advanceProvider`).
+     */
+    private readonly router?: {
+      getActive(): IProvider;
+      readonly model: string;
+      readonly hasFallback: boolean;
+      readonly providerName: string;
+      advanceProvider(): { name: string; model: string } | null;
+    },
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
     this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
@@ -493,36 +505,78 @@ export class ReactLoop {
       const toolArgBuffers = new Map<string, string>(); // id → args raw acumulados
       let fatalError: string | null = null;
 
-      try {
-        for await (const chunk of streamWithRetry(this.provider, request)) {
-          if (signal.aborted) break;
+      // Bucle de fallback automático por orden (§Hito 6): si el provider activo
+      // falla ANTES de emitir tokens, se conmuta al siguiente del router y se
+      // reintenta este mismo turno. No se hace fallback a mitad de stream.
+      const router = this.router;
+      streamLoop: while (true) {
+        const activeProvider = router?.getActive() ?? this.provider;
+        request.model = router?.model ?? this.model;
 
-          // Registrar usage real si viene en el chunk (§12.4)
-          if (chunk.usage?.prompt_tokens) {
-            this.contextManager.recordUsage(chunk.usage.prompt_tokens);
-          }
+        // ¿Se emitió algún evento visible? Si no, es seguro reintentar con otro provider.
+        let emittedVisible = false;
+        let streamErr: unknown = null;
 
-          for (const ev of buffer.feed(chunk)) {
-            if (ev.type === 'text_delta') {
-              assistantText += ev.delta;
-              yield ev;
-            } else if (ev.type === 'tool_call_start') {
-              toolArgBuffers.set(ev.id, ev.input_so_far);
-              yield ev;
-            } else if (ev.type === 'tool_call_ready') {
-              toolArgBuffers.delete(ev.id);
-              readyCalls.push(ev);
-              yield ev;
-            } else if (ev.type === 'tool_error') {
-              parseErrors.push(ev as ParseError);
-              yield ev;
-            } else {
-              yield ev;
+        try {
+          for await (const chunk of streamWithRetry(activeProvider, request)) {
+            if (signal.aborted) break;
+
+            // Registrar usage real si viene en el chunk (§12.4)
+            if (chunk.usage?.prompt_tokens) {
+              this.contextManager.recordUsage(chunk.usage.prompt_tokens);
+            }
+
+            for (const ev of buffer.feed(chunk)) {
+              emittedVisible = true;
+              if (ev.type === 'text_delta') {
+                assistantText += ev.delta;
+                yield ev;
+              } else if (ev.type === 'tool_call_start') {
+                toolArgBuffers.set(ev.id, ev.input_so_far);
+                yield ev;
+              } else if (ev.type === 'tool_call_ready') {
+                toolArgBuffers.delete(ev.id);
+                readyCalls.push(ev);
+                yield ev;
+              } else if (ev.type === 'tool_error') {
+                parseErrors.push(ev as ParseError);
+                yield ev;
+              } else {
+                yield ev;
+              }
             }
           }
+        } catch (err) {
+          streamErr = err;
         }
-      } catch (err) {
-        fatalError = err instanceof Error ? err.message : String(err);
+
+        if (streamErr !== null) {
+          const isAbort = streamErr instanceof Error && streamErr.name === 'AbortError';
+          // Fallback solo si: no es cancelación, no se emitió nada todavía y el
+          // router tiene alternativas que aún no han fallado en este run.
+          if (!isAbort && !emittedVisible && router?.hasFallback) {
+            const from = router.providerName;
+            const next = router.advanceProvider();
+            if (next) {
+              // Descartar lo acumulado del intento fallido antes de reintentar.
+              buffer.reset();
+              assistantText = '';
+              readyCalls.length = 0;
+              parseErrors.length = 0;
+              toolArgBuffers.clear();
+              loopLog.warn('provider fallback', { from, to: next.name, model: next.model });
+              yield {
+                type: 'warning',
+                message:
+                  `provider_fallback: "${from}" no respondió; ` +
+                  `conmutando a "${next.name}" (modelo ${next.model}).`,
+              };
+              continue streamLoop;
+            }
+          }
+          fatalError = streamErr instanceof Error ? streamErr.message : String(streamErr);
+        }
+        break;
       }
 
       if (signal.aborted) {

@@ -1,5 +1,6 @@
 import React, { useReducer, useCallback, useRef, useState, useEffect } from 'react';
 import { Box, Text, useApp, useInput } from 'ink';
+import TextInput from 'ink-text-input';
 import type { StratumAgent } from '../../agent/core.js';
 import type {
   AgentEvent,
@@ -10,7 +11,8 @@ import type {
 import type { ProviderConfig } from '../../config/schema.js';
 import { expandEnvVars } from '../../config/loader.js';
 import { upsertProvider, readRawProvider } from '../../config/writer.js';
-import { fetchModels } from '../../providers/utils.js';
+import { detectCapabilities } from '../../providers/utils.js';
+import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
 import { parseMcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
@@ -28,6 +30,7 @@ import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 type OverlayState =
   | { kind: 'model-loading' }
   | { kind: 'model-select'; models: string[] }
+  | { kind: 'model-manual'; note?: string }
   | {
       kind: 'wizard';
       initial: {
@@ -401,6 +404,24 @@ export function App({ agent, version, mcpManager }: Props) {
   }, [mcpManager]);
 
   // -------------------------------------------------------------------------
+  // Health check del provider (Hito 6): polling no bloqueante cada 30 s.
+  // El `●` izquierdo del status bar refleja el resultado en tiempo real.
+  // -------------------------------------------------------------------------
+  const [providerStatus, setProviderStatus] = useState<ProviderStatus>('checking');
+  const refreshProviderHealth = useCallback(() => {
+    setProviderStatus('checking');
+    agent
+      .healthCheck()
+      .then((ok) => setProviderStatus(ok ? 'connected' : 'disconnected'))
+      .catch(() => setProviderStatus('disconnected'));
+  }, [agent]);
+  useEffect(() => {
+    refreshProviderHealth();
+    const id = setInterval(refreshProviderHealth, 30000);
+    return () => clearInterval(id);
+  }, [refreshProviderHealth]);
+
+  // -------------------------------------------------------------------------
   // Confirmación destructiva (UI §12): el dispatcher pausa la ejecución y
   // espera la promesa; el usuario resuelve con S/N/! desde <DestructiveConfirm>.
   // -------------------------------------------------------------------------
@@ -439,6 +460,8 @@ export function App({ agent, version, mcpManager }: Props) {
   // Overlays de sesión (Hito 3.5): /model y /config_provider
   // -------------------------------------------------------------------------
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
+  /** Valor en edición del input de modelo manual (overlay model-manual, Hito 6). */
+  const [modelManualValue, setModelManualValue] = useState('');
 
   // -------------------------------------------------------------------------
   // Paleta de /comandos (UI §5.2)
@@ -494,6 +517,13 @@ export function App({ agent, version, mcpManager }: Props) {
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         exit();
       }
+      return;
+    }
+
+    // Overlay de modelo manual (Hito 6): el TextInput no gestiona Esc, así que
+    // lo cancelamos aquí antes del return genérico de overlays.
+    if (overlay?.kind === 'model-manual' && key.escape) {
+      setOverlay(null);
       return;
     }
 
@@ -648,28 +678,40 @@ export function App({ agent, version, mcpManager }: Props) {
   const openModelSelector = useCallback(() => {
     setOverlay({ kind: 'model-loading' });
     const cfg = agent.getActiveProviderConfig();
-    fetchModels(cfg.baseUrl, cfg.apiKey)
-      .then((models) => {
-        if (models.length === 0) {
-          setOverlay(null);
-          dispatch({
-            type: 'SYSTEM_MESSAGE',
-            text: `El endpoint ${cfg.baseUrl}/models no devolvió modelos.`,
-          });
-          return;
+    // Hito 6: detectar capacidades en vez de fallar en seco. Los modelos vienen
+    // SIEMPRE del endpoint en vivo (no de la config), así que un modelo nuevo
+    // del provider — p. ej. uno que LiteLLM acaba de añadir — aparece sin tocar
+    // .stratumrc.json. Si /models no está soportado, se ofrece entrada manual.
+    detectCapabilities(cfg.baseUrl, cfg.apiKey)
+      .then((caps) => {
+        if (caps.listsModels && caps.models.length > 0) {
+          setOverlay({ kind: 'model-select', models: caps.models });
+        } else {
+          setModelManualValue(agent.model);
+          setOverlay({ kind: 'model-manual', note: caps.note });
         }
-        setOverlay({ kind: 'model-select', models });
       })
       .catch((err: unknown) => {
-        setOverlay(null);
-        dispatch({
-          type: 'SYSTEM_MESSAGE',
-          text:
-            `No se pudieron obtener los modelos de ${cfg.baseUrl}: ${String(err)}\n` +
-            `Puedes fijar el modelo a mano con: stratum config set provider.providers.${agent.providerName}.model <modelo>`,
-        });
+        setModelManualValue(agent.model);
+        setOverlay({ kind: 'model-manual', note: String(err) });
       });
   }, [agent]);
+
+  // Aplica un modelo (de la lista o escrito a mano) a la sesión en curso.
+  const applyModel = useCallback(
+    (model: string) => {
+      setOverlay(null);
+      const trimmed = model.trim();
+      if (!trimmed || trimmed === agent.model) return;
+      agent.switchModel(trimmed);
+      refreshProviderHealth();
+      dispatch({
+        type: 'SYSTEM_MESSAGE',
+        text: `Modelo cambiado a ${trimmed} (solo esta sesión; no se ha modificado .stratumrc.json).`,
+      });
+    },
+    [agent, refreshProviderHealth],
+  );
 
   // -------------------------------------------------------------------------
   // /config_provider — wizard pre-rellenado con el provider activo (Hito 3.5)
@@ -835,6 +877,47 @@ export function App({ agent, version, mcpManager }: Props) {
         return;
       }
 
+      if (cmd === '/provider' || cmd.startsWith('/provider ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const target = cmd.slice('/provider'.length).trim();
+        const names = agent.providerNames;
+        if (!target) {
+          // Sin argumento: listar los providers configurados y el activo.
+          const lines = names.map((n) =>
+            n === agent.providerName ? `  ▶ ${n} (activo)` : `    ${n}`,
+          );
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text:
+              `Providers configurados:\n\n${lines.join('\n')}\n\n` +
+              `Uso: /provider <alias> para cambiar en esta sesión.`,
+          });
+          return;
+        }
+        if (target === agent.providerName) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `"${target}" ya es el provider activo.` });
+          return;
+        }
+        if (!names.includes(target)) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Provider "${target}" no existe. Disponibles: ${names.join(', ')}`,
+          });
+          return;
+        }
+        try {
+          agent.switchProvider(target);
+          refreshProviderHealth();
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Provider activo: ${target} (modelo ${agent.model}, solo esta sesión; no se ha modificado .stratumrc.json).`,
+          });
+        } catch (err) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al cambiar de provider: ${String(err)}` });
+        }
+        return;
+      }
+
       if (cmd === '/config_provider') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         openProviderEditor();
@@ -895,7 +978,16 @@ export function App({ agent, version, mcpManager }: Props) {
 
       void send(cmd);
     },
-    [send, exit, runInit, agent, openModelSelector, openProviderEditor, mcpManager],
+    [
+      send,
+      exit,
+      runInit,
+      agent,
+      openModelSelector,
+      openProviderEditor,
+      refreshProviderHealth,
+      mcpManager,
+    ],
   );
 
   const handleSend = useCallback(
@@ -961,25 +1053,55 @@ export function App({ agent, version, mcpManager }: Props) {
         </Text>
         <Text> </Text>
         <SelectList
-          items={overlay.models.map((m) => ({
-            label: m,
-            value: m,
-            hint: m === current ? '(actual)' : undefined,
-          }))}
+          items={[
+            ...overlay.models.map((m) => ({
+              label: m,
+              value: m,
+              hint: m === current ? '(actual)' : undefined,
+            })),
+            { label: '✎ Escribir modelo manualmente…', value: ' manual' },
+          ]}
           initialIndex={Math.max(overlay.models.indexOf(current), 0)}
           onSelect={(item) => {
-            setOverlay(null);
-            if (item.value !== current) {
-              agent.switchModel(item.value);
-              dispatch({
-                type: 'SYSTEM_MESSAGE',
-                text: `Modelo cambiado a ${item.value} (solo esta sesión; no se ha modificado .stratumrc.json).`,
-              });
+            if (item.value === ' manual') {
+              setModelManualValue(current);
+              setOverlay({ kind: 'model-manual' });
+              return;
             }
+            applyModel(item.value);
           }}
           onCancel={() => setOverlay(null)}
         />
         <Text color={theme.textDisabled}> Esc para cancelar</Text>
+      </Box>
+    );
+  } else if (overlay?.kind === 'model-manual') {
+    overlayNode = (
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={theme.borderAccent}
+        paddingX={1}
+      >
+        <Text color={theme.accent} bold>
+          Modelo (manual)
+          <Text color={theme.textMuted} bold={false}>
+            {'  ·  '}
+            {agent.providerName} · solo esta sesión
+          </Text>
+        </Text>
+        {overlay.note && <Text color={theme.warning}> ⚠ {overlay.note}</Text>}
+        <Box>
+          <Text color={theme.accent}>❯ </Text>
+          <TextInput
+            value={modelManualValue}
+            onChange={setModelManualValue}
+            onSubmit={(v) => applyModel(v)}
+            placeholder="nombre exacto del modelo"
+            showCursor
+          />
+        </Box>
+        <Text color={theme.textDisabled}> Enter para aplicar · Esc para cancelar</Text>
       </Box>
     );
   } else if (overlay?.kind === 'wizard') {
@@ -1022,6 +1144,7 @@ export function App({ agent, version, mcpManager }: Props) {
         palette={paletteNode}
         overlay={overlayNode}
         mcpStatus={mcpStatus}
+        providerStatus={providerStatus}
       />
     </Box>
   );

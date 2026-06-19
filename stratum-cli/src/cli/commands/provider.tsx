@@ -182,6 +182,7 @@ const providerRemove = new Command('remove')
   });
 
 export const providerCommand = new Command('provider')
+  .alias('providers')
   .description('Gestión de providers LLM (add/list/use/remove) sin editar .stratumrc.json a mano')
   .addCommand(providerAdd)
   .addCommand(providerList)

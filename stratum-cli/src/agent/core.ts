@@ -48,6 +48,10 @@ export class StratumAgent {
   async *run(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
     this.messages.push({ role: 'user', content: input });
 
+    // Hito 6: reiniciar el estado de fallback en cada turno para que el provider
+    // primario se reintente aunque haya fallado en un turno anterior.
+    this.router.resetFallback();
+
     this.currentLoop = new ReactLoop(
       this.router.getActive(),
       this.registry,
@@ -55,6 +59,7 @@ export class StratumAgent {
       this.config,
       this.router.model,
       this.router.contextWindow,
+      this.router,
     );
 
     let stopReason: string | null = null;
@@ -120,6 +125,26 @@ export class StratumAgent {
   reconfigureProvider(cfg: ProviderConfig): void {
     this.router.reconfigure(cfg);
     this.reloadMemory();
+  }
+
+  /**
+   * Cambia el provider activo en caliente (comando `/provider <name>`, Hito 6).
+   * Solo afecta a la sesión actual; no persiste en `.stratumrc.json`.
+   * Reconstruye el system prompt para reflejar el provider/modelo nuevos.
+   */
+  switchProvider(name: string): void {
+    this.router.switchProvider(name);
+    this.reloadMemory();
+  }
+
+  /** Alias de los providers configurados (para `/provider` y su autocompletado). */
+  get providerNames(): string[] {
+    return this.router.providerNames;
+  }
+
+  /** Health check del provider activo (para el indicador en tiempo real del status bar). */
+  async healthCheck(): Promise<boolean> {
+    return this.router.healthCheck();
   }
 
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {

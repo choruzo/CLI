@@ -150,7 +150,7 @@ interface IProvider {
 
 Providers soportados desde v1: `OpenAICompatible` (cubre Ollama, llama.cpp, vLLM, LiteLLM proxy, OpenAI, Anthropic vía proxy).
 
-> **Indicador `●` de provider (Hitos 1-5):** `healthCheck()` no está activo hasta el Hito 6. En los hitos anteriores, el indicador de la status bar se basa en el resultado de la **última llamada al LLM**: verde si completó sin error, rojo si la última request falló. No hay polling activo. Cuando `healthCheck()` se cablee en el Hito 6, reemplaza esta lógica y el indicador pasa a reflejar el estado real del provider.
+> **Indicador `●` de provider:** desde el **Hito 6**, `healthCheck()` (GET `{baseUrl}/models`, timeout 5 s) está cableado y la status bar hace polling en background cada ~30 s: el `●` izquierdo refleja el estado real del provider (verde = responde, rojo = no responde, gris = comprobando/desconocido), y se refresca tras `/model`, `/provider` o un fallback. *(Hitos 1-5: antes del cableado el indicador se basaba en el resultado de la última llamada al LLM, sin polling.)*
 
 #### `ToolRegistry` (src/tools/registry.ts)
 Registro central de herramientas. Soporta:
@@ -690,18 +690,20 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 ---
 
-### Hito 6 — Multi-provider Polishing *(~3 días)*
-- [ ] Soporte Ollama completo (listado de modelos, pull, etc.)
-- [ ] Soporte llama.cpp server
-- [ ] Soporte vLLM
-- [ ] LiteLLM proxy routing
-- [ ] Provider health check al startup
-- [ ] Fallback automático a provider secundario
-- [ ] Comando `stratum providers list`
+### Hito 6 — Multi-provider Polishing *(~3 días)* ✅ *(cerrado 2026-06-18)*
+- [x] Soporte Ollama / vLLM / llama.cpp / LiteLLM vía cliente OpenAI-compatible (todos comparten `/chat/completions`, `/models`, `/embeddings`)
+- [x] Detección de capacidades del backend (`detectCapabilities`/`classifyBackendByUrl` en `providers/utils.ts`): clasifica el backend y detecta si `/models` está soportado; cuando no lo está (p. ej. llama.cpp), `/model` ofrece entrada manual con aviso
+- [x] LiteLLM proxy routing (genérico OpenAI-compatible; los modelos se descubren en vivo, sin escribirlos en config)
+- [x] Provider health check con polling en background (~30 s, no bloqueante)
+- [x] Fallback automático a provider secundario (**automático por orden**: `ProviderRouter.advanceProvider()`; conmuta solo si el activo falla antes de emitir tokens, con notificación inline `provider_fallback`)
+- [x] Comando `stratum providers list` (alias de `provider list`) con estado de conectividad
+- [x] `/provider <name>` para cambiar de provider en sesión + autocompletado; `/model` descubre modelos en vivo (no depende de la config) y permite entrada manual
 
-> **UI:** El indicador `●` del status bar refleja el estado del provider en tiempo real (verde / rojo / gris según health check). El `/provider <name>` se añade al autocompletado (`/model` y `/config_provider` ya operativos desde Hito 3.5). En caso de fallback automático, notificar al usuario con un mensaje inline en el área de conversación. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/provider`, `/model`).
+> **UI:** El indicador `●` izquierdo del status bar refleja el estado del provider en tiempo real (verde / rojo / gris según health check); MCP pasa a tener su propio segmento `mcp ●`. El `/provider <name>` se añade al autocompletado (`/model` y `/config_provider` ya operativos desde Hito 3.5). En caso de fallback automático, se notifica al usuario con un mensaje inline (`warning` → `provider_fallback`) en el área de conversación. Ver [§4.1 — Status Bar](./STRATUM_UI_SPECIFICATION.md#41-status-bar) (indicador de conexión), [§5.2 — /comandos](./STRATUM_UI_SPECIFICATION.md#52-input-area--comandos-y-autocompletado) (`/provider`, `/model`).
 
 **Entregable:** El agente funciona de forma transparente con cualquier backend LLM.
+
+> **Nota de diseño (fallback por orden):** el orden de fallback es el provider por defecto primero y luego el resto en el orden de declaración en `.stratumrc.json`. El estado de fallback se reinicia al inicio de cada turno (`resetFallback()` en `core.run()`), de modo que el primario se reintenta en cada turno aunque haya fallado en el anterior; dentro de un mismo turno, una vez se conmuta, no se vuelve a probar el provider fallido. No se hace fallback a mitad de stream (si ya se emitieron tokens, el error es fatal).
 
 ---
 

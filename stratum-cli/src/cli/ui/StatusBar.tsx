@@ -3,6 +3,9 @@ import { Box, Text, useStdout } from 'ink';
 import { theme } from './theme.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
 
+/** Estado de salud del provider activo para el indicador `●` (Hito 6). */
+export type ProviderStatus = 'connected' | 'disconnected' | 'checking' | 'unknown';
+
 interface Props {
   providerName: string;
   model: string;
@@ -12,6 +15,12 @@ interface Props {
   estimated?: boolean;
   /** Estado de conectividad MCP. Undefined si no hay servers configurados. */
   mcpStatus?: McpStatusSummary;
+  /**
+   * Salud del provider activo (Hito 6). Driva el color del `●` izquierdo:
+   * verde = conectado, rojo = no responde, gris = comprobando/desconocido.
+   * Si se omite, el indicador queda en verde (compatibilidad pre-Hito 6).
+   */
+  providerStatus?: ProviderStatus;
 }
 
 function formatTokens(n: number): string {
@@ -32,6 +41,20 @@ function mcpDotColor(status: McpStatusSummary): string {
   return theme.success;
 }
 
+/** Color del indicador `●` del provider según su health check (Hito 6). */
+function providerDotColor(status: ProviderStatus | undefined): string {
+  switch (status) {
+    case 'disconnected':
+      return theme.error;
+    case 'checking':
+    case 'unknown':
+      return theme.textMuted;
+    case 'connected':
+    default:
+      return theme.success;
+  }
+}
+
 export function StatusBar({
   providerName,
   model,
@@ -39,24 +62,40 @@ export function StatusBar({
   contextMax,
   estimated,
   mcpStatus,
+  providerStatus,
 }: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
   const pct = contextMax > 0 ? Math.round((contextUsed / contextMax) * 100) : 0;
   const ctxColor = contextColor(pct);
-  const dotColor = mcpStatus ? mcpDotColor(mcpStatus) : theme.success;
+  const provColor = providerDotColor(providerStatus);
+
+  // Indicador MCP separado (Hito 6): el `●` izquierdo pasa a reflejar la salud
+  // del provider, así que MCP tiene su propio segmento `mcp ●` cuando hay servers.
+  const showMcp = !!mcpStatus && mcpStatus.total > 0;
+  const mcpSegmentText = showMcp ? ` │ mcp ●` : '';
 
   const ctxSuffix = ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%`;
-  const leftLen = ` ● ${providerName} │ ${model}`.length;
+  const leftLen = ` ● ${providerName} │ ${model}${mcpSegmentText}`.length;
   const spacer = cols - leftLen - ctxSuffix.length;
   const gap = spacer > 0 ? ' '.repeat(spacer) : ' ';
 
   return (
     <Box>
-      <Text color={dotColor}>●</Text>
+      <Text color={provColor}>●</Text>
       <Text color={theme.textMuted}> {providerName} </Text>
       <Text color={theme.textInvisible}>│</Text>
       <Text color={theme.textPrimary}> {model}</Text>
+      {showMcp && (
+        <>
+          <Text color={theme.textInvisible}> │</Text>
+          <Text color={theme.textMuted} dimColor>
+            {' '}
+            mcp{' '}
+          </Text>
+          <Text color={mcpDotColor(mcpStatus)}>●</Text>
+        </>
+      )}
       <Text>{gap}</Text>
       <Text color={theme.textMuted} dimColor>
         ctx{' '}

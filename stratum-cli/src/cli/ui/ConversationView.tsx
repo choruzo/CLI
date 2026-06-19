@@ -1,6 +1,7 @@
 import React from 'react';
 import { Box } from 'ink';
 import { StatusBar } from './StatusBar.js';
+import type { ProviderStatus } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
@@ -31,6 +32,8 @@ interface Props {
   overlay?: React.ReactNode;
   /** Estado de conectividad MCP para el indicador del status bar. */
   mcpStatus?: McpStatusSummary;
+  /** Salud del provider activo para el `●` del status bar (Hito 6). */
+  providerStatus?: ProviderStatus;
 }
 
 export function ConversationView({
@@ -54,6 +57,7 @@ export function ConversationView({
   palette,
   overlay,
   mcpStatus,
+  providerStatus,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -64,6 +68,7 @@ export function ConversationView({
         contextMax={contextMax}
         estimated={contextEstimated}
         mcpStatus={mcpStatus}
+        providerStatus={providerStatus}
       />
       <MessageList
         completedItems={completedItems}
