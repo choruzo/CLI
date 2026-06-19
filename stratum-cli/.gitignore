@@ -10,3 +10,6 @@ tsup.config.bundled_*.mjs
 
 # Datos locales de memoria del agente
 *.fallback.json
+
+# Datos locales del proyecto (planes, etc.) — no deben commitearse
+.stratum/

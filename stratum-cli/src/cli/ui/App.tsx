@@ -451,6 +451,14 @@ interface Props {
 export function App({ agent, version, mcpManager }: Props) {
   const { exit } = useApp();
 
+  // Getter de un solo uso: devuelve el plan reanudado (si lo hay) para init de UI.
+  // useState con función initializer garantiza que getResumePlan() se llame una sola vez.
+  const [resumeInfo] = useState(() => agent.getResumePlan());
+  // PlanStore para re-persistir las actualizaciones de pasos de un plan reanudado.
+  const resumePlanStoreRef = useRef<PlanStore | null>(
+    resumeInfo ? new PlanStore(process.cwd()) : null,
+  );
+
   const ctxInit = agent.getContextUsage();
   const [state, dispatch] = useReducer(reducer, {
     phase: 'banner',
@@ -465,8 +473,8 @@ export function App({ agent, version, mcpManager }: Props) {
     focusedBlockIndex: 0,
     expandedBlockIds: new Set<string>(),
     pendingConfirm: null,
-    planMode: 'normal',
-    plan: null,
+    planMode: resumeInfo ? 'execute' : 'normal',
+    plan: resumeInfo?.plan ?? null,
     pendingApproval: false,
   });
 
@@ -528,13 +536,34 @@ export function App({ agent, version, mcpManager }: Props) {
     resolver?.(decision);
   }, []);
 
-  const getRunOptions = useCallback(
-    (): Partial<RunOptions> => ({
+  // Refs que reflejan el estado del plan para getRunOptions (sin necesitar deps de state).
+  const planModeRef = useRef(state.planMode);
+  planModeRef.current = state.planMode;
+  const planDataRef = useRef<Plan | null>(state.plan);
+  planDataRef.current = state.plan;
+
+  const getRunOptions = useCallback((): Partial<RunOptions> => {
+    const opts: Partial<RunOptions> = {
       destructivePolicy: allowAllRef.current ? 'allow' : 'ask',
       onConfirmDestructive,
-    }),
-    [onConfirmDestructive],
-  );
+    };
+    // Reanudación de plan (§12.6): inyectar mode/plan para que update_plan esté
+    // disponible y el loop pueda actualizar los estados de los pasos.
+    if (planModeRef.current === 'execute' && planDataRef.current) {
+      opts.mode = 'execute';
+      opts.plan = planDataRef.current;
+      // El preámbulo de reanudación ya está en el historial; no re-inyectar el checklist.
+      opts.isResumePlan = true;
+      if (resumeInfo && resumePlanStoreRef.current) {
+        const planRef = agent.getPlanRef();
+        if (planRef) {
+          opts.onPlanPersist = (p, _done) =>
+            resumePlanStoreRef.current!.save(planRef, resumeInfo.task, p, resumeInfo.createdAt);
+        }
+      }
+    }
+    return opts;
+  }, [onConfirmDestructive, resumeInfo, agent]);
 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
@@ -564,8 +593,11 @@ export function App({ agent, version, mcpManager }: Props) {
     const resolve = planResolverRef.current;
     planResolverRef.current = null;
     dispatch({ type: 'REJECT_PLAN' });
+    // Limpiar la ref del plan para que la sesión no se guarde con un planRef
+    // apuntando a un plan que nunca llegó a ejecutarse.
+    agent.clearPlanRef();
     resolve?.({ decision: 'reject' });
-  }, []);
+  }, [agent]);
 
   /**
    * Lanza el modo plan-and-execute (Fase 1 → 2 → 3) en un único turno del

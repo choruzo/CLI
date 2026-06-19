@@ -70,6 +70,9 @@ export class PlanStore {
       renameSync(tmp, target);
     } catch (err) {
       log.warn('plan write failed', { ref, err });
+      process.stderr.write(
+        `[stratum] Advertencia: no se pudo guardar el plan en .stratum/plans/${ref}.json — ${String(err)}\n`,
+      );
     }
   }
 

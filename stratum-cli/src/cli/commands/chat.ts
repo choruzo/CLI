@@ -128,6 +128,9 @@ export const chatCommand = new Command('chat')
               initialMessages: saved.messages,
               resumePreamble: buildResumePreamble(planFile.plan),
               planRef: saved.planRef,
+              resumePlan: planFile.plan,
+              resumeTask: planFile.task,
+              resumeCreatedAt: planFile.createdAt,
             };
             process.stderr.write(`Reanudando plan in_progress (${saved.planRef})\n`);
           }

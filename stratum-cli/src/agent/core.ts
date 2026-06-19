@@ -19,6 +19,12 @@ export interface StratumAgentOptions {
   resumePreamble?: string;
   /** Referencia al fichero de plan asociado a la sesión reanudada. */
   planRef?: string;
+  /** Plan completo a reanudar (§12.6). Expuesto vía getResumePlan() para inicializar la UI. */
+  resumePlan?: import('./types.js').Plan;
+  /** Tarea original del plan reanudado (para re-persistir actualizaciones de pasos). */
+  resumeTask?: string;
+  /** ISO 8601 de creación del plan reanudado (preservado en las escrituras sucesivas). */
+  resumeCreatedAt?: string;
 }
 
 export class StratumAgent {
@@ -28,6 +34,10 @@ export class StratumAgent {
   private _toolCallCount = 0;
   /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
   private _planRef: string | null = null;
+  /** Plan reanudado (§12.6): expuesto una sola vez a la UI al init, luego se borra. */
+  private _resumePlan: import('./types.js').Plan | null = null;
+  private _resumeTask: string | null = null;
+  private _resumeCreatedAt: string | null = null;
 
   constructor(
     private readonly config: StratumConfig,
@@ -38,6 +48,11 @@ export class StratumAgent {
     this.memoryManager = new MemoryManager(config);
 
     if (options?.planRef) this._planRef = options.planRef;
+    if (options?.resumePlan) {
+      this._resumePlan = options.resumePlan;
+      this._resumeTask = options.resumeTask ?? null;
+      this._resumeCreatedAt = options.resumeCreatedAt ?? null;
+    }
 
     if (options?.initialMessages && options.initialMessages.length > 0) {
       // Reanudar sesión: usar historial completo tal como fue guardado
@@ -184,6 +199,29 @@ export class StratumAgent {
   /** Registra la ref del plan activo (la fija el flujo de /plan al persistir). */
   setPlanRef(ref: string): void {
     this._planRef = ref;
+  }
+
+  /** Borra la ref del plan activo (al rechazar el plan antes de aprobación). */
+  clearPlanRef(): void {
+    this._planRef = null;
+  }
+
+  /**
+   * Getter de un solo uso (§12.6): devuelve el plan reanudado con su tarea y
+   * fecha de creación para que App.tsx inicialice el estado de UI en execute.
+   * Se borra tras la primera llamada para no mantener la referencia innecesariamente.
+   */
+  getResumePlan(): { plan: import('./types.js').Plan; task: string; createdAt: string } | null {
+    if (!this._resumePlan) return null;
+    const result = {
+      plan: this._resumePlan,
+      task: this._resumeTask ?? '',
+      createdAt: this._resumeCreatedAt ?? new Date().toISOString(),
+    };
+    this._resumePlan = null;
+    this._resumeTask = null;
+    this._resumeCreatedAt = null;
+    return result;
   }
 
   /** Total de tool calls ejecutados exitosamente en esta sesión. */

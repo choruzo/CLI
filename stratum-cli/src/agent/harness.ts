@@ -452,7 +452,9 @@ export class ReactLoop {
 
     // Reanudación / ejecución directa: si ya hay un plan aprobado y entramos en
     // modo execute, inyectarlo como checklist de trabajo (§12.6).
-    if (mode === 'execute' && plan) {
+    // isResumePlan=true indica que el preámbulo de reanudación ya fue inyectado
+    // en core.ts (incluye los estados de cada paso); no re-inyectar.
+    if (mode === 'execute' && plan && !opts?.isResumePlan) {
       this.messages.push({ role: 'user', content: buildExecutionInjection(plan) });
       persistPlan(isPlanComplete(plan));
     }
@@ -865,7 +867,8 @@ export class ReactLoop {
         );
         plan = proposed;
         yield { type: 'plan_proposed', plan: proposed };
-        persistPlan(false);
+        // No persistir antes del gate: si el usuario rechaza, el plan nunca
+        // llega a ejecutarse y no debe quedar como in_progress en disco.
 
         // Resolver el gate. Sin callback (CI/piped sin TTY) → rechazo.
         let decision: PlanDecision;

@@ -118,4 +118,6 @@ export interface RunOptions {
   onApprovePlan?: (plan: Plan) => Promise<PlanDecision>;
   plan?: Plan;
   onPlanPersist?: (plan: Plan, done: boolean) => void;
+  /** Cuando true, el plan fue inyectado como preámbulo de reanudación; el loop no lo re-inyecta. */
+  isResumePlan?: boolean;
 }
