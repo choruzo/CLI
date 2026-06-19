@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { theme } from './theme.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
+import type { AgentMode } from '../../agent/types.js';
 
 /** Estado de salud del provider activo para el indicador `●` (Hito 6). */
 export type ProviderStatus = 'connected' | 'disconnected' | 'checking' | 'unknown';
@@ -21,6 +22,11 @@ interface Props {
    * Si se omite, el indicador queda en verde (compatibilidad pre-Hito 6).
    */
   providerStatus?: ProviderStatus;
+  /**
+   * Modo del agente (Hito 7). Cuando es 'plan'/'execute' se pinta un badge a la
+   * derecha del status bar: `◑ PLAN` (ámbar) o `▸ EXEC` (verde).
+   */
+  mode?: AgentMode;
 }
 
 function formatTokens(n: number): string {
@@ -63,6 +69,7 @@ export function StatusBar({
   estimated,
   mcpStatus,
   providerStatus,
+  mode,
 }: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
@@ -75,7 +82,11 @@ export function StatusBar({
   const showMcp = !!mcpStatus && mcpStatus.total > 0;
   const mcpSegmentText = showMcp ? ` │ mcp ●` : '';
 
-  const ctxSuffix = ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%`;
+  // Badge de modo (Hito 7): solo visible mientras mode !== 'normal'.
+  const planBadge = mode === 'plan' ? '◑ PLAN' : mode === 'execute' ? '▸ EXEC' : '';
+  const planBadgeColor = mode === 'plan' ? '#F59E0B' : '#34D399';
+
+  const ctxSuffix = ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%${planBadge ? `  ${planBadge}` : ''}`;
   const leftLen = ` ● ${providerName} │ ${model}${mcpSegmentText}`.length;
   const spacer = cols - leftLen - ctxSuffix.length;
   const gap = spacer > 0 ? ' '.repeat(spacer) : ' ';
@@ -112,6 +123,12 @@ export function StatusBar({
       </Text>
       <Text color={theme.textInvisible}> │</Text>
       <Text color={ctxColor}> {pct}%</Text>
+      {planBadge && (
+        <Text color={planBadgeColor} bold>
+          {'  '}
+          {planBadge}
+        </Text>
+      )}
     </Box>
   );
 }

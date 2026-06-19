@@ -11,6 +11,14 @@ import { extractAndStore } from '../memory/extractor.js';
 export interface StratumAgentOptions {
   /** Mensajes iniciales para reanudar una sesión guardada (incluye el system prompt original). */
   initialMessages?: Message[];
+  /**
+   * Preámbulo de reanudación de plan (§12.6, Hito 7). Si se pasa, se inyecta
+   * como mensaje de usuario tras el historial para que el agente continúe un
+   * plan que quedó `in_progress` en una sesión previa.
+   */
+  resumePreamble?: string;
+  /** Referencia al fichero de plan asociado a la sesión reanudada. */
+  planRef?: string;
 }
 
 export class StratumAgent {
@@ -18,6 +26,8 @@ export class StratumAgent {
   private currentLoop: ReactLoop | null = null;
   private readonly memoryManager: MemoryManager;
   private _toolCallCount = 0;
+  /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
+  private _planRef: string | null = null;
 
   constructor(
     private readonly config: StratumConfig,
@@ -27,9 +37,15 @@ export class StratumAgent {
   ) {
     this.memoryManager = new MemoryManager(config);
 
+    if (options?.planRef) this._planRef = options.planRef;
+
     if (options?.initialMessages && options.initialMessages.length > 0) {
       // Reanudar sesión: usar historial completo tal como fue guardado
       this.messages = [...options.initialMessages];
+      // Reanudación de plan interrumpido (§12.6): inyectar el estado de los pasos.
+      if (options.resumePreamble) {
+        this.messages.push({ role: 'user', content: options.resumePreamble });
+      }
     } else {
       // Nueva sesión: construir system prompt con memoria del proyecto
       const memory = this.memoryManager.getInjectableMemory();
@@ -158,6 +174,16 @@ export class StratumAgent {
   /** Devuelve una copia del historial de mensajes (para persistir la sesión). */
   getMessages(): Message[] {
     return [...this.messages];
+  }
+
+  /** Ref al fichero de plan activo (Hito 7), o null si no hay plan en esta sesión. */
+  getPlanRef(): string | null {
+    return this._planRef;
+  }
+
+  /** Registra la ref del plan activo (la fija el flujo de /plan al persistir). */
+  setPlanRef(ref: string): void {
+    this._planRef = ref;
   }
 
   /** Total de tool calls ejecutados exitosamente en esta sesión. */

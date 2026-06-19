@@ -14,4 +14,9 @@ export interface SessionContext {
   messages: Message[];
   toolCallCount: number;
   summary: string; // resumen ≤100 chars (vacío si < 5 rondas)
+  /**
+   * Hito 7 — ref al fichero de plan asociado (relativo a `.stratum/plans/`).
+   * Permite reanudar un plan interrumpido al hacer `stratum chat --resume` (§12.6).
+   */
+  planRef?: string;
 }

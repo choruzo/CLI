@@ -16,8 +16,29 @@ export type AgentEvent =
       tokensAfter: number;
       roundsCompressed: number;
     }
+  // Hito 7 - Plan & Execute
+  | { type: 'plan_proposed'; plan: Plan }
+  | { type: 'plan_step_update'; stepId: string; status: PlanStepStatus }
   | { type: 'error'; message: string; fatal: boolean }
   | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' };
+
+export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped';
+
+export interface PlanStep {
+  id: string;
+  title: string;
+  detail?: string;
+  status: PlanStepStatus;
+}
+
+export interface Plan {
+  summary: string;
+  steps: PlanStep[];
+}
+
+export type PlanDecision = { decision: 'approve'; plan: Plan } | { decision: 'reject' };
+
+export type AgentMode = 'normal' | 'plan' | 'execute';
 
 export interface DecisionEntry {
   id: string;
@@ -46,21 +67,13 @@ export interface Message {
   name?: string;
 }
 
-/**
- * Política de ejecución de tools destructivas (§12.5).
- * - 'ask'   → pausar y pedir confirmación via `confirmDestructive` (default)
- * - 'allow' → aprobar todas sin preguntar (--allow-destructive)
- * - 'deny'  → bloquear todas e inyectarlas como tool_error recuperable (--deny-destructive / CI)
- */
 export type DestructivePolicy = 'ask' | 'allow' | 'deny';
 
-/** Decisión del usuario ante una confirmación destructiva (§12 de la UI spec). */
 export type DestructiveDecision = 'approve' | 'deny' | 'allow-all';
 
 export interface ConfirmRequest {
   callId: string;
   toolName: string;
-  /** Descripción legible de la operación (p. ej. el comando bash completo). */
   description: string;
 }
 
@@ -69,12 +82,7 @@ export interface ToolContext {
   cwd: string;
   config: StratumConfig;
   allowDestructive?: boolean;
-  /** Política efectiva para tools destructivas. Default: 'ask'. */
   destructivePolicy?: DestructivePolicy;
-  /**
-   * Callback de confirmación interactiva. Si la política es 'ask' y no hay
-   * callback (modo piped/CI), el dispatcher se comporta como 'deny' (§12.5).
-   */
   confirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
 }
 
@@ -89,17 +97,7 @@ export interface ToolDefinition {
   destructive?: boolean;
   serialized?: boolean;
   timeout?: number;
-  /**
-   * JSON Schema raw pasado directamente al LLM en lugar de derivarlo via
-   * zodToJsonSchema(schema). Usado por las tools MCP, que ya traen su propio
-   * inputSchema y convertirlo sería lossy.
-   */
   rawParameters?: Record<string, unknown>;
-  /**
-   * Predicado dinámico: marca una llamada concreta como destructiva según sus
-   * parámetros (p. ej. bash con `rm -rf`). Complementa al flag estático
-   * `destructive`. Se evalúa con los parámetros ya validados por el schema.
-   */
   isDestructive?(params: unknown, ctx: ToolContext): boolean;
   execute(params: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
@@ -113,15 +111,11 @@ export interface ToolCallReady {
 export interface RunOptions {
   signal?: AbortSignal;
   allowDestructive?: boolean;
-  /** Política para tools destructivas. Si se omite, se deriva de `allowDestructive`. */
   destructivePolicy?: DestructivePolicy;
-  /** Callback de confirmación interactiva para la política 'ask'. */
   onConfirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
-  /**
-   * Modo de compresión de contexto (F6).
-   * 'conservative' sube el umbral de compresión y conserva más rondas —
-   * pensado para `/init`, donde el valor está en el contexto acumulado
-   * durante la exploración y comprimirlo lo destruye.
-   */
   compressionMode?: 'normal' | 'conservative';
+  mode?: AgentMode;
+  onApprovePlan?: (plan: Plan) => Promise<PlanDecision>;
+  plan?: Plan;
+  onPlanPersist?: (plan: Plan, done: boolean) => void;
 }

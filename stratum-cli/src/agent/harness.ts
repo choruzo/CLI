@@ -2,9 +2,27 @@ import type { StratumConfig } from '../config/schema.js';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
 import { StreamBuffer } from '../providers/openai-compatible.js';
-import type { AgentEvent, Message, ToolCallReady, ToolContext, RunOptions } from './types.js';
+import type {
+  AgentEvent,
+  AgentMode,
+  Message,
+  Plan,
+  PlanDecision,
+  PlanStepStatus,
+  ToolCallReady,
+  ToolContext,
+  RunOptions,
+} from './types.js';
 import type { ToolRegistry, DispatchResult } from '../tools/registry.js';
 import { ToolDispatcher } from '../tools/registry.js';
+import {
+  PLAN_ALLOWLIST,
+  PRESENT_PLAN_TOOL,
+  UPDATE_PLAN_TOOL,
+  makePlanFromProposal,
+  buildExecutionInjection,
+  isPlanComplete,
+} from './plan.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import { getLogger } from '../logging/index.js';
 
@@ -413,14 +431,35 @@ export class ReactLoop {
 
   async *run(opts?: RunOptions): AsyncGenerator<AgentEvent> {
     const signal = opts?.signal ?? new AbortController().signal;
-    const tools: ToolSchema[] = this.registry.toToolSchemas();
     const fmt = this.config.agent.toolErrorFormat;
     const compressionMode = opts?.compressionMode ?? 'normal';
     this.contextManager.setCompressionMode(compressionMode);
 
+    // Hito 7 — Plan & Execute. El modo puede transitar 'plan' → 'execute' en el
+    // mismo turno tras la aprobación del usuario; por eso es estado mutable y el
+    // toolset se recalcula por iteración.
+    let mode: AgentMode = opts?.mode ?? 'normal';
+    let plan: Plan | null = opts?.plan ?? null;
+    const persistPlan = (done: boolean): void => {
+      if (plan) {
+        try {
+          opts?.onPlanPersist?.(plan, done);
+        } catch {
+          /* la persistencia del plan es auxiliar: nunca aborta el loop */
+        }
+      }
+    };
+
+    // Reanudación / ejecución directa: si ya hay un plan aprobado y entramos en
+    // modo execute, inyectarlo como checklist de trabajo (§12.6).
+    if (mode === 'execute' && plan) {
+      this.messages.push({ role: 'user', content: buildExecutionInjection(plan) });
+      persistPlan(isPlanComplete(plan));
+    }
+
     const loopLog = log.child('loop', { model: this.model });
     loopLog.debug('run start', {
-      tools: tools.length,
+      mode,
       messages: this.messages.length,
       maxIterations: this.config.agent.maxIterations,
       compressionMode,
@@ -481,6 +520,10 @@ export class ReactLoop {
       } else if (comprResult.kind === 'pressure') {
         yield { type: 'warning', message: 'context_window_pressure' };
       }
+
+      // Toolset según el modo activo (Hito 7): en 'plan' se restringe a la
+      // allowlist read-only + present_plan; en 'execute' aparece update_plan.
+      const tools: ToolSchema[] = this.registry.toToolSchemas(mode);
 
       const request: CompletionRequest = {
         messages: this.messages,
@@ -650,8 +693,103 @@ export class ReactLoop {
         });
       }
 
-      // Despachar tool calls con JSON válido
-      if (readyCalls.length > 0) {
+      // -----------------------------------------------------------------------
+      // Hito 7 — Plan & Execute: separar las tools de control de plan y aplicar
+      // el allowlist read-only del modo plan ANTES de despachar nada normal.
+      // -----------------------------------------------------------------------
+      const regularCalls: ToolCallReady[] = [];
+      const updatePlanCalls: ToolCallReady[] = [];
+      let presentPlanCall: ToolCallReady | null = null;
+
+      for (const call of readyCalls) {
+        // present_plan: cierre de Fase 1. Solo válido (una vez) en modo plan.
+        if (call.name === PRESENT_PLAN_TOOL) {
+          if (mode === 'plan' && !presentPlanCall) {
+            presentPlanCall = call;
+          } else {
+            const err =
+              mode === 'plan'
+                ? 'present_plan ya fue invocada en este turno.'
+                : "present_plan solo está disponible en modo plan.";
+            yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: formatToolError(call.name, err, fmt, undefined),
+            });
+          }
+          continue;
+        }
+
+        // update_plan: actualización de estado de paso. Solo válido en execute.
+        if (call.name === UPDATE_PLAN_TOOL) {
+          if (mode === 'execute') {
+            updatePlanCalls.push(call);
+          } else {
+            const err = 'update_plan solo está disponible durante la ejecución de un plan.';
+            yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: formatToolError(call.name, err, fmt, undefined),
+            });
+          }
+          continue;
+        }
+
+        // Modo plan: cualquier tool mutante fuera del allowlist read-only se
+        // rechaza con un tool_error recuperable inyectado (UI §5.4, Fase 1).
+        if (mode === 'plan' && !PLAN_ALLOWLIST.has(call.name)) {
+          const err = `Plan mode: tool '${call.name}' deshabilitada hasta aprobar el plan`;
+          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.name,
+            content: formatToolError(
+              call.name,
+              err,
+              fmt,
+              'Use only read-only tools, then call present_plan with your plan.',
+            ),
+          });
+          continue;
+        }
+
+        regularCalls.push(call);
+      }
+
+      // ----- Fase 3: aplicar update_plan (estados vivos) -----
+      for (const call of updatePlanCalls) {
+        const stepId = String((call.input as { stepId?: unknown }).stepId ?? '');
+        const status = String((call.input as { status?: unknown }).status ?? '') as PlanStepStatus;
+        const step = plan?.steps.find((s) => s.id === stepId);
+        if (!step) {
+          const err = `No existe el paso "${stepId}" en el plan.`;
+          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.name,
+            content: formatToolError(call.name, err, fmt, undefined),
+          });
+          continue;
+        }
+        step.status = status;
+        yield { type: 'plan_step_update', stepId, status };
+        persistPlan(plan ? isPlanComplete(plan) : false);
+        this.messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          name: call.name,
+          content: `Paso ${stepId} → ${status}.`,
+        });
+      }
+
+      // Despachar tool calls con JSON válido (excluyendo las de control de plan)
+      if (regularCalls.length > 0) {
         const ctx: ToolContext = {
           signal,
           cwd: process.cwd(),
@@ -662,7 +800,7 @@ export class ReactLoop {
           confirmDestructive: opts?.onConfirmDestructive,
         };
 
-        const results: DispatchResult[] = await this.dispatcher.dispatch(readyCalls, ctx);
+        const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);
 
         for (const res of results) {
           if (res.result.ok) {
@@ -715,6 +853,55 @@ export class ReactLoop {
             });
           }
         }
+      }
+
+      // -----------------------------------------------------------------------
+      // Hito 7 — Fase 2: gate de aprobación. Se procesa AL FINAL del turno, tras
+      // cualquier tool read-only del mismo turno, para cerrar la planificación.
+      // -----------------------------------------------------------------------
+      if (presentPlanCall) {
+        const proposed = makePlanFromProposal(
+          presentPlanCall.input as { summary: string; steps: Array<{ title: string; detail?: string }> },
+        );
+        plan = proposed;
+        yield { type: 'plan_proposed', plan: proposed };
+        persistPlan(false);
+
+        // Resolver el gate. Sin callback (CI/piped sin TTY) → rechazo.
+        let decision: PlanDecision;
+        try {
+          decision = opts?.onApprovePlan
+            ? await opts.onApprovePlan(proposed)
+            : { decision: 'reject' };
+        } catch {
+          decision = { decision: 'reject' };
+        }
+
+        if (decision.decision === 'approve') {
+          plan = decision.plan;
+          mode = 'execute';
+          persistPlan(isPlanComplete(plan));
+          loopLog.info('plan approved', { steps: plan.steps.length });
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: presentPlanCall.id,
+            name: presentPlanCall.name,
+            content: buildExecutionInjection(plan),
+          });
+          // Continúa el loop: la próxima iteración ya corre en modo execute.
+          continue;
+        }
+
+        // Rechazo: el turno termina sin ejecutar (UI §5.4 Fase 2).
+        loopLog.info('plan rejected');
+        this.messages.push({
+          role: 'tool',
+          tool_call_id: presentPlanCall.id,
+          name: presentPlanCall.name,
+          content: 'El usuario rechazó el plan. Detente y espera nuevas instrucciones.',
+        });
+        yield { type: 'done', stopReason: 'stop' };
+        return;
       }
     }
 

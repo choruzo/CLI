@@ -1,7 +1,15 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
 import chalk from 'chalk';
-import type { ConfirmRequest, DestructiveDecision, DestructivePolicy } from '../../agent/types.js';
+import type {
+  ConfirmRequest,
+  DestructiveDecision,
+  DestructivePolicy,
+  Plan,
+  PlanDecision,
+} from '../../agent/types.js';
+import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
+import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
@@ -23,6 +31,8 @@ export const runCommand = new Command('run')
   .option('--provider <name>', 'use a specific provider from config')
   .option('--allow-destructive', 'approve all destructive operations without prompting')
   .option('--deny-destructive', 'block all destructive operations automatically')
+  .option('--plan', 'plan-and-execute mode: produce a plan, approve, then execute step by step')
+  .option('--yes, --approve-plan', 'auto-approve the plan in --plan mode (no prompt)')
   .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
   .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
@@ -32,6 +42,8 @@ export const runCommand = new Command('run')
         provider?: string;
         allowDestructive?: boolean;
         denyDestructive?: boolean;
+        plan?: boolean;
+        approvePlan?: boolean;
         logLevel?: string;
         debug?: boolean;
       },
@@ -125,15 +137,63 @@ export const runCommand = new Command('run')
       const errorLabel = isColorTty ? chalk.hex('#EF4444')('[error]') : '[error]';
       const fatalLabel = isColorTty ? chalk.hex('#EF4444').bold('[fatal]') : '[fatal]';
 
+      // -----------------------------------------------------------------------
+      // Hito 7 — Plan & Execute en `run` (no interactivo, UI §5.4). El plan se
+      // imprime en stderr; la aprobación se resuelve por flags/TTY (sin TTY y
+      // sin --yes el plan es el entregable y se termina sin ejecutar).
+      // -----------------------------------------------------------------------
+      const planMode = opts.plan === true;
+      const input = planMode ? PLAN_MODE_PROMPT.replaceAll('$ARGUMENTS', task) : task;
+
+      const printPlan = (plan: Plan): void => {
+        plan.steps.forEach((s, i) => {
+          process.stderr.write(`[plan] ${i + 1}. ${s.title}\n`);
+        });
+      };
+
+      const onApprovePlan = async (plan: Plan): Promise<PlanDecision> => {
+        printPlan(plan);
+        if (opts.approvePlan) return { decision: 'approve', plan };
+        if (!process.stdout.isTTY) {
+          // CI/pipe sin --yes: el plan es el entregable; no se ejecuta.
+          process.stderr.write('[plan] sin TTY y sin --yes: no se ejecuta el plan.\n');
+          return { decision: 'reject' };
+        }
+        const rl = createInterface({ input: process.stdin, output: process.stderr });
+        try {
+          const answer = await new Promise<string>((resolve) =>
+            rl.question('[plan] ¿Ejecutar? (S/N) ', resolve),
+          );
+          const a = answer.trim().toLowerCase();
+          return a === 's' || a === 'y' || a === 'si' || a === 'sí' || a === 'yes'
+            ? { decision: 'approve', plan }
+            : { decision: 'reject' };
+        } finally {
+          rl.close();
+        }
+      };
+
+      const planStore = new PlanStore(process.cwd());
+      const planRef = generatePlanId();
+      const planCreatedAt = new Date().toISOString();
+      const planStepTitles = new Map<string, { n: number; title: string }>();
+
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
 
       try {
-        for await (const event of agent.run(task, {
+        for await (const event of agent.run(input, {
           signal: controller.signal,
           allowDestructive: opts.allowDestructive,
           destructivePolicy: policy,
           onConfirmDestructive: policy === 'ask' ? confirmDestructive : undefined,
+          ...(planMode
+            ? {
+                mode: 'plan' as const,
+                onApprovePlan,
+                onPlanPersist: (p: Plan) => planStore.save(planRef, task, p, planCreatedAt),
+              }
+            : {}),
         })) {
           switch (event.type) {
             case 'text_delta':
@@ -182,6 +242,19 @@ export const runCommand = new Command('run')
                   `(${event.roundsCompressed} rondas)\n`,
               );
               break;
+
+            case 'plan_proposed':
+              event.plan.steps.forEach((s, i) =>
+                planStepTitles.set(s.id, { n: i + 1, title: s.title }),
+              );
+              break;
+
+            case 'plan_step_update': {
+              const meta = planStepTitles.get(event.stepId);
+              const label = meta ? `${meta.n}. ${meta.title}` : event.stepId;
+              process.stderr.write(`[plan] ${label}  (${event.status})\n`);
+              break;
+            }
 
             case 'error':
               if (event.fatal) {

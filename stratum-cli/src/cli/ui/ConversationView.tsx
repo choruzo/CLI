@@ -5,8 +5,11 @@ import type { ProviderStatus } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
+import { PlanView } from './PlanView.js';
+import { PlanApproval } from './PlanApproval.js';
 import type { ConvItem, PendingConfirm } from './App.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
+import type { AgentMode, Plan } from '../../agent/types.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -34,6 +37,15 @@ interface Props {
   mcpStatus?: McpStatusSummary;
   /** Salud del provider activo para el `●` del status bar (Hito 6). */
   providerStatus?: ProviderStatus;
+  // ----- Plan & Execute (Hito 7) -----
+  /** Modo del agente para el badge del status bar y el render del plan. */
+  planMode?: AgentMode;
+  /** Plan propuesto/aprobado con sus estados de paso. */
+  plan?: Plan | null;
+  /** Gate de aprobación (Fase 2) activo. */
+  pendingApproval?: boolean;
+  onPlanApprove?: (plan: Plan) => void;
+  onPlanReject?: () => void;
 }
 
 export function ConversationView({
@@ -58,6 +70,11 @@ export function ConversationView({
   overlay,
   mcpStatus,
   providerStatus,
+  planMode,
+  plan,
+  pendingApproval,
+  onPlanApprove,
+  onPlanReject,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -69,13 +86,22 @@ export function ConversationView({
         estimated={contextEstimated}
         mcpStatus={mcpStatus}
         providerStatus={providerStatus}
+        mode={planMode}
       />
+      {plan && planMode === 'execute' && <PlanView plan={plan} />}
       <MessageList
         completedItems={completedItems}
         currentItem={currentItem}
         focusedBlockId={focusedBlockId}
         expandedBlockIds={expandedBlockIds}
       />
+      {plan && pendingApproval && (
+        <PlanApproval
+          plan={plan}
+          onApprove={onPlanApprove ?? (() => undefined)}
+          onReject={onPlanReject ?? (() => undefined)}
+        />
+      )}
       {pendingConfirm && (
         <DestructiveConfirm
           toolName={pendingConfirm.toolName}

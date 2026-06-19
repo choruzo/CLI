@@ -115,6 +115,23 @@ export const chatCommand = new Command('chat')
         sessionId = saved.id;
         sessionCreatedAt = saved.createdAt;
         process.stderr.write(`Reanudando sesión ${saved.id}\n`);
+
+        // Hito 7 — reanudación de plan interrumpido (§12.6): si la sesión llevaba
+        // un planRef cuyo plan quedó in_progress, inyectar el preámbulo de
+        // reanudación con el estado de cada paso.
+        if (saved.planRef) {
+          const { PlanStore } = await import('../../session/plan-store.js');
+          const { buildResumePreamble } = await import('../../agent/plan.js');
+          const planFile = new PlanStore(process.cwd()).read(saved.planRef);
+          if (planFile && planFile.status === 'in_progress') {
+            agentOptions = {
+              initialMessages: saved.messages,
+              resumePreamble: buildResumePreamble(planFile.plan),
+              planRef: saved.planRef,
+            };
+            process.stderr.write(`Reanudando plan in_progress (${saved.planRef})\n`);
+          }
+        }
       } catch (err) {
         process.stderr.write(`Error al cargar sesión: ${String(err)}\n`);
         process.exit(1);
@@ -159,6 +176,7 @@ export const chatCommand = new Command('chat')
         messages: agent.getMessages(),
         toolCallCount: agent.toolCallCount,
         llmProvider: router.getActive(),
+        planRef: agent.getPlanRef(),
       });
     } catch {
       // No bloquear la salida por un fallo al guardar

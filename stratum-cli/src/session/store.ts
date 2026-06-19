@@ -44,6 +44,8 @@ export interface SaveSessionParams {
   existingId?: string;
   /** Timestamp de creación (para actualizar). */
   createdAt?: string;
+  /** Hito 7 — ref al fichero de plan asociado a la sesión (§12.6). */
+  planRef?: string | null;
 }
 
 export interface ListOptions {
@@ -98,6 +100,7 @@ export class SessionStore {
       messages: params.messages,
       toolCallCount: params.toolCallCount,
       summary,
+      ...(params.planRef ? { planRef: params.planRef } : {}),
     };
 
     writeFileSync(this.sessionPath(id), JSON.stringify(ctx, null, 2), 'utf-8');

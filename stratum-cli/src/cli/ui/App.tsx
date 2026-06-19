@@ -4,8 +4,11 @@ import TextInput from 'ink-text-input';
 import type { StratumAgent } from '../../agent/core.js';
 import type {
   AgentEvent,
+  AgentMode,
   ConfirmRequest,
   DestructiveDecision,
+  Plan,
+  PlanDecision,
   RunOptions,
 } from '../../agent/types.js';
 import type { ProviderConfig } from '../../config/schema.js';
@@ -25,6 +28,8 @@ import { SESSION_COMMANDS, filterCommands } from './session-commands.js';
 import { theme } from './theme.js';
 import { useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
+import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
+import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 
 /** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
 type OverlayState =
@@ -73,6 +78,10 @@ interface AppState {
   expandedBlockIds: ReadonlySet<string>;
   /** Confirmación destructiva pendiente (UI §12). */
   pendingConfirm: PendingConfirm | null;
+  // ----- Plan & Execute (Hito 7, UI §5.4) -----
+  planMode: AgentMode;
+  plan: Plan | null;
+  pendingApproval: boolean;
 }
 
 export type AppAction =
@@ -86,6 +95,9 @@ export type AppAction =
   | { type: 'INIT_DONE' }
   | { type: 'CONFIRM_SHOW'; request: PendingConfirm }
   | { type: 'CONFIRM_RESOLVE' }
+  | { type: 'PLAN_MODE_START' }
+  | { type: 'APPROVE_PLAN'; plan: Plan }
+  | { type: 'REJECT_PLAN' }
   | { type: 'FOCUS_BLOCKS' }
   | { type: 'FOCUS_MOVE'; delta: number }
   | { type: 'FOCUS_EXIT' }
@@ -191,6 +203,15 @@ function reducer(state: AppState, action: AppAction): AppState {
 
     case 'CONFIRM_RESOLVE':
       return { ...state, pendingConfirm: null };
+
+    case 'PLAN_MODE_START':
+      return { ...state, planMode: 'plan', plan: null, pendingApproval: false };
+
+    case 'APPROVE_PLAN':
+      return { ...state, planMode: 'execute', plan: action.plan, pendingApproval: false };
+
+    case 'REJECT_PLAN':
+      return { ...state, planMode: 'normal', plan: null, pendingApproval: false };
 
     case 'FOCUS_BLOCKS': {
       const blocks = getActiveBlocks(state);
@@ -317,18 +338,76 @@ function reducer(state: AppState, action: AppAction): AppState {
         return { ...state, completedItems: [...state.completedItems, note] };
       }
 
+      // Hito 7 — Fase 2: el agente propuso un plan; abrir el gate de aprobación.
+      if (ev.type === 'plan_proposed') {
+        return { ...state, plan: ev.plan, pendingApproval: true };
+      }
+
+      // Hito 7 — Fase 3: actualización in-place del estado de un paso.
+      if (ev.type === 'plan_step_update') {
+        if (!state.plan) return state;
+        return {
+          ...state,
+          plan: {
+            ...state.plan,
+            steps: state.plan.steps.map((s) =>
+              s.id === ev.stepId ? { ...s, status: ev.status } : s,
+            ),
+          },
+        };
+      }
+
       if (ev.type === 'done') {
         const rawCurrent = state.currentItem;
         const finalItem =
           rawCurrent && rawCurrent.kind === 'agent'
             ? { ...rawCurrent, streaming: false }
             : rawCurrent;
+        const completed = finalItem
+          ? [...state.completedItems, finalItem]
+          : [...state.completedItems];
+
+        // Hito 7: al terminar un plan en ejecución, colapsar <PlanView> a una
+        // línea de resumen (UI §5.4) y volver al modo normal.
+        if (state.plan && state.planMode === 'execute') {
+          const total = state.plan.steps.length;
+          const doneCount = state.plan.steps.filter((s) => s.status === 'done').length;
+          const skipped = state.plan.steps.filter((s) => s.status === 'skipped').length;
+          const pending = total - doneCount - skipped;
+          const summary: ConvItem =
+            pending === 0
+              ? {
+                  kind: 'agent',
+                  text: `✓ Plan completado — ${total} paso${total === 1 ? '' : 's'} · ${doneCount} ejecutado${doneCount === 1 ? '' : 's'}${skipped ? ` · ${skipped} omitido${skipped === 1 ? '' : 's'}` : ''}`,
+                  toolCalls: [],
+                  streaming: false,
+                }
+              : {
+                  kind: 'agent',
+                  text: `⚠ Plan incompleto — ${doneCount + skipped}/${total} pasos · interrumpido`,
+                  toolCalls: [],
+                  streaming: false,
+                };
+          return {
+            ...state,
+            completedItems: [...completed, summary],
+            currentItem: null,
+            thinking: false,
+            pendingConfirm: null,
+            planMode: 'normal',
+            plan: null,
+            pendingApproval: false,
+          };
+        }
+
         return {
           ...state,
-          completedItems: finalItem ? [...state.completedItems, finalItem] : state.completedItems,
+          completedItems: completed,
           currentItem: null,
           thinking: false,
           pendingConfirm: null,
+          planMode: 'normal',
+          pendingApproval: false,
         };
       }
 
@@ -386,6 +465,9 @@ export function App({ agent, version, mcpManager }: Props) {
     focusedBlockIndex: 0,
     expandedBlockIds: new Set<string>(),
     pendingConfirm: null,
+    planMode: 'normal',
+    plan: null,
+    pendingApproval: false,
   });
 
   // -------------------------------------------------------------------------
@@ -457,6 +539,61 @@ export function App({ agent, version, mcpManager }: Props) {
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
   // -------------------------------------------------------------------------
+  // Plan & Execute (Hito 7, UI §5.4): el loop emite plan_proposed y espera la
+  // decisión del usuario vía onApprovePlan. Se resuelve desde <PlanApproval>,
+  // igual que el gate destructivo.
+  // -------------------------------------------------------------------------
+  const planResolverRef = useRef<((d: PlanDecision) => void) | null>(null);
+
+  const onApprovePlan = useCallback((_proposed: Plan): Promise<PlanDecision> => {
+    // El evento plan_proposed (ya despachado por el stream) abrió el gate;
+    // aquí solo guardamos el resolver que <PlanApproval> invocará.
+    return new Promise<PlanDecision>((resolve) => {
+      planResolverRef.current = resolve;
+    });
+  }, []);
+
+  const resolvePlanApprove = useCallback((finalPlan: Plan) => {
+    const resolve = planResolverRef.current;
+    planResolverRef.current = null;
+    dispatch({ type: 'APPROVE_PLAN', plan: finalPlan });
+    resolve?.({ decision: 'approve', plan: finalPlan });
+  }, []);
+
+  const resolvePlanReject = useCallback(() => {
+    const resolve = planResolverRef.current;
+    planResolverRef.current = null;
+    dispatch({ type: 'REJECT_PLAN' });
+    resolve?.({ decision: 'reject' });
+  }, []);
+
+  /**
+   * Lanza el modo plan-and-execute (Fase 1 → 2 → 3) en un único turno del
+   * agente. La tarea se envuelve en PLAN_MODE_PROMPT; el plan se persiste de
+   * forma incremental en .stratum/plans/ para permitir la reanudación (§12.6).
+   */
+  const runPlan = useCallback(
+    (task: string) => {
+      const prompt = PLAN_MODE_PROMPT.replaceAll('$ARGUMENTS', task);
+      const planRef = generatePlanId();
+      const planStore = new PlanStore(process.cwd());
+      const createdAt = new Date().toISOString();
+      agent.setPlanRef(planRef);
+
+      dispatch({ type: 'PLAN_MODE_START' });
+      void send(prompt, {
+        displayText: `/plan ${task}`,
+        runOptions: {
+          mode: 'plan',
+          onApprovePlan,
+          onPlanPersist: (p, _done) => planStore.save(planRef, task, p, createdAt),
+        },
+      });
+    },
+    [agent, send, onApprovePlan],
+  );
+
+  // -------------------------------------------------------------------------
   // Overlays de sesión (Hito 3.5): /model y /config_provider
   // -------------------------------------------------------------------------
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
@@ -504,6 +641,10 @@ export function App({ agent, version, mcpManager }: Props) {
         resolveConfirm('deny');
         return;
       }
+      if (state.pendingApproval) {
+        resolvePlanReject();
+        return;
+      }
       if (state.thinking) {
         cancel();
         return;
@@ -532,6 +673,9 @@ export function App({ agent, version, mcpManager }: Props) {
 
     // El prompt de confirmación gestiona su propio input (S/N/!)
     if (state.pendingConfirm) return;
+
+    // El gate de aprobación de plan gestiona su propio input (A/E/R)
+    if (state.pendingApproval) return;
 
     // ----- Paleta de /comandos (§5.2): ↑↓ navega, Tab completa, Esc cierra -----
     if (paletteItems.length > 0) {
@@ -871,6 +1015,20 @@ export function App({ agent, version, mcpManager }: Props) {
         return;
       }
 
+      if (cmd === '/plan' || cmd.startsWith('/plan ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const task = cmd.slice('/plan'.length).trim();
+        if (!task) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'Uso: /plan <tarea> — planifica (read-only), pide aprobación y ejecuta.',
+          });
+          return;
+        }
+        runPlan(task);
+        return;
+      }
+
       if (cmd === '/model') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         openModelSelector();
@@ -982,6 +1140,7 @@ export function App({ agent, version, mcpManager }: Props) {
       send,
       exit,
       runInit,
+      runPlan,
       agent,
       openModelSelector,
       openProviderEditor,
@@ -1145,6 +1304,11 @@ export function App({ agent, version, mcpManager }: Props) {
         overlay={overlayNode}
         mcpStatus={mcpStatus}
         providerStatus={providerStatus}
+        planMode={state.planMode}
+        plan={state.plan}
+        pendingApproval={state.pendingApproval}
+        onPlanApprove={resolvePlanApprove}
+        onPlanReject={resolvePlanReject}
       />
     </Box>
   );

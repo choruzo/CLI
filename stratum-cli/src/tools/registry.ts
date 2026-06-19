@@ -7,10 +7,29 @@ import type {
   DestructiveDecision,
 } from '../agent/types.js';
 import type { ToolSchema } from '../providers/base.js';
+import type { AgentMode } from '../agent/types.js';
 import { truncateToolOutput } from './truncate.js';
+import { PLAN_ALLOWLIST, PRESENT_PLAN_TOOL, UPDATE_PLAN_TOOL } from '../agent/plan.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('tools');
+
+/**
+ * ¿Es la tool `name` visible para el modelo en el modo dado? (Hito 7)
+ * - 'normal'  → todo salvo las tools de control de plan.
+ * - 'plan'    → solo la allowlist read-only + present_plan (Fase 1).
+ * - 'execute' → todo salvo present_plan; update_plan sí (Fase 3).
+ */
+export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
+  if (mode === 'plan') {
+    return name === PRESENT_PLAN_TOOL || PLAN_ALLOWLIST.has(name);
+  }
+  if (mode === 'execute') {
+    return name !== PRESENT_PLAN_TOOL;
+  }
+  // normal
+  return name !== PRESENT_PLAN_TOOL && name !== UPDATE_PLAN_TOOL;
+}
 
 export class ToolRegistry {
   private tools = new Map<string, ToolDefinition>();
@@ -33,9 +52,10 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  toToolSchemas(): ToolSchema[] {
+  toToolSchemas(mode: AgentMode = 'normal'): ToolSchema[] {
     return this.list()
       .filter((tool) => !this.disabledTools.has(tool.name))
+      .filter((tool) => isToolVisibleInMode(tool.name, mode))
       .map((tool) => {
         // Tools MCP traen su propio JSON Schema — usarlo directamente para
         // evitar una conversión lossy (JSON Schema → Zod → JSON Schema).

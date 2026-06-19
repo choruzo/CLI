@@ -22,6 +22,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/plan',
+    description: 'Planifica una tarea (read-only), pide aprobación y la ejecuta paso a paso',
+    hasArgs: true,
+  },
+  {
     name: '/memory show',
     description: 'Muestra el contenido del STRATUM.md activo',
     hasArgs: false,
