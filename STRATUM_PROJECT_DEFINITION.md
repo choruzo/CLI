@@ -724,16 +724,33 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 ---
 
 ### Hito 8 — Multi-agent Foundation *(~10 días)*
-- [ ] `Orchestrator`: agente principal que delega en subagentes
-- [ ] Spawning de subagentes con contexto aislado
-- [ ] Protocolo de comunicación entre agentes (mensajes estructurados)
-- [ ] Agregación de resultados
-- [ ] Agentes especializados: `CodeAgent`, `ShellAgent`, `ResearchAgent`
-- [ ] Visualización de árbol de agentes en Ink
 
-> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar la implementación.* Necesita diseñar: árbol de agentes activos (orquestador + subagentes con sus tool call blocks anidados), indicador de qué agente está "hablando" en cada momento, vista de resultados agregados, y cómo representar la delegación de tareas en el flujo de conversación.
+Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `CodeAgent`/`ShellAgent`/`ResearchAgent`: un subagente es una instancia del mismo `ReactLoop` con contexto aislado, lanzada por la tool de control `delegate_task` (interceptada por el loop, como `present_plan`); las especializaciones son **perfiles** (ficheros `~/.stratum/agents/<name>.md`), no subclases. Se entrega en tres sub-hitos incrementales:
 
-**Entregable:** Tareas complejas se distribuyen entre subagentes especializados con resultados agregados.
+**8A — Delegación mínima**
+- [ ] Tool de control `delegate_task` (interceptada por el loop, no despachada)
+- [ ] Subagente = `ReactLoop` con contexto aislado, **router propio**, profundidad = 1 *enforced*
+- [ ] **Ejecución estrictamente secuencial** (concurrencia = 1)
+- [ ] `SubagentResult` estructurado + truncado (~30k vía `truncate.ts`)
+- [ ] `ProfileLoader` (perfiles como ficheros; `profile: z.string()` validado en runtime)
+- [ ] UI: bloque colapsable estilo `ToolCallBlock`
+
+**8B — Robustez**
+- [ ] Cancelación (signal encadenado) y propagación de errores (fallo del hijo ≠ caída del padre)
+- [ ] Presupuestos: `maxIterations`/`timeoutMs` duros, `maxTokens` best-effort
+- [ ] Logs (`agent.subagent`) + persistencia best-effort de resultados
+- [ ] Reanudación: hijo a medias → `interrupted`, el padre verifica antes de reintentar (no reejecución automática)
+- [ ] Write-log de escrituras por subagente; tests de integración
+
+**8C — UX y especialización**
+- [ ] Ejecución **paralela** acotada por semáforo (`maxConcurrency`) + mutex (confirmaciones, memoria)
+- [ ] Evento `subagent_event` + árbol Ink (`<AgentTree>`) con tool calls anidados
+- [ ] Detección de conflictos de fichero (best-effort vía write-log)
+- [ ] Perfiles `code` / `shell` / `research` afinados
+
+> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar.* 8A solo necesita el bloque colapsable; el árbol de agentes (orquestador + subagentes con sus tool call blocks anidados, indicador de quién "habla", resultados agregados) es de **8C** y va junto con el evento `subagent_event`.
+
+**Entregable (incremental):** 8A — el agente delega una subtarea aislada y consume su resultado; 8C — tareas complejas se distribuyen entre subagentes por perfil con resultados agregados.
 
 ---
 
@@ -2170,3 +2187,266 @@ Implementado y verificado (290/290 tests, lint y typecheck limpios, build `tsup`
 - **Allowlist con nombres reales.** `PLAN_ALLOWLIST` usa `list_directory` (nombre real de la tool), no `list` como aparece en el pseudocódigo de arriba.
 - **Fichero de plan.** Nombrado por id propio (`plan_YYYYMMDD_HHMMSS_<rnd>`), no por `sessionId`; schema `{ task, status, plan, createdAt, updatedAt }`. La sesión guarda `planRef` (nombre relativo en `.stratum/plans/`) y la reanudación inyecta `buildResumePreamble` (verifica el paso `in_progress` antes de darlo por bueno). Persistencia best-effort (escritura atómica temp+rename); un fallo de FS no aborta el loop (degrada a sin-persistencia). **Pendiente respecto a la spec:** no se añade automáticamente `.stratum/` al `.gitignore` ni se emite un `warning` explícito al usuario si la carpeta no se puede crear (solo se registra en el log).
 - **Tests.** `agent/plan.test.ts` (helpers: roundtrip markdown, allowlist, `makePlanFromProposal`, `isPlanComplete`) y `agent/plan-flow.test.ts` (flujo en `ReactLoop`: `plan_proposed`, rechazo sin ejecutar, aprobación→`execute`+`plan_step_update`, rechazo de tool mutante en modo plan).
+
+---
+
+### 12.16 — Multi-agente: delegación de tareas a subagentes (Hito 8)
+
+**Decisión: un subagente es una instancia del mismo `ReactLoop` con contexto aislado, lanzada por una tool de control (`delegate_task`) interceptada por el loop padre — no una clase nueva ni un pipeline de orquestación. Misma filosofía que cerró el Hito 2.5 (`/init`) y el Hito 7 (plan): la capacidad emerge de reutilizar el stack completo con el toolset y el system prompt restringidos por un *perfil*, no de arquitecturas paralelas.** Los "agentes especializados" (`code`, `shell`, `research`) son **perfiles de configuración** —prompt, tools permitidas, modelo y presupuesto—, no subclases. Esto evita la duplicación prematura y deja un único loop que mantener.
+
+El Hito 8 se parte en tres sub-hitos incrementales. **Cada problema difícil aparece junto con la herramienta que lo hace tratable; nada de paralelismo hasta que la UI lo pueda representar.**
+
+| Sub-hito | Alcance | Qué NO incluye |
+|---|---|---|
+| **8A — Delegación mínima** | Una tool `delegate_task`; contexto aislado; profundidad = 1 (sin recursión); **ejecución estrictamente secuencial (concurrencia = 1)**; resultado estructurado y truncado; perfiles básicos vía config | Sin paralelismo, sin árbol Ink, sin reanudación de subagentes, sin resolución de conflictos |
+| **8B — Robustez** | Cancelación y propagación de errores; presupuestos (iteraciones/tiempo duros, tokens best-effort); logs (`agent.subagent`); reanudación con estado `interrupted`; write-log por subagente; persistencia de resultados; tests de integración | Sin paralelismo aún (eso es 8C), sin UI de árbol, sin detección de conflictos (requiere paralelismo) |
+| **8C — UX y especialización** | Ejecución **paralela** acotada por **semáforo** que respeta `maxConcurrency`; **mutex** compartidos para confirmaciones destructivas y escrituras de memoria; árbol Ink (`<AgentTree>`); evento `subagent_event`; detección de conflictos de fichero; perfiles `code`/`shell`/`research` afinados | — |
+
+> **Por qué 8A es estrictamente secuencial.** El paralelismo genera el ~80% de los problemas duros: conflictos sobre el mismo fichero, *interleaving* de eventos en la UI, *interleaving* de confirmaciones destructivas (varios prompts a la vez sobre una sola TTY) y carreras sobre el store de memoria (§12.7, singleton por ruta). Con concurrencia = 1, "dos agentes tocando el mismo fichero" simplemente no existe en 8A, y el gate destructivo del subagente burbujea limpio al padre porque nunca hay dos a la vez. El paralelismo entra en 8C, donde el árbol Ink ya puede representarlo.
+
+#### Tool de control `delegate_task` (Hito 8A)
+
+Como `present_plan`/`update_plan` (§12.15), `delegate_task` **no se despacha como una tool normal**: el `ReactLoop` la intercepta, instancia un loop hijo, lo ejecuta a término y devuelve el `SubagentResult` como tool result (mecanismo *inject & recover* de §12.3). Vive en `src/tools/agent/delegate.ts`, registrada en `tools/index.ts`.
+
+```typescript
+// src/tools/agent/delegate.ts
+{
+  name: 'delegate_task',
+  description: 'Delegate a self-contained subtask to an isolated subagent. The subagent '
+    + 'starts with a clean context (only the task description + cwd), runs to completion, '
+    + 'and returns a compact structured result. Use for well-scoped work that would bloat '
+    + 'this conversation (large-file exploration, focused refactors, research sweeps). '
+    + 'Subagents cannot delegate further.',
+  schema: z.object({
+    task:    z.string().describe('Self-contained task description. The subagent does NOT see this conversation.'),
+    profile: z.string().default('general')
+              .describe('Name of an agent profile. Resolved and validated at runtime against the loaded profiles.'),
+    context: z.array(z.string()).optional()
+              .describe('Paths to files relevant to the task. The subagent reads them itself; they are shared, '
+                      + 'mutable working files — NOT a read-only snapshot.'),
+  }),
+}
+```
+
+> **Perfil dinámico, no `z.enum` (corrección).** Como los perfiles son ficheros sueltos que el usuario puede crear (`~/.stratum/agents/<name>.md`), el schema usa `z.string()` y la **validación es en runtime**: el loop resuelve el `profile` contra los perfiles cargados por el `ProfileLoader`; si no existe, devuelve un `tool_error` recuperable (`"unknown profile '<name>'; available: general, code, shell, research, ..."`) en vez de fallar en la validación del schema. Un `z.enum` fijo contradiría el descubrimiento dinámico de perfiles.
+
+El loop padre, al interceptarla:
+1. Resuelve el perfil **en runtime** contra el `ProfileLoader` (ver abajo) → toolset permitido + modelo/provider + presupuesto + política destructiva. Perfil inexistente → `tool_error` recuperable.
+2. Emite `{ type: 'subagent_started', subagentId, profile, task }`.
+3. Construye un `ReactLoop` hijo con su propio `messages`, su `ContextManager`, **su propia instancia de `ProviderRouter`** (ver *Router por hijo* abajo) y el `AbortSignal` del padre encadenado (`AbortSignal.any`).
+4. Ejecuta el hijo a término (en 8A, **de forma secuencial y bloqueante** dentro del turno del padre).
+5. Emite `{ type: 'subagent_completed', subagentId, result }` e inyecta el `SubagentResult` (serializado y **truncado**) como tool result del `delegate_task`.
+
+**Profundidad = 1, *enforced* en código:** el subagente nunca ve `delegate_task` en su toolset (se filtra vía `isToolVisibleInMode`/`toToolSchemas`, extendido de "mode" a "profile"). Esto elimina por construcción árboles, ciclos y explosión combinatoria. La recursión controlada (depth ≤ N) queda fuera de alcance del Hito 8.
+
+#### Aislamiento de contexto
+
+**Decisión: contexto aislado por defecto. El subagente NO hereda el historial de conversación del padre.** Recibe únicamente: la `task`, el `cwd`, y opcionalmente referencias (rutas) a ficheros relevantes que él mismo leerá con `read_file`. Devuelve un `SubagentResult` **compacto**. El `ContextManager` del padre nunca ve el historial interno del hijo — solo el resultado.
+
+Ese es el beneficio central: el subagente quema **su propia** ventana de contexto explorando, y devuelve algo pequeño. Para no reintroducir *bloat* en el padre, **el resultado tiene un cap de tamaño** y se trunca/resume con el mecanismo de `tools/truncate.ts` (~30k chars como el resto de tool outputs, o un cap menor configurable) antes de inyectarse.
+
+| Recurso | Política |
+|---|---|
+| Historial de conversación | **No se copia.** Solo `task` + `cwd` + refs de ficheros. |
+| Filesystem | **Compartido** (mismo cwd). Fuente de los conflictos → tratada en 8B/8C. |
+| Store de memoria (`decisions.json`/`vectors.db`) | **Compartido** (singleton por ruta, §12.7). En 8A secuencial es seguro; en 8C requiere serializar escrituras (ver abajo). |
+| Conexiones MCP (`McpManager`) | **Compartidas** con el padre. **No** se levantan servers nuevos por subagente (re-arrancar stdio es carísimo y rompe heartbeat/backoff de §12.8). |
+| `ProviderRouter` | **Instancia propia por hijo** (no compartida). Ver *Router por hijo* abajo. |
+| Provider/modelo | Por perfil — el subagente puede usar otro provider/modelo que el padre (ver abajo). |
+| Resultado | `SubagentResult` compacto y truncado de vuelta al padre. |
+
+**Router por hijo (corrección).** `ProviderRouter` es **mutable** (`switchProvider`, `advanceProvider`, estado de fallback). Compartir la instancia del padre permitiría que un fallback o un cambio de modelo del hijo alterase silenciosamente al padre. Por eso cada subagente **construye su propia instancia de `ProviderRouter`** a partir de la config (es barato; no abre conexiones persistentes), inicializada al provider/modelo de su perfil. El estado de fallback del hijo muere con el hijo. Lo único compartido a nivel de proveedores es la config inmutable de origen.
+
+#### Schema de mensajes y resultados
+
+```typescript
+// src/agent/subagent.ts
+interface SubagentTask {
+  id:       string;            // sub_YYYYMMDD_HHMMSS_<rnd>
+  task:     string;
+  profile:  string;            // nombre de perfil resuelto
+  context?: string[];          // rutas de ficheros (no contenidos)
+  budget:   SubagentBudget;
+}
+
+interface SubagentBudget {
+  maxIterations: number;       // tope de iteraciones del loop hijo (límite duro, siempre disponible)
+  maxTokens?:    number;       // best-effort: solo si el backend devuelve usage; si no, se ignora (ver abajo)
+  timeoutMs?:    number;       // pared de tiempo → AbortSignal (límite duro, siempre disponible)
+}
+
+interface SubagentResult {
+  id:           string;
+  status:       'completed' | 'failed' | 'cancelled' | 'budget_exceeded' | 'interrupted';
+  summary:      string;        // resumen en lenguaje natural (lo que el padre realmente consume)
+  filesChanged: { path: string; action: 'created' | 'modified' | 'deleted' }[];
+  decisions?:   string[];      // ids de decisiones guardadas (§12.7), por trazabilidad
+  usage:        { iterations: number; tokens?: number; durationMs: number };
+  error?:       string;        // presente si status !== 'completed'
+}
+```
+
+Inyección de vuelta al padre como tool result (XML, estilo del resto de tools):
+
+```xml
+<subagent_result id="sub_20260620_team_a" profile="code" status="completed" iterations="7" durationMs="18204">
+  <summary>Extraído weightedPick() a providers/utils.ts y cableado en advanceProvider(). 12 tests verdes.</summary>
+  <files_changed>
+    <file path="src/providers/utils.ts" action="modified" />
+    <file path="src/providers/router.ts" action="modified" />
+  </files_changed>
+</subagent_result>
+```
+
+#### Eventos (sesiones, logs, UI)
+
+Extensión de `AgentEvent` (§12.1):
+
+```typescript
+// src/agent/types.ts
+| { type: 'subagent_started';   subagentId: string; profile: string; task: string }
+| { type: 'subagent_progress';  subagentId: string; note: string }       // opcional, 8B+
+| { type: 'subagent_completed'; subagentId: string; result: SubagentResult }
+// 8C — re-emite los AgentEvent del hijo envueltos, para que la UI/árbol vea sus tool calls anidados:
+| { type: 'subagent_event';     subagentId: string; event: AgentEvent }
+```
+
+- **8A vs 8C (corrección).** `started/progress/completed` basta para el bloque colapsable de 8A, pero **no** permite mostrar los tool calls internos del hijo. Para el árbol vivo de 8C se añade `subagent_event`, que **envuelve cada `AgentEvent` del loop hijo** (`tool_call_start`, `token`, etc.) etiquetado con su `subagentId`. El reducer de la UI lo desanida bajo el nodo del subagente correspondiente. Esto se introduce en 8C junto con `<AgentTree>`; en 8A no se emite (el bloque colapsable solo necesita start/complete).
+- **Logs:** namespace nuevo `agent.subagent` (start/complete, presupuesto agotado, fallos), sumándose a los subsistemas instrumentados existentes (`provider`, `agent.loop`, `tools`, `mcp`).
+- **UI (8A):** el subagente se renderiza como un **bloque colapsable** estilo `ToolCallBlock` (pending/running/completed/error). El árbol vivo (`<AgentTree>`) se difiere a 8C, cuando hay paralelismo que justifique representar la jerarquía.
+
+#### Presupuestos, cancelación y errores (Hito 8B)
+
+- **Presupuestos:** el subagente lleva su propio `maxIterations` + `maxTokens` + `timeoutMs` (de `SubagentBudget`, default por perfil). Agotar cualquiera cierra el hijo con `status: 'budget_exceeded'` y devuelve el resultado parcial — no aborta al padre.
+- **`maxTokens` es best-effort (corrección).** `maxIterations` y `timeoutMs` son **límites duros** que no dependen de métricas del modelo y siempre aplican. `maxTokens`, en cambio, solo puede aplicarse si el backend devuelve `usage` en la respuesta; **muchos backends locales (Ollama, llama.cpp) no lo devuelven o lo devuelven incompleto.** Política: si hay `usage` real se cuenta; si no, `maxTokens` se ignora y el control de coste recae enteramente en `maxIterations` + `timeoutMs` (no se hace estimación por tokenizer en el Hito 8 — añade dependencia y es imprecisa entre modelos). El `SubagentResult.usage.tokens` queda `undefined` cuando no hay métrica, y se registra un `debug` en `agent.subagent`.
+- **Cancelación:** reutiliza el `AbortSignal` combinado de §12.12. La cancelación del padre (Ctrl+C) **propaga** a los hijos vía el signal encadenado; el `timeoutMs` aporta un segundo signal por `AbortSignal.any`.
+- **Propagación de errores:** un fallo del subagente **nunca tumba al padre**. Se captura y se devuelve como `SubagentResult{ status:'failed', error }`, que el padre recibe como tool result recuperable (*inject & recover*, §12.3) y decide cómo seguir.
+- **Concurrencia acotada (8C, corrección):** `Promise.allSettled` recoge resultados pero **no limita la concurrencia por sí mismo**. La ejecución paralela de 8C usa un **semáforo/cola** que nunca lanza más de `agents.maxConcurrency` hijos a la vez; los fallos parciales se recogen con `allSettled` sobre las tareas admitidas. Además, dos **mutex** compartidos protegen los recursos compartidos: uno serializa las confirmaciones destructivas contra la TTY única del padre (§Confirmaciones) y otro serializa las escrituras al store de memoria singleton (§12.7).
+
+#### Confirmaciones destructivas en subagentes
+
+**Decisión: el subagente no posee la TTY ni la UI; nunca promptea por su cuenta. La confirmación burbujea al `onConfirmDestructive` del padre (§12.5), que es el único dueño de la interacción.** Cada perfil define una `destructivePolicy` por defecto:
+
+| Perfil | `destructivePolicy` por defecto | Racional |
+|---|---|---|
+| `research` | `deny` | Solo lee/busca; no debería escribir. |
+| `code` | `ask` (burbujea al padre) | Ejecuta `bash`; los comandos destructivos confirman vía el `<DestructiveConfirm>` del padre. |
+| `shell` | `ask` | Ejecuta `bash`; máxima cautela. |
+| `general` | hereda la del padre | — |
+
+> **Qué cubre `ask` hoy (corrección).** `destructivePolicy` gobierna el **gate destructivo existente** (§12.5), que **solo se dispara para tools marcadas `destructive`/`isDestructive`**. Hoy eso es **únicamente `bash` con patrones destructivos** (`rm`, `dd`, `mkfs`, `DROP`, …): `write_file`, `edit_file` y `read_file` tienen `destructive: false` y **no** confirman. Por tanto `code: ask` confirma *comandos shell peligrosos*, **no** las ediciones de fichero. Esto es coherente con el modo normal y con `/init`. Decisión para el Hito 8: **no** se introduce una política nueva de confirmación por mutación de fichero — sería un cambio transversal que también afectaría al modo normal y excede el alcance. Si en el futuro se quiere "confirmar toda escritura de un subagente", se modelará como un knob de perfil aparte (`confirmWrites: true`) que envuelva las tools mutantes con un `isDestructive` dinámico; queda anotado como mejora futura, fuera del Hito 8.
+
+En **8A (secuencial)** esto funciona limpio: nunca hay dos prompts simultáneos sobre una sola TTY. En **8C (paralelo)** el gate destructivo debe **serializarse** —igual que ya hace el `ToolDispatcher` con la fase de confirmación (§12.9, nunca dos prompts a la vez)—: los subagentes en paralelo encolan sus confirmaciones contra un **mutex compartido** sobre el callback único del padre.
+
+#### Conflictos sobre el mismo fichero (Hito 8C)
+
+**Decisión: detección *best-effort*, no garantía. No se construye merge ni CRDT. Se diseña para tareas disjuntas y se *detectan y reportan* las colisiones que se puedan observar.** En 8A el problema no existe (secuencial). En 8C:
+
+1. Las tareas se reparten por directorio/fichero (partición advisory en la descripción de la tarea).
+2. **Registro de escrituras desde las tools (no solo `context`).** La fuente de verdad de "qué tocó cada hijo" es un **write-log por subagente** alimentado por las propias tools mutantes: `write_file`/`edit_file` registran el path que escriben y `bash` registra (best-effort) los paths afectados que se puedan inferir. Esto es necesario porque comparar solo `hash + mtime` de los ficheros de `context` **no cubre** ficheros descubiertos después, ficheros nuevos, ni mutaciones vía `bash`. El `context` aporta una baseline opcional de hashes de partida, pero no delimita el conjunto de escrituras.
+3. Si dos subagentes paralelos escriben el mismo path (intersección de write-logs, o hash de partida cambiado bajo los pies de uno), el orquestador **reporta un `warning`** y lo refleja en `filesChanged`. No se intenta fusionar; la resolución la decide el padre o el usuario.
+
+> **Límites reconocidos:** un `bash` que escribe por redirección o un proceso hijo que toca ficheros fuera de lo inferible puede escapar al write-log. La detección reduce el riesgo, no lo elimina; la primera línea de defensa sigue siendo el diseño de tareas disjuntas.
+
+#### Perfiles de agente (configuración, no clases)
+
+**Decisión: cada perfil es un fichero suelto en `~/.stratum/agents/<name>.md` (global) o `<projectRoot>/.stratum/agents/<name>.md` (proyecto, tiene prioridad), estilo subagentes de Claude Code. El formato es markdown con frontmatter YAML: el frontmatter lleva la config estructurada, el cuerpo es el `systemPromptFragment`.** Añadir un perfil nuevo es crear un fichero; no toca código ni `.stratumrc.json`. `.stratumrc.json` conserva solo los ajustes globales del subsistema (`agents.{defaultProfile,maxConcurrency}`), no los perfiles en sí.
+
+```markdown
+<!-- ~/.stratum/agents/research.md -->
+---
+allowedTools: [read_file, glob, list_directory, grep, web_search, web_fetch, recall_decisions]
+provider: fast            # p.ej. modelo barato/rápido para barrido
+model: qwen2.5:7b
+destructivePolicy: deny
+budget: { maxIterations: 15, timeoutMs: 120000 }
+---
+You are a research subagent. Explore and summarize. Do not modify files.
+```
+
+```markdown
+<!-- ~/.stratum/agents/code.md -->
+---
+allowedTools: [read_file, glob, list_directory, grep, edit_file, write_file, bash]
+provider: main
+destructivePolicy: ask
+budget: { maxIterations: 40, timeoutMs: 600000 }
+---
+You are a coding subagent. Implement the task and verify with tests.
+```
+
+```jsonc
+// .stratumrc.json — solo ajustes globales del subsistema, NO los perfiles
+{
+  "agents": {
+    "defaultProfile": "general",
+    "maxConcurrency": 1            // 8A=1; 8C permite >1
+  }
+}
+```
+
+Un `ProfileLoader` (`src/agent/profiles.ts`) descubre los ficheros de ambas carpetas al arrancar, parsea frontmatter + cuerpo, valida con Zod y mergea con prioridad de proyecto sobre global (mismo patrón que `STRATUM.md`, §Memoria). El perfil `general` está embebido por defecto (no requiere fichero).
+
+- **Provider/modelo por subagente:** soportado de base — `ProviderRouter` ya tiene `switchProvider` y selección por instancia (Hito 6). Justifica los perfiles: `research` en modelo rápido/barato, `code` en el fuerte.
+- **Toolset por perfil:** reutiliza el filtrado de toolset por modo del Hito 7 (`isToolVisibleInMode` + `toToolSchemas`), generalizado de "mode" a "profile/toolset". Cero duplicación.
+- **System prompt:** el `systemPromptFragment` se inyecta envolviendo la `task` como mensaje de usuario (patrón de `INITIALIZE_PROMPT`/`PLAN_MODE_PROMPT`), no en `system-prompt.ts`. El `<env>` del hijo marca que **es un subagente** para que no intente acciones interactivas (preguntar al usuario, proponer planes).
+
+#### Persistencia y reanudación
+
+**Decisión (8A/8B): los subagentes NO se reanudan ni se reejecutan automáticamente. Un subagente interrumpido se marca `interrupted` y el control vuelve al padre, que debe verificar el estado antes de decidir si reintenta.**
+
+> **Por qué NO reejecución automática (corrección).** La afirmación de que un subagente es "idempotente respecto a los ficheros que encuentra" es **falsa**: un subagente puede haber ejecutado comandos `bash`, escrito ficheros o provocado efectos externos (red, servicios) antes de la caída. Reejecutarlo a ciegas puede duplicar esos efectos. Por tanto:
+>
+> - Al detectar (en `resume`) un `delegate_task` cuya ejecución quedó a medias, su resultado persistido pasa a `status: 'interrupted'` con el `summary`/`filesChanged`/write-log que se alcanzaran a registrar.
+> - El preámbulo de reanudación **no relanza el hijo**. Inyecta el resultado `interrupted` al padre e **instruye al padre a verificar el estado real** (releer ficheros, comprobar efectos) y **decidir explícitamente** si reintenta `delegate_task`, lo da por bueno, o pide al usuario. Mismo espíritu que la verificación del paso `in_progress` de un plan (§12.15), pero la decisión es del agente, no automática.
+
+El resultado se persiste como referencia (no el transcript completo):
+
+```
+<projectRoot>/.stratum/
+  subagents/
+    sub_20260620_143022_abc.json    # SubagentResult (incl. status interrupted) + write-log (best-effort, write-temp+rename)
+```
+
+Patrón idéntico al de los planes (§12.15): escritura atómica, carpeta `.stratum/` auto-creada, degradación a memoria con `warning` si el FS falla. La reanudabilidad real *desde dentro* del subagente (continuar su loop donde quedó) queda **fuera de alcance** del Hito 8.
+
+#### Archivos afectados (estimación)
+
+```
+src/tools/agent/delegate.ts   ← NUEVO: tool de control delegate_task (interceptada por el loop),
+                              profile: z.string() + validación en runtime
+src/agent/subagent.ts         ← NUEVO: SubagentTask/Budget/Result, runSubagent(), router PROPIO por hijo,
+                              write-log de escrituras del hijo
+src/agent/types.ts            ← +eventos subagent_started/progress/completed; +subagent_event (8C)
+src/agent/harness.ts          ← ReactLoop: intercepción de delegate_task, instancia hijo, signal encadenado
+src/agent/core.ts             ← orquestación; en 8C, semáforo (maxConcurrency) + Promise.allSettled
+                              + mutex de confirmaciones y de memoria
+src/tools/registry.ts         ← filtrado de toolset por perfil (generaliza isToolVisibleInMode)
+src/agent/profiles.ts         ← NUEVO: ProfileLoader (descubre ~/.stratum/agents/ + .stratum/agents/,
+                              parsea frontmatter+cuerpo, valida Zod, merge proyecto>global)
+src/providers/router.ts       ← factory para instanciar un ProviderRouter por subagente (sin compartir estado)
+src/config/schema.ts          ← +agents.{defaultProfile,maxConcurrency}  (los perfiles son ficheros)
+src/logging/                  ← namespace agent.subagent
+src/session/types.ts          ← +subagentRefs?: string[] (8B)
+src/agent/subagent-store.ts   ← NUEVO (8B): persistencia best-effort de resultados (incl. status interrupted)
+src/cli/ui/SubagentBlock.tsx  ← NUEVO (8A): bloque colapsable; <AgentTree> en 8C
+```
+
+#### Tests mínimos
+
+- `subagent.test.ts` (8A): perfil resuelto filtra el toolset (un subagente `research` no ve `bash`/`edit_file`); profundidad = 1 *enforced* (el hijo no ve `delegate_task`); **perfil inexistente → `tool_error` recuperable** (no falla la validación del schema); `SubagentResult` se trunca al cap; contexto aislado (el hijo no recibe el historial del padre); **el hijo recibe su propia instancia de `ProviderRouter`** (un `switchProvider`/fallback del hijo no muta el router del padre).
+- `delegate-flow.test.ts` (8A): `delegate_task` emite `subagent_started`→`subagent_completed`; un fallo del hijo se devuelve como tool result recuperable, no tumba al padre; cancelación del padre propaga al hijo (signal encadenado).
+- 8B: `maxIterations`/`timeoutMs` agotados → `status:'budget_exceeded'` con resultado parcial; **`maxTokens` se ignora sin error cuando el backend no devuelve `usage`** (mock sin usage); confirmación destructiva del hijo (solo `bash` destructivo) burbujea al `onConfirmDestructive` del padre; **resume marca un hijo a medias como `interrupted` y NO lo reejecuta** (el padre recibe el estado para verificar); persistencia best-effort + degradación con `warning`.
+- 8C (integración): N subagentes con `maxConcurrency>1` **respetan el semáforo** (nunca más de N activos); confirmaciones serializadas por mutex (nunca dos prompts a la vez); **colisión detectada vía intersección de write-logs** (incluida una escritura por `bash`) emite `warning`.
+
+#### Decisiones (confirmadas 2026-06-20)
+
+1. **Perfiles como ficheros sueltos** en `~/.stratum/agents/<name>.md` (global) y `<projectRoot>/.stratum/agents/<name>.md` (proyecto, prioritario), markdown + frontmatter, estilo subagentes de Claude Code. `.stratumrc.json` solo guarda `agents.{defaultProfile,maxConcurrency}`. ✅
+2. **`context` como rutas de fichero:** el padre pasa paths, el subagente los relee con `read_file`. No infla la llamada ni duplica contexto. ✅
+3. **Cap del resultado: ~30k chars** reutilizando `tools/truncate.ts` (cabeza 80% + cola 20%). Consistente con el resto de tool outputs, cero código nuevo. ✅
+
+4. **Nombre de la tool: `delegate_task`** (confirmado). Expresa delegación **síncrona**; `spawn_agent` sugeriría ejecución asíncrona/fire-and-forget, que no es el modelo. ✅
+
+#### Revisión incorporada (2026-06-20)
+
+Correcciones aplicadas tras revisión de diseño: (1) reanudación con estado `interrupted` en vez de reejecución idempotente; (2) `profile: z.string()` + validación en runtime en vez de `z.enum`; (3) `ProviderRouter` propio por subagente; (4) aclarado que `ask` solo cubre el gate destructivo existente (hoy `bash`), sin política nueva de mutación de fichero; (5) `context` descrito como rutas compartidas mutables, no snapshot read-only; (6) detección de conflictos best-effort vía write-log alimentado por las tools; (7) concurrencia 8C acotada por semáforo + mutex; (8) evento `subagent_event` para anidar tool calls en el árbol 8C; (9) `maxTokens` best-effort (límites duros = `maxIterations`/`timeoutMs`).
