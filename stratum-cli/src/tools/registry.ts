@@ -10,6 +10,7 @@ import type { ToolSchema } from '../providers/base.js';
 import type { AgentMode } from '../agent/types.js';
 import { truncateToolOutput } from './truncate.js';
 import { PLAN_ALLOWLIST, PRESENT_PLAN_TOOL, UPDATE_PLAN_TOOL } from '../agent/plan.js';
+import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('tools');
@@ -29,6 +30,25 @@ export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
   }
   // normal
   return name !== PRESENT_PLAN_TOOL && name !== UPDATE_PLAN_TOOL;
+}
+
+/**
+ * Filtrado de toolset por perfil (Hito 8A). Generaliza el filtro de modo a la
+ * dimensión "perfil de subagente":
+ *  - `allowedTools` (cuando no es null) restringe a su intersección.
+ *  - `isSubagent` fuerza profundidad = 1 ocultando delegate_task: el subagente
+ *    nunca puede delegar de nuevo (§12.16).
+ */
+export interface ToolsetFilter {
+  allowedTools?: readonly string[] | null;
+  isSubagent?: boolean;
+}
+
+export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): boolean {
+  if (!filter) return true;
+  if (filter.isSubagent && name === DELEGATE_TASK_TOOL) return false;
+  if (filter.allowedTools && !filter.allowedTools.includes(name)) return false;
+  return true;
 }
 
 export class ToolRegistry {
@@ -52,10 +72,11 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
-  toToolSchemas(mode: AgentMode = 'normal'): ToolSchema[] {
+  toToolSchemas(mode: AgentMode = 'normal', filter?: ToolsetFilter): ToolSchema[] {
     return this.list()
       .filter((tool) => !this.disabledTools.has(tool.name))
       .filter((tool) => isToolVisibleInMode(tool.name, mode))
+      .filter((tool) => isToolVisibleForProfile(tool.name, filter))
       .map((tool) => {
         // Tools MCP traen su propio JSON Schema — usarlo directamente para
         // evitar una conversión lossy (JSON Schema → Zod → JSON Schema).

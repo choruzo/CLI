@@ -5,6 +5,7 @@ import type { IProvider } from '../providers/base.js';
 import type { AgentEvent, Message, RunOptions } from './types.js';
 import { ReactLoop } from './harness.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import { ProfileLoader } from './profiles.js';
 import { MemoryManager } from '../memory/manager.js';
 import { extractAndStore } from '../memory/extractor.js';
 
@@ -31,6 +32,8 @@ export class StratumAgent {
   private messages: Message[];
   private currentLoop: ReactLoop | null = null;
   private readonly memoryManager: MemoryManager;
+  /** Perfiles de subagente (Hito 8): descubiertos al arrancar, pasados al loop. */
+  private readonly profiles: ProfileLoader;
   private _toolCallCount = 0;
   /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
   private _planRef: string | null = null;
@@ -46,6 +49,7 @@ export class StratumAgent {
     options?: StratumAgentOptions,
   ) {
     this.memoryManager = new MemoryManager(config);
+    this.profiles = new ProfileLoader();
 
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {
@@ -91,6 +95,7 @@ export class StratumAgent {
       this.router.model,
       this.router.contextWindow,
       this.router,
+      { profiles: this.profiles },
     );
 
     let stopReason: string | null = null;

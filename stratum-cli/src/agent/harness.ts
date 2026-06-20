@@ -13,7 +13,7 @@ import type {
   ToolContext,
   RunOptions,
 } from './types.js';
-import type { ToolRegistry, DispatchResult } from '../tools/registry.js';
+import type { ToolRegistry, DispatchResult, ToolsetFilter } from '../tools/registry.js';
 import { ToolDispatcher } from '../tools/registry.js';
 import {
   PLAN_ALLOWLIST,
@@ -23,6 +23,9 @@ import {
   buildExecutionInjection,
   isPlanComplete,
 } from './plan.js';
+import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
+import type { ProfileLoader } from './profiles.js';
+import { runSubagent, serializeSubagentResult, generateSubagentId } from './subagent.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import { getLogger } from '../logging/index.js';
 
@@ -416,6 +419,15 @@ export class ReactLoop {
       readonly providerName: string;
       advanceProvider(): { name: string; model: string } | null;
     },
+    /**
+     * Extras Hito 8: `profiles` permite al loop padre resolver perfiles al
+     * interceptar delegate_task; `toolsetFilter` restringe el toolset cuando este
+     * loop ES un subagente (perfil + profundidad = 1).
+     */
+    private readonly extras?: {
+      profiles?: ProfileLoader;
+      toolsetFilter?: ToolsetFilter;
+    },
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
     this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
@@ -459,15 +471,19 @@ export class ReactLoop {
       persistPlan(isPlanComplete(plan));
     }
 
+    // Hito 8: los subagentes aplican el maxIterations de su presupuesto en vez
+    // del global de config (límite duro, §12.16).
+    const maxIterations = opts?.maxIterations ?? this.config.agent.maxIterations;
+
     const loopLog = log.child('loop', { model: this.model });
     loopLog.debug('run start', {
       mode,
       messages: this.messages.length,
-      maxIterations: this.config.agent.maxIterations,
+      maxIterations,
       compressionMode,
     });
 
-    for (let iter = 0; iter < this.config.agent.maxIterations; iter++) {
+    for (let iter = 0; iter < maxIterations; iter++) {
       if (signal.aborted) {
         loopLog.info('cancelled', { iter });
         yield { type: 'done', stopReason: 'cancelled' };
@@ -525,7 +541,8 @@ export class ReactLoop {
 
       // Toolset según el modo activo (Hito 7): en 'plan' se restringe a la
       // allowlist read-only + present_plan; en 'execute' aparece update_plan.
-      const tools: ToolSchema[] = this.registry.toToolSchemas(mode);
+      // Hito 8: el filtro de subagente restringe además por perfil + profundidad=1.
+      const tools: ToolSchema[] = this.registry.toToolSchemas(mode, this.extras?.toolsetFilter);
 
       const request: CompletionRequest = {
         messages: this.messages,
@@ -701,9 +718,17 @@ export class ReactLoop {
       // -----------------------------------------------------------------------
       const regularCalls: ToolCallReady[] = [];
       const updatePlanCalls: ToolCallReady[] = [];
+      const delegateCalls: ToolCallReady[] = [];
       let presentPlanCall: ToolCallReady | null = null;
 
       for (const call of readyCalls) {
+        // delegate_task (Hito 8): interceptada como las tools de control de plan.
+        // En modo plan (read-only) cae al rechazo de tool mutante de más abajo.
+        if (call.name === DELEGATE_TASK_TOOL && mode !== 'plan') {
+          delegateCalls.push(call);
+          continue;
+        }
+
         // present_plan: cierre de Fase 1. Solo válido (una vez) en modo plan.
         if (call.name === PRESENT_PLAN_TOOL) {
           if (mode === 'plan' && !presentPlanCall) {
@@ -858,6 +883,71 @@ export class ReactLoop {
       }
 
       // -----------------------------------------------------------------------
+      // Hito 8 — Delegación (§12.16). delegate_task se ejecuta a término de forma
+      // secuencial y bloqueante dentro del turno (8A: concurrencia = 1). El
+      // SubagentResult, truncado, se inyecta como tool result (inject & recover).
+      // -----------------------------------------------------------------------
+      for (const call of delegateCalls) {
+        const input = call.input as { task?: unknown; profile?: unknown; context?: unknown };
+        const profileName =
+          typeof input.profile === 'string' && input.profile
+            ? input.profile
+            : this.config.agents.defaultProfile;
+        const profiles = this.extras?.profiles;
+        const profile = profiles?.resolve(profileName);
+
+        // Perfil inexistente → tool_error recuperable (no falla la validación).
+        if (!profile) {
+          const available = profiles?.availableNames().join(', ') ?? 'general';
+          const err = `unknown profile '${profileName}'; available: ${available}`;
+          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: call.id,
+            name: call.name,
+            content: formatToolError(call.name, err, fmt, 'Use one of the available profiles, or "general".'),
+          });
+          continue;
+        }
+
+        const subId = generateSubagentId();
+        const taskText = String(input.task ?? '');
+        const context = Array.isArray(input.context)
+          ? input.context.filter((p): p is string => typeof p === 'string')
+          : undefined;
+
+        yield { type: 'subagent_started', subagentId: subId, profile: profile.name, task: taskText };
+
+        const result = await runSubagent({
+          task: {
+            id: subId,
+            task: taskText,
+            profile: profile.name,
+            context,
+            budget: profile.budget,
+          },
+          profile,
+          registry: this.registry,
+          config: this.config,
+          parentSignal: signal,
+          parentDestructivePolicy:
+            opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
+          onConfirmDestructive: opts?.onConfirmDestructive,
+          makeRouter: opts?.makeSubagentRouter
+            ? () => opts.makeSubagentRouter!(profile)
+            : undefined,
+        });
+
+        yield { type: 'subagent_completed', subagentId: subId, result };
+        this.messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          name: call.name,
+          content: serializeSubagentResult(result, profile.name),
+        });
+      }
+
+      // -----------------------------------------------------------------------
       // Hito 7 — Fase 2: gate de aprobación. Se procesa AL FINAL del turno, tras
       // cualquier tool read-only del mismo turno, para cerrar la planificación.
       // -----------------------------------------------------------------------
@@ -908,7 +998,7 @@ export class ReactLoop {
       }
     }
 
-    loopLog.warn('max iterations reached', { maxIterations: this.config.agent.maxIterations });
+    loopLog.warn('max iterations reached', { maxIterations });
     yield { type: 'done', stopReason: 'max_iterations' };
   }
 

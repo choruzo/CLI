@@ -13,6 +13,8 @@ export interface SystemPromptEnv {
   providerName?: string;
   /** Working directory (default: process.cwd()). */
   cwd?: string;
+  /** Hito 8: marca que este prompt es para un subagente (sin acciones interactivas). */
+  isSubagent?: boolean;
 }
 
 /** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
@@ -39,6 +41,12 @@ function buildEnvBlock(env: SystemPromptEnv): string {
         }${env.modelId}\n`
       : '';
 
+  const subagentNote = env.isSubagent
+    ? '\n\nYou are running as a SUBAGENT delegated a single, self-contained task. ' +
+      'Do not ask the user questions, propose plans, or delegate further — complete the task ' +
+      'autonomously with the tools available and finish with a concise summary of what you did.'
+    : '';
+
   return (
     modelLine +
     `Here is some useful information about the environment you are running in:
@@ -48,7 +56,8 @@ function buildEnvBlock(env: SystemPromptEnv): string {
   Is directory a git repo: ${isGitRepo ? 'yes' : 'no'}
   Platform: ${process.platform}
   Today's date: ${new Date().toDateString()}
-</env>`
+  Running as: ${env.isSubagent ? 'subagent' : 'main agent'}
+</env>${subagentNote}`
   );
 }
 

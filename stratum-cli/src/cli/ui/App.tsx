@@ -19,6 +19,8 @@ import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
 import { parseMcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
+import type { SubagentBlockState } from './SubagentBlock.js';
+import { DELEGATE_TASK_TOOL } from '../../tools/agent/delegate.js';
 import { Banner } from './Banner.js';
 import { ConversationView } from './ConversationView.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -51,6 +53,8 @@ export type AgentConvItem = {
   kind: 'agent';
   text: string;
   toolCalls: ToolCallState[];
+  /** Subagentes delegados en este turno (Hito 8A). Opcional: items previos no lo traen. */
+  subagents?: SubagentBlockState[];
   streaming: boolean;
 };
 
@@ -106,13 +110,18 @@ export type AppAction =
 /**
  * Bloques navegables con Tab: los del turno en curso, o los del último turno
  * completado (que MessageList mantiene fuera de <Static> precisamente para esto).
+ * Incluye tool calls y bloques de subagente (Hito 8A), ambos con `.id`.
  */
-function getActiveBlocks(state: AppState): ToolCallState[] {
-  if (state.currentItem?.kind === 'agent' && state.currentItem.toolCalls.length > 0) {
-    return state.currentItem.toolCalls;
+function blocksOf(item: AgentConvItem): Array<{ id: string }> {
+  return [...item.toolCalls, ...(item.subagents ?? [])];
+}
+
+function getActiveBlocks(state: AppState): Array<{ id: string }> {
+  if (state.currentItem?.kind === 'agent' && blocksOf(state.currentItem).length > 0) {
+    return blocksOf(state.currentItem);
   }
   const last = state.completedItems[state.completedItems.length - 1];
-  if (last?.kind === 'agent') return last.toolCalls;
+  if (last?.kind === 'agent') return blocksOf(last);
   return [];
 }
 
@@ -253,6 +262,9 @@ function reducer(state: AppState, action: AppAction): AppState {
       }
 
       if (ev.type === 'tool_call_start') {
+        // delegate_task se intercepta en el loop y se renderiza como SubagentBlock
+        // (vía subagent_started/completed), no como tool call crudo (Hito 8A).
+        if (ev.name === DELEGATE_TASK_TOOL) return state;
         return {
           ...state,
           currentItem: updateCurrentAgent(state.currentItem, (item) => {
@@ -336,6 +348,58 @@ function reducer(state: AppState, action: AppAction): AppState {
           streaming: false,
         };
         return { ...state, completedItems: [...state.completedItems, note] };
+      }
+
+      // Hito 8A — el agente delegó una subtarea: añadir un bloque de subagente
+      // en estado running al turno en curso.
+      if (ev.type === 'subagent_started') {
+        return {
+          ...state,
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
+            ...item,
+            subagents: [
+              ...(item.subagents ?? []),
+              {
+                id: ev.subagentId,
+                profile: ev.profile,
+                task: ev.task,
+                status: 'running' as const,
+              },
+            ],
+          })),
+        };
+      }
+
+      // Hito 8A — el subagente terminó: fijar estado final + resumen + ficheros.
+      if (ev.type === 'subagent_completed') {
+        const r = ev.result;
+        const status: SubagentBlockState['status'] =
+          r.status === 'completed'
+            ? 'completed'
+            : r.status === 'cancelled'
+              ? 'cancelled'
+              : r.status === 'budget_exceeded'
+                ? 'budget_exceeded'
+                : 'failed';
+        return {
+          ...state,
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
+            ...item,
+            subagents: (item.subagents ?? []).map((s) =>
+              s.id === ev.subagentId
+                ? {
+                    ...s,
+                    status,
+                    summary: r.summary,
+                    filesChanged: r.filesChanged,
+                    iterations: r.usage.iterations,
+                    durationMs: r.usage.durationMs,
+                    error: r.error,
+                  }
+                : s,
+            ),
+          })),
+        };
       }
 
       // Hito 7 — Fase 2: el agente propuso un plan; abrir el gate de aprobación.

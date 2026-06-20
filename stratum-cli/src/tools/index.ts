@@ -13,6 +13,7 @@ import { storeDecisionTool } from './memory/store-decision.js';
 import { recallDecisionsTool } from './memory/recall-decisions.js';
 import { presentPlanTool } from './plan/present-plan.js';
 import { updatePlanTool } from './plan/update-plan.js';
+import { delegateTaskTool } from './agent/delegate.js';
 
 export function registerBuiltinTools(registry: ToolRegistry, _config: StratumConfig): void {
   registry.register(readFileTool);
@@ -29,4 +30,6 @@ export function registerBuiltinTools(registry: ToolRegistry, _config: StratumCon
   // Hito 7 — Plan & Execute: tools de control interceptadas por el ReactLoop.
   registry.register(presentPlanTool);
   registry.register(updatePlanTool);
+  // Hito 8 — Multi-agente: tool de control de delegación interceptada por el loop.
+  registry.register(delegateTaskTool);
 }

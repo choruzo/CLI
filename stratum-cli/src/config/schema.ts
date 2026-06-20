@@ -181,6 +181,20 @@ export const StratumConfigSchema = z.object({
       compressorModel: z.string().optional(),
     })
     .default({}),
+
+  /**
+   * Multi-agente (Hito 8, §12.16). Solo ajustes globales del subsistema: los
+   * perfiles en sí son ficheros sueltos en `~/.stratum/agents/<name>.md` o
+   * `<projectRoot>/.stratum/agents/<name>.md`, no van aquí.
+   */
+  agents: z
+    .object({
+      /** Perfil usado cuando `delegate_task` no especifica uno. */
+      defaultProfile: z.string().default('general'),
+      /** Subagentes concurrentes máximos. 8A=1 (secuencial); 8C permite >1. */
+      maxConcurrency: z.number().int().positive().default(1),
+    })
+    .default({}),
 });
 
 export type StratumConfig = z.infer<typeof StratumConfigSchema>;

@@ -709,6 +709,29 @@ Durante la ejecución, cada cambio de estado de paso se emite como `[plan] N. <t
 
 ---
 
+### 5.5 Subagentes — `<SubagentBlock>` (Hito 8A)
+
+Cuando el agente delega una subtarea con `delegate_task`, el loop la intercepta, lanza un subagente aislado y emite `subagent_started`/`subagent_completed` (§12.16). La UI representa cada subagente como un **bloque colapsable** estilo `<ToolCallBlock>` (`cli/ui/SubagentBlock.tsx`), no como un tool call crudo: la llamada `delegate_task` se **filtra** del render de tool calls (en el handler de `tool_call_start`) para que el subagente tenga una sola representación.
+
+```
+⊳ subagent (research) │ 4.1s │ Investiga cómo se cablea el router…        ← running (spinner)
+✓ ⊳ subagent (research) │ 12.3s · 7 it │ Encontré 3 puntos de cableado…  ▸  ← completed (colapsado)
+✗ ⊳ subagent (code) │ fallido · 2.0s  ▸                                       ← failed
+⏱ ⊳ subagent (code) │ presupuesto agotado · 40 it  ▸                         ← budget_exceeded
+⊘ ⊳ subagent (shell) │ cancelado  ▸                                          ← cancelled
+```
+
+Estados del bloque: `running` (spinner + perfil + task truncada + cronómetro), y los terminales `completed`/`failed`/`cancelled`/`budget_exceeded` (mapeados desde `SubagentResult.status`). Al expandir (Space) muestra el `summary`, el `error` (si lo hay) y la lista de `filesChanged`.
+
+| Evento | Efecto en la UI |
+|---|---|
+| `subagent_started { subagentId, profile, task }` | Añade un `SubagentBlockState` en `running` al `AgentConvItem` en curso (campo `subagents?`). |
+| `subagent_completed { subagentId, result }` | Fija el estado final + `summary`/`filesChanged`/`iterations`/`durationMs` del bloque por `subagentId`. |
+
+**Navegación:** los bloques de subagente participan en el foco Tab y la expansión Space igual que los tool calls — `getActiveBlocks` une `toolCalls` + `subagents` (ambos con `.id`) y comparten el `expandedBlockIds` set. La ejecución de 8A es estrictamente secuencial (un subagente a la vez), por lo que **no** hay árbol vivo (`<AgentTree>`): eso se difiere a 8C junto con el paralelismo y el evento `subagent_event` que anida los tool calls internos del hijo.
+
+---
+
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).

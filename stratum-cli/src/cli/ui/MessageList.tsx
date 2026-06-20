@@ -25,6 +25,7 @@ function renderItem(
       key={key}
       text={item.text}
       toolCalls={item.toolCalls}
+      subagents={item.subagents}
       streaming={item.streaming}
       focusedBlockId={focusedBlockId}
       expandedBlockIds={expandedBlockIds}

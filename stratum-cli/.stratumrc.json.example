@@ -75,6 +75,10 @@
     "toolErrorFormat": "xml",
     "compressionKeepRounds": 6
   },
+  "agents": {
+    "defaultProfile": "general",
+    "maxConcurrency": 1
+  },
   "logging": {
     "level": "info",
     "stderr": true,
