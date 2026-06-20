@@ -18,7 +18,7 @@ export interface SystemPromptEnv {
 }
 
 /** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
-function findWorktreeRoot(cwd: string): { worktree: string; isGitRepo: boolean } {
+export function findWorktreeRoot(cwd: string): { worktree: string; isGitRepo: boolean } {
   let dir = cwd;
   for (;;) {
     if (existsSync(join(dir, '.git'))) {

@@ -142,18 +142,77 @@ function splitFrontmatter(raw: string): SplitResult {
   return { frontmatter, body: match[2] ?? '' };
 }
 
-/** Parsea un bloque YAML de pares `clave: valor` a nivel raíz. */
+/**
+ * Parsea un bloque YAML de pares `clave: valor` a nivel raíz. Soporta el
+ * subconjunto que usan los perfiles: escalares, arrays/objetos inline
+ * (`[a,b]` / `{k: v}`) Y bloques indentados multilínea — secuencias
+ * (`- item`) y mapas (`subkey: value`). Soportar el estilo de bloque es
+ * importante: un `allowedTools:` válido en YAML de bloque NO debe colarse como
+ * "sin restricción" (que concedería todas las tools al subagente).
+ */
 function parseYamlBlock(block: string): Record<string, unknown> {
   const out: Record<string, unknown> = {};
-  for (const rawLine of block.split('\n')) {
-    const line = rawLine.trim();
-    if (!line || line.startsWith('#')) continue;
-    const colon = line.indexOf(':');
-    if (colon === -1) continue;
-    const key = line.slice(0, colon).trim();
-    const value = line.slice(colon + 1).trim();
-    if (!key) continue;
-    out[key] = parseYamlValue(value);
+  const lines = block.split('\n');
+  const indentOf = (s: string): number => s.length - s.replace(/^\s+/, '').length;
+
+  let i = 0;
+  while (i < lines.length) {
+    const raw = (lines[i] ?? '').replace(/\s+$/, '');
+    const trimmed = raw.trim();
+    if (!trimmed || trimmed.startsWith('#')) {
+      i++;
+      continue;
+    }
+    const colon = trimmed.indexOf(':');
+    if (colon === -1) {
+      i++;
+      continue;
+    }
+    const key = trimmed.slice(0, colon).trim();
+    const valueStr = trimmed.slice(colon + 1).trim();
+    if (!key) {
+      i++;
+      continue;
+    }
+
+    // Valor en la misma línea → inline (escalar / [..] / {..}).
+    if (valueStr !== '') {
+      out[key] = parseYamlValue(valueStr);
+      i++;
+      continue;
+    }
+
+    // Valor vacío → posible bloque hijo indentado.
+    const parentIndent = indentOf(raw);
+    const children: string[] = [];
+    let j = i + 1;
+    while (j < lines.length) {
+      const childRaw = (lines[j] ?? '').replace(/\s+$/, '');
+      const childTrim = childRaw.trim();
+      if (childTrim === '' || childTrim.startsWith('#')) {
+        j++;
+        continue;
+      }
+      if (indentOf(childRaw) <= parentIndent) break;
+      children.push(childTrim);
+      j++;
+    }
+
+    if (children.length > 0 && children.every((c) => c.startsWith('-'))) {
+      out[key] = children.map((c) => parseScalar(c.replace(/^-\s*/, '').trim()));
+    } else if (children.length > 0) {
+      const obj: Record<string, unknown> = {};
+      for (const c of children) {
+        const cc = c.indexOf(':');
+        if (cc === -1) continue;
+        const k = c.slice(0, cc).trim();
+        if (k) obj[k] = parseScalar(c.slice(cc + 1).trim());
+      }
+      out[key] = obj;
+    } else {
+      out[key] = undefined;
+    }
+    i = j;
   }
   return out;
 }

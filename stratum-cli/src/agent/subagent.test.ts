@@ -81,6 +81,19 @@ describe('ProfileLoader (Hito 8A)', () => {
     expect(p?.provider).toBe('main');
     expect(p?.budget.maxIterations).toBe(GENERAL_PROFILE.budget.maxIterations);
   });
+
+  it('parseProfile: YAML de bloque restringe (no se cuela como "todas las tools")', () => {
+    const p = parseProfile(
+      'research',
+      `---\nallowedTools:\n  - read_file\n  - grep\ndestructivePolicy: deny\nbudget:\n  maxIterations: 10\n  timeoutMs: 60000\n---\nYou are research.`,
+    );
+    expect(p).not.toBeNull();
+    // NO debe ser null (null = concede todas las tools, el footgun que evitamos).
+    expect(p?.allowedTools).toEqual(['read_file', 'grep']);
+    expect(p?.destructivePolicy).toBe('deny');
+    expect(p?.budget.maxIterations).toBe(10);
+    expect(p?.budget.timeoutMs).toBe(60_000);
+  });
 });
 
 describe('Filtrado de toolset por perfil + profundidad=1 (Hito 8A)', () => {

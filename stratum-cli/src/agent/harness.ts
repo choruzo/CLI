@@ -24,6 +24,7 @@ import {
   isPlanComplete,
 } from './plan.js';
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
+import { truncateToolOutput } from '../tools/truncate.js';
 import type { ProfileLoader } from './profiles.js';
 import { runSubagent, serializeSubagentResult, generateSubagentId } from './subagent.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
@@ -399,6 +400,8 @@ export class ContextManager {
 export class ReactLoop {
   private readonly dispatcher: ToolDispatcher;
   private readonly contextManager: ContextManager;
+  /** Iteraciones del loop realmente ejecutadas en el último run (Hito 8: usage). */
+  private _iterations = 0;
 
   constructor(
     private readonly provider: IProvider,
@@ -489,6 +492,8 @@ export class ReactLoop {
         yield { type: 'done', stopReason: 'cancelled' };
         return;
       }
+      // Contar la iteración solo cuando realmente procede (no si se canceló antes).
+      this._iterations = iter + 1;
 
       const ctxUsage = this.contextManager.usage(this.messages);
       loopLog.debug('iteration', {
@@ -938,12 +943,27 @@ export class ReactLoop {
             : undefined,
         });
 
+        // Truncar el resultado serializado COMPLETO (no solo el summary) antes de
+        // inyectarlo, para proteger el contexto del padre igual que el resto de
+        // tool outputs (§12.16, cabeza 80% + cola 20%).
+        const serialized = truncateToolOutput(serializeSubagentResult(result, profile.name));
+
         yield { type: 'subagent_completed', subagentId: subId, result };
+        // Emitir también el tool_result del delegate_task: lo consumen el contador
+        // de tool calls (core), `stratum run` y la persistencia de sesión, igual
+        // que cualquier otra tool. La UI ya lo representa como SubagentBlock.
+        yield {
+          type: 'tool_result',
+          id: call.id,
+          name: call.name,
+          result: serialized,
+          durationMs: result.usage.durationMs,
+        };
         this.messages.push({
           role: 'tool',
           tool_call_id: call.id,
           name: call.name,
-          content: serializeSubagentResult(result, profile.name),
+          content: serialized,
         });
       }
 
@@ -1004,5 +1024,10 @@ export class ReactLoop {
 
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {
     return this.contextManager.usage(this.messages);
+  }
+
+  /** Iteraciones del loop ejecutadas en el último run (para usage de subagentes). */
+  get iterationsRun(): number {
+    return this._iterations;
   }
 }

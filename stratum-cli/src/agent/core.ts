@@ -4,7 +4,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type { IProvider } from '../providers/base.js';
 import type { AgentEvent, Message, RunOptions } from './types.js';
 import { ReactLoop } from './harness.js';
-import { buildSystemPrompt } from './system-prompt.js';
+import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
 import { ProfileLoader } from './profiles.js';
 import { MemoryManager } from '../memory/manager.js';
 import { extractAndStore } from '../memory/extractor.js';
@@ -49,7 +49,10 @@ export class StratumAgent {
     options?: StratumAgentOptions,
   ) {
     this.memoryManager = new MemoryManager(config);
-    this.profiles = new ProfileLoader();
+    // Perfiles de subagente desde la raíz del proyecto (worktree git), no el cwd
+    // crudo: así `<projectRoot>/.stratum/agents/` se descubre aunque se invoque
+    // Stratum desde un subdirectorio del repo (consistente con el `<env>`).
+    this.profiles = new ProfileLoader(findWorktreeRoot(process.cwd()).worktree);
 
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {

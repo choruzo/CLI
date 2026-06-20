@@ -187,7 +187,6 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
           pendingCalls.set(ev.id, { name: ev.name, input: ev.input });
           // El texto final (resumen) es el que viene tras el último tool call.
           currentText = '';
-          iterations++;
           break;
         case 'tool_result': {
           const call = pendingCalls.get(ev.id);
@@ -215,10 +214,13 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
       summary: truncateToolOutput(currentText.trim(), RESULT_SUMMARY_CAP),
       filesChanged: toFilesArray(filesChanged),
       decisions: decisions.length ? decisions : undefined,
-      usage: { iterations, tokens, durationMs: Date.now() - start },
+      usage: { iterations: loop.iterationsRun, tokens, durationMs: Date.now() - start },
       error: msg(err),
     };
   }
+
+  // Iteraciones REALES del loop hijo (no número de tool calls).
+  iterations = loop.iterationsRun;
 
   const status: SubagentStatus =
     stopReason === 'cancelled'
