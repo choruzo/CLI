@@ -47,7 +47,7 @@ status: en-progreso
 - [x] Tools básicas: `read_file`, `write_file`, `bash`
 - [x] `StreamBuffer` para parsing de tool calls SSE fragmentadas (§12.2)
 - [x] System prompt base (identidad Stratum + instrucciones ReAct)
-- [x] Ink UI: Banner con typewriter, ConversationView con streaming cursor
+- [x] UI terminal: logo con cortina ANSI aditiva previa a Ink y fallback estático; ConversationView con streaming cursor
 - [x] `stratum run` en modo plain-text (stdout/stderr separados)
 
 **Entregable:** `stratum chat` arranca la UI interactiva. El agente puede leer archivos y ejecutar comandos. `stratum run "tarea"` funciona en modo plain-text contra Ollama local. 42 tests pasando.

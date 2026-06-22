@@ -510,9 +510,10 @@ interface Props {
   agent: StratumAgent;
   version: string;
   mcpManager?: McpManager;
+  logoPreRendered: boolean;
 }
 
-export function App({ agent, version, mcpManager }: Props) {
+export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
   const { exit } = useApp();
 
   // Getter de un solo uso: devuelve el plan reanudado (si lo hay) para init de UI.
@@ -1273,7 +1274,7 @@ export function App({ agent, version, mcpManager }: Props) {
   if (state.phase === 'banner') {
     return (
       <Box>
-        <Banner version={version} onSend={handleSend} />
+        <Banner version={version} onSend={handleSend} logoPreRendered={logoPreRendered} />
       </Box>
     );
   }

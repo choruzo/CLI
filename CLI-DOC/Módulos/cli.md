@@ -1,5 +1,5 @@
 ---
-date: 2026-06-16
+date: 2026-06-22
 tags: [módulo, cli, ui, ink, stratum-cli]
 status: implementado
 hito: 1-5
@@ -26,8 +26,9 @@ src/cli/
 │   ├── provider.tsx            add / list / use / remove (wizard)
 │   └── mcp.ts                  list / install
 └── ui/
-    ├── App.tsx                 Root: reducer + slash commands + /init + /memory
-    ├── Banner.tsx              Bienvenida con typewriter
+    ├── App.tsx                 Root: reducer + slash commands + estado logoPreRendered
+    ├── Banner.tsx              Bienvenida; logo omitido o estático con <Static>
+    ├── startup-logo-animation.ts  Cortina ANSI previa al montaje de Ink
     ├── ConversationView.tsx    StatusBar + MessageList + InputArea
     ├── MessageList.tsx         <Static> + currentItem (scroll pattern)
     ├── StatusBar.tsx           ● provider │ model │ MCP │ ctx ~N/Nk │ %
@@ -76,12 +77,40 @@ loadConfig()
   → McpManager.startBackground()        // arranque lazy de MCP (Hito 4.1)
   → SessionStore.load(opts.resume)      // si --resume
   → new StratumAgent(config, router, registry, { initialMessages? })
-  → render(<App agent={...} version={...} />)
+  → animateStartupLogo({ stdout })      // termina antes de montar Ink
+  → render(<App ... logoPreRendered={boolean} />)
   → await waitUntilExit()
   → SessionStore.save({ messages, toolCallCount, ... })
 ```
 
 **Gestión de Ctrl+C:** durante un run → cancela (`AbortController.abort()`); durante conflicto de init pendiente → ignorado; en idle → 2do Ctrl+C en < 1s sale.
+
+### Logo de arranque y compatibilidad de terminal
+
+La animación del logo no pertenece al árbol React. `chat.ts` espera a
+`animateStartupLogo()` **antes** de llamar a `render()`; durante ese intervalo Ink aún
+no está montado ni controla stdout.
+
+`startup-logo-animation.ts` reserva una región con la altura del arte seleccionado por
+`getAsciiArt(stdout.columns)` y realiza una cortina horizontal aditiva:
+
+- revela 2 columnas por fotograma;
+- cada fotograma agrupa las columnas nuevas de todas las filas en una sola llamada a
+  `stdout.write()`;
+- nunca borra ni reimprime columnas ya visibles;
+- espera 40 ms en Windows y 32 ms en otros sistemas mediante una espera async cancelable;
+- al terminar restaura estilo y cursor, dejándolo debajo del logo.
+
+El booleano `logoPreRendered` se propaga `chat.ts → App → Banner`. Si es `true`,
+`Banner` no incluye el ASCII art. Si es `false`, el logo completo se emite una sola vez
+con `<Static>` y el resto de las fases (`appearing` y `ready`) continúa debajo.
+
+`supportsStartupLogoAnimation(stdout, env)` fuerza el fallback estático cuando stdout
+no es TTY, `TERM=dumb`, existe una señal de CI, faltan dimensiones, el arte no cabe,
+`STRATUM_NO_ANIMATION=1` o Windows no expone `WT_SESSION`. Por tanto, PowerShell
+antiguo/ConHost nunca ejecuta ANSI incremental; Windows Terminal sí puede hacerlo.
+Ante cancelación o error después de reservar la región, se completan las columnas
+restantes de forma aditiva y siempre se intenta restaurar cursor y estilo.
 
 ---
 
@@ -222,5 +251,11 @@ function useAgentStream(agent, dispatch) {
 `src/cli/ui/session-commands.test.ts` — definición y filtrado de slash commands.
 
 `src/cli/ui/wizard-logic.test.ts` — lógica del wizard de provider.
+
+`src/cli/ui/startup-logo-animation.test.ts` — compatibilidad, escrituras incrementales agrupadas, cursor y limpieza de timers.
+
+`src/cli/ui/Banner.test.ts` — evita duplicar un logo prerenderizado y garantiza salida estática única en fallback.
+
+`src/cli/ui/ascii-art.test.ts` — geometría y anchura de los artes disponibles.
 
 `src/cli/commands/run.test.ts` — `done(cancelled)` antes de salir con código 130 tras SIGINT.

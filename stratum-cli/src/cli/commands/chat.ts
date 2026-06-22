@@ -13,6 +13,7 @@ import { StratumAgent } from '../../agent/core.js';
 import { SessionStore } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
+import { animateStartupLogo } from '../ui/startup-logo-animation.js';
 import { configureLogging, flushLogging, getLogger, isLogLevel, type LogLevel } from '../../logging/index.js';
 
 declare const __VERSION__: string;
@@ -154,8 +155,11 @@ export const chatCommand = new Command('chat')
 
     const version = resolveVersion();
     const sessionStart = new Date().toISOString();
+    const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
-    const { waitUntilExit } = render(React.createElement(App, { agent, version, mcpManager }));
+    const { waitUntilExit } = render(
+      React.createElement(App, { agent, version, mcpManager, logoPreRendered }),
+    );
 
     try {
       await waitUntilExit();
