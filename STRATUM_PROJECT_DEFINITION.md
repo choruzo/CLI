@@ -748,7 +748,7 @@ Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `C
 - [ ] Detección de conflictos de fichero (best-effort vía write-log)
 - [ ] Perfiles `code` / `shell` / `research` afinados
 
-> **UI:** ⚠️ *La especificación de UI actual no cubre este modo — requiere extensión de `STRATUM_UI_SPECIFICATION.md` antes de comenzar.* 8A solo necesita el bloque colapsable; el árbol de agentes (orquestador + subagentes con sus tool call blocks anidados, indicador de quién "habla", resultados agregados) es de **8C** y va junto con el evento `subagent_event`.
+> **UI:** ✅ *Especificado.* 8A usa el bloque colapsable (`<SubagentBlock>`, **§5.5** de `STRATUM_UI_SPECIFICATION.md`, ya implementado). El árbol de agentes de **8C** (`<AgentTree>` con tool calls anidados, indicador de quién "habla" `▶`, resultados agregados, confirmaciones destructivas serializadas por mutex, conflictos de fichero y salida atribuible en `stratum run`) está diseñado en **§5.6**, junto con el evento `subagent_event`. Queda implementarlo.
 
 **Entregable (incremental):** 8A — el agente delega una subtarea aislada y consume su resultado; 8C — tareas complejas se distribuyen entre subagentes por perfil con resultados agregados.
 

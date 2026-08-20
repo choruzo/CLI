@@ -373,6 +373,7 @@ Al escribir `/` aparece inmediatamente un panel de autocompletado **encima** del
 | `/sessions resume <id>` | Carga una sesión anterior y la continúa en el chat actual. Equivalente a salir y ejecutar `stratum sessions resume <id>` desde la terminal — las tres formas hacen exactamente lo mismo. |
 | `/sessions delete <id>` | Elimina una sesión guardada por ID |
 | `/plan` | Activa modo plan-and-execute para el próximo mensaje |
+| `/subagents` | Abre un desplegable para inspeccionar el transcript de un subagente de la sesión (Hito 8C, §5.7). Dentro de esa vista, `/quit`/`Esc` vuelve al agente principal (ahí `/quit` **no** cierra Stratum). |
 | `/compact` | Fuerza la compresión del contexto actual sin esperar al umbral automático del 80% |
 | `/provider <name>` | Cambia el proveedor activo en caliente |
 | `/model` | Abre selector interactivo de modelos del provider activo (fetch de `/models` + menú navegable con `↑↓`). El cambio aplica a la sesión actual sin reiniciar; no persiste en `.stratumrc.json`. |
@@ -732,6 +733,247 @@ Estados del bloque: `running` (spinner + perfil + task truncada + cronómetro), 
 
 ---
 
+### 5.6 Multi-agente paralelo — `<AgentTree>` (Hito 8C)
+
+En 8C el padre puede lanzar **varios subagentes en paralelo** acotados por un semáforo que respeta `agents.maxConcurrency` (§12.16). Un único `<SubagentBlock>` plano deja de bastar: los hijos emiten eventos **entrelazados** y cada uno tiene sus propios tool calls internos. La UI los representa como un **árbol vivo** (`cli/ui/AgentTree.tsx`) que sustituye al grupo de `<SubagentBlock>` cuando en un mismo turno se delega más de una subtarea. Con **un solo** subagente se conserva el `<SubagentBlock>` de §5.5 (no se monta el árbol) — el árbol es la representación del paralelismo.
+
+> **Requisito de datos: el evento `subagent_event`.** `subagent_started/completed` bastan para el bloque plano, pero no para mostrar los tool calls internos del hijo. 8C añade `{ type: 'subagent_event'; subagentId: string; event: AgentEvent }` (§12.16 y §12.1), que **envuelve cada `AgentEvent` del loop hijo** etiquetado con su `subagentId`. El reducer lo desanida bajo el nodo del subagente correspondiente. Ver "Mapeo de eventos" abajo.
+
+#### Layout del árbol
+
+El árbol se ancla **inline** en el flujo de conversación, en el punto donde el padre delegó (no pinned como `<PlanView>`: un plan es único por turno, pero puede haber varios grupos de delegación a lo largo de una sesión). Un nodo raíz agrupa a los hijos; cada hijo es un `<SubagentNode>` con sus tool calls internos indentados:
+
+```
+  ◮ delegando 3 subagentes · 2/3 activos (maxConcurrency 2)
+  │
+  ├─▶ ⊳ research#1  │ 6.2s · 4 it │ Mapear el cableado del router…
+  │     ⟳ grep: "advanceProvider"
+  │     ✓ read_file: src/providers/router.ts
+  │
+  ├─  ⊳ code#2  │ 8.1s · 6 it │ Extraer weightedPick()…
+  │     ✓ edit_file: src/providers/utils.ts
+  │     ⟳ bash: npm test -- router
+  │
+  └─  ⋯ code#3  │ en cola │ Añadir tests del reparto ponderado…
+```
+
+- **Nodo raíz** `◮ delegando N subagentes · A/N activos (maxConcurrency M)` en `accent` (`#F59E0B`). `A` = hijos actualmente en ejecución (nunca supera `M`); el resto están `en cola` o ya terminados.
+- **`▶` (marcador de "quién habla")**: prefija al nodo que emitió el evento más reciente (`subagent_event`), en `accent-bright` (`#FBBF24`). Solo un nodo lo lleva a la vez; da sensación de foco pese al entrelazado. Cuando todos terminan y el **padre** retoma la palabra, ningún nodo lo lleva.
+- **Etiqueta de nodo** `⊳ <perfil>#<n>`: `n` es el índice de admisión (1-based) dentro del grupo, estable durante todo el turno. `perfil` en `accent`.
+- **Tool calls internos**: se renderizan indentados bajo el nodo, en forma compacta (una línea: icono de estado + `name`: + primer argumento truncado), reusando los iconos de `<ToolCallBlock>` (`⟳` running, `✓` ok, `✗` error). **No** se muestra el `text_delta` del hijo en el árbol (sería ruido de varios flujos a la vez): el resumen del hijo aparece al completarse, en su línea de nodo.
+
+#### Estados de nodo
+
+| Estado | Icono | Significado |
+|---|---|---|
+| `queued` | `⋯` (`#6B7280`) | Admitido pero esperando hueco del semáforo. Muestra `en cola`. |
+| `running` | `⊳` (`accent`) | En ejecución; cronómetro + `it` vivos. `▶` si es el que acaba de emitir. |
+| `completed` | `✓ ⊳` (`success`) | Terminado con éxito; muestra `summary` truncado. |
+| `failed` | `✗ ⊳` (`error`) | Falló; muestra `error` truncado. |
+| `budget_exceeded` | `⏱ ⊳` (`warning`) | Agotó presupuesto (iteraciones/tiempo/tokens). |
+| `cancelled` | `⊘ ⊳` (`#6B7280` dim) | Cancelado (Ctrl+C del padre propagó por el signal encadenado). |
+| `interrupted` | `⚠ ⊳` (`warning`) | Quedó a medias (persistido `running`, §12.16 8B); solo visible al reanudar. |
+
+Los estados terminales mapean 1:1 desde `SubagentResult.status`. Al expandir un nodo (Space con el nodo enfocado) se muestran su `summary`, `error` y `filesChanged` completos (igual que `<SubagentBlock>` expandido).
+
+#### Cierre y resultados agregados
+
+Cuando **todos** los hijos del grupo alcanzan un estado terminal, `<AgentTree>` colapsa a una línea de resumen agregada (patrón de `<PlanView>`/`<InitProgressBlock>`), expandible para volver a ver el árbol:
+
+```
+  ✓ 3 subagentes · 2 completados · 1 fallido · 6 ficheros tocados  ▸
+```
+
+Si hubo conflictos de fichero (ver abajo), el resumen lo señala en `warning`: `⚠ 3 subagentes · 1 conflicto de fichero · revisar`.
+
+#### Confirmaciones destructivas en paralelo (mutex sobre la TTY)
+
+El subagente nunca posee la TTY: su gate destructivo burbujea al `<DestructiveConfirm>` **único** del padre (§12 de esta spec, §12.16). Con paralelismo, varios hijos pueden pedir confirmación a la vez; un **mutex** serializa esos prompts —igual que el `ToolDispatcher` nunca muestra dos gates a la vez—: se muestra **un** `<DestructiveConfirm>` cada vez, etiquetado con el subagente que lo solicita, y los demás hijos quedan bloqueados en su `bash` hasta que se resuelve el suyo:
+
+```
+  ⚠ subagent (code#2) solicita ejecutar un comando destructivo
+  rm -rf dist/
+  [Enter] aprobar · [n] denegar · [!] aprobar todo (sesión) · [Esc] denegar
+```
+
+`allow-all` (`!`) aplica a **toda la sesión** (padre e hijos), consistente con el modo normal. Mientras el gate está activo, `focusState = 'destructive-confirm'` bloquea el input y la navegación del árbol.
+
+#### Conflictos de fichero (best-effort)
+
+La detección de conflictos (§12.16 8C) es *best-effort* vía intersección de write-logs por subagente, no una garantía. Cuando dos hijos escriben el mismo path, el orquestador emite un `warning` y la UI:
+
+1. Marca el fichero en conflicto con `⚠` en la vista expandida de los nodos implicados (`… edit_file: src/foo.ts ⚠ también tocado por code#3`).
+2. Refleja el conflicto en la línea de resumen agregada (`⚠ N conflicto(s) de fichero`).
+3. Emite además una línea de `warning` normal en el flujo (`chalk.hex('#F97316')`), como cualquier otro `warning` (§ mapeo de eventos). **No** se intenta fusionar; la resolución la decide el usuario/padre.
+
+#### Componentes Ink
+
+```tsx
+<AgentTree group={agentGroup}>          ← inline en el AgentConvItem, sustituye al grupo de SubagentBlock
+  {group.nodes.map((n) => (
+    <SubagentNode
+      key={n.id}
+      node={n}                            ← estado + toolCalls internos + summary/error/filesChanged
+      speaking={n.id === group.speakingId} ← marcador ▶
+      expanded={expandedBlockIds.has(n.id)}
+    />
+  ))}
+</AgentTree>
+```
+
+- Un **solo** subagente ⇒ no se monta `<AgentTree>`; se usa `<SubagentBlock>` (§5.5). El umbral es `group.nodes.length > 1`.
+- Estado nuevo en el `useReducer` global de `<App>` (dentro del `AgentConvItem` en curso):
+  - `agentGroup: { nodes: SubagentNodeState[]; speakingId: string | null; maxConcurrency: number } | null`
+  - `SubagentNodeState`: `{ id, profile, n, task, status, toolCalls: ToolCallState[], summary?, error?, filesChanged?, iterations?, durationMs? }`
+  - Reutiliza `expandedBlockIds` y el foco Tab existentes (los nodos y sus tool calls entran en `getActiveBlocks`).
+
+**Mapeo `AgentEvent` → componente** (eventos nuevos y modificados; ver §11 y §12.1 de STRATUM_PROJECT_DEFINITION.md):
+
+| Evento | Efecto en la UI |
+|---|---|
+| `subagent_started { subagentId, profile, task }` | Añade/actualiza un `SubagentNodeState`. Si es el 2.º del turno, promueve el `<SubagentBlock>` previo a `<AgentTree>`. Estado inicial `running` o `queued` según el semáforo. |
+| `subagent_progress { subagentId, note }` | Actualiza la línea de actividad del nodo (opcional; p.ej. "leyendo 3 ficheros"). |
+| `subagent_event { subagentId, event }` | Enruta `event` al nodo por `subagentId`: `tool_call_start`/`tool_result`/`tool_error` alimentan `node.toolCalls`; marca `speakingId = subagentId`. `text_delta` del hijo se **ignora** en el árbol. |
+| `subagent_completed { subagentId, result }` | Fija el estado terminal del nodo + `summary`/`error`/`filesChanged`/`iterations`/`durationMs`. Si todos terminan, colapsa a resumen agregado y limpia `speakingId`. |
+| `warning` (conflicto de fichero) | Marca el fichero con `⚠` en los nodos implicados + línea de warning en el flujo. |
+
+#### Atajos de teclado (añadidos a §10)
+
+| Estado | Tecla | Acción |
+|---|---|---|
+| `block-focus` (nodo de árbol) | `Space` | Expande/colapsa los `toolCalls` + `summary`/`error`/`filesChanged` del nodo. |
+| `block-focus` (nodo de árbol) | `Tab` / `Shift+Tab` | Cicla entre nodos y sus tool calls internos expandidos (orden de admisión). |
+
+El árbol no introduce un `focusState` nuevo: sus nodos son bloques enfocables como los tool calls (`block-focus`). El gate destructivo sigue siendo el `focusState` bloqueante `destructive-confirm`.
+
+#### Modo `stratum run` (añadido a §13)
+
+`run` es no interactivo y el paralelismo entrelaza la salida. Cada línea de un subagente se **prefija** con `[sub <perfil>#<n>]` para que el flujo entrelazado sea atribuible, manteniendo `stdout` reservado para la respuesta final del padre (los prefijos van a `stderr`):
+
+```bash
+$ stratum run "audita los 3 módulos en paralelo" --allow-destructive
+
+[sub research#1] grep: "advanceProvider"
+[sub code#2]     edit_file: src/providers/utils.ts
+[sub research#1] ✓ done · 4 it · 0 ficheros
+[sub code#2]     bash: npm test -- router
+[sub code#3]     ⋯ en cola
+[warn] conflicto: src/providers/utils.ts tocado por code#2 y code#3
+[sub code#2]     ✓ done · 6 it · 1 fichero
+[sub code#3]     ✓ done · 3 it · 1 fichero (⚠ conflicto)
+```
+
+Sin TTY, las confirmaciones destructivas de los hijos siguen la política del `run` (`--allow-destructive`/`--deny-destructive`; sin flag y sin TTY → deny), serializadas por el mismo mutex.
+
+#### Responsive (añadido a §9)
+
+- **<100 columnas**: la indentación del árbol se reduce a 2 espacios por nivel; las tasks/summaries se truncan más agresivamente.
+- **Profundidad**: el árbol es de **profundidad 1** por construcción (los subagentes no delegan, §12.16), así que nunca hay sub-sub-nodos; la indentación máxima es padre → nodo → tool call (3 niveles).
+- **Muchos nodos** (> `maxConcurrency` + varios en cola): los nodos `queued` se colapsan a una línea `⋯ +K en cola` cuando el alto disponible aprieta.
+
+---
+
+### 5.7 Inspector de subagentes — `/subagents` (Hito 8C)
+
+El árbol (§5.6) muestra *qué* hace cada subagente (sus tool calls y su resultado), pero **no** su conversación interna completa (el `text_delta` del hijo se omite del árbol para no entrelazar varios flujos). El inspector `/subagents` cubre ese hueco: permite **entrar** al transcript de un subagente concreto y leerlo aislado, como si abrieras su chat.
+
+> **Fuente de datos: transcript en memoria de la sesión actual.** El inspector se construye sobre el evento `subagent_event` (§5.6): además de alimentar el árbol, el reducer **acumula** cada `AgentEvent` del hijo, en orden, en un `subagentTranscripts: Map<subagentId, SubagentTranscript>`. No se persiste en disco (consistente con §12.16: el store guarda el resultado, no el transcript) — el inspector cubre los subagentes **de la sesión viva**; tras cerrar la sesión o hacer `/clear` deja de estar disponible (un `/clear` vacía también `subagentTranscripts`). Inspeccionar subagentes de sesiones pasadas queda como extensión futura (requeriría persistir transcripts + política de retención).
+
+#### Comando y desplegable de selección
+
+`/subagents` (autocompletado en §5.2) abre un **desplegable de selección** —misma mecánica visual que el dropdown de `/comandos`, pero listando subagentes en vez de comandos— con los subagentes de la sesión, del más reciente al más antiguo:
+
+```
+  /subagents
+  ┌───────────────────────────────────────────────────────────┐
+  │ ▸ ⊳ research#1  ✓ completed · 4 it · 6.2s                 │
+  │   ⊳ code#2      ✗ failed · 2 it · 2.0s                    │
+  │   ⊳ code#3      ⊳ running · 3 it…                          │
+  └───────────────────────────────────────────────────────────┘
+    ↑↓ seleccionar · Enter abrir · Esc cerrar
+```
+
+- Cada fila: icono de estado (§5.6) + `⊳ <perfil>#<n>` + estado + `it`/cronómetro. Perfil en `accent`.
+- `↑↓` navega, `Enter` abre la Vista de Subagente del seleccionado, `Esc` cierra el desplegable sin entrar.
+- Si no hay subagentes en la sesión, el desplegable muestra una única línea dim `— ningún subagente en esta sesión —` y `Enter` no hace nada.
+
+#### Vista de Subagente (modal read-only)
+
+Al elegir uno se entra a la **Vista de Subagente**: ocupa el área de conversación (sustituye a `<MessageList>`) y renderiza el transcript del hijo **en solo lectura**, reutilizando los mismos componentes que la conversación principal (`<UserMessage>` para la task inyectada, `<AgentMessage>`/`<ToolCallBlock>`/`<MarkdownText>` para su salida). Es scrollable con las mismas teclas que la conversación normal.
+
+```
+  ┌─ 👁 Subagente · research#1 · ✓ completed · 4 it · 7122 tok · 6.2s ──────┐
+  │                                                                          │
+  │  ❯❯ [task]  Investiga cómo se cablea el router y resume los puntos…      │
+  │                                                                          │
+  │  Stratum (research#1)                                                    │
+  │  ✓ grep: "advanceProvider"  ▸                                            │
+  │  ✓ read_file: src/providers/router.ts  ▸                                │
+  │  He encontrado 3 puntos de cableado: …                                   │
+  │                                                                          │
+  └──────────────────────────────────────────────────────────────────────────┘
+   Solo lectura · /quit (o Esc) para volver al agente principal
+```
+
+- **Cabecera** `👁 Subagente · <perfil>#<n> · <estado> · <it> · <tokens> · <duración>`, borde en `accent`.
+- El **badge de la `<StatusBar>`** cambia a `👁 SUBAGENT research#1` mientras estás dentro, para dejar claro que es una vista anidada (no el agente principal).
+- **En vivo:** si el subagente sigue `running` (paralelo, 8C), la vista se actualiza conforme llegan sus `subagent_event` (el mismo Map que alimenta el árbol). Al terminar, la cabecera pasa al estado terminal sin salir de la vista.
+- Los tool calls del hijo son expandibles (Space) igual que en la conversación normal; el foco Tab opera **dentro** del transcript del subagente.
+
+#### Input restringido — solo `/quit`
+
+Mientras la Vista de Subagente está activa, `focusState = 'subagent-view'` (estado bloqueante nuevo, mutuamente excluyente con los demás). La línea de entrada **no** manda mensajes al agente: es una vista de inspección. El único comando aceptado es **`/quit`** (con `Esc` como alias), que cierra la vista y **vuelve exactamente al punto de la conversación principal** donde estabas. Cualquier otra entrada se rechaza con un hint inline:
+
+```
+  ❯❯ arregla el bug
+  ⚠ Aquí solo está disponible /quit (vuelve al agente principal). Esc también cierra.
+```
+
+> **`/quit` aquí ≠ cerrar Stratum.** Dentro de esta vista, `/quit` significa *volver al agente principal*, no salir de la aplicación. El cierre real de Stratum (doble `Ctrl+C`) no se ve afectado y sigue disponible.
+
+No se puede enviar input **al** subagente: ya se ejecutó (o corre de forma autónoma); el inspector es un lector, no un chat interactivo con el hijo. Delegar de nuevo se hace desde el agente principal con `delegate_task`, no desde aquí.
+
+#### Componentes Ink y estado
+
+```tsx
+{focusState === 'subagent-view' && (
+  <SubagentView                         ← sustituye a <MessageList> mientras está activo
+    transcript={subagentTranscripts.get(viewingSubagentId)}
+    onQuit={() => dispatch({ type: 'EXIT_SUBAGENT_VIEW' })}
+  />
+)}
+```
+
+- Estado nuevo en el `useReducer` de `<App>`:
+  - `subagentTranscripts: Map<string, SubagentTranscript>` — `{ meta: { profile, n, task, status, iterations, tokens, durationMs }, events: AgentEvent[] }`, alimentado por `subagent_started`/`subagent_event`/`subagent_completed`.
+  - `viewingSubagentId: string | null` — subagente abierto; `null` fuera de la vista.
+  - `subagentPicker: boolean` — desplegable de selección abierto.
+- `<SubagentView>` reutiliza el pipeline de render de `<MessageList>` (los `events` del hijo son `AgentEvent[]` normales), solo cambia la cabecera y el input restringido.
+
+**Acciones del reducer:**
+
+| Acción | Efecto |
+|---|---|
+| `OPEN_SUBAGENT_PICKER` (`/subagents`) | `subagentPicker = true`; lista `subagentTranscripts`. |
+| `ENTER_SUBAGENT_VIEW { id }` | `viewingSubagentId = id`, `focusState = 'subagent-view'`, cierra el picker. |
+| `EXIT_SUBAGENT_VIEW` (`/quit`, `Esc`) | `viewingSubagentId = null`, restaura `focusState = 'input'`. |
+| `CLEAR` | vacía `subagentTranscripts` (además de messages/events). |
+
+#### Atajos de teclado (añadidos a §10)
+
+| Estado | Tecla | Acción |
+|---|---|---|
+| `subagent-view` | `/quit` + Enter, o `Esc` | Cierra la vista y vuelve al agente principal. |
+| `subagent-view` | `↑↓` / scroll | Desplaza el transcript del subagente. |
+| `subagent-view` | `Tab` / `Space` | Foco/expansión de los tool calls **dentro** del transcript. |
+| `subagent-picker` | `↑↓` / `Enter` / `Esc` | Seleccionar / abrir / cerrar el desplegable. |
+
+#### Modo `stratum run`
+
+No aplica: `run` es no interactivo, sin desplegables ni vistas modales. La atribución del transcript de cada hijo en `run` se cubre con los prefijos `[sub perfil#n]` de §5.6.
+
+---
+
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).
@@ -950,6 +1192,14 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
           output={...}
           duration={...}
         />
+        <SubagentBlock          → Hito 8A: 1 subagente, bloque colapsable (§5.5)
+          id={...}
+          profile={...}
+          status={...}
+        />
+        <AgentTree              → Hito 8C: >1 subagente en paralelo, árbol vivo (§5.6)
+          group={agentGroup}    → nodos + speakingId + maxConcurrency
+        />
         {streaming
           ? <StreamingText      → Durante streaming: texto plano + cursor parpadeante
               text={...}
@@ -977,9 +1227,11 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
 - `sessionId: string`
 - `provider: string`, `model: string`
 - `contextTokens: number`, `contextMax: number`
-- `focusState: 'input' | 'dropdown' | 'block-focus'` — ver §10
+- `focusState: 'input' | 'dropdown' | 'block-focus' | 'plan-approval' | 'destructive-confirm' | 'subagent-view'` — ver §10. `plan-approval` (§5.4), `destructive-confirm` (§12) y `subagent-view` (§5.7) son estados bloqueantes mutuamente excluyentes con los demás; los nodos de `<AgentTree>` (§5.6) son bloques `block-focus` normales, no un estado nuevo.
+- `agentGroup: AgentGroupState | null` — grupo de subagentes paralelos del turno en curso (§5.6, Hito 8C); `null` fuera de una delegación múltiple.
+- `subagentTranscripts: Map<string, SubagentTranscript>` + `viewingSubagentId: string | null` — inspector de subagentes de la sesión (§5.7, Hito 8C); en memoria, se vacía con `/clear`.
 
-**Acción `/clear` en el reducer:** despacha `{ type: 'CLEAR' }`, que reinicia tanto `messages: []` como `events: []`. El `sessionId` se mantiene; el agente pierde todo el contexto conversacional anterior. `Ctrl+L` despacha la misma acción.
+**Acción `/clear` en el reducer:** despacha `{ type: 'CLEAR' }`, que reinicia `messages: []`, `events: []` y `subagentTranscripts` (§5.7). El `sessionId` se mantiene; el agente pierde todo el contexto conversacional anterior. `Ctrl+L` despacha la misma acción.
 
 **AgentEvent → Componente:** el `<MessageList>` consume el stream de `AgentEvent` y los reduce a la representación visual:
 
@@ -991,6 +1243,10 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
 | `tool_result` | Actualiza bloque a `status="completed"` con output y duración |
 | `tool_error` | Actualiza bloque a `status="error"` con mensaje |
 | `memory_retrieved` | Renderiza una línea dim `↺ N decisiones recuperadas de memoria` justo antes del siguiente `<AgentMessage>`. Si `decisions.length === 0`, no se renderiza nada. |
+| `subagent_started` (8A/8C) | 1.º del turno → `<SubagentBlock>` (§5.5); 2.º → promueve a `<AgentTree>` (§5.6) y añade nodo. |
+| `subagent_progress` (8B+) | Actualiza la línea de actividad del bloque/nodo del subagente. |
+| `subagent_event` (8C) | Enruta el `AgentEvent` envuelto al nodo por `subagentId`; alimenta sus tool calls y marca `speakingId`. Ver §5.6. |
+| `subagent_completed` (8A/8C) | Fija estado terminal + `summary`/`error`/`filesChanged` del bloque/nodo. Colapsa el árbol al agregado si todos terminaron. |
 | `thinking` | **No se renderiza por defecto.** Solo visible en modo `--debug`: se muestra como un bloque `<Box>` colapsado con borde dim y prefijo `⊙ thinking`. |
 | `error { fatal: false }` | Igual que `tool_error` — el loop continúa, el error es parte del flujo normal. |
 | `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'` (valor incluido en el enum de `AgentEvent.done` — ver §12.1 de `STRATUM_PROJECT_DEFINITION.md`). |
