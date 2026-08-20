@@ -61,7 +61,12 @@ export function packageNameFromSpec(spec: string): string {
 export function isServerInstalled(serverCfg: McpServer, installDir: string): boolean {
   if (!serverCfg.package) return false;
   const pkgName = packageNameFromSpec(serverCfg.package);
-  const pkgJson = join(serverInstallPath(installDir, serverCfg.name), 'node_modules', pkgName, 'package.json');
+  const pkgJson = join(
+    serverInstallPath(installDir, serverCfg.name),
+    'node_modules',
+    pkgName,
+    'package.json',
+  );
   return existsSync(pkgJson);
 }
 
@@ -86,7 +91,11 @@ export async function installServer(
   if (!existsSync(localPkgJson)) {
     writeFileSync(
       localPkgJson,
-      JSON.stringify({ name: `stratum-mcp-${sanitizeSegment(serverCfg.name)}`, private: true }, null, 2),
+      JSON.stringify(
+        { name: `stratum-mcp-${sanitizeSegment(serverCfg.name)}`, private: true },
+        null,
+        2,
+      ),
     );
   }
 
@@ -122,7 +131,9 @@ function resolveBinEntry(serverCfg: McpServer, installDir: string): string {
   }
   binRel = binRel ?? pkg.main;
   if (!binRel) {
-    throw new Error(`El paquete '${pkgName}' no declara 'bin' ni 'main' (server '${serverCfg.name}').`);
+    throw new Error(
+      `El paquete '${pkgName}' no declara 'bin' ni 'main' (server '${serverCfg.name}').`,
+    );
   }
   return isAbsolute(binRel) ? binRel : join(pkgDir, binRel);
 }

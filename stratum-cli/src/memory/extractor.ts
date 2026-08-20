@@ -40,7 +40,13 @@ async function gatherCompletion(
   signal: AbortSignal,
 ): Promise<string> {
   let out = '';
-  for await (const chunk of provider.complete({ messages, model, stream: true, signal, temperature: 0.1 })) {
+  for await (const chunk of provider.complete({
+    messages,
+    model,
+    stream: true,
+    signal,
+    temperature: 0.1,
+  })) {
     const content = chunk.choices?.[0]?.delta?.content;
     if (content) out += content;
   }
@@ -56,7 +62,10 @@ export function parseDecisionsJson(raw: string): unknown[] {
   let text = (raw || '').trim();
   text = text.replace(/<think(?:ing)?>[\s\S]*?<\/think(?:ing)?>/gi, '').trim();
   if (text.startsWith('```')) {
-    text = text.replace(/^```(?:json)?\s*\n?/i, '').replace(/```\s*$/i, '').trim();
+    text = text
+      .replace(/^```(?:json)?\s*\n?/i, '')
+      .replace(/```\s*$/i, '')
+      .trim();
   }
   const start = text.indexOf('[');
   const end = text.lastIndexOf(']');

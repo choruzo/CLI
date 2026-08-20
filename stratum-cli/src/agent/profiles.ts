@@ -11,7 +11,7 @@
  */
 import { existsSync, readdirSync, readFileSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { join, resolve } from 'path';
 import { z } from 'zod';
 import type { AgentProfile, DestructivePolicy } from './types.js';
 import { getLogger } from '../logging/index.js';
@@ -54,10 +54,26 @@ const frontmatterSchema = z.object({
 export class ProfileLoader {
   private readonly profiles = new Map<string, AgentProfile>();
 
-  constructor(projectRoot: string = process.cwd()) {
-    // Global primero, proyecto después: el proyecto sobrescribe al global.
-    this.loadDir(join(homedir(), '.stratum', 'agents'));
-    this.loadDir(join(projectRoot, '.stratum', 'agents'));
+  /**
+   * Acepta uno o varios roots de proyecto. Precedencia de menor a mayor: global
+   * → cada root en orden (los posteriores sobrescriben a los anteriores). Pasar
+   * `[worktreeRoot, cwd]` hace que un perfil local al cwd gane sobre el de la raíz
+   * del repo. Con un solo root se comporta como la versión anterior. Los roots
+   * duplicados (p.ej. cwd === worktreeRoot) se cargan una sola vez.
+   */
+  constructor(projectRoots: string | string[] = process.cwd()) {
+    const roots = Array.isArray(projectRoots) ? projectRoots : [projectRoots];
+    const dirs = [
+      join(homedir(), '.stratum', 'agents'),
+      ...roots.map((r) => join(r, '.stratum', 'agents')),
+    ];
+    const seen = new Set<string>();
+    for (const dir of dirs) {
+      const key = resolve(dir);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      this.loadDir(dir);
+    }
     // El perfil embebido `general` solo se usa si no hay un fichero que lo defina.
     if (!this.profiles.has('general')) {
       this.profiles.set('general', GENERAL_PROFILE);

@@ -78,8 +78,7 @@ export class Logger {
   /** Crea un logger hijo con namespace anidado (`padre.hijo`) y campos heredados. */
   child(ns: string, fields?: Record<string, unknown>): Logger {
     const childNs = this.ns ? `${this.ns}.${ns}` : ns;
-    const merged =
-      this.baseFields || fields ? { ...this.baseFields, ...fields } : undefined;
+    const merged = this.baseFields || fields ? { ...this.baseFields, ...fields } : undefined;
     return new Logger(this.core, childNs, merged);
   }
 
@@ -123,8 +122,7 @@ export class Logger {
       if (Object.keys(others).length > 0) rest = others;
     }
 
-    const combined =
-      this.baseFields || rest ? { ...this.baseFields, ...rest } : undefined;
+    const combined = this.baseFields || rest ? { ...this.baseFields, ...rest } : undefined;
 
     this.core.emit({
       time: new Date().toISOString(),

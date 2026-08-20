@@ -1168,7 +1168,10 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
             text: `Provider activo: ${target} (modelo ${agent.model}, solo esta sesión; no se ha modificado .stratumrc.json).`,
           });
         } catch (err) {
-          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al cambiar de provider: ${String(err)}` });
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Error al cambiar de provider: ${String(err)}`,
+          });
         }
         return;
       }

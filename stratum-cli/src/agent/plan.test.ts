@@ -89,7 +89,10 @@ describe('serialize/parse markdown roundtrip', () => {
 
 describe('buildExecutionInjection', () => {
   it('numera los pasos e incluye los ids y reglas de update_plan', () => {
-    const plan = makePlanFromProposal({ summary: 'X', steps: [{ title: 'Uno' }, { title: 'Dos' }] });
+    const plan = makePlanFromProposal({
+      summary: 'X',
+      steps: [{ title: 'Uno' }, { title: 'Dos' }],
+    });
     const text = buildExecutionInjection(plan);
     expect(text).toContain('1. [step-1] Uno');
     expect(text).toContain('2. [step-2] Dos');

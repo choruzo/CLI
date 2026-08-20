@@ -136,9 +136,7 @@ export function SubagentBlock({ state, focused = false, expanded = false }: Prop
   }
 
   const expandable = !!state.summary || !!state.error || (state.filesChanged?.length ?? 0) > 0;
-  const chevron = expandable ? (
-    <Text color={theme.textFaint}> {expanded ? '▾' : '▸'}</Text>
-  ) : null;
+  const chevron = expandable ? <Text color={theme.textFaint}> {expanded ? '▾' : '▸'}</Text> : null;
   const dur = state.durationMs !== undefined ? formatDuration(state.durationMs) : '';
   const iters = state.iterations !== undefined ? `${state.iterations} it` : '';
   const meta = [dur, iters].filter(Boolean).join(' · ');
@@ -152,9 +150,7 @@ export function SubagentBlock({ state, focused = false, expanded = false }: Prop
           {label}
           {profileTag}
           {meta && <Text color={theme.textFaint}> │ {meta}</Text>}
-          {state.summary && (
-            <Text color={theme.textFaint}> │ {truncate(state.summary, 50)}</Text>
-          )}
+          {state.summary && <Text color={theme.textFaint}> │ {truncate(state.summary, 50)}</Text>}
           {chevron}
         </Box>
         {expanded && <ExpandedDetail state={state} />}

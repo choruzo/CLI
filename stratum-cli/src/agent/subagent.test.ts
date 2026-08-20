@@ -74,6 +74,43 @@ describe('ProfileLoader (Hito 8A)', () => {
     expect(loader.resolve('nope')).toBeUndefined();
   });
 
+  it('carga desde varios roots y el más específico (último) gana en conflictos', () => {
+    // Simula el layout real: worktree root (repo) + cwd (proyecto npm anidado).
+    const rootA = mkdtempSync(join(tmpdir(), 'stratum-rootA-'));
+    const rootB = mkdtempSync(join(tmpdir(), 'stratum-rootB-'));
+    try {
+      const dirA = join(rootA, '.stratum', 'agents');
+      const dirB = join(rootB, '.stratum', 'agents');
+      mkdirSync(dirA, { recursive: true });
+      mkdirSync(dirB, { recursive: true });
+      // 'shared' definido en ambos con budgets distintos; 'only-a' solo en A.
+      writeFileSync(join(dirA, 'shared.md'), `---\nbudget: { maxIterations: 11 }\n---\nfrom A`);
+      writeFileSync(join(dirA, 'only-a.md'), `---\n---\nonly in A`);
+      writeFileSync(join(dirB, 'shared.md'), `---\nbudget: { maxIterations: 22 }\n---\nfrom B`);
+
+      // Orden [A, B]: B es el más específico (cwd) → gana en 'shared'.
+      const loader = new ProfileLoader([rootA, rootB]);
+      expect(loader.resolve('only-a')?.systemPromptFragment).toContain('only in A');
+      expect(loader.resolve('shared')?.budget.maxIterations).toBe(22);
+      expect(loader.resolve('shared')?.systemPromptFragment).toContain('from B');
+      expect(loader.availableNames()).toContain('only-a');
+      expect(loader.availableNames()).toContain('shared');
+    } finally {
+      rmSync(rootA, { recursive: true, force: true });
+      rmSync(rootB, { recursive: true, force: true });
+    }
+  });
+
+  it('roots duplicados se cargan una sola vez (cwd === worktreeRoot)', () => {
+    const agentsDir = join(dir, '.stratum', 'agents');
+    mkdirSync(agentsDir, { recursive: true });
+    writeFileSync(join(agentsDir, 'research.md'), `---\n---\nresearch body`);
+    // Mismo root repetido: no debe fallar ni duplicar.
+    const loader = new ProfileLoader([dir, dir]);
+    expect(loader.resolve('research')).toBeDefined();
+    expect(loader.availableNames().filter((n) => n === 'research')).toHaveLength(1);
+  });
+
   it('parseProfile: allowedTools omitido → null (hereda todas)', () => {
     const p = parseProfile('code', `---\nprovider: main\n---\nYou are code.`);
     expect(p).not.toBeNull();
@@ -142,7 +179,12 @@ describe('runSubagent (Hito 8A)', () => {
     };
 
     const result = await runSubagent({
-      task: { id: 'sub_test', task: 'Investiga el módulo X', profile: 'research', budget: researchProfile.budget },
+      task: {
+        id: 'sub_test',
+        task: 'Investiga el módulo X',
+        profile: 'research',
+        budget: researchProfile.budget,
+      },
       profile: researchProfile,
       registry: newRegistry(),
       config,

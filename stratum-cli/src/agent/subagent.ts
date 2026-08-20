@@ -270,10 +270,7 @@ function toFilesArray(
 }
 
 function escapeXml(s: string): string {
-  return s
-    .replace(/&/g, '&amp;')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;');
+  return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
 /** Serializa el SubagentResult a XML para inyectarlo como tool result (§12.16). */

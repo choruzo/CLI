@@ -121,7 +121,9 @@ export async function animateStartupLogo({
   let regionReserved = false;
 
   try {
-    stdout.write(`${HIDE_CURSOR}${LOGO_COLOR}\r${'\n'.repeat(artRows.length)}${cursorUp(artRows.length)}\r`);
+    stdout.write(
+      `${HIDE_CURSOR}${LOGO_COLOR}\r${'\n'.repeat(artRows.length)}${cursorUp(artRows.length)}\r`,
+    );
     regionReserved = true;
 
     try {

@@ -245,9 +245,7 @@ export class VectorStore {
             this.backend = sqlite;
             return sqlite;
           } catch (err) {
-            this.warn(
-              `sqlite-vec no disponible (${String(err)}); usando índice brute-force JS`,
-            );
+            this.warn(`sqlite-vec no disponible (${String(err)}); usando índice brute-force JS`);
           }
         }
         const bf = new BruteForceBackend(this.opts.fallbackPath);

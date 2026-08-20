@@ -163,7 +163,11 @@ export const StratumConfigSchema = z.object({
           /** Carpeta del fichero `stratum.jsonl`. */
           dir: z.string().default('~/.stratum/logs'),
           /** Tamaño máximo antes de rotar (bytes). */
-          maxBytes: z.number().int().positive().default(5 * 1024 * 1024),
+          maxBytes: z
+            .number()
+            .int()
+            .positive()
+            .default(5 * 1024 * 1024),
           /** Ficheros rotados a conservar (`.1`…`.N`). */
           maxFiles: z.number().int().positive().default(5),
         })

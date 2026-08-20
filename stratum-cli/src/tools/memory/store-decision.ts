@@ -7,7 +7,14 @@ const schema = z.object({
   content: z
     .string()
     .describe('Explicación detallada: contexto, alternativas consideradas, razón de la elección'),
-  type: z.enum(['architectural', 'tooling', 'convention', 'bug_fix', 'security', 'user_preference']),
+  type: z.enum([
+    'architectural',
+    'tooling',
+    'convention',
+    'bug_fix',
+    'security',
+    'user_preference',
+  ]),
   tags: z.array(z.string()).max(5).describe('Tags para búsqueda semántica'),
   importance: z.enum(['low', 'medium', 'high']),
 });
@@ -49,7 +56,10 @@ export const storeDecisionTool: ToolDefinition = {
             '(instala @xenova/transformers o configura memory.embeddingEndpoint).',
         };
       }
-      return { ok: true, output: `Decisión almacenada: ${result.record.id} — "${result.record.title}"` };
+      return {
+        ok: true,
+        output: `Decisión almacenada: ${result.record.id} — "${result.record.title}"`,
+      };
     } catch (err) {
       return {
         ok: false,

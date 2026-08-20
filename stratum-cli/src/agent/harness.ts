@@ -742,8 +742,14 @@ export class ReactLoop {
             const err =
               mode === 'plan'
                 ? 'present_plan ya fue invocada en este turno.'
-                : "present_plan solo está disponible en modo plan.";
-            yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+                : 'present_plan solo está disponible en modo plan.';
+            yield {
+              type: 'tool_error',
+              id: call.id,
+              name: call.name,
+              error: err,
+              recoverable: true,
+            };
             this.messages.push({
               role: 'tool',
               tool_call_id: call.id,
@@ -760,7 +766,13 @@ export class ReactLoop {
             updatePlanCalls.push(call);
           } else {
             const err = 'update_plan solo está disponible durante la ejecución de un plan.';
-            yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+            yield {
+              type: 'tool_error',
+              id: call.id,
+              name: call.name,
+              error: err,
+              recoverable: true,
+            };
             this.messages.push({
               role: 'tool',
               tool_call_id: call.id,
@@ -910,7 +922,12 @@ export class ReactLoop {
             role: 'tool',
             tool_call_id: call.id,
             name: call.name,
-            content: formatToolError(call.name, err, fmt, 'Use one of the available profiles, or "general".'),
+            content: formatToolError(
+              call.name,
+              err,
+              fmt,
+              'Use one of the available profiles, or "general".',
+            ),
           });
           continue;
         }
@@ -921,7 +938,12 @@ export class ReactLoop {
           ? input.context.filter((p): p is string => typeof p === 'string')
           : undefined;
 
-        yield { type: 'subagent_started', subagentId: subId, profile: profile.name, task: taskText };
+        yield {
+          type: 'subagent_started',
+          subagentId: subId,
+          profile: profile.name,
+          task: taskText,
+        };
 
         const result = await runSubagent({
           task: {
@@ -973,7 +995,10 @@ export class ReactLoop {
       // -----------------------------------------------------------------------
       if (presentPlanCall) {
         const proposed = makePlanFromProposal(
-          presentPlanCall.input as { summary: string; steps: Array<{ title: string; detail?: string }> },
+          presentPlanCall.input as {
+            summary: string;
+            steps: Array<{ title: string; detail?: string }>;
+          },
         );
         plan = proposed;
         yield { type: 'plan_proposed', plan: proposed };

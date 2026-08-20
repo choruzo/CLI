@@ -56,8 +56,10 @@ describe('EmbeddingService', () => {
     const svc = new EmbeddingService(configWithEndpoint());
     // Forzamos que el fallback local no esté disponible para que el resultado
     // sea determinista en cualquier entorno (con/sin @xenova instalado).
-    vi.spyOn(svc as unknown as { embedLocal: (texts: string[]) => Promise<Float32Array[]> }, 'embedLocal')
-      .mockRejectedValue(new Error('ONNX unavailable'));
+    vi.spyOn(
+      svc as unknown as { embedLocal: (texts: string[]) => Promise<Float32Array[]> },
+      'embedLocal',
+    ).mockRejectedValue(new Error('ONNX unavailable'));
     const out = await svc.embedOne('x');
     expect(out).toBeNull();
   });

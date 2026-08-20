@@ -63,7 +63,9 @@ const mcpList = new Command('list')
   });
 
 const mcpInstall = new Command('install')
-  .description('Install MCP servers that declare a "package" into the managed folder (~/.stratum/mcp)')
+  .description(
+    'Install MCP servers that declare a "package" into the managed folder (~/.stratum/mcp)',
+  )
   .argument('[server]', 'Name of a single server to install (default: all with a "package")')
   .option('-f, --force', 'Reinstall even if already present')
   .action(async (serverName: string | undefined, opts: { force?: boolean }) => {
@@ -99,14 +101,18 @@ const mcpInstall = new Command('install')
     for (const server of targets) {
       const already = isServerInstalled(server, installDir);
       if (already && !opts.force) {
-        process.stdout.write(`● ${server.name}  ya instalado (${serverInstallPath(installDir, server.name)})\n`);
+        process.stdout.write(
+          `● ${server.name}  ya instalado (${serverInstallPath(installDir, server.name)})\n`,
+        );
         continue;
       }
       try {
         await installServer(server, installDir, (line) => process.stdout.write(`  ${line}\n`));
         process.stdout.write(`✔ ${server.name}\n`);
       } catch (err) {
-        process.stderr.write(`✗ ${server.name}: ${err instanceof Error ? err.message : String(err)}\n`);
+        process.stderr.write(
+          `✗ ${server.name}: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
       }
     }
   });

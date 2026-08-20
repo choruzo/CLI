@@ -102,7 +102,9 @@ export class EmbeddingService {
       if (vecs[0]) this._dimension = vecs[0].length;
       return vecs;
     } catch (err) {
-      this.warn(`embeddings locales no disponibles (${String(err)}); memoria semántica desactivada`);
+      this.warn(
+        `embeddings locales no disponibles (${String(err)}); memoria semántica desactivada`,
+      );
       return null;
     }
   }
@@ -180,9 +182,7 @@ export class EmbeddingService {
     const p = (async () => {
       // Import dinámico: @xenova/transformers es opcional. Si no está instalado
       // el throw se propaga a embed() que degrada a memoria sin índice.
-      const mod = (await import(
-        /* @vite-ignore */ '@xenova/transformers' as string
-      )) as {
+      const mod = (await import(/* @vite-ignore */ '@xenova/transformers' as string)) as {
         pipeline: (task: string, model: string, opts: Record<string, unknown>) => Promise<unknown>;
         env: { cacheDir?: string; localModelPath?: string };
       };

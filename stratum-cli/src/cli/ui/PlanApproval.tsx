@@ -101,12 +101,7 @@ export function PlanApproval({ plan, onApprove, onReject }: Props) {
   };
 
   return (
-    <Box
-      flexDirection="column"
-      borderStyle="single"
-      borderColor={theme.borderSubtle}
-      paddingX={1}
-    >
+    <Box flexDirection="column" borderStyle="single" borderColor={theme.borderSubtle} paddingX={1}>
       <Text color={theme.accent} bold>
         Plan propuesto
       </Text>

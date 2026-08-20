@@ -16,7 +16,13 @@ import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
 import { StratumAgent } from '../../agent/core.js';
-import { configureLogging, flushLogging, getLogger, isLogLevel, type LogLevel } from '../../logging/index.js';
+import {
+  configureLogging,
+  flushLogging,
+  getLogger,
+  isLogLevel,
+  type LogLevel,
+} from '../../logging/index.js';
 
 function summarizeInput(input: Record<string, unknown>): string {
   const keys = Object.keys(input);

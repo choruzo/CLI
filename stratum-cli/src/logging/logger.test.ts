@@ -98,7 +98,11 @@ describe('Redacción', () => {
 describe('StderrSink', () => {
   it('escribe líneas formateadas al stream', () => {
     const out: string[] = [];
-    const sink = new StderrSink({ level: 'info', color: false, stream: { write: (s) => out.push(s) } });
+    const sink = new StderrSink({
+      level: 'info',
+      color: false,
+      stream: { write: (s) => out.push(s) },
+    });
     resetLogging([sink], true);
     getLogger('ns').info('hello', { a: 1 });
     expect(out[0]).toContain('INFO');
@@ -135,7 +139,10 @@ describe('configureLogging + overrides', () => {
 
   it('--debug activa nivel debug y fichero', () => {
     const out: string[] = [];
-    configureLogging(cfg, { debug: true, stderrStream: { write: (s) => out.push(s), isTTY: false } });
+    configureLogging(cfg, {
+      debug: true,
+      stderrStream: { write: (s) => out.push(s), isTTY: false },
+    });
     getLogger('x').debug('visible');
     expect(out.join('')).toContain('visible');
   });
@@ -153,7 +160,10 @@ describe('configureLogging + overrides', () => {
 
   it('silent desactiva todo', () => {
     const out: string[] = [];
-    configureLogging(cfg, { level: 'silent', stderrStream: { write: (s) => out.push(s), isTTY: false } });
+    configureLogging(cfg, {
+      level: 'silent',
+      stderrStream: { write: (s) => out.push(s), isTTY: false },
+    });
     getLogger('x').error('nada');
     expect(out).toHaveLength(0);
   });

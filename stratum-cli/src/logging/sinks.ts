@@ -60,8 +60,7 @@ function formatFields(fields: Record<string, unknown> | undefined): string {
   const parts: string[] = [];
   for (const [k, v] of Object.entries(fields)) {
     if (v === undefined) continue;
-    const val =
-      typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
+    const val = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
     parts.push(`${k}=${val}`);
   }
   return parts.length > 0 ? ' ' + parts.join(' ') : '';

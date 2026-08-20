@@ -11,10 +11,7 @@ export function useAgentStream(
   const abortRef = useRef<AbortController | null>(null);
 
   const send = useCallback(
-    async (
-      input: string,
-      extra?: { displayText?: string; runOptions?: Partial<RunOptions> },
-    ) => {
+    async (input: string, extra?: { displayText?: string; runOptions?: Partial<RunOptions> }) => {
       const controller = new AbortController();
       abortRef.current = controller;
 

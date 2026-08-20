@@ -3,9 +3,7 @@ import type { ToolDefinition, ToolResult } from '../../agent/types.js';
 
 const schema = z.object({
   stepId: z.string().min(1).describe('Id del paso del plan aprobado (p. ej. "step-3")'),
-  status: z
-    .enum(['in_progress', 'done', 'skipped'])
-    .describe('Nuevo estado del paso'),
+  status: z.enum(['in_progress', 'done', 'skipped']).describe('Nuevo estado del paso'),
 });
 
 /**

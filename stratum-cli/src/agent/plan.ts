@@ -88,7 +88,13 @@ Rules:
 export function buildResumePreamble(plan: Plan): string {
   const lines = plan.steps.map((s) => {
     const mark =
-      s.status === 'done' ? '[done]' : s.status === 'in_progress' ? '[in progress]' : s.status === 'skipped' ? '[skipped]' : '[pending]';
+      s.status === 'done'
+        ? '[done]'
+        : s.status === 'in_progress'
+          ? '[in progress]'
+          : s.status === 'skipped'
+            ? '[skipped]'
+            : '[pending]';
     return `${stepNumber(plan, s.id)}. ${mark} [${s.id}] ${s.title}${s.detail ? ` — ${s.detail}` : ''}`;
   });
   return `You are resuming an interrupted plan. Plan: ${plan.summary}

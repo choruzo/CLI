@@ -16,7 +16,8 @@ function loadConfigOrExit() {
 function formatDecision(d: DecisionRecord, score?: number): string {
   const date = d.timestamp.slice(0, 10);
   const head =
-    `${d.id}  [${d.type}/${d.importance}]` + (score !== undefined ? `  score ${score.toFixed(2)}` : '');
+    `${d.id}  [${d.type}/${d.importance}]` +
+    (score !== undefined ? `  score ${score.toFixed(2)}` : '');
   const tags = d.tags.length ? `\n  tags: ${d.tags.join(', ')}` : '';
   return `${head}\n  ${date} — ${d.title}\n  ${d.content}${tags}`;
 }

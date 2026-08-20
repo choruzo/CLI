@@ -45,7 +45,10 @@ export class McpServerClient {
    */
   constructor(
     private readonly serverConfig: McpServer,
-    private readonly runtime: McpRuntimeOptions = { installDir: '~/.stratum/mcp', autoInstall: true },
+    private readonly runtime: McpRuntimeOptions = {
+      installDir: '~/.stratum/mcp',
+      autoInstall: true,
+    },
     private readonly onLog?: (line: string) => void,
   ) {
     this.name = serverConfig.name;

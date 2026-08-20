@@ -49,10 +49,12 @@ export class StratumAgent {
     options?: StratumAgentOptions,
   ) {
     this.memoryManager = new MemoryManager(config);
-    // Perfiles de subagente desde la raíz del proyecto (worktree git), no el cwd
-    // crudo: así `<projectRoot>/.stratum/agents/` se descubre aunque se invoque
-    // Stratum desde un subdirectorio del repo (consistente con el `<env>`).
-    this.profiles = new ProfileLoader(findWorktreeRoot(process.cwd()).worktree);
+    // Perfiles de subagente desde la raíz del worktree git Y el cwd: la raíz del
+    // worktree cubre la invocación desde un subdirectorio del repo (consistente
+    // con el `<env>`); el cwd cubre el caso en que el proyecto npm vive en un
+    // subdirectorio del repo (p.ej. `stratum-cli/.stratum/agents/`). El cwd gana
+    // en conflictos por ser el más específico. Si coinciden, se carga una vez.
+    this.profiles = new ProfileLoader([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
 
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {

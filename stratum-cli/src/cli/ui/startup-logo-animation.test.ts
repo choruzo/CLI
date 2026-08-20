@@ -39,9 +39,9 @@ afterEach(() => {
 
 describe('supportsStartupLogoAnimation', () => {
   it('accepts modern VT terminals with sufficient dimensions', () => {
-    expect(
-      supportsStartupLogoAnimation(new FakeStdout(), windowsTerminalEnv(), 'win32'),
-    ).toBe(true);
+    expect(supportsStartupLogoAnimation(new FakeStdout(), windowsTerminalEnv(), 'win32')).toBe(
+      true,
+    );
     expect(supportsStartupLogoAnimation(new FakeStdout(), {}, 'linux')).toBe(true);
   });
 
@@ -49,7 +49,12 @@ describe('supportsStartupLogoAnimation', () => {
     ['non-TTY stdout', new FakeStdout(false), windowsTerminalEnv(), 'win32'],
     ['TERM=dumb', new FakeStdout(), windowsTerminalEnv({ TERM: 'dumb' }), 'win32'],
     ['CI', new FakeStdout(), windowsTerminalEnv({ CI: '1' }), 'win32'],
-    ['disabled by env', new FakeStdout(), windowsTerminalEnv({ STRATUM_NO_ANIMATION: '1' }), 'win32'],
+    [
+      'disabled by env',
+      new FakeStdout(),
+      windowsTerminalEnv({ STRATUM_NO_ANIMATION: '1' }),
+      'win32',
+    ],
     ['insufficient columns', new FakeStdout(true, 5, 30), windowsTerminalEnv(), 'win32'],
     ['insufficient rows', new FakeStdout(true, 80, 6), windowsTerminalEnv(), 'win32'],
     ['legacy Windows console', new FakeStdout(), {}, 'win32'],

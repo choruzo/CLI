@@ -114,7 +114,9 @@ describe('extractAndStore', () => {
   it('ignora conversaciones demasiado cortas', async () => {
     const mem = memory(dir);
     const added = await extractAndStore({
-      provider: provider('[{"title":"x","content":"yyyyy","type":"tooling","tags":[],"importance":"low"}]'),
+      provider: provider(
+        '[{"title":"x","content":"yyyyy","type":"tooling","tags":[],"importance":"low"}]',
+      ),
       model: 'm',
       messages: [{ role: 'user', content: 'hola' }],
       memory: mem,
