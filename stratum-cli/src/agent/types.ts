@@ -24,6 +24,11 @@ export type AgentEvent =
   | { type: 'subagent_started'; subagentId: string; profile: string; task: string }
   | { type: 'subagent_progress'; subagentId: string; note: string }
   | { type: 'subagent_completed'; subagentId: string; result: SubagentResult }
+  // Hito 8C — re-emite cada AgentEvent del loop hijo, etiquetado con su subagentId,
+  // para que la UI (árbol vivo <AgentTree>, inspector /subagents) desanide sus tool
+  // calls bajo el nodo del subagente. El `event` nunca es a su vez un subagent_event
+  // (profundidad = 1: los subagentes no delegan).
+  | { type: 'subagent_event'; subagentId: string; event: AgentEvent }
   | { type: 'error'; message: string; fatal: boolean }
   | {
       type: 'done';

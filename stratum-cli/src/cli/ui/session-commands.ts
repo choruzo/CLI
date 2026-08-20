@@ -66,6 +66,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     description: 'Lista todas las tools disponibles (built-in + MCP)',
     hasArgs: false,
   },
+  {
+    name: '/subagents',
+    description: 'Inspecciona el transcript de un subagente de la sesión (read-only)',
+    hasArgs: false,
+  },
   { name: '/quit', description: 'Termina la sesión y guarda el historial', hasArgs: false },
   { name: '/exit', description: 'Termina la sesión y guarda el historial', hasArgs: false },
 ];

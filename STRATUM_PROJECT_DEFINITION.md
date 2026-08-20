@@ -742,13 +742,13 @@ Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `C
 - [x] Reanudación: hijo a medias → `interrupted`, el padre verifica antes de reintentar (no reejecución automática)
 - [x] Write-log de escrituras por subagente; tests de integración (`subagent-8b.test.ts`)
 
-**8C — UX y especialización**
-- [ ] Ejecución **paralela** acotada por semáforo (`maxConcurrency`) + mutex (confirmaciones, memoria)
-- [ ] Evento `subagent_event` + árbol Ink (`<AgentTree>`) con tool calls anidados
-- [ ] Detección de conflictos de fichero (best-effort vía write-log)
-- [ ] Perfiles `code` / `shell` / `research` afinados
+**8C — UX y especialización** ✅ (cerrado)
+- [x] Ejecución **paralela** acotada por semáforo (`maxConcurrency`) + mutex (confirmaciones, memoria)
+- [x] Evento `subagent_event` + árbol Ink (`<AgentTree>`) con tool calls anidados + inspector `/subagents`
+- [x] Detección de conflictos de fichero (best-effort vía write-log, incl. inferencia de `bash`)
+- [x] Perfiles `code` / `shell` / `research` afinados
 
-> **UI:** ✅ *Especificado.* 8A usa el bloque colapsable (`<SubagentBlock>`, **§5.5** de `STRATUM_UI_SPECIFICATION.md`, ya implementado). El árbol de agentes de **8C** (`<AgentTree>` con tool calls anidados, indicador de quién "habla" `▶`, resultados agregados, confirmaciones destructivas serializadas por mutex, conflictos de fichero y salida atribuible en `stratum run`) está diseñado en **§5.6**, junto con el evento `subagent_event`. Queda implementarlo.
+> **UI:** ✅ *Implementado.* 8A usa el bloque colapsable (`<SubagentBlock>`, **§5.5**). 8C monta el árbol vivo (`<AgentTree>`, **§5.6**: tool calls anidados vía `subagent_event`, marcador `▶`, resumen agregado, confirmaciones serializadas por mutex, conflictos de fichero, prefijos `[sub perfil#n]` en `stratum run`) cuando hay >1 subagente en el turno, y el inspector read-only `/subagents` (**§5.7**: `<SubagentView>`, `focusState='subagent-view'`, solo `/quit`/`Esc`).
 
 **Entregable (incremental):** 8A — el agente delega una subtarea aislada y consume su resultado; 8C — tareas complejas se distribuyen entre subagentes por perfil con resultados agregados.
 

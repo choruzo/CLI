@@ -8,6 +8,7 @@
 import type { StratumConfig } from '../config/schema.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type {
+  AgentEvent,
   AgentProfile,
   ConfirmRequest,
   DestructiveDecision,
@@ -46,6 +47,13 @@ export interface RunSubagentOptions {
    * propio desde la config. Punto de inyección para tests.
    */
   makeRouter?: () => SubagentRouter;
+  /**
+   * Callback de eventos del loop hijo (Hito 8C). Cuando se pasa, `runSubagent`
+   * lo invoca con CADA `AgentEvent` que emite el hijo, para que el orquestador
+   * los re-emita envueltos como `subagent_event` (árbol vivo, inspector). El
+   * `done` del hijo también se reporta. Best-effort: nunca debe lanzar.
+   */
+  onEvent?: (event: AgentEvent) => void;
 }
 
 function pad2(n: number): string {
@@ -180,6 +188,15 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   let stopReason = 'stop';
   try {
     for await (const ev of loop.run(runOpts)) {
+      // Re-emitir cada evento del hijo hacia el orquestador (Hito 8C): la UI lo
+      // envuelve como subagent_event bajo el nodo de este subagente. Best-effort.
+      if (opts.onEvent) {
+        try {
+          opts.onEvent(ev);
+        } catch {
+          /* el consumidor de eventos nunca debe tumbar al subagente */
+        }
+      }
       switch (ev.type) {
         case 'text_delta':
           currentText += ev.delta;
@@ -266,13 +283,83 @@ function recordFileChange(
   acc: Map<string, 'created' | 'modified' | 'deleted'>,
   call: { name: string; input: Record<string, unknown> },
 ): void {
-  const path = typeof call.input.path === 'string' ? call.input.path : undefined;
-  if (!path) return;
-  if (call.name === 'write_file') {
-    if (!acc.has(path)) acc.set(path, 'created');
-  } else if (call.name === 'edit_file') {
-    acc.set(path, 'modified');
+  if (call.name === 'write_file' || call.name === 'edit_file') {
+    const path = typeof call.input.path === 'string' ? call.input.path : undefined;
+    if (!path) return;
+    if (call.name === 'write_file') {
+      if (!acc.has(path)) acc.set(path, 'created');
+    } else {
+      acc.set(path, 'modified');
+    }
+    return;
   }
+  // bash: inferencia best-effort de los paths que se puedan leer del comando
+  // (redirecciones, tee, touch, cp/mv destino, rm). El límite reconocido de
+  // §12.16: comandos que escriben por vías no inferibles escapan al write-log.
+  if (call.name === 'bash' && typeof call.input.command === 'string') {
+    for (const { path, action } of inferBashWrites(call.input.command)) {
+      // No degradar un 'deleted'/'modified' ya registrado a 'created'.
+      if (action === 'created' && acc.has(path)) continue;
+      acc.set(path, action);
+    }
+  }
+}
+
+/**
+ * Infiere (best-effort) los ficheros que un comando shell escribe/borra. No es un
+ * parser de shell: reconoce los patrones comunes y acepta falsos negativos.
+ * §12.16: la detección reduce el riesgo de conflicto, no lo elimina.
+ */
+export function inferBashWrites(
+  command: string,
+): Array<{ path: string; action: 'created' | 'modified' | 'deleted' }> {
+  const out: Array<{ path: string; action: 'created' | 'modified' | 'deleted' }> = [];
+  const seen = new Set<string>();
+  const add = (rawPath: string, action: 'created' | 'modified' | 'deleted'): void => {
+    const path = rawPath.replace(/^['"]|['"]$/g, '').trim();
+    if (!path || path.startsWith('-')) return;
+    const key = `${action}:${path}`;
+    if (seen.has(key)) return;
+    seen.add(key);
+    out.push({ path, action });
+  };
+
+  // Redirecciones: `> file`, `>> file`, `2> file`, `&> file`.
+  const redir = /(?:^|\s|\d|&)>{1,2}\s*("[^"]+"|'[^']+'|[^\s;|&<>]+)/g;
+  for (let m = redir.exec(command); m; m = redir.exec(command)) add(m[1]!, 'modified');
+
+  // `tee [-a] file...` — escribe cada fichero hasta el siguiente operador.
+  const tee = /\btee\b((?:\s+(?!-)[^\s;|&]+)+)/g;
+  for (let m = tee.exec(command); m; m = tee.exec(command)) {
+    for (const tok of m[1]!.trim().split(/\s+/)) add(tok, 'modified');
+  }
+
+  // `touch file...`
+  const touch = /\btouch\b((?:\s+(?!-)[^\s;|&]+)+)/g;
+  for (let m = touch.exec(command); m; m = touch.exec(command)) {
+    for (const tok of m[1]!.trim().split(/\s+/)) add(tok, 'created');
+  }
+
+  // `rm [-rf] file...` → deleted
+  const rm = /\brm\b((?:\s+[^\s;|&]+)+)/g;
+  for (let m = rm.exec(command); m; m = rm.exec(command)) {
+    for (const tok of m[1]!.trim().split(/\s+/)) {
+      if (tok.startsWith('-')) continue;
+      add(tok, 'deleted');
+    }
+  }
+
+  // `mv src dst` / `cp src dst` → el ÚLTIMO token no-flag es el destino escrito.
+  const mvcp = /\b(?:mv|cp)\b((?:\s+[^\s;|&]+)+)/g;
+  for (let m = mvcp.exec(command); m; m = mvcp.exec(command)) {
+    const toks = m[1]!
+      .trim()
+      .split(/\s+/)
+      .filter((t) => !t.startsWith('-'));
+    if (toks.length >= 2) add(toks[toks.length - 1]!, 'modified');
+  }
+
+  return out;
 }
 
 function toFilesArray(

@@ -26,6 +26,8 @@ function renderItem(
       text={item.text}
       toolCalls={item.toolCalls}
       subagents={item.subagents}
+      speakingSubagentId={item.speakingSubagentId}
+      maxConcurrency={item.maxConcurrency}
       streaming={item.streaming}
       focusedBlockId={focusedBlockId}
       expandedBlockIds={expandedBlockIds}

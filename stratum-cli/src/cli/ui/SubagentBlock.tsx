@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
+import type { ToolCallState } from './ToolCallBlock.js';
 
 /**
  * Estado de un bloque de subagente (Hito 8A, §12.16). Render colapsable estilo
@@ -8,17 +9,23 @@ import { theme } from './theme.js';
  * estado final + resumen, y expande (Space) los ficheros tocados.
  */
 export type SubagentBlockStatus =
+  | 'queued'
   | 'running'
   | 'completed'
   | 'failed'
   | 'cancelled'
-  | 'budget_exceeded';
+  | 'budget_exceeded'
+  | 'interrupted';
 
 export interface SubagentBlockState {
   id: string;
   profile: string;
   task: string;
   status: SubagentBlockStatus;
+  /** Índice de admisión 1-based dentro del grupo del turno (Hito 8C, `<AgentTree>`). */
+  n?: number;
+  /** Tool calls internos del hijo (Hito 8C): alimentan el nodo del árbol vía subagent_event. */
+  toolCalls?: ToolCallState[];
   summary?: string;
   filesChanged?: { path: string; action: string }[];
   iterations?: number;
@@ -135,6 +142,21 @@ export function SubagentBlock({ state, focused = false, expanded = false }: Prop
     );
   }
 
+  if (state.status === 'queued') {
+    return (
+      <Box marginBottom={0}>
+        {focusPrefix}
+        <Text color={theme.textDisabled}>⋯ </Text>
+        {label}
+        {profileTag}
+        <Text color={theme.textFaint}> │ en cola │ </Text>
+        <Text color={theme.textFaint} dimColor>
+          {truncate(state.task, 50)}
+        </Text>
+      </Box>
+    );
+  }
+
   const expandable = !!state.summary || !!state.error || (state.filesChanged?.length ?? 0) > 0;
   const chevron = expandable ? <Text color={theme.textFaint}> {expanded ? '▾' : '▸'}</Text> : null;
   const dur = state.durationMs !== undefined ? formatDuration(state.durationMs) : '';
@@ -158,14 +180,23 @@ export function SubagentBlock({ state, focused = false, expanded = false }: Prop
     );
   }
 
-  // failed | cancelled | budget_exceeded
-  const icon = state.status === 'cancelled' ? '⊘' : state.status === 'budget_exceeded' ? '⏱' : '✗';
+  // failed | cancelled | budget_exceeded | interrupted
+  const icon =
+    state.status === 'cancelled'
+      ? '⊘'
+      : state.status === 'budget_exceeded'
+        ? '⏱'
+        : state.status === 'interrupted'
+          ? '⚠'
+          : '✗';
   const statusLabel =
     state.status === 'cancelled'
       ? 'cancelado'
       : state.status === 'budget_exceeded'
         ? 'presupuesto agotado'
-        : 'fallido';
+        : state.status === 'interrupted'
+          ? 'interrumpido'
+          : 'fallido';
 
   return (
     <Box flexDirection="column" marginBottom={0}>

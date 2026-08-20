@@ -3,6 +3,7 @@ import { resolveMemoryPaths } from '../config/paths.js';
 import { DecisionStore, type DecisionInput, type DecisionRecord } from './decisions.js';
 import { VectorStore } from './vectors.js';
 import { EmbeddingService, type EmbeddingServiceOptions } from './embeddings.js';
+import { Mutex } from '../agent/concurrency.js';
 
 export interface SaveResult {
   record: DecisionRecord;
@@ -47,6 +48,14 @@ export class DecisionMemory {
   private readonly threshold: number;
   /** Últimos resultados de search(); consumidos por el loop para emitir memory_retrieved. */
   private lastRecall: RecallResult[] = [];
+  /**
+   * Serializa el pipeline de escritura (§12.16, Hito 8C). Con subagentes en
+   * paralelo, dos `save()` concurrentes podrían entrelazar embed→findSimilar→add
+   * y crear duplicados o corromper el índice; este mutex garantiza que cada
+   * escritura ve el estado completo de la anterior. Singleton por ruta → protege
+   * a todos los agentes que comparten el store.
+   */
+  private readonly writeLock = new Mutex();
 
   constructor(config: StratumConfig, opts?: DecisionMemoryOptions) {
     const paths = resolveMemoryPaths(config);
@@ -67,22 +76,26 @@ export class DecisionMemory {
    *   embed(content) → findSimilar ≥ threshold ? dedup : store.add + vectors.add
    */
   async save(input: DecisionInput): Promise<SaveResult> {
-    const text = `${input.title}\n${input.content}`;
-    const vec = await this.embedder.embedOne(text);
+    // Serializado (Hito 8C): el pipeline dedup+add debe ser atómico frente a
+    // escrituras concurrentes de subagentes paralelos que comparten el store.
+    return this.writeLock.runExclusive(async () => {
+      const text = `${input.title}\n${input.content}`;
+      const vec = await this.embedder.embedOne(text);
 
-    if (vec) {
-      const dupRef = await this.vectors.findSimilar(vec, this.threshold);
-      if (dupRef) {
-        const existing = this.store.getByRef(dupRef);
-        if (existing) {
-          return { record: existing, deduped: true, duplicateOf: existing.id, indexed: true };
+      if (vec) {
+        const dupRef = await this.vectors.findSimilar(vec, this.threshold);
+        if (dupRef) {
+          const existing = this.store.getByRef(dupRef);
+          if (existing) {
+            return { record: existing, deduped: true, duplicateOf: existing.id, indexed: true };
+          }
         }
       }
-    }
 
-    const record = this.store.add(input);
-    if (vec) await this.vectors.add(record.embedding_ref, vec);
-    return { record, deduped: false, indexed: vec !== null };
+      const record = this.store.add(input);
+      if (vec) await this.vectors.add(record.embedding_ref, vec);
+      return { record, deduped: false, indexed: vec !== null };
+    });
   }
 
   /** Búsqueda semántica KNN. Devuelve decisiones por encima del umbral de score. */

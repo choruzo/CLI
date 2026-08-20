@@ -20,6 +20,8 @@ import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
 import { parseMcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
+import { SubagentView, type SubagentTranscript } from './SubagentView.js';
+import { applyToolEvent } from './tool-call-reducer.js';
 import { DELEGATE_TASK_TOOL } from '../../tools/agent/delegate.js';
 import { Banner } from './Banner.js';
 import { ConversationView } from './ConversationView.js';
@@ -56,6 +58,10 @@ export type AgentConvItem = {
   toolCalls: ToolCallState[];
   /** Subagentes delegados en este turno (Hito 8A). Opcional: items previos no lo traen. */
   subagents?: SubagentBlockState[];
+  /** Subagente que emitió el evento más reciente (Hito 8C, marcador ▶ del árbol). */
+  speakingSubagentId?: string | null;
+  /** maxConcurrency del turno (Hito 8C, cabecera de `<AgentTree>`). */
+  maxConcurrency?: number;
   streaming: boolean;
 };
 
@@ -76,8 +82,8 @@ interface AppState {
   contextUsed: number;
   contextMax: number;
   contextEstimated: boolean;
-  /** Máquina de foco (§10): input ↔ block-focus. */
-  focusState: 'input' | 'block-focus';
+  /** Máquina de foco (§10): input ↔ block-focus ↔ subagent-view (§5.7). */
+  focusState: 'input' | 'block-focus' | 'subagent-view';
   focusedBlockIndex: number;
   /** ids de tool call blocks con output expandido (Space). */
   expandedBlockIds: ReadonlySet<string>;
@@ -87,6 +93,15 @@ interface AppState {
   planMode: AgentMode;
   plan: Plan | null;
   pendingApproval: boolean;
+  // ----- Inspector de subagentes (Hito 8C, §5.7) -----
+  /** Transcripts en memoria de los subagentes de la sesión (por subagentId). */
+  subagentTranscripts: Map<string, SubagentTranscript>;
+  /** Desplegable de selección de subagente abierto (`/subagents`). */
+  subagentPicker: boolean;
+  /** Subagente cuyo transcript se está inspeccionando; null fuera de la vista. */
+  viewingSubagentId: string | null;
+  /** `agents.maxConcurrency` de la config (Hito 8C, cabecera del árbol). */
+  maxConcurrency: number;
 }
 
 export type AppAction =
@@ -106,7 +121,11 @@ export type AppAction =
   | { type: 'FOCUS_BLOCKS' }
   | { type: 'FOCUS_MOVE'; delta: number }
   | { type: 'FOCUS_EXIT' }
-  | { type: 'TOGGLE_EXPAND' };
+  | { type: 'TOGGLE_EXPAND' }
+  | { type: 'OPEN_SUBAGENT_PICKER' }
+  | { type: 'CLOSE_SUBAGENT_PICKER' }
+  | { type: 'ENTER_SUBAGENT_VIEW'; id: string }
+  | { type: 'EXIT_SUBAGENT_VIEW' };
 
 /**
  * Bloques navegables con Tab: los del turno en curso, o los del último turno
@@ -351,27 +370,78 @@ function reducer(state: AppState, action: AppAction): AppState {
         return { ...state, completedItems: [...state.completedItems, note] };
       }
 
-      // Hito 8A — el agente delegó una subtarea: añadir un bloque de subagente
-      // en estado running al turno en curso.
+      // Hito 8A/8C — el agente delegó una subtarea: añadir un bloque/nodo de
+      // subagente en estado running al turno en curso, e iniciar su transcript
+      // en memoria (§5.7) para el inspector `/subagents`.
       if (ev.type === 'subagent_started') {
+        const existingSubs =
+          state.currentItem?.kind === 'agent' ? (state.currentItem.subagents ?? []) : [];
+        const n = existingSubs.length + 1;
+        const transcripts = new Map(state.subagentTranscripts);
+        transcripts.set(ev.subagentId, {
+          id: ev.subagentId,
+          profile: ev.profile,
+          n,
+          task: ev.task,
+          status: 'running',
+          events: [],
+        });
         return {
           ...state,
+          subagentTranscripts: transcripts,
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
+            maxConcurrency: state.maxConcurrency,
+            speakingSubagentId: ev.subagentId,
             subagents: [
               ...(item.subagents ?? []),
               {
                 id: ev.subagentId,
                 profile: ev.profile,
                 task: ev.task,
+                n,
                 status: 'running' as const,
+                toolCalls: [],
               },
             ],
           })),
         };
       }
 
-      // Hito 8A — el subagente terminó: fijar estado final + resumen + ficheros.
+      // Hito 8C — evento del loop hijo re-emitido envuelto: alimenta los tool
+      // calls del nodo del árbol (ignora text_delta ahí) y acumula el evento en
+      // el transcript del subagente (§5.6/§5.7). Marca `speakingSubagentId`.
+      if (ev.type === 'subagent_event') {
+        const transcripts = new Map(state.subagentTranscripts);
+        const prev = transcripts.get(ev.subagentId);
+        if (prev) {
+          transcripts.set(ev.subagentId, { ...prev, events: [...prev.events, ev.event] });
+        }
+        const inner = ev.event;
+        const affectsToolCalls =
+          inner.type === 'tool_call_start' ||
+          inner.type === 'tool_call_ready' ||
+          inner.type === 'tool_result' ||
+          inner.type === 'tool_error';
+        return {
+          ...state,
+          subagentTranscripts: transcripts,
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
+            ...item,
+            speakingSubagentId: ev.subagentId,
+            subagents: affectsToolCalls
+              ? (item.subagents ?? []).map((s) =>
+                  s.id === ev.subagentId
+                    ? { ...s, toolCalls: applyToolEvent(s.toolCalls ?? [], inner) }
+                    : s,
+                )
+              : (item.subagents ?? []),
+          })),
+        };
+      }
+
+      // Hito 8A/8C — el subagente terminó: fijar estado final + resumen + ficheros,
+      // cerrar su transcript y, si todos los del turno terminaron, limpiar `speaking`.
       if (ev.type === 'subagent_completed') {
         const r = ev.result;
         const status: SubagentBlockState['status'] =
@@ -381,12 +451,25 @@ function reducer(state: AppState, action: AppAction): AppState {
               ? 'cancelled'
               : r.status === 'budget_exceeded'
                 ? 'budget_exceeded'
-                : 'failed';
+                : r.status === 'interrupted'
+                  ? 'interrupted'
+                  : 'failed';
+        const transcripts = new Map(state.subagentTranscripts);
+        const prevT = transcripts.get(ev.subagentId);
+        if (prevT) {
+          transcripts.set(ev.subagentId, {
+            ...prevT,
+            status,
+            iterations: r.usage.iterations,
+            tokens: r.usage.tokens,
+            durationMs: r.usage.durationMs,
+          });
+        }
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
-            ...item,
-            subagents: (item.subagents ?? []).map((s) =>
+          subagentTranscripts: transcripts,
+          currentItem: updateCurrentAgent(state.currentItem, (item) => {
+            const subagents = (item.subagents ?? []).map((s) =>
               s.id === ev.subagentId
                 ? {
                     ...s,
@@ -398,8 +481,16 @@ function reducer(state: AppState, action: AppAction): AppState {
                     error: r.error,
                   }
                 : s,
-            ),
-          })),
+            );
+            const anyRunning = subagents.some(
+              (s) => s.status === 'running' || s.status === 'queued',
+            );
+            return {
+              ...item,
+              subagents,
+              speakingSubagentId: anyRunning ? item.speakingSubagentId : null,
+            };
+          }),
         };
       }
 
@@ -502,6 +593,29 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'INPUT_CHANGE':
       return { ...state, inputValue: action.value };
 
+    // ----- Inspector de subagentes (Hito 8C, §5.7) -----
+    case 'OPEN_SUBAGENT_PICKER':
+      return { ...state, subagentPicker: true, inputValue: '' };
+
+    case 'CLOSE_SUBAGENT_PICKER':
+      return { ...state, subagentPicker: false };
+
+    case 'ENTER_SUBAGENT_VIEW':
+      return {
+        ...state,
+        subagentPicker: false,
+        viewingSubagentId: action.id,
+        focusState: 'subagent-view',
+        focusedBlockIndex: 0,
+      };
+
+    case 'EXIT_SUBAGENT_VIEW':
+      return {
+        ...state,
+        viewingSubagentId: null,
+        focusState: 'input',
+      };
+
     default:
       return state;
   }
@@ -545,6 +659,10 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
     planMode: resumeInfo ? 'execute' : 'normal',
     plan: resumeInfo?.plan ?? null,
     pendingApproval: false,
+    subagentTranscripts: new Map<string, SubagentTranscript>(),
+    subagentPicker: false,
+    viewingSubagentId: null,
+    maxConcurrency: agent.getConfig().agents.maxConcurrency,
   });
 
   // -------------------------------------------------------------------------
@@ -704,6 +822,8 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
   /** Valor en edición del input de modelo manual (overlay model-manual, Hito 6). */
   const [modelManualValue, setModelManualValue] = useState('');
+  /** Hint inline de la Vista de Subagente cuando se teclea algo distinto de /quit (§5.7). */
+  const [subagentViewHint, setSubagentViewHint] = useState<string | null>(null);
 
   // -------------------------------------------------------------------------
   // Paleta de /comandos (UI §5.2)
@@ -762,6 +882,25 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
       } else {
         if (ctrlCTimerRef.current) clearTimeout(ctrlCTimerRef.current);
         exit();
+      }
+      return;
+    }
+
+    // Vista de Subagente (Hito 8C, §5.7): Esc cierra y vuelve al agente principal;
+    // el resto del input lo teclea el TextInput (solo /quit es válido al enviar).
+    if (state.focusState === 'subagent-view') {
+      if (key.escape) {
+        setSubagentViewHint(null);
+        dispatch({ type: 'EXIT_SUBAGENT_VIEW' });
+      }
+      return;
+    }
+
+    // Desplegable de selección de subagente (§5.7): lo gobierna su <SelectList>
+    // cuando hay elementos; si está vacío, Esc lo cierra aquí.
+    if (state.subagentPicker) {
+      if (key.escape && state.subagentTranscripts.size === 0) {
+        dispatch({ type: 'CLOSE_SUBAGENT_PICKER' });
       }
       return;
     }
@@ -1025,6 +1164,13 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
         return;
       }
 
+      // Inspector de subagentes (Hito 8C, §5.7): abre el desplegable de selección.
+      // El caso "sin subagentes" lo resuelve el render del picker (línea dim).
+      if (cmd === '/subagents') {
+        dispatch({ type: 'OPEN_SUBAGENT_PICKER' });
+        return;
+      }
+
       if (cmd === '/memory show') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         import('../../memory/show.js')
@@ -1260,9 +1406,26 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
   const handleSend = useCallback(
     (text: string) => {
       if (!text.trim()) return;
-      if (state.thinking) return;
 
       const cmd = text.trim();
+
+      // Vista de Subagente (Hito 8C, §5.7): la línea de entrada es read-only; el
+      // único comando aceptado es /quit (Esc es alias, gestionado en useInput).
+      // Cualquier otra cosa se rechaza con un hint inline sin salir de la vista.
+      if (state.focusState === 'subagent-view') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        if (cmd === '/quit' || cmd === '/exit') {
+          setSubagentViewHint(null);
+          dispatch({ type: 'EXIT_SUBAGENT_VIEW' });
+        } else {
+          setSubagentViewHint(
+            '⚠ Aquí solo está disponible /quit (vuelve al agente principal). Esc también cierra.',
+          );
+        }
+        return;
+      }
+
+      if (state.thinking) return;
 
       // Enter con la paleta abierta: ejecutar (o completar) el comando seleccionado
       if (paletteItems.length > 0) {
@@ -1279,13 +1442,55 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
 
       executeCommand(cmd);
     },
-    [state.thinking, paletteItems, effPaletteIndex, completePaletteSelection, executeCommand],
+    [
+      state.thinking,
+      state.focusState,
+      paletteItems,
+      effPaletteIndex,
+      completePaletteSelection,
+      executeCommand,
+    ],
   );
 
   if (state.phase === 'banner') {
     return (
       <Box>
         <Banner version={version} onSend={handleSend} logoPreRendered={logoPreRendered} />
+      </Box>
+    );
+  }
+
+  // ----- Vista de Subagente read-only (Hito 8C, §5.7) -----
+  // Sustituye toda el área de conversación mientras está activa. El input solo
+  // acepta /quit (Esc como alias); la lógica está en handleSend/useInput.
+  if (state.focusState === 'subagent-view') {
+    const transcript = state.viewingSubagentId
+      ? state.subagentTranscripts.get(state.viewingSubagentId)
+      : undefined;
+    return (
+      <Box flexDirection="column" width="100%">
+        {transcript ? (
+          <SubagentView transcript={transcript} expandedBlockIds={state.expandedBlockIds} />
+        ) : (
+          <Box paddingX={1}>
+            <Text color={theme.textMuted}>Subagente no encontrado.</Text>
+          </Box>
+        )}
+        {subagentViewHint && (
+          <Box paddingX={1}>
+            <Text color={theme.warning}>{subagentViewHint}</Text>
+          </Box>
+        )}
+        <Box paddingX={1}>
+          <Text color={theme.accent}>❯❯ </Text>
+          <TextInput
+            value={state.inputValue}
+            onChange={handleInputChange}
+            onSubmit={handleSend}
+            placeholder="/quit para volver al agente principal"
+            showCursor
+          />
+        </Box>
       </Box>
     );
   }
@@ -1380,6 +1585,62 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
         onComplete={handleWizardComplete}
         onCancel={() => setOverlay(null)}
       />
+    );
+  }
+
+  // ----- Desplegable de selección de subagente (Hito 8C, §5.7) -----
+  if (state.subagentPicker) {
+    const list = [...state.subagentTranscripts.values()].reverse(); // más reciente primero
+    const icon = (s: SubagentTranscript['status']): string =>
+      s === 'completed'
+        ? '✓'
+        : s === 'failed'
+          ? '✗'
+          : s === 'running'
+            ? '⊳'
+            : s === 'budget_exceeded'
+              ? '⏱'
+              : s === 'cancelled'
+                ? '⊘'
+                : s === 'interrupted'
+                  ? '⚠'
+                  : '⋯';
+    overlayNode = (
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={theme.borderAccent}
+        paddingX={1}
+      >
+        <Text color={theme.accent} bold>
+          Subagentes de la sesión
+        </Text>
+        <Text> </Text>
+        {list.length === 0 ? (
+          <>
+            <Text color={theme.textDisabled} dimColor>
+              — ningún subagente en esta sesión —
+            </Text>
+            <Text color={theme.textDisabled}> Esc para cerrar</Text>
+          </>
+        ) : (
+          <>
+            <SelectList
+              items={list.map((t) => ({
+                label: `${icon(t.status)} ⊳ ${t.profile}#${t.n}`,
+                value: t.id,
+                hint:
+                  `${t.status}` +
+                  (t.iterations !== undefined ? ` · ${t.iterations} it` : '') +
+                  (t.durationMs !== undefined ? ` · ${(t.durationMs / 1000).toFixed(1)}s` : ''),
+              }))}
+              onSelect={(item) => dispatch({ type: 'ENTER_SUBAGENT_VIEW', id: item.value })}
+              onCancel={() => dispatch({ type: 'CLOSE_SUBAGENT_PICKER' })}
+            />
+            <Text color={theme.textDisabled}> ↑↓ seleccionar · Enter abrir · Esc cerrar</Text>
+          </>
+        )}
+      </Box>
     );
   }
 

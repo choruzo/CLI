@@ -5,10 +5,14 @@ import { StreamBuffer } from '../providers/openai-compatible.js';
 import type {
   AgentEvent,
   AgentMode,
+  AgentProfile,
+  ConfirmRequest,
+  DestructiveDecision,
   Message,
   Plan,
   PlanDecision,
   PlanStepStatus,
+  SubagentResult,
   ToolCallReady,
   ToolContext,
   RunOptions,
@@ -27,6 +31,7 @@ import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import type { ProfileLoader } from './profiles.js';
 import { runSubagent, serializeSubagentResult, generateSubagentId } from './subagent.js';
+import { Semaphore, Mutex } from './concurrency.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import { getLogger } from '../logging/index.js';
 
@@ -925,102 +930,15 @@ export class ReactLoop {
       }
 
       // -----------------------------------------------------------------------
-      // Hito 8 — Delegación (§12.16). delegate_task se ejecuta a término de forma
-      // secuencial y bloqueante dentro del turno (8A: concurrencia = 1). El
-      // SubagentResult, truncado, se inyecta como tool result (inject & recover).
+      // Hito 8 — Delegación (§12.16). En 8C, los delegate_task de un mismo turno
+      // se ejecutan en PARALELO acotados por un semáforo (agents.maxConcurrency);
+      // con maxConcurrency=1 el comportamiento es secuencial (8A/8B). Los eventos
+      // del hijo se re-emiten envueltos (subagent_event) y los resultados,
+      // truncados, se inyectan como tool results (inject & recover). Ver
+      // runDelegations() más abajo.
       // -----------------------------------------------------------------------
-      for (const call of delegateCalls) {
-        const input = call.input as { task?: unknown; profile?: unknown; context?: unknown };
-        const profileName =
-          typeof input.profile === 'string' && input.profile
-            ? input.profile
-            : this.config.agents.defaultProfile;
-        const profiles = this.extras?.profiles;
-        const profile = profiles?.resolve(profileName);
-
-        // Perfil inexistente → tool_error recuperable (no falla la validación).
-        if (!profile) {
-          const available = profiles?.availableNames().join(', ') ?? 'general';
-          const err = `unknown profile '${profileName}'; available: ${available}`;
-          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: call.name,
-            content: formatToolError(
-              call.name,
-              err,
-              fmt,
-              'Use one of the available profiles, or "general".',
-            ),
-          });
-          continue;
-        }
-
-        const subId = generateSubagentId();
-        const taskText = String(input.task ?? '');
-        const context = Array.isArray(input.context)
-          ? input.context.filter((p): p is string => typeof p === 'string')
-          : undefined;
-
-        yield {
-          type: 'subagent_started',
-          subagentId: subId,
-          profile: profile.name,
-          task: taskText,
-        };
-
-        // Persistir marca `running` ANTES de ejecutar (Hito 8B): si el proceso
-        // muere a mitad, en `resume` este registro sin estado terminal se detecta
-        // como `interrupted`. Best-effort: el callback nunca debe lanzar.
-        opts?.onSubagentPersist?.({ id: subId, profile: profile.name, task: taskText });
-
-        const result = await runSubagent({
-          task: {
-            id: subId,
-            task: taskText,
-            profile: profile.name,
-            context,
-            budget: profile.budget,
-          },
-          profile,
-          registry: this.registry,
-          config: this.config,
-          parentSignal: signal,
-          parentDestructivePolicy:
-            opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
-          onConfirmDestructive: opts?.onConfirmDestructive,
-          makeRouter: opts?.makeSubagentRouter
-            ? () => opts.makeSubagentRouter!(profile)
-            : undefined,
-        });
-
-        // Truncar el resultado serializado COMPLETO (no solo el summary) antes de
-        // inyectarlo, para proteger el contexto del padre igual que el resto de
-        // tool outputs (§12.16, cabeza 80% + cola 20%).
-        const serialized = truncateToolOutput(serializeSubagentResult(result, profile.name));
-
-        // Persistir el resultado terminal (Hito 8B): sobrescribe la marca `running`,
-        // de modo que ya no se detecta como interrumpido en un `resume` posterior.
-        opts?.onSubagentPersist?.({ id: subId, profile: profile.name, task: taskText, result });
-
-        yield { type: 'subagent_completed', subagentId: subId, result };
-        // Emitir también el tool_result del delegate_task: lo consumen el contador
-        // de tool calls (core), `stratum run` y la persistencia de sesión, igual
-        // que cualquier otra tool. La UI ya lo representa como SubagentBlock.
-        yield {
-          type: 'tool_result',
-          id: call.id,
-          name: call.name,
-          result: serialized,
-          durationMs: result.usage.durationMs,
-        };
-        this.messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: call.name,
-          content: serialized,
-        });
+      if (delegateCalls.length > 0) {
+        yield* this.runDelegations(delegateCalls, opts, signal, fmt);
       }
 
       // -----------------------------------------------------------------------
@@ -1079,6 +997,242 @@ export class ReactLoop {
 
     loopLog.warn('max iterations reached', { maxIterations });
     yield { type: 'done', stopReason: 'max_iterations' };
+  }
+
+  /**
+   * Hito 8C — Orquesta la ejecución de los `delegate_task` de un turno. Ejecución
+   * paralela acotada por un semáforo (`agents.maxConcurrency`); con maxConcurrency=1
+   * degrada a secuencial (idéntico a 8A/8B). Los eventos del hijo se re-emiten
+   * envueltos (`subagent_event`) intercalados en tiempo real vía una cola fan-in;
+   * las confirmaciones destructivas de los hijos se serializan contra la TTY única
+   * del padre con un mutex compartido (§Confirmaciones). Al terminar: detección
+   * best-effort de conflictos de fichero (intersección de write-logs) → `warning`,
+   * e inyección ordenada de los tool results (inject & recover, §12.3).
+   */
+  private async *runDelegations(
+    delegateCalls: ToolCallReady[],
+    opts: RunOptions | undefined,
+    signal: AbortSignal,
+    fmt: 'xml' | 'json',
+  ): AsyncGenerator<AgentEvent> {
+    const delLog = log.child('subagent');
+
+    // --- 1. Resolver perfiles. Los inválidos se rechazan aquí (tool_error). ---
+    interface Job {
+      call: ToolCallReady;
+      profile: AgentProfile;
+      taskText: string;
+      context?: string[];
+      subId: string;
+    }
+    const jobs: Job[] = [];
+    for (const call of delegateCalls) {
+      const input = call.input as { task?: unknown; profile?: unknown; context?: unknown };
+      const profileName =
+        typeof input.profile === 'string' && input.profile
+          ? input.profile
+          : this.config.agents.defaultProfile;
+      const profiles = this.extras?.profiles;
+      const profile = profiles?.resolve(profileName);
+
+      if (!profile) {
+        const available = profiles?.availableNames().join(', ') ?? 'general';
+        const err = `unknown profile '${profileName}'; available: ${available}`;
+        yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
+        this.messages.push({
+          role: 'tool',
+          tool_call_id: call.id,
+          name: call.name,
+          content: formatToolError(
+            call.name,
+            err,
+            fmt,
+            'Use one of the available profiles, or "general".',
+          ),
+        });
+        continue;
+      }
+
+      const context = Array.isArray(input.context)
+        ? input.context.filter((p): p is string => typeof p === 'string')
+        : undefined;
+      jobs.push({
+        call,
+        profile,
+        taskText: String(input.task ?? ''),
+        context,
+        subId: generateSubagentId(),
+      });
+    }
+
+    if (jobs.length === 0) return;
+
+    // --- 2. Infraestructura de concurrencia (§12.16). ---
+    const maxConcurrency = Math.max(1, this.config.agents.maxConcurrency);
+    const sem = new Semaphore(maxConcurrency);
+    // Mutex compartido: nunca dos prompts destructivos simultáneos sobre la TTY
+    // única del padre (igual que el ToolDispatcher serializa su fase de confirmación).
+    const confirmMutex = new Mutex();
+    const parentConfirm = opts?.onConfirmDestructive;
+    const wrappedConfirm: ((req: ConfirmRequest) => Promise<DestructiveDecision>) | undefined =
+      parentConfirm ? (req) => confirmMutex.runExclusive(() => parentConfirm(req)) : undefined;
+    const parentPolicy =
+      opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask');
+
+    delLog.info('delegations start', { count: jobs.length, maxConcurrency });
+
+    // --- 3. Cola fan-in: los hijos empujan eventos; este generador los drena. ---
+    const events: AgentEvent[] = [];
+    let wake: (() => void) | null = null;
+    const notify = (): void => {
+      const w = wake;
+      wake = null;
+      w?.();
+    };
+    const push = (ev: AgentEvent): void => {
+      events.push(ev);
+      notify();
+    };
+
+    const results = new Map<string, SubagentResult>();
+    let remaining = jobs.length;
+
+    // --- 4. Lanzar todos los trabajos (el semáforo limita los vivos a N). ---
+    for (const job of jobs) {
+      void (async () => {
+        const release = await sem.acquire();
+        try {
+          if (signal.aborted) {
+            results.set(job.subId, {
+              id: job.subId,
+              status: 'cancelled',
+              summary: '',
+              filesChanged: [],
+              usage: { iterations: 0, durationMs: 0 },
+              error: 'Subagent was cancelled.',
+            });
+            return;
+          }
+          // Emitir started + persistir `running` al adquirir el slot (no antes):
+          // el árbol muestra así qué subagentes están en cola vs. en ejecución.
+          push({
+            type: 'subagent_started',
+            subagentId: job.subId,
+            profile: job.profile.name,
+            task: job.taskText,
+          });
+          opts?.onSubagentPersist?.({
+            id: job.subId,
+            profile: job.profile.name,
+            task: job.taskText,
+          });
+
+          let result: SubagentResult;
+          try {
+            result = await runSubagent({
+              task: {
+                id: job.subId,
+                task: job.taskText,
+                profile: job.profile.name,
+                context: job.context,
+                budget: job.profile.budget,
+              },
+              profile: job.profile,
+              registry: this.registry,
+              config: this.config,
+              parentSignal: signal,
+              parentDestructivePolicy: parentPolicy,
+              onConfirmDestructive: wrappedConfirm,
+              makeRouter: opts?.makeSubagentRouter
+                ? () => opts.makeSubagentRouter!(job.profile)
+                : undefined,
+              onEvent: (ev) => push({ type: 'subagent_event', subagentId: job.subId, event: ev }),
+            });
+          } catch (err) {
+            // runSubagent no debería lanzar (captura internamente); red de seguridad.
+            result = {
+              id: job.subId,
+              status: 'failed',
+              summary: '',
+              filesChanged: [],
+              usage: { iterations: 0, durationMs: 0 },
+              error: err instanceof Error ? err.message : String(err),
+            };
+          }
+          results.set(job.subId, result);
+          opts?.onSubagentPersist?.({
+            id: job.subId,
+            profile: job.profile.name,
+            task: job.taskText,
+            result,
+          });
+          push({ type: 'subagent_completed', subagentId: job.subId, result });
+        } finally {
+          release();
+          remaining--;
+          notify();
+        }
+      })();
+    }
+
+    // --- 5. Drenar la cola en tiempo real hasta que todos los hijos terminen. ---
+    while (remaining > 0 || events.length > 0) {
+      while (events.length > 0) {
+        yield events.shift()!;
+      }
+      if (remaining === 0) break;
+      await new Promise<void>((resolve) => {
+        wake = resolve;
+        // Re-chequeo anti lost-wakeup: si algo llegó entre el while y este punto.
+        if (events.length > 0 || remaining === 0) notify();
+      });
+    }
+
+    // --- 6. Detección de conflictos de fichero (best-effort, §12.16). ---
+    const pathOwners = new Map<string, Set<string>>();
+    for (const [subId, result] of results) {
+      for (const f of result.filesChanged) {
+        let owners = pathOwners.get(f.path);
+        if (!owners) {
+          owners = new Set();
+          pathOwners.set(f.path, owners);
+        }
+        owners.add(subId);
+      }
+    }
+    const conflicts = [...pathOwners.entries()].filter(([, owners]) => owners.size > 1);
+    if (conflicts.length > 0) {
+      const detail = conflicts
+        .map(([path, owners]) => `${path} (${[...owners].join(', ')})`)
+        .join('; ');
+      delLog.warn('file conflict detected', { files: conflicts.map(([p]) => p) });
+      yield {
+        type: 'warning',
+        message:
+          `subagent_file_conflict: ${conflicts.length} fichero(s) escritos por más de un ` +
+          `subagente en paralelo: ${detail}. No se intentó fusionar; revisa el resultado.`,
+      };
+    }
+
+    // --- 7. Inyectar los tool results en el ORDEN original de las tool calls. ---
+    for (const job of jobs) {
+      const result = results.get(job.subId);
+      if (!result) continue; // no debería ocurrir; defensivo.
+      const serialized = truncateToolOutput(serializeSubagentResult(result, job.profile.name));
+      yield {
+        type: 'tool_result',
+        id: job.call.id,
+        name: job.call.name,
+        result: serialized,
+        durationMs: result.usage.durationMs,
+      };
+      this.messages.push({
+        role: 'tool',
+        tool_call_id: job.call.id,
+        name: job.call.name,
+        content: serialized,
+      });
+    }
   }
 
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {

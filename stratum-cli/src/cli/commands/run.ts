@@ -188,6 +188,17 @@ export const runCommand = new Command('run')
 
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
+      // Atribución de subagentes en paralelo (§5.6): prefijo `[sub perfil#n]` a
+      // stderr para que la salida entrelazada de varios hijos sea legible.
+      const subLabels = new Map<string, string>(); // subagentId → "perfil#n"
+      const subLabel = (id: string): string => {
+        const tag = subLabels.get(id) ?? 'sub';
+        return isColorTty ? chalk.hex('#F59E0B')(`[sub ${tag}]`) : `[sub ${tag}]`;
+      };
+      // Dedup de tool_call_start del hijo: el evento se repite por cada chunk de
+      // argumentos streameado; solo imprimimos la primera aparición (como el
+      // handler principal con `toolStartTimes`). Clave = subagentId:innerId.
+      const subToolSeen = new Set<string>();
 
       try {
         for await (const event of agent.run(input, {
@@ -265,6 +276,43 @@ export const runCommand = new Command('run')
               const meta = planStepTitles.get(event.stepId);
               const label = meta ? `${meta.n}. ${meta.title}` : event.stepId;
               process.stderr.write(`[plan] ${label}  (${event.status})\n`);
+              break;
+            }
+
+            // ----- Subagentes (Hito 8C, §5.6): salida atribuible por prefijo -----
+            case 'subagent_started': {
+              const n = subLabels.size + 1;
+              subLabels.set(event.subagentId, `${event.profile}#${n}`);
+              process.stderr.write(`${subLabel(event.subagentId)} ⊳ delegado: ${event.task}\n`);
+              break;
+            }
+
+            case 'subagent_event': {
+              // Solo se refleja la actividad de tools del hijo (no su text_delta).
+              const inner = event.event;
+              if (inner.type === 'tool_call_start') {
+                const key = `${event.subagentId}:${inner.id}`;
+                if (!subToolSeen.has(key)) {
+                  subToolSeen.add(key);
+                  process.stderr.write(`${subLabel(event.subagentId)} ${inner.name}: ...\n`);
+                }
+              } else if (inner.type === 'tool_result') {
+                process.stderr.write(`${subLabel(event.subagentId)} ✓ ${inner.name}\n`);
+              } else if (inner.type === 'tool_error') {
+                process.stderr.write(
+                  `${subLabel(event.subagentId)} ✗ ${inner.name}: ${inner.error}\n`,
+                );
+              }
+              break;
+            }
+
+            case 'subagent_completed': {
+              const r = event.result;
+              const files = r.filesChanged.length;
+              process.stderr.write(
+                `${subLabel(event.subagentId)} ${r.status === 'completed' ? '✓' : '✗'} ${r.status} · ` +
+                  `${r.usage.iterations} it · ${files} fichero${files === 1 ? '' : 's'}\n`,
+              );
               break;
             }
 

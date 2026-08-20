@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import { ToolCallBlock, type ToolCallState } from './ToolCallBlock.js';
 import { SubagentBlock, type SubagentBlockState } from './SubagentBlock.js';
+import { AgentTree } from './AgentTree.js';
 import { StreamingText } from './StreamingText.js';
 import { MarkdownText } from './MarkdownText.js';
 
@@ -11,6 +12,10 @@ interface Props {
   toolCalls: ToolCallState[];
   /** Bloques de subagente delegados en el turno (Hito 8A). */
   subagents?: SubagentBlockState[];
+  /** Subagente que emitió el evento más reciente (Hito 8C, marcador ▶ del árbol). */
+  speakingSubagentId?: string | null;
+  /** maxConcurrency del turno de delegación (Hito 8C, cabecera del árbol). */
+  maxConcurrency?: number;
   streaming: boolean;
   /** id del tool call block enfocado con Tab (si pertenece a este mensaje). */
   focusedBlockId?: string | null;
@@ -27,6 +32,8 @@ export function AgentMessage({
   text,
   toolCalls,
   subagents,
+  speakingSubagentId,
+  maxConcurrency,
   streaming,
   focusedBlockId,
   expandedBlockIds,
@@ -48,14 +55,25 @@ export function AgentMessage({
           expanded={expandedBlockIds?.has(tc.id) ?? false}
         />
       ))}
-      {subs.map((sa) => (
-        <SubagentBlock
-          key={sa.id}
-          state={sa}
-          focused={focusedBlockId === sa.id}
-          expanded={expandedBlockIds?.has(sa.id) ?? false}
+      {/* Hito 8C: >1 subagente en el turno ⇒ árbol vivo; 1 solo ⇒ bloque plano (§5.6). */}
+      {subs.length > 1 ? (
+        <AgentTree
+          nodes={subs}
+          speakingId={speakingSubagentId}
+          maxConcurrency={maxConcurrency ?? 1}
+          focusedBlockId={focusedBlockId}
+          expandedBlockIds={expandedBlockIds}
         />
-      ))}
+      ) : (
+        subs.map((sa) => (
+          <SubagentBlock
+            key={sa.id}
+            state={sa}
+            focused={focusedBlockId === sa.id}
+            expanded={expandedBlockIds?.has(sa.id) ?? false}
+          />
+        ))
+      )}
       {text &&
         (streaming ? <StreamingText text={text} streaming={true} /> : <MarkdownText text={text} />)}
     </Box>
