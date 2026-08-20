@@ -137,6 +137,28 @@ export const chatCommand = new Command('chat')
               process.stderr.write(`Reanudando plan in_progress (${saved.planRef})\n`);
             }
           }
+
+          // Hito 8B — subagentes interrumpidos (§12.16): si la sesión anterior
+          // murió a mitad de un delegate_task, su marca `running` sigue en disco.
+          // Se inyecta un preámbulo que instruye al padre a verificar el estado
+          // (NO se reejecutan automáticamente: un subagente no es idempotente).
+          const { SubagentStore } = await import('../../session/subagent-store.js');
+          const { buildInterruptedSubagentsPreamble } = await import('../../agent/subagent.js');
+          const subStore = new SubagentStore(process.cwd());
+          const interrupted = subStore.loadInterrupted();
+          const subPreamble = buildInterruptedSubagentsPreamble(interrupted);
+          if (subPreamble) {
+            const prev = (agentOptions as { resumePreamble?: string }).resumePreamble;
+            agentOptions = {
+              ...agentOptions,
+              initialMessages: saved.messages,
+              resumePreamble: prev ? `${prev}\n\n${subPreamble}` : subPreamble,
+            };
+            interrupted.forEach((s) => subStore.markInterrupted(s.id));
+            process.stderr.write(
+              `Reanudando: ${interrupted.length} subagente(s) interrumpido(s)\n`,
+            );
+          }
         } catch (err) {
           process.stderr.write(`Error al cargar sesión: ${String(err)}\n`);
           process.exit(1);

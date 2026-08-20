@@ -727,20 +727,20 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `CodeAgent`/`ShellAgent`/`ResearchAgent`: un subagente es una instancia del mismo `ReactLoop` con contexto aislado, lanzada por la tool de control `delegate_task` (interceptada por el loop, como `present_plan`); las especializaciones son **perfiles** (ficheros `~/.stratum/agents/<name>.md`), no subclases. Se entrega en tres sub-hitos incrementales:
 
-**8A — Delegación mínima**
-- [ ] Tool de control `delegate_task` (interceptada por el loop, no despachada)
-- [ ] Subagente = `ReactLoop` con contexto aislado, **router propio**, profundidad = 1 *enforced*
-- [ ] **Ejecución estrictamente secuencial** (concurrencia = 1)
-- [ ] `SubagentResult` estructurado + truncado (~30k vía `truncate.ts`)
-- [ ] `ProfileLoader` (perfiles como ficheros; `profile: z.string()` validado en runtime)
-- [ ] UI: bloque colapsable estilo `ToolCallBlock`
+**8A — Delegación mínima** ✅ (2026-06-20)
+- [x] Tool de control `delegate_task` (interceptada por el loop, no despachada)
+- [x] Subagente = `ReactLoop` con contexto aislado, **router propio**, profundidad = 1 *enforced*
+- [x] **Ejecución estrictamente secuencial** (concurrencia = 1)
+- [x] `SubagentResult` estructurado + truncado (~30k vía `truncate.ts`)
+- [x] `ProfileLoader` (perfiles como ficheros; `profile: z.string()` validado en runtime)
+- [x] UI: bloque colapsable estilo `ToolCallBlock`
 
-**8B — Robustez**
-- [ ] Cancelación (signal encadenado) y propagación de errores (fallo del hijo ≠ caída del padre)
-- [ ] Presupuestos: `maxIterations`/`timeoutMs` duros, `maxTokens` best-effort
-- [ ] Logs (`agent.subagent`) + persistencia best-effort de resultados
-- [ ] Reanudación: hijo a medias → `interrupted`, el padre verifica antes de reintentar (no reejecución automática)
-- [ ] Write-log de escrituras por subagente; tests de integración
+**8B — Robustez** ✅ (2026-08-20)
+- [x] Cancelación (signal encadenado) y propagación de errores (fallo del hijo ≠ caída del padre)
+- [x] Presupuestos: `maxIterations`/`timeoutMs` duros, `maxTokens` best-effort (`RunOptions.maxTokens`, `tokensUsed`)
+- [x] Logs (`agent.subagent`) + persistencia best-effort de resultados (`session/subagent-store.ts`)
+- [x] Reanudación: hijo a medias → `interrupted`, el padre verifica antes de reintentar (no reejecución automática)
+- [x] Write-log de escrituras por subagente; tests de integración (`subagent-8b.test.ts`)
 
 **8C — UX y especialización**
 - [ ] Ejecución **paralela** acotada por semáforo (`maxConcurrency`) + mutex (confirmaciones, memoria)

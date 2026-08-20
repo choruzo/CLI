@@ -76,6 +76,35 @@ describe('delegate_task — flujo del loop (Hito 8A)', () => {
     expect(done).toEqual({ type: 'done', stopReason: 'stop' });
   });
 
+  it('onSubagentPersist recibe running (sin result) y luego el resultado terminal (Hito 8B)', async () => {
+    const parent = new MockProvider([
+      makeToolCallRound('d1', 'delegate_task', { task: 'Explora foo', profile: 'general' }),
+      makeTextRound('Delegado.'),
+    ]);
+    const child = new MockProvider([makeTextRound('Exploré foo.')]);
+
+    const persisted: Array<{ id: string; hasResult: boolean; status?: string }> = [];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
+    const loop = new ReactLoop(parent, newRegistry(), messages, config, 'm', 32768, undefined, {
+      profiles: emptyProfiles(),
+    });
+
+    await collect(
+      loop.run({
+        makeSubagentRouter: () => mockRouter(child),
+        onSubagentPersist: (rec) =>
+          persisted.push({ id: rec.id, hasResult: !!rec.result, status: rec.result?.status }),
+      }),
+    );
+
+    // Dos llamadas para el mismo subagente: primero running (sin result), luego terminal.
+    expect(persisted).toHaveLength(2);
+    expect(persisted[0]?.hasResult).toBe(false); // marca running
+    expect(persisted[1]?.hasResult).toBe(true); // resultado terminal
+    expect(persisted[1]?.status).toBe('completed');
+    expect(persisted[0]?.id).toBe(persisted[1]?.id); // mismo subagentId
+  });
+
   it('perfil inexistente → tool_error recuperable, el padre continúa', async () => {
     const parent = new MockProvider([
       makeToolCallRound('d1', 'delegate_task', { task: 't', profile: 'inexistente' }),

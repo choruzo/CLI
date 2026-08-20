@@ -32,6 +32,7 @@ import { useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
+import { SubagentStore } from '../../session/subagent-store.js';
 
 /** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
 type OverlayState =
@@ -523,6 +524,9 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
   const resumePlanStoreRef = useRef<PlanStore | null>(
     resumeInfo ? new PlanStore(process.cwd()) : null,
   );
+  // SubagentStore (Hito 8B): persiste resultados de subagentes en cada run para
+  // que un cuelgue a mitad de un delegate_task se detecte como interrumpido.
+  const subagentStoreRef = useRef<SubagentStore>(new SubagentStore(process.cwd()));
 
   const ctxInit = agent.getContextUsage();
   const [state, dispatch] = useReducer(reducer, {
@@ -611,6 +615,10 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
     const opts: Partial<RunOptions> = {
       destructivePolicy: allowAllRef.current ? 'allow' : 'ask',
       onConfirmDestructive,
+      onSubagentPersist: (rec) =>
+        rec.result
+          ? subagentStoreRef.current.saveResult(rec.id, rec.profile, rec.task, rec.result)
+          : subagentStoreRef.current.saveRunning(rec.id, rec.profile, rec.task),
     };
     // Reanudación de plan (§12.6): inyectar mode/plan para que update_plan esté
     // disponible y el loop pueda actualizar los estados de los pasos.

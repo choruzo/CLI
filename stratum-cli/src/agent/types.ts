@@ -25,7 +25,10 @@ export type AgentEvent =
   | { type: 'subagent_progress'; subagentId: string; note: string }
   | { type: 'subagent_completed'; subagentId: string; result: SubagentResult }
   | { type: 'error'; message: string; fatal: boolean }
-  | { type: 'done'; stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' };
+  | {
+      type: 'done';
+      stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' | 'budget_tokens';
+    };
 
 export type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped';
 
@@ -217,4 +220,27 @@ export interface RunOptions {
    * Punto de inyección para tests; en producción no se pasa.
    */
   makeSubagentRouter?: (profile: AgentProfile) => SubagentRouter;
+  /**
+   * Tope de tokens acumulados para este run (Hito 8B, best-effort). Solo se aplica
+   * si el backend devuelve `usage`; si no, se ignora y el control recae en
+   * `maxIterations` + `timeoutMs` (§12.16). Lo usan los subagentes con su
+   * `budget.maxTokens`. Al superarse, el loop cierra con `stopReason: 'budget_tokens'`.
+   */
+  maxTokens?: number;
+  /**
+   * Persistencia de subagentes (Hito 8B, §12.16). El loop padre la invoca al
+   * lanzar un `delegate_task` (sin `result` → marca `running`) y de nuevo al
+   * terminar (con `result` → estado terminal). Permite detectar en `resume`
+   * subagentes cuya ejecución quedó a medias (`running` → `interrupted`).
+   */
+  onSubagentPersist?: (rec: SubagentPersist) => void;
+}
+
+/** Registro que el loop padre pasa a `onSubagentPersist` (Hito 8B). */
+export interface SubagentPersist {
+  id: string;
+  profile: string;
+  task: string;
+  /** Ausente al arrancar (marca `running`); presente al terminar (estado terminal). */
+  result?: SubagentResult;
 }

@@ -10,6 +10,7 @@ import type {
 } from '../../agent/types.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
+import { SubagentStore } from '../../session/subagent-store.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
@@ -183,6 +184,7 @@ export const runCommand = new Command('run')
       const planRef = generatePlanId();
       const planCreatedAt = new Date().toISOString();
       const planStepTitles = new Map<string, { n: number; title: string }>();
+      const subagentStore = new SubagentStore(process.cwd());
 
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
@@ -193,6 +195,10 @@ export const runCommand = new Command('run')
           allowDestructive: opts.allowDestructive,
           destructivePolicy: policy,
           onConfirmDestructive: policy === 'ask' ? confirmDestructive : undefined,
+          onSubagentPersist: (rec) =>
+            rec.result
+              ? subagentStore.saveResult(rec.id, rec.profile, rec.task, rec.result)
+              : subagentStore.saveRunning(rec.id, rec.profile, rec.task),
           ...(planMode
             ? {
                 mode: 'plan' as const,

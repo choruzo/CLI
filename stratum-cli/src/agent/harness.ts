@@ -402,6 +402,12 @@ export class ReactLoop {
   private readonly contextManager: ContextManager;
   /** Iteraciones del loop realmente ejecutadas en el último run (Hito 8: usage). */
   private _iterations = 0;
+  /**
+   * Tokens acumulados (best-effort) del último run (Hito 8B). Solo se incrementa
+   * cuando el backend devuelve `usage`; 0 si no. Fuente del `usage.tokens` de los
+   * subagentes y del presupuesto duro-si-hay-métrica `maxTokens`.
+   */
+  private _tokensUsed = 0;
 
   constructor(
     private readonly provider: IProvider,
@@ -490,6 +496,18 @@ export class ReactLoop {
       if (signal.aborted) {
         loopLog.info('cancelled', { iter });
         yield { type: 'done', stopReason: 'cancelled' };
+        return;
+      }
+      // Presupuesto de tokens (Hito 8B, best-effort): solo aplica si el backend
+      // devolvió usage en iteraciones previas. Se comprueba entre iteraciones —
+      // nunca a mitad de stream— para cerrar limpio con el resultado parcial.
+      if (opts?.maxTokens && this._tokensUsed >= opts.maxTokens) {
+        loopLog.info('budget tokens exceeded', {
+          iter,
+          tokensUsed: this._tokensUsed,
+          maxTokens: opts.maxTokens,
+        });
+        yield { type: 'done', stopReason: 'budget_tokens' };
         return;
       }
       // Contar la iteración solo cuando realmente procede (no si se canceló antes).
@@ -591,6 +609,13 @@ export class ReactLoop {
             // Registrar usage real si viene en el chunk (§12.4)
             if (chunk.usage?.prompt_tokens) {
               this.contextManager.recordUsage(chunk.usage.prompt_tokens);
+            }
+            // Tokens acumulados best-effort (Hito 8B): total del request si viene,
+            // si no la suma prompt+completion. Alimenta el presupuesto `maxTokens`.
+            if (chunk.usage) {
+              const u = chunk.usage;
+              this._tokensUsed +=
+                u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0);
             }
 
             for (const ev of buffer.feed(chunk)) {
@@ -945,6 +970,11 @@ export class ReactLoop {
           task: taskText,
         };
 
+        // Persistir marca `running` ANTES de ejecutar (Hito 8B): si el proceso
+        // muere a mitad, en `resume` este registro sin estado terminal se detecta
+        // como `interrupted`. Best-effort: el callback nunca debe lanzar.
+        opts?.onSubagentPersist?.({ id: subId, profile: profile.name, task: taskText });
+
         const result = await runSubagent({
           task: {
             id: subId,
@@ -969,6 +999,10 @@ export class ReactLoop {
         // inyectarlo, para proteger el contexto del padre igual que el resto de
         // tool outputs (§12.16, cabeza 80% + cola 20%).
         const serialized = truncateToolOutput(serializeSubagentResult(result, profile.name));
+
+        // Persistir el resultado terminal (Hito 8B): sobrescribe la marca `running`,
+        // de modo que ya no se detecta como interrumpido en un `resume` posterior.
+        opts?.onSubagentPersist?.({ id: subId, profile: profile.name, task: taskText, result });
 
         yield { type: 'subagent_completed', subagentId: subId, result };
         // Emitir también el tool_result del delegate_task: lo consumen el contador
@@ -1054,5 +1088,13 @@ export class ReactLoop {
   /** Iteraciones del loop ejecutadas en el último run (para usage de subagentes). */
   get iterationsRun(): number {
     return this._iterations;
+  }
+
+  /**
+   * Tokens acumulados del último run (Hito 8B, best-effort). 0 si el backend
+   * nunca devolvió `usage`. Los subagentes lo exponen como `usage.tokens`.
+   */
+  get tokensUsed(): number {
+    return this._tokensUsed;
   }
 }

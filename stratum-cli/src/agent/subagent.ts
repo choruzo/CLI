@@ -166,6 +166,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     destructivePolicy: profile.destructivePolicy ?? opts.parentDestructivePolicy,
     onConfirmDestructive: opts.onConfirmDestructive,
     maxIterations: profile.budget.maxIterations,
+    maxTokens: profile.budget.maxTokens,
   };
 
   log.info('subagent run', {
@@ -214,18 +215,29 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
       summary: truncateToolOutput(currentText.trim(), RESULT_SUMMARY_CAP),
       filesChanged: toFilesArray(filesChanged),
       decisions: decisions.length ? decisions : undefined,
-      usage: { iterations: loop.iterationsRun, tokens, durationMs: Date.now() - start },
+      usage: {
+        iterations: loop.iterationsRun,
+        tokens: loop.tokensUsed || undefined,
+        durationMs: Date.now() - start,
+      },
       error: msg(err),
     };
   }
 
   // Iteraciones REALES del loop hijo (no número de tool calls).
   iterations = loop.iterationsRun;
+  // Tokens best-effort (Hito 8B): solo si el backend devolvió usage; si no, queda
+  // undefined y el control de coste recayó en maxIterations + timeoutMs (§12.16).
+  tokens = loop.tokensUsed || undefined;
+  if (tokens === undefined) {
+    log.debug('subagent tokens unavailable (backend sin usage)', { id: task.id });
+  }
 
+  // 'max_iterations' y 'budget_tokens' son ambos agotamiento de presupuesto.
   const status: SubagentStatus =
     stopReason === 'cancelled'
       ? 'cancelled'
-      : stopReason === 'max_iterations'
+      : stopReason === 'max_iterations' || stopReason === 'budget_tokens'
         ? 'budget_exceeded'
         : stopReason === 'error'
           ? 'failed'
@@ -271,6 +283,36 @@ function toFilesArray(
 
 function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
+/**
+ * Preámbulo de reanudación de subagentes interrumpidos (Hito 8B, §12.16). Recibe
+ * los registros `running` que quedaron sin estado terminal (un cuelgue duro entre
+ * el arranque del hijo y su fin) e instruye al PADRE a verificar el estado real
+ * antes de decidir. **No relanza el hijo**: un subagente no es idempotente (pudo
+ * ejecutar `bash`, escribir ficheros o tocar servicios), reejecutar a ciegas
+ * duplicaría efectos. La decisión (reintentar, dar por bueno, o preguntar al
+ * usuario) es del agente, igual que la verificación de un paso `in_progress` de
+ * un plan (§12.15). Devuelve null si no hay nada interrumpido.
+ */
+export function buildInterruptedSubagentsPreamble(
+  interrupted: Array<{ id: string; profile: string; task: string }>,
+): string | null {
+  if (interrupted.length === 0) return null;
+  const items = interrupted.map((s) => `- [${s.profile}] ${s.id}: ${s.task}`).join('\n');
+  return [
+    'Reanudación de sesión: uno o más subagentes que delegaste quedaron INTERRUMPIDOS',
+    'antes de terminar (la sesión anterior se cerró a mitad de su ejecución). No se han',
+    'reejecutado automáticamente porque un subagente puede haber tenido efectos parciales',
+    '(comandos ejecutados, ficheros escritos).',
+    '',
+    'Subagentes interrumpidos:',
+    items,
+    '',
+    'Antes de continuar: verifica el estado real (relee los ficheros implicados, comprueba',
+    'si la tarea quedó a medias) y decide explícitamente si vuelves a delegar la tarea, la',
+    'das por completada, o preguntas al usuario. No asumas que se completó ni que no se hizo nada.',
+  ].join('\n');
 }
 
 /** Serializa el SubagentResult a XML para inyectarlo como tool result (§12.16). */
