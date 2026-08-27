@@ -108,6 +108,12 @@ export class ContextManager {
   /** Dato real de `usage.prompt_tokens` del último LLM call (null = no disponible aún). */
   private lastPromptTokens: number | null = null;
 
+  /**
+   * Tokens por "char-token" del proxy, calibrado con el último `usage` real
+   * (null = sin dato todavía → se usa el proxy chars/3.5 sin corregir).
+   */
+  private tokenRatio: number | null = null;
+
   /** Modo de compresión activo (F6). 'conservative' sube el umbral y conserva más rondas. */
   private mode: 'normal' | 'conservative' = 'normal';
 
@@ -140,9 +146,21 @@ export class ContextManager {
   // Estimación de tokens — cascada §12.4
   // -------------------------------------------------------------------------
 
-  /** Registra el `usage.prompt_tokens` reportado por el provider. */
-  recordUsage(promptTokens: number): void {
+  /**
+   * Registra el `usage.prompt_tokens` reportado por el provider.
+   *
+   * Si se pasan los mensajes con los que se hizo ese request, se calibra el
+   * proxy chars/3.5 contra el tokenizador real del modelo: la constante fija
+   * se desvía con facilidad un 40% (código y texto repetitivo tokenizan mucho
+   * mejor que prosa), lo que hace comprimir de más o de menos.
+   */
+  recordUsage(promptTokens: number, messages?: Message[]): void {
     this.lastPromptTokens = promptTokens;
+    if (messages) {
+      const chars = this.estimateFromChars(messages);
+      if (chars > 0 && promptTokens > 0) this.tokenRatio = promptTokens / chars;
+      log.debug('context calibration', { promptTokens, proxy: chars, ratio: this.tokenRatio });
+    }
   }
 
   /** Estima tokens a partir de chars cuando no hay dato del provider. */
@@ -159,22 +177,34 @@ export class ContextManager {
     return Math.ceil(chars / 3.5);
   }
 
-  /** Devuelve uso actual del contexto. `estimated=true` cuando se usa proxy chars/3.5. */
+  /**
+   * Devuelve uso actual del contexto. `estimated=true` cuando se usa proxy chars/3.5.
+   *
+   * `lastPromptTokens` es el `prompt_tokens` del LLM call **anterior**: no incluye
+   * la respuesta del assistant ni los tool results inyectados después (que llegan a
+   * ~30k chars ≈ 8.5k tokens tras el truncado del dispatcher). Tomar el máximo de
+   * ambas fuentes evita que la compresión se dispare tarde — o nunca — cuando una
+   * sola tool ha metido un cuarto de la ventana de contexto desde el último usage.
+   */
   usage(messages: Message[]): { used: number; max: number; pct: number; estimated: boolean } {
-    let used: number;
-    let estimated: boolean;
+    const rawChars = this.estimateFromChars(messages);
+    // Proxy corregido con el tokenizador real del modelo cuando hay calibración.
+    const fromChars = this.tokenRatio !== null ? Math.ceil(rawChars * this.tokenRatio) : rawChars;
+    const real = this.lastPromptTokens;
 
-    if (this.lastPromptTokens !== null) {
-      used = this.lastPromptTokens;
-      estimated = false;
-    } else {
-      used = this.estimateFromChars(messages);
-      estimated = true;
-    }
+    const used = real !== null ? Math.max(real, fromChars) : fromChars;
+    // Solo es dato "real" mientras el proxy por chars no lo supere.
+    const estimated = real === null || fromChars > real;
 
     const max = this.contextWindow;
     const pct = max > 0 ? Math.round((used / max) * 100) : 0;
     return { used, max, pct, estimated };
+  }
+
+  /** Proxy por chars corregido con la calibración del tokenizador real. */
+  private estimateCalibrated(messages: Message[]): number {
+    const raw = this.estimateFromChars(messages);
+    return this.tokenRatio !== null ? Math.ceil(raw * this.tokenRatio) : raw;
   }
 
   // Mantener firma compatible con los tests existentes
@@ -191,8 +221,9 @@ export class ContextManager {
    * Modifica `messages` en el lugar. Devuelve el resultado para emitir eventos.
    */
   async maybeCompress(messages: Message[]): Promise<CompressionResult> {
-    const { pct } = this.usage(messages);
-    if (pct / 100 <= this.compressionThreshold) return { kind: 'skipped' };
+    // Sin redondear: `pct` viene de Math.round y un 80.4% real se leería como 0.80.
+    const { used, max } = this.usage(messages);
+    if (max > 0 && used / max <= this.compressionThreshold) return { kind: 'skipped' };
     return this.compress(messages);
   }
 
@@ -243,8 +274,9 @@ export class ContextManager {
       // Reconstruir messages en el lugar: system + summaryMsg + zona protegida (sin system)
       const protectedMessages = messages.filter((_, i) => protectedSet.has(i) && i !== 0);
       messages.splice(0, messages.length, messages[0]!, summaryMsg, ...protectedMessages);
+      this.sanitizeToolPairing(messages);
 
-      const tokensAfter = this.estimateFromChars(messages);
+      const tokensAfter = this.estimateCalibrated(messages);
       // Invalidar cache de tokens reales (el historial cambió)
       this.lastPromptTokens = null;
 
@@ -315,6 +347,65 @@ export class ContextManager {
     return protected_;
   }
 
+  /**
+   * Repara el emparejamiento assistant↔tool tras una compresión (red de seguridad).
+   *
+   * La API OpenAI-compatible rechaza con 400 tanto un `tool` sin el assistant que lo
+   * pidió como un assistant con `tool_calls` sin todas sus respuestas. Como el
+   * historial se muta en el lugar, un 400 aquí no es recuperable: la sesión queda
+   * rota para siempre. Por eso se sanea siempre, aunque las rutas de compresión ya
+   * intenten mantener el invariante por su cuenta.
+   */
+  private sanitizeToolPairing(messages: Message[]): void {
+    // 1) Eliminar tool results huérfanos.
+    let openIds = new Set<string>();
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (!msg) continue;
+      if (msg.role === 'assistant') {
+        openIds = new Set((msg.tool_calls ?? []).map((tc) => tc.id));
+        continue;
+      }
+      if (msg.role === 'tool') {
+        if (!msg.tool_call_id || !openIds.has(msg.tool_call_id)) {
+          messages.splice(i, 1);
+          i--;
+        }
+        continue;
+      }
+      openIds = new Set(); // user/system cierran el bloque de tool calls
+    }
+
+    // 2) Rellenar tool_calls sin respuesta con un placeholder mínimo.
+    for (let i = 0; i < messages.length; i++) {
+      const msg = messages[i];
+      if (!msg || msg.role !== 'assistant' || !msg.tool_calls?.length) continue;
+
+      let j = i + 1;
+      const answered = new Set<string>();
+      while (j < messages.length && messages[j]?.role === 'tool') {
+        const id = messages[j]?.tool_call_id;
+        if (id) answered.add(id);
+        j++;
+      }
+
+      const missing = msg.tool_calls.filter((tc) => !answered.has(tc.id));
+      if (missing.length === 0) continue;
+
+      messages.splice(
+        j,
+        0,
+        ...missing.map(
+          (tc): Message => ({
+            role: 'tool',
+            tool_call_id: tc.id,
+            content: '<elided reason="context_compression"/>',
+          }),
+        ),
+      );
+    }
+  }
+
   /** Truncado duro: elimina mensajes fuera de la zona protegida en bloques de 2 rondas. */
   private hardTruncate(
     messages: Message[],
@@ -324,7 +415,7 @@ export class ContextManager {
     let roundsRemoved = 0;
 
     const belowThreshold = () => {
-      const tokens = this.estimateFromChars(messages);
+      const tokens = this.estimateCalibrated(messages);
       return this.contextWindow > 0 && tokens / this.contextWindow <= this.compressionThreshold;
     };
 
@@ -341,6 +432,15 @@ export class ContextManager {
         while (j < messages.length && !protectedSet.has(j) && blockRounds < 2) {
           toRemove.push(j);
           if (messages[j]?.role === 'user' || messages[j]?.role === 'assistant') blockRounds++;
+          j++;
+        }
+
+        // El bloque puede terminar en un assistant con `tool_calls`: arrastrar los
+        // `tool` que le responden, o quedarían huérfanos y el provider rechazaría
+        // el historial con un 400 irrecuperable (un `tool` debe ir precedido del
+        // assistant que lo pidió).
+        while (j < messages.length && !protectedSet.has(j) && messages[j]?.role === 'tool') {
+          toRemove.push(j);
           j++;
         }
 
@@ -367,7 +467,9 @@ export class ContextManager {
       if (!removed) break; // No queda nada que eliminar
     }
 
-    const tokensAfter = this.estimateFromChars(messages);
+    this.sanitizeToolPairing(messages);
+
+    const tokensAfter = this.estimateCalibrated(messages);
     this.lastPromptTokens = null;
 
     const newPct = this.contextWindow > 0 ? tokensAfter / this.contextWindow : 0;
@@ -452,18 +554,27 @@ export class ReactLoop {
     private readonly extras?: {
       profiles?: ProfileLoader;
       toolsetFilter?: ToolsetFilter;
+      /**
+       * `ContextManager` de sesión (lo aporta `StratumAgent`). El loop vive un
+       * solo turno, pero la calibración del estimador de tokens y el último
+       * `usage` real deben sobrevivir entre turnos: sin esto, la barra de estado
+       * y `/compact` vuelven al proxy chars/3.5 sin corregir.
+       */
+      contextManager?: ContextManager;
     },
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
     this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
-    this.contextManager = new ContextManager(
-      contextWindow,
-      config.agent.compressionKeepRounds,
-      provider,
-      model,
-      config.agent.compressionThreshold,
-      config.agent.compressorModel,
-    );
+    this.contextManager =
+      extras?.contextManager ??
+      new ContextManager(
+        contextWindow,
+        config.agent.compressionKeepRounds,
+        provider,
+        model,
+        config.agent.compressionThreshold,
+        config.agent.compressorModel,
+      );
   }
 
   async *run(opts?: RunOptions): AsyncGenerator<AgentEvent> {
@@ -629,7 +740,9 @@ export class ReactLoop {
 
             // Registrar usage real si viene en el chunk (§12.4)
             if (chunk.usage?.prompt_tokens) {
-              this.contextManager.recordUsage(chunk.usage.prompt_tokens);
+              // `this.messages` es exactamente el prompt de este request (la
+              // respuesta aún no se ha añadido): sirve para calibrar el proxy.
+              this.contextManager.recordUsage(chunk.usage.prompt_tokens, this.messages);
             }
             // Tokens acumulados best-effort (Hito 8B): total del request si viene,
             // si no la suma prompt+completion. Alimenta el presupuesto `maxTokens`.
