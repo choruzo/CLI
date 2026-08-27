@@ -32,6 +32,9 @@ export interface StratumAgentOptions {
 export class StratumAgent {
   private messages: Message[];
   private currentLoop: ReactLoop | null = null;
+  /** `ContextManager` de sesión (ver `getContextManager`). */
+  private contextManager: ContextManager | null = null;
+  private contextManagerKey = '';
   private readonly memoryManager: MemoryManager;
   /** Perfiles de subagente (Hito 8): descubiertos al arrancar, pasados al loop. */
   private readonly profiles: ProfileLoader;
@@ -101,7 +104,7 @@ export class StratumAgent {
       this.router.model,
       this.router.contextWindow,
       this.router,
-      { profiles: this.profiles },
+      { profiles: this.profiles, contextManager: this.getContextManager() },
     );
 
     let stopReason: string | null = null;
@@ -181,15 +184,31 @@ export class StratumAgent {
    * `run()` y `/compact` se invoca entre turnos.
    */
   async compactNow(): Promise<CompressionResult> {
-    const cm = new ContextManager(
-      this.router.contextWindow,
-      this.config.agent.compressionKeepRounds,
-      this.router.getActive(),
-      this.router.model,
-      this.config.agent.compressionThreshold,
-      this.config.agent.compressorModel,
-    );
-    return cm.compress(this.messages);
+    return this.getContextManager().compress(this.messages);
+  }
+
+  /**
+   * `ContextManager` de la sesión. Vive fuera del `ReactLoop` (que dura un solo
+   * turno) para conservar entre turnos el último `usage` real del provider y la
+   * calibración del estimador de tokens: son lo que hace que el % de contexto de
+   * la barra de estado y el umbral de compresión midan de verdad. Se reconstruye
+   * solo si cambia el provider, el modelo o la ventana (`/model`, `/provider`,
+   * fallback), porque la calibración es específica de ese tokenizador.
+   */
+  private getContextManager(): ContextManager {
+    const key = `${this.router.providerName}|${this.router.model}|${this.router.contextWindow}`;
+    if (!this.contextManager || this.contextManagerKey !== key) {
+      this.contextManager = new ContextManager(
+        this.router.contextWindow,
+        this.config.agent.compressionKeepRounds,
+        this.router.getActive(),
+        this.router.model,
+        this.config.agent.compressionThreshold,
+        this.config.agent.compressorModel,
+      );
+      this.contextManagerKey = key;
+    }
+    return this.contextManager;
   }
 
   /**
@@ -232,10 +251,10 @@ export class StratumAgent {
 
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {
     if (this.currentLoop) return this.currentLoop.getContextUsage();
-    const chars = this.messages.reduce((n, m) => n + (m.content?.length ?? 0), 0);
-    const used = Math.ceil(chars / 3.5);
-    const max = this.router.contextWindow;
-    return { used, max, pct: Math.round((used / max) * 100), estimated: true };
+    // Entre turnos: el mismo manager de sesión, para no perder la calibración ni
+    // el último usage real (antes se recalculaba a mano con chars/3.5 crudo, que
+    // subestima el contexto y hacía saltar el % de la barra al empezar el turno).
+    return this.getContextManager().usage(this.messages);
   }
 
   /** Devuelve una copia del historial de mensajes (para persistir la sesión). */

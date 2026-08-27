@@ -136,6 +136,156 @@ describe('ContextManager', () => {
   });
 });
 
+// ---------------------------------------------------------------------------
+// Invariante de historial: la API OpenAI-compatible rechaza con 400 tanto un
+// mensaje `tool` sin el assistant que lo pidió como un assistant con
+// `tool_calls` sin todas sus respuestas. Como el historial se muta en el lugar,
+// ese 400 no es recuperable — la sesión queda rota.
+// ---------------------------------------------------------------------------
+function expectValidToolPairing(messages: import('./types.js').Message[]): void {
+  let openIds = new Set<string>();
+  for (let i = 0; i < messages.length; i++) {
+    const msg = messages[i]!;
+    if (msg.role === 'assistant') {
+      const answered = new Set<string>();
+      let j = i + 1;
+      while (j < messages.length && messages[j]?.role === 'tool') {
+        answered.add(messages[j]!.tool_call_id!);
+        j++;
+      }
+      for (const tc of msg.tool_calls ?? []) {
+        expect(answered.has(tc.id), `tool_call ${tc.id} sin respuesta (índice ${i})`).toBe(true);
+      }
+      openIds = new Set((msg.tool_calls ?? []).map((tc) => tc.id));
+      continue;
+    }
+    if (msg.role === 'tool') {
+      expect(
+        !!msg.tool_call_id && openIds.has(msg.tool_call_id),
+        `tool huérfano en índice ${i}`,
+      ).toBe(true);
+      continue;
+    }
+    openIds = new Set();
+  }
+}
+
+describe('ContextManager — invariante assistant↔tool', () => {
+  function historyWithToolCall(): import('./types.js').Message[] {
+    return [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'U'.repeat(1500) },
+      {
+        role: 'assistant',
+        content: 'A'.repeat(1500),
+        tool_calls: [
+          { id: 'call_1', type: 'function', function: { name: 'read_file', arguments: '{}' } },
+        ],
+      },
+      { role: 'tool', tool_call_id: 'call_1', content: 'ok' },
+      { role: 'user', content: 'u3' },
+      { role: 'assistant', content: 'a3' },
+    ];
+  }
+
+  it('el truncado duro no deja tool results huérfanos', async () => {
+    const cm = new ContextManager(1000, 1, undefined, undefined, 0.8);
+    const messages = historyWithToolCall();
+
+    const result = await cm.maybeCompress(messages);
+
+    expect(result.kind).toBe('truncated');
+    expect(messages[0]?.role).toBe('system');
+    expectValidToolPairing(messages);
+  });
+
+  it('el truncado duro no deja tool_calls sin respuesta', async () => {
+    const cm = new ContextManager(1000, 1, undefined, undefined, 0.8);
+    // El assistant con tool_calls cae en zona protegida; su tool result no.
+    const messages: import('./types.js').Message[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'U'.repeat(3000) },
+      { role: 'assistant', content: 'A'.repeat(3000) },
+      { role: 'user', content: 'u2' },
+      {
+        role: 'assistant',
+        content: null,
+        tool_calls: [
+          { id: 'call_9', type: 'function', function: { name: 'bash', arguments: '{}' } },
+        ],
+      },
+    ];
+
+    await cm.maybeCompress(messages);
+    expectValidToolPairing(messages);
+  });
+
+  it('la compresión vía LLM preserva el emparejamiento', async () => {
+    const fakeProvider = {
+      async *complete() {
+        yield { choices: [{ delta: { content: 'resumen' }, finish_reason: null, index: 0 }] };
+      },
+    } as unknown as import('../providers/base.js').IProvider;
+
+    const cm = new ContextManager(1000, 1, fakeProvider, 'test-model', 0.8);
+    const messages = historyWithToolCall();
+
+    const result = await cm.maybeCompress(messages);
+
+    expect(result.kind).toBe('compressed');
+    expectValidToolPairing(messages);
+  });
+});
+
+describe('ContextManager — usage tras tool results', () => {
+  it('no ignora lo añadido desde el último usage real del provider', () => {
+    const cm = new ContextManager(10_000, 2, undefined, undefined, 0.8);
+    const messages: import('./types.js').Message[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: 'u1' },
+    ];
+    cm.recordUsage(7000); // 70% reportado por el provider en el call anterior
+
+    // Un solo tool result truncado a 30k chars ≈ 8.5k tokens
+    messages.push({ role: 'tool', tool_call_id: 'c1', content: 'X'.repeat(30_000) });
+
+    const u = cm.usage(messages);
+    expect(u.used).toBeGreaterThan(8000);
+    expect(u.pct).toBeGreaterThan(80);
+    expect(u.estimated).toBe(true); // el proxy por chars superó al dato real
+  });
+
+  it('calibra el proxy chars/3.5 con el tokenizador real del modelo', () => {
+    const cm = new ContextManager(100_000, 2, undefined, undefined, 0.8);
+    const prompt: import('./types.js').Message[] = [
+      { role: 'system', content: 'S'.repeat(35_000) }, // proxy: 10 000 tokens
+    ];
+    // El modelo dice que ese prompt son 5 000 tokens → el proxy sobreestima x2
+    cm.recordUsage(5000, prompt);
+
+    // Se duplica el historial: el proxy diría 20 000, calibrado son 10 000
+    prompt.push({ role: 'user', content: 'U'.repeat(35_000) });
+    const u = cm.usage(prompt);
+
+    expect(u.used).toBe(10_000);
+    expect(u.estimated).toBe(true);
+  });
+
+  it('sin calibración cae al proxy chars/3.5 sin corregir', () => {
+    const cm = new ContextManager(100_000, 2, undefined, undefined, 0.8);
+    const messages: import('./types.js').Message[] = [{ role: 'user', content: 'X'.repeat(3500) }];
+    expect(cm.usage(messages).used).toBe(1000);
+  });
+
+  it('sigue usando el dato real del provider cuando es el mayor', () => {
+    const cm = new ContextManager(32768, 6);
+    cm.recordUsage(5000);
+    const { used, estimated } = cm.usage([{ role: 'user', content: 'hello' }]);
+    expect(used).toBe(5000);
+    expect(estimated).toBe(false);
+  });
+});
+
 describe('ReactLoop', () => {
   it('emits text events and done(stop) for text-only response', async () => {
     const provider = new MockProvider([makeTextRound('Hello from agent')]);
