@@ -1,5 +1,5 @@
 ---
-date: 2026-06-16
+date: 2026-08-27
 tags: [arquitectura, stratum-cli, diseño]
 status: vivo
 ---
@@ -8,7 +8,7 @@ status: vivo
 
 Agente de línea de comandos extensible construido sobre un loop ReAct (Reason → Act → Observe). Provider-agnostic: compatible con cualquier API OpenAI-compatible.
 
-Ver [[Roadmap]] para el estado de implementación. Hitos 0–5 completados; Hito 6 en curso.
+Ver [[Roadmap]] para el estado de implementación. Hitos 0–9 completados.
 
 ---
 
@@ -32,9 +32,19 @@ CLI (Commander.js)
             │               ├── shell: bash (guard destructivo)
             │               ├── web: search / fetch
             │               ├── memory: store_decision / recall_decisions  ← Hito 5
+            │               ├── ssh: ssh_exec / ssh_upload / ssh_download   ← Hito 9
             │               └── mcp__<server>__<tool>  (auto-registradas)  ← Hito 4
+            │       └── tools de control (NO despachadas, las intercepta el loop)
+            │               ├── present_plan / update_plan                 ← Hito 7
+            │               └── delegate_task → runSubagent                ← Hito 8
             ├── SessionStore (session/store.ts)                 ← Hito 2
-            │       └── ~/.stratum/sessions/*.json
+            │       ├── ~/.stratum/sessions/*.json
+            │       ├── PlanStore → <proyecto>/.stratum/plans/  ← Hito 7
+            │       └── SubagentStore → .stratum/subagents/     ← Hito 8B
+            ├── SSHConnectionPool (tools/ssh/pool.ts)           ← Hito 9
+            │       ├── KnownHostsStore (~/.stratum/known_hosts.json, TOFU)
+            │       ├── jump hosts vía forwardOut (profundidad máx. 2)
+            │       └── SSHAuditLog (~/.stratum/logs/ssh-audit.jsonl)
             └── McpManager (mcp/manager.ts)                     ← Hito 4 + 4.1
                     ├── McpServerClient (stdio, heartbeat, backoff)
                     ├── installer.ts (carpeta gestionada ~/.stratum/mcp/)
@@ -81,7 +91,9 @@ CLI (Commander.js)
 - shell: `bash` (guard destructivo configurable, serialized)
 - web: `web_search` (DDG + Tavily, RRF), `web_fetch` (HTML→markdown)
 - memory: `store_decision`, `recall_decisions`
+- ssh: `ssh_exec`, `ssh_upload`, `ssh_download` — **solo si hay inventario `ssh.hosts`** (`ssh/`)
 - MCP: tools auto-registradas `mcp__<server>__<tool>` (`mcp/`)
+- control (interceptadas por el loop, nunca despachadas): `present_plan`, `update_plan`, `delegate_task`
 
 ### [[Módulos/memory]] — Memory Layers 1, 2 y 3 (Hitos 2 y 5)
 
@@ -100,11 +112,12 @@ CLI (Commander.js)
 
 ## Módulos pendientes de implementar
 
-| Módulo | Archivo principal | Hito |
-|--------|------------------|------|
-| Pulido multi-provider (health check, listado de modelos) | `providers/router.ts` | 6 |
-| Planner + Plan & Execute | `agent/planner.ts` | 7 |
-| Orchestrator multi-agente | `agent/orchestrator.ts` | 8 |
+Ninguno de los hitos 0–9 queda pendiente. Ver [[Roadmap]] para lo que venga después.
+
+> **Nota histórica:** este apartado listaba un `agent/planner.ts` y un `agent/orchestrator.ts`.
+> Ninguno existe: tanto el modo plan (Hito 7) como la delegación (Hito 8) se resolvieron como
+> **tools de control interceptadas por el propio `ReactLoop`**, no como pipelines dedicados —
+> la misma decisión que cerró `/init` en el Hito 2.5.
 
 ---
 
@@ -116,6 +129,7 @@ CLI (Commander.js)
 | Vector DB | `sqlite-vec` embebido + fallback brute-force JS (no Chroma/Qdrant) |
 | Embeddings | ONNX local con `@xenova/transformers` (no OpenAI API) |
 | Shell | `execa` (no `child_process` directo) |
+| SSH | `ssh2` puro Node (nunca el binario `ssh` del sistema); en `external` de tsup |
 | Build | `tsup` → ESM + CJS en `dist/` |
 
 ---
@@ -133,5 +147,8 @@ Antes de implementar módulos de `agent/` o `providers/`, revisar:
 - **12.8** — Ciclo de vida MCP servers: arranque, reconexión con backoff ✅ implementado
 - **12.8.1** — Carpeta gestionada de MCP servers ✅ implementado
 - **12.10** — Carga lazy ONNX con warm-up opcional ✅ implementado
-- **12.12** — Señales del proceso y cleanup por etapa
+- **12.12** — Señales del proceso y cleanup por etapa ✅ implementado
 - **12.13** — `stratum init` / `/init`: comando-plantilla `INITIALIZE_PROMPT` ✅ implementado
+- **12.14** — SSH nativo: pool, host keys, auth, jump hosts, límites de salida, auditoría ✅ implementado
+- **12.15** — Modo Plan & Execute en 3 fases ✅ implementado
+- **12.16** — Multi-agente: delegación, presupuestos, paralelismo ✅ implementado

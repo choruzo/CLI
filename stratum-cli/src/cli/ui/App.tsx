@@ -626,9 +626,11 @@ interface Props {
   version: string;
   mcpManager?: McpManager;
   logoPreRendered: boolean;
+  /** Id de la sesión en curso; se propaga al ToolContext para la auditoría SSH. */
+  sessionId?: string;
 }
 
-export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
+export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: Props) {
   const { exit } = useApp();
 
   // Getter de un solo uso: devuelve el plan reanudado (si lo hay) para init de UI.
@@ -731,6 +733,7 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
 
   const getRunOptions = useCallback((): Partial<RunOptions> => {
     const opts: Partial<RunOptions> = {
+      sessionId,
       destructivePolicy: allowAllRef.current ? 'allow' : 'ask',
       onConfirmDestructive,
       onSubagentPersist: (rec) =>
@@ -754,7 +757,7 @@ export function App({ agent, version, mcpManager, logoPreRendered }: Props) {
       }
     }
     return opts;
-  }, [onConfirmDestructive, resumeInfo, agent]);
+  }, [onConfirmDestructive, resumeInfo, agent, sessionId]);
 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 

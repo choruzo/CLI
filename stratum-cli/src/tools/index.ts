@@ -14,8 +14,9 @@ import { recallDecisionsTool } from './memory/recall-decisions.js';
 import { presentPlanTool } from './plan/present-plan.js';
 import { updatePlanTool } from './plan/update-plan.js';
 import { delegateTaskTool } from './agent/delegate.js';
+import { registerSshTools } from './ssh/index.js';
 
-export function registerBuiltinTools(registry: ToolRegistry, _config: StratumConfig): void {
+export function registerBuiltinTools(registry: ToolRegistry, config: StratumConfig): void {
   registry.register(readFileTool);
   registry.register(writeFileTool);
   registry.register(editFileTool);
@@ -32,4 +33,6 @@ export function registerBuiltinTools(registry: ToolRegistry, _config: StratumCon
   registry.register(updatePlanTool);
   // Hito 8 — Multi-agente: tool de control de delegación interceptada por el loop.
   registry.register(delegateTaskTool);
+  // Hito 9 — SSH nativo: solo si hay inventario configurado (§12.14).
+  registerSshTools(registry, config);
 }

@@ -868,6 +868,7 @@ export class ReactLoop {
           signal,
           cwd: process.cwd(),
           config: this.config,
+          sessionId: opts?.sessionId,
           allowDestructive: opts?.allowDestructive,
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
@@ -1142,6 +1143,7 @@ export class ReactLoop {
               config: this.config,
               parentSignal: signal,
               parentDestructivePolicy: parentPolicy,
+              sessionId: opts?.sessionId,
               onConfirmDestructive: wrappedConfirm,
               makeRouter: opts?.makeSubagentRouter
                 ? () => opts.makeSubagentRouter!(job.profile)

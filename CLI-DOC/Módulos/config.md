@@ -1,8 +1,8 @@
 ---
-date: 2026-05-29
-tags: [módulo, config, zod, stratum-cli]
+date: 2026-08-27
+tags: [módulo, config, zod, ssh, stratum-cli]
 status: implementado
-hito: 0-2
+hito: 0-9
 ---
 
 # Módulo config — Configuración
@@ -55,6 +55,23 @@ Implementado en Hito 0, ampliado en Hito 2. Ver [[Arquitectura]] y [[Roadmap]].
   "tools": {
     "confirmDestructive": true,
     "bashTimeout": 30000
+  },
+  "agents": {
+    "defaultProfile": "general",
+    "maxConcurrency": 1
+  },
+  "ssh": {
+    "auditLog": true,
+    "hosts": {
+      "prod-web": {
+        "host": "192.168.1.10",
+        "port": 22,
+        "user": "javi",
+        "privateKey": "~/.ssh/id_ed25519",
+        "jumpHost": "bastion",
+        "confirmAll": true
+      }
+    }
   }
 }
 ```
@@ -95,6 +112,48 @@ resolveMemoryPaths(config): MemoryPaths
 |-------|---------|-------------|
 | `agent.compressionThreshold` | `0.8` | Umbral (0–1) para activar compresión de contexto |
 | `agent.compressorModel` | _(activo)_ | Modelo alternativo para el LLM call de compresión; si no se define, usa el provider activo |
+
+---
+
+## Inventario SSH (Hito 9, §12.14)
+
+`ssh` es la única sección **opcional sin default**: si no existe, las tools SSH no se registran en el
+`ToolRegistry` y el modelo no las ve. `auditLog` acepta `true` (→ `~/.stratum/logs/ssh-audit.jsonl`),
+una ruta, o `false`.
+
+| Campo de host | Default | Descripción |
+|---------------|---------|-------------|
+| `host`, `port`, `user` | — / `22` / — | Destino y usuario |
+| `privateKey`, `passphrase` | — | Clave privada; `~` se expande. `passphrase` acepta `env:<VAR>` |
+| `useAgent` | `false` | Autenticar contra el ssh-agent del sistema (no es agent forwarding) |
+| `password` | — | Acepta `env:<VAR>` o valor literal |
+| `jumpHost` | — | Alias de otro host como bastión |
+| `hostKeyPolicy` | `tofu` | `tofu` / `strict` / `insecure` |
+| `hostKeyHash` | — | Fingerprint pinneado; **obligatorio** con `strict` |
+| `confirmAll` | `false` | Confirmación en TODOS los comandos del host |
+| `connectTimeout` | `10000` | ms para establecer la conexión |
+| `commandTimeout` | `30000` | ms por defecto por comando (override por tool call) |
+| `maxBytes` | `262144` | Tope de stdout+stderr (override por tool call) |
+
+### Validación temprana (`superRefine`)
+
+El schema rechaza en carga lo que el pool no podría arreglar en runtime:
+
+- un host sin **ningún** método de autenticación (`privateKey` / `useAgent` / `password`)
+- `hostKeyPolicy: "strict"` sin `hostKeyHash`
+- un `jumpHost` que no existe en `ssh.hosts`, un **ciclo**, o una cadena de más de 2 saltos
+
+Fallar aquí y no al conectar evita que un ciclo de `jumpHost` cuelgue el pool.
+
+### Resolución de secretos
+
+```
+"env:<VAR>"   → process.env[VAR]
+"<literal>"   → el valor tal cual (no recomendado: queda en disco)
+```
+
+En ambos casos, si no se resuelve se prueba `STRATUM_SSH_<ALIAS>_SECRET`.
+**`keychain:` no está implementado** — devuelve un error que apunta a `env:`.
 
 ---
 

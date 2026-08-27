@@ -1,8 +1,8 @@
 ---
-date: 2026-06-22
-tags: [módulo, cli, ui, ink, stratum-cli]
+date: 2026-08-27
+tags: [módulo, cli, ui, ink, ssh, stratum-cli]
 status: implementado
-hito: 1-5
+hito: 1-9
 ---
 
 # Módulo cli — Comandos y UI
@@ -54,13 +54,15 @@ src/cli/
 | Comando | Subcomandos / flags | Descripción |
 |---------|---------------------|-------------|
 | `chat` | `--provider <name>`, `--resume <id>` | REPL interactivo (Ink) |
-| `run` | `--allow-destructive` / `--deny-destructive` | One-shot plain-text |
+| `run` | `--allow-destructive` / `--deny-destructive`, `--plan`, `--yes` | One-shot plain-text |
 | `init` | `--force`, `--dry-run` | Genera/actualiza STRATUM.md (§12.13) |
 | `memory` | `list`, `search <q>`, `forget <id>`, `show` | Gestión de memoria |
 | `sessions` | `list`, `resume <id>`, `delete <id>`, `prune` | Historial de sesiones |
 | `config` | `get <key>`, `set <key> <value>` | Lectura/escritura de `.stratumrc.json` |
 | `provider` | `add`, `list`, `use <name>`, `remove <name>` | Gestión de providers (wizard en `add`) |
 | `mcp` | `list`, `install [server]` | Gestión de MCP servers |
+| `logs` | `path`, `tail [n]` | Fichero de logs JSONL (bug reports) |
+| `ssh` | `list`, `trust <alias>` | Inventario SSH y host keys (§12.14) |
 
 ---
 
@@ -183,6 +185,33 @@ Ver [[Módulos/sessions]] para la especificación completa.
 |-----------|-------------|
 | `list` | Lista MCP servers y su estado de conexión |
 | `install [server]` | Instala el `package` npm en la carpeta gestionada `~/.stratum/mcp/` |
+
+---
+
+## Comandos `stratum ssh` (Hito 9)
+
+Plain text sin UI Ink, como `stratum init`.
+
+| Subcomando | Descripción |
+|-----------|-------------|
+| `list` | Conecta a cada host del inventario **en paralelo** (acotado por su `connectTimeout`) y muestra estado y latencia reales |
+| `trust <alias>` | Conecta, muestra el fingerprint y pide confirmación por readline antes de guardarlo |
+| `trust <alias> --force` | Reemplaza la entrada almacenada (tras reinstalar el host) |
+| `trust <alias> --remove` | Elimina la entrada de `known_hosts.json` |
+
+```
+SSH hosts: 2 connected, 1 unreachable
+
+● bastion     javi@bastion.example.com:22   [connected, 42ms]
+● prod-web    javi@192.168.1.10:22          [connected, 118ms] (via bastion)
+○ dev-server  javi@10.0.0.5:22              [error: connect ETIMEDOUT]
+```
+
+Un host `tofu` sin entrada en `known_hosts` lleva el aviso
+`(host key sin confiar — usa: stratum ssh trust <alias>)`, pero **solo si la conexión llegó a ver la
+clave**: un `ECONNREFUSED` no dice nada sobre si la clave es de fiar.
+
+`trust` sin TTY deniega y sale con código 1 — nunca se confía en un host nuevo sin decisión humana.
 
 ---
 

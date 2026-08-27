@@ -9,8 +9,9 @@ import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
+import { closeSshPool } from '../../tools/ssh/index.js';
 import { StratumAgent } from '../../agent/core.js';
-import { SessionStore } from '../../session/store.js';
+import { SessionStore, generateSessionId } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
 import { animateStartupLogo } from '../ui/startup-logo-animation.js';
@@ -106,7 +107,9 @@ export const chatCommand = new Command('chat')
       const paths = resolveMemoryPaths(config);
       const store = new SessionStore(paths.sessionsDir);
 
-      let sessionId: string | undefined;
+      // El id se genera al arrancar, no al guardar: así lo que se escribe fuera
+      // de la sesión durante el turno (auditoría SSH, §12.14) puede correlacionarse.
+      let sessionId: string = generateSessionId();
       let sessionCreatedAt: string | undefined;
       let agentOptions = {};
 
@@ -181,7 +184,7 @@ export const chatCommand = new Command('chat')
       const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
       const { waitUntilExit } = render(
-        React.createElement(App, { agent, version, mcpManager, logoPreRendered }),
+        React.createElement(App, { agent, version, mcpManager, logoPreRendered, sessionId }),
       );
 
       try {
@@ -191,6 +194,9 @@ export const chatCommand = new Command('chat')
       }
 
       await mcpManager.shutdownAll();
+      // Hito 9 (§12.12): sin cerrar las conexiones SSH, sus sockets mantienen
+      // vivo el event loop y el proceso nunca termina.
+      await closeSshPool();
       await flushLogging();
 
       // -----------------------------------------------------------------------

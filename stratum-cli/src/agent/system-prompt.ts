@@ -176,8 +176,40 @@ Respond in the same language the user uses. If the user writes in Spanish, respo
 // Ensamblaje
 // ---------------------------------------------------------------------------
 
+/**
+ * Bloque de inventario SSH (Hito 9, §12.14). Solo se inyecta cuando hay hosts
+ * configurados. Además de listarlos, documenta las limitaciones que el modelo
+ * no puede descubrir por sí mismo: sudo sin TTY, PTY mezclando streams, y
+ * comandos que no terminan.
+ */
+function buildSshBlock(config: StratumConfig): string {
+  const hosts = config.ssh?.hosts;
+  if (!hosts || Object.keys(hosts).length === 0) return '';
+
+  const rows = Object.entries(hosts).map(([alias, host]) => {
+    const flags: string[] = [];
+    if (host.jumpHost) flags.push(`via ${host.jumpHost}`);
+    if (host.confirmAll) flags.push('confirmAll');
+    const suffix = flags.length > 0 ? ` (${flags.join(', ')})` : '';
+    return `- ${alias} — ${host.user}@${host.host}:${host.port}${suffix}`;
+  });
+
+  return `\n\n# Remote hosts (SSH)
+You can run commands and transfer files on these hosts with ssh_exec, ssh_upload and ssh_download.
+Always refer to a host by its inventory alias; never by IP or hostname.
+
+${rows.join('\n')}
+
+Operational limits you must respect:
+- sudo needs NOPASSWD on the host, or "sudo -S <cmd>" with the password in the stdin parameter. A plain sudo that prompts will hang until the timeout.
+- pty: true merges stdout and stderr into one stream and makes the exit code unreliable. Use it only for commands that truly require a TTY.
+- Avoid commands that never terminate (tail -f, watch, top): they are killed when the timeout expires and you get truncated output.
+- Long output is truncated to protect the context. Narrow it at the source with head, tail or grep instead of raising maxBytes.
+- Hosts marked confirmAll ask the user before every single command, including read-only ones. Batch your work on those hosts.`;
+}
+
 export function buildSystemPrompt(
-  _config: StratumConfig,
+  config: StratumConfig,
   memory?: string,
   env?: SystemPromptEnv,
 ): string {
@@ -189,6 +221,8 @@ export function buildSystemPrompt(
 You have two tools backed by long-term memory that persists across sessions:
 - store_decision: use it proactively when you make a significant technical decision (choosing between alternatives, defining a project convention, fixing a non-trivial bug) or when the user states a preference that should persist. Think of it as writing in your long-term notebook. Do NOT use it for routine actions or intermediate steps.
 - recall_decisions: use it to retrieve past decisions semantically before acting, when you need to remember why something was chosen, a project convention, a previous bug fix, or a user preference.`;
+
+  prompt += buildSshBlock(config);
 
   if (memory && memory.trim()) {
     prompt += `\n\n## Project Memory\nThe following is persistent context for this project (from STRATUM.md). Honor these instructions and conventions:\n\n${memory.trim()}`;

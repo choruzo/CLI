@@ -33,6 +33,128 @@ const McpServerSchema = z
     path: ['command'],
   });
 
+/**
+ * Host del inventario SSH (Hito 9, §12.14). Un alias del `ssh.hosts` de
+ * `.stratumrc.json` es todo lo que el LLM ve: nunca manipula credenciales.
+ */
+const SSHHostSchema = z.object({
+  host: z.string(),
+  port: z.number().int().positive().default(22),
+  user: z.string(),
+
+  // --- Auth: al menos uno requerido (validado en el superRefine de abajo) ---
+  /** Ruta al fichero de clave privada. `~` se expande al home del usuario. */
+  privateKey: z.string().optional(),
+  /** Passphrase de la clave privada. Prefijo `env:<VAR>` o valor literal. */
+  passphrase: z.string().optional(),
+  /**
+   * Autenticar contra el ssh-agent del sistema (`SSH_AUTH_SOCK` en POSIX,
+   * named pipe de OpenSSH o Pageant en Windows). No confundir con agent
+   * forwarding (reenviar el agente al host remoto), no soportado en v1.
+   */
+  useAgent: z.boolean().optional(),
+  /** Password. Prefijo `env:<VAR>` o valor literal (no recomendado). */
+  password: z.string().optional(),
+
+  // --- Topología ---
+  /** Alias de otro host del inventario usado como bastión. Profundidad máx. 2. */
+  jumpHost: z.string().optional(),
+
+  // --- Verificación de host key ---
+  /**
+   * `tofu` (default): la primera conexión pregunta y persiste en
+   * `~/.stratum/known_hosts.json`; después verifica en silencio.
+   * `strict`: exige `hostKeyHash` y rechaza cualquier discrepancia.
+   * `insecure`: sin verificación (solo lab); emite warning al conectar.
+   */
+  hostKeyPolicy: z.enum(['tofu', 'strict', 'insecure']).default('tofu'),
+  /** Fingerprint pinneado (`SHA256:<base64>`). Requerido con `strict`. */
+  hostKeyHash: z.string().optional(),
+
+  // --- Seguridad operacional ---
+  /**
+   * Requerir confirmación del usuario en TODOS los `ssh_exec` de este host,
+   * sea cual sea el comando. Es la defensa real en producción: la detección
+   * de patrones destructivos es una red blanda y trivialmente evasible.
+   */
+  confirmAll: z.boolean().default(false),
+
+  // --- Timeouts y salida ---
+  /** ms para establecer la conexión SSH. */
+  connectTimeout: z.number().int().positive().default(10000),
+  /** ms por defecto para cada comando (override por tool call). */
+  commandTimeout: z.number().int().positive().default(30000),
+  /** Tope de stdout+stderr en bytes (override por tool call). */
+  maxBytes: z
+    .number()
+    .int()
+    .positive()
+    .default(256 * 1024),
+});
+
+const SSHConfigSchema = z
+  .object({
+    hosts: z.record(z.string(), SSHHostSchema).default({}),
+    /**
+     * `true` → `~/.stratum/logs/ssh-audit.jsonl`; string → ruta personalizada;
+     * `false` → deshabilitado.
+     */
+    auditLog: z.union([z.boolean(), z.string()]).default(true),
+  })
+  .superRefine((cfg, ctx) => {
+    for (const [alias, host] of Object.entries(cfg.hosts)) {
+      if (!host.privateKey && !host.useAgent && !host.password) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['hosts', alias],
+          message: `El host "${alias}" no declara ningún método de autenticación. Define privateKey, useAgent o password.`,
+        });
+      }
+      if (host.hostKeyPolicy === 'strict' && !host.hostKeyHash) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['hosts', alias, 'hostKeyHash'],
+          message: `El host "${alias}" usa hostKeyPolicy "strict" pero no define hostKeyHash.`,
+        });
+      }
+
+      // Cadena de jump hosts: alias existente, sin ciclos y profundidad máx. 2
+      // (§12.14). Se valida aquí para que un ciclo no cuelgue el pool en runtime.
+      const seen = new Set<string>([alias]);
+      let current = host.jumpHost;
+      let depth = 0;
+      while (current !== undefined) {
+        if (seen.has(current)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['hosts', alias, 'jumpHost'],
+            message: `Ciclo de jumpHost detectado en "${alias}" → "${current}".`,
+          });
+          break;
+        }
+        const next = cfg.hosts[current];
+        if (!next) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['hosts', alias, 'jumpHost'],
+            message: `El host "${alias}" declara jumpHost "${current}", que no existe en ssh.hosts.`,
+          });
+          break;
+        }
+        if (++depth > 2) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['hosts', alias, 'jumpHost'],
+            message: `La cadena de jumpHost de "${alias}" excede la profundidad máxima de 2.`,
+          });
+          break;
+        }
+        seen.add(current);
+        current = next.jumpHost;
+      }
+    }
+  });
+
 export const StratumConfigSchema = z.object({
   provider: z
     .object({
@@ -199,8 +321,17 @@ export const StratumConfigSchema = z.object({
       maxConcurrency: z.number().int().positive().default(1),
     })
     .default({}),
+
+  /**
+   * Inventario SSH (Hito 9, §12.14). Deliberadamente **opcional** y sin
+   * `.default({})`: si no hay sección `ssh`, las tools SSH no se registran en
+   * el `ToolRegistry` y el LLM no las ve.
+   */
+  ssh: SSHConfigSchema.optional(),
 });
 
 export type StratumConfig = z.infer<typeof StratumConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type McpServer = z.infer<typeof McpServerSchema>;
+export type SSHHostConfig = z.infer<typeof SSHHostSchema>;
+export type SSHConfig = z.infer<typeof SSHConfigSchema>;

@@ -174,6 +174,8 @@ export interface ToolContext {
   signal: AbortSignal;
   cwd: string;
   config: StratumConfig;
+  /** Id de la sesión activa, cuando lo hay. Lo usa el log de auditoría SSH (§12.14). */
+  sessionId?: string;
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   confirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
@@ -203,6 +205,8 @@ export interface ToolCallReady {
 
 export interface RunOptions {
   signal?: AbortSignal;
+  /** Id de la sesión activa; se propaga al `ToolContext` para la auditoría SSH. */
+  sessionId?: string;
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   onConfirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;

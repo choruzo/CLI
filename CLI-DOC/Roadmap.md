@@ -1,5 +1,5 @@
 ---
-date: 2026-06-16
+date: 2026-08-27
 tags: [roadmap, hitos, stratum-cli]
 status: en-progreso
 ---
@@ -19,9 +19,10 @@ status: en-progreso
 | [[#Hito 4]] | MCP Client | ~4 días | ✅ Completado |
 | [[#Hito 4.1]] | MCP carpeta gestionada + arranque no bloqueante | ~2 días | ✅ Completado |
 | [[#Hito 5]] | Memory Layers 2 y 3 | ~6 días | ✅ Completado |
-| [[#Hito 6]] | Multi-provider Polishing | ~3 días | ⏳ Siguiente |
-| [[#Hito 7]] | Plan & Execute Mode | ~7 días | ⏳ Pendiente |
-| [[#Hito 8]] | Multi-agent Foundation | ~10 días | ⏳ Pendiente |
+| [[#Hito 6]] | Multi-provider Polishing | ~3 días | ✅ Completado |
+| [[#Hito 7]] | Plan & Execute Mode | ~7 días | ✅ Completado |
+| [[#Hito 8]] | Multi-agent Foundation | ~10 días | ✅ Completado |
+| [[#Hito 9]] | SSH Nativo | ~7 días | ✅ Completado |
 
 ---
 
@@ -168,28 +169,76 @@ Ver [[Módulos/memory]], [[Módulos/sessions]], [[Módulos/agent]], [[Módulos/c
 
 ---
 
-## Hito 6 — Multi-provider Polishing ⏳ (siguiente)
+## Hito 6 — Multi-provider Polishing ✅
 
-- [ ] Soporte Ollama completo (listado de modelos, pull)
-- [ ] Soporte llama.cpp server / vLLM / LiteLLM
-- [ ] Fallback automático a provider secundario
-- [ ] Provider health check al startup
-- [ ] Comando `stratum providers list`
+- [x] Backends Ollama / vLLM / llama.cpp / LiteLLM vía el cliente OpenAI-compatible único
+- [x] Detección de capacidades (`detectCapabilities` / `classifyBackendByUrl` en `providers/utils.ts`)
+- [x] Fallback automático por orden en `ProviderRouter`, con notificación inline `provider_fallback`
+- [x] Health check con polling en background (~30 s) que pinta el `●` del status bar
+- [x] `/provider <name>` y `/model` con descubrimiento de modelos en vivo
+- [x] `stratum providers` como alias de `stratum provider`
 
----
-
-## Hito 7 — Plan & Execute Mode ⏳
-
-- [ ] `Planner`: genera plan estructurado antes de ejecutar
-- [ ] Checkpoints de aprobación del usuario
-- [ ] Ejecución paso a paso con posibilidad de editar plan
-- [ ] Flag `--plan` en `stratum run`
+**Entregable:** cambiar de backend o de modelo sin reiniciar ni tocar `.stratumrc.json`. Ver [[Módulos/providers]].
 
 ---
 
-## Hito 8 — Multi-agent Foundation ⏳
+## Hito 7 — Plan & Execute Mode ✅
 
-- [ ] `Orchestrator`: agente principal que delega en subagentes
-- [ ] Spawning de subagentes con contexto aislado
-- [ ] Agentes especializados: `CodeAgent`, `ShellAgent`, `ResearchAgent`
-- [ ] Visualización de árbol de agentes en Ink
+> El diseño original (`Planner` con una llamada estructurada + checkpoints por paso)
+> **se descartó**. Igual que con `/init` en el Hito 2.5, la calidad emerge del loop
+> completo: el modo plan es el propio ReAct con el toolset restringido a read-only
+> más un tool de cierre. Ver §12.15.
+
+- [x] Tres fases en un mismo turno: exploración read-only → gate de aprobación → ejecución
+- [x] Tools de control `present_plan` / `update_plan`, interceptadas por el loop (no despachadas)
+- [x] Allowlist read-only en fase 1; toda tool mutante devuelve `tool_error` recuperable
+- [x] Aprobar-una-vez, sin checkpoints por paso (el control fino sigue siendo la confirmación destructiva)
+- [x] Persistencia incremental en `.stratum/plans/` — el plan es la fuente de verdad del progreso
+- [x] Reanudación: el paso que quedó `in_progress` se marca ambiguo y el agente lo verifica antes de darlo por hecho
+- [x] UI `<PlanView>` / `<PlanApproval>` y flag `--plan` en `stratum run`
+
+**Entregable:** planificar antes de tocar nada, con un plan que sobrevive a un cuelgue duro. Ver [[Módulos/agent]].
+
+---
+
+## Hito 8 — Multi-agent Foundation ✅
+
+> También aquí se descartó el diseño original: no hay clase `Orchestrator` ni clases
+> `CodeAgent`/`ShellAgent`/`ResearchAgent`. Los perfiles son **ficheros markdown con
+> frontmatter**, y la delegación es una tool de control más. Ver §12.16.
+
+**8A — Delegación mínima**
+- [x] Tool `delegate_task` interceptada por el loop; contexto **aislado** (el hijo no hereda el historial)
+- [x] `ProviderRouter` propio por hijo: un fallback del hijo no muta al padre
+- [x] Perfiles en `~/.stratum/agents/` y `<proyecto>/.stratum/agents/` (proyecto gana)
+- [x] Profundidad = 1: `delegate_task` está oculta a los subagentes
+
+**8B — Robustez**
+- [x] Presupuestos `maxIterations`/`timeoutMs` duros y `maxTokens` best-effort
+- [x] Persistencia en `.stratum/subagents/`; un hijo a medias queda `interrupted`
+- [x] Reanudación: el padre **verifica** antes de reintentar — un subagente no es idempotente
+
+**8C — UX y especialización**
+- [x] Ejecución paralela acotada por semáforo (`agents.maxConcurrency`) + mutex para TTY y memoria
+- [x] Evento `subagent_event` y árbol vivo `<AgentTree>` con tool calls anidados
+- [x] Inspector read-only `/subagents`
+- [x] Detección best-effort de conflictos de fichero entre subagentes
+
+**Entregable:** tareas complejas repartidas entre subagentes por perfil, con resultados agregados.
+
+---
+
+## Hito 9 — SSH Nativo ✅
+
+- [x] `SSHConnectionPool`: conexiones persistentes por alias, apertura lazy, `inflight` como mutex de establecimiento
+- [x] Tool `ssh_exec` con `pty`, `stdin`, `cwd`, límite de salida y timeout que matan el proceso remoto
+- [x] Tools `ssh_upload` / `ssh_download` vía SFTP
+- [x] Inventario `ssh.hosts` en `.stratumrc.json` + validación Zod temprana (auth, `strict`, cadena de `jumpHost`)
+- [x] Autenticación: clave privada (con passphrase), ssh-agent del sistema, password, jump hosts
+- [x] Verificación de host key: TOFU / `strict` / `insecure`, con `~/.stratum/known_hosts.json`
+- [x] Reconexión con backoff 2s → 4s → 8s para conexiones establecidas que se caen
+- [x] `stratum ssh list` (conectividad en vivo) y `stratum ssh trust`
+- [x] Limpieza de conexiones en el ciclo de SIGINT (§12.12)
+- [x] Log de auditoría JSONL con rotación a 10 MB
+
+**Entregable:** administrar infraestructura remota desde el loop ReAct, sin el binario `ssh` del sistema. Ver [[Módulos/tools]] y [[Diario/Hito-9]].

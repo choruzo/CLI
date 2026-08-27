@@ -89,5 +89,30 @@
       "maxBytes": 5242880,
       "maxFiles": 5
     }
+  },
+  "ssh": {
+    "auditLog": true,
+    "hosts": {
+      "bastion": {
+        "host": "bastion.example.com",
+        "port": 22,
+        "user": "javi",
+        "privateKey": "~/.ssh/id_ed25519"
+      },
+      "prod-web": {
+        "host": "192.168.1.10",
+        "port": 22,
+        "user": "javi",
+        "privateKey": "~/.ssh/id_ed25519",
+        "jumpHost": "bastion",
+        "confirmAll": true
+      },
+      "dev-server": {
+        "host": "10.0.0.5",
+        "port": 22,
+        "user": "javi",
+        "useAgent": true
+      }
+    }
   }
 }

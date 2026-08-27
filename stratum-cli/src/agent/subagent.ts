@@ -40,6 +40,11 @@ export interface RunSubagentOptions {
   parentSignal: AbortSignal;
   /** Política destructiva del padre, usada si el perfil no define una propia. */
   parentDestructivePolicy?: DestructivePolicy;
+  /**
+   * Id de sesión del padre. El hijo lo hereda para que lo que escriba fuera de
+   * la sesión (auditoría SSH, §12.14) se atribuya a la misma conversación.
+   */
+  sessionId?: string;
   /** Callback de confirmación del padre: el subagente nunca posee la TTY (§12.16). */
   onConfirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
   /**
@@ -171,6 +176,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
 
   const runOpts: RunOptions = {
     signal,
+    sessionId: opts.sessionId,
     destructivePolicy: profile.destructivePolicy ?? opts.parentDestructivePolicy,
     onConfirmDestructive: opts.onConfirmDestructive,
     maxIterations: profile.budget.maxIterations,

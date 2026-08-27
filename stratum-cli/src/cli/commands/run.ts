@@ -11,11 +11,13 @@ import type {
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
+import { generateSessionId } from '../../session/store.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
+import { closeSshPool } from '../../tools/ssh/index.js';
 import { StratumAgent } from '../../agent/core.js';
 import {
   configureLogging,
@@ -203,6 +205,9 @@ export const runCommand = new Command('run')
       try {
         for await (const event of agent.run(input, {
           signal: controller.signal,
+          // `run` es one-shot y no persiste sesión, pero el id sí correlaciona
+          // en el log de auditoría SSH los comandos de una misma invocación.
+          sessionId: generateSessionId(),
           allowDestructive: opts.allowDestructive,
           destructivePolicy: policy,
           onConfirmDestructive: policy === 'ask' ? confirmDestructive : undefined,
@@ -330,6 +335,7 @@ export const runCommand = new Command('run')
         }
       } catch (err) {
         await mcpManager.shutdownAll();
+        await closeSshPool();
         getLogger('cli').error('run aborted with error', { err });
         await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
@@ -337,6 +343,8 @@ export const runCommand = new Command('run')
       }
 
       await mcpManager.shutdownAll();
+      // Hito 9 (§12.12): cerrar los sockets SSH antes de salir.
+      await closeSshPool();
       await flushLogging();
 
       if (controller.signal.aborted) {

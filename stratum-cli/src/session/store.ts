@@ -21,7 +21,12 @@ function randomAlpha(len: number): string {
   return result;
 }
 
-function generateSessionId(): string {
+/**
+ * Id de sesión `sess_YYYYMMDD_HHMMSS_<rnd>`. Se exporta porque `chat` lo genera
+ * al arrancar —no al guardar— para poder correlacionar desde el primer turno
+ * lo que se escribe fuera de la sesión (p. ej. el log de auditoría SSH, §12.14).
+ */
+export function generateSessionId(): string {
   const now = new Date();
   const date = `${now.getFullYear()}${pad2(now.getMonth() + 1)}${pad2(now.getDate())}`;
   const time = `${pad2(now.getHours())}${pad2(now.getMinutes())}${pad2(now.getSeconds())}`;

@@ -758,16 +758,18 @@ Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `C
 
 El diferenciador operacional de Stratum: capacidad SSH integrada en el loop ReAct sin depender del binario `ssh` del sistema. El agente puede administrar infraestructura remota con la misma naturalidad con que maneja archivos locales.
 
-- [ ] `SSHConnectionPool`: pool de conexiones persistentes por alias de host
-- [ ] Tool `ssh_exec`: ejecución remota con detección de patrones destructivos
-- [ ] Tools `ssh_upload` / `ssh_download`: transferencia de ficheros vía SFTP
-- [ ] Inventario de hosts en `.stratumrc.json` + Zod schema de validación
-- [ ] Autenticación: clave privada, SSH agent forwarding, password (keychain SO), jump hosts
-- [ ] Reconexión automática con backoff si la conexión cae durante la sesión
-- [ ] Comando `stratum ssh list` — lista hosts con estado de conectividad en tiempo real
-- [ ] Limpieza de conexiones en el ciclo de SIGINT (integrado en §12.12)
+- [x] `SSHConnectionPool`: pool de conexiones persistentes por alias de host (`pool.ts`, mapa `inflight` como mutex de establecimiento)
+- [x] Tool `ssh_exec`: ejecución remota con detección de patrones destructivos (`exec.ts`, reutiliza `commandIsDestructive` de `bash`)
+- [x] Tools `ssh_upload` / `ssh_download`: transferencia de ficheros vía SFTP (`sftp.ts`)
+- [x] Inventario de hosts en `.stratumrc.json` + Zod schema de validación (`SSHHostSchema`, con `superRefine` de auth/strict/jumpHost)
+- [x] Autenticación: clave privada (con passphrase), SSH agent del sistema, password, jump hosts. Secretos vía `env:` (ver nota sobre `keychain:`)
+- [x] Reconexión automática con backoff 2s → 4s → 8s si la conexión cae durante la sesión
+- [x] Comando `stratum ssh list` — lista hosts con estado de conectividad en tiempo real (+ `stratum ssh trust`)
+- [x] Limpieza de conexiones en el ciclo de SIGINT (`closeSshPool` en `chat`/`run`, integrado en §12.12)
+- [x] Verificación de host key (TOFU / `strict` / `insecure`) con `~/.stratum/known_hosts.json`
+- [x] Log de auditoría JSONL con rotación a 10 MB
 
-> **UI:** Adaptar el `ToolCallBlock` para mostrar el host remoto como contexto en las tools SSH (icono de servidor + alias). Mostrar un indicador de latencia en el resultado de `ssh_exec` cuando `durationMs > 1000`. El comando `stratum ssh list` funciona sin UI Ink (plain text), igual que `stratum init`.
+> **UI:** ✅ *Implementado* (**§5.8** de STRATUM_UI_SPECIFICATION.md). `<ToolCallBlock>` muestra el host remoto como contexto en las tools SSH (`⌗ alias` en los cuatro estados) e indica la latencia pintando la duración en `warning` cuando `durationMs > 1000`. Las confirmaciones (patrón destructivo, `confirmAll` y gate TOFU) reutilizan `<DestructiveConfirm>` de §12. El comando `stratum ssh list` funciona sin UI Ink (plain text), igual que `stratum init`.
 
 **Entregable:** El agente puede ejecutar comandos y transferir ficheros en hosts remotos del inventario, sin binarios del sistema. Administración de infraestructura VMware/Linux desde el loop ReAct.
 
@@ -1558,6 +1560,13 @@ En `/init` (chat), los `text_delta` no se renderizan durante la exploración par
 
 Stratum no invoca el binario `ssh` del sistema. Todo el protocolo SSH corre dentro del proceso Node.js, garantizando portabilidad (Windows, Linux, macOS) y control total sobre el ciclo de vida de las conexiones.
 
+> **Desviaciones de esta spec en la implementación del Hito 9** (cerrado 2026-08-26):
+>
+> 1. **`keychain:` no está implementado.** `keytar` es una dependencia nativa sin mantenimiento activo y su coste de instalación no compensa. El resolvedor de secretos (`inventory.ts`) soporta `env:<VAR>`, el valor literal y el fallback `STRATUM_SSH_<ALIAS>_SECRET`; un `keychain:` en la config devuelve un error que explica la alternativa en vez de fallar en silencio.
+> 2. **`ssh_exec` usa `isDestructive()`, no `destructive: true`.** El snippet de abajo escribe `destructive: true` pero describe "confirmar *si detecta* patrones peligrosos"; en el `ToolRegistry` real, `destructive: true` significa confirmar SIEMPRE. La traducción fiel al dispatcher existente es el predicado dinámico `isDestructive(params, ctx)`, que confirma cuando el host lleva `confirmAll` o cuando el comando encaja con `tools.destructivePatterns` (reutilizando `commandIsDestructive` de `tools/shell/bash.ts`).
+> 3. **El gate TOFU reutiliza `ToolContext.confirmDestructive`** en vez de un canal propio. Ese callback ya está cableado a `<DestructiveConfirm>` en el chat Ink, a readline en `stratum run` y a deny automático sin TTY, así que el comportamiento correcto en CI sale gratis. `allow-all` (`!`) se interpreta como "aprobar **este** host": confiar en un fingerprint nunca se extiende al siguiente.
+> 4. **`ssh2` va en `external` de `tsup`**: resuelve su binding nativo opcional con requires dinámicos y bundlearlo rompe esa resolución. Además, el detector de exports CJS de Node reconoce `Client` como named export pero no `Server` ni `utils` — el código de producción solo usa `Client`.
+
 ---
 
 #### Tools disponibles
@@ -1991,6 +2000,13 @@ Todos los comandos remotos ejecutados se registran en `~/.stratum/logs/ssh-audit
 ```
 
 - Rotación por tamaño: 10 MB → `ssh-audit.jsonl`
+
+El `sessionId` viaja por `RunOptions` → `ToolContext`. Para que exista desde el primer turno, `chat` genera el id **al arrancar la sesión**, no al guardarla (antes del Hito 9 se generaba dentro de `SessionStore.save`); `stratum run`, que es one-shot y no persiste sesión, usa uno efímero que correlaciona los comandos de una misma invocación; y los subagentes heredan el del padre, de modo que lo que ejecuta un hijo se atribuye a la misma conversación.
+
+**Trampas de `ssh2` a no re-introducir** (ambas descubiertas verificando el CLI compilado, no por los tests):
+
+1. `ssh2` emite `error` de forma **asíncrona** incluso después de que la promesa de conexión se haya resuelto o rechazado (típicamente `Connection lost before handshake` tras un `destroy`). Un `error` sin listener en un `EventEmitter` **tumba el proceso entero**: el listener debe montarse antes de `connect()` y ser permanente, distinguiendo internamente si la promesa ya se resolvió.
+2. El singleton del pool no puede sustituirse sin cerrar el anterior: sus sockets siguen vivos y mantienen abierto el event loop.
 
 ---
 

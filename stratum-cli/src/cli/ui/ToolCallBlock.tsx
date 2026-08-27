@@ -18,16 +18,51 @@ export interface ToolCallState {
 const SPINNER_FRAMES = ['◌', '◎', '●', '◉', '○'];
 const MAX_EXPANDED_LINES = 10;
 
+/** Umbral de latencia SSH que se resalta en el bloque (UI §5.8). */
+const SLOW_MS = 1000;
+
+/**
+ * Alias del host remoto en las tools SSH (UI §5.8). Devuelve null mientras la
+ * tool call se está parseando y `input` aún no existe: el bloque se renderiza
+ * entonces sin prefijo, sin reservar hueco.
+ */
+function sshHostOf(state: ToolCallState): string | null {
+  if (!state.name.startsWith('ssh_')) return null;
+  const host = state.input?.host;
+  return typeof host === 'string' && host ? host : null;
+}
+
+function truncateLabel(value: string): string {
+  return value.length > 50 ? value.slice(0, 47) + '...' : value;
+}
+
 function formatInput(state: ToolCallState): string {
   const src = state.input ?? {};
   const keys = Object.keys(src);
   if (keys.length === 0) return '';
-  const first = String(src[keys[0]!] ?? '');
-  return first.length > 50 ? first.slice(0, 47) + '...' : first;
+
+  // Tools SSH (UI §5.8): la primera clave es siempre `host`, que ya va en el
+  // prefijo. Mostrar en su lugar lo que de verdad identifica la operación.
+  if (state.name.startsWith('ssh_')) {
+    if (typeof src.command === 'string') return truncateLabel(src.command);
+    const from = state.name === 'ssh_upload' ? src.localPath : src.remotePath;
+    const to = state.name === 'ssh_upload' ? src.remotePath : src.localPath;
+    if (typeof from === 'string' && typeof to === 'string') {
+      return truncateLabel(`${from} → ${to}`);
+    }
+  }
+
+  return truncateLabel(String(src[keys[0]!] ?? ''));
 }
 
 function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
+}
+
+/** Prefijo `⌗ alias` para las tools SSH. */
+function HostTag({ alias }: { alias: string | null }) {
+  if (!alias) return null;
+  return <Text color={theme.accent}> ⌗ {alias}</Text>;
 }
 
 interface Props {
@@ -80,6 +115,7 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
   }, [state.status]);
 
   const focusPrefix = focused ? <Text color={theme.accent}>▶ </Text> : null;
+  const sshHost = sshHostOf(state);
   const expandable =
     (state.status === 'completed' && !!state.output) ||
     (state.status === 'error' && !!state.errorMsg);
@@ -91,6 +127,7 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
         {focusPrefix}
         <Text color={theme.textDisabled}>○ </Text>
         <Text color={theme.textFaint}>{state.name}</Text>
+        <HostTag alias={sshHost} />
         <Text color={theme.textFaint}> │ en cola...</Text>
       </Box>
     );
@@ -104,6 +141,7 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
         <Text color={theme.accent} bold>
           {state.name}
         </Text>
+        <HostTag alias={sshHost} />
         <Text color={theme.textFaint}> │ {formatDuration(elapsedMs)} │ </Text>
         <Text color={theme.textFaint} dimColor>
           {(state.input ? formatInput(state) : state.inputSoFar?.slice(0, 60)) ?? ''}
@@ -115,6 +153,9 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
   if (state.status === 'completed') {
     const dur = state.durationMs !== undefined ? formatDuration(state.durationMs) : '';
     const label = formatInput(state);
+    // Indicador de latencia (UI §5.8): una operación remota lenta es
+    // información operativa, no ruido.
+    const slow = (state.durationMs ?? 0) > SLOW_MS;
     return (
       <Box flexDirection="column" marginBottom={0}>
         <Box>
@@ -123,7 +164,8 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
           <Text color={theme.accent} bold>
             {state.name}
           </Text>
-          {dur && <Text color={theme.textFaint}> │ {dur}</Text>}
+          <HostTag alias={sshHost} />
+          {dur && <Text color={slow ? theme.warning : theme.textFaint}> │ {dur}</Text>}
           {label && <Text color={theme.textFaint}> │ {label}</Text>}
           {chevron}
         </Box>
@@ -140,6 +182,7 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
         <Text color={theme.errorMuted} bold>
           {state.name}
         </Text>
+        <HostTag alias={sshHost} />
         <Text color={theme.errorMuted} dimColor>
           {' '}
           │ {(state.errorMsg ?? 'error').split('\n')[0]?.slice(0, 80)}

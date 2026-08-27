@@ -13,7 +13,10 @@ export default defineConfig({
   bundle: true,
   // Dependencias opcionales nativas / pesadas: nunca se bundlean. Se resuelven
   // en runtime vía import dinámico y degradan si no están instaladas.
-  external: ['@xenova/transformers', 'better-sqlite3', 'sqlite-vec'],
+  // `ssh2` no es opcional, pero resuelve su binding nativo (`cpu-features`,
+  // `sshcrypto.node`) con requires dinámicos y degrada a JS puro: bundlearlo
+  // rompe esa resolución.
+  external: ['@xenova/transformers', 'better-sqlite3', 'sqlite-vec', 'ssh2'],
   define: {
     __VERSION__: JSON.stringify(pkg.version),
   },

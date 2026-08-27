@@ -383,6 +383,15 @@ export function describeCall(call: ToolCallReady): string {
   if (call.name === 'bash' && typeof call.input.command === 'string') {
     return `bash: ${call.input.command}`;
   }
+  // Tools SSH (§12.14): el host va primero — antes de saber *qué* se ejecuta,
+  // el usuario necesita saber *dónde*.
+  if (call.name.startsWith('ssh_') && typeof call.input.host === 'string') {
+    const detail =
+      typeof call.input.command === 'string'
+        ? call.input.command
+        : [call.input.localPath, call.input.remotePath].filter(Boolean).join(' → ');
+    return `${call.name} [${call.input.host}]: ${detail}`;
+  }
   const compact = JSON.stringify(call.input);
   const summary = compact.length > 120 ? compact.slice(0, 117) + '...' : compact;
   return `${call.name}: ${summary}`;

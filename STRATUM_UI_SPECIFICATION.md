@@ -974,6 +974,87 @@ No aplica: `run` es no interactivo, sin desplegables ni vistas modales. La atrib
 
 ---
 
+### 5.8 Tool calls SSH — contexto de host remoto (Hito 9)
+
+Las tools `ssh_exec`, `ssh_upload` y `ssh_download` operan sobre **una máquina que no es la del usuario**. Un `rm -rf /var/cache` renderizado igual que un `bash` local es un fallo de diseño: el bloque debe decir *dónde* se ejecutó antes de decir *qué* se ejecutó. §5.8 extiende `<ToolCallBlock>` (§5.1) sin crear un componente nuevo.
+
+#### Prefijo de host
+
+El alias del inventario (`.stratumrc.json` → `ssh.hosts.<alias>`) se pinta con el icono de servidor `⌗` inmediatamente después del nombre de la tool, en `accent`, y está presente en **los cuatro estados**:
+
+```
+○ ssh_exec ⌗ prod-web │ en cola...
+◉ ssh_exec ⌗ prod-web │ 0.8s │ systemctl restart nginx
+✓ ssh_exec ⌗ prod-web │ 1.2s │ systemctl restart nginx ▸
+✗ ssh_exec ⌗ prod-web │ Permission denied (publickey) ▸
+```
+
+El alias se toma de `state.input.host`. Mientras la tool call se está parseando (`pending`/`running` con solo `inputSoFar`), el alias puede no estar disponible todavía: en ese caso el bloque se renderiza sin prefijo, sin hueco reservado.
+
+#### Indicador de latencia
+
+Una operación remota lenta es información operativa, no ruido. En estado `completed`, cuando `durationMs > 1000` la duración se pinta en `warning` en lugar de `textFaint`:
+
+| Duración | Color | Lectura |
+|---|---|---|
+| ≤ 1000 ms | `textFaint` | Latencia normal; no llama la atención. |
+| > 1000 ms | `warning` | Comando lento o enlace con latencia alta. |
+
+El umbral es el mismo para `ssh_exec` y para las transferencias SFTP, que se miden en su totalidad (conexión reutilizada + transferencia).
+
+#### Etiqueta de la línea
+
+`formatInput` (§5.1) muestra la **primera** clave del input, que en todas las tools SSH es `host` — duplicaría el alias que ya lleva el prefijo. Las tools SSH usan una clave preferente:
+
+| Tool | Clave mostrada |
+|---|---|
+| `ssh_exec` | `command` |
+| `ssh_upload` | `localPath → remotePath` |
+| `ssh_download` | `remotePath → localPath` |
+
+#### Confirmación
+
+Las confirmaciones SSH reutilizan `<DestructiveConfirm>` (§12) sin cambios de layout; solo cambia la `description`:
+
+```
+⚠  El agente quiere ejecutar un comando en prod-web [confirmAll: true]:
+   ssh_exec [prod-web]: ls -la /var/www/html
+
+   [Enter] Aprobar   [n] Denegar   [!] Aprobar todo
+```
+
+Se dispara en dos casos (§12.14): el comando encaja con `tools.destructivePatterns`, o el host lleva `confirmAll: true` — y entonces **cualquier** comando pide confirmación, incluido un `ls`.
+
+El mismo componente sirve para el gate **TOFU** de la primera conexión a un host, con la `description` en formato de fingerprint:
+
+```
+⚠  Host SSH nuevo: prod-web (192.168.1.10)
+   Fingerprint: SHA256:xK3m... (ssh-ed25519)
+   ¿Confiar y añadir a known_hosts?
+
+   [Enter] Confiar   [n] Abortar
+```
+
+`allow-all` (`!`) equivale aquí a **aprobar solo este host**: confiar en un fingerprint nunca implica confiar en los siguientes. Sin TTY (CI, salida a pipe) la respuesta es deny automático y la conexión aborta, igual que el resto de confirmaciones.
+
+Un **mismatch** de host key no es un gate: no se pregunta, se aborta con `tool_error` `recoverable: false`, y el mensaje de error instruye a usar `stratum ssh trust <alias> --force`.
+
+#### `stratum ssh list`
+
+Sin UI Ink, plain text a stdout, igual que `stratum init` (§12.13 del documento principal). Mismos iconos `●`/`○` que `stratum mcp list`:
+
+```
+SSH hosts: 2 connected, 1 unreachable
+
+● bastion     javi@bastion.example.com:22   [connected, 42ms]
+● prod-web    javi@192.168.1.10:22          [connected, 118ms] (via bastion)
+○ dev-server  javi@10.0.0.5:22              [error: connect ETIMEDOUT]
+```
+
+Un host aún no presente en `~/.stratum/known_hosts.json` se marca con `(host key sin confiar — usa: stratum ssh trust <alias>)`.
+
+---
+
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).
