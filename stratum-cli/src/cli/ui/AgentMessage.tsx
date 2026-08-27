@@ -6,6 +6,7 @@ import { SubagentBlock, type SubagentBlockState } from './SubagentBlock.js';
 import { AgentTree } from './AgentTree.js';
 import { StreamingText } from './StreamingText.js';
 import { MarkdownText } from './MarkdownText.js';
+import { InitProgressBlock, type InitStep } from './InitProgressBlock.js';
 
 interface Props {
   text: string;
@@ -21,6 +22,12 @@ interface Props {
   focusedBlockId?: string | null;
   /** ids de bloques con output expandido (Space). */
   expandedBlockIds?: ReadonlySet<string>;
+  /** Pasos de `/init` (§5.2); presente solo en el turno que ejecuta `/init`. */
+  initSteps?: InitStep[];
+  /** Resumen de `/init` una vez terminado: colapsa el bloque de progreso. */
+  initSummary?: string;
+  /** Bloques `⊙ thinking` (§11). Solo llegan con `/debug` activo. */
+  thinkingBlocks?: string[];
 }
 
 /**
@@ -37,9 +44,14 @@ export function AgentMessage({
   streaming,
   focusedBlockId,
   expandedBlockIds,
+  initSteps,
+  initSummary,
+  thinkingBlocks,
 }: Props) {
   const subs = subagents ?? [];
-  const hasContent = toolCalls.length > 0 || subs.length > 0 || text;
+  const isInit = initSteps !== undefined || initSummary !== undefined;
+  const hasContent =
+    toolCalls.length > 0 || subs.length > 0 || text || isInit || thinkingBlocks?.length;
   if (!hasContent) return null;
 
   return (
@@ -47,14 +59,25 @@ export function AgentMessage({
       <Text color={theme.accent} bold>
         Stratum
       </Text>
-      {toolCalls.map((tc) => (
-        <ToolCallBlock
-          key={tc.id}
-          state={tc}
-          focused={focusedBlockId === tc.id}
-          expanded={expandedBlockIds?.has(tc.id) ?? false}
-        />
+      {/* `/init` (§5.2): sus tool calls se representan como pasos del bloque de
+          progreso, no como <ToolCallBlock> sueltos. */}
+      {isInit && <InitProgressBlock steps={initSteps ?? []} summary={initSummary} />}
+      {thinkingBlocks?.map((t, i) => (
+        <Box key={`think-${i}`} marginLeft={2}>
+          <Text color={theme.textDisabled} dimColor wrap="truncate-end">
+            ⊙ thinking {t.replace(/\s+/g, ' ').trim()}
+          </Text>
+        </Box>
       ))}
+      {!isInit &&
+        toolCalls.map((tc) => (
+          <ToolCallBlock
+            key={tc.id}
+            state={tc}
+            focused={focusedBlockId === tc.id}
+            expanded={expandedBlockIds?.has(tc.id) ?? false}
+          />
+        ))}
       {/* Hito 8C: >1 subagente en el turno ⇒ árbol vivo; 1 solo ⇒ bloque plano (§5.6). */}
       {subs.length > 1 ? (
         <AgentTree

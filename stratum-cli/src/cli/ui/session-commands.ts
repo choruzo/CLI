@@ -1,7 +1,8 @@
 /**
  * Registro central de /comandos de sesión (UI §5.2).
- * Solo se listan comandos implementados; los hitos siguientes añaden aquí
- * los suyos (/tools en H4, /memory list|search|forget en H5, /provider en H6).
+ * Solo se listan comandos implementados. La tabla de §5.2 quedó cubierta por
+ * completo en el Hito 10 (/clear, /compact, /context, /debug, /mcp reload,
+ * /sessions *, /config get|set).
  */
 
 export interface SessionCommand {
@@ -70,6 +71,56 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     name: '/subagents',
     description: 'Inspecciona el transcript de un subagente de la sesión (read-only)',
     hasArgs: false,
+  },
+  {
+    name: '/clear',
+    description: 'Purga la conversación y el contexto del LLM (la sesión sigue activa)',
+    hasArgs: false,
+  },
+  {
+    name: '/compact',
+    description: 'Fuerza la compresión del contexto ahora, sin esperar al umbral',
+    hasArgs: false,
+  },
+  {
+    name: '/context',
+    description: 'Estadísticas de uso del contexto actual',
+    hasArgs: false,
+  },
+  {
+    name: '/debug',
+    description: 'Activa o desactiva la visualización de los bloques ⊙ thinking',
+    hasArgs: false,
+  },
+  {
+    name: '/mcp reload',
+    description: 'Reinicia todos los MCP servers sin salir del proceso',
+    hasArgs: false,
+  },
+  {
+    name: '/sessions list',
+    description: 'Lista las sesiones guardadas',
+    hasArgs: false,
+  },
+  {
+    name: '/sessions resume',
+    description: 'Carga una sesión anterior y la continúa aquí (requiere id)',
+    hasArgs: true,
+  },
+  {
+    name: '/sessions delete',
+    description: 'Elimina una sesión guardada por id (requiere id)',
+    hasArgs: true,
+  },
+  {
+    name: '/config get',
+    description: 'Muestra el valor de una clave de configuración (dot-path)',
+    hasArgs: true,
+  },
+  {
+    name: '/config set',
+    description: 'Cambia una clave de configuración y la persiste en .stratumrc.json',
+    hasArgs: true,
   },
   { name: '/quit', description: 'Termina la sesión y guarda el historial', hasArgs: false },
   { name: '/exit', description: 'Termina la sesión y guarda el historial', hasArgs: false },

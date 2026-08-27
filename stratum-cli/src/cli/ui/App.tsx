@@ -1,4 +1,6 @@
 import React, { useReducer, useCallback, useRef, useState, useEffect } from 'react';
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { join } from 'node:path';
 import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
 import type { StratumAgent } from '../../agent/core.js';
@@ -7,6 +9,7 @@ import type {
   AgentMode,
   ConfirmRequest,
   DestructiveDecision,
+  Message,
   Plan,
   PlanDecision,
   QuestionAnswer,
@@ -14,11 +17,16 @@ import type {
   RunOptions,
 } from '../../agent/types.js';
 import type { ProviderConfig } from '../../config/schema.js';
-import { expandEnvVars } from '../../config/loader.js';
+import { StratumConfigSchema } from '../../config/schema.js';
+import { expandEnvVars, findConfigFile } from '../../config/loader.js';
+import { getByDotPath, setByDotPath, formatConfigValue } from '../../config/dot-path.js';
+import { resolveMemoryPaths } from '../../config/paths.js';
+import { SessionStore } from '../../session/store.js';
 import { upsertProvider, readRawProvider } from '../../config/writer.js';
 import { detectCapabilities } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
+import type { ToolRegistry } from '../../tools/registry.js';
 import { parseMcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
@@ -26,11 +34,13 @@ import { SubagentView, type SubagentTranscript } from './SubagentView.js';
 import { applyToolEvent } from './tool-call-reducer.js';
 import { DELEGATE_TASK_TOOL } from '../../tools/agent/delegate.js';
 import { Banner } from './Banner.js';
+import type { InitStep } from './InitProgressBlock.js';
 import { ConversationView } from './ConversationView.js';
 import { CommandPalette } from './CommandPalette.js';
 import { ProviderWizard } from './ProviderWizard.js';
 import { SelectList } from './components/SelectList.js';
 import { SESSION_COMMANDS, filterCommands } from './session-commands.js';
+import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
 import { useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
@@ -58,6 +68,12 @@ export type AgentConvItem = {
   kind: 'agent';
   text: string;
   toolCalls: ToolCallState[];
+  /** Pasos de `/init` (UI §5.2). Presente solo en el item que ejecuta `/init`. */
+  initSteps?: InitStep[];
+  /** Resumen de `/init` una vez terminado: colapsa el bloque de progreso. */
+  initSummary?: string;
+  /** Bloques `⊙ thinking` del turno; solo se pintan con `/debug` activo (§11). */
+  thinkingBlocks?: string[];
   /** Subagentes delegados en este turno (Hito 8A). Opcional: items previos no lo traen. */
   subagents?: SubagentBlockState[];
   /** Subagente que emitió el evento más reciente (Hito 8C, marcador ▶ del árbol). */
@@ -106,6 +122,10 @@ interface AppState {
   viewingSubagentId: string | null;
   /** `agents.maxConcurrency` de la config (Hito 8C, cabecera del árbol). */
   maxConcurrency: number;
+  /** Error fatal del agente (UI §11): bloquea el input de forma permanente. */
+  fatalError: { message: string } | null;
+  /** `/debug` (UI §5.2): muestra los bloques `⊙ thinking` del agente. */
+  debug: boolean;
 }
 
 export type AppAction =
@@ -115,8 +135,11 @@ export type AppAction =
   | { type: 'INPUT_CHANGE'; value: string }
   | { type: 'SYSTEM_MESSAGE'; text: string }
   | { type: 'INIT_START' }
-  | { type: 'INIT_PROGRESS'; text: string }
-  | { type: 'INIT_DONE' }
+  | { type: 'INIT_STEP'; step: InitStep }
+  | { type: 'INIT_DONE'; summary?: string }
+  | { type: 'CLEAR' }
+  | { type: 'TOGGLE_DEBUG' }
+  | { type: 'RESTORE_HISTORY'; items: ConvItem[] }
   | { type: 'CONFIRM_SHOW'; request: PendingConfirm }
   | { type: 'CONFIRM_RESOLVE' }
   | { type: 'QUESTIONS_RESOLVE' }
@@ -148,6 +171,23 @@ function getActiveBlocks(state: AppState): Array<{ id: string }> {
   const last = state.completedItems[state.completedItems.length - 1];
   if (last?.kind === 'agent') return blocksOf(last);
   return [];
+}
+
+/**
+ * Traduce el historial guardado de una sesión a items de conversación para
+ * `/sessions resume <id>` en caliente. El system prompt y los mensajes de tool
+ * no se pintan: no son turnos visibles de la conversación.
+ */
+function messagesToConvItems(messages: Message[]): ConvItem[] {
+  const items: ConvItem[] = [];
+  for (const msg of messages) {
+    if (msg.role === 'user' && msg.content) {
+      items.push({ kind: 'user', text: msg.content });
+    } else if (msg.role === 'assistant' && msg.content) {
+      items.push({ kind: 'agent', text: msg.content, toolCalls: [], streaming: false });
+    }
+  }
+  return items;
 }
 
 function updateCurrentAgent(
@@ -195,8 +235,9 @@ function reducer(state: AppState, action: AppAction): AppState {
     case 'INIT_START': {
       const item: AgentConvItem = {
         kind: 'agent',
-        text: 'Explorando proyecto...',
+        text: '',
         toolCalls: [],
+        initSteps: [],
         streaming: true,
       };
       return {
@@ -209,20 +250,27 @@ function reducer(state: AppState, action: AppAction): AppState {
       };
     }
 
-    case 'INIT_PROGRESS': {
+    // Upsert por `id`: el mismo paso pasa de 'running' a su estado terminal
+    // sin duplicarse en el bloque de progreso (§5.2).
+    case 'INIT_STEP': {
       return {
         ...state,
-        currentItem: updateCurrentAgent(state.currentItem, (item) => ({
-          ...item,
-          text: action.text,
-        })),
+        currentItem: updateCurrentAgent(state.currentItem, (item) => {
+          const steps = item.initSteps ?? [];
+          const idx = steps.findIndex((s) => s.id === action.step.id);
+          const next =
+            idx >= 0
+              ? steps.map((s, i) => (i === idx ? { ...s, ...action.step } : s))
+              : [...steps, action.step];
+          return { ...item, initSteps: next };
+        }),
       };
     }
 
     case 'INIT_DONE': {
       const finalItem =
         state.currentItem && state.currentItem.kind === 'agent'
-          ? { ...state.currentItem, streaming: false }
+          ? { ...state.currentItem, streaming: false, initSummary: action.summary }
           : state.currentItem;
       return {
         ...state,
@@ -231,6 +279,35 @@ function reducer(state: AppState, action: AppAction): AppState {
         thinking: false,
       };
     }
+
+    // `/clear` y Ctrl+L (§5.2, §10). Mantiene el sessionId; el historial del LLM
+    // lo purga por separado `agent.clearHistory()` en el handler.
+    case 'CLEAR': {
+      return {
+        ...state,
+        completedItems: [],
+        currentItem: null,
+        inputValue: '',
+        thinking: false,
+        focusState: 'input',
+        focusedBlockIndex: 0,
+        expandedBlockIds: new Set(),
+        plan: null,
+        planMode: 'normal',
+        pendingApproval: false,
+        subagentTranscripts: new Map(),
+        subagentPicker: false,
+        viewingSubagentId: null,
+        fatalError: null,
+      };
+    }
+
+    case 'TOGGLE_DEBUG':
+      return { ...state, debug: !state.debug };
+
+    // `/sessions resume <id>` en caliente: repinta el historial cargado.
+    case 'RESTORE_HISTORY':
+      return { ...state, phase: 'conversation', completedItems: action.items };
 
     case 'CONFIRM_SHOW':
       return { ...state, pendingConfirm: action.request };
@@ -587,15 +664,29 @@ function reducer(state: AppState, action: AppAction): AppState {
         };
       }
 
+      // Error fatal (§11): bloque <FatalError> dedicado, no texto inline. El
+      // input queda bloqueado permanentemente mientras `fatalError` no sea null.
       if (ev.type === 'error' && ev.fatal) {
         return {
           ...state,
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            text: item.text + (item.text ? '\n' : '') + `[Error: ${ev.message}]`,
             streaming: false,
           })),
           thinking: false,
+          fatalError: { message: ev.message },
+        };
+      }
+
+      // `thinking` no se renderiza por defecto (§11): solo con /debug activo.
+      if (ev.type === 'thinking') {
+        if (!state.debug) return state;
+        return {
+          ...state,
+          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
+            ...item,
+            thinkingBlocks: [...(item.thinkingBlocks ?? []), ev.text],
+          })),
         };
       }
 
@@ -645,12 +736,24 @@ interface Props {
   agent: StratumAgent;
   version: string;
   mcpManager?: McpManager;
+  /** `mcp.startup === 'eager'`: el banner muestra el panel de arranque (§14). */
+  mcpEager?: boolean;
   logoPreRendered: boolean;
   /** Id de la sesión en curso; se propaga al ToolContext para la auditoría SSH. */
   sessionId?: string;
+  /** Registry activo, para re-registrar tools MCP tras `/mcp reload`. */
+  registry?: ToolRegistry;
 }
 
-export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: Props) {
+export function App({
+  agent,
+  version,
+  mcpManager,
+  mcpEager,
+  logoPreRendered,
+  sessionId,
+  registry,
+}: Props) {
   const { exit } = useApp();
 
   // Getter de un solo uso: devuelve el plan reanudado (si lo hay) para init de UI.
@@ -686,6 +789,8 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
     subagentPicker: false,
     viewingSubagentId: null,
     maxConcurrency: agent.getConfig().agents.maxConcurrency,
+    fatalError: null,
+    debug: false,
   });
 
   // -------------------------------------------------------------------------
@@ -804,6 +909,22 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
   // -------------------------------------------------------------------------
+  // Helpers de los comandos de sesión (§5.2, Hito 10)
+  // -------------------------------------------------------------------------
+
+  /** Repinta el status bar tras una operación que altera el historial. */
+  const refreshContext = useCallback(() => {
+    const u = agent.getContextUsage();
+    dispatch({ type: 'CONTEXT_UPDATE', used: u.used, max: u.max, estimated: u.estimated });
+  }, [agent]);
+
+  /** Store de sesiones resuelto desde la config activa (mismas rutas que la CLI). */
+  const sessionStore = useCallback(
+    () => new SessionStore(resolveMemoryPaths(agent.getConfig()).sessionsDir),
+    [agent],
+  );
+
+  // -------------------------------------------------------------------------
   // Plan & Execute (Hito 7, UI §5.4): el loop emite plan_proposed y espera la
   // decisión del usuario vía onApprovePlan. Se resuelve desde <PlanApproval>,
   // igual que el gate destructivo.
@@ -902,6 +1023,15 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
   const ctrlCCountRef = useRef(0);
   const ctrlCTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // ----- Historial de inputs enviados (§10) -----
+  // Vive en memoria y no persiste entre sesiones. `draft` guarda lo que el
+  // usuario tenía escrito antes de empezar a navegar, para restaurarlo con ↓.
+  const historyRef = useRef<string[]>([]);
+  const [historyIndex, setHistoryIndex] = useState<number | null>(null);
+  const draftRef = useRef('');
+  // `executeCommand` se define más abajo; Ctrl+L lo alcanza por ref.
+  const executeCommandRef = useRef<((cmd: string) => void) | null>(null);
+
   useInput((input, key) => {
     if (key.ctrl && (input === 'c' || (key as { name?: string }).name === 'c')) {
       if (overlay) {
@@ -996,6 +1126,32 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
       }
     }
 
+    // ----- Edición de línea (§10) -----
+    // Se evalúan tras la paleta: con el desplegable abierto, ↑↓ le pertenecen.
+    if (key.ctrl && input === 'l') {
+      executeCommandRef.current?.('/clear');
+      return;
+    }
+
+    if (key.ctrl && input === 'u') {
+      draftRef.current = '';
+      setHistoryIndex(null);
+      dispatch({ type: 'INPUT_CHANGE', value: '' });
+      return;
+    }
+
+    // ----- Historial de inputs enviados (§10) -----
+    if (state.focusState === 'input' && (key.upArrow || key.downArrow)) {
+      if (historyRef.current.length === 0) return;
+      if (historyIndex === null) draftRef.current = state.inputValue;
+      const nav = key.upArrow
+        ? historyPrev(historyRef.current, historyIndex, draftRef.current)
+        : historyNext(historyRef.current, historyIndex, draftRef.current);
+      setHistoryIndex(nav.index);
+      dispatch({ type: 'INPUT_CHANGE', value: nav.value });
+      return;
+    }
+
     // ----- Máquina de foco (§10): input ↔ block-focus -----
     if (key.tab) {
       if (state.focusState === 'block-focus') {
@@ -1061,8 +1217,8 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
                 currentTool = event.name + event.id;
                 toolCount++;
                 dispatch({
-                  type: 'INIT_PROGRESS',
-                  text: `[${toolCount}] ${event.name}...`,
+                  type: 'INIT_STEP',
+                  step: { id: event.id, label: event.name, status: 'running' },
                 });
               } else if (event.type === 'tool_call_ready') {
                 if (
@@ -1074,12 +1230,20 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
               } else if (event.type === 'tool_result') {
                 if (stratumWriteIds.has(event.id)) wroteStratum = true;
                 dispatch({
-                  type: 'INIT_PROGRESS',
-                  text: `[${toolCount}] ${event.name} OK`,
+                  type: 'INIT_STEP',
+                  step: { id: event.id, label: event.name, status: 'completed' },
                 });
                 currentTool = '';
               } else if (event.type === 'error' && event.fatal) {
-                dispatch({ type: 'INIT_PROGRESS', text: `Error: ${event.message}` });
+                dispatch({
+                  type: 'INIT_STEP',
+                  step: {
+                    id: `err-${toolCount}`,
+                    label: 'Error',
+                    status: 'failed',
+                    detail: event.message,
+                  },
+                });
               }
             }
           };
@@ -1090,29 +1254,61 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
           // fichero, reinyectar una instrucción directa una única vez.
           if (!wroteStratum) {
             dispatch({
-              type: 'INIT_PROGRESS',
-              text: 'El agente no escribió STRATUM.md — reintentando con instrucción directa...',
+              type: 'INIT_STEP',
+              step: {
+                id: 'retry',
+                label: 'Reintentando con instrucción directa',
+                status: 'running',
+              },
             });
             await consume(
               `You have not written the file yet. Based on your investigation so far, call the write_file tool NOW with the complete contents of STRATUM.md at path ${cwd}/STRATUM.md. Do not reply with text only — make the tool call.`,
             );
+            dispatch({
+              type: 'INIT_STEP',
+              step: {
+                id: 'retry',
+                label: 'Reintentando con instrucción directa',
+                status: wroteStratum ? 'completed' : 'failed',
+              },
+            });
           }
 
           if (wroteStratum) {
             agent.reloadMemory();
-            dispatch({ type: 'INIT_PROGRESS', text: 'STRATUM.md generado. Contexto recargado.' });
-          } else {
-            const detail = agentText.trim()
-              ? ` Respuesta del agente: ${agentText.trim().slice(0, 500)}`
-              : '';
+            // §5.2: el bloque colapsa a una línea de resumen. Las secciones se
+            // cuentan sobre el fichero recién escrito, no sobre lo que dijo el LLM.
+            let sections = 0;
+            try {
+              const md = readFileSync(join(cwd, 'STRATUM.md'), 'utf-8');
+              sections = (md.match(/^##\s+/gm) ?? []).length;
+            } catch {
+              /* el resumen es informativo: si no se puede leer, se omite el dato */
+            }
+            const parts = [
+              sections > 0 ? `${sections} secciones` : null,
+              `${toolCount} operaciones`,
+            ].filter(Boolean);
             dispatch({
-              type: 'INIT_PROGRESS',
-              text: `El agente terminó sin escribir STRATUM.md.${detail}`,
+              type: 'INIT_DONE',
+              summary: `STRATUM.md actualizado — ${parts.join(' · ')}`,
             });
+            return;
           }
+
+          const detail = agentText.trim()
+            ? ` Respuesta del agente: ${agentText.trim().slice(0, 500)}`
+            : '';
+          dispatch({
+            type: 'INIT_DONE',
+            summary: `El agente terminó sin escribir STRATUM.md.${detail}`,
+          });
+          return;
         } catch (err) {
-          dispatch({ type: 'INIT_PROGRESS', text: `Error: ${String(err)}` });
-        } finally {
+          dispatch({
+            type: 'INIT_STEP',
+            step: { id: 'fatal', label: 'Error', status: 'failed', detail: String(err) },
+          });
           dispatch({ type: 'INIT_DONE' });
         }
       })();
@@ -1221,6 +1417,211 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
         const width = Math.max(...SESSION_COMMANDS.map((c) => c.name.length)) + 2;
         const lines = SESSION_COMMANDS.map((c) => `  ${c.name.padEnd(width)} ${c.description}`);
         dispatch({ type: 'SYSTEM_MESSAGE', text: `Comandos disponibles:\n\n${lines.join('\n')}` });
+        return;
+      }
+
+      // ----- Contexto y sesión (§5.2, Hito 10) -----
+
+      // `<Static>` ya volcó los turnos anteriores al scrollback del terminal y
+      // no puede "desimprimirlos": hay que limpiar la pantalla a mano.
+      if (cmd === '/clear') {
+        agent.clearHistory();
+        process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+        dispatch({ type: 'CLEAR' });
+        refreshContext();
+        return;
+      }
+
+      if (cmd === '/compact') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        void (async () => {
+          try {
+            const result = await agent.compactNow();
+            const text =
+              result.kind === 'compressed'
+                ? `Contexto comprimido: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsCompressed} rondas resumidas).`
+                : result.kind === 'truncated'
+                  ? `Contexto truncado: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsRemoved} rondas eliminadas).`
+                  : result.kind === 'pressure'
+                    ? 'No hay nada que comprimir: toda la conversación está en la zona protegida.'
+                    : 'No había nada que comprimir.';
+            dispatch({ type: 'SYSTEM_MESSAGE', text });
+            refreshContext();
+          } catch (err) {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al comprimir: ${String(err)}` });
+          }
+        })();
+        return;
+      }
+
+      if (cmd === '/context') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const usage = agent.getContextUsage();
+        const source = usage.estimated ? 'estimado (chars/3.5)' : 'reportado por el provider';
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: [
+            'Uso del contexto:',
+            '',
+            `  tokens      ${usage.used} / ${usage.max} (${usage.pct}%)`,
+            `  origen      ${source}`,
+            `  mensajes    ${agent.getMessages().length}`,
+            `  tool calls  ${agent.toolCallCount}`,
+            `  provider    ${agent.providerName} / ${agent.model}`,
+          ].join('\n'),
+        });
+        return;
+      }
+
+      if (cmd === '/debug') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        dispatch({ type: 'TOGGLE_DEBUG' });
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `Modo debug ${state.debug ? 'desactivado' : 'activado'}: los bloques ⊙ thinking ${state.debug ? 'dejan de mostrarse' : 'se muestran'}.`,
+        });
+        return;
+      }
+
+      if (cmd === '/mcp reload') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        if (!mcpManager || !registry) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'No hay MCP servers configurados.' });
+          return;
+        }
+        dispatch({ type: 'SYSTEM_MESSAGE', text: 'Reiniciando MCP servers...' });
+        void (async () => {
+          try {
+            // Retirar las tools del ciclo anterior: si un server deja de
+            // conectar, sus tools no deben quedarse apuntando a un cliente muerto.
+            for (const t of registry.list()) {
+              if (t.name.startsWith('mcp__')) registry.unregister(t.name);
+            }
+            await mcpManager.shutdownAll();
+            const warnings = await mcpManager.connectAll();
+            mcpManager.registerInto(registry);
+            mcpManager.startHeartbeat();
+            const summary = mcpManager.getStatusSummary();
+            const warnText = warnings.length
+              ? `\n\n${warnings.map((w) => `  ⚠ ${w.message}`).join('\n')}`
+              : '';
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `MCP recargado: ${summary.connected}/${summary.total} servers conectados.${warnText}`,
+            });
+          } catch (err) {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al recargar MCP: ${String(err)}` });
+          }
+        })();
+        return;
+      }
+
+      if (cmd === '/sessions list') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        try {
+          const sessions = sessionStore().list({ last: 10 });
+          if (sessions.length === 0) {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: 'No hay sesiones guardadas.' });
+            return;
+          }
+          const lines = sessions.map((s) => {
+            const summary = s.summary ? `  ${s.summary}` : '';
+            return `  ${s.id}\n    ${new Date(s.updatedAt).toLocaleString()} │ ${s.provider} / ${s.model}${summary}`;
+          });
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Sesiones guardadas (${sessions.length}):\n\n${lines.join('\n\n')}`,
+          });
+        } catch (err) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error: ${String(err)}` });
+        }
+        return;
+      }
+
+      if (cmd.startsWith('/sessions resume')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const id = cmd.slice('/sessions resume'.length).trim();
+        if (!id) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /sessions resume <id>' });
+          return;
+        }
+        try {
+          const saved = sessionStore().load(id);
+          agent.replaceHistory(saved.messages);
+          process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
+          dispatch({ type: 'CLEAR' });
+          dispatch({ type: 'RESTORE_HISTORY', items: messagesToConvItems(saved.messages) });
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Sesión ${saved.id} reanudada (${saved.messages.length} mensajes).`,
+          });
+          refreshContext();
+        } catch (err) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al reanudar: ${String(err)}` });
+        }
+        return;
+      }
+
+      if (cmd.startsWith('/sessions delete')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const id = cmd.slice('/sessions delete'.length).trim();
+        if (!id) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /sessions delete <id>' });
+          return;
+        }
+        try {
+          sessionStore().delete(id);
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Sesión "${id}" eliminada.` });
+        } catch (err) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error: ${String(err)}` });
+        }
+        return;
+      }
+
+      if (cmd.startsWith('/config get')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const key = cmd.slice('/config get'.length).trim();
+        if (!key) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /config get <clave.dot.path>' });
+          return;
+        }
+        const value = getByDotPath(agent.getConfig() as unknown as Record<string, unknown>, key);
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text:
+            value === undefined
+              ? `Clave no encontrada: ${key}`
+              : `${key} = ${formatConfigValue(value)}`,
+        });
+        return;
+      }
+
+      if (cmd.startsWith('/config set')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const rest = cmd.slice('/config set'.length).trim();
+        const sp = rest.indexOf(' ');
+        if (sp < 0) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /config set <clave> <valor>' });
+          return;
+        }
+        const key = rest.slice(0, sp);
+        const value = rest.slice(sp + 1).trim();
+        try {
+          const configPath =
+            findConfigFile(process.cwd()) ?? join(process.cwd(), '.stratumrc.json');
+          const raw: Record<string, unknown> = existsSync(configPath)
+            ? (JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>)
+            : {};
+          setByDotPath(raw, key, value);
+          StratumConfigSchema.parse(raw);
+          writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `${key} = ${value} guardado en ${configPath}.\nLos cambios de provider/MCP requieren reiniciar o usar /provider, /model o /mcp reload.`,
+          });
+        } catch (err) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al guardar: ${String(err)}` });
+        }
         return;
       }
 
@@ -1460,14 +1861,35 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
       openProviderEditor,
       refreshProviderHealth,
       mcpManager,
+      registry,
+      refreshContext,
+      sessionStore,
+      state.debug,
     ],
   );
+
+  // Ctrl+L necesita alcanzar `executeCommand` desde el useInput, que se declara antes.
+  executeCommandRef.current = executeCommand;
+
+  // Panel de arranque MCP (§14): solo con `mcp.startup: 'eager'`. Los timeouts
+  // se leen de la config para poder distinguir un timeout de un fallo de arranque.
+  const [mcpStartup] = useState(() => {
+    if (!mcpEager || !mcpManager) return undefined;
+    const timeouts: Record<string, number> = {};
+    for (const s of agent.getConfig().mcp.servers) timeouts[s.name] = s.startupTimeout;
+    return { manager: mcpManager, timeouts };
+  });
 
   const handleSend = useCallback(
     (text: string) => {
       if (!text.trim()) return;
 
       const cmd = text.trim();
+
+      // Historial de inputs (§10): se registra todo lo enviado, comandos incluidos.
+      historyRef.current = pushHistory(historyRef.current, cmd);
+      setHistoryIndex(null);
+      draftRef.current = '';
 
       // Vista de Subagente (Hito 8C, §5.7): la línea de entrada es read-only; el
       // único comando aceptado es /quit (Esc es alias, gestionado en useInput).
@@ -1515,7 +1937,12 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
   if (state.phase === 'banner') {
     return (
       <Box>
-        <Banner version={version} onSend={handleSend} logoPreRendered={logoPreRendered} />
+        <Banner
+          version={version}
+          onSend={handleSend}
+          logoPreRendered={logoPreRendered}
+          mcpStartup={mcpStartup}
+        />
       </Box>
     );
   }
@@ -1591,11 +2018,11 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
               value: m,
               hint: m === current ? '(actual)' : undefined,
             })),
-            { label: '✎ Escribir modelo manualmente…', value: ' manual' },
+            { label: '✎ Escribir modelo manualmente…', value: '\u0000manual' },
           ]}
           initialIndex={Math.max(overlay.models.indexOf(current), 0)}
           onSelect={(item) => {
-            if (item.value === ' manual') {
+            if (item.value === '\u0000manual') {
               setModelManualValue(current);
               setOverlay({ kind: 'model-manual' });
               return;
@@ -1725,6 +2152,8 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
         contextEstimated={state.contextEstimated}
         focusedBlockId={focusedBlockId}
         expandedBlockIds={state.expandedBlockIds}
+        fatalError={state.fatalError}
+        debug={state.debug}
         pendingConfirm={state.pendingConfirm}
         onConfirmApprove={() => resolveConfirm('approve')}
         onConfirmDeny={() => resolveConfirm('deny')}

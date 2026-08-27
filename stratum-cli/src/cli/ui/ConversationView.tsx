@@ -8,6 +8,7 @@ import { DestructiveConfirm } from './DestructiveConfirm.js';
 import { PlanView } from './PlanView.js';
 import { PlanApproval } from './PlanApproval.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
+import { FatalError } from './FatalError.js';
 import type { ConvItem, PendingConfirm } from './App.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
 import type { AgentMode, Plan, QuestionAnswer, QuestionItem } from '../../agent/types.js';
@@ -26,6 +27,10 @@ interface Props {
   contextEstimated?: boolean;
   focusedBlockId?: string | null;
   expandedBlockIds?: ReadonlySet<string>;
+  /** Error fatal (§11): bloque rojo + input bloqueado permanentemente. */
+  fatalError?: { message: string } | null;
+  /** `/debug`: pinta los bloques `⊙ thinking` del agente (§11). */
+  debug?: boolean;
   pendingConfirm?: PendingConfirm | null;
   onConfirmApprove?: () => void;
   onConfirmDeny?: () => void;
@@ -68,6 +73,8 @@ export function ConversationView({
   contextEstimated,
   focusedBlockId,
   expandedBlockIds,
+  fatalError,
+  debug,
   pendingConfirm,
   onConfirmApprove,
   onConfirmDeny,
@@ -103,7 +110,9 @@ export function ConversationView({
         currentItem={currentItem}
         focusedBlockId={focusedBlockId}
         expandedBlockIds={expandedBlockIds}
+        debug={debug}
       />
+      {fatalError && <FatalError message={fatalError.message} />}
       {plan && pendingApproval && (
         <PlanApproval
           plan={plan}
@@ -134,7 +143,7 @@ export function ConversationView({
           value={inputValue}
           onChange={onInputChange}
           onSubmit={onInputSubmit}
-          disabled={thinking || !!pendingConfirm || !!pendingQuestions?.length}
+          disabled={thinking || !!pendingConfirm || !!pendingQuestions?.length || !!fatalError}
         />
       )}
     </Box>

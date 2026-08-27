@@ -61,6 +61,16 @@ export class ToolRegistry {
     this.tools.set(tool.name, tool);
   }
 
+  /**
+   * Retira una tool del registro. La usa `/mcp reload` (Hito 10) para que las
+   * tools de un server que ya no conecta no queden apuntando a un cliente
+   * muerto. Devuelve true si la tool existía.
+   */
+  unregister(name: string): boolean {
+    this.disabledTools.delete(name);
+    return this.tools.delete(name);
+  }
+
   get(name: string): ToolDefinition | undefined {
     return this.tools.get(name);
   }

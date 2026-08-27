@@ -86,13 +86,17 @@ export const chatCommand = new Command('chat')
       // Un fallo de un server nunca aborta.
       // -----------------------------------------------------------------------
       const mcpManager = new McpManager(config);
+      // Con arranque eager, el panel <MCPStartup> del banner (UI §14) muestra el
+      // progreso en vivo: la conexión se lanza aquí pero NO se espera, o la fase
+      // de conexión habría terminado antes de que Ink pintase nada. Los fallos
+      // se ven en el propio panel — escribir a stderr aquí corrompería el render.
+      let mcpEager = false;
       if (config.mcp.servers.length > 0) {
         if (config.mcp.startup === 'eager') {
-          const mcpWarnings = await mcpManager.connectAll();
-          for (const w of mcpWarnings) {
-            process.stderr.write(`[mcp] ${w.message}\n`);
-          }
-          mcpManager.registerInto(registry);
+          mcpEager = true;
+          void mcpManager.connectAll().then(() => {
+            mcpManager.registerInto(registry);
+          });
         } else {
           mcpManager.startBackground(registry, (w) => {
             process.stderr.write(`[mcp] ${w.message}\n`);
@@ -184,7 +188,15 @@ export const chatCommand = new Command('chat')
       const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
       const { waitUntilExit } = render(
-        React.createElement(App, { agent, version, mcpManager, logoPreRendered, sessionId }),
+        React.createElement(App, {
+          agent,
+          version,
+          mcpManager,
+          mcpEager,
+          logoPreRendered,
+          sessionId,
+          registry,
+        }),
       );
 
       try {

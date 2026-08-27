@@ -3,7 +3,8 @@ import type { ProviderRouter } from '../providers/router.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { IProvider } from '../providers/base.js';
 import type { AgentEvent, Message, RunOptions } from './types.js';
-import { ReactLoop } from './harness.js';
+import { ReactLoop, ContextManager } from './harness.js';
+import type { CompressionResult } from './harness.js';
 import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
 import { ProfileLoader } from './profiles.js';
 import { MemoryManager } from '../memory/manager.js';
@@ -148,6 +149,47 @@ export class StratumAgent {
     } else {
       this.messages.unshift({ role: 'system', content: newSystemContent });
     }
+  }
+
+  /**
+   * Purga el historial conversacional dejando solo el system prompt (`/clear`
+   * y `Ctrl+L`, UI §5.2). La sesión sigue viva — mismo `sessionId` — pero el
+   * agente arranca la siguiente iteración con el contexto vacío.
+   */
+  clearHistory(): void {
+    const system = this.messages[0]?.role === 'system' ? this.messages[0] : null;
+    this.messages = system ? [system] : [];
+    this._toolCallCount = 0;
+    this._planRef = null;
+  }
+
+  /**
+   * Sustituye el historial completo (`/sessions resume <id>` en caliente).
+   * A diferencia de `clearHistory`, el system prompt viene dentro de los
+   * mensajes cargados: se guardaron tal cual estaban en la sesión original.
+   */
+  replaceHistory(messages: Message[]): void {
+    this.messages = [...messages];
+    this._toolCallCount = 0;
+    this._planRef = null;
+  }
+
+  /**
+   * Fuerza una compresión de contexto ahora (`/compact`), sin esperar al umbral
+   * automático del 80%. Se construye un `ContextManager` con los mismos
+   * parámetros que usa `ReactLoop`, porque el del loop solo vive durante un
+   * `run()` y `/compact` se invoca entre turnos.
+   */
+  async compactNow(): Promise<CompressionResult> {
+    const cm = new ContextManager(
+      this.router.contextWindow,
+      this.config.agent.compressionKeepRounds,
+      this.router.getActive(),
+      this.router.model,
+      this.config.agent.compressionThreshold,
+      this.config.agent.compressorModel,
+    );
+    return cm.compress(this.messages);
   }
 
   /**

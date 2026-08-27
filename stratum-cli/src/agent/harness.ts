@@ -191,9 +191,18 @@ export class ContextManager {
    * Modifica `messages` en el lugar. Devuelve el resultado para emitir eventos.
    */
   async maybeCompress(messages: Message[]): Promise<CompressionResult> {
-    const { pct, used } = this.usage(messages);
+    const { pct } = this.usage(messages);
     if (pct / 100 <= this.compressionThreshold) return { kind: 'skipped' };
+    return this.compress(messages);
+  }
 
+  /**
+   * Comprime el historial **sin comprobar el umbral** (Hito 10): es la vía que
+   * usa `/compact`, donde el usuario pide la compresión explícitamente y el
+   * contexto está, por definición, por debajo del umbral automático.
+   */
+  async compress(messages: Message[]): Promise<CompressionResult> {
+    const { used } = this.usage(messages);
     const tokensBefore = used;
 
     // -----------------------------------------------------------------------

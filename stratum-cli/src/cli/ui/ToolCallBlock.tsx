@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
+import { SPINNER_FRAMES, SPINNER_INTERVAL_MS } from './spinner.js';
 
 export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'error';
 
@@ -15,7 +16,6 @@ export interface ToolCallState {
   durationMs?: number;
 }
 
-const SPINNER_FRAMES = ['◌', '◎', '●', '◉', '○'];
 const MAX_EXPANDED_LINES = 10;
 
 /** Umbral de latencia SSH que se resalta en el bloque (UI §5.8). */
@@ -106,7 +106,10 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
 
   useEffect(() => {
     if (state.status !== 'running') return;
-    const spinIv = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 150);
+    const spinIv = setInterval(
+      () => setFrame((f) => (f + 1) % SPINNER_FRAMES.length),
+      SPINNER_INTERVAL_MS,
+    );
     const timerIv = setInterval(() => setElapsedMs((e) => e + 100), 100);
     return () => {
       clearInterval(spinIv);

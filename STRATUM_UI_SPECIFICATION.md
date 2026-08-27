@@ -189,36 +189,27 @@ Una sola línea fija en la parte superior, con fondo ligeramente más claro que 
 
 Scrollable verticalmente. Esta sección especifica la estrategia concreta de scroll, que es el punto más frágil de la UI dado que Ink no tiene scroll real de viewport.
 
-#### Estrategia: ventana virtual de N líneas
+#### Estrategia: `<Static>` + scrollback nativo del terminal
 
-`<MessageList>` no renderiza todos los mensajes del historial — mantiene una **ventana deslizante** de `viewportLines = terminalHeight × 3` líneas como máximo. Esto acota el trabajo de Ink independientemente del tamaño del historial.
+**El scroll del historial lo hace el terminal, no la aplicación.** `<MessageList>` reparte los turnos en tres zonas:
 
-**Anclaje al fondo (streaming):**
-- Mientras `streaming = true`, la ventana se ancla automáticamente al último mensaje. Cualquier nuevo `text_delta` empuja la vista hacia abajo.
-- El usuario no puede hacer scroll hacia arriba durante el streaming (PgUp se ignora). Cuando el streaming termina (`done`), el scroll se habilita.
-
-**Navegación manual (post-streaming):**
-- `PgUp` / `PgDn`: desplazan la ventana en incrementos de `terminalHeight - 2` líneas.
-- `↓` hasta el final: re-ancla la vista al fondo.
-- Un indicador discreto `↓ N líneas más` aparece en la esquina inferior derecha del área de conversación cuando hay contenido por debajo de la vista.
-
-**Implementación:**
-```typescript
-// En <MessageList>:
-const [scrollOffset, setScrollOffset] = useState(0);
-const [anchored, setAnchored] = useState(true);
-
-useInput((input, key) => {
-  if (streaming) return;          // ignorar scroll durante streaming
-  if (key.pageDown) setScrollOffset(o => Math.max(0, o - pageSize));
-  if (key.pageUp)   setScrollOffset(o => o + pageSize);
-});
-
-// Al recibir text_delta mientras anchored === true:
-// scrollOffset = 0 (siempre fondo)
+```
+<Static items={completados.slice(0, -1)}>   ← impresos una sola vez, salen del árbol de render
+{ultimoCompletado}                          ← dinámico: Tab/Space siguen funcionando tras `done`
+{itemActual}                                ← turno en streaming
 ```
 
-Los mensajes fuera de la ventana no se desmontan — se excluyen del render calculando qué slice del array de líneas está dentro del offset visible.
+- Los turnos cerrados se emiten con `<Static>` de Ink: se escriben una única vez al stdout y pasan al **scrollback nativo** del terminal. Ink deja de repintarlos, así que el coste de render es constante por muy larga que sea la conversación.
+- El **último turno completado** se mantiene fuera de `<Static>` a propósito: es el que el usuario navega con `Tab` y expande con `Space` (§5.1) justo después de recibir `done`. Cuando llega un turno nuevo, el anterior pasa a `<Static>` de forma natural.
+- El turno en curso se repinta con cada `text_delta`.
+
+**Consecuencias deliberadas:**
+- No hay ventana virtual, ni `scrollOffset`, ni manejo de `PgUp`/`PgDn` en la aplicación: esas teclas las gobierna el terminal, junto con la rueda del ratón y la barra de scroll.
+- El historial completo se puede **seleccionar y copiar** con el ratón, porque es texto real del terminal y no un viewport redibujado.
+- No existe el indicador `↓ N líneas más`: la aplicación no conoce ni controla la posición del scroll.
+- `/clear` y `Ctrl+L` no pueden "desimprimir" lo ya volcado al scrollback, así que además de vaciar el estado emiten la secuencia de borrado de pantalla (`\x1b[2J\x1b[3J\x1b[H`) — ver §5.2.
+
+**Ancho del contenido** (§9): el área se limita a 100 columnas en terminales más anchas (`resolveLayout` en `cli/ui/layout.ts`).
 
 #### Mensaje del usuario
 ```
@@ -387,34 +378,30 @@ Al escribir `/` aparece inmediatamente un panel de autocompletado **encima** del
 
 #### Flujo visual de `/init` en el chat
 
-Cuando el usuario escribe `/init`, el `InitAgent` emite `InitEvent`s que `<MessageList>` traduce a un bloque de progreso dedicado (`<InitProgressBlock>`), renderizado como un `<AgentMessage>` especial con borde tenue.
+`/init` no tiene agente ni pipeline propios: es un **comando-plantilla** que ejecuta el agente general con `INITIALIZE_PROMPT` (§12.13 de la definición del proyecto, decidido en el Hito 2.5). No existen `InitAgent` ni `InitEvent` — la UI se construye sobre los `AgentEvent` normales del turno.
+
+`<AgentMessage>` detecta que el turno es un `/init` (trae `initSteps`) y, en lugar de pintar sus tool calls como `<ToolCallBlock>` sueltos, los agrupa en un `<InitProgressBlock>` con borde tenue. Cada tool call del agente es un paso: `tool_call_start` lo abre en `running`, `tool_result` lo cierra en `completed`.
 
 ```
   Stratum
-  ┌─ Escaneando proyecto ──────────────────────────────────────────┐
-  │  ⟳ Estructura de directorios...          ✓ 47 archivos         │
-  │  ⟳ Detectando stack tecnológico...       ✓ TypeScript · Vitest │
-  │  ⟳ Leyendo configuración...              ✓ tsconfig · ESLint   │
-  │  ⟳ Generando STRATUM.md...              ◌                      │
+  ┌────────────────────────────────────────────────────────────────┐
+  │ Escaneando proyecto                                            │
+  │ ✓ list                                                         │
+  │ ✓ glob                                                         │
+  │ ✓ read_file                                                    │
+  │ ◌ write_file                                                   │
   └────────────────────────────────────────────────────────────────┘
 ```
 
 - Borde: `borderStyle="single"`, `borderColor="#2A2A2A"` — discreto, igual que el dropdown
-- Icono de paso completado `✓`: `chalk.hex('#34D399')` — verde
-- Icono de paso en curso `◌` → animado: `chalk.hex('#F59E0B')` — ámbar
+- Icono de paso completado `✓`: `chalk.hex('#22C55E')` — verde
+- Icono de paso en curso `◌` → animado con los frames de §5.1: `chalk.hex('#F59E0B')` — ámbar
+- Icono de paso fallido `✗`: `chalk.hex('#EF4444')`
 - Texto de paso: `chalk.hex('#9CA3AF')` — gris secundario
 
-**Si hay conflicto de merge** (sección con contenido manual existente), el bloque se pausa y se renderiza un sub-prompt de confirmación integrado en el mismo bloque:
+**No hay sub-prompt de conflicto de merge.** El agente escribe `STRATUM.md` con `write_file`/`edit_file`, que ya pasan por el gate de confirmación destructiva de §12: es ahí donde el usuario aprueba o rechaza sobrescribir contenido existente, con el mismo componente que cualquier otra escritura.
 
-```
-  │  ⚠  "## Convenciones" tiene contenido escrito a mano.          │
-  │     ¿Actualizar con el scan? [ S ] sí  [ N ] preservar         │
-```
-
-- El input principal queda bloqueado hasta que el usuario responda con `S` o `N`.
-- Estilo del sub-prompt: igual que `<DestructiveConfirmation>` (§12) pero con borde ámbar dentro del bloque, sin ocupar toda la pantalla.
-
-**Al terminar** (`InitEvent { type: 'done' }`), el bloque de progreso colapsa a una línea de resumen y el input se reactiva:
+**Al terminar**, el bloque de progreso colapsa a una línea de resumen y el input se reactiva. Las secciones se cuentan sobre el fichero recién escrito:
 
 ```
   Stratum
@@ -1180,17 +1167,21 @@ El terminal puede tener distintos tamaños. Ink expone `useStdout()` con `column
 
 ### Ancho amplio: >120 columnas
 
-- El contenido de conversación sigue limitado a 100 chars de ancho.
+- El contenido de conversación sigue limitado a 100 chars de ancho (`MAX_CONTENT_WIDTH`).
 - Los tool call blocks añaden más espacio para el input visible.
 
 ### Alto mínimo: 24 líneas
 
-- Si `rows < 24`: reducir el banner (ocultar tips, mostrar solo ASCII + prompt).
-- El área de conversación scrollable siempre mantiene al menos 10 líneas visibles.
+- Si `rows < 24`: el banner se reduce — oculta los tips, el tagline y el separador, y deja solo el ASCII art y el prompt.
+- No hay altura mínima que reservar para el área de conversación: el terminal es dueño del scroll (§4.2).
+
+### Implementación
+
+Los cortes horizontales del ASCII art viven en `getAsciiArt(columns)` (`cli/ui/ascii-art.ts`). El resto de breakpoints están en `resolveLayout(columns, rows)` (`cli/ui/layout.ts`), que devuelve `{ showTips, contentWidth }` — lógica pura, testeable sin renderizar Ink.
 
 ### Redimensionado en caliente
 
-Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().columns` reactivamente y no hardcodear anchos.
+Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().columns` / `.rows` reactivamente y no hardcodear anchos.
 
 ---
 
@@ -1209,7 +1200,8 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | `Shift+Tab` | Mover foco al tool call block anterior |
 | `Space` | En un tool call block enfocado: expandir/colapsar output |
 | `Esc` (fuera de input) | Quitar foco del tool call block seleccionado |
-| `PgUp / PgDn` | Scroll en el historial de conversación |
+
+**Scroll del historial:** no lo gestiona la aplicación. `PgUp`/`PgDn`, la rueda del ratón y la barra de scroll pertenecen al terminal, porque los turnos cerrados viven en su scrollback nativo (§4.2).
 
 **Máquina de estados de foco** (resuelve la ambigüedad de `Tab` y `Esc`):
 
@@ -1311,8 +1303,12 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
 - `focusState: 'input' | 'dropdown' | 'block-focus' | 'plan-approval' | 'destructive-confirm' | 'subagent-view'` — ver §10. `plan-approval` (§5.4), `destructive-confirm` (§12) y `subagent-view` (§5.7) son estados bloqueantes mutuamente excluyentes con los demás; los nodos de `<AgentTree>` (§5.6) son bloques `block-focus` normales, no un estado nuevo.
 - `agentGroup: AgentGroupState | null` — grupo de subagentes paralelos del turno en curso (§5.6, Hito 8C); `null` fuera de una delegación múltiple.
 - `subagentTranscripts: Map<string, SubagentTranscript>` + `viewingSubagentId: string | null` — inspector de subagentes de la sesión (§5.7, Hito 8C); en memoria, se vacía con `/clear`.
+- `fatalError: { message: string } | null` — error fatal del agente (§11, Hito 10); mientras no sea `null`, el input queda bloqueado.
+- `debug: boolean` — `/debug` (Hito 10); con `true` se pintan los bloques `⊙ thinking`.
 
-**Acción `/clear` en el reducer:** despacha `{ type: 'CLEAR' }`, que reinicia `messages: []`, `events: []` y `subagentTranscripts` (§5.7). El `sessionId` se mantiene; el agente pierde todo el contexto conversacional anterior. `Ctrl+L` despacha la misma acción.
+**Acción `/clear` en el reducer:** despacha `{ type: 'CLEAR' }`, que reinicia `completedItems: []`, `currentItem: null`, `subagentTranscripts` (§5.7), el plan en curso y `fatalError`. El `sessionId` se mantiene; el agente pierde todo el contexto conversacional anterior vía `agent.clearHistory()`. `Ctrl+L` despacha la misma acción.
+
+Como los turnos cerrados ya están en el scrollback nativo del terminal (§4.2), el handler emite además `\x1b[2J\x1b[3J\x1b[H` antes de despachar: `<Static>` no puede retirar lo que ya imprimió.
 
 **AgentEvent → Componente:** el `<MessageList>` consume el stream de `AgentEvent` y los reduce a la representación visual:
 
@@ -1328,7 +1324,7 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
 | `subagent_progress` (8B+) | Actualiza la línea de actividad del bloque/nodo del subagente. |
 | `subagent_event` (8C) | Enruta el `AgentEvent` envuelto al nodo por `subagentId`; alimenta sus tool calls y marca `speakingId`. Ver §5.6. |
 | `subagent_completed` (8A/8C) | Fija estado terminal + `summary`/`error`/`filesChanged` del bloque/nodo. Colapsa el árbol al agregado si todos terminaron. |
-| `thinking` | **No se renderiza por defecto.** Solo visible en modo `--debug`: se muestra como un bloque `<Box>` colapsado con borde dim y prefijo `⊙ thinking`. |
+| `thinking` | **No se renderiza por defecto.** Solo visible con `/debug` activo (o `--debug`): una línea dim truncada con prefijo `⊙ thinking`. Sin `debug`, el reducer descarta el evento sin tocar el estado. |
 | `error { fatal: false }` | Igual que `tool_error` — el loop continúa, el error es parte del flujo normal. |
 | `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'` (valor incluido en el enum de `AgentEvent.done` — ver §12.1 de `STRATUM_PROJECT_DEFINITION.md`). |
 | `done` | Quita el cursor de streaming del último `<StreamingText>` y lo reemplaza con `<MarkdownText>` (re-render con markdown formateado). Habilita el input. Actualiza la sesión guardada. Ver [§5.3 — Renderizado de Markdown](./STRATUM_UI_SPECIFICATION.md#53-renderizado-de-markdown-en-respuestas-del-agente). |
@@ -1346,6 +1342,8 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
 - Título: `chalk.hex('#EF4444').bold`
 - Mensaje: `chalk.hex('#FCA5A5')`
 - Sugerencia: `chalk.hex('#6B7280').dim`
+
+Se renderiza en `<ConversationView>`, entre `<MessageList>` e `<InputArea>` — el mismo hueco que `<DestructiveConfirm>` (§12). La sugerencia la deriva `suggestForError(message)`, un mapa de patrones conocidos (`ECONNREFUSED`, `ENOTFOUND`, `401`, `404`, `429`, desbordamiento de contexto…); si el error no encaja con ninguno, la línea se omite en lugar de inventarse una recomendación.
 
 ---
 
@@ -1454,7 +1452,11 @@ Según lo definido en `§12.5` de `STRATUM_PROJECT_DEFINITION.md`:
 
 ## 14. Estado de Arranque — Conexión MCP Servers
 
-Al iniciar `stratum chat`, los MCP servers se conectan de forma eager (§12.8 de `STRATUM_PROJECT_DEFINITION.md`). Si hay servers configurados, esta fase puede durar varios segundos. Se renderiza en el banner, antes de que el prompt `❯❯` aparezca.
+> **Solo aplica con `mcp.startup: 'eager'`.** El Hito 4.1 introdujo el modo `lazy` — hoy el **default** — en el que los servers conectan en background (`startBackground`) y el banner **no espera a nada**: el prompt aparece de inmediato y el estado de conectividad se sigue en el segmento `mcp ●` del status bar (§4.1). Esta sección describe el arranque bloqueante, que solo se activa cuando la config pide `eager` explícitamente.
+
+Con `mcp.startup: 'eager'`, los MCP servers se conectan antes de aceptar entrada (§12.8 de `STRATUM_PROJECT_DEFINITION.md`). Si hay servers configurados, esta fase puede durar varios segundos. Se renderiza en el banner, antes de que el prompt `❯❯` aparezca.
+
+**Nota de implementación:** la conexión se lanza en `chat.ts` pero **no se espera ahí** — si se hiciera, la fase de conexión habría terminado antes de que Ink pintara nada y el panel nunca sería visible. `<MCPStartup>` sondea el estado de los clientes del `McpManager` y avisa con `onAllSettled`. Por el mismo motivo, los fallos de conexión se muestran en el propio panel en lugar de escribirse a `stderr`, que corrompería el render de Ink.
 
 ### Layout durante el arranque
 
@@ -1479,15 +1481,20 @@ Al iniciar `stratum chat`, los MCP servers se conectan de forma eager (§12.8 de
 
 - La sección de MCP startup aparece **debajo del ASCII art**, en el mismo estado A (banner), antes de mostrar los tips y el prompt.
 - El prompt `❯❯` y los tips solo aparecen una vez que **todos los servers han terminado** (conectado o fallado).
-- Si no hay servers configurados, esta sección no se renderiza (el banner va directo a los tips).
-- Si un server tarda más de 5 segundos, se marca como `(timeout)` en rojo y se continúa.
+- Si no hay servers configurados —o si `mcp.startup` es `lazy`— esta sección no se renderiza y el banner va directo a los tips.
+- El corte por tiempo lo aplica el propio `McpServerClient` con el `startupTimeout` de cada server (15 s por defecto, §12.8.1). El panel solo etiqueta el resultado: si el server terminó desconectado habiendo agotado su `startupTimeout`, se marca `(timeout)`; si falló antes, `(no disponible)`.
 
 ### Componente Ink
 
 ```tsx
-// Fase de arranque: antes del phase 'ready' del banner
-{mcpServers.length > 0 && phase === 'connecting' && (
-  <MCPStartup servers={mcpServers} onAllSettled={() => setPhase('typing')} />
+// En <Banner>, entre el ASCII art y los tips. `mcpStartup` solo llega con
+// `mcp.startup: 'eager'`; con `lazy` es undefined y mcpSettled arranca en true.
+{mcpStartup && !mcpSettled && (
+  <MCPStartup
+    manager={mcpStartup.manager}
+    timeouts={mcpStartup.timeouts}
+    onAllSettled={handleMcpSettled}
+  />
 )}
 ```
 
@@ -1510,5 +1517,5 @@ Al iniciar `stratum chat`, los MCP servers se conectan de forma eager (§12.8 de
 
 ---
 
-*Documento generado: 2026-05-27 | Versión: 0.3.0-draft | Revisión: correcciones de compatibilidad Ink/terminal, nuevas secciones §12–§14; §5.3 Renderizado de Markdown (dual-mode, marked + Ink components, CodeBlock, InlineCode)*
+*Documento generado: 2026-05-27 | Versión: 0.4.0 | Revisión (Hito 10, 2026-08-27): cierre de la UI base y sincronización con la implementación — §4.2 reescrita a la estrategia `<Static>` + scrollback nativo (se retira la ventana virtual y `PgUp`/`PgDn` de §10); §5.2 completa la tabla de /comandos y sustituye el flujo `InitAgent`/`InitEvent` de `/init` por el comando-plantilla del Hito 2.5; §9 añade el eje vertical y el ancho máximo de contenido; §11 detalla `<FatalError>` y el gate de `/debug` para los eventos `thinking`; §14 se condiciona a `mcp.startup: 'eager'`*
 *Documento relacionado: [Definición del Proyecto](./STRATUM_PROJECT_DEFINITION.md)*

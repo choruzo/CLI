@@ -3,38 +3,7 @@ import { existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { loadConfig, findConfigFile } from '../../config/loader.js';
 import { StratumConfigSchema } from '../../config/schema.js';
-
-function getByDotPath(obj: Record<string, unknown>, path: string): unknown {
-  return path.split('.').reduce<unknown>((current, key) => {
-    if (current !== null && typeof current === 'object') {
-      return (current as Record<string, unknown>)[key];
-    }
-    return undefined;
-  }, obj);
-}
-
-function setByDotPath(obj: Record<string, unknown>, path: string, value: unknown): void {
-  const keys = path.split('.');
-  let current: Record<string, unknown> = obj;
-
-  for (let i = 0; i < keys.length - 1; i++) {
-    const key = keys[i];
-    if (!(key in current) || typeof current[key] !== 'object' || current[key] === null) {
-      current[key] = {};
-    }
-    current = current[key] as Record<string, unknown>;
-  }
-
-  const lastKey = keys[keys.length - 1];
-  // Try to coerce common types
-  if (value === 'true') current[lastKey] = true;
-  else if (value === 'false') current[lastKey] = false;
-  else if (typeof value === 'string' && !isNaN(Number(value)) && value.trim() !== '') {
-    current[lastKey] = Number(value);
-  } else {
-    current[lastKey] = value;
-  }
-}
+import { getByDotPath, setByDotPath, formatConfigValue } from '../../config/dot-path.js';
 
 const configGet = new Command('get')
   .description('Get a config value by dot-path key')
@@ -47,9 +16,7 @@ const configGet = new Command('get')
         process.stderr.write(`Key not found: ${key}\n`);
         process.exit(1);
       }
-      process.stdout.write(
-        typeof value === 'object' ? JSON.stringify(value, null, 2) : String(value),
-      );
+      process.stdout.write(formatConfigValue(value));
       process.stdout.write('\n');
     } catch (err) {
       process.stderr.write(`Error loading config: ${(err as Error).message}\n`);

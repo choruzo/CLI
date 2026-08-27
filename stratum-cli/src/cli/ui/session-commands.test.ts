@@ -37,3 +37,62 @@ describe('filterCommands (panel §5.2)', () => {
     expect(filterCommands('hola /model')).toEqual([]);
   });
 });
+
+describe('cobertura de la tabla de §5.2 (Hito 10)', () => {
+  const names = SESSION_COMMANDS.map((c) => c.name);
+
+  it('registra los comandos de contexto y sesión', () => {
+    expect(names).toEqual(
+      expect.arrayContaining([
+        '/clear',
+        '/compact',
+        '/context',
+        '/debug',
+        '/mcp reload',
+        '/sessions list',
+        '/sessions resume',
+        '/sessions delete',
+        '/config get',
+        '/config set',
+      ]),
+    );
+  });
+
+  it('marca hasArgs solo en los comandos que esperan argumentos', () => {
+    const byName = new Map(SESSION_COMMANDS.map((c) => [c.name, c.hasArgs]));
+    // Sin argumentos: se ejecutan directamente al pulsar Enter.
+    for (const n of ['/clear', '/compact', '/context', '/debug', '/mcp reload', '/sessions list']) {
+      expect(byName.get(n), n).toBe(false);
+    }
+    // Con argumentos: Enter solo completa el prefijo en el input.
+    for (const n of ['/sessions resume', '/sessions delete', '/config get', '/config set']) {
+      expect(byName.get(n), n).toBe(true);
+    }
+  });
+
+  it('"/c" ofrece toda la familia de comandos que empiezan por c', () => {
+    const found = filterCommands('/c').map((c) => c.name);
+    expect(found).toEqual(
+      expect.arrayContaining([
+        '/clear',
+        '/compact',
+        '/context',
+        '/config get',
+        '/config set',
+        '/config_provider',
+      ]),
+    );
+  });
+
+  it('"/sessions" ofrece los tres subcomandos', () => {
+    expect(filterCommands('/sessions').map((c) => c.name)).toEqual([
+      '/sessions list',
+      '/sessions resume',
+      '/sessions delete',
+    ]);
+  });
+
+  it('no hay nombres duplicados en el registro', () => {
+    expect(new Set(names).size).toBe(names.length);
+  });
+});
