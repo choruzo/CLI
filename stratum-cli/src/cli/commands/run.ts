@@ -9,6 +9,7 @@ import type {
   PlanDecision,
 } from '../../agent/types.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
+import { makeCliQuestionAsker } from '../ask-questions.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
 import { generateSessionId } from '../../session/store.js';
@@ -211,6 +212,9 @@ export const runCommand = new Command('run')
           allowDestructive: opts.allowDestructive,
           destructivePolicy: policy,
           onConfirmDestructive: policy === 'ask' ? confirmDestructive : undefined,
+          // Tanda única de preguntas (Hito 2.5, F7). Sin TTY no hay callback:
+          // el loop se lo dice al agente y este continúa con supuestos.
+          onAskQuestions: makeCliQuestionAsker(),
           onSubagentPersist: (rec) =>
             rec.result
               ? subagentStore.saveResult(rec.id, rec.profile, rec.task, rec.result)
@@ -269,6 +273,19 @@ export const runCommand = new Command('run')
                 `[ctx] Contexto comprimido: ${event.tokensBefore} → ${event.tokensAfter} tokens ` +
                   `(${event.roundsCompressed} rondas)\n`,
               );
+              break;
+
+            // La tanda de preguntas la imprime el propio asker (readline);
+            // aquí solo se deja constancia de que se omitió.
+            case 'questions_asked':
+              break;
+
+            case 'questions_answered':
+              if (event.answers === null) {
+                process.stderr.write(
+                  '[question] sin respuesta: el agente continuará con supuestos.\n',
+                );
+              }
               break;
 
             case 'plan_proposed':

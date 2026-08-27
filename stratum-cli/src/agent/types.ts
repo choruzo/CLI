@@ -17,6 +17,9 @@ export type AgentEvent =
       tokensAfter: number;
       roundsCompressed: number;
     }
+  // Hito 2.5 (F7) — tanda única de preguntas al usuario (tool `question`)
+  | { type: 'questions_asked'; questions: QuestionItem[] }
+  | { type: 'questions_answered'; answers: QuestionAnswer[] | null }
   // Hito 7 - Plan & Execute
   | { type: 'plan_proposed'; plan: Plan }
   | { type: 'plan_step_update'; stepId: string; status: PlanStepStatus }
@@ -52,6 +55,22 @@ export interface Plan {
 export type PlanDecision = { decision: 'approve'; plan: Plan } | { decision: 'reject' };
 
 export type AgentMode = 'normal' | 'plan' | 'execute';
+
+// ---------------------------------------------------------------------------
+// Hito 2.5 (F7) — Tool `question`: tanda única de preguntas al usuario
+// ---------------------------------------------------------------------------
+
+export interface QuestionItem {
+  question: string;
+  /** Opciones sugeridas. Vacío/ausente → respuesta libre. */
+  options?: string[];
+}
+
+export interface QuestionAnswer {
+  question: string;
+  /** Respuesta del usuario. Cadena vacía = la omitió. */
+  answer: string;
+}
 
 // ---------------------------------------------------------------------------
 // Hito 8 — Multi-agente (§12.16)
@@ -213,6 +232,13 @@ export interface RunOptions {
   compressionMode?: 'normal' | 'conservative';
   mode?: AgentMode;
   onApprovePlan?: (plan: Plan) => Promise<PlanDecision>;
+  /**
+   * Gate de la tool `question` (Hito 2.5, F7). El loop la intercepta, pausa y
+   * espera aquí las respuestas del usuario. `null` = no hay usuario disponible
+   * (CI/piped sin TTY) o el usuario omitió la tanda: el loop se lo dice al
+   * agente para que continúe con supuestos razonables. Sin callback → `null`.
+   */
+  onAskQuestions?: (questions: QuestionItem[]) => Promise<QuestionAnswer[] | null>;
   plan?: Plan;
   onPlanPersist?: (plan: Plan, done: boolean) => void;
   /** Cuando true, el plan fue inyectado como preámbulo de reanudación; el loop no lo re-inyecta. */

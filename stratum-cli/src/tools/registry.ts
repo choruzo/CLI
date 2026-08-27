@@ -11,6 +11,7 @@ import type { AgentMode } from '../agent/types.js';
 import { truncateToolOutput } from './truncate.js';
 import { PLAN_ALLOWLIST, PRESENT_PLAN_TOOL, UPDATE_PLAN_TOOL } from '../agent/plan.js';
 import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
+import { QUESTION_TOOL } from './question.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('tools');
@@ -37,7 +38,8 @@ export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
  * dimensión "perfil de subagente":
  *  - `allowedTools` (cuando no es null) restringe a su intersección.
  *  - `isSubagent` fuerza profundidad = 1 ocultando delegate_task: el subagente
- *    nunca puede delegar de nuevo (§12.16).
+ *    nunca puede delegar de nuevo (§12.16). Oculta también `question`: la TTY
+ *    es del padre y un hijo en paralelo no tiene con quién dialogar.
  */
 export interface ToolsetFilter {
   allowedTools?: readonly string[] | null;
@@ -46,7 +48,7 @@ export interface ToolsetFilter {
 
 export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): boolean {
   if (!filter) return true;
-  if (filter.isSubagent && name === DELEGATE_TASK_TOOL) return false;
+  if (filter.isSubagent && (name === DELEGATE_TASK_TOOL || name === QUESTION_TOOL)) return false;
   if (filter.allowedTools && !filter.allowedTools.includes(name)) return false;
   return true;
 }

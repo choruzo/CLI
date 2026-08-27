@@ -9,6 +9,8 @@ import type {
   DestructiveDecision,
   Plan,
   PlanDecision,
+  QuestionAnswer,
+  QuestionItem,
   RunOptions,
 } from '../../agent/types.js';
 import type { ProviderConfig } from '../../config/schema.js';
@@ -93,6 +95,8 @@ interface AppState {
   planMode: AgentMode;
   plan: Plan | null;
   pendingApproval: boolean;
+  /** Tanda de preguntas pendiente (Hito 2.5, F7); null fuera del gate. */
+  pendingQuestions: QuestionItem[] | null;
   // ----- Inspector de subagentes (Hito 8C, §5.7) -----
   /** Transcripts en memoria de los subagentes de la sesión (por subagentId). */
   subagentTranscripts: Map<string, SubagentTranscript>;
@@ -115,6 +119,7 @@ export type AppAction =
   | { type: 'INIT_DONE' }
   | { type: 'CONFIRM_SHOW'; request: PendingConfirm }
   | { type: 'CONFIRM_RESOLVE' }
+  | { type: 'QUESTIONS_RESOLVE' }
   | { type: 'PLAN_MODE_START' }
   | { type: 'APPROVE_PLAN'; plan: Plan }
   | { type: 'REJECT_PLAN' }
@@ -232,6 +237,9 @@ function reducer(state: AppState, action: AppAction): AppState {
 
     case 'CONFIRM_RESOLVE':
       return { ...state, pendingConfirm: null };
+
+    case 'QUESTIONS_RESOLVE':
+      return { ...state, pendingQuestions: null };
 
     case 'PLAN_MODE_START':
       return { ...state, planMode: 'plan', plan: null, pendingApproval: false };
@@ -494,6 +502,16 @@ function reducer(state: AppState, action: AppAction): AppState {
         };
       }
 
+      // Hito 2.5 (F7): el agente abrió la tanda única de preguntas. El gate se
+      // resuelve desde <QuestionPrompt> (igual que el destructivo y el de plan);
+      // questions_answered solo confirma el cierre.
+      if (ev.type === 'questions_asked') {
+        return { ...state, pendingQuestions: ev.questions };
+      }
+      if (ev.type === 'questions_answered') {
+        return { ...state, pendingQuestions: null };
+      }
+
       // Hito 7 — Fase 2: el agente propuso un plan; abrir el gate de aprobación.
       if (ev.type === 'plan_proposed') {
         return { ...state, plan: ev.plan, pendingApproval: true };
@@ -550,6 +568,7 @@ function reducer(state: AppState, action: AppAction): AppState {
             currentItem: null,
             thinking: false,
             pendingConfirm: null,
+            pendingQuestions: null,
             planMode: 'normal',
             plan: null,
             pendingApproval: false,
@@ -562,6 +581,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           currentItem: null,
           thinking: false,
           pendingConfirm: null,
+          pendingQuestions: null,
           planMode: 'normal',
           pendingApproval: false,
         };
@@ -658,6 +678,7 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
     focusedBlockIndex: 0,
     expandedBlockIds: new Set<string>(),
     pendingConfirm: null,
+    pendingQuestions: null,
     planMode: resumeInfo ? 'execute' : 'normal',
     plan: resumeInfo?.plan ?? null,
     pendingApproval: false,
@@ -725,6 +746,26 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
     resolver?.(decision);
   }, []);
 
+  // -------------------------------------------------------------------------
+  // Tanda única de preguntas (Hito 2.5, F7): el loop intercepta la tool
+  // `question`, emite questions_asked (que abre el gate en el reducer) y espera
+  // aquí; <QuestionPrompt> resuelve con las respuestas o con null si se omite.
+  // -------------------------------------------------------------------------
+  const questionsResolverRef = useRef<((a: QuestionAnswer[] | null) => void) | null>(null);
+
+  const onAskQuestions = useCallback((): Promise<QuestionAnswer[] | null> => {
+    return new Promise<QuestionAnswer[] | null>((resolve) => {
+      questionsResolverRef.current = resolve;
+    });
+  }, []);
+
+  const resolveQuestions = useCallback((answers: QuestionAnswer[] | null) => {
+    const resolve = questionsResolverRef.current;
+    questionsResolverRef.current = null;
+    dispatch({ type: 'QUESTIONS_RESOLVE' });
+    resolve?.(answers);
+  }, []);
+
   // Refs que reflejan el estado del plan para getRunOptions (sin necesitar deps de state).
   const planModeRef = useRef(state.planMode);
   planModeRef.current = state.planMode;
@@ -736,6 +777,7 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
       sessionId,
       destructivePolicy: allowAllRef.current ? 'allow' : 'ask',
       onConfirmDestructive,
+      onAskQuestions,
       onSubagentPersist: (rec) =>
         rec.result
           ? subagentStoreRef.current.saveResult(rec.id, rec.profile, rec.task, rec.result)
@@ -757,7 +799,7 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
       }
     }
     return opts;
-  }, [onConfirmDestructive, resumeInfo, agent, sessionId]);
+  }, [onConfirmDestructive, onAskQuestions, resumeInfo, agent, sessionId]);
 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
@@ -837,6 +879,7 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
   const paletteEligible =
     !state.thinking &&
     !state.pendingConfirm &&
+    !state.pendingQuestions &&
     !overlay &&
     state.focusState === 'input' &&
     !paletteDismissed &&
@@ -867,6 +910,10 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
       }
       if (state.pendingConfirm) {
         resolveConfirm('deny');
+        return;
+      }
+      if (state.pendingQuestions) {
+        resolveQuestions(null);
         return;
       }
       if (state.pendingApproval) {
@@ -923,6 +970,9 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
 
     // El gate de aprobación de plan gestiona su propio input (A/E/R)
     if (state.pendingApproval) return;
+
+    // La tanda de preguntas gestiona su propio input (selector / texto libre)
+    if (state.pendingQuestions) return;
 
     // ----- Paleta de /comandos (§5.2): ↑↓ navega, Tab completa, Esc cierra -----
     if (paletteItems.length > 0) {
@@ -994,8 +1044,15 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
 
           const consume = async (input: string): Promise<void> => {
             agentText = '';
-            for await (const event of agent.run(input, { compressionMode: 'conservative' })) {
-              if (event.type === 'text_delta') {
+            for await (const event of agent.run(input, {
+              compressionMode: 'conservative',
+              // F7: `/init` es interactivo — el agente puede abrir la tanda única
+              // de preguntas antes de escribir STRATUM.md.
+              onAskQuestions,
+            })) {
+              if (event.type === 'questions_asked' || event.type === 'questions_answered') {
+                dispatch({ type: 'AGENT_EVENT', event });
+              } else if (event.type === 'text_delta') {
                 agentText += event.delta;
               } else if (
                 event.type === 'tool_call_start' &&
@@ -1060,7 +1117,7 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
         }
       })();
     },
-    [agent],
+    [agent, onAskQuestions],
   );
 
   // -------------------------------------------------------------------------
@@ -1681,6 +1738,9 @@ export function App({ agent, version, mcpManager, logoPreRendered, sessionId }: 
         pendingApproval={state.pendingApproval}
         onPlanApprove={resolvePlanApprove}
         onPlanReject={resolvePlanReject}
+        pendingQuestions={state.pendingQuestions}
+        onQuestionsSubmit={(answers) => resolveQuestions(answers)}
+        onQuestionsCancel={() => resolveQuestions(null)}
       />
     </Box>
   );

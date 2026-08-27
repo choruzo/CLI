@@ -7,9 +7,10 @@ import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
 import { PlanView } from './PlanView.js';
 import { PlanApproval } from './PlanApproval.js';
+import { QuestionPrompt } from './QuestionPrompt.js';
 import type { ConvItem, PendingConfirm } from './App.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
-import type { AgentMode, Plan } from '../../agent/types.js';
+import type { AgentMode, Plan, QuestionAnswer, QuestionItem } from '../../agent/types.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -46,6 +47,11 @@ interface Props {
   pendingApproval?: boolean;
   onPlanApprove?: (plan: Plan) => void;
   onPlanReject?: () => void;
+  // ----- Tanda única de preguntas (Hito 2.5, F7) -----
+  /** Preguntas pendientes de responder; null fuera del gate. */
+  pendingQuestions?: QuestionItem[] | null;
+  onQuestionsSubmit?: (answers: QuestionAnswer[]) => void;
+  onQuestionsCancel?: () => void;
 }
 
 export function ConversationView({
@@ -75,6 +81,9 @@ export function ConversationView({
   pendingApproval,
   onPlanApprove,
   onPlanReject,
+  pendingQuestions,
+  onQuestionsSubmit,
+  onQuestionsCancel,
 }: Props) {
   return (
     <Box flexDirection="column" width="100%">
@@ -102,6 +111,13 @@ export function ConversationView({
           onReject={onPlanReject ?? (() => undefined)}
         />
       )}
+      {pendingQuestions && pendingQuestions.length > 0 && (
+        <QuestionPrompt
+          questions={pendingQuestions}
+          onSubmit={onQuestionsSubmit ?? (() => undefined)}
+          onCancel={onQuestionsCancel ?? (() => undefined)}
+        />
+      )}
       {pendingConfirm && (
         <DestructiveConfirm
           toolName={pendingConfirm.toolName}
@@ -118,7 +134,7 @@ export function ConversationView({
           value={inputValue}
           onChange={onInputChange}
           onSubmit={onInputSubmit}
-          disabled={thinking || !!pendingConfirm}
+          disabled={thinking || !!pendingConfirm || !!pendingQuestions?.length}
         />
       )}
     </Box>

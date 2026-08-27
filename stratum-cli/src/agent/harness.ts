@@ -12,6 +12,7 @@ import type {
   Plan,
   PlanDecision,
   PlanStepStatus,
+  QuestionAnswer,
   SubagentResult,
   ToolCallReady,
   ToolContext,
@@ -28,6 +29,7 @@ import {
   isPlanComplete,
 } from './plan.js';
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
+import { QUESTION_TOOL, parseQuestionInput, formatQuestionAnswers } from '../tools/question.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import type { ProfileLoader } from './profiles.js';
 import { runSubagent, serializeSubagentResult, generateSubagentId } from './subagent.js';
@@ -485,6 +487,11 @@ export class ReactLoop {
       persistPlan(isPlanComplete(plan));
     }
 
+    // Hito 2.5 (F7): la tanda de preguntas es ÚNICA por run. Una segunda llamada
+    // a `question` se rechaza con tool_error recuperable para que un modelo
+    // pequeño no convierta el turno en un interrogatorio.
+    let questionsAsked = false;
+
     // Hito 8: los subagentes aplican el maxIterations de su presupuesto en vez
     // del global de config (límite duro, §12.16).
     const maxIterations = opts?.maxIterations ?? this.config.agent.maxIterations;
@@ -755,8 +762,35 @@ export class ReactLoop {
       const updatePlanCalls: ToolCallReady[] = [];
       const delegateCalls: ToolCallReady[] = [];
       let presentPlanCall: ToolCallReady | null = null;
+      let questionCall: ToolCallReady | null = null;
 
       for (const call of readyCalls) {
+        // question (Hito 2.5, F7): tanda única de preguntas al usuario. Tool de
+        // control — se intercepta aquí y nunca llega al dispatcher.
+        if (call.name === QUESTION_TOOL) {
+          if (!questionsAsked && !questionCall) {
+            questionCall = call;
+          } else {
+            const err =
+              'Ya preguntaste al usuario en este turno: `question` es una tanda única. ' +
+              'Continúa con los supuestos más razonables.';
+            yield {
+              type: 'tool_error',
+              id: call.id,
+              name: call.name,
+              error: err,
+              recoverable: true,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: formatToolError(call.name, err, fmt, undefined),
+            });
+          }
+          continue;
+        }
+
         // delegate_task (Hito 8): interceptada como las tools de control de plan.
         // En modo plan (read-only) cae al rechazo de tool mutante de más abajo.
         if (call.name === DELEGATE_TASK_TOOL && mode !== 'plan') {
@@ -940,6 +974,49 @@ export class ReactLoop {
       // -----------------------------------------------------------------------
       if (delegateCalls.length > 0) {
         yield* this.runDelegations(delegateCalls, opts, signal, fmt);
+      }
+
+      // -----------------------------------------------------------------------
+      // Hito 2.5 (F7) — Gate de preguntas. Como el de plan, se resuelve al final
+      // de la iteración (tras las tools del mismo turno) y siempre inyecta un
+      // tool result: sin callback o sin respuestas, se instruye al agente a
+      // continuar con supuestos razonables en vez de bloquear el loop.
+      // -----------------------------------------------------------------------
+      if (questionCall) {
+        questionsAsked = true;
+        const items = parseQuestionInput(questionCall.input);
+        if (items.length === 0) {
+          const err = 'question requiere al menos una pregunta no vacía.';
+          yield {
+            type: 'tool_error',
+            id: questionCall.id,
+            name: questionCall.name,
+            error: err,
+            recoverable: true,
+          };
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: questionCall.id,
+            name: questionCall.name,
+            content: formatToolError(questionCall.name, err, fmt, undefined),
+          });
+        } else {
+          yield { type: 'questions_asked', questions: items };
+          let answers: QuestionAnswer[] | null = null;
+          try {
+            answers = opts?.onAskQuestions ? await opts.onAskQuestions(items) : null;
+          } catch {
+            answers = null;
+          }
+          loopLog.info('questions asked', { count: items.length, answered: answers !== null });
+          yield { type: 'questions_answered', answers };
+          this.messages.push({
+            role: 'tool',
+            tool_call_id: questionCall.id,
+            name: questionCall.name,
+            content: formatQuestionAnswers(items, answers),
+          });
+        }
       }
 
       // -----------------------------------------------------------------------

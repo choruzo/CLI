@@ -14,6 +14,7 @@ import { recallDecisionsTool } from './memory/recall-decisions.js';
 import { presentPlanTool } from './plan/present-plan.js';
 import { updatePlanTool } from './plan/update-plan.js';
 import { delegateTaskTool } from './agent/delegate.js';
+import { questionTool } from './question.js';
 import { registerSshTools } from './ssh/index.js';
 
 export function registerBuiltinTools(registry: ToolRegistry, config: StratumConfig): void {
@@ -28,6 +29,8 @@ export function registerBuiltinTools(registry: ToolRegistry, config: StratumConf
   registry.register(webFetchTool);
   registry.register(storeDecisionTool);
   registry.register(recallDecisionsTool);
+  // Hito 2.5 (F7) — tanda única de preguntas: control, interceptada por el loop.
+  registry.register(questionTool);
   // Hito 7 — Plan & Execute: tools de control interceptadas por el ReactLoop.
   registry.register(presentPlanTool);
   registry.register(updatePlanTool);

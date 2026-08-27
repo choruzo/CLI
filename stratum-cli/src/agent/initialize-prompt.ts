@@ -54,6 +54,10 @@ When in doubt, omit. Prefer short sections and bullets. If the repo is simple, k
 
 If \`STRATUM.md\` already exists at \`\${path}\`, read it first and improve it in place. Preserve verified useful guidance, delete fluff or stale claims, and reconcile with the current codebase.
 
+## Asking the user
+
+If something important cannot be settled by reading the repository — which of several entrypoints is the real one, which test command the team actually uses, whether a package is dead code — call the \`question\` tool ONCE with all your doubts at the same time (at most 4, with suggested options when they exist). Do not ask about anything you can verify by reading files, and do not ask twice: if there is no answer, pick the most reasonable assumption and state it in the file.
+
 ## Output
 
 Write the complete \`STRATUM.md\` using the \`write_file\` tool at path \`\${path}/STRATUM.md\`. Start with a top-level \`#\` heading and use \`##\` sections for each topic. No preamble or explanation — just write the file.`;

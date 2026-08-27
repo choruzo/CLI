@@ -8,6 +8,7 @@ import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { StratumAgent } from '../../agent/core.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
+import { makeCliQuestionAsker } from '../ask-questions.js';
 
 // ---------------------------------------------------------------------------
 // Plantilla de .stratumrc.json por defecto
@@ -93,6 +94,10 @@ export const initCommand = new Command('init')
       const errorLabel = isColorTty ? chalk.hex('#EF4444')('[error]') : '[error]';
       const fatalLabel = isColorTty ? chalk.hex('#EF4444').bold('[fatal]') : '[fatal]';
 
+      // Tanda única de preguntas (Hito 2.5, F7): solo con TTY; en CI el loop
+      // instruye al agente a continuar con supuestos razonables.
+      const onAskQuestions = makeCliQuestionAsker();
+
       const toolStartTimes = new Map<string, number>();
       let wroteStratum = false;
       const stratumWriteIds = new Set<string>();
@@ -102,6 +107,7 @@ export const initCommand = new Command('init')
           signal: controller.signal,
           allowDestructive: opts.allowDestructive,
           compressionMode: 'conservative',
+          onAskQuestions,
         })) {
           switch (event.type) {
             case 'tool_call_ready':

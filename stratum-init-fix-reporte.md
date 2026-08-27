@@ -151,7 +151,10 @@ Here is some useful information about the environment you are running in:
 
 ---
 
-## F7 (opcional, tras F1–F6) — Tool `question`
+## F7 ✅ (cerrado 2026-08-27) — Tool `question`
+
+**Implementado** en `src/tools/question.ts` (tool de control interceptada por el `ReactLoop`), `src/cli/ui/QuestionPrompt.tsx` (TUI Ink), `src/cli/ask-questions.ts` (readline para `run`/`init`) y el bloque "Asking the user" del `INITIALIZE_PROMPT`. Sin TTY no hay callback: el loop inyecta `<question_answers unavailable="true">` y el agente continúa con supuestos en vez de bloquearse.
+
 
 El prompt de init de OpenCode contempla una tanda única de preguntas al usuario cuando el repo no responde algo importante. Implementación mínima: tool `question` que recibe `questions: [{question, options[]}]`, pausa el loop, muestra las opciones en la TUI (Ink) o por stdin en modo comando, y devuelve las respuestas como tool result. Mientras no exista, eliminar cualquier referencia a preguntar al usuario en `INITIALIZE_PROMPT` para que Gemma no intente usar una tool inexistente.
 
