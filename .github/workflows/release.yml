@@ -8,6 +8,7 @@ on:
 
 permissions:
   contents: write
+  id-token: write   # necesario para la provenance de npm
 
 jobs:
   release:
@@ -28,6 +29,7 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '22'
+          registry-url: 'https://registry.npmjs.org'
 
       - name: Validate version matches tag
         run: |
@@ -54,6 +56,16 @@ jobs:
         run: |
           TARBALL=$(npm pack --ignore-scripts --silent | tail -n 1)
           echo "TARBALL=$TARBALL" >> $GITHUB_ENV
+
+      - name: Publish to npm
+        run: |
+          if [[ "${GITHUB_REF_NAME}" == *"-beta."* ]]; then
+            npm publish "$TARBALL" --provenance --access public --tag beta
+          else
+            npm publish "$TARBALL" --provenance --access public
+          fi
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
 
       - name: Create GitHub Release
         run: |

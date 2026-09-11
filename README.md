@@ -4,10 +4,10 @@
 
 <div align="center">
 
-[![version](https://img.shields.io/badge/version-0.2.0-F5A623?style=flat-square&labelColor=111111)](https://github.com/choruzo/CLI)
+[![npm](https://img.shields.io/npm/v/stratum-cli?style=flat-square&color=F5A623&labelColor=111111)](https://www.npmjs.com/package/stratum-cli)
 [![node](https://img.shields.io/badge/node-22+-F5A623?style=flat-square&labelColor=111111&logo=node.js&logoColor=F5A623)](https://nodejs.org)
 [![license](https://img.shields.io/badge/license-MIT-F5A623?style=flat-square&labelColor=111111)](LICENSE)
-[![status](https://img.shields.io/badge/hito-9%20completado-F5A623?style=flat-square&labelColor=111111)](STRATUM_PROJECT_DEFINITION.md)
+[![status](https://img.shields.io/badge/hito-10%20completado-F5A623?style=flat-square&labelColor=111111)](STRATUM_PROJECT_DEFINITION.md)
 
 **Agente CLI extensible · Provider-agnostic · Local-first**
 
@@ -38,6 +38,13 @@ Stratum es un agente de línea de comandos construido sobre un loop **ReAct** (R
 ## ✦ Inicio rápido
 
 Requiere **Node.js 22+**.
+
+```bash
+npm install -g stratum-cli
+stratum --help
+```
+
+O desde el código fuente:
 
 ```bash
 cd stratum-cli

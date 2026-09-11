@@ -132,7 +132,6 @@ describe('delegate_task — flujo del loop (Hito 8A)', () => {
     ]);
     // Provider del hijo que lanza al primer chunk → el loop hijo cierra con error.
     const failingChild: IProvider = {
-      // eslint-disable-next-line require-yield
       async *complete(_req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
         throw new Error('boom del hijo');
       },
