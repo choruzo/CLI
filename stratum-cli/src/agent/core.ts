@@ -6,6 +6,7 @@ import type { AgentEvent, Message, RunOptions, TokenAccounting, TokenStatus } fr
 import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
 import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
+import { prepareGuideIndex } from './guides.js';
 import { ProfileLoader } from './profiles.js';
 import { ChangeTracker } from './risk.js';
 import { SkillRegistry } from '../skills/registry.js';
@@ -62,6 +63,8 @@ export class StratumAgent {
   private readonly tdd = new TddLedger();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
+  /** Tabla de punteros a las guías largas. Vacía en modo `inline` (default). */
+  private readonly guidesBlock: string;
   /**
    * Contabilidad de tokens de la sesión (Hito 13). El `ReactLoop` vive un turno,
    * así que el acumulado se suma aquí. El estado se guarda aparte del número:
@@ -102,6 +105,18 @@ export class StratumAgent {
       this.skillsBlock = '';
     }
 
+    // Guías por puntero (§3 de gentle-pi): se materializan una sola vez por
+    // sesión, como el índice de skills. En modo `inline` devuelve cadena vacía
+    // y `buildSystemPrompt` sigue inyectando los cuerpos.
+    this.guidesBlock = prepareGuideIndex(
+      config,
+      {
+        agentProfiles: this.profiles.availableNames(),
+        testCommand: config.tools.testCommand,
+      },
+      process.cwd(),
+    );
+
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {
       this._resumePlan = options.resumePlan;
@@ -131,6 +146,7 @@ export class StratumAgent {
             providerName: router.providerName,
             agentProfiles: this.profiles.availableNames(),
             skills: this.skillsBlock,
+            guides: this.guidesBlock,
           }),
         },
       ];
@@ -213,6 +229,7 @@ export class StratumAgent {
       providerName: this.router.providerName,
       agentProfiles: this.profiles.availableNames(),
       skills: this.skillsBlock,
+      guides: this.guidesBlock,
     });
     if (this.messages[0]?.role === 'system') {
       this.messages[0] = { role: 'system', content: newSystemContent };

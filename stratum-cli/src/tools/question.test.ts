@@ -3,9 +3,11 @@ import {
   questionTool,
   parseQuestionInput,
   formatQuestionAnswers,
+  resolveQuestionAnswers,
   MAX_QUESTIONS,
   MAX_OPTIONS,
 } from './question.js';
+import type { QuestionItem } from '../agent/types.js';
 
 describe('tool question — schema (Hito 2.5, F7)', () => {
   it('acepta una tanda con opciones y otra libre', () => {
@@ -41,11 +43,18 @@ describe('parseQuestionInput', () => {
         { question: 'Sin opciones', options: [] },
       ],
     });
-    expect(items).toEqual([
-      { question: 'Pregunta suelta' },
-      { question: 'Con opciones', options: ['a', 'b'] },
-      { question: 'Sin opciones' },
+    expect(items.map((i) => i.question)).toEqual([
+      'Pregunta suelta',
+      'Con opciones',
+      'Sin opciones',
     ]);
+    expect(items[0]!.options).toBeUndefined();
+    expect(items[1]!.options!.map((o) => o.label)).toEqual(['a', 'b']);
+    expect(items[2]!.options).toBeUndefined();
+    // Cada opción lleva su propio token y ninguno codifica el ordinal.
+    const ids = items[1]!.options!.map((o) => o.id);
+    expect(new Set(ids).size).toBe(2);
+    for (const id of ids) expect(id).toMatch(/^opt_[a-z0-9]{6}$/);
   });
 
   it('corta en los topes de preguntas y opciones', () => {
@@ -92,5 +101,121 @@ describe('formatQuestionAnswers', () => {
       { question: '¿Comando?', answer: '' },
     ]);
     expect(out).toContain('unavailable="true"');
+  });
+});
+
+describe('resolveQuestionAnswers — dominio cerrado y token opaco', () => {
+  function closed(allowCustom = false): QuestionItem {
+    const [item] = parseQuestionInput({
+      questions: [
+        { question: '¿Entrypoint?', options: ['src/index.ts', 'src/cli.ts'], allowCustom },
+      ],
+    });
+    return item!;
+  }
+
+  it('acepta el token de una opción y canoniza a su etiqueta', () => {
+    const q = closed();
+    const chosen = q.options![1]!;
+    const { answers, rejections } = resolveQuestionAnswers(
+      [q],
+      // El gate devuelve el token; la etiqueta que traiga es irrelevante.
+      [{ question: q.question, answer: 'lo que sea', optionId: chosen.id }],
+    );
+    expect(rejections).toEqual([]);
+    expect(answers).toEqual([{ question: q.question, answer: 'src/cli.ts', optionId: chosen.id }]);
+  });
+
+  it('rechaza un token que no está en el envelope', () => {
+    const q = closed();
+    const { answers, rejections } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: 'src/cli.ts', optionId: 'opt_zzzzzz' }],
+    );
+    expect(answers).toEqual([]);
+    expect(rejections).toHaveLength(1);
+    expect(rejections[0]!.reason).toContain('opt_zzzzzz');
+  });
+
+  it('acepta texto que coincide exactamente con una etiqueta y le pone su token', () => {
+    const q = closed();
+    const { answers, rejections } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: '  SRC/CLI.TS  ' }],
+    );
+    expect(rejections).toEqual([]);
+    expect(answers[0]!.answer).toBe('src/cli.ts');
+    expect(answers[0]!.optionId).toBe(q.options![1]!.id);
+  });
+
+  it('rechaza texto fuera del dominio cuando no hay allowCustom', () => {
+    const q = closed();
+    const { answers, rejections } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: 'src/main.ts' }],
+    );
+    expect(answers).toEqual([]);
+    expect(rejections[0]!.reason).toContain('no coincide con ninguna');
+  });
+
+  it('con allowCustom sí acepta texto fuera del dominio', () => {
+    const q = closed(true);
+    const { answers, rejections } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: 'src/main.ts' }],
+    );
+    expect(rejections).toEqual([]);
+    expect(answers[0]).toEqual({ question: q.question, answer: 'src/main.ts' });
+  });
+
+  it('una respuesta vacía es omisión, no rechazo', () => {
+    const q = closed();
+    const { answers, rejections } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: '   ' }],
+    );
+    expect(answers).toEqual([]);
+    expect(rejections).toEqual([]);
+  });
+
+  it('las etiquetas duplicadas se colapsan al construir el envelope', () => {
+    // Sin esto, resolver por texto sería ambiguo por construcción.
+    const [item] = parseQuestionInput({
+      questions: [{ question: '¿Cuál?', options: ['Sí', ' sí ', 'SÍ', 'No'] }],
+    });
+    expect(item!.options!.map((o) => o.label)).toEqual(['Sí', 'No']);
+  });
+
+  it('sin opciones, el texto libre pasa tal cual', () => {
+    const q: QuestionItem = { question: '¿Comando de tests?' };
+    const { answers } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: ' npm test ' }],
+    );
+    expect(answers[0]!.answer).toBe('npm test');
+    expect(answers[0]!.optionId).toBeUndefined();
+  });
+
+  it('el tool result explica el descarte y no lo aproxima', () => {
+    const q = closed();
+    const out = formatQuestionAnswers(
+      [q, { question: '¿Algo más?' }],
+      [
+        { question: q.question, answer: 'src/main.ts' },
+        { question: '¿Algo más?', answer: 'no' },
+      ],
+    );
+    expect(out).toContain('respuesta descartada');
+    expect(out).not.toContain('src/main.ts');
+    expect(out).toContain('<answer>no</answer>');
+    // Queda una pregunta sin resolver: el agente debe seguir con supuestos.
+    expect(out).toContain('No repitas la tanda en este turno');
+  });
+
+  it('si todo se descarta, el resultado es "no disponible" con el motivo', () => {
+    const q = closed();
+    const out = formatQuestionAnswers([q], [{ question: q.question, answer: 'otra cosa' }]);
+    expect(out).toContain('unavailable="true"');
+    expect(out).toContain('fuera del dominio');
   });
 });

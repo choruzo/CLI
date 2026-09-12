@@ -20,6 +20,7 @@ import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
 import { closeSshPool } from '../../tools/ssh/index.js';
 import { StratumAgent } from '../../agent/core.js';
+import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import {
   configureLogging,
   flushLogging,
@@ -79,6 +80,7 @@ export const runCommand = new Command('run')
         stderrLevel: 'warn',
       });
       getLogger('cli').debug('run start', { task: task.slice(0, 120) });
+      warnInheritedGitRouting();
 
       let router;
       try {

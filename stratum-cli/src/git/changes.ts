@@ -16,6 +16,7 @@
  * Ver CLI-DOC/Investigacion/gentle-pi.md §2 (P3).
  */
 import { execa } from 'execa';
+import { scrubGitEnv } from './env.js';
 import { readFile, stat } from 'fs/promises';
 import { join } from 'path';
 
@@ -232,7 +233,15 @@ export function formatChangesReport(summary: ChangesSummary): string {
 
 async function git(cwd: string, args: string[]): Promise<string | null> {
   try {
-    const result = await execa('git', args, { cwd, reject: false, stripFinalNewline: false });
+    const result = await execa('git', args, {
+      cwd,
+      reject: false,
+      stripFinalNewline: false,
+      // Sin esto, un `GIT_DIR` heredado del entorno haría que estas dos
+      // invocaciones midieran otro repositorio, ignorando `cwd` (ver git/env.ts).
+      env: scrubGitEnv(),
+      extendEnv: false,
+    });
     if (result.exitCode !== 0) return null;
     return result.stdout;
   } catch {

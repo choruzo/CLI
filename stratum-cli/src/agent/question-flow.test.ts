@@ -42,7 +42,7 @@ describe('tool question — flujo del loop (Hito 2.5, F7)', () => {
     );
 
     expect(seen).toHaveLength(1);
-    expect(seen[0]![0]!.options).toEqual(['src/index.ts', 'src/cli.ts']);
+    expect(seen[0]![0]!.options!.map((o) => o.label)).toEqual(['src/index.ts', 'src/cli.ts']);
 
     const asked = events.find((e) => e.type === 'questions_asked');
     expect(asked).toBeDefined();

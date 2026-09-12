@@ -15,6 +15,7 @@ import { SessionStore, generateSessionId } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
 import { animateStartupLogo } from '../ui/startup-logo-animation.js';
+import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import {
   configureLogging,
   flushLogging,
@@ -68,6 +69,7 @@ export const chatCommand = new Command('chat')
         stderrLevel: 'warn',
       });
       getLogger('cli').debug('chat start', { provider: opts.provider, resume: opts.resume });
+      warnInheritedGitRouting();
 
       let router;
       try {

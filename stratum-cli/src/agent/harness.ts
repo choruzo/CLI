@@ -30,7 +30,12 @@ import {
   isPlanComplete,
 } from './plan.js';
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
-import { QUESTION_TOOL, parseQuestionInput, formatQuestionAnswers } from '../tools/question.js';
+import {
+  QUESTION_TOOL,
+  parseQuestionInput,
+  formatQuestionAnswers,
+  resolveQuestionAnswers,
+} from '../tools/question.js';
 import { TODO_TOOL } from '../tools/todo.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import {
@@ -1369,7 +1374,16 @@ export class ReactLoop {
           } catch {
             answers = null;
           }
-          loopLog.info('questions asked', { count: items.length, answered: answers !== null });
+          // La resolución estricta (token opaco / dominio cerrado) la aplica
+          // `formatQuestionAnswers`; aquí se recalcula solo para dejar los
+          // descartes en el log: sin esto, una respuesta fuera de dominio
+          // desaparecería sin rastro para quien depura el gate.
+          const { rejections } = resolveQuestionAnswers(items, answers);
+          loopLog.info('questions asked', {
+            count: items.length,
+            answered: answers !== null,
+            ...(rejections.length > 0 ? { rejected: rejections.map((r) => r.reason) } : {}),
+          });
           yield { type: 'questions_answered', answers };
           this.messages.push({
             role: 'tool',

@@ -363,6 +363,25 @@ export const StratumConfigSchema = z.object({
     .default({}),
 
   /**
+   * Forma del system prompt (§3 de `gentle-pi`). `guides` decide si los bloques
+   * largos de disciplina (`# Work routing`, `# Testing discipline`) viajan
+   * inline en cada petición o se materializan en ficheros que el agente lee
+   * bajo demanda siguiendo un puntero.
+   *
+   * El default es `inline` a propósito: seguir un puntero exige que el modelo
+   * decida abrir un fichero antes de trabajar, y un modelo pequeño no lo hace —
+   * se queda sin la disciplina en vez de ahorrarse el contexto. Con un modelo
+   * capaz y una ventana ajustada, `pointers` quita ~90 líneas de cada petición.
+   */
+  prompt: z
+    .object({
+      guides: z.enum(['inline', 'pointers']).default('inline'),
+      /** Directorio donde se materializan las guías. Relativo al cwd. */
+      guidesDir: z.string().default('./.stratum/guides'),
+    })
+    .default({}),
+
+  /**
    * Inventario SSH (Hito 9, §12.14). Deliberadamente **opcional** y sin
    * `.default({})`: si no hay sección `ssh`, las tools SSH no se registran en
    * el `ToolRegistry` y el LLM no las ve.

@@ -22,6 +22,13 @@ export interface SystemPromptEnv {
    */
   agentProfiles?: string[];
   /**
+   * Bloque `# Operating guides` ya renderizado (§3 de `gentle-pi`). Lo produce
+   * `prepareGuideIndex` en `StratumAgent` cuando `prompt.guides` es
+   * `'pointers'`. Presente → los cuerpos de esas guías NO se inyectan inline:
+   * el prompt lleva solo la tabla de punteros y el agente lee el fichero.
+   */
+  guides?: string;
+  /**
    * Bloque `# Skills` ya renderizado (Hito 12). Lo produce `SkillRegistry` en
    * `StratumAgent` una sola vez por sesión y se hereda tal cual a los
    * subagentes: el índice es el mismo para todos y ningún hijo redescubre.
@@ -100,6 +107,9 @@ function getShellInstructions(): string {
 const BASE_PROMPT = `You are Stratum, an interactive CLI tool that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user.
 
 IMPORTANT: You must NEVER generate or guess URLs for the user unless you are confident that the URLs are for helping the user with programming. You may use URLs provided by the user in their messages or local files.
+
+# Identity
+You are Stratum: a command-line coding agent that runs locally, in this terminal, against the user's own model provider. When the user asks what you are, say exactly that — name the tool and the model you are running on, and describe what you can do here. Never introduce yourself as "your assistant" or as a generic chatbot, and never claim capabilities you do not have: what you can do is the set of tools actually available to you in this session, which you can see, plus what the user's environment allows.
 
 # Tone and style
 You should be concise, direct, and to the point. When you run a non-trivial bash command, you should explain what the command does and why you are running it, to make sure the user understands what you are doing (this is especially important when you are running a command that will make changes to the user's system).
@@ -318,6 +328,26 @@ While you are in the cycle run ONLY the relevant test file, not the whole suite.
 belongs at the end, once the work is done.`;
 }
 
+/**
+ * Bloque `# Asking the user` (§3 de `gentle-pi`). Solo el agente principal: un
+ * subagente no tiene `question` en su toolset, porque la TTY es del padre.
+ *
+ * Las dos reglas que no se deducen del schema de la tool son el dominio cerrado
+ * de respuesta (una respuesta fuera de las opciones se descarta, no se
+ * aproxima — ver `resolveQuestionAnswers`) y la del bloqueo: si el usuario
+ * responde con una pregunta sobre la pregunta, contestarla NO es haber
+ * recibido una decisión. Sin esa regla el modelo trata la duda del usuario como
+ * un permiso implícito y elige por él, que es justo el fallo que el gate
+ * existía para evitar.
+ */
+export function buildAskingBlock(): string {
+  return `# Asking the user
+Use \`question\` only when the answer is not in the repository and getting it wrong would change the work itself. One batch per turn, four questions at most, and never to ask permission to run something.
+- Offer closed options whenever you know the plausible answers, most likely first. The options are the entire answer domain: an answer outside it is discarded, never approximated to the nearest option. Set \`allowCustom: true\` only when an answer you did not anticipate would genuinely be useful.
+- **A question about the blocker is not an answer to the blocker.** If the user replies by asking why you need the input, or what one of the options means, answer from what you already know, then ask the same question again unchanged and keep waiting. Do not choose for them because they asked something first.
+- If nobody answers, or an answer comes back discarded, continue with the most reasonable assumption and say out loud which one you took. Do not repeat the batch in the same turn.`;
+}
+
 export function buildSystemPrompt(
   config: StratumConfig,
   memory?: string,
@@ -334,24 +364,42 @@ You have two tools backed by long-term memory that persists across sessions:
 
   prompt += buildSshBlock(config);
 
-  // Work routing (Hito 11): solo el agente principal enruta trabajo. Un
-  // subagente no puede delegar (profundidad = 1), así que el bloque sobraría.
+  // Asking the user (§3 de gentle-pi): la tool `question` está oculta a los
+  // subagentes, así que sus reglas también.
   if (!env?.isSubagent) {
-    const routing = buildWorkRoutingBlock(env?.agentProfiles ?? []);
-    if (routing)
-      prompt += `
-
-${routing}`;
-  }
-
-  // Testing discipline (Hito 13): condicionado a que haya comando de tests.
-  // Se inyecta también a los subagentes — el perfil `tdd` es precisamente un
-  // subagente, y es quien más necesita tener el ciclo delante.
-  const testing = buildTestingDisciplineBlock(config.tools.testCommand);
-  if (testing)
     prompt += `
 
+${buildAskingBlock()}`;
+  }
+
+  // Guías largas: o la tabla de punteros, o los cuerpos inline. Nunca las dos
+  // cosas — `env.guides` solo llega relleno cuando `prompt.guides` es
+  // `'pointers'` y los ficheros se materializaron (ver agent/guides.ts).
+  const pointers = env?.guides?.trim();
+  if (pointers) {
+    prompt += `
+
+${pointers}`;
+  } else {
+    // Work routing (Hito 11): solo el agente principal enruta trabajo. Un
+    // subagente no puede delegar (profundidad = 1), así que el bloque sobraría.
+    if (!env?.isSubagent) {
+      const routing = buildWorkRoutingBlock(env?.agentProfiles ?? []);
+      if (routing)
+        prompt += `
+
+${routing}`;
+    }
+
+    // Testing discipline (Hito 13): condicionado a que haya comando de tests.
+    // Se inyecta también a los subagentes — el perfil `tdd` es precisamente un
+    // subagente, y es quien más necesita tener el ciclo delante.
+    const testing = buildTestingDisciplineBlock(config.tools.testCommand);
+    if (testing)
+      prompt += `
+
 ${testing}`;
+  }
 
   // Skills (Hito 12): solo el índice. Se inyecta también a los subagentes —
   // el trabajo de verdad lo hacen ellos, así que son los que más lo necesitan.

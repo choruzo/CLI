@@ -64,16 +64,35 @@ export type AgentMode = 'normal' | 'plan' | 'execute';
 // Hito 2.5 (F7) — Tool `question`: tanda única de preguntas al usuario
 // ---------------------------------------------------------------------------
 
+/**
+ * Opción de respuesta cerrada. El `id` es un **token opaco** (§3 de la
+ * investigación `gentle-pi`): quien resuelve el gate devuelve el token, no la
+ * etiqueta ni el ordinal, y el loop resuelve la etiqueta desde este mismo
+ * envelope. Así una etiqueta parecida, un reordenamiento o un `2` tecleado de
+ * más nunca se confunden con una elección.
+ */
+export interface QuestionOption {
+  id: string;
+  label: string;
+}
+
 export interface QuestionItem {
   question: string;
-  /** Opciones sugeridas. Vacío/ausente → respuesta libre. */
-  options?: string[];
+  /** Opciones cerradas. Vacío/ausente → respuesta libre. */
+  options?: QuestionOption[];
+  /**
+   * Texto libre admitido junto a las opciones. Opt-in explícito: con opciones y
+   * sin este flag el dominio de respuesta son las opciones y nada más.
+   */
+  allowCustom?: boolean;
 }
 
 export interface QuestionAnswer {
   question: string;
-  /** Respuesta del usuario. Cadena vacía = la omitió. */
+  /** Respuesta del usuario, ya canonizada a la etiqueta cuando eligió opción. */
   answer: string;
+  /** Token de la opción elegida. Ausente si respondió texto libre o la omitió. */
+  optionId?: string;
 }
 
 // ---------------------------------------------------------------------------

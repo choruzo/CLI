@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { execa } from 'execa';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { scrubGitEnv } from '../../git/env.js';
 import {
   hardDenyReason,
   guardedBlockReason,
@@ -119,6 +120,13 @@ export const bashTool: ToolDefinition = {
       all: true,
       reject: false,
       cwd: ctx.cwd,
+      // El entorno se hereda entero MENOS las variables de enrutado de git
+      // (§3 de gentle-pi, ver git/env.ts): con un `GIT_DIR` heredado, cada
+      // `git` que lance el agente opera sobre otro repositorio ignorando el
+      // cwd. `extendEnv: false` es obligatorio — con el merge por defecto de
+      // execa, quitarlas de la copia no las quitaría del proceso hijo.
+      env: scrubGitEnv(),
+      extendEnv: false,
       ...(process.platform !== 'win32' && { detached: true }),
     });
 

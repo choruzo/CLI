@@ -24,6 +24,7 @@ import type {
 import { ReactLoop } from './harness.js';
 import { ProviderRouter } from '../providers/router.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import { prepareGuideIndex } from './guides.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
 
@@ -161,11 +162,18 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   const messages: Message[] = [
     {
       role: 'system',
+      // Índice de guías propio: los ficheros ya los materializó el padre (mismo
+      // cwd, mismo fingerprint), pero la tabla no puede heredarse tal cual —
+      // incluiría `work-routing`, y un subagente no delega.
       content: buildSystemPrompt(config, undefined, {
         modelId: router.model,
         providerName: router.providerName,
         isSubagent: true,
         skills: opts.skillsBlock,
+        guides: prepareGuideIndex(config, {
+          isSubagent: true,
+          testCommand: config.tools.testCommand,
+        }),
       }),
     },
     { role: 'user', content: buildTaskInjection(profile, task) },

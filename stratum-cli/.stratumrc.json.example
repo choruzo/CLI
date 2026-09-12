@@ -94,6 +94,10 @@
     "enabled": true,
     "registryFile": "./.stratum/skill-registry.md"
   },
+  "prompt": {
+    "guides": "inline",
+    "guidesDir": "./.stratum/guides"
+  },
   "logging": {
     "level": "info",
     "stderr": true,

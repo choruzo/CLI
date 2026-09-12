@@ -31,8 +31,18 @@ export function QuestionPrompt({ questions, onSubmit, onCancel }: Props) {
   const current = questions[index];
   const typing = freeText || !current?.options || current.options.length === 0;
 
-  const advance = (answer: string): void => {
-    const next = [...answers, { question: current?.question ?? '', answer: answer.trim() }];
+  // `optionId` viaja tal cual al loop: es el token opaco de la opción elegida
+  // (§3 de gentle-pi). Sin él, el loop tendría que reconocer la etiqueta por
+  // texto, y una etiqueta ambigua o reordenada se convertiría en otra elección.
+  const advance = (answer: string, optionId?: string): void => {
+    const next = [
+      ...answers,
+      {
+        question: current?.question ?? '',
+        answer: answer.trim(),
+        ...(optionId ? { optionId } : {}),
+      },
+    ];
     if (index + 1 >= questions.length) {
       onSubmit(next);
       return;
@@ -88,8 +98,13 @@ export function QuestionPrompt({ questions, onSubmit, onCancel }: Props) {
         <>
           <SelectList
             items={[
-              ...current.options!.map((o) => ({ label: o, value: o })),
-              { label: '✎ Escribir otra respuesta…', value: FREE_TEXT },
+              ...current.options!.map((o) => ({ label: o.label, value: o.id })),
+              // "Escribir otra respuesta" solo cuando la pregunta lo admite:
+              // con opciones y sin allowCustom, el dominio son las opciones y
+              // el loop descartaría cualquier otra cosa.
+              ...(current.allowCustom
+                ? [{ label: '✎ Escribir otra respuesta…', value: FREE_TEXT }]
+                : []),
             ]}
             onSelect={(item) => {
               if (item.value === FREE_TEXT) {
@@ -97,7 +112,8 @@ export function QuestionPrompt({ questions, onSubmit, onCancel }: Props) {
                 setDraft('');
                 return;
               }
-              advance(item.value);
+              const option = current.options!.find((o) => o.id === item.value);
+              if (option) advance(option.label, option.id);
             }}
             onCancel={onCancel}
           />
