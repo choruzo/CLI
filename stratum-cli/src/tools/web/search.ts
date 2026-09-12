@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { unavailable } from '../optional.js';
 
 export interface SearchResult {
   title: string;
@@ -223,11 +224,14 @@ export const webSearchTool: ToolDefinition = {
 
     const backend = cfg.backend;
     if (backend === 'brave' || backend === 'serpapi') {
-      return {
-        ok: false,
-        error: `web_search backend "${backend}" is not implemented yet. Use "meta", "duckduckgo" or "tavily" in .stratumrc.json (tools.webSearch.backend).`,
-        recoverable: false,
-      };
+      return unavailable({
+        missing: `the "${backend}" search backend is not implemented`,
+        alternatives: [
+          'Answer from the repository itself with grep, glob and read_file.',
+          'If you already know a relevant URL, fetch it with web_fetch.',
+        ],
+        howToEnable: 'set tools.webSearch.backend to "meta", "duckduckgo" or "tavily".',
+      });
     }
 
     const tavilyKey = cfg.tavilyApiKey || cfg.apiKey || process.env.TAVILY_API_KEY || '';
@@ -236,12 +240,14 @@ export const webSearchTool: ToolDefinition = {
     const useTavily = (backend === 'meta' && tavilyKey !== '') || backend === 'tavily';
 
     if (backend === 'tavily' && tavilyKey === '') {
-      return {
-        ok: false,
-        error:
-          'web_search backend "tavily" requires an API key (tools.webSearch.tavilyApiKey or TAVILY_API_KEY).',
-        recoverable: false,
-      };
+      return unavailable({
+        missing: 'the Tavily API key',
+        alternatives: [
+          'Answer from the repository itself with grep, glob and read_file.',
+          'If you already know a relevant URL, fetch it with web_fetch.',
+        ],
+        howToEnable: 'set tools.webSearch.tavilyApiKey in .stratumrc.json or TAVILY_API_KEY.',
+      });
     }
 
     const tasks: Promise<SearchResult[]>[] = [];
@@ -264,11 +270,15 @@ export const webSearchTool: ToolDefinition = {
     });
 
     if (lists.length === 0) {
-      return {
-        ok: false,
-        error: `All search backends failed — ${failures.join(' | ')}`,
-        recoverable: true,
-      };
+      // Sin ningún backend vivo casi siempre es falta de red, no un fallo de la
+      // llamada: reintentar la misma búsqueda no va a arreglarlo.
+      return unavailable({
+        missing: `web search is not reachable (${failures.join(' | ')})`,
+        alternatives: [
+          'Answer from the repository itself with grep, glob and read_file.',
+          'State clearly what you could not verify instead of guessing.',
+        ],
+      });
     }
 
     const merged = mergeResults(lists, topN);

@@ -93,6 +93,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/changes',
+    description: 'Muestra los cambios del working tree (+N/-M por fichero)',
+    hasArgs: false,
+  },
+  {
     name: '/debug',
     description: 'Activa o desactiva la visualización de los bloques ⊙ thinking',
     hasArgs: false,

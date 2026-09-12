@@ -15,6 +15,7 @@ import type {
   QuestionAnswer,
   QuestionItem,
   RunOptions,
+  TokenAccounting,
 } from '../../agent/types.js';
 import type { ProviderConfig } from '../../config/schema.js';
 import { StratumConfigSchema } from '../../config/schema.js';
@@ -35,6 +36,13 @@ import { applyToolEvent } from './tool-call-reducer.js';
 import { DELEGATE_TASK_TOOL } from '../../tools/agent/delegate.js';
 import { TODO_TOOL } from '../../tools/todo.js';
 import type { TodoItem } from '../../agent/todo.js';
+import {
+  collectWorkingTreeChanges,
+  formatChangesReport,
+  formatCompact,
+  EMPTY_SUMMARY,
+  type ChangesSummary,
+} from '../../git/changes.js';
 import { Banner } from './Banner.js';
 import type { InitStep } from './InitProgressBlock.js';
 import { ConversationView } from './ConversationView.js';
@@ -135,12 +143,36 @@ interface AppState {
   todoStale: number;
   /** `/todo` y Ctrl+T colapsan el panel sin borrar la lista. */
   todoCollapsed: boolean;
+  // ----- Working tree y tokens (Hito 13) -----
+  /** Estado del working tree; alimenta el `+N/-M` de la barra y `/changes`. */
+  changes: ChangesSummary;
+  /** Contabilidad de tokens de la sesión para el medidor de la barra. */
+  tokens: TokenAccounting;
+}
+
+/**
+ * Texto del contador de tokens para `/context` (Hito 13). Nunca inventa un
+ * número: cuando no hay dato dice por qué no lo hay.
+ */
+function describeTokenUsage(usage: TokenAccounting): string {
+  if (usage.status === 'reported') return String(usage.tokens ?? 0);
+  if (usage.status === 'unsupported') {
+    return 'sin dato — este backend no devuelve `usage` en el stream';
+  }
+  return 'sin dato todavía';
 }
 
 export type AppAction =
   | { type: 'AGENT_START'; input: string }
   | { type: 'AGENT_EVENT'; event: AgentEvent }
-  | { type: 'CONTEXT_UPDATE'; used: number; max: number; estimated: boolean }
+  | {
+      type: 'CONTEXT_UPDATE';
+      used: number;
+      max: number;
+      estimated: boolean;
+      tokens?: TokenAccounting;
+    }
+  | { type: 'CHANGES_UPDATE'; summary: ChangesSummary }
   | { type: 'INPUT_CHANGE'; value: string }
   | { type: 'SYSTEM_MESSAGE'; text: string }
   | { type: 'INIT_START' }
@@ -722,7 +754,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         contextUsed: action.used,
         contextMax: action.max,
         contextEstimated: action.estimated,
+        tokens: action.tokens ?? state.tokens,
       };
+
+    case 'CHANGES_UPDATE':
+      return { ...state, changes: action.summary };
 
     case 'INPUT_CHANGE':
       return { ...state, inputValue: action.value };
@@ -817,6 +853,8 @@ export function App({
     todos: agent.getTodos(),
     todoStale: 0,
     todoCollapsed: false,
+    changes: EMPTY_SUMMARY,
+    tokens: { status: 'unavailable' },
   });
 
   // -------------------------------------------------------------------------
@@ -943,6 +981,23 @@ export function App({
     const u = agent.getContextUsage();
     dispatch({ type: 'CONTEXT_UPDATE', used: u.used, max: u.max, estimated: u.estimated });
   }, [agent]);
+
+  /**
+   * Estado del working tree (Hito 13). Se recalcula al arrancar y cada vez que
+   * el agente termina un turno: dos invocaciones de git por turno son baratas,
+   * hacerlo por tool call no lo sería.
+   */
+  const refreshChanges = useCallback(() => {
+    void collectWorkingTreeChanges(process.cwd())
+      .then((summary) => dispatch({ type: 'CHANGES_UPDATE', summary }))
+      .catch(() => {
+        /* el panel es informativo: un fallo de git nunca interrumpe la sesión */
+      });
+  }, []);
+
+  useEffect(() => {
+    if (!state.thinking) refreshChanges();
+  }, [state.thinking, refreshChanges]);
 
   /** Store de sesiones resuelto desde la config activa (mismas rutas que la CLI). */
   const sessionStore = useCallback(
@@ -1500,6 +1555,7 @@ export function App({
             `  origen      ${source}`,
             `  mensajes    ${agent.getMessages().length}`,
             `  tool calls  ${agent.toolCallCount}`,
+            `  tokens      ${describeTokenUsage(agent.getTokenUsage())}`,
             `  provider    ${agent.providerName} / ${agent.model}`,
           ].join('\n'),
         });
@@ -1517,6 +1573,18 @@ export function App({
             text: 'El agente no lleva ninguna lista de tareas ahora mismo.',
           });
         }
+        return;
+      }
+
+      // Hito 13: el usuario mira `git status` constantemente mientras el agente
+      // trabaja. El desglose completo va aquí; la barra solo lleva el total.
+      if (cmd === '/changes') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        void (async () => {
+          const summary = await collectWorkingTreeChanges(process.cwd());
+          dispatch({ type: 'CHANGES_UPDATE', summary });
+          dispatch({ type: 'SYSTEM_MESSAGE', text: formatChangesReport(summary) });
+        })();
         return;
       }
 
@@ -2209,6 +2277,8 @@ export function App({
         overlay={overlayNode}
         mcpStatus={mcpStatus}
         providerStatus={providerStatus}
+        changes={formatCompact(state.changes)}
+        tokens={state.tokens}
         todos={state.todoCollapsed ? [] : state.todos}
         todoStale={state.todoStale}
         planMode={state.planMode}

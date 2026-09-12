@@ -2,7 +2,7 @@ import React from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { theme } from './theme.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
-import type { AgentMode } from '../../agent/types.js';
+import type { AgentMode, TokenAccounting } from '../../agent/types.js';
 
 /** Estado de salud del provider activo para el indicador `●` (Hito 6). */
 export type ProviderStatus = 'connected' | 'disconnected' | 'checking' | 'unknown';
@@ -27,6 +27,18 @@ interface Props {
    * derecha del status bar: `◑ PLAN` (ámbar) o `▸ EXEC` (verde).
    */
   mode?: AgentMode;
+  /**
+   * Cambios del working tree ya formateados (`+N/-M`, Hito 13). Cadena vacía
+   * cuando el árbol está limpio o el cwd no es un repo: el segmento desaparece.
+   */
+  changes?: string;
+  /**
+   * Contabilidad de tokens de la sesión (Hito 13). Solo se pinta un número
+   * cuando el backend lo reportó; con `unsupported` se pinta `Σ n/d` atenuado
+   * (el backend no va a darlo nunca) y con `unavailable` no se pinta nada,
+   * porque todavía puede haber dato.
+   */
+  tokens?: TokenAccounting;
 }
 
 function formatTokens(n: number): string {
@@ -61,6 +73,22 @@ function providerDotColor(status: ProviderStatus | undefined): string {
   }
 }
 
+/** Texto del medidor de tokens de sesión, o '' cuando no procede pintarlo. */
+export function formatTokenMeter(tokens: TokenAccounting | undefined): string {
+  if (!tokens) return '';
+  if (tokens.status === 'reported') return `Σ ${formatTokens(tokens.tokens ?? 0)}`;
+  if (tokens.status === 'unsupported') return 'Σ n/d';
+  return '';
+}
+
+/**
+ * Ancho a partir del cual caben los segmentos opcionales (Hito 13). Por debajo
+ * se sacrifican en orden: primero el medidor de tokens, luego los cambios. El
+ * contexto y el modelo nunca se recortan — son los que el usuario mira.
+ */
+const WIDE_ENOUGH_FOR_TOKENS = 100;
+const WIDE_ENOUGH_FOR_CHANGES = 80;
+
 export function StatusBar({
   providerName,
   model,
@@ -70,6 +98,8 @@ export function StatusBar({
   mcpStatus,
   providerStatus,
   mode,
+  changes,
+  tokens,
 }: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
@@ -82,12 +112,19 @@ export function StatusBar({
   const showMcp = !!mcpStatus && mcpStatus.total > 0;
   const mcpSegmentText = showMcp ? ` │ mcp ●` : '';
 
+  const changesText = changes && cols >= WIDE_ENOUGH_FOR_CHANGES ? changes : '';
+  const tokenText = cols >= WIDE_ENOUGH_FOR_TOKENS ? formatTokenMeter(tokens) : '';
+
   // Badge de modo (Hito 7): solo visible mientras mode !== 'normal'.
   const planBadge = mode === 'plan' ? '◑ PLAN' : mode === 'execute' ? '▸ EXEC' : '';
   const planBadgeColor = mode === 'plan' ? '#F59E0B' : '#34D399';
 
-  const ctxSuffix = ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%${planBadge ? `  ${planBadge}` : ''}`;
-  const leftLen = ` ● ${providerName} │ ${model}${mcpSegmentText}`.length;
+  const ctxSuffix =
+    `${tokenText ? `${tokenText} · ` : ''}` +
+    ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%${planBadge ? `  ${planBadge}` : ''}`;
+  const leftLen =
+    ` ● ${providerName} │ ${model}${mcpSegmentText}${changesText ? ` │ ${changesText}` : ''}`
+      .length;
   const spacer = cols - leftLen - ctxSuffix.length;
   const gap = spacer > 0 ? ' '.repeat(spacer) : ' ';
 
@@ -107,7 +144,21 @@ export function StatusBar({
           <Text color={mcpDotColor(mcpStatus)}>●</Text>
         </>
       )}
+      {changesText && (
+        <>
+          <Text color={theme.textInvisible}> │</Text>
+          <Text color={theme.accent}> {changesText}</Text>
+        </>
+      )}
       <Text>{gap}</Text>
+      {tokenText && (
+        <>
+          <Text color={theme.textMuted} dimColor>
+            {tokenText}
+          </Text>
+          <Text color={theme.textInvisible}> · </Text>
+        </>
+      )}
       <Text color={theme.textMuted} dimColor>
         ctx{' '}
       </Text>

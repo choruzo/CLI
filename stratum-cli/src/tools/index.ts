@@ -17,6 +17,7 @@ import { delegateTaskTool } from './agent/delegate.js';
 import { questionTool } from './question.js';
 import { todoTool } from './todo.js';
 import { registerSshTools } from './ssh/index.js';
+import { registerTddTools } from './tdd.js';
 
 export function registerBuiltinTools(registry: ToolRegistry, config: StratumConfig): void {
   registry.register(readFileTool);
@@ -41,4 +42,6 @@ export function registerBuiltinTools(registry: ToolRegistry, config: StratumConf
   registry.register(delegateTaskTool);
   // Hito 9 — SSH nativo: solo si hay inventario configurado (§12.14).
   registerSshTools(registry, config);
+  // Hito 13 — evidencia TDD: solo si hay `tools.testCommand` configurado.
+  registerTddTools(registry, config);
 }

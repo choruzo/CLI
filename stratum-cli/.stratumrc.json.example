@@ -39,6 +39,7 @@
   "tools": {
     "confirmDestructive": true,
     "bashTimeout": 30000,
+    "testCommand": "npm test",
     "webSearch": {
       "backend": "meta",
       "tavilyApiKey": "${TAVILY_API_KEY}",

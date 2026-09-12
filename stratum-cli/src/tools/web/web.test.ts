@@ -149,7 +149,9 @@ describe('web_search', () => {
     if (result.ok) expect(result.output).toContain('Some backends failed');
   });
 
-  it('fails recoverably when all backends fail', async () => {
+  // Hito 13: sin red o sin key no es un error de la llamada, es una capacidad
+  // ausente. Se devuelve una instrucción de fallback y el loop sigue trabajando.
+  it('degrades with instructions when all backends fail', async () => {
     vi.stubGlobal(
       'fetch',
       vi.fn(async () => {
@@ -158,14 +160,20 @@ describe('web_search', () => {
     );
 
     const result = await webSearchTool.execute({ query: 'q' }, makeCtx());
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.recoverable).toBe(true);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output).toContain('UNAVAILABLE');
+      expect(result.output).toContain('grep');
+    }
   });
 
-  it('rejects tavily backend without api key', async () => {
+  it('degrades with instructions when the tavily backend has no api key', async () => {
     const result = await webSearchTool.execute({ query: 'q' }, makeCtx({ backend: 'tavily' }));
-    expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error).toContain('API key');
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.output).toContain('UNAVAILABLE');
+      expect(result.output).toContain('TAVILY_API_KEY');
+    }
   });
 });
 

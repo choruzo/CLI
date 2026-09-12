@@ -29,6 +29,7 @@ describe('useAgentStream', () => {
         };
       }),
       getContextUsage: vi.fn(() => ({ used: 1, max: 10, estimated: true })),
+      getTokenUsage: vi.fn(() => ({ status: 'reported' as const, tokens: 42 })),
     };
 
     const { send, cancel } = useAgentStream(agent as never, dispatch);
@@ -45,9 +46,13 @@ describe('useAgentStream', () => {
       type: 'AGENT_EVENT',
       event: { type: 'done', stopReason: 'cancelled' },
     });
-    // CONTEXT_UPDATE debe propagar estimated
+    // CONTEXT_UPDATE debe propagar estimated y la contabilidad de tokens (Hito 13)
     expect(dispatch).toHaveBeenCalledWith(
-      expect.objectContaining({ type: 'CONTEXT_UPDATE', estimated: true }),
+      expect.objectContaining({
+        type: 'CONTEXT_UPDATE',
+        estimated: true,
+        tokens: { status: 'reported', tokens: 42 },
+      }),
     );
   });
 });

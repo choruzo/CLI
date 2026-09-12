@@ -271,6 +271,53 @@ Action → route:
 When you delegate, give the child a self-contained task: it does NOT inherit your conversation. State the goal, the acceptance criteria and the file paths it needs in \`context\`. Write that task in English (see # Language). You stay responsible for reading its summary and deciding what happens next.`;
 }
 
+/**
+ * Bloque `# Testing discipline` (Hito 13). Solo se inyecta cuando la config
+ * declara `tools.testCommand`: sin un comando de tests que ejecutar, pedir
+ * evidencia del ciclo solo consigue que el modelo la invente.
+ *
+ * Es la mitad de prompt del modo TDD estricto; la otra mitad es la validación
+ * real de la tool `test_evidence`, que rechaza un GREEN sin RED previo. El
+ * prompt convence al modelo de intentarlo; la tool impide que se lo salte.
+ *
+ * Reescrito a partir de `strict-tdd.md` de gentle-pi (Alan Buscaglia, MIT).
+ * Ver CLI-DOC/Investigacion/gentle-pi.md §2 (P3).
+ */
+export function buildTestingDisciplineBlock(testCommand: string): string {
+  if (!testCommand.trim()) return '';
+
+  return `# Testing discipline
+The project runs its tests with \`${testCommand.trim()}\`. When you write or change behaviour,
+follow the cycle and record each phase with \`test_evidence\` as it happens:
+
+**SAFETY NET → RED → GREEN → TRIANGULATE → REFACTOR**
+
+1. **SAFETY NET** — before editing an existing file, run its tests and capture the baseline
+   ("5 passing"). If something already fails, STOP and report it as a pre-existing failure.
+   Do not fix it along the way: that baseline is the proof you did not break anything.
+2. **RED** — write the test first and watch it fail. A test that passes before the code exists
+   is not testing what you think, or the feature was already there.
+3. **GREEN** — write the minimum implementation that passes. Then check it is not a false green:
+   - it passed because the component never rendered → not GREEN
+   - it passed because a loop iterated zero times (the body is dead code) → not GREEN
+   - it passed because the setup never triggers the code path → not GREEN
+4. **TRIANGULATE** — add a second case with different inputs. This is required by default: with a
+   single case, hardcoding the return value passes. Skip it only when the task is purely
+   structural or there is literally one possible output, and record the reason.
+5. **REFACTOR** — clean up with the tests still green.
+
+Assertions that are never acceptable: tautologies (\`expect(true).toBe(true)\`), empty collections
+without justifying why they are empty, type-only assertions (a bare \`toBeDefined()\`), and CSS
+class names — a class name is never an assertion about behaviour.
+
+Mocks: 3 or fewer is healthy, 4-6 deserves a second look, 7 or more means you are testing at the
+wrong layer. Extract-Before-Mock: if what you want to verify is a data transformation, pull it out
+into a pure function and test it with no mocks at all.
+
+While you are in the cycle run ONLY the relevant test file, not the whole suite. The full suite
+belongs at the end, once the work is done.`;
+}
+
 export function buildSystemPrompt(
   config: StratumConfig,
   memory?: string,
@@ -296,6 +343,15 @@ You have two tools backed by long-term memory that persists across sessions:
 
 ${routing}`;
   }
+
+  // Testing discipline (Hito 13): condicionado a que haya comando de tests.
+  // Se inyecta también a los subagentes — el perfil `tdd` es precisamente un
+  // subagente, y es quien más necesita tener el ciclo delante.
+  const testing = buildTestingDisciplineBlock(config.tools.testCommand);
+  if (testing)
+    prompt += `
+
+${testing}`;
 
   // Skills (Hito 12): solo el índice. Se inyecta también a los subagentes —
   // el trabajo de verdad lo hacen ellos, así que son los que más lo necesitan.

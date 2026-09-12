@@ -18,6 +18,7 @@ import type {
   SubagentResult,
   SubagentRouter,
   SubagentStatus,
+  TokenStatus,
   SubagentTask,
 } from './types.js';
 import { ReactLoop } from './harness.js';
@@ -124,6 +125,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   const decisions: string[] = [];
   let iterations = 0;
   let tokens: number | undefined;
+  let tokenStatus: TokenStatus = 'unavailable';
   let currentText = '';
 
   // Signal encadenado: cancelación del padre + pared de tiempo del presupuesto.
@@ -150,7 +152,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
       status: 'failed',
       summary: '',
       filesChanged: [],
-      usage: { iterations: 0, durationMs: Date.now() - start },
+      usage: { iterations: 0, tokenStatus: 'unavailable', durationMs: Date.now() - start },
       error: `No se pudo inicializar el provider del perfil '${profile.name}': ${msg(err)}`,
     };
   }
@@ -246,7 +248,8 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
       decisions: decisions.length ? decisions : undefined,
       usage: {
         iterations: loop.iterationsRun,
-        tokens: loop.tokensUsed || undefined,
+        tokens: loop.tokenAccounting.tokens,
+        tokenStatus: loop.tokenAccounting.status,
         durationMs: Date.now() - start,
       },
       error: msg(err),
@@ -257,9 +260,14 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   iterations = loop.iterationsRun;
   // Tokens best-effort (Hito 8B): solo si el backend devolvió usage; si no, queda
   // undefined y el control de coste recayó en maxIterations + timeoutMs (§12.16).
-  tokens = loop.tokensUsed || undefined;
-  if (tokens === undefined) {
-    log.debug('subagent tokens unavailable (backend sin usage)', { id: task.id });
+  // Hito 13: el porqué del undefined se transporta en `tokenStatus` en vez de
+  // perderse — `unsupported` es accionable (este backend nunca lo dará),
+  // `unavailable` puede resolverse en la siguiente ejecución.
+  const accounting = loop.tokenAccounting;
+  tokens = accounting.tokens;
+  tokenStatus = accounting.status;
+  if (accounting.status !== 'reported') {
+    log.debug('subagent tokens sin dato', { id: task.id, tokenStatus: accounting.status });
   }
 
   // 'max_iterations' y 'budget_tokens' son ambos agotamiento de presupuesto.
@@ -285,7 +293,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     summary,
     filesChanged: toFilesArray(filesChanged),
     decisions: decisions.length ? decisions : undefined,
-    usage: { iterations, tokens, durationMs: Date.now() - start },
+    usage: { iterations, tokens, tokenStatus, durationMs: Date.now() - start },
     error: statusErrorText(status),
   };
 }
@@ -418,7 +426,10 @@ export function buildInterruptedSubagentsPreamble(
 export function serializeSubagentResult(result: SubagentResult, profile: string): string {
   const attrs =
     `id="${escapeXml(result.id)}" profile="${escapeXml(profile)}" status="${result.status}" ` +
-    `iterations="${result.usage.iterations}" durationMs="${result.usage.durationMs}"`;
+    `iterations="${result.usage.iterations}" durationMs="${result.usage.durationMs}" ` +
+    // Hito 13: el padre ve el número cuando lo hay y, cuando no, POR QUÉ no lo
+    // hay. Un `tokens="0"` inventado le haría creer que el hijo no gastó nada.
+    `tokens="${result.usage.tokens ?? result.usage.tokenStatus ?? 'unavailable'}"`;
   const lines = [`<subagent_result ${attrs}>`];
   lines.push(`  <summary>${escapeXml(result.summary)}</summary>`);
   if (result.filesChanged.length > 0) {

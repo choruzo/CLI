@@ -31,6 +31,7 @@ export function useAgentStream(
             used: ctx.used,
             max: ctx.max,
             estimated: ctx.estimated,
+            tokens: agent.getTokenUsage(),
           });
         }
       } catch (err) {

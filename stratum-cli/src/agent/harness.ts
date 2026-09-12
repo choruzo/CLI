@@ -14,6 +14,7 @@ import type {
   PlanStepStatus,
   QuestionAnswer,
   SubagentResult,
+  TokenAccounting,
   ToolCallReady,
   ToolContext,
   RunOptions,
@@ -31,6 +32,14 @@ import {
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { QUESTION_TOOL, parseQuestionInput, formatQuestionAnswers } from '../tools/question.js';
 import { TODO_TOOL } from '../tools/todo.js';
+import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
+import {
+  TddError,
+  TddLedger,
+  applyTddToSystemMessage,
+  formatTddSnapshot,
+  type TddRecordInput,
+} from './tdd.js';
 import {
   TodoError,
   TodoList,
@@ -531,6 +540,8 @@ export class ReactLoop {
   private readonly todos: TodoList;
   /** Write-log acumulado (Hito 12). De sesión cuando `extras.changes` lo aporta. */
   private readonly changes: ChangeTracker;
+  /** Evidencia del ciclo TDD (Hito 13). De sesión cuando `extras.tdd` la aporta. */
+  private readonly tdd: TddLedger;
   /** Iteraciones del loop realmente ejecutadas en el último run (Hito 8: usage). */
   private _iterations = 0;
   /**
@@ -539,6 +550,16 @@ export class ReactLoop {
    * subagentes y del presupuesto duro-si-hay-métrica `maxTokens`.
    */
   private _tokensUsed = 0;
+  /**
+   * Contabilidad con estado (Hito 13). `_usageReports` cuenta chunks que
+   * trajeron `usage`; `_completedRequests`, streams que terminaron sin
+   * cancelarse. Con los dos se distingue «aún no hay dato» de «este backend
+   * nunca lo manda», que es justo lo que antes se degradaba en silencio.
+   */
+  private _usageReports = 0;
+  private _completedRequests = 0;
+  /** El aviso de presupuesto sin métrica se emite una sola vez por loop. */
+  private _warnedUnmeteredBudget = false;
 
   constructor(
     private readonly provider: IProvider,
@@ -588,6 +609,11 @@ export class ReactLoop {
        */
       changes?: ChangeTracker;
       /**
+       * Registro de evidencia TDD (Hito 13). Como los todos y el write-log,
+       * vive fuera del loop: un ciclo RED → GREEN abarca varios turnos.
+       */
+      tdd?: TddLedger;
+      /**
        * Bloque `# Skills` renderizado por `StratumAgent` (Hito 12). El loop solo
        * lo transporta: se lo pasa a los subagentes que delegue.
        */
@@ -600,6 +626,7 @@ export class ReactLoop {
     // sigue funcionando dentro del turno, solo que no persiste entre turnos.
     this.todos = extras?.todos ?? new TodoList();
     this.changes = extras?.changes ?? new ChangeTracker();
+    this.tdd = extras?.tdd ?? new TddLedger();
     this.contextManager =
       extras?.contextManager ??
       new ContextManager(
@@ -680,14 +707,30 @@ export class ReactLoop {
       // Presupuesto de tokens (Hito 8B, best-effort): solo aplica si el backend
       // devolvió usage en iteraciones previas. Se comprueba entre iteraciones —
       // nunca a mitad de stream— para cerrar limpio con el resultado parcial.
-      if (opts?.maxTokens && this._tokensUsed >= opts.maxTokens) {
-        loopLog.info('budget tokens exceeded', {
-          iter,
-          tokensUsed: this._tokensUsed,
-          maxTokens: opts.maxTokens,
-        });
-        yield { type: 'done', stopReason: 'budget_tokens' };
-        return;
+      if (opts?.maxTokens) {
+        const accounting = this.tokenAccounting;
+        if (accounting.status === 'reported' && this._tokensUsed >= opts.maxTokens) {
+          loopLog.info('budget tokens exceeded', {
+            iter,
+            tokensUsed: this._tokensUsed,
+            maxTokens: opts.maxTokens,
+          });
+          yield { type: 'done', stopReason: 'budget_tokens' };
+          return;
+        }
+        // Hito 13: un presupuesto que no se puede medir se ignoraba en silencio.
+        // Se avisa UNA vez y se sigue: el control recae en maxIterations/timeout.
+        if (accounting.status === 'unsupported' && !this._warnedUnmeteredBudget) {
+          this._warnedUnmeteredBudget = true;
+          loopLog.warn('token budget unmetered', { iter, maxTokens: opts.maxTokens });
+          yield {
+            type: 'warning',
+            message:
+              `token_budget_unmetered: el presupuesto de ${opts.maxTokens} tokens no se puede ` +
+              'aplicar porque este backend no devuelve `usage`. El límite efectivo pasa a ser ' +
+              'maxIterations + timeout.',
+          };
+        }
       }
       // Contar la iteración solo cuando realmente procede (no si se canceló antes).
       this._iterations = iter + 1;
@@ -753,6 +796,10 @@ export class ReactLoop {
       // mensaje nuevo: así no acumula basura por iteración y la compresión de
       // contexto, que protege el system prompt, no se lo lleva por delante.
       applyTodoToSystemMessage(this.messages, this.todos.injection());
+      // Hito 13 — mismo mecanismo para el ciclo TDD abierto: un modelo pequeño
+      // declara la tarea terminada en cuanto los tests pasan una vez, así que
+      // el recordatorio de lo que le falta tiene que estar delante cada turno.
+      applyTddToSystemMessage(this.messages, this.tdd.injection());
 
       const request: CompletionRequest = {
         messages: this.messages,
@@ -803,6 +850,7 @@ export class ReactLoop {
             // si no la suma prompt+completion. Alimenta el presupuesto `maxTokens`.
             if (chunk.usage) {
               const u = chunk.usage;
+              this._usageReports++;
               this._tokensUsed +=
                 u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0);
             }
@@ -830,6 +878,11 @@ export class ReactLoop {
         } catch (err) {
           streamErr = err;
         }
+
+        // Request completa (ni error ni cancelación): si no trajo `usage` pese a
+        // haberlo pedido con `stream_options.include_usage`, este backend no lo
+        // manda. Es lo que separa `unsupported` de «todavía no hay dato».
+        if (streamErr === null && !signal.aborted) this._completedRequests++;
 
         if (streamErr !== null) {
           const isAbort = streamErr instanceof Error && streamErr.name === 'AbortError';
@@ -1017,6 +1070,49 @@ export class ReactLoop {
             });
           } catch (err) {
             const message = err instanceof TodoError ? err.message : String(err);
+            yield {
+              type: 'tool_error',
+              id: call.id,
+              name: call.name,
+              error: message,
+              recoverable: true,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: formatToolError(call.name, message, fmt, undefined),
+            });
+          }
+          continue;
+        }
+
+        // test_evidence (Hito 13): tool de control. Se aplica en orden, aquí
+        // mismo, para que dos fases registradas en la misma tanda se validen
+        // una contra otra (un `green` tras el `red` del mismo turno es válido).
+        if (call.name === TEST_EVIDENCE_TOOL) {
+          try {
+            const input = call.input as unknown as TddRecordInput & { action?: string };
+            const applied =
+              input.action === 'list'
+                ? { entries: this.tdd.snapshot, notes: [] as string[] }
+                : this.tdd.record(input);
+            const snapshot = formatTddSnapshot(applied.entries, applied.notes);
+            yield {
+              type: 'tool_result',
+              id: call.id,
+              name: call.name,
+              result: snapshot,
+              durationMs: 0,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: snapshot,
+            });
+          } catch (err) {
+            const message = err instanceof TddError ? err.message : String(err);
             yield {
               type: 'tool_error',
               id: call.id,
@@ -1588,5 +1684,16 @@ export class ReactLoop {
    */
   get tokensUsed(): number {
     return this._tokensUsed;
+  }
+
+  /**
+   * Contabilidad de tokens con estado explícito (Hito 13). Prefiérela a
+   * `tokensUsed`: un 0 puede significar «cero tokens» o «el backend no lo
+   * dice», y esas dos cosas se tratan distinto.
+   */
+  get tokenAccounting(): TokenAccounting {
+    if (this._usageReports > 0) return { status: 'reported', tokens: this._tokensUsed };
+    if (this._completedRequests > 0) return { status: 'unsupported' };
+    return { status: 'unavailable' };
   }
 }

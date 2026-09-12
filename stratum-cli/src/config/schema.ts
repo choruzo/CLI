@@ -209,6 +209,14 @@ export const StratumConfigSchema = z.object({
     .object({
       confirmDestructive: z.boolean().default(true),
       bashTimeout: z.number().int().positive().default(30000),
+      /**
+       * Hito 13 — comando de tests del proyecto (`npm test`, `pytest -q`…).
+       * Cuando se declara, se registra la tool de control `test_evidence` y el
+       * system prompt gana el bloque `# Testing discipline` con el ciclo TDD
+       * estricto. Vacío (default) → ninguna de las dos cosas: exigir evidencia
+       * sin un comando que ejecutar solo invita al modelo a inventarla.
+       */
+      testCommand: z.string().default(''),
       webSearch: z
         .object({
           /**

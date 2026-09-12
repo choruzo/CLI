@@ -180,7 +180,9 @@ Una sola línea fija en la parte superior, con fondo ligeramente más claro que 
 | Provider name | Nombre del proveedor activo (`ollama`, `openai`, `litellm`) | Gris muted `#9CA3AF` |
 | `│` | Separador vertical | Gris oscuro `#374151` |
 | Model name | Nombre del modelo activo | Blanco `#F3F4F6` |
+| `+N/-M` | Cambios del working tree acumulados (Hito 13). Solo con árbol sucio, repo git y ancho >= 80 columnas | Ámbar `#F59E0B` |
 | (espacio flexible) | Empuja los elementos de contexto a la derecha | — |
+| `Σ N.Nk` | Tokens consumidos en la sesión (Hito 13). Solo con ancho >= 100 columnas y dato **reportado** por el backend; si el backend no devuelve `usage` se pinta `Σ n/d`, y mientras no haya dato todavía no se pinta nada. Nunca se estima | Gris `#9CA3AF` |
 | `ctx N.Nk / NNk` | Estimación de tokens usados / máximo del modelo | Gris `#9CA3AF` |
 | `│` | Separador vertical | Gris oscuro `#374151` |
 | `NN%` | Porcentaje de contexto usado. Verde < 60%, ámbar 60-85%, rojo > 85% | Variable |
@@ -374,6 +376,7 @@ Al escribir `/` aparece inmediatamente un panel de autocompletado **encima** del
 | `/context` | Muestra estadísticas de uso del contexto actual |
 | `/config get <key>` | Muestra el valor actual de una clave de configuración |
 | `/config set <key> <value>` | Cambia una clave de configuración en caliente (persiste en `.stratumrc.json`) |
+| `/changes` | Muestra los cambios del working tree con desglose por fichero (`M/A/D/R/?` + `+N/-M`). El total vive permanentemente en la status bar; este comando da el detalle (Hito 13) |
 | `/debug` | Toggle del modo debug (muestra chunks SSE raw) |
 
 #### Flujo visual de `/init` en el chat

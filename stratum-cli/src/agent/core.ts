@@ -2,7 +2,7 @@ import type { StratumConfig, ProviderConfig } from '../config/schema.js';
 import type { ProviderRouter } from '../providers/router.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { IProvider } from '../providers/base.js';
-import type { AgentEvent, Message, RunOptions } from './types.js';
+import type { AgentEvent, Message, RunOptions, TokenAccounting, TokenStatus } from './types.js';
 import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
 import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
@@ -10,6 +10,8 @@ import { ProfileLoader } from './profiles.js';
 import { ChangeTracker } from './risk.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
+import { TddLedger, rehydrateTdd } from './tdd.js';
+import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
 import { MemoryManager } from '../memory/manager.js';
 import { extractAndStore } from '../memory/extractor.js';
@@ -53,8 +55,20 @@ export class StratumAgent {
    * de tareas: el loop dura un turno y el aviso mide el cambio acumulado.
    */
   private readonly changes = new ChangeTracker();
+  /**
+   * Evidencia del ciclo TDD (Hito 13). Igual que la lista de tareas: el ciclo
+   * abarca varios turnos, así que el registro no puede vivir en el loop.
+   */
+  private readonly tdd = new TddLedger();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
+  /**
+   * Contabilidad de tokens de la sesión (Hito 13). El `ReactLoop` vive un turno,
+   * así que el acumulado se suma aquí. El estado se guarda aparte del número:
+   * un 0 sin estado no distingue «no gastó nada» de «el backend no lo dice».
+   */
+  private _sessionTokens = 0;
+  private _tokenStatus: TokenStatus = 'unavailable';
   /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
   private _planRef: string | null = null;
   /** Plan reanudado (§12.6): expuesto una sola vez a la UI al init, luego se borra. */
@@ -101,6 +115,7 @@ export class StratumAgent {
       // Hito 11: el estado de la lista viaja en el historial (cada tool result
       // lleva el snapshot completo), asi que reanudar no necesita store propio.
       this.todos.replace(rehydrateTodos(this.messages));
+      this.tdd.replace(rehydrateTdd(this.messages, TEST_EVIDENCE_TOOL));
       // Reanudación de plan interrumpido (§12.6): inyectar el estado de los pasos.
       if (options.resumePreamble) {
         this.messages.push({ role: 'user', content: options.resumePreamble });
@@ -142,6 +157,7 @@ export class StratumAgent {
         contextManager: this.getContextManager(),
         todos: this.todos,
         changes: this.changes,
+        tdd: this.tdd,
         skillsBlock: this.skillsBlock,
       },
     );
@@ -151,6 +167,16 @@ export class StratumAgent {
       if (event.type === 'tool_result') this._toolCallCount++;
       if (event.type === 'done') stopReason = event.stopReason;
       yield event;
+    }
+    // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
+    // `unsupported` es pegajoso — si este backend no manda usage, no lo va a
+    // mandar en el turno siguiente — pero `reported` siempre lo sobreescribe.
+    const accounting = this.currentLoop.tokenAccounting;
+    if (accounting.status === 'reported') {
+      this._sessionTokens += accounting.tokens ?? 0;
+      this._tokenStatus = 'reported';
+    } else if (this._tokenStatus !== 'reported') {
+      this._tokenStatus = accounting.status;
     }
     this.currentLoop = null;
 
@@ -211,6 +237,7 @@ export class StratumAgent {
     this._toolCallCount = 0;
     this._planRef = null;
     this.todos.clear();
+    this.tdd.clear();
   }
 
   /**
@@ -223,6 +250,7 @@ export class StratumAgent {
     this._toolCallCount = 0;
     this._planRef = null;
     this.todos.replace(rehydrateTodos(this.messages));
+    this.tdd.replace(rehydrateTdd(this.messages, TEST_EVIDENCE_TOOL));
   }
 
   /**
@@ -344,6 +372,21 @@ export class StratumAgent {
   }
 
   /** Total de tool calls ejecutados exitosamente en esta sesión. */
+  /**
+   * Tokens consumidos en la sesión (Hito 13). Nunca estima: cuando el backend
+   * no reporta `usage`, devuelve el estado en lugar de un número inventado.
+   */
+  getTokenUsage(): TokenAccounting {
+    const live = this.currentLoop?.tokenAccounting;
+    if (live?.status === 'reported') {
+      return { status: 'reported', tokens: this._sessionTokens + (live.tokens ?? 0) };
+    }
+    if (this._tokenStatus === 'reported') {
+      return { status: 'reported', tokens: this._sessionTokens };
+    }
+    return { status: live?.status ?? this._tokenStatus };
+  }
+
   get toolCallCount(): number {
     return this._toolCallCount;
   }

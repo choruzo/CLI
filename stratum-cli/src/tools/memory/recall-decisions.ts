@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.js';
 import { getDecisionMemory } from '../../memory/decision-memory.js';
+import { unavailable } from '../optional.js';
 
 const schema = z.object({
   query: z.string().describe('Consulta en lenguaje natural sobre decisiones técnicas pasadas'),
@@ -42,11 +43,18 @@ export const recallDecisionsTool: ToolDefinition = {
         .join('\n\n');
       return { ok: true, output: body };
     } catch (err) {
-      return {
-        ok: false,
-        error: `No se pudo recuperar memoria: ${(err as Error).message}`,
-        recoverable: true,
-      };
+      // El índice semántico es opcional (embedder ONNX o endpoint HTTP): si no
+      // está, la sesión debe seguir. Un tool_error aquí haría que el agente
+      // reintente una recuperación que nunca va a funcionar en este entorno.
+      return unavailable({
+        missing: `semantic memory is not available (${(err as Error).message})`,
+        alternatives: [
+          'Continue without prior decisions; do not invent what was decided before.',
+          'If the answer matters, ask the user or look for it in the repository (STRATUM.md, docs, git log).',
+        ],
+        howToEnable:
+          'install the optional dependencies (@xenova/transformers, better-sqlite3, sqlite-vec) or set memory.embeddingEndpoint.',
+      });
     }
   },
 };

@@ -151,9 +151,32 @@ export interface SubagentResult {
   filesChanged: { path: string; action: 'created' | 'modified' | 'deleted' }[];
   /** Ids de decisiones guardadas (§12.7), por trazabilidad. */
   decisions?: string[];
-  usage: { iterations: number; tokens?: number; durationMs: number };
+  usage: { iterations: number; tokens?: number; tokenStatus?: TokenStatus; durationMs: number };
   /** Presente si status !== 'completed'. */
   error?: string;
+}
+
+// ---------------------------------------------------------------------------
+// Hito 13 — Contabilidad de tokens con estado explícito (P3 de `gentle-pi`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Estado de una medición de tokens. La regla es no inventar nunca un valor que
+ * el backend no dio: un número ausente y un número que este backend jamás va a
+ * dar son situaciones distintas y se diagnostican distinto.
+ *
+ *  - `reported`    — el backend devolvió `usage`; `tokens` es un dato real.
+ *  - `unavailable` — todavía no hay dato (ninguna request completa aún, o el
+ *    stream se cortó antes del chunk final). Puede haberlo más adelante.
+ *  - `unsupported` — se pidió `stream_options.include_usage`, hubo al menos una
+ *    respuesta completa y nunca llegó `usage`: este backend no lo manda.
+ */
+export type TokenStatus = 'reported' | 'unavailable' | 'unsupported';
+
+export interface TokenAccounting {
+  status: TokenStatus;
+  /** Solo presente con `status: 'reported'`. Nunca se estima. */
+  tokens?: number;
 }
 
 export interface DecisionEntry {

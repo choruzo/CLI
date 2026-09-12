@@ -12,7 +12,13 @@ import { QuestionPrompt } from './QuestionPrompt.js';
 import { FatalError } from './FatalError.js';
 import type { ConvItem, PendingConfirm } from './App.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
-import type { AgentMode, Plan, QuestionAnswer, QuestionItem } from '../../agent/types.js';
+import type {
+  AgentMode,
+  Plan,
+  QuestionAnswer,
+  QuestionItem,
+  TokenAccounting,
+} from '../../agent/types.js';
 import type { TodoItem } from '../../agent/todo.js';
 
 interface Props {
@@ -45,6 +51,10 @@ interface Props {
   mcpStatus?: McpStatusSummary;
   /** Salud del provider activo para el `●` del status bar (Hito 6). */
   providerStatus?: ProviderStatus;
+  /** Cambios del working tree ya formateados (`+N/-M`) para el status bar (Hito 13). */
+  changes?: string;
+  /** Contabilidad de tokens de la sesión para el medidor del status bar (Hito 13). */
+  tokens?: TokenAccounting;
   // ----- Plan & Execute (Hito 7) -----
   /** Modo del agente para el badge del status bar y el render del plan. */
   planMode?: AgentMode;
@@ -90,6 +100,8 @@ export function ConversationView({
   overlay,
   mcpStatus,
   providerStatus,
+  changes,
+  tokens,
   planMode,
   plan,
   pendingApproval,
@@ -112,6 +124,8 @@ export function ConversationView({
         mcpStatus={mcpStatus}
         providerStatus={providerStatus}
         mode={planMode}
+        changes={changes}
+        tokens={tokens}
       />
       {plan && planMode === 'execute' && <PlanView plan={plan} />}
       {todos && todos.length > 0 && <TodoView items={todos} stale={todoStale ?? 0} />}
