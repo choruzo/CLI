@@ -519,6 +519,204 @@ export function collectPathInputs(params: unknown, depth = 0): string[] {
   return found;
 }
 
+// ---------------------------------------------------------------------------
+// Capa 3 sobre comandos de shell
+// ---------------------------------------------------------------------------
+
+/**
+ * Comandos que vuelcan el CONTENIDO de un fichero (a stdout, a otro fichero o
+ * a la red). Son la vía por la que la capa 3 se esquivaba: bloquear `read_file`
+ * sobre `.env` no sirve de nada si `cat .env` sigue disponible, y el modelo
+ * encuentra ese rodeo solo — se observó haciéndolo.
+ *
+ * La lista es deliberadamente de comandos que EXPONEN contenido, no de todo lo
+ * que abre un fichero: `wc -l .env` o `stat` no filtran el secreto, y meterlos
+ * solo añadiría falsos positivos. Cubre POSIX y los alias de PowerShell, que es
+ * el shell por defecto en Windows.
+ */
+const CONTENT_READERS = new Set([
+  // volcado directo
+  'cat',
+  'bat',
+  'tac',
+  'head',
+  'tail',
+  'more',
+  'less',
+  'nl',
+  'strings',
+  'xxd',
+  'od',
+  'hexdump',
+  'base64',
+  'openssl',
+  // filtros que imprimen líneas del fichero
+  'grep',
+  'egrep',
+  'fgrep',
+  'rg',
+  'ag',
+  'ack',
+  'sed',
+  'awk',
+  'gawk',
+  'perl',
+  'sort',
+  'uniq',
+  'cut',
+  // copia (mover el material a otro sitio lo saca del alcance de la guarda)
+  'cp',
+  'mv',
+  'install',
+  'rsync',
+  'scp',
+  'tee',
+  // PowerShell
+  'get-content',
+  'gc',
+  'type',
+  'select-string',
+  'sls',
+  'copy-item',
+  'copy',
+  'move-item',
+  'out-file',
+  'set-content',
+  'add-content',
+]);
+
+/**
+ * Flags que consumen el token siguiente como valor y no como ruta. Depende del
+ * comando a propósito: `-n` es un número en `head -n 5` y una opción sin valor
+ * en `sed -n`, así que una lista única acertaría en uno y fallaría en el otro.
+ */
+const VALUE_FLAGS_BY_COMMAND: Record<string, readonly string[]> = {
+  head: ['-n', '-c', '--lines', '--bytes'],
+  tail: ['-n', '-c', '--lines', '--bytes'],
+  grep: ['-m', '-A', '-B', '-C', '-e', '-f', '--regexp', '--file', '--max-count'],
+  egrep: ['-m', '-A', '-B', '-C', '-e', '-f'],
+  fgrep: ['-m', '-A', '-B', '-C', '-e', '-f'],
+  rg: ['-m', '-A', '-B', '-C', '-e', '-f', '--max-count', '--regexp', '--file'],
+  sed: ['-e', '-f', '--expression', '--file'],
+  awk: ['-v', '-f'],
+  gawk: ['-v', '-f'],
+  perl: ['-e', '-I'],
+  'select-string': ['-Pattern', '-pattern'],
+  sls: ['-Pattern', '-pattern'],
+  cut: ['-d', '-f', '-c', '--delimiter', '--fields'],
+  openssl: ['-in', '-out', '-passin', '-passout'],
+};
+
+/** Flags que aportan el patrón por opción: con uno de ellos, el primer operando YA es una ruta. */
+const PATTERN_FLAGS = new Set(['-e', '--regexp', '-f', '--file', '-Pattern', '-pattern']);
+
+interface ReaderOperands {
+  paths: string[];
+  /** true si el patrón vino por flag, así que no hay que descartar el primer operando. */
+  patternFromFlag: boolean;
+}
+
+/** Operandos de un lector, saltando flags y los valores que estos consumen. */
+function readerOperands(name: string, rest: string[]): ReaderOperands {
+  const valueFlags = new Set(VALUE_FLAGS_BY_COMMAND[name] ?? []);
+  const paths: string[] = [];
+  let patternFromFlag = false;
+
+  for (let i = 0; i < rest.length; i++) {
+    const tok = rest[i]!;
+    if (tok.startsWith('-')) {
+      if (valueFlags.has(tok)) {
+        if (PATTERN_FLAGS.has(tok)) patternFromFlag = true;
+        i++;
+      }
+      continue;
+    }
+    paths.push(tok);
+  }
+  return { paths, patternFromFlag };
+}
+
+/** Flags de subida de `curl`: `curl -T .env https://…` es exfiltración directa. */
+const CURL_UPLOAD_FLAGS = new Set(['-T', '--upload-file', '--data-binary', '-d', '--data', '-F']);
+
+/**
+ * Extrae las rutas que un comando de shell va a leer o escribir. Cubre tres
+ * vías: los operandos de un comando de la lista de arriba, las redirecciones
+ * (`< .env`, `> .ssh/authorized_keys`) y las subidas de `curl`.
+ *
+ * Es best-effort por construcción — un shell puede componer una ruta de mil
+ * maneras (variables, `$(...)`, globs) y esto no es un intérprete. Sube el
+ * listón lo suficiente para que el rodeo obvio deje de funcionar, que es de lo
+ * que se trata; la defensa real de un secreto es no tenerlo en el disco donde
+ * corre el agente.
+ */
+export function collectCommandPaths(command: string): string[] {
+  const found: string[] = [];
+
+  for (const segment of splitCommandSegments(command)) {
+    const tokens = tokenize(segment);
+    if (tokens.length === 0) continue;
+
+    // Redirecciones: `> f`, `>> f`, `< f`, y las formas pegadas `>f` / `<f`.
+    for (let i = 0; i < tokens.length; i++) {
+      const tok = tokens[i]!;
+      const redirect = tok.match(/^\d?(?:>>|>|<)(.*)$/);
+      if (!redirect) continue;
+      const inline = redirect[1] ?? '';
+      const target = inline || tokens[i + 1] || '';
+      if (target && !target.startsWith('-')) found.push(target);
+    }
+
+    const invocation = parseInvocation(tokens);
+    if (!invocation) continue;
+    const name = invocation.name.toLowerCase();
+
+    if (CONTENT_READERS.has(name)) {
+      // El primer operando de sed/awk/perl/grep es el programa o el patrón, no
+      // una ruta; contarlo daría falsos positivos con expresiones tipo `s/a/b/`.
+      const skipFirst =
+        name === 'sed' ||
+        name === 'awk' ||
+        name === 'gawk' ||
+        name === 'perl' ||
+        name === 'grep' ||
+        name === 'egrep' ||
+        name === 'fgrep' ||
+        name === 'rg' ||
+        name === 'select-string' ||
+        name === 'sls';
+      const { paths, patternFromFlag } = readerOperands(name, invocation.rest);
+      found.push(...(skipFirst && !patternFromFlag ? paths.slice(1) : paths));
+      continue;
+    }
+
+    if (name === 'curl' || name === 'wget' || name === 'invoke-webrequest' || name === 'iwr') {
+      for (let i = 0; i < invocation.rest.length; i++) {
+        const tok = invocation.rest[i]!;
+        if (!CURL_UPLOAD_FLAGS.has(tok)) continue;
+        const value = invocation.rest[i + 1] ?? '';
+        // `-d @fichero` sube el contenido; `-d clave=valor` no.
+        const path = value.startsWith('@')
+          ? value.slice(1)
+          : tok === '-T' || tok === '--upload-file'
+            ? value
+            : '';
+        if (path) found.push(path);
+      }
+    }
+  }
+
+  return found.filter((p) => p.length > 0 && !p.startsWith('-'));
+}
+
+/**
+ * Veredicto de capa 3 para un comando de shell. Mismo criterio que el de las
+ * tools de fichero: `blocked` es inapelable, `confirm` admite allowlist.
+ */
+export function commandPathVerdict(command: string, allowlist: string[] = []): PathVerdict | null {
+  return sensitivePathVerdict({ paths: collectCommandPaths(command) }, allowlist);
+}
+
 export interface PathVerdict {
   tier: PathTier;
   path: string;

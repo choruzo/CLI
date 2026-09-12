@@ -1,7 +1,12 @@
 import { z } from 'zod';
 import { execa } from 'execa';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
-import { hardDenyReason, guardedBlockReason, guardedConfirmLabel } from '../guards.js';
+import {
+  hardDenyReason,
+  guardedBlockReason,
+  guardedConfirmLabel,
+  commandPathVerdict,
+} from '../guards.js';
 
 const schema = z.object({
   command: z.string().describe('Shell command to execute'),
@@ -49,6 +54,18 @@ export function commandVeto(
       'Ask the user to run it themselves, or to change that policy in .stratumrc.json.'
     );
   }
+  // Capa 3 sobre el shell: sin esto, bloquear `read_file` sobre una clave no
+  // sirve de nada, porque `cat` sigue disponible y el modelo encuentra el
+  // rodeo solo. Mismo veredicto y mismo texto que en las tools de fichero.
+  const sensitive = commandPathVerdict(command);
+  if (sensitive && sensitive.tier === 'blocked') {
+    return (
+      `the command reads or writes "${sensitive.path}" (${sensitive.reason}). ` +
+      'Credentials and private key material are never accessed by the agent, through file tools ' +
+      'or through the shell, and no configuration or user approval can enable it. ' +
+      'If you need a value from it, ask the user to provide just that value.'
+    );
+  }
   return null;
 }
 
@@ -78,6 +95,14 @@ export const bashTool: ToolDefinition = {
     const parsed = schema.safeParse(params);
     if (!parsed.success) return false;
     if (guardedConfirmLabel(parsed.data.command, ctx.config.tools.guardedCommands)) return true;
+    // Ruta sensible del nivel `confirm` (.env, secrets/, .npmrc) tocada desde el
+    // shell: mismo gate que si se hubiera pedido con read_file.
+    if (
+      commandPathVerdict(parsed.data.command, ctx.config.tools.sensitivePathAllowlist)?.tier ===
+      'confirm'
+    ) {
+      return true;
+    }
     return commandIsDestructive(parsed.data.command, ctx.config.tools.destructivePatterns);
   },
 

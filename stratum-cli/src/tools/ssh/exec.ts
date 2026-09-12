@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { ClientChannel } from 'ssh2';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.js';
 import { commandIsDestructive, commandVeto } from '../shell/bash.js';
+import { commandPathVerdict } from '../guards.js';
 import { guardedConfirmLabel } from '../guards.js';
 import { getSshPool, getAuditLog, confirmFnFrom } from './runtime.js';
 import { HostKeyError } from './known-hosts.js';
@@ -111,6 +112,8 @@ export const sshExecTool: ToolDefinition = {
 
   // Hito 11: las capas 1 y 2 de las guardas valen igual para un host remoto.
   // Un `rm -rf /` no es menos catastrófico por estar al otro lado de un socket.
+  // Hito 13: `commandVeto` incluye además la capa 3 sobre el comando — volcar
+  // la clave privada del host remoto al provider es la misma fuga que en local.
   preflight(params: unknown, ctx: ToolContext): ToolResult | null {
     const parsed = schema.safeParse(params);
     if (!parsed.success) return null;
@@ -124,6 +127,12 @@ export const sshExecTool: ToolDefinition = {
     const host = ctx.config.ssh?.hosts[parsed.data.host];
     if (host?.confirmAll) return true;
     if (guardedConfirmLabel(parsed.data.command, ctx.config.tools.guardedCommands)) return true;
+    if (
+      commandPathVerdict(parsed.data.command, ctx.config.tools.sensitivePathAllowlist)?.tier ===
+      'confirm'
+    ) {
+      return true;
+    }
     return commandIsDestructive(parsed.data.command, ctx.config.tools.destructivePatterns);
   },
 
