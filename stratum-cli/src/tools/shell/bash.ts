@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { execa } from 'execa';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { hardDenyReason, guardedBlockReason, guardedConfirmLabel } from '../guards.js';
 
 const schema = z.object({
   command: z.string().describe('Shell command to execute'),
@@ -24,11 +25,40 @@ export function commandIsDestructive(command: string, patterns: string[]): boole
   return false;
 }
 
+/**
+ * Veto de capas 1 y 2 (Hito 11), compartido con `ssh_exec`: lo que es
+ * catastrófico en local lo es igual en un host remoto. Devuelve el motivo del
+ * rechazo, o `null` si el comando pasa.
+ */
+export function commandVeto(
+  command: string,
+  guardedCommands?: Record<string, 'allow' | 'confirm' | 'block'>,
+): string | null {
+  const hard = hardDenyReason(command);
+  if (hard) {
+    return (
+      `Blocked by a non-negotiable safety rule: ${hard}. ` +
+      'This rule cannot be disabled by configuration or by user approval. ' +
+      'Narrow the command to the specific target you actually need.'
+    );
+  }
+  const guarded = guardedBlockReason(command, guardedCommands);
+  if (guarded) {
+    return (
+      `Blocked by policy: ${guarded} is set to "block" in tools.guardedCommands. ` +
+      'Ask the user to run it themselves, or to change that policy in .stratumrc.json.'
+    );
+  }
+  return null;
+}
+
 export const bashTool: ToolDefinition = {
   name: 'bash',
   description:
     'Execute a shell command and return stdout and stderr. Timeouts after 30s by default. ' +
-    'Commands matching destructive patterns (rm, dd, mkfs, DROP, ...) require user confirmation.',
+    'Commands matching destructive patterns (rm, dd, mkfs, DROP, ...) require user confirmation. ' +
+    'A few catastrophic commands (rm -rf on / or ~, git clean -fd, mkfs, chmod -R 777, ' +
+    'dd onto a block device) are rejected outright and no approval can enable them.',
   schema,
   destructive: false,
   serialized: true,
@@ -37,9 +67,17 @@ export const bashTool: ToolDefinition = {
   // seguridad para no matar comandos largos legítimos.
   timeout: 600000,
 
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    const parsed = schema.safeParse(params);
+    if (!parsed.success) return null;
+    const veto = commandVeto(parsed.data.command, ctx.config.tools.guardedCommands);
+    return veto ? { ok: false, error: veto, recoverable: false } : null;
+  },
+
   isDestructive(params: unknown, ctx: ToolContext): boolean {
     const parsed = schema.safeParse(params);
     if (!parsed.success) return false;
+    if (guardedConfirmLabel(parsed.data.command, ctx.config.tools.guardedCommands)) return true;
     return commandIsDestructive(parsed.data.command, ctx.config.tools.destructivePatterns);
   },
 

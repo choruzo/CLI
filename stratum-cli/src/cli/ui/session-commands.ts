@@ -88,6 +88,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/todo',
+    description: 'Colapsa o despliega el panel de tareas del agente (Ctrl+T)',
+    hasArgs: false,
+  },
+  {
     name: '/debug',
     description: 'Activa o desactiva la visualización de los bloques ⊙ thinking',
     hasArgs: false,

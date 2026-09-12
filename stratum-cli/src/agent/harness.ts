@@ -30,6 +30,14 @@ import {
 } from './plan.js';
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { QUESTION_TOOL, parseQuestionInput, formatQuestionAnswers } from '../tools/question.js';
+import { TODO_TOOL } from '../tools/todo.js';
+import {
+  TodoError,
+  TodoList,
+  applyTodoToSystemMessage,
+  formatTodoSnapshot,
+  type TodoInput,
+} from './todo.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import type { ProfileLoader } from './profiles.js';
 import { runSubagent, serializeSubagentResult, generateSubagentId } from './subagent.js';
@@ -518,6 +526,8 @@ export class ContextManager {
 export class ReactLoop {
   private readonly dispatcher: ToolDispatcher;
   private readonly contextManager: ContextManager;
+  /** Lista de tareas del turno (Hito 11). De sesión cuando `extras.todos` la aporta. */
+  private readonly todos: TodoList;
   /** Iteraciones del loop realmente ejecutadas en el último run (Hito 8: usage). */
   private _iterations = 0;
   /**
@@ -561,10 +571,20 @@ export class ReactLoop {
        * y `/compact` vuelven al proxy chars/3.5 sin corregir.
        */
       contextManager?: ContextManager;
+      /**
+       * Lista de tareas de la sesión (Hito 11). Como el `ContextManager`, vive
+       * fuera del loop: la lista tiene que sobrevivir entre turnos para que la
+       * detección de staleness cuente turnos de verdad. Sin ella, `todo` sigue
+       * existiendo pero arranca vacía en cada turno.
+       */
+      todos?: TodoList;
     },
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
     this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
+    // Sin lista de sesión (tests, subagentes) el loop usa una propia: `todo`
+    // sigue funcionando dentro del turno, solo que no persiste entre turnos.
+    this.todos = extras?.todos ?? new TodoList();
     this.contextManager =
       extras?.contextManager ??
       new ContextManager(
@@ -611,6 +631,18 @@ export class ReactLoop {
     // a `question` se rechaza con tool_error recuperable para que un modelo
     // pequeño no convierta el turno en un interrogatorio.
     let questionsAsked = false;
+
+    // Hito 11 — lista de tareas. `beginTurn` avanza el contador de staleness y
+    // limpia una lista ya terminada; el evento repinta la UI al reanudar una
+    // sesión con tareas abiertas, antes de que el modelo diga nada.
+    this.todos.beginTurn();
+    if (this.todos.snapshot.length > 0) {
+      yield {
+        type: 'todo_updated',
+        items: this.todos.snapshot,
+        stale: this.todos.staleTurns,
+      };
+    }
 
     // Hito 8: los subagentes aplican el maxIterations de su presupuesto en vez
     // del global de config (límite duro, §12.16).
@@ -698,6 +730,14 @@ export class ReactLoop {
       // allowlist read-only + present_plan; en 'execute' aparece update_plan.
       // Hito 8: el filtro de subagente restringe además por perfil + profundidad=1.
       const tools: ToolSchema[] = this.registry.toToolSchemas(mode, this.extras?.toolsetFilter);
+
+      // Hito 11 — re-inyectar las tareas abiertas en el system prompt antes de
+      // cada iteración. Una descripción estática de tool no basta para que un
+      // modelo pequeño mantenga la lista al día; recordárselo cada vez sí. Va
+      // dentro del mensaje system (entre marcadores, idempotente) y no como
+      // mensaje nuevo: así no acumula basura por iteración y la compresión de
+      // contexto, que protege el system prompt, no se lo lleva por delante.
+      applyTodoToSystemMessage(this.messages, this.todos.injection());
 
       const request: CompletionRequest = {
         messages: this.messages,
@@ -908,6 +948,72 @@ export class ReactLoop {
               tool_call_id: call.id,
               name: call.name,
               content: formatToolError(call.name, err, fmt, undefined),
+            });
+          }
+          continue;
+        }
+
+        // todo (Hito 11): tool de control. Se aplica aquí mismo, en orden, para
+        // que el snapshot que se inyecta como tool result refleje ya el cambio
+        // y una tanda de varias llamadas (update + update) se acumule bien.
+        if (call.name === TODO_TOOL) {
+          // Fuera del modo normal la lista no existe: en plan/execute el
+          // checklist del plan es la única fuente de verdad del progreso.
+          if (mode !== 'normal') {
+            const err =
+              mode === 'plan'
+                ? 'todo no está disponible en modo plan: describe los pasos en present_plan.'
+                : 'todo no está disponible durante la ejecución de un plan: usa update_plan.';
+            yield {
+              type: 'tool_error',
+              id: call.id,
+              name: call.name,
+              error: err,
+              recoverable: true,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: formatToolError(call.name, err, fmt, undefined),
+            });
+            continue;
+          }
+          try {
+            const applied = this.todos.apply(call.input as unknown as TodoInput);
+            const snapshot = formatTodoSnapshot(applied.items, applied.notes);
+            yield {
+              type: 'todo_updated',
+              items: this.todos.snapshot,
+              stale: this.todos.staleTurns,
+            };
+            yield {
+              type: 'tool_result',
+              id: call.id,
+              name: call.name,
+              result: snapshot,
+              durationMs: 0,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: snapshot,
+            });
+          } catch (err) {
+            const message = err instanceof TodoError ? err.message : String(err);
+            yield {
+              type: 'tool_error',
+              id: call.id,
+              name: call.name,
+              error: message,
+              recoverable: true,
+            };
+            this.messages.push({
+              role: 'tool',
+              tool_call_id: call.id,
+              name: call.name,
+              content: formatToolError(call.name, message, fmt, undefined),
             });
           }
           continue;

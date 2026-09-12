@@ -7,6 +7,8 @@ import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
 import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
 import { ProfileLoader } from './profiles.js';
+import { TodoList, rehydrateTodos } from './todo.js';
+import type { TodoItem } from './todo.js';
 import { MemoryManager } from '../memory/manager.js';
 import { extractAndStore } from '../memory/extractor.js';
 
@@ -39,6 +41,11 @@ export class StratumAgent {
   /** Perfiles de subagente (Hito 8): descubiertos al arrancar, pasados al loop. */
   private readonly profiles: ProfileLoader;
   private _toolCallCount = 0;
+  /**
+   * Lista de tareas de la sesion (Hito 11). Vive aqui y no en el `ReactLoop`
+   * porque el loop dura un solo turno y la deteccion de staleness cuenta turnos.
+   */
+  private readonly todos = new TodoList();
   /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
   private _planRef: string | null = null;
   /** Plan reanudado (§12.6): expuesto una sola vez a la UI al init, luego se borra. */
@@ -70,6 +77,9 @@ export class StratumAgent {
     if (options?.initialMessages && options.initialMessages.length > 0) {
       // Reanudar sesión: usar historial completo tal como fue guardado
       this.messages = [...options.initialMessages];
+      // Hito 11: el estado de la lista viaja en el historial (cada tool result
+      // lleva el snapshot completo), asi que reanudar no necesita store propio.
+      this.todos.replace(rehydrateTodos(this.messages));
       // Reanudación de plan interrumpido (§12.6): inyectar el estado de los pasos.
       if (options.resumePreamble) {
         this.messages.push({ role: 'user', content: options.resumePreamble });
@@ -83,6 +93,7 @@ export class StratumAgent {
           content: buildSystemPrompt(config, memory || undefined, {
             modelId: router.model,
             providerName: router.providerName,
+            agentProfiles: this.profiles.availableNames(),
           }),
         },
       ];
@@ -104,7 +115,11 @@ export class StratumAgent {
       this.router.model,
       this.router.contextWindow,
       this.router,
-      { profiles: this.profiles, contextManager: this.getContextManager() },
+      {
+        profiles: this.profiles,
+        contextManager: this.getContextManager(),
+        todos: this.todos,
+      },
     );
 
     let stopReason: string | null = null;
@@ -146,6 +161,7 @@ export class StratumAgent {
     const newSystemContent = buildSystemPrompt(this.config, memory || undefined, {
       modelId: this.router.model,
       providerName: this.router.providerName,
+      agentProfiles: this.profiles.availableNames(),
     });
     if (this.messages[0]?.role === 'system') {
       this.messages[0] = { role: 'system', content: newSystemContent };
@@ -159,11 +175,17 @@ export class StratumAgent {
    * y `Ctrl+L`, UI §5.2). La sesión sigue viva — mismo `sessionId` — pero el
    * agente arranca la siguiente iteración con el contexto vacío.
    */
+  /** Tareas vivas de la sesion (para inicializar la UI al reanudar). */
+  getTodos(): TodoItem[] {
+    return this.todos.snapshot;
+  }
+
   clearHistory(): void {
     const system = this.messages[0]?.role === 'system' ? this.messages[0] : null;
     this.messages = system ? [system] : [];
     this._toolCallCount = 0;
     this._planRef = null;
+    this.todos.clear();
   }
 
   /**
@@ -175,6 +197,7 @@ export class StratumAgent {
     this.messages = [...messages];
     this._toolCallCount = 0;
     this._planRef = null;
+    this.todos.replace(rehydrateTodos(this.messages));
   }
 
   /**

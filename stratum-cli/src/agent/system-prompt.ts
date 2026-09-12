@@ -15,6 +15,12 @@ export interface SystemPromptEnv {
   cwd?: string;
   /** Hito 8: marca que este prompt es para un subagente (sin acciones interactivas). */
   isSubagent?: boolean;
+  /**
+   * Perfiles de subagente disponibles (Hito 11). Cuando la lista no está vacía
+   * y no somos un subagente, se inyecta el bloque `# Work routing`: sin él, un
+   * modelo pequeño ve `delegate_task` en el toolset pero nunca sabe cuándo usarla.
+   */
+  agentProfiles?: string[];
 }
 
 /** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
@@ -170,7 +176,10 @@ assistant: Clients are marked as failed in the \`connectToServer\` function in s
 </example>
 
 # Language
-Respond in the same language the user uses. If the user writes in Spanish, respond in Spanish.`;
+Three separate domains, do not mix them up:
+1. Conversation with the user — the language the user writes in. If the user writes in Spanish, answer in Spanish.
+2. Technical artifacts — English by default, always: code, identifiers, code comments, commit messages, file and directory names, test names and repository documentation. The only exception is a project that is already written in another language: follow what the repository already does.
+3. Prompts you write for subagents (delegate_task) — English by default, even when the user speaks another language. It costs fewer tokens and gives the children a consistent operating language. Keep verbatim quotes, error messages, file names and commands exactly as they are, and use the user's language when the child's output will be shown to the user as-is.`;
 
 // ---------------------------------------------------------------------------
 // Ensamblaje
@@ -208,6 +217,54 @@ Operational limits you must respect:
 - Hosts marked confirmAll ask the user before every single command, including read-only ones. Batch your work on those hosts.`;
 }
 
+/**
+ * Bloque `# Work routing` (Hito 11). Escalera de enrutado de trabajo con
+ * umbrales numéricos: inline directo → delegación simple → plan formal.
+ *
+ * Solo se inyecta en el agente principal y solo cuando hay perfiles de
+ * subagente cargados: `delegate_task` está en el toolset desde el Hito 8, pero
+ * hasta ahora nada en el prompt decía CUÁNDO usarla, así que un modelo pequeño
+ * o no delegaba nunca o delegaba trabajo trivial.
+ *
+ * Adaptado de la Work Routing Ladder de gentle-pi (Alan Buscaglia, MIT) a los
+ * nombres de tools de Stratum. Ver CLI-DOC/Investigacion/gentle-pi.md §2.
+ */
+export function buildWorkRoutingBlock(profiles: string[]): string {
+  if (profiles.length === 0) return '';
+
+  return `# Work routing
+Before doing any work, decide at which level it belongs. The question that decides it is always the same: **would doing this inline inflate my context without need?**
+
+1. **Inline direct** — small, mechanical, and the context you need is already here: a typo, an edit to one file you have already read, reading 1-3 known files, a bash command to inspect state.
+2. **Simple delegation** (\`delegate_task\`) — one bounded worker: read-only exploration, a self-contained implementation, a verification pass. Available profiles: ${profiles.join(', ')}.
+3. **Formal plan** (\`present_plan\`, only in plan mode) — only when the user asks for it or accepts your proposal. Size and risk alone NEVER select this level.
+
+Mandatory triggers. When one fires, delegate — do not talk yourself out of it:
+
+| Rule | Threshold | Action |
+|---|---|---|
+| Bounded read | 1-3 files | inline |
+| Four-file rule | understanding it needs 4+ files | delegate a read-only mapper |
+| Multi-write rule | 2+ non-trivial files to write | delegate ONE writer for all of them |
+| Context rule | reading that only prepares a write, or broad research | delegate it together with the write |
+| Incident rule | wrong cwd, accidental mutation, strange environment | diagnose it in a SEPARATE worker before continuing |
+| Long-session rule | ~20 tool calls, 5 exploratory reads, or 2 non-mechanical edits without delegating | stop and delegate the rest |
+
+Action → route:
+
+| Action | Inline | Delegated worker |
+|---|---|---|
+| Read to decide or verify (1-3 files) | yes | — |
+| Read to explore or understand (4+) | — | yes, a narrow mapper |
+| Read as preparation for writing | — | yes, together with the write |
+| Write 1 mechanical file you already understand | yes | — |
+| Write 2+ non-trivial files | — | yes, one writer |
+| bash for state (git status, gh, ls) | yes | — |
+| Tests, builds, installs | bounded, allowed | yes, a fresh worker per action |
+
+When you delegate, give the child a self-contained task: it does NOT inherit your conversation. State the goal, the acceptance criteria and the file paths it needs in \`context\`. Write that task in English (see # Language). You stay responsible for reading its summary and deciding what happens next.`;
+}
+
 export function buildSystemPrompt(
   config: StratumConfig,
   memory?: string,
@@ -223,6 +280,16 @@ You have two tools backed by long-term memory that persists across sessions:
 - recall_decisions: use it to retrieve past decisions semantically before acting, when you need to remember why something was chosen, a project convention, a previous bug fix, or a user preference.`;
 
   prompt += buildSshBlock(config);
+
+  // Work routing (Hito 11): solo el agente principal enruta trabajo. Un
+  // subagente no puede delegar (profundidad = 1), así que el bloque sobraría.
+  if (!env?.isSubagent) {
+    const routing = buildWorkRoutingBlock(env?.agentProfiles ?? []);
+    if (routing)
+      prompt += `
+
+${routing}`;
+  }
 
   if (memory && memory.trim()) {
     prompt += `\n\n## Project Memory\nThe following is persistent context for this project (from STRATUM.md). Honor these instructions and conventions:\n\n${memory.trim()}`;

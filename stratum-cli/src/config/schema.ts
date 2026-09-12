@@ -236,6 +236,21 @@ export const StratumConfigSchema = z.object({
           'shred',
           'wipefs',
         ]),
+      /**
+       * Hito 11 — capa 2 de las guardas: mapa `clave → allow|confirm|block`
+       * sobre comandos conocidos (ver `tools/guards.ts` → GUARDED_COMMANDS).
+       * Lo que se pone aquí SUSTITUYE la acción por defecto de esa clave.
+       * `block` es absoluto: no lo levantan `--allow-destructive` ni el
+       * allow-all de sesión. `confirm` sí cede ante ellos, como cualquier otra
+       * confirmación destructiva. La capa 1 (hard-deny) no es configurable.
+       */
+      guardedCommands: z.record(z.enum(['allow', 'confirm', 'block'])).default({}),
+      /**
+       * Hito 11 — capa 3: rutas que dejan de pedir confirmación aunque encajen
+       * con los patrones sensibles del nivel `confirm` (.env, secrets/, .npmrc).
+       * NUNCA levanta el nivel `blocked` (claves, credenciales, llaveros).
+       */
+      sensitivePathAllowlist: z.array(z.string()).default([]),
     })
     .default({}),
 

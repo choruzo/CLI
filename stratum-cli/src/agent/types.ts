@@ -1,6 +1,7 @@
 import type { ZodTypeAny } from 'zod';
 import type { StratumConfig } from '../config/schema.js';
 import type { IProvider } from '../providers/base.js';
+import type { TodoItem } from './todo.js';
 
 export type AgentEvent =
   | { type: 'text_delta'; delta: string }
@@ -20,6 +21,9 @@ export type AgentEvent =
   // Hito 2.5 (F7) — tanda única de preguntas al usuario (tool `question`)
   | { type: 'questions_asked'; questions: QuestionItem[] }
   | { type: 'questions_answered'; answers: QuestionAnswer[] | null }
+  // Hito 11 — lista de tareas del turno (tool `todo`). `stale` son los turnos
+  // transcurridos con tareas abiertas y sin que el modelo tocara la lista.
+  | { type: 'todo_updated'; items: TodoItem[]; stale: number }
   // Hito 7 - Plan & Execute
   | { type: 'plan_proposed'; plan: Plan }
   | { type: 'plan_step_update'; stepId: string; status: PlanStepStatus }
@@ -212,6 +216,13 @@ export interface ToolDefinition {
   serialized?: boolean;
   timeout?: number;
   rawParameters?: Record<string, unknown>;
+  /**
+   * Veto inapelable (Hito 11, capa 1 y 3-blocked de las guardas). El dispatcher
+   * lo evalúa ANTES de la fase de confirmación: devolver un `ToolResult` de
+   * error aborta la call sin preguntar al usuario y sin que `--allow-destructive`
+   * ni el allow-all de sesión puedan levantarlo. `null` = la call sigue su curso.
+   */
+  preflight?(params: unknown, ctx: ToolContext): ToolResult | null;
   isDestructive?(params: unknown, ctx: ToolContext): boolean;
   execute(params: unknown, ctx: ToolContext): Promise<ToolResult>;
 }

@@ -1,6 +1,7 @@
 import { readFileSync } from 'fs';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
 
 // Mismo contrato que la tool `read` de OpenCode (ver opencode-init-implementacion.md §5.1):
 // tope de 2000 líneas por llamada, líneas prefijadas con su número, líneas largas truncadas.
@@ -40,6 +41,14 @@ export const readFileTool: ToolDefinition = {
     '- Avoid tiny repeated slices (30 line chunks). If you need more context, read a larger window.',
   schema,
   destructive: false,
+
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return sensitivePathPreflight(params, ctx);
+  },
+
+  isDestructive(params: unknown, ctx: ToolContext): boolean {
+    return sensitivePathNeedsConfirm(params, ctx);
+  },
 
   async execute(params: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const { path, offset, limit } = schema.parse(params);

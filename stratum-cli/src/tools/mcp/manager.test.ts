@@ -28,6 +28,8 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       bashTimeout: 30000,
       webSearch: { backend: 'meta', apiKey: '', tavilyApiKey: '', maxResults: 10 },
       destructivePatterns: [],
+      guardedCommands: {},
+      sensitivePathAllowlist: [],
     },
     mcp: {
       servers: servers.map((s) => ({

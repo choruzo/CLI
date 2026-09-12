@@ -12,6 +12,7 @@ import { truncateToolOutput } from './truncate.js';
 import { PLAN_ALLOWLIST, PRESENT_PLAN_TOOL, UPDATE_PLAN_TOOL } from '../agent/plan.js';
 import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
 import { QUESTION_TOOL } from './question.js';
+import { TODO_TOOL } from './todo.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('tools');
@@ -26,8 +27,10 @@ export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
   if (mode === 'plan') {
     return name === PRESENT_PLAN_TOOL || PLAN_ALLOWLIST.has(name);
   }
+  // Hito 11: durante un plan aprobado el checklist ES el plan. Ofrecer además
+  // `todo` invita al modelo a llevar dos listas divergentes del mismo trabajo.
   if (mode === 'execute') {
-    return name !== PRESENT_PLAN_TOOL;
+    return name !== PRESENT_PLAN_TOOL && name !== TODO_TOOL;
   }
   // normal
   return name !== PRESENT_PLAN_TOOL && name !== UPDATE_PLAN_TOOL;
@@ -48,7 +51,14 @@ export interface ToolsetFilter {
 
 export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): boolean {
   if (!filter) return true;
-  if (filter.isSubagent && (name === DELEGATE_TASK_TOOL || name === QUESTION_TOOL)) return false;
+  // Hito 11: `todo` también queda fuera. La lista es del padre y se reinyecta
+  // en SU system prompt; un hijo con contexto aislado no comparte ese estado.
+  if (
+    filter.isSubagent &&
+    (name === DELEGATE_TASK_TOOL || name === QUESTION_TOOL || name === TODO_TOOL)
+  ) {
+    return false;
+  }
   if (filter.allowedTools && !filter.allowedTools.includes(name)) return false;
   return true;
 }
@@ -140,7 +150,17 @@ export class ToolDispatcher {
     // prompts a la vez), así las aprobadas pueden correr en paralelo después.
     // -------------------------------------------------------------------
     const denied = new Map<string, ToolResult>();
+
+    // Capa de veto (Hito 11): se evalúa ANTES de confirmar nada. Al usuario no
+    // se le pregunta por un `rm -rf /` que nunca se va a ejecutar, y ninguna
+    // política de sesión puede levantar este rechazo.
     for (const call of calls) {
+      const veto = this.preflight(call, ctx);
+      if (veto !== null) denied.set(call.id, veto);
+    }
+
+    for (const call of calls) {
+      if (denied.has(call.id)) continue;
       const verdict = await this.confirmIfDestructive(call, ctx);
       if (verdict !== null) denied.set(call.id, verdict);
     }
@@ -162,6 +182,29 @@ export class ToolDispatcher {
     const byId = new Map<string, DispatchResult>();
     for (const r of [...deniedResults, ...executed]) byId.set(r.callId, r);
     return calls.map((c) => byId.get(c.id)!);
+  }
+
+  /**
+   * Veto de preflight (Hito 11). `null` si la tool no define el hook o lo pasa.
+   * Un fallo del propio hook nunca bloquea: se registra y se deja pasar a la
+   * fase de confirmación, que sí es capaz de detener la call.
+   */
+  private preflight(call: ToolCallReady, ctx: ToolContext): ToolResult | null {
+    const tool = this.registry.get(call.name);
+    if (!tool?.preflight) return null;
+    let verdict: ToolResult | null;
+    try {
+      verdict = tool.preflight(call.input, ctx);
+    } catch (err) {
+      log.warn('preflight threw', { tool: call.name, err });
+      return null;
+    }
+    if (verdict === null) return null;
+    log.warn('preflight blocked', {
+      tool: call.name,
+      reason: verdict.ok ? '' : verdict.error,
+    });
+    return verdict;
   }
 
   /**

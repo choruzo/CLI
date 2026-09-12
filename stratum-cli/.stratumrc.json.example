@@ -44,7 +44,17 @@
       "tavilyApiKey": "${TAVILY_API_KEY}",
       "maxResults": 10
     },
-    "destructivePatterns": ["rm", "rmdir", "dd", "mkfs", "format", "DROP", "DELETE", "truncate", "shred", "wipefs"]
+    "destructivePatterns": ["rm", "rmdir", "dd", "mkfs", "format", "DROP", "DELETE", "truncate", "shred", "wipefs"],
+    "guardedCommands": {
+      "gitPushForce": "confirm",
+      "gitResetHard": "confirm",
+      "gitRebase": "confirm",
+      "gitBranchDeleteForce": "confirm",
+      "npmPublish": "block",
+      "dockerPrune": "confirm",
+      "curlPipeShell": "confirm"
+    },
+    "sensitivePathAllowlist": []
   },
   "mcp": {
     "startup": "lazy",

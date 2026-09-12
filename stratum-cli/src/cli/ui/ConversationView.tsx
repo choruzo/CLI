@@ -6,12 +6,14 @@ import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
 import { PlanView } from './PlanView.js';
+import { TodoView } from './TodoView.js';
 import { PlanApproval } from './PlanApproval.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { FatalError } from './FatalError.js';
 import type { ConvItem, PendingConfirm } from './App.js';
 import type { McpStatusSummary } from '../../tools/mcp/manager.js';
 import type { AgentMode, Plan, QuestionAnswer, QuestionItem } from '../../agent/types.js';
+import type { TodoItem } from '../../agent/todo.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -52,6 +54,11 @@ interface Props {
   pendingApproval?: boolean;
   onPlanApprove?: (plan: Plan) => void;
   onPlanReject?: () => void;
+  // ----- Lista de tareas (Hito 11) -----
+  /** Tareas vivas; vacio tambien cuando el usuario colapso el panel. */
+  todos?: TodoItem[];
+  /** Turnos con tareas abiertas sin actualizar (marca de staleness). */
+  todoStale?: number;
   // ----- Tanda única de preguntas (Hito 2.5, F7) -----
   /** Preguntas pendientes de responder; null fuera del gate. */
   pendingQuestions?: QuestionItem[] | null;
@@ -88,6 +95,8 @@ export function ConversationView({
   pendingApproval,
   onPlanApprove,
   onPlanReject,
+  todos,
+  todoStale,
   pendingQuestions,
   onQuestionsSubmit,
   onQuestionsCancel,
@@ -105,6 +114,7 @@ export function ConversationView({
         mode={planMode}
       />
       {plan && planMode === 'execute' && <PlanView plan={plan} />}
+      {todos && todos.length > 0 && <TodoView items={todos} stale={todoStale ?? 0} />}
       <MessageList
         completedItems={completedItems}
         currentItem={currentItem}

@@ -33,6 +33,8 @@ import type { SubagentBlockState } from './SubagentBlock.js';
 import { SubagentView, type SubagentTranscript } from './SubagentView.js';
 import { applyToolEvent } from './tool-call-reducer.js';
 import { DELEGATE_TASK_TOOL } from '../../tools/agent/delegate.js';
+import { TODO_TOOL } from '../../tools/todo.js';
+import type { TodoItem } from '../../agent/todo.js';
 import { Banner } from './Banner.js';
 import type { InitStep } from './InitProgressBlock.js';
 import { ConversationView } from './ConversationView.js';
@@ -126,6 +128,13 @@ interface AppState {
   fatalError: { message: string } | null;
   /** `/debug` (UI §5.2): muestra los bloques `⊙ thinking` del agente. */
   debug: boolean;
+  // ----- Lista de tareas (Hito 11, UI §5.9) -----
+  /** Tareas vivas del turno; vacía cuando el agente no lleva lista. */
+  todos: TodoItem[];
+  /** Turnos con tareas abiertas sin que el modelo tocara la lista. */
+  todoStale: number;
+  /** `/todo` y Ctrl+T colapsan el panel sin borrar la lista. */
+  todoCollapsed: boolean;
 }
 
 export type AppAction =
@@ -139,6 +148,7 @@ export type AppAction =
   | { type: 'INIT_DONE'; summary?: string }
   | { type: 'CLEAR' }
   | { type: 'TOGGLE_DEBUG' }
+  | { type: 'TOGGLE_TODO' }
   | { type: 'RESTORE_HISTORY'; items: ConvItem[] }
   | { type: 'CONFIRM_SHOW'; request: PendingConfirm }
   | { type: 'CONFIRM_RESOLVE' }
@@ -299,11 +309,16 @@ function reducer(state: AppState, action: AppAction): AppState {
         subagentPicker: false,
         viewingSubagentId: null,
         fatalError: null,
+        todos: [],
+        todoStale: 0,
       };
     }
 
     case 'TOGGLE_DEBUG':
       return { ...state, debug: !state.debug };
+
+    case 'TOGGLE_TODO':
+      return { ...state, todoCollapsed: !state.todoCollapsed };
 
     // `/sessions resume <id>` en caliente: repinta el historial cargado.
     case 'RESTORE_HISTORY':
@@ -370,6 +385,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         // delegate_task se intercepta en el loop y se renderiza como SubagentBlock
         // (vía subagent_started/completed), no como tool call crudo (Hito 8A).
         if (ev.name === DELEGATE_TASK_TOOL) return state;
+        // `todo` se intercepta en el loop y se pinta como <TodoView> (Hito 11),
+        // no como tool call crudo: el bloque repetiría la misma información.
+        if (ev.name === TODO_TOOL) return state;
         return {
           ...state,
           currentItem: updateCurrentAgent(state.currentItem, (item) => {
@@ -589,6 +607,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         return { ...state, pendingQuestions: null };
       }
 
+      // Hito 11: la lista de tareas cambió (o se reinyectó al arrancar el turno).
+      if (ev.type === 'todo_updated') {
+        return { ...state, todos: ev.items, todoStale: ev.stale };
+      }
+
       // Hito 7 — Fase 2: el agente propuso un plan; abrir el gate de aprobación.
       if (ev.type === 'plan_proposed') {
         return { ...state, plan: ev.plan, pendingApproval: true };
@@ -791,6 +814,9 @@ export function App({
     maxConcurrency: agent.getConfig().agents.maxConcurrency,
     fatalError: null,
     debug: false,
+    todos: agent.getTodos(),
+    todoStale: 0,
+    todoCollapsed: false,
   });
 
   // -------------------------------------------------------------------------
@@ -1133,6 +1159,13 @@ export function App({
       return;
     }
 
+    // Ctrl+T colapsa el panel de tareas (Hito 11). Ctrl+Shift+T, que sería el
+    // atajo natural, no llega al proceso en la mayoría de terminales.
+    if (key.ctrl && input === 't') {
+      dispatch({ type: 'TOGGLE_TODO' });
+      return;
+    }
+
     if (key.ctrl && input === 'u') {
       draftRef.current = '';
       setHistoryIndex(null);
@@ -1470,6 +1503,20 @@ export function App({
             `  provider    ${agent.providerName} / ${agent.model}`,
           ].join('\n'),
         });
+        return;
+      }
+
+      // Hito 11: colapsa/despliega el panel de tareas sin tocar la lista. El
+      // estado vive en el agente, así que esconderlo no le quita contexto.
+      if (cmd === '/todo') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        dispatch({ type: 'TOGGLE_TODO' });
+        if (state.todos.length === 0) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'El agente no lleva ninguna lista de tareas ahora mismo.',
+          });
+        }
         return;
       }
 
@@ -2162,6 +2209,8 @@ export function App({
         overlay={overlayNode}
         mcpStatus={mcpStatus}
         providerStatus={providerStatus}
+        todos={state.todoCollapsed ? [] : state.todos}
+        todoStale={state.todoStale}
         planMode={state.planMode}
         plan={state.plan}
         pendingApproval={state.pendingApproval}

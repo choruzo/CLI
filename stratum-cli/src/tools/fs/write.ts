@@ -2,6 +2,7 @@ import { writeFileSync, mkdirSync } from 'fs';
 import { dirname } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
 
 const schema = z.object({
   path: z.string().describe('Absolute or relative path to write'),
@@ -14,6 +15,14 @@ export const writeFileTool: ToolDefinition = {
     'Create or overwrite a file with the given content. Parent directories are created automatically.',
   schema,
   destructive: false,
+
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return sensitivePathPreflight(params, ctx);
+  },
+
+  isDestructive(params: unknown, ctx: ToolContext): boolean {
+    return sensitivePathNeedsConfirm(params, ctx);
+  },
 
   async execute(params: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const { path, content } = schema.parse(params);

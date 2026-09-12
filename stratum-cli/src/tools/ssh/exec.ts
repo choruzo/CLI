@@ -1,7 +1,8 @@
 import { z } from 'zod';
 import type { ClientChannel } from 'ssh2';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.js';
-import { commandIsDestructive } from '../shell/bash.js';
+import { commandIsDestructive, commandVeto } from '../shell/bash.js';
+import { guardedConfirmLabel } from '../guards.js';
 import { getSshPool, getAuditLog, confirmFnFrom } from './runtime.js';
 import { HostKeyError } from './known-hosts.js';
 import { getLogger } from '../../logging/index.js';
@@ -94,6 +95,8 @@ export const sshExecTool: ToolDefinition = {
     'Ejecuta un comando en un host remoto del inventario SSH.\n' +
     'Usa el alias definido en .stratumrc.json → ssh.hosts.<alias>.\n' +
     'AVISO: la detección de patrones destructivos es orientativa, no un control de seguridad real.\n' +
+    'Los comandos catastróficos (rm -rf sobre / o ~, git clean -fd, mkfs, chmod -R 777) se rechazan\n' +
+    'sin posibilidad de aprobación, igual que en local.\n' +
     'Evita comandos que no terminan (tail -f, watch): se matan al expirar el timeout.\n' +
     'sudo requiere NOPASSWD en el host, o "sudo -S" con la contraseña en stdin; ' +
     'con pty: true stdout y stderr se mezclan y el exit code puede no ser fiable.',
@@ -106,11 +109,21 @@ export const sshExecTool: ToolDefinition = {
   // El del dispatcher queda alto como red de seguridad, igual que en `bash`.
   timeout: 600000,
 
+  // Hito 11: las capas 1 y 2 de las guardas valen igual para un host remoto.
+  // Un `rm -rf /` no es menos catastrófico por estar al otro lado de un socket.
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    const parsed = schema.safeParse(params);
+    if (!parsed.success) return null;
+    const veto = commandVeto(parsed.data.command, ctx.config.tools.guardedCommands);
+    return veto ? { ok: false, error: `[${parsed.data.host}] ${veto}`, recoverable: false } : null;
+  },
+
   isDestructive(params: unknown, ctx: ToolContext): boolean {
     const parsed = schema.safeParse(params);
     if (!parsed.success) return false;
     const host = ctx.config.ssh?.hosts[parsed.data.host];
     if (host?.confirmAll) return true;
+    if (guardedConfirmLabel(parsed.data.command, ctx.config.tools.guardedCommands)) return true;
     return commandIsDestructive(parsed.data.command, ctx.config.tools.destructivePatterns);
   },
 

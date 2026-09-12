@@ -1,6 +1,7 @@
 import { readFileSync, writeFileSync } from 'fs';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
 import { generateUnifiedDiff } from './diff.js';
 
 const schema = z.object({
@@ -39,6 +40,14 @@ export const editFileTool: ToolDefinition = {
     '- Returns a unified diff of the change for review.',
   schema,
   destructive: false,
+
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return sensitivePathPreflight(params, ctx);
+  },
+
+  isDestructive(params: unknown, ctx: ToolContext): boolean {
+    return sensitivePathNeedsConfirm(params, ctx);
+  },
 
   async execute(params: unknown, _ctx: ToolContext): Promise<ToolResult> {
     const { path, old_string, new_string, replace_all } = schema.parse(params);
