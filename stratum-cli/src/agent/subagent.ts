@@ -59,6 +59,11 @@ export interface RunSubagentOptions {
    * `done` del hijo también se reporta. Best-effort: nunca debe lanzar.
    */
   onEvent?: (event: AgentEvent) => void;
+  /**
+   * Bloque `# Skills` ya renderizado por el padre (Hito 12). El hijo no
+   * redescubre skills: el índice se resuelve una vez por sesión y se hereda.
+   */
+  skillsBlock?: string;
 }
 
 function pad2(n: number): string {
@@ -158,6 +163,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
         modelId: router.model,
         providerName: router.providerName,
         isSubagent: true,
+        skills: opts.skillsBlock,
       }),
     },
     { role: 'user', content: buildTaskInjection(profile, task) },

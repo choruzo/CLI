@@ -40,6 +40,7 @@ import {
 } from './todo.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import type { ProfileLoader } from './profiles.js';
+import { ChangeTracker, changeFromToolCall } from './risk.js';
 import { runSubagent, serializeSubagentResult, generateSubagentId } from './subagent.js';
 import { Semaphore, Mutex } from './concurrency.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
@@ -528,6 +529,8 @@ export class ReactLoop {
   private readonly contextManager: ContextManager;
   /** Lista de tareas del turno (Hito 11). De sesión cuando `extras.todos` la aporta. */
   private readonly todos: TodoList;
+  /** Write-log acumulado (Hito 12). De sesión cuando `extras.changes` lo aporta. */
+  private readonly changes: ChangeTracker;
   /** Iteraciones del loop realmente ejecutadas en el último run (Hito 8: usage). */
   private _iterations = 0;
   /**
@@ -578,6 +581,17 @@ export class ReactLoop {
        * existiendo pero arranca vacía en cada turno.
        */
       todos?: TodoList;
+      /**
+       * Acumulador del cambio de la sesión (Hito 12). Como los todos, vive
+       * fuera del loop: el aviso de «reviewer protection» mide el diff de toda
+       * la sesión, no el de un turno.
+       */
+      changes?: ChangeTracker;
+      /**
+       * Bloque `# Skills` renderizado por `StratumAgent` (Hito 12). El loop solo
+       * lo transporta: se lo pasa a los subagentes que delegue.
+       */
+      skillsBlock?: string;
     },
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
@@ -585,6 +599,7 @@ export class ReactLoop {
     // Sin lista de sesión (tests, subagentes) el loop usa una propia: `todo`
     // sigue funcionando dentro del turno, solo que no persiste entre turnos.
     this.todos = extras?.todos ?? new TodoList();
+    this.changes = extras?.changes ?? new ChangeTracker();
     this.contextManager =
       extras?.contextManager ??
       new ContextManager(
@@ -1154,6 +1169,12 @@ export class ReactLoop {
               name: res.toolName,
               content: res.result.output,
             });
+            // Hito 12 — write-log de sesión: alimenta la protección del revisor.
+            const originCall = regularCalls.find((c) => c.id === res.callId);
+            if (originCall) {
+              const change = changeFromToolCall(res.toolName, originCall.input, res.result.output);
+              if (change) this.changes.record(change.path, change.added, change.deleted);
+            }
             // Señal semántica de recuperación de memoria (§5/UI §11): el agente
             // ejecutó recall_decisions con éxito. Emitir el evento con las
             // decisiones estructuradas que el orquestador acaba de devolver.
@@ -1189,6 +1210,15 @@ export class ReactLoop {
               content: formatToolError(res.toolName, res.result.error, fmt, undefined),
             });
           }
+        }
+
+        // Protección del revisor (Hito 12): un aviso cuando el cambio acumulado
+        // de la sesión cruza el umbral de lo que un humano revisa bien. No
+        // bloquea nada; solo informa, y se re-arma cada vez que se duplica.
+        const largeChange = this.changes.takeLargeChangeWarning();
+        if (largeChange) {
+          loopLog.info('large change warning', { message: largeChange });
+          yield { type: 'warning', message: largeChange };
         }
       }
 
@@ -1454,6 +1484,7 @@ export class ReactLoop {
                 ? () => opts.makeSubagentRouter!(job.profile)
                 : undefined,
               onEvent: (ev) => push({ type: 'subagent_event', subagentId: job.subId, event: ev }),
+              skillsBlock: this.extras?.skillsBlock,
             });
           } catch (err) {
             // runSubagent no debería lanzar (captura internamente); red de seguridad.

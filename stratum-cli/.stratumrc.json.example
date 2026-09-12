@@ -89,6 +89,10 @@
     "defaultProfile": "general",
     "maxConcurrency": 1
   },
+  "skills": {
+    "enabled": true,
+    "registryFile": "./.stratum/skill-registry.md"
+  },
   "logging": {
     "level": "info",
     "stderr": true,

@@ -21,6 +21,12 @@ export interface SystemPromptEnv {
    * modelo pequeño ve `delegate_task` en el toolset pero nunca sabe cuándo usarla.
    */
   agentProfiles?: string[];
+  /**
+   * Bloque `# Skills` ya renderizado (Hito 12). Lo produce `SkillRegistry` en
+   * `StratumAgent` una sola vez por sesión y se hereda tal cual a los
+   * subagentes: el índice es el mismo para todos y ningún hijo redescubre.
+   */
+  skills?: string;
 }
 
 /** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
@@ -289,6 +295,12 @@ You have two tools backed by long-term memory that persists across sessions:
       prompt += `
 
 ${routing}`;
+  }
+
+  // Skills (Hito 12): solo el índice. Se inyecta también a los subagentes —
+  // el trabajo de verdad lo hacen ellos, así que son los que más lo necesitan.
+  if (env?.skills && env.skills.trim()) {
+    prompt += `\n\n${env.skills.trim()}`;
   }
 
   if (memory && memory.trim()) {

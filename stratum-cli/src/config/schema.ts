@@ -338,6 +338,23 @@ export const StratumConfigSchema = z.object({
     .default({}),
 
   /**
+   * Registro de skills (Hito 12). Las skills en sí son ficheros sueltos
+   * (`<dir>/<nombre>/SKILL.md`), como los perfiles: aquí solo va el
+   * interruptor y dónde se materializa el índice.
+   */
+  skills: z
+    .object({
+      /** `false` → no se escanea nada y el bloque `# Skills` no se inyecta. */
+      enabled: z.boolean().default(true),
+      /**
+       * Fichero donde se materializa la tabla de skills descubiertas. Relativo
+       * al cwd. Se reescribe solo cuando cambia el fingerprint del conjunto.
+       */
+      registryFile: z.string().default('./.stratum/skill-registry.md'),
+    })
+    .default({}),
+
+  /**
    * Inventario SSH (Hito 9, §12.14). Deliberadamente **opcional** y sin
    * `.default({})`: si no hay sección `ssh`, las tools SSH no se registran en
    * el `ToolRegistry` y el LLM no las ve.

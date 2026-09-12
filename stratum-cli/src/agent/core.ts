@@ -7,6 +7,8 @@ import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
 import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
 import { ProfileLoader } from './profiles.js';
+import { ChangeTracker } from './risk.js';
+import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import type { TodoItem } from './todo.js';
 import { MemoryManager } from '../memory/manager.js';
@@ -46,6 +48,13 @@ export class StratumAgent {
    * porque el loop dura un solo turno y la deteccion de staleness cuenta turnos.
    */
   private readonly todos = new TodoList();
+  /**
+   * Write-log de la sesión (Hito 12). Vive aquí por la misma razón que la lista
+   * de tareas: el loop dura un turno y el aviso mide el cambio acumulado.
+   */
+  private readonly changes = new ChangeTracker();
+  /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
+  private readonly skillsBlock: string;
   /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
   private _planRef: string | null = null;
   /** Plan reanudado (§12.6): expuesto una sola vez a la UI al init, luego se borra. */
@@ -66,6 +75,18 @@ export class StratumAgent {
     // subdirectorio del repo (p.ej. `stratum-cli/.stratum/agents/`). El cwd gana
     // en conflictos por ser el más específico. Si coinciden, se carga una vez.
     this.profiles = new ProfileLoader([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
+
+    // Skills (Hito 12): mismos roots que los perfiles. El índice entra en el
+    // system prompt; el cuerpo de cada skill se lee bajo demanda con read_file.
+    // La tabla materializada en disco es auditable y sirve de caché: si el
+    // fingerprint no cambia, no se reescribe.
+    if (config.skills.enabled) {
+      const registry = new SkillRegistry([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
+      this.skillsBlock = registry.promptBlock(process.cwd());
+      registry.writeRegistryFile(config.skills.registryFile);
+    } else {
+      this.skillsBlock = '';
+    }
 
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {
@@ -94,6 +115,7 @@ export class StratumAgent {
             modelId: router.model,
             providerName: router.providerName,
             agentProfiles: this.profiles.availableNames(),
+            skills: this.skillsBlock,
           }),
         },
       ];
@@ -119,6 +141,8 @@ export class StratumAgent {
         profiles: this.profiles,
         contextManager: this.getContextManager(),
         todos: this.todos,
+        changes: this.changes,
+        skillsBlock: this.skillsBlock,
       },
     );
 
@@ -162,6 +186,7 @@ export class StratumAgent {
       modelId: this.router.model,
       providerName: this.router.providerName,
       agentProfiles: this.profiles.availableNames(),
+      skills: this.skillsBlock,
     });
     if (this.messages[0]?.role === 'system') {
       this.messages[0] = { role: 'system', content: newSystemContent };
