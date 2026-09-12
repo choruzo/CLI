@@ -718,19 +718,6 @@ export class ReactLoop {
           yield { type: 'done', stopReason: 'budget_tokens' };
           return;
         }
-        // Hito 13: un presupuesto que no se puede medir se ignoraba en silencio.
-        // Se avisa UNA vez y se sigue: el control recae en maxIterations/timeout.
-        if (accounting.status === 'unsupported' && !this._warnedUnmeteredBudget) {
-          this._warnedUnmeteredBudget = true;
-          loopLog.warn('token budget unmetered', { iter, maxTokens: opts.maxTokens });
-          yield {
-            type: 'warning',
-            message:
-              `token_budget_unmetered: el presupuesto de ${opts.maxTokens} tokens no se puede ` +
-              'aplicar porque este backend no devuelve `usage`. El límite efectivo pasa a ser ' +
-              'maxIterations + timeout.',
-          };
-        }
       }
       // Contar la iteración solo cuando realmente procede (no si se canceló antes).
       this._iterations = iter + 1;
@@ -883,6 +870,26 @@ export class ReactLoop {
         // haberlo pedido con `stream_options.include_usage`, este backend no lo
         // manda. Es lo que separa `unsupported` de «todavía no hay dato».
         if (streamErr === null && !signal.aborted) this._completedRequests++;
+
+        // Hito 13: un presupuesto que no se puede medir se ignoraba en silencio.
+        // El aviso va AQUÍ y no al inicio de la iteración siguiente: un turno que
+        // se resuelve en una sola iteración —el caso más común— nunca llegaría a
+        // una segunda, y el usuario se quedaría sin enterarse. Una vez por loop.
+        if (
+          opts?.maxTokens &&
+          !this._warnedUnmeteredBudget &&
+          this.tokenAccounting.status === 'unsupported'
+        ) {
+          this._warnedUnmeteredBudget = true;
+          loopLog.warn('token budget unmetered', { iter, maxTokens: opts.maxTokens });
+          yield {
+            type: 'warning',
+            message:
+              `token_budget_unmetered: el presupuesto de ${opts.maxTokens} tokens no se puede ` +
+              'aplicar porque este backend no devuelve `usage`. El límite efectivo pasa a ser ' +
+              'maxIterations + timeout.',
+          };
+        }
 
         if (streamErr !== null) {
           const isAbort = streamErr instanceof Error && streamErr.name === 'AbortError';

@@ -72,6 +72,17 @@ describe('contabilidad de tokens con estado (Hito 13)', () => {
     expect(warnings).toHaveLength(1);
   });
 
+  it('avisa aunque el turno se resuelva en UNA sola iteración', async () => {
+    // El aviso se emite al cerrar el stream, no al abrir la iteración siguiente:
+    // un turno de una iteración —el caso más común— nunca llega a una segunda.
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
+    const loop = newLoop(new MockProvider([makeTextRound('respuesta directa')]), messages);
+    const events = await collect(loop.run({ maxTokens: 50 }));
+    expect(
+      events.some((e) => e.type === 'warning' && e.message.startsWith('token_budget_unmetered')),
+    ).toBe(true);
+  });
+
   it('no avisa cuando el backend sí reporta usage', async () => {
     const messages: Message[] = [{ role: 'system', content: 'sys' }];
     const loop = newLoop(new MockProvider([makeTextRoundWithUsage('a', 10)]), messages);
