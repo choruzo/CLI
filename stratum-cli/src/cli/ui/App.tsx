@@ -155,7 +155,7 @@ interface AppState {
  * número: cuando no hay dato dice por qué no lo hay.
  */
 function describeTokenUsage(usage: TokenAccounting): string {
-  if (usage.status === 'reported') return String(usage.tokens ?? 0);
+  if (usage.status === 'reported') return `${usage.tokens ?? 0} (reportado por el provider)`;
   if (usage.status === 'unsupported') {
     return 'sin dato — este backend no devuelve `usage` en el stream';
   }
@@ -1551,12 +1551,15 @@ export function App({
           text: [
             'Uso del contexto:',
             '',
-            `  tokens      ${usage.used} / ${usage.max} (${usage.pct}%)`,
-            `  origen      ${source}`,
-            `  mensajes    ${agent.getMessages().length}`,
-            `  tool calls  ${agent.toolCallCount}`,
-            `  tokens      ${describeTokenUsage(agent.getTokenUsage())}`,
-            `  provider    ${agent.providerName} / ${agent.model}`,
+            `  contexto       ${usage.used} / ${usage.max} (${usage.pct}%)`,
+            `  origen         ${source}`,
+            `  mensajes       ${agent.getMessages().length}`,
+            `  tool calls     ${agent.toolCallCount}`,
+            `  gasto sesión   ${describeTokenUsage(agent.getTokenUsage())}`,
+            `  provider       ${agent.providerName} / ${agent.model}`,
+            '',
+            'El contexto es el tamaño del prompt actual (se reduce al comprimir);',
+            'el gasto de sesión es el total consumido, y solo crece.',
           ].join('\n'),
         });
         return;
