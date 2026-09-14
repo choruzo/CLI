@@ -13,7 +13,8 @@ const schema = z.object({
     .string()
     .default('general')
     .describe(
-      'Name of an agent profile. Resolved and validated at runtime against the loaded profiles.',
+      'Name of an agent profile from the "# Agent profiles" table of the system prompt. ' +
+        'Resolved and validated at runtime against the loaded profiles.',
     ),
   context: z
     .array(z.string())

@@ -141,3 +141,30 @@ describe('parseDuration', () => {
   it('parsea segundos', () => expect(parseDuration('10s')).toBe(10_000));
   it('lanza en formato inválido', () => expect(() => parseDuration('abc')).toThrow());
 });
+
+describe('SessionStore — activeAgent (Hito 15)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeTmpDir();
+  });
+  afterEach(() => {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('persiste el perfil principal activo y lo omite cuando no hay', async () => {
+    const store = new SessionStore(dir);
+    const base = {
+      provider: 'p',
+      model: 'm',
+      project: '/x',
+      messages: sampleMessages,
+      toolCallCount: 0,
+    };
+
+    const withAgent = await store.save({ ...base, activeAgent: 'reviewer' });
+    expect(store.load(withAgent.id).activeAgent).toBe('reviewer');
+
+    const without = await store.save({ ...base, activeAgent: null });
+    expect('activeAgent' in store.load(without.id)).toBe(false);
+  });
+});

@@ -24,6 +24,7 @@ import type {
 import { ReactLoop } from './harness.js';
 import { ProviderRouter } from '../providers/router.js';
 import { buildSystemPrompt } from './system-prompt.js';
+import { strictestPolicy } from './profiles.js';
 import { prepareGuideIndex } from './guides.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
@@ -128,6 +129,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   let tokens: number | undefined;
   let tokenStatus: TokenStatus = 'unavailable';
   let currentText = '';
+  let lastError: string | undefined;
 
   // Signal encadenado: cancelación del padre + pared de tiempo del presupuesto.
   let signal = parentSignal;
@@ -193,7 +195,12 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   const runOpts: RunOptions = {
     signal,
     sessionId: opts.sessionId,
-    destructivePolicy: profile.destructivePolicy ?? opts.parentDestructivePolicy,
+    // Hito 15: la política del perfil solo endurece la del padre. Antes la
+    // sustituía, y un perfil con `allow` convertía un --deny-destructive en allow.
+    destructivePolicy: strictestPolicy(
+      opts.parentDestructivePolicy ?? 'ask',
+      profile.destructivePolicy,
+    ),
     onConfirmDestructive: opts.onConfirmDestructive,
     maxIterations: profile.budget.maxIterations,
     maxTokens: profile.budget.maxTokens,
@@ -239,6 +246,11 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
           }
           break;
         }
+        case 'error':
+          // El motivo real (HTTP 4xx del provider, contexto excedido…). Sin
+          // guardarlo, el resultado solo decía «Subagent failed.».
+          lastError = ev.message;
+          break;
         case 'done':
           stopReason = ev.stopReason;
           break;
@@ -302,7 +314,8 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     filesChanged: toFilesArray(filesChanged),
     decisions: decisions.length ? decisions : undefined,
     usage: { iterations, tokens, tokenStatus, durationMs: Date.now() - start },
-    error: statusErrorText(status),
+    error:
+      status === 'failed' && lastError ? `Subagent failed: ${lastError}` : statusErrorText(status),
   };
 }
 

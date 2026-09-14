@@ -7,7 +7,9 @@ import type {
   DestructivePolicy,
   Plan,
   PlanDecision,
+  RunOptions,
 } from '../../agent/types.js';
+import { strictestPolicy } from '../../agent/profiles.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { makeCliQuestionAsker } from '../ask-questions.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
@@ -44,6 +46,11 @@ export const runCommand = new Command('run')
   .option('--deny-destructive', 'block all destructive operations automatically')
   .option('--plan', 'plan-and-execute mode: produce a plan, approve, then execute step by step')
   .option('--yes, --approve-plan', 'auto-approve the plan in --plan mode (no prompt)')
+  .option('--agent <profile>', 'use an agent profile (mode primary/all) as the main agent')
+  .option(
+    '--delegate <profile>',
+    'hand the task straight to a subagent profile (mode subagent/all), without the main agent',
+  )
   .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
   .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
@@ -55,10 +62,19 @@ export const runCommand = new Command('run')
         denyDestructive?: boolean;
         plan?: boolean;
         approvePlan?: boolean;
+        agent?: string;
+        delegate?: string;
         logLevel?: string;
         debug?: boolean;
       },
     ) => {
+      // Hito 15: `--delegate` no pasa por el agente principal, así que no hay
+      // plan que presentar ni perfil principal que activar.
+      if (opts.delegate && (opts.plan || opts.agent)) {
+        process.stderr.write('[fatal] --delegate no se combina con --plan ni con --agent.\n');
+        process.exit(1);
+      }
+
       if (opts.logLevel && !isLogLevel(opts.logLevel)) {
         process.stderr.write(`[fatal] Invalid --log-level: ${opts.logLevel}\n`);
         process.exit(1);
@@ -105,6 +121,30 @@ export const runCommand = new Command('run')
 
       const agent = new StratumAgent(config, router, registry);
 
+      // Hito 15 — perfiles: `--agent` activa uno como agente principal;
+      // `--delegate` le entrega la tarea a un subagente sin pasar por el principal.
+      let profileFailure: string | null = null;
+      if (opts.agent) {
+        const applied = agent.setPrimaryProfile(opts.agent);
+        if (!applied.ok) profileFailure = `--agent: ${applied.error}`;
+        else for (const note of applied.notes) process.stderr.write(`[agent] ${note}\n`);
+      } else if (opts.delegate) {
+        const name = opts.delegate;
+        const delegable = agent.delegableProfiles().map((p) => p.name);
+        if (!delegable.includes(name)) {
+          profileFailure = agent.listProfiles().some((p) => p.name === name)
+            ? `--delegate: '${name}' es un perfil principal (mode: primary); usa --agent ${name}.`
+            : `--delegate: el perfil '${name}' no existe. Disponibles: ${delegable.join(', ')}.`;
+        }
+      }
+      if (profileFailure) {
+        await mcpManager.shutdownAll();
+        await closeSshPool();
+        await flushLogging();
+        process.stderr.write(`[fatal] ${profileFailure}\n`);
+        process.exit(1);
+      }
+
       const controller = new AbortController();
       let aborting = false;
       process.on('SIGINT', () => {
@@ -124,6 +164,8 @@ export const runCommand = new Command('run')
       if (opts.allowDestructive) policy = 'allow';
       else if (opts.denyDestructive) policy = 'deny';
       else if (!process.stdin.isTTY) policy = 'deny';
+      // Un perfil principal solo endurece la política, nunca la relaja.
+      policy = strictestPolicy(policy, agent.getActiveProfile()?.destructivePolicy);
 
       const confirmDestructive = async (req: ConfirmRequest): Promise<DestructiveDecision> => {
         process.stderr.write(
@@ -193,6 +235,8 @@ export const runCommand = new Command('run')
 
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
+      // Con `--delegate` la salida es el resumen del subagente y el exit code su estado.
+      let delegateStatus: string | null = null;
       // Atribución de subagentes en paralelo (§5.6): prefijo `[sub perfil#n]` a
       // stderr para que la salida entrelazada de varios hijos sea legible.
       const subLabels = new Map<string, string>(); // subagentId → "perfil#n"
@@ -206,7 +250,7 @@ export const runCommand = new Command('run')
       const subToolSeen = new Set<string>();
 
       try {
-        for await (const event of agent.run(input, {
+        const runOpts: RunOptions = {
           signal: controller.signal,
           // `run` es one-shot y no persiste sesión, pero el id sí correlaciona
           // en el log de auditoría SSH los comandos de una misma invocación.
@@ -228,7 +272,11 @@ export const runCommand = new Command('run')
                 onPlanPersist: (p: Plan) => planStore.save(planRef, task, p, planCreatedAt),
               }
             : {}),
-        })) {
+        };
+        const events = opts.delegate
+          ? agent.runDelegate(opts.delegate, task, runOpts)
+          : agent.run(input, runOpts);
+        for await (const event of events) {
           switch (event.type) {
             case 'text_delta':
               finalText += event.delta;
@@ -337,6 +385,13 @@ export const runCommand = new Command('run')
                 `${subLabel(event.subagentId)} ${r.status === 'completed' ? '✓' : '✗'} ${r.status} · ` +
                   `${r.usage.iterations} it · ${files} fichero${files === 1 ? '' : 's'}\n`,
               );
+              if (opts.delegate) {
+                finalText = r.status === 'completed' ? r.summary : '';
+                delegateStatus = r.status;
+                if (r.status !== 'completed' && r.error) {
+                  process.stderr.write(`${errorLabel} ${r.error}\n`);
+                }
+              }
               break;
             }
 
@@ -372,6 +427,12 @@ export const runCommand = new Command('run')
 
       if (finalText) {
         process.stdout.write(finalText + '\n');
+      }
+
+      // `--delegate`: un subagente que no completó no es un éxito para quien
+      // encadena `stratum run` en un script.
+      if (opts.delegate && delegateStatus !== 'completed') {
+        process.exit(1);
       }
     },
   );

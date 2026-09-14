@@ -32,7 +32,12 @@ describe('activeGuides', () => {
   it('el cuerpo es exactamente el bloque que iría inline', () => {
     const [guide] = activeGuides({ agentProfiles: ['code', 'research'] });
     expect(guide!.body).toContain('# Work routing');
-    expect(guide!.body).toContain('code, research');
+  });
+
+  it('el cuerpo de work-routing no depende de qué perfiles haya (Hito 15)', () => {
+    const [one] = activeGuides({ agentProfiles: ['code'] });
+    const [two] = activeGuides({ agentProfiles: ['code', 'tdd', 'research'] });
+    expect(two!.body).toBe(one!.body);
   });
 });
 
@@ -55,11 +60,11 @@ describe('writeGuideFile', () => {
 
   it('reescribe cuando el cuerpo cambia', () => {
     const dir = mkdtempSync(join(tmpdir(), 'stratum-guides-'));
-    const [one] = activeGuides({ agentProfiles: ['code'] });
+    const [one] = activeGuides({ testCommand: 'npm test' });
     const path = writeGuideFile(dir, one!)!;
-    const [two] = activeGuides({ agentProfiles: ['code', 'tdd'] });
+    const [two] = activeGuides({ testCommand: 'pnpm vitest run' });
     writeGuideFile(dir, two!);
-    expect(readFileSync(path, 'utf-8')).toContain('code, tdd');
+    expect(readFileSync(path, 'utf-8')).toContain('pnpm vitest run');
   });
 });
 

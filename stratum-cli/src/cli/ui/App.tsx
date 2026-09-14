@@ -49,7 +49,9 @@ import { ConversationView } from './ConversationView.js';
 import { CommandPalette } from './CommandPalette.js';
 import { ProviderWizard } from './ProviderWizard.js';
 import { SelectList } from './components/SelectList.js';
-import { SESSION_COMMANDS, filterCommands } from './session-commands.js';
+import { SESSION_COMMANDS, filterCommands, filterProfiles } from './session-commands.js';
+import { describeProfile, strictestPolicy } from '../../agent/profiles.js';
+import { formatProfilesReport } from '../../agent/profiles-report.js';
 import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
 import { useAgentStream } from './useAgentStream.js';
@@ -818,6 +820,17 @@ export function App({
   // Getter de un solo uso: devuelve el plan reanudado (si lo hay) para init de UI.
   // useState con función initializer garantiza que getResumePlan() se llame una sola vez.
   const [resumeInfo] = useState(() => agent.getResumePlan());
+  // Hito 15 — perfil principal activo (badge `◆`) y filas de la paleta `@`. Los
+  // perfiles se descubren una vez por sesión, así que las filas no cambian.
+  const [activeAgent, setActiveAgent] = useState<string | null>(
+    () => agent.getActiveProfile()?.name ?? null,
+  );
+  const [profileRows] = useState(() =>
+    agent.delegableProfiles().map((p) => ({
+      name: p.name,
+      description: describeProfile(p).replace(/\\\|/g, '|'),
+    })),
+  );
   // PlanStore para re-persistir las actualizaciones de pasos de un plan reanudado.
   const resumePlanStoreRef = useRef<PlanStore | null>(
     resumeInfo ? new PlanStore(process.cwd()) : null,
@@ -944,7 +957,11 @@ export function App({
   const getRunOptions = useCallback((): Partial<RunOptions> => {
     const opts: Partial<RunOptions> = {
       sessionId,
-      destructivePolicy: allowAllRef.current ? 'allow' : 'ask',
+      // Hito 15: la política de un perfil principal solo endurece la de la sesión.
+      destructivePolicy: strictestPolicy(
+        allowAllRef.current ? 'allow' : 'ask',
+        agent.getActiveProfile()?.destructivePolicy,
+      ),
       onConfirmDestructive,
       onAskQuestions,
       onSubagentPersist: (rec) =>
@@ -1085,8 +1102,12 @@ export function App({
     !overlay &&
     state.focusState === 'input' &&
     !paletteDismissed &&
-    state.inputValue.trimStart().startsWith('/');
-  const paletteItems = paletteEligible ? filterCommands(state.inputValue, SESSION_COMMANDS) : [];
+    /^[/@]/.test(state.inputValue.trimStart());
+  const paletteItems = !paletteEligible
+    ? []
+    : state.inputValue.trimStart().startsWith('@')
+      ? filterProfiles(state.inputValue, profileRows)
+      : filterCommands(state.inputValue, SESSION_COMMANDS);
   const effPaletteIndex = Math.min(paletteIndex, Math.max(paletteItems.length - 1, 0));
 
   const handleInputChange = useCallback((value: string) => {
@@ -1244,7 +1265,7 @@ export function App({
     if (key.tab) {
       if (state.focusState === 'block-focus') {
         dispatch({ type: 'FOCUS_MOVE', delta: key.shift ? -1 : 1 });
-      } else if (!state.inputValue.startsWith('/')) {
+      } else if (!/^[/@]/.test(state.inputValue)) {
         dispatch({ type: 'FOCUS_BLOCKS' });
       }
       return;
@@ -1500,6 +1521,34 @@ export function App({
         return;
       }
 
+      // Hito 15 — `@perfil tarea`: el subagente atiende la tarea directamente,
+      // sin pasar por el agente principal. Un `@` que no nombra un perfil se
+      // envía como mensaje normal: puede ser un correo, un paquete npm, etc.
+      const mention = cmd.match(/^@(\S+)(?:\s+([\s\S]*))?$/);
+      const mentioned = mention
+        ? agent.listProfiles().find((p) => p.name === mention[1])
+        : undefined;
+      if (mention && mentioned) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const taskText = (mention[2] ?? '').trim();
+        if (!agent.delegableProfiles().some((p) => p.name === mentioned.name)) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `'${mentioned.name}' es un perfil principal (mode: primary): actívalo con /agent ${mentioned.name}.`,
+          });
+          return;
+        }
+        if (!taskText) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Uso: @${mentioned.name} <tarea> — delega la tarea en ese subagente.`,
+          });
+          return;
+        }
+        void send(taskText, { displayText: cmd, delegateProfile: mentioned.name });
+        return;
+      }
+
       if (cmd === '/help') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         const width = Math.max(...SESSION_COMMANDS.map((c) => c.name.length)) + 2;
@@ -1665,13 +1714,16 @@ export function App({
         }
         try {
           const saved = sessionStore().load(id);
-          agent.replaceHistory(saved.messages);
+          const notice = agent.replaceHistory(saved.messages, saved.activeAgent);
+          setActiveAgent(agent.getActiveProfile()?.name ?? null);
           process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
           dispatch({ type: 'CLEAR' });
           dispatch({ type: 'RESTORE_HISTORY', items: messagesToConvItems(saved.messages) });
           dispatch({
             type: 'SYSTEM_MESSAGE',
-            text: `Sesión ${saved.id} reanudada (${saved.messages.length} mensajes).`,
+            text:
+              `Sesión ${saved.id} reanudada (${saved.messages.length} mensajes).` +
+              (notice ? `\n${notice}` : ''),
           });
           refreshContext();
         } catch (err) {
@@ -1745,6 +1797,69 @@ export function App({
 
       // Inspector de subagentes (Hito 8C, §5.7): abre el desplegable de selección.
       // El caso "sin subagentes" lo resuelve el render del picker (línea dim).
+      // ----- Perfiles de agente (Hito 15) -----
+      if (cmd === '/agents') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: formatProfilesReport(agent.listProfiles(), agent.invalidProfiles(), {
+            activeName: agent.getActiveProfile()?.name,
+          }),
+        });
+        return;
+      }
+
+      if (cmd === '/agent' || cmd.startsWith('/agent ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const target = cmd.slice('/agent'.length).trim();
+        if (!target) {
+          const active = agent.getActiveProfile()?.name;
+          const rows = agent
+            .primaryProfiles()
+            .map(
+              (p) =>
+                `  ${p.name === active ? '◆' : '•'} ${p.name} — ${describeProfile(p).replace(/\\\|/g, '|')}`,
+            );
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: [
+              `Agente principal: ${active ?? 'por defecto'}`,
+              '',
+              rows.length > 0
+                ? 'Perfiles activables:'
+                : 'No hay perfiles activables: declara mode: primary o mode: all en su frontmatter.',
+              ...rows,
+              '',
+              'Uso: /agent <perfil> · /agent off',
+            ].join('\n'),
+          });
+          return;
+        }
+        // Cambiar el prompt y las tools a mitad de un plan dejaría el checklist
+        // aprobado en manos de un agente distinto del que lo propuso.
+        if (planModeRef.current !== 'normal') {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'No se puede cambiar de agente principal con un plan en curso.',
+          });
+          return;
+        }
+        const applied = agent.setPrimaryProfile(
+          target === 'off' || target === 'default' ? null : target,
+        );
+        if (!applied.ok) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `No se pudo activar: ${applied.error}` });
+          return;
+        }
+        setActiveAgent(applied.profile?.name ?? null);
+        const head = applied.profile
+          ? `Agente principal: ${applied.profile.name}. El historial se conserva; el system prompt y las tools cambian desde el próximo mensaje.`
+          : 'De vuelta al agente por defecto.';
+        dispatch({ type: 'SYSTEM_MESSAGE', text: [head, ...applied.notes].join('\n') });
+        refreshContext();
+        return;
+      }
+
       if (cmd === '/subagents') {
         dispatch({ type: 'OPEN_SUBAGENT_PICKER' });
         return;
@@ -1840,6 +1955,17 @@ export function App({
       }
 
       if (cmd === '/init' || cmd.startsWith('/init ')) {
+        // /init escribe STRATUM.md: con un perfil que no permite write_file,
+        // el agente se quedaría explorando sin poder entregar nada.
+        const activeProfile = agent.getActiveProfile();
+        if (activeProfile?.allowedTools && !activeProfile.allowedTools.includes('write_file')) {
+          dispatch({ type: 'INPUT_CHANGE', value: '' });
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `/init necesita write_file y el perfil activo '${activeProfile.name}' no la permite. Usa /agent off antes.`,
+          });
+          return;
+        }
         const focus = cmd.startsWith('/init ') ? cmd.slice('/init '.length).trim() : undefined;
         runInit(focus);
         return;
@@ -2282,6 +2408,7 @@ export function App({
         providerStatus={providerStatus}
         changes={formatCompact(state.changes)}
         tokens={state.tokens}
+        activeAgent={activeAgent}
         todos={state.todoCollapsed ? [] : state.todos}
         todoStale={state.todoStale}
         planMode={state.planMode}

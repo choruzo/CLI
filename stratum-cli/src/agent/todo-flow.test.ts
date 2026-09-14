@@ -148,9 +148,12 @@ describe('work routing — bloque de system prompt (Hito 11)', () => {
     );
   });
 
-  it('con perfiles lista los disponibles y los umbrales de delegación', () => {
+  it('con perfiles remite al índice de perfiles y lista los umbrales de delegación', () => {
     const block = buildWorkRoutingBlock(['general', 'research', 'code']);
-    expect(block).toContain('general, research, code');
+    // Hito 15: los nombres viven en `# Agent profiles`, no aquí — así el cuerpo
+    // de la guía no cambia cada vez que se añade un perfil.
+    expect(block).toContain('# Agent profiles');
+    expect(block).not.toContain('general, research, code');
     expect(block).toContain('Four-file rule');
     expect(block).toContain('Multi-write rule');
     expect(block).toContain('Long-session rule');

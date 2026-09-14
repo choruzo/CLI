@@ -13,6 +13,7 @@ import { PLAN_ALLOWLIST, PRESENT_PLAN_TOOL, UPDATE_PLAN_TOOL } from '../agent/pl
 import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
 import { QUESTION_TOOL } from './question.js';
 import { TODO_TOOL } from './todo.js';
+import { TEST_EVIDENCE_TOOL } from './tdd.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('tools');
@@ -47,10 +48,32 @@ export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
 export interface ToolsetFilter {
   allowedTools?: readonly string[] | null;
   isSubagent?: boolean;
+  /**
+   * Hito 15 — perfil activo como agente principal. `'keep'` deja pasar las
+   * tools de control del loop (`CONTROL_TOOLS`) aunque `allowedTools` no las
+   * liste: un perfil describe capacidades operativas, y sin `present_plan` un
+   * `/plan` bajo `/agent code` no podría ni presentar el plan. El filtro de
+   * modo sigue decidiendo cuáles aplican.
+   */
+  controlTools?: 'keep';
 }
+
+/**
+ * Tools de control interceptadas por el loop (nunca tocan el sistema). No
+ * incluye `delegate_task`: delegar en `general` devolvería todas las tools a un
+ * perfil restringido, así que solo aparece si el perfil la lista.
+ */
+export const CONTROL_TOOLS: ReadonlySet<string> = new Set([
+  PRESENT_PLAN_TOOL,
+  UPDATE_PLAN_TOOL,
+  QUESTION_TOOL,
+  TODO_TOOL,
+  TEST_EVIDENCE_TOOL,
+]);
 
 export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): boolean {
   if (!filter) return true;
+  if (filter.controlTools === 'keep' && CONTROL_TOOLS.has(name)) return true;
   // Hito 11: `todo` también queda fuera. La lista es del padre y se reinyecta
   // en SU system prompt; un hijo con contexto aislado no comparte ese estado.
   if (

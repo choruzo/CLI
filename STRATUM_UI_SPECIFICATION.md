@@ -1043,6 +1043,39 @@ SSH hosts: 2 connected, 1 unreachable
 
 Un host aún no presente en `~/.stratum/known_hosts.json` se marca con `(host key sin confiar — usa: stratum ssh trust <alias>)`.
 
+### 5.9 Perfiles de agente — `@perfil`, `/agents`, `/agent` (Hito 15)
+
+**Invocación directa.** Un input que empieza por `@` abre la paleta con los perfiles delegables (nombre + descripción); filtra por subcadena mientras se escribe el nombre y se cierra al teclear el espacio que empieza la tarea. `Tab`/`Enter` completan `@nombre `. Al enviar `@research busca X`:
+
+- perfil delegable → el turno muestra `@research busca X` como mensaje de usuario y un `<SubagentBlock>` (o el `<AgentTree>`, §5.5/§5.6) sin pasar por el agente principal;
+- perfil `primary` → línea de sistema: `'x' es un perfil principal (mode: primary): actívalo con /agent x.`;
+- `@perfil` sin tarea → línea de uso;
+- `@algo` que no es un perfil → se envía como mensaje normal.
+
+**`/agents`** pinta como mensaje de sistema el mismo informe que `stratum agents list`:
+
+```
+Perfiles de agente (3):
+
+  ◆ reviewer  [primary · proyecto]
+      Reviews diffs for correctness
+      tools: read_file, grep
+      fichero: /repo/.stratum/agents/reviewer.md
+
+  • research  [subagent · proyecto]
+      ...
+
+Perfiles inválidos (1) — no se cargaron:
+
+  ✗ broken
+      mode: Invalid enum value ...
+      fichero: /repo/.stratum/agents/broken.md
+```
+
+**`/agent`** sin argumentos lista los perfiles activables y el activo; `/agent <perfil>` lo activa y `/agent off` vuelve al agente por defecto. La confirmación dice que el historial se conserva y que prompt y tools cambian desde el siguiente mensaje, más un aviso si el perfil declara `provider`/`model` (se ignoran). Se rechaza con un plan en curso.
+
+**Status bar.** Con un perfil principal activo aparece `◆ <perfil>` (color de acento, negrita) tras el porcentaje de contexto y antes del badge de plan: el perfil dura la sesión, el modo plan una tarea.
+
 ---
 
 ## 6. Paleta de Colores

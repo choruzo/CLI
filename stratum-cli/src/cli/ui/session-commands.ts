@@ -73,6 +73,16 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/agents',
+    description: 'Lista los perfiles de agente (global y proyecto) y los inválidos',
+    hasArgs: false,
+  },
+  {
+    name: '/agent',
+    description: 'Usa un perfil como agente principal (sin args: lista · off: desactiva)',
+    hasArgs: true,
+  },
+  {
     name: '/clear',
     description: 'Purga la conversación y el contexto del LLM (la sesión sigue activa)',
     hasArgs: false,
@@ -149,4 +159,22 @@ export function filterCommands(
   const needle = trimmed.slice(1).toLowerCase();
   if (!needle) return commands;
   return commands.filter((c) => c.name.slice(1).toLowerCase().includes(needle));
+}
+
+/**
+ * Paleta de perfiles para `@perfil` (Hito 15). `filterCommands` exige `/`, así
+ * que los perfiles tienen su propio filtro: solo el primer token tras `@` y
+ * solo mientras no se haya escrito la tarea (con un espacio ya no hay nada que
+ * completar).
+ */
+export function filterProfiles(
+  input: string,
+  profiles: Array<{ name: string; description: string }>,
+): SessionCommand[] {
+  const trimmed = input.trimStart();
+  if (!trimmed.startsWith('@') || /\s/.test(trimmed)) return [];
+  const needle = trimmed.slice(1).toLowerCase();
+  return profiles
+    .filter((p) => p.name.includes(needle))
+    .map((p) => ({ name: `@${p.name}`, description: p.description, hasArgs: true }));
 }

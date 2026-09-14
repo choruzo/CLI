@@ -51,6 +51,8 @@ export interface SaveSessionParams {
   createdAt?: string;
   /** Hito 7 — ref al fichero de plan asociado a la sesión (§12.6). */
   planRef?: string | null;
+  /** Hito 15 — perfil activo como agente principal. */
+  activeAgent?: string | null;
 }
 
 export interface ListOptions {
@@ -106,6 +108,7 @@ export class SessionStore {
       toolCallCount: params.toolCallCount,
       summary,
       ...(params.planRef ? { planRef: params.planRef } : {}),
+      ...(params.activeAgent ? { activeAgent: params.activeAgent } : {}),
     };
 
     writeFileSync(this.sessionPath(id), JSON.stringify(ctx, null, 2), 'utf-8');

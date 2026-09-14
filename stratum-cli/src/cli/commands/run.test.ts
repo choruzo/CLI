@@ -74,6 +74,10 @@ vi.mock('../../agent/core.js', () => ({
     getContextUsage() {
       return mockState.getContextUsage();
     }
+
+    getActiveProfile() {
+      return null;
+    }
   },
 }));
 
@@ -183,5 +187,19 @@ describe('runCommand', () => {
     await action;
 
     expect(exitSpy).toHaveBeenCalledWith(1);
+  });
+
+  it('rechaza --delegate combinado con --plan antes de cargar la config (Hito 15)', async () => {
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.spyOn(process, 'exit').mockImplementation(((code?: string | number | null) => {
+      throw new ExitError(Number(code ?? 0));
+    }) as typeof process.exit);
+
+    const { runCommand } = await import('./run.js');
+    await expect(
+      runCommand.parseAsync(['demo-task', '--delegate', 'code', '--plan'], { from: 'user' }),
+    ).rejects.toMatchObject({ code: 1 });
+    expect(mockState.loadConfig).not.toHaveBeenCalled();
+    expect(mockState.agentRun).not.toHaveBeenCalled();
   });
 });

@@ -39,6 +39,8 @@ interface Props {
    * porque todavía puede haber dato.
    */
   tokens?: TokenAccounting;
+  /** Perfil activo como agente principal (Hito 15): segmento `◆ perfil` a la derecha. */
+  activeAgent?: string | null;
 }
 
 function formatTokens(n: number): string {
@@ -100,6 +102,7 @@ export function StatusBar({
   mode,
   changes,
   tokens,
+  activeAgent,
 }: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
@@ -118,10 +121,13 @@ export function StatusBar({
   // Badge de modo (Hito 7): solo visible mientras mode !== 'normal'.
   const planBadge = mode === 'plan' ? '◑ PLAN' : mode === 'execute' ? '▸ EXEC' : '';
   const planBadgeColor = mode === 'plan' ? '#F59E0B' : '#34D399';
+  // Perfil principal activo (Hito 15). Va antes del badge de plan: el perfil
+  // dura la sesión, el modo plan dura una tarea.
+  const agentBadge = activeAgent ? `◆ ${activeAgent}` : '';
 
   const ctxSuffix =
     `${tokenText ? `${tokenText} · ` : ''}` +
-    ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%${planBadge ? `  ${planBadge}` : ''}`;
+    ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%${agentBadge ? `  ${agentBadge}` : ''}${planBadge ? `  ${planBadge}` : ''}`;
   const leftLen =
     ` ● ${providerName} │ ${model}${mcpSegmentText}${changesText ? ` │ ${changesText}` : ''}`
       .length;
@@ -174,6 +180,12 @@ export function StatusBar({
       </Text>
       <Text color={theme.textInvisible}> │</Text>
       <Text color={ctxColor}> {pct}%</Text>
+      {agentBadge && (
+        <Text color={theme.accent} bold>
+          {'  '}
+          {agentBadge}
+        </Text>
+      )}
       {planBadge && (
         <Text color={planBadgeColor} bold>
           {'  '}

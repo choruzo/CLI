@@ -2,12 +2,34 @@ import type { StratumConfig, ProviderConfig } from '../config/schema.js';
 import type { ProviderRouter } from '../providers/router.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { IProvider } from '../providers/base.js';
-import type { AgentEvent, Message, RunOptions, TokenAccounting, TokenStatus } from './types.js';
+import type {
+  AgentEvent,
+  AgentProfile,
+  Message,
+  RunOptions,
+  SubagentResult,
+  TokenAccounting,
+  TokenStatus,
+} from './types.js';
 import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
-import { buildSystemPrompt, findWorktreeRoot } from './system-prompt.js';
+import {
+  buildAgentProfilesBlock,
+  buildSystemPrompt,
+  findWorktreeRoot,
+  type SystemPromptEnv,
+} from './system-prompt.js';
 import { prepareGuideIndex } from './guides.js';
-import { ProfileLoader } from './profiles.js';
+import {
+  ProfileLoader,
+  describeProfile,
+  isPrimaryCapable,
+  type InvalidProfile,
+} from './profiles.js';
+import { executeDelegations, resolveDelegationProfile } from './delegation.js';
+import { generateSubagentId, serializeSubagentResult } from './subagent.js';
+import { truncateToolOutput } from '../tools/truncate.js';
+import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { ChangeTracker } from './risk.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
@@ -34,6 +56,17 @@ export interface StratumAgentOptions {
   resumeTask?: string;
   /** ISO 8601 de creación del plan reanudado (preservado en las escrituras sucesivas). */
   resumeCreatedAt?: string;
+  /**
+   * Perfil activo como agente principal en la sesión reanudada (Hito 15). Se
+   * reaplica recomponiendo el system prompt; si el perfil ya no es válido, se
+   * vuelve al prompt base y el aviso queda en `takeResumeNotice()`.
+   */
+  activeAgent?: string;
+  /**
+   * Loader de perfiles ya construido. Punto de inyección para tests: el de
+   * producción lee `~/.stratum/agents` y los roots del cwd.
+   */
+  profileLoader?: ProfileLoader;
 }
 
 export class StratumAgent {
@@ -63,8 +96,6 @@ export class StratumAgent {
   private readonly tdd = new TddLedger();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
-  /** Tabla de punteros a las guías largas. Vacía en modo `inline` (default). */
-  private readonly guidesBlock: string;
   /**
    * Contabilidad de tokens de la sesión (Hito 13). El `ReactLoop` vive un turno,
    * así que el acumulado se suma aquí. El estado se guarda aparte del número:
@@ -78,6 +109,13 @@ export class StratumAgent {
   private _resumePlan: import('./types.js').Plan | null = null;
   private _resumeTask: string | null = null;
   private _resumeCreatedAt: string | null = null;
+  /**
+   * Perfil activo como agente principal (Hito 15, `/agent <perfil>`). Cambia el
+   * system prompt y restringe el toolset; no el provider ni el modelo.
+   */
+  private _activeProfile: AgentProfile | null = null;
+  /** Aviso de un solo uso al reanudar con un perfil que ya no se puede activar. */
+  private _resumeNotice: string | null = null;
 
   constructor(
     private readonly config: StratumConfig,
@@ -91,7 +129,9 @@ export class StratumAgent {
     // con el `<env>`); el cwd cubre el caso en que el proyecto npm vive en un
     // subdirectorio del repo (p.ej. `stratum-cli/.stratum/agents/`). El cwd gana
     // en conflictos por ser el más específico. Si coinciden, se carga una vez.
-    this.profiles = new ProfileLoader([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
+    this.profiles =
+      options?.profileLoader ??
+      new ProfileLoader([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
 
     // Skills (Hito 12): mismos roots que los perfiles. El índice entra en el
     // system prompt; el cuerpo de cada skill se lee bajo demanda con read_file.
@@ -104,18 +144,6 @@ export class StratumAgent {
     } else {
       this.skillsBlock = '';
     }
-
-    // Guías por puntero (§3 de gentle-pi): se materializan una sola vez por
-    // sesión, como el índice de skills. En modo `inline` devuelve cadena vacía
-    // y `buildSystemPrompt` sigue inyectando los cuerpos.
-    this.guidesBlock = prepareGuideIndex(
-      config,
-      {
-        agentProfiles: this.profiles.availableNames(),
-        testCommand: config.tools.testCommand,
-      },
-      process.cwd(),
-    );
 
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {
@@ -137,19 +165,21 @@ export class StratumAgent {
       }
     } else {
       // Nueva sesión: construir system prompt con memoria del proyecto
-      const memory = this.memoryManager.getInjectableMemory();
-      this.messages = [
-        {
-          role: 'system',
-          content: buildSystemPrompt(config, memory || undefined, {
-            modelId: router.model,
-            providerName: router.providerName,
-            agentProfiles: this.profiles.availableNames(),
-            skills: this.skillsBlock,
-            guides: this.guidesBlock,
-          }),
-        },
-      ];
+      this.messages = [{ role: 'system', content: this.buildSystemContent() }];
+    }
+
+    // Hito 15: el system prompt guardado ya llevaba el bloque del perfil, pero
+    // se recompone igualmente — el fichero del perfil pudo cambiar, y si ya no
+    // se puede activar, dejar el bloque viejo sería mentirle al modelo sobre
+    // qué tools tiene.
+    if (options?.activeAgent) {
+      const applied = this.setPrimaryProfile(options.activeAgent);
+      if (!applied.ok) {
+        this._resumeNotice =
+          `No se pudo reactivar el perfil '${options.activeAgent}': ${applied.error} ` +
+          'Se continúa con el agente por defecto.';
+        this.rebuildSystemPrompt();
+      }
     }
   }
 
@@ -160,27 +190,12 @@ export class StratumAgent {
     // primario se reintente aunque haya fallado en un turno anterior.
     this.router.resetFallback();
 
-    this.currentLoop = new ReactLoop(
-      this.router.getActive(),
-      this.registry,
-      this.messages,
-      this.config,
-      this.router.model,
-      this.router.contextWindow,
-      this.router,
-      {
-        profiles: this.profiles,
-        contextManager: this.getContextManager(),
-        todos: this.todos,
-        changes: this.changes,
-        tdd: this.tdd,
-        skillsBlock: this.skillsBlock,
-      },
-    );
+    this.currentLoop = this.makeLoop();
 
     let stopReason: string | null = null;
     for await (const event of this.currentLoop.run(opts)) {
       if (event.type === 'tool_result') this._toolCallCount++;
+      if (event.type === 'subagent_completed') this.addChildTokens(event.result);
       if (event.type === 'done') stopReason = event.stopReason;
       yield event;
     }
@@ -223,14 +238,12 @@ export class StratumAgent {
    */
   reloadMemory(): void {
     this.memoryManager.reload();
-    const memory = this.memoryManager.getInjectableMemory();
-    const newSystemContent = buildSystemPrompt(this.config, memory || undefined, {
-      modelId: this.router.model,
-      providerName: this.router.providerName,
-      agentProfiles: this.profiles.availableNames(),
-      skills: this.skillsBlock,
-      guides: this.guidesBlock,
-    });
+    this.rebuildSystemPrompt();
+  }
+
+  /** Recompone `messages[0]` desde la config y el estado actuales (sin recargar memoria). */
+  private rebuildSystemPrompt(): void {
+    const newSystemContent = this.buildSystemContent();
     if (this.messages[0]?.role === 'system') {
       this.messages[0] = { role: 'system', content: newSystemContent };
     } else {
@@ -262,12 +275,28 @@ export class StratumAgent {
    * A diferencia de `clearHistory`, el system prompt viene dentro de los
    * mensajes cargados: se guardaron tal cual estaban en la sesión original.
    */
-  replaceHistory(messages: Message[]): void {
+  replaceHistory(messages: Message[], activeAgent?: string | null): string | null {
     this.messages = [...messages];
     this._toolCallCount = 0;
     this._planRef = null;
     this.todos.replace(rehydrateTodos(this.messages));
     this.tdd.replace(rehydrateTdd(this.messages, TEST_EVIDENCE_TOOL));
+
+    // Hito 15: el perfil activo es de la sesión cargada, no de la que había.
+    // Conservar el actual dejaría el estado interno y el system prompt cargado
+    // en desacuerdo.
+    if (!activeAgent) {
+      if (this._activeProfile) {
+        this._activeProfile = null;
+        this.rebuildSystemPrompt();
+      }
+      return null;
+    }
+    const applied = this.setPrimaryProfile(activeAgent);
+    if (applied.ok) return null;
+    this._activeProfile = null;
+    this.rebuildSystemPrompt();
+    return `No se pudo reactivar el perfil '${activeAgent}': ${applied.error}`;
   }
 
   /**
@@ -435,4 +464,281 @@ export class StratumAgent {
   getActiveProviderConfig(): ProviderConfig {
     return this.router.getActiveConfig();
   }
+
+  // -------------------------------------------------------------------------
+  // Hito 15 — Perfiles de agente de primera clase
+  // -------------------------------------------------------------------------
+
+  /**
+   * Entorno del system prompt del agente principal. Un único punto para el
+   * constructor, `reloadMemory`, `/model` y `/agent`: si cada uno montase el
+   * suyo, el primero que olvidase un campo borraría el bloque del perfil.
+   */
+  private promptEnv(): SystemPromptEnv {
+    const active = this._activeProfile;
+    // Un perfil principal sin `delegate_task` no puede delegar: anunciarle
+    // perfiles y reglas de delegación le ordenaría llamar a una tool que no tiene.
+    const canDelegate =
+      !active || active.allowedTools === null || active.allowedTools.includes(DELEGATE_TASK_TOOL);
+    const delegable = canDelegate
+      ? this.profiles.delegable().filter((p) => p.name !== active?.name)
+      : [];
+    const agentProfiles = delegable.map((p) => p.name);
+    return {
+      modelId: this.router.model,
+      providerName: this.router.providerName,
+      agentProfiles,
+      profileIndex: buildAgentProfilesBlock(
+        delegable.map((p) => ({ name: p.name, when: describeProfile(p) })),
+      ),
+      activeProfile: active
+        ? { name: active.name, fragment: active.systemPromptFragment }
+        : undefined,
+      skills: this.skillsBlock,
+      // Guías por puntero (§3 de gentle-pi): se recalculan con el perfil, porque
+      // la de work-routing solo se anuncia si hay a quién delegar. En modo
+      // `inline` devuelve cadena vacía; los ficheros llevan fingerprint y no se
+      // reescriben si no cambiaron.
+      guides: prepareGuideIndex(
+        this.config,
+        { agentProfiles, testCommand: this.config.tools.testCommand },
+        process.cwd(),
+      ),
+    };
+  }
+
+  private buildSystemContent(): string {
+    const memory = this.memoryManager.getInjectableMemory();
+    return buildSystemPrompt(this.config, memory || undefined, this.promptEnv());
+  }
+
+  /** `ReactLoop` de un turno del agente principal. */
+  private makeLoop(): ReactLoop {
+    const active = this._activeProfile;
+    return new ReactLoop(
+      this.router.getActive(),
+      this.registry,
+      this.messages,
+      this.config,
+      this.router.model,
+      this.router.contextWindow,
+      this.router,
+      {
+        profiles: this.profiles,
+        contextManager: this.getContextManager(),
+        todos: this.todos,
+        changes: this.changes,
+        tdd: this.tdd,
+        skillsBlock: this.skillsBlock,
+        // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
+        // control pasan aunque el perfil no las liste; `delegate_task` no.
+        toolsetFilter: active
+          ? { allowedTools: active.allowedTools, controlTools: 'keep' }
+          : undefined,
+      },
+    );
+  }
+
+  /**
+   * Suma a la sesión los tokens de un subagente. Antes solo contaba el loop
+   * padre, así que el `Σ` de la barra ignoraba todo el trabajo delegado.
+   */
+  private addChildTokens(result: SubagentResult): void {
+    if (result.usage.tokenStatus !== 'reported' || result.usage.tokens === undefined) return;
+    this._sessionTokens += result.usage.tokens;
+    this._tokenStatus = 'reported';
+  }
+
+  /**
+   * Activa un perfil como agente principal, o vuelve al agente por defecto con
+   * `null`. Recompone el system prompt; el toolset se filtra en cada turno.
+   * `provider`/`model` del perfil se ignoran a propósito en esta versión: se
+   * informan en `notes` para que la UI lo diga.
+   */
+  setPrimaryProfile(
+    name: string | null,
+  ): { ok: true; profile: AgentProfile | null; notes: string[] } | { ok: false; error: string } {
+    if (name === null) {
+      this._activeProfile = null;
+      this.rebuildSystemPrompt();
+      return { ok: true, profile: null, notes: [] };
+    }
+    const profile = this.profiles.resolve(name);
+    if (!profile) {
+      const available = this.profiles.primaries().map((p) => p.name);
+      return {
+        ok: false,
+        error:
+          `el perfil '${name}' no existe.` +
+          (available.length > 0
+            ? ` Activables: ${available.join(', ')}.`
+            : ' No hay perfiles con mode: primary o all.'),
+      };
+    }
+    if (!isPrimaryCapable(profile)) {
+      return {
+        ok: false,
+        error:
+          `'${name}' es un perfil de subagente (mode: subagent). Declara mode: primary o ` +
+          `mode: all en su frontmatter para usarlo como agente principal, o invócalo con @${name}.`,
+      };
+    }
+    const notes: string[] = [];
+    if (profile.provider || profile.model) {
+      const declared = [profile.provider, profile.model].filter(Boolean).join(' / ');
+      notes.push(
+        `El perfil declara ${declared}; como agente principal se ignora y se sigue con ` +
+          `${this.router.providerName} / ${this.router.model}.`,
+      );
+    }
+    if (profile.budgetDeclared) {
+      notes.push(
+        'El budget del perfil solo se aplica cuando se usa como subagente; como agente principal no limita nada.',
+      );
+    }
+    this._activeProfile = profile;
+    this.rebuildSystemPrompt();
+    return { ok: true, profile, notes };
+  }
+
+  /** Perfil activo como agente principal, o null. */
+  getActiveProfile(): AgentProfile | null {
+    return this._activeProfile;
+  }
+
+  /** Aviso de reanudación pendiente (un solo uso), o null. */
+  takeResumeNotice(): string | null {
+    const notice = this._resumeNotice;
+    this._resumeNotice = null;
+    return notice;
+  }
+
+  listProfiles(): AgentProfile[] {
+    return this.profiles.list();
+  }
+
+  delegableProfiles(): AgentProfile[] {
+    return this.profiles.delegable();
+  }
+
+  primaryProfiles(): AgentProfile[] {
+    return this.profiles.primaries();
+  }
+
+  invalidProfiles(): InvalidProfile[] {
+    return this.profiles.invalidProfiles();
+  }
+
+  /**
+   * Invocación directa de un subagente por el usuario (`@perfil tarea`,
+   * `stratum run --delegate`). No pasa por el LLM del agente principal, pero
+   * deja el mismo rastro que un `delegate_task` del modelo — un par
+   * `assistant(tool_calls) → tool` — para que el siguiente turno pueda usar el
+   * resultado y la compresión y `--resume` vean un historial bien formado. Lo
+   * cierra un `assistant` con el resumen: ni se queda un `tool` seguido de un
+   * `user` (plantillas de chat estrictas), ni la sesión reanudada pierde qué
+   * contestó el subagente.
+   */
+  async *runDelegate(
+    profileName: string,
+    task: string,
+    opts?: RunOptions,
+  ): AsyncGenerator<AgentEvent> {
+    const taskText = task.trim();
+    const resolved = resolveDelegationProfile(this.profiles, profileName);
+    if (!resolved.ok || !taskText) {
+      const message = !taskText
+        ? `Uso: @${profileName} <tarea>`
+        : resolved.ok
+          ? ''
+          : resolved.error;
+      yield { type: 'error', message, fatal: false };
+      yield { type: 'done', stopReason: 'stop' };
+      return;
+    }
+    const profile = resolved.profile;
+    const signal = opts?.signal ?? new AbortController().signal;
+    const subId = generateSubagentId();
+    const callId = `call_direct_${subId.slice(4)}`;
+
+    this.messages.push({ role: 'user', content: `@${profile.name} ${taskText}` });
+    this.messages.push({
+      role: 'assistant',
+      content: null,
+      tool_calls: [
+        {
+          id: callId,
+          type: 'function',
+          function: {
+            name: DELEGATE_TASK_TOOL,
+            arguments: JSON.stringify({ task: taskText, profile: profile.name }),
+          },
+        },
+      ],
+    });
+
+    let result: SubagentResult | undefined;
+    const delegations = executeDelegations([{ callId, profile, taskText, subId }], {
+      registry: this.registry,
+      config: this.config,
+      signal,
+      opts,
+      skillsBlock: this.skillsBlock,
+    });
+    try {
+      for (;;) {
+        const next = await delegations.next();
+        if (next.done) {
+          result = next.value.get(subId) ?? result;
+          break;
+        }
+        // El resultado se captura al verlo pasar, no solo al final: si el
+        // consumidor abandona justo después de este yield, el historial debe
+        // decir lo que ocurrió de verdad, no `cancelled`.
+        if (next.value.type === 'subagent_completed' && next.value.subagentId === subId) {
+          result = next.value.result;
+        }
+        yield next.value;
+      }
+    } finally {
+      // Abandonado a mitad: cerrar el generador interno aborta al hijo y espera
+      // a que termine, así no queda nadie escribiendo ficheros por detrás.
+      await delegations.return(new Map());
+      // Aunque el consumidor abandone el generador, la tool call sintética no
+      // puede quedar sin respuesta: el siguiente request al provider fallaría.
+      const final: SubagentResult = result ?? {
+        id: subId,
+        status: 'cancelled',
+        summary: '',
+        filesChanged: [],
+        usage: { iterations: 0, durationMs: 0 },
+        error: 'Subagent was cancelled.',
+      };
+      this.messages.push({
+        role: 'tool',
+        tool_call_id: callId,
+        name: DELEGATE_TASK_TOOL,
+        content: truncateToolOutput(serializeSubagentResult(final, profile.name)),
+      });
+      this.messages.push({ role: 'assistant', content: directSummaryText(profile.name, final) });
+      this._toolCallCount++;
+      if (result) this.addChildTokens(result);
+    }
+
+    yield {
+      type: 'tool_result',
+      id: callId,
+      name: DELEGATE_TASK_TOOL,
+      result: truncateToolOutput(serializeSubagentResult(result!, profile.name)),
+      durationMs: result!.usage.durationMs,
+    };
+    yield { type: 'done', stopReason: result!.status === 'cancelled' ? 'cancelled' : 'stop' };
+  }
+}
+
+/** Texto del `assistant` que cierra una invocación directa (Hito 15). */
+function directSummaryText(profile: string, result: SubagentResult): string {
+  const head = result.status === 'completed' ? `[@${profile}]` : `[@${profile} · ${result.status}]`;
+  const body = result.summary.trim() || result.error || '(no summary)';
+  return `${head} ${body}`;
 }

@@ -13,6 +13,7 @@ import { providerCommand } from './commands/provider.js';
 import { mcpCommand } from './commands/mcp.js';
 import { logsCommand } from './commands/logs.js';
 import { sshCommand } from './commands/ssh.js';
+import { agentsCommand } from './commands/agents.js';
 
 // Injected by tsup at build time; falls back to package.json in tsx dev mode
 declare const __VERSION__: string;
@@ -43,5 +44,6 @@ program.addCommand(providerCommand);
 program.addCommand(mcpCommand);
 program.addCommand(logsCommand);
 program.addCommand(sshCommand);
+program.addCommand(agentsCommand);
 
 program.parse();

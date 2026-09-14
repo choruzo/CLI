@@ -114,8 +114,33 @@ export interface SubagentBudget {
  * con frontmatter YAML en ~/.stratum/agents/ o <projectRoot>/.stratum/agents/.
  * El perfil `general` viene embebido por defecto.
  */
+/**
+ * Cómo puede usarse un perfil (Hito 15). `subagent` (default): solo se delega
+ * (`delegate_task`, `@perfil`, `run --delegate`). `primary`: solo como agente
+ * principal (`/agent`, `run --agent`). `all`: ambas.
+ */
+export type ProfileMode = 'primary' | 'subagent' | 'all';
+
+/** De dónde salió un perfil (Hito 15): para `/agents` y `stratum agents list`. */
+export interface ProfileSource {
+  scope: 'builtin' | 'global' | 'project';
+  /** Fichero del perfil. Ausente en el builtin. */
+  path?: string;
+}
+
 export interface AgentProfile {
   name: string;
+  /** Cuándo usar el perfil (Hito 15). Alimenta el índice `# Agent profiles`. */
+  description?: string;
+  /** Default `subagent` cuando se omite (ver `profileMode`). */
+  mode?: ProfileMode;
+  source?: ProfileSource;
+  /**
+   * El frontmatter declaró `budget` (Hito 15). `budget` siempre llega relleno
+   * con defaults, así que sin esto no se puede avisar de que como agente
+   * principal el presupuesto del perfil no se aplica.
+   */
+  budgetDeclared?: boolean;
   /**
    * Tools permitidas al subagente. `null` = hereda todas (salvo delegate_task,
    * filtrado por construcción para forzar profundidad = 1).

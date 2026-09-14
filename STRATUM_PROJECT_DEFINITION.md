@@ -2407,6 +2407,33 @@ Un `ProfileLoader` (`src/agent/profiles.ts`) descubre los ficheros de ambas carp
 - **Toolset por perfil:** reutiliza el filtrado de toolset por modo del Hito 7 (`isToolVisibleInMode` + `toToolSchemas`), generalizado de "mode" a "profile/toolset". Cero duplicación.
 - **System prompt:** el `systemPromptFragment` se inyecta envolviendo la `task` como mensaje de usuario (patrón de `INITIALIZE_PROMPT`/`PLAN_MODE_PROMPT`), no en `system-prompt.ts`. El `<env>` del hijo marca que **es un subagente** para que no intente acciones interactivas (preguntar al usuario, proponer planes).
 
+#### Perfiles de primera clase (Hito 15)
+
+El frontmatter admite dos claves más, y un perfil deja de ser solo «un subagente que el modelo decide lanzar»:
+
+```markdown
+---
+description: Read-only exploration of the codebase; returns a summary with path:line citations.
+mode: subagent        # subagent (default) | primary | all
+allowedTools: [read_file, glob, grep]
+---
+```
+
+- **`description`** alimenta el bloque `# Agent profiles` del system prompt del agente principal: una tabla `perfil → cuándo usarlo` (como el índice `# Skills`), con tope de 30 filas, una línea por descripción, `|` escapado y tope de 160 caracteres. Sin `description` se usa la primera línea del cuerpo. Va **siempre inline**, también con `prompt.guides: 'pointers'`; `# Work routing` ya no lista nombres, así que el cuerpo de `work-routing.md` no cambia al añadir perfiles.
+- **`mode`** decide cómo se puede usar. `subagent` (default: es lo que eran todos los perfiles antes) solo se delega; `primary` solo actúa como agente principal; `all`, ambas cosas. Un `delegate_task` del modelo hacia un perfil `primary` es un `tool_error` recuperable distinto de «perfil inexistente».
+- **Nombres**: `^[a-z0-9][a-z0-9._-]*$` (sin mayúsculas: Windows y macOS no distinguen `Code.md` de `code.md`); `off` y `default` están reservados para `/agent`.
+- **Inválidos**: un fichero rechazado (frontmatter, nombre) queda registrado con su error y se muestra en `/agents`. Un override inválido de mayor prioridad **enmascara** al perfil homónimo de menor prioridad en vez de caer en silencio al global.
+
+**Invocación directa** (`@perfil tarea` en el chat, `stratum run --delegate <perfil>`): `StratumAgent.runDelegate` ejecuta el subagente sin pasar por el LLM principal, con la misma maquinaria que un `delegate_task` — la ejecución se extrajo de `ReactLoop.runDelegations` a `executeDelegations` (`agent/delegation.ts`): semáforo, eventos `subagent_*`, mutex de confirmaciones, persistencia y detección de conflictos. En el historial deja `user(@perfil tarea) → assistant(tool_calls: delegate_task) → tool(<subagent_result>) → assistant([@perfil] resumen)`: el par sintético es el formato que exige el provider, y el `assistant` final evita un `tool` seguido de `user` en plantillas estrictas y conserva el resumen al reanudar. El par se cierra en un `finally` aunque el consumidor abandone el generador. Los tokens reportados por los subagentes se suman ahora al total de la sesión, también en las delegaciones del modelo.
+
+**Agente principal** (`/agent <perfil>`, `/agent off`, `stratum run --agent <perfil>`): `setPrimaryProfile` recompone `messages[0]` con un bloque `# Active agent profile` antes de la memoria del proyecto, y el loop filtra el toolset con `{ allowedTools, controlTools: 'keep' }`. Las tools de control (`present_plan`, `update_plan`, `question`, `todo`, `test_evidence`) pasan aunque el perfil no las liste — sin ellas `/plan` no funcionaría bajo un perfil —; `delegate_task` no, porque delegar en `general` devolvería todas las tools a un perfil restringido. Decisiones y límites:
+- `provider`/`model` del perfil **se ignoran** como agente principal (se avisa al activarlo). Un router con capa de perfil superpuesta a `/model`, `/provider` y el fallback es frágil; queda para otro hito.
+- `destructivePolicy` del perfil solo **endurece** la de la sesión (`strictestPolicy`: `deny` > `ask` > `allow`). La misma regla se aplica ahora a los subagentes (`runSubagent`): antes la política del perfil sustituía a la del padre, y un perfil con `allow` convertía un `--deny-destructive` en `allow`. `budget` se ignora y se avisa al activar.
+- El filtro de toolset se impone también **al ejecutar**, no solo en el schema: una tool que el perfil no permite (incluido un `delegate_task` oculto) es un `tool_error` recuperable aunque el modelo la invente.
+- Un perfil principal sin `delegate_task` no recibe `# Agent profiles` ni `# Work routing`: le ordenarían llamar a una tool que no tiene.
+- `executeDelegations` usa concurrencia estructurada: si se abandona el generador, aborta a los hijos y espera a que terminen antes de devolver el control.
+- El perfil activo se persiste en `SessionContext.activeAgent`. `chat --resume` y `/sessions resume` lo reaplican recomponiendo el system prompt; si ya no se puede activar, vuelven al prompt base con un aviso en vez de dejar el bloque viejo. `/agent` se rechaza con un plan en curso, y `/init` con un perfil que no permite `write_file`.
+
 #### Persistencia y reanudación
 
 **Decisión (8A/8B): los subagentes NO se reanudan ni se reejecutan automáticamente. Un subagente interrumpido se marca `interrupted` y el control vuelve al padre, que debe verificar el estado antes de decidir si reintenta.**

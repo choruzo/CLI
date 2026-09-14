@@ -168,6 +168,11 @@ export const chatCommand = new Command('chat')
               `Reanudando: ${interrupted.length} subagente(s) interrumpido(s)\n`,
             );
           }
+          // Hito 15: perfil activo como agente principal. Se añade al final
+          // porque las ramas anteriores reconstruyen `agentOptions` enteras.
+          if (saved.activeAgent) {
+            agentOptions = { ...agentOptions, activeAgent: saved.activeAgent };
+          }
         } catch (err) {
           process.stderr.write(`Error al cargar sesión: ${String(err)}\n`);
           process.exit(1);
@@ -175,6 +180,8 @@ export const chatCommand = new Command('chat')
       }
 
       const agent = new StratumAgent(config, router, registry, agentOptions);
+      const resumeNotice = agent.takeResumeNotice();
+      if (resumeNotice) process.stderr.write(`${resumeNotice}\n`);
 
       // Warm-up opcional del modelo de embeddings (§12.10): precarga el ONNX en
       // background durante el arranque para que la primera recuperación/escritura
@@ -227,6 +234,7 @@ export const chatCommand = new Command('chat')
           toolCallCount: agent.toolCallCount,
           llmProvider: router.getActive(),
           planRef: agent.getPlanRef(),
+          activeAgent: agent.getActiveProfile()?.name ?? null,
         });
       } catch {
         // No bloquear la salida por un fallo al guardar

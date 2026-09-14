@@ -19,4 +19,9 @@ export interface SessionContext {
    * Permite reanudar un plan interrumpido al hacer `stratum chat --resume` (§12.6).
    */
   planRef?: string;
+  /**
+   * Hito 15 — perfil activo como agente principal (`/agent <perfil>`) al
+   * guardar. `chat --resume` y `/sessions resume` lo reaplican.
+   */
+  activeAgent?: string;
 }

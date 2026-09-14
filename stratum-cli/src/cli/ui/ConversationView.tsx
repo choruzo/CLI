@@ -55,6 +55,8 @@ interface Props {
   changes?: string;
   /** Contabilidad de tokens de la sesión para el medidor del status bar (Hito 13). */
   tokens?: TokenAccounting;
+  /** Perfil activo como agente principal para el badge `◆` del status bar (Hito 15). */
+  activeAgent?: string | null;
   // ----- Plan & Execute (Hito 7) -----
   /** Modo del agente para el badge del status bar y el render del plan. */
   planMode?: AgentMode;
@@ -102,6 +104,7 @@ export function ConversationView({
   providerStatus,
   changes,
   tokens,
+  activeAgent,
   planMode,
   plan,
   pendingApproval,
@@ -126,6 +129,7 @@ export function ConversationView({
         mode={planMode}
         changes={changes}
         tokens={tokens}
+        activeAgent={activeAgent}
       />
       {plan && planMode === 'execute' && <PlanView plan={plan} />}
       {todos && todos.length > 0 && <TodoView items={todos} stale={todoStale ?? 0} />}

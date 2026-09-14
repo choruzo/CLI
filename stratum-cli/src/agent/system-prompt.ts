@@ -22,6 +22,18 @@ export interface SystemPromptEnv {
    */
   agentProfiles?: string[];
   /**
+   * Bloque `# Agent profiles` ya renderizado (Hito 15, `buildAgentProfilesBlock`):
+   * la tabla perfil → cuándo usarlo. Va siempre inline, también con guías por
+   * puntero — como el índice de skills, es barato y es lo que decide a quién
+   * delegar. Ignorado en subagentes.
+   */
+  profileIndex?: string;
+  /**
+   * Perfil activo como agente principal (Hito 15, `/agent <perfil>`). Su cuerpo
+   * entra como bloque `# Active agent profile` antes de la memoria del proyecto.
+   */
+  activeProfile?: { name: string; fragment: string };
+  /**
    * Bloque `# Operating guides` ya renderizado (§3 de `gentle-pi`). Lo produce
    * `prepareGuideIndex` en `StratumAgent` cuando `prompt.guides` es
    * `'pointers'`. Presente → los cuerpos de esas guías NO se inyectan inline:
@@ -252,7 +264,7 @@ export function buildWorkRoutingBlock(profiles: string[]): string {
 Before doing any work, decide at which level it belongs. The question that decides it is always the same: **would doing this inline inflate my context without need?**
 
 1. **Inline direct** — small, mechanical, and the context you need is already here: a typo, an edit to one file you have already read, reading 1-3 known files, a bash command to inspect state.
-2. **Simple delegation** (\`delegate_task\`) — one bounded worker: read-only exploration, a self-contained implementation, a verification pass. Available profiles: ${profiles.join(', ')}.
+2. **Simple delegation** (\`delegate_task\`) — one bounded worker: read-only exploration, a self-contained implementation, a verification pass. Pick the profile whose trigger matches in # Agent profiles; use \`general\` only when none does.
 3. **Formal plan** (\`present_plan\`, only in plan mode) — only when the user asks for it or accepts your proposal. Size and risk alone NEVER select this level.
 
 Mandatory triggers. When one fires, delegate — do not talk yourself out of it:
@@ -348,6 +360,42 @@ Use \`question\` only when the answer is not in the repository and getting it wr
 - If nobody answers, or an answer comes back discarded, continue with the most reasonable assumption and say out loud which one you took. Do not repeat the batch in the same turn.`;
 }
 
+/** Tope de filas del índice de perfiles: con más, la tabla deja de ser un índice barato. */
+export const PROFILE_INDEX_MAX_ROWS = 30;
+
+/**
+ * Bloque `# Agent profiles` (Hito 15). Antes el prompt solo nombraba los
+ * perfiles y el modelo elegía por el nombre; como el índice de skills, la
+ * columna que decide es «cuándo usarlo». Las filas llegan ya saneadas
+ * (`describeProfile`: una línea, `|` escapado, con tope).
+ */
+export function buildAgentProfilesBlock(rows: Array<{ name: string; when: string }>): string {
+  if (rows.length === 0) return '';
+  const shown = rows.slice(0, PROFILE_INDEX_MAX_ROWS);
+  const lines = shown.map((r) => `| ${r.name} | ${r.when || '(no description declared)'} |`);
+  const more =
+    rows.length > shown.length
+      ? `\n\n${rows.length - shown.length} more profile(s) not listed; ask the user before guessing a name.`
+      : '';
+  return `# Agent profiles
+Subagent profiles you can pass as \`profile\` to \`delegate_task\`. Choose by the "Use it when" column, never by the name alone; if no row matches, use \`general\`.
+
+| Profile | Use it when |
+|---|---|
+${lines.join('\n')}${more}`;
+}
+
+/**
+ * Bloque del perfil activo como agente principal (Hito 15). El cuerpo del
+ * fichero se escribió para ese perfil, así que se inyecta tal cual.
+ */
+export function buildActiveProfileBlock(name: string, fragment: string): string {
+  return `# Active agent profile: ${name}
+The user selected this profile for the session. Follow these instructions on top of everything above; where they conflict with a general default, these win. Your available tools are already restricted to what the profile allows.
+
+${fragment.trim()}`;
+}
+
 export function buildSystemPrompt(
   config: StratumConfig,
   memory?: string,
@@ -405,6 +453,19 @@ ${testing}`;
   // el trabajo de verdad lo hacen ellos, así que son los que más lo necesitan.
   if (env?.skills && env.skills.trim()) {
     prompt += `\n\n${env.skills.trim()}`;
+  }
+
+  // Agent profiles (Hito 15): a quién delegar. Siempre inline — con guías por
+  // puntero, `work-routing.md` dice CUÁNDO delegar pero ya no lista a quién.
+  if (!env?.isSubagent && env?.profileIndex && env.profileIndex.trim()) {
+    prompt += `\n\n${env.profileIndex.trim()}`;
+  }
+
+  // Perfil activo como agente principal (Hito 15): va después de las reglas
+  // generales para que sus instrucciones específicas sean lo último que lee,
+  // pero antes de la memoria del proyecto, que manda sobre ambos.
+  if (!env?.isSubagent && env?.activeProfile && env.activeProfile.fragment.trim()) {
+    prompt += `\n\n${buildActiveProfileBlock(env.activeProfile.name, env.activeProfile.fragment)}`;
   }
 
   if (memory && memory.trim()) {

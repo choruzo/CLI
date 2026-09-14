@@ -96,3 +96,15 @@ describe('cobertura de la tabla de §5.2 (Hito 10)', () => {
     expect(new Set(names).size).toBe(names.length);
   });
 });
+
+describe('comandos de perfiles (Hito 15)', () => {
+  it('/agents lista y /agent espera argumentos', () => {
+    const agents = SESSION_COMMANDS.find((c) => c.name === '/agents');
+    const agent = SESSION_COMMANDS.find((c) => c.name === '/agent');
+    expect(agents?.hasArgs).toBe(false);
+    expect(agent?.hasArgs).toBe(true);
+    expect(filterCommands('/agen').map((c) => c.name)).toEqual(
+      expect.arrayContaining(['/agents', '/agent']),
+    );
+  });
+});

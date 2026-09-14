@@ -11,18 +11,31 @@ export function useAgentStream(
   const abortRef = useRef<AbortController | null>(null);
 
   const send = useCallback(
-    async (input: string, extra?: { displayText?: string; runOptions?: Partial<RunOptions> }) => {
+    async (
+      input: string,
+      extra?: {
+        displayText?: string;
+        runOptions?: Partial<RunOptions>;
+        /** Hito 15 — `@perfil tarea`: el subagente atiende `input` sin pasar por el principal. */
+        delegateProfile?: string;
+      },
+    ) => {
       const controller = new AbortController();
       abortRef.current = controller;
 
       dispatch({ type: 'AGENT_START', input: extra?.displayText ?? input });
 
+      const runOptions: RunOptions = {
+        ...(getRunOptions?.() ?? {}),
+        ...(extra?.runOptions ?? {}),
+        signal: controller.signal,
+      };
+      const events = extra?.delegateProfile
+        ? agent.runDelegate(extra.delegateProfile, input, runOptions)
+        : agent.run(input, runOptions);
+
       try {
-        for await (const event of agent.run(input, {
-          ...(getRunOptions?.() ?? {}),
-          ...(extra?.runOptions ?? {}),
-          signal: controller.signal,
-        })) {
+        for await (const event of events) {
           dispatch({ type: 'AGENT_EVENT', event });
 
           const ctx = agent.getContextUsage();
