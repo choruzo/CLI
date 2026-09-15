@@ -20,7 +20,9 @@ import { ToolRegistry, ToolDispatcher } from './registry.js';
 import { StratumConfigSchema } from '../config/schema.js';
 import type { ToolContext } from '../agent/types.js';
 
-const config = StratumConfigSchema.parse({});
+// Sin auditoría: estos tests ejecutan `exec` de verdad, y con el default
+// (`tools.auditLog: true`) escribirían en el exec-audit.jsonl del usuario.
+const config = StratumConfigSchema.parse({ tools: { auditLog: false } });
 const execTool = createExecTool(config);
 
 function ctx(overrides: Partial<ToolContext> = {}): ToolContext {
