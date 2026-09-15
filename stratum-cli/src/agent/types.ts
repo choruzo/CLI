@@ -8,7 +8,15 @@ export type AgentEvent =
   | { type: 'tool_call_start'; id: string; name: string; input_so_far: string }
   | { type: 'tool_call_ready'; id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result'; id: string; name: string; result: string; durationMs: number }
-  | { type: 'tool_error'; id: string; name: string; error: string; recoverable: boolean }
+  | {
+      type: 'tool_error';
+      id: string;
+      name: string;
+      error: string;
+      recoverable: boolean;
+      /** Hito 16 — la tool llegó a ejecutar (un comando que salió ≠ 0, se truncó o se canceló). */
+      executed?: boolean;
+    }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   | { type: 'thinking'; text: string }
   | { type: 'warning'; message: string }
@@ -273,7 +281,19 @@ export interface ToolContext {
 
 export type ToolResult =
   | { ok: true; output: string }
-  | { ok: false; error: string; recoverable: boolean };
+  | {
+      ok: false;
+      error: string;
+      recoverable: boolean;
+      /**
+       * Hito 16 — `false` si el error no es un fallo de la tool sino un resultado
+       * legítimo de lo que ejecutó (un `grep` sin coincidencias sale con 1). No
+       * consume reintento (§12.3) ni rompe la racha de fallos. Default `true`.
+       */
+      countsAsFailure?: boolean;
+      /** Hito 16 — la operación llegó a ejecutarse (el write-log la sigue contando). */
+      executed?: boolean;
+    };
 
 export interface ToolDefinition {
   name: string;
@@ -291,6 +311,17 @@ export interface ToolDefinition {
    */
   preflight?(params: unknown, ctx: ToolContext): ToolResult | null;
   isDestructive?(params: unknown, ctx: ToolContext): boolean;
+  /**
+   * Hito 16 — serialización decidida por llamada (`exec` en local sí, en un
+   * host remoto no). Se suma a `serialized`; si lanza, la llamada se serializa.
+   */
+  isSerialized?(params: unknown, ctx: ToolContext): boolean;
+  /**
+   * Hito 16 — la tool resuelve por sí misma cuando se cancela (mata su proceso
+   * y devuelve un resultado `cancelled`). El dispatcher no compite con el abort
+   * y solo impone una red de seguridad de unos segundos.
+   */
+  structuredCancellation?: boolean;
   execute(params: unknown, ctx: ToolContext): Promise<ToolResult>;
 }
 

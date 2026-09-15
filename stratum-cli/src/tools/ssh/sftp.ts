@@ -71,7 +71,7 @@ export const sshUploadTool: ToolDefinition = {
   name: 'ssh_upload',
   description:
     'Sube un archivo local a un host remoto vía SFTP. ' +
-    'El directorio remoto de destino debe existir: créalo antes con ssh_exec si hace falta.',
+    'El directorio remoto de destino debe existir: créalo antes con exec (target "ssh:<alias>") si hace falta.',
   schema: uploadSchema,
   destructive: false,
   serialized: false,

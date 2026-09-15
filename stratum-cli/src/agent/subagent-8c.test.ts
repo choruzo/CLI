@@ -79,7 +79,7 @@ function multiDelegateRound(
   ];
 }
 
-/** Un turno con una tool call bash arbitraria. */
+/** Un turno con una tool call exec (target local) arbitraria. */
 function bashRound(id: string, command: string): OpenAIStreamChunk[] {
   const args = JSON.stringify({ command });
   return [
@@ -92,7 +92,7 @@ function bashRound(id: string, command: string): OpenAIStreamChunk[] {
                 index: 0,
                 id,
                 type: 'function' as const,
-                function: { name: 'bash', arguments: args },
+                function: { name: 'exec', arguments: args },
               },
             ],
           },
@@ -407,7 +407,7 @@ describe('Orquestación paralela de subagentes (Hito 8C)', () => {
       ]),
       makeTextRound('gestionado'),
     ]);
-    // Cada hijo intenta un bash destructivo (rm) → confirmación al padre → deny.
+    // Cada hijo intenta un exec destructivo (rm) → confirmación al padre → deny.
     const childA = new MockProvider([bashRound('ba', 'rm -rf tmp_a'), makeTextRound('ok A')]);
     const childB = new MockProvider([bashRound('bb', 'rm -rf tmp_b'), makeTextRound('ok B')]);
     const childProviders = [childA, childB];

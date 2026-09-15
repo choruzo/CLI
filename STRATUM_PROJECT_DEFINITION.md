@@ -773,6 +773,17 @@ El diferenciador operacional de Stratum: capacidad SSH integrada en el loop ReAc
 
 **Entregable:** El agente puede ejecutar comandos y transferir ficheros en hosts remotos del inventario, sin binarios del sistema. Administración de infraestructura VMware/Linux desde el loop ReAct.
 
+### Hito 16 — Ejecución unificada, auditoría universal y redacción de salidas ✅ *(cerrado 2026-09-15)*
+
+Primer bloque de `CLI-DOC/Orientacion-Infraestructura.md` (Hitos 10–15: ver `CLAUDE.md`). Spec vinculante en **§12.17**.
+
+- [x] `ExecutionTarget` (`local` | `ssh:<alias>`; `container`/`pod`/`winrm` reservados) y tool `exec` sobre `IExecBackend` con capacidades declaradas
+- [x] `bash` y `ssh_exec` retirados sin alias; `ssh_upload`/`ssh_download` se mantienen
+- [x] Auditoría universal de comandos (`tools.auditLog` → `~/.stratum/logs/exec-audit.jsonl`)
+- [x] Redacción de secretos en la salida de las tools antes de entrar al historial
+- [x] Contrato de fallo de `exec` (`countsAsFailure:false`) y contador de reintentos consecutivo (§12.3)
+
+**Entregable:** una sola superficie de ejecución con guardas, auditoría y redacción en un único punto — el sustrato de los hitos de infraestructura 17–20.
 ---
 
 ## 10. Próximos Pasos Inmediatos
@@ -959,6 +970,8 @@ El contador de reintentos por tool lo lleva el `ToolDispatcher` (mapa `toolRetri
 </tool_error>
 ```
 3. El loop **no aborta**: el agente puede seguir usando otras tools o responder al usuario directamente.
+
+> **Hito 16 — reintentos.** El contador es **consecutivo**, como ya decía el mensaje: un éxito lo reinicia. La tool se deshabilita **en el mismo resultado** que alcanza el límite —ese `tool_error` pasa a `recoverable: false` y lo explica—, no al inicio de la llamada siguiente: si no, seguiría en el schema de la próxima iteración. Además, un `ToolResult` de error con `countsAsFailure: false` no lo toca (ni suma ni reinicia): lo usa `exec` para un comando que **se ejecutó** y falló (exit ≠ 0, timeout, truncado, cancelado). Sigue siendo un `tool_error` recuperable —la UI lo pinta en rojo— pero no es un fallo de la tool; antes, tres `grep` sin coincidencias repartidos por la sesión deshabilitaban el shell.
 
 **Errores no recuperables** (fallos del propio sistema, no de la tool):
 - Error de red al llamar al LLM → reintento con backoff exponencial (3 intentos, 1s/2s/4s), luego `{ type: 'error', fatal: true }`.
@@ -1499,6 +1512,7 @@ for await (const event of agent.run(input, { signal: controller.signal })) {
 
 **Segundo Ctrl+C:** si el usuario presiona Ctrl+C por segunda vez durante el cleanup, se hace `process.exit(1)` inmediato sin más espera.
 
+> **Hito 16 — cancelación estructurada de `exec`.** Los backends de `exec` gestionan su propia cancelación: al abortar el signal envían SIGTERM (al grupo de procesos en POSIX) y SIGKILL a los 2 s, y **resuelven** con `status: "cancelled"` y la salida capturada, en un tiempo acotado. La tool declara `structuredCancellation: true`, y el `ToolDispatcher` no compite con el abort: solo impone una red de seguridad de 5 s. `closeExecRuntime()` (cierre del pool SSH + flush de la auditoría) sustituye a `closeSshPool()` en el teardown de `chat`/`run`.
 ---
 
 ### 12.13 — Comando `/init` y `stratum init`
@@ -1566,6 +1580,8 @@ Stratum no invoca el binario `ssh` del sistema. Todo el protocolo SSH corre dent
 > 2. **`ssh_exec` usa `isDestructive()`, no `destructive: true`.** El snippet de abajo escribe `destructive: true` pero describe "confirmar *si detecta* patrones peligrosos"; en el `ToolRegistry` real, `destructive: true` significa confirmar SIEMPRE. La traducción fiel al dispatcher existente es el predicado dinámico `isDestructive(params, ctx)`, que confirma cuando el host lleva `confirmAll` o cuando el comando encaja con `tools.destructivePatterns` (reutilizando `commandIsDestructive` de `tools/shell/bash.ts`).
 > 3. **El gate TOFU reutiliza `ToolContext.confirmDestructive`** en vez de un canal propio. Ese callback ya está cableado a `<DestructiveConfirm>` en el chat Ink, a readline en `stratum run` y a deny automático sin TTY, así que el comportamiento correcto en CI sale gratis. `allow-all` (`!`) se interpreta como "aprobar **este** host": confiar en un fingerprint nunca se extiende al siguiente.
 > 4. **`ssh2` va en `external` de `tsup`**: resuelve su binding nativo opcional con requires dinámicos y bundlearlo rompe esa resolución. Además, el detector de exports CJS de Node reconoce `Client` como named export pero no `Server` ni `utils` — el código de producción solo usa `Client`.
+>
+> 5. **Hito 16: `ssh_exec` se retiró sin alias.** La ejecución remota es la tool `exec` con `target: "ssh:<alias>"` (§12.17); su lógica vive en `tools/exec/backends/ssh.ts`. Cambios de contrato respecto a lo de abajo: el resultado es `<exec_result target status exitCode duration requestedCwd maxBytes>` en vez de `<ssh_result>`; un exit ≠ 0, un timeout o un truncado son `tool_error` recuperables (§12.3); sin `stdin` se envía EOF inmediato también con PTY; `pty` + `stdin` se rechaza en preflight; y la auditoría es universal (`tools/exec/audit.ts` → `~/.stratum/logs/exec-audit.jsonl`, con `target` y `status`), con `ssh.auditLog` como alias obsoleto que el loader migra.
 
 ---
 
@@ -2493,3 +2509,74 @@ src/cli/ui/SubagentBlock.tsx  ← NUEVO (8A): bloque colapsable; <AgentTree> en 
 #### Revisión incorporada (2026-06-20)
 
 Correcciones aplicadas tras revisión de diseño: (1) reanudación con estado `interrupted` en vez de reejecución idempotente; (2) `profile: z.string()` + validación en runtime en vez de `z.enum`; (3) `ProviderRouter` propio por subagente; (4) aclarado que `ask` solo cubre el gate destructivo existente (hoy `bash`), sin política nueva de mutación de fichero; (5) `context` descrito como rutas compartidas mutables, no snapshot read-only; (6) detección de conflictos best-effort vía write-log alimentado por las tools; (7) concurrencia 8C acotada por semáforo + mutex; (8) evento `subagent_event` para anidar tool calls en el árbol 8C; (9) `maxTokens` best-effort (límites duros = `maxIterations`/`timeoutMs`).
+
+---
+
+### 12.17 — Ejecución unificada, auditoría universal y redacción de salidas (Hito 16)
+
+**Decisión: una tool `exec` con un `target` como parámetro, sobre backends `IExecBackend`; guardas, auditoría y redacción en un único punto.** Origen: §2, §2.5, §8.2 y §11 de `CLI-DOC/Orientacion-Infraestructura.md`.
+
+#### Target y esquema
+
+```
+target := local | ssh:<alias>          (container:, pod:, winrm: reservados → rechazo con mensaje)
+exec   { target?, command, cwd?, pty?, stdin?, timeout?, maxBytes? }
+```
+
+El esquema es el de `ssh_exec` con `host` generalizado a `target`: ninguno de sus parámetros era específico de SSH. `bash` y `ssh_exec` se retiran **sin alias** (§11.1). La descripción de `exec` se **genera en el registro** con los targets de la config: la tool siempre existe (el target `local` siempre está disponible) y lo dinámico es la lista de targets.
+
+#### Capacidades por backend
+
+| | `local` | `ssh:<alias>` |
+|---|---|---|
+| `pty` | no — rechazo recuperable que nombra los targets que sí | sí |
+| `maxBytes` | descarta el resto y **deja terminar** (default `tools.execMaxBytes`, 1 MiB) | mata el proceso remoto (§12.14) |
+| Serialización | sí (`isSerialized`) | no |
+| Directorio reportado | `cwd` efectivo | `requestedCwd` |
+
+`pty` + `stdin` se rechaza siempre. Sin `stdin`, la entrada se cierra de inmediato (también con PTY). Precedencia de estados: `cancelled > timeout > truncated > exited`. El backend local usa `execa` con `buffer: false` (el buffer por defecto falla a partir de 100 MB) y, en Windows, `pwsh.exe -NoProfile -NonInteractive -Command` con un envoltorio que propaga `$LASTEXITCODE`: `pwsh -c` devuelve 1 ante cualquier fallo.
+
+#### Preflight y resultado
+
+`preflight` evalúa, en orden: sintaxis y existencia del target (recuperable) → capacidades (recuperable) → `commandVeto(command, guardedCommands, target)` de `tools/guards.ts` (no recuperable). La semántica de las capas 1–3 no depende todavía del target; la firma lo recibe para las políticas por entorno del hito siguiente.
+
+| Situación | `ToolResult` |
+|---|---|
+| `exited` con exit 0 | `{ ok: true, output: <exec_result> }` |
+| Ejecutó y falló (exit ≠ 0, `timeout`, `truncated`, `cancelled`) | `{ ok: false, error: <exec_result>, recoverable: true, countsAsFailure: false, executed: true }` |
+| No arrancó / no conectó | `{ ok: false, recoverable: true }` (cuenta como fallo) |
+| Mismatch de host key | `{ ok: false, recoverable: false }` |
+
+`executed` viaja en el evento `tool_error` y mantiene el write-log de subagentes: un comando que escribe y luego falla sigue contando. La clave del write-log es canónica para todas las tools mutantes (`canonicalChangePath`): relativa al directorio del proceso en local y `ssh:<alias>:<ruta>` en remoto.
+
+#### Auditoría
+
+Todo intento real de ejecución (tras preflight y confirmación) escribe en `tools.auditLog` (default `~/.stratum/logs/exec-audit.jsonl`, rotación a 10 MB): `{ timestamp, sessionId?, target, host?, command, cwd?, requestedCwd?, status, exitCode, durationMs, truncated }`, con `status` ∈ `exited | truncated | timeout | cancelled | spawn_error | connect_error`. `command` se guarda redactado; `stdin` nunca. `ssh.auditLog` es alias obsoleto: el loader lo migra **dentro de cada capa** de config antes de fusionarlas, para respetar la precedencia proyecto > global.
+
+#### Redacción de salidas
+
+Núcleo **no desactivable** (`src/security/secrets.ts`, compartido con `logging/redact.ts`): bloque PEM de clave privada (también sin END), cabecera `Authorization`, `Bearer`, `sk-…` con dígito, `xox?-`, JWT y tokens de GitHub. Solo formatos con estructura reconocible, para no tachar hashes ni identificadores. Sustitución por `[redacted: <motivo>]`, **nunca eliminación** (§11.3). `tools.redaction.extraPatterns` solo añade **literales** (`{ value, reason }`, 4–512 caracteres, máximo 50): una regex de usuario no se puede validar contra ReDoS.
+
+Fronteras: el `ToolDispatcher` redacta toda salida, error y rechazo **antes** de loguearlos y de truncar (un PEM cortado por el truncado dejaría de casar); el `ReactLoop` construye evento y mensaje `role: "tool"` desde el mismo texto redactado en todas sus rutas, incluidas las tools de control; `executeDelegations` redacta el `SubagentResult` en su único punto de nacimiento; la auditoría redacta el comando. El texto libre que escribe el modelo queda fuera de alcance.
+
+#### Exit code en Windows — contrato best-effort (decisión del usuario)
+
+`pwsh -Command` devuelve 1 ante cualquier fallo, así que el backend local lo envuelve. El orden de ejecución lo aporta un gancho `PostCommandLookupAction` que apunta `$Error.Count` al arrancar cada nativo; al terminar, si `$?` es falso y hubo errores de PowerShell después del último nativo → 1, si no → `$LASTEXITCODE`.
+
+| Situación | Resultado |
+|---|---|
+| El último comando termina bien (`$?` verdadero) | **0 en todos los modos**, como en POSIX (`false; x=1` → 0): `cmd /c exit 6; $x = 1` → 0, también en el respaldo |
+| Gancho instalado y sin reemplazar (FullLanguage) | Exacto, también dentro de bloques: `if ($true) { Get-Item x; cmd /c exit 7 }` → 7 |
+| Sesión que arranca en `ConstrainedLanguage`, o comando que pone su propio `PostCommandLookupAction` | Respaldo **sin orden**: un error de PowerShell en la ejecución → 1; si no, `$LASTEXITCODE` |
+| Tuberías | El gancho ve la resolución de comandos, previa a ejecutar la tubería: `cmd /c exit 7 \| Out-String` → 7, `Get-Item x \| cmd /c exit 7` → 1 |
+| Llamada a una función | Semántica de `$?` de PowerShell: tras la función es `$true` → 0, igual que sin envoltorio |
+
+Se descartó perseguir la exactitud en todos los modos: PowerShell no expone el orden de finalización de los nativos en `ConstrainedLanguage`, y los mecanismos probados escribían en stderr (`$PSNativeCommandUseErrorActionPreference`), no saltaban con nativos (breakpoint de variable), fallaban dentro de bloques (AST de la última sentencia) o hacían que el antivirus bloquease el spawn (comando en base64). El envoltorio nunca toca stdout/stderr.
+
+#### Motivos de redacción seguros
+
+Solo cuenta como marca ya aplicada un `[redacted: <motivo>]` con motivo canónico (los del núcleo o los de los extras activos): una tool no puede proteger un secreto escribiendo `[redacted: sk-…]`. Ningún motivo efectivo contiene un valor protegido: si el de una regla del núcleo (p. ej. `API key`) o el genérico de respaldo colisionan con un `value`, se sustituyen por un respaldo que no colisiona (`custom secret`, y si no `#1`, `#2`…). Un `reason` configurado no puede contener corchetes ni saltos de línea, ni ningún `value` protegido (el suyo o el de otra entrada), ni tener forma de secreto del núcleo; lo valida el schema y, para configs construidas a mano, el motivo inseguro se sustituye en tiempo de ejecución por `custom secret` y nunca se trata como canónico.
+
+#### Fuera de alcance (hitos siguientes)
+
+`environments`/blast radius, read-only mode, perfil de sesión, targets `container`/`pod`/`winrm`, tool `copy`, tools de diagnóstico y `diagnosis`.

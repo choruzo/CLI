@@ -258,6 +258,68 @@ export function hardDenyReason(command: string): string | null {
 }
 
 // ---------------------------------------------------------------------------
+// Veto de comando compartido por todos los targets de ejecución
+// ---------------------------------------------------------------------------
+
+/**
+ * Safety check (§12.5): detecta si un comando contiene patrones destructivos.
+ * Los patrones vienen de `tools.destructivePatterns` en la config. Cada patrón
+ * se busca como palabra completa (case-sensitive — `DROP`/`DELETE` apuntan a
+ * SQL en mayúsculas; `rm`/`dd` a comandos shell en minúsculas).
+ */
+export function commandIsDestructive(command: string, patterns: string[]): boolean {
+  for (const pattern of patterns) {
+    const escaped = pattern.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    const re = new RegExp(`(?:^|[\\s;|&("'\`])${escaped}(?:$|[\\s;|&)"'\`])`);
+    if (re.test(command)) return true;
+  }
+  return false;
+}
+
+/**
+ * Veto de capas 1, 2 y 3-blocked sobre un comando de shell. Hito 16: lo evalúa
+ * `exec` una sola vez para cualquier target (antes lo compartían a medias
+ * `bash` y `ssh_exec`). Recibe el target para que las políticas por entorno
+ * puedan enchufarse aquí sin tocar la tool; hoy la semántica es idéntica en
+ * todos: un `rm -rf /` no es menos catastrófico al otro lado de un socket.
+ * Devuelve el motivo del rechazo, o `null` si el comando pasa.
+ */
+export function commandVeto(
+  command: string,
+  guardedCommands?: Record<string, GuardAction>,
+  _target?: string,
+): string | null {
+  const hard = hardDenyReason(command);
+  if (hard) {
+    return (
+      `Blocked by a non-negotiable safety rule: ${hard}. ` +
+      'This rule cannot be disabled by configuration or by user approval. ' +
+      'Narrow the command to the specific target you actually need.'
+    );
+  }
+  const guarded = guardedBlockReason(command, guardedCommands);
+  if (guarded) {
+    return (
+      `Blocked by policy: ${guarded} is set to "block" in tools.guardedCommands. ` +
+      'Ask the user to run it themselves, or to change that policy in .stratumrc.json.'
+    );
+  }
+  // Capa 3 sobre el shell: sin esto, bloquear `read_file` sobre una clave no
+  // sirve de nada, porque `cat` sigue disponible y el modelo encuentra el
+  // rodeo solo. Mismo veredicto y mismo texto que en las tools de fichero.
+  const sensitive = commandPathVerdict(command);
+  if (sensitive && sensitive.tier === 'blocked') {
+    return (
+      `the command reads or writes "${sensitive.path}" (${sensitive.reason}). ` +
+      'Credentials and private key material are never accessed by the agent, through file tools ' +
+      'or through the shell, and no configuration or user approval can enable it. ' +
+      'If you need a value from it, ask the user to provide just that value.'
+    );
+  }
+  return null;
+}
+
+// ---------------------------------------------------------------------------
 // Capa 2 — Comandos guardados (configurables)
 // ---------------------------------------------------------------------------
 

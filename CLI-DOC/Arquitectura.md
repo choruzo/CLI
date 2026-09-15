@@ -29,10 +29,10 @@ CLI (Commander.js)
             │       ├── ContextManager (compresión §12.4: LLM call + truncado duro)
             │       └── ToolDispatcher → ToolRegistry
             │               ├── fs: read/write/edit/glob/list/grep
-            │               ├── shell: bash (guard destructivo)
+            │               ├── exec: targets local / ssh:<alias>           ← Hito 16
             │               ├── web: search / fetch
             │               ├── memory: store_decision / recall_decisions  ← Hito 5
-            │               ├── ssh: ssh_exec / ssh_upload / ssh_download   ← Hito 9
+            │               ├── ssh: ssh_upload / ssh_download              ← Hito 9
             │               └── mcp__<server>__<tool>  (auto-registradas)  ← Hito 4
             │       └── tools de control (NO despachadas, las intercepta el loop)
             │               ├── present_plan / update_plan                 ← Hito 7
@@ -44,7 +44,7 @@ CLI (Commander.js)
             ├── SSHConnectionPool (tools/ssh/pool.ts)           ← Hito 9
             │       ├── KnownHostsStore (~/.stratum/known_hosts.json, TOFU)
             │       ├── jump hosts vía forwardOut (profundidad máx. 2)
-            │       └── SSHAuditLog (~/.stratum/logs/ssh-audit.jsonl)
+            │       └── (auditoría → ExecAuditLog, ~/.stratum/logs/exec-audit.jsonl, Hito 16)
             └── McpManager (mcp/manager.ts)                     ← Hito 4 + 4.1
                     ├── McpServerClient (stdio, heartbeat, backoff)
                     ├── installer.ts (carpeta gestionada ~/.stratum/mcp/)
@@ -88,10 +88,10 @@ CLI (Commander.js)
 
 - `ToolRegistry` + `ToolDispatcher` — registro central y dispatch paralelo/serializado, fase de confirmación destructiva, truncado ~30k (`truncate.ts`)
 - fs: `read_file`, `write_file`, `edit_file` (unified diff), `glob`, `list_directory`, `grep`
-- shell: `bash` (guard destructivo configurable, serialized)
+- exec: `exec` con targets `local` y `ssh:<alias>` (Hito 16) — guardas en un solo punto, auditoría universal, redacción de salidas
 - web: `web_search` (DDG + Tavily, RRF), `web_fetch` (HTML→markdown)
 - memory: `store_decision`, `recall_decisions`
-- ssh: `ssh_exec`, `ssh_upload`, `ssh_download` — **solo si hay inventario `ssh.hosts`** (`ssh/`)
+- ssh: `ssh_upload`, `ssh_download` — **solo si hay inventario `ssh.hosts`** (`ssh/`); la ejecución remota es `exec`
 - MCP: tools auto-registradas `mcp__<server>__<tool>` (`mcp/`)
 - control (interceptadas por el loop, nunca despachadas): `present_plan`, `update_plan`, `delegate_task`
 

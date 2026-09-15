@@ -25,6 +25,7 @@ import {
   describeProfile,
   isPrimaryCapable,
   type InvalidProfile,
+  type ProfileWarning,
 } from './profiles.js';
 import { executeDelegations, resolveDelegationProfile } from './delegation.js';
 import { generateSubagentId, serializeSubagentResult } from './subagent.js';
@@ -627,6 +628,10 @@ export class StratumAgent {
 
   invalidProfiles(): InvalidProfile[] {
     return this.profiles.invalidProfiles();
+  }
+
+  profileWarnings(): ProfileWarning[] {
+    return this.profiles.warnings();
   }
 
   /**

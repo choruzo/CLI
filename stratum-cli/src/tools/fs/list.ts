@@ -29,7 +29,7 @@ function listDirRecursive(
 ): void {
   if (depth > maxDepth || lines.length >= MAX_ENTRIES) return;
 
-  let entries: ReturnType<typeof readdirSync>;
+  let entries: import('fs').Dirent[];
   try {
     entries = readdirSync(dir, { withFileTypes: true });
   } catch {

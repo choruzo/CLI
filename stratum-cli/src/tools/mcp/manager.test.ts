@@ -2,7 +2,10 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { McpManager } from './manager.js';
 import { ToolRegistry } from '../registry.js';
 import type { McpServerClient } from './client.js';
-import type { StratumConfig } from '../../config/schema.js';
+import { StratumConfigSchema, type StratumConfig } from '../../config/schema.js';
+
+/** Secciones que este test no ejercita: los defaults del schema. */
+const DEFAULTS = StratumConfigSchema.parse({});
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -10,6 +13,10 @@ import type { StratumConfig } from '../../config/schema.js';
 
 function makeConfig(servers: { name: string }[] = []): StratumConfig {
   return {
+    logging: DEFAULTS.logging,
+    agents: DEFAULTS.agents,
+    skills: DEFAULTS.skills,
+    prompt: DEFAULTS.prompt,
     provider: undefined,
     memory: {
       projectFile: '',
@@ -26,10 +33,14 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     tools: {
       confirmDestructive: false,
       bashTimeout: 30000,
+      testCommand: '',
       webSearch: { backend: 'meta', apiKey: '', tavilyApiKey: '', maxResults: 10 },
       destructivePatterns: [],
       guardedCommands: {},
       sensitivePathAllowlist: [],
+      execMaxBytes: 1024 * 1024,
+      auditLog: false,
+      redaction: { extraPatterns: [] },
     },
     mcp: {
       servers: servers.map((s) => ({

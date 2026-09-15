@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import { unsafeReasonProblem } from '../security/secrets.js';
 
 const ProviderConfigSchema = z.object({
   type: z.literal('openai-compatible'),
@@ -73,7 +74,7 @@ const SSHHostSchema = z.object({
 
   // --- Seguridad operacional ---
   /**
-   * Requerir confirmación del usuario en TODOS los `ssh_exec` de este host,
+   * Requerir confirmación del usuario en TODOS los `exec` sobre este host,
    * sea cual sea el comando. Es la defensa real en producción: la detección
    * de patrones destructivos es una red blanda y trivialmente evasible.
    */
@@ -96,10 +97,11 @@ const SSHConfigSchema = z
   .object({
     hosts: z.record(z.string(), SSHHostSchema).default({}),
     /**
-     * `true` → `~/.stratum/logs/ssh-audit.jsonl`; string → ruta personalizada;
-     * `false` → deshabilitado.
+     * Obsoleto desde el Hito 16: alias de `tools.auditLog`. El loader lo migra
+     * dentro de cada capa de config antes de fusionarlas. Sin default, para que
+     * la migración distinga «no puesto» de «puesto a true».
      */
-    auditLog: z.union([z.boolean(), z.string()]).default(true),
+    auditLog: z.union([z.boolean(), z.string()]).optional(),
   })
   .superRefine((cfg, ctx) => {
     for (const [alias, host] of Object.entries(cfg.hosts)) {
@@ -259,6 +261,61 @@ export const StratumConfigSchema = z.object({
        * NUNCA levanta el nivel `blocked` (claves, credenciales, llaveros).
        */
       sensitivePathAllowlist: z.array(z.string()).default([]),
+      /**
+       * Hito 16 — bytes de stdout+stderr que `exec` conserva en el target
+       * `local`. Pasado el límite se descarta el resto pero el proceso termina
+       * con normalidad (en SSH, `ssh.hosts.<alias>.maxBytes` lo mata, §12.14).
+       */
+      execMaxBytes: z
+        .number()
+        .int()
+        .positive()
+        .default(1024 * 1024),
+      /**
+       * Hito 16 — auditoría de todo comando ejecutado, en cualquier target.
+       * `true` → `~/.stratum/logs/exec-audit.jsonl`; string → ruta; `false` → off.
+       * `ssh.auditLog` se acepta como alias obsoleto (lo migra el loader).
+       */
+      auditLog: z.union([z.boolean(), z.string()]).default(true),
+      /**
+       * Hito 16 — redacción de secretos en la salida de las tools. El núcleo
+       * (claves privadas, Authorization, tokens con formato conocido) no se
+       * puede desactivar; aquí solo se AÑADEN valores literales a tachar.
+       */
+      redaction: z
+        .object({
+          extraPatterns: z
+            .array(
+              z.object({
+                value: z.string().min(4).max(512),
+                // Va dentro de la marca `[redacted: <reason>]`: sin corchetes ni
+                // saltos de línea, o la marca dejaría de reconocerse como tal.
+                reason: z
+                  .string()
+                  .min(1)
+                  .max(80)
+                  .regex(/^[^[\]\r\n]+$/, 'reason cannot contain brackets or line breaks'),
+              }),
+            )
+            .max(50)
+            .default([])
+            // Un motivo que contenga un valor protegido (el suyo o el de otra
+            // entrada) o que tenga forma de secreto haría de su marca un escondite.
+            .superRefine((entries, ctx) => {
+              const values = entries.map((e) => e.value);
+              entries.forEach((entry, i) => {
+                const problem = unsafeReasonProblem(entry.reason, values);
+                if (problem) {
+                  ctx.addIssue({
+                    code: z.ZodIssueCode.custom,
+                    path: [i, 'reason'],
+                    message: problem,
+                  });
+                }
+              });
+            }),
+        })
+        .default({}),
     })
     .default({}),
 

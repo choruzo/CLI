@@ -16,11 +16,19 @@ const listSub = new Command('list')
     const loader = new ProfileLoader([findWorktreeRoot(cwd).worktree, cwd]);
     if (opts.json) {
       process.stdout.write(
-        JSON.stringify(profilesToJson(loader.list(), loader.invalidProfiles()), null, 2) + '\n',
+        JSON.stringify(
+          profilesToJson(loader.list(), loader.invalidProfiles(), loader.warnings()),
+          null,
+          2,
+        ) + '\n',
       );
       return;
     }
-    process.stdout.write(formatProfilesReport(loader.list(), loader.invalidProfiles()) + '\n');
+    process.stdout.write(
+      formatProfilesReport(loader.list(), loader.invalidProfiles(), {
+        warnings: loader.warnings(),
+      }) + '\n',
+    );
   });
 
 export const agentsCommand = new Command('agents')

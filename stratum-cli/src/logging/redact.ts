@@ -7,6 +7,8 @@
  * estructurados antes de que lleguen a cualquier sink.
  */
 
+import { SECRET_PATTERNS } from '../security/secrets.js';
+
 const REDACTED = '«redacted»';
 
 /** Claves cuyo valor se redacta por completo (comparación case-insensitive). */
@@ -39,6 +41,18 @@ const VALUE_PATTERNS: RegExp[] = [
 function redactString(s: string): string {
   let out = s;
   for (const re of VALUE_PATTERNS) out = out.replace(re, REDACTED);
+  // Hito 16: además, el núcleo compartido con la redacción de salidas de tool
+  // (claves privadas, JWT, tokens GitHub…). Se suma: nunca redacta menos que antes.
+  for (const pattern of SECRET_PATTERNS) {
+    if (pattern.hint && !out.includes(pattern.hint)) continue;
+    pattern.re.lastIndex = 0;
+    out = out.replace(pattern.re, (...args: unknown[]) => {
+      const groups = args[args.length - 1] as Record<string, string | undefined> | undefined;
+      const keep = typeof groups === 'object' && groups ? (groups.keep ?? '') : '';
+      return keep + REDACTED;
+    });
+    pattern.re.lastIndex = 0;
+  }
   return out;
 }
 

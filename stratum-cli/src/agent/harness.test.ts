@@ -3,7 +3,7 @@ import { ReactLoop, ContextManager } from './harness.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { z } from 'zod';
-import type { ToolDefinition, AgentEvent } from './types.js';
+import type { ToolDefinition, AgentEvent, Message } from './types.js';
 import { StratumConfigSchema } from '../config/schema.js';
 
 const defaultConfig = StratumConfigSchema.parse({});
@@ -290,7 +290,7 @@ describe('ReactLoop', () => {
   it('emits text events and done(stop) for text-only response', async () => {
     const provider = new MockProvider([makeTextRound('Hello from agent')]);
     const registry = new ToolRegistry();
-    const messages = [{ role: 'system' as const, content: 'sys' }];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
 
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
@@ -311,7 +311,7 @@ describe('ReactLoop', () => {
       makeTextRound('File says: file content here'),
     ]);
 
-    const messages = [{ role: 'system' as const, content: 'sys' }];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
 
@@ -334,7 +334,7 @@ describe('ReactLoop', () => {
     const round = makeToolCallRound('c1', 'bash', { value: 'x' });
     const provider = new MockProvider(Array(60).fill(round));
 
-    const messages = [{ role: 'system' as const, content: 'sys' }];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
     const config = StratumConfigSchema.parse({ agent: { maxIterations: 3 } });
     const loop = new ReactLoop(provider, registry, messages, config, 'test-model', 32768);
     const events = await collectEvents(loop.run());
@@ -360,7 +360,7 @@ describe('ReactLoop', () => {
       makeTextRound('I see the tool failed, I will recover'),
     ]);
 
-    const messages = [{ role: 'system' as const, content: 'sys' }];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
 
@@ -385,7 +385,7 @@ describe('ReactLoop', () => {
       makeTextRound('Recovered after parse error'),
     ]);
     const registry = new ToolRegistry();
-    const messages = [{ role: 'system' as const, content: 'sys' }];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
 
     const loop = new ReactLoop(provider, registry, messages, defaultConfig, 'test-model', 32768);
     const events = await collectEvents(loop.run());
@@ -404,7 +404,7 @@ describe('ReactLoop', () => {
   it('respects AbortSignal cancellation', async () => {
     const provider = new MockProvider([makeTextRound('Long response...')]);
     const registry = new ToolRegistry();
-    const messages = [{ role: 'system' as const, content: 'sys' }];
+    const messages: Message[] = [{ role: 'system', content: 'sys' }];
 
     const controller = new AbortController();
     controller.abort(); // abort immediately

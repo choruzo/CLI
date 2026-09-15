@@ -1282,7 +1282,7 @@ export function App({
 
   /**
    * Lanza /init usando el agente regular para explorar el repo libremente.
-   * El agente usa read_file, write_file y bash para explorar y escribir
+   * El agente usa read_file, write_file y exec para explorar y escribir
    * STRATUM.md, igual que opencode.
    *
    * Las actualizaciones de UI se limitan a tool_call_start y tool_result
@@ -1804,6 +1804,7 @@ export function App({
           type: 'SYSTEM_MESSAGE',
           text: formatProfilesReport(agent.listProfiles(), agent.invalidProfiles(), {
             activeName: agent.getActiveProfile()?.name,
+            warnings: agent.profileWarnings(),
           }),
         });
         return;
@@ -2058,7 +2059,7 @@ export function App({
               'glob',
               'list_directory',
               'grep',
-              'bash',
+              'exec',
               'web_search',
               'web_fetch',
               'store_decision',

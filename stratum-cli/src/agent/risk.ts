@@ -55,7 +55,7 @@ export interface RiskAssessment {
 // ---------------------------------------------------------------------------
 
 const HIGH_RISK_TOKEN =
-  /^(?:auth|authentication|authorization|update|updater|security|payments?|permissions?|shell|process|processes|secrets?|credentials?|tokens?|ssh|guards?)$/i;
+  /^(?:auth|authentication|authorization|update|updater|security|payments?|permissions?|shell|exec|process|processes|secrets?|credentials?|tokens?|ssh|guards?)$/i;
 
 const RESILIENCE_PATH =
   /(?:^|\/)(?:update|deploy|infra|ops|migrations?|rollback|recovery|providers?)(?:\/|$)/i;

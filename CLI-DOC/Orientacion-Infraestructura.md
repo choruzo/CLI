@@ -1,6 +1,6 @@
 # Orientación a infraestructura — análisis y roadmap propuesto
 
-**Fecha:** 2026-09-12 · **Estado:** propuesta, sin implementar
+**Fecha:** 2026-09-12 · **Estado:** bloque 1 implementado como Hito 16 (2026-09-15, spec en §12.17 de `STRATUM_PROJECT_DEFINITION.md`); bloques 2–5 pendientes
 **Punto de partida:** Hito 14 cerrado (709 tests verdes). La investigación `gentle-pi` está agotada: no queda nada pendiente de ella.
 
 Este documento responde a una pregunta: *dado que la base del CLI es sólida, ¿qué le falta a Stratum para ser una herramienta orientada a infraestructura* — nube y local, revisión de bugs, depuración de redes, fallos de sistema operativo y virtualización?
@@ -85,7 +85,7 @@ Al comparar los dos esquemas reales aparece un resultado que cambia el enfoque d
 
 Lo que hay no son dos tools distintas, sino una tool **rica** (`ssh_exec`, seis parámetros) y una tool **pobre** (`bash`, dos: `command` y `timeout`).
 
-**Corolario para el Hito 15:** el esquema de `exec` no es «`bash` más un `target`». Es **`ssh_exec` con `host` generalizado a `target`**. El trabajo se desplaza: más esfuerzo en el backend local (que tiene que implementar `pty`, `stdin` y `maxBytes`, que hoy le faltan) y menos en todo lo demás.
+**Corolario para el Hito 16:** el esquema de `exec` no es «`bash` más un `target`». Es **`ssh_exec` con `host` generalizado a `target`**. El trabajo se desplaza: más esfuerzo en el backend local (que tiene que implementar `pty`, `stdin` y `maxBytes`, que hoy le faltan) y menos en todo lo demás.
 
 ### Capacidades por backend
 
@@ -98,7 +98,7 @@ Por tanto `IExecBackend` no expone solo `run()`, sino también `capabilities: { 
 
 ### Dos consecuencias
 
-**1. `ssh_upload` / `ssh_download` siguen el mismo camino.** Su esquema (`{host, localPath, remotePath}`) es puro transporte, y `docker cp` / `kubectl cp` son la misma operación. Sale una tool `copy` con `target` en un extremo, y las dos tools SSH desaparecen igual que `ssh_exec`. No entra en el Hito 15 —el transporte de ficheros no bloquea nada— pero el diseño debe contemplarlo para no rehacerlo después.
+**1. `ssh_upload` / `ssh_download` siguen el mismo camino.** Su esquema (`{host, localPath, remotePath}`) es puro transporte, y `docker cp` / `kubectl cp` son la misma operación. Sale una tool `copy` con `target` en un extremo, y las dos tools SSH desaparecen igual que `ssh_exec`. No entra en el Hito 16 —el transporte de ficheros no bloquea nada— pero el diseño debe contemplarlo para no rehacerlo después.
 
 **2. El registro condicional cambia de naturaleza.** Hoy la regla es elegante: sin inventario `ssh`, las tools SSH no existen y el modelo no las ve. Con `exec` unificada la tool **siempre** existe, porque el target `local` siempre está disponible. Lo que pasa a ser dinámico es **la lista de targets en la descripción de la tool**, generada en arranque — igual que hoy el bloque de inventario SSH se inyecta en el system prompt solo si hay hosts. Mismo principio, distinto vehículo. Conviene anotarlo porque **una descripción de tool generada dinámicamente es algo que el proyecto no tiene hoy en ningún sitio**.
 
@@ -268,21 +268,23 @@ La capa 3 de las guardas (Hito 11 + Hito 13) protege las rutas sensibles y los c
 
 | Hito | Contenido | Por qué en ese orden |
 |---|---|---|
-| **15** | `ExecutionTarget` + tool `exec` unificada + auditoría universal + redacción de salidas de tool | Todo lo demás cuelga de esto |
-| **16** | Entornos con blast radius + read-only mode + **perfil de sesión** (§10.5) + badge de contexto en `StatusBar` | La seguridad antes que el alcance; y el perfil tiene que existir **antes** de que el 17 empiece a añadir tools |
-| **17** | `net_probe` + `sys_inspect` + `log_query` + `service_status` | Diagnóstico puro, sin dependencias externas |
-| **18** | Tool `diagnosis` + perfiles de triaje + `.stratum/incidents/` | La pieza diferencial, ya con sustrato debajo |
-| **19** | Wrappers cloud + virtualización + contexto activo en la barra | Lo más amplio y lo que más envejece |
+| **16** ✅ | `ExecutionTarget` + tool `exec` unificada + auditoría universal + redacción de salidas de tool | Todo lo demás cuelga de esto |
+| **17** | Entornos con blast radius + read-only mode + **perfil de sesión** (§10.5) + badge de contexto en `StatusBar` | La seguridad antes que el alcance; y el perfil tiene que existir **antes** de que el 18 empiece a añadir tools |
+| **18** | `net_probe` + `sys_inspect` + `log_query` + `service_status` | Diagnóstico puro, sin dependencias externas |
+| **19** | Tool `diagnosis` + perfiles de triaje + `.stratum/incidents/` | La pieza diferencial, ya con sustrato debajo |
+| **20** | Wrappers cloud + virtualización + contexto activo en la barra | Lo más amplio y lo que más envejece |
 
-El orden no es negociable en su primera mitad: los hitos 15 y 16 son los que hacen que los demás sean **seguros de usar**, y el 18 es el que convierte a Stratum en algo que hoy no existe en el mercado en vez de en otro wrapper de CLIs.
+El orden no es negociable en su primera mitad: los hitos 16 y 17 son los que hacen que los demás sean **seguros de usar**, y el 19 es el que convierte a Stratum en algo que hoy no existe en el mercado en vez de en otro wrapper de CLIs.
+
+> **Renumerado el 2026-09-15.** El número 15 lo ocupó «Perfiles de agente de primera clase», así que el roadmap pasa a 16–20. El bloque 1 está implementado (Hito 16). Decisiones de implementación que concretan este documento: `pty` en `local` se declara no soportado (sin `node-pty`); `ssh_exec` también se retira sin alias; la auditoría vive en `exec-audit.jsonl` con `ssh.auditLog` como alias; un comando que se ejecutó y falló es `tool_error` que no consume reintento; `maxBytes` en local descarta sin matar; y los patrones extra de redacción son solo literales (ReDoS).
 
 ---
 
-## 10. Observación estratégica sobre el Hito 19
+## 10. Observación estratégica sobre el Hito 20
 
 En el bloque cloud se compite con `aws q`, `kubectl-ai` y media docena de herramientas más, todas con más cobertura y respaldo del propio proveedor. Esa carrera se pierde siempre por cobertura.
 
-La ventaja defendible está en el **Hito 18**: disciplina de diagnóstico verificada por tooling, con memoria de decisiones persistente entre sesiones. Eso es propio, encaja con la filosofía que el proyecto lleva construida desde el Hito 11, y no depende de seguirle el ritmo a la superficie de API de nadie.
+La ventaja defendible está en el **Hito 19**: disciplina de diagnóstico verificada por tooling, con memoria de decisiones persistente entre sesiones. Eso es propio, encaja con la filosofía que el proyecto lleva construida desde el Hito 11, y no depende de seguirle el ritmo a la superficie de API de nadie.
 
 ---
 
@@ -360,11 +362,11 @@ Un sistema de plugins que cargue módulos TS de un directorio. MCP ya cubre ese 
 
 ## 11. Decisiones tomadas
 
-Las cuatro preguntas de diseño que condicionaban el Hito 15, resueltas el 2026-09-12.
+Las cuatro preguntas de diseño que condicionaban el Hito 16, resueltas el 2026-09-12.
 
 ### 11.1 `bash` se absorbe en `exec`, sin fachada
 
-**Decisión:** absorción directa en el Hito 15. No se mantiene `bash` como alias.
+**Decisión:** absorción directa en el Hito 16. No se mantiene `bash` como alias.
 
 **Motivo:** la rotura real es menor de lo que parecía — tres ficheros de perfil (`code.md`, `shell.md`, `tdd.md`), un bloque del system prompt y los tests. El `.stratumrc.json` de usuario **no se ve afectado**: `tools.guardedCommands` habla de comandos (`gitPushForce`, `npmPublish`), no de nombres de tool. Frente a eso, dos tools que hacen lo mismo son una fuente real de confusión para modelos pequeños, que son el caso de uso del proyecto. El coste de la transición se paga una vez.
 

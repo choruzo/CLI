@@ -4,7 +4,7 @@
  * la CLI muestran exactamente lo mismo.
  */
 import type { AgentProfile } from './types.js';
-import type { InvalidProfile } from './profiles.js';
+import type { InvalidProfile, ProfileWarning } from './profiles.js';
 import { describeProfile, profileMode } from './profiles.js';
 
 const SCOPE_LABEL: Record<string, string> = {
@@ -28,6 +28,8 @@ function plainDescription(profile: AgentProfile): string {
 export interface ProfilesReportOptions {
   /** Perfil activo como agente principal, marcado con `◆`. */
   activeName?: string | null;
+  /** Hito 16 — perfiles válidos con avisos (tools retiradas en `allowedTools`). */
+  warnings?: ProfileWarning[];
 }
 
 export function formatProfilesReport(
@@ -56,6 +58,14 @@ export function formatProfilesReport(
     }
   }
 
+  const warnings = opts.warnings ?? [];
+  if (warnings.length > 0) {
+    lines.push('', `Avisos (${warnings.length}):`);
+    for (const w of warnings) {
+      lines.push('', `  ! ${w.name}`, `      ${w.message}`, `      fichero: ${w.path}`);
+    }
+  }
+
   lines.push(
     '',
     'Uso: @perfil <tarea> delega (mode subagent/all) · /agent <perfil> lo activa como agente principal (mode primary/all).',
@@ -64,7 +74,11 @@ export function formatProfilesReport(
 }
 
 /** Forma JSON estable para `stratum agents list --json`. */
-export function profilesToJson(profiles: AgentProfile[], invalid: InvalidProfile[]): unknown {
+export function profilesToJson(
+  profiles: AgentProfile[],
+  invalid: InvalidProfile[],
+  warnings: ProfileWarning[] = [],
+): unknown {
   return {
     profiles: profiles.map((p) => ({
       name: p.name,
@@ -79,5 +93,6 @@ export function profilesToJson(profiles: AgentProfile[], invalid: InvalidProfile
       budget: p.budget,
     })),
     invalid,
+    warnings,
   };
 }

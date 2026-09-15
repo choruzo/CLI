@@ -23,8 +23,8 @@ Stratum es un agente de línea de comandos construido sobre un loop **ReAct** (R
 |---|:---:|---|
 | Loop ReAct + streaming | ✅ | Iteraciones con tool calls, compresión de contexto automática |
 | Provider router | ✅ | Fallback automático, health check en background, `/provider` en sesión |
-| Tools built-in | ✅ | `read_file`, `write_file`, `edit_file`, `glob`, `list_directory`, `grep`, `bash`, `web_search`, `web_fetch` |
-| SSH nativo | ✅ | `ssh_exec`, `ssh_upload`, `ssh_download` sobre `ssh2` — sin el binario `ssh` del sistema |
+| Tools built-in | ✅ | `read_file`, `write_file`, `edit_file`, `glob`, `list_directory`, `grep`, `exec`, `web_search`, `web_fetch` |
+| SSH nativo | ✅ | `exec` con `target: "ssh:<alias>"`, `ssh_upload`, `ssh_download` sobre `ssh2` — sin el binario `ssh` del sistema |
 | Confirmación destructiva | ✅ | Interactiva en `chat`, readline en `run`, deny automático en CI |
 | MCP Client | ✅ | Arranque lazy/eager, heartbeat, backoff, carpeta gestionada `~/.stratum/mcp/` |
 | Memoria Layer 1 | ✅ | `STRATUM.md` global y de proyecto inyectado en system prompt |
@@ -114,7 +114,7 @@ Hay tres perfiles de ejemplo (`research`, `code`, `shell`) además del perfil `g
 
 ### Hosts remotos (SSH)
 
-Stratum lleva un cliente SSH propio sobre `ssh2`: **nunca invoca el binario `ssh` del sistema**, así que funciona igual en Windows, Linux y macOS. Las tools `ssh_exec`, `ssh_upload` y `ssh_download` **solo aparecen si defines un inventario** — sin sección `ssh`, el modelo ni siquiera las ve.
+Stratum lleva un cliente SSH propio sobre `ssh2`: **nunca invoca el binario `ssh` del sistema**, así que funciona igual en Windows, Linux y macOS. Los targets `ssh:<alias>` de la tool `exec` y las tools `ssh_upload`/`ssh_download` **solo aparecen si defines un inventario** — sin sección `ssh`, el modelo ni siquiera los ve.
 
 ```json
 {
@@ -155,7 +155,7 @@ stratum ssh trust prod-web         # muestra el fingerprint y pide confirmación
 stratum ssh trust prod-web --force # tras reinstalar el host
 ```
 
-Cada comando remoto queda registrado en `~/.stratum/logs/ssh-audit.jsonl`.
+Cada comando que ejecuta el agente, local o remoto, queda registrado en `~/.stratum/logs/exec-audit.jsonl` (`tools.auditLog`).
 
 > **Sobre la detección de comandos destructivos:** es una red de seguridad blanda contra descuidos del modelo, no un control real — un `base64 -d | sh` la esquiva sin esfuerzo. La defensa de verdad en hosts de producción es `confirmAll: true`.
 

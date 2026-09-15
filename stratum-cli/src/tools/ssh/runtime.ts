@@ -1,16 +1,15 @@
 import type { StratumConfig } from '../../config/schema.js';
 import type { ToolContext, DestructiveDecision } from '../../agent/types.js';
 import { SSHConnectionPool, type ConfirmFn } from './pool.js';
-import { createAuditLog, type AuditLog } from './audit.js';
 
 /**
  * Estado SSH vivo del proceso. Singleton por config, mismo patrón que
  * `getDecisionMemory` en `src/memory/decision-memory.ts`: las tools no reciben
- * el pool por parámetro, lo piden aquí.
+ * el pool por parámetro, lo piden aquí. La auditoría de comandos vive desde el
+ * Hito 16 en `tools/exec/runtime.ts`, común a todos los targets.
  */
 let pool: SSHConnectionPool | null = null;
 let poolConfig: StratumConfig | null = null;
-let auditLog: AuditLog | null = null;
 
 export function getSshPool(config: StratumConfig): SSHConnectionPool {
   if (pool && poolConfig === config) return pool;
@@ -22,35 +21,25 @@ export function getSshPool(config: StratumConfig): SSHConnectionPool {
 
   pool = new SSHConnectionPool(config);
   poolConfig = config;
-  auditLog = null;
   return pool;
 }
 
-export function getAuditLog(config: StratumConfig): AuditLog {
-  if (!auditLog) auditLog = createAuditLog(config);
-  return auditLog;
-}
-
 /**
- * Cierra las conexiones vivas y vacía la cola de auditoría. Se llama en el
- * teardown de `chat` y `run` (§12.12): sin esto los sockets abiertos mantienen
- * vivo el event loop y el proceso no termina.
+ * Cierra las conexiones vivas. Lo llama `closeExecRuntime()` en el teardown de
+ * `chat` y `run` (§12.12): sin esto los sockets abiertos mantienen vivo el
+ * event loop y el proceso no termina.
  */
 export async function closeSshPool(): Promise<void> {
   const current = pool;
-  const audit = auditLog;
   pool = null;
   poolConfig = null;
-  auditLog = null;
   if (current) await current.closeAll();
-  if (audit) await audit.flush();
 }
 
 /** Solo para tests: descarta el singleton sin tocar la red. */
 export function resetSshRuntime(): void {
   pool = null;
   poolConfig = null;
-  auditLog = null;
 }
 
 /**
@@ -64,5 +53,5 @@ export function confirmFnFrom(ctx: ToolContext): ConfirmFn | undefined {
   if (!confirm) return undefined;
   if (ctx.destructivePolicy === 'deny') return undefined;
   return async (description: string): Promise<DestructiveDecision> =>
-    confirm({ callId: `ssh-hostkey-${Date.now()}`, toolName: 'ssh_exec', description });
+    confirm({ callId: `ssh-hostkey-${Date.now()}`, toolName: 'exec', description });
 }

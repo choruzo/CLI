@@ -22,7 +22,7 @@ export type ConfirmFn = (description: string) => Promise<DestructiveDecision>;
  *  - Apertura **lazy**: nada se conecta al arrancar Stratum, solo al primer uso.
  *  - `inflight` es el mutex de establecimiento: dos tool calls paralelas al
  *    mismo alias comparten una única promesa de conexión, no dos sockets
- *    (necesario porque `ssh_exec` va con `serialized: false`).
+ *    (necesario porque `exec` sobre targets ssh no se serializa).
  *  - El `hostVerifier` se monta **siempre**, también sobre los jump hosts.
  */
 export class SSHConnectionPool {

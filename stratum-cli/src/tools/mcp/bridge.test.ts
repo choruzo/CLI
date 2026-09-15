@@ -8,6 +8,7 @@ import {
 } from './bridge.js';
 import type { McpServerClient, McpToolInfo } from './client.js';
 import { ToolRegistry } from '../registry.js';
+import { StratumConfigSchema } from '../../config/schema.js';
 
 // ---------------------------------------------------------------------------
 // Naming helpers
@@ -119,40 +120,12 @@ const sampleTool: McpToolInfo = {
 const baseCtx = {
   signal: new AbortController().signal,
   cwd: '/tmp',
-  config: {
-    tools: {
-      confirmDestructive: false,
-      bashTimeout: 30000,
-      webSearch: { backend: 'meta' as const, apiKey: '', tavilyApiKey: '', maxResults: 10 },
-      destructivePatterns: [],
-    },
-    mcp: {
-      servers: [],
-      heartbeatInterval: 30000,
-      startup: 'lazy' as const,
-      installDir: '~/.stratum/mcp',
-      autoInstall: true,
-    },
-    memory: {
-      projectFile: '',
-      globalFile: '',
-      decisionsFile: '',
-      vectorDb: '',
-      embeddingModel: '',
-      embeddingDimension: 384,
-      retrievalTopK: 5,
-      embeddingWarmup: false,
-      autoExtract: false,
-      similarityThreshold: 0.9,
-    },
-    agent: {
-      maxIterations: 50,
-      maxToolRetries: 3,
-      toolErrorFormat: 'xml' as const,
-      compressionKeepRounds: 6,
-      compressionThreshold: 0.8,
-    },
-  },
+  // Config completa desde el schema: un objeto parcial deja de ser un
+  // `StratumConfig` válido cada vez que el schema gana una clave.
+  config: StratumConfigSchema.parse({
+    tools: { confirmDestructive: false, destructivePatterns: [] },
+    memory: { autoExtract: false },
+  }),
 };
 
 describe('buildMcpTool', () => {

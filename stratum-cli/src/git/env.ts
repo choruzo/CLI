@@ -9,7 +9,7 @@
  * `/changes` mide un repo, el agente cree estar en otro, y un `git add` acaba
  * en el árbol equivocado.
  *
- * Por eso las invocaciones internas de git y los comandos de `bash` corren con
+ * Por eso las invocaciones internas de git y los comandos de `exec` en local corren con
  * las variables de **enrutado** eliminadas, de modo que el `cwd` sea la única
  * fuente de verdad.
  *

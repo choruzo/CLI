@@ -1,7 +1,7 @@
 import { describe, it, expect, vi } from 'vitest';
 import { z } from 'zod';
 import { ToolRegistry, ToolDispatcher, describeCall } from './registry.js';
-import { commandIsDestructive } from './shell/bash.js';
+import { commandIsDestructive } from './guards.js';
 import type {
   ToolContext,
   ToolDefinition,
@@ -165,11 +165,11 @@ describe('ToolDispatcher destructive confirmation', () => {
     expect(confirm).not.toHaveBeenCalled();
   });
 
-  it('uses isDestructive predicate for dynamic detection (bash)', async () => {
+  it('uses isDestructive predicate for dynamic detection (exec)', async () => {
     const registry = new ToolRegistry();
     const fakeBash: ToolDefinition = {
-      name: 'bash',
-      description: 'test bash',
+      name: 'exec',
+      description: 'test exec',
       schema: z.object({ command: z.string() }),
       destructive: false,
       isDestructive: (params, ctx) =>
@@ -185,14 +185,14 @@ describe('ToolDispatcher destructive confirmation', () => {
     const ctx = makeCtx({ destructivePolicy: 'ask', confirmDestructive: confirm });
 
     const safe = await dispatcher.dispatch(
-      [{ id: 's1', name: 'bash', input: { command: 'ls -la' } }],
+      [{ id: 's1', name: 'exec', input: { command: 'ls -la' } }],
       ctx,
     );
     expect(safe[0]!.result.ok).toBe(true);
     expect(confirm).not.toHaveBeenCalled();
 
     const dangerous = await dispatcher.dispatch(
-      [{ id: 'd1', name: 'bash', input: { command: 'rm -rf /' } }],
+      [{ id: 'd1', name: 'exec', input: { command: 'rm -rf /' } }],
       ctx,
     );
     expect(dangerous[0]!.result.ok).toBe(false);
@@ -292,10 +292,13 @@ describe('ToolDispatcher timeout & cancellation', () => {
 });
 
 describe('describeCall', () => {
-  it('shows the full command for bash', () => {
-    expect(describeCall({ id: '1', name: 'bash', input: { command: 'rm -rf /tmp' } })).toBe(
-      'bash: rm -rf /tmp',
+  it('shows the target and the full command for exec', () => {
+    expect(describeCall({ id: '1', name: 'exec', input: { command: 'rm -rf /tmp' } })).toBe(
+      'exec [local]: rm -rf /tmp',
     );
+    expect(
+      describeCall({ id: '2', name: 'exec', input: { target: 'ssh:prod', command: 'uptime' } }),
+    ).toBe('exec [ssh:prod]: uptime');
   });
 
   it('compacts other tools to json', () => {

@@ -15,8 +15,36 @@ import { QUESTION_TOOL } from './question.js';
 import { TODO_TOOL } from './todo.js';
 import { TEST_EVIDENCE_TOOL } from './tdd.js';
 import { getLogger } from '../logging/index.js';
+import { redactText } from '../security/redact-output.js';
 
 const log = getLogger('tools');
+
+/**
+ * Hito 16 — red de seguridad de una tool con `structuredCancellation`: tras el
+ * abort, se le da este margen para matar su trabajo y devolver su propio
+ * resultado `cancelled` antes de rechazar la llamada.
+ */
+export const STRUCTURED_CANCEL_GRACE_MS = 5000;
+
+/** Hito 16 — redacción de secretos (§11.3) sobre la salida o el error de una tool. */
+function redactResult(result: ToolResult, ctx: ToolContext): ToolResult {
+  return result.ok
+    ? { ok: true, output: redactText(result.output, ctx.config) }
+    : { ...result, error: redactText(result.error, ctx.config) };
+}
+
+/** `serialized` estático o `isSerialized` por llamada; un hook que lanza serializa. */
+function wantsSerial(tool: ToolDefinition | undefined, input: unknown, ctx: ToolContext): boolean {
+  if (!tool) return false;
+  if (tool.serialized === true) return true;
+  if (!tool.isSerialized) return false;
+  try {
+    return tool.isSerialized(input, ctx);
+  } catch (err) {
+    log.warn('isSerialized threw, serializing', { tool: tool.name, err });
+    return true;
+  }
+}
 
 /**
  * ¿Es la tool `name` visible para el modelo en el modo dado? (Hito 7)
@@ -162,6 +190,7 @@ export class ToolDispatcher {
   constructor(
     private readonly registry: ToolRegistry,
     private readonly maxToolRetries: number = 3,
+    private readonly cancelGraceMs: number = STRUCTURED_CANCEL_GRACE_MS,
   ) {}
 
   async dispatch(calls: ToolCallReady[], ctx: ToolContext): Promise<DispatchResult[]> {
@@ -185,7 +214,8 @@ export class ToolDispatcher {
     for (const call of calls) {
       if (denied.has(call.id)) continue;
       const verdict = await this.confirmIfDestructive(call, ctx);
-      if (verdict !== null) denied.set(call.id, verdict);
+      // Hito 16: el rechazo cita el comando, que puede llevar un secreto.
+      if (verdict !== null) denied.set(call.id, redactResult(verdict, ctx));
     }
 
     const approved = calls.filter((c) => !denied.has(c.id));
@@ -223,6 +253,7 @@ export class ToolDispatcher {
       return null;
     }
     if (verdict === null) return null;
+    verdict = redactResult(verdict, ctx);
     log.warn('preflight blocked', {
       tool: call.name,
       reason: verdict.ok ? '' : verdict.error,
@@ -251,7 +282,9 @@ export class ToolDispatcher {
 
     if (policy === 'allow' || this.allowAllDestructive) return null;
 
-    const description = describeCall(call);
+    // Hito 16: la descripción cita el comando (puede llevar un secreto) y va al
+    // log y al prompt de confirmación: redactada con el núcleo y los extras.
+    const description = redactText(describeCall(call), ctx.config);
 
     if (policy === 'deny' || !ctx.confirmDestructive) {
       // --deny-destructive explícito, o modo piped/CI sin TTY (§12.5)
@@ -300,10 +333,9 @@ export class ToolDispatcher {
       return [await this.dispatchOne(calls[0]!, ctx)];
     }
 
-    const hasSerializedCall = calls.some((c) => {
-      const tool = this.registry.get(c.name);
-      return tool?.serialized === true;
-    });
+    const hasSerializedCall = calls.some((c) =>
+      wantsSerial(this.registry.get(c.name), c.input, ctx),
+    );
 
     if (hasSerializedCall) {
       const results: DispatchResult[] = [];
@@ -333,6 +365,42 @@ export class ToolDispatcher {
 
   private recordFailure(name: string): void {
     this.toolFailureCounts.set(name, (this.toolFailureCounts.get(name) ?? 0) + 1);
+  }
+
+  /**
+   * Hito 16 — contabilidad CONSECUTIVA (§12.3, y lo que ya decía el mensaje de
+   * deshabilitado): un éxito reinicia la racha; un error que la tool marca con
+   * `countsAsFailure: false` (un comando que se ejecutó y salió ≠ 0) ni suma ni
+   * la reinicia. Antes el contador era acumulado: tres `grep` sin coincidencias
+   * a lo largo de la sesión bastaban para quedarse sin shell.
+   */
+  private recordOutcome(name: string, result: ToolResult): void {
+    if (result.ok) {
+      this.toolFailureCounts.delete(name);
+      return;
+    }
+    if (result.countsAsFailure === false) return;
+    this.recordFailure(name);
+  }
+
+  /**
+   * §12.3 — al ALCANZAR el límite de fallos consecutivos la tool se deshabilita
+   * en ese mismo resultado (que pasa a no recuperable y lo explica), no en la
+   * llamada siguiente: si no, seguiría en el schema de la próxima iteración.
+   */
+  private applyRetryLimit(name: string, result: ToolResult): ToolResult {
+    if (result.ok || result.countsAsFailure === false) return result;
+    const failures = this.toolFailureCounts.get(name) ?? 0;
+    if (failures < this.maxToolRetries) return result;
+    this.registry.disableForSession(name);
+    log.warn('tool disabled for session', { tool: name, failures });
+    return {
+      ...result,
+      recoverable: false,
+      error:
+        `${result.error}\n\nTool "${name}" has been disabled for this session after ` +
+        `${failures} consecutive failures.`,
+    };
   }
 
   private async dispatchOne(call: ToolCallReady, ctx: ToolContext): Promise<DispatchResult> {
@@ -370,15 +438,12 @@ export class ToolDispatcher {
     const parsed = tool.schema.safeParse(call.input);
     if (!parsed.success) {
       this.recordFailure(call.name);
-      log.warn('tool invalid params', { tool: call.name, error: parsed.error.message });
+      const error = redactText(`Invalid parameters: ${parsed.error.message}`, ctx.config);
+      log.warn('tool invalid params', { tool: call.name, error });
       return {
         callId: call.id,
         toolName: call.name,
-        result: {
-          ok: false,
-          error: `Invalid parameters: ${parsed.error.message}`,
-          recoverable: true,
-        },
+        result: this.applyRetryLimit(call.name, { ok: false, error, recoverable: true }),
         durationMs: Date.now() - start,
       };
     }
@@ -397,25 +462,46 @@ export class ToolDispatcher {
     );
     const combinedSignal = AbortSignal.any([ctx.signal, timeoutController.signal]);
     const execCtx: ToolContext = { ...ctx, signal: combinedSignal };
+    // Hito 16: con `structuredCancellation` la tool mata su propio trabajo y
+    // devuelve un resultado `cancelled`; si el race rechazase en el acto, ese
+    // resultado (y su auditoría) se perdería. Solo queda una red de seguridad.
+    let graceTimer: ReturnType<typeof setTimeout> | undefined;
+    // Un abort que llega cuando la tool ya terminó no debe armar nada: sin esto,
+    // un Ctrl+C tras un `exec` dejaba un temporizador de gracia vivo.
+    let raceSettled = false;
+    let onRaceAbort: (() => void) | undefined;
 
     try {
-      const result = await Promise.race([
+      let raw = await Promise.race([
         tool.execute(parsed.data, execCtx),
         new Promise<never>((_, reject) => {
-          combinedSignal.addEventListener(
-            'abort',
-            () => {
-              const reason: unknown = combinedSignal.reason;
-              reject(
-                reason instanceof Error ? reason : new Error(`Tool "${call.name}" was cancelled`),
-              );
-            },
-            { once: true },
-          );
+          onRaceAbort = () => {
+            if (raceSettled) return;
+            const reason: unknown = combinedSignal.reason;
+            const err =
+              reason instanceof Error ? reason : new Error(`Tool "${call.name}" was cancelled`);
+            if (tool.structuredCancellation) {
+              graceTimer = setTimeout(() => reject(err), this.cancelGraceMs);
+            } else {
+              reject(err);
+            }
+          };
+          combinedSignal.addEventListener('abort', onRaceAbort, { once: true });
+          // Una señal que ya llega abortada no vuelve a emitir `abort`: sin
+          // esto, la red de seguridad no se armaría nunca.
+          if (combinedSignal.aborted) onRaceAbort();
         }),
-      ]);
+      ]).finally(() => {
+        raceSettled = true;
+        if (onRaceAbort) combinedSignal.removeEventListener('abort', onRaceAbort);
+      });
       clearTimeout(timeoutId);
-      if (!result.ok) this.recordFailure(call.name);
+      clearTimeout(graceTimer);
+      this.recordOutcome(call.name, raw);
+      raw = this.applyRetryLimit(call.name, raw);
+      // Redactar ANTES de loguear y de truncar: un bloque PEM cortado por el
+      // truncado dejaría de casar con su patrón.
+      const result = redactResult(raw, ctx);
       const durationMs = Date.now() - start;
       if (result.ok) {
         log.debug('tool ok', { tool: call.name, durationMs, outputChars: result.output.length });
@@ -440,16 +526,24 @@ export class ToolDispatcher {
       };
     } catch (err) {
       clearTimeout(timeoutId);
+      clearTimeout(graceTimer);
       this.recordFailure(call.name);
-      log.warn('tool threw', { tool: call.name, durationMs: Date.now() - start, err });
+      const result = this.applyRetryLimit(
+        call.name,
+        redactResult(
+          { ok: false, error: String(err instanceof Error ? err.message : err), recoverable: true },
+          ctx,
+        ),
+      );
+      log.warn('tool threw', {
+        tool: call.name,
+        durationMs: Date.now() - start,
+        error: result.ok ? '' : result.error,
+      });
       return {
         callId: call.id,
         toolName: call.name,
-        result: {
-          ok: false,
-          error: String(err instanceof Error ? err.message : err),
-          recoverable: true,
-        },
+        result,
         durationMs: Date.now() - start,
       };
     }
@@ -458,16 +552,17 @@ export class ToolDispatcher {
 
 /** Descripción legible de una tool call para el prompt de confirmación. */
 export function describeCall(call: ToolCallReady): string {
-  if (call.name === 'bash' && typeof call.input.command === 'string') {
-    return `bash: ${call.input.command}`;
+  // `exec` y tools SSH (§12.14): el dónde va primero — antes de saber *qué* se
+  // ejecuta, el usuario necesita saber *dónde*.
+  if (call.name === 'exec' && typeof call.input.command === 'string') {
+    const target =
+      typeof call.input.target === 'string' && call.input.target.trim()
+        ? call.input.target.trim()
+        : 'local';
+    return `exec [${target}]: ${call.input.command}`;
   }
-  // Tools SSH (§12.14): el host va primero — antes de saber *qué* se ejecuta,
-  // el usuario necesita saber *dónde*.
   if (call.name.startsWith('ssh_') && typeof call.input.host === 'string') {
-    const detail =
-      typeof call.input.command === 'string'
-        ? call.input.command
-        : [call.input.localPath, call.input.remotePath].filter(Boolean).join(' → ');
+    const detail = [call.input.localPath, call.input.remotePath].filter(Boolean).join(' → ');
     return `${call.name} [${call.input.host}]: ${detail}`;
   }
   const compact = JSON.stringify(call.input);

@@ -33,6 +33,8 @@ export interface TestServerOptions {
   sftp?: boolean;
   /** Habilita `direct-tcpip` para probar jump hosts (por defecto no). */
   allowForward?: boolean;
+  /** Retrasa la aceptación del canal `exec` (cancelación durante su apertura). */
+  execAcceptDelayMs?: number;
 }
 
 export interface TestServer {
@@ -235,17 +237,30 @@ export async function startTestServer(opts: TestServerOptions = {}): Promise<Tes
       client.on('session', (acceptSession) => {
         const session = acceptSession();
 
+        // Sin listener, ssh2 rechaza el PTY y `exec` con `pty: true` no se
+        // podría probar. El servidor no emula terminal: solo lo concede.
+        session.on('pty', (acceptPty) => acceptPty?.());
+
         session.on('exec', (acceptExec, _rejectExec, info) => {
-          const stream = acceptExec();
-          const signalHandlers: ((name: string) => void)[] = [];
-          session.on('signal', (_a, _r, sigInfo) => {
-            for (const handler of signalHandlers) handler(sigInfo.name);
-          });
-          onExec({
-            command: info.command,
-            stream,
-            onSignal: (cb) => signalHandlers.push(cb),
-          });
+          const start = (): void => {
+            let stream: ServerChannel;
+            try {
+              stream = acceptExec();
+            } catch {
+              return; // el cliente se fue mientras se aplazaba la aceptación
+            }
+            const signalHandlers: ((name: string) => void)[] = [];
+            session.on('signal', (_a, _r, sigInfo) => {
+              for (const handler of signalHandlers) handler(sigInfo.name);
+            });
+            onExec({
+              command: info.command,
+              stream,
+              onSignal: (cb) => signalHandlers.push(cb),
+            });
+          };
+          if (opts.execAcceptDelayMs) setTimeout(start, opts.execAcceptDelayMs);
+          else start();
         });
 
         if (opts.sftp !== false) {

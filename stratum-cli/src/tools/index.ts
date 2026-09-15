@@ -6,7 +6,7 @@ import { editFileTool } from './fs/edit.js';
 import { globTool } from './fs/glob.js';
 import { listDirectoryTool } from './fs/list.js';
 import { grepTool } from './fs/grep.js';
-import { bashTool } from './shell/bash.js';
+import { createExecTool } from './exec/exec.js';
 import { webSearchTool } from './web/search.js';
 import { webFetchTool } from './web/fetch.js';
 import { storeDecisionTool } from './memory/store-decision.js';
@@ -26,7 +26,9 @@ export function registerBuiltinTools(registry: ToolRegistry, config: StratumConf
   registry.register(globTool);
   registry.register(listDirectoryTool);
   registry.register(grepTool);
-  registry.register(bashTool);
+  // Hito 16 — ejecución unificada: `local` siempre, `ssh:<alias>` si hay inventario.
+  // La descripción se genera con los targets de esta config.
+  registry.register(createExecTool(config));
   registry.register(webSearchTool);
   registry.register(webFetchTool);
   registry.register(storeDecisionTool);

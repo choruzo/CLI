@@ -56,8 +56,8 @@ stratum run --plan "Refactoriza el módulo de autenticación"
 |---|---|
 | Loop ReAct + streaming | Iteraciones con tool calls, compresión de contexto automática |
 | Provider router | Fallback automático entre providers, health check en background, `/provider` en sesión |
-| Tools built-in | `read_file`, `write_file`, `edit_file`, `glob`, `list_directory`, `grep`, `bash`, `web_search`, `web_fetch`, `question` |
-| SSH nativo | `ssh_exec`, `ssh_upload`, `ssh_download` sobre `ssh2` — nunca invoca el binario `ssh` del sistema |
+| Tools built-in | `read_file`, `write_file`, `edit_file`, `glob`, `list_directory`, `grep`, `exec`, `web_search`, `web_fetch`, `question` |
+| SSH nativo | `exec` con `target: "ssh:<alias>"`, `ssh_upload`, `ssh_download` sobre `ssh2` — nunca invoca el binario `ssh` del sistema |
 | Confirmación destructiva | Interactiva en `chat`, readline en `run`, deny automático sin TTY |
 | Cliente MCP | Arranque lazy/eager, heartbeat, backoff, carpeta gestionada `~/.stratum/mcp/` |
 | Memoria en 3 capas | `STRATUM.md` · `decisions.json` · índice semántico `vectors.db` |
@@ -92,7 +92,7 @@ stratum run --plan "Refactoriza el módulo de autenticación"
 
 ### Hosts remotos (SSH)
 
-Las tools `ssh_exec`, `ssh_upload` y `ssh_download` **solo se registran si defines un inventario** — sin sección `ssh`, el modelo ni siquiera las ve. El agente se refiere a los hosts **solo por su alias**; las credenciales nunca pasan por el modelo.
+Los targets `ssh:<alias>` de `exec` y las tools `ssh_upload`/`ssh_download` **solo existen si defines un inventario** — sin sección `ssh`, el modelo ni siquiera los ve. El agente se refiere a los hosts **solo por su alias**; las credenciales nunca pasan por el modelo.
 
 ```json
 {
@@ -105,7 +105,7 @@ Las tools `ssh_exec`, `ssh_upload` y `ssh_download` **solo se registran si defin
 }
 ```
 
-La primera conexión muestra el fingerprint y pregunta (TOFU); después verifica en silencio contra `~/.stratum/known_hosts.json`. Si la host key cambia, la conexión se **aborta siempre** — no hay override interactivo. Cada comando remoto queda registrado en `~/.stratum/logs/ssh-audit.jsonl`.
+La primera conexión muestra el fingerprint y pregunta (TOFU); después verifica en silencio contra `~/.stratum/known_hosts.json`. Si la host key cambia, la conexión se **aborta siempre** — no hay override interactivo. Cada comando que ejecuta el agente, local o remoto, queda registrado en `~/.stratum/logs/exec-audit.jsonl` (`tools.auditLog`).
 
 > **Sobre la detección de comandos destructivos:** es una red de seguridad blanda contra descuidos del modelo, no un control real — un `base64 -d | sh` la esquiva sin esfuerzo. La defensa de verdad en hosts de producción es `confirmAll: true`.
 

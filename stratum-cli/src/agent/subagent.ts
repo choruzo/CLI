@@ -5,6 +5,7 @@
  * 2.5) y plan (Hito 7). `runSubagent` lo lanza, lo ejecuta a término de forma
  * bloqueante y devuelve un SubagentResult compacto y truncado.
  */
+import { isAbsolute, posix, relative, resolve } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type {
@@ -246,6 +247,13 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
           }
           break;
         }
+        case 'tool_error': {
+          // Hito 16: un comando que escribió y luego salió ≠ 0, se truncó o
+          // agotó el timeout es un tool_error, pero se ejecutó: sigue contando.
+          const call = ev.executed ? pendingCalls.get(ev.id) : undefined;
+          if (call) recordFileChange(filesChanged, call);
+          break;
+        }
         case 'error':
           // El motivo real (HTTP 4xx del provider, contexto excedido…). Sin
           // guardarlo, el resultado solo decía «Subagent failed.».
@@ -319,14 +327,48 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   };
 }
 
+/**
+ * Hito 16 — clave canónica de un fichero en el write-log. La misma función para
+ * TODAS las tools mutantes: sin ella `./foo`, `foo`, `sub/../foo` y la ruta
+ * absoluta no colisionaban entre sí, y un `foo` escrito en local se confundía
+ * con el `foo` de un host remoto.
+ *  - local → relativa al directorio del proceso si cae dentro, absoluta si no;
+ *  - ssh   → `ssh:<alias>:<ruta POSIX normalizada contra el cwd solicitado>`.
+ */
+export function canonicalChangePath(
+  target: string,
+  baseCwd: string,
+  rawPath: string,
+  cwd?: string,
+): string {
+  const clean = rawPath.replace(/^['"]|['"]$/g, '').trim();
+  if (target.startsWith('ssh:')) {
+    const joined = posix.isAbsolute(clean) ? clean : posix.join(cwd ?? '', clean);
+    return `${target}:${posix.normalize(joined)}`;
+  }
+  const absolute = resolve(baseCwd, cwd ?? '', clean);
+  const rel = relative(process.cwd(), absolute);
+  const inside = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
+  return (inside ? rel : absolute).replace(/\\/g, '/');
+}
+
+/** Target de una llamada a `exec` en forma canónica, o `null` si es inválido. */
+function execTargetOf(input: Record<string, unknown>): string | null {
+  const raw = typeof input.target === 'string' ? input.target.trim() : '';
+  if (raw === '' || raw === 'local') return 'local';
+  return raw.startsWith('ssh:') && raw.length > 4 ? raw : null;
+}
+
 /** Write-log best-effort (§12.16): infiere ficheros tocados de las tools mutantes. */
 function recordFileChange(
   acc: Map<string, 'created' | 'modified' | 'deleted'>,
   call: { name: string; input: Record<string, unknown> },
+  baseCwd: string = process.cwd(),
 ): void {
   if (call.name === 'write_file' || call.name === 'edit_file') {
-    const path = typeof call.input.path === 'string' ? call.input.path : undefined;
-    if (!path) return;
+    const raw = typeof call.input.path === 'string' ? call.input.path : undefined;
+    if (!raw) return;
+    const path = canonicalChangePath('local', baseCwd, raw);
     if (call.name === 'write_file') {
       if (!acc.has(path)) acc.set(path, 'created');
     } else {
@@ -334,11 +376,15 @@ function recordFileChange(
     }
     return;
   }
-  // bash: inferencia best-effort de los paths que se puedan leer del comando
+  // exec: inferencia best-effort de los paths que se puedan leer del comando
   // (redirecciones, tee, touch, cp/mv destino, rm). El límite reconocido de
   // §12.16: comandos que escriben por vías no inferibles escapan al write-log.
-  if (call.name === 'bash' && typeof call.input.command === 'string') {
-    for (const { path, action } of inferBashWrites(call.input.command)) {
+  if (call.name === 'exec' && typeof call.input.command === 'string') {
+    const target = execTargetOf(call.input);
+    if (!target) return;
+    const cwd = typeof call.input.cwd === 'string' ? call.input.cwd : undefined;
+    for (const { path: raw, action } of inferBashWrites(call.input.command)) {
+      const path = canonicalChangePath(target, baseCwd, raw, cwd);
       // No degradar un 'deleted'/'modified' ya registrado a 'created'.
       if (action === 'created' && acc.has(path)) continue;
       acc.set(path, action);
@@ -418,7 +464,7 @@ function escapeXml(s: string): string {
  * los registros `running` que quedaron sin estado terminal (un cuelgue duro entre
  * el arranque del hijo y su fin) e instruye al PADRE a verificar el estado real
  * antes de decidir. **No relanza el hijo**: un subagente no es idempotente (pudo
- * ejecutar `bash`, escribir ficheros o tocar servicios), reejecutar a ciegas
+ * ejecutar `exec`, escribir ficheros o tocar servicios), reejecutar a ciegas
  * duplicaría efectos. La decisión (reintentar, dar por bueno, o preguntar al
  * usuario) es del agente, igual que la verificación de un paso `in_progress` de
  * un plan (§12.15). Devuelve null si no hay nada interrumpido.

@@ -39,6 +39,16 @@
   "tools": {
     "confirmDestructive": true,
     "bashTimeout": 30000,
+    "execMaxBytes": 1048576,
+    "auditLog": true,
+    "redaction": {
+      "extraPatterns": [
+        {
+          "value": "internal.corp.example",
+          "reason": "internal domain"
+        }
+      ]
+    },
     "testCommand": "npm test",
     "webSearch": {
       "backend": "meta",
@@ -110,7 +120,6 @@
     }
   },
   "ssh": {
-    "auditLog": true,
     "hosts": {
       "bastion": {
         "host": "bastion.example.com",

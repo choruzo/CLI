@@ -98,7 +98,7 @@ describe('registro condicional de las tools SSH', () => {
     expect(registry.get('ssh_exec')).toBeUndefined();
   });
 
-  it('registra las tres tools cuando hay al menos un host', () => {
+  it('registra las dos tools de transferencia cuando hay al menos un host; ssh_exec ya no existe', () => {
     const registry = new ToolRegistry();
     registerSshTools(
       registry,
@@ -106,20 +106,20 @@ describe('registro condicional de las tools SSH', () => {
         ssh: { hosts: { dev: { host: '1', user: 'u', useAgent: true } } },
       }),
     );
-    expect(registry.get('ssh_exec')).toBeDefined();
+    expect(registry.get('ssh_exec')).toBeUndefined();
     expect(registry.get('ssh_upload')).toBeDefined();
     expect(registry.get('ssh_download')).toBeDefined();
   });
 });
 
-describe('describeCall para tools SSH', () => {
-  it('antepone el host al comando en el prompt de confirmación', () => {
+describe('describeCall para ejecución remota y tools SSH', () => {
+  it('antepone el target al comando en el prompt de confirmación', () => {
     const description = describeCall({
       id: '1',
-      name: 'ssh_exec',
-      input: { host: 'prod-web', command: 'rm -rf /var/cache' },
+      name: 'exec',
+      input: { target: 'ssh:prod-web', command: 'rm -rf /var/cache' },
     });
-    expect(description).toBe('ssh_exec [prod-web]: rm -rf /var/cache');
+    expect(description).toBe('exec [ssh:prod-web]: rm -rf /var/cache');
   });
 
   it('describe las transferencias con origen y destino', () => {

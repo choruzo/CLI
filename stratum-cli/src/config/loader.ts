@@ -41,10 +41,48 @@ export function expandEnvVars(obj: unknown): unknown {
 
 function readRawConfig(filePath: string): Record<string, unknown> {
   const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
-  return expandEnvVars(raw) as Record<string, unknown>;
+  return migrateLegacyKeys(expandEnvVars(raw) as Record<string, unknown>, filePath);
 }
 
-function mergeConfigs(
+/** Avisos de claves obsoletas detectadas al cargar, pendientes de emitir. */
+const pendingDeprecations: string[] = [];
+
+/**
+ * Hito 16 — migra claves obsoletas DENTRO de una capa de config, antes de
+ * fusionarla con las demás. Hacerlo después del merge rompería la precedencia
+ * proyecto > global: un `tools.auditLog` global ganaría a un `ssh.auditLog` del
+ * proyecto. Si la capa trae ya la clave nueva, esa gana.
+ */
+export function migrateLegacyKeys(
+  layer: Record<string, unknown>,
+  source: string,
+): Record<string, unknown> {
+  const ssh = layer.ssh;
+  if (ssh === null || typeof ssh !== 'object' || !('auditLog' in ssh)) return layer;
+
+  const legacy = (ssh as Record<string, unknown>).auditLog;
+  const { auditLog: _dropped, ...restSsh } = ssh as Record<string, unknown>;
+  const tools =
+    layer.tools !== null && typeof layer.tools === 'object'
+      ? (layer.tools as Record<string, unknown>)
+      : {};
+  pendingDeprecations.push(
+    `${source}: "ssh.auditLog" está obsoleto desde el Hito 16; usa "tools.auditLog" ` +
+      '(la auditoría cubre ahora todos los comandos, locales y remotos).',
+  );
+  return {
+    ...layer,
+    ssh: restSsh,
+    tools: 'auditLog' in tools ? tools : { ...tools, auditLog: legacy },
+  };
+}
+
+/** Devuelve y vacía los avisos de claves obsoletas (se emiten tras configurar el logging). */
+export function takeConfigDeprecations(): string[] {
+  return pendingDeprecations.splice(0, pendingDeprecations.length);
+}
+
+export function mergeConfigs(
   base: Record<string, unknown>,
   override: Record<string, unknown>,
 ): Record<string, unknown> {

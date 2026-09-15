@@ -9,8 +9,9 @@ export function configWithHost(
   extraHosts: Record<string, Record<string, unknown>> = {},
 ): StratumConfig {
   return StratumConfigSchema.parse({
+    // Hito 16: la auditoría de comandos es tools.auditLog (default true); los tests no escriben en ~/.stratum.
+    tools: { auditLog: false },
     ssh: {
-      auditLog: false,
       hosts: {
         [alias]: {
           host: '127.0.0.1',

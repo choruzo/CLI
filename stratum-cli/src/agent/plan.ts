@@ -39,7 +39,7 @@ export const PLAN_MODE_PROMPT = `You are in PLAN MODE. Do NOT modify anything ye
 
 $ARGUMENTS
 
-Investigate read-only first: use read_file, glob, list_directory, grep, web_search, web_fetch and recall_decisions to understand the codebase and gather the context you need. Writing tools (write_file, edit_file, bash, store_decision, MCP writes) are disabled until the plan is approved — attempting them will fail.
+Investigate read-only first: use read_file, glob, list_directory, grep, web_search, web_fetch and recall_decisions to understand the codebase and gather the context you need. Writing tools (write_file, edit_file, exec, store_decision, MCP writes) are disabled until the plan is approved — attempting them will fail.
 
 When you have enough understanding, call the \`present_plan\` tool exactly once with:
 - \`summary\`: one sentence describing the overall change.

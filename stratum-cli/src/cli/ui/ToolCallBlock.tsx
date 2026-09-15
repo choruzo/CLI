@@ -27,6 +27,13 @@ const SLOW_MS = 1000;
  * entonces sin prefijo, sin reservar hueco.
  */
 function sshHostOf(state: ToolCallState): string | null {
+  // Hito 16: `exec` sobre un target `ssh:<alias>` lleva el mismo prefijo.
+  if (state.name === 'exec') {
+    const target = state.input?.target;
+    return typeof target === 'string' && target.startsWith('ssh:') && target.length > 4
+      ? target.slice(4)
+      : null;
+  }
   if (!state.name.startsWith('ssh_')) return null;
   const host = state.input?.host;
   return typeof host === 'string' && host ? host : null;
@@ -40,6 +47,11 @@ function formatInput(state: ToolCallState): string {
   const src = state.input ?? {};
   const keys = Object.keys(src);
   if (keys.length === 0) return '';
+
+  // `exec`: el target ya va en el prefijo; lo que identifica la llamada es el comando.
+  if (state.name === 'exec' && typeof src.command === 'string') {
+    return truncateLabel(src.command);
+  }
 
   // Tools SSH (UI §5.8): la primera clave es siempre `host`, que ya va en el
   // prefijo. Mostrar en su lugar lo que de verdad identifica la operación.

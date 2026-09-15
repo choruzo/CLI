@@ -26,8 +26,23 @@ import { isDelegable } from './profiles.js';
 import { runSubagent } from './subagent.js';
 import { Semaphore, Mutex } from './concurrency.js';
 import { getLogger } from '../logging/index.js';
+import { redactText } from '../security/redact-output.js';
 
 const log = getLogger('agent').child('subagent');
+
+/**
+ * Hito 16 — redacción del resultado de un hijo en su ÚNICO punto de nacimiento:
+ * desde aquí se persiste, se emite como `subagent_completed`, se serializa como
+ * tool result del padre y alimenta el par sintético de `runDelegate`.
+ */
+function redactSubagentResult(result: SubagentResult, config: StratumConfig): SubagentResult {
+  return {
+    ...result,
+    summary: redactText(result.summary, config),
+    filesChanged: result.filesChanged.map((f) => ({ ...f, path: redactText(f.path, config) })),
+    ...(result.error !== undefined ? { error: redactText(result.error, config) } : {}),
+  };
+}
 
 export interface DelegationJob {
   /** Id de la tool call que originó la delegación (real o sintética). */
@@ -204,6 +219,7 @@ export async function* executeDelegations(
             error: err instanceof Error ? err.message : String(err),
           };
         }
+        result = redactSubagentResult(result, ctx.config);
         results.set(job.subId, result);
         opts?.onSubagentPersist?.({
           id: job.subId,

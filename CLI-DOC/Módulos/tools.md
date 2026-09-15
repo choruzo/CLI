@@ -25,7 +25,13 @@ Implementado en Hitos 1, 2.5, 3, 4, 4.1, 5, 7, 8 y 9. Ver [[Arquitectura]] y [[M
 | `src/tools/fs/glob.ts` | `glob` |
 | `src/tools/fs/list.ts` | `list_directory` |
 | `src/tools/fs/grep.ts` | `grep` |
-| `src/tools/shell/bash.ts` | `bash` (guard destructivo, serialized) |
+| `src/tools/exec/exec.ts` | `exec` — tool única de ejecución (Hito 16), descripción generada con los targets |
+| `src/tools/exec/target.ts` | `ExecutionTarget`: `parseTarget` / `resolveTarget` / `formatTarget` |
+| `src/tools/exec/backend.ts` · `router.ts` | `IExecBackend`, estados, errores y router por kind |
+| `src/tools/exec/backends/local.ts` | Backend `local` (execa `buffer:false`, `ByteBudget`, pwsh con exit code real) |
+| `src/tools/exec/backends/ssh.ts` | Backend `ssh:<alias>` (antes `ssh_exec`) |
+| `src/tools/exec/audit.ts` · `runtime.ts` | `exec-audit.jsonl` universal + `closeExecRuntime()` |
+| `src/security/secrets.ts` · `redact-output.ts` | Núcleo de redacción de secretos y `[redacted: motivo]` |
 | `src/tools/web/search.ts` | `web_search` (metabúsqueda DDG + Tavily, RRF) |
 | `src/tools/web/fetch.ts` | `web_fetch` (descarga + HTML→markdown) |
 | `src/tools/web/html-to-text.ts` | Conversor HTML→markdown propio |
@@ -41,10 +47,8 @@ Implementado en Hitos 1, 2.5, 3, 4, 4.1, 5, 7, 8 y 9. Ver [[Arquitectura]] y [[M
 | `src/tools/ssh/pool.ts` | `SSHConnectionPool` — conexiones persistentes, jump hosts, reconexión |
 | `src/tools/ssh/known-hosts.ts` | Verificación de host key (TOFU / strict / insecure) |
 | `src/tools/ssh/inventory.ts` | Alias → `ConnectConfig`, resolución de secretos, socket del agente |
-| `src/tools/ssh/exec.ts` | `ssh_exec` |
 | `src/tools/ssh/sftp.ts` | `ssh_upload` / `ssh_download` |
-| `src/tools/ssh/runtime.ts` | Singleton del pool + `closeSshPool()` |
-| `src/tools/ssh/audit.ts` | `ssh-audit.jsonl` con rotación a 10 MB |
+| `src/tools/ssh/runtime.ts` | Singleton del pool + `closeSshPool()` (lo llama `closeExecRuntime()`) |
 | `src/tools/ssh/test-server.ts` | `ssh2.Server` en proceso para los tests |
 
 ---
@@ -58,15 +62,19 @@ interface ToolDefinition {
   schema?: ZodSchema                   // validación de parámetros
   rawParameters?: object               // JSON Schema nativo (tools MCP)
   destructive?: boolean                // pide confirmación al usuario
-  isDestructive?(params, ctx): boolean // predicado dinámico por llamada (bash)
-  serialized?: boolean                 // nunca se ejecuta en paralelo (bash, store_decision)
+  isDestructive?(params, ctx): boolean // predicado dinámico por llamada (exec)
+  serialized?: boolean                 // nunca se ejecuta en paralelo (store_decision)
+  isSerialized?(params, ctx): boolean  // serialización por llamada (exec: local sí, ssh no) — Hito 16
+  structuredCancellation?: boolean     // la tool resuelve su propio `cancelled` — Hito 16
   timeout?: number                     // ms antes de abortar
   execute(params: unknown, ctx: ToolContext): Promise<ToolResult>
 }
 
 type ToolResult =
   | { ok: true;  output: string }
-  | { ok: false; error: string; recoverable: boolean }
+  | { ok: false; error: string; recoverable: boolean;
+      countsAsFailure?: boolean  // false: se ejecutó y falló (no consume reintento) — Hito 16
+      executed?: boolean }       // la operación llegó a ejecutarse — Hito 16
 ```
 
 ---
@@ -134,14 +142,24 @@ Búsqueda de contenido por patrón.
 
 ---
 
-## Tool built-in — shell
+## Tool built-in — ejecución (Hito 16)
 
-### bash
-`command`, `timeout?`. Ejecuta con `execa` (`shell: true`), captura stdout + stderr combinados.
+### exec
+`target?` (`local` por defecto o `ssh:<alias>`), `command`, `cwd?`, `pty?`, `stdin?`, `timeout?`, `maxBytes?`. Sustituye a `bash` y a `ssh_exec` sin alias (§12.17).
 
-- `serialized: true` — nunca en paralelo con otras tools
-- `isDestructive?()` — detecta patrones de `tools.destructivePatterns` con **límites de palabra**; si coincide, dispara confirmación
-- Timeout por defecto: `config.tools.bashTimeout` (30 s)
+| | `local` | `ssh:<alias>` |
+|---|---|---|
+| PTY | no (rechazo recuperable) | sí |
+| Pasado `maxBytes` | descarta y deja terminar (default `tools.execMaxBytes`, 1 MiB) | mata el proceso remoto (default `host.maxBytes`, 256 KB) |
+| Timeout default | `tools.bashTimeout` (30 s) | `host.commandTimeout` (30 s) |
+| Serialización | sí | no |
+| Directorio en el resultado | efectivo (`cwd`) | solicitado (`requestedCwd`) |
+
+- `preflight` — target → capacidades (`pty+stdin` también se rechaza) → `commandVeto` de `guards.ts`, en ese orden
+- `isDestructive?()` — `confirmAll` del host, capa 2 en `confirm`, rutas sensibles `confirm` y `tools.destructivePatterns` con **límites de palabra**
+- Resultado `<exec_result target status exitCode duration cwd|requestedCwd maxBytes>`. Exit 0 → `ok:true`; cualquier otro estado → `tool_error` recuperable con `countsAsFailure:false` y `executed:true`
+- Cancelación estructurada: Ctrl+C mata el proceso y devuelve `status="cancelled"`
+- En Windows usa `pwsh.exe -NoProfile -NonInteractive` con propagación de `$LASTEXITCODE`
 
 ---
 
@@ -197,16 +215,16 @@ total del ciclo de vida de las conexiones.
 > **Registro condicional.** `registerSshTools` no registra nada si `.stratumrc.json` no trae
 > sección `ssh` con al menos un host. Sin inventario, el modelo ni siquiera ve estas tools.
 
-### ssh_exec
-`host`, `command`, `cwd?`, `pty?`, `stdin?`, `timeout?`, `maxBytes?`.
+### ssh_exec (retirado en el Hito 16)
+Hoy es `exec` con `target: "ssh:<alias>"`; lo de abajo describe el backend `tools/exec/backends/ssh.ts`.
 
 - `serialized: false` — dos hosts distintos no se estorban; dos calls al mismo alias comparten socket
 - `isDestructive?()` — confirma si el host lleva `confirmAll`, o si el comando encaja con
-  `tools.destructivePatterns` (reutiliza `commandIsDestructive` de `shell/bash.ts`)
+  `tools.destructivePatterns` (`commandIsDestructive`, hoy en `guards.ts`)
 - Corta la salida en `maxBytes` (256 KB) y el comando en `commandTimeout` (30 s), en ambos casos
   con `stream.signal('KILL')` al proceso remoto — así un `tail -f` o un `journalctl` no revientan
   el contexto del modelo
-- Devuelve XML `<ssh_result host=… exitCode=… duration=… truncated=… maxBytes=…>`
+- Devuelve XML `<exec_result target="ssh:…" status=… exitCode=… duration=… requestedCwd=… maxBytes=…>`
 - Con `pty: true`, filtra las secuencias de escape ANSI antes de devolver el resultado
 
 ### ssh_upload / ssh_download
@@ -265,12 +283,16 @@ error que explica la alternativa en vez de fallar en silencio.
 
 ## Auditoría
 
-Un registro JSON por comando remoto en `~/.stratum/logs/ssh-audit.jsonl` (o la ruta de
-`ssh.auditLog`), con rotación por tamaño a 10 MB:
+Hito 16: un registro JSON por **cada intento real de ejecución, local o remoto**, en
+`~/.stratum/logs/exec-audit.jsonl` (o la ruta de `tools.auditLog`; `ssh.auditLog` es alias obsoleto que
+el loader migra por capa), con rotación por tamaño a 10 MB. El comando se guarda redactado y `stdin` nunca:
 
 ```json
-{"timestamp":"…","sessionId":"sess_…","host":"lab","command":"systemctl restart nginx","exitCode":0,"durationMs":342,"truncated":false}
+{"timestamp":"…","sessionId":"sess_…","target":"ssh:lab","host":"lab","command":"systemctl restart nginx","requestedCwd":"/etc","status":"exited","exitCode":0,"durationMs":342,"truncated":false}
 ```
+
+`status` ∈ `exited | truncated | timeout | cancelled | spawn_error | connect_error`. Los vetos y las
+denegaciones no llegan a ejecutarse y no se auditan aquí (los registra el logger del dispatcher).
 
 El `sessionId` viaja por `RunOptions` → `ToolContext`: `chat` lo genera al arrancar (no al guardar),
 `run` usa uno efímero por invocación, y los subagentes heredan el del padre.
@@ -283,7 +305,7 @@ El `sessionId` viaja por `RunOptions` → `ToolContext`: `chat` lo genera al arr
 
 `src/tools/fs.test.ts` — `read_file` (numeradas, offset/limit), `write_file`, `edit_file` (única ocurrencia, `replace_all`, diff), `glob`/`list`/`grep`.
 
-`src/tools/bash.test.ts` — comando simple, fallido, captura stderr, guard destructivo, timeout (skip en Windows).
+`src/tools/exec/*.test.ts` (Hito 16) — target, backend local (exit codes, stdin/EOF, `cwd`, `maxBytes` que drena, timeout, cancelación, entorno git), tool `exec` (descripción, preflight, serialización), backend SSH contra el servidor en proceso (PTY, EOF, kill por `maxBytes`, host key) y auditoría.
 
 `src/tools/web` + `src/tools/mcp` + `src/tools/memory` — cubren metabúsqueda/RRF, HTML→markdown, bridge MCP y las tools de decisión.
 

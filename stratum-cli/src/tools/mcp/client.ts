@@ -180,9 +180,11 @@ export class McpServerClient {
     const killTimer = setTimeout(() => {
       // SIGKILL si el transport no terminó a tiempo
       try {
-        (
-          this.transport as StdioClientTransport & { _process?: { kill(s: string): void } }
-        )._process?.kill('SIGKILL');
+        // `_process` es privado en el SDK: la intersección con el tipo público
+        // colapsa a `never`, así que el acceso pasa por `unknown`.
+        (this.transport as unknown as { _process?: { kill(s: string): void } })._process?.kill(
+          'SIGKILL',
+        );
       } catch {
         // ignorar — el proceso ya terminó
       }

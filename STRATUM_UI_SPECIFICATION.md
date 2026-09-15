@@ -62,7 +62,7 @@ La transición entre estados es la única animación de "pantalla completa". El 
 │                                                                          │
 │  ✓ read_file  │ 0.4s │ src/agent/core.ts                          ▸     │  ← TOOL CALL BLOCK (colapsado)
 │  ✓ grep       │ 0.2s │ removeListener|cleanup — 0 matches         ▸     │
-│  ◌ bash       │ 1.2s │ grep -c "\.on(" src/agent/core.ts               │  ← TOOL CALL (running)
+│  ◌ exec       │ 1.2s │ grep -c "\.on(" src/agent/core.ts               │  ← TOOL CALL (running)
 │                                                                          │
 │  Stratum                                                                 │
 │  He identificado 2 posibles memory leaks:                                │
@@ -252,7 +252,7 @@ Cada tool call pasa por una secuencia de estados visuales:
 
 #### Estado: `running` (ejecutándose)
 ```
-  ◌ bash  │ 1.2s  │ grep -c "\.on(" src/agent/core.ts
+  ◌ exec  │ 1.2s  │ grep -c "\.on(" src/agent/core.ts
 ```
 - Icono `◌` → animado con frames: `◌ ◎ ● ◉ ○` cada 150ms
 - Color ámbar `#F59E0B`
@@ -280,7 +280,7 @@ Cada tool call pasa por una secuencia de estados visuales:
 
 #### Estado: `error` (error recuperable)
 ```
-  ✗ bash  │ 0.8s  │ permission denied                              ▸
+  ✗ exec  │ 0.8s  │ permission denied                              ▸
 ```
 - Icono `✗`: `chalk.hex('#EF4444')`
 - Tool name: `chalk.hex('#FCA5A5')` — rojo atenuado
@@ -544,7 +544,7 @@ Mecánica del agente (eventos, tools, `RunOptions`): ver [§12.15 de STRATUM_PRO
 
 #### Fase 1 — Planificación (exploración read-only)
 
-`RunOptions.mode = 'plan'` filtra el `ToolRegistry` a un allowlist read-only (`read_file`, `glob`, `list`, `grep`, `web_search`, `web_fetch`, `recall_decisions`). Cualquier tool mutante (`write_file`, `edit_file`, `bash`, `store_decision`, MCP de escritura) se rechaza con un `tool_error` recuperable inyectado: *"Plan mode: tool '<name>' deshabilitada hasta aprobar el plan"*.
+`RunOptions.mode = 'plan'` filtra el `ToolRegistry` a un allowlist read-only (`read_file`, `glob`, `list`, `grep`, `web_search`, `web_fetch`, `recall_decisions`). Cualquier tool mutante (`write_file`, `edit_file`, `exec`, `store_decision`, MCP de escritura) se rechaza con un `tool_error` recuperable inyectado: *"Plan mode: tool '<name>' deshabilitada hasta aprobar el plan"*.
 
 Visualmente la Fase 1 es idéntica a un turno normal del agente — `<ToolCallBlock>`s de exploración con su spinner — pero con un **badge de modo** en la `<StatusBar>` para que quede claro que nada se va a modificar todavía:
 
@@ -596,7 +596,7 @@ Acciones del gate:
 
 #### Fase 3 — Ejecución (estados vivos)
 
-Al aprobar, `RunOptions.mode = 'execute'`, se restaura el toolset completo (la política destructiva normal vuelve a aplicar — un paso que ejecute `bash rm` dispara `<DestructiveConfirm>` como siempre) y el plan se inyecta en el contexto como checklist de trabajo. `<PlanView>` **no se desmonta**: se ancla de forma compacta encima del flujo de conversación y actualiza el estado de cada paso conforme el modelo llama a `update_plan(stepId, status)`.
+Al aprobar, `RunOptions.mode = 'execute'`, se restaura el toolset completo (la política destructiva normal vuelve a aplicar — un paso que ejecute un `rm` con `exec` dispara `<DestructiveConfirm>` como siempre) y el plan se inyecta en el contexto como checklist de trabajo. `<PlanView>` **no se desmonta**: se ancla de forma compacta encima del flujo de conversación y actualiza el estado de cada paso conforme el modelo llama a `update_plan(stepId, status)`.
 
 ```
   ┌─ Plan · 2/4 ─────────────────────────────────────────────────────────┐
@@ -742,7 +742,7 @@ El árbol se ancla **inline** en el flujo de conversación, en el punto donde el
   │
   ├─  ⊳ code#2  │ 8.1s · 6 it │ Extraer weightedPick()…
   │     ✓ edit_file: src/providers/utils.ts
-  │     ⟳ bash: npm test -- router
+  │     ⟳ exec: npm test -- router
   │
   └─  ⋯ code#3  │ en cola │ Añadir tests del reparto ponderado…
 ```
@@ -778,7 +778,7 @@ Si hubo conflictos de fichero (ver abajo), el resumen lo señala en `warning`: `
 
 #### Confirmaciones destructivas en paralelo (mutex sobre la TTY)
 
-El subagente nunca posee la TTY: su gate destructivo burbujea al `<DestructiveConfirm>` **único** del padre (§12 de esta spec, §12.16). Con paralelismo, varios hijos pueden pedir confirmación a la vez; un **mutex** serializa esos prompts —igual que el `ToolDispatcher` nunca muestra dos gates a la vez—: se muestra **un** `<DestructiveConfirm>` cada vez, etiquetado con el subagente que lo solicita, y los demás hijos quedan bloqueados en su `bash` hasta que se resuelve el suyo:
+El subagente nunca posee la TTY: su gate destructivo burbujea al `<DestructiveConfirm>` **único** del padre (§12 de esta spec, §12.16). Con paralelismo, varios hijos pueden pedir confirmación a la vez; un **mutex** serializa esos prompts —igual que el `ToolDispatcher` nunca muestra dos gates a la vez—: se muestra **un** `<DestructiveConfirm>` cada vez, etiquetado con el subagente que lo solicita, y los demás hijos quedan bloqueados en su `exec` hasta que se resuelve el suyo:
 
 ```
   ⚠ subagent (code#2) solicita ejecutar un comando destructivo
@@ -846,7 +846,7 @@ $ stratum run "audita los 3 módulos en paralelo" --allow-destructive
 [sub research#1] grep: "advanceProvider"
 [sub code#2]     edit_file: src/providers/utils.ts
 [sub research#1] ✓ done · 4 it · 0 ficheros
-[sub code#2]     bash: npm test -- router
+[sub code#2]     exec [local]: npm test -- router
 [sub code#3]     ⋯ en cola
 [warn] conflicto: src/providers/utils.ts tocado por code#2 y code#3
 [sub code#2]     ✓ done · 6 it · 1 fichero
@@ -966,17 +966,19 @@ No aplica: `run` es no interactivo, sin desplegables ni vistas modales. La atrib
 
 ### 5.8 Tool calls SSH — contexto de host remoto (Hito 9)
 
-Las tools `ssh_exec`, `ssh_upload` y `ssh_download` operan sobre **una máquina que no es la del usuario**. Un `rm -rf /var/cache` renderizado igual que un `bash` local es un fallo de diseño: el bloque debe decir *dónde* se ejecutó antes de decir *qué* se ejecutó. §5.8 extiende `<ToolCallBlock>` (§5.1) sin crear un componente nuevo.
+`exec` sobre un target `ssh:<alias>` y las tools `ssh_upload` y `ssh_download` operan sobre **una máquina que no es la del usuario**. Un `rm -rf /var/cache` renderizado igual que un `exec` local es un fallo de diseño: el bloque debe decir *dónde* se ejecutó antes de decir *qué* se ejecutó. §5.8 extiende `<ToolCallBlock>` (§5.1) sin crear un componente nuevo.
+
+> **Hito 16:** la ejecución remota es `exec` con `target: "ssh:<alias>"` (`ssh_exec` se retiró). El prefijo `⌗ alias` se toma de ese target —un `exec` en `local` no lleva prefijo— y la etiqueta de la línea es su `command`.
 
 #### Prefijo de host
 
 El alias del inventario (`.stratumrc.json` → `ssh.hosts.<alias>`) se pinta con el icono de servidor `⌗` inmediatamente después del nombre de la tool, en `accent`, y está presente en **los cuatro estados**:
 
 ```
-○ ssh_exec ⌗ prod-web │ en cola...
-◉ ssh_exec ⌗ prod-web │ 0.8s │ systemctl restart nginx
-✓ ssh_exec ⌗ prod-web │ 1.2s │ systemctl restart nginx ▸
-✗ ssh_exec ⌗ prod-web │ Permission denied (publickey) ▸
+○ exec ⌗ prod-web │ en cola...
+◉ exec ⌗ prod-web │ 0.8s │ systemctl restart nginx
+✓ exec ⌗ prod-web │ 1.2s │ systemctl restart nginx ▸
+✗ exec ⌗ prod-web │ Permission denied (publickey) ▸
 ```
 
 El alias se toma de `state.input.host`. Mientras la tool call se está parseando (`pending`/`running` con solo `inputSoFar`), el alias puede no estar disponible todavía: en ese caso el bloque se renderiza sin prefijo, sin hueco reservado.
@@ -990,7 +992,7 @@ Una operación remota lenta es información operativa, no ruido. En estado `comp
 | ≤ 1000 ms | `textFaint` | Latencia normal; no llama la atención. |
 | > 1000 ms | `warning` | Comando lento o enlace con latencia alta. |
 
-El umbral es el mismo para `ssh_exec` y para las transferencias SFTP, que se miden en su totalidad (conexión reutilizada + transferencia).
+El umbral es el mismo para `exec` en un target remoto y para las transferencias SFTP, que se miden en su totalidad (conexión reutilizada + transferencia).
 
 #### Etiqueta de la línea
 
@@ -998,7 +1000,7 @@ El umbral es el mismo para `ssh_exec` y para las transferencias SFTP, que se mid
 
 | Tool | Clave mostrada |
 |---|---|
-| `ssh_exec` | `command` |
+| `exec` (target `ssh:<alias>`) | `command` |
 | `ssh_upload` | `localPath → remotePath` |
 | `ssh_download` | `remotePath → localPath` |
 
@@ -1008,7 +1010,7 @@ Las confirmaciones SSH reutilizan `<DestructiveConfirm>` (§12) sin cambios de l
 
 ```
 ⚠  El agente quiere ejecutar un comando en prod-web [confirmAll: true]:
-   ssh_exec [prod-web]: ls -la /var/www/html
+   exec [ssh:prod-web]: ls -la /var/www/html
 
    [Enter] Aprobar   [n] Denegar   [!] Aprobar todo
 ```
@@ -1393,7 +1395,7 @@ Cuando el `ToolDispatcher` detecta que una tool tiene `destructive: true`, pausa
 ┌──────────────────────────────────────────────────────────────────────┐
 │ ⚠  Operación destructiva                                             │
 │                                                                      │
-│  bash: rm -rf /var/log/app/*.log                                     │
+│  exec: rm -rf /var/log/app/*.log                                     │
 │                                                                      │
 │  ¿Continuar? [ S ] continuar  [ N ] cancelar  [ ! ] permitir todo   │
 └──────────────────────────────────────────────────────────────────────┘
@@ -1453,7 +1455,7 @@ El bloque **no desplaza** el historial de mensajes — el scroll permanece donde
 $ stratum run "lista los archivos TypeScript en src/ y cuenta cuántos hay"
 
 [tool] read_file: src/
-[tool] bash: find src/ -name "*.ts" | wc -l  (0.3s)
+[tool] exec [local]: find src/ -name "*.ts" | wc -l  (0.3s)
 [result] Hay 24 archivos TypeScript en src/.
 ```
 

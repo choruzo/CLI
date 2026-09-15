@@ -20,7 +20,8 @@ import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
-import { closeSshPool } from '../../tools/ssh/index.js';
+import { closeExecRuntime } from '../../tools/exec/runtime.js';
+import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import {
@@ -97,6 +98,7 @@ export const runCommand = new Command('run')
       });
       getLogger('cli').debug('run start', { task: task.slice(0, 120) });
       warnInheritedGitRouting();
+      warnConfigDeprecations();
 
       let router;
       try {
@@ -139,7 +141,7 @@ export const runCommand = new Command('run')
       }
       if (profileFailure) {
         await mcpManager.shutdownAll();
-        await closeSshPool();
+        await closeExecRuntime();
         await flushLogging();
         process.stderr.write(`[fatal] ${profileFailure}\n`);
         process.exit(1);
@@ -409,7 +411,7 @@ export const runCommand = new Command('run')
         }
       } catch (err) {
         await mcpManager.shutdownAll();
-        await closeSshPool();
+        await closeExecRuntime();
         getLogger('cli').error('run aborted with error', { err });
         await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
@@ -418,7 +420,7 @@ export const runCommand = new Command('run')
 
       await mcpManager.shutdownAll();
       // Hito 9 (§12.12): cerrar los sockets SSH antes de salir.
-      await closeSshPool();
+      await closeExecRuntime();
       await flushLogging();
 
       if (controller.signal.aborted) {

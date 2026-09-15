@@ -98,9 +98,37 @@ export interface InvalidProfile {
   error: string;
 }
 
+/** Hito 16 — perfil válido que merece atención (hoy: tools retiradas en `allowedTools`). */
+export interface ProfileWarning {
+  name: string;
+  path: string;
+  message: string;
+}
+
+/**
+ * Tools retiradas y su sustituta. NO se traducen solas: `bash` → `exec` daría
+ * también ejecución en hosts remotos, y `ssh_exec` → `exec` daría ejecución
+ * local. Ampliar capacidades de un perfil es una decisión del usuario.
+ */
+const RETIRED_TOOLS: Readonly<Record<string, string>> = {
+  bash: 'exec',
+  ssh_exec: 'exec (target "ssh:<alias>")',
+};
+
+export function retiredToolsWarning(profile: AgentProfile): string | null {
+  const hits = (profile.allowedTools ?? []).filter((t) => t in RETIRED_TOOLS);
+  if (hits.length === 0) return null;
+  return (
+    `allowedTools incluye tools retiradas en el Hito 16 (${hits.join(', ')}), que no se conceden. ` +
+    `Sustitúyelas a mano: ${hits.map((h) => `${h} → ${RETIRED_TOOLS[h]}`).join('; ')}. ` +
+    'Ojo: exec cubre tanto la máquina local como los hosts SSH del inventario.'
+  );
+}
+
 export class ProfileLoader {
   private readonly profiles = new Map<string, AgentProfile>();
   private readonly invalid = new Map<string, InvalidProfile>();
+  private readonly warned = new Map<string, ProfileWarning>();
 
   /**
    * Acepta uno o varios roots de proyecto. Precedencia de menor a mayor: global
@@ -163,8 +191,16 @@ export class ProfileLoader {
       if (profile) {
         this.profiles.set(name, profile);
         this.invalid.delete(name);
+        const warning = retiredToolsWarning(profile);
+        if (warning) {
+          log.warn('profile lists retired tools', { file: path, message: warning });
+          this.warned.set(name, { name, path, message: warning });
+        } else {
+          this.warned.delete(name);
+        }
         continue;
       }
+      this.warned.delete(name);
       log.warn('profile rejected', { file: path, error });
       // Un override roto enmascara al perfil homónimo de menor prioridad: si
       // cayera al global, se ejecutaría en silencio un perfil que el usuario
@@ -202,6 +238,11 @@ export class ProfileLoader {
   /** Ficheros de perfil rechazados, por nombre. */
   invalidProfiles(): InvalidProfile[] {
     return [...this.invalid.values()].sort((a, b) => a.name.localeCompare(b.name));
+  }
+
+  /** Perfiles cargados con avisos (Hito 16), por nombre. */
+  warnings(): ProfileWarning[] {
+    return [...this.warned.values()].sort((a, b) => a.name.localeCompare(b.name));
   }
 }
 

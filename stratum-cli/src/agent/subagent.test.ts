@@ -134,7 +134,7 @@ describe('ProfileLoader (Hito 8A)', () => {
 });
 
 describe('Filtrado de toolset por perfil + profundidad=1 (Hito 8A)', () => {
-  it('un perfil research no ve bash/edit_file pero sí read_file', () => {
+  it('un perfil research no ve exec/edit_file pero sí read_file', () => {
     const reg = newRegistry();
     const schemas = reg.toToolSchemas('normal', {
       allowedTools: researchProfile.allowedTools,
@@ -143,7 +143,7 @@ describe('Filtrado de toolset por perfil + profundidad=1 (Hito 8A)', () => {
     const names = schemas.map((s) => s.function.name);
     expect(names).toContain('read_file');
     expect(names).toContain('grep');
-    expect(names).not.toContain('bash');
+    expect(names).not.toContain('exec');
     expect(names).not.toContain('edit_file');
     expect(names).not.toContain('write_file');
   });
@@ -154,7 +154,7 @@ describe('Filtrado de toolset por perfil + profundidad=1 (Hito 8A)', () => {
     const names = reg
       .toToolSchemas('normal', { allowedTools: null, isSubagent: true })
       .map((s) => s.function.name);
-    expect(names).toContain('bash');
+    expect(names).toContain('exec');
     expect(names).not.toContain('delegate_task');
 
     // El loop padre (sin filtro de subagente) SÍ ve delegate_task.

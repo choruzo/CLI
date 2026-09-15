@@ -49,7 +49,7 @@ describe('lentes (4R)', () => {
 
   it('rutas sensibles → risk', () => {
     expect(lensesForPath('src/auth/login.ts')).toContain('risk');
-    expect(lensesForPath('src/tools/shell/bash.ts')).toContain('risk');
+    expect(lensesForPath('src/tools/exec/backends/local.ts')).toContain('risk');
   });
 
   it('despliegue/migraciones → resilience; tests/api → reliability', () => {

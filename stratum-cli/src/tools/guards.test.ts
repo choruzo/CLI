@@ -13,7 +13,7 @@ import {
   collectPathInputs,
   sensitivePathVerdict,
 } from './guards.js';
-import { bashTool } from './shell/bash.js';
+import { createExecTool } from './exec/exec.js';
 import { readFileTool } from './fs/read.js';
 import { writeFileTool } from './fs/write.js';
 import { ToolRegistry, ToolDispatcher } from './registry.js';
@@ -21,6 +21,7 @@ import { StratumConfigSchema } from '../config/schema.js';
 import type { ToolContext } from '../agent/types.js';
 
 const config = StratumConfigSchema.parse({});
+const execTool = createExecTool(config);
 
 function ctx(overrides: Partial<ToolContext> = {}): ToolContext {
   return {
@@ -92,7 +93,7 @@ describe('guards — capa 1 (hard-deny)', () => {
 
   it('no depende de la config: el veto se evalúa con el comando a secas', () => {
     const sinPatrones = StratumConfigSchema.parse({ tools: { destructivePatterns: [] } });
-    const veto = bashTool.preflight!({ command: 'rm -rf /' }, ctx({ config: sinPatrones }));
+    const veto = execTool.preflight!({ command: 'rm -rf /' }, ctx({ config: sinPatrones }));
     expect(veto?.ok).toBe(false);
     expect(veto && !veto.ok && veto.recoverable).toBe(false);
   });
@@ -116,8 +117,8 @@ describe('guards — capa 2 (comandos guardados)', () => {
   it('las claves en confirm alimentan isDestructive, no el veto', () => {
     expect(guardedConfirmLabel('git push --force-with-lease')).toContain('git push');
     expect(guardedBlockReason('git push --force-with-lease')).toBeNull();
-    expect(bashTool.isDestructive!({ command: 'git rebase -i main' }, ctx())).toBe(true);
-    expect(bashTool.preflight!({ command: 'git rebase -i main' }, ctx())).toBeNull();
+    expect(execTool.isDestructive!({ command: 'git rebase -i main' }, ctx())).toBe(true);
+    expect(execTool.preflight!({ command: 'git rebase -i main' }, ctx())).toBeNull();
   });
 
   it('un git push normal no dispara nada', () => {
@@ -175,7 +176,7 @@ describe('guards — capa 3 (rutas sensibles)', () => {
 });
 
 describe('guards — preflight en el dispatcher', () => {
-  function dispatcherWith(tool: typeof bashTool): ToolDispatcher {
+  function dispatcherWith(tool: typeof execTool): ToolDispatcher {
     const registry = new ToolRegistry();
     registry.register(tool);
     return new ToolDispatcher(registry, 3);
@@ -183,8 +184,8 @@ describe('guards — preflight en el dispatcher', () => {
 
   it('el veto se aplica antes de la fase de confirmación: nunca se pregunta', async () => {
     let asked = 0;
-    const results = await dispatcherWith(bashTool).dispatch(
-      [{ id: 'c1', name: 'bash', input: { command: 'rm -rf /' } }],
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'rm -rf /' } }],
       ctx({
         destructivePolicy: 'ask',
         confirmDestructive: async () => {
@@ -198,8 +199,8 @@ describe('guards — preflight en el dispatcher', () => {
   });
 
   it('ni --allow-destructive ni un allow-all levantan el veto', async () => {
-    const results = await dispatcherWith(bashTool).dispatch(
-      [{ id: 'c1', name: 'bash', input: { command: 'npm publish' } }],
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'npm publish' } }],
       ctx({ destructivePolicy: 'allow', allowDestructive: true }),
     );
     const result = results[0]!.result;
@@ -208,8 +209,8 @@ describe('guards — preflight en el dispatcher', () => {
   });
 
   it('una call sin veto sigue su curso normal', async () => {
-    const results = await dispatcherWith(bashTool).dispatch(
-      [{ id: 'c1', name: 'bash', input: { command: 'echo hola' } }],
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'echo hola' } }],
       ctx({ destructivePolicy: 'allow' }),
     );
     expect(results[0]!.result.ok).toBe(true);
@@ -272,16 +273,16 @@ describe('collectCommandPaths', () => {
   });
 });
 
-describe('bash — rutas sensibles a través del shell (Hito 13)', () => {
-  function dispatcherWith(tool: typeof bashTool): ToolDispatcher {
+describe('exec — rutas sensibles a través del shell (Hito 13)', () => {
+  function dispatcherWith(tool: typeof execTool): ToolDispatcher {
     const registry = new ToolRegistry();
     registry.register(tool);
     return new ToolDispatcher(registry, 3);
   }
 
   it('vetar la clave por read_file y dejarla pasar por cat era la fuga: ya no', async () => {
-    const results = await dispatcherWith(bashTool).dispatch(
-      [{ id: 'c1', name: 'bash', input: { command: 'cat .ssh/id_rsa' } }],
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'cat .ssh/id_rsa' } }],
       ctx({ destructivePolicy: 'allow', allowDestructive: true }),
     );
     const result = results[0]!.result;
@@ -291,8 +292,8 @@ describe('bash — rutas sensibles a través del shell (Hito 13)', () => {
 
   it('un .env por el shell pide la misma confirmación que por read_file', async () => {
     let asked = 0;
-    const results = await dispatcherWith(bashTool).dispatch(
-      [{ id: 'c1', name: 'bash', input: { command: 'cat .env' } }],
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'cat .env' } }],
       ctx({
         destructivePolicy: 'ask',
         confirmDestructive: async () => {
@@ -306,8 +307,8 @@ describe('bash — rutas sensibles a través del shell (Hito 13)', () => {
   });
 
   it('un comando normal no se ve afectado', async () => {
-    const results = await dispatcherWith(bashTool).dispatch(
-      [{ id: 'c1', name: 'bash', input: { command: 'echo sin-rutas-sensibles' } }],
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'echo sin-rutas-sensibles' } }],
       ctx({ destructivePolicy: 'allow' }),
     );
     expect(results[0]!.result.ok).toBe(true);

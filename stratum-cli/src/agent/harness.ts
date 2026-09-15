@@ -49,6 +49,7 @@ import {
   type TodoInput,
 } from './todo.js';
 import { truncateToolOutput } from '../tools/truncate.js';
+import { redactText } from '../security/redact-output.js';
 import type { ProfileLoader } from './profiles.js';
 import { ChangeTracker, changeFromToolCall } from './risk.js';
 import { serializeSubagentResult, generateSubagentId } from './subagent.js';
@@ -856,8 +857,12 @@ export class ReactLoop {
                 readyCalls.push(ev);
                 yield ev;
               } else if (ev.type === 'tool_error') {
-                parseErrors.push(ev as ParseError);
-                yield ev;
+                // Hito 16: el error de parseo cita los argumentos crudos del
+                // modelo; se redacta aquí para que el evento (UI, subagent_event)
+                // y el mensaje del historial lleven el mismo texto seguro.
+                const safe = { ...ev, error: redactText(ev.error, this.config) };
+                parseErrors.push(safe as ParseError);
+                yield safe;
               } else {
                 yield ev;
               }
@@ -979,17 +984,18 @@ export class ReactLoop {
 
       // Inyectar parse errors al historial para que el LLM pueda recuperarse
       for (const pe of parseErrors) {
-        this.messages.push({
-          role: 'tool',
-          tool_call_id: pe.id,
-          name: pe.name,
-          content: formatToolError(
+        this.messages.push(
+          this.toolMessage(
+            pe.id,
             pe.name,
-            pe.error,
-            fmt,
-            'Ensure the tool call arguments are valid JSON.',
+            formatToolError(
+              pe.name,
+              pe.error,
+              fmt,
+              'Ensure the tool call arguments are valid JSON.',
+            ),
           ),
-        });
+        );
       }
 
       // -----------------------------------------------------------------------
@@ -1005,22 +1011,20 @@ export class ReactLoop {
       for (const call of readyCalls) {
         // Hito 15 — el filtro de toolset también se impone al ejecutar. Ocultar
         // una tool del schema no impide que el modelo la invente, y sin esto un
-        // perfil restringido podría llamar a `bash` o delegar en `general`.
+        // perfil restringido podría llamar a `exec` o delegar en `general`.
         const filter = this.extras?.toolsetFilter;
         if (filter && !isToolVisibleForProfile(call.name, filter)) {
           const err = `tool '${call.name}' is not available to this agent profile`;
-          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: call.name,
-            content: formatToolError(
-              call.name,
-              err,
-              fmt,
-              'Use only the tools offered to you in this conversation.',
-            ),
-          });
+          const o = this.toolErrorOutcome(
+            call.id,
+            call.name,
+            err,
+            true,
+            fmt,
+            'Use only the tools offered to you in this conversation.',
+          );
+          yield o.event;
+          this.messages.push(o.message);
           continue;
         }
 
@@ -1033,19 +1037,9 @@ export class ReactLoop {
             const err =
               'Ya preguntaste al usuario en este turno: `question` es una tanda única. ' +
               'Continúa con los supuestos más razonables.';
-            yield {
-              type: 'tool_error',
-              id: call.id,
-              name: call.name,
-              error: err,
-              recoverable: true,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: formatToolError(call.name, err, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
           }
           continue;
         }
@@ -1061,19 +1055,9 @@ export class ReactLoop {
               mode === 'plan'
                 ? 'todo no está disponible en modo plan: describe los pasos en present_plan.'
                 : 'todo no está disponible durante la ejecución de un plan: usa update_plan.';
-            yield {
-              type: 'tool_error',
-              id: call.id,
-              name: call.name,
-              error: err,
-              recoverable: true,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: formatToolError(call.name, err, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
             continue;
           }
           try {
@@ -1084,34 +1068,14 @@ export class ReactLoop {
               items: this.todos.snapshot,
               stale: this.todos.staleTurns,
             };
-            yield {
-              type: 'tool_result',
-              id: call.id,
-              name: call.name,
-              result: snapshot,
-              durationMs: 0,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: snapshot,
-            });
+            const o = this.toolResultOutcome(call.id, call.name, snapshot, 0);
+            yield o.event;
+            this.messages.push(o.message);
           } catch (err) {
             const message = err instanceof TodoError ? err.message : String(err);
-            yield {
-              type: 'tool_error',
-              id: call.id,
-              name: call.name,
-              error: message,
-              recoverable: true,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: formatToolError(call.name, message, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(call.id, call.name, message, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
           }
           continue;
         }
@@ -1127,34 +1091,14 @@ export class ReactLoop {
                 ? { entries: this.tdd.snapshot, notes: [] as string[] }
                 : this.tdd.record(input);
             const snapshot = formatTddSnapshot(applied.entries, applied.notes);
-            yield {
-              type: 'tool_result',
-              id: call.id,
-              name: call.name,
-              result: snapshot,
-              durationMs: 0,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: snapshot,
-            });
+            const o = this.toolResultOutcome(call.id, call.name, snapshot, 0);
+            yield o.event;
+            this.messages.push(o.message);
           } catch (err) {
             const message = err instanceof TddError ? err.message : String(err);
-            yield {
-              type: 'tool_error',
-              id: call.id,
-              name: call.name,
-              error: message,
-              recoverable: true,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: formatToolError(call.name, message, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(call.id, call.name, message, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
           }
           continue;
         }
@@ -1175,19 +1119,9 @@ export class ReactLoop {
               mode === 'plan'
                 ? 'present_plan ya fue invocada en este turno.'
                 : 'present_plan solo está disponible en modo plan.';
-            yield {
-              type: 'tool_error',
-              id: call.id,
-              name: call.name,
-              error: err,
-              recoverable: true,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: formatToolError(call.name, err, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
           }
           continue;
         }
@@ -1198,19 +1132,9 @@ export class ReactLoop {
             updatePlanCalls.push(call);
           } else {
             const err = 'update_plan solo está disponible durante la ejecución de un plan.';
-            yield {
-              type: 'tool_error',
-              id: call.id,
-              name: call.name,
-              error: err,
-              recoverable: true,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: call.id,
-              name: call.name,
-              content: formatToolError(call.name, err, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
           }
           continue;
         }
@@ -1219,18 +1143,16 @@ export class ReactLoop {
         // rechaza con un tool_error recuperable inyectado (UI §5.4, Fase 1).
         if (mode === 'plan' && !PLAN_ALLOWLIST.has(call.name)) {
           const err = `Plan mode: tool '${call.name}' deshabilitada hasta aprobar el plan`;
-          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: call.name,
-            content: formatToolError(
-              call.name,
-              err,
-              fmt,
-              'Use only read-only tools, then call present_plan with your plan.',
-            ),
-          });
+          const o = this.toolErrorOutcome(
+            call.id,
+            call.name,
+            err,
+            true,
+            fmt,
+            'Use only read-only tools, then call present_plan with your plan.',
+          );
+          yield o.event;
+          this.messages.push(o.message);
           continue;
         }
 
@@ -1244,24 +1166,15 @@ export class ReactLoop {
         const step = plan?.steps.find((s) => s.id === stepId);
         if (!step) {
           const err = `No existe el paso "${stepId}" en el plan.`;
-          yield { type: 'tool_error', id: call.id, name: call.name, error: err, recoverable: true };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: call.id,
-            name: call.name,
-            content: formatToolError(call.name, err, fmt, undefined),
-          });
+          const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
+          yield o.event;
+          this.messages.push(o.message);
           continue;
         }
         step.status = status;
         yield { type: 'plan_step_update', stepId, status };
         persistPlan(plan ? isPlanComplete(plan) : false);
-        this.messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: call.name,
-          content: `Paso ${stepId} → ${status}.`,
-        });
+        this.messages.push(this.toolMessage(call.id, call.name, `Paso ${stepId} → ${status}.`));
       }
 
       // Despachar tool calls con JSON válido (excluyendo las de control de plan)
@@ -1281,19 +1194,14 @@ export class ReactLoop {
 
         for (const res of results) {
           if (res.result.ok) {
-            yield {
-              type: 'tool_result',
-              id: res.callId,
-              name: res.toolName,
-              result: res.result.output,
-              durationMs: res.durationMs,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: res.callId,
-              name: res.toolName,
-              content: res.result.output,
-            });
+            const o = this.toolResultOutcome(
+              res.callId,
+              res.toolName,
+              res.result.output,
+              res.durationMs,
+            );
+            yield o.event;
+            this.messages.push(o.message);
             // Hito 12 — write-log de sesión: alimenta la protección del revisor.
             const originCall = regularCalls.find((c) => c.id === res.callId);
             if (originCall) {
@@ -1321,19 +1229,17 @@ export class ReactLoop {
               }
             }
           } else {
-            yield {
-              type: 'tool_error',
-              id: res.callId,
-              name: res.toolName,
-              error: res.result.error,
-              recoverable: res.result.recoverable,
-            };
-            this.messages.push({
-              role: 'tool',
-              tool_call_id: res.callId,
-              name: res.toolName,
-              content: formatToolError(res.toolName, res.result.error, fmt, undefined),
-            });
+            const o = this.toolErrorOutcome(
+              res.callId,
+              res.toolName,
+              res.result.error,
+              res.result.recoverable,
+              fmt,
+              undefined,
+              res.result.executed,
+            );
+            yield o.event;
+            this.messages.push(o.message);
           }
         }
 
@@ -1370,19 +1276,9 @@ export class ReactLoop {
         const items = parseQuestionInput(questionCall.input);
         if (items.length === 0) {
           const err = 'question requiere al menos una pregunta no vacía.';
-          yield {
-            type: 'tool_error',
-            id: questionCall.id,
-            name: questionCall.name,
-            error: err,
-            recoverable: true,
-          };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: questionCall.id,
-            name: questionCall.name,
-            content: formatToolError(questionCall.name, err, fmt, undefined),
-          });
+          const o = this.toolErrorOutcome(questionCall.id, questionCall.name, err, true, fmt);
+          yield o.event;
+          this.messages.push(o.message);
         } else {
           yield { type: 'questions_asked', questions: items };
           let answers: QuestionAnswer[] | null = null;
@@ -1402,12 +1298,13 @@ export class ReactLoop {
             ...(rejections.length > 0 ? { rejected: rejections.map((r) => r.reason) } : {}),
           });
           yield { type: 'questions_answered', answers };
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: questionCall.id,
-            name: questionCall.name,
-            content: formatQuestionAnswers(items, answers),
-          });
+          this.messages.push(
+            this.toolMessage(
+              questionCall.id,
+              questionCall.name,
+              formatQuestionAnswers(items, answers),
+            ),
+          );
         }
       }
 
@@ -1442,24 +1339,26 @@ export class ReactLoop {
           mode = 'execute';
           persistPlan(isPlanComplete(plan));
           loopLog.info('plan approved', { steps: plan.steps.length });
-          this.messages.push({
-            role: 'tool',
-            tool_call_id: presentPlanCall.id,
-            name: presentPlanCall.name,
-            content: buildExecutionInjection(plan),
-          });
+          this.messages.push(
+            this.toolMessage(
+              presentPlanCall.id,
+              presentPlanCall.name,
+              buildExecutionInjection(plan),
+            ),
+          );
           // Continúa el loop: la próxima iteración ya corre en modo execute.
           continue;
         }
 
         // Rechazo: el turno termina sin ejecutar (UI §5.4 Fase 2).
         loopLog.info('plan rejected');
-        this.messages.push({
-          role: 'tool',
-          tool_call_id: presentPlanCall.id,
-          name: presentPlanCall.name,
-          content: 'El usuario rechazó el plan. Detente y espera nuevas instrucciones.',
-        });
+        this.messages.push(
+          this.toolMessage(
+            presentPlanCall.id,
+            presentPlanCall.name,
+            'El usuario rechazó el plan. Detente y espera nuevas instrucciones.',
+          ),
+        );
         yield { type: 'done', stopReason: 'stop' };
         return;
       }
@@ -1493,19 +1392,16 @@ export class ReactLoop {
       const resolved = resolveDelegationProfile(this.extras?.profiles, profileName);
 
       if (!resolved.ok) {
-        yield {
-          type: 'tool_error',
-          id: call.id,
-          name: call.name,
-          error: resolved.error,
-          recoverable: true,
-        };
-        this.messages.push({
-          role: 'tool',
-          tool_call_id: call.id,
-          name: call.name,
-          content: formatToolError(call.name, resolved.error, fmt, resolved.hint),
-        });
+        const o = this.toolErrorOutcome(
+          call.id,
+          call.name,
+          resolved.error,
+          true,
+          fmt,
+          resolved.hint,
+        );
+        yield o.event;
+        this.messages.push(o.message);
         continue;
       }
 
@@ -1535,20 +1431,68 @@ export class ReactLoop {
       const result = results.get(job.subId);
       if (!result) continue; // no debería ocurrir; defensivo.
       const serialized = truncateToolOutput(serializeSubagentResult(result, job.profile.name));
-      yield {
-        type: 'tool_result',
-        id: job.callId,
-        name: DELEGATE_TASK_TOOL,
-        result: serialized,
-        durationMs: result.usage.durationMs,
-      };
-      this.messages.push({
-        role: 'tool',
-        tool_call_id: job.callId,
-        name: DELEGATE_TASK_TOOL,
-        content: serialized,
-      });
+      const o = this.toolResultOutcome(
+        job.callId,
+        DELEGATE_TASK_TOOL,
+        serialized,
+        result.usage.durationMs,
+      );
+      yield o.event;
+      this.messages.push(o.message);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // Hito 16 — frontera única hacia el historial. Todo lo que el loop entrega
+  // como resultado de una tool (despachada, de control, rechazo o delegación)
+  // pasa por aquí: se redacta UNA vez y el mismo texto va al evento (UI,
+  // subagent_event del padre) y al mensaje (historial, SessionStore, provider).
+  // Idempotente con lo que el dispatcher ya redactó.
+  // -------------------------------------------------------------------------
+
+  private toolMessage(id: string, name: string, content: string): Message {
+    return { role: 'tool', tool_call_id: id, name, content: redactText(content, this.config) };
+  }
+
+  private toolResultOutcome(
+    id: string,
+    name: string,
+    result: string,
+    durationMs: number,
+  ): { event: AgentEvent; message: Message } {
+    const safe = redactText(result, this.config);
+    return {
+      event: { type: 'tool_result', id, name, result: safe, durationMs },
+      message: { role: 'tool', tool_call_id: id, name, content: safe },
+    };
+  }
+
+  private toolErrorOutcome(
+    id: string,
+    name: string,
+    error: string,
+    recoverable: boolean,
+    fmt: 'xml' | 'json',
+    suggestion?: string,
+    executed?: boolean,
+  ): { event: AgentEvent; message: Message } {
+    const safe = redactText(error, this.config);
+    return {
+      event: {
+        type: 'tool_error',
+        id,
+        name,
+        error: safe,
+        recoverable,
+        ...(executed ? { executed: true } : {}),
+      },
+      message: {
+        role: 'tool',
+        tool_call_id: id,
+        name,
+        content: formatToolError(name, safe, fmt, suggestion),
+      },
+    };
   }
 
   getContextUsage(): { used: number; max: number; pct: number; estimated: boolean } {

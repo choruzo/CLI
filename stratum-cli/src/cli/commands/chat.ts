@@ -9,7 +9,8 @@ import { ProviderRouter } from '../../providers/router.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
-import { closeSshPool } from '../../tools/ssh/index.js';
+import { closeExecRuntime } from '../../tools/exec/runtime.js';
+import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { SessionStore, generateSessionId } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
@@ -70,6 +71,7 @@ export const chatCommand = new Command('chat')
       });
       getLogger('cli').debug('chat start', { provider: opts.provider, resume: opts.resume });
       warnInheritedGitRouting();
+      warnConfigDeprecations();
 
       let router;
       try {
@@ -217,7 +219,7 @@ export const chatCommand = new Command('chat')
       await mcpManager.shutdownAll();
       // Hito 9 (§12.12): sin cerrar las conexiones SSH, sus sockets mantienen
       // vivo el event loop y el proceso nunca termina.
-      await closeSshPool();
+      await closeExecRuntime();
       await flushLogging();
 
       // -----------------------------------------------------------------------

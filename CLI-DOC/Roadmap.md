@@ -242,3 +242,21 @@ Ver [[Módulos/memory]], [[Módulos/sessions]], [[Módulos/agent]], [[Módulos/c
 - [x] Log de auditoría JSONL con rotación a 10 MB
 
 **Entregable:** administrar infraestructura remota desde el loop ReAct, sin el binario `ssh` del sistema. Ver [[Módulos/tools]] y [[Diario/Hito-9]].
+
+---
+
+## Hito 16 — Ejecución unificada, auditoría universal y redacción ✅
+
+Primer bloque de [[Orientacion-Infraestructura]] (cerrado 2026-09-15).
+
+- [x] `ExecutionTarget` (`local` / `ssh:<alias>`; `container`/`pod`/`winrm` reservados)
+- [x] Tool `exec` sobre `IExecBackend` con capacidades declaradas; `bash` y `ssh_exec` retirados sin alias
+- [x] Descripción de tool generada con los targets de la config
+- [x] Backend local: `maxBytes` que descarta sin matar, exit code real en Windows, cancelación estructurada
+- [x] Contrato de fallo: `tool_error` recuperable con `countsAsFailure:false`; contador de reintentos consecutivo
+- [x] Auditoría universal en `exec-audit.jsonl` (+ alias `ssh.auditLog` migrado por capa)
+- [x] Redacción de salidas de tool con núcleo no desactivable y extras literales
+- [x] Write-log de subagentes con clave canónica por target
+- [x] Avisos de perfiles con tools retiradas en `/agents` y `stratum agents list`
+
+**Entregable:** una sola superficie de ejecución con guardas, auditoría y redacción en un punto, base de los hitos de infraestructura 17–20.

@@ -4,10 +4,10 @@ import { ToolRegistry } from '../tools/registry.js';
 import { registerBuiltinTools } from '../tools/index.js';
 import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { StratumConfigSchema } from '../config/schema.js';
-import { TodoList, TODO_STALE_TURNS, parseTodoSnapshot } from './todo.js';
+import { TodoList, TODO_STALE_TURNS, parseTodoSnapshot, type TodoItem } from './todo.js';
 import { buildWorkRoutingBlock, buildSystemPrompt } from './system-prompt.js';
 import { isToolVisibleInMode, isToolVisibleForProfile } from '../tools/registry.js';
-import type { AgentEvent, Message, TodoItem } from './types.js';
+import type { AgentEvent, Message } from './types.js';
 
 const config = StratumConfigSchema.parse({});
 

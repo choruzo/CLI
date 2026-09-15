@@ -30,6 +30,7 @@ const mockState = vi.hoisted(() => {
 
 vi.mock('../../config/loader.js', () => ({
   loadConfig: mockState.loadConfig,
+  takeConfigDeprecations: () => [],
 }));
 
 vi.mock('../../tools/index.js', () => ({

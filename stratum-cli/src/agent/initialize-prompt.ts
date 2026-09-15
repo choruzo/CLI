@@ -6,7 +6,7 @@
  *   $ARGUMENTS    — restricciones o foco adicionales del usuario (puede estar vacío)
  *
  * El agente recibe este prompt como mensaje de usuario y usa sus tools
- * (read_file, write_file, bash) para explorar el repo libremente.
+ * (read_file, write_file, exec) para explorar el repo libremente.
  */
 export const INITIALIZE_PROMPT = `Create or update \`STRATUM.md\` for the repository at \`\${path}\`.
 
