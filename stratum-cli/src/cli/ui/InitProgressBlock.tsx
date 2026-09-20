@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
-import { useSpinnerFrame } from './spinner.js';
+import { spinnerFrameAt } from './spinner.js';
 
 export type InitStepStatus = 'running' | 'completed' | 'failed' | 'note';
 
@@ -30,18 +30,17 @@ interface Props {
   steps: InitStep[];
   /** Presente solo cuando `/init` ha terminado: colapsa el bloque. */
   summary?: string;
+  now?: number;
 }
 
-function StepIcon({ status }: { status: InitStepStatus }) {
-  const frame = useSpinnerFrame(status === 'running');
-
-  if (status === 'running') return <Text color={theme.accent}>{frame}</Text>;
+function StepIcon({ status, now }: { status: InitStepStatus; now: number }) {
+  if (status === 'running') return <Text color={theme.accent}>{spinnerFrameAt(now)}</Text>;
   if (status === 'completed') return <Text color={theme.success}>✓</Text>;
   if (status === 'failed') return <Text color={theme.error}>✗</Text>;
   return <Text color={theme.textDisabled}>·</Text>;
 }
 
-export function InitProgressBlock({ steps, summary }: Props) {
+export function InitProgressBlock({ steps, summary, now = Date.now() }: Props) {
   if (summary) {
     return (
       <Box flexDirection="column">
@@ -63,7 +62,7 @@ export function InitProgressBlock({ steps, summary }: Props) {
       </Text>
       {steps.map((step) => (
         <Box key={step.id}>
-          <StepIcon status={step.status} />
+          <StepIcon status={step.status} now={now} />
           <Text color={theme.textMuted}> {step.label}</Text>
           {step.detail && (
             <Text color={theme.textFaint} dimColor wrap="truncate-end">

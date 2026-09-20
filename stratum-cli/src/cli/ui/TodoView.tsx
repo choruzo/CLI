@@ -10,6 +10,7 @@ interface Props {
   items: TodoItem[];
   /** Turnos con tareas abiertas y sin que el modelo tocara la lista. */
   stale: number;
+  maxSteps?: number;
 }
 
 /**
@@ -21,14 +22,16 @@ interface Props {
  * Cuando la lista no cabe en `TODO_VISIBLE_ROWS`, las tareas terminadas colapsan
  * a un contador: lo que importa es lo que queda abierto.
  */
-export function TodoView({ items, stale }: Props) {
+export function TodoView({ items, stale, maxSteps = TODO_VISIBLE_ROWS }: Props) {
   if (items.length === 0) return null;
 
   const total = items.length;
   const open = items.filter(isTodoOpen);
   const finished = total - open.length;
   const collapse = total > TODO_VISIBLE_ROWS && finished > 0;
-  const visible = collapse ? open : items;
+  const candidates = collapse ? open : items;
+  const visible = candidates.slice(0, maxSteps);
+  const hidden = candidates.length - visible.length;
 
   const steps: PlanStep[] = visible.map((item) => ({
     id: item.id,
@@ -49,6 +52,7 @@ export function TodoView({ items, stale }: Props) {
         )}
       </Box>
       <PlanSteps steps={steps} />
+      {hidden > 0 && <Text color={theme.textDisabled}> … {hidden} tareas fuera de vista</Text>}
       {collapse && <Text color={theme.textDisabled}> ✓ {finished} completadas</Text>}
     </Box>
   );

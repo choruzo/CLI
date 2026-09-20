@@ -22,8 +22,38 @@ export interface SubagentTranscript {
   iterations?: number;
   tokens?: number;
   durationMs?: number;
-  /** Cada AgentEvent del loop hijo, en orden (desanidado de subagent_event). */
-  events: AgentEvent[];
+  /** Log persistente O(1) por append; se materializa solo al abrir el inspector. */
+  events: TranscriptEventLog;
+}
+
+export interface TranscriptEventNode {
+  event: AgentEvent;
+  previous: TranscriptEventNode | null;
+}
+
+export interface TranscriptEventLog {
+  tail: TranscriptEventNode | null;
+  length: number;
+}
+
+export function createTranscriptEventLog(): TranscriptEventLog {
+  return { tail: null, length: 0 };
+}
+
+/** Buffer deliberadamente mutable y ajeno al ciclo de render de React. */
+export function appendTranscriptEvent(log: TranscriptEventLog, event: AgentEvent): void {
+  log.tail = { event, previous: log.tail };
+  log.length++;
+}
+
+export function transcriptEventsInOrder(log: TranscriptEventLog): AgentEvent[] {
+  const events = new Array<AgentEvent>(log.length);
+  let node = log.tail;
+  for (let i = log.length - 1; i >= 0 && node; i--) {
+    events[i] = node.event;
+    node = node.previous;
+  }
+  return events;
 }
 
 function fmtDur(ms: number): string {
@@ -77,7 +107,7 @@ interface Props {
  * principal. La restricción de input (solo `/quit`) la gobierna `<App>`.
  */
 export function SubagentView({ transcript, expandedBlockIds, focusedBlockId }: Props) {
-  const { text, toolCalls } = reduceTranscript(transcript.events);
+  const { text, toolCalls } = reduceTranscript(transcriptEventsInOrder(transcript.events));
   const metaParts = [
     `${transcript.iterations ?? 0} it`,
     transcript.tokens !== undefined ? `${transcript.tokens} tok` : '',

@@ -24,7 +24,9 @@ export function applyToolEvent(toolCalls: ToolCallState[], ev: AgentEvent): Tool
     }
     case 'tool_call_ready':
       return toolCalls.map((tc) =>
-        tc.id === ev.id ? { ...tc, status: 'running', input: ev.input } : tc,
+        tc.id === ev.id
+          ? { ...tc, status: 'running', input: ev.input, startedAt: tc.startedAt ?? Date.now() }
+          : tc,
       );
     case 'tool_result':
       return toolCalls.map((tc) =>

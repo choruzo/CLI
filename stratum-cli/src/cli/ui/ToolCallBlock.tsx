@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
-import { SPINNER_FRAMES, SPINNER_INTERVAL_MS } from './spinner.js';
+import { spinnerFrameAt } from './spinner.js';
 
 export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'error';
 
@@ -14,6 +14,8 @@ export interface ToolCallState {
   output?: string;
   errorMsg?: string;
   durationMs?: number;
+  /** Instante de transición a running; el reloj compartido calcula el elapsed. */
+  startedAt?: number;
 }
 
 const MAX_EXPANDED_LINES = 10;
@@ -83,6 +85,8 @@ interface Props {
   focused?: boolean;
   /** Output expandido con Space (§5.1 expandido). */
   expanded?: boolean;
+  /** Reloj compartido de la conversación. */
+  now?: number;
 }
 
 function ExpandedOutput({ text }: { text: string }) {
@@ -112,22 +116,8 @@ function ExpandedOutput({ text }: { text: string }) {
   );
 }
 
-export function ToolCallBlock({ state, focused = false, expanded = false }: Props) {
-  const [frame, setFrame] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
-
-  useEffect(() => {
-    if (state.status !== 'running') return;
-    const spinIv = setInterval(
-      () => setFrame((f) => (f + 1) % SPINNER_FRAMES.length),
-      SPINNER_INTERVAL_MS,
-    );
-    const timerIv = setInterval(() => setElapsedMs((e) => e + 100), 100);
-    return () => {
-      clearInterval(spinIv);
-      clearInterval(timerIv);
-    };
-  }, [state.status]);
+export function ToolCallBlock({ state, focused = false, expanded = false, now = Date.now() }: Props) {
+  const elapsedMs = state.startedAt ? Math.max(0, now - state.startedAt) : 0;
 
   const focusPrefix = focused ? <Text color={theme.accent}>▶ </Text> : null;
   const sshHost = sshHostOf(state);
@@ -152,7 +142,7 @@ export function ToolCallBlock({ state, focused = false, expanded = false }: Prop
     return (
       <Box marginBottom={0}>
         {focusPrefix}
-        <Text color={theme.accent}>{SPINNER_FRAMES[frame]} </Text>
+        <Text color={theme.accent}>{spinnerFrameAt(now)} </Text>
         <Text color={theme.accent} bold>
           {state.name}
         </Text>

@@ -1,5 +1,5 @@
 import React from 'react';
-import { Box } from 'ink';
+import { Box, useStdout } from 'ink';
 import { StatusBar } from './StatusBar.js';
 import type { ProviderStatus } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
@@ -20,6 +20,7 @@ import type {
   TokenAccounting,
 } from '../../agent/types.js';
 import type { TodoItem } from '../../agent/todo.js';
+import { useLiveClock } from './spinner.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -116,6 +117,15 @@ export function ConversationView({
   onQuestionsSubmit,
   onQuestionsCancel,
 }: Props) {
+  const liveNow = useLiveClock(thinking);
+  const { stdout } = useStdout();
+  const terminalRows = stdout.rows ?? 24;
+  const panelMaxSteps = Math.max(2, Math.min(5, Math.floor(terminalRows / 5)));
+  const pinnedPanels = Number(Boolean(plan && planMode === 'execute')) + Number(Boolean(todos?.length));
+  const availableConversationRows = Math.max(
+    8,
+    terminalRows - pinnedPanels * (panelMaxSteps + 3),
+  );
   return (
     <Box flexDirection="column" width="100%">
       <StatusBar
@@ -131,14 +141,18 @@ export function ConversationView({
         tokens={tokens}
         activeAgent={activeAgent}
       />
-      {plan && planMode === 'execute' && <PlanView plan={plan} />}
-      {todos && todos.length > 0 && <TodoView items={todos} stale={todoStale ?? 0} />}
+      {plan && planMode === 'execute' && <PlanView plan={plan} maxSteps={panelMaxSteps} />}
+      {todos && todos.length > 0 && (
+        <TodoView items={todos} stale={todoStale ?? 0} maxSteps={panelMaxSteps} />
+      )}
       <MessageList
         completedItems={completedItems}
         currentItem={currentItem}
         focusedBlockId={focusedBlockId}
         expandedBlockIds={expandedBlockIds}
         debug={debug}
+        now={liveNow}
+        availableRows={availableConversationRows}
       />
       {fatalError && <FatalError message={fatalError.message} />}
       {plan && pendingApproval && (

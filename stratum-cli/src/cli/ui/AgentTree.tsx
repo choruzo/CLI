@@ -1,8 +1,9 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
 import type { ToolCallState } from './ToolCallBlock.js';
+import { spinnerFrameAt } from './spinner.js';
 
 /**
  * Árbol vivo de subagentes en paralelo (Hito 8C, §5.6). Sustituye al grupo de
@@ -12,7 +13,6 @@ import type { ToolCallState } from './ToolCallBlock.js';
  * NO se monta este árbol (se usa `<SubagentBlock>`, §5.5).
  */
 
-const SPINNER = ['◍', '◌', '◎', '●', '◉'];
 const TERMINAL: ReadonlySet<SubagentBlockState['status']> = new Set([
   'completed',
   'failed',
@@ -62,6 +62,7 @@ interface NodeProps {
   focused: boolean;
   expanded: boolean;
   isLast: boolean;
+  now: number;
 }
 
 function nodeIcon(status: SubagentBlockState['status']): { icon: string; color: string } {
@@ -83,25 +84,14 @@ function nodeIcon(status: SubagentBlockState['status']): { icon: string; color: 
   }
 }
 
-function SubagentNode({ node, speaking, focused, expanded, isLast }: NodeProps) {
-  const [frame, setFrame] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
+function SubagentNode({ node, speaking, focused, expanded, isLast, now }: NodeProps) {
   const running = node.status === 'running';
-
-  useEffect(() => {
-    if (!running) return;
-    const spin = setInterval(() => setFrame((f) => (f + 1) % SPINNER.length), 150);
-    const timer = setInterval(() => setElapsedMs((e) => e + 100), 100);
-    return () => {
-      clearInterval(spin);
-      clearInterval(timer);
-    };
-  }, [running]);
+  const elapsedMs = node.startedAt ? Math.max(0, now - node.startedAt) : 0;
 
   const { icon, color } = nodeIcon(node.status);
   const branch = isLast ? '└─' : '├─';
   const marker = speaking ? '▶' : ' ';
-  const spinner = running ? SPINNER[frame] : icon;
+  const spinner = running ? spinnerFrameAt(now) : icon;
 
   const meta =
     node.status === 'queued'
@@ -172,6 +162,7 @@ interface Props {
   maxConcurrency: number;
   focusedBlockId?: string | null;
   expandedBlockIds?: ReadonlySet<string>;
+  now?: number;
 }
 
 export function AgentTree({
@@ -180,6 +171,7 @@ export function AgentTree({
   maxConcurrency,
   focusedBlockId,
   expandedBlockIds,
+  now = Date.now(),
 }: Props) {
   const allTerminal = nodes.every((n) => TERMINAL.has(n.status));
 
@@ -225,6 +217,7 @@ export function AgentTree({
           focused={focusedBlockId === n.id}
           expanded={expandedBlockIds?.has(n.id) ?? false}
           isLast={i === nodes.length - 1}
+          now={now}
         />
       ))}
     </Box>

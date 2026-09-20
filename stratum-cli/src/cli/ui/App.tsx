@@ -31,7 +31,12 @@ import type { ToolRegistry } from '../../tools/registry.js';
 import { parseMcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
-import { SubagentView, type SubagentTranscript } from './SubagentView.js';
+import {
+  SubagentView,
+  appendTranscriptEvent,
+  createTranscriptEventLog,
+  type SubagentTranscript,
+} from './SubagentView.js';
 import { applyToolEvent } from './tool-call-reducer.js';
 import { DELEGATE_TASK_TOOL } from '../../tools/agent/delegate.js';
 import { TODO_TOOL } from '../../tools/todo.js';
@@ -168,6 +173,11 @@ export type AppAction =
   | { type: 'AGENT_START'; input: string }
   | { type: 'AGENT_EVENT'; event: AgentEvent }
   | {
+      type: 'AGENT_FRAME';
+      events: AgentEvent[];
+      context?: { used: number; max: number; estimated: boolean; tokens: TokenAccounting };
+    }
+  | {
       type: 'CONTEXT_UPDATE';
       used: number;
       max: number;
@@ -252,6 +262,20 @@ function updateToolCall(
 
 function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
+    case 'AGENT_FRAME': {
+      const next = action.events.reduce<AppState>(
+        (current, event) => reducer(current, { type: 'AGENT_EVENT', event }),
+        state,
+      );
+      if (!action.context) return next;
+      return {
+        ...next,
+        contextUsed: action.context.used,
+        contextMax: action.context.max,
+        contextEstimated: action.context.estimated,
+        tokens: action.context.tokens,
+      };
+    }
     case 'AGENT_START': {
       const userItem: ConvItem = { kind: 'user', text: action.input };
       const agentItem: AgentConvItem = { kind: 'agent', text: '', toolCalls: [], streaming: true };
@@ -461,6 +485,7 @@ function reducer(state: AppState, action: AppAction): AppState {
               ...tc,
               status: 'running' as const,
               input: ev.input,
+              startedAt: tc.startedAt ?? Date.now(),
             })),
           })),
         };
@@ -521,7 +546,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           n,
           task: ev.task,
           status: 'running',
-          events: [],
+          events: createTranscriptEventLog(),
         });
         return {
           ...state,
@@ -538,6 +563,7 @@ function reducer(state: AppState, action: AppAction): AppState {
                 task: ev.task,
                 n,
                 status: 'running' as const,
+                startedAt: Date.now(),
                 toolCalls: [],
               },
             ],
@@ -549,10 +575,9 @@ function reducer(state: AppState, action: AppAction): AppState {
       // calls del nodo del árbol (ignora text_delta ahí) y acumula el evento en
       // el transcript del subagente (§5.6/§5.7). Marca `speakingSubagentId`.
       if (ev.type === 'subagent_event') {
-        const transcripts = new Map(state.subagentTranscripts);
-        const prev = transcripts.get(ev.subagentId);
+        const prev = state.subagentTranscripts.get(ev.subagentId);
         if (prev) {
-          transcripts.set(ev.subagentId, { ...prev, events: [...prev.events, ev.event] });
+          appendTranscriptEvent(prev.events, ev.event);
         }
         const inner = ev.event;
         const affectsToolCalls =
@@ -560,9 +585,14 @@ function reducer(state: AppState, action: AppAction): AppState {
           inner.type === 'tool_call_ready' ||
           inner.type === 'tool_result' ||
           inner.type === 'tool_error';
+        const sameSpeaker =
+          state.currentItem?.kind === 'agent' &&
+          state.currentItem.speakingSubagentId === ev.subagentId;
+        // Los tokens del hijo no se muestran en el árbol. El buffer mutable los
+        // conserva para `/subagents` sin despertar toda la UI por cada fragmento.
+        if (inner.type === 'text_delta' && sameSpeaker) return state;
         return {
           ...state,
-          subagentTranscripts: transcripts,
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
             speakingSubagentId: ev.subagentId,

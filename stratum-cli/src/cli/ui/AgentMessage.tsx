@@ -28,6 +28,12 @@ interface Props {
   initSummary?: string;
   /** Bloques `⊙ thinking` (§11). Solo llegan con `/debug` activo. */
   thinkingBlocks?: string[];
+  /** Reloj único de la conversación; evita intervalos por bloque. */
+  now?: number;
+  /** Límites de la región viva para que Ink no reescriba todo el scrollback. */
+  liveTextLines?: number;
+  liveColumns?: number;
+  liveActionLimit?: number;
 }
 
 /**
@@ -47,8 +53,20 @@ export function AgentMessage({
   initSteps,
   initSummary,
   thinkingBlocks,
+  now = Date.now(),
+  liveTextLines = 12,
+  liveColumns = 80,
+  liveActionLimit = 6,
 }: Props) {
   const subs = subagents ?? [];
+  const visibleSubs = streaming ? subs.slice(-liveActionLimit) : subs;
+  const remainingLiveActions = Math.max(0, liveActionLimit - visibleSubs.length);
+  const visibleToolCalls = streaming
+    ? remainingLiveActions > 0
+      ? toolCalls.slice(-remainingLiveActions)
+      : []
+    : toolCalls;
+  const hiddenActions = toolCalls.length + subs.length - visibleToolCalls.length - visibleSubs.length;
   const isInit = initSteps !== undefined || initSummary !== undefined;
   const hasContent =
     toolCalls.length > 0 || subs.length > 0 || text || isInit || thinkingBlocks?.length;
@@ -61,8 +79,14 @@ export function AgentMessage({
       </Text>
       {/* `/init` (§5.2): sus tool calls se representan como pasos del bloque de
           progreso, no como <ToolCallBlock> sueltos. */}
-      {isInit && <InitProgressBlock steps={initSteps ?? []} summary={initSummary} />}
-      {thinkingBlocks?.map((t, i) => (
+      {isInit && (
+        <InitProgressBlock
+          steps={streaming ? (initSteps ?? []).slice(-liveActionLimit) : (initSteps ?? [])}
+          summary={initSummary}
+          now={now}
+        />
+      )}
+      {(streaming ? thinkingBlocks?.slice(-2) : thinkingBlocks)?.map((t, i) => (
         <Box key={`think-${i}`} marginLeft={2}>
           <Text color={theme.textDisabled} dimColor wrap="truncate-end">
             ⊙ thinking {t.replace(/\s+/g, ' ').trim()}
@@ -70,35 +94,54 @@ export function AgentMessage({
         </Box>
       ))}
       {!isInit &&
-        toolCalls.map((tc) => (
+        visibleToolCalls.map((tc) => (
           <ToolCallBlock
             key={tc.id}
             state={tc}
             focused={focusedBlockId === tc.id}
             expanded={expandedBlockIds?.has(tc.id) ?? false}
+            now={now}
           />
         ))}
+      {streaming && hiddenActions > 0 && (
+        <Text color={theme.textDisabled} dimColor>
+          … {hiddenActions} acción{hiddenActions === 1 ? '' : 'es'} anterior
+          {hiddenActions === 1 ? '' : 'es'} fijada{hiddenActions === 1 ? '' : 's'} en el scrollback
+        </Text>
+      )}
       {/* Hito 8C: >1 subagente en el turno ⇒ árbol vivo; 1 solo ⇒ bloque plano (§5.6). */}
-      {subs.length > 1 ? (
+      {visibleSubs.length > 1 ? (
         <AgentTree
-          nodes={subs}
+          nodes={visibleSubs}
           speakingId={speakingSubagentId}
           maxConcurrency={maxConcurrency ?? 1}
           focusedBlockId={focusedBlockId}
           expandedBlockIds={expandedBlockIds}
+          now={now}
         />
       ) : (
-        subs.map((sa) => (
+        visibleSubs.map((sa) => (
           <SubagentBlock
             key={sa.id}
             state={sa}
             focused={focusedBlockId === sa.id}
             expanded={expandedBlockIds?.has(sa.id) ?? false}
+            now={now}
           />
         ))
       )}
       {text &&
-        (streaming ? <StreamingText text={text} streaming={true} /> : <MarkdownText text={text} />)}
+        (streaming ? (
+          <StreamingText
+            text={text}
+            streaming={true}
+            now={now}
+            maxVisibleLines={liveTextLines}
+            columns={liveColumns}
+          />
+        ) : (
+          <MarkdownText text={text} />
+        ))}
     </Box>
   );
 }

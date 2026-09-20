@@ -1,7 +1,8 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import type { ToolCallState } from './ToolCallBlock.js';
+import { spinnerFrameAt } from './spinner.js';
 
 /**
  * Estado de un bloque de subagente (Hito 8A, §12.16). Render colapsable estilo
@@ -31,9 +32,10 @@ export interface SubagentBlockState {
   iterations?: number;
   durationMs?: number;
   error?: string;
+  /** Instante de admisión; usado por el reloj compartido de la UI. */
+  startedAt?: number;
 }
 
-const SPINNER_FRAMES = ['◍', '◌', '◎', '●', '◉'];
 const MAX_SUMMARY_LINES = 8;
 const MAX_FILES = 12;
 
@@ -52,6 +54,7 @@ interface Props {
   focused?: boolean;
   /** Detalle expandido con Space. */
   expanded?: boolean;
+  now?: number;
 }
 
 function ExpandedDetail({ state }: { state: SubagentBlockState }) {
@@ -105,19 +108,8 @@ function ExpandedDetail({ state }: { state: SubagentBlockState }) {
   );
 }
 
-export function SubagentBlock({ state, focused = false, expanded = false }: Props) {
-  const [frame, setFrame] = useState(0);
-  const [elapsedMs, setElapsedMs] = useState(0);
-
-  useEffect(() => {
-    if (state.status !== 'running') return;
-    const spinIv = setInterval(() => setFrame((f) => (f + 1) % SPINNER_FRAMES.length), 150);
-    const timerIv = setInterval(() => setElapsedMs((e) => e + 100), 100);
-    return () => {
-      clearInterval(spinIv);
-      clearInterval(timerIv);
-    };
-  }, [state.status]);
+export function SubagentBlock({ state, focused = false, expanded = false, now = Date.now() }: Props) {
+  const elapsedMs = state.startedAt ? Math.max(0, now - state.startedAt) : 0;
 
   const focusPrefix = focused ? <Text color={theme.accent}>▶ </Text> : null;
   const label = (
@@ -131,7 +123,7 @@ export function SubagentBlock({ state, focused = false, expanded = false }: Prop
     return (
       <Box marginBottom={0}>
         {focusPrefix}
-        <Text color={theme.accent}>{SPINNER_FRAMES[frame]} </Text>
+        <Text color={theme.accent}>{spinnerFrameAt(now)} </Text>
         {label}
         {profileTag}
         <Text color={theme.textFaint}> │ {formatDuration(elapsedMs)} │ </Text>
