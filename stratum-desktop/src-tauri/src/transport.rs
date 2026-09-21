@@ -12,7 +12,22 @@ use std::io;
 use std::time::{Duration, Instant};
 
 /// Versión del protocolo que entiende este shell (`DESKTOP_PROTOCOL_VERSION`).
-pub const PROTOCOL_VERSION: u64 = 1;
+pub const PROTOCOL_VERSION: u64 = 2;
+
+/// Tipos que el frontend puede mandar (`CLIENT_FRAME_TYPES` en `protocol.ts`).
+pub const CLIENT_FRAME_TYPES: [&str; 7] = [
+    "ping",
+    "new_conversation",
+    "close_conversation",
+    "chat",
+    "cancel",
+    "answer_questions",
+    "confirm_response",
+];
+
+/// Tope de una trama del frontend (`MAX_FRAME_BYTES` en `protocol.ts`). Se
+/// comprueba aquí para no escribir al pipe algo que el sidecar va a rechazar.
+pub const MAX_CLIENT_FRAME_BYTES: usize = 1024 * 1024;
 
 #[cfg(windows)]
 pub type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
@@ -95,21 +110,29 @@ pub fn parse_handshake_reply(line: &str) -> Result<HandshakeInfo, String> {
 
 /// Valida una trama del frontend y la serializa como línea NDJSON.
 ///
-/// El frontend nunca habla de autenticación: un `handshake` desde el webview se
-/// rechaza aquí, antes de llegar al pipe.
+/// Primera barrera: tipo en la lista blanca y tamaño acotado. El frontend
+/// nunca habla de autenticación, así que un `handshake` desde el webview no
+/// llega al pipe. La validación campo a campo la hace el sidecar (`codec.ts`).
 pub fn outbound_line(frame: &Value) -> Result<String, String> {
     let obj = frame
         .as_object()
         .ok_or("la trama debe ser un objeto JSON")?;
     match obj.get("type").and_then(Value::as_str) {
-        None => Err("la trama necesita un campo `type` de texto".into()),
-        Some("handshake") => Err("el frontend no puede enviar handshakes".into()),
-        Some(_) => {
-            let mut line = frame.to_string();
-            line.push('\n');
-            Ok(line)
+        None => return Err("la trama necesita un campo `type` de texto".into()),
+        Some("handshake") => return Err("el frontend no puede enviar handshakes".into()),
+        Some(t) if !CLIENT_FRAME_TYPES.contains(&t) => {
+            return Err(format!("tipo de trama no permitido: {t}"))
         }
+        Some(_) => {}
     }
+    let mut line = frame.to_string();
+    if line.len() > MAX_CLIENT_FRAME_BYTES {
+        return Err(format!(
+            "la trama supera el límite de {MAX_CLIENT_FRAME_BYTES} bytes"
+        ));
+    }
+    line.push('\n');
+    Ok(line)
 }
 
 #[cfg(test)]
@@ -129,7 +152,7 @@ mod tests {
     #[test]
     fn acepta_handshake_ok_con_la_version_de_protocolo() {
         let info = parse_handshake_reply(
-            &json!({"type":"handshake_ok","core":{"protocolVersion":1,"version":"0.4.0"},"natives":[]})
+            &json!({"type":"handshake_ok","core":{"protocolVersion":2,"version":"0.4.0"},"natives":[]})
                 .to_string(),
         )
         .unwrap();
@@ -139,7 +162,7 @@ mod tests {
     #[test]
     fn rechaza_version_de_protocolo_distinta() {
         let err = parse_handshake_reply(
-            &json!({"type":"handshake_ok","core":{"protocolVersion":2}}).to_string(),
+            &json!({"type":"handshake_ok","core":{"protocolVersion":1}}).to_string(),
         )
         .unwrap_err();
         assert!(err.contains("incompatible"), "{err}");
@@ -162,5 +185,23 @@ mod tests {
             outbound_line(&json!({"type":"ping","id":"1"})).unwrap(),
             "{\"id\":\"1\",\"type\":\"ping\"}\n"
         );
+    }
+
+    #[test]
+    fn solo_pasan_los_tipos_de_la_lista_blanca() {
+        for t in CLIENT_FRAME_TYPES {
+            assert!(outbound_line(&json!({ "type": t })).is_ok(), "{t}");
+        }
+        for t in ["handshake_ok", "agent_event", "shutdown", "rehydrate"] {
+            let err = outbound_line(&json!({ "type": t })).unwrap_err();
+            assert!(err.contains("no permitido"), "{t}: {err}");
+        }
+    }
+
+    #[test]
+    fn rechaza_una_trama_por_encima_del_limite() {
+        let text = "x".repeat(MAX_CLIENT_FRAME_BYTES);
+        let err = outbound_line(&json!({ "type": "chat", "text": text })).unwrap_err();
+        assert!(err.contains("límite"), "{err}");
     }
 }

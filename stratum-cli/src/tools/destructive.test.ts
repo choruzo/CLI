@@ -306,4 +306,15 @@ describe('describeCall', () => {
       'nuke: {"target":"x"}',
     );
   });
+
+  it('redacts secrets identified by field name, also nested', () => {
+    const text = describeCall({
+      id: '1',
+      name: 'deploy',
+      input: { user: 'ana', password: 'hunter2', auth: { apiKey: 'k-123' } },
+    });
+    expect(text).not.toContain('hunter2');
+    expect(text).not.toContain('k-123');
+    expect(text).toContain('"user":"ana"');
+  });
 });

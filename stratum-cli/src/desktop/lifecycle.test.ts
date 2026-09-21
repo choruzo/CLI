@@ -5,6 +5,7 @@ import { tmpdir } from 'os';
 import { ShutdownRegistry } from './lifecycle.js';
 import { LineDecoder, FrameTooLargeError, parseInboundFrame } from './codec.js';
 import { loadSharedConfig, parseSidecarArgs } from './main.js';
+import { LIMITS } from './protocol.js';
 import {
   setOptionalModuleLoader,
   importOptional,
@@ -70,10 +71,55 @@ describe('parseInboundFrame', () => {
     ['"ping"', null],
     ['{"type":"handshake"}', null],
     ['{"type":"ping","id":3}', null],
-    ['{"type":"ping","id":"x","extra":1}', { type: 'ping', id: 'x' }],
+    // D1: schemas estrictos, un campo desconocido invalida la trama.
+    ['{"type":"ping","id":"x","extra":1}', null],
     ['{"type":"handshake","token":"t"}', { type: 'handshake', token: 't' }],
   ])('%s', (line, expected) => {
     expect(parseInboundFrame(line)).toEqual(expected);
+  });
+});
+
+describe('parseInboundFrame — tramas de conversación (D1)', () => {
+  const CID = '6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e';
+  const ok = (frame: unknown) => expect(parseInboundFrame(JSON.stringify(frame))).toEqual(frame);
+  const bad = (frame: unknown) => expect(parseInboundFrame(JSON.stringify(frame))).toBeNull();
+
+  it('acepta las tramas bien formadas', () => {
+    ok({ type: 'new_conversation', conversationId: CID, resume: true });
+    ok({ type: 'close_conversation', conversationId: CID });
+    ok({ type: 'chat', conversationId: CID, turnId: 't1', text: 'hola' });
+    ok({ type: 'cancel', conversationId: CID });
+    ok({ type: 'cancel', conversationId: CID, turnId: 't1' });
+    ok({ type: 'confirm_response', conversationId: CID, callId: 'c1', decision: 'allow-all' });
+    ok({ type: 'answer_questions', conversationId: CID, requestId: 'q1', answers: null });
+    ok({
+      type: 'answer_questions',
+      conversationId: CID,
+      requestId: 'q1',
+      answers: [{ question: '¿?', answer: 'Sí', optionId: 'opt_ab12cd' }],
+    });
+  });
+
+  it('rechaza un conversationId que no es UUID (se usa como nombre de fichero)', () => {
+    bad({ type: 'close_conversation', conversationId: '../../etc/passwd' });
+    bad({ type: 'chat', conversationId: 'abc', turnId: 't', text: 'x' });
+  });
+
+  it('rechaza campos fuera de dominio o de límite', () => {
+    bad({ type: 'chat', conversationId: CID, turnId: 't', text: '' });
+    bad({ type: 'chat', conversationId: CID, turnId: 't', text: 'x'.repeat(LIMITS.chatChars + 1) });
+    bad({ type: 'chat', conversationId: CID, turnId: 'x'.repeat(LIMITS.idChars + 1), text: 'x' });
+    bad({ type: 'confirm_response', conversationId: CID, callId: 'c', decision: 'yes' });
+    bad({
+      type: 'answer_questions',
+      conversationId: CID,
+      requestId: 'q',
+      answers: [
+        { question: 'a', answer: '1' },
+        { question: 'a', answer: '2' },
+      ],
+    });
+    bad({ type: 'unknown', conversationId: CID });
   });
 });
 

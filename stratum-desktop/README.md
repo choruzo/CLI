@@ -2,8 +2,9 @@
 
 Shell de escritorio (Tauri v2 + React 18) sobre el core de `stratum-cli`. La
 definición completa está en `../STRATUM_DESKTOP_PROJECT_DEFINITION.md` y el plan
-por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D0** (ventana + sidecar
-empaquetado + canal autenticado + ping; todavía sin chat).
+por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 en curso** (chat de
+asistente en una conversación sobre el canal autenticado de D0; pendiente la
+prueba con un provider real).
 
 ## Requisitos de desarrollo
 
@@ -116,5 +117,46 @@ En WSL, linuxdeploy no puede montar su propia AppImage sin FUSE:
 3. **Si Tauri muere sin poder hacer nada**: en Windows, el Job Object con
    `KILL_ON_JOB_CLOSE` mata el sidecar y todos sus hijos; en Linux, `PR_SET_PDEATHSIG`
    más el EOF en stdin. `PDEATHSIG` se dispara cuando muere el **hilo** que lanzó
-   el proceso, así que `SidecarProcess::spawn` tiene que llamarse desde el hilo
-   principal (el `setup` de Tauri), nunca desde un hilo auxiliar.
+   el proceso, así que `SidecarProcess::spawn` solo se llama desde el hilo
+   dedicado del supervisor (D1), que vive tanto como la app; nunca desde un
+   worker de Tokio.
+
+## Chat de asistente (D1)
+
+```
+webview                      Rust                               stratum-core (SEA)
+useAgentStream ─invoke──► sidecar_send (lista blanca + 1 MiB) ─pipe─► codec.ts (Zod estricto)
+      ▲                                                                   │
+      └──Channel──── relay (un suscriptor, reparto en bridge.ts) ◄─pipe── ConversationHost
+                          ▲                                                └ ConversationSession × N
+                     supervisor.rs (hilo dedicado,                            (StratumAgent preset
+                     backoff 1→2→5→10 s, máx. 4)                               `assistant`, registry
+                                                                               y router propios)
+```
+
+- **Protocolo v2** (`stratum-cli/src/desktop/protocol.ts`): `new_conversation`,
+  `close_conversation`, `chat`, `cancel`, `answer_questions`,
+  `confirm_response` con `conversationId`; salida `agent_event`, `turn_ended`,
+  `chat_rejected`, `confirm_request`, `questions_request`, `prompt_resolved`,
+  `conversation_opened|closed|error`. `cancel` viaja por el mismo canal ordenado
+  que el stream (15.9).
+- **Autenticación (15.1)**: una trama de conversación solo llega al host desde
+  una conexión autenticada; el cliente activo tiene un *lease*
+  (`connectionId`) y el cierre tardío de una conexión sustituida no cancela los
+  turnos de la nueva.
+- **Turnos**: uno a la vez por conversación, una única tarea que siempre acaba
+  en `turn_ended` y guarda la sesión. Confirmaciones (5 min) y preguntas
+  (10 min) se resuelven solas con `deny`/`null` al vencer, cancelar o cerrar.
+  `allow-all` vale para el resto de la conversación.
+- **Rehidratación (15.5)**: sesiones en `~/.stratum/desktop/sessions/<uuid>.json`
+  (escritura atómica). Tras un reinicio del sidecar el frontend reenvía
+  `new_conversation {resume: true}` y el agente recupera el historial; el turno
+  que estaba a medias se ofrece para reintentar.
+- **Memoria del asistente**: `~/.stratum/desktop/memory/`, separada de la de
+  cualquier proyecto.
+- **Markdown (15.13)**: `marked.lexer` solo trocea en bloques; cada bloque se
+  renderiza con react-markdown memoizado por su texto, así que en streaming solo
+  se re-parsea el último. Resaltado con `rehype-highlight` (nodos, sin HTML
+  inyectado) solo en vallas cerradas. Sin HTML crudo, URLs solo `http(s)`/
+  `mailto`, imágenes como enlace y enlaces sin `href` que abren el navegador del
+  sistema.

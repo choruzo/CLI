@@ -3,8 +3,18 @@ import { connect, type Socket } from 'net';
 import { randomBytes } from 'crypto';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { startDesktopServer, tokensMatch, type DesktopServer } from './server.js';
-import { DESKTOP_PROTOCOL_VERSION, type CoreInfo, type SidecarErrorFrame } from './protocol.js';
+import {
+  startDesktopServer,
+  tokensMatch,
+  type ConversationSink,
+  type DesktopServer,
+} from './server.js';
+import {
+  DESKTOP_PROTOCOL_VERSION,
+  type ConversationFrame,
+  type CoreInfo,
+  type SidecarErrorFrame,
+} from './protocol.js';
 
 const TOKEN = randomBytes(32).toString('hex');
 
@@ -218,5 +228,119 @@ describe('tokensMatch', () => {
     expect(tokensMatch(TOKEN, TOKEN)).toBe(true);
     expect(tokensMatch(TOKEN, TOKEN.slice(1))).toBe(false);
     expect(tokensMatch(TOKEN, '')).toBe(false);
+  });
+});
+
+describe('servidor IPC — conversaciones (D1, 15.1)', () => {
+  const CID = '6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e';
+  const CHAT = { type: 'chat', conversationId: CID, turnId: 't1', text: 'hola' };
+  let server: DesktopServer | null = null;
+  const clients: Client[] = [];
+
+  function sink() {
+    const calls = {
+      handled: [] as ConversationFrame[],
+      attached: [] as number[],
+      detached: [] as number[],
+    };
+    const conversations: ConversationSink = {
+      attach: (id) => void calls.attached.push(id),
+      detach: (id) => void calls.detached.push(id),
+      handle: (frame) => void calls.handled.push(frame),
+    };
+    return { calls, conversations };
+  }
+
+  async function start(conversations: ConversationSink): Promise<string> {
+    const path = ipcPath();
+    server = await startDesktopServer({
+      ipcPath: path,
+      token: TOKEN,
+      core: CORE,
+      natives: async () => [],
+      conversations,
+    });
+    return path;
+  }
+
+  async function open(path: string): Promise<Client> {
+    const c = await Client.open(path);
+    clients.push(c);
+    return c;
+  }
+
+  afterEach(async () => {
+    for (const c of clients.splice(0)) c.socket.destroy();
+    await server?.close();
+    server = null;
+  });
+
+  it('un chat sin handshake se rechaza y nunca llega a las conversaciones', async () => {
+    const { calls, conversations } = sink();
+    const c = await open(await start(conversations));
+    c.send(CHAT);
+    await c.whenClosed();
+    expect(c.frames).toEqual([{ type: 'handshake_error', reason: 'expected_handshake' }]);
+    expect(calls.handled).toEqual([]);
+    expect(calls.attached).toEqual([]);
+  });
+
+  it('un token incorrecto seguido de un chat en el mismo chunk tampoco llega', async () => {
+    const { calls, conversations } = sink();
+    const c = await open(await start(conversations));
+    c.raw(
+      JSON.stringify({ type: 'handshake', token: 'y'.repeat(64) }) +
+        '\n' +
+        JSON.stringify(CHAT) +
+        '\n',
+    );
+    await c.whenClosed();
+    expect(c.frames).toEqual([{ type: 'handshake_error', reason: 'bad_token' }]);
+    expect(calls.handled).toEqual([]);
+  });
+
+  it('con token, las tramas de conversación llegan en orden tras el handshake_ok', async () => {
+    const { calls, conversations } = sink();
+    const c = await open(await start(conversations));
+    // El chat viaja pegado al handshake: se encola mientras se sondean los nativos.
+    c.raw(JSON.stringify({ type: 'handshake', token: TOKEN }) + '\n' + JSON.stringify(CHAT) + '\n');
+    c.send({ type: 'cancel', conversationId: CID, turnId: 't1' });
+    await c.waitFor(() => calls.handled.length === 2);
+    expect(c.frames[0]).toMatchObject({ type: 'handshake_ok' });
+    expect(calls.handled.map((f) => f.type)).toEqual(['chat', 'cancel']);
+    expect(calls.attached).toHaveLength(1);
+  });
+
+  it('una trama de conversación inválida se contesta con error de protocolo', async () => {
+    const { calls, conversations } = sink();
+    const c = await open(await start(conversations));
+    c.send({ type: 'handshake', token: TOKEN });
+    c.send({ ...CHAT, conversationId: '../x' });
+    await c.frameCount(2);
+    expect(c.frames[1]).toMatchObject({ type: 'sidecar_error', code: 'protocol' });
+    expect(calls.handled).toEqual([]);
+  });
+
+  it('un cliente nuevo sustituye al anterior sin que el cierre del viejo lo desconecte', async () => {
+    const { calls, conversations } = sink();
+    const path = await start(conversations);
+    const a = await open(path);
+    a.send({ type: 'handshake', token: TOKEN });
+    await a.frameCount(1);
+    const b = await open(path);
+    b.send({ type: 'handshake', token: TOKEN });
+    await b.frameCount(1);
+    await a.whenClosed();
+
+    expect(calls.attached).toHaveLength(2);
+    // El cierre de `a` llega cuando `b` ya tiene el lease: no hay detach.
+    expect(calls.detached).toEqual([]);
+    b.send(CHAT);
+    await b.waitFor(() => calls.handled.length === 1);
+
+    b.socket.destroy();
+    await b.whenClosed();
+    await b.waitFor(() => calls.detached.length === 1);
+    expect(calls.detached).toEqual([calls.attached[1]]);
   });
 });

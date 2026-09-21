@@ -38,6 +38,7 @@ import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
 import { MemoryManager } from '../memory/manager.js';
+import { assistantToolsetFilter, type PromptPreset } from './presets.js';
 import { extractAndStore } from '../memory/extractor.js';
 
 export interface StratumAgentOptions {
@@ -68,6 +69,12 @@ export interface StratumAgentOptions {
    * producción lee `~/.stratum/agents` y los roots del cwd.
    */
   profileLoader?: ProfileLoader;
+  /**
+   * Preset del prompt y del toolset (Stratum Desktop D1). Default `coding`: la
+   * CLI no cambia. `assistant` es el asistente del modo Chat — sin skills, sin
+   * perfiles, sin `STRATUM.md` de proyecto y con el toolset de `ASSISTANT_TOOLS`.
+   */
+  promptPreset?: PromptPreset;
 }
 
 export class StratumAgent {
@@ -117,6 +124,7 @@ export class StratumAgent {
   private _activeProfile: AgentProfile | null = null;
   /** Aviso de un solo uso al reanudar con un perfil que ya no se puede activar. */
   private _resumeNotice: string | null = null;
+  private readonly preset: PromptPreset;
 
   constructor(
     private readonly config: StratumConfig,
@@ -125,6 +133,7 @@ export class StratumAgent {
     options?: StratumAgentOptions,
   ) {
     this.memoryManager = new MemoryManager(config);
+    this.preset = options?.promptPreset ?? 'coding';
     // Perfiles de subagente desde la raíz del worktree git Y el cwd: la raíz del
     // worktree cubre la invocación desde un subdirectorio del repo (consistente
     // con el `<env>`); el cwd cubre el caso en que el proyecto npm vive en un
@@ -138,7 +147,9 @@ export class StratumAgent {
     // system prompt; el cuerpo de cada skill se lee bajo demanda con read_file.
     // La tabla materializada en disco es auditable y sirve de caché: si el
     // fingerprint no cambia, no se reescribe.
-    if (config.skills.enabled) {
+    // El asistente no tiene skills: su índice presupone un proyecto, y
+    // materializarlo escribiría `skill-registry.md` en el cwd del sidecar.
+    if (config.skills.enabled && this.preset === 'coding') {
       const registry = new SkillRegistry([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
       this.skillsBlock = registry.promptBlock(process.cwd());
       registry.writeRegistryFile(config.skills.registryFile);
@@ -163,6 +174,14 @@ export class StratumAgent {
       // Reanudación de plan interrumpido (§12.6): inyectar el estado de los pasos.
       if (options.resumePreamble) {
         this.messages.push({ role: 'user', content: options.resumePreamble });
+      }
+      // El asistente nunca conserva el system prompt guardado: una sesión de
+      // otro modo, de una versión anterior o editada a mano podría traer el
+      // prompt de código (16.6). Se conserva el historial y se recompone el
+      // system prompt desde el preset actual.
+      if (this.preset === 'assistant') {
+        this.messages = this.messages.filter((m) => m.role !== 'system');
+        this.rebuildSystemPrompt();
       }
     } else {
       // Nueva sesión: construir system prompt con memoria del proyecto
@@ -476,6 +495,15 @@ export class StratumAgent {
    * suyo, el primero que olvidase un campo borraría el bloque del perfil.
    */
   private promptEnv(): SystemPromptEnv {
+    // El asistente no delega ni tiene perfiles, skills o guías: nada de eso se
+    // calcula (las guías, además, se materializarían en el cwd).
+    if (this.preset === 'assistant') {
+      return {
+        modelId: this.router.model,
+        providerName: this.router.providerName,
+        preset: 'assistant',
+      };
+    }
     const active = this._activeProfile;
     // Un perfil principal sin `delegate_task` no puede delegar: anunciarle
     // perfiles y reglas de delegación le ordenaría llamar a una tool que no tiene.
@@ -509,7 +537,12 @@ export class StratumAgent {
   }
 
   private buildSystemContent(): string {
-    const memory = this.memoryManager.getInjectableMemory();
+    // Modo Chat: solo el `STRATUM.md` global. El de proyecto se resolvería
+    // contra el cwd del sidecar, que no es ningún proyecto.
+    const memory =
+      this.preset === 'assistant'
+        ? this.memoryManager.getProjectMemory().globalContent
+        : this.memoryManager.getInjectableMemory();
     return buildSystemPrompt(this.config, memory || undefined, this.promptEnv());
   }
 
@@ -533,9 +566,12 @@ export class StratumAgent {
         skillsBlock: this.skillsBlock,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
         // control pasan aunque el perfil no las liste; `delegate_task` no.
-        toolsetFilter: active
-          ? { allowedTools: active.allowedTools, controlTools: 'keep' }
-          : undefined,
+        toolsetFilter:
+          this.preset === 'assistant'
+            ? assistantToolsetFilter()
+            : active
+              ? { allowedTools: active.allowedTools, controlTools: 'keep' }
+              : undefined,
       },
     );
   }
@@ -563,6 +599,12 @@ export class StratumAgent {
       this._activeProfile = null;
       this.rebuildSystemPrompt();
       return { ok: true, profile: null, notes: [] };
+    }
+    if (this.preset === 'assistant') {
+      return {
+        ok: false,
+        error: 'los perfiles de agente no están disponibles en el modo asistente.',
+      };
     }
     const profile = this.profiles.resolve(name);
     if (!profile) {

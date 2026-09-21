@@ -13,6 +13,8 @@ export function describeConnection(state: SidecarState): { label: string; tone: 
         : { label: 'Agente conectado con errores', tone: 'warn' };
     case 'disconnected':
       return { label: 'Agente desconectado', tone: 'error' };
+    case 'reconnecting':
+      return { label: 'Reconectando…', tone: 'warn' };
     case 'failed':
       return { label: 'Agente no disponible', tone: 'error' };
   }

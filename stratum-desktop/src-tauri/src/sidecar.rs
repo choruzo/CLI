@@ -148,8 +148,9 @@ impl SidecarProcess {
             use std::os::unix::process::CommandExt;
             // PDEATHSIG se dispara cuando muere el HILO que hizo el fork, no el
             // proceso: `spawn` tiene que llamarse desde un hilo que viva tanto
-            // como la app (el `setup` de Tauri corre en el hilo principal). Desde
-            // un hilo auxiliar, el sidecar moriría al terminar ese hilo.
+            // como la app. Por eso todos los lanzamientos, también los
+            // reinicios, salen del hilo dedicado de `supervisor.rs`; desde un
+            // worker de Tokio el sidecar moriría al terminar ese worker.
             let parent = std::process::id() as libc::pid_t;
             // SAFETY: solo llamadas async-signal-safe entre fork y exec.
             unsafe {

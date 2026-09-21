@@ -1,7 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos de la ventana principal. D0 solo necesita el núcleo de Tauri: el sidecar se lanza desde Rust con std::process (sin plugin shell) y todo el acceso a ficheros de proyecto se enrutará por el sidecar (15.8).",
+  "description": "Permisos de la ventana principal. El sidecar se lanza desde Rust con std::process (sin plugin shell) y todo acceso a ficheros pasa por el sidecar (15.8). D1 añade solo abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto: el webview nunca navega fuera de la app.",
   "windows": ["main"],
-  "permissions": ["core:default"]
+  "permissions": [
+    "core:default",
+    {
+      "identifier": "opener:allow-open-url",
+      "allow": [{ "url": "https://*" }, { "url": "http://*" }, { "url": "mailto:*" }]
+    }
+  ]
 }

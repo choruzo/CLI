@@ -2,7 +2,9 @@
  * Codificación NDJSON del canal del sidecar. Separado de `protocol.ts` porque
  * usa `Buffer`, y `protocol.ts` lo importa también el frontend de Desktop.
  */
-import type { InboundFrame, OutboundFrame } from './protocol.js';
+import { z } from 'zod';
+import { LIMITS, type InboundFrame, type OutboundFrame } from './protocol.js';
+import { isConversationId } from './session-store.js';
 
 export function encodeFrame(frame: OutboundFrame): string {
   // JSON.stringify nunca emite un salto de línea literal: los de los strings
@@ -61,6 +63,60 @@ export class LineDecoder {
   }
 }
 
+const id = z.string().min(1).max(LIMITS.idChars);
+const conversationId = z.string().refine(isConversationId, 'conversationId no es un UUID');
+
+const answer = z
+  .object({
+    question: z.string().max(LIMITS.answerChars),
+    answer: z.string().max(LIMITS.answerChars),
+    optionId: id.optional(),
+  })
+  .strict();
+
+/**
+ * Schemas de entrada. `strict()`: un campo desconocido invalida la trama en vez
+ * de viajar ignorado hacia el core.
+ */
+const inboundSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('handshake'), token: z.string().max(1024) }).strict(),
+  z.object({ type: z.literal('ping'), id: id.optional() }).strict(),
+  z
+    .object({ type: z.literal('new_conversation'), conversationId, resume: z.boolean().optional() })
+    .strict(),
+  z.object({ type: z.literal('close_conversation'), conversationId }).strict(),
+  z
+    .object({
+      type: z.literal('chat'),
+      conversationId,
+      turnId: id,
+      text: z.string().min(1).max(LIMITS.chatChars),
+    })
+    .strict(),
+  z.object({ type: z.literal('cancel'), conversationId, turnId: id.optional() }).strict(),
+  z
+    .object({
+      type: z.literal('answer_questions'),
+      conversationId,
+      requestId: id,
+      answers: z
+        .array(answer)
+        .max(LIMITS.answers)
+        // Una respuesta por pregunta: dos para la misma son ambiguas.
+        .refine((a) => new Set(a.map((x) => x.question)).size === a.length, 'respuestas duplicadas')
+        .nullable(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('confirm_response'),
+      conversationId,
+      callId: id,
+      decision: z.enum(['approve', 'deny', 'allow-all']),
+    })
+    .strict(),
+]);
+
 /** Parsea una línea como trama de entrada. Devuelve `null` si no tiene forma válida. */
 export function parseInboundFrame(line: string): InboundFrame | null {
   let value: unknown;
@@ -69,15 +125,6 @@ export function parseInboundFrame(line: string): InboundFrame | null {
   } catch {
     return null;
   }
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return null;
-  const frame = value as Record<string, unknown>;
-  switch (frame.type) {
-    case 'handshake':
-      return typeof frame.token === 'string' ? { type: 'handshake', token: frame.token } : null;
-    case 'ping':
-      if (frame.id !== undefined && typeof frame.id !== 'string') return null;
-      return frame.id === undefined ? { type: 'ping' } : { type: 'ping', id: frame.id };
-    default:
-      return null;
-  }
+  const parsed = inboundSchema.safeParse(value);
+  return parsed.success ? (parsed.data as InboundFrame) : null;
 }

@@ -10,14 +10,18 @@
 //!
 //! Como stream y control comparten este único canal, un `cancel` (D1) nunca
 //! adelanta a los chunks que ya estaban en vuelo (15.9).
+//!
+//! Quién lanza el sidecar y cuándo se relanza lo decide `supervisor.rs`; aquí
+//! vive el estado compartido y un ciclo de relay (`relay_once`).
 
 use crate::sidecar::SidecarProcess;
 use crate::transport;
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::VecDeque;
+use std::sync::mpsc::Sender;
 use std::sync::Mutex;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -46,6 +50,15 @@ pub enum SidecarStatus {
         #[serde(rename = "exitCode")]
         exit_code: Option<i32>,
     },
+    /// El sidecar se cayó y el supervisor lo relanzará tras `delay_ms` (15.5).
+    Reconnecting {
+        attempt: u32,
+        #[serde(rename = "maxAttempts")]
+        max_attempts: u32,
+        #[serde(rename = "delayMs")]
+        delay_ms: u64,
+        reason: String,
+    },
     Failed {
         message: String,
     },
@@ -55,13 +68,23 @@ pub enum SidecarStatus {
 struct Relay {
     subscriber: Option<Channel<Value>>,
     pending: VecDeque<Value>,
-    outbound: Option<mpsc::UnboundedSender<String>>,
+    /// Canal hacia el pipe, etiquetado con la generación del relay que lo abrió.
+    outbound: Option<(u64, mpsc::UnboundedSender<String>)>,
+}
+
+/// Proceso del sidecar + si la app está saliendo, bajo un mismo mutex: así
+/// instalar un proceso y empezar la salida no pueden cruzarse.
+#[derive(Default)]
+struct ProcessSlot {
+    exiting: bool,
+    process: Option<SidecarProcess>,
 }
 
 pub struct SidecarState {
     status: Mutex<SidecarStatus>,
     relay: Mutex<Relay>,
-    process: Mutex<Option<SidecarProcess>>,
+    process: Mutex<ProcessSlot>,
+    supervisor: Mutex<Option<Sender<crate::supervisor::Command>>>,
 }
 
 impl SidecarState {
@@ -69,22 +92,52 @@ impl SidecarState {
         Self {
             status: Mutex::new(SidecarStatus::Starting),
             relay: Mutex::new(Relay::default()),
-            process: Mutex::new(None),
+            process: Mutex::new(ProcessSlot::default()),
+            supervisor: Mutex::new(None),
         }
     }
 
-    pub fn set_process(&self, process: SidecarProcess) {
-        *self.process.lock().unwrap() = Some(process);
+    pub fn set_supervisor(&self, tx: Sender<crate::supervisor::Command>) {
+        *self.supervisor.lock().unwrap() = Some(tx);
+    }
+
+    /// Instala el proceso recién lanzado. Si la app ya está saliendo, lo
+    /// devuelve para que quien lo lanzó lo apague.
+    pub fn install_process(&self, process: SidecarProcess) -> Result<(), SidecarProcess> {
+        let mut slot = self.process.lock().unwrap();
+        if slot.exiting {
+            return Err(process);
+        }
+        slot.process = Some(process);
+        Ok(())
     }
 
     pub fn take_process(&self) -> Option<SidecarProcess> {
-        self.process.lock().unwrap().take()
+        self.process.lock().unwrap().process.take()
+    }
+
+    pub fn is_exiting(&self) -> bool {
+        self.process.lock().unwrap().exiting
+    }
+
+    /// Empieza la salida de la app: ningún proceso más se instalará, el
+    /// supervisor deja de esperar (se suelta su canal) y se devuelve el
+    /// proceso vivo para apagarlo.
+    pub fn begin_exit(&self) -> Option<SidecarProcess> {
+        let process = {
+            let mut slot = self.process.lock().unwrap();
+            slot.exiting = true;
+            slot.process.take()
+        };
+        self.supervisor.lock().unwrap().take();
+        process
     }
 
     fn exit_code(&self) -> Option<Option<i32>> {
         self.process
             .lock()
             .unwrap()
+            .process
             .as_mut()
             .and_then(SidecarProcess::try_exit)
     }
@@ -149,7 +202,7 @@ pub fn sidecar_subscribe(state: State<'_, SidecarState>, on_frame: Channel<Value
 pub fn sidecar_send(state: State<'_, SidecarState>, frame: Value) -> Result<(), String> {
     let line = transport::outbound_line(&frame)?;
     let relay = state.relay.lock().unwrap();
-    let tx = relay
+    let (_, tx) = relay
         .outbound
         .as_ref()
         .ok_or("el sidecar no está conectado")?;
@@ -157,22 +210,36 @@ pub fn sidecar_send(state: State<'_, SidecarState>, frame: Value) -> Result<(), 
         .map_err(|_| "el canal con el sidecar está cerrado".to_string())
 }
 
+/// Reintentar tras agotar los reinicios automáticos (botón de la UI).
+#[tauri::command]
+pub fn sidecar_restart(state: State<'_, SidecarState>) -> Result<(), String> {
+    let supervisor = state.supervisor.lock().unwrap();
+    let tx = supervisor
+        .as_ref()
+        .ok_or("la aplicación se está cerrando")?;
+    tx.send(crate::supervisor::Command::Restart)
+        .map_err(|_| "el supervisor del sidecar no está activo".to_string())
+}
+
 // ---------------------------------------------------------------------------
 // Relay
 // ---------------------------------------------------------------------------
 
-/// Conecta, autentica y reenvía tramas hasta que el pipe se cierra.
-pub async fn run_relay(app: AppHandle, ipc_path: String, token: String) {
-    match relay_once(&app, &ipc_path, &token).await {
-        Ok(reason) => {
-            let exit_code = app.state::<SidecarState>().exit_code().flatten();
-            set_status(&app, SidecarStatus::Disconnected { reason, exit_code });
-        }
-        Err(message) => set_status(&app, SidecarStatus::Failed { message }),
-    }
+/// Fin de un relay que llegó a conectar.
+pub struct RelayEnd {
+    pub reason: String,
+    /// Cuánto duró la conexión autenticada (decide si se reinicia el backoff).
+    pub connected_for: Duration,
 }
 
-async fn relay_once(app: &AppHandle, ipc_path: &str, token: &str) -> Result<String, String> {
+/// Conecta, autentica y reenvía tramas hasta que el pipe se cierra. `Err` si
+/// no llegó a conectar.
+pub async fn relay_once(
+    app: &AppHandle,
+    ipc_path: &str,
+    token: &str,
+    generation: u64,
+) -> Result<RelayEnd, String> {
     let state = app.state::<SidecarState>();
     let stream = transport::connect(ipc_path, CONNECT_TIMEOUT, || match state.exit_code() {
         Some(code) => Err(format!(
@@ -197,7 +264,14 @@ async fn relay_once(app: &AppHandle, ipc_path: &str, token: &str) -> Result<Stri
     let info = transport::parse_handshake_reply(&reply)?;
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
-    state.relay.lock().unwrap().outbound = Some(tx);
+    {
+        let mut relay = state.relay.lock().unwrap();
+        relay.outbound = Some((generation, tx));
+        // Tramas de un sidecar anterior que el frontend no llegó a recoger: ya
+        // no significan nada para este.
+        relay.pending.clear();
+    }
+    let connected_at = Instant::now();
     set_status(
         app,
         SidecarStatus::Connected {
@@ -225,9 +299,28 @@ async fn relay_once(app: &AppHandle, ipc_path: &str, token: &str) -> Result<Stri
         }
     };
 
-    state.relay.lock().unwrap().outbound = None;
+    {
+        let mut relay = state.relay.lock().unwrap();
+        if matches!(relay.outbound, Some((g, _)) if g == generation) {
+            relay.outbound = None;
+        }
+    }
     writer_task.abort();
     // Deja un instante para que el proceso termine y su código quede disponible.
     tokio::time::sleep(Duration::from_millis(200)).await;
-    Ok(reason)
+    let exit_code = state.exit_code().flatten();
+    set_status(
+        app,
+        SidecarStatus::Disconnected {
+            reason: reason.clone(),
+            exit_code,
+        },
+    );
+    Ok(RelayEnd {
+        reason: match exit_code {
+            Some(code) => format!("{reason} (código de salida {code})"),
+            None => reason,
+        },
+        connected_for: connected_at.elapsed(),
+    })
 }

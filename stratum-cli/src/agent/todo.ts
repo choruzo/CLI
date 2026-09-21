@@ -20,16 +20,11 @@
  * El estado vive en el historial (cada tool result lleva el snapshot completo),
  * así que `chat --resume` lo recupera sin store nuevo en disco.
  */
-import type { Message, PlanStepStatus } from './types.js';
+import type { Message } from './types.js';
+import type { TodoItem, TodoStatus } from './events.js';
 
-/** Mismo vocabulario de estado que los pasos de plan, para no duplicarlo. */
-export type TodoStatus = PlanStepStatus;
-
-export interface TodoItem {
-  id: string;
-  title: string;
-  status: TodoStatus;
-}
+// Definidos en `events.ts` (viajan en `todo_updated`); se re-exportan aquí.
+export type { TodoItem, TodoStatus } from './events.js';
 
 /** Turnos sin tocar `todo` con tareas abiertas a partir de los cuales se avisa. */
 export const TODO_STALE_TURNS = 2;

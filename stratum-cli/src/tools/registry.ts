@@ -1,4 +1,5 @@
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { redact } from '../logging/redact.js';
 import type {
   ToolDefinition,
   ToolContext,
@@ -565,7 +566,11 @@ export function describeCall(call: ToolCallReady): string {
     const detail = [call.input.localPath, call.input.remotePath].filter(Boolean).join(' → ');
     return `${call.name} [${call.input.host}]: ${detail}`;
   }
-  const compact = JSON.stringify(call.input);
+  // Redacción estructural antes de serializar: `redactText` (que el dispatcher
+  // aplica después) solo reconoce formas de secreto, no un `{"password": "…"}`
+  // cualquiera. La descripción viaja al usuario — a la terminal y, en Stratum
+  // Desktop, al webview (`confirm_request`).
+  const compact = JSON.stringify(redact(call.input));
   const summary = compact.length > 120 ? compact.slice(0, 117) + '...' : compact;
   return `${call.name}: ${summary}`;
 }

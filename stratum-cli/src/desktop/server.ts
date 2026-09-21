@@ -7,6 +7,8 @@ import {
   HANDSHAKE_TIMEOUT_MS,
   MAX_FRAME_BYTES,
   MAX_UNAUTHENTICATED_FRAME_BYTES,
+  type ConversationFrame,
+  type ConversationOutboundFrame,
   type CoreInfo,
   type HandshakeErrorFrame,
   type NativeProbe,
@@ -31,6 +33,18 @@ export interface DesktopServerOptions {
    */
   startupError?: SidecarErrorFrame | null;
   handshakeTimeoutMs?: number;
+  /** Destino de las tramas de conversación (D1). Sin él, se contestan con error de protocolo. */
+  conversations?: ConversationSink;
+}
+
+/**
+ * Lo que el servidor necesita del `ConversationHost`. Solo recibe tramas de
+ * conexiones **autenticadas**: una conexión sin token no llega nunca aquí (15.1).
+ */
+export interface ConversationSink {
+  attach(connectionId: number, send: (frame: ConversationOutboundFrame) => void): void;
+  detach(connectionId: number): void | Promise<void>;
+  handle(frame: ConversationFrame, connectionId: number): void;
 }
 
 export interface DesktopServer {
@@ -50,13 +64,21 @@ export function tokensMatch(expected: string, received: string): boolean {
 export function startDesktopServer(opts: DesktopServerOptions): Promise<DesktopServer> {
   const sockets = new Set<Socket>();
   const handshakeTimeoutMs = opts.handshakeTimeoutMs ?? HANDSHAKE_TIMEOUT_MS;
+  const lease: ClientLease = { nextId: 1, active: null };
 
   const server = createServer((socket) => {
     sockets.add(socket);
-    socket.on('close', () => sockets.delete(socket));
+    const connectionId = lease.nextId++;
+    socket.on('close', () => {
+      sockets.delete(socket);
+      if (lease.active?.id === connectionId) {
+        lease.active = null;
+        void opts.conversations?.detach(connectionId);
+      }
+    });
     // Un error de E/S en un cliente no puede tumbar el sidecar.
     socket.on('error', (err) => log.debug('socket error', { err }));
-    handleConnection(socket, opts, handshakeTimeoutMs);
+    handleConnection(socket, connectionId, opts, handshakeTimeoutMs, lease);
   });
 
   return new Promise((resolve, reject) => {
@@ -86,7 +108,23 @@ function closeServer(server: Server, sockets: Set<Socket>): Promise<void> {
   });
 }
 
-function handleConnection(socket: Socket, opts: DesktopServerOptions, timeoutMs: number): void {
+/**
+ * Cliente autenticado activo. Solo hay uno (el relay de Rust): uno nuevo lo
+ * sustituye. El orden importa — primero se mueve el lease y después se destruye
+ * el socket viejo, así su `close` ya no es del activo y no cancela nada.
+ */
+interface ClientLease {
+  nextId: number;
+  active: { id: number; socket: Socket } | null;
+}
+
+function handleConnection(
+  socket: Socket,
+  connectionId: number,
+  opts: DesktopServerOptions,
+  timeoutMs: number,
+  lease: ClientLease,
+): void {
   const decoder = new LineDecoder(MAX_UNAUTHENTICATED_FRAME_BYTES);
   let authenticated = false;
   let rejected = false;
@@ -137,6 +175,20 @@ function handleConnection(socket: Socket, opts: DesktopServerOptions, timeoutMs:
           message: 'Handshake duplicado en una conexión ya autenticada.',
         });
         return;
+      default:
+        // Una conexión que perdió el lease ya no habla por las conversaciones.
+        if (lease.active?.id !== connectionId) return;
+        if (!opts.conversations) {
+          send({
+            type: 'sidecar_error',
+            fatal: false,
+            code: 'protocol',
+            message: 'Este sidecar no admite conversaciones.',
+          });
+          return;
+        }
+        opts.conversations.handle(frame, connectionId);
+        return;
     }
   };
 
@@ -152,11 +204,23 @@ function handleConnection(socket: Socket, opts: DesktopServerOptions, timeoutMs:
     // de nativos pueden tener el tamaño normal.
     decoder.setLimit(MAX_FRAME_BYTES);
     void opts.natives().then((natives) => {
+      // El cliente pudo irse mientras se sondeaban los nativos.
+      if (socket.destroyed) return;
       authenticated = true;
       handshaking = false;
-      log.info('client authenticated');
+      log.info('client authenticated', { connectionId });
+      // `handshake_ok` va primero: Rust espera la respuesta al handshake en la
+      // primera línea, y en cuanto este cliente tenga el lease las
+      // conversaciones vivas pueden empezar a emitirle tramas.
       send({ type: 'handshake_ok', core: opts.core, natives });
       if (opts.startupError) send(opts.startupError);
+      const previous = lease.active;
+      lease.active = { id: connectionId, socket };
+      opts.conversations?.attach(connectionId, send);
+      if (previous && previous.socket !== socket) {
+        log.info('replacing previous client', { previous: previous.id, connectionId });
+        previous.socket.destroy();
+      }
       for (const queued of backlog.splice(0)) handleAuthenticated(queued);
     });
   };

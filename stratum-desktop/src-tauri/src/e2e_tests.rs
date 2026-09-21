@@ -159,3 +159,93 @@ fn soltar_el_job_object_mata_al_sidecar() {
         "el sidecar {pid} sigue vivo tras cerrar el job"
     );
 }
+
+/// 15.1 contra el binario real: una trama de chat sin handshake previo se
+/// rechaza y la conexión se cierra sin procesar nada.
+#[test]
+fn un_chat_sin_handshake_se_rechaza() {
+    let Some(bin) = sea_binary() else {
+        eprintln!("SKIP: sin binario del sidecar");
+        return;
+    };
+    let l = launch(&bin);
+    runtime().block_on(async {
+        let stream = transport::connect(&l.ipc_path, Duration::from_secs(20), || Ok(()))
+            .await
+            .unwrap();
+        let (r, mut w) = tokio::io::split(stream);
+        let mut lines = BufReader::new(r).lines();
+        let chat = json!({
+            "type": "chat",
+            "conversationId": "6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e",
+            "turnId": "t1",
+            "text": "hola"
+        });
+        w.write_all(format!("{chat}\n").as_bytes()).await.unwrap();
+        let reply: Value =
+            serde_json::from_str(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        assert_eq!(
+            reply,
+            json!({"type": "handshake_error", "reason": "expected_handshake"})
+        );
+        assert!(lines.next_line().await.unwrap().is_none());
+    });
+    l.process.shutdown(sidecar::GRACE);
+}
+
+/// D1 contra el binario real: tras autenticar se abre una conversación, y un
+/// chat a otra que no está abierta se rechaza sin tocar ningún provider.
+#[test]
+fn abre_una_conversacion_tras_autenticar() {
+    let Some(bin) = sea_binary() else {
+        eprintln!("SKIP: sin binario del sidecar");
+        return;
+    };
+    let l = launch(&bin);
+    runtime().block_on(async {
+        let stream = transport::connect(&l.ipc_path, Duration::from_secs(20), || Ok(()))
+            .await
+            .unwrap();
+        let (r, mut w) = tokio::io::split(stream);
+        let mut lines = BufReader::new(r).lines();
+        w.write_all(transport::handshake_line(&l.token).as_bytes())
+            .await
+            .unwrap();
+        transport::parse_handshake_reply(&lines.next_line().await.unwrap().unwrap()).unwrap();
+
+        let id = "6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e";
+        for frame in [
+            json!({"type": "new_conversation", "conversationId": id}),
+            json!({
+                "type": "chat",
+                "conversationId": "6f1c1c0e-3d2a-4b8e-9c1d-000000000000",
+                "turnId": "t1",
+                "text": "hola"
+            }),
+        ] {
+            let line = transport::outbound_line(&frame).unwrap();
+            w.write_all(line.as_bytes()).await.unwrap();
+        }
+        let mut frames = Vec::new();
+        // El error de config de arranque (si lo hay) puede llegar antes.
+        while frames.len() < 2 {
+            let line = tokio::time::timeout(Duration::from_secs(20), lines.next_line())
+                .await
+                .expect("sin respuesta del sidecar")
+                .unwrap()
+                .unwrap();
+            let v: Value = serde_json::from_str(&line).unwrap();
+            if v["type"] != "sidecar_error" {
+                frames.push(v);
+            }
+        }
+        assert_eq!(frames[0]["type"], "conversation_opened", "{frames:?}");
+        assert_eq!(frames[0]["conversationId"], id);
+        assert_eq!(frames[1]["type"], "chat_rejected", "{frames:?}");
+        assert_eq!(frames[1]["reason"], "unknown_conversation");
+    });
+    assert_eq!(
+        l.process.shutdown(sidecar::GRACE),
+        ShutdownOutcome::Graceful(Some(0))
+    );
+}

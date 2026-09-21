@@ -1,12 +1,66 @@
 # Stratum Desktop — Plan de hitos de implementación
 
-> Desglose ejecutable de los hitos D0–D5 definidos en
-> `STRATUM_DESKTOP_PROJECT_DEFINITION.md` (sección 13), ampliado con las
-> resoluciones de los puntos ciegos de la sección 15. Cada hito lista objetivo,
-> tareas concretas, criterios de aceptación y dependencias.
+> Desglose ejecutable de Stratum Desktop a partir de
+> `STRATUM_DESKTOP_PROJECT_DEFINITION.md`, con las resoluciones de sus puntos
+> ciegos (sección 15) y los nuevos de este plan (sección *Puntos ciegos del modo
+> Chat*, `[16.x]`). Cada hito lista objetivo, tareas, criterios de aceptación y
+> dependencias.
 >
 > Convención de estado: ⏳ pendiente · 🔄 en curso · ✅ cerrado.
-> Los puntos ciegos se referencian como `[15.x]`.
+> Los puntos ciegos se referencian como `[15.x]` y `[16.x]`.
+
+---
+
+## Orientación: primero un asistente, después un entorno de código
+
+La CLI es un agente de código: su prompt, su toolset y su memoria giran en torno
+a un repositorio. **Stratum Desktop arranca como asistente conversacional**, al
+estilo de Claude Desktop: el usuario habla con el agente, le sube ficheros y
+recibe respuestas y ficheros generados. No hay un proyecto abierto ni un
+repositorio de por medio.
+
+El core es el mismo (`StratumAgent`, `ReactLoop`, providers, tools, memoria);
+cambian tres cosas, todas por configuración del agente y sin ramificar el core:
+
+1. **Prompt de asistente.** Un preset `assistant` sustituye al prompt estilo
+   opencode (`default.txt`). Conserva `# Identity`, `# Language`,
+   `# Asking the user` y la memoria de largo plazo; elimina todo lo que presupone
+   un repositorio: `# Shell`, `# Work routing`, `# Testing discipline`, el bloque
+   git del `<env>`, `STRATUM.md` de proyecto y `/init`. Añade un bloque
+   `# Workspace` que describe el espacio de trabajo de la conversación.
+2. **Espacio de trabajo aislado por conversación.** Cada conversación tiene su
+   carpeta propia gestionada por la app. Los ficheros que sube el usuario se
+   copian ahí y el agente trabaja **solo** ahí con las tools de fichero de la
+   CLI. Nunca toca el disco del usuario directamente.
+3. **Retención.** Un espacio de trabajo sin uso durante X días se comprime, y
+   pasados Y días se elimina. La conversación (el texto) se conserva; lo que
+   caduca son los ficheros.
+
+**Modo Code, más adelante.** Un conmutador **Chat | Code** (como el de Claude
+Desktop) activará el comportamiento actual de la CLI: abrir carpeta, prompt de
+código, toolset completo, `STRATUM.md` de proyecto. El modo se fija **por
+conversación al crearla**: cambiarlo a mitad dejaría un historial razonado con
+un prompt y un toolset distintos. El conmutador decide el modo de la
+*siguiente* conversación nueva. Todo lo que hoy depende del cwd (antiguo
+`[15.3]`) se mueve a ese hito.
+
+### Qué hereda cada modo del core
+
+| Pieza del core | Chat (v1) | Code (D8) |
+|---|---|---|
+| Prompt | preset `assistant` | preset `coding` (el actual) |
+| Raíz de trabajo | `workspaces/<conversationId>/` (gestionada) | carpeta elegida por el usuario |
+| `read_file`/`write_file`/`edit_file`/`glob`/`list`/`grep` | ✅ confinadas al workspace | ✅ |
+| `exec` | ❌ en v1 (ver `[16.1]`) | ✅ |
+| `web_search` / `web_fetch` | ✅ | ✅ |
+| `question` / `todo` | ✅ | ✅ |
+| `store_decision` / `recall_decisions` | ✅ memoria **global** del asistente | ✅ memoria del proyecto |
+| `present_plan`, `delegate_task`, `test_evidence`, SSH, MCP | ❌ | ✅ |
+| `STRATUM.md` | solo el global | global + proyecto |
+
+El filtrado sale de `ToolsetFilter` (Hito 15), que ya oculta tools **y** rechaza
+en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punto
+único. Ningún modo añade ramas nuevas al loop.
 
 ---
 
@@ -15,11 +69,14 @@
 | Hito | Foco | Depende de | Puntos ciegos que cierra |
 |------|------|-----------|--------------------------|
 | **D0** 🔄 | Scaffolding + sidecar empaquetado + ping seguro | stratum-cli Hito 4 | 15.2, 15.6, 15.10, 15.11 |
-| **D1** | IPC seguro + chat de una pestaña + cwd | D0 | 15.1, 15.3, 15.4, 15.5, 15.9, 15.13 |
-| **D2** | Pestañas + Sidebar + StatusBar + InputArea | D1 | 15.8, 15.12, 15.15 |
-| **D3** | Settings Panel + ProviderWizard + config compartida | D2 | 15.7 |
-| **D4** | Drag&drop + notificaciones + hotkey + build pipeline | D3 | — |
-| **D5** | Polish: frameless, animaciones, a11y, E2E | D4 | 15.14 |
+| **D1** 🔄 | IPC seguro + chat de asistente en una conversación | D0 | 15.1, 15.4, 15.5, 15.9, 15.13, 16.6 |
+| **D2** | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
+| **D3** | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
+| **D4** | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
+| **D5** | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
+| **D6** | Integración con el SO + pipeline de build | D5 | — |
+| **D7** | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
+| **D8** | Modo Code: conmutador Chat \| Code | D7 | 15.3 |
 
 Regla de oro: ningún hito se cierra sin que sus criterios de aceptación pasen y
 sin que los puntos ciegos asignados estén resueltos y verificados.
@@ -110,256 +167,460 @@ Pendiente para cerrar D0:
 
 ---
 
-## D1 — IPC seguro, chat de una pestaña y directorio de trabajo
+## D1 — IPC seguro y chat de asistente en una conversación 🔄
 
-**Objetivo.** Conversación completa en una sola pestaña: streaming de
-`AgentEvent`s, `ToolCallBlock` con sus 4 estados, confirmación destructiva y
-cancelación. Canal autenticado y modelo de cwd resuelto.
+**Objetivo.** Conversación completa con el asistente en una sola conversación:
+streaming de `AgentEvent`s, `ToolCallBlock` con sus 4 estados, preguntas del
+agente, confirmaciones y cancelación. Sin ficheros todavía: el toolset es web,
+memoria, `question` y `todo`.
+
+**Estado (2026-09-21).** Implementado y verificado en Windows con un provider
+real (`gemma-4-12b` en llama.cpp, manejando la ventana por la depuración remota
+de WebView2). Plan revisado por Codex antes de implementar e implementación
+revisada después (ver abajo). Pendiente: repetir la prueba en Linux.
+
+| Criterio | Estado |
+|---|---|
+| Streaming + `ToolCallBlock` en 4 estados | ✅ `web_search` real pasa por `pending → running → completed`; `error` cubierto por tests. Respuesta larga (7,3k caracteres, 4 bloques de código, tabla) en 87 s: 144 fps de media, frame p99 7,1 ms, máximo 35 ms, **cero long tasks** (15.13) |
+| Se comporta como asistente | ✅ Se presenta como Stratum Desktop con su modelo; ante «qué hay en este proyecto» explica que no tiene acceso a ficheros, sin llamar a ninguna tool |
+| `question` desde la UI y el turno sigue | ✅ Pregunta con 6 opciones, elegida «Fantasía» desde la UI y el turno continúa usando la respuesta |
+| `cancel` aborta | ✅ «Detener» corta el stream en ~240 ms (prueba con un stream real) |
+| Matar el sidecar y reconectar con contexto | ✅ `Stop-Process -Force` en plena conversación: banner «Reintentando (1/4)», relanzado en ~1 s, conversación rehidratada (`resumed=true`, 8 mensajes) y el agente recuerda lo hablado antes del reinicio |
+| Conexión sin token rechazada | ✅ tests del servidor + e2e contra el SEA |
+| La CLI sin cambios | ✅ suite completa verde; prompt `coding` idéntico byte a byte al de `HEAD` |
+
+Hallazgos de la prueba real, corregidos: el bloque de `question` acababa en
+error aunque la pregunta se respondiera (el loop no emite `tool_result` para
+las tools de control; ahora `questions_answered` lo completa), y enviar un
+mensaje con la vista desplazada hacia arriba no volvía al fondo. Anotado sin
+corregir: las fórmulas LaTeX (`$O(1)$`) se muestran en crudo (sin soporte de
+matemáticas en el renderer). Un servidor llama.cpp sin `--jinja` rompe modelos
+como `gpt-oss` (sin rol system ni tools): no es de Stratum, pero conviene
+detectarlo en el ProviderWizard de D5.
+
+Decisiones tomadas durante la implementación:
+- **`confirm_request` lleva `description`, no `params`.** Es la línea de
+  `describeCall` que el dispatcher ya redacta antes de pedir confirmación; los
+  parámetros crudos nunca llegan al webview.
+- **`allow-all` por conversación lo recuerda el sidecar**, no el dispatcher: el
+  `ToolDispatcher` vive un turno.
+- **Un `ToolRegistry` y un `ProviderRouter` por conversación**: las tools
+  deshabilitadas por reintentos y el fallback no se contagian entre conversaciones.
+- **Supervisor en un hilo del SO dedicado**: todos los `spawn` salen de él para
+  que `PDEATHSIG` (Linux) siga ligado a un hilo que vive tanto como la app.
+- **Un turno cancelado se guarda tal cual** (como en la CLI); uno a medias cuando
+  muere el sidecar no llega a guardarse y la UI lo ofrece para reintentar.
+- **Al reanudar, el preset `assistant` recompone siempre el system prompt**: una
+  sesión de otro modo o editada a mano no puede colar el prompt de código.
+- **Revisión final de Codex**: un P0 y cinco P1 corregidos. (1) Una sesión cuyo
+  turno no atiende el cierre a tiempo queda *retirada*: no vuelve a guardar ni a
+  emitir, así que no puede pisar la conversación reabierta. (2) Las tramas llevan
+  el `connectionId` del cliente y se descartan al ejecutarse si ya perdió el lease.
+  (3) Validación estructural completa en el webview de lo que llega del sidecar.
+  (4) Un `turn_ended` con `error` deja el turno en error. (5) Preguntas y
+  confirmaciones siguen a la vista hasta el acuse `prompt_resolved`. (6)
+  `describeCall` redacta también por nombre de campo (`password`, `token`,
+  `apiKey`…), con efecto también en la confirmación de la CLI.
+- **Enlaces sin `href`**: botón con rol de enlace que abre el navegador del sistema
+  (`tauri-plugin-opener`, scope `http(s)`/`mailto`); ninguna vía del webview
+  (clic central, menú contextual) puede navegar fuera de la app.
 
 ### Tareas
 
-1. **`[15.1]` Autenticación del WebSocket (bloqueante).**
-   - El sidecar exige el token del handshake en la primera trama; rechaza
-     conexiones sin token o con `Origin` no permitido.
-   - Test: una conexión desde otro origen / sin token es rechazada antes de poder
-     emitir un `chat`.
+1. **`[15.1]` Autenticación del canal (bloqueante).** Ya resuelta en D0 para el
+   pipe/socket (token en la primera trama, límite de 4 KiB antes de autenticar);
+   aquí se extiende a los mensajes de chat.
+   - Test: una conexión sin token es rechazada antes de poder emitir un `chat`.
 
-2. **Protocolo IPC tipado** (`src/ipc/types.ts` + `bridge.ts`).
-   - Mensajes de entrada: `chat`, `cancel`, `new_tab`, `close_tab` (todos con
-     `tabId`).
-   - `[15.9]` `cancel` viaja **por el WS**, no por `invoke`. Los `invoke` de Tauri
-     se reservan para operaciones request-response sin relación con el stream
-     (config read/write, abrir editor).
-   - Salida: los `AgentEvent`s de `agent/types.ts` con `tabId` añadido.
+2. **Protocolo IPC tipado** (ampliación de `src/desktop/protocol.ts`).
+   - Entrada: `chat`, `cancel`, `new_conversation`, `close_conversation`,
+     `answer_questions` (todos con `conversationId`).
+   - `[15.9]` `cancel` viaja por el canal del stream, no por `invoke`. Los
+     `invoke` de Tauri quedan para request-response ajeno al stream (config,
+     guardar un fichero en disco).
+   - Salida: los `AgentEvent`s de `agent/types.ts` con `conversationId`.
 
-3. **`[15.4]` Protocolo de confirmación destructiva.**
-   - Mensajes `confirm_request { callId, tool, params }` /
-     `confirm_response { callId, decision }`.
-   - El sidecar bloquea la ejecución hasta la respuesta.
-   - Default `deny` ante timeout o cierre de la pestaña con confirmación pendiente.
-   - `allow-all` (`!`) con alcance **por pestaña** (coherente con "instancias aisladas").
-   - Componente `DestructiveConfirm.tsx` con `<dialog>` HTML.
+3. **Preset de prompt `assistant`** (`[16.6]`, en `stratum-cli`).
+   - `StratumAgentOptions.promptPreset: 'coding' | 'assistant'` (default
+     `coding`: la CLI no cambia). Se resuelve en `promptEnv()`, nunca en otro
+     sitio, por la misma razón que el bloque de perfil del Hito 15.
+   - Texto base propio: asistente de propósito general, tono conversacional,
+     respuestas en markdown, sin supuestos de repositorio. Conserva
+     `# Identity`, `# Language`, `# Asking the user` y `# Long-term memory`;
+     el `<env>` se reduce a plataforma, fecha y modelo.
+   - Toolset del modo vía `ToolsetFilter`: `web_search`, `web_fetch`, `question`,
+     `todo`, `store_decision`, `recall_decisions`.
+   - Memoria del asistente: `DecisionStore`/`VectorStore` en
+     `~/.stratum/desktop/memory/`, separada de la de cualquier proyecto.
+   - Tests del preset: ningún bloque de código se cuela en el prompt y una tool
+     fuera del filtro se rechaza al ejecutar.
 
-4. **`[15.3]` Modelo de directorio de trabajo / abrir proyecto.**
-   - UI "Abrir carpeta" (Tauri dialog) que fija el cwd.
-   - Decisión: cwd **por pestaña** → cada `StratumAgent` recibe su cwd. El panel
-     Memory/Proyecto y `/init` se resuelven contra el cwd de la pestaña activa.
-   - Persistir el último cwd por pestaña en la sesión.
+4. **`[15.4]` Confirmaciones y preguntas por el canal.**
+   - `confirm_request { callId, tool, description }` / `confirm_response { callId, decision }`
+     (`description` redactada; ver *Decisiones* arriba);
+     el sidecar bloquea hasta la respuesta, `deny` ante timeout o cierre de la
+     conversación, `allow-all` con alcance **por conversación**.
+   - `question` se resuelve con `RunOptions.onAskQuestions` hacia un componente
+     `QuestionPrompt` (mismas reglas de dominio cerrado que la CLI).
+   - Aunque el toolset de D1 apenas tenga tools destructivas, el protocolo se
+     cierra aquí: D2 lo necesita desde el primer día.
 
-5. **`[15.5]` Estado del agente vs. reconexión.**
-   - El WS multiplexa por `tabId` (aclarar que no es "una sola conexión").
-   - Al reconectar tras caída del sidecar, **rehidratar** el agente reenviando el
-     historial conservado en el frontend (o recargando la sesión persistida).
-   - Banner de reconexión con backoff 1→2→5→10s (máx 4) como en la definición.
+5. **`[15.5]` Estado del agente vs. reconexión.** El canal multiplexa por
+   `conversationId`; tras una caída del sidecar se rehidrata el agente desde la
+   sesión persistida. Banner de reconexión con backoff 1→2→5→10 s (máx. 4).
 
 6. **Componentes de chat** (`ConversationView`, `MessageList`, `AgentMessage`,
    `UserMessage`, `ToolCallBlock`, `StreamingText`, `MarkdownRenderer`,
-   `InputArea` básico).
-   - `useAgentStream.ts`: trata `tool_call_start` como actualización del mismo
-     tool call por `id` (mismo invariante que la CLI).
-   - `ToolCallBlock` con estados pending/running/completed/error + expansión.
+   `InputArea` básico). `useAgentStream.ts` trata `tool_call_start` como
+   actualización del mismo tool call por `id`.
 
-7. **`[15.13]` Render incremental de markdown.**
-   - Memoizar bloques estables / parsear solo el delta para no re-parsear el
-     mensaje completo en cada chunk SSE. Medir frame rate con una respuesta larga
-     con bloques de código.
+7. **`[15.13]` Render incremental de markdown**: memoizar bloques estables y
+   parsear solo el delta. Medir frame rate con una respuesta larga con código.
 
 ### Criterios de aceptación
 
 - Conversación end-to-end con streaming fluido y `ToolCallBlock` en sus 4 estados.
-- Una herramienta destructiva (`bash rm`, `write_file`) **pide confirmación** y
-  respeta approve/deny/allow-all por pestaña.
-- `cancel` aborta la generación en curso vía el `AbortSignal` correcto del agente.
-- Matar el sidecar a mano y reconectar **continúa la conversación con contexto**.
+- El agente se presenta y se comporta como asistente: pedirle «qué hay en este
+  proyecto» no le lleva a buscar un repositorio.
+- Una pregunta del agente (`question`) se responde desde la UI y el turno continúa.
+- `cancel` aborta la generación en curso.
+- Matar el sidecar y reconectar continúa la conversación con contexto.
 - Conexión sin token rechazada (test automatizado).
-- `/init` y `read_file` con ruta relativa resuelven contra el cwd elegido.
+- La CLI sin cambios de comportamiento: la suite completa sigue verde.
 
 ---
 
-## D2 — Pestañas, Sidebar, StatusBar e InputArea completo
+## D2 — Espacio de trabajo aislado y ficheros
 
-**Objetivo.** Modelo multi-pestaña completo y los tres paneles del sidebar
-(Sessions, Outline, Memory), StatusBar e InputArea con slash-commands.
+**Objetivo.** El usuario sube ficheros a la conversación, el agente trabaja con
+ellos con las tools de fichero de la CLI dentro de una carpeta propia de la
+conversación, y lo que produce se puede descargar.
+
+### Estructura
+
+```
+~/.stratum/desktop/workspaces/<conversationId>/
+  inputs/      ← copias de lo que sube el usuario (solo lectura para el agente)
+  outputs/     ← lo que el agente genera para el usuario
+  scratch/     ← ficheros intermedios del agente
+  .workspace.json  ← metadatos: creado, último uso, estado, tamaño, fijado
+```
+
+La raíz es configurable (`desktop.workspaces.root`) y siempre vive bajo los datos
+de la app, nunca en una carpeta del usuario.
 
 ### Tareas
 
-1. **TabBar y store de pestañas** (`store/tabs.ts`, Zustand o `useContext`+`useReducer`).
-   - `tabId` UUID, título derivado del primer mensaje, indicador idle/generando/error.
-   - `[+]` nueva pestaña, `[×]` cierra (confirmación inline si hay generación).
-   - `[15.15]` Cada pestaña con su `StratumAgent` independiente en el sidecar;
-     documentar comportamiento bajo generación concurrente (rate limits del
-     provider, `serialized` de `bash` por agente). Evaluar límite de generaciones
-     simultáneas si el provider lo exige.
-   - Título de ventana dinámico vía `appWindow.setTitle()` (tabla sección 6).
-   - Plugin `window-state` para posición/tamaño.
+1. **`WorkspaceManager`** (sidecar, `src/desktop/workspace.ts`): crear, resolver,
+   marcar uso (`lastUsedAt` en cada turno y en cada subida), calcular tamaño.
+   Escritura atómica de `.workspace.json`, como el resto de stores.
 
-2. **Sidebar (rail de iconos + paneles).**
-   - Colapsado 40px por defecto; expandido 260px con animación 150ms.
-   - Estado `sidebar_open` y `sidebar_panel` en `localStorage`.
-   - **Panel Sessions (7.1):** agrupación por fecha, búsqueda, renombrar/eliminar
-     in-place, context menu, empty state.
-   - **Panel Outline (7.2):** anchors a mensajes del usuario, scroll suave,
-     resaltado del mensaje en vista, actualización en vivo.
-   - **Panel Memory (7.3):** tabs Global/Proyecto, render markdown read-only,
-     "Abrir en editor", refresco por `fs.watch`, tab Proyecto deshabilitada sin cwd.
+2. **`[16.2]` Confinamiento de las tools de fichero** (en `stratum-cli`).
+   - `ToolContext.workspaceRoot` opcional. Presente → un `preflight` común a
+     `read_file`/`write_file`/`edit_file`/`glob`/`list`/`grep` veta toda ruta
+     cuyo `realpath` quede fuera de la raíz: `..`, rutas absolutas, symlinks y
+     junctions de Windows. Es un veto inapelable (mismo mecanismo que las rutas
+     `blocked` del Hito 11), no una confirmación.
+   - Las rutas relativas se resuelven contra la raíz del workspace.
+   - `inputs/` es de solo lectura para el agente: preserva el original subido.
+   - Tests con symlink y junction apuntando fuera, y con `..` encadenados.
 
-3. **`[15.8]` Scope fs de Tauri.**
-   - Ampliar el scope para que "Abrir en editor" (`shell.open`) y la resolución de
-     rutas funcionen sobre proyectos arbitrarios, **o** enrutar esas acciones por
-     el sidecar. Documentar la opción elegida en `capabilities/default.json`.
+3. **`[16.1]` Sin `exec` en el modo Chat v1.** Confinar las tools de fichero es
+   un control fiable; confinar un shell por directorio no lo es (`cd ..`, rutas
+   absolutas, cualquier intérprete). `exec` queda fuera del toolset del preset
+   `assistant` hasta tener un aislamiento real del SO (ver *Futuro*).
 
-4. **`[15.12]` Persistencia incremental de sesión.**
-   - Autosave/checkpoint periódico de la sesión activa (no solo al cerrar), para
-     no perder la conversación ante crash del proceso.
+4. **Subida de ficheros.**
+   - Drag & drop sobre el `InputArea` y botón de adjuntar (diálogo de Tauri).
+   - Rust copia al `inputs/` del workspace (el webview nunca recibe rutas del
+     disco del usuario más allá de la selección). Nombres saneados y colisiones
+     resueltas con sufijo.
+   - `[16.3]` Límites: tamaño por fichero y por workspace
+     (`desktop.workspaces.maxFileMB`, `maxWorkspaceMB`), con error claro en la UI.
+   - El mensaje del usuario lleva la lista de adjuntos; el agente los ve como
+     rutas del workspace (`inputs/informe.pdf`), nunca la ruta original.
+   - Imágenes: si el provider declara `vision`, además se adjuntan como imagen.
 
-5. **StatusBar** (provider, modelo, ctx %, nº tools) con umbrales de color iguales
-   a la CLI.
+5. **`[16.4]` Contenido de ficheros como dato no confiable.** El bloque
+   `# Workspace` del prompt declara que el contenido de los ficheros subidos son
+   datos, no instrucciones. La redacción de salidas del Hito 16 ya se aplica a
+   todo `read_file`.
 
-6. **InputArea + slash-commands.**
-   - `<textarea>` autoexpandible; dropdown de `/comandos` con filtrado, navegación
-     ↑↓, Enter/Tab/Escape.
-   - Catálogo heredado de la CLI + exclusivos desktop (`/settings`, `/new-tab`,
-     `/open`).
+6. **Descarga de resultados.** Lo que el agente escribe en `outputs/` aparece en
+   el mensaje como tarjeta de fichero (nombre, tamaño, tipo) con «Guardar
+   como…» (diálogo de Tauri) y «Abrir». Vista previa para texto, markdown,
+   imagen y CSV.
 
-7. **Atajos de teclado** (sección 9) con `react-hotkeys-hook`: `Ctrl+T/W/Tab/1..8/B/L/K`,
-   `Escape`, `Ctrl+Enter`.
+7. **`[15.8]` Scope fs de Tauri.** Con el workspace bajo los datos de la app, el
+   scope se reduce a esa raíz + los diálogos de abrir/guardar. Documentarlo en
+   `capabilities/default.json`.
 
 ### Criterios de aceptación
 
-- Abrir/cerrar/cambiar pestañas con teclado y ratón; título de ventana sigue a la
-  activa.
-- Dos pestañas generan en paralelo sin corromper estado ni mezclar streams.
-- Los tres paneles del sidebar funcionan con sus empty states; Memory refresca al
-  editar el `STRATUM.md` desde la terminal.
-- "Abrir en editor" abre un `STRATUM.md` de proyecto fuera de `~/.stratum`.
-- Cierre forzado (kill) deja recuperable la conversación activa al reabrir.
+- Subir un `.csv`, pedir un resumen y un fichero derivado: el derivado aparece
+  en `outputs/` y se guarda donde el usuario elija.
+- Pedir al agente que lea `../` o una ruta absoluta del disco → veto, sin
+  confirmación que lo levante; ídem a través de un symlink/junction.
+- El original subido sigue intacto tras la conversación.
+- Un fichero por encima del límite se rechaza en la UI antes de copiarse.
+- Dos conversaciones no ven los ficheros de la otra.
 
 ---
 
-## D3 — Settings Panel, ProviderWizard y config compartida
+## D3 — Retención: compresión y purga de workspaces
 
-**Objetivo.** Configuración visual sin editar JSON a mano y escritura segura
-compartida con la CLI.
+**Objetivo.** Los workspaces no crecen sin límite: tras X días sin uso se
+comprimen y tras Y días se eliminan, sin perder la conversación ni sorprender al
+usuario.
+
+### Política
+
+| Estado | Cuándo | Qué queda |
+|---|---|---|
+| `active` | uso en los últimos `compressAfterDays` (default 7) | carpeta completa |
+| `archived` | sin uso ≥ `compressAfterDays` | `<conversationId>.tar.gz`, carpeta borrada |
+| `purged` | sin uso ≥ `deleteAfterDays` (default 30) | nada; la conversación sigue legible |
+
+Config `desktop.workspaces.{compressAfterDays, deleteAfterDays}`; `0` desactiva
+cada etapa. `deleteAfterDays` debe ser mayor que `compressAfterDays` (validado en
+el schema).
 
 ### Tareas
 
-1. **Settings Panel** (overlay fullscreen, `Ctrl+,` / `/settings`).
-   - Secciones: Providers, Modelo activo, Web Search, Memory, (Apariencia v2).
-   - Pestaña "Avanzado" con editor del JSON raw + validación en vivo contra el
-     schema Zod.
+1. **Janitor** en el sidecar: al arrancar y cada 24 h mientras la app esté
+   abierta. Recorre los `.workspace.json` y aplica la política. Si la app estuvo
+   cerrada, el janitor del siguiente arranque recupera el retraso; nunca hay un
+   proceso en segundo plano con la app cerrada.
+2. **Compresión** a `tar.gz` con `zlib` de Node y una librería tar en JS puro
+   (debe funcionar dentro del SEA; nada nativo). Escritura atómica: se comprime a
+   temporal, se verifica y solo entonces se borra la carpeta.
+3. **Restauración transparente**: abrir o escribir en una conversación
+   `archived` descomprime el workspace antes del primer turno (con indicador en
+   la UI) y lo devuelve a `active`.
+4. **`[16.5]` Concurrencia**: lock por workspace. El janitor salta cualquier
+   conversación con un turno en curso o abierta en la UI, y el turno espera a
+   que termine una compresión en marcha.
+5. **Conversación `purged`**: el historial se conserva; las tarjetas de fichero
+   se muestran como «caducado» y el prompt de esa conversación indica al agente
+   que los ficheros ya no existen, para que no intente leerlos.
+6. **`[16.7]` Que no pille por sorpresa.**
+   - Fijar una conversación la excluye de la retención.
+   - Aviso en la conversación cuando falta poco para la purga
+     (p. ej. los últimos 3 días), con «Fijar» y «Descargar todo (.zip)».
+   - Ajuste de los plazos en Settings (D5).
 
-2. **ProviderWizard portado** desde la CLI a modal: alias, base URL, API key,
-   selección de modelo, test de conexión, guardar.
+### Criterios de aceptación
 
+- Con plazos cortos de test (y reloj inyectable), un workspace pasa
+  `active → archived → purged` y la conversación sigue abriéndose en cada estado.
+- Reabrir una `archived` restaura los ficheros byte a byte.
+- Matar el proceso a mitad de una compresión no pierde datos: al arrancar, o la
+  carpeta sigue entera o el archivo está completo.
+- Una conversación fijada nunca se comprime.
+- Una conversación con turno en curso nunca se comprime.
+
+---
+
+## D4 — Conversaciones múltiples, Sidebar, StatusBar e InputArea
+
+**Objetivo.** Navegación entre conversaciones como en un asistente de escritorio:
+lista en el sidebar como navegación principal, varias conversaciones vivas a la
+vez, StatusBar e InputArea completos.
+
+### Tareas
+
+1. **Store de conversaciones.** `conversationId` UUID, título derivado del primer
+   mensaje, indicador idle/generando/error. `[15.15]` Cada conversación con su
+   `StratumAgent` independiente; documentar el comportamiento con varias
+   generando a la vez (rate limits del provider) y evaluar un límite de
+   generaciones simultáneas. Pestañas: opcionales, decidir aquí si aportan algo
+   sobre la lista del sidebar.
+2. **Sidebar.**
+   - **Conversaciones (7.1):** agrupación por fecha, búsqueda, renombrar,
+     eliminar (borra también su workspace), fijar, estado del workspace
+     (`archived`/`purged`), empty state.
+   - **Outline (7.2):** anchors a mensajes del usuario, scroll suave.
+   - **Memoria (7.3):** solo lo global en modo Chat — `~/.stratum/STRATUM.md` y
+     las decisiones del asistente con búsqueda y borrado. La pestaña Proyecto
+     llega con el modo Code.
+   - **Ficheros de la conversación:** `inputs/` y `outputs/` de la conversación
+     activa, con guardar y abrir.
+3. **`[15.12]` Persistencia incremental** de la sesión (checkpoint periódico, no
+   solo al cerrar).
+4. **StatusBar**: provider, modelo, contexto %, tamaño del workspace.
+5. **InputArea + slash-commands**: textarea autoexpandible, adjuntar, catálogo de
+   comandos reducido al modo Chat (`/new`, `/clear`, `/compact`, `/model`,
+   `/memory`, `/settings`); los de código (`/init`, `/changes`, `/plan`,
+   `/agent`) quedan para el modo Code.
+6. **Atajos de teclado** con `react-hotkeys-hook`: `Ctrl+N` nueva conversación,
+   `Ctrl+B` sidebar, `Ctrl+K` buscar, `Ctrl+L` limpiar, `Escape` cancelar.
+
+### Criterios de aceptación
+
+- Dos conversaciones generan en paralelo sin mezclar streams ni workspaces.
+- Eliminar una conversación borra su workspace (o su archivo).
+- Cierre forzado deja recuperable la conversación activa al reabrir.
+- La memoria global se ve y se edita desde el sidebar.
+
+---
+
+## D5 — Settings Panel, ProviderWizard y config compartida
+
+**Objetivo.** Configuración visual sin editar JSON y escritura segura compartida
+con la CLI.
+
+### Tareas
+
+1. **Settings Panel** (overlay, `Ctrl+,` / `/settings`): Providers, Modelo
+   activo, Web Search, Memoria, **Espacios de trabajo** (raíz, límites, plazos de
+   retención, uso de disco total, «Purgar ahora»), Avanzado (JSON raw con
+   validación en vivo contra el schema Zod).
+2. **ProviderWizard** portado de la CLI a modal.
 3. **Selector de modelo activo** (misma lógica que `/model`).
-
 4. **`useConfig.ts`** vía `invoke` `read_config`/`write_config` (Rust).
-
-5. **`[15.7]` Config compartida segura.**
-   - Escritura atómica (temp + rename) en Rust (`tempfile`).
-   - Antes de escribir, comparar mtime/hash; si cambió bajo los pies, avisar al
-     usuario en vez de pisar (evitar lost updates frente a la CLI).
-   - `watch_config` con debounce + flag de auto-write para **no** entrar en bucle
-     ni descartar ediciones abiertas en el Settings Panel.
+5. **`[15.7]` Config compartida segura**: escritura atómica, comparación de
+   mtime/hash antes de escribir con aviso de conflicto, `watch_config` con
+   debounce y flag de auto-write.
 
 ### Criterios de aceptación
 
-- Añadir un provider por el wizard y verlo reflejado en la terminal (y viceversa).
-- Editar config en CLI con el Settings abierto **no** pierde cambios silenciosamente:
-  se avisa del conflicto.
-- El watcher no genera bucle de recarga tras una escritura propia.
-- JSON inválido en "Avanzado" se marca antes de guardar.
+- Un provider añadido en el wizard aparece en la terminal y viceversa.
+- Editar la config en la CLI con Settings abierto avisa del conflicto.
+- El watcher no entra en bucle tras una escritura propia.
+- JSON inválido en Avanzado se marca antes de guardar.
 
 ---
 
-## D4 — Features desktop e infraestructura de build
-
-**Objetivo.** Integración con el SO y pipeline reproducible para Windows y Linux.
+## D6 — Integración con el SO e infraestructura de build
 
 ### Tareas
 
-1. **Drag & drop de archivos** sobre `InputArea`: resolución de ruta absoluta
-   (Tauri `drag-drop`), inserción `[adjunto: ...]`, soporte vision si el provider
-   tiene `vision: true`.
-2. **Notificaciones OS** (plugin `notification`) para tareas largas (>10s) en
-   segundo plano; toggle en Settings.
-3. **Global hotkey** `Ctrl+Shift+Space` (plugin `global-shortcut`) para enfocar/
-   restaurar; configurable/desactivable.
-4. **Onboarding de primer arranque** (sección 9): splash → ProviderWizard →
-   primera pestaña; sin botón "saltar".
-5. **Manejo de errores del sidecar** (pantalla de fallo de inicio con Reintentar/Ver
-   logs; banner no bloqueante en runtime).
-6. **Pipeline de build** (GitHub Actions): `build-windows` (`.msi`) y `build-linux`
-   (`.deb` + `.AppImage`), incluyendo build del sidecar empaquetado por plataforma.
-7. **Firma de código:** Windows con `TAURI_SIGNING_*` (auto-firmado en local; EV a
-   futuro); Linux GPG opcional para `.AppImage`.
+1. **Notificaciones OS** para respuestas largas (>10 s) con la app en segundo
+   plano; toggle en Settings.
+2. **Global hotkey** `Ctrl+Shift+Space` para enfocar/restaurar; configurable.
+3. **Onboarding de primer arranque**: splash → ProviderWizard → primera
+   conversación.
+4. **Errores del sidecar**: pantalla de fallo de inicio (Reintentar / Ver logs) y
+   banner no bloqueante en runtime.
+5. **Pipeline de build** (GitHub Actions): `.msi` en Windows, `.deb` +
+   `.AppImage` en Linux, con el sidecar SEA por plataforma.
+6. **Firma de código**: Windows con `TAURI_SIGNING_*`; GPG opcional en Linux.
 
 ### Criterios de aceptación
 
-- Drag&drop de un `.txt` y de una imagen (con provider vision) funcionan.
-- Notificación nativa al terminar una tarea larga con la app en background.
+- Notificación nativa al terminar una respuesta larga en background.
 - CI produce `.msi`, `.deb` y `.AppImage` instalables desde cero.
 - Onboarding completo en una máquina sin `.stratumrc.json`.
 
 ---
 
-## D5 — Polish: frameless, animaciones, accesibilidad y E2E
-
-**Objetivo.** Acabado visual y robustez de la UI.
+## D7 — Polish: frameless, animaciones, accesibilidad y E2E
 
 ### Tareas
 
-1. **Ventana frameless** (`decorations: false`) con TitleBar custom de 32px,
-   `data-tauri-drag-region`, controles ─ □ ×.
-2. **`[15.14]` Mitigar lo que rompe el frameless.**
-   - Accesibilidad de los controles custom (roles/labels para lectores de pantalla).
-   - Clamping de la posición restaurada por `window-state` al área visible actual
-     (evitar ventana fuera de pantalla en setups multi-monitor cambiados).
-   - Validar/decidir maquetación TitleBar + TabBar (misma fila vs. separadas) que
-     quedó "a validar en D2".
-3. **Animaciones** de streaming (CSS), expansión de `ToolCallBlock`, transiciones
-   del sidebar.
-4. **Accesibilidad general:** foco visible, navegación por teclado completa,
-   contraste, `aria-*` en componentes interactivos.
-5. **Tests E2E** con Tauri WebDriver: flujo de chat, pestañas, settings, onboarding.
-6. **Auto-update** (`tauri-plugin-updater`) apuntando a GitHub Releases.
+1. **Ventana frameless** con TitleBar custom de 32 px y controles ─ □ ×.
+2. **`[15.14]`** Accesibilidad de los controles custom y clamping de la posición
+   restaurada al área visible (multi-monitor). La TitleBar deja hueco para el
+   conmutador Chat | Code de D8.
+3. **Animaciones** de streaming, expansión de `ToolCallBlock` y sidebar.
+4. **Accesibilidad general**: foco visible, teclado completo, contraste, `aria-*`.
+5. **Tests E2E** con Tauri WebDriver: chat, subida/descarga, retención,
+   conversaciones, settings, onboarding.
+6. **Auto-update** (`tauri-plugin-updater`) contra GitHub Releases.
 
 ### Criterios de aceptación
 
-- Mover/maximizar/cerrar la ventana frameless funciona en Win y Linux.
+- Mover/maximizar/cerrar la ventana frameless funciona en Windows y Linux.
 - Restaurar tras desconectar un monitor deja la ventana visible.
 - Suite E2E verde en CI.
-- Una release nueva en GitHub dispara el flujo de auto-update.
+- Una release nueva dispara el auto-update.
 
 ---
 
-## Trazabilidad de puntos ciegos → hito
+## D8 — Modo Code: conmutador Chat | Code
+
+**Objetivo.** Recuperar dentro de Desktop el comportamiento de la CLI para
+trabajar sobre un proyecto real.
+
+### Tareas
+
+1. **Conmutador Chat | Code** en la TitleBar. Fija el modo de las conversaciones
+   **nuevas**; el de una conversación existente no cambia (se muestra como
+   insignia). `SessionContext.mode` persiste el modo en la sesión.
+2. **`[15.3]` Directorio de trabajo**: «Abrir carpeta» fija el cwd de la
+   conversación Code; `read_file` y `/init` resuelven contra él; el último cwd se
+   persiste en la sesión.
+3. **Preset `coding`** + toolset completo (`exec`, plan, delegación, perfiles,
+   TDD, SSH, MCP), confirmaciones destructivas por conversación.
+4. **Sidebar en modo Code**: pestaña Proyecto de Memoria (`STRATUM.md` de
+   proyecto con refresco por `fs.watch`, «Abrir en editor»), panel de cambios
+   del working tree (`/changes`), comandos de código en el InputArea.
+5. **Sin retención** en modo Code: la carpeta es del usuario, nunca se comprime
+   ni se borra.
+
+### Criterios de aceptación
+
+- Una conversación Code sobre una carpeta hace lo mismo que `stratum chat` ahí.
+- Cambiar el conmutador no altera conversaciones ya creadas.
+- El janitor nunca toca una carpeta de una conversación Code.
+
+---
+
+## Futuro (fuera de la ruta D0–D8)
+
+- **Ejecución aislada en el modo Chat** (`[16.1]`): `exec` dentro del workspace
+  con aislamiento real del SO — contenedor, `bubblewrap` en Linux, AppContainer
+  o una VM ligera en Windows — para que el asistente pueda procesar datos con
+  Python o convertir ficheros. Encaja con los targets `container:` que `exec`
+  ya reserva (Hito 16).
+- Proyectos/colecciones: agrupar conversaciones con ficheros compartidos.
+- Exportar una conversación completa (texto + ficheros).
+
+---
+
+## Puntos ciegos del modo Chat
+
+| Id | Severidad | Problema | Resolución | Hito |
+|----|-----------|----------|------------|------|
+| 16.1 | 🔴 | Un directorio no aísla un shell: `exec` con cwd en el workspace puede leer y escribir cualquier parte del disco | Sin `exec` en el modo Chat v1; aislamiento del SO como trabajo futuro | D2 |
+| 16.2 | 🔴 | Escapar del workspace con `..`, rutas absolutas, symlinks o junctions | Veto en `preflight` por `realpath` contra `workspaceRoot`, inapelable | D2 |
+| 16.3 | 🟠 | Subidas enormes llenan el disco o revientan el contexto | Límites por fichero y por workspace; `read_file` ya pagina | D2 |
+| 16.4 | 🟠 | Un fichero subido contiene instrucciones (prompt injection) | Contenido declarado como dato en el prompt; `inputs/` de solo lectura; sin `exec` limita el daño | D2 |
+| 16.5 | 🟠 | El janitor comprime un workspace en uso | Lock por workspace; salta conversaciones abiertas o con turno en curso | D3 |
+| 16.6 | 🟠 | El prompt de código se filtra al asistente (o al revés) y rompe la CLI | Preset resuelto solo en `promptEnv()`, default `coding`, tests de ambos presets | D1 |
+| 16.7 | 🟡 | La purga borra ficheros que el usuario daba por guardados | Fijar, aviso previo, «Descargar todo», plazos configurables; el texto nunca se purga | D3 |
+
+## Trazabilidad de puntos ciegos de la definición → hito
 
 | Punto ciego | Severidad | Hito |
 |-------------|-----------|------|
-| 15.1 WebSocket sin autenticar | 🔴 | D1 |
+| 15.1 Canal sin autenticar | 🔴 | D0 (transporte) / D1 (chat) |
 | 15.2 Empaquetado del sidecar / tamaño real | 🔴 | D0 |
-| 15.3 Modelo de cwd / abrir proyecto | 🔴 | D1 |
+| 15.3 Modelo de cwd / abrir proyecto | 🔴 | D8 (solo modo Code) |
 | 15.4 Protocolo de confirmación destructiva | 🟠 | D1 |
 | 15.5 Estado del agente vs. reconexión | 🟠 | D1 |
 | 15.6 Versión core bundle vs. CLI global | 🟠 | D0 |
-| 15.7 Lost updates en config concurrente | 🟠 | D3 |
+| 15.7 Lost updates en config concurrente | 🟠 | D5 |
 | 15.8 Scope fs de Tauri | 🟠 | D2 |
 | 15.9 Cancel en transporte separado | 🟠 | D1 |
 | 15.10 Puerto por stdout + firewall | 🟠 | D0 |
 | 15.11 Ciclo de vida del sidecar / MCP | 🟠 | D0 |
-| 15.12 Persistencia de sesión solo al cerrar | 🟡 | D2 |
+| 15.12 Persistencia de sesión solo al cerrar | 🟡 | D4 |
 | 15.13 Rendimiento markdown en streaming | 🟡 | D1 |
-| 15.14 Frameless rompe SO + multi-monitor | 🟡 | D5 |
-| 15.15 Concurrencia entre pestañas | 🟡 | D2 |
+| 15.14 Frameless rompe SO + multi-monitor | 🟡 | D7 |
+| 15.15 Concurrencia entre conversaciones | 🟡 | D4 |
 
 ---
 
 ## Dependencias externas y supuestos
 
-- **stratum-cli Hito 4 (MCP Client) cerrado** antes de D0: el sidecar reutiliza el
-  core completo; el ciclo de vida MCP se contempla desde D0 aunque su uso pleno
-  llegue después.
-- **Sin macOS en v1** (sección 12): el pipeline cubre Windows + Linux.
-- **Sin sincronización de sesión en tiempo real** entre instancias: solo se
-  comparte estado en disco (config, memoria, sesiones guardadas).
+- **stratum-cli Hito 4 (MCP Client) cerrado** antes de D0; MCP solo se expone en
+  el modo Code (D8).
+- **Cambios en `stratum-cli`** que pide este plan, todos opt-in y sin cambiar la
+  CLI por defecto: `promptPreset` (D1), `ToolContext.workspaceRoot` con su
+  `preflight` (D2) y `SessionContext.mode` (D8).
+- **Sin macOS en v1**: el pipeline cubre Windows + Linux.
+- **Sin sincronización en tiempo real** entre instancias: solo estado en disco.
+- `STRATUM_DESKTOP_PROJECT_DEFINITION.md` sigue describiendo la app centrada en
+  código (§1, §3 cwd por pestaña, §7.3 Memoria de proyecto); hay que alinearlo
+  con esta orientación.

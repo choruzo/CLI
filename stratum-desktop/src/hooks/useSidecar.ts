@@ -2,6 +2,7 @@ import { useCallback, useEffect, useReducer } from 'react';
 import {
   getSidecarStatus,
   onSidecarStatus,
+  restartSidecar,
   sendSidecarFrame,
   subscribeSidecarFrames,
 } from '../ipc/bridge';
@@ -64,28 +65,36 @@ export function isOperational(state: SidecarState): boolean {
 
 let pingSeq = 0;
 
-export function useSidecar(): SidecarState & { ping: () => void } {
+export function useSidecar(): SidecarState & { ping: () => void; restart: () => void } {
   const [state, dispatch] = useReducer(sidecarReducer, initialSidecarState);
 
   useEffect(() => {
     let disposed = false;
     let unlisten: (() => void) | undefined;
+    let unsubscribe: (() => void) | undefined;
     const setStatus = (status: SidecarStatus) => {
       if (!disposed) dispatch({ type: 'status', status });
     };
 
     void (async () => {
       // Primero escuchar y luego leer: un cambio entre ambos pasos no se pierde.
-      unlisten = await onSidecarStatus(setStatus);
-      await subscribeSidecarFrames((frame) => {
+      // Tras cada `await` se comprueba el desmontaje (StrictMode monta dos
+      // veces): lo registrado después del cleanup se suelta en el acto.
+      const u1 = await onSidecarStatus(setStatus);
+      if (disposed) return u1();
+      unlisten = u1;
+      const u2 = await subscribeSidecarFrames((frame) => {
         if (!disposed) dispatch({ type: 'frame', frame, now: performance.now() });
       });
+      if (disposed) return u2();
+      unsubscribe = u2;
       setStatus(await getSidecarStatus());
     })();
 
     return () => {
       disposed = true;
       unlisten?.();
+      unsubscribe?.();
     };
   }, []);
 
@@ -101,5 +110,9 @@ export function useSidecar(): SidecarState & { ping: () => void } {
     if (connected) ping();
   }, [connected, ping]);
 
-  return { ...state, ping };
+  const restart = useCallback(() => {
+    void restartSidecar().catch((err) => console.warn('[stratum] reintento fallido', err));
+  }, []);
+
+  return { ...state, ping, restart };
 }

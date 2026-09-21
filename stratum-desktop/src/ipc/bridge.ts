@@ -16,16 +16,44 @@ export function onSidecarStatus(cb: (status: SidecarStatus) => void): Promise<Un
   return listen<SidecarStatus>(EVENT_STATUS, (e) => cb(e.payload));
 }
 
+type FrameListener = (frame: SidecarFrame) => void;
+
+const listeners = new Set<FrameListener>();
+let subscription: Promise<void> | null = null;
+
 /**
- * Recibe cada trama del sidecar en orden. Las que llegaron antes de suscribirse
- * (p. ej. un error de config al arrancar) las entrega Rust nada más suscribirse.
+ * Recibe cada trama del sidecar en orden. Rust admite **un solo** suscriptor
+ * (el último `sidecar_subscribe` sustituye al anterior), así que el webview se
+ * suscribe una vez y reparte aquí a todos los oyentes. Las tramas que llegaron
+ * antes de suscribirse (p. ej. un error de config al arrancar) las entrega
+ * Rust nada más suscribirse.
  */
-export async function subscribeSidecarFrames(cb: (frame: SidecarFrame) => void): Promise<void> {
-  const channel = new Channel<SidecarFrame>();
-  channel.onmessage = cb;
-  await invoke('sidecar_subscribe', { onFrame: channel });
+export async function subscribeSidecarFrames(cb: FrameListener): Promise<() => void> {
+  listeners.add(cb);
+  subscription ??= (async () => {
+    const channel = new Channel<SidecarFrame>();
+    channel.onmessage = (frame) => {
+      for (const l of listeners) l(frame);
+    };
+    await invoke('sidecar_subscribe', { onFrame: channel });
+  })();
+  try {
+    await subscription;
+  } catch (err) {
+    subscription = null;
+    listeners.delete(cb);
+    throw err;
+  }
+  return () => {
+    listeners.delete(cb);
+  };
 }
 
 export function sendSidecarFrame(frame: ClientFrame): Promise<void> {
   return invoke('sidecar_send', { frame });
+}
+
+/** Reintentar tras agotar los reinicios automáticos del sidecar. */
+export function restartSidecar(): Promise<void> {
+  return invoke('sidecar_restart');
 }

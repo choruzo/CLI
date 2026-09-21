@@ -1,4 +1,5 @@
 import { homedir } from 'os';
+import { join } from 'path';
 import { configureLogging, closeLogging, getLogger } from '../logging/index.js';
 import { loadConfig } from '../config/loader.js';
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
@@ -12,6 +13,10 @@ import { installResourceLoader, probeNatives } from './natives.js';
 import { ShutdownRegistry, type ShutdownReason } from './lifecycle.js';
 import { DESKTOP_PROTOCOL_VERSION, type CoreInfo, type SidecarErrorFrame } from './protocol.js';
 import { startDesktopServer } from './server.js';
+import { ConversationHost } from './conversation-host.js';
+import { DesktopSessionStore } from './session-store.js';
+import { buildAssistantConfig, desktopDataDir } from './assistant-runtime.js';
+import { ProviderRouter } from '../providers/router.js';
 
 /**
  * Arranque del sidecar `stratum-core` de Stratum Desktop (D0).
@@ -134,7 +139,8 @@ export async function runSidecar(argv: string[]): Promise<number> {
     return 2;
   }
 
-  // El sidecar arranca con cwd = home. El cwd de trabajo es por pestaña (D1, 15.3).
+  // El sidecar arranca con cwd = home. El modo Chat no trabaja sobre ninguna
+  // carpeta; el cwd de trabajo llega con el modo Code (D8, 15.3).
   const { config, error: startupError } = loadSharedConfig(homedir());
   configureLogging(config, { stderrEnabled: true });
   const log = getLogger('desktop');
@@ -150,6 +156,16 @@ export async function runSidecar(argv: string[]): Promise<number> {
   // Arranca el sondeo ya: así el primer handshake no espera a cargar ONNX.
   void natives();
 
+  // Modo Chat (D1): memoria y sesiones del asistente en ~/.stratum/desktop/.
+  const dataDir = desktopDataDir();
+  const assistantConfig = buildAssistantConfig(config, dataDir);
+  const conversations = new ConversationHost({
+    config: assistantConfig,
+    store: new DesktopSessionStore(join(dataDir, 'sessions')),
+    makeRouter: () => new ProviderRouter(assistantConfig),
+    startupError,
+  });
+
   let server;
   try {
     server = await startDesktopServer({
@@ -158,6 +174,7 @@ export async function runSidecar(argv: string[]): Promise<number> {
       core: coreInfo(),
       natives,
       startupError,
+      conversations,
     });
   } catch (err) {
     log.error('listen failed', { err, ipcPath: args.ipcPath });
@@ -165,6 +182,9 @@ export async function runSidecar(argv: string[]): Promise<number> {
     return 3;
   }
   shutdown.onShutdown('ipc-server', () => server.close());
+  // Registrado después del servidor para ejecutarse antes (LIFO): los turnos se
+  // cancelan y las sesiones se guardan mientras el log sigue abierto.
+  shutdown.onShutdown('conversations', () => conversations.closeAll());
 
   return new Promise<number>((resolve) => {
     const stop = (reason: ShutdownReason, detail?: string): void => {
