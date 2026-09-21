@@ -140,9 +140,7 @@ export function useAgentStream(
           // El historial/contexto solo cambia en fronteras de iteración y al
           // inyectar resultados; los deltas intermedios devolverían el mismo dato.
           const contextChanged =
-            refreshPreviousBoundary ||
-            event.type === 'context_compressed' ||
-            event.type === 'done';
+            refreshPreviousBoundary || event.type === 'context_compressed' || event.type === 'done';
           flush(contextChanged);
           if (event.type === 'tool_result' || event.type === 'tool_error') {
             contextDirty = true;

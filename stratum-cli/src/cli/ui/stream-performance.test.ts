@@ -9,7 +9,11 @@ import {
 
 describe('stream performance primitives', () => {
   it('bounds live text by visual rows even when the stream contains many newlines', () => {
-    const visible = limitLiveText(Array.from({ length: 100 }, (_, i) => `line-${i}`).join('\n'), 40, 5);
+    const visible = limitLiveText(
+      Array.from({ length: 100 }, (_, i) => `line-${i}`).join('\n'),
+      40,
+      5,
+    );
     expect(visible.split('\n')).toHaveLength(5);
     expect(visible).toContain('line-99');
     expect(visible).not.toContain('line-0\n');

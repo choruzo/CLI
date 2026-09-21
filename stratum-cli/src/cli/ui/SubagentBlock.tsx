@@ -108,7 +108,12 @@ function ExpandedDetail({ state }: { state: SubagentBlockState }) {
   );
 }
 
-export function SubagentBlock({ state, focused = false, expanded = false, now = Date.now() }: Props) {
+export function SubagentBlock({
+  state,
+  focused = false,
+  expanded = false,
+  now = Date.now(),
+}: Props) {
   const elapsedMs = state.startedAt ? Math.max(0, now - state.startedAt) : 0;
 
   const focusPrefix = focused ? <Text color={theme.accent}>▶ </Text> : null;

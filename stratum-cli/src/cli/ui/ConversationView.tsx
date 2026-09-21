@@ -121,11 +121,9 @@ export function ConversationView({
   const { stdout } = useStdout();
   const terminalRows = stdout.rows ?? 24;
   const panelMaxSteps = Math.max(2, Math.min(5, Math.floor(terminalRows / 5)));
-  const pinnedPanels = Number(Boolean(plan && planMode === 'execute')) + Number(Boolean(todos?.length));
-  const availableConversationRows = Math.max(
-    8,
-    terminalRows - pinnedPanels * (panelMaxSteps + 3),
-  );
+  const pinnedPanels =
+    Number(Boolean(plan && planMode === 'execute')) + Number(Boolean(todos?.length));
+  const availableConversationRows = Math.max(8, terminalRows - pinnedPanels * (panelMaxSteps + 3));
   return (
     <Box flexDirection="column" width="100%">
       <StatusBar

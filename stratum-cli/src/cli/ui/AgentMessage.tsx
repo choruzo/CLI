@@ -66,7 +66,8 @@ export function AgentMessage({
       ? toolCalls.slice(-remainingLiveActions)
       : []
     : toolCalls;
-  const hiddenActions = toolCalls.length + subs.length - visibleToolCalls.length - visibleSubs.length;
+  const hiddenActions =
+    toolCalls.length + subs.length - visibleToolCalls.length - visibleSubs.length;
   const isInit = initSteps !== undefined || initSummary !== undefined;
   const hasContent =
     toolCalls.length > 0 || subs.length > 0 || text || isInit || thinkingBlocks?.length;

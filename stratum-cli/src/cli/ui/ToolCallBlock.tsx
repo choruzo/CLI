@@ -116,7 +116,12 @@ function ExpandedOutput({ text }: { text: string }) {
   );
 }
 
-export function ToolCallBlock({ state, focused = false, expanded = false, now = Date.now() }: Props) {
+export function ToolCallBlock({
+  state,
+  focused = false,
+  expanded = false,
+  now = Date.now(),
+}: Props) {
   const elapsedMs = state.startedAt ? Math.max(0, now - state.startedAt) : 0;
 
   const focusPrefix = focused ? <Text color={theme.accent}>▶ </Text> : null;
