@@ -41,11 +41,12 @@ Stratum Desktop **no es una reescritura**. Es una capa de presentación sobre el
 | Sidecar | **Node.js SEA** (Single Executable App, Node 21+) | Binario autónomo por plataforma, sin dep. de Node del sistema |
 | Empaquetado | **tauri build** | Genera `.msi` (Windows) y `.deb` / `.AppImage` (Linux) |
 
-> **Tamaño instalado real:** el shell Rust de Tauri pesa ~5–10 MB, pero el sidecar
-> SEA con `sqlite-vec`, `better-sqlite3` y `@xenova/transformers` (ONNX runtime)
-> añade ~50–100 MB de binarios nativos por plataforma. El instalador completo se
-> estima en **60–120 MB** según plataforma. No hay dependencia de Node.js instalado
-> en el sistema del usuario.
+> **Tamaño instalado real (medido en D0, Windows x64):** el shell Rust de Tauri pesa
+> 8,9 MB. El sidecar SEA (runtime Node incluido) pesa 86 MB, y los módulos nativos
+> (`better-sqlite3`, `sqlite-vec`, ONNX runtime de `@xenova/transformers`, `sharp`)
+> que viajan como resources, 103 MB. Los instaladores comprimidos: **62 MB el `.msi`
+> y 41 MB el NSIS**. No hay dependencia de Node.js instalado en el sistema del
+> usuario. Desglose y método en `stratum-desktop/README.md`.
 
 ### Estructura de repositorio
 
@@ -99,41 +100,51 @@ stratum-desktop/           ← nuevo workspace (fuera de stratum-cli/)
 
 ### Patrón: Node.js sidecar + canal local autenticado
 
-El frontend **no** llama directamente al core de stratum por comandos Tauri. En su lugar:
+> **Revisado en D0.** El diseño original conectaba el webview al socket local por
+> WebSocket, pero un webview no puede abrir un named pipe ni un unix socket
+> (WebSocket solo habla TCP). Se sustituyó por un relay en Rust. Los detalles y el
+> resto de desviaciones están en `stratum-desktop/README.md`.
 
-1. Tauri genera un **token aleatorio** de 32 bytes al arrancar (`crypto.getRandomValues`
-   en Rust) y lo pasa al sidecar como argumento: `stratum-core --desktop-token <TOKEN>
-   --ipc-path <PATH>`.
-2. Tauri emite el token y la ruta IPC al frontend via el evento `sidecar://ready`
-   (canal Tauri interno, no accesible desde fuera).
-3. El sidecar abre el servidor IPC en la ruta recibida:
-   - **Windows:** Named Pipe `\\.\pipe\stratum-desktop-<PID>`
-   - **Linux:** Unix socket `$XDG_RUNTIME_DIR/stratum-desktop-<PID>.sock`
-4. El frontend conecta al socket via `WebSocket` usando el path recibido.
-   El primer mensaje **debe** ser el handshake con el token; sin él la conexión
-   se cierra inmediatamente.
+El frontend **no** habla con el sidecar directamente. En su lugar:
+
+1. Tauri genera un **token aleatorio** de 32 bytes al arrancar (`getrandom` en
+   Rust) y una ruta IPC con sufijo aleatorio, y lanza el sidecar con
+   `stratum-core --ipc-path <PATH> --watch-stdin`. El token va en la variable de
+   entorno `STRATUM_DESKTOP_TOKEN`, nunca por argumento: la línea de comandos de
+   un proceso la puede leer cualquier usuario.
+2. El sidecar abre el servidor IPC en la ruta recibida:
+   - **Windows:** Named Pipe `\\.\pipe\stratum-desktop-<PID>-<aleatorio>`
+   - **Linux:** Unix socket `$XDG_RUNTIME_DIR/stratum-desktop-<PID>-<aleatorio>.sock` (0600)
+3. **Rust** conecta al pipe y hace el handshake con el token. El token no sale
+   nunca del proceso Tauri.
+4. Rust hace de relay: reenvía cada trama del sidecar al webview por un
+   `Channel` de Tauri (`sidecar_subscribe`) y escribe en el pipe lo que el
+   webview manda con `sidecar_send`. El estado de la conexión se publica con los
+   eventos `sidecar://status` y `sidecar://ready`.
+
+Por el pipe viaja NDJSON (una línea JSON por trama). La primera trama **debe** ser
+el handshake con el token; sin él, o con otro token, la conexión se cierra.
 
 ```
 Rust (Tauri)
-  │  genera TOKEN + PATH
-  │  spawn sidecar con --desktop-token TOKEN --ipc-path PATH
-  │  emite sidecar://ready {token, path} al frontend
+  │  genera TOKEN + PATH, spawn sidecar (TOKEN por entorno)
+  │  conecta al pipe y hace el handshake
   │
-Frontend (React) ──WS(socket local)──► stratum-core (Node sidecar)
-                                               │
-                                   valida token en handshake
-                                   rechaza Origin ≠ tauri://localhost
+Frontend (React) ──invoke/Channel──► Rust (relay) ──pipe/socket──► stratum-core (Node SEA)
+                                                                     valida token
 ```
 
-Los `invoke` Tauri quedan **exclusivamente** para operaciones sin relación con el
-stream: leer/escribir config, abrir archivos con el editor del sistema, listar
-sesiones en disco. Todo lo demás — chat, cancel, gestión de tabs — viaja por WS.
+Los `invoke` que no son `sidecar_*` quedan **exclusivamente** para operaciones sin
+relación con el stream: leer/escribir config, abrir archivos con el editor del
+sistema, listar sesiones en disco. Todo lo demás (chat, cancel, gestión de tabs)
+viaja por el relay, que es un único canal ordenado.
 
 ### Por qué socket local en lugar de TCP
 
-Un socket Unix / Named Pipe **no es alcanzable desde el navegador** (los
-navegadores bloquean `ws://` a unix sockets). Elimina el vector de ataque de la
-15.1 y evita el diálogo del Firewall de Windows que dispara cualquier servidor TCP.
+Un socket Unix / Named Pipe **no es alcanzable desde el navegador** ni desde la
+red. Elimina el vector de ataque de la 15.1 y evita el diálogo del Firewall de
+Windows que dispara cualquier servidor TCP. Como no hay HTTP, no hay cabecera
+`Origin` que validar: la defensa es el token más el nombre aleatorio del pipe.
 
 ### Protocolo de mensajes (entrada → sidecar)
 
@@ -971,8 +982,8 @@ con el mismo aislamiento que la CLI cuando se ejecuta en la terminal.
 | Área | Decisión |
 |------|----------|
 | Shell nativo | Tauri v2; no Electron |
-| IPC streaming | Socket local (named pipe / unix socket); no TCP abierto en red |
-| IPC auth | Token aleatorio 32 bytes en handshake; sin token → conexión rechazada inmediatamente |
+| IPC streaming | Socket local (named pipe / unix socket) con relay en Rust hacia el webview; no TCP |
+| IPC auth | Token aleatorio 32 bytes, por entorno (nunca por argumento), handshake hecho por Rust; sin token → conexión rechazada inmediatamente |
 | Config | Escritura atómica + comparación mtime + debounce 300ms en watcher; no escritura directa sin guard |
 | Estilos | CSS variables desde `theme.ts`; no Tailwind ni styled-components |
 | Estado de pestañas | Zustand o `useContext` + `useReducer`; no Redux |

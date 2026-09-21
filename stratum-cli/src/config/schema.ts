@@ -158,6 +158,13 @@ const SSHConfigSchema = z
   });
 
 export const StratumConfigSchema = z.object({
+  /**
+   * Versión del formato del fichero (15.6, `config/schema-version.ts`). Ausente
+   * equivale a 1. El loader rechaza una versión mayor que la soportada antes de
+   * llegar aquí; declararla en el schema evita que Zod la descarte al reescribir.
+   */
+  schemaVersion: z.number().int().positive().optional(),
+
   provider: z
     .object({
       default: z.string(),

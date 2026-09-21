@@ -2,6 +2,7 @@ import { existsSync, readFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { homedir } from 'os';
 import { StratumConfigSchema, type StratumConfig } from './schema.js';
+import { assertSchemaVersion } from './schema-version.js';
 
 export const CONFIG_FILENAME = '.stratumrc.json';
 export const GLOBAL_CONFIG_PATH = join(homedir(), '.stratum', CONFIG_FILENAME);
@@ -41,6 +42,12 @@ export function expandEnvVars(obj: unknown): unknown {
 
 function readRawConfig(filePath: string): Record<string, unknown> {
   const raw = JSON.parse(readFileSync(filePath, 'utf-8')) as unknown;
+  // 15.6 — antes de migrar o validar: un fichero de un Stratum más nuevo no se
+  // interpreta a medias. Cada capa se comprueba por separado, así el error
+  // nombra el fichero concreto.
+  if (raw !== null && typeof raw === 'object' && !Array.isArray(raw)) {
+    assertSchemaVersion((raw as Record<string, unknown>).schemaVersion, 'config', filePath);
+  }
   return migrateLegacyKeys(expandEnvVars(raw) as Record<string, unknown>, filePath);
 }
 

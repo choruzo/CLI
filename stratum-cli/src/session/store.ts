@@ -3,6 +3,7 @@ import { join } from 'path';
 import type { SessionContext } from './types.js';
 import type { IProvider } from '../providers/base.js';
 import type { Message } from '../agent/types.js';
+import { SESSION_SCHEMA_VERSION, assertSchemaVersion } from '../config/schema-version.js';
 
 // ---------------------------------------------------------------------------
 // Generación de IDs de sesión
@@ -98,6 +99,7 @@ export class SessionStore {
 
     // IMPORTANTE: no persistir secretos — solo el nombre del provider
     const ctx: SessionContext = {
+      schemaVersion: SESSION_SCHEMA_VERSION,
       id,
       createdAt,
       updatedAt: now,
@@ -124,7 +126,9 @@ export class SessionStore {
     if (!existsSync(path)) {
       throw new Error(`Sesión "${id}" no encontrada en ${this.sessionsDir}`);
     }
-    return JSON.parse(readFileSync(path, 'utf-8')) as SessionContext;
+    const ctx = JSON.parse(readFileSync(path, 'utf-8')) as SessionContext;
+    assertSchemaVersion(ctx.schemaVersion, 'session', path);
+    return ctx;
   }
 
   // -------------------------------------------------------------------------

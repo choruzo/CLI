@@ -1,5 +1,6 @@
 import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { dirname } from 'path';
+import { importOptional } from '../runtime/optional-import.js';
 
 export interface VectorMatch {
   ref: string;
@@ -142,12 +143,12 @@ class SqliteVecBackend implements VectorBackend {
     const dir = dirname(dbPath);
     if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
 
-    const DatabaseMod = (await import(/* @vite-ignore */ 'better-sqlite3' as string)) as {
+    const DatabaseMod = await importOptional<{
       default: new (path: string) => SqliteDb;
-    };
-    const sqliteVec = (await import(/* @vite-ignore */ 'sqlite-vec' as string)) as {
+    }>('better-sqlite3');
+    const sqliteVec = await importOptional<{
       load: (db: unknown) => void;
-    };
+    }>('sqlite-vec');
 
     const db = new DatabaseMod.default(dbPath);
     sqliteVec.load(db);

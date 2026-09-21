@@ -14,7 +14,7 @@
 
 | Hito | Foco | Depende de | Puntos ciegos que cierra |
 |------|------|-----------|--------------------------|
-| **D0** | Scaffolding + sidecar empaquetado + ping seguro | stratum-cli Hito 4 | 15.2, 15.6, 15.10, 15.11 |
+| **D0** 🔄 | Scaffolding + sidecar empaquetado + ping seguro | stratum-cli Hito 4 | 15.2, 15.6, 15.10, 15.11 |
 | **D1** | IPC seguro + chat de una pestaña + cwd | D0 | 15.1, 15.3, 15.4, 15.5, 15.9, 15.13 |
 | **D2** | Pestañas + Sidebar + StatusBar + InputArea | D1 | 15.8, 15.12, 15.15 |
 | **D3** | Settings Panel + ProviderWizard + config compartida | D2 | 15.7 |
@@ -26,12 +26,32 @@ sin que los puntos ciegos asignados estén resueltos y verificados.
 
 ---
 
-## D0 — Scaffolding, sidecar empaquetado y arranque seguro
+## D0 — Scaffolding, sidecar empaquetado y arranque seguro 🔄
 
 **Objetivo.** Una ventana Tauri vacía que arranca un sidecar `stratum-core`
 empaquetado, establece un canal autenticado y responde a un `ping`. Sin chat
 todavía. Aquí se cierran las decisiones de empaquetado y ciclo de vida que el
 resto del proyecto asume.
+
+**Estado (2026-09-21).** Implementado y verificado en **Windows**. En Linux (WSL2
+Ubuntu 24.04) están verificados los tests del sidecar con unix socket y el SEA con
+sus nativos. Falta compilar y probar el shell Tauri, que necesita las librerías de
+WebKitGTK instaladas con `apt`. Decisiones y cifras medidas en
+`stratum-desktop/README.md`. Cambio de diseño respecto a §3: el webview no puede
+abrir un pipe, así que Rust hace de relay y el handshake, y el token viaja por
+entorno.
+
+| Criterio | Windows | Linux |
+|---|---|---|
+| `tauri dev` levanta ventana + sidecar conectado | ✅ | ⏳ WebKitGTK |
+| Cero huérfanos al cerrar la ventana | ✅ salida ordenada con código 0 en ~130 ms | ⏳ |
+| Cero huérfanos si Tauri muere (kill -Force) | ✅ Job Object | ⏳ PDEATHSIG |
+| Sin diálogo de firewall | ✅ 0 sockets TCP/UDP en el sidecar | n/a |
+| Bundle con sidecar que arranca sin Node | ✅ `.msi` 62 MB / NSIS 41 MB, release con PATH sin Node; SEA self-test sin Node | ✅ SEA self-test sin Node; ⏳ `.deb`/`.AppImage` |
+| `schemaVersion` incompatible → error claro | ✅ `sidecar_error` fatal `schema_incompatible`, el sidecar sigue vivo | ✅ tests |
+
+Queda pendiente la prueba en una máquina Windows limpia (Windows Sandbox o VM),
+que los criterios dan por supuesta.
 
 ### Tareas
 

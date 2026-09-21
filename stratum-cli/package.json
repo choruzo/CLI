@@ -54,6 +54,7 @@
   "scripts": {
     "dev": "tsx src/cli/index.ts",
     "build": "tsup",
+    "build:desktop": "tsup --config tsup.desktop.config.ts",
     "prepare": "tsup",
     "test": "vitest",
     "test:run": "vitest run",

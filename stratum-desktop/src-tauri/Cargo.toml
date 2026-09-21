@@ -1,0 +1,38 @@
+[package]
+name = "stratum-desktop"
+version = "0.1.0"
+description = "Stratum Desktop — shell Tauri v2 sobre el core de stratum-cli"
+authors = ["Javier (choruzo)"]
+license = "MIT"
+edition = "2021"
+rust-version = "1.77.2"
+
+[lib]
+# El sufijo `_lib` evita el choque de nombres entre el binario y la librería en
+# Windows (recomendación de la plantilla de Tauri v2).
+name = "stratum_desktop_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = [] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
+getrandom = "0.3"
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = [
+  "Win32_Foundation",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_Threading",
+] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"

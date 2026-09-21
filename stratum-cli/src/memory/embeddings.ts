@@ -2,6 +2,7 @@ import { homedir } from 'os';
 import { join } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import { resolveMemoryPaths } from '../config/paths.js';
+import { importOptional } from '../runtime/optional-import.js';
 
 /**
  * Función de bajo nivel que convierte textos en vectores. Inyectable en tests
@@ -182,10 +183,10 @@ export class EmbeddingService {
     const p = (async () => {
       // Import dinámico: @xenova/transformers es opcional. Si no está instalado
       // el throw se propaga a embed() que degrada a memoria sin índice.
-      const mod = (await import(/* @vite-ignore */ '@xenova/transformers' as string)) as {
+      const mod = await importOptional<{
         pipeline: (task: string, model: string, opts: Record<string, unknown>) => Promise<unknown>;
         env: { cacheDir?: string; localModelPath?: string };
-      };
+      }>('@xenova/transformers');
       if (mod.env) mod.env.cacheDir = this.modelsDir || join(homedir(), '.stratum', 'models');
       return mod.pipeline('feature-extraction', this.model, {
         cache_dir: this.modelsDir || join(homedir(), '.stratum', 'models'),

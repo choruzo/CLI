@@ -1,0 +1,8 @@
+node_modules/
+dist/
+# Generados por scripts/build-sea.mjs (sidecar SEA + node_modules nativos)
+src-tauri/binaries/
+src-tauri/resources/sidecar/
+src-tauri/target/
+src-tauri/gen/
+build/

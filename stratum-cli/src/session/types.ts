@@ -5,6 +5,11 @@ import type { Message } from '../agent/types.js';
  * NUNCA incluye apiKey ni baseUrl del provider.
  */
 export interface SessionContext {
+  /**
+   * Versión del formato (15.6, `config/schema-version.ts`). Ausente en sesiones
+   * anteriores a Stratum Desktop, que equivalen a la versión 1.
+   */
+  schemaVersion?: number;
   id: string;
   createdAt: string; // ISO 8601
   updatedAt: string; // ISO 8601
