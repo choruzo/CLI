@@ -135,11 +135,18 @@ function resolvePackageDir(name, fromDir) {
   }
 }
 
+/**
+ * Dependencias que solo se usan al INSTALAR un paquete nativo (descargar o
+ * compilar su binario), nunca en runtime. No se copian, y tampoco su clausura.
+ */
+const INSTALL_ONLY = new Set(['prebuild-install', 'node-gyp', 'nan', 'node-addon-api', 'buildcheck']);
+
 function dependencyClosure(roots) {
   const seen = new Map(); // ruta absoluta → nombre
   const queue = roots.map((name) => ({ name, from: cliRoot, optional: false }));
   while (queue.length > 0) {
     const { name, from, optional } = queue.shift();
+    if (INSTALL_ONLY.has(name)) continue;
     const pkgDir = resolvePackageDir(name, from);
     if (!pkgDir) {
       // Las opcionales de otras plataformas (sqlite-vec-darwin-*…) no están instaladas.
@@ -198,6 +205,22 @@ function prunedPaths(pkgName) {
   }
 }
 
+/**
+ * Convención `prebuilds/<so>-<arch>[+<arch>…]` (node-gyp-build, prebuildify):
+ * ¿es la carpeta de otra plataforma? Las carpetas que no siguen la convención
+ * se conservan. Además de peso, evita que linuxdeploy (AppImage) pase `ldd` por
+ * binarios de Android o iOS (`bare-fs`, vía `tar-fs` de sharp) y aborte.
+ */
+function isForeignPrebuild(rel, platform = process.platform, arch = process.arch) {
+  const parts = rel.split(sep);
+  const i = parts.indexOf('prebuilds');
+  if (i === -1 || i + 1 >= parts.length) return false;
+  // Admite sufijos de variante: `ios-arm64-simulator`, `linux-x64-musl`…
+  const m = /^([a-z0-9]+)-([a-z0-9+]+)(?:-[a-z0-9-]+)?$/.exec(parts[i + 1]);
+  if (!m) return false;
+  return m[1] !== platform || !m[2].split('+').includes(arch);
+}
+
 function copyPackage(pkgDir, name) {
   const target = join(sidecarModules, relative(join(cliRoot, 'node_modules'), pkgDir));
   const prune = prunedPaths(name);
@@ -209,6 +232,7 @@ function copyPackage(pkgDir, name) {
       if (rel === '') return true;
       if (rel.split(sep)[0] === 'node_modules') return false;
       if (src.endsWith('.map')) return false;
+      if (isForeignPrebuild(rel)) return false;
       if (typeof prune === 'function') return !prune(rel);
       return !prune.some((p) => rel === p || rel.startsWith(p + sep));
     },
@@ -231,6 +255,15 @@ function copyResources() {
   );
   const dirs = dependencyClosure(roots);
   rmSync(join(resourcesDir, 'sidecar'), { recursive: true, force: true });
+  // Tauri copia los resources a `target/<perfil>/sidecar` y a los árboles de
+  // `target/<perfil>/bundle` (el AppImage se monta sobre el del .deb), y nunca
+  // borra lo que ya no está en la fuente: sin esto, un bundle arrastraría
+  // ficheros podados. Con resources nuevos, esos bundles están obsoletos.
+  for (const profile of ['debug', 'release']) {
+    for (const dir of ['sidecar', 'bundle']) {
+      rmSync(join(tauriRoot, 'target', profile, dir), { recursive: true, force: true });
+    }
+  }
   mkdirSync(sidecarModules, { recursive: true });
   let copied = 0;
   for (const dir of dirs) {

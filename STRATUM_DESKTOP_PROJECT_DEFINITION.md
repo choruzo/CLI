@@ -44,8 +44,8 @@ Stratum Desktop **no es una reescritura**. Es una capa de presentación sobre el
 > **Tamaño instalado real (medido en D0, Windows x64):** el shell Rust de Tauri pesa
 > 8,9 MB. El sidecar SEA (runtime Node incluido) pesa 86 MB, y los módulos nativos
 > (`better-sqlite3`, `sqlite-vec`, ONNX runtime de `@xenova/transformers`, `sharp`)
-> que viajan como resources, 103 MB. Los instaladores comprimidos: **62 MB el `.msi`
-> y 41 MB el NSIS**. No hay dependencia de Node.js instalado en el sistema del
+> que viajan como resources, 98 MB. Los instaladores comprimidos: **61 MB el `.msi`
+> y 40 MB el NSIS** (en Linux, 65 MB el `.deb`). No hay dependencia de Node.js instalado en el sistema del
 > usuario. Desglose y método en `stratum-desktop/README.md`.
 
 ### Estructura de repositorio

@@ -86,18 +86,26 @@ Método: **Node SEA** (`node --experimental-sea-config` + `postject`), en
 4. Self-test: el binario se ejecuta con un PATH sin Node y tiene que reportar
    `sea: true` y los tres nativos cargados.
 
-### Tamaños medidos (Windows x64, D0)
+La poda no copia las dependencias que solo sirven para instalar un nativo
+(`prebuild-install`, `node-gyp`…) ni los `prebuilds/<so>-<arch>` de otras
+plataformas. Además de ahorrar espacio, evita que linuxdeploy aborte al generar el
+AppImage por pasar `ldd` sobre binarios de Android o iOS. `build-sea.mjs` también
+borra `src-tauri/target/*/{sidecar,bundle}`, porque Tauri copia ahí los resources
+y nunca elimina los ficheros que desaparecen de la fuente.
 
-| Pieza | Tamaño |
-|---|---|
-| Shell Tauri (`stratum-desktop.exe`, release) | 8,9 MB |
-| Sidecar SEA (`stratum-core.exe`, runtime Node incluido) | 86 MB |
-| Resources nativos (better-sqlite3, sqlite-vec, onnxruntime-node, sharp…) | 103 MB |
-| Instalador `.msi` | 62 MB |
-| Instalador NSIS `.exe` | 41 MB |
+### Tamaños medidos (D0, x64)
 
-En Linux, el SEA pesa 124 MB y los resources 59 MB. La cifra «5–10 MB» solo vale
-para el shell Rust.
+| Pieza | Windows | Linux |
+|---|---|---|
+| Shell Tauri (`stratum-desktop`, release) | 8,9 MB | — |
+| Sidecar SEA (runtime Node incluido) | 86 MB | 124 MB |
+| Resources nativos (better-sqlite3, sqlite-vec, onnxruntime-node, sharp…) | 98 MB | 54 MB |
+| Instaladores | `.msi` 61 MB · NSIS 40 MB | `.deb` 65 MB · `.AppImage` 140 MB (lleva WebKitGTK) |
+
+La cifra «5–10 MB» solo vale para el shell Rust.
+
+En WSL, linuxdeploy no puede montar su propia AppImage sin FUSE:
+`APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build`.
 
 ## Ciclo de vida (15.11)
 
@@ -107,4 +115,6 @@ para el shell Rust.
 2. Si no ha salido a tiempo: `kill`.
 3. **Si Tauri muere sin poder hacer nada**: en Windows, el Job Object con
    `KILL_ON_JOB_CLOSE` mata el sidecar y todos sus hijos; en Linux, `PR_SET_PDEATHSIG`
-   más el EOF en stdin.
+   más el EOF en stdin. `PDEATHSIG` se dispara cuando muere el **hilo** que lanzó
+   el proceso, así que `SidecarProcess::spawn` tiene que llamarse desde el hilo
+   principal (el `setup` de Tauri), nunca desde un hilo auxiliar.

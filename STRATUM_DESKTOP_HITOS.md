@@ -33,25 +33,28 @@ empaquetado, establece un canal autenticado y responde a un `ping`. Sin chat
 todavía. Aquí se cierran las decisiones de empaquetado y ciclo de vida que el
 resto del proyecto asume.
 
-**Estado (2026-09-21).** Implementado y verificado en **Windows**. En Linux (WSL2
-Ubuntu 24.04) están verificados los tests del sidecar con unix socket y el SEA con
-sus nativos. Falta compilar y probar el shell Tauri, que necesita las librerías de
-WebKitGTK instaladas con `apt`. Decisiones y cifras medidas en
+**Estado (2026-09-21).** Implementado y verificado en **Windows** y en **Linux**
+(WSL2 Ubuntu 24.04 con WSLg). Decisiones y cifras medidas en
 `stratum-desktop/README.md`. Cambio de diseño respecto a §3: el webview no puede
 abrir un pipe, así que Rust hace de relay y el handshake, y el token viaja por
 entorno.
 
 | Criterio | Windows | Linux |
 |---|---|---|
-| `tauri dev` levanta ventana + sidecar conectado | ✅ | ⏳ WebKitGTK |
-| Cero huérfanos al cerrar la ventana | ✅ salida ordenada con código 0 en ~130 ms | ⏳ |
-| Cero huérfanos si Tauri muere (kill -Force) | ✅ Job Object | ⏳ PDEATHSIG |
-| Sin diálogo de firewall | ✅ 0 sockets TCP/UDP en el sidecar | n/a |
-| Bundle con sidecar que arranca sin Node | ✅ `.msi` 62 MB / NSIS 41 MB, release con PATH sin Node; SEA self-test sin Node | ✅ SEA self-test sin Node; ⏳ `.deb`/`.AppImage` |
+| Ventana + sidecar conectado | ✅ `tauri dev` y release | ✅ release y AppImage (X11 en WSLg) |
+| Cero huérfanos al cerrar la ventana | ✅ salida ordenada con código 0 en ~130 ms | ✅ `WM_DELETE_WINDOW` → salida ordenada con código 0; el socket se borra |
+| Cero huérfanos si Tauri muere | ✅ `kill -Force` → Job Object | ✅ `SIGKILL` → `PDEATHSIG` → apagado ordenado |
+| Sin diálogo de firewall | ✅ 0 sockets TCP/UDP en el sidecar | ✅ 0 TCP/UDP; unix socket 0600 |
+| Bundle con sidecar que arranca sin Node | ✅ `.msi` 61 MB / NSIS 40 MB; release con PATH sin Node | ✅ `.deb` 65 MB (depende solo de WebKitGTK/GTK), `.AppImage` 140 MB; ambos con PATH sin Node |
 | `schemaVersion` incompatible → error claro | ✅ `sidecar_error` fatal `schema_incompatible`, el sidecar sigue vivo | ✅ tests |
 
-Queda pendiente la prueba en una máquina Windows limpia (Windows Sandbox o VM),
-que los criterios dan por supuesta.
+Pendiente para cerrar D0:
+- Prueba en una máquina Windows limpia, que los criterios dan por supuesta
+  (Windows 11 Home no trae Windows Sandbox: hace falta VM u otro equipo).
+- Revisión visual de la ventana: la conexión se ha verificado por las trazas del
+  relay y los tests del frontend, no mirando la UI.
+- `dpkg -i` del `.deb` en un sistema con `sudo`: se ha revisado su contenido y
+  el AppImage se monta sobre el mismo árbol, pero no se ha instalado.
 
 ### Tareas
 

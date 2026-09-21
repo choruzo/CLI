@@ -146,6 +146,10 @@ impl SidecarProcess {
         #[cfg(target_os = "linux")]
         {
             use std::os::unix::process::CommandExt;
+            // PDEATHSIG se dispara cuando muere el HILO que hizo el fork, no el
+            // proceso: `spawn` tiene que llamarse desde un hilo que viva tanto
+            // como la app (el `setup` de Tauri corre en el hilo principal). Desde
+            // un hilo auxiliar, el sidecar moriría al terminar ese hilo.
             let parent = std::process::id() as libc::pid_t;
             // SAFETY: solo llamadas async-signal-safe entre fork y exec.
             unsafe {
@@ -185,7 +189,7 @@ impl SidecarProcess {
 
     /// Solo tests: saca el stdin para poder filtrarlo y que el sidecar no vea
     /// EOF, aislando así la garantía del Job Object.
-    #[cfg(test)]
+    #[cfg(all(test, windows))]
     pub fn stdin_for_test(&mut self) -> Option<ChildStdin> {
         self.stdin.take()
     }
