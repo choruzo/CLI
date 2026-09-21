@@ -2,9 +2,9 @@
 
 Shell de escritorio (Tauri v2 + React 18) sobre el core de `stratum-cli`. La
 definición completa está en `../STRATUM_DESKTOP_PROJECT_DEFINITION.md` y el plan
-por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 en curso** (chat de
-asistente en una conversación sobre el canal autenticado de D0; pendiente la
-prueba con un provider real).
+por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 cerrado** (chat de
+asistente en una conversación sobre el canal autenticado de D0, verificado en
+Windows y Linux con un modelo real).
 
 ## Requisitos de desarrollo
 

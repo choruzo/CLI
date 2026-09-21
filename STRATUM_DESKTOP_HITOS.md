@@ -69,7 +69,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | Hito | Foco | Depende de | Puntos ciegos que cierra |
 |------|------|-----------|--------------------------|
 | **D0** 🔄 | Scaffolding + sidecar empaquetado + ping seguro | stratum-cli Hito 4 | 15.2, 15.6, 15.10, 15.11 |
-| **D1** 🔄 | IPC seguro + chat de asistente en una conversación | D0 | 15.1, 15.4, 15.5, 15.9, 15.13, 16.6 |
+| **D1** ✅ | IPC seguro + chat de asistente en una conversación | D0 | 15.1, 15.4, 15.5, 15.9, 15.13, 16.6 |
 | **D2** | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
 | **D3** | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
 | **D4** | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
@@ -167,17 +167,30 @@ Pendiente para cerrar D0:
 
 ---
 
-## D1 — IPC seguro y chat de asistente en una conversación 🔄
+## D1 — IPC seguro y chat de asistente en una conversación ✅
 
 **Objetivo.** Conversación completa con el asistente en una sola conversación:
 streaming de `AgentEvent`s, `ToolCallBlock` con sus 4 estados, preguntas del
 agente, confirmaciones y cancelación. Sin ficheros todavía: el toolset es web,
 memoria, `question` y `todo`.
 
-**Estado (2026-09-21).** Implementado y verificado en Windows con un provider
-real (`gemma-4-12b` en llama.cpp, manejando la ventana por la depuración remota
-de WebView2). Plan revisado por Codex antes de implementar e implementación
-revisada después (ver abajo). Pendiente: repetir la prueba en Linux.
+**Estado (2026-09-22): cerrado.** Verificado en Windows y en Linux con un
+provider real (`gemma-4-12b` en llama.cpp). Plan revisado por Codex antes de
+implementar e implementación revisada después (ver abajo).
+
+- **Windows**: la ventana real, manejada por la depuración remota de WebView2
+  (tabla de abajo).
+- **Linux** (WSL2 Ubuntu 24.04, WSLg/X11): `cargo test` 21/21 (4 e2e contra el
+  SEA de Linux), suite de la CLI (915 + 17 omitidos por ser de Windows) y del
+  frontend (56). Con la app real: matar el sidecar lo relanza en ~1 s y el
+  relanzado sigue vivo (el hilo dedicado mantiene `PDEATHSIG`); `SIGKILL` a
+  Tauri → el sidecar recibe `SIGTERM` y se apaga, cero huérfanos. La UI se pinta
+  igual en WebKitGTK, pero WSLg no deja inyectar teclado (ni `XSendEvent` ni
+  XTEST llegan a la ventana), así que la conversación se probó con un cliente
+  que habla el protocolo del relay por el unix socket: asistente sin tools ante
+  «este proyecto», `question` con acuse `prompt_resolved`, `cancel` en 102 ms,
+  `SIGKILL` + relanzar → `resumed: true` y el agente recuerda lo hablado, y
+  apagado ordenado por EOF en stdin con código 0.
 
 | Criterio | Estado |
 |---|---|
