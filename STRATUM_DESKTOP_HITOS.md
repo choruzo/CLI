@@ -378,10 +378,16 @@ nativos se rellenaron por mensajes Win32 sin robar el foco):
 - «Abrir» entrega el fichero al SO (en esta máquina `.csv` no tiene app
   asociada y Windows mostró «Abrir con»).
 
+Linux (WSL2 Ubuntu 24.04): CLI 955 + 17 omitidos por ser de Windows (`tsc`
+limpio), frontend 66 (typecheck limpio), SEA de Linux con protocolo 3 y los
+tres nativos, y `cargo test` 35/35 con los 5 e2e (incluido
+`workspace_de_una_conversacion`). Aquí sí corren los tests de symlink de
+fichero y symlink roto del confinamiento, que en Windows sin modo desarrollador
+se saltan.
+
 Pendiente para cerrar D2:
 - Drag & drop real sobre la ventana (no se puede simular por CDP) y
   «Guardar como…» eligiendo otro nombre y carpeta, a mano.
-- Linux (WSL): suites y e2e del SEA de Linux.
 
 ### Estructura
 
