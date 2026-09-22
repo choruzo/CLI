@@ -314,9 +314,16 @@ fn workspace_de_una_conversacion() {
         }))
         .unwrap();
         w.write_all(chat.as_bytes()).await.unwrap();
+        // D3: fijar la conversación desde el webview (lista blanca de Rust).
+        let pin = transport::outbound_line(
+            &json!({"type": "workspace_pin", "conversationId": id, "pinned": true}),
+        )
+        .unwrap();
+        w.write_all(pin.as_bytes()).await.unwrap();
 
         let mut frames = Vec::new();
-        while frames.len() < 2 {
+        let mut statuses = Vec::new();
+        while frames.len() < 2 || !statuses.iter().any(|s: &Value| s["pinned"] == true) {
             let line = tokio::time::timeout(Duration::from_secs(20), lines.next_line())
                 .await
                 .expect("sin respuesta del sidecar")
@@ -324,11 +331,17 @@ fn workspace_de_una_conversacion() {
                 .unwrap();
             let v: Value = serde_json::from_str(&line).unwrap();
             assert_ne!(v["code"], "protocol", "trama rechazada: {v}");
-            if v["type"] != "sidecar_error" {
+            if v["type"] == "workspace_status" {
+                statuses.push(v["status"].clone());
+            } else if v["type"] != "sidecar_error" {
                 frames.push(v);
             }
         }
         assert_eq!(frames[0]["type"], "conversation_opened", "{frames:?}");
+        assert_eq!(frames[0]["workspace"]["state"], "active", "{frames:?}");
+        assert!(frames[0]["workspace"]["purgeAt"].is_string(), "{frames:?}");
+        let pinned = statuses.iter().find(|s| s["pinned"] == true).unwrap();
+        assert!(pinned["purgeAt"].is_null(), "{statuses:?}");
         assert_eq!(frames[1]["type"], "chat_rejected", "{frames:?}");
         assert_eq!(frames[1]["reason"], "bad_attachment");
         let dir = ws.conversation_dir(id).unwrap();

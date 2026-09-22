@@ -379,7 +379,12 @@ pub fn copy_into_inputs(
         ));
     }
     let inputs = dir.join(INPUTS);
-    fs::create_dir_all(&inputs).map_err(|e| e.to_string())?;
+    // El workspace lo crea (y lo restaura, D3) el sidecar al abrir la
+    // conversación. Crearlo aquí dejaría una carpeta suelta junto a un
+    // workspace archivado.
+    if !inputs.is_dir() {
+        return Err("la carpeta de ficheros de la conversación no está lista; vuelve a intentarlo".into());
+    }
     let raw_name = source
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -535,6 +540,92 @@ pub fn preview(path: &Path) -> Result<Preview, String> {
     Ok(Preview::Unsupported {
         reason: "no hay vista previa para este tipo de fichero".into(),
     })
+}
+
+/// «Descargar todo (.zip)» (D3, 16.7): `inputs/` y `outputs/` del workspace.
+/// Sin `scratch/` (intermedios del agente) ni `.workspace.json`, y sin seguir
+/// enlaces. Se escribe a un temporal junto al destino y se renombra al
+/// terminar: un fallo a mitad no deja un zip truncado con el nombre final.
+/// Devuelve cuántos ficheros metió.
+pub fn export_zip(dir: &Path, target: &Path) -> Result<u64, String> {
+    if !dir.join(INPUTS).is_dir() && !dir.join(OUTPUTS).is_dir() {
+        return Err("los ficheros de esta conversación no están disponibles".into());
+    }
+    let tmp = target.with_file_name(format!(
+        ".{}.{}.part",
+        target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        random_id()
+    ));
+    let result = (|| -> Result<u64, String> {
+        let file = fs::File::create(&tmp).map_err(|e| format!("no se pudo crear el zip: {e}"))?;
+        let mut zip = zip::ZipWriter::new(io::BufWriter::new(file));
+        let mut count = 0;
+        for area in [INPUTS, OUTPUTS] {
+            let root = dir.join(area);
+            if root.is_dir() {
+                add_to_zip(&mut zip, &root, area, &mut count)?;
+            }
+        }
+        let mut writer = zip.finish().map_err(|e| e.to_string())?;
+        writer.flush().map_err(|e| e.to_string())?;
+        writer
+            .into_inner()
+            .map_err(|e| e.to_string())?
+            .sync_all()
+            .map_err(|e| e.to_string())?;
+        Ok(count)
+    })();
+    match result {
+        Ok(count) => {
+            if let Err(e) = fs::rename(&tmp, target) {
+                let _ = fs::remove_file(&tmp);
+                return Err(format!("no se pudo guardar el zip: {e}"));
+            }
+            Ok(count)
+        }
+        Err(e) => {
+            let _ = fs::remove_file(&tmp);
+            Err(e)
+        }
+    }
+}
+
+fn add_to_zip<W: Write + io::Seek>(
+    zip: &mut zip::ZipWriter<W>,
+    dir: &Path,
+    prefix: &str,
+    count: &mut u64,
+) -> Result<(), String> {
+    let mut entries: Vec<_> = fs::read_dir(dir)
+        .map_err(|e| e.to_string())?
+        .filter_map(Result::ok)
+        .collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        let name = format!("{prefix}/{}", entry.file_name().to_string_lossy());
+        let Ok(meta) = fs::symlink_metadata(entry.path()) else {
+            continue;
+        };
+        if meta.is_dir() {
+            zip.add_directory(format!("{name}/"), zip_options(0))
+                .map_err(|e| e.to_string())?;
+            add_to_zip(zip, &entry.path(), &name, count)?;
+        } else if meta.is_file() {
+            zip.start_file(name.as_str(), zip_options(meta.len()))
+                .map_err(|e| e.to_string())?;
+            let mut input =
+                fs::File::open(entry.path()).map_err(|e| format!("no se puede leer {name}: {e}"))?;
+            io::copy(&mut input, zip).map_err(|e| e.to_string())?;
+            *count += 1;
+        }
+    }
+    Ok(())
+}
+
+fn zip_options(size: u64) -> zip::write::SimpleFileOptions {
+    zip::write::SimpleFileOptions::default()
+        .compression_method(zip::CompressionMethod::Deflated)
+        .large_file(size >= u32::MAX as u64)
 }
 
 pub fn format_bytes(bytes: u64) -> String {
@@ -785,6 +876,61 @@ mod tests {
         let bin = dir.join("outputs/x.bin");
         fs::write(&bin, [0u8]).unwrap();
         assert!(matches!(preview(&bin).unwrap(), Preview::Unsupported { .. }));
+    }
+
+    #[test]
+    fn no_crea_el_workspace_al_adjuntar() {
+        let (tmp, state, _dir) = setup(1024, 4096);
+        let src = user_file(&tmp, "a.txt", 10);
+        let info = state.info().unwrap();
+        // Sin carpeta: ni siquiera se resuelve.
+        assert!(info.conversation_dir("0b5b2c7e-5c1a-4f7e-8d3a-0000000000ff").is_err());
+        // Con carpeta pero sin `inputs/` (no la preparó el sidecar): no se crea.
+        let other = info.root.join("0b5b2c7e-5c1a-4f7e-8d3a-0000000000fe");
+        fs::create_dir_all(&other).unwrap();
+        let err = copy_into_inputs(&info, &other, &src).unwrap_err();
+        assert!(err.contains("no está lista"), "{err}");
+        assert!(!other.join(INPUTS).exists());
+    }
+
+    #[test]
+    fn exporta_inputs_y_outputs_a_zip() {
+        let (tmp, _state, dir) = setup(1024, 4096);
+        fs::write(dir.join(INPUTS).join("ventas.csv"), "mes,total
+").unwrap();
+        fs::create_dir_all(dir.join(OUTPUTS).join("sub")).unwrap();
+        fs::write(dir.join(OUTPUTS).join("sub").join("año.md"), "# ñ").unwrap();
+        fs::write(dir.join("scratch").join("notas.txt"), "privado").unwrap();
+        fs::write(dir.join(".workspace.json"), "{}").unwrap();
+        let target = tmp.path().join("todo.zip");
+        assert_eq!(export_zip(&dir, &target).unwrap(), 2);
+
+        let mut archive = zip::ZipArchive::new(fs::File::open(&target).unwrap()).unwrap();
+        let mut names: Vec<String> = archive.file_names().map(String::from).collect();
+        names.sort();
+        assert_eq!(names, ["inputs/ventas.csv", "outputs/sub/", "outputs/sub/año.md"]);
+        let mut content = String::new();
+        archive
+            .by_name("outputs/sub/año.md")
+            .unwrap()
+            .read_to_string(&mut content)
+            .unwrap();
+        assert_eq!(content, "# ñ");
+        // Ni temporales junto al destino.
+        let leftovers: Vec<_> = fs::read_dir(tmp.path())
+            .unwrap()
+            .filter_map(Result::ok)
+            .filter(|e| e.file_name().to_string_lossy().ends_with(".part"))
+            .collect();
+        assert!(leftovers.is_empty());
+    }
+
+    #[test]
+    fn exportar_un_workspace_que_no_esta_falla_sin_dejar_nada() {
+        let tmp = tempfile::tempdir().unwrap();
+        let target = tmp.path().join("todo.zip");
+        assert!(export_zip(&tmp.path().join("no-existe"), &target).is_err());
+        assert!(!target.exists());
     }
 
     #[test]

@@ -728,3 +728,41 @@ body {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
 }
+
+/* ------------------------------------------------------------------------ */
+/* D3 — retención                                                            */
+/* ------------------------------------------------------------------------ */
+
+.retention {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  margin: 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-borderAccent);
+  border-radius: 8px;
+  background: var(--color-bgPanel);
+  font-size: 13px;
+  color: var(--color-textMuted);
+}
+.retention[data-tone='warning'] {
+  border-color: var(--color-warning);
+}
+.retention__text {
+  flex: 1;
+  min-width: 200px;
+  margin: 0;
+  color: var(--color-warning);
+}
+.retention__actions {
+  display: flex;
+  gap: 6px;
+}
+.file-card[data-expired='true'] {
+  opacity: 0.6;
+  border-style: dashed;
+}
+.file-card[data-expired='true'] .file-card__icon {
+  color: var(--color-textFaint);
+}

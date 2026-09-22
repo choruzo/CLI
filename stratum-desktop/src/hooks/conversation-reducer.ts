@@ -3,7 +3,10 @@ import type {
   QuestionItem,
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
-import type { WorkspaceFileInfo } from '../../../stratum-cli/src/desktop/protocol';
+import type {
+  WorkspaceFileInfo,
+  WorkspaceStatus,
+} from '../../../stratum-cli/src/desktop/protocol';
 
 /**
  * Estado de una conversación en el webview (D1). Reducer puro: los tests lo
@@ -84,6 +87,8 @@ export interface ConversationState {
   opened: boolean;
   /** Último problema de la conversación que no pertenece a un turno (historial ilegible…). */
   notice: string | null;
+  /** Retención del workspace (D3); `null` si la conversación no tiene ficheros. */
+  workspace: WorkspaceStatus | null;
 }
 
 export const initialConversationState: ConversationState = {
@@ -94,10 +99,12 @@ export const initialConversationState: ConversationState = {
   todos: [],
   opened: false,
   notice: null,
+  workspace: null,
 };
 
 export type ConversationAction =
-  | { type: 'opened' }
+  | { type: 'opened'; workspace?: WorkspaceStatus | null }
+  | { type: 'workspace_status'; status: WorkspaceStatus }
   | { type: 'conversation_error'; message: string }
   | { type: 'dismiss_notice' }
   | { type: 'user_sent'; turnId: string; text: string; attachments?: SentAttachment[] }
@@ -229,7 +236,10 @@ export function conversationReducer(
 ): ConversationState {
   switch (action.type) {
     case 'opened':
-      return { ...state, opened: true };
+      return { ...state, opened: true, workspace: action.workspace ?? null };
+
+    case 'workspace_status':
+      return { ...state, workspace: action.status };
 
     case 'conversation_error':
       return { ...state, notice: action.message };

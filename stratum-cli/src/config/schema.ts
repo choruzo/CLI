@@ -472,10 +472,28 @@ export const StratumConfigSchema = z.object({
           maxFileMB: z.number().positive().max(4096).default(25),
           /** Tope de un workspace entero: subidas + lo que genere el agente (16.3). */
           maxWorkspaceMB: z.number().positive().max(65536).default(250),
+          /**
+           * Retención (D3). Días sin uso (turnos y subidas; abrir no cuenta)
+           * tras los que el workspace se comprime a `tar.gz`. `0` desactiva la
+           * etapa. Se admiten fracciones de día.
+           */
+          compressAfterDays: z.number().min(0).max(3650).default(7),
+          /** Días sin uso tras los que los ficheros se eliminan (la conversación se conserva). `0` desactiva. */
+          deleteAfterDays: z.number().min(0).max(3650).default(30),
         })
         .refine((w) => w.maxWorkspaceMB >= w.maxFileMB, {
           message: 'desktop.workspaces.maxWorkspaceMB no puede ser menor que maxFileMB',
         })
+        .refine(
+          (w) =>
+            w.compressAfterDays === 0 ||
+            w.deleteAfterDays === 0 ||
+            w.deleteAfterDays > w.compressAfterDays,
+          {
+            message:
+              'desktop.workspaces.deleteAfterDays tiene que ser mayor que compressAfterDays (o 0 para no purgar)',
+          },
+        )
         .default({}),
     })
     .default({}),

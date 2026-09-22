@@ -109,7 +109,7 @@ describe('WorkspaceManager', () => {
     expect(() => manager().open('../../etc')).toThrow(/inválido/);
   });
 
-  it('reabrir conserva createdAt y fijado, y touch actualiza último uso y tamaño', () => {
+  it('reabrir conserva createdAt, fijado y último uso (abrir no es usar, D3); touch sí lo marca', () => {
     let now = new Date('2026-09-01T10:00:00Z');
     const mgr = new WorkspaceManager(
       { root: join(base, `root${++n}`), maxFileBytes: 1, maxWorkspaceBytes: 1 },
@@ -124,10 +124,12 @@ describe('WorkspaceManager', () => {
     const again = mgr.open(IDS[1]!);
     expect(again.getMeta()).toMatchObject({
       createdAt: '2026-09-01T10:00:00.000Z',
-      lastUsedAt: '2026-09-05T10:00:00.000Z',
+      lastUsedAt: '2026-09-01T10:00:00.000Z',
       pinned: true,
       sizeBytes: 100,
     });
+    again.touch();
+    expect(again.getMeta().lastUsedAt).toBe('2026-09-05T10:00:00.000Z');
   });
 
   it('el tamaño no sigue enlaces que salen del workspace', () => {
@@ -176,7 +178,6 @@ describe('WorkspaceManager', () => {
     expect(ws.checkAttachment('inputs/../../../x').ok).toBe(false);
     expect(ws.checkAttachment('inputs').ok).toBe(false);
   });
-
 });
 
 describe('composeUserMessage', () => {

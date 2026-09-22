@@ -5,6 +5,7 @@ import { ConfirmDialog } from './ConfirmDialog';
 import { InputArea } from './InputArea';
 import { MessageList } from './MessageList';
 import { QuestionPrompt } from './QuestionPrompt';
+import { RetentionBanner } from './RetentionBanner';
 import { TodoPanel } from './TodoPanel';
 
 /** Distancia al fondo por debajo de la cual se sigue el stream automáticamente. */
@@ -53,6 +54,7 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
             messages={stream.messages}
             onRetry={stream.retry}
             conversationId={stream.conversationId}
+            filesExpiredAt={stream.workspace?.filesExpiredAt}
           />
         )}
       </div>
@@ -62,6 +64,11 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
           {stream.notice}
         </p>
       )}
+      <RetentionBanner
+        status={stream.workspace}
+        conversationId={stream.conversationId}
+        onPin={stream.pin}
+      />
       <TodoPanel items={stream.todos} />
       {stream.pendingConfirm && (
         <ConfirmDialog request={stream.pendingConfirm} onDecide={stream.confirm} />

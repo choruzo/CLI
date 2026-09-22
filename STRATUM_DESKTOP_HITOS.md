@@ -71,7 +71,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D0** 🔄 | Scaffolding + sidecar empaquetado + ping seguro | stratum-cli Hito 4 | 15.2, 15.6, 15.10, 15.11 |
 | **D1** ✅ | IPC seguro + chat de asistente en una conversación | D0 | 15.1, 15.4, 15.5, 15.9, 15.13, 16.6 |
 | **D2** 🔄 | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
-| **D3** | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
+| **D3** 🔄 | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
 | **D4** | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
 | **D6** | Integración con el SO + pipeline de build | D5 | — |
@@ -460,11 +460,75 @@ de la app, nunca en una carpeta del usuario.
 
 ---
 
-## D3 — Retención: compresión y purga de workspaces
+## D3 — Retención: compresión y purga de workspaces 🔄
 
 **Objetivo.** Los workspaces no crecen sin límite: tras X días sin uso se
 comprimen y tras Y días se eliminan, sin perder la conversación ni sorprender al
 usuario.
+
+**Estado (2026-09-22): implementado y verificado contra el SEA con modelo real;
+pendiente de revisar a mano en la ventana el aviso de purga y «Descargar todo».**
+Suites verdes: CLI 1006 (`tsc` y lint limpios), frontend 75 (typecheck limpio)
+y Rust 39 (5 e2e contra el SEA con protocolo 4; el de workspace fija la
+conversación por la lista blanca de Rust).
+
+| Criterio | Estado |
+|---|---|
+| `active → archived → purged` con plazos cortos y reloj inyectable; la conversación se abre en cada estado | ✅ tests con reloj inyectable, y contra el SEA con `gemma-4-12b` y plazos de 20 s / 60 s: archivado al arrancar, reabrir emite `restoring` antes de `conversation_opened`, historial intacto (20 → 24 mensajes), el modelo lee el fichero restaurado, y tras la purga la conversación se abre con `filesExpiredAt` |
+| Reabrir una `archived` restaura byte a byte | ✅ sha256 de cada fichero (binario, unicode, nombres de 140 caracteres, carpetas vacías) en los tests y contra el SEA |
+| Matar el proceso a mitad de una compresión no pierde datos | ✅ test que mata con `SIGKILL` un hijo que comprime, y contra el SEA: `taskkill /F` con el temporal a 5 MB de 200 MB → carpeta intacta y nada publicado; el siguiente arranque barre el temporal, comprime entero y restaura byte a byte |
+| Una conversación fijada nunca se comprime | ✅ test (400 días sin uso) y `workspace_pin` e2e contra el SEA |
+| Una conversación con turno en curso nunca se comprime | ✅ test con un provider colgado: el janitor la salta (`inUse`) y solo la toca al cerrarse y acabar el turno |
+
+Decisiones (con el usuario, antes de implementar):
+- **Abrir no es usar.** Solo un turno o una subida mueven `lastUsedAt` (en D2
+  abrir también lo hacía). Restaurar al abrir tampoco reinicia el reloj: si no se
+  escribe, la siguiente pasada la vuelve a comprimir. Si abrir contase, el
+  webview (que abre su conversación en cada conexión) no dejaría caducar nada y
+  el aviso de purga no se vería nunca.
+- **«Descargar todo (.zip)» lo genera Rust** con el crate `zip` (4.6, zip64,
+  backend `zlib-rs`): `inputs/` + `outputs/`, sin `scratch/` ni metadatos, sin
+  seguir enlaces, a un temporal que se renombra al terminar.
+- **`tar-stream` 3** (JS puro, incrustado en el bundle del SEA) + `zlib` de Node.
+- **Tras la purga, workspace nuevo y vacío.** Se pueden volver a subir
+  ficheros; `filesExpiredAt` marca como caducadas las tarjetas anteriores y
+  añade al bloque `# Workspace` una nota para el agente.
+
+Decisiones de diseño:
+- **Estado en disco reconocible en cada paso** (`workspace.ts`):
+  `active` = `<id>/` con `.workspace.json`; `archived` = `<id>.tar.gz` +
+  registro `<id>.json`; `purged` = solo el registro. Compresión: temporal
+  `.tmp-<id>.tar.gz` → verificación (sha256 de cada fichero contra lo leído de
+  la carpeta) → rename → registro → rename de la carpeta a `.trash-*` → borrado.
+  Restauración: extracción a `.restoring-<id>` → rename. Purga: primero el
+  registro `purged` (desde ahí es firme) y luego el borrado. Regla de
+  recuperación (`recover()` al inicio de cada pasada): **la carpeta gana** si
+  tiene metadatos válidos y **`purged` es terminal**; los temporales se barren.
+- **Una carpeta sin metadatos junto a un archivo no gana.** La creó alguien que
+  no es el sidecar; si ganase, `recover` borraría el archivo bueno. Se aparta
+  a `.orphan-*` al restaurar. Rust ya no crea `inputs/` si falta: el workspace
+  solo lo crea (y lo restaura) el sidecar.
+- **Concurrencia (16.5)**: `WorkspaceManager.acquire`/`release` marcan la
+  conversación en uso desde que se abre en el host hasta que se cierra **y** su
+  turno termina (también uno retirado por no atender el cierre), y un lock por
+  conversación serializa comprimir, restaurar y abrir: abrir espera a una
+  compresión en marcha y restaura.
+- **Janitor** (`retention.ts`): al arrancar y cada 24 h con temporizador
+  `unref`; un pase no espera al apagado (es seguro de interrumpir). Una
+  carpeta sin metadatos válidos no se data y no se toca. Un workspace activo
+  que ya pasó `deleteAfterDays` se purga sin comprimirlo antes.
+- **Un archivo corrupto no impide abrir la conversación**: se abre sin
+  ficheros, con aviso, y el archivo se queda en disco.
+- **Protocolo v4**: `conversation_opened.workspace` y `workspace_status`
+  (`state` `active|restoring|archived|purged`, `pinned`, `lastUsedAt`,
+  `purgeAt`, `filesExpiredAt`), y `workspace_pin` del webview.
+  `PURGE_WARNING_DAYS = 3` en el protocolo; el webview lo espeja (con un test
+  que comprueba que coinciden) porque no importa valores de `stratum-cli`.
+
+Hallazgo de la prueba real: tras la purga, si el usuario pide explícitamente
+abrir un fichero de antes, `gemma-4-12b` lo intenta igualmente pese a la nota
+del prompt; recibe el `ENOENT` y explica que caducó y que hay que volver a
+subirlo. Sin la petición explícita no se ha observado.
 
 ### Política
 

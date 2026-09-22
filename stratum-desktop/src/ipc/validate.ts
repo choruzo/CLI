@@ -4,7 +4,7 @@ import type {
   QuestionItem,
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
-import type { WorkspaceFileInfo } from '../../../stratum-cli/src/desktop/protocol';
+import type { WorkspaceFileInfo, WorkspaceStatus } from '../../../stratum-cli/src/desktop/protocol';
 
 /**
  * Validación estructural de lo que llega del sidecar antes de entrar al estado
@@ -145,4 +145,23 @@ export function workspaceFiles(v: unknown): WorkspaceFileInfo[] | null {
     });
   }
   return files;
+}
+
+const WORKSPACE_STATES = new Set(['active', 'restoring', 'archived', 'purged']);
+const isoOrNull = (v: unknown): v is string | null =>
+  v === null || (str(v) && !Number.isNaN(Date.parse(v)));
+
+/** Estado de retención del workspace (D3), de `conversation_opened` o `workspace_status`. */
+export function workspaceStatus(v: unknown): WorkspaceStatus | null {
+  if (!isRecord(v) || !str(v.state) || !WORKSPACE_STATES.has(v.state) || !bool(v.pinned)) {
+    return null;
+  }
+  if (!str(v.lastUsedAt) || !isoOrNull(v.purgeAt) || !isoOrNull(v.filesExpiredAt)) return null;
+  return {
+    state: v.state as WorkspaceStatus['state'],
+    pinned: v.pinned,
+    lastUsedAt: v.lastUsedAt,
+    purgeAt: v.purgeAt,
+    filesExpiredAt: v.filesExpiredAt,
+  };
 }

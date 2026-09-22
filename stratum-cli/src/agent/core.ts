@@ -82,6 +82,12 @@ export interface StratumAgentOptions {
    * al prompt y habilita las tools de `ASSISTANT_FILE_TOOLS`.
    */
   workspace?: WorkspaceConfinement;
+  /**
+   * Los ficheros del workspace anteriores a esta fecha (ISO) se purgaron por
+   * retención (Stratum Desktop D3). El bloque `# Workspace` lo dice, para que
+   * el agente no intente leer rutas que aparecen antes en el historial.
+   */
+  workspaceFilesExpiredAt?: string;
 }
 
 export class StratumAgent {
@@ -133,6 +139,7 @@ export class StratumAgent {
   private _resumeNotice: string | null = null;
   private readonly preset: PromptPreset;
   private readonly workspace: WorkspaceConfinement | undefined;
+  private readonly workspaceFilesExpiredAt: string | undefined;
 
   constructor(
     private readonly config: StratumConfig,
@@ -143,6 +150,7 @@ export class StratumAgent {
     this.memoryManager = new MemoryManager(config);
     this.preset = options?.promptPreset ?? 'coding';
     this.workspace = options?.workspace;
+    this.workspaceFilesExpiredAt = options?.workspaceFilesExpiredAt;
     // Perfiles de subagente desde la raíz del worktree git Y el cwd: la raíz del
     // worktree cubre la invocación desde un subdirectorio del repo (consistente
     // con el `<env>`); el cwd cubre el caso en que el proyecto npm vive en un
@@ -512,6 +520,7 @@ export class StratumAgent {
         providerName: this.router.providerName,
         preset: 'assistant',
         workspace: this.workspace,
+        workspaceFilesExpiredAt: this.workspaceFilesExpiredAt,
       };
     }
     const active = this._activeProfile;

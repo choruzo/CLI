@@ -83,6 +83,13 @@ export class ConversationHost {
     const done = session.close().finally(() => {
       if (this.closing.get(conversationId) === done) this.closing.delete(conversationId);
     });
+    // La retención puede volver a tocar el workspace cuando ya no queda turno:
+    // también el de una sesión retirada, que puede seguir escribiendo un rato.
+    if (session.hasWorkspace) {
+      void done
+        .then(() => session.whenIdle())
+        .finally(() => this.opts.workspaces?.release(conversationId));
+    }
     this.closing.set(conversationId, done);
     return done;
   }
@@ -117,7 +124,7 @@ export class ConversationHost {
     switch (frame.type) {
       case 'new_conversation':
         await this.closing.get(frame.conversationId);
-        this.open(frame.conversationId, frame.resume === true);
+        await this.open(frame.conversationId, frame.resume === true);
         return;
       case 'close_conversation':
         // No se espera dentro de la cola: un cierre lento no retrasa las
@@ -149,6 +156,9 @@ export class ConversationHost {
       case 'workspace_touch':
         this.sessions.get(frame.conversationId)?.touchWorkspace();
         return;
+      case 'workspace_pin':
+        this.sessions.get(frame.conversationId)?.pinWorkspace(frame.pinned);
+        return;
       case 'confirm_response':
         this.sessions.get(frame.conversationId)?.answerConfirm(frame.callId, frame.decision);
         return;
@@ -158,14 +168,16 @@ export class ConversationHost {
     }
   }
 
-  private open(conversationId: string, resume: boolean): void {
+  private async open(conversationId: string, resume: boolean): Promise<void> {
     const existing = this.sessions.get(conversationId);
     if (existing) {
+      const workspace = existing.workspaceStatus();
       this.emit({
         type: 'conversation_opened',
         conversationId,
         resumed: false,
         messageCount: existing.messageCount,
+        ...(workspace ? { workspace } : {}),
       });
       return;
     }
@@ -193,11 +205,24 @@ export class ConversationHost {
       }
     }
 
-    let session: ConversationSession;
-    try {
-      let workspace: ConversationWorkspace | undefined;
+    // El workspace, antes que la sesión: espera a una compresión en marcha y
+    // restaura un archivado (D3). Desde aquí la retención ya no lo toca.
+    let workspace: ConversationWorkspace | undefined;
+    const manager = this.opts.workspaces;
+    if (manager) {
       try {
-        workspace = this.opts.workspaces?.open(conversationId);
+        ({ workspace } = await manager.acquire(conversationId, {
+          onRestoring: () => {
+            const status = manager.statusOf(conversationId);
+            if (status) {
+              this.emit({
+                type: 'workspace_status',
+                conversationId,
+                status: { ...status, state: 'restoring' },
+              });
+            }
+          },
+        }));
       } catch (err) {
         // Sin workspace la conversación sigue, sin ficheros: mejor que no poder
         // hablar con el asistente por un problema de disco.
@@ -208,8 +233,13 @@ export class ConversationHost {
           message: `No se pudo preparar la carpeta de ficheros de la conversación: ${err instanceof Error ? err.message : String(err)}`,
         });
       }
+    }
+
+    let session: ConversationSession;
+    try {
       session = new ConversationSession({
         workspace,
+        workspaceSettings: manager?.settings,
         conversationId,
         config: this.opts.config,
         router: this.opts.makeRouter(),
@@ -227,6 +257,7 @@ export class ConversationHost {
         conversationId,
         message: `No se pudo iniciar el agente: ${err instanceof Error ? err.message : String(err)}`,
       });
+      if (workspace) manager?.release(conversationId);
       return;
     }
     this.sessions.set(conversationId, session);
@@ -235,11 +266,13 @@ export class ConversationHost {
       resumed: saved !== null,
       messages: session.messageCount,
     });
+    const workspaceStatus = session.workspaceStatus();
     this.emit({
       type: 'conversation_opened',
       conversationId,
       resumed: saved !== null,
       messageCount: session.messageCount,
+      ...(workspaceStatus ? { workspace: workspaceStatus } : {}),
     });
   }
 }

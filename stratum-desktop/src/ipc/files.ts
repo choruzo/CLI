@@ -65,6 +65,11 @@ export function previewOutput(conversationId: string, path: string): Promise<Pre
   return invoke<Preview>('output_preview', { conversationId, path });
 }
 
+/** «Descargar todo (.zip)»: `inputs/` y `outputs/`. `false` si el usuario canceló. */
+export function exportWorkspace(conversationId: string): Promise<boolean> {
+  return invoke<boolean>('workspace_export', { conversationId });
+}
+
 export function onDragState(cb: (active: boolean) => void): Promise<UnlistenFn> {
   return listen<{ active: boolean }>(EVENT_DRAG, (e) => cb(e.payload.active === true));
 }

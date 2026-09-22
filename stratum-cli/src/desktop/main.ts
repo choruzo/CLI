@@ -17,6 +17,7 @@ import { ConversationHost } from './conversation-host.js';
 import { DesktopSessionStore } from './session-store.js';
 import { buildAssistantConfig, desktopDataDir } from './assistant-runtime.js';
 import { WorkspaceManager, resolveWorkspaceSettings } from './workspace.js';
+import { WorkspaceJanitor } from './retention.js';
 import { ProviderRouter } from '../providers/router.js';
 
 /**
@@ -199,6 +200,12 @@ export async function runSidecar(argv: string[]): Promise<number> {
   // Registrado después del servidor para ejecutarse antes (LIFO): los turnos se
   // cancelan y las sesiones se guardan mientras el log sigue abierto.
   shutdown.onShutdown('conversations', () => conversations.closeAll());
+
+  // Retención (D3): al arrancar y cada 24 h. Se para la primera al apagar; una
+  // compresión a medias no se espera (es segura de interrumpir).
+  const janitor = new WorkspaceJanitor(workspaces);
+  shutdown.onShutdown('retention', () => janitor.stop());
+  janitor.start();
 
   return new Promise<number>((resolve) => {
     const stop = (reason: ShutdownReason, detail?: string): void => {

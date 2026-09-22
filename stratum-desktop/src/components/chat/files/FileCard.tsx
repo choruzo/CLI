@@ -14,6 +14,16 @@ import {
 import { MarkdownRenderer } from '../markdown/MarkdownRenderer';
 import { parseDelimited } from './csv';
 
+/**
+ * El fichero se purgó por retención (D3): es anterior a `filesExpiredAt`. Sin
+ * fecha de modificación no se puede saber, y se da por caducado.
+ */
+export function isExpired(file: WorkspaceFileInfo, filesExpiredAt: string | null | undefined): boolean {
+  if (!filesExpiredAt) return false;
+  const modified = Date.parse(file.modifiedAt);
+  return Number.isNaN(modified) || modified < Date.parse(filesExpiredAt);
+}
+
 /** Tipo legible a partir del mime: lo que se ve en la tarjeta. */
 export function kindLabel(file: WorkspaceFileInfo): string {
   const ext = file.name.includes('.') ? file.name.split('.').pop()!.toUpperCase() : '';
@@ -86,14 +96,17 @@ function PreviewBody({ name, preview }: { name: string; preview: Preview }) {
 
 /**
  * Tarjeta de un fichero que el agente dejó en `outputs/` (D2): nombre, tamaño y
- * tipo, con «Guardar como…», «Abrir» (solo tipos inertes) y vista previa.
+ * tipo, con «Guardar como…», «Abrir» (solo tipos inertes) y vista previa. Si
+ * el fichero caducó por retención (D3), queda solo el nombre, sin acciones.
  */
 export function FileCard({
   conversationId,
   file,
+  expired = false,
 }: {
   conversationId: string;
   file: WorkspaceFileInfo;
+  expired?: boolean;
 }) {
   const [preview, setPreview] = useState<Preview | null>(null);
   const [open, setOpen] = useState(false);
@@ -120,6 +133,24 @@ export function FileCard({
         .catch((err) => setPreview({ kind: 'unsupported', reason: errorMessage(err) }));
     }
   };
+
+  if (expired) {
+    return (
+      <div className="file-card" data-expired="true">
+        <div className="file-card__row">
+          <span className="file-card__icon" aria-hidden="true">
+            ▤
+          </span>
+          <span className="file-card__meta">
+            <span className="file-card__name">{file.name}</span>
+            <span className="file-card__detail">
+              Caducado · se eliminó por llevar tiempo sin usarse la conversación
+            </span>
+          </span>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="file-card">

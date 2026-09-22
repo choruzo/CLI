@@ -12,7 +12,12 @@ import { getLogger } from '../logging/index.js';
 import { buildAssistantRegistry } from './assistant-runtime.js';
 import type { DesktopSessionStore } from './session-store.js';
 import type { ConversationOutboundFrame, TurnEndedFrame } from './protocol.js';
-import { formatBytes, type ConversationWorkspace, type OutputsSnapshot } from './workspace.js';
+import {
+  formatBytes,
+  type ConversationWorkspace,
+  type OutputsSnapshot,
+  type WorkspaceSettings,
+} from './workspace.js';
 
 const log = getLogger('desktop.conversation');
 
@@ -43,6 +48,8 @@ export interface ConversationSessionOptions {
    * fichero confinadas y el `chat` admite adjuntos; sin él, el asistente de D1.
    */
   workspace?: ConversationWorkspace;
+  /** Plazos de retención, para anunciar `workspace_status` tras cada uso (D3). */
+  workspaceSettings?: WorkspaceSettings;
 }
 
 /** Un adjunto ya comprobado contra el workspace. */
@@ -98,6 +105,7 @@ export class ConversationSession {
   private readonly questionsTimeoutMs: number;
   private readonly closeGraceMs: number;
   private readonly workspace: ConversationWorkspace | undefined;
+  private readonly workspaceSettings: WorkspaceSettings | undefined;
   private turn: Turn | null = null;
   private readonly confirms = new Map<string, Pending<DestructiveDecision>>();
   private readonly questions = new Map<string, Pending<QuestionAnswer[] | null>>();
@@ -122,6 +130,7 @@ export class ConversationSession {
     this.questionsTimeoutMs = opts.questionsTimeoutMs ?? QUESTIONS_TIMEOUT_MS;
     this.closeGraceMs = opts.closeGraceMs ?? CLOSE_GRACE_MS;
     this.workspace = opts.workspace;
+    this.workspaceSettings = opts.workspaceSettings;
     this.agent = new StratumAgent(
       opts.config,
       opts.router,
@@ -130,13 +139,41 @@ export class ConversationSession {
         promptPreset: 'assistant',
         initialMessages: opts.initialMessages,
         workspace: this.workspace?.confinement,
+        workspaceFilesExpiredAt: this.workspace?.getMeta().filesExpiredAt,
       },
     );
   }
 
   /** Rust copió una subida (`workspace_touch`): marca uso y recalcula el tamaño. */
   touchWorkspace(): void {
-    if (!this.closed) this.workspace?.touch();
+    if (this.closed || !this.workspace) return;
+    this.workspace.touch();
+    this.announceStatus();
+  }
+
+  /** Fija o desfija la conversación (16.7). No cuenta como uso. */
+  pinWorkspace(pinned: boolean): void {
+    if (this.closed || !this.workspace) return;
+    this.workspace.setPinned(pinned);
+    this.announceStatus();
+  }
+
+  /** Estado de retención del workspace, o `undefined` si la conversación no tiene. */
+  workspaceStatus() {
+    return this.workspace && this.workspaceSettings
+      ? this.workspace.status(this.workspaceSettings)
+      : undefined;
+  }
+
+  private announceStatus(): void {
+    const status = this.workspaceStatus();
+    if (status)
+      this.send({ type: 'workspace_status', conversationId: this.conversationId, status });
+  }
+
+  /** Se resuelve cuando no queda turno en curso (también uno que `close` dejó retirado). */
+  whenIdle(): Promise<void> {
+    return this.turn?.task ?? Promise.resolve();
   }
 
   private send(frame: ConversationOutboundFrame): void {
@@ -146,6 +183,10 @@ export class ConversationSession {
   /** Mensajes del historial sin el system prompt. */
   get messageCount(): number {
     return this.agent.getMessages().filter((m) => m.role !== 'system').length;
+  }
+
+  get hasWorkspace(): boolean {
+    return this.workspace !== undefined;
   }
 
   get busy(): boolean {
@@ -264,6 +305,7 @@ export class ConversationSession {
       if (files.length > 0) {
         this.send({ type: 'workspace_files', conversationId: this.conversationId, turnId, files });
       }
+      this.announceStatus();
     } catch (err) {
       log.error('outputs scan failed', { conversationId: this.conversationId, err });
     }

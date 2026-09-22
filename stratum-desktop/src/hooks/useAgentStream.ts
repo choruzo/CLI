@@ -7,7 +7,14 @@ import type {
   SidecarFrame,
   SidecarStatus,
 } from '../ipc/types';
-import { agentEvent, isRecord, isStopReason, questionItems, workspaceFiles } from '../ipc/validate';
+import {
+  agentEvent,
+  isRecord,
+  isStopReason,
+  questionItems,
+  workspaceFiles,
+  workspaceStatus,
+} from '../ipc/validate';
 import {
   conversationReducer,
   initialConversationState,
@@ -59,7 +66,11 @@ export function frameToAction(
   if (!isRecord(f) || f.conversationId !== conversationId) return null;
   switch (f.type) {
     case 'conversation_opened':
-      return { type: 'opened' };
+      return { type: 'opened', workspace: workspaceStatus(f.workspace) };
+    case 'workspace_status': {
+      const status = workspaceStatus(f.status);
+      return status ? { type: 'workspace_status', status } : null;
+    }
     case 'agent_event': {
       const event = agentEvent(f.event);
       return isString(f.turnId) && event ? { type: 'agent_event', turnId: f.turnId, event } : null;
@@ -108,6 +119,8 @@ export interface AgentStream extends ConversationState {
   answerQuestions: (answers: QuestionAnswer[] | null) => void;
   confirm: (decision: DestructiveDecision) => void;
   retry: (turnId: string) => void;
+  /** Fija o desfija la conversación: la excluye de la retención (D3). */
+  pin: (pinned: boolean) => void;
 }
 
 function post(frame: ClientFrame, onError?: (message: string) => void): void {
@@ -211,5 +224,14 @@ export function useAgentStream(status: SidecarStatus): AgentStream {
     [send],
   );
 
-  return { ...state, conversationId, send, cancel, answerQuestions, confirm, retry };
+  const pin = useCallback(
+    (pinned: boolean) => {
+      post({ type: 'workspace_pin', conversationId, pinned }, (m) =>
+        dispatch({ type: 'conversation_error', message: `No se pudo fijar la conversación: ${m}` }),
+      );
+    },
+    [conversationId],
+  );
+
+  return { ...state, conversationId, send, cancel, answerQuestions, confirm, retry, pin };
 }

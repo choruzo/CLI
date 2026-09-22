@@ -1,7 +1,7 @@
 import type { AgentTurn } from '../../hooks/conversation-reducer';
 import { StreamingText } from './StreamingText';
 import { ToolCallBlock } from './ToolCallBlock';
-import { FileCard } from './files/FileCard';
+import { FileCard, isExpired } from './files/FileCard';
 
 const STATUS_NOTE: Partial<Record<AgentTurn['status'], string>> = {
   cancelled: 'Respuesta detenida.',
@@ -13,8 +13,11 @@ export function AgentMessage({
   turn,
   onRetry,
   conversationId,
+  filesExpiredAt,
 }: {
   turn: AgentTurn;
+  /** Los ficheros anteriores a esta fecha se purgaron (D3): tarjetas «caducado». */
+  filesExpiredAt?: string | null;
   /** Para las tarjetas de fichero (D2); sin él no se pintan. */
   conversationId?: string;
   /** Solo en turnos interrumpidos: reenvía el mensaje del usuario. */
@@ -43,7 +46,12 @@ export function AgentMessage({
       {conversationId && turn.files && turn.files.length > 0 && (
         <div className="file-cards" aria-label="Ficheros generados">
           {turn.files.map((f) => (
-            <FileCard key={f.path} conversationId={conversationId} file={f} />
+            <FileCard
+              key={f.path}
+              conversationId={conversationId}
+              file={f}
+              expired={isExpired(f, filesExpiredAt)}
+            />
           ))}
         </div>
       )}

@@ -98,6 +98,7 @@ const inboundSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   z.object({ type: z.literal('workspace_touch'), conversationId }).strict(),
+  z.object({ type: z.literal('workspace_pin'), conversationId, pinned: z.boolean() }).strict(),
   z.object({ type: z.literal('cancel'), conversationId, turnId: id.optional() }).strict(),
   z
     .object({

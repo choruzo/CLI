@@ -139,6 +139,44 @@ pub async fn output_save(
     Ok(true)
 }
 
+/// «Descargar todo (.zip)» (D3, 16.7): `inputs/` y `outputs/` de la
+/// conversación en un zip donde el usuario elija. Devuelve `false` si canceló.
+#[tauri::command]
+pub async fn workspace_export(
+    app: AppHandle,
+    window: WebviewWindow,
+    conversation_id: String,
+) -> Result<bool, String> {
+    let dir = app
+        .state::<WorkspaceState>()
+        .info()?
+        .conversation_dir(&conversation_id)?;
+    let file_name = format!("stratum-ficheros-{}.zip", &conversation_id[..8]);
+    let start_dir = app.path().download_dir().ok();
+    let chosen = tauri::async_runtime::spawn_blocking(move || {
+        let mut dialog = app
+            .dialog()
+            .file()
+            .set_title("Descargar todos los ficheros")
+            .set_file_name(file_name)
+            .add_filter("Zip", &["zip"])
+            .set_parent(&window);
+        if let Some(dir) = start_dir {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.blocking_save_file()
+    })
+    .await
+    .map_err(|e| e.to_string())?;
+    let Some(target) = chosen.and_then(|p| p.into_path().ok()) else {
+        return Ok(false);
+    };
+    tauri::async_runtime::spawn_blocking(move || workspace::export_zip(&dir, &target))
+        .await
+        .map_err(|e| e.to_string())??;
+    Ok(true)
+}
+
 /// «Abrir» con la app por defecto del SO, solo para tipos inertes.
 #[tauri::command]
 pub fn output_open(app: AppHandle, conversation_id: String, path: String) -> Result<(), String> {

@@ -19,6 +19,7 @@ export type {
   SidecarErrorFrame,
   SidecarErrorCode,
   WorkspaceFileInfo,
+  WorkspaceStatus,
 } from '../../../stratum-cli/src/desktop/protocol';
 
 import type {

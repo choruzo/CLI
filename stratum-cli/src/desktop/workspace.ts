@@ -5,8 +5,11 @@ import {
   readdirSync,
   readFileSync,
   renameSync,
+  rmSync,
+  statSync,
   writeFileSync,
 } from 'fs';
+import { rm } from 'fs/promises';
 import { homedir } from 'os';
 import { extname, isAbsolute, join, parse, resolve, sep } from 'path';
 import type { StratumConfig } from '../config/schema.js';
@@ -14,7 +17,8 @@ import type { WorkspaceConfinement } from '../agent/types.js';
 import { confinePath } from '../tools/fs/confine.js';
 import { getLogger } from '../logging/index.js';
 import { isConversationId } from './session-store.js';
-import type { WorkspaceFileInfo } from './protocol.js';
+import type { WorkspaceFileInfo, WorkspaceStatus } from './protocol.js';
+import { extractArchive, packDirectory, verifyArchive } from './archive.js';
 
 /**
  * Espacio de trabajo de cada conversación del modo Chat (Stratum Desktop D2):
@@ -31,6 +35,21 @@ import type { WorkspaceFileInfo } from './protocol.js';
  * el resto de stores). Rust solo copia en `inputs/` y avisa con
  * `workspace_touch`; el agente no puede escribir fuera de `outputs/` y
  * `scratch/` (`WorkspaceConfinement.writable`).
+ *
+ * Retención (D3). Un workspace sin uso se archiva y luego se purga; lo que
+ * queda en la raíz en cada estado:
+ *
+ * ```
+ * active    <id>/                        (con su .workspace.json)
+ * archived  <id>.tar.gz + <id>.json      (registro de retención)
+ * purged    <id>.json                    (solo el registro: la conversación sigue)
+ * ```
+ *
+ * El orden de cada operación deja siempre un estado reconocible si el proceso
+ * muere a mitad (`inspect`): **la carpeta gana** —solo desaparece renombrándola
+ * a `.trash-*` cuando el archivo ya está completo, verificado y registrado—, y
+ * un registro `purged` es terminal. Los temporales (`.tmp-*`, `.restoring-*`,
+ * `.trash-*`) se barren en `recover()`.
  */
 
 const log = getLogger('desktop.workspace');
@@ -48,20 +67,47 @@ export interface WorkspaceMeta {
   version: number;
   conversationId: string;
   createdAt: string;
+  /** Último uso real: un turno o una subida. Abrir la conversación no cuenta (D3). */
   lastUsedAt: string;
-  /** D3 añade `archived` y `purged`. */
+  /** Dentro de la carpeta siempre `active`; los otros estados viven en el registro. */
   state: 'active';
   sizeBytes: number;
+  /** Excluido de la retención (16.7). */
   pinned: boolean;
+  /**
+   * Los ficheros anteriores a esta fecha se purgaron: la conversación siguió
+   * con un workspace nuevo (D3). Ausente si nunca hubo purga.
+   */
+  filesExpiredAt?: string;
+}
+
+/** Registro de retención (`<root>/<id>.json`) de un workspace sin carpeta. */
+export interface RetentionRecord {
+  version: number;
+  conversationId: string;
+  state: 'archived' | 'purged';
+  createdAt: string;
+  lastUsedAt: string;
+  pinned: boolean;
+  sizeBytes: number;
+  filesExpiredAt?: string;
+  archivedAt?: string;
+  archiveBytes?: number;
+  purgedAt?: string;
 }
 
 export interface WorkspaceSettings {
   root: string;
   maxFileBytes: number;
   maxWorkspaceBytes: number;
+  /** Sin uso durante este tiempo → `archived`. `0` o ausente: nunca. */
+  compressAfterMs?: number;
+  /** Sin uso durante este tiempo → `purged`. `0` o ausente: nunca. */
+  deleteAfterMs?: number;
 }
 
 const MB = 1024 * 1024;
+const DAY_MS = 24 * 60 * 60 * 1000;
 
 /**
  * Resuelve `desktop.workspaces` de la config. La raíz puede ser cualquier ruta
@@ -94,6 +140,8 @@ export function resolveWorkspaceSettings(
       root,
       maxFileBytes: Math.floor(w.maxFileMB * MB),
       maxWorkspaceBytes: Math.floor(w.maxWorkspaceMB * MB),
+      compressAfterMs: Math.floor(w.compressAfterDays * DAY_MS),
+      deleteAfterMs: Math.floor(w.deleteAfterDays * DAY_MS),
     },
     warning,
   };
@@ -187,15 +235,53 @@ export type AttachmentCheck =
   | { ok: true; path: string; size: number; mime: string }
   | { ok: false; reason: string };
 
+const isIso = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));
+
+function writeJsonAtomic(path: string, data: unknown): void {
+  const tmp = `${path}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
+  renameSync(tmp, path);
+}
+
+/**
+ * Estado de retención visto por la UI. `purgeAt` es cuándo se borrarán los
+ * ficheros si nadie usa la conversación antes; `null` si está fijada o la purga
+ * está desactivada.
+ */
+export function workspaceStatus(
+  state: WorkspaceStatus['state'],
+  fields: { lastUsedAt: string; pinned: boolean; filesExpiredAt?: string },
+  settings: WorkspaceSettings,
+): WorkspaceStatus {
+  const deleteAfter = settings.deleteAfterMs ?? 0;
+  const purgeAt =
+    !fields.pinned && deleteAfter > 0 && state !== 'purged'
+      ? new Date(Date.parse(fields.lastUsedAt) + deleteAfter).toISOString()
+      : null;
+  return {
+    state,
+    pinned: fields.pinned,
+    lastUsedAt: fields.lastUsedAt,
+    purgeAt,
+    filesExpiredAt: fields.filesExpiredAt ?? null,
+  };
+}
+
 /** El workspace de una conversación, ya creado en disco. */
 export class ConversationWorkspace {
   readonly confinement: WorkspaceConfinement;
   private meta: WorkspaceMeta;
 
+  /**
+   * Crea las subcarpetas y carga (o genera) los metadatos. Abrir **no** marca
+   * uso (D3): solo recalcula el tamaño. `initial` siembra los metadatos de un
+   * workspace nuevo (el que sustituye a uno purgado).
+   */
   constructor(
     readonly conversationId: string,
     readonly dir: string,
     private readonly now: () => Date,
+    initial: Partial<Pick<WorkspaceMeta, 'filesExpiredAt' | 'pinned'>> = {},
   ) {
     this.confinement = {
       root: dir,
@@ -203,8 +289,8 @@ export class ConversationWorkspace {
       writable: [WORKSPACE_DIRS.outputs, WORKSPACE_DIRS.scratch],
     };
     for (const sub of Object.values(WORKSPACE_DIRS)) mkdirSync(join(dir, sub), { recursive: true });
-    this.meta = this.loadMeta() ?? this.freshMeta();
-    this.touch();
+    this.meta = this.loadMeta() ?? { ...this.freshMeta(), ...initial };
+    this.refresh();
   }
 
   private get metaPath(): string {
@@ -226,28 +312,21 @@ export class ConversationWorkspace {
 
   /** Metadatos existentes, o `null` si faltan o no se pueden leer (se regeneran). */
   private loadMeta(): WorkspaceMeta | null {
-    if (!existsSync(this.metaPath)) return null;
-    try {
-      const raw = JSON.parse(readFileSync(this.metaPath, 'utf-8')) as Partial<WorkspaceMeta>;
-      if (raw.conversationId !== this.conversationId || typeof raw.createdAt !== 'string') {
-        return null;
-      }
-      return {
-        ...this.freshMeta(),
-        createdAt: raw.createdAt,
-        pinned: raw.pinned === true,
-      };
-    } catch (err) {
+    const meta = readWorkspaceMeta(this.dir, this.conversationId);
+    if (meta === null) {
       log.warn('workspace metadata unreadable; regenerating', {
         conversationId: this.conversationId,
-        err,
       });
-      return null;
     }
+    return meta ?? null;
   }
 
   getMeta(): WorkspaceMeta {
     return { ...this.meta };
+  }
+
+  status(settings: WorkspaceSettings): WorkspaceStatus {
+    return workspaceStatus('active', this.meta, settings);
   }
 
   /** Bytes de todo el workspace (sin seguir enlaces ni contar los metadatos). */
@@ -260,20 +339,28 @@ export class ConversationWorkspace {
     return total;
   }
 
-  /**
-   * Marca uso (cada turno y cada subida) y recalcula el tamaño. Best-effort:
-   * un fallo de disco se registra, no tumba la conversación.
-   */
+  /** Marca uso (cada turno y cada subida) y recalcula el tamaño. */
   touch(): void {
-    this.meta = {
-      ...this.meta,
-      lastUsedAt: this.now().toISOString(),
-      sizeBytes: this.sizeBytes(),
-    };
+    this.meta = { ...this.meta, lastUsedAt: this.now().toISOString() };
+    this.refresh();
+  }
+
+  /** Recalcula el tamaño sin marcar uso. */
+  refresh(): void {
+    this.meta = { ...this.meta, sizeBytes: this.sizeBytes() };
+    this.save();
+  }
+
+  /** Fija (excluye de la retención) o desfija. No cuenta como uso. */
+  setPinned(pinned: boolean): void {
+    this.meta = { ...this.meta, pinned };
+    this.save();
+  }
+
+  /** Best-effort: un fallo de disco se registra, no tumba la conversación. */
+  private save(): void {
     try {
-      const tmp = `${this.metaPath}.${process.pid}.tmp`;
-      writeFileSync(tmp, JSON.stringify(this.meta, null, 2), 'utf-8');
-      renameSync(tmp, this.metaPath);
+      writeJsonAtomic(this.metaPath, this.meta);
     } catch (err) {
       log.error('workspace metadata save failed', { conversationId: this.conversationId, err });
     }
@@ -325,8 +412,50 @@ export class ConversationWorkspace {
   }
 }
 
-/** Crea y resuelve los workspaces de las conversaciones. */
+/**
+ * Lee `.workspace.json` de una carpeta. `undefined` si no existe, `null` si
+ * existe pero no vale (de otra conversación o mal formado).
+ */
+function readWorkspaceMeta(dir: string, conversationId: string): WorkspaceMeta | null | undefined {
+  const path = join(dir, WORKSPACE_META_FILE);
+  if (!existsSync(path)) return undefined;
+  try {
+    const raw = JSON.parse(readFileSync(path, 'utf-8')) as Partial<WorkspaceMeta>;
+    if (raw.conversationId !== conversationId || !isIso(raw.createdAt)) return null;
+    return {
+      version: WORKSPACE_META_VERSION,
+      conversationId,
+      createdAt: raw.createdAt,
+      // Un workspace de D2 siempre tuvo `lastUsedAt`; si faltase, se data por su creación.
+      lastUsedAt: isIso(raw.lastUsedAt) ? raw.lastUsedAt : raw.createdAt,
+      state: 'active',
+      sizeBytes: typeof raw.sizeBytes === 'number' ? raw.sizeBytes : 0,
+      pinned: raw.pinned === true,
+      ...(isIso(raw.filesExpiredAt) ? { filesExpiredAt: raw.filesExpiredAt } : {}),
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Qué hay en disco para una conversación. */
+export type WorkspaceInspection =
+  | { state: 'none' }
+  /** `meta: null` → carpeta sin metadatos válidos: la retención no la toca. */
+  | { state: 'active'; meta: WorkspaceMeta | null }
+  | { state: 'archived'; record: RetentionRecord }
+  | { state: 'purged'; record: RetentionRecord };
+
+const TEMP_ENTRY = /^\.(tmp|restoring|trash)-([0-9a-f-]{36})/i;
+const ROOT_ENTRY = /^([0-9a-f-]{36})(\.tar\.gz|\.json)?$/i;
+
+/** Crea y resuelve los workspaces de las conversaciones, y ejecuta su retención (D3). */
 export class WorkspaceManager {
+  /** Cola por conversación: archivar, restaurar y abrir nunca se solapan (16.5). */
+  private readonly locks = new Map<string, Promise<unknown>>();
+  /** Conversaciones abiertas en el host (contador: abrir y cerrar pueden solaparse). */
+  private readonly inUse = new Map<string, number>();
+
   constructor(
     readonly settings: WorkspaceSettings,
     private readonly now: () => Date = () => new Date(),
@@ -336,8 +465,7 @@ export class WorkspaceManager {
     return this.settings.root;
   }
 
-  /** Workspace de `conversationId`, creado si no existe. Lanza con un id que no es UUID. */
-  open(conversationId: string): ConversationWorkspace {
+  private checkedDir(conversationId: string): string {
     if (!isConversationId(conversationId)) {
       throw new Error(`conversationId inválido: ${JSON.stringify(conversationId.slice(0, 64))}`);
     }
@@ -345,7 +473,343 @@ export class WorkspaceManager {
     if (!dir.startsWith(resolve(this.settings.root) + sep)) {
       throw new Error('ruta de workspace fuera de la raíz');
     }
+    return dir;
+  }
+
+  archivePath(conversationId: string): string {
+    return `${this.checkedDir(conversationId)}.tar.gz`;
+  }
+
+  recordPath(conversationId: string): string {
+    return `${this.checkedDir(conversationId)}.json`;
+  }
+
+  /**
+   * Workspace de `conversationId`, creado si no existe. Síncrono y sin lock:
+   * no restaura un archivado (el host usa `acquire`). Lanza con un id que no es UUID.
+   */
+  open(
+    conversationId: string,
+    initial?: Partial<Pick<WorkspaceMeta, 'filesExpiredAt' | 'pinned'>>,
+  ): ConversationWorkspace {
+    const dir = this.checkedDir(conversationId);
     mkdirSync(dir, { recursive: true });
-    return new ConversationWorkspace(conversationId, dir, this.now);
+    return new ConversationWorkspace(conversationId, dir, this.now, initial);
+  }
+
+  /** Ejecuta `fn` con el lock de la conversación (FIFO). */
+  withLock<T>(conversationId: string, fn: () => Promise<T>): Promise<T> {
+    const prev = this.locks.get(conversationId) ?? Promise.resolve();
+    const run = prev.then(fn, fn);
+    const tail = run.catch(() => undefined);
+    this.locks.set(conversationId, tail);
+    void tail.then(() => {
+      if (this.locks.get(conversationId) === tail) this.locks.delete(conversationId);
+    });
+    return run;
+  }
+
+  isInUse(conversationId: string): boolean {
+    return (this.inUse.get(conversationId) ?? 0) > 0;
+  }
+
+  /**
+   * Workspace de una conversación que se abre en el host. La marca en uso (la
+   * retención deja de tocarla) y, con el lock, espera a una compresión en
+   * marcha, restaura un `archived` o da un workspace nuevo a uno `purged`. Si
+   * no lanza, el llamador tiene que llamar a `release` al cerrar.
+   */
+  async acquire(
+    conversationId: string,
+    hooks: { onRestoring?: () => void } = {},
+  ): Promise<{ workspace: ConversationWorkspace; restored: boolean }> {
+    this.checkedDir(conversationId);
+    this.inUse.set(conversationId, (this.inUse.get(conversationId) ?? 0) + 1);
+    try {
+      return await this.withLock(conversationId, async () => {
+        const found = this.inspect(conversationId);
+        if (found.state === 'archived') {
+          hooks.onRestoring?.();
+          await this.restore(conversationId, found.record);
+          return { workspace: this.open(conversationId), restored: true };
+        }
+        if (found.state === 'purged') {
+          // Workspace nuevo y vacío; la fecha de la purga avisa al agente y a la UI.
+          const workspace = this.open(conversationId, {
+            filesExpiredAt: found.record.purgedAt ?? this.now().toISOString(),
+          });
+          rmSync(this.recordPath(conversationId), { force: true });
+          return { workspace, restored: false };
+        }
+        return { workspace: this.open(conversationId), restored: false };
+      });
+    } catch (err) {
+      this.release(conversationId);
+      throw err;
+    }
+  }
+
+  release(conversationId: string): void {
+    const n = (this.inUse.get(conversationId) ?? 0) - 1;
+    if (n > 0) this.inUse.set(conversationId, n);
+    else this.inUse.delete(conversationId);
+  }
+
+  /** Lectura pura del estado en disco (sin limpiar nada: eso es `recover`). */
+  inspect(conversationId: string): WorkspaceInspection {
+    const dir = this.checkedDir(conversationId);
+    let hasDir = false;
+    try {
+      hasDir = lstatSync(dir).isDirectory();
+    } catch {
+      /* no existe */
+    }
+    const archive = this.archivePath(conversationId);
+    const hasArchive = existsSync(archive);
+    if (hasDir) {
+      const meta = readWorkspaceMeta(dir, conversationId) ?? null;
+      // La carpeta gana solo si es un workspace de verdad: una carpeta sin
+      // metadatos junto a un archivo no la creó el sidecar (el archivo manda).
+      if (meta || !hasArchive) return { state: 'active', meta };
+    }
+    const record = this.readRecord(conversationId);
+    if (record?.state === 'purged' && !hasDir) return { state: 'purged', record };
+    if (hasArchive) {
+      if (record?.state === 'archived') return { state: 'archived', record };
+      // Registro perdido: se data por el propio archivo.
+      const iso = statSync(archive).mtime.toISOString();
+      return {
+        state: 'archived',
+        record: {
+          version: 1,
+          conversationId,
+          state: 'archived',
+          createdAt: iso,
+          lastUsedAt: iso,
+          pinned: false,
+          sizeBytes: 0,
+          archivedAt: iso,
+        },
+      };
+    }
+    return { state: 'none' };
+  }
+
+  /** Estado para la UI de una conversación, abierta o no; `null` si no tiene workspace. */
+  statusOf(conversationId: string): WorkspaceStatus | null {
+    const found = this.inspect(conversationId);
+    if (found.state === 'none') return null;
+    if (found.state === 'active') {
+      return found.meta ? workspaceStatus('active', found.meta, this.settings) : null;
+    }
+    return workspaceStatus(found.state, found.record, this.settings);
+  }
+
+  private readRecord(conversationId: string): RetentionRecord | null {
+    const path = this.recordPath(conversationId);
+    if (!existsSync(path)) return null;
+    try {
+      const raw = JSON.parse(readFileSync(path, 'utf-8')) as Partial<RetentionRecord>;
+      if (
+        raw.conversationId !== conversationId ||
+        (raw.state !== 'archived' && raw.state !== 'purged') ||
+        !isIso(raw.lastUsedAt)
+      ) {
+        return null;
+      }
+      return {
+        version: 1,
+        conversationId,
+        state: raw.state,
+        createdAt: isIso(raw.createdAt) ? raw.createdAt : raw.lastUsedAt,
+        lastUsedAt: raw.lastUsedAt,
+        pinned: raw.pinned === true,
+        sizeBytes: typeof raw.sizeBytes === 'number' ? raw.sizeBytes : 0,
+        ...(isIso(raw.filesExpiredAt) ? { filesExpiredAt: raw.filesExpiredAt } : {}),
+        ...(isIso(raw.archivedAt) ? { archivedAt: raw.archivedAt } : {}),
+        ...(typeof raw.archiveBytes === 'number' ? { archiveBytes: raw.archiveBytes } : {}),
+        ...(isIso(raw.purgedAt) ? { purgedAt: raw.purgedAt } : {}),
+      };
+    } catch (err) {
+      log.warn('retention record unreadable', { conversationId, err });
+      return null;
+    }
+  }
+
+  /** Conversaciones con algo en la raíz (carpeta, archivo o registro). */
+  list(): string[] {
+    let entries: string[];
+    try {
+      entries = readdirSync(this.settings.root);
+    } catch {
+      return [];
+    }
+    const ids = new Set<string>();
+    for (const e of entries) {
+      const m = ROOT_ENTRY.exec(e);
+      if (m && isConversationId(m[1])) ids.add(m[1]);
+    }
+    return [...ids].sort();
+  }
+
+  /**
+   * Deja la raíz limpia tras un apagado brusco: borra los temporales y lo que
+   * sobra según la regla «la carpeta gana; `purged` es terminal». No toca las
+   * conversaciones en uso. Best-effort.
+   */
+  async recover(): Promise<void> {
+    let entries: string[] = [];
+    try {
+      entries = readdirSync(this.settings.root);
+    } catch {
+      return;
+    }
+    for (const e of entries) {
+      const m = TEMP_ENTRY.exec(e);
+      if (!m || this.isInUse(m[2])) continue;
+      await this.withLock(m[2], () =>
+        rm(join(this.settings.root, e), { recursive: true, force: true }),
+      ).catch((err) => log.warn('temp cleanup failed', { entry: e, err }));
+    }
+    for (const id of this.list()) {
+      if (this.isInUse(id)) continue;
+      await this.withLock(id, async () => {
+        const found = this.inspect(id);
+        if (found.state === 'active') {
+          // Compresión que no llegó a retirar la carpeta, o restauración que
+          // no llegó a borrar el archivo: en los dos casos la carpeta está entera.
+          rmSync(this.archivePath(id), { force: true });
+          rmSync(this.recordPath(id), { force: true });
+        } else if (found.state === 'purged') {
+          rmSync(this.archivePath(id), { force: true });
+        }
+      }).catch((err) => log.warn('retention recovery failed', { conversationId: id, err }));
+    }
+  }
+
+  /**
+   * `active → archived`. Requiere el lock. Comprime a un temporal, lo verifica
+   * contra la carpeta, lo publica, escribe el registro y solo entonces retira
+   * la carpeta. Si algo falla antes de retirarla, la carpeta sigue y el
+   * archivo se descarta.
+   */
+  async archive(conversationId: string): Promise<void> {
+    const dir = this.checkedDir(conversationId);
+    const meta = readWorkspaceMeta(dir, conversationId);
+    if (!meta) throw new Error('el workspace no tiene metadatos válidos');
+    const tmp = join(this.settings.root, `.tmp-${conversationId}.tar.gz`);
+    const archive = this.archivePath(conversationId);
+    const record = this.recordPath(conversationId);
+    try {
+      const manifest = await packDirectory(dir, tmp);
+      await verifyArchive(tmp, manifest);
+      renameSync(tmp, archive);
+    } catch (err) {
+      rmSync(tmp, { force: true });
+      throw err;
+    }
+    try {
+      writeJsonAtomic(record, {
+        version: 1,
+        conversationId,
+        state: 'archived',
+        createdAt: meta.createdAt,
+        lastUsedAt: meta.lastUsedAt,
+        pinned: meta.pinned,
+        sizeBytes: meta.sizeBytes,
+        ...(meta.filesExpiredAt ? { filesExpiredAt: meta.filesExpiredAt } : {}),
+        archivedAt: this.now().toISOString(),
+        archiveBytes: statSync(archive).size,
+      } satisfies RetentionRecord);
+      this.retireDir(conversationId, dir);
+    } catch (err) {
+      // La carpeta sigue: se deshace lo publicado para no dejar dos verdades.
+      rmSync(archive, { force: true });
+      rmSync(record, { force: true });
+      throw err;
+    }
+  }
+
+  /** `archived → active`. Requiere el lock. Extrae a un temporal y lo publica con un rename. */
+  async restore(conversationId: string, record: RetentionRecord): Promise<void> {
+    const dir = this.checkedDir(conversationId);
+    const staging = join(this.settings.root, `.restoring-${conversationId}`);
+    await rm(staging, { recursive: true, force: true });
+    if (existsSync(dir)) {
+      // Carpeta sin metadatos junto al archivo (ver `inspect`): se aparta, no
+      // se borra, por si alguien dejó algo ahí.
+      const orphan = join(this.settings.root, `.orphan-${conversationId}-${Date.now()}`);
+      log.warn('stray folder next to an archive; moved aside', { conversationId, orphan });
+      renameSync(dir, orphan);
+    }
+    await extractArchive(this.archivePath(conversationId), staging);
+    const restored: WorkspaceMeta = {
+      version: WORKSPACE_META_VERSION,
+      conversationId,
+      createdAt: record.createdAt,
+      // Restaurar no es usar: el reloj de la retención sigue donde estaba.
+      lastUsedAt: record.lastUsedAt,
+      state: 'active',
+      sizeBytes: record.sizeBytes,
+      pinned: record.pinned,
+      ...(record.filesExpiredAt ? { filesExpiredAt: record.filesExpiredAt } : {}),
+    };
+    try {
+      writeJsonAtomic(join(staging, WORKSPACE_META_FILE), restored);
+      renameSync(staging, dir);
+    } catch (err) {
+      await rm(staging, { recursive: true, force: true });
+      throw err;
+    }
+    rmSync(this.archivePath(conversationId), { force: true });
+    rmSync(this.recordPath(conversationId), { force: true });
+  }
+
+  /**
+   * `active|archived → purged`. Requiere el lock. El registro `purged` se
+   * escribe primero: a partir de ahí la purga es firme aunque el borrado se
+   * interrumpa (lo termina `recover`).
+   */
+  async purge(conversationId: string): Promise<void> {
+    const found = this.inspect(conversationId);
+    if (found.state === 'none' || found.state === 'purged') return;
+    const base = found.state === 'active' ? found.meta : found.record;
+    if (!base) throw new Error('el workspace no tiene metadatos válidos');
+    const iso = this.now().toISOString();
+    const recordPath = this.recordPath(conversationId);
+    writeJsonAtomic(recordPath, {
+      version: 1,
+      conversationId,
+      state: 'purged',
+      createdAt: base.createdAt,
+      lastUsedAt: base.lastUsedAt,
+      pinned: base.pinned,
+      sizeBytes: base.sizeBytes,
+      filesExpiredAt: iso,
+      purgedAt: iso,
+    } satisfies RetentionRecord);
+    if (found.state === 'archived') {
+      await rm(this.archivePath(conversationId), { force: true });
+      return;
+    }
+    try {
+      this.retireDir(conversationId, this.checkedDir(conversationId));
+    } catch (err) {
+      rmSync(recordPath, { force: true });
+      throw err;
+    }
+  }
+
+  /**
+   * Retira la carpeta con un rename atómico a `.trash-*` y la borra en
+   * segundo plano. Si el rename falla (un fichero abierto en Windows), lanza
+   * con la carpeta intacta; si falla el borrado, lo termina `recover`.
+   */
+  private retireDir(conversationId: string, dir: string): void {
+    const trash = join(this.settings.root, `.trash-${conversationId}-${Date.now()}`);
+    renameSync(dir, trash);
+    void rm(trash, { recursive: true, force: true }).catch((err) =>
+      log.warn('trash cleanup failed', { conversationId, err }),
+    );
   }
 }

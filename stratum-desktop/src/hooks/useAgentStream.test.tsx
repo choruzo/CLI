@@ -17,6 +17,7 @@ describe('frameToAction', () => {
   it('traduce las tramas de esta conversación', () => {
     expect(frameToAction(frame({ type: 'conversation_opened', conversationId: ID }), ID)).toEqual({
       type: 'opened',
+      workspace: null,
     });
     expect(
       frameToAction(

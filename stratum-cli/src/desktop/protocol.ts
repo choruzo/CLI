@@ -25,6 +25,11 @@
  * y `handshake_ok` le dice a Rust dónde viven los workspaces y sus límites.
  * `workspace_touch` solo lo manda Rust (tras copiar una subida): no está en
  * `CLIENT_FRAME_TYPES`, así que el webview no puede emitirlo.
+ *
+ * D3 (v4) añade la retención: `conversation_opened.workspace` y
+ * `workspace_status` llevan el estado del workspace (`active`, `restoring`
+ * mientras se descomprime, `archived`, `purged`) con la fecha prevista de
+ * purga, y el webview puede fijar la conversación con `workspace_pin`.
  */
 
 import type {
@@ -37,7 +42,7 @@ import type {
 export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem };
 
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 3;
+export const DESKTOP_PROTOCOL_VERSION = 4;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -137,8 +142,16 @@ export interface WorkspaceTouchFrame {
   conversationId: string;
 }
 
+/** Fija la conversación (la excluye de la retención) o la desfija (D3, 16.7). */
+export interface WorkspacePinFrame {
+  type: 'workspace_pin';
+  conversationId: string;
+  pinned: boolean;
+}
+
 export type ConversationFrame =
   | WorkspaceTouchFrame
+  | WorkspacePinFrame
   | NewConversationFrame
   | CloseConversationFrame
   | ChatFrame
@@ -157,6 +170,7 @@ export const CLIENT_FRAME_TYPES = [
   'cancel',
   'answer_questions',
   'confirm_response',
+  'workspace_pin',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -217,6 +231,26 @@ export interface PongFrame {
 
 export type SidecarErrorCode = 'schema_incompatible' | 'config_invalid' | 'protocol';
 
+/**
+ * Días antes de la purga en los que la UI avisa en la conversación (16.7).
+ * Constante del protocolo para que sidecar y webview cuenten igual.
+ */
+export const PURGE_WARNING_DAYS = 3;
+
+/** Retención del workspace de una conversación (D3). */
+export interface WorkspaceStatus {
+  /** `restoring`: se está descomprimiendo antes de abrir la conversación. */
+  state: 'active' | 'restoring' | 'archived' | 'purged';
+  /** Fijada: excluida de la retención. */
+  pinned: boolean;
+  /** Último uso (turno o subida), ISO 8601. */
+  lastUsedAt: string;
+  /** Cuándo se borrarán los ficheros si no se usa antes; `null` si fijada o sin purga. */
+  purgeAt: string | null;
+  /** Los ficheros anteriores a esta fecha ya no existen (se purgaron); `null` si nunca. */
+  filesExpiredAt: string | null;
+}
+
 export interface ConversationOpenedFrame {
   type: 'conversation_opened';
   conversationId: string;
@@ -224,6 +258,15 @@ export interface ConversationOpenedFrame {
   resumed: boolean;
   /** Mensajes del historial rehidratado (sin el system prompt). */
   messageCount: number;
+  /** Ausente si la conversación no tiene workspace (sin ficheros, como en D1). */
+  workspace?: WorkspaceStatus;
+}
+
+/** Cambió la retención del workspace (restaurando, uso, fijado) (D3). */
+export interface WorkspaceStatusFrame {
+  type: 'workspace_status';
+  conversationId: string;
+  status: WorkspaceStatus;
 }
 
 export interface ConversationClosedFrame {
@@ -326,6 +369,7 @@ export type ConversationOutboundFrame =
   | QuestionsRequestFrame
   | PromptResolvedFrame
   | WorkspaceFilesFrame
+  | WorkspaceStatusFrame
   | ConversationErrorFrame;
 
 export interface SidecarErrorFrame {

@@ -6,10 +6,12 @@ export function MessageList({
   messages,
   onRetry,
   conversationId,
+  filesExpiredAt,
 }: {
   messages: ChatMessage[];
   onRetry: (turnId: string) => void;
   conversationId?: string;
+  filesExpiredAt?: string | null;
 }) {
   return (
     <div className="message-list">
@@ -21,6 +23,7 @@ export function MessageList({
             key={`a-${m.turnId}`}
             turn={m}
             conversationId={conversationId}
+            filesExpiredAt={filesExpiredAt}
             onRetry={() => onRetry(m.turnId)}
           />
         ),

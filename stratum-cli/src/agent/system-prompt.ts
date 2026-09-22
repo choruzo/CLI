@@ -60,6 +60,8 @@ export interface SystemPromptEnv {
    * en vez de «no tienes acceso a ficheros».
    */
   workspace?: WorkspaceConfinement;
+  /** Ver `StratumAgentOptions.workspaceFilesExpiredAt` (D3). Solo con `workspace`. */
+  workspaceFilesExpiredAt?: string;
 }
 
 /** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
@@ -570,6 +572,16 @@ function assistantBaseWithWorkspace(): string {
   return ASSISTANT_HEAD + ASSISTANT_WITH_WORKSPACE + ASSISTANT_TONE + tools + ASSISTANT_LANGUAGE;
 }
 
+/**
+ * Nota de retención (D3): los ficheros de antes de la purga ya no existen. Sin
+ * ella, el agente vería en el historial rutas como `outputs/informe.csv` e
+ * intentaría leerlas.
+ */
+function buildFilesExpiredNote(iso: string): string {
+  const date = Number.isNaN(Date.parse(iso)) ? iso : new Date(iso).toDateString();
+  return `Files from earlier in this conversation were deleted on ${date}, because the workspace went unused for too long. Any workspace path mentioned before that date (in inputs/, outputs/ or scratch/) no longer exists: do not try to read or list it. If the user needs one of those files, tell them it expired and ask them to upload it again. Files uploaded or written after that date are available as usual.`;
+}
+
 /** `<env>` reducido del asistente: sin cwd, sin worktree, sin git. */
 function buildAssistantEnvBlock(env: SystemPromptEnv): string {
   const modelLine =
@@ -595,7 +607,12 @@ function buildAssistantEnvBlock(env: SystemPromptEnv): string {
 export function buildAssistantPrompt(memory: string | undefined, env: SystemPromptEnv): string {
   let prompt = env.workspace ? assistantBaseWithWorkspace() : ASSISTANT_BASE_PROMPT;
   prompt += `\n\n${buildAssistantEnvBlock(env)}`;
-  if (env.workspace) prompt += `\n\n${ASSISTANT_WORKSPACE_BLOCK}`;
+  if (env.workspace) {
+    prompt += `\n\n${ASSISTANT_WORKSPACE_BLOCK}`;
+    if (env.workspaceFilesExpiredAt) {
+      prompt += `\n${buildFilesExpiredNote(env.workspaceFilesExpiredAt)}`;
+    }
+  }
   prompt += `\n\n# Long-term memory
 You have two tools backed by a long-term memory that persists across conversations:
 - store_decision: use it when the user states a preference, a stable fact about themselves or their work, or a decision they want you to remember in future conversations. Do NOT use it for passing details of the current conversation.

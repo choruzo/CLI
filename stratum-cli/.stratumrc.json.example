@@ -147,7 +147,9 @@
     "workspaces": {
       "root": "~/.stratum/desktop/workspaces",
       "maxFileMB": 25,
-      "maxWorkspaceMB": 250
+      "maxWorkspaceMB": 250,
+      "compressAfterDays": 7,
+      "deleteAfterDays": 30
     }
   }
 }
