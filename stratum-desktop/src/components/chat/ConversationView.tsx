@@ -1,5 +1,6 @@
 import { useEffect, useRef } from 'react';
 import type { AgentStream } from '../../hooks/useAgentStream';
+import { useAttachments } from '../../hooks/useAttachments';
 import { ConfirmDialog } from './ConfirmDialog';
 import { InputArea } from './InputArea';
 import { MessageList } from './MessageList';
@@ -37,6 +38,8 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
 
   const generating = stream.activeTurnId !== null;
   const empty = stream.messages.length === 0;
+  const inputDisabled = !connected || !stream.opened || stream.pendingQuestions !== null;
+  const attachments = useAttachments(stream.conversationId, !inputDisabled);
 
   return (
     <section className="conversation" aria-label="Conversación">
@@ -46,7 +49,11 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
             <p>¿En qué puedo ayudarte?</p>
           </div>
         ) : (
-          <MessageList messages={stream.messages} onRetry={stream.retry} />
+          <MessageList
+            messages={stream.messages}
+            onRetry={stream.retry}
+            conversationId={stream.conversationId}
+          />
         )}
       </div>
 
@@ -67,9 +74,10 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
         />
       )}
       <InputArea
-        disabled={!connected || !stream.opened || stream.pendingQuestions !== null}
+        disabled={inputDisabled}
         generating={generating}
         onSend={stream.send}
+        attachments={attachments}
         onCancel={stream.cancel}
         placeholder={connected ? 'Escribe un mensaje…' : 'Esperando al agente…'}
       />

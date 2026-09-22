@@ -1,8 +1,9 @@
-import { readdirSync, readFileSync, statSync } from 'fs';
-import { join } from 'path';
+import { lstatSync, readdirSync, readFileSync, statSync } from 'fs';
+import { join, resolve } from 'path';
 import { z } from 'zod';
 import { execa } from 'execa';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { stringParam, workspacePathPreflight } from './confine.js';
 
 // Directorios que siempre se excluyen (mismo set que glob.ts / list.ts)
 const EXCLUDED_DIRS = new Set([
@@ -91,7 +92,16 @@ function includeToRegExp(include: string): RegExp {
   return new RegExp('^' + regStr + '$');
 }
 
-function searchWithNode(pattern: string, include: string | undefined, baseDir: string): string[] {
+/**
+ * `followLinks: false` (workspace de Desktop, D2): los enlaces simbólicos y las
+ * junctions no se recorren, porque podrían llevar fuera de la raíz confinada.
+ */
+function searchWithNode(
+  pattern: string,
+  include: string | undefined,
+  baseDir: string,
+  followLinks = true,
+): string[] {
   const re = new RegExp(pattern);
   const includeRe = include ? includeToRegExp(include) : null;
   const matches: string[] = [];
@@ -115,10 +125,11 @@ function searchWithNode(pattern: string, include: string | undefined, baseDir: s
 
       let stat;
       try {
-        stat = statSync(fullPath);
+        stat = followLinks ? statSync(fullPath) : lstatSync(fullPath);
       } catch {
         continue;
       }
+      if (stat.isSymbolicLink()) continue;
 
       if (stat.isDirectory()) {
         walk(fullPath, relPath);
@@ -175,13 +186,23 @@ export const grepTool: ToolDefinition = {
   schema,
   destructive: false,
 
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return workspacePathPreflight(stringParam(params, 'cwd'), ctx, 'read');
+  },
+
   async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const { pattern, include, cwd } = schema.parse(params);
-    const base = cwd ?? ctx.cwd;
+    const vetoed = workspacePathPreflight(cwd, ctx, 'read');
+    if (vetoed) return vetoed;
+    const base = resolve(ctx.cwd, cwd ?? '.');
 
     try {
       let matches: string[];
-      if (await hasRipgrep()) {
+      if (ctx.workspace) {
+        // Confinado: sin ripgrep (sería lanzar un binario desde el sidecar) y
+        // sin seguir enlaces.
+        matches = searchWithNode(pattern, include, base, false);
+      } else if (await hasRipgrep()) {
         matches = await searchWithRipgrep(pattern, include, base, ctx.signal);
       } else {
         matches = searchWithNode(pattern, include, base);

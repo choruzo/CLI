@@ -1,7 +1,8 @@
-import { readdirSync, statSync } from 'fs';
-import { join } from 'path';
+import { lstatSync, readdirSync, statSync } from 'fs';
+import { join, resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { stringParam, workspacePathPreflight } from './confine.js';
 
 // Directorios que siempre se excluyen (mismo set que list.ts y grep.ts)
 const EXCLUDED_DIRS = new Set([
@@ -61,7 +62,14 @@ function globToRegExp(pattern: string): RegExp {
   return new RegExp('^' + regStr + '$');
 }
 
-function walkGlob(dir: string, relDir: string, re: RegExp, results: string[]): void {
+/** `followLinks: false` (workspace de Desktop, D2): no recorre symlinks ni junctions. */
+function walkGlob(
+  dir: string,
+  relDir: string,
+  re: RegExp,
+  results: string[],
+  followLinks = true,
+): void {
   if (results.length >= MAX_RESULTS) return;
 
   let entries: string[];
@@ -79,13 +87,15 @@ function walkGlob(dir: string, relDir: string, re: RegExp, results: string[]): v
 
     let isDir = false;
     try {
-      isDir = statSync(fullPath).isDirectory();
+      const stat = followLinks ? statSync(fullPath) : lstatSync(fullPath);
+      if (stat.isSymbolicLink()) continue;
+      isDir = stat.isDirectory();
     } catch {
       continue;
     }
 
     if (isDir) {
-      walkGlob(fullPath, relPath, re, results);
+      walkGlob(fullPath, relPath, re, results, followLinks);
     } else {
       if (re.test(relPath)) {
         results.push(relPath);
@@ -111,14 +121,20 @@ export const globTool: ToolDefinition = {
   schema,
   destructive: false,
 
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return workspacePathPreflight(stringParam(params, 'cwd'), ctx, 'read');
+  },
+
   async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const { pattern, cwd } = schema.parse(params);
-    const base = cwd ?? ctx.cwd;
+    const vetoed = workspacePathPreflight(cwd, ctx, 'read');
+    if (vetoed) return vetoed;
+    const base = resolve(ctx.cwd, cwd ?? '.');
 
     try {
       const re = globToRegExp(pattern);
       const results: string[] = [];
-      walkGlob(base, '', re, results);
+      walkGlob(base, '', re, results, !ctx.workspace);
 
       if (results.length === 0) {
         return { ok: true, output: '(no matches)' };

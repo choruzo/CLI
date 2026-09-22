@@ -18,6 +18,13 @@
  * (UUID que genera el frontend) y viajan por el mismo canal ordenado que el
  * stream, `cancel` incluido (15.9). Rust filtra por tipo y tamaño lo que manda
  * el webview; el sidecar valida cada trama con un schema estricto (`codec.ts`).
+ *
+ * D2 (v3) añade el workspace de cada conversación: el `chat` puede llevar
+ * adjuntos (rutas `inputs/…` del workspace, nunca rutas del disco del usuario),
+ * el sidecar anuncia con `workspace_files` lo que el agente dejó en `outputs/`,
+ * y `handshake_ok` le dice a Rust dónde viven los workspaces y sus límites.
+ * `workspace_touch` solo lo manda Rust (tras copiar una subida): no está en
+ * `CLIENT_FRAME_TYPES`, así que el webview no puede emitirlo.
  */
 
 import type {
@@ -30,7 +37,7 @@ import type {
 export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem };
 
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 2;
+export const DESKTOP_PROTOCOL_VERSION = 3;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -55,6 +62,10 @@ export const LIMITS = {
   answers: 8,
   /** Texto de una pregunta o de una respuesta libre. */
   answerChars: 4_000,
+  /** Adjuntos de un mismo mensaje. */
+  attachments: 20,
+  /** Ruta de un adjunto dentro del workspace (`inputs/…`). */
+  attachmentPathChars: 512,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -89,7 +100,10 @@ export interface ChatFrame {
   conversationId: string;
   /** Lo genera el frontend: etiqueta todos los eventos del turno. */
   turnId: string;
+  /** Puede ir vacío solo si hay adjuntos. */
   text: string;
+  /** Rutas del workspace (`inputs/informe.pdf`) de los ficheros que acompañan al mensaje (D2). */
+  attachments?: string[];
 }
 
 export interface CancelFrame {
@@ -114,7 +128,17 @@ export interface ConfirmResponseFrame {
   decision: DestructiveDecision;
 }
 
+/**
+ * Rust copió una subida en `inputs/` (D2): el sidecar marca uso y recalcula el
+ * tamaño. Solo lo emite Rust; el webview no puede (no está en la lista blanca).
+ */
+export interface WorkspaceTouchFrame {
+  type: 'workspace_touch';
+  conversationId: string;
+}
+
 export type ConversationFrame =
+  | WorkspaceTouchFrame
   | NewConversationFrame
   | CloseConversationFrame
   | ChatFrame
@@ -162,10 +186,21 @@ export interface CoreInfo {
   sea: boolean;
 }
 
+/**
+ * Dónde viven los workspaces y sus límites (D2). Lo consume Rust, que es quien
+ * copia las subidas y sirve las descargas; no se reenvía al webview.
+ */
+export interface WorkspacesInfo {
+  root: string;
+  maxFileBytes: number;
+  maxWorkspaceBytes: number;
+}
+
 export interface HandshakeOkFrame {
   type: 'handshake_ok';
   core: CoreInfo;
   natives: NativeProbe[];
+  workspaces?: WorkspacesInfo;
 }
 
 export interface HandshakeErrorFrame {
@@ -211,7 +246,11 @@ export interface TurnEndedFrame {
   stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' | 'budget_tokens';
 }
 
-export type ChatRejectReason = 'busy' | 'unknown_conversation' | 'sidecar_unavailable';
+export type ChatRejectReason =
+  | 'busy'
+  | 'unknown_conversation'
+  | 'sidecar_unavailable'
+  | 'bad_attachment';
 
 export interface ChatRejectedFrame {
   type: 'chat_rejected';
@@ -249,6 +288,27 @@ export interface PromptResolvedFrame {
   id: string;
 }
 
+/** Un fichero de `outputs/` del workspace (D2). `path` es relativo al workspace. */
+export interface WorkspaceFileInfo {
+  path: string;
+  name: string;
+  size: number;
+  mime: string;
+  /** ISO 8601. */
+  modifiedAt: string;
+}
+
+/**
+ * Ficheros que el agente creó o modificó en `outputs/` durante un turno. Llega
+ * antes que el `turn_ended` de ese turno; sin cambios, no se envía.
+ */
+export interface WorkspaceFilesFrame {
+  type: 'workspace_files';
+  conversationId: string;
+  turnId: string;
+  files: WorkspaceFileInfo[];
+}
+
 /** Error de una trama de conversación que no se puede atribuir a un turno. */
 export interface ConversationErrorFrame {
   type: 'conversation_error';
@@ -265,6 +325,7 @@ export type ConversationOutboundFrame =
   | ConfirmRequestFrame
   | QuestionsRequestFrame
   | PromptResolvedFrame
+  | WorkspaceFilesFrame
   | ConversationErrorFrame;
 
 export interface SidecarErrorFrame {

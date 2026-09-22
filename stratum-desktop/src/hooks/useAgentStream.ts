@@ -7,12 +7,13 @@ import type {
   SidecarFrame,
   SidecarStatus,
 } from '../ipc/types';
-import { agentEvent, isRecord, isStopReason, questionItems } from '../ipc/validate';
+import { agentEvent, isRecord, isStopReason, questionItems, workspaceFiles } from '../ipc/validate';
 import {
   conversationReducer,
   initialConversationState,
-  userTextOf,
+  userMessageOf,
   type ConversationAction,
+  type SentAttachment,
   type ConversationState,
 } from './conversation-reducer';
 
@@ -88,6 +89,12 @@ export function frameToAction(
       return null;
     case 'conversation_error':
       return isString(f.message) ? { type: 'conversation_error', message: f.message } : null;
+    case 'workspace_files': {
+      const files = workspaceFiles(f.files);
+      return isString(f.turnId) && files && files.length > 0
+        ? { type: 'workspace_files', turnId: f.turnId, files }
+        : null;
+    }
     default:
       return null;
   }
@@ -95,7 +102,8 @@ export function frameToAction(
 
 export interface AgentStream extends ConversationState {
   conversationId: string;
-  send: (text: string) => void;
+  /** `attachments`: adjuntos ya copiados al workspace (D2). */
+  send: (text: string, attachments?: SentAttachment[]) => void;
   cancel: () => void;
   answerQuestions: (answers: QuestionAnswer[] | null) => void;
   confirm: (decision: DestructiveDecision) => void;
@@ -146,13 +154,21 @@ export function useAgentStream(status: SidecarStatus): AgentStream {
   }, [connected, conversationId]);
 
   const send = useCallback(
-    (text: string) => {
+    (text: string, attachments: SentAttachment[] = []) => {
       const trimmed = text.trim();
-      if (!trimmed || stateRef.current.activeTurnId || !stateRef.current.opened) return;
+      if (!trimmed && attachments.length === 0) return;
+      if (stateRef.current.activeTurnId || !stateRef.current.opened) return;
       const turnId = crypto.randomUUID();
-      dispatch({ type: 'user_sent', turnId, text: trimmed });
-      post({ type: 'chat', conversationId, turnId, text: trimmed }, (message) =>
-        dispatch({ type: 'chat_rejected', turnId, message }),
+      dispatch({ type: 'user_sent', turnId, text: trimmed, attachments });
+      post(
+        {
+          type: 'chat',
+          conversationId,
+          turnId,
+          text: trimmed,
+          ...(attachments.length > 0 ? { attachments: attachments.map((a) => a.path) } : {}),
+        },
+        (message) => dispatch({ type: 'chat_rejected', turnId, message }),
       );
     },
     [conversationId],
@@ -189,8 +205,8 @@ export function useAgentStream(status: SidecarStatus): AgentStream {
 
   const retry = useCallback(
     (turnId: string) => {
-      const text = userTextOf(stateRef.current, turnId);
-      if (text) send(text);
+      const message = userMessageOf(stateRef.current, turnId);
+      if (message) send(message.text, message.attachments);
     },
     [send],
   );

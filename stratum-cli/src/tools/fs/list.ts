@@ -2,6 +2,7 @@ import { readdirSync } from 'fs';
 import { join, resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
+import { stringParam, workspacePathPreflight } from './confine.js';
 
 // Directorios que siempre se excluyen (mismo set que glob.ts y grep.ts)
 const EXCLUDED_DIRS = new Set([
@@ -79,8 +80,16 @@ export const listDirectoryTool: ToolDefinition = {
   schema,
   destructive: false,
 
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return workspacePathPreflight(stringParam(params, 'path'), ctx, 'read');
+  },
+
   async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const { path: dirPath, depth } = schema.parse(params);
+    // `Dirent.isDirectory()` es falso para symlinks y junctions: el recorrido
+    // nunca entra en ellos, así que basta con confinar la base.
+    const vetoed = workspacePathPreflight(dirPath, ctx, 'read');
+    if (vetoed) return vetoed;
     const base = resolve(ctx.cwd, dirPath);
 
     try {

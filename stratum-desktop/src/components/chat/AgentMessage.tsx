@@ -1,6 +1,7 @@
 import type { AgentTurn } from '../../hooks/conversation-reducer';
 import { StreamingText } from './StreamingText';
 import { ToolCallBlock } from './ToolCallBlock';
+import { FileCard } from './files/FileCard';
 
 const STATUS_NOTE: Partial<Record<AgentTurn['status'], string>> = {
   cancelled: 'Respuesta detenida.',
@@ -11,8 +12,11 @@ const STATUS_NOTE: Partial<Record<AgentTurn['status'], string>> = {
 export function AgentMessage({
   turn,
   onRetry,
+  conversationId,
 }: {
   turn: AgentTurn;
+  /** Para las tarjetas de fichero (D2); sin él no se pintan. */
+  conversationId?: string;
   /** Solo en turnos interrumpidos: reenvía el mensaje del usuario. */
   onRetry?: () => void;
 }) {
@@ -36,6 +40,13 @@ export function AgentMessage({
           </p>
         );
       })}
+      {conversationId && turn.files && turn.files.length > 0 && (
+        <div className="file-cards" aria-label="Ficheros generados">
+          {turn.files.map((f) => (
+            <FileCard key={f.path} conversationId={conversationId} file={f} />
+          ))}
+        </div>
+      )}
       {streaming && turn.parts.length === 0 && (
         <p className="message__thinking" aria-live="polite">
           Pensando…

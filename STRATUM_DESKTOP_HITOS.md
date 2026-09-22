@@ -70,7 +70,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 |------|------|-----------|--------------------------|
 | **D0** 🔄 | Scaffolding + sidecar empaquetado + ping seguro | stratum-cli Hito 4 | 15.2, 15.6, 15.10, 15.11 |
 | **D1** ✅ | IPC seguro + chat de asistente en una conversación | D0 | 15.1, 15.4, 15.5, 15.9, 15.13, 16.6 |
-| **D2** | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
+| **D2** 🔄 | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
 | **D3** | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
 | **D4** | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
@@ -305,11 +305,68 @@ Decisiones tomadas durante la implementación:
 
 ---
 
-## D2 — Espacio de trabajo aislado y ficheros
+## D2 — Espacio de trabajo aislado y ficheros 🔄
 
 **Objetivo.** El usuario sube ficheros a la conversación, el agente trabaja con
 ellos con las tools de fichero de la CLI dentro de una carpeta propia de la
 conversación, y lo que produce se puede descargar.
+
+**Estado (2026-09-22): implementado y verificado con modelo real; pendiente la
+prueba a mano en la ventana.** Suites verdes: CLI 972, frontend 66, Rust 36 (5
+e2e contra el SEA, ahora con un home temporal propio: ya no leen la config ni
+escriben en el `~/.stratum` real).
+
+Prueba real con `gemma-4-12b` (llama.cpp) contra el SEA, con un cliente del
+protocolo que hace de Rust (copia a `inputs/` + `workspace_touch`) y de webview:
+- Subido un `ventas.csv` y pedido un resumen mensual en CSV: `read_file` +
+  `write_file`, importes correctos, `outputs/resumen_ventas.csv` anunciado en
+  `workspace_files` antes del `turn_ended`, original intacto.
+- Pedido leer `../`, una ruta absoluta de fuera y sobrescribir el original: el
+  modelo se niega solo. Forzando las llamadas, las cuatro (`read_file` relativa
+  y absoluta, `list_directory ..`, `write_file inputs/…`) se vetan en
+  `preflight`; el contenido de fuera no aparece en ninguna trama.
+
+Decisiones tomadas (con el usuario, antes de implementar):
+- **Visión aplazada.** El core no tiene contenido multiparte ni capacidad
+  `vision`; una imagen se sube como fichero más. Pendiente para un hito propio
+  o D5 (ProviderWizard).
+- **«Abrir» solo para tipos inertes** (documentos, datos, imágenes: `pdf`,
+  `csv`, `md`, `docx`, `png`…). Fuera `html`/`svg` (ejecutan JS en el
+  navegador), scripts, ejecutables y Office con macros: esos solo se guardan.
+- **Límites por defecto 25 MB por fichero / 250 MB por workspace.**
+- **`desktop.workspaces.root` admite cualquier ruta absoluta** (otro disco); se
+  rechazan relativas, la raíz de una unidad y el home o un ancestro suyo, con
+  aviso y vuelta al default.
+
+Decisiones de diseño:
+- **`ToolContext.workspace`** (`WorkspaceConfinement { root, readOnly, writable }`)
+  en vez de un `workspaceRoot` suelto: hace falta expresar `inputs/` de solo
+  lectura y que solo se escriba en `outputs/` y `scratch/` (ni la raíz ni
+  `.workspace.json`). Veto en `tools/fs/confine.ts` por `realpath` —con
+  `lstat` para que un symlink roto no se salte el control—, que **falla
+  cerrado** (el dispatcher deja pasar un `preflight` que lanza) y se repite en
+  `execute`. En Windows además veta UNC/dispositivos, rutas relativas a
+  unidad, flujos alternativos y nombres de dispositivo. `glob`/`grep` no
+  siguen enlaces con workspace y `grep` no lanza `rg`.
+- **Las concesiones las hace Rust.** El diálogo (`tauri-plugin-dialog` usado
+  solo desde Rust, sin permisos para el webview) y el drag & drop entregan las
+  rutas a Rust, que devuelve al webview candidatos con id opaco; el webview
+  adjunta nombrando ids. Un webview comprometido no puede pedir que se copie
+  un fichero que el usuario no eligió.
+- **Protocolo v3**: `chat.attachments` (rutas `inputs/…`, comprobadas otra vez
+  en el sidecar), `workspace_files` (lo nuevo o modificado en `outputs/` por
+  turno, antes del `turn_ended`), `handshake_ok.workspaces` (raíz y límites,
+  solo para Rust) y `workspace_touch` (solo Rust; fuera de la lista blanca del
+  webview).
+- **Copia al adjuntar, no al enviar**: el error de límite o de lectura sale en
+  el acto, y quitar un chip antes de enviar borra la copia (solo si ningún
+  `chat` la llevó ya).
+
+Pendiente para cerrar D2:
+- Prueba a mano en la ventana: botón Adjuntar, drag & drop, vista previa,
+  «Abrir», «Guardar como…» a una carpeta elegida y el aviso de límite (los
+  diálogos nativos no se pueden manejar por CDP).
+- Linux (WSL): suites y e2e del SEA de Linux.
 
 ### Estructura
 

@@ -1,7 +1,7 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos de la ventana principal. El sidecar se lanza desde Rust con std::process (sin plugin shell) y todo acceso a ficheros pasa por el sidecar (15.8). D1 añade solo abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto: el webview nunca navega fuera de la app.",
+  "description": "Permisos de la ventana principal (15.8). El webview no tiene acceso al sistema de ficheros: ni plugin fs, ni permisos de dialog, ni asset protocol. El sidecar se lanza desde Rust con std::process (sin plugin shell). D2: los ficheros de la conversación los manejan comandos propios de Rust (src-tauri/src/files.rs) confinados a la raíz de workspaces que anuncia el sidecar; los diálogos de abrir/guardar los abre Rust con tauri-plugin-dialog desde Rust, así que el webview no recibe rutas del disco del usuario (solo candidatos con id opaco) y no puede abrir un diálogo ni leer un fichero por su cuenta. 'Abrir' un fichero generado lo hace Rust con el opener y solo para tipos inertes. D1: abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto.",
   "windows": ["main"],
   "permissions": [
     "core:default",

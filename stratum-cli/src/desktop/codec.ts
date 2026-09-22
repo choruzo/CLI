@@ -90,9 +90,14 @@ const inboundSchema = z.discriminatedUnion('type', [
       type: z.literal('chat'),
       conversationId,
       turnId: id,
-      text: z.string().min(1).max(LIMITS.chatChars),
+      text: z.string().max(LIMITS.chatChars),
+      attachments: z
+        .array(z.string().min(1).max(LIMITS.attachmentPathChars))
+        .max(LIMITS.attachments)
+        .optional(),
     })
     .strict(),
+  z.object({ type: z.literal('workspace_touch'), conversationId }).strict(),
   z.object({ type: z.literal('cancel'), conversationId, turnId: id.optional() }).strict(),
   z
     .object({
@@ -126,5 +131,10 @@ export function parseInboundFrame(line: string): InboundFrame | null {
     return null;
   }
   const parsed = inboundSchema.safeParse(value);
-  return parsed.success ? (parsed.data as InboundFrame) : null;
+  if (!parsed.success) return null;
+  const frame = parsed.data as InboundFrame;
+  // Un mensaje vacío solo tiene sentido si lleva ficheros. Va aquí y no como
+  // `refine` porque `discriminatedUnion` solo admite objetos planos.
+  if (frame.type === 'chat' && frame.text.trim() === '' && !frame.attachments?.length) return null;
+  return frame;
 }

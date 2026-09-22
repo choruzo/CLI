@@ -14,6 +14,7 @@ import {
   type NativeProbe,
   type OutboundFrame,
   type SidecarErrorFrame,
+  type WorkspacesInfo,
 } from './protocol.js';
 
 const log = getLogger('desktop.server');
@@ -35,6 +36,8 @@ export interface DesktopServerOptions {
   handshakeTimeoutMs?: number;
   /** Destino de las tramas de conversación (D1). Sin él, se contestan con error de protocolo. */
   conversations?: ConversationSink;
+  /** Raíz y límites de los workspaces (D2), para Rust. */
+  workspaces?: WorkspacesInfo;
 }
 
 /**
@@ -212,7 +215,12 @@ function handleConnection(
       // `handshake_ok` va primero: Rust espera la respuesta al handshake en la
       // primera línea, y en cuanto este cliente tenga el lease las
       // conversaciones vivas pueden empezar a emitirle tramas.
-      send({ type: 'handshake_ok', core: opts.core, natives });
+      send({
+        type: 'handshake_ok',
+        core: opts.core,
+        natives,
+        ...(opts.workspaces ? { workspaces: opts.workspaces } : {}),
+      });
       if (opts.startupError) send(opts.startupError);
       const previous = lease.active;
       lease.active = { id: connectionId, socket };

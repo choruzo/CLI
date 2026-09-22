@@ -17,6 +17,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     agents: DEFAULTS.agents,
     skills: DEFAULTS.skills,
     prompt: DEFAULTS.prompt,
+    desktop: DEFAULTS.desktop,
     provider: undefined,
     memory: {
       projectFile: '',

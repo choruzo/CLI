@@ -86,7 +86,7 @@ describe('InputArea', () => {
     fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
     expect(onSend).not.toHaveBeenCalled();
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(onSend).toHaveBeenCalledWith('hola');
+    expect(onSend).toHaveBeenCalledWith('hola', []);
   });
 
   it('mientras genera ofrece Detener, y Escape también cancela', () => {

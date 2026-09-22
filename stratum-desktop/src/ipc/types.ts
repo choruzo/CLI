@@ -18,6 +18,7 @@ export type {
   QuestionItem,
   SidecarErrorFrame,
   SidecarErrorCode,
+  WorkspaceFileInfo,
 } from '../../../stratum-cli/src/desktop/protocol';
 
 import type {
@@ -25,6 +26,7 @@ import type {
   CoreInfo,
   NativeProbe,
   PingFrame,
+  WorkspaceTouchFrame,
 } from '../../../stratum-cli/src/desktop/protocol';
 
 /** Espejo de `SidecarStatus` en `src-tauri/src/ipc.rs` (serde `tag = "state"`). */
@@ -41,8 +43,11 @@ export type SidecarStatus =
     }
   | { state: 'failed'; message: string };
 
-/** Tramas que el frontend puede mandar al sidecar. Rust las filtra por tipo y tamaño. */
-export type ClientFrame = PingFrame | ConversationFrame;
+/**
+ * Tramas que el frontend puede mandar al sidecar. Rust las filtra por tipo y
+ * tamaño; `workspace_touch` solo lo emite Rust.
+ */
+export type ClientFrame = PingFrame | Exclude<ConversationFrame, WorkspaceTouchFrame>;
 
 export const EVENT_STATUS = 'sidecar://status';
 export const EVENT_READY = 'sidecar://ready';

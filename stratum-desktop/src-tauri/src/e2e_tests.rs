@@ -31,6 +31,28 @@ struct Launched {
 
 fn launch(bin: &Path) -> Launched {
     let tmp = tempfile::tempdir().unwrap();
+    // Home propio del sidecar: nada de la config ni de los datos del usuario.
+    // El provider apunta a un puerto cerrado; ningún test llega a llamarlo.
+    let stratum_dir = tmp.path().join(".stratum");
+    std::fs::create_dir_all(&stratum_dir).unwrap();
+    std::fs::write(
+        stratum_dir.join(".stratumrc.json"),
+        json!({
+            "provider": {
+                "default": "e2e",
+                "providers": { "e2e": {
+                    "type": "openai-compatible",
+                    "baseUrl": "http://127.0.0.1:9/v1",
+                    "apiKey": "",
+                    "model": "e2e-model",
+                    "contextWindow": 8192
+                } }
+            },
+            "memory": { "autoExtract": false }
+        })
+        .to_string(),
+    )
+    .unwrap();
     let (log, _) = crate::logs::open_sidecar_log(tmp.path(), 1 << 20, 1).unwrap();
     let token = sidecar::generate_token().unwrap();
     let ipc_path =
@@ -42,6 +64,7 @@ fn launch(bin: &Path) -> Launched {
         resources_dir: &manifest_dir().join("resources"),
         cwd: tmp.path(),
         log,
+        home: Some(tmp.path()),
     })
     .unwrap();
     Launched {
@@ -243,6 +266,76 @@ fn abre_una_conversacion_tras_autenticar() {
         assert_eq!(frames[0]["conversationId"], id);
         assert_eq!(frames[1]["type"], "chat_rejected", "{frames:?}");
         assert_eq!(frames[1]["reason"], "unknown_conversation");
+    });
+    assert_eq!(
+        l.process.shutdown(sidecar::GRACE),
+        ShutdownOutcome::Graceful(Some(0))
+    );
+}
+
+/// D2 contra el binario real: el handshake anuncia la raíz de workspaces (bajo
+/// el home del sidecar), abrir una conversación crea su carpeta, Rust puede
+/// mandar `workspace_touch` y un adjunto inexistente se rechaza.
+#[test]
+fn workspace_de_una_conversacion() {
+    let Some(bin) = sea_binary() else {
+        eprintln!("SKIP: sin binario del sidecar");
+        return;
+    };
+    let l = launch(&bin);
+    let home = l._tmp.path().to_path_buf();
+    runtime().block_on(async {
+        let stream = transport::connect(&l.ipc_path, Duration::from_secs(20), || Ok(()))
+            .await
+            .unwrap();
+        let (r, mut w) = tokio::io::split(stream);
+        let mut lines = BufReader::new(r).lines();
+        w.write_all(transport::handshake_line(&l.token).as_bytes())
+            .await
+            .unwrap();
+        let info =
+            transport::parse_handshake_reply(&lines.next_line().await.unwrap().unwrap()).unwrap();
+        let ws = crate::workspace::WorkspacesInfo::from_handshake(
+            info.workspaces.as_ref().expect("handshake sin workspaces"),
+        )
+        .unwrap();
+        assert!(ws.root.starts_with(&home), "{:?} fuera de {home:?}", ws.root);
+        assert_eq!(ws.max_file_bytes, 25 * 1024 * 1024);
+
+        let id = "6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e";
+        let open = transport::outbound_line(&json!({"type": "new_conversation", "conversationId": id}))
+            .unwrap();
+        w.write_all(open.as_bytes()).await.unwrap();
+        let touch = transport::internal_line(&json!({"type": "workspace_touch", "conversationId": id}));
+        w.write_all(touch.as_bytes()).await.unwrap();
+        let chat = transport::outbound_line(&json!({
+            "type": "chat", "conversationId": id, "turnId": "t1",
+            "text": "", "attachments": ["inputs/no-existe.pdf"]
+        }))
+        .unwrap();
+        w.write_all(chat.as_bytes()).await.unwrap();
+
+        let mut frames = Vec::new();
+        while frames.len() < 2 {
+            let line = tokio::time::timeout(Duration::from_secs(20), lines.next_line())
+                .await
+                .expect("sin respuesta del sidecar")
+                .unwrap()
+                .unwrap();
+            let v: Value = serde_json::from_str(&line).unwrap();
+            assert_ne!(v["code"], "protocol", "trama rechazada: {v}");
+            if v["type"] != "sidecar_error" {
+                frames.push(v);
+            }
+        }
+        assert_eq!(frames[0]["type"], "conversation_opened", "{frames:?}");
+        assert_eq!(frames[1]["type"], "chat_rejected", "{frames:?}");
+        assert_eq!(frames[1]["reason"], "bad_attachment");
+        let dir = ws.conversation_dir(id).unwrap();
+        for sub in ["inputs", "outputs", "scratch"] {
+            assert!(dir.join(sub).is_dir(), "falta {sub}/");
+        }
+        assert!(dir.join(".workspace.json").is_file());
     });
     assert_eq!(
         l.process.shutdown(sidecar::GRACE),

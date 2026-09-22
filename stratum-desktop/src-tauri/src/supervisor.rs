@@ -239,6 +239,7 @@ fn launch(app: &AppHandle) -> Result<Launched, (String, bool)> {
         // El modo Chat no trabaja sobre ninguna carpeta; el proceso arranca en home.
         cwd: &home,
         log,
+        home: None,
     })
     .map_err(|e| (format!("no se pudo lanzar {}: {e}", exe.display()), false))?;
     eprintln!(

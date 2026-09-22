@@ -14,6 +14,7 @@ import type {
   ToolCallReady,
   ToolContext,
   RunOptions,
+  WorkspaceConfinement,
 } from './types.js';
 import type { ToolRegistry, DispatchResult, ToolsetFilter } from '../tools/registry.js';
 import { ToolDispatcher, isToolVisibleForProfile } from '../tools/registry.js';
@@ -620,6 +621,11 @@ export class ReactLoop {
        * lo transporta: se lo pasa a los subagentes que delegue.
        */
       skillsBlock?: string;
+      /**
+       * Stratum Desktop D2 — workspace al que se confinan las tools de fichero.
+       * Se pasa en el `ToolContext` y hace de `cwd`.
+       */
+      workspace?: WorkspaceConfinement;
     },
   ) {
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
@@ -1181,9 +1187,10 @@ export class ReactLoop {
       if (regularCalls.length > 0) {
         const ctx: ToolContext = {
           signal,
-          cwd: process.cwd(),
+          cwd: this.extras?.workspace?.root ?? process.cwd(),
           config: this.config,
           sessionId: opts?.sessionId,
+          workspace: this.extras?.workspace,
           allowDestructive: opts?.allowDestructive,
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),

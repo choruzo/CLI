@@ -3,14 +3,17 @@
 
 #[cfg(test)]
 mod e2e_tests;
+mod files;
 mod ipc;
 mod logs;
 mod sidecar;
 mod supervisor;
 mod transport;
+mod workspace;
 
 use ipc::SidecarState;
-use tauri::{AppHandle, Manager, RunEvent};
+use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use workspace::WorkspaceState;
 
 /// Salida de la app: se marca antes de apagar, así el supervisor no relanza el
 /// sidecar que se está deteniendo.
@@ -25,13 +28,27 @@ fn shutdown_sidecar(app: &AppHandle) {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // Solo lo usa Rust (D2): el webview no tiene permisos del plugin.
+        .plugin(tauri_plugin_dialog::init())
         .manage(SidecarState::new())
+        .manage(WorkspaceState::default())
         .invoke_handler(tauri::generate_handler![
             ipc::sidecar_status,
             ipc::sidecar_subscribe,
             ipc::sidecar_send,
             ipc::sidecar_restart,
+            files::attachments_pick,
+            files::attachments_add,
+            files::attachments_discard,
+            files::output_save,
+            files::output_open,
+            files::output_preview,
         ])
+        .on_window_event(|window, event| {
+            if let WindowEvent::DragDrop(drag) = event {
+                files::on_drag_drop(window, drag);
+            }
+        })
         .setup(|app| {
             // Un fallo al lanzar no aborta la app: queda como estado `failed`
             // para que la UI lo muestre, con Reintentar.

@@ -1,7 +1,9 @@
 import { readFileSync } from 'fs';
+import { resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
+import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
 
 // Mismo contrato que la tool `read` de OpenCode (ver opencode-init-implementacion.md §5.1):
 // tope de 2000 líneas por llamada, líneas prefijadas con su número, líneas largas truncadas.
@@ -43,17 +45,22 @@ export const readFileTool: ToolDefinition = {
   destructive: false,
 
   preflight(params: unknown, ctx: ToolContext): ToolResult | null {
-    return sensitivePathPreflight(params, ctx);
+    return (
+      workspacePathPreflight(stringParam(params, 'path'), ctx, 'read') ??
+      sensitivePathPreflight(params, ctx)
+    );
   },
 
   isDestructive(params: unknown, ctx: ToolContext): boolean {
     return sensitivePathNeedsConfirm(params, ctx);
   },
 
-  async execute(params: unknown, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const { path, offset, limit } = schema.parse(params);
+    const vetoed = workspaceExecuteGuard(path, ctx, 'read');
+    if (vetoed) return vetoed;
     try {
-      const content = readFileSync(path, 'utf-8');
+      const content = readFileSync(resolve(ctx.cwd, path), 'utf-8');
       const lines = content.split('\n');
       const start = (offset ?? 1) - 1;
       const cap = limit !== undefined ? Math.min(limit, MAX_LINES) : MAX_LINES;

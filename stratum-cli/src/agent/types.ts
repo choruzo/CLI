@@ -162,6 +162,26 @@ export interface ToolContext {
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   confirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
+  /**
+   * Stratum Desktop D2 (16.2) — espacio de trabajo al que se confinan las tools
+   * de fichero. Presente → toda ruta se resuelve contra `root` y la que quede
+   * fuera por `realpath` se veta en `preflight` (ver `tools/fs/confine.ts`), y
+   * `cwd` es `root`. Ausente (la CLI) → nada cambia.
+   */
+  workspace?: WorkspaceConfinement;
+}
+
+/** Espacio de trabajo de una conversación del modo Chat (D2). */
+export interface WorkspaceConfinement {
+  /** Raíz absoluta. Ninguna tool de fichero lee ni escribe fuera de ella. */
+  root: string;
+  /** Subcarpetas de primer nivel de solo lectura (`inputs`: los originales subidos). */
+  readOnly?: string[];
+  /**
+   * Si se da, las únicas subcarpetas de primer nivel donde se puede escribir;
+   * la raíz y sus ficheros sueltos (`.workspace.json`) quedan fuera.
+   */
+  writable?: string[];
 }
 
 export type ToolResult =

@@ -3,6 +3,7 @@ import type { ProviderRouter } from '../providers/router.js';
 import { getLogger } from '../logging/index.js';
 import { ConversationSession } from './conversation.js';
 import type { DesktopSessionStore } from './session-store.js';
+import type { ConversationWorkspace, WorkspaceManager } from './workspace.js';
 import type {
   ConversationFrame,
   ConversationOutboundFrame,
@@ -20,6 +21,8 @@ export interface ConversationHostOptions {
   startupError?: SidecarErrorFrame | null;
   confirmTimeoutMs?: number;
   questionsTimeoutMs?: number;
+  /** Workspaces por conversación (D2). Sin él, conversaciones sin ficheros, como en D1. */
+  workspaces?: WorkspaceManager;
 }
 
 type Send = (frame: ConversationOutboundFrame) => void;
@@ -137,11 +140,14 @@ export class ConversationHost {
           });
           return;
         }
-        session.chat(frame.turnId, frame.text);
+        session.chat(frame.turnId, frame.text, frame.attachments);
         return;
       }
       case 'cancel':
         this.sessions.get(frame.conversationId)?.cancel(frame.turnId);
+        return;
+      case 'workspace_touch':
+        this.sessions.get(frame.conversationId)?.touchWorkspace();
         return;
       case 'confirm_response':
         this.sessions.get(frame.conversationId)?.answerConfirm(frame.callId, frame.decision);
@@ -189,7 +195,21 @@ export class ConversationHost {
 
     let session: ConversationSession;
     try {
+      let workspace: ConversationWorkspace | undefined;
+      try {
+        workspace = this.opts.workspaces?.open(conversationId);
+      } catch (err) {
+        // Sin workspace la conversación sigue, sin ficheros: mejor que no poder
+        // hablar con el asistente por un problema de disco.
+        log.error('workspace open failed', { conversationId, err });
+        this.emit({
+          type: 'conversation_error',
+          conversationId,
+          message: `No se pudo preparar la carpeta de ficheros de la conversación: ${err instanceof Error ? err.message : String(err)}`,
+        });
+      }
       session = new ConversationSession({
+        workspace,
         conversationId,
         config: this.opts.config,
         router: this.opts.makeRouter(),

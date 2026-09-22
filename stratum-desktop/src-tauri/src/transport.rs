@@ -12,7 +12,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 /// Versión del protocolo que entiende este shell (`DESKTOP_PROTOCOL_VERSION`).
-pub const PROTOCOL_VERSION: u64 = 2;
+pub const PROTOCOL_VERSION: u64 = 3;
 
 /// Tipos que el frontend puede mandar (`CLIENT_FRAME_TYPES` en `protocol.ts`).
 pub const CLIENT_FRAME_TYPES: [&str; 7] = [
@@ -76,6 +76,8 @@ pub fn handshake_line(token: &str) -> String {
 pub struct HandshakeInfo {
     pub core: Value,
     pub natives: Value,
+    /// Raíz y límites de los workspaces (D2). Se queda en Rust: no se reenvía.
+    pub workspaces: Option<Value>,
 }
 
 pub fn parse_handshake_reply(line: &str) -> Result<HandshakeInfo, String> {
@@ -105,6 +107,7 @@ pub fn parse_handshake_reply(line: &str) -> Result<HandshakeInfo, String> {
             .get("natives")
             .cloned()
             .unwrap_or(Value::Array(vec![])),
+        workspaces: frame.get("workspaces").cloned(),
     })
 }
 
@@ -135,6 +138,14 @@ pub fn outbound_line(frame: &Value) -> Result<String, String> {
     Ok(line)
 }
 
+/// Trama que origina el propio Rust (`workspace_touch`): no pasa por la lista
+/// blanca del frontend, que es justo lo que impide al webview emitirla.
+pub fn internal_line(frame: &Value) -> String {
+    let mut line = frame.to_string();
+    line.push('\n');
+    line
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -152,7 +163,7 @@ mod tests {
     #[test]
     fn acepta_handshake_ok_con_la_version_de_protocolo() {
         let info = parse_handshake_reply(
-            &json!({"type":"handshake_ok","core":{"protocolVersion":2,"version":"0.4.0"},"natives":[]})
+            &json!({"type":"handshake_ok","core":{"protocolVersion":3,"version":"0.4.0"},"natives":[]})
                 .to_string(),
         )
         .unwrap();
@@ -162,7 +173,7 @@ mod tests {
     #[test]
     fn rechaza_version_de_protocolo_distinta() {
         let err = parse_handshake_reply(
-            &json!({"type":"handshake_ok","core":{"protocolVersion":1}}).to_string(),
+            &json!({"type":"handshake_ok","core":{"protocolVersion":2}}).to_string(),
         )
         .unwrap_err();
         assert!(err.contains("incompatible"), "{err}");
@@ -192,7 +203,7 @@ mod tests {
         for t in CLIENT_FRAME_TYPES {
             assert!(outbound_line(&json!({ "type": t })).is_ok(), "{t}");
         }
-        for t in ["handshake_ok", "agent_event", "shutdown", "rehydrate"] {
+        for t in ["handshake_ok", "agent_event", "shutdown", "rehydrate", "workspace_touch"] {
             let err = outbound_line(&json!({ "type": t })).unwrap_err();
             assert!(err.contains("no permitido"), "{t}: {err}");
         }

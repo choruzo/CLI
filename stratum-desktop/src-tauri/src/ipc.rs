@@ -16,6 +16,7 @@
 
 use crate::sidecar::SidecarProcess;
 use crate::transport;
+use crate::workspace::{WorkspaceState, WorkspacesInfo};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::VecDeque;
@@ -142,6 +143,18 @@ impl SidecarState {
             .and_then(SidecarProcess::try_exit)
     }
 
+    /// Trama que origina Rust (D2: `workspace_touch`), sin pasar por la lista
+    /// blanca del frontend.
+    pub fn send_internal(&self, frame: Value) -> Result<(), String> {
+        let relay = self.relay.lock().unwrap();
+        let (_, tx) = relay
+            .outbound
+            .as_ref()
+            .ok_or("el sidecar no está conectado")?;
+        tx.send(transport::internal_line(&frame))
+            .map_err(|_| "el canal con el sidecar está cerrado".to_string())
+    }
+
     fn forward(&self, frame: Value) {
         let mut relay = self.relay.lock().unwrap();
         if let Some(ch) = &relay.subscriber {
@@ -199,15 +212,36 @@ pub fn sidecar_subscribe(state: State<'_, SidecarState>, on_frame: Channel<Value
 }
 
 #[tauri::command]
-pub fn sidecar_send(state: State<'_, SidecarState>, frame: Value) -> Result<(), String> {
+pub fn sidecar_send(
+    state: State<'_, SidecarState>,
+    workspaces: State<'_, WorkspaceState>,
+    frame: Value,
+) -> Result<(), String> {
     let line = transport::outbound_line(&frame)?;
-    let relay = state.relay.lock().unwrap();
-    let (_, tx) = relay
-        .outbound
-        .as_ref()
-        .ok_or("el sidecar no está conectado")?;
-    tx.send(line)
-        .map_err(|_| "el canal con el sidecar está cerrado".to_string())
+    {
+        let relay = state.relay.lock().unwrap();
+        let (_, tx) = relay
+            .outbound
+            .as_ref()
+            .ok_or("el sidecar no está conectado")?;
+        tx.send(line)
+            .map_err(|_| "el canal con el sidecar está cerrado".to_string())?;
+    }
+    // Un `chat` con adjuntos los hace parte de la conversación: ya no se
+    // pueden descartar (D2).
+    if frame.get("type").and_then(Value::as_str) == Some("chat") {
+        if let (Some(cid), Some(list)) = (
+            frame.get("conversationId").and_then(Value::as_str),
+            frame.get("attachments").and_then(Value::as_array),
+        ) {
+            let paths: Vec<String> = list
+                .iter()
+                .filter_map(|v| v.as_str().map(str::to_string))
+                .collect();
+            workspaces.commit(cid, &paths);
+        }
+    }
+    Ok(())
 }
 
 /// Reintentar tras agotar los reinicios automáticos (botón de la UI).
@@ -262,6 +296,11 @@ pub async fn relay_once(
         .map_err(|e| format!("error leyendo el handshake: {e}"))?
         .ok_or("el sidecar cerró la conexión durante el handshake")?;
     let info = transport::parse_handshake_reply(&reply)?;
+    app.state::<WorkspaceState>().set_info(
+        info.workspaces
+            .as_ref()
+            .and_then(WorkspacesInfo::from_handshake),
+    );
 
     let (tx, mut rx) = mpsc::unbounded_channel::<String>();
     {

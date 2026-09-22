@@ -1,8 +1,9 @@
 import { writeFileSync, mkdirSync } from 'fs';
-import { dirname } from 'path';
+import { dirname, resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
+import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
 
 const schema = z.object({
   path: z.string().describe('Absolute or relative path to write'),
@@ -17,18 +18,24 @@ export const writeFileTool: ToolDefinition = {
   destructive: false,
 
   preflight(params: unknown, ctx: ToolContext): ToolResult | null {
-    return sensitivePathPreflight(params, ctx);
+    return (
+      workspacePathPreflight(stringParam(params, 'path'), ctx, 'write') ??
+      sensitivePathPreflight(params, ctx)
+    );
   },
 
   isDestructive(params: unknown, ctx: ToolContext): boolean {
     return sensitivePathNeedsConfirm(params, ctx);
   },
 
-  async execute(params: unknown, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const { path, content } = schema.parse(params);
+    const vetoed = workspaceExecuteGuard(path, ctx, 'write');
+    if (vetoed) return vetoed;
+    const target = resolve(ctx.cwd, path);
     try {
-      mkdirSync(dirname(path), { recursive: true });
-      writeFileSync(path, content, 'utf-8');
+      mkdirSync(dirname(target), { recursive: true });
+      writeFileSync(target, content, 'utf-8');
       return { ok: true, output: `File written: ${path} (${content.length} bytes)` };
     } catch (err) {
       return {

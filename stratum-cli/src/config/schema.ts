@@ -451,6 +451,34 @@ export const StratumConfigSchema = z.object({
    * el `ToolRegistry` y el LLM no las ve.
    */
   ssh: SSHConfigSchema.optional(),
+
+  /**
+   * Stratum Desktop (D2). La CLI no lo lee: vive aquí porque la config es
+   * compartida y así un `.stratumrc.json` con esta sección sigue validando.
+   */
+  desktop: z
+    .object({
+      /** Espacios de trabajo por conversación del modo Chat. */
+      workspaces: z
+        .object({
+          /**
+           * Raíz de los workspaces. Por defecto `~/.stratum/desktop/workspaces`.
+           * Cualquier ruta absoluta (p. ej. otro disco); `~/` se expande. Una
+           * relativa, la raíz de una unidad o el propio home se rechazan al
+           * arrancar el sidecar y se usa el default.
+           */
+          root: z.string().optional(),
+          /** Tope por fichero subido (16.3). */
+          maxFileMB: z.number().positive().max(4096).default(25),
+          /** Tope de un workspace entero: subidas + lo que genere el agente (16.3). */
+          maxWorkspaceMB: z.number().positive().max(65536).default(250),
+        })
+        .refine((w) => w.maxWorkspaceMB >= w.maxFileMB, {
+          message: 'desktop.workspaces.maxWorkspaceMB no puede ser menor que maxFileMB',
+        })
+        .default({}),
+    })
+    .default({}),
 });
 
 export type StratumConfig = z.infer<typeof StratumConfigSchema>;

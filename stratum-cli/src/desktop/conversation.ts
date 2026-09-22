@@ -12,6 +12,7 @@ import { getLogger } from '../logging/index.js';
 import { buildAssistantRegistry } from './assistant-runtime.js';
 import type { DesktopSessionStore } from './session-store.js';
 import type { ConversationOutboundFrame, TurnEndedFrame } from './protocol.js';
+import { formatBytes, type ConversationWorkspace, type OutputsSnapshot } from './workspace.js';
 
 const log = getLogger('desktop.conversation');
 
@@ -37,6 +38,34 @@ export interface ConversationSessionOptions {
   confirmTimeoutMs?: number;
   questionsTimeoutMs?: number;
   closeGraceMs?: number;
+  /**
+   * Workspace de la conversación (D2). Con él, el agente recibe las tools de
+   * fichero confinadas y el `chat` admite adjuntos; sin él, el asistente de D1.
+   */
+  workspace?: ConversationWorkspace;
+}
+
+/** Un adjunto ya comprobado contra el workspace. */
+export interface CheckedAttachment {
+  path: string;
+  size: number;
+  mime: string;
+}
+
+/**
+ * Mensaje de usuario con adjuntos: el agente ve rutas del workspace, nunca la
+ * ruta original del disco del usuario (que ni siquiera llega al sidecar).
+ */
+export function composeUserMessage(text: string, attachments: CheckedAttachment[]): string {
+  if (attachments.length === 0) return text;
+  const lines = attachments.map((a) => `- ${a.path} (${a.mime}, ${formatBytes(a.size)})`);
+  const block = [
+    '<attachments>',
+    'The user attached these files to this message. They are in the conversation workspace:',
+    ...lines,
+    '</attachments>',
+  ].join('\n');
+  return text.trim() === '' ? block : `${block}\n\n${text}`;
 }
 
 interface Pending<T> {
@@ -68,6 +97,7 @@ export class ConversationSession {
   private readonly confirmTimeoutMs: number;
   private readonly questionsTimeoutMs: number;
   private readonly closeGraceMs: number;
+  private readonly workspace: ConversationWorkspace | undefined;
   private turn: Turn | null = null;
   private readonly confirms = new Map<string, Pending<DestructiveDecision>>();
   private readonly questions = new Map<string, Pending<QuestionAnswer[] | null>>();
@@ -91,10 +121,22 @@ export class ConversationSession {
     this.confirmTimeoutMs = opts.confirmTimeoutMs ?? CONFIRM_TIMEOUT_MS;
     this.questionsTimeoutMs = opts.questionsTimeoutMs ?? QUESTIONS_TIMEOUT_MS;
     this.closeGraceMs = opts.closeGraceMs ?? CLOSE_GRACE_MS;
-    this.agent = new StratumAgent(opts.config, opts.router, buildAssistantRegistry(), {
-      promptPreset: 'assistant',
-      initialMessages: opts.initialMessages,
-    });
+    this.workspace = opts.workspace;
+    this.agent = new StratumAgent(
+      opts.config,
+      opts.router,
+      buildAssistantRegistry({ files: this.workspace !== undefined }),
+      {
+        promptPreset: 'assistant',
+        initialMessages: opts.initialMessages,
+        workspace: this.workspace?.confinement,
+      },
+    );
+  }
+
+  /** Rust copió una subida (`workspace_touch`): marca uso y recalcula el tamaño. */
+  touchWorkspace(): void {
+    if (!this.closed) this.workspace?.touch();
   }
 
   private send(frame: ConversationOutboundFrame): void {
@@ -110,7 +152,7 @@ export class ConversationSession {
     return this.turn !== null;
   }
 
-  chat(turnId: string, text: string): void {
+  chat(turnId: string, text: string, attachments: string[] = []): void {
     if (this.closed) {
       this.send({
         type: 'chat_rejected',
@@ -131,16 +173,52 @@ export class ConversationSession {
       });
       return;
     }
+    const checked = this.checkAttachments(attachments);
+    if (!checked.ok) {
+      this.send({
+        type: 'chat_rejected',
+        conversationId: this.conversationId,
+        turnId,
+        reason: 'bad_attachment',
+        message: checked.message,
+      });
+      return;
+    }
     const abort = new AbortController();
     const turn: Turn = { turnId, abort, task: Promise.resolve() };
     this.turn = turn;
-    turn.task = this.runTurn(turn, text);
+    turn.task = this.runTurn(turn, composeUserMessage(text, checked.files));
+  }
+
+  /** Cada adjunto tiene que ser un fichero de `inputs/` de este workspace. */
+  private checkAttachments(
+    paths: string[],
+  ): { ok: true; files: CheckedAttachment[] } | { ok: false; message: string } {
+    if (paths.length === 0) return { ok: true, files: [] };
+    if (!this.workspace) {
+      return { ok: false, message: 'Esta conversación no admite ficheros adjuntos.' };
+    }
+    const files: CheckedAttachment[] = [];
+    const seen = new Set<string>();
+    for (const path of paths) {
+      const r = this.workspace.checkAttachment(path);
+      if (!r.ok) {
+        return { ok: false, message: `El adjunto «${path}» no es válido: ${r.reason}.` };
+      }
+      if (seen.has(r.path)) continue;
+      seen.add(r.path);
+      files.push({ path: r.path, size: r.size, mime: r.mime });
+    }
+    return { ok: true, files };
   }
 
   private async runTurn(turn: Turn, text: string): Promise<void> {
     const { turnId, abort } = turn;
     let stopReason: StopReason = 'error';
+    let outputsBefore: OutputsSnapshot | null = null;
     try {
+      this.workspace?.touch();
+      outputsBefore = this.workspace?.snapshotOutputs() ?? null;
       const events = this.agent.run(text, {
         signal: abort.signal,
         sessionId: this.conversationId,
@@ -169,7 +247,25 @@ export class ConversationSession {
       this.settlePending();
       if (this.turn === turn) this.turn = null;
       this.save();
+      this.announceOutputs(turnId, outputsBefore);
       this.send({ type: 'turn_ended', conversationId: this.conversationId, turnId, stopReason });
+    }
+  }
+
+  /**
+   * Anuncia lo que el turno dejó en `outputs/` (también si se canceló: lo
+   * escrito, escrito está) y marca uso. Best-effort: nunca impide el `turn_ended`.
+   */
+  private announceOutputs(turnId: string, before: OutputsSnapshot | null): void {
+    if (!this.workspace || !before) return;
+    try {
+      const files = this.workspace.changedOutputs(before);
+      this.workspace.touch();
+      if (files.length > 0) {
+        this.send({ type: 'workspace_files', conversationId: this.conversationId, turnId, files });
+      }
+    } catch (err) {
+      log.error('outputs scan failed', { conversationId: this.conversationId, err });
     }
   }
 

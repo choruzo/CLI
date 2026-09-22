@@ -23,6 +23,7 @@ serde_json = "1"
 tokio = { version = "1", features = ["net", "io-util", "sync", "time", "rt", "macros"] }
 getrandom = "0.3"
 tauri-plugin-opener = "2"
+tauri-plugin-dialog = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [

@@ -142,5 +142,12 @@
         "useAgent": true
       }
     }
+  },
+  "desktop": {
+    "workspaces": {
+      "root": "~/.stratum/desktop/workspaces",
+      "maxFileMB": 25,
+      "maxWorkspaceMB": 250
+    }
   }
 }

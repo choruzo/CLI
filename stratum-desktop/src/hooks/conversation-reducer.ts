@@ -3,6 +3,7 @@ import type {
   QuestionItem,
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
+import type { WorkspaceFileInfo } from '../../../stratum-cli/src/desktop/protocol';
 
 /**
  * Estado de una conversación en el webview (D1). Reducer puro: los tests lo
@@ -34,10 +35,18 @@ export type AgentPart =
 
 export type TurnStatus = 'streaming' | 'done' | 'cancelled' | 'error' | 'interrupted';
 
+/** Un adjunto enviado con un mensaje (D2): solo su ruta en el workspace. */
+export interface SentAttachment {
+  path: string;
+  name: string;
+  size: number;
+}
+
 export interface UserMessage {
   role: 'user';
   turnId: string;
   text: string;
+  attachments?: SentAttachment[];
 }
 
 export interface AgentTurn {
@@ -47,6 +56,8 @@ export interface AgentTurn {
   toolCalls: Record<string, ToolCallView>;
   status: TurnStatus;
   stopReason?: string;
+  /** Ficheros que el turno dejó en `outputs/` (D2, `workspace_files`). */
+  files?: WorkspaceFileInfo[];
 }
 
 export type ChatMessage = UserMessage | AgentTurn;
@@ -89,7 +100,8 @@ export type ConversationAction =
   | { type: 'opened' }
   | { type: 'conversation_error'; message: string }
   | { type: 'dismiss_notice' }
-  | { type: 'user_sent'; turnId: string; text: string }
+  | { type: 'user_sent'; turnId: string; text: string; attachments?: SentAttachment[] }
+  | { type: 'workspace_files'; turnId: string; files: WorkspaceFileInfo[] }
   | { type: 'agent_event'; turnId: string; event: AgentEvent }
   | { type: 'turn_ended'; turnId: string; stopReason: string }
   | { type: 'chat_rejected'; turnId: string; message: string }
@@ -236,9 +248,28 @@ export function conversationReducer(
       return {
         ...state,
         activeTurnId: action.turnId,
-        messages: [...state.messages, { role: 'user', turnId: action.turnId, text: action.text }, agent],
+        messages: [
+          ...state.messages,
+          {
+            role: 'user',
+            turnId: action.turnId,
+            text: action.text,
+            ...(action.attachments?.length ? { attachments: action.attachments } : {}),
+          },
+          agent,
+        ],
       };
     }
+
+    case 'workspace_files':
+      return updateTurn(state, action.turnId, (t) => ({
+        ...t,
+        // Un fichero reescrito en el mismo turno sustituye a su tarjeta anterior.
+        files: [
+          ...(t.files ?? []).filter((f) => !action.files.some((n) => n.path === f.path)),
+          ...action.files,
+        ],
+      }));
 
     case 'agent_event': {
       const { event } = action;
@@ -311,8 +342,13 @@ export function conversationReducer(
   }
 }
 
-/** Texto del mensaje de usuario de un turno, para «Reintentar» tras una caída. */
-export function userTextOf(state: ConversationState, turnId: string): string | null {
+/** Mensaje de usuario de un turno, para «Reintentar» tras una caída. */
+export function userMessageOf(state: ConversationState, turnId: string): UserMessage | null {
   const m = state.messages.find((x) => x.role === 'user' && x.turnId === turnId);
-  return m && m.role === 'user' ? m.text : null;
+  return m && m.role === 'user' ? m : null;
+}
+
+/** Texto del mensaje de usuario de un turno. */
+export function userTextOf(state: ConversationState, turnId: string): string | null {
+  return userMessageOf(state, turnId)?.text ?? null;
 }

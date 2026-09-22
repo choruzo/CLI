@@ -1,7 +1,9 @@
 import { readFileSync, writeFileSync } from 'fs';
+import { resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
+import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
 import { generateUnifiedDiff } from './diff.js';
 
 const schema = z.object({
@@ -42,15 +44,21 @@ export const editFileTool: ToolDefinition = {
   destructive: false,
 
   preflight(params: unknown, ctx: ToolContext): ToolResult | null {
-    return sensitivePathPreflight(params, ctx);
+    return (
+      workspacePathPreflight(stringParam(params, 'path'), ctx, 'write') ??
+      sensitivePathPreflight(params, ctx)
+    );
   },
 
   isDestructive(params: unknown, ctx: ToolContext): boolean {
     return sensitivePathNeedsConfirm(params, ctx);
   },
 
-  async execute(params: unknown, _ctx: ToolContext): Promise<ToolResult> {
+  async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const { path, old_string, new_string, replace_all } = schema.parse(params);
+    const vetoed = workspaceExecuteGuard(path, ctx, 'write');
+    if (vetoed) return vetoed;
+    const target = resolve(ctx.cwd, path);
 
     if (old_string === new_string) {
       return {
@@ -62,7 +70,7 @@ export const editFileTool: ToolDefinition = {
 
     let original: string;
     try {
-      original = readFileSync(path, 'utf-8');
+      original = readFileSync(target, 'utf-8');
     } catch (err) {
       return {
         ok: false,
@@ -98,7 +106,7 @@ export const editFileTool: ToolDefinition = {
       : original.replace(old_string, new_string);
 
     try {
-      writeFileSync(path, updated, 'utf-8');
+      writeFileSync(target, updated, 'utf-8');
     } catch (err) {
       return {
         ok: false,

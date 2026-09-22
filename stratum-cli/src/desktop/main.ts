@@ -16,6 +16,7 @@ import { startDesktopServer } from './server.js';
 import { ConversationHost } from './conversation-host.js';
 import { DesktopSessionStore } from './session-store.js';
 import { buildAssistantConfig, desktopDataDir } from './assistant-runtime.js';
+import { WorkspaceManager, resolveWorkspaceSettings } from './workspace.js';
 import { ProviderRouter } from '../providers/router.js';
 
 /**
@@ -159,11 +160,19 @@ export async function runSidecar(argv: string[]): Promise<number> {
   // Modo Chat (D1): memoria y sesiones del asistente en ~/.stratum/desktop/.
   const dataDir = desktopDataDir();
   const assistantConfig = buildAssistantConfig(config, dataDir);
+  // Workspaces por conversación (D2).
+  const { settings: workspaceSettings, warning: workspaceWarning } = resolveWorkspaceSettings(
+    config,
+    dataDir,
+  );
+  if (workspaceWarning) log.warn(workspaceWarning);
+  const workspaces = new WorkspaceManager(workspaceSettings);
   const conversations = new ConversationHost({
     config: assistantConfig,
     store: new DesktopSessionStore(join(dataDir, 'sessions')),
     makeRouter: () => new ProviderRouter(assistantConfig),
     startupError,
+    workspaces,
   });
 
   let server;
@@ -175,6 +184,11 @@ export async function runSidecar(argv: string[]): Promise<number> {
       natives,
       startupError,
       conversations,
+      workspaces: {
+        root: workspaceSettings.root,
+        maxFileBytes: workspaceSettings.maxFileBytes,
+        maxWorkspaceBytes: workspaceSettings.maxWorkspaceBytes,
+      },
     });
   } catch (err) {
     log.error('listen failed', { err, ipcPath: args.ipcPath });

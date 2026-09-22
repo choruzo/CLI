@@ -10,6 +10,7 @@ import type {
   SubagentResult,
   TokenAccounting,
   TokenStatus,
+  WorkspaceConfinement,
 } from './types.js';
 import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
@@ -75,6 +76,12 @@ export interface StratumAgentOptions {
    * perfiles, sin `STRATUM.md` de proyecto y con el toolset de `ASSISTANT_TOOLS`.
    */
   promptPreset?: PromptPreset;
+  /**
+   * Workspace de la conversación (Stratum Desktop D2, solo con el preset
+   * `assistant`). Confina las tools de fichero, añade el bloque `# Workspace`
+   * al prompt y habilita las tools de `ASSISTANT_FILE_TOOLS`.
+   */
+  workspace?: WorkspaceConfinement;
 }
 
 export class StratumAgent {
@@ -125,6 +132,7 @@ export class StratumAgent {
   /** Aviso de un solo uso al reanudar con un perfil que ya no se puede activar. */
   private _resumeNotice: string | null = null;
   private readonly preset: PromptPreset;
+  private readonly workspace: WorkspaceConfinement | undefined;
 
   constructor(
     private readonly config: StratumConfig,
@@ -134,6 +142,7 @@ export class StratumAgent {
   ) {
     this.memoryManager = new MemoryManager(config);
     this.preset = options?.promptPreset ?? 'coding';
+    this.workspace = options?.workspace;
     // Perfiles de subagente desde la raíz del worktree git Y el cwd: la raíz del
     // worktree cubre la invocación desde un subdirectorio del repo (consistente
     // con el `<env>`); el cwd cubre el caso en que el proyecto npm vive en un
@@ -502,6 +511,7 @@ export class StratumAgent {
         modelId: this.router.model,
         providerName: this.router.providerName,
         preset: 'assistant',
+        workspace: this.workspace,
       };
     }
     const active = this._activeProfile;
@@ -564,11 +574,12 @@ export class StratumAgent {
         changes: this.changes,
         tdd: this.tdd,
         skillsBlock: this.skillsBlock,
+        workspace: this.workspace,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
         // control pasan aunque el perfil no las liste; `delegate_task` no.
         toolsetFilter:
           this.preset === 'assistant'
-            ? assistantToolsetFilter()
+            ? assistantToolsetFilter({ workspace: this.workspace !== undefined })
             : active
               ? { allowedTools: active.allowedTools, controlTools: 'keep' }
               : undefined,

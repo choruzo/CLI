@@ -8,7 +8,13 @@ import { storeDecisionTool } from '../tools/memory/store-decision.js';
 import { recallDecisionsTool } from '../tools/memory/recall-decisions.js';
 import { questionTool } from '../tools/question.js';
 import { todoTool } from '../tools/todo.js';
-import { ASSISTANT_TOOLS } from '../agent/presets.js';
+import { ASSISTANT_FILE_TOOLS, ASSISTANT_TOOLS } from '../agent/presets.js';
+import { readFileTool } from '../tools/fs/read.js';
+import { writeFileTool } from '../tools/fs/write.js';
+import { editFileTool } from '../tools/fs/edit.js';
+import { globTool } from '../tools/fs/glob.js';
+import { grepTool } from '../tools/fs/grep.js';
+import { listDirectoryTool } from '../tools/fs/list.js';
 
 /**
  * Piezas del modo Chat de Stratum Desktop que no son del core (D1): dónde viven
@@ -46,8 +52,11 @@ export function buildAssistantConfig(base: StratumConfig, dataDir: string): Stra
  * preset ya las restringe en el loop; no registrar el resto es defensa en
  * profundidad. Uno por conversación: las tools deshabilitadas por reintentos
  * viven en el registry y no pueden contagiarse entre conversaciones.
+ *
+ * `files` (D2) añade las tools de fichero: solo para una conversación con
+ * workspace, que es lo que las confina. `exec` no se registra nunca (16.1).
  */
-export function buildAssistantRegistry(): ToolRegistry {
+export function buildAssistantRegistry(opts: { files?: boolean } = {}): ToolRegistry {
   const registry = new ToolRegistry();
   for (const tool of [
     webSearchTool,
@@ -59,7 +68,20 @@ export function buildAssistantRegistry(): ToolRegistry {
   ]) {
     registry.register(tool);
   }
-  const missing = ASSISTANT_TOOLS.filter((name) => !registry.get(name));
+  if (opts.files) {
+    for (const tool of [
+      readFileTool,
+      writeFileTool,
+      editFileTool,
+      globTool,
+      grepTool,
+      listDirectoryTool,
+    ]) {
+      registry.register(tool);
+    }
+  }
+  const expected = opts.files ? [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS] : ASSISTANT_TOOLS;
+  const missing = expected.filter((name) => !registry.get(name));
   if (missing.length > 0) throw new Error(`faltan tools del asistente: ${missing.join(', ')}`);
   return registry;
 }

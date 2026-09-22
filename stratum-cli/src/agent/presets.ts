@@ -28,6 +28,23 @@ export const ASSISTANT_TOOLS: readonly string[] = [
   'recall_decisions',
 ];
 
-export function assistantToolsetFilter(): ToolsetFilter {
-  return { allowedTools: ASSISTANT_TOOLS };
+/**
+ * Tools de fichero del modo Chat (D2). Solo se ofrecen con un workspace
+ * confinado: sin él, leerían y escribirían el disco del usuario. `exec` no
+ * está ni estará aquí mientras no haya aislamiento del SO (16.1): un directorio
+ * no confina un shell.
+ */
+export const ASSISTANT_FILE_TOOLS: readonly string[] = [
+  'read_file',
+  'write_file',
+  'edit_file',
+  'glob',
+  'grep',
+  'list_directory',
+];
+
+export function assistantToolsetFilter(opts: { workspace?: boolean } = {}): ToolsetFilter {
+  return {
+    allowedTools: opts.workspace ? [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS] : ASSISTANT_TOOLS,
+  };
 }

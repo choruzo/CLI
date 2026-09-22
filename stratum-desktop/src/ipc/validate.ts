@@ -4,6 +4,7 @@ import type {
   QuestionItem,
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
+import type { WorkspaceFileInfo } from '../../../stratum-cli/src/desktop/protocol';
 
 /**
  * Validación estructural de lo que llega del sidecar antes de entrar al estado
@@ -122,4 +123,26 @@ export function questionItems(v: unknown): QuestionItem[] | null {
 
 export function isStopReason(v: unknown): v is string {
   return str(v) && STOP_REASONS.has(v);
+}
+
+/**
+ * Ficheros de `outputs/` de una trama `workspace_files` (D2). La ruta tiene que
+ * ser relativa y empezar por `outputs/`: es lo único que se le pedirá a Rust
+ * guardar o abrir, y Rust vuelve a comprobarlo.
+ */
+export function workspaceFiles(v: unknown): WorkspaceFileInfo[] | null {
+  if (!Array.isArray(v)) return null;
+  const files: WorkspaceFileInfo[] = [];
+  for (const f of v) {
+    if (!isRecord(f) || !str(f.path) || !str(f.name) || !num(f.size) || !str(f.mime)) continue;
+    if (!f.path.startsWith('outputs/') || f.path.split('/').includes('..')) continue;
+    files.push({
+      path: f.path,
+      name: f.name,
+      size: f.size,
+      mime: f.mime,
+      modifiedAt: str(f.modifiedAt) ? f.modifiedAt : '',
+    });
+  }
+  return files;
 }

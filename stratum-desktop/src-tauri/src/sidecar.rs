@@ -102,6 +102,9 @@ pub struct LaunchSpec<'a> {
     pub resources_dir: &'a Path,
     pub cwd: &'a Path,
     pub log: File,
+    /// Home alternativo (`HOME`/`USERPROFILE`) para el sidecar. Solo tests: los
+    /// e2e no pueden leer la config ni crear workspaces en el home real.
+    pub home: Option<&'a Path>,
 }
 
 pub struct SidecarProcess {
@@ -134,6 +137,10 @@ impl SidecarProcess {
             .stdin(Stdio::piped())
             .stdout(Stdio::from(spec.log))
             .stderr(Stdio::from(stderr));
+        if let Some(home) = spec.home {
+            cmd.env("HOME", plain_path(home))
+                .env("USERPROFILE", plain_path(home));
+        }
 
         #[cfg(windows)]
         {
