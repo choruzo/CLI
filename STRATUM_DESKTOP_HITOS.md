@@ -190,7 +190,9 @@ implementar e implementación revisada después (ver abajo).
   que habla el protocolo del relay por el unix socket: asistente sin tools ante
   «este proyecto», `question` con acuse `prompt_resolved`, `cancel` en 102 ms,
   `SIGKILL` + relanzar → `resumed: true` y el agente recuerda lo hablado, y
-  apagado ordenado por EOF en stdin con código 0.
+  apagado ordenado por EOF en stdin con código 0. El usuario completó la prueba
+  a mano en la ventana de Linux: la app se abre y el agente se comporta igual
+  que en Windows.
 
 | Criterio | Estado |
 |---|---|
