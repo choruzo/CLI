@@ -362,10 +362,25 @@ Decisiones de diseño:
   el acto, y quitar un chip antes de enviar borra la copia (solo si ningún
   `chat` la llevó ya).
 
+Ventana real en Windows (`tauri dev` + CDP, con `gemma-4-12b`; los diálogos
+nativos se rellenaron por mensajes Win32 sin robar el foco):
+- «Adjuntar» con un `.csv` y un fichero de 30 MB: el CSV queda listo y el
+  grande se muestra rechazado («supera el límite de 25.0 MB por fichero») sin
+  llegar a copiarse (`inputs/` solo contiene el CSV).
+- El mensaje sale con su chip; el agente lee y escribe, y la tarjeta de
+  `resumen_ventas.csv` se pinta con «Vista previa» (tabla), «Abrir» y
+  «Guardar como…».
+- «Guardar como…» copia el fichero; la prueba destapó que el diálogo arrancaba
+  en el cwd del proceso (`src-tauri/` en dev), así que ahora abre en
+  Descargas. El nombre personalizado no se pudo teclear desde fuera (el
+  diálogo moderno no lo expone a la automatización): se guardó con el nombre
+  por defecto.
+- «Abrir» entrega el fichero al SO (en esta máquina `.csv` no tiene app
+  asociada y Windows mostró «Abrir con»).
+
 Pendiente para cerrar D2:
-- Prueba a mano en la ventana: botón Adjuntar, drag & drop, vista previa,
-  «Abrir», «Guardar como…» a una carpeta elegida y el aviso de límite (los
-  diálogos nativos no se pueden manejar por CDP).
+- Drag & drop real sobre la ventana (no se puede simular por CDP) y
+  «Guardar como…» eligiendo otro nombre y carpeta, a mano.
 - Linux (WSL): suites y e2e del SEA de Linux.
 
 ### Estructura

@@ -115,13 +115,20 @@ pub async fn output_save(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    // Sin carpeta inicial, el diálogo arranca en el cwd del proceso (el home
+    // del usuario en release, `src-tauri/` en dev): Descargas es lo esperable.
+    let start_dir = app.path().download_dir().ok();
     let chosen = tauri::async_runtime::spawn_blocking(move || {
-        app.dialog()
+        let mut dialog = app
+            .dialog()
             .file()
             .set_title("Guardar como")
             .set_file_name(file_name)
-            .set_parent(&window)
-            .blocking_save_file()
+            .set_parent(&window);
+        if let Some(dir) = start_dir {
+            dialog = dialog.set_directory(dir);
+        }
+        dialog.blocking_save_file()
     })
     .await
     .map_err(|e| e.to_string())?;
