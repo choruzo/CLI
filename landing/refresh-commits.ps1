@@ -66,3 +66,20 @@ $jsOutputPath = Join-Path $PSScriptRoot "data/commits-data.js"
 [System.IO.File]::WriteAllText($jsOutputPath, "window.__STRATUM_COMMITS__ = $body;`n", $utf8)
 
 Write-Host "Updated data/commits.json and data/commits-data.js: $($commits.Count) commits, $(@($tags).Count) tags, $(@($prs).Count) PRs."
+
+# --- Cache busting -----------------------------------------------------------
+# Cloudflare sirve CSS/JS con Cache-Control max-age=14400: sin una versión en la URL,
+# un visitante recurrente combina el index.html nuevo con el CSS/JS viejo de su caché.
+# La versión es un hash del contenido, así que solo cambia cuando cambian los ficheros.
+$assets = @("styles.css", "app.js", "data/commits-data.js") | ForEach-Object { Join-Path $PSScriptRoot $_ }
+$sha = [System.Security.Cryptography.SHA1]::Create()
+$bytes = [System.Collections.Generic.List[byte]]::new()
+foreach ($a in $assets) { $bytes.AddRange([System.IO.File]::ReadAllBytes($a)) }
+$version = ([System.BitConverter]::ToString($sha.ComputeHash($bytes.ToArray())) -replace "-", "").Substring(0, 10).ToLower()
+
+$indexPath = Join-Path $PSScriptRoot "index.html"
+$index = [System.IO.File]::ReadAllText($indexPath)
+$index = [regex]::Replace($index, '((?:href|src)="\./(?:styles\.css|app\.js|data/commits-data\.js))(\?v=[^"]*)?"', "`$1?v=$version`"")
+[System.IO.File]::WriteAllText($indexPath, $index, $utf8)
+
+Write-Host "Assets versioned as ?v=$version in index.html."

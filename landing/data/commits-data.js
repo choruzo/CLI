@@ -1,8 +1,17 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-09-23T19:11:58.9279727+02:00",
+  "generatedAt": "2026-09-23T20:20:20.6752902+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "ee26daf41402f09b50e4699a7f7c554b1b8e4f76",
+      "date": "2026-09-23T20:12:20+02:00",
+      "author": "Javi_1",
+      "subject": "feat(landing): rehacer la landing con estilo terminal y contenido dinámico",
+      "add": 4592,
+      "del": 2479,
+      "files": 6
+    },
     {
       "sha": "9c1fe9994dd1581e5fc49ef38407caed4f14e5d7",
       "date": "2026-09-23T08:17:16+02:00",

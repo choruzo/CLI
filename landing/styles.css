@@ -139,13 +139,14 @@ kbd { color: var(--accent); }
 
 /* ─── Hero ───────────────────────────────────────────────────── */
 .hero { padding: 56px 0 40px; border-bottom: 1px dashed var(--border); }
-.logo {
-  margin: 0; color: var(--accent); line-height: 1.05;
-  font-size: clamp(5px, calc((100vw - 32px) / 62 / 0.62), 15px);
-  text-shadow: var(--glow);
-  overflow: hidden;
-}
-.logo .shade { color: color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+.logo { margin: 0; width: 100%; max-width: 660px; color: var(--accent); font-size: 48px; line-height: 1; letter-spacing: .1em; }
+.logo svg { width: 100%; height: auto; display: block; overflow: visible; }
+.logo-block { fill: var(--accent); filter: drop-shadow(0 0 6px rgba(245, 158, 11, 0.35)); }
+:root[data-theme="light"] .logo-block { filter: none; }
+.logo-shade { stroke: color-mix(in srgb, var(--accent) 45%, var(--bg)); }
+/* Revelado de izquierda a derecha, como el typewriter del Banner de la CLI */
+.logo.draw svg { animation: logo-in 0.9s steps(31) both; }
+@keyframes logo-in { from { clip-path: inset(0 100% 0 0); } to { clip-path: inset(0 0 0 0); } }
 .tagline { color: var(--muted); margin: 18px 0 0; }
 .lede { max-width: 72ch; color: var(--muted); margin: 18px 0 0; }
 .boot {

@@ -211,24 +211,49 @@ const GLYPHS = {
   M: ["███╗   ███╗", "████╗ ████║", "██╔████╔██║", "██║╚██╔╝██║", "██║ ╚═╝ ██║", "╚═╝     ╚═╝"]
 };
 
+// El logo se dibuja como SVG a partir de la rejilla de glifos: con texto, cada █
+// deja juntas de subpíxel entre caracteres y el logo se ve rayado.
+const LOGO_CELL = { w: 10, h: 17 };
+const LOGO_LINKS = { "═": "lr", "║": "ud", "╗": "ld", "╔": "rd", "╝": "lu", "╚": "ru" };
+
 function renderLogo() {
   const rows = [0, 1, 2, 3, 4, 5].map((i) => [..."STRATUM"].map((c) => GLYPHS[c][i]).join(""));
-  // Las líneas de sombra (box-drawing) se atenúan; los bloques llenos quedan en ámbar.
-  const html = rows
-    .map((r) => esc(r).replace(/[╗╔╝╚║═]+/g, (m) => `<span class="shade">${m}</span>`))
-    .join("\n");
+  const { w, h } = LOGO_CELL;
+  const blocks = [];
+  const lines = [];
+  rows.forEach((row, y) => {
+    [...row].forEach((ch, x) => {
+      const x0 = x * w;
+      const y0 = y * h;
+      if (ch === "█") {
+        blocks.push(`M${x0} ${y0}h${w}v${h}h${-w}z`);
+        return;
+      }
+      const links = LOGO_LINKS[ch];
+      if (!links) return;
+      // Línea doble: dos trazos paralelos desde el centro de la celda hacia cada lado enlazado
+      const cx = x0 + w / 2;
+      const cy = y0 + h / 2;
+      const ox = w * 0.18;
+      const oy = h * 0.12;
+      for (const dir of links) {
+        for (const s of [-1, 1]) {
+          if (dir === "l") lines.push(`M${x0} ${cy + s * oy}H${cx + ox}`);
+          if (dir === "r") lines.push(`M${cx - ox} ${cy + s * oy}H${x0 + w}`);
+          if (dir === "u") lines.push(`M${cx + s * ox} ${y0}V${cy + oy}`);
+          if (dir === "d") lines.push(`M${cx + s * ox} ${cy - oy}V${y0 + h}`);
+        }
+      }
+    });
+  });
+  const W = rows[0].length * w;
+  const H = rows.length * h;
   const logo = $("#logo");
-  if (REDUCED) { logo.innerHTML = html; return; }
-  // Revelado por columnas, como el typewriter del Banner de la CLI
-  const width = rows[0].length;
-  let col = 0;
-  const tick = () => {
-    col += 2;
-    if (col >= width) { logo.innerHTML = html; return; }
-    logo.textContent = rows.map((r) => r.slice(0, col)).join("\n");
-    requestAnimationFrame(tick);
-  };
-  tick();
+  logo.innerHTML = `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="STRATUM" preserveAspectRatio="xMinYMin meet">
+    <path class="logo-shade" d="${lines.join("")}" fill="none" stroke-width="1.1" />
+    <path class="logo-block" d="${blocks.join("")}" shape-rendering="crispEdges" />
+  </svg>`;
+  if (!REDUCED) logo.classList.add("draw");
 }
 
 /* ═══ Arranque del hero ════════════════════════════════════════════════════ */
