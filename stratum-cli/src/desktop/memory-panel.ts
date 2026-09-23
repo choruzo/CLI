@@ -26,7 +26,12 @@ export type MemorySaveResult =
  * `stratum init`, otro editor), no se pisa.
  */
 export class MemoryPanel {
-  constructor(private readonly config: StratumConfig) {}
+  constructor(private config: StratumConfig) {}
+
+  /** La config cambió desde Ajustes (D5): la ruta del `STRATUM.md` global puede ser otra. */
+  setConfig(config: StratumConfig): void {
+    this.config = config;
+  }
 
   get globalPath(): string {
     return resolveMemoryPaths(this.config).globalFile;

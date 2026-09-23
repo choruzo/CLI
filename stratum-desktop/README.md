@@ -154,6 +154,17 @@ useAgentStream ─invoke──► sidecar_send (lista blanca + 1 MiB) ─pipe─
   que estaba a medias se ofrece para reintentar.
 - **Memoria del asistente**: `~/.stratum/desktop/memory/`, separada de la de
   cualquier proyecto.
+- **Ajustes (D5, 15.7)**: `Ctrl+,`, `/settings` o ⚙. El `.stratumrc.json`
+  global lo lee, valida y escribe el **sidecar** (`stratum-cli/src/desktop/config-panel.ts`
+  y `settings.ts`), no Rust: tiene el schema y aplica la config nueva a cada
+  conversación antes de su siguiente turno. Las API keys literales llegan al
+  webview como `••••••••` y se restauran al guardar (nunca hacia otra URL);
+  guardar es concurrencia optimista por sha256 y el watcher del directorio solo
+  avisa si el contenido difiere del último conocido, así que una escritura
+  propia no vuelve como cambio externo. El frontend está en
+  `src/components/settings/` y `src/hooks/useConfig.ts`; el ProviderWizard usa
+  la lógica de la CLI (`wizard-logic.ts`). `sidecar_reload` reinicia el agente
+  para lo que solo cambia al arrancar (raíz y límites de los workspaces, logging).
 - **Markdown (15.13)**: `marked.lexer` solo trocea en bloques; cada bloque se
   renderiza con react-markdown memoizado por su texto, así que en streaming solo
   se re-parsea el último. Resaltado con `rehype-highlight` (nodos, sin HTML

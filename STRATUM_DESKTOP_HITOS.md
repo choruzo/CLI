@@ -73,7 +73,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D2** 🔄 | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
 | **D3** 🔄 | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
 | **D4** 🔄 | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
-| **D5** | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
+| **D5** 🔄 | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
 | **D6** | Integración con el SO + pipeline de build | D5 | — |
 | **D7** | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
 | **D8** | Modo Code: conmutador Chat \| Code | D7 | 15.3 |
@@ -709,10 +709,103 @@ Decisiones de diseño:
 
 ---
 
-## D5 — Settings Panel, ProviderWizard y config compartida
+## D5 — Settings Panel, ProviderWizard y config compartida 🔄
 
 **Objetivo.** Configuración visual sin editar JSON y escritura segura compartida
 con la CLI.
+
+**Estado (2026-09-23): implementado y verificado en Windows (ventana real) y
+en Linux (protocolo contra el SEA) con `gemma-4-12b` (llama.cpp); pendiente la
+revisión a mano de la ventana en Linux.** Suites verdes: CLI 1191 (`tsc` y lint
+limpios; 21 tests nuevos en `desktop/settings-d5.test.ts`), frontend 118
+(16 nuevos, typecheck y `vite build` limpios) y Rust 40 (e2e contra el SEA con
+protocolo 6). Linux (WSL2): CLI 1174 + 17 omitidos por ser de Windows, frontend
+118, `cargo test` 39/39 y SEA de Linux con protocolo 6 y los tres nativos.
+
+En Linux, con un cliente del protocolo por el unix socket contra el SEA, un HOME
+temporal sin config y `gemma-4-12b`: 21/21 — sin provider la conversación no
+abre; guardar desde Ajustes la aplica y la conversación abre y responde **sin
+reiniciar**; `stratum provider list` ve lo guardado; una key literal nunca sale
+del sidecar y en disco sigue la real; el sondeo del wizard usa la key guardada
+solo contra su servidor; `stratum provider use` desde la terminal llega como un
+único cambio externo y la conversación abierta sigue al nuevo default; un
+guardado propio no vuelve como cambio externo; guardar sobre una versión vieja
+da conflicto; validación en vivo con ruta; uso de disco; retención inmediata que
+no toca la conversación abierta; apagado ordenado por EOF en stdin.
+
+| Criterio | Estado |
+|---|---|
+| Un provider añadido en el wizard aparece en la terminal y viceversa | ✅ En la ventana: el wizard (Otro → `localhost:8080` → `/models` lista `gemma-4-12b` → por defecto) guarda, `stratum provider list` lo muestra como activo y la conversación abierta responde con él. Al revés, `stratum provider use litellm` con Ajustes abierto recarga el panel con el aviso «cambió fuera de la app» |
+| Editar la config en la CLI con Settings abierto avisa del conflicto | ✅ Con un cambio sin guardar, `stratum provider use` desde la terminal muestra «cambió fuera mientras la editabas» con «Descartar mis cambios» / «Mantener mis cambios», sin tocar el borrador. Guardar sobre un hash viejo da `config_conflict` («Cargar la versión del disco» / «Sobrescribir con la mía») |
+| El watcher no entra en bucle tras una escritura propia | ✅ Tras dos cambios de la CLI y un guardado desde la app, el log del sidecar tiene exactamente dos `config changed on disk`. Tests: escritura propia sin aviso, dos escrituras seguidas → un aviso, reescribir el mismo contenido → ninguno |
+| JSON inválido en Avanzado se marca antes de guardar | ✅ Una coma de más: «línea 30, columna 23», la línea marcada en el margen, pestaña con contador y Guardar deshabilitado. Un valor fuera de rango (`maxResults: 99`) da el problema con su ruta, también en la pestaña Búsqueda web |
+
+También probado en la ventana: `Ctrl+,` y el botón ⚙; la key del provider
+existente no aparece en el DOM; «Ver modelos disponibles» en Modelo activo; uso
+de disco y «Purgar ahora» (con confirmación); un cambio que necesita reinicio
+(tamaño máximo por fichero) → «Reiniciar el agente» → apagado ordenado, relanzado
+sin espera y la conversación reabierta; y el fichero roto en disco con la app
+abierta → el agente sigue con la config anterior, lo dice, y al arreglarlo se
+recupera solo. La config global del usuario se restauró después (mismo SHA1).
+
+Decisiones (con el usuario, antes de implementar):
+- **La config la lee, valida y escribe el sidecar**, no Rust (desviación de §4
+  de la definición y de la tarea 4): el schema Zod, la preservación de `${VAR}`,
+  `schemaVersion` y la migración de claves viven en TypeScript, y el sidecar
+  tenía que recargarla igualmente. Mismo patrón que la memoria global de D4.
+  Rust solo añade las tramas a su lista blanca.
+- **Se aplica en el siguiente turno**: cada conversación reconstruye su agente
+  (mismo historial, mismo registry) antes de su próximo turno; uno en marcha
+  termina con la config con la que empezó. Lo que Rust recibe en el handshake
+  (raíz y límites de los workspaces) y el logging quedan «pendientes de
+  reiniciar el agente», con un botón.
+- **API keys enmascaradas**: una literal llega al webview como `••••••••`; un
+  campo que la conserva recupera al guardar el valor de disco. Los `${VAR}` y
+  `env:VAR` se ven tal cual.
+- **«Purgar ahora»** = un pase del janitor ya, con los plazos guardados.
+
+Decisiones de diseño:
+- **Protocolo v6**: `config_get`/`config_state` (`reason` requested/saved/
+  external, `snapshot` enmascarado con `hash`, `applied` con `restartRequired` y
+  los `defaults` del schema), `config_validate`/`config_validation` (con
+  `requestId`), `config_save`/`config_saved`/`config_conflict`/`config_invalid`/
+  `config_error`, `provider_probe`/`provider_probe_result`,
+  `workspaces_usage_get`/`workspaces_usage` y `retention_run`/`retention_report`.
+- **Solo la config global** (`~/.stratum/.stratumrc.json`), la que la CLI lee
+  desde cualquier carpeta. Si otra capa se fusiona por encima (un
+  `~/.stratumrc.json`), Ajustes lo avisa.
+- **Concurrencia por hash, no por mtime** (15.7): el webview guarda sobre el
+  sha256 que leyó. El watcher vigila el directorio (una escritura atómica
+  sustituye el fichero), con debounce de 300 ms, y solo avisa si el hash difiere
+  del último conocido, que incluye lo que el propio panel escribió: es la marca
+  `_selfWrite` de §4 sin ventana temporal.
+- **Un secreto no viaja a otra URL**: si el borrador cambia el origen de la
+  `baseUrl` junto a una key enmascarada, no se restaura (hay que escribirla), y
+  `provider_probe` solo usa la guardada contra el mismo origen. Si no, cambiar
+  la URL bastaría para enviar la key a otro servidor.
+- **Escritura atómica también en la CLI** (`writeFileAtomic` en
+  `config/writer.ts`, usada por el wizard y por `stratum config set`): sin ella,
+  el watcher podía leer el fichero a medio escribir.
+- **Modelo por conversación** (`ConversationRecord.modelPinned`): una
+  conversación que eligió modelo con `/model` lo conserva; las demás siguen al
+  modelo por defecto cuando cambia en Ajustes. Los registros anteriores cuentan
+  como elegido si su modelo difiere del default (lo que hacía la reapertura).
+- **Una config que carga retira el error de arranque**: con `.stratumrc.json`
+  roto o sin provider, se arregla en Ajustes (o en la terminal) y la
+  conversación se reabre sola, sin reiniciar. Adelanta parte del onboarding de D6.
+- **Wizard**: la lógica es la de la CLI (`wizard-logic.ts`, importada); el
+  sondeo de `/models` lo hace el sidecar (el webview no sale a la red) y, como
+  en la CLI, terminar el wizard guarda.
+- **Borrador de texto**: la fuente de verdad es el JSON de Avanzado; los
+  formularios lo parsean, cambian una clave y lo reserializan. Una clave que los
+  formularios no conocen (`ssh`, `mcp`…) se conserva, y vaciar un campo vuelve
+  al default (que se ve como placeholder).
+- **«Reiniciar el agente»** (`sidecar_reload`): apagado ordenado del sidecar y
+  relanzamiento inmediato sin contar como caída; el webview reabre las
+  conversaciones con `resume`, como tras cualquier reinicio.
+
+Conocido: tras reconstruir el agente, el % de contexto vuelve a ser estimado
+hasta el siguiente turno (como al reabrir una conversación).
 
 ### Tareas
 

@@ -5,6 +5,9 @@ import type {
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
 import type {
+  ConfigApplied,
+  ConfigIssue,
+  ConfigSnapshot,
   ConversationStats,
   ConversationSummary,
   DecisionSummary,
@@ -310,3 +313,48 @@ export function decisionSummaries(v: unknown): DecisionSummary[] | null {
 }
 
 export const isNullableNumber = (v: unknown): v is number | null => v === null || num(v);
+
+const nullableStr = (v: unknown): v is string | null => v === null || str(v);
+
+// ---------------------------------------------------------------------------
+// Ajustes (D5)
+// ---------------------------------------------------------------------------
+
+export function configSnapshot(v: unknown): ConfigSnapshot | null {
+  if (!isRecord(v) || !str(v.path) || !bool(v.exists) || !str(v.text)) return null;
+  if (!nullableStr(v.hash) || !nullableStr(v.parseError) || !nullableStr(v.readOnly)) return null;
+  return {
+    path: v.path,
+    exists: v.exists,
+    text: v.text,
+    hash: v.hash,
+    parseError: v.parseError,
+    readOnly: v.readOnly,
+    overrides: Array.isArray(v.overrides) ? v.overrides.filter(str) : [],
+  };
+}
+
+export function configApplied(v: unknown): ConfigApplied | null {
+  if (!isRecord(v) || !bool(v.ok) || !nullableStr(v.error)) return null;
+  return {
+    ok: v.ok,
+    error: v.error,
+    restartRequired: Array.isArray(v.restartRequired) ? v.restartRequired.filter(str) : [],
+  };
+}
+
+export function configIssues(v: unknown): ConfigIssue[] | null {
+  if (!Array.isArray(v)) return null;
+  return v.flatMap((i) =>
+    isRecord(i) && str(i.path) && str(i.message)
+      ? [
+          {
+            path: i.path,
+            message: i.message,
+            ...(num(i.line) ? { line: i.line } : {}),
+            ...(num(i.column) ? { column: i.column } : {}),
+          },
+        ]
+      : [],
+  );
+}

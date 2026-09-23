@@ -149,6 +149,36 @@ const inboundSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   z.object({ type: z.literal('memory_forget'), id }).strict(),
+  z.object({ type: z.literal('config_get') }).strict(),
+  z
+    .object({
+      type: z.literal('config_validate'),
+      requestId: id,
+      text: z.string().max(LIMITS.configChars),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('config_save'),
+      text: z.string().max(LIMITS.configChars),
+      baseHash: z
+        .string()
+        .regex(/^[0-9a-f]{64}$/)
+        .nullable(),
+      force: z.boolean().optional(),
+    })
+    .strict(),
+  z
+    .object({
+      type: z.literal('provider_probe'),
+      requestId: id,
+      baseUrl: z.string().min(1).max(LIMITS.urlChars),
+      apiKey: z.string().max(LIMITS.secretChars).optional(),
+      provider: z.string().min(1).max(LIMITS.idChars).optional(),
+    })
+    .strict(),
+  z.object({ type: z.literal('retention_run') }).strict(),
+  z.object({ type: z.literal('workspaces_usage_get') }).strict(),
 ]);
 
 /** Parsea una línea como trama de entrada. Devuelve `null` si no tiene forma válida. */

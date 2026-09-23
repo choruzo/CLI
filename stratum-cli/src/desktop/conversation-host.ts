@@ -6,6 +6,7 @@ import { normalizeTitle } from './codec.js';
 import { ConversationSession } from './conversation.js';
 import { DesktopConversationStore, type ConversationRecord } from './conversation-store.js';
 import { MemoryPanel } from './memory-panel.js';
+import type { DesktopSettings } from './settings.js';
 import type { DesktopSessionStore } from './session-store.js';
 import { DEFAULT_MAX_CONCURRENT_TURNS, TurnScheduler } from './turn-scheduler.js';
 import type { ConversationWorkspace, WorkspaceManager } from './workspace.js';
@@ -23,8 +24,13 @@ export interface ConversationHostOptions {
   store: DesktopSessionStore;
   /** Título y transcript visible (D4). Por defecto, `<datos>/conversations/`. */
   records?: DesktopConversationStore;
-  /** Un router por conversación: un fallback o un `/model` no puede afectar a las demás. */
-  makeRouter: () => ProviderRouter;
+  /**
+   * Un router por conversación: un fallback o un `/model` no puede afectar a
+   * las demás. Recibe la config vigente (cambia con Ajustes, D5).
+   */
+  makeRouter: (config: StratumConfig) => ProviderRouter;
+  /** Panel de Ajustes (D5). Sin él, las tramas `config_*` se contestan con error. */
+  settings?: DesktopSettings;
   /** Error fatal de arranque (config incompatible): no se puede chatear. */
   startupError?: SidecarErrorFrame | null;
   confirmTimeoutMs?: number;
@@ -68,13 +74,41 @@ export class ConversationHost {
   private readonly records: DesktopConversationStore;
   private readonly scheduler: TurnScheduler;
   private readonly memory: MemoryPanel;
+  /** Config vigente: la de arranque hasta que Ajustes o la CLI la cambian (D5). */
+  private config: StratumConfig;
+  private error: SidecarErrorFrame | null;
 
   constructor(private readonly opts: ConversationHostOptions) {
+    this.config = opts.config;
+    this.error = opts.startupError ?? null;
     this.records =
       opts.records ??
       new DesktopConversationStore(join(dirname(opts.store.dir), 'conversations'), opts.store);
     this.scheduler = new TurnScheduler(opts.maxConcurrentTurns ?? DEFAULT_MAX_CONCURRENT_TURNS);
     this.memory = opts.memory ?? new MemoryPanel(opts.config);
+    opts.settings?.attach(this.emit);
+  }
+
+  /**
+   * Error de config vigente. Deja de haberlo en cuanto se aplica una config que
+   * carga (D5): se arregla desde Ajustes sin reiniciar la app.
+   */
+  get startupError(): SidecarErrorFrame | null {
+    return this.error;
+  }
+
+  /**
+   * Config efectiva nueva (D5). Cada conversación la toma antes de su siguiente
+   * turno; la cola, en el acto (subir el límite arranca a los que esperaban).
+   */
+  applyConfig(config: StratumConfig, opts: { maxConcurrentTurns?: number } = {}): void {
+    this.config = config;
+    this.error = null;
+    this.memory.setConfig(config);
+    if (opts.maxConcurrentTurns !== undefined) this.scheduler.setLimit(opts.maxConcurrentTurns);
+    for (const session of this.sessions.values()) {
+      session.applyConfig(config, () => this.opts.makeRouter(config));
+    }
   }
 
   /** Salida hacia el cliente activo en el momento de emitir (no en el de crear la sesión). */
@@ -183,14 +217,14 @@ export class ConversationHost {
         return;
       case 'chat': {
         const session = this.sessions.get(frame.conversationId);
-        if (this.opts.startupError?.fatal || !session) {
+        if (this.error?.fatal || !session) {
           this.emit({
             type: 'chat_rejected',
             conversationId: frame.conversationId,
             turnId: frame.turnId,
-            reason: this.opts.startupError?.fatal ? 'sidecar_unavailable' : 'unknown_conversation',
-            message: this.opts.startupError?.fatal
-              ? this.opts.startupError.message
+            reason: this.error?.fatal ? 'sidecar_unavailable' : 'unknown_conversation',
+            message: this.error?.fatal
+              ? this.error.message
               : 'La conversación no está abierta en el agente.',
           });
           return;
@@ -249,6 +283,40 @@ export class ConversationHost {
       case 'memory_forget':
         await this.forgetDecision(frame.id);
         return;
+      case 'config_get':
+      case 'config_validate':
+      case 'config_save':
+      case 'workspaces_usage_get':
+        await this.withSettings((s) => s.handle(frame));
+        return;
+      case 'provider_probe':
+        // Fuera de la cola: es una petición HTTP con timeout propio.
+        void this.withSettings((s) => s.handle(frame));
+        return;
+      case 'retention_run':
+        // Fuera de la cola (comprime y borra); al terminar, el listado cambia.
+        void this.withSettings(async (s) => {
+          await s.handle(frame);
+          this.emit({ type: 'conversations', items: this.list() });
+        });
+        return;
+    }
+  }
+
+  private async withSettings(fn: (s: DesktopSettings) => Promise<void>): Promise<void> {
+    const settings = this.opts.settings;
+    if (!settings) {
+      this.emit({ type: 'config_error', message: 'Este agente no admite ajustes.' });
+      return;
+    }
+    try {
+      await fn(settings);
+    } catch (err) {
+      log.error('settings frame failed', { err });
+      this.emit({
+        type: 'config_error',
+        message: err instanceof Error ? err.message : String(err),
+      });
     }
   }
 
@@ -454,11 +522,11 @@ export class ConversationHost {
       this.emit(this.opened(existing, false));
       return;
     }
-    if (this.opts.startupError?.fatal) {
+    if (this.error?.fatal) {
       this.emit({
         type: 'conversation_error',
         conversationId,
-        message: this.opts.startupError.message,
+        message: this.error.message,
       });
       return;
     }
@@ -516,8 +584,8 @@ export class ConversationHost {
         workspace,
         workspaceSettings: manager?.settings,
         conversationId,
-        config: this.opts.config,
-        router: this.opts.makeRouter(),
+        config: this.config,
+        router: this.opts.makeRouter(this.config),
         store: this.opts.store,
         records: this.records,
         record,

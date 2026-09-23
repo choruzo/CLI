@@ -88,6 +88,8 @@ export function useConversations(status: SidecarStatus): Conversations {
   const stateRef = useRef(state);
   stateRef.current = state;
   const activeId = state.activeId;
+  // `open` se define más abajo; el oyente de tramas lo llama por aquí.
+  const reopenRef = useRef<(id: string) => void>(() => undefined);
 
   useEffect(() => saveActiveId(activeId), [activeId]);
 
@@ -115,6 +117,18 @@ export function useConversations(status: SidecarStatus): Conversations {
             dispatch({ type: 'deleted', id: f.conversationId });
           }
           return;
+        case 'config_state': {
+          // D5: la activa no pudo abrirse (config rota, sin provider…) y ya
+          // hay una config que funciona: se vuelve a intentar sin reiniciar.
+          const applied = isRecord(f.applied) ? f.applied : null;
+          const current = stateRef.current;
+          const c = current.byId[current.activeId];
+          if (applied?.ok === true && current.open[current.activeId] && c && !c.opened && c.notice) {
+            dispatch({ type: 'conv', id: current.activeId, action: { type: 'dismiss_notice' } });
+            reopenRef.current(current.activeId);
+          }
+          return;
+        }
         case 'models':
           if (typeof f.conversationId === 'string' && typeof f.current === 'string') {
             setModels({
@@ -156,6 +170,11 @@ export function useConversations(status: SidecarStatus): Conversations {
       dispatch({ type: 'conv', id, action: { type: 'conversation_error', message } });
     });
   }, []);
+  reopenRef.current = (id: string) => {
+    post({ type: 'new_conversation', conversationId: id, resume: true }, (message) =>
+      dispatch({ type: 'conv', id, action: { type: 'conversation_error', message } }),
+    );
+  };
 
   // Cada conexión nueva: listado y apertura de la activa. Al perderla, lo que
   // estaba en vuelo no va a terminar.

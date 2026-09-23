@@ -1,7 +1,8 @@
 import { Command } from 'commander';
-import { existsSync, readFileSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { loadConfig, findConfigFile } from '../../config/loader.js';
+import { writeFileAtomic } from '../../config/writer.js';
 import { StratumConfigSchema } from '../../config/schema.js';
 import { getByDotPath, setByDotPath, formatConfigValue } from '../../config/dot-path.js';
 
@@ -50,7 +51,7 @@ const configSet = new Command('set')
       process.exit(1);
     }
 
-    writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+    writeFileAtomic(configPath, JSON.stringify(raw, null, 2) + '\n');
     process.stdout.write(`Set ${key} = ${value} in ${configPath}\n`);
   });
 

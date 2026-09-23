@@ -38,6 +38,14 @@
  * (`turn_queued` / `turn_started`), las estadísticas de la StatusBar
  * (`conversation_stats`), el transcript visible al abrir (sobrevive a la
  * compresión de contexto) y la memoria global (`memory_*`).
+ *
+ * D5 (v6) añade el panel de ajustes (15.7): el `.stratumrc.json` global se lee
+ * y se escribe **a través del sidecar** (`config_*`), que es quien tiene el
+ * schema, preserva los `${VAR}` y aplica la config nueva a las conversaciones
+ * en su siguiente turno. Las API keys literales llegan al webview sustituidas
+ * por `SECRET_PLACEHOLDER`. Además, el ProviderWizard sondea `/models` con
+ * `provider_probe`, y Espacios de trabajo pide uso de disco y un pase de
+ * retención inmediato.
  */
 
 import type {
@@ -51,7 +59,7 @@ import type {
 export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem, TodoItem };
 
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 5;
+export const DESKTOP_PROTOCOL_VERSION = 6;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -86,7 +94,19 @@ export const LIMITS = {
   modelChars: 256,
   /** Contenido del `STRATUM.md` global editado desde el sidebar. */
   memoryChars: 256 * 1024,
+  /** Texto del `.stratumrc.json` editado desde Ajustes (D5). */
+  configChars: 512 * 1024,
+  /** URL de un provider que se sondea desde el wizard (D5). */
+  urlChars: 2_048,
+  /** API key tecleada en el wizard (D5). */
+  secretChars: 4_096,
 } as const;
+
+/**
+ * Lo que ve el webview en lugar de un secreto literal de la config (D5). Al
+ * guardar, un campo que sigue valiendo esto conserva el valor de disco.
+ */
+export const SECRET_PLACEHOLDER = '••••••••';
 
 // ---------------------------------------------------------------------------
 // Tramas de entrada (Rust → sidecar)
@@ -228,7 +248,63 @@ export interface MemoryForgetFrame {
   id: string;
 }
 
+// --- Ajustes (D5) -----------------------------------------------------------
+
+/** Pide el `.stratumrc.json` global (enmascarado) y el estado de la config aplicada. */
+export interface ConfigGetFrame {
+  type: 'config_get';
+}
+
+/** Valida un borrador sin guardarlo (Avanzado, en vivo). */
+export interface ConfigValidateFrame {
+  type: 'config_validate';
+  requestId: string;
+  text: string;
+}
+
+/**
+ * Guarda el `.stratumrc.json` global. `baseHash` es el de la versión sobre la
+ * que se editó (`null` si no existía): si el fichero cambió en disco entretanto
+ * (la CLI, otro editor), no se pisa y se responde `config_conflict`, salvo con
+ * `force` («Sobrescribir con la mía»).
+ */
+export interface ConfigSaveFrame {
+  type: 'config_save';
+  text: string;
+  baseHash: string | null;
+  force?: boolean;
+}
+
+/**
+ * Lista los modelos de un endpoint (ProviderWizard y selector de modelo). Sin
+ * `apiKey` (o con `SECRET_PLACEHOLDER`) se usa la guardada del provider
+ * `provider`, solo si `baseUrl` tiene el mismo origen que la suya.
+ */
+export interface ProviderProbeFrame {
+  type: 'provider_probe';
+  requestId: string;
+  baseUrl: string;
+  apiKey?: string;
+  provider?: string;
+}
+
+/** «Purgar ahora»: un pase de retención inmediato con los plazos configurados. */
+export interface RetentionRunFrame {
+  type: 'retention_run';
+}
+
+/** Uso de disco de los espacios de trabajo. */
+export interface WorkspacesUsageGetFrame {
+  type: 'workspaces_usage_get';
+}
+
 export type ConversationFrame =
+  | ConfigGetFrame
+  | ConfigValidateFrame
+  | ConfigSaveFrame
+  | ProviderProbeFrame
+  | RetentionRunFrame
+  | WorkspacesUsageGetFrame
   | ListConversationsFrame
   | RenameConversationFrame
   | DeleteConversationFrame
@@ -270,6 +346,12 @@ export const CLIENT_FRAME_TYPES = [
   'memory_get',
   'memory_save',
   'memory_forget',
+  'config_get',
+  'config_validate',
+  'config_save',
+  'provider_probe',
+  'retention_run',
+  'workspaces_usage_get',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -644,7 +726,120 @@ export interface ConversationErrorFrame {
   message: string;
 }
 
+// --- Ajustes (D5) -----------------------------------------------------------
+
+/** Un problema de un borrador de config. `path` con puntos (`provider.default`); `''` = el documento. */
+export interface ConfigIssue {
+  path: string;
+  message: string;
+  /** Solo en errores de sintaxis JSON (1-based). */
+  line?: number;
+  column?: number;
+}
+
+/** El `.stratumrc.json` global tal como está en disco, con los secretos enmascarados. */
+export interface ConfigSnapshot {
+  path: string;
+  exists: boolean;
+  /** JSON con `SECRET_PLACEHOLDER` en lugar de cada secreto literal; `''` si no existe. */
+  text: string;
+  /** sha256 del contenido en disco; `null` si no existe. Se devuelve en `config_save`. */
+  hash: string | null;
+  /** El fichero no se puede interpretar (JSON roto): `text` es el contenido crudo, sin enmascarar nada. */
+  parseError: string | null;
+  /** Motivo por el que no se puede guardar desde Desktop (un Stratum más nuevo lo escribió). */
+  readOnly: string | null;
+  /** Otros `.stratumrc.json` que se fusionan por encima del global (p. ej. `~/.stratumrc.json`). */
+  overrides: string[];
+}
+
+/** Estado de la config que usa el sidecar en este momento. */
+export interface ConfigApplied {
+  /** La última carga funcionó y es la que usan las conversaciones. */
+  ok: boolean;
+  /** Por qué la última carga falló (se sigue con la anterior). */
+  error: string | null;
+  /** Cambios guardados que solo se aplican al reiniciar el agente. */
+  restartRequired: string[];
+}
+
+export interface ConfigStateFrame {
+  type: 'config_state';
+  /** `requested`: respuesta a `config_get`; `saved`: tras guardar; `external`: cambió en disco (la CLI, otro editor). */
+  reason: 'requested' | 'saved' | 'external';
+  snapshot: ConfigSnapshot;
+  applied: ConfigApplied;
+  /** Valores por defecto del schema (lo que vale una clave ausente). */
+  defaults: Record<string, unknown>;
+}
+
+export interface ConfigValidationFrame {
+  type: 'config_validation';
+  requestId: string;
+  issues: ConfigIssue[];
+}
+
+/** Guardado. Le sigue un `config_state` con `reason: 'saved'`. */
+export interface ConfigSavedFrame {
+  type: 'config_saved';
+  hash: string;
+}
+
+/** El fichero cambió en disco desde `baseHash`: no se guardó. */
+export interface ConfigConflictFrame {
+  type: 'config_conflict';
+  snapshot: ConfigSnapshot;
+}
+
+/** El borrador no valida: no se guardó. */
+export interface ConfigInvalidFrame {
+  type: 'config_invalid';
+  issues: ConfigIssue[];
+}
+
+export interface ConfigErrorFrame {
+  type: 'config_error';
+  message: string;
+}
+
+export interface ProviderProbeResultFrame {
+  type: 'provider_probe_result';
+  requestId: string;
+  models: string[];
+  /** El endpoint no respondió o no lista modelos: el wizard pide el nombre a mano. */
+  error?: string;
+}
+
+export interface WorkspacesUsageFrame {
+  type: 'workspaces_usage';
+  root: string;
+  totalBytes: number;
+  active: { count: number; bytes: number };
+  archived: { count: number; bytes: number };
+  purged: { count: number };
+}
+
+export interface RetentionReportFrame {
+  type: 'retention_report';
+  archived: number;
+  purged: number;
+  /** Conversaciones abiertas que el pase no tocó. */
+  inUse: number;
+  failed: number;
+  /** La retención está desactivada (los dos plazos a 0). */
+  disabled: boolean;
+}
+
 export type ConversationOutboundFrame =
+  | ConfigStateFrame
+  | ConfigValidationFrame
+  | ConfigSavedFrame
+  | ConfigConflictFrame
+  | ConfigInvalidFrame
+  | ConfigErrorFrame
+  | ProviderProbeResultFrame
+  | WorkspacesUsageFrame
+  | RetentionReportFrame
   | ConversationsFrame
   | ConversationUpdatedFrame
   | ConversationDeletedFrame

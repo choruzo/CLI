@@ -36,6 +36,12 @@ export interface ConversationRecord {
   updatedAt: string;
   provider: string;
   model: string;
+  /**
+   * El modelo lo eligió el usuario con `/model` (D5). Si no, la conversación
+   * sigue al modelo por defecto del provider cuando cambia en Ajustes. Ausente
+   * en los registros anteriores: se trata como elegido si difiere del default.
+   */
+  modelPinned?: boolean;
   transcript: TranscriptTurn[];
 }
 
@@ -90,6 +96,7 @@ export class DesktopConversationStore {
           updatedAt: raw.updatedAt ?? raw.createdAt ?? new Date(0).toISOString(),
           provider: raw.provider ?? '',
           model: raw.model ?? '',
+          ...(typeof raw.modelPinned === 'boolean' ? { modelPinned: raw.modelPinned } : {}),
           transcript: raw.transcript,
         };
       }

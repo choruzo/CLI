@@ -57,3 +57,11 @@ export function sendSidecarFrame(frame: ClientFrame): Promise<void> {
 export function restartSidecar(): Promise<void> {
   return invoke('sidecar_restart');
 }
+
+/**
+ * Reiniciar el agente con la conexión viva (Ajustes, D5): para lo que solo se
+ * aplica al arrancar el sidecar. Las conversaciones se guardan y se reabren.
+ */
+export function reloadSidecar(): Promise<void> {
+  return invoke('sidecar_reload');
+}

@@ -37,6 +37,7 @@ pub fn run() {
             ipc::sidecar_subscribe,
             ipc::sidecar_send,
             ipc::sidecar_restart,
+            ipc::sidecar_reload,
             files::attachments_pick,
             files::attachments_add,
             files::attachments_discard,

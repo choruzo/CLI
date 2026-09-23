@@ -458,13 +458,79 @@ export class WorkspaceManager {
   /** Conversaciones abiertas en el host (contador: abrir y cerrar pueden solaparse). */
   private readonly inUse = new Map<string, number>();
 
+  private current: WorkspaceSettings;
+
   constructor(
-    readonly settings: WorkspaceSettings,
+    settings: WorkspaceSettings,
     private readonly now: () => Date = () => new Date(),
-  ) {}
+  ) {
+    this.current = settings;
+  }
+
+  get settings(): WorkspaceSettings {
+    return this.current;
+  }
 
   get root(): string {
     return this.settings.root;
+  }
+
+  /**
+   * Plazos de retención nuevos desde Ajustes (D5): cuentan desde el siguiente
+   * pase y en la fecha de purga que ve la UI. La raíz y los límites de subida
+   * no cambian en caliente (Rust los recibe en el handshake): esos esperan a
+   * reiniciar el agente.
+   */
+  updateRetention(s: Pick<WorkspaceSettings, 'compressAfterMs' | 'deleteAfterMs'>): void {
+    this.current = {
+      ...this.current,
+      compressAfterMs: s.compressAfterMs,
+      deleteAfterMs: s.deleteAfterMs,
+    };
+  }
+
+  /** Uso de disco de la raíz, por estado (Ajustes → Espacios de trabajo). */
+  usage(): {
+    totalBytes: number;
+    active: { count: number; bytes: number };
+    archived: { count: number; bytes: number };
+    purged: { count: number };
+  } {
+    const out = {
+      totalBytes: 0,
+      active: { count: 0, bytes: 0 },
+      archived: { count: 0, bytes: 0 },
+      purged: { count: 0 },
+    };
+    for (const id of this.list()) {
+      let found: WorkspaceInspection;
+      try {
+        found = this.inspect(id);
+      } catch {
+        continue;
+      }
+      if (found.state === 'active') {
+        const files = new Map<string, Stamp>();
+        walkFiles(this.checkedDir(id), '', files, { n: MAX_WALK_ENTRIES * 4 });
+        let bytes = 0;
+        for (const f of files.values()) bytes += f.size;
+        out.active.count++;
+        out.active.bytes += bytes;
+      } else if (found.state === 'archived') {
+        let bytes = 0;
+        try {
+          bytes = statSync(this.archivePath(id)).size;
+        } catch {
+          /* desapareció entre medias */
+        }
+        out.archived.count++;
+        out.archived.bytes += bytes;
+      } else if (found.state === 'purged') {
+        out.purged.count++;
+      }
+    }
+    out.totalBytes = out.active.bytes + out.archived.bytes;
+    return out;
   }
 
   private checkedDir(conversationId: string): string {

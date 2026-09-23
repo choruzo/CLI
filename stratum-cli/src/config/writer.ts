@@ -1,4 +1,12 @@
-import { existsSync, readFileSync, writeFileSync, copyFileSync, mkdirSync } from 'fs';
+import {
+  existsSync,
+  readFileSync,
+  writeFileSync,
+  copyFileSync,
+  mkdirSync,
+  renameSync,
+  rmSync,
+} from 'fs';
 import { dirname } from 'path';
 import { findConfigFile, expandEnvVars, GLOBAL_CONFIG_PATH } from './loader.js';
 import { StratumConfigSchema, type ProviderConfig } from './schema.js';
@@ -17,6 +25,23 @@ import { StratumConfigSchema, type ProviderConfig } from './schema.js';
  */
 export function resolveWritableConfigPath(startDir?: string): string {
   return findConfigFile(startDir ?? process.cwd()) ?? GLOBAL_CONFIG_PATH;
+}
+
+/**
+ * Escritura atómica (temporal + rename en el mismo directorio). La config la
+ * comparten la CLI y Stratum Desktop, que la vigila: sin esto, un lector podía
+ * ver el fichero a medio escribir (15.7).
+ */
+export function writeFileAtomic(path: string, content: string): void {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.${process.pid}.${Date.now()}.tmp`;
+  try {
+    writeFileSync(tmp, content, 'utf-8');
+    renameSync(tmp, path);
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
 }
 
 function readRaw(path: string): Record<string, unknown> {
@@ -38,11 +63,9 @@ export function writeConfigWithBackup(path: string, raw: Record<string, unknown>
   if (existsSync(path)) {
     backupPath = `${path}.bak`;
     copyFileSync(path, backupPath);
-  } else {
-    mkdirSync(dirname(path), { recursive: true });
   }
 
-  writeFileSync(path, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+  writeFileAtomic(path, JSON.stringify(raw, null, 2) + '\n');
   return backupPath;
 }
 

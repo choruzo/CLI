@@ -18,6 +18,8 @@ import { DesktopSessionStore } from './session-store.js';
 import { buildAssistantConfig, desktopDataDir } from './assistant-runtime.js';
 import { WorkspaceManager, resolveWorkspaceSettings } from './workspace.js';
 import { WorkspaceJanitor } from './retention.js';
+import { ConfigPanel } from './config-panel.js';
+import { DesktopSettings } from './settings.js';
 import { ProviderRouter } from '../providers/router.js';
 
 /**
@@ -168,13 +170,33 @@ export async function runSidecar(argv: string[]): Promise<number> {
   );
   if (workspaceWarning) log.warn(workspaceWarning);
   const workspaces = new WorkspaceManager(workspaceSettings);
+  const janitor = new WorkspaceJanitor(workspaces);
+  // Ajustes (D5): el `.stratumrc.json` global se edita desde la app, y lo que
+  // cambie en disco (la CLI, otro editor) se aplica igual que lo guardado aquí.
+  const settings = new DesktopSettings({
+    panel: new ConfigPanel(),
+    load: () => loadSharedConfig(homedir()),
+    apply: (next) => {
+      conversations.applyConfig(buildAssistantConfig(next, dataDir), {
+        maxConcurrentTurns: next.desktop.maxConcurrentTurns,
+      });
+      workspaces.updateRetention(resolveWorkspaceSettings(next, dataDir).settings);
+      janitor.refresh();
+    },
+    startup: config,
+    startupError,
+    dataDir,
+    workspaces,
+    janitor,
+  });
   const conversations = new ConversationHost({
     config: assistantConfig,
     store: new DesktopSessionStore(join(dataDir, 'sessions')),
-    makeRouter: () => new ProviderRouter(assistantConfig),
+    makeRouter: (current) => new ProviderRouter(current),
     startupError,
     workspaces,
     maxConcurrentTurns: config.desktop.maxConcurrentTurns,
+    settings,
   });
 
   let server;
@@ -184,7 +206,7 @@ export async function runSidecar(argv: string[]): Promise<number> {
       token,
       core: coreInfo(),
       natives,
-      startupError,
+      startupError: () => conversations.startupError,
       conversations,
       workspaces: {
         root: workspaceSettings.root,
@@ -204,9 +226,10 @@ export async function runSidecar(argv: string[]): Promise<number> {
 
   // Retención (D3): al arrancar y cada 24 h. Se para la primera al apagar; una
   // compresión a medias no se espera (es segura de interrumpir).
-  const janitor = new WorkspaceJanitor(workspaces);
   shutdown.onShutdown('retention', () => janitor.stop());
   janitor.start();
+  shutdown.onShutdown('settings', () => settings.stop());
+  settings.start();
 
   return new Promise<number>((resolve) => {
     const stop = (reason: ShutdownReason, detail?: string): void => {

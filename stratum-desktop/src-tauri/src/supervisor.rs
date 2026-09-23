@@ -85,6 +85,11 @@ fn run(app: AppHandle, rx: Receiver<Command>) {
         if app.state::<SidecarState>().is_exiting() {
             return;
         }
+        // Reinicio pedido desde Ajustes (D5): no es una caída.
+        if app.state::<SidecarState>().take_reload_request() {
+            failures = 0;
+            continue;
+        }
 
         if cycle.fatal {
             ipc::set_status(

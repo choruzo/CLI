@@ -36,8 +36,25 @@ export class TurnScheduler {
   private running = 0;
   private readonly queue: Waiter[] = [];
 
-  constructor(readonly limit: number = DEFAULT_MAX_CONCURRENT_TURNS) {
+  private max: number;
+
+  constructor(limit: number = DEFAULT_MAX_CONCURRENT_TURNS) {
     if (!Number.isInteger(limit) || limit < 1) throw new Error('limit debe ser un entero ≥ 1');
+    this.max = limit;
+  }
+
+  get limit(): number {
+    return this.max;
+  }
+
+  /**
+   * Nuevo límite desde Ajustes (D5). Subirlo arranca ya los que esperaban;
+   * bajarlo no corta los que están en marcha, solo retrasa a los siguientes.
+   */
+  setLimit(limit: number): void {
+    if (!Number.isInteger(limit) || limit < 1) throw new Error('limit debe ser un entero ≥ 1');
+    this.max = limit;
+    this.next();
   }
 
   get active(): number {

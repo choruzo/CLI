@@ -27,7 +27,12 @@ export type {
   TranscriptPart,
   TranscriptToolCall,
   TodoItem,
+  ConfigApplied,
+  ConfigIssue,
+  ConfigSnapshot,
 } from '../../../stratum-cli/src/desktop/protocol';
+
+export { SECRET_PLACEHOLDER } from '../../../stratum-cli/src/desktop/protocol';
 
 import type {
   ConversationFrame,

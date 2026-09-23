@@ -12,6 +12,7 @@ import type {
   QuestionItem,
 } from '../agent/types.js';
 import { getLogger } from '../logging/index.js';
+import type { ToolRegistry } from '../tools/registry.js';
 import { buildAssistantRegistry } from './assistant-runtime.js';
 import type { DesktopSessionStore } from './session-store.js';
 import {
@@ -167,7 +168,9 @@ interface Turn {
  */
 export class ConversationSession {
   readonly conversationId: string;
-  private readonly agent: StratumAgent;
+  /** Se sustituye cuando cambia la config (D5); nunca durante un turno. */
+  private agent: StratumAgent;
+  private readonly registry: ToolRegistry;
   private readonly store: DesktopSessionStore;
   private readonly records: DesktopConversationStore;
   private readonly sink: (frame: ConversationOutboundFrame) => void;
@@ -190,6 +193,8 @@ export class ConversationSession {
   private closed = false;
   /** El `STRATUM.md` global cambió durante un turno: se recarga antes del siguiente. */
   private memoryStale = false;
+  /** Config nueva (D5) que llegó durante un turno: se aplica antes del siguiente. */
+  private pendingConfig: { config: StratumConfig; makeRouter: () => ProviderRouter } | null = null;
   /**
    * Cerrada sin que su turno terminase a tiempo. Una sesión retirada ya no
    * guarda ni emite: si el turno viejo acaba más tarde, su `finally` no puede
@@ -214,27 +219,25 @@ export class ConversationSession {
     this.checkpointMs = opts.checkpointMs ?? CHECKPOINT_INTERVAL_MS;
     this.workspace = opts.workspace;
     this.workspaceSettings = opts.workspaceSettings;
-    this.agent = new StratumAgent(
-      opts.config,
-      opts.router,
-      buildAssistantRegistry({ files: this.workspace !== undefined }),
-      {
-        promptPreset: 'assistant',
-        initialMessages: opts.initialMessages,
-        workspace: this.workspace?.confinement,
-        workspaceFilesExpiredAt: this.workspace?.getMeta().filesExpiredAt,
-      },
-    );
+    this.registry = buildAssistantRegistry({ files: this.workspace !== undefined });
+    this.agent = this.createAgent(opts.config, opts.router, opts.initialMessages);
     // `/model` es por conversación y se guarda con la sesión: al reabrir se
-    // reaplica si sigue siendo el mismo provider.
+    // reaplica si sigue siendo el mismo provider. Un registro de D5 dice si el
+    // usuario lo eligió; en uno anterior, un modelo distinto del default cuenta
+    // como elegido (era la única forma de tenerlo).
     const savedModel = opts.savedModel ?? opts.record?.model;
     const savedProvider = opts.savedProvider ?? opts.record?.provider;
+    let modelPinned = false;
     if (
       savedModel &&
       savedProvider === this.agent.providerName &&
-      savedModel !== this.agent.model
+      savedModel !== this.agent.model &&
+      opts.record?.modelPinned !== false
     ) {
       this.agent.switchModel(savedModel);
+      modelPinned = true;
+    } else if (opts.record?.modelPinned === true && savedProvider === this.agent.providerName) {
+      modelPinned = true;
     }
     const base = opts.record;
     this.record = {
@@ -246,6 +249,7 @@ export class ConversationSession {
       updatedAt: base?.updatedAt ?? this.createdAt,
       provider: this.agent.providerName,
       model: this.agent.model,
+      modelPinned,
       // Un turno que estaba en marcha cuando murió el sidecar no va a terminar.
       transcript: (base?.transcript ?? []).map((t) =>
         t.status === 'streaming' || t.status === 'queued'
@@ -253,6 +257,76 @@ export class ConversationSession {
           : t,
       ),
     };
+  }
+
+  /**
+   * Agente del modo Chat. El registry es el de la conversación y sobrevive a
+   * los cambios de config: las tools deshabilitadas por reintentos no vuelven
+   * por guardar los ajustes.
+   */
+  private createAgent(
+    config: StratumConfig,
+    router: ProviderRouter,
+    messages?: Message[],
+  ): StratumAgent {
+    return new StratumAgent(config, router, this.registry, {
+      promptPreset: 'assistant',
+      initialMessages: messages,
+      workspace: this.workspace?.confinement,
+      workspaceFilesExpiredAt: this.workspace?.getMeta().filesExpiredAt,
+    });
+  }
+
+  /**
+   * La config cambió (Ajustes o la CLI, D5). Se aplica ya si no hay turno, o
+   * antes del siguiente: un turno en marcha termina con la config con la que
+   * empezó. Una config sin provider utilizable deja la anterior y lo avisa.
+   */
+  applyConfig(config: StratumConfig, makeRouter: () => ProviderRouter): void {
+    if (this.closed) return;
+    if (this.turn) {
+      this.pendingConfig = { config, makeRouter };
+      return;
+    }
+    this.pendingConfig = null;
+    const before = `${this.record.provider}|${this.record.model}`;
+    this.rebuildAgent(config, makeRouter);
+    // Solo se guarda lo que ya estaba guardado: un borrador sin mensajes no
+    // deja sesión en disco por un cambio de ajustes.
+    if (`${this.record.provider}|${this.record.model}` !== before && this.hasSavedRecord()) {
+      this.save();
+    }
+    this.announceStats();
+  }
+
+  private rebuildAgent(config: StratumConfig, makeRouter: () => ProviderRouter): void {
+    let router: ProviderRouter;
+    try {
+      router = makeRouter();
+    } catch (err) {
+      this.notice(
+        'warning',
+        `La configuración nueva no se pudo aplicar a esta conversación (${err instanceof Error ? err.message : String(err)}); sigue con la anterior.`,
+      );
+      return;
+    }
+    const previous = { provider: this.agent.providerName, model: this.agent.model };
+    // El historial se conserva; el system prompt se recompone con la config
+    // nueva (el preset `assistant` nunca reutiliza el guardado).
+    this.agent = this.createAgent(config, router, this.agent.getMessages());
+    const pinned =
+      this.record.modelPinned === true && previous.provider === this.agent.providerName;
+    if (pinned && previous.model !== this.agent.model) this.agent.switchModel(previous.model);
+    this.memoryStale = false;
+    this.record = {
+      ...this.record,
+      provider: this.agent.providerName,
+      model: this.agent.model,
+      modelPinned: pinned,
+    };
+    if (previous.provider !== this.agent.providerName || previous.model !== this.agent.model) {
+      this.onChanged(this.summary());
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -467,6 +541,11 @@ export class ConversationSession {
       started = true;
       this.send({ type: 'turn_started', conversationId: this.conversationId, turnId });
       this.updateTranscriptTurn(turnId, (t) => ({ ...t, status: 'streaming' }));
+      if (this.pendingConfig) {
+        const { config, makeRouter } = this.pendingConfig;
+        this.pendingConfig = null;
+        this.rebuildAgent(config, makeRouter);
+      }
       if (this.memoryStale) {
         this.memoryStale = false;
         this.agent.reloadMemory();
@@ -644,7 +723,12 @@ export class ConversationSession {
   setModel(model: string): void {
     if (this.rejectIfBusy('cambiar de modelo')) return;
     this.agent.switchModel(model);
-    this.record = { ...this.record, model: this.agent.model, provider: this.agent.providerName };
+    this.record = {
+      ...this.record,
+      model: this.agent.model,
+      provider: this.agent.providerName,
+      modelPinned: true,
+    };
     this.save();
     this.notice('info', `Modelo de esta conversación: ${this.agent.model}`);
     this.announceStats();

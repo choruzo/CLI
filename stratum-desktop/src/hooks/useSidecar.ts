@@ -46,6 +46,14 @@ export function sidecarReducer(state: SidecarState, action: SidecarAction): Side
         if (!state.pendingPing || frame.id !== state.pendingPing.id) return state;
         return { ...state, latencyMs: action.now - state.pendingPing.sentAt, pendingPing: null };
       }
+      // D5: una config que el sidecar consiguió aplicar retira el error de
+      // config del arranque (se arregló en Ajustes o desde la CLI).
+      if (frame.type === 'config_state' && frame.applied?.ok) {
+        const errors = state.errors.filter(
+          (e) => e.code !== 'config_invalid' && e.code !== 'schema_incompatible',
+        );
+        return errors.length === state.errors.length ? state : { ...state, errors };
+      }
       if (frame.type === 'sidecar_error') {
         // El sidecar reenvía su error de arranque a cada conexión: sin duplicados.
         if (state.errors.some((e) => e.code === frame.code && e.message === frame.message)) {

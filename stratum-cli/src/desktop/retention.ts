@@ -86,6 +86,20 @@ export class WorkspaceJanitor {
   }
 
   /**
+   * Los plazos cambiaron desde Ajustes (D5): arranca si se acaba de activar
+   * alguna etapa y deja de programar pases si ya no queda ninguna.
+   */
+  refresh(): void {
+    if (this.stopped) return;
+    if (this.enabled) {
+      this.start();
+    } else if (this.timer) {
+      clearInterval(this.timer);
+      this.timer = null;
+    }
+  }
+
+  /**
    * Deja de programar pases y no empieza operaciones nuevas. No espera a la
    * que esté en marcha: morir a mitad es seguro (lo recoge `recover`).
    */

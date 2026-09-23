@@ -19,16 +19,17 @@ import { StatusBar } from './components/layout/StatusBar';
 import { isBusy, needsAttention } from './hooks/conversations-store';
 import { useConversations } from './hooks/useConversations';
 import { useMemory } from './hooks/useMemory';
+import { useConfig } from './hooks/useConfig';
+import { SettingsPanel } from './components/settings/SettingsPanel';
 import { isOperational, useSidecar } from './hooks/useSidecar';
 
 /** Los atajos también funcionan con el foco en el textarea o en un buscador. */
 const GLOBAL = { enableOnFormTags: true, preventDefault: true } as const;
 
-const SETTINGS_PENDING = 'El panel de ajustes llega en la próxima versión (D5).';
-
 /**
  * D4: varias conversaciones con el asistente, sidebar (conversaciones, índice,
  * memoria global y ficheros), StatusBar e InputArea con slash-commands.
+ * D5: panel de Ajustes sobre el `.stratumrc.json` global.
  */
 export function App() {
   const sidecar = useSidecar();
@@ -45,6 +46,9 @@ export function App() {
   const [visibleTurn, setVisibleTurn] = useState<string | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [appNotice, setAppNotice] = useState<string | null>(null);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const config = useConfig(settingsOpen);
+  const openSettings = useCallback(() => setSettingsOpen(true), []);
 
   // Cambiar de conversación: fuera la confirmación de /clear y foco al input.
   useEffect(() => {
@@ -80,11 +84,11 @@ export function App() {
           openPanel('memory');
           return;
         case 'settings':
-          setAppNotice(SETTINGS_PENDING);
+          openSettings();
           return;
       }
     },
-    [conversations, newConversation, openPanel],
+    [conversations, newConversation, openPanel, openSettings],
   );
 
   useHotkeys('ctrl+n, meta+n', newConversation, GLOBAL, [newConversation]);
@@ -100,15 +104,17 @@ export function App() {
     [openPanel],
   );
   useHotkeys('ctrl+l, meta+l', () => active.opened && setConfirmClear(true), GLOBAL, [active.opened]);
-  useHotkeys('ctrl+comma, meta+comma', () => setAppNotice(SETTINGS_PENDING), GLOBAL);
+  useHotkeys('ctrl+comma, meta+comma', openSettings, GLOBAL, [openSettings]);
   useHotkeys(
     'escape',
     () => {
+      // Con Ajustes abierto, Esc es del panel (lo cierra).
+      if (settingsOpen) return;
       if (confirmClear) setConfirmClear(false);
       else if (active.activeTurnId) active.cancel();
     },
     { enableOnFormTags: true },
-    [confirmClear, active.activeTurnId, active.cancel],
+    [settingsOpen, confirmClear, active.activeTurnId, active.cancel],
   );
 
   const { generating, queued, backgroundAttention } = useMemo(() => {
@@ -191,7 +197,7 @@ export function App() {
         <Sidebar
           state={sidebar}
           onToggle={(p) => setSidebar((s) => togglePanel(s, p))}
-          onSettings={() => setAppNotice(SETTINGS_PENDING)}
+          onSettings={openSettings}
           badges={{ conversations: backgroundAttention }}
         >
           {panel}
@@ -223,6 +229,21 @@ export function App() {
         generating={generating}
         queued={queued}
       />
+
+      {settingsOpen && (
+        <SettingsPanel
+          config={config}
+          connected={sidecar.status.state === 'connected'}
+          onClose={() => {
+            setSettingsOpen(false);
+            viewRef.current?.focusInput();
+          }}
+          onOpenMemory={() => {
+            setSettingsOpen(false);
+            openPanel('memory');
+          }}
+        />
+      )}
     </main>
   );
 }

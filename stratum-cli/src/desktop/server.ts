@@ -31,8 +31,10 @@ export interface DesktopServerOptions {
    * Problema detectado al arrancar (config incompatible o inválida). Se envía
    * justo después del `handshake_ok` a cada conexión: el sidecar sigue vivo
    * para poder explicar por qué no puede trabajar, en vez de morir sin más.
+   * Como función, se consulta en cada conexión: desde D5 el error se arregla
+   * en Ajustes sin reiniciar, y un reinicio del relay no debe resucitarlo.
    */
-  startupError?: SidecarErrorFrame | null;
+  startupError?: SidecarErrorFrame | null | (() => SidecarErrorFrame | null);
   handshakeTimeoutMs?: number;
   /** Destino de las tramas de conversación (D1). Sin él, se contestan con error de protocolo. */
   conversations?: ConversationSink;
@@ -221,7 +223,9 @@ function handleConnection(
         natives,
         ...(opts.workspaces ? { workspaces: opts.workspaces } : {}),
       });
-      if (opts.startupError) send(opts.startupError);
+      const startupError =
+        typeof opts.startupError === 'function' ? opts.startupError() : opts.startupError;
+      if (startupError) send(startupError);
       const previous = lease.active;
       lease.active = { id: connectionId, socket };
       opts.conversations?.attach(connectionId, send);

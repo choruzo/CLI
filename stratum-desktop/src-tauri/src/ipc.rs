@@ -20,6 +20,7 @@ use crate::workspace::{WorkspaceState, WorkspacesInfo};
 use serde::Serialize;
 use serde_json::Value;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
@@ -86,6 +87,9 @@ pub struct SidecarState {
     relay: Mutex<Relay>,
     process: Mutex<ProcessSlot>,
     supervisor: Mutex<Option<Sender<crate::supervisor::Command>>>,
+    /// El usuario pidió reiniciar el agente (D5): la caída que sigue no es un
+    /// fallo y se relanza sin espera ni contador de intentos.
+    reload_requested: AtomicBool,
 }
 
 impl SidecarState {
@@ -95,7 +99,13 @@ impl SidecarState {
             relay: Mutex::new(Relay::default()),
             process: Mutex::new(ProcessSlot::default()),
             supervisor: Mutex::new(None),
+            reload_requested: AtomicBool::new(false),
         }
+    }
+
+    /// Consume la petición de reinicio, si la hay (lo llama el supervisor).
+    pub fn take_reload_request(&self) -> bool {
+        self.reload_requested.swap(false, Ordering::SeqCst)
     }
 
     pub fn set_supervisor(&self, tx: Sender<crate::supervisor::Command>) {
@@ -259,6 +269,29 @@ pub fn sidecar_restart(state: State<'_, SidecarState>) -> Result<(), String> {
         .ok_or("la aplicación se está cerrando")?;
     tx.send(crate::supervisor::Command::Restart)
         .map_err(|_| "el supervisor del sidecar no está activo".to_string())
+}
+
+/// Reinicia el agente a petición del usuario (Ajustes, D5): la carpeta y los
+/// límites de los espacios de trabajo, y el logging, solo cambian al arrancar el
+/// sidecar. Se apaga ordenadamente (guarda las conversaciones) y el supervisor
+/// lo relanza en el acto; el webview las reabre con `resume` al reconectar.
+#[tauri::command]
+pub fn sidecar_reload(app: AppHandle, state: State<'_, SidecarState>) -> Result<(), String> {
+    if state.is_exiting() {
+        return Err("la aplicación se está cerrando".into());
+    }
+    let Some(process) = state.take_process() else {
+        // Sin proceso vivo (fallido o arrancando): es un Reintentar normal.
+        return sidecar_restart(state);
+    };
+    state.reload_requested.store(true, Ordering::SeqCst);
+    set_status(&app, SidecarStatus::Starting);
+    // El apagado espera hasta `GRACE`: fuera del hilo del comando.
+    std::thread::spawn(move || {
+        let outcome = process.shutdown(crate::sidecar::GRACE);
+        eprintln!("[stratum] sidecar detenido para reiniciar: {outcome:?}");
+    });
+    Ok(())
 }
 
 // ---------------------------------------------------------------------------
