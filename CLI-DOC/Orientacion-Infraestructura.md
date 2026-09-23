@@ -1,6 +1,6 @@
 # Orientación a infraestructura — análisis y roadmap propuesto
 
-**Fecha:** 2026-09-12 · **Estado:** bloque 1 implementado como Hito 16 (2026-09-15, spec en §12.17 de `STRATUM_PROJECT_DEFINITION.md`); bloques 2–5 pendientes
+**Fecha:** 2026-09-12 · **Estado:** bloque 1 implementado como Hito 16 (2026-09-15, spec en §12.17 de `STRATUM_PROJECT_DEFINITION.md`) y bloque 2 como Hito 17 (2026-09-23, spec en §12.18); bloques 3–5 pendientes
 **Punto de partida:** Hito 14 cerrado (709 tests verdes). La investigación `gentle-pi` está agotada: no queda nada pendiente de ella.
 
 Este documento responde a una pregunta: *dado que la base del CLI es sólida, ¿qué le falta a Stratum para ser una herramienta orientada a infraestructura* — nube y local, revisión de bugs, depuración de redes, fallos de sistema operativo y virtualización?
@@ -269,7 +269,7 @@ La capa 3 de las guardas (Hito 11 + Hito 13) protege las rutas sensibles y los c
 | Hito | Contenido | Por qué en ese orden |
 |---|---|---|
 | **16** ✅ | `ExecutionTarget` + tool `exec` unificada + auditoría universal + redacción de salidas de tool | Todo lo demás cuelga de esto |
-| **17** | Entornos con blast radius + read-only mode + **perfil de sesión** (§10.5) + badge de contexto en `StatusBar` | La seguridad antes que el alcance; y el perfil tiene que existir **antes** de que el 18 empiece a añadir tools |
+| **17** ✅ | Entornos con blast radius + read-only mode + **perfil de sesión** (§10.5) + badge de contexto en `StatusBar` | La seguridad antes que el alcance; y el perfil tiene que existir **antes** de que el 18 empiece a añadir tools |
 | **18** | `net_probe` + `sys_inspect` + `log_query` + `service_status` | Diagnóstico puro, sin dependencias externas |
 | **19** | Tool `diagnosis` + perfiles de triaje + `.stratum/incidents/` | La pieza diferencial, ya con sustrato debajo |
 | **20** | Wrappers cloud + virtualización + contexto activo en la barra | Lo más amplio y lo que más envejece |
@@ -391,3 +391,5 @@ Las cuatro preguntas de diseño que condicionaban el Hito 16, resueltas el 2026-
 **Decisión:** la tool se registra solo si la sesión tiene infraestructura a la vista — hay inventario `ssh`, o `kubectl` / `docker` en el `PATH`.
 
 **Motivo:** es el mismo criterio que ya se aplica a las tools SSH (sin hosts, no se registran). El razonamiento de `test_evidence` con `tools.testCommand` —*exigir evidencia sin un comando que ejecutar invita a inventarla*— aquí aplica solo a medias: el diagnóstico no necesita un comando configurado, porque las observaciones salen de tools read-only que ya existen. Pero registrarla en una sesión de escribir código es ruido puro: una tool más en el schema que el modelo puede invocar sin sentido. Sin infraestructura a la vista, no hay incidente que diagnosticar.
+
+> **Hito 17 (2026-09-23).** Decisiones de implementación que concretan §3, §5 y §10.5 (spec en §12.18): las reglas de entorno solo afectan a lo que **muta** (leer en producción nunca pregunta), sobre un clasificador read-only por allowlist; `requirePlan` escala el turno a modo plan en vez de solo rechazar, y la Fase 1 del plan admite `exec` read-only; `confirm-always` no lo levanta nada salvo la confirmación de esa llamada; y el perfil `auto` resuelve a `full` (no a `infra`) cuando hay infraestructura a la vista, para no quitar las tools de código a quien solo tiene docker instalado. El «read-only por defecto en producción» queda cubierto por `requirePlan`, que es exactamente eso: observar libre, cambiar solo con plan aprobado.

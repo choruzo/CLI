@@ -29,4 +29,11 @@ export interface SessionContext {
    * guardar. `chat --resume` y `/sessions resume` lo reaplican.
    */
   activeAgent?: string;
+  /**
+   * Hito 17 — la sesión estaba en modo read-only. `chat --resume` la reabre
+   * read-only: reanudar no puede ser la forma de salir de él sin decirlo.
+   */
+  readOnly?: boolean;
+  /** Hito 17 — perfil de sesión pedido (`auto`, `code`, `infra`…). */
+  sessionProfile?: string;
 }

@@ -24,6 +24,8 @@ import { closeExecRuntime } from '../../tools/exec/runtime.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
+import { resolveSessionProfile } from '../../agent/session-profile.js';
+import { sessionProfileFlag } from '../session-flags.js';
 import {
   configureLogging,
   flushLogging,
@@ -52,6 +54,10 @@ export const runCommand = new Command('run')
     '--delegate <profile>',
     'hand the task straight to a subagent profile (mode subagent/all), without the main agent',
   )
+  .option('--read-only', 'observation only: no file writes and only read-only commands')
+  .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
+  .option('--infra', 'shortcut for --profile infra')
+  .option('--code', 'shortcut for --profile code')
   .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
   .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
@@ -67,8 +73,17 @@ export const runCommand = new Command('run')
         delegate?: string;
         logLevel?: string;
         debug?: boolean;
+        readOnly?: boolean;
+        profile?: string;
+        infra?: boolean;
+        code?: boolean;
       },
     ) => {
+      const profileFlag = sessionProfileFlag(opts);
+      if (!profileFlag.ok) {
+        process.stderr.write(`[fatal] ${profileFlag.error}\n`);
+        process.exit(1);
+      }
       // Hito 15: `--delegate` no pasa por el agente principal, así que no hay
       // plan que presentar ni perfil principal que activar.
       if (opts.delegate && (opts.plan || opts.agent)) {
@@ -121,7 +136,20 @@ export const runCommand = new Command('run')
         mcpManager.registerInto(registry);
       }
 
-      const agent = new StratumAgent(config, router, registry);
+      if (profileFlag.profile) {
+        const check = resolveSessionProfile(profileFlag.profile, config);
+        if (!check.ok) {
+          await mcpManager.shutdownAll();
+          await closeExecRuntime();
+          await flushLogging();
+          process.stderr.write(`[fatal] --profile: ${check.error}\n`);
+          process.exit(1);
+        }
+      }
+      const agent = new StratumAgent(config, router, registry, {
+        readOnly: opts.readOnly === true,
+        ...(profileFlag.profile ? { sessionProfile: profileFlag.profile } : {}),
+      });
 
       // Hito 15 — perfiles: `--agent` activa uno como agente principal;
       // `--delegate` le entrega la tarea a un subagente sin pasar por el principal.
@@ -170,16 +198,29 @@ export const runCommand = new Command('run')
       policy = strictestPolicy(policy, agent.getActiveProfile()?.destructivePolicy);
 
       const confirmDestructive = async (req: ConfirmRequest): Promise<DestructiveDecision> => {
+        const env = req.environment
+          ? ` en el entorno ${req.environment.name} (${req.environment.tier})`
+          : '';
         process.stderr.write(
-          `\n⚠  El agente quiere ejecutar una operación destructiva:\n   ${req.description}\n\n`,
+          `\n⚠  El agente quiere ejecutar una operación${req.forced ? '' : ' destructiva'}${env}:\n   ${req.description}\n\n`,
         );
         const rl = createInterface({ input: process.stdin, output: process.stderr });
         try {
+          // Hito 17 — confirmación con nombre: hay que teclear el alias exacto.
+          if (req.confirmPhrase) {
+            const typed = await new Promise<string>((resolve) =>
+              rl.question(
+                `Escribe "${req.confirmPhrase}" para confirmar (otra cosa cancela): `,
+                resolve,
+              ),
+            );
+            return typed.trim() === req.confirmPhrase ? 'approve' : 'deny';
+          }
           const answer = await new Promise<string>((resolve) =>
             rl.question('¿Continuar? (s/N/!) ', resolve),
           );
           const a = answer.trim().toLowerCase();
-          if (a === '!') return 'allow-all';
+          if (a === '!' && !req.forced) return 'allow-all';
           return a === 's' || a === 'y' || a === 'si' || a === 'sí' || a === 'yes'
             ? 'approve'
             : 'deny';
@@ -259,7 +300,12 @@ export const runCommand = new Command('run')
           sessionId: generateSessionId(),
           allowDestructive: opts.allowDestructive,
           destructivePolicy: policy,
-          onConfirmDestructive: policy === 'ask' ? confirmDestructive : undefined,
+          // Hito 17: con TTY el callback se pasa también con --allow-destructive:
+          // un entorno `confirm-always` pregunta aunque la sesión permita todo.
+          onConfirmDestructive:
+            policy === 'ask' || (policy === 'allow' && process.stdin.isTTY)
+              ? confirmDestructive
+              : undefined,
           // Tanda única de preguntas (Hito 2.5, F7). Sin TTY no hay callback:
           // el loop se lo dice al agente y este continúa con supuestos.
           onAskQuestions: makeCliQuestionAsker(),
@@ -267,13 +313,11 @@ export const runCommand = new Command('run')
             rec.result
               ? subagentStore.saveResult(rec.id, rec.profile, rec.task, rec.result)
               : subagentStore.saveRunning(rec.id, rec.profile, rec.task),
-          ...(planMode
-            ? {
-                mode: 'plan' as const,
-                onApprovePlan,
-                onPlanPersist: (p: Plan) => planStore.save(planRef, task, p, planCreatedAt),
-              }
-            : {}),
+          // Hito 17: el gate de aprobación se pasa siempre — un entorno con
+          // `requirePlan` puede escalar el turno a modo plan.
+          onApprovePlan,
+          onPlanPersist: (p: Plan) => planStore.save(planRef, task, p, planCreatedAt),
+          ...(planMode ? { mode: 'plan' as const } : {}),
         };
         const events = opts.delegate
           ? agent.runDelegate(opts.delegate, task, runOpts)
@@ -317,6 +361,14 @@ export const runCommand = new Command('run')
               break;
 
             case 'warning':
+              // Hito 17: un entorno con `requirePlan` escaló el turno a modo plan.
+              if (event.message.startsWith('plan_required:')) {
+                process.stderr.write(
+                  `[plan] el entorno ${event.message.slice('plan_required:'.length)} exige un plan ` +
+                    'aprobado: el turno pasa a modo plan.\n',
+                );
+                break;
+              }
               process.stderr.write(`${errorLabel} [warning] ${event.message}\n`);
               break;
 

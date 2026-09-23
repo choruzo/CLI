@@ -17,6 +17,8 @@ import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
 import { animateStartupLogo } from '../ui/startup-logo-animation.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
+import { resolveSessionProfile } from '../../agent/session-profile.js';
+import { sessionProfileFlag } from '../session-flags.js';
 import {
   configureLogging,
   flushLogging,
@@ -44,10 +46,28 @@ export const chatCommand = new Command('chat')
   .description('Start an interactive REPL session with the agent')
   .option('--provider <name>', 'use a specific provider from config')
   .option('--resume <session-id>', 'resume a previous session')
+  .option('--read-only', 'observation only: no file writes and only read-only commands')
+  .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
+  .option('--infra', 'shortcut for --profile infra')
+  .option('--code', 'shortcut for --profile code')
   .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
   .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
-    async (opts: { provider?: string; resume?: string; logLevel?: string; debug?: boolean }) => {
+    async (opts: {
+      provider?: string;
+      resume?: string;
+      logLevel?: string;
+      debug?: boolean;
+      readOnly?: boolean;
+      profile?: string;
+      infra?: boolean;
+      code?: boolean;
+    }) => {
+      const profileFlag = sessionProfileFlag(opts);
+      if (!profileFlag.ok) {
+        process.stderr.write(`${profileFlag.error}\n`);
+        process.exit(1);
+      }
       if (opts.logLevel && !isLogLevel(opts.logLevel)) {
         process.stderr.write(`Invalid --log-level: ${opts.logLevel}\n`);
         process.exit(1);
@@ -120,6 +140,10 @@ export const chatCommand = new Command('chat')
       let sessionId: string = generateSessionId();
       let sessionCreatedAt: string | undefined;
       let agentOptions = {};
+      // Hito 17: una sesión read-only se reanuda read-only; el perfil guardado se
+      // reaplica salvo que un flag pida otro.
+      let resumedReadOnly = false;
+      let resumedProfile: string | undefined;
 
       if (opts.resume) {
         try {
@@ -175,13 +199,29 @@ export const chatCommand = new Command('chat')
           if (saved.activeAgent) {
             agentOptions = { ...agentOptions, activeAgent: saved.activeAgent };
           }
+          resumedReadOnly = saved.readOnly === true;
+          resumedProfile = saved.sessionProfile;
         } catch (err) {
           process.stderr.write(`Error al cargar sesión: ${String(err)}\n`);
           process.exit(1);
         }
       }
 
-      const agent = new StratumAgent(config, router, registry, agentOptions);
+      // Hito 17: validar el perfil antes de arrancar Ink (un nombre mal escrito
+      // es un error de invocación, no algo que descubrir a mitad de sesión).
+      const requestedProfile = profileFlag.profile ?? resumedProfile;
+      if (profileFlag.profile) {
+        const check = resolveSessionProfile(profileFlag.profile, config);
+        if (!check.ok) {
+          process.stderr.write(`--profile: ${check.error}\n`);
+          process.exit(1);
+        }
+      }
+      const agent = new StratumAgent(config, router, registry, {
+        ...agentOptions,
+        readOnly: opts.readOnly === true || resumedReadOnly,
+        ...(requestedProfile ? { sessionProfile: requestedProfile } : {}),
+      });
       const resumeNotice = agent.takeResumeNotice();
       if (resumeNotice) process.stderr.write(`${resumeNotice}\n`);
 
@@ -237,6 +277,8 @@ export const chatCommand = new Command('chat')
           llmProvider: router.getActive(),
           planRef: agent.getPlanRef(),
           activeAgent: agent.getActiveProfile()?.name ?? null,
+          readOnly: agent.isReadOnly(),
+          sessionProfile: agent.getSessionProfileRequest(),
         });
       } catch {
         // No bloquear la salida por un fallo al guardar

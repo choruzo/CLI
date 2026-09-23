@@ -157,6 +157,55 @@ const SSHConfigSchema = z
     }
   });
 
+/**
+ * Hito 17 — entorno de infraestructura (§3 de `Orientacion-Infraestructura.md`).
+ * Agrupa targets por patrón y les da reglas propias: el mismo comando es trivial
+ * en el portátil y catastrófico en `ssh:prod-db`. Solo cuenta lo que MUTA: un
+ * comando read-only nunca queda restringido por un entorno.
+ */
+const EnvironmentSchema = z.object({
+  /**
+   * Globs sobre la etiqueta del target (`local`, `ssh:<alias>`): `*` cualquier
+   * secuencia, `?` un carácter, sin distinguir mayúsculas. Si un target encaja
+   * en varios entornos, gana el de `tier` más alto.
+   */
+  match: z.array(z.string().min(1)).min(1),
+  /** Criticidad: pinta el badge (rojo en `production`) y fija los defaults de abajo. */
+  tier: z.enum(['production', 'staging', 'development']).default('development'),
+  /**
+   * `allow`: los cambios no piden confirmación (salvo `confirmAll` del host o
+   * `--deny-destructive`). `ask`: la de siempre, por patrón destructivo.
+   * `confirm-always`: TODO cambio pide confirmación, y ni el allow-all de
+   * sesión ni `--allow-destructive` la levantan. Default: `confirm-always` en
+   * `production`, `ask` en el resto.
+   */
+  policy: z.enum(['allow', 'ask', 'confirm-always']).optional(),
+  /**
+   * Nada cambia en este entorno fuera de un plan aprobado: los comandos
+   * read-only siguen permitidos (para investigar) y un cambio escala a modo plan.
+   */
+  requirePlan: z.boolean().default(false),
+  /** Solo observación en este entorno, siempre: cualquier cambio se rechaza. */
+  readOnly: z.boolean().default(false),
+  /**
+   * `typed`: para confirmar hay que teclear el alias del target. `simple`: S/N.
+   * Default: `typed` con `confirm-always`, `simple` con el resto.
+   */
+  confirmation: z.enum(['typed', 'simple']).optional(),
+});
+
+/**
+ * Hito 17 — perfil de sesión (§10.5): qué tools ve la sesión raíz. Mismo
+ * formato de `allowedTools` que los perfiles de agente, más globs (`mcp__*`).
+ */
+const SessionProfileSchema = z.object({
+  description: z.string().optional(),
+  /** `null` o ausente = todas. Admite `*` (p. ej. `mcp__*`). */
+  allowedTools: z.array(z.string().min(1)).nullable().optional(),
+  /** Tools ocultas aunque `allowedTools` las admita. */
+  hiddenTools: z.array(z.string().min(1)).default([]),
+});
+
 export const StratumConfigSchema = z.object({
   /**
    * Versión del formato del fichero (15.6, `config/schema-version.ts`). Ausente
@@ -453,6 +502,43 @@ export const StratumConfigSchema = z.object({
   ssh: SSHConfigSchema.optional(),
 
   /**
+   * Hito 17 — entornos con blast radius (§3 y §11.2 de la orientación).
+   * Opcional y sin default: sin sección, ninguna regla nueva se aplica.
+   */
+  environments: z
+    .record(
+      z
+        .string()
+        .regex(
+          /^[A-Za-z0-9][A-Za-z0-9_-]{0,31}$/,
+          'nombre de entorno: letras, dígitos, - y _ (máx. 32)',
+        ),
+      EnvironmentSchema,
+    )
+    .optional(),
+
+  /**
+   * Hito 17 — perfil de la sesión (§10.5). `auto` = `full` si hay
+   * infraestructura a la vista (inventario `ssh`, o `kubectl`/`docker`/`podman`
+   * en el PATH) y `code` si no. `profiles` define perfiles propios o
+   * sobrescribe los integrados (`code`, `infra`, `full`).
+   */
+  session: z
+    .object({
+      profile: z.string().min(1).default('auto'),
+      profiles: z
+        .record(
+          z
+            .string()
+            .regex(/^[a-z][a-z0-9_-]{0,31}$/, 'nombre de perfil: minúsculas, dígitos, - y _')
+            .refine((n) => n !== 'auto', "'auto' está reservado"),
+          SessionProfileSchema,
+        )
+        .default({}),
+    })
+    .default({}),
+
+  /**
    * Stratum Desktop (D2). La CLI no lo lee: vive aquí porque la config es
    * compartida y así un `.stratumrc.json` con esta sección sigue validando.
    */
@@ -511,3 +597,5 @@ export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 export type McpServer = z.infer<typeof McpServerSchema>;
 export type SSHHostConfig = z.infer<typeof SSHHostSchema>;
 export type SSHConfig = z.infer<typeof SSHConfigSchema>;
+export type EnvironmentConfig = z.infer<typeof EnvironmentSchema>;
+export type SessionProfileConfig = z.infer<typeof SessionProfileSchema>;

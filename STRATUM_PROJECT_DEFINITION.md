@@ -784,6 +784,20 @@ Primer bloque de `CLI-DOC/Orientacion-Infraestructura.md` (Hitos 10–15: ver `C
 - [x] Contrato de fallo de `exec` (`countsAsFailure:false`) y contador de reintentos consecutivo (§12.3)
 
 **Entregable:** una sola superficie de ejecución con guardas, auditoría y redacción en un único punto — el sustrato de los hitos de infraestructura 17–20.
+
+### Hito 17 — Entornos con blast radius, read-only y perfil de sesión ✅ *(cerrado 2026-09-23)*
+
+Segundo bloque de `CLI-DOC/Orientacion-Infraestructura.md` (§3, §5 y §10.5). Spec vinculante en **§12.18**.
+
+- [x] Sección `environments` en `.stratumrc.json`: `match` por glob, `tier`, `policy` (`allow`/`ask`/`confirm-always`), `requirePlan`, `readOnly`, `confirmation` (`typed`/`simple`)
+- [x] Clasificador read-only de comandos (`tools/readonly-commands.ts`) y efectos por llamada (`callEffects`)
+- [x] Modo read-only de sesión (`--read-only`, `/readonly`), inapelable y heredado por subagentes; la Fase 1 del modo plan admite `exec` read-only
+- [x] `requirePlan`: escalada a modo plan en el mismo turno
+- [x] Confirmación con nombre (`<DestructiveConfirm>` tecleado, readline en `run`; Desktop deniega)
+- [x] Perfil de sesión (`code`/`infra`/`full`/`auto` + propios), `--profile`/`--infra`/`--code`, `/profile`
+- [x] Badges de entorno, `RO` y perfil en `StatusBar`; `/env`
+
+**Entregable:** el mismo comando se trata distinto según dónde cae, y soltar el agente en un sistema real tiene un modo de solo observación que ninguna aprobación puede saltarse.
 ---
 
 ## 10. Próximos Pasos Inmediatos
@@ -2580,3 +2594,98 @@ Solo cuenta como marca ya aplicada un `[redacted: <motivo>]` con motivo canónic
 #### Fuera de alcance (hitos siguientes)
 
 `environments`/blast radius, read-only mode, perfil de sesión, targets `container`/`pod`/`winrm`, tool `copy`, tools de diagnóstico y `diagnosis`.
+
+---
+
+### 12.18 — Entornos con blast radius, modo read-only y perfil de sesión (Hito 17)
+
+**Decisión: las reglas de seguridad por entorno y el modo read-only se deciden sobre los *efectos* de cada tool call, en el `ToolDispatcher` y el `ReactLoop`, nunca dentro de una tool; el perfil de sesión es el `ToolsetFilter` de los subagentes aplicado a la sesión raíz.** Origen: §3, §5 y §10.5 de `CLI-DOC/Orientacion-Infraestructura.md`.
+
+#### Efectos de una llamada
+
+`callEffects(name, input)` (`tools/environments.ts`, puro) dice sobre qué targets actúa una llamada y si en cada uno **cambia** algo:
+
+| Tool | Efectos |
+|---|---|
+| `read_file`, `glob`, `grep`, `list_directory` | `local`, solo lectura |
+| `web_search`, `web_fetch`, `recall_decisions` | ningún target, solo lectura |
+| `write_file`, `edit_file` | `local`, muta |
+| `store_decision` | muta (memoria), sin target |
+| `exec` | su target; muta salvo que el comando sea read-only |
+| `ssh_upload` / `ssh_download` | muta el remoto / muta `local` |
+| cualquier otra (MCP, futuras) | desconocida → **muta** |
+
+Un comando es read-only según `readOnlyCommandVerdict` (`tools/readonly-commands.ts`): **allowlist** por segmento (`;`, `&&`, `|`), con reglas de argumentos donde hacen falta (`git`, `kubectl`, `docker`, `systemctl`, `curl`, `sed`, `find`, `ip`, cmdlets `Get-*`/`Test-*`…). Se rechazan sin analizar la sustitución (`$(`, backtick, `<(`), la redirección a fichero (`2>&1` y `>/dev/null` son inocuas), los heredocs, `git -c` y los scriptblocks de PowerShell. Lo desconocido muta: el error en esa dirección obliga a buscar otro comando; el contrario rompería el modo read-only.
+
+#### Entornos
+
+```jsonc
+"environments": {
+  "prod":    { "match": ["ssh:prod-*"], "tier": "production", "requirePlan": true },
+  "staging": { "match": ["ssh:stg-*"],  "tier": "staging" },
+  "lab":     { "match": ["ssh:lab-*", "local"], "policy": "allow" },
+  "audit":   { "match": ["ssh:audit-*"], "readOnly": true }
+}
+```
+
+| Campo | Default | Semántica |
+|---|---|---|
+| `match` | — | Globs (`*`, `?`) sobre la etiqueta del target, sin distinguir mayúsculas. Varios candidatos → gana el `tier` más alto, y a igualdad la política más estricta |
+| `tier` | `development` | Color del badge y defaults |
+| `policy` | `confirm-always` en `production`, `ask` en el resto | Ver abajo |
+| `requirePlan` | `false` | Nada cambia fuera de un plan aprobado |
+| `readOnly` | `false` | Ningún cambio, nunca |
+| `confirmation` | `typed` con `confirm-always`, `simple` en el resto | `typed`: aprobar exige teclear el alias del target |
+
+**Las reglas solo afectan a llamadas que mutan.** Leer en producción nunca pide nada: así se investiga antes de proponer un plan. Con una llamada que muta varios targets manda la política más estricta. En Stratum Desktop (`ToolContext.workspace`) los entornos no aplican: el workspace es un sandbox propio.
+
+| `policy` | Comportamiento en la fase de confirmación |
+|---|---|
+| `allow` | Sin confirmación, salvo sesión `deny` (`--deny-destructive`, CI) o `confirmAll` del host |
+| `ask` | La de siempre: confirmación por patrón destructivo, guardas `confirm` y rutas sensibles |
+| `confirm-always` | **Todo** cambio pregunta. No lo levantan `tools.confirmDestructive: false`, `--allow-destructive`, el allow-all de sesión ni un `!` sobre esa confirmación (vale solo para la llamada). Sin nadie que confirme → bloqueado |
+
+`ConfirmRequest` gana `environment`, `forced` y `confirmPhrase`. Una UI que no sepa pedir la frase **deniega** (Stratum Desktop lo hace).
+
+#### Orden de evaluación
+
+1. Loop — filtro de toolset (perfil de sesión ∩ perfil de agente ∩ read-only).
+2. Loop — modo plan: en Fase 1 pasan `PLAN_ALLOWLIST` **y `exec` con comando read-only** (`PLAN_READ_ONLY_CALL_TOOLS`); lo demás, `tool_error` recuperable con el motivo.
+3. Loop — `requirePlan`: fuera de `execute` y sin `RunOptions.planApproved`, un cambio en ese entorno se rechaza. Con `onApprovePlan` disponible y modo `normal`, el turno **escala a modo plan** (una vez) y emite `warning` `plan_required:<entorno>`; sin gate (subagente, Desktop) solo rechaza y pide `/plan` o `run --plan`. Un hijo delegado durante la Fase 3 hereda `planApproved`.
+4. Dispatcher — veto read-only (`readOnlyVeto`): sesión read-only o entorno `readOnly`. Inapelable como un `preflight` y antes de él; `countsAsFailure: false` (no consume reintentos). Si el clasificador lanza, falla cerrado solo en sesión read-only.
+5. Dispatcher — `preflight` de la tool (capas 1–3 de las guardas).
+6. Dispatcher — confirmación, con la regla de entorno (`environmentGate`).
+
+`commandVeto` conserva el parámetro `target` sin usarlo: las reglas de entorno aplican también a transferencias y tools de fichero, así que su sitio es el dispatcher y no la tool `exec`.
+
+#### Modo read-only
+
+`--read-only` (`chat`, `run`), `/readonly [on|off]`, `StratumAgentOptions.readOnly`. `RunOptions.readOnly` → `ToolContext.readOnly`, y se hereda a los subagentes. Toolset visible: `READ_ONLY_SESSION_TOOLS` (`read_file`, `glob`, `list_directory`, `grep`, `web_search`, `web_fetch`, `recall_decisions`, `exec`, `delegate_task`) más las de control. El system prompt gana `# Read-only mode`, que nombra lo que **sí** se puede hacer. Se persiste en la sesión (`SessionContext.readOnly`): `chat --resume` y `/sessions resume` nunca sacan de read-only. `/init` se rechaza en read-only.
+
+#### Perfil de sesión
+
+```jsonc
+"session": {
+  "profile": "auto",   // auto | code | infra | full | <propio>
+  "profiles": { "ops": { "allowedTools": ["exec", "read_file", "mcp__*"], "hiddenTools": [] } }
+}
+```
+
+| Perfil | Toolset |
+|---|---|
+| `code` | todas salvo `INFRA_TOOLS` (`ssh_upload`, `ssh_download` y las de los Hitos 18–19 ya nombradas) |
+| `infra` | lectura, `exec`, web, memoria, `delegate_task`, `INFRA_TOOLS`, `mcp__*`; sin `write_file`/`edit_file` y con `test_evidence` oculta |
+| `full` | todas |
+| `auto` | `full` con infraestructura a la vista (inventario `ssh`, o `kubectl`/`docker`/`podman` en el PATH), `code` si no |
+
+**Desviación de §10.5:** `auto` no resuelve a `infra` sino a `full`. Tener docker instalado es lo normal en un portátil de desarrollo, y quitarle `write_file` por eso rompería la sesión de código; la garantía que sí se mantiene es que quien no tiene infraestructura a la vista no ve sus tools.
+
+Los perfiles de config sobrescriben a los integrados por nombre; `auto` está reservado. `allowedTools`/`hiddenTools` admiten globs. El filtro se compone por intersección con el del perfil de agente principal (`ToolsetFilter.also`, `composeToolsetFilters`); las tools de control pasan salvo que el perfil las oculte. Los bloques del prompt siguen al perfil: sin `test_evidence` visible no se inyecta `# Testing discipline` (tampoco como guía por puntero), y sin `delegate_task` no hay índice de perfiles ni work routing. `--profile`, `--infra`, `--code` (`chat`, `run`; excluyentes), `/profile [nombre]`; un nombre inválido en un flag es error de invocación, y en `StratumAgent` cae a `auto` con aviso. Se persiste lo **pedido** (`SessionContext.sessionProfile`), no lo resuelto: una sesión `auto` reanudada vuelve a detectar. Los subagentes no heredan el perfil de sesión (su toolset es el de su perfil); sí el modo read-only.
+
+#### Contexto activo
+
+`StratumAgent.getActiveContext()` = último target donde algo **se ejecutó** (`tool_result`, o `tool_error` con `executed`; también dentro de subagentes) y su entorno. Alimenta el badge `⬢ entorno target` de la barra (UI §4.1/§5.10), y `/env` lo lista junto con los entornos.
+
+#### Fuera de alcance
+
+Un contexto activo *declarado* por el usuario (kube-context, cuenta cloud: Hito 20), read-only por defecto al entrar en un entorno de producción sin `requirePlan`, y la clasificación read-only de tools MCP (hoy cuentan como mutantes).

@@ -17,9 +17,16 @@ import type {
   WorkspaceConfinement,
 } from './types.js';
 import type { ToolRegistry, DispatchResult, ToolsetFilter } from '../tools/registry.js';
-import { ToolDispatcher, isToolVisibleForProfile } from '../tools/registry.js';
+import {
+  ToolDispatcher,
+  composeToolsetFilters,
+  isToolVisibleForProfile,
+} from '../tools/registry.js';
+import { READ_ONLY_TOOLSET, requirePlanViolation } from '../tools/call-policy.js';
+import { callEffects } from '../tools/environments.js';
 import {
   PLAN_ALLOWLIST,
+  PLAN_READ_ONLY_CALL_TOOLS,
   PRESENT_PLAN_TOOL,
   UPDATE_PLAN_TOOL,
   makePlanFromProposal,
@@ -686,6 +693,16 @@ export class ReactLoop {
       persistPlan(isPlanComplete(plan));
     }
 
+    // Hito 17 — el modo read-only se compone con el filtro del perfil (sesión,
+    // agente o subagente): el modelo no ve lo que no podría ejecutar.
+    const readOnly = opts?.readOnly === true;
+    const toolsetFilter = composeToolsetFilters(
+      this.extras?.toolsetFilter,
+      readOnly ? READ_ONLY_TOOLSET : undefined,
+    );
+    // `requirePlan` escala a modo plan una sola vez por turno.
+    let planEscalated = false;
+
     // Hito 2.5 (F7): la tanda de preguntas es ÚNICA por run. Una segunda llamada
     // a `question` se rechaza con tool_error recuperable para que un modelo
     // pequeño no convierta el turno en un interrogatorio.
@@ -791,7 +808,7 @@ export class ReactLoop {
       // Toolset según el modo activo (Hito 7): en 'plan' se restringe a la
       // allowlist read-only + present_plan; en 'execute' aparece update_plan.
       // Hito 8: el filtro de subagente restringe además por perfil + profundidad=1.
-      const tools: ToolSchema[] = this.registry.toToolSchemas(mode, this.extras?.toolsetFilter);
+      const tools: ToolSchema[] = this.registry.toToolSchemas(mode, toolsetFilter);
 
       // Hito 11 — re-inyectar las tareas abiertas en el system prompt antes de
       // cada iteración. Una descripción estática de tool no basta para que un
@@ -1027,9 +1044,12 @@ export class ReactLoop {
         // Hito 15 — el filtro de toolset también se impone al ejecutar. Ocultar
         // una tool del schema no impide que el modelo la invente, y sin esto un
         // perfil restringido podría llamar a `exec` o delegar en `general`.
-        const filter = this.extras?.toolsetFilter;
+        const filter = toolsetFilter;
         if (filter && !isToolVisibleForProfile(call.name, filter)) {
-          const err = `tool '${call.name}' is not available to this agent profile`;
+          const err =
+            readOnly && !isToolVisibleForProfile(call.name, READ_ONLY_TOOLSET)
+              ? `tool '${call.name}' is not available in a read-only session`
+              : `tool '${call.name}' is not available to this agent profile`;
           const o = this.toolErrorOutcome(
             call.id,
             call.name,
@@ -1156,8 +1176,16 @@ export class ReactLoop {
 
         // Modo plan: cualquier tool mutante fuera del allowlist read-only se
         // rechaza con un tool_error recuperable inyectado (UI §5.4, Fase 1).
-        if (mode === 'plan' && !PLAN_ALLOWLIST.has(call.name)) {
-          const err = `Plan mode: tool '${call.name}' deshabilitada hasta aprobar el plan`;
+        // Hito 17: `exec` pasa si el comando solo observa.
+        const planReadOnlyCall =
+          PLAN_READ_ONLY_CALL_TOOLS.has(call.name) && !callEffects(call.name, call.input).mutating;
+        if (mode === 'plan' && !PLAN_ALLOWLIST.has(call.name) && !planReadOnlyCall) {
+          const effects = PLAN_READ_ONLY_CALL_TOOLS.has(call.name)
+            ? callEffects(call.name, call.input)
+            : null;
+          const err = effects
+            ? `Plan mode: only read-only commands can run until the plan is approved (${effects.reason ?? 'this command changes state'})`
+            : `Plan mode: tool '${call.name}' deshabilitada hasta aprobar el plan`;
           const o = this.toolErrorOutcome(
             call.id,
             call.name,
@@ -1169,6 +1197,41 @@ export class ReactLoop {
           yield o.event;
           this.messages.push(o.message);
           continue;
+        }
+
+        // Hito 17 — `requirePlan` de un entorno (§12.18): fuera de un plan
+        // aprobado nada cambia allí. Leer sí se puede (así se investiga para el
+        // plan). Con un gate de aprobación disponible, el turno escala a modo
+        // plan; sin él (subagente, `run` sin TTY, Desktop) solo se rechaza.
+        if (mode !== 'execute' && opts?.planApproved !== true) {
+          const violation = requirePlanViolation(
+            call.name,
+            call.input,
+            this.config,
+            this.extras?.workspace,
+          );
+          if (violation) {
+            const { env, target } = violation;
+            const canEscalate = mode === 'normal' && opts?.onApprovePlan !== undefined;
+            if (canEscalate && !planEscalated) {
+              planEscalated = true;
+              mode = 'plan';
+              yield { type: 'warning', message: `plan_required:${env.name}` };
+            }
+            const err = canEscalate
+              ? `Environment "${env.name}" requires an approved plan before changing anything on ` +
+                `${target}. You are now in PLAN MODE: investigate with read-only tools (exec is ` +
+                'allowed for commands that only read state), then call present_plan with the ' +
+                'concrete steps. The change runs after the user approves the plan.'
+              : `Environment "${env.name}" requires an approved plan before changing anything on ` +
+                `${target}, and this session cannot present one for approval. Report what you ` +
+                'would change and ask the user to run the task as a plan (/plan in the chat, or ' +
+                'stratum run --plan).';
+            const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
+            continue;
+          }
         }
 
         regularCalls.push(call);
@@ -1204,6 +1267,7 @@ export class ReactLoop {
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
           confirmDestructive: opts?.onConfirmDestructive,
+          readOnly,
         };
 
         const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);
@@ -1278,7 +1342,10 @@ export class ReactLoop {
       // runDelegations() más abajo.
       // -----------------------------------------------------------------------
       if (delegateCalls.length > 0) {
-        yield* this.runDelegations(delegateCalls, opts, signal, fmt);
+        // Hito 17: un hijo delegado durante la Fase 3 trabaja bajo el plan aprobado.
+        const delegationOpts: RunOptions | undefined =
+          mode === 'execute' ? { ...opts, planApproved: true } : opts;
+        yield* this.runDelegations(delegateCalls, delegationOpts, signal, fmt);
       }
 
       // -----------------------------------------------------------------------

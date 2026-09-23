@@ -1,7 +1,7 @@
 import React from 'react';
 import { Box, useStdout } from 'ink';
 import { StatusBar } from './StatusBar.js';
-import type { ProviderStatus } from './StatusBar.js';
+import type { EnvironmentBadge, ProviderStatus } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
@@ -58,6 +58,10 @@ interface Props {
   tokens?: TokenAccounting;
   /** Perfil activo como agente principal para el badge `◆` del status bar (Hito 15). */
   activeAgent?: string | null;
+  /** Hito 17 — badges de sesión del status bar. */
+  readOnly?: boolean;
+  sessionProfile?: string | null;
+  environment?: EnvironmentBadge | null;
   // ----- Plan & Execute (Hito 7) -----
   /** Modo del agente para el badge del status bar y el render del plan. */
   planMode?: AgentMode;
@@ -106,6 +110,9 @@ export function ConversationView({
   changes,
   tokens,
   activeAgent,
+  readOnly,
+  sessionProfile,
+  environment,
   planMode,
   plan,
   pendingApproval,
@@ -138,6 +145,9 @@ export function ConversationView({
         changes={changes}
         tokens={tokens}
         activeAgent={activeAgent}
+        readOnly={readOnly}
+        sessionProfile={sessionProfile}
+        environment={environment}
       />
       {plan && planMode === 'execute' && <PlanView plan={plan} maxSteps={panelMaxSteps} />}
       {todos && todos.length > 0 && (
@@ -171,6 +181,9 @@ export function ConversationView({
         <DestructiveConfirm
           toolName={pendingConfirm.toolName}
           description={pendingConfirm.description}
+          confirmPhrase={pendingConfirm.confirmPhrase}
+          environment={pendingConfirm.environment}
+          forced={pendingConfirm.forced}
           onApprove={onConfirmApprove ?? (() => undefined)}
           onDeny={onConfirmDeny ?? (() => undefined)}
           onAllowAll={onConfirmAllowAll ?? (() => undefined)}

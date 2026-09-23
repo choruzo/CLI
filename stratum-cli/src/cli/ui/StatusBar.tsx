@@ -41,6 +41,38 @@ interface Props {
   tokens?: TokenAccounting;
   /** Perfil activo como agente principal (Hito 15): segmento `◆ perfil` a la derecha. */
   activeAgent?: string | null;
+  /** Hito 17 — sesión read-only: badge `RO`. */
+  readOnly?: boolean;
+  /** Hito 17 — perfil de sesión. `code` (lo de siempre) no se pinta. */
+  sessionProfile?: string | null;
+  /**
+   * Hito 17 — contexto activo: entorno del último target usado. Rojo en
+   * `production`: el accidente clásico es escribir bien el comando en la
+   * ventana equivocada.
+   */
+  environment?: EnvironmentBadge | null;
+}
+
+/** Entorno del contexto activo para el badge de la barra (Hito 17). */
+export interface EnvironmentBadge {
+  name: string;
+  tier: 'production' | 'staging' | 'development';
+  target: string;
+}
+
+/** Texto del badge de entorno: `⬢ prod ssh:db-1`, o solo el entorno si no cabe. */
+export function formatEnvironmentBadge(
+  env: EnvironmentBadge | null | undefined,
+  wide: boolean,
+): string {
+  if (!env) return '';
+  return wide ? `⬢ ${env.name} ${env.target}` : `⬢ ${env.name}`;
+}
+
+export function environmentBadgeColor(tier: EnvironmentBadge['tier']): string {
+  if (tier === 'production') return theme.error;
+  if (tier === 'staging') return theme.warning;
+  return theme.textMuted;
 }
 
 function formatTokens(n: number): string {
@@ -103,6 +135,9 @@ export function StatusBar({
   changes,
   tokens,
   activeAgent,
+  readOnly,
+  sessionProfile,
+  environment,
 }: Props) {
   const { stdout } = useStdout();
   const cols = stdout.columns ?? 80;
@@ -124,10 +159,18 @@ export function StatusBar({
   // Perfil principal activo (Hito 15). Va antes del badge de plan: el perfil
   // dura la sesión, el modo plan dura una tarea.
   const agentBadge = activeAgent ? `◆ ${activeAgent}` : '';
+  // Hito 17 — lo que dura la sesión va antes que lo que dura una tarea. El
+  // entorno va primero: es el que más importa ver de un vistazo.
+  const envBadge = formatEnvironmentBadge(environment, cols >= WIDE_ENOUGH_FOR_TOKENS);
+  const roBadge = readOnly ? 'RO' : '';
+  const profileBadge = sessionProfile && sessionProfile !== 'code' ? `⬡ ${sessionProfile}` : '';
+  const sessionBadges = [envBadge, roBadge, profileBadge].filter(Boolean);
 
   const ctxSuffix =
     `${tokenText ? `${tokenText} · ` : ''}` +
-    ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%${agentBadge ? `  ${agentBadge}` : ''}${planBadge ? `  ${planBadge}` : ''}`;
+    ` ctx ${estimated ? '~' : ''}${formatTokens(contextUsed)} / ${formatTokens(contextMax)} │ ${pct}%` +
+    sessionBadges.map((b) => `  ${b}`).join('') +
+    `${agentBadge ? `  ${agentBadge}` : ''}${planBadge ? `  ${planBadge}` : ''}`;
   const leftLen =
     ` ● ${providerName} │ ${model}${mcpSegmentText}${changesText ? ` │ ${changesText}` : ''}`
       .length;
@@ -180,6 +223,24 @@ export function StatusBar({
       </Text>
       <Text color={theme.textInvisible}> │</Text>
       <Text color={ctxColor}> {pct}%</Text>
+      {envBadge && environment && (
+        <Text color={environmentBadgeColor(environment.tier)} bold>
+          {'  '}
+          {envBadge}
+        </Text>
+      )}
+      {roBadge && (
+        <Text color={theme.warning} bold>
+          {'  '}
+          {roBadge}
+        </Text>
+      )}
+      {profileBadge && (
+        <Text color={theme.textMuted}>
+          {'  '}
+          {profileBadge}
+        </Text>
+      )}
       {agentBadge && (
         <Text color={theme.accent} bold>
           {'  '}

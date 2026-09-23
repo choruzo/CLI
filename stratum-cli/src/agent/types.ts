@@ -151,6 +151,20 @@ export interface ConfirmRequest {
   callId: string;
   toolName: string;
   description: string;
+  /**
+   * Hito 17 — confirmación con nombre (entorno con `confirmation: typed`). Para
+   * aprobar hay que teclear exactamente este texto (el alias del target). Una
+   * UI que no sepa pedirlo debe denegar: un sí/no por reflejo es justo lo que
+   * esta confirmación existe para evitar.
+   */
+  confirmPhrase?: string;
+  /** Hito 17 — entorno del target que la llamada cambia, para pintarlo en la confirmación. */
+  environment?: { name: string; tier: 'production' | 'staging' | 'development' };
+  /**
+   * Hito 17 — la confirmación viene de un entorno `confirm-always`: el
+   * allow-all no se ofrece (y si se devuelve, cuenta solo para esta llamada).
+   */
+  forced?: boolean;
 }
 
 export interface ToolContext {
@@ -162,6 +176,11 @@ export interface ToolContext {
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   confirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
+  /**
+   * Hito 17 — sesión read-only (§12.18): toda llamada que cambie algo se veta en
+   * el dispatcher antes de confirmar, y ninguna política la levanta.
+   */
+  readOnly?: boolean;
   /**
    * Stratum Desktop D2 (16.2) — espacio de trabajo al que se confinan las tools
    * de fichero. Presente → toda ruta se resuelve contra `root` y la que quede
@@ -243,6 +262,17 @@ export interface RunOptions {
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   onConfirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
+  /**
+   * Hito 17 — modo read-only (`--read-only`, `/readonly`). Se propaga al
+   * `ToolContext` y a los subagentes: un hijo nunca puede escribir por el padre.
+   */
+  readOnly?: boolean;
+  /**
+   * Hito 17 — el turno trabaja bajo un plan aprobado aunque el loop no esté en
+   * modo `execute` (un subagente delegado desde la Fase 3). Satisface
+   * `requirePlan` de los entornos.
+   */
+  planApproved?: boolean;
   compressionMode?: 'normal' | 'conservative';
   mode?: AgentMode;
   onApprovePlan?: (plan: Plan) => Promise<PlanDecision>;

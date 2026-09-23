@@ -718,6 +718,10 @@ export class ConversationSession {
   }
 
   private confirm(req: ConfirmRequest, signal: AbortSignal): Promise<DestructiveDecision> {
+    // Hito 17: la ventana no sabe pedir la confirmación con nombre ni la de un
+    // entorno `confirm-always`, y el allow-all de la conversación no puede
+    // levantarlas. Un sí/no aquí sería justo el reflejo que existen para evitar.
+    if (req.confirmPhrase || req.forced) return Promise.resolve('deny');
     if (this.allowAll) return Promise.resolve('approve');
     if (signal.aborted || this.closed) return Promise.resolve('deny');
     return this.wait(this.confirms, req.callId, 'deny', this.confirmTimeoutMs, 'confirm', () =>

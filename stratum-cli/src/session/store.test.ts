@@ -167,4 +167,20 @@ describe('SessionStore — activeAgent (Hito 15)', () => {
     const without = await store.save({ ...base, activeAgent: null });
     expect('activeAgent' in store.load(without.id)).toBe(false);
   });
+
+  it('Hito 17: persiste read-only y el perfil de sesión, y los omite si no aplican', async () => {
+    const store = new SessionStore(dir);
+    const base = {
+      provider: 'p',
+      model: 'm',
+      project: '/x',
+      messages: sampleMessages,
+      toolCallCount: 0,
+    };
+    const ro = await store.save({ ...base, readOnly: true, sessionProfile: 'infra' });
+    expect(store.load(ro.id)).toMatchObject({ readOnly: true, sessionProfile: 'infra' });
+    const plain = await store.save({ ...base, readOnly: false, sessionProfile: null });
+    expect('readOnly' in store.load(plain.id)).toBe(false);
+    expect('sessionProfile' in store.load(plain.id)).toBe(false);
+  });
 });

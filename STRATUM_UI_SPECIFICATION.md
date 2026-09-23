@@ -186,6 +186,9 @@ Una sola línea fija en la parte superior, con fondo ligeramente más claro que 
 | `ctx N.Nk / NNk` | Estimación de tokens usados / máximo del modelo | Gris `#9CA3AF` |
 | `│` | Separador vertical | Gris oscuro `#374151` |
 | `NN%` | Porcentaje de contexto usado. Verde < 60%, ámbar 60-85%, rojo > 85% | Variable |
+| `⬢ entorno target` | Contexto activo (Hito 17, §5.10): entorno del último target donde se ejecutó algo. Con ancho < 100 solo el entorno. Sin entorno que case, no se pinta | Rojo `#EF4444` en `production`, ámbar en `staging`, gris en `development` |
+| `RO` | Sesión read-only (Hito 17) | Ámbar `#F59E0B`, negrita |
+| `⬡ perfil` | Perfil de sesión cuando no es `code` (Hito 17) | Gris `#9CA3AF` |
 
 ### 4.2 Área de Conversación
 
@@ -1078,6 +1081,29 @@ Perfiles inválidos (1) — no se cargaron:
 
 **Status bar.** Con un perfil principal activo aparece `◆ <perfil>` (color de acento, negrita) tras el porcentaje de contexto y antes del badge de plan: el perfil dura la sesión, el modo plan una tarea.
 
+### 5.10 Entornos, read-only y perfil de sesión (Hito 17)
+
+**Status bar.** Tras el porcentaje de contexto, en este orden: entorno del contexto activo, `RO`, perfil de sesión, perfil principal (`◆`) y modo plan. Lo que dura la sesión va antes que lo que dura una tarea, y el entorno el primero porque es lo que más importa ver de un vistazo:
+
+```
+ ● local │ gemma-4-12b              ctx 4.2k / 43k │ 10%  ⬢ prod ssh:prod-db  RO  ⬡ infra
+```
+
+- *Contexto activo* = último target (`exec`, `ssh_upload`, `ssh_download`) donde algo **se ejecutó** — un rechazo no cuenta, también dentro de subagentes. Al arrancar es `local`. Se refresca al terminar cada turno y tras `/readonly`, `/profile` y `/sessions resume`.
+- El badge solo aparece si el target casa con un entorno de `environments`: sin entornos definidos la barra no cambia.
+
+**Comandos.**
+
+| Comando | Efecto |
+|---|---|
+| `/readonly [on\|off]` | Sin argumento alterna. Mensaje de sistema con el nuevo estado; el system prompt y el toolset cambian desde el próximo mensaje. `/init` se rechaza en read-only |
+| `/profile [nombre]` | Sin argumento, informe: perfil activo (con el motivo si es `auto`), disponibles con su origen y sus tools. Con argumento lo cambia; se rechaza con un plan en curso |
+| `/env` | Contexto activo, entornos definidos con sus patrones y sus reglas en una línea |
+
+**Escalada a plan.** Si un entorno con `requirePlan` rechaza un cambio y el turno escala a modo plan (evento `warning` `plan_required:<entorno>`), la UI entra en modo plan como con `/plan`: badge `◑ PLAN` y, al llegar `present_plan`, el gate de aprobación de §5.4.
+
+**Confirmación.** Ver §12 (variante con entorno y confirmación tecleada).
+
 ---
 
 ## 6. Paleta de Colores
@@ -1415,6 +1441,24 @@ Cuando el `ToolDispatcher` detecta que una tool tiene `destructive: true`, pausa
 | `S` / `Y` / `Enter` | Aprobar esta tool y continuar |
 | `N` / `Esc` | Cancelar esta tool (se inyecta como `tool_error` recuperable) |
 | `!` | Activar modo `--allow-destructive` para el resto de la sesión (sin más confirmaciones) |
+
+### Variante de entorno (Hito 17)
+
+Cuando la llamada cambia algo en un target que pertenece a un entorno, el título nombra el entorno y el borde toma el color de su tier (rojo `production`, ámbar `staging`):
+
+```
+┌──────────────────────────────────────────────────────────────────────┐
+│ ⚠ Cambio en prod (production)                                        │
+│                                                                      │
+│  exec [ssh:prod-db]: systemctl restart api                           │
+│                                                                      │
+│  Escribe prod-db para confirmar (Esc cancela): prod-d_               │
+└──────────────────────────────────────────────────────────────────────┘
+```
+
+- Con `confirmation: typed` (default en `confirm-always`) no hay atajos: se teclea el alias del target y `Enter`. Si no coincide exactamente, línea roja `No coincide…` y el bloque sigue abierto; `Esc` o `Ctrl+C` deniegan.
+- Con `policy: confirm-always` no se ofrece `[ ! ] permitir todo`, y un allow-all nunca convierte la sesión en `allow`.
+- En `stratum run` la confirmación tecleada es una línea de readline (`Escribe "prod-db" para confirmar`); cualquier otra respuesta deniega. Stratum Desktop deniega estas confirmaciones: su ventana no sabe pedirlas.
 
 ### Posicionamiento
 

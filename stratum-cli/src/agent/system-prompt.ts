@@ -3,6 +3,7 @@ import { join, dirname } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import type { PromptPreset } from './presets.js';
 import type { WorkspaceConfinement } from './types.js';
+import { describeEnvironmentRules, listEnvironments } from '../tools/environments.js';
 
 // ---------------------------------------------------------------------------
 // Entorno (<env>) — formato exacto de OpenCode (F5)
@@ -62,6 +63,14 @@ export interface SystemPromptEnv {
   workspace?: WorkspaceConfinement;
   /** Ver `StratumAgentOptions.workspaceFilesExpiredAt` (D3). Solo con `workspace`. */
   workspaceFilesExpiredAt?: string;
+  /** Hito 17 — sesión read-only: bloque `# Read-only mode` al principio de las reglas. */
+  readOnly?: boolean;
+  /**
+   * Hito 17 — `false` omite `# Testing discipline` aunque haya `tools.testCommand`:
+   * el perfil de sesión oculta `test_evidence` (p. ej. `infra`), y enseñar un
+   * ciclo sin la tool que lo registra solo invita a inventar la evidencia.
+   */
+  testing?: boolean;
 }
 
 /** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
@@ -235,6 +244,34 @@ Three separate domains, do not mix them up:
  * no puede descubrir por sí mismo: sudo sin TTY, PTY mezclando streams, y
  * comandos que no terminan.
  */
+/**
+ * Hito 17 — bloque `# Read-only mode`. Nombra lo que sí se puede hacer: con
+ * solo «no escribas», un modelo pequeño deja de usar `exec` también para leer.
+ */
+export const READ_ONLY_BLOCK = `# Read-only mode
+This session is READ-ONLY. You can only observe: read files, search, fetch web pages, and run exec commands that only read state (ls, cat, grep, find, ps, df, du, journalctl, systemctl status, ss, ip addr, dig, curl without data, git status/log/diff, kubectl get/describe/logs, docker ps/logs/inspect, Get-* cmdlets...). Pipes and "2>&1" are fine.
+Anything that writes a file, changes a service or configuration, or runs a command that cannot be verified as read-only (output redirection to a file, $(...) substitution, python -c, scripts) is rejected before it runs, and no user approval can lift that.
+If the task needs a change, describe the exact change and tell the user to leave read-only mode with /readonly off.`;
+
+/**
+ * Hito 17 — bloque `# Environments`: qué targets son de qué entorno y qué reglas
+ * tienen. Sin él, el modelo descubre `requirePlan` o la confirmación tecleada a
+ * base de rechazos.
+ */
+export function buildEnvironmentsBlock(config: StratumConfig): string {
+  const envs = listEnvironments(config);
+  if (envs.length === 0) return '';
+  const rows = envs.map(
+    (e) => `- ${e.name} (${e.tier}): ${e.match.join(', ')} — ${describeEnvironmentRules(e)}`,
+  );
+  return `
+
+# Environments
+Execution targets belong to environments with their own rules. The rules apply only to calls that CHANGE something on the target; commands that only read state are never restricted by them.
+${rows.join('\n')}
+A target that matches several environments takes the most critical one. Before changing anything in a production environment, verify the current state with read-only commands and say what you are about to change.`;
+}
+
 function buildSshBlock(config: StratumConfig): string {
   const hosts = config.ssh?.hosts;
   if (!hosts || Object.keys(hosts).length === 0) return '';
@@ -432,6 +469,11 @@ You have two tools backed by long-term memory that persists across sessions:
 - recall_decisions: use it to retrieve past decisions semantically before acting, when you need to remember why something was chosen, a project convention, a previous bug fix, or a user preference.`;
 
   prompt += buildSshBlock(config);
+  prompt += buildEnvironmentsBlock(config);
+  if (env?.readOnly)
+    prompt += `
+
+${READ_ONLY_BLOCK}`;
 
   // Asking the user (§3 de gentle-pi): la tool `question` está oculta a los
   // subagentes, así que sus reglas también.
@@ -463,7 +505,8 @@ ${routing}`;
     // Testing discipline (Hito 13): condicionado a que haya comando de tests.
     // Se inyecta también a los subagentes — el perfil `tdd` es precisamente un
     // subagente, y es quien más necesita tener el ciclo delante.
-    const testing = buildTestingDisciplineBlock(config.tools.testCommand);
+    const testing =
+      env?.testing === false ? '' : buildTestingDisciplineBlock(config.tools.testCommand);
     if (testing)
       prompt += `
 

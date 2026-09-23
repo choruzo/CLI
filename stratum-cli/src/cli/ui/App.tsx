@@ -57,6 +57,9 @@ import { SelectList } from './components/SelectList.js';
 import { SESSION_COMMANDS, filterCommands, filterProfiles } from './session-commands.js';
 import { describeProfile, strictestPolicy } from '../../agent/profiles.js';
 import { formatProfilesReport } from '../../agent/profiles-report.js';
+import { listSessionProfiles } from '../../agent/session-profile.js';
+import { listEnvironments } from '../../tools/environments.js';
+import { formatEnvironmentsReport, formatSessionProfileReport } from '../session-report.js';
 import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
 import { useAgentStream } from './useAgentStream.js';
@@ -106,6 +109,10 @@ export interface PendingConfirm {
   callId: string;
   toolName: string;
   description: string;
+  /** Hito 17 — confirmación con nombre y entorno del target. */
+  confirmPhrase?: string;
+  environment?: { name: string; tier: 'production' | 'staging' | 'development' };
+  forced?: boolean;
 }
 
 interface AppState {
@@ -676,6 +683,11 @@ function reducer(state: AppState, action: AppAction): AppState {
         return { ...state, todos: ev.items, todoStale: ev.stale };
       }
 
+      // Hito 17: un entorno con `requirePlan` escaló el turno a modo plan.
+      if (ev.type === 'warning' && ev.message.startsWith('plan_required:')) {
+        return { ...state, planMode: 'plan', plan: null, pendingApproval: false };
+      }
+
       // Hito 7 — Fase 2: el agente propuso un plan; abrir el gate de aprobación.
       if (ev.type === 'plan_proposed') {
         return { ...state, plan: ev.plan, pendingApproval: true };
@@ -939,19 +951,33 @@ export function App({
   // -------------------------------------------------------------------------
   const confirmResolverRef = useRef<((d: DestructiveDecision) => void) | null>(null);
   const allowAllRef = useRef(false);
+  const pendingConfirmRef = useRef<PendingConfirm | null>(null);
+  pendingConfirmRef.current = state.pendingConfirm;
 
   const onConfirmDestructive = useCallback((req: ConfirmRequest): Promise<DestructiveDecision> => {
     return new Promise<DestructiveDecision>((resolve) => {
       confirmResolverRef.current = resolve;
       dispatch({
         type: 'CONFIRM_SHOW',
-        request: { callId: req.callId, toolName: req.toolName, description: req.description },
+        request: {
+          callId: req.callId,
+          toolName: req.toolName,
+          description: req.description,
+          ...(req.confirmPhrase ? { confirmPhrase: req.confirmPhrase } : {}),
+          ...(req.environment ? { environment: req.environment } : {}),
+          ...(req.forced ? { forced: true } : {}),
+        },
       });
     });
   }, []);
 
   const resolveConfirm = useCallback((decision: DestructiveDecision) => {
-    if (decision === 'allow-all') allowAllRef.current = true;
+    // Hito 17: un «permitir todo» sobre una confirmación forzada o tecleada no
+    // se ofrece; si llegase, no convierte la sesión en `allow`.
+    const pending = pendingConfirmRef.current;
+    if (decision === 'allow-all' && !pending?.forced && !pending?.confirmPhrase) {
+      allowAllRef.current = true;
+    }
     const resolver = confirmResolverRef.current;
     confirmResolverRef.current = null;
     dispatch({ type: 'CONFIRM_RESOLVE' });
@@ -978,6 +1004,11 @@ export function App({
     resolve?.(answers);
   }, []);
 
+  // Hito 17: getRunOptions se define antes que el gate de plan; lo alcanza por ref.
+  const onApprovePlanRef = useRef<(p: Plan) => Promise<PlanDecision>>(() =>
+    Promise.resolve({ decision: 'reject' }),
+  );
+
   // Refs que reflejan el estado del plan para getRunOptions (sin necesitar deps de state).
   const planModeRef = useRef(state.planMode);
   planModeRef.current = state.planMode;
@@ -994,6 +1025,9 @@ export function App({
       ),
       onConfirmDestructive,
       onAskQuestions,
+      // Hito 17: un entorno con `requirePlan` puede escalar un turno normal a
+      // modo plan; el gate de aprobación tiene que estar disponible siempre.
+      onApprovePlan: (p) => onApprovePlanRef.current(p),
       onSubagentPersist: (rec) =>
         rec.result
           ? subagentStoreRef.current.saveResult(rec.id, rec.profile, rec.task, rec.result)
@@ -1042,9 +1076,31 @@ export function App({
       });
   }, []);
 
+  // Hito 17 — badges de sesión: read-only, perfil y contexto activo (entorno
+  // del último target usado). Se recalculan al cerrar cada turno y tras los
+  // comandos que los cambian.
+  const readSessionBadges = useCallback(() => {
+    const context = agent.getActiveContext();
+    return {
+      readOnly: agent.isReadOnly(),
+      profile: agent.getSessionProfile()?.name ?? null,
+      environment: context.environment
+        ? { name: context.environment.name, tier: context.environment.tier, target: context.target }
+        : null,
+    };
+  }, [agent]);
+  const [sessionBadges, setSessionBadges] = useState(readSessionBadges);
+  const refreshSessionBadges = useCallback(
+    () => setSessionBadges(readSessionBadges()),
+    [readSessionBadges],
+  );
+
   useEffect(() => {
-    if (!state.thinking) refreshChanges();
-  }, [state.thinking, refreshChanges]);
+    if (!state.thinking) {
+      refreshChanges();
+      refreshSessionBadges();
+    }
+  }, [state.thinking, refreshChanges, refreshSessionBadges]);
 
   /** Store de sesiones resuelto desde la config activa (mismas rutas que la CLI). */
   const sessionStore = useCallback(
@@ -1058,6 +1114,10 @@ export function App({
   // igual que el gate destructivo.
   // -------------------------------------------------------------------------
   const planResolverRef = useRef<((d: PlanDecision) => void) | null>(null);
+  onApprovePlanRef.current = (_proposed: Plan): Promise<PlanDecision> =>
+    new Promise<PlanDecision>((resolve) => {
+      planResolverRef.current = resolve;
+    });
 
   const onApprovePlan = useCallback((_proposed: Plan): Promise<PlanDecision> => {
     // El evento plan_proposed (ya despachado por el stream) abrió el gate;
@@ -1744,8 +1804,9 @@ export function App({
         }
         try {
           const saved = sessionStore().load(id);
-          const notice = agent.replaceHistory(saved.messages, saved.activeAgent);
+          const notice = agent.replaceHistory(saved.messages, saved.activeAgent, saved.readOnly);
           setActiveAgent(agent.getActiveProfile()?.name ?? null);
+          refreshSessionBadges();
           process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
           dispatch({ type: 'CLEAR' });
           dispatch({ type: 'RESTORE_HISTORY', items: messagesToConvItems(saved.messages) });
@@ -1891,6 +1952,79 @@ export function App({
         return;
       }
 
+      // ----- Hito 17: read-only, perfil de sesión y entornos -----
+      if (cmd === '/readonly' || cmd.startsWith('/readonly ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const arg = cmd.slice('/readonly'.length).trim().toLowerCase();
+        if (arg && arg !== 'on' && arg !== 'off') {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /readonly [on|off]' });
+          return;
+        }
+        const next = arg === '' ? !agent.isReadOnly() : arg === 'on';
+        agent.setReadOnly(next);
+        refreshSessionBadges();
+        refreshContext();
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: next
+            ? 'Modo read-only activado: solo observación. Nada que escriba o cambie estado se ejecuta, ' +
+              'y ninguna confirmación lo levanta. /readonly off para salir.'
+            : 'Modo read-only desactivado: el agente puede volver a hacer cambios (con las confirmaciones de siempre).',
+        });
+        return;
+      }
+
+      if (cmd === '/profile' || cmd.startsWith('/profile ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const target = cmd.slice('/profile'.length).trim();
+        if (!target) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: formatSessionProfileReport(
+              agent.getSessionProfile(),
+              agent.getSessionProfileRequest(),
+              agent.getProfileDetection(),
+              listSessionProfiles(agent.getConfig()),
+            ),
+          });
+          return;
+        }
+        if (planModeRef.current !== 'normal') {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'No se puede cambiar de perfil de sesión con un plan en curso.',
+          });
+          return;
+        }
+        const applied = agent.setSessionProfile(target);
+        if (!applied.ok) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `No se pudo cambiar: ${applied.error}` });
+          return;
+        }
+        refreshSessionBadges();
+        refreshContext();
+        const why = applied.detection
+          ? applied.detection.detected
+            ? ` (auto: ${applied.detection.reasons.join(', ')})`
+            : ' (auto: sin infraestructura a la vista)'
+          : '';
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `Perfil de sesión: ${applied.profile.name}${why}. Las tools y el system prompt cambian desde el próximo mensaje.`,
+        });
+        return;
+      }
+
+      if (cmd === '/env') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const context = agent.getActiveContext();
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: formatEnvironmentsReport(listEnvironments(agent.getConfig()), context),
+        });
+        return;
+      }
+
       if (cmd === '/subagents') {
         dispatch({ type: 'OPEN_SUBAGENT_PICKER' });
         return;
@@ -1982,6 +2116,15 @@ export function App({
           .catch((err: unknown) => {
             dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al eliminar: ${String(err)}` });
           });
+        return;
+      }
+
+      if ((cmd === '/init' || cmd.startsWith('/init ')) && agent.isReadOnly()) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: '/init escribe STRATUM.md y la sesión es read-only. Sal con /readonly off.',
+        });
         return;
       }
 
@@ -2138,6 +2281,7 @@ export function App({
       mcpManager,
       registry,
       refreshContext,
+      refreshSessionBadges,
       sessionStore,
       state.debug,
     ],
@@ -2440,6 +2584,9 @@ export function App({
         changes={formatCompact(state.changes)}
         tokens={state.tokens}
         activeAgent={activeAgent}
+        readOnly={sessionBadges.readOnly}
+        sessionProfile={sessionBadges.profile}
+        environment={sessionBadges.environment}
         todos={state.todoCollapsed ? [] : state.todos}
         todoStale={state.todoStale}
         planMode={state.planMode}

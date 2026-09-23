@@ -18,6 +18,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     skills: DEFAULTS.skills,
     prompt: DEFAULTS.prompt,
     desktop: DEFAULTS.desktop,
+    session: DEFAULTS.session,
     provider: undefined,
     memory: {
       projectFile: '',

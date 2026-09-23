@@ -54,6 +54,10 @@ export interface SaveSessionParams {
   planRef?: string | null;
   /** Hito 15 — perfil activo como agente principal. */
   activeAgent?: string | null;
+  /** Hito 17 — modo read-only al guardar. */
+  readOnly?: boolean;
+  /** Hito 17 — perfil de sesión pedido. */
+  sessionProfile?: string | null;
 }
 
 export interface ListOptions {
@@ -111,6 +115,8 @@ export class SessionStore {
       summary,
       ...(params.planRef ? { planRef: params.planRef } : {}),
       ...(params.activeAgent ? { activeAgent: params.activeAgent } : {}),
+      ...(params.readOnly ? { readOnly: true } : {}),
+      ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
     };
 
     writeFileSync(this.sessionPath(id), JSON.stringify(ctx, null, 2), 'utf-8');

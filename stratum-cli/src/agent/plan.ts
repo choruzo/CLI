@@ -26,6 +26,15 @@ export const PLAN_ALLOWLIST: ReadonlySet<string> = new Set([
   'question',
 ]);
 
+/**
+ * Hito 17 — tools admitidas en Fase 1 solo cuando la llamada concreta es
+ * read-only (`exec` con un comando que solo observa, ver
+ * `tools/readonly-commands.ts`). Sin esto, un plan sobre infraestructura se
+ * escribiría sin haber podido mirar el sistema, y `requirePlan` de un entorno
+ * sería inusable.
+ */
+export const PLAN_READ_ONLY_CALL_TOOLS: ReadonlySet<string> = new Set(['exec']);
+
 /** Nombre de la tool de cierre de Fase 1. */
 export const PRESENT_PLAN_TOOL = 'present_plan';
 /** Nombre de la tool de actualización de estado de paso (Fase 3). */
@@ -39,7 +48,7 @@ export const PLAN_MODE_PROMPT = `You are in PLAN MODE. Do NOT modify anything ye
 
 $ARGUMENTS
 
-Investigate read-only first: use read_file, glob, list_directory, grep, web_search, web_fetch and recall_decisions to understand the codebase and gather the context you need. Writing tools (write_file, edit_file, exec, store_decision, MCP writes) are disabled until the plan is approved — attempting them will fail.
+Investigate read-only first: use read_file, glob, list_directory, grep, web_search, web_fetch and recall_decisions to understand the codebase and gather the context you need. exec is available only for commands that just read state (ls, cat, grep, ps, df, git status, systemctl status, kubectl get…). Writing tools (write_file, edit_file, store_decision, MCP writes) and any exec command that changes something are disabled until the plan is approved — attempting them will fail.
 
 When you have enough understanding, call the \`present_plan\` tool exactly once with:
 - \`summary\`: one sentence describing the overall change.

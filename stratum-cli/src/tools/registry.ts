@@ -10,13 +10,19 @@ import type {
 import type { ToolSchema } from '../providers/base.js';
 import type { AgentMode } from '../agent/types.js';
 import { truncateToolOutput } from './truncate.js';
-import { PLAN_ALLOWLIST, PRESENT_PLAN_TOOL, UPDATE_PLAN_TOOL } from '../agent/plan.js';
+import {
+  PLAN_ALLOWLIST,
+  PLAN_READ_ONLY_CALL_TOOLS,
+  PRESENT_PLAN_TOOL,
+  UPDATE_PLAN_TOOL,
+} from '../agent/plan.js';
 import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
 import { QUESTION_TOOL } from './question.js';
 import { TODO_TOOL } from './todo.js';
 import { TEST_EVIDENCE_TOOL } from './tdd.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
+import { environmentGate, readOnlyVeto, type EnvironmentGate } from './call-policy.js';
 
 const log = getLogger('tools');
 
@@ -55,7 +61,10 @@ function wantsSerial(tool: ToolDefinition | undefined, input: unknown, ctx: Tool
  */
 export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
   if (mode === 'plan') {
-    return name === PRESENT_PLAN_TOOL || PLAN_ALLOWLIST.has(name);
+    // Hito 17: `exec` se ofrece también — el loop admite sus llamadas read-only.
+    return (
+      name === PRESENT_PLAN_TOOL || PLAN_ALLOWLIST.has(name) || PLAN_READ_ONLY_CALL_TOOLS.has(name)
+    );
   }
   // Hito 11: durante un plan aprobado el checklist ES el plan. Ofrecer además
   // `todo` invita al modelo a llevar dos listas divergentes del mismo trabajo.
@@ -85,6 +94,24 @@ export interface ToolsetFilter {
    * modo sigue decidiendo cuáles aplican.
    */
   controlTools?: 'keep';
+  /** Hito 17 — ocultas aunque `allowedTools` las admita (y aunque sean de control). */
+  hiddenTools?: readonly string[] | null;
+  /**
+   * Hito 17 — otro filtro que también tiene que admitir la tool (intersección).
+   * Así se componen el perfil de sesión, el perfil de agente y el modo read-only
+   * sin que ninguno conozca a los demás.
+   */
+  also?: ToolsetFilter;
+}
+
+/** Nombre de tool contra una entrada de lista: exacta o glob con `*` (`mcp__*`). */
+function toolNameMatches(pattern: string, name: string): boolean {
+  if (!pattern.includes('*')) return pattern === name;
+  const body = pattern
+    .split('*')
+    .map((part) => part.replace(/[.+?^${}()|[\]\\]/g, '\\$&'))
+    .join('.*');
+  return new RegExp(`^${body}$`).test(name);
 }
 
 /**
@@ -102,6 +129,8 @@ export const CONTROL_TOOLS: ReadonlySet<string> = new Set([
 
 export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): boolean {
   if (!filter) return true;
+  if (filter.also && !isToolVisibleForProfile(name, filter.also)) return false;
+  if (filter.hiddenTools?.some((p) => toolNameMatches(p, name))) return false;
   if (filter.controlTools === 'keep' && CONTROL_TOOLS.has(name)) return true;
   // Hito 11: `todo` también queda fuera. La lista es del padre y se reinyecta
   // en SU system prompt; un hijo con contexto aislado no comparte ese estado.
@@ -111,8 +140,21 @@ export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): b
   ) {
     return false;
   }
-  if (filter.allowedTools && !filter.allowedTools.includes(name)) return false;
+  if (filter.allowedTools && !filter.allowedTools.some((p) => toolNameMatches(p, name))) {
+    return false;
+  }
   return true;
+}
+
+/** Hito 17 — compone filtros por intersección; `undefined` si no queda ninguno. */
+export function composeToolsetFilters(
+  ...filters: (ToolsetFilter | undefined)[]
+): ToolsetFilter | undefined {
+  const [first, ...rest] = filters.filter((f): f is ToolsetFilter => f !== undefined);
+  if (!first) return undefined;
+  const tail = composeToolsetFilters(...rest);
+  if (!tail) return first;
+  return { ...first, also: first.also ? composeToolsetFilters(first.also, tail) : tail };
 }
 
 export class ToolRegistry {
@@ -208,7 +250,9 @@ export class ToolDispatcher {
     // se le pregunta por un `rm -rf /` que nunca se va a ejecutar, y ninguna
     // política de sesión puede levantar este rechazo.
     for (const call of calls) {
-      const veto = this.preflight(call, ctx);
+      // Hito 17: el modo read-only (de sesión o de entorno) va antes que el
+      // preflight de la tool — es una política de la sesión, no de la tool.
+      const veto = this.readOnlyVeto(call, ctx) ?? this.preflight(call, ctx);
       if (veto !== null) denied.set(call.id, veto);
     }
 
@@ -236,6 +280,30 @@ export class ToolDispatcher {
     const byId = new Map<string, DispatchResult>();
     for (const r of [...deniedResults, ...executed]) byId.set(r.callId, r);
     return calls.map((c) => byId.get(c.id)!);
+  }
+
+  /** Hito 17 — veto de modo read-only (§12.18), de sesión o de entorno. */
+  private readOnlyVeto(call: ToolCallReady, ctx: ToolContext): ToolResult | null {
+    let verdict: ToolResult | null;
+    try {
+      verdict = readOnlyVeto(call.name, call.input, ctx);
+    } catch (err) {
+      log.warn('read-only check threw', { tool: call.name, err });
+      // Falla cerrado solo en una sesión read-only: ahí dejar pasar una
+      // escritura sería peor que rechazar una lectura.
+      return ctx.readOnly
+        ? {
+            ok: false,
+            error: 'Read-only session: the call could not be verified as read-only.',
+            recoverable: true,
+            countsAsFailure: false,
+          }
+        : null;
+    }
+    if (verdict === null) return null;
+    verdict = redactResult(verdict, ctx);
+    log.warn('read-only blocked', { tool: call.name, reason: verdict.ok ? '' : verdict.error });
+    return verdict;
   }
 
   /**
@@ -273,15 +341,32 @@ export class ToolDispatcher {
     const tool = this.registry.get(call.name);
     if (!tool) return null; // dispatchOne reportará "not found"
 
-    if (!ctx.config.tools.confirmDestructive) return null;
+    // Hito 17 — regla del entorno del target que la llamada cambia (§12.18).
+    let gate: EnvironmentGate | null = null;
+    try {
+      gate = environmentGate(call.name, call.input, ctx);
+    } catch (err) {
+      log.warn('environment gate threw', { tool: call.name, err });
+    }
+    // `confirm-always`: se pregunta por todo cambio, y ni
+    // `tools.confirmDestructive: false`, ni `--allow-destructive`, ni el
+    // allow-all de sesión lo saltan.
+    const forced = gate?.forced === true;
+
+    if (!forced && !ctx.config.tools.confirmDestructive) return null;
 
     const isDestructive =
-      tool.destructive === true || (tool.isDestructive?.(call.input, ctx) ?? false);
+      forced || tool.destructive === true || (tool.isDestructive?.(call.input, ctx) ?? false);
     if (!isDestructive) return null;
 
     const policy = ctx.destructivePolicy ?? (ctx.allowDestructive === true ? 'allow' : 'ask');
 
-    if (policy === 'allow' || this.allowAllDestructive) return null;
+    if (!forced) {
+      if (policy === 'allow' || this.allowAllDestructive) return null;
+      // Entorno `allow` (un laboratorio): sin confirmación, salvo que la sesión
+      // deniegue (`--deny-destructive`, CI) o el host pida `confirmAll`.
+      if (gate?.env.policy === 'allow' && policy === 'ask' && !gate.hostConfirmAll) return null;
+    }
 
     // Hito 16: la descripción cita el comando (puede llevar un secreto) y va al
     // log y al prompt de confirmación: redactada con el núcleo y los extras.
@@ -289,12 +374,20 @@ export class ToolDispatcher {
 
     if (policy === 'deny' || !ctx.confirmDestructive) {
       // --deny-destructive explícito, o modo piped/CI sin TTY (§12.5)
-      log.warn('destructive blocked', { tool: call.name, policy, description });
+      log.warn('destructive blocked', {
+        tool: call.name,
+        policy,
+        description,
+        env: gate?.env.name,
+      });
       return {
         ok: false,
-        error:
-          `Destructive operation blocked: ${description}. ` +
-          'Destructive operations are not allowed in this session. Consider a non-destructive alternative.',
+        error: gate?.forced
+          ? `Change blocked: ${description}. Environment "${gate.env.name}" requires the user to ` +
+            'approve every change, and nobody can approve it in this session. Ask the user to run ' +
+            'it from an interactive session.'
+          : `Destructive operation blocked: ${description}. ` +
+            'Destructive operations are not allowed in this session. Consider a non-destructive alternative.',
         recoverable: true,
       };
     }
@@ -305,15 +398,29 @@ export class ToolDispatcher {
         callId: call.id,
         toolName: call.name,
         description,
+        ...(gate
+          ? {
+              environment: { name: gate.env.name, tier: gate.env.tier },
+              ...(gate.phrase ? { confirmPhrase: gate.phrase } : {}),
+              ...(forced ? { forced: true } : {}),
+            }
+          : {}),
       });
     } catch {
       decision = 'deny';
     }
 
-    log.info('destructive decision', { tool: call.name, decision, description });
+    log.info('destructive decision', {
+      tool: call.name,
+      decision,
+      description,
+      env: gate?.env.name,
+    });
 
     if (decision === 'allow-all') {
-      this.allowAllDestructive = true;
+      // `confirm-always` y la confirmación tecleada no admiten «permitir todo»:
+      // la aprobación vale solo para esta llamada.
+      if (!forced && !gate?.phrase) this.allowAllDestructive = true;
       return null;
     }
     if (decision === 'approve') return null;

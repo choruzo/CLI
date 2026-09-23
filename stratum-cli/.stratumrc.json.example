@@ -55,7 +55,18 @@
       "tavilyApiKey": "${TAVILY_API_KEY}",
       "maxResults": 10
     },
-    "destructivePatterns": ["rm", "rmdir", "dd", "mkfs", "format", "DROP", "DELETE", "truncate", "shred", "wipefs"],
+    "destructivePatterns": [
+      "rm",
+      "rmdir",
+      "dd",
+      "mkfs",
+      "format",
+      "DROP",
+      "DELETE",
+      "truncate",
+      "shred",
+      "wipefs"
+    ],
     "guardedCommands": {
       "gitPushForce": "confirm",
       "gitResetHard": "confirm",
@@ -76,7 +87,9 @@
       {
         "name": "filesystem",
         "package": "@modelcontextprotocol/server-filesystem@2025.8.21",
-        "args": ["/home/user/projects"],
+        "args": [
+          "/home/user/projects"
+        ],
         "startupTimeout": 15000
       },
       {
@@ -86,7 +99,10 @@
       {
         "name": "legacy-npx",
         "command": "npx",
-        "args": ["-y", "some-mcp-server@latest"]
+        "args": [
+          "-y",
+          "some-mcp-server@latest"
+        ]
       }
     ]
   },
@@ -150,6 +166,41 @@
       "maxWorkspaceMB": 250,
       "compressAfterDays": 7,
       "deleteAfterDays": 30
+    }
+  },
+  "environments": {
+    "prod": {
+      "match": [
+        "ssh:prod-*"
+      ],
+      "tier": "production",
+      "requirePlan": true
+    },
+    "staging": {
+      "match": [
+        "ssh:stg-*"
+      ],
+      "tier": "staging"
+    },
+    "lab": {
+      "match": [
+        "ssh:dev-*"
+      ],
+      "policy": "allow"
+    }
+  },
+  "session": {
+    "profile": "auto",
+    "profiles": {
+      "ops": {
+        "description": "guardias",
+        "allowedTools": [
+          "exec",
+          "read_file",
+          "grep",
+          "mcp__*"
+        ]
+      }
     }
   }
 }

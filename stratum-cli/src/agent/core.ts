@@ -40,6 +40,19 @@ import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
 import { MemoryManager } from '../memory/manager.js';
 import { assistantToolsetFilter, type PromptPreset } from './presets.js';
+import { composeToolsetFilters } from '../tools/registry.js';
+import {
+  profileAllows,
+  resolveSessionProfile,
+  sessionProfileFilter,
+  type InfraDetection,
+  type SessionProfile,
+} from './session-profile.js';
+import {
+  resolveEnvironment,
+  targetOfCall,
+  type ResolvedEnvironment,
+} from '../tools/environments.js';
 import { extractAndStore } from '../memory/extractor.js';
 
 export interface StratumAgentOptions {
@@ -88,6 +101,17 @@ export interface StratumAgentOptions {
    * el agente no intente leer rutas que aparecen antes en el historial.
    */
   workspaceFilesExpiredAt?: string;
+  /**
+   * Hito 17 — arrancar en modo read-only (`--read-only`, sesión reanudada que
+   * lo era). Se alterna después con `setReadOnly`.
+   */
+  readOnly?: boolean;
+  /**
+   * Hito 17 — perfil de sesión pedido (`--infra`, `--code`, `--profile`). Sin
+   * él, `session.profile` de la config (default `auto`). Un nombre que no existe
+   * cae a `auto` con aviso en `takeResumeNotice()`.
+   */
+  sessionProfile?: string;
 }
 
 export class StratumAgent {
@@ -138,6 +162,18 @@ export class StratumAgent {
   /** Aviso de un solo uso al reanudar con un perfil que ya no se puede activar. */
   private _resumeNotice: string | null = null;
   private readonly preset: PromptPreset;
+  /** Hito 17 — modo read-only de la sesión (`/readonly`). */
+  private _readOnly = false;
+  /** Hito 17 — perfil de sesión (§10.5). `null` con el preset `assistant`. */
+  private _sessionProfile: SessionProfile | null = null;
+  private _sessionProfileRequest = 'auto';
+  private _profileDetection: InfraDetection | null = null;
+  /**
+   * Hito 17 — último target sobre el que se ejecutó algo. Es el «contexto
+   * activo» del badge de entorno: el accidente clásico es escribir bien el
+   * comando en la ventana equivocada.
+   */
+  private _activeTarget = 'local';
   private readonly workspace: WorkspaceConfinement | undefined;
   private readonly workspaceFilesExpiredAt: string | undefined;
 
@@ -151,6 +187,16 @@ export class StratumAgent {
     this.preset = options?.promptPreset ?? 'coding';
     this.workspace = options?.workspace;
     this.workspaceFilesExpiredAt = options?.workspaceFilesExpiredAt;
+    this._readOnly = options?.readOnly === true;
+    // Hito 17: el perfil de sesión decide bloques del prompt, así que se
+    // resuelve antes de componerlo. El asistente de Desktop no tiene perfil.
+    if (this.preset === 'coding') {
+      const applied = this.applySessionProfile(options?.sessionProfile);
+      if (!applied.ok) {
+        this._resumeNotice = `Perfil de sesión: ${applied.error} Se usa 'auto'.`;
+        this.applySessionProfile('auto');
+      }
+    }
     // Perfiles de subagente desde la raíz del worktree git Y el cwd: la raíz del
     // worktree cubre la invocación desde un subdirectorio del repo (consistente
     // con el `<env>`); el cwd cubre el caso en que el proyecto npm vive en un
@@ -230,10 +276,12 @@ export class StratumAgent {
     this.currentLoop = this.makeLoop();
 
     let stopReason: string | null = null;
-    for await (const event of this.currentLoop.run(opts)) {
+    const tracker = this.targetTracker();
+    for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
       if (event.type === 'tool_result') this._toolCallCount++;
       if (event.type === 'subagent_completed') this.addChildTokens(event.result);
       if (event.type === 'done') stopReason = event.stopReason;
+      tracker(event);
       yield event;
     }
     // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
@@ -313,17 +361,33 @@ export class StratumAgent {
    * A diferencia de `clearHistory`, el system prompt viene dentro de los
    * mensajes cargados: se guardaron tal cual estaban en la sesión original.
    */
-  replaceHistory(messages: Message[], activeAgent?: string | null): string | null {
+  replaceHistory(
+    messages: Message[],
+    activeAgent?: string | null,
+    readOnly?: boolean,
+  ): string | null {
     this.messages = [...messages];
     this.contextManager?.forgetLastUsage();
     this._toolCallCount = 0;
     this._planRef = null;
     this.todos.replace(rehydrateTodos(this.messages));
     this.tdd.replace(rehydrateTdd(this.messages, TEST_EVIDENCE_TOOL));
+    // Hito 17: cargar una sesión read-only nunca saca de read-only, y cargar
+    // una que no lo era tampoco saca a la actual.
+    if (readOnly) this._readOnly = true;
 
-    // Hito 15: el perfil activo es de la sesión cargada, no de la que había.
-    // Conservar el actual dejaría el estado interno y el system prompt cargado
-    // en desacuerdo.
+    const notice = this.reapplyPrimaryProfile(activeAgent);
+    // El system prompt cargado es el de aquella sesión: si esta es read-only,
+    // tiene que decirlo aunque aquella no lo fuera.
+    if (this._readOnly) this.rebuildSystemPrompt();
+    return notice;
+  }
+
+  /** Hito 15 — reaplica el perfil principal de una sesión cargada. */
+  private reapplyPrimaryProfile(activeAgent?: string | null): string | null {
+    // El perfil activo es de la sesión cargada, no de la que había. Conservar
+    // el actual dejaría el estado interno y el system prompt cargado en
+    // desacuerdo.
     if (!activeAgent) {
       if (this._activeProfile) {
         this._activeProfile = null;
@@ -526,10 +590,17 @@ export class StratumAgent {
       };
     }
     const active = this._activeProfile;
+    const session = this._sessionProfile;
     // Un perfil principal sin `delegate_task` no puede delegar: anunciarle
     // perfiles y reglas de delegación le ordenaría llamar a una tool que no tiene.
+    // Lo mismo si el perfil de sesión la oculta (Hito 17).
     const canDelegate =
-      !active || active.allowedTools === null || active.allowedTools.includes(DELEGATE_TASK_TOOL);
+      (!active ||
+        active.allowedTools === null ||
+        active.allowedTools.includes(DELEGATE_TASK_TOOL)) &&
+      (!session || profileAllows(session, DELEGATE_TASK_TOOL));
+    // Hito 17: sin `test_evidence` en el toolset, el ciclo TDD no se enseña.
+    const testing = !session || profileAllows(session, TEST_EVIDENCE_TOOL);
     const delegable = canDelegate
       ? this.profiles.delegable().filter((p) => p.name !== active?.name)
       : [];
@@ -545,13 +616,15 @@ export class StratumAgent {
         ? { name: active.name, fragment: active.systemPromptFragment }
         : undefined,
       skills: this.skillsBlock,
+      readOnly: this._readOnly,
+      testing,
       // Guías por puntero (§3 de gentle-pi): se recalculan con el perfil, porque
       // la de work-routing solo se anuncia si hay a quién delegar. En modo
       // `inline` devuelve cadena vacía; los ficheros llevan fingerprint y no se
       // reescriben si no cambiaron.
       guides: prepareGuideIndex(
         this.config,
-        { agentProfiles, testCommand: this.config.tools.testCommand },
+        { agentProfiles, testCommand: testing ? this.config.tools.testCommand : '' },
         process.cwd(),
       ),
     };
@@ -588,12 +661,14 @@ export class StratumAgent {
         workspace: this.workspace,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
         // control pasan aunque el perfil no las liste; `delegate_task` no.
+        // Hito 17: el perfil de sesión se compone con el del agente principal.
         toolsetFilter:
           this.preset === 'assistant'
             ? assistantToolsetFilter({ workspace: this.workspace !== undefined })
-            : active
-              ? { allowedTools: active.allowedTools, controlTools: 'keep' }
-              : undefined,
+            : composeToolsetFilters(
+                this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
+                active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
+              ),
       },
     );
   }
@@ -678,6 +753,101 @@ export class StratumAgent {
     return notice;
   }
 
+  // -------------------------------------------------------------------------
+  // Hito 17 — read-only, perfil de sesión y contexto activo
+  // -------------------------------------------------------------------------
+
+  /** Las opciones de la sesión (read-only) sobre las del turno. Nunca relajan. */
+  private withSessionOptions(opts?: RunOptions): RunOptions {
+    return this._readOnly ? { ...opts, readOnly: true } : (opts ?? {});
+  }
+
+  /**
+   * Observa los eventos de un turno y apunta el último target donde algo se
+   * ejecutó (también dentro de subagentes). Un rechazo previo no cuenta: el
+   * badge dice dónde se está actuando, no dónde se intentó.
+   */
+  private targetTracker(): (event: AgentEvent) => void {
+    const inputs = new Map<string, { name: string; input: string }>();
+    const observe = (event: AgentEvent, prefix: string): void => {
+      if (event.type === 'tool_call_start') {
+        inputs.set(prefix + event.id, { name: event.name, input: event.input_so_far });
+      } else if (
+        event.type === 'tool_result' ||
+        (event.type === 'tool_error' && event.executed === true)
+      ) {
+        const call = inputs.get(prefix + event.id);
+        const target = call ? targetOfCall(call.name, call.input) : null;
+        if (target) this._activeTarget = target;
+      } else if (event.type === 'subagent_event') {
+        observe(event.event, `${event.subagentId}:`);
+      }
+    };
+    return (event) => observe(event, '');
+  }
+
+  isReadOnly(): boolean {
+    return this._readOnly;
+  }
+
+  /** Activa o desactiva el modo read-only. Recompone el prompt; el toolset cambia desde el próximo turno. */
+  setReadOnly(on: boolean): void {
+    if (this._readOnly === on) return;
+    this._readOnly = on;
+    this.rebuildSystemPrompt();
+  }
+
+  getSessionProfile(): SessionProfile | null {
+    return this._sessionProfile;
+  }
+
+  /** Lo que se pidió (`auto`, `code`…): con `auto`, `getSessionProfile()` es el resuelto. */
+  getSessionProfileRequest(): string {
+    return this._sessionProfileRequest;
+  }
+
+  /** Detección de infraestructura de la última resolución `auto`, o null. */
+  getProfileDetection(): InfraDetection | null {
+    return this._profileDetection;
+  }
+
+  private applySessionProfile(
+    requested: string | undefined,
+  ): { ok: true; profile: SessionProfile } | { ok: false; error: string } {
+    const resolved = resolveSessionProfile(requested, this.config);
+    if (!resolved.ok) return resolved;
+    this._sessionProfile = resolved.profile;
+    this._sessionProfileRequest = (requested ?? this.config.session.profile).trim().toLowerCase();
+    this._profileDetection = resolved.auto ?? null;
+    return { ok: true, profile: resolved.profile };
+  }
+
+  /** Cambia el perfil de sesión (`/profile`). Recompone el prompt. */
+  setSessionProfile(
+    name: string,
+  ):
+    | { ok: true; profile: SessionProfile; detection: InfraDetection | null }
+    | { ok: false; error: string } {
+    if (this.preset === 'assistant') {
+      return {
+        ok: false,
+        error: 'los perfiles de sesión no están disponibles en el modo asistente.',
+      };
+    }
+    const applied = this.applySessionProfile(name);
+    if (!applied.ok) return applied;
+    this.rebuildSystemPrompt();
+    return { ok: true, profile: applied.profile, detection: this._profileDetection };
+  }
+
+  /** Contexto activo (badge de la barra): último target usado y su entorno. */
+  getActiveContext(): { target: string; environment: ResolvedEnvironment | null } {
+    return {
+      target: this._activeTarget,
+      environment: resolveEnvironment(this._activeTarget, this.config),
+    };
+  }
+
   listProfiles(): AgentProfile[] {
     return this.profiles.list();
   }
@@ -751,7 +921,7 @@ export class StratumAgent {
       registry: this.registry,
       config: this.config,
       signal,
-      opts,
+      opts: this.withSessionOptions(opts),
       skillsBlock: this.skillsBlock,
     });
     try {

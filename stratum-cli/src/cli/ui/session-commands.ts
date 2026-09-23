@@ -83,6 +83,21 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: true,
   },
   {
+    name: '/readonly',
+    description: 'Alterna el modo read-only: solo observación, nada que cambie estado (on/off)',
+    hasArgs: false,
+  },
+  {
+    name: '/profile',
+    description: 'Perfil de sesión: code, infra, full o auto (sin args: lista)',
+    hasArgs: true,
+  },
+  {
+    name: '/env',
+    description: 'Entornos definidos, sus reglas y el contexto activo',
+    hasArgs: false,
+  },
+  {
     name: '/clear',
     description: 'Purga la conversación y el contexto del LLM (la sesión sigue activa)',
     hasArgs: false,

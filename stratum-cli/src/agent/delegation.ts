@@ -202,6 +202,9 @@ export async function* executeDelegations(
             parentDestructivePolicy: parentPolicy,
             sessionId: opts?.sessionId,
             onConfirmDestructive: wrappedConfirm,
+            // Hito 17: el hijo hereda el modo read-only y el plan aprobado del padre.
+            readOnly: opts?.readOnly,
+            planApproved: opts?.planApproved,
             makeRouter: opts?.makeSubagentRouter
               ? () => opts.makeSubagentRouter!(job.profile)
               : undefined,

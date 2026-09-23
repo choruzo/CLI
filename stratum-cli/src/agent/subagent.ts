@@ -68,6 +68,10 @@ export interface RunSubagentOptions {
    * redescubre skills: el índice se resuelve una vez por sesión y se hereda.
    */
   skillsBlock?: string;
+  /** Hito 17 — modo read-only del padre: el hijo nunca puede escribir por él. */
+  readOnly?: boolean;
+  /** Hito 17 — el padre trabaja bajo un plan aprobado (satisface `requirePlan`). */
+  planApproved?: boolean;
 }
 
 function pad2(n: number): string {
@@ -173,6 +177,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
         providerName: router.providerName,
         isSubagent: true,
         skills: opts.skillsBlock,
+        readOnly: opts.readOnly,
         guides: prepareGuideIndex(config, {
           isSubagent: true,
           testCommand: config.tools.testCommand,
@@ -203,6 +208,8 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
       profile.destructivePolicy,
     ),
     onConfirmDestructive: opts.onConfirmDestructive,
+    readOnly: opts.readOnly,
+    planApproved: opts.planApproved,
     maxIterations: profile.budget.maxIterations,
     maxTokens: profile.budget.maxTokens,
   };
