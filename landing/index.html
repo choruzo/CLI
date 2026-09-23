@@ -1,215 +1,298 @@
 <!doctype html>
-<html lang="es">
+<html lang="es" data-theme="dark">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Stratum CLI · Roadmap & Evolution</title>
+    <title>Stratum CLI</title>
     <meta
       name="description"
-      content="Landing oficial de Stratum CLI con hitos, evolución de commits, estado actual y próximos pasos."
+      content="Stratum CLI: agente de terminal ReAct, provider-agnostic y local-first. Hitos, novedades, actividad del repositorio y demo interactiva."
     />
+    <meta name="theme-color" content="#0a0a0b" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0a0b'/%3E%3Cpath d='M8 10l6 6-6 6' stroke='%23F59E0B' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 22h8' stroke='%23F59E0B' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link
-      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Space+Grotesk:wght@600;700&family=JetBrains+Mono:wght@400;500&display=swap"
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
+    <a class="skip" href="#main">Saltar al contenido</a>
+    <div class="crt" aria-hidden="true"></div>
 
-    <!-- NAV -->
-    <nav class="nav" aria-label="Navegación principal">
-      <div class="nav-inner">
-        <a href="#" class="nav-logo" aria-label="Stratum CLI inicio">
-          <span class="nav-logo-text">STRATUM</span>
-          <span class="nav-logo-badge">CLI</span>
-        </a>
-        <ul class="nav-links" role="list">
-          <li><a href="#charts">Gráficos</a></li>
-          <li><a href="#milestones">Hitos</a></li>
-          <li><a href="#commits">Commits</a></li>
-        </ul>
-        <a class="btn btn-nav-cta" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer" aria-label="Ver repositorio en GitHub">
-          <svg viewBox="0 0 24 24" width="15" height="15" fill="currentColor" aria-hidden="true" focusable="false">
-            <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
-          </svg>
-          GitHub
-        </a>
+    <!-- Barra superior estilo tmux -->
+    <nav class="tmux" aria-label="Navegación principal">
+      <a class="tmux-session" href="#top">[stratum]</a>
+      <ul class="tmux-windows" role="list">
+        <li><a href="#status" data-win="status">0:status</a></li>
+        <li><a href="#demo" data-win="demo">1:demo</a></li>
+        <li><a href="#hitos" data-win="hitos">2:hitos</a></li>
+        <li><a href="#novedades" data-win="novedades">3:novedades</a></li>
+        <li><a href="#actividad" data-win="actividad">4:log</a></li>
+        <li><a href="#desktop" data-win="desktop">5:desktop</a></li>
+        <li><a href="#roadmap" data-win="roadmap">6:roadmap</a></li>
+      </ul>
+      <div class="tmux-right">
+        <button class="tbtn" id="theme-toggle" type="button" aria-label="Cambiar tema claro/oscuro">◐ tema</button>
+        <span class="tmux-branch" title="Rama">⎇ main</span>
+        <span class="tmux-clock" id="clock">--:--</span>
       </div>
     </nav>
 
     <!-- HERO -->
-    <header class="hero">
-      <div class="container">
-        <div class="hero-inner">
-          <div class="hero-content">
-            <p class="eyebrow">Stratum CLI &nbsp;·&nbsp; v0.2.0</p>
-            <h1>Roadmap, estado actual y evolución real del proyecto</h1>
-            <p class="subtitle">
-              Vista ejecutiva con hitos cerrados, ejecución futura y actividad de commits en tiempo real.
-            </p>
-            <div class="hero-actions">
-              <a class="btn btn-primary" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">
-                <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor" aria-hidden="true" focusable="false">
-                  <path d="M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12"/>
-                </svg>
-                Ver repositorio
-              </a>
-              <a class="btn btn-secondary" href="#charts">Ver gráficos</a>
-            </div>
-          </div>
+    <header class="hero" id="top">
+      <div class="wrap">
+        <pre class="logo" id="logo" aria-label="STRATUM">STRATUM</pre>
+        <p class="tagline">
+          <span class="dim">v</span><span id="hero-version">0.4.0</span>
+          <span class="sep">·</span> extensible <span class="sep">·</span> local-first <span class="sep">·</span> provider-agnostic
+        </p>
+        <p class="lede">
+          Un agente de línea de comandos sobre un loop <b>ReAct</b> (Reason → Act → Observe), con
+          plan-and-execute, subagentes en paralelo, memoria persistente en tres capas y ejecución
+          local o remota bajo guardas que no se pueden desactivar. Funciona con cualquier API
+          OpenAI-compatible: Ollama, llama.cpp, vLLM, LiteLLM u OpenAI.
+        </p>
 
-          <!-- Terminal mockup (hidden on mobile/tablet) -->
-          <div class="terminal-preview-wrapper" aria-hidden="true">
-            <div class="terminal-window">
-              <div class="terminal-topbar">
-                <div class="terminal-dots">
-                  <span></span><span></span><span></span>
-                </div>
-                <span class="terminal-title">stratum chat</span>
-              </div>
-              <div class="terminal-statusbar">
-                <span class="t-dot t-connected">●</span>
-                <span class="t-provider">ollama</span>
-                <span class="t-sep">│</span>
-                <span class="t-model">qwen2.5-coder:32b</span>
-                <span class="t-ctx-right">ctx 2.1k / 32k <span class="t-sep">│</span> <span class="t-pct">6%</span></span>
-              </div>
-              <div class="terminal-body">
-                <div class="t-turn">
-                  <div class="t-label t-label-user">You</div>
-                  <div class="t-text t-user-text"><span class="t-bar">▏</span> Refactoriza src/auth.ts con error handling</div>
-                </div>
-                <div class="t-turn">
-                  <div class="t-label t-label-agent">Stratum</div>
-                  <div class="t-text t-agent-text">Voy a analizar el archivo primero.</div>
-                  <div class="t-tool t-tool-done">
-                    <span class="t-tool-icon">✓</span>
-                    <span class="t-tool-name">read_file</span>
-                    <span class="t-tool-meta">│ 0.4s │ src/auth.ts</span>
-                  </div>
-                  <div class="t-tool t-tool-done">
-                    <span class="t-tool-icon">✓</span>
-                    <span class="t-tool-name">edit_file</span>
-                    <span class="t-tool-meta">│ 0.9s │ +47 / -23 líneas</span>
-                  </div>
-                  <div class="t-text t-agent-text">He refactorizado con error boundaries...<span class="t-cursor" aria-hidden="true"></span></div>
-                </div>
-              </div>
-              <div class="terminal-prompt-line">
-                <span class="t-prompt">❯❯</span> <span class="t-cursor-input" aria-hidden="true">_</span>
-              </div>
-            </div>
-          </div>
+        <div class="boot" id="boot" aria-live="polite">
+          <div class="boot-line"><span class="p">❯</span>npm i -g stratum-cli</div>
+        </div>
+
+        <div class="hero-actions">
+          <button class="btn btn-primary copy" type="button" data-copy="npm i -g stratum-cli">
+            <span class="p">$</span> npm i -g stratum-cli <span class="copy-hint">⧉ copiar</span>
+          </button>
+          <a class="btn" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">[ github ↗ ]</a>
+          <a class="btn" href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">[ npm ↗ ]</a>
+          <a class="btn" href="#demo">[ probar la demo ]</a>
         </div>
       </div>
     </header>
 
-    <!-- MAIN -->
-    <main class="container">
-
-      <section class="kpis" aria-label="Estado general">
-        <article class="card card-status">
-          <p>Estado general</p>
-          <h3 id="general-status">Cargando…</h3>
-        </article>
-        <article class="card card-milestone">
-          <p>Hito actual</p>
-          <h3 id="current-milestone">Cargando…</h3>
-        </article>
-        <article class="card card-commits">
-          <p>Commits totales</p>
-          <h3 id="total-commits">-</h3>
-        </article>
-        <article class="card card-recent">
-          <p>Commits 30 días</p>
-          <h3 id="commits-30d">-</h3>
-        </article>
-      </section>
-
-      <section id="charts" class="panel">
-        <h2>Gráficos de evolución</h2>
-        <div class="chart-grid">
-          <div class="chart-card"><h3>Actividad diaria — 45 días</h3><canvas id="dailyChart"></canvas></div>
-          <div class="chart-card"><h3>Commits por tipo</h3><canvas id="typeChart"></canvas></div>
-          <div class="chart-card"><h3>Progreso del roadmap</h3><canvas id="roadmapChart"></canvas></div>
-          <div class="chart-card"><h3>Evolución mensual</h3><canvas id="monthlyChart"></canvas></div>
+    <main id="main">
+      <!-- STATUS -->
+      <section class="section" id="status" aria-labelledby="h-status">
+        <div class="wrap">
+          <h2 class="cmd" id="h-status" data-cmd="stratum status">stratum status</h2>
+          <div class="kpis" id="kpis">
+            <div class="kpi"><span class="k">versión npm</span><span class="v" id="k-version">0.4.0</span><span class="s" id="k-version-src">snapshot</span></div>
+            <div class="kpi"><span class="k">hito actual</span><span class="v">16 <span class="ok">✓</span></span><span class="s">ejecución unificada</span></div>
+            <div class="kpi"><span class="k">commits</span><span class="v" id="k-commits">—</span><span class="s" id="k-commits-30">— en 30 días</span></div>
+            <div class="kpi"><span class="k">líneas</span><span class="v"><span class="add" id="k-add">+0</span></span><span class="s"><span class="del" id="k-del">−0</span> borradas</span></div>
+            <div class="kpi"><span class="k">tests</span><span class="v">848 <span class="ok">✓</span></span><span class="s">91 ficheros · vitest</span></div>
+            <div class="kpi"><span class="k">desktop</span><span class="v">D4</span><span class="s">de D0–D8 · Tauri + SEA</span></div>
+            <div class="kpi"><span class="k">último commit</span><span class="v" id="k-last">—</span><span class="s" id="k-last-sha">—</span></div>
+            <div class="kpi"><span class="k">días de proyecto</span><span class="v" id="k-days">—</span><span class="s">desde 2026-05-27</span></div>
+          </div>
+          <p class="source-line" id="source-line">
+            <span class="dot"></span> datos: snapshot local
+          </p>
         </div>
       </section>
 
-      <section id="milestones" class="panel">
-        <h2>Hitos del proyecto</h2>
-        <div id="milestone-list" class="milestones"></div>
-      </section>
-
-      <section class="panel">
-        <h2>Ejecuciones futuras</h2>
-        <div id="future-list" class="future-grid"></div>
-      </section>
-
-      <section id="commits" class="panel">
-        <h2>Últimos commits</h2>
-        <div class="table-wrap">
-          <table>
-            <thead>
-              <tr>
-                <th>Fecha</th>
-                <th>SHA</th>
-                <th>Autor</th>
-                <th>Descripción</th>
-              </tr>
-            </thead>
-            <tbody id="commit-table"></tbody>
-          </table>
+      <!-- DEMO -->
+      <section class="section" id="demo" aria-labelledby="h-demo">
+        <div class="wrap">
+          <h2 class="cmd" id="h-demo" data-cmd="stratum chat --demo">stratum chat --demo</h2>
+          <p class="note">
+            Escenarios reproducidos a partir de la UI real (Ink). Elige uno o escribe <kbd>help</kbd> en el
+            prompt: tiene historial con <kbd>↑</kbd><kbd>↓</kbd> y autocompletado con <kbd>Tab</kbd>.
+          </p>
+          <div class="term" id="term">
+            <div class="term-bar">
+              <span class="dots" aria-hidden="true"><i></i><i></i><i></i></span>
+              <span class="term-title">stratum chat — ~/proyecto</span>
+              <button class="tbtn" id="demo-pause" type="button" aria-pressed="false">❚❚ pausa</button>
+            </div>
+            <div class="scenario-tabs" role="tablist" aria-label="Escenarios de la demo" id="scenario-tabs"></div>
+            <div class="term-body" id="term-body" role="log" aria-live="polite" tabindex="0"></div>
+            <div class="term-status" id="term-status">
+              <span><span class="ok">●</span> litellm</span><span class="sep">│</span><span>qwen3.6-35b-a3b</span><span class="sep">│</span><span>mcp <span class="ok">●</span></span>
+              <span class="sb-mode" id="sb-mode"></span>
+              <span class="grow"></span>
+              <span class="add">+0</span>/<span class="del">-0</span><span class="sep">│</span><span>Σ <span id="sb-tokens">0</span></span><span class="sep">│</span><span>ctx <span class="ok" id="sb-ctx">4%</span></span>
+            </div>
+            <form class="term-input" id="term-form" autocomplete="off">
+              <label for="term-in" class="p">❯❯</label>
+              <input id="term-in" type="text" spellcheck="false" placeholder="escribe help, demo plan, hitos, grep ssh…" aria-label="Comando de la demo" />
+            </form>
+          </div>
         </div>
       </section>
 
-      <section class="panel">
-        <h2>Estado visual actual del CLI</h2>
-        <div class="shots">
-          <figure>
-            <img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI" loading="lazy" class="zoomable" />
-            <figcaption>Banner de arranque</figcaption>
-          </figure>
-          <figure>
-            <img src="./assets/chat.png" alt="Vista de conversación y status bar del CLI" loading="lazy" class="zoomable" />
-            <figcaption>Conversación con tool calls</figcaption>
-          </figure>
-          <figure>
-            <img src="./assets/help.png" alt="Paleta de comandos /help del CLI" loading="lazy" class="zoomable" />
-            <figcaption>Comandos disponibles</figcaption>
-          </figure>
+      <!-- HITOS -->
+      <section class="section" id="hitos" aria-labelledby="h-hitos">
+        <div class="wrap">
+          <h2 class="cmd" id="h-hitos" data-cmd="git log --graph --oneline hitos">git log --graph --oneline hitos</h2>
+          <div class="progress-row">
+            <div class="progress" aria-label="Progreso de la CLI">
+              <span class="progress-label">cli</span>
+              <span class="bar" id="bar-cli"></span>
+              <span class="progress-num" id="num-cli"></span>
+            </div>
+            <div class="progress" aria-label="Progreso de Desktop">
+              <span class="progress-label">desktop</span>
+              <span class="bar" id="bar-desktop"></span>
+              <span class="progress-num" id="num-desktop"></span>
+            </div>
+          </div>
+          <div class="filters" role="group" aria-label="Filtrar hitos" id="hito-filters">
+            <button type="button" class="chip on" data-f="all">--all</button>
+            <button type="button" class="chip" data-f="cli">--cli</button>
+            <button type="button" class="chip" data-f="desktop">--desktop</button>
+            <button type="button" class="chip" data-f="next">--pendientes</button>
+          </div>
+          <ol class="graph" id="graph"></ol>
         </div>
       </section>
 
+      <!-- NOVEDADES -->
+      <section class="section" id="novedades" aria-labelledby="h-nov">
+        <div class="wrap">
+          <h2 class="cmd" id="h-nov" data-cmd="stratum changelog --since v0.2.0">stratum changelog --since v0.2.0</h2>
+          <p class="note">Lo que ha entrado desde la última versión de esta página (Hito 7, junio): once hitos de la CLI, dos releases (v0.3.0 y v0.4.0), un PR y el arranque de Stratum Desktop.</p>
+
+          <div class="releases" id="releases"></div>
+
+          <div class="news" id="news"></div>
+
+          <h3 class="sub">pull requests</h3>
+          <div id="prs" class="prs"></div>
+        </div>
+      </section>
+
+      <!-- ACTIVIDAD -->
+      <section class="section" id="actividad" aria-labelledby="h-act">
+        <div class="wrap">
+          <h2 class="cmd" id="h-act" data-cmd="git log --stat --since=2026-05-27">git log --stat --since=2026-05-27</h2>
+
+          <div class="panel">
+            <div class="panel-head"><span>actividad diaria</span><span class="dim" id="heat-range"></span></div>
+            <div class="heat-wrap"><div class="heat" id="heat" role="img" aria-label="Mapa de calor de commits por día"></div></div>
+            <div class="heat-legend"><span class="dim">menos</span><i class="l0"></i><i class="l1"></i><i class="l2"></i><i class="l3"></i><i class="l4"></i><span class="dim">más</span></div>
+          </div>
+
+          <div class="split">
+            <div class="panel">
+              <div class="panel-head"><span>commits por tipo</span><span class="dim">conventional commits</span></div>
+              <div class="bars" id="type-bars"></div>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span>commits por mes</span><span class="dim">+líneas</span></div>
+              <div class="bars" id="month-bars"></div>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-head">
+              <span>últimos commits</span>
+              <label class="grep">
+                <span class="p">grep</span>
+                <input id="commit-filter" type="search" placeholder="ssh, desktop, fix…" aria-label="Filtrar commits" />
+              </label>
+            </div>
+            <ul class="commits" id="commits"></ul>
+            <button class="tbtn more" id="commits-more" type="button">-- más --</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- DESKTOP -->
+      <section class="section" id="desktop" aria-labelledby="h-desk">
+        <div class="wrap">
+          <h2 class="cmd" id="h-desk" data-cmd="cd ../stratum-desktop && npm run tauri dev">cd ../stratum-desktop &amp;&amp; npm run tauri dev</h2>
+          <p class="note">
+            Stratum Desktop reutiliza el core de la CLI como <b>sidecar</b> (binario Node SEA) detrás de una app
+            Tauri. Primero un asistente de chat con workspace aislado; el modo Code llega en D8.
+          </p>
+          <div class="desk" aria-label="Recreación de la ventana de Stratum Desktop (D4)">
+            <div class="desk-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Stratum Desktop</span></div>
+            <div class="desk-body">
+              <aside class="desk-side">
+                <div class="desk-new">＋ Nueva conversación</div>
+                <div class="desk-group">fijadas</div>
+                <div class="desk-conv on">📌 Informe trimestral <span class="dim">2</span></div>
+                <div class="desk-group">hoy</div>
+                <div class="desk-conv">Resumen del PDF <span class="q">en cola</span></div>
+                <div class="desk-conv">Traducir contrato</div>
+                <div class="desk-group">archivadas</div>
+                <div class="desk-conv dim">Notas de reunión <span class="dim">.tar.gz</span></div>
+              </aside>
+              <div class="desk-main">
+                <div class="desk-msg user">Resume <span class="file">inputs/ventas-q3.xlsx</span> y deja un informe en outputs/</div>
+                <div class="desk-msg bot">
+                  <div class="tool"><span class="ok">✓</span> read_file <span class="dim">inputs/ventas-q3.xlsx</span></div>
+                  <div class="tool"><span class="ok">✓</span> write_file <span class="dim">outputs/informe-q3.md</span></div>
+                  Listo. Las ventas crecen un 12 % respecto a Q2; el detalle por región está en el informe.
+                  <div class="desk-files"><span>📄 informe-q3.md</span><span class="dim">Abrir · Guardar como…</span></div>
+                </div>
+                <div class="desk-input">Escribe un mensaje… <span class="dim">⏎</span></div>
+                <div class="desk-status"><span><span class="ok">●</span> litellm · qwen3.6</span><span>workspace 3.2 MB</span><span>2 turnos activos · 1 en cola</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="desk-grid" id="desk-grid"></div>
+        </div>
+      </section>
+
+      <!-- CAPTURAS -->
+      <section class="section" id="capturas" aria-labelledby="h-shots">
+        <div class="wrap">
+          <h2 class="cmd" id="h-shots" data-cmd="ls -la capturas/">ls -la capturas/</h2>
+          <div class="shots">
+            <figure>
+              <button class="shot" type="button" data-full="./assets/banner.png"><img src="./assets/banner.png" alt="Pantalla de inicio de Stratum CLI con el logo y el quick start" loading="lazy" /></button>
+              <figcaption><span class="dim">-rw-r--r--</span> banner.png <span class="dim">· arranque</span></figcaption>
+            </figure>
+            <figure>
+              <button class="shot" type="button" data-full="./assets/chat.png"><img src="./assets/chat.png" alt="Conversación con la barra de estado del CLI" loading="lazy" /></button>
+              <figcaption><span class="dim">-rw-r--r--</span> chat.png <span class="dim">· status bar</span></figcaption>
+            </figure>
+            <figure>
+              <button class="shot" type="button" data-full="./assets/help.png"><img src="./assets/help.png" alt="Paleta de comandos /help del CLI" loading="lazy" /></button>
+              <figcaption><span class="dim">-rw-r--r--</span> help.png <span class="dim">· /help</span></figcaption>
+            </figure>
+          </div>
+          <p class="note">Las vistas nuevas (plan, árbol de subagentes, <code>exec</code> sobre SSH, redacción, <code>todo</code>, <code>question</code>) están recreadas en la <a href="#demo">demo</a>.</p>
+        </div>
+      </section>
+
+      <!-- ROADMAP -->
+      <section class="section" id="roadmap" aria-labelledby="h-road">
+        <div class="wrap">
+          <h2 class="cmd" id="h-road" data-cmd="cat CLI-DOC/Orientacion-Infraestructura.md | grep roadmap">cat CLI-DOC/Orientacion-Infraestructura.md | grep roadmap</h2>
+          <p class="note">
+            La CLI gira hacia infraestructura: primero la seguridad (Hitos 16–17), luego el alcance. La pieza
+            diferencial es el <b>Hito 19</b>: diagnóstico verificado por tooling, con memoria de decisiones
+            entre sesiones.
+          </p>
+          <div class="roadmap" id="roadmap-list"></div>
+        </div>
+      </section>
     </main>
 
-    <!-- LIGHTBOX -->
-    <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Vista ampliada" hidden>
-      <button class="lightbox-close" aria-label="Cerrar">
-        <svg viewBox="0 0 24 24" width="20" height="20" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
-          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-        </svg>
-      </button>
-      <div class="lightbox-backdrop"></div>
-      <img class="lightbox-img" src="" alt="" />
-    </div>
-
-    <!-- FOOTER -->
-    <footer>
-      <div class="footer-inner">
-        <span class="footer-brand"><span>STRATUM</span> CLI &nbsp;·&nbsp; v0.2.0</span>
-        <ul class="footer-links" role="list">
-          <li><a href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">GitHub</a></li>
-          <li><a href="#charts">Gráficos</a></li>
-          <li><a href="#milestones">Hitos</a></li>
-          <li><a href="#commits">Commits</a></li>
-        </ul>
+    <footer class="footer">
+      <div class="wrap">
+        <div><span class="p">❯</span> exit <span class="dim">— MIT · hecho con Stratum y mucho café</span></div>
+        <div class="footer-links">
+          <a href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">github</a>
+          <a href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">npm</a>
+          <a href="#top">↑ arriba</a>
+        </div>
+        <div class="dim small" id="generated"></div>
       </div>
     </footer>
 
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.3/dist/chart.umd.min.js"></script>
+    <!-- Lightbox -->
+    <div id="lightbox" class="lightbox" role="dialog" aria-modal="true" aria-label="Vista ampliada" hidden>
+      <button class="tbtn lightbox-close" type="button">[x] cerrar</button>
+      <img class="lightbox-img" src="" alt="" />
+    </div>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
     <script src="./data/commits-data.js"></script>
     <script src="./app.js" defer></script>
   </body>
