@@ -30,6 +30,8 @@ const RESET_HOOK = '$ExecutionContext.InvokeCommand.PostCommandLookupAction = $n
 
 describe.skipIf(process.platform !== 'win32')(
   'backend local en Windows — casos límite (Hito 16)',
+  // Cada caso lanza tres pwsh seguidos; bajo la carga de la suite completa superan los 5 s por defecto.
+  { timeout: 30_000 },
   () => {
     it('tuberías: el exit code del nativo final cuenta; un cmdlet antes del nativo gana', async () => {
       expect(await exitCodeOf('cmd /c exit 7 | Out-String')).toBe(7);
