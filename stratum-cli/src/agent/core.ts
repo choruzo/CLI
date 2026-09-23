@@ -301,6 +301,7 @@ export class StratumAgent {
   clearHistory(): void {
     const system = this.messages[0]?.role === 'system' ? this.messages[0] : null;
     this.messages = system ? [system] : [];
+    this.contextManager?.forgetLastUsage();
     this._toolCallCount = 0;
     this._planRef = null;
     this.todos.clear();
@@ -314,6 +315,7 @@ export class StratumAgent {
    */
   replaceHistory(messages: Message[], activeAgent?: string | null): string | null {
     this.messages = [...messages];
+    this.contextManager?.forgetLastUsage();
     this._toolCallCount = 0;
     this._planRef = null;
     this.todos.replace(rehydrateTodos(this.messages));

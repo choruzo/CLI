@@ -72,7 +72,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D1** ✅ | IPC seguro + chat de asistente en una conversación | D0 | 15.1, 15.4, 15.5, 15.9, 15.13, 16.6 |
 | **D2** 🔄 | Espacio de trabajo aislado + subida y descarga de ficheros | D1 | 15.8, 16.1, 16.2, 16.3, 16.4 |
 | **D3** 🔄 | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
-| **D4** | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
+| **D4** 🔄 | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
 | **D6** | Integración con el SO + pipeline de build | D5 | — |
 | **D7** | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
@@ -578,11 +578,99 @@ el schema).
 
 ---
 
-## D4 — Conversaciones múltiples, Sidebar, StatusBar e InputArea
+## D4 — Conversaciones múltiples, Sidebar, StatusBar e InputArea 🔄
 
 **Objetivo.** Navegación entre conversaciones como en un asistente de escritorio:
 lista en el sidebar como navegación principal, varias conversaciones vivas a la
 vez, StatusBar e InputArea completos.
+
+**Estado (2026-09-23): implementado y verificado en Windows (ventana real) y
+en Linux (protocolo contra el SEA) con `gemma-4-12b` (llama.cpp); pendiente la
+revisión a mano de la ventana en Linux.** Suites verdes: CLI 1027 (`tsc` y lint
+limpios), frontend 102 (typecheck limpio) y Rust 40 (e2e contra el SEA con
+protocolo 5).
+
+Linux (WSL2 Ubuntu 24.04): CLI 1010 + 17 omitidos por ser de Windows (`tsc` y
+lint limpios), frontend 102, SEA de Linux con protocolo 5 y los tres nativos, y
+`cargo test` 39/39 con los e2e. Como WSLg no deja inyectar teclado, D4 se probó
+con un cliente del protocolo por el unix socket contra el SEA de Linux, con un
+HOME temporal y `gemma-4-12b`: 14/14 — dos conversaciones arrancan a la vez sin
+cola ni mezcla de streams, listado y renombrar, `/model`, `/compact`, memoria
+global aplicada por la conversación abierta y conflicto al guardar, `/clear`
+(el contexto vuelve al de una conversación vacía, ~3,8k con los esquemas de las
+tools), `SIGKILL` a mitad de turno → al relanzar, la conversación vuelve con el
+turno interrumpido, eliminar borra el workspace, cola con límite 1 y apagado
+ordenado por EOF en stdin. Con este llama.cpp (un slot) las dos generaciones
+simultáneas se sirven en serie: Stratum las lanza a la vez, pero los tokens de
+la segunda empiezan cuando termina la primera — el motivo del límite de 15.15.
+
+| Criterio | Estado |
+|---|---|
+| Dos conversaciones generan en paralelo sin mezclar streams ni workspaces | ✅ En la ventana: dos poemas a la vez («2 generando», dos indicadores en la lista), cada conversación con el suyo y su carpeta. Con `maxConcurrentTurns: 1`, la segunda muestra «En cola» y arranca al terminar la primera. Tests con providers bloqueados: eventos etiquetados por turno, cola FIFO y cancelar en cola sin llamar al modelo |
+| Eliminar una conversación borra su workspace (o su archivo) | ✅ Desde el sidebar (con confirmación en línea) se van sesión, transcript y carpeta; test con una archivada (`.tar.gz` y registro) y con una abierta |
+| Cierre forzado deja recuperable la conversación activa | ✅ `taskkill /F` a la app a mitad de generación: al relanzar, la conversación sigue activa con su historial y el turno «a medias» con «Reintentar», que funciona. Tests: primer turno sin checkpoint todavía y turno con una tool ya terminada |
+| La memoria global se ve y se edita desde el sidebar | ✅ Creado el `STRATUM.md` global desde el panel y aplicado por la conversación abierta sin reiniciarla; editarlo mientras cambiaba en disco da el conflicto sin pisarlo (el fichero de prueba se borró al terminar). Decisiones: búsqueda y borrado con test |
+
+También probado en la ventana: `/model` (selector con los modelos de
+llama.cpp), `/compact`, `/clear` y `Ctrl+L` con confirmación, renombrar, índice
+de mensajes, panel de ficheros sobre una conversación de D2, `Ctrl+N`, `Ctrl+B`,
+`Ctrl+K` y `Escape`.
+
+Hallazgos de la prueba real, corregidos: una conversación vaciada con `/clear`
+no se podía eliminar (las acciones dependían de que tuviera turnos), el
+textarea mostraba barra de scroll (la altura no contaba el borde), `/model` sin
+argumento necesitaba dos Enter, el % de contexto no bajaba tras `/clear`, y cada
+conversación nueva abandonada dejaba una carpeta vacía.
+
+Decisiones (con el usuario, antes de implementar):
+- **Sin pestañas.** El sidebar es la navegación; las conversaciones que generan
+  siguen vivas en segundo plano con un indicador en la lista (y un punto en el
+  icono si alguna espera una respuesta del usuario).
+- **Transcript de UI guardado por el sidecar** (`~/.stratum/desktop/conversations/<id>.json`),
+  aparte del historial del agente: sobrevive a la compresión de contexto y
+  conserva tool calls (salida recortada a 8k), avisos y tarjetas de fichero.
+  Las conversaciones de D1–D3 se leen derivando el transcript del historial
+  (sin avisos ni tarjetas, y sin lo que ya se comprimió).
+- **Límite de generaciones simultáneas** `desktop.maxConcurrentTurns` (default
+  2, 1–8): con un llama.cpp de un slot, dos a la vez van a la mitad de
+  velocidad cada una, y un provider remoto puede responder con rate limit
+  (15.15). Las de más esperan «En cola» (FIFO) y se pueden cancelar sin llegar
+  a llamar al modelo.
+- **Memoria global editable en el sidebar** con concurrencia optimista: se
+  guarda sobre el `mtime` leído y, si el `STRATUM.md` cambió en disco (la CLI,
+  otro editor), no se pisa: «Cargar la versión del disco» o «Sobrescribir con
+  la mía». Las conversaciones abiertas recomponen el prompt (o lo harán antes
+  de su siguiente turno).
+
+Decisiones de diseño:
+- **Protocolo v5**: `list_conversations`/`conversations`, `conversation_updated`,
+  `rename_conversation`, `delete_conversation`/`conversation_deleted`,
+  `clear_conversation`/`conversation_cleared`, `compact_conversation`,
+  `list_models`/`models`, `set_model`, `conversation_stats`,
+  `conversation_notice`, `turn_queued`/`turn_started` y `memory_*`.
+  `conversation_opened` trae el transcript (con el turno en marcha, si lo hay),
+  el título, las tareas y las estadísticas; `WorkspaceStatus.sizeBytes` para la
+  StatusBar.
+- **Una conversación que deja de ser la activa se cierra en el sidecar** en
+  cuanto no tiene turno ni pregunta pendiente (la retención puede volver a
+  tocarla); si genera, sigue abierta hasta terminar. Un borrador abandonado
+  (sin mensajes ni ficheros) no deja carpeta de workspace.
+- **Checkpoints (15.12)**: el transcript se guarda al aceptar el mensaje; sesión
+  y transcript, tras cada tool terminada y cada 60 s. El checkpoint quita del
+  historial un `assistant` con `tool_calls` sin respuesta y el `user` final sin
+  respuesta; al reabrir, el turno aparece «interrumpido» con «Reintentar».
+- **`/model` es por conversación** y se guarda con su sesión; al reabrir se
+  reaplica si el provider sigue siendo el mismo. `/clear` vacía el historial del
+  agente y el visible, conserva los ficheros y pide confirmación en la propia
+  conversación (también con `Ctrl+L`). `/settings` avisa de que llega en D5.
+- **Eliminar** cierra la sesión, espera a que su turno termine y borra sesión,
+  transcript y workspace (carpeta o archivo); no se ofrece mientras genera.
+  Fijar desde el sidebar funciona también con la conversación cerrada o
+  archivada (sin restaurarla).
+- **Panel de ficheros**: Rust lista `inputs/` y `outputs/` (`workspace_files`)
+  y «Guardar»/«Abrir» aceptan ahora también `inputs/`; nunca `scratch/`.
+- **Tras `/clear`, el % de contexto** deja de contar el último `prompt_tokens`
+  real (`ContextManager.forgetLastUsage`); arregla también la barra de la CLI.
 
 ### Tareas
 

@@ -227,6 +227,12 @@ pub fn sidecar_send(
         tx.send(line)
             .map_err(|_| "el canal con el sidecar está cerrado".to_string())?;
     }
+    // Una conversación eliminada no conserva adjuntos pendientes (D4).
+    if frame.get("type").and_then(Value::as_str) == Some("delete_conversation") {
+        if let Some(cid) = frame.get("conversationId").and_then(Value::as_str) {
+            workspaces.forget(cid);
+        }
+    }
     // Un `chat` con adjuntos los hace parte de la conversación: ya no se
     // pueden descartar (D2).
     if frame.get("type").and_then(Value::as_str) == Some("chat") {

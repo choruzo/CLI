@@ -1,4 +1,12 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { resolve, sep } from 'path';
 import type { Message } from '../agent/types.js';
 import type { SessionContext } from '../session/types.js';
@@ -23,6 +31,23 @@ export function isConversationId(id: string): boolean {
   return UUID.test(id);
 }
 
+/** Ids de conversación de los `<uuid>.json` de un directorio. */
+export function idsIn(dir: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(dir);
+  } catch {
+    return [];
+  }
+  const ids: string[] = [];
+  for (const e of entries) {
+    if (!e.endsWith('.json')) continue;
+    const id = e.slice(0, -'.json'.length);
+    if (isConversationId(id)) ids.push(id);
+  }
+  return ids;
+}
+
 export interface DesktopSessionSave {
   conversationId: string;
   provider: string;
@@ -33,7 +58,7 @@ export interface DesktopSessionSave {
 }
 
 export class DesktopSessionStore {
-  constructor(private readonly dir: string) {}
+  constructor(readonly dir: string) {}
 
   private pathFor(conversationId: string): string {
     if (!isConversationId(conversationId)) {
@@ -50,6 +75,15 @@ export class DesktopSessionStore {
 
   exists(conversationId: string): boolean {
     return existsSync(this.pathFor(conversationId));
+  }
+
+  remove(conversationId: string): void {
+    rmSync(this.pathFor(conversationId), { force: true });
+  }
+
+  /** Conversaciones con sesión guardada. */
+  ids(): string[] {
+    return idsIn(this.dir);
   }
 
   load(conversationId: string): SessionContext | null {

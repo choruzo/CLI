@@ -250,7 +250,7 @@ function writeJsonAtomic(path: string, data: unknown): void {
  */
 export function workspaceStatus(
   state: WorkspaceStatus['state'],
-  fields: { lastUsedAt: string; pinned: boolean; filesExpiredAt?: string },
+  fields: { lastUsedAt: string; pinned: boolean; filesExpiredAt?: string; sizeBytes: number },
   settings: WorkspaceSettings,
 ): WorkspaceStatus {
   const deleteAfter = settings.deleteAfterMs ?? 0;
@@ -264,6 +264,8 @@ export function workspaceStatus(
     lastUsedAt: fields.lastUsedAt,
     purgeAt,
     filesExpiredAt: fields.filesExpiredAt ?? null,
+    // Tras la purga no queda nada, aunque el registro guarde el tamaño de antes.
+    sizeBytes: state === 'purged' ? 0 : fields.sizeBytes,
   };
 }
 
@@ -798,6 +800,38 @@ export class WorkspaceManager {
       rmSync(recordPath, { force: true });
       throw err;
     }
+  }
+
+  /**
+   * Fija o desfija una conversación que no está abierta en el host (desde el
+   * sidebar, D4): en los metadatos de la carpeta o en el registro del archivo.
+   * Sin workspace o purgada no hay nada que proteger. Devuelve el estado nuevo.
+   */
+  async setPinned(conversationId: string, pinned: boolean): Promise<WorkspaceStatus | null> {
+    const dir = this.checkedDir(conversationId);
+    return this.withLock(conversationId, async () => {
+      const found = this.inspect(conversationId);
+      if (found.state === 'active' && found.meta) {
+        writeJsonAtomic(join(dir, WORKSPACE_META_FILE), { ...found.meta, pinned });
+      } else if (found.state === 'archived') {
+        writeJsonAtomic(this.recordPath(conversationId), { ...found.record, pinned });
+      }
+      return this.statusOf(conversationId);
+    });
+  }
+
+  /**
+   * Elimina todo lo de la conversación (D4): carpeta, archivo y registro. Con
+   * el lock, así no se cruza con una compresión o una restauración. El llamador
+   * garantiza que la conversación ya no está abierta en el host.
+   */
+  async remove(conversationId: string): Promise<void> {
+    const dir = this.checkedDir(conversationId);
+    await this.withLock(conversationId, async () => {
+      if (existsSync(dir)) this.retireDir(conversationId, dir);
+      await rm(this.archivePath(conversationId), { force: true });
+      await rm(this.recordPath(conversationId), { force: true });
+    });
   }
 
   /**

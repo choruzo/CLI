@@ -103,22 +103,30 @@ describe('ConversationHost (D1)', () => {
     host.handle({ type: 'chat', conversationId: id, turnId: 't1', text: 'hola' }, 1);
     await ended('t1');
 
-    expect(frames[0]).toEqual({
+    expect(frames[0]).toMatchObject({
       type: 'conversation_opened',
       conversationId: id,
       resumed: false,
       messageCount: 0,
+      transcript: [],
+      activeTurnId: null,
     });
     const events = frames.flatMap((f) => (f.type === 'agent_event' ? [f.event] : []));
     expect(events.map((e) => e.type)).toContain('text_delta');
     expect(events.at(-1)).toEqual({ type: 'done', stopReason: 'stop' });
-    expect(frames.at(-1)).toEqual({
+    expect(frames.find((f) => f.type === 'turn_ended')).toEqual({
       type: 'turn_ended',
       conversationId: id,
       turnId: 't1',
       stopReason: 'stop',
     });
-    expect(frames.every((f) => f.conversationId === id)).toBe(true);
+    expect(
+      frames.every((f) =>
+        f.type === 'conversation_updated'
+          ? f.summary.conversationId === id
+          : 'conversationId' in f && f.conversationId === id,
+      ),
+    ).toBe(true);
 
     const saved = store.load(id);
     expect(saved?.messages.map((m) => m.role)).toEqual(['system', 'user', 'assistant']);
@@ -169,7 +177,7 @@ describe('ConversationHost (D1)', () => {
     host.handle({ type: 'cancel', conversationId: id, turnId: 'otro' }, 1);
     host.handle({ type: 'cancel', conversationId: id, turnId: 't1' }, 1);
     await ended('t1');
-    expect(frames.at(-1)).toMatchObject({ type: 'turn_ended', stopReason: 'cancelled' });
+    expect(frames.find((f) => f.type === 'turn_ended')).toMatchObject({ stopReason: 'cancelled' });
   });
 
   it('un chat durante un turno se rechaza como busy', async () => {
@@ -210,11 +218,13 @@ describe('ConversationHost (D1)', () => {
     );
     await second.ended('t2');
 
-    expect(second.frames[0]).toEqual({
+    expect(second.frames[0]).toMatchObject({
       type: 'conversation_opened',
       conversationId: id,
       resumed: true,
       messageCount: 2,
+      title: 'Soy Ana',
+      transcript: [{ turnId: 't1', user: { text: 'Soy Ana' }, status: 'done' }],
     });
     const sent = provider.requests[0].messages.map((m) => m.content);
     expect(sent).toContain('Soy Ana');
@@ -227,7 +237,7 @@ describe('ConversationHost (D1)', () => {
     const id = cid();
     host.handle({ type: 'new_conversation', conversationId: id, resume: true }, 1);
     await host.idle();
-    expect(frames).toEqual([
+    expect(frames).toMatchObject([
       { type: 'conversation_opened', conversationId: id, resumed: false, messageCount: 0 },
     ]);
   });

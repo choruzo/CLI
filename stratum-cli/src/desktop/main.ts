@@ -174,6 +174,7 @@ export async function runSidecar(argv: string[]): Promise<number> {
     makeRouter: () => new ProviderRouter(assistantConfig),
     startupError,
     workspaces,
+    maxConcurrentTurns: config.desktop.maxConcurrentTurns,
   });
 
   let server;

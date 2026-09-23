@@ -121,6 +121,34 @@ const inboundSchema = z.discriminatedUnion('type', [
       decision: z.enum(['approve', 'deny', 'allow-all']),
     })
     .strict(),
+  z.object({ type: z.literal('list_conversations') }).strict(),
+  z
+    .object({
+      type: z.literal('rename_conversation'),
+      conversationId,
+      title: z.string().max(LIMITS.titleChars),
+    })
+    .strict(),
+  z.object({ type: z.literal('delete_conversation'), conversationId }).strict(),
+  z.object({ type: z.literal('clear_conversation'), conversationId }).strict(),
+  z.object({ type: z.literal('compact_conversation'), conversationId }).strict(),
+  z.object({ type: z.literal('list_models'), conversationId }).strict(),
+  z
+    .object({
+      type: z.literal('set_model'),
+      conversationId,
+      model: z.string().trim().min(1).max(LIMITS.modelChars),
+    })
+    .strict(),
+  z.object({ type: z.literal('memory_get') }).strict(),
+  z
+    .object({
+      type: z.literal('memory_save'),
+      content: z.string().max(LIMITS.memoryChars),
+      baseMtimeMs: z.number().finite().nullable(),
+    })
+    .strict(),
+  z.object({ type: z.literal('memory_forget'), id }).strict(),
 ]);
 
 /** Parsea una línea como trama de entrada. Devuelve `null` si no tiene forma válida. */
@@ -137,5 +165,14 @@ export function parseInboundFrame(line: string): InboundFrame | null {
   // Un mensaje vacío solo tiene sentido si lleva ficheros. Va aquí y no como
   // `refine` porque `discriminatedUnion` solo admite objetos planos.
   if (frame.type === 'chat' && frame.text.trim() === '' && !frame.attachments?.length) return null;
+  if (frame.type === 'rename_conversation' && normalizeTitle(frame.title) === '') return null;
   return frame;
+}
+
+/** Título en una línea, sin espacios sobrantes ni caracteres de control. */
+export function normalizeTitle(title: string): string {
+  return title
+    .replace(/[\u0000-\u001f\u007f]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
 }

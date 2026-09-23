@@ -5,12 +5,17 @@ import { SentChips } from './files/AttachmentChips';
 export function UserMessage({
   text,
   attachments,
+  id,
+  turnId,
 }: {
   text: string;
   attachments?: SentAttachment[];
+  /** Ancla del índice del sidebar (§7.2). */
+  id?: string;
+  turnId?: string;
 }) {
   return (
-    <div className="message message--user">
+    <div className="message message--user" id={id} data-user-turn={turnId}>
       <div className="message__bubble">
         {attachments && attachments.length > 0 && <SentChips items={attachments} />}
         {text}

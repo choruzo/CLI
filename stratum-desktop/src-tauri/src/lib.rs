@@ -44,6 +44,7 @@ pub fn run() {
             files::output_open,
             files::output_preview,
             files::workspace_export,
+            files::workspace_files,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::DragDrop(drag) = event {

@@ -5,7 +5,7 @@
 //! diálogo por su cuenta ni recibir rutas del disco (15.8).
 
 use crate::ipc::SidecarState;
-use crate::workspace::{self, Attached, Candidate, Preview, WorkspaceState};
+use crate::workspace::{self, Attached, Candidate, ListedFile, Preview, WorkspaceState};
 use serde::Serialize;
 use serde_json::json;
 use std::path::PathBuf;
@@ -101,7 +101,8 @@ pub fn attachments_discard(
     state.discard(&conversation_id, &path)
 }
 
-/// «Guardar como…»: copia un fichero de `outputs/` donde el usuario elija.
+/// «Guardar como…»: copia un fichero de `outputs/` (o de `inputs/`, desde el
+/// panel de ficheros de D4) donde el usuario elija.
 /// Devuelve `false` si canceló el diálogo. La ruta elegida no vuelve al webview.
 #[tauri::command]
 pub async fn output_save(
@@ -110,7 +111,7 @@ pub async fn output_save(
     conversation_id: String,
     path: String,
 ) -> Result<bool, String> {
-    let source = app.state::<WorkspaceState>().output_path(&conversation_id, &path)?;
+    let source = app.state::<WorkspaceState>().file_path(&conversation_id, &path)?;
     let file_name = source
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -177,10 +178,23 @@ pub async fn workspace_export(
     Ok(true)
 }
 
+/// Ficheros de `inputs/` y `outputs/` para el panel del sidebar (D4).
+#[tauri::command]
+pub async fn workspace_files(
+    app: AppHandle,
+    conversation_id: String,
+) -> Result<Vec<ListedFile>, String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        app.state::<WorkspaceState>().list_files(&conversation_id)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+}
+
 /// «Abrir» con la app por defecto del SO, solo para tipos inertes.
 #[tauri::command]
 pub fn output_open(app: AppHandle, conversation_id: String, path: String) -> Result<(), String> {
-    let real = app.state::<WorkspaceState>().output_path(&conversation_id, &path)?;
+    let real = app.state::<WorkspaceState>().file_path(&conversation_id, &path)?;
     let name = real
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -199,7 +213,7 @@ pub async fn output_preview(
     conversation_id: String,
     path: String,
 ) -> Result<Preview, String> {
-    let real = app.state::<WorkspaceState>().output_path(&conversation_id, &path)?;
+    let real = app.state::<WorkspaceState>().file_path(&conversation_id, &path)?;
     tauri::async_runtime::spawn_blocking(move || workspace::preview(&real))
         .await
         .map_err(|e| e.to_string())?

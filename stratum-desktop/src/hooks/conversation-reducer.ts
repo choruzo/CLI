@@ -4,6 +4,8 @@ import type {
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
 import type {
+  ConversationStats,
+  TranscriptTurn,
   WorkspaceFileInfo,
   WorkspaceStatus,
 } from '../../../stratum-cli/src/desktop/protocol';
@@ -36,7 +38,8 @@ export type AgentPart =
   | { kind: 'tool'; id: string }
   | { kind: 'notice'; tone: 'warning' | 'error'; text: string };
 
-export type TurnStatus = 'streaming' | 'done' | 'cancelled' | 'error' | 'interrupted';
+/** `queued`: espera a que otra conversación termine (`desktop.maxConcurrentTurns`, D4). */
+export type TurnStatus = 'queued' | 'streaming' | 'done' | 'cancelled' | 'error' | 'interrupted';
 
 /** Un adjunto enviado con un mensaje (D2): solo su ruta en el workspace. */
 export interface SentAttachment {
@@ -61,6 +64,8 @@ export interface AgentTurn {
   stopReason?: string;
   /** Ficheros que el turno dejó en `outputs/` (D2, `workspace_files`). */
   files?: WorkspaceFileInfo[];
+  /** Posición en la cola de generación mientras `status === 'queued'` (D4). */
+  queuePosition?: number;
 }
 
 export type ChatMessage = UserMessage | AgentTurn;
@@ -89,6 +94,12 @@ export interface ConversationState {
   notice: string | null;
   /** Retención del workspace (D3); `null` si la conversación no tiene ficheros. */
   workspace: WorkspaceStatus | null;
+  /** Título que le da el sidecar (derivado del primer mensaje o puesto a mano) (D4). */
+  title: string | null;
+  /** Provider, modelo y contexto para la StatusBar (D4). */
+  stats: ConversationStats | null;
+  /** Aviso informativo (resultado de `/compact`, `/model`…). */
+  info: string | null;
 }
 
 export const initialConversationState: ConversationState = {
@@ -100,10 +111,28 @@ export const initialConversationState: ConversationState = {
   opened: false,
   notice: null,
   workspace: null,
+  title: null,
+  stats: null,
+  info: null,
 };
 
+/** Lo que trae `conversation_opened` para pintar la conversación (D4). */
+export interface OpenedSnapshot {
+  transcript: TranscriptTurn[];
+  activeTurnId: string | null;
+  todos: TodoItem[];
+  stats: ConversationStats | null;
+  title: string | null;
+}
+
 export type ConversationAction =
-  | { type: 'opened'; workspace?: WorkspaceStatus | null }
+  | { type: 'opened'; workspace?: WorkspaceStatus | null; snapshot?: OpenedSnapshot }
+  | { type: 'cleared' }
+  | { type: 'turn_queued'; turnId: string; position: number }
+  | { type: 'turn_started'; turnId: string }
+  | { type: 'stats'; stats: ConversationStats }
+  | { type: 'info'; message: string }
+  | { type: 'dismiss_info' }
   | { type: 'workspace_status'; status: WorkspaceStatus }
   | { type: 'conversation_error'; message: string }
   | { type: 'dismiss_notice' }
@@ -166,7 +195,11 @@ function stringifyInput(input: Record<string, unknown>): string {
 function applyEvent(turn: AgentTurn, event: AgentEvent): AgentTurn {
   switch (event.type) {
     case 'text_delta':
-      return { ...turn, parts: appendText(turn.parts, event.delta) };
+      return {
+        ...turn,
+        status: turn.status === 'queued' ? 'streaming' : turn.status,
+        parts: appendText(turn.parts, event.delta),
+      };
     case 'tool_call_start':
       return upsertTool(turn, event.id, event.name, { input: event.input_so_far });
     case 'tool_call_ready':
@@ -230,13 +263,86 @@ function settleTools(turn: AgentTurn): AgentTurn {
   return changed ? { ...turn, toolCalls } : turn;
 }
 
+/** Mensajes de la UI a partir del transcript que guarda el sidecar. */
+export function messagesFromTranscript(transcript: TranscriptTurn[]): ChatMessage[] {
+  return transcript.flatMap((t): ChatMessage[] => [
+    {
+      role: 'user',
+      turnId: t.turnId,
+      text: t.user.text,
+      ...(t.user.attachments?.length ? { attachments: t.user.attachments } : {}),
+    },
+    {
+      role: 'agent',
+      turnId: t.turnId,
+      parts: t.parts,
+      toolCalls: t.toolCalls,
+      status: t.status,
+      ...(t.stopReason ? { stopReason: t.stopReason } : {}),
+      ...(t.files?.length ? { files: t.files } : {}),
+    },
+  ]);
+}
+
 export function conversationReducer(
   state: ConversationState,
   action: ConversationAction,
 ): ConversationState {
   switch (action.type) {
-    case 'opened':
-      return { ...state, opened: true, workspace: action.workspace ?? null };
+    case 'opened': {
+      const next = { ...state, opened: true, workspace: action.workspace ?? null };
+      const snap = action.snapshot;
+      if (!snap) return next;
+      // El sidecar es la fuente de verdad: su transcript incluye el turno en
+      // marcha (o en cola) con lo que ya se generó.
+      const active =
+        snap.activeTurnId && snap.transcript.some((t) => t.turnId === snap.activeTurnId)
+          ? snap.activeTurnId
+          : null;
+      return {
+        ...next,
+        messages: messagesFromTranscript(snap.transcript),
+        activeTurnId: active,
+        todos: snap.todos,
+        stats: snap.stats ?? state.stats,
+        title: snap.title ?? state.title,
+      };
+    }
+
+    case 'cleared':
+      return {
+        ...state,
+        messages: [],
+        todos: [],
+        activeTurnId: null,
+        pendingQuestions: null,
+        pendingConfirm: null,
+        notice: null,
+        info: null,
+      };
+
+    case 'turn_queued':
+      return updateTurn(state, action.turnId, (t) => ({
+        ...t,
+        status: t.status === 'streaming' && t.parts.length === 0 ? 'queued' : t.status,
+        queuePosition: action.position,
+      }));
+
+    case 'turn_started':
+      return updateTurn(state, action.turnId, (t) => ({
+        ...t,
+        status: t.status === 'queued' ? 'streaming' : t.status,
+        queuePosition: undefined,
+      }));
+
+    case 'stats':
+      return { ...state, stats: action.stats };
+
+    case 'info':
+      return { ...state, info: action.message };
+
+    case 'dismiss_info':
+      return { ...state, info: null };
 
     case 'workspace_status':
       return { ...state, workspace: action.status };
@@ -294,8 +400,13 @@ export function conversationReducer(
     case 'turn_ended': {
       const next = updateTurn(state, action.turnId, (t) =>
         settleTools(
-          t.status === 'streaming'
-            ? { ...t, status: statusFor(action.stopReason), stopReason: action.stopReason }
+          t.status === 'streaming' || t.status === 'queued'
+            ? {
+                ...t,
+                status: statusFor(action.stopReason),
+                stopReason: action.stopReason,
+                queuePosition: undefined,
+              }
             : t,
         ),
       );

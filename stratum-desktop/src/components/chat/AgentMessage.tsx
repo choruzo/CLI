@@ -24,11 +24,12 @@ export function AgentMessage({
   onRetry?: () => void;
 }) {
   const streaming = turn.status === 'streaming';
+  const queued = turn.status === 'queued';
   const lastText = turn.parts.map((p) => p.kind).lastIndexOf('text');
   const note = STATUS_NOTE[turn.status];
 
   return (
-    <div className="message message--agent" aria-busy={streaming}>
+    <div className="message message--agent" aria-busy={streaming || queued}>
       {turn.parts.map((part, i) => {
         if (part.kind === 'text') {
           return <StreamingText key={i} text={part.text} streaming={streaming && i === lastText} />;
@@ -54,6 +55,12 @@ export function AgentMessage({
             />
           ))}
         </div>
+      )}
+      {queued && (
+        <p className="message__thinking" aria-live="polite">
+          En cola: empezará cuando termine otra conversación
+          {turn.queuePosition && turn.queuePosition > 1 ? ` (${turn.queuePosition}.º)` : ''}.
+        </p>
       )}
       {streaming && turn.parts.length === 0 && (
         <p className="message__thinking" aria-live="polite">

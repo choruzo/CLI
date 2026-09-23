@@ -52,7 +52,7 @@ export function discardAttachment(conversationId: string, path: string): Promise
   return invoke('attachments_discard', { conversationId, path });
 }
 
-/** «Guardar como…». `false` si el usuario canceló el diálogo. */
+/** «Guardar como…» de `outputs/` o `inputs/`. `false` si el usuario canceló el diálogo. */
 export function saveOutput(conversationId: string, path: string): Promise<boolean> {
   return invoke<boolean>('output_save', { conversationId, path });
 }
@@ -63,6 +63,19 @@ export function openOutput(conversationId: string, path: string): Promise<void> 
 
 export function previewOutput(conversationId: string, path: string): Promise<Preview> {
   return invoke<Preview>('output_preview', { conversationId, path });
+}
+
+/** Un fichero de `inputs/` u `outputs/` (espejo de `ListedFile` en `workspace.rs`). */
+export interface ListedFile {
+  path: string;
+  name: string;
+  size: number;
+  area: 'inputs' | 'outputs';
+  modifiedMs: number;
+}
+
+export function listWorkspaceFiles(conversationId: string): Promise<ListedFile[]> {
+  return invoke<ListedFile[]>('workspace_files', { conversationId });
 }
 
 /** «Descargar todo (.zip)»: `inputs/` y `outputs/`. `false` si el usuario canceló. */

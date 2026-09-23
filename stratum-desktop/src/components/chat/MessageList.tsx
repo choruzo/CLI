@@ -1,6 +1,7 @@
 import type { ChatMessage } from '../../hooks/conversation-reducer';
 import { AgentMessage } from './AgentMessage';
 import { UserMessage } from './UserMessage';
+import { userMessageAnchor } from '../layout/OutlinePanel';
 
 export function MessageList({
   messages,
@@ -17,7 +18,13 @@ export function MessageList({
     <div className="message-list">
       {messages.map((m) =>
         m.role === 'user' ? (
-          <UserMessage key={`u-${m.turnId}`} text={m.text} attachments={m.attachments} />
+          <UserMessage
+            key={`u-${m.turnId}`}
+            id={userMessageAnchor(m.turnId)}
+            turnId={m.turnId}
+            text={m.text}
+            attachments={m.attachments}
+          />
         ) : (
           <AgentMessage
             key={`a-${m.turnId}`}

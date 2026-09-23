@@ -37,6 +37,7 @@ function status(patch: Partial<WorkspaceStatus> = {}): WorkspaceStatus {
     lastUsedAt: new Date(NOW - 28 * DAY).toISOString(),
     purgeAt: new Date(NOW + 2 * DAY).toISOString(),
     filesExpiredAt: null,
+    sizeBytes: 0,
     ...patch,
   };
 }

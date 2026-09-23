@@ -4,7 +4,16 @@ import type {
   QuestionItem,
   TodoItem,
 } from '../../../stratum-cli/src/agent/events';
-import type { WorkspaceFileInfo, WorkspaceStatus } from '../../../stratum-cli/src/desktop/protocol';
+import type {
+  ConversationStats,
+  ConversationSummary,
+  DecisionSummary,
+  TranscriptPart,
+  TranscriptToolCall,
+  TranscriptTurn,
+  WorkspaceFileInfo,
+  WorkspaceStatus,
+} from '../../../stratum-cli/src/desktop/protocol';
 
 /**
  * Validación estructural de lo que llega del sidecar antes de entrar al estado
@@ -23,7 +32,7 @@ export const isRecord = (v: unknown): v is Record<string, unknown> =>
 const TODO_STATUS = new Set(['pending', 'in_progress', 'done', 'skipped']);
 const STOP_REASONS = new Set(['stop', 'max_iterations', 'cancelled', 'error', 'budget_tokens']);
 
-function todoItem(v: unknown): TodoItem | null {
+export function todoItem(v: unknown): TodoItem | null {
   if (!isRecord(v) || !str(v.id) || !str(v.title) || !str(v.status)) return null;
   if (!TODO_STATUS.has(v.status)) return null;
   return { id: v.id, title: v.title, status: v.status as TodoItem['status'] };
@@ -163,5 +172,141 @@ export function workspaceStatus(v: unknown): WorkspaceStatus | null {
     lastUsedAt: v.lastUsedAt,
     purgeAt: v.purgeAt,
     filesExpiredAt: v.filesExpiredAt,
+    // Un sidecar anterior a D4 no manda el tamaño.
+    sizeBytes: num(v.sizeBytes) ? v.sizeBytes : 0,
   };
 }
+
+// ---------------------------------------------------------------------------
+// D4: transcript, listado, estadísticas y memoria
+// ---------------------------------------------------------------------------
+
+const TOOL_STATES = new Set(['pending', 'running', 'completed', 'error']);
+const TURN_STATUSES = new Set(['queued', 'streaming', 'done', 'cancelled', 'error', 'interrupted']);
+
+function transcriptPart(v: unknown): TranscriptPart | null {
+  if (!isRecord(v)) return null;
+  if (v.kind === 'text' && str(v.text)) return { kind: 'text', text: v.text };
+  if (v.kind === 'tool' && str(v.id)) return { kind: 'tool', id: v.id };
+  if (v.kind === 'notice' && (v.tone === 'warning' || v.tone === 'error') && str(v.text)) {
+    return { kind: 'notice', tone: v.tone, text: v.text };
+  }
+  return null;
+}
+
+function toolCall(v: unknown): TranscriptToolCall | null {
+  if (!isRecord(v) || !str(v.id) || !str(v.name) || !str(v.state) || !str(v.input)) return null;
+  if (!TOOL_STATES.has(v.state)) return null;
+  return {
+    id: v.id,
+    name: v.name,
+    state: v.state as TranscriptToolCall['state'],
+    input: v.input,
+    ...(str(v.output) ? { output: v.output } : {}),
+    ...(str(v.error) ? { error: v.error } : {}),
+    ...(num(v.durationMs) ? { durationMs: v.durationMs } : {}),
+  };
+}
+
+/** Un turno del transcript. Lo que no encaja invalida el turno (no el transcript entero). */
+export function transcriptTurn(v: unknown): TranscriptTurn | null {
+  if (!isRecord(v) || !str(v.turnId) || !isRecord(v.user) || !str(v.user.text)) return null;
+  if (!str(v.status) || !TURN_STATUSES.has(v.status) || !isRecord(v.toolCalls)) return null;
+  const parts = all(v.parts, transcriptPart);
+  if (!parts) return null;
+  const toolCalls: Record<string, TranscriptToolCall> = {};
+  for (const [id, raw] of Object.entries(v.toolCalls)) {
+    const call = toolCall(raw);
+    if (!call || call.id !== id) return null;
+    toolCalls[id] = call;
+  }
+  const attachments = Array.isArray(v.user.attachments)
+    ? v.user.attachments.flatMap((a) =>
+        isRecord(a) && str(a.path) && str(a.name) && num(a.size)
+          ? [{ path: a.path, name: a.name, size: a.size }]
+          : [],
+      )
+    : [];
+  const files = v.files === undefined ? undefined : workspaceFiles(v.files);
+  return {
+    turnId: v.turnId,
+    user: { text: v.user.text, ...(attachments.length > 0 ? { attachments } : {}) },
+    parts,
+    toolCalls,
+    status: v.status as TranscriptTurn['status'],
+    ...(str(v.stopReason) ? { stopReason: v.stopReason } : {}),
+    ...(files && files.length > 0 ? { files } : {}),
+    startedAt: str(v.startedAt) ? v.startedAt : '',
+  };
+}
+
+export function transcript(v: unknown): TranscriptTurn[] | null {
+  if (!Array.isArray(v)) return null;
+  return v.flatMap((t) => {
+    const turn = transcriptTurn(t);
+    return turn ? [turn] : [];
+  });
+}
+
+export function conversationStats(v: unknown): ConversationStats | null {
+  if (!isRecord(v) || !str(v.provider) || !str(v.model) || !isRecord(v.context)) return null;
+  const c = v.context;
+  if (!num(c.used) || !num(c.max) || !num(c.pct) || !bool(c.estimated)) return null;
+  return {
+    provider: v.provider,
+    model: v.model,
+    context: { used: c.used, max: c.max, pct: c.pct, estimated: c.estimated },
+  };
+}
+
+export function conversationSummary(v: unknown): ConversationSummary | null {
+  if (!isRecord(v) || !str(v.conversationId) || !str(v.title) || !bool(v.titleEdited)) return null;
+  if (!str(v.createdAt) || !str(v.updatedAt) || !str(v.provider) || !str(v.model)) return null;
+  if (!num(v.turnCount)) return null;
+  const workspace = v.workspace === null ? null : workspaceStatus(v.workspace);
+  if (v.workspace !== null && workspace === null) return null;
+  return {
+    conversationId: v.conversationId,
+    title: v.title,
+    titleEdited: v.titleEdited,
+    createdAt: v.createdAt,
+    updatedAt: v.updatedAt,
+    provider: v.provider,
+    model: v.model,
+    turnCount: v.turnCount,
+    workspace,
+  };
+}
+
+export function conversationSummaries(v: unknown): ConversationSummary[] | null {
+  if (!Array.isArray(v)) return null;
+  return v.flatMap((x) => {
+    const s = conversationSummary(x);
+    return s ? [s] : [];
+  });
+}
+
+export function todoItems(v: unknown): TodoItem[] | null {
+  return all(v, todoItem);
+}
+
+export function decisionSummaries(v: unknown): DecisionSummary[] | null {
+  if (!Array.isArray(v)) return null;
+  return v.flatMap((d) =>
+    isRecord(d) && str(d.id) && str(d.title) && str(d.content) && str(d.type) && str(d.importance)
+      ? [
+          {
+            id: d.id,
+            title: d.title,
+            content: d.content,
+            type: d.type,
+            importance: d.importance,
+            tags: Array.isArray(d.tags) ? d.tags.filter(str) : [],
+            timestamp: str(d.timestamp) ? d.timestamp : '',
+          },
+        ]
+      : [],
+  );
+}
+
+export const isNullableNumber = (v: unknown): v is number | null => v === null || num(v);

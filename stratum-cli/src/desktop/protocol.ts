@@ -30,6 +30,14 @@
  * `workspace_status` llevan el estado del workspace (`active`, `restoring`
  * mientras se descomprime, `archived`, `purged`) con la fecha prevista de
  * purga, y el webview puede fijar la conversación con `workspace_pin`.
+ *
+ * D4 (v5) añade varias conversaciones vivas a la vez: el listado para el
+ * sidebar (`list_conversations` → `conversations`), renombrar y eliminar (que
+ * borra también el workspace), `/clear`, `/compact` y `/model` por conversación,
+ * la cola de turnos cuando hay más generaciones que `desktop.maxConcurrentTurns`
+ * (`turn_queued` / `turn_started`), las estadísticas de la StatusBar
+ * (`conversation_stats`), el transcript visible al abrir (sobrevive a la
+ * compresión de contexto) y la memoria global (`memory_*`).
  */
 
 import type {
@@ -37,12 +45,13 @@ import type {
   DestructiveDecision,
   QuestionAnswer,
   QuestionItem,
+  TodoItem,
 } from '../agent/events.js';
 
-export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem };
+export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem, TodoItem };
 
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 4;
+export const DESKTOP_PROTOCOL_VERSION = 5;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -71,6 +80,12 @@ export const LIMITS = {
   attachments: 20,
   /** Ruta de un adjunto dentro del workspace (`inputs/…`). */
   attachmentPathChars: 512,
+  /** Título de una conversación. */
+  titleChars: 200,
+  /** Nombre de un modelo (`/model`). */
+  modelChars: 256,
+  /** Contenido del `STRATUM.md` global editado desde el sidebar. */
+  memoryChars: 256 * 1024,
 } as const;
 
 // ---------------------------------------------------------------------------
@@ -149,7 +164,81 @@ export interface WorkspacePinFrame {
   pinned: boolean;
 }
 
+/** Pide el listado de conversaciones para el sidebar (D4). */
+export interface ListConversationsFrame {
+  type: 'list_conversations';
+}
+
+export interface RenameConversationFrame {
+  type: 'rename_conversation';
+  conversationId: string;
+  title: string;
+}
+
+/** Elimina la conversación: historial, transcript y workspace (o su archivo). */
+export interface DeleteConversationFrame {
+  type: 'delete_conversation';
+  conversationId: string;
+}
+
+/** `/clear`: vacía el historial (del agente y el visible). El workspace se queda. */
+export interface ClearConversationFrame {
+  type: 'clear_conversation';
+  conversationId: string;
+}
+
+/** `/compact`: comprime el contexto ahora, sin esperar al umbral. */
+export interface CompactConversationFrame {
+  type: 'compact_conversation';
+  conversationId: string;
+}
+
+/** `/model` sin argumento: modelos que ofrece el provider de la conversación. */
+export interface ListModelsFrame {
+  type: 'list_models';
+  conversationId: string;
+}
+
+/** `/model <nombre>`: cambia el modelo solo en esta conversación. */
+export interface SetModelFrame {
+  type: 'set_model';
+  conversationId: string;
+  model: string;
+}
+
+/** Memoria global para el sidebar: `STRATUM.md` y decisiones del asistente. */
+export interface MemoryGetFrame {
+  type: 'memory_get';
+}
+
+/**
+ * Guarda el `STRATUM.md` global. `baseMtimeMs` es la versión sobre la que se
+ * editó (`null` si no existía): si el fichero cambió en disco entretanto (la
+ * CLI, otro editor), no se pisa y se responde `memory_conflict`.
+ */
+export interface MemorySaveFrame {
+  type: 'memory_save';
+  content: string;
+  baseMtimeMs: number | null;
+}
+
+/** Borra una decisión de la memoria del asistente. */
+export interface MemoryForgetFrame {
+  type: 'memory_forget';
+  id: string;
+}
+
 export type ConversationFrame =
+  | ListConversationsFrame
+  | RenameConversationFrame
+  | DeleteConversationFrame
+  | ClearConversationFrame
+  | CompactConversationFrame
+  | ListModelsFrame
+  | SetModelFrame
+  | MemoryGetFrame
+  | MemorySaveFrame
+  | MemoryForgetFrame
   | WorkspaceTouchFrame
   | WorkspacePinFrame
   | NewConversationFrame
@@ -171,6 +260,16 @@ export const CLIENT_FRAME_TYPES = [
   'answer_questions',
   'confirm_response',
   'workspace_pin',
+  'list_conversations',
+  'rename_conversation',
+  'delete_conversation',
+  'clear_conversation',
+  'compact_conversation',
+  'list_models',
+  'set_model',
+  'memory_get',
+  'memory_save',
+  'memory_forget',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -249,6 +348,85 @@ export interface WorkspaceStatus {
   purgeAt: string | null;
   /** Los ficheros anteriores a esta fecha ya no existen (se purgaron); `null` si nunca. */
   filesExpiredAt: string | null;
+  /** Tamaño de los ficheros (el de la carpeta antes de comprimirla, si está archivada) (D4). */
+  sizeBytes: number;
+}
+
+// ---------------------------------------------------------------------------
+// Transcript visible (D4)
+// ---------------------------------------------------------------------------
+
+/**
+ * Lo que la UI pinta de una conversación, guardado por el sidecar junto a la
+ * sesión. No es el historial del agente: ese se comprime y pierde lo antiguo;
+ * este conserva los turnos tal como se vieron (texto, tool calls con la salida
+ * recortada, avisos y tarjetas de fichero).
+ */
+export type TranscriptPart =
+  | { kind: 'text'; text: string }
+  | { kind: 'tool'; id: string }
+  | { kind: 'notice'; tone: 'warning' | 'error'; text: string };
+
+export interface TranscriptToolCall {
+  id: string;
+  name: string;
+  state: 'pending' | 'running' | 'completed' | 'error';
+  input: string;
+  output?: string;
+  error?: string;
+  durationMs?: number;
+}
+
+export interface TranscriptAttachment {
+  path: string;
+  name: string;
+  size: number;
+}
+
+/**
+ * `queued`: espera turno de generación (15.15). `interrupted`: el sidecar murió
+ * con el turno en marcha (la UI ofrece reintentarlo).
+ */
+export type TranscriptTurnStatus =
+  | 'queued'
+  | 'streaming'
+  | 'done'
+  | 'cancelled'
+  | 'error'
+  | 'interrupted';
+
+export interface TranscriptTurn {
+  turnId: string;
+  user: { text: string; attachments?: TranscriptAttachment[] };
+  parts: TranscriptPart[];
+  toolCalls: Record<string, TranscriptToolCall>;
+  status: TranscriptTurnStatus;
+  stopReason?: string;
+  files?: WorkspaceFileInfo[];
+  /** ISO 8601. */
+  startedAt: string;
+}
+
+/** Una conversación en el listado del sidebar. */
+export interface ConversationSummary {
+  conversationId: string;
+  title: string;
+  /** El usuario le puso el título a mano (ya no se deriva del primer mensaje). */
+  titleEdited: boolean;
+  createdAt: string;
+  updatedAt: string;
+  provider: string;
+  model: string;
+  /** Turnos visibles. */
+  turnCount: number;
+  workspace: WorkspaceStatus | null;
+}
+
+/** Uso de contexto y modelo de una conversación (StatusBar). */
+export interface ConversationStats {
+  provider: string;
+  model: string;
+  context: { used: number; max: number; pct: number; estimated: boolean };
 }
 
 export interface ConversationOpenedFrame {
@@ -260,6 +438,13 @@ export interface ConversationOpenedFrame {
   messageCount: number;
   /** Ausente si la conversación no tiene workspace (sin ficheros, como en D1). */
   workspace?: WorkspaceStatus;
+  /** Lo que la UI tiene que pintar, incluido un turno aún en marcha o en cola (D4). */
+  transcript?: TranscriptTurn[];
+  /** Turno en marcha (o en cola) en el sidecar, si lo hay. */
+  activeTurnId?: string | null;
+  title?: string;
+  todos?: TodoItem[];
+  stats?: ConversationStats;
 }
 
 /** Cambió la retención del workspace (restaurando, uso, fijado) (D3). */
@@ -267,6 +452,106 @@ export interface WorkspaceStatusFrame {
   type: 'workspace_status';
   conversationId: string;
   status: WorkspaceStatus;
+}
+
+/** Listado completo de conversaciones, de la más reciente a la más antigua (D4). */
+export interface ConversationsFrame {
+  type: 'conversations';
+  items: ConversationSummary[];
+}
+
+/** Cambió una conversación del listado (turno, título, fijado…). */
+export interface ConversationUpdatedFrame {
+  type: 'conversation_updated';
+  summary: ConversationSummary;
+}
+
+export interface ConversationDeletedFrame {
+  type: 'conversation_deleted';
+  conversationId: string;
+}
+
+/** `/clear` aplicado: la conversación queda vacía. */
+export interface ConversationClearedFrame {
+  type: 'conversation_cleared';
+  conversationId: string;
+}
+
+export interface ConversationStatsFrame {
+  type: 'conversation_stats';
+  conversationId: string;
+  stats: ConversationStats;
+}
+
+/** Aviso informativo de una conversación (resultado de `/compact`, `/model`…). */
+export interface ConversationNoticeFrame {
+  type: 'conversation_notice';
+  conversationId: string;
+  tone: 'info' | 'warning';
+  message: string;
+}
+
+export interface ModelsFrame {
+  type: 'models';
+  conversationId: string;
+  current: string;
+  models: string[];
+  /** El provider no lista modelos: se puede escribir el nombre a mano. */
+  error?: string;
+}
+
+/** El turno espera a que otra conversación termine (`desktop.maxConcurrentTurns`, 15.15). */
+export interface TurnQueuedFrame {
+  type: 'turn_queued';
+  conversationId: string;
+  turnId: string;
+  /** 1 = el siguiente en arrancar. */
+  position: number;
+}
+
+export interface TurnStartedFrame {
+  type: 'turn_started';
+  conversationId: string;
+  turnId: string;
+}
+
+export interface DecisionSummary {
+  id: string;
+  title: string;
+  content: string;
+  type: string;
+  tags: string[];
+  importance: string;
+  timestamp: string;
+}
+
+export interface MemoryStateFrame {
+  type: 'memory_state';
+  global: {
+    path: string;
+    exists: boolean;
+    content: string;
+    /** Versión leída; `null` si no existe. Se devuelve en `memory_save`. */
+    mtimeMs: number | null;
+  };
+  decisions: DecisionSummary[];
+}
+
+export interface MemorySavedFrame {
+  type: 'memory_saved';
+  mtimeMs: number;
+}
+
+/** El `STRATUM.md` cambió en disco mientras se editaba: no se guardó. */
+export interface MemoryConflictFrame {
+  type: 'memory_conflict';
+  content: string;
+  mtimeMs: number | null;
+}
+
+export interface MemoryErrorFrame {
+  type: 'memory_error';
+  message: string;
 }
 
 export interface ConversationClosedFrame {
@@ -360,6 +645,19 @@ export interface ConversationErrorFrame {
 }
 
 export type ConversationOutboundFrame =
+  | ConversationsFrame
+  | ConversationUpdatedFrame
+  | ConversationDeletedFrame
+  | ConversationClearedFrame
+  | ConversationStatsFrame
+  | ConversationNoticeFrame
+  | ModelsFrame
+  | TurnQueuedFrame
+  | TurnStartedFrame
+  | MemoryStateFrame
+  | MemorySavedFrame
+  | MemoryConflictFrame
+  | MemoryErrorFrame
   | ConversationOpenedFrame
   | ConversationClosedFrame
   | AgentEventFrame

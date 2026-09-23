@@ -333,6 +333,9 @@ fn workspace_de_una_conversacion() {
             assert_ne!(v["code"], "protocol", "trama rechazada: {v}");
             if v["type"] == "workspace_status" {
                 statuses.push(v["status"].clone());
+            } else if v["type"] == "conversation_updated" {
+                // D4: cambios del listado del sidebar (tamaño, fijado).
+                assert_eq!(v["summary"]["conversationId"], id, "{v}");
             } else if v["type"] != "sidecar_error" {
                 frames.push(v);
             }

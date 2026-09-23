@@ -10,10 +10,12 @@
 //!   puede nombrar concesiones que el usuario hizo a mano.
 //! - **Rust copia** al `inputs/` del workspace, con los límites de tamaño
 //!   (16.3) comprobados antes de copiar y otra vez durante la copia.
-//! - **Las descargas salen solo de `outputs/`**, resueltas por `canonicalize`
-//!   contra la carpeta real (ni `..`, ni enlaces), y «Abrir» solo para tipos de
-//!   documento inertes: el fichero lo escribió el modelo, y un prompt injection
-//!   en un fichero subido podría dejar ahí un `.bat` o un `.html`.
+//! - **Las descargas salen solo de `outputs/` e `inputs/`** (esta, desde el
+//!   panel de ficheros de D4; nunca `scratch/` ni la raíz), resueltas por
+//!   `canonicalize` contra la carpeta real (ni `..`, ni enlaces), y «Abrir»
+//!   solo para tipos de documento inertes: el fichero lo escribió el modelo, y
+//!   un prompt injection en un fichero subido podría dejar ahí un `.bat` o un
+//!   `.html`.
 //!
 //! La raíz y los límites llegan del sidecar en `handshake_ok.workspaces`.
 
@@ -293,11 +295,88 @@ impl WorkspaceState {
         fs::remove_file(&path).map_err(|e| format!("no se pudo borrar: {e}"))
     }
 
-    /// Ruta real de un fichero de `outputs/`, validada.
-    pub fn output_path(&self, conversation_id: &str, rel: &str) -> Result<PathBuf, String> {
+    /// Ruta real de un fichero de `inputs/` o de `outputs/` (panel de ficheros
+    /// de la conversación, D4). Nunca de `scratch/` ni de la raíz.
+    pub fn file_path(&self, conversation_id: &str, rel: &str) -> Result<PathBuf, String> {
         let info = self.info()?;
         let dir = info.conversation_dir(conversation_id)?;
-        resolve_in(&dir, OUTPUTS, rel)
+        let area = if rel.starts_with("inputs/") { INPUTS } else { OUTPUTS };
+        resolve_in(&dir, area, rel)
+    }
+
+    /// Ficheros de `inputs/` y `outputs/` de una conversación (D4). Vacío si no
+    /// tiene carpeta (archivada, purgada o sin abrir todavía).
+    pub fn list_files(&self, conversation_id: &str) -> Result<Vec<ListedFile>, String> {
+        let info = self.info()?;
+        if !is_uuid(conversation_id) {
+            return Err("identificador de conversación no válido".into());
+        }
+        let dir = info.root.join(conversation_id);
+        let mut files = Vec::new();
+        for area in [INPUTS, OUTPUTS] {
+            let mut budget = MAX_LISTED_FILES;
+            walk_area(&dir.join(area), area, &mut files, &mut budget);
+        }
+        Ok(files)
+    }
+
+    /// La conversación se eliminó: sus adjuntos pendientes ya no existen.
+    pub fn forget(&self, conversation_id: &str) {
+        self.inner.lock().unwrap().pending.remove(conversation_id);
+    }
+}
+
+/// Tope de ficheros listados por carpeta en el panel del sidebar.
+const MAX_LISTED_FILES: usize = 500;
+
+/// Un fichero de la conversación en el panel del sidebar (D4).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct ListedFile {
+    /// Ruta en el workspace (`outputs/informe.md`).
+    pub path: String,
+    pub name: String,
+    pub size: u64,
+    /// `inputs` u `outputs`.
+    pub area: &'static str,
+    /// Epoch ms de la última modificación.
+    #[serde(rename = "modifiedMs")]
+    pub modified_ms: u64,
+}
+
+/// Recorre `dir` sin seguir enlaces, con rutas relativas `area/…` con `/`.
+fn walk_area(dir: &Path, prefix: &str, out: &mut Vec<ListedFile>, budget: &mut usize) {
+    let Ok(entries) = fs::read_dir(dir) else {
+        return;
+    };
+    let mut entries: Vec<_> = entries.flatten().collect();
+    entries.sort_by_key(|e| e.file_name());
+    for entry in entries {
+        if *budget == 0 {
+            return;
+        }
+        let Ok(meta) = entry.path().symlink_metadata() else {
+            continue;
+        };
+        let name = entry.file_name().to_string_lossy().into_owned();
+        let rel = format!("{prefix}/{name}");
+        if meta.is_dir() {
+            walk_area(&entry.path(), &rel, out, budget);
+        } else if meta.is_file() {
+            *budget -= 1;
+            let modified_ms = meta
+                .modified()
+                .ok()
+                .and_then(|t| t.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|d| d.as_millis() as u64)
+                .unwrap_or(0);
+            out.push(ListedFile {
+                path: rel,
+                name,
+                size: meta.len(),
+                area: if prefix.starts_with(INPUTS) { INPUTS } else { OUTPUTS },
+                modified_ms,
+            });
+        }
     }
 }
 
@@ -806,24 +885,29 @@ mod tests {
     }
 
     #[test]
-    fn las_descargas_solo_salen_de_outputs() {
+    fn las_descargas_solo_salen_de_inputs_y_outputs() {
         let (tmp, state, dir) = setup(1000, 10_000);
         fs::write(dir.join("outputs/resumen.csv"), "a").unwrap();
         fs::write(dir.join("inputs/orig.csv"), "b").unwrap();
+        fs::write(dir.join("scratch/tmp.csv"), "c").unwrap();
         let outside = user_file(&tmp, "secreto.txt", 3);
-        assert!(state.output_path(CID, "outputs/resumen.csv").is_ok());
+        assert!(state.file_path(CID, "outputs/resumen.csv").is_ok());
+        // D4: el panel de ficheros también guarda y abre lo subido.
+        assert!(state.file_path(CID, "inputs/orig.csv").is_ok());
         for bad in [
-            "inputs/orig.csv",
+            "scratch/tmp.csv",
+            ".workspace.json",
             "outputs/../inputs/orig.csv",
+            "inputs/../scratch/tmp.csv",
             "outputs",
             "outputs/",
             "../usuario/secreto.txt",
             "outputs/no-existe.txt",
         ] {
-            assert!(state.output_path(CID, bad).is_err(), "{bad}");
+            assert!(state.file_path(CID, bad).is_err(), "{bad}");
         }
         let abs = outside.to_string_lossy().into_owned();
-        assert!(state.output_path(CID, &abs).is_err());
+        assert!(state.file_path(CID, &abs).is_err());
     }
 
     #[test]
@@ -845,7 +929,7 @@ mod tests {
                 .unwrap();
             assert!(status.status.success());
         }
-        assert!(state.output_path(CID, "outputs/link/s.txt").is_err());
+        assert!(state.file_path(CID, "outputs/link/s.txt").is_err());
     }
 
     #[test]
@@ -931,6 +1015,32 @@ mod tests {
         let target = tmp.path().join("todo.zip");
         assert!(export_zip(&tmp.path().join("no-existe"), &target).is_err());
         assert!(!target.exists());
+    }
+
+    #[test]
+    fn lista_inputs_y_outputs_sin_scratch_ni_enlaces() {
+        let (_tmp, state, dir) = setup(1024, 4096);
+        let cid = dir.file_name().unwrap().to_string_lossy().into_owned();
+        fs::create_dir_all(dir.join("inputs")).unwrap();
+        fs::create_dir_all(dir.join("scratch")).unwrap();
+        fs::write(dir.join("inputs").join("a.csv"), "1,2").unwrap();
+        fs::create_dir_all(dir.join("outputs").join("sub")).unwrap();
+        fs::write(dir.join("outputs").join("sub").join("b.md"), "# b").unwrap();
+        fs::write(dir.join("scratch").join("tmp.txt"), "x").unwrap();
+        let files = state.list_files(&cid).unwrap();
+        let paths: Vec<_> = files.iter().map(|f| (f.path.as_str(), f.area)).collect();
+        assert_eq!(paths, vec![("inputs/a.csv", "inputs"), ("outputs/sub/b.md", "outputs")]);
+        assert_eq!(files[0].size, 3);
+        // Guardar y abrir aceptan las dos carpetas, nunca scratch/.
+        assert!(state.file_path(&cid, "inputs/a.csv").is_ok());
+        assert!(state.file_path(&cid, "outputs/sub/b.md").is_ok());
+        assert!(state.file_path(&cid, "scratch/tmp.txt").is_err());
+        assert!(state.file_path(&cid, "inputs/../scratch/tmp.txt").is_err());
+        // Sin carpeta (archivada o purgada): lista vacía, no error.
+        assert!(state
+            .list_files("0b5b2c7e-5c1a-4f7e-8d3a-0000000000ee")
+            .unwrap()
+            .is_empty());
     }
 
     #[test]

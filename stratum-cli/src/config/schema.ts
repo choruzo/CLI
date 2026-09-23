@@ -458,6 +458,13 @@ export const StratumConfigSchema = z.object({
    */
   desktop: z
     .object({
+      /**
+       * Generaciones simultáneas entre todas las conversaciones (D4, 15.15).
+       * Las demás esperan en cola: con un servidor local de un solo slot, dos a
+       * la vez van a la mitad de velocidad cada una, y uno remoto puede
+       * responder con rate limit.
+       */
+      maxConcurrentTurns: z.number().int().min(1).max(8).default(2),
       /** Espacios de trabajo por conversación del modo Chat. */
       workspaces: z
         .object({

@@ -175,6 +175,15 @@ export class ContextManager {
    * se desvía con facilidad un 40% (código y texto repetitivo tokenizan mucho
    * mejor que prosa), lo que hace comprimir de más o de menos.
    */
+  /**
+   * El historial se sustituyó por completo (`/clear`, reanudar otra sesión): el
+   * último `prompt_tokens` ya no describe nada. La calibración del tokenizador
+   * se conserva, es del modelo y no del historial.
+   */
+  forgetLastUsage(): void {
+    this.lastPromptTokens = null;
+  }
+
   recordUsage(promptTokens: number, messages?: Message[]): void {
     this.lastPromptTokens = promptTokens;
     if (messages) {

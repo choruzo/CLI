@@ -1,28 +1,98 @@
-import { useEffect, useRef } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, type Ref } from 'react';
 import type { AgentStream } from '../../hooks/useAgentStream';
+import type { ModelsOffer } from '../../hooks/useConversations';
 import { useAttachments } from '../../hooks/useAttachments';
 import { ConfirmDialog } from './ConfirmDialog';
-import { InputArea } from './InputArea';
+import { InputArea, type InputAreaHandle } from './InputArea';
 import { MessageList } from './MessageList';
+import { ModelPicker } from './ModelPicker';
 import { QuestionPrompt } from './QuestionPrompt';
 import { RetentionBanner } from './RetentionBanner';
 import { TodoPanel } from './TodoPanel';
+import type { CommandName } from './commands';
+import { userMessageAnchor } from '../layout/OutlinePanel';
 
 /** Distancia al fondo por debajo de la cual se sigue el stream automáticamente. */
 const STICK_PX = 80;
 
+export interface ConversationViewHandle {
+  focusInput: () => void;
+  /** Salta con scroll suave a un mensaje del usuario (índice del sidebar). */
+  jumpTo: (turnId: string) => void;
+}
+
 /**
  * Conversación con el asistente. El scroll sigue al stream mientras el usuario
- * esté abajo; si sube a leer algo, deja de arrastrarle.
+ * esté abajo; si sube a leer algo, deja de arrastrarle. Informa al índice del
+ * sidebar de qué mensaje del usuario está a la vista.
  */
-export function ConversationView({ stream, connected }: { stream: AgentStream; connected: boolean }) {
+export const ConversationView = forwardRef(function ConversationView(
+  {
+    stream,
+    connected,
+    onCommand,
+    onVisibleTurn,
+    models,
+    onPickModel,
+    onCloseModels,
+    confirmClear,
+    onConfirmClear,
+    onCancelClear,
+  }: {
+    stream: AgentStream;
+    connected: boolean;
+    onCommand?: (name: CommandName, arg: string) => void;
+    onVisibleTurn?: (turnId: string | null) => void;
+    models?: ModelsOffer | null;
+    onPickModel?: (model: string) => void;
+    onCloseModels?: () => void;
+    /** `/clear` o `Ctrl+L` pidió vaciar: confirmación en la propia conversación. */
+    confirmClear?: boolean;
+    onConfirmClear?: () => void;
+    onCancelClear?: () => void;
+  },
+  ref: Ref<ConversationViewHandle>,
+) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const inputRef = useRef<InputAreaHandle>(null);
   const stickRef = useRef(true);
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      focusInput: () => inputRef.current?.focus(),
+      jumpTo: (turnId) => {
+        stickRef.current = false;
+        document
+          .getElementById(userMessageAnchor(turnId))
+          ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      },
+    }),
+    [],
+  );
+
+  const reportVisible = () => {
+    const el = scrollRef.current;
+    if (!el || !onVisibleTurn) return;
+    // El último mensaje del usuario cuyo inicio ya pasó el tercio superior.
+    const top = el.getBoundingClientRect().top + el.clientHeight / 3;
+    let current: string | null = null;
+    for (const node of el.querySelectorAll<HTMLElement>('[data-user-turn]')) {
+      if (node.getBoundingClientRect().top <= top) current = node.dataset.userTurn ?? null;
+      else break;
+    }
+    if (!current) {
+      const first = el.querySelector<HTMLElement>('[data-user-turn]');
+      current = first?.dataset.userTurn ?? null;
+    }
+    onVisibleTurn(current);
+  };
 
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
     stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    reportVisible();
   };
 
   // Un mensaje nuevo del usuario vuelve a anclar al fondo aunque antes hubiera
@@ -36,6 +106,7 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
     const el = scrollRef.current;
     if (el && stickRef.current) el.scrollTop = el.scrollHeight;
   });
+  useEffect(reportVisible, [userCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generating = stream.activeTurnId !== null;
   const empty = stream.messages.length === 0;
@@ -47,7 +118,11 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
       <div className="conversation__scroll" ref={scrollRef} onScroll={onScroll}>
         {empty ? (
           <div className="conversation__empty">
-            <p>¿En qué puedo ayudarte?</p>
+            <p className="conversation__empty-title">¿En qué puedo ayudarte?</p>
+            <p className="conversation__empty-hint">
+              Adjunta ficheros con el botón o soltándolos sobre la ventana. Escribe / para ver los
+              comandos.
+            </p>
           </div>
         ) : (
           <MessageList
@@ -60,9 +135,39 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
       </div>
 
       {stream.notice && (
-        <p className="notice" data-tone="warning" role="alert">
+        <p className="notice notice--dismissable" data-tone="warning" role="alert">
           {stream.notice}
+          <button type="button" className="icon-button" aria-label="Cerrar aviso" onClick={stream.dismissNotice}>
+            ×
+          </button>
         </p>
+      )}
+      {stream.info && (
+        <p className="notice notice--dismissable" data-tone="info" role="status">
+          {stream.info}
+          <button type="button" className="icon-button" aria-label="Cerrar aviso" onClick={stream.dismissInfo}>
+            ×
+          </button>
+        </p>
+      )}
+      {confirmClear && (
+        <section className="confirm-bar" role="alertdialog" aria-label="Vaciar la conversación">
+          <p>
+            ¿Vaciar esta conversación? Se borra el historial (también para el asistente); los
+            ficheros se conservan.
+          </p>
+          <span className="confirm-bar__actions">
+            <button type="button" className="button" onClick={onCancelClear} autoFocus>
+              Cancelar
+            </button>
+            <button type="button" className="button button--danger" onClick={onConfirmClear}>
+              Vaciar
+            </button>
+          </span>
+        </section>
+      )}
+      {models && onPickModel && onCloseModels && (
+        <ModelPicker offer={models} onPick={onPickModel} onClose={onCloseModels} />
       )}
       <RetentionBanner
         status={stream.workspace}
@@ -81,13 +186,15 @@ export function ConversationView({ stream, connected }: { stream: AgentStream; c
         />
       )}
       <InputArea
+        ref={inputRef}
         disabled={inputDisabled}
         generating={generating}
         onSend={stream.send}
+        onCommand={onCommand}
         attachments={attachments}
         onCancel={stream.cancel}
         placeholder={connected ? 'Escribe un mensaje…' : 'Esperando al agente…'}
       />
     </section>
   );
-}
+});

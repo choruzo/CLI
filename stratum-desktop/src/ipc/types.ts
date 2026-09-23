@@ -20,6 +20,13 @@ export type {
   SidecarErrorCode,
   WorkspaceFileInfo,
   WorkspaceStatus,
+  ConversationSummary,
+  ConversationStats,
+  DecisionSummary,
+  TranscriptTurn,
+  TranscriptPart,
+  TranscriptToolCall,
+  TodoItem,
 } from '../../../stratum-cli/src/desktop/protocol';
 
 import type {

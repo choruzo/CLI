@@ -56,6 +56,16 @@ describe('StratumAgent.clearHistory (/clear, §5.2)', () => {
     expect(agent.getPlanRef()).toBeNull();
   });
 
+  it('el % de contexto deja de contar el último usage real del historial borrado', () => {
+    const agent = newAgent([{ role: 'system', content: 'sys' }]);
+    agent.getContextUsage();
+    // El provider reportó 20k tokens de prompt en el último turno.
+    (agent as unknown as { contextManager: ContextManager }).contextManager.recordUsage(20_000);
+    expect(agent.getContextUsage().used).toBe(20_000);
+    agent.clearHistory();
+    expect(agent.getContextUsage().used).toBeLessThan(100);
+  });
+
   it('no deja un system fantasma si el historial no empezaba por system', () => {
     const agent = newAgent([{ role: 'user', content: 'hola' }]);
     agent.clearHistory();
