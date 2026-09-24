@@ -46,6 +46,11 @@
  * por `SECRET_PLACEHOLDER`. Además, el ProviderWizard sondea `/models` con
  * `provider_probe`, y Espacios de trabajo pide uso de disco y un pase de
  * retención inmediato.
+ *
+ * D6 (v7) añade a `config_state.applied` lo que el shell necesita saber de la
+ * config efectiva aunque Ajustes esté cerrado: las preferencias del sistema
+ * (`os`: notificaciones y atajo global, que Rust registra) y si hay un provider
+ * utilizable (`providerReady`), que decide el onboarding del primer arranque.
  */
 
 import type {
@@ -59,7 +64,7 @@ import type {
 export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem, TodoItem };
 
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 6;
+export const DESKTOP_PROTOCOL_VERSION = 7;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -761,6 +766,17 @@ export interface ConfigApplied {
   error: string | null;
   /** Cambios guardados que solo se aplican al reiniciar el agente. */
   restartRequired: string[];
+  /** Preferencias del sistema de la config en uso (D6). */
+  os: DesktopOsPrefs;
+  /** La config en uso tiene un provider por defecto que existe (D6: si no, onboarding). */
+  providerReady: boolean;
+}
+
+/** `desktop.notifications` y `desktop.globalHotkey` efectivos (D6). */
+export interface DesktopOsPrefs {
+  notifications: { enabled: boolean; minSeconds: number };
+  /** Accelerator de Tauri; `''` = sin atajo. */
+  globalHotkey: string;
 }
 
 export interface ConfigStateFrame {

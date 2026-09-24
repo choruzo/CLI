@@ -1,0 +1,239 @@
+name: Desktop release
+
+# Stratum Desktop (D6): instaladores .msi/.exe en Windows y .deb/.AppImage en
+# Linux, cada uno con el sidecar SEA de su plataforma (scripts/build-sea.mjs).
+#
+# - Tag `desktop-vX.Y.Z` (versión = tauri.conf.json): build + Release en borrador.
+# - Manual (workflow_dispatch): solo build, los instaladores quedan como
+#   artefactos del run.
+#
+# Firma, toda opcional (sin secrets, instaladores sin firmar):
+# - Windows Authenticode: WINDOWS_CERTIFICATE (PFX en base64) +
+#   WINDOWS_CERTIFICATE_PASSWORD. Tauri firma el ejecutable, el sidecar y los
+#   instaladores.
+# - Clave del updater (D7): TAURI_SIGNING_PRIVATE_KEY +
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD. Tauri solo la usa cuando se activen los
+#   artefactos del updater.
+# - Linux: GPG_PRIVATE_KEY (armored) + GPG_PASSPHRASE → firmas `.asc` separadas
+#   del .deb y del .AppImage.
+
+on:
+  push:
+    tags:
+      - 'desktop-v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            bundles: msi,nsis
+          # 22.04: glibc antigua, así el .deb y el AppImage arrancan también en
+          # distribuciones de hace un par de años.
+          - name: linux-x64
+            os: ubuntu-22.04
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate version
+        run: |
+          set -euo pipefail
+          cd stratum-desktop
+          CONF=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          PKG=$(node -p "require('./package.json').version")
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' src-tauri/Cargo.toml | head -n 1)
+          echo "tauri.conf.json=$CONF package.json=$PKG Cargo.toml=$CARGO"
+          if [ "$CONF" != "$PKG" ] || [ "$CONF" != "$CARGO" ]; then
+            echo "::error::Las versiones de tauri.conf.json, package.json y Cargo.toml no coinciden"
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" == refs/tags/desktop-v* ]] && [ "${GITHUB_REF_NAME}" != "desktop-v$CONF" ]; then
+            echo "::error::El tag ${GITHUB_REF_NAME} no coincide con la versión $CONF"
+            exit 1
+          fi
+          echo "VERSION=$CONF" >> "$GITHUB_ENV"
+
+      # El runtime de Node que se embebe en el sidecar es este mismo: los .node
+      # de stratum-cli se compilan para su ABI (ver build-sea.mjs).
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            stratum-cli/package-lock.json
+            stratum-desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: stratum-desktop/src-tauri -> target
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+
+      - name: Install dependencies
+        run: |
+          (cd stratum-cli && npm ci)
+          (cd stratum-desktop && npm ci)
+
+      - name: Test core (desktop + config)
+        working-directory: stratum-cli
+        run: npx vitest run src/desktop src/config
+
+      - name: Test frontend
+        working-directory: stratum-desktop
+        run: |
+          npm run typecheck
+          npm run test:run
+
+      - name: Build sidecar (SEA + nativos + self-test)
+        working-directory: stratum-desktop
+        run: npm run sidecar:build
+
+      # Con el SEA ya construido, los tests de integración de Rust corren
+      # contra el binario real en vez de saltarse.
+      - name: Test shell (Rust)
+        working-directory: stratum-desktop/src-tauri
+        run: cargo test --locked
+
+      - name: Windows code signing (optional)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Host "Sin WINDOWS_CERTIFICATE: instaladores sin firma Authenticode."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          $config = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $cert.Thumbprint
+                digestAlgorithm = 'sha256'
+                timestampUrl = 'http://timestamp.digicert.com'
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+          $path = Join-Path $env:RUNNER_TEMP 'tauri.signing.json'
+          Set-Content -Path $path -Value $config -Encoding utf8
+          "TAURI_EXTRA_CONFIG=$path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Firma Authenticode activada ($($cert.Subject))"
+
+      - name: Build installers
+        working-directory: stratum-desktop
+        env:
+          # linuxdeploy es una AppImage: sin FUSE en el runner, se extrae y ejecuta.
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ARGS=(--ci --bundles "${{ matrix.bundles }}")
+          if [ -n "${TAURI_EXTRA_CONFIG:-}" ]; then ARGS+=(--config "$TAURI_EXTRA_CONFIG"); fi
+          npm run tauri build -- "${ARGS[@]}"
+
+      - name: Collect installers
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/installers"
+          mkdir -p "$OUT"
+          BUNDLE=stratum-desktop/src-tauri/target/release/bundle
+          shopt -s nullglob
+          for f in "$BUNDLE"/msi/*.msi "$BUNDLE"/nsis/*.exe "$BUNDLE"/deb/*.deb "$BUNDLE"/appimage/*.AppImage; do
+            cp "$f" "$OUT/"
+          done
+          FILES=("$OUT"/*)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::error::No se generó ningún instalador"
+            exit 1
+          fi
+          (cd "$OUT" && sha256sum * > "SHA256SUMS-${{ matrix.name }}.txt")
+          ls -la "$OUT"
+          echo "INSTALLERS=$OUT" >> "$GITHUB_ENV"
+
+      - name: GPG signatures (optional)
+        if: runner.os == 'Linux'
+        env:
+          GPG_PRIVATE_KEY: ${{ secrets.GPG_PRIVATE_KEY }}
+          GPG_PASSPHRASE: ${{ secrets.GPG_PASSPHRASE }}
+        run: |
+          set -euo pipefail
+          if [ -z "${GPG_PRIVATE_KEY:-}" ]; then
+            echo "Sin GPG_PRIVATE_KEY: sin firmas .asc."
+            exit 0
+          fi
+          echo "$GPG_PRIVATE_KEY" | gpg --batch --import
+          for f in "$INSTALLERS"/*.deb "$INSTALLERS"/*.AppImage; do
+            gpg --batch --yes --pinentry-mode loopback --passphrase "$GPG_PASSPHRASE" \
+              --armor --detach-sign "$f"
+          done
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: stratum-desktop-${{ env.VERSION }}-${{ matrix.name }}
+          path: ${{ env.INSTALLERS }}
+          if-no-files-found: error
+
+  release:
+    name: Draft GitHub Release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Create draft release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#desktop-v}"
+          cat installers/SHA256SUMS-*.txt > installers/SHA256SUMS.txt
+          rm installers/SHA256SUMS-*.txt
+          PRERELEASE=()
+          if [[ "$VERSION" == 0.* || "$VERSION" == *-* ]]; then PRERELEASE=(--prerelease); fi
+          gh release create "${GITHUB_REF_NAME}" installers/* \
+            --draft "${PRERELEASE[@]}" \
+            --title "Stratum Desktop ${VERSION}" \
+            --notes "Instaladores de Stratum Desktop ${VERSION} para Windows (.msi, .exe) y Linux (.deb, .AppImage). Verifica las descargas con SHA256SUMS.txt."

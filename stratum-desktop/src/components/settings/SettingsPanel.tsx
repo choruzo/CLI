@@ -15,7 +15,14 @@ import type { FieldContext } from './fields';
 import { Issues } from './fields';
 import { JsonEditor } from './JsonEditor';
 import { ProviderWizard, type WizardResult } from './ProviderWizard';
-import { MemorySection, ModelSection, ProvidersSection, WebSearchSection, WorkspacesSection } from './sections';
+import {
+  MemorySection,
+  ModelSection,
+  ProvidersSection,
+  SystemSection,
+  WebSearchSection,
+  WorkspacesSection,
+} from './sections';
 
 /**
  * Panel de Ajustes (D5, §7.4): overlay a pantalla completa con el
@@ -23,7 +30,7 @@ import { MemorySection, ModelSection, ProvidersSection, WebSearchSection, Worksp
  * por el borrador de `useConfig`; guardar lo valida y escribe el sidecar.
  */
 
-export type SettingsTab = 'providers' | 'model' | 'web' | 'memory' | 'workspaces' | 'advanced';
+export type SettingsTab = 'providers' | 'model' | 'web' | 'memory' | 'workspaces' | 'system' | 'advanced';
 
 const TABS: Array<{ id: SettingsTab; label: string; paths: string[] }> = [
   { id: 'providers', label: 'Providers', paths: ['provider'] },
@@ -31,6 +38,7 @@ const TABS: Array<{ id: SettingsTab; label: string; paths: string[] }> = [
   { id: 'web', label: 'Búsqueda web', paths: ['tools.webSearch'] },
   { id: 'memory', label: 'Memoria', paths: ['memory'] },
   { id: 'workspaces', label: 'Espacios de trabajo', paths: ['desktop.workspaces'] },
+  { id: 'system', label: 'Sistema', paths: ['desktop.notifications', 'desktop.globalHotkey'] },
   { id: 'advanced', label: 'Avanzado', paths: [] },
 ];
 
@@ -38,11 +46,14 @@ type WizardState = { mode: 'add' } | { mode: 'edit'; provider: ProviderEntry } |
 
 export function SettingsPanel({
   config,
+  hotkeyError = null,
   connected,
   onClose,
   onOpenMemory,
 }: {
   config: Config;
+  /** El atajo global en uso no se pudo registrar (D6). */
+  hotkeyError?: string | null;
   connected: boolean;
   onClose: () => void;
   onOpenMemory: () => void;
@@ -287,6 +298,8 @@ export function SettingsPanel({
               ctx={ctx}
               onOpenMemory={config.dirty ? () => setConfirmClose(true) : onOpenMemory}
             />
+          ) : tab === 'system' ? (
+            <SystemSection ctx={ctx} hotkeyError={hotkeyError} />
           ) : (
             <WorkspacesSection ctx={ctx} config={config} />
           )}

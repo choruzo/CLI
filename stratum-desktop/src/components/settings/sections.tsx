@@ -11,6 +11,7 @@ import {
 } from './config-draft';
 import {
   CheckboxSetting,
+  HotkeySetting,
   Issues,
   NumberSetting,
   SecretSetting,
@@ -443,6 +444,35 @@ export function WorkspacesSection({ ctx, config }: { ctx: FieldContext; config: 
           </p>
         )}
       </div>
+    </section>
+  );
+}
+
+/**
+ * Sistema (D6): notificaciones nativas y atajo global. Los guarda el sidecar
+ * como el resto; el atajo lo registra Rust en cuanto la config se aplica.
+ */
+export function SystemSection({ ctx, hotkeyError }: { ctx: FieldContext; hotkeyError: string | null }) {
+  return (
+    <section className="settings-section" aria-labelledby="settings-system">
+      <header className="settings-section__header">
+        <h3 id="settings-system" className="settings-section__title">
+          Sistema
+        </h3>
+      </header>
+      <CheckboxSetting
+        ctx={ctx}
+        path={['desktop', 'notifications', 'enabled']}
+        label="Notificar cuando termine una respuesta larga"
+        hint="Solo si la ventana no está a la vista o la respuesta es de otra conversación. También avisa cuando el agente espera tu confirmación o tus respuestas."
+      />
+      <NumberSetting
+        ctx={ctx}
+        path={['desktop', 'notifications', 'minSeconds']}
+        label="Respuesta larga a partir de"
+        unit="segundos"
+      />
+      <HotkeySetting ctx={ctx} registerError={hotkeyError} />
     </section>
   );
 }

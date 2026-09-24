@@ -110,12 +110,44 @@ async function buildBinary() {
   mkdirSync(dirname(out), { recursive: true });
   rmSync(out, { force: true });
   copyFileSync(process.execPath, out);
-  // La firma Authenticode de node.exe deja de ser válida tras inyectar; la
-  // firma propia del sidecar llega con el pipeline de D4.
+  // La firma Authenticode de node.exe dejaría de ser válida al inyectar: se
+  // quita antes (como indica la documentación de SEA) para que el binario no
+  // lleve una firma rota y para que la firma propia del pipeline (D6, si hay
+  // certificado) no tropiece con ella.
+  if (isWindows) removeAuthenticode(out);
   const { inject } = await import('postject');
   await inject(out, 'NODE_SEA_BLOB', readFileSync(blob), { sentinelFuse: SEA_FUSE });
   console.log(`  ${relative(desktopRoot, out)} (${(statSync(out).size / 1e6).toFixed(1)} MB)`);
   return out;
+}
+
+/** `signtool` del PATH o del Windows SDK más reciente; `null` si no hay. */
+function findSigntool() {
+  const probe = spawnSync('signtool', ['/?'], { stdio: 'ignore', shell: true });
+  if (probe.status === 0) return 'signtool';
+  const kits = join(process.env['ProgramFiles(x86)'] ?? 'C:\\Program Files (x86)', 'Windows Kits', '10', 'bin');
+  if (!existsSync(kits)) return null;
+  const arch = process.arch === 'arm64' ? 'arm64' : 'x64';
+  const versions = readdirSync(kits)
+    .filter((d) => /^\d+\.\d+\.\d+\.\d+$/.test(d))
+    .sort((a, b) => b.localeCompare(a, undefined, { numeric: true }));
+  for (const v of versions) {
+    const candidate = join(kits, v, arch, 'signtool.exe');
+    if (existsSync(candidate)) return candidate;
+  }
+  return null;
+}
+
+function removeAuthenticode(file) {
+  const signtool = findSigntool();
+  if (!signtool) {
+    console.log('  (sin signtool: el binario conserva la firma de node.exe, que queda inválida)');
+    return;
+  }
+  const r = spawnSync(signtool, ['remove', '/s', file], { encoding: 'utf8', shell: false });
+  if (r.status !== 0) {
+    console.log(`  (signtool remove falló, se sigue: ${(r.stderr || r.stdout).trim()})`);
+  }
 }
 
 // ---------------------------------------------------------------------------

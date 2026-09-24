@@ -30,6 +30,7 @@ export type {
   ConfigApplied,
   ConfigIssue,
   ConfigSnapshot,
+  DesktopOsPrefs,
 } from '../../../stratum-cli/src/desktop/protocol';
 
 export { SECRET_PLACEHOLDER } from '../../../stratum-cli/src/desktop/protocol';

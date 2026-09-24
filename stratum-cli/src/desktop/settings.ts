@@ -8,6 +8,7 @@ import { resolveWorkspaceSettings, type WorkspaceManager } from './workspace.js'
 import {
   SECRET_PLACEHOLDER,
   type ConfigApplied,
+  type DesktopOsPrefs,
   type ConfigGetFrame,
   type ConfigSaveFrame,
   type ConfigValidateFrame,
@@ -50,6 +51,29 @@ export interface DesktopSettingsOptions {
 
 type Send = (frame: ConversationOutboundFrame) => void;
 
+/** Preferencias del sistema (D6) de una config efectiva. */
+export function osPrefsOf(config: StratumConfig): DesktopOsPrefs {
+  return {
+    notifications: {
+      enabled: config.desktop.notifications.enabled,
+      minSeconds: config.desktop.notifications.minSeconds,
+    },
+    globalHotkey: config.desktop.globalHotkey.trim(),
+  };
+}
+
+/** ¿Hay un provider por defecto que exista? Sin él no se puede conversar (D6: onboarding). */
+export function hasUsableProvider(config: StratumConfig): boolean {
+  const p = config.provider;
+  return (
+    !!p && p.default.length > 0 && Object.prototype.hasOwnProperty.call(p.providers, p.default)
+  );
+}
+
+function appliedFor(config: StratumConfig): Pick<ConfigApplied, 'os' | 'providerReady'> {
+  return { os: osPrefsOf(config), providerReady: hasUsableProvider(config) };
+}
+
 /**
  * Panel de Ajustes de Stratum Desktop en el sidecar (D5, 15.7): lee y guarda el
  * `.stratumrc.json` global y pone en marcha la config resultante, tanto si la
@@ -71,6 +95,8 @@ export class DesktopSettings {
       ok: !opts.startupError,
       error: opts.startupError?.message ?? null,
       restartRequired: [],
+      // Con error de arranque, `startup` son los defaults: sin provider.
+      ...appliedFor(opts.startup),
     };
     this.defaults = StratumConfigSchema.parse({}) as unknown as Record<string, unknown>;
   }
@@ -194,7 +220,12 @@ export class DesktopSettings {
       this.applied = { ...this.applied, ok: false, error: message };
       return;
     }
-    this.applied = { ok: true, error: null, restartRequired: this.restartRequired(config) };
+    this.applied = {
+      ok: true,
+      error: null,
+      restartRequired: this.restartRequired(config),
+      ...appliedFor(config),
+    };
   }
 
   /** Diferencias con la config de arranque que solo se aplican reiniciando el agente. */

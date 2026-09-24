@@ -160,6 +160,12 @@
     }
   },
   "desktop": {
+    "maxConcurrentTurns": 2,
+    "notifications": {
+      "enabled": true,
+      "minSeconds": 10
+    },
+    "globalHotkey": "CommandOrControl+Shift+Space",
     "workspaces": {
       "root": "~/.stratum/desktop/workspaces",
       "maxFileMB": 25,

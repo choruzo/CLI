@@ -11,12 +11,14 @@ import type {
   ConversationStats,
   ConversationSummary,
   DecisionSummary,
+  DesktopOsPrefs,
   TranscriptPart,
   TranscriptToolCall,
   TranscriptTurn,
   WorkspaceFileInfo,
   WorkspaceStatus,
 } from '../../../stratum-cli/src/desktop/protocol';
+import { DEFAULT_GLOBAL_HOTKEY } from '../../../stratum-cli/src/config/accelerator';
 
 /**
  * Validación estructural de lo que llega del sidecar antes de entrar al estado
@@ -340,6 +342,21 @@ export function configApplied(v: unknown): ConfigApplied | null {
     ok: v.ok,
     error: v.error,
     restartRequired: Array.isArray(v.restartRequired) ? v.restartRequired.filter(str) : [],
+    os: osPrefs(v.os),
+    // Ausente = no hay motivo para lanzar el onboarding.
+    providerReady: v.providerReady !== false,
+  };
+}
+
+/** `applied.os` (D6), con los defaults del schema en lo que falte o no cuadre. */
+export function osPrefs(v: unknown): DesktopOsPrefs {
+  const n = isRecord(v) && isRecord(v.notifications) ? v.notifications : {};
+  return {
+    notifications: {
+      enabled: typeof n.enabled === 'boolean' ? n.enabled : true,
+      minSeconds: num(n.minSeconds) && n.minSeconds >= 0 ? n.minSeconds : 10,
+    },
+    globalHotkey: isRecord(v) && str(v.globalHotkey) ? v.globalHotkey : DEFAULT_GLOBAL_HOTKEY,
   };
 }
 

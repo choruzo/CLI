@@ -12,7 +12,7 @@ use std::io;
 use std::time::{Duration, Instant};
 
 /// Versión del protocolo que entiende este shell (`DESKTOP_PROTOCOL_VERSION`).
-pub const PROTOCOL_VERSION: u64 = 6;
+pub const PROTOCOL_VERSION: u64 = 7;
 
 /// Tipos que el frontend puede mandar (`CLIENT_FRAME_TYPES` en `protocol.ts`).
 pub const CLIENT_FRAME_TYPES: [&str; 24] = [
@@ -180,7 +180,7 @@ mod tests {
     #[test]
     fn acepta_handshake_ok_con_la_version_de_protocolo() {
         let info = parse_handshake_reply(
-            &json!({"type":"handshake_ok","core":{"protocolVersion":6,"version":"0.4.0"},"natives":[]})
+            &json!({"type":"handshake_ok","core":{"protocolVersion":7,"version":"0.4.0"},"natives":[]})
                 .to_string(),
         )
         .unwrap();

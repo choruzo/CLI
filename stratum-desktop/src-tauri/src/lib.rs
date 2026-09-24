@@ -1,17 +1,20 @@
 //! Stratum Desktop: ventana Tauri + sidecar `stratum-core` con canal local
-//! autenticado (D0) y chat de asistente (D1). Ver STRATUM_DESKTOP_HITOS.md.
+//! autenticado (D0), chat de asistente (D1) e integración con el SO (D6). Ver
+//! STRATUM_DESKTOP_HITOS.md.
 
 #[cfg(test)]
 mod e2e_tests;
 mod files;
 mod ipc;
 mod logs;
+mod os;
 mod sidecar;
 mod supervisor;
 mod transport;
 mod workspace;
 
 use ipc::SidecarState;
+use os::OsState;
 use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
 use workspace::WorkspaceState;
 
@@ -30,8 +33,12 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         // Solo lo usa Rust (D2): el webview no tiene permisos del plugin.
         .plugin(tauri_plugin_dialog::init())
+        // D6: solo los usa Rust (`os.rs`); el webview no tiene sus permisos.
+        .plugin(tauri_plugin_notification::init())
+        .plugin(os::global_shortcut_plugin())
         .manage(SidecarState::new())
         .manage(WorkspaceState::default())
+        .manage(OsState::default())
         .invoke_handler(tauri::generate_handler![
             ipc::sidecar_status,
             ipc::sidecar_subscribe,
@@ -46,6 +53,10 @@ pub fn run() {
             files::output_preview,
             files::workspace_export,
             files::workspace_files,
+            os::os_set_hotkey,
+            os::os_notify,
+            os::logs_open,
+            os::logs_tail,
         ])
         .on_window_event(|window, event| {
             if let WindowEvent::DragDrop(drag) = event {
@@ -53,6 +64,8 @@ pub fn run() {
             }
         })
         .setup(|app| {
+            // Hasta que el sidecar diga cuál es el configurado (D6).
+            os::register_default(app.handle());
             // Un fallo al lanzar no aborta la app: queda como estado `failed`
             // para que la UI lo muestre, con Reintentar.
             supervisor::start(app.handle().clone());

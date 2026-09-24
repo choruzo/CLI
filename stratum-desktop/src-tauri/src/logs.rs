@@ -3,8 +3,9 @@
 //! sidecar muy verboso no llene el disco entre reinicios.
 
 use std::fs::{self, File, OpenOptions};
-use std::io;
+use std::io::{self, Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
+use tauri::{AppHandle, Manager, Runtime};
 
 pub const SIDECAR_LOG: &str = "sidecar.log";
 
@@ -13,6 +14,41 @@ pub const MAX_LOG_BYTES: u64 = 5 * 1024 * 1024;
 
 /// Ficheros rotados que se conservan (`sidecar.log.1` … `.N`).
 pub const KEEP_ROTATED: usize = 3;
+
+/// Bytes finales de `sidecar.log` que se leen para la pantalla de fallo (D6).
+const TAIL_BYTES: u64 = 64 * 1024;
+
+/// Carpeta de logs de la app. Sin directorio de logs (perfil de usuario raro),
+/// el temporal del sistema: quedarse sin log no puede dejar a la app sin agente.
+pub fn log_dir<R: Runtime>(app: &AppHandle<R>) -> PathBuf {
+    app.path()
+        .app_log_dir()
+        .unwrap_or_else(|_| std::env::temp_dir().join("stratum-desktop").join("logs"))
+}
+
+/// Últimas `lines` líneas de un log (lee como mucho los últimos 64 KiB; la
+/// primera línea, posiblemente cortada, se descarta si no se leyó desde el inicio).
+/// Un fichero que no existe es un log vacío.
+pub fn read_tail(path: &Path, lines: usize) -> io::Result<String> {
+    let mut file = match File::open(path) {
+        Ok(f) => f,
+        Err(e) if e.kind() == io::ErrorKind::NotFound => return Ok(String::new()),
+        Err(e) => return Err(e),
+    };
+    let len = file.metadata()?.len();
+    let start = len.saturating_sub(TAIL_BYTES);
+    file.seek(SeekFrom::Start(start))?;
+    let mut buf = Vec::new();
+    file.read_to_end(&mut buf)?;
+    let text = String::from_utf8_lossy(&buf);
+    let mut all: Vec<&str> = text.lines().collect();
+    if start > 0 && !all.is_empty() {
+        all.remove(0);
+    }
+    let from = all.len().saturating_sub(lines);
+    Ok(all[from..].join("
+"))
+}
 
 /// Abre (en modo append) el log del sidecar en `dir`, rotándolo antes si supera `max_bytes`.
 pub fn open_sidecar_log(dir: &Path, max_bytes: u64, keep: usize) -> io::Result<(File, PathBuf)> {
@@ -86,6 +122,30 @@ mod tests {
         assert!(rotated(&log, 1).exists());
         assert!(rotated(&log, 2).exists());
         assert!(!rotated(&log, 3).exists());
+    }
+
+    #[test]
+    fn read_tail_devuelve_las_ultimas_lineas() {
+        let dir = tempfile::tempdir().unwrap();
+        let log = dir.path().join(SIDECAR_LOG);
+        assert_eq!(read_tail(&log, 5).unwrap(), "");
+        fs::write(&log, "a
+b
+c
+d
+").unwrap();
+        assert_eq!(read_tail(&log, 2).unwrap(), "c
+d");
+        assert_eq!(read_tail(&log, 10).unwrap(), "a
+b
+c
+d");
+        // Más grande que la ventana de lectura: la primera línea (cortada) se descarta.
+        let big = format!("{}
+fin
+", "x".repeat(TAIL_BYTES as usize + 10));
+        fs::write(&log, big).unwrap();
+        assert_eq!(read_tail(&log, 10).unwrap(), "fin");
     }
 
     #[test]

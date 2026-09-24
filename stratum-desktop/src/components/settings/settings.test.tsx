@@ -24,6 +24,14 @@ vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 afterEach(cleanup);
 
+const APPLIED = {
+  ok: true,
+  error: null,
+  restartRequired: [] as string[],
+  os: { notifications: { enabled: true, minSeconds: 10 }, globalHotkey: 'CommandOrControl+Shift+Space' },
+  providerReady: true,
+};
+
 const snap = (text: string, hash = 'a'.repeat(64)): ConfigSnapshot => ({
   path: '/home/u/.stratum/.stratumrc.json',
   exists: true,
@@ -99,7 +107,7 @@ describe('configReducer (D5, 15.7)', () => {
       type: 'state',
       reason: 'requested',
       snapshot: snap('{}'),
-      applied: { ok: true, error: null, restartRequired: [] },
+      applied: { ...APPLIED, restartRequired: [] },
       defaults: {},
     });
 
@@ -151,7 +159,7 @@ describe('configReducer (D5, 15.7)', () => {
       type: 'state',
       reason: 'saved',
       snapshot: snap('{"x":1}', 'e'.repeat(64)),
-      applied: { ok: true, error: null, restartRequired: [] },
+      applied: { ...APPLIED, restartRequired: [] },
       defaults: null,
     });
     expect(s.conflict).toBeNull();
@@ -173,7 +181,7 @@ describe('configReducer (D5, 15.7)', () => {
         type: 'config_state',
         reason: 'saved',
         snapshot: snap('{}'),
-        applied: { ok: true, error: null, restartRequired: [] },
+        applied: { ...APPLIED, restartRequired: [] },
         defaults: {},
       },
     });
@@ -186,7 +194,7 @@ function fakeConfig(overrides: Partial<Config> = {}): Config {
     ...initialConfigState,
     loaded: true,
     snapshot: snap(CONFIG),
-    applied: { ok: true, error: null, restartRequired: [] },
+    applied: { ...APPLIED, restartRequired: [] },
     defaults: { tools: { webSearch: { maxResults: 10 } } },
     draft: CONFIG,
     baseText: CONFIG,
@@ -288,7 +296,7 @@ describe('SettingsPanel (D5)', () => {
     const config = fakeConfig({
       draft: `${CONFIG} `,
       conflict: snap('{}', 'f'.repeat(64)),
-      applied: { ok: true, error: null, restartRequired: ['Carpeta de los espacios de trabajo'] },
+      applied: { ...APPLIED, restartRequired: ['Carpeta de los espacios de trabajo'] },
     });
     renderPanel(config);
     fireEvent.click(screen.getByRole('button', { name: 'Sobrescribir con la mía' }));

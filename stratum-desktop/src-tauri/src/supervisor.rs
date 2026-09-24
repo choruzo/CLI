@@ -203,11 +203,7 @@ struct Launched {
 /// Lanza el proceso con token y ruta de pipe nuevos. `Err((motivo, fatal))`.
 fn launch(app: &AppHandle) -> Result<Launched, (String, bool)> {
     let paths = app.path();
-    // Sin directorio de logs de la app (perfil de usuario raro), el temporal del
-    // sistema: quedarse sin log no puede dejar a la app sin agente.
-    let log_dir = paths
-        .app_log_dir()
-        .unwrap_or_else(|_| std::env::temp_dir().join("stratum-desktop").join("logs"));
+    let log_dir = logs::log_dir(app);
     let resources_dir = paths
         .resource_dir()
         .map_err(|e| (format!("sin directorio de resources: {e}"), true))?;

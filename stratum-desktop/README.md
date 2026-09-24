@@ -2,9 +2,9 @@
 
 Shell de escritorio (Tauri v2 + React 18) sobre el core de `stratum-cli`. La
 definición completa está en `../STRATUM_DESKTOP_PROJECT_DEFINITION.md` y el plan
-por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 cerrado** (chat de
-asistente en una conversación sobre el canal autenticado de D0, verificado en
-Windows y Linux con un modelo real).
+por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 cerrado**; D2–D5
+implementados y verificados; **D6** (integración con el SO y pipeline de build)
+implementado — ver abajo.
 
 ## Requisitos de desarrollo
 
@@ -171,3 +171,72 @@ useAgentStream ─invoke──► sidecar_send (lista blanca + 1 MiB) ─pipe─
   inyectado) solo en vallas cerradas. Sin HTML crudo, URLs solo `http(s)`/
   `mailto`, imágenes como enlace y enlaces sin `href` que abren el navegador del
   sistema.
+
+## Integración con el SO (D6)
+
+Las preferencias viven en el `.stratumrc.json` global, como el resto de Ajustes
+(pestaña **Sistema**): `desktop.notifications.{enabled,minSeconds}` y
+`desktop.globalHotkey` (gramática de Tauri; `""` = sin atajo). El sidecar las
+valida (`stratum-cli/src/config/accelerator.ts`, compartido con el webview) y las
+entrega en `config_state.applied.os` (protocolo v7), junto a
+`applied.providerReady`. `useDesktopOs` pide la config en cada conexión y sigue
+cada cambio, con Ajustes abierto o no.
+
+- **Atajo global** (`src-tauri/src/os.rs`, `tauri-plugin-global-shortcut`): Rust
+  registra `CommandOrControl+Shift+Space` al arrancar —para traer la ventana
+  aunque el agente no arranque— y lo sustituye por el configurado en cuanto llega.
+  Si el nuevo no se puede registrar (otra app lo tiene), recupera el anterior y
+  Ajustes muestra el error. Pulsarlo restaura (si está minimizada u oculta) y
+  enfoca la ventana. En Linux solo funciona bajo X11 (también XWayland): en una
+  sesión Wayland nativa el registro falla y Ajustes lo dice.
+- **Notificaciones** (`tauri-plugin-notification`): `TurnWatch`
+  (`src/hooks/turn-notifications.ts`, puro) mide cada turno desde la cola hasta
+  `turn_ended` y pide aviso si dura ≥ `minSeconds` y no se canceló; también
+  cuando el agente espera una confirmación o respuestas. **Rust** decide si
+  procede (`should_notify`: ventana sin foco, minimizada u oculta, o conversación
+  que no es la visible) y recorta el texto. En `tauri dev` el aviso sale a nombre
+  de «Windows PowerShell»; instalada, con el nombre de la app. Pulsar el aviso no
+  enfoca la ventana: el plugin no expone el clic en Windows ni en Linux.
+- **Onboarding**: sin provider utilizable, bienvenida → ProviderWizard (el de
+  Ajustes, mismo guardado atómico) → la conversación se reabre sola con el
+  provider nuevo y el input queda enfocado. «Ahora no» deja un aviso con
+  «Conectar un modelo».
+- **Errores del sidecar**: si el agente no llega a conectar ni una vez,
+  `StartupFailure` ocupa la ventana (motivo, últimas líneas de `sidecar.log`,
+  Reintentar, Ver logs). Una caída posterior es el banner no bloqueante de
+  siempre, ahora también con «Ver logs». Los errores de config del arranque
+  llevan «Abrir ajustes» y «Ver logs». `logs_open`/`logs_tail` los sirve Rust.
+
+Ningún plugin nuevo da permisos al webview: todo pasa por comandos propios
+(`os_set_hotkey`, `os_notify`, `logs_open`, `logs_tail`).
+
+## Pipeline de build (D6)
+
+`.github/workflows/desktop-release.yml`, separado del release de npm:
+
+| Disparador | Resultado |
+|---|---|
+| Tag `desktop-vX.Y.Z` | Build en Windows y Linux + **Release en borrador** con los instaladores y `SHA256SUMS.txt` (pre-release si la versión es `0.x` o lleva sufijo) |
+| Manual (`workflow_dispatch`) | Solo build; los instaladores quedan como artefactos del run |
+
+Cada plataforma: versiones coherentes (`tauri.conf.json` = `package.json` =
+`Cargo.toml` = tag), `npm ci` en los dos paquetes, tests del core (`src/desktop`,
+`src/config`), typecheck y tests del frontend, `sidecar:build` (con su self-test
+sin Node en el PATH), `cargo test` contra el SEA recién construido y
+`tauri build --ci`. Windows produce `.msi` + NSIS (`windows-latest`); Linux,
+`.deb` + `.AppImage` en `ubuntu-22.04` (glibc antigua a propósito, para que el
+AppImage arranque en distribuciones de hace un par de años) con
+`APPIMAGE_EXTRACT_AND_RUN=1`.
+
+Firma, toda opcional — sin los secrets, instaladores sin firmar:
+
+| Secret | Qué hace |
+|---|---|
+| `WINDOWS_CERTIFICATE` (PFX en base64) + `WINDOWS_CERTIFICATE_PASSWORD` | Authenticode: se importa el certificado y Tauri firma ejecutable, sidecar e instaladores (`certificateThumbprint`, sha256, sello de tiempo de DigiCert). Quita el aviso de SmartScreen a medida que el certificado gana reputación |
+| `TAURI_SIGNING_PRIVATE_KEY` + `..._PASSWORD` | Clave minisign del **updater** (D7). Se pasa ya al build, pero solo se usa cuando se activen los artefactos del updater. Se genera con `npm run tauri signer generate` |
+| `GPG_PRIVATE_KEY` (armored) + `GPG_PASSPHRASE` | Firmas `.asc` separadas del `.deb` y del `.AppImage` |
+
+`build-sea.mjs` quita ahora la firma Authenticode de la copia de `node.exe` antes
+de inyectar el blob (`signtool remove /s`, si hay Windows SDK): tras la
+inyección esa firma quedaba rota, y un binario con firma rota es peor que uno sin
+firmar —y estorba a la firma propia—.

@@ -1,6 +1,7 @@
 import { useEffect, useId, useState, type ReactNode } from 'react';
 import { SECRET_PLACEHOLDER, type ConfigIssue } from '../../ipc/types';
 import { getIn, issuesFor, numberField, setIn, type Json } from './config-draft';
+import { acceleratorFromEvent } from '../../../../stratum-cli/src/config/accelerator';
 
 /**
  * Campos de los formularios de Ajustes (D5). Cada uno lee y escribe una ruta
@@ -284,6 +285,80 @@ export function SecretSetting({
         value={typeof current === 'string' ? current : ''}
         onChange={(v) => ctx.update((draft) => setIn(draft, path, v === '' ? undefined : v))}
       />
+    </Row>
+  );
+}
+
+/**
+ * Atajo global (D6): se captura pulsándolo sobre el campo. Tab/Esc sin
+ * modificadores conservan su papel (salir del campo, cerrar Ajustes);
+ * Retroceso o Supr sin modificadores dejan el atajo por defecto.
+ */
+export function HotkeySetting({
+  ctx,
+  registerError,
+}: {
+  ctx: FieldContext;
+  /** Rust no pudo registrar el atajo en uso (lo tiene otra aplicación…). */
+  registerError: string | null;
+}) {
+  const id = useId();
+  const path = ['desktop', 'globalHotkey'];
+  const current = getIn(ctx.value, path);
+  const fallback = fmt(getIn(ctx.defaults, path));
+  const shown = typeof current === 'string' ? current : '';
+  const [hint, setHint] = useState<string | null>(null);
+  const set = (v: string | undefined) => ctx.update((draft) => setIn(draft, path, v));
+  return (
+    <Row
+      id={id}
+      label="Atajo para traer Stratum al frente"
+      hint={
+        <>
+          {hint ?? 'Haz clic en el campo y pulsa la combinación (con Ctrl, Alt o Super).'}{' '}
+          {shown !== '' || current === undefined ? null : 'Sin atajo.'}
+        </>
+      }
+      issues={[
+        ...issuesFor(ctx.issues, path.join('.')),
+        ...(registerError ? [{ path: '', message: registerError }] : []),
+      ]}
+    >
+      <span className="settings-hotkey">
+        <input
+          id={id}
+          className="settings-input settings-input--hotkey"
+          type="text"
+          readOnly
+          disabled={ctx.disabled}
+          value={current === '' ? '' : shown}
+          placeholder={current === '' ? 'Desactivado' : fallback}
+          onKeyDown={(e) => {
+            const bare = !e.ctrlKey && !e.altKey && !e.metaKey && !e.shiftKey;
+            if (bare && (e.key === 'Tab' || e.key === 'Escape')) return;
+            e.preventDefault();
+            e.stopPropagation();
+            if (bare && (e.key === 'Backspace' || e.key === 'Delete')) {
+              set(undefined);
+              setHint(null);
+              return;
+            }
+            const acc = acceleratorFromEvent(e);
+            if (acc) {
+              set(acc);
+              setHint(null);
+            } else if (!['Control', 'Alt', 'Shift', 'Meta'].includes(e.key)) {
+              setHint('Esa combinación no vale: usa Ctrl, Alt o Super más una letra, un número, F1–F24 o Espacio.');
+            }
+          }}
+        />
+        <button type="button" className="button" disabled={ctx.disabled || current === ''} onClick={() => set('')}>
+          Desactivar
+        </button>
+        <button type="button" className="button" disabled={ctx.disabled || current === undefined} onClick={() => set(undefined)}>
+          Por defecto
+        </button>
+      </span>
     </Row>
   );
 }

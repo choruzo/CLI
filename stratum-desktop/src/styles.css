@@ -1930,3 +1930,114 @@ body {
     border-bottom: 1px solid var(--color-borderSubtle);
   }
 }
+/* ------------------------------------------------------------------------ */
+/* D6 — onboarding, fallo de arranque, atajo global                          */
+/* ------------------------------------------------------------------------ */
+
+.alert__actions,
+.banner__actions,
+.settings-hotkey {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.alert__actions {
+  margin-top: 10px;
+}
+.app__notice .button {
+  margin-left: 10px;
+}
+.settings-input--hotkey {
+  max-width: 280px;
+  font-family: var(--font-mono);
+  cursor: pointer;
+}
+
+.onboarding,
+.startup-failure {
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: var(--color-bgApp);
+}
+.onboarding {
+  position: fixed;
+  inset: 0;
+  z-index: 55;
+}
+.startup-failure {
+  height: 100%;
+  overflow: auto;
+}
+.onboarding__card,
+.startup-failure__card {
+  width: min(560px, 100%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  text-align: center;
+}
+.onboarding__logo,
+.startup-failure__logo {
+  width: 72px;
+  height: 72px;
+}
+.onboarding__logo {
+  animation: onboarding-rise 600ms ease-out both;
+}
+@keyframes onboarding-rise {
+  from {
+    opacity: 0;
+    transform: translateY(8px);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .onboarding__logo {
+    animation: none;
+  }
+}
+.onboarding__title,
+.startup-failure__title {
+  margin: 4px 0 0;
+  font-size: 22px;
+  font-weight: 600;
+}
+.onboarding__lead,
+.startup-failure__message {
+  margin: 0;
+  color: var(--color-textMuted);
+  line-height: 1.5;
+}
+.startup-failure__message {
+  color: var(--color-errorMuted);
+}
+.onboarding__actions,
+.startup-failure__actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+.onboarding__status {
+  margin: 0;
+  color: var(--color-textMuted);
+}
+.startup-failure__log {
+  width: 100%;
+  text-align: left;
+  font-size: 13px;
+  color: var(--color-textMuted);
+}
+.startup-failure__log pre {
+  max-height: 280px;
+  overflow: auto;
+  padding: 10px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 6px;
+  background: var(--color-bgStatusbar);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  white-space: pre-wrap;
+  word-break: break-all;
+}

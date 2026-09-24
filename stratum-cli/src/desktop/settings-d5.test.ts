@@ -325,6 +325,11 @@ describe('DesktopSettings (D5)', () => {
       ok: true,
       error: null,
       restartRequired: [],
+      os: {
+        notifications: { enabled: true, minSeconds: 10 },
+        globalHotkey: 'CommandOrControl+Shift+Space',
+      },
+      providerReady: false,
     });
   });
 

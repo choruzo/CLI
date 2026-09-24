@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
+import { openLogsDir } from '../../ipc/os';
 import type { SidecarStatus } from '../../ipc/types';
 
 /**
  * Banner de reconexión (15.5): intento N de 4 con cuenta atrás mientras el
- * supervisor relanza el sidecar; agotados, «Reintentar».
+ * supervisor relanza el sidecar; agotados, «Reintentar» y «Ver logs» (D6). No
+ * bloquea: el historial sigue a la vista. Si el agente no llegó a conectar
+ * nunca, en su lugar se muestra `StartupFailure`.
  */
 export function ReconnectBanner({
   status,
@@ -36,9 +39,18 @@ export function ReconnectBanner({
     return (
       <div className="banner" data-tone="error" role="alert">
         <span>El agente no está disponible: {status.message}</span>
-        <button type="button" className="button" onClick={onRestart}>
-          Reintentar
-        </button>
+        <span className="banner__actions">
+          <button
+            type="button"
+            className="button"
+            onClick={() => openLogsDir().catch((err) => console.warn('[stratum] logs', err))}
+          >
+            Ver logs
+          </button>
+          <button type="button" className="button" onClick={onRestart}>
+            Reintentar
+          </button>
+        </span>
       </div>
     );
   }

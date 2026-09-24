@@ -22,6 +22,10 @@ import { useMemory } from './hooks/useMemory';
 import { useConfig } from './hooks/useConfig';
 import { SettingsPanel } from './components/settings/SettingsPanel';
 import { isOperational, useSidecar } from './hooks/useSidecar';
+import { useDesktopOs } from './hooks/useDesktopOs';
+import { Onboarding } from './components/onboarding/Onboarding';
+import { StartupFailure } from './components/onboarding/StartupFailure';
+import { openLogsDir } from './ipc/os';
 
 /** Los atajos también funcionan con el foco en el textarea o en un buscador. */
 const GLOBAL = { enableOnFormTags: true, preventDefault: true } as const;
@@ -30,6 +34,8 @@ const GLOBAL = { enableOnFormTags: true, preventDefault: true } as const;
  * D4: varias conversaciones con el asistente, sidebar (conversaciones, índice,
  * memoria global y ficheros), StatusBar e InputArea con slash-commands.
  * D5: panel de Ajustes sobre el `.stratumrc.json` global.
+ * D6: atajo global y notificaciones (`useDesktopOs`), onboarding sin provider y
+ * pantalla de fallo si el agente no llega a arrancar.
  */
 export function App() {
   const sidecar = useSidecar();
@@ -47,8 +53,45 @@ export function App() {
   const [confirmClear, setConfirmClear] = useState(false);
   const [appNotice, setAppNotice] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
-  const config = useConfig(settingsOpen);
   const openSettings = useCallback(() => setSettingsOpen(true), []);
+
+  // D6: el agente llegó a conectar en esta sesión (si no, un fallo ocupa la ventana).
+  const [everConnected, setEverConnected] = useState(false);
+  useEffect(() => {
+    if (sidecar.status.state === 'connected') setEverConnected(true);
+  }, [sidecar.status.state]);
+
+  const listRef = useRef(conversations.list);
+  listRef.current = conversations.list;
+  const titleOf = useCallback(
+    (id: string) => listRef.current.find((c) => c.conversationId === id)?.title ?? null,
+    [],
+  );
+  const os = useDesktopOs(connected, active.conversationId, titleOf);
+
+  // Onboarding (D6): sin provider utilizable. «Ahora no» lo aparca hasta que el
+  // usuario lo pida desde el aviso; con provider termina solo.
+  const needsProvider = connected && os.loaded && os.configOk && !os.providerReady;
+  const [onboarding, setOnboarding] = useState(false);
+  const [onboardingSkipped, setOnboardingSkipped] = useState(false);
+  useEffect(() => {
+    if (needsProvider && !onboardingSkipped && !settingsOpen) setOnboarding(true);
+  }, [needsProvider, onboardingSkipped, settingsOpen]);
+  // Al terminar, la conversación se está reabriendo con el provider nuevo: el
+  // input se enfoca en cuanto está abierta.
+  const focusWhenOpen = useRef(false);
+  const finishOnboarding = useCallback(() => {
+    setOnboarding(false);
+    focusWhenOpen.current = true;
+  }, []);
+  useEffect(() => {
+    if (focusWhenOpen.current && active.opened) {
+      focusWhenOpen.current = false;
+      viewRef.current?.focusInput();
+    }
+  }, [active.opened, onboarding]);
+
+  const config = useConfig(settingsOpen || onboarding);
 
   // Cambiar de conversación: fuera la confirmación de /clear y foco al input.
   useEffect(() => {
@@ -108,13 +151,13 @@ export function App() {
   useHotkeys(
     'escape',
     () => {
-      // Con Ajustes abierto, Esc es del panel (lo cierra).
-      if (settingsOpen) return;
+      // Con Ajustes o el onboarding abiertos, Esc es suyo.
+      if (settingsOpen || onboarding) return;
       if (confirmClear) setConfirmClear(false);
       else if (active.activeTurnId) active.cancel();
     },
     { enableOnFormTags: true },
-    [settingsOpen, confirmClear, active.activeTurnId, active.cancel],
+    [settingsOpen, onboarding, confirmClear, active.activeTurnId, active.cancel],
   );
 
   const { generating, queued, backgroundAttention } = useMemo(() => {
@@ -173,6 +216,10 @@ export function App() {
     }
   })();
 
+  if (!everConnected && sidecar.status.state === 'failed') {
+    return <StartupFailure message={sidecar.status.message} onRetry={sidecar.restart} />;
+  }
+
   return (
     <main className="app">
       <ReconnectBanner status={sidecar.status} onRestart={sidecar.restart} />
@@ -182,8 +229,37 @@ export function App() {
             {e.code === 'schema_incompatible' ? 'Configuración incompatible' : 'Error del agente'}
           </strong>
           <p>{e.message}</p>
+          <div className="alert__actions">
+            {e.code !== 'protocol' && (
+              <button type="button" className="button" onClick={openSettings}>
+                Abrir ajustes
+              </button>
+            )}
+            <button
+              type="button"
+              className="button"
+              onClick={() => openLogsDir().catch((err) => setAppNotice(String(err)))}
+            >
+              Ver logs
+            </button>
+          </div>
         </section>
       ))}
+      {needsProvider && !onboarding && (
+        <p className="notice app__notice" data-tone="warning" role="status">
+          No hay ningún modelo configurado: el asistente no puede responder todavía.
+          <button
+            type="button"
+            className="button"
+            onClick={() => {
+              setOnboardingSkipped(false);
+              setOnboarding(true);
+            }}
+          >
+            Conectar un modelo
+          </button>
+        </p>
+      )}
       {appNotice && (
         <p className="notice notice--dismissable app__notice" data-tone="info" role="status">
           {appNotice}
@@ -230,9 +306,23 @@ export function App() {
         queued={queued}
       />
 
+      {onboarding && !settingsOpen && (
+        <Onboarding
+          config={config}
+          providerReady={os.providerReady}
+          configExists={os.configExists}
+          onDone={finishOnboarding}
+          onSkip={() => {
+            setOnboarding(false);
+            setOnboardingSkipped(true);
+          }}
+        />
+      )}
+
       {settingsOpen && (
         <SettingsPanel
           config={config}
+          hotkeyError={os.hotkeyError}
           connected={sidecar.status.state === 'connected'}
           onClose={() => {
             setSettingsOpen(false);

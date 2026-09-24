@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { unsafeReasonProblem } from '../security/secrets.js';
+import { DEFAULT_GLOBAL_HOTKEY, parseAccelerator } from './accelerator.js';
 
 const ProviderConfigSchema = z.object({
   type: z.literal('openai-compatible'),
@@ -551,6 +552,31 @@ export const StratumConfigSchema = z.object({
        * responder con rate limit.
        */
       maxConcurrentTurns: z.number().int().min(1).max(8).default(2),
+      /**
+       * Notificaciones del sistema (D6): al terminar una respuesta que ha
+       * tardado al menos `minSeconds` con la ventana sin foco (o en una
+       * conversación que no es la visible), y cuando el agente espera una
+       * confirmación o una respuesta del usuario en esas mismas condiciones.
+       */
+      notifications: z
+        .object({
+          enabled: z.boolean().default(true),
+          minSeconds: z.number().min(0).max(3600).default(10),
+        })
+        .default({}),
+      /**
+       * Atajo global que trae la ventana al frente (D6), con la gramática de
+       * Tauri (`CommandOrControl+Shift+Space`). Cadena vacía: sin atajo.
+       */
+      globalHotkey: z
+        .string()
+        .max(64)
+        .default(DEFAULT_GLOBAL_HOTKEY)
+        .superRefine((value, ctx) => {
+          if (value.trim() === '') return;
+          const parsed = parseAccelerator(value);
+          if (!parsed.ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
+        }),
       /** Espacios de trabajo por conversación del modo Chat. */
       workspaces: z
         .object({

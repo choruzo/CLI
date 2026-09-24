@@ -74,7 +74,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D3** 🔄 | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
 | **D4** 🔄 | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** 🔄 | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
-| **D6** | Integración con el SO + pipeline de build | D5 | — |
+| **D6** 🔄 | Integración con el SO + pipeline de build | D5 | — |
 | **D7** | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
 | **D8** | Modo Code: conmutador Chat \| Code | D7 | 15.3 |
 
@@ -829,7 +829,70 @@ hasta el siguiente turno (como al reabrir una conversación).
 
 ---
 
-## D6 — Integración con el SO e infraestructura de build
+## D6 — Integración con el SO e infraestructura de build 🔄
+
+**Estado (2026-09-24): implementado y verificado en Windows (ventana real);
+pendiente la primera ejecución del workflow en GitHub Actions y la prueba en
+Linux.** Suites verdes: CLI 1200 (9 tests nuevos en `desktop/os-d6.test.ts`;
+`tsc` y lint limpios), frontend 130 (12 nuevos en
+`components/onboarding/os-d6.test.tsx`), Rust 44 (e2e contra el SEA con
+protocolo 7). `actionlint` limpio en el workflow.
+
+Verificado en la ventana (`tauri dev` con un perfil de usuario temporal, sin
+`.stratumrc.json`, y un servidor OpenAI-compatible de prueba que tarda 12 s):
+
+| Criterio | Estado |
+|---|---|
+| Notificación nativa al terminar una respuesta larga en background | ✅ Con la ventana minimizada, toast «Stratum · Hola, ¿qué tal? — Respuesta lista (12 s)» |
+| Onboarding completo en una máquina sin `.stratumrc.json` | ✅ Bienvenida → wizard (Otro → URL → `/models` lista el modelo → por defecto → Guardar) → config escrita, conversación reabierta con el provider nuevo |
+| CI produce `.msi`, `.deb` y `.AppImage` instalables desde cero | 🔄 Workflow escrito y validado con `actionlint`; `tauri build --ci --bundles msi,nsis` reproducido en local: `.msi` 61,8 MB y NSIS 41,2 MB. Falta su primera ejecución en Actions (y con ella el `.deb`/`.AppImage`) |
+
+También probado: el atajo global queda registrado a nivel de SO (otro proceso no
+puede registrarlo: error 1409); cambiarlo en el fichero desde fuera o capturarlo
+en Ajustes → Sistema y guardar lo re-registra en caliente y libera el anterior;
+uno ocupado por otra aplicación se muestra como error en Ajustes y sigue activo
+el anterior. Sin el binario del sidecar, la pantalla de fallo muestra el motivo y
+el final de `sidecar.log`; al restaurarlo, «Reintentar» conecta. Cerrar la
+ventana deja cero procesos del sidecar. No se pudo pulsar el atajo por programa:
+el antivirus bloquea la inyección de teclado (`SendKeys`/`keybd_event`).
+
+Decisiones (con el usuario, antes de implementar):
+- **Firma opcional**: sin certificado Authenticode; el pipeline firma solo si
+  existen los secrets. `TAURI_SIGNING_*` es la clave minisign del **updater**
+  (D7), no Authenticode: se pasa al build y se documenta, sin activar aún los
+  artefactos del updater.
+- **Preferencias en `.stratumrc.json`** (`desktop.notifications`,
+  `desktop.globalHotkey`), como el resto de Ajustes (D5): las valida el sidecar.
+  Hasta que conecta, Rust mantiene el atajo por defecto.
+- **Disparador**: tag `desktop-v*` (Release en borrador) + manual (solo
+  artefactos), en un workflow separado del release de npm.
+- **«Segundo plano»** = ventana sin foco, minimizada u oculta, o una
+  conversación que no es la visible aunque la ventana tenga el foco.
+
+Decisiones de diseño:
+- **Protocolo v7**: `config_state.applied` lleva `os` (preferencias efectivas) y
+  `providerReady`. El shell las necesita con Ajustes cerrado, así que
+  `useDesktopOs` manda `config_get` en cada conexión.
+- **El webview no recibe permisos de los plugins nuevos**: notificar, registrar
+  el atajo y leer o abrir los logs son comandos propios de Rust que acotan lo que
+  se puede pedir (texto recortado, la notificación solo si la ventana no está a
+  la vista).
+- **Qué se notifica** lo decide `TurnWatch` (puro): la duración cuenta desde la
+  cola (es espera del usuario), una respuesta cancelada no avisa, y una
+  confirmación o preguntas pendientes avisan siempre (el turno queda parado y la
+  confirmación caduca a los 5 min).
+- **Gramática del atajo** (`config/accelerator.ts`): subconjunto de la de Tauri
+  con al menos un modificador distinto de Shift (un atajo global sin él
+  secuestraría una tecla de escritura en todo el sistema). Un test de Rust
+  comprueba que Tauri acepta cada tecla admitida.
+- **Pantalla de fallo solo si nunca conectó**: una caída con la app en uso sigue
+  siendo el banner no bloqueante (con «Ver logs»).
+- **`build-sea.mjs` quita la firma de `node.exe`** antes de inyectar: quedaba
+  rota tras la inyección y estorbaba a la firma propia.
+- **Linux en `ubuntu-22.04`** para una glibc antigua en el `.deb`/AppImage.
+
+Conocido: pulsar la notificación no enfoca la ventana (el plugin no expone el
+clic en Windows ni en Linux).
 
 ### Tareas
 
