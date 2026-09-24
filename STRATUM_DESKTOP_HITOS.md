@@ -74,7 +74,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D3** 🔄 | Retención: compresión y purga de workspaces | D2 | 16.5, 16.7 |
 | **D4** 🔄 | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** 🔄 | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
-| **D6** 🔄 | Integración con el SO + pipeline de build | D5 | — |
+| **D6** ✅ | Integración con el SO + pipeline de build | D5 | — |
 | **D7** | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
 | **D8** | Modo Code: conmutador Chat \| Code | D7 | 15.3 |
 
@@ -829,11 +829,12 @@ hasta el siguiente turno (como al reabrir una conversación).
 
 ---
 
-## D6 — Integración con el SO e infraestructura de build 🔄
+## D6 — Integración con el SO e infraestructura de build ✅
 
-**Estado (2026-09-24): implementado y verificado en Windows (ventana real);
-el workflow de GitHub Actions ya produce los instaladores de las dos
-plataformas; pendiente instalarlos desde cero y la prueba en Linux.** Suites verdes: CLI 1200 (9 tests nuevos en `desktop/os-d6.test.ts`;
+**Estado (2026-09-24): cerrado.** Verificado en Windows (`tauri dev` y app
+instalada desde el NSIS de CI) y en Linux (`.deb` de CI instalado en WSL2
+Ubuntu 24.04 con WSLg): la app arranca sin Node, conecta con el agente, conversa
+con `gemma-4-12b` y notifica. Suites verdes: CLI 1200 (9 tests nuevos en `desktop/os-d6.test.ts`;
 `tsc` y lint limpios), frontend 130 (12 nuevos en
 `components/onboarding/os-d6.test.tsx`), Rust 44 (e2e contra el SEA con
 protocolo 7). `actionlint` limpio en el workflow.
@@ -843,18 +844,19 @@ Verificado en la ventana (`tauri dev` con un perfil de usuario temporal, sin
 
 | Criterio | Estado |
 |---|---|
-| Notificación nativa al terminar una respuesta larga en background | ✅ Con la ventana minimizada, toast «Stratum · Hola, ¿qué tal? — Respuesta lista (12 s)» |
+| Notificación nativa al terminar una respuesta larga en background | ✅ Con la ventana minimizada, toast «Stratum · Hola, ¿qué tal? — Respuesta lista (12 s)». Con la app **instalada desde el NSIS de CI** (`gemma-4-12b`), el aviso sale a nombre de «Stratum»: «Stratum · hola — Respuesta lista (58 s)». En Linux, con el `.deb` de CI instalado, también llega la notificación |
 | Onboarding completo en una máquina sin `.stratumrc.json` | ✅ Bienvenida → wizard (Otro → URL → `/models` lista el modelo → por defecto → Guardar) → config escrita, conversación reabierta con el provider nuevo |
-| CI produce `.msi`, `.deb` y `.AppImage` instalables desde cero | 🔄 Primera ejecución manual en Actions en verde ([run 36043032850](https://github.com/choruzo/CLI/actions/runs/36043032850)): las dos plataformas pasan versiones, tests del core y del frontend, `sidecar:build` con su self-test y `cargo test` contra el SEA, y dejan como artefactos `.msi` + NSIS (95 MB) y `.deb` + `.AppImage` (212 MB) con sus `SHA256SUMS`, sin firmar (sin secrets). En local, `.msi` 61,8 MB y NSIS 41,2 MB. Falta instalarlos en una máquina limpia |
+| CI produce `.msi`, `.deb` y `.AppImage` instalables desde cero | ✅ Primera ejecución manual en Actions en verde ([run 36043032850](https://github.com/choruzo/CLI/actions/runs/36043032850)): las dos plataformas pasan versiones, tests del core y del frontend, `sidecar:build` con su self-test y `cargo test` contra el SEA, y dejan como artefactos `.msi` + NSIS (95 MB) y `.deb` + `.AppImage` (212 MB) con sus `SHA256SUMS`, sin firmar (sin secrets). En local, `.msi` 61,8 MB y NSIS 41,2 MB. Instalados y funcionando: el NSIS en Windows 11 y el `.deb` (`apt install`, arrastra `libwebkit2gtk-4.1-0`/`libgtk-3-0`) en Ubuntu 24.04 bajo WSL2 |
 
 También probado: el atajo global queda registrado a nivel de SO (otro proceso no
 puede registrarlo: error 1409); cambiarlo en el fichero desde fuera o capturarlo
 en Ajustes → Sistema y guardar lo re-registra en caliente y libera el anterior;
 uno ocupado por otra aplicación se muestra como error en Ajustes y sigue activo
-el anterior. Sin el binario del sidecar, la pantalla de fallo muestra el motivo y
+el anterior. Con la app instalada, pulsar `Ctrl+Shift+Space` con la ventana
+minimizada la trae al frente (probado a mano: el antivirus bloquea la
+inyección de teclado por script). Sin el binario del sidecar, la pantalla de fallo muestra el motivo y
 el final de `sidecar.log`; al restaurarlo, «Reintentar» conecta. Cerrar la
-ventana deja cero procesos del sidecar. No se pudo pulsar el atajo por programa:
-el antivirus bloquea la inyección de teclado (`SendKeys`/`keybd_event`).
+ventana deja cero procesos del sidecar.
 
 Decisiones (con el usuario, antes de implementar):
 - **Firma opcional**: sin certificado Authenticode; el pipeline firma solo si
@@ -892,7 +894,12 @@ Decisiones de diseño:
 - **Linux en `ubuntu-22.04`** para una glibc antigua en el `.deb`/AppImage.
 
 Conocido: pulsar la notificación no enfoca la ventana (el plugin no expone el
-clic en Windows ni en Linux).
+clic en Windows ni en Linux). El atajo global en Linux no se ha probado: WSLg no
+admite atajos globales, y en una sesión Wayland nativa el registro falla (solo
+X11/XWayland). La instalación en una Windows limpia (VM sin Node ni Rust) sigue
+sin hacerse; la app instalada no usa el Node del sistema (lo comprueba el
+self-test del SEA con un PATH sin Node). Los instaladores van sin firmar hasta
+que haya certificado (SmartScreen avisa).
 
 ### Tareas
 

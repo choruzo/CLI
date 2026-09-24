@@ -3,8 +3,8 @@
 Shell de escritorio (Tauri v2 + React 18) sobre el core de `stratum-cli`. La
 definición completa está en `../STRATUM_DESKTOP_PROJECT_DEFINITION.md` y el plan
 por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 cerrado**; D2–D5
-implementados y verificados; **D6** (integración con el SO y pipeline de build)
-implementado — ver abajo.
+implementados y verificados; **D6 cerrado** (integración con el SO y pipeline de
+build, instaladores de CI probados en Windows y Linux) — ver abajo.
 
 ## Requisitos de desarrollo
 
