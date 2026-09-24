@@ -832,8 +832,8 @@ hasta el siguiente turno (como al reabrir una conversación).
 ## D6 — Integración con el SO e infraestructura de build 🔄
 
 **Estado (2026-09-24): implementado y verificado en Windows (ventana real);
-pendiente la primera ejecución del workflow en GitHub Actions y la prueba en
-Linux.** Suites verdes: CLI 1200 (9 tests nuevos en `desktop/os-d6.test.ts`;
+el workflow de GitHub Actions ya produce los instaladores de las dos
+plataformas; pendiente instalarlos desde cero y la prueba en Linux.** Suites verdes: CLI 1200 (9 tests nuevos en `desktop/os-d6.test.ts`;
 `tsc` y lint limpios), frontend 130 (12 nuevos en
 `components/onboarding/os-d6.test.tsx`), Rust 44 (e2e contra el SEA con
 protocolo 7). `actionlint` limpio en el workflow.
@@ -845,7 +845,7 @@ Verificado en la ventana (`tauri dev` con un perfil de usuario temporal, sin
 |---|---|
 | Notificación nativa al terminar una respuesta larga en background | ✅ Con la ventana minimizada, toast «Stratum · Hola, ¿qué tal? — Respuesta lista (12 s)» |
 | Onboarding completo en una máquina sin `.stratumrc.json` | ✅ Bienvenida → wizard (Otro → URL → `/models` lista el modelo → por defecto → Guardar) → config escrita, conversación reabierta con el provider nuevo |
-| CI produce `.msi`, `.deb` y `.AppImage` instalables desde cero | 🔄 Workflow escrito y validado con `actionlint`; `tauri build --ci --bundles msi,nsis` reproducido en local: `.msi` 61,8 MB y NSIS 41,2 MB. Falta su primera ejecución en Actions (y con ella el `.deb`/`.AppImage`) |
+| CI produce `.msi`, `.deb` y `.AppImage` instalables desde cero | 🔄 Primera ejecución manual en Actions en verde ([run 36043032850](https://github.com/choruzo/CLI/actions/runs/36043032850)): las dos plataformas pasan versiones, tests del core y del frontend, `sidecar:build` con su self-test y `cargo test` contra el SEA, y dejan como artefactos `.msi` + NSIS (95 MB) y `.deb` + `.AppImage` (212 MB) con sus `SHA256SUMS`, sin firmar (sin secrets). En local, `.msi` 61,8 MB y NSIS 41,2 MB. Falta instalarlos en una máquina limpia |
 
 También probado: el atajo global queda registrado a nivel de SO (otro proceso no
 puede registrarlo: error 1409); cambiarlo en el fichero desde fuera o capturarlo
