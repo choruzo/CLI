@@ -13,6 +13,10 @@
 
 </div>
 
+<div align="center">
+https://taskplatform.pro/
+</div>
+
 ---
 
 Stratum es un agente de línea de comandos construido sobre un loop **ReAct** (Reason → Act → Observe) con soporte de **plan-and-execute** y arquitectura **multi-agente**. Funciona con cualquier API OpenAI-compatible: Ollama, llama.cpp, vLLM, LiteLLM y OpenAI nativo.
