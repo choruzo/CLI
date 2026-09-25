@@ -75,7 +75,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D4** 🔄 | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** 🔄 | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
 | **D6** ✅ | Integración con el SO + pipeline de build | D5 | — |
-| **D7** 🔄 | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
+| **D7** ✅ | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
 | **D8** | Modo Code: conmutador Chat \| Code | D7 | 15.3 |
 
 Regla de oro: ningún hito se cierra sin que sus criterios de aceptación pasen y
@@ -922,9 +922,9 @@ que haya certificado (SmartScreen avisa).
 
 ---
 
-## D7 — Polish: frameless, animaciones, accesibilidad y E2E 🔄
+## D7 — Polish: frameless, animaciones, accesibilidad y E2E ✅
 
-**Estado (2026-09-25): implementado; pendiente de la primera ejecución en CI.**
+**Estado (2026-09-25): cerrado.** Los cuatro criterios verificados, el auto-update con la release real `desktop-v0.2.0`.
 Todo verificado en local en Windows 11 y en Linux (WSL2 Ubuntu 24.04, Xvfb):
 suite E2E 15/15 en las dos plataformas, CLI 1211, frontend
 160, Rust 53 (8 nuevos en `window_state.rs`); `tsc`, lint y `actionlint` limpios. Falta lo que
@@ -936,7 +936,7 @@ instalada.
 |---|---|
 | Mover/maximizar/cerrar la ventana frameless funciona en Windows y Linux | ✅ E2E `window` en las dos: maximizar y restaurar con los controles propios y con doble clic en la barra, «Cerrar» cierra y guarda la posición. Arrastrar la ventana no se puede probar por script (el SO toma el ratón real): pendiente de comprobarlo a mano |
 | Restaurar tras desconectar un monitor deja la ventana visible | ✅ `clamp_to_monitors` con 8 tests (monitor externo que ya no está, coordenadas negativas, ventana mayor que el área, barra de título fuera) y E2E `window`: un `window-state.json` en (-30000, -30000) arranca centrado y visible |
-| Suite E2E verde en CI | 🔄 Verde en local en Windows (msedgedriver 153) y Linux (WebKitWebDriver + Xvfb, el mismo entorno que la CI); el workflow está listo y validado con `actionlint`, falta su primera ejecución |
+| Suite E2E verde en CI | ✅ 15/15 en `desktop-e2e.yml` ([run 36129829768](https://github.com/choruzo/CLI/actions/runs/36129829768), `ubuntu-22.04`, Xvfb + openbox). Las dos primeras ejecuciones destaparon: maximizar necesita un gestor de ventanas (Xvfb solo lo ignora; en WSL lo enmascaraba WSLg), el WebKitWebDriver de 22.04 da texto vacío durante la animación de entrada, y una carrera real de la app —la respuesta de `sidecar_status` podía pisar un `connected` más nuevo y dejar la UI en «Iniciando agente…»—, corregida con un `seq` en cada estado |
 | Una release nueva dispara el auto-update | ✅ **Con el canal real**: publicar la release [`desktop-v0.2.0`](https://github.com/choruzo/CLI/releases/tag/desktop-v0.2.0) (instaladores y `.sig` firmados en CI con los secrets) lanzó el job `updater-manifest`, que dejó `latest.json` en `desktop-updater` con las seis plataformas. Una 0.1.3 instalada (NSIS) lo encontró al abrirse, ofreció la 0.2.0, la instaló y se relanzó ya en la 0.2.0 (versión visible en Ajustes). Antes, en local con la app instalada: 0.1.1 → 0.1.2 por un endpoint HTTP de prueba, y un paquete manipulado rechazado por firma sin instalar |
 
 También verificado: con `gemma-4-12b` (llama.cpp, puerto 8080) el razonamiento
