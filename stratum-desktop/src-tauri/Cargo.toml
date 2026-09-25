@@ -1,6 +1,6 @@
 [package]
 name = "stratum-desktop"
-version = "0.1.0"
+version = "0.2.0"
 description = "Stratum Desktop — shell Tauri v2 sobre el core de stratum-cli"
 authors = ["Javier (choruzo)"]
 license = "MIT"
