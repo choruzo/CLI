@@ -21,6 +21,22 @@ function withStatus(status: SidecarStatus): SidecarState {
 }
 
 describe('sidecarReducer', () => {
+  it('un estado viejo que llega tarde no pisa a uno más nuevo (seq, D7)', () => {
+    // El evento «connected» (seq 2) llega antes que la respuesta de
+    // `sidecar_status`, que leyó «starting» (seq 1) un instante antes.
+    let s = sidecarReducer(initialSidecarState, { type: 'status', status: { ...connected, seq: 2 } });
+    s = sidecarReducer(s, { type: 'status', status: { state: 'starting', seq: 1 } });
+    expect(s.status.state).toBe('connected');
+    expect(s.statusSeq).toBe(2);
+    expect('seq' in s.status).toBe(false);
+    // Uno más nuevo sí se aplica.
+    s = sidecarReducer(s, {
+      type: 'status',
+      status: { state: 'disconnected', reason: 'x', exitCode: 1, seq: 3 },
+    });
+    expect(s.status.state).toBe('disconnected');
+  });
+
   it('mide la latencia solo con el pong del ping pendiente', () => {
     let s = withStatus(connected);
     s = sidecarReducer(s, { type: 'ping_sent', id: 'p1', now: 100 });

@@ -58,6 +58,12 @@ export type SidecarStatus =
   | { state: 'failed'; message: string };
 
 /**
+ * Lo que llega de Rust: el estado con su número de orden (`seq`, creciente).
+ * Ausente en los tests que construyen estados a mano.
+ */
+export type StampedSidecarStatus = SidecarStatus & { seq?: number };
+
+/**
  * Tramas que el frontend puede mandar al sidecar. Rust las filtra por tipo y
  * tamaño; `workspace_touch` solo lo emite Rust.
  */

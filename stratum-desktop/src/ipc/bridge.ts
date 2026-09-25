@@ -1,6 +1,11 @@
 import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import { EVENT_STATUS, type ClientFrame, type SidecarFrame, type SidecarStatus } from './types';
+import {
+  EVENT_STATUS,
+  type ClientFrame,
+  type SidecarFrame,
+  type StampedSidecarStatus,
+} from './types';
 
 /**
  * Único punto de contacto del frontend con el sidecar. El webview no abre
@@ -8,12 +13,12 @@ import { EVENT_STATUS, type ClientFrame, type SidecarFrame, type SidecarStatus }
  * tiene el token y hace el handshake.
  */
 
-export function getSidecarStatus(): Promise<SidecarStatus> {
-  return invoke<SidecarStatus>('sidecar_status');
+export function getSidecarStatus(): Promise<StampedSidecarStatus> {
+  return invoke<StampedSidecarStatus>('sidecar_status');
 }
 
-export function onSidecarStatus(cb: (status: SidecarStatus) => void): Promise<UnlistenFn> {
-  return listen<SidecarStatus>(EVENT_STATUS, (e) => cb(e.payload));
+export function onSidecarStatus(cb: (status: StampedSidecarStatus) => void): Promise<UnlistenFn> {
+  return listen<StampedSidecarStatus>(EVENT_STATUS, (e) => cb(e.payload));
 }
 
 type FrameListener = (frame: SidecarFrame) => void;

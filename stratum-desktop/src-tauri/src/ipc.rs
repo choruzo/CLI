@@ -39,6 +39,18 @@ const PENDING_LIMIT: usize = 256;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(20);
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Un estado con su número de orden. El webview lee el estado al montar
+/// (`sidecar_status`) y a la vez escucha `sidecar://status`: la respuesta del
+/// comando puede llegar **después** de un evento más nuevo, y sin `seq` un
+/// «starting» viejo pisaba el «connected» y la UI se quedaba en «Iniciando
+/// agente…» para siempre (visto en la CI de D7).
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct StampedStatus {
+    pub seq: u64,
+    #[serde(flatten)]
+    pub status: SidecarStatus,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "state", rename_all = "snake_case")]
 pub enum SidecarStatus {
@@ -83,7 +95,7 @@ struct ProcessSlot {
 }
 
 pub struct SidecarState {
-    status: Mutex<SidecarStatus>,
+    status: Mutex<StampedStatus>,
     relay: Mutex<Relay>,
     process: Mutex<ProcessSlot>,
     supervisor: Mutex<Option<Sender<crate::supervisor::Command>>>,
@@ -95,7 +107,10 @@ pub struct SidecarState {
 impl SidecarState {
     pub fn new() -> Self {
         Self {
-            status: Mutex::new(SidecarStatus::Starting),
+            status: Mutex::new(StampedStatus {
+                seq: 0,
+                status: SidecarStatus::Starting,
+            }),
             relay: Mutex::new(Relay::default()),
             process: Mutex::new(ProcessSlot::default()),
             supervisor: Mutex::new(None),
@@ -196,11 +211,18 @@ pub fn set_status(app: &AppHandle, status: SidecarStatus) {
         other => eprintln!("[stratum] sidecar: {other:?}"),
     }
     let state = app.state::<SidecarState>();
-    *state.status.lock().unwrap() = status.clone();
-    if let SidecarStatus::Connected { .. } = &status {
-        let _ = app.emit(EVENT_READY, &status);
+    // Se sella y se emite con el lock tomado: dos `set_status` seguidos no
+    // pueden salir con el orden de `seq` cambiado.
+    let mut slot = state.status.lock().unwrap();
+    let stamped = StampedStatus {
+        seq: slot.seq + 1,
+        status,
+    };
+    *slot = stamped.clone();
+    if let SidecarStatus::Connected { .. } = &stamped.status {
+        let _ = app.emit(EVENT_READY, &stamped);
     }
-    let _ = app.emit(EVENT_STATUS, &status);
+    let _ = app.emit(EVENT_STATUS, &stamped);
 }
 
 // ---------------------------------------------------------------------------
@@ -208,7 +230,7 @@ pub fn set_status(app: &AppHandle, status: SidecarStatus) {
 // ---------------------------------------------------------------------------
 
 #[tauri::command]
-pub fn sidecar_status(state: State<'_, SidecarState>) -> SidecarStatus {
+pub fn sidecar_status(state: State<'_, SidecarState>) -> StampedStatus {
     state.status.lock().unwrap().clone()
 }
 

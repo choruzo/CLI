@@ -6,10 +6,17 @@ import {
   sendSidecarFrame,
   subscribeSidecarFrames,
 } from '../ipc/bridge';
-import type { SidecarErrorFrame, SidecarFrame, SidecarStatus } from '../ipc/types';
+import type {
+  SidecarErrorFrame,
+  SidecarFrame,
+  SidecarStatus,
+  StampedSidecarStatus,
+} from '../ipc/types';
 
 export interface SidecarState {
   status: SidecarStatus;
+  /** `seq` del último estado aplicado: uno más viejo que llegue tarde se descarta. */
+  statusSeq: number;
   /** Errores que el sidecar reportó (config incompatible, protocolo…). */
   errors: SidecarErrorFrame[];
   /** Ida y vuelta del último ping contestado. */
@@ -18,12 +25,13 @@ export interface SidecarState {
 }
 
 export type SidecarAction =
-  | { type: 'status'; status: SidecarStatus }
+  | { type: 'status'; status: StampedSidecarStatus }
   | { type: 'frame'; frame: SidecarFrame; now: number }
   | { type: 'ping_sent'; id: string; now: number };
 
 export const initialSidecarState: SidecarState = {
   status: { state: 'starting' },
+  statusSeq: -1,
   errors: [],
   latencyMs: null,
   pendingPing: null,
@@ -31,13 +39,19 @@ export const initialSidecarState: SidecarState = {
 
 export function sidecarReducer(state: SidecarState, action: SidecarAction): SidecarState {
   switch (action.type) {
-    case 'status':
+    case 'status': {
+      // La respuesta de `sidecar_status` puede llegar después de un evento
+      // más nuevo: sin esto, un «starting» viejo dejaba la UI esperando.
+      const { seq, ...status } = action.status;
+      if (seq !== undefined && seq <= state.statusSeq) return state;
       return {
         ...state,
-        status: action.status,
+        status: status as SidecarStatus,
+        statusSeq: seq ?? state.statusSeq,
         // Un ping en vuelo no se va a contestar por una conexión que ya no existe.
-        pendingPing: action.status.state === 'connected' ? state.pendingPing : null,
+        pendingPing: status.state === 'connected' ? state.pendingPing : null,
       };
+    }
     case 'ping_sent':
       return { ...state, pendingPing: { id: action.id, sentAt: action.now } };
     case 'frame': {
@@ -80,7 +94,7 @@ export function useSidecar(): SidecarState & { ping: () => void; restart: () => 
     let disposed = false;
     let unlisten: (() => void) | undefined;
     let unsubscribe: (() => void) | undefined;
-    const setStatus = (status: SidecarStatus) => {
+    const setStatus = (status: StampedSidecarStatus) => {
       if (!disposed) dispatch({ type: 'status', status });
     };
 
