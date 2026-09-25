@@ -31,7 +31,12 @@ describe('chat (E2E)', () => {
     await waitForIdle(s);
     // Bloque de razonamiento, plegado, que al abrirse enseña lo que pensó.
     const header = await s.waitForElement('.reasoning__header');
-    assert.match(await s.text(header), /Razonó|Razonamiento/);
+    // textContent: el texto «visible» de WebDriver sale vacío mientras el
+    // mensaje aún anima su opacidad (WebKitWebDriver de Ubuntu 22.04).
+    assert.match(
+      await s.execute(`return document.querySelector('.reasoning__header').textContent`),
+      /Razonó|Razonamiento/,
+    );
     assert.equal(await s.attribute(header, 'aria-expanded'), 'false');
     await s.click(header);
     await s.waitFor(
