@@ -21,6 +21,7 @@ import { SettingsPanel } from './SettingsPanel';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
+vi.mock('@tauri-apps/api/app', () => ({ getVersion: vi.fn(() => Promise.resolve('0.2.0')) }));
 
 afterEach(cleanup);
 
@@ -28,7 +29,7 @@ const APPLIED = {
   ok: true,
   error: null,
   restartRequired: [] as string[],
-  os: { notifications: { enabled: true, minSeconds: 10 }, globalHotkey: 'CommandOrControl+Shift+Space' },
+  os: { notifications: { enabled: true, minSeconds: 10 }, globalHotkey: 'CommandOrControl+Shift+Space', updates: { autoCheck: true } },
   providerReady: true,
 };
 
@@ -229,6 +230,12 @@ function renderPanel(config: Config) {
 }
 
 describe('SettingsPanel (D5)', () => {
+  it('enseña la versión instalada abajo, junto a Guardar (D7)', async () => {
+    renderPanel(fakeConfig());
+    const version = await screen.findByText('Stratum 0.2.0');
+    expect(version.closest('footer')).not.toBeNull();
+  });
+
   it('lista los providers sin enseñar la key y cambia el default en el borrador', () => {
     const config = fakeConfig();
     renderPanel(config);

@@ -846,7 +846,7 @@ type AgentEvent =
   | { type: 'tool_result';      id: string; name: string; result: string; durationMs: number }
   | { type: 'tool_error';       id: string; name: string; error: string; recoverable: boolean }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
-  | { type: 'thinking';         text: string }          // reasoning interno del modelo
+  | { type: 'thinking';         text: string }          // fragmento del razonamiento (§12.2); no entra en el historial
   | { type: 'plan_proposed';    plan: Plan }            // Hito 7 — fin de la fase de planificación
   | { type: 'plan_step_update'; stepId: string; status: PlanStepStatus }  // Hito 7
   | { type: 'error';            message: string; fatal: boolean }
@@ -941,6 +941,8 @@ class StreamBuffer {
 ```
 
 **Modelos que envían múltiples tool calls en un turno** (Claude, GPT-4o): el buffer soporta `index` 0..N de forma natural, acumulando en paralelo.
+
+**Razonamiento (Desktop D7).** `delta.reasoning_content` (llama.cpp, vLLM, DeepSeek) o `delta.reasoning` (vLLM reciente, OpenRouter) se emiten como `{ type: 'thinking', text }`, un fragmento por chunk, igual que `text_delta`. Los backends que no lo extraen lo mandan como `<think>…</think>` en `content`: `ThinkTagSplitter` lo separa **solo al principio** de la respuesta (un `<think>` a mitad de texto es contenido del usuario), retiene un tag partido entre chunks y lo suelta al llegar tool calls o `finish_reason`. El razonamiento **nunca** entra en `assistantText` ni en el historial.
 
 ---
 

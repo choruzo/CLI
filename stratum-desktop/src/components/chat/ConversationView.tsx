@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, type Ref } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
 import type { AgentStream } from '../../hooks/useAgentStream';
 import type { ModelsOffer } from '../../hooks/useConversations';
 import { useAttachments } from '../../hooks/useAttachments';
@@ -109,13 +109,24 @@ export const ConversationView = forwardRef(function ConversationView(
   useEffect(reportVisible, [userCount]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const generating = stream.activeTurnId !== null;
+  const announcement = useTurnAnnouncement(stream);
   const empty = stream.messages.length === 0;
   const inputDisabled = !connected || !stream.opened || stream.pendingQuestions !== null;
   const attachments = useAttachments(stream.conversationId, !inputDisabled);
 
   return (
     <section className="conversation" aria-label="Conversación">
-      <div className="conversation__scroll" ref={scrollRef} onScroll={onScroll}>
+      {/* Un anuncio por turno (empieza, termina): el texto en streaming no se lee a trozos. */}
+      <p className="sr-only" role="status" aria-live="polite">
+        {announcement}
+      </p>
+      <div
+        className="conversation__scroll"
+        ref={scrollRef}
+        onScroll={onScroll}
+        tabIndex={0}
+        aria-label="Mensajes"
+      >
         {empty ? (
           <div className="conversation__empty">
             <p className="conversation__empty-title">¿En qué puedo ayudarte?</p>
@@ -198,3 +209,30 @@ export const ConversationView = forwardRef(function ConversationView(
     </section>
   );
 });
+
+/**
+ * Texto para el lector de pantalla cuando un turno empieza o termina. Cambiar
+ * de conversación no anuncia nada: el componente se monta de nuevo.
+ */
+function useTurnAnnouncement(stream: AgentStream): string {
+  const [text, setText] = useState('');
+  const previous = useRef(stream.activeTurnId);
+  useEffect(() => {
+    const was = previous.current;
+    previous.current = stream.activeTurnId;
+    if (stream.activeTurnId && stream.activeTurnId !== was) {
+      setText('Stratum está trabajando en la respuesta.');
+    } else if (was && !stream.activeTurnId) {
+      const turn = stream.messages.find((m) => m.role === 'agent' && m.turnId === was);
+      const status = turn?.role === 'agent' ? turn.status : 'done';
+      setText(
+        status === 'cancelled'
+          ? 'Respuesta detenida.'
+          : status === 'error'
+            ? 'La respuesta terminó con un error.'
+            : 'Respuesta lista.',
+      );
+    }
+  }, [stream.activeTurnId, stream.messages]);
+  return text;
+}

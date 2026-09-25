@@ -26,8 +26,12 @@ interface Props {
   initSteps?: InitStep[];
   /** Resumen de `/init` una vez terminado: colapsa el bloque de progreso. */
   initSummary?: string;
-  /** Bloques `⊙ thinking` (§11). Solo llegan con `/debug` activo. */
+  /** Bloques de razonamiento (§11). */
   thinkingBlocks?: string[];
+  /** El último bloque sigue llegando: se pinta su cola en vivo. */
+  thinkingOpen?: boolean;
+  /** `/debug`: el razonamiento entero; sin él, una línea plegada por bloque. */
+  debug?: boolean;
   /** Reloj único de la conversación; evita intervalos por bloque. */
   now?: number;
   /** Límites de la región viva para que Ink no reescriba todo el scrollback. */
@@ -53,6 +57,8 @@ export function AgentMessage({
   initSteps,
   initSummary,
   thinkingBlocks,
+  thinkingOpen = false,
+  debug = false,
   now = Date.now(),
   liveTextLines = 12,
   liveColumns = 80,
@@ -87,13 +93,21 @@ export function AgentMessage({
           now={now}
         />
       )}
-      {(streaming ? thinkingBlocks?.slice(-2) : thinkingBlocks)?.map((t, i) => (
-        <Box key={`think-${i}`} marginLeft={2}>
-          <Text color={theme.textDisabled} dimColor wrap="truncate-end">
-            ⊙ thinking {t.replace(/\s+/g, ' ').trim()}
-          </Text>
-        </Box>
-      ))}
+      {(streaming ? thinkingBlocks?.slice(-2) : thinkingBlocks)?.map((t, i, shown) => {
+        const flat = t.replace(/\s+/g, ' ').trim();
+        const live = streaming && thinkingOpen && i === shown.length - 1;
+        return (
+          <Box key={`think-${i}`} marginLeft={2}>
+            <Text color={theme.textDisabled} dimColor wrap={debug ? 'wrap' : 'truncate-end'}>
+              {debug
+                ? `⊙ thinking ${flat}`
+                : live
+                  ? `⊙ razonando… ${flat.slice(-120)}`
+                  : `⊙ razonó · ${countWords(flat)} palabras (/debug para verlo)`}
+            </Text>
+          </Box>
+        );
+      })}
       {!isInit &&
         visibleToolCalls.map((tc) => (
           <ToolCallBlock
@@ -145,4 +159,8 @@ export function AgentMessage({
         ))}
     </Box>
   );
+}
+
+function countWords(text: string): number {
+  return text ? text.split(' ').length : 0;
 }

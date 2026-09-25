@@ -79,11 +79,17 @@ describe('applied.os / providerReady (D6)', () => {
       os: { notifications: { enabled: false, minSeconds: 30 }, globalHotkey: '' },
       providerReady: false,
     });
-    expect(a?.os).toEqual({ notifications: { enabled: false, minSeconds: 30 }, globalHotkey: '' });
+    expect(a?.os).toEqual({
+      notifications: { enabled: false, minSeconds: 30 },
+      globalHotkey: '',
+      updates: { autoCheck: true },
+    });
+    expect(osPrefs({ updates: { autoCheck: false } }).updates).toEqual({ autoCheck: false });
     expect(a?.providerReady).toBe(false);
     expect(osPrefs({ notifications: { minSeconds: -4 } })).toEqual({
       notifications: { enabled: true, minSeconds: 10 },
       globalHotkey: 'CommandOrControl+Shift+Space',
+      updates: { autoCheck: true },
     });
     // Sin el campo, no se lanza el onboarding.
     expect(configApplied({ ok: true, error: null })?.providerReady).toBe(true);

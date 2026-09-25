@@ -124,7 +124,7 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   },
   {
     name: '/debug',
-    description: 'Activa o desactiva la visualización de los bloques ⊙ thinking',
+    description: 'Muestra el razonamiento completo (⊙ thinking) en vez de la línea plegada',
     hasArgs: false,
   },
   {

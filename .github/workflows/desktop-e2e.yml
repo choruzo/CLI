@@ -1,0 +1,99 @@
+name: Desktop E2E
+
+# Suite E2E de Stratum Desktop (D7): la app de verdad —shell de Tauri + sidecar
+# SEA— manejada con tauri-driver/WebKitWebDriver sobre Xvfb, contra un servidor
+# OpenAI de mentira (stratum-desktop/e2e/mock-llm.mjs). Cubre chat con
+# razonamiento, subida/descarga, retención, conversaciones, ajustes y
+# onboarding. En Windows se ejecuta en local (msedgedriver va ligado a la
+# versión exacta de WebView2): ver stratum-desktop/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stratum-desktop/**'
+      - 'stratum-cli/src/**'
+      - 'stratum-cli/package*.json'
+      - '.github/workflows/desktop-e2e.yml'
+  pull_request:
+    paths:
+      - 'stratum-desktop/**'
+      - 'stratum-cli/src/**'
+      - 'stratum-cli/package*.json'
+      - '.github/workflows/desktop-e2e.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-e2e-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  e2e-linux:
+    name: E2E (Linux)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 60
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            stratum-cli/package-lock.json
+            stratum-desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: stratum-desktop/src-tauri -> target
+          # tauri-driver se instala con cargo: que quede en la caché.
+          cache-bin: true
+
+      - name: System dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config \
+            webkit2gtk-driver xvfb
+
+      - name: tauri-driver
+        run: command -v tauri-driver || cargo install tauri-driver --locked
+
+      - name: Install dependencies
+        run: |
+          (cd stratum-cli && npm ci)
+          (cd stratum-desktop && npm ci)
+
+      - name: Build sidecar (SEA)
+        working-directory: stratum-desktop
+        run: npm run sidecar:build
+
+      - name: Build app (debug + feature e2e)
+        working-directory: stratum-desktop
+        run: npm run e2e:build
+
+      - name: Run E2E
+        working-directory: stratum-desktop
+        env:
+          STRATUM_E2E_ARTIFACTS: ${{ runner.temp }}/e2e-artifacts
+        run: xvfb-run -a npm run e2e
+
+      - name: Upload failure artifacts
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: desktop-e2e-failure
+          path: ${{ runner.temp }}/e2e-artifacts
+          if-no-files-found: ignore

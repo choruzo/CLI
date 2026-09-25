@@ -1,10 +1,15 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos de la ventana principal (15.8). El webview no tiene acceso al sistema de ficheros: ni plugin fs, ni permisos de dialog, ni asset protocol. El sidecar se lanza desde Rust con std::process (sin plugin shell). D2: los ficheros de la conversación los manejan comandos propios de Rust (src-tauri/src/files.rs) confinados a la raíz de workspaces que anuncia el sidecar; los diálogos de abrir/guardar los abre Rust con tauri-plugin-dialog desde Rust, así que el webview no recibe rutas del disco del usuario (solo candidatos con id opaco) y no puede abrir un diálogo ni leer un fichero por su cuenta. 'Abrir' un fichero generado lo hace Rust con el opener y solo para tipos inertes. D1: abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto.",
+  "description": "Permisos de la ventana principal (15.8). El webview no tiene acceso al sistema de ficheros: ni plugin fs, ni permisos de dialog, ni asset protocol. El sidecar se lanza desde Rust con std::process (sin plugin shell). D2: los ficheros de la conversación los manejan comandos propios de Rust (src-tauri/src/files.rs) confinados a la raíz de workspaces que anuncia el sidecar; los diálogos de abrir/guardar los abre Rust con tauri-plugin-dialog desde Rust, así que el webview no recibe rutas del disco del usuario (solo candidatos con id opaco) y no puede abrir un diálogo ni leer un fichero por su cuenta. 'Abrir' un fichero generado lo hace Rust con el opener y solo para tipos inertes. D1: abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto. D7: la ventana es frameless; la TitleBar propia minimiza, maximiza, cierra y arrastra (data-tauri-drag-region, doble clic maximiza) con los permisos core:window justos para eso. El updater lo manejan comandos propios de Rust (updates.rs): el webview no recibe permisos del plugin.",
   "windows": ["main"],
   "permissions": [
     "core:default",
+    "core:window:allow-minimize",
+    "core:window:allow-toggle-maximize",
+    "core:window:allow-internal-toggle-maximize",
+    "core:window:allow-close",
+    "core:window:allow-start-dragging",
     {
       "identifier": "opener:allow-open-url",
       "allow": [{ "url": "https://*" }, { "url": "http://*" }, { "url": "mailto:*" }]

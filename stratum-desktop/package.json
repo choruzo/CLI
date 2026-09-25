@@ -13,6 +13,8 @@
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "sidecar:build": "node scripts/build-sea.mjs",
+    "e2e:build": "tauri build --debug --no-bundle --features e2e",
+    "e2e": "node --test --test-concurrency=1 e2e/*.e2e.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

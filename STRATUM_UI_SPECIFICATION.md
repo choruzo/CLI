@@ -1368,7 +1368,7 @@ El estado de foco vive en el `useReducer` global como `focusState: 'input' | 'dr
 - `agentGroup: AgentGroupState | null` — grupo de subagentes paralelos del turno en curso (§5.6, Hito 8C); `null` fuera de una delegación múltiple.
 - `subagentTranscripts: Map<string, SubagentTranscript>` + `viewingSubagentId: string | null` — inspector de subagentes de la sesión (§5.7, Hito 8C); en memoria, se vacía con `/clear`.
 - `fatalError: { message: string } | null` — error fatal del agente (§11, Hito 10); mientras no sea `null`, el input queda bloqueado.
-- `debug: boolean` — `/debug` (Hito 10); con `true` se pintan los bloques `⊙ thinking`.
+- `debug: boolean` — `/debug` (Hito 10); con `true` se pinta el razonamiento entero (`⊙ thinking`) en vez de la línea plegada.
 
 **Acción `/clear` en el reducer:** despacha `{ type: 'CLEAR' }`, que reinicia `completedItems: []`, `currentItem: null`, `subagentTranscripts` (§5.7), el plan en curso y `fatalError`. El `sessionId` se mantiene; el agente pierde todo el contexto conversacional anterior vía `agent.clearHistory()`. `Ctrl+L` despacha la misma acción.
 
@@ -1388,7 +1388,7 @@ Como los turnos cerrados ya están en el scrollback nativo del terminal (§4.2),
 | `subagent_progress` (8B+) | Actualiza la línea de actividad del bloque/nodo del subagente. |
 | `subagent_event` (8C) | Enruta el `AgentEvent` envuelto al nodo por `subagentId`; alimenta sus tool calls y marca `speakingId`. Ver §5.6. |
 | `subagent_completed` (8A/8C) | Fija estado terminal + `summary`/`error`/`filesChanged` del bloque/nodo. Colapsa el árbol al agregado si todos terminaron. |
-| `thinking` | **No se renderiza por defecto.** Solo visible con `/debug` activo (o `--debug`): una línea dim truncada con prefijo `⊙ thinking`. Sin `debug`, el reducer descarta el evento sin tocar el estado. |
+| `thinking` | Fragmento del razonamiento del modelo (D7). Los fragmentos consecutivos forman un bloque (`thinkingBlocks` + `thinkingOpen`; un `text_delta` o un `tool_call_start` lo cierran). Sin `debug`, una línea dim plegada por bloque: `⊙ razonando… <cola>` mientras llega y `⊙ razonó · N palabras (/debug para verlo)` al cerrarse. Con `/debug` activo (o `--debug`), el texto entero con prefijo `⊙ thinking`. |
 | `error { fatal: false }` | Igual que `tool_error` — el loop continúa, el error es parte del flujo normal. |
 | `error { fatal: true }` | Renderiza `<FatalError>`: bloque con borde rojo, icono `✗`, mensaje de error y sugerencia de acción. El input queda permanentemente bloqueado. Se emite el evento `done` con `stopReason: 'error'` (valor incluido en el enum de `AgentEvent.done` — ver §12.1 de `STRATUM_PROJECT_DEFINITION.md`). |
 | `done` | Quita el cursor de streaming del último `<StreamingText>` y lo reemplaza con `<MarkdownText>` (re-render con markdown formateado). Habilita el input. Actualiza la sesión guardada. Ver [§5.3 — Renderizado de Markdown](./STRATUM_UI_SPECIFICATION.md#53-renderizado-de-markdown-en-respuestas-del-agente). |

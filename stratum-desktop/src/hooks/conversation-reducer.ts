@@ -35,6 +35,11 @@ export interface ToolCallView {
 /** Trozos de una respuesta, en el orden en que llegaron. */
 export type AgentPart =
   | { kind: 'text'; text: string }
+  /**
+   * Razonamiento del modelo (D7). `startedAt`/`endedAt` (ms, reloj del webview)
+   * solo existen si se vio llegar: un turno reabierto no los trae.
+   */
+  | { kind: 'reasoning'; text: string; startedAt?: number; endedAt?: number }
   | { kind: 'tool'; id: string }
   | { kind: 'notice'; tone: 'warning' | 'error'; text: string };
 
@@ -138,7 +143,8 @@ export type ConversationAction =
   | { type: 'dismiss_notice' }
   | { type: 'user_sent'; turnId: string; text: string; attachments?: SentAttachment[] }
   | { type: 'workspace_files'; turnId: string; files: WorkspaceFileInfo[] }
-  | { type: 'agent_event'; turnId: string; event: AgentEvent }
+  /** `now`: reloj para medir el razonamiento; por defecto `Date.now()`. */
+  | { type: 'agent_event'; turnId: string; event: AgentEvent; now?: number }
   | { type: 'turn_ended'; turnId: string; stopReason: string }
   | { type: 'chat_rejected'; turnId: string; message: string }
   | { type: 'questions_request'; requestId: string; questions: QuestionItem[] }
@@ -168,6 +174,24 @@ function appendText(parts: AgentPart[], delta: string): AgentPart[] {
   return [...parts, { kind: 'text', text: delta }];
 }
 
+/** Fragmentos consecutivos de razonamiento forman un bloque. */
+function appendReasoning(parts: AgentPart[], delta: string, now: number): AgentPart[] {
+  const last = parts[parts.length - 1];
+  if (last?.kind === 'reasoning' && last.endedAt === undefined) {
+    return [...parts.slice(0, -1), { ...last, text: last.text + delta }];
+  }
+  return [...parts, { kind: 'reasoning', text: delta, startedAt: now }];
+}
+
+/** Cualquier otra cosa que llegue cierra el bloque de razonamiento abierto. */
+function closeReasoning(parts: AgentPart[], now: number): AgentPart[] {
+  const last = parts[parts.length - 1];
+  if (last?.kind !== 'reasoning' || last.endedAt !== undefined || last.startedAt === undefined) {
+    return parts;
+  }
+  return [...parts.slice(0, -1), { ...last, endedAt: now }];
+}
+
 function upsertTool(
   turn: AgentTurn,
   id: string,
@@ -192,7 +216,16 @@ function stringifyInput(input: Record<string, unknown>): string {
   }
 }
 
-function applyEvent(turn: AgentTurn, event: AgentEvent): AgentTurn {
+function applyEvent(turn: AgentTurn, event: AgentEvent, now: number): AgentTurn {
+  if (event.type === 'thinking') {
+    return {
+      ...turn,
+      status: turn.status === 'queued' ? 'streaming' : turn.status,
+      parts: appendReasoning(turn.parts, event.text, now),
+    };
+  }
+  const closed = closeReasoning(turn.parts, now);
+  if (closed !== turn.parts) turn = { ...turn, parts: closed };
   switch (event.type) {
     case 'text_delta':
       return {
@@ -389,7 +422,8 @@ export function conversationReducer(
 
     case 'agent_event': {
       const { event } = action;
-      let next = updateTurn(state, action.turnId, (t) => applyEvent(t, event));
+      const now = action.now ?? Date.now();
+      let next = updateTurn(state, action.turnId, (t) => applyEvent(t, event, now));
       if (event.type === 'todo_updated') next = { ...next, todos: event.items };
       // `questions_answered` cierra la tanda aunque la respuesta llegase por
       // otro camino (timeout, cancel): la UI no puede seguir preguntando.
@@ -398,11 +432,13 @@ export function conversationReducer(
     }
 
     case 'turn_ended': {
+      const ended = Date.now();
       const next = updateTurn(state, action.turnId, (t) =>
         settleTools(
           t.status === 'streaming' || t.status === 'queued'
             ? {
                 ...t,
+                parts: closeReasoning(t.parts, ended),
                 status: statusFor(action.stopReason),
                 stopReason: action.stopReason,
                 queuePosition: undefined,
@@ -450,7 +486,9 @@ export function conversationReducer(
     case 'connection_lost': {
       const turnId = state.activeTurnId;
       const next = turnId
-        ? updateTurn(state, turnId, (t) => settleTools({ ...t, status: 'interrupted' }))
+        ? updateTurn(state, turnId, (t) =>
+            settleTools({ ...t, parts: closeReasoning(t.parts, Date.now()), status: 'interrupted' }),
+          )
         : state;
       return {
         ...next,

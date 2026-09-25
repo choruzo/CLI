@@ -23,6 +23,9 @@ import type {
 export const TRANSCRIPT_TOOL_OUTPUT_CHARS = 8_000;
 /** Tope de los argumentos de una tool guardados en el transcript. */
 export const TRANSCRIPT_TOOL_INPUT_CHARS = 4_000;
+/** Tope de cada bloque de razonamiento guardado en el transcript. */
+export const TRANSCRIPT_REASONING_CHARS = 8_000;
+const REASONING_CLIPPED = '\n… (recortado)';
 /** Longitud del título derivado del primer mensaje. */
 export const TITLE_CHARS = 60;
 
@@ -62,6 +65,26 @@ function appendText(parts: TranscriptPart[], delta: string): TranscriptPart[] {
   return [...parts, { kind: 'text', text: delta }];
 }
 
+/**
+ * Fragmentos de razonamiento consecutivos forman un bloque; pasado el tope se
+ * dejan de guardar (el webview los tiene enteros mientras la conversación está
+ * abierta).
+ */
+function appendReasoning(parts: TranscriptPart[], delta: string): TranscriptPart[] {
+  const last = parts[parts.length - 1];
+  if (last?.kind !== 'reasoning') {
+    return [...parts, { kind: 'reasoning', text: clipReasoning(delta) }];
+  }
+  if (last.text.endsWith(REASONING_CLIPPED)) return parts;
+  return [...parts.slice(0, -1), { kind: 'reasoning', text: clipReasoning(last.text + delta) }];
+}
+
+function clipReasoning(text: string): string {
+  return text.length > TRANSCRIPT_REASONING_CHARS
+    ? text.slice(0, TRANSCRIPT_REASONING_CHARS) + REASONING_CLIPPED
+    : text;
+}
+
 function upsertTool(
   turn: TranscriptTurn,
   id: string,
@@ -89,6 +112,8 @@ export function applyTranscriptEvent(turn: TranscriptTurn, event: AgentEvent): T
   switch (event.type) {
     case 'text_delta':
       return { ...turn, status: 'streaming', parts: appendText(turn.parts, event.delta) };
+    case 'thinking':
+      return { ...turn, status: 'streaming', parts: appendReasoning(turn.parts, event.text) };
     case 'tool_call_start':
       return upsertTool(turn, event.id, event.name, {
         input: clip(event.input_so_far, TRANSCRIPT_TOOL_INPUT_CHARS),

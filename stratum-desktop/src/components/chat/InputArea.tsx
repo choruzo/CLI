@@ -192,6 +192,7 @@ export const InputArea = forwardRef<
         )}
         <textarea
           ref={textareaRef}
+          id="chat-input"
           className="input-area__text"
           aria-label="Mensaje para el asistente"
           rows={1}

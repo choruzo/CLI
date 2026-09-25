@@ -328,6 +328,7 @@ describe('DesktopSettings (D5)', () => {
       os: {
         notifications: { enabled: true, minSeconds: 10 },
         globalHotkey: 'CommandOrControl+Shift+Space',
+        updates: { autoCheck: true },
       },
       providerReady: false,
     });

@@ -75,7 +75,7 @@ en ejecución lo que el filtro no permite; el prompt, de `promptEnv()` como punt
 | **D4** 🔄 | Conversaciones múltiples + Sidebar + StatusBar + InputArea | D3 | 15.12, 15.15 |
 | **D5** 🔄 | Settings Panel + ProviderWizard + config compartida | D4 | 15.7 |
 | **D6** ✅ | Integración con el SO + pipeline de build | D5 | — |
-| **D7** | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
+| **D7** 🔄 | Polish: frameless, animaciones, a11y, E2E | D6 | 15.14 |
 | **D8** | Modo Code: conmutador Chat \| Code | D7 | 15.3 |
 
 Regla de oro: ningún hito se cierra sin que sus criterios de aceptación pasen y
@@ -922,7 +922,68 @@ que haya certificado (SmartScreen avisa).
 
 ---
 
-## D7 — Polish: frameless, animaciones, accesibilidad y E2E
+## D7 — Polish: frameless, animaciones, accesibilidad y E2E 🔄
+
+**Estado (2026-09-25): implementado; pendiente de la primera ejecución en CI.**
+Todo verificado en local en Windows 11 y en Linux (WSL2 Ubuntu 24.04, Xvfb):
+suite E2E 15/15 en las dos plataformas, CLI 1211, frontend
+160, Rust 53 (8 nuevos en `window_state.rs`); `tsc`, lint y `actionlint` limpios. Falta lo que
+solo puede pasar en GitHub: la suite en la CI (`desktop-e2e.yml`) y publicar una
+`desktop-v*` firmada para ver el auto-update de punta a punta con una app
+instalada.
+
+| Criterio | Estado |
+|---|---|
+| Mover/maximizar/cerrar la ventana frameless funciona en Windows y Linux | ✅ E2E `window` en las dos: maximizar y restaurar con los controles propios y con doble clic en la barra, «Cerrar» cierra y guarda la posición. Arrastrar la ventana no se puede probar por script (el SO toma el ratón real): pendiente de comprobarlo a mano |
+| Restaurar tras desconectar un monitor deja la ventana visible | ✅ `clamp_to_monitors` con 8 tests (monitor externo que ya no está, coordenadas negativas, ventana mayor que el área, barra de título fuera) y E2E `window`: un `window-state.json` en (-30000, -30000) arranca centrado y visible |
+| Suite E2E verde en CI | 🔄 Verde en local en Windows (msedgedriver 153) y Linux (WebKitWebDriver + Xvfb, el mismo entorno que la CI); el workflow está listo y validado con `actionlint`, falta su primera ejecución |
+| Una release nueva dispara el auto-update | ✅ Con la app **instalada** (NSIS 0.1.1 firmado con la clave nueva, endpoint local por HTTP): al abrirla pidió `latest.json` sola, ofreció la 0.1.2, descargó el instalador (42 MB), verificó la firma, instaló en modo pasivo y se relanzó sola ya en la 0.1.2 (`DisplayVersion` 0.1.2), que volvió a comprobar sin encontrar nada. Un paquete manipulado se rechaza («The signature verification failed») sin instalar. Falta repetirlo con el canal real (`desktop-updater` en GitHub) en la primera release publicada |
+
+También verificado: con `gemma-4-12b` (llama.cpp, puerto 8080) el razonamiento
+llega en vivo al bloque «Razonando», se pliega a «Razonó 35 s · 500 palabras» al
+empezar la respuesta, y el indicador de estratos rota sus frases mientras tanto.
+
+Decisiones (con el usuario, antes de implementar):
+- **Clave del updater**: generada aquí (`tauri signer generate`) en
+  `~/.tauri/stratum-updater.key`, fuera del repo; la pública en
+  `tauri.conf.json`. La privada va a los secrets de GitHub
+  (`TAURI_SIGNING_PRIVATE_KEY` es el **contenido** del fichero, no su ruta).
+- **Razonamiento plegado y guardado**: se ve en vivo, se pliega al empezar la
+  respuesta y se guarda recortado en el transcript. En la CLI, línea plegada sin
+  necesidad de `/debug`.
+- **E2E**: Linux en CI; Windows en local (msedgedriver va atado a la versión
+  exacta de WebView2).
+
+Decisiones de diseño:
+- **Protocolo v8**: parte `reasoning` en el transcript y `os.updates` en
+  `config_state.applied`. El webview valida cada tipo de evento y de parte
+  (`ipc/validate.ts`): sin añadirlos ahí, el evento se descartaba y una parte
+  desconocida invalidaba el turno entero al reabrir.
+- **`<think>` solo al principio** de la respuesta: a mitad de texto es contenido
+  (un ejemplo de código, una pregunta sobre el tag).
+- **Frases de espera propias**, de estratos y geología (*Sedimentando*, *Contando
+  varvas*, *Sacando testigos*…), deterministas por turno: nada de
+  `Math.random()`, y los tests pueden fijarlas.
+- **Ventana**: se guarda el último rectángulo *normal*; maximizada, la posición
+  es la del monitor y no sirve para restaurar. Arranca oculta y se muestra ya
+  colocada.
+- **Updater solo desde Rust**, como D6: el webview no recibe permisos del plugin.
+  Nunca instala sin que el usuario lo pida; «Más tarde» aparca esa versión.
+- **Manifiesto en una release fija `desktop-updater`**: el «latest» de GitHub es
+  la release de la CLI, y un borrador no debe llegar a nadie; se escribe al
+  **publicar** la release.
+- **Cliente WebDriver propio** (`e2e/webdriver.mjs`, ~200 líneas) en vez de
+  webdriverio: el protocolo W3C son unas pocas peticiones HTTP.
+- **Feature de Cargo `e2e`** para los diálogos nativos, que WebDriver no puede
+  manejar; nunca entra en un build de release.
+- **Contraste**: `textFaint` a `#7C8493` solo en Desktop (en la terminal manda el
+  fondo del emulador).
+
+Conocido: el janitor puede comprimir al arrancar la conversación que el webview
+reabre justo después (se restaura sola; se vio en la E2E de retención en Linux).
+Snap layouts de Windows 11 no aparecen al pasar por el botón de maximizar (no
+hay API en Tauri para una barra propia). El arrastre no se ha probado a mano en
+ninguna de las dos plataformas.
 
 ### Tareas
 

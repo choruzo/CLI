@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import type { Config } from '../../hooks/useConfig';
 import { editDraft, parseDraft, providersOf, upsertProvider } from '../settings/config-draft';
 import { ProviderWizard, type WizardResult } from '../settings/ProviderWizard';
@@ -35,9 +36,11 @@ export function Onboarding({
   const parsed = useMemo(() => parseDraft(config.draft), [config.draft]);
   const existing = parsed.ok ? providersOf(parsed.value).map((p) => p.name) : [];
 
+  const root = useRef<HTMLDivElement>(null);
   useEffect(() => {
     if (step === 'welcome') start.current?.focus();
   }, [step]);
+  useFocusTrap(root, step !== 'wizard');
 
   // Guardado y aplicado por el sidecar: listo.
   useEffect(() => {
@@ -81,7 +84,13 @@ export function Onboarding({
   }
 
   return (
-    <div className="onboarding" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+    <div
+      ref={root}
+      className="onboarding"
+      role="dialog"
+      aria-modal="true"
+      aria-labelledby="onboarding-title"
+    >
       <div className="onboarding__card">
         <AppLogo className="onboarding__logo" />
         <h1 id="onboarding-title" className="onboarding__title">

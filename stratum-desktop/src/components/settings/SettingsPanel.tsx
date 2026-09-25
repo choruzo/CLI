@@ -1,4 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useAppVersion } from '../../hooks/useAppVersion';
+import type { Updates } from '../../hooks/useUpdates';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import type { Config } from '../../hooks/useConfig';
 import {
   defaultProvider,
@@ -38,7 +41,11 @@ const TABS: Array<{ id: SettingsTab; label: string; paths: string[] }> = [
   { id: 'web', label: 'Búsqueda web', paths: ['tools.webSearch'] },
   { id: 'memory', label: 'Memoria', paths: ['memory'] },
   { id: 'workspaces', label: 'Espacios de trabajo', paths: ['desktop.workspaces'] },
-  { id: 'system', label: 'Sistema', paths: ['desktop.notifications', 'desktop.globalHotkey'] },
+  {
+    id: 'system',
+    label: 'Sistema',
+    paths: ['desktop.notifications', 'desktop.globalHotkey', 'desktop.updates'],
+  },
   { id: 'advanced', label: 'Avanzado', paths: [] },
 ];
 
@@ -47,6 +54,7 @@ type WizardState = { mode: 'add' } | { mode: 'edit'; provider: ProviderEntry } |
 export function SettingsPanel({
   config,
   hotkeyError = null,
+  updates,
   connected,
   onClose,
   onOpenMemory,
@@ -54,11 +62,14 @@ export function SettingsPanel({
   config: Config;
   /** El atajo global en uso no se pudo registrar (D6). */
   hotkeyError?: string | null;
+  /** Auto-update (D7): «Buscar actualizaciones» en Sistema. */
+  updates?: Updates;
   connected: boolean;
   onClose: () => void;
   onOpenMemory: () => void;
 }) {
   const [tab, setTab] = useState<SettingsTab>('providers');
+  const version = useAppVersion();
   const [wizard, setWizard] = useState<WizardState>(null);
   const [confirmClose, setConfirmClose] = useState(false);
   const panel = useRef<HTMLDivElement>(null);
@@ -66,6 +77,8 @@ export function SettingsPanel({
   useEffect(() => {
     panel.current?.focus();
   }, []);
+  // Con el wizard encima, el foco es suyo.
+  useFocusTrap(panel, !wizard);
 
   const parsed = useMemo(() => parseDraft(config.draft), [config.draft]);
   const value: Json = parsed.ok ? parsed.value : {};
@@ -218,7 +231,30 @@ export function SettingsPanel({
       </div>
 
       <div className="settings__body">
-        <nav className="settings__tabs" aria-label="Secciones de ajustes" role="tablist">
+        <nav
+          className="settings__tabs"
+          aria-label="Secciones de ajustes"
+          role="tablist"
+          aria-orientation="vertical"
+          onKeyDown={(e) => {
+            // Patrón tabs de WAI-ARIA: flechas e Inicio/Fin cambian de sección.
+            const at = TABS.findIndex((t) => t.id === tab);
+            const to =
+              e.key === 'ArrowDown' || e.key === 'ArrowRight'
+                ? (at + 1) % TABS.length
+                : e.key === 'ArrowUp' || e.key === 'ArrowLeft'
+                  ? (at - 1 + TABS.length) % TABS.length
+                  : e.key === 'Home'
+                    ? 0
+                    : e.key === 'End'
+                      ? TABS.length - 1
+                      : -1;
+            if (to === -1) return;
+            e.preventDefault();
+            setTab(TABS[to].id);
+            e.currentTarget.querySelectorAll<HTMLElement>('[role="tab"]')[to]?.focus();
+          }}
+        >
           {TABS.map((t) => {
             const n = tabIssues(t);
             return (
@@ -226,6 +262,9 @@ export function SettingsPanel({
                 key={t.id}
                 type="button"
                 role="tab"
+                id={`settings-tab-${t.id}`}
+                aria-controls="settings-tabpanel"
+                tabIndex={tab === t.id ? 0 : -1}
                 className="settings__tab"
                 aria-selected={tab === t.id}
                 data-active={tab === t.id || undefined}
@@ -242,7 +281,12 @@ export function SettingsPanel({
           })}
         </nav>
 
-        <div className="settings__content" role="tabpanel">
+        <div
+          className="settings__content"
+          role="tabpanel"
+          id="settings-tabpanel"
+          aria-labelledby={`settings-tab-${tab}`}
+        >
           {!config.loaded ? (
             <p className="notice">Cargando la configuración…</p>
           ) : tab === 'advanced' ? (
@@ -299,7 +343,7 @@ export function SettingsPanel({
               onOpenMemory={config.dirty ? () => setConfirmClose(true) : onOpenMemory}
             />
           ) : tab === 'system' ? (
-            <SystemSection ctx={ctx} hotkeyError={hotkeyError} />
+            <SystemSection ctx={ctx} hotkeyError={hotkeyError} updates={updates} />
           ) : (
             <WorkspacesSection ctx={ctx} config={config} />
           )}
@@ -342,6 +386,11 @@ export function SettingsPanel({
           <button type="button" className="button button--primary" disabled={!canSave} onClick={() => config.save()}>
             Guardar
           </button>
+          {version && (
+            <span className="settings__version" title="Versión instalada">
+              Stratum {version}
+            </span>
+          )}
         </span>
       </footer>
 

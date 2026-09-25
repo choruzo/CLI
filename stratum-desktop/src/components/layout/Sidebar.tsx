@@ -1,4 +1,5 @@
-import type { ReactNode } from 'react';
+import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { inertProps } from '../chat/Collapse';
 
 export type SidebarPanel = 'conversations' | 'outline' | 'memory' | 'files';
 
@@ -77,9 +78,35 @@ export function Sidebar({
   badges?: Partial<Record<SidebarPanel, boolean>>;
   children: ReactNode;
 }) {
+  const present = usePresence(state.open, PANEL_TRANSITION_MS);
+  const railRef = useRef<HTMLElement>(null);
+
+  // Raíl con flechas (patrón toolbar): ↑↓ recorren los iconos, Inicio/Fin saltan.
+  const onRailKey = (e: KeyboardEvent<HTMLElement>) => {
+    const keys = ['ArrowDown', 'ArrowUp', 'Home', 'End'];
+    if (!keys.includes(e.key)) return;
+    const buttons = Array.from(railRef.current?.querySelectorAll<HTMLButtonElement>('button') ?? []);
+    const at = buttons.indexOf(document.activeElement as HTMLButtonElement);
+    if (at === -1) return;
+    e.preventDefault();
+    const next =
+      e.key === 'Home'
+        ? 0
+        : e.key === 'End'
+          ? buttons.length - 1
+          : (at + (e.key === 'ArrowDown' ? 1 : -1) + buttons.length) % buttons.length;
+    buttons[next]?.focus();
+  };
+
   return (
-    <aside className="sidebar" data-open={state.open || undefined}>
-      <nav className="sidebar__rail" aria-label="Paneles">
+    <aside className="sidebar" data-open={state.open || undefined} aria-label="Barra lateral">
+      <nav
+        ref={railRef}
+        className="sidebar__rail"
+        aria-label="Paneles"
+        aria-orientation="vertical"
+        onKeyDown={onRailKey}
+      >
         {PANELS.map((p) => (
           <button
             key={p}
@@ -87,7 +114,7 @@ export function Sidebar({
             className="rail-button"
             data-active={(state.open && state.panel === p) || undefined}
             aria-pressed={state.open && state.panel === p}
-            aria-label={LABELS[p]}
+            aria-label={LABELS[p] + (badges?.[p] ? ' — hay una respuesta esperando' : '')}
             title={LABELS[p]}
             onClick={() => onToggle(p)}
           >
@@ -106,7 +133,36 @@ export function Sidebar({
           <Icon d={ICONS.settings} />
         </button>
       </nav>
-      {state.open && <div className="sidebar__panel">{children}</div>}
+      {(state.open || present) && (
+        <div
+          className="sidebar__panel"
+          data-state={state.open && present ? 'open' : 'closed'}
+          {...inertProps(!state.open)}
+        >
+          <div className="sidebar__panel-inner">{children}</div>
+        </div>
+      )}
     </aside>
   );
+}
+
+/** Lo que dura la transición de anchura del panel (`--dur-med`). */
+export const PANEL_TRANSITION_MS = 220;
+
+/**
+ * Montado con retraso en las dos direcciones: al abrir se monta cerrado y pasa
+ * a abierto en el siguiente frame (para que la anchura transicione); al cerrar
+ * se desmonta cuando la transición ha terminado.
+ */
+function usePresence(open: boolean, exitMs: number): boolean {
+  const [present, setPresent] = useState(open);
+  useEffect(() => {
+    if (open) {
+      const raf = requestAnimationFrame(() => setPresent(true));
+      return () => cancelAnimationFrame(raf);
+    }
+    const t = window.setTimeout(() => setPresent(false), exitMs);
+    return () => window.clearTimeout(t);
+  }, [open, exitMs]);
+  return present;
 }

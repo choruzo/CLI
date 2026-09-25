@@ -17,11 +17,21 @@
         "height": 720,
         "minWidth": 640,
         "minHeight": 400,
-        "backgroundColor": "#0D0D0D"
+        "backgroundColor": "#0D0D0D",
+        "decorations": false,
+        "visible": false,
+        "center": true
       }
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFRjY2MkIwRTZCRDNEMUQKUldRZFBiM21zR0wyVHVaS3BOUTZlY05HUElEWTJMUWY5TjNNOFAwemJnTjJ1MlRwcUg4dGFuenUK",
+      "endpoints": ["https://github.com/choruzo/CLI/releases/download/desktop-updater/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   },
   "bundle": {

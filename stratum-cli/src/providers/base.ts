@@ -25,6 +25,12 @@ export interface OpenAIStreamChunk {
   choices: Array<{
     delta: {
       content?: string | null;
+      /**
+       * Razonamiento del modelo, separado de la respuesta: `reasoning_content`
+       * (llama.cpp, vLLM, DeepSeek) o `reasoning` (vLLM reciente, OpenRouter).
+       */
+      reasoning_content?: string | null;
+      reasoning?: string | null;
       role?: string;
       tool_calls?: ToolCallDelta[];
     };

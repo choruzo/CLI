@@ -47,7 +47,9 @@ function renderItem(
       expandedBlockIds={expandedBlockIds}
       initSteps={item.initSteps}
       initSummary={item.initSummary}
-      thinkingBlocks={debug ? item.thinkingBlocks : undefined}
+      thinkingBlocks={item.thinkingBlocks}
+      thinkingOpen={item.thinkingOpen}
+      debug={debug}
       now={now}
       liveTextLines={liveTextLines}
       liveColumns={liveColumns}

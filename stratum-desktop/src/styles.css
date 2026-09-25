@@ -22,13 +22,19 @@ body {
   color: var(--color-textPrimary);
 }
 
+/* Solo para lectores de pantalla. `!important`: un contenedor con reglas de
+   ancho para sus hijos (`.conversation > *`) no puede volver a sacarlo. */
 .sr-only {
-  position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
-  white-space: nowrap;
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  margin: -1px !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
 }
 
 /* D4: sidebar + conversación + StatusBar a lo ancho de la ventana. */
@@ -2040,4 +2046,517 @@ body {
   font-size: 12px;
   white-space: pre-wrap;
   word-break: break-all;
+}
+
+/* ------------------------------------------------------------------------ */
+/* D7 — pulido: indicador de capas, razonamiento, colapsos, foco, movimiento */
+/* ------------------------------------------------------------------------ */
+
+:root {
+  --ease-out: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --dur-fast: 140ms;
+  --dur-med: 220ms;
+}
+
+/* Foco visible en todo lo interactivo, también en lo que no tenía regla propia. */
+:where(button, a, input, textarea, select, summary, [tabindex]):focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+/* Salto al contenido: invisible hasta que llega el foco con Tab. */
+.skip-link {
+  position: fixed;
+  top: calc(var(--titlebar-height) + 8px);
+  left: 56px;
+  z-index: 100;
+  padding: 8px 14px;
+  border-radius: 6px;
+  background: var(--color-accent);
+  color: var(--color-bgApp);
+  font-weight: 600;
+  text-decoration: none;
+  opacity: 0;
+  pointer-events: none;
+  transform: translateY(-6px);
+  transition:
+    opacity var(--dur-fast) var(--ease-out),
+    transform var(--dur-fast) var(--ease-out);
+}
+.skip-link:focus-visible {
+  opacity: 1;
+  pointer-events: auto;
+  transform: none;
+  outline-color: var(--color-accentBright);
+}
+
+kbd {
+  padding: 0 4px;
+  border: 1px solid var(--color-borderMedium);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-family: var(--font-mono);
+  font-size: 0.85em;
+}
+
+/* Mensajes: cada uno entra con un leve ascenso. */
+.message {
+  animation: message-in var(--dur-med) var(--ease-out) both;
+}
+@keyframes message-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+}
+
+/* Cursor de streaming: brillo que respira en lugar de parpadeo seco. */
+.streaming-text__cursor {
+  border-radius: 2px;
+  box-shadow: 0 0 8px var(--color-accent);
+  animation: cursor-breathe 1.1s ease-in-out infinite;
+}
+@keyframes cursor-breathe {
+  50% {
+    opacity: 0.25;
+    box-shadow: 0 0 2px var(--color-accent);
+  }
+}
+
+/* Indicador de espera: tres estratos que se depositan y se compactan. */
+.thinking {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 24px;
+  font-size: 14px;
+  color: var(--color-textMuted);
+}
+.strata-loader {
+  display: inline-flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 2px;
+  width: 18px;
+  height: 16px;
+}
+.strata-loader span {
+  display: block;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--color-accent);
+  transform-origin: left center;
+  animation: stratum-settle 1.8s var(--ease-out) infinite;
+}
+.strata-loader span:nth-child(1) {
+  animation-delay: 0.6s;
+  background: var(--color-accentBright);
+}
+.strata-loader span:nth-child(2) {
+  animation-delay: 0.3s;
+}
+.strata-loader span:nth-child(3) {
+  background: var(--color-borderAccent);
+}
+@keyframes stratum-settle {
+  0% {
+    opacity: 0;
+    transform: translateY(-6px) scaleX(0.4);
+  }
+  30%,
+  75% {
+    opacity: 1;
+    transform: none;
+  }
+  100% {
+    opacity: 0;
+    transform: scaleX(1.1);
+  }
+}
+.thinking[data-phase='tool'] .strata-loader span {
+  animation-duration: 1.1s;
+}
+.thinking[data-phase='reasoning'] .strata-loader span:nth-child(3) {
+  background: var(--color-warning);
+}
+.thinking__phrase {
+  background: linear-gradient(
+      90deg,
+      var(--color-textMuted) 0%,
+      var(--color-accentBright) 45%,
+      var(--color-textMuted) 90%
+    )
+    0 0 / 250% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation:
+    phrase-in var(--dur-med) var(--ease-out) both,
+    shimmer 2.4s linear infinite;
+}
+@keyframes phrase-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+    filter: blur(2px);
+  }
+}
+@keyframes shimmer {
+  to {
+    background-position: -250% 0;
+  }
+}
+.thinking__meta {
+  font-size: 12px;
+  color: var(--color-textFaint);
+}
+
+/* Razonamiento del modelo. */
+.reasoning {
+  border-left: 2px solid var(--color-borderMedium);
+  padding-left: 10px;
+  font-size: 13px;
+}
+.reasoning[data-live] {
+  border-left-color: var(--color-borderAccent);
+}
+.reasoning__header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+  border: 0;
+  background: none;
+  color: var(--color-textMuted);
+  font: inherit;
+  cursor: pointer;
+}
+.reasoning__header:hover {
+  color: var(--color-textPrimary);
+}
+.reasoning__chevron,
+.tool-call__chevron {
+  display: inline-block;
+  transition: transform var(--dur-fast) var(--ease-out);
+}
+.reasoning[data-open] .reasoning__chevron,
+.tool-call[data-open] .tool-call__chevron {
+  transform: rotate(90deg);
+}
+.reasoning[data-live] .reasoning__label {
+  color: var(--color-accentBright);
+}
+.reasoning__words {
+  color: var(--color-textFaint);
+  font-size: 12px;
+}
+.reasoning__body,
+.reasoning__tail {
+  color: var(--color-textMuted);
+  font-style: italic;
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+.reasoning__body {
+  max-height: 420px;
+  overflow-y: auto;
+  padding: 6px 0 4px;
+}
+/* En vivo: ventana de cuatro líneas que se desvanece por arriba. */
+.reasoning__tail {
+  max-height: calc(1.5em * 4);
+  overflow: hidden;
+  -webkit-mask-image: linear-gradient(to bottom, transparent, #000 60%);
+  mask-image: linear-gradient(to bottom, transparent, #000 60%);
+}
+
+/* Desplegables: altura animada sin medir el DOM. */
+.collapse {
+  display: grid;
+  grid-template-rows: 0fr;
+  transition: grid-template-rows var(--dur-med) var(--ease-out);
+}
+.collapse[data-open] {
+  grid-template-rows: 1fr;
+}
+.collapse__inner {
+  min-height: 0;
+  overflow: hidden;
+}
+
+/* Tool calls: estado en marcha que gira y un destello al terminar. */
+.tool-call {
+  transition: border-color var(--dur-med) var(--ease-out);
+}
+.tool-call__chevron {
+  margin-left: 4px;
+  color: var(--color-textFaint);
+}
+.tool-call__duration + .tool-call__chevron {
+  margin-left: 4px;
+}
+.tool-call__state + .tool-call__chevron {
+  margin-left: auto;
+}
+.tool-call[data-state='running'] .tool-call__icon {
+  display: inline-block;
+  animation: spin 1s linear infinite;
+}
+.tool-call[data-state='running'] {
+  border-color: var(--color-borderAccent);
+}
+.tool-call[data-state='completed'] .tool-call__icon,
+.tool-call[data-state='error'] .tool-call__icon {
+  animation: pop var(--dur-med) var(--ease-out);
+}
+@keyframes pop {
+  from {
+    transform: scale(0.4);
+    opacity: 0;
+  }
+}
+
+/* Sidebar: el panel se abre y se cierra deslizando su anchura. */
+.sidebar__panel {
+  animation: none;
+  width: 280px;
+  transition:
+    width var(--dur-med) var(--ease-out),
+    opacity var(--dur-med) var(--ease-out);
+  overflow: hidden;
+}
+.sidebar__panel[data-state='closed'] {
+  width: 0;
+  opacity: 0;
+  border-left-color: transparent;
+}
+.sidebar__panel-inner {
+  width: 280px;
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+}
+
+/* Quien pide menos movimiento, lo tiene: nada se desliza ni gira. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+  .thinking__phrase {
+    background: none;
+    color: var(--color-textMuted);
+  }
+  .strata-loader span {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* Barra de título de la ventana frameless (D7). */
+:root {
+  --titlebar-height: 32px;
+}
+.titlebar {
+  height: var(--titlebar-height);
+  flex-shrink: 0;
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  padding-left: 10px;
+  border-bottom: 1px solid var(--color-borderSubtle);
+  background: var(--color-bgPanel);
+  color: var(--color-textMuted);
+  font-size: 12px;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.titlebar__brand {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+}
+.titlebar__logo {
+  width: 16px;
+  height: 16px;
+}
+.titlebar__name {
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  color: var(--color-textPrimary);
+}
+/* Hueco del conmutador Chat | Code (D8): sin contenido, no ocupa. */
+.titlebar__modes {
+  display: flex;
+  align-items: center;
+}
+.titlebar__modes:empty {
+  display: none;
+}
+.titlebar__title {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.titlebar__controls {
+  display: flex;
+}
+.titlebar__control {
+  width: 46px;
+  display: grid;
+  place-items: center;
+  border: 0;
+  background: none;
+  color: var(--color-textMuted);
+  cursor: default;
+  transition: background var(--dur-fast) ease, color var(--dur-fast) ease;
+}
+.titlebar__control:hover {
+  background: var(--color-bgStatusbar);
+  color: var(--color-textPrimary);
+}
+.titlebar__control--close:hover {
+  background: #c42b1c;
+  color: #fff;
+}
+.titlebar__control:focus-visible {
+  outline-offset: -2px;
+}
+
+/* La ventana: TitleBar arriba y la app debajo (D7). */
+.window {
+  height: 100%;
+  display: flex;
+  flex-direction: column;
+}
+.window > .app {
+  flex: 1;
+  min-height: 0;
+  height: auto;
+}
+.window > .startup-failure {
+  flex: 1;
+  height: auto;
+}
+/* Las capas a pantalla completa dejan la TitleBar a la vista: la ventana se
+   sigue pudiendo mover y cerrar con Ajustes o el onboarding abiertos. */
+.settings,
+.wizard-backdrop,
+.onboarding {
+  top: var(--titlebar-height);
+}
+.titlebar__logo {
+  pointer-events: none;
+}
+
+/* Actualización disponible (D7). */
+.update-banner {
+  margin: 8px 16px 0;
+  padding: 8px 12px;
+  border: 1px solid var(--color-borderAccent);
+  border-radius: 8px;
+  background: var(--color-bgStatusbar);
+  font-size: 14px;
+  animation: message-in var(--dur-med) var(--ease-out) both;
+}
+.update-banner__row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.update-banner__text {
+  margin: 0;
+}
+.update-banner__current {
+  color: var(--color-textMuted);
+}
+.update-banner__actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.update-banner__progress {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+.update-banner__status {
+  font-size: 12px;
+  color: var(--color-textMuted);
+}
+.update-banner__notes {
+  max-height: 220px;
+  overflow: auto;
+  margin: 8px 0 0;
+  white-space: pre-wrap;
+  font-family: inherit;
+  font-size: 13px;
+  color: var(--color-textResponse);
+}
+.progress {
+  position: relative;
+  flex: 1;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 3px;
+  background: var(--color-borderSubtle);
+}
+.progress__bar {
+  position: absolute;
+  inset: 0 auto 0 0;
+  border-radius: 3px;
+  background: var(--color-accent);
+  transition: width var(--dur-med) var(--ease-out);
+}
+.progress[data-indeterminate] .progress__bar {
+  width: 30%;
+  animation: progress-slide 1.2s ease-in-out infinite;
+}
+@keyframes progress-slide {
+  from {
+    transform: translateX(-100%);
+  }
+  to {
+    transform: translateX(340%);
+  }
+}
+.settings-updates {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 8px;
+}
+.settings-updates__row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+/* Versión instalada, abajo a la derecha de Ajustes (D7). */
+.settings__footer-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings__version {
+  margin-left: 8px;
+  padding-left: 12px;
+  border-left: 1px solid var(--color-borderSubtle);
+  color: var(--color-textFaint);
+  font-family: var(--font-mono);
+  font-size: 12px;
 }

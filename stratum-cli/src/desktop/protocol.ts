@@ -51,6 +51,9 @@
  * config efectiva aunque Ajustes esté cerrado: las preferencias del sistema
  * (`os`: notificaciones y atajo global, que Rust registra) y si hay un provider
  * utilizable (`providerReady`), que decide el onboarding del primer arranque.
+ *
+ * D7 (v8) añade el razonamiento del modelo al transcript (parte `reasoning`,
+ * recortada) y `os.updates` (buscar actualizaciones al conectar).
  */
 
 import type {
@@ -64,7 +67,7 @@ import type {
 export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem, TodoItem };
 
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 7;
+export const DESKTOP_PROTOCOL_VERSION = 8;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -451,6 +454,8 @@ export interface WorkspaceStatus {
  */
 export type TranscriptPart =
   | { kind: 'text'; text: string }
+  /** Razonamiento del modelo (evento `thinking`); recortado al guardarlo (v8). */
+  | { kind: 'reasoning'; text: string }
   | { kind: 'tool'; id: string }
   | { kind: 'notice'; tone: 'warning' | 'error'; text: string };
 
@@ -772,11 +777,13 @@ export interface ConfigApplied {
   providerReady: boolean;
 }
 
-/** `desktop.notifications` y `desktop.globalHotkey` efectivos (D6). */
+/** `desktop.notifications`, `desktop.globalHotkey` (D6) y `desktop.updates` (D7) efectivos. */
 export interface DesktopOsPrefs {
   notifications: { enabled: boolean; minSeconds: number };
   /** Accelerator de Tauri; `''` = sin atajo. */
   globalHotkey: string;
+  /** Buscar actualizaciones al conectar (D7). */
+  updates: { autoCheck: boolean };
 }
 
 export interface ConfigStateFrame {

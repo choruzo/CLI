@@ -59,6 +59,7 @@ export function osPrefsOf(config: StratumConfig): DesktopOsPrefs {
       minSeconds: config.desktop.notifications.minSeconds,
     },
     globalHotkey: config.desktop.globalHotkey.trim(),
+    updates: { autoCheck: config.desktop.updates.autoCheck },
   };
 }
 

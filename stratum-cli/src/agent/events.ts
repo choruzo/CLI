@@ -21,6 +21,11 @@ export type AgentEvent =
       executed?: boolean;
     }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
+  /**
+   * Fragmento del razonamiento del modelo (`reasoning_content` o un `<think>`
+   * inicial). Llega en streaming como `text_delta`: fragmentos consecutivos
+   * forman un bloque. Nunca entra en el historial.
+   */
   | { type: 'thinking'; text: string }
   | { type: 'warning'; message: string }
   | {

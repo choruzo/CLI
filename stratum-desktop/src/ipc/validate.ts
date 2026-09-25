@@ -87,6 +87,9 @@ export function agentEvent(v: unknown): AgentEvent | null {
   switch (v.type) {
     case 'text_delta':
       return str(v.delta) ? { type: 'text_delta', delta: v.delta } : null;
+    case 'thinking':
+      // D7: razonamiento del modelo (`reasoning_content`).
+      return str(v.text) ? { type: 'thinking', text: v.text } : null;
     case 'tool_call_start':
       return str(v.id) && str(v.name) && str(v.input_so_far)
         ? { type: 'tool_call_start', id: v.id, name: v.name, input_so_far: v.input_so_far }
@@ -192,6 +195,7 @@ const TURN_STATUSES = new Set(['queued', 'streaming', 'done', 'cancelled', 'erro
 function transcriptPart(v: unknown): TranscriptPart | null {
   if (!isRecord(v)) return null;
   if (v.kind === 'text' && str(v.text)) return { kind: 'text', text: v.text };
+  if (v.kind === 'reasoning' && str(v.text)) return { kind: 'reasoning', text: v.text };
   if (v.kind === 'tool' && str(v.id)) return { kind: 'tool', id: v.id };
   if (v.kind === 'notice' && (v.tone === 'warning' || v.tone === 'error') && str(v.text)) {
     return { kind: 'notice', tone: v.tone, text: v.text };
@@ -357,6 +361,9 @@ export function osPrefs(v: unknown): DesktopOsPrefs {
       minSeconds: num(n.minSeconds) && n.minSeconds >= 0 ? n.minSeconds : 10,
     },
     globalHotkey: isRecord(v) && str(v.globalHotkey) ? v.globalHotkey : DEFAULT_GLOBAL_HOTKEY,
+    updates: {
+      autoCheck: !(isRecord(v) && isRecord(v.updates) && v.updates.autoCheck === false),
+    },
   };
 }
 

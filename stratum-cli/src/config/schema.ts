@@ -577,6 +577,16 @@ export const StratumConfigSchema = z.object({
           const parsed = parseAccelerator(value);
           if (!parsed.ok) ctx.addIssue({ code: z.ZodIssueCode.custom, message: parsed.error });
         }),
+      /**
+       * Actualizaciones de la app (D7): al conectar, Desktop pregunta a GitHub
+       * Releases si hay una versión nueva y la ofrece (nunca se instala sola).
+       * Con `false` solo se busca desde Ajustes.
+       */
+      updates: z
+        .object({
+          autoCheck: z.boolean().default(true),
+        })
+        .default({}),
       /** Espacios de trabajo por conversación del modo Chat. */
       workspaces: z
         .object({

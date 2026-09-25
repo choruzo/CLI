@@ -112,3 +112,70 @@ describe('StreamBuffer', () => {
     expect(ready).toHaveLength(0);
   });
 });
+
+describe('StreamBuffer — razonamiento', () => {
+  const delta = (d: Record<string, unknown>, finish: string | null = null) =>
+    ({ choices: [{ delta: d, finish_reason: finish, index: 0 }] }) as never;
+
+  function run(chunks: string[]) {
+    const buf = new StreamBuffer();
+    const events = chunks.flatMap((c) => buf.feed(delta({ content: c })));
+    events.push(...buf.feed(delta({}, 'stop')));
+    const join = (t: 'thinking' | 'text_delta') =>
+      events
+        .filter((e) => e.type === t)
+        .map((e) => (e.type === 'thinking' ? e.text : e.type === 'text_delta' ? e.delta : ''))
+        .join('');
+    return { thinking: join('thinking'), text: join('text_delta') };
+  }
+
+  it('emite thinking desde reasoning_content y reasoning, sin tocar el texto', () => {
+    const buf = new StreamBuffer();
+    expect(buf.feed(delta({ reasoning_content: 'Primero ' }))).toEqual([
+      { type: 'thinking', text: 'Primero ' },
+    ]);
+    expect(buf.feed(delta({ reasoning: 'luego' }))).toEqual([{ type: 'thinking', text: 'luego' }]);
+    expect(buf.feed(delta({ content: '391' }))).toEqual([{ type: 'text_delta', delta: '391' }]);
+  });
+
+  it('separa un <think> inicial aunque los tags lleguen partidos', () => {
+    expect(run(['<thi', 'nk>17*23', ' = 391</th', 'ink>\n\nSon 391.'])).toEqual({
+      thinking: '17*23 = 391',
+      text: 'Son 391.',
+    });
+  });
+
+  it('admite espacio antes del tag de apertura', () => {
+    expect(run(['\n', '  <think>a</think>b'])).toEqual({ thinking: 'a', text: 'b' });
+  });
+
+  it('un <think> que no está al principio es texto', () => {
+    expect(run(['Usa ', '<think> en el prompt'])).toEqual({
+      thinking: '',
+      text: 'Usa <think> en el prompt',
+    });
+  });
+
+  it('un < inicial que no acaba en tag se suelta como texto', () => {
+    expect(run(['<', 'div>hola</div>'])).toEqual({ thinking: '', text: '<div>hola</div>' });
+    expect(run(['<'])).toEqual({ thinking: '', text: '<' });
+  });
+
+  it('un bloque sin cerrar sale entero como razonamiento al terminar', () => {
+    expect(run(['<think>sin cierre </th'])).toEqual({ thinking: 'sin cierre </th', text: '' });
+  });
+
+  it('tras el cierre, otro <think> es texto', () => {
+    expect(run(['<think>x</think>y <think>z</think>'])).toEqual({
+      thinking: 'x',
+      text: 'y <think>z</think>',
+    });
+  });
+
+  it('reset olvida el estado del intento anterior', () => {
+    const buf = new StreamBuffer();
+    buf.feed(delta({ content: '<think>a' }));
+    buf.reset();
+    expect(buf.feed(delta({ content: 'hola' }))).toEqual([{ type: 'text_delta', delta: 'hola' }]);
+  });
+});

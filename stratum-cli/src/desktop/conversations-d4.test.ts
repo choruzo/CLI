@@ -12,6 +12,7 @@ import { WorkspaceManager } from './workspace.js';
 import { TurnCancelledInQueue, TurnScheduler } from './turn-scheduler.js';
 import {
   applyTranscriptEvent,
+  TRANSCRIPT_REASONING_CHARS,
   deriveTitle,
   newTurn,
   settleTranscriptTurn,
@@ -167,6 +168,20 @@ describe('transcript (D4)', () => {
     // La salida se recorta: el transcript no crece con cada lectura grande.
     expect(t.toolCalls.c1.output!.length).toBeLessThan(9_000);
     expect(t.status).toBe('done');
+  });
+
+  it('guarda el razonamiento como bloques propios y recortados (D7)', () => {
+    let t = newTurn('t1', 'hola', [], 'streaming');
+    t = applyTranscriptEvent(t, { type: 'thinking', text: 'Pienso ' });
+    t = applyTranscriptEvent(t, { type: 'thinking', text: 'un poco' });
+    t = applyTranscriptEvent(t, { type: 'text_delta', delta: 'Hola' });
+    t = applyTranscriptEvent(t, { type: 'thinking', text: 'x'.repeat(TRANSCRIPT_REASONING_CHARS) });
+    t = applyTranscriptEvent(t, { type: 'thinking', text: 'más' });
+    expect(t.parts.map((p) => p.kind)).toEqual(['reasoning', 'text', 'reasoning']);
+    expect(t.parts[0]).toEqual({ kind: 'reasoning', text: 'Pienso un poco' });
+    const last = t.parts[2];
+    expect(last.kind === 'reasoning' && last.text.endsWith('(recortado)')).toBe(true);
+    expect(last.kind === 'reasoning' && last.text.includes('más')).toBe(false);
   });
 
   it('un turno sin terminar se guarda como interrumpido, sin tools «ejecutándose»', () => {

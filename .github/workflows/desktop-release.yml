@@ -6,14 +6,19 @@ name: Desktop release
 # - Tag `desktop-vX.Y.Z` (versión = tauri.conf.json): build + Release en borrador.
 # - Manual (workflow_dispatch): solo build, los instaladores quedan como
 #   artefactos del run.
+# - Al **publicar** una release `desktop-v*` (D7): se escribe `latest.json` en
+#   la release fija `desktop-updater`, que es la que consulta el auto-update.
+#   Un borrador nunca llega a los usuarios, y el «latest» de GitHub es el de
+#   la CLI, así que el manifiesto no puede colgar de él.
 #
 # Firma, toda opcional (sin secrets, instaladores sin firmar):
 # - Windows Authenticode: WINDOWS_CERTIFICATE (PFX en base64) +
 #   WINDOWS_CERTIFICATE_PASSWORD. Tauri firma el ejecutable, el sidecar y los
 #   instaladores.
 # - Clave del updater (D7): TAURI_SIGNING_PRIVATE_KEY +
-#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD. Tauri solo la usa cuando se activen los
-#   artefactos del updater.
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD (minisign; la pública está en
+#   tauri.conf.json). Con ella se generan los paquetes firmados del updater
+#   (`*.sig`); sin ella, instaladores sin auto-update.
 # - Linux: GPG_PRIVATE_KEY (armored) + GPG_PASSPHRASE → firmas `.asc` separadas
 #   del .deb y del .AppImage.
 
@@ -22,6 +27,8 @@ on:
     tags:
       - 'desktop-v*.*.*'
   workflow_dispatch:
+  release:
+    types: [published]
 
 permissions:
   contents: write
@@ -33,6 +40,7 @@ concurrency:
 jobs:
   build:
     name: Build (${{ matrix.name }})
+    if: github.event_name != 'release'
     strategy:
       fail-fast: false
       matrix:
@@ -165,6 +173,12 @@ jobs:
           set -euo pipefail
           ARGS=(--ci --bundles "${{ matrix.bundles }}")
           if [ -n "${TAURI_EXTRA_CONFIG:-}" ]; then ARGS+=(--config "$TAURI_EXTRA_CONFIG"); fi
+          # D7: con la clave del updater, además los paquetes firmados (*.sig).
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            ARGS+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
+          else
+            echo "Sin TAURI_SIGNING_PRIVATE_KEY: instaladores sin auto-update."
+          fi
           npm run tauri build -- "${ARGS[@]}"
 
       - name: Collect installers
@@ -176,6 +190,8 @@ jobs:
           shopt -s nullglob
           for f in "$BUNDLE"/msi/*.msi "$BUNDLE"/nsis/*.exe "$BUNDLE"/deb/*.deb "$BUNDLE"/appimage/*.AppImage; do
             cp "$f" "$OUT/"
+            # Firma minisign del updater (D7), si se generó.
+            if [ -f "$f.sig" ]; then cp "$f.sig" "$OUT/"; fi
           done
           FILES=("$OUT"/*)
           if [ ${#FILES[@]} -eq 0 ]; then
@@ -213,7 +229,7 @@ jobs:
   release:
     name: Draft GitHub Release
     needs: build
-    if: startsWith(github.ref, 'refs/tags/desktop-v')
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/desktop-v')
     runs-on: ubuntu-latest
     steps:
       - name: Download installers
@@ -237,3 +253,50 @@ jobs:
             --draft "${PRERELEASE[@]}" \
             --title "Stratum Desktop ${VERSION}" \
             --notes "Instaladores de Stratum Desktop ${VERSION} para Windows (.msi, .exe) y Linux (.deb, .AppImage). Verifica las descargas con SHA256SUMS.txt."
+
+  # D7: publicar la release (sacarla de borrador) es lo que dispara el
+  # auto-update. Solo se descargan las firmas; las URLs apuntan a la release.
+  updater-manifest:
+    name: Updater manifest (latest.json)
+    if: github.event_name == 'release' && startsWith(github.event.release.tag_name, 'desktop-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build latest.json
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.event.release.tag_name }}
+        run: |
+          set -euo pipefail
+          VERSION="${TAG#desktop-v}"
+          mkdir -p sigs
+          gh release download "$TAG" --dir sigs --pattern '*.sig'
+          gh release view "$TAG" --json body --jq .body > notes.md
+          node stratum-desktop/scripts/updater-manifest.mjs sigs \
+            --version "$VERSION" \
+            --base-url "https://github.com/${GH_REPO}/releases/download/${TAG}" \
+            --notes-file notes.md \
+            --pub-date "${{ github.event.release.published_at }}" > latest.json
+          cat latest.json
+
+      - name: Upload to desktop-updater
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          if ! gh release view desktop-updater > /dev/null 2>&1; then
+            gh release create desktop-updater --prerelease \
+              --target "${{ github.event.repository.default_branch }}" \
+              --title "Stratum Desktop · canal de actualizaciones" \
+              --notes "Manifiesto del auto-update de Stratum Desktop (latest.json). No es una versión: los instaladores están en las releases desktop-v*."
+          fi
+          gh release upload desktop-updater latest.json --clobber

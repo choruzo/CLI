@@ -42,12 +42,52 @@ pub fn on_drag_drop(window: &Window, event: &DragDropEvent) {
     }
 }
 
+/// Sustitutos de los diálogos nativos para la suite E2E (feature `e2e`).
+#[cfg(feature = "e2e")]
+mod e2e_dialogs {
+    use std::path::PathBuf;
+
+    /// `STRATUM_E2E_PICK`: rutas separadas por `|` que «elige» el usuario.
+    pub fn pick() -> Option<Vec<PathBuf>> {
+        let raw = std::env::var("STRATUM_E2E_PICK").ok()?;
+        Some(
+            raw.split('|')
+                .filter(|p| !p.is_empty())
+                .map(PathBuf::from)
+                .collect(),
+        )
+    }
+
+    /// `STRATUM_E2E_SAVE_DIR`: carpeta donde «guarda» el diálogo, con el nombre propuesto.
+    pub fn save(file_name: &str) -> Option<PathBuf> {
+        std::env::var("STRATUM_E2E_SAVE_DIR")
+            .ok()
+            .map(|dir| PathBuf::from(dir).join(file_name))
+    }
+}
+
+#[cfg(not(feature = "e2e"))]
+mod e2e_dialogs {
+    use std::path::PathBuf;
+
+    pub fn pick() -> Option<Vec<PathBuf>> {
+        None
+    }
+
+    pub fn save(_file_name: &str) -> Option<PathBuf> {
+        None
+    }
+}
+
 /// Botón de adjuntar: diálogo de selección múltiple.
 #[tauri::command]
 pub async fn attachments_pick(
     app: AppHandle,
     window: WebviewWindow,
 ) -> Result<Vec<Candidate>, String> {
+    if let Some(paths) = e2e_dialogs::pick() {
+        return Ok(app.state::<WorkspaceState>().grant(paths));
+    }
     let handle = app.clone();
     let picked = tauri::async_runtime::spawn_blocking(move || {
         handle
@@ -116,6 +156,10 @@ pub async fn output_save(
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
+    if let Some(target) = e2e_dialogs::save(&file_name) {
+        std::fs::copy(&source, &target).map_err(|e| format!("no se pudo guardar: {e}"))?;
+        return Ok(true);
+    }
     // Sin carpeta inicial, el diálogo arranca en el cwd del proceso (el home
     // del usuario en release, `src-tauri/` en dev): Descargas es lo esperable.
     let start_dir = app.path().download_dir().ok();
@@ -153,6 +197,12 @@ pub async fn workspace_export(
         .info()?
         .conversation_dir(&conversation_id)?;
     let file_name = format!("stratum-ficheros-{}.zip", &conversation_id[..8]);
+    if let Some(target) = e2e_dialogs::save(&file_name) {
+        return tauri::async_runtime::spawn_blocking(move || workspace::export_zip(&dir, &target))
+            .await
+            .map_err(|e| e.to_string())?
+            .map(|_| true);
+    }
     let start_dir = app.path().download_dir().ok();
     let chosen = tauri::async_runtime::spawn_blocking(move || {
         let mut dialog = app

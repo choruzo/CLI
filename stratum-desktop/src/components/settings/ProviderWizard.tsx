@@ -1,4 +1,5 @@
 import { useEffect, useId, useRef, useState } from 'react';
+import { useFocusTrap } from '../../hooks/useFocusTrap';
 import {
   PROVIDER_TYPE_PRESETS,
   buildProviderEntry,
@@ -74,6 +75,7 @@ export function ProviderWizard({
   useEffect(() => {
     dialog.current?.querySelector<HTMLElement>('input, button')?.focus();
   }, [step]);
+  useFocusTrap(dialog);
 
   // La key guardada solo vale para su servidor (el sidecar tampoco la usaría).
   const keyForOtherServer =

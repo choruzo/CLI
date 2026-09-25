@@ -233,10 +233,143 @@ Firma, toda opcional — sin los secrets, instaladores sin firmar:
 | Secret | Qué hace |
 |---|---|
 | `WINDOWS_CERTIFICATE` (PFX en base64) + `WINDOWS_CERTIFICATE_PASSWORD` | Authenticode: se importa el certificado y Tauri firma ejecutable, sidecar e instaladores (`certificateThumbprint`, sha256, sello de tiempo de DigiCert). Quita el aviso de SmartScreen a medida que el certificado gana reputación |
-| `TAURI_SIGNING_PRIVATE_KEY` + `..._PASSWORD` | Clave minisign del **updater** (D7). Se pasa ya al build, pero solo se usa cuando se activen los artefactos del updater. Se genera con `npm run tauri signer generate` |
+| `TAURI_SIGNING_PRIVATE_KEY` + `..._PASSWORD` | Clave minisign del **updater** (D7). Con ella el build añade `createUpdaterArtifacts` y cada instalador lleva su `.sig`; sin ella, instaladores sin auto-update. La pública está en `tauri.conf.json` (`plugins.updater.pubkey`) |
 | `GPG_PRIVATE_KEY` (armored) + `GPG_PASSPHRASE` | Firmas `.asc` separadas del `.deb` y del `.AppImage` |
 
 `build-sea.mjs` quita ahora la firma Authenticode de la copia de `node.exe` antes
 de inyectar el blob (`signtool remove /s`, si hay Windows SDK): tras la
 inyección esa firma quedaba rota, y un binario con firma rota es peor que uno sin
 firmar —y estorba a la firma propia—.
+
+## Pulido (D7)
+
+### Ventana frameless (15.14)
+
+`decorations: false`: la barra de título es `TitleBar.tsx` (32 px): logo, título
+de la conversación activa, un hueco para el conmutador Chat | Code de D8 y los
+controles ─ □ × como botones de verdad (Tab, nombre accesible, «Restaurar»
+cuando está maximizada). Todo lo que no es un control lleva
+`data-tauri-drag-region` (arrastrar; doble clic maximiza). Permisos justos en
+`capabilities/default.json`: `core:window:allow-{minimize,toggle-maximize,
+internal-toggle-maximize,close,start-dragging}`. Ajustes y el onboarding
+empiezan debajo de la barra, así la ventana se puede mover y cerrar con ellos
+abiertos; la pantalla de fallo de arranque también la lleva.
+
+La ventana arranca oculta (`visible: false`) y `window_state.rs` la coloca donde
+estaba antes de mostrarla. Se guarda el último rectángulo **normal** (sin
+maximizar ni minimizar) más si estaba maximizada, en
+`<app_config_dir>/window-state.json`, al cerrar y al salir. Al restaurar,
+`clamp_to_monitors` (puro, con tests) lo ajusta a las áreas de trabajo de los
+monitores conectados: si ya no comparte nada con ninguno (se cerró en un
+monitor externo que no está), se centra en el principal; nunca es mayor que el
+área; y la barra de título queda dentro, con al menos 120 px a la vista.
+
+### Animaciones y accesibilidad
+
+- **Espera del agente**: `ThinkingIndicator` — tres estratos que se depositan y
+  una frase que rota cada 4 s. Las frases (`thinking-phrases.ts`) son de
+  geología, no «Pensando…»: *Sedimentando*, *Contando varvas*, *Midiendo el
+  buzamiento* mientras espera; *Metamorfoseando*, *Subduciendo dudas* mientras
+  razona; *Sacando testigos*, *Perforando* con una tool en marcha; y pasados 30 s,
+  *Esto va por eras geológicas*. Deterministas por turno (hash del id), sin
+  `Math.random()`. A partir de 3 s enseña el tiempo y «Esc para detener».
+- **Razonamiento del modelo**: `ReasoningBlock`. En vivo, una ventana de cuatro
+  líneas con la cola del razonamiento («Razonando · 12 s»); al empezar la
+  respuesta se pliega a «Razonó 12 s · N palabras», desplegable entero. Se guarda
+  recortado en el transcript (8 000 caracteres por bloque), así que sobrevive a
+  reabrir la conversación. Ver *Razonamiento* más abajo.
+- **Desplegables** (`Collapse`): altura animada con `grid-template-rows`
+  0fr → 1fr, sin medir el DOM; plegados quedan `inert`. Los usan tool calls,
+  razonamiento y las novedades de una actualización. El sidebar abre y cierra
+  animando su anchura y desmonta el panel al terminar.
+- Mensajes que entran con un leve ascenso, cursor de streaming que respira, icono
+  de la tool en marcha que gira y «pop» al terminar.
+- `prefers-reduced-motion`: nada se desliza, gira ni parpadea.
+- **Foco visible** en todo lo interactivo; **salto** «Ir al mensaje» con el
+  primer Tab; foco atrapado (`useFocusTrap`) en Ajustes, el wizard y el
+  onboarding, y devuelto al cerrar; pestañas de Ajustes y raíl del sidebar con
+  flechas/Inicio/Fin; la confirmación destructiva enfoca «Denegar»; la lista de
+  mensajes es una región enfocable; un anunciador (`role="status"`) dice una vez
+  por turno «Stratum está trabajando» / «Respuesta lista» en vez de leer el
+  streaming a trozos.
+- **Contraste**: `textFaint` pasa a `#7C8493` (4,5:1 sobre todos los fondos);
+  `theme.test.ts` comprueba WCAG AA para cada color de texto sobre cada fondo.
+
+### Razonamiento
+
+El core emite `thinking` desde `reasoning_content` (llama.cpp, vLLM, DeepSeek) o
+`reasoning` (vLLM reciente, OpenRouter), y separa un `<think>…</think>` **al
+principio** del contenido (Ollama, `--reasoning-format none`). El razonamiento
+nunca entra en el historial del agente. En la CLI se pinta plegado en una línea
+(`⊙ razonando…` en vivo, `⊙ razonó · N palabras` al terminar) y entero con
+`/debug`.
+
+### Auto-update
+
+`tauri-plugin-updater`, manejado solo por Rust (`updates.rs`): el webview pide
+`update_check` / `update_install` y no tiene permisos del plugin. Al conectar
+(si `desktop.updates.autoCheck`, por defecto sí) se busca en silencio; el banner
+ofrece «Instalar y reiniciar» o «Más tarde» (que aparca esa versión). Ajustes →
+Sistema tiene «Buscar actualizaciones» y el interruptor. **Nunca se instala sin
+que el usuario lo pida.** Antes de instalar se guarda la ventana y se apaga el
+sidecar (en Windows el instalador NSIS sale con `process::exit`, en modo
+`passive`, y relanza la app).
+
+El manifiesto no puede colgar del «latest» de GitHub, que es la release de la
+CLI: vive en una release fija, **`desktop-updater`**
+(`…/releases/download/desktop-updater/latest.json`). Flujo de una versión:
+
+1. Subir la versión en `tauri.conf.json`, `package.json` y `Cargo.toml`.
+2. Tag `desktop-vX.Y.Z` → el workflow construye con la clave y deja la release en
+   borrador con instaladores y `.sig`.
+3. **Publicar** la release → el job `updater-manifest` genera `latest.json`
+   (`scripts/updater-manifest.mjs`, con tests) a partir de las `.sig` y lo sube a
+   `desktop-updater`. Las apps instaladas lo verán en su siguiente arranque.
+
+La clave privada no está en el repo: se generó con `tauri signer generate` en
+`~/.tauri/stratum-updater.key` (contraseña al lado, `.password`) y va a los
+secrets `TAURI_SIGNING_PRIVATE_KEY` (el **contenido** del fichero: la variable de ruta no la acepta el bundler) y `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`.
+**Perderla obliga a reinstalar a mano**: las apps instaladas solo aceptan
+paquetes firmados con ella. `STRATUM_UPDATE_ENDPOINT` sustituye el endpoint
+(pruebas contra un servidor local; la firma se sigue exigiendo).
+
+### Tests E2E
+
+`e2e/` maneja la app de verdad (shell + sidecar SEA) por WebDriver
+(tauri-driver), con un cliente W3C propio (`webdriver.mjs`, sin webdriverio) y
+`node:test`. Cada suite arranca la app con un HOME aislado (config, sesiones,
+workspaces y datos del webview) contra `mock-llm.mjs`, un servidor
+OpenAI-compatible que responde en streaming con razonamiento y tool calls según
+lo que escriba el test.
+
+| Suite | Qué cubre |
+|---|---|
+| `window` | Posición guardada fuera de todo monitor → la ventana aparece visible; maximizar/restaurar con los controles propios; «Cerrar» guarda la posición |
+| `chat` | TitleBar frameless, respuesta en streaming, razonamiento plegado, anuncio accesible, indicador de espera y «Detener» |
+| `files` | Adjuntar → el agente lo lee de `inputs/`; genera un fichero en `outputs/` → «Guardar como…» |
+| `retention` | Conversación con ficheros → relanzar con retención de segundos → `tar.gz` → abrirla lo restaura |
+| `conversations` | Título automático, «Nueva», cambiar, renombrar, eliminar |
+| `settings` | Cambiar una preferencia y guardar escribe el `.stratumrc.json`; pestañas con flechas; Esc |
+| `onboarding` | Sin config: bienvenida → wizard contra el mock (sondea `/models`) → primera respuesta |
+
+Los diálogos nativos de abrir/guardar no se pueden manejar por WebDriver: la
+feature de Cargo **`e2e`** (solo en `npm run e2e:build`, nunca en release) los
+sustituye por `STRATUM_E2E_PICK` / `STRATUM_E2E_SAVE_DIR` cuando la suite los
+define.
+
+```bash
+npm run sidecar:build   # el SEA con el core actual
+npm run e2e:build       # app de depuración con la feature e2e
+npm run e2e             # Linux: xvfb-run -a npm run e2e
+```
+
+- **Linux**: `webkit2gtk-driver` (`WebKitWebDriver`) y `xvfb`; `cargo install
+  tauri-driver --locked`. Es lo que corre la CI (`.github/workflows/desktop-e2e.yml`,
+  `ubuntu-22.04`), que sube capturas y logs si algo falla
+  (`STRATUM_E2E_ARTIFACTS`).
+- **Windows**: `msedgedriver` de la **misma versión** que WebView2 (la de
+  `HKLM\SOFTWARE\WOW6432Node\Microsoft\EdgeUpdate\Clients\{F3017226-…}` → `pv`,
+  descarga en `https://msedgedriver.microsoft.com/<versión>/edgedriver_win64.zip`)
+  y `STRATUM_E2E_NATIVE_DRIVER=<ruta a msedgedriver.exe>`. Se ejecuta en local:
+  en CI el driver tendría que seguir cada actualización de WebView2.
+

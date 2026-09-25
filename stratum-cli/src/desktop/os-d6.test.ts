@@ -91,7 +91,10 @@ describe('schema desktop.notifications / desktop.globalHotkey (D6)', () => {
     expect(osPrefsOf(c)).toEqual({
       notifications: { enabled: true, minSeconds: 10 },
       globalHotkey: DEFAULT_GLOBAL_HOTKEY,
+      updates: { autoCheck: true },
     });
+    const off = StratumConfigSchema.parse({ desktop: { updates: { autoCheck: false } } });
+    expect(osPrefsOf(off).updates).toEqual({ autoCheck: false });
   });
 
   it('cadena vacía desactiva el atajo; uno inválido es un problema con su ruta', () => {
@@ -161,6 +164,7 @@ describe('DesktopSettings: applied.os y providerReady (D6)', () => {
     expect(saved.applied.os).toEqual({
       notifications: { enabled: false, minSeconds: 30 },
       globalHotkey: 'alt+shift+s',
+      updates: { autoCheck: true },
     });
   });
 });

@@ -16,6 +16,9 @@ import {
   type SidebarState,
 } from './components/layout/Sidebar';
 import { StatusBar } from './components/layout/StatusBar';
+import { TitleBar } from './components/layout/TitleBar';
+import { UpdateBanner } from './components/layout/UpdateBanner';
+import { useUpdates } from './hooks/useUpdates';
 import { isBusy, needsAttention } from './hooks/conversations-store';
 import { useConversations } from './hooks/useConversations';
 import { useMemory } from './hooks/useMemory';
@@ -68,6 +71,8 @@ export function App() {
     [],
   );
   const os = useDesktopOs(connected, active.conversationId, titleOf);
+  // D7: la comprobación automática espera a la config (puede estar desactivada).
+  const updates = useUpdates(connected && os.loaded, os.prefs.updates.autoCheck);
 
   // Onboarding (D6): sin provider utilizable. «Ahora no» lo aparca hasta que el
   // usuario lo pida desde el aviso; con provider termina solo.
@@ -217,123 +222,149 @@ export function App() {
   })();
 
   if (!everConnected && sidecar.status.state === 'failed') {
-    return <StartupFailure message={sidecar.status.message} onRetry={sidecar.restart} />;
+    return (
+      <div className="window">
+        <TitleBar />
+        <StartupFailure message={sidecar.status.message} onRetry={sidecar.restart} />
+      </div>
+    );
   }
 
   return (
-    <main className="app">
-      <ReconnectBanner status={sidecar.status} onRestart={sidecar.restart} />
-      {sidecar.errors.map((e) => (
-        <section key={`${e.code}:${e.message}`} className="alert" role="alert" data-fatal={e.fatal}>
-          <strong>
-            {e.code === 'schema_incompatible' ? 'Configuración incompatible' : 'Error del agente'}
-          </strong>
-          <p>{e.message}</p>
-          <div className="alert__actions">
-            {e.code !== 'protocol' && (
-              <button type="button" className="button" onClick={openSettings}>
-                Abrir ajustes
+    <div className="window">
+      <a
+        className="skip-link"
+        href="#chat-input"
+        onClick={(e) => {
+          e.preventDefault();
+          viewRef.current?.focusInput();
+        }}
+      >
+        Ir al mensaje
+      </a>
+      <TitleBar
+        title={
+          conversations.list.find((c) => c.conversationId === state.activeId)?.title ??
+          state.byId[state.activeId]?.title ??
+          null
+        }
+      />
+      <main className="app">
+        <ReconnectBanner status={sidecar.status} onRestart={sidecar.restart} />
+        {sidecar.errors.map((e) => (
+          <section key={`${e.code}:${e.message}`} className="alert" role="alert" data-fatal={e.fatal}>
+            <strong>
+              {e.code === 'schema_incompatible' ? 'Configuración incompatible' : 'Error del agente'}
+            </strong>
+            <p>{e.message}</p>
+            <div className="alert__actions">
+              {e.code !== 'protocol' && (
+                <button type="button" className="button" onClick={openSettings}>
+                  Abrir ajustes
+                </button>
+              )}
+              <button
+                type="button"
+                className="button"
+                onClick={() => openLogsDir().catch((err) => setAppNotice(String(err)))}
+              >
+                Ver logs
               </button>
-            )}
+            </div>
+          </section>
+        ))}
+        {needsProvider && !onboarding && (
+          <p className="notice app__notice" data-tone="warning" role="status">
+            No hay ningún modelo configurado: el asistente no puede responder todavía.
             <button
               type="button"
               className="button"
-              onClick={() => openLogsDir().catch((err) => setAppNotice(String(err)))}
+              onClick={() => {
+                setOnboardingSkipped(false);
+                setOnboarding(true);
+              }}
             >
-              Ver logs
+              Conectar un modelo
             </button>
-          </div>
-        </section>
-      ))}
-      {needsProvider && !onboarding && (
-        <p className="notice app__notice" data-tone="warning" role="status">
-          No hay ningún modelo configurado: el asistente no puede responder todavía.
-          <button
-            type="button"
-            className="button"
-            onClick={() => {
-              setOnboardingSkipped(false);
-              setOnboarding(true);
-            }}
+          </p>
+        )}
+        <UpdateBanner updates={updates} />
+        {appNotice && (
+          <p className="notice notice--dismissable app__notice" data-tone="info" role="status">
+            {appNotice}
+            <button type="button" className="icon-button" aria-label="Cerrar aviso" onClick={() => setAppNotice(null)}>
+              ×
+            </button>
+          </p>
+        )}
+
+        <div className="app__body">
+          <Sidebar
+            state={sidebar}
+            onToggle={(p) => setSidebar((s) => togglePanel(s, p))}
+            onSettings={openSettings}
+            badges={{ conversations: backgroundAttention }}
           >
-            Conectar un modelo
-          </button>
-        </p>
-      )}
-      {appNotice && (
-        <p className="notice notice--dismissable app__notice" data-tone="info" role="status">
-          {appNotice}
-          <button type="button" className="icon-button" aria-label="Cerrar aviso" onClick={() => setAppNotice(null)}>
-            ×
-          </button>
-        </p>
-      )}
+            {panel}
+          </Sidebar>
+          <ConversationView
+            key={active.conversationId}
+            ref={viewRef}
+            stream={active}
+            connected={connected}
+            onCommand={onCommand}
+            onVisibleTurn={setVisibleTurn}
+            models={conversations.models}
+            onPickModel={conversations.setModel}
+            onCloseModels={conversations.closeModels}
+            confirmClear={confirmClear}
+            onConfirmClear={() => {
+              setConfirmClear(false);
+              if (!isBusy(active)) conversations.clear();
+              else setAppNotice('Espera a que termine la respuesta para vaciar la conversación.');
+            }}
+            onCancelClear={() => setConfirmClear(false)}
+          />
+        </div>
 
-      <div className="app__body">
-        <Sidebar
-          state={sidebar}
-          onToggle={(p) => setSidebar((s) => togglePanel(s, p))}
-          onSettings={openSettings}
-          badges={{ conversations: backgroundAttention }}
-        >
-          {panel}
-        </Sidebar>
-        <ConversationView
-          key={active.conversationId}
-          ref={viewRef}
-          stream={active}
-          connected={connected}
-          onCommand={onCommand}
-          onVisibleTurn={setVisibleTurn}
-          models={conversations.models}
-          onPickModel={conversations.setModel}
-          onCloseModels={conversations.closeModels}
-          confirmClear={confirmClear}
-          onConfirmClear={() => {
-            setConfirmClear(false);
-            if (!isBusy(active)) conversations.clear();
-            else setAppNotice('Espera a que termine la respuesta para vaciar la conversación.');
-          }}
-          onCancelClear={() => setConfirmClear(false)}
+        <StatusBar
+          sidecar={sidecar}
+          stats={active.stats}
+          workspace={active.workspace}
+          generating={generating}
+          queued={queued}
         />
-      </div>
 
-      <StatusBar
-        sidecar={sidecar}
-        stats={active.stats}
-        workspace={active.workspace}
-        generating={generating}
-        queued={queued}
-      />
+        {onboarding && !settingsOpen && (
+          <Onboarding
+            config={config}
+            providerReady={os.providerReady}
+            configExists={os.configExists}
+            onDone={finishOnboarding}
+            onSkip={() => {
+              setOnboarding(false);
+              setOnboardingSkipped(true);
+            }}
+          />
+        )}
 
-      {onboarding && !settingsOpen && (
-        <Onboarding
-          config={config}
-          providerReady={os.providerReady}
-          configExists={os.configExists}
-          onDone={finishOnboarding}
-          onSkip={() => {
-            setOnboarding(false);
-            setOnboardingSkipped(true);
-          }}
-        />
-      )}
-
-      {settingsOpen && (
-        <SettingsPanel
-          config={config}
-          hotkeyError={os.hotkeyError}
-          connected={sidecar.status.state === 'connected'}
-          onClose={() => {
-            setSettingsOpen(false);
-            viewRef.current?.focusInput();
-          }}
-          onOpenMemory={() => {
-            setSettingsOpen(false);
-            openPanel('memory');
-          }}
-        />
-      )}
-    </main>
+        {settingsOpen && (
+          <SettingsPanel
+            config={config}
+            hotkeyError={os.hotkeyError}
+            updates={updates}
+            connected={sidecar.status.state === 'connected'}
+            onClose={() => {
+              setSettingsOpen(false);
+              viewRef.current?.focusInput();
+            }}
+            onOpenMemory={() => {
+              setSettingsOpen(false);
+              openPanel('memory');
+            }}
+          />
+        )}
+      </main>
+    </div>
   );
 }

@@ -1,5 +1,6 @@
 import { useId, useState } from 'react';
 import type { ToolCallState, ToolCallView } from '../../hooks/conversation-reducer';
+import { Collapse } from './Collapse';
 
 /** Tope de lo que se pinta de la entrada o la salida de una tool al expandir. */
 export const TOOL_PREVIEW_CHARS = 4_000;
@@ -34,17 +35,24 @@ function formatDuration(ms: number): string {
  */
 export function ToolCallBlock({ call }: { call: ToolCallView }) {
   const [open, setOpen] = useState(false);
+  // El cuerpo se monta al abrirlo por primera vez y se queda: así la
+  // animación de cierre tiene algo que plegar, y una lista larga de tools
+  // plegadas no pinta sus salidas.
+  const [mounted, setMounted] = useState(false);
   const bodyId = useId();
   const body = call.state === 'error' ? call.error : call.output;
 
   return (
-    <div className="tool-call" data-state={call.state}>
+    <div className="tool-call" data-state={call.state} data-open={open || undefined}>
       <button
         type="button"
         className="tool-call__header"
         aria-expanded={open}
         aria-controls={bodyId}
-        onClick={() => setOpen((v) => !v)}
+        onClick={() => {
+          setMounted(true);
+          setOpen((v) => !v);
+        }}
       >
         <span className="tool-call__icon" aria-hidden="true">
           {STATE_ICON[call.state]}
@@ -54,23 +62,28 @@ export function ToolCallBlock({ call }: { call: ToolCallView }) {
         {call.durationMs !== undefined && (
           <span className="tool-call__duration">{formatDuration(call.durationMs)}</span>
         )}
+        <span className="tool-call__chevron" aria-hidden="true">
+          ›
+        </span>
       </button>
-      {open && (
-        <div className="tool-call__body" id={bodyId}>
-          {call.input && (
-            <>
-              <div className="tool-call__label">Argumentos</div>
-              <pre className="tool-call__pre">{clip(call.input)}</pre>
-            </>
-          )}
-          {body && (
-            <>
-              <div className="tool-call__label">{call.state === 'error' ? 'Error' : 'Resultado'}</div>
-              <pre className="tool-call__pre">{clip(body)}</pre>
-            </>
-          )}
-        </div>
-      )}
+      <Collapse open={open} id={bodyId}>
+        {mounted && (
+          <div className="tool-call__body">
+            {call.input && (
+              <>
+                <div className="tool-call__label">Argumentos</div>
+                <pre className="tool-call__pre">{clip(call.input)}</pre>
+              </>
+            )}
+            {body && (
+              <>
+                <div className="tool-call__label">{call.state === 'error' ? 'Error' : 'Resultado'}</div>
+                <pre className="tool-call__pre">{clip(body)}</pre>
+              </>
+            )}
+          </div>
+        )}
+      </Collapse>
     </div>
   );
 }

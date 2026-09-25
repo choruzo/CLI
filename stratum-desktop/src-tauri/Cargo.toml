@@ -27,6 +27,8 @@ tauri-plugin-dialog = "2"
 zip = { version = "4.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
+# D7: auto-update contra GitHub Releases (lo usa solo Rust, `updates.rs`).
+tauri-plugin-updater = "2"
 
 [target.'cfg(windows)'.dependencies]
 windows-sys = { version = "0.60", features = [
@@ -38,6 +40,13 @@ windows-sys = { version = "0.60", features = [
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+[features]
+# D7: solo para la suite E2E (tauri-driver). Los diálogos nativos de abrir y
+# guardar no se pueden manejar por WebDriver: con esta feature, y solo si la
+# suite define STRATUM_E2E_PICK / STRATUM_E2E_SAVE_DIR, se sustituyen por esas
+# rutas. Nunca entra en un build de release.
+e2e = []
 
 [dev-dependencies]
 tempfile = "3"

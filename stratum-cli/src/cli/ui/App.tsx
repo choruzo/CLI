@@ -92,8 +92,13 @@ export type AgentConvItem = {
   initSteps?: InitStep[];
   /** Resumen de `/init` una vez terminado: colapsa el bloque de progreso. */
   initSummary?: string;
-  /** Bloques `⊙ thinking` del turno; solo se pintan con `/debug` activo (§11). */
+  /**
+   * Bloques de razonamiento del turno (§11): fragmentos `thinking` consecutivos
+   * forman un bloque. Sin `/debug` se pintan plegados en una línea.
+   */
   thinkingBlocks?: string[];
+  /** El último bloque sigue abierto: el siguiente `thinking` se le añade. */
+  thinkingOpen?: boolean;
   /** Subagentes delegados en este turno (Hito 8A). Opcional: items previos no lo traen. */
   subagents?: SubagentBlockState[];
   /** Subagente que emitió el evento más reciente (Hito 8C, marcador ▶ del árbol). */
@@ -115,7 +120,7 @@ export interface PendingConfirm {
   forced?: boolean;
 }
 
-interface AppState {
+export interface AppState {
   phase: 'banner' | 'conversation';
   completedItems: ConvItem[];
   currentItem: ConvItem | null;
@@ -267,7 +272,8 @@ function updateToolCall(
   return toolCalls.map((tc) => (tc.id === id ? updater(tc) : tc));
 }
 
-function reducer(state: AppState, action: AppAction): AppState {
+/** Exportado para tests. */
+export function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'AGENT_FRAME': {
       const next = action.events.reduce<AppState>(
@@ -442,6 +448,7 @@ function reducer(state: AppState, action: AppAction): AppState {
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
             text: item.text + ev.delta,
+            thinkingOpen: false,
           })),
         };
       }
@@ -455,7 +462,9 @@ function reducer(state: AppState, action: AppAction): AppState {
         if (ev.name === TODO_TOOL) return state;
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, (item) => {
+          currentItem: updateCurrentAgent(state.currentItem, (current) => {
+            // Una tool call cierra el bloque de razonamiento en curso.
+            const item = current.thinkingOpen ? { ...current, thinkingOpen: false } : current;
             const exists = item.toolCalls.find((tc) => tc.id === ev.id);
             if (exists) {
               return {
@@ -779,13 +788,19 @@ function reducer(state: AppState, action: AppAction): AppState {
 
       // `thinking` no se renderiza por defecto (§11): solo con /debug activo.
       if (ev.type === 'thinking') {
-        if (!state.debug) return state;
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
-            ...item,
-            thinkingBlocks: [...(item.thinkingBlocks ?? []), ev.text],
-          })),
+          currentItem: updateCurrentAgent(state.currentItem, (item) => {
+            const blocks = item.thinkingBlocks ?? [];
+            return {
+              ...item,
+              thinkingBlocks:
+                item.thinkingOpen && blocks.length > 0
+                  ? [...blocks.slice(0, -1), blocks[blocks.length - 1] + ev.text]
+                  : [...blocks, ev.text],
+              thinkingOpen: true,
+            };
+          }),
         };
       }
 

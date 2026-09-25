@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import type { Updates } from '../../hooks/useUpdates';
 import type { Config } from '../../hooks/useConfig';
 import { SECRET_PLACEHOLDER } from '../../ipc/types';
 import {
@@ -452,7 +453,16 @@ export function WorkspacesSection({ ctx, config }: { ctx: FieldContext; config: 
  * Sistema (D6): notificaciones nativas y atajo global. Los guarda el sidecar
  * como el resto; el atajo lo registra Rust en cuanto la config se aplica.
  */
-export function SystemSection({ ctx, hotkeyError }: { ctx: FieldContext; hotkeyError: string | null }) {
+export function SystemSection({
+  ctx,
+  hotkeyError,
+  updates,
+}: {
+  ctx: FieldContext;
+  hotkeyError: string | null;
+  /** D7: sin él (tests antiguos), no se pinta el bloque de actualizaciones. */
+  updates?: Updates;
+}) {
   return (
     <section className="settings-section" aria-labelledby="settings-system">
       <header className="settings-section__header">
@@ -473,6 +483,55 @@ export function SystemSection({ ctx, hotkeyError }: { ctx: FieldContext; hotkeyE
         unit="segundos"
       />
       <HotkeySetting ctx={ctx} registerError={hotkeyError} />
+      <CheckboxSetting
+        ctx={ctx}
+        path={['desktop', 'updates', 'autoCheck']}
+        label="Buscar actualizaciones al abrir"
+        hint="Pregunta a GitHub Releases si hay una versión nueva. Nunca se instala sin que lo pidas."
+      />
+      {updates && <UpdatesStatus updates={updates} />}
     </section>
+  );
+}
+
+/** «Buscar ahora» y qué salió de la última comprobación (D7). */
+function UpdatesStatus({ updates }: { updates: Updates }) {
+  const { phase } = updates;
+  const status =
+    phase.kind === 'checking'
+      ? 'Buscando…'
+      : phase.kind === 'none'
+        ? 'Tienes la última versión.'
+        : phase.kind === 'available'
+          ? `Hay una versión nueva: ${phase.info.version}.`
+          : phase.kind === 'downloading' || phase.kind === 'installing'
+            ? `Instalando la ${phase.info.version}…`
+            : phase.kind === 'error' && phase.manual
+              ? `No se pudo comprobar: ${phase.message}`
+              : null;
+  const busy =
+    phase.kind === 'checking' || phase.kind === 'downloading' || phase.kind === 'installing';
+  return (
+    <div className="settings-updates">
+      <div className="settings-updates__row">
+        <button type="button" className="button" onClick={updates.check} disabled={busy}>
+          Buscar actualizaciones
+        </button>
+        {phase.kind === 'available' && (
+          <button type="button" className="button button--primary" onClick={updates.install}>
+            Instalar y reiniciar
+          </button>
+        )}
+      </div>
+      {status && (
+        <p
+          className="notice"
+          data-tone={phase.kind === 'error' ? 'error' : undefined}
+          role="status"
+        >
+          {status}
+        </p>
+      )}
+    </div>
   );
 }
