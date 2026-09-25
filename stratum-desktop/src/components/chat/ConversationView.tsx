@@ -10,6 +10,7 @@ import { QuestionPrompt } from './QuestionPrompt';
 import { RetentionBanner } from './RetentionBanner';
 import { TodoPanel } from './TodoPanel';
 import type { CommandName } from './commands';
+import { ICON, StrokeIcon } from './icons';
 import { userMessageAnchor } from '../layout/OutlinePanel';
 import { AppLogo } from '../onboarding/AppLogo';
 
@@ -24,8 +25,9 @@ export interface ConversationViewHandle {
 
 /**
  * Conversación con el asistente. El scroll sigue al stream mientras el usuario
- * esté abajo; si sube a leer algo, deja de arrastrarle. Informa al índice del
- * sidebar de qué mensaje del usuario está a la vista.
+ * esté abajo; si sube a leer algo, deja de arrastrarle y aparece «Ir al final»
+ * (con un punto si llegó contenido nuevo). Informa al índice del sidebar de qué
+ * mensaje del usuario está a la vista.
  */
 export const ConversationView = forwardRef(function ConversationView(
   {
@@ -57,6 +59,11 @@ export const ConversationView = forwardRef(function ConversationView(
   const scrollRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<InputAreaHandle>(null);
   const stickRef = useRef(true);
+  // «Ir al final»: visible si el usuario subió; `unread` si desde entonces
+  // llegó contenido (creció la altura del scroll).
+  const [away, setAway] = useState(false);
+  const [unread, setUnread] = useState(false);
+  const lastHeight = useRef(0);
 
   useImperativeHandle(
     ref,
@@ -92,7 +99,10 @@ export const ConversationView = forwardRef(function ConversationView(
   const onScroll = () => {
     const el = scrollRef.current;
     if (!el) return;
-    stickRef.current = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < STICK_PX;
+    stickRef.current = atBottom;
+    setAway(!atBottom);
+    if (atBottom) setUnread(false);
     reportVisible();
   };
 
@@ -105,9 +115,20 @@ export const ConversationView = forwardRef(function ConversationView(
 
   useEffect(() => {
     const el = scrollRef.current;
-    if (el && stickRef.current) el.scrollTop = el.scrollHeight;
+    if (!el) return;
+    if (stickRef.current) el.scrollTop = el.scrollHeight;
+    else if (el.scrollHeight > lastHeight.current) setUnread(true);
+    lastHeight.current = el.scrollHeight;
   });
   useEffect(reportVisible, [userCount]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const scrollToEnd = () => {
+    const el = scrollRef.current;
+    if (!el) return;
+    stickRef.current = true;
+    setUnread(false);
+    el.scrollTo({ top: el.scrollHeight, behavior: 'smooth' });
+  };
 
   const generating = stream.activeTurnId !== null;
   const announcement = useTurnAnnouncement(stream);
@@ -121,29 +142,44 @@ export const ConversationView = forwardRef(function ConversationView(
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
-      <div
-        className="conversation__scroll"
-        ref={scrollRef}
-        onScroll={onScroll}
-        tabIndex={0}
-        aria-label="Mensajes"
-      >
-        {empty ? (
-          <div className="conversation__empty">
-            <AppLogo className="conversation__empty-logo" />
-            <p className="conversation__empty-title">¿En qué puedo ayudarte?</p>
-            <p className="conversation__empty-hint">
-              Adjunta ficheros con el botón + o soltándolos sobre la ventana. Escribe / para ver los
-              comandos.
-            </p>
-          </div>
-        ) : (
-          <MessageList
-            messages={stream.messages}
-            onRetry={stream.retry}
-            conversationId={stream.conversationId}
-            filesExpiredAt={stream.workspace?.filesExpiredAt}
-          />
+      <div className="conversation__viewport">
+        <div
+          className="conversation__scroll"
+          ref={scrollRef}
+          onScroll={onScroll}
+          tabIndex={0}
+          aria-label="Mensajes"
+        >
+          {empty ? (
+            <div className="conversation__empty">
+              <AppLogo className="conversation__empty-logo" />
+              <p className="conversation__empty-title">¿En qué puedo ayudarte?</p>
+              <p className="conversation__empty-hint">
+                Adjunta ficheros con el botón + o soltándolos sobre la ventana. Escribe / para ver los
+                comandos.
+              </p>
+            </div>
+          ) : (
+            <MessageList
+              messages={stream.messages}
+              onRetry={stream.retry}
+              canRetry={!generating && connected}
+              conversationId={stream.conversationId}
+              filesExpiredAt={stream.workspace?.filesExpiredAt}
+            />
+          )}
+        </div>
+        {away && !empty && (
+          <button
+            type="button"
+            className="jump-to-end"
+            data-unread={unread || undefined}
+            aria-label={unread ? 'Ir al final (hay contenido nuevo)' : 'Ir al final'}
+            title="Ir al final"
+            onClick={scrollToEnd}
+          >
+            <StrokeIcon d={ICON.arrowDown} size={16} />
+          </button>
         )}
       </div>
 

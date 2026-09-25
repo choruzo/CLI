@@ -8,11 +8,14 @@ export function MessageList({
   onRetry,
   conversationId,
   filesExpiredAt,
+  canRetry = false,
 }: {
   messages: ChatMessage[];
   onRetry: (turnId: string) => void;
   conversationId?: string;
   filesExpiredAt?: string | null;
+  /** No hay ningún turno en marcha: las respuestas se pueden reintentar. */
+  canRetry?: boolean;
 }) {
   return (
     <div className="message-list">
@@ -32,6 +35,7 @@ export function MessageList({
             conversationId={conversationId}
             filesExpiredAt={filesExpiredAt}
             onRetry={() => onRetry(m.turnId)}
+            canRetry={canRetry}
           />
         ),
       )}

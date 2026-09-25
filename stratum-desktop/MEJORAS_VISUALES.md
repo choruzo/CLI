@@ -39,24 +39,34 @@ Revisión del frontend (`src/styles.css`, `src/components/**`) con una restricci
 
 **Verificación**: `npm run build` (typecheck + Vite) y los 162 tests de Vitest pasan; se revisó el composer en una captura con el CSS compilado (normal, deshabilitado y detener). El CSS pasa de ~39 a 42,9 kB (7,9 kB gzip).
 
+### 3. Segunda tanda: sugerencias 1, 2, 4, 6 y 9
+
+- **Copiar en bloques de código** (`MarkdownRenderer.tsx`, `CodeBlock`): `pre` → `div.code-block` con cabecera (lenguaje o «código») y botón «Copiar» visible con `:hover`/`:focus-within`; copia el `textContent` sin el salto final y confirma con «✓ Copiado» 1,5 s (`hooks/useCopy.ts`). Un fallo del portapapeles no marca nada.
+- **«Ir al final»** (`ConversationView.tsx`): el scroll va dentro de `.conversation__viewport` y el botón flota sobre su borde inferior mientras el usuario no está abajo; punto ámbar si la altura creció desde que subió. Entra con un `translate` de 140 ms, una vez.
+- **Iconos por tipo de tool** (`ToolCallBlock.tsx`, `toolIcon`): fichero, lápiz, lupa, carpeta, globo, memoria, lista, pregunta y terminal; `mcp__*` → enchufe y lo desconocido → llave. Iconos compartidos en `chat/icons.tsx`, misma rejilla que el sidebar.
+- **Acciones por mensaje** (`AgentMessage.tsx`, `MessageActions`): copiar respuesta (texto visible, sin sintaxis ni cabeceras de código), copiar como markdown y reintentar (solo si no hay otro turno en marcha). Bajo la respuesta, alineadas a la izquierda, y solo por opacidad: ocupan su hueco siempre, así que nada salta al pasar el ratón.
+- **Tipografía**: **IBM Plex Sans + IBM Plex Mono** (elegida frente a Inter/JetBrains Mono, Geist, Atkinson Hyperlegible y Source tras compararlas). Ocho woff2 del subconjunto latino en `src/assets/fonts/` (≈165 kB; licencia OFL en `OFL.txt`) con `@font-face` propio en `src/fonts.css` y `font-display: swap`; sin dependencia npm y sin tocar la CSP. Solo los pesos que usa el CSS (Sans 400/400i/500/600/700, Mono 400/400i/600): un peso nuevo exige añadir su fichero. Los controles de formulario y `pre`/`code`/`kbd` heredan ahora la familia explícitamente.
+
+Tests en `chat/visual-polish.test.tsx` (9).
+
 ## Sugerencias pendientes
 
 Por orden de relación impacto/esfuerzo. Todas son compatibles con la restricción de rendimiento.
 
 ### Alta prioridad
 
-1. **Botón «Copiar» en los bloques de código**, con la etiqueta del lenguaje en una cabecera fina (`pre` → `div.code-block` con `header`). Hoy no hay forma de copiar un bloque sin seleccionarlo a mano. Solo aparece con `:hover`/`:focus-within`, con `navigator.clipboard` y un «✓ Copiado» de 1,5 s.
-2. **Botón flotante «Ir al final»** cuando el usuario ha subido y llega texto nuevo (`ConversationView` ya sabe si está «pegado» abajo: `stickRef`). Pequeño círculo sobre el composer con una flecha ↓ y un punto ámbar si hay contenido sin leer.
+1. ✅ *(aplicada, ver §3)* **Botón «Copiar» en los bloques de código**, con la etiqueta del lenguaje en una cabecera fina (`pre` → `div.code-block` con `header`). Hoy no hay forma de copiar un bloque sin seleccionarlo a mano. Solo aparece con `:hover`/`:focus-within`, con `navigator.clipboard` y un «✓ Copiado» de 1,5 s.
+2. ✅ *(aplicada, ver §3)* **Botón flotante «Ir al final»** cuando el usuario ha subido y llega texto nuevo (`ConversationView` ya sabe si está «pegado» abajo: `stickRef`). Pequeño círculo sobre el composer con una flecha ↓ y un punto ámbar si hay contenido sin leer.
 3. **Sugerencias en el estado vacío**: 3–4 chips («Resume un fichero», «Explica este error», «Redacta un correo») que rellenan el composer. Reutilizan `.chip`.
-4. **Iconos por tipo de tool** en `ToolCallBlock`: fichero (read/write/edit), lupa (glob/grep/web_search), globo (web_fetch), cerebro (memoria). Hoy todas llevan el mismo glifo; con un `Record<toolName, path>` como el del sidebar se lee de un vistazo qué está haciendo el agente.
+4. ✅ *(aplicada, ver §3)* **Iconos por tipo de tool** en `ToolCallBlock`: fichero (read/write/edit), lupa (glob/grep/web_search), globo (web_fetch), cerebro (memoria). Hoy todas llevan el mismo glifo; con un `Record<toolName, path>` como el del sidebar se lee de un vistazo qué está haciendo el agente.
 
 ### Media prioridad
 
 5. **Marca del agente al inicio de cada turno**: el logo de estratos en miniatura (14 px) junto a la primera línea de la respuesta, en lugar de texto suelto. Ayuda a escanear conversaciones largas.
-6. **Acciones por mensaje al pasar el ratón** (copiar respuesta, reintentar, copiar como markdown), alineadas a la derecha y solo con `:hover`/`:focus-within`, como las de `.conv-item__actions`.
+6. ✅ *(aplicada, ver §3)* **Acciones por mensaje al pasar el ratón** (copiar respuesta, reintentar, copiar como markdown), alineadas a la derecha y solo con `:hover`/`:focus-within`, como las de `.conv-item__actions`.
 7. **Avisos como toasts** (esquina inferior derecha, se van solos a los 5 s) en vez de líneas `notice--dismissable` que empujan el composer hacia arriba.
 8. **StatusBar por segmentos**: separadores `·` o pequeñas «píldoras» con fondo en provider, modelo, tokens y contexto; el porcentaje de contexto como una barra de 40 px (ya existe `.progress`).
-9. **Tipografía propia empaquetada**: Inter (UI) y JetBrains Mono (código) en `woff2` locales con `font-display: swap`, ~150 kB en total y sin red. Da identidad y un render idéntico en Windows, macOS y Linux (hoy depende de `system-ui`). Subconjunto latino para no pagar glifos que no se usan.
+9. ✅ *(aplicada, ver §3)* **Tipografía propia empaquetada**: Inter (UI) y JetBrains Mono (código) en `woff2` locales con `font-display: swap`, ~150 kB en total y sin red. Da identidad y un render idéntico en Windows, macOS y Linux (hoy depende de `system-ui`). Subconjunto latino para no pagar glifos que no se usan.
 10. **Resaltado de sintaxis más rico**: la paleta de `hljs-*` solo cubre seis clases; añadir `hljs-variable`, `hljs-type`, `hljs-meta`, `hljs-tag`/`hljs-name` (HTML/JSX) y `hljs-regexp`. Solo CSS.
 
 ### Baja prioridad / más trabajo

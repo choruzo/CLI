@@ -1,6 +1,7 @@
 import { useId, useState } from 'react';
 import type { ToolCallState, ToolCallView } from '../../hooks/conversation-reducer';
 import { Collapse } from './Collapse';
+import { ICON, StrokeIcon } from './icons';
 
 /** Tope de lo que se pinta de la entrada o la salida de una tool al expandir. */
 export const TOOL_PREVIEW_CHARS = 4_000;
@@ -18,6 +19,29 @@ const STATE_ICON: Record<ToolCallState, string> = {
   completed: '✓',
   error: '✗',
 };
+
+const TOOL_ICON: Record<string, string> = {
+  read_file: ICON.file,
+  write_file: ICON.filePen,
+  edit_file: ICON.filePen,
+  glob: ICON.search,
+  grep: ICON.search,
+  web_search: ICON.search,
+  list_directory: ICON.folder,
+  web_fetch: ICON.globe,
+  store_decision: ICON.brain,
+  recall_decisions: ICON.brain,
+  todo: ICON.list,
+  question: ICON.question,
+  exec: ICON.terminal,
+};
+
+/** Icono de lo que hace una tool: fichero, búsqueda, web, memoria… */
+export function toolIcon(name: string): string {
+  if (TOOL_ICON[name]) return TOOL_ICON[name];
+  if (name.startsWith('mcp__')) return ICON.plug;
+  return ICON.tool;
+}
 
 function clip(text: string): string {
   if (text.length <= TOOL_PREVIEW_CHARS) return text;
@@ -56,6 +80,9 @@ export function ToolCallBlock({ call }: { call: ToolCallView }) {
       >
         <span className="tool-call__icon" aria-hidden="true">
           {STATE_ICON[call.state]}
+        </span>
+        <span className="tool-call__kind" aria-hidden="true">
+          <StrokeIcon d={toolIcon(call.name)} />
         </span>
         <span className="tool-call__name">{call.name}</span>
         <span className="tool-call__state">{STATE_LABEL[call.state]}</span>

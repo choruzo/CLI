@@ -2,12 +2,27 @@
 
 :root {
   color-scheme: dark;
-  font-family: system-ui, -apple-system, 'Segoe UI', sans-serif;
-  --font-mono: ui-monospace, 'Cascadia Code', 'JetBrains Mono', monospace;
+  /* IBM Plex, empaquetada en `fonts.css`; el resto de la pila cubre los glifos que no trae. */
+  font-family: 'IBM Plex Sans', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'IBM Plex Mono', ui-monospace, 'Cascadia Code', monospace;
 }
 
 * {
   box-sizing: border-box;
+}
+
+/* Los controles no heredan la fuente: sin esto, un botón sin `font: inherit` se quedaría en la del sistema. */
+button,
+input,
+textarea,
+select {
+  font-family: inherit;
+}
+/* Y el `monospace` por defecto de `pre`/`code`/`kbd` no es Plex Mono. */
+pre,
+code,
+kbd {
+  font-family: var(--font-mono);
 }
 
 html,
@@ -2746,4 +2761,185 @@ kbd {
 }
 .tool-call__header:hover {
   color: var(--color-textPrimary);
+}
+
+/* ------------------------------------------------------------------------ */
+/* Mejoras 1, 2, 4 y 6 de MEJORAS_VISUALES.md. Mismas reglas: solo color,    */
+/* opacidad y transform; nada en bucle.                                      */
+/* ------------------------------------------------------------------------ */
+
+/* 1. Bloques de código con cabecera (lenguaje + Copiar). El marco pasa del  */
+/*    `pre` al contenedor para que la cabecera quede dentro.                 */
+.code-block {
+  margin: 0 0 10px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
+  background: var(--color-bgPanel);
+  overflow: hidden;
+}
+.markdown .code-block pre {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+}
+.code-block__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  padding: 3px 6px 3px 12px;
+  border-bottom: 1px solid var(--color-borderSubtle);
+  background: var(--color-bgStatusbar);
+  font-size: 12px;
+}
+.code-block__lang {
+  color: var(--color-textFaint);
+  font-family: var(--font-mono);
+  text-transform: lowercase;
+}
+.code-block__copy {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-textMuted);
+  font: inherit;
+  cursor: pointer;
+  opacity: 0;
+  transition:
+    opacity var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+.code-block:hover .code-block__copy,
+.code-block:focus-within .code-block__copy,
+.code-block__copy[aria-label='Copiado'] {
+  opacity: 1;
+}
+.code-block__copy:hover {
+  background: var(--color-bgPanel);
+  color: var(--color-textPrimary);
+}
+.code-block__copy[aria-label='Copiado'] {
+  color: var(--color-success);
+}
+.code-block__copy:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+
+/* 2. «Ir al final»: círculo flotante sobre el borde inferior del historial. */
+.conversation__viewport {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+.jump-to-end {
+  position: absolute;
+  left: 50%;
+  bottom: 10px;
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 50%;
+  background: var(--color-bgStatusbar);
+  color: var(--color-textPrimary);
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.45);
+  cursor: pointer;
+  transform: translateX(-50%);
+  animation: jump-in var(--dur-fast) var(--ease-out) both;
+  transition:
+    border-color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+.jump-to-end:hover {
+  border-color: var(--color-accent);
+}
+.jump-to-end:active {
+  transform: translateX(-50%) scale(0.92);
+}
+.jump-to-end:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+/* Punto ámbar: llegó contenido mientras el usuario leía más arriba. */
+.jump-to-end[data-unread]::after {
+  content: '';
+  position: absolute;
+  top: 1px;
+  right: 1px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--color-bgApp);
+  border-radius: 50%;
+  background: var(--color-accent);
+}
+@keyframes jump-in {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 6px);
+  }
+}
+
+/* 4. Icono del tipo de tool, antes del nombre. */
+.tool-call__kind {
+  display: inline-grid;
+  place-items: center;
+  color: var(--color-textFaint);
+  transition: color var(--dur-fast) ease;
+}
+.tool-call__header:hover .tool-call__kind {
+  color: var(--color-textMuted);
+}
+
+/* 6. Acciones por mensaje: invisibles hasta hover o foco dentro del turno. */
+/*    Ocupan su hueco siempre (solo cambia la opacidad): nada salta.        */
+.message__actions {
+  display: flex;
+  gap: 2px;
+  margin-top: -2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+.message--agent:hover .message__actions,
+.message--agent:focus-within .message__actions {
+  opacity: 1;
+}
+.message__action {
+  width: 26px;
+  height: 26px;
+  display: inline-grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-textFaint);
+  cursor: pointer;
+  transition:
+    color var(--dur-fast) ease,
+    background-color var(--dur-fast) ease;
+}
+.message__action:hover {
+  background: var(--color-bgPanel);
+  color: var(--color-textPrimary);
+}
+.message__action:active {
+  transform: scale(0.92);
+}
+.message__action[aria-label='Copiado'] {
+  color: var(--color-success);
+}
+.message__action:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
 }

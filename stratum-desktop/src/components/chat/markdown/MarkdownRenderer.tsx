@@ -1,10 +1,12 @@
-import { memo, useRef, type ReactNode } from 'react';
+import { isValidElement, memo, useRef, type ReactNode } from 'react';
 import ReactMarkdown, { type Components, type Options } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeHighlight from 'rehype-highlight';
 import { common } from 'lowlight';
 import { EMPTY_SPLIT, isClosedFence, splitBlocks, type SplitState } from './blocks';
 import { openExternal } from '../../../ipc/external';
+import { useCopy } from '../../../hooks/useCopy';
+import { ICON, StrokeIcon } from '../icons';
 
 /**
  * Render del markdown del asistente (15.13).
@@ -44,7 +46,44 @@ function ExternalLink({ href, children, title }: { href?: string; title?: string
   );
 }
 
+/** Lenguaje de un `<code class="language-ts hljs">`, o `null` si no se indicó. */
+export function codeLanguage(children: ReactNode): string | null {
+  const child = Array.isArray(children) ? children[0] : children;
+  if (!isValidElement<{ className?: string }>(child)) return null;
+  const match = /(?:^|\s)language-([\w+#.-]+)/.exec(child.props.className ?? '');
+  return match ? match[1] : null;
+}
+
+/**
+ * Bloque de código con cabecera: el lenguaje a la izquierda y «Copiar» a la
+ * derecha. El texto se toma del DOM (`textContent`), así que da igual que el
+ * resaltado lo haya partido en nodos.
+ */
+function CodeBlock({ children }: { children?: ReactNode }) {
+  const pre = useRef<HTMLPreElement>(null);
+  const [copied, copy] = useCopy();
+  const language = codeLanguage(children);
+  return (
+    <div className="code-block">
+      <div className="code-block__header">
+        <span className="code-block__lang">{language ?? 'código'}</span>
+        <button
+          type="button"
+          className="code-block__copy"
+          aria-label={copied ? 'Copiado' : 'Copiar código'}
+          onClick={() => void copy(pre.current?.textContent?.replace(/\n$/, '') ?? '')}
+        >
+          <StrokeIcon d={copied ? ICON.check : ICON.copy} size={13} />
+          <span aria-hidden="true">{copied ? 'Copiado' : 'Copiar'}</span>
+        </button>
+      </div>
+      <pre ref={pre}>{children}</pre>
+    </div>
+  );
+}
+
 const components: Components = {
+  pre: ({ children }) => <CodeBlock>{children}</CodeBlock>,
   a: ({ href, title, children }) => (
     <ExternalLink href={href} title={title}>
       {children}
