@@ -42,6 +42,7 @@
     "STRATUM.md",
     ".stratumrc.json.example",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "engines": {
