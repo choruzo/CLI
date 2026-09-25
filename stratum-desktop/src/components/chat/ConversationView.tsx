@@ -11,6 +11,7 @@ import { RetentionBanner } from './RetentionBanner';
 import { TodoPanel } from './TodoPanel';
 import type { CommandName } from './commands';
 import { userMessageAnchor } from '../layout/OutlinePanel';
+import { AppLogo } from '../onboarding/AppLogo';
 
 /** Distancia al fondo por debajo de la cual se sigue el stream automáticamente. */
 const STICK_PX = 80;
@@ -129,9 +130,10 @@ export const ConversationView = forwardRef(function ConversationView(
       >
         {empty ? (
           <div className="conversation__empty">
+            <AppLogo className="conversation__empty-logo" />
             <p className="conversation__empty-title">¿En qué puedo ayudarte?</p>
             <p className="conversation__empty-hint">
-              Adjunta ficheros con el botón o soltándolos sobre la ventana. Escribe / para ver los
+              Adjunta ficheros con el botón + o soltándolos sobre la ventana. Escribe / para ver los
               comandos.
             </p>
           </div>

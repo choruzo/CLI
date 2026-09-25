@@ -542,8 +542,7 @@ body {
   background: var(--color-bgStatusbar);
   color: var(--color-accentBright);
 }
-.question-prompt__input,
-.input-area__text {
+.question-prompt__input {
   width: 100%;
   padding: 8px 10px;
   border: 1px solid var(--color-borderSubtle);
@@ -585,20 +584,6 @@ body {
 
 .input-area {
   position: relative;
-  display: flex;
-  align-items: flex-end;
-  gap: 8px;
-}
-.input-area__main {
-  flex: 1;
-  min-width: 0;
-  display: flex;
-  flex-direction: column;
-  gap: 6px;
-}
-.input-area__buttons {
-  display: flex;
-  gap: 8px;
 }
 .input-area__drop {
   position: absolute;
@@ -737,14 +722,6 @@ body {
   color: var(--color-textPrimary);
   text-align: left;
 }
-.input-area__text {
-  /* Crece con el texto desde InputArea (D4); más allá de su tope, scroll. */
-  resize: none;
-  min-height: 40px;
-  overflow-y: auto;
-  line-height: 1.45;
-}
-.input-area__text:focus-visible,
 .question-prompt__input:focus-visible {
   outline: 2px solid var(--color-accent);
   outline-offset: 1px;
@@ -2559,4 +2536,214 @@ kbd {
   color: var(--color-textFaint);
   font-family: var(--font-mono);
   font-size: 12px;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Pulido visual (post-D7). Solo propiedades baratas: color, fondo, borde,  */
+/* sombra en elementos pequeños y transform/opacity; nada de backdrop-filter */
+/* ni animaciones en bucle nuevas. Ver MEJORAS_VISUALES.md.                 */
+/* ------------------------------------------------------------------------ */
+
+:root {
+  --radius-composer: 14px;
+  --ring-accent: color-mix(in srgb, var(--color-accent) 16%, transparent);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Barras de desplazamiento finas y en la paleta, en vez de las del sistema. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--color-borderMedium) transparent;
+}
+
+::selection {
+  background: color-mix(in srgb, var(--color-accent) 32%, transparent);
+  color: var(--color-textPrimary);
+}
+
+/* Cifras que cambian (tokens, duraciones, latencia) sin bailar de ancho. */
+.status-bar,
+.tool-call__duration,
+.connection__latency,
+.reasoning__words {
+  font-variant-numeric: tabular-nums;
+}
+
+/* Botones: el hover se funde en lugar de saltar. */
+.button,
+.chip,
+.icon-button,
+.rail-button,
+.conv-item {
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+.button:active:not(:disabled),
+.chip:active {
+  transform: translateY(1px);
+}
+
+/* Composer: una sola tarjeta con + a la izquierda y la flecha a la derecha. */
+.input-area__box {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 6px;
+  border: 1px solid var(--color-borderMedium);
+  border-radius: var(--radius-composer);
+  background: var(--color-bgPanel);
+  transition:
+    border-color var(--dur-fast) ease,
+    box-shadow var(--dur-fast) ease;
+}
+.input-area__box:focus-within {
+  border-color: var(--color-borderAccent);
+  box-shadow: 0 0 0 3px var(--ring-accent);
+}
+.input-area__box > .attachments,
+.input-area__box > .notice {
+  padding: 2px 4px 0;
+}
+.input-area__row {
+  display: flex;
+  align-items: flex-end;
+  gap: 4px;
+}
+.input-area__text {
+  flex: 1;
+  min-width: 0;
+  /* Crece con el texto desde InputArea (D4); más allá de su tope, scroll. */
+  min-height: 36px;
+  padding: 8px 6px;
+  border: 0;
+  background: transparent;
+  color: var(--color-textPrimary);
+  font: inherit;
+  line-height: 1.45;
+  resize: none;
+  overflow-y: auto;
+}
+.input-area__text::placeholder {
+  color: var(--color-textFaint);
+}
+/* El anillo lo pinta la tarjeta (`:focus-within`); el textarea no duplica. */
+.input-area__text:focus-visible {
+  outline: none;
+}
+.input-area__drop {
+  border-radius: calc(var(--radius-composer) + 4px);
+}
+
+.composer-button {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-textMuted);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease,
+    transform var(--dur-fast) var(--ease-out);
+}
+.composer-button:hover:not(:disabled) {
+  background: var(--color-bgStatusbar);
+  color: var(--color-textPrimary);
+}
+.composer-button:active:not(:disabled) {
+  transform: scale(0.92);
+}
+.composer-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+.composer-button--send {
+  border-radius: 50%;
+  background: var(--color-accent);
+  color: var(--color-bgApp);
+}
+.composer-button--send:hover:not(:disabled) {
+  background: var(--color-accentBright);
+  color: var(--color-bgApp);
+}
+/* Deshabilitado: gris neutro, no un ámbar apagado que parezca pulsable. */
+.composer-button--send:disabled {
+  opacity: 1;
+  background: var(--color-borderSubtle);
+  color: var(--color-textDisabled);
+}
+.composer-button--stop {
+  border-radius: 50%;
+  border: 1px solid var(--color-borderAccent);
+  color: var(--color-accentBright);
+}
+.composer-button--stop:hover {
+  border-color: var(--color-accent);
+}
+
+/* Menú de comandos: entra con un leve ascenso (una vez, no en bucle). */
+.slash-menu {
+  border-radius: 10px;
+  animation: message-in var(--dur-fast) var(--ease-out) both;
+}
+
+/* Conversación vacía: el logo de estratos presenta la pantalla. */
+.conversation__empty-logo {
+  width: 48px;
+  height: 48px;
+  margin-bottom: 10px;
+  opacity: 0.9;
+}
+.conversation__empty-title {
+  font-size: 22px;
+  font-weight: 600;
+  letter-spacing: -0.01em;
+}
+
+/* Mensaje del usuario: tinte cálido para distinguirlo de un panel cualquiera. */
+.message__bubble {
+  border-radius: 14px 14px 4px 14px;
+  background: color-mix(in srgb, var(--color-accent) 7%, var(--color-bgPanel));
+  border-color: color-mix(in srgb, var(--color-accent) 18%, var(--color-borderSubtle));
+  color: var(--color-textPrimary);
+}
+
+/* Markdown: jerarquía de títulos y separadores más legibles. */
+.markdown h1,
+.markdown h2 {
+  padding-bottom: 4px;
+  border-bottom: 1px solid var(--color-borderSubtle);
+}
+.markdown hr {
+  height: 1px;
+  margin: 16px 0;
+  border: 0;
+  background: var(--color-borderSubtle);
+}
+.markdown li + li {
+  margin-top: 3px;
+}
+.markdown th {
+  background: var(--color-bgStatusbar);
+  color: var(--color-textPrimary);
+  text-align: left;
+}
+.markdown pre {
+  line-height: 1.5;
+}
+
+/* Tool calls: la cabecera responde al ratón como el resto de botones. */
+.tool-call__header {
+  border-radius: 8px;
+  transition: color var(--dur-fast) ease;
+}
+.tool-call__header:hover {
+  color: var(--color-textPrimary);
 }

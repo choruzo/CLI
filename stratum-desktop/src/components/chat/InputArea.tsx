@@ -12,6 +12,16 @@ import type { SentAttachment } from '../../hooks/conversation-reducer';
 import { DraftChips } from './files/AttachmentChips';
 import { matchCommands, parseCommand, type CommandName, type SlashCommand } from './commands';
 
+/** Trazos de los botones del composer (misma rejilla 24×24 que el sidebar). */
+const PLUS = 'M12 5v14M5 12h14';
+const SEND = 'M9 5l7 7-7 7';
+
+const ComposerIcon = ({ d }: { d: string }) => (
+  <svg viewBox="0 0 24 24" width="18" height="18" aria-hidden="true" focusable="false">
+    <path d={d} fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" />
+  </svg>
+);
+
 /** Alto máximo del textarea antes de hacer scroll (px). */
 const MAX_HEIGHT = 240;
 
@@ -23,7 +33,8 @@ export interface InputAreaHandle {
  * Entrada del chat (D1 + adjuntos de D2 + D4): Enter envía, Shift+Enter salta
  * de línea y el textarea crece con el texto. Escribir `/` abre el menú de
  * comandos (↑↓ para elegir, Enter o Tab para completar, Escape para cerrar).
- * Mientras el asistente responde, el botón pasa a Detener (`cancel`).
+ * Mientras el asistente responde, el botón pasa a Detener (`cancel`). Los
+ * botones son iconos (`+` adjuntar, `>` enviar, ■ detener) con `aria-label`.
  */
 export const InputArea = forwardRef<
   InputAreaHandle,
@@ -178,7 +189,7 @@ export const InputArea = forwardRef<
           ))}
         </ul>
       )}
-      <div className="input-area__main">
+      <div className="input-area__box">
         {attachments && <DraftChips items={attachments.items} onRemove={attachments.remove} />}
         {attachments?.error && (
           <p className="notice" data-tone="error" role="alert">
@@ -190,45 +201,59 @@ export const InputArea = forwardRef<
             {commandError}
           </p>
         )}
-        <textarea
-          ref={textareaRef}
-          id="chat-input"
-          className="input-area__text"
-          aria-label="Mensaje para el asistente"
-          rows={1}
-          value={text}
-          placeholder={placeholder}
-          disabled={disabled}
-          onChange={(e) => {
-            setText(e.target.value);
-            setMenuClosed(false);
-            setCommandError(null);
-          }}
-          onKeyDown={onKeyDown}
-        />
-      </div>
-      <div className="input-area__buttons">
-        {attachments && (
-          <button
-            type="button"
-            className="button"
-            onClick={attachments.pick}
+        <div className="input-area__row">
+          {attachments && (
+            <button
+              type="button"
+              className="composer-button"
+              onClick={attachments.pick}
+              disabled={disabled}
+              aria-label="Adjuntar ficheros"
+              title="Adjuntar ficheros"
+            >
+              <ComposerIcon d={PLUS} />
+            </button>
+          )}
+          <textarea
+            ref={textareaRef}
+            id="chat-input"
+            className="input-area__text"
+            aria-label="Mensaje para el asistente"
+            rows={1}
+            value={text}
+            placeholder={placeholder}
             disabled={disabled}
-            aria-label="Adjuntar ficheros"
-            title="Adjuntar ficheros"
-          >
-            Adjuntar
-          </button>
-        )}
-        {generating && !isCommand ? (
-          <button type="button" className="button" onClick={onCancel}>
-            Detener
-          </button>
-        ) : (
-          <button type="submit" className="button button--primary" disabled={!canSend}>
-            Enviar
-          </button>
-        )}
+            onChange={(e) => {
+              setText(e.target.value);
+              setMenuClosed(false);
+              setCommandError(null);
+            }}
+            onKeyDown={onKeyDown}
+          />
+          {generating && !isCommand ? (
+            <button
+              type="button"
+              className="composer-button composer-button--stop"
+              onClick={onCancel}
+              aria-label="Detener"
+              title="Detener (Esc)"
+            >
+              <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" focusable="false">
+                <rect x="5" y="5" width="14" height="14" rx="2.5" fill="currentColor" />
+              </svg>
+            </button>
+          ) : (
+            <button
+              type="submit"
+              className="composer-button composer-button--send"
+              disabled={!canSend}
+              aria-label="Enviar"
+              title="Enviar (Enter)"
+            >
+              <ComposerIcon d={SEND} />
+            </button>
+          )}
+        </div>
       </div>
     </form>
   );
