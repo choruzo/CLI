@@ -13,6 +13,7 @@ import { closeExecRuntime } from '../../tools/exec/runtime.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { SessionStore, generateSessionId } from '../../session/store.js';
+import { SubagentStore } from '../../session/subagent-store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
 import { animateStartupLogo } from '../ui/startup-logo-animation.js';
@@ -138,6 +139,11 @@ export const chatCommand = new Command('chat')
       // El id se genera al arrancar, no al guardar: así lo que se escribe fuera
       // de la sesión durante el turno (auditoría SSH, §12.14) puede correlacionarse.
       let sessionId: string = generateSessionId();
+      // Un único store de subagentes para la sesión: `App` persiste en él y aquí
+      // se marcan, tras guardar, los huérfanos avisados al reanudar (8B endurecido).
+      const subagentStore = new SubagentStore(process.cwd());
+      const retentionDays = config.agents.subagentRetentionDays;
+      if (retentionDays > 0) subagentStore.prune(retentionDays * 24 * 60 * 60 * 1000);
       let sessionCreatedAt: string | undefined;
       let agentOptions = {};
       // Hito 17: una sesión read-only se reanuda read-only; el perfil guardado se
@@ -177,21 +183,24 @@ export const chatCommand = new Command('chat')
           // murió a mitad de un delegate_task, su marca `running` sigue en disco.
           // Se inyecta un preámbulo que instruye al padre a verificar el estado
           // (NO se reejecutan automáticamente: un subagente no es idempotente).
-          const { SubagentStore } = await import('../../session/subagent-store.js');
-          const { buildInterruptedSubagentsPreamble } = await import('../../agent/subagent.js');
-          const subStore = new SubagentStore(process.cwd());
-          const interrupted = subStore.loadInterrupted();
-          const subPreamble = buildInterruptedSubagentsPreamble(interrupted);
-          if (subPreamble) {
+          // 8B endurecido: solo los de ESTA sesión y con el dueño muerto, sin repetir
+          // lo que el historial ya avisó; se marcan tras guardar la sesión.
+          const { planSubagentResume } = await import('../../agent/subagent.js');
+          const resumePlan = planSubagentResume(
+            subagentStore.findOrphaned(saved.id),
+            saved.messages,
+          );
+          resumePlan.alreadyReported.forEach((s) => subagentStore.markInterrupted(s.id));
+          if (resumePlan.preamble) {
             const prev = (agentOptions as { resumePreamble?: string }).resumePreamble;
             agentOptions = {
               ...agentOptions,
               initialMessages: saved.messages,
-              resumePreamble: prev ? `${prev}\n\n${subPreamble}` : subPreamble,
+              resumePreamble: prev ? `${prev}\n\n${resumePlan.preamble}` : resumePlan.preamble,
             };
-            interrupted.forEach((s) => subStore.markInterrupted(s.id));
+            subagentStore.deferInterrupted(resumePlan.report.map((s) => s.id));
             process.stderr.write(
-              `Reanudando: ${interrupted.length} subagente(s) interrumpido(s)\n`,
+              `Reanudando: ${resumePlan.report.length} subagente(s) interrumpido(s)\n`,
             );
           }
           // Hito 15: perfil activo como agente principal. Se añade al final
@@ -247,6 +256,7 @@ export const chatCommand = new Command('chat')
           logoPreRendered,
           sessionId,
           registry,
+          subagentStore,
         }),
       );
 
@@ -260,6 +270,7 @@ export const chatCommand = new Command('chat')
       // Hito 9 (§12.12): sin cerrar las conexiones SSH, sus sockets mantienen
       // vivo el event loop y el proceso nunca termina.
       await closeExecRuntime();
+      subagentStore.dispose();
       await flushLogging();
 
       // -----------------------------------------------------------------------
@@ -280,6 +291,8 @@ export const chatCommand = new Command('chat')
           readOnly: agent.isReadOnly(),
           sessionProfile: agent.getSessionProfileRequest(),
         });
+        // El aviso de los huérfanos ya está guardado en la sesión: ahora sí.
+        subagentStore.commitDeferred();
       } catch {
         // No bloquear la salida por un fallo al guardar
       }

@@ -2,7 +2,12 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { runSubagent, buildInterruptedSubagentsPreamble } from './subagent.js';
+import {
+  runSubagent,
+  buildInterruptedSubagentsPreamble,
+  planSubagentResume,
+  INTERRUPTED_SUBAGENTS_HEADER,
+} from './subagent.js';
 import { SubagentStore } from '../session/subagent-store.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { registerBuiltinTools } from '../tools/index.js';
@@ -121,23 +126,30 @@ describe('SubagentStore (Hito 8B)', () => {
     };
   }
 
-  it('marca running y la detecta como interrumpida hasta que llega el resultado', () => {
-    const store = new SubagentStore(dir);
-    store.saveRunning('sub_1', 'research', 'explorar X');
+  // Un proceso que lanza el hijo y "muere", y otro que reanuda despues.
+  const writerProbe = () => ({ pid: 1111, host: 'h', now: Date.now(), pidAlive: () => true });
+  const readerProbe = () => ({ pid: 2222, host: 'h', now: Date.now(), pidAlive: () => false });
 
-    // Aún sin resultado terminal → interrumpida.
-    let interrupted = store.loadInterrupted();
+  it('marca running y la detecta como interrumpida hasta que llega el resultado', () => {
+    const writer = new SubagentStore(dir, { probe: writerProbe });
+    const reader = new SubagentStore(dir, { probe: readerProbe });
+    writer.saveRunning('sub_1', 'research', 'explorar X', { sessionId: 'sess_a' });
+    writer.dispose();
+
+    // Aun sin resultado terminal y con el dueno muerto -> interrumpida.
+    let interrupted = reader.findOrphaned('sess_a');
     expect(interrupted.map((s) => s.id)).toContain('sub_1');
     expect(existsSync(join(dir, '.stratum', 'subagents', 'sub_1.json'))).toBe(true);
 
-    // Llega el resultado terminal → deja de estar interrumpida.
-    store.saveResult('sub_1', 'research', 'explorar X', sampleResult('sub_1', 'completed'));
-    interrupted = store.loadInterrupted();
+    // Llega el resultado terminal -> deja de estar interrumpida.
+    writer.saveResult('sub_1', 'research', 'explorar X', sampleResult('sub_1', 'completed'));
+    interrupted = reader.findOrphaned('sess_a');
     expect(interrupted.map((s) => s.id)).not.toContain('sub_1');
 
-    const rec = store.read('sub_1');
+    const rec = reader.read('sub_1');
     expect(rec?.status).toBe('completed');
     expect(rec?.result?.summary).toBe('resumen');
+    expect(rec?.sessionId).toBe('sess_a');
   });
 
   it('preserva createdAt entre running y result', () => {
@@ -148,16 +160,18 @@ describe('SubagentStore (Hito 8B)', () => {
     expect(store.read('sub_2')?.createdAt).toBe(created);
   });
 
-  it('markInterrupted convierte running → interrupted (idempotente para no-running)', () => {
-    const store = new SubagentStore(dir);
-    store.saveRunning('sub_3', 'general', 'x');
-    store.markInterrupted('sub_3');
-    expect(store.read('sub_3')?.status).toBe('interrupted');
-    expect(store.loadInterrupted().map((s) => s.id)).not.toContain('sub_3');
+  it('markInterrupted convierte running -> interrupted (idempotente para no-running)', () => {
+    const writer = new SubagentStore(dir, { probe: writerProbe });
+    const reader = new SubagentStore(dir, { probe: readerProbe });
+    writer.saveRunning('sub_3', 'general', 'x', { sessionId: 'sess_a' });
+    writer.dispose();
+    reader.markInterrupted('sub_3');
+    expect(reader.read('sub_3')?.status).toBe('interrupted');
+    expect(reader.findOrphaned('sess_a').map((s) => s.id)).not.toContain('sub_3');
     // No-op sobre un registro ya terminal.
-    store.saveResult('sub_3b', 'general', 'x', sampleResult('sub_3b', 'completed'));
-    store.markInterrupted('sub_3b');
-    expect(store.read('sub_3b')?.status).toBe('completed');
+    reader.saveResult('sub_3b', 'general', 'x', sampleResult('sub_3b', 'completed'));
+    reader.markInterrupted('sub_3b');
+    expect(reader.read('sub_3b')?.status).toBe('completed');
   });
 
   it('list ignora ficheros .tmp y registros corruptos', () => {
@@ -184,5 +198,39 @@ describe('buildInterruptedSubagentsPreamble (Hito 8B)', () => {
     expect(pre).toContain('refactor Y');
     expect(pre).toContain('code');
     expect(pre!.toLowerCase()).toContain('verifica');
+  });
+});
+
+describe('planSubagentResume (8B endurecido)', () => {
+  const orphans = [
+    { id: 'sub_a', profile: 'code', task: 'tarea A' },
+    { id: 'sub_b', profile: 'research', task: 'tarea B' },
+  ];
+
+  it('sin huérfanos → nada que avisar', () => {
+    const plan = planSubagentResume([], [{ role: 'user', content: 'hola' }]);
+    expect(plan).toEqual({ report: [], alreadyReported: [], preamble: null });
+  });
+
+  it('avisa solo de los que el historial no conoce', () => {
+    const earlier = buildInterruptedSubagentsPreamble([orphans[0]!])!;
+    // `chat --resume` concatena el aviso tras el preámbulo del plan.
+    const history = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: `Plan en curso...\n\n${earlier}` },
+      { role: 'assistant', content: `Revisando sub_b: ${INTERRUPTED_SUBAGENTS_HEADER}` },
+    ];
+    const plan = planSubagentResume(orphans, history);
+    expect(plan.alreadyReported.map((o) => o.id)).toEqual(['sub_a']);
+    expect(plan.report.map((o) => o.id)).toEqual(['sub_b']);
+    expect(plan.preamble).toContain('sub_b');
+    expect(plan.preamble).not.toContain('sub_a');
+  });
+
+  it('todo ya avisado → sin preámbulo', () => {
+    const history = [{ role: 'user', content: buildInterruptedSubagentsPreamble(orphans)! }];
+    const plan = planSubagentResume(orphans, history);
+    expect(plan.preamble).toBeNull();
+    expect(plan.alreadyReported).toHaveLength(2);
   });
 });

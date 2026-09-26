@@ -456,6 +456,11 @@ export const StratumConfigSchema = z.object({
       defaultProfile: z.string().default('general'),
       /** Subagentes concurrentes máximos. 8A=1 (secuencial); 8C permite >1. */
       maxConcurrency: z.number().int().positive().default(1),
+      /**
+       * Días que se conservan los registros de `.stratum/subagents/` (8B endurecido).
+       * `chat` purga al arrancar lo que lleve más sin tocarse; `0` lo desactiva.
+       */
+      subagentRetentionDays: z.number().int().nonnegative().default(30),
     })
     .default({}),
 

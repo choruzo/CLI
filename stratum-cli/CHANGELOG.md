@@ -6,6 +6,20 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+Endurecimiento de la persistencia de subagentes (`.stratum/subagents/`).
+
+### Corregido
+- Al reanudar una sesión solo se avisa de los subagentes interrumpidos **de esa sesión**. Antes se adoptaban los de cualquier sesión del proyecto, y con dos `chat` abiertos se daba por interrumpido un subagente que seguía corriendo en la otra terminal.
+- Cada registro lleva el proceso dueño y un latido; un subagente solo cuenta como interrumpido si su proceso murió (o dejó de latir hace más de 3 minutos).
+- `/sessions resume` dentro del chat también avisa de los subagentes interrumpidos, igual que `chat --resume`.
+- El aviso ya no se pierde si el proceso muere antes de guardar la sesión: los registros se marcan después de guardarla, y un aviso que ya está en el historial no se repite.
+- Los registros se validan al leerlos (`schemaVersion`); uno roto se ignora y uno de un Stratum más nuevo no se reescribe ni se borra.
+
+### Añadido
+- `sessions delete` y `sessions prune` borran también los registros de subagente de esas sesiones, y `chat` poda al arrancar los de más de `agents.subagentRetentionDays` días (30 por defecto; `0` lo desactiva).
+
 ## [0.6.0] — 2026-09-25
 
 Centrada en el **Hito 17**: entornos con *blast radius*, modo read-only y perfil de sesión.

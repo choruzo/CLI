@@ -180,7 +180,7 @@ export class SessionStore {
    * Elimina sesiones más antiguas que `olderThan` ms.
    * Devuelve el número de sesiones eliminadas.
    */
-  prune(olderThanMs: number): number {
+  prune(olderThanMs: number, onDeleted?: (session: SessionContext) => void): number {
     if (!existsSync(this.sessionsDir)) return 0;
 
     const cutoff = Date.now() - olderThanMs;
@@ -193,6 +193,7 @@ export class SessionStore {
         try {
           this.delete(session.id);
           deleted++;
+          onDeleted?.(session);
         } catch {
           // ignorar errores individuales
         }

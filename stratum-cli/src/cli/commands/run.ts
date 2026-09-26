@@ -309,10 +309,7 @@ export const runCommand = new Command('run')
           // Tanda única de preguntas (Hito 2.5, F7). Sin TTY no hay callback:
           // el loop se lo dice al agente y este continúa con supuestos.
           onAskQuestions: makeCliQuestionAsker(),
-          onSubagentPersist: (rec) =>
-            rec.result
-              ? subagentStore.saveResult(rec.id, rec.profile, rec.task, rec.result)
-              : subagentStore.saveRunning(rec.id, rec.profile, rec.task),
+          onSubagentPersist: (rec) => subagentStore.persist(rec),
           // Hito 17: el gate de aprobación se pasa siempre — un entorno con
           // `requirePlan` puede escalar el turno a modo plan.
           onApprovePlan,

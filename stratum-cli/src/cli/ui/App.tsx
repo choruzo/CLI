@@ -67,6 +67,8 @@ import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
+import { deleteSessionAndSubagents } from '../../session/cleanup.js';
+import { planSubagentResume } from '../../agent/subagent.js';
 
 /** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
 type OverlayState =
@@ -861,6 +863,8 @@ interface Props {
   sessionId?: string;
   /** Registry activo, para re-registrar tools MCP tras `/mcp reload`. */
   registry?: ToolRegistry;
+  /** Store de subagentes compartido con `chat`, que marca los huérfanos tras guardar. */
+  subagentStore?: SubagentStore;
 }
 
 export function App({
@@ -871,6 +875,7 @@ export function App({
   logoPreRendered,
   sessionId,
   registry,
+  subagentStore,
 }: Props) {
   const { exit } = useApp();
 
@@ -894,7 +899,7 @@ export function App({
   );
   // SubagentStore (Hito 8B): persiste resultados de subagentes en cada run para
   // que un cuelgue a mitad de un delegate_task se detecte como interrumpido.
-  const subagentStoreRef = useRef<SubagentStore>(new SubagentStore(process.cwd()));
+  const subagentStoreRef = useRef<SubagentStore>(subagentStore ?? new SubagentStore(process.cwd()));
 
   const ctxInit = agent.getContextUsage();
   const [state, dispatch] = useReducer(reducer, {
@@ -1043,10 +1048,7 @@ export function App({
       // Hito 17: un entorno con `requirePlan` puede escalar un turno normal a
       // modo plan; el gate de aprobación tiene que estar disponible siempre.
       onApprovePlan: (p) => onApprovePlanRef.current(p),
-      onSubagentPersist: (rec) =>
-        rec.result
-          ? subagentStoreRef.current.saveResult(rec.id, rec.profile, rec.task, rec.result)
-          : subagentStoreRef.current.saveRunning(rec.id, rec.profile, rec.task),
+      onSubagentPersist: (rec) => subagentStoreRef.current.persist(rec),
     };
     // Reanudación de plan (§12.6): inyectar mode/plan para que update_plan esté
     // disponible y el loop pueda actualizar los estados de los pasos.
@@ -1820,6 +1822,15 @@ export function App({
         try {
           const saved = sessionStore().load(id);
           const notice = agent.replaceHistory(saved.messages, saved.activeAgent, saved.readOnly);
+          // 8B endurecido: los subagentes que esa sesión dejó huérfanos se avisan igual
+          // que en `chat --resume`; se marcan cuando esta sesión se guarde.
+          const subStore = subagentStoreRef.current;
+          const resumePlan = planSubagentResume(subStore.findOrphaned(saved.id), saved.messages);
+          resumePlan.alreadyReported.forEach((o) => subStore.markInterrupted(o.id));
+          if (resumePlan.preamble) {
+            agent.appendResumePreamble(resumePlan.preamble);
+            subStore.deferInterrupted(resumePlan.report.map((o) => o.id));
+          }
           setActiveAgent(agent.getActiveProfile()?.name ?? null);
           refreshSessionBadges();
           process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
@@ -1829,6 +1840,9 @@ export function App({
             type: 'SYSTEM_MESSAGE',
             text:
               `Sesión ${saved.id} reanudada (${saved.messages.length} mensajes).` +
+              (resumePlan.report.length > 0
+                ? `\n${resumePlan.report.length} subagente(s) interrumpido(s): el agente verificará su estado antes de seguir.`
+                : '') +
               (notice ? `\n${notice}` : ''),
           });
           refreshContext();
@@ -1846,8 +1860,13 @@ export function App({
           return;
         }
         try {
-          sessionStore().delete(id);
-          dispatch({ type: 'SYSTEM_MESSAGE', text: `Sesión "${id}" eliminada.` });
+          const { subagents } = deleteSessionAndSubagents(sessionStore(), id);
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text:
+              `Sesión "${id}" eliminada.` +
+              (subagents > 0 ? ` (y ${subagents} registro(s) de subagente)` : ''),
+          });
         } catch (err) {
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Error: ${String(err)}` });
         }

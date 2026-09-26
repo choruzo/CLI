@@ -183,6 +183,7 @@ export async function* executeDelegations(
           id: job.subId,
           profile: job.profile.name,
           task: job.taskText,
+          sessionId: opts?.sessionId,
         });
 
         let result: SubagentResult;
@@ -229,6 +230,7 @@ export async function* executeDelegations(
           profile: job.profile.name,
           task: job.taskText,
           result,
+          sessionId: opts?.sessionId,
         });
         push({ type: 'subagent_completed', subagentId: job.subId, result });
       } finally {

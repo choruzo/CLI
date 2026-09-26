@@ -83,7 +83,12 @@ describe('delegate_task — flujo del loop (Hito 8A)', () => {
     ]);
     const child = new MockProvider([makeTextRound('Exploré foo.')]);
 
-    const persisted: Array<{ id: string; hasResult: boolean; status?: string }> = [];
+    const persisted: Array<{
+      id: string;
+      hasResult: boolean;
+      status?: string;
+      sessionId?: string;
+    }> = [];
     const messages: Message[] = [{ role: 'system', content: 'sys' }];
     const loop = new ReactLoop(parent, newRegistry(), messages, config, 'm', 32768, undefined, {
       profiles: emptyProfiles(),
@@ -92,8 +97,14 @@ describe('delegate_task — flujo del loop (Hito 8A)', () => {
     await collect(
       loop.run({
         makeSubagentRouter: () => mockRouter(child),
+        sessionId: 'sess_padre',
         onSubagentPersist: (rec) =>
-          persisted.push({ id: rec.id, hasResult: !!rec.result, status: rec.result?.status }),
+          persisted.push({
+            id: rec.id,
+            hasResult: !!rec.result,
+            status: rec.result?.status,
+            sessionId: rec.sessionId,
+          }),
       }),
     );
 
@@ -103,6 +114,8 @@ describe('delegate_task — flujo del loop (Hito 8A)', () => {
     expect(persisted[1]?.hasResult).toBe(true); // resultado terminal
     expect(persisted[1]?.status).toBe('completed');
     expect(persisted[0]?.id).toBe(persisted[1]?.id); // mismo subagentId
+    // 8B endurecido: los dos registros llevan la sesión del padre.
+    expect(persisted.map((p) => p.sessionId)).toEqual(['sess_padre', 'sess_padre']);
   });
 
   it('perfil inexistente → tool_error recuperable, el padre continúa', async () => {

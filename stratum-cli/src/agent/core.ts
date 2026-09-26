@@ -383,6 +383,15 @@ export class StratumAgent {
     return notice;
   }
 
+  /**
+   * Añade un aviso de reanudación como mensaje de usuario, igual que hace
+   * `resumePreamble` al construir. Para `/sessions resume` en caliente, que
+   * carga el historial con `replaceHistory` sin recrear el agente.
+   */
+  appendResumePreamble(text: string): void {
+    this.messages.push({ role: 'user', content: text });
+  }
+
   /** Hito 15 — reaplica el perfil principal de una sesión cargada. */
   private reapplyPrimaryProfile(activeAgent?: string | null): string | null {
     // El perfil activo es de la sesión cargada, no de la que había. Conservar

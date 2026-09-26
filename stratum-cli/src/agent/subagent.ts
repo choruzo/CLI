@@ -466,6 +466,10 @@ function escapeXml(s: string): string {
   return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
 }
 
+/** Primera línea del preámbulo: identifica los avisos ya presentes en un historial. */
+export const INTERRUPTED_SUBAGENTS_HEADER =
+  'Reanudación de sesión: uno o más subagentes que delegaste quedaron INTERRUMPIDOS';
+
 /**
  * Preámbulo de reanudación de subagentes interrumpidos (Hito 8B, §12.16). Recibe
  * los registros `running` que quedaron sin estado terminal (un cuelgue duro entre
@@ -482,7 +486,7 @@ export function buildInterruptedSubagentsPreamble(
   if (interrupted.length === 0) return null;
   const items = interrupted.map((s) => `- [${s.profile}] ${s.id}: ${s.task}`).join('\n');
   return [
-    'Reanudación de sesión: uno o más subagentes que delegaste quedaron INTERRUMPIDOS',
+    INTERRUPTED_SUBAGENTS_HEADER,
     'antes de terminar (la sesión anterior se cerró a mitad de su ejecución). No se han',
     'reejecutado automáticamente porque un subagente puede haber tenido efectos parciales',
     '(comandos ejecutados, ficheros escritos).',
@@ -494,6 +498,37 @@ export function buildInterruptedSubagentsPreamble(
     'si la tarea quedó a medias) y decide explícitamente si vuelves a delegar la tarea, la',
     'das por completada, o preguntas al usuario. No asumas que se completó ni que no se hizo nada.',
   ].join('\n');
+}
+
+/** Resultado de `planSubagentResume`. */
+export interface SubagentResumePlan<T extends { id: string }> {
+  /** Huérfanos que el modelo aún no conoce: van en el preámbulo. */
+  report: T[];
+  /** Huérfanos que el historial ya avisó (un arranque anterior que no llegó a marcarlos). */
+  alreadyReported: T[];
+  preamble: string | null;
+}
+
+/**
+ * Decide qué contar al reanudar una sesión (8B endurecido). Puro: recibe los huérfanos
+ * de esa sesión (`SubagentStore.findOrphaned`) y su historial. El historial es
+ * la fuente de verdad de lo ya avisado — igual que el snapshot de `todo` —, así
+ * que si el marcado en disco no llegó a hacerse (el proceso murió después de
+ * guardar la sesión y antes de marcar), el aviso no se duplica.
+ */
+export function planSubagentResume<T extends { id: string; profile: string; task: string }>(
+  orphans: T[],
+  history: Array<{ role: string; content?: unknown }>,
+): SubagentResumePlan<T> {
+  const notices = history
+    .filter((m) => m.role === 'user' && typeof m.content === 'string')
+    .map((m) => m.content as string)
+    // `includes`, no `startsWith`: `chat --resume` lo concatena tras el preámbulo del plan.
+    .filter((c) => c.includes(INTERRUPTED_SUBAGENTS_HEADER));
+  const reported = (id: string): boolean => notices.some((c) => c.includes(`] ${id}: `));
+  const report = orphans.filter((o) => !reported(o.id));
+  const alreadyReported = orphans.filter((o) => reported(o.id));
+  return { report, alreadyReported, preamble: buildInterruptedSubagentsPreamble(report) };
 }
 
 /** Serializa el SubagentResult a XML para inyectarlo como tool result (§12.16). */

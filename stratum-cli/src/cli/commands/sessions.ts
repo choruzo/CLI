@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { loadConfig } from '../../config/loader.js';
 import { SessionStore, parseDuration } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
+import { deleteSessionAndSubagents, pruneSessionsAndSubagents } from '../../session/cleanup.js';
 
 function getStore(): SessionStore {
   const config = loadConfig();
@@ -68,8 +69,9 @@ const sessionsDelete = new Command('delete')
   .action((id: string) => {
     const store = getStore();
     try {
-      store.delete(id);
-      process.stdout.write(`Sesión "${id}" eliminada.\n`);
+      const { subagents } = deleteSessionAndSubagents(store, id);
+      const extra = subagents > 0 ? ` (y ${subagents} registro(s) de subagente)` : '';
+      process.stdout.write(`Sesión "${id}" eliminada${extra}.\n`);
     } catch (err) {
       process.stderr.write(`Error: ${String(err)}\n`);
       process.exit(1);
@@ -91,8 +93,11 @@ const sessionsPrune = new Command('prune')
     }
 
     const store = getStore();
-    const deleted = store.prune(olderThanMs);
-    process.stdout.write(`${deleted} sesión(es) eliminada(s) (más antiguas de ${durationStr}).\n`);
+    const { sessions, subagents } = pruneSessionsAndSubagents(store, olderThanMs, process.cwd());
+    process.stdout.write(
+      `${sessions} sesión(es) y ${subagents} registro(s) de subagente eliminados ` +
+        `(más antiguos de ${durationStr}).\n`,
+    );
   });
 
 export const sessionsCommand = new Command('sessions')

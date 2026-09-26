@@ -322,4 +322,6 @@ export interface SubagentPersist {
   task: string;
   /** Ausente al arrancar (marca `running`); presente al terminar (estado terminal). */
   result?: SubagentResult;
+  /** Sesión del padre (`RunOptions.sessionId`): al reanudar solo se miran los suyos. */
+  sessionId?: string;
 }

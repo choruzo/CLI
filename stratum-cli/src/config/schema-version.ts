@@ -22,6 +22,13 @@ export const CONFIG_SCHEMA_VERSION = 1;
 /** Versión del formato de sesión guardada (`~/.stratum/sessions/*.json`). */
 export const SESSION_SCHEMA_VERSION = 1;
 
+/**
+ * Versión del formato de registro de subagente (`.stratum/subagents/*.json`).
+ * Lo lee `SubagentStore`, que es best-effort: un registro de una versión más
+ * nueva no lanza, se ignora y nunca se reescribe ni se borra.
+ */
+export const SUBAGENT_SCHEMA_VERSION = 1;
+
 export type SchemaKind = 'config' | 'session';
 
 export type SchemaVersionCheck =
