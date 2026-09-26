@@ -8,9 +8,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`).
+Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), y de la escritura de ficheros del usuario (`write_file` / `edit_file`).
 
 ### Corregido
+- **`write_file` / `edit_file`**: la escritura es atómica (temporal + fsync + rename). Un cierre, un corte o un Ctrl+C a mitad ya no puede dejar el fichero del usuario truncado.
+- **`edit_file`**: un `new_string` con `$&`, `$$` o `$1` (shell, PowerShell, PHP, plantillas JS) se insertaba alterado; ahora se inserta literalmente.
+- **`edit_file`**: en ficheros con finales de línea CRLF, un `old_string` de varias líneas no casaba nunca porque el modelo lo escribe con `\n`. Ahora casa, y el texto nuevo se adapta a CRLF en vez de dejar líneas LF sueltas.
+- **`edit_file`**: un fichero que no es UTF-8 (Latin-1, UTF-16) o que es binario se rechaza sin tocarlo. Antes se decodificaba con reemplazo y al guardar se corrompían todos sus caracteres no ASCII, no solo la línea editada.
+- **`edit_file`**: si el fichero cambia en disco entre la lectura y la escritura (un editor guarda justo en ese momento), no se escribe encima.
+- **`write_file`**: se niega a sobrescribir un fichero que cambió desde que el agente lo leyó (lo editó el usuario, un formateador u otro proceso) y le pide que lo relea. Un fichero que el agente nunca leyó no se comprueba.
+- **`write_file` / `edit_file`**: se conservan el BOM, los finales de línea CRLF, los permisos (el bit de ejecución) y los symlinks del fichero original; con hard links se escribe en sitio para no romperlos.
+- **`read_file`**: ya no muestra los `\r` de los ficheros CRLF ni el BOM.
 - **Sesiones**: se guardan de forma atómica; un cierre a mitad de escritura ya no deja la conversación truncada e irrecuperable.
 - **Sesiones**: con la misma sesión abierta en dos terminales, la que guarda en segundo lugar ya no pisa a la otra: su conversación se guarda como sesión nueva (`forkedFrom`) y se avisa con el id para reanudarla.
 - **Sesiones**: una sesión dañada ya no rompe `sessions list`, `/sessions list` ni `sessions prune`: se omite y se dice cuál. Al cargar se valida su forma y un error lo explica («está dañada (…)»).

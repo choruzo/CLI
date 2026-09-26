@@ -1,9 +1,10 @@
-import { readFileSync } from 'fs';
+import { readFileSync, statSync } from 'fs';
 import { resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
 import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
+import { signatureOf } from './file-io.js';
 
 // Mismo contrato que la tool `read` de OpenCode (ver opencode-init-implementacion.md §5.1):
 // tope de 2000 líneas por llamada, líneas prefijadas con su número, líneas largas truncadas.
@@ -60,8 +61,17 @@ export const readFileTool: ToolDefinition = {
     const vetoed = workspaceExecuteGuard(path, ctx, 'read');
     if (vetoed) return vetoed;
     try {
-      const content = readFileSync(resolve(ctx.cwd, path), 'utf-8');
-      const lines = content.split('\n');
+      const target = resolve(ctx.cwd, path);
+      const buf = readFileSync(target);
+      // La versión vista: write_file no sobrescribirá una posterior sin releerla.
+      ctx.fileState?.record(target, signatureOf(buf, statSync(target)));
+      // Sin el `\r` de CRLF ni el BOM: el modelo los copiaría a old_string, y
+      // edit_file ya adapta los saltos de línea por su cuenta.
+      const lines = buf
+        .toString('utf-8')
+        .replace(/^﻿/, '')
+        .split('\n')
+        .map((l) => (l.endsWith('\r') ? l.slice(0, -1) : l));
       const start = (offset ?? 1) - 1;
       const cap = limit !== undefined ? Math.min(limit, MAX_LINES) : MAX_LINES;
       const end = Math.min(start + cap, lines.length);

@@ -33,6 +33,7 @@ import { generateSubagentId, serializeSubagentResult } from './subagent.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { ChangeTracker } from './risk.js';
+import { FileStateTracker } from '../tools/fs/file-state.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { TddLedger, rehydrateTdd } from './tdd.js';
@@ -141,6 +142,8 @@ export class StratumAgent {
    * abarca varios turnos, así que el registro no puede vivir en el loop.
    */
   private readonly tdd = new TddLedger();
+  /** Versión de cada fichero leída por el agente: protege `write_file` de pisar cambios ajenos. */
+  private readonly fileState = new FileStateTracker();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
   /**
@@ -678,6 +681,7 @@ export class StratumAgent {
         changes: this.changes,
         tdd: this.tdd,
         skillsBlock: this.skillsBlock,
+        fileState: this.fileState,
         workspace: this.workspace,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
         // control pasan aunque el perfil no las liste; `delegate_task` no.

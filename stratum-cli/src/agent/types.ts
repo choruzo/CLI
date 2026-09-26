@@ -1,6 +1,7 @@
 import type { ZodTypeAny } from 'zod';
 import type { StratumConfig } from '../config/schema.js';
 import type { IProvider } from '../providers/base.js';
+import type { FileStateTracker } from '../tools/fs/file-state.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -188,6 +189,12 @@ export interface ToolContext {
    * `cwd` es `root`. Ausente (la CLI) → nada cambia.
    */
   workspace?: WorkspaceConfinement;
+  /**
+   * Versión de cada fichero que el agente vio por última vez. `read_file` la
+   * registra y `write_file` se niega a sobrescribir un fichero que cambió desde
+   * entonces (`tools/fs/file-state.ts`). Ausente → sin comprobación.
+   */
+  fileState?: FileStateTracker;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */

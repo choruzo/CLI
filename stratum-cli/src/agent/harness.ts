@@ -64,6 +64,7 @@ import { serializeSubagentResult, generateSubagentId } from './subagent.js';
 import { executeDelegations, resolveDelegationProfile, type DelegationJob } from './delegation.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import { getLogger } from '../logging/index.js';
+import type { FileStateTracker } from '../tools/fs/file-state.js';
 
 const log = getLogger('agent');
 
@@ -637,6 +638,12 @@ export class ReactLoop {
        * lo transporta: se lo pasa a los subagentes que delegue.
        */
       skillsBlock?: string;
+      /**
+       * Versión de cada fichero vista por este agente (`read_file`), que
+       * `write_file` consulta antes de sobrescribir. De sesión: una lectura de
+       * un turno vale para escribir en el siguiente.
+       */
+      fileState?: FileStateTracker;
       /**
        * Stratum Desktop D2 — workspace al que se confinan las tools de fichero.
        * Se pasa en el `ToolContext` y hace de `cwd`.
@@ -1263,6 +1270,7 @@ export class ReactLoop {
           config: this.config,
           sessionId: opts?.sessionId,
           workspace: this.extras?.workspace,
+          fileState: this.extras?.fileState,
           allowDestructive: opts?.allowDestructive,
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),

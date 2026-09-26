@@ -1,10 +1,17 @@
-import { readFileSync, writeFileSync } from 'fs';
 import { resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
 import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
 import { generateUnifiedDiff } from './diff.js';
+import {
+  FileChangedError,
+  UnsupportedEncodingError,
+  readTextFile,
+  toCrlf,
+  writeTextFileAtomic,
+  type TextFile,
+} from './file-io.js';
 
 const schema = z.object({
   path: z.string().describe('Path to the file to edit'),
@@ -31,6 +38,47 @@ function countOccurrences(haystack: string, needle: string): number {
   return count;
 }
 
+/**
+ * Reemplazo literal. `String.prototype.replace` con un string de reemplazo
+ * interpreta `$&`, `$1`, `$$`…: un `new_string` con código de shell, PHP o
+ * plantillas JS salía corrompido.
+ */
+function replaceLiteral(text: string, search: string, replacement: string, all: boolean): string {
+  if (all) return text.split(search).join(replacement);
+  const idx = text.indexOf(search);
+  return text.slice(0, idx) + replacement + text.slice(idx + search.length);
+}
+
+/**
+ * En un fichero CRLF el modelo casi siempre escribe `old_string` con `\n`
+ * (read_file no le enseña los `\r`), así que la búsqueda exacta no casaba nunca
+ * con más de una línea. Se prueba primero tal cual y, si no aparece, con los
+ * saltos convertidos a CRLF. El reemplazo siempre se adapta a CRLF, para no
+ * dejar líneas LF sueltas en medio del fichero.
+ */
+function matchInFile(
+  file: TextFile,
+  oldString: string,
+  newString: string,
+): { search: string; replacement: string; occurrences: number } {
+  if (file.eol !== 'crlf') {
+    return {
+      search: oldString,
+      replacement: newString,
+      occurrences: countOccurrences(file.text, oldString),
+    };
+  }
+  const replacement = toCrlf(newString);
+  const exact = countOccurrences(file.text, oldString);
+  if (exact > 0) return { search: oldString, replacement, occurrences: exact };
+  const search = toCrlf(oldString);
+  return {
+    search,
+    replacement,
+    occurrences: search === oldString ? 0 : countOccurrences(file.text, search),
+  };
+}
+
 export const editFileTool: ToolDefinition = {
   name: 'edit_file',
   description:
@@ -39,6 +87,7 @@ export const editFileTool: ToolDefinition = {
     'When copying from read_file output, strip the "N: " line-number prefix first.\n' +
     '- old_string must be unique in the file; include surrounding lines to disambiguate, ' +
     'or set replace_all: true to replace every occurrence.\n' +
+    '- Only UTF-8 text files can be edited; the file keeps its BOM and line endings.\n' +
     '- Returns a unified diff of the change for review.',
   schema,
   destructive: false,
@@ -68,18 +117,22 @@ export const editFileTool: ToolDefinition = {
       };
     }
 
-    let original: string;
+    let file: TextFile;
     try {
-      original = readFileSync(target, 'utf-8');
+      file = readTextFile(target);
     } catch (err) {
+      const reason =
+        err instanceof UnsupportedEncodingError
+          ? `${err.message}. The file was not modified; edit_file only handles UTF-8 text.`
+          : (err as Error).message;
       return {
         ok: false,
-        error: `Cannot read "${path}": ${(err as Error).message}`,
+        error: `Cannot edit "${path}": ${reason}`,
         recoverable: true,
       };
     }
 
-    const occurrences = countOccurrences(original, old_string);
+    const { search, replacement, occurrences } = matchInFile(file, old_string, new_string);
 
     if (occurrences === 0) {
       return {
@@ -101,21 +154,34 @@ export const editFileTool: ToolDefinition = {
       };
     }
 
-    const updated = replace_all
-      ? original.split(old_string).join(new_string)
-      : original.replace(old_string, new_string);
+    const updated = replaceLiteral(file.text, search, replacement, replace_all === true);
 
     try {
-      writeFileSync(target, updated, 'utf-8');
+      // `expected`: si el fichero cambió desde la lectura de arriba (un editor
+      // guardó justo ahora), no se pisa esa versión.
+      const written = writeTextFileAtomic(target, updated, {
+        bom: file.bom,
+        expected: file.signature,
+      });
+      ctx.fileState?.record(target, written);
     } catch (err) {
+      const msg =
+        err instanceof FileChangedError
+          ? `${err.message}; nothing was written. Read the file again and retry.`
+          : (err as Error).message;
       return {
         ok: false,
-        error: `Failed to write "${path}": ${(err as Error).message}`,
+        error: `Failed to write "${path}": ${msg}`,
         recoverable: true,
       };
     }
 
-    const diff = generateUnifiedDiff(path, original, updated);
+    // El diff se calcula sin `\r`: con CRLF cada línea llevaría un `^M` visible.
+    const diff = generateUnifiedDiff(
+      path,
+      file.text.replace(/\r\n/g, '\n'),
+      updated.replace(/\r\n/g, '\n'),
+    );
     const replacedNote = replace_all ? ` (${occurrences} occurrences replaced)` : '';
     return { ok: true, output: `File edited: ${path}${replacedNote}\n\n${diff}` };
   },

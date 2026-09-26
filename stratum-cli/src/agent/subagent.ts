@@ -29,6 +29,7 @@ import { strictestPolicy } from './profiles.js';
 import { prepareGuideIndex } from './guides.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
+import { FileStateTracker } from '../tools/fs/file-state.js';
 
 const log = getLogger('agent.subagent');
 
@@ -195,7 +196,12 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     router.model,
     router.contextWindow,
     router,
-    { toolsetFilter: { allowedTools: profile.allowedTools, isSubagent: true } },
+    {
+      toolsetFilter: { allowedTools: profile.allowedTools, isSubagent: true },
+      // Propio, no el del padre: lo que escribe el hijo no cuenta como leído
+      // por el padre, que tendrá que releerlo antes de sobrescribirlo.
+      fileState: new FileStateTracker(),
+    },
   );
 
   const runOpts: RunOptions = {
