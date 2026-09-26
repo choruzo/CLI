@@ -166,7 +166,7 @@ function sleepSync(ms: number): void {
  * Rename con reintentos: en Windows un antivirus o un indexador que tiene el
  * destino abierto un instante hace fallar el rename con EPERM/EBUSY.
  */
-function renameWithRetry(from: string, to: string): void {
+export function renameWithRetry(from: string, to: string): void {
   let delay = 10;
   for (let attempt = 0; ; attempt++) {
     try {

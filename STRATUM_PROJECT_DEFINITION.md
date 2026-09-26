@@ -1247,7 +1247,15 @@ Cada server se instala en su **subdirectorio aislado** (`<installDir>/<server>/`
 
 La carpeta gestionada **se crea automáticamente** (`mkdirSync(..., { recursive: true })`) la primera vez que se resuelve un server con `package` o al ejecutar `stratum mcp install`.
 
-**Comando:** `stratum mcp install [server] [--force]` instala todos los servers con `package` (o uno concreto) en la carpeta gestionada; idempotente, salta los ya instalados salvo `--force`.
+**Instalación transaccional (endurecimiento posterior a 0.6.0).** «Instalado» ya no es «existe `node_modules/<pkg>/package.json`» —un `npm install` cortado a mitad deja el paquete extraído sin sus dependencias y el server fallaba en cada arranque sin repararse nunca—, sino:
+
+- `npm install` corre en `<installDir>/.staging-<server>-<pid>-<rand>/`, propia de cada proceso. Al terminar se resuelve y comprueba el entry, se escribe el **marcador** `.stratum-install.json` (`{ schemaVersion: 1, server, package, entry, installedAt }`, entry relativo) **lo último**, y la carpeta se renombra a `<server>/`. Si ya existía, se aparta a `.trash-…` antes y se restaura si el segundo rename falla; si no se puede apartar (Windows con el server en uso), la instalación anterior queda intacta y se avisa.
+- Cuenta como instalado solo un marcador válido, del mismo `server` (dos nombres que se sanitizan igual → error de colisión, no reinstalaciones alternas), con el mismo `package` que la config (cambiar la versión reinstala) y cuyo entry existe dentro de la carpeta. Una instalación **legacy** (sin marcador) se reinstala; si no se puede (sin red o `autoInstall: false`), se usa tal cual con un aviso.
+- Dos procesos que instalan a la vez no comparten carpeta: gana el primer rename y el otro descarta la suya (salvo `--force`). En un proceso, las instalaciones del mismo server se unen en una promesa.
+- `npm install` tiene timeout (5 min) y, tras un fallo de auto-instalación, no se relanza durante 60 s: la reconexión con backoff no puede convertirse en un bucle de `npm install`. Los restos de staging/papelera de más de una hora se barren al instalar.
+- Limitación: un paquete cuyo `postinstall` grabe rutas absolutas a su propia carpeta verá la de staging. No se conoce ninguno entre los servers MCP habituales.
+
+**Comando:** `stratum mcp install [server] [--force]` instala todos los servers con `package` (o uno concreto) en la carpeta gestionada; idempotente, salta los ya instalados salvo `--force`; los desactualizados, incompletos o legacy se reinstalan sin necesidad de `--force`.
 
 **Decisión (opción 3): arranque no bloqueante + `startupTimeout`.** Dos mecanismos independientes:
 

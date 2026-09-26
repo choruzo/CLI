@@ -4,7 +4,7 @@ import { McpManager } from '../../tools/mcp/manager.js';
 import {
   ensureInstallDir,
   installServer,
-  isServerInstalled,
+  installState,
   serverInstallPath,
 } from '../../tools/mcp/installer.js';
 
@@ -99,15 +99,33 @@ const mcpInstall = new Command('install')
     }
 
     for (const server of targets) {
-      const already = isServerInstalled(server, installDir);
-      if (already && !opts.force) {
+      const state = installState(server, installDir);
+      if (state.kind === 'installed' && !opts.force) {
         process.stdout.write(
           `● ${server.name}  ya instalado (${serverInstallPath(installDir, server.name)})\n`,
         );
         continue;
       }
+      if (state.kind === 'collision') {
+        process.stderr.write(
+          `✗ ${server.name}: su carpeta la usa el server '${state.owner}' ` +
+            '(mismo nombre al sanitizar). Renombra uno de los dos.\n',
+        );
+        continue;
+      }
+      if (state.kind === 'outdated') {
+        process.stdout.write(
+          `  ${server.name}: instalado '${state.installed}', se actualiza a '${server.package}'\n`,
+        );
+      } else if (state.kind === 'legacy' || state.kind === 'broken') {
+        process.stdout.write(
+          `  ${server.name}: instalación incompleta o sin marcador, se reinstala\n`,
+        );
+      }
       try {
-        await installServer(server, installDir, (line) => process.stdout.write(`  ${line}\n`));
+        await installServer(server, installDir, (line) => process.stdout.write(`  ${line}\n`), {
+          force: opts.force === true,
+        });
         process.stdout.write(`✔ ${server.name}\n`);
       } catch (err) {
         process.stderr.write(

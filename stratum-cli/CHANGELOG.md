@@ -8,9 +8,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), y de la escritura de ficheros del usuario (`write_file` / `edit_file`).
+Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), y de la escritura de ficheros del usuario (`write_file` / `edit_file`) y de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`).
 
 ### Corregido
+- **MCP**: un `npm install` cortado a mitad (Ctrl+C, cierre, corte de red) dejaba el server como «instalado» con dependencias ausentes, y fallaba en cada arranque sin repararse. La instalación se hace ahora en una carpeta temporal que solo sustituye a la definitiva cuando está completa, con un marcador `.stratum-install.json`.
+- **MCP**: cambiar la versión de `package` en la config no actualizaba el server; ahora se reinstala (`stratum mcp install` lo hace sin `--force`).
+- **MCP**: si reinstalar falla, la instalación anterior sigue funcionando. Una instalación hecha con versiones anteriores de Stratum se reinstala una vez; sin red o con `autoInstall: false` se sigue usando.
+- **MCP**: dos `chat` arrancando a la vez ya no ejecutan `npm install` sobre la misma carpeta.
+- **MCP**: `npm install` tiene un límite de 5 minutos, y tras un fallo no se relanza en cada reconexión durante un minuto.
+- **MCP**: dos servers cuyos nombres coinciden al sanitizarse (`a.b` y `a_b`) dan un error claro en vez de reinstalarse el uno encima del otro.
 - **`write_file` / `edit_file`**: la escritura es atómica (temporal + fsync + rename). Un cierre, un corte o un Ctrl+C a mitad ya no puede dejar el fichero del usuario truncado.
 - **`edit_file`**: un `new_string` con `$&`, `$$` o `$1` (shell, PowerShell, PHP, plantillas JS) se insertaba alterado; ahora se inserta literalmente.
 - **`edit_file`**: en ficheros con finales de línea CRLF, un `old_string` de varias líneas no casaba nunca porque el modelo lo escribe con `\n`. Ahora casa, y el texto nuevo se adapta a CRLF en vez de dejar líneas LF sueltas.
