@@ -19,7 +19,7 @@ import {
   type LivenessProbe,
 } from './subagent-store.js';
 import { SessionStore } from './store.js';
-import { deleteSessionAndSubagents, pruneSessionsAndSubagents } from './cleanup.js';
+import { deleteSessionWithArtifacts, pruneSessionsWithArtifacts } from './cleanup.js';
 import type { SubagentResult } from '../agent/types.js';
 
 const DAY = 24 * 60 * 60 * 1000;
@@ -332,7 +332,7 @@ describe('limpieza de sesiones con sus subagentes (8B endurecido)', () => {
     subs.saveResult('sub_a', 'code', 't', result('sub_a'), { sessionId: s.id });
     subs.saveResult('sub_b', 'code', 't', result('sub_b'), { sessionId: 'otra' });
     // Se borra desde otro cwd: cuenta el `project` guardado.
-    expect(deleteSessionAndSubagents(sessions, s.id)).toEqual({ subagents: 1 });
+    expect(deleteSessionWithArtifacts(sessions, s.id)).toEqual({ subagents: 1, plans: 0 });
     expect(subs.list().map((r) => r.id)).toEqual(['sub_b']);
     expect(() => sessions.load(s.id)).toThrow();
   });
@@ -343,8 +343,8 @@ describe('limpieza de sesiones con sus subagentes (8B endurecido)', () => {
     const subs = new SubagentStore(project);
     subs.saveResult('sub_old', 'code', 't', result('sub_old'), { sessionId: old.id });
     subs.saveResult('sub_new', 'code', 't', result('sub_new'), { sessionId: recent.id });
-    const out = pruneSessionsAndSubagents(sessions, 30 * DAY, join(root, 'otro-cwd'));
-    expect(out).toEqual({ sessions: 1, subagents: 1 });
+    const out = pruneSessionsWithArtifacts(sessions, 30 * DAY, join(root, 'otro-cwd'));
+    expect(out).toEqual({ sessions: 1, subagents: 1, plans: 0 });
     expect(subs.list().map((r) => r.id)).toEqual(['sub_new']);
   });
 });

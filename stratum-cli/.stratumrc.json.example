@@ -198,6 +198,7 @@
   },
   "session": {
     "profile": "auto",
+    "planRetentionDays": 30,
     "profiles": {
       "ops": {
         "description": "guardias",

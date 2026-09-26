@@ -14,6 +14,8 @@ import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { SessionStore, generateSessionId } from '../../session/store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
+import { prepareSessionResume } from '../../session/resume.js';
+import { pruneOldPlans } from '../../session/cleanup.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
 import { animateStartupLogo } from '../ui/startup-logo-animation.js';
@@ -144,6 +146,7 @@ export const chatCommand = new Command('chat')
       const subagentStore = new SubagentStore(process.cwd());
       const retentionDays = config.agents.subagentRetentionDays;
       if (retentionDays > 0) subagentStore.prune(retentionDays * 24 * 60 * 60 * 1000);
+      pruneOldPlans(store, process.cwd(), config.session.planRetentionDays);
       let sessionCreatedAt: string | undefined;
       let agentOptions = {};
       // Hito 17: una sesión read-only se reanuda read-only; el perfil guardado se
@@ -159,48 +162,33 @@ export const chatCommand = new Command('chat')
           sessionCreatedAt = saved.createdAt;
           process.stderr.write(`Reanudando sesión ${saved.id}\n`);
 
-          // Hito 7 — reanudación de plan interrumpido (§12.6): si la sesión llevaba
-          // un planRef cuyo plan quedó in_progress, inyectar el preámbulo de
-          // reanudación con el estado de cada paso.
-          if (saved.planRef) {
-            const { PlanStore } = await import('../../session/plan-store.js');
-            const { buildResumePreamble } = await import('../../agent/plan.js');
-            const planFile = new PlanStore(process.cwd()).read(saved.planRef);
-            if (planFile && planFile.status === 'in_progress') {
-              agentOptions = {
-                initialMessages: saved.messages,
-                resumePreamble: buildResumePreamble(planFile.plan),
-                planRef: saved.planRef,
-                resumePlan: planFile.plan,
-                resumeTask: planFile.task,
-                resumeCreatedAt: planFile.createdAt,
-              };
-              process.stderr.write(`Reanudando plan in_progress (${saved.planRef})\n`);
-            }
+          // Hito 7 / 8B — plan a medias y subagentes interrumpidos (§12.6, §12.16),
+          // buscados en el proyecto de la sesión. Los subagentes no se
+          // reejecutan (no son idempotentes): el preámbulo pide verificar, y los
+          // avisados se marcan tras guardar la sesión.
+          const resume = prepareSessionResume(saved, process.cwd());
+          for (const w of resume.warnings) process.stderr.write(`[stratum] ${w}\n`);
+          if (resume.preamble) {
+            agentOptions = { initialMessages: saved.messages, resumePreamble: resume.preamble };
           }
-
-          // Hito 8B — subagentes interrumpidos (§12.16): si la sesión anterior
-          // murió a mitad de un delegate_task, su marca `running` sigue en disco.
-          // Se inyecta un preámbulo que instruye al padre a verificar el estado
-          // (NO se reejecutan automáticamente: un subagente no es idempotente).
-          // 8B endurecido: solo los de ESTA sesión y con el dueño muerto, sin repetir
-          // lo que el historial ya avisó; se marcan tras guardar la sesión.
-          const { planSubagentResume } = await import('../../agent/subagent.js');
-          const resumePlan = planSubagentResume(
-            subagentStore.findOrphaned(saved.id),
-            saved.messages,
-          );
-          resumePlan.alreadyReported.forEach((s) => subagentStore.markInterrupted(s.id));
-          if (resumePlan.preamble) {
-            const prev = (agentOptions as { resumePreamble?: string }).resumePreamble;
+          if (resume.plan) {
             agentOptions = {
               ...agentOptions,
-              initialMessages: saved.messages,
-              resumePreamble: prev ? `${prev}\n\n${resumePlan.preamble}` : resumePlan.preamble,
+              planRef: resume.plan.ref,
+              resumePlan: resume.plan.plan,
+              resumeTask: resume.plan.task,
+              resumeCreatedAt: resume.plan.createdAt,
+              resumePlanRoot: resume.plan.root,
             };
-            subagentStore.deferInterrupted(resumePlan.report.map((s) => s.id));
+            process.stderr.write(`Reanudando plan in_progress (${resume.plan.ref})\n`);
+          }
+          if (resume.orphans.length > 0) {
+            subagentStore.deferInterrupted(
+              resume.orphans.map((o) => o.id),
+              resume.subagentStore,
+            );
             process.stderr.write(
-              `Reanudando: ${resumePlan.report.length} subagente(s) interrumpido(s)\n`,
+              `Reanudando: ${resume.orphans.length} subagente(s) interrumpido(s)\n`,
             );
           }
           // Hito 15: perfil activo como agente principal. Se añade al final

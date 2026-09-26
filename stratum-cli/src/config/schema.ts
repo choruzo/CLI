@@ -541,6 +541,12 @@ export const StratumConfigSchema = z.object({
           SessionProfileSchema,
         )
         .default({}),
+      /**
+       * Días que se conservan los planes de `.stratum/plans/`. `chat` purga al
+       * arrancar los que lleven más sin tocarse, salvo los que una sesión guardada
+       * todavía puede reanudar. `0` lo desactiva.
+       */
+      planRetentionDays: z.number().int().nonnegative().default(30),
     })
     .default({}),
 

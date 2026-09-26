@@ -67,8 +67,8 @@ import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
-import { deleteSessionAndSubagents } from '../../session/cleanup.js';
-import { planSubagentResume } from '../../agent/subagent.js';
+import { deleteSessionWithArtifacts, describeArtifacts } from '../../session/cleanup.js';
+import { prepareSessionResume } from '../../session/resume.js';
 
 /** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
 type OverlayState =
@@ -213,6 +213,7 @@ export type AppAction =
   | { type: 'QUESTIONS_RESOLVE' }
   | { type: 'PLAN_MODE_START' }
   | { type: 'APPROVE_PLAN'; plan: Plan }
+  | { type: 'RESUME_PLAN'; plan: Plan }
   | { type: 'REJECT_PLAN' }
   | { type: 'FOCUS_BLOCKS' }
   | { type: 'FOCUS_MOVE'; delta: number }
@@ -410,6 +411,8 @@ export function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, planMode: 'plan', plan: null, pendingApproval: false };
 
     case 'APPROVE_PLAN':
+    // `/sessions resume` de una sesión con un plan a medias: mismo estado que tras aprobarlo.
+    case 'RESUME_PLAN':
       return { ...state, planMode: 'execute', plan: action.plan, pendingApproval: false };
 
     case 'REJECT_PLAN':
@@ -893,10 +896,26 @@ export function App({
       description: describeProfile(p).replace(/\\\|/g, '|'),
     })),
   );
-  // PlanStore para re-persistir las actualizaciones de pasos de un plan reanudado.
-  const resumePlanStoreRef = useRef<PlanStore | null>(
-    resumeInfo ? new PlanStore(process.cwd()) : null,
-  );
+  // Plan reanudado cuyos pasos hay que seguir persistiendo: el del arranque
+  // (`chat --resume`) o el de una sesión cargada con `/sessions resume`. Su
+  // fichero vive en el proyecto de esa sesión, que puede no ser el cwd.
+  const activePlanRef = useRef<{
+    ref: string;
+    task: string;
+    createdAt: string;
+    store: PlanStore;
+  } | null>(null);
+  if (activePlanRef.current === null && resumeInfo) {
+    const ref = agent.getPlanRef();
+    if (ref) {
+      activePlanRef.current = {
+        ref,
+        task: resumeInfo.task,
+        createdAt: resumeInfo.createdAt,
+        store: new PlanStore(resumeInfo.root ?? process.cwd()),
+      };
+    }
+  }
   // SubagentStore (Hito 8B): persiste resultados de subagentes en cada run para
   // que un cuelgue a mitad de un delegate_task se detecte como interrumpido.
   const subagentStoreRef = useRef<SubagentStore>(subagentStore ?? new SubagentStore(process.cwd()));
@@ -1057,16 +1076,14 @@ export function App({
       opts.plan = planDataRef.current;
       // El preámbulo de reanudación ya está en el historial; no re-inyectar el checklist.
       opts.isResumePlan = true;
-      if (resumeInfo && resumePlanStoreRef.current) {
-        const planRef = agent.getPlanRef();
-        if (planRef) {
-          opts.onPlanPersist = (p, _done) =>
-            resumePlanStoreRef.current!.save(planRef, resumeInfo.task, p, resumeInfo.createdAt);
-        }
+      const active = activePlanRef.current;
+      if (active) {
+        opts.onPlanPersist = (p, _done) =>
+          active.store.save(active.ref, active.task, p, active.createdAt);
       }
     }
     return opts;
-  }, [onConfirmDestructive, onAskQuestions, resumeInfo, agent, sessionId]);
+  }, [onConfirmDestructive, onAskQuestions, agent, sessionId]);
 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
@@ -1173,6 +1190,8 @@ export function App({
       const planStore = new PlanStore(process.cwd());
       const createdAt = new Date().toISOString();
       agent.setPlanRef(planRef);
+      // Un plan nuevo sustituye al reanudado: sus pasos ya no se persisten.
+      activePlanRef.current = null;
 
       dispatch({ type: 'PLAN_MODE_START' });
       void send(prompt, {
@@ -1822,29 +1841,34 @@ export function App({
         try {
           const saved = sessionStore().load(id);
           const notice = agent.replaceHistory(saved.messages, saved.activeAgent, saved.readOnly);
-          // 8B endurecido: los subagentes que esa sesión dejó huérfanos se avisan igual
-          // que en `chat --resume`; se marcan cuando esta sesión se guarde.
-          const subStore = subagentStoreRef.current;
-          const resumePlan = planSubagentResume(subStore.findOrphaned(saved.id), saved.messages);
-          resumePlan.alreadyReported.forEach((o) => subStore.markInterrupted(o.id));
-          if (resumePlan.preamble) {
-            agent.appendResumePreamble(resumePlan.preamble);
-            subStore.deferInterrupted(resumePlan.report.map((o) => o.id));
-          }
+          // Lo mismo que `chat --resume` (Hito 7 / 8B): plan a medias y subagentes
+          // huérfanos; estos se marcan cuando esta sesión se guarde.
+          const resume = prepareSessionResume(saved, process.cwd());
+          if (resume.preamble) agent.appendResumePreamble(resume.preamble);
+          subagentStoreRef.current.deferInterrupted(
+            resume.orphans.map((o) => o.id),
+            resume.subagentStore,
+          );
+          activePlanRef.current = resume.plan
+            ? { ...resume.plan, store: new PlanStore(resume.plan.root) }
+            : null;
+          if (resume.plan) agent.setPlanRef(resume.plan.ref);
           setActiveAgent(agent.getActiveProfile()?.name ?? null);
           refreshSessionBadges();
           process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
           dispatch({ type: 'CLEAR' });
           dispatch({ type: 'RESTORE_HISTORY', items: messagesToConvItems(saved.messages) });
-          dispatch({
-            type: 'SYSTEM_MESSAGE',
-            text:
-              `Sesión ${saved.id} reanudada (${saved.messages.length} mensajes).` +
-              (resumePlan.report.length > 0
-                ? `\n${resumePlan.report.length} subagente(s) interrumpido(s): el agente verificará su estado antes de seguir.`
-                : '') +
-              (notice ? `\n${notice}` : ''),
-          });
+          if (resume.plan) dispatch({ type: 'RESUME_PLAN', plan: resume.plan.plan });
+          const lines = [`Sesión ${saved.id} reanudada (${saved.messages.length} mensajes).`];
+          if (resume.plan) lines.push(`Plan en curso reanudado (${resume.plan.ref}).`);
+          if (resume.orphans.length > 0) {
+            lines.push(
+              `${resume.orphans.length} subagente(s) interrumpido(s): el agente verificará su estado antes de seguir.`,
+            );
+          }
+          lines.push(...resume.warnings);
+          if (notice) lines.push(notice);
+          dispatch({ type: 'SYSTEM_MESSAGE', text: lines.join('\n') });
           refreshContext();
         } catch (err) {
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al reanudar: ${String(err)}` });
@@ -1860,12 +1884,10 @@ export function App({
           return;
         }
         try {
-          const { subagents } = deleteSessionAndSubagents(sessionStore(), id);
+          const removed = deleteSessionWithArtifacts(sessionStore(), id);
           dispatch({
             type: 'SYSTEM_MESSAGE',
-            text:
-              `Sesión "${id}" eliminada.` +
-              (subagents > 0 ? ` (y ${subagents} registro(s) de subagente)` : ''),
+            text: `Sesión "${id}" eliminada${describeArtifacts(removed)}.`,
           });
         } catch (err) {
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Error: ${String(err)}` });

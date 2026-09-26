@@ -223,7 +223,7 @@ export class SubagentStore {
   private readonly probe: () => LivenessProbe;
   private readonly heartbeats = new Map<string, NodeJS.Timeout>();
   /** Huérfanos ya contados al modelo, a marcar cuando el aviso quede guardado. */
-  private readonly deferred = new Set<string>();
+  private readonly deferred = new Map<string, SubagentStore>();
 
   constructor(projectRoot: string, opts?: { probe?: () => LivenessProbe }) {
     this.dir = join(projectRoot, '.stratum', 'subagents');
@@ -375,13 +375,15 @@ export class SubagentStore {
    * durable cuando la sesión que lo contiene se guarda. Marcar antes y perder la
    * sesión (proceso muerto antes de guardar) borraría el aviso para siempre.
    */
-  deferInterrupted(ids: Iterable<string>): void {
-    for (const id of ids) this.deferred.add(id);
+  deferInterrupted(ids: Iterable<string>, owner: SubagentStore = this): void {
+    // `owner`: el store del proyecto de la sesión reanudada, que puede no ser
+    // el del cwd (reanudar desde otra carpeta).
+    for (const id of ids) this.deferred.set(id, owner);
   }
 
   /** Marca los aplazados. Llamar tras guardar la sesión. */
   commitDeferred(): void {
-    for (const id of this.deferred) this.markInterrupted(id);
+    for (const [id, owner] of this.deferred) owner.markInterrupted(id);
     this.deferred.clear();
   }
 

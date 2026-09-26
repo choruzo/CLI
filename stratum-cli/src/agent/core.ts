@@ -72,6 +72,8 @@ export interface StratumAgentOptions {
   resumeTask?: string;
   /** ISO 8601 de creación del plan reanudado (preservado en las escrituras sucesivas). */
   resumeCreatedAt?: string;
+  /** Proyecto donde vive el fichero del plan reanudado (el de la sesión, no el cwd). */
+  resumePlanRoot?: string;
   /**
    * Perfil activo como agente principal en la sesión reanudada (Hito 15). Se
    * reaplica recomponiendo el system prompt; si el perfil ya no es válido, se
@@ -154,6 +156,7 @@ export class StratumAgent {
   private _resumePlan: import('./types.js').Plan | null = null;
   private _resumeTask: string | null = null;
   private _resumeCreatedAt: string | null = null;
+  private _resumePlanRoot: string | null = null;
   /**
    * Perfil activo como agente principal (Hito 15, `/agent <perfil>`). Cambia el
    * system prompt y restringe el toolset; no el provider ni el modelo.
@@ -225,6 +228,7 @@ export class StratumAgent {
       this._resumePlan = options.resumePlan;
       this._resumeTask = options.resumeTask ?? null;
       this._resumeCreatedAt = options.resumeCreatedAt ?? null;
+      this._resumePlanRoot = options.resumePlanRoot ?? null;
     }
 
     if (options?.initialMessages && options.initialMessages.length > 0) {
@@ -516,13 +520,20 @@ export class StratumAgent {
    * fecha de creación para que App.tsx inicialice el estado de UI en execute.
    * Se borra tras la primera llamada para no mantener la referencia innecesariamente.
    */
-  getResumePlan(): { plan: import('./types.js').Plan; task: string; createdAt: string } | null {
+  getResumePlan(): {
+    plan: import('./types.js').Plan;
+    task: string;
+    createdAt: string;
+    root: string | null;
+  } | null {
     if (!this._resumePlan) return null;
     const result = {
       plan: this._resumePlan,
       task: this._resumeTask ?? '',
       createdAt: this._resumeCreatedAt ?? new Date().toISOString(),
+      root: this._resumePlanRoot,
     };
+    this._resumePlanRoot = null;
     this._resumePlan = null;
     this._resumeTask = null;
     this._resumeCreatedAt = null;

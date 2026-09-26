@@ -8,7 +8,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de subagentes (`.stratum/subagents/`).
+Endurecimiento de la persistencia de subagentes (`.stratum/subagents/`) y de planes (`.stratum/plans/`).
 
 ### Corregido
 - Al reanudar una sesión solo se avisa de los subagentes interrumpidos **de esa sesión**. Antes se adoptaban los de cualquier sesión del proyecto, y con dos `chat` abiertos se daba por interrumpido un subagente que seguía corriendo en la otra terminal.
@@ -16,9 +16,13 @@ Endurecimiento de la persistencia de subagentes (`.stratum/subagents/`).
 - `/sessions resume` dentro del chat también avisa de los subagentes interrumpidos, igual que `chat --resume`.
 - El aviso ya no se pierde si el proceso muere antes de guardar la sesión: los registros se marcan después de guardarla, y un aviso que ya está en el historial no se repite.
 - Los registros se validan al leerlos (`schemaVersion`); uno roto se ignora y uno de un Stratum más nuevo no se reescribe ni se borra.
+- Un plan dañado ya no impide reanudar la sesión: se avisa y se reanuda sin él (antes `chat --resume` salía con error). Los planes también se validan y llevan `schemaVersion`.
+- La referencia al plan guardada en la sesión se valida antes de usarla como ruta: ya no puede leer ni escribir fuera de `.stratum/plans/`.
+- `/sessions resume` dentro del chat retoma también el plan a medias de la sesión cargada, igual que `chat --resume`.
+- Reanudar una sesión desde otra carpeta encuentra su plan y sus subagentes: se buscan en el proyecto de la sesión, no en el directorio actual.
 
 ### Añadido
-- `sessions delete` y `sessions prune` borran también los registros de subagente de esas sesiones, y `chat` poda al arrancar los de más de `agents.subagentRetentionDays` días (30 por defecto; `0` lo desactiva).
+- `sessions delete` y `sessions prune` borran también los registros de subagente y el plan de esas sesiones (un plan que otra sesión todavía puede reanudar se conserva). `chat` poda al arrancar los registros de más de `agents.subagentRetentionDays` días y los planes de más de `session.planRetentionDays` (30 por defecto en ambos; `0` lo desactiva).
 
 ## [0.6.0] — 2026-09-25
 

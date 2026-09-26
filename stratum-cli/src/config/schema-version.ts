@@ -29,6 +29,9 @@ export const SESSION_SCHEMA_VERSION = 1;
  */
 export const SUBAGENT_SCHEMA_VERSION = 1;
 
+/** Versión del formato de plan persistido (`.stratum/plans/*.json`). Mismas reglas. */
+export const PLAN_SCHEMA_VERSION = 1;
+
 export type SchemaKind = 'config' | 'session';
 
 export type SchemaVersionCheck =
