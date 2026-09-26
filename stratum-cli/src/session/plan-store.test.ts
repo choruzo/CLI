@@ -227,16 +227,23 @@ describe('limpieza de planes con las sesiones', () => {
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  const save = (planRef: string, createdAt?: string) =>
-    sessions.save({
+  /** Con `usedAt`, la sesión queda sin usar desde esa fecha (prune mira `updatedAt`). */
+  const save = async (planRef: string, usedAt?: string) => {
+    const s = await sessions.save({
       provider: 'p',
       model: 'm',
       project,
       messages: [{ role: 'user', content: 'hola' }],
       toolCallCount: 0,
       planRef,
-      ...(createdAt ? { createdAt } : {}),
     });
+    if (usedAt) {
+      const file = join(root, 'sessions', `${s.id}.json`);
+      const raw = JSON.parse(readFileSync(file, 'utf-8'));
+      writeFileSync(file, JSON.stringify({ ...raw, createdAt: usedAt, updatedAt: usedAt }));
+    }
+    return s;
+  };
 
   it('sessions delete borra su plan salvo que otra sesión lo use', async () => {
     const plans = new PlanStore(project);

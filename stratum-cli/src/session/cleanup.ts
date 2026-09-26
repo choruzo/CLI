@@ -19,14 +19,16 @@ function projectOf(project: string | undefined): string | null {
 /** Refs de plan que alguna sesión guardada todavía puede reanudar. null si no se pueden leer. */
 function referencedPlanRefs(store: SessionStore): Set<string> | null {
   try {
+    const { sessions, skipped } = store.scan();
+    // Una sesión ilegible puede referenciar cualquier plan: no se borra ninguno.
+    if (skipped.length > 0) return null;
     const refs = new Set<string>();
-    for (const s of store.list()) {
+    for (const s of sessions) {
       const ref = s.planRef ? normalizePlanRef(s.planRef) : null;
       if (ref) refs.add(ref);
     }
     return refs;
   } catch {
-    // Una sesión ilegible: no se sabe qué planes siguen en uso, así que no se borra ninguno.
     return null;
   }
 }

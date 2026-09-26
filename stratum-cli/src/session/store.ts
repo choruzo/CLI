@@ -1,9 +1,18 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, readdirSync, unlinkSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
+import { z } from 'zod';
 import type { SessionContext } from './types.js';
 import type { IProvider } from '../providers/base.js';
 import type { Message } from '../agent/types.js';
-import { SESSION_SCHEMA_VERSION, assertSchemaVersion } from '../config/schema-version.js';
+import {
+  SESSION_SCHEMA_VERSION,
+  SchemaVersionError,
+  assertSchemaVersion,
+} from '../config/schema-version.js';
+import { writeFileAtomic } from '../config/writer.js';
+import { getLogger } from '../logging/index.js';
+
+const log = getLogger('session');
 
 // ---------------------------------------------------------------------------
 // Generación de IDs de sesión
@@ -35,6 +44,100 @@ export function generateSessionId(): string {
 }
 
 // ---------------------------------------------------------------------------
+// Validación
+// ---------------------------------------------------------------------------
+
+/**
+ * Id de sesión válido: el que genera `generateSessionId`. El id llega del
+ * usuario (`sessions delete <id>`, `/sessions resume <id>`) y se usa como
+ * nombre de fichero: sin esta comprobación, `../../x` borraba cualquier `.json`.
+ */
+const SESSION_ID_RE = /^sess_[A-Za-z0-9_-]+$/;
+
+export function isSessionId(id: string): boolean {
+  return SESSION_ID_RE.test(id);
+}
+
+const MessageSchema = z
+  .object({
+    role: z.enum(['system', 'user', 'assistant', 'tool']),
+    content: z.string().nullable().optional(),
+  })
+  .passthrough();
+
+// Solo la forma que el resto del código da por supuesta; `passthrough` para no
+// perder al reescribir un campo que añada una versión compatible.
+const SessionSchema = z
+  .object({
+    schemaVersion: z.unknown().optional(),
+    id: z.string(),
+    createdAt: z.string(),
+    updatedAt: z.string(),
+    provider: z.string(),
+    model: z.string(),
+    project: z.string(),
+    messages: z.array(MessageSchema),
+    toolCallCount: z.number().default(0),
+    summary: z.string().default(''),
+    planRef: z.string().optional(),
+    activeAgent: z.string().optional(),
+    readOnly: z.boolean().optional(),
+    sessionProfile: z.string().optional(),
+    forkedFrom: z.string().optional(),
+  })
+  .passthrough();
+
+/** Una sesión que existe pero no se puede usar (JSON roto o forma inválida). */
+export class SessionCorruptError extends Error {
+  constructor(
+    readonly id: string,
+    readonly reason: string,
+  ) {
+    super(`La sesión "${id}" está dañada (${reason}).`);
+    this.name = 'SessionCorruptError';
+  }
+}
+
+/** Valida un JSON ya parseado. Lanza `SchemaVersionError` o `SessionCorruptError`. */
+export function parseSession(raw: unknown, id: string, source: string): SessionContext {
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new SessionCorruptError(id, 'no es un objeto');
+  }
+  assertSchemaVersion((raw as { schemaVersion?: unknown }).schemaVersion, 'session', source);
+  const parsed = SessionSchema.safeParse(raw);
+  if (!parsed.success) {
+    const issue = parsed.error.issues[0];
+    throw new SessionCorruptError(
+      id,
+      `${issue?.path.join('.') || '(raíz)'}: ${issue?.message ?? 'inválido'}`,
+    );
+  }
+  if (parsed.data.id !== id) {
+    throw new SessionCorruptError(id, `el fichero contiene la sesión ${parsed.data.id}`);
+  }
+  return parsed.data as unknown as SessionContext;
+}
+
+/** Sesión que `scan` no pudo leer y omitió. */
+export interface SkippedSession {
+  file: string;
+  reason: string;
+  /** De un Stratum más nuevo (no se toca) o dañada. */
+  kind: 'newer' | 'corrupt';
+}
+
+/** Aviso legible de las sesiones omitidas por `scan`; null si no hay ninguna. */
+export function describeSkippedSessions(skipped: SkippedSession[]): string | null {
+  if (skipped.length === 0) return null;
+  const lines = skipped.map((s) =>
+    s.kind === 'newer'
+      ? `  ${s.file}: guardada por una versión más nueva de Stratum`
+      : `  ${s.file}: ${s.reason}`,
+  );
+  return `${skipped.length} sesión(es) no se pudieron leer y se omiten:\n${lines.join('\n')}`;
+}
+
+// ---------------------------------------------------------------------------
 // SessionStore — §12.6
 // ---------------------------------------------------------------------------
 
@@ -58,6 +161,14 @@ export interface SaveSessionParams {
   readOnly?: boolean;
   /** Hito 17 — perfil de sesión pedido. */
   sessionProfile?: string | null;
+  /**
+   * `updatedAt` de la versión en disco de la que parte esta conversación (la
+   * que se cargó al reanudar). Si al guardar el fichero ya no está en esa
+   * versión —otra terminal lo guardó entretanto—, no se pisa: la conversación
+   * se guarda como sesión nueva con `forkedFrom`. Sin este campo, que ya exista
+   * un fichero con `existingId` también cuenta como conflicto.
+   */
+  expectedUpdatedAt?: string;
 }
 
 export interface ListOptions {
@@ -74,7 +185,23 @@ export class SessionStore {
   }
 
   private sessionPath(id: string): string {
+    if (!isSessionId(id)) {
+      throw new Error(`Id de sesión inválido: ${JSON.stringify(id.slice(0, 80))}`);
+    }
     return join(this.sessionsDir, `${id}.json`);
+  }
+
+  /** `updatedAt` de la sesión en disco; null si no existe. */
+  private diskUpdatedAt(id: string): string | null {
+    try {
+      const raw = JSON.parse(readFileSync(this.sessionPath(id), 'utf-8')) as {
+        updatedAt?: unknown;
+      };
+      return typeof raw.updatedAt === 'string' ? raw.updatedAt : 'unknown';
+    } catch (err) {
+      // Existe pero ilegible: tampoco es la versión de la que partimos.
+      return (err as NodeJS.ErrnoException).code === 'ENOENT' ? null : 'unreadable';
+    }
   }
 
   // -------------------------------------------------------------------------
@@ -85,8 +212,20 @@ export class SessionStore {
     this.ensureDir();
 
     const now = new Date().toISOString();
-    const id = params.existingId ?? generateSessionId();
-    const createdAt = params.createdAt ?? now;
+    let id = params.existingId ?? generateSessionId();
+    let createdAt = params.createdAt ?? now;
+    let forkedFrom: string | undefined;
+    // Concurrencia optimista: si la sesión cambió en disco desde que se cargó,
+    // otra terminal la guardó. Pisarla perdería esa conversación sin avisar.
+    if (params.existingId) {
+      const onDisk = this.diskUpdatedAt(params.existingId);
+      if (onDisk !== null && onDisk !== params.expectedUpdatedAt) {
+        forkedFrom = params.existingId;
+        id = generateSessionId();
+        createdAt = now;
+        log.warn('session changed on disk: saving as a fork', { from: forkedFrom, to: id });
+      }
+    }
 
     // Contar rondas (user+assistant) para decidir si generar resumen
     const rounds = params.messages.filter((m) => m.role === 'user').length;
@@ -117,9 +256,12 @@ export class SessionStore {
       ...(params.activeAgent ? { activeAgent: params.activeAgent } : {}),
       ...(params.readOnly ? { readOnly: true } : {}),
       ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
+      ...(forkedFrom ? { forkedFrom } : {}),
     };
 
-    writeFileSync(this.sessionPath(id), JSON.stringify(ctx, null, 2), 'utf-8');
+    // Atómica: un cierre a mitad de escritura dejaba un JSON truncado y la
+    // conversación perdida.
+    writeFileAtomic(this.sessionPath(id), JSON.stringify(ctx, null, 2));
     return ctx;
   }
 
@@ -132,32 +274,57 @@ export class SessionStore {
     if (!existsSync(path)) {
       throw new Error(`Sesión "${id}" no encontrada en ${this.sessionsDir}`);
     }
-    const ctx = JSON.parse(readFileSync(path, 'utf-8')) as SessionContext;
-    assertSchemaVersion(ctx.schemaVersion, 'session', path);
-    return ctx;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, 'utf-8'));
+    } catch (err) {
+      throw new SessionCorruptError(id, err instanceof Error ? err.message : String(err));
+    }
+    return parseSession(raw, id, path);
   }
 
   // -------------------------------------------------------------------------
   // list
   // -------------------------------------------------------------------------
 
+  /** Sesiones legibles, más recientes primero. Omite (sin lanzar) las que no puede leer. */
   list(opts?: ListOptions): SessionContext[] {
-    if (!existsSync(this.sessionsDir)) return [];
+    return this.scan(opts).sessions;
+  }
+
+  /**
+   * Como `list`, pero dice qué omitió. Una sola sesión dañada no puede dejar
+   * sin `sessions list` ni `prune`; y quien borra algo según lo que
+   * referencian las sesiones tiene que saber que no las vio todas.
+   */
+  scan(opts?: ListOptions): { sessions: SessionContext[]; skipped: SkippedSession[] } {
+    if (!existsSync(this.sessionsDir)) return { sessions: [], skipped: [] };
 
     const files = readdirSync(this.sessionsDir).filter(
-      (f) => f.endsWith('.json') && f.startsWith('sess_'),
+      (f) => f.endsWith('.json') && isSessionId(f.slice(0, -'.json'.length)),
     );
+    const sessions: SessionContext[] = [];
+    const skipped: SkippedSession[] = [];
+    for (const f of files) {
+      try {
+        sessions.push(this.load(f.slice(0, -'.json'.length)));
+      } catch (err) {
+        const kind: SkippedSession['kind'] =
+          err instanceof SchemaVersionError && Number(err.found) > err.supported
+            ? 'newer'
+            : 'corrupt';
+        const reason = err instanceof Error ? err.message : String(err);
+        skipped.push({ file: f, reason, kind });
+        // debug: quien llama decide cómo mostrarlo (`describeSkippedSessions`).
+        log.debug('session skipped', { file: f, reason });
+      }
+    }
 
-    // Parsear y ordenar por updatedAt (más recientes primero) para orden estable
-    const sessions = files.map((f) => {
-      const raw = readFileSync(join(this.sessionsDir, f), 'utf-8');
-      return JSON.parse(raw) as SessionContext;
-    });
-
+    // Ordenar por updatedAt (más recientes primero) para orden estable
     sessions.sort((a, b) => (a.updatedAt > b.updatedAt ? -1 : a.updatedAt < b.updatedAt ? 1 : 0));
 
     const limit = opts?.last ?? sessions.length;
-    return sessions.slice(0, limit);
+    return { sessions: sessions.slice(0, limit), skipped };
   }
 
   // -------------------------------------------------------------------------
@@ -177,8 +344,9 @@ export class SessionStore {
   // -------------------------------------------------------------------------
 
   /**
-   * Elimina sesiones más antiguas que `olderThan` ms.
-   * Devuelve el número de sesiones eliminadas.
+   * Elimina las sesiones que llevan más de `olderThan` ms **sin usarse**
+   * (`updatedAt`, no `createdAt`: una sesión larga retomada ayer no es vieja).
+   * Las que no se pueden leer no se tocan. Devuelve cuántas borró.
    */
   prune(olderThanMs: number, onDeleted?: (session: SessionContext) => void): number {
     if (!existsSync(this.sessionsDir)) return 0;
@@ -188,8 +356,8 @@ export class SessionStore {
     let deleted = 0;
 
     for (const session of sessions) {
-      const createdMs = new Date(session.createdAt).getTime();
-      if (createdMs < cutoff) {
+      const usedMs = new Date(session.updatedAt).getTime();
+      if (usedMs < cutoff) {
         try {
           this.delete(session.id);
           deleted++;

@@ -8,9 +8,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de subagentes (`.stratum/subagents/`) y de planes (`.stratum/plans/`).
+Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`) y planes (`.stratum/plans/`).
 
 ### Corregido
+- **Sesiones**: se guardan de forma atómica; un cierre a mitad de escritura ya no deja la conversación truncada e irrecuperable.
+- **Sesiones**: con la misma sesión abierta en dos terminales, la que guarda en segundo lugar ya no pisa a la otra: su conversación se guarda como sesión nueva (`forkedFrom`) y se avisa con el id para reanudarla.
+- **Sesiones**: una sesión dañada ya no rompe `sessions list`, `/sessions list` ni `sessions prune`: se omite y se dice cuál. Al cargar se valida su forma y un error lo explica («está dañada (…)»).
+- **Sesiones**: `sessions prune` borra por último uso (`updatedAt`), no por fecha de creación: una sesión larga retomada ayer ya no se poda. Nunca borra una sesión que no puede leer ni una de un Stratum más nuevo.
+- **Sesiones**: el id se valida antes de usarlo como ruta; `sessions delete ../x` ya no puede borrar ficheros fuera de la carpeta de sesiones.
+- Si guardar la sesión al salir de `chat` falla, se dice en vez de perderla en silencio.
 - Al reanudar una sesión solo se avisa de los subagentes interrumpidos **de esa sesión**. Antes se adoptaban los de cualquier sesión del proyecto, y con dos `chat` abiertos se daba por interrumpido un subagente que seguía corriendo en la otra terminal.
 - Cada registro lleva el proceso dueño y un latido; un subagente solo cuenta como interrumpido si su proceso murió (o dejó de latir hace más de 3 minutos).
 - `/sessions resume` dentro del chat también avisa de los subagentes interrumpidos, igual que `chat --resume`.

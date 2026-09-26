@@ -315,15 +315,21 @@ describe('limpieza de sesiones con sus subagentes (8B endurecido)', () => {
   });
   afterEach(() => rmSync(root, { recursive: true, force: true }));
 
-  async function saveSession(createdAt?: string) {
-    return sessions.save({
+  /** Con `usedAt`, la sesión queda sin usar desde esa fecha (prune mira `updatedAt`). */
+  async function saveSession(usedAt?: string) {
+    const s = await sessions.save({
       provider: 'p',
       model: 'm',
       project,
       messages: [{ role: 'user', content: 'hola' }],
       toolCallCount: 0,
-      ...(createdAt ? { createdAt } : {}),
     });
+    if (usedAt) {
+      const file = join(root, 'sessions', `${s.id}.json`);
+      const raw = JSON.parse(readFileSync(file, 'utf-8'));
+      writeFileSync(file, JSON.stringify({ ...raw, createdAt: usedAt, updatedAt: usedAt }));
+    }
+    return s;
   }
 
   it('sessions delete borra también los registros de esa sesión en su proyecto', async () => {

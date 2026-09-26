@@ -22,7 +22,7 @@ import { StratumConfigSchema } from '../../config/schema.js';
 import { expandEnvVars, findConfigFile } from '../../config/loader.js';
 import { getByDotPath, setByDotPath, formatConfigValue } from '../../config/dot-path.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
-import { SessionStore } from '../../session/store.js';
+import { SessionStore, describeSkippedSessions } from '../../session/store.js';
 import { upsertProvider, readRawProvider } from '../../config/writer.js';
 import { detectCapabilities } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
@@ -1812,9 +1812,13 @@ export function App({
       if (cmd === '/sessions list') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         try {
-          const sessions = sessionStore().list({ last: 10 });
+          const { sessions, skipped } = sessionStore().scan({ last: 10 });
+          const skippedNotice = describeSkippedSessions(skipped);
           if (sessions.length === 0) {
-            dispatch({ type: 'SYSTEM_MESSAGE', text: 'No hay sesiones guardadas.' });
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: ['No hay sesiones guardadas.', skippedNotice].filter(Boolean).join('\n\n'),
+            });
             return;
           }
           const lines = sessions.map((s) => {
@@ -1823,7 +1827,9 @@ export function App({
           });
           dispatch({
             type: 'SYSTEM_MESSAGE',
-            text: `Sesiones guardadas (${sessions.length}):\n\n${lines.join('\n\n')}`,
+            text:
+              `Sesiones guardadas (${sessions.length}):\n\n${lines.join('\n\n')}` +
+              (skippedNotice ? `\n\n${skippedNotice}` : ''),
           });
         } catch (err) {
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Error: ${String(err)}` });

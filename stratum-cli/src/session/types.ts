@@ -36,4 +36,9 @@ export interface SessionContext {
   readOnly?: boolean;
   /** Hito 17 — perfil de sesión pedido (`auto`, `code`, `infra`…). */
   sessionProfile?: string;
+  /**
+   * La sesión de la que se separó esta al guardar: otra terminal había
+   * guardado la original mientras esta la tenía abierta (`SessionStore.save`).
+   */
+  forkedFrom?: string;
 }

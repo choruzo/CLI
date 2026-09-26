@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { loadConfig } from '../../config/loader.js';
-import { SessionStore, parseDuration } from '../../session/store.js';
+import { SessionStore, describeSkippedSessions, parseDuration } from '../../session/store.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import {
   deleteSessionWithArtifacts,
@@ -25,7 +25,9 @@ const sessionsList = new Command('list')
   .action((opts: { last?: string }) => {
     const store = getStore();
     const last = opts.last ? parseInt(opts.last, 10) : 10;
-    const sessions = store.list({ last });
+    const { sessions, skipped } = store.scan({ last });
+    const skippedNotice = describeSkippedSessions(skipped);
+    if (skippedNotice) process.stderr.write(`${skippedNotice}\n`);
 
     if (sessions.length === 0) {
       process.stdout.write('No hay sesiones guardadas.\n');
@@ -51,7 +53,7 @@ const sessionsResume = new Command('resume')
     try {
       store.load(id); // lanza si no existe
     } catch (err) {
-      process.stderr.write(`Error: ${String(err)}\n`);
+      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
 
@@ -62,7 +64,7 @@ const sessionsResume = new Command('resume')
         chatCommand.parse(['--resume', id], { from: 'user' });
       })
       .catch((err: unknown) => {
-        process.stderr.write(`Error: ${String(err)}\n`);
+        process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
         process.exit(1);
       });
   });
@@ -76,7 +78,7 @@ const sessionsDelete = new Command('delete')
       const removed = deleteSessionWithArtifacts(store, id);
       process.stdout.write(`Sesión "${id}" eliminada${describeArtifacts(removed)}.\n`);
     } catch (err) {
-      process.stderr.write(`Error: ${String(err)}\n`);
+      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
   });
@@ -90,7 +92,7 @@ const sessionsPrune = new Command('prune')
     try {
       olderThanMs = parseDuration(durationStr);
     } catch (err) {
-      process.stderr.write(`Error: ${String(err)}\n`);
+      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
       return;
     }

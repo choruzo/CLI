@@ -148,6 +148,9 @@ export const chatCommand = new Command('chat')
       if (retentionDays > 0) subagentStore.prune(retentionDays * 24 * 60 * 60 * 1000);
       pruneOldPlans(store, process.cwd(), config.session.planRetentionDays);
       let sessionCreatedAt: string | undefined;
+      // Versión en disco de la que parte la sesión reanudada: si al salir ya no
+      // es esa, otra terminal la guardó y esta conversación se guarda aparte.
+      let resumedUpdatedAt: string | undefined;
       let agentOptions = {};
       // Hito 17: una sesión read-only se reanuda read-only; el perfil guardado se
       // reaplica salvo que un flag pida otro.
@@ -160,6 +163,7 @@ export const chatCommand = new Command('chat')
           agentOptions = { initialMessages: saved.messages };
           sessionId = saved.id;
           sessionCreatedAt = saved.createdAt;
+          resumedUpdatedAt = saved.updatedAt;
           process.stderr.write(`Reanudando sesión ${saved.id}\n`);
 
           // Hito 7 / 8B — plan a medias y subagentes interrumpidos (§12.6, §12.16),
@@ -199,7 +203,9 @@ export const chatCommand = new Command('chat')
           resumedReadOnly = saved.readOnly === true;
           resumedProfile = saved.sessionProfile;
         } catch (err) {
-          process.stderr.write(`Error al cargar sesión: ${String(err)}\n`);
+          process.stderr.write(
+            `Error al cargar sesión: ${err instanceof Error ? err.message : String(err)}\n`,
+          );
           process.exit(1);
         }
       }
@@ -265,8 +271,9 @@ export const chatCommand = new Command('chat')
       // Guardar sesión al salir
       // -----------------------------------------------------------------------
       try {
-        await store.save({
+        const savedSession = await store.save({
           existingId: sessionId,
+          expectedUpdatedAt: resumedUpdatedAt,
           createdAt: sessionCreatedAt ?? sessionStart,
           provider: router.providerName,
           model: router.model,
@@ -281,8 +288,19 @@ export const chatCommand = new Command('chat')
         });
         // El aviso de los huérfanos ya está guardado en la sesión: ahora sí.
         subagentStore.commitDeferred();
-      } catch {
-        // No bloquear la salida por un fallo al guardar
+        if (savedSession.forkedFrom) {
+          process.stderr.write(
+            `La sesión ${savedSession.forkedFrom} se guardó desde otra terminal mientras ` +
+              `estaba abierta aquí; para no perder ninguna de las dos, esta conversación ` +
+              `se guardó como ${savedSession.id} (stratum sessions resume ${savedSession.id}).\n`,
+          );
+        }
+      } catch (err) {
+        // No bloquear la salida por un fallo al guardar, pero tampoco callarlo:
+        // es la conversación entera.
+        process.stderr.write(
+          `[stratum] No se pudo guardar la sesión ${sessionId}: ${String(err)}\n`,
+        );
       }
     },
   );
