@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync, readFileSync, readdirSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { DecisionStore, type DecisionInput } from './decisions.js';
+import { DecisionStore, DecisionStoreError, type DecisionInput } from './decisions.js';
 
 const sampleInput: DecisionInput = {
   title: 'Usar sqlite-vec en lugar de Chroma',
@@ -66,6 +66,60 @@ describe('DecisionStore', () => {
     // Corromper el archivo
     writeFileSync(file, '{ no es json', 'utf-8');
     expect(store.load()).toEqual([]);
+  });
+
+  it('un fichero dañado se aparta antes de escribir, nunca se pisa', () => {
+    writeFileSync(file, '[{"id": "dec_1", "title": "a medias', 'utf-8');
+    const store = new DecisionStore(file);
+    const rec = store.add(sampleInput);
+
+    const aside = readdirSync(dir).filter((f) => f.startsWith('decisions.json.corrupt-'));
+    expect(aside).toHaveLength(1);
+    expect(readFileSync(join(dir, aside[0]!), 'utf-8')).toBe('[{"id": "dec_1", "title": "a medias');
+    expect(store.load().map((r) => r.id)).toEqual([rec.id]);
+  });
+
+  it('remove sobre un fichero dañado también lo aparta en vez de reescribirlo', () => {
+    writeFileSync(file, 'basura', 'utf-8');
+    expect(new DecisionStore(file).remove('dec_x')).toBe(false);
+    expect(readdirSync(dir).some((f) => f.startsWith('decisions.json.corrupt-'))).toBe(true);
+  });
+
+  it('conserva al reescribir las entradas que no valida', () => {
+    const foreign = { id: 'dec_future', type: 'tipo_nuevo', title: 't', extra: 1 };
+    const store = new DecisionStore(file);
+    const rec = store.add(sampleInput);
+    const onDisk = JSON.parse(readFileSync(file, 'utf-8')) as unknown[];
+    writeFileSync(file, JSON.stringify([...onDisk, foreign]), 'utf-8');
+
+    expect(store.load().map((r) => r.id)).toEqual([rec.id]);
+    const rec2 = store.add(sampleInput);
+    const after = JSON.parse(readFileSync(file, 'utf-8')) as Array<{ id: string }>;
+    expect(after.map((e) => e.id)).toEqual([rec.id, 'dec_future', rec2.id]);
+    expect(after[1]).toEqual(foreign);
+
+    expect(store.remove(rec.id)).toBe(true);
+    const final = JSON.parse(readFileSync(file, 'utf-8')) as Array<{ id: string }>;
+    expect(final.map((e) => e.id)).toEqual(['dec_future', rec2.id]);
+  });
+
+  it('un fichero de un Stratum más nuevo no se modifica', () => {
+    const newer = JSON.stringify({ schemaVersion: 2, decisions: [] });
+    writeFileSync(file, newer, 'utf-8');
+    const store = new DecisionStore(file);
+    expect(store.load()).toEqual([]);
+    expect(() => store.add(sampleInput)).toThrow(DecisionStoreError);
+    expect(() => store.remove('dec_x')).toThrow(DecisionStoreError);
+    expect(readFileSync(file, 'utf-8')).toBe(newer);
+    expect(readdirSync(dir)).toEqual(['decisions.json']);
+  });
+
+  it('cada escritura parte de lo que hay en disco: dos instancias no se pisan', () => {
+    const a = new DecisionStore(file);
+    const b = new DecisionStore(file);
+    const r1 = a.add(sampleInput);
+    const r2 = b.add(sampleInput);
+    expect(a.load().map((r) => r.id)).toEqual([r1.id, r2.id]);
   });
 
   it('ids consecutivos no colisionan', () => {

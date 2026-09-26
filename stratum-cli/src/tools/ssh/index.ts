@@ -4,7 +4,13 @@ import { sshUploadTool, sshDownloadTool } from './sftp.js';
 
 export { getSshPool, closeSshPool, resetSshRuntime, confirmFnFrom } from './runtime.js';
 export { SSHConnectionPool } from './pool.js';
-export { KnownHostsStore, verifyHostKey, fingerprintOf, HostKeyError } from './known-hosts.js';
+export {
+  KnownHostsStore,
+  KnownHostsCorruptError,
+  verifyHostKey,
+  fingerprintOf,
+  HostKeyError,
+} from './known-hosts.js';
 export { resolveHost, resolveSecret, resolveAgentSocket, buildConnectConfig } from './inventory.js';
 
 /**

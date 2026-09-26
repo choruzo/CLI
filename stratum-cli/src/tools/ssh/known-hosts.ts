@@ -1,6 +1,7 @@
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readFileSync, writeFileSync, renameSync } from 'fs';
-import { dirname } from 'path';
+import { existsSync, readFileSync } from 'fs';
+import { z } from 'zod';
+import { writeFileAtomic } from '../../config/writer.js';
 import type { SSHHostConfig } from '../../config/schema.js';
 import type { DestructiveDecision } from '../../agent/types.js';
 import { expandHome } from '../../config/paths.js';
@@ -28,9 +29,43 @@ export function fingerprintOf(key: Buffer): string {
   return `SHA256:${digest}`;
 }
 
+const KnownHostEntrySchema = z
+  .object({
+    fingerprint: z.string().regex(/^SHA256:/),
+    algorithm: z.string(),
+    addedAt: z.string(),
+    host: z.string(),
+  })
+  // Un campo que añada un Stratum más nuevo se conserva al reescribir.
+  .passthrough();
+
+const KnownHostsFileSchema = z.record(z.string(), KnownHostEntrySchema);
+
+/**
+ * `known_hosts.json` existe pero no se puede interpretar. Nunca se trata como
+ * vacío: eso convertiría cada host de confianza en «primera conexión» (el TOFU
+ * aceptaría cualquier clave) y la siguiente escritura borraría las huellas.
+ */
+export class KnownHostsCorruptError extends Error {
+  readonly path: string;
+  constructor(path: string, reason: string) {
+    super(
+      `${path} está dañado (${reason}).
+` +
+        '  No se verifica ninguna host key contra él ni se modifica: revísalo a mano, ' +
+        'o muévelo a otro sitio para volver a confiar en cada host con `stratum ssh trust <alias>`.',
+    );
+    this.name = 'KnownHostsCorruptError';
+    this.path = path;
+  }
+}
+
 /**
  * Almacén TOFU en `~/.stratum/known_hosts.json`. Formato propio (no el de
  * OpenSSH) para no interferir con el `~/.ssh/known_hosts` del usuario.
+ *
+ * Falla cerrado: un fichero que existe y no valida lanza
+ * `KnownHostsCorruptError` en toda lectura y escritura.
  */
 export class KnownHostsStore {
   private readonly path: string;
@@ -40,37 +75,44 @@ export class KnownHostsStore {
   }
 
   list(): Record<string, KnownHostEntry> {
+    if (!existsSync(this.path)) return {};
+    // Un error de E/S también lanza: tampoco dice qué claves hay guardadas.
+    const raw = readFileSync(this.path, 'utf-8');
+    let parsed: unknown;
     try {
-      if (!existsSync(this.path)) return {};
-      return JSON.parse(readFileSync(this.path, 'utf-8')) as Record<string, KnownHostEntry>;
+      parsed = JSON.parse(raw);
     } catch (err) {
-      log.warn('known_hosts read failed', { path: this.path, err });
-      return {};
+      throw new KnownHostsCorruptError(this.path, `JSON inválido: ${(err as Error).message}`);
     }
+    const result = KnownHostsFileSchema.safeParse(parsed);
+    if (!result.success) {
+      const issue = result.error.issues[0];
+      const where = issue?.path.length ? ` en ${issue.path.join('.')}` : '';
+      throw new KnownHostsCorruptError(this.path, `${issue?.message ?? 'forma inválida'}${where}`);
+    }
+    return result.data as Record<string, KnownHostEntry>;
   }
 
   read(alias: string): KnownHostEntry | undefined {
-    return this.list()[alias];
+    const entries = this.list();
+    return Object.hasOwn(entries, alias) ? entries[alias] : undefined;
   }
 
-  /** Escritura atómica (tmp + rename), mismo patrón que `decisions.ts`. */
   private writeAll(entries: Record<string, KnownHostEntry>): void {
-    const dir = dirname(this.path);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
-    const tmp = `${this.path}.tmp`;
-    writeFileSync(tmp, JSON.stringify(entries, null, 2) + '\n', 'utf-8');
-    renameSync(tmp, this.path);
+    writeFileAtomic(this.path, JSON.stringify(entries, null, 2) + '\n');
   }
 
   write(alias: string, entry: KnownHostEntry): void {
     const entries = this.list();
-    entries[alias] = entry;
+    // Validar antes de escribir: una entrada inválida dejaría el fichero
+    // ilegible para todas las demás.
+    entries[alias] = KnownHostEntrySchema.parse(entry) as KnownHostEntry;
     this.writeAll(entries);
   }
 
   remove(alias: string): boolean {
     const entries = this.list();
-    if (!(alias in entries)) return false;
+    if (!Object.hasOwn(entries, alias)) return false;
     delete entries[alias];
     this.writeAll(entries);
     return true;
@@ -135,7 +177,15 @@ export async function verifyHostKey(opts: VerifyHostKeyOptions): Promise<void> {
   }
 
   // --- TOFU ---
-  const known = store.read(alias);
+  let known: KnownHostEntry | undefined;
+  try {
+    known = store.read(alias);
+  } catch (err) {
+    // Sin poder leer las claves guardadas no hay forma de distinguir un host
+    // nuevo de un MITM: se aborta sin preguntar, como ante un mismatch.
+    const reason = err instanceof Error ? err.message : String(err);
+    throw new HostKeyError(`No se puede verificar la host key de '${alias}': ${reason}`, false);
+  }
 
   if (known) {
     if (known.fingerprint === fingerprint) return;

@@ -3,7 +3,7 @@ import { createInterface } from 'readline';
 import { loadConfig } from '../../config/loader.js';
 import type { StratumConfig, SSHHostConfig } from '../../config/schema.js';
 import { SSHConnectionPool } from '../../tools/ssh/pool.js';
-import { KnownHostsStore } from '../../tools/ssh/known-hosts.js';
+import { KnownHostsStore, KnownHostsCorruptError } from '../../tools/ssh/known-hosts.js';
 
 /**
  * `stratum ssh` (Hito 9, §12.14). Plain text sin UI Ink, igual que
@@ -51,7 +51,18 @@ const sshList = new Command('list')
     const config = requireConfig();
     const hosts = requireHosts(config);
     const knownHosts = new KnownHostsStore();
-    const trusted = knownHosts.list();
+    // Con known_hosts dañado se sigue listando: los hosts `strict`/`insecure`
+    // no lo usan, y los `tofu` fallarán con el mismo error al conectar.
+    let trusted: Record<string, unknown> | null;
+    try {
+      trusted = knownHosts.list();
+    } catch (err) {
+      if (!(err instanceof KnownHostsCorruptError)) throw err;
+      process.stderr.write(`⚠  ${err.message}
+
+`);
+      trusted = null;
+    }
     const pool = new SSHConnectionPool(config, knownHosts);
 
     const aliases = Object.keys(hosts);
@@ -89,7 +100,7 @@ const sshList = new Command('list')
       // El aviso solo tiene sentido si la conexión llegó a ver la host key. Un
       // ECONNREFUSED no dice nada sobre si la clave es de fiar.
       const sawHostKey = result.ok || /host key/i.test(result.error);
-      if (host.hostKeyPolicy === 'tofu' && !trusted[result.alias] && sawHostKey) {
+      if (host.hostKeyPolicy === 'tofu' && trusted && !trusted[result.alias] && sawHostKey) {
         process.stdout.write(
           `  ${' '.repeat(width)}  (host key sin confiar — usa: stratum ssh trust ${result.alias})\n`,
         );
@@ -116,6 +127,14 @@ const sshTrust = new Command('trust')
     }
 
     const store = new KnownHostsStore();
+    try {
+      store.list();
+    } catch (err) {
+      if (!(err instanceof KnownHostsCorruptError)) throw err;
+      process.stderr.write(`✗ ${err.message}
+`);
+      process.exit(1);
+    }
 
     if (opts.remove) {
       const removed = store.remove(alias);

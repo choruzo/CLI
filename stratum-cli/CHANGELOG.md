@@ -8,7 +8,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`) y planes (`.stratum/plans/`).
+Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`) y host keys SSH (`known_hosts.json`).
 
 ### Corregido
 - **Sesiones**: se guardan de forma atómica; un cierre a mitad de escritura ya no deja la conversación truncada e irrecuperable.
@@ -26,6 +26,10 @@ Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`
 - La referencia al plan guardada en la sesión se valida antes de usarla como ruta: ya no puede leer ni escribir fuera de `.stratum/plans/`.
 - `/sessions resume` dentro del chat retoma también el plan a medias de la sesión cargada, igual que `chat --resume`.
 - Reanudar una sesión desde otra carpeta encuentra su plan y sus subagentes: se buscan en el proyecto de la sesión, no en el directorio actual.
+- **Decisiones**: un `decisions.json` dañado ya no se sobrescribe con la siguiente decisión, que borraba todas las anteriores. Se aparta a `decisions.json.corrupt-<fecha>` y se avisa.
+- **Decisiones**: cada entrada se valida al leerla. Las que no validan (por ejemplo, de un Stratum más nuevo) no se muestran, pero se conservan al reescribir el fichero, y un fichero con otro formato (`schemaVersion`) no se modifica.
+- **Decisiones**: cada escritura parte del contenido que hay en disco y usa un temporal único por proceso; dos procesos que guardaban a la vez podían pisarse el temporal.
+- **SSH**: un `known_hosts.json` dañado ya no se trata como vacío. Antes, todos los hosts `tofu` volvían a «primera conexión» (se aceptaba cualquier clave) y la siguiente confirmación borraba las huellas guardadas. Ahora la conexión se aborta sin preguntar, el fichero no se toca y `stratum ssh list`/`trust` explican qué pasa.
 
 ### Añadido
 - `sessions delete` y `sessions prune` borran también los registros de subagente y el plan de esas sesiones (un plan que otra sesión todavía puede reanudar se conserva). `chat` poda al arrancar los registros de más de `agents.subagentRetentionDays` días y los planes de más de `session.planRetentionDays` (30 por defecto en ambos; `0` lo desactiva).

@@ -1,8 +1,14 @@
 import { describe, it, expect, beforeEach, afterEach, beforeAll, afterAll, vi } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdtempSync, rmSync, writeFileSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
-import { KnownHostsStore, verifyHostKey, fingerprintOf, HostKeyError } from './known-hosts.js';
+import {
+  KnownHostsStore,
+  KnownHostsCorruptError,
+  verifyHostKey,
+  fingerprintOf,
+  HostKeyError,
+} from './known-hosts.js';
 import { SSHConnectionPool } from './pool.js';
 import { startTestServer, type TestServer } from './test-server.js';
 import { configWithHost } from './ssh-test-utils.js';
@@ -50,9 +56,47 @@ describe('KnownHostsStore', () => {
   });
 
   it('elimina una entrada e informa si no existía', () => {
-    store.write('h', { fingerprint: 'x', algorithm: 'a', addedAt: 'now', host: 'h' });
+    store.write('h', { fingerprint: 'SHA256:x', algorithm: 'a', addedAt: 'now', host: 'h' });
     expect(store.remove('h')).toBe(true);
     expect(store.remove('h')).toBe(false);
+  });
+
+  it('un fichero dañado lanza en toda lectura y escritura, y no se toca', () => {
+    const file = join(dir, 'known_hosts.json');
+    writeFileSync(file, '{ "h": { "fingerprint": "SHA256:', 'utf-8');
+    const entry = { fingerprint: 'SHA256:y', algorithm: 'a', addedAt: 'now', host: 'h' };
+    expect(() => store.list()).toThrow(KnownHostsCorruptError);
+    expect(() => store.read('h')).toThrow(KnownHostsCorruptError);
+    expect(() => store.write('h', entry)).toThrow(KnownHostsCorruptError);
+    expect(() => store.remove('h')).toThrow(KnownHostsCorruptError);
+    expect(readFileSync(file, 'utf-8')).toBe('{ "h": { "fingerprint": "SHA256:');
+  });
+
+  it('una entrada con forma inválida invalida el fichero entero', () => {
+    writeFileSync(join(dir, 'known_hosts.json'), JSON.stringify({ h: { fingerprint: 'md5' } }));
+    expect(() => store.list()).toThrow(/dañado.*h\.fingerprint|h\.fingerprint/s);
+    writeFileSync(join(dir, 'known_hosts.json'), '[]');
+    expect(() => store.list()).toThrow(KnownHostsCorruptError);
+  });
+
+  it('conserva los campos que no conoce al reescribir', () => {
+    const file = join(dir, 'known_hosts.json');
+    const future = {
+      fingerprint: 'SHA256:a',
+      algorithm: 'ssh-ed25519',
+      addedAt: 'now',
+      host: 'h',
+      comment: 'nuevo',
+    };
+    writeFileSync(file, JSON.stringify({ old: future }));
+    store.write('h', { fingerprint: 'SHA256:b', algorithm: 'a', addedAt: 'now', host: 'h' });
+    expect(JSON.parse(readFileSync(file, 'utf-8')).old).toEqual(future);
+  });
+
+  it('un alias como __proto__ o toString no se confunde con una entrada', () => {
+    expect(store.read('toString')).toBeUndefined();
+    expect(store.read('__proto__')).toBeUndefined();
+    expect(store.remove('toString')).toBe(false);
   });
 
   it('genera fingerprints en el formato SHA256 de OpenSSH, sin padding', () => {
@@ -84,6 +128,30 @@ describe('verifyHostKey', () => {
     expect(confirm).toHaveBeenCalledOnce();
     expect(String(confirm.mock.calls[0]?.[0])).toContain(fingerprintOf(KEY));
     expect(store.read('h')?.fingerprint).toBe(fingerprintOf(KEY));
+  });
+
+  it('tofu: con known_hosts dañado aborta sin preguntar y sin reescribirlo', async () => {
+    const file = join(dir, 'known_hosts.json');
+    writeFileSync(file, 'basura', 'utf-8');
+    const confirm = vi.fn().mockResolvedValue('approve');
+    const err = await verifyHostKey({ ...base, host: host(), store, confirm }).catch(
+      (e: unknown) => e,
+    );
+    expect(err).toBeInstanceOf(HostKeyError);
+    expect((err as HostKeyError).recoverable).toBe(false);
+    expect((err as Error).message).toMatch(/dañado/);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(readFileSync(file, 'utf-8')).toBe('basura');
+  });
+
+  it('strict e insecure no dependen de known_hosts', async () => {
+    writeFileSync(join(dir, 'known_hosts.json'), 'basura', 'utf-8');
+    await verifyHostKey({ ...base, host: host({ hostKeyPolicy: 'insecure' }), store });
+    await verifyHostKey({
+      ...base,
+      host: host({ hostKeyPolicy: 'strict', hostKeyHash: fingerprintOf(KEY) }),
+      store,
+    });
   });
 
   it('tofu: la segunda conexión con la misma clave no vuelve a preguntar', async () => {
