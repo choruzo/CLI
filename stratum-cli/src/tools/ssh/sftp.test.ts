@@ -1,5 +1,16 @@
 import { describe, it, expect, beforeAll, afterAll, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, readFileSync, mkdirSync } from 'fs';
+import {
+  mkdtempSync,
+  rmSync,
+  writeFileSync,
+  readFileSync,
+  mkdirSync,
+  readdirSync,
+  statSync,
+  utimesSync,
+} from 'fs';
+import { FileStateTracker } from '../fs/file-state.js';
+import { currentSignature } from '../fs/file-io.js';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { sshUploadTool, sshDownloadTool } from './sftp.js';
@@ -113,5 +124,90 @@ describe('ssh_upload / ssh_download', () => {
     expect(result.ok).toBe(false);
     if (result.ok) return;
     expect(result.recoverable).toBe(true);
+  });
+
+  // -------------------------------------------------------------------------
+  // Endurecimiento: rutas sensibles, descarga atómica y vista del agente
+  // -------------------------------------------------------------------------
+
+  it('veta subir una clave privada (capa 3), también con ruta relativa', () => {
+    const sshDir = join(dir, '.ssh');
+    mkdirSync(sshDir);
+    writeFileSync(join(sshDir, 'config'), 'Host x');
+    const veto = sshUploadTool.preflight!(
+      { host: 'dev', localPath: 'config', remotePath: '/tmp/c' },
+      toolContext(config, { cwd: sshDir }),
+    );
+    expect(veto).not.toBeNull();
+    expect(veto!.ok).toBe(false);
+  });
+
+  it('veta descargar sobre un fichero de credenciales', () => {
+    const veto = sshDownloadTool.preflight!(
+      { host: 'dev', remotePath: '/tmp/k', localPath: join(dir, 'id_ed25519') },
+      ctx(),
+    );
+    expect(veto?.ok).toBe(false);
+  });
+
+  it('pide confirmación para subir un .env', () => {
+    expect(
+      sshUploadTool.isDestructive!(
+        { host: 'dev', localPath: join(dir, '.env'), remotePath: '/tmp/e' },
+        ctx(),
+      ),
+    ).toBe(true);
+    expect(
+      sshUploadTool.isDestructive!(
+        { host: 'dev', localPath: join(dir, 'a.txt'), remotePath: '/tmp/e' },
+        ctx(),
+      ),
+    ).toBe(false);
+  });
+
+  it('descarga sin dejar temporales y sobrescribe el destino', async () => {
+    const remote = join(dir, 'remoto.txt');
+    const local = join(dir, 'local.txt');
+    writeFileSync(remote, 'nuevo');
+    writeFileSync(local, 'viejo');
+    const res = await sshDownloadTool.execute(
+      { host: 'dev', remotePath: remote, localPath: local },
+      ctx(),
+    );
+    expect(res.ok).toBe(true);
+    expect(readFileSync(local, 'utf-8')).toBe('nuevo');
+    expect(readdirSync(dir).filter((f) => f.includes('stratum-dl'))).toEqual([]);
+  });
+
+  it('un fallo a mitad no toca el destino ni deja temporales', async () => {
+    const local = join(dir, 'local.txt');
+    writeFileSync(local, 'intacto');
+    const res = await sshDownloadTool.execute(
+      { host: 'dev', remotePath: join(dir, 'fantasma.txt'), localPath: local },
+      ctx(),
+    );
+    expect(res.ok).toBe(false);
+    expect(readFileSync(local, 'utf-8')).toBe('intacto');
+    expect(readdirSync(dir).filter((f) => f.includes('stratum-dl'))).toEqual([]);
+  });
+
+  it('no sobrescribe un fichero que cambió desde que el agente lo leyó', async () => {
+    const remote = join(dir, 'remoto.txt');
+    const local = join(dir, 'local.txt');
+    writeFileSync(remote, 'remoto');
+    writeFileSync(local, 'versión leída');
+    const fileState = new FileStateTracker();
+    fileState.record(local, currentSignature(local)!);
+    // Otro proceso lo edita después de la lectura.
+    writeFileSync(local, 'editado por el usuario');
+    const later = new Date(statSync(local).mtimeMs + 5000);
+    utimesSync(local, later, later);
+
+    const res = await sshDownloadTool.execute(
+      { host: 'dev', remotePath: remote, localPath: local },
+      toolContext(config, { cwd: dir, fileState }),
+    );
+    expect(res.ok).toBe(false);
+    expect(readFileSync(local, 'utf-8')).toBe('editado por el usuario');
   });
 });

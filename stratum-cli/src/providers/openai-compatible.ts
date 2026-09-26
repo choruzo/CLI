@@ -91,6 +91,28 @@ export class ThinkTagSplitter {
   }
 }
 
+/**
+ * Argumentos de una tool call → objeto. Vacío equivale a `{}` (backends que
+ * mandan `""` para una tool sin parámetros); cualquier JSON que no sea un
+ * objeto (`null`, un array, un número) es un error: el dispatcher y las
+ * políticas leen `input.<campo>` y un `null` los hacía lanzar.
+ */
+export function parseToolArguments(
+  raw: string,
+): { ok: true; value: Record<string, unknown> } | { ok: false; error: string } {
+  if (raw.trim() === '') return { ok: true, value: {} };
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    return { ok: false, error: `Invalid JSON in tool arguments: ${raw}` };
+  }
+  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+    return { ok: false, error: `Tool arguments must be a JSON object, got: ${raw}` };
+  }
+  return { ok: true, value: parsed as Record<string, unknown> };
+}
+
 export class StreamBuffer {
   private toolBuffers = new Map<number, ToolBuffer>();
   private think = new ThinkTagSplitter();
@@ -148,24 +170,65 @@ export class StreamBuffer {
       });
     }
 
-    if (choice.finish_reason === 'tool_calls') {
-      for (const [, buf] of this.toolBuffers) {
-        try {
-          const input = JSON.parse(buf.args) as Record<string, unknown>;
-          events.push({ type: 'tool_call_ready', id: buf.id, name: buf.name, input });
-        } catch {
-          events.push({
-            type: 'tool_error',
-            id: buf.id,
-            name: buf.name,
-            error: `Invalid JSON in tool arguments: ${buf.args}`,
-            recoverable: false,
-          });
-        }
-      }
-      this.toolBuffers.clear();
+    // Cualquier `finish_reason` cierra las tool calls abiertas, no solo
+    // `tool_calls`: varios backends (algunas versiones de Ollama y llama.cpp)
+    // terminan una respuesta con tool calls con `stop`, y descartarlas dejaba
+    // el turno acabado como si el modelo no hubiese pedido nada.
+    if (choice.finish_reason) {
+      events.push(...this.materialize(choice.finish_reason));
     }
 
+    return events;
+  }
+
+  /**
+   * Fin del stream (tras `[DONE]` o cuando el cuerpo se acaba). Suelta lo que
+   * el splitter de `<think>` retenía y cierra las tool calls que ningún
+   * `finish_reason` cerró — un backend que no lo manda, o una conexión cortada:
+   * si los argumentos quedaron a medias, el parseo falla y el modelo recibe un
+   * error recuperable en vez de perder la llamada en silencio.
+   */
+  finish(): AgentEvent[] {
+    const events: AgentEvent[] = [];
+    if (!this.think.idle) {
+      const { thinking, text } = this.think.flush();
+      if (thinking) events.push({ type: 'thinking', text: thinking });
+      if (text) events.push({ type: 'text_delta', delta: text });
+    }
+    events.push(...this.materialize(null));
+    return events;
+  }
+
+  private materialize(finishReason: string | null): AgentEvent[] {
+    const events: AgentEvent[] = [];
+    for (const [, buf] of this.toolBuffers) {
+      if (finishReason === 'length') {
+        events.push({
+          type: 'tool_error',
+          id: buf.id,
+          name: buf.name,
+          error:
+            'Tool call arguments were cut off: the response hit the output token limit ' +
+            '(finish_reason "length"). Retry with shorter arguments (e.g. split a large ' +
+            'write into several smaller edits).',
+          recoverable: false,
+        });
+        continue;
+      }
+      const input = parseToolArguments(buf.args);
+      if (input.ok) {
+        events.push({ type: 'tool_call_ready', id: buf.id, name: buf.name, input: input.value });
+      } else {
+        events.push({
+          type: 'tool_error',
+          id: buf.id,
+          name: buf.name,
+          error: input.error,
+          recoverable: false,
+        });
+      }
+    }
+    this.toolBuffers.clear();
     return events;
   }
 

@@ -868,6 +868,8 @@ interface Props {
   registry?: ToolRegistry;
   /** Store de subagentes compartido con `chat`, que marca los huérfanos tras guardar. */
   subagentStore?: SubagentStore;
+  /** Guarda un checkpoint de la sesión; se llama al terminar cada turno. */
+  onCheckpoint?: () => void;
 }
 
 export function App({
@@ -879,6 +881,7 @@ export function App({
   sessionId,
   registry,
   subagentStore,
+  onCheckpoint,
 }: Props) {
   const { exit } = useApp();
 
@@ -1133,8 +1136,9 @@ export function App({
     if (!state.thinking) {
       refreshChanges();
       refreshSessionBadges();
+      onCheckpoint?.();
     }
-  }, [state.thinking, refreshChanges, refreshSessionBadges]);
+  }, [state.thinking, refreshChanges, refreshSessionBadges, onCheckpoint]);
 
   /** Store de sesiones resuelto desde la config activa (mismas rutas que la CLI). */
   const sessionStore = useCallback(

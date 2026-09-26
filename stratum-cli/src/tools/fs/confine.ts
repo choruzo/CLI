@@ -9,10 +9,10 @@
  * (inapelable, como las rutas `blocked` del Hito 11), no una confirmación.
  *
  * Dos propiedades que no deben perderse:
- *  - **Falla cerrado.** El dispatcher deja pasar un `preflight` que lanza (un
- *    fallo del hook no puede bloquear a la CLI); aquí cualquier excepción se
- *    convierte en veto, porque dejar pasar una ruta que no se pudo comprobar es
- *    exactamente el escape que se quiere evitar.
+ *  - **Falla cerrado.** Aquí cualquier excepción se convierte en veto, porque
+ *    dejar pasar una ruta que no se pudo comprobar es exactamente el escape que
+ *    se quiere evitar (el dispatcher también rechaza un `preflight` que lanza,
+ *    pero `execute` repite la comprobación sin pasar por él).
  *  - **Se comprueba también al ejecutar** (`workspaceExecuteGuard`): el
  *    `preflight` es el punto de decisión, pero una tool invocada por otra vía
  *    que no pase por el dispatcher no puede quedar sin confinar.

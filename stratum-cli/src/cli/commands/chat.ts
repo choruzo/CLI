@@ -15,6 +15,7 @@ import { StratumAgent } from '../../agent/core.js';
 import { SessionStore, generateSessionId } from '../../session/store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
 import { prepareSessionResume } from '../../session/resume.js';
+import { SessionCheckpointer } from '../../session/checkpoint.js';
 import { pruneOldPlans } from '../../session/cleanup.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { App } from '../ui/App.js';
@@ -31,6 +32,18 @@ import {
 } from '../../logging/index.js';
 
 declare const __VERSION__: string;
+
+/** Cadencia del checkpoint periódico de la sesión (además del de fin de turno). */
+const CHECKPOINT_EVERY_MS = 30_000;
+
+/** Ejecuta un paso del teardown sin dejar que su fallo aborte los siguientes. */
+async function settle(step: string, fn: () => unknown): Promise<void> {
+  try {
+    await fn();
+  } catch (err) {
+    getLogger('cli').warn('teardown step failed', { step, err });
+  }
+}
 
 function resolveVersion(): string {
   if (typeof __VERSION__ !== 'undefined') return __VERSION__;
@@ -239,6 +252,44 @@ export const chatCommand = new Command('chat')
 
       const version = resolveVersion();
       const sessionStart = new Date().toISOString();
+
+      // Guardado incremental (checkpoints): antes la sesión solo se escribía al
+      // salir limpiamente, y un cierre de la ventana o un fallo la perdía entera.
+      // El checkpointer es el único escritor de la sesión, también al salir.
+      const checkpointer = new SessionCheckpointer(store, {
+        id: sessionId,
+        expectedUpdatedAt: resumedUpdatedAt,
+        snapshot: () => ({
+          createdAt: sessionCreatedAt ?? sessionStart,
+          provider: router.providerName,
+          model: router.model,
+          project: process.cwd(),
+          messages: agent.getMessages(),
+          toolCallCount: agent.toolCallCount,
+          planRef: agent.getPlanRef(),
+          activeAgent: agent.getActiveProfile()?.name ?? null,
+          readOnly: agent.isReadOnly(),
+          sessionProfile: agent.getSessionProfileRequest(),
+        }),
+      });
+      const checkpointTimer = setInterval(
+        () => void checkpointer.checkpoint(),
+        CHECKPOINT_EVERY_MS,
+      );
+      checkpointTimer.unref();
+      // Cierre por señal (terminal cerrada → SIGHUP, `kill` → SIGTERM): no pasa
+      // por la salida normal de Ink, así que se guarda aquí antes de salir.
+      let signalled = false;
+      const onFatalSignal = (signal: NodeJS.Signals): void => {
+        if (signalled) return;
+        signalled = true;
+        void checkpointer.checkpoint().finally(() => {
+          process.exit(signal === 'SIGTERM' ? 143 : 129);
+        });
+      };
+      process.on('SIGTERM', onFatalSignal);
+      process.on('SIGHUP', onFatalSignal);
+
       const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
       const { waitUntilExit } = render(
@@ -251,6 +302,7 @@ export const chatCommand = new Command('chat')
           sessionId,
           registry,
           subagentStore,
+          onCheckpoint: () => void checkpointer.checkpoint(),
         }),
       );
 
@@ -259,33 +311,16 @@ export const chatCommand = new Command('chat')
       } catch {
         // exit() was called — normal shutdown
       }
-
-      await mcpManager.shutdownAll();
-      // Hito 9 (§12.12): sin cerrar las conexiones SSH, sus sockets mantienen
-      // vivo el event loop y el proceso nunca termina.
-      await closeExecRuntime();
-      subagentStore.dispose();
-      await flushLogging();
+      clearInterval(checkpointTimer);
+      process.off('SIGTERM', onFatalSignal);
+      process.off('SIGHUP', onFatalSignal);
 
       // -----------------------------------------------------------------------
-      // Guardar sesión al salir
+      // Guardar sesión al salir. Va ANTES del teardown: si el cierre de MCP o de
+      // SSH lanzase, antes se perdía la conversación entera.
       // -----------------------------------------------------------------------
       try {
-        const savedSession = await store.save({
-          existingId: sessionId,
-          expectedUpdatedAt: resumedUpdatedAt,
-          createdAt: sessionCreatedAt ?? sessionStart,
-          provider: router.providerName,
-          model: router.model,
-          project: process.cwd(),
-          messages: agent.getMessages(),
-          toolCallCount: agent.toolCallCount,
-          llmProvider: router.getActive(),
-          planRef: agent.getPlanRef(),
-          activeAgent: agent.getActiveProfile()?.name ?? null,
-          readOnly: agent.isReadOnly(),
-          sessionProfile: agent.getSessionProfileRequest(),
-        });
+        const savedSession = await checkpointer.saveFinal(router.getActive());
         // El aviso de los huérfanos ya está guardado en la sesión: ahora sí.
         subagentStore.commitDeferred();
         if (savedSession.forkedFrom) {
@@ -299,8 +334,17 @@ export const chatCommand = new Command('chat')
         // No bloquear la salida por un fallo al guardar, pero tampoco callarlo:
         // es la conversación entera.
         process.stderr.write(
-          `[stratum] No se pudo guardar la sesión ${sessionId}: ${String(err)}\n`,
+          `[stratum] No se pudo guardar la sesión ${checkpointer.sessionId}: ${String(err)}\n`,
         );
       }
+
+      // Teardown: cada paso por separado, para que un fallo no deje el resto
+      // sin cerrar (sin cerrar SSH el proceso no termina, §12.12).
+      await settle('mcp shutdown', () => mcpManager.shutdownAll());
+      // Hito 9 (§12.12): sin cerrar las conexiones SSH, sus sockets mantienen
+      // vivo el event loop y el proceso nunca termina.
+      await settle('exec runtime shutdown', () => closeExecRuntime());
+      await settle('subagent store dispose', () => subagentStore.dispose());
+      await flushLogging();
     },
   );

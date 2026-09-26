@@ -308,8 +308,10 @@ export class ToolDispatcher {
 
   /**
    * Veto de preflight (Hito 11). `null` si la tool no define el hook o lo pasa.
-   * Un fallo del propio hook nunca bloquea: se registra y se deja pasar a la
-   * fase de confirmación, que sí es capaz de detener la call.
+   * Un fallo del propio hook **falla cerrado**: el preflight es el único punto
+   * donde viven los vetos inapelables (hard-deny de `exec`, rutas `blocked`,
+   * confinamiento de Desktop), así que dejar pasar la call cuando el chequeo no
+   * se pudo evaluar sería levantar justo lo que no se puede levantar.
    */
   private preflight(call: ToolCallReady, ctx: ToolContext): ToolResult | null {
     const tool = this.registry.get(call.name);
@@ -319,7 +321,14 @@ export class ToolDispatcher {
       verdict = tool.preflight(call.input, ctx);
     } catch (err) {
       log.warn('preflight threw', { tool: call.name, err });
-      return null;
+      return {
+        ok: false,
+        error:
+          `Tool "${call.name}": the safety check could not be evaluated for this call, ` +
+          'so it was not executed. Rephrase the call (simpler arguments) or use another approach.',
+        recoverable: true,
+        countsAsFailure: false,
+      };
     }
     if (verdict === null) return null;
     verdict = redactResult(verdict, ctx);
@@ -346,7 +355,17 @@ export class ToolDispatcher {
     try {
       gate = environmentGate(call.name, call.input, ctx);
     } catch (err) {
+      // Falla cerrado: sin poder decidir el entorno, un `confirm-always` o un
+      // `typed` quedarían sin efecto.
       log.warn('environment gate threw', { tool: call.name, err });
+      return {
+        ok: false,
+        error:
+          `Tool "${call.name}": the environment policy could not be evaluated for this call, ` +
+          'so it was not executed.',
+        recoverable: true,
+        countsAsFailure: false,
+      };
     }
     // `confirm-always`: se pregunta por todo cambio, y ni
     // `tools.confirmDestructive: false`, ni `--allow-destructive`, ni el
@@ -355,8 +374,15 @@ export class ToolDispatcher {
 
     if (!forced && !ctx.config.tools.confirmDestructive) return null;
 
-    const isDestructive =
-      forced || tool.destructive === true || (tool.isDestructive?.(call.input, ctx) ?? false);
+    let dynamicDestructive = false;
+    try {
+      dynamicDestructive = tool.isDestructive?.(call.input, ctx) ?? false;
+    } catch (err) {
+      // Ante la duda, se pregunta: tratarla como inocua sería fallar abierto.
+      log.warn('isDestructive threw', { tool: call.name, err });
+      dynamicDestructive = true;
+    }
+    const isDestructive = forced || tool.destructive === true || dynamicDestructive;
     if (!isDestructive) return null;
 
     const policy = ctx.destructivePolicy ?? (ctx.allowDestructive === true ? 'allow' : 'ask');

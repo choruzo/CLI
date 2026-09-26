@@ -4,6 +4,7 @@ import { z } from 'zod';
 import { execa } from 'execa';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { stringParam, workspacePathPreflight } from './confine.js';
+import { omitFromSearch, sensitivePathPreflight } from './sensitive.js';
 
 // Directorios que siempre se excluyen (mismo set que glob.ts / list.ts)
 const EXCLUDED_DIRS = new Set([
@@ -53,7 +54,13 @@ async function searchWithRipgrep(
     throw new Error(result.stderr || 'ripgrep failed');
   }
   if (!result.stdout) return [];
-  return result.stdout.split('\n').filter(Boolean).slice(0, MAX_MATCHES);
+  return result.stdout.split('\n').filter(Boolean);
+}
+
+/** Ruta de una línea `ruta:N:contenido` de ripgrep (relativa a la raíz de búsqueda). */
+function ripgrepLinePath(line: string): string | null {
+  const m = /^(.+?):\d+:/.exec(line);
+  return m ? m[1]! : null;
 }
 
 /** Convierte un patrón include estilo glob ("*.ts", "*.{ts,tsx}") a RegExp sobre el nombre de archivo. */
@@ -101,6 +108,8 @@ function searchWithNode(
   include: string | undefined,
   baseDir: string,
   followLinks = true,
+  omit: (fullPath: string) => boolean = () => false,
+  onOmit: () => void = () => {},
 ): string[] {
   const re = new RegExp(pattern);
   const includeRe = include ? includeToRegExp(include) : null;
@@ -132,11 +141,17 @@ function searchWithNode(
       if (stat.isSymbolicLink()) continue;
 
       if (stat.isDirectory()) {
+        // Un directorio sensible (`.ssh/`, `secrets/`) no se recorre.
+        if (omit(fullPath)) continue;
         walk(fullPath, relPath);
         continue;
       }
 
       if (includeRe && !includeRe.test(entry) && !includeRe.test(relPath)) continue;
+      if (omit(fullPath)) {
+        onOmit();
+        continue;
+      }
       if (stat.size > MAX_FILE_SIZE) continue;
 
       let content: string;
@@ -187,7 +202,12 @@ export const grepTool: ToolDefinition = {
   destructive: false,
 
   preflight(params: unknown, ctx: ToolContext): ToolResult | null {
-    return workspacePathPreflight(stringParam(params, 'cwd'), ctx, 'read');
+    const cwd = stringParam(params, 'cwd');
+    return (
+      workspacePathPreflight(cwd, ctx, 'read') ??
+      // Buscar dentro de `~/.ssh` es leer claves: mismo veto que `read_file`.
+      sensitivePathPreflight({ path: resolve(ctx.cwd, cwd ?? '.') }, ctx)
+    );
   },
 
   async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
@@ -195,26 +215,51 @@ export const grepTool: ToolDefinition = {
     const vetoed = workspacePathPreflight(cwd, ctx, 'read');
     if (vetoed) return vetoed;
     const base = resolve(ctx.cwd, cwd ?? '.');
+    const baseVeto = sensitivePathPreflight({ path: base }, ctx);
+    if (baseVeto) return baseVeto;
+
+    // Capa 3 (Hito 11) en búsquedas: el contenido de rutas sensibles nunca
+    // llega al modelo. Se cuenta lo omitido para decírselo.
+    let omitted = 0;
+    const omit = (fullPath: string): boolean => omitFromSearch(fullPath, ctx);
+    const countOmitted = (): void => {
+      omitted++;
+    };
 
     try {
       let matches: string[];
       if (ctx.workspace) {
         // Confinado: sin ripgrep (sería lanzar un binario desde el sidecar) y
         // sin seguir enlaces.
-        matches = searchWithNode(pattern, include, base, false);
+        matches = searchWithNode(pattern, include, base, false, omit, countOmitted);
       } else if (await hasRipgrep()) {
-        matches = await searchWithRipgrep(pattern, include, base, ctx.signal);
+        const omittedFiles = new Set<string>();
+        matches = (await searchWithRipgrep(pattern, include, base, ctx.signal)).filter((line) => {
+          const rel = ripgrepLinePath(line);
+          if (rel === null || !omit(resolve(base, rel))) return true;
+          omittedFiles.add(rel);
+          return false;
+        });
+        omitted = omittedFiles.size;
       } else {
-        matches = searchWithNode(pattern, include, base);
+        matches = searchWithNode(pattern, include, base, true, omit, countOmitted);
       }
+      matches = matches.slice(0, MAX_MATCHES);
+
+      const omittedNote =
+        omitted > 0
+          ? `\n(${omitted} sensitive file(s) — credentials, keys, .env, secrets — were ` +
+            'excluded from the search. Use read_file on a specific file if you need it; it asks ' +
+            'the user when that is allowed.)'
+          : '';
 
       if (matches.length === 0) {
-        return { ok: true, output: '(no matches)' };
+        return { ok: true, output: '(no matches)' + omittedNote };
       }
 
       const overflow =
         matches.length >= MAX_MATCHES ? `\n… (capped at ${MAX_MATCHES} matches)` : '';
-      return { ok: true, output: matches.join('\n') + overflow };
+      return { ok: true, output: matches.join('\n') + overflow + omittedNote };
     } catch (err) {
       return {
         ok: false,

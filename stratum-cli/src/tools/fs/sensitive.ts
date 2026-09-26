@@ -34,3 +34,15 @@ export function sensitivePathNeedsConfirm(params: unknown, ctx: ToolContext): bo
   const verdict = sensitivePathVerdict(params, ctx.config.tools.sensitivePathAllowlist);
   return verdict?.tier === 'confirm';
 }
+
+/**
+ * Filtro para las tools que **recorren** directorios (`grep`): `true` si el
+ * contenido de esa ruta no debe llegar al modelo. Sin esto, un `grep "."` sobre
+ * `~/.ssh` volcaba la clave que `read_file` tiene vetada — el mismo rodeo que
+ * la capa 3 ya cerró para los comandos de shell (Hito 13). Los del nivel
+ * `confirm` también se omiten salvo allowlist: una búsqueda no puede pedir
+ * confirmación fichero a fichero, y `read_file` sí la pide.
+ */
+export function omitFromSearch(path: string, ctx: ToolContext): boolean {
+  return sensitivePathVerdict({ path }, ctx.config.tools.sensitivePathAllowlist) !== null;
+}

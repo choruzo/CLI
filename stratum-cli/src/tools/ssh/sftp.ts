@@ -1,12 +1,15 @@
 import { z } from 'zod';
-import { existsSync, statSync } from 'fs';
+import { existsSync, lstatSync, realpathSync, statSync, unlinkSync } from 'fs';
 import { mkdir, stat } from 'fs/promises';
-import { dirname, resolve as resolvePath } from 'path';
+import { randomBytes } from 'crypto';
+import { basename, dirname, join, resolve as resolvePath } from 'path';
 import type { Client, SFTPWrapper } from 'ssh2';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.js';
 import { getSshPool, confirmFnFrom } from './runtime.js';
 import { HostKeyError } from './known-hosts.js';
 import { getLogger } from '../../logging/index.js';
+import { sensitivePathNeedsConfirm, sensitivePathPreflight } from '../fs/sensitive.js';
+import { currentSignature, renameWithRetry } from '../fs/file-io.js';
 
 const log = getLogger('ssh');
 
@@ -61,6 +64,43 @@ function humanBytes(bytes: number): string {
   return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
 }
 
+/**
+ * Rutas de la llamada con la local ya resuelta contra el cwd: la capa 3 (rutas
+ * sensibles, Hito 11) tiene que ver `~/.ssh/id_ed25519` aunque el modelo pase
+ * `id_ed25519` desde `~/.ssh`.
+ */
+function pathsOf(params: unknown, ctx: ToolContext): { localPath?: string; remotePath?: string } {
+  if (typeof params !== 'object' || params === null) return {};
+  const p = params as Record<string, unknown>;
+  return {
+    ...(typeof p.localPath === 'string' ? { localPath: resolvePath(ctx.cwd, p.localPath) } : {}),
+    ...(typeof p.remotePath === 'string' ? { remotePath: p.remotePath } : {}),
+  };
+}
+
+/**
+ * Capa 3 para transferencias: subir `~/.ssh/id_rsa` es exfiltrar la clave, y
+ * descargar sobre un fichero de credenciales es sobrescribirlo. Mismos niveles
+ * que `read_file`/`write_file`: `blocked` veta, `confirm` pregunta.
+ */
+const sensitiveTransferHooks = {
+  preflight(params: unknown, ctx: ToolContext): ToolResult | null {
+    return sensitivePathPreflight(pathsOf(params, ctx), ctx);
+  },
+  isDestructive(params: unknown, ctx: ToolContext): boolean {
+    return sensitivePathNeedsConfirm(pathsOf(params, ctx), ctx);
+  },
+};
+
+/** Cierra el canal SFTP: sin esto cada transferencia dejaba uno abierto en la conexión del pool. */
+function closeSftp(sftp: SFTPWrapper | undefined): void {
+  try {
+    sftp?.end();
+  } catch {
+    /* el canal ya estaba cerrado */
+  }
+}
+
 /** Traduce fallos de conexión/verificación al `ToolResult` correspondiente. */
 function toError(err: unknown): ToolResult {
   const recoverable = err instanceof HostKeyError ? err.recoverable : true;
@@ -76,6 +116,7 @@ export const sshUploadTool: ToolDefinition = {
   destructive: false,
   serialized: false,
   timeout: 600000,
+  ...sensitiveTransferHooks,
 
   async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const input = uploadSchema.parse(params);
@@ -98,10 +139,11 @@ export const sshUploadTool: ToolDefinition = {
     }
 
     const started = Date.now();
+    let sftp: SFTPWrapper | undefined;
     try {
       const pool = getSshPool(ctx.config);
       const client = await pool.getConnection(input.host, confirmFnFrom(ctx));
-      const sftp = await openSftp(client, input.host);
+      sftp = await openSftp(client, input.host);
       await transfer(sftp, 'put', localPath, input.remotePath, ctx.signal);
       const size = (await stat(localPath)).size;
       const durationMs = Date.now() - started;
@@ -114,6 +156,8 @@ export const sshUploadTool: ToolDefinition = {
       };
     } catch (err) {
       return toError(err);
+    } finally {
+      closeSftp(sftp);
     }
   },
 };
@@ -125,18 +169,64 @@ export const sshDownloadTool: ToolDefinition = {
   destructive: false,
   serialized: false,
   timeout: 600000,
+  ...sensitiveTransferHooks,
 
   async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
     const input = downloadSchema.parse(params);
-    const localPath = resolvePath(ctx.cwd, input.localPath);
-    const started = Date.now();
+    const requested = resolvePath(ctx.cwd, input.localPath);
+    // Un symlink se conserva: se escribe en su destino, como `write_file`.
+    let localPath = requested;
+    try {
+      if (lstatSync(requested).isSymbolicLink()) localPath = realpathSync(requested);
+    } catch {
+      /* no existe todavía */
+    }
+    if (existsSync(localPath) && statSync(localPath).isDirectory()) {
+      return {
+        ok: false,
+        error: `${localPath} es un directorio; indica la ruta completa del fichero de destino.`,
+        recoverable: true,
+      };
+    }
+    // Misma regla que `write_file`: si el agente leyó este fichero y cambió
+    // desde entonces, sobrescribirlo borraría cambios que nadie ha visto.
+    const before = currentSignature(localPath);
+    if (ctx.fileState?.check(localPath, before) === 'stale') {
+      return {
+        ok: false,
+        error:
+          `${localPath} cambió desde que lo leíste; vuelve a leerlo antes de sobrescribirlo ` +
+          'con la descarga.',
+        recoverable: true,
+      };
+    }
 
+    const started = Date.now();
+    // Descarga a un temporal en el mismo directorio y rename: un corte o una
+    // cancelación a mitad ya no deja el fichero de destino truncado.
+    const tmp = join(
+      dirname(localPath),
+      `.${basename(localPath)}.stratum-dl-${process.pid}-${randomBytes(4).toString('hex')}`,
+    );
+    let sftp: SFTPWrapper | undefined;
     try {
       await mkdir(dirname(localPath), { recursive: true });
       const pool = getSshPool(ctx.config);
       const client = await pool.getConnection(input.host, confirmFnFrom(ctx));
-      const sftp = await openSftp(client, input.host);
-      await transfer(sftp, 'get', input.remotePath, localPath, ctx.signal);
+      sftp = await openSftp(client, input.host);
+      await transfer(sftp, 'get', input.remotePath, tmp, ctx.signal);
+      const now = currentSignature(localPath);
+      const unchanged = before === null ? now === null : now !== null && now.hash === before.hash;
+      if (!unchanged) {
+        return {
+          ok: false,
+          error: `${localPath} cambió durante la descarga; no se ha sobrescrito.`,
+          recoverable: true,
+        };
+      }
+      renameWithRetry(tmp, localPath);
+      // El contenido nuevo no lo ha visto el agente.
+      ctx.fileState?.forget(localPath);
       const size = (await stat(localPath)).size;
       const durationMs = Date.now() - started;
       log.info('sftp download', { alias: input.host, size, durationMs });
@@ -148,6 +238,15 @@ export const sshDownloadTool: ToolDefinition = {
       };
     } catch (err) {
       return toError(err);
+    } finally {
+      // Cerrar el canal antes de borrar: un `fastGet` cancelado puede seguir
+      // escribiendo en el temporal hasta que el canal se cierra.
+      closeSftp(sftp);
+      try {
+        unlinkSync(tmp);
+      } catch {
+        /* ya renombrado o nunca creado */
+      }
     }
   },
 };

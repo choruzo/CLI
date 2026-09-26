@@ -864,6 +864,28 @@ export class ReactLoop {
         let emittedVisible = false;
         let streamErr: unknown = null;
 
+        // Acumula cada evento del buffer en el estado del turno y devuelve el
+        // que hay que emitir (el mismo, o su versión redactada).
+        const absorb = (ev: AgentEvent): AgentEvent => {
+          emittedVisible = true;
+          if (ev.type === 'text_delta') {
+            assistantText += ev.delta;
+          } else if (ev.type === 'tool_call_start') {
+            toolArgBuffers.set(ev.id, ev.input_so_far);
+          } else if (ev.type === 'tool_call_ready') {
+            toolArgBuffers.delete(ev.id);
+            readyCalls.push(ev);
+          } else if (ev.type === 'tool_error') {
+            // Hito 16: el error de parseo cita los argumentos crudos del
+            // modelo; se redacta aquí para que el evento (UI, subagent_event)
+            // y el mensaje del historial lleven el mismo texto seguro.
+            const safe = { ...ev, error: redactText(ev.error, this.config) };
+            parseErrors.push(safe as ParseError);
+            return safe;
+          }
+          return ev;
+        };
+
         try {
           for await (const chunk of streamWithRetry(activeProvider, request)) {
             if (signal.aborted) break;
@@ -883,29 +905,12 @@ export class ReactLoop {
                 u.total_tokens ?? (u.prompt_tokens ?? 0) + (u.completion_tokens ?? 0);
             }
 
-            for (const ev of buffer.feed(chunk)) {
-              emittedVisible = true;
-              if (ev.type === 'text_delta') {
-                assistantText += ev.delta;
-                yield ev;
-              } else if (ev.type === 'tool_call_start') {
-                toolArgBuffers.set(ev.id, ev.input_so_far);
-                yield ev;
-              } else if (ev.type === 'tool_call_ready') {
-                toolArgBuffers.delete(ev.id);
-                readyCalls.push(ev);
-                yield ev;
-              } else if (ev.type === 'tool_error') {
-                // Hito 16: el error de parseo cita los argumentos crudos del
-                // modelo; se redacta aquí para que el evento (UI, subagent_event)
-                // y el mensaje del historial lleven el mismo texto seguro.
-                const safe = { ...ev, error: redactText(ev.error, this.config) };
-                parseErrors.push(safe as ParseError);
-                yield safe;
-              } else {
-                yield ev;
-              }
-            }
+            for (const ev of buffer.feed(chunk)) yield absorb(ev);
+          }
+          // Fin normal del cuerpo: cierra las tool calls que ningún
+          // `finish_reason` cerró (backend que no lo manda o corte limpio).
+          if (!signal.aborted) {
+            for (const ev of buffer.finish()) yield absorb(ev);
           }
         } catch (err) {
           streamErr = err;

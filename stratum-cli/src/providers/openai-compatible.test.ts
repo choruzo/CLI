@@ -179,3 +179,68 @@ describe('StreamBuffer — razonamiento', () => {
     expect(buf.feed(delta({ content: 'hola' }))).toEqual([{ type: 'text_delta', delta: 'hola' }]);
   });
 });
+
+describe('StreamBuffer — cierre de tool calls', () => {
+  it('materializa las tool calls también con finish_reason "stop"', () => {
+    const buf = new StreamBuffer();
+    buf.feed(toolChunk(0, 'c0', 'read_file', '{"path":"a.txt"}'));
+    const events = buf.feed(textChunk('', 'stop'));
+    expect(events).toContainEqual({
+      type: 'tool_call_ready',
+      id: 'c0',
+      name: 'read_file',
+      input: { path: 'a.txt' },
+    });
+  });
+
+  it('con finish_reason "length" la llamada cortada es un error, no se pierde', () => {
+    const buf = new StreamBuffer();
+    buf.feed(toolChunk(0, 'c0', 'write_file', '{"path":"a.txt","content":"mucho'));
+    const events = buf.feed(textChunk('', 'length'));
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ type: 'tool_error', id: 'c0', name: 'write_file' });
+    expect((events[0] as { error: string }).error).toContain('output token limit');
+  });
+
+  it('finish() cierra las que ningún finish_reason cerró', () => {
+    const buf = new StreamBuffer();
+    buf.feed(toolChunk(0, 'c0', 'glob', '{"pattern":"*.ts"}'));
+    expect(buf.finish()).toEqual([
+      { type: 'tool_call_ready', id: 'c0', name: 'glob', input: { pattern: '*.ts' } },
+    ]);
+    // Idempotente: ya no queda nada abierto.
+    expect(buf.finish()).toEqual([]);
+  });
+
+  it('finish() con argumentos a medias (conexión cortada) da un error de parseo', () => {
+    const buf = new StreamBuffer();
+    buf.feed(toolChunk(0, 'c0', 'glob', '{"pattern":"*.t'));
+    const [ev] = buf.finish();
+    expect(ev).toMatchObject({ type: 'tool_error', id: 'c0' });
+  });
+
+  it('finish() suelta el texto retenido por el splitter de <think>', () => {
+    const buf = new StreamBuffer();
+    expect(buf.feed(textChunk('<thi'))).toEqual([]);
+    expect(buf.finish()).toEqual([{ type: 'text_delta', delta: '<thi' }]);
+  });
+
+  it('argumentos vacíos equivalen a {}', () => {
+    const buf = new StreamBuffer();
+    buf.feed(toolChunk(0, 'c0', 'todo', ''));
+    expect(buf.feed(finishToolChunk())).toEqual([
+      { type: 'tool_call_ready', id: 'c0', name: 'todo', input: {} },
+    ]);
+  });
+
+  it.each(['null', '[1,2]', '42', '"texto"'])(
+    'argumentos que no son un objeto (%s) son un error de parseo',
+    (args) => {
+      const buf = new StreamBuffer();
+      buf.feed(toolChunk(0, 'c0', 'exec', args));
+      const [ev] = buf.feed(finishToolChunk());
+      expect(ev).toMatchObject({ type: 'tool_error', id: 'c0' });
+      expect((ev as { error: string }).error).toContain('must be a JSON object');
+    },
+  );
+});

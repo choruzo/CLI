@@ -14,6 +14,7 @@ import type {
 import { getLogger } from '../logging/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { buildAssistantRegistry } from './assistant-runtime.js';
+import { checkpointMessages } from '../session/checkpoint.js';
 import type { DesktopSessionStore } from './session-store.js';
 import {
   CONVERSATION_RECORD_VERSION,
@@ -118,31 +119,7 @@ export function composeUserMessage(text: string, attachments: CheckedAttachment[
   return text.trim() === '' ? block : `${block}\n\n${text}`;
 }
 
-/**
- * Historial apto para un checkpoint a mitad de turno (15.12). Si el sidecar
- * muere justo después, lo guardado tiene que poder reanudarse: se quitan un
- * `assistant` con `tool_calls` sin todas sus respuestas (el provider rechazaría
- * el historial) y un mensaje de usuario final sin respuesta (el turno aparece
- * como interrumpido en el transcript y la UI ofrece reintentarlo).
- */
-export function checkpointMessages(messages: Message[]): Message[] {
-  const out = [...messages];
-  for (let i = out.length - 1; i >= 0; i--) {
-    const m = out[i];
-    if (m.role === 'tool') continue;
-    if (m.role === 'assistant' && m.tool_calls?.length) {
-      const answered = new Set(
-        out
-          .slice(i + 1)
-          .flatMap((x) => (x.role === 'tool' && x.tool_call_id ? [x.tool_call_id] : [])),
-      );
-      if (m.tool_calls.some((tc) => !answered.has(tc.id))) out.splice(i);
-    }
-    break;
-  }
-  if (out.at(-1)?.role === 'user') out.pop();
-  return out;
-}
+export { checkpointMessages };
 
 interface Pending<T> {
   resolve: (value: T) => void;

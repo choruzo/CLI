@@ -169,6 +169,11 @@ export interface SaveSessionParams {
    * un fichero con `existingId` también cuenta como conflicto.
    */
   expectedUpdatedAt?: string;
+  /**
+   * Marca de bifurcación que conservar: los guardados posteriores de una sesión
+   * que ya se bifurcó (checkpoints, `session/checkpoint.ts`) no deben perderla.
+   */
+  forkedFrom?: string;
 }
 
 export interface ListOptions {
@@ -214,7 +219,7 @@ export class SessionStore {
     const now = new Date().toISOString();
     let id = params.existingId ?? generateSessionId();
     let createdAt = params.createdAt ?? now;
-    let forkedFrom: string | undefined;
+    let forkedFrom: string | undefined = params.forkedFrom;
     // Concurrencia optimista: si la sesión cambió en disco desde que se cargó,
     // otra terminal la guardó. Pisarla perdería esa conversación sin avisar.
     if (params.existingId) {
