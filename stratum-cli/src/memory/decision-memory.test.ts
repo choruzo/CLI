@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync } from 'fs';
+import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { StratumConfigSchema } from '../config/schema.js';
@@ -134,5 +134,38 @@ describe('DecisionMemory', () => {
     const res = await mem.search('sqlite embeddings');
     expect(res.length).toBeGreaterThanOrEqual(1);
     expect(await mem.vectors.count()).toBe(1);
+  });
+
+  it('search reindexa las decisiones que faltan en un índice incompleto', async () => {
+    const mem = makeMemory(dir);
+    const a = await mem.save(sqliteDecision);
+    // Guardada sin indexar (embedder caído en su momento): el índice no está
+    // vacío, así que la reparación antigua (solo con count() === 0) no actuaba.
+    const b = mem.store.add({ ...sqliteDecision, title: 'Modelo onnx', content: 'python onnx' });
+    expect(await mem.vectors.count()).toBe(1);
+
+    const res = await mem.search('onnx python');
+    expect(res[0]?.record.id).toBe(b.id);
+    expect(await mem.vectors.has(a.record.embedding_ref)).toBe(true);
+    expect(await mem.vectors.count()).toBe(2);
+  });
+
+  it('un sidecar dañado no deja decisiones fuera del recall', async () => {
+    const mem = makeMemory(dir);
+    await mem.save(sqliteDecision);
+    writeFileSync(join(dir, 'vectors.fallback.json'), '{ roto', 'utf-8');
+    const fresh = makeMemory(dir);
+    await fresh.save({ ...sqliteDecision, title: 'Tabs', content: 'tabs vmware' });
+    const res = await fresh.search('sqlite chroma docker');
+    expect(res[0]?.record.title).toBe(sqliteDecision.title);
+  });
+
+  it('el dedup ve también las decisiones que no estaban indexadas', async () => {
+    const mem = makeMemory(dir);
+    const existing = mem.store.add(sqliteDecision);
+    const { deduped, duplicateOf } = await mem.save(sqliteDecision);
+    expect(deduped).toBe(true);
+    expect(duplicateOf).toBe(existing.id);
+    expect(mem.list()).toHaveLength(1);
   });
 });

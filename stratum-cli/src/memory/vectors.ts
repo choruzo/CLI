@@ -1,6 +1,10 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readFileSync, statSync } from 'fs';
 import { dirname } from 'path';
+import { writeFileAtomic } from '../config/writer.js';
+import { getLogger } from '../logging/index.js';
 import { importOptional } from '../runtime/optional-import.js';
+
+const log = getLogger('memory');
 
 export interface VectorMatch {
   ref: string;
@@ -43,61 +47,109 @@ function cosine(a: Float32Array, b: Float32Array): number {
 // Persiste en un sidecar JSON. O(n) por búsqueda; suficiente para el volumen de
 // decisiones de una sesión y garantiza que la memoria semántica funcione aunque
 // sqlite-vec / better-sqlite3 no estén instalados o fallen al compilar.
+//
+// El sidecar es un derivado de `decisions.json`, así que lo que no se entiende
+// se descarta en vez de apartarse; lo que importa es que el índice no se quede
+// incompleto sin que nadie lo note (ver `DecisionMemory.ensureIndexed`):
+// - Varias instancias (dos `chat`, CLI + Desktop) comparten el fichero: cada
+//   escritura relee el disco y aplica solo su cambio, y las lecturas recargan
+//   si el fichero cambió desde la última vez.
+// - Entradas con forma inválida o con otra dimensión (se cambió el modelo de
+//   embeddings) se descartan al cargar: solo harían ruido con score 0.
 // ---------------------------------------------------------------------------
 export class BruteForceBackend implements VectorBackend {
   readonly name = 'brute-force';
   private entries = new Map<string, Float32Array>();
+  /** `mtimeMs:size` del fichero la última vez que se leyó o escribió. */
+  private signature: string | null = null;
 
-  constructor(private readonly file: string) {
-    this.loadFromDisk();
+  constructor(
+    private readonly file: string,
+    private readonly dim?: number,
+  ) {
+    this.refresh();
   }
 
-  private loadFromDisk(): void {
-    if (!existsSync(this.file)) return;
+  private currentSignature(): string | null {
     try {
-      const raw = JSON.parse(readFileSync(this.file, 'utf-8')) as {
-        entries?: Array<{ ref: string; vec: number[] }>;
-      };
-      for (const e of raw.entries ?? []) {
-        this.entries.set(e.ref, Float32Array.from(e.vec));
-      }
+      const st = statSync(this.file);
+      return `${st.mtimeMs}:${st.size}`;
     } catch {
-      /* índice corrupto → empezar vacío; se reconstruye desde decisions.json */
+      return null;
     }
   }
 
-  private persist(): void {
-    const dir = dirname(this.file);
-    if (!existsSync(dir)) mkdirSync(dir, { recursive: true });
+  /** Recarga del disco si el fichero cambió (u otra instancia lo escribió). */
+  private refresh(): void {
+    const sig = this.currentSignature();
+    if (sig !== null && sig === this.signature) return;
+    this.signature = sig;
+    this.entries = sig === null ? new Map() : this.readFile();
+  }
+
+  private readFile(): Map<string, Float32Array> {
+    const out = new Map<string, Float32Array>();
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(this.file, 'utf-8'));
+    } catch (err) {
+      log.warn('vector fallback index unreadable; it will be rebuilt from decisions', {
+        file: this.file,
+        err,
+      });
+      return out;
+    }
+    const list = (raw as { entries?: unknown } | null)?.entries;
+    if (!Array.isArray(list)) return out;
+    let dropped = 0;
+    for (const e of list) {
+      const vec = validVector(e, this.dim);
+      if (vec) out.set((e as { ref: string }).ref, vec);
+      else dropped++;
+    }
+    if (dropped > 0) {
+      log.debug('vector fallback entries dropped', { file: this.file, dropped });
+    }
+    return out;
+  }
+
+  /** Relee el disco, aplica el cambio y persiste: no pisa lo de otra instancia. */
+  private mutate(change: (entries: Map<string, Float32Array>) => boolean): void {
+    this.refresh();
+    if (!change(this.entries)) return;
     const payload = {
       entries: Array.from(this.entries.entries()).map(([ref, vec]) => ({
         ref,
         vec: Array.from(vec),
       })),
     };
-    const tmp = `${this.file}.tmp`;
-    writeFileSync(tmp, JSON.stringify(payload), 'utf-8');
-    renameSync(tmp, this.file);
+    writeFileAtomic(this.file, JSON.stringify(payload));
+    this.signature = this.currentSignature();
   }
 
   add(ref: string, vec: Float32Array): void {
-    this.entries.set(ref, vec);
-    this.persist();
+    this.mutate((entries) => {
+      entries.set(ref, vec);
+      return true;
+    });
   }
 
   remove(ref: string): void {
-    if (this.entries.delete(ref)) this.persist();
+    this.mutate((entries) => entries.delete(ref));
   }
 
   has(ref: string): boolean {
+    this.refresh();
     return this.entries.has(ref);
   }
 
   count(): number {
+    this.refresh();
     return this.entries.size;
   }
 
   search(vec: Float32Array, k: number): VectorMatch[] {
+    this.refresh();
     const scored: VectorMatch[] = [];
     for (const [ref, v] of this.entries) {
       scored.push({ ref, score: cosine(vec, v) });
@@ -107,14 +159,26 @@ export class BruteForceBackend implements VectorBackend {
   }
 
   rebuild(entries: VectorEntry[]): void {
-    this.entries.clear();
-    for (const e of entries) this.entries.set(e.ref, e.vec);
-    this.persist();
+    this.mutate((current) => {
+      current.clear();
+      for (const e of entries) current.set(e.ref, e.vec);
+      return true;
+    });
   }
 
   close(): void {
     /* nada que cerrar */
   }
+}
+
+/** Vector de una entrada del sidecar, o `null` si no tiene la forma esperada. */
+function validVector(entry: unknown, dim: number | undefined): Float32Array | null {
+  if (typeof entry !== 'object' || entry === null) return null;
+  const { ref, vec } = entry as { ref?: unknown; vec?: unknown };
+  if (typeof ref !== 'string' || !ref || !Array.isArray(vec) || vec.length === 0) return null;
+  if (dim !== undefined && vec.length !== dim) return null;
+  if (!vec.every((x) => typeof x === 'number' && Number.isFinite(x))) return null;
+  return Float32Array.from(vec as number[]);
 }
 
 // ---------------------------------------------------------------------------
@@ -129,6 +193,16 @@ interface SqliteDb {
     all(...params: unknown[]): unknown[];
   };
   close(): void;
+}
+
+/** Dimensión declarada de `vec_decisions`, o `null` si la tabla no existe. */
+function tableDimension(db: SqliteDb): number | null {
+  const row = db
+    .prepare("SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'vec_decisions'")
+    .get() as { sql?: string } | undefined;
+  if (!row?.sql) return null;
+  const m = /float\[(\d+)\]/i.exec(row.sql);
+  return m ? Number(m[1]) : null;
 }
 
 class SqliteVecBackend implements VectorBackend {
@@ -152,6 +226,18 @@ class SqliteVecBackend implements VectorBackend {
 
     const db = new DatabaseMod.default(dbPath);
     sqliteVec.load(db);
+    // Cambiar `memory.embeddingDimension` (otro modelo) dejaba la tabla con la
+    // dimensión vieja y todo `add` fallaba. El índice es derivado: se recrea y
+    // `DecisionMemory.ensureIndexed` lo vuelve a llenar desde decisions.json.
+    const existing = tableDimension(db);
+    if (existing !== null && existing !== dim) {
+      log.warn('vector index dimension changed; recreating it', {
+        dbPath,
+        from: existing,
+        to: dim,
+      });
+      db.exec('DROP TABLE vec_decisions');
+    }
     db.exec(
       `CREATE VIRTUAL TABLE IF NOT EXISTS vec_decisions USING vec0(
          embedding_ref TEXT PRIMARY KEY,
@@ -249,7 +335,7 @@ export class VectorStore {
             this.warn(`sqlite-vec no disponible (${String(err)}); usando índice brute-force JS`);
           }
         }
-        const bf = new BruteForceBackend(this.opts.fallbackPath);
+        const bf = new BruteForceBackend(this.opts.fallbackPath, this.opts.dimension);
         this.backend = bf;
         return bf;
       })();

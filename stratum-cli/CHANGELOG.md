@@ -8,7 +8,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`) y host keys SSH (`known_hosts.json`).
+Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`).
 
 ### Corregido
 - **Sesiones**: se guardan de forma atómica; un cierre a mitad de escritura ya no deja la conversación truncada e irrecuperable.
@@ -29,6 +29,9 @@ Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`
 - **Decisiones**: un `decisions.json` dañado ya no se sobrescribe con la siguiente decisión, que borraba todas las anteriores. Se aparta a `decisions.json.corrupt-<fecha>` y se avisa.
 - **Decisiones**: cada entrada se valida al leerla. Las que no validan (por ejemplo, de un Stratum más nuevo) no se muestran, pero se conservan al reescribir el fichero, y un fichero con otro formato (`schemaVersion`) no se modifica.
 - **Decisiones**: cada escritura parte del contenido que hay en disco y usa un temporal único por proceso; dos procesos que guardaban a la vez podían pisarse el temporal.
+- **Memoria semántica**: las decisiones que faltan en el índice se indexan al buscar y al guardar. Antes solo se reparaba un índice vacío, así que con un índice incompleto (índice dañado, decisiones guardadas con el embedder caído, dos procesos escribiendo a la vez) esas decisiones no aparecían nunca en el recall y el dedup no las veía.
+- **Memoria semántica**: cambiar `memory.embeddingDimension` recrea el índice `sqlite-vec` en vez de hacer fallar todas las inserciones; el índice brute-force descarta las entradas de otra dimensión o con forma inválida.
+- **Memoria semántica**: el índice brute-force relee el disco antes de escribir y cuando cambia, así que dos procesos ya no se borran las entradas entre sí; escritura con `writeFileAtomic`.
 - **SSH**: un `known_hosts.json` dañado ya no se trata como vacío. Antes, todos los hosts `tofu` volvían a «primera conexión» (se aceptaba cualquier clave) y la siguiente confirmación borraba las huellas guardadas. Ahora la conexión se aborta sin preguntar, el fichero no se toca y `stratum ssh list`/`trust` explican qué pasa.
 
 ### Añadido

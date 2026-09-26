@@ -81,6 +81,9 @@ export class DecisionMemory {
     return this.writeLock.runExclusive(async () => {
       const text = `${input.title}\n${input.content}`;
       const vec = await this.embedder.embedOne(text);
+      // El dedup solo ve lo indexado: sin esto, una decisión que falta en el
+      // índice se guardaría otra vez como nueva.
+      if (vec) await this.ensureIndexed();
 
       if (vec) {
         const dupRef = await this.vectors.findSimilar(vec, this.threshold);
@@ -102,12 +105,7 @@ export class DecisionMemory {
   async search(query: string, k?: number): Promise<RecallResult[]> {
     const vec = await this.embedder.embedOne(query);
     if (!vec) return [];
-    // Auto-reparación: si el índice está vacío pero hay decisiones guardadas
-    // (p. ej. se guardaron mientras el embedder estaba caído y ahora funciona),
-    // reconstruir el índice desde decisions.json antes de buscar.
-    if ((await this.vectors.count()) === 0 && this.store.all().length > 0) {
-      await this.reindex();
-    }
+    await this.ensureIndexed();
     const matches = await this.vectors.search(vec, k ?? this.topK);
     const out: RecallResult[] = [];
     for (const m of matches) {
@@ -137,6 +135,27 @@ export class DecisionMemory {
 
   list(): DecisionRecord[] {
     return this.store.all();
+  }
+
+  /**
+   * Auto-reparación: indexa las decisiones de `decisions.json` que faltan en el
+   * índice — guardadas con el embedder caído, un sidecar dañado que se empezó
+   * de cero, un cambio de dimensión, u otra instancia que escribió a la vez.
+   * Antes solo se reparaba un índice vacío: con uno incompleto, el recall no
+   * encontraba esas decisiones nunca. Solo se calculan los embeddings que faltan.
+   */
+  private async ensureIndexed(): Promise<void> {
+    const missing: DecisionRecord[] = [];
+    for (const r of this.store.all()) {
+      if (!(await this.vectors.has(r.embedding_ref))) missing.push(r);
+    }
+    if (missing.length === 0) return;
+    const vecs = await this.embedder.embed(missing.map((r) => `${r.title}\n${r.content}`));
+    if (!vecs) return;
+    for (let i = 0; i < missing.length; i++) {
+      const vec = vecs[i];
+      if (vec) await this.vectors.add(missing[i]!.embedding_ref, vec);
+    }
   }
 
   /**
