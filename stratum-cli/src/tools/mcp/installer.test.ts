@@ -39,7 +39,13 @@ describe('serverInstallPath', () => {
 
 describe('isServerInstalled', () => {
   it('false cuando el server no declara package', () => {
-    const cfg = { name: 'x', command: 'npx', args: [], startupTimeout: 15000 } as McpServer;
+    const cfg = {
+      name: 'x',
+      command: 'npx',
+      args: [],
+      startupTimeout: 15000,
+      toolTimeout: 120000,
+    } as McpServer;
     expect(isServerInstalled(cfg, '/nonexistent')).toBe(false);
   });
 
@@ -50,6 +56,7 @@ describe('isServerInstalled', () => {
       args: [],
       package: 'nope-not-installed@1.0.0',
       startupTimeout: 15000,
+      toolTimeout: 120000,
     } as McpServer;
     expect(isServerInstalled(cfg, '/nonexistent-dir-xyz')).toBe(false);
   });

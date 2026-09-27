@@ -28,7 +28,7 @@ import { detectCapabilities } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
 import type { ToolRegistry } from '../../tools/registry.js';
-import { parseMcpToolName } from '../../tools/mcp/bridge.js';
+import { mcpToolName } from '../../tools/mcp/bridge.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
 import {
@@ -1789,15 +1789,10 @@ export function App({
         dispatch({ type: 'SYSTEM_MESSAGE', text: 'Reiniciando MCP servers...' });
         void (async () => {
           try {
-            // Retirar las tools del ciclo anterior: si un server deja de
-            // conectar, sus tools no deben quedarse apuntando a un cliente muerto.
-            for (const t of registry.list()) {
-              if (t.name.startsWith('mcp__')) registry.unregister(t.name);
-            }
-            await mcpManager.shutdownAll();
-            const warnings = await mcpManager.connectAll();
-            mcpManager.registerInto(registry);
-            mcpManager.startHeartbeat();
+            // Retira las tools del ciclo anterior (un server que deja de
+            // conectar no deja tools apuntando a un cliente muerto), cierra y
+            // vuelve a conectar.
+            const warnings = await mcpManager.reload(registry);
             const summary = mcpManager.getStatusSummary();
             const warnText = warnings.length
               ? `\n\n${warnings.map((w) => `  ⚠ ${w.message}`).join('\n')}`
@@ -2316,10 +2311,17 @@ export function App({
                 for (const client of clients) {
                   const icon = client.status === 'connected' ? '●' : '○';
                   lines.push(`    ${icon} ${client.name} [${client.status}]`);
+                  const registered = mcpManager.registeredNames(client);
                   for (const t of client.tools) {
-                    const parsed = parseMcpToolName(`mcp__${client.name}__${t.name}`);
-                    const display = parsed ? `${parsed.server}/${parsed.tool}` : t.name;
-                    lines.push(`        • ${display}`);
+                    // El nombre registrado lleva hash si el original no era
+                    // válido o pasaba de 64 caracteres; se enseña cuando difiere.
+                    const name = mcpToolName(client.name, t.name);
+                    const note = !registered.has(name)
+                      ? '  (omitida: nombre en uso)'
+                      : name !== `mcp__${client.name}__${t.name}`
+                        ? `  → ${name}`
+                        : '';
+                    lines.push(`        • ${client.name}/${t.name}${note}`);
                   }
                 }
               }

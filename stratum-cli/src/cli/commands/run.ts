@@ -130,10 +130,12 @@ export const runCommand = new Command('run')
       const mcpManager = new McpManager(config);
       if (config.mcp.servers.length > 0) {
         const mcpWarnings = await mcpManager.connectAll();
+        mcpWarnings.push(...mcpManager.registerInto(registry));
         for (const w of mcpWarnings) {
           process.stderr.write(`[mcp] ${w.message}\n`);
         }
-        mcpManager.registerInto(registry);
+        // Un server que se cuelga durante un run largo se detecta y se relanza.
+        mcpManager.startHeartbeat();
       }
 
       if (profileFlag.profile) {

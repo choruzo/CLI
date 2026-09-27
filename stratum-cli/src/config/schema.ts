@@ -41,6 +41,11 @@ const McpServerSchema = z
     package: z.string().optional(),
     /** Timeout de arranque por server en ms (§12.8, opción 3). */
     startupTimeout: z.number().int().positive().default(15000),
+    /**
+     * Timeout de cada llamada a una tool de este server en ms. Antes mandaba el
+     * default del dispatcher (30 s) y cortaba las tools MCP lentas.
+     */
+    toolTimeout: z.number().int().positive().default(120000),
   })
   .refine((s) => s.package !== undefined || (s.command !== undefined && s.command.length > 0), {
     message: "Se requiere 'command' cuando no se define 'package'",

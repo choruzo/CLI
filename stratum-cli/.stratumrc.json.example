@@ -94,7 +94,8 @@
         "args": [
           "/home/user/projects"
         ],
-        "startupTimeout": 15000
+        "startupTimeout": 15000,
+        "toolTimeout": 120000
       },
       {
         "name": "chrome-devtools",

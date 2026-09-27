@@ -52,6 +52,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
         args: [],
         env: undefined,
         startupTimeout: 15000,
+        toolTimeout: 120000,
       })),
       heartbeatInterval: 30000,
       startup: 'lazy',
