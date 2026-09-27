@@ -100,7 +100,9 @@ export const runCommand = new Command('run')
       try {
         config = loadConfig();
       } catch (err) {
-        process.stderr.write(`[fatal] Config error: ${String(err)}\n`);
+        process.stderr.write(
+          `[fatal] Config error: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
         process.exit(1);
       }
 

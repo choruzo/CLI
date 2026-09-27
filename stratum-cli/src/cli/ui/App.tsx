@@ -1,5 +1,5 @@
 import React, { useReducer, useCallback, useRef, useState, useEffect } from 'react';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Box, Text, useApp, useInput } from 'ink';
 import TextInput from 'ink-text-input';
@@ -18,12 +18,11 @@ import type {
   TokenAccounting,
 } from '../../agent/types.js';
 import type { ProviderConfig } from '../../config/schema.js';
-import { StratumConfigSchema } from '../../config/schema.js';
-import { expandEnvVars, findConfigFile } from '../../config/loader.js';
-import { getByDotPath, setByDotPath, formatConfigValue } from '../../config/dot-path.js';
+import { expandEnvVars } from '../../config/loader.js';
+import { getByDotPath, formatConfigValue } from '../../config/dot-path.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { SessionStore, describeSkippedSessions } from '../../session/store.js';
-import { upsertProvider, readRawProvider } from '../../config/writer.js';
+import { upsertProvider, readRawProvider, setConfigValue } from '../../config/writer.js';
 import { detectCapabilities } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
@@ -1929,20 +1928,18 @@ export function App({
         const key = rest.slice(0, sp);
         const value = rest.slice(sp + 1).trim();
         try {
-          const configPath =
-            findConfigFile(process.cwd()) ?? join(process.cwd(), '.stratumrc.json');
-          const raw: Record<string, unknown> = existsSync(configPath)
-            ? (JSON.parse(readFileSync(configPath, 'utf-8')) as Record<string, unknown>)
-            : {};
-          setByDotPath(raw, key, value);
-          StratumConfigSchema.parse(raw);
-          writeFileSync(configPath, JSON.stringify(raw, null, 2) + '\n', 'utf-8');
+          // Misma ruta que `stratum config set`: validación fusionada con la
+          // global y escritura atómica.
+          const configPath = setConfigValue(key, value);
           dispatch({
             type: 'SYSTEM_MESSAGE',
             text: `${key} = ${value} guardado en ${configPath}.\nLos cambios de provider/MCP requieren reiniciar o usar /provider, /model o /mcp reload.`,
           });
         } catch (err) {
-          dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al guardar: ${String(err)}` });
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Error al guardar: ${err instanceof Error ? err.message : String(err)}`,
+          });
         }
         return;
       }

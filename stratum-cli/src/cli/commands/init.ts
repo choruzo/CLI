@@ -58,7 +58,9 @@ export const initCommand = new Command('init')
       try {
         config = loadConfig(cwd);
       } catch (err) {
-        process.stderr.write(`\n  [error] Config: ${String(err)}\n`);
+        process.stderr.write(
+          `\n  [error] Config: ${err instanceof Error ? err.message : String(err)}\n`,
+        );
         process.exit(1);
       }
 

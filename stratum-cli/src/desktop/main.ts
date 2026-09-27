@@ -1,7 +1,7 @@
 import { homedir } from 'os';
 import { join } from 'path';
 import { configureLogging, closeLogging, getLogger } from '../logging/index.js';
-import { loadConfig } from '../config/loader.js';
+import { loadConfig, takeConfigDeprecations } from '../config/loader.js';
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import {
   CONFIG_SCHEMA_VERSION,
@@ -90,14 +90,21 @@ export function coreInfo(): CoreInfo {
 export function loadSharedConfig(startDir: string): {
   config: StratumConfig;
   error: SidecarErrorFrame | null;
+  /** Avisos del loader (variables no definidas, claves obsoletas). */
+  warnings: string[];
 } {
   try {
-    return { config: loadConfig(startDir), error: null };
+    const config = loadConfig(startDir);
+    // Variables de entorno no definidas, claves obsoletas: se devuelven para
+    // que el llamador los registre cuando el logging ya esté configurado. La
+    // cola se vacía en cada carga en vez de crecer con cada recarga.
+    return { config, error: null, warnings: takeConfigDeprecations() };
   } catch (err) {
     const defaults = StratumConfigSchema.parse({});
     if (err instanceof SchemaVersionError) {
       return {
         config: defaults,
+        warnings: [],
         error: {
           type: 'sidecar_error',
           fatal: true,
@@ -109,6 +116,7 @@ export function loadSharedConfig(startDir: string): {
     const message = err instanceof Error ? err.message : String(err);
     return {
       config: defaults,
+      warnings: [],
       error: {
         type: 'sidecar_error',
         fatal: true,
@@ -145,9 +153,10 @@ export async function runSidecar(argv: string[]): Promise<number> {
 
   // El sidecar arranca con cwd = home. El modo Chat no trabaja sobre ninguna
   // carpeta; el cwd de trabajo llega con el modo Code (D8, 15.3).
-  const { config, error: startupError } = loadSharedConfig(homedir());
+  const { config, error: startupError, warnings } = loadSharedConfig(homedir());
   configureLogging(config, { stderrEnabled: true });
   const log = getLogger('desktop');
+  for (const warning of warnings) log.warn(warning);
   if (startupError)
     log.error('startup config error', { code: startupError.code, msg: startupError.message });
 
@@ -175,7 +184,11 @@ export async function runSidecar(argv: string[]): Promise<number> {
   // cambie en disco (la CLI, otro editor) se aplica igual que lo guardado aquí.
   const settings = new DesktopSettings({
     panel: new ConfigPanel(),
-    load: () => loadSharedConfig(homedir()),
+    load: () => {
+      const loaded = loadSharedConfig(homedir());
+      for (const warning of loaded.warnings) log.warn(warning);
+      return loaded;
+    },
     apply: (next) => {
       conversations.applyConfig(buildAssistantConfig(next, dataDir), {
         maxConcurrentTurns: next.desktop.maxConcurrentTurns,

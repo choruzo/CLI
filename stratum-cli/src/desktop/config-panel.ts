@@ -5,6 +5,7 @@ import { homedir } from 'os';
 import { StratumConfigSchema } from '../config/schema.js';
 import { expandEnvVars, findConfigFile, GLOBAL_CONFIG_PATH } from '../config/loader.js';
 import { CONFIG_SCHEMA_VERSION, checkSchemaVersion } from '../config/schema-version.js';
+import { jsonErrorPosition, stripBom } from '../config/json-text.js';
 import { writeFileAtomic } from '../config/writer.js';
 import { getLogger } from '../logging/index.js';
 import { SECRET_PLACEHOLDER, type ConfigIssue, type ConfigSnapshot } from './protocol.js';
@@ -66,7 +67,7 @@ export class ConfigPanel {
     try {
       const { content, exists } = this.readDisk();
       if (!exists) return {};
-      const value = JSON.parse(content) as unknown;
+      const value = JSON.parse(stripBom(content)) as unknown;
       return isObject(value) ? value : {};
     } catch {
       return {};
@@ -85,7 +86,7 @@ export class ConfigPanel {
     if (!disk.exists) return { ...base, text: '', parseError: null, readOnly: null };
     let value: unknown;
     try {
-      value = JSON.parse(disk.content);
+      value = JSON.parse(stripBom(disk.content));
     } catch (err) {
       // Sin interpretar no se sabe qué es secreto: el contenido va tal cual
       // (es lo que hay en el disco del usuario) para poder arreglarlo.
@@ -339,7 +340,7 @@ function parseDraft(
 ): { ok: true; value: Json } | { ok: false; issues: ConfigIssue[] } {
   if (text.trim() === '') return { ok: true, value: {} };
   try {
-    const value = JSON.parse(text) as unknown;
+    const value = JSON.parse(stripBom(text)) as unknown;
     if (!isObject(value)) {
       return {
         ok: false,
@@ -359,23 +360,7 @@ function jsonErrorMessage(err: unknown): string {
   return `JSON no válido: ${raw}`;
 }
 
-/** Línea y columna de un `SyntaxError` de `JSON.parse` (V8 da la posición o la línea). */
-export function jsonErrorPosition(err: unknown, text: string): { line?: number; column?: number } {
-  const message = err instanceof Error ? err.message : '';
-  const lc = /line (\d+) column (\d+)/.exec(message);
-  if (lc) return { line: Number(lc[1]), column: Number(lc[2]) };
-  const pos = /position (\d+)/.exec(message);
-  if (pos) {
-    const before = text.slice(0, Number(pos[1]));
-    const lines = before.split('\n');
-    return { line: lines.length, column: lines[lines.length - 1].length + 1 };
-  }
-  if (/end of JSON input/i.test(message)) {
-    const lines = text.split('\n');
-    return { line: lines.length, column: lines[lines.length - 1].length + 1 };
-  }
-  return {};
-}
+export { jsonErrorPosition };
 
 function newerSchemaMessage(version: unknown): string | null {
   const check = checkSchemaVersion(version, CONFIG_SCHEMA_VERSION);

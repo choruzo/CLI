@@ -14,6 +14,8 @@ import { mcpCommand } from './commands/mcp.js';
 import { logsCommand } from './commands/logs.js';
 import { sshCommand } from './commands/ssh.js';
 import { agentsCommand } from './commands/agents.js';
+import { ConfigError } from '../config/loader.js';
+import { SchemaVersionError } from '../config/schema-version.js';
 
 // Injected by tsup at build time; falls back to package.json in tsx dev mode
 declare const __VERSION__: string;
@@ -46,4 +48,12 @@ program.addCommand(logsCommand);
 program.addCommand(sshCommand);
 program.addCommand(agentsCommand);
 
-program.parse();
+// Una config rota se explica con su mensaje (fichero, línea o clave), no con
+// la traza: los comandos que no capturan `loadConfig()` llegan aquí.
+program.parseAsync().catch((err: unknown) => {
+  if (err instanceof ConfigError || err instanceof SchemaVersionError) {
+    process.stderr.write(`Config error: ${err.message}\n`);
+    process.exit(1);
+  }
+  throw err;
+});

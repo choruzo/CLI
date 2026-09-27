@@ -8,7 +8,7 @@ function loadConfigOrExit() {
   try {
     return loadConfig();
   } catch (err) {
-    process.stderr.write(`Config error: ${String(err)}\n`);
+    process.stderr.write(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
   }
 }
@@ -68,7 +68,7 @@ const memoryShow = new Command('show')
     try {
       config = loadConfig();
     } catch (err) {
-      process.stderr.write(`Config error: ${String(err)}\n`);
+      process.stderr.write(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
 

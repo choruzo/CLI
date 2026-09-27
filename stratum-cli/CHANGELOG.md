@@ -11,6 +11,10 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), de la escritura de ficheros del usuario (`write_file` / `edit_file`), de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`) y de su uso en la sesión, del cliente del LLM y de `web_fetch`.
 
 ### Corregido
+- **Config**: un `.stratumrc.json` guardado con BOM (el Bloc de notas de Windows lo añade) ya no falla con «Unexpected token»; se lee con normalidad, también en Ajustes de Desktop.
+- **Config**: un JSON roto dice qué fichero es (el global o el del proyecto), la línea y la columna. Un valor inválido lista cada clave con su motivo y el fichero que la define, en vez de volcar el error de validación entero. Los comandos que no lo capturaban (`sessions`, `logs`) ya no enseñan una traza.
+- **Config**: una variable `${VAR}` que no está definida se sigue sustituyendo por vacío, pero ahora `chat` y `run` avisan de cuál es, en qué clave y en qué fichero. Antes una `apiKey` con el nombre de variable mal escrito acababa en un 401 sin pista.
+- **Config**: `stratum config set` y `/config set` validan el resultado junto con la config global, como la verá Stratum: un valor del proyecto que se apoya en la global (p. ej. un `jumpHost` definido allí) ya no se rechaza. `/config set` escribe de forma atómica, como `stratum config set`, y ninguno acepta claves como `__proto__` o `a..b`.
 - **MCP**: un server que se cae durante la sesión se reconecta solo. Antes se quedaba en «reconnecting» hasta salir, y sus tools respondían que no estaban disponibles. Una llamada que estaba en curso cuando cayó avisa de que la acción pudo llegar a hacerse, para que el agente la compruebe antes de repetirla.
 - **MCP**: un server colgado (que no responde ni al heartbeat) se relanza.
 - **MCP**: las tools MCP ya no se cortan a los 30 s. Cada server tiene su `toolTimeout` (120 s por defecto) y, al vencer, se cancela la llamada en el server.

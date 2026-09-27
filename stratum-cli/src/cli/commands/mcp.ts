@@ -15,7 +15,7 @@ const mcpList = new Command('list')
     try {
       config = loadConfig();
     } catch (err) {
-      process.stderr.write(`Config error: ${String(err)}\n`);
+      process.stderr.write(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
 
@@ -73,7 +73,7 @@ const mcpInstall = new Command('install')
     try {
       config = loadConfig();
     } catch (err) {
-      process.stderr.write(`Config error: ${String(err)}\n`);
+      process.stderr.write(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
       process.exit(1);
     }
 

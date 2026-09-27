@@ -22,6 +22,13 @@ export function getByDotPath(obj: Record<string, unknown>, path: string): unknow
  */
 export function setByDotPath(obj: Record<string, unknown>, path: string, value: unknown): void {
   const keys = path.split('.');
+  // `a..b` o `.a` crearían claves vacías, y `__proto__` escribiría en el
+  // prototipo de Object en vez de en la config.
+  for (const key of keys) {
+    if (key === '' || key === '__proto__' || key === 'constructor' || key === 'prototype') {
+      throw new Error(`Clave de config no válida: "${path}"`);
+    }
+  }
   let current: Record<string, unknown> = obj;
 
   for (let i = 0; i < keys.length - 1; i++) {

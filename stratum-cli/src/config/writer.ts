@@ -1,15 +1,13 @@
+import { existsSync, writeFileSync, copyFileSync, mkdirSync, renameSync, rmSync } from 'fs';
+import { dirname, join } from 'path';
 import {
-  existsSync,
-  readFileSync,
-  writeFileSync,
-  copyFileSync,
-  mkdirSync,
-  renameSync,
-  rmSync,
-} from 'fs';
-import { dirname } from 'path';
-import { findConfigFile, expandEnvVars, GLOBAL_CONFIG_PATH } from './loader.js';
-import { StratumConfigSchema, type ProviderConfig } from './schema.js';
+  findConfigFile,
+  GLOBAL_CONFIG_PATH,
+  readConfigFile,
+  validateConfigLayer,
+} from './loader.js';
+import { setByDotPath } from './dot-path.js';
+import type { ProviderConfig } from './schema.js';
 
 /**
  * Escritura de `.stratumrc.json` para el wizard de providers (Hito 3.5).
@@ -46,7 +44,7 @@ export function writeFileAtomic(path: string, content: string): void {
 
 function readRaw(path: string): Record<string, unknown> {
   if (!existsSync(path)) return {};
-  return JSON.parse(readFileSync(path, 'utf-8')) as Record<string, unknown>;
+  return readConfigFile(path);
 }
 
 /**
@@ -56,8 +54,9 @@ function readRaw(path: string): Record<string, unknown> {
  * @returns ruta del backup creado, o `null` si no había archivo previo.
  */
 export function writeConfigWithBackup(path: string, raw: Record<string, unknown>): string | null {
-  // Validar el resultado final antes de tocar el disco
-  StratumConfigSchema.parse(expandEnvVars(raw));
+  // Validar el resultado final antes de tocar el disco, como lo verá el
+  // loader (una capa de proyecto, fusionada con la global).
+  validateConfigLayer(path, raw);
 
   let backupPath: string | null = null;
   if (existsSync(path)) {
@@ -164,4 +163,19 @@ export function readRawProvider(name: string, configPath?: string): Record<strin
     | undefined;
   const entry = providers?.[name];
   return entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
+}
+
+/**
+ * `stratum config set` y `/config set`: fija una clave en el `.stratumrc.json`
+ * de proyecto (el más cercano hacia arriba, o uno nuevo en `cwd`), validando
+ * el resultado como lo verá el loader y escribiendo de forma atómica. Lanza
+ * `ConfigError` (o `Error` si la clave no es válida) sin tocar el disco.
+ */
+export function setConfigValue(key: string, value: string, cwd: string = process.cwd()): string {
+  const path = findConfigFile(cwd) ?? join(cwd, '.stratumrc.json');
+  const raw = readRaw(path);
+  setByDotPath(raw, key, value);
+  validateConfigLayer(path, raw);
+  writeFileAtomic(path, JSON.stringify(raw, null, 2) + '\n');
+  return path;
 }
