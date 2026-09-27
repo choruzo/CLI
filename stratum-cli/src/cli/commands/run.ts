@@ -282,6 +282,9 @@ export const runCommand = new Command('run')
 
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
+      // Un error fatal (provider caído, fallback agotado) no es un éxito para
+      // quien encadena `stratum run` en un script.
+      let fatalError = false;
       // Con `--delegate` la salida es el resumen del subagente y el exit code su estado.
       let delegateStatus: string | null = null;
       // Atribución de subagentes en paralelo (§5.6): prefijo `[sub perfil#n]` a
@@ -452,6 +455,7 @@ export const runCommand = new Command('run')
 
             case 'error':
               if (event.fatal) {
+                fatalError = true;
                 process.stderr.write(`${fatalLabel} ${event.message}\n`);
               } else {
                 process.stderr.write(`${errorLabel} ${event.message}\n`);
@@ -482,6 +486,10 @@ export const runCommand = new Command('run')
 
       if (finalText) {
         process.stdout.write(finalText + '\n');
+      }
+
+      if (fatalError) {
+        process.exit(1);
       }
 
       // `--delegate`: un subagente que no completó no es un éxito para quien

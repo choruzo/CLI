@@ -190,6 +190,49 @@ describe('runCommand', () => {
     expect(exitSpy).toHaveBeenCalledWith(1);
   });
 
+  it('sale con código 1 si el turno termina con un error fatal', async () => {
+    // Un provider caído (fallback agotado) acaba en error{fatal} + done: antes
+    // el proceso salía con 0 y un script que encadena `stratum run` lo daba
+    // por bueno.
+    mockState.agentRun.mockImplementationOnce(async function* () {
+      yield { type: 'text_delta' as const, delta: 'texto a medias' };
+      yield { type: 'error' as const, message: 'LLM API error 500', fatal: true };
+      yield { type: 'done' as const, stopReason: 'error' as const };
+    });
+    vi.spyOn(process, 'on').mockImplementation((() => process) as typeof process.on);
+    const stderrWrite = vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    vi.spyOn(process, 'exit').mockImplementation(((code?: string | number | null) => {
+      throw new ExitError(Number(code ?? 0));
+    }) as typeof process.exit);
+
+    const { runCommand } = await import('./run.js');
+    await expect(runCommand.parseAsync(['demo-task'], { from: 'user' })).rejects.toMatchObject({
+      code: 1,
+    });
+    expect(stderrWrite).toHaveBeenCalledWith(expect.stringContaining('LLM API error 500'));
+  });
+
+  it('un error no fatal no cambia el código de salida', async () => {
+    mockState.agentRun.mockImplementationOnce(async function* () {
+      yield { type: 'error' as const, message: 'tool falló', fatal: false };
+      yield { type: 'text_delta' as const, delta: 'respuesta' };
+      yield { type: 'done' as const, stopReason: 'stop' as const };
+    });
+    vi.spyOn(process, 'on').mockImplementation((() => process) as typeof process.on);
+    vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
+    vi.spyOn(process.stdout, 'write').mockImplementation(() => true);
+    const exitSpy = vi.spyOn(process, 'exit').mockImplementation(((
+      code?: string | number | null,
+    ) => {
+      throw new ExitError(Number(code ?? 0));
+    }) as typeof process.exit);
+
+    const { runCommand } = await import('./run.js');
+    await runCommand.parseAsync(['demo-task'], { from: 'user' });
+    expect(exitSpy).not.toHaveBeenCalled();
+  });
+
   it('rechaza --delegate combinado con --plan antes de cargar la config (Hito 15)', async () => {
     vi.spyOn(process.stderr, 'write').mockImplementation(() => true);
     vi.spyOn(process, 'exit').mockImplementation(((code?: string | number | null) => {

@@ -11,6 +11,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), de la escritura de ficheros del usuario (`write_file` / `edit_file`), de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`) y de su uso en la sesión, del cliente del LLM y de `web_fetch`.
 
 ### Corregido
+- **`stratum run`**: un turno que termina con un error fatal (el provider caído y el fallback agotado) sale con código 1. Antes salía con 0 y un script que encadenaba `stratum run` lo daba por bueno.
 - **Compresión de contexto**: en una tarea larga con muchas tool calls, la petición original del usuario ya no se pierde al comprimir: se conserva literal junto a las últimas iteraciones.
 - **Compresión de contexto**: el historial comprimido ya no pone dos mensajes seguidos del asistente ni empieza por uno, algo que las plantillas de chat de algunos modelos (Mistral, Gemma) rechazan con un error que dejaba la sesión inutilizable.
 - **Compresión de contexto**: el resumen ya no se cortaba a los 30 s. Un modelo local con razonamiento tarda más y siempre acababa en el truncado duro; ahora el límite es `agent.compressionTimeoutMs` (120 s) y, si el resumen falla, se avisa (`context_summary_failed`) en vez de truncar en silencio. Cancelar el turno mientras se resume no toca el historial.
