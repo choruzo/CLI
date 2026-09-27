@@ -114,6 +114,14 @@ export function parseInvocation(tokens: string[]): { name: string; rest: string[
       while (i < tokens.length && tokens[i]!.startsWith('-')) i++;
       continue;
     }
+    // `cmd /c del x` (Windows): el comando real va tras `/c` o `/k`.
+    if (bare.toLowerCase() === 'cmd') {
+      const run = tokens.findIndex((t, j) => j > i && /^\/[ck]$/i.test(t));
+      if (run !== -1) {
+        i = run + 1;
+        continue;
+      }
+    }
     return { name: bare, rest: tokens.slice(i + 1) };
   }
   return null;
@@ -161,6 +169,20 @@ function subcommand(rest: string[]): { name: string | null; rest: string[] } {
 /** Rutas cuya destrucción recursiva no tiene vuelta atrás. */
 const CATASTROPHIC_TARGETS = /^(?:\/|~|~\/\*?|\$HOME\/?\*?|\$\{HOME\}\/?\*?|\.|\.\.|\/\*)$/;
 
+/**
+ * Lo mismo con sintaxis de Windows/PowerShell: raíz de una unidad (`C:\`, `C:`,
+ * `\`), home (`~`, `$HOME`, `$env:USERPROFILE`), directorio actual y padre, con o
+ * sin `\*` final. Sin distinguir mayúsculas, como PowerShell.
+ */
+const WINDOWS_CATASTROPHIC =
+  /^(?:[a-z]:[\\/]?|[\\/]|~[\\/]?|\$home[\\/]?|\$env:(?:userprofile|homedrive|systemdrive|systemroot|windir)[\\/]?|\.[\\/]?|\.\.[\\/]?)\*?$/i;
+
+/** `Remove-Item` y todos sus alias, más los borrados de `cmd.exe`. */
+const PS_REMOVE_COMMANDS = new Set(['remove-item', 'rm', 'ri', 'del', 'erase', 'rd', 'rmdir']);
+
+/** `-Recurse` y sus abreviaturas (PowerShell acepta cualquier prefijo único). */
+const PS_RECURSE_FLAG = /^-r(?:e(?:c(?:u(?:r(?:s(?:e)?)?)?)?)?)?(?::\$true)?$/i;
+
 export interface HardDenyRule {
   id: string;
   reason: string;
@@ -176,6 +198,23 @@ export const HARD_DENY_RULES: readonly HardDenyRule[] = [
       const recursive = hasShortFlags(rest, ['r']) || hasLongFlag(rest, '--recursive');
       if (!recursive) return false;
       return positionals(rest).some((p) => CATASTROPHIC_TARGETS.test(p));
+    },
+  },
+  {
+    // En Windows `exec` corre en PowerShell: el `rm -rf /` de allí es un
+    // `Remove-Item -Recurse` (o sus alias) sobre la raíz de una unidad o el home.
+    id: 'ps_remove_recursive_root',
+    reason: 'borrado recursivo de la raíz de una unidad, del home o del directorio actual',
+    matches(name, rest) {
+      const cmd = name.toLowerCase();
+      if (!PS_REMOVE_COMMANDS.has(cmd)) return false;
+      const recursive =
+        rest.some((tok) => PS_RECURSE_FLAG.test(tok)) ||
+        ((cmd === 'rd' || cmd === 'rmdir') && rest.some((tok) => /^\/s$/i.test(tok)));
+      if (!recursive) return false;
+      return rest.some(
+        (tok) => !tok.startsWith('-') && !/^\/[a-z]$/i.test(tok) && WINDOWS_CATASTROPHIC.test(tok),
+      );
     },
   },
   {
@@ -274,6 +313,46 @@ export function commandIsDestructive(command: string, patterns: string[]): boole
     if (re.test(command)) return true;
   }
   return false;
+}
+
+/**
+ * Cmdlets de PowerShell que borran o destruyen datos. Son nombres inequívocos,
+ * así que se buscan en cualquier parte del comando (también dentro de un
+ * `pwsh -Command "…"`), sin distinguir mayúsculas.
+ */
+const PS_DESTRUCTIVE_CMDLETS = [
+  'Remove-Item',
+  'Remove-ItemProperty',
+  'Clear-Content',
+  'Clear-Item',
+  'Clear-RecycleBin',
+  'Format-Volume',
+  'Clear-Disk',
+  'Initialize-Disk',
+  'Remove-Partition',
+];
+
+/** Alias de borrado de PowerShell/`cmd.exe`: solo cuentan como comando, no como palabra suelta. */
+const PS_DESTRUCTIVE_ALIASES = new Set(['rm', 'ri', 'del', 'erase', 'rd', 'rmdir', 'format']);
+
+/**
+ * Borrados con sintaxis de Windows (§12.5). En Windows `exec` corre en
+ * PowerShell y `tools.destructivePatterns` solo trae nombres POSIX que
+ * distinguen mayúsculas: un `Remove-Item`, un `del` o un `RM` se ejecutaban sin
+ * confirmación. Es intrínseco —no depende de la config— igual que la capa 1:
+ * quien personaliza `destructivePatterns` no debe perderlo sin saberlo.
+ */
+export function windowsDestructiveCommand(command: string): string | null {
+  for (const cmdlet of PS_DESTRUCTIVE_CMDLETS) {
+    const re = new RegExp(`(?:^|[\\s;|&("'\`{])${cmdlet}(?:$|[\\s;|&)"'\`}])`, 'i');
+    if (re.test(command)) return cmdlet;
+  }
+  for (const segment of splitCommandSegments(command)) {
+    const invocation = parseInvocation(tokenize(segment.replace(/^[({]+/, '')));
+    const name = invocation?.name.toLowerCase();
+    if (name && PS_DESTRUCTIVE_ALIASES.has(name)) return name;
+  }
+  return null;
 }
 
 /**

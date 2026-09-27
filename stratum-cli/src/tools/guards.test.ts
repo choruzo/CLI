@@ -12,6 +12,7 @@ import {
   commandPathVerdict,
   collectPathInputs,
   sensitivePathVerdict,
+  windowsDestructiveCommand,
 } from './guards.js';
 import { createExecTool } from './exec/exec.js';
 import { readFileTool } from './fs/read.js';
@@ -314,5 +315,78 @@ describe('exec — rutas sensibles a través del shell (Hito 13)', () => {
       ctx({ destructivePolicy: 'allow' }),
     );
     expect(results[0]!.result.ok).toBe(true);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Windows: `exec` corre en PowerShell. Los patrones por defecto solo traían
+// nombres POSIX y distinguían mayúsculas, así que un `Remove-Item` o un `del`
+// se ejecutaban sin confirmación (visto de punta a punta con un modelo local).
+// ---------------------------------------------------------------------------
+
+describe('guards — borrados con sintaxis de Windows', () => {
+  it.each([
+    'Remove-Item notas.txt',
+    'remove-item -Path build -Recurse',
+    'Get-ChildItem *.log | Remove-Item',
+    'del notas.txt',
+    'DEL /q notas.txt',
+    'erase a.txt',
+    'ri build -r',
+    'rd /s /q build',
+    'RM notas.txt',
+    'Clear-Content app.log',
+    'Format-Volume -DriveLetter D',
+    'pwsh -NoProfile -Command "Remove-Item x"',
+    'if ($true) { Remove-Item x }',
+    'cmd /c del x.txt',
+  ])('pide confirmación: %s', (command) => {
+    expect(windowsDestructiveCommand(command)).not.toBeNull();
+    expect(execTool.isDestructive?.({ command }, ctx())).toBe(true);
+  });
+
+  it.each([
+    'Get-ChildItem',
+    'Get-Content notas.txt',
+    'git log --grep del',
+    'echo "rd y del son alias"',
+    'Get-ChildItem | Format-Table',
+    'npm run format',
+    'Select-String -Pattern Remove-Items-Old notas.txt',
+  ])('no molesta: %s', (command) => {
+    expect(windowsDestructiveCommand(command)).toBeNull();
+  });
+
+  it('no depende de tools.destructivePatterns', () => {
+    const custom = StratumConfigSchema.parse({
+      tools: { auditLog: false, destructivePatterns: ['DROP'] },
+    });
+    expect(execTool.isDestructive?.({ command: 'Remove-Item x' }, ctx({ config: custom }))).toBe(
+      true,
+    );
+  });
+
+  it.each([
+    'Remove-Item -Recurse -Force C:\\',
+    'Remove-Item C:\\* -Recurse',
+    'remove-item -r -fo ~',
+    'Remove-Item -Path $HOME -Recurse',
+    'Remove-Item $env:USERPROFILE\\* -Recurse -Force',
+    'rm -r -fo .',
+    'rd /s /q C:\\',
+    'rmdir /S \\',
+    'cmd /c rd /s /q C:\\',
+    'ri -Recurse d:/',
+  ])('hard-deny: %s', (command) => {
+    expect(hardDenyReason(command)).not.toBeNull();
+  });
+
+  it.each([
+    'Remove-Item -Recurse -Force build',
+    'Remove-Item C:\\temp\\x -Recurse',
+    'rd /s /q node_modules',
+    'Remove-Item C:\\',
+  ])('hard-deny no salta: %s', (command) => {
+    expect(hardDenyReason(command)).toBeNull();
   });
 });

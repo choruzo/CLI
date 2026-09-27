@@ -1110,6 +1110,8 @@ stratum run --deny-destructive "task"  # Bloquea todas las destructivas y las in
 rm, rmdir, dd, mkfs, format, DROP, DELETE, truncate, shred, wipefs, > (overwrite redirect)
 ```
 
+> **Endurecimiento — sintaxis de Windows.** En Windows `exec` corre en PowerShell, y esos patrones (nombres POSIX, con mayúsculas y minúsculas distintas) no veían `Remove-Item`, `del` ni `RM`: un borrado se ejecutaba sin confirmación. `windowsDestructiveCommand` (`tools/guards.ts`) lo detecta de forma **intrínseca**, sin depender de `tools.destructivePatterns` (quien la personaliza no debe perderlo sin saberlo): cmdlets destructivos (`Remove-Item`, `Clear-Content`, `Format-Volume`, `Clear-Disk`…) en cualquier parte del comando y alias de borrado (`rm`, `ri`, `del`, `erase`, `rd`, `rmdir`, `format`) en posición de comando, sin distinguir mayúsculas. La capa 1 (hard-deny) gana la regla `ps_remove_recursive_root`: `Remove-Item -Recurse` (o un alias, o `rd /s`) sobre la raíz de una unidad, el home o el directorio actual. `parseInvocation` desenvuelve `cmd /c …`.
+
 **En piped/CI mode** (stdin no es TTY): si no se puede mostrar el prompt, se comporta como `--deny-destructive` automáticamente. El agente recibe el error y puede buscar alternativas.
 
 ---

@@ -11,6 +11,7 @@ import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.
 import type { StratumConfig } from '../../config/schema.js';
 import {
   commandIsDestructive,
+  windowsDestructiveCommand,
   commandPathVerdict,
   commandVeto,
   guardedConfirmLabel,
@@ -254,6 +255,7 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
       ) {
         return true;
       }
+      if (windowsDestructiveCommand(command)) return true;
       return commandIsDestructive(command, ctx.config.tools.destructivePatterns);
     },
 
