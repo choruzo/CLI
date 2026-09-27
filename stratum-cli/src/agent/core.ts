@@ -446,6 +446,7 @@ export class StratumAgent {
         this.router.model,
         this.config.agent.compressionThreshold,
         this.config.agent.compressorModel,
+        this.config.agent.compressionTimeoutMs,
       );
       this.contextManagerKey = key;
     }

@@ -1,7 +1,7 @@
 import type { StratumConfig } from '../config/schema.js';
 import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
-import { StreamBuffer } from '../providers/openai-compatible.js';
+import { StreamBuffer, ThinkTagSplitter } from '../providers/openai-compatible.js';
 import { streamWithRetry } from '../providers/retry.js';
 import type {
   AgentEvent,
@@ -90,8 +90,44 @@ function formatToolError(
 export type CompressionResult =
   | { kind: 'skipped' }
   | { kind: 'compressed'; tokensBefore: number; tokensAfter: number; roundsCompressed: number }
-  | { kind: 'truncated'; tokensBefore: number; tokensAfter: number; roundsRemoved: number }
-  | { kind: 'pressure' }; // zona protegida sola ya supera umbral
+  | {
+      kind: 'truncated';
+      tokensBefore: number;
+      tokensAfter: number;
+      roundsRemoved: number;
+      /** Por qué no sirvió el resumen LLM (ausente si no había compresor). */
+      compressorError?: string;
+    }
+  /** `/compact` forzado: el resumen falló y no hacía falta truncar nada. */
+  | { kind: 'failed'; error: string }
+  | { kind: 'pressure'; compressorError?: string }; // zona protegida sola ya supera umbral
+
+/** Timeout por defecto del resumen LLM: un modelo local con razonamiento tarda ~40 s. */
+export const DEFAULT_COMPRESSION_TIMEOUT_MS = 120_000;
+
+/** Tope por mensaje en la entrada del compresor: el resumen necesita el hilo, no los volcados. */
+const COMPRESSOR_TOOL_CHARS = 1_500;
+const COMPRESSOR_TEXT_CHARS = 4_000;
+
+const COMPRESSOR_PROMPT =
+  'Summarize the conversation below so an agent can continue the work without it. ' +
+  'At most 500 words. Preserve: the user requests and goals, technical decisions and ' +
+  'their reasons, files read or changed, commands run and their outcome, errors found, ' +
+  'and what is still pending. Write in the language the user writes in. ' +
+  'Output only the summary.';
+
+/**
+ * Error del compresor. `cancelled` distingue la cancelación del usuario de un
+ * fallo: cancelar no debe tocar el historial.
+ */
+class CompressorError extends Error {
+  constructor(
+    message: string,
+    readonly cancelled = false,
+  ) {
+    super(message);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // ContextManager — §12.4
@@ -116,6 +152,7 @@ export class ContextManager {
     private readonly model?: string,
     private readonly baseCompressionThreshold = 0.8,
     private readonly compressorModel?: string,
+    private readonly compressionTimeoutMs = DEFAULT_COMPRESSION_TIMEOUT_MS,
   ) {}
 
   setCompressionMode(mode: 'normal' | 'conservative'): void {
@@ -220,12 +257,14 @@ export class ContextManager {
   /**
    * Comprime el historial si supera el umbral configurado (default 80%).
    * Modifica `messages` en el lugar. Devuelve el resultado para emitir eventos.
+   * `signal` es la cancelación del turno: cancelar durante el resumen deja el
+   * historial intacto.
    */
-  async maybeCompress(messages: Message[]): Promise<CompressionResult> {
+  async maybeCompress(messages: Message[], signal?: AbortSignal): Promise<CompressionResult> {
     // Sin redondear: `pct` viene de Math.round y un 80.4% real se leería como 0.80.
     const { used, max } = this.usage(messages);
     if (max > 0 && used / max <= this.compressionThreshold) return { kind: 'skipped' };
-    return this.compress(messages);
+    return this.compress(messages, signal, false);
   }
 
   /**
@@ -233,19 +272,14 @@ export class ContextManager {
    * usa `/compact`, donde el usuario pide la compresión explícitamente y el
    * contexto está, por definición, por debajo del umbral automático.
    */
-  async compress(messages: Message[]): Promise<CompressionResult> {
-    const { used } = this.usage(messages);
-    const tokensBefore = used;
-
-    // -----------------------------------------------------------------------
-    // Identificar zona protegida:
-    // - messages[0] (system prompt)
-    // - últimas keepRounds rondas: recorremos desde el final
-    // -----------------------------------------------------------------------
-    const protectedSet = this.buildProtectedSet(messages);
-
-    // Mensajes candidatos a comprimir (fuera de la zona protegida)
-    const oldMessages = messages.filter((_, i) => !protectedSet.has(i));
+  async compress(
+    messages: Message[],
+    signal?: AbortSignal,
+    forced = true,
+  ): Promise<CompressionResult> {
+    const tokensBefore = this.usage(messages).used;
+    const zone = this.buildProtectedZone(messages);
+    const oldMessages = zone.compressible.map((i) => messages[i]!);
 
     if (oldMessages.length === 0) {
       // Toda la conversación está en zona protegida — presión irresolvible
@@ -255,49 +289,39 @@ export class ContextManager {
     // -----------------------------------------------------------------------
     // Intento 1: compresión vía LLM call
     // -----------------------------------------------------------------------
-    let summary: string | null = null;
+    let compressorError: string | undefined;
     if (this.provider) {
       try {
-        summary = await this.callCompressor(oldMessages);
-      } catch {
+        const anchor = zone.anchor !== null ? messages[zone.anchor] : undefined;
+        const summary = await this.callCompressor(oldMessages, anchor, signal);
+        this.applySummary(messages, zone, summary);
+        this.sanitizeToolPairing(messages);
+        // Invalidar cache de tokens reales (el historial cambió)
+        this.lastPromptTokens = null;
+
+        const tokensAfter = this.estimateCalibrated(messages);
+        const newPct = this.contextWindow > 0 ? tokensAfter / this.contextWindow : 0;
+        if (forced || newPct <= this.compressionThreshold) {
+          return {
+            kind: 'compressed',
+            tokensBefore,
+            tokensAfter,
+            roundsCompressed: oldMessages.length,
+          };
+        }
+        compressorError = 'the summary did not bring the context below the threshold';
+      } catch (err) {
+        if (err instanceof CompressorError && err.cancelled) return { kind: 'skipped' };
         // Caso A: falla → no reintentar → ir a truncado duro
-        summary = null;
+        compressorError = err instanceof Error ? err.message : String(err);
+        log.warn('context compressor failed', { error: compressorError });
       }
     }
 
-    if (summary !== null) {
-      // Reemplazar historial antiguo por el resumen
-      const summaryMsg: Message = {
-        role: 'assistant',
-        content: `<summary>${summary}</summary>`,
-      };
-
-      // Reconstruir messages en el lugar: system + summaryMsg + zona protegida (sin system)
-      const protectedMessages = messages.filter((_, i) => protectedSet.has(i) && i !== 0);
-      messages.splice(0, messages.length, messages[0]!, summaryMsg, ...protectedMessages);
-      this.sanitizeToolPairing(messages);
-
-      const tokensAfter = this.estimateCalibrated(messages);
-      // Invalidar cache de tokens reales (el historial cambió)
-      this.lastPromptTokens = null;
-
-      // Verificar si la compresión fue suficiente
-      const newPct = this.contextWindow > 0 ? tokensAfter / this.contextWindow : 0;
-      if (newPct <= this.compressionThreshold) {
-        return {
-          kind: 'compressed',
-          tokensBefore,
-          tokensAfter,
-          roundsCompressed: oldMessages.length,
-        };
-      }
-      // Si no bajó suficiente → caer a truncado duro
-    }
-
     // -----------------------------------------------------------------------
-    // Caso B: truncado duro en bloques de 2 rondas
+    // Caso B: truncado duro
     // -----------------------------------------------------------------------
-    return this.hardTruncate(messages, tokensBefore, protectedSet);
+    return this.hardTruncate(messages, tokensBefore, compressorError);
   }
 
   // -------------------------------------------------------------------------
@@ -305,47 +329,80 @@ export class ContextManager {
   // -------------------------------------------------------------------------
 
   /**
-   * Construye el Set de índices de la zona protegida:
-   * - índice 0 (system prompt)
-   * - últimas `keepRounds` rondas (par user+assistant + sus tool messages asociados)
+   * Zona protegida (§12.4):
+   *  - el system prompt (índice 0);
+   *  - la **cola**: las últimas `keepRounds` respuestas del assistant con sus
+   *    tool results, más el `user` que abre la primera si va justo delante. En
+   *    un chat sin tools cada assistant es una ronda; en un turno agéntico, una
+   *    iteración;
+   *  - el **ancla**: si la cola no contiene ningún `user` (un turno agéntico
+   *    largo), el último `user` anterior a ella, que es la tarea en curso. Sin
+   *    él, tras comprimir el agente seguiría trabajando sin saber para qué.
+   *
+   * Lo comprimible es todo lo que hay entre el system y la cola salvo el ancla.
    */
-  private buildProtectedSet(messages: Message[]): Set<number> {
-    const protected_ = new Set<number>();
-    protected_.add(0); // system prompt
-
-    // Recorrer desde el final contando "rondas" (user+assistant)
-    let rounds = 0;
-    let i = messages.length - 1;
-    while (i > 0 && rounds < this.keepRounds) {
-      const msg = messages[i];
-      if (!msg) {
-        i--;
-        continue;
+  private buildProtectedZone(messages: Message[]): {
+    tailStart: number;
+    anchor: number | null;
+    compressible: number[];
+  } {
+    let tailStart = messages.length;
+    let assistants = 0;
+    for (let i = messages.length - 1; i > 0 && assistants < this.keepRounds; i--) {
+      if (messages[i]?.role === 'assistant') {
+        assistants++;
+        tailStart = i;
       }
+    }
+    if (assistants < this.keepRounds) tailStart = 1;
+    if (tailStart > 1 && messages[tailStart - 1]?.role === 'user') tailStart--;
 
-      if (msg.role === 'assistant') {
-        protected_.add(i);
-        // incluir los tool results que siguen a este assistant
-        let j = i + 1;
-        while (j < messages.length && messages[j]?.role === 'tool') {
-          protected_.add(j);
-          j++;
+    let anchor: number | null = null;
+    const tailHasUser = messages.slice(tailStart).some((m) => m.role === 'user');
+    if (!tailHasUser) {
+      for (let i = tailStart - 1; i > 0; i--) {
+        if (messages[i]?.role === 'user') {
+          anchor = i;
+          break;
         }
-        // incluir el user message anterior
-        if (i - 1 > 0 && messages[i - 1]?.role === 'user') {
-          protected_.add(i - 1);
-          i -= 2;
-        } else {
-          i--;
-        }
-        rounds++;
-      } else {
-        protected_.add(i);
-        i--;
       }
     }
 
-    return protected_;
+    const compressible: number[] = [];
+    for (let i = 1; i < tailStart; i++) if (i !== anchor) compressible.push(i);
+    return { tailStart, anchor, compressible };
+  }
+
+  /**
+   * Sustituye lo comprimible por el resumen sin romper la alternancia de roles
+   * (varias plantillas de chat rechazan dos `assistant` seguidos o que el
+   * primer mensaje tras el system no sea `user`):
+   *  - con ancla, la cola empieza por un assistant: el resumen va en su texto,
+   *    justo después de la tarea, que queda literal;
+   *  - si la cola empieza por un `user`, el resumen lo precede en su texto;
+   *  - si no, el resumen es un `user` propio tras el system.
+   */
+  private applySummary(
+    messages: Message[],
+    zone: { tailStart: number; anchor: number | null },
+    summary: string,
+  ): void {
+    const block = `<summary>\n${summary}\n</summary>`;
+    const prepend = (msg: Message): Message => ({
+      ...msg,
+      content: msg.content ? `${block}\n\n${msg.content}` : block,
+    });
+
+    const head: Message[] = [messages[0]!];
+    const tail = messages.slice(zone.tailStart);
+    if (zone.anchor !== null) head.push(messages[zone.anchor]!);
+
+    if (tail[0] && (zone.anchor !== null || tail[0].role === 'user')) {
+      tail[0] = prepend(tail[0]);
+    } else {
+      head.push({ role: 'user', content: block });
+    }
+    messages.splice(0, messages.length, ...head, ...tail);
   }
 
   /**
@@ -407,13 +464,19 @@ export class ContextManager {
     }
   }
 
-  /** Truncado duro: elimina mensajes fuera de la zona protegida en bloques de 2 rondas. */
+  /**
+   * Truncado duro: elimina lo comprimible de más antiguo a más reciente, por
+   * unidades (un `user`, o un assistant con sus tool results), hasta bajar del
+   * umbral. La zona protegida —ancla incluida— nunca se toca.
+   */
   private hardTruncate(
     messages: Message[],
     tokensBefore: number,
-    protectedSet: Set<number>,
+    compressorError?: string,
   ): CompressionResult {
+    let { tailStart, anchor } = this.buildProtectedZone(messages);
     let roundsRemoved = 0;
+    let removedAny = false;
 
     const belowThreshold = () => {
       const tokens = this.estimateCalibrated(messages);
@@ -421,51 +484,34 @@ export class ContextManager {
     };
 
     while (!belowThreshold()) {
-      // Encontrar el bloque no-protegido más antiguo (después del system)
-      let removed = false;
-      for (let i = 1; i < messages.length; i++) {
-        if (protectedSet.has(i)) continue;
+      const start = anchor === 1 ? 2 : 1;
+      if (start >= tailStart) break; // No queda nada que eliminar
 
-        // Eliminar hasta 2 mensajes no protegidos consecutivos (user+assistant)
-        const toRemove: number[] = [];
-        let j = i;
-        let blockRounds = 0;
-        while (j < messages.length && !protectedSet.has(j) && blockRounds < 2) {
-          toRemove.push(j);
-          if (messages[j]?.role === 'user' || messages[j]?.role === 'assistant') blockRounds++;
-          j++;
-        }
-
-        // El bloque puede terminar en un assistant con `tool_calls`: arrastrar los
-        // `tool` que le responden, o quedarían huérfanos y el provider rechazaría
-        // el historial con un 400 irrecuperable (un `tool` debe ir precedido del
-        // assistant que lo pidió).
-        while (j < messages.length && !protectedSet.has(j) && messages[j]?.role === 'tool') {
-          toRemove.push(j);
-          j++;
-        }
-
-        if (toRemove.length === 0) break;
-
-        // Eliminar en orden inverso para no alterar índices
-        for (let k = toRemove.length - 1; k >= 0; k--) {
-          messages.splice(toRemove[k]!, 1);
-          // Ajustar protectedSet (desplazar índices mayores)
-          const newProtected = new Set<number>();
-          for (const idx of protectedSet) {
-            if (idx < toRemove[k]!) newProtected.add(idx);
-            else if (idx > toRemove[k]!) newProtected.add(idx - 1);
-          }
-          protectedSet.clear();
-          for (const idx of newProtected) protectedSet.add(idx);
-        }
-
-        roundsRemoved += blockRounds;
-        removed = true;
-        break;
+      // Un assistant arrastra los `tool` que le responden: quedarían huérfanos y
+      // el provider rechazaría el historial con un 400 irrecuperable.
+      let end = start + 1;
+      if (messages[start]?.role === 'assistant') {
+        while (end < tailStart && messages[end]?.role === 'tool') end++;
       }
+      const count = end - start;
+      if (messages[start]?.role === 'user' || messages[start]?.role === 'assistant') {
+        roundsRemoved++;
+      }
+      messages.splice(start, count);
+      tailStart -= count;
+      if (anchor !== null && anchor > start) anchor -= count;
+      removedAny = true;
+    }
 
-      if (!removed) break; // No queda nada que eliminar
+    // Lo que queda tras el system puede empezar por un assistant (se cortó una
+    // ronda por la mitad, o solo queda la cola): muchas plantillas exigen que
+    // la conversación empiece por `user`.
+    if (removedAny && messages[1] && messages[1].role !== 'user') {
+      messages.splice(1, 0, {
+        role: 'user',
+        content:
+          '<context_truncated>Older messages were removed to fit the context window.</context_truncated>',
+      });
     }
 
     this.sanitizeToolPairing(messages);
@@ -475,41 +521,102 @@ export class ContextManager {
 
     const newPct = this.contextWindow > 0 ? tokensAfter / this.contextWindow : 0;
     if (newPct > this.compressionThreshold) {
-      return { kind: 'pressure' };
+      return compressorError ? { kind: 'pressure', compressorError } : { kind: 'pressure' };
+    }
+    // `/compact` por debajo del umbral con el compresor caído: no hacía falta
+    // truncar, así que no hay nada que decir salvo que el resumen falló.
+    if (!removedAny && compressorError) return { kind: 'failed', error: compressorError };
+
+    return compressorError
+      ? { kind: 'truncated', tokensBefore, tokensAfter, roundsRemoved, compressorError }
+      : { kind: 'truncated', tokensBefore, tokensAfter, roundsRemoved };
+  }
+
+  /**
+   * Texto que ve el compresor. Incluye las tool calls (sin ellas cada
+   * iteración llegaba como un «assistant:» vacío y el resumen no podía decir
+   * qué se leyó ni qué se ejecutó) y recorta cada mensaje: un volcado de 30k
+   * caracteres no aporta al resumen y podría desbordar la propia petición.
+   */
+  private compressorInput(oldMessages: Message[], anchor?: Message): string {
+    const names = new Map<string, string>();
+    const lines: string[] = [];
+    for (const msg of oldMessages) {
+      if (msg.role === 'assistant') {
+        const parts = [`[assistant]`];
+        if (msg.content) parts.push(truncateToolOutput(msg.content, COMPRESSOR_TEXT_CHARS));
+        for (const tc of msg.tool_calls ?? []) {
+          names.set(tc.id, tc.function.name);
+          parts.push(
+            `-> ${tc.function.name}(${truncateToolOutput(tc.function.arguments, COMPRESSOR_TEXT_CHARS / 4)})`,
+          );
+        }
+        lines.push(parts.join('\n'));
+      } else if (msg.role === 'tool') {
+        const name = (msg.tool_call_id && names.get(msg.tool_call_id)) || 'tool';
+        lines.push(
+          `[${name} result]\n${truncateToolOutput(msg.content ?? '', COMPRESSOR_TOOL_CHARS)}`,
+        );
+      } else {
+        lines.push(
+          `[${msg.role}]\n${truncateToolOutput(msg.content ?? '', COMPRESSOR_TEXT_CHARS)}`,
+        );
+      }
     }
 
-    return { kind: 'truncated', tokensBefore, tokensAfter, roundsRemoved };
+    // La propia petición tiene que caber en la ventana con sitio para el resumen.
+    const ratio = this.tokenRatio ?? 1;
+    const budgetChars = Math.max(8_000, Math.floor(((this.contextWindow * 0.6) / ratio) * 3.5));
+    const conversation = truncateToolOutput(lines.join('\n\n'), budgetChars);
+
+    const context = anchor?.content
+      ? `The user's current request stays in the conversation verbatim; use it as context:\n${truncateToolOutput(anchor.content, COMPRESSOR_TEXT_CHARS)}\n\n`
+      : '';
+    return `${COMPRESSOR_PROMPT}\n\n${context}<conversation>\n${conversation}\n</conversation>`;
   }
 
   /** Llama al LLM para comprimir el historial antiguo. */
-  private async callCompressor(oldMessages: Message[]): Promise<string> {
-    if (!this.provider || !this.model) throw new Error('No provider para compresión');
+  private async callCompressor(
+    oldMessages: Message[],
+    anchor?: Message,
+    signal?: AbortSignal,
+  ): Promise<string> {
+    if (!this.provider || !this.model) throw new CompressorError('no provider for compression');
 
-    const conversationText = oldMessages.map((m) => `${m.role}: ${m.content ?? ''}`).join('\n');
-
-    const compressorMessages: Message[] = [
-      {
-        role: 'user',
-        content:
-          'Resume esta conversación en máximo 500 palabras preservando decisiones técnicas y contexto clave:\n\n' +
-          conversationText,
-      },
-    ];
-
+    const timeout = AbortSignal.timeout(this.compressionTimeoutMs);
+    const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
     const model = this.compressorModel ?? this.model;
+    // Un `<think>` al principio es razonamiento (backends que no lo separan a
+    // `reasoning_content`): no es parte del resumen.
+    const think = new ThinkTagSplitter();
     let result = '';
 
-    for await (const chunk of this.provider.complete({
-      messages: compressorMessages,
-      stream: true,
-      model,
-      signal: AbortSignal.timeout(30000),
-    })) {
-      const content = chunk.choices[0]?.delta?.content;
-      if (content) result += content;
+    try {
+      for await (const chunk of this.provider.complete({
+        messages: [{ role: 'user', content: this.compressorInput(oldMessages, anchor) }],
+        stream: true,
+        model,
+        signal: combined,
+      })) {
+        const content = chunk.choices[0]?.delta?.content;
+        if (content) result += think.feed(content).text;
+      }
+    } catch (err) {
+      if (signal?.aborted) throw new CompressorError('cancelled', true);
+      if (timeout.aborted) {
+        throw new CompressorError(
+          `timed out after ${Math.round(this.compressionTimeoutMs / 1000)} s`,
+        );
+      }
+      throw new CompressorError(err instanceof Error ? err.message : String(err));
     }
+    if (signal?.aborted) throw new CompressorError('cancelled', true);
+    result += think.flush().text;
 
-    return result.trim();
+    const summary = result.trim();
+    // Un resumen vacío no sustituye a nada: sería borrar el historial.
+    if (!summary) throw new CompressorError('the compressor returned an empty summary');
+    return summary;
   }
 }
 
@@ -630,6 +737,7 @@ export class ReactLoop {
         model,
         config.agent.compressionThreshold,
         config.agent.compressorModel,
+        config.agent.compressionTimeoutMs,
       );
   }
 
@@ -735,7 +843,7 @@ export class ReactLoop {
       });
 
       // Comprimir contexto antes de cada iteración (§12.4)
-      const comprResult = await this.contextManager.maybeCompress(this.messages);
+      const comprResult = await this.contextManager.maybeCompress(this.messages, signal);
       if (comprResult.kind === 'compressed' || comprResult.kind === 'truncated') {
         loopLog.info(`context ${comprResult.kind}`, {
           tokensBefore: comprResult.tokensBefore,
@@ -743,6 +851,17 @@ export class ReactLoop {
         });
       } else if (comprResult.kind === 'pressure') {
         loopLog.warn('context window pressure', { ctxPct: ctxUsage.pct });
+      }
+      // Un resumen que no llega cae al truncado duro: sin este aviso el usuario
+      // solo vería que el agente ha olvidado cosas.
+      if (
+        (comprResult.kind === 'truncated' || comprResult.kind === 'pressure') &&
+        comprResult.compressorError
+      ) {
+        yield {
+          type: 'warning',
+          message: `context_summary_failed: ${comprResult.compressorError}; older messages were truncated instead`,
+        };
       }
       // F6: en modo conservative (p. ej. /init) la compresión destruye el
       // contexto investigado — avisar de forma visible si llegó a activarse.

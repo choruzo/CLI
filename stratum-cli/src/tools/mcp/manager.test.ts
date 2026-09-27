@@ -64,6 +64,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       maxToolRetries: 3,
       toolErrorFormat: 'xml',
       compressionKeepRounds: 6,
+      compressionTimeoutMs: 120_000,
       compressionThreshold: 0.8,
     },
   };

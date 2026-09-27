@@ -470,6 +470,8 @@ export const StratumConfigSchema = z.object({
       compressionKeepRounds: z.number().int().positive().default(6),
       compressionThreshold: z.number().min(0.1).max(1).default(0.8),
       compressorModel: z.string().optional(),
+      /** Timeout del resumen LLM de la compresión (§12.4). */
+      compressionTimeoutMs: z.number().int().positive().default(120_000),
     })
     .default({}),
 

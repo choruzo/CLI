@@ -115,7 +115,8 @@
     "maxIterations": 50,
     "maxToolRetries": 3,
     "toolErrorFormat": "xml",
-    "compressionKeepRounds": 6
+    "compressionKeepRounds": 6,
+    "compressionTimeoutMs": 120000
   },
   "agents": {
     "defaultProfile": "general",

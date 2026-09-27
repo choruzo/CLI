@@ -1707,10 +1707,12 @@ export function App({
               result.kind === 'compressed'
                 ? `Contexto comprimido: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsCompressed} rondas resumidas).`
                 : result.kind === 'truncated'
-                  ? `Contexto truncado: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsRemoved} rondas eliminadas).`
-                  : result.kind === 'pressure'
-                    ? 'No hay nada que comprimir: toda la conversación está en la zona protegida.'
-                    : 'No había nada que comprimir.';
+                  ? `Contexto truncado: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsRemoved} rondas eliminadas)${result.compressorError ? `; el resumen falló: ${result.compressorError}` : ''}.`
+                  : result.kind === 'failed'
+                    ? `No se pudo resumir el historial: ${result.error}. No se ha tocado nada.`
+                    : result.kind === 'pressure'
+                      ? 'No hay nada que comprimir: toda la conversación está en la zona protegida.'
+                      : 'No había nada que comprimir.';
             dispatch({ type: 'SYSTEM_MESSAGE', text });
             refreshContext();
           } catch (err) {

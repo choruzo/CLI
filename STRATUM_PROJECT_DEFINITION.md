@@ -1030,18 +1030,30 @@ La status bar muestra el conteo con prefijo `~` mientras se usa el proxy (`~4.2k
 ```
 1. Estimar tokens actuales: sum(chars) / 3.5
 2. Si tokens_estimados > contextWindow * 0.80:
-   a. Separar "zona protegida": [system_prompt] + últimas 6 rondas (configurable)
-   b. Comprimir el historial antiguo con un LLM call:
-      prompt: "Resume esta conversación en máximo 500 palabras preservando decisiones técnicas y contexto clave:"
-      model: el mismo provider activo (o un modelo pequeño si se configura compressor_model)
-   c. Reemplazar historial antiguo por: [{ role: 'assistant', content: '<summary>...</summary>' }]
+   a. Separar "zona protegida" (ver abajo)
+   b. Comprimir el resto con un LLM call:
+      prompt: resumen de ≤500 palabras que conserve peticiones, decisiones, ficheros
+              leídos o cambiados, comandos y resultados, errores y lo pendiente
+      entrada: cada mensaje con sus tool calls (nombre + argumentos) y cada tool
+               result recortado (1 500 caracteres; el texto, 4 000), con la tarea
+               anclada como contexto; el total, ≤60% de la ventana
+      model: el mismo provider activo (o `agent.compressorModel`)
+      timeout: `agent.compressionTimeoutMs` (120 s) + la cancelación del turno
+   c. Insertar el resumen `<summary>…</summary>` sin romper la alternancia de roles
 3. Emitir evento interno de compresión (visible en --debug mode)
 ```
 
 **Zona protegida (nunca comprimida):**
 - System prompt completo
-- Últimas N rondas (default: 6, configurable `agent.compressionKeepRounds`)
-- Tool results de la iteración actual
+- La **cola**: las últimas N respuestas del assistant (default: 6, configurable `agent.compressionKeepRounds`) con sus tool results, y el `user` que abre la primera si va justo delante. En un chat sin tools cada assistant es una ronda; en un turno agéntico, una iteración
+- El **ancla**: si la cola no contiene ningún `user` (un turno agéntico largo), el último `user` anterior a ella —la tarea en curso—, literal
+
+**Dónde va el resumen.** Varias plantillas de chat (Mistral, Gemma ≤3) rechazan dos mensajes seguidos del mismo rol o que el primero tras el system no sea `user`, así que el resumen nunca es un `assistant` suelto:
+- Con ancla, la cola empieza por un assistant: el resumen va al principio de su texto (junto a sus `tool_calls`), justo después de la tarea.
+- Si la cola empieza por un `user`, el resumen va al principio de ese mensaje.
+- Si no, el resumen es un `user` propio tras el system.
+
+Un resumen vacío (o solo espacios, o solo un bloque `<think>`) cuenta como fallo del compresor. Cancelar el turno durante el resumen deja el historial intacto.
 
 **Política de fallback cuando la compresión falla o no reduce suficiente:**
 
@@ -1052,8 +1064,14 @@ Caso A — El LLM call de resumen falla (timeout, error de red):
 Caso B — El resumen generado no reduce el contexto por debajo del 80%
          (p.ej. zona protegida + system prompt ya superan el umbral):
   → Truncar duro: eliminar los mensajes más antiguos fuera de la zona protegida
-    en bloques de 2 rondas (user+assistant) hasta bajar del 80%, o hasta que
-    no quede historial antiguo que eliminar.
+    por unidades (un `user`, o un assistant con sus tool results) hasta bajar
+    del 80%, o hasta que no quede historial antiguo que eliminar. Si lo que queda
+    tras el system no empieza por `user`, se inserta una nota
+    `<context_truncated>` como `user`.
+  → Si el resumen falló, el loop emite `warning` `context_summary_failed: <motivo>`:
+    truncar en silencio hace que el agente olvide cosas sin explicación.
+  → `/compact` (compresión forzada) con el compresor caído y nada que truncar
+    devuelve `failed` y no toca el historial.
   → Si tras truncar todo el historial antiguo el contexto sigue sobre el 80%,
     emitir evento { type: 'warning', message: 'context_window_pressure' } y
     continuar — la zona protegida nunca se toca.
