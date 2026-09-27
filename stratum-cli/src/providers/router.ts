@@ -5,6 +5,10 @@ import { getLogger } from '../logging/index.js';
 
 const log = getLogger('provider');
 
+function makeClient(cfg: ProviderConfig): IProvider {
+  return new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model, { timeouts: cfg.timeouts });
+}
+
 export class ProviderRouter {
   private activeKey: string;
   private activeConfig: ProviderConfig;
@@ -48,7 +52,7 @@ export class ProviderRouter {
     // Copia propia: los cambios en caliente (switchModel/reconfigure) no deben
     // mutar el objeto de config cargado desde disco.
     this.activeConfig = { ...provCfg };
-    this.provider = new OpenAICompatible(provCfg.baseUrl, provCfg.apiKey, provCfg.model);
+    this.provider = makeClient(provCfg);
   }
 
   /**
@@ -73,7 +77,7 @@ export class ProviderRouter {
     }
     this.activeKey = name;
     this.activeConfig = { ...cfg };
-    this.provider = new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model);
+    this.provider = makeClient(cfg);
     // El cambio manual reinicia el estado de fallback: el nuevo activo deja de
     // considerarse "fallido" aunque lo hubiera estado antes.
     this.failedKeys.clear();
@@ -85,7 +89,7 @@ export class ProviderRouter {
    */
   reconfigure(cfg: ProviderConfig): void {
     this.activeConfig = { ...cfg };
-    this.provider = new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model);
+    this.provider = makeClient(cfg);
   }
 
   // -------------------------------------------------------------------------
@@ -121,7 +125,7 @@ export class ProviderRouter {
     log.warn('provider fallback', { from: this.activeKey, to: next, model: cfg.model });
     this.activeKey = next;
     this.activeConfig = { ...cfg };
-    this.provider = new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model);
+    this.provider = makeClient(cfg);
     return { name: next, model: cfg.model };
   }
 

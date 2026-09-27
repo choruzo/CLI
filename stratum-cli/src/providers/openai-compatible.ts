@@ -2,6 +2,15 @@ import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from './base.js';
 import type { AgentEvent } from '../agent/types.js';
 import { getLogger } from '../logging/index.js';
+import {
+  ERROR_BODY_READ_LIMIT,
+  ProviderError,
+  httpError,
+  networkError,
+  safeOrigin,
+  streamError,
+  timeoutError,
+} from './errors.js';
 
 const log = getLogger('provider');
 
@@ -237,13 +246,97 @@ export class StreamBuffer {
     this.think.reset();
   }
 }
+/**
+ * Timeouts del cliente (§12.3). Son de **inactividad**, no de duración total:
+ * una respuesta larga que no para de llegar nunca se corta.
+ *
+ * - `headersMs`: hasta recibir las cabeceras HTTP. llama.cpp las manda al
+ *   instante; un backend que ni contesta está caído o colgado.
+ * - `idleMs`: sin recibir un solo byte del cuerpo. Cubre el procesado del
+ *   prompt antes del primer token (llama.cpp tarda ~1 s por cada 1k tokens en
+ *   GPU, mucho más en CPU) y los backends que no trocean las tool calls y las
+ *   mandan enteras al final (Ollama con algunos modelos). Por eso es generoso.
+ *
+ * `0` desactiva cada uno.
+ */
+export interface ProviderTimeouts {
+  headersMs: number;
+  idleMs: number;
+}
+
+export const DEFAULT_PROVIDER_TIMEOUTS: ProviderTimeouts = {
+  headersMs: 120_000,
+  idleMs: 300_000,
+};
+
+export interface OpenAICompatibleOptions {
+  timeouts?: Partial<ProviderTimeouts>;
+}
+
+/** Lee como mucho `limit` bytes del cuerpo y cancela el resto. */
+async function readCapped(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string> {
+  if (!body) return '';
+  const reader = body.getReader();
+  const decoder = new TextDecoder();
+  let out = '';
+  let bytes = 0;
+  try {
+    while (bytes < limit) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      bytes += value.byteLength;
+      out += decoder.decode(value, { stream: true });
+    }
+    out += decoder.decode();
+  } finally {
+    // Sin esperar: con un cuerpo que no termina, `cancel()` podría colgar.
+    void reader.cancel().catch(() => undefined);
+  }
+  return out;
+}
+
+/**
+ * Temporizador de inactividad: `arm(ms, fase)` lo (re)inicia y, si vence,
+ * aborta la petición con un `ProviderError` de timeout. `fired` dice si la
+ * cancelación vino de aquí y no del usuario.
+ */
+class IdleWatchdog {
+  private timer: ReturnType<typeof setTimeout> | undefined;
+  readonly controller = new AbortController();
+  fired: ProviderError | undefined;
+
+  constructor(private readonly origin: string) {}
+
+  arm(ms: number, phase: 'headers' | 'body'): void {
+    this.clear();
+    if (ms <= 0 || this.fired) return;
+    this.timer = setTimeout(() => {
+      this.fired = timeoutError(this.origin, ms, phase);
+      this.controller.abort(this.fired);
+    }, ms);
+    // El temporizador no debe mantener vivo el proceso (`stratum run` al salir).
+    this.timer.unref?.();
+  }
+
+  clear(): void {
+    if (this.timer !== undefined) clearTimeout(this.timer);
+    this.timer = undefined;
+  }
+}
 
 export class OpenAICompatible implements IProvider {
+  private readonly timeouts: ProviderTimeouts;
+  private readonly origin: string;
+
   constructor(
     private readonly baseUrl: string,
     private readonly apiKey: string,
     private readonly defaultModel: string,
-  ) {}
+    options: OpenAICompatibleOptions = {},
+  ) {
+    this.timeouts = { ...DEFAULT_PROVIDER_TIMEOUTS, ...options.timeouts };
+    this.origin = safeOrigin(baseUrl);
+  }
 
   async *complete(req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
@@ -271,63 +364,140 @@ export class OpenAICompatible implements IProvider {
     });
     const endTimer = log.startTimer();
 
-    const response = await fetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.apiKey}`,
-      },
-      body: JSON.stringify(body),
-      signal: req.signal,
-    });
+    const watchdog = new IdleWatchdog(this.origin);
+    const signal = req.signal
+      ? AbortSignal.any([req.signal, watchdog.controller.signal])
+      : watchdog.controller.signal;
 
-    if (!response.ok) {
-      const text = await response.text();
-      log.error('http error', {
-        status: response.status,
-        model: req.model,
-        durationMs: endTimer(),
-        body: text.slice(0, 500),
-      });
-      throw new Error(`LLM API error ${response.status}: ${text}`);
-    }
+    // Un abort del usuario se propaga tal cual (el loop lo reconoce); uno del
+    // watchdog se convierte en su `ProviderError`; el resto es un fallo de red.
+    const translate = (err: unknown, phase: 'connect' | 'stream'): unknown => {
+      if (req.signal?.aborted) return err;
+      if (watchdog.fired) return watchdog.fired;
+      if (err instanceof ProviderError) return err;
+      return networkError(err, this.origin, phase);
+    };
 
-    if (!response.body) {
-      log.error('empty response body', { model: req.model, status: response.status });
-      throw new Error('LLM API returned no response body');
-    }
+    try {
+      watchdog.arm(this.timeouts.headersMs, 'headers');
+      let response: Response;
+      try {
+        response = await fetch(url, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            Authorization: `Bearer ${this.apiKey}`,
+          },
+          body: JSON.stringify(body),
+          signal,
+        });
+      } catch (err) {
+        throw translate(err, 'connect');
+      }
+      watchdog.arm(this.timeouts.idleMs, 'body');
 
-    log.trace('response headers', { status: response.status, ttfbMs: endTimer() });
-
-    const eventStream = response.body
-      .pipeThrough(new TextDecoderStream())
-      .pipeThrough(new EventSourceParserStream());
-
-    let chunks = 0;
-    let lastUsage: OpenAIStreamChunk['usage'];
-    for await (const event of eventStream) {
-      if ('data' in event) {
-        if (event.data === '[DONE]') break;
+      if (!response.ok) {
+        let text = '';
         try {
-          const chunk = JSON.parse(event.data) as OpenAIStreamChunk;
+          text = await readCapped(response.body, ERROR_BODY_READ_LIMIT);
+        } catch {
+          // Sin cuerpo legible el status basta.
+        }
+        if (req.signal?.aborted) throw req.signal.reason;
+        const err = httpError(
+          response.status,
+          response.statusText,
+          text,
+          response.headers.get('content-type') ?? '',
+          response.headers.get('retry-after'),
+        );
+        log.error('http error', {
+          status: response.status,
+          model: req.model,
+          durationMs: endTimer(),
+          retryable: err.retryable,
+          body: err.message,
+        });
+        throw err;
+      }
+
+      if (!response.body) {
+        log.error('empty response body', { model: req.model, status: response.status });
+        throw new ProviderError('LLM API returned no response body', 'stream', true);
+      }
+
+      log.trace('response headers', { status: response.status, ttfbMs: endTimer() });
+
+      // Cada bloque de bytes rearma el watchdog, antes de decodificar: un
+      // comentario SSE de keep-alive (`: ping`) también cuenta como actividad.
+      const idleMs = this.timeouts.idleMs;
+      const keepAlive = new TransformStream<Uint8Array, Uint8Array<ArrayBuffer>>({
+        transform(chunk, controller) {
+          watchdog.arm(idleMs, 'body');
+          controller.enqueue(chunk as Uint8Array<ArrayBuffer>);
+        },
+      });
+
+      const eventStream = response.body
+        .pipeThrough(keepAlive)
+        .pipeThrough(new TextDecoderStream())
+        .pipeThrough(new EventSourceParserStream());
+
+      let chunks = 0;
+      let dropped = 0;
+      let lastUsage: OpenAIStreamChunk['usage'];
+      try {
+        for await (const event of eventStream) {
+          if (!('data' in event)) continue;
+          const data = event.data.trim();
+          if (data === '') continue;
+          if (data === '[DONE]') break;
+          let parsed: unknown;
+          try {
+            parsed = JSON.parse(data);
+          } catch {
+            dropped++;
+            log.warn('malformed stream chunk dropped', {
+              model: req.model,
+              length: data.length,
+              head: data.slice(0, 120),
+            });
+            req.onStreamWarning?.(
+              `stream_chunk_dropped: el backend mandó un fragmento que no es JSON ` +
+                `(${data.length} caracteres) y se descartó; si la respuesta llevaba una ` +
+                'tool call, sus argumentos pueden llegar incompletos.',
+            );
+            continue;
+          }
+          if (!parsed || typeof parsed !== 'object') continue;
+          const chunk = parsed as OpenAIStreamChunk & { error?: unknown };
+          // llama.cpp, vLLM y LiteLLM mandan los errores a mitad de generación
+          // como un evento `{"error": …}` sin `choices`. Antes se ignoraba y el
+          // turno acababa vacío, como si el modelo no hubiese dicho nada.
+          if (chunk.error) {
+            throw streamError(chunk, this.origin);
+          }
           // Yield tanto chunks con choices como el chunk final de usage (choices vacío)
           if (chunk.choices?.[0] || chunk.usage) {
             chunks++;
             if (chunk.usage) lastUsage = chunk.usage;
             yield chunk;
           }
-        } catch {
-          // skip malformed chunks
         }
+      } catch (err) {
+        throw translate(err, 'stream');
       }
+      log.debug('response complete', {
+        model: req.model,
+        chunks,
+        dropped,
+        durationMs: endTimer(),
+        promptTokens: lastUsage?.prompt_tokens,
+        completionTokens: lastUsage?.completion_tokens,
+      });
+    } finally {
+      watchdog.clear();
     }
-    log.debug('response complete', {
-      model: req.model,
-      chunks,
-      durationMs: endTimer(),
-      promptTokens: lastUsage?.prompt_tokens,
-      completionTokens: lastUsage?.completion_tokens,
-    });
   }
 
   async healthCheck(): Promise<boolean> {

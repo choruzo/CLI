@@ -1,7 +1,8 @@
 import type { StratumConfig } from '../config/schema.js';
-import type { IProvider, CompletionRequest, OpenAIStreamChunk } from '../providers/base.js';
+import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
 import { StreamBuffer } from '../providers/openai-compatible.js';
+import { streamWithRetry } from '../providers/retry.js';
 import type {
   AgentEvent,
   AgentMode,
@@ -67,44 +68,6 @@ import { getLogger } from '../logging/index.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
 
 const log = getLogger('agent');
-
-function delay(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
-}
-
-// Fix #5: 4 intentos totales = 3 retries con delays 1s/2s/4s (spec 12.3)
-async function* streamWithRetry(
-  provider: IProvider,
-  request: CompletionRequest,
-  maxAttempts = 4,
-): AsyncGenerator<OpenAIStreamChunk> {
-  let lastErr: unknown;
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    if (attempt > 0) {
-      const backoff = 1000 * Math.pow(2, attempt - 1);
-      log.warn('stream retry', {
-        attempt,
-        maxAttempts,
-        backoffMs: backoff,
-        err: lastErr,
-      });
-      await delay(backoff);
-    }
-    try {
-      const gen = provider.complete(request);
-      const first = await gen.next();
-      if (first.done) return;
-      yield first.value;
-      yield* gen;
-      return;
-    } catch (err) {
-      if (err instanceof Error && err.name === 'AbortError') throw err;
-      lastErr = err;
-    }
-  }
-  log.error('stream failed after retries', { maxAttempts, err: lastErr });
-  throw lastErr;
-}
 
 // Fix #4: respeta toolErrorFormat de config (spec 12.3)
 function formatToolError(
@@ -835,6 +798,15 @@ export class ReactLoop {
         stream: true,
         model: this.model,
         signal,
+        onStreamWarning: (message) => streamWarnings.push(message),
+      };
+      // Incidencias del stream (chunks descartados): se emiten como `warning`
+      // en cuanto el loop recupera el control, sin cortar la respuesta.
+      const streamWarnings: string[] = [];
+      const drainStreamWarnings = function* (): Generator<AgentEvent> {
+        while (streamWarnings.length > 0) {
+          yield { type: 'warning', message: streamWarnings.shift()! };
+        }
       };
 
       const buffer = new StreamBuffer();
@@ -906,6 +878,7 @@ export class ReactLoop {
             }
 
             for (const ev of buffer.feed(chunk)) yield absorb(ev);
+            yield* drainStreamWarnings();
           }
           // Fin normal del cuerpo: cierra las tool calls que ningún
           // `finish_reason` cerró (backend que no lo manda o corte limpio).
@@ -915,6 +888,7 @@ export class ReactLoop {
         } catch (err) {
           streamErr = err;
         }
+        yield* drainStreamWarnings();
 
         // Request completa (ni error ni cancelación): si no trajo `usage` pese a
         // haberlo pedido con `stream_options.include_usage`, este backend no lo

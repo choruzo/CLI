@@ -993,6 +993,13 @@ El contador de reintentos por tool lo lleva el `ToolDispatcher` (mapa `toolRetri
 - Error de red al llamar al LLM → reintento con backoff exponencial (3 intentos, 1s/2s/4s), luego `{ type: 'error', fatal: true }`.
 - JSON inválido en argumentos de tool → `tool_error` con `recoverable: false`, el loop sigue pero el agente recibe el error.
 
+> **Endurecimiento del cliente del LLM (post-Hito 17).** El reintento vive en `providers/retry.ts` (`streamWithRetry`) y el cliente clasifica sus fallos con `ProviderError` (`providers/errors.ts`: `kind` `http|network|timeout|stream` + `retryable`). Reglas:
+> - **Solo se reintenta antes del primer chunk.** Reiniciar un stream ya entregado duplicaba el texto y pegaba los fragmentos de argumentos de una tool call de dos intentos (JSON corrupto). Un corte a mitad se propaga; el fallback de provider tampoco aplica ahí (ya había emitido).
+> - **Solo se reintenta lo transitorio**: red (`ECONNREFUSED`, `ECONNRESET`…, no los timeouts de conexión, que ya esperaron 10–20 s) y status 408/409/425/429/5xx de proxy/servidor. Un 400 (contexto desbordado), 401, 404 falla en el acto: antes esperaba 7 s de backoff y reenviaba el prompt cuatro veces. `Retry-After` sustituye al backoff si cabe en 30 s; si pide más, no se reintenta. La espera atiende a la cancelación.
+> - **Timeouts de inactividad** por provider (`timeouts.{headersMs,idleMs}`, default 120 s / 300 s, `0` desactiva): se rearman con cada bloque de bytes (también los keep-alive SSE), así que nunca cortan una respuesta que sigue llegando. El `idleMs` es generoso porque cubre el procesado del prompt antes del primer token (llama.cpp manda las cabeceras al instante y el primer byte cuando termina el prompt: ~14 s para 15k tokens en GPU) y los backends que mandan la tool call entera al final. Un timeout no se reintenta contra el mismo backend, pero sí conmuta de provider.
+> - **Errores legibles y seguros**: el cuerpo de un error se lee con tope (64 KB), se reduce al `error.message` del JSON (formatos OpenAI/llama.cpp/Ollama) o a una nota si es HTML, se recorta a 500 caracteres y pasa por el núcleo de redacción. Los errores de red nombran solo el origen de la `baseUrl`, nunca credenciales ni ruta.
+> - **Stream**: un evento `{"error": …}` dentro del SSE (llama.cpp, vLLM, LiteLLM a mitad de generación) es un `ProviderError` `stream`, no un turno vacío; un `data:` que no es JSON se descarta con `warning` `stream_chunk_dropped` vía `CompletionRequest.onStreamWarning`.
+
 ---
 
 ### 12.4 — Compresión de contexto

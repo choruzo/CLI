@@ -7,7 +7,8 @@
         "baseUrl": "http://localhost:11434/v1",
         "model": "qwen3.5:9b",
         "apiKey": "ollama",
-        "contextWindow": 32768
+        "contextWindow": 32768,
+        "timeouts": { "headersMs": 120000, "idleMs": 300000 }
       },
       "litellm-proxy": {
         "type": "openai-compatible",

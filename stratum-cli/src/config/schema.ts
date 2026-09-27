@@ -8,6 +8,18 @@ const ProviderConfigSchema = z.object({
   model: z.string(),
   apiKey: z.string().default(''),
   contextWindow: z.number().int().positive().default(32768),
+  /**
+   * Timeouts de inactividad del cliente en ms (§12.3); `0` desactiva. Por
+   * defecto 120 s hasta las cabeceras y 300 s sin recibir nada del cuerpo, que
+   * cubre el procesado de un prompt largo en un modelo local.
+   */
+  timeouts: z
+    .object({
+      headersMs: z.number().int().nonnegative().optional(),
+      idleMs: z.number().int().nonnegative().optional(),
+    })
+    .strict()
+    .optional(),
 });
 
 const McpServerSchema = z
