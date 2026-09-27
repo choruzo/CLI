@@ -3,6 +3,7 @@ import { join } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import { resolveMemoryPaths } from '../config/paths.js';
 import { importOptional } from '../runtime/optional-import.js';
+import { redactText } from '../security/redact-output.js';
 
 /**
  * Función de bajo nivel que convierte textos en vectores. Inyectable en tests
@@ -26,6 +27,55 @@ function normalize(vec: Float32Array): Float32Array {
 }
 
 /**
+ * Valida la respuesta de un endpoint `/v1/embeddings` y devuelve los vectores
+ * normalizados **en el orden de los textos enviados**. Quien llama los asocia a
+ * sus decisiones por posición, así que una respuesta con menos filas, con
+ * índices repetidos o fuera de rango, o con vectores de distinto tamaño no se
+ * puede aprovechar a medias: guardaría el vector de una decisión bajo la ref de
+ * otra, y el recall devolvería decisiones que no tienen nada que ver. Lanza, y
+ * `embed()` cae al backend local.
+ */
+export function parseEmbeddingResponse(body: unknown, expected: number): Float32Array[] {
+  const rows = (body as { data?: unknown } | null)?.data;
+  if (!Array.isArray(rows)) throw new Error('embeddings response has no data array');
+  if (rows.length !== expected) {
+    throw new Error(`embeddings response has ${rows.length} rows for ${expected} inputs`);
+  }
+  const withIndex = rows.filter((r) => typeof (r as { index?: unknown })?.index === 'number');
+  if (withIndex.length !== 0 && withIndex.length !== rows.length) {
+    throw new Error('embeddings response mixes rows with and without index');
+  }
+  const ordered: unknown[] = new Array(expected);
+  rows.forEach((row, i) => {
+    const index = withIndex.length ? (row as { index: number }).index : i;
+    if (
+      !Number.isInteger(index) ||
+      index < 0 ||
+      index >= expected ||
+      ordered[index] !== undefined
+    ) {
+      throw new Error(`embeddings response has an invalid or repeated index (${index})`);
+    }
+    ordered[index] = (row as { embedding?: unknown })?.embedding;
+  });
+  let dim = -1;
+  return ordered.map((embedding, i) => {
+    if (
+      !Array.isArray(embedding) ||
+      embedding.length === 0 ||
+      !embedding.every((x) => typeof x === 'number' && Number.isFinite(x))
+    ) {
+      throw new Error(`embeddings response row ${i} is not a numeric vector`);
+    }
+    if (dim === -1) dim = embedding.length;
+    else if (embedding.length !== dim) {
+      throw new Error(`embeddings response mixes dimensions (${dim} and ${embedding.length})`);
+    }
+    return normalize(Float32Array.from(embedding as number[]));
+  });
+}
+
+/**
  * EmbeddingService — Capa 3 (§12.10).
  *
  * Estrategia provider-agnostic:
@@ -45,6 +95,7 @@ export class EmbeddingService {
   private readonly endpoint?: { url: string; model: string; apiKey: string };
   private readonly modelsDir: string;
   private readonly injected?: EmbedFn;
+  private readonly config: StratumConfig;
 
   /** Latch de proceso: si el endpoint HTTP falla una vez, no se reintenta. */
   private httpDown = false;
@@ -54,6 +105,7 @@ export class EmbeddingService {
   private warned = false;
 
   constructor(config: StratumConfig, opts?: EmbeddingServiceOptions) {
+    this.config = config;
     this.model = config.memory.embeddingModel;
     this.endpoint = config.memory.embeddingEndpoint;
     this.modelsDir = resolveMemoryPaths(config).modelsDir;
@@ -143,11 +195,18 @@ export class EmbeddingService {
         signal: AbortSignal.timeout(8000),
       });
       if (!resp.ok) {
-        throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+        // El cuerpo puede ser una página HTML entera o citar la key: recortado y redactado.
+        const body = redactText((await resp.text()).slice(0, 300), this.config);
+        throw new Error(`HTTP ${resp.status}: ${body}`);
       }
-      const data = (await resp.json()) as { data?: Array<{ embedding: number[]; index?: number }> };
-      const rows = (data.data ?? []).slice().sort((a, b) => (a.index ?? 0) - (b.index ?? 0));
-      for (const row of rows) out.push(normalize(Float32Array.from(row.embedding)));
+      const vecs = parseEmbeddingResponse(await resp.json(), batch.length);
+      const dim = out[0]?.length ?? vecs[0]!.length;
+      if (vecs[0]!.length !== dim) {
+        throw new Error(
+          `embedding dimension changed between batches (${dim} → ${vecs[0]!.length})`,
+        );
+      }
+      out.push(...vecs);
     }
     return out;
   }

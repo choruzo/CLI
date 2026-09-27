@@ -1,5 +1,11 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
-import { parseDuckDuckGoHtml, normalizeUrl, mergeResults, webSearchTool } from './search.js';
+import {
+  parseDuckDuckGoHtml,
+  normalizeUrl,
+  mergeResults,
+  webSearchTool,
+  readBodyCapped,
+} from './search.js';
 import type { SearchResult } from './search.js';
 import { htmlToText, extractTitle, decodeHtmlEntities } from './html-to-text.js';
 import type { ToolContext } from '../../agent/types.js';
@@ -211,5 +217,24 @@ describe('htmlToText', () => {
 
   it('decodes numeric entities', () => {
     expect(decodeHtmlEntities('caf&#233; &#x41;')).toBe('café A');
+  });
+});
+
+describe('readBodyCapped', () => {
+  it('devuelve el cuerpo si cabe', async () => {
+    await expect(readBodyCapped(new Response('hola'), 10)).resolves.toBe('hola');
+  });
+
+  it('corta en cuanto pasa del tope en vez de acumularlo entero', async () => {
+    let pulled = 0;
+    const stream = new ReadableStream<Uint8Array>({
+      pull(controller) {
+        pulled++;
+        controller.enqueue(new Uint8Array(1024));
+        if (pulled > 10_000) controller.close();
+      },
+    });
+    await expect(readBodyCapped(new Response(stream), 4096)).rejects.toThrow(/larger than/);
+    expect(pulled).toBeLessThan(20);
   });
 });

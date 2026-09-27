@@ -17,6 +17,32 @@ const TAVILY_ENDPOINT = 'https://api.tavily.com/search';
 const USER_AGENT =
   'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36';
 
+/** Tope del cuerpo de una respuesta de búsqueda. Una página de DDG ronda los 50 KB. */
+export const SEARCH_MAX_BODY_BYTES = 2 * 1024 * 1024;
+
+/**
+ * Lee el cuerpo como texto sin pasar de `maxBytes`. `res.text()` lo acumula
+ * entero: un proxy o un portal cautivo que respondiese con un fichero enorme
+ * se quedaba en memoria hasta el timeout de la tool. Exportado para tests.
+ */
+export async function readBodyCapped(res: Response, maxBytes: number): Promise<string> {
+  if (!res.body) return '';
+  const reader = res.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  for (;;) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      await reader.cancel().catch(() => undefined);
+      throw new Error(`response larger than ${Math.round(maxBytes / 1024)} KB`);
+    }
+    chunks.push(value);
+  }
+  return Buffer.concat(chunks).toString('utf8');
+}
+
 function decodeEntities(text: string): string {
   return text
     .replace(/&amp;/g, '&')
@@ -95,7 +121,7 @@ async function searchDuckDuckGo(
     signal,
   });
   if (!res.ok) throw new Error(`DuckDuckGo returned HTTP ${res.status}`);
-  const html = await res.text();
+  const html = await readBodyCapped(res, SEARCH_MAX_BODY_BYTES);
   return parseDuckDuckGoHtml(html, maxResults);
 }
 
@@ -121,7 +147,7 @@ async function searchTavily(
     signal,
   });
   if (!res.ok) throw new Error(`Tavily returned HTTP ${res.status}`);
-  const data = (await res.json()) as TavilyResponse;
+  const data = JSON.parse(await readBodyCapped(res, SEARCH_MAX_BODY_BYTES)) as TavilyResponse;
   return (data.results ?? [])
     .filter((r) => typeof r.url === 'string' && r.url.length > 0)
     .map((r) => ({
