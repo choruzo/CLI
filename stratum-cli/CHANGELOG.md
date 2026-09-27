@@ -6,7 +6,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.7.0-beta.0] — 2026-09-27
+
+Pre-release para pruebas (`npm install -g stratum-cli@beta`); `latest` sigue en la 0.6.0.
 
 Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), de la escritura de ficheros del usuario (`write_file` / `edit_file`), de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`) y de su uso en la sesión, del cliente del LLM y de `web_fetch`.
 
@@ -208,6 +210,7 @@ Primera versión etiquetada. Hitos 0 y 1.
 - `/init` para generar o actualizar `STRATUM.md`.
 - Render de markdown de las respuestas.
 
+[0.7.0-beta.0]: https://github.com/choruzo/CLI/compare/v0.6.0...v0.7.0-beta.0
 [0.6.0]: https://github.com/choruzo/CLI/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/choruzo/CLI/compare/v0.4.0...v0.5.0
 [0.4.0]: https://github.com/choruzo/CLI/compare/v0.3.0...v0.4.0
