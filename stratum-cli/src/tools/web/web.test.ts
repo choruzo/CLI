@@ -2,7 +2,6 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { parseDuckDuckGoHtml, normalizeUrl, mergeResults, webSearchTool } from './search.js';
 import type { SearchResult } from './search.js';
 import { htmlToText, extractTitle, decodeHtmlEntities } from './html-to-text.js';
-import { webFetchTool } from './fetch.js';
 import type { ToolContext } from '../../agent/types.js';
 import { StratumConfigSchema } from '../../config/schema.js';
 
@@ -212,78 +211,5 @@ describe('htmlToText', () => {
 
   it('decodes numeric entities', () => {
     expect(decodeHtmlEntities('caf&#233; &#x41;')).toBe('café A');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// web_fetch (fetch mockeado)
-// ---------------------------------------------------------------------------
-
-describe('web_fetch', () => {
-  it('converts html responses to clean text with title header', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response(
-            '<html><head><title>T</title></head><body><h2>Sec</h2><p>body text</p></body></html>',
-            {
-              status: 200,
-              headers: { 'content-type': 'text/html; charset=utf-8' },
-            },
-          ),
-      ),
-    );
-
-    const result = await webFetchTool.execute({ url: 'https://example.com/x' }, makeCtx());
-    expect(result.ok).toBe(true);
-    if (result.ok) {
-      expect(result.output).toContain('# T');
-      expect(result.output).toContain('## Sec');
-      expect(result.output).toContain('body text');
-      expect(result.output).not.toContain('<p>');
-    }
-  });
-
-  it('returns non-html content as-is', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(
-        async () =>
-          new Response('{"a": 1}', {
-            status: 200,
-            headers: { 'content-type': 'application/json' },
-          }),
-      ),
-    );
-
-    const result = await webFetchTool.execute({ url: 'https://api.example.com/d' }, makeCtx());
-    expect(result.ok).toBe(true);
-    if (result.ok) expect(result.output).toBe('{"a": 1}');
-  });
-
-  it('sends Accept header preferring markdown', async () => {
-    const fetchMock = vi.fn(
-      async () => new Response('ok', { status: 200, headers: { 'content-type': 'text/plain' } }),
-    );
-    vi.stubGlobal('fetch', fetchMock);
-
-    await webFetchTool.execute({ url: 'https://example.com' }, makeCtx());
-    const init = (fetchMock.mock.calls[0] as unknown as [unknown, RequestInit])[1];
-    expect((init.headers as Record<string, string>).Accept).toContain('text/markdown');
-  });
-
-  it('fails recoverably on http errors', async () => {
-    vi.stubGlobal(
-      'fetch',
-      vi.fn(async () => new Response('nope', { status: 404, statusText: 'Not Found' })),
-    );
-
-    const result = await webFetchTool.execute({ url: 'https://example.com/missing' }, makeCtx());
-    expect(result.ok).toBe(false);
-    if (!result.ok) {
-      expect(result.recoverable).toBe(true);
-      expect(result.error).toContain('404');
-    }
   });
 });

@@ -8,9 +8,10 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), de la escritura de ficheros del usuario (`write_file` / `edit_file`), de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`) y del cliente del LLM.
+Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), de la escritura de ficheros del usuario (`write_file` / `edit_file`), de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`), del cliente del LLM y de `web_fetch`.
 
 ### Corregido
+- **Seguridad (`web_fetch`)**: ya no alcanza direcciones privadas, de loopback ni link-local (`localhost`, `10.x`, `192.168.x`, `169.254.169.254` —metadatos de la nube—, `[::ffff:127.0.0.1]`, `http://2130706433/`…), tampoco a través de una redirección ni de un nombre que resuelve a una IP privada (DNS rebinding): la IP se comprueba al conectar. Para un servidor local o interno legítimo, `tools.webFetch.allowHosts` (`["localhost:3000", "*.corp.example"]`). Un host rechazado no cuenta como fallo de la tool.
 - **LLM**: un corte de conexión a mitad de respuesta ya no reinicia el stream desde el principio. Antes el texto salía duplicado y los argumentos de una tool call llegaban mezclados de dos intentos (JSON corrupto); ahora el error se muestra.
 - **LLM**: los errores que no se arreglan reintentando (400 por contexto desbordado, 401, 404) fallan en el acto con el mensaje del backend. Antes se esperaban 7 s de reintentos y se reenviaba el prompt cuatro veces. Los transitorios (conexión rechazada, 429, 503 «Loading model», 502 de un proxy) se siguen reintentando, respetando `Retry-After`, y cancelar durante la espera corta en el acto.
 - **LLM**: un backend colgado (sin responder o parado a mitad del stream) ya no bloquea el turno para siempre: timeouts de inactividad de 120 s hasta las cabeceras y 300 s sin recibir nada, configurables por provider con `timeouts.{headersMs,idleMs}` (`0` desactiva). Una respuesta larga que sigue llegando nunca se corta. Tras un timeout se prueba el siguiente provider si hay más.
@@ -61,6 +62,9 @@ Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`
 
 ### Añadido
 - `sessions delete` y `sessions prune` borran también los registros de subagente y el plan de esas sesiones (un plan que otra sesión todavía puede reanudar se conserva). `chat` poda al arrancar los registros de más de `agents.subagentRetentionDays` días y los planes de más de `session.planRetentionDays` (30 por defecto en ambos; `0` lo desactiva).
+
+### Cambios a tener en cuenta
+- `web_fetch` rechaza ahora `localhost` y cualquier dirección privada. Si el agente consultaba un servidor de desarrollo o un servicio interno, añade su host a `tools.webFetch.allowHosts` (por ejemplo `"localhost:3000"`).
 
 ## [0.6.0] — 2026-09-25
 

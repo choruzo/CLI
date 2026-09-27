@@ -56,6 +56,9 @@
       "tavilyApiKey": "${TAVILY_API_KEY}",
       "maxResults": 10
     },
+    "webFetch": {
+      "allowHosts": ["localhost:3000"]
+    },
     "destructivePatterns": [
       "rm",
       "rmdir",

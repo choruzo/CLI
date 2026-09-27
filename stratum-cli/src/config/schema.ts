@@ -301,6 +301,17 @@ export const StratumConfigSchema = z.object({
           maxResults: z.number().int().positive().max(20).default(10),
         })
         .default({}),
+      webFetch: z
+        .object({
+          /**
+           * Hosts que `web_fetch` puede alcanzar aunque resuelvan a una
+           * dirección privada, de loopback o link-local (bloqueadas por
+           * defecto contra SSRF). `host` o `host:puerto`, con `*.` como
+           * comodín de subdominio: `["localhost:3000", "*.corp.example"]`.
+           */
+          allowHosts: z.array(z.string()).default([]),
+        })
+        .default({}),
       destructivePatterns: z
         .array(z.string())
         .default([

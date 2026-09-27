@@ -37,6 +37,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       bashTimeout: 30000,
       testCommand: '',
       webSearch: { backend: 'meta', apiKey: '', tavilyApiKey: '', maxResults: 10 },
+      webFetch: { allowHosts: [] },
       destructivePatterns: [],
       guardedCommands: {},
       sensitivePathAllowlist: [],
