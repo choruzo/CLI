@@ -9,6 +9,7 @@ import { registerBuiltinTools } from '../../tools/index.js';
 import { StratumAgent } from '../../agent/core.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { makeCliQuestionAsker } from '../ask-questions.js';
+import { closeExecRuntime } from '../../tools/exec/runtime.js';
 
 // ---------------------------------------------------------------------------
 // Plantilla de .stratumrc.json por defecto
@@ -181,9 +182,13 @@ export const initCommand = new Command('init')
           );
         }
       } catch (err) {
+        await closeExecRuntime();
         process.stderr.write(`\n${fatalLabel} ${String(err)}\n`);
         process.exit(1);
       }
+
+      // §12.12: cerrar los sockets SSH y vaciar la auditoría antes de salir.
+      await closeExecRuntime();
 
       if (controller.signal.aborted) {
         process.exit(130);

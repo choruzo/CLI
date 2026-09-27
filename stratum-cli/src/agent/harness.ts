@@ -42,6 +42,8 @@ import {
   resolveQuestionAnswers,
 } from '../tools/question.js';
 import { TODO_TOOL } from '../tools/todo.js';
+import { untilAborted } from './concurrency.js';
+import { CANCELLED_BY_USER } from './cancel.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import {
   TddError,
@@ -1454,6 +1456,23 @@ export class ReactLoop {
         yield* this.runDelegations(delegateCalls, delegationOpts, signal, fmt);
       }
 
+      // §12.12 — cancelado mientras corrían las tools o los subagentes: no se
+      // abre ningún gate más (preguntar o pedir aprobación después de un Ctrl+C
+      // sería justo lo contrario de lo que pidió el usuario), pero las tool
+      // calls de control pendientes reciben su resultado, para que el
+      // `assistant` con `tool_calls` no quede sin respuesta en el historial.
+      if (signal.aborted) {
+        for (const call of [questionCall, presentPlanCall]) {
+          if (!call) continue;
+          const o = this.toolErrorOutcome(call.id, call.name, CANCELLED_BY_USER, true, fmt);
+          yield o.event;
+          this.messages.push(o.message);
+        }
+        loopLog.info('cancelled', { iter });
+        yield { type: 'done', stopReason: 'cancelled' };
+        return;
+      }
+
       // -----------------------------------------------------------------------
       // Hito 2.5 (F7) — Gate de preguntas. Como el de plan, se resuelve al final
       // de la iteración (tras las tools del mismo turno) y siempre inyecta un
@@ -1472,7 +1491,9 @@ export class ReactLoop {
           yield { type: 'questions_asked', questions: items };
           let answers: QuestionAnswer[] | null = null;
           try {
-            answers = opts?.onAskQuestions ? await opts.onAskQuestions(items) : null;
+            answers = opts?.onAskQuestions
+              ? await untilAborted(opts.onAskQuestions(items), signal, null)
+              : null;
           } catch {
             answers = null;
           }
@@ -1487,6 +1508,13 @@ export class ReactLoop {
             ...(rejections.length > 0 ? { rejected: rejections.map((r) => r.reason) } : {}),
           });
           yield { type: 'questions_answered', answers };
+          if (signal.aborted) {
+            this.messages.push(
+              this.toolMessage(questionCall.id, questionCall.name, CANCELLED_BY_USER),
+            );
+            yield { type: 'done', stopReason: 'cancelled' };
+            return;
+          }
           this.messages.push(
             this.toolMessage(
               questionCall.id,
@@ -1517,10 +1545,19 @@ export class ReactLoop {
         let decision: PlanDecision;
         try {
           decision = opts?.onApprovePlan
-            ? await opts.onApprovePlan(proposed)
+            ? await untilAborted(opts.onApprovePlan(proposed), signal, {
+                decision: 'reject',
+              } as PlanDecision)
             : { decision: 'reject' };
         } catch {
           decision = { decision: 'reject' };
+        }
+        if (signal.aborted) {
+          this.messages.push(
+            this.toolMessage(presentPlanCall.id, presentPlanCall.name, CANCELLED_BY_USER),
+          );
+          yield { type: 'done', stopReason: 'cancelled' };
+          return;
         }
 
         if (decision.decision === 'approve') {

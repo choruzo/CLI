@@ -11,6 +11,12 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 Endurecimiento de la persistencia de sesiones, subagentes (`.stratum/subagents/`), planes (`.stratum/plans/`), decisiones (`decisions.json`), su índice semántico y host keys SSH (`known_hosts.json`), de la escritura de ficheros del usuario (`write_file` / `edit_file`), de la carpeta gestionada de MCP servers (`~/.stratum/mcp/`) y de su uso en la sesión, del cliente del LLM y de `web_fetch`.
 
 ### Corregido
+- **Cancelar (Ctrl+C)**: en `stratum run` y `stratum init`, un Ctrl+C con una confirmación, una pregunta o la aprobación del plan en pantalla dejaba el proceso colgado (hacían falta tres Ctrl+C). Ahora cuenta como «no» y cancela el turno.
+- **Cancelar (Ctrl+C)**: en el chat, Ctrl+C en una confirmación, una pregunta o una aprobación de plan responde «no» y además detiene el turno, como en cualquier otro momento. `Esc` sigue respondiendo «no» y dejando continuar al agente.
+- **Cancelar (Ctrl+C)**: tras cancelar ya no se lanza ninguna tool que no hubiese empezado (antes, un `write_file` de la misma tanda podía llegar a escribir), no se abre la tanda de preguntas ni la aprobación del plan, y un subagente en cola no pide confirmación.
+- **Cancelar (Ctrl+C)**: cancelar varias veces una tool lenta ya no la deshabilita para el resto de la sesión.
+- **Cancelar (Ctrl+C)**: la conversación sigue funcionando después de cancelar. Una petición cancelada antes de que el modelo respondiese ya no deja dos mensajes de usuario seguidos (que rechazan las plantillas de chat de Mistral y otras), y ninguna llamada a una tool se queda sin respuesta en el historial.
+- **`stratum init`**: cierra las conexiones SSH antes de salir.
 - **`stratum run`**: un turno que termina con un error fatal (el provider caído y el fallback agotado) sale con código 1. Antes salía con 0 y un script que encadenaba `stratum run` lo daba por bueno.
 - **Compresión de contexto**: en una tarea larga con muchas tool calls, la petición original del usuario ya no se pierde al comprimir: se conserva literal junto a las últimas iteraciones.
 - **Compresión de contexto**: el historial comprimido ya no pone dos mensajes seguidos del asistente ni empieza por uno, algo que las plantillas de chat de algunos modelos (Mistral, Gemma) rechazan con un error que dejaba la sesión inutilizable.

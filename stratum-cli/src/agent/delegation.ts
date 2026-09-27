@@ -134,7 +134,14 @@ export async function* executeDelegations(
   const confirmMutex = new Mutex();
   const parentConfirm = opts?.onConfirmDestructive;
   const wrappedConfirm: ((req: ConfirmRequest) => Promise<DestructiveDecision>) | undefined =
-    parentConfirm ? (req) => confirmMutex.runExclusive(() => parentConfirm(req)) : undefined;
+    parentConfirm
+      ? (req) =>
+          // Un hijo que esperaba turno tras el mutex no pregunta si entretanto
+          // se canceló (§12.12): el usuario ya dijo que parase.
+          confirmMutex.runExclusive(() =>
+            childSignal.aborted ? Promise.resolve('deny' as const) : parentConfirm(req),
+          )
+      : undefined;
   const parentPolicy =
     opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask');
 

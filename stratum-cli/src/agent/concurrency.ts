@@ -82,3 +82,31 @@ export class Mutex {
     }
   }
 }
+
+/**
+ * Espera `promise`, pero si `signal` se aborta antes resuelve con `onAbort`
+ * (§12.12). Es para los gates que esperan al usuario —confirmación destructiva,
+ * preguntas, aprobación de plan—: una UI que no resuelve su promesa al cancelar
+ * (readline cerrado por Ctrl+C, por ejemplo) no puede dejar el turno colgado.
+ * La promesa original sigue su curso; su resultado tardío se ignora.
+ */
+export function untilAborted<T>(promise: Promise<T>, signal: AbortSignal, onAbort: T): Promise<T> {
+  if (signal.aborted) {
+    promise.catch(() => undefined);
+    return Promise.resolve(onAbort);
+  }
+  return new Promise<T>((resolve, reject) => {
+    const abort = (): void => resolve(onAbort);
+    signal.addEventListener('abort', abort, { once: true });
+    promise.then(
+      (value) => {
+        signal.removeEventListener('abort', abort);
+        resolve(value);
+      },
+      (err: unknown) => {
+        signal.removeEventListener('abort', abort);
+        reject(err);
+      },
+    );
+  });
+}

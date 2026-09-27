@@ -1256,7 +1256,7 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 | `Enter` | Enviar mensaje / seleccionar en dropdown |
 | `↑ / ↓` | Navegar historial de inputs enviados en la sesión actual (igual que shell) / navegar dropdown. El historial vive en memoria (`string[]` en el estado de `<InputArea>`); no persiste entre sesiones. |
 | `Esc` | Cerrar dropdown de /comandos / cancelar input |
-| `Ctrl+C` | Interrumpir respuesta del agente en curso (graceful cancel) |
+| `Ctrl+C` | Interrumpir respuesta del agente en curso (graceful cancel). Con una confirmación, una tanda de preguntas o una aprobación de plan abierta, responde «no» **y** cancela el turno (§12.12); `Esc` responde «no» y deja seguir al agente |
 | `Ctrl+C` × 2 | Salir del CLI (si no hay respuesta en curso: salir directamente) |
 | `Ctrl+L` | Clear screen (equivalente a `/clear`) |
 | `Ctrl+U` | Borrar línea de input actual |
@@ -1456,7 +1456,7 @@ Cuando la llamada cambia algo en un target que pertenece a un entorno, el títul
 └──────────────────────────────────────────────────────────────────────┘
 ```
 
-- Con `confirmation: typed` (default en `confirm-always`) no hay atajos: se teclea el alias del target y `Enter`. Si no coincide exactamente, línea roja `No coincide…` y el bloque sigue abierto; `Esc` o `Ctrl+C` deniegan.
+- Con `confirmation: typed` (default en `confirm-always`) no hay atajos: se teclea el alias del target y `Enter`. Si no coincide exactamente, línea roja `No coincide…` y el bloque sigue abierto; `Esc` deniega; `Ctrl+C` deniega y cancela el turno.
 - Con `policy: confirm-always` no se ofrece `[ ! ] permitir todo`, y un allow-all nunca convierte la sesión en `allow`.
 - En `stratum run` la confirmación tecleada es una línea de readline (`Escribe "prod-db" para confirmar`); cualquier otra respuesta deniega. Stratum Desktop deniega estas confirmaciones: su ventana no sabe pedirlas.
 

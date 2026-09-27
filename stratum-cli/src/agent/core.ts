@@ -36,6 +36,7 @@ import { ChangeTracker } from './risk.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
+import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
 import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
@@ -274,7 +275,7 @@ export class StratumAgent {
   }
 
   async *run(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
-    this.messages.push({ role: 'user', content: input });
+    pushUserInput(this.messages, input);
 
     // Hito 6: reiniciar el estado de fallback en cada turno para que el provider
     // primario se reintente aunque haya fallado en un turno anterior.
@@ -284,12 +285,18 @@ export class StratumAgent {
 
     let stopReason: string | null = null;
     const tracker = this.targetTracker();
-    for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
-      if (event.type === 'tool_result') this._toolCallCount++;
-      if (event.type === 'subagent_completed') this.addChildTokens(event.result);
-      if (event.type === 'done') stopReason = event.stopReason;
-      tracker(event);
-      yield event;
+    try {
+      for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
+        if (event.type === 'tool_result') this._toolCallCount++;
+        if (event.type === 'subagent_completed') this.addChildTokens(event.result);
+        if (event.type === 'done') stopReason = event.stopReason;
+        tracker(event);
+        yield event;
+      }
+    } finally {
+      // §12.12: un turno cancelado o abandonado a mitad no puede dejar tool
+      // calls sin respuesta: el siguiente request al provider fallaría.
+      closeDanglingToolCalls(this.messages);
     }
     // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
     // `unsupported` es pegajoso — si este backend no manda usage, no lo va a
@@ -925,7 +932,7 @@ export class StratumAgent {
     const subId = generateSubagentId();
     const callId = `call_direct_${subId.slice(4)}`;
 
-    this.messages.push({ role: 'user', content: `@${profile.name} ${taskText}` });
+    pushUserInput(this.messages, `@${profile.name} ${taskText}`);
     this.messages.push({
       role: 'assistant',
       content: null,

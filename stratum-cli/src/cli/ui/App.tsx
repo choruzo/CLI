@@ -1269,16 +1269,21 @@ export function App({
         setOverlay(null);
         return;
       }
+      // §12.12: Ctrl+C en un gate responde «no» Y cancela el turno. Esc es
+      // el que responde «no» y deja seguir al agente.
       if (state.pendingConfirm) {
         resolveConfirm('deny');
+        cancel();
         return;
       }
       if (state.pendingQuestions) {
         resolveQuestions(null);
+        cancel();
         return;
       }
       if (state.pendingApproval) {
         resolvePlanReject();
+        cancel();
         return;
       }
       if (state.thinking) {

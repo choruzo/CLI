@@ -135,8 +135,13 @@ describe('runCommand', () => {
     const { runCommand } = await import('./run.js');
     const action = runCommand.parseAsync(['demo-task'], { from: 'user' });
 
-    const sigint = mockState.getSigint();
-    expect(sigint).toBeTypeOf('function');
+    // `run` registra el handler tras varias esperas (config, MCP, logging):
+    // leerlo en el acto era una carrera que fallaba bajo la carga de la suite.
+    const sigint = await vi.waitFor(() => {
+      const listener = mockState.getSigint();
+      expect(listener).toBeTypeOf('function');
+      return listener;
+    });
 
     sigint?.();
     expect(exitSpy).not.toHaveBeenCalled();
@@ -178,8 +183,13 @@ describe('runCommand', () => {
     const { runCommand } = await import('./run.js');
     const action = runCommand.parseAsync(['demo-task'], { from: 'user' }).catch(() => undefined);
 
-    const sigint = mockState.getSigint();
-    expect(sigint).toBeTypeOf('function');
+    // `run` registra el handler tras varias esperas (config, MCP, logging):
+    // leerlo en el acto era una carrera que fallaba bajo la carga de la suite.
+    const sigint = await vi.waitFor(() => {
+      const listener = mockState.getSigint();
+      expect(listener).toBeTypeOf('function');
+      return listener;
+    });
 
     sigint?.();
     expect(() => sigint?.()).toThrowError(new ExitError(1));

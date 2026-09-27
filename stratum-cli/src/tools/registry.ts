@@ -10,6 +10,7 @@ import type {
 import type { ToolSchema } from '../providers/base.js';
 import type { AgentMode } from '../agent/types.js';
 import { truncateToolOutput } from './truncate.js';
+import { untilAborted } from '../agent/concurrency.js';
 import {
   PLAN_ALLOWLIST,
   PLAN_READ_ONLY_CALL_TOOLS,
@@ -218,6 +219,16 @@ export class ToolRegistry {
   }
 }
 
+/** Resultado de una llamada que no llegó a ejecutarse porque el turno se canceló. */
+function cancelledBeforeRun(): ToolResult {
+  return {
+    ok: false,
+    error: 'Cancelled by the user before it ran.',
+    recoverable: true,
+    countsAsFailure: false,
+  };
+}
+
 export interface DispatchResult {
   callId: string;
   toolName: string;
@@ -258,9 +269,21 @@ export class ToolDispatcher {
 
     for (const call of calls) {
       if (denied.has(call.id)) continue;
+      // §12.12: tras un Ctrl+C no se pregunta nada más al usuario.
+      if (ctx.signal.aborted) break;
       const verdict = await this.confirmIfDestructive(call, ctx);
       // Hito 16: el rechazo cita el comando, que puede llevar un secreto.
       if (verdict !== null) denied.set(call.id, redactResult(verdict, ctx));
+    }
+
+    // §12.12: una llamada que aún no empezó no se lanza con el turno ya
+    // cancelado. Antes se ejecutaba con la señal abortada y el `race` la daba
+    // por cancelada, pero una tool que no mira la señal (`write_file`) llegaba
+    // a escribir igualmente.
+    if (ctx.signal.aborted) {
+      for (const call of calls) {
+        if (!denied.has(call.id)) denied.set(call.id, cancelledBeforeRun());
+      }
     }
 
     const approved = calls.filter((c) => !denied.has(c.id));
@@ -420,7 +443,9 @@ export class ToolDispatcher {
 
     let decision: DestructiveDecision;
     try {
-      decision = await ctx.confirmDestructive({
+      // Un Ctrl+C mientras se pregunta equivale a «no» (§12.12), aunque la UI no
+      // llegue a resolver su promesa.
+      const pending = ctx.confirmDestructive({
         callId: call.id,
         toolName: call.name,
         description,
@@ -432,9 +457,11 @@ export class ToolDispatcher {
             }
           : {}),
       });
+      decision = await untilAborted(pending, ctx.signal, 'deny');
     } catch {
       decision = 'deny';
     }
+    if (ctx.signal.aborted) return cancelledBeforeRun();
 
     log.info('destructive decision', {
       tool: call.name,
@@ -661,14 +688,18 @@ export class ToolDispatcher {
     } catch (err) {
       clearTimeout(timeoutId);
       clearTimeout(graceTimer);
-      this.recordFailure(call.name);
-      const result = this.applyRetryLimit(
-        call.name,
-        redactResult(
-          { ok: false, error: String(err instanceof Error ? err.message : err), recoverable: true },
-          ctx,
-        ),
-      );
+      // Que el usuario cancele no es un fallo de la tool: sin esto, tres Ctrl+C
+      // durante un `web_fetch` lento lo deshabilitaban para toda la sesión. El
+      // timeout propio de la tool sí cuenta.
+      const cancelledByUser = ctx.signal.aborted;
+      if (!cancelledByUser) this.recordFailure(call.name);
+      const failure: ToolResult = {
+        ok: false,
+        error: String(err instanceof Error ? err.message : err),
+        recoverable: true,
+        ...(cancelledByUser ? { countsAsFailure: false } : {}),
+      };
+      const result = this.applyRetryLimit(call.name, redactResult(failure, ctx));
       log.warn('tool threw', {
         tool: call.name,
         durationMs: Date.now() - start,

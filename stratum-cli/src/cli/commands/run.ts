@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
+import { askLine } from '../readline-prompt.js';
 import chalk from 'chalk';
 import type {
   ConfirmRequest,
@@ -212,17 +213,14 @@ export const runCommand = new Command('run')
         try {
           // Hito 17 — confirmación con nombre: hay que teclear el alias exacto.
           if (req.confirmPhrase) {
-            const typed = await new Promise<string>((resolve) =>
-              rl.question(
-                `Escribe "${req.confirmPhrase}" para confirmar (otra cosa cancela): `,
-                resolve,
-              ),
+            const typed = await askLine(
+              rl,
+              `Escribe "${req.confirmPhrase}" para confirmar (otra cosa cancela): `,
             );
-            return typed.trim() === req.confirmPhrase ? 'approve' : 'deny';
+            return typed?.trim() === req.confirmPhrase ? 'approve' : 'deny';
           }
-          const answer = await new Promise<string>((resolve) =>
-            rl.question('¿Continuar? (s/N/!) ', resolve),
-          );
+          const answer = await askLine(rl, '¿Continuar? (s/N/!) ');
+          if (answer === null) return 'deny';
           const a = answer.trim().toLowerCase();
           if (a === '!' && !req.forced) return 'allow-all';
           return a === 's' || a === 'y' || a === 'si' || a === 'sí' || a === 'yes'
@@ -262,9 +260,8 @@ export const runCommand = new Command('run')
         }
         const rl = createInterface({ input: process.stdin, output: process.stderr });
         try {
-          const answer = await new Promise<string>((resolve) =>
-            rl.question('[plan] ¿Ejecutar? (S/N) ', resolve),
-          );
+          const answer = await askLine(rl, '[plan] ¿Ejecutar? (S/N) ');
+          if (answer === null) return { decision: 'reject' };
           const a = answer.trim().toLowerCase();
           return a === 's' || a === 'y' || a === 'si' || a === 'sí' || a === 'yes'
             ? { decision: 'approve', plan }

@@ -1,4 +1,5 @@
 import { createInterface } from 'readline';
+import { askLine } from './readline-prompt.js';
 import type { QuestionAnswer, QuestionItem } from '../agent/types.js';
 
 /**
@@ -24,8 +25,14 @@ export function makeCliQuestionAsker():
   return async (questions: QuestionItem[]): Promise<QuestionAnswer[] | null> => {
     process.stderr.write('\n?  El agente necesita que decidas algo:\n');
     const rl = createInterface({ input: process.stdin, output: process.stderr });
-    const ask = (prompt: string): Promise<string> =>
-      new Promise<string>((resolve) => rl.question(prompt, resolve));
+    // Ctrl+C (o EOF) en mitad de la tanda: se abandona entera y el comando
+    // cancela el turno (§12.12). `null` = el usuario no respondió.
+    class Interrupted extends Error {}
+    const ask = async (prompt: string): Promise<string> => {
+      const answer = await askLine(rl, prompt);
+      if (answer === null) throw new Interrupted();
+      return answer;
+    };
 
     try {
       const answers: QuestionAnswer[] = [];
@@ -71,6 +78,9 @@ export function makeCliQuestionAsker():
       }
       process.stderr.write('\n');
       return answers;
+    } catch (err) {
+      if (err instanceof Interrupted) return null;
+      throw err;
     } finally {
       rl.close();
     }
