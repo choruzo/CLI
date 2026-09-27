@@ -1551,7 +1551,7 @@ for await (const event of agent.run(input, { signal: controller.signal })) {
 
 **Segundo Ctrl+C:** si el usuario presiona Ctrl+C por segunda vez durante el cleanup, se hace `process.exit(1)` inmediato sin más espera.
 
-> **Hito 16 — cancelación estructurada de `exec`.** Los backends de `exec` gestionan su propia cancelación: al abortar el signal envían SIGTERM (al grupo de procesos en POSIX) y SIGKILL a los 2 s, y **resuelven** con `status: "cancelled"` y la salida capturada, en un tiempo acotado. La tool declara `structuredCancellation: true`, y el `ToolDispatcher` no compite con el abort: solo impone una red de seguridad de 5 s. `closeExecRuntime()` (cierre del pool SSH + flush de la auditoría) sustituye a `closeSshPool()` en el teardown de `chat`/`run`.
+> **Hito 16 — cancelación estructurada de `exec`.** Los backends de `exec` gestionan su propia cancelación: al abortar el signal envían SIGTERM (al grupo de procesos en POSIX) y SIGKILL a los 2 s —en Windows, `taskkill /T /F` sobre el árbol entero, porque ningún proceso de consola atiende un SIGTERM y matar solo `pwsh.exe` dejaba vivos a sus hijos—, y **resuelven** con `status: "cancelled"` y la salida capturada, en un tiempo acotado. La tool declara `structuredCancellation: true`, y el `ToolDispatcher` no compite con el abort: solo impone una red de seguridad de 5 s. `closeExecRuntime()` (cierre del pool SSH + flush de la auditoría) sustituye a `closeSshPool()` en el teardown de `chat`/`run`.
 ---
 
 ### 12.13 — Comando `/init` y `stratum init`

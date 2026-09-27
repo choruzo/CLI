@@ -8,7 +8,7 @@
  *  - No hay PTY (`capabilities.pty = false`): exigiría `node-pty`, una
  *    dependencia nativa. `exec` lo rechaza en preflight.
  */
-import { resolve } from 'path';
+import { join, resolve } from 'path';
 import { execa } from 'execa';
 import type { ToolContext } from '../../../agent/types.js';
 import type { StratumConfig } from '../../../config/schema.js';
@@ -122,6 +122,39 @@ export class ByteBudget {
   }
 }
 
+/**
+ * `taskkill /T /F` sobre el árbol de `pid`. Ruta absoluta de System32: un
+ * `taskkill` en el cwd o el PATH no debe ser lo que se ejecute. Si no se puede
+ * lanzar, `fallback` mata al menos el proceso directo.
+ */
+function killWindowsTree(pid: number, fallback: () => void): void {
+  const systemRoot = process.env['SystemRoot'] ?? 'C:\\Windows';
+  const taskkill = join(systemRoot, 'System32', 'taskkill.exe');
+  try {
+    execa(taskkill, ['/T', '/F', '/PID', String(pid)], {
+      reject: false,
+      stdio: 'ignore',
+      windowsHide: true,
+    }).then(
+      (r) => {
+        // 128: el proceso ya no existe. Cualquier otro fallo, al menos el directo.
+        if (r.failed && r.exitCode !== 128) safely(fallback);
+      },
+      () => safely(fallback),
+    );
+  } catch {
+    safely(fallback);
+  }
+}
+
+function safely(fn: () => void): void {
+  try {
+    fn();
+  } catch {
+    /* ya terminado */
+  }
+}
+
 export const localBackend: IExecBackend = {
   kind: 'local',
   capabilities: { pty: false, stdin: true, cwd: true, maxBytes: true },
@@ -176,6 +209,12 @@ export const localBackend: IExecBackend = {
           } catch {
             /* el grupo ya no existe */
           }
+        } else if (pid !== undefined) {
+          // En Windows `kill()` solo termina pwsh.exe: sus hijos (node, los
+          // workers de un `npm test`, un servidor de desarrollo) quedaban
+          // huérfanos y vivos, y con los pipes abiertos. No hay SIGTERM que
+          // respete un proceso de consola, así que el árbol se cierra forzado.
+          killWindowsTree(pid, () => subprocess.kill(sig));
         } else {
           try {
             subprocess.kill(sig);
@@ -250,7 +289,9 @@ export const localBackend: IExecBackend = {
             fail(new ExecSpawnError(result.shortMessage ?? result.message ?? 'spawn failed'));
             return;
           }
-          settle(result.exitCode ?? null);
+          // Si lo matamos nosotros, su exit code es un artefacto de la muerte
+          // (`taskkill /F` deja 1), no del comando: desconocido, como en POSIX.
+          settle(killing ? null : (result.exitCode ?? null));
         },
         (err: unknown) => {
           if (killing) {

@@ -1,5 +1,8 @@
-import { describe, it, expect, vi, afterEach } from 'vitest';
+import { describe, it, expect, vi, afterEach, beforeEach } from 'vitest';
 import { execa } from 'execa';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { localBackend, ByteBudget } from './backends/local.js';
 import { createExecTool } from './exec.js';
 import { resetExecRuntime } from './runtime.js';
@@ -186,6 +189,96 @@ describe.skipIf(process.platform !== 'win32')(
     }
   },
 );
+
+describe('terminación del árbol de procesos', () => {
+  let dir: string;
+  const spawned: number[] = [];
+
+  beforeEach(() => {
+    dir = mkdtempSync(join(tmpdir(), 'stratum-tree-'));
+    // Hijo que lanza un nieto de larga duración y espera: el caso de
+    // `npm test` → node → workers, o un servidor de desarrollo.
+    writeFileSync(
+      join(dir, 'grandchild.cjs'),
+      "require('fs').writeFileSync(process.argv[2], String(process.pid)); setTimeout(() => {}, 60000);",
+    );
+    writeFileSync(
+      join(dir, 'parent.cjs'),
+      "const { spawn } = require('child_process');" +
+        "spawn(process.execPath, [require('path').join(__dirname, 'grandchild.cjs'), process.argv[2]], { stdio: 'inherit' });" +
+        'setTimeout(() => {}, 60000);',
+    );
+  });
+
+  afterEach(() => {
+    for (const pid of spawned.splice(0)) {
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {
+        /* ya muerto */
+      }
+    }
+    rmSync(dir, { recursive: true, force: true });
+  });
+
+  function isAlive(pid: number): boolean {
+    try {
+      process.kill(pid, 0);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  async function grandchildPid(pidFile: string): Promise<number> {
+    const start = Date.now();
+    while (!existsSync(pidFile) || readFileSync(pidFile, 'utf8') === '') {
+      if (Date.now() - start > 10_000) throw new Error('el nieto no arrancó');
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    const pid = Number(readFileSync(pidFile, 'utf8'));
+    spawned.push(pid);
+    return pid;
+  }
+
+  async function expectDead(pid: number): Promise<void> {
+    const start = Date.now();
+    while (isAlive(pid) && Date.now() - start < 3000) {
+      await new Promise((r) => setTimeout(r, 50));
+    }
+    expect(isAlive(pid)).toBe(false);
+  }
+
+  it('cancelar mata también a los nietos', async () => {
+    const pidFile = join(dir, 'pid-cancel');
+    const controller = new AbortController();
+    const running = localBackend.run(
+      { kind: 'local' },
+      req(`node "${join(dir, 'parent.cjs')}" "${pidFile}"`, { signal: controller.signal }),
+      ctx(),
+    );
+    const pid = await grandchildPid(pidFile);
+    controller.abort();
+    const out = await running;
+    expect(out.status).toBe('cancelled');
+    await expectDead(pid);
+  }, 20_000);
+
+  it('el timeout mata también a los nietos', async () => {
+    const pidFile = join(dir, 'pid-timeout');
+    const running = localBackend.run(
+      { kind: 'local' },
+      req(`node "${join(dir, 'parent.cjs')}" "${pidFile}"`, { timeoutMs: 1500 }),
+      ctx(),
+    );
+    const pid = await grandchildPid(pidFile);
+    const out = await running;
+    expect(out.status).toBe('timeout');
+    // El exit code de un proceso matado por nosotros no es del comando.
+    expect(out.exitCode).toBeNull();
+    await expectDead(pid);
+  }, 20_000);
+});
 
 describe('exec sobre target local', () => {
   const tool = createExecTool(config);
