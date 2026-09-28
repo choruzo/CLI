@@ -11,7 +11,12 @@ import {
 } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
-import { RENAME_RETRY_DELAYS_MS, sweepTempFiles, writeFileAtomicSync } from './atomic-file.js';
+import {
+  RENAME_RETRY_DELAYS_MS,
+  describeFsError,
+  sweepTempFiles,
+  writeFileAtomicSync,
+} from './atomic-file.js';
 import { ConversationSession } from './conversation.js';
 import { DesktopConversationStore } from './conversation-store.js';
 import { DesktopSessionStore } from './session-store.js';
@@ -165,6 +170,25 @@ describe('writeFileAtomicSync', () => {
   });
 });
 
+describe('describeFsError', () => {
+  it('un error de disco se cuenta sin rutas (visto en la ventana: EPERM con las dos rutas del rename)', () => {
+    const err = Object.assign(
+      new Error(
+        "EPERM: operation not permitted, rename 'C:\\a\\x.json.1.2.tmp' -> 'C:\\a\\x.json'",
+      ),
+      { code: 'EPERM' },
+    );
+    const text = describeFsError(err);
+    expect(text).toBe('otro programa tiene el fichero abierto o es de solo lectura (EPERM)');
+    expect(text).not.toContain('C:\\');
+  });
+
+  it('un código desconocido se nombra; sin código, el mensaje recortado', () => {
+    expect(describeFsError(errno('EXDEV'))).toBe('error del sistema de ficheros (EXDEV)');
+    expect(describeFsError(new Error('x'.repeat(500)))).toHaveLength(201);
+  });
+});
+
 describe('sweepTempFiles', () => {
   it('borra solo los temporales viejos; nunca un .json ni uno reciente', () => {
     const dir = join(root, `d${++seq}`);
@@ -242,7 +266,9 @@ describe('ConversationSession: guardado', () => {
     await ended('t2');
     const warnings = frames.filter((f) => f.type === 'conversation_notice' && f.tone === 'warning');
     expect(warnings).toHaveLength(1);
-    expect(warnings[0]).toMatchObject({ message: expect.stringContaining('ENOSPC') });
+    expect(warnings[0]).toMatchObject({
+      message: expect.stringContaining('no queda espacio en disco (ENOSPC)'),
+    });
 
     spy.mockRestore();
     s.chat('t3', 'c');

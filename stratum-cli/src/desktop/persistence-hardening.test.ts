@@ -51,7 +51,7 @@ const config = buildAssistantConfig(
 );
 
 let seq = 0;
-function setup() {
+function setup(opts: { workspaces?: WorkspaceManager } = {}) {
   const dir = join(root, `case-${++seq}`);
   const sessionsDir = join(dir, 'sessions');
   const recordsDir = join(dir, 'conversations');
@@ -64,6 +64,7 @@ function setup() {
     config,
     store,
     records,
+    workspaces: opts.workspaces,
     makeRouter: () => {
       const router = new ProviderRouter(config);
       vi.spyOn(router, 'getActive').mockReturnValue(new MockProvider([]));
@@ -317,5 +318,36 @@ describe('metadatos de workspace ilegibles', () => {
     manager.release(id);
     expect(existsSync(join(wsRoot, id))).toBe(true);
     expect(manager.statusOf(id)).toMatchObject({ pinned: true, purgeAt: null });
+  });
+
+  it('al abrirla, el listado recibe el estado nuevo (visto en la ventana: seguía sin fijar)', async () => {
+    const wsRoot = join(root, `ws-${++seq}`);
+    const manager = new WorkspaceManager({
+      root: wsRoot,
+      maxFileBytes: 1024 * 1024,
+      maxWorkspaceBytes: 10 * 1024 * 1024,
+    });
+    const h = setup({ workspaces: manager });
+    writeFileSync(h.sessionPath, sessionJson(h.id));
+    writeFileSync(h.recordPath, recordJson(h.id));
+    mkdirSync(join(wsRoot, h.id), { recursive: true });
+    writeFileSync(join(wsRoot, h.id, WORKSPACE_META_FILE), '{roto');
+
+    h.host.handle({ type: 'new_conversation', conversationId: h.id, resume: true }, 1);
+    await h.host.idle();
+
+    const updated = h.frames.find((f) => f.type === 'conversation_updated');
+    expect(updated).toMatchObject({
+      summary: { conversationId: h.id, workspace: { pinned: true } },
+    });
+    await h.host.closeAll();
+  });
+
+  it('una conversación nueva no se anuncia al abrirla', async () => {
+    const h = setup();
+    h.host.handle({ type: 'new_conversation', conversationId: h.id, resume: true }, 1);
+    await h.host.idle();
+    expect(h.frames.map((f) => f.type)).toEqual(['conversation_opened']);
+    await h.host.closeAll();
   });
 });

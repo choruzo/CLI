@@ -62,6 +62,29 @@ export function writeFileAtomicSync(
   }
 }
 
+const FS_ERROR_TEXT: Record<string, string> = {
+  ENOSPC: 'no queda espacio en disco',
+  EDQUOT: 'se ha superado la cuota de disco',
+  EPERM: 'otro programa tiene el fichero abierto o es de solo lectura',
+  EACCES: 'no hay permiso para escribir el fichero',
+  EBUSY: 'otro programa tiene el fichero abierto',
+  EROFS: 'el disco es de solo lectura',
+  EIO: 'error de entrada/salida del disco',
+};
+
+/**
+ * Un error de disco en una frase para la UI, sin rutas: `EPERM` con las dos
+ * rutas del `rename` no le dice nada a quien usa la app. Lleva el código entre
+ * paréntesis para poder buscarlo; el error completo va al log.
+ */
+export function describeFsError(err: unknown): string {
+  const code = (err as NodeJS.ErrnoException | undefined)?.code;
+  if (code && FS_ERROR_TEXT[code]) return `${FS_ERROR_TEXT[code]} (${code})`;
+  if (code) return `error del sistema de ficheros (${code})`;
+  const message = err instanceof Error ? err.message : String(err);
+  return message.length > 200 ? `${message.slice(0, 200)}…` : message;
+}
+
 /**
  * Borra los temporales que dejó un proceso que murió a mitad de una escritura
  * (el `rm` del `catch` no llega a ejecutarse). Solo los de más de `olderThanMs`:

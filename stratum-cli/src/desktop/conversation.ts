@@ -15,6 +15,7 @@ import { getLogger } from '../logging/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { buildAssistantRegistry } from './assistant-runtime.js';
 import { checkpointMessages } from '../session/checkpoint.js';
+import { describeFsError } from './atomic-file.js';
 import { closeDanglingToolCalls } from '../agent/cancel.js';
 import type { DesktopSessionStore } from './session-store.js';
 import {
@@ -1003,11 +1004,10 @@ export class ConversationSession {
     if (this.saveFailing) return;
     this.saveFailing = true;
     const err = this.lastSaveError;
-    const detail = err instanceof Error ? err.message : String(err);
     this.notice(
       'warning',
-      `No se pudo guardar la conversación en disco (${detail}). Se reintentará con el siguiente ` +
-        'guardado; si cierras la app antes, se perderá lo último.',
+      `No se pudo guardar la conversación en disco: ${describeFsError(err)}. Se reintentará ` +
+        'con el siguiente guardado; si cierras la app antes, se perderá lo último.',
     );
   }
 

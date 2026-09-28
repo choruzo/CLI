@@ -294,10 +294,9 @@ export const ConversationsPanel = forwardRef<
         {unreadable > 0 && !query && (
           <p className="side-panel__empty" role="status">
             {unreadable === 1
-              ? 'Una conversación guardada no se pudo leer'
-              : `${unreadable} conversaciones guardadas no se pudieron leer`}
-            : están dañadas o las guardó una versión más nueva de Stratum. No se ha borrado nada;
-            los detalles están en el log del agente.
+              ? 'Una conversación guardada no se pudo leer: está dañada o la guardó una versión más nueva de Stratum.'
+              : `${unreadable} conversaciones guardadas no se pudieron leer: están dañadas o las guardó una versión más nueva de Stratum.`}{' '}
+            No se ha borrado nada; los detalles están en el log del agente.
           </p>
         )}
       </div>

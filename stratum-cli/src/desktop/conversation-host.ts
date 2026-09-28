@@ -10,6 +10,7 @@ import { DesktopConversationStore, type ConversationRecord } from './conversatio
 import { MemoryPanel } from './memory-panel.js';
 import type { DesktopSettings } from './settings.js';
 import { unreadableReason, type DesktopSessionStore } from './session-store.js';
+import { describeFsError } from './atomic-file.js';
 import { DEFAULT_MAX_CONCURRENT_TURNS, TurnScheduler } from './turn-scheduler.js';
 import type { ConversationWorkspace, WorkspaceManager } from './workspace.js';
 import type {
@@ -637,6 +638,12 @@ export class ConversationHost {
       messages: session.messageCount,
     });
     this.emit(this.opened(session, saved !== null || record !== null));
+    // Abrir puede cambiar lo que el listado mostraba: metadatos del workspace
+    // regenerados (fijada), un archivo restaurado, una purga. Una conversación
+    // nueva no se anuncia: aún no forma parte del listado.
+    if (saved !== null || record !== null) {
+      this.emit({ type: 'conversation_updated', summary: session.summary() });
+    }
     for (const message of notices) {
       this.emit({ type: 'conversation_notice', conversationId, tone: 'warning', message });
     }
@@ -660,15 +667,17 @@ export class ConversationHost {
       }
     | { ok: false; message: string } {
     const notices: string[] = [];
+    // El detalle (rutas, versiones) va al log; a la UI, una frase que se entienda.
     const refuse = (err: unknown, what: string) => {
       log.error('conversation unreadable; not opened', { conversationId, what, err });
-      const detail = err instanceof Error ? err.message : String(err);
       return {
         ok: false as const,
         message:
           unreadableReason(err) === 'newer'
-            ? `No se abre esta conversación para no perder datos: ${detail}`
-            : `No se pudo abrir la conversación (${what}): ${detail}`,
+            ? 'No se abre esta conversación para no perder datos: la guardó una versión más nueva ' +
+              'de Stratum. Actualiza Stratum Desktop para abrirla.'
+            : `No se pudo abrir la conversación (${what}): ${describeFsError(err)}. ` +
+              'No se ha modificado nada; los detalles están en el log del agente.',
       };
     };
 
