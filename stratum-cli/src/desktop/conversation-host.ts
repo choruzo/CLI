@@ -1,5 +1,7 @@
-import { dirname, join } from 'path';
+import { basename, dirname, join } from 'path';
 import type { StratumConfig } from '../config/schema.js';
+import { SessionCorruptError } from '../session/store.js';
+import type { SessionContext } from '../session/types.js';
 import type { ProviderRouter } from '../providers/router.js';
 import { getLogger } from '../logging/index.js';
 import { normalizeTitle } from './codec.js';
@@ -7,7 +9,7 @@ import { ConversationSession } from './conversation.js';
 import { DesktopConversationStore, type ConversationRecord } from './conversation-store.js';
 import { MemoryPanel } from './memory-panel.js';
 import type { DesktopSettings } from './settings.js';
-import type { DesktopSessionStore } from './session-store.js';
+import { unreadableReason, type DesktopSessionStore } from './session-store.js';
 import { DEFAULT_MAX_CONCURRENT_TURNS, TurnScheduler } from './turn-scheduler.js';
 import type { ConversationWorkspace, WorkspaceManager } from './workspace.js';
 import type {
@@ -15,6 +17,7 @@ import type {
   ConversationOutboundFrame,
   ConversationSummary,
   SidecarErrorFrame,
+  UnreadableConversation,
 } from './protocol.js';
 
 const log = getLogger('desktop.host');
@@ -253,7 +256,7 @@ export class ConversationHost {
         this.sessions.get(frame.conversationId)?.answerQuestions(frame.requestId, frame.answers);
         return;
       case 'list_conversations':
-        this.emit({ type: 'conversations', items: this.list() });
+        this.emitList();
         return;
       case 'rename_conversation':
         this.rename(frame.conversationId, normalizeTitle(frame.title));
@@ -297,7 +300,7 @@ export class ConversationHost {
         // Fuera de la cola (comprime y borra); al terminar, el listado cambia.
         void this.withSettings(async (s) => {
           await s.handle(frame);
-          this.emit({ type: 'conversations', items: this.list() });
+          this.emitList();
         });
         return;
     }
@@ -337,14 +340,31 @@ export class ConversationHost {
   // Listado, renombrar y eliminar (D4)
   // -------------------------------------------------------------------------
 
-  /** Conversaciones guardadas más las abiertas, de la más reciente a la más antigua. */
-  list(): ConversationSummary[] {
+  private emitList(): void {
+    const unreadable: UnreadableConversation[] = [];
+    const items = this.list(unreadable);
+    this.emit({
+      type: 'conversations',
+      items,
+      ...(unreadable.length > 0 ? { unreadable } : {}),
+    });
+  }
+
+  /**
+   * Conversaciones guardadas más las abiertas, de la más reciente a la más
+   * antigua. Las que no se pueden leer se dejan fuera y, si se pasa
+   * `unreadable`, se apuntan ahí.
+   */
+  list(unreadable?: UnreadableConversation[]): ConversationSummary[] {
     const items = new Map<string, ConversationSummary>();
     const saved = new Set(this.records.ids());
     for (const id of saved) {
       if (this.sessions.has(id)) continue;
-      const summary = this.records.summary(id);
-      if (!summary) continue;
+      const result = this.records.summaryResult(id);
+      if (result.kind === 'unreadable')
+        unreadable?.push({ conversationId: id, reason: result.reason });
+      if (result.kind !== 'ok') continue;
+      const summary = result.summary;
       let workspace = null;
       try {
         workspace = this.opts.workspaces?.statusOf(id) ?? null;
@@ -370,7 +390,8 @@ export class ConversationHost {
     }
     let record: ConversationRecord | null;
     try {
-      record = this.records.load(conversationId);
+      // Se va a reescribir: un registro dañado se aparta antes, no se pisa.
+      record = this.records.load(conversationId, { setAsideCorrupt: true });
     } catch (err) {
       this.emit({
         type: 'conversation_error',
@@ -531,21 +552,17 @@ export class ConversationHost {
       return;
     }
 
-    let saved = null;
+    let saved: SessionContext | null = null;
     let record: ConversationRecord | null = null;
+    const notices: string[] = [];
     if (resume) {
-      try {
-        saved = this.opts.store.load(conversationId);
-        record = this.records.load(conversationId);
-      } catch (err) {
-        // Una sesión ilegible no impide seguir: se abre vacía y se avisa.
-        log.error('session load failed', { conversationId, err });
-        this.emit({
-          type: 'conversation_error',
-          conversationId,
-          message: `No se pudo recuperar el historial: ${err instanceof Error ? err.message : String(err)}`,
-        });
+      const loaded = this.loadForOpen(conversationId);
+      if (!loaded.ok) {
+        this.emit({ type: 'conversation_error', conversationId, message: loaded.message });
+        return;
       }
+      ({ saved, record } = loaded);
+      notices.push(...loaded.notices);
     }
 
     // El workspace, antes que la sesión: espera a una compresión en marcha y
@@ -617,5 +634,73 @@ export class ConversationHost {
       messages: session.messageCount,
     });
     this.emit(this.opened(session, saved !== null || record !== null));
+    for (const message of notices) {
+      this.emit({ type: 'conversation_notice', conversationId, tone: 'warning', message });
+    }
+  }
+
+  /**
+   * Lee sesión y registro de una conversación que se va a abrir. Abrir implica
+   * escribir (cada turno y el cierre guardan), así que lo que no se puede leer
+   * nunca se abre encima:
+   * - dañado → se aparta a `.corrupt-<fecha>` y se sigue con lo que quede (el
+   *   registro sin sesión conserva el transcript visible; la sesión sin
+   *   registro, el historial del agente);
+   * - de un Stratum más nuevo, o imposible de apartar → no se abre.
+   */
+  private loadForOpen(
+    conversationId: string,
+  ):
+    | {
+        ok: true;
+        saved: SessionContext | null;
+        record: ConversationRecord | null;
+        notices: string[];
+      }
+    | { ok: false; message: string } {
+    const notices: string[] = [];
+    const refuse = (err: unknown, what: string) => {
+      log.error('conversation unreadable; not opened', { conversationId, what, err });
+      const detail = err instanceof Error ? err.message : String(err);
+      return {
+        ok: false as const,
+        message:
+          unreadableReason(err) === 'newer'
+            ? `No se abre esta conversación para no perder datos: ${detail}`
+            : `No se pudo abrir la conversación (${what}): ${detail}`,
+      };
+    };
+
+    let saved: SessionContext | null = null;
+    try {
+      saved = this.opts.store.load(conversationId);
+    } catch (err) {
+      if (!(err instanceof SessionCorruptError)) return refuse(err, 'historial');
+      let aside: string;
+      try {
+        aside = this.opts.store.setAside(conversationId);
+      } catch (moveErr) {
+        return refuse(moveErr, 'no se pudo apartar el historial dañado');
+      }
+      log.warn('corrupt session set aside', { conversationId, aside, reason: err.reason });
+      notices.push(
+        `El historial de esta conversación estaba dañado y se ha apartado (${basename(aside)}). ` +
+          'El asistente no recuerda los mensajes anteriores.',
+      );
+    }
+
+    let record: ConversationRecord | null = null;
+    try {
+      record = this.records.load(conversationId, {
+        setAsideCorrupt: true,
+        onSetAside: (aside) =>
+          notices.push(
+            `El registro visible de esta conversación estaba dañado y se ha apartado (${basename(aside)}).`,
+          ),
+      });
+    } catch (err) {
+      return refuse(err, 'registro');
+    }
+    return { ok: true, saved, record, notices };
   }
 }

@@ -190,6 +190,7 @@ export function App() {
             ref={searchRef}
             list={conversations.list}
             loaded={state.listLoaded}
+            unreadable={state.unreadable}
             activeId={state.activeId}
             draftId={conversations.draftId}
             byId={state.byId}

@@ -187,6 +187,8 @@ export const ConversationsPanel = forwardRef<
   {
     list: ConversationSummary[];
     loaded: boolean;
+    /** Conversaciones guardadas que el agente no pudo leer. */
+    unreadable?: number;
     activeId: string;
     /** Conversación nueva aún sin guardar (sin acciones). */
     draftId?: string | null;
@@ -198,7 +200,19 @@ export const ConversationsPanel = forwardRef<
     onPin: (id: string, pinned: boolean) => void;
   }
 >(function ConversationsPanel(
-  { list, loaded, activeId, draftId = null, byId, onSelect, onNew, onRename, onDelete, onPin },
+  {
+    list,
+    loaded,
+    unreadable = 0,
+    activeId,
+    draftId = null,
+    byId,
+    onSelect,
+    onNew,
+    onRename,
+    onDelete,
+    onPin,
+  },
   searchRef,
 ) {
   const [query, setQuery] = useState('');
@@ -277,6 +291,15 @@ export const ConversationsPanel = forwardRef<
             </ul>
           </section>
         ))}
+        {unreadable > 0 && !query && (
+          <p className="side-panel__empty" role="status">
+            {unreadable === 1
+              ? 'Una conversación guardada no se pudo leer'
+              : `${unreadable} conversaciones guardadas no se pudieron leer`}
+            : están dañadas o las guardó una versión más nueva de Stratum. No se ha borrado nada;
+            los detalles están en el log del agente.
+          </p>
+        )}
       </div>
     </div>
   );

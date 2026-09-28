@@ -295,6 +295,17 @@ export function conversationSummaries(v: unknown): ConversationSummary[] | null 
   });
 }
 
+/**
+ * Cuántas conversaciones guardadas no pudo leer el sidecar (`unreadable` de la
+ * trama `conversations`). Solo interesa el número: la UI avisa, no las lista.
+ */
+export function unreadableCount(v: unknown): number {
+  if (!Array.isArray(v)) return 0;
+  return v.filter(
+    (x) => isRecord(x) && str(x.conversationId) && (x.reason === 'corrupt' || x.reason === 'newer'),
+  ).length;
+}
+
 export function todoItems(v: unknown): TodoItem[] | null {
   return all(v, todoItem);
 }

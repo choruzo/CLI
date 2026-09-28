@@ -10,7 +10,8 @@ import {
 import { resolve, sep } from 'path';
 import type { Message } from '../agent/types.js';
 import type { SessionContext } from '../session/types.js';
-import { SESSION_SCHEMA_VERSION, assertSchemaVersion } from '../config/schema-version.js';
+import { SessionCorruptError, parseSession } from '../session/store.js';
+import { SESSION_SCHEMA_VERSION, SchemaVersionError } from '../config/schema-version.js';
 
 /**
  * Sesiones de las conversaciones de Stratum Desktop (D1, 15.5): de aquí sale el
@@ -23,6 +24,11 @@ import { SESSION_SCHEMA_VERSION, assertSchemaVersion } from '../config/schema-ve
  * - la escritura es atómica (tmp + rename). Un sidecar que muere a mitad de un
  *   guardado —justo el caso que motiva este store— no puede dejar la sesión
  *   corrupta.
+ *
+ * Leer valida como la CLI (`parseSession`): un fichero dañado lanza
+ * `SessionCorruptError` y uno de un Stratum más nuevo `SchemaVersionError`.
+ * Ninguno de los dos se sobrescribe nunca: el dañado se aparta con `setAside`
+ * y el más nuevo no se abre (lo decide `ConversationHost`).
  */
 
 const UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
@@ -46,6 +52,35 @@ export function idsIn(dir: string): string[] {
     if (isConversationId(id)) ids.push(id);
   }
   return ids;
+}
+
+/**
+ * Renombra un fichero ilegible a `<fichero>.corrupt-<fecha>`, como
+ * `decisions.json` en la CLI. Queda fuera de `idsIn` (no acaba en `.json`) y a
+ * mano del usuario para recuperarlo.
+ */
+export function setAsideFile(path: string): string {
+  const aside = `${path}.corrupt-${new Date().toISOString().replace(/[:.]/g, '-')}`;
+  renameSync(path, aside);
+  return aside;
+}
+
+/** Por qué no se pudo leer una sesión o un registro. */
+export type UnreadableReason = 'corrupt' | 'newer';
+
+export function unreadableReason(err: unknown): UnreadableReason {
+  return err instanceof SchemaVersionError || err instanceof NewerRecordError ? 'newer' : 'corrupt';
+}
+
+/** Un registro que escribió un Stratum más nuevo: no se interpreta ni se reescribe. */
+export class NewerRecordError extends Error {
+  constructor(what: string, version: unknown) {
+    super(
+      `${what} lo guardó una versión más nueva de Stratum (versión ${String(version)}); ` +
+        'actualiza Stratum Desktop para abrirla.',
+    );
+    this.name = 'NewerRecordError';
+  }
 }
 
 export interface DesktopSessionSave {
@@ -86,13 +121,25 @@ export class DesktopSessionStore {
     return idsIn(this.dir);
   }
 
+  /** Lanza `SessionCorruptError` (dañada) o `SchemaVersionError` (más nueva). */
   load(conversationId: string): SessionContext | null {
     const path = this.pathFor(conversationId);
     if (!existsSync(path)) return null;
-    const ctx = JSON.parse(readFileSync(path, 'utf-8')) as SessionContext;
-    assertSchemaVersion(ctx.schemaVersion, 'session', path);
-    if (!Array.isArray(ctx.messages)) throw new Error(`sesión sin historial: ${path}`);
-    return ctx;
+    let raw: unknown;
+    try {
+      raw = JSON.parse(readFileSync(path, 'utf-8'));
+    } catch (err) {
+      throw new SessionCorruptError(
+        conversationId,
+        `JSON inválido (${err instanceof Error ? err.message : String(err)})`,
+      );
+    }
+    return parseSession(raw, conversationId, path);
+  }
+
+  /** Aparta una sesión dañada (nunca se pisa). Devuelve la ruta nueva. */
+  setAside(conversationId: string): string {
+    return setAsideFile(this.pathFor(conversationId));
   }
 
   save(p: DesktopSessionSave): SessionContext {

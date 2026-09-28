@@ -550,6 +550,17 @@ export interface WorkspaceStatusFrame {
 export interface ConversationsFrame {
   type: 'conversations';
   items: ConversationSummary[];
+  /**
+   * Conversaciones guardadas que no se pudieron leer: dañadas o de un Stratum
+   * más nuevo. No están en `items`; la UI avisa de que existen en vez de
+   * hacerlas desaparecer en silencio. Ausente si no hay ninguna.
+   */
+  unreadable?: UnreadableConversation[];
+}
+
+export interface UnreadableConversation {
+  conversationId: string;
+  reason: 'corrupt' | 'newer';
 }
 
 /** Cambió una conversación del listado (turno, título, fijado…). */

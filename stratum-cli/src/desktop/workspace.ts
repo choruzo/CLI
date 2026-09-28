@@ -291,7 +291,20 @@ export class ConversationWorkspace {
       writable: [WORKSPACE_DIRS.outputs, WORKSPACE_DIRS.scratch],
     };
     for (const sub of Object.values(WORKSPACE_DIRS)) mkdirSync(join(dir, sub), { recursive: true });
-    this.meta = this.loadMeta() ?? { ...this.freshMeta(), ...initial };
+    const loaded = readWorkspaceMeta(this.dir, this.conversationId);
+    if (loaded === null) {
+      // Metadatos ilegibles: no se sabe si estaba fijada, y regenerarlos sin
+      // fijar la devolvería a la retención, que podría borrar sus ficheros. Se
+      // regeneran fijados; el usuario la desfija si quiere.
+      log.warn('workspace metadata unreadable; regenerating as pinned', {
+        conversationId: this.conversationId,
+      });
+    }
+    this.meta = loaded ?? {
+      ...this.freshMeta(),
+      ...initial,
+      ...(loaded === null ? { pinned: true } : {}),
+    };
     this.refresh();
   }
 
@@ -310,17 +323,6 @@ export class ConversationWorkspace {
       sizeBytes: 0,
       pinned: false,
     };
-  }
-
-  /** Metadatos existentes, o `null` si faltan o no se pueden leer (se regeneran). */
-  private loadMeta(): WorkspaceMeta | null {
-    const meta = readWorkspaceMeta(this.dir, this.conversationId);
-    if (meta === null) {
-      log.warn('workspace metadata unreadable; regenerating', {
-        conversationId: this.conversationId,
-      });
-    }
-    return meta ?? null;
   }
 
   getMeta(): WorkspaceMeta {

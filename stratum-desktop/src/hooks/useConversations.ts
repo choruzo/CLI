@@ -7,7 +7,12 @@ import type {
   SidecarFrame,
   SidecarStatus,
 } from '../ipc/types';
-import { conversationSummaries, conversationSummary, isRecord } from '../ipc/validate';
+import {
+  conversationSummaries,
+  conversationSummary,
+  isRecord,
+  unreadableCount,
+} from '../ipc/validate';
 import {
   initialConversationState,
   userMessageOf,
@@ -104,7 +109,7 @@ export function useConversations(status: SidecarStatus): Conversations {
       switch (f.type) {
         case 'conversations': {
           const items = conversationSummaries(f.items);
-          if (items) dispatch({ type: 'list', items });
+          if (items) dispatch({ type: 'list', items, unreadable: unreadableCount(f.unreadable) });
           return;
         }
         case 'conversation_updated': {

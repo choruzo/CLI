@@ -9,7 +9,16 @@ import {
 } from 'fs';
 import { resolve, sep } from 'path';
 import { getLogger } from '../logging/index.js';
-import { DesktopSessionStore, idsIn, isConversationId } from './session-store.js';
+import {
+  DesktopSessionStore,
+  NewerRecordError,
+  idsIn,
+  isConversationId,
+  setAsideFile,
+  unreadableReason,
+  type UnreadableReason,
+} from './session-store.js';
+import { SessionCorruptError } from '../session/store.js';
 import { deriveTitle, transcriptFromMessages } from './transcript.js';
 import type { ConversationSummary, TranscriptTurn, WorkspaceStatus } from './protocol.js';
 
@@ -50,6 +59,39 @@ interface CachedSummary {
   summary: Omit<ConversationSummary, 'workspace'>;
 }
 
+export interface LoadOptions {
+  /**
+   * Apartar a `.corrupt-<fecha>` un registro dañado antes de derivar otro de la
+   * sesión. Lo pide quien va a escribir después (abrir, renombrar): sin
+   * apartarlo, el siguiente guardado lo pisaría. El listado solo lee.
+   */
+  setAsideCorrupt?: boolean;
+  /** Se llama con la ruta nueva de un registro apartado. */
+  onSetAside?: (path: string) => void;
+}
+
+/** Resultado de leer una conversación para el listado. */
+export type SummaryResult =
+  | { kind: 'ok'; summary: Omit<ConversationSummary, 'workspace'> }
+  | { kind: 'unreadable'; reason: UnreadableReason }
+  | { kind: 'none' };
+
+/** La forma mínima que el resto del código da por supuesta en un turno guardado. */
+function isTranscriptTurn(t: unknown): t is TranscriptTurn {
+  if (typeof t !== 'object' || t === null) return false;
+  const turn = t as Partial<TranscriptTurn>;
+  return (
+    typeof turn.turnId === 'string' &&
+    typeof turn.status === 'string' &&
+    Array.isArray(turn.parts) &&
+    typeof turn.toolCalls === 'object' &&
+    turn.toolCalls !== null &&
+    typeof turn.user === 'object' &&
+    turn.user !== null &&
+    typeof turn.user.text === 'string'
+  );
+}
+
 export class DesktopConversationStore {
   private readonly cache = new Map<string, CachedSummary>();
 
@@ -69,24 +111,40 @@ export class DesktopConversationStore {
     return path;
   }
 
-  /** Registro propio, o uno derivado de la sesión (conversaciones anteriores a D4). */
-  load(conversationId: string): ConversationRecord | null {
+  /**
+   * Registro propio, o uno derivado de la sesión (conversaciones anteriores a
+   * D4, o registro dañado). Lanza `NewerRecordError` si el registro es de un
+   * Stratum más nuevo, y los errores de `DesktopSessionStore.load` si hay que
+   * derivar y la sesión tampoco se puede leer. Un registro dañado sin sesión de
+   * la que derivar lanza `SessionCorruptError`… salvo con `setAsideCorrupt`,
+   * que lo aparta y devuelve `null`.
+   */
+  load(conversationId: string, opts: LoadOptions = {}): ConversationRecord | null {
     const path = this.pathFor(conversationId);
     if (existsSync(path)) {
       let raw: Partial<ConversationRecord> | null = null;
+      let problem: string | null = null;
       try {
-        raw = JSON.parse(readFileSync(path, 'utf-8')) as Partial<ConversationRecord>;
+        const parsed = JSON.parse(readFileSync(path, 'utf-8')) as unknown;
+        if (typeof parsed === 'object' && parsed !== null && !Array.isArray(parsed)) {
+          raw = parsed as Partial<ConversationRecord>;
+        } else {
+          problem = 'no es un objeto';
+        }
       } catch (err) {
-        log.warn('conversation record unreadable; deriving from session', { conversationId, err });
+        problem = `JSON inválido (${err instanceof Error ? err.message : String(err)})`;
       }
       // Un registro de un Stratum más nuevo no se interpreta a medias ni se
       // sustituye por uno derivado (el siguiente guardado lo pisaría).
       if (typeof raw?.version === 'number' && raw.version > CONVERSATION_RECORD_VERSION) {
-        throw new Error(
-          `el registro de la conversación es de una versión más nueva de Stratum (${raw.version})`,
-        );
+        throw new NewerRecordError('El registro de la conversación', raw.version);
       }
-      if (raw && raw.conversationId === conversationId && Array.isArray(raw.transcript)) {
+      if (
+        raw &&
+        raw.conversationId === conversationId &&
+        Array.isArray(raw.transcript) &&
+        raw.transcript.every(isTranscriptTurn)
+      ) {
         return {
           version: CONVERSATION_RECORD_VERSION,
           conversationId,
@@ -100,7 +158,23 @@ export class DesktopConversationStore {
           transcript: raw.transcript,
         };
       }
-      if (raw) log.warn('conversation record malformed; deriving from session', { conversationId });
+      problem ??= 'forma inválida';
+      if (opts.setAsideCorrupt) {
+        const aside = setAsideFile(path);
+        this.cache.delete(conversationId);
+        log.warn('corrupt conversation record set aside', { conversationId, aside, problem });
+        opts.onSetAside?.(aside);
+      } else {
+        log.warn('conversation record unreadable; deriving from session', {
+          conversationId,
+          problem,
+        });
+      }
+      const derived = this.fromSession(conversationId);
+      if (!derived && !opts.setAsideCorrupt) {
+        throw new SessionCorruptError(conversationId, `registro de la conversación: ${problem}`);
+      }
+      return derived;
     }
     return this.fromSession(conversationId);
   }
@@ -153,6 +227,12 @@ export class DesktopConversationStore {
 
   /** Resumen para el sidebar, sin el estado del workspace (lo añade el host). */
   summary(conversationId: string): Omit<ConversationSummary, 'workspace'> | null {
+    const result = this.summaryResult(conversationId);
+    return result.kind === 'ok' ? result.summary : null;
+  }
+
+  /** Como `summary`, pero distingue «no existe» de «existe y no se puede leer». Solo lee. */
+  summaryResult(conversationId: string): SummaryResult {
     let mtimeMs = -1;
     try {
       mtimeMs = statSync(this.pathFor(conversationId)).mtimeMs;
@@ -160,18 +240,20 @@ export class DesktopConversationStore {
       /* sin registro: se deriva de la sesión */
     }
     const cached = this.cache.get(conversationId);
-    if (cached && mtimeMs !== -1 && cached.mtimeMs === mtimeMs) return cached.summary;
+    if (cached && mtimeMs !== -1 && cached.mtimeMs === mtimeMs) {
+      return { kind: 'ok', summary: cached.summary };
+    }
     let record: ConversationRecord | null;
     try {
       record = this.load(conversationId);
     } catch (err) {
       log.warn('conversation unreadable; left out of the list', { conversationId, err });
-      return null;
+      return { kind: 'unreadable', reason: unreadableReason(err) };
     }
-    if (!record) return null;
+    if (!record) return { kind: 'none' };
     const summary = summarize(record);
     if (mtimeMs !== -1) this.cache.set(conversationId, { mtimeMs, summary });
-    return summary;
+    return { kind: 'ok', summary };
   }
 }
 

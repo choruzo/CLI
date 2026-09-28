@@ -12,7 +12,12 @@ import {
 } from './conversations-store';
 import { conversationReducer, initialConversationState } from './conversation-reducer';
 import { frameToAction } from './useAgentStream';
-import { conversationSummary, transcriptTurn, workspaceStatus } from '../ipc/validate';
+import {
+  conversationSummary,
+  transcriptTurn,
+  unreadableCount,
+  workspaceStatus,
+} from '../ipc/validate';
 
 const A = '6f1c1c0e-3d2a-4b8e-9c1d-00000000000a';
 const B = '6f1c1c0e-3d2a-4b8e-9c1d-00000000000b';
@@ -159,6 +164,22 @@ describe('store de conversaciones', () => {
     const b = s.byId[B]!.messages[1];
     expect(a.role === 'agent' && a.parts).toEqual([]);
     expect(b.role === 'agent' && b.parts).toEqual([{ kind: 'text', text: 'B' }]);
+  });
+
+  it('las conversaciones ilegibles llegan como número y el siguiente listado lo reemplaza', () => {
+    const unreadable = unreadableCount([
+      { conversationId: A, reason: 'corrupt' },
+      { conversationId: B, reason: 'newer' },
+      { conversationId: 'x', reason: 'otra' },
+      'basura',
+    ]);
+    expect(unreadable).toBe(2);
+    expect(unreadableCount(undefined)).toBe(0);
+    let s = initialConversationsState(A);
+    s = conversationsReducer(s, { type: 'list', items: [], unreadable });
+    expect(s.unreadable).toBe(2);
+    s = conversationsReducer(s, { type: 'list', items: [] });
+    expect(s.unreadable).toBe(0);
   });
 
   it('listado ordenado por fecha; actualizar y eliminar', () => {

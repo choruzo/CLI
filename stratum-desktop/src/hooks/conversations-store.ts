@@ -21,6 +21,8 @@ import {
 export interface ConversationsState {
   list: ConversationSummary[];
   listLoaded: boolean;
+  /** Conversaciones guardadas que el sidecar no pudo leer (dañadas o más nuevas). */
+  unreadable: number;
   byId: Record<string, ConversationState>;
   open: Record<string, true>;
   activeId: string;
@@ -28,7 +30,7 @@ export interface ConversationsState {
 
 export type ConversationsAction =
   | { type: 'conv'; id: string; action: ConversationAction }
-  | { type: 'list'; items: ConversationSummary[] }
+  | { type: 'list'; items: ConversationSummary[]; unreadable?: number }
   | { type: 'summary'; summary: ConversationSummary }
   | { type: 'deleted'; id: string }
   | { type: 'activate'; id: string }
@@ -37,7 +39,7 @@ export type ConversationsAction =
   | { type: 'connection_lost' };
 
 export function initialConversationsState(activeId: string): ConversationsState {
-  return { list: [], listLoaded: false, byId: {}, open: {}, activeId };
+  return { list: [], listLoaded: false, unreadable: 0, byId: {}, open: {}, activeId };
 }
 
 /** ¿La conversación tiene algo en marcha que impida cerrarla en el sidecar? */
@@ -66,7 +68,12 @@ export function conversationsReducer(
       return { ...state, byId: { ...state.byId, [action.id]: next } };
     }
     case 'list':
-      return { ...state, list: sortList(action.items), listLoaded: true };
+      return {
+        ...state,
+        list: sortList(action.items),
+        listLoaded: true,
+        unreadable: action.unreadable ?? 0,
+      };
     case 'summary': {
       const others = state.list.filter((c) => c.conversationId !== action.summary.conversationId);
       return { ...state, list: sortList([...others, action.summary]) };
