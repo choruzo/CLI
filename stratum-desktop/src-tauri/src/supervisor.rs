@@ -62,12 +62,52 @@ struct Cycle {
 pub fn start(app: AppHandle) {
     let (tx, rx) = mpsc::channel();
     app.state::<SidecarState>().set_supervisor(tx);
+    let handle = app.clone();
     let spawned = std::thread::Builder::new()
         .name("sidecar-supervisor".into())
         .spawn(move || run(app, rx));
-    if let Err(e) = spawned {
-        eprintln!("[stratum] no se pudo arrancar el supervisor del sidecar: {e}");
+    match spawned {
+        Ok(thread) => handle.state::<SidecarState>().set_supervisor_thread(thread),
+        Err(e) => eprintln!("[stratum] no se pudo arrancar el supervisor del sidecar: {e}"),
     }
+}
+
+/// Lo que se espera a que el supervisor anterior termine antes de arrancar otro.
+const OLD_SUPERVISOR_WAIT: Duration = Duration::from_secs(10);
+
+/// Una salida que empezó y no llegó a ocurrir (el instalador de una
+/// actualización falló después de apagar el sidecar): sin esto, la app seguía
+/// abierta sin agente y sin supervisor que lo relanzase.
+///
+/// Espera a que el supervisor anterior acabe —con `exiting` marcado sale en
+/// cuanto su relay se cierra, y el proceso ya está apagado— antes de admitir
+/// procesos otra vez y arrancar uno nuevo: dos supervisores a la vez podrían
+/// apagarse el sidecar el uno al otro. Si el anterior no termina a tiempo, no
+/// se arranca otro y la UI pide reiniciar la aplicación. Bloquea: llamarlo
+/// fuera del hilo de la UI.
+pub fn resume_after_aborted_exit(app: AppHandle) {
+    let state = app.state::<SidecarState>();
+    if !state.is_exiting() {
+        return;
+    }
+    if let Some(old) = state.take_supervisor_thread() {
+        if !join_within(old, OLD_SUPERVISOR_WAIT) {
+            eprintln!("[stratum] el supervisor anterior no terminó: el sidecar no se relanza");
+            ipc::set_status(
+                &app,
+                SidecarStatus::Failed {
+                    message: "El agente se detuvo para actualizar y no se pudo relanzar: \
+                              reinicia la aplicación."
+                        .into(),
+                },
+            );
+            return;
+        }
+    }
+    state.cancel_exit();
+    ipc::set_status(&app, SidecarStatus::Starting);
+    eprintln!("[stratum] salida abortada: se relanza el sidecar");
+    start(app);
 }
 
 fn run(app: AppHandle, rx: Receiver<Command>) {
@@ -140,6 +180,19 @@ fn run(app: AppHandle, rx: Receiver<Command>) {
             }
         }
     }
+}
+
+/// Espera a que el hilo termine, como mucho `timeout`. `true` si terminó.
+pub fn join_within(thread: std::thread::JoinHandle<()>, timeout: Duration) -> bool {
+    let deadline = Instant::now() + timeout;
+    while !thread.is_finished() {
+        if Instant::now() >= deadline {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let _ = thread.join();
+    true
 }
 
 /// Lanza un sidecar, ejecuta el relay hasta que se cae y deja el proceso apagado.
@@ -276,6 +329,31 @@ mod tests {
         assert_eq!(next_failures(2, Some(Duration::from_millis(500))), 3);
         // Aguantó el periodo estable: esta caída es la primera de una racha nueva.
         assert_eq!(next_failures(3, Some(STABLE_AFTER)), 1);
+    }
+
+    #[test]
+    fn join_within_espera_al_hilo_que_termina_y_no_al_que_se_cuelga() {
+        let quick = std::thread::spawn(|| std::thread::sleep(Duration::from_millis(50)));
+        assert!(join_within(quick, Duration::from_secs(5)));
+
+        let (tx, rx) = mpsc::channel::<()>();
+        let stuck = std::thread::spawn(move || {
+            let _ = rx.recv();
+        });
+        let started = Instant::now();
+        assert!(!join_within(stuck, Duration::from_millis(100)));
+        assert!(started.elapsed() < Duration::from_secs(2));
+        drop(tx);
+    }
+
+    #[test]
+    fn cancelar_la_salida_vuelve_a_admitir_procesos() {
+        let state = SidecarState::new();
+        assert!(!state.is_exiting());
+        assert!(state.begin_exit().is_none());
+        assert!(state.is_exiting());
+        state.cancel_exit();
+        assert!(!state.is_exiting());
     }
 
     #[test]

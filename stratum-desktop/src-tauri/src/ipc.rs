@@ -23,6 +23,7 @@ use std::collections::VecDeque;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
 use std::sync::Mutex;
+use std::thread::JoinHandle;
 use std::time::{Duration, Instant};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager, State};
@@ -99,6 +100,9 @@ pub struct SidecarState {
     relay: Mutex<Relay>,
     process: Mutex<ProcessSlot>,
     supervisor: Mutex<Option<Sender<crate::supervisor::Command>>>,
+    /// Hilo del supervisor: para esperar a que termine antes de arrancar otro
+    /// si una salida se aborta (`supervisor::resume_after_aborted_exit`).
+    supervisor_thread: Mutex<Option<JoinHandle<()>>>,
     /// El usuario pidió reiniciar el agente (D5): la caída que sigue no es un
     /// fallo y se relanza sin espera ni contador de intentos.
     reload_requested: AtomicBool,
@@ -114,8 +118,23 @@ impl SidecarState {
             relay: Mutex::new(Relay::default()),
             process: Mutex::new(ProcessSlot::default()),
             supervisor: Mutex::new(None),
+            supervisor_thread: Mutex::new(None),
             reload_requested: AtomicBool::new(false),
         }
+    }
+
+    pub fn set_supervisor_thread(&self, handle: JoinHandle<()>) {
+        *self.supervisor_thread.lock().unwrap() = Some(handle);
+    }
+
+    pub fn take_supervisor_thread(&self) -> Option<JoinHandle<()>> {
+        self.supervisor_thread.lock().unwrap().take()
+    }
+
+    /// Deshace `begin_exit` cuando la salida no llega a ocurrir (el instalador
+    /// de una actualización no arrancó): se vuelven a admitir procesos.
+    pub fn cancel_exit(&self) {
+        self.process.lock().unwrap().exiting = false;
     }
 
     /// Consume la petición de reinicio, si la hay (lo llama el supervisor).

@@ -105,9 +105,14 @@ pub async fn update_check<R: Runtime>(
 
 /// Descarga, verifica la firma, instala y reinicia. Informa del progreso por
 /// `on_progress`. Solo instala lo que encontró el último `update_check`.
+///
+/// El sidecar se apaga antes de instalar (en Windows, desde `on_before_exit`,
+/// justo antes de lanzar el instalador). Si la instalación falla después —el
+/// usuario rechaza el UAC, el AppImage no se puede escribir—, la app sigue
+/// abierta: el sidecar se relanza antes de devolver el error.
 #[tauri::command]
-pub async fn update_install<R: Runtime>(
-    app: AppHandle<R>,
+pub async fn update_install(
+    app: AppHandle,
     state: State<'_, UpdateState>,
     on_progress: Channel<UpdateProgress>,
 ) -> Result<(), String> {
@@ -130,11 +135,20 @@ pub async fn update_install<R: Runtime>(
         .map_err(|e| e.to_string())?;
     let _ = on_progress.send(UpdateProgress::Installing);
     // En Linux el AppImage se sustituye con la app viva: el sidecar se apaga
-    // aquí y la app se reinicia con la versión nueva. En Windows no se vuelve
-    // de `install` (el hook `on_before_exit` ya apagó todo).
+    // aquí y la app se reinicia con la versión nueva. En Windows, si el
+    // instalador arranca, no se vuelve de `install` (el hook `on_before_exit`
+    // ya apagó todo); si no arranca, `install` devuelve el error con el
+    // sidecar ya apagado.
     #[cfg(not(windows))]
     crate::prepare_exit(&app);
-    update.install(bytes).map_err(|e| e.to_string())?;
+    if let Err(e) = update.install(bytes) {
+        let resumed = app.clone();
+        let _ = tauri::async_runtime::spawn_blocking(move || {
+            crate::supervisor::resume_after_aborted_exit(resumed)
+        })
+        .await;
+        return Err(e.to_string());
+    }
     app.restart();
 }
 
