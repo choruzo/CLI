@@ -7,9 +7,9 @@ import {
   renameSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from 'fs';
 import { rm } from 'fs/promises';
+import { writeFileAtomicSync } from './atomic-file.js';
 import { homedir } from 'os';
 import { extname, isAbsolute, join, parse, resolve, sep } from 'path';
 import type { StratumConfig } from '../config/schema.js';
@@ -238,9 +238,7 @@ export type AttachmentCheck =
 const isIso = (v: unknown): v is string => typeof v === 'string' && !Number.isNaN(Date.parse(v));
 
 function writeJsonAtomic(path: string, data: unknown): void {
-  const tmp = `${path}.${process.pid}.tmp`;
-  writeFileSync(tmp, JSON.stringify(data, null, 2), 'utf-8');
-  renameSync(tmp, path);
+  writeFileAtomicSync(path, JSON.stringify(data, null, 2));
 }
 
 /**

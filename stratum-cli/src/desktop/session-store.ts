@@ -1,13 +1,6 @@
-import {
-  existsSync,
-  mkdirSync,
-  readdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  writeFileSync,
-} from 'fs';
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'fs';
 import { resolve, sep } from 'path';
+import { sweepTempFiles, writeFileAtomicSync } from './atomic-file.js';
 import type { Message } from '../agent/types.js';
 import type { SessionContext } from '../session/types.js';
 import { SessionCorruptError, parseSession } from '../session/store.js';
@@ -21,9 +14,9 @@ import { SESSION_SCHEMA_VERSION, SchemaVersionError } from '../config/schema-ver
  * `schemaVersion`), pero en su propio directorio y con dos diferencias:
  * - el id es el `conversationId` (UUID) que genera el frontend, validado antes
  *   de usarlo como nombre de fichero: viene del webview;
- * - la escritura es atómica (tmp + rename). Un sidecar que muere a mitad de un
- *   guardado —justo el caso que motiva este store— no puede dejar la sesión
- *   corrupta.
+ * - la escritura es atómica (`writeFileAtomicSync`). Un sidecar que muere a
+ *   mitad de un guardado —justo el caso que motiva este store— no puede dejar
+ *   la sesión corrupta.
  *
  * Leer valida como la CLI (`parseSession`): un fichero dañado lanza
  * `SessionCorruptError` y uno de un Stratum más nuevo `SchemaVersionError`.
@@ -144,7 +137,6 @@ export class DesktopSessionStore {
 
   save(p: DesktopSessionSave): SessionContext {
     const path = this.pathFor(p.conversationId);
-    mkdirSync(this.dir, { recursive: true });
     const now = new Date().toISOString();
     const ctx: SessionContext = {
       schemaVersion: SESSION_SCHEMA_VERSION,
@@ -159,9 +151,15 @@ export class DesktopSessionStore {
       toolCallCount: p.toolCallCount,
       summary: '',
     };
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(ctx, null, 2), 'utf-8');
-    renameSync(tmp, path);
+    // Sin sangrado: se guarda síncrono tras cada tool, y con historiales de
+    // varios MB el sangrado casi duplica el tamaño y el tiempo que el sidecar
+    // (el de todas las conversaciones) pasa bloqueado.
+    writeFileAtomicSync(path, JSON.stringify(ctx));
     return ctx;
+  }
+
+  /** Borra los temporales de escrituras que no terminaron (proceso matado). */
+  sweepTemp(): number {
+    return sweepTempFiles(this.dir);
   }
 }

@@ -1,14 +1,7 @@
-import {
-  existsSync,
-  mkdirSync,
-  readFileSync,
-  renameSync,
-  rmSync,
-  statSync,
-  writeFileSync,
-} from 'fs';
+import { existsSync, readFileSync, rmSync, statSync } from 'fs';
 import { resolve, sep } from 'path';
 import { getLogger } from '../logging/index.js';
+import { sweepTempFiles, writeFileAtomicSync } from './atomic-file.js';
 import {
   DesktopSessionStore,
   NewerRecordError,
@@ -198,12 +191,13 @@ export class DesktopConversationStore {
   }
 
   save(record: ConversationRecord): void {
-    const path = this.pathFor(record.conversationId);
-    mkdirSync(this.dir, { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, JSON.stringify(record), 'utf-8');
-    renameSync(tmp, path);
+    writeFileAtomicSync(this.pathFor(record.conversationId), JSON.stringify(record));
     this.cache.delete(record.conversationId);
+  }
+
+  /** Borra los temporales de escrituras que no terminaron (proceso matado). */
+  sweepTemp(): number {
+    return sweepTempFiles(this.dir);
   }
 
   /** Hay registro propio (no cuenta una sesión anterior a D4). */

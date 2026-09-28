@@ -15,6 +15,7 @@ import { getLogger } from '../logging/index.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import { buildAssistantRegistry } from './assistant-runtime.js';
 import { checkpointMessages } from '../session/checkpoint.js';
+import { closeDanglingToolCalls } from '../agent/cancel.js';
 import type { DesktopSessionStore } from './session-store.js';
 import {
   CONVERSATION_RECORD_VERSION,
@@ -121,6 +122,34 @@ export function composeUserMessage(text: string, attachments: CheckedAttachment[
 
 export { checkpointMessages };
 
+/**
+ * Historial guardado apto para reanudar: un `assistant` con tool calls sin
+ * respuesta al final (un guardado a mitad de turno de una versión anterior, o
+ * editado a mano) haría que el provider rechazase todos los turnos siguientes.
+ * Se cierran como canceladas, igual que al cancelar un turno.
+ */
+function resumable(messages: Message[] | undefined): Message[] | undefined {
+  if (!messages) return undefined;
+  const copy = [...messages];
+  const closed = closeDanglingToolCalls(copy);
+  if (closed > 0) log.warn('dangling tool calls closed on resume', { closed });
+  return copy;
+}
+
+interface SessionFingerprint {
+  length: number;
+  last: Message | undefined;
+  header: string;
+}
+
+/**
+ * El loop añade mensajes nuevos y no modifica los que ya hay (la compresión y
+ * `/clear` cambian la longitud), así que longitud + identidad del último bastan.
+ */
+function sameFingerprint(a: SessionFingerprint, b: SessionFingerprint | null): boolean {
+  return b !== null && a.length === b.length && a.last === b.last && a.header === b.header;
+}
+
 interface Pending<T> {
   resolve: (value: T) => void;
 }
@@ -179,6 +208,11 @@ export class ConversationSession {
    * a un cliente que ya habla con la sesión nueva.
    */
   private retired = false;
+  /** Lo último que se escribió de la sesión: un checkpoint sin cambios no reescribe. */
+  private lastSessionFingerprint: SessionFingerprint | null = null;
+  /** Hay una racha de guardados fallidos (ya avisada). */
+  private saveFailing = false;
+  private lastSaveError: unknown = null;
 
   constructor(opts: ConversationSessionOptions) {
     this.conversationId = opts.conversationId;
@@ -197,7 +231,7 @@ export class ConversationSession {
     this.workspace = opts.workspace;
     this.workspaceSettings = opts.workspaceSettings;
     this.registry = buildAssistantRegistry({ files: this.workspace !== undefined });
-    this.agent = this.createAgent(opts.config, opts.router, opts.initialMessages);
+    this.agent = this.createAgent(opts.config, opts.router, resumable(opts.initialMessages));
     // `/model` es por conversación y se guarda con la sesión: al reabrir se
     // reaplica si sigue siendo el mismo provider. Un registro de D5 dice si el
     // usuario lo eligió; en uno anterior, un modelo distinto del default cuenta
@@ -749,8 +783,12 @@ export class ConversationSession {
 
   /**
    * Cierre (conversación cerrada, cliente desconectado o apagado del sidecar):
-   * aborta el turno, espera un plazo acotado a que termine —su `finally` ya
-   * guarda— y, si no hay turno o no terminó a tiempo, guarda aquí.
+   * guarda un checkpoint en el acto, aborta el turno, espera un plazo acotado a
+   * que termine —su `finally` ya guarda— y, si no terminó a tiempo, vuelve a
+   * guardar un checkpoint y retira la sesión.
+   *
+   * El checkpoint inicial es lo que se conserva si el sidecar se está
+   * apagando: el apagado entero tiene ~1,5 s y el plazo de gracia son 5 s.
    */
   async close(): Promise<void> {
     if (this.closed) return;
@@ -761,6 +799,7 @@ export class ConversationSession {
       this.save();
       return;
     }
+    this.checkpoint();
     this.cancel();
     let timer: NodeJS.Timeout | undefined;
     const finished = await Promise.race([
@@ -775,7 +814,9 @@ export class ConversationSession {
       log.warn('turn did not stop in time; saving and retiring the session', {
         conversationId: this.conversationId,
       });
-      this.save();
+      // El turno sigue vivo: el historial puede acabar en tool calls sin
+      // respuesta, que el checkpoint quita (un `save` las guardaría tal cual).
+      this.checkpoint();
       this.retired = true;
     }
   }
@@ -867,31 +908,49 @@ export class ConversationSession {
   // Persistencia
   // -------------------------------------------------------------------------
 
-  /** Checkpoint a mitad de turno (15.12): historial reanudable + transcript. */
+  /**
+   * Checkpoint a mitad de turno (15.12): historial reanudable + transcript. El
+   * historial no se reescribe si no cambió desde el último guardado: los
+   * checkpoints van tras cada tool y cada minuto, y la sesión puede pesar MB.
+   */
   private checkpoint(): void {
     if (this.retired || !this.turn) return;
-    this.saveSession(checkpointMessages(this.agent.getMessages()));
-    this.saveRecord();
+    const messages = checkpointMessages(this.agent.getMessages());
+    const unchanged = sameFingerprint(this.fingerprint(messages), this.lastSessionFingerprint);
+    const sessionOk = unchanged || this.saveSession(messages);
+    const recordOk = this.saveRecord();
+    this.reportSave(sessionOk && recordOk);
   }
 
   /**
    * Guarda el historial y el transcript. Síncrono y best-effort: un fallo de
-   * disco se registra pero no puede tumbar la conversación. Un turno cancelado
+   * disco se avisa pero no puede tumbar la conversación. Un turno cancelado
    * se guarda tal cual (como en la CLI).
    */
   private save(): void {
     if (this.retired) return;
-    this.saveSession(this.agent.getMessages());
-    this.saveRecord();
+    const sessionOk = this.saveSession(this.agent.getMessages());
+    const recordOk = this.saveRecord();
+    this.reportSave(sessionOk && recordOk);
   }
 
-  private saveSession(messages: Message[]): void {
+  /** Huella barata del historial guardado: longitud, último mensaje y lo que va en la cabecera. */
+  private fingerprint(messages: Message[]): SessionFingerprint {
+    return {
+      length: messages.length,
+      last: messages.at(-1),
+      header: `${this.agent.providerName}|${this.agent.model}|${this.agent.toolCallCount}`,
+    };
+  }
+
+  /** `true` si guardó o no había nada que guardar. */
+  private saveSession(messages: Message[]): boolean {
     // Una conversación sin mensajes ni fichero previo no tiene nada que
     // recuperar: no se crea un fichero por cada conversación abierta y nunca
     // usada. Con fichero previo (un `/clear`) sí hay que vaciarlo.
     const count = messages.filter((m) => m.role !== 'system').length;
     try {
-      if (count === 0 && !this.store.exists(this.conversationId)) return;
+      if (count === 0 && !this.store.exists(this.conversationId)) return true;
       this.store.save({
         conversationId: this.conversationId,
         provider: this.agent.providerName,
@@ -900,23 +959,56 @@ export class ConversationSession {
         toolCallCount: this.agent.toolCallCount,
         createdAt: this.createdAt,
       });
+      this.lastSessionFingerprint = this.fingerprint(messages);
+      return true;
     } catch (err) {
+      this.lastSessionFingerprint = null;
+      this.lastSaveError = err;
       log.error('session save failed', { conversationId: this.conversationId, err });
+      return false;
     }
   }
 
-  private saveRecord(): void {
-    if (this.retired) return;
+  /** `true` si guardó o no había nada que guardar. */
+  private saveRecord(): boolean {
+    if (this.retired) return true;
     try {
-      if (this.record.transcript.length === 0 && !this.hasSavedRecord()) return;
+      if (this.record.transcript.length === 0 && !this.hasSavedRecord()) return true;
       this.records.save({
         ...this.record,
         provider: this.agent.providerName,
         model: this.agent.model,
       });
+      return true;
     } catch (err) {
+      this.lastSaveError = err;
       log.error('conversation record save failed', { conversationId: this.conversationId, err });
+      return false;
     }
+  }
+
+  /**
+   * Un guardado que falla (disco lleno, fichero bloqueado) se avisa una vez por
+   * racha: sin aviso, el usuario seguiría conversando creyendo que todo queda
+   * guardado. Cuando vuelve a guardar, se dice también.
+   */
+  private reportSave(ok: boolean): void {
+    if (ok) {
+      if (this.saveFailing) {
+        this.saveFailing = false;
+        this.notice('info', 'La conversación vuelve a guardarse en disco.');
+      }
+      return;
+    }
+    if (this.saveFailing) return;
+    this.saveFailing = true;
+    const err = this.lastSaveError;
+    const detail = err instanceof Error ? err.message : String(err);
+    this.notice(
+      'warning',
+      `No se pudo guardar la conversación en disco (${detail}). Se reintentará con el siguiente ` +
+        'guardado; si cierras la app antes, se perderá lo último.',
+    );
   }
 
   private hasSavedRecord(): boolean {

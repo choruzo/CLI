@@ -90,6 +90,9 @@ export class ConversationHost {
     this.scheduler = new TurnScheduler(opts.maxConcurrentTurns ?? DEFAULT_MAX_CONCURRENT_TURNS);
     this.memory = opts.memory ?? new MemoryPanel(opts.config);
     opts.settings?.attach(this.emit);
+    // Temporales de guardados que un proceso matado dejó a medias.
+    const swept = opts.store.sweepTemp() + this.records.sweepTemp();
+    if (swept > 0) log.info('stale temp files removed', { count: swept });
   }
 
   /**
@@ -648,9 +651,7 @@ export class ConversationHost {
    *   registro, el historial del agente);
    * - de un Stratum más nuevo, o imposible de apartar → no se abre.
    */
-  private loadForOpen(
-    conversationId: string,
-  ):
+  private loadForOpen(conversationId: string):
     | {
         ok: true;
         saved: SessionContext | null;

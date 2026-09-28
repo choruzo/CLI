@@ -1,5 +1,5 @@
-import { existsSync, mkdirSync, readFileSync, renameSync, statSync, writeFileSync } from 'fs';
-import { dirname } from 'path';
+import { existsSync, readFileSync, statSync } from 'fs';
+import { writeFileAtomicSync } from './atomic-file.js';
 import type { StratumConfig } from '../config/schema.js';
 import { resolveMemoryPaths } from '../config/paths.js';
 import { DecisionStore } from '../memory/decisions.js';
@@ -77,10 +77,7 @@ export class MemoryPanel {
       return { ok: false, conflict: true, content: current.content, mtimeMs: current.mtimeMs };
     }
     const path = this.globalPath;
-    mkdirSync(dirname(path), { recursive: true });
-    const tmp = `${path}.${process.pid}.tmp`;
-    writeFileSync(tmp, content, 'utf-8');
-    renameSync(tmp, path);
+    writeFileAtomicSync(path, content);
     return { ok: true, mtimeMs: statSync(path).mtimeMs };
   }
 
