@@ -59,7 +59,7 @@ const MILESTONES = [
     body: ["Saneado de GIT_DIR heredado, opciones con token opaco en question, contrato de identidad y guías por puntero."] },
   { id: "H15", title: "Perfiles de agente", date: "2026-09-14", track: "cli", status: "done", release: "v0.4.0",
     body: ["@perfil para delegar, /agent para activarlo como principal, stratum agents list y badge ◆ en la barra."] },
-  { id: "H16", title: "Ejecución unificada", date: "2026-09-15", track: "cli", status: "current",
+  { id: "H16", title: "Ejecución unificada", date: "2026-09-15", track: "cli", status: "done",
     body: ["Tool exec con targets local y ssh:<alias>, auditoría universal en exec-audit.jsonl y redacción de secretos no desactivable.", "El exit code real en Windows sale de un gancho de PowerShell."] },
   { id: "D0", title: "Scaffolding y sidecar SEA", date: "2026-09-21", track: "desktop", status: "wip",
     body: ["Tauri + core de la CLI empaquetado como binario Node SEA, canal local autenticado por token."] },
@@ -71,21 +71,38 @@ const MILESTONES = [
     body: ["Compresión a tar.gz verificada por sha256 y purga por antigüedad; nunca toca una conversación abierta."] },
   { id: "D4", title: "Conversaciones múltiples", date: "2026-09-23", track: "desktop", status: "wip",
     body: ["Sidebar, transcript visible separado del historial, cola de turnos concurrentes y checkpoints tras cada tool."] },
-  { id: "H17", title: "Entornos y blast radius", date: "siguiente", track: "cli", status: "next",
-    body: ["Entornos con radio de impacto, modo read-only, perfil de sesión y badge de contexto en la barra."] },
-  { id: "D5", title: "Settings y ProviderWizard", date: "pendiente", track: "desktop", status: "next",
-    body: ["Configuración visual y escritura segura compartida con la CLI."] },
+  { id: "H17", title: "Entornos y blast radius", date: "2026-09-23", track: "cli", status: "current", release: "v0.5.0",
+    body: ["Entornos por target con política, plan obligatorio y confirmación tecleando el nombre; solo afectan a lo que cambia algo.", "Modo read-only inapelable, perfil de sesión (code, infra, full) y badges de contexto en la barra."] },
+  { id: "D5", title: "Ajustes y ProviderWizard", date: "2026-09-23", track: "desktop", status: "wip",
+    body: ["Panel de Ajustes sobre el .stratumrc.json global, compartido con la CLI: secretos enmascarados, guardado con detección de conflictos y aviso si el fichero cambia fuera."] },
+  { id: "D6", title: "Integración con el SO y build", date: "2026-09-24", track: "desktop", status: "done",
+    body: ["Atajo global, notificaciones nativas y onboarding; pipeline de CI que produce .msi, .exe, .deb y .AppImage."] },
+  { id: "D7", title: "Pulido", date: "2026-09-25", track: "desktop", status: "done", release: "desktop 0.3.0",
+    body: ["Ventana frameless, razonamiento del modelo visible, animaciones y accesibilidad, tests E2E y auto-update firmado."] },
   { id: "H18", title: "Tools de diagnóstico", date: "pendiente", track: "cli", status: "next",
     body: ["net_probe, sys_inspect, log_query y service_status."] },
   { id: "H19", title: "Diagnóstico verificado", date: "pendiente", track: "cli", status: "next",
     body: ["Tool diagnosis, perfiles de triaje y .stratum/incidents/."] },
   { id: "H20", title: "Cloud y virtualización", date: "pendiente", track: "cli", status: "next",
     body: ["Wrappers cloud y de virtualización, contexto activo en la barra."] },
-  { id: "D6–D8", title: "SO, polish y modo Code", date: "pendiente", track: "desktop", status: "next",
-    body: ["Integración con el SO y build, ventana frameless y E2E, y el conmutador Chat | Code."] }
+  { id: "D8", title: "Modo Code", date: "pendiente", track: "desktop", status: "next",
+    body: ["El conmutador Chat | Code: el comportamiento de la CLI sobre un proyecto real, dentro de la app."] }
 ];
 
+// `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "v0.7β", title: "Modelos descubiertos: basta la URL y la key", date: "2026-10-03", match: /^feat\(providers\)/,
+    text: "Un provider ya no necesita modelo ni ventana de contexto en la config: se consultan a /models. chat abre el selector al arrancar; run, si hay varios, los lista en vez de elegir por ti.",
+    pre: "❯ stratum provider add local --base-url http://localhost:8080/v1 --api-key-env KEY\n❯ stratum provider models --set gemma-4-12b" },
+  { id: "v0.7β", title: "Endurecimiento de punta a punta", date: "2026-09-27", match: /^fix\((?!desktop|landing|tests|ui)/, since: "2026-09-26",
+    text: "Escrituras atómicas en ficheros, sesiones, planes y memoria; reintentos solo de lo transitorio; web_fetch que comprueba la IP al conectar; Ctrl+C que deja un historial válido y mata el árbol de procesos en Windows.",
+    pre: "✗ web_fetch · 169.254.169.254 vetada al conectar\n⚠ sesión cambiada en otra terminal → guardada como fork" },
+  { id: "D5–D7", title: "Stratum Desktop se instala y se actualiza solo", date: "2026-09-25", match: /Hito D[5-7]|\(desktop/, since: "2026-09-23T20:00",
+    text: "Ajustes compartidos con la CLI, atajo global, notificaciones, ventana propia con el razonamiento del modelo a la vista e instaladores para Windows y Linux con auto-update firmado.",
+    pre: "Stratum_0.3.0_x64-setup.exe · .msi · .deb · .AppImage\nprotocolo v8 · E2E en CI · latest.json firmado" },
+  { id: "H17", title: "Entornos con blast radius y modo read-only", date: "2026-09-23",
+    text: "Cada target pertenece a un entorno con su política. En producción, cambiar algo exige un plan aprobado y teclear el nombre del entorno; leer nunca pregunta. --read-only deja al agente solo observar.",
+    pre: "⬢ prod ssh:prod-web  RO  ⬡ infra\n⚠ plan_required:prod → el turno pasa a modo plan" },
   { id: "H16", title: "Una sola tool exec para todos los targets", date: "2026-09-15",
     text: "bash y ssh_exec desaparecen: exec recibe un target (local o ssh:<alias>). Un comando que falla ya no gasta reintentos, y tres grep sin resultados no deshabilitan el shell.",
     pre: "exec { target: \"ssh:prod-db\", command: \"df -h /var\" }\n<exec_result target=\"ssh:prod-db\" status=\"exited\" exitCode=\"0\">" },
@@ -95,13 +112,7 @@ const NEWS = [
   { id: "H15", title: "Perfiles de agente de primera clase", date: "2026-09-14",
     text: "Los perfiles de .stratum/agents/ se describen, se listan y se invocan: @review en el chat, /agent para convertirlo en principal, stratum run --delegate en scripts.",
     pre: "❯ @review revisa el diff de hoy\n◆ review · allowedTools: read_file, grep, exec" },
-  { id: "H13", title: "TDD estricto verificado por tooling", date: "2026-09-12",
-    text: "Con tools.testCommand configurado, test_evidence rechaza un GREEN sin RED previo o un refactor en rojo. La disciplina deja de depender de la buena voluntad del modelo.",
-    pre: "✗ test_evidence · GREEN sin RED previo (recuperable)" },
-  { id: "H11", title: "Guardas por capas", date: "2026-09-12",
-    text: "Capa 1 hard-deny no configurable (rm -rf /, mkfs, fork bombs), capa 2 por comando (npm publish bloqueado, git push --force pide confirmación) y capa 3 de rutas sensibles.",
-    pre: "✗ vetado · capa 1 hard-deny\n  ni --allow-destructive ni el allow-all lo levantan" },
-  { id: "D0–D4", title: "Stratum Desktop arranca", date: "2026-09-23",
+  { id: "D0–D4", title: "Stratum Desktop arranca", date: "2026-09-23", match: /\(desktop\): D[0-4]\b/,
     text: "El mismo core, ahora como sidecar de una app Tauri: chat de asistente, workspace aislado por conversación, retención automática y varias conversaciones a la vez.",
     pre: "sidecar  stratum-desktop-server  (Node SEA)\nprotocolo v5 · named pipe · token por env" }
 ];
@@ -118,9 +129,6 @@ const PR_DETAILS = {
 };
 
 const ROADMAP = [
-  { id: "H17", title: "Entornos con blast radius", key: true,
-    text: "Entornos declarados en .stratumrc.json con radio de impacto, modo read-only y un perfil de sesión que decide qué tools ve el modelo.",
-    why: "la seguridad antes que el alcance" },
   { id: "H18", title: "Diagnóstico puro",
     text: "net_probe, sys_inspect, log_query y service_status, sin dependencias externas.",
     why: "sustrato para el hito 19" },
@@ -130,9 +138,6 @@ const ROADMAP = [
   { id: "H20", title: "Cloud y virtualización",
     text: "Wrappers cloud y de virtualización con el contexto activo visible en la barra.",
     why: "lo más amplio y lo que más envejece" },
-  { id: "D5", title: "Desktop · Settings",
-    text: "Settings Panel, ProviderWizard y configuración compartida con la CLI.",
-    why: "configurar sin editar JSON" },
   { id: "D8", title: "Desktop · modo Code",
     text: "Conmutador Chat | Code: el comportamiento de la CLI sobre un proyecto real, dentro de la app.",
     why: "cierra la ruta D0–D8" }
@@ -296,7 +301,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.4.0",
+  version: "0.6.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -513,9 +518,8 @@ const STATUS_LABEL = { done: "hecho", current: "actual", wip: "implementado · e
 function renderMilestones() {
   const cliDone = MILESTONES.filter((m) => m.track === "cli" && (m.status === "done" || m.status === "current")).length;
   const cliTotal = MILESTONES.filter((m) => m.track === "cli").length;
-  // D6–D8 agrupa tres hitos
   const deskDone = MILESTONES.filter((m) => m.track === "desktop" && m.status !== "next").length;
-  const deskTotal = 9;
+  const deskTotal = MILESTONES.filter((m) => m.track === "desktop").length;
   const barW = window.innerWidth < 640 ? 18 : 40;
   const bar = (a, b) => `${asciiBar(a / b, barW)}<span class="rest">${"░".repeat(Math.max(0, barW - Math.ceil((a / b) * barW)))}</span>`;
   $("#bar-cli").innerHTML = bar(cliDone, cliTotal);
@@ -558,13 +562,15 @@ function filterMilestones(f) {
 /* ═══ Novedades, PRs, roadmap, desktop ═════════════════════════════════════ */
 
 function renderNews() {
-  const rels = state.tags.filter((t) => !t.name.includes("beta"));
+  // `desktop-updater` es el canal de actualizaciones, no una versión.
+  const rels = state.tags.filter((t) => !t.name.includes("beta") && t.name !== "desktop-updater");
   $("#releases").innerHTML = rels
     .map((t, i) => `<span class="rel ${i === 0 ? "latest" : ""}"><b>${esc(t.name)}</b><span class="dim">${esc(t.date.slice(0, 10))}</span>${i === 0 ? `<span class="ok">latest</span>` : ""}</span>`)
     .join("");
 
   $("#news").innerHTML = NEWS.map((n) => {
-    const hits = state.commits.filter((c) => c.subject.includes(n.id.replace("H", "Hito ")) || (n.id === "D0–D4" && /\(desktop\)/.test(c.subject)));
+    const hits = state.commits.filter((c) =>
+      (n.match ? n.match.test(c.subject) : c.subject.includes(n.id.replace("H", "Hito "))) && (!n.since || c.date >= n.since));
     const add = hits.reduce((a, c) => a + (c.add || 0), 0);
     return `<article class="news-card reveal">
       <header><span class="h-id">${esc(n.id)}</span><span>${esc(n.date)}</span></header>
@@ -656,9 +662,9 @@ const SCENARIOS = {
       { upd: "plan", html: planHtml(["ok", "ok", "run", "todo"], 2) },
       tool("edit_file", "src/cli/index.ts", "+3 −0"),
       { upd: "plan", html: planHtml(["ok", "ok", "ok", "run"], 3) },
-      tool("exec", "npm test", "848 passed · 41.2s"),
+      tool("exec", "npm test", "1587 passed · 30.2s"),
       { upd: "plan", html: planHtml(["ok", "ok", "ok", "ok"], 4) },
-      { stream: "Hecho: 23 console.log migrados a getLogger en 6 ficheros y --log-level disponible en todos los comandos. Los 848 tests siguen en verde." },
+      { stream: "Hecho: 23 console.log migrados a getLogger en 6 ficheros y --log-level disponible en todos los comandos. Los 1587 tests siguen en verde." },
       { tokens: "18.4k", ctx: "31%" }
     ]
   },
@@ -883,11 +889,11 @@ const COMMANDS = {
   status: () => {
     const c = state.commits;
     return `versión    <span class="ok">${esc(state.version)}</span>
-hito       16 ✓ ejecución unificada · siguiente: 17
+hito       17 ✓ entornos y read-only · siguiente: 18
 commits    ${fmt(c.length)} <span class="dim">(${state.weekCommits} esta semana)</span>
 líneas     <span class="add">+${fmt(c.reduce((a, x) => a + (x.add || 0), 0))}</span> <span class="del">−${fmt(c.reduce((a, x) => a + (x.del || 0), 0))}</span>
-tests      848 ✓
-desktop    D4 <span class="dim">(D0–D8)</span>
+tests      1587 ✓
+desktop    D7 <span class="dim">(D0–D8)</span>
 fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span class="dim">● snapshot</span>`}`;
   },
   hitos: (arg) => {

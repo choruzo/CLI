@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=19cab7fa7d" />
+    <link rel="stylesheet" href="./styles.css?v=7277a3ef28" />
   </head>
   <body>
     <a class="skip" href="#main">Saltar al contenido</a>
@@ -33,6 +33,7 @@
         <li><a href="#actividad" data-win="actividad">4:log</a></li>
         <li><a href="#desktop" data-win="desktop">5:desktop</a></li>
         <li><a href="#roadmap" data-win="roadmap">6:roadmap</a></li>
+        <li><a class="tmux-link" href="./guias.html">7:guías ↗</a></li>
       </ul>
       <div class="tmux-right">
         <button class="tbtn" id="theme-toggle" type="button" aria-label="Cambiar tema claro/oscuro">◐ tema</button>
@@ -67,6 +68,7 @@
           <a class="btn" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">[ github ↗ ]</a>
           <a class="btn" href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">[ npm ↗ ]</a>
           <a class="btn" href="#demo">[ probar la demo ]</a>
+          <a class="btn" href="./guias.html">[ guías ]</a>
         </div>
       </div>
     </header>
@@ -78,11 +80,11 @@
           <h2 class="cmd" id="h-status" data-cmd="stratum status">stratum status</h2>
           <div class="kpis" id="kpis">
             <div class="kpi"><span class="k">versión npm</span><span class="v" id="k-version">0.4.0</span><span class="s" id="k-version-src">snapshot</span></div>
-            <div class="kpi"><span class="k">hito actual</span><span class="v">16 <span class="ok">✓</span></span><span class="s">ejecución unificada</span></div>
+            <div class="kpi"><span class="k">hito actual</span><span class="v">17 <span class="ok">✓</span></span><span class="s">entornos y read-only</span></div>
             <div class="kpi"><span class="k">commits</span><span class="v" id="k-commits">—</span><span class="s" id="k-commits-30">— en 30 días</span></div>
             <div class="kpi"><span class="k">líneas</span><span class="v"><span class="add" id="k-add">+0</span></span><span class="s"><span class="del" id="k-del">−0</span> borradas</span></div>
-            <div class="kpi"><span class="k">tests</span><span class="v">848 <span class="ok">✓</span></span><span class="s">91 ficheros · vitest</span></div>
-            <div class="kpi"><span class="k">desktop</span><span class="v">D4</span><span class="s">de D0–D8 · Tauri + SEA</span></div>
+            <div class="kpi"><span class="k">tests</span><span class="v">1587 <span class="ok">✓</span></span><span class="s">119 ficheros · vitest</span></div>
+            <div class="kpi"><span class="k">desktop</span><span class="v">D7</span><span class="s">de D0–D8 · v0.3.0 instalable</span></div>
             <div class="kpi"><span class="k">último commit</span><span class="v" id="k-last">—</span><span class="s" id="k-last-sha">—</span></div>
             <div class="kpi"><span class="k">días de proyecto</span><span class="v" id="k-days">—</span><span class="s">desde 2026-05-27</span></div>
           </div>
@@ -151,8 +153,8 @@
       <!-- NOVEDADES -->
       <section class="section" id="novedades" aria-labelledby="h-nov">
         <div class="wrap">
-          <h2 class="cmd" id="h-nov" data-cmd="stratum changelog --since v0.2.0">stratum changelog --since v0.2.0</h2>
-          <p class="note">Lo que ha entrado desde la última versión de esta página (Hito 7, junio): once hitos de la CLI, dos releases (v0.3.0 y v0.4.0), un PR y el arranque de Stratum Desktop.</p>
+          <h2 class="cmd" id="h-nov" data-cmd="stratum changelog --since v0.4.0">stratum changelog --since v0.4.0</h2>
+          <p class="note">Lo último: el Hito 17 de la CLI (v0.5.0), una ronda de endurecimiento que sale en v0.6.0 y v0.7.0-beta, y Stratum Desktop de D5 a D7, ya con instaladores y auto-update.</p>
 
           <div class="releases" id="releases"></div>
 
@@ -205,9 +207,10 @@
           <h2 class="cmd" id="h-desk" data-cmd="cd ../stratum-desktop && npm run tauri dev">cd ../stratum-desktop &amp;&amp; npm run tauri dev</h2>
           <p class="note">
             Stratum Desktop reutiliza el core de la CLI como <b>sidecar</b> (binario Node SEA) detrás de una app
-            Tauri. Primero un asistente de chat con workspace aislado; el modo Code llega en D8.
+            Tauri. Hoy es un asistente de chat con workspace aislado, instalable en Windows y Linux
+            (<a href="./guias.html#desktop-instalacion">cómo instalarlo</a>); el modo Code llega en D8.
           </p>
-          <div class="desk" aria-label="Recreación de la ventana de Stratum Desktop (D4)">
+          <div class="desk" aria-label="Recreación de la ventana de Stratum Desktop">
             <div class="desk-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Stratum Desktop</span></div>
             <div class="desk-body">
               <aside class="desk-side">
@@ -264,7 +267,7 @@
         <div class="wrap">
           <h2 class="cmd" id="h-road" data-cmd="cat CLI-DOC/Orientacion-Infraestructura.md | grep roadmap">cat CLI-DOC/Orientacion-Infraestructura.md | grep roadmap</h2>
           <p class="note">
-            La CLI gira hacia infraestructura: primero la seguridad (Hitos 16–17), luego el alcance. La pieza
+            La CLI gira hacia infraestructura: la seguridad ya está (Hitos 16–17), ahora toca el alcance. La pieza
             diferencial es el <b>Hito 19</b>: diagnóstico verificado por tooling, con memoria de decisiones
             entre sesiones.
           </p>
@@ -277,6 +280,7 @@
       <div class="wrap">
         <div><span class="p">❯</span> exit <span class="dim">— MIT · hecho con Stratum y mucho café</span></div>
         <div class="footer-links">
+          <a href="./guias.html">guías</a>
           <a href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">github</a>
           <a href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">npm</a>
           <a href="#top">↑ arriba</a>
@@ -293,7 +297,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="./data/commits-data.js?v=19cab7fa7d"></script>
-    <script src="./app.js?v=19cab7fa7d" defer></script>
+    <script src="./data/commits-data.js?v=7277a3ef28"></script>
+    <script src="./app.js?v=7277a3ef28" defer></script>
   </body>
 </html>

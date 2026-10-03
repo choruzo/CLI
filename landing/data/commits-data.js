@@ -1,8 +1,404 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-09-23T20:20:20.6752902+02:00",
+  "generatedAt": "2026-10-03T19:48:57.6180306+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "68cfb418076e9f7e42bf257ccd6ea0f50f5973a7",
+      "date": "2026-10-03T19:32:15+02:00",
+      "author": "Javi_1",
+      "subject": "feat(providers): modelos descubiertos por /models y alta con solo URL + key",
+      "add": 960,
+      "del": 53,
+      "files": 18
+    },
+    {
+      "sha": "514ab609eb87dd661ee5958d1cdfac9052366317",
+      "date": "2026-09-28T15:21:45+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop): listado al día al abrir y avisos de disco legibles",
+      "add": 102,
+      "del": 13,
+      "files": 6
+    },
+    {
+      "sha": "388a740927800fe26585cc423208ed222d64804d",
+      "date": "2026-09-28T14:34:46+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop): el sidecar vuelve si la instalación de un update falla",
+      "add": 118,
+      "del": 7,
+      "files": 3
+    },
+    {
+      "sha": "76dc2b858f8f739461d7c8b86443006749514b36",
+      "date": "2026-09-28T14:28:09+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop): guardado al cerrar, avisos de fallo y checkpoints ligeros",
+      "add": 506,
+      "del": 58,
+      "files": 8
+    },
+    {
+      "sha": "83684c26605017ce830bd53975a084be3750de96",
+      "date": "2026-09-28T14:18:54+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop): una conversación ilegible no se abre encima ni desaparece del listado",
+      "add": 675,
+      "del": 59,
+      "files": 12
+    },
+    {
+      "sha": "b8c9cacf7c8d3cedcb3c0866d2bd44f8b7bf0a29",
+      "date": "2026-09-27T22:35:02+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.7.0-beta.0",
+      "add": 7,
+      "del": 4,
+      "files": 3
+    },
+    {
+      "sha": "7e9913ba14ecb1951bb21fff171dae45fcc7b1d1",
+      "date": "2026-09-27T21:38:54+02:00",
+      "author": "Javi_1",
+      "subject": "fix(memory,web_search): embeddings validados antes de indexar y respuestas de búsqueda acotadas",
+      "add": 209,
+      "del": 8,
+      "files": 5
+    },
+    {
+      "sha": "a37c2e6b2c2a2be78b99b582968c9897785ad9c9",
+      "date": "2026-09-27T21:38:46+02:00",
+      "author": "Javi_1",
+      "subject": "fix(exec): en Windows, borrar con PowerShell pide confirmación y el borrado de raíz se bloquea",
+      "add": 158,
+      "del": 0,
+      "files": 5
+    },
+    {
+      "sha": "8c757ea8100d226909c332fdcc972293cf1c18ef",
+      "date": "2026-09-27T21:38:22+02:00",
+      "author": "Javi_1",
+      "subject": "fix(agent,cli): cancelar con Ctrl+C no cuelga, no lanza tools y deja un historial válido",
+      "add": 649,
+      "del": 40,
+      "files": 17
+    },
+    {
+      "sha": "1ed457b0943b78b60d11bbfe18a1f5c69af7b990",
+      "date": "2026-09-27T21:37:24+02:00",
+      "author": "Javi_1",
+      "subject": "chore(fs): confine.ts con finales de línea LF",
+      "add": 188,
+      "del": 188,
+      "files": 1
+    },
+    {
+      "sha": "28d83a850d34d9774bdb5a19fdc35d7273192dac",
+      "date": "2026-09-27T19:13:29+02:00",
+      "author": "Javi_1",
+      "subject": "fix(run): un error fatal termina con código de salida 1",
+      "add": 52,
+      "del": 0,
+      "files": 3
+    },
+    {
+      "sha": "411caa58eaf309a73bd44e95f618620870646e08",
+      "date": "2026-09-27T19:09:58+02:00",
+      "author": "Javi_1",
+      "subject": "fix(context): la compresión conserva la tarea, alterna roles y avisa si el resumen falla",
+      "add": 666,
+      "del": 175,
+      "files": 10
+    },
+    {
+      "sha": "b83f32160d9702689e4669cbd4d23e9b16b274ce",
+      "date": "2026-09-27T14:55:16+02:00",
+      "author": "Javi_1",
+      "subject": "fix(exec): en Windows, cancelar o el timeout terminan el árbol de procesos entero",
+      "add": 139,
+      "del": 4,
+      "files": 4
+    },
+    {
+      "sha": "4bf86037dc49199ed06efde447fb4608195f472b",
+      "date": "2026-09-27T14:48:27+02:00",
+      "author": "Javi_1",
+      "subject": "fix(config): BOM, errores legibles, aviso de ${VAR} sin definir y config set validado con la global",
+      "add": 503,
+      "del": 109,
+      "files": 18
+    },
+    {
+      "sha": "5d5da15276cea5af0d59cb22f4213a7f6533a528",
+      "date": "2026-09-27T14:31:29+02:00",
+      "author": "Javi_1",
+      "subject": "fix(mcp): reconexión ante caídas, timeouts por server, nombres seguros y catálogo sincronizado",
+      "add": 1153,
+      "del": 205,
+      "files": 14
+    },
+    {
+      "sha": "7ba1732fcb035cf0cf3f11c6aaa7db5ec25f2944",
+      "date": "2026-09-27T11:41:42+02:00",
+      "author": "Javi_1",
+      "subject": "fix(web_fetch): bloqueo de SSRF con la IP comprobada al conectar",
+      "add": 660,
+      "del": 125,
+      "files": 8
+    },
+    {
+      "sha": "8d5bd1e862cb7a65cdc20cafb7062555bcafc0ba",
+      "date": "2026-09-27T11:41:31+02:00",
+      "author": "Javi_1",
+      "subject": "fix(providers): reintento sin duplicar el stream, timeouts de inactividad y errores clasificados",
+      "add": 1065,
+      "del": 89,
+      "files": 13
+    },
+    {
+      "sha": "151b5ff248dbaf8b30539069d4e97c30a276fb24",
+      "date": "2026-09-27T01:43:28+02:00",
+      "author": "Javi_1",
+      "subject": "fix(agent,tools): vetos en modo seguro, tool calls sin perder, checkpoints del chat y rutas sensibles en grep y SFTP",
+      "add": 1238,
+      "del": 298,
+      "files": 19
+    },
+    {
+      "sha": "dae0a43a141497abffe6f9fbc5f02cf8f3942190",
+      "date": "2026-09-27T01:06:07+02:00",
+      "author": "Javi_1",
+      "subject": "fix(mcp): instalación transaccional de la carpeta gestionada",
+      "add": 653,
+      "del": 73,
+      "files": 6
+    },
+    {
+      "sha": "f7ad336cabaecab53dfb12ae1ef6e439f9150535",
+      "date": "2026-09-27T00:55:21+02:00",
+      "author": "Javi_1",
+      "subject": "fix(tools): write_file y edit_file escriben de forma atómica y no pisan cambios ajenos",
+      "add": 768,
+      "del": 23,
+      "files": 12
+    },
+    {
+      "sha": "a69b9f6f58781df90fd34901ad3d08b68996a1fe",
+      "date": "2026-09-27T00:23:20+02:00",
+      "author": "Javi_1",
+      "subject": "fix(memory): el índice semántico se autorrepara aunque no esté vacío",
+      "add": 242,
+      "del": 35,
+      "files": 5
+    },
+    {
+      "sha": "ba7caded6d48a06e73636fc6c8a150eeb22318d3",
+      "date": "2026-09-27T00:19:32+02:00",
+      "author": "Javi_1",
+      "subject": "fix(memory,ssh): decisions.json y known_hosts.json no se pierden ni se degradan al dañarse",
+      "add": 366,
+      "del": 49,
+      "files": 7
+    },
+    {
+      "sha": "212b921019706bcadd6488b2545fc6481c75c654",
+      "date": "2026-09-26T23:48:46+02:00",
+      "author": "Javi_1",
+      "subject": "fix(sessions): guardado atómico, forks ante conflicto y lectura tolerante",
+      "add": 415,
+      "del": 46,
+      "files": 10
+    },
+    {
+      "sha": "99183d899e86b4ea540cdc348008162d5bca44db",
+      "date": "2026-09-26T20:58:39+02:00",
+      "author": "Javi_1",
+      "subject": "fix(plans): validación, refs seguras, reanudación común y retención de planes",
+      "add": 822,
+      "del": 127,
+      "files": 14
+    },
+    {
+      "sha": "05441d633ea8cd272d38eb81c3e488878f7139bb",
+      "date": "2026-09-26T20:28:51+02:00",
+      "author": "Javi_1",
+      "subject": "fix(subagents): registros por sesión con dueño vivo, validación y retención",
+      "add": 1002,
+      "del": 87,
+      "files": 18
+    },
+    {
+      "sha": "7efc21ea0150f6995dd861790cbb0a34dcda8b54",
+      "date": "2026-09-25T21:21:38+02:00",
+      "author": "Javi_1",
+      "subject": "docs: CHANGELOG de la CLI y de Desktop con el historial de releases",
+      "add": 168,
+      "del": 0,
+      "files": 3
+    },
+    {
+      "sha": "22fe59a8381394ecd5e1fb7325cdc186c76e8e4f",
+      "date": "2026-09-25T21:14:04+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.6.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "3b7f41d089d26bb356b0d3692445d2ff443e3e49",
+      "date": "2026-09-25T20:47:54+02:00",
+      "author": "Javi_1",
+      "subject": "chore(desktop): versión 0.3.0",
+      "add": 6,
+      "del": 6,
+      "files": 5
+    },
+    {
+      "sha": "a85bdf5433f01bf7bf458c6617ec9ebfa0b6d070",
+      "date": "2026-09-25T20:47:37+02:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): copiar código, ir al final, iconos de tools, acciones por mensaje e IBM Plex",
+      "add": 778,
+      "del": 38,
+      "files": 21
+    },
+    {
+      "sha": "c36311e4d2850a91e3b20d287378bd71e60d00cd",
+      "date": "2026-09-25T20:32:07+02:00",
+      "author": "Javi_1",
+      "subject": "feat: implement visual improvements and redesign input area for better accessibility and user experience",
+      "add": 351,
+      "del": 65,
+      "files": 4
+    },
+    {
+      "sha": "2bce42d58e2116f2fcc9efdc8678b721a6612fd7",
+      "date": "2026-09-25T13:56:48+02:00",
+      "author": "Javi Martin",
+      "subject": "Revise README with new content and formatting",
+      "add": 4,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "1d0f95c422a29f7cebdb3dcdb58809266388de21",
+      "date": "2026-09-25T13:40:06+02:00",
+      "author": "Javi_1",
+      "subject": "docs(desktop): cierra D7 — E2E verde en CI y auto-update real a la 0.2.0",
+      "add": 4,
+      "del": 4,
+      "files": 1
+    },
+    {
+      "sha": "e6c44957482ecf4d2395a00a11dcb0be1efcafd0",
+      "date": "2026-09-25T13:31:08+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop): el estado del sidecar lleva seq; un estado viejo ya no pisa a uno nuevo",
+      "add": 82,
+      "del": 19,
+      "files": 6
+    },
+    {
+      "sha": "316c9685dbfeefc0adce585f3653e80e86cb5af4",
+      "date": "2026-09-25T10:07:59+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop-e2e): gestor de ventanas en CI y texto del razonamiento por textContent",
+      "add": 10,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "1e32c01c516775be31f2ee725c584f2dc0351d07",
+      "date": "2026-09-25T09:56:32+02:00",
+      "author": "Javi_1",
+      "subject": "chore(desktop): versión 0.2.0",
+      "add": 6,
+      "del": 6,
+      "files": 5
+    },
+    {
+      "sha": "909e78dc8f695d45c01ef65d355e9ee6533a12c8",
+      "date": "2026-09-25T09:56:12+02:00",
+      "author": "Javi_1",
+      "subject": "feat: Hito D7 — frameless, razonamiento visible, animaciones, a11y, E2E y auto-update",
+      "add": 5226,
+      "del": 208,
+      "files": 77
+    },
+    {
+      "sha": "e5ec7c2c6f0e3024091bafde2777a7cbcc138a2a",
+      "date": "2026-09-24T21:55:43+02:00",
+      "author": "Javi_1",
+      "subject": "docs(desktop): cierra D6 — instaladores de CI probados en Windows y Linux",
+      "add": 20,
+      "del": 13,
+      "files": 2
+    },
+    {
+      "sha": "d0bc54a52c317dbfdeb5d087dd43f39ba0c53bfc",
+      "date": "2026-09-24T21:01:06+02:00",
+      "author": "Javi_1",
+      "subject": "docs(desktop): D6 — primera ejecución del workflow en verde",
+      "add": 3,
+      "del": 3,
+      "files": 1
+    },
+    {
+      "sha": "e42bb227fd0fab2bea391ea5c7ae6cee6e7f1232",
+      "date": "2026-09-24T20:41:46+02:00",
+      "author": "Javi_1",
+      "subject": "feat: Hito D6 — integración con el SO y pipeline de build de Desktop",
+      "add": 2434,
+      "del": 34,
+      "files": 34
+    },
+    {
+      "sha": "a245655648532ba0ee9a9e3adfeba0e5a8468fe3",
+      "date": "2026-09-23T22:56:23+02:00",
+      "author": "Javi_1",
+      "subject": "feat: Hito D5 — panel de Ajustes, ProviderWizard y config compartida",
+      "add": 5131,
+      "del": 53,
+      "files": 38
+    },
+    {
+      "sha": "85871b26995da7d6fad3fd05228a13a993454f8f",
+      "date": "2026-09-23T21:32:22+02:00",
+      "author": "Javi_1",
+      "subject": "feat: Hito 17 — entornos con blast radius, modo read-only y perfil de sesión",
+      "add": 8214,
+      "del": 4617,
+      "files": 35
+    },
+    {
+      "sha": "b093b3ba62d162419b6c47cef6f78ba03703128e",
+      "date": "2026-09-23T20:31:21+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.5.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "5f1ec7f32e47793d55b631320f6fb7b21af2be0f",
+      "date": "2026-09-23T20:30:32+02:00",
+      "author": "Javi_1",
+      "subject": "fix(tests): timeout amplio en los casos límite de exit code de pwsh",
+      "add": 2,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "1f367deb45895af645f6feaa93f72954418e96be",
+      "date": "2026-09-23T20:21:11+02:00",
+      "author": "Javi_1",
+      "subject": "fix(landing): logo sin rayas y versionado de assets contra la caché de Cloudflare",
+      "add": 89,
+      "del": 28,
+      "files": 6
+    },
     {
       "sha": "ee26daf41402f09b50e4699a7f7c554b1b8e4f76",
       "date": "2026-09-23T20:12:20+02:00",
@@ -1328,6 +1724,30 @@ window.__STRATUM_COMMITS__ = {
     }
   ],
   "tags": [
+    {
+      "name": "v0.7.0-beta.0",
+      "date": "2026-09-27T22:35:02+02:00"
+    },
+    {
+      "name": "v0.6.0",
+      "date": "2026-09-25T21:14:04+02:00"
+    },
+    {
+      "name": "desktop-v0.3.0",
+      "date": "2026-09-25T20:47:54+02:00"
+    },
+    {
+      "name": "desktop-updater",
+      "date": "2026-09-25T10:07:59+02:00"
+    },
+    {
+      "name": "desktop-v0.2.0",
+      "date": "2026-09-25T09:56:32+02:00"
+    },
+    {
+      "name": "v0.5.0",
+      "date": "2026-09-23T20:31:21+02:00"
+    },
     {
       "name": "v0.4.0",
       "date": "2026-09-14T19:13:04+02:00"

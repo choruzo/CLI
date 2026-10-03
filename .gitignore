@@ -22,3 +22,6 @@ opencode-dev/
 .claude/skills/ui-ux-pro-max/*
 .agents/*
 .codex/*
+
+# Caché local de wrangler (deploy de la landing)
+.wrangler/

@@ -1,0 +1,679 @@
+<!doctype html>
+<html lang="es" data-theme="dark">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Guías · Stratum</title>
+    <meta
+      name="description"
+      content="Guías de instalación, configuración y uso de Stratum CLI y Stratum Desktop."
+    />
+    <meta name="theme-color" content="#0a0a0b" />
+    <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%230a0a0b'/%3E%3Cpath d='M8 10l6 6-6 6' stroke='%23F59E0B' stroke-width='3' fill='none' stroke-linecap='round' stroke-linejoin='round'/%3E%3Cpath d='M16 22h8' stroke='%23F59E0B' stroke-width='3' stroke-linecap='round'/%3E%3C/svg%3E" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="./styles.css?v=7277a3ef28" />
+  </head>
+  <body>
+    <a class="skip" href="#main">Saltar al contenido</a>
+    <div class="crt" aria-hidden="true"></div>
+
+    <!-- Barra superior estilo tmux -->
+    <nav class="tmux" aria-label="Navegación principal">
+      <a class="tmux-session" href="./index.html">[stratum]</a>
+      <ul class="tmux-windows" role="list">
+        <li><a href="./index.html">← inicio</a></li>
+        <li><a href="#cli" data-win="cli">0:cli</a></li>
+        <li><a href="#desktop" data-win="desktop">1:desktop</a></li>
+        <li><a href="#problemas" data-win="problemas">2:problemas</a></li>
+      </ul>
+      <div class="tmux-right">
+        <button class="tbtn" id="theme-toggle" type="button" aria-label="Cambiar tema claro/oscuro">◐ tema</button>
+        <span class="tmux-branch" title="Rama">⎇ main</span>
+        <span class="tmux-clock" id="clock">--:--</span>
+      </div>
+    </nav>
+
+    <header class="hero doc-hero" id="top">
+      <div class="wrap">
+        <h1 class="cmd doc-title">man stratum</h1>
+        <p class="lede">
+          Cómo instalar, configurar y usar las dos caras de Stratum: la <b>CLI</b>, un agente de terminal para
+          código e infraestructura, y <b>Desktop</b>, un asistente de chat con ficheros que reutiliza el mismo
+          núcleo. Las dos leen la misma configuración global.
+        </p>
+        <div class="doc-pick">
+          <a class="doc-card" href="#cli">
+            <span class="doc-card-k">▸ terminal</span>
+            <span class="doc-card-t">Stratum CLI</span>
+            <span class="doc-card-s">npm · Node 22+ · Windows, Linux, macOS</span>
+          </a>
+          <a class="doc-card" href="#desktop">
+            <span class="doc-card-k">▸ escritorio</span>
+            <span class="doc-card-t">Stratum Desktop</span>
+            <span class="doc-card-s">instalador nativo · Windows y Linux · sin Node</span>
+          </a>
+        </div>
+      </div>
+    </header>
+
+    <main id="main" class="wrap doc-layout">
+      <nav class="toc" aria-label="Índice de las guías">
+        <div class="toc-group">
+          <a class="toc-h" href="#cli">cli</a>
+          <a href="#cli-instalacion">instalación</a>
+          <a href="#cli-configuracion">configuración</a>
+          <a href="#cli-uso">uso</a>
+        </div>
+        <div class="toc-group">
+          <a class="toc-h" href="#desktop">desktop</a>
+          <a href="#desktop-instalacion">instalación</a>
+          <a href="#desktop-configuracion">configuración</a>
+          <a href="#desktop-uso">uso</a>
+        </div>
+        <div class="toc-group">
+          <a class="toc-h" href="#problemas">problemas frecuentes</a>
+        </div>
+      </nav>
+
+      <div class="doc">
+        <!-- ═══ CLI ═══════════════════════════════════════════════════════ -->
+        <section class="doc-part" id="cli" aria-labelledby="h-cli">
+          <h2 class="cmd" id="h-cli">stratum --help</h2>
+          <p class="note">
+            Un agente de línea de comandos sobre un loop ReAct. Habla con cualquier API OpenAI-compatible
+            (Ollama, llama.cpp, vLLM, LiteLLM, OpenAI) y no necesita ninguna cuenta propia.
+          </p>
+
+          <!-- CLI · instalación -->
+          <section id="cli-instalacion" class="doc-sec" aria-labelledby="h-cli-inst">
+            <h3 class="sub" id="h-cli-inst">Instalación</h3>
+
+            <h4>Requisitos</h4>
+            <ul>
+              <li><b>Node.js 22</b> o superior.</li>
+              <li>
+                Un backend que exponga una API OpenAI-compatible: un servidor local (Ollama, llama.cpp, vLLM),
+                un proxy (LiteLLM) o un servicio alojado.
+              </li>
+            </ul>
+
+            <h4>Con npm</h4>
+            <div class="code"><pre><code>npm install -g stratum-cli
+stratum --version</code></pre></div>
+            <p>Para probarlo sin instalar nada:</p>
+            <div class="code"><pre><code>npx stratum-cli chat</code></pre></div>
+            <p>Para actualizar, repite la instalación con <code>stratum-cli@latest</code>.</p>
+
+            <h4>Desde el código fuente</h4>
+            <div class="code"><pre><code>git clone https://github.com/choruzo/CLI.git
+cd CLI/stratum-cli
+npm install
+npm run build
+npm link            # deja el comando `stratum` en el PATH</code></pre></div>
+
+            <div class="callout">
+              <b>Dependencias opcionales.</b> La búsqueda semántica de la memoria usa
+              <code>@xenova/transformers</code>, <code>better-sqlite3</code> y <code>sqlite-vec</code>. Si su
+              compilación nativa falla, Stratum sigue funcionando: el índice pasa a una búsqueda en JavaScript
+              y las decisiones guardadas no se pierden.
+            </div>
+          </section>
+
+          <!-- CLI · configuración -->
+          <section id="cli-configuracion" class="doc-sec" aria-labelledby="h-cli-conf">
+            <h3 class="sub" id="h-cli-conf">Configuración</h3>
+
+            <h4>1. Conectar un modelo</h4>
+            <p>A un provider le bastan la URL base y la API key. El asistente pregunta por ambas:</p>
+            <div class="code"><pre><code>stratum provider add</code></pre></div>
+            <p>O en una sola línea, sin asistente:</p>
+            <div class="code"><pre><code>stratum provider add ollama --base-url http://localhost:11434/v1 --api-key ollama --default
+stratum provider add hosted --base-url https://api.example.com/v1 --api-key-env EXAMPLE_API_KEY</code></pre></div>
+            <p>
+              Con <code>--api-key-env</code> el fichero guarda <code>${EXAMPLE_API_KEY}</code>, no el valor: la
+              key se lee del entorno en cada arranque. <code>--api-key</code> la deja escrita en claro.
+            </p>
+            <p>
+              El modelo es opcional. Si no lo indicas, Stratum consulta <code>GET /models</code>:
+              <code>chat</code> abre el selector al arrancar y recuerda la elección; <code>run</code> e
+              <code>init</code> usan el único modelo expuesto y, si hay varios, se detienen y los listan para
+              que elijas con <code>--model</code>.
+            </p>
+            <div class="code"><pre><code>stratum provider list                 # providers y conectividad
+stratum provider models               # modelos que expone el provider activo
+stratum provider models --set &lt;id&gt;    # fija el modelo por defecto
+stratum provider use &lt;alias&gt;          # cambia el provider activo
+stratum provider remove &lt;alias&gt;</code></pre></div>
+
+            <h4>2. Dónde vive la configuración</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Fichero</th><th>Alcance</th></tr></thead>
+                <tbody>
+                  <tr><td><code>~/.stratum/.stratumrc.json</code></td><td>Global: vale para todos los proyectos y es la que usa Desktop</td></tr>
+                  <tr><td><code>./.stratumrc.json</code></td><td>Proyecto: se fusiona sobre la global y gana en caso de conflicto</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>Un fichero mínimo escrito a mano:</p>
+            <div class="code"><pre><code>{
+  "provider": {
+    "default": "local-ollama",
+    "providers": {
+      "local-ollama": {
+        "type": "openai-compatible",
+        "baseUrl": "http://localhost:11434/v1",
+        "apiKey": "ollama",
+        "model": "qwen3.5:9b"
+      }
+    }
+  }
+}</code></pre></div>
+            <p>También se puede leer y escribir clave a clave:</p>
+            <div class="code"><pre><code>stratum config get provider.default
+stratum config set agents.maxConcurrency 2</code></pre></div>
+            <div class="callout">
+              <b>Ventana de contexto.</b> Stratum comprime el historial al llegar al 80 % de la ventana del
+              modelo. La toma de <code>/models</code> cuando el servidor la declara; si no, puedes fijarla con
+              <code>contextWindow</code> en el provider o en <code>models.&lt;id&gt;.contextWindow</code>. Debe
+              reflejar el contexto <b>real</b> del servidor.
+            </div>
+
+            <h4>3. Secciones del fichero</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Sección</th><th>Qué controla</th></tr></thead>
+                <tbody>
+                  <tr><td><code>provider</code></td><td>Providers, modelo por defecto, timeouts. El orden define el fallback automático</td></tr>
+                  <tr><td><code>memory</code></td><td>Rutas de <code>STRATUM.md</code>, decisiones e índice semántico; extracción automática</td></tr>
+                  <tr><td><code>tools</code></td><td>Confirmaciones, comandos vigilados, búsqueda web, auditoría, redacción de secretos, <code>testCommand</code></td></tr>
+                  <tr><td><code>mcp</code></td><td>Servidores MCP y modo de arranque (<code>lazy</code> / <code>eager</code>)</td></tr>
+                  <tr><td><code>agents</code></td><td>Perfil por defecto y subagentes en paralelo (<code>maxConcurrency</code>)</td></tr>
+                  <tr><td><code>ssh</code></td><td>Inventario de hosts remotos</td></tr>
+                  <tr><td><code>environments</code></td><td>Reglas por entorno: confirmación, plan obligatorio, solo lectura</td></tr>
+                  <tr><td><code>session</code></td><td>Perfil de sesión (<code>auto</code>, <code>code</code>, <code>infra</code>, <code>full</code>) y retención de planes</td></tr>
+                  <tr><td><code>logging</code></td><td>Nivel y fichero de logs</td></tr>
+                  <tr><td><code>desktop</code></td><td>Preferencias de Stratum Desktop</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              El ejemplo con todas las claves está en
+              <a href="https://github.com/choruzo/CLI/blob/main/stratum-cli/.stratumrc.json.example" target="_blank" rel="noreferrer">.stratumrc.json.example ↗</a>.
+            </p>
+
+            <h4>Servidores MCP</h4>
+            <p>
+              Un servidor que declara <code>package</code> se instala una sola vez en
+              <code>~/.stratum/mcp/</code> y arranca directo con Node, sin pasar por <code>npx</code> cada vez.
+              Sus tools aparecen como <code>mcp__&lt;servidor&gt;__&lt;tool&gt;</code>.
+            </p>
+            <div class="code"><pre><code>{
+  "mcp": {
+    "servers": [
+      { "name": "filesystem", "package": "@modelcontextprotocol/server-filesystem@2025.8.21", "args": ["/home/user/projects"] },
+      { "name": "otro", "command": "npx", "args": ["-y", "some-mcp-server@latest"] }
+    ]
+  }
+}</code></pre></div>
+            <div class="code"><pre><code>stratum mcp install     # instala los que declaran `package`
+stratum mcp list        # servidores y tools disponibles</code></pre></div>
+
+            <h4>Hosts remotos (SSH)</h4>
+            <p>
+              Stratum lleva su propio cliente SSH y no usa el binario del sistema. El agente solo ve los
+              <b>alias</b>; las credenciales nunca pasan por el modelo. Sin sección <code>ssh</code>, las tools
+              remotas ni siquiera existen.
+            </p>
+            <div class="code"><pre><code>{
+  "ssh": {
+    "hosts": {
+      "bastion":  { "host": "bastion.example.com", "user": "javi", "privateKey": "~/.ssh/id_ed25519" },
+      "prod-web": { "host": "192.168.1.10", "user": "javi", "privateKey": "~/.ssh/id_ed25519",
+                    "jumpHost": "bastion", "confirmAll": true }
+    }
+  }
+}</code></pre></div>
+            <div class="code"><pre><code>stratum ssh list                    # inventario con conectividad en vivo
+stratum ssh trust prod-web          # muestra el fingerprint y lo confía
+stratum ssh trust prod-web --force  # tras reinstalar el host</code></pre></div>
+            <p>
+              La primera conexión enseña el fingerprint y pregunta; después se verifica en silencio. Si la
+              clave del host cambia, la conexión se aborta siempre. Las contraseñas y passphrases se pasan como
+              <code>env:&lt;VAR&gt;</code>.
+            </p>
+
+            <h4>Entornos</h4>
+            <p>
+              Las reglas por entorno solo afectan a lo que <b>cambia</b> algo: leer en producción nunca
+              pregunta.
+            </p>
+            <div class="code"><pre><code>{
+  "environments": {
+    "prod":    { "match": ["ssh:prod-*"], "tier": "production", "requirePlan": true },
+    "staging": { "match": ["ssh:stg-*"],  "tier": "staging" },
+    "lab":     { "match": ["ssh:dev-*"],  "policy": "allow" }
+  }
+}</code></pre></div>
+          </section>
+
+          <!-- CLI · uso -->
+          <section id="cli-uso" class="doc-sec" aria-labelledby="h-cli-uso">
+            <h3 class="sub" id="h-cli-uso">Uso</h3>
+
+            <h4>Primeros pasos</h4>
+            <div class="code"><pre><code>stratum init                # explora el proyecto y escribe STRATUM.md
+stratum chat                # sesión interactiva
+stratum run "Analiza ./src y resume la arquitectura"
+stratum run --plan "Refactoriza el módulo de autenticación"</code></pre></div>
+            <p>
+              <code>STRATUM.md</code> es la memoria del proyecto: se carga en cada sesión. Hay otro global en
+              <code>~/.stratum/STRATUM.md</code> para lo que vale en todos tus proyectos.
+            </p>
+
+            <h4>Modos de trabajo</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Comando</th><th>Para qué</th></tr></thead>
+                <tbody>
+                  <tr><td><code>stratum chat</code></td><td>Conversación interactiva; guarda la sesión al cerrar cada turno</td></tr>
+                  <tr><td><code>stratum chat --resume &lt;id&gt;</code></td><td>Continúa una sesión guardada</td></tr>
+                  <tr><td><code>stratum run "&lt;tarea&gt;"</code></td><td>Una tarea y termina. Sirve para scripts y CI</td></tr>
+                  <tr><td><code>stratum run --plan "&lt;tarea&gt;"</code></td><td>Investiga, propone un plan, espera tu aprobación y lo ejecuta paso a paso. <code>--yes</code> lo aprueba sin preguntar</td></tr>
+                  <tr><td><code>stratum run --agent &lt;perfil&gt;</code></td><td>Usa un perfil como agente principal</td></tr>
+                  <tr><td><code>stratum run --delegate &lt;perfil&gt;</code></td><td>Entrega la tarea directamente a un subagente</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h4>Opciones comunes de <code>chat</code> y <code>run</code></h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Opción</th><th>Efecto</th></tr></thead>
+                <tbody>
+                  <tr><td><code>--provider &lt;alias&gt;</code> · <code>--model &lt;id&gt;</code></td><td>Provider y modelo solo para esta ejecución</td></tr>
+                  <tr><td><code>--read-only</code></td><td>Solo observación: no escribe ficheros y solo admite comandos de lectura</td></tr>
+                  <tr><td><code>--profile &lt;nombre&gt;</code> · <code>--code</code> · <code>--infra</code></td><td>Perfil de sesión: qué familia de tools ve el agente</td></tr>
+                  <tr><td><code>--allow-destructive</code> · <code>--deny-destructive</code></td><td>Solo en <code>run</code>: aprueba o deniega las operaciones destructivas sin preguntar</td></tr>
+                  <tr><td><code>--debug</code> · <code>--log-level &lt;nivel&gt;</code></td><td>Logs detallados</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="callout">
+              <b>Operaciones destructivas.</b> En <code>chat</code> se confirman una a una. En
+              <code>run</code> se pregunta por terminal y, sin terminal interactivo (CI), se deniegan. Algunas
+              guardas no se pueden levantar con ningún flag: <code>rm -rf</code> sobre la raíz, lectura de
+              claves privadas o los comandos marcados como <code>block</code>.
+            </div>
+
+            <h4>Comandos dentro del chat</h4>
+            <p>Escribe <kbd>/</kbd> para abrir la paleta, con autocompletado por <kbd>Tab</kbd>.</p>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Comando</th><th>Qué hace</th></tr></thead>
+                <tbody>
+                  <tr><td><code>/help</code></td><td>Lista todos los comandos</td></tr>
+                  <tr><td><code>/init</code></td><td>Genera o actualiza <code>STRATUM.md</code></td></tr>
+                  <tr><td><code>/plan &lt;tarea&gt;</code></td><td>Planifica, pide aprobación y ejecuta</td></tr>
+                  <tr><td><code>/model</code> · <code>/provider &lt;alias&gt;</code></td><td>Cambia de modelo o de provider en la sesión</td></tr>
+                  <tr><td><code>/config_provider</code></td><td>Edita el provider activo y lo guarda</td></tr>
+                  <tr><td><code>/agents</code> · <code>/agent &lt;perfil&gt;</code> · <code>/agent off</code></td><td>Lista los perfiles y activa uno como agente principal</td></tr>
+                  <tr><td><code>@perfil &lt;tarea&gt;</code></td><td>Encarga la tarea a un subagente</td></tr>
+                  <tr><td><code>/subagents</code></td><td>Inspecciona lo que hizo cada subagente</td></tr>
+                  <tr><td><code>/readonly</code> · <code>/profile</code> · <code>/env</code></td><td>Modo solo lectura, perfil de sesión y entornos definidos</td></tr>
+                  <tr><td><code>/memory show|list|search|forget</code></td><td>Memoria del proyecto y decisiones guardadas</td></tr>
+                  <tr><td><code>/context</code> · <code>/compact</code> · <code>/clear</code></td><td>Uso del contexto, compresión inmediata y vaciado de la conversación</td></tr>
+                  <tr><td><code>/changes</code> · <code>/todo</code></td><td>Cambios del árbol de trabajo y panel de tareas</td></tr>
+                  <tr><td><code>/tools</code> · <code>/mcp reload</code></td><td>Tools disponibles y reinicio de los servidores MCP</td></tr>
+                  <tr><td><code>/sessions list|resume|delete</code></td><td>Sesiones guardadas, sin salir del chat</td></tr>
+                  <tr><td><code>/config get|set</code></td><td>Lee o cambia una clave de configuración</td></tr>
+                  <tr><td><code>/debug</code></td><td>Muestra el razonamiento completo del modelo</td></tr>
+                  <tr><td><code>/quit</code></td><td>Guarda y sale</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h4>Atajos de teclado</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Tecla</th><th>Acción</th></tr></thead>
+                <tbody>
+                  <tr><td><kbd>↑</kbd> <kbd>↓</kbd></td><td>Historial de mensajes enviados</td></tr>
+                  <tr><td><kbd>Tab</kbd> · <kbd>Space</kbd></td><td>Recorre los bloques de tools y despliega el seleccionado</td></tr>
+                  <tr><td><kbd>Ctrl+L</kbd></td><td>Vacía la conversación (igual que <code>/clear</code>)</td></tr>
+                  <tr><td><kbd>Ctrl+U</kbd></td><td>Borra lo escrito</td></tr>
+                  <tr><td><kbd>Ctrl+T</kbd></td><td>Pliega o despliega el panel de tareas</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h4>Perfiles de agente y skills</h4>
+            <p>
+              Un perfil es un fichero markdown con frontmatter en <code>.stratum/agents/&lt;nombre&gt;.md</code>
+              (proyecto) o <code>~/.stratum/agents/</code> (global): describe para qué sirve, qué tools puede
+              usar y su prompt. Las <i>skills</i> son instrucciones de tarea en
+              <code>.stratum/skills/&lt;nombre&gt;/SKILL.md</code>; el agente ve su índice y lee el cuerpo solo
+              cuando lo necesita.
+            </p>
+            <div class="code"><pre><code>stratum agents list          # perfiles válidos e inválidos, con su origen</code></pre></div>
+
+            <h4>Sesiones, memoria y logs</h4>
+            <div class="code"><pre><code>stratum sessions list
+stratum sessions resume &lt;id&gt;
+stratum sessions prune --older 30d
+
+stratum memory list
+stratum memory search "por qué elegimos sqlite"
+stratum memory forget &lt;id&gt;
+
+stratum logs path            # para adjuntar a un bug report
+stratum logs tail 100</code></pre></div>
+            <p>
+              Cada comando que ejecuta el agente, local o remoto, queda registrado en
+              <code>~/.stratum/logs/exec-audit.jsonl</code>.
+            </p>
+          </section>
+        </section>
+
+        <!-- ═══ DESKTOP ══════════════════════════════════════════════════ -->
+        <section class="doc-part" id="desktop" aria-labelledby="h-desktop">
+          <h2 class="cmd" id="h-desktop">open Stratum.app</h2>
+          <p class="note">
+            Un asistente de chat de escritorio. Cada conversación tiene su propia carpeta de trabajo: adjuntas
+            ficheros, el asistente los lee y deja los resultados para que los guardes. No ejecuta comandos en
+            tu máquina.
+          </p>
+
+          <!-- Desktop · instalación -->
+          <section id="desktop-instalacion" class="doc-sec" aria-labelledby="h-desk-inst">
+            <h3 class="sub" id="h-desk-inst">Instalación</h3>
+            <p>
+              La app instalada es autónoma: <b>no necesita Node ni Rust</b>. Los instaladores están en las
+              releases de GitHub con etiqueta <code>desktop-v…</code>; la actual es la
+              <b id="desk-version">0.3.0</b> (pre-release).
+            </p>
+            <div class="hero-actions doc-downloads">
+              <a class="btn btn-primary" id="dl-exe" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_x64-setup.exe">↓ Windows · .exe</a>
+              <a class="btn" id="dl-msi" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_x64_en-US.msi">↓ Windows · .msi</a>
+              <a class="btn" id="dl-deb" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_amd64.deb">↓ Linux · .deb</a>
+              <a class="btn" id="dl-appimage" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_amd64.AppImage">↓ Linux · .AppImage</a>
+              <a class="btn" id="dl-all" href="https://github.com/choruzo/CLI/releases/tag/desktop-v0.3.0" target="_blank" rel="noreferrer">[ todas las descargas ↗ ]</a>
+            </div>
+
+            <h4>Windows</h4>
+            <ul>
+              <li>Ejecuta el <code>.exe</code> (o el <code>.msi</code> si lo despliegas con herramientas de empresa).</li>
+              <li>Necesita <b>WebView2</b>, que ya viene con Windows 11 y con las versiones actuales de Windows 10.</li>
+              <li>Si el instalador no está firmado, SmartScreen mostrará un aviso: «Más información» → «Ejecutar de todas formas».</li>
+            </ul>
+
+            <h4>Linux</h4>
+            <div class="code"><pre><code># Debian / Ubuntu
+sudo apt install ./Stratum_0.3.0_amd64.deb
+
+# Cualquier distribución
+chmod +x Stratum_0.3.0_amd64.AppImage
+./Stratum_0.3.0_amd64.AppImage</code></pre></div>
+
+            <h4>Comprobar la descarga</h4>
+            <p>Cada release incluye <code>SHA256SUMS.txt</code>:</p>
+            <div class="code"><pre><code># Linux
+sha256sum -c SHA256SUMS.txt --ignore-missing
+
+# Windows (PowerShell): compara el resultado con la línea del fichero
+Get-FileHash .\Stratum_0.3.0_x64-setup.exe -Algorithm SHA256</code></pre></div>
+
+            <h4>Actualizaciones</h4>
+            <p>
+              Al arrancar, la app busca versiones nuevas en silencio y muestra un aviso con «Instalar y
+              reiniciar» o «Más tarde». <b>Nunca instala sin que lo pidas.</b> Se puede desactivar en
+              Ajustes → Sistema.
+            </p>
+
+            <h4>Desde el código fuente</h4>
+            <p>Hacen falta Node 22 y Rust estable (en Windows, MSVC Build Tools; en Linux, las librerías de WebKitGTK).</p>
+            <div class="code"><pre><code>git clone https://github.com/choruzo/CLI.git
+cd CLI/stratum-cli &amp;&amp; npm install
+cd ../stratum-desktop &amp;&amp; npm install
+npm run sidecar:build     # empaqueta el núcleo; repítelo si cambia stratum-cli
+npm run tauri dev         # ventana de desarrollo
+npm run tauri build       # instaladores</code></pre></div>
+          </section>
+
+          <!-- Desktop · configuración -->
+          <section id="desktop-configuracion" class="doc-sec" aria-labelledby="h-desk-conf">
+            <h3 class="sub" id="h-desk-conf">Configuración</h3>
+
+            <h4>Primer arranque</h4>
+            <p>
+              Sin ningún modelo configurado, la app abre un asistente: URL del servidor, API key, nombre y
+              modelo (los lista consultando <code>/models</code>). Al terminar, la conversación queda lista
+              para escribir. Si eliges «Ahora no», un aviso con «Conectar un modelo» lo retoma más tarde.
+            </p>
+            <div class="callout">
+              <b>Compartida con la CLI.</b> Desktop lee y escribe el fichero global
+              <code>~/.stratum/.stratumrc.json</code>. Un provider que añadas con
+              <code>stratum provider add</code> aparece en Desktop, y al revés.
+            </div>
+
+            <h4>Ajustes</h4>
+            <p>Se abren con <kbd>Ctrl+,</kbd>, con <code>/settings</code> o con el icono ⚙.</p>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Pestaña</th><th>Contenido</th></tr></thead>
+                <tbody>
+                  <tr><td>Providers</td><td>Alta, edición y prueba de conexión. Las API keys se muestran enmascaradas</td></tr>
+                  <tr><td>Modelo activo</td><td>Modelo por defecto y cuántas conversaciones responden a la vez (2 por defecto; el resto espera en cola)</td></tr>
+                  <tr><td>Búsqueda web</td><td>DuckDuckGo, Tavily o ambos</td></tr>
+                  <tr><td>Memoria</td><td>Memoria global del asistente y decisiones guardadas</td></tr>
+                  <tr><td>Espacios de trabajo</td><td>Carpeta raíz, límites de tamaño, retención y espacio ocupado</td></tr>
+                  <tr><td>Sistema</td><td>Notificaciones, atajo global y actualizaciones</td></tr>
+                  <tr><td>Avanzado</td><td>El resto del fichero de configuración</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <p>
+              Los cambios se aplican a cada conversación antes de su siguiente mensaje. La carpeta y los
+              límites de los espacios de trabajo, y el logging, piden reiniciar el agente; la app lo ofrece.
+            </p>
+
+            <h4>Claves de <code>desktop</code></h4>
+            <div class="code"><pre><code>{
+  "desktop": {
+    "maxConcurrentTurns": 2,
+    "notifications": { "enabled": true, "minSeconds": 10 },
+    "globalHotkey": "CommandOrControl+Shift+Space",
+    "updates": { "autoCheck": true },
+    "workspaces": {
+      "root": "~/.stratum/desktop/workspaces",
+      "maxFileMB": 25,
+      "maxWorkspaceMB": 250,
+      "compressAfterDays": 7,
+      "deleteAfterDays": 30
+    }
+  }
+}</code></pre></div>
+          </section>
+
+          <!-- Desktop · uso -->
+          <section id="desktop-uso" class="doc-sec" aria-labelledby="h-desk-uso">
+            <h3 class="sub" id="h-desk-uso">Uso</h3>
+
+            <h4>Conversaciones</h4>
+            <p>
+              El panel lateral las agrupa por fecha. Se pueden buscar, renombrar, fijar y eliminar; el título
+              se pone solo tras el primer mensaje. Varias conversaciones pueden trabajar a la vez: las que
+              superan el límite quedan «en cola» y arrancan por orden.
+            </p>
+
+            <h4>Ficheros</h4>
+            <ul>
+              <li><b>Adjuntar</b>: con el botón o arrastrando al chat. Se copian a la carpeta <code>inputs/</code> de la conversación.</li>
+              <li><b>Resultados</b>: lo que el asistente genera aparece en <code>outputs/</code> como tarjetas con «Abrir», «Guardar como…» y vista previa.</li>
+              <li><b>Descargar todo</b>: un <code>.zip</code> con los ficheros de la conversación.</li>
+              <li>El asistente solo puede leer y escribir dentro de esa carpeta. Por defecto, 25 MB por fichero y 250 MB por conversación.</li>
+            </ul>
+            <div class="callout">
+              <b>Retención.</b> A los 7 días sin uso, los ficheros de una conversación se comprimen; abrirla
+              los restaura. A los 30 días se borran y la conversación conserva solo el texto. Solo los mensajes
+              y las subidas cuentan como uso; abrirla para leer, no. Los plazos se cambian en Ajustes → Espacios
+              de trabajo, y <code>0</code> los desactiva.
+            </div>
+
+            <h4>Comandos</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Comando</th><th>Qué hace</th></tr></thead>
+                <tbody>
+                  <tr><td><code>/new</code></td><td>Empieza una conversación nueva</td></tr>
+                  <tr><td><code>/clear</code></td><td>Vacía la conversación; sus ficheros se conservan</td></tr>
+                  <tr><td><code>/compact</code></td><td>Comprime el contexto ahora</td></tr>
+                  <tr><td><code>/model [modelo]</code></td><td>Ve o cambia el modelo de esta conversación</td></tr>
+                  <tr><td><code>/memory</code></td><td>Ve y edita la memoria global</td></tr>
+                  <tr><td><code>/settings</code></td><td>Abre Ajustes</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h4>Atajos de teclado</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Tecla</th><th>Acción</th></tr></thead>
+                <tbody>
+                  <tr><td><kbd>Ctrl+N</kbd></td><td>Nueva conversación</td></tr>
+                  <tr><td><kbd>Ctrl+K</kbd></td><td>Buscar conversaciones</td></tr>
+                  <tr><td><kbd>Ctrl+B</kbd></td><td>Plegar el panel lateral</td></tr>
+                  <tr><td><kbd>Ctrl+L</kbd></td><td>Vaciar la conversación (pide confirmación)</td></tr>
+                  <tr><td><kbd>Ctrl+,</kbd></td><td>Ajustes</td></tr>
+                  <tr><td><kbd>Esc</kbd></td><td>Detener la respuesta en curso</td></tr>
+                  <tr><td><kbd>Ctrl+Shift+Space</kbd></td><td>Atajo global: trae la ventana al frente desde cualquier aplicación (configurable)</td></tr>
+                </tbody>
+              </table>
+            </div>
+
+            <h4>Confirmaciones y avisos</h4>
+            <ul>
+              <li>Antes de una operación que modifica ficheros de forma destructiva, el asistente pregunta. Sin respuesta en 5 minutos, se deniega.</li>
+              <li>Si una respuesta tarda más de 10 segundos y la ventana no está a la vista, llega una notificación del sistema al terminar.</li>
+              <li>El razonamiento del modelo se muestra plegado («Razonó 12 s») y se despliega al pulsarlo.</li>
+            </ul>
+
+            <h4>Dónde se guardan los datos</h4>
+            <div class="tscroll">
+              <table class="dtable">
+                <thead><tr><th>Ruta</th><th>Contenido</th></tr></thead>
+                <tbody>
+                  <tr><td><code>~/.stratum/.stratumrc.json</code></td><td>Configuración (compartida con la CLI)</td></tr>
+                  <tr><td><code>~/.stratum/desktop/conversations/</code></td><td>Título y mensajes visibles de cada conversación</td></tr>
+                  <tr><td><code>~/.stratum/desktop/workspaces/</code></td><td>Ficheros de cada conversación</td></tr>
+                  <tr><td><code>~/.stratum/desktop/memory/</code></td><td>Memoria del asistente, separada de la de cualquier proyecto</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+        </section>
+
+        <!-- ═══ PROBLEMAS ════════════════════════════════════════════════ -->
+        <section class="doc-part" id="problemas" aria-labelledby="h-prob">
+          <h2 class="cmd" id="h-prob">stratum doctor</h2>
+          <p class="note">Lo que más se repite al empezar.</p>
+
+          <details class="faq">
+            <summary>«Config error» al arrancar</summary>
+            <p>
+              El mensaje indica el fichero, la línea y la clave que falla. Si el error es de JSON, revisa comas
+              y comillas; si es de validación, compara la clave con el
+              <a href="https://github.com/choruzo/CLI/blob/main/stratum-cli/.stratumrc.json.example" target="_blank" rel="noreferrer">ejemplo ↗</a>.
+              Recuerda que el fichero del proyecto se fusiona sobre el global.
+            </p>
+          </details>
+          <details class="faq">
+            <summary><code>run</code> se detiene listando varios modelos</summary>
+            <p>
+              El provider no tiene modelo fijado y el servidor expone más de uno. Elige con
+              <code>--model &lt;id&gt;</code> o déjalo fijo con <code>stratum provider models --set &lt;id&gt;</code>.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>El provider no responde o da 401</summary>
+            <p>
+              Comprueba la conectividad con <code>stratum provider list</code>. Si la key se guardó como
+              <code>${VAR}</code>, la variable tiene que existir en el entorno desde el que lanzas Stratum;
+              si no, se sustituye por vacío y se avisa al arrancar. La URL base debe incluir <code>/v1</code>.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>La barra de estado muestra <code>Σ n/d</code></summary>
+            <p>
+              El servidor no devuelve el consumo de tokens. Stratum no lo estima: el resto funciona igual y
+              los límites se controlan por iteraciones y tiempo.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>El agente pierde el hilo en conversaciones largas</summary>
+            <p>
+              Suele ser una ventana de contexto mal declarada. Mira el uso real con <code>/context</code> y
+              fija <code>contextWindow</code> con el valor con el que arrancaste el servidor.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>Una conexión SSH se aborta por la clave del host</summary>
+            <p>
+              La clave guardada no coincide con la que presenta el servidor. Si el host se reinstaló, confía
+              la nueva con <code>stratum ssh trust &lt;alias&gt; --force</code>. Si no esperabas el cambio, no
+              la aceptes.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>Desktop: «el agente no arranca»</summary>
+            <p>
+              La pantalla de fallo muestra el motivo y las últimas líneas del log, con «Reintentar» y «Ver
+              logs». Si el problema es de configuración, «Abrir ajustes» permite corregirla sin salir.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>Desktop en Linux: el atajo global no funciona</summary>
+            <p>
+              El atajo global necesita X11 (o XWayland). En una sesión Wayland nativa el registro falla y
+              Ajustes → Sistema lo indica. Si otra aplicación ya usa la combinación, elige otra.
+            </p>
+          </details>
+          <details class="faq">
+            <summary>Desktop: los ficheros de una conversación aparecen como «caducado»</summary>
+            <p>
+              Pasó el plazo de borrado de la retención. El texto de la conversación sigue ahí, pero los
+              ficheros no se pueden recuperar; vuelve a adjuntarlos.
+            </p>
+          </details>
+
+          <p class="note doc-more">
+            ¿No está aquí? Abre una incidencia en
+            <a href="https://github.com/choruzo/CLI/issues" target="_blank" rel="noreferrer">github.com/choruzo/CLI/issues ↗</a>
+            y adjunta la salida de <code>stratum logs tail</code>.
+          </p>
+        </section>
+      </div>
+    </main>
+
+    <footer class="footer">
+      <div class="wrap">
+        <div><span class="p">❯</span> exit <span class="dim">— MIT · hecho con Stratum y mucho café</span></div>
+        <div class="footer-links">
+          <a href="./index.html">inicio</a>
+          <a href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">github</a>
+          <a href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">npm</a>
+          <a href="#top">↑ arriba</a>
+        </div>
+      </div>
+    </footer>
+
+    <div class="toast" id="toast" role="status" aria-live="polite"></div>
+
+    <script src="./guias.js?v=7277a3ef28" defer></script>
+  </body>
+</html>
