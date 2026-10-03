@@ -1,4 +1,5 @@
-import type { ProviderConfig } from '../../config/schema.js';
+import type { ProviderConfigInput } from '../../config/schema.js';
+import { expandEnvVars } from '../../config/loader.js';
 import { fetchModels } from '../../providers/utils.js';
 
 /**
@@ -85,6 +86,23 @@ export function validateBaseUrl(url: string): string | null {
   }
 }
 
+export interface ResolvedApiKey {
+  /** Key con los `${VAR}` sustituidos: la que se envía, nunca la que se guarda. */
+  key: string;
+  /** Variables referenciadas que no están definidas en este entorno. */
+  missing: string[];
+}
+
+/**
+ * Expande los `${VAR}` de una API key para consultar el provider. En disco se
+ * guarda siempre lo tecleado, con el placeholder intacto.
+ */
+export function resolveApiKey(raw: string): ResolvedApiKey {
+  const missing: string[] = [];
+  const key = String(expandEnvVars(raw, (m) => missing.push(m.name)));
+  return { key, missing };
+}
+
 export interface ModelDiscovery {
   models: string[];
   /** true → el fetch falló y el wizard debe pedir el modelo a mano. */
@@ -101,8 +119,16 @@ export async function discoverModels(
   apiKey: string,
   fetchFn?: typeof fetch,
 ): Promise<ModelDiscovery> {
+  const { key, missing } = resolveApiKey(apiKey);
+  if (missing.length > 0) {
+    return {
+      models: [],
+      manualFallback: true,
+      error: `variable de entorno no definida: ${missing.join(', ')}`,
+    };
+  }
   try {
-    const models = await fetchModels(baseUrl, apiKey, fetchFn ? { fetchFn } : {});
+    const models = await fetchModels(baseUrl, key, fetchFn ? { fetchFn } : {});
     if (models.length === 0) {
       return { models: [], manualFallback: true, error: 'El endpoint /models no devolvió modelos' };
     }
@@ -114,22 +140,26 @@ export async function discoverModels(
 
 export interface WizardResult {
   name: string;
-  config: ProviderConfig;
+  config: ProviderConfigInput;
   makeDefault: boolean;
 }
 
-/** Construye el bloque ProviderConfig final que se escribirá en la config. */
+/**
+ * Construye el bloque de provider que se escribirá en la config. Sin `model`
+ * se elige al arrancar; sin `contextWindow` manda lo que declare `/models`.
+ */
 export function buildProviderEntry(params: {
   baseUrl: string;
   apiKey: string;
-  model: string;
+  model?: string;
   contextWindow?: number;
-}): ProviderConfig {
+}): ProviderConfigInput {
+  const model = params.model?.trim();
   return {
     type: 'openai-compatible',
     baseUrl: params.baseUrl.trim().replace(/\/$/, ''),
-    model: params.model.trim(),
+    ...(model ? { model } : {}),
     apiKey: params.apiKey,
-    contextWindow: params.contextWindow ?? 32768,
+    ...(params.contextWindow !== undefined ? { contextWindow: params.contextWindow } : {}),
   };
 }

@@ -2,12 +2,29 @@ import { z } from 'zod';
 import { unsafeReasonProblem } from '../security/secrets.js';
 import { DEFAULT_GLOBAL_HOTKEY, parseAccelerator } from './accelerator.js';
 
+/** Ventana de contexto cuando ni la config ni `/models` dicen otra. */
+export const DEFAULT_CONTEXT_WINDOW = 32768;
+
 const ProviderConfigSchema = z.object({
   type: z.literal('openai-compatible'),
   baseUrl: z.string().url(),
-  model: z.string(),
+  /**
+   * Modelo de arranque. Vacío (o ausente) = se resuelve contra `GET /models`:
+   * `chat` abre el selector, `run`/`init` exigen `--model` salvo que el
+   * provider exponga uno solo. Basta con `baseUrl` + `apiKey`.
+   */
+  model: z.string().default(''),
   apiKey: z.string().default(''),
-  contextWindow: z.number().int().positive().default(32768),
+  /**
+   * Ventana de contexto del provider. Opcional: si falta se usa la que
+   * `/models` declare para el modelo activo y, si no declara ninguna,
+   * `DEFAULT_CONTEXT_WINDOW`. Explícita, gana a lo descubierto.
+   */
+  contextWindow: z.number().int().positive().optional(),
+  /** Ajustes por modelo (id exacto); ganan a los del provider. */
+  models: z
+    .record(z.object({ contextWindow: z.number().int().positive().optional() }).strict())
+    .optional(),
   /**
    * Timeouts de inactividad del cliente en ms (§12.3); `0` desactiva. Por
    * defecto 120 s hasta las cabeceras y 300 s sin recibir nada del cuerpo, que
@@ -671,6 +688,8 @@ export const StratumConfigSchema = z.object({
 
 export type StratumConfig = z.infer<typeof StratumConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
+/** Lo que se escribe en disco: `model` y `contextWindow` pueden omitirse. */
+export type ProviderConfigInput = z.input<typeof ProviderConfigSchema>;
 export type McpServer = z.infer<typeof McpServerSchema>;
 export type SSHHostConfig = z.infer<typeof SSHHostSchema>;
 export type SSHConfig = z.infer<typeof SSHConfigSchema>;

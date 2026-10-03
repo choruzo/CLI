@@ -16,6 +16,14 @@
         "model": "claude-sonnet-4-5",
         "apiKey": "${LITELLM_API_KEY}",
         "contextWindow": 200000
+      },
+      "hosted": {
+        "type": "openai-compatible",
+        "baseUrl": "https://api.example.com/v1",
+        "apiKey": "${EXAMPLE_API_KEY}",
+        "models": {
+          "big-model": { "contextWindow": 200000 }
+        }
       }
     }
   },

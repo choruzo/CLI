@@ -7,7 +7,7 @@ import {
   validateConfigLayer,
 } from './loader.js';
 import { setByDotPath } from './dot-path.js';
-import type { ProviderConfig } from './schema.js';
+import type { ProviderConfigInput } from './schema.js';
 
 /**
  * Escritura de `.stratumrc.json` para el wizard de providers (Hito 3.5).
@@ -80,7 +80,7 @@ export interface UpsertProviderResult {
  */
 export function upsertProvider(
   name: string,
-  providerCfg: ProviderConfig,
+  providerCfg: ProviderConfigInput,
   makeDefault: boolean,
   configPath?: string,
 ): UpsertProviderResult {
@@ -135,6 +135,23 @@ export function removeProvider(name: string, configPath?: string): RemoveProvide
   return { configPath: path, backupPath, newDefault };
 }
 
+/**
+ * Elimina un provider de todos los ficheros que lo definen (el de proyecto y
+ * el global): quitarlo solo de una capa lo dejaría vivo por la otra. Con la
+ * entrada se van su modelo por defecto y sus ajustes por modelo (`models`).
+ * Primero la capa de proyecto, que se valida fusionada con la global.
+ */
+export function removeProviderEverywhere(name: string, startDir?: string): RemoveProviderResult[] {
+  const projectPath = findConfigFile(startDir ?? process.cwd());
+  const paths = [...new Set([projectPath, GLOBAL_CONFIG_PATH])].filter(
+    (p): p is string => !!p && hasProvider(p, name),
+  );
+  if (paths.length === 0) {
+    throw new Error(`Provider "${name}" no existe en ningún .stratumrc.json`);
+  }
+  return paths.map((path) => removeProvider(name, path));
+}
+
 /** Cambia el provider default (comando `stratum provider use`). */
 export function setDefaultProvider(
   name: string,
@@ -163,6 +180,37 @@ export function readRawProvider(name: string, configPath?: string): Record<strin
     | undefined;
   const entry = providers?.[name];
   return entry && typeof entry === 'object' ? (entry as Record<string, unknown>) : null;
+}
+
+function hasProvider(path: string, name: string): boolean {
+  if (!existsSync(path)) return false;
+  try {
+    return readRawProvider(name, path) !== null;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fija el `model` de un provider ya configurado, en el fichero que lo define
+ * (el de proyecto si lo declara, si no el global). Devuelve la ruta escrita, o
+ * `null` si ningún fichero escribible declara ese provider.
+ */
+export function setProviderModel(name: string, model: string, startDir?: string): string | null {
+  const projectPath = findConfigFile(startDir ?? process.cwd());
+  const path = [projectPath, GLOBAL_CONFIG_PATH].find(
+    (p): p is string => !!p && hasProvider(p, name),
+  );
+  if (!path) return null;
+
+  const raw = readRaw(path);
+  const providers = (raw['provider'] as Record<string, unknown>)['providers'] as Record<
+    string,
+    Record<string, unknown>
+  >;
+  providers[name]['model'] = model;
+  writeConfigWithBackup(path, raw);
+  return path;
 }
 
 /**

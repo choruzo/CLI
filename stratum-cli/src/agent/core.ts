@@ -488,6 +488,11 @@ export class StratumAgent {
     this.reloadMemory();
   }
 
+  /** Retira de la sesión un provider eliminado de la config (`/provider remove`). */
+  forgetProvider(name: string): void {
+    this.router.forgetProvider(name);
+  }
+
   /** Alias de los providers configurados (para `/provider` y su autocompletado). */
   get providerNames(): string[] {
     return this.router.providerNames;

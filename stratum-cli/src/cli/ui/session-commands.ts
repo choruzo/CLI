@@ -54,7 +54,8 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   },
   {
     name: '/provider',
-    description: 'Cambia el provider activo en esta sesión (sin args: lista los configurados)',
+    description:
+      'Cambia el provider activo en esta sesión (sin args: lista; remove <alias>: lo elimina)',
     hasArgs: true,
   },
   {

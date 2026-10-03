@@ -85,7 +85,7 @@ describe('discoverModels (paso 5 del wizard)', () => {
 });
 
 describe('buildProviderEntry', () => {
-  it('normaliza URL y aplica contextWindow por defecto', () => {
+  it('normaliza URL y no fija contextWindow si no se le da', () => {
     const entry = buildProviderEntry({
       baseUrl: ' http://localhost:11434/v1/ ',
       apiKey: 'ollama',
@@ -96,7 +96,6 @@ describe('buildProviderEntry', () => {
       baseUrl: 'http://localhost:11434/v1',
       model: 'qwen2.5-coder:32b',
       apiKey: 'ollama',
-      contextWindow: 32768,
     });
   });
 

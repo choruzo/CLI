@@ -562,6 +562,7 @@ export class ConversationSession {
         this.memoryStale = false;
         this.agent.reloadMemory();
       }
+      if (!this.agent.model) await this.adoptOnlyModel();
       this.workspace?.touch();
       outputsBefore = this.workspace?.snapshotOutputs() ?? null;
       timer = setInterval(() => this.checkpoint(), this.checkpointMs);
@@ -604,6 +605,28 @@ export class ConversationSession {
         this.onChanged(this.summary());
       }
     }
+  }
+
+  /**
+   * Provider configurado sin `model`: si expone un único modelo se adopta; con
+   * varios hay que elegir con `/model` (lanza, y el turno acaba con ese error).
+   */
+  private async adoptOnlyModel(): Promise<void> {
+    const cfg = this.agent.getActiveProviderConfig();
+    const name = this.agent.providerName;
+    let models: string[];
+    try {
+      models = await fetchModels(cfg.baseUrl, cfg.apiKey);
+    } catch (err) {
+      throw new Error(
+        `El provider "${name}" no tiene modelo configurado y no se pudieron listar los suyos ` +
+          `(${err instanceof Error ? err.message : String(err)}).`,
+      );
+    }
+    if (models.length !== 1) {
+      throw new Error(`El provider "${name}" no tiene modelo configurado: elige uno con /model.`);
+    }
+    this.agent.switchModel(models[0]!);
   }
 
   private onEvent(turnId: string, event: AgentEvent): void {

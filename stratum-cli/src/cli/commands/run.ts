@@ -18,6 +18,7 @@ import { SubagentStore } from '../../session/subagent-store.js';
 import { generateSessionId } from '../../session/store.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
+import { discoverContextWindow, resolveStartupModel } from '../startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
@@ -46,6 +47,7 @@ export const runCommand = new Command('run')
   .description('Run a one-shot task with the agent')
   .argument('<task>', 'task to execute')
   .option('--provider <name>', 'use a specific provider from config')
+  .option('--model <id>', 'use a specific model of the provider for this run')
   .option('--allow-destructive', 'approve all destructive operations without prompting')
   .option('--deny-destructive', 'block all destructive operations automatically')
   .option('--plan', 'plan-and-execute mode: produce a plan, approve, then execute step by step')
@@ -66,6 +68,7 @@ export const runCommand = new Command('run')
       task: string,
       opts: {
         provider?: string;
+        model?: string;
         allowDestructive?: boolean;
         denyDestructive?: boolean;
         plan?: boolean;
@@ -118,12 +121,23 @@ export const runCommand = new Command('run')
       warnInheritedGitRouting();
       warnConfigDeprecations();
 
+      const startupModel = await resolveStartupModel(config, opts);
+      if (!startupModel.ok) {
+        process.stderr.write(`[fatal] ${startupModel.error}\n`);
+        process.exit(1);
+      }
+
       let router;
       try {
         router = new ProviderRouter(config, opts.provider);
       } catch (err) {
         process.stderr.write(`[fatal] Provider error: ${String(err)}\n`);
         process.exit(1);
+      }
+      // La ventana se fija al arrancar el turno, y aquí solo hay uno: se espera
+      // (acotado) a lo que declare `/models` si la config no la fija.
+      if (router.contextWindowIsDiscoverable && !startupModel.fetched) {
+        await discoverContextWindow(router.getActiveConfig(), { timeoutMs: 3000 });
       }
 
       const registry = new ToolRegistry();

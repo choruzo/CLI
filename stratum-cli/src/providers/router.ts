@@ -1,6 +1,8 @@
+import { DEFAULT_CONTEXT_WINDOW } from '../config/schema.js';
 import type { StratumConfig, ProviderConfig } from '../config/schema.js';
 import type { IProvider } from './base.js';
 import { OpenAICompatible } from './openai-compatible.js';
+import { discoveredContextWindow } from './utils.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('provider');
@@ -61,6 +63,10 @@ export class ProviderRouter {
    */
   switchModel(model: string): void {
     this.activeConfig = { ...this.activeConfig, model };
+    // Un provider sin `model` en la config queda resuelto para el resto del
+    // proceso: los routers de los subagentes y el fallback parten del catálogo.
+    const entry = this.providers[this.activeKey];
+    if (entry && !entry.model) this.providers[this.activeKey] = { ...entry, model };
   }
 
   /**
@@ -81,6 +87,20 @@ export class ProviderRouter {
     // El cambio manual reinicia el estado de fallback: el nuevo activo deja de
     // considerarse "fallido" aunque lo hubiera estado antes.
     this.failedKeys.clear();
+  }
+
+  /**
+   * Retira de la sesión un provider eliminado de la config (`/provider remove`):
+   * deja de listarse y de servir de fallback. El activo no se puede retirar.
+   */
+  forgetProvider(name: string): void {
+    if (name === this.activeKey) {
+      throw new Error(`"${name}" es el provider activo: cambia antes a otro.`);
+    }
+    delete this.providers[name];
+    const index = this.fallbackOrder.indexOf(name);
+    if (index !== -1) this.fallbackOrder.splice(index, 1);
+    this.failedKeys.delete(name);
   }
 
   /**
@@ -116,7 +136,9 @@ export class ProviderRouter {
    */
   advanceProvider(): { name: string; model: string } | null {
     this.failedKeys.add(this.activeKey);
-    const next = this.fallbackOrder.find((k) => !this.failedKeys.has(k));
+    // Un provider sin modelo resuelto no sirve de fallback: no hay a quién
+    // preguntar a mitad de turno.
+    const next = this.fallbackOrder.find((k) => !this.failedKeys.has(k) && this.providers[k].model);
     if (!next) {
       log.error('fallback exhausted', { tried: [...this.failedKeys] });
       return null;
@@ -150,8 +172,24 @@ export class ProviderRouter {
     return this.activeConfig.model;
   }
 
+  /**
+   * Ventana del modelo activo: ajuste por modelo (`models.<id>`) > la del
+   * provider si es explícita > la que declaró `/models` > default.
+   */
   get contextWindow(): number {
-    return this.activeConfig.contextWindow;
+    const cfg = this.activeConfig;
+    return (
+      cfg.models?.[cfg.model]?.contextWindow ??
+      cfg.contextWindow ??
+      discoveredContextWindow(cfg.baseUrl, cfg.model) ??
+      DEFAULT_CONTEXT_WINDOW
+    );
+  }
+
+  /** ¿Depende la ventana de lo que declare `/models`? (ni modelo ni provider la fijan). */
+  get contextWindowIsDiscoverable(): boolean {
+    const cfg = this.activeConfig;
+    return cfg.models?.[cfg.model]?.contextWindow === undefined && cfg.contextWindow === undefined;
   }
 
   async healthCheck(): Promise<boolean> {

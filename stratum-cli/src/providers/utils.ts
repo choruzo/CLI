@@ -4,7 +4,54 @@
  */
 
 interface ModelsResponse {
-  data?: Array<{ id?: unknown }>;
+  data?: Array<Record<string, unknown>>;
+}
+
+/** Un modelo tal como lo anuncia `GET /models`. */
+export interface ModelInfo {
+  id: string;
+  /** Ventana de contexto, si el backend la declara (la mayoría solo da el id). */
+  contextWindow?: number;
+}
+
+/**
+ * Campos donde los backends OpenAI-compatibles declaran la ventana: OpenRouter
+ * (`context_length`), Groq (`context_window`), vLLM (`max_model_len`), LM Studio
+ * (`max_context_length`). El `meta.n_ctx_train` de llama.cpp se ignora a
+ * propósito: es el contexto de entrenamiento, no el `-c` con que corre el server.
+ */
+const CONTEXT_WINDOW_FIELDS = [
+  'context_length',
+  'context_window',
+  'max_model_len',
+  'max_context_length',
+];
+
+function contextWindowOf(entry: Record<string, unknown>): number | undefined {
+  for (const field of CONTEXT_WINDOW_FIELDS) {
+    const value = entry[field];
+    if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
+  }
+  return undefined;
+}
+
+/**
+ * Ventanas descubiertas en este proceso, por `baseUrl` normalizada. A nivel de
+ * módulo porque cada subagente tiene su propio `ProviderRouter` y no debe
+ * repetir la petición ni caer al default que el padre ya superó.
+ */
+const discoveredWindows = new Map<string, Map<string, number>>();
+
+const normalizeBaseUrl = (baseUrl: string): string => baseUrl.replace(/\/$/, '');
+
+/** Ventana que `/models` declaró para `model`, si ya se consultó ese provider. */
+export function discoveredContextWindow(baseUrl: string, model: string): number | undefined {
+  return discoveredWindows.get(normalizeBaseUrl(baseUrl))?.get(model);
+}
+
+/** Solo para tests. */
+export function clearDiscoveredModels(): void {
+  discoveredWindows.clear();
 }
 
 export interface FetchModelsOptions {
@@ -27,8 +74,20 @@ export async function fetchModels(
   apiKey: string,
   opts: FetchModelsOptions = {},
 ): Promise<string[]> {
+  return (await fetchModelInfos(baseUrl, apiKey, opts)).map((m) => m.id);
+}
+
+/**
+ * Como `fetchModels`, con los metadatos que el backend declare. Recuerda las
+ * ventanas descubiertas (`discoveredContextWindow`).
+ */
+export async function fetchModelInfos(
+  baseUrl: string,
+  apiKey: string,
+  opts: FetchModelsOptions = {},
+): Promise<ModelInfo[]> {
   const { timeoutMs = 5000, fetchFn = fetch } = opts;
-  const url = `${baseUrl.replace(/\/$/, '')}/models`;
+  const url = `${normalizeBaseUrl(baseUrl)}/models`;
 
   const headers: Record<string, string> = {};
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
@@ -47,11 +106,22 @@ export async function fetchModels(
     throw new Error(`GET ${url} → respuesta sin campo "data" (no es OpenAI-compatible)`);
   }
 
-  const ids = body.data
-    .map((m) => m.id)
-    .filter((id): id is string => typeof id === 'string' && id.length > 0);
+  const byId = new Map<string, ModelInfo>();
+  for (const entry of body.data) {
+    const id = entry?.id;
+    if (typeof id !== 'string' || id.length === 0 || byId.has(id)) continue;
+    const contextWindow = contextWindowOf(entry);
+    byId.set(id, contextWindow ? { id, contextWindow } : { id });
+  }
+  const infos = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 
-  return [...new Set(ids)].sort((a, b) => a.localeCompare(b));
+  const windows = new Map<string, number>();
+  for (const info of infos) {
+    if (info.contextWindow) windows.set(info.id, info.contextWindow);
+  }
+  discoveredWindows.set(normalizeBaseUrl(baseUrl), windows);
+
+  return infos;
 }
 
 // ---------------------------------------------------------------------------

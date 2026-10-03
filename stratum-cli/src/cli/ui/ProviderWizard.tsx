@@ -185,7 +185,8 @@ export function ProviderWizard({
               />
             </Box>
             <Text color={theme.textFaint}>
-              {'  '}Puedes usar {'${VAR}'} editando el archivo después; aquí se guarda literal
+              {'  '}Escribe {'${VAR}'} (p. ej. {'${NAN_API_KEY}'}) para no guardar la key en el
+              archivo
             </Text>
           </Box>
         );

@@ -4,6 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
+import { resolveStartupModel } from '../startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { StratumAgent } from '../../agent/core.js';
@@ -41,9 +42,13 @@ export const initCommand = new Command('init')
     'Optional focus or constraints for the agent (e.g. "focus on the test setup")',
   )
   .option('--provider <name>', 'use a specific provider from config')
+  .option('--model <id>', 'use a specific model of the provider for this run')
   .option('--allow-destructive', 'approve all destructive operations without prompting')
   .action(
-    async (focus: string | undefined, opts: { provider?: string; allowDestructive?: boolean }) => {
+    async (
+      focus: string | undefined,
+      opts: { provider?: string; model?: string; allowDestructive?: boolean },
+    ) => {
       const cwd = process.cwd();
 
       process.stdout.write('\n  Stratum — Inicializando proyecto\n\n');
@@ -62,6 +67,12 @@ export const initCommand = new Command('init')
         process.stderr.write(
           `\n  [error] Config: ${err instanceof Error ? err.message : String(err)}\n`,
         );
+        process.exit(1);
+      }
+
+      const startupModel = await resolveStartupModel(config, opts);
+      if (!startupModel.ok) {
+        process.stderr.write(`\n  [error] Provider: ${startupModel.error}\n`);
         process.exit(1);
       }
 

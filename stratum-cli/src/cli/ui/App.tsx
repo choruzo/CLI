@@ -17,12 +17,18 @@ import type {
   RunOptions,
   TokenAccounting,
 } from '../../agent/types.js';
-import type { ProviderConfig } from '../../config/schema.js';
+import type { ProviderConfig, ProviderConfigInput } from '../../config/schema.js';
 import { expandEnvVars } from '../../config/loader.js';
 import { getByDotPath, formatConfigValue } from '../../config/dot-path.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
 import { SessionStore, describeSkippedSessions } from '../../session/store.js';
-import { upsertProvider, readRawProvider, setConfigValue } from '../../config/writer.js';
+import {
+  upsertProvider,
+  readRawProvider,
+  removeProviderEverywhere,
+  setConfigValue,
+  setProviderModel,
+} from '../../config/writer.js';
 import { detectCapabilities } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
@@ -81,7 +87,7 @@ type OverlayState =
         baseUrl: string;
         apiKey: string;
         model: string;
-        contextWindow: number;
+        contextWindow?: number;
       };
     };
 
@@ -1571,7 +1577,13 @@ export function App({
     // .stratumrc.json. Si /models no está soportado, se ofrece entrada manual.
     detectCapabilities(cfg.baseUrl, cfg.apiKey)
       .then((caps) => {
-        if (caps.listsModels && caps.models.length > 0) {
+        if (!agent.model && caps.models.length === 1) {
+          // Un solo modelo (p. ej. llama.cpp): nada que elegir ni que fijar.
+          setOverlay(null);
+          agent.switchModel(caps.models[0]!);
+          refreshProviderHealth();
+          dispatch({ type: 'SYSTEM_MESSAGE', text: `Modelo: ${caps.models[0]}` });
+        } else if (caps.listsModels && caps.models.length > 0) {
           setOverlay({ kind: 'model-select', models: caps.models });
         } else {
           setModelManualValue(agent.model);
@@ -1582,7 +1594,7 @@ export function App({
         setModelManualValue(agent.model);
         setOverlay({ kind: 'model-manual', note: String(err) });
       });
-  }, [agent]);
+  }, [agent, refreshProviderHealth]);
 
   // Aplica un modelo (de la lista o escrito a mano) a la sesión en curso.
   const applyModel = useCallback(
@@ -1590,15 +1602,49 @@ export function App({
       setOverlay(null);
       const trimmed = model.trim();
       if (!trimmed || trimmed === agent.model) return;
+      // Provider sin modelo en la config: la primera elección se guarda como su
+      // modelo por defecto, para no preguntar en cada arranque.
+      const wasUnset = !agent.model;
       agent.switchModel(trimmed);
       refreshProviderHealth();
+      if (!wasUnset) {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `Modelo cambiado a ${trimmed} (solo esta sesión; no se ha modificado .stratumrc.json).`,
+        });
+        return;
+      }
+      let saved: string | null = null;
+      let saveError: string | undefined;
+      try {
+        saved = setProviderModel(agent.providerName, trimmed);
+      } catch (err) {
+        saveError = err instanceof Error ? err.message : String(err);
+      }
       dispatch({
         type: 'SYSTEM_MESSAGE',
-        text: `Modelo cambiado a ${trimmed} (solo esta sesión; no se ha modificado .stratumrc.json).`,
+        text: saved
+          ? `Modelo: ${trimmed} (guardado como modelo por defecto de "${agent.providerName}" en ${saved}; /model lo cambia en la sesión).`
+          : `Modelo: ${trimmed} (solo esta sesión${saveError ? `; no se pudo guardar: ${saveError}` : ''}).`,
       });
     },
     [agent, refreshProviderHealth],
   );
+
+  // Provider configurado solo con URL + key: sin modelo no hay a quién hablar,
+  // así que se pide antes de nada (al arrancar y tras `/provider`).
+  const promptForModel = useCallback(() => {
+    dispatch({
+      type: 'SYSTEM_MESSAGE',
+      text: `El provider "${agent.providerName}" no tiene modelo fijado: elige uno de los que expone.`,
+    });
+    openModelSelector();
+  }, [agent, openModelSelector]);
+
+  useEffect(() => {
+    if (!agent.model) promptForModel();
+    // Solo al montar.
+  }, []);
 
   // -------------------------------------------------------------------------
   // /config_provider — wizard pre-rellenado con el provider activo (Hito 3.5)
@@ -1616,23 +1662,22 @@ export function App({
         baseUrl: typeof raw?.['baseUrl'] === 'string' ? (raw['baseUrl'] as string) : active.baseUrl,
         apiKey: typeof raw?.['apiKey'] === 'string' ? (raw['apiKey'] as string) : active.apiKey,
         model: typeof raw?.['model'] === 'string' ? (raw['model'] as string) : active.model,
+        // Solo si está escrita: sin ella manda lo que declare `/models`.
         contextWindow:
-          typeof raw?.['contextWindow'] === 'number'
-            ? (raw['contextWindow'] as number)
-            : active.contextWindow,
+          typeof raw?.['contextWindow'] === 'number' ? (raw['contextWindow'] as number) : undefined,
       },
     });
   }, [agent]);
 
   const handleWizardComplete = useCallback(
-    (result: { name: string; config: ProviderConfig; makeDefault: boolean }) => {
+    (result: { name: string; config: ProviderConfigInput; makeDefault: boolean }) => {
       setOverlay(null);
       try {
         const { configPath, backupPath } = upsertProvider(result.name, result.config, false);
         if (result.name === agent.providerName) {
           // Aplicar en caliente a la sesión (con env vars expandidas)
-          const expanded = expandEnvVars(result.config) as ProviderConfig;
-          agent.reconfigureProvider(expanded);
+          const expanded = expandEnvVars(result.config) as ProviderConfigInput;
+          agent.reconfigureProvider({ model: '', ...expanded } as ProviderConfig);
         }
         dispatch({
           type: 'SYSTEM_MESSAGE',
@@ -2234,6 +2279,38 @@ export function App({
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         const target = cmd.slice('/provider'.length).trim();
         const names = agent.providerNames;
+
+        // `/provider remove <alias>`: lo quita de .stratumrc.json (con su modelo
+        // y sus ajustes por modelo) y de esta sesión.
+        const removal = target.match(/^(?:remove|rm)\s+(\S+)$/);
+        if (removal) {
+          const alias = removal[1]!;
+          if (alias === agent.providerName) {
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `"${alias}" es el provider activo: cambia antes a otro con /provider <alias>.`,
+            });
+            return;
+          }
+          try {
+            const results = removeProviderEverywhere(alias);
+            if (names.includes(alias)) agent.forgetProvider(alias);
+            const files = results.map((r) => r.configPath).join(', ');
+            const promoted = results.find((r) => r.newDefault)?.newDefault;
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text:
+                `Provider "${alias}" eliminado de ${files} (copia en .bak).` +
+                (promoted ? ` Era el provider por defecto: ahora lo es "${promoted}".` : ''),
+            });
+          } catch (err) {
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `No se pudo eliminar "${alias}": ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+          return;
+        }
         if (!target) {
           // Sin argumento: listar los providers configurados y el activo.
           const lines = names.map((n) =>
@@ -2243,7 +2320,8 @@ export function App({
             type: 'SYSTEM_MESSAGE',
             text:
               `Providers configurados:\n\n${lines.join('\n')}\n\n` +
-              `Uso: /provider <alias> para cambiar en esta sesión.`,
+              `Uso: /provider <alias> para cambiar en esta sesión · ` +
+              `/provider remove <alias> para eliminarlo de la config.`,
           });
           return;
         }
@@ -2261,6 +2339,10 @@ export function App({
         try {
           agent.switchProvider(target);
           refreshProviderHealth();
+          if (!agent.model) {
+            promptForModel();
+            return;
+          }
           dispatch({
             type: 'SYSTEM_MESSAGE',
             text: `Provider activo: ${target} (modelo ${agent.model}, solo esta sesión; no se ha modificado .stratumrc.json).`,
@@ -2400,6 +2482,13 @@ export function App({
 
       if (state.thinking) return;
 
+      // Sin modelo elegido (se canceló el selector) no se puede hablar con el
+      // provider: se vuelve a pedir, conservando lo escrito.
+      if (!agent.model && (!cmd.startsWith('/') || /^\/(init|plan|compact)(\s|$)/.test(cmd))) {
+        promptForModel();
+        return;
+      }
+
       // Enter con la paleta abierta: ejecutar (o completar) el comando seleccionado
       if (paletteItems.length > 0) {
         const sel = paletteItems[effPaletteIndex];
@@ -2422,6 +2511,8 @@ export function App({
       effPaletteIndex,
       completePaletteSelection,
       executeCommand,
+      agent,
+      promptForModel,
     ],
   );
 
@@ -2498,7 +2589,7 @@ export function App({
           Modelo
           <Text color={theme.textMuted} bold={false}>
             {'  ·  '}
-            {agent.providerName} · solo esta sesión
+            {agent.providerName} · {agent.model ? 'solo esta sesión' : 'modelo por defecto'}
           </Text>
         </Text>
         <Text> </Text>
@@ -2537,7 +2628,7 @@ export function App({
           Modelo (manual)
           <Text color={theme.textMuted} bold={false}>
             {'  ·  '}
-            {agent.providerName} · solo esta sesión
+            {agent.providerName} · {agent.model ? 'solo esta sesión' : 'modelo por defecto'}
           </Text>
         </Text>
         {overlay.note && <Text color={theme.warning}> ⚠ {overlay.note}</Text>}

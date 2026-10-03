@@ -6,6 +6,7 @@ import React from 'react';
 import { render } from 'ink';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
+import { discoverContextWindow } from '../startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
@@ -61,6 +62,7 @@ function resolveVersion(): string {
 export const chatCommand = new Command('chat')
   .description('Start an interactive REPL session with the agent')
   .option('--provider <name>', 'use a specific provider from config')
+  .option('--model <id>', 'start with a specific model of the provider (this session only)')
   .option('--resume <session-id>', 'resume a previous session')
   .option('--read-only', 'observation only: no file writes and only read-only commands')
   .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
@@ -71,6 +73,7 @@ export const chatCommand = new Command('chat')
   .action(
     async (opts: {
       provider?: string;
+      model?: string;
       resume?: string;
       logLevel?: string;
       debug?: boolean;
@@ -115,6 +118,12 @@ export const chatCommand = new Command('chat')
       } catch (err) {
         process.stderr.write(`Provider error: ${String(err)}\n`);
         process.exit(1);
+      }
+      if (opts.model?.trim()) router.switchModel(opts.model.trim());
+      // Sin modelo configurado, `App` abre el selector al montar (y esa consulta
+      // ya trae las ventanas). Con modelo, se consulta en background.
+      if (router.model && router.contextWindowIsDiscoverable) {
+        void discoverContextWindow(router.getActiveConfig());
       }
 
       const registry = new ToolRegistry();
