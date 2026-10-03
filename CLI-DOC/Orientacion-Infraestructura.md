@@ -358,6 +358,8 @@ Y aquí `prompt.guides: 'pointers'` (Hito 14) gana sentido de golpe. Se dejó co
 
 Un sistema de plugins que cargue módulos TS de un directorio. MCP ya cubre ese caso con un protocolo, aislamiento de proceso y un ciclo de vida probado (Hitos 4 y 4.1). Duplicarlo con carga dinámica en proceso añadiría una superficie de seguridad nueva a cambio de nada.
 
+> **Revisado el 2026-10-03.** Esta decisión se reabre de forma acotada en [[Plugins-Implementacion]]. El argumento sigue valiendo para las **tools** — MCP continúa siendo la vía para añadirlas —, pero MCP no puede interceptar tools ajenas, reaccionar al ciclo del agente, añadir `/comandos` o bloques de prompt, ni distribuir skills y perfiles como un paquete. Los plugins cubren solo eso, con la superficie de seguridad nueva tratada explícitamente (solo pueden restringir, confianza de proyecto, sin instalación al arrancar).
+
 ---
 
 ## 11. Decisiones tomadas
