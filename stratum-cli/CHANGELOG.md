@@ -6,6 +6,24 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.7.0] — 2026-10-03
+
+Versión estable de la 0.7.0: incluye todo lo de la [0.7.0-beta.0](#070-beta0--2026-09-27) (endurecimiento de la persistencia, de la escritura de ficheros, de MCP, del cliente del LLM y de `web_fetch`) y, además, los **modelos descubiertos**: a un provider le basta la URL y la key.
+
+### Añadido
+- **Providers sin `model`**: un provider ya no necesita `model` ni `contextWindow` en la config; con `baseUrl` y `apiKey` los modelos se piden a `GET /models`. `chat` abre el selector de modelos al arrancar si el provider no tiene ninguno y guarda la primera elección como modelo por defecto.
+- `stratum run` y `stratum init` aceptan `--model`. Sin modelo fijado, usan el único que exponga el provider; con varios, fallan listándolos en vez de elegir uno.
+- `stratum provider add <alias> --base-url … --api-key-env VAR` da de alta un provider sin pasar por el wizard, y `stratum provider models [alias] [--set <id>]` lista los modelos y fija el de por defecto.
+- `/provider remove <alias>` en el chat.
+- Core de Stratum Desktop: guardado atómico de conversaciones y sesiones, guardado al cerrar y avisos cuando un guardado falla. Sin cambios de comportamiento en la CLI.
+
+### Cambiado
+- **Ventana de contexto por modelo**: `models.<id>.contextWindow` > la del provider si está escrita > la que declare `/models` > 32768. El wizard ya no escribe `contextWindow`.
+- `stratum provider remove` quita el provider de todos los ficheros que lo definen (global y proyecto), no solo del primero.
+
+### Corregido
+- **Wizard de providers**: con una `apiKey` escrita como `${VAR}`, la consulta de modelos enviaba el placeholder literal y caía siempre a la entrada manual. Ahora consulta con la variable expandida y guarda el placeholder.
+
 ## [0.7.0-beta.0] — 2026-09-27
 
 Pre-release para pruebas (`npm install -g stratum-cli@beta`); `latest` sigue en la 0.6.0.
