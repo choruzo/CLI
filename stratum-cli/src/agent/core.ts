@@ -285,18 +285,22 @@ export class StratumAgent {
 
     let stopReason: string | null = null;
     const tracker = this.targetTracker();
+    const trace = opts?.trace;
+    trace?.turnStart(input, this.messages);
     try {
       for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
         if (event.type === 'tool_result') this._toolCallCount++;
         if (event.type === 'subagent_completed') this.addChildTokens(event.result);
         if (event.type === 'done') stopReason = event.stopReason;
         tracker(event);
+        trace?.event(event);
         yield event;
       }
     } finally {
       // §12.12: un turno cancelado o abandonado a mitad no puede dejar tool
       // calls sin respuesta: el siguiente request al provider fallaría.
       closeDanglingToolCalls(this.messages);
+      trace?.turnEnd(stopReason);
     }
     // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
     // `unsupported` es pegajoso — si este backend no manda usage, no lo va a
@@ -938,6 +942,8 @@ export class StratumAgent {
     const callId = `call_direct_${subId.slice(4)}`;
 
     pushUserInput(this.messages, `@${profile.name} ${taskText}`);
+    const trace = opts?.trace;
+    trace?.turnStart(`@${profile.name} ${taskText}`, this.messages);
     this.messages.push({
       role: 'assistant',
       content: null,
@@ -974,6 +980,7 @@ export class StratumAgent {
         if (next.value.type === 'subagent_completed' && next.value.subagentId === subId) {
           result = next.value.result;
         }
+        trace?.event(next.value);
         yield next.value;
       }
     } finally {
@@ -999,6 +1006,7 @@ export class StratumAgent {
       this.messages.push({ role: 'assistant', content: directSummaryText(profile.name, final) });
       this._toolCallCount++;
       if (result) this.addChildTokens(result);
+      trace?.turnEnd(result ? 'stop' : 'cancelled');
     }
 
     yield {

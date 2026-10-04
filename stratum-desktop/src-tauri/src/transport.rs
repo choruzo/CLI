@@ -12,10 +12,10 @@ use std::io;
 use std::time::{Duration, Instant};
 
 /// Versión del protocolo que entiende este shell (`DESKTOP_PROTOCOL_VERSION`).
-pub const PROTOCOL_VERSION: u64 = 8;
+pub const PROTOCOL_VERSION: u64 = 9;
 
 /// Tipos que el frontend puede mandar (`CLIENT_FRAME_TYPES` en `protocol.ts`).
-pub const CLIENT_FRAME_TYPES: [&str; 24] = [
+pub const CLIENT_FRAME_TYPES: [&str; 26] = [
     "ping",
     "new_conversation",
     "close_conversation",
@@ -40,6 +40,8 @@ pub const CLIENT_FRAME_TYPES: [&str; 24] = [
     "provider_probe",
     "retention_run",
     "workspaces_usage_get",
+    "trace_subscribe",
+    "trace_unsubscribe",
 ];
 
 /// Tope de una trama del frontend (`MAX_FRAME_BYTES` en `protocol.ts`). Se
@@ -180,7 +182,7 @@ mod tests {
     #[test]
     fn acepta_handshake_ok_con_la_version_de_protocolo() {
         let info = parse_handshake_reply(
-            &json!({"type":"handshake_ok","core":{"protocolVersion":8,"version":"0.4.0"},"natives":[]})
+            &json!({"type":"handshake_ok","core":{"protocolVersion":9,"version":"0.4.0"},"natives":[]})
                 .to_string(),
         )
         .unwrap();

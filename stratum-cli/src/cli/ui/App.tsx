@@ -79,6 +79,8 @@ import { PlanStore, generatePlanId } from '../../session/plan-store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
 import { deleteSessionWithArtifacts, describeArtifacts } from '../../session/cleanup.js';
 import { prepareSessionResume } from '../../session/resume.js';
+import type { SessionAuditor } from '../../trace/auditor.js';
+import { deleteTrace } from '../../trace/store.js';
 
 /** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
 type OverlayState =
@@ -878,6 +880,8 @@ interface Props {
   registry?: ToolRegistry;
   /** Store de subagentes compartido con `chat`, que marca los huérfanos tras guardar. */
   subagentStore?: SubagentStore;
+  /** Traza de la sesión y su visor web (`/auditor`). */
+  auditor?: SessionAuditor;
   /** Guarda un checkpoint de la sesión; se llama al terminar cada turno. */
   onCheckpoint?: () => void;
 }
@@ -891,6 +895,7 @@ export function App({
   sessionId,
   registry,
   subagentStore,
+  auditor,
   onCheckpoint,
 }: Props) {
   const { exit } = useApp();
@@ -1070,6 +1075,7 @@ export function App({
   const getRunOptions = useCallback((): Partial<RunOptions> => {
     const opts: Partial<RunOptions> = {
       sessionId,
+      trace: auditor?.scope,
       // Hito 15: la política de un perfil principal solo endurece la de la sesión.
       destructivePolicy: strictestPolicy(
         allowAllRef.current ? 'allow' : 'ask',
@@ -1096,7 +1102,7 @@ export function App({
       }
     }
     return opts;
-  }, [onConfirmDestructive, onAskQuestions, agent, sessionId]);
+  }, [onConfirmDestructive, onAskQuestions, agent, sessionId, auditor]);
 
   const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
 
@@ -1826,6 +1832,47 @@ export function App({
         return;
       }
 
+      // Trayectoria de la sesión en el navegador. El visor solo lee la traza
+      // que escribe el runtime; el agente no interviene.
+      if (cmd === '/auditor' || cmd === '/auditor stop') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        if (!auditor?.enabled) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'La traza de sesión está desactivada (trace.enabled: false en .stratumrc.json).',
+          });
+          return;
+        }
+        void (async () => {
+          try {
+            if (cmd === '/auditor stop') {
+              const stopped = await auditor.stop();
+              dispatch({
+                type: 'SYSTEM_MESSAGE',
+                text: stopped ? 'Visor de trayectoria cerrado.' : 'El visor no estaba abierto.',
+              });
+              return;
+            }
+            const opened = await auditor.open();
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text:
+                `Trayectoria de la sesión: ${opened.url}\n` +
+                (opened.browser
+                  ? 'Abierta en el navegador; se actualiza sola según avanza la sesión.'
+                  : 'No se pudo abrir el navegador: abre esa URL a mano.') +
+                '\nSolo es accesible desde este equipo y se cierra al salir (o con /auditor stop).',
+            });
+          } catch (err) {
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `No se pudo abrir el visor: ${err instanceof Error ? err.message : String(err)}`,
+            });
+          }
+        })();
+        return;
+      }
+
       if (cmd === '/debug') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         dispatch({ type: 'TOGGLE_DEBUG' });
@@ -1946,6 +1993,7 @@ export function App({
         }
         try {
           const removed = deleteSessionWithArtifacts(sessionStore(), id);
+          deleteTrace(agent.getConfig(), id);
           dispatch({
             type: 'SYSTEM_MESSAGE',
             text: `Sesión "${id}" eliminada${describeArtifacts(removed)}.`,

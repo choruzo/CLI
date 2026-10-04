@@ -29,6 +29,8 @@ import { useDesktopOs } from './hooks/useDesktopOs';
 import { Onboarding } from './components/onboarding/Onboarding';
 import { StartupFailure } from './components/onboarding/StartupFailure';
 import { openLogsDir } from './ipc/os';
+import { TrajectoryPanel } from './components/trajectory/TrajectoryPanel';
+import { loadTrajectoryOpen, saveTrajectoryOpen, useTrajectory } from './hooks/useTrajectory';
 
 /** Los atajos también funcionan con el foco en el textarea o en un buscador. */
 const GLOBAL = { enableOnFormTags: true, preventDefault: true } as const;
@@ -49,6 +51,12 @@ export function App() {
   const [sidebar, setSidebar] = useState<SidebarState>(loadSidebarState);
   useEffect(() => saveSidebarState(sidebar), [sidebar]);
   const memory = useMemory(connected && sidebar.open && sidebar.panel === 'memory');
+
+  // Trayectoria del agente: panel anclado a la derecha del chat (Ctrl+J).
+  const [trajectoryOpen, setTrajectoryOpen] = useState(loadTrajectoryOpen);
+  useEffect(() => saveTrajectoryOpen(trajectoryOpen), [trajectoryOpen]);
+  const toggleTrajectory = useCallback(() => setTrajectoryOpen((open) => !open), []);
+  const trajectory = useTrajectory(connected && trajectoryOpen, active.conversationId);
 
   const viewRef = useRef<ConversationViewHandle>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -153,6 +161,7 @@ export function App() {
   );
   useHotkeys('ctrl+l, meta+l', () => active.opened && setConfirmClear(true), GLOBAL, [active.opened]);
   useHotkeys('ctrl+comma, meta+comma', openSettings, GLOBAL, [openSettings]);
+  useHotkeys('ctrl+j, meta+j', toggleTrajectory, GLOBAL, [toggleTrajectory]);
   useHotkeys(
     'escape',
     () => {
@@ -326,6 +335,9 @@ export function App() {
             }}
             onCancelClear={() => setConfirmClear(false)}
           />
+          {trajectoryOpen && (
+            <TrajectoryPanel trajectory={trajectory} onClose={() => setTrajectoryOpen(false)} />
+          )}
         </div>
 
         <StatusBar
@@ -334,6 +346,8 @@ export function App() {
           workspace={active.workspace}
           generating={generating}
           queued={queued}
+          trajectoryOpen={trajectoryOpen}
+          onToggleTrajectory={toggleTrajectory}
         />
 
         {onboarding && !settingsOpen && (

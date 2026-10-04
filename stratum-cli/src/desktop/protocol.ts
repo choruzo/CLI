@@ -66,8 +66,11 @@ import type {
 
 export type { AgentEvent, DestructiveDecision, QuestionAnswer, QuestionItem, TodoItem };
 
+import type { TraceRecord } from '../trace/records.js';
+export type { TraceRecord };
+
 /** Versión del protocolo del canal. Rust la comprueba en `handshake_ok`. */
-export const DESKTOP_PROTOCOL_VERSION = 8;
+export const DESKTOP_PROTOCOL_VERSION = 9;
 
 /** Tiempo máximo para recibir el handshake tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
@@ -306,7 +309,23 @@ export interface WorkspacesUsageGetFrame {
   type: 'workspaces_usage_get';
 }
 
+/**
+ * Panel de trayectoria (v9): empieza a recibir la traza de una conversación,
+ * desde el principio y según crece. Solo se sigue una a la vez: suscribirse a
+ * otra sustituye a la anterior.
+ */
+export interface TraceSubscribeFrame {
+  type: 'trace_subscribe';
+  conversationId: string;
+}
+
+export interface TraceUnsubscribeFrame {
+  type: 'trace_unsubscribe';
+}
+
 export type ConversationFrame =
+  | TraceSubscribeFrame
+  | TraceUnsubscribeFrame
   | ConfigGetFrame
   | ConfigValidateFrame
   | ConfigSaveFrame
@@ -360,6 +379,8 @@ export const CLIENT_FRAME_TYPES = [
   'provider_probe',
   'retention_run',
   'workspaces_usage_get',
+  'trace_subscribe',
+  'trace_unsubscribe',
 ] as const;
 
 // ---------------------------------------------------------------------------
@@ -864,7 +885,19 @@ export interface RetentionReportFrame {
   disabled: boolean;
 }
 
+/**
+ * Tanda de registros de la traza de una conversación (v9). `reset` indica que
+ * empieza de cero: lo recibido antes para esa conversación se descarta.
+ */
+export interface TraceRecordsFrame {
+  type: 'trace_records';
+  conversationId: string;
+  reset: boolean;
+  records: TraceRecord[];
+}
+
 export type ConversationOutboundFrame =
+  | TraceRecordsFrame
   | ConfigStateFrame
   | ConfigValidationFrame
   | ConfigSavedFrame

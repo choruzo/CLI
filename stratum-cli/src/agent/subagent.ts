@@ -30,6 +30,7 @@ import { prepareGuideIndex } from './guides.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
+import type { TraceScope } from '../trace/recorder.js';
 
 const log = getLogger('agent.subagent');
 
@@ -73,6 +74,8 @@ export interface RunSubagentOptions {
   readOnly?: boolean;
   /** Hito 17 — el padre trabaja bajo un plan aprobado (satisface `requirePlan`). */
   planApproved?: boolean;
+  /** Scope de traza de este hijo (`TraceScope.child`): sus pasos cuelgan del subagente. */
+  trace?: TraceScope;
 }
 
 function pad2(n: number): string {
@@ -218,6 +221,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     planApproved: opts.planApproved,
     maxIterations: profile.budget.maxIterations,
     maxTokens: profile.budget.maxTokens,
+    trace: opts.trace,
   };
 
   log.info('subagent run', {
@@ -231,6 +235,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   let stopReason = 'stop';
   try {
     for await (const ev of loop.run(runOpts)) {
+      opts.trace?.event(ev);
       // Re-emitir cada evento del hijo hacia el orquestador (Hito 8C): la UI lo
       // envuelve como subagent_event bajo el nodo de este subagente. Best-effort.
       if (opts.onEvent) {

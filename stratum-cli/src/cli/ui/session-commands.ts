@@ -124,6 +124,16 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/auditor',
+    description: 'Abre en el navegador la trayectoria de la sesión (timeline en vivo)',
+    hasArgs: false,
+  },
+  {
+    name: '/auditor stop',
+    description: 'Cierra el visor de trayectoria',
+    hasArgs: false,
+  },
+  {
     name: '/debug',
     description: 'Muestra el razonamiento completo (⊙ thinking) en vez de la línea plegada',
     hasArgs: false,

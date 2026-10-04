@@ -11,6 +11,8 @@ import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
+import { openSessionTrace, pruneTraces } from '../../trace/store.js';
+import { SessionAuditor } from '../../trace/auditor.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { SessionStore, generateSessionId } from '../../session/store.js';
@@ -262,6 +264,15 @@ export const chatCommand = new Command('chat')
       const version = resolveVersion();
       const sessionStart = new Date().toISOString();
 
+      // Traza de la sesión (`/auditor`): se graba siempre; el visor web solo se
+      // levanta si se pide. Una sesión reanudada sigue en su mismo fichero.
+      if (config.trace.retentionDays > 0) {
+        pruneTraces(config, config.trace.retentionDays * 24 * 60 * 60 * 1000);
+      }
+      const auditor = new SessionAuditor(
+        openSessionTrace(config, sessionId, { cwd: process.cwd(), version }),
+      );
+
       // Guardado incremental (checkpoints): antes la sesión solo se escribía al
       // salir limpiamente, y un cierre de la ventana o un fallo la perdía entera.
       // El checkpointer es el único escritor de la sesión, también al salir.
@@ -311,6 +322,7 @@ export const chatCommand = new Command('chat')
           sessionId,
           registry,
           subagentStore,
+          auditor,
           onCheckpoint: () => void checkpointer.checkpoint(),
         }),
         // Ctrl+C es de App (cancelar el turno, doble pulsación para salir, §10):
@@ -357,6 +369,7 @@ export const chatCommand = new Command('chat')
       // vivo el event loop y el proceso nunca termina.
       await settle('exec runtime shutdown', () => closeExecRuntime());
       await settle('subagent store dispose', () => subagentStore.dispose());
+      await settle('auditor shutdown', () => auditor.dispose());
       await flushLogging();
     },
   );

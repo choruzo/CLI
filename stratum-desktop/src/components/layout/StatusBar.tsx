@@ -27,6 +27,8 @@ export function StatusBar({
   workspace,
   generating,
   queued,
+  trajectoryOpen,
+  onToggleTrajectory,
 }: {
   sidecar: SidecarState;
   stats: ConversationStats | null;
@@ -35,6 +37,9 @@ export function StatusBar({
   generating: number;
   /** Turnos esperando hueco de generación. */
   queued: number;
+  /** Panel de trayectoria: el botón lo muestra y lo esconde. */
+  trajectoryOpen?: boolean;
+  onToggleTrajectory?: () => void;
 }) {
   const { label, tone } = describeConnection(sidecar);
   const ctx = stats?.context;
@@ -73,6 +78,17 @@ export function StatusBar({
           {generating > 0 && queued > 0 && ' · '}
           {queued > 0 && `${queued} en cola`}
         </span>
+      )}
+      {onToggleTrajectory && (
+        <button
+          type="button"
+          className="status-bar__item status-bar__toggle"
+          aria-pressed={trajectoryOpen === true}
+          title={`${trajectoryOpen ? 'Ocultar' : 'Mostrar'} la trayectoria del agente (Ctrl+J)`}
+          onClick={onToggleTrajectory}
+        >
+          Trayectoria
+        </button>
       )}
     </footer>
   );

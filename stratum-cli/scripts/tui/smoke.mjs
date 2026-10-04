@@ -110,7 +110,7 @@ async function conversation() {
 
 async function cancelAndExit() {
   const mock = await startMockLlm();
-  const t = launch({ config: mockConfig(mock.baseUrl) });
+  const t = launch({ config: mockConfig(mock.baseUrl), env: { STRATUM_NO_BROWSER: '1' } });
   try {
     await check('Ctrl+C a mitad de respuesta cancela el turno y la sesión sigue', t, async () => {
       await t.waitForBanner();
@@ -127,6 +127,23 @@ async function cancelAndExit() {
       await t.submit('/help');
       await t.waitFor(/\/quit\s+Termina la sesión/);
       assert.equal(mock.requests.length, before);
+    });
+
+    await check('/auditor levanta el visor con la traza de la sesión', t, async () => {
+      await t.submit('/auditor');
+      await t.waitFor(/Trayectoria de la sesión: http/);
+      const url = /http:\/\/127\.0\.0\.1:\d+\/[0-9a-f]{32}\//.exec(
+        t.screen().replace(/\n/g, ''),
+      )[0];
+      const page = await fetch(url);
+      assert.equal(page.status, 200);
+      assert.match(await page.text(), /Trayectoria/);
+      // El turno cancelado de antes ya está en la traza que sirve el visor.
+      const events = await fetch(`${url}events`);
+      const { value } = await events.body.getReader().read();
+      assert.match(new TextDecoder().decode(value), /connected/);
+      await t.submit('/auditor stop');
+      await t.waitFor(/Visor de trayectoria cerrado/);
     });
 
     await check('/comando desconocido: error en local, no llega al modelo', t, async () => {

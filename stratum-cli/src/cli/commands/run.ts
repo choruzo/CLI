@@ -23,6 +23,7 @@ import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
+import { openSessionTrace } from '../../trace/store.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
@@ -310,12 +311,17 @@ export const runCommand = new Command('run')
       // handler principal con `toolStartTimes`). Clave = subagentId:innerId.
       const subToolSeen = new Set<string>();
 
+      // `run` es one-shot y no persiste sesión, pero el id sí correlaciona en el
+      // log de auditoría los comandos de una misma invocación y nombra su traza
+      // (`stratum auditor <id>`).
+      const sessionId = generateSessionId();
+      const trace = openSessionTrace(config, sessionId, { cwd: process.cwd() });
+
       try {
         const runOpts: RunOptions = {
           signal: controller.signal,
-          // `run` es one-shot y no persiste sesión, pero el id sí correlaciona
-          // en el log de auditoría SSH los comandos de una misma invocación.
-          sessionId: generateSessionId(),
+          sessionId,
+          trace: trace?.scope(),
           allowDestructive: opts.allowDestructive,
           destructivePolicy: policy,
           // Hito 17: con TTY el callback se pasa también con --allow-destructive:
@@ -481,6 +487,7 @@ export const runCommand = new Command('run')
         await mcpManager.shutdownAll();
         await closeExecRuntime();
         getLogger('cli').error('run aborted with error', { err });
+        await trace?.flush();
         await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
         process.exit(1);
@@ -489,6 +496,7 @@ export const runCommand = new Command('run')
       await mcpManager.shutdownAll();
       // Hito 9 (§12.12): cerrar los sockets SSH antes de salir.
       await closeExecRuntime();
+      await trace?.flush();
       await flushLogging();
 
       if (controller.signal.aborted) {

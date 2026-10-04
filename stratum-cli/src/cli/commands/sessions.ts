@@ -7,6 +7,7 @@ import {
   describeArtifacts,
   pruneSessionsWithArtifacts,
 } from '../../session/cleanup.js';
+import { deleteTrace, pruneTraces } from '../../trace/store.js';
 
 function getStore(): SessionStore {
   const config = loadConfig();
@@ -76,6 +77,7 @@ const sessionsDelete = new Command('delete')
     const store = getStore();
     try {
       const removed = deleteSessionWithArtifacts(store, id);
+      deleteTrace(loadConfig(), id);
       process.stdout.write(`Sesión "${id}" eliminada${describeArtifacts(removed)}.\n`);
     } catch (err) {
       process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
@@ -103,6 +105,8 @@ const sessionsPrune = new Command('prune')
       olderThanMs,
       process.cwd(),
     );
+    // Las trazas son derivadas de la sesión: se van con el mismo umbral.
+    pruneTraces(loadConfig(), olderThanMs);
     process.stdout.write(
       `${sessions} sesión(es), ${subagents} registro(s) de subagente y ${plans} plan(es) ` +
         `eliminados (más antiguos de ${durationStr}).\n`,

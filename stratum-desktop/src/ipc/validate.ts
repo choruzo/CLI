@@ -19,6 +19,7 @@ import type {
   WorkspaceStatus,
 } from '../../../stratum-cli/src/desktop/protocol';
 import { DEFAULT_GLOBAL_HOTKEY } from '../../../stratum-cli/src/config/accelerator';
+import type { TraceKind, TraceRecord, TraceStatus } from '../../../stratum-cli/src/trace/records';
 
 /**
  * Validación estructural de lo que llega del sidecar antes de entrar al estado
@@ -392,4 +393,46 @@ export function configIssues(v: unknown): ConfigIssue[] | null {
         ]
       : [],
   );
+}
+
+const TRACE_KINDS = new Set(['system', 'user', 'context', 'model', 'tool', 'subagent', 'notice']);
+const TRACE_STATUS = new Set(['ok', 'error', 'cancelled']);
+
+/** Un registro de la traza (panel de trayectoria, v9). `data` es libre: se pinta como texto. */
+function traceRecord(v: unknown): TraceRecord | null {
+  if (!isRecord(v) || !num(v.at)) return null;
+  const data = isRecord(v.data) ? { data: v.data } : {};
+  const parent = str(v.parent) ? { parent: v.parent } : {};
+  const status = str(v.status) && TRACE_STATUS.has(v.status) ? (v.status as TraceStatus) : null;
+  switch (v.t) {
+    case 'turn':
+      return str(v.input) ? { t: 'turn', at: v.at, input: v.input } : null;
+    case 'turn_end':
+      return { t: 'turn_end', at: v.at, stopReason: str(v.stopReason) ? v.stopReason : null };
+    case 'begin':
+    case 'point': {
+      if (!str(v.id) || !str(v.name) || !str(v.kind) || !TRACE_KINDS.has(v.kind)) return null;
+      const base = { at: v.at, id: v.id, kind: v.kind as TraceKind, name: v.name, ...parent, ...data };
+      return v.t === 'begin'
+        ? { t: 'begin', ...base }
+        : { t: 'point', ...base, ...(status ? { status } : {}) };
+    }
+    case 'end':
+      return str(v.id) && status ? { t: 'end', at: v.at, id: v.id, status, ...data } : null;
+    case 'mark':
+      return str(v.id) && str(v.name) ? { t: 'mark', at: v.at, id: v.id, name: v.name } : null;
+    default:
+      return null; // `meta` y tipos de un formato más nuevo: el panel no los usa
+  }
+}
+
+/** Registros válidos de una trama `trace_records`; los que no encajan se descartan. */
+export function traceRecords(v: unknown): TraceRecord[] | null {
+  if (!Array.isArray(v)) return null;
+  const out: TraceRecord[] = [];
+  for (const item of v) {
+    const r = traceRecord(item);
+    if (r) out.push(r);
+  }
+  return out;
 }

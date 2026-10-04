@@ -14,6 +14,7 @@ import { mcpCommand } from './commands/mcp.js';
 import { logsCommand } from './commands/logs.js';
 import { sshCommand } from './commands/ssh.js';
 import { agentsCommand } from './commands/agents.js';
+import { auditorCommand } from './commands/auditor.js';
 import { ConfigError } from '../config/loader.js';
 import { SchemaVersionError } from '../config/schema-version.js';
 
@@ -47,6 +48,7 @@ program.addCommand(mcpCommand);
 program.addCommand(logsCommand);
 program.addCommand(sshCommand);
 program.addCommand(agentsCommand);
+program.addCommand(auditorCommand);
 
 // Una config rota se explica con su mensaje (fichero, línea o clave), no con
 // la traza: los comandos que no capturan `loadConfig()` llegan aquí.

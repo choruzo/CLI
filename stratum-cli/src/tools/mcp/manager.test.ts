@@ -16,6 +16,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     logging: DEFAULTS.logging,
     agents: DEFAULTS.agents,
     skills: DEFAULTS.skills,
+    trace: DEFAULTS.trace,
     prompt: DEFAULTS.prompt,
     desktop: DEFAULTS.desktop,
     session: DEFAULTS.session,

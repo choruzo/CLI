@@ -135,6 +135,12 @@
     "enabled": true,
     "registryFile": "./.stratum/skill-registry.md"
   },
+  "trace": {
+    "enabled": true,
+    "dir": "~/.stratum/traces",
+    "retentionDays": 30,
+    "maxFieldChars": 200000
+  },
   "prompt": {
     "guides": "inline",
     "guidesDir": "./.stratum/guides"

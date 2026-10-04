@@ -17,6 +17,7 @@ import { buildAssistantRegistry } from './assistant-runtime.js';
 import { checkpointMessages } from '../session/checkpoint.js';
 import { describeFsError } from './atomic-file.js';
 import { closeDanglingToolCalls } from '../agent/cancel.js';
+import type { TraceRecorder } from '../trace/recorder.js';
 import type { DesktopSessionStore } from './session-store.js';
 import {
   CONVERSATION_RECORD_VERSION,
@@ -96,6 +97,8 @@ export interface ConversationSessionOptions {
   workspace?: ConversationWorkspace;
   /** Plazos de retención, para anunciar `workspace_status` tras cada uso (D3). */
   workspaceSettings?: WorkspaceSettings;
+  /** Traza de la conversación para el panel de trayectoria (v9); sin ella no se graba. */
+  makeTrace?: (config: StratumConfig) => TraceRecorder | null;
 }
 
 /** Un adjunto ya comprobado contra el workspace. */
@@ -189,6 +192,9 @@ export class ConversationSession {
   private readonly closeGraceMs: number;
   private readonly checkpointMs: number;
   private readonly workspace: ConversationWorkspace | undefined;
+  private readonly makeTrace: ((config: StratumConfig) => TraceRecorder | null) | undefined;
+  /** Se renueva con el agente: sus mensajes son objetos nuevos y la traza los daría por entrada nueva. */
+  private trace: TraceRecorder | null = null;
   private readonly workspaceSettings: WorkspaceSettings | undefined;
   private record: ConversationRecord;
   private turn: Turn | null = null;
@@ -230,6 +236,8 @@ export class ConversationSession {
     this.closeGraceMs = opts.closeGraceMs ?? CLOSE_GRACE_MS;
     this.checkpointMs = opts.checkpointMs ?? CHECKPOINT_INTERVAL_MS;
     this.workspace = opts.workspace;
+    this.makeTrace = opts.makeTrace;
+    this.trace = opts.makeTrace?.(opts.config) ?? null;
     this.workspaceSettings = opts.workspaceSettings;
     this.registry = buildAssistantRegistry({ files: this.workspace !== undefined });
     this.agent = this.createAgent(opts.config, opts.router, resumable(opts.initialMessages));
@@ -326,6 +334,7 @@ export class ConversationSession {
     // El historial se conserva; el system prompt se recompone con la config
     // nueva (el preset `assistant` nunca reutiliza el guardado).
     this.agent = this.createAgent(config, router, this.agent.getMessages());
+    this.trace = this.makeTrace?.(config) ?? null;
     const pinned =
       this.record.modelPinned === true && previous.provider === this.agent.providerName;
     if (pinned && previous.model !== this.agent.model) this.agent.switchModel(previous.model);
@@ -570,6 +579,7 @@ export class ConversationSession {
       const events = this.agent.run(text, {
         signal: abort.signal,
         sessionId: this.conversationId,
+        trace: this.trace?.scope(),
         destructivePolicy: 'ask',
         onConfirmDestructive: (req) => this.confirm(req, abort.signal),
         onAskQuestions: (items) => this.ask(items, abort.signal),

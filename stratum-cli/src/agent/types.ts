@@ -2,6 +2,7 @@ import type { ZodTypeAny } from 'zod';
 import type { StratumConfig } from '../config/schema.js';
 import type { IProvider } from '../providers/base.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
+import type { TraceScope } from '../trace/recorder.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -320,6 +321,12 @@ export interface RunOptions {
    * subagentes cuya ejecución quedó a medias (`running` → `interrupted`).
    */
   onSubagentPersist?: (rec: SubagentPersist) => void;
+  /**
+   * Traza de la sesión (`src/trace/`). El loop anota en ella cada llamada al
+   * modelo y quien consume sus eventos (`StratumAgent`, `runSubagent`), el
+   * resto. Sin ella no se graba nada.
+   */
+  trace?: TraceScope;
 }
 
 /** Registro que el loop padre pasa a `onSubagentPersist` (Hito 8B). */

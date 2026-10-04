@@ -218,6 +218,7 @@ export async function* executeDelegations(
               : undefined,
             onEvent: (ev) => push({ type: 'subagent_event', subagentId: job.subId, event: ev }),
             skillsBlock: ctx.skillsBlock,
+            trace: opts?.trace?.child(job.subId),
           });
         } catch (err) {
           // runSubagent no debería lanzar (captura internamente); red de seguridad.

@@ -11,6 +11,7 @@ import { MemoryPanel } from './memory-panel.js';
 import type { DesktopSettings } from './settings.js';
 import { unreadableReason, type DesktopSessionStore } from './session-store.js';
 import { describeFsError } from './atomic-file.js';
+import { TraceFeed } from './trace-feed.js';
 import { DEFAULT_MAX_CONCURRENT_TURNS, TurnScheduler } from './turn-scheduler.js';
 import type { ConversationWorkspace, WorkspaceManager } from './workspace.js';
 import type {
@@ -78,6 +79,8 @@ export class ConversationHost {
   private readonly records: DesktopConversationStore;
   private readonly scheduler: TurnScheduler;
   private readonly memory: MemoryPanel;
+  /** Trazas por conversación y el panel de trayectoria que sigue una (v9). */
+  private readonly traces: TraceFeed;
   /** Config vigente: la de arranque hasta que Ajustes o la CLI la cambian (D5). */
   private config: StratumConfig;
   private error: SidecarErrorFrame | null;
@@ -90,6 +93,7 @@ export class ConversationHost {
       new DesktopConversationStore(join(dirname(opts.store.dir), 'conversations'), opts.store);
     this.scheduler = new TurnScheduler(opts.maxConcurrentTurns ?? DEFAULT_MAX_CONCURRENT_TURNS);
     this.memory = opts.memory ?? new MemoryPanel(opts.config);
+    this.traces = new TraceFeed(join(dirname(opts.store.dir), 'traces'), this.emit);
     opts.settings?.attach(this.emit);
     // Temporales de guardados que un proceso matado dejó a medias.
     const swept = opts.store.sweepTemp() + this.records.sweepTemp();
@@ -135,6 +139,7 @@ export class ConversationHost {
   async detach(connectionId: number): Promise<void> {
     if (this.active?.connectionId !== connectionId) return;
     this.active = null;
+    this.traces.unsubscribe();
     await this.closeAll();
   }
 
@@ -274,6 +279,12 @@ export class ConversationHost {
       case 'compact_conversation':
         // Fuera de la cola: una compresión es una llamada al LLM.
         this.withSession(frame.conversationId, (s) => void s.compact());
+        return;
+      case 'trace_subscribe':
+        this.traces.subscribe(frame.conversationId);
+        return;
+      case 'trace_unsubscribe':
+        this.traces.unsubscribe();
         return;
       case 'list_models':
         this.withSession(frame.conversationId, (s) => void s.listModels());
@@ -457,6 +468,7 @@ export class ConversationHost {
       // se espera a que acabe antes de borrar su carpeta.
       if (session) await session.whenIdle();
       this.records.remove(conversationId);
+      this.traces.remove(conversationId);
       await this.opts.workspaces?.remove(conversationId);
     })();
     const done = task
@@ -611,6 +623,7 @@ export class ConversationHost {
         records: this.records,
         record,
         scheduler: this.scheduler,
+        makeTrace: (config) => this.traces.recorder(conversationId, config),
         send: this.emit,
         onChanged: (summary) => this.emit({ type: 'conversation_updated', summary }),
         initialMessages: saved?.messages,

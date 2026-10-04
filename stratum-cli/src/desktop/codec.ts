@@ -133,6 +133,8 @@ const inboundSchema = z.discriminatedUnion('type', [
   z.object({ type: z.literal('clear_conversation'), conversationId }).strict(),
   z.object({ type: z.literal('compact_conversation'), conversationId }).strict(),
   z.object({ type: z.literal('list_models'), conversationId }).strict(),
+  z.object({ type: z.literal('trace_subscribe'), conversationId }).strict(),
+  z.object({ type: z.literal('trace_unsubscribe') }).strict(),
   z
     .object({
       type: z.literal('set_model'),

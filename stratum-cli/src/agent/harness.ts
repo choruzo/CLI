@@ -932,6 +932,8 @@ export class ReactLoop {
 
       const buffer = new StreamBuffer();
       let assistantText = '';
+      // Solo para la traza: el razonamiento nunca entra en el historial.
+      let reasoningText = '';
       const readyCalls: ToolCallReady[] = [];
       // Fix #2: rastrear parse errors del buffer para inject & recover (spec 12.3)
       type ParseError = {
@@ -956,6 +958,13 @@ export class ReactLoop {
         // ¿Se emitió algún evento visible? Si no, es seguro reintentar con otro provider.
         let emittedVisible = false;
         let streamErr: unknown = null;
+        const modelSpan = opts?.trace?.modelStart({
+          iteration: iter,
+          provider: router?.providerName,
+          model: request.model,
+          messages: this.messages,
+          tools: tools.length,
+        });
 
         // Acumula cada evento del buffer en el estado del turno y devuelve el
         // que hay que emitir (el mismo, o su versión redactada).
@@ -963,6 +972,8 @@ export class ReactLoop {
           emittedVisible = true;
           if (ev.type === 'text_delta') {
             assistantText += ev.delta;
+          } else if (ev.type === 'thinking') {
+            reasoningText += ev.text;
           } else if (ev.type === 'tool_call_start') {
             toolArgBuffers.set(ev.id, ev.input_so_far);
           } else if (ev.type === 'tool_call_ready') {
@@ -982,6 +993,8 @@ export class ReactLoop {
         try {
           for await (const chunk of streamWithRetry(activeProvider, request)) {
             if (signal.aborted) break;
+            modelSpan?.firstChunk();
+            if (chunk.usage) modelSpan?.usage(chunk.usage);
 
             // Registrar usage real si viene en el chunk (§12.4)
             if (chunk.usage?.prompt_tokens) {
@@ -1009,6 +1022,29 @@ export class ReactLoop {
         } catch (err) {
           streamErr = err;
         }
+        modelSpan?.end({
+          text: assistantText,
+          reasoning: reasoningText,
+          toolCalls: [
+            ...readyCalls.map((rc) => ({
+              id: rc.id,
+              name: rc.name,
+              arguments: JSON.stringify(rc.input),
+            })),
+            ...parseErrors.map((pe) => ({
+              id: pe.id,
+              name: pe.name,
+              arguments: toolArgBuffers.get(pe.id) ?? '',
+            })),
+          ],
+          cancelled: signal.aborted,
+          error:
+            streamErr === null || signal.aborted
+              ? undefined
+              : streamErr instanceof Error
+                ? streamErr.message
+                : String(streamErr),
+        });
         yield* drainStreamWarnings();
 
         // Request completa (ni error ni cancelación): si no trajo `usage` pese a
@@ -1047,6 +1083,7 @@ export class ReactLoop {
               // Descartar lo acumulado del intento fallido antes de reintentar.
               buffer.reset();
               assistantText = '';
+              reasoningText = '';
               readyCalls.length = 0;
               parseErrors.length = 0;
               toolArgBuffers.clear();

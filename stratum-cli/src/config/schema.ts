@@ -516,6 +516,23 @@ export const StratumConfigSchema = z.object({
    * (`<dir>/<nombre>/SKILL.md`), como los perfiles: aquí solo va el
    * interruptor y dónde se materializa el índice.
    */
+  /**
+   * Traza de sesión (`src/trace/`): un JSONL por sesión con cada paso del
+   * agente —entrada, llamadas al modelo, tools, subagentes— que alimenta el
+   * visor de `/auditor` y `stratum auditor`. La escribe el runtime, nunca el modelo.
+   */
+  trace: z
+    .object({
+      /** `false` → no se graba nada y `/auditor` no tiene qué mostrar. */
+      enabled: z.boolean().default(true),
+      dir: z.string().default('~/.stratum/traces'),
+      /** Días que se conservan las trazas; `chat` purga al arrancar. `0` desactiva. */
+      retentionDays: z.number().int().min(0).default(30),
+      /** Tope por cadena guardada (el contenido va completo y redactado hasta aquí). */
+      maxFieldChars: z.number().int().min(1_000).default(200_000),
+    })
+    .default({}),
+
   skills: z
     .object({
       /** `false` → no se escanea nada y el bloque `# Skills` no se inyecta. */
