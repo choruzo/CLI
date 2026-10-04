@@ -61,6 +61,7 @@
     "test:run": "vitest run",
     "lint": "eslint src/",
     "format": "prettier --write src/",
+    "tui:smoke": "node scripts/tui/smoke.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
@@ -86,12 +87,14 @@
     "sqlite-vec": "^0.1.6"
   },
   "devDependencies": {
+    "@lydell/node-pty": "^1.2.0-beta.15",
     "@types/node": "^22.0.0",
     "@types/react": "^18.3.1",
     "@types/ssh2": "^1.15.5",
     "@types/tar-stream": "^3.1.4",
     "@typescript-eslint/eslint-plugin": "^8.0.0",
     "@typescript-eslint/parser": "^8.0.0",
+    "@xterm/headless": "^6.0.0",
     "eslint": "^9.0.0",
     "prettier": "^3.0.0",
     "tsup": "^8.0.0",
