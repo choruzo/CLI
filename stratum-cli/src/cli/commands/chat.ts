@@ -313,6 +313,9 @@ export const chatCommand = new Command('chat')
           subagentStore,
           onCheckpoint: () => void checkpointer.checkpoint(),
         }),
+        // Ctrl+C es de App (cancelar el turno, doble pulsación para salir, §10):
+        // con el default de Ink, la tecla desmontaba la UI y nunca llegaba.
+        { exitOnCtrlC: false },
       );
 
       try {

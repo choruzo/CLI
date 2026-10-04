@@ -59,7 +59,12 @@ import { ConversationView } from './ConversationView.js';
 import { CommandPalette } from './CommandPalette.js';
 import { ProviderWizard } from './ProviderWizard.js';
 import { SelectList } from './components/SelectList.js';
-import { SESSION_COMMANDS, filterCommands, filterProfiles } from './session-commands.js';
+import {
+  SESSION_COMMANDS,
+  filterCommands,
+  filterProfiles,
+  slashCommandName,
+} from './session-commands.js';
 import { describeProfile, strictestPolicy } from '../../agent/profiles.js';
 import { formatProfilesReport } from '../../agent/profiles-report.js';
 import { listSessionProfiles } from '../../agent/session-profile.js';
@@ -2421,6 +2426,18 @@ export function App({
         return;
       }
 
+      // Aquí ya no queda ningún comando por casar: un `/algo` que llega hasta
+      // este punto no existe, y no se envía al modelo como si fuese un mensaje.
+      const unknown = slashCommandName(cmd);
+      if (unknown) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `✗ Comando desconocido: ${unknown}. Escribe /help para ver los disponibles.`,
+        });
+        return;
+      }
+
       void send(cmd);
     },
     [
@@ -2524,6 +2541,7 @@ export function App({
           onSend={handleSend}
           logoPreRendered={logoPreRendered}
           mcpStartup={mcpStartup}
+          profiles={profileRows}
         />
       </Box>
     );

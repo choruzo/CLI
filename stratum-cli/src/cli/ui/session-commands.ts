@@ -194,3 +194,12 @@ export function filterProfiles(
     .filter((p) => p.name.includes(needle))
     .map((p) => ({ name: `@${p.name}`, description: p.description, hasArgs: true }));
 }
+
+/**
+ * Nombre del /comando que encabeza `input` cuando tiene forma de comando:
+ * `/palabra` sola o seguida de argumentos. Una ruta (`/etc/hosts`, `/tmp/a.log`)
+ * no lo es, así que sigue llegando al modelo como texto normal.
+ */
+export function slashCommandName(input: string): string | null {
+  return /^(\/[A-Za-z][\w-]*)(\s|$)/.exec(input.trimStart())?.[1] ?? null;
+}

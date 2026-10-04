@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { filterCommands, SESSION_COMMANDS } from './session-commands.js';
+import { filterCommands, SESSION_COMMANDS, slashCommandName } from './session-commands.js';
 
 describe('filterCommands (panel §5.2)', () => {
   it('"/" solo muestra todos los comandos', () => {
@@ -106,5 +106,21 @@ describe('comandos de perfiles (Hito 15)', () => {
     expect(filterCommands('/agen').map((c) => c.name)).toEqual(
       expect.arrayContaining(['/agents', '/agent']),
     );
+  });
+});
+
+describe('slashCommandName', () => {
+  it('reconoce un /comando solo o con argumentos', () => {
+    expect(slashCommandName('/noexiste')).toBe('/noexiste');
+    expect(slashCommandName('  /memory search algo')).toBe('/memory');
+    expect(slashCommandName('/config_provider')).toBe('/config_provider');
+  });
+
+  it('una ruta o un texto normal no son un comando', () => {
+    expect(slashCommandName('/etc/hosts qué contiene')).toBeNull();
+    expect(slashCommandName('/tmp/a.log')).toBeNull();
+    expect(slashCommandName('/')).toBeNull();
+    expect(slashCommandName('mira /help')).toBeNull();
+    expect(slashCommandName('hola')).toBeNull();
   });
 });
