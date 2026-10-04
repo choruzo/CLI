@@ -1,5 +1,5 @@
 import type { ProviderConfigInput } from '../../config/schema.js';
-import { expandEnvVars } from '../../config/loader.js';
+import { expandEnvVars } from '../../config/env-vars.js';
 import { fetchModels } from '../../providers/utils.js';
 
 /**
