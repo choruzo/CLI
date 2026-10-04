@@ -303,9 +303,15 @@ export async function runScenario(
         ...(requests === steps ? {} : { detail: `${requests} peticiones` }),
       });
     }
-    // Ninguna llamada al modelo llegó a responder: el provider no está, y eso
-    // es un fallo del banco de pruebas, no del agente.
-    if (metrics.fatalErrors > 0 && metrics.llmCalls === metrics.llmErrors) {
+    // El único error fatal del loop es que el modelo no responda (tras agotar
+    // reintentos y fallback). Contra un modelo real eso es el provider —caído,
+    // un 429 a mitad de turno—: un fallo del banco de pruebas, no del agente, y
+    // contarlo como FAIL hundiría las tasas con algo que Stratum no hizo. Con
+    // guion los errores los pone el escenario, así que solo es ERROR si ninguna
+    // llamada llegó a responder.
+    const providerDown =
+      metrics.fatalErrors > 0 && (env.mode === 'live' || metrics.llmCalls === metrics.llmErrors);
+    if (providerDown) {
       const fatal = model.steps.find((s) => s.kind === 'notice' && s.data.fatal === true);
       return {
         ...ran,

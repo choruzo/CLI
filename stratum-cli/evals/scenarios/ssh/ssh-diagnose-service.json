@@ -9,21 +9,58 @@
         "app1": {
           "commands": [
             {
-              "match": "systemctl\\s+(restart|start|stop|reload|kill)",
+              "match": "systemctl\\s+(restart|start|stop|reload|kill|disable|enable|mask)",
               "stdout": ""
             },
             {
-              "match": "systemctl\\s+(status|is-active|is-failed)",
+              "match": "^(?!.*apache)(sudo\\s+)?systemctl\\s+(status|is-active|is-failed)",
               "stdout": "× nginx.service - A high performance web server\n     Active: failed (Result: exit-code) since Mon 2026-01-12 09:14:02 UTC\n    Process: 2231 ExecStart=/usr/sbin/nginx (code=exited, status=1/FAILURE)\n",
               "exitCode": 3
             },
             {
-              "match": "journalctl",
+              "match": "systemctl\\s+(status|is-active|is-failed|is-enabled).*apache",
+              "stdout": "● apache2.service - The Apache HTTP Server\n     Active: active (running) since Mon 2026-01-12 08:02:11 UTC\n   Main PID: 812 (apache2)\n"
+            },
+            {
+              "match": "systemctl\\s+is-enabled",
+              "stdout": "enabled\n"
+            },
+            {
+              "match": "journalctl|/var/log/nginx",
               "stdout": "Jan 12 09:14:02 app1 nginx[2231]: nginx: [emerg] bind() to 0.0.0.0:80 failed (98: Address already in use)\nJan 12 09:14:02 app1 systemd[1]: nginx.service: Failed with result exit-code.\n"
             },
             {
               "match": "\\b(ss|netstat|lsof|fuser)\\b",
               "stdout": "State  Recv-Q Send-Q Local Address:Port Peer Address:Port Process\nLISTEN 0      511          0.0.0.0:80        0.0.0.0:*     users:((\"apache2\",pid=812,fd=4))\n"
+            },
+            {
+              "match": "\\b(ps|pgrep|pidof)\\b",
+              "stdout": "    PID    PPID USER     CMD\n    812       1 root     /usr/sbin/apache2 -k start\n    815     812 www-data /usr/sbin/apache2 -k start\n"
+            },
+            {
+              "match": "nginx\\s+-t",
+              "stdout": "",
+              "stderr": "nginx: configuration file /etc/nginx/nginx.conf test is successful\n"
+            },
+            {
+              "match": "^\\s*(sudo\\s+)?(id|whoami)\\b",
+              "stdout": "uid=1000(eval) gid=1000(eval) groups=1000(eval),27(sudo)\n"
+            },
+            {
+              "match": "^\\s*(hostname|uname)\\b",
+              "stdout": "app1\n"
+            },
+            {
+              "match": "^\\s*pwd\\b",
+              "stdout": "/home/eval\n"
+            },
+            {
+              "match": "^\\s*(/bin/)?echo\\b",
+              "stdout": "ok\n"
+            },
+            {
+              "match": "^\\s*(type|command -v|which)\\b",
+              "stdout": "/usr/bin/systemctl\n"
             }
           ]
         }

@@ -55,7 +55,8 @@
         "type": "tool_called",
         "tool": "read_file",
         "input": "conf/settings.json",
-        "status": "ok"
+        "status": "ok",
+        "mode": "mock"
       },
       {
         "type": "metric",

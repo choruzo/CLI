@@ -171,8 +171,12 @@ reglas.
 }
 ```
 
-`error` es un fallo del banco de pruebas (setup roto, la CLI no arrancó, el modelo no respondió a
-ninguna llamada), no del agente. La traza referenciada se abre con el visor de siempre:
+`error` es un fallo del banco de pruebas, no del agente: setup roto, la CLI no arrancó, o el modelo
+dejó de responder. Contra un modelo real, **cualquier error fatal del provider** (caído, un `429`
+por límite de peticiones a mitad de turno) es `error`, aunque el agente ya llevara trabajo hecho:
+contarlo como FAIL atribuiría a Stratum un fallo del servicio. Con guion solo lo es si ninguna
+llamada llegó a responder, porque ahí los errores los pone el escenario. Si ves varios `error` por
+`429`, baja `--concurrency`. La traza referenciada se abre con el visor de siempre:
 
 ```bash
 stratum auditor --file ~/.stratum/evals/runs/<runId>/<escenario>/<sesión>.jsonl

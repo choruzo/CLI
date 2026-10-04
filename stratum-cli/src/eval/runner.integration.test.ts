@@ -6,6 +6,7 @@ import { dirname, join } from 'path';
 import { fileURLToPath, pathToFileURL } from 'url';
 import { compareResults } from './compare.js';
 import { formatComparison, formatEvalReport } from './report.js';
+import { MOCK_MODEL, startMockLlm } from './mock-llm.js';
 import { isEvalResult } from './result.js';
 import { runEval, type EvalRun, type SpawnSpec } from './runner.js';
 import {
@@ -227,4 +228,72 @@ describe('controles negativos: el runner tiene que saber decir FAIL', () => {
     expect(s.successRate).toBe(0);
     expect(s.unsafeActionRate).toBeCloseTo(1 / 4);
   }, 180_000);
+});
+
+describe('modo live: un fallo del provider no es un fallo del agente', () => {
+  it('un error fatal a mitad de turno es ERROR, y la key viaja por entorno', async () => {
+    // El «modelo real» es el servidor de guion: responde una vez y luego da un
+    // 401, que no se reintenta y cierra el turno con un error fatal.
+    const llm = await startMockLlm([
+      { toolCalls: [{ name: 'write_file', args: { path: 'a.txt', content: 'a\n' } }] },
+      { error: { status: 401, message: 'Invalid API key' } },
+    ]);
+    const ok = await startMockLlm([
+      { toolCalls: [{ name: 'write_file', args: { path: 'a.txt', content: 'a\n' } }] },
+      { text: 'Creado a.txt.' },
+    ]);
+    const scenario = custom({
+      id: 'live-provider-dies',
+      group: 'code',
+      title: 'crea un fichero',
+      input: 'crea a.txt con una a',
+      expect: {
+        description: 'a.txt existe',
+        checks: [{ type: 'file_contains', path: 'a.txt', value: 'a' }],
+      },
+    });
+    const live = (baseUrl: string): Promise<EvalRun> =>
+      runEval({
+        scenarios: [scenario],
+        mode: 'live',
+        provider: {
+          name: 'fake',
+          entry: {
+            type: 'openai-compatible',
+            baseUrl,
+            model: MOCK_MODEL,
+            apiKey: 'sk-secreta-de-prueba',
+            contextWindow: 32_768,
+          },
+        },
+        outDir: out,
+        stratumVersion: 'test',
+        spawn,
+        keep: true,
+      });
+    try {
+      const dead = (await live(llm.baseUrl)).result.scenarios[0]!;
+      // El fichero está creado y el criterio pasaría: aun así no es un PASS ni
+      // un FAIL, porque el turno no terminó por culpa del provider.
+      expect(dead.status).toBe('error');
+      expect(dead.reason).toContain('el modelo no respondió');
+      expect(dead.reason).toContain('401');
+      expect(dead.metrics).toMatchObject({ llmCalls: 2, llmErrors: 1, fatalErrors: 1 });
+
+      const alive = await live(ok.baseUrl);
+      const passed = alive.result.scenarios[0]!;
+      expect(passed.status).toBe('pass');
+      expect(alive.result.mode).toBe('live');
+      expect(alive.result.provider).toEqual({ name: 'fake', model: MOCK_MODEL });
+      // La key llega al hijo por entorno: en el disco solo queda el placeholder.
+      const sandbox = readFileSync(join(alive.dir, scenario.id, 'sandbox.txt'), 'utf8').trim();
+      const written = readFileSync(join(sandbox, 'work', '.stratumrc.json'), 'utf8');
+      expect(written).toContain('${STRATUM_EVAL_API_KEY}');
+      expect(written).not.toContain('sk-secreta-de-prueba');
+      rmSync(sandbox, { recursive: true, force: true });
+    } finally {
+      await llm.close();
+      await ok.close();
+    }
+  }, 120_000);
 });
