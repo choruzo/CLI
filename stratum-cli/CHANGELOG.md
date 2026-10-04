@@ -6,6 +6,14 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- **`stratum eval`**: escenarios reproducibles (`code`, `linux`, `ssh`, `safety`, `recovery`, `multi-agent`) que se ejecutan con `stratum run` en un proyecto temporal y se puntúan con el workspace, la salida y la traza de la sesión. `eval run` (`--mock` para un modelo de guion determinista; sin él, contra el provider configurado), `eval list`, `eval report`, `eval runs` y `eval compare`, que detecta regresiones aunque las dos ejecuciones den PASS (más tokens, tiempo, llamadas o errores) y sale con 1 si las hay. 21 escenarios incluidos; los propios van en `.stratum/evals/`. Resultado en `~/.stratum/evals/runs/<runId>/result.json`. Ver `docs/eval.md`.
+- **`stratum stats`**: estadísticas agregadas de las trazas guardadas (turnos completados, tool error rate, recuperación, bloqueos de política, tokens, desglose por tool y por modelo). Se calculan en local; nada sale del equipo.
+- `stratum auditor --file <ruta>` abre una traza que no está en `trace.dir` (las de `stratum eval`).
+- La traza registra las **decisiones del runtime** como avisos: confirmaciones (aprobada, denegada, bloqueada), vetos (guarda de la tool, read-only, toolset, plan) y reintentos de la llamada al modelo. El formato no cambia de versión y las trazas anteriores se siguen leyendo.
+
 ## [0.7.0] — 2026-10-03
 
 Versión estable de la 0.7.0: incluye todo lo de la [0.7.0-beta.0](#070-beta0--2026-09-27) (endurecimiento de la persistencia, de la escritura de ficheros, de MCP, del cliente del LLM y de `web_fetch`) y, además, los **modelos descubiertos**: a un provider le basta la URL y la key.

@@ -1,0 +1,75 @@
+{
+  "id": "recovery-failing-command",
+  "group": "recovery",
+  "title": "Un comando falla con un mensaje claro: arreglar la causa y reintentar",
+  "setup": {
+    "files": {
+      "build.js": "const fs = require('fs');\n\nif (!fs.existsSync('input.txt')) {\n  console.error('ERROR: falta input.txt (una línea con el nombre del proyecto)');\n  process.exit(2);\n}\nconst name = fs.readFileSync('input.txt', 'utf8').trim();\nfs.mkdirSync('dist', { recursive: true });\nfs.writeFileSync('dist/out.txt', `built ${name}\\n`);\nconsole.log('build ok');\n"
+    }
+  },
+  "input": "Ejecuta `node build.js` y haz lo necesario para que termine bien. El proyecto se llama demo.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node build.js"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "input.txt",
+            "content": "demo\n"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node build.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Faltaba input.txt; lo he creado y el build termina bien."
+    }
+  ],
+  "expect": {
+    "description": "input.txt creado y dist/out.txt generado por el build.",
+    "checks": [
+      {
+        "type": "file_contains",
+        "path": "dist/out.txt",
+        "value": "built demo"
+      },
+      {
+        "type": "command",
+        "run": [
+          "node",
+          "build.js"
+        ]
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 10
+      },
+      {
+        "type": "metric",
+        "metric": "repeatedCalls",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

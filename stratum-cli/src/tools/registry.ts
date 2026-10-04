@@ -219,6 +219,22 @@ export class ToolRegistry {
   }
 }
 
+/** Anota en la traza una llamada rechazada sin preguntar (el motivo ya llega redactado). */
+function traceVeto(
+  ctx: ToolContext,
+  call: ToolCallReady,
+  source: 'preflight' | 'read-only' | 'environment',
+  veto: ToolResult,
+): void {
+  ctx.trace?.runtime({
+    event: 'veto',
+    source,
+    tool: call.name,
+    callId: call.id,
+    reason: veto.ok ? '' : veto.error,
+  });
+}
+
 /** Resultado de una llamada que no llegó a ejecutarse porque el turno se canceló. */
 function cancelledBeforeRun(): ToolResult {
   return {
@@ -263,8 +279,11 @@ export class ToolDispatcher {
     for (const call of calls) {
       // Hito 17: el modo read-only (de sesión o de entorno) va antes que el
       // preflight de la tool — es una política de la sesión, no de la tool.
-      const veto = this.readOnlyVeto(call, ctx) ?? this.preflight(call, ctx);
-      if (veto !== null) denied.set(call.id, veto);
+      const readOnly = this.readOnlyVeto(call, ctx);
+      const veto = readOnly ?? this.preflight(call, ctx);
+      if (veto === null) continue;
+      denied.set(call.id, veto);
+      traceVeto(ctx, call, readOnly ? 'read-only' : 'preflight', veto);
     }
 
     for (const call of calls) {
@@ -381,7 +400,7 @@ export class ToolDispatcher {
       // Falla cerrado: sin poder decidir el entorno, un `confirm-always` o un
       // `typed` quedarían sin efecto.
       log.warn('environment gate threw', { tool: call.name, err });
-      return {
+      const veto: ToolResult = {
         ok: false,
         error:
           `Tool "${call.name}": the environment policy could not be evaluated for this call, ` +
@@ -389,6 +408,8 @@ export class ToolDispatcher {
         recoverable: true,
         countsAsFailure: false,
       };
+      traceVeto(ctx, call, 'environment', veto);
+      return veto;
     }
     // `confirm-always`: se pregunta por todo cambio, y ni
     // `tools.confirmDestructive: false`, ni `--allow-destructive`, ni el
@@ -420,6 +441,16 @@ export class ToolDispatcher {
     // Hito 16: la descripción cita el comando (puede llevar un secreto) y va al
     // log y al prompt de confirmación: redactada con el núcleo y los extras.
     const description = redactText(describeCall(call), ctx.config);
+    const traceDecision = (decision: 'approved' | 'allow-all' | 'denied' | 'blocked'): void =>
+      ctx.trace?.runtime({
+        event: 'confirmation',
+        decision,
+        tool: call.name,
+        callId: call.id,
+        description,
+        ...(gate ? { environment: gate.env.name } : {}),
+        ...(forced ? { forced: true } : {}),
+      });
 
     if (policy === 'deny' || !ctx.confirmDestructive) {
       // --deny-destructive explícito, o modo piped/CI sin TTY (§12.5)
@@ -429,6 +460,7 @@ export class ToolDispatcher {
         description,
         env: gate?.env.name,
       });
+      traceDecision('blocked');
       return {
         ok: false,
         error: gate?.forced
@@ -469,6 +501,10 @@ export class ToolDispatcher {
       description,
       env: gate?.env.name,
     });
+
+    traceDecision(
+      decision === 'approve' ? 'approved' : decision === 'allow-all' ? 'allow-all' : 'denied',
+    );
 
     if (decision === 'allow-all') {
       // `confirm-always` y la confirmación tecleada no admiten «permitir todo»:

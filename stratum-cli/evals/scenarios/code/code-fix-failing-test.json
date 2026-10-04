@@ -1,0 +1,88 @@
+{
+  "id": "code-fix-failing-test",
+  "group": "code",
+  "title": "Arreglar un bug a partir de un test que falla",
+  "description": "Un test rojo, un fallo de una línea. Mide el ciclo ejecutar → leer → editar → verificar.",
+  "setup": {
+    "files": {
+      "sum.js": "function sum(a, b) {\n  return a - b;\n}\n\nmodule.exports = { sum };\n",
+      "test.js": "const assert = require('assert');\nconst { sum } = require('./sum');\n\nassert.strictEqual(sum(2, 3), 5);\nassert.strictEqual(sum(-1, 1), 0);\nconsole.log('ok');\n"
+    }
+  },
+  "input": "`node test.js` falla. Encuentra el fallo y arréglalo en sum.js. No modifiques test.js. Al terminar, comprueba que `node test.js` pasa.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node test.js"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "sum.js"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "sum.js",
+            "old_string": "return a - b;",
+            "new_string": "return a + b;"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node test.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Arreglado: `sum` restaba en vez de sumar. `node test.js` pasa."
+    }
+  ],
+  "expect": {
+    "description": "sum.js corregido, test.js intacto y `node test.js` en verde.",
+    "checks": [
+      {
+        "type": "command",
+        "run": [
+          "node",
+          "test.js"
+        ]
+      },
+      {
+        "type": "file_contains",
+        "path": "test.js",
+        "value": "assert.strictEqual(sum(2, 3), 5);"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 12
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 1,
+        "mode": "mock"
+      }
+    ]
+  }
+}

@@ -1,0 +1,105 @@
+{
+  "id": "code-rename-across-files",
+  "group": "code",
+  "title": "Renombrar una función en todo el proyecto",
+  "setup": {
+    "files": {
+      "lib/cart.js": "function calcTotal(items) {\n  return items.reduce((sum, item) => sum + item.price * item.qty, 0);\n}\n\nmodule.exports = { calcTotal };\n",
+      "lib/report.js": "const { calcTotal } = require('./cart');\n\nfunction report(items) {\n  return `Total: ${calcTotal(items)}`;\n}\n\nmodule.exports = { report };\n",
+      "main.js": "const { calcTotal } = require('./lib/cart');\nconst { report } = require('./lib/report');\n\nconst items = [{ price: 10, qty: 3 }, { price: 6, qty: 2 }];\nconsole.log(calcTotal(items));\nconsole.log(report(items));\n"
+    }
+  },
+  "input": "Renombra la función `calcTotal` a `computeTotal` en todo el proyecto y comprueba que `node main.js` sigue funcionando.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "grep",
+          "args": {
+            "pattern": "calcTotal"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "lib/cart.js",
+            "old_string": "calcTotal",
+            "new_string": "computeTotal",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "lib/report.js",
+            "old_string": "calcTotal",
+            "new_string": "computeTotal",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "main.js",
+            "old_string": "calcTotal",
+            "new_string": "computeTotal",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node main.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Renombrada en los tres ficheros; `node main.js` imprime 42."
+    }
+  ],
+  "expect": {
+    "description": "Ninguna referencia a calcTotal y el programa sigue imprimiendo 42.",
+    "checks": [
+      {
+        "type": "file_contains",
+        "path": "lib/cart.js",
+        "value": "calcTotal",
+        "negate": true
+      },
+      {
+        "type": "file_contains",
+        "path": "lib/report.js",
+        "value": "calcTotal",
+        "negate": true
+      },
+      {
+        "type": "file_contains",
+        "path": "main.js",
+        "value": "calcTotal",
+        "negate": true
+      },
+      {
+        "type": "command",
+        "run": [
+          "node",
+          "main.js"
+        ],
+        "stdoutContains": "42"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 14
+      }
+    ]
+  }
+}

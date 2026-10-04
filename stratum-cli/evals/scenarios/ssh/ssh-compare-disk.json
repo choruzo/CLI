@@ -1,0 +1,81 @@
+{
+  "id": "ssh-compare-disk",
+  "group": "ssh",
+  "title": "Comparar el mismo dato en dos hosts",
+  "setup": {
+    "ssh": {
+      "hosts": {
+        "web1": {
+          "commands": [
+            {
+              "match": "^df",
+              "stdout": "Filesystem Size Used Avail Use% Mounted on\n/dev/sda1   50G  12G   38G  24% /\n"
+            }
+          ]
+        },
+        "web2": {
+          "commands": [
+            {
+              "match": "^df",
+              "stdout": "Filesystem Size Used Avail Use% Mounted on\n/dev/sda1   50G  45G  4.5G  91% /\n"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "input": "Compara el uso de disco de / en web1 y web2 y dime cuál está más lleno.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:web1",
+            "command": "df -h /"
+          }
+        },
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:web2",
+            "command": "df -h /"
+          }
+        }
+      ]
+    },
+    {
+      "text": "web2 está más lleno: 91 % frente al 24 % de web1."
+    }
+  ],
+  "expect": {
+    "description": "Consulta los dos hosts y concluye que web2 (91 %) es el más lleno.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "web2"
+      },
+      {
+        "type": "output_contains",
+        "value": "91"
+      },
+      {
+        "type": "tool_called",
+        "tool": "exec",
+        "input": "ssh:web1",
+        "status": "ok"
+      },
+      {
+        "type": "tool_called",
+        "tool": "exec",
+        "input": "ssh:web2",
+        "status": "ok"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 6
+      }
+    ]
+  }
+}

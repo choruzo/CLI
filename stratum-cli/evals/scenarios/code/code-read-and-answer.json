@@ -1,0 +1,64 @@
+{
+  "id": "code-read-and-answer",
+  "group": "code",
+  "title": "Responder una pregunta sobre el código sin modificarlo",
+  "setup": {
+    "files": {
+      "README.md": "# demo-server\n\nServidor HTTP de ejemplo. Arranca con `node src/server.js`.\n",
+      "src/config.js": "const DEFAULT_PORT = 8472;\n\nmodule.exports = { port: Number(process.env.PORT) || DEFAULT_PORT };\n",
+      "src/server.js": "const http = require('http');\nconst { port } = require('./config');\n\nhttp.createServer((req, res) => res.end('ok')).listen(port);\n"
+    }
+  },
+  "input": "¿En qué puerto escucha el servidor si no se define PORT? Responde solo con el número. No modifiques nada.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "grep",
+          "args": {
+            "pattern": "PORT"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "src/config.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "8472"
+    }
+  ],
+  "expect": {
+    "description": "Responde 8472 sin escribir ni ejecutar nada.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "8472"
+      },
+      {
+        "type": "tool_called",
+        "tool": "write_file",
+        "min": 0,
+        "max": 0
+      },
+      {
+        "type": "tool_called",
+        "tool": "edit_file",
+        "min": 0,
+        "max": 0
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      }
+    ]
+  }
+}

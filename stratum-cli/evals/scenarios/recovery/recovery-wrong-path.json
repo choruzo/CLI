@@ -1,0 +1,73 @@
+{
+  "id": "recovery-wrong-path",
+  "group": "recovery",
+  "title": "La ruta indicada no existe: buscar el fichero en vez de rendirse",
+  "setup": {
+    "files": {
+      "conf/settings.json": "{\n  \"name\": \"demo\",\n  \"timeout\": 45,\n  \"retries\": 3\n}\n",
+      "README.md": "# demo\n"
+    }
+  },
+  "input": "Lee config/settings.json y dime el valor de `timeout`. Si no está en esa ruta, búscalo.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "config/settings.json"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "glob",
+          "args": {
+            "pattern": "**/settings.json"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "conf/settings.json"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El fichero estaba en conf/settings.json. timeout = 45."
+    }
+  ],
+  "expect": {
+    "description": "Tras el fallo de lectura localiza conf/settings.json y responde 45.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "45"
+      },
+      {
+        "type": "tool_called",
+        "tool": "read_file",
+        "input": "conf/settings.json",
+        "status": "ok"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 1,
+        "mode": "mock"
+      }
+    ]
+  }
+}

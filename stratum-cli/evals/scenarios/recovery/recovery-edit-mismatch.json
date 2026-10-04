@@ -1,0 +1,76 @@
+{
+  "id": "recovery-edit-mismatch",
+  "group": "recovery",
+  "title": "Una edición que no casa: releer y corregir",
+  "setup": {
+    "files": {
+      "app.conf": "# app\ntimeout = 30\nretries = 3\n"
+    }
+  },
+  "input": "Cambia el timeout de app.conf a 60. No toques nada más.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "app.conf",
+            "old_string": "timeout=30",
+            "new_string": "timeout=60"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "app.conf"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "app.conf",
+            "old_string": "timeout = 30",
+            "new_string": "timeout = 60"
+          }
+        }
+      ]
+    },
+    {
+      "text": "timeout pasa de 30 a 60 en app.conf."
+    }
+  ],
+  "expect": {
+    "description": "app.conf queda con timeout 60 y el resto intacto.",
+    "checks": [
+      {
+        "type": "file_matches",
+        "path": "app.conf",
+        "pattern": "timeout\\s*=\\s*60"
+      },
+      {
+        "type": "file_contains",
+        "path": "app.conf",
+        "value": "retries = 3"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 1,
+        "mode": "mock"
+      }
+    ]
+  }
+}

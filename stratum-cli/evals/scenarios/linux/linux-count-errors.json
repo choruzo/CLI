@@ -1,0 +1,58 @@
+{
+  "id": "linux-count-errors",
+  "group": "linux",
+  "title": "Contar errores en un log y dejar el resultado en un fichero",
+  "requires": {
+    "platform": [
+      "linux",
+      "darwin"
+    ]
+  },
+  "setup": {
+    "files": {
+      "app.log": "2026-01-10 10:00:01 INFO  started\n2026-01-10 10:00:07 ERROR db timeout\n2026-01-10 10:01:12 WARN  slow query\n2026-01-10 10:02:40 ERROR db timeout\n2026-01-10 10:03:00 INFO  recovered\n2026-01-10 10:09:31 ERROR disk full\n"
+    }
+  },
+  "input": "Cuenta cuántas líneas ERROR hay en app.log y escribe solo ese número en report.txt.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "grep -c ERROR app.log"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "report.txt",
+            "content": "3\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Hay 3 líneas ERROR; el número está en report.txt."
+    }
+  ],
+  "expect": {
+    "description": "report.txt contiene 3.",
+    "checks": [
+      {
+        "type": "file_matches",
+        "path": "report.txt",
+        "pattern": "^\\s*3\\s*$"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      }
+    ]
+  }
+}

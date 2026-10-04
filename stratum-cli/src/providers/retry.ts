@@ -28,6 +28,8 @@ export interface RetryOptions {
   maxAttempts?: number;
   /** Retraso base en ms; el intento n espera `base · 2^(n-1)`. Inyectable para tests. */
   baseDelayMs?: number;
+  /** Se llama antes de cada reintento (el loop lo anota en la traza). */
+  onRetry?: (attempt: number, err: unknown) => void;
 }
 
 /**
@@ -61,6 +63,7 @@ export async function* streamWithRetry(
         lastErr instanceof ProviderError ? lastErr.details.retryAfterMs : undefined;
       const wait = retryAfter !== undefined ? Math.max(retryAfter, backoff) : backoff;
       log.warn('stream retry', { attempt, maxAttempts, backoffMs: wait, err: lastErr });
+      opts.onRetry?.(attempt, lastErr);
       await abortableDelay(wait, request.signal);
     }
 

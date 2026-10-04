@@ -1,0 +1,59 @@
+{
+  "id": "code-create-module",
+  "group": "code",
+  "title": "Crear un módulo que cumpla una comprobación dada",
+  "setup": {
+    "files": {
+      "check.js": "const assert = require('assert');\nconst { slugify } = require('./slugify');\n\nassert.strictEqual(slugify('Hola Mundo'), 'hola-mundo');\nassert.strictEqual(slugify('  Árbol   de  Navidad! '), 'arbol-de-navidad');\nassert.strictEqual(slugify('a--b'), 'a-b');\nconsole.log('ok');\n"
+    }
+  },
+  "input": "Crea slugify.js (CommonJS) que exporte `slugify(texto)`: minúsculas, sin acentos, y cualquier secuencia de espacios o símbolos convertida en un único guion, sin guiones al principio ni al final. `node check.js` tiene que pasar.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "slugify.js",
+            "content": "function slugify(text) {\n  return String(text)\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '')\n    .toLowerCase()\n    .replace(/[^a-z0-9]+/g, '-')\n    .replace(/^-+|-+$/g, '');\n}\n\nmodule.exports = { slugify };\n"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node check.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Creado slugify.js; `node check.js` pasa."
+    }
+  ],
+  "expect": {
+    "description": "Existe slugify.js y `node check.js` pasa sin tocar check.js.",
+    "checks": [
+      {
+        "type": "command",
+        "run": [
+          "node",
+          "check.js"
+        ]
+      },
+      {
+        "type": "file_contains",
+        "path": "check.js",
+        "value": "slugify('Hola Mundo')"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 10
+      }
+    ]
+  }
+}

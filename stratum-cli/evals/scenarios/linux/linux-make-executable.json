@@ -1,0 +1,55 @@
+{
+  "id": "linux-make-executable",
+  "group": "linux",
+  "title": "Dar permiso de ejecución a un script y lanzarlo",
+  "requires": {
+    "platform": [
+      "linux",
+      "darwin"
+    ]
+  },
+  "setup": {
+    "files": {
+      "run.sh": "#!/bin/sh\necho deploy-ok-7731\n"
+    }
+  },
+  "input": "run.sh no se puede ejecutar. Arréglalo, ejecútalo con ./run.sh y dime qué imprime.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "chmod +x run.sh && ./run.sh"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Le faltaba el permiso de ejecución. Imprime: deploy-ok-7731"
+    }
+  ],
+  "expect": {
+    "description": "run.sh queda ejecutable y la respuesta cita su salida.",
+    "checks": [
+      {
+        "type": "command",
+        "run": [
+          "test",
+          "-x",
+          "run.sh"
+        ],
+        "label": "run.sh es ejecutable"
+      },
+      {
+        "type": "output_contains",
+        "value": "deploy-ok-7731"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      }
+    ]
+  }
+}

@@ -1,0 +1,57 @@
+{
+  "id": "linux-largest-log",
+  "group": "linux",
+  "title": "Encontrar el fichero más grande de un directorio",
+  "requires": {
+    "platform": [
+      "linux",
+      "darwin"
+    ]
+  },
+  "setup": {
+    "files": {
+      "logs/auth.log": "login ok\nlogin ok\nlogin ok\nlogin ok\n",
+      "logs/billing.log": "invoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\ninvoice generated for customer 000000\n",
+      "logs/cron.log": "job done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\njob done\n"
+    }
+  },
+  "input": "¿Cuál es el fichero más grande de logs/? Responde con su nombre.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "ls -lS logs"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El más grande es billing.log."
+    }
+  ],
+  "expect": {
+    "description": "Identifica billing.log usando el shell, sin modificar nada.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "billing.log"
+      },
+      {
+        "type": "tool_called",
+        "tool": "exec",
+        "status": "ok"
+      },
+      {
+        "type": "file_exists",
+        "path": "logs/auth.log"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 6
+      }
+    ]
+  }
+}

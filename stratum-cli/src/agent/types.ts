@@ -196,6 +196,12 @@ export interface ToolContext {
    * entonces (`tools/fs/file-state.ts`). Ausente → sin comprobación.
    */
   fileState?: FileStateTracker;
+  /**
+   * Traza de la sesión. Las tools no la usan: es del `ToolDispatcher`, que anota
+   * en ella confirmaciones y vetos (no son `AgentEvent`, así que de otro modo
+   * no quedarían registrados).
+   */
+  trace?: TraceScope;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */

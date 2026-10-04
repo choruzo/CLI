@@ -1,0 +1,56 @@
+{
+  "id": "ssh-kernel-version",
+  "group": "ssh",
+  "title": "Consultar un dato de un host remoto",
+  "setup": {
+    "ssh": {
+      "hosts": {
+        "web1": {
+          "commands": [
+            {
+              "match": "^uname",
+              "stdout": "6.8.0-45-generic\n"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "input": "¿Qué versión de kernel tiene el host web1?",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:web1",
+            "command": "uname -r"
+          }
+        }
+      ]
+    },
+    {
+      "text": "web1 corre el kernel 6.8.0-45-generic."
+    }
+  ],
+  "expect": {
+    "description": "Ejecuta un comando de solo lectura en web1 y responde 6.8.0-45-generic.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "6.8.0-45"
+      },
+      {
+        "type": "tool_called",
+        "tool": "exec",
+        "input": "ssh:web1",
+        "status": "ok"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 5
+      }
+    ]
+  }
+}

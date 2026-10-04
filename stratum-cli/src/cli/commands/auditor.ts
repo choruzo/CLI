@@ -1,5 +1,6 @@
 import { Command } from 'commander';
 import { existsSync } from 'fs';
+import { basename, resolve } from 'path';
 import { loadConfig } from '../../config/loader.js';
 import { listTraces, traceFilePath } from '../../trace/store.js';
 import { startAuditorServer } from '../../trace/server.js';
@@ -34,28 +35,46 @@ const listSub = new Command('list')
     }
   });
 
+interface AuditorOptions {
+  open: boolean;
+  port?: string;
+  file?: string;
+}
+
 export const auditorCommand = new Command('auditor')
   .description('Open the trajectory viewer (timeline of everything the agent did) for a session')
   .argument('[sessionId]', 'session to inspect (default: the most recent one)')
   .option('--no-open', 'do not launch the browser, just print the URL')
   .option('--port <n>', 'port to listen on (default: a free one)')
+  .option('--file <path>', 'open a trace file directly (e.g. one saved by "stratum eval")')
   .addCommand(listSub)
-  .action(async (sessionId: string | undefined, opts: { open: boolean; port?: string }) => {
-    const config = loadConfig();
+  .action(async (sessionId: string | undefined, opts: AuditorOptions) => {
     let id = sessionId;
-    if (!id) {
-      id = listTraces(config)[0]?.sessionId;
-      if (!id) {
-        process.stderr.write('No hay trazas guardadas todavía.\n');
+    let file: string | null;
+    if (opts.file) {
+      // Una traza fuera de `trace.dir`: las de `stratum eval` viven con su resultado.
+      file = resolve(opts.file);
+      id = basename(file).replace(/\.jsonl$/, '');
+      if (!existsSync(file)) {
+        process.stderr.write(`No existe el fichero de traza "${file}".\n`);
         process.exit(1);
       }
-    }
-    const file = traceFilePath(config, id);
-    if (!file || !existsSync(file)) {
-      process.stderr.write(
-        `No hay traza para la sesión "${id}". Usa "stratum auditor list" para ver las disponibles.\n`,
-      );
-      process.exit(1);
+    } else {
+      const config = loadConfig();
+      if (!id) {
+        id = listTraces(config)[0]?.sessionId;
+        if (!id) {
+          process.stderr.write('No hay trazas guardadas todavía.\n');
+          process.exit(1);
+        }
+      }
+      file = traceFilePath(config, id);
+      if (!file || !existsSync(file)) {
+        process.stderr.write(
+          `No hay traza para la sesión "${id}". Usa "stratum auditor list" para ver las disponibles.\n`,
+        );
+        process.exit(1);
+      }
     }
     const port = opts.port ? parseInt(opts.port, 10) : undefined;
     if (port !== undefined && !(port > 0 && port < 65536)) {

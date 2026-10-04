@@ -1,0 +1,53 @@
+{
+  "id": "recovery-provider-error",
+  "group": "recovery",
+  "title": "Un 500 transitorio del provider se reintenta y la tarea termina",
+  "description": "Con guion, la primera petición devuelve un 500. Contra un modelo real es una tarea trivial de control.",
+  "input": "Crea out.txt con el texto «listo».",
+  "script": [
+    {
+      "error": {
+        "status": 500,
+        "message": "upstream exploded"
+      }
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "out.txt",
+            "content": "listo\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Creado out.txt."
+    }
+  ],
+  "expect": {
+    "description": "out.txt existe y el proceso acaba con exit 0 pese al fallo del provider.",
+    "checks": [
+      {
+        "type": "file_contains",
+        "path": "out.txt",
+        "value": "listo"
+      },
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "runtime_event",
+        "event": "retry",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmErrors",
+        "equals": 0
+      }
+    ]
+  }
+}

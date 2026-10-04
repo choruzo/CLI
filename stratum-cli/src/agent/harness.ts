@@ -991,7 +991,13 @@ export class ReactLoop {
         };
 
         try {
-          for await (const chunk of streamWithRetry(activeProvider, request)) {
+          const onRetry = (attempt: number, err: unknown): void =>
+            opts?.trace?.runtime({
+              event: 'retry',
+              attempt,
+              error: err instanceof Error ? err.message : String(err),
+            });
+          for await (const chunk of streamWithRetry(activeProvider, request, { onRetry })) {
             if (signal.aborted) break;
             modelSpan?.firstChunk();
             if (chunk.usage) modelSpan?.usage(chunk.usage);
@@ -1194,6 +1200,13 @@ export class ReactLoop {
             readOnly && !isToolVisibleForProfile(call.name, READ_ONLY_TOOLSET)
               ? `tool '${call.name}' is not available in a read-only session`
               : `tool '${call.name}' is not available to this agent profile`;
+          opts?.trace?.runtime({
+            event: 'veto',
+            source: 'toolset',
+            tool: call.name,
+            callId: call.id,
+            reason: err,
+          });
           const o = this.toolErrorOutcome(
             call.id,
             call.name,
@@ -1330,6 +1343,13 @@ export class ReactLoop {
           const err = effects
             ? `Plan mode: only read-only commands can run until the plan is approved (${effects.reason ?? 'this command changes state'})`
             : `Plan mode: tool '${call.name}' deshabilitada hasta aprobar el plan`;
+          opts?.trace?.runtime({
+            event: 'veto',
+            source: 'plan',
+            tool: call.name,
+            callId: call.id,
+            reason: err,
+          });
           const o = this.toolErrorOutcome(
             call.id,
             call.name,
@@ -1371,6 +1391,13 @@ export class ReactLoop {
                 `${target}, and this session cannot present one for approval. Report what you ` +
                 'would change and ask the user to run the task as a plan (/plan in the chat, or ' +
                 'stratum run --plan).';
+            opts?.trace?.runtime({
+              event: 'veto',
+              source: 'plan',
+              tool: call.name,
+              callId: call.id,
+              reason: redactText(err, this.config),
+            });
             const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
             yield o.event;
             this.messages.push(o.message);
@@ -1413,6 +1440,7 @@ export class ReactLoop {
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
           confirmDestructive: opts?.onConfirmDestructive,
           readOnly,
+          trace: opts?.trace,
         };
 
         const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);

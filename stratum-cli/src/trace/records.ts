@@ -27,6 +27,41 @@ export type TraceStatus = 'ok' | 'error' | 'cancelled';
 /** Datos libres del paso. Las cadenas llegan redactadas y recortadas. */
 export type TraceData = Record<string, unknown>;
 
+/** `meta.caps`: la traza registra las decisiones del runtime (`TraceRuntimeEvent`). */
+export const TRACE_CAP_RUNTIME = 'runtime';
+
+/**
+ * Decisiones del runtime que no son un `AgentEvent`: se guardan como un `point`
+ * de tipo `notice` con estos campos en `data` (el visor las pinta como un aviso
+ * más; `stratum eval` y `stratum stats` las cuentan por `data.event`).
+ *  - `confirmation` — una confirmación destructiva o de entorno: `approved` /
+ *    `allow-all` / `denied` las contesta el usuario; `blocked` es que nadie
+ *    podía contestar (sin TTY, `--deny-destructive`)
+ *  - `veto` — la llamada se rechazó sin preguntar: `preflight` de la tool, modo
+ *    read-only, política de entorno que no se pudo evaluar, tool fuera del
+ *    toolset de la sesión (`toolset`) o cambio fuera de un plan aprobado (`plan`)
+ *  - `retry` — reintento de una llamada al modelo antes del primer chunk
+ */
+export type TraceRuntimeEvent =
+  | {
+      event: 'confirmation';
+      decision: 'approved' | 'allow-all' | 'denied' | 'blocked';
+      tool: string;
+      callId: string;
+      description: string;
+      /** Entorno cuya política forzó la pregunta. */
+      environment?: string;
+      forced?: boolean;
+    }
+  | {
+      event: 'veto';
+      source: 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan';
+      tool: string;
+      callId: string;
+      reason: string;
+    }
+  | { event: 'retry'; attempt: number; error: string };
+
 export type TraceRecord =
   /** Cabecera: una por proceso que escribe en el fichero (arranque o reanudación). */
   | {
@@ -36,6 +71,12 @@ export type TraceRecord =
       sessionId: string;
       cwd?: string;
       version?: string;
+      /**
+       * Lo que este escritor sabe registrar además del formato base. Ausente en
+       * las trazas anteriores: quien calcula métricas distingue así «no hubo
+       * ninguna confirmación» de «esta traza no las registraba».
+       */
+      caps?: string[];
     }
   /** Empieza un turno del usuario. */
   | { t: 'turn'; at: number; input: string }

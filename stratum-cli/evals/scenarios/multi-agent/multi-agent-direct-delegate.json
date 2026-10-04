@@ -1,0 +1,52 @@
+{
+  "id": "multi-agent-direct-delegate",
+  "group": "multi-agent",
+  "title": "Delegación directa con --delegate: el subagente hace el trabajo",
+  "run": {
+    "args": [
+      "--delegate",
+      "general"
+    ]
+  },
+  "input": "Create a file named hello.txt containing exactly the text: hola",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "hello.txt",
+            "content": "hola\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Created hello.txt with the requested text."
+    }
+  ],
+  "expect": {
+    "description": "hello.txt creado por el subagente y exit 0.",
+    "checks": [
+      {
+        "type": "file_contains",
+        "path": "hello.txt",
+        "value": "hola"
+      },
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "subagents",
+        "min": 1
+      },
+      {
+        "type": "metric",
+        "metric": "subagentFailures",
+        "equals": 0
+      }
+    ]
+  }
+}

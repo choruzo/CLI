@@ -1,0 +1,64 @@
+{
+  "id": "multi-agent-delegate-lookup",
+  "group": "multi-agent",
+  "title": "El agente principal delega una búsqueda y usa el resultado",
+  "setup": {
+    "files": {
+      "VERSION.txt": "2.7.1\n",
+      "README.md": "# demo\n"
+    }
+  },
+  "input": "Delega en un subagente (delegate_task) la lectura de VERSION.txt y respóndeme con la versión que te devuelva.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "delegate_task",
+          "args": {
+            "task": "Read the file VERSION.txt in the current directory and report its exact content."
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "VERSION.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "VERSION.txt contains: 2.7.1"
+    },
+    {
+      "text": "La versión es 2.7.1."
+    }
+  ],
+  "expect": {
+    "description": "Un subagente lee el fichero y el principal responde 2.7.1.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "2.7.1"
+      },
+      {
+        "type": "metric",
+        "metric": "subagents",
+        "min": 1
+      },
+      {
+        "type": "metric",
+        "metric": "subagentFailures",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 10
+      }
+    ]
+  }
+}

@@ -5,10 +5,12 @@ import type { AgentEvent, Message } from '../agent/types.js';
 import { redactText } from '../security/redact-output.js';
 import { getLogger } from '../logging/index.js';
 import {
+  TRACE_CAP_RUNTIME,
   TRACE_FORMAT_VERSION,
   type TraceData,
   type TraceKind,
   type TraceRecord,
+  type TraceRuntimeEvent,
   type TraceStatus,
 } from './records.js';
 
@@ -62,6 +64,8 @@ export interface TraceScope {
   modelStart(info: ModelCallInfo): ModelSpan;
   /** Cada `AgentEvent` del loop de este scope, en el orden en que se emite. */
   event(event: AgentEvent): void;
+  /** Una decisión del runtime que no viaja como `AgentEvent` (confirmación, veto, reintento). */
+  runtime(event: TraceRuntimeEvent): void;
   /** Scope de un subagente: sus pasos cuelgan del paso `subagentId`. */
   child(subagentId: string): TraceScope;
 }
@@ -195,6 +199,7 @@ export class TraceRecorder {
         sessionId: this.opts.sessionId,
         ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
         ...(this.opts.version ? { version: this.opts.version } : {}),
+        caps: [TRACE_CAP_RUNTIME],
       });
     }
     this.writer.write(record);
@@ -228,6 +233,21 @@ export class TraceRecorder {
 // ---------------------------------------------------------------------------
 // Scope
 // ---------------------------------------------------------------------------
+
+const CONFIRMATION_LABEL = {
+  approved: 'aprobada',
+  'allow-all': 'aprobada (permitir todo)',
+  denied: 'denegada',
+  blocked: 'bloqueada (nadie puede aprobar)',
+} as const;
+
+const VETO_LABEL = {
+  preflight: 'la guarda de la tool',
+  'read-only': 'el modo read-only',
+  environment: 'la política de entorno',
+  toolset: 'el toolset de la sesión',
+  plan: 'el modo plan',
+} as const;
 
 /** Primera línea con contenido, recortada: el nombre de un mensaje inyectado. */
 function headline(text: string, max = 120): string {
@@ -529,6 +549,19 @@ class Scope implements TraceScope {
         // subagent_event lo registra el scope del propio hijo.
         break;
     }
+  }
+
+  runtime(ev: TraceRuntimeEvent): void {
+    this.guard(() => {
+      const data = this.rec.safe(ev) as TraceData;
+      if (ev.event === 'confirmation') {
+        this.point('notice', `Confirmación ${CONFIRMATION_LABEL[ev.decision]}: ${ev.tool}`, data);
+      } else if (ev.event === 'veto') {
+        this.point('notice', `Vetada por ${VETO_LABEL[ev.source]}: ${ev.tool}`, data);
+      } else {
+        this.point('notice', `Reintento ${ev.attempt} de la llamada al modelo`, data);
+      }
+    });
   }
 
   child(subagentId: string): TraceScope {
