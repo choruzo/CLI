@@ -441,6 +441,17 @@ li.next .h-id { color: var(--dim); }
 .shot:hover img { transform: scale(1.03); }
 .shots figcaption { font-size: 12px; margin-top: 6px; }
 
+/* ─── Trayectoria ────────────────────────────────────────────── */
+.traj-hero { margin: 0 0 16px; }
+.traj-hero .shot { aspect-ratio: 1476 / 808; }
+.traj-hero figcaption { font-size: 12px; margin-top: 6px; color: var(--muted); }
+.traj-grid { margin: 0 0 16px; }
+.traj-how { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; margin-bottom: 16px; }
+.traj-pre { margin: 0; font-family: var(--mono); font-size: 12px; line-height: 1.6; white-space: pre-wrap; color: var(--text); }
+.traj-p { margin: 0 0 8px; font-size: 13px; color: var(--muted); }
+.traj-p:last-child { margin-bottom: 0; }
+#trayectoria .shots .shot { aspect-ratio: 16 / 9; }
+
 /* ─── Roadmap ────────────────────────────────────────────────── */
 .roadmap { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; }
 .road {
@@ -569,6 +580,7 @@ li.next .h-id { color: var(--dim); }
   .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .news, .roadmap, .split { grid-template-columns: minmax(0, 1fr); }
   .shots { grid-template-columns: minmax(0, 1fr); }
+  .traj-how { grid-template-columns: minmax(0, 1fr); }
   .desk-body { grid-template-columns: minmax(0, 1fr); }
   .desk-side { display: none; }
   .desk-grid { grid-template-columns: minmax(0, 1fr); }

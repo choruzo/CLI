@@ -1068,7 +1068,7 @@ function initTmux() {
       }
     });
   }, { rootMargin: "-45% 0px -50% 0px" });
-  ["status", "demo", "hitos", "novedades", "actividad", "desktop", "roadmap"].forEach((id) => { const s = document.getElementById(id); if (s) io.observe(s); });
+  ["status", "demo", "hitos", "novedades", "actividad", "desktop", "trayectoria", "roadmap"].forEach((id) => { const s = document.getElementById(id); if (s) io.observe(s); });
 }
 
 function toggleTheme() {

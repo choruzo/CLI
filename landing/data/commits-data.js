@@ -1,8 +1,89 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-10-03T19:48:57.6180306+02:00",
+  "generatedAt": "2026-10-04T16:14:36.9417352+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "a933a6c6b1341d95fe6a4a86d912982649fd8a1a",
+      "date": "2026-10-04T15:17:53+02:00",
+      "author": "Javi_1",
+      "subject": "docs(landing): capturas del visor de trayectoria",
+      "add": 0,
+      "del": 0,
+      "files": 10
+    },
+    {
+      "sha": "2fa29134bbdff4b9efb40ff7dac778af1809f83a",
+      "date": "2026-10-04T15:17:52+02:00",
+      "author": "Javi_1",
+      "subject": "feat: traza de sesión y visor de trayectoria (/auditor y panel de Desktop)",
+      "add": 4249,
+      "del": 9,
+      "files": 41
+    },
+    {
+      "sha": "82b334090b025307369423059acccc27f779b38e",
+      "date": "2026-10-04T15:17:44+02:00",
+      "author": "Javi_1",
+      "subject": "fix(desktop): el webview arrancaba en blanco por Node en el bundle",
+      "add": 46,
+      "del": 37,
+      "files": 3
+    },
+    {
+      "sha": "bebb12a28b9dcb46ad8fb3e842969ac25d805bbd",
+      "date": "2026-10-04T11:54:33+02:00",
+      "author": "Javi_1",
+      "subject": "test(tui): arnés para manejar la TUI en un terminal real",
+      "add": 818,
+      "del": 0,
+      "files": 7
+    },
+    {
+      "sha": "896f357485a0b21d0ac4adad23861f50c3c108cf",
+      "date": "2026-10-04T11:54:33+02:00",
+      "author": "Javi_1",
+      "subject": "fix(chat): paleta en la bienvenida, Ctrl+C cancela el turno y /comando desconocido",
+      "add": 107,
+      "del": 6,
+      "files": 5
+    },
+    {
+      "sha": "05bdb0c47deebe5ed058ea89191eadbbba55ec46",
+      "date": "2026-10-03T23:45:42+02:00",
+      "author": "Javi_1",
+      "subject": "docs: diseño del sistema de plugins e investigación de openai/codex",
+      "add": 731,
+      "del": 0,
+      "files": 3
+    },
+    {
+      "sha": "ae11966f16791773c1718be0c01457808edf951e",
+      "date": "2026-10-03T19:58:58+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.7.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "b584f4857566c814b64885d5639f1d467dad5b3e",
+      "date": "2026-10-03T19:57:37+02:00",
+      "author": "Javi_1",
+      "subject": "docs(changelog): notas de la 0.7.0",
+      "add": 18,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "31b1eaf5c5ddb07edfd6ca64288b5f5e0547f3f6",
+      "date": "2026-10-03T19:50:36+02:00",
+      "author": "Javi_1",
+      "subject": "feat(landing): página de guías, datos al día y script de deploy",
+      "add": 1826,
+      "del": 49,
+      "files": 10
+    },
     {
       "sha": "68cfb418076e9f7e42bf257ccd6ea0f50f5973a7",
       "date": "2026-10-03T19:32:15+02:00",
@@ -1724,6 +1805,10 @@ window.__STRATUM_COMMITS__ = {
     }
   ],
   "tags": [
+    {
+      "name": "v0.7.0",
+      "date": "2026-10-03T19:58:58+02:00"
+    },
     {
       "name": "v0.7.0-beta.0",
       "date": "2026-09-27T22:35:02+02:00"

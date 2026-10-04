@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=7277a3ef28" />
+    <link rel="stylesheet" href="./styles.css?v=38b24db837" />
   </head>
   <body>
     <a class="skip" href="#main">Saltar al contenido</a>
@@ -32,8 +32,9 @@
         <li><a href="#novedades" data-win="novedades">3:novedades</a></li>
         <li><a href="#actividad" data-win="actividad">4:log</a></li>
         <li><a href="#desktop" data-win="desktop">5:desktop</a></li>
-        <li><a href="#roadmap" data-win="roadmap">6:roadmap</a></li>
-        <li><a class="tmux-link" href="./guias.html">7:guías ↗</a></li>
+        <li><a href="#trayectoria" data-win="trayectoria">6:trazas</a></li>
+        <li><a href="#roadmap" data-win="roadmap">7:roadmap</a></li>
+        <li><a class="tmux-link" href="./guias.html">8:guías ↗</a></li>
       </ul>
       <div class="tmux-right">
         <button class="tbtn" id="theme-toggle" type="button" aria-label="Cambiar tema claro/oscuro">◐ tema</button>
@@ -240,6 +241,69 @@
         </div>
       </section>
 
+      <!-- TRAYECTORIA -->
+      <section class="section" id="trayectoria" aria-labelledby="h-traj">
+        <div class="wrap">
+          <h2 class="cmd" id="h-traj" data-cmd="stratum auditor">stratum auditor</h2>
+          <p class="note">
+            Cada sesión deja una <b>traza</b> de todo lo que hace el agente: lo que entra al modelo, cada llamada
+            al LLM y cada herramienta. La escribe el runtime a partir de sus propios eventos; <b>el modelo no la
+            ve ni puede tocarla</b>. El visor la pinta como un timeline por carriles que se actualiza solo según
+            avanza la sesión.
+          </p>
+          <figure class="traj-hero">
+            <button class="shot" type="button" data-full="./assets/trayectoria/cli-2-modelo-resumen.png"><img src="./assets/trayectoria/cli-2-modelo-resumen.png" alt="Visor de trayectoria: timeline por carriles, lista de pasos y detalle de una llamada al modelo con tokens, caché y velocidad" loading="lazy" /></button>
+            <figcaption><span class="dim">/auditor</span> · sesión real: dos turnos, dos tools en paralelo, 21.2K tokens, 66 % de caché</figcaption>
+          </figure>
+          <div class="desk-grid traj-grid">
+            <div class="desk-card">
+              <h4>Tres carriles</h4>
+              <p><b>Entrada</b> (prompt del sistema, tu mensaje, lo que inyecta el runtime), <b>Modelo</b> (cada llamada, con la espera hasta el primer token y la generación) y <b>Herramientas</b> (tools y subagentes). El eje puede ir por duración, por turnos o por llamadas.</p>
+            </div>
+            <div class="desk-card">
+              <h4>Detalle de cada paso</h4>
+              <p>Resumen con proveedor, tiempos, tokens de entrada, caché y salida, y tok/s; vista previa con el razonamiento, la respuesta y los argumentos y la salida de cada tool; y el contenido sin procesar.</p>
+            </div>
+            <div class="desk-card">
+              <h4>Sin exponer nada</h4>
+              <p>Los secretos se redactan antes de tocar el disco. El visor solo escucha en <code>127.0.0.1</code>, con un token aleatorio en la URL, y solo lee: no tiene ninguna ruta que hable con el agente.</p>
+            </div>
+          </div>
+          <div class="traj-how">
+            <div class="panel">
+              <div class="panel-head"><span>en la CLI</span><span class="dim">web local efímera</span></div>
+              <pre class="traj-pre"><span class="dim"># dentro del chat: abre el navegador con la sesión en curso</span>
+/auditor
+/auditor stop
+
+<span class="dim"># fuera: una sesión pasada (la última por defecto)</span>
+stratum auditor
+stratum auditor list
+stratum auditor sess_20261004_151424_2n6 --no-open</pre>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span>en Desktop</span><span class="dim">panel anclado al chat</span></div>
+              <p class="traj-p">El botón <b>Trayectoria</b> de la barra de estado (o <code>Ctrl+J</code>) muestra y esconde el panel a la derecha de la conversación. Sigue a la conversación activa y se recuerda entre arranques.</p>
+              <p class="traj-p dim">Las trazas se guardan en <code>~/.stratum/traces/</code> (30 días por defecto, <code>trace.retentionDays</code>) y se pueden desactivar con <code>trace.enabled: false</code>.</p>
+            </div>
+          </div>
+          <div class="shots">
+            <figure>
+              <button class="shot" type="button" data-full="./assets/trayectoria/cli-3-modelo-vista-previa.png"><img src="./assets/trayectoria/cli-3-modelo-vista-previa.png" alt="Vista previa de una llamada al modelo: razonamiento y las dos tool calls que emitió" loading="lazy" /></button>
+              <figcaption><span class="dim">-rw-r--r--</span> cli-3-modelo-vista-previa.png <span class="dim">· CLI: razonamiento y tool calls</span></figcaption>
+            </figure>
+            <figure>
+              <button class="shot" type="button" data-full="./assets/trayectoria/desktop-1-panel.png"><img src="./assets/trayectoria/desktop-1-panel.png" alt="Stratum Desktop con el panel de trayectoria abierto a la derecha del chat" loading="lazy" /></button>
+              <figcaption><span class="dim">-rw-r--r--</span> desktop-1-panel.png <span class="dim">· Desktop: panel junto al chat</span></figcaption>
+            </figure>
+            <figure>
+              <button class="shot" type="button" data-full="./assets/trayectoria/desktop-3-detalle-tool.png"><img src="./assets/trayectoria/desktop-3-detalle-tool.png" alt="Entrada y salida de write_file en el panel de Desktop" loading="lazy" /></button>
+              <figcaption><span class="dim">-rw-r--r--</span> desktop-3-detalle-tool.png <span class="dim">· Desktop: detalle de una tool</span></figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
       <!-- CAPTURAS -->
       <section class="section" id="capturas" aria-labelledby="h-shots">
         <div class="wrap">
@@ -258,7 +322,7 @@
               <figcaption><span class="dim">-rw-r--r--</span> help.png <span class="dim">· /help</span></figcaption>
             </figure>
           </div>
-          <p class="note">Las vistas nuevas (plan, árbol de subagentes, <code>exec</code> sobre SSH, redacción, <code>todo</code>, <code>question</code>) están recreadas en la <a href="#demo">demo</a>.</p>
+          <p class="note">El visor de trayectoria tiene sus capturas en <a href="#trayectoria">trazas</a>. Las vistas nuevas (plan, árbol de subagentes, <code>exec</code> sobre SSH, redacción, <code>todo</code>, <code>question</code>) están recreadas en la <a href="#demo">demo</a>.</p>
         </div>
       </section>
 
@@ -297,7 +361,7 @@
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="./data/commits-data.js?v=7277a3ef28"></script>
-    <script src="./app.js?v=7277a3ef28" defer></script>
+    <script src="./data/commits-data.js?v=38b24db837"></script>
+    <script src="./app.js?v=38b24db837" defer></script>
   </body>
 </html>
