@@ -2,6 +2,7 @@
   "id": "recovery-edit-mismatch",
   "group": "recovery",
   "title": "Una edición que no casa: releer y corregir",
+  "difficulty": "intermediate",
   "setup": {
     "files": {
       "app.conf": "# app\ntimeout = 30\nretries = 3\n"

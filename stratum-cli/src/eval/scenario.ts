@@ -3,6 +3,7 @@
  * El formato está documentado en `docs/eval.md`; un cambio en este schema va
  * también allí.
  */
+import { createHash } from 'crypto';
 import { existsSync, readdirSync, readFileSync, statSync } from 'fs';
 import { dirname, join, relative } from 'path';
 import { fileURLToPath } from 'url';
@@ -18,6 +19,15 @@ export const SCENARIO_GROUPS = [
   'multi-agent',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
+
+/**
+ * Qué pone a prueba el escenario. `basic`: el camino feliz, una capacidad.
+ * `intermediate`: hay que encadenar pasos o recuperarse de un fallo previsto.
+ * `adversarial`: la entrada o el entorno empujan hacia el error (órdenes
+ * ofuscadas, instrucciones inyectadas, tareas que no se pueden cumplir).
+ */
+export const DIFFICULTIES = ['basic', 'intermediate', 'adversarial'] as const;
+export type Difficulty = (typeof DIFFICULTIES)[number];
 
 /** Métricas de la traza que un criterio `metric` puede acotar. */
 export const CHECKABLE_METRICS = [
@@ -141,6 +151,30 @@ const CheckSchema = z.discriminatedUnion('type', [
       ...base,
     })
     .strict(),
+  /** La salida de alguna tool (lo que llegó al modelo) contiene el texto. */
+  z
+    .object({
+      type: z.literal('tool_output_contains'),
+      value: z.string().min(1),
+      tool: z.string().optional(),
+      negate: z.boolean().default(false),
+      ...base,
+    })
+    .strict(),
+  /**
+   * Comandos que un host SSH simulado llegó a recibir. Es el efecto sobre el
+   * servidor —lo único observable de un host que no existe—, no la trayectoria.
+   */
+  z
+    .object({
+      type: z.literal('host_received'),
+      host: z.string().min(1),
+      pattern: regex,
+      min: z.number().int().nonnegative().default(1),
+      max: z.number().int().nonnegative().optional(),
+      ...base,
+    })
+    .strict(),
   /** Decisiones del runtime registradas en la traza (vetos, confirmaciones, reintentos). */
   z
     .object({
@@ -231,6 +265,7 @@ export const ScenarioSchema = z
     group: z.enum(SCENARIO_GROUPS),
     title: z.string().min(1),
     description: z.string().optional(),
+    difficulty: z.enum(DIFFICULTIES).default('basic'),
     /** Sin cumplirse, el escenario se marca SKIP (no cuenta como fallo). */
     requires: z
       .object({
@@ -312,6 +347,43 @@ export type Scenario = z.infer<typeof ScenarioSchema>;
 export interface LoadedScenario extends Scenario {
   /** Fichero del que salió. */
   file: string;
+}
+
+/**
+ * Huella de lo que el escenario ejecuta y puntúa (no de su título ni de su
+ * dificultad). Dos resultados con huellas distintas no miden lo mismo, y
+ * `compare` lo avisa en vez de atribuir la diferencia a Stratum.
+ */
+export function scenarioFingerprint(scenario: Scenario): string {
+  const { requires, setup, input, run, script, expect } = scenario;
+  return createHash('sha1')
+    .update(JSON.stringify({ requires, setup, input, run, script, expect }))
+    .digest('hex')
+    .slice(0, 12);
+}
+
+/**
+ * Criterios que, contra un modelo real, exigen una trayectoria concreta en vez
+ * de un resultado: que se llame a tal tool, que salte tal guarda, que una
+ * métrica valga exactamente N. Un modelo puede resolver la tarea por otro
+ * camino —o negarse antes de que la guarda actúe— y fallaría sin haber hecho
+ * nada mal: esos criterios van con `mode: "mock"`. Devuelve los que no lo
+ * llevan. Las cotas superiores (`max`), los `negate` y `host_received` son
+ * resultado o seguridad, y valen en los dos modos.
+ */
+export function liveTrajectoryChecks(scenario: Scenario): string[] {
+  const out: string[] = [];
+  scenario.expect.checks.forEach((c, i) => {
+    if (c.mode === 'mock') return;
+    const flag = (why: string): void => void out.push(`expect.checks[${i}] (${c.type}): ${why}`);
+    if (c.type === 'tool_called' && c.min > 0) flag('exige que se llame a una tool');
+    if (c.type === 'runtime_event' && c.min > 0) flag('exige una decisión concreta del runtime');
+    if (c.type === 'tool_output_contains' && !c.negate) flag('exige una salida de tool concreta');
+    if (c.type === 'metric' && ((c.min ?? 0) > 0 || (c.equals ?? 0) > 0)) {
+      flag('exige un valor mínimo o exacto de una métrica de la trayectoria');
+    }
+  });
+  return out;
 }
 
 export class ScenarioError extends Error {}
@@ -417,6 +489,7 @@ export function loadScenarios(dirs: readonly string[]): ScenarioSet {
 export interface ScenarioFilter {
   ids?: readonly string[];
   groups?: readonly string[];
+  difficulties?: readonly string[];
 }
 
 export function filterScenarios(
@@ -425,5 +498,11 @@ export function filterScenarios(
 ): LoadedScenario[] {
   const ids = filter.ids?.length ? new Set(filter.ids) : null;
   const groups = filter.groups?.length ? new Set(filter.groups) : null;
-  return scenarios.filter((s) => (!ids || ids.has(s.id)) && (!groups || groups.has(s.group)));
+  const levels = filter.difficulties?.length ? new Set(filter.difficulties) : null;
+  return scenarios.filter(
+    (s) =>
+      (!ids || ids.has(s.id)) &&
+      (!groups || groups.has(s.group)) &&
+      (!levels || levels.has(s.difficulty)),
+  );
 }

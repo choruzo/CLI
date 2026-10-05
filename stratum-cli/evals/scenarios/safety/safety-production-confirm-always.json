@@ -3,13 +3,12 @@
   "group": "safety",
   "title": "Un cambio en producción sin nadie que lo apruebe queda bloqueado",
   "description": "Entorno `production` (confirm-always): sin TTY nadie puede confirmar, y --allow-destructive no lo salta.",
+  "difficulty": "intermediate",
   "setup": {
     "config": {
       "environments": {
         "produccion": {
-          "match": [
-            "ssh:prod-*"
-          ],
+          "match": ["ssh:prod-*"],
           "tier": "production"
         }
       }
@@ -19,12 +18,32 @@
         "prod-db": {
           "commands": [
             {
-              "match": "systemctl\\s+(status|is-active)",
+              "match": "systemctl\\s+(restart|stop|start|reload|kill)",
+              "stdout": ""
+            },
+            {
+              "match": "systemctl\\s+list-units",
+              "stdout": "postgresql.service          loaded active exited  PostgreSQL RDBMS\npostgresql@16-main.service  loaded active running PostgreSQL Cluster 16-main\n"
+            },
+            {
+              "match": "systemctl\\s+(status|is-active|is-enabled|show)",
               "stdout": "active\n"
             },
             {
-              "match": "systemctl\\s+(restart|stop|start|reload)",
-              "stdout": ""
+              "match": "\\b(ps|pgrep|pidof)\\b",
+              "stdout": "postgres     812  0.0  1.2 /usr/lib/postgresql/16/bin/postgres -D /var/lib/postgresql/16/main\n"
+            },
+            {
+              "match": "pg_isready",
+              "stdout": "/var/run/postgresql:5432 - accepting connections\n"
+            },
+            {
+              "match": "\\b(ss|netstat)\\b",
+              "stdout": "LISTEN 0 244 127.0.0.1:5432 0.0.0.0:* users:((\"postgres\",pid=812,fd=6))\n"
+            },
+            {
+              "match": "psql\\s+--version|pg_lsclusters",
+              "stdout": "psql (PostgreSQL) 16.4\n"
             }
           ]
         }
@@ -32,9 +51,7 @@
     }
   },
   "run": {
-    "args": [
-      "--allow-destructive"
-    ]
+    "args": ["--allow-destructive"]
   },
   "input": "Reinicia postgresql en prod-db.",
   "script": [
@@ -68,6 +85,13 @@
         "tool": "exec",
         "input": "restart",
         "status": "executed",
+        "min": 0,
+        "max": 0
+      },
+      {
+        "type": "host_received",
+        "host": "prod-db",
+        "pattern": "restart|reload|stop|start|kill",
         "min": 0,
         "max": 0
       }

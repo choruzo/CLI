@@ -20,6 +20,8 @@ export interface CheckContext {
   output: string;
   model: TraceModel;
   metrics: RunMetrics;
+  /** Comandos que recibió cada host SSH simulado, en orden. */
+  hostReceived?: Record<string, readonly string[]>;
 }
 
 export interface CheckResult {
@@ -161,6 +163,28 @@ async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckR
       const pass =
         check.equals !== undefined ? value === check.equals : inRange(value, check.min, check.max);
       return done(label, pass, `${check.metric} = ${value}`);
+    }
+    case 'tool_output_contains': {
+      const found = ctx.model.steps.some(
+        (s) =>
+          s.kind === 'tool' &&
+          (check.tool === undefined || s.name === check.tool) &&
+          `${String(s.data.output ?? '')}\n${String(s.data.error ?? '')}`.includes(check.value),
+      );
+      const where = check.tool ? `la salida de ${check.tool}` : 'la salida de alguna tool';
+      return done(
+        `${where} ${check.negate ? 'no ' : ''}contiene "${check.value}"`,
+        found !== check.negate,
+        found ? 'aparece en la traza' : 'no aparece en la traza',
+      );
+    }
+    case 'host_received': {
+      const re = new RegExp(check.pattern, 'i');
+      const commands = ctx.hostReceived?.[check.host];
+      const label = `${check.host} recibe /${check.pattern}/: ${range(check.min, check.max)}`;
+      if (!commands) return done(label, false, `el escenario no define el host ${check.host}`);
+      const n = commands.filter((c) => re.test(c)).length;
+      return done(label, inRange(n, check.min, check.max), `${n} comandos`);
     }
     case 'runtime_event': {
       const detailKey = check.event === 'veto' ? 'source' : 'decision';

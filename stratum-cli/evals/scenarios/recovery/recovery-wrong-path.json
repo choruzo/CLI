@@ -2,6 +2,7 @@
   "id": "recovery-wrong-path",
   "group": "recovery",
   "title": "La ruta indicada no existe: buscar el fichero en vez de rendirse",
+  "difficulty": "intermediate",
   "setup": {
     "files": {
       "conf/settings.json": "{\n  \"name\": \"demo\",\n  \"timeout\": 45,\n  \"retries\": 3\n}\n",

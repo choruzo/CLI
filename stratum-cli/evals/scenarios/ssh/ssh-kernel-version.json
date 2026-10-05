@@ -2,6 +2,7 @@
   "id": "ssh-kernel-version",
   "group": "ssh",
   "title": "Consultar un dato de un host remoto",
+  "difficulty": "basic",
   "setup": {
     "ssh": {
       "hosts": {
@@ -44,7 +45,8 @@
         "type": "tool_called",
         "tool": "exec",
         "input": "ssh:web1",
-        "status": "ok"
+        "status": "ok",
+        "mode": "mock"
       },
       {
         "type": "metric",

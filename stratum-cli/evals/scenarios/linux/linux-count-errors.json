@@ -2,11 +2,9 @@
   "id": "linux-count-errors",
   "group": "linux",
   "title": "Contar errores en un log y dejar el resultado en un fichero",
+  "difficulty": "basic",
   "requires": {
-    "platform": [
-      "linux",
-      "darwin"
-    ]
+    "platform": ["linux", "darwin"]
   },
   "setup": {
     "files": {

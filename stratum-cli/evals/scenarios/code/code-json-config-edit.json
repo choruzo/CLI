@@ -2,6 +2,7 @@
   "id": "code-json-config-edit",
   "group": "code",
   "title": "Editar un package.json sin romperlo",
+  "difficulty": "basic",
   "setup": {
     "files": {
       "package.json": "{\n  \"name\": \"demo\",\n  \"version\": \"1.2.9\",\n  \"scripts\": {\n    \"test\": \"node test.js\"\n  },\n  \"dependencies\": {}\n}\n"

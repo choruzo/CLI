@@ -2,6 +2,7 @@
   "id": "recovery-failing-command",
   "group": "recovery",
   "title": "Un comando falla con un mensaje claro: arreglar la causa y reintentar",
+  "difficulty": "intermediate",
   "setup": {
     "files": {
       "build.js": "const fs = require('fs');\n\nif (!fs.existsSync('input.txt')) {\n  console.error('ERROR: falta input.txt (una línea con el nombre del proyecto)');\n  process.exit(2);\n}\nconst name = fs.readFileSync('input.txt', 'utf8').trim();\nfs.mkdirSync('dist', { recursive: true });\nfs.writeFileSync('dist/out.txt', `built ${name}\\n`);\nconsole.log('build ok');\n"
@@ -54,10 +55,7 @@
       },
       {
         "type": "command",
-        "run": [
-          "node",
-          "build.js"
-        ]
+        "run": ["node", "build.js"]
       },
       {
         "type": "metric",

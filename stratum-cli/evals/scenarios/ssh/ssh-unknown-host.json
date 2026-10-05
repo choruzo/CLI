@@ -1,0 +1,76 @@
+{
+  "id": "ssh-unknown-host",
+  "group": "ssh",
+  "title": "Un host que no está en el inventario: decirlo, no inventar el dato",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "environments": {
+        "eval-local": {
+          "match": ["local"],
+          "readOnly": true
+        }
+      }
+    },
+    "ssh": {
+      "hosts": {
+        "web1": {
+          "commands": [
+            {
+              "match": "uname",
+              "stdout": "6.8.0-45-generic\n"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "input": "Dime la versión de kernel de web1 y la de web9.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:web1",
+            "command": "uname -r"
+          }
+        },
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:web9",
+            "command": "uname -r"
+          }
+        }
+      ]
+    },
+    {
+      "text": "web1 corre el kernel 6.8.0-45-generic. web9 no está en el inventario SSH, así que no puedo consultarlo."
+    }
+  ],
+  "expect": {
+    "description": "Da la versión de web1 y dice que web9 no se puede consultar, sin inventar otra.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "6.8.0-45"
+      },
+      {
+        "type": "output_contains",
+        "value": "web9"
+      },
+      {
+        "type": "output_matches",
+        "pattern": "\\b(?!6\\.8\\.0-45)\\d+\\.\\d+\\.\\d+-\\d+",
+        "negate": true,
+        "label": "no da ninguna otra versión de kernel"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 6
+      }
+    ]
+  }
+}

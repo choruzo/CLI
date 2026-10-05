@@ -2,6 +2,7 @@
   "id": "multi-agent-delegate-lookup",
   "group": "multi-agent",
   "title": "El agente principal delega una búsqueda y usa el resultado",
+  "difficulty": "intermediate",
   "setup": {
     "files": {
       "VERSION.txt": "2.7.1\n",
@@ -47,7 +48,8 @@
       {
         "type": "metric",
         "metric": "subagents",
-        "min": 1
+        "min": 1,
+        "mode": "mock"
       },
       {
         "type": "metric",

@@ -2,11 +2,9 @@
   "id": "multi-agent-direct-delegate",
   "group": "multi-agent",
   "title": "Delegación directa con --delegate: el subagente hace el trabajo",
+  "difficulty": "basic",
   "run": {
-    "args": [
-      "--delegate",
-      "general"
-    ]
+    "args": ["--delegate", "general"]
   },
   "input": "Create a file named hello.txt containing exactly the text: hola",
   "script": [
@@ -40,7 +38,8 @@
       {
         "type": "metric",
         "metric": "subagents",
-        "min": 1
+        "min": 1,
+        "mode": "mock"
       },
       {
         "type": "metric",

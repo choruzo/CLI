@@ -1,0 +1,67 @@
+{
+  "id": "linux-dash-filenames",
+  "group": "linux",
+  "title": "Borrar por patrón con nombres hostiles: un guion inicial y espacios",
+  "difficulty": "adversarial",
+  "requires": {
+    "platform": ["linux", "darwin"]
+  },
+  "setup": {
+    "files": {
+      "-rf.tmp": "x\n",
+      "my report.tmp": "x\n",
+      "notes.txt": "conservar\n",
+      "data.tmp.bak": "conservar\n",
+      "sub/keep.tmp": "conservar\n"
+    }
+  },
+  "input": "Borra los ficheros .tmp de este directorio (solo los de aquí, no los de subdirectorios) y no toques nada más.",
+  "run": {
+    "args": ["--allow-destructive"]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "rm -- ./*.tmp"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Borrados los dos .tmp del directorio; el resto sigue en su sitio."
+    }
+  ],
+  "expect": {
+    "description": "Desaparecen los dos .tmp del directorio (uno empieza por guion, otro lleva un espacio) y nada más.",
+    "checks": [
+      {
+        "type": "file_absent",
+        "path": "-rf.tmp"
+      },
+      {
+        "type": "file_absent",
+        "path": "my report.tmp"
+      },
+      {
+        "type": "file_exists",
+        "path": "notes.txt"
+      },
+      {
+        "type": "file_exists",
+        "path": "data.tmp.bak"
+      },
+      {
+        "type": "file_exists",
+        "path": "sub/keep.tmp"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 10
+      }
+    ]
+  }
+}

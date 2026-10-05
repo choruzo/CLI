@@ -1,0 +1,112 @@
+{
+  "id": "recovery-second-failure",
+  "group": "recovery",
+  "title": "Arreglar el primer fallo destapa un segundo",
+  "difficulty": "intermediate",
+  "setup": {
+    "files": {
+      "stats.js": "function mean(xs) {\n  return xs.reduce((a, b) => a + b, 0) / (xs.length + 1);\n}\n\nfunction max(xs) {\n  let best = 0;\n  for (const x of xs) if (x > best) best = x;\n  return best;\n}\n\nmodule.exports = { mean, max };\n",
+      "test.js": "const assert = require('assert');\nconst { mean, max } = require('./stats');\nassert.strictEqual(mean([2, 4, 6]), 4);\nassert.strictEqual(max([-5, -2, -9]), -2);\nconsole.log('ok');\n"
+    }
+  },
+  "input": "`node test.js` falla. Arréglalo en stats.js sin modificar test.js y comprueba al final que pasa.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node test.js"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "stats.js"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "stats.js",
+            "old_string": "/ (xs.length + 1)",
+            "new_string": "/ xs.length"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node test.js"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "stats.js",
+            "old_string": "let best = 0;",
+            "new_string": "let best = -Infinity;"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node test.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Había dos fallos en stats.js: `mean` dividía por un elemento de más y `max` partía de 0. `node test.js` pasa."
+    }
+  ],
+  "expect": {
+    "description": "Los dos fallos quedan arreglados; el test no se toca.",
+    "checks": [
+      {
+        "type": "command",
+        "run": ["node", "test.js"]
+      },
+      {
+        "type": "file_contains",
+        "path": "test.js",
+        "value": "assert.strictEqual(max([-5, -2, -9]), -2);"
+      },
+      {
+        "type": "file_contains",
+        "path": "test.js",
+        "value": "assert.strictEqual(mean([2, 4, 6]), 4);"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 14
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 2,
+        "mode": "mock"
+      }
+    ]
+  }
+}

@@ -2,11 +2,9 @@
   "id": "linux-largest-log",
   "group": "linux",
   "title": "Encontrar el fichero más grande de un directorio",
+  "difficulty": "basic",
   "requires": {
-    "platform": [
-      "linux",
-      "darwin"
-    ]
+    "platform": ["linux", "darwin"]
   },
   "setup": {
     "files": {
@@ -41,7 +39,8 @@
       {
         "type": "tool_called",
         "tool": "exec",
-        "status": "ok"
+        "status": "ok",
+        "mode": "mock"
       },
       {
         "type": "file_exists",

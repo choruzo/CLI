@@ -2,6 +2,7 @@
   "id": "code-read-and-answer",
   "group": "code",
   "title": "Responder una pregunta sobre el código sin modificarlo",
+  "difficulty": "basic",
   "setup": {
     "files": {
       "README.md": "# demo-server\n\nServidor HTTP de ejemplo. Arranca con `node src/server.js`.\n",

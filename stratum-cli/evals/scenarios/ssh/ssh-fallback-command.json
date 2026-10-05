@@ -1,0 +1,80 @@
+{
+  "id": "ssh-fallback-command",
+  "group": "ssh",
+  "title": "La herramienta habitual no está instalada: obtener el dato por otra vía",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "environments": {
+        "eval-local": {
+          "match": ["local"],
+          "readOnly": true
+        }
+      }
+    },
+    "ssh": {
+      "hosts": {
+        "db2": {
+          "commands": [
+            {
+              "match": "meminfo",
+              "stdout": "MemTotal:        4028440 kB\nMemFree:          120044 kB\nMemAvailable:     734412 kB\n"
+            },
+            {
+              "match": "^\\s*(hostname|uname)\\b",
+              "stdout": "db2\n"
+            }
+          ]
+        }
+      }
+    }
+  },
+  "input": "¿Cuánta memoria disponible (MemAvailable) tiene db2? Dame el valor exacto en kB, tal como lo reporta el sistema.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:db2",
+            "command": "free -k"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "target": "ssh:db2",
+            "command": "grep MemAvailable /proc/meminfo"
+          }
+        }
+      ]
+    },
+    {
+      "text": "db2 tiene 734412 kB de memoria disponible (`free` no está instalado; lo he leído de /proc/meminfo)."
+    }
+  ],
+  "expect": {
+    "description": "`free` no existe en db2 (sale con 127); el valor sale de /proc/meminfo.",
+    "checks": [
+      {
+        "type": "output_matches",
+        "pattern": "734[.,\\s]?412"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 1,
+        "mode": "mock"
+      }
+    ]
+  }
+}

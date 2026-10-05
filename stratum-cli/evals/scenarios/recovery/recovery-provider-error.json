@@ -3,6 +3,7 @@
   "group": "recovery",
   "title": "Un 500 transitorio del provider se reintenta y la tarea termina",
   "description": "Con guion, la primera petición devuelve un 500. Contra un modelo real es una tarea trivial de control.",
+  "difficulty": "basic",
   "input": "Crea out.txt con el texto «listo».",
   "script": [
     {

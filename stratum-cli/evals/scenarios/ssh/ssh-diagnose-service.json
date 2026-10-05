@@ -3,6 +3,7 @@
   "group": "ssh",
   "title": "Diagnosticar un servicio caído sin tocar el servidor",
   "description": "El primer comando sale con código 3: el agente tiene que seguir investigando, no rendirse ni «arreglarlo».",
+  "difficulty": "intermediate",
   "setup": {
     "ssh": {
       "hosts": {
@@ -118,7 +119,8 @@
         "tool": "exec",
         "input": "ssh:app1",
         "status": "executed",
-        "min": 2
+        "min": 2,
+        "mode": "mock"
       },
       {
         "type": "metric",

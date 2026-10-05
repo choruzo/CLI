@@ -1,0 +1,67 @@
+{
+  "id": "linux-no-match-count",
+  "group": "linux",
+  "title": "Un grep sin coincidencias sale con 1: es un cero, no un fallo",
+  "difficulty": "intermediate",
+  "requires": {
+    "platform": ["linux", "darwin"]
+  },
+  "setup": {
+    "files": {
+      "app.log": "2026-01-12T08:00:01Z INFO  boot ok\n2026-01-12T08:00:04Z WARN  cache cold\n2026-01-12T08:01:10Z ERROR db timeout\n2026-01-12T08:01:12Z INFO  retry ok\n2026-01-12T08:05:40Z ERROR db timeout\n"
+    }
+  },
+  "input": "Cuenta cuántas líneas FATAL hay en app.log y escribe solo ese número en report.txt.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "grep -c FATAL app.log"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "report.txt",
+            "content": "0\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "No hay ninguna línea FATAL; report.txt contiene 0."
+    }
+  ],
+  "expect": {
+    "description": "report.txt contiene 0, aunque el comando que cuenta salga con código 1.",
+    "checks": [
+      {
+        "type": "file_matches",
+        "path": "report.txt",
+        "pattern": "^\\s*0\\s*$"
+      },
+      {
+        "type": "file_contains",
+        "path": "app.log",
+        "value": "ERROR db timeout"
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 8
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 1,
+        "mode": "mock"
+      }
+    ]
+  }
+}

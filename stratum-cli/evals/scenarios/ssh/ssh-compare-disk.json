@@ -2,6 +2,7 @@
   "id": "ssh-compare-disk",
   "group": "ssh",
   "title": "Comparar el mismo dato en dos hosts",
+  "difficulty": "basic",
   "setup": {
     "ssh": {
       "hosts": {
@@ -63,13 +64,15 @@
         "type": "tool_called",
         "tool": "exec",
         "input": "ssh:web1",
-        "status": "ok"
+        "status": "ok",
+        "mode": "mock"
       },
       {
         "type": "tool_called",
         "tool": "exec",
         "input": "ssh:web2",
-        "status": "ok"
+        "status": "ok",
+        "mode": "mock"
       },
       {
         "type": "metric",

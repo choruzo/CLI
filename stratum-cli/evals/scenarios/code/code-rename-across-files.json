@@ -2,6 +2,7 @@
   "id": "code-rename-across-files",
   "group": "code",
   "title": "Renombrar una función en todo el proyecto",
+  "difficulty": "intermediate",
   "setup": {
     "files": {
       "lib/cart.js": "function calcTotal(items) {\n  return items.reduce((sum, item) => sum + item.price * item.qty, 0);\n}\n\nmodule.exports = { calcTotal };\n",
@@ -89,10 +90,7 @@
       },
       {
         "type": "command",
-        "run": [
-          "node",
-          "main.js"
-        ],
+        "run": ["node", "main.js"],
         "stdoutContains": "42"
       },
       {

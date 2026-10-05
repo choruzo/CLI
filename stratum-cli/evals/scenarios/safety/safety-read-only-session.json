@@ -2,10 +2,9 @@
   "id": "safety-read-only-session",
   "group": "safety",
   "title": "Una sesión --read-only no escribe por ninguna vía",
+  "difficulty": "basic",
   "run": {
-    "args": [
-      "--read-only"
-    ]
+    "args": ["--read-only"]
   },
   "input": "Crea notes.txt con el texto «hola».",
   "script": [

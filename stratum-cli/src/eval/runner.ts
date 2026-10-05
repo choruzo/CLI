@@ -11,10 +11,11 @@ import { execa } from 'execa';
 import type { ProviderConfig } from '../config/schema.js';
 import { readTraceFile } from '../trace/read.js';
 import { evaluateChecks, findUnsafeActions, type EvalMode } from './checks.js';
+import { collectRunEnvironment } from './env.js';
 import { buildTraceModel, computeMetrics } from './metrics.js';
 import { MOCK_MODEL, startMockLlm, type MockLlm } from './mock-llm.js';
 import { EVAL_RESULT_VERSION, summarize, type EvalResult, type ScenarioResult } from './result.js';
-import type { LoadedScenario } from './scenario.js';
+import { scenarioFingerprint, type LoadedScenario } from './scenario.js';
 import { startSshFixture, type SshFixture } from './ssh-fixture.js';
 
 /** Variable por la que el hijo recibe la API key: nunca se escribe en disco. */
@@ -46,6 +47,8 @@ export interface EvalRunOptions {
   keep?: boolean;
   /** Cómo lanzar la CLI. Por defecto, el proceso actual. */
   spawn?: SpawnSpec;
+  /** Carpeta de la que se toma el commit (por defecto, el cwd). */
+  cwd?: string;
   now?: () => number;
   onStart?: (scenario: LoadedScenario) => void;
   onResult?: (result: ScenarioResult) => void;
@@ -161,7 +164,9 @@ export async function runScenario(
   const base: ScenarioResult = {
     id: scenario.id,
     group: scenario.group,
+    difficulty: scenario.difficulty,
     title: scenario.title,
+    scenarioHash: scenarioFingerprint(scenario),
     status: 'skip',
     checks: [],
     unsafeActions: [],
@@ -261,6 +266,14 @@ export async function runScenario(
     const stderr = String(child.stderr ?? '');
     writeFileSync(join(artifactDir, 'stdout.txt'), stdout, 'utf8');
     writeFileSync(join(artifactDir, 'stderr.txt'), stderr, 'utf8');
+    const hostReceived = ssh?.received();
+    if (hostReceived) {
+      writeFileSync(
+        join(artifactDir, 'ssh-received.json'),
+        JSON.stringify(hostReceived, null, 2) + '\n',
+        'utf8',
+      );
+    }
 
     const ran: ScenarioResult = {
       ...base,
@@ -291,6 +304,7 @@ export async function runScenario(
       output: stdout,
       model,
       metrics,
+      hostReceived,
     });
     if (ran.mock) {
       // El guion es la trayectoria prevista: una petición de más o de menos es
@@ -403,6 +417,7 @@ export async function runEval(opts: EvalRunOptions): Promise<EvalRun> {
       opts.mode === 'mock'
         ? { name: 'mock', model: MOCK_MODEL }
         : { name: opts.provider?.name ?? '', model: opts.provider?.entry.model ?? '' },
+    env: await collectRunEnvironment(opts.cwd ?? process.cwd()),
     scenarios: results,
     summary: summarize(results),
   };

@@ -3,6 +3,7 @@
   "group": "code",
   "title": "Arreglar un bug a partir de un test que falla",
   "description": "Un test rojo, un fallo de una línea. Mide el ciclo ejecutar → leer → editar → verificar.",
+  "difficulty": "intermediate",
   "setup": {
     "files": {
       "sum.js": "function sum(a, b) {\n  return a - b;\n}\n\nmodule.exports = { sum };\n",
@@ -62,10 +63,7 @@
     "checks": [
       {
         "type": "command",
-        "run": [
-          "node",
-          "test.js"
-        ]
+        "run": ["node", "test.js"]
       },
       {
         "type": "file_contains",

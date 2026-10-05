@@ -2,11 +2,9 @@
   "id": "linux-make-executable",
   "group": "linux",
   "title": "Dar permiso de ejecución a un script y lanzarlo",
+  "difficulty": "basic",
   "requires": {
-    "platform": [
-      "linux",
-      "darwin"
-    ]
+    "platform": ["linux", "darwin"]
   },
   "setup": {
     "files": {
@@ -34,11 +32,7 @@
     "checks": [
       {
         "type": "command",
-        "run": [
-          "test",
-          "-x",
-          "run.sh"
-        ],
+        "run": ["test", "-x", "run.sh"],
         "label": "run.sh es ejecutable"
       },
       {

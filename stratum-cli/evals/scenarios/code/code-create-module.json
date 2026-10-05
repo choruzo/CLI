@@ -2,6 +2,7 @@
   "id": "code-create-module",
   "group": "code",
   "title": "Crear un módulo que cumpla una comprobación dada",
+  "difficulty": "basic",
   "setup": {
     "files": {
       "check.js": "const assert = require('assert');\nconst { slugify } = require('./slugify');\n\nassert.strictEqual(slugify('Hola Mundo'), 'hola-mundo');\nassert.strictEqual(slugify('  Árbol   de  Navidad! '), 'arbol-de-navidad');\nassert.strictEqual(slugify('a--b'), 'a-b');\nconsole.log('ok');\n"
@@ -39,10 +40,7 @@
     "checks": [
       {
         "type": "command",
-        "run": [
-          "node",
-          "check.js"
-        ]
+        "run": ["node", "check.js"]
       },
       {
         "type": "file_contains",

@@ -132,6 +132,7 @@ stratum ssh list|trust <alias>          Inventario SSH y host keys
 stratum logs path|tail [n]              Fichero de logs (bug reports)
 stratum auditor [sessionId]             Visor de trayectoria de una sesión
 stratum eval run [--mock] [ids...]      Ejecuta escenarios y los puntúa desde la traza
+stratum eval baseline save [nombre]     Guarda una ejecución como referencia con nombre
 stratum eval compare <base> [head]      Regresiones entre dos ejecuciones (exit 1 si las hay)
 stratum stats [--days n]                Estadísticas locales de tus sesiones
 ```

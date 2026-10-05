@@ -4,7 +4,8 @@
  */
 import type { CheckResult, EvalMode, UnsafeAction } from './checks.js';
 import type { RunMetrics } from './metrics.js';
-import { SCENARIO_GROUPS, type ScenarioGroup } from './scenario.js';
+import type { ToleranceOverrides } from './compare.js';
+import { DIFFICULTIES, SCENARIO_GROUPS, type Difficulty, type ScenarioGroup } from './scenario.js';
 
 export const EVAL_RESULT_VERSION = 1;
 
@@ -14,7 +15,11 @@ export type ScenarioStatus = 'pass' | 'fail' | 'error' | 'skip';
 export interface ScenarioResult {
   id: string;
   group: ScenarioGroup;
+  /** Ausente en resultados anteriores a los niveles de dificultad. */
+  difficulty?: Difficulty;
   title: string;
+  /** Huella de la definición del escenario (`scenarioFingerprint`). */
+  scenarioHash?: string;
   status: ScenarioStatus;
   /** Por qué no pasó (primer criterio incumplido, motivo del skip o del error). */
   reason?: string;
@@ -74,6 +79,30 @@ export interface GroupSummary {
   };
 }
 
+/** Dónde y sobre qué código se ejecutó: lo que hace falta para fiarse de una comparación. */
+export interface RunEnvironment {
+  os: { platform: string; release: string; arch: string };
+  /** Repositorio desde el que se lanzó; null fuera de uno. `dirty`: había cambios sin commit. */
+  git: {
+    /** `stratum`: el checkout desde el que corre la CLI. `cwd`: el proyecto donde se lanzó. */
+    repo?: 'stratum' | 'cwd';
+    commit: string;
+    branch: string | null;
+    dirty: boolean;
+  } | null;
+}
+
+/** Presente en la copia de un resultado guardada como baseline con nombre. */
+export interface BaselineInfo {
+  name: string;
+  savedAt: string;
+  /** Ejecución de la que se copió. */
+  runId: string;
+  note?: string;
+  /** Tolerancias propias de este baseline; `compare` las aplica sobre las de su modo. */
+  tolerances?: ToleranceOverrides;
+}
+
 export interface EvalResult {
   schemaVersion: number;
   kind: 'stratum-eval';
@@ -86,8 +115,14 @@ export interface EvalResult {
   node: string;
   mode: EvalMode;
   provider: { name: string; model: string };
+  env?: RunEnvironment;
+  baseline?: BaselineInfo;
   scenarios: ScenarioResult[];
-  summary: { overall: GroupSummary; groups: Partial<Record<ScenarioGroup, GroupSummary>> };
+  summary: {
+    overall: GroupSummary;
+    groups: Partial<Record<ScenarioGroup, GroupSummary>>;
+    difficulties?: Partial<Record<Difficulty, GroupSummary>>;
+  };
 }
 
 const ratio = (a: number, b: number): number | null => (b > 0 ? a / b : null);
@@ -166,7 +201,12 @@ export function summarize(results: readonly ScenarioResult[]): EvalResult['summa
     const inGroup = results.filter((r) => r.group === group);
     if (inGroup.length > 0) groups[group] = summarizeGroup(inGroup);
   }
-  return { overall: summarizeGroup(results), groups };
+  const difficulties: Partial<Record<Difficulty, GroupSummary>> = {};
+  for (const difficulty of DIFFICULTIES) {
+    const atLevel = results.filter((r) => r.difficulty === difficulty);
+    if (atLevel.length > 0) difficulties[difficulty] = summarizeGroup(atLevel);
+  }
+  return { overall: summarizeGroup(results), groups, difficulties };
 }
 
 /** ¿Tiene `value` la forma de un `result.json`? (para leer uno de disco). */

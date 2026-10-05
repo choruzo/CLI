@@ -4,9 +4,16 @@
  */
 import chalk from 'chalk';
 import { formatDuration, formatTokenCount } from '../trace/model.js';
-import type { Comparison, MetricChange, Verdict } from './compare.js';
+import type {
+  Comparison,
+  MetricChange,
+  ScenarioComparison,
+  Tolerance,
+  Verdict,
+} from './compare.js';
+import { COMPARABLE_METRICS } from './metrics.js';
 import type { Distribution, EvalResult, GroupSummary, ScenarioResult } from './result.js';
-import type { LoadedScenario } from './scenario.js';
+import { DIFFICULTIES, liveTrajectoryChecks, type LoadedScenario } from './scenario.js';
 import type { AggregateStats } from './stats.js';
 
 const pct = (v: number | null): string => (v === null ? 'n/d' : `${(v * 100).toFixed(1)} %`);
@@ -41,7 +48,25 @@ function scenarioLine(r: ScenarioResult, idWidth: number): string {
       (m.policyBlocks ? ` · ${m.policyBlocks} bloq` : '') +
       (m.repeatedCalls ? ` · ${m.repeatedCalls} rep` : '')
     : '';
-  return `  ${STATUS[r.status]} ${pad(r.id, idWidth)}  ${chalk.gray(cost)}`.trimEnd();
+  const level = r.difficulty ? chalk.gray(LEVEL[r.difficulty]) : ' ';
+  return `  ${STATUS[r.status]} ${level} ${pad(r.id, idWidth)}  ${chalk.gray(cost)}`.trimEnd();
+}
+
+/** Marca de dificultad en una línea de escenario. */
+const LEVEL = { basic: '·', intermediate: '◆', adversarial: '▲' } as const;
+
+/** Commit, sistema y fecha de una ejecución, en una línea. */
+function provenance(result: EvalResult): string {
+  const git = result.env?.git;
+  return [
+    git ? `commit ${git.commit}${git.dirty ? ' (con cambios sin commit)' : ''}` : null,
+    git?.branch ? `rama ${git.branch}` : null,
+    result.env ? `${result.env.os.platform} ${result.env.os.release}` : result.platform,
+    `node ${result.node}`,
+    result.startedAt.slice(0, 16).replace('T', ' '),
+  ]
+    .filter(Boolean)
+    .join(' · ');
 }
 
 const dist = (d: Distribution | null, fmt: (v: number) => string): string =>
@@ -76,7 +101,7 @@ export function formatEvalReport(result: EvalResult, dir?: string): string {
     result.mode === 'mock' ? 'modelo de guion' : `${result.provider.name}/${result.provider.model}`,
     result.platform,
   ].filter(Boolean);
-  out.push(chalk.bold(head.join(' · ')), '');
+  out.push(chalk.bold(head.join(' · ')), chalk.gray(provenance(result)), '');
 
   const idWidth = Math.max(...result.scenarios.map((s) => s.id.length), 8);
   let group = '';
@@ -92,6 +117,12 @@ export function formatEvalReport(result: EvalResult, dir?: string): string {
       out.push(chalk.red(`        ⚠ acción insegura (paso ${u.step}): ${u.tool} ${u.input}`));
     }
   }
+
+  const levels = DIFFICULTIES.flatMap((d) => {
+    const s = result.summary.difficulties?.[d];
+    return s ? [`${LEVEL[d]} ${d} ${s.passed}/${s.total - s.skipped}`] : [];
+  });
+  if (levels.length > 0) out.push('', chalk.gray(`Por dificultad: ${levels.join('  ')}`));
 
   out.push('', chalk.bold('Resumen'), ...summaryLines(result.summary.overall));
   if (dir) {
@@ -138,28 +169,113 @@ function changeText(c: MetricChange): string {
   return `${c.metric} ${value(c.metric, c.base)} → ${value(c.metric, c.head)}${rel}`;
 }
 
+function toleranceText(metric: string, t: Tolerance): string {
+  const parts: string[] = [];
+  if (t.pct > 0) parts.push(`${Math.round(t.pct * 100)} %`);
+  if (t.abs > 0) parts.push(value(metric, t.abs));
+  return `${metric} ${parts.length > 0 ? parts.join(' y ') : 'sin margen'}`;
+}
+
+const runName = (r: Comparison['base']): string =>
+  [
+    r.baseline ? `baseline «${r.baseline}»` : (r.label ?? r.runId),
+    `v${r.stratumVersion}`,
+    r.commit,
+    r.mode === 'mock' ? 'guion' : r.model,
+    r.platform,
+    r.startedAt.slice(0, 10),
+  ]
+    .filter(Boolean)
+    .join(' · ');
+
 export function formatComparison(cmp: Comparison): string {
-  const name = (r: Comparison['base']): string =>
-    `${r.label ?? r.runId} (v${r.stratumVersion}, ${r.mode === 'mock' ? 'guion' : r.model})`;
   const out: string[] = [
-    chalk.bold(`stratum eval compare · ${name(cmp.base)} → ${name(cmp.head)}`),
+    chalk.bold('stratum eval compare'),
+    `  base     ${runName(cmp.base)}`,
+    `  actual   ${runName(cmp.head)}`,
     ...cmp.notes.map((n) => chalk.yellow(`  ! ${n}`)),
-    '',
   ];
 
-  const moved = cmp.scenarios.filter((s) => s.verdict !== 'same');
-  if (moved.length === 0) out.push('  Sin cambios por escenario por encima de los umbrales.');
-  for (const s of moved) {
-    const status = s.base !== s.head ? `  ${s.base ?? '—'} → ${s.head ?? '—'}` : '';
-    out.push(`  ${VERDICT[s.verdict]}  ${s.id}${status}`);
-    for (const c of s.changes) {
-      const mark = c.verdict === 'regression' ? chalk.red('+') : chalk.green('-');
-      out.push(`      ${mark} ${changeText(c)}`);
+  const byId = new Map(cmp.scenarios.map((s) => [s.id, s]));
+  /** Un bloque del informe: los escenarios de un hallazgo, con lo que cambió. */
+  const section = (
+    title: string,
+    ids: readonly string[],
+    detail: (s: ScenarioComparison) => string[],
+    color: (s: string) => string,
+  ): void => {
+    if (ids.length === 0) return;
+    out.push('', color(chalk.bold(`${title} (${ids.length})`)));
+    for (const id of ids) {
+      const s = byId.get(id)!;
+      out.push(`  ${id}${s.definitionChanged ? chalk.gray('  (escenario modificado)') : ''}`);
+      for (const line of detail(s)) out.push(chalk.gray(`      ${line}`));
     }
+  };
+  const why = (s: ScenarioComparison): string[] => (s.reason ? [s.reason.split('\n')[0]!] : []);
+  const moved =
+    (category: MetricChange['category'], verdict: Verdict) =>
+    (s: ScenarioComparison): string[] =>
+      s.changes.filter((c) => c.category === category && c.verdict === verdict).map(changeText);
+  const h = cmp.highlights;
+
+  section('PASS → FAIL', h.passToFail, why, chalk.red);
+  section('PASS → ERROR', h.passToError, why, chalk.red);
+  section(
+    'Nuevas acciones inseguras',
+    h.newUnsafeActions,
+    moved('safety', 'regression'),
+    chalk.red,
+  );
+  section('Más bloqueos de política', h.morePolicyBlocks, moved('policy', 'regression'), chalk.red);
+  section(
+    'Regresiones de coste (tokens, tiempo, llamadas)',
+    h.costRegressions,
+    moved('cost', 'regression'),
+    chalk.yellow,
+  );
+  section(
+    'Regresiones de fiabilidad (errores, reintentos, repeticiones)',
+    h.reliabilityRegressions,
+    moved('reliability', 'regression'),
+    chalk.yellow,
+  );
+  section(
+    'Mejoras',
+    h.improvements,
+    (s) => [
+      ...(s.transition === 'fail_to_pass' ? ['FAIL → PASS'] : []),
+      ...(s.transition === 'error_to_pass' ? ['ERROR → PASS'] : []),
+      ...s.changes.filter((c) => c.verdict === 'improvement').map(changeText),
+    ],
+    chalk.green,
+  );
+  section(
+    'Siguen sin pasar, de otra manera',
+    h.unresolved,
+    (s) => [`${s.base} → ${s.head}`, ...why(s)],
+    chalk.gray,
+  );
+  section('Nuevos (no estaban en la base)', h.added, (s) => [String(s.head)], chalk.gray);
+  section('No ejecutados ahora', h.removed, () => [], chalk.gray);
+
+  const found = cmp.scenarios.filter(
+    (s) => s.verdict !== 'same' || s.transition === 'unresolved',
+  ).length;
+  if (found === 0) out.push('', '  Sin cambios por escenario por encima de las tolerancias.');
+
+  if (cmp.difficulties.length > 0) {
+    const cell = (c: { passed: number; ran: number } | null): string =>
+      c ? `${c.passed}/${c.ran}` : '—';
+    out.push('', chalk.bold('Éxito por dificultad'));
+    out.push(
+      ...table(cmp.difficulties.map((d) => [`  ${d.difficulty}`, cell(d.base), '→', cell(d.head)])),
+    );
   }
 
   if (cmp.summary.length > 0) {
-    out.push('', chalk.bold('Métricas agregadas'));
+    // Sin veredicto: las medias se mueven con el ruido; lo que cuenta sale de los escenarios.
+    out.push('', chalk.bold('Métricas agregadas') + chalk.gray('  (informativas)'));
     out.push(
       ...table(
         cmp.summary.map((c) => [
@@ -167,20 +283,41 @@ export function formatComparison(cmp: Comparison): string {
           value(c.metric, c.base),
           '→',
           value(c.metric, c.head),
-          c.verdict === 'same' ? '' : VERDICT[c.verdict],
+          c.verdict === 'same' ? '' : chalk.gray(c.verdict === 'regression' ? 'peor' : 'mejor'),
         ]),
       ),
     );
   }
 
-  const same = cmp.scenarios.length - moved.length;
+  const same = cmp.scenarios.filter((s) => s.verdict === 'same').length;
   out.push(
     '',
     `${VERDICT[cmp.verdict]} — ${cmp.regressions} regresiones, ${cmp.improvements} mejoras, ` +
-      `${same} sin cambios (umbral ${Math.round(cmp.thresholds.relative * 100)} %, ` +
-      `tiempo ${Math.round(cmp.thresholds.timeRelative * 100)} %)`,
+      `${same} sin cambios`,
+    chalk.gray(
+      `Tolerancias: ${COMPARABLE_METRICS.map((m) => toleranceText(m, cmp.tolerances[m])).join(' · ')}`,
+    ),
   );
   return out.join('\n') + '\n';
+}
+
+/** Baselines guardados, uno por línea. */
+export function formatBaselineList(baselines: readonly EvalResult[]): string {
+  if (baselines.length === 0) return 'No hay baselines guardados.\n';
+  const rows = baselines.map((r) => {
+    const s = r.summary.overall;
+    return [
+      r.baseline?.name ?? '?',
+      `${s.passed}/${s.total - s.skipped}`,
+      r.mode === 'mock' ? 'guion' : `${r.provider.name}/${r.provider.model}`,
+      `v${r.stratumVersion}`,
+      r.env?.git ? r.env.git.commit + (r.env.git.dirty ? '+' : '') : '',
+      r.platform,
+      (r.baseline?.savedAt ?? r.startedAt).slice(0, 10),
+      r.baseline?.note ?? '',
+    ];
+  });
+  return table(rows).join('\n') + '\n';
 }
 
 // ---------------------------------------------------------------------------
@@ -191,12 +328,22 @@ export function formatScenarioList(scenarios: readonly LoadedScenario[]): string
   if (scenarios.length === 0) return 'No hay escenarios.\n';
   const rows = scenarios.map((s) => [
     s.group,
+    s.difficulty,
     s.id,
     s.script ? 'guion' : 'live',
     s.requires?.platform ? s.requires.platform.join('/') : '',
     s.title,
   ]);
   return table(rows).join('\n') + '\n';
+}
+
+/** Avisos de escenarios cuyos criterios atan la trayectoria de un modelo real. */
+export function scenarioWarnings(scenarios: readonly LoadedScenario[]): string[] {
+  return scenarios.flatMap((s) =>
+    liveTrajectoryChecks(s).map(
+      (w) => `${s.id}: ${w}; márcalo con "mode": "mock" si solo vale para el guion`,
+    ),
+  );
 }
 
 export function formatStats(s: AggregateStats, top = 10): string {
