@@ -315,6 +315,22 @@ Guarda uno por combinación que quieras vigilar — `mock`, `live-glm`, `mock-li
 guion con un modelo real, o dos plataformas, no dice nada sobre Stratum (el informe lo avisa y, entre
 modos distintos, no compara el coste).
 
+### Baselines de referencia del repositorio
+
+`evals/baselines/` guarda la referencia con la que se valida cada cambio de Stratum (no va en el
+paquete de npm): `mock.json` (guion) y `live-glm.json` (`glm5.3-flash` por nan), los dos en Windows,
+32/32 con los 5 de `linux` en SKIP, sobre el commit que consta en cada fichero. Una ruta vale como
+referencia, así que no hace falta importarlos:
+
+```bash
+stratum eval run --mock --baseline evals/baselines/mock.json
+stratum eval run --model glm5.3-flash --concurrency 2 --baseline evals/baselines/live-glm.json
+```
+
+Cuando un cambio intencionado mueve la referencia, se regeneran (`--save-baseline`) y se copian
+desde `~/.stratum/evals/baselines/`. Comparar contra ellos desde otra plataforma avisa de la
+diferencia; los escenarios de `linux` saldrán como «nuevos».
+
 ### Qué cuenta como regresión
 
 Por escenario, en este orden:
