@@ -25,27 +25,43 @@ beforeEach(() => {
   feed = new TraceFeed(
     dir,
     (f: ConversationOutboundFrame) => {
-      if (f.type === 'trace_records') frames.push(f);
+      if (f.type !== 'trace_records') return;
+      frames.push(f);
+      onFrame();
     },
     10,
   );
 });
 afterEach(() => {
+  onFrame = () => {};
   feed.unsubscribe();
   rmSync(dir, { recursive: true, force: true });
 });
 
-async function until(cond: () => boolean): Promise<void> {
-  const deadline = Date.now() + 2000;
-  while (!cond()) {
-    if (Date.now() > deadline) throw new Error('timeout');
-    await new Promise((r) => setTimeout(r, 10));
-  }
+/** Lo llama el feed al emitir cada trama. */
+let onFrame: () => void = () => {};
+
+/**
+ * Espera a que la condición se cumpla, comprobándola cuando llega una trama.
+ * Sin plazo propio: con el equipo cargado (la suite entera en paralelo) el
+ * sondeo del fichero tarda lo que tarde, y un plazo fijo de 2 s fallaba sin
+ * que hubiera nada roto. Si la trama no llega nunca, corta el timeout del test.
+ */
+function until(cond: () => boolean): Promise<void> {
+  return new Promise((resolve) => {
+    const check = (): void => {
+      if (!cond()) return;
+      onFrame = () => {};
+      resolve();
+    };
+    onFrame = check;
+    check();
+  });
 }
 
 const line = (at: number): string => `${JSON.stringify({ t: 'turn', at, input: `m${at}` })}\n`;
 
-describe('TraceFeed', () => {
+describe('TraceFeed', { timeout: 30_000 }, () => {
   it('manda lo ya grabado con reset y luego solo lo nuevo', async () => {
     writeFileSync(feed.file(ID), line(1) + line(2));
     feed.subscribe(ID);
@@ -85,6 +101,32 @@ describe('TraceFeed', () => {
     await until(() => frames.reduce((n, f) => n + f.records.length, 0) === 450);
     expect(frames.length).toBeGreaterThanOrEqual(3);
     expect(frames.filter((f) => f.reset)).toHaveLength(1);
+  });
+
+  it('un sondeo que se solapa con otro no adelanta un reset vacío', async () => {
+    // Sondeo cada 1 ms sobre un fichero que tarda más que eso en leerse: los
+    // sondeos se pisan, y la primera trama tiene que seguir siendo la lectura
+    // completa, no una tanda vacía emitida por el que llegó segundo.
+    const stressed: TraceRecordsFrame[] = [];
+    const fast = new TraceFeed(
+      dir,
+      (f: ConversationOutboundFrame) => {
+        if (f.type !== 'trace_records') return;
+        stressed.push(f);
+        onFrame();
+      },
+      1,
+    );
+    writeFileSync(fast.file(ID), Array.from({ length: 5000 }, (_, i) => line(i + 1)).join(''));
+    try {
+      fast.subscribe(ID);
+      await until(() => stressed.reduce((n, f) => n + f.records.length, 0) === 5000);
+      expect(stressed[0]).toMatchObject({ reset: true });
+      expect(stressed.every((f) => f.records.length > 0)).toBe(true);
+      expect(stressed.filter((f) => f.reset)).toHaveLength(1);
+    } finally {
+      fast.unsubscribe();
+    }
   });
 
   it('remove borra la traza y deja de seguirla', async () => {

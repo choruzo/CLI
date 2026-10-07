@@ -30,9 +30,40 @@
  * regla se evalúa por segmento y no sobre la cadena entera.
  */
 export function splitCommandSegments(command: string): string[] {
-  const segments: string[] = [];
+  return splitCommandParts(command).map((p) => p.text);
+}
+
+/** Operador que precede a un segmento: `|` es una tubería; el resto solo encadena. */
+export type SegmentOperator = '' | ';' | '|' | '||' | '&' | '&&';
+
+export interface CommandPart {
+  text: string;
+  /** Qué lo une al segmento anterior (`''` en el primero). */
+  op: SegmentOperator;
+}
+
+/**
+ * Como `splitCommandSegments`, pero conservando el operador que precede a cada
+ * segmento: hace falta para saber si un intérprete recibe su código por una
+ * tubería (`… | sh`), que es lo único que distingue `sh` de `echo x | sh`.
+ */
+export function splitCommandParts(command: string): CommandPart[] {
+  const parts: CommandPart[] = [];
   let current = '';
+  let op: SegmentOperator = '';
   let quote: string | null = null;
+  const push = (next: SegmentOperator): void => {
+    const text = current.trim();
+    if (text) {
+      parts.push({ text, op });
+      op = next;
+    } else if (next === '|' || op === '') {
+      // Un segmento vacío no rompe la tubería que venía (`a | | b` no existe,
+      // pero `a |& b` sí: el `&` no debe borrar el `|`).
+      op = op === '|' ? '|' : next;
+    }
+    current = '';
+  };
 
   for (let i = 0; i < command.length; i++) {
     const ch = command[i]!;
@@ -46,16 +77,20 @@ export function splitCommandSegments(command: string): string[] {
       current += ch;
       continue;
     }
-    if (ch === ';' || ch === '\n' || ch === '|' || ch === '&') {
-      segments.push(current);
-      current = '';
+    if (ch === ';' || ch === '\n') {
+      push(';');
+      continue;
+    }
+    if (ch === '|' || ch === '&') {
+      const double = command[i + 1] === ch;
+      push(double ? (`${ch}${ch}` as SegmentOperator) : ch);
+      if (double) i++;
       continue;
     }
     current += ch;
   }
-  segments.push(current);
-
-  return segments.map((s) => s.trim()).filter((s) => s.length > 0);
+  push(';');
+  return parts;
 }
 
 /** Tokeniza un segmento respetando comillas simples y dobles (las retira). */
@@ -97,7 +132,6 @@ export function tokenize(segment: string): string[] {
  * que `/usr/bin/rm` y `rm` se traten igual. `rest` son los tokens que siguen.
  */
 export function parseInvocation(tokens: string[]): { name: string; rest: string[] } | null {
-  const WRAPPERS = new Set(['sudo', 'doas', 'env', 'command', 'nohup', 'time', 'xargs', 'nice']);
   let i = 0;
   while (i < tokens.length) {
     const tok = tokens[i]!;
@@ -106,12 +140,23 @@ export function parseInvocation(tokens: string[]): { name: string; rest: string[
       i++;
       continue;
     }
+    // Un comando entero entre comillas (`cmd /c "rd /s /q x"`) llega como un solo
+    // token: se devuelve tal cual y `effectiveInvocations` lo vuelve a trocear.
+    // Una ruta con espacios (`"C:\Program Files\Git\git.exe"`) no empieza por una
+    // palabra suelta, así que sigue por el camino normal.
+    if (/^[A-Za-z][\w.-]*\s/.test(tok)) return { name: tok, rest: tokens.slice(i + 1) };
     const base = tok.replace(/\\/g, '/').split('/').pop() ?? tok;
     const bare = base.replace(/\.(exe|cmd|bat|ps1)$/i, '');
-    if (WRAPPERS.has(bare)) {
+    const wrapper = WRAPPERS[bare];
+    if (wrapper) {
       i++;
-      // saltar los flags del envoltorio (sudo -u foo, env -i, …)
-      while (i < tokens.length && tokens[i]!.startsWith('-')) i++;
+      // Flags del envoltorio, con el valor de los que lo llevan (`sudo -u root`,
+      // `nice -n 10`): sin saltarlo, `root` pasaba por ser el comando.
+      while (i < tokens.length && tokens[i]!.startsWith('-')) {
+        i += wrapper.valueFlags.includes(tokens[i]!) ? 2 : 1;
+      }
+      // Operandos propios antes del comando (`timeout 30 rm …`, `chroot /mnt rm …`).
+      for (let n = 0; n < wrapper.operands && i < tokens.length; n++) i++;
       continue;
     }
     // `cmd /c del x` (Windows): el comando real va tras `/c` o `/k`.
@@ -125,6 +170,216 @@ export function parseInvocation(tokens: string[]): { name: string; rest: string[
     return { name: bare, rest: tokens.slice(i + 1) };
   }
   return null;
+}
+
+interface WrapperSpec {
+  /** Flags que consumen el token siguiente. */
+  valueFlags: readonly string[];
+  /** Operandos del propio envoltorio antes del comando. */
+  operands: number;
+}
+
+const wrapper = (valueFlags: readonly string[] = [], operands = 0): WrapperSpec => ({
+  valueFlags,
+  operands,
+});
+
+/**
+ * Comandos que solo lanzan a otro: lo que cuenta es lo que envuelven. Lista
+ * cerrada a propósito — no es un intérprete de shell —, con los flags que
+ * consumen un valor para no confundir ese valor con el comando.
+ */
+const WRAPPERS: Readonly<Record<string, WrapperSpec>> = {
+  sudo: wrapper(['-u', '-g', '-h', '-p', '-C', '-D', '-R', '-T', '-U', '-r', '-t']),
+  doas: wrapper(['-u', '-C']),
+  env: wrapper(['-u', '-C', '--unset', '--chdir']),
+  command: wrapper(),
+  exec: wrapper(['-a']),
+  nohup: wrapper(),
+  setsid: wrapper(),
+  time: wrapper(['-f', '-o']),
+  nice: wrapper(['-n', '--adjustment']),
+  ionice: wrapper(['-c', '-n', '-p']),
+  stdbuf: wrapper(['-i', '-o', '-e']),
+  timeout: wrapper(['-s', '-k', '--signal', '--kill-after'], 1),
+  chroot: wrapper(['--userspec', '--groups'], 1),
+  busybox: wrapper(),
+  xargs: wrapper(['-n', '-I', '-P', '-L', '-d', '-a', '-s', '-E']),
+};
+
+// ---------------------------------------------------------------------------
+// Comando efectivo
+// ---------------------------------------------------------------------------
+
+/** Una invocación tal como se va a ejecutar, una vez quitado lo que la envuelve. */
+export interface EffectiveInvocation {
+  /** Ejecutable (basename, sin extensión). */
+  name: string;
+  rest: string[];
+  /** Segmento de primer nivel del que sale. */
+  segment: string;
+  /** Recibe su entrada por una tubería. */
+  piped: boolean;
+  /** 0 = escrita tal cual; >0 = dentro de un `sh -c`, un `find -exec`… */
+  depth: number;
+  /**
+   * El ejecutable (o el código) se decide en tiempo de ejecución y no se puede
+   * leer aquí: `$CMD args`, `$(…) args`, `pwsh -EncodedCommand`, `iex`.
+   */
+  dynamic?: string;
+}
+
+/** Shells que aceptan `-c "<comando>"`. */
+const SHELLS = new Set(['sh', 'bash', 'zsh', 'dash', 'ksh', 'ash', 'fish']);
+const POWERSHELLS = new Set(['pwsh', 'powershell']);
+/** Palabras de control de flujo que preceden a un comando (`then rm …`). */
+const SHELL_KEYWORDS = new Set([
+  'if',
+  'then',
+  'else',
+  'elif',
+  'do',
+  'while',
+  'until',
+  '!',
+  '{',
+  '(',
+]);
+const SHELL_CLOSERS = new Set(['fi', 'done', '}', ')', 'esac']);
+/** Operadores de PowerShell: `$a -eq 1` es una expresión, no `$a` ejecutándose. */
+const PS_OPERATOR =
+  /^(?:=|\+=|-=|\*=|\/=|-(?:eq|ne|gt|ge|lt|le|like|notlike|match|notmatch|and|or|xor|not|join|split|replace|f|is|isnot|as|in|notin|contains|notcontains|band|bor|shl|shr))$/i;
+const PLAIN_VARIABLE = /^\$\{?[A-Za-z_][A-Za-z0-9_]*\}?$/;
+const MAX_NESTING = 2;
+
+/** Quita los paréntesis y llaves de agrupación y las palabras de control. */
+function stripGrouping(tokens: string[]): string[] {
+  const out = tokens
+    .map((t, i) => (i === 0 ? t.replace(/^[({]+/, '') : t))
+    .map((t, i, all) => (i === all.length - 1 ? t.replace(/\)+$/, '') : t))
+    .filter((t) => t.length > 0 && !SHELL_CLOSERS.has(t));
+  let i = 0;
+  while (i < out.length && SHELL_KEYWORDS.has(out[i]!)) i++;
+  return out.slice(i).map((t, j) => (j === 0 ? t.replace(/^[({]+/, '') : t));
+}
+
+/** Sustituye `$VAR` / `${VAR}` por el valor que el propio comando le dio antes. */
+function expandKnown(token: string, vars: ReadonlyMap<string, string>): string {
+  if (vars.size === 0 || !token.includes('$')) return token;
+  return token.replace(/\$\{?([A-Za-z_][A-Za-z0-9_]*)\}?/g, (whole, name: string) =>
+    vars.has(name) ? vars.get(name)! : whole,
+  );
+}
+
+/**
+ * Las invocaciones que un comando va a ejecutar de verdad. Es el punto único
+ * donde se deshace lo que esconde al ejecutable — sin ser un intérprete de
+ * shell —, y todas las capas clasifican sobre su resultado:
+ *
+ *  - envoltorios (`sudo -u root`, `timeout 30`, `env X=1`, `nice`…) y agrupación
+ *    (`( … )`, `{ …; }`, `then …`);
+ *  - un nivel de comando interno: `sh -c "…"`, `pwsh -Command …`, `eval …`,
+ *    `su -c "…"`, `find … -exec … ;` (y `cmd /c`, que ya resuelve
+ *    `parseInvocation`). Hasta `MAX_NESTING` niveles;
+ *  - variables asignadas en el mismo comando (`R=rm; $R -rf /`).
+ *
+ * Lo que no se puede resolver —el ejecutable sale de una variable desconocida,
+ * de una sustitución o de código codificado— se marca `dynamic` en vez de
+ * darse por inocuo: quien clasifica decide, y falla hacia el lado seguro.
+ */
+export function effectiveInvocations(
+  command: string,
+  depth = 0,
+  inherited: ReadonlyMap<string, string> = new Map(),
+): EffectiveInvocation[] {
+  const found: EffectiveInvocation[] = [];
+  const vars = new Map(inherited);
+
+  for (const part of splitCommandParts(command)) {
+    let tokens = stripGrouping(tokenize(part.text));
+    if (tokens.length === 0) continue;
+
+    // `R=rm` (o `export R=rm`) suelto: no ejecuta nada, pero se recuerda.
+    const assigning = /^(export|declare|local|readonly|set)$/.test(tokens[0]!) ? 1 : 0;
+    const assignments = tokens.slice(assigning);
+    if (assignments.length > 0 && assignments.every((t) => /^[A-Za-z_][A-Za-z0-9_]*=/.test(t))) {
+      for (const t of assignments) {
+        const eq = t.indexOf('=');
+        vars.set(t.slice(0, eq), expandKnown(t.slice(eq + 1), vars));
+      }
+      continue;
+    }
+
+    tokens = tokens.flatMap((t, i) => {
+      const expanded = expandKnown(t, vars);
+      // El valor de una variable usada como comando puede traer sus argumentos.
+      return i === 0 && expanded !== t ? tokenize(expanded) : [expanded];
+    });
+    const invocation = parseInvocation(tokens);
+    if (!invocation) continue;
+    const { name, rest } = invocation;
+    const lower = name.toLowerCase();
+    const entry: EffectiveInvocation = {
+      name,
+      rest,
+      segment: part.text,
+      piped: part.op === '|',
+      depth,
+    };
+
+    if (name.startsWith('$(') || name.startsWith('`') || name.startsWith('<(')) {
+      entry.dynamic = 'command substitution used as the executable';
+    } else if (PLAIN_VARIABLE.test(name) && rest.length > 0 && !PS_OPERATOR.test(rest[0]!)) {
+      entry.dynamic = `variable ${name} used as the executable`;
+    } else if (lower === 'iex' || lower === 'invoke-expression') {
+      entry.dynamic = 'Invoke-Expression runs a string as code';
+    } else if (
+      POWERSHELLS.has(lower) &&
+      rest.some((t) => /^-(e|ec|enc|encodedcommand)$/i.test(t))
+    ) {
+      entry.dynamic = 'PowerShell -EncodedCommand hides the command';
+    } else if (
+      (SHELLS.has(lower) || lower === 'source' || name === '.') &&
+      rest.some((t) => t.startsWith('<('))
+    ) {
+      entry.dynamic = 'process substitution run as a script';
+    }
+    found.push(entry);
+
+    if (depth >= MAX_NESTING) continue;
+    const nest = (inner: string): void => {
+      for (const child of effectiveInvocations(inner, depth + 1, vars)) {
+        found.push({ ...child, segment: part.text, piped: child.piped || entry.piped });
+      }
+    };
+
+    // Un comando entero entre comillas: su contenido es el comando.
+    if (/\s/.test(name)) {
+      nest([name, ...rest].join(' '));
+      continue;
+    }
+    if (SHELLS.has(lower) || lower === 'su') {
+      const flag = rest.findIndex((t) => /^-[A-Za-z]*c$/.test(t));
+      if (flag !== -1 && rest[flag + 1] !== undefined) nest(rest[flag + 1]!);
+    } else if (POWERSHELLS.has(lower)) {
+      const flag = rest.findIndex((t) => /^-(c|command)$/i.test(t));
+      const inner = flag !== -1 ? rest.slice(flag + 1) : rest.filter((t) => !t.startsWith('-'));
+      // `pwsh script.ps1` lanza un fichero: no hay comando interno que leer.
+      if (inner.length > 0 && !(flag === -1 && /\.ps1$/i.test(inner[0]!))) nest(inner.join(' '));
+    } else if (lower === 'eval') {
+      if (rest.length > 0) nest(rest.join(' '));
+    } else if (lower === 'find') {
+      for (let i = 0; i < rest.length; i++) {
+        if (!/^-(exec|execdir|ok|okdir)$/.test(rest[i]!)) continue;
+        const end = rest.findIndex((t, j) => j > i && (t === ';' || t === '\\;' || t === '+'));
+        const inner = parseInvocation(rest.slice(i + 1, end === -1 ? undefined : end));
+        if (inner) found.push({ ...inner, segment: part.text, piped: false, depth: depth + 1 });
+        if (end === -1) break;
+        i = end;
+      }
+    }
+  }
+  return found;
 }
 
 /** ¿Llevan los flags cortos agrupados alguna de estas letras? (`-rf` → r y f). */
@@ -170,6 +425,78 @@ function subcommand(rest: string[]): { name: string | null; rest: string[] } {
 const CATASTROPHIC_TARGETS = /^(?:\/|~|~\/\*?|\$HOME\/?\*?|\$\{HOME\}\/?\*?|\.|\.\.|\/\*)$/;
 
 /**
+ * Forma canónica de una ruta para compararla con las catastróficas: `//`,
+ * `/.`, `/./`, `/etc/..` y `.//` son la raíz o el directorio actual escritos
+ * de otra manera. Solo sintaxis: no toca el disco ni expande variables.
+ */
+export function normalizeTarget(path: string): string {
+  const glob = /\/\*$/.test(path) || path === '*' ? '/*' : '';
+  const body = glob ? path.slice(0, -1) : path;
+  const prefix =
+    /^(~|\$HOME|\$\{HOME\})(?=\/|$)/.exec(body)?.[0] ?? (body.startsWith('/') ? '/' : '');
+  const parts: string[] = [];
+  for (const part of body.slice(prefix.length).split('/')) {
+    if (part === '' || part === '.') continue;
+    if (part === '..' && parts.length > 0 && parts[parts.length - 1] !== '..') parts.pop();
+    // Por encima de la raíz no hay nada: `/..` es `/`.
+    else if (part === '..' && prefix === '/') continue;
+    else parts.push(part);
+  }
+  const joined = parts.join('/');
+  if (prefix === '/') return `/${joined}${joined ? glob : glob.slice(1)}`;
+  if (prefix) return joined ? `${prefix}/${joined}${glob}` : `${prefix}${glob}`;
+  return joined ? `${joined}${glob}` : glob ? '*' : '.';
+}
+
+const isCatastrophicTarget = (path: string): boolean =>
+  CATASTROPHIC_TARGETS.test(path) || CATASTROPHIC_TARGETS.test(normalizeTarget(path));
+
+/** Expresiones de `find` que no filtran qué se borra (y cuántos valores consumen). */
+const FIND_NON_FILTERS: Readonly<Record<string, number>> = {
+  '-delete': 0,
+  '-xdev': 0,
+  '-mount': 0,
+  '-depth': 0,
+  '-d': 0,
+  '-print': 0,
+  '-print0': 0,
+  '-follow': 0,
+  '-noleaf': 0,
+  '-L': 0,
+  '-H': 0,
+  '-P': 0,
+  '-mindepth': 1,
+  '-maxdepth': 1,
+};
+const FIND_EXEC = /^-(exec|execdir|ok|okdir)$/;
+/** Lo que, lanzado por `find -exec`, borra lo encontrado. */
+const FIND_DELETERS = new Set(['rm', 'unlink', 'shred', 'rmdir']);
+
+/** Cómo borra un `find`: raíces, si borra y si algo acota qué. */
+export function findDeletion(rest: string[]): { roots: string[]; filtered: boolean } | null {
+  const first = rest.findIndex((t) => t.startsWith('-') || t === '(' || t === '!');
+  const roots = (first === -1 ? rest : rest.slice(0, first)).filter((t) => t.length > 0);
+  let deletes = false;
+  let filtered = false;
+  for (let i = first === -1 ? rest.length : first; i < rest.length; i++) {
+    const tok = rest[i]!;
+    if (FIND_EXEC.test(tok)) {
+      const end = rest.findIndex((t, j) => j > i && (t === ';' || t === '\\;' || t === '+'));
+      const inner = parseInvocation(rest.slice(i + 1, end === -1 ? undefined : end));
+      if (inner && FIND_DELETERS.has(inner.name)) deletes = true;
+      if (end === -1) break;
+      i = end;
+      continue;
+    }
+    if (tok === '-delete') deletes = true;
+    const skip = FIND_NON_FILTERS[tok];
+    if (skip === undefined) filtered = true;
+    else i += skip;
+  }
+  return deletes ? { roots: roots.length > 0 ? roots : ['.'], filtered } : null;
+}
+
+/**
  * Lo mismo con sintaxis de Windows/PowerShell: raíz de una unidad (`C:\`, `C:`,
  * `\`), home (`~`, `$HOME`, `$env:USERPROFILE`), directorio actual y padre, con o
  * sin `\*` final. Sin distinguir mayúsculas, como PowerShell.
@@ -197,7 +524,19 @@ export const HARD_DENY_RULES: readonly HardDenyRule[] = [
       if (name !== 'rm') return false;
       const recursive = hasShortFlags(rest, ['r']) || hasLongFlag(rest, '--recursive');
       if (!recursive) return false;
-      return positionals(rest).some((p) => CATASTROPHIC_TARGETS.test(p));
+      return positionals(rest).some(isCatastrophicTarget);
+    },
+  },
+  {
+    // `find / -delete` es un `rm -rf /` sin la palabra `rm`. Con un filtro
+    // (`-name '*.tmp'`) ya no es indiscriminado: eso pide confirmación, no veto.
+    id: 'find_delete_root',
+    reason:
+      'find sin filtros borrando la raíz del sistema, el home o el directorio actual (equivale a un rm -rf)',
+    matches(name, rest) {
+      if (name !== 'find') return false;
+      const deletion = findDeletion(rest);
+      return deletion !== null && !deletion.filtered && deletion.roots.some(isCatastrophicTarget);
     },
   },
   {
@@ -286,9 +625,9 @@ export function hardDenyReason(command: string): string | null {
     return 'fork bomb: agota la tabla de procesos de la máquina';
   }
 
-  for (const segment of splitCommandSegments(command)) {
-    const invocation = parseInvocation(tokenize(segment));
-    if (!invocation) continue;
+  // Sobre el comando efectivo: un envoltorio, un `sh -c` o una variable no
+  // cambian lo que se va a ejecutar.
+  for (const invocation of effectiveInvocations(command)) {
     for (const rule of HARD_DENY_RULES) {
       if (rule.matches(invocation.name, invocation.rest)) return rule.reason;
     }
@@ -342,6 +681,15 @@ const PS_DESTRUCTIVE_ALIASES = new Set(['rm', 'ri', 'del', 'erase', 'rd', 'rmdir
  * confirmación. Es intrínseco —no depende de la config— igual que la capa 1:
  * quien personaliza `destructivePatterns` no debe perderlo sin saberlo.
  */
+/** ¿Es este ejecutable un borrado de PowerShell/`cmd.exe` (cmdlet o alias)? */
+export function isWindowsDeleteCommand(name: string): boolean {
+  const lower = name.toLowerCase();
+  return (
+    PS_DESTRUCTIVE_ALIASES.has(lower) ||
+    PS_DESTRUCTIVE_CMDLETS.some((cmdlet) => cmdlet.toLowerCase() === lower)
+  );
+}
+
 export function windowsDestructiveCommand(command: string): string | null {
   for (const cmdlet of PS_DESTRUCTIVE_CMDLETS) {
     const re = new RegExp(`(?:^|[\\s;|&("'\`{])${cmdlet}(?:$|[\\s;|&)"'\`}])`, 'i');
@@ -457,6 +805,20 @@ export const GUARDED_COMMANDS: readonly GuardedCommand[] = [
     },
   },
   {
+    // `git clean -fd` sin más es capa 1. Acotado a una ruta, o sin `-d`, sigue
+    // borrando ficheros sin seguimiento que no vuelven: pide confirmación, para
+    // que «acotar el comando» no sea la forma de saltarse el veto.
+    key: 'gitCleanForce',
+    label: 'git clean -f',
+    matches(name, rest) {
+      if (name !== 'git') return false;
+      const sub = subcommand(rest);
+      if (sub.name !== 'clean') return false;
+      if (hasShortFlags(sub.rest, ['n']) || hasLongFlag(sub.rest, '--dry-run')) return false;
+      return hasShortFlags(sub.rest, ['f']) || hasLongFlag(sub.rest, '--force');
+    },
+  },
+  {
     key: 'npmPublish',
     label: 'npm publish',
     matches(name, rest) {
@@ -491,6 +853,7 @@ export const DEFAULT_GUARD_ACTIONS: Readonly<Record<string, GuardAction>> = {
   gitResetHard: 'confirm',
   gitRebase: 'confirm',
   gitBranchDeleteForce: 'confirm',
+  gitCleanForce: 'confirm',
   npmPublish: 'block',
   dockerPrune: 'confirm',
   curlPipeShell: 'confirm',
@@ -517,12 +880,10 @@ export function matchGuardedCommands(
   const matches: GuardMatch[] = [];
   const seen = new Set<string>();
 
-  for (const segment of splitCommandSegments(command)) {
-    const invocation = parseInvocation(tokenize(segment));
-    if (!invocation) continue;
+  for (const invocation of effectiveInvocations(command)) {
     for (const guarded of GUARDED_COMMANDS) {
       if (seen.has(guarded.key)) continue;
-      if (!guarded.matches(invocation.name, invocation.rest, segment, command)) continue;
+      if (!guarded.matches(invocation.name, invocation.rest, invocation.segment, command)) continue;
       seen.add(guarded.key);
       matches.push({
         key: guarded.key,

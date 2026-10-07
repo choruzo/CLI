@@ -78,8 +78,19 @@ export class TraceFeed {
         reset = true;
       },
     );
+    // Un sondeo a la vez: `FileTail.poll()` vuelve en el acto si hay otro en
+    // vuelo, y vaciar la tanda tras ese sondeo que no leyó nada mandaba un
+    // `reset` vacío antes de que el primero terminase de leer el fichero.
+    let polling = false;
     const poll = (): void => {
-      void tail.poll().then(flush, (err) => log.debug('trace poll failed', { err }));
+      if (polling) return;
+      polling = true;
+      void tail
+        .poll()
+        .then(flush, (err) => log.debug('trace poll failed', { err }))
+        .finally(() => {
+          polling = false;
+        });
     };
     const timer = setInterval(poll, this.pollMs);
     timer.unref();

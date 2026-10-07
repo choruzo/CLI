@@ -84,6 +84,7 @@
       "gitResetHard": "confirm",
       "gitRebase": "confirm",
       "gitBranchDeleteForce": "confirm",
+      "gitCleanForce": "confirm",
       "npmPublish": "block",
       "dockerPrune": "confirm",
       "curlPipeShell": "confirm"

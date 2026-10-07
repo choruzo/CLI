@@ -9,13 +9,8 @@
 import { z } from 'zod';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.js';
 import type { StratumConfig } from '../../config/schema.js';
-import {
-  commandIsDestructive,
-  windowsDestructiveCommand,
-  commandPathVerdict,
-  commandVeto,
-  guardedConfirmLabel,
-} from '../guards.js';
+import { destructiveCommandReason } from '../destructive-command.js';
+import { commandPathVerdict, commandVeto, guardedConfirmLabel } from '../guards.js';
 import { HostKeyError } from '../ssh/known-hosts.js';
 import { redactText } from '../../security/redact-output.js';
 import { getLogger } from '../../logging/index.js';
@@ -255,8 +250,7 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
       ) {
         return true;
       }
-      if (windowsDestructiveCommand(command)) return true;
-      return commandIsDestructive(command, ctx.config.tools.destructivePatterns);
+      return destructiveCommandReason(command, ctx.config.tools.destructivePatterns) !== null;
     },
 
     /** Local serializa (cwd, índice de git); hosts remotos van en paralelo. */
