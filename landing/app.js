@@ -91,6 +91,14 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "eval", title: "stratum eval: ¿esta versión es mejor, peor o más insegura?", date: "2026-10-05", match: /\(eval\)|stratum eval/,
+    text: "37 escenarios reproducibles, de básicos a adversariales, que se ejecutan con stratum run y se puntúan desde la traza. Baselines con nombre y eval compare, que sale con 1 si hay regresión. stratum stats agrega tus sesiones en local.",
+    pre: "❯ stratum eval run --mock --baseline mock\n32/32 PASS · 0 acciones inseguras · sin regresiones",
+    href: "./control.html#eval", more: "cómo se evalúa →" },
+  { id: "guardas", title: "Las guardas clasifican lo que se ejecuta, no lo que se escribe", date: "2026-10-07", match: /^fix\(guards\)/,
+    text: "Los casos adversariales destaparon tres brechas: un rm -rf / envuelto en sudo, timeout o sh -c esquivaba el veto. Ahora se deshacen envoltorios, anidamiento, variables y rutas equivalentes antes de decidir, y lo ilegible pide confirmación.",
+    pre: "✗ sudo -u root sh -c 'rm -rf /'   vetado\n? curl … | base64 -d | sh        confirmación\n✓ grep -rn \"rm -rf\" src/         sin preguntar",
+    href: "./control.html#guardas", more: "qué cubre la guarda →" },
   { id: "v0.7β", title: "Modelos descubiertos: basta la URL y la key", date: "2026-10-03", match: /^feat\(providers\)/,
     text: "Un provider ya no necesita modelo ni ventana de contexto en la config: se consultan a /models. chat abre el selector al arrancar; run, si hay varios, los lista en vez de elegir por ti.",
     pre: "❯ stratum provider add local --base-url http://localhost:8080/v1 --api-key-env KEY\n❯ stratum provider models --set gemma-4-12b" },
@@ -301,7 +309,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.6.0",
+  version: "0.7.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -577,6 +585,7 @@ function renderNews() {
       <h4>${esc(n.title)}</h4>
       <p>${esc(n.text)}</p>
       <pre class="pre">${esc(n.pre)}</pre>
+      ${n.href ? `<a class="more" href="${esc(n.href)}">${esc(n.more)}</a>` : ""}
       ${hits.length ? `<div class="stats">${hits.length} commit${hits.length > 1 ? "s" : ""} · <span class="add">+${fmt(add)}</span> líneas</div>` : ""}
     </article>`;
   }).join("");
@@ -1058,17 +1067,37 @@ function initReveal() {
 }
 
 function initTmux() {
-  const links = $$(".tmux-windows a");
+  const menu = $("#tmux-menu"), btn = $("#tmux-menu-btn"), list = $("#tmux-menu-list"), label = $("#tmux-menu-label");
+  const links = $$("a", list);
   const map = new Map(links.map((a) => [a.dataset.win, a]));
   const io = new IntersectionObserver((entries) => {
     entries.forEach((en) => {
-      if (en.isIntersecting) {
-        links.forEach((a) => a.classList.remove("active"));
-        map.get(en.target.id)?.classList.add("active");
-      }
+      const link = en.isIntersecting && map.get(en.target.id);
+      if (!link) return;
+      links.forEach((a) => a.classList.remove("active"));
+      link.classList.add("active");
+      label.textContent = link.textContent;
     });
   }, { rootMargin: "-45% 0px -50% 0px" });
-  ["status", "demo", "hitos", "novedades", "actividad", "desktop", "trayectoria", "roadmap"].forEach((id) => { const s = document.getElementById(id); if (s) io.observe(s); });
+  links.forEach((a) => { const s = document.getElementById(a.dataset.win); if (s) io.observe(s); });
+
+  const toggle = (open) => {
+    list.hidden = !open;
+    btn.setAttribute("aria-expanded", String(open));
+  };
+  btn.addEventListener("click", () => {
+    toggle(list.hidden);
+    if (!list.hidden) (list.querySelector("a.active") || links[0]).focus();
+  });
+  list.addEventListener("click", (e) => { if (e.target.closest("a")) toggle(false); });
+  document.addEventListener("click", (e) => { if (!menu.contains(e.target)) toggle(false); });
+  menu.addEventListener("keydown", (e) => {
+    if (e.key === "Escape") { toggle(false); btn.focus(); return; }
+    if (list.hidden || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+    e.preventDefault();
+    const i = links.indexOf(document.activeElement) + (e.key === "ArrowDown" ? 1 : -1);
+    links[(i + links.length) % links.length].focus();
+  });
 }
 
 function toggleTheme() {

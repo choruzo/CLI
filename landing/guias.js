@@ -1,4 +1,4 @@
-/* Stratum — página de guías. Independiente de app.js: aquí no hay demo ni datos del repo. */
+/* Stratum — páginas de guías y de control. Independiente de app.js: aquí no hay demo ni datos del repo. */
 
 const $ = (s, r = document) => r.querySelector(s);
 const $$ = (s, r = document) => [...r.querySelectorAll(s)];
@@ -93,6 +93,7 @@ function initNav() {
 // Los enlaces del HTML apuntan a una versión concreta y funcionan sin red;
 // si la API responde, se sustituyen por los de la release más reciente.
 async function initDownloads() {
+  if (!$("#desk-version")) return; // control.html comparte este script y no tiene descargas
   const res = await fetch("https://api.github.com/repos/choruzo/CLI/releases?per_page=30");
   if (!res.ok) return;
   const release = (await res.json()).find((r) => !r.draft && /^desktop-v\d/.test(r.tag_name));

@@ -77,11 +77,11 @@ $bytes = [System.Collections.Generic.List[byte]]::new()
 foreach ($a in $assets) { $bytes.AddRange([System.IO.File]::ReadAllBytes($a)) }
 $version = ([System.BitConverter]::ToString($sha.ComputeHash($bytes.ToArray())) -replace "-", "").Substring(0, 10).ToLower()
 
-foreach ($page in @("index.html", "guias.html")) {
+foreach ($page in @("index.html", "guias.html", "control.html")) {
   $pagePath = Join-Path $PSScriptRoot $page
   $html = [System.IO.File]::ReadAllText($pagePath)
   $html = [regex]::Replace($html, '((?:href|src)="\./(?:styles\.css|app\.js|guias\.js|data/commits-data\.js))(\?v=[^"]*)?"', "`$1?v=$version`"")
   [System.IO.File]::WriteAllText($pagePath, $html, $utf8)
 }
 
-Write-Host "Assets versioned as ?v=$version in index.html and guias.html."
+Write-Host "Assets versioned as ?v=$version in index.html, guias.html and control.html."

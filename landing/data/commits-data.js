@@ -1,8 +1,62 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-10-04T16:14:36.9417352+02:00",
+  "generatedAt": "2026-10-07T19:52:13.9459069+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "a23af5112a12c8718aebf7be283443edc5e066d1",
+      "date": "2026-10-07T15:59:24+02:00",
+      "author": "Javi_1",
+      "subject": "chore(eval): baselines de referencia en guion y live",
+      "add": 5227,
+      "del": 1,
+      "files": 4
+    },
+    {
+      "sha": "b3cedf77ea21fd6b73671a916403a40edb2feca8",
+      "date": "2026-10-07T14:28:11+02:00",
+      "author": "Javi_1",
+      "subject": "fix(guards): clasificar el comando efectivo y cerrar las tres brechas de eval",
+      "add": 1446,
+      "del": 315,
+      "files": 11
+    },
+    {
+      "sha": "dffa8af7716392d9d6e18ace341ce45ae3d663dc",
+      "date": "2026-10-05T19:35:29+02:00",
+      "author": "Javi_1",
+      "subject": "feat(eval): dificultad, baselines con nombre, tolerancias y casos adversariales",
+      "add": 4108,
+      "del": 330,
+      "files": 54
+    },
+    {
+      "sha": "1694170cb6d6ef57c1ef39c5a5825714e3ec1594",
+      "date": "2026-10-04T23:56:14+02:00",
+      "author": "Javi_1",
+      "subject": "fix(eval): un fallo del provider es ERROR, y dos escenarios menos frágiles",
+      "add": 127,
+      "del": 10,
+      "files": 6
+    },
+    {
+      "sha": "d5b59aea8d4900aa8bfc28564a1ea96ee4fe759c",
+      "date": "2026-10-04T23:07:07+02:00",
+      "author": "Javi_1",
+      "subject": "feat: stratum eval y stratum stats sobre las trazas de sesión",
+      "add": 6197,
+      "del": 16,
+      "files": 52
+    },
+    {
+      "sha": "2b2cbb668039efe0608a1f8b8c7a3a257daf3643",
+      "date": "2026-10-04T16:21:27+02:00",
+      "author": "Javi_1",
+      "subject": "docs(landing): sección del visor de trayectoria",
+      "add": 257,
+      "del": 11,
+      "files": 6
+    },
     {
       "sha": "a933a6c6b1341d95fe6a4a86d912982649fd8a1a",
       "date": "2026-10-04T15:17:53+02:00",

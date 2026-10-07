@@ -130,6 +130,27 @@ kbd { color: var(--accent); }
 :root[data-theme="light"] .tmux .tbtn { border-color: rgba(255,255,255,0.5); }
 .tmux-clock { font-weight: 700; font-variant-numeric: tabular-nums; }
 
+/* Menú de secciones: las ventanas 0–7 plegadas en un desplegable */
+.tmux-menu { position: relative; }
+.tmux-menu-btn {
+  font: inherit; color: inherit; cursor: pointer; display: flex; align-items: center; gap: 6px;
+  background: #0a0a0b; color: var(--accent); border: none; border-radius: 3px; padding: 0 8px; height: 24px; font-weight: 700;
+}
+:root[data-theme="light"] .tmux-menu-btn { background: #fff; }
+.tmux-caret { transition: transform .15s; }
+.tmux-menu-btn[aria-expanded="true"] .tmux-caret { transform: rotate(180deg); }
+.tmux-menu-list {
+  position: absolute; top: calc(100% + 6px); left: 0; z-index: 60; min-width: 180px;
+  list-style: none; margin: 0; padding: 4px;
+  background: var(--surface); color: var(--text); border: 1px solid var(--accent); border-radius: var(--radius);
+  box-shadow: 0 8px 24px rgba(0,0,0,0.35);
+}
+.tmux-menu-list[hidden] { display: none; }
+.tmux-menu-list a { display: block; padding: 5px 10px; border-radius: 3px; color: var(--muted); }
+.tmux-menu-list a:hover, .tmux-menu-list a:focus-visible { background: var(--accent-soft); color: var(--text); text-decoration: none; }
+.tmux-menu-list a.active { color: var(--accent); font-weight: 700; }
+.tmux-menu-list a.active::after { content: " *"; }
+
 .tbtn {
   font: inherit; font-size: 12px; cursor: pointer;
   background: transparent; color: var(--muted);
@@ -546,6 +567,11 @@ li.next .h-id { color: var(--dim); }
 }
 .doc-downloads { margin: 4px 0 8px; }
 
+/* ─── Control (control.html) ─────────────────────────────────── */
+.ctl-kpis { grid-template-columns: repeat(3, minmax(0, 1fr)); margin-top: 24px; max-width: 860px; }
+.ctl-note { margin-top: 16px; }
+.news-card .more { font-size: 12px; font-weight: 700; align-self: flex-start; text-align: left; }
+
 .faq { border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); margin-bottom: 8px; }
 .faq summary { cursor: pointer; padding: 10px 14px; color: var(--text); list-style: none; }
 .faq summary::-webkit-details-marker { display: none; }
@@ -577,7 +603,7 @@ li.next .h-id { color: var(--dim); }
 
 /* ─── Responsive ─────────────────────────────────────────────── */
 @media (max-width: 900px) {
-  .kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .kpis, .ctl-kpis { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .news, .roadmap, .split { grid-template-columns: minmax(0, 1fr); }
   .shots { grid-template-columns: minmax(0, 1fr); }
   .traj-how { grid-template-columns: minmax(0, 1fr); }
