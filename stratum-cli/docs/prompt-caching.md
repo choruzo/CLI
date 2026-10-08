@@ -85,14 +85,27 @@ llamadas que tienen con qué compararse.
 
 ### Roturas de caché
 
-En una conversación que solo crece, cada llamada debería reutilizar al menos el prompt entero de la
-anterior. `cacheBreaks(model)` (`src/trace/model.ts`) marca una **rotura** cuando:
+Una **rotura de caché** es una pérdida **demostrable con lo que reporta el backend**, y solo eso.
+`cacheBreaks(model)` (`src/trace/model.ts`) marca una cuando una llamada leyó de caché **menos
+tokens que la llamada anterior** del mismo agente: esos tokens estaban en caché —el backend los
+sirvió— y han dejado de servir.
 
-- el backend reutilizó **menos** tokens que en la llamada anterior del mismo agente, o
-- Stratum reescribió parte del prompt anterior (`prefix.diverged`) y el backend, en efecto, no llegó
-  a reutilizarlo entero.
+No es «todo el potencial de caché que podría haberse reutilizado». En concreto, **no** es una rotura:
 
-Cada rotura lleva su causa:
+- que una llamada lea más (o lo mismo) que la anterior sin llegar al prompt anterior entero, aunque
+  Stratum haya reescrito el prompt entre medias (`prefix.diverged`). Ningún backend reporta cuánto
+  del prompt anterior dejó guardado —hay granularidad de bloque, tamaño mínimo cacheable y
+  caducidad—, así que ahí no hay pérdida que demostrar;
+- nada que salga solo de `prefix.sharedChars`: son caracteres medidos en el cliente y **no se
+  convierten a tokens**;
+- una llamada cuyo backend no reporta caché: ni rompe ni corta la comparación entre las que sí.
+
+El detector es conservador a propósito: prefiere no avisar a inventar una rotura. Lo que el prompt
+deja de repetir sin que el backend lo acuse se ve en `prefixStability` y en «Deja de coincidir en»
+de cada paso, que miden lo que hace Stratum, no lo que hizo la caché.
+
+La pérdida la demuestra el backend; la **causa** es una atribución: lo que el cliente vio cambiar en
+el prompt entre las dos llamadas.
 
 | Causa | Qué pasó |
 |---|---|
@@ -101,7 +114,7 @@ Cada rotura lleva su causa:
 | `history` | Se reescribió un mensaje ya enviado. |
 | `compression` | Esa reescritura fue una compresión de contexto. |
 | `model` | Otro provider u otro modelo: otra caché. |
-| `backend` | El prompt solo creció por el final y aun así se reutilizó menos: caducó, u otra petición ocupó la caché. No es algo que haya hecho Stratum. |
+| `backend` | El prompt solo creció por el final y aun así se leyó menos: caducó, u otra petición ocupó la caché. Stratum no cambió nada. |
 | `unknown` | Traza anterior a `prefix`: no hay con qué atribuirlo. |
 
 Solo se cuentan con datos del backend, y nunca en la primera llamada de un proceso: reanudar una
@@ -140,10 +153,17 @@ antes, una reconexión las retira y las vuelve a registrar al final, y cada serv
 en el orden que quiere. Como las tools van al principio del prompt, un cambio de orden invalidaba
 todo lo demás.
 
-Los schemas se serializan siempre igual: los de las built-in salen de su schema Zod por
-`zodToJsonSchema`, que es determinista, y los de las MCP se envían tal como los declaró el server.
-Las claves de esos schemas **no** se reordenan: el orden de las propiedades es visible para el modelo
-y cambiarlo no es neutro.
+Lo mismo pasa **dentro** de cada definición MCP: el JSON Schema de sus parámetros lo serializa el
+server, y el orden de sus claves puede cambiar entre arranques (otra versión, otro runtime, un mapa
+sin orden) sin que el schema cambie. Por eso se envía en **forma canónica** (`canonicalJson`,
+`src/tools/canonical-json.ts`): claves de cada objeto ordenadas a todos los niveles, por unidades de
+código y no por configuración regional; los arrays (`required`, `enum`, `anyOf`) conservan su orden;
+ningún tipo ni valor cambia y el schema que registró el server no se muta (se canonicaliza una copia,
+una vez por schema). Dos schemas equivalentes dan la misma petición byte a byte y la misma huella
+`prefix.tools`.
+
+Los schemas de las built-in **no** se reordenan: salen de Zod en un orden que fija el código, así
+que ya son deterministas, y reordenarlos cambiaría lo que ve el modelo sin ganar nada.
 
 ### 2. System prompt
 
@@ -190,7 +210,7 @@ De mayor a menor alcance. «Se pierde» es lo que el backend tiene que volver a 
 El que más pesa dentro de una sesión es el bloque de tareas: vive en el system prompt —a propósito,
 para sobrevivir a la compresión y no acumular mensajes— y el system prompt va antes que la
 conversación, así que cada actualización de la lista obliga a reprocesar todo el historial. La traza
-lo registra como rotura con causa `system`. No se ha cambiado: sacarlo del system prompt altera
+lo registra como rotura con causa `system` cuando el backend acusa la pérdida. No se ha cambiado: sacarlo del system prompt altera
 cómo ve el modelo sus tareas, que es comportamiento, no caché.
 
 ## Capacidades por provider
@@ -246,6 +266,14 @@ tres **cambian la petición**, y por eso solo están activas donde se sabe que e
 El id de sesión es el de Stratum (`RunOptions.sessionId`): el de `chat`, el efímero de cada
 `stratum run`, y el del padre en los subagentes.
 
+**Trabajo futuro (no implementado).** `prompt_cache_key` es hoy siempre el id de sesión. Una clave
+por sesión no comparte caché entre dos sesiones con el mismo prefijo (dos `stratum run` seguidos en
+el mismo proyecto). Una opción `cacheKey: "session" | "prompt" | "none"` permitiría elegir: `session`
+(lo actual), `prompt` (una clave derivada de la huella de tools + system, compartida por todas las
+sesiones con ese prefijo) y `none` (no mandar clave y dejar el enrutado al backend). No se ha hecho
+porque no hay todavía una medida contra OpenAI que diga cuál gana; cuando la haya, entra con su
+escenario de eval, como el resto.
+
 ## Escenarios de eval
 
 `evals/scenarios/cache/`. Con `--mock`, el modelo de guion simula una caché de prefijo ideal (ver
@@ -297,6 +325,11 @@ comportamiento:
 
 ## Limitaciones
 
+- **Validación contra un backend real.** Las cifras de una sesión de varios turnos contra llama.cpp,
+  cruzadas con el log del propio servidor, están en [`prompt-caching-live.md`](prompt-caching-live.md).
+- **El TTFT incluye la cola del servidor.** La extracción automática de memoria y el compresor de
+  contexto llaman al modelo fuera del loop: no están en la traza, y en un servidor de un solo slot
+  retrasan el primer token de la llamada siguiente aunque su caché esté intacta.
 - **El orden tools → system → conversación es un modelo.** Es el de Anthropic y el del modelo de
   guion; las plantillas de chat de algunos modelos locales incrustan las tools dentro o después del
   system. `prefix.sharedChars` y el guion miden con ese orden; lo que reutiliza un backend real es lo
@@ -305,6 +338,11 @@ comportamiento:
   entre todas las peticiones del escenario. Es la cota de lo reutilizable, no una predicción.
 - **Las roturas dependen de que el backend reporte caché.** Sin ese dato solo queda
   `prefixStability`.
+- **`cacheBreaks` infracuenta, a propósito.** Solo ve pérdidas respecto a lo que el backend ya
+  había servido. Una reescritura temprana del prompt (una compresión cuando la caché aún leía
+  poco) puede desperdiciar caché recién escrita sin que lo leído baje: no se marca, porque no se
+  puede demostrar. Con un backend que reportase de forma fiable lo que escribe en cada llamada
+  se podría afinar; hoy solo lo hace Anthropic y no está verificado aquí.
 - **La llamada del compresor de contexto no está en la traza** (no pasa por el loop): su coste y su
   efecto sobre la caché de un servidor de un solo slot no se ven.
 - **`explicitBreakpoints` y `sessionAffinity` no se han probado contra un backend real**: la forma

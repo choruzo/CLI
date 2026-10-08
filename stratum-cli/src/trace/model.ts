@@ -435,7 +435,9 @@ export function prefixOf(s: TraceStep): PromptPrefix | null {
 }
 
 /**
- * Por qué una llamada reutilizó menos que la anterior:
+ * Qué cambió entre una llamada y la anterior cuando el backend reutilizó menos.
+ * La pérdida la demuestra el backend; la causa es lo que el cliente vio cambiar
+ * en el prompt, es decir, una atribución y no una prueba:
  *  - `tools` / `system` / `history`: Stratum cambió esa parte del prompt;
  *  - `compression`: el cambio en el historial fue una compresión de contexto;
  *  - `model`: otra combinación de provider y modelo, que es otra caché;
@@ -458,12 +460,12 @@ export const CACHE_BREAK_LABEL: Record<CacheBreakCause, string> = {
   history: 'se reescribió el historial',
   compression: 'compresión de contexto',
   model: 'cambio de provider o modelo',
-  backend: 'el backend perdió la caché',
+  backend: 'el backend reutilizó menos sin cambios en el prompt',
   unknown: 'causa no registrada',
 };
 
 export interface CacheBreak {
-  /** Paso de la llamada que reutilizó menos. */
+  /** Paso de la llamada que leyó de caché menos tokens que la anterior. */
   id: string;
   n: number;
   turn: number;
@@ -475,38 +477,41 @@ export interface CacheBreak {
 export const COMPRESSION_STEP = 'Contexto comprimido';
 
 /**
- * Roturas de caché. En una conversación que solo crece, cada llamada debería
- * reutilizar al menos el prompt entero de la anterior. Es una rotura cuando:
- *  - el backend reutilizó MENOS tokens que en la llamada anterior del mismo
- *    agente (lo que ya estaba en caché dejó de servir), o
- *  - Stratum reescribió parte del prompt anterior (`prefix.diverged`) y el
- *    backend, en efecto, no llegó a reutilizarlo entero.
- * Solo con datos del backend (una llamada que no reporta caché ni rompe ni deja
- * de romper) y sin contar la primera llamada de un proceso: reanudar una sesión
- * horas después no es una rotura, es otra caché.
+ * Roturas de caché: pérdidas DEMOSTRABLES con lo que reporta el backend. Una
+ * llamada rompe la caché cuando leyó de ella menos tokens que la llamada
+ * anterior del mismo agente: esos tokens estaban en caché (el backend los
+ * sirvió) y han dejado de servir.
+ *
+ * No mide el potencial desaprovechado. Que una llamada reutilice más que la
+ * anterior pero menos que el prompt anterior entero NO es una rotura, aunque
+ * Stratum haya reescrito el prompt (`prefix.diverged`): ningún backend dice
+ * cuánto del prompt anterior dejó guardado (granularidad, mínimo cacheable,
+ * caducidad), y `prefix.sharedChars` son caracteres medidos en el cliente, que
+ * no se convierten a tokens. El detector prefiere callar a inventar una rotura;
+ * lo que el prompt deja de repetir se lee en `prefixStability`.
+ *
+ * Una llamada que no reporta caché ni rompe ni corta la comparación, y la
+ * primera llamada de un proceso no cuenta: reanudar una sesión horas después no
+ * es una rotura, es otra caché.
  */
 export function cacheBreaks(model: TraceModel): CacheBreak[] {
   const out: CacheBreak[] = [];
-  const last = new Map<string, { step: TraceStep; read: number; prompt: number | undefined }>();
+  const last = new Map<string, { step: TraceStep; read: number }>();
   const compressed = new Set<string>();
   for (const s of model.steps) {
     const scope = s.parent ?? '';
     if (s.kind === 'context' && s.name === COMPRESSION_STEP) compressed.add(scope);
     if (s.kind !== 'model') continue;
-    const usage = usageOf(s);
-    const read = usage?.cachedReadTokens;
+    const read = usageOf(s)?.cachedReadTokens;
     if (read === undefined) continue;
     const prev = last.get(scope);
     const prefix = prefixOf(s);
     const wasCompressed = compressed.delete(scope);
-    last.set(scope, { step: s, read, prompt: usage?.promptTokens });
+    last.set(scope, { step: s, read });
     if (!prev) continue;
     // Con `prefix` pero sin `sharedChars`: primera llamada de otro proceso.
     if (prefix && prefix.sharedChars === undefined) continue;
-    const shrank = read < prev.read;
-    const rewritten =
-      prefix?.diverged !== undefined && prev.prompt !== undefined && read < prev.prompt;
-    if (!shrank && !rewritten) continue;
+    if (read >= prev.read) continue;
     let cause: CacheBreakCause;
     if (prev.step.name !== s.name || prev.step.data.provider !== s.data.provider) cause = 'model';
     else if (!prefix) cause = wasCompressed ? 'compression' : 'unknown';

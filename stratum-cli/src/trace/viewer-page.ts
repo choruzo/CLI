@@ -550,7 +550,7 @@ footer {
   var BREAK_LABEL = {
     tools: 'cambió la lista de tools', system: 'cambió el prompt del sistema',
     history: 'se reescribió el historial', compression: 'compresión de contexto',
-    model: 'cambio de provider o modelo', backend: 'el backend perdió la caché',
+    model: 'cambio de provider o modelo', backend: 'el backend reutilizó menos sin cambios en el prompt',
     unknown: 'causa no registrada'
   };
   var DIVERGED_LABEL = { tools: 'la lista de tools', system: 'el prompt del sistema', history: 'el historial' };
@@ -562,7 +562,8 @@ footer {
     return typeof r === 'number' && r >= 0 ? r : null;
   }
 
-  // Llamadas que reutilizaron menos que la anterior del mismo agente, por id.
+  // Llamadas que leyeron de caché menos tokens que la anterior del mismo agente, por id.
+  // Solo pérdidas que el backend demuestra: igual que cacheBreaks() de model.ts.
   function cacheBreaks() {
     var out = {}, last = {}, compressed = {}, i;
     for (i = 0; i < steps.length; i++) {
@@ -573,11 +574,10 @@ footer {
       if (read === null) continue;
       var prev = last[scope], px = s.data.prefix, was = compressed[scope] === true;
       compressed[scope] = false;
-      last[scope] = { step: s, read: read, prompt: s.data.usage.promptTokens };
+      last[scope] = { step: s, read: read };
       if (!prev) continue;
       if (px && typeof px.sharedChars !== 'number') continue;
-      var rewritten = px && px.diverged && typeof prev.prompt === 'number' && read < prev.prompt;
-      if (read >= prev.read && !rewritten) continue;
+      if (read >= prev.read) continue;
       var cause;
       if (prev.step.name !== s.name || prev.step.data.provider !== s.data.provider) cause = 'model';
       else if (!px) cause = was ? 'compression' : 'unknown';

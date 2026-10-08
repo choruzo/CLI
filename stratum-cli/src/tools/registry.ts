@@ -10,6 +10,7 @@ import type {
 import type { ToolSchema } from '../providers/base.js';
 import type { AgentMode } from '../agent/types.js';
 import { truncateToolOutput } from './truncate.js';
+import { canonicalJson } from './canonical-json.js';
 import { untilAborted } from '../agent/concurrency.js';
 import {
   PLAN_ALLOWLIST,
@@ -197,6 +198,12 @@ export class ToolRegistry {
    * van después y ordenadas por nombre, porque su orden de registro depende de
    * qué server conecta antes (arranque `lazy`, reconexiones) y de cómo anuncie
    * cada uno su catálogo.
+   *
+   * Lo mismo vale dentro de cada definición: el JSON Schema de una tool MCP lo
+   * serializa su server, y el orden de sus claves puede cambiar entre arranques
+   * sin que cambie el schema. Se manda en forma canónica (`canonicalParameters`).
+   * Los schemas de las built-in salen de Zod, en un orden que fija el código: no
+   * se tocan.
    */
   private canonicalOrder(): ToolDefinition[] {
     const builtin: ToolDefinition[] = [];
@@ -205,6 +212,18 @@ export class ToolRegistry {
       (tool.name.startsWith('mcp__') ? mcp : builtin).push(tool);
     mcp.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
     return [...builtin, ...mcp];
+  }
+
+  /** Schema MCP con las claves ordenadas; una copia por schema, no por llamada al modelo. */
+  private readonly canonicalCache = new WeakMap<object, Record<string, unknown>>();
+
+  private canonicalParameters(raw: Record<string, unknown>): Record<string, unknown> {
+    let canonical = this.canonicalCache.get(raw);
+    if (!canonical) {
+      canonical = canonicalJson(raw);
+      this.canonicalCache.set(raw, canonical);
+    }
+    return canonical;
   }
 
   toToolSchemas(mode: AgentMode = 'normal', filter?: ToolsetFilter): ToolSchema[] {
@@ -216,7 +235,7 @@ export class ToolRegistry {
         // Tools MCP traen su propio JSON Schema — usarlo directamente para
         // evitar una conversión lossy (JSON Schema → Zod → JSON Schema).
         const parameters: Record<string, unknown> = tool.rawParameters
-          ? tool.rawParameters
+          ? this.canonicalParameters(tool.rawParameters)
           : (() => {
               const full = zodToJsonSchema(tool.schema, {
                 $refStrategy: 'none',

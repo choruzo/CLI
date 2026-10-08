@@ -188,7 +188,7 @@ function Detail({
 }: {
   step: TraceStep;
   now: number;
-  /** La rotura de caché de este paso, si reutilizó menos que la llamada anterior. */
+  /** La rotura de caché de este paso, si leyó de caché menos tokens que la llamada anterior. */
   cacheBreak?: CacheBreak;
   onClose: () => void;
 }) {

@@ -198,7 +198,7 @@ const CheckSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   /**
-   * Roturas de caché de la traza: llamadas que reutilizaron menos que la
+   * Roturas de caché de la traza: llamadas que leyeron de caché menos que la
    * anterior del mismo agente. `cause` las limita a las de esa causa.
    */
   z

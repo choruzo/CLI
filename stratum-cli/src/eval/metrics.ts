@@ -65,7 +65,7 @@ export interface RunMetrics {
   /** Llamadas sin nada reutilizado / con algo reutilizado. */
   coldCalls?: number | null;
   warmCalls?: number | null;
-  /** Llamadas que reutilizaron menos que la anterior del mismo agente. */
+  /** Llamadas que leyeron de caché menos tokens que la anterior del mismo agente (pérdida demostrable). */
   cacheBreaks?: number | null;
   /** Tiempo medio hasta el primer token: de todas, de las frías y de las templadas. */
   ttftMs?: number | null;

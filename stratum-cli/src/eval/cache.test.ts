@@ -670,7 +670,9 @@ describe('escenarios de caché', () => {
     const records = traceOf([
       { usage: [1000, 0], prefix: prefix(4000) },
       { usage: [2000, 1000], prefix: prefix(8000, 4000) },
+      { usage: [3000, 2000], prefix: prefix(12000, 8000) },
       {
+        // Tras comprimir se lee de caché menos que antes: pérdida demostrable.
         usage: [1500, 1005],
         prefix: prefix(6000, 4020, { diverged: 'history', divergedAt: 2 }),
         compressedBefore: true,

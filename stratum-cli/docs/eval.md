@@ -276,7 +276,7 @@ stratum auditor --file ~/.stratum/evals/runs/<runId>/<escenario>/<sesión>.jsonl
 | `uncachedPromptTokens` | Tokens de entrada que hubo que procesar: `promptTokens − cachedReadTokens`. |
 | `cacheHitRate` | `cachedReadTokens` / tokens de entrada. |
 | `coldCalls`, `warmCalls` | Llamadas en las que el backend no reutilizó nada / reutilizó algo. Sale del dato, no de la posición. |
-| `cacheBreaks` | Llamadas que reutilizaron menos de lo que la anterior dejó en caché. Ver [caché de prompt](#caché-de-prompt). |
+| `cacheBreaks` | Llamadas que leyeron de caché **menos tokens que la llamada anterior** del mismo agente: una pérdida demostrable con el dato del backend, no todo el potencial desaprovechado (una reescritura del prompt tras la que lo leído no baja no cuenta). Ver [caché de prompt](#caché-de-prompt). |
 | `ttftMs`, `ttftColdMs`, `ttftWarmMs` | Tiempo medio hasta el primer token: de todas las llamadas, de las frías y de las templadas. |
 | `prefixStability` | Fracción del prompt que repite el de la llamada anterior, medida en el cliente. No depende del backend. |
 
@@ -314,6 +314,9 @@ está en [`prompt-caching.md`](prompt-caching.md). Lo que afecta a `eval`:
   anteriores viven en memoria mientras dura el escenario.
 - **Fría y templada.** `coldCalls` y `warmCalls` salen de lo que reporta el backend. Con guion, la
   primera llamada de un escenario es siempre fría; las de una segunda sesión (`sessions`) ya no.
+- **Una rotura es una pérdida demostrada, no una sospecha.** Solo cuenta cuando el backend reporta
+  haber leído de caché menos que en la llamada anterior; lo que el prompt deja de repetir sin que
+  el backend lo acuse va en `prefixStability`, que no se convierte a tokens.
 - **Una rotura no es un error.** `cacheBreaks` no entra en `hadErrors`, en `toolErrors` ni en
   *recovery success*. Su causa (`tools`, `system`, `history`, `compression`, `model`, `backend`) se
   ve en `/auditor` y se puede exigir con un criterio `cache_break`.

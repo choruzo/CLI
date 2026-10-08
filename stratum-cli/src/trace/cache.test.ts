@@ -203,10 +203,47 @@ describe('cacheBreaks', () => {
     expect(cause(broken({}, { model: 'otro-modelo' }))).toEqual(['model']);
   });
 
-  it('una reescritura cuenta aunque el backend no reutilice menos que antes', () => {
-    // Tras comprimir se reutiliza lo mismo que en la llamada anterior, pero no
-    // el prompt anterior entero: es lo que una compresión temprana deja ver.
+  it('los tokens leídos de caché bajan claramente: rotura, con las cifras del backend', () => {
     const model = modelOf([
+      { usage: [1000, 0], prefix: stable(4000) },
+      { usage: [2000, 1000], prefix: stable(8000, 4000) },
+      { usage: [2400, 2000], prefix: stable(9600, 8000) },
+      { usage: [2600, 400], prefix: stable(10400, 9600) },
+    ]);
+    expect(cacheBreaks(model)).toEqual([
+      { id: 'm3', n: 5, turn: 0, cause: 'backend', cachedBefore: 2000, cachedAfter: 400 },
+    ]);
+    expect(cacheSummary(model)?.breaks).toBe(1);
+  });
+
+  it('el prompt se reescribe y cae la reutilización: rotura atribuida a la reescritura', () => {
+    const model = modelOf([
+      { usage: [1000, 0], prefix: stable(4000) },
+      { usage: [2000, 1000], prefix: stable(8000, 4000) },
+      { usage: [3000, 2000], prefix: stable(12000, 8000) },
+      {
+        usage: [1800, 1005],
+        prefix: { ...stable(7200, 4020), diverged: 'history', divergedAt: 2 },
+        compressedBefore: true,
+      },
+    ]);
+    expect(cacheBreaks(model)).toEqual([
+      { id: 'm3', n: 6, turn: 0, cause: 'compression', cachedBefore: 2000, cachedAfter: 1005 },
+    ]);
+  });
+
+  it('lo leído sube sin alcanzar todo el prefijo potencial: no es una rotura', () => {
+    // El backend sirvió más que en la llamada anterior. Que no llegue al prompt
+    // anterior entero (2000) no demuestra una pérdida: nadie reportó que esos
+    // tokens estuvieran guardados. Vale con el prompt intacto y reescrito.
+    const grew = modelOf([
+      { usage: [1000, 0], prefix: stable(4000) },
+      { usage: [2000, 1000], prefix: stable(8000, 4000) },
+      { usage: [2400, 1500], prefix: stable(9600, 8000) },
+    ]);
+    expect(cacheBreaks(grew)).toEqual([]);
+
+    const rewritten = modelOf([
       { usage: [1000, 0], prefix: stable(4000) },
       { usage: [2000, 1000], prefix: stable(8000, 4000) },
       {
@@ -215,10 +252,35 @@ describe('cacheBreaks', () => {
         compressedBefore: true,
       },
     ]);
-    expect(cacheBreaks(model)).toEqual([
-      { id: 'm2', n: 5, turn: 0, cause: 'compression', cachedBefore: 1000, cachedAfter: 1005 },
+    expect(cacheBreaks(rewritten)).toEqual([]);
+    expect(cacheSummary(rewritten)?.breaks).toBe(0);
+    // Lo que el prompt dejó de repetir sigue a la vista, medido en el cliente.
+    expect(prefixStability(rewritten)).toBeCloseTo(8020 / 14000, 10);
+
+    const same = modelOf([
+      { usage: [2000, 1000], prefix: stable(8000) },
+      { usage: [2100, 1000], prefix: { ...stable(8400, 4100), diverged: 'system', divergedAt: 0 } },
     ]);
-    expect(cacheSummary(model)?.breaks).toBe(1);
+    expect(cacheBreaks(same)).toEqual([]);
+  });
+
+  it('el backend no reporta caché: ninguna rotura, cambie lo que cambie el prompt', () => {
+    const model = modelOf([
+      { usage: [1000], prefix: stable(4000) },
+      { usage: [2000], prefix: stable(8000, 4000) },
+      { usage: [900], prefix: { ...stable(3600, 100), diverged: 'tools' } },
+      {
+        usage: [800],
+        prefix: { ...stable(3200, 500), diverged: 'history', divergedAt: 1 },
+        compressedBefore: true,
+      },
+      { prefix: { ...stable(3000, 200), diverged: 'system', divergedAt: 0 } },
+    ]);
+    expect(cacheBreaks(model)).toEqual([]);
+    expect(cacheSummary(model)).toBeNull();
+    expect(traceStats(model, 0).cache).toBeNull();
+    // El prefijo del cliente sí se mide, y por caracteres: no se pasa a tokens.
+    expect(prefixStability(model)).toBeCloseTo(4800 / 17800, 10);
   });
 
   it('cada agente se compara consigo mismo: un subagente no rompe la caché del padre', () => {
