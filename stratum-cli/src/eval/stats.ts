@@ -3,7 +3,7 @@
  * stats`). Nada sale del equipo: se leen los JSONL de `trace.dir` y se suman.
  * La agregación es pura; el disco lo toca quien la llama.
  */
-import { usageOf } from '../trace/model.js';
+import { cacheBreaks, prefixOf, ttftOf, usageOf, type CacheBreakCause } from '../trace/model.js';
 import type { TraceRecord } from '../trace/records.js';
 import { blockedToolSteps, buildTraceModel, computeMetrics, turnOutcomes } from './metrics.js';
 
@@ -23,13 +23,86 @@ export interface ToolStats {
   meanMs: number | null;
 }
 
+/** Caché de prompt de un conjunto de llamadas. Solo cuentan las que la reportaron. */
+export interface CacheStats {
+  reportedCalls: number;
+  promptTokens: number;
+  cachedReadTokens: number;
+  /** null si ninguna llamada reportó escrituras. */
+  cacheWriteTokens: number | null;
+  uncachedPromptTokens: number;
+  hitRate: number | null;
+  coldCalls: number;
+  warmCalls: number;
+  ttftColdMs: number | null;
+  ttftWarmMs: number | null;
+}
+
 export interface ModelStats {
   model: string;
+  /** Provider con el que se llamó; ausente en trazas que no lo registraban. */
+  provider?: string;
   calls: number;
   errors: number;
   tokens: number | null;
   /** Tokens de salida por segundo de generación; null si el backend no da `usage`. */
   tokensPerSecond: number | null;
+  /** TTFT medio de sus llamadas. */
+  ttftMs: number | null;
+  /** null si ninguna de sus llamadas reportó caché. */
+  cache: CacheStats | null;
+}
+
+class CacheAcc {
+  reportedCalls = 0;
+  prompt = 0;
+  read = 0;
+  write = 0;
+  writeSeen = false;
+  cold = 0;
+  warm = 0;
+  ttftCold = 0;
+  ttftColdN = 0;
+  ttftWarm = 0;
+  ttftWarmN = 0;
+
+  add(u: ReturnType<typeof usageOf>, ttft: number | null): void {
+    if (u?.cachedReadTokens === undefined || u.promptTokens === undefined) return;
+    this.reportedCalls++;
+    this.prompt += u.promptTokens;
+    this.read += Math.min(u.cachedReadTokens, u.promptTokens);
+    if (u.cacheWriteTokens !== undefined) {
+      this.writeSeen = true;
+      this.write += u.cacheWriteTokens;
+    }
+    const warm = u.cachedReadTokens > 0;
+    if (warm) this.warm++;
+    else this.cold++;
+    if (ttft === null) return;
+    if (warm) {
+      this.ttftWarm += ttft;
+      this.ttftWarmN++;
+    } else {
+      this.ttftCold += ttft;
+      this.ttftColdN++;
+    }
+  }
+
+  stats(): CacheStats | null {
+    if (this.reportedCalls === 0) return null;
+    return {
+      reportedCalls: this.reportedCalls,
+      promptTokens: this.prompt,
+      cachedReadTokens: this.read,
+      cacheWriteTokens: this.writeSeen ? this.write : null,
+      uncachedPromptTokens: this.prompt - this.read,
+      hitRate: ratio(this.read, this.prompt),
+      coldCalls: this.cold,
+      warmCalls: this.warm,
+      ttftColdMs: ratio(this.ttftCold, this.ttftColdN),
+      ttftWarmMs: ratio(this.ttftWarm, this.ttftWarmN),
+    };
+  }
 }
 
 export interface AggregateStats {
@@ -65,6 +138,12 @@ export interface AggregateStats {
   perTurn: { tokens: number | null; durationMs: number | null; toolCalls: number | null };
   tools: ToolStats[];
   models: ModelStats[];
+  /** Caché de prompt de todas las llamadas que la reportaron; null si ninguna. */
+  cache: CacheStats | null;
+  /** Roturas de caché por causa (`cacheBreaks`); vacío si no hubo o no hay datos. */
+  cacheBreaks: Partial<Record<CacheBreakCause, number>>;
+  /** Fracción del prompt que repite el de la llamada anterior; null sin trazas que lo midan. */
+  prefixStability: number | null;
 }
 
 const ratio = (a: number, b: number): number | null => (b > 0 ? a / b : null);
@@ -84,8 +163,16 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
       usage: boolean;
       genMs: number;
       genTokens: number;
+      model: string;
+      provider?: string;
+      ttft: number;
+      ttftN: number;
+      cache: CacheAcc;
     }
   >();
+  const cache = new CacheAcc();
+  const breaks: Partial<Record<CacheBreakCause, number>> = {};
+  const prefix = { chars: 0, shared: 0 };
   const conf = { asked: 0, approved: 0, denied: 0, blocked: 0 };
   const total = {
     turns: 0,
@@ -152,6 +239,7 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
 
     const model = buildTraceModel(trace.records);
     const blocked = blockedToolSteps(model);
+    for (const b of cacheBreaks(model)) breaks[b.cause] = (breaks[b.cause] ?? 0) + 1;
     for (const s of model.steps) {
       if (s.kind === 'tool') {
         let t = tools.get(s.name);
@@ -164,15 +252,42 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
           t.closed++;
         }
       } else if (s.kind === 'model') {
-        let mo = models.get(s.name);
+        // El mismo modelo servido por dos providers son dos cachés distintas.
+        const provider = typeof s.data.provider === 'string' ? s.data.provider : undefined;
+        const key = `${provider ?? ''}\u0000${s.name}`;
+        let mo = models.get(key);
         if (!mo) {
-          mo = { calls: 0, errors: 0, tokens: 0, usage: false, genMs: 0, genTokens: 0 };
-          models.set(s.name, mo);
+          mo = {
+            calls: 0,
+            errors: 0,
+            tokens: 0,
+            usage: false,
+            genMs: 0,
+            genTokens: 0,
+            model: s.name,
+            ...(provider ? { provider } : {}),
+            ttft: 0,
+            ttftN: 0,
+            cache: new CacheAcc(),
+          };
+          models.set(key, mo);
         }
         mo.calls++;
         if (s.status === 'error') mo.errors++;
+        const ttft = ttftOf(s);
+        if (ttft !== null) {
+          mo.ttft += ttft;
+          mo.ttftN++;
+        }
+        const p = prefixOf(s);
+        if (p?.sharedChars !== undefined) {
+          prefix.chars += p.chars;
+          prefix.shared += Math.min(p.sharedChars, p.chars);
+        }
         const u = usageOf(s);
         if (!u) continue;
+        cache.add(u, ttft);
+        mo.cache.add(u, ttft);
         mo.usage = true;
         mo.tokens += u.totalTokens ?? (u.promptTokens ?? 0) + (u.completionTokens ?? 0);
         if (u.completionTokens && s.end !== null) {
@@ -232,14 +347,20 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
         meanMs: ratio(t.ms, t.closed),
       }))
       .sort((a, b) => b.calls - a.calls || a.name.localeCompare(b.name)),
-    models: [...models.entries()]
-      .map(([model, m]) => ({
-        model,
+    models: [...models.values()]
+      .map((m) => ({
+        model: m.model,
+        ...(m.provider ? { provider: m.provider } : {}),
         calls: m.calls,
         errors: m.errors,
         tokens: m.usage ? m.tokens : null,
         tokensPerSecond: m.genMs > 0 ? m.genTokens / (m.genMs / 1000) : null,
+        ttftMs: ratio(m.ttft, m.ttftN),
+        cache: m.cache.stats(),
       }))
       .sort((a, b) => b.calls - a.calls || a.model.localeCompare(b.model)),
+    cache: cache.stats(),
+    cacheBreaks: breaks,
+    prefixStability: ratio(prefix.shared, prefix.chars),
   };
 }

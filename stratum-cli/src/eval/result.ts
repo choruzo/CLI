@@ -34,6 +34,11 @@ export interface ScenarioResult {
   sessionId: string | null;
   /** Traza de la ejecución, relativa a la carpeta del resultado. */
   trace: string | null;
+  /**
+   * Todas las trazas, en orden, cuando el escenario lanza varias sesiones
+   * (`sessions`): `trace` es la primera y las métricas salen de todas.
+   */
+  traces?: string[];
   /** Solo con guion: peticiones recibidas frente a pasos previstos. */
   mock?: { requests: number; steps: number };
 }
@@ -77,6 +82,27 @@ export interface GroupSummary {
     toolCalls: Distribution | null;
     llmCalls: Distribution | null;
   };
+  /**
+   * Caché de prompt, sumada sobre las ejecuciones cuyas llamadas la reportaron;
+   * null si ninguna. Ausente en resultados anteriores a la métrica.
+   */
+  cache?: {
+    /** Ejecuciones con datos de caché. */
+    runs: number;
+    reportedCalls: number;
+    cachedReadTokens: number;
+    cacheWriteTokens: number | null;
+    uncachedPromptTokens: number;
+    hitRate: number | null;
+    coldCalls: number;
+    warmCalls: number;
+    breaks: number;
+    /** Media, por ejecución, del TTFT de sus llamadas frías / templadas. */
+    ttftColdMs: number | null;
+    ttftWarmMs: number | null;
+  } | null;
+  /** Media de `prefixStability` de las ejecuciones que la registran. */
+  prefixStability?: number | null;
 }
 
 /** Dónde y sobre qué código se ejecutó: lo que hace falta para fiarse de una comparación. */
@@ -146,6 +172,16 @@ export function summarizeGroup(results: readonly ScenarioResult[]): GroupSummary
   const withErrors = withMetrics.filter((r) => r.metrics.hadErrors);
   const recovered = withErrors.filter((r) => r.status === 'pass').length;
   const tokenRuns = withMetrics.filter((r) => r.metrics.tokens !== null);
+  const meanOf = (pick: (m: RunMetrics) => number | null | undefined): number | null => {
+    const values = withMetrics.flatMap((r) => pick(r.metrics) ?? []);
+    return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  };
+  const cacheRuns = withMetrics.filter((r) => (r.metrics.cacheReportedCalls ?? 0) > 0);
+  const cacheSum = (pick: (m: RunMetrics) => number | null | undefined): number =>
+    cacheRuns.reduce((s, r) => s + (pick(r.metrics) ?? 0), 0);
+  const cachedRead = cacheSum((m) => m.cachedReadTokens);
+  const uncached = cacheSum((m) => m.uncachedPromptTokens);
+  const writeRuns = cacheRuns.filter((r) => typeof r.metrics.cacheWriteTokens === 'number');
   const ofPassed = (pick: (m: RunMetrics) => number | null): Distribution | null =>
     distribution(
       passed.flatMap((r) => {
@@ -192,6 +228,23 @@ export function summarizeGroup(results: readonly ScenarioResult[]): GroupSummary
       toolCalls: ofPassed((m) => m.toolCalls),
       llmCalls: ofPassed((m) => m.llmCalls),
     },
+    cache:
+      cacheRuns.length > 0
+        ? {
+            runs: cacheRuns.length,
+            reportedCalls: cacheSum((m) => m.cacheReportedCalls),
+            cachedReadTokens: cachedRead,
+            cacheWriteTokens: writeRuns.length > 0 ? cacheSum((m) => m.cacheWriteTokens) : null,
+            uncachedPromptTokens: uncached,
+            hitRate: ratio(cachedRead, cachedRead + uncached),
+            coldCalls: cacheSum((m) => m.coldCalls),
+            warmCalls: cacheSum((m) => m.warmCalls),
+            breaks: cacheSum((m) => m.cacheBreaks),
+            ttftColdMs: meanOf((m) => m.ttftColdMs),
+            ttftWarmMs: meanOf((m) => m.ttftWarmMs),
+          }
+        : null,
+    prefixStability: meanOf((m) => m.prefixStability),
   };
 }
 

@@ -1,0 +1,97 @@
+{
+  "id": "cache-stable-toolset-order",
+  "group": "cache",
+  "title": "El orden de las tools no depende del orden en que un server MCP las anuncia",
+  "description": "Un server MCP anuncia sus tools en un orden distinto en cada arranque. Las definiciones de tools van al principio del prompt: si su orden cambia entre sesiones, la segunda no reutiliza nada de lo que viene detrás.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "mcp-registry.mjs": "// Servidor MCP mínimo (stdio, JSON por línea). En su segundo arranque anuncia\n// las mismas tools en orden inverso: un catálogo cuyo orden no es estable.\nimport { existsSync, writeFileSync } from 'node:fs';\nimport { createInterface } from 'node:readline';\n\nconst flipped = existsSync('.mcp-started');\nwriteFileSync('.mcp-started', '1');\nconst names = ['alpha_lookup', 'beta_lookup', 'gamma_lookup', 'delta_lookup'];\nconst tools = (flipped ? [...names].reverse() : names).map((name) => ({\n  name,\n  description: 'Looks up a value in the ' + name.split('_')[0] + ' registry by its key.',\n  inputSchema: { type: 'object', properties: { key: { type: 'string' } }, required: ['key'] },\n}));\nconst send = (message) => process.stdout.write(JSON.stringify(message) + '\\n');\n\ncreateInterface({ input: process.stdin }).on('line', (line) => {\n  let msg;\n  try {\n    msg = JSON.parse(line);\n  } catch {\n    return;\n  }\n  if (msg.id === undefined) return;\n  const reply = (result) => send({ jsonrpc: '2.0', id: msg.id, result });\n  if (msg.method === 'initialize') {\n    reply({\n      protocolVersion: (msg.params && msg.params.protocolVersion) || '2024-11-05',\n      capabilities: { tools: {} },\n      serverInfo: { name: 'registry', version: '1.0.0' },\n    });\n  } else if (msg.method === 'tools/list') reply({ tools });\n  else if (msg.method === 'tools/call') reply({ content: [{ type: 'text', text: 'value-42' }] });\n  else reply({});\n});\n"
+    },
+    "config": {
+      "mcp": {
+        "servers": [
+          {
+            "name": "registry",
+            "command": "node",
+            "args": ["mcp-registry.mjs"]
+          }
+        ]
+      }
+    }
+  },
+  "input": "Busca la clave \"build\" en el registro alpha y dime el valor.",
+  "sessions": [
+    {
+      "input": "Busca la clave \"deploy\" en el registro delta y dime el valor."
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__registry__alpha_lookup",
+          "args": {
+            "key": "build"
+          }
+        }
+      ]
+    },
+    {
+      "text": "value-42"
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__registry__delta_lookup",
+          "args": {
+            "key": "deploy"
+          }
+        }
+      ]
+    },
+    {
+      "text": "value-42"
+    }
+  ],
+  "expect": {
+    "description": "Las dos sesiones usan su tool MCP y la segunda reutiliza tools y prompt del sistema aunque el server las anunciara en otro orden.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_contains",
+        "value": "value-42"
+      },
+      {
+        "type": "tool_called",
+        "tool": "mcp__registry__delta_lookup",
+        "status": "ok",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "coldCalls",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "metric",
+        "metric": "cacheBreaks",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "cacheHitRate",
+        "mode": "mock",
+        "min": 0.7
+      }
+    ]
+  }
+}

@@ -1,4 +1,5 @@
 import type { Message } from '../agent/types.js';
+import type { RawTimings, RawUsage } from './cache.js';
 
 export interface ToolFunctionSchema {
   name: string;
@@ -38,11 +39,9 @@ export interface OpenAIStreamChunk {
     index: number;
   }>;
   /** Presente solo en el chunk final cuando se solicita `stream_options.include_usage`. */
-  usage?: {
-    prompt_tokens: number;
-    completion_tokens: number;
-    total_tokens: number;
-  };
+  usage?: RawUsage;
+  /** llama.cpp: tiempos de la petición; `cache_n` es lo reutilizado del KV cache. */
+  timings?: RawTimings;
 }
 
 export interface CompletionRequest {
@@ -53,6 +52,13 @@ export interface CompletionRequest {
   signal?: AbortSignal;
   /** Temperatura de muestreo (0–2). Si se omite, el provider usa el valor por defecto del backend. */
   temperature?: number;
+  /**
+   * Sesión de Stratum a la que pertenece la petición. Solo sale hacia el
+   * backend si sus `CacheCapabilities` lo piden (`prompt_cache_key`,
+   * `session_id`): sirve para que peticiones con el mismo prefijo caigan en la
+   * misma caché.
+   */
+  sessionId?: string;
   /**
    * Incidencias del stream que no lo interrumpen (un chunk SSE que no es JSON
    * y se descarta). El loop las convierte en un `warning` visible: un fragmento

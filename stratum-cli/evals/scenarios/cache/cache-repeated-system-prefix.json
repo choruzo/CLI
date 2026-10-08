@@ -1,0 +1,89 @@
+{
+  "id": "cache-repeated-system-prefix",
+  "group": "cache",
+  "title": "Dos sesiones desde carpetas distintas comparten el prefijo estable del prompt",
+  "description": "La segunda sesión arranca en una subcarpeta del mismo proyecto: cambian el cwd y la raíz del workspace, que son entorno dinámico. Todo lo que el prompt lleva antes de ese bloque (instrucciones, tools, reglas) debe salir de la caché que dejó la primera.",
+  "difficulty": "basic",
+  "setup": {
+    "files": {
+      "README.md": "# demo-api\n\nServicio de ejemplo. El puerto por defecto es 8472.\n",
+      "packages/api/NOTES.md": "El servicio de la API usa la cola `jobs-main`.\n"
+    }
+  },
+  "input": "¿Cuál es el puerto por defecto según README.md? Responde solo con el número.",
+  "sessions": [
+    {
+      "input": "¿Qué cola usa el servicio según NOTES.md? Responde solo con el nombre.",
+      "cwd": "packages/api"
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "README.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "8472"
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "NOTES.md"
+          }
+        }
+      ]
+    },
+    {
+      "text": "jobs-main"
+    }
+  ],
+  "expect": {
+    "description": "Las dos sesiones responden bien; solo la primera llamada de la primera sesión es fría, y la primera de la segunda reutiliza el prefijo estable.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_contains",
+        "value": "8472"
+      },
+      {
+        "type": "output_contains",
+        "value": "jobs-main"
+      },
+      {
+        "type": "metric",
+        "metric": "coldCalls",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "metric",
+        "metric": "warmCalls",
+        "mode": "mock",
+        "equals": 3
+      },
+      {
+        "type": "metric",
+        "metric": "cacheBreaks",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "cacheHitRate",
+        "mode": "mock",
+        "min": 0.725
+      }
+    ]
+  }
+}

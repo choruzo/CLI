@@ -189,8 +189,26 @@ export class ToolRegistry {
     return Array.from(this.tools.values());
   }
 
+  /**
+   * Las tools en el orden en que se ofrecen al modelo. Las definiciones van al
+   * principio del prompt, así que su orden decide cuánto reutiliza la caché de
+   * prefijo del backend: tiene que ser el mismo en cada llamada y en cada
+   * sesión. Las built-in conservan el de registro, que fija el código; las MCP
+   * van después y ordenadas por nombre, porque su orden de registro depende de
+   * qué server conecta antes (arranque `lazy`, reconexiones) y de cómo anuncie
+   * cada uno su catálogo.
+   */
+  private canonicalOrder(): ToolDefinition[] {
+    const builtin: ToolDefinition[] = [];
+    const mcp: ToolDefinition[] = [];
+    for (const tool of this.tools.values())
+      (tool.name.startsWith('mcp__') ? mcp : builtin).push(tool);
+    mcp.sort((a, b) => (a.name < b.name ? -1 : a.name > b.name ? 1 : 0));
+    return [...builtin, ...mcp];
+  }
+
   toToolSchemas(mode: AgentMode = 'normal', filter?: ToolsetFilter): ToolSchema[] {
-    return this.list()
+    return this.canonicalOrder()
       .filter((tool) => !this.disabledTools.has(tool.name))
       .filter((tool) => isToolVisibleInMode(tool.name, mode))
       .filter((tool) => isToolVisibleForProfile(tool.name, filter))

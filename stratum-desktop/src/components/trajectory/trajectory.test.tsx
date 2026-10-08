@@ -79,6 +79,67 @@ describe('TrajectoryPanel', () => {
     expect(screen.queryByLabelText('Detalle del paso')).toBeNull();
   });
 
+  it('sin dato de caché lo dice, y no pinta un 0 %', () => {
+    const { container } = render(<TrajectoryPanel trajectory={trajectory(RECORDS)} onClose={() => {}} />);
+    expect(screen.getByText('caché no reportada')).toBeTruthy();
+    fireEvent.click(container.querySelectorAll('.trajectory__row')[2]);
+    const detail = within(screen.getByLabelText('Detalle del paso'));
+    expect(detail.getByText('no reportada por el backend')).toBeTruthy();
+    expect(detail.queryByText('Acierto de caché')).toBeNull();
+  });
+
+  it('muestra caché fría y templada, el prefijo repetido y la rotura con su causa', () => {
+    const call = (
+      id: string,
+      at: number,
+      usage: Record<string, number>,
+      prefix: Record<string, unknown>,
+    ): TraceRecord[] => [
+      { t: 'begin', at, id, kind: 'model', name: 'qwen', data: { provider: 'local', prefix } },
+      { t: 'mark', at: at + ((usage.cachedReadTokens ?? usage.cachedTokens) ? 20 : 300), id, name: 'first_token' },
+      { t: 'end', at: at + 400, id, status: 'ok', data: { text: 'ok', usage } },
+    ];
+    const records: TraceRecord[] = [
+      { t: 'turn', at: 1000, input: 'tarea' },
+      ...call('m1', 1010, { promptTokens: 1000, cachedReadTokens: 0 }, { chars: 4000 }),
+      // Traza anterior: el dato viene en `cachedTokens`.
+      ...call('m2', 2000, { promptTokens: 1200, cachedTokens: 1000 }, { chars: 4800, sharedChars: 4000 }),
+      ...call(
+        'm3',
+        3000,
+        { promptTokens: 1300, cachedReadTokens: 260, cacheWriteTokens: 40 },
+        { chars: 5200, sharedChars: 1300, diverged: 'system', divergedAt: 0 },
+      ),
+    ];
+    const { container } = render(<TrajectoryPanel trajectory={trajectory(records)} onClose={() => {}} />);
+
+    // Pie: 1260 de 3500 tokens de entrada salieron de caché.
+    const footer = container.querySelector('.trajectory__stats')!.textContent!;
+    expect(footer).toContain('caché 36%');
+    expect(footer).toContain('1 frías · 2 templadas');
+    expect(footer).toContain('TTFT 300 ms frío · 20 ms templado');
+    expect(footer).toContain('1 rotura de caché');
+    expect(footer).toContain('prefijo estable 53%');
+
+    const rows = container.querySelectorAll('.trajectory__row');
+    fireEvent.click(rows[1]);
+    let detail = within(screen.getByLabelText('Detalle del paso'));
+    expect(detail.getByText('fría')).toBeTruthy();
+    expect(detail.getByText('primera llamada: sin referencia')).toBeTruthy();
+
+    fireEvent.click(rows[2]);
+    detail = within(screen.getByLabelText('Detalle del paso'));
+    expect(detail.getByText('templada')).toBeTruthy();
+    expect(detail.getByText('83%')).toBeTruthy();
+    expect(detail.getByText('83% del prompt')).toBeTruthy();
+
+    fireEvent.click(rows[3]);
+    detail = within(screen.getByLabelText('Detalle del paso'));
+    expect(detail.getByText('cambió el prompt del sistema (1000 → 260 tok)')).toBeTruthy();
+    expect(detail.getByText('el prompt del sistema')).toBeTruthy();
+    expect(detail.getByText('40')).toBeTruthy(); // tokens escritos en caché
+  });
+
   it('un bloque del timeline selecciona el mismo paso que su fila', () => {
     const { container } = render(<TrajectoryPanel trajectory={trajectory(RECORDS)} onClose={() => {}} />);
     fireEvent.click(container.querySelector('.trajectory__block[data-kind="tool"]')!);

@@ -600,7 +600,7 @@ export class ContextManager {
         model,
         signal: combined,
       })) {
-        const content = chunk.choices[0]?.delta?.content;
+        const content = chunk.choices?.[0]?.delta?.content;
         if (content) result += think.feed(content).text;
       }
     } catch (err) {
@@ -919,6 +919,7 @@ export class ReactLoop {
         stream: true,
         model: this.model,
         signal,
+        sessionId: opts?.sessionId,
         onStreamWarning: (message) => streamWarnings.push(message),
       };
       // Incidencias del stream (chunks descartados): se emiten como `warning`
@@ -964,6 +965,7 @@ export class ReactLoop {
           model: request.model,
           messages: this.messages,
           tools: tools.length,
+          toolSchemas: tools,
         });
 
         // Acumula cada evento del buffer en el estado del turno y devuelve el
@@ -1000,7 +1002,7 @@ export class ReactLoop {
           for await (const chunk of streamWithRetry(activeProvider, request, { onRetry })) {
             if (signal.aborted) break;
             modelSpan?.firstChunk();
-            if (chunk.usage) modelSpan?.usage(chunk.usage);
+            if (chunk.usage || chunk.timings) modelSpan?.usage(chunk.usage, chunk.timings);
 
             // Registrar usage real si viene en el chunk (§12.4)
             if (chunk.usage?.prompt_tokens) {

@@ -1,0 +1,110 @@
+{
+  "id": "cache-tool-loop-prefix",
+  "group": "cache",
+  "title": "Un bucle de tools reutiliza el prefijo en cada iteración",
+  "description": "Un turno agéntico de seis llamadas. Entre iteraciones solo se añaden la respuesta del modelo y los resultados de las tools: el prompt anterior es prefijo exacto del nuevo.",
+  "difficulty": "basic",
+  "setup": {
+    "files": {
+      "data/one.txt": "11\n",
+      "data/two.txt": "22\n",
+      "data/three.txt": "33\n",
+      "data/four.txt": "44\n"
+    }
+  },
+  "input": "Suma los números de los cuatro ficheros de data/ (uno por fichero) y dime el total. Lee los ficheros de uno en uno.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "list_directory",
+          "args": {
+            "path": "data"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "data/one.txt"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "data/two.txt"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "data/three.txt"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "data/four.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El total es 110."
+    }
+  ],
+  "expect": {
+    "description": "Responde 110; de las seis llamadas solo la primera es fría y ninguna rompe la caché.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "110"
+      },
+      {
+        "type": "metric",
+        "metric": "coldCalls",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "metric",
+        "metric": "warmCalls",
+        "mode": "mock",
+        "equals": 5
+      },
+      {
+        "type": "metric",
+        "metric": "cacheBreaks",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "prefixStability",
+        "mode": "mock",
+        "min": 0.98
+      },
+      {
+        "type": "metric",
+        "metric": "cacheHitRate",
+        "mode": "mock",
+        "min": 0.8
+      }
+    ]
+  }
+}

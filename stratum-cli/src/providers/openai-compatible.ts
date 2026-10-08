@@ -1,6 +1,7 @@
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from './base.js';
-import type { AgentEvent } from '../agent/types.js';
+import type { AgentEvent, Message } from '../agent/types.js';
+import type { CacheCapabilities } from './cache.js';
 import { getLogger } from '../logging/index.js';
 import {
   ERROR_BODY_READ_LIMIT,
@@ -128,7 +129,7 @@ export class StreamBuffer {
 
   feed(chunk: OpenAIStreamChunk): AgentEvent[] {
     const events: AgentEvent[] = [];
-    const choice = chunk.choices[0];
+    const choice = chunk.choices?.[0];
     if (!choice) return events;
 
     const delta = choice.delta;
@@ -271,6 +272,40 @@ export const DEFAULT_PROVIDER_TIMEOUTS: ProviderTimeouts = {
 
 export interface OpenAICompatibleOptions {
   timeouts?: Partial<ProviderTimeouts>;
+  /** Qué admite el backend en caché de prompt. Sin ella, la petición no lleva nada extra. */
+  cache?: CacheCapabilities;
+}
+
+type ContentPart = { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } };
+
+/**
+ * Marcas `cache_control` para un backend con breakpoints explícitos (Anthropic
+ * a través de una pasarela compatible): una al final del system prompt —el
+ * prefijo que comparten todas las llamadas de la sesión— y otra en el último
+ * mensaje `user`/`tool` con texto, para que la siguiente llamada reutilice la
+ * conversación entera. Devuelve copias: el historial del agente no se toca.
+ */
+export function withCacheBreakpoints(messages: readonly Message[]): unknown[] {
+  const mark = (m: Message): unknown => ({
+    ...m,
+    content: [
+      { type: 'text', text: m.content ?? '', cache_control: { type: 'ephemeral' } },
+    ] satisfies ContentPart[],
+  });
+  const markable = (m: Message | undefined): boolean =>
+    !!m && typeof m.content === 'string' && m.content.length > 0;
+
+  let last = -1;
+  for (let i = messages.length - 1; i > 0; i--) {
+    const m = messages[i]!;
+    if ((m.role === 'user' || m.role === 'tool') && markable(m)) {
+      last = i;
+      break;
+    }
+  }
+  return messages.map((m, i) =>
+    (i === 0 && m.role === 'system' && markable(m)) || i === last ? mark(m) : m,
+  );
 }
 
 /** Lee como mucho `limit` bytes del cuerpo y cancela el resto. */
@@ -327,6 +362,7 @@ class IdleWatchdog {
 export class OpenAICompatible implements IProvider {
   private readonly timeouts: ProviderTimeouts;
   private readonly origin: string;
+  private readonly cache: CacheCapabilities | undefined;
 
   constructor(
     private readonly baseUrl: string,
@@ -335,6 +371,7 @@ export class OpenAICompatible implements IProvider {
     options: OpenAICompatibleOptions = {},
   ) {
     this.timeouts = { ...DEFAULT_PROVIDER_TIMEOUTS, ...options.timeouts };
+    this.cache = options.cache;
     this.origin = safeOrigin(baseUrl);
   }
 
@@ -342,10 +379,16 @@ export class OpenAICompatible implements IProvider {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
     const body: Record<string, unknown> = {
       model: req.model,
-      messages: req.messages,
+      messages: this.cache?.explicitBreakpoints ? withCacheBreakpoints(req.messages) : req.messages,
       stream: true,
       stream_options: { include_usage: true },
     };
+    // Enrutado de caché: solo donde el backend lo declara. Un campo desconocido
+    // hace que algunos servidores rechacen la petición entera.
+    if (req.sessionId) {
+      if (this.cache?.cacheKey) body['prompt_cache_key'] = req.sessionId;
+      if (this.cache?.sessionAffinity) body['session_id'] = req.sessionId;
+    }
     if (req.tools && req.tools.length > 0) {
       body['tools'] = req.tools;
       body['tool_choice'] = 'auto';
@@ -478,7 +521,8 @@ export class OpenAICompatible implements IProvider {
             throw streamError(chunk, this.origin);
           }
           // Yield tanto chunks con choices como el chunk final de usage (choices vacío)
-          if (chunk.choices?.[0] || chunk.usage) {
+          // (o los `timings` de llama.cpp, de donde sale lo reutilizado del KV cache)
+          if (chunk.choices?.[0] || chunk.usage || chunk.timings) {
             chunks++;
             if (chunk.usage) lastUsage = chunk.usage;
             yield chunk;
@@ -494,6 +538,7 @@ export class OpenAICompatible implements IProvider {
         durationMs: endTimer(),
         promptTokens: lastUsage?.prompt_tokens,
         completionTokens: lastUsage?.completion_tokens,
+        cachedTokens: lastUsage?.prompt_tokens_details?.cached_tokens,
       });
     } finally {
       watchdog.clear();

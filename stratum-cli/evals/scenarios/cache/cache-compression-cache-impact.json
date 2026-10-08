@@ -1,0 +1,113 @@
+{
+  "id": "cache-compression-cache-impact",
+  "group": "cache",
+  "title": "La compresión de contexto ahorra tokens y rompe la caché: las dos cosas se miden",
+  "description": "Tres lecturas grandes llevan el historial por encima del umbral y se resume a mitad del turno. La llamada siguiente lleva menos tokens, pero el prefijo que estaba en caché ya no existe: la traza lo registra como una rotura con causa `compression`, no como un error del agente.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "logs/README.md": "Logs de los tres servicios."
+    },
+    "commands": [
+      [
+        "node",
+        "-e",
+        "const fs = require('fs');['one', 'two', 'three'].forEach((name, k) => {  const lines = [];  for (let i = 0; i < 300; i++)    lines.push('service-' + name + ' request ' + String(i).padStart(4, '0') + ' handled in ' + (20 + ((i * 7 + k) % 60)) + ' ms status 200 ok');  lines[150] = 'service-' + name + ' request FAILED with code E' + (41 + k) + ' upstream timeout';  const nl = String.fromCharCode(10);  fs.writeFileSync('logs/' + name + '.log', lines.join(nl) + nl);});"
+      ]
+    ],
+    "config": {
+      "agent": {
+        "compressionThreshold": 0.62,
+        "compressionKeepRounds": 1
+      }
+    }
+  },
+  "input": "Lee logs/one.log, logs/two.log y logs/three.log, de uno en uno, y dime el código de error que aparece en cada uno.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "logs/one.log"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "logs/two.log"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "logs/three.log"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Read so far: logs/one.log failed with E41, logs/two.log failed with E42."
+    },
+    {
+      "text": "Los códigos son E41, E42 y E43."
+    }
+  ],
+  "expect": {
+    "description": "La tarea se completa pese a la compresión, que deja una rotura de caché atribuida a ella y ningún error.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "E43"
+      },
+      {
+        "type": "metric",
+        "metric": "compressions",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "cache_break",
+        "cause": "compression",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "cacheBreaks",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "llmErrors",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "coldCalls",
+        "mode": "mock",
+        "equals": 1
+      }
+    ]
+  }
+}

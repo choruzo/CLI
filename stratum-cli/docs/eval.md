@@ -49,7 +49,8 @@ Con `--mock`, la petición *n* al modelo recibe el paso *n* del `script` del esc
 la trayectoria prevista: si el runtime hace una petición de más o de menos, el escenario falla
 (`guion consumido exacto`). Los `usage` que devuelve el modelo de guion se derivan del tamaño real
 de cada petición (caracteres / 4): no son tokens de verdad, pero un system prompt que crece entre
-dos versiones se ve en la comparación.
+dos versiones se ve en la comparación. También simula una caché de prefijo, que es lo que hace
+reproducibles las métricas de [caché de prompt](#caché-de-prompt).
 
 En modo live la API key **no se escribe en disco**: el hijo la recibe por la variable de entorno
 `STRATUM_EVAL_API_KEY` y el `.stratumrc.json` temporal solo lleva el placeholder.
@@ -94,7 +95,7 @@ desconocidas se rechazan.
 | Campo | Qué es |
 |---|---|
 | `id` | Minúsculas, dígitos y guiones. Único. |
-| `group` | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` |
+| `group` | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` |
 | `difficulty` | `basic` (por defecto) · `intermediate` · `adversarial`. Ver [Niveles de dificultad](#niveles-de-dificultad). |
 | `requires` | Si no se cumple, el escenario queda en **SKIP** (no cuenta como fallo): `platform` y ejecutables en el PATH. |
 | `setup.files` | Ficheros de partida, ruta relativa → contenido. No pueden salir del workspace. |
@@ -102,6 +103,8 @@ desconocidas se rechazan.
 | `setup.config` | Capa de `.stratumrc.json` (entornos, perfiles, `tools.*`…). `provider`, `trace` y `memory.autoExtract` los fija el runner. |
 | `setup.ssh.hosts` | Hosts simulados (ver abajo). |
 | `input` | **Entrada**: la tarea, tal cual se le pasa a `stratum run`. |
+| `followUps` | Turnos siguientes en la **misma sesión**: se lanzan con `stratum run … --then …`, uno tras otro. Un turno que no acaba en `stop` corta la cadena. |
+| `sessions` | Sesiones posteriores: `[{ input, cwd? }]`. Cada una es otro `stratum run` (otro proceso, otra traza) en el mismo workspace y contra el mismo modelo; `cwd` la lanza desde una subcarpeta. Las métricas salen de todas las trazas, y `traces` en el resultado las lista. |
 | `run.args` | Flags de `stratum run`: `--plan`, `--yes`, `--allow-destructive`, `--deny-destructive`, `--read-only`, `--infra`, `--code`, `--profile <p>`, `--agent <p>`, `--delegate <p>`. |
 | `run.timeoutMs` | Límite del proceso (180 s). Superarlo es FAIL. |
 | `script` | Guion para `--mock`. Sin él, el escenario solo corre en live. |
@@ -150,10 +153,14 @@ trayectoria es el guion y sí hay que comprobarla. `stratum eval list` avisa de 
 | `host_received` | `host`, `pattern`, `min` (1), `max` | el host SSH simulado recibió comandos que casan. Es el **efecto** sobre el servidor, no la trayectoria: vale en los dos modos |
 | `metric` | `metric`, `min` / `max` / `equals` | la métrica de la traza está en la cota |
 | `runtime_event` | `event` (`veto`·`confirmation`·`retry`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto o `decision` de la confirmación) |
+| `cache_break` | `cause` (`tools`·`system`·`history`·`compression`·`model`·`backend`·`unknown`), `min` (1), `max` | la traza tiene ese número de roturas de caché, de esa causa si se indica |
 
 Métricas acotables: `tokens`, `durationMs`, `llmCalls`, `llmErrors`, `toolCalls`, `toolErrors`,
 `policyBlocks`, `retries`, `providerFallbacks`, `subagents`, `subagentFailures`, `repeatedCalls`,
-`warnings`, `fatalErrors`.
+`warnings`, `fatalErrors`, `turns`, `compressions` y las de caché: `cacheReportedCalls`,
+`cacheHitRate`, `cachedReadTokens`, `uncachedPromptTokens`, `coldCalls`, `warmCalls`, `cacheBreaks`,
+`prefixStability`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
+criterio: no se da por buena.
 
 ### Acciones inseguras (`expect.forbidden`)
 
@@ -264,6 +271,14 @@ stratum auditor --file ~/.stratum/evals/runs/<runId>/<escenario>/<sesión>.jsonl
 | `subagents`, `subagentFailures` | Delegaciones y las que acabaron en `failed`. |
 | `repeatedCalls` | Ver abajo. |
 | `stopReason`, `fatalErrors`, `warnings`, `compressions` | Tal cual de la traza. |
+| `cacheReportedCalls` | Llamadas al modelo cuyo backend reportó caché. Las métricas de caché siguientes son solo de ellas, y `null` si no hay ninguna. |
+| `cachedReadTokens`, `cacheWriteTokens` | Tokens de entrada servidos de la caché del backend / escritos en ella (esto último solo lo reporta Anthropic). |
+| `uncachedPromptTokens` | Tokens de entrada que hubo que procesar: `promptTokens − cachedReadTokens`. |
+| `cacheHitRate` | `cachedReadTokens` / tokens de entrada. |
+| `coldCalls`, `warmCalls` | Llamadas en las que el backend no reutilizó nada / reutilizó algo. Sale del dato, no de la posición. |
+| `cacheBreaks` | Llamadas que reutilizaron menos de lo que la anterior dejó en caché. Ver [caché de prompt](#caché-de-prompt). |
+| `ttftMs`, `ttftColdMs`, `ttftWarmMs` | Tiempo medio hasta el primer token: de todas las llamadas, de las frías y de las templadas. |
+| `prefixStability` | Fracción del prompt que repite el de la llamada anterior, medida en el cliente. No depende del backend. |
 
 **Acciones repetidas.** Solo se cuenta lo que se puede afirmar sin adivinar: la misma tool con los
 mismos argumentos que una llamada anterior del mismo agente y turno, **sin que entre las dos se haya
@@ -281,6 +296,32 @@ seguidas, o relanzar tal cual el comando que acaba de fallar, sí. «Innecesaria
 | **Unsafe action rate** | Ejecuciones con alguna acción insegura / ejecutadas. Debería ser 0. |
 | **Recovery success** | De las ejecuciones con algún fallo por el camino (tool, modelo, reintento, fallback, subagente), cuántas acabaron en PASS. |
 | **Tokens / tiempo / tool calls / llamadas LLM hasta el éxito** | Media y mediana **solo sobre las ejecuciones en PASS**. |
+| **Cache hit rate** | Tokens servidos de caché / tokens de entrada, sobre las ejecuciones que reportan caché. Con él van las llamadas frías y templadas, las roturas y el TTFT de cada clase. `n/d` si ninguna lo reporta. |
+| **Prefijo estable (cliente)** | Media de `prefixStability`. |
+
+### Caché de prompt
+
+Qué mide Stratum de la caché del backend, cómo ordena el prompt para aprovecharla y qué la invalida
+está en [`prompt-caching.md`](prompt-caching.md). Lo que afecta a `eval`:
+
+- **De dónde sale el dato.** Del `usage` de cada llamada, normalizado (`cached_tokens` de OpenAI,
+  los campos de Anthropic y DeepSeek, `timings.cache_n` de llama.cpp). Si el backend no lo reporta,
+  las métricas de caché son `null`: no se estiman.
+- **Con guion es reproducible.** El modelo de guion reporta como `cached_tokens` el prefijo más largo
+  que la petición comparte con alguna anterior del mismo escenario —en el orden tools, system,
+  conversación— y retrasa el primer token en proporción a lo que no salió de caché. Es una caché
+  ideal (sin TTL, sin tamaño mínimo, sin desalojos): la cota de lo reutilizable. Los prompts
+  anteriores viven en memoria mientras dura el escenario.
+- **Fría y templada.** `coldCalls` y `warmCalls` salen de lo que reporta el backend. Con guion, la
+  primera llamada de un escenario es siempre fría; las de una segunda sesión (`sessions`) ya no.
+- **Una rotura no es un error.** `cacheBreaks` no entra en `hadErrors`, en `toolErrors` ni en
+  *recovery success*. Su causa (`tools`, `system`, `history`, `compression`, `model`, `backend`) se
+  ve en `/auditor` y se puede exigir con un criterio `cache_break`.
+- **En live, los criterios de caché van con `mode: "mock"`.** Qué queda caliente en un backend real
+  depende de lo que se ejecutó antes y de su TTL.
+
+Los cinco escenarios del grupo `cache` están descritos en
+[`prompt-caching.md`](prompt-caching.md#escenarios-de-eval).
 
 ## Comparar dos ejecuciones
 
@@ -318,9 +359,11 @@ modos distintos, no compara el coste).
 ### Baselines de referencia del repositorio
 
 `evals/baselines/` guarda la referencia con la que se valida cada cambio de Stratum (no va en el
-paquete de npm): `mock.json` (guion) y `live-glm.json` (`glm5.3-flash` por nan), los dos en Windows,
-32/32 con los 5 de `linux` en SKIP, sobre el commit que consta en cada fichero. Una ruta vale como
-referencia, así que no hace falta importarlos:
+paquete de npm): `mock.json` (guion, 37/37) y `live-glm.json` (`glm5.3-flash` por nan, 32/32), los
+dos en Windows, con los 5 de `linux` en SKIP y sobre el commit que consta en cada fichero.
+`live-glm.json` es anterior al grupo `cache` y a las métricas de caché: contra él esos escenarios
+salen como «nuevos» y la caché no se compara. Una ruta vale como referencia, así que no hace falta
+importarlos:
 
 ```bash
 stratum eval run --mock --baseline evals/baselines/mock.json
@@ -343,11 +386,17 @@ Por escenario, en este orden:
 | **Más bloqueos de política** | Regresión: al agente hubo que pararlo más veces. Se compara entre dos PASS y entre dos FAIL. |
 | **Coste** (`tokens`, `durationMs`, `llmCalls`, `toolCalls`) | Regresión si supera la tolerancia. Solo entre dos PASS del mismo modo: entre dos FAIL, gastar menos sin resolver la tarea no es mejorar. |
 | **Fiabilidad** (`toolErrors`, `llmErrors`, `retries`, `repeatedCalls`, `subagentFailures`) | Igual que el coste. |
+| **Caché** (`cacheHitRate`, `cachedReadTokens`, `uncachedPromptTokens`, `cacheBreaks`, `coldCalls`, `prefixStability`, `ttftColdMs`, `ttftWarmMs`) | Igual que el coste, en su propio bloque: el escenario sigue pasando, pero el backend reutiliza menos prompt o tarda más en el primer token. No se mezcla con los errores del agente. |
 | FAIL → PASS, ERROR → PASS, menos coste, menos errores | Mejora. |
 | FAIL ↔ ERROR | Ni lo uno ni lo otro: «sigue sin pasar, de otra manera». Se lista aparte. |
 
 Una regresión pesa más que una mejora en el mismo escenario. Un dato que una de las dos trazas no
-tiene (`null`) no se compara.
+tiene (`null`, o ausente en un resultado anterior a esa métrica) no se compara: contra un baseline
+guardado antes de las métricas de caché, la caché simplemente no entra en la comparación.
+
+En `cacheHitRate`, `cachedReadTokens` y `prefixStability` **más es mejor**; en el resto, menos. Y
+`cachedReadTokens` solo cuenta cuando se intercambia con `uncachedPromptTokens`: leer menos tokens
+de caché porque el prompt encogió no es una regresión, y leer más porque creció no es una mejora.
 
 Cada resultado guarda la **huella** de la definición de sus escenarios (`scenarioHash`: setup,
 entrada, flags, guion y criterios). Si un escenario cambió entre las dos ejecuciones, se compara su
@@ -367,6 +416,11 @@ relativo y decide `abs`). `0` en las dos = cualquier cambio cuenta.
 | `toolErrors`, `retries` | sin margen | 2 |
 | `llmErrors`, `repeatedCalls`, `policyBlocks` | sin margen | 1 |
 | `subagentFailures` | sin margen | sin margen |
+| `cacheHitRate`, `prefixStability` | 2 puntos | 20 puntos · 10 puntos |
+| `cachedReadTokens` | 10 % y 100 | 100 % y 25 000 |
+| `uncachedPromptTokens` | 20 % y 200 | 100 % y 25 000 |
+| `cacheBreaks`, `coldCalls` | sin margen | 2 |
+| `ttftColdMs`, `ttftWarmMs` | 50 % y 250 ms | 200 % y 5 s |
 | acciones inseguras | sin margen, no configurable | sin margen, no configurable |
 
 Con guion la trayectoria es idéntica entre dos ejecuciones: lo único que se mueve es el tamaño del
@@ -438,9 +492,24 @@ Métricas agregadas  (informativas)
 Tolerancias: tokens 20 % y 200 · durationMs 50 % y 2.00 s · llmCalls 20 % · …
 ```
 
-Los bloques salen por gravedad —estado, seguridad, política, coste, fiabilidad— y solo los que
-tienen algo. Un escenario puede estar en varios. `--json` da el mismo contenido: `highlights` (ids
-por bloque), `scenarios[].transition` y `scenarios[].changes[]` con su `category`.
+Los bloques salen por gravedad —estado, seguridad, política, coste, fiabilidad, caché— y solo los
+que tienen algo. Un escenario puede estar en varios. `--json` da el mismo contenido: `highlights`
+(ids por bloque, `cacheRegressions` entre ellos), `scenarios[].transition` y
+`scenarios[].changes[]` con su `category`.
+
+Una regresión de caché se ve así:
+
+```text
+Regresiones de caché (acierto, tokens sin caché, roturas, TTFT) (1)
+  cache-stable-toolset-order
+      cacheHitRate 74.3 % → 61.9 %
+      cachedReadTokens 23.0K → 19.1K (-17 %)
+      uncachedPromptTokens 7.9K → 11.8K (+50 %)
+```
+
+Las tolerancias de caché se ajustan como las demás: `--tolerance "cache=0.05 ttftWarm=50%,200ms
+breaks=1"` (alias `cache`, `cached`, `uncached`, `breaks`, `prefix`, `ttftCold`, `ttftWarm`; en las
+tasas el valor absoluto va en tanto por uno).
 
 ### Uso en cada cambio
 
@@ -509,7 +578,14 @@ stratum stats --json
 Sin un criterio de éxito por tarea, aquí el éxito es por turno: **turnos completados** (`stop` /
 turnos cerrados) y **recovery success** (turnos con algún fallo que aun así acabaron en `stop`).
 Añade el desglose por herramienta (llamadas, errores, bloqueadas, duración media) y por modelo
-(llamadas, tokens, tokens/s).
+(llamadas, tokens, tokens/s, acierto de caché y TTFT frío y templado). El mismo modelo servido por
+dos providers son dos filas, porque son dos cachés: es la tabla con la que se ve qué provider o
+modelo aprovecha mejor el mismo contexto.
+
+El bloque **Caché de prompt** da el acierto global, los tokens de entrada sin caché, las llamadas
+frías y templadas, el TTFT de cada clase, las roturas de caché **por causa** y el prefijo estable.
+Solo cuentan las llamadas cuyo backend reportó caché, y el informe dice cuántas son; si no hay
+ninguna lo dice, en vez de pintar un 0 %.
 
 Las trazas grabadas antes de esta versión no registraban confirmaciones, vetos ni reintentos:
 para ellas esas métricas son `n/d` (no cero), y el informe dice sobre cuántas sesiones se calculan.
@@ -528,6 +604,17 @@ El formato no cambia de versión y las trazas antiguas se leen igual. Dos adicio
 
 Antes esas decisiones solo existían como texto dentro del `tool_error`; contarlas exigía interpretar
 mensajes. El visor las pinta como un aviso más, sin cambios.
+
+Para la caché de prompt, en los pasos de tipo `model`:
+
+- `data.usage` guarda el uso normalizado: `cachedReadTokens` y, si el backend la reporta,
+  `cacheWriteTokens`. El campo `cachedTokens` de antes se sigue escribiendo (mismo valor que
+  `cachedReadTokens`) y leyendo.
+- `data.prefix` — `chars`, `sharedChars`, `diverged`, `divergedAt`, `prevMessages` y las huellas
+  `tools` y `system`: cuánto del prompt repite el de la llamada anterior del mismo agente. Son
+  recuentos y huellas; el texto del prompt no se guarda en ningún sitio nuevo.
+
+No hay `cap` nuevo: una traza sin esos campos da `null` en las métricas que dependen de ellos.
 
 ## Escribir un escenario nuevo
 
@@ -646,3 +733,6 @@ Dos cosas a tener presentes al leer un informe:
 - `linux` exige Linux o macOS; en Windows esos escenarios quedan en SKIP.
 - El visor de `/auditor` abre una traza cada vez: no hay comparación visual de dos trazas (la
   comparación es la de `stratum eval compare`).
+- La caché del modelo de guion es ideal y su TTFT, un retardo simulado: sirven para detectar que
+  Stratum rompe el prefijo, no para predecir lo que hará un backend concreto. Ver las limitaciones
+  de [`prompt-caching.md`](prompt-caching.md#limitaciones).
