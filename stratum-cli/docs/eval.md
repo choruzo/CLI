@@ -432,10 +432,9 @@ modos distintos, no compara el coste).
 ### Baselines de referencia del repositorio
 
 `evals/baselines/` guarda la referencia con la que se valida cada cambio de Stratum (no va en el
-paquete de npm): `mock.json` (guion, 49/49, con el grupo `jobs`) y `live-glm.json` (`glm5.3-flash` por nan, 32/32), los
-dos en Windows, con los 5 de `linux` en SKIP y sobre el commit que consta en cada fichero.
-`live-glm.json` es anterior al grupo `cache` y a las métricas de caché: contra él esos escenarios
-salen como «nuevos» y la caché no se compara. Una ruta vale como referencia, así que no hace falta
+paquete de npm): `mock.json` (guion, 49/49) y `live-glm.json` (`glm5.3-flash` por nan, 49/49), los
+dos en Windows, con los 5 de `linux` en SKIP y sobre el commit que consta en cada fichero. Los dos
+incluyen ya los grupos `cache`, `auxiliary` y `jobs`. Una ruta vale como referencia, así que no hace falta
 importarlos:
 
 ```bash
