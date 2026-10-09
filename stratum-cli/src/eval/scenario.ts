@@ -17,6 +17,7 @@ export const SCENARIO_GROUPS = [
   'safety',
   'recovery',
   'multi-agent',
+  'cache',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
 
@@ -45,6 +46,27 @@ export const CHECKABLE_METRICS = [
   'repeatedCalls',
   'warnings',
   'fatalErrors',
+  'turns',
+  'compressions',
+  'cacheReportedCalls',
+  'cacheHitRate',
+  'cachedReadTokens',
+  'uncachedPromptTokens',
+  'coldCalls',
+  'warmCalls',
+  'cacheBreaks',
+  'prefixStability',
+] as const;
+
+/** Causas de una rotura de caché que un criterio `cache_break` puede exigir. */
+export const CACHE_BREAK_CAUSES = [
+  'tools',
+  'system',
+  'history',
+  'compression',
+  'model',
+  'backend',
+  'unknown',
 ] as const;
 
 const regex = z.string().refine((p) => {
@@ -170,6 +192,19 @@ const CheckSchema = z.discriminatedUnion('type', [
       type: z.literal('host_received'),
       host: z.string().min(1),
       pattern: regex,
+      min: z.number().int().nonnegative().default(1),
+      max: z.number().int().nonnegative().optional(),
+      ...base,
+    })
+    .strict(),
+  /**
+   * Roturas de caché de la traza: llamadas que leyeron de caché menos que la
+   * anterior del mismo agente. `cause` las limita a las de esa causa.
+   */
+  z
+    .object({
+      type: z.literal('cache_break'),
+      cause: z.enum(CACHE_BREAK_CAUSES).optional(),
       min: z.number().int().nonnegative().default(1),
       max: z.number().int().nonnegative().optional(),
       ...base,
@@ -304,6 +339,16 @@ export const ScenarioSchema = z
       .default({}),
     /** La tarea: el argumento de `stratum run`. */
     input: z.string().min(1),
+    /** Turnos siguientes en la **misma sesión** (`stratum run … --then …`). */
+    followUps: z.array(z.string().min(1)).default([]),
+    /**
+     * Sesiones posteriores: otro `stratum run` (otro proceso, otra traza) en el
+     * mismo workspace y contra el mismo modelo, que es lo que comparte la caché
+     * de prefijo entre sesiones. `cwd` lo lanza desde una subcarpeta.
+     */
+    sessions: z
+      .array(z.object({ input: z.string().min(1), cwd: relPath.optional() }).strict())
+      .default([]),
     run: z
       .object({
         args: z.array(z.string()).default([]),
@@ -355,9 +400,14 @@ export interface LoadedScenario extends Scenario {
  * `compare` lo avisa en vez de atribuir la diferencia a Stratum.
  */
 export function scenarioFingerprint(scenario: Scenario): string {
-  const { requires, setup, input, run, script, expect } = scenario;
+  const { requires, setup, input, followUps, sessions, run, script, expect } = scenario;
+  // Solo entran si se usan: la huella de los escenarios de siempre no cambia.
+  const more = {
+    ...(followUps.length > 0 ? { followUps } : {}),
+    ...(sessions.length > 0 ? { sessions } : {}),
+  };
   return createHash('sha1')
-    .update(JSON.stringify({ requires, setup, input, run, script, expect }))
+    .update(JSON.stringify({ requires, setup, input, run, script, expect, ...more }))
     .digest('hex')
     .slice(0, 12);
 }
@@ -378,6 +428,7 @@ export function liveTrajectoryChecks(scenario: Scenario): string[] {
     const flag = (why: string): void => void out.push(`expect.checks[${i}] (${c.type}): ${why}`);
     if (c.type === 'tool_called' && c.min > 0) flag('exige que se llame a una tool');
     if (c.type === 'runtime_event' && c.min > 0) flag('exige una decisión concreta del runtime');
+    if (c.type === 'cache_break' && c.min > 0) flag('exige una rotura de caché concreta');
     if (c.type === 'tool_output_contains' && !c.negate) flag('exige una salida de tool concreta');
     if (c.type === 'metric' && ((c.min ?? 0) > 0 || (c.equals ?? 0) > 0)) {
       flag('exige un valor mínimo o exacto de una métrica de la trayectoria');

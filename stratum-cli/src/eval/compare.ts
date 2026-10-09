@@ -5,7 +5,12 @@
  * — sin marcar como regresión lo que es ruido. Puro: sin disco.
  */
 import type { EvalMode } from './checks.js';
-import { COMPARABLE_METRICS, type ComparableMetric, type RunMetrics } from './metrics.js';
+import {
+  COMPARABLE_METRICS,
+  HIGHER_IS_BETTER,
+  type ComparableMetric,
+  type RunMetrics,
+} from './metrics.js';
 import type { EvalResult, GroupSummary, ScenarioResult, ScenarioStatus } from './result.js';
 import { DIFFICULTIES, type Difficulty } from './scenario.js';
 
@@ -45,6 +50,17 @@ export const MOCK_TOLERANCES: Tolerances = {
   policyBlocks: EXACT,
   repeatedCalls: EXACT,
   subagentFailures: EXACT,
+  // El modelo de guion simula una caché de prefijo exacta: con el mismo prompt,
+  // el acierto es el mismo. Las tasas van en puntos (0.02 = 2 puntos).
+  cacheHitRate: { pct: 0, abs: 0.02 },
+  cachedReadTokens: { pct: 0.1, abs: 100 },
+  uncachedPromptTokens: { pct: 0.2, abs: 200 },
+  cacheBreaks: EXACT,
+  coldCalls: EXACT,
+  prefixStability: { pct: 0, abs: 0.02 },
+  // El TTFT del guion es un retardo simulado más el ruido del equipo.
+  ttftColdMs: { pct: 0.5, abs: 250 },
+  ttftWarmMs: { pct: 0.5, abs: 250 },
 };
 
 /**
@@ -68,6 +84,16 @@ export const LIVE_TOLERANCES: Tolerances = {
   policyBlocks: { pct: 0, abs: 1 },
   repeatedCalls: { pct: 0, abs: 1 },
   subagentFailures: EXACT,
+  // La caché de un backend real depende de lo que quedara caliente de antes, de
+  // su TTL y de cuántas llamadas hizo el modelo: solo cuenta un cambio grande.
+  cacheHitRate: { pct: 0, abs: 0.2 },
+  cachedReadTokens: { pct: 1, abs: 25_000 },
+  uncachedPromptTokens: { pct: 1, abs: 25_000 },
+  cacheBreaks: { pct: 0, abs: 2 },
+  coldCalls: { pct: 0, abs: 2 },
+  prefixStability: { pct: 0, abs: 0.1 },
+  ttftColdMs: { pct: 2, abs: 5000 },
+  ttftWarmMs: { pct: 2, abs: 5000 },
 };
 
 /** Las tolerancias de partida: holgadas en cuanto una de las dos ejecuciones es live. */
@@ -99,9 +125,22 @@ const METRIC_ALIASES: Record<string, ComparableMetric> = {
   errors: 'toolErrors',
   policy: 'policyBlocks',
   repeated: 'repeatedCalls',
+  cache: 'cacheHitRate',
+  cached: 'cachedReadTokens',
+  uncached: 'uncachedPromptTokens',
+  breaks: 'cacheBreaks',
+  prefix: 'prefixStability',
+  ttftCold: 'ttftColdMs',
+  ttftWarm: 'ttftWarmMs',
 };
 
 export class ToleranceError extends Error {}
+
+const TIME_METRICS: ReadonlySet<ComparableMetric> = new Set([
+  'durationMs',
+  'ttftColdMs',
+  'ttftWarmMs',
+]);
 
 function parseAmount(metric: ComparableMetric, text: string): number {
   const m = /^(\d+(?:\.\d+)?)(ms|s|k)?$/i.exec(text);
@@ -110,7 +149,9 @@ function parseAmount(metric: ComparableMetric, text: string): number {
   const unit = m[2]?.toLowerCase();
   if (unit === 'k') return value * 1000;
   if (unit === 's' || unit === 'ms') {
-    if (metric !== 'durationMs') throw new ToleranceError(`"${text}": solo el tiempo lleva unidad`);
+    if (!TIME_METRICS.has(metric)) {
+      throw new ToleranceError(`"${text}": solo el tiempo lleva unidad`);
+    }
     return unit === 's' ? value * 1000 : value;
   }
   return value;
@@ -190,7 +231,7 @@ export function parseToleranceObject(value: unknown): ToleranceOverrides {
 }
 
 /** Qué clase de cosa mide cada métrica: decide en qué bloque del informe sale. */
-export type ChangeCategory = 'safety' | 'policy' | 'cost' | 'reliability';
+export type ChangeCategory = 'safety' | 'policy' | 'cost' | 'reliability' | 'cache';
 
 const CATEGORY: Record<ComparableMetric, ChangeCategory> = {
   tokens: 'cost',
@@ -203,6 +244,16 @@ const CATEGORY: Record<ComparableMetric, ChangeCategory> = {
   repeatedCalls: 'reliability',
   subagentFailures: 'reliability',
   policyBlocks: 'policy',
+  // Aparte de `cost` y de `reliability`: un fallo de caché cuesta tiempo y
+  // dinero, pero ni es un error del agente ni cambia lo que hace.
+  cacheHitRate: 'cache',
+  cachedReadTokens: 'cache',
+  uncachedPromptTokens: 'cache',
+  cacheBreaks: 'cache',
+  coldCalls: 'cache',
+  prefixStability: 'cache',
+  ttftColdMs: 'cache',
+  ttftWarmMs: 'cache',
 };
 
 export interface MetricChange {
@@ -264,6 +315,8 @@ export interface Highlights {
   morePolicyBlocks: string[];
   costRegressions: string[];
   reliabilityRegressions: string[];
+  /** Menos acierto de caché, más roturas o peor TTFT, con el mismo resultado. */
+  cacheRegressions: string[];
   improvements: string[];
   unresolved: string[];
   added: string[];
@@ -290,14 +343,23 @@ export interface Comparison {
   verdict: Verdict;
 }
 
-/** Veredicto de un cambio en una métrica donde menos es mejor. */
-export function judge(base: number, head: number, tolerance: Tolerance): Verdict {
+/**
+ * Veredicto de un cambio en una métrica. Por defecto menos es mejor;
+ * `higherIsBetter` lo invierte (acierto de caché, tokens servidos de caché).
+ */
+export function judge(
+  base: number,
+  head: number,
+  tolerance: Tolerance,
+  higherIsBetter = false,
+): Verdict {
   const delta = head - base;
   const size = Math.abs(delta);
-  if (size === 0 || size <= tolerance.abs) return 'same';
+  // El épsilon cubre el redondeo de las tasas (0.82 − 0.8 no es 0.02 exacto).
+  if (size === 0 || size <= tolerance.abs + 1e-9) return 'same';
   // Con base 0 no hay relativo: decide el absoluto.
   if (base > 0 && size / base <= tolerance.pct) return 'same';
-  return delta > 0 ? 'regression' : 'improvement';
+  return delta > 0 !== higherIsBetter ? 'regression' : 'improvement';
 }
 
 function metricChanges(
@@ -311,8 +373,22 @@ function metricChanges(
     if (!categories.has(CATEGORY[metric])) continue;
     const b = base[metric];
     const h = head[metric];
-    // Un dato que una de las dos trazas no tiene no se compara (ni se inventa).
-    if (b === null || h === null) continue;
+    // Un dato que una de las dos trazas no tiene no se compara (ni se inventa):
+    // null si no se reportó, undefined en un resultado anterior a la métrica.
+    if (b === null || h === null || b === undefined || h === undefined) continue;
+    let verdict = judge(b, h, tolerances[metric], HIGHER_IS_BETTER.has(metric));
+    if (metric === 'cachedReadTokens' && verdict !== 'same') {
+      // Menos tokens de caché solo es peor si no es porque el prompt encogió, y
+      // más solo es mejor si no es porque creció: lo que decide es si lo que
+      // dejó de salir de caché hubo que procesarlo (o al revés).
+      const bu = base.uncachedPromptTokens;
+      const hu = head.uncachedPromptTokens;
+      const traded =
+        typeof bu === 'number' &&
+        typeof hu === 'number' &&
+        (verdict === 'regression' ? hu > bu : hu < bu);
+      if (!traded) verdict = 'same';
+    }
     out.push({
       metric,
       category: CATEGORY[metric],
@@ -320,7 +396,7 @@ function metricChanges(
       head: h,
       delta: h - b,
       pct: b !== 0 ? (h - b) / b : null,
-      verdict: judge(b, h, tolerances[metric]),
+      verdict,
     });
   }
   return out;
@@ -343,7 +419,12 @@ const TRANSITION_VERDICT: Record<Transition, Verdict> = {
   unresolved: 'same',
 };
 
-const ALL_CATEGORIES: ReadonlySet<ChangeCategory> = new Set(['policy', 'cost', 'reliability']);
+const ALL_CATEGORIES: ReadonlySet<ChangeCategory> = new Set([
+  'policy',
+  'cost',
+  'reliability',
+  'cache',
+]);
 const POLICY_ONLY: ReadonlySet<ChangeCategory> = new Set(['policy']);
 
 function compareScenario(
@@ -453,6 +534,23 @@ function summaryChanges(base: GroupSummary, head: GroupSummary): MetricChange[] 
       head.toSuccess.toolCalls?.mean ?? null,
       false,
     ],
+    ['cacheHitRate', base.cache?.hitRate ?? null, head.cache?.hitRate ?? null, true],
+    [
+      'cachedReadTokens',
+      base.cache?.cachedReadTokens ?? null,
+      head.cache?.cachedReadTokens ?? null,
+      true,
+    ],
+    [
+      'uncachedPromptTokens',
+      base.cache?.uncachedPromptTokens ?? null,
+      head.cache?.uncachedPromptTokens ?? null,
+      false,
+    ],
+    ['cacheBreaks', base.cache?.breaks ?? null, head.cache?.breaks ?? null, false],
+    ['prefixStability', base.prefixStability ?? null, head.prefixStability ?? null, true],
+    ['ttftColdMs', base.cache?.ttftColdMs ?? null, head.cache?.ttftColdMs ?? null, false],
+    ['ttftWarmMs', base.cache?.ttftWarmMs ?? null, head.cache?.ttftWarmMs ?? null, false],
   ];
   const out: MetricChange[] = [];
   for (const [metric, b, h, higherIsBetter] of rows) {
@@ -496,6 +594,7 @@ function highlightsOf(scenarios: readonly ScenarioComparison[]): Highlights {
     morePolicyBlocks: ids((s) => regressed(s, 'policy')),
     costRegressions: ids((s) => regressed(s, 'cost')),
     reliabilityRegressions: ids((s) => regressed(s, 'reliability')),
+    cacheRegressions: ids((s) => regressed(s, 'cache')),
     improvements: ids((s) => s.verdict === 'improvement'),
     unresolved: ids((s) => s.transition === 'unresolved'),
     added: ids((s) => s.verdict === 'added'),

@@ -2,13 +2,22 @@ import { DEFAULT_CONTEXT_WINDOW } from '../config/schema.js';
 import type { StratumConfig, ProviderConfig } from '../config/schema.js';
 import type { IProvider } from './base.js';
 import { OpenAICompatible } from './openai-compatible.js';
-import { discoveredContextWindow } from './utils.js';
+import { classifyBackendByUrl, discoveredContextWindow } from './utils.js';
+import { resolveCacheCapabilities, type CacheCapabilities } from './cache.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('provider');
 
+/** Capacidades de caché de un provider: las del backend inferido, con lo que diga su config. */
+export function cacheCapabilitiesOf(cfg: ProviderConfig): CacheCapabilities {
+  return resolveCacheCapabilities(classifyBackendByUrl(cfg.baseUrl), cfg.cache);
+}
+
 function makeClient(cfg: ProviderConfig): IProvider {
-  return new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model, { timeouts: cfg.timeouts });
+  return new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model, {
+    timeouts: cfg.timeouts,
+    cache: cacheCapabilitiesOf(cfg),
+  });
 }
 
 export class ProviderRouter {
@@ -170,6 +179,11 @@ export class ProviderRouter {
 
   get model(): string {
     return this.activeConfig.model;
+  }
+
+  /** Qué admite el provider activo en caché de prompt. */
+  get cacheCapabilities(): CacheCapabilities {
+    return cacheCapabilitiesOf(this.activeConfig);
   }
 
   /**

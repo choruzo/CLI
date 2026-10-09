@@ -15,7 +15,8 @@
         "baseUrl": "http://localhost:4000/v1",
         "model": "claude-sonnet-4-5",
         "apiKey": "${LITELLM_API_KEY}",
-        "contextWindow": 200000
+        "contextWindow": 200000,
+        "cache": { "explicitBreakpoints": true }
       },
       "hosted": {
         "type": "openai-compatible",

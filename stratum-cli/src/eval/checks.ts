@@ -6,7 +6,7 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execa } from 'execa';
-import { compactJson, type TraceModel, type TraceStep } from '../trace/model.js';
+import { cacheBreaks, compactJson, type TraceModel, type TraceStep } from '../trace/model.js';
 import { stepExecuted, type RunMetrics } from './metrics.js';
 import type { ForbiddenRule, ScenarioCheck } from './scenario.js';
 
@@ -159,10 +159,27 @@ async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckR
       const value = ctx.metrics[check.metric];
       const want = check.equals !== undefined ? `= ${check.equals}` : range(check.min, check.max);
       const label = `${check.metric} ${want}`;
-      if (value === null) return done(label, false, 'la traza no trae ese dato');
+      if (value === null || value === undefined) {
+        return done(label, false, 'la traza no trae ese dato');
+      }
       const pass =
         check.equals !== undefined ? value === check.equals : inRange(value, check.min, check.max);
       return done(label, pass, `${check.metric} = ${value}`);
+    }
+    case 'cache_break': {
+      const breaks = cacheBreaks(ctx.model).filter(
+        (b) => check.cause === undefined || b.cause === check.cause,
+      );
+      const what = check.cause ? `roturas de caché por ${check.cause}` : 'roturas de caché';
+      return done(
+        `${what} ${range(check.min, check.max)}`,
+        inRange(breaks.length, check.min, check.max),
+        `${breaks.length} (${
+          cacheBreaks(ctx.model)
+            .map((b) => `paso ${b.n}: ${b.cause}`)
+            .join(', ') || 'ninguna'
+        })`,
+      );
     }
     case 'tool_output_contains': {
       const found = ctx.model.steps.some(

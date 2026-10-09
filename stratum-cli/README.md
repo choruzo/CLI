@@ -120,6 +120,7 @@ stratum chat                            Sesión interactiva
 stratum chat --resume <id>              Reanuda una sesión guardada
 stratum run "<tarea>"                   Tarea one-shot
 stratum run --plan "<tarea>"            Modo plan-and-execute
+stratum run "<tarea>" --then "<otra>"   Turnos siguientes en la misma sesión (repetible)
 stratum run --allow-destructive "..."   Aprueba tools destructivas automáticamente
 stratum run --deny-destructive "..."    Deniega tools destructivas automáticamente
 stratum init [--force] [--dry-run]      Genera/actualiza STRATUM.md
@@ -139,6 +140,11 @@ stratum stats [--days n]                Estadísticas locales de tus sesiones
 
 `stratum eval` y `stratum stats` trabajan solo con las trazas locales (sin telemetría): formato de
 escenarios, métricas y uso en [`docs/eval.md`](docs/eval.md).
+
+Las mismas trazas miden la **caché de prompt** del backend: acierto, tokens servidos de caché,
+llamadas frías y templadas, TTFT de cada clase y qué cambio rompió el prefijo. Cómo se ordena el
+prompt para aprovecharla, qué la invalida y qué admite cada provider está en
+[`docs/prompt-caching.md`](docs/prompt-caching.md).
 
 Dentro de `stratum chat`:
 

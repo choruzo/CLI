@@ -1,0 +1,106 @@
+{
+  "id": "cache-growing-multi-turn-context",
+  "group": "cache",
+  "title": "Una conversación de varios turnos solo añade al final del prompt",
+  "description": "Tres turnos en la misma sesión. Cada llamada debe reutilizar el prompt entero de la anterior: el historial crece por el final y nada de lo ya enviado se reescribe.",
+  "difficulty": "intermediate",
+  "setup": {
+    "files": {
+      "src/a.txt": "alfa\n",
+      "src/b.txt": "beta\n",
+      "src/c.txt": "gamma\n"
+    }
+  },
+  "input": "Lee src/a.txt y dime qué contiene.",
+  "followUps": ["Ahora lee src/b.txt y dime qué contiene.", "Y por último src/c.txt."],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "src/a.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "alfa"
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "src/b.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "beta"
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "src/c.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "gamma"
+    }
+  ],
+  "expect": {
+    "description": "Tres turnos resueltos; una única llamada fría (la primera) y ninguna rotura de caché entre turnos.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_contains",
+        "value": "gamma"
+      },
+      {
+        "type": "metric",
+        "metric": "turns",
+        "mode": "mock",
+        "equals": 3
+      },
+      {
+        "type": "metric",
+        "metric": "coldCalls",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "metric",
+        "metric": "warmCalls",
+        "mode": "mock",
+        "equals": 5
+      },
+      {
+        "type": "metric",
+        "metric": "cacheBreaks",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "prefixStability",
+        "mode": "mock",
+        "min": 0.95
+      },
+      {
+        "type": "metric",
+        "metric": "cacheHitRate",
+        "mode": "mock",
+        "min": 0.8
+      }
+    ]
+  }
+}

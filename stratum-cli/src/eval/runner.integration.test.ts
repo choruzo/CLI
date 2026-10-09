@@ -7,7 +7,8 @@ import { fileURLToPath, pathToFileURL } from 'url';
 import { compareResults } from './compare.js';
 import { formatComparison, formatEvalReport } from './report.js';
 import { MOCK_MODEL, startMockLlm } from './mock-llm.js';
-import { isEvalResult } from './result.js';
+import { buildTraceModel } from './metrics.js';
+import { isEvalResult, type EvalResult } from './result.js';
 import { runEval, type EvalRun, type SpawnSpec } from './runner.js';
 import {
   bundledScenariosDir,
@@ -17,6 +18,7 @@ import {
 } from './scenario.js';
 import { resolveResult, saveBaseline } from './store.js';
 import { aggregateStats } from './stats.js';
+import { cacheBreaks } from '../trace/model.js';
 import { readTraceFile } from '../trace/read.js';
 
 /**
@@ -141,6 +143,82 @@ describe('escenarios incluidos, con el modelo de guion', () => {
     expect(s.policyBlocks).toBeGreaterThanOrEqual(6);
   });
 
+  it('la caché de prompt se mide desde la traza: frías, templadas y roturas con su causa', () => {
+    const by = Object.fromEntries(first.result.scenarios.map((s) => [s.id, s]));
+    // Todas las llamadas que respondieron traen el dato del modelo de guion.
+    for (const s of first.result.scenarios.filter((x) => x.status === 'pass')) {
+      const m = s.metrics!;
+      expect(m.cacheReportedCalls, s.id).toBe(m.llmCalls - m.llmErrors);
+      expect(m.coldCalls! + m.warmCalls!, s.id).toBe(m.cacheReportedCalls);
+      expect(m.cacheHitRate, s.id).toBeGreaterThan(0);
+    }
+    // Un bucle de tools y varios turnos: solo la primera llamada es fría.
+    expect(by['cache-tool-loop-prefix']!.metrics).toMatchObject({
+      coldCalls: 1,
+      warmCalls: 5,
+      cacheBreaks: 0,
+    });
+    expect(by['cache-tool-loop-prefix']!.metrics!.cacheHitRate).toBeGreaterThan(0.8);
+    expect(by['cache-tool-loop-prefix']!.metrics!.prefixStability).toBeGreaterThan(0.98);
+    expect(by['cache-growing-multi-turn-context']!.metrics).toMatchObject({
+      turns: 3,
+      coldCalls: 1,
+      cacheBreaks: 0,
+    });
+    // Dos sesiones (dos trazas): la segunda encuentra caliente el prefijo estable.
+    const repeated = by['cache-repeated-system-prefix']!;
+    expect(repeated.traces).toHaveLength(2);
+    expect(repeated.metrics).toMatchObject({ coldCalls: 1, warmCalls: 3, cacheBreaks: 0 });
+    const order = by['cache-stable-toolset-order']!;
+    if (order.status !== 'skip') {
+      expect(order.metrics).toMatchObject({ coldCalls: 1, cacheBreaks: 0 });
+      expect(order.metrics!.cacheHitRate).toBeGreaterThan(0.7);
+    }
+    // La compresión rompe la caché, y eso no es un error del agente.
+    const compression = by['cache-compression-cache-impact']!;
+    if (compression.status !== 'skip') {
+      expect(compression.metrics).toMatchObject({
+        compressions: 1,
+        cacheBreaks: 1,
+        hadErrors: false,
+        toolErrors: 0,
+        llmErrors: 0,
+      });
+      const model = buildTraceModel(readTraceFile(join(first.dir, compression.trace!)));
+      expect(cacheBreaks(model).map((b) => b.cause)).toEqual(['compression']);
+    }
+    // El TTFT del guion separa las dos clases de llamada.
+    const cache = first.result.summary.overall.cache!;
+    expect(cache.hitRate).toBeGreaterThan(0.5);
+    expect(cache.ttftColdMs!).toBeGreaterThan(cache.ttftWarmMs!);
+
+    // Y `compare` lo ve: el mismo resultado con peor caché es una regresión de caché.
+    const degraded: EvalResult = {
+      ...first.result,
+      runId: 'degraded',
+      scenarios: first.result.scenarios.map((s) =>
+        s.id === 'cache-tool-loop-prefix'
+          ? {
+              ...s,
+              metrics: {
+                ...s.metrics!,
+                cacheHitRate: 0.2,
+                cacheBreaks: 3,
+                cachedReadTokens: Math.round(s.metrics!.cachedReadTokens! / 4),
+                uncachedPromptTokens: s.metrics!.uncachedPromptTokens! * 4,
+              },
+            }
+          : s,
+      ),
+    };
+    expect(compareResults(first.result, first.result).verdict).toBe('same');
+    const cmp = compareResults(first.result, degraded);
+    expect(cmp.verdict).toBe('regression');
+    expect(cmp.highlights.cacheRegressions).toEqual(['cache-tool-loop-prefix']);
+    expect(cmp.highlights.costRegressions).toEqual([]);
+    expect(cmp.highlights.reliabilityRegressions).toEqual([]);
+  });
+
   it('el artefacto JSON es legible, se resuelve por referencia y el informe lo pinta', () => {
     const onDisk = JSON.parse(readFileSync(first.file, 'utf8')) as unknown;
     expect(isEvalResult(onDisk)).toBe(true);
@@ -155,12 +233,14 @@ describe('escenarios incluidos, con el modelo de guion', () => {
   });
 
   it('`stats` agrega las mismas trazas', () => {
+    // Un escenario con varias sesiones deja una traza por sesión.
     const traces = first.result.scenarios
       .filter((s) => s.trace)
-      .map((s) => ({
-        sessionId: s.sessionId!,
+      .flatMap((s) => s.traces ?? [s.trace!])
+      .map((trace) => ({
+        sessionId: trace,
         updatedAt: 0,
-        records: readTraceFile(join(first.dir, s.trace!)),
+        records: readTraceFile(join(first.dir, trace)),
       }));
     const stats = aggregateStats(traces);
     const o = first.result.summary.overall;

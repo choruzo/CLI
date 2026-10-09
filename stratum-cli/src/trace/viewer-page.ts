@@ -499,13 +499,32 @@ footer {
       var u = d.usage;
       if (u) {
         kv(dl, 'Tokens entrada', u.promptTokens);
-        kv(dl, 'Tokens en caché', u.cachedTokens);
+        var read = cacheRead(u);
+        if (read !== null) {
+          kv(dl, 'Caché', read > 0 ? 'templada' : 'fría');
+          kv(dl, 'Tokens de caché (leídos)', read);
+          if (typeof u.promptTokens === 'number') {
+            kv(dl, 'Tokens sin caché', Math.max(u.promptTokens - read, 0));
+            if (u.promptTokens > 0) kv(dl, 'Acierto de caché', Math.round(Math.min(read, u.promptTokens) / u.promptTokens * 100) + '%');
+          }
+        } else kv(dl, 'Caché', 'no reportada por el backend');
+        kv(dl, 'Tokens escritos en caché', u.cacheWriteTokens);
+        var brk = cacheBreaks()[s.id];
+        if (brk) kv(dl, 'Rotura de caché', BREAK_LABEL[brk.cause] + ' (' + brk.before + ' → ' + brk.after + ' tok)');
         kv(dl, 'Tokens salida', u.completionTokens);
         if (u.completionTokens && s.end !== null) {
           var gen = s.end - (s.firstToken === null ? s.start : s.firstToken);
           if (gen > 0) kv(dl, 'Velocidad', (u.completionTokens / (gen / 1000)).toFixed(1) + ' tok/s');
         }
       } else if (s.end !== null) kv(dl, 'Tokens', 'no reportados por el backend');
+      var px = d.prefix;
+      if (px && typeof px.chars === 'number') {
+        if (typeof px.sharedChars === 'number' && px.chars > 0) {
+          kv(dl, 'Prefijo repetido', Math.round(Math.min(px.sharedChars, px.chars) / px.chars * 100) + '% del prompt');
+          if (px.diverged) kv(dl, 'Deja de coincidir en', DIVERGED_LABEL[px.diverged] + (px.diverged === 'history' && px.divergedAt !== undefined ? ' (mensaje ' + px.divergedAt + ')' : ''));
+        } else kv(dl, 'Prefijo repetido', 'primera llamada: sin referencia');
+        kv(dl, 'Huella system · tools', (px.system || '—') + ' · ' + (px.tools || '—'));
+      }
     }
     if (s.kind === 'tool') {
       kv(dl, 'Ejecución', d.execMs !== undefined ? fmtDur(d.execMs) : null);
@@ -526,17 +545,72 @@ footer {
     }
   }
 
+  // --- Caché de prompt (mismo cálculo que trace/model.ts) ----------------------
+
+  var BREAK_LABEL = {
+    tools: 'cambió la lista de tools', system: 'cambió el prompt del sistema',
+    history: 'se reescribió el historial', compression: 'compresión de contexto',
+    model: 'cambio de provider o modelo', backend: 'el backend reutilizó menos sin cambios en el prompt',
+    unknown: 'causa no registrada'
+  };
+  var DIVERGED_LABEL = { tools: 'la lista de tools', system: 'el prompt del sistema', history: 'el historial' };
+
+  // Tokens leídos de caché; null si el backend no los reportó (nunca se estima).
+  function cacheRead(u) {
+    if (!u) return null;
+    var r = typeof u.cachedReadTokens === 'number' ? u.cachedReadTokens : u.cachedTokens;
+    return typeof r === 'number' && r >= 0 ? r : null;
+  }
+
+  // Llamadas que leyeron de caché menos tokens que la anterior del mismo agente, por id.
+  // Solo pérdidas que el backend demuestra: igual que cacheBreaks() de model.ts.
+  function cacheBreaks() {
+    var out = {}, last = {}, compressed = {}, i;
+    for (i = 0; i < steps.length; i++) {
+      var s = steps[i], scope = s.parent || '';
+      if (s.kind === 'context' && s.name === 'Contexto comprimido') compressed[scope] = true;
+      if (s.kind !== 'model') continue;
+      var read = cacheRead(s.data.usage);
+      if (read === null) continue;
+      var prev = last[scope], px = s.data.prefix, was = compressed[scope] === true;
+      compressed[scope] = false;
+      last[scope] = { step: s, read: read };
+      if (!prev) continue;
+      if (px && typeof px.sharedChars !== 'number') continue;
+      if (read >= prev.read) continue;
+      var cause;
+      if (prev.step.name !== s.name || prev.step.data.provider !== s.data.provider) cause = 'model';
+      else if (!px) cause = was ? 'compression' : 'unknown';
+      else if (px.diverged === 'tools') cause = 'tools';
+      else if (px.diverged === 'system') cause = 'system';
+      else if (px.diverged === 'history') cause = was ? 'compression' : 'history';
+      else cause = 'backend';
+      out[s.id] = { cause: cause, before: prev.read, after: read };
+    }
+    return out;
+  }
+
   // --- Pie -------------------------------------------------------------------
 
   function renderStats() {
     var prompt = 0, cached = 0, completion = 0, total = 0, genMs = 0, genTok = 0, calls = 0, tools = 0, active = 0, i;
+    var reported = 0, cold = 0, warm = 0, ttftCold = 0, ttftColdN = 0, ttftWarm = 0, ttftWarmN = 0, pxChars = 0, pxShared = 0;
     for (i = 0; i < steps.length; i++) {
       var s = steps[i], u = s.data.usage;
       if (s.kind === 'tool') tools++;
       if (s.kind !== 'model') continue;
       calls++;
+      var px = s.data.prefix;
+      if (px && typeof px.sharedChars === 'number' && typeof px.chars === 'number') { pxChars += px.chars; pxShared += Math.min(px.sharedChars, px.chars); }
       if (!u) continue;
-      prompt += u.promptTokens || 0; cached += u.cachedTokens || 0; completion += u.completionTokens || 0;
+      completion += u.completionTokens || 0;
+      var read = cacheRead(u);
+      if (read !== null && typeof u.promptTokens === 'number') {
+        reported++; prompt += u.promptTokens; cached += Math.min(read, u.promptTokens);
+        var ttft = s.firstToken === null ? null : Math.max(s.firstToken - s.start, 0);
+        if (read > 0) { warm++; if (ttft !== null) { ttftWarm += ttft; ttftWarmN++; } }
+        else { cold++; if (ttft !== null) { ttftCold += ttft; ttftColdN++; } }
+      }
       total += u.totalTokens || ((u.promptTokens || 0) + (u.completionTokens || 0));
       if (u.completionTokens && s.end !== null) {
         var g = s.end - (s.firstToken === null ? s.start : s.firstToken);
@@ -550,7 +624,15 @@ footer {
     var parts = [realTurns + ' turnos · ' + steps.length + ' pasos', calls + ' llamadas al modelo · ' + tools + ' tools'];
     if (genMs > 0) parts.push((genTok / (genMs / 1000)).toFixed(0) + ' tok/s');
     if (total > 0) parts.push(fmtTok(total) + ' tok');
-    if (cached > 0 && prompt > 0) parts.push('Acierto de caché ' + Math.round(cached / prompt * 100) + '%');
+    if (reported > 0) {
+      if (prompt > 0) parts.push('Acierto de caché ' + Math.round(cached / prompt * 100) + '% (' + fmtTok(cached) + ' de ' + fmtTok(prompt) + ')');
+      parts.push(cold + ' frías · ' + warm + ' templadas');
+      if (ttftColdN > 0 || ttftWarmN > 0) parts.push('TTFT ' + (ttftColdN > 0 ? fmtDur(ttftCold / ttftColdN) : 'n/d') + ' frío · ' + (ttftWarmN > 0 ? fmtDur(ttftWarm / ttftWarmN) : 'n/d') + ' templado');
+      var nBreaks = 0, breaks = cacheBreaks(), key;
+      for (key in breaks) nBreaks++;
+      if (nBreaks > 0) parts.push(nBreaks + (nBreaks === 1 ? ' rotura de caché' : ' roturas de caché'));
+    } else if (calls > 0) parts.push('Caché no reportada');
+    if (pxChars > 0) parts.push('Prefijo estable ' + Math.round(pxShared / pxChars * 100) + '%');
     if (active > 0) parts.push('Tiempo activo ' + fmtDur(active));
     var foot = $('stats');
     foot.textContent = '';

@@ -5,6 +5,7 @@
  * de la CLI (`viewer-page.ts`) hace lo mismo en JS plano dentro de la página:
  * un cambio de formato hay que llevarlo a los dos.
  */
+import { withCacheDerived, type CacheUsage } from '../providers/cache.js';
 import type { TraceData, TraceKind, TraceRecord, TraceStatus } from './records.js';
 
 export interface TraceStep {
@@ -346,16 +347,268 @@ export function layoutTimeline(
 // Totales
 // ---------------------------------------------------------------------------
 
-export interface ModelUsage {
-  promptTokens?: number;
-  completionTokens?: number;
-  totalTokens?: number;
-  cachedTokens?: number;
-}
+/**
+ * Uso de una llamada al modelo, normalizado. Los campos de caché solo están si
+ * el backend los reportó: una traza sin ellos (anterior, o de un backend que no
+ * los da) los deja `undefined`, nunca en 0.
+ */
+export type ModelUsage = CacheUsage;
+
+const count = (v: unknown): number | undefined =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 ? v : undefined;
 
 export function usageOf(s: TraceStep): ModelUsage | null {
   const u = s.data.usage;
-  return s.kind === 'model' && typeof u === 'object' && u !== null ? (u as ModelUsage) : null;
+  if (s.kind !== 'model' || typeof u !== 'object' || u === null) return null;
+  const raw = u as Record<string, unknown>;
+  const out: ModelUsage = {};
+  const set = (key: keyof ModelUsage, value: number | undefined): void => {
+    if (value !== undefined) out[key] = value;
+  };
+  set('promptTokens', count(raw.promptTokens));
+  set('completionTokens', count(raw.completionTokens));
+  set('totalTokens', count(raw.totalTokens));
+  // `cachedTokens` es el nombre que usaban las trazas anteriores.
+  set('cachedReadTokens', count(raw.cachedReadTokens) ?? count(raw.cachedTokens));
+  set('cacheWriteTokens', count(raw.cacheWriteTokens));
+  return withCacheDerived(out);
+}
+
+// ---------------------------------------------------------------------------
+// Caché de prompt
+// ---------------------------------------------------------------------------
+
+/** Tiempo hasta el primer token de una llamada; null si no llegó ninguno. */
+export function ttftOf(s: TraceStep): number | null {
+  return s.kind === 'model' && s.firstToken !== null ? Math.max(s.firstToken - s.start, 0) : null;
+}
+
+/**
+ * `cold`: el backend no reutilizó nada del prompt. `warm`: reutilizó algo.
+ * null: no lo reportó — no se deduce de la posición de la llamada.
+ */
+export type CacheTemperature = 'cold' | 'warm';
+
+export function cacheTemperature(s: TraceStep): CacheTemperature | null {
+  const read = usageOf(s)?.cachedReadTokens;
+  if (read === undefined) return null;
+  return read > 0 ? 'warm' : 'cold';
+}
+
+/**
+ * Cuánto del prompt de una llamada repite el de la anterior del mismo agente,
+ * medido en el cliente (caracteres, en el orden tools, system, conversación).
+ * Es lo que una caché de prefijo podría reutilizar; lo que reutilizó de verdad
+ * es `usageOf(s).cachedReadTokens`.
+ */
+export interface PromptPrefix {
+  chars: number;
+  /** Ausente en la primera llamada de un agente en este proceso: no hay con qué comparar. */
+  sharedChars?: number;
+  /** Huella de los schemas de tools y del prompt del sistema. */
+  tools?: string;
+  system?: string;
+  /** Dónde deja de coincidir con la llamada anterior; ausente si solo se añadió al final. */
+  diverged?: 'tools' | 'system' | 'history';
+  divergedAt?: number;
+  prevMessages?: number;
+}
+
+export function prefixOf(s: TraceStep): PromptPrefix | null {
+  const p = s.data.prefix;
+  if (s.kind !== 'model' || typeof p !== 'object' || p === null) return null;
+  const raw = p as Record<string, unknown>;
+  const chars = count(raw.chars);
+  if (chars === undefined) return null;
+  const out: PromptPrefix = { chars };
+  const shared = count(raw.sharedChars);
+  if (shared !== undefined) out.sharedChars = shared;
+  if (typeof raw.tools === 'string') out.tools = raw.tools;
+  if (typeof raw.system === 'string') out.system = raw.system;
+  const d = raw.diverged;
+  if (d === 'tools' || d === 'system' || d === 'history') out.diverged = d;
+  const at = count(raw.divergedAt);
+  if (at !== undefined) out.divergedAt = at;
+  const prev = count(raw.prevMessages);
+  if (prev !== undefined) out.prevMessages = prev;
+  return out;
+}
+
+/**
+ * Qué cambió entre una llamada y la anterior cuando el backend reutilizó menos.
+ * La pérdida la demuestra el backend; la causa es lo que el cliente vio cambiar
+ * en el prompt, es decir, una atribución y no una prueba:
+ *  - `tools` / `system` / `history`: Stratum cambió esa parte del prompt;
+ *  - `compression`: el cambio en el historial fue una compresión de contexto;
+ *  - `model`: otra combinación de provider y modelo, que es otra caché;
+ *  - `backend`: el prompt solo creció por el final y aun así el backend
+ *    reutilizó menos (caducó, u otra petición ocupó la caché);
+ *  - `unknown`: traza anterior a `prefix`, no hay con qué atribuirlo.
+ */
+export type CacheBreakCause =
+  | 'tools'
+  | 'system'
+  | 'history'
+  | 'compression'
+  | 'model'
+  | 'backend'
+  | 'unknown';
+
+export const CACHE_BREAK_LABEL: Record<CacheBreakCause, string> = {
+  tools: 'cambió la lista de tools',
+  system: 'cambió el prompt del sistema',
+  history: 'se reescribió el historial',
+  compression: 'compresión de contexto',
+  model: 'cambio de provider o modelo',
+  backend: 'el backend reutilizó menos sin cambios en el prompt',
+  unknown: 'causa no registrada',
+};
+
+export interface CacheBreak {
+  /** Paso de la llamada que leyó de caché menos tokens que la anterior. */
+  id: string;
+  n: number;
+  turn: number;
+  cause: CacheBreakCause;
+  cachedBefore: number;
+  cachedAfter: number;
+}
+
+export const COMPRESSION_STEP = 'Contexto comprimido';
+
+/**
+ * Roturas de caché: pérdidas DEMOSTRABLES con lo que reporta el backend. Una
+ * llamada rompe la caché cuando leyó de ella menos tokens que la llamada
+ * anterior del mismo agente: esos tokens estaban en caché (el backend los
+ * sirvió) y han dejado de servir.
+ *
+ * No mide el potencial desaprovechado. Que una llamada reutilice más que la
+ * anterior pero menos que el prompt anterior entero NO es una rotura, aunque
+ * Stratum haya reescrito el prompt (`prefix.diverged`): ningún backend dice
+ * cuánto del prompt anterior dejó guardado (granularidad, mínimo cacheable,
+ * caducidad), y `prefix.sharedChars` son caracteres medidos en el cliente, que
+ * no se convierten a tokens. El detector prefiere callar a inventar una rotura;
+ * lo que el prompt deja de repetir se lee en `prefixStability`.
+ *
+ * Una llamada que no reporta caché ni rompe ni corta la comparación, y la
+ * primera llamada de un proceso no cuenta: reanudar una sesión horas después no
+ * es una rotura, es otra caché.
+ */
+export function cacheBreaks(model: TraceModel): CacheBreak[] {
+  const out: CacheBreak[] = [];
+  const last = new Map<string, { step: TraceStep; read: number }>();
+  const compressed = new Set<string>();
+  for (const s of model.steps) {
+    const scope = s.parent ?? '';
+    if (s.kind === 'context' && s.name === COMPRESSION_STEP) compressed.add(scope);
+    if (s.kind !== 'model') continue;
+    const read = usageOf(s)?.cachedReadTokens;
+    if (read === undefined) continue;
+    const prev = last.get(scope);
+    const prefix = prefixOf(s);
+    const wasCompressed = compressed.delete(scope);
+    last.set(scope, { step: s, read });
+    if (!prev) continue;
+    // Con `prefix` pero sin `sharedChars`: primera llamada de otro proceso.
+    if (prefix && prefix.sharedChars === undefined) continue;
+    if (read >= prev.read) continue;
+    let cause: CacheBreakCause;
+    if (prev.step.name !== s.name || prev.step.data.provider !== s.data.provider) cause = 'model';
+    else if (!prefix) cause = wasCompressed ? 'compression' : 'unknown';
+    else if (prefix.diverged === 'tools') cause = 'tools';
+    else if (prefix.diverged === 'system') cause = 'system';
+    else if (prefix.diverged === 'history') cause = wasCompressed ? 'compression' : 'history';
+    else cause = 'backend';
+    out.push({ id: s.id, n: s.n, turn: s.turn, cause, cachedBefore: prev.read, cachedAfter: read });
+  }
+  return out;
+}
+
+export interface CacheSummary {
+  /** Llamadas que reportaron caché (las demás no entran en ninguna cifra). */
+  reportedCalls: number;
+  /** Tokens de entrada de esas llamadas. */
+  promptTokens: number;
+  cachedReadTokens: number;
+  /** null si ninguna llamada reportó escrituras (solo Anthropic las da). */
+  cacheWriteTokens: number | null;
+  uncachedPromptTokens: number;
+  hitRate: number | null;
+  coldCalls: number;
+  warmCalls: number;
+  /** TTFT medio de las llamadas frías / templadas; null sin ninguna con primer token. */
+  ttftColdMs: number | null;
+  ttftWarmMs: number | null;
+  breaks: number;
+}
+
+const mean = (values: readonly number[]): number | null =>
+  values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+
+/** Resumen de caché de una trayectoria; null si ninguna llamada la reportó. */
+export function cacheSummary(model: TraceModel): CacheSummary | null {
+  let reportedCalls = 0;
+  let prompt = 0;
+  let read = 0;
+  let write = 0;
+  let writeSeen = false;
+  let cold = 0;
+  let warm = 0;
+  const ttftCold: number[] = [];
+  const ttftWarm: number[] = [];
+  for (const s of model.steps) {
+    if (s.kind !== 'model') continue;
+    const u = usageOf(s);
+    if (u?.cachedReadTokens === undefined || u.promptTokens === undefined) continue;
+    reportedCalls++;
+    prompt += u.promptTokens;
+    read += Math.min(u.cachedReadTokens, u.promptTokens);
+    if (u.cacheWriteTokens !== undefined) {
+      writeSeen = true;
+      write += u.cacheWriteTokens;
+    }
+    const isWarm = u.cachedReadTokens > 0;
+    if (isWarm) warm++;
+    else cold++;
+    const ttft = ttftOf(s);
+    if (ttft !== null) (isWarm ? ttftWarm : ttftCold).push(ttft);
+  }
+  if (reportedCalls === 0) return null;
+  return {
+    reportedCalls,
+    promptTokens: prompt,
+    cachedReadTokens: read,
+    cacheWriteTokens: writeSeen ? write : null,
+    uncachedPromptTokens: prompt - read,
+    hitRate: prompt > 0 ? read / prompt : null,
+    coldCalls: cold,
+    warmCalls: warm,
+    ttftColdMs: mean(ttftCold),
+    ttftWarmMs: mean(ttftWarm),
+    breaks: cacheBreaks(model).length,
+  };
+}
+
+/**
+ * Fracción del prompt que repite el de la llamada anterior, sobre las llamadas
+ * que tienen con qué compararse. Mide lo que hace Stratum con el prompt, con
+ * cualquier backend; null en una traza que no lo registraba.
+ */
+export function prefixStability(model: TraceModel): number | null {
+  let chars = 0;
+  let shared = 0;
+  for (const s of model.steps) {
+    const p = prefixOf(s);
+    if (p?.sharedChars === undefined) continue;
+    chars += p.chars;
+    shared += Math.min(p.sharedChars, p.chars);
+  }
+  return chars > 0 ? shared / chars : null;
+}
+
+/** TTFT medio de las llamadas al modelo; null si ninguna llegó al primer token. */
+export function meanTtft(model: TraceModel): number | null {
+  return mean(model.steps.flatMap((s) => ttftOf(s) ?? []));
 }
 
 /** Tokens por segundo de una llamada: salida entre el tiempo de generación. */
@@ -375,12 +628,15 @@ export interface TraceStats {
   tokensPerSecond: number | null;
   /** Fracción del prompt servida de caché; null si el backend no la reporta. */
   cacheHit: number | null;
+  /** Desglose de caché; null si ninguna llamada la reportó. */
+  cache: CacheSummary | null;
+  /** Ver `prefixStability`. */
+  prefixStability: number | null;
+  ttftMs: number | null;
   activeMs: number;
 }
 
 export function traceStats(model: TraceModel, now: number): TraceStats {
-  let prompt = 0;
-  let cached = 0;
   let total = 0;
   let genMs = 0;
   let genTokens = 0;
@@ -392,8 +648,6 @@ export function traceStats(model: TraceModel, now: number): TraceStats {
     modelCalls++;
     const u = usageOf(s);
     if (!u) continue;
-    prompt += u.promptTokens ?? 0;
-    cached += u.cachedTokens ?? 0;
     total += u.totalTokens ?? (u.promptTokens ?? 0) + (u.completionTokens ?? 0);
     if (u.completionTokens && s.end !== null) {
       const ms = s.end - (s.firstToken ?? s.start);
@@ -403,6 +657,7 @@ export function traceStats(model: TraceModel, now: number): TraceStats {
       }
     }
   }
+  const cache = cacheSummary(model);
   return {
     turns: model.turns.filter((t) => !t.implicit).length,
     steps: model.steps.length,
@@ -410,7 +665,10 @@ export function traceStats(model: TraceModel, now: number): TraceStats {
     toolCalls,
     totalTokens: total,
     tokensPerSecond: genMs > 0 ? genTokens / (genMs / 1000) : null,
-    cacheHit: cached > 0 && prompt > 0 ? cached / prompt : null,
+    cacheHit: cache?.hitRate ?? null,
+    cache,
+    prefixStability: prefixStability(model),
+    ttftMs: meanTtft(model),
     activeMs: turnBounds(model, now).reduce((sum, b) => sum + (b.end - b.start), 0),
   };
 }

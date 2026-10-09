@@ -10,6 +10,7 @@ import { delimiter, dirname, join } from 'path';
 import { execa } from 'execa';
 import type { ProviderConfig } from '../config/schema.js';
 import { readTraceFile } from '../trace/read.js';
+import type { TraceRecord } from '../trace/records.js';
 import { evaluateChecks, findUnsafeActions, type EvalMode } from './checks.js';
 import { collectRunEnvironment } from './env.js';
 import { buildTraceModel, computeMetrics } from './metrics.js';
@@ -242,28 +243,59 @@ export async function runScenario(
     );
 
     // --- Ejecución: `stratum run`, tal cual ---
+    // Una sesión por proceso. Las de `sessions` van después, contra el mismo
+    // modelo: lo que una deja en la caché de prefijo lo encuentra la siguiente.
     const started = Date.now();
-    const child = await execa(
-      env.spawn.command,
-      [...env.spawn.args, 'run', ...scenario.run.args, '--', scenario.input],
-      {
-        cwd: work,
-        reject: false,
-        timeout: scenario.run.timeoutMs,
-        stdin: 'ignore',
-        env: {
-          HOME: home,
-          USERPROFILE: home,
-          [API_KEY_ENV]: apiKey,
-          STRATUM_NO_BROWSER: '1',
-          NO_COLOR: '1',
-          FORCE_COLOR: '0',
+    const invocations = [
+      { input: scenario.input, followUps: scenario.followUps, cwd: work },
+      ...scenario.sessions.map((s) => ({
+        input: s.input,
+        followUps: [] as string[],
+        cwd: s.cwd ? join(work, s.cwd) : work,
+      })),
+    ];
+    const outputs: string[] = [];
+    const errors: string[] = [];
+    let exitCode: number | null = null;
+    let timedOut = false;
+    for (const inv of invocations) {
+      mkdirSync(inv.cwd, { recursive: true });
+      const child = await execa(
+        env.spawn.command,
+        [
+          ...env.spawn.args,
+          'run',
+          ...scenario.run.args,
+          ...inv.followUps.flatMap((turn) => ['--then', turn]),
+          '--',
+          inv.input,
+        ],
+        {
+          cwd: inv.cwd,
+          reject: false,
+          timeout: scenario.run.timeoutMs,
+          stdin: 'ignore',
+          env: {
+            HOME: home,
+            USERPROFILE: home,
+            [API_KEY_ENV]: apiKey,
+            STRATUM_NO_BROWSER: '1',
+            NO_COLOR: '1',
+            FORCE_COLOR: '0',
+          },
         },
-      },
-    );
+      );
+      outputs.push(String(child.stdout ?? ''));
+      errors.push(String(child.stderr ?? ''));
+      exitCode = child.exitCode ?? null;
+      timedOut = child.timedOut === true;
+      // Una sesión que falla corta las siguientes: partirían de un estado roto.
+      if (exitCode !== 0 || timedOut) break;
+    }
+    const child = { exitCode, timedOut };
     const wallMs = Date.now() - started;
-    const stdout = String(child.stdout ?? '');
-    const stderr = String(child.stderr ?? '');
+    const stdout = outputs.join('\n');
+    const stderr = errors.join('\n');
     writeFileSync(join(artifactDir, 'stdout.txt'), stdout, 'utf8');
     writeFileSync(join(artifactDir, 'stderr.txt'), stderr, 'utf8');
     const hostReceived = ssh?.received();
@@ -283,7 +315,12 @@ export async function runScenario(
       ...(mock ? { mock: { requests: mock.requests(), steps: scenario.script?.length ?? 0 } } : {}),
     };
 
-    const traceName = readdirSync(artifactDir).find((n) => n.endsWith('.jsonl'));
+    // Una traza por sesión, en el orden en que arrancaron.
+    const traces = readdirSync(artifactDir)
+      .filter((n) => n.endsWith('.jsonl'))
+      .map((name) => ({ name, records: readTraceFile(join(artifactDir, name)) }))
+      .sort((a, b) => (a.records[0]?.at ?? 0) - (b.records[0]?.at ?? 0));
+    const traceName = traces[0]?.name;
     if (!traceName) {
       // Sin traza el agente no llegó a arrancar un turno: config, provider…
       return {
@@ -294,7 +331,9 @@ export async function runScenario(
     }
 
     // --- Puntuación: workspace + salida + traza ---
-    const records = readTraceFile(join(artifactDir, traceName));
+    const records: TraceRecord[] = traces.flatMap((t) => t.records);
+    const allTraces =
+      traces.length > 1 ? { traces: traces.map((t) => `${scenario.id}/${t.name}`) } : {};
     const model = buildTraceModel(records);
     const metrics = computeMetrics(records, started + wallMs);
     const checks = await evaluateChecks(scenario.expect.checks, {
@@ -334,6 +373,7 @@ export async function runScenario(
         metrics,
         sessionId: traceName.slice(0, -'.jsonl'.length),
         trace: `${scenario.id}/${traceName}`,
+        ...allTraces,
       };
     }
     const unsafeActions = findUnsafeActions(scenario.expect.forbidden, model);
@@ -355,6 +395,7 @@ export async function runScenario(
       metrics,
       sessionId: traceName.slice(0, -'.jsonl'.length),
       trace: `${scenario.id}/${traceName}`,
+      ...allTraces,
     };
   } catch (err) {
     return {

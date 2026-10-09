@@ -1,12 +1,15 @@
 import { useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import {
+  CACHE_BREAK_LABEL,
   KIND_LABEL,
   LANE_NAMES,
+  cacheBreaks,
   formatClock,
   formatDuration,
   formatTokenCount,
   firstLine,
   layoutTimeline,
+  prefixOf,
   prettyValue,
   stepLabel,
   stepMatches,
@@ -16,6 +19,7 @@ import {
   toolCallsOf,
   traceStats,
   usageOf,
+  type CacheBreak,
   type TimelineMode,
   type TraceModel,
   type TraceStep,
@@ -167,19 +171,32 @@ function parseArgs(text: string): unknown {
   }
 }
 
+const DIVERGED_LABEL = {
+  tools: 'la lista de tools',
+  system: 'el prompt del sistema',
+  history: 'el historial',
+} as const;
+
+const percent = (part: number, whole: number): string =>
+  `${Math.round((Math.min(part, whole) / whole) * 100)}%`;
+
 function Detail({
   step,
   now,
+  cacheBreak,
   onClose,
 }: {
   step: TraceStep;
   now: number;
+  /** La rotura de caché de este paso, si leyó de caché menos tokens que la llamada anterior. */
+  cacheBreak?: CacheBreak;
   onClose: () => void;
 }) {
   const [tab, setTab] = useState<DetailTab>('summary');
   const d = step.data;
   const usage = usageOf(step);
   const speed = tokensPerSecond(step);
+  const prefix = prefixOf(step);
 
   let body: ReactNode;
   if (tab === 'raw') {
@@ -257,12 +274,56 @@ function Detail({
               {usage ? (
                 <>
                   <Field label="Tokens entrada" value={usage.promptTokens} />
-                  <Field label="Tokens en caché" value={usage.cachedTokens} />
+                  {usage.cachedReadTokens === undefined ? (
+                    <Field label="Caché" value="no reportada por el backend" />
+                  ) : (
+                    <>
+                      <Field label="Caché" value={usage.cachedReadTokens > 0 ? 'templada' : 'fría'} />
+                      <Field label="Tokens de caché (leídos)" value={usage.cachedReadTokens} />
+                      <Field label="Tokens sin caché" value={usage.uncachedPromptTokens} />
+                      {usage.cacheHitRate !== undefined && (
+                        <Field
+                          label="Acierto de caché"
+                          value={`${Math.round(usage.cacheHitRate * 100)}%`}
+                        />
+                      )}
+                    </>
+                  )}
+                  <Field label="Tokens escritos en caché" value={usage.cacheWriteTokens} />
+                  {cacheBreak && (
+                    <Field
+                      label="Rotura de caché"
+                      value={`${CACHE_BREAK_LABEL[cacheBreak.cause]} (${cacheBreak.cachedBefore} → ${cacheBreak.cachedAfter} tok)`}
+                    />
+                  )}
                   <Field label="Tokens salida" value={usage.completionTokens} />
                   {speed !== null && <Field label="Velocidad" value={`${speed.toFixed(1)} tok/s`} />}
                 </>
               ) : (
                 step.end !== null && <Field label="Tokens" value="no reportados por el backend" />
+              )}
+              {prefix && prefix.chars > 0 && (
+                <>
+                  <Field
+                    label="Prefijo repetido"
+                    value={
+                      prefix.sharedChars === undefined
+                        ? 'primera llamada: sin referencia'
+                        : `${percent(prefix.sharedChars, prefix.chars)} del prompt`
+                    }
+                  />
+                  {prefix.diverged && (
+                    <Field
+                      label="Deja de coincidir en"
+                      value={
+                        DIVERGED_LABEL[prefix.diverged] +
+                        (prefix.diverged === 'history' && prefix.divergedAt !== undefined
+                          ? ` (mensaje ${prefix.divergedAt})`
+                          : '')
+                      }
+                    />
+                  )}
+                </>
               )}
             </>
           )}
@@ -336,6 +397,7 @@ export function TrajectoryPanel({
   const hasOpen = useMemo(() => model.steps.some((s) => s.end === null), [model]);
   const now = useNowWhile(hasOpen);
   const stats = useMemo(() => traceStats(model, now), [model, now]);
+  const breaks = useMemo(() => new Map(cacheBreaks(model).map((b) => [b.id, b])), [model]);
   const needle = query.trim().toLowerCase();
 
   const selectedStep = selected !== null ? model.steps[model.index[selected]] : undefined;
@@ -436,7 +498,14 @@ export function TrajectoryPanel({
         })}
       </div>
 
-      {selectedStep && <Detail step={selectedStep} now={now} onClose={() => setSelected(null)} />}
+      {selectedStep && (
+        <Detail
+          step={selectedStep}
+          now={now}
+          cacheBreak={breaks.get(selectedStep.id)}
+          onClose={() => setSelected(null)}
+        />
+      )}
 
       <footer className="trajectory__stats">
         <span>
@@ -444,7 +513,41 @@ export function TrajectoryPanel({
         </span>
         {stats.tokensPerSecond !== null && <span>{stats.tokensPerSecond.toFixed(0)} tok/s</span>}
         {stats.totalTokens > 0 && <span>{formatTokenCount(stats.totalTokens)} tok</span>}
-        {stats.cacheHit !== null && <span>caché {Math.round(stats.cacheHit * 100)}%</span>}
+        {stats.cache ? (
+          <>
+            {stats.cache.hitRate !== null && (
+              <span title="Tokens de entrada servidos de la caché del backend">
+                caché {Math.round(stats.cache.hitRate * 100)}% (
+                {formatTokenCount(stats.cache.cachedReadTokens)} de{' '}
+                {formatTokenCount(stats.cache.promptTokens)})
+              </span>
+            )}
+            <span>
+              {stats.cache.coldCalls} frías · {stats.cache.warmCalls} templadas
+            </span>
+            {(stats.cache.ttftColdMs !== null || stats.cache.ttftWarmMs !== null) && (
+              <span>
+                TTFT{' '}
+                {stats.cache.ttftColdMs === null ? 'n/d' : formatDuration(stats.cache.ttftColdMs)}{' '}
+                frío ·{' '}
+                {stats.cache.ttftWarmMs === null ? 'n/d' : formatDuration(stats.cache.ttftWarmMs)}{' '}
+                templado
+              </span>
+            )}
+            {stats.cache.breaks > 0 && (
+              <span>
+                {stats.cache.breaks} {stats.cache.breaks === 1 ? 'rotura' : 'roturas'} de caché
+              </span>
+            )}
+          </>
+        ) : (
+          stats.modelCalls > 0 && <span>caché no reportada</span>
+        )}
+        {stats.prefixStability !== null && (
+          <span title="Parte del prompt que repite el de la llamada anterior, medida en el cliente">
+            prefijo estable {Math.round(stats.prefixStability * 100)}%
+          </span>
+        )}
         {stats.activeMs > 0 && <span>{formatDuration(stats.activeMs)} activo</span>}
       </footer>
     </aside>

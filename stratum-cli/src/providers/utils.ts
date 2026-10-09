@@ -3,6 +3,8 @@
  * endpoint OpenAI-compatible `GET {baseUrl}/models`.
  */
 
+import type { CacheBackendKind } from './cache.js';
+
 interface ModelsResponse {
   data?: Array<Record<string, unknown>>;
 }
@@ -134,7 +136,7 @@ export async function fetchModelInfos(
  * adaptar la UI (mensajes de ayuda), nunca para cambiar la ruta de la API:
  * Stratum siempre habla OpenAI-compatible.
  */
-export type BackendKind = 'ollama' | 'vllm' | 'llamacpp' | 'litellm' | 'openai' | 'unknown';
+export type BackendKind = CacheBackendKind;
 
 export interface ProviderCapabilities {
   /** Backend inferido por heurística sobre la URL y la respuesta de `/models`. */
@@ -157,6 +159,7 @@ export function classifyBackendByUrl(baseUrl: string): BackendKind {
   if (u.includes('/ollama') || u.includes('ollama')) return 'ollama';
   if (u.includes(':4000') || u.includes('litellm')) return 'litellm';
   if (u.includes('api.openai.com')) return 'openai';
+  if (u.includes(':30000') || u.includes('sglang')) return 'sglang';
   if (u.includes(':8000') || u.includes('vllm')) return 'vllm';
   if (u.includes(':8080') || u.includes('llama')) return 'llamacpp';
   return 'unknown';

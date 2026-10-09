@@ -6,7 +6,11 @@
  */
 import {
   applyRecords,
+  cacheSummary,
+  COMPRESSION_STEP,
   emptyTrace,
+  meanTtft,
+  prefixStability,
   usageOf,
   type TraceModel,
   type TraceStep,
@@ -46,9 +50,32 @@ export interface RunMetrics {
   stopReason: string | null;
   /** Hubo algún fallo por el camino (tool, modelo, reintento, fallback, subagente). */
   hadErrors: boolean;
+  /**
+   * Caché de prompt. Opcionales porque un `result.json` anterior no los trae, y
+   * null cuando ninguna llamada reportó caché: un fallo de caché no es un error
+   * del agente y no entra en `hadErrors` ni en ninguna tasa de fiabilidad.
+   */
+  /** Llamadas que reportaron caché; las cifras siguientes son solo de ellas. */
+  cacheReportedCalls?: number;
+  cachedReadTokens?: number | null;
+  cacheWriteTokens?: number | null;
+  uncachedPromptTokens?: number | null;
+  /** cachedReadTokens / promptTokens de las llamadas que reportaron. */
+  cacheHitRate?: number | null;
+  /** Llamadas sin nada reutilizado / con algo reutilizado. */
+  coldCalls?: number | null;
+  warmCalls?: number | null;
+  /** Llamadas que leyeron de caché menos tokens que la anterior del mismo agente (pérdida demostrable). */
+  cacheBreaks?: number | null;
+  /** Tiempo medio hasta el primer token: de todas, de las frías y de las templadas. */
+  ttftMs?: number | null;
+  ttftColdMs?: number | null;
+  ttftWarmMs?: number | null;
+  /** Fracción del prompt que repite el de la llamada anterior (medida en el cliente). */
+  prefixStability?: number | null;
 }
 
-/** Métricas numéricas comparables entre dos ejecuciones; en todas, menos es mejor. */
+/** Métricas numéricas comparables entre dos ejecuciones. */
 export const COMPARABLE_METRICS = [
   'tokens',
   'durationMs',
@@ -60,8 +87,23 @@ export const COMPARABLE_METRICS = [
   'policyBlocks',
   'repeatedCalls',
   'subagentFailures',
+  'cacheHitRate',
+  'cachedReadTokens',
+  'uncachedPromptTokens',
+  'cacheBreaks',
+  'coldCalls',
+  'prefixStability',
+  'ttftColdMs',
+  'ttftWarmMs',
 ] as const;
 export type ComparableMetric = (typeof COMPARABLE_METRICS)[number];
+
+/** En estas, más es mejor; en el resto de `COMPARABLE_METRICS`, menos. */
+export const HIGHER_IS_BETTER: ReadonlySet<ComparableMetric> = new Set([
+  'cacheHitRate',
+  'cachedReadTokens',
+  'prefixStability',
+]);
 
 /** Tools que solo observan: repetirlas sin un cambio entre medias no aporta nada. */
 const OBSERVING_TOOLS = new Set([
@@ -190,7 +232,7 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
       subagents++;
       if (s.status === 'error') subagentFailures++;
     } else if (s.kind === 'context') {
-      if (s.name === 'Contexto comprimido') compressions++;
+      if (s.name === COMPRESSION_STEP) compressions++;
     } else if (s.kind === 'notice') {
       const ev = eventOf(s);
       if (ev === 'retry') retries++;
@@ -216,6 +258,7 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
   }
 
   const closed = model.turns.filter((t) => t.end !== null);
+  const cache = cacheSummary(model);
   const policyBlocks = vetoes + conf.denied + conf.blocked;
   const durationMs = model.turns.reduce((sum, t, i) => {
     let end = t.end ?? t.at;
@@ -246,6 +289,18 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
     stopReason: closed.length > 0 ? closed[closed.length - 1]!.stop : null,
     hadErrors:
       toolErrorSteps + llmErrors + retries + providerFallbacks + subagentFailures + fatalErrors > 0,
+    cacheReportedCalls: cache?.reportedCalls ?? 0,
+    cachedReadTokens: cache?.cachedReadTokens ?? null,
+    cacheWriteTokens: cache?.cacheWriteTokens ?? null,
+    uncachedPromptTokens: cache?.uncachedPromptTokens ?? null,
+    cacheHitRate: cache?.hitRate ?? null,
+    coldCalls: cache?.coldCalls ?? null,
+    warmCalls: cache?.warmCalls ?? null,
+    cacheBreaks: cache?.breaks ?? null,
+    ttftMs: meanTtft(model),
+    ttftColdMs: cache?.ttftColdMs ?? null,
+    ttftWarmMs: cache?.ttftWarmMs ?? null,
+    prefixStability: prefixStability(model),
   };
 }
 

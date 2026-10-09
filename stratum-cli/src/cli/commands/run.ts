@@ -3,6 +3,7 @@ import { createInterface } from 'readline';
 import { askLine } from '../readline-prompt.js';
 import chalk from 'chalk';
 import type {
+  AgentEvent,
   ConfirmRequest,
   DestructiveDecision,
   DestructivePolicy,
@@ -58,6 +59,12 @@ export const runCommand = new Command('run')
     '--delegate <profile>',
     'hand the task straight to a subagent profile (mode subagent/all), without the main agent',
   )
+  .option(
+    '--then <task>',
+    'follow-up turn in the same session, after the task (repeatable)',
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[],
+  )
   .option('--read-only', 'observation only: no file writes and only read-only commands')
   .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
   .option('--infra', 'shortcut for --profile infra')
@@ -76,6 +83,7 @@ export const runCommand = new Command('run')
         approvePlan?: boolean;
         agent?: string;
         delegate?: string;
+        then?: string[];
         logLevel?: string;
         debug?: boolean;
         readOnly?: boolean;
@@ -91,8 +99,10 @@ export const runCommand = new Command('run')
       }
       // Hito 15: `--delegate` no pasa por el agente principal, así que no hay
       // plan que presentar ni perfil principal que activar.
-      if (opts.delegate && (opts.plan || opts.agent)) {
-        process.stderr.write('[fatal] --delegate no se combina con --plan ni con --agent.\n');
+      if (opts.delegate && (opts.plan || opts.agent || opts.then?.length)) {
+        process.stderr.write(
+          '[fatal] --delegate no se combina con --plan, con --agent ni con --then.\n',
+        );
         process.exit(1);
       }
 
@@ -340,9 +350,24 @@ export const runCommand = new Command('run')
           onPlanPersist: (p: Plan) => planStore.save(planRef, task, p, planCreatedAt),
           ...(planMode ? { mode: 'plan' as const } : {}),
         };
-        const events = opts.delegate
-          ? agent.runDelegate(opts.delegate, task, runOpts)
-          : agent.run(input, runOpts);
+        // `--then`: turnos siguientes en la misma sesión (mismo historial, misma
+        // traza). Un turno que no acaba en `stop` corta la cadena: seguir tras un
+        // error fatal o una cancelación sería trabajar sobre un turno a medias.
+        const followUps = opts.then ?? [];
+        const chained = async function* (): AsyncGenerator<AgentEvent> {
+          let stop: string | null = null;
+          for (const turn of [input, ...followUps]) {
+            if (stop !== null) {
+              if (stop !== 'stop') return;
+              yield { type: 'text_delta', delta: '\n\n' };
+            }
+            for await (const ev of agent.run(turn, runOpts)) {
+              if (ev.type === 'done') stop = ev.stopReason;
+              yield ev;
+            }
+          }
+        };
+        const events = opts.delegate ? agent.runDelegate(opts.delegate, task, runOpts) : chained();
         for await (const event of events) {
           switch (event.type) {
             case 'text_delta':

@@ -1,9 +1,11 @@
+import { createHash } from 'crypto';
 import { appendFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import type { AgentEvent, Message } from '../agent/types.js';
 import { redactText } from '../security/redact-output.js';
 import { getLogger } from '../logging/index.js';
+import { normalizeUsage, type RawTimings, type RawUsage } from '../providers/cache.js';
 import {
   TRACE_CAP_RUNTIME,
   TRACE_FORMAT_VERSION,
@@ -28,14 +30,15 @@ export interface ModelCallInfo {
   messages: readonly Message[];
   /** Tools ofrecidas al modelo en esta llamada. */
   tools: number;
+  /**
+   * Los schemas de esas tools, tal como se envían. No se guardan: solo sirven
+   * para medir cuánto del prompt repite el de la llamada anterior (`prefix`).
+   */
+  toolSchemas?: readonly unknown[];
 }
 
-export interface ModelCallUsage {
-  prompt_tokens?: number;
-  completion_tokens?: number;
-  total_tokens?: number;
-  prompt_tokens_details?: { cached_tokens?: number };
-}
+/** `usage` crudo del backend; la traza guarda su forma normalizada (`normalizeUsage`). */
+export type ModelCallUsage = RawUsage;
 
 export interface ModelCallEnd {
   text: string;
@@ -48,7 +51,8 @@ export interface ModelCallEnd {
 export interface ModelSpan {
   /** Primer chunk del stream: separa la espera de la generación. */
   firstChunk(): void;
-  usage(usage: ModelCallUsage): void;
+  /** `timings` es lo que llama.cpp manda aparte del `usage` (tokens reutilizados del KV cache). */
+  usage(usage: ModelCallUsage | undefined, timings?: RawTimings): void;
   end(result: ModelCallEnd): void;
 }
 
@@ -259,6 +263,74 @@ function headline(text: string, max = 120): string {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line;
 }
 
+const hash8 = (text: string): string => createHash('sha1').update(text).digest('hex').slice(0, 8);
+
+function commonPrefix(a: string, b: string): number {
+  const max = Math.min(a.length, b.length);
+  let i = 0;
+  while (i < max && a.charCodeAt(i) === b.charCodeAt(i)) i++;
+  return i;
+}
+
+/** Un mensaje tal como cuenta para el prefijo: lo que el backend recibe de él. */
+const renderMessage = (m: Message): string => JSON.stringify(m) ?? '';
+
+/**
+ * Compara el prompt de cada llamada con el de la anterior del mismo scope, en
+ * el orden en que un backend lo procesa (tools, system, conversación): cuántos
+ * caracteres iniciales repite y dónde deja de coincidir. Es lo que una caché de
+ * prefijo **podría** reutilizar, medido en el cliente; lo que de verdad
+ * reutilizó lo dice el `usage` del backend. El prompt anterior se retiene solo
+ * en memoria: a la traza va el recuento, nunca el texto.
+ */
+class PrefixTracker {
+  private prevTools: string | null = null;
+  private prevRefs: readonly Message[] = [];
+  private prevRendered: string[] = [];
+
+  measure(messages: readonly Message[], toolSchemas: readonly unknown[] | undefined): TraceData {
+    const tools = JSON.stringify(toolSchemas ?? []);
+    const rendered = messages.map((m, i) =>
+      m === this.prevRefs[i] ? this.prevRendered[i]! : renderMessage(m),
+    );
+    const chars = tools.length + rendered.reduce((sum, r) => sum + r.length, 0);
+    const first = messages[0];
+    const data: TraceData = {
+      chars,
+      tools: hash8(tools),
+      ...(first?.role === 'system' ? { system: hash8(rendered[0]!) } : {}),
+    };
+
+    if (this.prevTools !== null) {
+      let shared: number;
+      if (tools !== this.prevTools) {
+        shared = commonPrefix(tools, this.prevTools);
+        data.diverged = 'tools';
+      } else {
+        shared = tools.length;
+        for (let i = 0; i < rendered.length && i < this.prevRendered.length; i++) {
+          const prev = this.prevRendered[i]!;
+          if (rendered[i] === prev) {
+            shared += prev.length;
+            continue;
+          }
+          shared += commonPrefix(rendered[i]!, prev);
+          data.diverged = i === 0 && first?.role === 'system' ? 'system' : 'history';
+          data.divergedAt = i;
+          break;
+        }
+      }
+      data.sharedChars = shared;
+      data.prevMessages = this.prevRendered.length;
+    }
+
+    this.prevTools = tools;
+    this.prevRefs = messages.slice();
+    this.prevRendered = rendered;
+    return data;
+  }
+}
+
 class Scope implements TraceScope {
   /** Mensajes ya contabilizados como entrada de alguna llamada. */
   private readonly seen = new WeakSet<object>();
@@ -267,6 +339,7 @@ class Scope implements TraceScope {
   /** tool call id del modelo → paso abierto (los ids del modelo se repiten entre turnos). */
   private readonly openTools = new Map<string, string>();
   private readonly openSubagents = new Set<string>();
+  private readonly prefix = new PrefixTracker();
 
   constructor(
     private readonly rec: TraceRecorder,
@@ -388,6 +461,7 @@ class Scope implements TraceScope {
   modelStart(info: ModelCallInfo): ModelSpan {
     const id = this.rec.nextId();
     let usage: ModelCallUsage | undefined;
+    let timings: RawTimings | undefined;
     let closed = false;
     let first = false;
     this.guard(() => {
@@ -399,6 +473,7 @@ class Scope implements TraceScope {
         model: info.model,
         messages: info.messages.length,
         tools: info.tools,
+        prefix: this.prefix.measure(info.messages, info.toolSchemas),
       });
     });
     return {
@@ -407,8 +482,9 @@ class Scope implements TraceScope {
         first = true;
         this.guard(() => this.rec.write({ t: 'mark', at: this.rec.at(), id, name: 'first_token' }));
       },
-      usage: (u) => {
-        usage = u;
+      usage: (u, t) => {
+        if (u) usage = u;
+        if (t) timings = t;
       },
       end: (result) => {
         if (closed) return;
@@ -424,12 +500,14 @@ class Scope implements TraceScope {
               arguments: this.rec.text(c.arguments),
             }));
           }
-          if (usage) {
+          const normalized = normalizeUsage(usage, timings);
+          if (normalized) {
             data.usage = {
-              promptTokens: usage.prompt_tokens,
-              completionTokens: usage.completion_tokens,
-              totalTokens: usage.total_tokens,
-              cachedTokens: usage.prompt_tokens_details?.cached_tokens,
+              ...normalized,
+              // Nombre anterior del campo: lo leen los visores de antes.
+              ...(normalized.cachedReadTokens !== undefined
+                ? { cachedTokens: normalized.cachedReadTokens }
+                : {}),
             };
           }
           if (result.error) data.error = this.rec.text(result.error);

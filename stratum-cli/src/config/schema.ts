@@ -37,6 +37,26 @@ const ProviderConfigSchema = z.object({
     })
     .strict()
     .optional(),
+  /**
+   * Caché de prompt del backend (`providers/cache.ts`). Cada clave sustituye a
+   * lo que Stratum asume por el tipo de backend; sin la sección, solo se activa
+   * lo que se sabe que ese backend acepta. `usage` y `automaticPrefix` son
+   * informativas; las otras tres cambian la petición:
+   *  - `cacheKey`: envía `prompt_cache_key` con el id de sesión (OpenAI);
+   *  - `explicitBreakpoints`: marca el prompt con `cache_control` (Anthropic
+   *    a través de una pasarela compatible);
+   *  - `sessionAffinity`: envía `session_id` con el id de sesión (SGLang).
+   */
+  cache: z
+    .object({
+      usage: z.boolean().optional(),
+      automaticPrefix: z.boolean().optional(),
+      explicitBreakpoints: z.boolean().optional(),
+      cacheKey: z.boolean().optional(),
+      sessionAffinity: z.boolean().optional(),
+    })
+    .strict()
+    .optional(),
 });
 
 const McpServerSchema = z

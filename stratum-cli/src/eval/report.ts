@@ -3,7 +3,8 @@
  * devuelven la cadena a imprimir; el JSON equivalente es el propio objeto.
  */
 import chalk from 'chalk';
-import { formatDuration, formatTokenCount } from '../trace/model.js';
+import { CACHE_BREAK_LABEL, formatDuration, formatTokenCount } from '../trace/model.js';
+import type { CacheBreakCause } from '../trace/model.js';
 import type {
   Comparison,
   MetricChange,
@@ -46,7 +47,9 @@ function scenarioLine(r: ScenarioResult, idWidth: number): string {
     ? `${dur(m.durationMs)} · ${tok(m.tokens)} tok · ${m.llmCalls} llm · ${m.toolCalls} tools` +
       (m.toolErrors ? ` · ${m.toolErrors} err` : '') +
       (m.policyBlocks ? ` · ${m.policyBlocks} bloq` : '') +
-      (m.repeatedCalls ? ` · ${m.repeatedCalls} rep` : '')
+      (m.repeatedCalls ? ` · ${m.repeatedCalls} rep` : '') +
+      (typeof m.cacheHitRate === 'number' ? ` · caché ${pct(m.cacheHitRate)}` : '') +
+      (m.cacheBreaks ? ` · ${m.cacheBreaks} rot` : '')
     : '';
   const level = r.difficulty ? chalk.gray(LEVEL[r.difficulty]) : ' ';
   return `  ${STATUS[r.status]} ${level} ${pad(r.id, idWidth)}  ${chalk.gray(cost)}`.trimEnd();
@@ -89,7 +92,36 @@ function summaryLines(s: GroupSummary): string[] {
     ['Tiempo hasta el éxito', dist(s.toSuccess.durationMs, dur)],
     ['Tool calls hasta el éxito', dist(s.toSuccess.toolCalls, (v) => v.toFixed(1))],
     ['Llamadas LLM hasta el éxito', dist(s.toSuccess.llmCalls, (v) => v.toFixed(1))],
+    ...cacheLines(s),
   ]).map((l) => `  ${l}`);
+}
+
+/** Filas de caché del resumen. Sin datos del backend solo queda lo que mide el cliente. */
+function cacheLines(s: GroupSummary): string[][] {
+  const rows: string[][] = [];
+  const c = s.cache;
+  if (c) {
+    const total = c.cachedReadTokens + c.uncachedPromptTokens;
+    rows.push(
+      [
+        'Cache hit rate',
+        `${pct(c.hitRate)}  (${tok(c.cachedReadTokens)} de ${tok(total)} tok de entrada)`,
+      ],
+      [
+        'Llamadas frías · templadas',
+        `${c.coldCalls} · ${c.warmCalls}  (${c.breaks} roturas de caché)`,
+      ],
+      ['TTFT frío · templado', `${dur(c.ttftColdMs)} · ${dur(c.ttftWarmMs)}`],
+    );
+    if (c.cacheWriteTokens !== null)
+      rows.push(['Tokens escritos en caché', tok(c.cacheWriteTokens)]);
+  } else if (s.cache === null) {
+    rows.push(['Cache hit rate', 'n/d  (el backend no reporta caché)']);
+  }
+  if (typeof s.prefixStability === 'number') {
+    rows.push(['Prefijo estable (cliente)', pct(s.prefixStability)]);
+  }
+  return rows;
 }
 
 export function formatEvalReport(result: EvalResult, dir?: string): string {
@@ -152,12 +184,16 @@ const RATES = new Set([
   'policyViolationRate',
   'unsafeActionRate',
   'recoveryRate',
+  'cacheHitRate',
+  'prefixStability',
 ]);
+const DURATIONS = new Set(['durationMs', 'timeToSuccessMs', 'ttftColdMs', 'ttftWarmMs']);
+const TOKENS = new Set(['tokens', 'tokensToSuccess', 'cachedReadTokens', 'uncachedPromptTokens']);
 
 function value(metric: string, v: number): string {
   if (RATES.has(metric)) return pct(v);
-  if (metric === 'durationMs' || metric === 'timeToSuccessMs') return dur(v);
-  if (metric === 'tokens' || metric === 'tokensToSuccess') return tok(v);
+  if (DURATIONS.has(metric)) return dur(v);
+  if (TOKENS.has(metric)) return tok(v);
   return Number.isInteger(v) ? String(v) : v.toFixed(1);
 }
 
@@ -172,7 +208,10 @@ function changeText(c: MetricChange): string {
 function toleranceText(metric: string, t: Tolerance): string {
   const parts: string[] = [];
   if (t.pct > 0) parts.push(`${Math.round(t.pct * 100)} %`);
-  if (t.abs > 0) parts.push(value(metric, t.abs));
+  // En una tasa el margen absoluto son puntos porcentuales, no un porcentaje de la base.
+  if (t.abs > 0) {
+    parts.push(RATES.has(metric) ? `${+(t.abs * 100).toFixed(1)} puntos` : value(metric, t.abs));
+  }
   return `${metric} ${parts.length > 0 ? parts.join(' y ') : 'sin margen'}`;
 }
 
@@ -238,6 +277,12 @@ export function formatComparison(cmp: Comparison): string {
     'Regresiones de fiabilidad (errores, reintentos, repeticiones)',
     h.reliabilityRegressions,
     moved('reliability', 'regression'),
+    chalk.yellow,
+  );
+  section(
+    'Regresiones de caché (acierto, tokens sin caché, roturas, TTFT)',
+    h.cacheRegressions ?? [],
+    moved('cache', 'regression'),
     chalk.yellow,
   );
   section(
@@ -390,6 +435,44 @@ export function formatStats(s: AggregateStats, top = 10): string {
       ],
     ]).map((l) => `  ${l}`),
   );
+
+  out.push('', chalk.bold('Caché de prompt'));
+  const cache = s.cache;
+  if (cache) {
+    const causes = (Object.entries(s.cacheBreaks ?? {}) as Array<[CacheBreakCause, number]>)
+      .sort((a, b) => b[1] - a[1])
+      .map(([cause, n]) => `${CACHE_BREAK_LABEL[cause]} ${n}`);
+    out.push(
+      ...table([
+        [
+          'Cache hit rate',
+          `${pct(cache.hitRate)}  (${tok(cache.cachedReadTokens)} de ${tok(cache.promptTokens)} tok de entrada)`,
+        ],
+        ['Tokens de entrada sin caché', tok(cache.uncachedPromptTokens)],
+        ...(cache.cacheWriteTokens !== null
+          ? [['Tokens escritos en caché', tok(cache.cacheWriteTokens)]]
+          : []),
+        ['Llamadas frías · templadas', `${cache.coldCalls} · ${cache.warmCalls}`],
+        ['TTFT frío · templado', `${dur(cache.ttftColdMs)} · ${dur(cache.ttftWarmMs)}`],
+        ['Roturas de caché', causes.length > 0 ? causes.join(' · ') : '0'],
+        ['Prefijo estable (cliente)', pct(s.prefixStability ?? null)],
+      ]).map((l) => `  ${l}`),
+    );
+    if (cache.reportedCalls < s.llmCalls) {
+      out.push(
+        chalk.gray(
+          `  (solo de las ${cache.reportedCalls} llamadas de ${s.llmCalls} cuyo backend reportó caché)`,
+        ),
+      );
+    }
+  } else {
+    out.push(
+      '  Ninguna llamada reportó caché: el backend no la expone en `usage`.',
+      ...(typeof s.prefixStability === 'number'
+        ? [`  Prefijo estable (medido en el cliente): ${pct(s.prefixStability)}`]
+        : []),
+    );
+  }
   if (s.runtimeSessions < s.sessions) {
     out.push(
       chalk.gray(
@@ -420,15 +503,27 @@ export function formatStats(s: AggregateStats, top = 10): string {
     out.push('', chalk.bold('Modelos'));
     out.push(
       ...table([
-        ['  modelo', 'llamadas', 'errores', 'tokens', 'tok/s'],
+        [
+          '  modelo',
+          'llamadas',
+          'errores',
+          'tokens',
+          'tok/s',
+          'caché',
+          'TTFT frío',
+          'TTFT templado',
+        ],
         ...s.models
           .slice(0, top)
           .map((m) => [
-            `  ${m.model}`,
+            `  ${m.provider ? `${m.provider}/` : ''}${m.model}`,
             String(m.calls),
             String(m.errors),
             tok(m.tokens),
             m.tokensPerSecond === null ? 'n/d' : m.tokensPerSecond.toFixed(1),
+            pct(m.cache?.hitRate ?? null),
+            dur(m.cache?.ttftColdMs ?? null),
+            dur(m.cache?.ttftWarmMs ?? null),
           ]),
       ]),
     );
