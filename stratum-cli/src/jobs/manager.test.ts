@@ -90,7 +90,9 @@ beforeEach(() => {
 afterEach(async () => {
   await Promise.all(managers.map((m) => m.shutdown()));
   resetExecRuntime();
-  rmSync(dir, { recursive: true, force: true });
+  // En Windows el directorio de trabajo de un proceso recién terminado tarda
+  // un instante en liberarse, aunque el proceso ya no exista.
+  rmSync(dir, { recursive: true, force: true, maxRetries: 40, retryDelay: 50 });
 });
 
 describe('JobManager — ciclo de vida', () => {

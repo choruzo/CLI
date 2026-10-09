@@ -31,7 +31,7 @@ import {
   type ExecutionTarget,
 } from './target.js';
 import { getExecAuditLog } from './runtime.js';
-import { JobLimitError } from '../../jobs/manager.js';
+import { JobLimitError, JobManagerClosedError } from '../../jobs/manager.js';
 import { MAIN_JOB_SCOPE, shortJobCommand } from '../../jobs/types.js';
 
 const log = getLogger('tools').child('exec');
@@ -446,6 +446,10 @@ async function startBackgroundJob(
   } catch (err) {
     if (err instanceof JobLimitError) {
       return { ok: false, error: err.message, recoverable: true, countsAsFailure: false };
+    }
+    // La sesión se cerró: no es un fallo de la tool ni algo que reintentar.
+    if (err instanceof JobManagerClosedError) {
+      return { ok: false, error: err.message, recoverable: false, countsAsFailure: false };
     }
     return { ok: false, error: `[${label}] ${(err as Error).message}`, recoverable: true };
   }

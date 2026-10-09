@@ -23,6 +23,7 @@ import { redactText } from '../security/redact-output.js';
 import {
   killProcessTreeSync,
   signalProcessTree,
+  sweepProcessDescendants,
   spawnLocalShell,
   type LocalSubprocess,
 } from '../tools/exec/backends/local.js';
@@ -43,6 +44,9 @@ import {
 } from './types.js';
 
 const log = getLogger('jobs');
+
+/** Tope del cierre de un job que matamos (orden al árbol + barrido de descendientes). */
+const REAP_CAP_MS = 25_000;
 
 /** Tras salir el proceso, margen para que sus pipes terminen de vaciarse. */
 const DRAIN_GRACE_MS = 1000;
@@ -80,6 +84,17 @@ export class JobLimitError extends Error {
   override readonly name = 'JobLimitError';
 }
 
+/**
+ * El manager ya se cerró (`shutdown`). Es definitivo: un manager cerrado no
+ * vuelve a lanzar jobs ni a entrar en el registro del proceso.
+ */
+export class JobManagerClosedError extends Error {
+  override readonly name = 'JobManagerClosedError';
+  constructor() {
+    super('The session has been closed: background jobs can no longer be started.');
+  }
+}
+
 export class JobNotFoundError extends Error {
   override readonly name = 'JobNotFoundError';
 }
@@ -93,6 +108,10 @@ interface JobRecord {
   cancelReason?: JobEndReason;
   timedOut: boolean;
   killing: boolean;
+  /** La orden de cierre del árbol ya se entregó (en Windows, `taskkill` terminó). */
+  treeSignalled?: Promise<void>;
+  /** El cierre de un job que matamos ya está en marcha (se hace una sola vez). */
+  reaping: boolean;
   timers: Set<ReturnType<typeof setTimeout>>;
   ended: Promise<void>;
   resolveEnded: () => void;
@@ -111,7 +130,11 @@ export class JobManager {
   private readonly killGraceMs: number;
   private readonly spawn: NonNullable<JobManagerOptions['spawn']>;
   private seq = 0;
+  /** `shutdown()` es terminal: una vez a true, nunca vuelve a false. */
   private closed = false;
+  private shutdownPromise: Promise<void> | null = null;
+  /** `start()` en vuelo: `shutdown` los espera para no dejar un proceso recién nacido sin dueño. */
+  private readonly starting = new Set<Promise<unknown>>();
 
   constructor(
     private readonly config: StratumConfig,
@@ -171,12 +194,28 @@ export class JobManager {
   // Creación
   // -------------------------------------------------------------------------
 
+  /** `shutdown()` ya se llamó: el manager no admite más jobs. */
+  get isClosed(): boolean {
+    return this.closed;
+  }
+
   /**
    * Lanza el comando y devuelve en cuanto el proceso existe. Rechaza con
-   * `JobLimitError` (límite de la sesión) o `ExecSpawnError` (no arrancó).
+   * `JobManagerClosedError` (el manager se cerró), `JobLimitError` (límite de
+   * la sesión) o `ExecSpawnError` (no arrancó).
    */
-  async start(req: StartJobRequest): Promise<BackgroundJob> {
-    if (this.closed) throw new JobLimitError('The session is closing: no new background jobs.');
+  start(req: StartJobRequest): Promise<BackgroundJob> {
+    // La comprobación va antes de cualquier efecto: un manager cerrado ni crea
+    // el registro del job ni vuelve a apuntarse en el registro del proceso.
+    if (this.closed) return Promise.reject(new JobManagerClosedError());
+    const pending = this.launch(req);
+    this.starting.add(pending);
+    const forget = (): void => void this.starting.delete(pending);
+    pending.then(forget, forget);
+    return pending;
+  }
+
+  private async launch(req: StartJobRequest): Promise<BackgroundJob> {
     if (this.runningCount >= this.limits.maxRunning) {
       throw new JobLimitError(
         `There are already ${this.limits.maxRunning} background jobs running ` +
@@ -208,6 +247,7 @@ export class JobManager {
       trace: req.trace,
       timedOut: false,
       killing: false,
+      reaping: false,
       timers: new Set(),
       ended,
       resolveEnded,
@@ -239,6 +279,12 @@ export class JobManager {
 
     rec.subprocess = subprocess;
     rec.job.pid = subprocess.pid;
+    // Cancelado mientras nacía (un cierre o un `closeScope` a la vez): aquella
+    // orden no tenía proceso al que llegar. Se repite ahora que lo hay.
+    if (rec.killing) {
+      rec.killing = false;
+      this.kill(rec);
+    }
     subprocess.stdout?.on('data', (chunk: Buffer | string) => this.onData(rec, 'stdout', chunk));
     subprocess.stderr?.on('data', (chunk: Buffer | string) => this.onData(rec, 'stderr', chunk));
 
@@ -465,17 +511,30 @@ export class JobManager {
     await Promise.allSettled(running.map((rec) => this.cancel(rec.job.id, scope, 'scope-closed')));
   }
 
-  /** Cierre de la sesión: cancela todo lo vivo y espera a que muera. Nunca lanza. */
-  async shutdown(): Promise<void> {
+  /**
+   * Cierre de la sesión: cancela todo lo vivo y espera a que muera. Nunca lanza.
+   *
+   * **Terminal.** El manager queda cerrado para siempre: `start()` rechaza con
+   * `JobManagerClosedError` y no vuelve a registrarse. Lo ya terminado sigue
+   * consultable (estado y salida). Llamarlo otra vez devuelve el mismo cierre.
+   */
+  shutdown(): Promise<void> {
     this.closed = true;
+    this.shutdownPromise ??= this.closeAll();
+    return this.shutdownPromise;
+  }
+
+  private async closeAll(): Promise<void> {
     try {
+      // Un `start()` que ya había pasado la comprobación termina de nacer (o de
+      // fallar) antes de cancelar: así su proceso entra en la lista de abajo.
+      await Promise.allSettled([...this.starting]);
       const running = [...this.records.values()].filter((rec) => rec.job.status === 'running');
       await Promise.allSettled(
         running.map((rec) => this.cancel(rec.job.id, MAIN_JOB_SCOPE, 'session-closed')),
       );
     } finally {
       unregisterJobManager(this);
-      this.closed = false;
     }
   }
 
@@ -486,7 +545,7 @@ export class JobManager {
   killAllSync(): void {
     for (const rec of this.records.values()) {
       if (rec.job.status !== 'running' || rec.job.pid === undefined) continue;
-      killProcessTreeSync(rec.job.pid);
+      killProcessTreeSync(rec.job.pid, rec.job.startedAt);
     }
   }
 
@@ -495,11 +554,12 @@ export class JobManager {
     if (rec.killing || rec.job.status !== 'running') return;
     rec.killing = true;
     const sub = rec.subprocess;
-    const signalTree = (sig: NodeJS.Signals): void =>
+    const signalTree = (sig: NodeJS.Signals): Promise<void> =>
       signalProcessTree(sub?.pid, sig, () => sub?.kill(sig));
-    signalTree('SIGTERM');
-    this.timer(rec, this.killGraceMs, () => signalTree('SIGKILL'));
-    this.timer(rec, this.killGraceMs + SETTLE_GRACE_MS, () => this.finish(rec, null));
+    rec.treeSignalled = signalTree('SIGTERM');
+    this.timer(rec, this.killGraceMs, () => void signalTree('SIGKILL'));
+    // Ni así salió el shell: se cierra el job igualmente, barriendo su árbol.
+    this.timer(rec, this.killGraceMs + SETTLE_GRACE_MS, () => this.reap(rec));
   }
 
   private timer(rec: JobRecord, ms: number, fn: () => void): void {
@@ -513,13 +573,43 @@ export class JobManager {
   /** Cierre único de un job que llegó a arrancar. */
   private finish(rec: JobRecord, exitCode: number | null): void {
     if (rec.job.status !== 'running') return;
-    const reason: JobEndReason = rec.cancelReason ?? (rec.timedOut ? 'timeout' : 'exit');
-    // Si lo matamos nosotros, el exit code es un artefacto de la muerte
-    // (`taskkill /F` deja 1), no del comando.
-    this.finishRecord(rec, rec.killing ? null : exitCode, reason);
+    if (!rec.killing) {
+      this.finishRecord(rec, exitCode, this.reasonOf(rec));
+      return;
+    }
+    this.reap(rec);
+  }
+
+  /**
+   * Cierre de un job que matamos nosotros. Que el shell haya salido no dice que
+   * su árbol también: el job no se da por terminado —ni `cancel()` ni
+   * `shutdown()` vuelven— hasta que la orden de cierre está entregada y, en
+   * Windows, hasta barrer los descendientes que `taskkill` no llegó a ver
+   * (`sweepProcessDescendants`). Un tope acota la espera. El exit code es un
+   * artefacto de la muerte (`taskkill /F` deja 1), no del comando: queda `null`.
+   */
+  private reap(rec: JobRecord): void {
+    if (rec.reaping || rec.job.status !== 'running') return;
+    rec.reaping = true;
+    for (const t of rec.timers) clearTimeout(t);
+    rec.timers.clear();
+    const done = (): void => this.finishRecord(rec, null, this.reasonOf(rec));
+    this.timer(rec, REAP_CAP_MS, done);
+    const pid = rec.job.pid;
+    void (rec.treeSignalled ?? Promise.resolve())
+      .then(() => (pid === undefined ? 0 : sweepProcessDescendants(pid, rec.job.startedAt)))
+      .then((swept) => {
+        if (swept > 0) log.warn('job descendants swept', { id: rec.job.id, pid, swept });
+      })
+      .then(done, done);
+  }
+
+  private reasonOf(rec: JobRecord): JobEndReason {
+    return rec.cancelReason ?? (rec.timedOut ? 'timeout' : 'exit');
   }
 
   private finishRecord(rec: JobRecord, exitCode: number | null, reason: JobEndReason): void {
+    if (rec.job.status !== 'running') return;
     for (const t of rec.timers) clearTimeout(t);
     rec.timers.clear();
 
@@ -528,7 +618,7 @@ export class JobManager {
       // En POSIX el grupo puede conservar miembros aunque el shell haya salido
       // (un hijo que quedó atrás): se cierran aquí, que es su último dueño.
       if (process.platform !== 'win32' && sub.pid !== undefined) {
-        signalProcessTree(sub.pid, 'SIGKILL', () => undefined);
+        void signalProcessTree(sub.pid, 'SIGKILL', () => undefined);
       }
       sub.stdout?.destroy();
       sub.stderr?.destroy();

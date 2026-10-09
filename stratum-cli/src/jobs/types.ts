@@ -95,6 +95,11 @@ export interface JobNotification {
   unreadChars: number;
 }
 
+/**
+ * Un tramo de la salida de un job. `stdout` y `stderr` van separados: cada uno
+ * en su orden, pero sin la información de cómo se intercalaron entre sí. Los
+ * offsets son sobre el registro común de los dos (ver `jobs/output.ts`).
+ */
 export interface JobOutputSlice {
   stdout: string;
   stderr: string;

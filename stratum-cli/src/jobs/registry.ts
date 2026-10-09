@@ -38,7 +38,10 @@ export function unregisterJobManager(manager: ManagedJobs): void {
   managers.delete(manager);
 }
 
-/** Cancela y espera todos los jobs vivos del proceso. Nunca lanza. */
+/**
+ * Cancela y espera todos los jobs vivos del proceso. Nunca lanza. El cierre de
+ * cada manager es terminal: no vuelve a lanzar jobs ni a registrarse aquí.
+ */
 export async function shutdownAllJobs(): Promise<void> {
   await Promise.allSettled([...managers].map((m) => m.shutdown()));
 }

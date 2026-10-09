@@ -132,9 +132,10 @@ function taskkillPath(): string {
   return join(systemRoot, 'System32', 'taskkill.exe');
 }
 
-function killWindowsTree(pid: number, fallback: () => void): void {
+/** Resuelve cuando `taskkill` ha terminado de recorrer el árbol. Nunca rechaza. */
+function killWindowsTree(pid: number, fallback: () => void): Promise<void> {
   try {
-    execa(taskkillPath(), ['/T', '/F', '/PID', String(pid)], {
+    return execa(taskkillPath(), ['/T', '/F', '/PID', String(pid)], {
       reject: false,
       stdio: 'ignore',
       windowsHide: true,
@@ -147,6 +148,7 @@ function killWindowsTree(pid: number, fallback: () => void): void {
     );
   } catch {
     safely(fallback);
+    return Promise.resolve();
   }
 }
 
@@ -191,12 +193,16 @@ export function spawnLocalShell(command: string, cwd: string, stdin?: string): L
  * Señal al árbol entero de un proceso lanzado con `spawnLocalShell`: en POSIX
  * a su grupo; en Windows, `taskkill /T /F` (allí `sig` no se respeta: el cierre
  * es siempre forzado). `direct` mata solo el proceso directo, como respaldo.
+ *
+ * La promesa resuelve cuando la señal está entregada: en POSIX, en el acto; en
+ * Windows, cuando `taskkill` ha terminado de recorrer el árbol. Nunca rechaza.
+ * Quien solo quiere mandar la señal puede ignorarla.
  */
 export function signalProcessTree(
   pid: number | undefined,
   sig: NodeJS.Signals,
   direct: () => void,
-): void {
+): Promise<void> {
   if (pid !== undefined && !IS_WINDOWS) {
     try {
       process.kill(-pid, sig);
@@ -208,17 +214,97 @@ export function signalProcessTree(
     // workers de un `npm test`, un servidor de desarrollo) quedaban
     // huérfanos y vivos, y con los pipes abiertos. No hay SIGTERM que
     // respete un proceso de consola, así que el árbol se cierra forzado.
-    killWindowsTree(pid, direct);
+    return killWindowsTree(pid, direct);
   } else {
     safely(direct);
+  }
+  return Promise.resolve();
+}
+
+/**
+ * Script del barrido de descendientes (Windows). Recorre el árbol por
+ * `ParentProcessId` a partir de un pid que puede estar ya muerto —un huérfano
+ * conserva el pid de su padre— y termina lo que encuentra. Dos guardas contra
+ * la reutilización de pids: solo cuenta un proceso creado después de `since`
+ * (el arranque del job) y nunca el propio barrido. Repite unas pocas rondas por
+ * si lo que encuentra estaba a su vez lanzando algo.
+ */
+const WINDOWS_SWEEP_SCRIPT = [
+  '$ErrorActionPreference = "SilentlyContinue"',
+  '$root = [int]$env:STRATUM_SWEEP_ROOT',
+  '$since = [datetime]::Parse($env:STRATUM_SWEEP_SINCE, $null, "RoundtripKind").ToUniversalTime()',
+  '$killed = 0',
+  'for ($round = 0; $round -lt 4; $round++) {',
+  '  $byParent = @{}',
+  '  foreach ($p in Get-CimInstance Win32_Process -Property ProcessId,ParentProcessId,CreationDate) {',
+  '    $key = [int]$p.ParentProcessId',
+  '    if (-not $byParent.ContainsKey($key)) { $byParent[$key] = @() }',
+  '    $byParent[$key] += $p',
+  '  }',
+  '  $found = @()',
+  '  $queue = [System.Collections.Queue]::new()',
+  '  $queue.Enqueue($root)',
+  '  while ($queue.Count -gt 0) {',
+  '    $id = [int]$queue.Dequeue()',
+  '    foreach ($c in $byParent[$id]) {',
+  '      if ($c.ProcessId -eq $PID -or -not $c.CreationDate) { continue }',
+  '      if ($c.CreationDate.ToUniversalTime() -lt $since) { continue }',
+  '      $found += [int]$c.ProcessId',
+  '      $queue.Enqueue([int]$c.ProcessId)',
+  '    }',
+  '  }',
+  '  if ($found.Count -eq 0) { break }',
+  '  foreach ($id in $found) { Stop-Process -Id $id -Force; $killed++ }',
+  '  Start-Sleep -Milliseconds 150',
+  '}',
+  'Write-Output $killed',
+].join('\n');
+
+/** Margen por la diferencia entre el reloj de Node y la fecha de creación que da Windows. */
+const SWEEP_CLOCK_SKEW_MS = 2000;
+
+function sweepInvocation(rootPid: number, sinceMs: number) {
+  return {
+    args: ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command', WINDOWS_SWEEP_SCRIPT],
+    options: {
+      reject: false,
+      windowsHide: true,
+      stdin: 'ignore',
+      env: {
+        STRATUM_SWEEP_ROOT: String(rootPid),
+        STRATUM_SWEEP_SINCE: new Date(sinceMs - SWEEP_CLOCK_SKEW_MS).toISOString(),
+      },
+    },
+  } as const;
+}
+
+/**
+ * Windows: termina los descendientes de `rootPid` que sigan vivos, aunque
+ * `rootPid` ya no exista. Hace falta después de un `taskkill /T`: si el shell
+ * estaba lanzando a su hijo en ese instante, `taskkill` recorre el árbol antes
+ * de que el hijo figure en él, mata al shell y el hijo queda huérfano y vivo
+ * (se observó con un job cancelado nada más arrancar). `sinceMs` es cuándo se
+ * lanzó `rootPid`. Devuelve cuántos procesos terminó; nunca rechaza. En POSIX
+ * no hace nada: allí el grupo de procesos no tiene esa ventana.
+ */
+export async function sweepProcessDescendants(rootPid: number, sinceMs: number): Promise<number> {
+  if (!IS_WINDOWS) return 0;
+  try {
+    const { args, options } = sweepInvocation(rootPid, sinceMs);
+    const result = await execa('pwsh.exe', args, { ...options, timeout: 20_000 });
+    return Number.parseInt(String(result.stdout ?? '').trim(), 10) || 0;
+  } catch {
+    return 0;
   }
 }
 
 /**
  * Cierre SÍNCRONO y forzado del árbol, para el `exit` del proceso: ahí ya no
- * corre nada asíncrono, y un job vivo no puede sobrevivir a Stratum.
+ * corre nada asíncrono, y un job vivo no puede sobrevivir a Stratum. Con
+ * `sinceMs` (cuándo se lanzó), en Windows barre además los descendientes que
+ * `taskkill` no llegase a ver.
  */
-export function killProcessTreeSync(pid: number): void {
+export function killProcessTreeSync(pid: number, sinceMs?: number): void {
   if (!IS_WINDOWS) {
     try {
       process.kill(-pid, 'SIGKILL');
@@ -236,6 +322,18 @@ export function killProcessTreeSync(pid: number): void {
     });
   } catch {
     /* sin taskkill no hay más que hacer aquí */
+  }
+  if (sinceMs === undefined) return;
+  try {
+    const { args, options } = sweepInvocation(pid, sinceMs);
+    execaSync('pwsh.exe', args, {
+      ...options,
+      stdout: 'ignore',
+      stderr: 'ignore',
+      timeout: 10_000,
+    });
+  } catch {
+    /* mejor esfuerzo: ya se está saliendo */
   }
 }
 
@@ -269,7 +367,7 @@ export const localBackend: IExecBackend = {
       const timers: ReturnType<typeof setTimeout>[] = [];
 
       const signalTree = (sig: NodeJS.Signals): void =>
-        signalProcessTree(subprocess.pid, sig, () => subprocess.kill(sig));
+        void signalProcessTree(subprocess.pid, sig, () => subprocess.kill(sig));
 
       const cleanup = (): void => {
         for (const t of timers) clearTimeout(t);

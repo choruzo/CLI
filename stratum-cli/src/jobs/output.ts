@@ -1,6 +1,16 @@
 /**
- * Salida de un job: stdout y stderr en un único registro, en orden de llegada,
- * con offsets absolutos para leerlo por partes.
+ * Salida de un job: stdout y stderr en un único registro con offsets absolutos,
+ * para leerlo por partes.
+ *
+ * **Qué orden se conserva y cuál no.** Por dentro los trozos se guardan en el
+ * orden en que Stratum los fue recibiendo, y el offset avanza sobre ese
+ * registro común: por eso basta un solo cursor para los dos streams. Pero
+ * `read()` devuelve `stdout` y `stderr` **por separado**: dentro de cada uno el
+ * orden es exacto; entre los dos, quien lee no puede reconstruir cómo se
+ * intercalaron. Tampoco el orden interno es el de escritura del proceso: son
+ * dos pipes distintos, cada uno se entrega por líneas completas, y lo que el
+ * proceso escribió primero puede llegar después. Quien necesite la secuencia
+ * exacta tiene que unirla en el propio comando (`2>&1`).
  *
  * Dos decisiones:
  *
@@ -139,9 +149,11 @@ export class JobOutput {
   }
 
   /**
-   * Lee hasta `maxChars` desde `offset`. Si el corte cae a mitad de una línea
-   * y hay un salto antes, se corta en el salto: el resto llega entero en la
-   * lectura siguiente.
+   * Lee hasta `maxChars` del registro común desde `offset`, y lo devuelve
+   * repartido en `stdout` y `stderr` (ver la cabecera: el intercalado entre
+   * los dos no se conserva en el resultado). `maxChars` cuenta la suma de
+   * ambos. Si el corte cae a mitad de una línea y hay un salto antes, se corta
+   * en el salto: el resto llega entero en la lectura siguiente.
    */
   read(offset: number, maxChars: number): JobOutputSlice {
     const wanted = Math.max(0, Math.floor(offset));
