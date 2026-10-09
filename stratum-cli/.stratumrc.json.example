@@ -51,6 +51,18 @@
     "bashTimeout": 30000,
     "execMaxBytes": 1048576,
     "auditLog": true,
+    "jobs": {
+      "enabled": true,
+      "maxRunning": 8,
+      "maxRetained": 50,
+      "maxOutputChars": 1000000,
+      "maxTotalOutputChars": 8000000,
+      "readChars": 8000,
+      "maxReadChars": 24000,
+      "maxRuntimeMs": 1800000,
+      "maxWaitMs": 60000,
+      "subagentAccess": "own"
+    },
     "redaction": {
       "extraPatterns": [
         {
@@ -88,7 +100,8 @@
       "gitCleanForce": "confirm",
       "npmPublish": "block",
       "dockerPrune": "confirm",
-      "curlPipeShell": "confirm"
+      "curlPipeShell": "confirm",
+      "shellDetach": "block"
     },
     "sensitivePathAllowlist": []
   },

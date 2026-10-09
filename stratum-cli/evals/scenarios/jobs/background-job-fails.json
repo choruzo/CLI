@@ -1,0 +1,97 @@
+{
+  "id": "background-job-fails",
+  "group": "jobs",
+  "title": "Un job que sale con error queda failed y su stderr se puede leer",
+  "description": "El comando en segundo plano termina con exit 2. El job queda failed (no es un error de la tool exec) y el agente lee en su stderr por que fallo.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "broken.js": "console.log('compiling 3 files');\nconsole.error('error TS2322: type mismatch at src/app.ts:14');\nprocess.exit(2);\n"
+    }
+  },
+  "input": "Lanza `node broken.js` en segundo plano y dime si termina bien. Si falla, dime el error exacto.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node broken.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_status",
+          "args": {
+            "jobId": "1",
+            "waitMs": 30000
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_output",
+          "args": {
+            "jobId": "1"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El job fallo con exit 2. El error es: error TS2322: type mismatch at src/app.ts:14"
+    }
+  ],
+  "expect": {
+    "description": "El job queda failed con su exit code, y el error sale de stderr.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "TS2322"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "ended:failed",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_status",
+        "value": "exitCode=\"2\"",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_output",
+        "value": "error TS2322",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsFailed",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsCompleted",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

@@ -1,0 +1,147 @@
+{
+  "id": "background-job-subagent-ownership",
+  "group": "jobs",
+  "title": "Un subagente no ve ni cancela los jobs del agente principal",
+  "description": "El principal lanza un job y delega una tarea. El subagente intenta cancelar ese job y listarlos: para el no existe. El job sigue vivo hasta que lo cancela su dueno.",
+  "difficulty": "adversarial",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "forever.js": "console.log('up');\nsetInterval(() => {}, 1000);\n"
+    }
+  },
+  "input": "Lanza `node forever.js` en segundo plano. Despues delega en un subagente (delegate_task) que cancele el job 1 y liste los jobs. Cuando vuelva, comprueba tu si el job sigue corriendo y cancelalo tu.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node forever.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "delegate_task",
+          "args": {
+            "task": "Cancel background job 1 with cancel_job, then call list_jobs and report exactly what you see."
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "cancel_job",
+          "args": {
+            "jobId": "1"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "list_jobs",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "text": "I could not cancel job 1: it does not exist for me, and list_jobs shows no jobs."
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_status",
+          "args": {
+            "jobId": "1"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "cancel_job",
+          "args": {
+            "jobId": "1"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El subagente no pudo tocar el job #1: para el no existia. Seguia running y lo he cancelado yo."
+    }
+  ],
+  "expect": {
+    "description": "El intento del hijo se rechaza, el job sobrevive a el y solo lo cancela el principal.",
+    "checks": [
+      {
+        "type": "tool_output_contains",
+        "tool": "cancel_job",
+        "value": "No background job with id \"1\"",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "list_jobs",
+        "value": "count=\"0\"",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_status",
+        "value": "status=\"running\"",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_called",
+        "tool": "cancel_job",
+        "status": "error",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "tool_called",
+        "tool": "cancel_job",
+        "status": "ok",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "cancel",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "subagents",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsCancelled",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "subagentFailures",
+        "equals": 0
+      }
+    ]
+  }
+}

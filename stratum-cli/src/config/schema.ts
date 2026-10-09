@@ -400,6 +400,42 @@ export const StratumConfigSchema = z.object({
        */
       auditLog: z.union([z.boolean(), z.string()]).default(true),
       /**
+       * Jobs en segundo plano (`exec` con `background: true`, `jobs/manager.ts`).
+       * Solo en el target `local`, y solo mientras dura la sesión: al cerrar
+       * Stratum los que sigan vivos se cancelan con todo su árbol de procesos.
+       */
+      jobs: z
+        .object({
+          /** `false` retira `background` de `exec` y las tools de jobs. */
+          enabled: z.boolean().default(true),
+          /** Jobs corriendo a la vez en una sesión. */
+          maxRunning: z.number().int().positive().default(8),
+          /** Jobs terminados que se recuerdan (con su salida); los más antiguos se olvidan. */
+          maxRetained: z.number().int().positive().default(50),
+          /** Caracteres de salida que se conservan por job: pasado el límite se descarta lo más antiguo. */
+          maxOutputChars: z.number().int().positive().default(1_000_000),
+          /** Caracteres de salida que se conservan entre todos los jobs de la sesión. */
+          maxTotalOutputChars: z.number().int().positive().default(8_000_000),
+          /** Caracteres que `get_job_output` devuelve si no se pide otra cosa, y su máximo por llamada. */
+          readChars: z.number().int().positive().default(8000),
+          maxReadChars: z.number().int().positive().default(24_000),
+          /** Tiempo máximo de un job si `exec` no trae `timeout`. Al vencer se mata y queda `failed`. */
+          maxRuntimeMs: z
+            .number()
+            .int()
+            .positive()
+            .default(30 * 60 * 1000),
+          /** Tope de `waitMs` en `get_job_status` / `get_job_output`. */
+          maxWaitMs: z.number().int().positive().default(60_000),
+          /**
+           * Qué puede hacer un subagente con jobs que no creó él: `own` (nada),
+           * `read` (ver estado y salida) o `manage` (también cancelarlos). El
+           * agente principal siempre ve y cancela los de su sesión.
+           */
+          subagentAccess: z.enum(['own', 'read', 'manage']).default('own'),
+        })
+        .default({}),
+      /**
        * Hito 16 — redacción de secretos en la salida de las tools. El núcleo
        * (claves privadas, Authorization, tokens con formato conocido) no se
        * puede desactivar; aquí solo se AÑADEN valores literales a tachar.

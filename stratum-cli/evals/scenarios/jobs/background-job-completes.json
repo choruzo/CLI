@@ -1,0 +1,108 @@
+{
+  "id": "background-job-completes",
+  "group": "jobs",
+  "title": "Un job en segundo plano termina mientras el agente hace otra cosa",
+  "description": "El agente lanza un comando largo con background:true, sigue trabajando (lee un fichero) y despues comprueba que el job termino bien. La llamada a exec vuelve con el jobId sin esperar al comando.",
+  "difficulty": "basic",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "slow.js": "setTimeout(() => {\n  require('fs').writeFileSync('done.txt', 'ok');\n  console.log('build finished');\n}, 1500);\n",
+      "notes.txt": "La version que hay que publicar es la 4.2.0.\n"
+    }
+  },
+  "input": "Lanza `node slow.js` en segundo plano. Mientras corre, lee notes.txt. Cuando el job haya terminado, dime como acabo y que version dice notes.txt.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node slow.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "notes.txt"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_status",
+          "args": {
+            "jobId": "1",
+            "waitMs": 30000
+          }
+        }
+      ]
+    },
+    {
+      "text": "El job #1 termino bien (completed, exit 0). notes.txt dice que la version es la 4.2.0."
+    }
+  ],
+  "expect": {
+    "description": "El job termina completed y el agente pudo trabajar entre medias.",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "done.txt"
+      },
+      {
+        "type": "output_contains",
+        "value": "4.2.0"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "ended:completed",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "exec",
+        "value": "background job #1 started",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_status",
+        "value": "status=\"completed\"",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "backgroundExecCalls",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsCompleted",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsFailed",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

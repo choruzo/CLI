@@ -52,11 +52,24 @@ export type AgentEvent =
   // calls bajo el nodo del subagente. El `event` nunca es a su vez un subagent_event
   // (profundidad = 1: los subagentes no delegan).
   | { type: 'subagent_event'; subagentId: string; event: AgentEvent }
+  // Jobs en segundo plano: el aviso de que estos jobs terminaron acaba de
+  // entrar en el contexto del modelo (el loop lo inyecta en un punto seguro).
+  // El cambio de estado en sí no viaja como evento del turno — puede ocurrir
+  // sin turno abierto —: la UI lo recibe del `JobManager`.
+  | { type: 'job_notice'; jobs: JobNoticeItem[] }
   | { type: 'error'; message: string; fatal: boolean }
   | {
       type: 'done';
       stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' | 'budget_tokens';
     };
+
+export interface JobNoticeItem {
+  id: string;
+  command: string;
+  status: 'completed' | 'failed' | 'cancelled';
+  exitCode: number | null;
+  durationMs: number;
+}
 
 /** Respuesta del usuario a una confirmación destructiva (§12.5; por el canal de Desktop en 15.4). */
 export type DestructiveDecision = 'approve' | 'deny' | 'allow-all';

@@ -39,6 +39,12 @@ export const TRACE_CAP_RUNTIME = 'runtime';
 export const TRACE_CAP_LLM_ORIGIN = 'llm-origin';
 
 /**
+ * `meta.caps`: el escritor registra el ciclo de vida de los jobs en segundo
+ * plano (`TraceJobEvent`). Sin él, las métricas de jobs son desconocidas.
+ */
+export const TRACE_CAP_JOBS = 'jobs';
+
+/**
  * Quién hizo una llamada al LLM (`data.origin` de un paso `model`):
  *  - `agent` — el loop del agente principal;
  *  - `subagent` — el loop de un subagente (su paso lleva además `parent`);
@@ -80,6 +86,12 @@ export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlm
  *    read-only, política de entorno que no se pudo evaluar, tool fuera del
  *    toolset de la sesión (`toolset`) o cambio fuera de un plan aprobado (`plan`)
  *  - `retry` — reintento de una llamada al modelo antes del primer chunk
+ *  - `job` — ciclo de vida de un job en segundo plano (`exec` con `background:
+ *    true`, `jobs/manager.ts`): `created` → `started` (con `pid`) → `ended`
+ *    (estado, exit code, duración, bytes de cada stream y si su salida se
+ *    leyó); `read` cada vez que un agente lee su salida, `cancel` cuando se
+ *    pide cancelarlo y `notified` cuando el aviso de fin entra en el contexto
+ *    del agente. Nunca llevan la salida del job, solo recuentos.
  */
 export type TraceRuntimeEvent =
   | {
@@ -99,7 +111,38 @@ export type TraceRuntimeEvent =
       callId: string;
       reason: string;
     }
-  | { event: 'retry'; attempt: number; error: string };
+  | { event: 'retry'; attempt: number; error: string }
+  | TraceJobEvent;
+
+export type TraceJobEvent =
+  | { event: 'job'; phase: 'created'; jobId: string; command: string; cwd: string; scope: string }
+  | { event: 'job'; phase: 'started'; jobId: string; pid: number | null }
+  | {
+      event: 'job';
+      phase: 'ended';
+      jobId: string;
+      status: 'completed' | 'failed' | 'cancelled';
+      exitCode: number | null;
+      reason: string;
+      durationMs: number;
+      stdoutBytes: number;
+      stderrBytes: number;
+      /** Caracteres que el límite de buffer descartó antes de que nadie los leyera. */
+      droppedChars: number;
+      /** Si algún agente había leído su salida al terminar (ver también `read`). */
+      outputRead: boolean;
+    }
+  | {
+      event: 'job';
+      phase: 'read';
+      jobId: string;
+      scope: string;
+      offset: number;
+      chars: number;
+      finished: boolean;
+    }
+  | { event: 'job'; phase: 'cancel'; jobId: string; scope: string; reason: string }
+  | { event: 'job'; phase: 'notified'; jobId: string; status: string; scope: string };
 
 export type TraceRecord =
   /** Cabecera: una por proceso que escribe en el fichero (arranque o reanudación). */

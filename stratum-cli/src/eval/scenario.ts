@@ -20,6 +20,7 @@ export const SCENARIO_GROUPS = [
   'multi-agent',
   'cache',
   'auxiliary',
+  'jobs',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
 
@@ -71,6 +72,14 @@ export const CHECKABLE_METRICS = [
   'auxiliaryCacheHitRate',
   'promptTokens',
   'completionTokens',
+  'foregroundExecCalls',
+  'backgroundExecCalls',
+  'jobsStarted',
+  'jobsCompleted',
+  'jobsFailed',
+  'jobsCancelled',
+  'jobsOutputRead',
+  'jobNotifications',
 ] as const;
 
 /** Causas de una rotura de caché que un criterio `cache_break` puede exigir. */
@@ -239,13 +248,23 @@ const CheckSchema = z.discriminatedUnion('type', [
       ...base,
     })
     .strict(),
+  /**
+   * Los procesos cuyos pids dejó escritos el escenario en `pidFile` (un JSON:
+   * número, lista u objeto de números) ya no existen. Es lo que distingue
+   * «el job figura como cancelado» de «su árbol de procesos murió de verdad».
+   */
+  z.object({ type: z.literal('processes_gone'), pidFile: relPath, ...base }).strict(),
   /** Decisiones del runtime registradas en la traza (vetos, confirmaciones, reintentos). */
   z
     .object({
       type: z.literal('runtime_event'),
-      event: z.enum(['veto', 'confirmation', 'retry']),
+      event: z.enum(['veto', 'confirmation', 'retry', 'job']),
       tool: z.string().optional(),
-      /** `veto`: su `source`. `confirmation`: su `decision`. */
+      /**
+       * `veto`: su `source`. `confirmation`: su `decision`. `job`: su fase
+       * (`started`, `ended`, `read`…) o fase y resultado (`ended:cancelled`,
+       * `ended:session-closed`: el estado o el motivo del cierre).
+       */
       detail: z.string().optional(),
       min: z.number().int().nonnegative().default(1),
       max: z.number().int().nonnegative().optional(),

@@ -1,5 +1,6 @@
 import type { StratumConfig } from '../../config/schema.js';
 import { closeSshPool } from '../ssh/runtime.js';
+import { shutdownAllJobs } from '../../jobs/registry.js';
 import { createExecAuditLog, type AuditLog } from './audit.js';
 
 /**
@@ -19,10 +20,13 @@ export function getExecAuditLog(config: StratumConfig): AuditLog {
 }
 
 /**
- * Teardown de `chat` y `run` (§12.12): cierra las conexiones SSH vivas (sin
- * esto el event loop no termina) y vacía la cola de auditoría.
+ * Teardown de `chat` y `run` (§12.12): cancela los jobs en segundo plano que
+ * sigan vivos (con su árbol de procesos), cierra las conexiones SSH (sin esto
+ * el event loop no termina) y vacía la cola de auditoría.
  */
 export async function closeExecRuntime(): Promise<void> {
+  // Antes que nada: cancelar un job escribe su cierre en la auditoría.
+  await shutdownAllJobs();
   const audit = auditLog;
   auditLog = null;
   auditConfig = null;

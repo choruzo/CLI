@@ -3,6 +3,7 @@ import type { StratumConfig } from '../config/schema.js';
 import type { IProvider } from '../providers/base.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
 import type { TraceScope } from '../trace/recorder.js';
+import type { JobManager } from '../jobs/manager.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -202,6 +203,13 @@ export interface ToolContext {
    * no quedarían registrados).
    */
   trace?: TraceScope;
+  /**
+   * Jobs en segundo plano de la sesión (`exec` con `background: true` y las
+   * tools `*_job*`). Ausente → la sesión no los ofrece (Stratum Desktop).
+   */
+  jobs?: JobManager;
+  /** Scope de quien llama dentro de la sesión: `main` o el id del subagente. */
+  jobScope?: string;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */
@@ -333,6 +341,15 @@ export interface RunOptions {
    * resto. Sin ella no se graba nada.
    */
   trace?: TraceScope;
+  /**
+   * Jobs en segundo plano de la sesión. Lo aporta `StratumAgent` y lo heredan
+   * los subagentes (cada uno con su `jobScope`). El loop lo pasa al
+   * `ToolContext` y, antes de cada iteración, recoge de él los jobs de su scope
+   * que terminaron para contárselo al modelo.
+   */
+  jobs?: JobManager;
+  /** Scope de este loop dentro de la sesión. Default `main`. */
+  jobScope?: string;
 }
 
 /** Registro que el loop padre pasa a `onSubagentPersist` (Hito 8B). */

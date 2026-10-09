@@ -1,0 +1,102 @@
+{
+  "id": "background-job-cancel",
+  "group": "jobs",
+  "title": "Cancelar un job termina el proceso y sus descendientes",
+  "description": "Un job largo lanza a su vez un proceso hijo. Al cancelarlo no basta con que figure como cancelled: los dos procesos tienen que haber muerto.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "tree.js": "// Deja un arbol de dos procesos vivo y apunta sus pids: lo que hay que ver morir.\nconst { spawn } = require('child_process');\nconst fs = require('fs');\nconst child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });\nfs.writeFileSync('pids.json', JSON.stringify({ parent: process.pid, child: child.pid }));\nconsole.log('ready');\nsetInterval(() => {}, 1000);\n"
+    }
+  },
+  "input": "Lanza `node tree.js` en segundo plano, espera a que escriba `ready` y entonces cancelalo. Confirmame que ya no esta corriendo.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node tree.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_output",
+          "args": {
+            "jobId": "1",
+            "waitMs": 20000
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "cancel_job",
+          "args": {
+            "jobId": "1"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Cancelado: el job #1 ya no esta corriendo."
+    }
+  ],
+  "expect": {
+    "description": "El job queda cancelled y no sobrevive ningun proceso de su arbol.",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "pids.json"
+      },
+      {
+        "type": "processes_gone",
+        "pidFile": "pids.json"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "ended:cancelled",
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "cancel",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_output",
+        "value": "ready",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "cancel_job",
+        "value": "status=\"cancelled\"",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsCancelled",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

@@ -9,7 +9,7 @@
  *    dependencia nativa. `exec` lo rechaza en preflight.
  */
 import { join, resolve } from 'path';
-import { execa } from 'execa';
+import { execa, execaSync } from 'execa';
 import type { ToolContext } from '../../../agent/types.js';
 import type { StratumConfig } from '../../../config/schema.js';
 import { scrubGitEnv } from '../../../git/env.js';
@@ -127,11 +127,14 @@ export class ByteBudget {
  * `taskkill` en el cwd o el PATH no debe ser lo que se ejecute. Si no se puede
  * lanzar, `fallback` mata al menos el proceso directo.
  */
+function taskkillPath(): string {
+  const systemRoot = process.env['SystemRoot'] ?? 'C:\Windows';
+  return join(systemRoot, 'System32', 'taskkill.exe');
+}
+
 function killWindowsTree(pid: number, fallback: () => void): void {
-  const systemRoot = process.env['SystemRoot'] ?? 'C:\\Windows';
-  const taskkill = join(systemRoot, 'System32', 'taskkill.exe');
   try {
-    execa(taskkill, ['/T', '/F', '/PID', String(pid)], {
+    execa(taskkillPath(), ['/T', '/F', '/PID', String(pid)], {
       reject: false,
       stdio: 'ignore',
       windowsHide: true,
@@ -155,6 +158,87 @@ function safely(fn: () => void): void {
   }
 }
 
+export type LocalSubprocess = ReturnType<typeof execa>;
+
+/**
+ * Lanza `command` en el shell local, igual para un `exec` en primer plano que
+ * para un job en segundo plano (`jobs/manager.ts`): mismo intérprete, mismo
+ * entorno saneado y, en POSIX, grupo de procesos propio para poder cerrar el
+ * árbol entero. Lanza si el proceso no se puede crear.
+ */
+export function spawnLocalShell(command: string, cwd: string, stdin?: string): LocalSubprocess {
+  const options = {
+    cwd,
+    // Entorno heredado MENOS las variables de enrutado de git (git/env.ts).
+    // `extendEnv: false` es obligatorio: con el merge por defecto de execa,
+    // quitarlas de la copia no las quitaría del proceso hijo.
+    env: scrubGitEnv(),
+    extendEnv: false,
+    // Sin buffer interno: execa acumula por defecto hasta `maxBuffer`
+    // (100 MB) y falla después. La salida la consumen los listeners de quien llama.
+    buffer: false,
+    reject: false,
+    ...(stdin !== undefined ? { input: stdin } : { stdin: 'ignore' as const }),
+    // En POSIX, grupo de procesos propio para matar shell + hijos de una vez.
+    ...(!IS_WINDOWS && { detached: true }),
+  } as const;
+  return IS_WINDOWS
+    ? execa('pwsh.exe', windowsCommandArgs(command), options)
+    : execa(command, { ...options, shell: true });
+}
+
+/**
+ * Señal al árbol entero de un proceso lanzado con `spawnLocalShell`: en POSIX
+ * a su grupo; en Windows, `taskkill /T /F` (allí `sig` no se respeta: el cierre
+ * es siempre forzado). `direct` mata solo el proceso directo, como respaldo.
+ */
+export function signalProcessTree(
+  pid: number | undefined,
+  sig: NodeJS.Signals,
+  direct: () => void,
+): void {
+  if (pid !== undefined && !IS_WINDOWS) {
+    try {
+      process.kill(-pid, sig);
+    } catch {
+      /* el grupo ya no existe */
+    }
+  } else if (pid !== undefined) {
+    // En Windows `kill()` solo termina pwsh.exe: sus hijos (node, los
+    // workers de un `npm test`, un servidor de desarrollo) quedaban
+    // huérfanos y vivos, y con los pipes abiertos. No hay SIGTERM que
+    // respete un proceso de consola, así que el árbol se cierra forzado.
+    killWindowsTree(pid, direct);
+  } else {
+    safely(direct);
+  }
+}
+
+/**
+ * Cierre SÍNCRONO y forzado del árbol, para el `exit` del proceso: ahí ya no
+ * corre nada asíncrono, y un job vivo no puede sobrevivir a Stratum.
+ */
+export function killProcessTreeSync(pid: number): void {
+  if (!IS_WINDOWS) {
+    try {
+      process.kill(-pid, 'SIGKILL');
+    } catch {
+      /* el grupo ya no existe */
+    }
+    return;
+  }
+  try {
+    execaSync(taskkillPath(), ['/T', '/F', '/PID', String(pid)], {
+      reject: false,
+      stdio: 'ignore',
+      windowsHide: true,
+      timeout: 5000,
+    });
+  } catch {
+    /* sin taskkill no hay más que hacer aquí */
+  }
+}
+
 export const localBackend: IExecBackend = {
   kind: 'local',
   capabilities: { pty: false, stdin: true, cwd: true, maxBytes: true },
@@ -166,26 +250,9 @@ export const localBackend: IExecBackend = {
   run(_target: ExecutionTarget, req: ExecRequest, ctx: ToolContext): Promise<ExecOutcome> {
     const cwd = req.cwd ? resolve(ctx.cwd, req.cwd) : ctx.cwd;
 
-    let subprocess: ReturnType<typeof execa>;
+    let subprocess: LocalSubprocess;
     try {
-      const options = {
-        cwd,
-        // Entorno heredado MENOS las variables de enrutado de git (git/env.ts).
-        // `extendEnv: false` es obligatorio: con el merge por defecto de execa,
-        // quitarlas de la copia no las quitaría del proceso hijo.
-        env: scrubGitEnv(),
-        extendEnv: false,
-        // Sin buffer interno: execa acumula por defecto hasta `maxBuffer`
-        // (100 MB) y falla después. La salida la consumen los listeners de abajo.
-        buffer: false,
-        reject: false,
-        ...(req.stdin !== undefined ? { input: req.stdin } : { stdin: 'ignore' as const }),
-        // En POSIX, grupo de procesos propio para matar shell + hijos de una vez.
-        ...(!IS_WINDOWS && { detached: true }),
-      } as const;
-      subprocess = IS_WINDOWS
-        ? execa('pwsh.exe', windowsCommandArgs(req.command), options)
-        : execa(req.command, { ...options, shell: true });
+      subprocess = spawnLocalShell(req.command, cwd, req.stdin);
     } catch (err) {
       return Promise.reject(new ExecSpawnError((err as Error).message));
     }
@@ -201,28 +268,8 @@ export const localBackend: IExecBackend = {
       let settled = false;
       const timers: ReturnType<typeof setTimeout>[] = [];
 
-      const signalTree = (sig: NodeJS.Signals): void => {
-        const pid = subprocess.pid;
-        if (pid !== undefined && !IS_WINDOWS) {
-          try {
-            process.kill(-pid, sig);
-          } catch {
-            /* el grupo ya no existe */
-          }
-        } else if (pid !== undefined) {
-          // En Windows `kill()` solo termina pwsh.exe: sus hijos (node, los
-          // workers de un `npm test`, un servidor de desarrollo) quedaban
-          // huérfanos y vivos, y con los pipes abiertos. No hay SIGTERM que
-          // respete un proceso de consola, así que el árbol se cierra forzado.
-          killWindowsTree(pid, () => subprocess.kill(sig));
-        } else {
-          try {
-            subprocess.kill(sig);
-          } catch {
-            /* ya terminado */
-          }
-        }
-      };
+      const signalTree = (sig: NodeJS.Signals): void =>
+        signalProcessTree(subprocess.pid, sig, () => subprocess.kill(sig));
 
       const cleanup = (): void => {
         for (const t of timers) clearTimeout(t);

@@ -43,7 +43,9 @@ import {
 } from '../tools/question.js';
 import { TODO_TOOL } from '../tools/todo.js';
 import { untilAborted } from './concurrency.js';
-import { CANCELLED_BY_USER } from './cancel.js';
+import { CANCELLED_BY_USER, appendRuntimeNotice } from './cancel.js';
+import { MAIN_JOB_SCOPE } from '../jobs/types.js';
+import { formatJobNotifications } from '../tools/jobs.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import {
   TddError,
@@ -802,6 +804,7 @@ export class ReactLoop {
     );
     // `requirePlan` escala a modo plan una sola vez por turno.
     let planEscalated = false;
+    const jobScope = opts?.jobScope ?? MAIN_JOB_SCOPE;
 
     // Hito 2.5 (F7): la tanda de preguntas es ÚNICA por run. Una segunda llamada
     // a `question` se rechaza con tool_error recuperable para que un modelo
@@ -936,6 +939,30 @@ export class ReactLoop {
       // declara la tarea terminada en cuanto los tests pasan una vez, así que
       // el recordatorio de lo que le falta tiene que estar delante cada turno.
       applyTddToSystemMessage(this.messages, this.tdd.injection());
+
+      // Jobs en segundo plano — punto seguro de entrega. Los jobs de este
+      // scope que terminaron desde la última vez se cuentan aquí, justo antes
+      // de componer la petición: entre turnos (el aviso acompaña a lo que
+      // escribió el usuario) o a mitad de uno (acompaña al último resultado de
+      // tool). Nunca se lanza una llamada al modelo solo para avisar: un job
+      // que termina con el agente parado espera al siguiente turno.
+      const jobNotices = opts?.jobs?.takeNotifications(jobScope) ?? [];
+      if (jobNotices.length > 0) {
+        appendRuntimeNotice(
+          this.messages,
+          redactText(formatJobNotifications(jobNotices), this.config),
+        );
+        yield {
+          type: 'job_notice',
+          jobs: jobNotices.map((n) => ({
+            id: n.id,
+            command: n.command,
+            status: n.status,
+            exitCode: n.exitCode,
+            durationMs: n.durationMs,
+          })),
+        };
+      }
 
       const request: CompletionRequest = {
         messages: this.messages,
@@ -1467,6 +1494,8 @@ export class ReactLoop {
           confirmDestructive: opts?.onConfirmDestructive,
           readOnly,
           trace: opts?.trace,
+          jobs: opts?.jobs,
+          jobScope,
         };
 
         const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);

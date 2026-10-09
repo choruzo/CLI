@@ -10,6 +10,7 @@
 import type { EnvironmentConfig, StratumConfig } from '../config/schema.js';
 import { formatTarget, parseTarget } from './exec/target.js';
 import { readOnlyCommandVerdict } from './readonly-commands.js';
+import { JOB_TOOLS } from '../jobs/types.js';
 
 export type EnvironmentTier = 'production' | 'staging' | 'development';
 export type EnvironmentPolicy = 'allow' | 'ask' | 'confirm-always';
@@ -107,7 +108,16 @@ export interface CallEffects {
 /** Tools que solo leen de este equipo. */
 const LOCAL_READERS = new Set(['read_file', 'glob', 'list_directory', 'grep']);
 /** Tools que solo consultan fuera de cualquier target (red pública, memoria). */
-const PURE_READERS = new Set(['web_search', 'web_fetch', 'recall_decisions']);
+const PURE_READERS = new Set([
+  'web_search',
+  'web_fetch',
+  'recall_decisions',
+  // Jobs en segundo plano: mirar un job no cambia nada, y `cancel_job` solo
+  // detiene un proceso que la propia sesión lanzó — poder pararlo tiene que
+  // seguir siendo posible en read-only y en modo plan. Lo que el job HACE ya
+  // se clasificó al crearlo, en su `exec`.
+  ...JOB_TOOLS,
+]);
 const LOCAL_WRITERS = new Set(['write_file', 'edit_file']);
 
 function str(v: unknown): string | undefined {

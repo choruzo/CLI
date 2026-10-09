@@ -7,6 +7,7 @@ import { redactText } from '../security/redact-output.js';
 import { getLogger } from '../logging/index.js';
 import { normalizeUsage, type RawTimings, type RawUsage } from '../providers/cache.js';
 import {
+  TRACE_CAP_JOBS,
   TRACE_CAP_LLM_ORIGIN,
   TRACE_CAP_RUNTIME,
   TRACE_FORMAT_VERSION,
@@ -213,7 +214,7 @@ export class TraceRecorder {
         sessionId: this.opts.sessionId,
         ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
         ...(this.opts.version ? { version: this.opts.version } : {}),
-        caps: [TRACE_CAP_RUNTIME, TRACE_CAP_LLM_ORIGIN],
+        caps: [TRACE_CAP_RUNTIME, TRACE_CAP_LLM_ORIGIN, TRACE_CAP_JOBS],
       });
     }
     this.writer.write(record);
@@ -261,6 +262,15 @@ const VETO_LABEL = {
   environment: 'la política de entorno',
   toolset: 'el toolset de la sesión',
   plan: 'el modo plan',
+} as const;
+
+const JOB_PHASE_LABEL = {
+  created: 'creado',
+  started: 'arrancó',
+  ended: 'terminó',
+  read: 'salida leída',
+  cancel: 'cancelación pedida',
+  notified: 'aviso entregado al agente',
 } as const;
 
 /** Primera línea con contenido, recortada: el nombre de un mensaje inyectado. */
@@ -637,6 +647,13 @@ class Scope implements TraceScope {
           plan: this.rec.safe(ev.plan),
         });
         break;
+      case 'job_notice':
+        this.point(
+          'context',
+          `Aviso de jobs: ${ev.jobs.map((j) => `#${j.id} ${j.status}`).join(', ')}`,
+          { jobs: this.rec.safe(ev.jobs) },
+        );
+        break;
       case 'done':
         // En un subagente no hay `turnEnd`: su `done` cierra lo que quedó abierto.
         if (this.parent) this.closeOpen();
@@ -655,6 +672,13 @@ class Scope implements TraceScope {
         this.point('notice', `Confirmación ${CONFIRMATION_LABEL[ev.decision]}: ${ev.tool}`, data);
       } else if (ev.event === 'veto') {
         this.point('notice', `Vetada por ${VETO_LABEL[ev.source]}: ${ev.tool}`, data);
+      } else if (ev.event === 'job') {
+        this.point(
+          'notice',
+          `Job #${ev.jobId}: ${JOB_PHASE_LABEL[ev.phase]}${ev.phase === 'ended' ? ` (${ev.status})` : ''}`,
+          data,
+          ev.phase === 'ended' && ev.status === 'failed' ? 'error' : undefined,
+        );
       } else {
         this.point('notice', `Reintento ${ev.attempt} de la llamada al modelo`, data);
       }

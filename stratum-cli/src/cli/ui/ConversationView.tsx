@@ -7,6 +7,8 @@ import { InputArea } from './InputArea.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
 import { PlanView } from './PlanView.js';
 import { TodoView } from './TodoView.js';
+import { JobsView, visibleJobs } from './JobsView.js';
+import type { BackgroundJob } from '../../jobs/types.js';
 import { PlanApproval } from './PlanApproval.js';
 import { QuestionPrompt } from './QuestionPrompt.js';
 import { FatalError } from './FatalError.js';
@@ -76,6 +78,11 @@ interface Props {
   todos?: TodoItem[];
   /** Turnos con tareas abiertas sin actualizar (marca de staleness). */
   todoStale?: number;
+  // ----- Jobs en segundo plano -----
+  /** Jobs de la sesión; el panel solo pinta los vivos y los recién terminados. */
+  jobs?: BackgroundJob[];
+  /** Reloj con el que se calcula el tiempo transcurrido de cada job. */
+  jobsNow?: number;
   // ----- Tanda única de preguntas (Hito 2.5, F7) -----
   /** Preguntas pendientes de responder; null fuera del gate. */
   pendingQuestions?: QuestionItem[] | null;
@@ -120,6 +127,8 @@ export function ConversationView({
   onPlanReject,
   todos,
   todoStale,
+  jobs,
+  jobsNow,
   pendingQuestions,
   onQuestionsSubmit,
   onQuestionsCancel,
@@ -128,8 +137,12 @@ export function ConversationView({
   const { stdout } = useStdout();
   const terminalRows = stdout.rows ?? 24;
   const panelMaxSteps = Math.max(2, Math.min(5, Math.floor(terminalRows / 5)));
+  const jobsClock = jobsNow ?? Date.now();
+  const showJobs = Boolean(jobs && visibleJobs(jobs, jobsClock).length > 0);
   const pinnedPanels =
-    Number(Boolean(plan && planMode === 'execute')) + Number(Boolean(todos?.length));
+    Number(Boolean(plan && planMode === 'execute')) +
+    Number(Boolean(todos?.length)) +
+    Number(showJobs);
   const availableConversationRows = Math.max(8, terminalRows - pinnedPanels * (panelMaxSteps + 3));
   return (
     <Box flexDirection="column" width="100%">
@@ -153,6 +166,7 @@ export function ConversationView({
       {todos && todos.length > 0 && (
         <TodoView items={todos} stale={todoStale ?? 0} maxSteps={panelMaxSteps} />
       )}
+      {showJobs && <JobsView jobs={jobs ?? []} now={jobsClock} maxRows={panelMaxSteps} />}
       <MessageList
         completedItems={completedItems}
         currentItem={currentItem}

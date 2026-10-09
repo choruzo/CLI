@@ -7,6 +7,7 @@
  * análogo a `ExitPlanMode` de Claude Code.
  */
 import type { Plan, PlanStep, PlanStepStatus } from './types.js';
+import { JOB_TOOLS } from '../jobs/types.js';
 
 /**
  * Allowlist de tools en Fase 1 (planificación, read-only). Cualquier tool fuera
@@ -24,6 +25,9 @@ export const PLAN_ALLOWLIST: ReadonlySet<string> = new Set([
   // `question` es de control (no toca disco) y en Fase 1 es cuando más valor
   // tiene: resolver una ambigüedad antes de proponer el plan (Hito 2.5, F7).
   'question',
+  // Jobs en segundo plano: en Fase 1 solo existen los que lanzó un `exec`
+  // read-only, y mirarlos o pararlos no cambia el sistema.
+  ...JOB_TOOLS,
 ]);
 
 /**

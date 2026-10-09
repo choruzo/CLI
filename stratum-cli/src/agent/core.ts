@@ -34,6 +34,7 @@ import { truncateToolOutput } from '../tools/truncate.js';
 import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { ChangeTracker } from './risk.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
+import { JobManager } from '../jobs/manager.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
@@ -149,6 +150,13 @@ export class StratumAgent {
   private readonly tdd = new TddLedger();
   /** Versión de cada fichero leída por el agente: protege `write_file` de pisar cambios ajenos. */
   private readonly fileState = new FileStateTracker();
+  /**
+   * Jobs en segundo plano de la sesión (`exec` con `background: true`). De
+   * sesión, como la lista de tareas: un job sobrevive al turno que lo lanzó.
+   * La UI se suscribe aquí para pintarlos. `undefined` si están desactivados o
+   * en el preset `assistant` (Desktop no ofrece `exec`).
+   */
+  readonly jobs: JobManager | undefined;
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
   /**
@@ -196,6 +204,8 @@ export class StratumAgent {
   ) {
     this.memoryManager = new MemoryManager(config);
     this.preset = options?.promptPreset ?? 'coding';
+    this.jobs =
+      this.preset === 'coding' && config.tools.jobs.enabled ? new JobManager(config) : undefined;
     this.workspace = options?.workspace;
     this.workspaceFilesExpiredAt = options?.workspaceFilesExpiredAt;
     this._readOnly = options?.readOnly === true;
@@ -823,7 +833,8 @@ export class StratumAgent {
 
   /** Las opciones de la sesión (read-only) sobre las del turno. Nunca relajan. */
   private withSessionOptions(opts?: RunOptions): RunOptions {
-    return this._readOnly ? { ...opts, readOnly: true } : (opts ?? {});
+    const base: RunOptions = this._readOnly ? { ...opts, readOnly: true } : (opts ?? {});
+    return this.jobs ? { ...base, jobs: this.jobs } : base;
   }
 
   /**

@@ -7,6 +7,7 @@ import { globTool } from './fs/glob.js';
 import { listDirectoryTool } from './fs/list.js';
 import { grepTool } from './fs/grep.js';
 import { createExecTool } from './exec/exec.js';
+import { createJobTools } from './jobs.js';
 import { webSearchTool } from './web/search.js';
 import { webFetchTool } from './web/fetch.js';
 import { storeDecisionTool } from './memory/store-decision.js';
@@ -29,6 +30,10 @@ export function registerBuiltinTools(registry: ToolRegistry, config: StratumConf
   // Hito 16 — ejecución unificada: `local` siempre, `ssh:<alias>` si hay inventario.
   // La descripción se genera con los targets de esta config.
   registry.register(createExecTool(config));
+  // Jobs en segundo plano: inspección de lo que `exec` lanza con `background: true`.
+  if (config.tools.jobs.enabled) {
+    for (const tool of createJobTools(config)) registry.register(tool);
+  }
   registry.register(webSearchTool);
   registry.register(webFetchTool);
   registry.register(storeDecisionTool);

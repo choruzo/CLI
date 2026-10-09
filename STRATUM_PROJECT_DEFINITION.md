@@ -2736,3 +2736,223 @@ Los perfiles de config sobrescriben a los integrados por nombre; `auto` está re
 #### Fuera de alcance
 
 Un contexto activo *declarado* por el usuario (kube-context, cuenta cloud: Hito 20), read-only por defecto al entrar en un entorno de producción sin `requirePlan`, y la clasificación read-only de tools MCP (hoy cuentan como mutantes).
+### Jobs en segundo plano (`src/jobs/`)
+
+`exec` con `background: true` lanza el comando como un **job** del `JobManager` de la sesión y vuelve con su `jobId` sin esperar; el agente sigue trabajando y se entera cuando termina (§12.19). No es un `comando &`: el proceso es de Stratum de principio a fin.
+
+- `types.ts` — **sin imports** (lo lee la UI): `BackgroundJob`, `JobOwner { sessionId, scope }`, estados `running|completed|failed|cancelled` + `endReason` (`exit`·`timeout`·`cancelled`·`scope-closed`·`session-closed`·`spawn-error`), nombres de las tools (`JOB_TOOLS`) y formateadores (`formatJobEndLine`).
+- `manager.ts` — `JobManager`, **uno por `StratumAgent`** (`agent.jobs`; `undefined` con `tools.jobs.enabled: false` o en el preset `assistant`). Lanza con `spawnLocalShell` de `tools/exec/backends/local.ts` — el mismo shell, entorno saneado y grupo de procesos que un `exec` normal — y cierra con `signalProcessTree` (SIGTERM al grupo → SIGKILL a los `KILL_GRACE_MS`; en Windows `taskkill /T /F`). El final se decide con el `exit` del proceso, no con el cierre de los pipes (un nieto que los herede los mantendría abiertos), y en POSIX se barre el grupo al terminar. Solo target `local`, sin persistencia: un job no sobrevive a la sesión.
+- `output.ts` — `JobOutput`: stdout y stderr en un registro único con offsets absolutos. **Se redacta al entrar** (lo guardado ya es seguro para la UI, la traza y el modelo) y solo por líneas completas, reteniendo la línea a medias y un bloque PEM abierto: un secreto partido entre dos chunks no se libra. Pasado `maxOutputChars` conserva **la cola**; `maxTotalOutputChars` libera primero la salida de los jobs terminados.
+- `registry.ts` — los managers con jobs. `closeExecRuntime()` llama a `shutdownAllJobs()` **antes** de cerrar la auditoría, así que todo teardown que ya existía cancela los jobs vivos sin tocarlo; un gancho en `process.on('exit')` mata el árbol de forma síncrona (`killProcessTreeSync`) si se sale por otra vía.
+- `tools/jobs.ts` — `list_jobs`, `get_job_status`, `get_job_output` (`offset`/`maxChars`/`tail`; sin `offset` continúa donde ese scope lo dejó) y `cancel_job`. `waitMs` espera sin sondear (`JobManager.waitFor`). Son tools normales del dispatcher. **Su visibilidad sigue a la de `exec`** en todos los filtros (`isToolVisibleForProfile`, `isToolVisibleInMode`): quien puede lanzar un job puede leerlo y pararlo.
+
+**`background` no cambia ninguna guarda.** Es un parámetro más de `exec`, así que la llamada pasa por el mismo `preflight`, read-only, entorno y confirmación; `callEffects` e `isDestructive` solo miran `command` y `target` (un test lo fija). Lo que se añade en `preflight` son requisitos del modo: solo `local`, jobs activados, `ToolContext.jobs` presente. Un job que termina mal **no es un error de la tool**: `exec` devolvió `ok` al lanzarlo.
+
+**Desligar un proceso es un veto** (`shellDetachReason` en `tools/guards.ts`, clave `shellDetach` de `tools.guardedCommands`, default `block`, solo target local): `cmd &`, `nohup`, `setsid`, `disown`, `Start-Process`, `start`, `Start-Job`, `screen -dm`, `tmux new -d`, también dentro de un `sh -c`. Sin eso, el bypass del JobManager sería una línea. No lo es `a & b; wait` ni el `&` de llamada de PowerShell (`& $cmd`). Los envoltorios saltados viajan en `EffectiveInvocation.wrappers`.
+
+**Ownership.** `ToolContext.jobScope` (`RunOptions.jobScope`): `main` o el id del subagente. Un scope solo ve y toca sus jobs; el principal, todos los de la sesión; `tools.jobs.subagentAccess` (`own`|`read`|`manage`) lo amplía. Un job ajeno responde como uno que no existe. Al terminar un subagente, `executeDelegations` llama a `closeScope` y sus jobs vivos se cancelan.
+
+**Aviso al agente.** `JobManager.takeNotifications(scope)` entrega una sola vez los jobs terminados que su dueño no conoce (no los que ya vio con una tool). El `ReactLoop` la consulta **antes de componer cada petición** y anexa el aviso al último `user` o `tool` con `appendRuntimeNotice` (`agent/cancel.ts`), emitiendo `job_notice`. No es un `user` nuevo: a mitad de turno le quitaría el ancla a la compresión (§12.4) y rompería la alternancia; ni va en el system prompt, que tiraría la caché de prefijo. **Nunca se lanza una llamada al modelo solo para avisar**: un job que termina con el agente parado espera al turno siguiente. El despertador automático no existe todavía; su punto de enganche es `JobManager.subscribe`.
+
+**Traza, auditoría y UI.** `TraceRuntimeEvent` `job` (`created`·`started`·`ended`·`read`·`cancel`·`notified`), cap `jobs`: recuentos, nunca la salida. `isBackgroundStep` cubre el aviso de un job que termina con el turno cerrado, para no alargarlo. `exec-audit.jsonl` lleva `background`, `jobId`, `pid` y un registro `background_started` más el de cierre. La UI no espera a un evento del turno: `App.tsx` y `run` se suscriben al manager (`<JobsView>`, `/jobs`, líneas `[background job #3 completed · exit 1 · 38.2s]`).
+
+'''
+
+patch('CLAUDE.md', [
+    ('### Entornos, read-only y perfil de sesión (Hito 17, §12.18)',
+     JOBS_SECTION + '### Entornos, read-only y perfil de sesión (Hito 17, §12.18)'),
+    ('| `DestructiveConfirm.tsx` | Confirmación destructiva; variante de entorno con alias tecleado (Hito 17) |',
+     '| `DestructiveConfirm.tsx` | Confirmación destructiva; variante de entorno con alias tecleado (Hito 17) |\n'
+     '| `JobsView.tsx` | Jobs en segundo plano: panel anclado con los vivos y los terminados hace menos de un minuto (`#3  npm test  running  18s`). `/jobs` lista todos y `/jobs cancel <id>` para uno |'),
+    ('| Orden del prompt |',
+     '| Jobs en segundo plano | Todo proceso que sobreviva a su `exec` es un job del `JobManager`: desligarlo desde el shell se veta. `background` no altera ninguna guarda. Los jobs se cancelan al cerrar la sesión (sin persistencia ni daemon) y el aviso de fin nunca fuerza por sí solo una llamada al modelo |\n| Orden del prompt |'),
+])
+
+# --------------------------------------------------------------------------- docs/eval.md
+patch('stratum-cli/docs/eval.md', [
+    ('''| `runtime_event` | `event` (`veto`·`confirmation`·`retry`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto o `decision` de la confirmación) |''',
+     '''| `runtime_event` | `event` (`veto`·`confirmation`·`retry`·`job`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto, `decision` de la confirmación o, en un `job`, su fase —`started`, `read`, `cancel`, `notified`— o fase y resultado: `ended:failed`, `ended:session-closed`) |
+| `processes_gone` | `pidFile` | los procesos cuyos pids dejó el escenario en ese fichero (un JSON: número, lista u objeto de números) ya no existen. Distingue «el job figura como cancelado» de «su árbol murió de verdad»; vale en los dos modos |'''),
+    ('''`auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate`. Una métrica''',
+     '''`auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate`; y las de jobs en segundo plano:
+`foregroundExecCalls`, `backgroundExecCalls`, `jobsStarted`, `jobsCompleted`, `jobsFailed`,
+`jobsCancelled`, `jobsOutputRead`, `jobNotifications`. Una métrica'''),
+    ('''| `stopReason`, `fatalErrors`, `warnings`, `compressions` | Tal cual de la traza. |''',
+     '''| `stopReason`, `fatalErrors`, `warnings`, `compressions` | Tal cual de la traza. |
+| `foregroundExecCalls`, `backgroundExecCalls` | Llamadas a `exec` sin y con `background: true`. Las dos cuentan en `toolCalls` como siempre. |
+| `jobsStarted`, `jobsCompleted`, `jobsFailed`, `jobsCancelled` | Jobs en segundo plano que arrancaron y cómo terminaron. **Un job que falla no es un `toolError`**: la llamada a `exec` que lo lanzó salió bien. `null` en una traza sin el cap `jobs`. |
+| `jobsOutputRead`, `jobNotifications`, `jobOutputBytes` | Jobs cuya salida leyó algún agente, avisos de fin que el loop entregó al modelo, y bytes que escribieron (se conservasen o no). |'''),
+    ('''Antes esas decisiones solo existían como texto dentro del `tool_error`; contarlas exigía interpretar
+mensajes. El visor las pinta como un aviso más, sin cambios.''',
+     '''Antes esas decisiones solo existían como texto dentro del `tool_error`; contarlas exigía interpretar
+mensajes. El visor las pinta como un aviso más, sin cambios.
+
+Para los jobs en segundo plano (`exec` con `background: true`), `meta.caps` lleva `jobs` y cada job
+deja puntos `notice` con `data.event: "job"` y su `phase`:
+
+- `created` (`command` redactado, `cwd`, `scope`) → `started` (`pid`) → `ended` (`status`,
+  `exitCode`, `reason`, `durationMs`, `stdoutBytes`, `stderrBytes`, `droppedChars`, `outputRead`);
+- `read` cada vez que un agente lee su salida (`scope`, `offset`, `chars`, `finished`), `cancel`
+  cuando se pide pararlo y `notified` cuando el aviso de fin entra en el contexto del modelo.
+
+Llevan recuentos, **nunca la salida**. Un job termina cuando quiere, también con el turno ya
+cerrado: ese aviso se pinta pero no alarga el turno (`isBackgroundStep`), igual que una llamada
+auxiliar. No cuentan como `warnings`. El paso `exec` que lanza un job lleva `background: true` en
+su `input`, y el visor lo titula `exec [background]`.'''),
+    ('''## Escenarios corregidos, y por qué''',
+     '''### Procesos que se desligan de la sesión
+
+Una guarda aparte, solo para el target `local`: un comando que deja un proceso vivo fuera del
+control de Stratum se veta (`shellDetachReason`; clave `shellDetach` de `tools.guardedCommands`,
+`block` por defecto). Sin ella, `exec` con `background: true` —que da dueño, salida y cancelación a
+un proceso largo— se esquivaría con un `&`.
+
+| Se veta | No se veta |
+|---|---|
+| `cmd &`, `cmd > log 2>&1 &`, `sh -c "cmd &"` | `a && b`, `2>&1`, `&>`, `>&2`, `\\|&` |
+| `nohup`, `setsid` (también tras `sudo`), `disown` | `a & b; wait` (el propio comando los espera) |
+| `Start-Process`, `saps`, `start`, `cmd /c start` | `& $cmd`, `{ & foo }`, `$x = & foo` (operador de llamada de PowerShell) |
+| `Start-Job`, `Start-ThreadJob` | `Start-Job { … } \\| Wait-Job \\| Receive-Job` |
+| `screen -dm`, `tmux new-session -d`, `systemd-run`, `daemonize` | `npm start`, `systemctl start nginx`, `docker start`, un `&` entre comillas |
+
+En un host remoto no se aplica: allí no hay `JobManager` que saltarse. Es best-effort, como el
+resto: un programa que se demoniza por su cuenta (doble `fork`) no pasa por el shell.
+
+## Escenarios corregidos, y por qué'''),
+])
+
+# --------------------------------------------------------------------------- .stratumrc.json.example
+patch('stratum-cli/.stratumrc.json.example', [
+    ('''    "auditLog": true,
+    "redaction": {''', '''    "auditLog": true,
+    "jobs": {
+      "enabled": true,
+      "maxRunning": 8,
+      "maxRetained": 50,
+      "maxOutputChars": 1000000,
+      "maxTotalOutputChars": 8000000,
+      "readChars": 8000,
+      "maxReadChars": 24000,
+      "maxRuntimeMs": 1800000,
+      "maxWaitMs": 60000,
+      "subagentAccess": "own"
+    },
+    "redaction": {'''),
+    ('''      "curlPipeShell": "confirm"
+    },''', '''      "curlPipeShell": "confirm",
+      "shellDetach": "block"
+    },'''),
+])
+
+# --------------------------------------------------------------------------- UI spec
+patch('STRATUM_UI_SPECIFICATION.md', [
+    ('''## 6. Paleta de Colores''', '''### 5.11 Jobs en segundo plano
+
+Un comando largo lanzado con `exec` y `background: true` no bloquea el turno. La UI lo sigue por su
+cuenta —se suscribe al `JobManager` de la sesión—, porque un job cambia de estado cuando quiere,
+haya o no un turno abierto.
+
+- **Avisos en la conversación**, como mensaje del sistema, al arrancar y al terminar:
+
+  ```
+  [background job #3 started: npm test]
+  [background job #3 completed · exit 1 · 38.2s]
+  ```
+
+  El segundo campo es el desenlace: `exit N`, `timeout`, `session closed`, `owner finished`. Un job
+  cancelado a mano no lleva ninguno.
+- **Panel `<JobsView>`**, anclado bajo la barra de estado como `<TodoView>`. Solo aparece si hay
+  jobs corriendo o terminados hace menos de un minuto; los vivos van primero:
+
+  ```
+  Jobs · 1 en curso
+  #3  npm test        running   18s
+  #4  cargo build     failed    exit 101
+  ```
+
+  Color por estado: `running` acento, `completed` verde, `failed` rojo, `cancelled` naranja. El
+  tiempo de los vivos avanza cada segundo; el reloj solo late mientras el panel está en pantalla.
+- **`/jobs`** lista todos los jobs de la sesión (también los que ya salieron del panel) y
+  **`/jobs cancel <id>`** para uno, con todo su árbol de procesos. El agente se entera de esa
+  cancelación en su siguiente turno, como de cualquier otro final.
+- `stratum run` escribe las mismas dos líneas por stderr.
+
+Al salir de Stratum los jobs que sigan vivos se cancelan. En Stratum Desktop no hay jobs: el modo
+asistente no ofrece `exec`.
+
+## 6. Paleta de Colores'''),
+])
+
+# --------------------------------------------------------------------------- definición §12.19
+SPEC = open(ROOT + 'STRATUM_PROJECT_DEFINITION.md', encoding='utf-8', newline='').read()
+crlf = '\r\n' in SPEC
+body = SPEC.replace('\r\n', '\n')
+start = body.index('### 12.18 — Entornos con blast radius')
+# Primer encabezado de nivel 2 después de §12.18: ahí acaba la sección 12.
+end = body.index('\n## ', start)
+SECTION = '''
+### 12.19 — Jobs en segundo plano gestionados por el runtime
+
+**Decisión: un comando largo que no debe bloquear el turno es un *job* del `JobManager` de la sesión —lanzado, vigilado y cerrado por Stratum—, nunca un proceso desligado desde el shell. `background` es un parámetro de `exec`, no una tool aparte, para que herede todas sus guardas por construcción.**
+
+#### Modelo
+
+```ts
+interface BackgroundJob {
+  id: string;                 // secuencial por sesión: "1", "2"…
+  command: string;            // ya redactado
+  cwd: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  pid?: number;
+  startedAt: number;
+  endedAt?: number;
+  exitCode?: number | null;
+  endReason?: 'exit' | 'timeout' | 'cancelled' | 'scope-closed' | 'session-closed' | 'spawn-error';
+  owner: { sessionId?: string; scope: string };   // scope: 'main' | id del subagente
+  stdoutBytes: number; stderrBytes: number;
+  outputChars: number; droppedChars: number;
+  outputRead: boolean;
+}
+```
+
+Estado final: `exit` con código 0 → `completed`; `exit` con otro código, `timeout` o `spawn-error` → `failed`; el resto → `cancelled`. Un proceso que mata Stratum tiene `exitCode: null` (el código es un artefacto de la muerte).
+
+#### Invariantes
+
+1. **Mismas guardas.** `exec` con `background: true` recorre el mismo camino que sin él: veto read-only, `preflight` (hard-deny, comandos guardados, rutas sensibles), regla de entorno y confirmación destructiva. `callEffects` e `isDestructive` no leen `background`. `preflight` solo añade requisitos del modo: target `local`, `tools.jobs.enabled`, y un `JobManager` en la sesión.
+2. **Dueño único.** Un proceso que sobrevive a su `exec` es un job. Desligarlo desde el shell (`&`, `nohup`, `setsid`, `disown`, `Start-Process`, `start`, `Start-Job`, `screen -dm`, `tmux new -d`) se veta en el target local (`shellDetach`, `block` por defecto, configurable como el resto de la capa 2).
+3. **Árbol entero.** Cancelar (o vencer el tiempo máximo) cierra el árbol de procesos: en POSIX, SIGTERM al grupo, SIGKILL tras `KILL_GRACE_MS` y cierre forzado del job `SETTLE_GRACE_MS` después; en Windows, `taskkill /T /F`. `cancel` no resuelve hasta que el job ha terminado.
+4. **Nada sobrevive a la sesión.** `closeExecRuntime()` cancela los jobs vivos (`session-closed`) antes de cerrar la auditoría, y un gancho en el `exit` del proceso mata de forma síncrona lo que quede. No hay persistencia, daemon ni reanudación.
+5. **La salida se redacta al entrar.** Lo que se guarda ya pasó por `redactText`, por líneas completas y sin partir un bloque PEM abierto. De ahí salen la lectura del agente, la UI y la traza.
+6. **Memoria acotada.** `tools.jobs.maxOutputChars` por job (se conserva la cola) y `maxTotalOutputChars` entre todos (se libera primero la de los jobs terminados). `maxRunning` jobs vivos y `maxRetained` terminados.
+7. **Ownership.** Un scope solo accede a sus jobs; el principal, a todos los de la sesión; `tools.jobs.subagentAccess` amplía lo que puede un subagente. Un job ajeno responde como uno inexistente. Al terminar un subagente sus jobs vivos se cancelan (`scope-closed`).
+8. **Un job que falla no es un error de la tool.** `exec` devolvió `ok` al lanzarlo; lo que pase después se cuenta en las métricas de jobs.
+
+#### Lectura
+
+`get_job_output { jobId, offset?, maxChars?, tail?, waitMs? }` devuelve `stdout`, `stderr`, `nextOffset`, `totalChars` y `finished`. El offset es absoluto sobre el registro combinado (en orden de llegada); sin `offset` continúa donde ese scope lo dejó. `maxChars` por defecto `readChars`, con tope `maxReadChars`; el corte se alinea a un salto de línea. Si lo pedido ya se descartó, se sirve desde lo primero que queda y se dice cuánto falta. `waitMs` (también en `get_job_status`) espera sin sondear, hasta `maxWaitMs`.
+
+#### Notificación
+
+Al pasar un job a un estado terminal:
+
+- `JobManager.subscribe` avisa en el acto (UI; futuro despertador).
+- El aviso al **agente** queda pendiente y `takeNotifications(scope)` lo entrega una sola vez. El `ReactLoop` la consulta antes de componer cada petición —el punto seguro— y anexa el texto al último mensaje `user` o `tool` del historial (`appendRuntimeNotice`), emitiendo `job_notice`:
+
+  ```
+  <background_jobs>
+  Background job #12 (npm test) completed with exit code 0 after 38.2s.
+  </background_jobs>
+  ```
+
+- No se crea un mensaje `user` (rompería la alternancia y desplazaría el ancla de §12.4) ni se toca el system prompt (invalidaría la caché de prefijo).
+- **No se fuerza una llamada al modelo.** Un job que termina con el agente parado espera al siguiente turno.
+- Si el dueño ya vio el final por una tool (`get_job_status`, `get_job_output`, `list_jobs`, `cancel_job`), no se le avisa.
+
+#### Traza y auditoría
+
+`TraceRuntimeEvent` `job`, con `meta.caps: ['jobs']`: `created`, `started` (pid), `ended` (estado, exit code, motivo, duración, bytes de cada stream, `outputRead`), `read`, `cancel`, `notified`. Sin la salida. `exec-audit.jsonl` añade `background`, `jobId` y `pid`, con un registro `background_started` y otro de cierre. Las métricas de tools no cambian.
+
+#### Fuera de alcance
+
+Persistencia tras reiniciar, daemon, jobs remotos por SSH, reanudación tras un crash, despertador automático del modelo y planificador.

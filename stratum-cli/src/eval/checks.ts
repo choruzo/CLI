@@ -62,6 +62,32 @@ function readWorkFile(ctx: CheckContext, path: string): string | null {
   }
 }
 
+/** Pids de un JSON cualquiera: un número, una lista o un objeto de números. */
+function pidsIn(text: string): number[] {
+  try {
+    const value: unknown = JSON.parse(text);
+    const list =
+      typeof value === 'number'
+        ? [value]
+        : value && typeof value === 'object'
+          ? Object.values(value)
+          : [];
+    return list.filter((v): v is number => typeof v === 'number' && Number.isInteger(v) && v > 0);
+  } catch {
+    return [];
+  }
+}
+
+function isAlive(pid: number): boolean {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch (err) {
+    // EPERM: existe pero es de otro usuario. Cualquier otro error: no existe.
+    return (err as NodeJS.ErrnoException).code === 'EPERM';
+  }
+}
+
 async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckResult> {
   const type: string = check.type;
   const custom: string | undefined = check.label;
@@ -219,14 +245,37 @@ async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckR
         `${n} llamadas (${all.map((s) => s.status ?? 'abierta').join(', ') || 'ninguna'})`,
       );
     }
+    case 'processes_gone': {
+      const label = `los procesos de ${check.pidFile} han terminado`;
+      const text = readWorkFile(ctx, check.pidFile);
+      if (text === null) return done(label, false, 'el fichero de pids no existe');
+      const pids = pidsIn(text);
+      if (pids.length === 0) return done(label, false, `sin pids en ${check.pidFile}`);
+      // El cierre del árbol puede tardar un instante en verse desde fuera.
+      let alive = pids.filter(isAlive);
+      for (let i = 0; i < 50 && alive.length > 0; i++) {
+        await new Promise((r) => setTimeout(r, 100));
+        alive = alive.filter(isAlive);
+      }
+      return done(label, alive.length === 0, `siguen vivos: ${alive.join(', ')}`);
+    }
     case 'runtime_event': {
       const detailKey = check.event === 'veto' ? 'source' : 'decision';
+      const matches = (s: TraceStep): boolean => {
+        if (check.detail === undefined) return true;
+        if (check.event !== 'job') return s.data[detailKey] === check.detail;
+        const [phase, outcome] = check.detail.split(':');
+        return (
+          s.data.phase === phase &&
+          (outcome === undefined || s.data.status === outcome || s.data.reason === outcome)
+        );
+      };
       const n = ctx.model.steps.filter(
         (s) =>
           s.kind === 'notice' &&
           s.data.event === check.event &&
           (check.tool === undefined || s.data.tool === check.tool) &&
-          (check.detail === undefined || s.data[detailKey] === check.detail),
+          matches(s),
       ).length;
       const what = [check.event, check.detail, check.tool].filter(Boolean).join(' · ');
       return done(

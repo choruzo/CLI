@@ -227,6 +227,12 @@ export interface EffectiveInvocation {
    * leer aquí: `$CMD args`, `$(…) args`, `pwsh -EncodedCommand`, `iex`.
    */
   dynamic?: string;
+  /**
+   * Envoltorios y prefijos que se saltaron para llegar al ejecutable (`sudo`,
+   * `nohup`, `cmd`…), en minúsculas. Casi nunca importan —por eso se saltan—,
+   * salvo los que cambian de quién es el proceso (`shellDetachReason`).
+   */
+  wrappers?: string[];
 }
 
 /** Shells que aceptan `-c "<comando>"`. */
@@ -326,6 +332,11 @@ export function effectiveInvocations(
       piped: part.op === '|',
       depth,
     };
+    const skipped = tokens
+      .slice(0, Math.max(0, tokens.length - rest.length - 1))
+      .map((t) => bareName(t).toLowerCase())
+      .filter((t) => !t.startsWith('-') && !/^[a-z_][a-z0-9_]*=/.test(t));
+    if (skipped.length > 0) entry.wrappers = skipped;
 
     if (name.startsWith('$(') || name.startsWith('`') || name.startsWith('<(')) {
       entry.dynamic = 'command substitution used as the executable';
@@ -380,6 +391,12 @@ export function effectiveInvocations(
     }
   }
   return found;
+}
+
+/** Basename sin extensión de ejecutable: `/usr/bin/nohup` y `nohup.exe` son `nohup`. */
+function bareName(token: string): string {
+  const base = token.replace(/\\/g, '/').split('/').pop() ?? token;
+  return base.replace(/\.(exe|cmd|bat|ps1)$/i, '');
 }
 
 /** ¿Llevan los flags cortos agrupados alguna de estas letras? (`-rf` → r y f). */
@@ -714,7 +731,7 @@ export function windowsDestructiveCommand(command: string): string | null {
 export function commandVeto(
   command: string,
   guardedCommands?: Record<string, GuardAction>,
-  _target?: string,
+  target?: string,
 ): string | null {
   const hard = hardDenyReason(command);
   if (hard) {
@@ -723,6 +740,21 @@ export function commandVeto(
       'This rule cannot be disabled by configuration or by user approval. ' +
       'Narrow the command to the specific target you actually need.'
     );
+  }
+  if (
+    target === LOCAL_TARGET &&
+    resolveGuardAction(SHELL_DETACH_GUARD, guardedCommands) === 'block'
+  ) {
+    const detach = shellDetachReason(command);
+    if (detach) {
+      return (
+        `the command would leave a process running outside the session (${detach}). ` +
+        'Stratum has to own every process it starts so it can report on it and stop it: run the ' +
+        'command with exec background:true instead (then get_job_output / cancel_job), or in ' +
+        'the foreground if it finishes on its own. No approval lifts this; the policy is ' +
+        '"shellDetach" in tools.guardedCommands.'
+      );
+    }
   }
   const guarded = guardedBlockReason(command, guardedCommands);
   if (guarded) {
@@ -744,6 +776,144 @@ export function commandVeto(
     );
   }
   return null;
+}
+
+// ---------------------------------------------------------------------------
+// Procesos que se desligan de la sesión
+// ---------------------------------------------------------------------------
+
+const LOCAL_TARGET = 'local';
+/** Clave de `tools.guardedCommands` (default `block`). */
+export const SHELL_DETACH_GUARD = 'shellDetach';
+
+/** Envoltorios que sacan al proceso del grupo o de la sesión del shell. */
+const DETACH_WRAPPERS: Readonly<Record<string, string>> = {
+  nohup: 'nohup detaches the process from the shell',
+  setsid: 'setsid moves the process to a session of its own',
+};
+
+/** Comandos cuyo trabajo es lanzar algo que les sobrevive. */
+const DETACH_COMMANDS: Readonly<Record<string, (rest: string[]) => string | null>> = {
+  disown: () => 'disown removes the process from the shell job table',
+  daemonize: () => 'daemonize starts a detached daemon',
+  daemon: () => 'daemon starts a detached daemon',
+  'start-stop-daemon': (rest) =>
+    hasLongFlag(rest, '--start') || hasShortFlags(rest, ['S'])
+      ? 'start-stop-daemon starts a detached daemon'
+      : null,
+  'systemd-run': () => 'systemd-run starts the command as a separate unit',
+  'start-process': () => 'Start-Process launches an independent process',
+  saps: () => 'Start-Process launches an independent process',
+  start: () => 'start launches an independent process',
+  'start-job': () => 'Start-Job runs the command as a PowerShell background job',
+  sajb: () => 'Start-Job runs the command as a PowerShell background job',
+  'start-threadjob': () => 'Start-ThreadJob runs the command as a PowerShell background job',
+  screen: (rest) =>
+    hasShortFlags(rest, ['d']) && hasShortFlags(rest, ['m'])
+      ? 'screen -dm starts a detached session'
+      : null,
+  tmux: (rest) =>
+    /^(new|new-session)$/.test(positionals(rest)[0] ?? '') && hasShortFlags(rest, ['d'])
+      ? 'tmux new-session -d starts a detached session'
+      : null,
+};
+
+/** Esperar a lo lanzado en el propio comando lo mantiene dentro: no es un desligue. */
+const WAITERS = new Set(['wait', 'wait-job', 'wjb', 'receive-job', 'rcjb', 'wait-process']);
+
+/**
+ * ¿Hay un `&` de segundo plano? Es el que tiene un comando delante: el `&` de
+ * PowerShell que abre una sentencia (`& $cmd`, `{ & foo }`, `$x = & foo`) es el
+ * operador de llamada, y `&&`, `>&`, `&>`, `<&` y `|&` son otra cosa.
+ */
+function hasBackgroundOperator(command: string): boolean {
+  let quote: string | null = null;
+  for (let i = 0; i < command.length; i++) {
+    const ch = command[i]!;
+    if (quote) {
+      if (ch === quote) quote = null;
+      continue;
+    }
+    if (ch === '\\' || ch === '`') {
+      // Un `&` escapado (con barra en POSIX, con acento grave en PowerShell) es
+      // literal. Un acento grave que abre una sustitución también salta un
+      // carácter: da igual, no es un `&`.
+      i++;
+      continue;
+    }
+    if (ch === '"' || ch === "'") {
+      quote = ch;
+      continue;
+    }
+    if (ch !== '&') continue;
+    const next = command[i + 1];
+    if (next === '&') {
+      i++;
+      continue;
+    }
+    const prev = command[i - 1];
+    if (next === '>' || prev === '>' || prev === '<' || prev === '|') continue;
+    const last = command.slice(0, i).trimEnd().at(-1);
+    if (last === undefined || ';{(=|&\n'.includes(last)) continue;
+    return true;
+  }
+  return false;
+}
+
+/**
+ * Por qué el comando dejaría un proceso vivo fuera del control de Stratum, o
+ * `null`. Un proceso desligado (`cmd &` con la salida redirigida, `nohup`,
+ * `Start-Process`…) sobrevive a su `exec`, no tiene dueño, no se puede
+ * cancelar y sigue ahí al cerrar la sesión: justo lo que `exec` con
+ * `background: true` existe para evitar. Solo se aplica al target local — en un
+ * host remoto no hay `JobManager` que saltarse.
+ *
+ * Best-effort, como el resto de las guardas: mira el comando efectivo, también
+ * dentro de un `sh -c` o un `pwsh -Command`.
+ */
+export function shellDetachReason(command: string, depth = 0): string | null {
+  const invocations = effectiveInvocations(command);
+  const waits = invocations.some((inv) => WAITERS.has(inv.name.toLowerCase()));
+
+  for (const inv of invocations) {
+    for (const w of inv.wrappers ?? []) {
+      if (DETACH_WRAPPERS[w]) return DETACH_WRAPPERS[w]!;
+    }
+    const lower = inv.name.toLowerCase();
+    const reason = DETACH_COMMANDS[lower]?.(inv.rest) ?? null;
+    // Un job de PowerShell que el propio comando espera no se queda atrás.
+    if (reason && !(waits && /^(start-job|sajb|start-threadjob)$/.test(lower))) return reason;
+  }
+
+  if (!waits && hasBackgroundOperator(command)) {
+    return 'a "&" puts the command in the background of a shell that then exits';
+  }
+
+  // El `&` dentro del comando que recibe otro shell (`sh -c "x &"`): las
+  // comillas lo esconden del barrido de arriba.
+  if (depth >= 2) return null;
+  for (const part of splitCommandParts(command)) {
+    const tokens = tokenize(part.text);
+    for (let i = 1; i < tokens.length; i++) {
+      if (!/^(?:-[A-Za-z]*c|-command|\/[ck])$/i.test(tokens[i - 1]!)) continue;
+      const inner = tokens[i]!;
+      if (!/\s/.test(inner)) continue;
+      const nested = shellDetachReason(inner, depth + 1);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+/** Motivo de confirmación cuando `shellDetach` está en `confirm` (target local). */
+export function shellDetachConfirmReason(
+  command: string,
+  overrides: Record<string, GuardAction> | undefined,
+  target: string,
+): string | null {
+  if (target !== LOCAL_TARGET) return null;
+  if (resolveGuardAction(SHELL_DETACH_GUARD, overrides) !== 'confirm') return null;
+  return shellDetachReason(command);
 }
 
 // ---------------------------------------------------------------------------
@@ -857,6 +1027,9 @@ export const DEFAULT_GUARD_ACTIONS: Readonly<Record<string, GuardAction>> = {
   npmPublish: 'block',
   dockerPrune: 'confirm',
   curlPipeShell: 'confirm',
+  // No está en `GUARDED_COMMANDS` porque solo aplica al target local: ver
+  // `shellDetachReason`.
+  shellDetach: 'block',
 };
 
 export function resolveGuardAction(
