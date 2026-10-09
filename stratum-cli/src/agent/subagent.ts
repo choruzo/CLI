@@ -30,6 +30,7 @@ import { prepareGuideIndex } from './guides.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
+import type { JobManager } from '../jobs/manager.js';
 import type { TraceScope } from '../trace/recorder.js';
 
 const log = getLogger('agent.subagent');
@@ -72,6 +73,11 @@ export interface RunSubagentOptions {
   skillsBlock?: string;
   /** Hito 17 — modo read-only del padre: el hijo nunca puede escribir por él. */
   readOnly?: boolean;
+  /**
+   * Jobs en segundo plano de la sesión. El hijo los crea con su propio scope
+   * (su id) y solo ve los suyos; quien lo lanza cierra ese scope al terminar.
+   */
+  jobs?: JobManager;
   /** Hito 17 — el padre trabaja bajo un plan aprobado (satisface `requirePlan`). */
   planApproved?: boolean;
   /** Scope de traza de este hijo (`TraceScope.child`): sus pasos cuelgan del subagente. */
@@ -219,6 +225,9 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     onConfirmDestructive: opts.onConfirmDestructive,
     readOnly: opts.readOnly,
     planApproved: opts.planApproved,
+    // Jobs en segundo plano: el mismo manager de la sesión, con scope propio.
+    jobs: opts.jobs,
+    jobScope: task.id,
     maxIterations: profile.budget.maxIterations,
     maxTokens: profile.budget.maxTokens,
     trace: opts.trace,

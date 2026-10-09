@@ -21,7 +21,8 @@ import {
   type TraceModel,
   type TraceStep,
 } from '../trace/model.js';
-import { TRACE_CAP_RUNTIME, type TraceRecord } from '../trace/records.js';
+import { TRACE_CAP_JOBS, TRACE_CAP_RUNTIME, type TraceRecord } from '../trace/records.js';
+import { isJobTool } from '../jobs/types.js';
 
 export interface RunMetrics {
   turns: number;
@@ -116,6 +117,26 @@ export interface RunMetrics {
   /** TTFT medio del loop con / sin una auxiliar en curso durante la espera. */
   ttftOverlappedMs?: number | null;
   ttftClearMs?: number | null;
+  /**
+   * Jobs en segundo plano (`exec` con `background: true`). `toolCalls` y
+   * `toolErrors` no cambian: lanzar un job es una llamada a `exec` como otra
+   * cualquiera, y lo que le pase después al job no es un error de la tool.
+   * Opcionales (un `result.json` anterior no los trae) y null en una traza
+   * que no registraba los jobs.
+   */
+  /** Llamadas a `exec` en primer plano / que pidieron segundo plano. */
+  foregroundExecCalls?: number;
+  backgroundExecCalls?: number;
+  jobsStarted?: number | null;
+  jobsCompleted?: number | null;
+  jobsFailed?: number | null;
+  jobsCancelled?: number | null;
+  /** Jobs cuya salida leyó algún agente. */
+  jobsOutputRead?: number | null;
+  /** Avisos de fin de job entregados al agente por el loop. */
+  jobNotifications?: number | null;
+  /** Bytes que escribieron los jobs (stdout + stderr), se conservasen o no. */
+  jobOutputBytes?: number | null;
 }
 
 /**
@@ -186,6 +207,11 @@ export function buildTraceModel(records: readonly TraceRecord[]): TraceModel {
   return applyRecords(emptyTrace(), records);
 }
 
+/** ¿Registraba esta traza el ciclo de vida de los jobs en segundo plano? */
+export function hasJobEvents(records: readonly TraceRecord[]): boolean {
+  return records.some((r) => r.t === 'meta' && r.caps?.includes(TRACE_CAP_JOBS) === true);
+}
+
 /** ¿Registraba esta traza las decisiones del runtime? (las anteriores al cap, no). */
 export function hasRuntimeEvents(records: readonly TraceRecord[]): boolean {
   return records.some((r) => r.t === 'meta' && r.caps?.includes(TRACE_CAP_RUNTIME) === true);
@@ -216,6 +242,9 @@ export function countRepeatedCalls(model: TraceModel): number {
   let repeated = 0;
   for (const s of model.steps) {
     if (s.kind !== 'tool') continue;
+    // Las tools de jobs se repiten con los mismos argumentos por diseño: cada
+    // `get_job_output(jobId)` devuelve lo que hay de nuevo.
+    if (isJobTool(s.name)) continue;
     const scope = `${s.turn}:${s.parent ?? ''}`;
     let seen = seenByScope.get(scope);
     if (!seen) seenByScope.set(scope, (seen = new Set()));
@@ -276,6 +305,17 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
   let providerFallbacks = 0;
   let retries = 0;
   let vetoes = 0;
+  const jobs = { started: 0, completed: 0, failed: 0, cancelled: 0, notified: 0, bytes: 0 };
+  // Los ids de job se reinician en cada proceso que escribe en la traza: la
+  // lectura se apunta al job abierto con ese id, no al id.
+  const jobRead = new Map<string, boolean>();
+  let jobsRead = 0;
+  const closeJob = (id: string): void => {
+    if (jobRead.get(id)) jobsRead++;
+    jobRead.delete(id);
+  };
+  let foregroundExec = 0;
+  let backgroundExec = 0;
   const conf = { asked: 0, approved: 0, denied: 0, blocked: 0 };
   let tokens = 0;
   let prompt = 0;
@@ -305,7 +345,24 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
     } else if (s.kind === 'notice') {
       const ev = eventOf(s);
       if (ev === 'retry') retries++;
-      else if (ev === 'veto') vetoes++;
+      else if (ev === 'job') {
+        // Ni aviso ni error del agente: el ciclo de vida de un job va aparte.
+        const id = String(s.data.jobId ?? '');
+        const phase = s.data.phase;
+        if (phase === 'created') {
+          closeJob(id);
+          jobRead.set(id, false);
+        } else if (phase === 'started') jobs.started++;
+        else if (phase === 'read') jobRead.set(id, true);
+        else if (phase === 'notified') jobs.notified++;
+        else if (phase === 'ended') {
+          if (s.data.status === 'completed') jobs.completed++;
+          else if (s.data.status === 'failed') jobs.failed++;
+          else jobs.cancelled++;
+          jobs.bytes += Number(s.data.stdoutBytes ?? 0) + Number(s.data.stderrBytes ?? 0);
+          if (s.data.outputRead === true) jobRead.set(id, true);
+        }
+      } else if (ev === 'veto') vetoes++;
       else if (ev === 'confirmation') {
         conf.asked++;
         const d = s.data.decision;
@@ -324,7 +381,14 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
     if (s.kind !== 'tool') continue;
     toolCalls++;
     if (s.status === 'error' && !blocked.has(s.id)) toolErrorSteps++;
+    if (s.name === 'exec') {
+      const input = s.data.input as { background?: unknown } | undefined;
+      if (input?.background === true) backgroundExec++;
+      else foregroundExec++;
+    }
   }
+  for (const id of [...jobRead.keys()]) closeJob(id);
+  const jobsTracked = hasJobEvents(records);
 
   const closed = model.turns.filter((t) => t.end !== null);
   const cache = cacheSummary(model);
@@ -395,6 +459,15 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
     precedingAuxiliaryMs: impact ? impact.precedingAuxiliaryMs : null,
     ttftOverlappedMs: impact ? impact.ttftOverlappedMs : null,
     ttftClearMs: impact ? impact.ttftClearMs : null,
+    foregroundExecCalls: foregroundExec,
+    backgroundExecCalls: backgroundExec,
+    jobsStarted: jobsTracked ? jobs.started : null,
+    jobsCompleted: jobsTracked ? jobs.completed : null,
+    jobsFailed: jobsTracked ? jobs.failed : null,
+    jobsCancelled: jobsTracked ? jobs.cancelled : null,
+    jobsOutputRead: jobsTracked ? jobsRead : null,
+    jobNotifications: jobsTracked ? jobs.notified : null,
+    jobOutputBytes: jobsTracked ? jobs.bytes : null,
   };
 }
 

@@ -6,11 +6,17 @@
  * El esquema es el de `ssh_exec` con `host` generalizado a `target`, porque
  * ninguno de sus parámetros era específico de SSH.
  */
+import { resolve } from 'path';
 import { z } from 'zod';
 import type { ToolContext, ToolDefinition, ToolResult } from '../../agent/types.js';
 import type { StratumConfig } from '../../config/schema.js';
 import { destructiveCommandReason } from '../destructive-command.js';
-import { commandPathVerdict, commandVeto, guardedConfirmLabel } from '../guards.js';
+import {
+  commandPathVerdict,
+  commandVeto,
+  guardedConfirmLabel,
+  shellDetachConfirmReason,
+} from '../guards.js';
 import { HostKeyError } from '../ssh/known-hosts.js';
 import { redactText } from '../../security/redact-output.js';
 import { getLogger } from '../../logging/index.js';
@@ -25,6 +31,8 @@ import {
   type ExecutionTarget,
 } from './target.js';
 import { getExecAuditLog } from './runtime.js';
+import { JobLimitError, JobManagerClosedError } from '../../jobs/manager.js';
+import { MAIN_JOB_SCOPE, shortJobCommand } from '../../jobs/types.js';
 
 const log = getLogger('tools').child('exec');
 
@@ -69,6 +77,13 @@ const schema = z.object({
     .positive()
     .optional()
     .describe('Maximum bytes of stdout+stderr kept in the result.'),
+  background: z
+    .boolean()
+    .optional()
+    .describe(
+      'Run as a background job (local target only): returns a jobId at once while the command ' +
+        'keeps running. For long commands (test suites, builds, servers).',
+    ),
 });
 
 type ExecInput = z.infer<typeof schema>;
@@ -123,11 +138,25 @@ export function describeExecTool(config: StratumConfig): string {
     }),
   ];
 
+  const jobs = config.tools.jobs.enabled
+    ? [
+        '',
+        'Background jobs (local target only): background:true starts the command as a job owned by ' +
+          'this session and returns its jobId at once, so you can keep working. You are told when ' +
+          'it ends: do not poll; to wait, call get_job_status with waitMs. Read its output with ' +
+          'get_job_output and stop it with cancel_job. Every rule below applies unchanged, and jobs ' +
+          'still running when the session ends are cancelled.',
+        'Never detach a process yourself on local (a trailing "&", nohup, setsid, disown, ' +
+          'Start-Process, start, Start-Job): it is rejected. Use background:true.',
+      ]
+    : [];
+
   return [
     'Execute a shell command on a target and return its exit code, stdout and stderr.',
     '',
     'Targets:',
     ...targetLines,
+    ...jobs,
     '',
     'A command that runs but exits non-zero, times out or is truncated is reported as an error that ' +
       'includes its output; that is information about the command, not a broken tool.',
@@ -232,6 +261,35 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
         );
       }
 
+      // Solo requisitos del modo: `background` no cambia NADA de lo que sigue
+      // (guardas) ni de lo que evalúa el dispatcher (read-only, entorno,
+      // confirmación), que clasifican por `command` y `target`.
+      if (input.background === true) {
+        if (!ctx.config.tools.jobs.enabled) {
+          return recoverableError(
+            'background is disabled in this configuration (tools.jobs.enabled is false). ' +
+              'Run the command in the foreground.',
+          );
+        }
+        if (resolved.target.kind !== 'local') {
+          return recoverableError(
+            `background is only supported on target "local", not on "${label}". ` +
+              'Run the command in the foreground there.',
+          );
+        }
+        if (!ctx.jobs) {
+          return recoverableError(
+            'Background jobs are not available in this session. Run the command in the foreground.',
+          );
+        }
+        if (input.maxBytes !== undefined) {
+          return recoverableError(
+            'maxBytes does not apply to a background job: its output is kept in a buffer ' +
+              '(tools.jobs.maxOutputChars) and read in pieces with get_job_output.',
+          );
+        }
+      }
+
       const veto = commandVeto(input.command, ctx.config.tools.guardedCommands, label);
       return veto ? { ok: false, error: `[${label}] ${veto}`, recoverable: false } : null;
     },
@@ -245,6 +303,8 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
         if (ctx.config.ssh?.hosts[target.target.alias]?.confirmAll) return true;
       }
       if (guardedConfirmLabel(command, ctx.config.tools.guardedCommands)) return true;
+      const label = target.ok ? formatTarget(target.target) : 'local';
+      if (shellDetachConfirmReason(command, ctx.config.tools.guardedCommands, label)) return true;
       if (
         commandPathVerdict(command, ctx.config.tools.sensitivePathAllowlist)?.tier === 'confirm'
       ) {
@@ -268,6 +328,7 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
 
       const target = resolved.target;
       const label = formatTarget(target);
+      if (input.background === true) return startBackgroundJob(input, ctx, label);
       const backend = getExecBackend(target.kind);
       const audit = getExecAuditLog(ctx.config);
 
@@ -344,4 +405,52 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
       };
     },
   };
+}
+
+/**
+ * `exec` con `background: true`: el comando pasa a ser un job del `JobManager`
+ * de la sesión y la llamada vuelve en cuanto el proceso existe. A esta función
+ * solo se llega después de todas las guardas — las mismas que en primer plano.
+ */
+async function startBackgroundJob(
+  input: ExecInput,
+  ctx: ToolContext,
+  label: string,
+): Promise<ToolResult> {
+  if (!ctx.jobs) {
+    return recoverableError('Background jobs are not available in this session.');
+  }
+  const cwd = input.cwd ? resolve(ctx.cwd, input.cwd) : ctx.cwd;
+  try {
+    const job = await ctx.jobs.start({
+      command: input.command,
+      cwd,
+      stdin: input.stdin,
+      timeoutMs: input.timeout,
+      owner: { sessionId: ctx.sessionId, scope: ctx.jobScope ?? MAIN_JOB_SCOPE },
+      trace: ctx.trace,
+    });
+    log.debug('exec background', { target: label, jobId: job.id, pid: job.pid });
+    return {
+      ok: true,
+      output: [
+        `<exec_job target="${escapeXmlAttr(label)}" jobId="${escapeXmlAttr(job.id)}" status="running"` +
+          `${job.pid !== undefined ? ` pid="${job.pid}"` : ''} cwd="${escapeXmlAttr(job.cwd)}">`,
+        `[background job #${job.id} started: ${escapeXmlText(shortJobCommand(job.command, 120))}]`,
+        'The command keeps running. You will be told when it ends, so carry on with other work ' +
+          `instead of polling. get_job_output(jobId="${job.id}") reads its output so far, ` +
+          `get_job_status(jobId="${job.id}", waitMs=…) waits for it, cancel_job stops it.`,
+        '</exec_job>',
+      ].join('\n'),
+    };
+  } catch (err) {
+    if (err instanceof JobLimitError) {
+      return { ok: false, error: err.message, recoverable: true, countsAsFailure: false };
+    }
+    // La sesión se cerró: no es un fallo de la tool ni algo que reintentar.
+    if (err instanceof JobManagerClosedError) {
+      return { ok: false, error: err.message, recoverable: false, countsAsFailure: false };
+    }
+    return { ok: false, error: `[${label}] ${(err as Error).message}`, recoverable: true };
+  }
 }

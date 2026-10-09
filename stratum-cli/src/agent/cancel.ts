@@ -47,6 +47,30 @@ export function closeDanglingToolCalls(messages: Message[]): number {
 }
 
 /**
+ * Añade un aviso del runtime (p. ej. «el job #3 terminó») al final del
+ * historial sin crear un mensaje: se anexa al último `user` o `tool`, que es
+ * lo que hay al empezar cualquier iteración del loop.
+ *
+ * No es un `user` nuevo a propósito. A mitad de turno rompería dos cosas: la
+ * alternancia de roles que exigen varias plantillas de chat y, sobre todo, el
+ * ancla de la compresión de contexto (§12.4), que es «el último `user`» — un
+ * aviso pasaría a ser la tarea en curso y la tarea de verdad se comprimiría.
+ * Tampoco va en el system prompt: cambiaría el prefijo y tiraría la caché de
+ * todo el historial por cada job. Anexado al final, el aviso queda donde el
+ * modelo más lo ve, persiste con la sesión y no invalida nada anterior.
+ *
+ * El mensaje se muta en el sitio: es el mismo objeto que la traza ya conoce.
+ */
+export function appendRuntimeNotice(messages: Message[], notice: string): void {
+  const last = messages.at(-1);
+  if (last && (last.role === 'user' || last.role === 'tool') && typeof last.content === 'string') {
+    last.content = last.content ? `${last.content}\n\n${notice}` : notice;
+    return;
+  }
+  messages.push({ role: 'user', content: notice });
+}
+
+/**
  * Añade la petición `input` del usuario al historial sin dejar dos `user`
  * seguidos: si el último mensaje es una petición que nunca recibió respuesta
  * (turno cancelado antes de que el modelo contestase, que acabó en error, o

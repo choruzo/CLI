@@ -201,11 +201,12 @@ footer {
     return s.parent ? 'subagent' : 'agent';
   }
   function isAux(s) { var o = originOf(s); return o !== null && o !== 'agent' && o !== 'subagent'; }
+  function isJob(s) { return s.kind === 'notice' && !!s.data && s.data.event === 'job'; }
   function isPrimary(s) { var o = originOf(s); return o === 'agent' || o === 'subagent'; }
   // Auxiliar lanzada con el turno ya cerrado: se pinta, pero no alarga el turno.
   function isBackground(s) {
     var t = turns[s.turn];
-    return !!t && t.end !== null && s.start >= t.end && isAux(s);
+    return !!t && t.end !== null && s.start >= t.end && (isAux(s) || isJob(s));
   }
 
   var steps = [], byId = {}, turns = [], rows = {}, blocks = {};
@@ -331,7 +332,10 @@ footer {
       if (d.error) return firstLine(d.error, 200);
       return s.end === null ? 'Generando…' : '(sin salida)';
     }
-    if (s.kind === 'tool') return s.name + ' ' + (d.input !== undefined ? compact(d.input, 80) : '');
+    if (s.kind === 'tool') {
+      var bg = s.name === 'exec' && d.input && d.input.background === true ? ' [background]' : '';
+      return s.name + bg + ' ' + (d.input !== undefined ? compact(d.input, 80) : '');
+    }
     if (s.kind === 'subagent') return '@' + s.name + ' ' + firstLine(d.task, 160);
     return firstLine(s.name, 200) || KINDS[s.kind].label;
   }

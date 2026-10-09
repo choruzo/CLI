@@ -1106,6 +1106,40 @@ Perfiles inválidos (1) — no se cargaron:
 
 ---
 
+### 5.11 Jobs en segundo plano
+
+Un comando largo lanzado con `exec` y `background: true` no bloquea el turno. La UI lo sigue por su
+cuenta —se suscribe al `JobManager` de la sesión—, porque un job cambia de estado cuando quiere,
+haya o no un turno abierto.
+
+- **Avisos en la conversación**, como mensaje del sistema, al arrancar y al terminar:
+
+  ```
+  [background job #3 started: npm test]
+  [background job #3 completed · exit 1 · 38.2s]
+  ```
+
+  El segundo campo es el desenlace: `exit N`, `timeout`, `session closed`, `owner finished`. Un job
+  cancelado a mano no lleva ninguno.
+- **Panel `<JobsView>`**, anclado bajo la barra de estado como `<TodoView>`. Solo aparece si hay
+  jobs corriendo o terminados hace menos de un minuto; los vivos van primero:
+
+  ```
+  Jobs · 1 en curso
+  #3  npm test        running   18s
+  #4  cargo build     failed    exit 101
+  ```
+
+  Color por estado: `running` acento, `completed` verde, `failed` rojo, `cancelled` naranja. El
+  tiempo de los vivos avanza cada segundo; el reloj solo late mientras el panel está en pantalla.
+- **`/jobs`** lista todos los jobs de la sesión (también los que ya salieron del panel) y
+  **`/jobs cancel <id>`** para uno, con todo su árbol de procesos. El agente se entera de esa
+  cancelación en su siguiente turno, como de cualquier otro final.
+- `stratum run` escribe las mismas dos líneas por stderr.
+
+Al salir de Stratum los jobs que sigan vivos se cancelan. En Stratum Desktop no hay jobs: el modo
+asistente no ofrece `exec`.
+
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).

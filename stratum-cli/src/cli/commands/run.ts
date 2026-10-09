@@ -24,6 +24,7 @@ import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
+import { formatJobEndLine, shortJobCommand } from '../../jobs/types.js';
 import { openSessionTrace } from '../../trace/store.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
@@ -326,6 +327,23 @@ export const runCommand = new Command('run')
       // (`stratum auditor <id>`).
       const sessionId = generateSessionId();
       const trace = openSessionTrace(config, sessionId, { cwd: process.cwd() });
+
+      // Jobs en segundo plano: su inicio y su fin se cuentan por stderr cuando
+      // ocurren (un job puede terminar mientras el modelo está pensando). Al
+      // acabar el run, los que sigan vivos se cancelan en `closeExecRuntime`.
+      agent.jobs?.subscribe((ev) => {
+        if (ev.type === 'started') {
+          process.stderr.write(
+            `[background job #${ev.job.id} started: ${shortJobCommand(ev.job.command, 80)}]\n`,
+          );
+        } else if (ev.type === 'ended' && ev.job.endReason !== 'spawn-error') {
+          const line = formatJobEndLine({
+            ...ev.job,
+            durationMs: (ev.job.endedAt ?? Date.now()) - ev.job.startedAt,
+          });
+          process.stderr.write(`${line}\n`);
+        }
+      });
 
       try {
         const runOpts: RunOptions = {

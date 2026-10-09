@@ -22,11 +22,14 @@ import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
 import { QUESTION_TOOL } from './question.js';
 import { TODO_TOOL } from './todo.js';
 import { TEST_EVIDENCE_TOOL } from './tdd.js';
+import { isJobTool } from '../jobs/types.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
 import { environmentGate, readOnlyVeto, type EnvironmentGate } from './call-policy.js';
 
 const log = getLogger('tools');
+
+const EXEC_TOOL_NAME = 'exec';
 
 /**
  * Hito 16 — red de seguridad de una tool con `structuredCancellation`: tras el
@@ -62,6 +65,8 @@ function wantsSerial(tool: ToolDefinition | undefined, input: unknown, ctx: Tool
  * - 'execute' → todo salvo present_plan; update_plan sí (Fase 3).
  */
 export function isToolVisibleInMode(name: string, mode: AgentMode): boolean {
+  // Las tools de jobs acompañan a `exec` en todos los modos.
+  if (isJobTool(name)) return isToolVisibleInMode(EXEC_TOOL_NAME, mode);
   if (mode === 'plan') {
     // Hito 17: `exec` se ofrece también — el loop admite sus llamadas read-only.
     return (
@@ -131,6 +136,9 @@ export const CONTROL_TOOLS: ReadonlySet<string> = new Set([
 
 export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): boolean {
   if (!filter) return true;
+  // Las tools de jobs siguen a `exec`: quien puede lanzar un job tiene que
+  // poder leerlo y pararlo, y quien no tiene `exec` no tiene jobs que mirar.
+  if (isJobTool(name)) return isToolVisibleForProfile(EXEC_TOOL_NAME, filter);
   if (filter.also && !isToolVisibleForProfile(name, filter.also)) return false;
   if (filter.hiddenTools?.some((p) => toolNameMatches(p, name))) return false;
   if (filter.controlTools === 'keep' && CONTROL_TOOLS.has(name)) return true;

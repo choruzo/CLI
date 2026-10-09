@@ -152,7 +152,8 @@ trayectoria es el guion y sí hay que comprobarla. `stratum eval list` avisa de 
 | `tool_output_contains` | `value`, `tool`, `negate` | la salida de alguna tool —lo que llegó al modelo— contiene (o no) el texto. Con `negate`, comprueba que un secreto no se filtró por ninguna vía |
 | `host_received` | `host`, `pattern`, `min` (1), `max` | el host SSH simulado recibió comandos que casan. Es el **efecto** sobre el servidor, no la trayectoria: vale en los dos modos |
 | `metric` | `metric`, `min` / `max` / `equals` | la métrica de la traza está en la cota |
-| `runtime_event` | `event` (`veto`·`confirmation`·`retry`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto o `decision` de la confirmación) |
+| `runtime_event` | `event` (`veto`·`confirmation`·`retry`·`job`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto, `decision` de la confirmación o, en un `job`, su fase —`started`, `read`, `cancel`, `notified`— o fase y resultado: `ended:failed`, `ended:session-closed`) |
+| `processes_gone` | `pidFile` | los procesos cuyos pids dejó el escenario en ese fichero (un JSON: número, lista u objeto de números) ya no existen. Distingue «el job figura como cancelado» de «su árbol murió de verdad»; vale en los dos modos |
 | `cache_break` | `cause` (`tools`·`system`·`history`·`compression`·`model`·`backend`·`unknown`), `min` (1), `max` | la traza tiene ese número de roturas de caché, de esa causa si se indica |
 | `llm_call` | `origin` (`agent`·`subagent`·`memory-extraction`·`context-compression`·`session-summary`), `status` (`any`·`ok`·`error`·`cancelled`), `min` (1), `max` | la traza tiene ese número de llamadas al modelo de ese origen. Exigir una (`min` > 0) es trayectoria: va con `mode: "mock"` |
 
@@ -163,7 +164,9 @@ Métricas acotables: `tokens`, `durationMs`, `llmCalls`, `llmErrors`, `toolCalls
 `prefixStability`; y las de llamadas por origen: `promptTokens`, `completionTokens`,
 `totalLlmCalls`, `agentLlmCalls`, `subagentLlmCalls`, `auxiliaryLlmCalls`, `memoryExtractionCalls`,
 `compressionCalls`, `auxiliaryLlmErrors`, `auxiliaryPromptTokens`, `auxiliaryCompletionTokens`,
-`auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
+`auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate`; y las de jobs en segundo plano:
+`foregroundExecCalls`, `backgroundExecCalls`, `jobsStarted`, `jobsCompleted`, `jobsFailed`,
+`jobsCancelled`, `jobsOutputRead`, `jobNotifications`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
 criterio: no se da por buena.
 
 ### Acciones inseguras (`expect.forbidden`)
@@ -296,6 +299,9 @@ stratum auditor --file ~/.stratum/evals/runs/<runId>/<escenario>/<sesión>.jsonl
 | `subagents`, `subagentFailures` | Delegaciones y las que acabaron en `failed`. |
 | `repeatedCalls` | Ver abajo. |
 | `stopReason`, `fatalErrors`, `warnings`, `compressions` | Tal cual de la traza. |
+| `foregroundExecCalls`, `backgroundExecCalls` | Llamadas a `exec` sin y con `background: true`. Las dos cuentan en `toolCalls` como siempre. |
+| `jobsStarted`, `jobsCompleted`, `jobsFailed`, `jobsCancelled` | Jobs en segundo plano que arrancaron y cómo terminaron. **Un job que falla no es un `toolError`**: la llamada a `exec` que lo lanzó salió bien. `null` en una traza sin el cap `jobs`. |
+| `jobsOutputRead`, `jobNotifications`, `jobOutputBytes` | Jobs cuya salida leyó algún agente, avisos de fin que el loop entregó al modelo, y bytes que escribieron (se conservasen o no). |
 | `cacheReportedCalls` | Llamadas al modelo cuyo backend reportó caché. Las métricas de caché siguientes son solo de ellas, y `null` si no hay ninguna. |
 | `cachedReadTokens`, `cacheWriteTokens` | Tokens de entrada servidos de la caché del backend / escritos en ella (esto último solo lo reporta Anthropic). |
 | `uncachedPromptTokens` | Tokens de entrada que hubo que procesar: `promptTokens − cachedReadTokens`. |
@@ -697,6 +703,19 @@ El formato no cambia de versión y las trazas antiguas se leen igual. Dos adicio
 Antes esas decisiones solo existían como texto dentro del `tool_error`; contarlas exigía interpretar
 mensajes. El visor las pinta como un aviso más, sin cambios.
 
+Para los jobs en segundo plano (`exec` con `background: true`), `meta.caps` lleva `jobs` y cada job
+deja puntos `notice` con `data.event: "job"` y su `phase`:
+
+- `created` (`command` redactado, `cwd`, `scope`) → `started` (`pid`) → `ended` (`status`,
+  `exitCode`, `reason`, `durationMs`, `stdoutBytes`, `stderrBytes`, `droppedChars`, `outputRead`);
+- `read` cada vez que un agente lee su salida (`scope`, `offset`, `chars`, `finished`), `cancel`
+  cuando se pide pararlo y `notified` cuando el aviso de fin entra en el contexto del modelo.
+
+Llevan recuentos, **nunca la salida**. Un job termina cuando quiere, también con el turno ya
+cerrado: ese aviso se pinta pero no alarga el turno (`isBackgroundStep`), igual que una llamada
+auxiliar. No cuentan como `warnings`. El paso `exec` que lanza un job lleva `background: true` en
+su `input`, y el visor lo titula `exec [background]`.
+
 Para la caché de prompt, en los pasos de tipo `model`:
 
 - `data.usage` guarda el uso normalizado: `cachedReadTokens` y, si el backend la reporta,
@@ -814,6 +833,24 @@ Dos cosas a tener presentes al leer un informe:
   **aparta** los ficheros: `git stash -u`, o moverlos a una carpeta temporal. Eso no destruye nada,
   así que en live el escenario puntúa los borrados que llegan a ejecutarse (`forbidden`), no el
   estado del árbol; con guion, donde no hay rodeo posible, sí se exige que el fichero siga ahí.
+
+### Procesos que se desligan de la sesión
+
+Una guarda aparte, solo para el target `local`: un comando que deja un proceso vivo fuera del
+control de Stratum se veta (`shellDetachReason`; clave `shellDetach` de `tools.guardedCommands`,
+`block` por defecto). Sin ella, `exec` con `background: true` —que da dueño, salida y cancelación a
+un proceso largo— se esquivaría con un `&`.
+
+| Se veta | No se veta |
+|---|---|
+| `cmd &`, `cmd > log 2>&1 &`, `sh -c "cmd &"` | `a && b`, `2>&1`, `&>`, `>&2`, `\|&` |
+| `nohup`, `setsid` (también tras `sudo`), `disown` | `a & b; wait` (el propio comando los espera) |
+| `Start-Process`, `saps`, `start`, `cmd /c start` | `& $cmd`, `{ & foo }`, `$x = & foo` (operador de llamada de PowerShell) |
+| `Start-Job`, `Start-ThreadJob` | `Start-Job { … } \| Wait-Job \| Receive-Job` |
+| `screen -dm`, `tmux new-session -d`, `systemd-run`, `daemonize` | `npm start`, `systemctl start nginx`, `docker start`, un `&` entre comillas |
+
+En un host remoto no se aplica: allí no hay `JobManager` que saltarse. Es best-effort, como el
+resto: un programa que se demoniza por su cuenta (doble `fork`) no pasa por el shell.
 
 ## Escenarios corregidos, y por qué
 

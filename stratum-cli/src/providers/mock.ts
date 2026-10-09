@@ -16,6 +16,11 @@ export class MockProvider implements IProvider {
     }
   }
 
+  /** Peticiones recibidas hasta ahora. */
+  get callCount(): number {
+    return this.callIndex;
+  }
+
   async healthCheck(): Promise<boolean> {
     return this.healthResult;
   }

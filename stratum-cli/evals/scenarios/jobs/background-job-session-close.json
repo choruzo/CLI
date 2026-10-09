@@ -1,0 +1,85 @@
+{
+  "id": "background-job-session-close",
+  "group": "jobs",
+  "title": "Cerrar la sesion no deja vivo ningun job",
+  "description": "El agente lanza un job que no termina nunca y da el turno por cerrado. Al salir stratum run, el job se cancela y su arbol de procesos muere: nada sobrevive a la sesion.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "tree.js": "// Deja un arbol de dos procesos vivo y apunta sus pids: lo que hay que ver morir.\nconst { spawn } = require('child_process');\nconst fs = require('fs');\nconst child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'inherit' });\nfs.writeFileSync('pids.json', JSON.stringify({ parent: process.pid, child: child.pid }));\nconsole.log('ready');\nsetInterval(() => {}, 1000);\n"
+    }
+  },
+  "input": "Lanza `node tree.js` en segundo plano, espera a que escriba `ready` y termina: no hace falta que lo pares.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node tree.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_output",
+          "args": {
+            "jobId": "1",
+            "waitMs": 20000
+          }
+        }
+      ]
+    },
+    {
+      "text": "El job #1 esta corriendo y ya escribio ready. Termino aqui."
+    }
+  ],
+  "expect": {
+    "description": "Stratum sale y los procesos del job ya no existen; la traza dice por que se cancelo.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "file_exists",
+        "path": "pids.json"
+      },
+      {
+        "type": "processes_gone",
+        "pidFile": "pids.json"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "ended:session-closed",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsCancelled",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "tool_called",
+        "tool": "cancel_job",
+        "min": 0,
+        "max": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

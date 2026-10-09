@@ -124,6 +124,16 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/jobs',
+    description: 'Lista los jobs en segundo plano de la sesión (estado, exit code, duración)',
+    hasArgs: false,
+  },
+  {
+    name: '/jobs cancel',
+    description: 'Cancela un job en segundo plano y su árbol de procesos: /jobs cancel <id>',
+    hasArgs: true,
+  },
+  {
     name: '/auditor',
     description: 'Abre en el navegador la trayectoria de la sesión (timeline en vivo)',
     hasArgs: false,

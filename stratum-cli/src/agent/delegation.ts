@@ -213,6 +213,7 @@ export async function* executeDelegations(
             // Hito 17: el hijo hereda el modo read-only y el plan aprobado del padre.
             readOnly: opts?.readOnly,
             planApproved: opts?.planApproved,
+            jobs: opts?.jobs,
             makeRouter: opts?.makeSubagentRouter
               ? () => opts.makeSubagentRouter!(job.profile)
               : undefined,
@@ -231,6 +232,9 @@ export async function* executeDelegations(
             error: err instanceof Error ? err.message : String(err),
           };
         }
+        // El hijo terminó: sus jobs vivos se cancelan con él (nadie quedaría
+        // para leerlos ni para pararlos). Los terminados siguen a la vista del padre.
+        await opts?.jobs?.closeScope(job.subId);
         result = redactSubagentResult(result, ctx.config);
         results.set(job.subId, result);
         opts?.onSubagentPersist?.({

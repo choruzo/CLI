@@ -367,14 +367,22 @@ export interface TimelineBlock {
 
 const endOf = (s: TraceStep, now: number): number => s.end ?? now;
 
+/** Aviso del ciclo de vida de un job en segundo plano (`TraceJobEvent`). */
+export function isJobNotice(s: TraceStep): boolean {
+  return s.kind === 'notice' && s.data.event === 'job';
+}
+
 /**
  * Trabajo en segundo plano: una llamada auxiliar lanzada con el turno ya
- * cerrado (la extracción de memoria). Se pinta en el timeline, pero no alarga
- * el turno: el usuario ya tenía su respuesta.
+ * cerrado (la extracción de memoria), o el aviso de un job que termina cuando
+ * el agente ya había contestado. Se pinta en el timeline, pero no alarga el
+ * turno: el usuario ya tenía su respuesta.
  */
 export function isBackgroundStep(model: TraceModel, s: TraceStep): boolean {
   const end = model.turns[s.turn]?.end;
-  return end !== null && end !== undefined && s.start >= end && isAuxiliaryCall(s);
+  return (
+    end !== null && end !== undefined && s.start >= end && (isAuxiliaryCall(s) || isJobNotice(s))
+  );
 }
 
 function turnBounds(

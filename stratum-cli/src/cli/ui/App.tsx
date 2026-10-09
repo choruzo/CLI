@@ -72,6 +72,8 @@ import { listEnvironments } from '../../tools/environments.js';
 import { formatEnvironmentsReport, formatSessionProfileReport } from '../session-report.js';
 import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
+import { formatJobRows, visibleJobs } from './JobsView.js';
+import { formatJobEndLine, shortJobCommand, type BackgroundJob } from '../../jobs/types.js';
 import { useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
@@ -985,6 +987,42 @@ export function App({
   }, [mcpManager]);
 
   // -------------------------------------------------------------------------
+  // Jobs en segundo plano. Un job cambia de estado cuando quiere, con o sin
+  // turno abierto, así que la UI no espera a un evento del agente: se suscribe
+  // al JobManager de la sesión. El reloj solo late mientras hay algo que pintar.
+  // -------------------------------------------------------------------------
+  const [jobs, setJobs] = useState<BackgroundJob[]>(() => agent.jobs?.list() ?? []);
+  const [jobsNow, setJobsNow] = useState(() => Date.now());
+  useEffect(() => {
+    const manager = agent.jobs;
+    if (!manager) return;
+    return manager.subscribe((ev) => {
+      setJobs(manager.list());
+      setJobsNow(Date.now());
+      if (ev.type === 'started') {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `[background job #${ev.job.id} started: ${shortJobCommand(ev.job.command, 80)}]`,
+        });
+      } else if (ev.type === 'ended' && ev.job.endReason !== 'spawn-error') {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: formatJobEndLine({
+            ...ev.job,
+            durationMs: (ev.job.endedAt ?? Date.now()) - ev.job.startedAt,
+          }),
+        });
+      }
+    });
+  }, [agent]);
+  const jobsOnScreen = visibleJobs(jobs, jobsNow).length > 0;
+  useEffect(() => {
+    if (!jobsOnScreen) return;
+    const id = setInterval(() => setJobsNow(Date.now()), 1000);
+    return () => clearInterval(id);
+  }, [jobsOnScreen]);
+
+  // -------------------------------------------------------------------------
   // Health check del provider (Hito 6): polling no bloqueante cada 30 s.
   // El `●` izquierdo del status bar refleja el resultado en tiempo real.
   // -------------------------------------------------------------------------
@@ -1817,6 +1855,60 @@ export function App({
             text: 'El agente no lleva ninguna lista de tareas ahora mismo.',
           });
         }
+        return;
+      }
+
+      // Jobs en segundo plano: el listado completo (el panel solo enseña los
+      // vivos y los recién terminados) y la cancelación a mano.
+      if (cmd === '/jobs' || cmd.startsWith('/jobs ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const manager = agent.jobs;
+        if (!manager) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'Los jobs en segundo plano están desactivados (tools.jobs.enabled: false).',
+          });
+          return;
+        }
+        const [, sub, arg] = cmd.split(/\s+/);
+        if (sub === 'cancel') {
+          const job = arg ? manager.get(arg) : undefined;
+          if (!job) {
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: arg ? `No hay ningún job #${arg}.` : 'Uso: /jobs cancel <id>',
+            });
+            return;
+          }
+          if (job.status !== 'running') {
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `El job #${job.id} ya había terminado (${job.status}).`,
+            });
+            return;
+          }
+          // El aviso de fin lo pinta la suscripción al JobManager.
+          void manager.cancel(job.id);
+          return;
+        }
+        if (sub !== undefined) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /jobs · /jobs cancel <id>' });
+          return;
+        }
+        const all = manager.list();
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text:
+            all.length === 0
+              ? 'No hay jobs en segundo plano en esta sesión.'
+              : [
+                  'Jobs en segundo plano',
+                  '',
+                  ...formatJobRows(all, Date.now(), 48).map((row) => `  ${row}`),
+                  '',
+                  'Para parar uno: /jobs cancel <id>. Al salir de Stratum los que sigan vivos se cancelan.',
+                ].join('\n'),
+        });
         return;
       }
 
@@ -2818,6 +2910,8 @@ export function App({
         environment={sessionBadges.environment}
         todos={state.todoCollapsed ? [] : state.todos}
         todoStale={state.todoStale}
+        jobs={jobs}
+        jobsNow={jobsNow}
         planMode={state.planMode}
         plan={state.plan}
         pendingApproval={state.pendingApproval}

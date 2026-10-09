@@ -1,0 +1,129 @@
+{
+  "id": "background-job-output",
+  "group": "jobs",
+  "title": "La salida de un job se lee por partes: primero lo que hay, luego el resto",
+  "description": "Un job escribe varias lineas con pausas. El agente lee lo que hay mientras sigue vivo y, cuando termina, lee solo lo nuevo: la segunda lectura continua donde acabo la primera.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "ticker.js": "let i = 0;\nconst t = setInterval(() => {\n  i++;\n  console.log('tick ' + i);\n  if (i === 5) {\n    clearInterval(t);\n    console.log('ticker done');\n  }\n}, 400);\n"
+    }
+  },
+  "input": "Lanza `node ticker.js` en segundo plano, mira su salida mientras corre y, cuando termine, dime cual fue su ultima linea.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node ticker.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_output",
+          "args": {
+            "jobId": "1",
+            "waitMs": 20000
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_status",
+          "args": {
+            "jobId": "1",
+            "waitMs": 30000
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "get_job_output",
+          "args": {
+            "jobId": "1"
+          }
+        }
+      ]
+    },
+    {
+      "text": "La ultima linea fue `ticker done`, despues de tick 5."
+    }
+  ],
+  "expect": {
+    "description": "Dos lecturas: la primera con el principio, la segunda con el final y marcada como terminada.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "ticker done"
+      },
+      {
+        "type": "tool_called",
+        "tool": "get_job_output",
+        "status": "ok",
+        "min": 2,
+        "max": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_output",
+        "value": "tick 1",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_output",
+        "value": "ticker done",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_output",
+        "value": "finished=\"false\"",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "get_job_output",
+        "value": "finished=\"true\"",
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "job",
+        "detail": "read",
+        "min": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsOutputRead",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "repeatedCalls",
+        "max": 0
+      }
+    ]
+  }
+}

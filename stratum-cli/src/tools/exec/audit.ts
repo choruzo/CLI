@@ -11,7 +11,8 @@ const DEFAULT_AUDIT_PATH = '~/.stratum/logs/exec-audit.jsonl';
 /** Rotación por tamaño a 10 MB (§12.14). */
 const MAX_BYTES = 10 * 1024 * 1024;
 
-export type ExecAuditStatus = ExecStatus | 'spawn_error' | 'connect_error';
+/** `background_started`: un job en segundo plano arrancó; su cierre es otro registro con el mismo `jobId`. */
+export type ExecAuditStatus = ExecStatus | 'spawn_error' | 'connect_error' | 'background_started';
 
 /**
  * Registro de auditoría de un intento real de ejecución (Hito 16). Conserva los
@@ -30,6 +31,10 @@ export interface ExecAuditRecord {
   exitCode: number | null;
   durationMs: number;
   truncated: boolean;
+  /** Job en segundo plano (`exec` con `background: true`). Ausente en primer plano. */
+  background?: boolean;
+  jobId?: string;
+  pid?: number;
 }
 
 /**
