@@ -744,7 +744,7 @@ export class ConversationSession {
   async compact(): Promise<void> {
     if (this.rejectIfBusy('comprimir el contexto')) return;
     try {
-      const result = await this.agent.compactNow();
+      const result = await this.agent.compactNow(this.trace?.scope());
       const text =
         result.kind === 'compressed'
           ? `Contexto comprimido: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsCompressed} rondas resumidas).`

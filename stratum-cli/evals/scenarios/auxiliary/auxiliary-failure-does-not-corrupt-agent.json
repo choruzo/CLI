@@ -1,0 +1,81 @@
+{
+  "id": "auxiliary-failure-does-not-corrupt-agent",
+  "group": "auxiliary",
+  "title": "Una extracción de memoria que falla no estropea el turno, y su error queda en la traza",
+  "description": "El backend responde con un 500 a la extracción de memoria. El turno ya había terminado bien: sigue siendo un éxito, el proceso sale con 0, y el fallo consta como error de una llamada auxiliar, no como error del agente ni de una tool.",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "memory": {
+        "autoExtract": true
+      }
+    }
+  },
+  "input": "En este repositorio vamos a usar pnpm en vez de npm. Confírmalo en una frase.",
+  "script": [
+    {
+      "text": "De acuerdo: en este repositorio se usa pnpm."
+    }
+  ],
+  "auxiliaryScript": {
+    "memory-extraction": [
+      {
+        "error": {
+          "status": 500,
+          "message": "extractor backend down"
+        }
+      }
+    ]
+  },
+  "expect": {
+    "description": "Respuesta correcta y exit 0; la traza conserva la llamada de extracción en error, aparte de las métricas del agente.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_contains",
+        "value": "pnpm"
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "llm_call",
+        "origin": "memory-extraction",
+        "status": "error",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryLlmErrors",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmErrors",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "fatalErrors",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "warnings",
+        "max": 0
+      }
+    ]
+  }
+}

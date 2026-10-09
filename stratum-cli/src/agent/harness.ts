@@ -68,6 +68,8 @@ import { executeDelegations, resolveDelegationProfile, type DelegationJob } from
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import { getLogger } from '../logging/index.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
+import { tracedCompletion } from '../trace/llm-call.js';
+import type { TraceScope } from '../trace/recorder.js';
 
 const log = getLogger('agent');
 
@@ -111,7 +113,8 @@ export const DEFAULT_COMPRESSION_TIMEOUT_MS = 120_000;
 const COMPRESSOR_TOOL_CHARS = 1_500;
 const COMPRESSOR_TEXT_CHARS = 4_000;
 
-const COMPRESSOR_PROMPT =
+/** Exportado para el modelo de guion de `stratum eval`, que reconoce por él la petición. */
+export const COMPRESSOR_PROMPT =
   'Summarize the conversation below so an agent can continue the work without it. ' +
   'At most 500 words. Preserve: the user requests and goals, technical decisions and ' +
   'their reasons, files read or changed, commands run and their outcome, errors found, ' +
@@ -155,6 +158,8 @@ export class ContextManager {
     private readonly baseCompressionThreshold = 0.8,
     private readonly compressorModel?: string,
     private readonly compressionTimeoutMs = DEFAULT_COMPRESSION_TIMEOUT_MS,
+    /** Nombre del provider en la config: solo para la traza de la llamada del compresor. */
+    private readonly providerName?: string,
   ) {}
 
   setCompressionMode(mode: 'normal' | 'conservative'): void {
@@ -260,13 +265,18 @@ export class ContextManager {
    * Comprime el historial si supera el umbral configurado (default 80%).
    * Modifica `messages` en el lugar. Devuelve el resultado para emitir eventos.
    * `signal` es la cancelación del turno: cancelar durante el resumen deja el
-   * historial intacto.
+   * historial intacto. Con `trace`, la llamada del compresor queda registrada
+   * como `context-compression`.
    */
-  async maybeCompress(messages: Message[], signal?: AbortSignal): Promise<CompressionResult> {
+  async maybeCompress(
+    messages: Message[],
+    signal?: AbortSignal,
+    trace?: TraceScope,
+  ): Promise<CompressionResult> {
     // Sin redondear: `pct` viene de Math.round y un 80.4% real se leería como 0.80.
     const { used, max } = this.usage(messages);
     if (max > 0 && used / max <= this.compressionThreshold) return { kind: 'skipped' };
-    return this.compress(messages, signal, false);
+    return this.compress(messages, signal, false, trace);
   }
 
   /**
@@ -278,6 +288,7 @@ export class ContextManager {
     messages: Message[],
     signal?: AbortSignal,
     forced = true,
+    trace?: TraceScope,
   ): Promise<CompressionResult> {
     const tokensBefore = this.usage(messages).used;
     const zone = this.buildProtectedZone(messages);
@@ -295,7 +306,7 @@ export class ContextManager {
     if (this.provider) {
       try {
         const anchor = zone.anchor !== null ? messages[zone.anchor] : undefined;
-        const summary = await this.callCompressor(oldMessages, anchor, signal);
+        const summary = await this.callCompressor(oldMessages, anchor, signal, trace);
         this.applySummary(messages, zone, summary);
         this.sanitizeToolPairing(messages);
         // Invalidar cache de tokens reales (el historial cambió)
@@ -582,6 +593,7 @@ export class ContextManager {
     oldMessages: Message[],
     anchor?: Message,
     signal?: AbortSignal,
+    trace?: TraceScope,
   ): Promise<string> {
     if (!this.provider || !this.model) throw new CompressorError('no provider for compression');
 
@@ -594,11 +606,18 @@ export class ContextManager {
     let result = '';
 
     try {
-      for await (const chunk of this.provider.complete({
-        messages: [{ role: 'user', content: this.compressorInput(oldMessages, anchor) }],
-        stream: true,
-        model,
-        signal: combined,
+      for await (const chunk of tracedCompletion({
+        origin: 'context-compression',
+        provider: this.provider,
+        providerName: this.providerName,
+        request: {
+          messages: [{ role: 'user', content: this.compressorInput(oldMessages, anchor) }],
+          stream: true,
+          model,
+          signal: combined,
+        },
+        trace,
+        cancelSignal: signal,
       })) {
         const content = chunk.choices?.[0]?.delta?.content;
         if (content) result += think.feed(content).text;
@@ -740,6 +759,7 @@ export class ReactLoop {
         config.agent.compressionThreshold,
         config.agent.compressorModel,
         config.agent.compressionTimeoutMs,
+        router?.providerName,
       );
   }
 
@@ -845,7 +865,11 @@ export class ReactLoop {
       });
 
       // Comprimir contexto antes de cada iteración (§12.4)
-      const comprResult = await this.contextManager.maybeCompress(this.messages, signal);
+      const comprResult = await this.contextManager.maybeCompress(
+        this.messages,
+        signal,
+        opts?.trace,
+      );
       if (comprResult.kind === 'compressed' || comprResult.kind === 'truncated') {
         loopLog.info(`context ${comprResult.kind}`, {
           tokensBefore: comprResult.tokensBefore,

@@ -6,12 +6,18 @@
  */
 import {
   applyRecords,
+  auxiliaryImpact,
   cacheSummary,
   COMPRESSION_STEP,
   emptyTrace,
+  isAuxiliaryCall,
+  isBackgroundStep,
+  llmBreakdown,
   meanTtft,
   prefixStability,
   usageOf,
+  type LlmCallOrigin,
+  type LlmOriginStats,
   type TraceModel,
   type TraceStep,
 } from '../trace/model.js';
@@ -73,7 +79,67 @@ export interface RunMetrics {
   ttftWarmMs?: number | null;
   /** Fracción del prompt que repite el de la llamada anterior (medida en el cliente). */
   prefixStability?: number | null;
+  /**
+   * Llamadas al LLM por origen. `llmCalls`, `tokens`, la caché y el TTFT de
+   * arriba son solo del loop (agente + subagentes), como siempre: las
+   * auxiliares van aquí aparte y un fallo suyo no entra en `llmErrors`,
+   * `toolErrors` ni `hadErrors`. Opcionales (un `result.json` anterior no los
+   * trae) y null en una traza que no registraba las auxiliares: que no
+   * aparezcan no quiere decir que no las hubiera.
+   */
+  /** Todas las llamadas de la traza: `llmCalls` + `auxiliaryLlmCalls`. */
+  totalLlmCalls?: number;
+  agentLlmCalls?: number;
+  subagentLlmCalls?: number;
+  auxiliaryLlmCalls?: number | null;
+  memoryExtractionCalls?: number | null;
+  compressionCalls?: number | null;
+  sessionSummaryCalls?: number | null;
+  /** Auxiliares que acabaron en error (no las canceladas). */
+  auxiliaryLlmErrors?: number | null;
+  auxiliaryPromptTokens?: number | null;
+  auxiliaryCompletionTokens?: number | null;
+  auxiliaryCachedReadTokens?: number | null;
+  auxiliaryCacheHitRate?: number | null;
+  /** Suma de la duración de las llamadas auxiliares. */
+  auxiliaryDurationMs?: number | null;
+  /** Desglose completo por origen (`llmBreakdown`). */
+  llmByOrigin?: Record<LlmCallOrigin, LlmOriginStats> | null;
+  /**
+   * Coincidencia en el tiempo entre las llamadas del loop y las auxiliares,
+   * medida con los relojes del cliente (`auxiliaryImpact`). No es tiempo de cola
+   * del servidor: eso no se mide.
+   */
+  overlappedLlmCalls?: number | null;
+  overlappingAuxiliaryMs?: number | null;
+  precedingAuxiliaryMs?: number | null;
+  /** TTFT medio del loop con / sin una auxiliar en curso durante la espera. */
+  ttftOverlappedMs?: number | null;
+  ttftClearMs?: number | null;
 }
+
+/**
+ * Métricas de las llamadas auxiliares que `compare` sabe comparar, pero solo si
+ * se piden (`--metric`): todavía no hay datos reales con los que fijarles una
+ * tolerancia, así que por defecto ni cuentan como regresión ni como mejora.
+ */
+export const AUXILIARY_METRICS = [
+  'auxiliaryLlmCalls',
+  'memoryExtractionCalls',
+  'compressionCalls',
+  'auxiliaryLlmErrors',
+  'auxiliaryPromptTokens',
+  'auxiliaryCachedReadTokens',
+  'auxiliaryDurationMs',
+  'overlappingAuxiliaryMs',
+  'precedingAuxiliaryMs',
+] as const;
+export type AuxiliaryMetric = (typeof AUXILIARY_METRICS)[number];
+
+/** En estas, más es mejor; en el resto de `AUXILIARY_METRICS`, menos. */
+export const AUXILIARY_HIGHER_IS_BETTER: ReadonlySet<AuxiliaryMetric> = new Set([
+  'auxiliaryCachedReadTokens',
+]);
 
 /** Métricas numéricas comparables entre dos ejecuciones. */
 export const COMPARABLE_METRICS = [
@@ -219,6 +285,9 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
 
   for (const s of model.steps) {
     if (s.kind === 'model') {
+      // Las auxiliares se cuentan aparte (`llm`, más abajo): ni son del turno
+      // ni un fallo suyo es un fallo del agente.
+      if (isAuxiliaryCall(s)) continue;
       llmCalls++;
       if (s.status === 'error') llmErrors++;
       const u = usageOf(s);
@@ -262,9 +331,15 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
   const policyBlocks = vetoes + conf.denied + conf.blocked;
   const durationMs = model.turns.reduce((sum, t, i) => {
     let end = t.end ?? t.at;
-    for (const s of model.steps) if (s.turn === i) end = Math.max(end, s.end ?? now);
+    for (const s of model.steps) {
+      // La extracción de memoria corre con el turno ya cerrado: no lo alarga.
+      if (s.turn === i && !isBackgroundStep(model, s)) end = Math.max(end, s.end ?? now);
+    }
     return sum + Math.max(end - t.at, 0);
   }, 0);
+  const llm = llmBreakdown(model, now);
+  const aux = llm.auxiliaryTracked ? llm.auxiliary : null;
+  const impact = llm.auxiliaryTracked ? auxiliaryImpact(model, now) : null;
 
   return {
     turns: model.turns.filter((t) => !t.implicit).length,
@@ -301,6 +376,25 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
     ttftColdMs: cache?.ttftColdMs ?? null,
     ttftWarmMs: cache?.ttftWarmMs ?? null,
     prefixStability: prefixStability(model),
+    totalLlmCalls: llm.calls,
+    agentLlmCalls: llm.byOrigin.agent.calls,
+    subagentLlmCalls: llm.byOrigin.subagent.calls,
+    auxiliaryLlmCalls: aux ? aux.calls : null,
+    memoryExtractionCalls: aux ? llm.byOrigin['memory-extraction'].calls : null,
+    compressionCalls: aux ? llm.byOrigin['context-compression'].calls : null,
+    sessionSummaryCalls: aux ? llm.byOrigin['session-summary'].calls : null,
+    auxiliaryLlmErrors: aux ? aux.errors : null,
+    auxiliaryPromptTokens: aux ? aux.promptTokens : null,
+    auxiliaryCompletionTokens: aux ? aux.completionTokens : null,
+    auxiliaryCachedReadTokens: aux ? aux.cachedReadTokens : null,
+    auxiliaryCacheHitRate: aux ? aux.cacheHitRate : null,
+    auxiliaryDurationMs: aux ? aux.durationMs : null,
+    llmByOrigin: llm.auxiliaryTracked ? llm.byOrigin : null,
+    overlappedLlmCalls: impact ? impact.overlappedCalls : null,
+    overlappingAuxiliaryMs: impact ? impact.overlappingAuxiliaryMs : null,
+    precedingAuxiliaryMs: impact ? impact.precedingAuxiliaryMs : null,
+    ttftOverlappedMs: impact ? impact.ttftOverlappedMs : null,
+    ttftClearMs: impact ? impact.ttftClearMs : null,
   };
 }
 
@@ -313,7 +407,8 @@ export function turnOutcomes(
   const out = model.turns.map((t) => ({ errors: 0, stop: t.stop }));
   for (const s of model.steps) {
     const t = out[s.turn];
-    if (!t || blocked.has(s.id)) continue;
+    // Una auxiliar que falla no es un fallo del turno: la respuesta ya estaba dada.
+    if (!t || blocked.has(s.id) || isAuxiliaryCall(s)) continue;
     const failed =
       ((s.kind === 'tool' || s.kind === 'model' || s.kind === 'subagent') &&
         s.status === 'error') ||

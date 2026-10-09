@@ -1,0 +1,135 @@
+{
+  "id": "compression-visible",
+  "group": "auxiliary",
+  "title": "El resumen de la compresión de contexto queda en la traza como llamada propia",
+  "description": "Tres lecturas grandes llevan el historial por encima del umbral y Stratum pide un resumen al modelo a mitad del turno. Esa petición tiene su propio guion: la traza la registra con origen context-compression y el agente sigue con sus cuatro llamadas.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "logs/README.md": "Logs de los tres servicios."
+    },
+    "commands": [
+      [
+        "node",
+        "-e",
+        "const fs = require('fs');['one', 'two', 'three'].forEach((name, k) => {  const lines = [];  for (let i = 0; i < 300; i++)    lines.push('service-' + name + ' request ' + String(i).padStart(4, '0') + ' handled in ' + (20 + ((i * 7 + k) % 60)) + ' ms status 200 ok');  lines[150] = 'service-' + name + ' request FAILED with code E' + (41 + k) + ' upstream timeout';  const nl = String.fromCharCode(10);  fs.writeFileSync('logs/' + name + '.log', lines.join(nl) + nl);});"
+      ]
+    ],
+    "config": {
+      "agent": {
+        "compressionThreshold": 0.62,
+        "compressionKeepRounds": 1
+      }
+    }
+  },
+  "input": "Lee logs/one.log, logs/two.log y logs/three.log, de uno en uno, y dime el código de error que aparece en cada uno.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "logs/one.log"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "logs/two.log"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "logs/three.log"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Los códigos son E41, E42 y E43."
+    }
+  ],
+  "auxiliaryScript": {
+    "context-compression": [
+      {
+        "text": "Read so far: logs/one.log failed with E41, logs/two.log failed with E42."
+      }
+    ]
+  },
+  "expect": {
+    "description": "La tarea se completa; la compresión aparece como una llamada context-compression aparte de las cuatro del agente.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "E43"
+      },
+      {
+        "type": "llm_call",
+        "origin": "context-compression",
+        "status": "ok",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "compressionCalls",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "compressions",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 4,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "totalLlmCalls",
+        "equals": 5,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "memoryExtractionCalls",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "cache_break",
+        "cause": "compression",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmErrors",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryLlmErrors",
+        "max": 0
+      }
+    ]
+  }
+}

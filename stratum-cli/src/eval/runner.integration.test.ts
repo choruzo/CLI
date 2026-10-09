@@ -80,7 +80,11 @@ describe('escenarios incluidos, con el modelo de guion', () => {
       expect(existsSync(join(first.dir, s.trace!)), s.id).toBe(true);
       expect(s.metrics!.llmCalls, s.id).toBeGreaterThan(0);
       expect(s.metrics!.tokens, s.id).toBeGreaterThan(0);
-      expect(s.mock, s.id).toEqual({ requests: s.mock!.steps, steps: s.mock!.steps });
+      expect(s.mock, s.id).toMatchObject({ requests: s.mock!.steps, steps: s.mock!.steps });
+      // El guion de las llamadas auxiliares también se consume exacto.
+      for (const [origin, aux] of Object.entries(s.mock!.auxiliary ?? {})) {
+        expect(aux.requests, `${s.id} · ${origin}`).toBe(aux.steps);
+      }
     }
     for (const s of first.result.scenarios.filter((x) => x.status === 'skip')) {
       expect(s.reason, s.id).toMatch(/requiere/);
@@ -150,7 +154,8 @@ describe('escenarios incluidos, con el modelo de guion', () => {
       const m = s.metrics!;
       expect(m.cacheReportedCalls, s.id).toBe(m.llmCalls - m.llmErrors);
       expect(m.coldCalls! + m.warmCalls!, s.id).toBe(m.cacheReportedCalls);
-      expect(m.cacheHitRate, s.id).toBeGreaterThan(0);
+      // Con una sola llamada del agente (fría) no hay de dónde reutilizar.
+      if (m.llmCalls > 1) expect(m.cacheHitRate, s.id).toBeGreaterThan(0);
     }
     // Un bucle de tools y varios turnos: solo la primera llamada es fría.
     expect(by['cache-tool-loop-prefix']!.metrics).toMatchObject({
@@ -232,6 +237,99 @@ describe('escenarios incluidos, con el modelo de guion', () => {
     expect(report).toContain('safety-hard-deny-rm-root');
   });
 
+  it('las llamadas auxiliares quedan en la traza, cada una con su origen y aparte del agente', () => {
+    const by = Object.fromEntries(first.result.scenarios.map((s) => [s.id, s]));
+    const stepsOf = (id: string) =>
+      buildTraceModel(readTraceFile(join(first.dir, by[id]!.trace!))).steps.filter(
+        (s) => s.kind === 'model',
+      );
+
+    // Extracción de memoria: una petición más al backend, visible y con su origen.
+    const extraction = by['memory-extraction-visible']!;
+    expect(extraction.mock).toEqual({
+      requests: 1,
+      steps: 1,
+      auxiliary: { 'memory-extraction': { requests: 1, steps: 1 } },
+    });
+    expect(extraction.metrics).toMatchObject({
+      llmCalls: 1,
+      totalLlmCalls: 2,
+      agentLlmCalls: 1,
+      memoryExtractionCalls: 1,
+      auxiliaryLlmErrors: 0,
+    });
+    // Lo que ve Stratum es lo que recibió el backend: ni una petición sin atribuir.
+    for (const s of first.result.scenarios.filter((x) => x.status === 'pass')) {
+      const aux = Object.values(s.mock!.auxiliary ?? {}).reduce((n, a) => n + a.requests, 0);
+      const retries = s.metrics!.retries ?? 0;
+      expect(s.metrics!.totalLlmCalls! + retries, s.id).toBe(s.mock!.requests + aux);
+    }
+    expect(stepsOf('memory-extraction-visible').map((s) => [s.data.origin, s.status])).toEqual([
+      ['agent', 'ok'],
+      ['memory-extraction', 'ok'],
+    ]);
+
+    // Compresión: aparte de las cuatro llamadas del agente, y justo antes de una.
+    expect(by['compression-visible']!.metrics).toMatchObject({
+      llmCalls: 4,
+      compressionCalls: 1,
+      compressions: 1,
+      cacheBreaks: 1,
+      overlappedLlmCalls: 0,
+    });
+    expect(by['compression-visible']!.metrics!.precedingAuxiliaryMs).toBeGreaterThan(0);
+    // El escenario de siempre, con el resumen dentro del guion principal, da lo mismo.
+    expect(by['cache-compression-cache-impact']!.metrics).toMatchObject({
+      llmCalls: 4,
+      compressionCalls: 1,
+      totalLlmCalls: 5,
+    });
+
+    // Caché: la del agente solo cuenta sus llamadas; la auxiliar va por su lado.
+    const cache = by['auxiliary-cache-accounting']!.metrics!;
+    expect(cache).toMatchObject({ cacheReportedCalls: 2, coldCalls: 1, warmCalls: 1 });
+    expect(cache.auxiliaryCachedReadTokens).toBeGreaterThan(0);
+    expect(cache.auxiliaryPromptTokens! + cache.promptTokens!).toBe(
+      cache.llmByOrigin!.agent.promptTokens! +
+        cache.llmByOrigin!['memory-extraction'].promptTokens!,
+    );
+    expect(cache.promptTokens).toBe(cache.llmByOrigin!.agent.promptTokens);
+
+    // Un fallo auxiliar no convierte el escenario en FAIL ni toca los errores del agente.
+    const failure = by['auxiliary-failure-does-not-corrupt-agent']!;
+    expect(failure).toMatchObject({ status: 'pass', exitCode: 0 });
+    expect(failure.metrics).toMatchObject({
+      auxiliaryLlmErrors: 1,
+      llmErrors: 0,
+      toolErrors: 0,
+      hadErrors: false,
+      stopReason: 'stop',
+    });
+    const failed = stepsOf('auxiliary-failure-does-not-corrupt-agent')[1]!;
+    expect(failed.status).toBe('error');
+    expect(String(failed.data.error)).toContain('extractor backend down');
+
+    // Subagente: sus llamadas no se mezclan con las del agente.
+    expect(by['subagent-origin']!.metrics).toMatchObject({
+      agentLlmCalls: 2,
+      subagentLlmCalls: 2,
+      auxiliaryLlmCalls: 0,
+    });
+    expect(stepsOf('subagent-origin').map((s) => [s.data.origin, s.parent !== null])).toEqual([
+      ['agent', false],
+      ['subagent', true],
+      ['subagent', true],
+      ['agent', false],
+    ]);
+
+    // El resumen de la ejecución lleva el desglose.
+    const llm = first.result.summary.overall.llm!;
+    expect(llm.byOrigin['memory-extraction'].calls).toBe(4);
+    expect(llm.byOrigin['context-compression'].calls).toBe(2);
+    expect(llm.auxiliary.errors).toBe(1);
+    expect(formatEvalReport(first.result)).toContain(`LLM calls: ${llm.calls}`);
+  });
+
   it('`stats` agrega las mismas trazas', () => {
     // Un escenario con varias sesiones deja una traza por sesión.
     const traces = first.result.scenarios
@@ -250,6 +348,13 @@ describe('escenarios incluidos, con el modelo de guion', () => {
     expect(stats.policyBlocks).toBe(o.policyBlocks);
     expect(stats.tokens).toBe(o.tokens);
     expect(stats.turnCompletionRate).toBe(1);
+    const llm = first.result.summary.overall.llm!;
+    expect(stats.llm.auxiliarySessions).toBe(traces.length);
+    expect(stats.llm.calls).toBe(llm.calls);
+    expect(stats.llm.byOrigin['memory-extraction'].calls).toBe(
+      llm.byOrigin['memory-extraction'].calls,
+    );
+    expect(stats.llm.auxiliary.errors).toBe(1);
   });
 
   it('una segunda ejecución es comparable y no regresa', async () => {

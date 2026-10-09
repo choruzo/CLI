@@ -6,7 +6,20 @@
  * un cambio de formato hay que llevarlo a los dos.
  */
 import { withCacheDerived, type CacheUsage } from '../providers/cache.js';
-import type { TraceData, TraceKind, TraceRecord, TraceStatus } from './records.js';
+import {
+  AUXILIARY_LLM_ORIGINS,
+  LLM_CALL_ORIGINS,
+  TRACE_CAP_LLM_ORIGIN,
+  isAuxiliaryOrigin,
+  type LlmCallOrigin,
+  type TraceData,
+  type TraceKind,
+  type TraceRecord,
+  type TraceStatus,
+} from './records.js';
+
+export { AUXILIARY_LLM_ORIGINS, LLM_CALL_ORIGINS, isAuxiliaryOrigin };
+export type { LlmCallOrigin };
 
 export interface TraceStep {
   id: string;
@@ -38,6 +51,11 @@ export interface TraceModel {
   steps: TraceStep[];
   index: Record<string, number>;
   turns: TraceTurn[];
+  /**
+   * Lo que saben registrar **todos** los procesos que escribieron la traza (la
+   * intersección de sus `meta.caps`). Ausente si aún no llegó ninguna cabecera.
+   */
+  caps?: string[];
 }
 
 export type TimelineMode = 'duration' | 'turns' | 'calls';
@@ -80,6 +98,7 @@ export function applyRecords(model: TraceModel, records: readonly TraceRecord[])
   const steps = model.steps.slice();
   const index = { ...model.index };
   const turns = model.turns.slice();
+  let caps = model.caps;
 
   const add = (
     r: { id: string; at: number; kind: TraceKind; name: string; parent?: string; data?: TraceData },
@@ -153,11 +172,62 @@ export function applyRecords(model: TraceModel, records: readonly TraceRecord[])
         };
         break;
       }
+      case 'meta': {
+        const own = Array.isArray(r.caps) ? r.caps : [];
+        caps = caps === undefined ? own.slice() : caps.filter((c) => own.includes(c));
+        break;
+      }
       default:
-        break; // `meta` y tipos de un formato más nuevo
+        break; // tipos de un formato más nuevo
     }
   }
-  return { steps, index, turns };
+  return caps === undefined ? { steps, index, turns } : { steps, index, turns, caps };
+}
+
+// ---------------------------------------------------------------------------
+// Origen de una llamada al modelo
+// ---------------------------------------------------------------------------
+
+export const ORIGIN_LABEL: Record<LlmCallOrigin, string> = {
+  agent: 'agente',
+  subagent: 'subagente',
+  'memory-extraction': 'extracción de memoria',
+  'context-compression': 'compresión de contexto',
+  'session-summary': 'resumen de sesión',
+};
+
+const ORIGINS = new Set<string>(LLM_CALL_ORIGINS);
+
+/**
+ * Quién hizo la llamada; null si el paso no es una llamada al modelo. Una traza
+ * anterior a `data.origin` solo registraba las del loop: la del agente
+ * principal, o la de un subagente si cuelga de uno.
+ */
+export function originOf(s: TraceStep): LlmCallOrigin | null {
+  if (s.kind !== 'model') return null;
+  const o = s.data.origin;
+  if (typeof o === 'string' && ORIGINS.has(o)) return o as LlmCallOrigin;
+  return s.parent ? 'subagent' : 'agent';
+}
+
+/** Llamada auxiliar: ni del loop del agente ni del de un subagente. */
+export function isAuxiliaryCall(s: TraceStep): boolean {
+  const o = originOf(s);
+  return o !== null && isAuxiliaryOrigin(o);
+}
+
+/** Llamada del loop (agente o subagente): las que medían las trazas de siempre. */
+export function isPrimaryCall(s: TraceStep): boolean {
+  const o = originOf(s);
+  return o !== null && !isAuxiliaryOrigin(o);
+}
+
+/**
+ * ¿Registraba la traza las llamadas auxiliares? Si no, que no aparezcan no
+ * quiere decir que no las hubiera.
+ */
+export function tracksAuxiliaryCalls(model: TraceModel): boolean {
+  return model.caps?.includes(TRACE_CAP_LLM_ORIGIN) === true;
 }
 
 // ---------------------------------------------------------------------------
@@ -208,6 +278,12 @@ export function toolCallsOf(step: TraceStep): ToolCallData[] {
 export function stepLabel(s: TraceStep): string {
   const d = s.data;
   if (s.kind === 'model') {
+    // Una auxiliar se reconoce por lo que es, no por su salida (un JSON, un resumen).
+    const origin = originOf(s);
+    if (origin && isAuxiliaryOrigin(origin)) {
+      const tail = d.error ? `: ${firstLine(d.error, 160)}` : s.end === null ? '…' : '';
+      return `${ORIGIN_LABEL[origin]}${tail}`;
+    }
     if (d.text) return firstLine(d.text, 200);
     if (d.reasoning) return firstLine(d.reasoning, 200);
     const calls = toolCallsOf(s);
@@ -291,11 +367,26 @@ export interface TimelineBlock {
 
 const endOf = (s: TraceStep, now: number): number => s.end ?? now;
 
-function turnBounds(model: TraceModel, now: number): Array<{ start: number; end: number }> {
+/**
+ * Trabajo en segundo plano: una llamada auxiliar lanzada con el turno ya
+ * cerrado (la extracción de memoria). Se pinta en el timeline, pero no alarga
+ * el turno: el usuario ya tenía su respuesta.
+ */
+export function isBackgroundStep(model: TraceModel, s: TraceStep): boolean {
+  const end = model.turns[s.turn]?.end;
+  return end !== null && end !== undefined && s.start >= end && isAuxiliaryCall(s);
+}
+
+function turnBounds(
+  model: TraceModel,
+  now: number,
+  background = true,
+): Array<{ start: number; end: number }> {
   const bounds = model.turns.map((t) => ({ start: t.at, end: t.end ?? t.at }));
   for (const s of model.steps) {
     const b = bounds[s.turn];
     if (!b) continue;
+    if (!background && isBackgroundStep(model, s)) continue;
     b.end = Math.max(b.end, endOf(s, now));
     b.start = Math.min(b.start, s.start);
   }
@@ -501,7 +592,8 @@ export function cacheBreaks(model: TraceModel): CacheBreak[] {
   for (const s of model.steps) {
     const scope = s.parent ?? '';
     if (s.kind === 'context' && s.name === COMPRESSION_STEP) compressed.add(scope);
-    if (s.kind !== 'model') continue;
+    // Una llamada auxiliar lleva otro prompt: no se compara con las del agente.
+    if (!isPrimaryCall(s)) continue;
     const read = usageOf(s)?.cachedReadTokens;
     if (read === undefined) continue;
     const prev = last.get(scope);
@@ -545,7 +637,10 @@ export interface CacheSummary {
 const mean = (values: readonly number[]): number | null =>
   values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
 
-/** Resumen de caché de una trayectoria; null si ninguna llamada la reportó. */
+/**
+ * Resumen de caché de las llamadas del loop (agente y subagentes); null si
+ * ninguna la reportó. Las auxiliares van aparte, en `llmBreakdown`.
+ */
 export function cacheSummary(model: TraceModel): CacheSummary | null {
   let reportedCalls = 0;
   let prompt = 0;
@@ -557,7 +652,7 @@ export function cacheSummary(model: TraceModel): CacheSummary | null {
   const ttftCold: number[] = [];
   const ttftWarm: number[] = [];
   for (const s of model.steps) {
-    if (s.kind !== 'model') continue;
+    if (!isPrimaryCall(s)) continue;
     const u = usageOf(s);
     if (u?.cachedReadTokens === undefined || u.promptTokens === undefined) continue;
     reportedCalls++;
@@ -598,6 +693,7 @@ export function prefixStability(model: TraceModel): number | null {
   let chars = 0;
   let shared = 0;
   for (const s of model.steps) {
+    if (!isPrimaryCall(s)) continue;
     const p = prefixOf(s);
     if (p?.sharedChars === undefined) continue;
     chars += p.chars;
@@ -606,9 +702,268 @@ export function prefixStability(model: TraceModel): number | null {
   return chars > 0 ? shared / chars : null;
 }
 
-/** TTFT medio de las llamadas al modelo; null si ninguna llegó al primer token. */
+/** TTFT medio de las llamadas del loop; null si ninguna llegó al primer token. */
 export function meanTtft(model: TraceModel): number | null {
-  return mean(model.steps.flatMap((s) => ttftOf(s) ?? []));
+  return mean(model.steps.flatMap((s) => (isPrimaryCall(s) ? (ttftOf(s) ?? []) : [])));
+}
+
+// ---------------------------------------------------------------------------
+// Llamadas al LLM por origen
+// ---------------------------------------------------------------------------
+
+export interface LlmOriginStats {
+  calls: number;
+  /** Acabaron en error / canceladas. */
+  errors: number;
+  cancelled: number;
+  /** null si ninguna llamada de este origen reportó `usage`: no se estima. */
+  promptTokens: number | null;
+  completionTokens: number | null;
+  /** null si ninguna reportó caché; las tres cifras son solo de las que sí. */
+  cachedReadTokens: number | null;
+  uncachedPromptTokens: number | null;
+  cacheHitRate: number | null;
+  /** Tiempo medio hasta el primer token; null si ninguna llegó a él. */
+  ttftMs: number | null;
+  /** Llamadas que llegaron al primer token (el peso de `ttftMs` al sumar trazas). */
+  ttftCalls: number;
+  /** Suma de la duración de las llamadas (una abierta cuenta hasta `now`). */
+  durationMs: number;
+}
+
+export interface LlmBreakdown {
+  /**
+   * false en una traza que no registraba las llamadas auxiliares: sus cifras
+   * por origen auxiliar son lo que hay en la traza, no lo que ocurrió.
+   */
+  auxiliaryTracked: boolean;
+  /** Todas las llamadas al LLM de la traza. */
+  calls: number;
+  byOrigin: Record<LlmCallOrigin, LlmOriginStats>;
+  /** Suma de los orígenes auxiliares. */
+  auxiliary: LlmOriginStats;
+}
+
+interface OriginAcc {
+  calls: number;
+  errors: number;
+  cancelled: number;
+  usageSeen: boolean;
+  prompt: number;
+  completion: number;
+  cacheSeen: boolean;
+  cachePrompt: number;
+  cacheRead: number;
+  ttft: number[];
+  durationMs: number;
+}
+
+const newAcc = (): OriginAcc => ({
+  calls: 0,
+  errors: 0,
+  cancelled: 0,
+  usageSeen: false,
+  prompt: 0,
+  completion: 0,
+  cacheSeen: false,
+  cachePrompt: 0,
+  cacheRead: 0,
+  ttft: [],
+  durationMs: 0,
+});
+
+function accumulate(acc: OriginAcc, s: TraceStep, now: number): void {
+  acc.calls++;
+  if (s.status === 'error') acc.errors++;
+  if (s.status === 'cancelled') acc.cancelled++;
+  acc.durationMs += Math.max(endOf(s, now) - s.start, 0);
+  const ttft = ttftOf(s);
+  if (ttft !== null) acc.ttft.push(ttft);
+  const u = usageOf(s);
+  if (!u) return;
+  acc.usageSeen = true;
+  acc.prompt += u.promptTokens ?? 0;
+  acc.completion += u.completionTokens ?? 0;
+  if (u.cachedReadTokens !== undefined && u.promptTokens !== undefined) {
+    acc.cacheSeen = true;
+    acc.cachePrompt += u.promptTokens;
+    acc.cacheRead += Math.min(u.cachedReadTokens, u.promptTokens);
+  }
+}
+
+const finishAcc = (a: OriginAcc): LlmOriginStats => ({
+  calls: a.calls,
+  errors: a.errors,
+  cancelled: a.cancelled,
+  promptTokens: a.usageSeen ? a.prompt : null,
+  completionTokens: a.usageSeen ? a.completion : null,
+  cachedReadTokens: a.cacheSeen ? a.cacheRead : null,
+  uncachedPromptTokens: a.cacheSeen ? a.cachePrompt - a.cacheRead : null,
+  cacheHitRate: a.cacheSeen && a.cachePrompt > 0 ? a.cacheRead / a.cachePrompt : null,
+  ttftMs: mean(a.ttft),
+  ttftCalls: a.ttft.length,
+  durationMs: a.durationMs,
+});
+
+const sumOrNull = (values: ReadonlyArray<number | null>): number | null => {
+  const seen = values.filter((v): v is number => v !== null);
+  return seen.length > 0 ? seen.reduce((a, b) => a + b, 0) : null;
+};
+
+/** Suma las cifras de un origen de varias trazas (medias ponderadas por sus llamadas). */
+export function sumOriginStats(list: readonly LlmOriginStats[]): LlmOriginStats {
+  const read = sumOrNull(list.map((s) => s.cachedReadTokens));
+  const uncached = sumOrNull(list.map((s) => s.uncachedPromptTokens));
+  const ttftCalls = list.reduce((n, s) => n + s.ttftCalls, 0);
+  const ttftTotal = list.reduce((n, s) => n + (s.ttftMs ?? 0) * s.ttftCalls, 0);
+  return {
+    calls: list.reduce((n, s) => n + s.calls, 0),
+    errors: list.reduce((n, s) => n + s.errors, 0),
+    cancelled: list.reduce((n, s) => n + s.cancelled, 0),
+    promptTokens: sumOrNull(list.map((s) => s.promptTokens)),
+    completionTokens: sumOrNull(list.map((s) => s.completionTokens)),
+    cachedReadTokens: read,
+    uncachedPromptTokens: uncached,
+    cacheHitRate:
+      read !== null && uncached !== null && read + uncached > 0 ? read / (read + uncached) : null,
+    ttftMs: ttftCalls > 0 ? ttftTotal / ttftCalls : null,
+    ttftCalls,
+    durationMs: list.reduce((n, s) => n + s.durationMs, 0),
+  };
+}
+
+/** Llamadas al LLM de la traza, repartidas por quién las hizo. */
+export function llmBreakdown(model: TraceModel, now: number): LlmBreakdown {
+  const accs = new Map<LlmCallOrigin, OriginAcc>(LLM_CALL_ORIGINS.map((o) => [o, newAcc()]));
+  const auxiliary = newAcc();
+  let calls = 0;
+  for (const s of model.steps) {
+    const origin = originOf(s);
+    if (origin === null) continue;
+    calls++;
+    accumulate(accs.get(origin)!, s, now);
+    if (isAuxiliaryOrigin(origin)) accumulate(auxiliary, s, now);
+  }
+  const byOrigin = {} as Record<LlmCallOrigin, LlmOriginStats>;
+  for (const o of LLM_CALL_ORIGINS) byOrigin[o] = finishAcc(accs.get(o)!);
+  return {
+    auxiliaryTracked: tracksAuxiliaryCalls(model),
+    calls,
+    byOrigin,
+    auxiliary: finishAcc(auxiliary),
+  };
+}
+
+// ---------------------------------------------------------------------------
+// Relación temporal entre llamadas auxiliares y llamadas del loop
+// ---------------------------------------------------------------------------
+
+/**
+ * Lo que la traza permite decir de cómo coincidieron en el tiempo una llamada
+ * del loop y las auxiliares. Son relojes del cliente: dicen que dos peticiones
+ * estaban en vuelo a la vez, **no** cuánto esperó una en la cola del servidor
+ * —eso solo lo sabe el backend, y aquí ni se mide ni se deduce—.
+ */
+export interface AuxiliaryOverlap {
+  /** Llamadas auxiliares en curso cuando empezó esta. */
+  activeAtStart: number;
+  /**
+   * Parte de la espera de esta llamada (de su inicio a su primer token, o a su
+   * fin si no llegó ninguno) durante la que había alguna auxiliar en curso.
+   */
+  overlappingAuxiliaryMs: number;
+  /**
+   * Duración de las auxiliares que terminaron entre la llamada del loop
+   * anterior y el inicio de esta: no coinciden con ella, pero han pasado por el
+   * backend justo antes (una compresión, una extracción ya acabada).
+   */
+  precedingAuxiliaryMs: number;
+}
+
+/** Longitud de la unión de `intervals` recortada a [from, to]. */
+function coveredMs(intervals: ReadonlyArray<[number, number]>, from: number, to: number): number {
+  const clipped = intervals
+    .map(([a, b]): [number, number] => [Math.max(a, from), Math.min(b, to)])
+    .filter(([a, b]) => b > a)
+    .sort((x, y) => x[0] - y[0]);
+  let total = 0;
+  let cursor = from;
+  for (const [a, b] of clipped) {
+    const start = Math.max(a, cursor);
+    if (b > start) {
+      total += b - start;
+      cursor = b;
+    }
+  }
+  return total;
+}
+
+/** Por id de cada llamada del loop, su relación temporal con las auxiliares. */
+export function auxiliaryOverlaps(model: TraceModel, now: number): Map<string, AuxiliaryOverlap> {
+  const out = new Map<string, AuxiliaryOverlap>();
+  const intervals = model.steps
+    .filter(isAuxiliaryCall)
+    .map((a): [number, number] => [a.start, endOf(a, now)]);
+  // Fin de la última llamada del loop ya vista: cota inferior de «justo antes».
+  let lastPrimaryEnd = -Infinity;
+  const primary = model.steps.filter(isPrimaryCall).sort((a, b) => a.start - b.start);
+  for (const s of primary) {
+    const waitEnd = s.firstToken ?? endOf(s, now);
+    let activeAtStart = 0;
+    let preceding = 0;
+    for (const [a, b] of intervals) {
+      if (a <= s.start && b > s.start) activeAtStart++;
+      if (b <= s.start && b > lastPrimaryEnd) preceding += b - a;
+    }
+    out.set(s.id, {
+      activeAtStart,
+      overlappingAuxiliaryMs: coveredMs(intervals, s.start, waitEnd),
+      precedingAuxiliaryMs: preceding,
+    });
+    lastPrimaryEnd = Math.max(lastPrimaryEnd, endOf(s, now));
+  }
+  return out;
+}
+
+export interface AuxiliaryImpact {
+  /** Llamadas del loop cuya espera coincidió con alguna auxiliar. */
+  overlappedCalls: number;
+  overlappingAuxiliaryMs: number;
+  precedingAuxiliaryMs: number;
+  /** TTFT medio de las llamadas del loop con / sin una auxiliar en curso durante la espera. */
+  ttftOverlappedMs: number | null;
+  ttftClearMs: number | null;
+  /** Llamadas que entran en cada media (su peso al sumar trazas). */
+  ttftOverlappedCalls: number;
+  ttftClearCalls: number;
+}
+
+export function auxiliaryImpact(model: TraceModel, now: number): AuxiliaryImpact {
+  const overlaps = auxiliaryOverlaps(model, now);
+  let overlappedCalls = 0;
+  let overlapping = 0;
+  let preceding = 0;
+  const hit: number[] = [];
+  const clear: number[] = [];
+  for (const s of model.steps) {
+    const o = overlaps.get(s.id);
+    if (!o) continue;
+    overlapping += o.overlappingAuxiliaryMs;
+    preceding += o.precedingAuxiliaryMs;
+    const overlapped = o.overlappingAuxiliaryMs > 0;
+    if (overlapped) overlappedCalls++;
+    const ttft = ttftOf(s);
+    if (ttft !== null) (overlapped ? hit : clear).push(ttft);
+  }
+  return {
+    overlappedCalls,
+    overlappingAuxiliaryMs: overlapping,
+    precedingAuxiliaryMs: preceding,
+    ttftOverlappedMs: mean(hit),
+    ttftClearMs: mean(clear),
+    ttftOverlappedCalls: hit.length,
+    ttftClearCalls: clear.length,
+  };
 }
 
 /** Tokens por segundo de una llamada: salida entre el tiempo de generación. */
@@ -622,7 +977,10 @@ export function tokensPerSecond(s: TraceStep): number | null {
 export interface TraceStats {
   turns: number;
   steps: number;
+  /** Llamadas del loop (agente y subagentes); el total y las auxiliares, en `llm`. */
   modelCalls: number;
+  llm: LlmBreakdown;
+  auxiliaryImpact: AuxiliaryImpact;
   toolCalls: number;
   totalTokens: number;
   tokensPerSecond: number | null;
@@ -644,7 +1002,7 @@ export function traceStats(model: TraceModel, now: number): TraceStats {
   let toolCalls = 0;
   for (const s of model.steps) {
     if (s.kind === 'tool') toolCalls++;
-    if (s.kind !== 'model') continue;
+    if (!isPrimaryCall(s)) continue;
     modelCalls++;
     const u = usageOf(s);
     if (!u) continue;
@@ -662,6 +1020,8 @@ export function traceStats(model: TraceModel, now: number): TraceStats {
     turns: model.turns.filter((t) => !t.implicit).length,
     steps: model.steps.length,
     modelCalls,
+    llm: llmBreakdown(model, now),
+    auxiliaryImpact: auxiliaryImpact(model, now),
     toolCalls,
     totalTokens: total,
     tokensPerSecond: genMs > 0 ? genTokens / (genMs / 1000) : null,
@@ -669,6 +1029,6 @@ export function traceStats(model: TraceModel, now: number): TraceStats {
     cache,
     prefixStability: prefixStability(model),
     ttftMs: meanTtft(model),
-    activeMs: turnBounds(model, now).reduce((sum, b) => sum + (b.end - b.start), 0),
+    activeMs: turnBounds(model, now, false).reduce((sum, b) => sum + (b.end - b.start), 0),
   };
 }

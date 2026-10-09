@@ -3,12 +3,17 @@ import {
   CACHE_BREAK_LABEL,
   KIND_LABEL,
   LANE_NAMES,
+  LLM_CALL_ORIGINS,
+  ORIGIN_LABEL,
+  auxiliaryOverlaps,
   cacheBreaks,
   formatClock,
   formatDuration,
   formatTokenCount,
   firstLine,
+  isAuxiliaryCall,
   layoutTimeline,
+  originOf,
   prefixOf,
   prettyValue,
   stepLabel,
@@ -19,6 +24,7 @@ import {
   toolCallsOf,
   traceStats,
   usageOf,
+  type AuxiliaryOverlap,
   type CacheBreak,
   type TimelineMode,
   type TraceModel,
@@ -50,7 +56,15 @@ const ICON: Record<TraceKind, string> = {
   subagent: '⬡',
 };
 
-const STATUS_LABEL = { ok: 'Completado', error: 'Error', cancelled: 'Cancelado' } as const;
+const STATUS_LABEL = {
+  ok: 'Completado',
+  error: 'Error',
+  cancelled: 'Cancelado',
+} as const;
+
+/** Una llamada auxiliar (memoria, compresión) va en el carril del modelo con otra marca. */
+const kindLabel = (step: TraceStep): string =>
+  isAuxiliaryCall(step) ? 'MODELO · AUXILIAR' : KIND_LABEL[step.kind];
 
 /** Reloj que solo corre mientras hay pasos abiertos: sus barras crecen con él. */
 function useNowWhile(active: boolean): number {
@@ -80,7 +94,11 @@ function Timeline({
   onSelect: (id: string) => void;
 }) {
   const blocks = useMemo(() => layoutTimeline(model, mode, now), [model, mode, now]);
-  const [tip, setTip] = useState<{ step: TraceStep; x: number; y: number } | null>(null);
+  const [tip, setTip] = useState<{
+    step: TraceStep;
+    x: number;
+    y: number;
+  } | null>(null);
   const width = mode === 'calls' ? `max(100%, ${model.steps.length * 14}px)` : '100%';
   return (
     <div className="trajectory__timeline">
@@ -102,12 +120,13 @@ function Timeline({
                     type="button"
                     className="trajectory__block"
                     data-kind={step.kind}
+                    data-auxiliary={isAuxiliaryCall(step) || undefined}
                     data-selected={b.id === selected || undefined}
                     data-error={step.status === 'error' || undefined}
                     data-open={step.end === null || undefined}
                     data-dimmed={!stepMatches(step, query) || undefined}
                     style={{ left: `${b.x * 100}%`, width: `${b.w * 100}%` }}
-                    aria-label={`${KIND_LABEL[step.kind]}: ${stepLabel(step)}`}
+                    aria-label={`${kindLabel(step)}: ${stepLabel(step)}`}
                     onClick={() => onSelect(b.id)}
                     onMouseMove={(e) => setTip({ step, x: e.clientX, y: e.clientY })}
                   >
@@ -127,7 +146,7 @@ function Timeline({
           role="tooltip"
           style={{ left: Math.max(8, tip.x - 150), top: tip.y + 16 }}
         >
-          <strong>{KIND_LABEL[tip.step.kind]}</strong> · {firstLine(stepLabel(tip.step), 60)}
+          <strong>{kindLabel(tip.step)}</strong> · {firstLine(stepLabel(tip.step), 60)}
           <br />
           {formatClock(tip.step.start)} →{' '}
           {tip.step.end === null ? 'en curso' : formatClock(tip.step.end)}
@@ -184,10 +203,16 @@ function Detail({
   step,
   now,
   cacheBreak,
+  overlap,
   onClose,
 }: {
   step: TraceStep;
   now: number;
+  /**
+   * Cómo coincidió esta llamada del loop con las auxiliares, según los relojes
+   * del cliente. No es tiempo de cola del servidor.
+   */
+  overlap?: AuxiliaryOverlap;
   /** La rotura de caché de este paso, si leyó de caché menos tokens que la llamada anterior. */
   cacheBreak?: CacheBreak;
   onClose: () => void;
@@ -197,6 +222,12 @@ function Detail({
   const usage = usageOf(step);
   const speed = tokensPerSecond(step);
   const prefix = prefixOf(step);
+  const origin = originOf(step);
+  const overlapped =
+    overlap !== undefined &&
+    (overlap.activeAtStart > 0 ||
+      overlap.overlappingAuxiliaryMs > 0 ||
+      overlap.precedingAuxiliaryMs > 0);
 
   let body: ReactNode;
   if (tab === 'raw') {
@@ -265,11 +296,27 @@ function Detail({
           <Field label="Duración" value={formatDuration((step.end ?? now) - step.start)} />
           {step.kind === 'model' && (
             <>
+              {origin && <Field label="Origen" value={`${origin} (${ORIGIN_LABEL[origin]})`} />}
               <Field label="Proveedor" value={d.provider as string | undefined} />
               <Field label="Mensajes" value={d.messages as number | undefined} />
               <Field label="Tools ofrecidas" value={d.tools as number | undefined} />
               {step.firstToken !== null && (
                 <Field label="Primer token" value={formatDuration(step.firstToken - step.start)} />
+              )}
+              {overlap && overlapped && (
+                <>
+                  <Field label="Auxiliares en curso al empezar" value={overlap.activeAtStart} />
+                  <Field
+                    label="Espera solapada con auxiliares"
+                    value={formatDuration(overlap.overlappingAuxiliaryMs)}
+                  />
+                  {overlap.precedingAuxiliaryMs > 0 && (
+                    <Field
+                      label="Auxiliares justo antes"
+                      value={formatDuration(overlap.precedingAuxiliaryMs)}
+                    />
+                  )}
+                </>
               )}
               {usage ? (
                 <>
@@ -278,7 +325,10 @@ function Detail({
                     <Field label="Caché" value="no reportada por el backend" />
                   ) : (
                     <>
-                      <Field label="Caché" value={usage.cachedReadTokens > 0 ? 'templada' : 'fría'} />
+                      <Field
+                        label="Caché"
+                        value={usage.cachedReadTokens > 0 ? 'templada' : 'fría'}
+                      />
                       <Field label="Tokens de caché (leídos)" value={usage.cachedReadTokens} />
                       <Field label="Tokens sin caché" value={usage.uncachedPromptTokens} />
                       {usage.cacheHitRate !== undefined && (
@@ -297,7 +347,9 @@ function Detail({
                     />
                   )}
                   <Field label="Tokens salida" value={usage.completionTokens} />
-                  {speed !== null && <Field label="Velocidad" value={`${speed.toFixed(1)} tok/s`} />}
+                  {speed !== null && (
+                    <Field label="Velocidad" value={`${speed.toFixed(1)} tok/s`} />
+                  )}
                 </>
               ) : (
                 step.end !== null && <Field label="Tokens" value="no reportados por el backend" />
@@ -346,8 +398,12 @@ function Detail({
   return (
     <section className="trajectory__detail" aria-label="Detalle del paso">
       <header className="trajectory__detail-head">
-        <span className="trajectory__badge" data-kind={step.kind}>
-          {KIND_LABEL[step.kind]}
+        <span
+          className="trajectory__badge"
+          data-kind={step.kind}
+          data-auxiliary={isAuxiliaryCall(step) || undefined}
+        >
+          {kindLabel(step)}
         </span>
         <span className="trajectory__where">
           Turno {step.turn + 1} · Paso {step.n}
@@ -398,6 +454,7 @@ export function TrajectoryPanel({
   const now = useNowWhile(hasOpen);
   const stats = useMemo(() => traceStats(model, now), [model, now]);
   const breaks = useMemo(() => new Map(cacheBreaks(model).map((b) => [b.id, b])), [model]);
+  const overlaps = useMemo(() => auxiliaryOverlaps(model, now), [model, now]);
   const needle = query.trim().toLowerCase();
 
   const selectedStep = selected !== null ? model.steps[model.index[selected]] : undefined;
@@ -483,8 +540,13 @@ export function TrajectoryPanel({
               <span className="trajectory__turn">
                 {s.kind === 'user' && s.id.startsWith('turn-') ? `#${s.turn + 1}` : ''}
               </span>
-              <span className="trajectory__icon" data-kind={s.kind} aria-hidden="true">
-                {ICON[s.kind]}
+              <span
+                className="trajectory__icon"
+                data-kind={s.kind}
+                data-auxiliary={isAuxiliaryCall(s) || undefined}
+                aria-hidden="true"
+              >
+                {isAuxiliaryCall(s) ? '◇' : ICON[s.kind]}
               </span>
               <span className="trajectory__label" data-mono={s.kind === 'tool' || undefined}>
                 {stepLabel(s)}
@@ -503,6 +565,7 @@ export function TrajectoryPanel({
           step={selectedStep}
           now={now}
           cacheBreak={breaks.get(selectedStep.id)}
+          overlap={overlaps.get(selectedStep.id)}
           onClose={() => setSelected(null)}
         />
       )}
@@ -511,6 +574,35 @@ export function TrajectoryPanel({
         <span>
           {stats.turns} turnos · {stats.steps} pasos
         </span>
+        {stats.llm.calls > 0 && (
+          <span title="Llamadas al modelo por origen">
+            LLM calls: {stats.llm.calls} (
+            {LLM_CALL_ORIGINS.filter((o) => stats.llm.byOrigin[o].calls > 0)
+              .map((o) => `${o} ${stats.llm.byOrigin[o].calls}`)
+              .join(' · ')}
+            )
+          </span>
+        )}
+        {stats.llm.auxiliary.calls > 0 ? (
+          <span title="Extracción de memoria, compresión de contexto y resumen de sesión">
+            auxiliares {formatDuration(stats.llm.auxiliary.durationMs)}
+            {stats.llm.auxiliary.promptTokens !== null &&
+              ` · ${formatTokenCount(stats.llm.auxiliary.promptTokens)} tok entrada`}
+            {stats.llm.auxiliary.cacheHitRate !== null &&
+              ` · caché ${Math.round(stats.llm.auxiliary.cacheHitRate * 100)}%`}
+            {stats.llm.auxiliary.errors > 0 &&
+              ` · ${stats.llm.auxiliary.errors} ${stats.llm.auxiliary.errors === 1 ? 'fallo' : 'fallos'}`}
+          </span>
+        ) : (
+          !stats.llm.auxiliaryTracked &&
+          stats.modelCalls > 0 && <span>auxiliares no registradas en esta traza</span>
+        )}
+        {stats.auxiliaryImpact.overlappedCalls > 0 && (
+          <span title="Llamadas del agente cuya espera coincidió con una auxiliar en vuelo (relojes del cliente; no es tiempo de cola del servidor)">
+            {stats.auxiliaryImpact.overlappedCalls} con auxiliar en curso (
+            {formatDuration(stats.auxiliaryImpact.overlappingAuxiliaryMs)} solapados)
+          </span>
+        )}
         {stats.tokensPerSecond !== null && <span>{stats.tokensPerSecond.toFixed(0)} tok/s</span>}
         {stats.totalTokens > 0 && <span>{formatTokenCount(stats.totalTokens)} tok</span>}
         {stats.cache ? (

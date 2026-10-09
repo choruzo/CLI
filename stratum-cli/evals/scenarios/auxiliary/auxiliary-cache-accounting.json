@@ -1,0 +1,108 @@
+{
+  "id": "auxiliary-cache-accounting",
+  "group": "auxiliary",
+  "title": "Los tokens y la caché de las llamadas auxiliares se contabilizan aparte de los del agente",
+  "description": "Dos turnos con extracción de memoria tras cada uno. El backend reporta caché en todas las peticiones: la segunda extracción reutiliza el prompt del extractor, y esa caché no puede sumarse a la del agente ni alterar sus llamadas frías y templadas.",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "memory": {
+        "autoExtract": true
+      }
+    }
+  },
+  "input": "En este repositorio vamos a usar pnpm en vez de npm. Confírmalo en una frase.",
+  "followUps": ["Y los tests se lanzan con vitest, no con jest. Confírmalo también."],
+  "script": [
+    {
+      "text": "De acuerdo: en este repositorio se usa pnpm."
+    },
+    {
+      "text": "De acuerdo: los tests se lanzan con vitest."
+    }
+  ],
+  "auxiliaryScript": {
+    "memory-extraction": [
+      {
+        "text": "[]"
+      },
+      {
+        "text": "[]"
+      }
+    ]
+  },
+  "expect": {
+    "description": "Dos llamadas del agente (una fría, una templada) y dos de extracción con su propia caché, sin mezclar cifras.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "vitest"
+      },
+      {
+        "type": "llm_call",
+        "origin": "memory-extraction",
+        "status": "ok",
+        "min": 2,
+        "max": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "cacheReportedCalls",
+        "equals": 2,
+        "mode": "mock",
+        "label": "la caché del agente solo cuenta sus 2 llamadas"
+      },
+      {
+        "type": "metric",
+        "metric": "coldCalls",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "warmCalls",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "cacheBreaks",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryLlmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryPromptTokens",
+        "min": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryCachedReadTokens",
+        "min": 1,
+        "mode": "mock",
+        "label": "la segunda extracción lee de caché el prompt del extractor"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryCacheHitRate",
+        "min": 0.01,
+        "max": 0.99,
+        "mode": "mock"
+      }
+    ]
+  }
+}

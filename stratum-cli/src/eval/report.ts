@@ -3,8 +3,14 @@
  * devuelven la cadena a imprimir; el JSON equivalente es el propio objeto.
  */
 import chalk from 'chalk';
-import { CACHE_BREAK_LABEL, formatDuration, formatTokenCount } from '../trace/model.js';
-import type { CacheBreakCause } from '../trace/model.js';
+import {
+  CACHE_BREAK_LABEL,
+  LLM_CALL_ORIGINS,
+  formatDuration,
+  formatTokenCount,
+  isAuxiliaryOrigin,
+} from '../trace/model.js';
+import type { CacheBreakCause, LlmCallOrigin, LlmOriginStats } from '../trace/model.js';
 import type {
   Comparison,
   MetricChange,
@@ -12,7 +18,7 @@ import type {
   Tolerance,
   Verdict,
 } from './compare.js';
-import { COMPARABLE_METRICS } from './metrics.js';
+import { AUXILIARY_METRICS, COMPARABLE_METRICS } from './metrics.js';
 import type { Distribution, EvalResult, GroupSummary, ScenarioResult } from './result.js';
 import { DIFFICULTIES, liveTrajectoryChecks, type LoadedScenario } from './scenario.js';
 import type { AggregateStats } from './stats.js';
@@ -70,6 +76,71 @@ function provenance(result: EvalResult): string {
   ]
     .filter(Boolean)
     .join(' · ');
+}
+
+/**
+ * «LLM calls: N» y una fila por origen con llamadas. Los nombres de origen van
+ * tal cual están en la traza (`data.origin`): son lo que se busca en ella.
+ */
+export function originLines(
+  calls: number,
+  byOrigin: Record<LlmCallOrigin, LlmOriginStats>,
+  note?: string,
+): string[] {
+  const rows = LLM_CALL_ORIGINS.filter((o) => byOrigin[o].calls > 0 || !isAuxiliaryOrigin(o)).map(
+    (o) => {
+      const s = byOrigin[o];
+      return [
+        `  ${o}`,
+        String(s.calls),
+        tok(s.promptTokens),
+        tok(s.completionTokens),
+        tok(s.cachedReadTokens),
+        tok(s.uncachedPromptTokens),
+        dur(s.ttftMs),
+        dur(s.durationMs),
+        s.cancelled > 0 ? `${s.errors} (+${s.cancelled} canc.)` : String(s.errors),
+      ];
+    },
+  );
+  return [
+    chalk.bold(`LLM calls: ${calls}`) + (note ? chalk.gray(`  ${note}`) : ''),
+    ...table([
+      [
+        '  origen',
+        'llamadas',
+        'tok entrada',
+        'tok salida',
+        'caché leída',
+        'sin caché',
+        'TTFT medio',
+        'duración',
+        'errores',
+      ],
+      ...rows,
+    ]),
+  ];
+}
+
+/** Lo que la traza deja decir de la coincidencia entre el loop y las auxiliares. */
+function impactLines(i: {
+  overlappedCalls: number;
+  overlappingAuxiliaryMs: number;
+  precedingAuxiliaryMs: number;
+  ttftOverlappedMs: number | null;
+  ttftClearMs: number | null;
+}): string[] {
+  return table([
+    [
+      'Llamadas del loop con una auxiliar en curso',
+      `${i.overlappedCalls}  (${dur(i.overlappingAuxiliaryMs)} de espera solapada)`,
+    ],
+    ['Auxiliares justo antes de una llamada del loop', dur(i.precedingAuxiliaryMs)],
+    [
+      'TTFT del loop con · sin auxiliar en curso',
+      `${dur(i.ttftOverlappedMs)} · ${dur(i.ttftClearMs)}`,
+    ],
+  ]).map((l) => `  ${l}`);
 }
 
 const dist = (d: Distribution | null, fmt: (v: number) => string): string =>
@@ -157,6 +228,11 @@ export function formatEvalReport(result: EvalResult, dir?: string): string {
   if (levels.length > 0) out.push('', chalk.gray(`Por dificultad: ${levels.join('  ')}`));
 
   out.push('', chalk.bold('Resumen'), ...summaryLines(result.summary.overall));
+  const llm = result.summary.overall.llm;
+  if (llm) {
+    out.push('', ...originLines(llm.calls, llm.byOrigin));
+    if (llm.auxiliary.calls > 0) out.push(...impactLines(llm));
+  }
   if (dir) {
     out.push('', chalk.gray(`Artefacto: ${dir}`));
     const failed = result.scenarios.find((s) => s.status === 'fail' && s.trace);
@@ -187,8 +263,23 @@ const RATES = new Set([
   'cacheHitRate',
   'prefixStability',
 ]);
-const DURATIONS = new Set(['durationMs', 'timeToSuccessMs', 'ttftColdMs', 'ttftWarmMs']);
-const TOKENS = new Set(['tokens', 'tokensToSuccess', 'cachedReadTokens', 'uncachedPromptTokens']);
+const DURATIONS = new Set([
+  'durationMs',
+  'timeToSuccessMs',
+  'ttftColdMs',
+  'ttftWarmMs',
+  'auxiliaryDurationMs',
+  'overlappingAuxiliaryMs',
+  'precedingAuxiliaryMs',
+]);
+const TOKENS = new Set([
+  'tokens',
+  'tokensToSuccess',
+  'cachedReadTokens',
+  'uncachedPromptTokens',
+  'auxiliaryPromptTokens',
+  'auxiliaryCachedReadTokens',
+]);
 
 function value(metric: string, v: number): string {
   if (RATES.has(metric)) return pct(v);
@@ -286,6 +377,12 @@ export function formatComparison(cmp: Comparison): string {
     chalk.yellow,
   );
   section(
+    'Regresiones en llamadas auxiliares (métricas pedidas con --metric)',
+    h.auxiliaryRegressions ?? [],
+    moved('auxiliary', 'regression'),
+    chalk.yellow,
+  );
+  section(
     'Mejoras',
     h.improvements,
     (s) => [
@@ -341,6 +438,14 @@ export function formatComparison(cmp: Comparison): string {
       `${same} sin cambios`,
     chalk.gray(
       `Tolerancias: ${COMPARABLE_METRICS.map((m) => toleranceText(m, cmp.tolerances[m])).join(' · ')}`,
+    ),
+    chalk.gray(
+      cmp.selected
+        ? `Auxiliares comparadas: ${AUXILIARY_METRICS.flatMap((m) => {
+            const t = cmp.selected?.[m];
+            return t ? [toleranceText(m, t)] : [];
+          }).join(' · ')}`
+        : 'Las métricas de llamadas auxiliares son informativas: para que cuenten, --metric <nombre>.',
     ),
   );
   return out.join('\n') + '\n';
@@ -409,7 +514,7 @@ export function formatStats(s: AggregateStats, top = 10): string {
       ['Turnos', `${s.turns}  (${stops || 'ninguno cerrado'})`],
       ['Turnos completados', pct(s.turnCompletionRate)],
       ['Tiempo activo', dur(s.durationMs)],
-      ['Llamadas al modelo', `${s.llmCalls}  (${s.llmErrors} con error)`],
+      ['Llamadas al modelo (loop)', `${s.llmCalls}  (${s.llmErrors} con error)`],
       ['Tokens', tok(s.tokens)],
       ['Tool calls', String(s.toolCalls)],
       ['Tool error rate', `${pct(s.toolErrorRate)}  (${s.toolErrors})`],
@@ -436,7 +541,22 @@ export function formatStats(s: AggregateStats, top = 10): string {
     ]).map((l) => `  ${l}`),
   );
 
-  out.push('', chalk.bold('Caché de prompt'));
+  const llm = s.llm;
+  if (llm) {
+    out.push(
+      '',
+      ...originLines(
+        llm.calls,
+        llm.byOrigin,
+        llm.auxiliarySessions < s.sessions
+          ? `(auxiliares: solo de las ${llm.auxiliarySessions} sesiones grabadas desde que la traza las registra)`
+          : undefined,
+      ),
+    );
+    if (llm.auxiliary.calls > 0) out.push(...impactLines(llm));
+  }
+
+  out.push('', chalk.bold('Caché de prompt') + chalk.gray('  (llamadas del agente y subagentes)'));
   const cache = s.cache;
   if (cache) {
     const causes = (Object.entries(s.cacheBreaks ?? {}) as Array<[CacheBreakCause, number]>)

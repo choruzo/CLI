@@ -344,7 +344,7 @@ export const chatCommand = new Command('chat')
       // SSH lanzase, antes se perdía la conversación entera.
       // -----------------------------------------------------------------------
       try {
-        const savedSession = await checkpointer.saveFinal(router.getActive());
+        const savedSession = await checkpointer.saveFinal(router.getActive(), auditor.scope);
         // El aviso de los huérfanos ya está guardado en la sesión: ahora sí.
         subagentStore.commitDeferred();
         if (savedSession.forkedFrom) {

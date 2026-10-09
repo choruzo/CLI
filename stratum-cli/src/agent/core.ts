@@ -56,6 +56,7 @@ import {
   type ResolvedEnvironment,
 } from '../tools/environments.js';
 import { extractAndStore } from '../memory/extractor.js';
+import type { TraceScope } from '../trace/recorder.js';
 
 export interface StratumAgentOptions {
   /** Mensajes iniciales para reanudar una sesión guardada (incluye el system prompt original). */
@@ -124,6 +125,9 @@ export class StratumAgent {
   /** `ContextManager` de sesión (ver `getContextManager`). */
   private contextManager: ContextManager | null = null;
   private contextManagerKey = '';
+  /** Trabajo en segundo plano en vuelo (extracción de memoria) y su cancelación. */
+  private readonly background = new Set<Promise<void>>();
+  private backgroundAbort = new AbortController();
   private readonly memoryManager: MemoryManager;
   /** Perfiles de subagente (Hito 8): descubiertos al arrancar, pasados al loop. */
   private readonly profiles: ProfileLoader;
@@ -317,22 +321,40 @@ export class StratumAgent {
     // Extracción automática de decisiones en background (§9, detección
     // LLM-based). Fire-and-forget: nunca bloquea ni interrumpe la respuesta.
     if (stopReason === 'stop' && this.config.memory.autoExtract) {
-      void this.maybeAutoExtract();
+      const extraction = this.maybeAutoExtract(trace).finally(() =>
+        this.background.delete(extraction),
+      );
+      this.background.add(extraction);
     }
   }
 
   /** Lanza la extracción automática de decisiones. Best-effort, no lanza. */
-  private async maybeAutoExtract(): Promise<void> {
+  private async maybeAutoExtract(trace?: TraceScope): Promise<void> {
     try {
       await extractAndStore({
         provider: this.router.getActive(),
+        providerName: this.router.providerName,
         model: this.config.memory.extractionModel ?? this.router.model,
         messages: this.getMessages(),
         memory: this.memoryManager.getDecisionMemory(),
+        trace,
+        cancelSignal: this.backgroundAbort.signal,
       });
     } catch {
       /* la memoria es auxiliar: un fallo nunca debe afectar a la sesión */
     }
+  }
+
+  /**
+   * Corta el trabajo en segundo plano (la extracción de memoria en vuelo) y
+   * espera a que se cierre. Para el apagado: sin esto, una llamada auxiliar a
+   * medias quedaría en la traza abierta para siempre en vez de `cancelled`. No
+   * hay que llamarlo si se quiere que la extracción termine.
+   */
+  async cancelBackgroundWork(): Promise<void> {
+    this.backgroundAbort.abort();
+    await Promise.allSettled([...this.background]);
+    this.backgroundAbort = new AbortController();
   }
 
   /**
@@ -435,8 +457,8 @@ export class StratumAgent {
    * parámetros que usa `ReactLoop`, porque el del loop solo vive durante un
    * `run()` y `/compact` se invoca entre turnos.
    */
-  async compactNow(): Promise<CompressionResult> {
-    return this.getContextManager().compress(this.messages);
+  async compactNow(trace?: TraceScope): Promise<CompressionResult> {
+    return this.getContextManager().compress(this.messages, undefined, true, trace);
   }
 
   /**
@@ -458,6 +480,7 @@ export class StratumAgent {
         this.config.agent.compressionThreshold,
         this.config.agent.compressorModel,
         this.config.agent.compressionTimeoutMs,
+        this.router.providerName,
       );
       this.contextManagerKey = key;
     }

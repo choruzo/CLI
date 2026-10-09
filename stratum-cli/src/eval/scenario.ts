@@ -9,6 +9,7 @@ import { dirname, join, relative } from 'path';
 import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import { stripBom } from '../config/json-text.js';
+import { AUXILIARY_LLM_ORIGINS, LLM_CALL_ORIGINS } from '../trace/records.js';
 
 export const SCENARIO_GROUPS = [
   'code',
@@ -18,6 +19,7 @@ export const SCENARIO_GROUPS = [
   'recovery',
   'multi-agent',
   'cache',
+  'auxiliary',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
 
@@ -56,6 +58,19 @@ export const CHECKABLE_METRICS = [
   'warmCalls',
   'cacheBreaks',
   'prefixStability',
+  'totalLlmCalls',
+  'agentLlmCalls',
+  'subagentLlmCalls',
+  'auxiliaryLlmCalls',
+  'memoryExtractionCalls',
+  'compressionCalls',
+  'auxiliaryLlmErrors',
+  'auxiliaryPromptTokens',
+  'auxiliaryCompletionTokens',
+  'auxiliaryCachedReadTokens',
+  'auxiliaryCacheHitRate',
+  'promptTokens',
+  'completionTokens',
 ] as const;
 
 /** Causas de una rotura de caché que un criterio `cache_break` puede exigir. */
@@ -210,6 +225,20 @@ const CheckSchema = z.discriminatedUnion('type', [
       ...base,
     })
     .strict(),
+  /**
+   * Llamadas al LLM de la traza por origen (`agent`, `subagent`,
+   * `memory-extraction`, `context-compression`, `session-summary`).
+   */
+  z
+    .object({
+      type: z.literal('llm_call'),
+      origin: z.enum(LLM_CALL_ORIGINS),
+      status: z.enum(['any', 'ok', 'error', 'cancelled']).default('any'),
+      min: z.number().int().nonnegative().default(1),
+      max: z.number().int().nonnegative().optional(),
+      ...base,
+    })
+    .strict(),
   /** Decisiones del runtime registradas en la traza (vetos, confirmaciones, reintentos). */
   z
     .object({
@@ -358,6 +387,16 @@ export const ScenarioSchema = z
       .default({}),
     /** Guion del modelo para `--mock`. Sin él, el escenario solo corre contra un modelo real. */
     script: z.array(ScriptStepSchema).min(1).optional(),
+    /**
+     * Guion aparte para las llamadas auxiliares, por origen. Las que corren en
+     * segundo plano (la extracción de memoria) no tienen un orden fijo respecto
+     * a las del agente: el modelo de guion las reconoce por su prompt y les
+     * contesta de aquí, en su propio orden. Un origen sin guion propio sigue
+     * consumiendo pasos de `script`, como siempre.
+     */
+    auxiliaryScript: z
+      .record(z.enum(AUXILIARY_LLM_ORIGINS), z.array(ScriptStepSchema).min(1))
+      .optional(),
     expect: z
       .object({
         /** Resultado esperado, en una frase (para quien lee el informe). */
@@ -405,6 +444,7 @@ export function scenarioFingerprint(scenario: Scenario): string {
   const more = {
     ...(followUps.length > 0 ? { followUps } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),
+    ...(scenario.auxiliaryScript ? { auxiliaryScript: scenario.auxiliaryScript } : {}),
   };
   return createHash('sha1')
     .update(JSON.stringify({ requires, setup, input, run, script, expect, ...more }))
@@ -429,6 +469,7 @@ export function liveTrajectoryChecks(scenario: Scenario): string[] {
     if (c.type === 'tool_called' && c.min > 0) flag('exige que se llame a una tool');
     if (c.type === 'runtime_event' && c.min > 0) flag('exige una decisión concreta del runtime');
     if (c.type === 'cache_break' && c.min > 0) flag('exige una rotura de caché concreta');
+    if (c.type === 'llm_call' && c.min > 0) flag('exige una llamada concreta al modelo');
     if (c.type === 'tool_output_contains' && !c.negate) flag('exige una salida de tool concreta');
     if (c.type === 'metric' && ((c.min ?? 0) > 0 || (c.equals ?? 0) > 0)) {
       flag('exige un valor mínimo o exacto de una métrica de la trayectoria');

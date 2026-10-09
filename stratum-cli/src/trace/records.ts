@@ -16,7 +16,7 @@ export const TRACE_FORMAT_VERSION = 1;
  * Carril del timeline al que pertenece un paso:
  *  - `system` / `user` / `context` — lo que entra al modelo (prompt del sistema,
  *    mensaje del usuario, mensajes inyectados por el runtime)
- *  - `model` — una llamada al LLM
+ *  - `model` — una llamada al LLM; `data.origin` dice quién la hizo (`LlmCallOrigin`)
  *  - `tool` / `subagent` — lo que el agente ejecuta
  *  - `notice` — avisos y errores del runtime
  */
@@ -29,6 +29,45 @@ export type TraceData = Record<string, unknown>;
 
 /** `meta.caps`: la traza registra las decisiones del runtime (`TraceRuntimeEvent`). */
 export const TRACE_CAP_RUNTIME = 'runtime';
+
+/**
+ * `meta.caps`: el escritor registra **todas** las llamadas al LLM, también las
+ * auxiliares, y cada paso `model` lleva su origen en `data.origin`. Sin este
+ * cap, que no haya llamadas auxiliares en la traza no significa que no las
+ * hubiera: quien calcula métricas las da por desconocidas (`null`), nunca por 0.
+ */
+export const TRACE_CAP_LLM_ORIGIN = 'llm-origin';
+
+/**
+ * Quién hizo una llamada al LLM (`data.origin` de un paso `model`):
+ *  - `agent` — el loop del agente principal;
+ *  - `subagent` — el loop de un subagente (su paso lleva además `parent`);
+ *  - `memory-extraction` — la extracción automática de decisiones tras un turno;
+ *  - `context-compression` — el resumen del historial (umbral o `/compact`);
+ *  - `session-summary` — el resumen de una línea al guardar la sesión.
+ *
+ * Las tres últimas son **auxiliares**: no las pide el modelo ni forman parte del
+ * turno, pero ocupan el backend y su caché igual que las demás.
+ */
+export const LLM_CALL_ORIGINS = [
+  'agent',
+  'subagent',
+  'memory-extraction',
+  'context-compression',
+  'session-summary',
+] as const;
+export type LlmCallOrigin = (typeof LLM_CALL_ORIGINS)[number];
+
+export const AUXILIARY_LLM_ORIGINS = [
+  'memory-extraction',
+  'context-compression',
+  'session-summary',
+] as const satisfies readonly LlmCallOrigin[];
+export type AuxiliaryLlmOrigin = (typeof AUXILIARY_LLM_ORIGINS)[number];
+
+export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlmOrigin {
+  return (AUXILIARY_LLM_ORIGINS as readonly string[]).includes(origin);
+}
 
 /**
  * Decisiones del runtime que no son un `AgentEvent`: se guardan como un `point`

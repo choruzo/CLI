@@ -201,7 +201,7 @@ describe('el recorder los guarda como puntos `notice` y declara el cap', () => {
     await rec.flush();
 
     const records = readTraceFile(file);
-    expect(records[0]).toMatchObject({ t: 'meta', caps: ['runtime'] });
+    expect(records[0]).toMatchObject({ t: 'meta', caps: expect.arrayContaining(['runtime']) });
     const points = records.filter((r) => r.t === 'point' && r.kind === 'notice');
     expect(points).toHaveLength(4);
     expect(JSON.stringify(points)).not.toContain('sk-proj-abcdefghij');

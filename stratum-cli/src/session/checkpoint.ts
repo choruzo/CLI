@@ -3,6 +3,7 @@ import type { IProvider } from '../providers/base.js';
 import { getLogger } from '../logging/index.js';
 import type { SaveSessionParams, SessionStore } from './store.js';
 import type { SessionContext } from './types.js';
+import type { TraceScope } from '../trace/recorder.js';
 
 const log = getLogger('session');
 
@@ -35,7 +36,7 @@ export function checkpointMessages(messages: Message[]): Message[] {
 /** Lo que el checkpointer no decide: todo `SaveSessionParams` salvo la identidad. */
 export type CheckpointSnapshot = Omit<
   SaveSessionParams,
-  'existingId' | 'expectedUpdatedAt' | 'forkedFrom' | 'llmProvider'
+  'existingId' | 'expectedUpdatedAt' | 'forkedFrom' | 'llmProvider' | 'trace'
 >;
 
 export interface SessionCheckpointerOptions {
@@ -102,10 +103,17 @@ export class SessionCheckpointer {
     });
   }
 
-  /** Guardado final (con resumen si se pasa `llmProvider`). Lanza si falla. */
-  saveFinal(llmProvider?: IProvider): Promise<SessionContext> {
+  /**
+   * Guardado final (con resumen si se pasa `llmProvider`). Lanza si falla. Con
+   * `trace`, la llamada del resumen queda registrada como `session-summary`.
+   */
+  saveFinal(llmProvider?: IProvider, trace?: TraceScope): Promise<SessionContext> {
     return this.enqueue(() =>
-      this.write({ ...this.opts.snapshot(), ...(llmProvider ? { llmProvider } : {}) }),
+      this.write({
+        ...this.opts.snapshot(),
+        ...(llmProvider ? { llmProvider } : {}),
+        ...(trace ? { trace } : {}),
+      }),
     );
   }
 

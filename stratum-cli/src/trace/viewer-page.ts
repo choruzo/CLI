@@ -20,6 +20,7 @@ export const VIEWER_PAGE = String.raw`<!doctype html>
   --sel: #eceef2; --accent: #3b6fd4;
   --c-system: #8a8f98; --c-user: #6f8fe6; --c-context: #7fc08d; --c-notice: #d9a13b;
   --c-model: #c3b3df; --c-model-gen: #8f73c4; --c-tool: #e0903e; --c-subagent: #3aa7a0;
+  --c-aux: #c9cdd6; --c-aux-gen: #7d8798;
   --c-error: #d6453d;
 }
 @media (prefers-color-scheme: dark) {
@@ -28,6 +29,7 @@ export const VIEWER_PAGE = String.raw`<!doctype html>
     --sel: #252a34; --accent: #7ea2f0;
     --c-system: #777d88; --c-user: #6f8fe6; --c-context: #5fa873; --c-notice: #c9973a;
     --c-model: #6d5c94; --c-model-gen: #a48be0; --c-tool: #d98a3c; --c-subagent: #3aa7a0;
+    --c-aux: #4a5262; --c-aux-gen: #9aa5b8;
     --c-error: #e2605a;
   }
 }
@@ -78,6 +80,8 @@ header h1 { font-size: 15px; margin: 0; font-weight: 600; }
 .k-context { background: var(--c-context); } .k-notice { background: var(--c-notice); }
 .k-model { background: var(--c-model); } .k-tool { background: var(--c-tool); }
 .k-subagent { background: var(--c-subagent); }
+/* Llamada auxiliar (memoria, compresión): mismo carril que el modelo, otro color. */
+.blk.aux { background: var(--c-aux); } .blk.aux .gen { background: var(--c-aux-gen); }
 #tip {
   position: fixed; z-index: 10; pointer-events: none; display: none; max-width: 420px;
   background: #1f232b; color: #f1f3f6; padding: 8px 10px; border-radius: 6px; font-size: 12px;
@@ -183,6 +187,26 @@ footer {
     subagent: { label: 'SUBAGENTE', lane: 2, icon: '⬡', color: 'var(--c-subagent)' }
   };
   var STATUS = { ok: 'Completado', error: 'Error', cancelled: 'Cancelado' };
+  // Origen de una llamada al modelo (mismo criterio que trace/model.ts).
+  var ORIGINS = ['agent', 'subagent', 'memory-extraction', 'context-compression', 'session-summary'];
+  var ORIGIN_LABEL = {
+    agent: 'agente', subagent: 'subagente', 'memory-extraction': 'extracción de memoria',
+    'context-compression': 'compresión de contexto', 'session-summary': 'resumen de sesión'
+  };
+  var auxTracked = null;
+  function originOf(s) {
+    if (s.kind !== 'model') return null;
+    var o = s.data.origin;
+    if (typeof o === 'string' && ORIGINS.indexOf(o) >= 0) return o;
+    return s.parent ? 'subagent' : 'agent';
+  }
+  function isAux(s) { var o = originOf(s); return o !== null && o !== 'agent' && o !== 'subagent'; }
+  function isPrimary(s) { var o = originOf(s); return o === 'agent' || o === 'subagent'; }
+  // Auxiliar lanzada con el turno ya cerrado: se pinta, pero no alarga el turno.
+  function isBackground(s) {
+    var t = turns[s.turn];
+    return !!t && t.end !== null && s.start >= t.end && isAux(s);
+  }
 
   var steps = [], byId = {}, turns = [], rows = {}, blocks = {};
   var selected = null, mode = 'calls', tab = 'summary', query = '';
@@ -231,7 +255,7 @@ footer {
   // --- Reconstrucción de pasos a partir de los registros ---------------------
 
   function reset() {
-    steps = []; byId = {}; turns = []; rows = {}; blocks = {}; selected = null;
+    steps = []; byId = {}; turns = []; rows = {}; blocks = {}; selected = null; auxTracked = null;
     var list = $('list');
     list.textContent = '';
     list.appendChild(el('div', '', 'Todavía no hay pasos en esta sesión.')).id = 'empty';
@@ -263,6 +287,12 @@ footer {
     if (!r || typeof r !== 'object') return;
     var s, k;
     switch (r.t) {
+      case 'meta':
+        // Todas las cabeceras tienen que declararlo: una sesión reanudada desde una
+        // versión anterior no registraba las auxiliares en su primera parte.
+        k = r.caps && r.caps.indexOf('llm-origin') >= 0;
+        auxTracked = auxTracked === null ? k : (auxTracked && k);
+        break;
       case 'turn':
         // Lo que llegó antes del primer turno (el prompt del sistema) abrió un
         // turno implícito: es este mismo.
@@ -294,6 +324,7 @@ footer {
   function label(s) {
     var d = s.data;
     if (s.kind === 'model') {
+      if (isAux(s)) return ORIGIN_LABEL[originOf(s)] + (d.error ? ': ' + firstLine(d.error, 160) : (s.end === null ? '…' : ''));
       if (d.text) return firstLine(d.text, 200);
       if (d.reasoning) return firstLine(d.reasoning, 200);
       if (d.toolCalls && d.toolCalls.length) return 'Llama a ' + d.toolCalls.map(function (c) { return c.name; }).join(', ');
@@ -312,6 +343,7 @@ footer {
       return s.end === null ? '→ en curso…' : '';
     }
     if (s.kind === 'subagent' && d.summary) return '→ ' + firstLine(d.summary, 160);
+    if (isAux(s) && d.text) return '→ ' + firstLine(d.text, 160);
     return '';
   }
   function mainText(s) {
@@ -331,12 +363,13 @@ footer {
 
   // --- Timeline --------------------------------------------------------------
 
-  function turnBounds() {
+  function turnBounds(background) {
     var out = [], i;
     for (i = 0; i < turns.length; i++) out.push({ start: turns[i].at, end: turns[i].end === null ? turns[i].at : turns[i].end });
     for (i = 0; i < steps.length; i++) {
       var b = out[steps[i].turn];
       if (!b) continue;
+      if (!background && isBackground(steps[i])) continue;
       var e = endOf(steps[i]);
       if (e > b.end) b.end = e;
       if (steps[i].start < b.start) b.start = steps[i].start;
@@ -346,7 +379,7 @@ footer {
 
   function renderTimeline() {
     var lanes = $('lanes'), n = steps.length, i, s;
-    var bounds = turnBounds(), offsets = [], total = 0;
+    var bounds = turnBounds(true), offsets = [], total = 0;
     for (i = 0; i < bounds.length; i++) {
       offsets.push(total);
       total += Math.max(bounds[i].end - bounds[i].start, 1);
@@ -376,6 +409,7 @@ footer {
       b.style.left = (x0 * 100).toFixed(3) + '%';
       b.style.width = mode === 'calls' ? 'calc(' + ((x1 - x0) * 100).toFixed(3) + '% - 2px)' : Math.max((x1 - x0) * 100, 0).toFixed(3) + '%';
       var cls = 'blk k-' + s.kind;
+      if (isAux(s)) cls += ' aux';
       if (s.id === selected) cls += ' sel';
       if (s.status === 'error') cls += ' err';
       if (s.end === null) cls += ' open';
@@ -411,8 +445,8 @@ footer {
     }
     var c = row.children;
     c[0].textContent = s.kind === 'user' && !s.parent && s.id.indexOf('turn-') === 0 ? '#' + (s.turn + 1) : '';
-    c[1].textContent = KINDS[s.kind].icon;
-    c[1].style.background = KINDS[s.kind].color;
+    c[1].textContent = isAux(s) ? '◇' : KINDS[s.kind].icon;
+    c[1].style.background = isAux(s) ? 'var(--c-aux-gen)' : KINDS[s.kind].color;
     c[2].textContent = label(s);
     c[2].className = s.kind === 'tool' ? 'lbl mono' : 'lbl';
     c[3].textContent = result(s);
@@ -443,8 +477,8 @@ footer {
     if (!s) { panel.className = ''; return; }
     panel.className = 'on';
     var kind = KINDS[s.kind], d = s.data, body = $('dbody');
-    $('dbadge').textContent = kind.label;
-    $('dbadge').style.background = kind.color;
+    $('dbadge').textContent = isAux(s) ? 'MODELO · AUXILIAR' : kind.label;
+    $('dbadge').style.background = isAux(s) ? 'var(--c-aux-gen)' : kind.color;
     $('dwhere').textContent = 'Turno ' + (s.turn + 1) + ' · Paso ' + s.n + (s.parent ? ' · subagente' : '');
     var tabsEl = $('tabs').children;
     for (var i = 0; i < tabsEl.length; i++) tabsEl[i].setAttribute('aria-selected', String(tabsEl[i].getAttribute('data-tab') === tab));
@@ -491,11 +525,19 @@ footer {
     kv(dl, 'Inicio', fmtTime(s.start));
     kv(dl, 'Duración', fmtDur(endOf(s) - s.start));
     if (s.kind === 'model') {
+      kv(dl, 'Origen', originOf(s) + ' (' + ORIGIN_LABEL[originOf(s)] + ')');
       kv(dl, 'Proveedor', d.provider);
       kv(dl, 'Iteración', d.iteration !== undefined ? d.iteration + 1 : null);
       kv(dl, 'Mensajes', d.messages);
       kv(dl, 'Tools ofrecidas', d.tools);
       if (s.firstToken !== null) kv(dl, 'Primer token', fmtDur(s.firstToken - s.start));
+      var ov = isPrimary(s) ? overlapOf(s) : null;
+      if (ov && (ov.active > 0 || ov.overlapping > 0 || ov.preceding > 0)) {
+        // Relojes del cliente: dos peticiones en vuelo a la vez, no tiempo de cola del servidor.
+        kv(dl, 'Auxiliares en curso al empezar', ov.active);
+        kv(dl, 'Espera solapada con auxiliares', fmtDur(ov.overlapping));
+        if (ov.preceding > 0) kv(dl, 'Auxiliares justo antes', fmtDur(ov.preceding));
+      }
       var u = d.usage;
       if (u) {
         kv(dl, 'Tokens entrada', u.promptTokens);
@@ -569,7 +611,7 @@ footer {
     for (i = 0; i < steps.length; i++) {
       var s = steps[i], scope = s.parent || '';
       if (s.kind === 'context' && s.name === 'Contexto comprimido') compressed[scope] = true;
-      if (s.kind !== 'model') continue;
+      if (!isPrimary(s)) continue;
       var read = cacheRead(s.data.usage);
       if (read === null) continue;
       var prev = last[scope], px = s.data.prefix, was = compressed[scope] === true;
@@ -590,15 +632,69 @@ footer {
     return out;
   }
 
+  // --- Solape con llamadas auxiliares (mismo cálculo que trace/model.ts) ------
+
+  function covered(intervals, from, to) {
+    var clipped = [], i;
+    for (i = 0; i < intervals.length; i++) {
+      var a = Math.max(intervals[i][0], from), b = Math.min(intervals[i][1], to);
+      if (b > a) clipped.push([a, b]);
+    }
+    clipped.sort(function (x, y) { return x[0] - y[0]; });
+    var total = 0, cursor = from;
+    for (i = 0; i < clipped.length; i++) {
+      var st = Math.max(clipped[i][0], cursor);
+      if (clipped[i][1] > st) { total += clipped[i][1] - st; cursor = clipped[i][1]; }
+    }
+    return total;
+  }
+  // Por id de cada llamada del loop: auxiliares en curso al empezar, espera solapada y auxiliares justo antes.
+  function overlaps() {
+    var out = {}, intervals = [], primary = [], i, j;
+    for (i = 0; i < steps.length; i++) {
+      if (isAux(steps[i])) intervals.push([steps[i].start, endOf(steps[i])]);
+      else if (isPrimary(steps[i])) primary.push(steps[i]);
+    }
+    primary.sort(function (a, b) { return a.start - b.start; });
+    var lastEnd = -Infinity;
+    for (i = 0; i < primary.length; i++) {
+      var s = primary[i], waitEnd = s.firstToken === null ? endOf(s) : s.firstToken, active = 0, preceding = 0;
+      for (j = 0; j < intervals.length; j++) {
+        var a = intervals[j][0], b = intervals[j][1];
+        if (a <= s.start && b > s.start) active++;
+        if (b <= s.start && b > lastEnd) preceding += b - a;
+      }
+      out[s.id] = { active: active, overlapping: covered(intervals, s.start, waitEnd), preceding: preceding };
+      lastEnd = Math.max(lastEnd, endOf(s));
+    }
+    return out;
+  }
+  function overlapOf(s) { return overlaps()[s.id] || null; }
+
   // --- Pie -------------------------------------------------------------------
 
   function renderStats() {
     var prompt = 0, cached = 0, completion = 0, total = 0, genMs = 0, genTok = 0, calls = 0, tools = 0, active = 0, i;
     var reported = 0, cold = 0, warm = 0, ttftCold = 0, ttftColdN = 0, ttftWarm = 0, ttftWarmN = 0, pxChars = 0, pxShared = 0;
+    var byOrigin = {}, aux = { calls: 0, errors: 0, ms: 0, usage: false, prompt: 0, cacheSeen: false, cachePrompt: 0, cached: 0 };
     for (i = 0; i < steps.length; i++) {
       var s = steps[i], u = s.data.usage;
       if (s.kind === 'tool') tools++;
-      if (s.kind !== 'model') continue;
+      var origin = originOf(s);
+      if (origin === null) continue;
+      byOrigin[origin] = (byOrigin[origin] || 0) + 1;
+      if (isAux(s)) {
+        // Las auxiliares se cuentan aparte: ni son del turno ni comparten prompt con el agente.
+        aux.calls++;
+        if (s.status === 'error') aux.errors++;
+        aux.ms += endOf(s) - s.start;
+        if (u) {
+          aux.usage = true; aux.prompt += u.promptTokens || 0;
+          var ar = cacheRead(u);
+          if (ar !== null && typeof u.promptTokens === 'number') { aux.cacheSeen = true; aux.cachePrompt += u.promptTokens; aux.cached += Math.min(ar, u.promptTokens); }
+        }
+        continue;
+      }
       calls++;
       var px = s.data.prefix;
       if (px && typeof px.sharedChars === 'number' && typeof px.chars === 'number') { pxChars += px.chars; pxShared += Math.min(px.sharedChars, px.chars); }
@@ -617,11 +713,23 @@ footer {
         if (g > 0) { genMs += g; genTok += u.completionTokens; }
       }
     }
-    var bounds = turnBounds();
+    var bounds = turnBounds(false);
     for (i = 0; i < bounds.length; i++) active += bounds[i].end - bounds[i].start;
     var realTurns = 0;
     for (i = 0; i < turns.length; i++) if (!turns[i].implicit) realTurns++;
-    var parts = [realTurns + ' turnos · ' + steps.length + ' pasos', calls + ' llamadas al modelo · ' + tools + ' tools'];
+    var breakdown = [];
+    for (i = 0; i < ORIGINS.length; i++) if (byOrigin[ORIGINS[i]]) breakdown.push(ORIGINS[i] + ' ' + byOrigin[ORIGINS[i]]);
+    var parts = [realTurns + ' turnos · ' + steps.length + ' pasos', 'LLM calls: ' + (calls + aux.calls) + (breakdown.length ? ' (' + breakdown.join(' · ') + ')' : '') + ' · ' + tools + ' tools'];
+    if (aux.calls > 0) {
+      var auxText = 'Auxiliares ' + fmtDur(aux.ms);
+      if (aux.usage) auxText += ' · ' + fmtTok(aux.prompt) + ' tok entrada';
+      if (aux.cacheSeen && aux.cachePrompt > 0) auxText += ' · caché ' + Math.round(aux.cached / aux.cachePrompt * 100) + '%';
+      if (aux.errors > 0) auxText += ' · ' + aux.errors + (aux.errors === 1 ? ' fallo' : ' fallos');
+      parts.push(auxText);
+      var ovAll = overlaps(), ovMs = 0, ovN = 0, key2;
+      for (key2 in ovAll) if (ovAll[key2].overlapping > 0) { ovMs += ovAll[key2].overlapping; ovN++; }
+      if (ovN > 0) parts.push(ovN + (ovN === 1 ? ' llamada del agente' : ' llamadas del agente') + ' con auxiliar en curso (' + fmtDur(ovMs) + ' solapados)');
+    } else if (auxTracked === false && calls > 0) parts.push('Auxiliares no registradas en esta traza');
     if (genMs > 0) parts.push((genTok / (genMs / 1000)).toFixed(0) + ' tok/s');
     if (total > 0) parts.push(fmtTok(total) + ' tok');
     if (reported > 0) {
@@ -701,7 +809,7 @@ footer {
   $('lanes').addEventListener('mousemove', function (ev) {
     var id = idFrom(ev.target), s = id ? byId[id] : null;
     if (!s) { tip.style.display = 'none'; return; }
-    tip.textContent = KINDS[s.kind].label + ' · ' + firstLine(label(s), 60) + '\n' +
+    tip.textContent = (isAux(s) ? 'MODELO · AUXILIAR' : KINDS[s.kind].label) + ' · ' + firstLine(label(s), 60) + '\n' +
       fmtTime(s.start) + ' → ' + (s.end === null ? 'en curso' : fmtTime(s.end)) + '\n' +
       'Total ' + fmtDur(endOf(s) - s.start);
     tip.style.display = 'block';

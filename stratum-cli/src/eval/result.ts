@@ -3,6 +3,13 @@
  * métricas derivadas que se calculan sobre él. Puro: sin disco.
  */
 import type { CheckResult, EvalMode, UnsafeAction } from './checks.js';
+import {
+  AUXILIARY_LLM_ORIGINS,
+  LLM_CALL_ORIGINS,
+  sumOriginStats,
+  type LlmCallOrigin,
+  type LlmOriginStats,
+} from '../trace/model.js';
 import type { RunMetrics } from './metrics.js';
 import type { ToleranceOverrides } from './compare.js';
 import { DIFFICULTIES, SCENARIO_GROUPS, type Difficulty, type ScenarioGroup } from './scenario.js';
@@ -40,7 +47,12 @@ export interface ScenarioResult {
    */
   traces?: string[];
   /** Solo con guion: peticiones recibidas frente a pasos previstos. */
-  mock?: { requests: number; steps: number };
+  mock?: {
+    requests: number;
+    steps: number;
+    /** Lo mismo para cada guion auxiliar del escenario (`auxiliaryScript`). */
+    auxiliary?: Record<string, { requests: number; steps: number }>;
+  };
 }
 
 export interface Distribution {
@@ -103,6 +115,26 @@ export interface GroupSummary {
   } | null;
   /** Media de `prefixStability` de las ejecuciones que la registran. */
   prefixStability?: number | null;
+  /**
+   * Llamadas al LLM por origen, sumadas sobre las ejecuciones cuya traza
+   * registraba las auxiliares; null si ninguna. Ausente en resultados
+   * anteriores. `llmCalls` de arriba sigue siendo solo las del loop.
+   */
+  llm?: {
+    /** Ejecuciones con el desglose. */
+    runs: number;
+    /** Todas las llamadas: loop + auxiliares. */
+    calls: number;
+    byOrigin: Record<LlmCallOrigin, LlmOriginStats>;
+    auxiliary: LlmOriginStats;
+    /** Llamadas del loop cuya espera coincidió con alguna auxiliar. */
+    overlappedCalls: number;
+    overlappingAuxiliaryMs: number;
+    precedingAuxiliaryMs: number;
+    /** Media, por ejecución, del TTFT del loop con / sin una auxiliar en curso. */
+    ttftOverlappedMs: number | null;
+    ttftClearMs: number | null;
+  } | null;
 }
 
 /** Dónde y sobre qué código se ejecutó: lo que hace falta para fiarse de una comparación. */
@@ -245,6 +277,31 @@ export function summarizeGroup(results: readonly ScenarioResult[]): GroupSummary
           }
         : null,
     prefixStability: meanOf((m) => m.prefixStability),
+    llm: summarizeLlm(withMetrics.map((r) => r.metrics)),
+  };
+}
+
+function summarizeLlm(metrics: readonly RunMetrics[]): GroupSummary['llm'] {
+  const tracked = metrics.flatMap((m) => (m.llmByOrigin ? [{ m, by: m.llmByOrigin }] : []));
+  if (tracked.length === 0) return null;
+  const byOrigin = {} as Record<LlmCallOrigin, LlmOriginStats>;
+  for (const o of LLM_CALL_ORIGINS) byOrigin[o] = sumOriginStats(tracked.map((t) => t.by[o]));
+  const total = (pick: (m: RunMetrics) => number | null | undefined): number =>
+    tracked.reduce((s, t) => s + (pick(t.m) ?? 0), 0);
+  const meanOf = (pick: (m: RunMetrics) => number | null | undefined): number | null => {
+    const values = tracked.flatMap((t) => pick(t.m) ?? []);
+    return values.length > 0 ? values.reduce((a, b) => a + b, 0) / values.length : null;
+  };
+  return {
+    runs: tracked.length,
+    calls: LLM_CALL_ORIGINS.reduce((n, o) => n + byOrigin[o].calls, 0),
+    byOrigin,
+    auxiliary: sumOriginStats(AUXILIARY_LLM_ORIGINS.map((o) => byOrigin[o])),
+    overlappedCalls: total((m) => m.overlappedLlmCalls),
+    overlappingAuxiliaryMs: total((m) => m.overlappingAuxiliaryMs),
+    precedingAuxiliaryMs: total((m) => m.precedingAuxiliaryMs),
+    ttftOverlappedMs: meanOf((m) => m.ttftOverlappedMs),
+    ttftClearMs: meanOf((m) => m.ttftClearMs),
   };
 }
 

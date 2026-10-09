@@ -2955,6 +2955,8 @@ kbd {
   --tr-model-gen: #a48be0;
   --tr-tool: var(--color-accent);
   --tr-subagent: #3aa7a0;
+  --tr-aux: #4a5262;
+  --tr-aux-gen: #9aa5b8;
   width: 40%;
   min-width: 320px;
   max-width: 760px;
@@ -3102,6 +3104,15 @@ kbd {
   right: 0;
   bottom: 0;
   background: var(--tr-model-gen);
+}
+/* Llamada auxiliar (memoria, compresión): carril del modelo, color neutro. */
+.trajectory__block[data-auxiliary] {
+  background: var(--tr-aux);
+}
+.trajectory__icon[data-auxiliary],
+.trajectory__badge[data-auxiliary],
+.trajectory__block[data-auxiliary] .trajectory__gen {
+  background: var(--tr-aux-gen);
 }
 .trajectory__block[data-selected] {
   outline: 2px solid var(--color-textPrimary);

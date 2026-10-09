@@ -1,0 +1,90 @@
+{
+  "id": "subagent-origin",
+  "group": "auxiliary",
+  "title": "Las llamadas al modelo de un subagente se registran como subagent, no como agent",
+  "description": "El agente principal delega una lectura. Las dos llamadas del hijo cuelgan de su paso en la traza y llevan origen subagent; las dos del padre, agent.",
+  "difficulty": "intermediate",
+  "setup": {
+    "files": {
+      "VERSION.txt": "2.7.1\n",
+      "README.md": "# demo\n"
+    }
+  },
+  "input": "Delega en un subagente (delegate_task) la lectura de VERSION.txt y respóndeme con la versión que te devuelva.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "delegate_task",
+          "args": {
+            "task": "Read the file VERSION.txt in the current directory and report its exact content."
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "VERSION.txt"
+          }
+        }
+      ]
+    },
+    {
+      "text": "VERSION.txt contains: 2.7.1"
+    },
+    {
+      "text": "La versión es 2.7.1."
+    }
+  ],
+  "expect": {
+    "description": "Cuatro llamadas al modelo: dos del agente principal y dos del subagente, cada grupo con su origen.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "2.7.1"
+      },
+      {
+        "type": "llm_call",
+        "origin": "subagent",
+        "status": "ok",
+        "min": 2,
+        "max": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "llm_call",
+        "origin": "agent",
+        "status": "ok",
+        "min": 2,
+        "max": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "subagentLlmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "agentLlmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryLlmCalls",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "subagentFailures",
+        "equals": 0
+      }
+    ]
+  }
+}

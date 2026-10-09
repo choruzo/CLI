@@ -1,0 +1,78 @@
+{
+  "id": "memory-extraction-visible",
+  "group": "auxiliary",
+  "title": "La extracción de memoria tras el turno queda en la traza como llamada propia",
+  "description": "Con memory.autoExtract activo, al cerrar el turno Stratum lanza en segundo plano una llamada al modelo para extraer decisiones. Esa petición llega al backend igual que las del agente: la traza tiene que registrarla con origen memory-extraction, sin mezclarla con las del loop.",
+  "difficulty": "basic",
+  "setup": {
+    "config": {
+      "memory": {
+        "autoExtract": true
+      }
+    }
+  },
+  "input": "En este repositorio vamos a usar pnpm en vez de npm. Confírmalo en una frase.",
+  "script": [
+    {
+      "text": "De acuerdo: en este repositorio se usa pnpm."
+    }
+  ],
+  "auxiliaryScript": {
+    "memory-extraction": [
+      {
+        "text": "[]"
+      }
+    ]
+  },
+  "expect": {
+    "description": "Una llamada del agente y una de extracción de memoria, las dos visibles y cada una con su origen.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "pnpm"
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "llm_call",
+        "origin": "memory-extraction",
+        "status": "ok",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "llm_call",
+        "origin": "agent",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "memoryExtractionCalls",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "totalLlmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmErrors",
+        "equals": 0
+      }
+    ]
+  }
+}

@@ -512,6 +512,7 @@ export const runCommand = new Command('run')
         await mcpManager.shutdownAll();
         await closeExecRuntime();
         getLogger('cli').error('run aborted with error', { err });
+        await agent.cancelBackgroundWork();
         await trace?.flush();
         await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
@@ -521,6 +522,16 @@ export const runCommand = new Command('run')
       await mcpManager.shutdownAll();
       // Hito 9 (§12.12): cerrar los sockets SSH antes de salir.
       await closeExecRuntime();
+      // Las salidas con `process.exit` cortan la extracción de memoria de un
+      // turno anterior (`--then`): se cancela para que la traza la cierre. En la
+      // salida normal no se toca: el proceso espera a que termine, como siempre.
+      if (
+        controller.signal.aborted ||
+        fatalError ||
+        (opts.delegate && delegateStatus !== 'completed')
+      ) {
+        await agent.cancelBackgroundWork();
+      }
       await trace?.flush();
       await flushLogging();
 
