@@ -6,7 +6,13 @@
 import { existsSync, readFileSync } from 'fs';
 import { join } from 'path';
 import { execa } from 'execa';
-import { cacheBreaks, compactJson, type TraceModel, type TraceStep } from '../trace/model.js';
+import {
+  cacheBreaks,
+  compactJson,
+  originOf,
+  type TraceModel,
+  type TraceStep,
+} from '../trace/model.js';
 import { stepExecuted, type RunMetrics } from './metrics.js';
 import type { ForbiddenRule, ScenarioCheck } from './scenario.js';
 
@@ -202,6 +208,16 @@ async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckR
       if (!commands) return done(label, false, `el escenario no define el host ${check.host}`);
       const n = commands.filter((c) => re.test(c)).length;
       return done(label, inRange(n, check.min, check.max), `${n} comandos`);
+    }
+    case 'llm_call': {
+      const all = ctx.model.steps.filter((s) => originOf(s) === check.origin);
+      const n = all.filter((s) => check.status === 'any' || s.status === check.status).length;
+      const how = check.status === 'any' ? '' : ` (${check.status})`;
+      return done(
+        `llamadas al modelo de ${check.origin}${how}: ${range(check.min, check.max)}`,
+        inRange(n, check.min, check.max),
+        `${n} llamadas (${all.map((s) => s.status ?? 'abierta').join(', ') || 'ninguna'})`,
+      );
     }
     case 'runtime_event': {
       const detailKey = check.event === 'veto' ? 'source' : 'decision';

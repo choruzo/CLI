@@ -2,6 +2,8 @@ import type { IProvider } from '../providers/base.js';
 import type { Message } from '../agent/types.js';
 import type { DecisionMemory } from './decision-memory.js';
 import type { DecisionInput, DecisionImportance, DecisionType } from './decisions.js';
+import { tracedCompletion } from '../trace/llm-call.js';
+import type { TraceScope } from '../trace/recorder.js';
 
 const VALID_TYPES: DecisionType[] = [
   'architectural',
@@ -16,7 +18,8 @@ const VALID_IMPORTANCE: DecisionImportance[] = ['low', 'medium', 'high'];
 /** Cuántos mensajes recientes se consideran para la extracción. */
 const CONTEXT_WINDOW = 8;
 
-const EXTRACT_SYSTEM_PROMPT = `Eres un asistente de extracción de memoria para un agente de programación.
+/** Exportado para el modelo de guion de `stratum eval`, que reconoce por él la petición. */
+export const EXTRACT_SYSTEM_PROMPT = `Eres un asistente de extracción de memoria para un agente de programación.
 Analiza la conversación y extrae SOLO decisiones técnicas duraderas que convenga recordar entre sesiones.
 
 Extrae cuando: (1) se eligió entre alternativas técnicas significativas, (2) se definió una convención del proyecto,
@@ -34,18 +37,18 @@ Devuelve SOLO un array JSON válido, sin texto adicional ni fences markdown.`;
 
 /** Acumula una completion no-stream del provider en un único string. */
 async function gatherCompletion(
-  provider: IProvider,
+  opts: ExtractOptions,
   messages: Message[],
-  model: string,
   signal: AbortSignal,
 ): Promise<string> {
   let out = '';
-  for await (const chunk of provider.complete({
-    messages,
-    model,
-    stream: true,
-    signal,
-    temperature: 0.1,
+  for await (const chunk of tracedCompletion({
+    origin: 'memory-extraction',
+    provider: opts.provider,
+    providerName: opts.providerName,
+    request: { messages, model: opts.model, stream: true, signal, temperature: 0.1 },
+    trace: opts.trace,
+    cancelSignal: opts.cancelSignal,
   })) {
     const content = chunk.choices?.[0]?.delta?.content;
     if (content) out += content;
@@ -113,6 +116,12 @@ function messageText(m: Message): string {
 
 export interface ExtractOptions {
   provider: IProvider;
+  /** Nombre del provider en la config: solo para la traza. */
+  providerName?: string;
+  /** Con scope, la llamada queda en la traza como `memory-extraction`. */
+  trace?: TraceScope;
+  /** Cierre de la sesión: corta la llamada en vuelo, que queda como cancelada. */
+  cancelSignal?: AbortSignal;
   model: string;
   messages: Message[];
   memory: DecisionMemory;
@@ -127,8 +136,9 @@ export interface ExtractOptions {
  */
 export async function extractAndStore(opts: ExtractOptions): Promise<number> {
   try {
-    const { provider, model, memory, sessionId } = opts;
-    const signal = opts.signal ?? AbortSignal.timeout(30000);
+    const { memory, sessionId } = opts;
+    const timeout = opts.signal ?? AbortSignal.timeout(30000);
+    const signal = opts.cancelSignal ? AbortSignal.any([timeout, opts.cancelSignal]) : timeout;
 
     // Ventana reciente, solo mensajes con texto de usuario/asistente.
     const recent = opts.messages
@@ -152,7 +162,7 @@ export async function extractAndStore(opts: ExtractOptions): Promise<number> {
 
     let raw = '';
     try {
-      raw = await gatherCompletion(provider, extractionMessages, model, signal);
+      raw = await gatherCompletion(opts, extractionMessages, signal);
     } catch {
       return 0;
     }

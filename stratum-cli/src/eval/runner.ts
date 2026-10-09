@@ -125,17 +125,35 @@ function sandboxConfig(
   traceDir: string,
   ssh: SshFixture | null,
 ): Record<string, unknown> {
+  // El extractor de decisiones hace llamadas al modelo en segundo plano: ruido
+  // en los tokens y peticiones fuera del guion. Solo se deja encendido en el
+  // escenario que lo pide a propósito (los que miden esas llamadas).
+  const memory = scenario.setup.config.memory as { autoExtract?: unknown } | undefined;
   const forced: Record<string, unknown> = {
     provider: { default: 'eval', providers: { eval: provider } },
-    // El extractor de decisiones haría llamadas al modelo en segundo plano:
-    // ruido en los tokens y peticiones fuera del guion.
-    memory: { autoExtract: false, embeddingWarmup: false },
+    memory: { autoExtract: memory?.autoExtract === true, embeddingWarmup: false },
     trace: { enabled: true, dir: traceDir },
   };
   if (ssh) forced.ssh = { hosts: ssh.hosts };
   // `provider` se sustituye entero: una capa del escenario no puede añadir otro.
   const { provider: _ignored, ...layer } = scenario.setup.config;
   return deepMerge(layer, forced);
+}
+
+/** Peticiones recibidas frente a pasos previstos, del guion principal y de los auxiliares. */
+function mockUsage(mock: MockLlm, scenario: LoadedScenario): NonNullable<ScenarioResult['mock']> {
+  const received = mock.auxiliaryRequests();
+  const auxiliary = Object.fromEntries(
+    Object.entries(scenario.auxiliaryScript ?? {}).map(([origin, steps]) => [
+      origin,
+      { requests: received[origin as keyof typeof received] ?? 0, steps: steps.length },
+    ]),
+  );
+  return {
+    requests: mock.requests(),
+    steps: scenario.script?.length ?? 0,
+    ...(Object.keys(auxiliary).length > 0 ? { auxiliary } : {}),
+  };
 }
 
 function tail(text: string, lines = 6): string {
@@ -220,7 +238,7 @@ export async function runScenario(
     let providerEntry: Record<string, unknown>;
     let apiKey: string;
     if (env.mode === 'mock') {
-      mock = await startMockLlm(scenario.script ?? []);
+      mock = await startMockLlm(scenario.script ?? [], scenario.auxiliaryScript);
       apiKey = 'eval-mock';
       providerEntry = {
         type: 'openai-compatible',
@@ -312,7 +330,7 @@ export async function runScenario(
       exitCode: child.exitCode ?? null,
       wallMs,
       timedOut: child.timedOut === true,
-      ...(mock ? { mock: { requests: mock.requests(), steps: scenario.script?.length ?? 0 } } : {}),
+      ...(mock ? { mock: mockUsage(mock, scenario) } : {}),
     };
 
     // Una traza por sesión, en el orden en que arrancaron.
@@ -355,6 +373,14 @@ export async function runScenario(
         pass: requests === steps,
         ...(requests === steps ? {} : { detail: `${requests} peticiones` }),
       });
+      for (const [origin, aux] of Object.entries(ran.mock.auxiliary ?? {})) {
+        checks.push({
+          type: 'mock_script',
+          label: `guion de ${origin} consumido exacto (${aux.steps} peticiones)`,
+          pass: aux.requests === aux.steps,
+          ...(aux.requests === aux.steps ? {} : { detail: `${aux.requests} peticiones` }),
+        });
+      }
     }
     // El único error fatal del loop es que el modelo no responda (tras agotar
     // reintentos y fallback). Contra un modelo real eso es el provider —caído,

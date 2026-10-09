@@ -1763,7 +1763,7 @@ export function App({
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         void (async () => {
           try {
-            const result = await agent.compactNow();
+            const result = await agent.compactNow(auditor?.scope);
             const text =
               result.kind === 'compressed'
                 ? `Contexto comprimido: ${result.tokensBefore} → ${result.tokensAfter} tokens (${result.roundsCompressed} rondas resumidas).`

@@ -421,8 +421,20 @@ function traceRecord(v: unknown): TraceRecord | null {
       return str(v.id) && status ? { t: 'end', at: v.at, id: v.id, status, ...data } : null;
     case 'mark':
       return str(v.id) && str(v.name) ? { t: 'mark', at: v.at, id: v.id, name: v.name } : null;
+    case 'meta':
+      // De la cabecera el panel solo usa `caps`: sin él no sabría si la traza
+      // registraba las llamadas auxiliares o simplemente no hubo ninguna.
+      return {
+        t: 'meta',
+        v: num(v.v) ? v.v : 0,
+        at: v.at,
+        sessionId: str(v.sessionId) ? v.sessionId : '',
+        ...(Array.isArray(v.caps)
+          ? { caps: v.caps.filter((c): c is string => typeof c === 'string') }
+          : {}),
+      };
     default:
-      return null; // `meta` y tipos de un formato más nuevo: el panel no los usa
+      return null; // tipos de un formato más nuevo: el panel no los usa
   }
 }
 

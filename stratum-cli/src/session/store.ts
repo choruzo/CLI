@@ -11,6 +11,8 @@ import {
 } from '../config/schema-version.js';
 import { writeFileAtomic } from '../config/writer.js';
 import { getLogger } from '../logging/index.js';
+import { tracedCompletion } from '../trace/llm-call.js';
+import type { TraceScope } from '../trace/recorder.js';
 
 const log = getLogger('session');
 
@@ -149,6 +151,8 @@ export interface SaveSessionParams {
   toolCallCount: number;
   /** Si se pasa, se usa para generar el resumen automático (≤100 chars). */
   llmProvider?: IProvider;
+  /** Traza de la sesión: la llamada del resumen se registra como `session-summary`. */
+  trace?: TraceScope;
   /** ID de sesión existente (para actualizar en vez de crear nuevo). */
   existingId?: string;
   /** Timestamp de creación (para actualizar). */
@@ -238,7 +242,7 @@ export class SessionStore {
 
     if (rounds >= 5 && params.llmProvider) {
       try {
-        summary = await this.generateSummary(params.messages, params.llmProvider, params.model);
+        summary = await this.generateSummary(params, params.llmProvider);
       } catch {
         // No bloquear el guardado por un fallo en el resumen
         summary = '';
@@ -381,12 +385,8 @@ export class SessionStore {
   // -------------------------------------------------------------------------
 
   /** Genera un resumen ≤100 chars usando el LLM. */
-  private async generateSummary(
-    messages: Message[],
-    provider: IProvider,
-    model: string,
-  ): Promise<string> {
-    const conversation = messages
+  private async generateSummary(params: SaveSessionParams, provider: IProvider): Promise<string> {
+    const conversation = params.messages
       .filter((m) => m.role !== 'system')
       .slice(0, 20) // primeros 20 mensajes para no exceder contexto
       .map((m) => `${m.role}: ${(m.content ?? '').slice(0, 200)}`)
@@ -402,11 +402,17 @@ export class SessionStore {
     ];
 
     let result = '';
-    for await (const chunk of provider.complete({
-      messages: prompt,
-      stream: true,
-      model,
-      signal: AbortSignal.timeout(15000),
+    for await (const chunk of tracedCompletion({
+      origin: 'session-summary',
+      provider,
+      providerName: params.provider,
+      request: {
+        messages: prompt,
+        stream: true,
+        model: params.model,
+        signal: AbortSignal.timeout(15000),
+      },
+      trace: params.trace,
     })) {
       const content = chunk.choices[0]?.delta?.content;
       if (content) result += content;

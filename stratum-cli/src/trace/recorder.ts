@@ -7,8 +7,11 @@ import { redactText } from '../security/redact-output.js';
 import { getLogger } from '../logging/index.js';
 import { normalizeUsage, type RawTimings, type RawUsage } from '../providers/cache.js';
 import {
+  TRACE_CAP_LLM_ORIGIN,
   TRACE_CAP_RUNTIME,
   TRACE_FORMAT_VERSION,
+  isAuxiliaryOrigin,
+  type LlmCallOrigin,
   type TraceData,
   type TraceKind,
   type TraceRecord,
@@ -23,7 +26,14 @@ const log = getLogger('trace');
 // ---------------------------------------------------------------------------
 
 export interface ModelCallInfo {
-  iteration: number;
+  /**
+   * Quién hace la llamada. Por defecto, el dueño del scope: `agent` en el del
+   * agente principal y `subagent` en el de un hijo. Las llamadas auxiliares lo
+   * indican siempre (`tracedCompletion`).
+   */
+  origin?: LlmCallOrigin;
+  /** Iteración del loop; las llamadas auxiliares no tienen. */
+  iteration?: number;
   provider?: string;
   model: string;
   /** El prompt exacto de la llamada: el historial tal como se envía. */
@@ -203,7 +213,7 @@ export class TraceRecorder {
         sessionId: this.opts.sessionId,
         ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
         ...(this.opts.version ? { version: this.opts.version } : {}),
-        caps: [TRACE_CAP_RUNTIME],
+        caps: [TRACE_CAP_RUNTIME, TRACE_CAP_LLM_ORIGIN],
       });
     }
     this.writer.write(record);
@@ -339,7 +349,8 @@ class Scope implements TraceScope {
   /** tool call id del modelo → paso abierto (los ids del modelo se repiten entre turnos). */
   private readonly openTools = new Map<string, string>();
   private readonly openSubagents = new Set<string>();
-  private readonly prefix = new PrefixTracker();
+  /** Uno por origen: el prompt del compresor no se compara con el del agente. */
+  private readonly prefixes = new Map<LlmCallOrigin, PrefixTracker>();
 
   constructor(
     private readonly rec: TraceRecorder,
@@ -464,16 +475,24 @@ class Scope implements TraceScope {
     let timings: RawTimings | undefined;
     let closed = false;
     let first = false;
+    const origin: LlmCallOrigin = info.origin ?? (this.parent ? 'subagent' : 'agent');
     this.guard(() => {
-      this.started = true;
-      this.recordNewContext(info.messages);
+      // El prompt de una llamada auxiliar no es entrada del agente: se deriva de
+      // un historial que ya está en la traza, y de él solo se guardan recuentos.
+      if (!isAuxiliaryOrigin(origin)) {
+        this.started = true;
+        this.recordNewContext(info.messages);
+      }
+      let prefix = this.prefixes.get(origin);
+      if (!prefix) this.prefixes.set(origin, (prefix = new PrefixTracker()));
       this.begin(id, 'model', info.model, {
-        iteration: info.iteration,
+        origin,
+        ...(info.iteration !== undefined ? { iteration: info.iteration } : {}),
         ...(info.provider ? { provider: info.provider } : {}),
         model: info.model,
         messages: info.messages.length,
         tools: info.tools,
-        prefix: this.prefix.measure(info.messages, info.toolSchemas),
+        prefix: prefix.measure(info.messages, info.toolSchemas),
       });
     });
     return {

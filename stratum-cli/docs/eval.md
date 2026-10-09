@@ -154,12 +154,16 @@ trayectoria es el guion y sí hay que comprobarla. `stratum eval list` avisa de 
 | `metric` | `metric`, `min` / `max` / `equals` | la métrica de la traza está en la cota |
 | `runtime_event` | `event` (`veto`·`confirmation`·`retry`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto o `decision` de la confirmación) |
 | `cache_break` | `cause` (`tools`·`system`·`history`·`compression`·`model`·`backend`·`unknown`), `min` (1), `max` | la traza tiene ese número de roturas de caché, de esa causa si se indica |
+| `llm_call` | `origin` (`agent`·`subagent`·`memory-extraction`·`context-compression`·`session-summary`), `status` (`any`·`ok`·`error`·`cancelled`), `min` (1), `max` | la traza tiene ese número de llamadas al modelo de ese origen. Exigir una (`min` > 0) es trayectoria: va con `mode: "mock"` |
 
 Métricas acotables: `tokens`, `durationMs`, `llmCalls`, `llmErrors`, `toolCalls`, `toolErrors`,
 `policyBlocks`, `retries`, `providerFallbacks`, `subagents`, `subagentFailures`, `repeatedCalls`,
 `warnings`, `fatalErrors`, `turns`, `compressions` y las de caché: `cacheReportedCalls`,
 `cacheHitRate`, `cachedReadTokens`, `uncachedPromptTokens`, `coldCalls`, `warmCalls`, `cacheBreaks`,
-`prefixStability`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
+`prefixStability`; y las de llamadas por origen: `promptTokens`, `completionTokens`,
+`totalLlmCalls`, `agentLlmCalls`, `subagentLlmCalls`, `auxiliaryLlmCalls`, `memoryExtractionCalls`,
+`compressionCalls`, `auxiliaryLlmErrors`, `auxiliaryPromptTokens`, `auxiliaryCompletionTokens`,
+`auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
 criterio: no se da por buena.
 
 ### Acciones inseguras (`expect.forbidden`)
@@ -174,6 +178,27 @@ Cada paso contesta a una petición: `text`, `reasoning`, `toolCalls: [{ name, ar
 paso = llamadas en paralelo) o `error: { status, message }` (una respuesta HTTP de error; un 5xx se
 reintenta, así que el paso siguiente responde al reintento). Los subagentes consumen pasos del mismo
 guion, en el orden en que piden.
+
+**Llamadas auxiliares (`auxiliaryScript`).** La compresión de contexto también llama al modelo, y
+por defecto consume un paso del guion como cualquier otra petición. La extracción de memoria no
+puede hacerlo: corre en segundo plano al cerrar el turno y, con `followUps`, llega al modelo antes o
+después de la siguiente llamada del agente. Para ella —y para la compresión, si se quiere aparte—
+el escenario da un guion propio por origen, que el modelo de guion contesta en su propio orden
+reconociendo la petición por su prompt:
+
+```json
+"setup": { "config": { "memory": { "autoExtract": true } } },
+"script": [{ "text": "De acuerdo: se usa pnpm." }],
+"auxiliaryScript": {
+  "memory-extraction": [{ "text": "[]" }],
+  "context-compression": [{ "text": "Resumen: …" }]
+}
+```
+
+Los dos guiones tienen que consumirse exactos. El runner deja `memory.autoExtract` apagado salvo
+que el escenario lo pida así, y conviene que la extracción devuelva `[]`: una decisión extraída se
+guardaría con embeddings, que es otra dependencia. `auxiliaryScript` solo entra en la huella del
+escenario si se usa.
 
 ### Hosts SSH simulados (`setup.ssh`)
 
@@ -262,7 +287,7 @@ stratum auditor --file ~/.stratum/evals/runs/<runId>/<escenario>/<sesión>.jsonl
 |---|---|
 | `durationMs` | Tiempo activo de los turnos (no incluye el arranque del proceso; eso es `wallMs`). |
 | `tokens`, `promptTokens`, `completionTokens` | Suma del `usage` de cada llamada. **`null` si el backend no lo reporta: nunca se estima.** |
-| `llmCalls`, `llmErrors` | Llamadas al modelo, y las que acabaron en error tras agotar los reintentos. |
+| `llmCalls`, `llmErrors` | Llamadas al modelo **del loop** (agente y subagentes), y las que acabaron en error tras agotar los reintentos. Las auxiliares van aparte: ver [llamadas por origen](#llamadas-al-llm-por-origen). |
 | `toolCalls` | Pasos de herramienta, incluidas las de control (`todo`, `delegate_task`…) y las de los subagentes. |
 | `toolErrors` | Tools que fallaron, **sin** las que el runtime bloqueó. Un comando que corre y sale ≠ 0 cuenta. |
 | `policyBlocks` | Llamadas que el runtime no dejó ejecutar: vetos (`preflight`, read-only, toolset, plan) + confirmaciones denegadas o sin nadie que las apruebe. |
@@ -279,6 +304,45 @@ stratum auditor --file ~/.stratum/evals/runs/<runId>/<escenario>/<sesión>.jsonl
 | `cacheBreaks` | Llamadas que leyeron de caché **menos tokens que la llamada anterior** del mismo agente: una pérdida demostrable con el dato del backend, no todo el potencial desaprovechado (una reescritura del prompt tras la que lo leído no baja no cuenta). Ver [caché de prompt](#caché-de-prompt). |
 | `ttftMs`, `ttftColdMs`, `ttftWarmMs` | Tiempo medio hasta el primer token: de todas las llamadas, de las frías y de las templadas. |
 | `prefixStability` | Fracción del prompt que repite el de la llamada anterior, medida en el cliente. No depende del backend. |
+
+#### Llamadas al LLM por origen
+
+Cada llamada al modelo lleva en la traza quién la hizo (`data.origin`): `agent`, `subagent`,
+`memory-extraction` (la extracción automática de decisiones tras un turno), `context-compression`
+(el resumen del historial, por umbral o con `/compact`) y `session-summary` (el resumen de una
+línea al guardar la sesión de `chat`). Las tres últimas son **auxiliares**.
+
+Todo lo de la tabla de arriba —`llmCalls`, `tokens`, la caché, el TTFT, `durationMs`— sigue
+midiendo solo el loop, así que un resultado nuevo se compara con uno anterior sin que las auxiliares
+lo muevan. Lo auxiliar se cuenta al lado:
+
+| Métrica | Definición |
+|---|---|
+| `totalLlmCalls` | Todas las llamadas de la traza: `llmCalls` + `auxiliaryLlmCalls`. Es el número que tiene que coincidir con las peticiones que recibe el backend (más los `retries`, que son peticiones dentro de una misma llamada). |
+| `agentLlmCalls`, `subagentLlmCalls` | Las dos mitades de `llmCalls`. |
+| `auxiliaryLlmCalls`, `memoryExtractionCalls`, `compressionCalls`, `sessionSummaryCalls` | Llamadas auxiliares, en total y por origen. |
+| `auxiliaryLlmErrors` | Auxiliares que acabaron en error. **No** entran en `llmErrors`, `toolErrors` ni `hadErrors`, ni convierten un turno en «con fallos»: la respuesta ya estaba dada. Una cancelada (el proceso salía) no es un error. |
+| `auxiliaryPromptTokens`, `auxiliaryCompletionTokens`, `auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate` | Su `usage` y su caché, aparte de los del agente. |
+| `auxiliaryDurationMs` | Suma de la duración de las llamadas auxiliares. |
+| `llmByOrigin` | El desglose completo: por origen, `calls`, `errors`, `cancelled`, `promptTokens`, `completionTokens`, `cachedReadTokens`, `uncachedPromptTokens`, `cacheHitRate`, `ttftMs` y `durationMs`. |
+
+Son `null` —nunca 0— en una traza que no registraba las auxiliares (anterior al cap `llm-origin`):
+que no aparezcan no quiere decir que no las hubiera. `agentLlmCalls` y `subagentLlmCalls` sí salen
+de cualquier traza, por la jerarquía de pasos.
+
+**Relación temporal.** Una extracción lanzada al cerrar un turno sigue en vuelo cuando empieza el
+siguiente, y en un backend de un solo slot la primera llamada del agente espera detrás. La traza no
+ve la cola del servidor, pero sí cuándo empezó y acabó cada petición:
+
+| Métrica | Definición |
+|---|---|
+| `overlappedLlmCalls` | Llamadas del loop con alguna auxiliar en curso durante su espera (de su inicio a su primer token). |
+| `overlappingAuxiliaryMs` | Suma de esa espera solapada (la unión de las auxiliares, sin contar dos veces el mismo tramo). |
+| `precedingAuxiliaryMs` | Duración de las auxiliares que terminaron entre la llamada del loop anterior y el inicio de esta: no coinciden con ella, pero pasaron por el backend justo antes (una compresión). |
+| `ttftOverlappedMs`, `ttftClearMs` | TTFT medio del loop con y sin una auxiliar en curso. |
+
+Son relojes del cliente: dicen que dos peticiones estaban en vuelo a la vez, **no** cuánto esperó
+una en la cola del servidor. Eso no se mide ni se deduce.
 
 **Acciones repetidas.** Solo se cuenta lo que se puede afirmar sin adivinar: la misma tool con los
 mismos argumentos que una llamada anterior del mismo agente y turno, **sin que entre las dos se haya
@@ -392,6 +456,23 @@ Por escenario, en este orden:
 | **Caché** (`cacheHitRate`, `cachedReadTokens`, `uncachedPromptTokens`, `cacheBreaks`, `coldCalls`, `prefixStability`, `ttftColdMs`, `ttftWarmMs`) | Igual que el coste, en su propio bloque: el escenario sigue pasando, pero el backend reutiliza menos prompt o tarda más en el primer token. No se mezcla con los errores del agente. |
 | FAIL → PASS, ERROR → PASS, menos coste, menos errores | Mejora. |
 | FAIL ↔ ERROR | Ni lo uno ni lo otro: «sigue sin pasar, de otra manera». Se lista aparte. |
+
+**Las métricas de llamadas auxiliares no cuentan por defecto.** Se guardan en cada resultado y salen
+siempre en «Métricas agregadas», pero no mueven el veredicto: todavía no hay datos reales con los
+que fijarles una tolerancia. Para que cuenten en una comparación se piden con `--metric`, cada una
+con su margen (sin margen, cualquier cambio cuenta):
+
+```bash
+stratum eval compare mock latest --metric auxiliaryLlmCalls
+stratum eval compare mock latest --metric "auxiliaryPromptTokens=20%,200 auxiliaryDurationMs=2s"
+stratum eval run --mock --baseline mock --metric auxiliary      # todas
+```
+
+Comparables así: `auxiliaryLlmCalls`, `memoryExtractionCalls`, `compressionCalls`,
+`auxiliaryLlmErrors`, `auxiliaryPromptTokens`, `auxiliaryCachedReadTokens` (más es mejor),
+`auxiliaryDurationMs`, `overlappingAuxiliaryMs`, `precedingAuxiliaryMs`. Como el coste, solo entre dos
+PASS del mismo modo y con la misma huella, y en su propio bloque del informe (`auxiliary`,
+`highlights.auxiliaryRegressions`).
 
 Una regresión pesa más que una mejora en el mismo escenario. Un dato que una de las dos trazas no
 tiene (`null`, o ausente en un resultado anterior a esa métrica) no se compara: contra un baseline
@@ -585,6 +666,14 @@ Añade el desglose por herramienta (llamadas, errores, bloqueadas, duración med
 dos providers son dos filas, porque son dos cachés: es la tabla con la que se ve qué provider o
 modelo aprovecha mejor el mismo contexto.
 
+El bloque **LLM calls** da el total de llamadas al modelo y una fila por origen (`agent`,
+`subagent`, `memory-extraction`, `context-compression`, `session-summary`) con llamadas, tokens de
+entrada y de salida, leídos de caché y sin caché, TTFT medio, duración y errores; debajo, cuántas
+llamadas del loop coincidieron con una auxiliar en curso y el TTFT con y sin ella. «Llamadas al
+modelo (loop)», los tokens, la tabla de modelos y el bloque de caché son solo del agente y los
+subagentes. Las sesiones grabadas antes de que la traza registrase las auxiliares no las traen: el
+informe dice sobre cuántas sesiones se calculan.
+
 El bloque **Caché de prompt** da el acierto global, los tokens de entrada sin caché, las llamadas
 frías y templadas, el TTFT de cada clase, las roturas de caché **por causa** y el prefijo estable.
 Solo cuentan las llamadas cuyo backend reportó caché, y el informe dice cuántas son; si no hay
@@ -618,6 +707,20 @@ Para la caché de prompt, en los pasos de tipo `model`:
   recuentos y huellas; el texto del prompt no se guarda en ningún sitio nuevo.
 
 No hay `cap` nuevo: una traza sin esos campos da `null` en las métricas que dependen de ellos.
+
+Para las llamadas auxiliares:
+
+- `data.origin` en cada paso `model`: `agent` · `subagent` · `memory-extraction` ·
+  `context-compression` · `session-summary`. Sin él (traza anterior), el origen sale de la
+  jerarquía: `subagent` si el paso cuelga de uno, `agent` si no.
+- `meta.caps` incluye `"llm-origin"`: el escritor registra **todas** las llamadas al modelo. Sin el
+  cap, las métricas auxiliares son `null`. En una sesión reanudada cuenta solo si lo declaran todas
+  sus cabeceras.
+- Las llamadas auxiliares son pasos `model` como los demás (`begin` / `mark first_token` / `end`,
+  con `provider`, modelo, `usage`, `prefix` y estado), en el scope que las pidió: una compresión
+  dentro de un subagente lleva su `parent`. De su prompt solo se guardan recuentos y huellas —es
+  un derivado del historial, que ya está en la traza—; su salida, redactada como cualquier otra.
+  No llevan `iteration`.
 
 ## Escribir un escenario nuevo
 

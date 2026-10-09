@@ -133,6 +133,10 @@ ni en ninguna tasa de fiabilidad; en `eval compare` tiene su propia categoría (
 | `stratum eval run` / `report` | `caché N %` y roturas por escenario; en el resumen, acierto, frías · templadas, TTFT y prefijo estable. |
 | `stratum eval compare` | Regresiones y mejoras de caché por escenario, y las mismas métricas en el resumen agregado. Ver [`eval.md`](eval.md#caché-de-prompt). |
 
+Todas esas cifras son de las llamadas **del loop** (agente y subagentes). Las llamadas auxiliares
+—extracción de memoria, compresión, resumen de sesión— tienen otro prompt y se miden aparte, por
+origen: ver [Llamadas auxiliares](#llamadas-auxiliares).
+
 Las trazas anteriores siguen leyéndose: el campo `cachedTokens` que ya se guardaba se toma como
 `cachedReadTokens`, y lo que no registraban (`prefix`) queda en `null`.
 
@@ -337,30 +341,52 @@ comportamiento:
   mitad de sesión, y ahí la conversación se pierde igual porque va detrás del system prompt.
 - Sacar las tareas abiertas del system prompt (ver arriba).
 
+## Llamadas auxiliares
+
+Stratum llama al modelo también fuera del loop del agente, y esas peticiones ocupan el backend y su
+caché igual que las demás. Todas pasan por un único punto (`tracedCompletion`, `trace/llm-call.ts`)
+que las anota en la traza con el mismo `ModelSpan` del loop y su **origen**:
+
+| Origen | Quién la hace | Cuándo |
+|---|---|---|
+| `agent` | El loop del agente principal (`ReactLoop`) | Cada iteración de un turno. |
+| `subagent` | El loop de un subagente | Cada iteración de una delegación; el paso cuelga del subagente. |
+| `memory-extraction` | `extractAndStore` (`memory/extractor.ts`) | En segundo plano al cerrar un turno con `stop`, si `memory.autoExtract`. |
+| `context-compression` | `ContextManager` (`agent/harness.ts`) | Antes de una iteración que supera el umbral, o con `/compact`. |
+| `session-summary` | `SessionStore.save` (`session/store.ts`) | Al salir de `chat`, si la sesión tiene 5 turnos o más. |
+
+Cada una queda con provider, modelo, inicio, primer token, fin, `usage`, uso de caché y estado, y se
+registra aunque falle, se cancele, no produzca texto o no traiga `usage`. Instrumentarlas no cambia
+la petición ni cuándo se hace: es el mismo `provider.complete(request)` de antes.
+
+`/auditor`, el panel de Desktop, `stratum stats` y `stratum eval` dan el total («LLM calls») y el
+desglose por origen: llamadas, tokens de entrada y de salida, leídos de caché, sin caché, TTFT medio,
+duración y errores. Las cifras de caché de este documento siguen siendo las del loop; una llamada
+auxiliar no entra en `cacheBreaks` ni corta la comparación entre dos llamadas del agente.
+
+Y como la traza sabe cuándo empezó y acabó cada petición, da lo que hace falta para ver la
+interferencia sin medir la cola del servidor: por cada llamada del loop, cuántas auxiliares había en
+curso al empezar, cuánto de su espera coincidió con alguna (`overlappingAuxiliaryMs`) y cuánto
+trabajo auxiliar acababa de pasar por el backend (`precedingAuxiliaryMs`); en agregado, el TTFT del
+loop con y sin una auxiliar en vuelo. Las definiciones están en
+[`eval.md`](eval.md#llamadas-al-llm-por-origen) y las cifras medidas, en
+[`prompt-caching-live.md`](prompt-caching-live.md#llamadas-auxiliares-por-origen).
+
+Lo que **no** es una llamada al LLM y por tanto no está en la traza: `GET /models` (descubrimiento
+de modelos, ventana de contexto, health check del status bar) y `POST /embeddings` si hay
+`memory.embeddingEndpoint`.
+
 ## Siguiente trabajo
 
 Nada de esto está implementado.
 
-### Trace auxiliary LLM calls
+### Reducir la interferencia de las llamadas auxiliares
 
-La extracción automática de memoria y la compresión de contexto llaman al modelo fuera del loop, y
-hoy no aparecen como llamadas de modelo en la traza ni en `/auditor`. En la prueba contra llama.cpp
-el servidor recibió 22 peticiones para 14 llamadas trazadas y, con un solo slot, el TTFT templado
-pasó de unos 277 ms a unos 7,3 s sin que cambiase el acierto de caché: lo que se medía como «primer
-token lento» era cola detrás de trabajo auxiliar, no procesado de prompt.
-
-La siguiente fase debería atribuir en la traza cada llamada al modelo a su **origen**:
-
-- `agent`
-- `memory-extraction`
-- `context-compression`
-- `subagent`
-
-con provider y modelo, inicio y fin, TTFT, `usage` y uso de caché, para poder separar el tiempo de
-*prefill* del tiempo de cola que provoca el trabajo auxiliar. Con eso `cacheSummary`, `stratum stats`
-y `eval` podrían dar el TTFT por origen y el coste real de la extracción y de la compresión, y las
-roturas de caché que provoca una llamada auxiliar en un servidor de un solo slot dejarían de
-atribuirse al `backend`.
+Con las llamadas auxiliares a la vista, lo siguiente es decidir qué hacer con ellas: cuándo lanzar
+la extracción de memoria (hoy, justo al cerrar cada turno, compite con el arranque del siguiente),
+si debe ir a otro modelo o endpoint, o esperar a que el backend quede libre. Este trabajo no cambia
+nada de eso a propósito: primero la medida. Tampoco hay todavía tolerancias de `eval compare` para
+las métricas auxiliares; se fijarán con datos reales.
 
 ### Estrategia de cache key
 

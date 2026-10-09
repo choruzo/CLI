@@ -79,6 +79,8 @@ vi.mock('../../agent/core.js', () => ({
     getActiveProfile() {
       return null;
     }
+
+    async cancelBackgroundWork() {}
   },
 }));
 

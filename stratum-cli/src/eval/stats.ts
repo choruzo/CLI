@@ -3,7 +3,21 @@
  * stats`). Nada sale del equipo: se leen los JSONL de `trace.dir` y se suman.
  * La agregación es pura; el disco lo toca quien la llama.
  */
-import { cacheBreaks, prefixOf, ttftOf, usageOf, type CacheBreakCause } from '../trace/model.js';
+import {
+  AUXILIARY_LLM_ORIGINS,
+  LLM_CALL_ORIGINS,
+  auxiliaryImpact,
+  cacheBreaks,
+  isPrimaryCall,
+  llmBreakdown,
+  prefixOf,
+  sumOriginStats,
+  ttftOf,
+  usageOf,
+  type CacheBreakCause,
+  type LlmCallOrigin,
+  type LlmOriginStats,
+} from '../trace/model.js';
 import type { TraceRecord } from '../trace/records.js';
 import { blockedToolSteps, buildTraceModel, computeMetrics, turnOutcomes } from './metrics.js';
 
@@ -144,6 +158,27 @@ export interface AggregateStats {
   cacheBreaks: Partial<Record<CacheBreakCause, number>>;
   /** Fracción del prompt que repite el de la llamada anterior; null sin trazas que lo midan. */
   prefixStability: number | null;
+  /**
+   * Llamadas al LLM por origen. `llmCalls`, `tokens`, `models` y `cache` son
+   * solo del loop (agente + subagentes); las auxiliares están aquí.
+   */
+  llm: {
+    /** Sesiones cuya traza ya registraba las llamadas auxiliares. */
+    auxiliarySessions: number;
+    /** Todas las llamadas: loop + auxiliares. */
+    calls: number;
+    byOrigin: Record<LlmCallOrigin, LlmOriginStats>;
+    auxiliary: LlmOriginStats;
+    /**
+     * Coincidencia en el tiempo del loop con las auxiliares (relojes del
+     * cliente, sobre `auxiliarySessions`): no es tiempo de cola del servidor.
+     */
+    overlappedCalls: number;
+    overlappingAuxiliaryMs: number;
+    precedingAuxiliaryMs: number;
+    ttftOverlappedMs: number | null;
+    ttftClearMs: number | null;
+  };
 }
 
 const ratio = (a: number, b: number): number | null => (b > 0 ? a / b : null);
@@ -174,6 +209,17 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
   const breaks: Partial<Record<CacheBreakCause, number>> = {};
   const prefix = { chars: 0, shared: 0 };
   const conf = { asked: 0, approved: 0, denied: 0, blocked: 0 };
+  const origins: Array<Record<LlmCallOrigin, LlmOriginStats>> = [];
+  const impact = {
+    sessions: 0,
+    overlappedCalls: 0,
+    overlapping: 0,
+    preceding: 0,
+    ttftHit: 0,
+    ttftHitN: 0,
+    ttftClear: 0,
+    ttftClearN: 0,
+  };
   const total = {
     turns: 0,
     closedTurns: 0,
@@ -240,6 +286,19 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
     const model = buildTraceModel(trace.records);
     const blocked = blockedToolSteps(model);
     for (const b of cacheBreaks(model)) breaks[b.cause] = (breaks[b.cause] ?? 0) + 1;
+    const llm = llmBreakdown(model, trace.updatedAt);
+    origins.push(llm.byOrigin);
+    if (llm.auxiliaryTracked) {
+      const i = auxiliaryImpact(model, trace.updatedAt);
+      impact.sessions++;
+      impact.overlappedCalls += i.overlappedCalls;
+      impact.overlapping += i.overlappingAuxiliaryMs;
+      impact.preceding += i.precedingAuxiliaryMs;
+      impact.ttftHit += (i.ttftOverlappedMs ?? 0) * i.ttftOverlappedCalls;
+      impact.ttftHitN += i.ttftOverlappedCalls;
+      impact.ttftClear += (i.ttftClearMs ?? 0) * i.ttftClearCalls;
+      impact.ttftClearN += i.ttftClearCalls;
+    }
     for (const s of model.steps) {
       if (s.kind === 'tool') {
         let t = tools.get(s.name);
@@ -251,7 +310,7 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
           t.ms += s.end - s.start;
           t.closed++;
         }
-      } else if (s.kind === 'model') {
+      } else if (isPrimaryCall(s)) {
         // El mismo modelo servido por dos providers son dos cachés distintas.
         const provider = typeof s.data.provider === 'string' ? s.data.provider : undefined;
         const key = `${provider ?? ''}\u0000${s.name}`;
@@ -303,6 +362,8 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
 
   const times = traces.map((t) => t.updatedAt);
   const runtime = total.runtimeSessions > 0;
+  const byOrigin = {} as Record<LlmCallOrigin, LlmOriginStats>;
+  for (const o of LLM_CALL_ORIGINS) byOrigin[o] = sumOriginStats(origins.map((by) => by[o]));
   return {
     sessions: traces.length,
     runtimeSessions: total.runtimeSessions,
@@ -362,5 +423,16 @@ export function aggregateStats(traces: readonly TraceInput[]): AggregateStats {
     cache: cache.stats(),
     cacheBreaks: breaks,
     prefixStability: ratio(prefix.shared, prefix.chars),
+    llm: {
+      auxiliarySessions: impact.sessions,
+      calls: LLM_CALL_ORIGINS.reduce((n, o) => n + byOrigin[o].calls, 0),
+      byOrigin,
+      auxiliary: sumOriginStats(AUXILIARY_LLM_ORIGINS.map((o) => byOrigin[o])),
+      overlappedCalls: impact.overlappedCalls,
+      overlappingAuxiliaryMs: impact.overlapping,
+      precedingAuxiliaryMs: impact.preceding,
+      ttftOverlappedMs: ratio(impact.ttftHit, impact.ttftHitN),
+      ttftClearMs: ratio(impact.ttftClear, impact.ttftClearN),
+    },
   };
 }

@@ -7,8 +7,10 @@ import { ProviderRouter } from '../../providers/router.js';
 import { resolveStartupModel } from '../startup-model.js';
 import {
   compareResults,
+  parseMetricSelection,
   parseToleranceObject,
   parseToleranceSpec,
+  type MetricSelection,
   type ToleranceOverrides,
 } from '../../eval/compare.js';
 import {
@@ -89,6 +91,16 @@ interface ToleranceOpts {
   tolerance: string[];
   tolerances?: string;
   threshold?: string;
+  metric: string[];
+}
+
+/** Métricas de llamadas auxiliares pedidas con `--metric`: sin él, no se juzgan. */
+function selectionOf(opts: ToleranceOpts): MetricSelection {
+  try {
+    return parseMetricSelection(opts.metric);
+  } catch (err) {
+    return fail(`--metric: ${err instanceof Error ? err.message : String(err)}`);
+  }
 }
 
 /**
@@ -222,12 +234,20 @@ const runSub = new Command('run')
     'JSON file with tolerances: { "tokens": { "pct": 0.3, "abs": 500 } }',
   )
   .option('--threshold <pct>', 'shortcut: relative tolerance for tokens and call counts')
+  .option(
+    '--metric <name>',
+    'also judge an auxiliary-LLM-call metric (repeatable): auxiliaryLlmCalls, ' +
+      'auxiliaryPromptTokens=20%,200, or "auxiliary" for all of them',
+    collect,
+    [],
+  )
   .option('--json', 'print the result JSON instead of the report')
   .action(async (ids: string[], opts: RunOpts) => {
     const scenarios = select(discover(opts), ids, opts);
     if (scenarios.length === 0) fail('No hay escenarios que ejecutar.');
     const dir = evalsDir(opts.out);
     const tolerances = tolerancesOf(opts);
+    const selection = selectionOf(opts);
     const saveAs =
       opts.saveBaseline === undefined
         ? null
@@ -283,7 +303,9 @@ const runSub = new Command('run')
       },
     });
 
-    const comparison = baseline ? compareResults(baseline.result, run.result, tolerances) : null;
+    const comparison = baseline
+      ? compareResults(baseline.result, run.result, tolerances, selection)
+      : null;
     if (opts.json) {
       process.stdout.write(
         JSON.stringify(comparison ? { result: run.result, comparison } : run.result, null, 2) +
@@ -355,6 +377,13 @@ const compareSub = new Command('compare')
     'JSON file with tolerances: { "tokens": { "pct": 0.3, "abs": 500 } }',
   )
   .option('--threshold <pct>', 'shortcut: relative tolerance for tokens and call counts')
+  .option(
+    '--metric <name>',
+    'also judge an auxiliary-LLM-call metric (repeatable): auxiliaryLlmCalls, ' +
+      'auxiliaryPromptTokens=20%,200, or "auxiliary" for all of them',
+    collect,
+    [],
+  )
   .option('--json', 'machine-readable output')
   .action(
     (baseRef: string, headRef: string, opts: ToleranceOpts & { out?: string; json?: boolean }) => {
@@ -363,6 +392,7 @@ const compareSub = new Command('compare')
         resolveOrFail(baseRef, dir).result,
         resolveOrFail(headRef, dir).result,
         tolerancesOf(opts),
+        selectionOf(opts),
       );
       process.stdout.write(
         opts.json ? JSON.stringify(comparison, null, 2) + '\n' : formatComparison(comparison),

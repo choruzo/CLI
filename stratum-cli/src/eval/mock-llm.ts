@@ -15,18 +15,31 @@
  * primer token tarda en proporción a lo que NO salió de caché. No modela ni
  * TTL, ni tamaño mínimo de prefijo, ni desalojos: es la cota de lo reutilizable.
  * Los prompts anteriores viven en memoria mientras dura el escenario.
+ *
+ * Las llamadas auxiliares (extracción de memoria, compresión) se reconocen por
+ * su prompt. Si el escenario les da guion propio (`auxiliaryScript`) se
+ * contestan de él, en su propio orden: la extracción corre en segundo plano y
+ * puede llegar antes o después de la siguiente llamada del agente, así que no
+ * puede depender de la posición en el guion principal.
  */
 import { createServer, type Server } from 'http';
 import type { AddressInfo } from 'net';
+import { COMPRESSOR_PROMPT } from '../agent/harness.js';
+import { EXTRACT_SYSTEM_PROMPT } from '../memory/extractor.js';
+import type { AuxiliaryLlmOrigin } from '../trace/records.js';
 import type { ScriptStep } from './scenario.js';
+
+export type AuxiliaryScript = Partial<Record<AuxiliaryLlmOrigin, readonly ScriptStep[]>>;
 
 export const MOCK_MODEL = 'eval-mock';
 const EXHAUSTED_TEXT = '[eval-mock] guion agotado: no hay respuesta prevista para esta petición.';
 
 export interface MockLlm {
   baseUrl: string;
-  /** Peticiones de chat recibidas. */
+  /** Peticiones de chat contestadas con el guion principal. */
   requests(): number;
+  /** Peticiones contestadas con el guion auxiliar, por origen. */
+  auxiliaryRequests(): Partial<Record<AuxiliaryLlmOrigin, number>>;
   close(): Promise<void>;
 }
 
@@ -59,8 +72,34 @@ export function cachedPrefixLength(prompt: string, seen: readonly string[]): num
   return best;
 }
 
-export function startMockLlm(script: readonly ScriptStep[]): Promise<MockLlm> {
+/**
+ * Qué llamada auxiliar de Stratum es esta petición, por su prompt; null si es
+ * una del loop. El resumen de sesión no se reconoce: `stratum run` no lo hace.
+ */
+export function classifyAuxiliaryRequest(body: unknown): AuxiliaryLlmOrigin | null {
+  const messages = (body as { messages?: unknown } | null)?.messages;
+  if (!Array.isArray(messages)) return null;
+  const first = messages[0] as { role?: unknown; content?: unknown } | undefined;
+  if (typeof first?.content !== 'string') return null;
+  if (first.role === 'system' && first.content === EXTRACT_SYSTEM_PROMPT) {
+    return 'memory-extraction';
+  }
+  if (
+    messages.length === 1 &&
+    first.role === 'user' &&
+    first.content.startsWith(COMPRESSOR_PROMPT)
+  ) {
+    return 'context-compression';
+  }
+  return null;
+}
+
+export function startMockLlm(
+  script: readonly ScriptStep[],
+  auxiliary: AuxiliaryScript = {},
+): Promise<MockLlm> {
   let requests = 0;
+  const auxRequests: Partial<Record<AuxiliaryLlmOrigin, number>> = {};
   const seenPrompts: string[] = [];
 
   const server: Server = createServer((req, res) => {
@@ -78,14 +117,24 @@ export function startMockLlm(script: readonly ScriptStep[]): Promise<MockLlm> {
     req.setEncoding('utf8');
     req.on('data', (c: string) => (raw += c));
     req.on('end', () => {
-      const step: ScriptStep = script[requests] ?? { text: EXHAUSTED_TEXT };
-      requests++;
-
       let rendered = '';
+      let origin: AuxiliaryLlmOrigin | null = null;
       try {
-        rendered = renderPromptForCache(JSON.parse(raw));
+        const body: unknown = JSON.parse(raw);
+        rendered = renderPromptForCache(body);
+        origin = classifyAuxiliaryRequest(body);
       } catch {
         /* petición que no es JSON: sin caché que simular */
+      }
+      const auxSteps = origin ? auxiliary[origin] : undefined;
+      let step: ScriptStep;
+      if (origin && auxSteps) {
+        const n = auxRequests[origin] ?? 0;
+        step = auxSteps[n] ?? { text: EXHAUSTED_TEXT };
+        auxRequests[origin] = n + 1;
+      } else {
+        step = script[requests] ?? { text: EXHAUSTED_TEXT };
+        requests++;
       }
       const prompt = approxTokens(raw.length);
       const cached = Math.min(Math.floor(cachedPrefixLength(rendered, seenPrompts) / 4), prompt);
@@ -172,6 +221,7 @@ export function startMockLlm(script: readonly ScriptStep[]): Promise<MockLlm> {
       resolve({
         baseUrl: `http://127.0.0.1:${port}/v1`,
         requests: () => requests,
+        auxiliaryRequests: () => ({ ...auxRequests }),
         close: () =>
           new Promise<void>((done) => {
             server.closeAllConnections?.();

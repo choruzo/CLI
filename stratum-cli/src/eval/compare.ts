@@ -6,8 +6,11 @@
  */
 import type { EvalMode } from './checks.js';
 import {
+  AUXILIARY_HIGHER_IS_BETTER,
+  AUXILIARY_METRICS,
   COMPARABLE_METRICS,
   HIGHER_IS_BETTER,
+  type AuxiliaryMetric,
   type ComparableMetric,
   type RunMetrics,
 } from './metrics.js';
@@ -142,14 +145,14 @@ const TIME_METRICS: ReadonlySet<ComparableMetric> = new Set([
   'ttftWarmMs',
 ]);
 
-function parseAmount(metric: ComparableMetric, text: string): number {
+function parseAmount(isTime: boolean, text: string): number {
   const m = /^(\d+(?:\.\d+)?)(ms|s|k)?$/i.exec(text);
   if (!m) throw new ToleranceError(`"${text}" no es una cantidad válida`);
   const value = Number(m[1]);
   const unit = m[2]?.toLowerCase();
   if (unit === 'k') return value * 1000;
   if (unit === 's' || unit === 'ms') {
-    if (!TIME_METRICS.has(metric)) {
+    if (!isTime) {
       throw new ToleranceError(`"${text}": solo el tiempo lleva unidad`);
     }
     return unit === 's' ? value * 1000 : value;
@@ -177,23 +180,66 @@ export function parseToleranceSpec(spec: string): ToleranceOverrides {
       );
     }
     const key = metric as ComparableMetric;
-    const tolerance: Partial<Tolerance> = {};
-    for (const value of part
-      .slice(eq + 1)
-      .split(',')
-      .filter(Boolean)) {
-      if (value.endsWith('%')) {
-        const pct = Number(value.slice(0, -1));
-        if (!(pct >= 0)) throw new ToleranceError(`"${value}" no es un porcentaje válido`);
-        tolerance.pct = pct / 100;
-      } else {
-        tolerance.abs = parseAmount(key, value);
-      }
-    }
+    const tolerance = parseToleranceValues(TIME_METRICS.has(key), part.slice(eq + 1));
     if (tolerance.pct === undefined && tolerance.abs === undefined) {
       throw new ToleranceError(`"${part}": falta el valor`);
     }
     out[key] = { ...out[key], ...tolerance };
+  }
+  return out;
+}
+
+/** `30%`, `500`, `30%,500`, `10s`: un porcentaje fija `pct`; una cantidad, `abs`. */
+function parseToleranceValues(isTime: boolean, text: string): Partial<Tolerance> {
+  const tolerance: Partial<Tolerance> = {};
+  for (const value of text.split(',').filter(Boolean)) {
+    if (value.endsWith('%')) {
+      const pct = Number(value.slice(0, -1));
+      if (!(pct >= 0)) throw new ToleranceError(`"${value}" no es un porcentaje válido`);
+      tolerance.pct = pct / 100;
+    } else {
+      tolerance.abs = parseAmount(isTime, value);
+    }
+  }
+  return tolerance;
+}
+
+/**
+ * Métricas de las llamadas auxiliares que se piden a propósito para una
+ * comparación, cada una con su tolerancia. No tienen tolerancias por defecto
+ * calibradas: sin margen indicado, cualquier cambio cuenta.
+ */
+export type MetricSelection = Partial<Record<AuxiliaryMetric, Tolerance>>;
+
+const AUXILIARY_TIME_METRICS: ReadonlySet<AuxiliaryMetric> = new Set([
+  'auxiliaryDurationMs',
+  'overlappingAuxiliaryMs',
+  'precedingAuxiliaryMs',
+]);
+
+/**
+ * `auxiliaryLlmCalls`, `auxiliaryPromptTokens=20%,200`, `auxiliary` (todas).
+ * Varias separadas por espacios o `;` — la coma separa porcentaje y cantidad.
+ */
+export function parseMetricSelection(specs: readonly string[]): MetricSelection {
+  const out: MetricSelection = {};
+  for (const part of specs.flatMap((s) => s.split(/[\s;]+/)).filter(Boolean)) {
+    const eq = part.indexOf('=');
+    const name = eq < 0 ? part : part.slice(0, eq);
+    if (name.toLowerCase() === 'auxiliary' && eq < 0) {
+      for (const m of AUXILIARY_METRICS) out[m] ??= { ...EXACT };
+      continue;
+    }
+    const metric = AUXILIARY_METRICS.find((m) => m.toLowerCase() === name.toLowerCase());
+    if (!metric) {
+      throw new ToleranceError(
+        `"${name}" no es una métrica auxiliar. Métricas: ${AUXILIARY_METRICS.join(', ')} ` +
+          '(o "auxiliary" para todas).',
+      );
+    }
+    const values =
+      eq < 0 ? {} : parseToleranceValues(AUXILIARY_TIME_METRICS.has(metric), part.slice(eq + 1));
+    out[metric] = { ...EXACT, ...values };
   }
   return out;
 }
@@ -231,7 +277,14 @@ export function parseToleranceObject(value: unknown): ToleranceOverrides {
 }
 
 /** Qué clase de cosa mide cada métrica: decide en qué bloque del informe sale. */
-export type ChangeCategory = 'safety' | 'policy' | 'cost' | 'reliability' | 'cache';
+export type ChangeCategory =
+  | 'safety'
+  | 'policy'
+  | 'cost'
+  | 'reliability'
+  | 'cache'
+  /** Llamadas auxiliares: solo las métricas pedidas a propósito (`MetricSelection`). */
+  | 'auxiliary';
 
 const CATEGORY: Record<ComparableMetric, ChangeCategory> = {
   tokens: 'cost',
@@ -317,6 +370,8 @@ export interface Highlights {
   reliabilityRegressions: string[];
   /** Menos acierto de caché, más roturas o peor TTFT, con el mismo resultado. */
   cacheRegressions: string[];
+  /** Más llamadas auxiliares, o más caras; solo de las métricas pedidas a propósito. */
+  auxiliaryRegressions: string[];
   improvements: string[];
   unresolved: string[];
   added: string[];
@@ -327,6 +382,8 @@ export interface Comparison {
   base: RunInfo;
   head: RunInfo;
   tolerances: Tolerances;
+  /** Métricas auxiliares que se pidió comparar, con su tolerancia; ausente si ninguna. */
+  selected?: MetricSelection;
   /** Avisos sobre la comparación en sí (modos, modelos o escenarios distintos). */
   notes: string[];
   scenarios: ScenarioComparison[];
@@ -402,6 +459,33 @@ function metricChanges(
   return out;
 }
 
+/** Cambios en las métricas auxiliares pedidas: las demás ni se miran. */
+function auxiliaryChanges(
+  base: RunMetrics,
+  head: RunMetrics,
+  selection: MetricSelection,
+): MetricChange[] {
+  const out: MetricChange[] = [];
+  for (const metric of AUXILIARY_METRICS) {
+    const tolerance = selection[metric];
+    if (!tolerance) continue;
+    const b = base[metric];
+    const h = head[metric];
+    // Una traza que no registraba las auxiliares no tiene con qué comparar.
+    if (typeof b !== 'number' || typeof h !== 'number') continue;
+    out.push({
+      metric,
+      category: 'auxiliary',
+      base: b,
+      head: h,
+      delta: h - b,
+      pct: b !== 0 ? (h - b) / b : null,
+      verdict: judge(b, h, tolerance, AUXILIARY_HIGHER_IS_BETTER.has(metric)),
+    });
+  }
+  return out;
+}
+
 function transitionOf(base: ScenarioStatus, head: ScenarioStatus): Transition | null {
   if (base === head) return null;
   if (base === 'pass') return head === 'fail' ? 'pass_to_fail' : 'pass_to_error';
@@ -432,6 +516,7 @@ function compareScenario(
   head: ScenarioResult | undefined,
   tolerances: Tolerances,
   sameMode: boolean,
+  selection: MetricSelection,
 ): ScenarioComparison {
   const ref = (head ?? base)!;
   const out: ScenarioComparison = {
@@ -482,6 +567,7 @@ function compareScenario(
           sameMode ? ALL_CATEGORIES : POLICY_ONLY,
         ),
       );
+      if (sameMode) changes.push(...auxiliaryChanges(base.metrics, head.metrics, selection));
     } else if (base.status === 'fail') {
       changes.push(...metricChanges(base.metrics, head.metrics, tolerances, POLICY_ONLY));
     }
@@ -505,6 +591,36 @@ function compareScenario(
     definitionChanged,
     ...(head.status !== 'pass' && head.reason ? { reason: head.reason } : {}),
   };
+}
+
+function auxiliarySummaryRows(
+  base: GroupSummary,
+  head: GroupSummary,
+): Array<[string, number | null, number | null, boolean]> {
+  const b = base.llm;
+  const h = head.llm;
+  if (!b || !h) return [];
+  return [
+    ['auxiliaryLlmCalls', b.auxiliary.calls, h.auxiliary.calls, false],
+    [
+      'memoryExtractionCalls',
+      b.byOrigin['memory-extraction'].calls,
+      h.byOrigin['memory-extraction'].calls,
+      false,
+    ],
+    [
+      'compressionCalls',
+      b.byOrigin['context-compression'].calls,
+      h.byOrigin['context-compression'].calls,
+      false,
+    ],
+    ['auxiliaryLlmErrors', b.auxiliary.errors, h.auxiliary.errors, false],
+    ['auxiliaryPromptTokens', b.auxiliary.promptTokens, h.auxiliary.promptTokens, false],
+    ['auxiliaryCachedReadTokens', b.auxiliary.cachedReadTokens, h.auxiliary.cachedReadTokens, true],
+    ['auxiliaryDurationMs', b.auxiliary.durationMs, h.auxiliary.durationMs, false],
+    ['overlappingAuxiliaryMs', b.overlappingAuxiliaryMs, h.overlappingAuxiliaryMs, false],
+    ['precedingAuxiliaryMs', b.precedingAuxiliaryMs, h.precedingAuxiliaryMs, false],
+  ];
 }
 
 function summaryChanges(base: GroupSummary, head: GroupSummary): MetricChange[] {
@@ -551,6 +667,8 @@ function summaryChanges(base: GroupSummary, head: GroupSummary): MetricChange[] 
     ['prefixStability', base.prefixStability ?? null, head.prefixStability ?? null, true],
     ['ttftColdMs', base.cache?.ttftColdMs ?? null, head.cache?.ttftColdMs ?? null, false],
     ['ttftWarmMs', base.cache?.ttftWarmMs ?? null, head.cache?.ttftWarmMs ?? null, false],
+    // Llamadas auxiliares: siempre a la vista, nunca en el veredicto por defecto.
+    ...auxiliarySummaryRows(base, head),
   ];
   const out: MetricChange[] = [];
   for (const [metric, b, h, higherIsBetter] of rows) {
@@ -595,6 +713,7 @@ function highlightsOf(scenarios: readonly ScenarioComparison[]): Highlights {
     costRegressions: ids((s) => regressed(s, 'cost')),
     reliabilityRegressions: ids((s) => regressed(s, 'reliability')),
     cacheRegressions: ids((s) => regressed(s, 'cache')),
+    auxiliaryRegressions: ids((s) => regressed(s, 'auxiliary')),
     improvements: ids((s) => s.verdict === 'improvement'),
     unresolved: ids((s) => s.transition === 'unresolved'),
     added: ids((s) => s.verdict === 'added'),
@@ -618,6 +737,7 @@ export function compareResults(
   base: EvalResult,
   head: EvalResult,
   overrides?: ToleranceOverrides,
+  selection: MetricSelection = {},
 ): Comparison {
   // Las tolerancias que viajan con el baseline valen para toda comparación
   // contra él; lo que se pasa aquí (la línea de comandos) va por encima.
@@ -631,7 +751,7 @@ export function compareResults(
   const headById = new Map(head.scenarios.map((s) => [s.id, s]));
   const ids = [...new Set([...base.scenarios, ...head.scenarios].map((s) => s.id))];
   const scenarios = ids.map((id) =>
-    compareScenario(baseById.get(id), headById.get(id), tolerances, sameMode),
+    compareScenario(baseById.get(id), headById.get(id), tolerances, sameMode, selection),
   );
 
   const notes: string[] = [];
@@ -666,6 +786,7 @@ export function compareResults(
     base: describe(base),
     head: describe(head),
     tolerances,
+    ...(Object.keys(selection).length > 0 ? { selected: selection } : {}),
     notes,
     scenarios,
     highlights: highlightsOf(scenarios),

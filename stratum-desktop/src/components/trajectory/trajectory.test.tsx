@@ -170,6 +170,71 @@ describe('TrajectoryPanel', () => {
   });
 });
 
+describe('TrajectoryPanel: llamadas auxiliares', () => {
+  const aux = (
+    id: string,
+    origin: string,
+    start: number,
+    end: number,
+    over: Partial<{ status: 'ok' | 'error'; data: Record<string, unknown> }> = {},
+  ): TraceRecord[] => [
+    { t: 'begin', at: start, id, kind: 'model', name: 'qwen', data: { origin, provider: 'local' } },
+    { t: 'end', at: end, id, status: over.status ?? 'ok', data: over.data ?? {} },
+  ];
+  const META: TraceRecord = { t: 'meta', v: 1, at: 0, sessionId: 's', caps: ['runtime', 'llm-origin'] };
+  const records: TraceRecord[] = [
+    META,
+    { t: 'turn', at: 1000, input: 'tarea' },
+    { t: 'begin', at: 1010, id: 'm1', kind: 'model', name: 'qwen', data: { origin: 'agent', provider: 'local' } },
+    { t: 'mark', at: 1100, id: 'm1', name: 'first_token' },
+    { t: 'end', at: 1200, id: 'm1', status: 'ok', data: { text: 'Hecho.', usage: { promptTokens: 900, completionTokens: 5 } } },
+    { t: 'turn_end', at: 1250, stopReason: 'stop' },
+    ...aux('x1', 'memory-extraction', 1250, 1900, { status: 'error', data: { error: 'HTTP 500' } }),
+    { t: 'turn', at: 1300, input: 'otra' },
+    { t: 'begin', at: 1310, id: 'm2', kind: 'model', name: 'qwen', data: { origin: 'agent', provider: 'local' } },
+    { t: 'mark', at: 2000, id: 'm2', name: 'first_token' },
+    { t: 'end', at: 2100, id: 'm2', status: 'ok', data: { text: 'Listo.' } },
+    { t: 'turn_end', at: 2150, stopReason: 'stop' },
+  ].sort((a, b) => a.at - b.at) as TraceRecord[];
+
+  it('las pinta en el carril del modelo, marcadas, y las cuenta por origen', () => {
+    const { container } = render(<TrajectoryPanel trajectory={trajectory(records)} onClose={() => {}} />);
+    const auxBlocks = container.querySelectorAll('.trajectory__block[data-auxiliary]');
+    expect(auxBlocks).toHaveLength(1);
+    expect(auxBlocks[0].getAttribute('data-kind')).toBe('model');
+    const row = [...container.querySelectorAll('.trajectory__row')].find((r) =>
+      r.textContent?.includes('extracción de memoria'),
+    );
+    expect(row?.textContent).toContain('HTTP 500');
+    expect(row?.getAttribute('data-error')).not.toBeNull();
+    expect(screen.getByText(/LLM calls: 3/).textContent).toContain('agent 2 · memory-extraction 1');
+    expect(screen.getByText(/auxiliares 650 ms/).textContent).toContain('1 fallo');
+    expect(screen.queryByText('auxiliares no registradas en esta traza')).toBeNull();
+  });
+
+  it('el detalle dice el origen y cuánto de la espera coincidió con una auxiliar', () => {
+    const { container } = render(<TrajectoryPanel trajectory={trajectory(records)} onClose={() => {}} />);
+    const rows = [...container.querySelectorAll('.trajectory__row')];
+    fireEvent.click(rows.find((r) => r.textContent?.includes('extracción de memoria'))!);
+    let detail = within(screen.getByLabelText('Detalle del paso'));
+    expect(detail.getByText('MODELO · AUXILIAR')).toBeTruthy();
+    expect(detail.getByText('memory-extraction (extracción de memoria)')).toBeTruthy();
+
+    fireEvent.click(rows.find((r) => r.textContent?.includes('Listo.'))!);
+    detail = within(screen.getByLabelText('Detalle del paso'));
+    expect(detail.getByText('agent (agente)')).toBeTruthy();
+    expect(detail.getByText('Auxiliares en curso al empezar')).toBeTruthy();
+    // La extracción (1250→1900) coincide con la espera de m2 (1310→2000).
+    expect(detail.getByText('590 ms')).toBeTruthy();
+  });
+
+  it('una traza anterior al cap dice que no las registraba, en vez de dar cero', () => {
+    render(<TrajectoryPanel trajectory={trajectory(RECORDS)} onClose={() => {}} />);
+    expect(screen.getByText('auxiliares no registradas en esta traza')).toBeTruthy();
+    expect(screen.getByText(/LLM calls: 1/).textContent).toContain('agent 1');
+  });
+});
+
 describe('trayectoria: validación y toggle', () => {
   it('traceRecords descarta lo que no encaja y conserva lo válido', () => {
     const out = traceRecords([
@@ -178,13 +243,15 @@ describe('trayectoria: validación y toggle', () => {
       { t: 'begin', at: 2, id: 'b', kind: 'nope', name: 'm' },
       { t: 'end', at: 3, id: 'a', status: 'weird' },
       { t: 'end', at: 3, id: 'a', status: 'ok' },
-      { t: 'meta', at: 0, v: 1, sessionId: 's' },
+      { t: 'meta', at: 0, v: 1, sessionId: 's', caps: ['runtime', 'llm-origin', 7], cwd: '/x' },
       'basura',
     ]);
     expect(out).toEqual([
       { t: 'turn', at: 1, input: 'hola' },
       { t: 'begin', at: 2, id: 'a', kind: 'model', name: 'm', data: { x: 1 } },
       { t: 'end', at: 3, id: 'a', status: 'ok' },
+      // De la cabecera solo pasa lo que el panel usa: los caps.
+      { t: 'meta', at: 0, v: 1, sessionId: 's', caps: ['runtime', 'llm-origin'] },
     ]);
     expect(traceRecords('no')).toBeNull();
   });
