@@ -7,9 +7,12 @@ import type { ToolDefinition } from './types.js';
 import { buildAssistantPrompt, buildSystemPrompt, type SystemPromptEnv } from './system-prompt.js';
 import { applyTodoToSystemMessage } from './todo.js';
 
-// El prompt se ordena de lo más estable a lo más variable (docs/prompt-caching.md).
-// Estos tests fijan el orden: lo que una caché de prefijo puede reutilizar entre
-// dos sesiones es justo lo que va antes del primer byte que cambia.
+// Lo que una caché de prefijo puede reutilizar es lo que va antes del primer
+// byte que cambia (docs/prompt-caching.md). Estos tests fijan lo que Stratum
+// garantiza: el orden de las tools y dónde va cada bloque del system prompt.
+// El bloque `<env>` sigue donde estaba, justo detrás de las instrucciones base:
+// moverlo al final mejoraba la caché entre sesiones, pero no se pudo descartar
+// que cambiase el comportamiento de un modelo pequeño (prompt-caching-live.md).
 
 const config = StratumConfigSchema.parse({
   ssh: { hosts: { web1: { host: '10.0.0.5', user: 'deploy', password: 'env:X' } } },
@@ -45,9 +48,10 @@ describe('orden del system prompt', () => {
     return index;
   };
 
-  it('va de lo más estable a lo más variable', () => {
+  it('los bloques van en un orden fijo, con <env> detrás de las instrucciones base', () => {
     const order = [
       'You are Stratum, an interactive CLI tool',
+      '<env>',
       '# Shell',
       '# Long-term memory',
       '# Remote hosts (SSH)',
@@ -59,40 +63,39 @@ describe('orden del system prompt', () => {
       '| Profile | Use it when |',
       '# Active agent profile: code',
       '## Project Memory',
-      '<env>',
     ].map(at);
     expect(order).toEqual([...order].sort((a, b) => a - b));
   });
 
-  it('el bloque de entorno es lo último, con todo lo que cambia entre sesiones', () => {
-    const tail = prompt.slice(at('You are powered by the model named'));
-    expect(tail).toContain('Working directory: /work/repo');
-    expect(tail).toContain("Today's date:");
-    expect(tail).toContain('local/qwen3');
-    expect(prompt.trimEnd().endsWith('</env>')).toBe(true);
-    // Nada de lo dinámico aparece antes.
-    const head = prompt.slice(0, at('You are powered by the model named'));
-    expect(head).not.toContain('/work/repo');
-    expect(head).not.toContain('qwen3');
+  it('el bloque de entorno lleva lo que cambia entre sesiones', () => {
+    const block = prompt.slice(at('You are powered by the model named'), at('# Shell'));
+    expect(block).toContain('Working directory: /work/repo');
+    expect(block).toContain("Today's date:");
+    expect(block).toContain('local/qwen3');
+    expect(block.trimEnd().endsWith('</env>')).toBe(true);
   });
 
-  it('otra carpeta, otro modelo u otro día solo cambian la cola del prompt', () => {
+  it('otra carpeta u otro modelo conservan las instrucciones base y nada más', () => {
+    // Lo que se comparte entre dos sesiones acaba donde empieza `<env>`: es el
+    // coste conocido de dejarlo en su sitio.
     const other = buildSystemPrompt(
       config,
       MEMORY,
       env({ cwd: '/work/repo/packages/api', modelId: 'glm-5', providerName: 'hosted' }),
     );
-    const shared = commonPrefix(prompt, other);
-    expect(shared).toBe(
+    expect(commonPrefix(prompt, other)).toBe(
       at('You are powered by the model named') + 'You are powered by the model named '.length,
     );
-    expect(shared / prompt.length).toBeGreaterThan(0.95);
   });
 
-  it('un subagente lleva su marca en el bloque de entorno, al final', () => {
+  it('el mismo entorno da el mismo prompt byte a byte', () => {
+    expect(buildSystemPrompt(config, MEMORY, env())).toBe(prompt);
+  });
+
+  it('un subagente lleva su marca en el bloque de entorno', () => {
     const child = buildSystemPrompt(config, undefined, env({ isSubagent: true }));
-    expect(child.indexOf('Running as: subagent')).toBeGreaterThan(child.indexOf('# Skills'));
-    expect(child.trimEnd().endsWith('finish with a concise summary of what you did.')).toBe(true);
+    expect(child.indexOf('Running as: subagent')).toBeGreaterThanOrEqual(0);
+    expect(child.indexOf('Running as: subagent')).toBeLessThan(child.indexOf('# Shell'));
   });
 
   it('las tareas abiertas se reinyectan detrás de todo: el prompt estable queda intacto', () => {
@@ -104,12 +107,11 @@ describe('orden del system prompt', () => {
     expect(commonPrefix(messages[0]!.content, injected)).toBeGreaterThanOrEqual(prompt.length);
   });
 
-  it('el prompt del asistente también deja modelo y fecha para el final', () => {
+  it('el prompt del asistente lleva su bloque de entorno antes de la memoria', () => {
     const a = buildAssistantPrompt('Prefiero respuestas breves.', { modelId: 'qwen3' });
-    const b = buildAssistantPrompt('Prefiero respuestas breves.', { modelId: 'glm-5' });
-    expect(a.trimEnd().endsWith('</env>')).toBe(true);
-    expect(a.indexOf('## User Memory')).toBeLessThan(a.indexOf('<env>'));
-    expect(commonPrefix(a, b) / a.length).toBeGreaterThan(0.95);
+    expect(a.indexOf('<env>')).toBeGreaterThanOrEqual(0);
+    expect(a.indexOf('<env>')).toBeLessThan(a.indexOf('## User Memory'));
+    expect(buildAssistantPrompt('Prefiero respuestas breves.', { modelId: 'qwen3' })).toBe(a);
   });
 });
 

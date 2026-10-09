@@ -6,8 +6,8 @@ guarda prompts por su cuenta; lo que hace es
 
 1. **medir** cuánto del prompt reutilizó el backend en cada llamada, con los datos que el propio
    backend reporta, y
-2. **ordenar** el prompt de lo más estable a lo más variable para que ese prefijo sea lo más largo
-   posible.
+2. **no romper** ese prefijo sin necesidad: las tools se ofrecen siempre en el mismo orden y con sus
+   schemas serializados igual, y la conversación solo crece por el final.
 
 Todo sale de la traza de sesión (`src/trace/`): no hay almacenamiento ni telemetría aparte.
 
@@ -171,22 +171,32 @@ que ya son deterministas, y reordenarlos cambiaría lo que ve el modelo sin gana
 
 | # | Bloque | Cambia cuando… |
 |---|---|---|
-| 1 | Instrucciones base (`BASE_PROMPT`), `# Shell` | se actualiza Stratum; el shell, por plataforma |
-| 2 | `# Long-term memory`, `# Remote hosts (SSH)`, `# Environments` | se edita `.stratumrc.json` |
-| 3 | `# Read-only mode` | `/readonly`, `--read-only` |
-| 4 | `# Asking the user`, guías (`# Operating guides`) o sus cuerpos (`# Work routing`, `# Testing discipline`) | cambian los perfiles disponibles, `tools.testCommand` o `prompt.guides` |
-| 5 | `# Skills`, `# Agent profiles` (ordenados por nombre), `# Active agent profile` | se añade o edita una skill o un perfil; `/agent` |
-| 6 | `## Project Memory` (`STRATUM.md`) | se edita `STRATUM.md`, `/init` |
-| 7 | `<env>`: modelo, cwd, raíz del workspace, plataforma, fecha, agente o subagente | **otra carpeta, otro día, `/model`, `/provider`** |
-| 8 | Tareas abiertas (`todo`) y ciclo TDD, reinyectados por el loop | cada vez que el agente actualiza su lista |
+| 1 | Instrucciones base (`BASE_PROMPT`) | se actualiza Stratum |
+| 2 | `<env>`: modelo, cwd, raíz del workspace, plataforma, fecha, agente o subagente | **otra carpeta, otro día, `/model`, `/provider`** |
+| 3 | `# Shell` | por plataforma |
+| 4 | `# Long-term memory`, `# Remote hosts (SSH)`, `# Environments` | se edita `.stratumrc.json` |
+| 5 | `# Read-only mode` | `/readonly`, `--read-only` |
+| 6 | `# Asking the user`, guías (`# Operating guides`) o sus cuerpos (`# Work routing`, `# Testing discipline`) | cambian los perfiles disponibles, `tools.testCommand` o `prompt.guides` |
+| 7 | `# Skills`, `# Agent profiles` (ordenados por nombre), `# Active agent profile` | se añade o edita una skill o un perfil; `/agent` |
+| 8 | `## Project Memory` (`STRATUM.md`) | se edita `STRATUM.md`, `/init` |
+| 9 | Tareas abiertas (`todo`) y ciclo TDD, reinyectados por el loop | cada vez que el agente actualiza su lista |
 
-El bloque `<env>` iba el segundo, justo detrás de las instrucciones base: dos sesiones del mismo
-proyecto lanzadas desde carpetas distintas, o en días distintos, solo compartían ese primer bloque.
-Ahora es lo último antes de lo que cambia durante el turno. El prompt del asistente de Desktop
-(`buildAssistantPrompt`) sigue el mismo criterio: modelo y fecha al final.
+Dentro de una sesión el system prompt no cambia salvo por el último bloque, así que la conversación
+se reutiliza entera de una llamada a la siguiente. **Entre** sesiones, en cambio, el bloque `<env>`
+va el segundo: dos sesiones del mismo proyecto lanzadas desde otra carpeta, otro día o con otro
+modelo solo comparten las tools y las instrucciones base.
 
-**Un bloque nuevo se coloca por lo a menudo que cambia, no por tema.** El orden lo fija
-`src/agent/prompt-cache-order.test.ts`.
+**`<env>` se queda donde está, a sabiendas.** Se probó a llevarlo al final del system prompt, que es
+donde le corresponde por lo a menudo que cambia, y la caché mejoraba (ver
+[Resultados medidos](#resultados-medidos)). Se devolvió a su sitio porque en la validación contra un
+modelo local pequeño la variante con `<env>` al final dio menos respuestas finales correctas que
+`main` (48 de 60 frente a 54 de 60; ver [`prompt-caching-live.md`](prompt-caching-live.md)). La
+diferencia no es estadísticamente concluyente, pero la calidad funcional va antes que unos puntos de
+acierto de caché: una optimización de caché que puede cambiar el comportamiento de un modelo no se
+queda sin evidencia clara de beneficio neto. Si se retoma, hace falta un A/B con más muestra y más
+de un modelo.
+
+El orden lo fija `src/agent/prompt-cache-order.test.ts`.
 
 ### 3. Conversación
 
@@ -201,8 +211,8 @@ De mayor a menor alcance. «Se pierde» es lo que el backend tiene que volver a 
 |---|---|---|
 | Provider o modelo | Todo: es otra caché | `/model`, `/provider`, fallback automático |
 | Lista de tools | Todo lo que va detrás de la primera tool distinta: system y conversación | Un server MCP conecta tarde o anuncia un catálogo nuevo; una tool se deshabilita al agotar reintentos; cambio de modo (plan ↔ execute), de perfil de agente o de sesión, `/readonly` |
-| Bloques 1–6 del system prompt | Desde ese bloque: el resto del system y la conversación | Editar config, skills, perfiles o `STRATUM.md`; `/agent`, `/readonly`, `/init` |
-| `<env>` | El bloque y la conversación | Otra carpeta, otro día, `/model` |
+| Bloques 1–8 del system prompt | Desde ese bloque: el resto del system y la conversación | Editar config, skills, perfiles o `STRATUM.md`; `/agent`, `/readonly`, `/init` |
+| `<env>` (bloque 2) | Casi todo el system prompt y la conversación; se conservan las tools y las instrucciones base | Otra carpeta, otro día, `/model` |
 | Tareas abiertas / ciclo TDD | **La conversación entera** | Cada llamada a `todo` o `test_evidence` que cambie el estado |
 | Compresión de contexto | La conversación a partir del resumen | Al superar el umbral, `/compact` |
 | Nada (solo crece) | Nada | El caso normal |
@@ -281,7 +291,7 @@ escenario de eval, como el resto.
 
 | Escenario | Qué comprueba |
 |---|---|
-| `cache-repeated-system-prefix` | Dos sesiones del mismo proyecto desde carpetas distintas: la primera llamada de la segunda es templada y reutiliza todo lo anterior a `<env>`. |
+| `cache-repeated-system-prefix` | Dos sesiones del mismo proyecto desde carpetas distintas: la primera llamada de la segunda es templada y reutiliza lo anterior a `<env>` (las tools y las instrucciones base). |
 | `cache-growing-multi-turn-context` | Tres turnos en una sesión (`followUps`): una sola llamada fría y ninguna rotura entre turnos. |
 | `cache-tool-loop-prefix` | Seis llamadas en un turno agéntico: el prompt anterior es prefijo exacto del siguiente. |
 | `cache-stable-toolset-order` | Un server MCP anuncia sus tools en otro orden en su segundo arranque: la segunda sesión reutiliza igual. |
@@ -301,17 +311,21 @@ Cada uno distingue la primera llamada fría de las templadas con `coldCalls` y `
 
 ## Resultados medidos
 
-Las dos optimizaciones se midieron por separado con `stratum eval run --mock` antes de quedarse,
-contra un baseline tomado con la observabilidad ya puesta y el prompt sin tocar:
+Cada cambio de prompt se midió por separado con `stratum eval run --mock`, contra un baseline tomado
+con la observabilidad ya puesta y el prompt sin tocar:
 
-| Cambio | Escenario | Acierto de caché | Tokens sin caché |
-|---|---|---|---|
-| Orden canónico de las tools | `cache-stable-toolset-order` | 61,9 % → 74,3 % | 11,8 K → 7,9 K (−33 %) |
-| Bloque `<env>` al final | `cache-repeated-system-prefix` | 70,2 % → 74,1 % | la primera llamada de la segunda sesión pasa a reutilizar el 98,5 % de su prompt |
+| Cambio | Escenario | Acierto de caché | Tokens sin caché | Estado |
+|---|---|---|---|---|
+| Orden canónico de las tools | `cache-stable-toolset-order` | 61,9 % → 74,3 % | 11,8 K → 7,9 K (−33 %) | **se queda** |
+| Bloque `<env>` al final | `cache-repeated-system-prefix` | 70,2 % → 74,1 % | 9,0 K → 7,8 K | **revertido** |
 
-Los otros 40 escenarios no cambian: 37/37 PASS antes y después, y las mismas llamadas, tokens y
-errores. Contra un backend real (`glm5.3-flash`), la segunda sesión de
-`cache-repeated-system-prefix` reutilizó 6 784 de 6 943 tokens en su primera llamada.
+El resto de escenarios no cambia con ninguno de los dos: mismos PASS, llamadas, tokens y errores.
+
+El segundo se revirtió tras la validación live (ver [el system prompt](#2-system-prompt)): con
+`<env>` de vuelta en su sitio, `cache-repeated-system-prefix` vuelve al 70,2 % y es el único
+escenario cuyas métricas de caché se mueven. Con `<env>` al final, contra backends reales, la primera
+llamada de una segunda sesión reutilizó 6 784 de 6 943 tokens (`glm5.3-flash`) y 7 381 de 7 385
+(llama.cpp); ese es el beneficio al que se renuncia.
 
 Lo que se probó y **no** se ha cambiado, porque no daba una mejora medible o porque tocaba el
 comportamiento:
@@ -322,6 +336,36 @@ comportamiento:
 - Mover `# Read-only mode` o el perfil activo a la cola dinámica: solo se notaría al conmutarlos a
   mitad de sesión, y ahí la conversación se pierde igual porque va detrás del system prompt.
 - Sacar las tareas abiertas del system prompt (ver arriba).
+
+## Siguiente trabajo
+
+Nada de esto está implementado.
+
+### Trace auxiliary LLM calls
+
+La extracción automática de memoria y la compresión de contexto llaman al modelo fuera del loop, y
+hoy no aparecen como llamadas de modelo en la traza ni en `/auditor`. En la prueba contra llama.cpp
+el servidor recibió 22 peticiones para 14 llamadas trazadas y, con un solo slot, el TTFT templado
+pasó de unos 277 ms a unos 7,3 s sin que cambiase el acierto de caché: lo que se medía como «primer
+token lento» era cola detrás de trabajo auxiliar, no procesado de prompt.
+
+La siguiente fase debería atribuir en la traza cada llamada al modelo a su **origen**:
+
+- `agent`
+- `memory-extraction`
+- `context-compression`
+- `subagent`
+
+con provider y modelo, inicio y fin, TTFT, `usage` y uso de caché, para poder separar el tiempo de
+*prefill* del tiempo de cola que provoca el trabajo auxiliar. Con eso `cacheSummary`, `stratum stats`
+y `eval` podrían dar el TTFT por origen y el coste real de la extracción y de la compresión, y las
+roturas de caché que provoca una llamada auxiliar en un servidor de un solo slot dejarían de
+atribuirse al `backend`.
+
+### Estrategia de cache key
+
+Ver [Capacidades por provider](#capacidades-por-provider): `prompt_cache_key` es hoy siempre el id
+de sesión; `session | prompt | none` queda pendiente de una medida contra un backend que lo use.
 
 ## Limitaciones
 

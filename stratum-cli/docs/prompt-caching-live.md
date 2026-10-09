@@ -1,7 +1,9 @@
 # Caché de prompt: validación contra un backend real
 
-Cifras observadas el 2026-10-08 en la rama `feat/prompt-cache-observability`. Son de **una máquina
-y un modelo**: sirven para comprobar que lo que mide Stratum coincide con lo que hace el backend, no
+Cifras observadas el 2026-10-08 en la rama `feat/prompt-cache-observability`, en el commit
+`64aec3e1b`, que llevaba el bloque `<env>` **al final** del system prompt. A raíz de esta validación
+ese bloque volvió a su posición original (ver «Decisión» al final); todo lo demás que se midió aquí
+sigue igual. Son de **una máquina y un modelo**: sirven para comprobar que lo que mide Stratum coincide con lo que hace el backend, no
 como referencia de rendimiento. Ningún test depende de ellas; la referencia determinista siguen
 siendo los escenarios con guion (`stratum eval run --mock`).
 
@@ -54,7 +56,8 @@ Qué se comprueba:
   cachedReadTokens` es exactamente el número de tokens que el log de llama.cpp dice haber procesado.
 - **Fría y templada salen del dato, no de la posición.** La primera llamada de la segunda sesión es
   templada (7 381 de 7 385): el prompt del sistema y las tools del proceso anterior seguían en el
-  slot. Es la reutilización entre sesiones que busca el orden del prompt, medida en un backend real.
+  slot. Con `<env>` de vuelta en su sitio esa llamada sigue siendo templada, pero solo reutiliza las
+  tools y las instrucciones base (lo que va antes de `<env>`).
 - **TTFT.** El primer token tarda unas quince veces menos con la caché templada.
 - **Sin regresiones funcionales.** Los ocho turnos acabaron en `stop` con la respuesta correcta
   (`4500`, `OPS-7731`, `v2.4.1` y el resumen), 6 llamadas a tools y 0 errores.
@@ -98,6 +101,18 @@ marca como rotura con causa `compression`.
   bloque `<env>` al final del prompt del sistema —lo único que cambia en el prompt entre las dos—
   influya en un modelo pequeño. Las llamadas a tools fueron equivalentes en las dos (mismas rutas,
   0 errores).
+
+## Decisión
+
+El bloque `<env>` se devolvió a la posición que tiene en `main`, justo detrás de las instrucciones
+base. El A/B no demuestra que moverlo empeore las respuestas, pero tampoco lo descarta, y el
+beneficio (unos 4 puntos de acierto en `cache-repeated-system-prefix` con guion, y una primera
+llamada casi entera de caché en la segunda sesión) no compensa el riesgo de cambiar el
+comportamiento de un modelo pequeño. El resto del trabajo —medición, orden y schemas canónicos de
+las tools, detector de roturas— no toca el texto que ve el modelo y se mantiene.
+
+Queda como siguiente trabajo trazar las llamadas auxiliares al modelo (extracción de memoria y
+compresión) por origen: ver «Siguiente trabajo» en [`prompt-caching.md`](prompt-caching.md).
 
 ## Cómo repetirlo
 

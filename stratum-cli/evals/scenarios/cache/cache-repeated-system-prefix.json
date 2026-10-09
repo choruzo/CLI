@@ -1,8 +1,8 @@
 {
   "id": "cache-repeated-system-prefix",
   "group": "cache",
-  "title": "Dos sesiones desde carpetas distintas comparten el prefijo estable del prompt",
-  "description": "La segunda sesión arranca en una subcarpeta del mismo proyecto: cambian el cwd y la raíz del workspace, que son entorno dinámico. Todo lo que el prompt lleva antes de ese bloque (instrucciones, tools, reglas) debe salir de la caché que dejó la primera.",
+  "title": "Dos sesiones desde carpetas distintas comparten las tools y el inicio del prompt",
+  "description": "La segunda sesión arranca en una subcarpeta del mismo proyecto: cambian el cwd y la raíz del workspace, que son entorno dinámico. Lo que la petición lleva antes de ese bloque (las definiciones de tools y las instrucciones base) debe salir de la caché que dejó la primera: su primera llamada es templada, no fría.",
   "difficulty": "basic",
   "setup": {
     "files": {
@@ -82,7 +82,7 @@
         "type": "metric",
         "metric": "cacheHitRate",
         "mode": "mock",
-        "min": 0.725
+        "min": 0.68
       }
     ]
   }

@@ -453,26 +453,6 @@ The user selected this profile for the session. Follow these instructions on top
 ${fragment.trim()}`;
 }
 
-/**
- * Ensambla el system prompt **de lo más estable a lo más variable**, porque la
- * caché de prompt de un backend solo reutiliza un prefijo: en cuanto un byte
- * cambia, todo lo que viene detrás se procesa de nuevo. El orden es:
- *
- *  1. instrucciones base (constantes del código) y shell (por plataforma);
- *  2. reglas que salen de la config: memoria de largo plazo, hosts SSH,
- *     entornos; `# Read-only mode` si la sesión lo es;
- *  3. disciplina de trabajo: `# Asking the user`, guías o sus cuerpos inline;
- *  4. índices descubiertos en disco: skills y perfiles (ya ordenados por
- *     nombre) y el perfil activo;
- *  5. memoria del proyecto (`STRATUM.md`);
- *  6. el bloque `<env>`: modelo, cwd, raíz del workspace, fecha. Es lo único
- *     que cambia entre dos sesiones del mismo proyecto (otra carpeta, otro día,
- *     `/model`), y por eso va lo último: movido arriba invalidaba todo lo demás.
- *
- * Detrás solo quedan los bloques que el loop reinyecta en cada iteración (tareas
- * abiertas, ciclo TDD), que cambian durante el turno. Un bloque nuevo se coloca
- * por lo a menudo que cambia, no por tema; ver `docs/prompt-caching.md`.
- */
 export function buildSystemPrompt(
   config: StratumConfig,
   memory?: string,
@@ -481,6 +461,7 @@ export function buildSystemPrompt(
   if (env?.preset === 'assistant') return buildAssistantPrompt(memory, env);
   let prompt = BASE_PROMPT;
 
+  prompt += `\n\n${buildEnvBlock(env ?? {})}`;
   prompt += `\n\n# Shell\n${getShellInstructions()}`;
   prompt += `\n\n# Long-term memory
 You have two tools backed by long-term memory that persists across sessions:
@@ -554,9 +535,6 @@ ${testing}`;
   if (memory && memory.trim()) {
     prompt += `\n\n## Project Memory\nThe following is persistent context for this project (from STRATUM.md). Honor these instructions and conventions:\n\n${memory.trim()}`;
   }
-
-  // Lo último: es lo único que cambia de una sesión a otra del mismo proyecto.
-  prompt += `\n\n${buildEnvBlock(env ?? {})}`;
 
   return prompt;
 }
@@ -671,6 +649,7 @@ function buildAssistantEnvBlock(env: SystemPromptEnv): string {
  */
 export function buildAssistantPrompt(memory: string | undefined, env: SystemPromptEnv): string {
   let prompt = env.workspace ? assistantBaseWithWorkspace() : ASSISTANT_BASE_PROMPT;
+  prompt += `\n\n${buildAssistantEnvBlock(env)}`;
   if (env.workspace) {
     prompt += `\n\n${ASSISTANT_WORKSPACE_BLOCK}`;
     if (env.workspaceFilesExpiredAt) {
@@ -685,7 +664,5 @@ You have two tools backed by a long-term memory that persists across conversatio
   if (memory && memory.trim()) {
     prompt += `\n\n## User Memory\nThe following is persistent context the user wrote for you (from their global STRATUM.md). Honor these instructions and preferences:\n\n${memory.trim()}`;
   }
-  // Modelo y fecha al final, como en `buildSystemPrompt`: es lo que cambia.
-  prompt += `\n\n${buildAssistantEnvBlock(env)}`;
   return prompt;
 }
