@@ -1,0 +1,118 @@
+{
+  "id": "subagent-does-not-steal-main-steering",
+  "group": "steering",
+  "title": "Un subagente activo no consume el steering dirigido al principal",
+  "description": "El principal delega una tarea. Con el subagente trabajando, el usuario escribe. El subagente no ve el mensaje ni ve vetada su tool; lo recibe el principal, junto al resultado de la delegacion.",
+  "difficulty": "adversarial",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "wait.js": "const name = process.argv[2] || 'wait';\nconst ms = Number(process.argv[3] || 2500);\nsetTimeout(() => {\n  require('fs').writeFileSync(name + '.txt', 'ok');\n  console.log(name + ' finished');\n}, ms);\n"
+    }
+  },
+  "input": "Delega en un subagente (delegate_task) que ejecute `node wait.js child 2000` y te diga el resultado.",
+  "steering": [
+    {
+      "on": "tool_call_ready",
+      "in": "subagent",
+      "text": "no toques OAuth"
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "delegate_task",
+          "args": {
+            "task": "Run `node wait.js child 2000` and report what it prints."
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node wait.js child 2000"
+          }
+        }
+      ]
+    },
+    {
+      "text": "The command printed: child finished."
+    },
+    {
+      "text": "El subagente lo ejecuto: \"child finished\". Y anotado: no toco OAuth."
+    }
+  ],
+  "expect": {
+    "description": "Solo el principal consume el mensaje, y la tool del subagente se ejecuta con normalidad.",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "child.txt",
+        "label": "la tool del subagente se ejecuto"
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "no toques OAuth",
+        "negate": true,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 3,
+        "value": "no toques OAuth",
+        "negate": true,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 4,
+        "value": "1. User: no toques OAuth",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "inbox",
+        "detail": "consume:user-message",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolBatchesInvalidatedBySteering",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "subagents",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 4,
+        "mode": "mock"
+      }
+    ]
+  }
+}

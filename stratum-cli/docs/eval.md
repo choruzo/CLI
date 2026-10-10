@@ -95,7 +95,7 @@ desconocidas se rechazan.
 | Campo | Qué es |
 |---|---|
 | `id` | Minúsculas, dígitos y guiones. Único. |
-| `group` | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` |
+| `group` | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` |
 | `difficulty` | `basic` (por defecto) · `intermediate` · `adversarial`. Ver [Niveles de dificultad](#niveles-de-dificultad). |
 | `requires` | Si no se cumple, el escenario queda en **SKIP** (no cuenta como fallo): `platform` y ejecutables en el PATH. |
 | `setup.files` | Ficheros de partida, ruta relativa → contenido. No pueden salir del workspace. |
@@ -105,6 +105,7 @@ desconocidas se rechazan.
 | `input` | **Entrada**: la tarea, tal cual se le pasa a `stratum run`. |
 | `followUps` | Turnos siguientes en la **misma sesión**: se lanzan con `stratum run … --then …`, uno tras otro. Un turno que no acaba en `stop` corta la cadena. |
 | `sessions` | Sesiones posteriores: `[{ input, cwd? }]`. Cada una es otro `stratum run` (otro proceso, otra traza) en el mismo workspace y contra el mismo modelo; `cwd` la lanza desde una subcarpeta. Las métricas salen de todas las trazas, y `traces` en el resultado las lista. |
+| `steering` | Lo que el usuario hace **mientras el agente trabaja** en la primera sesión: `[{ on, tool?, in?, nth?, delayMs?, text \| cancel }]`. Ver [Steering](#steering-steering). |
 | `run.args` | Flags de `stratum run`: `--plan`, `--yes`, `--allow-destructive`, `--deny-destructive`, `--read-only`, `--infra`, `--code`, `--profile <p>`, `--agent <p>`, `--delegate <p>`. |
 | `run.timeoutMs` | Límite del proceso (180 s). Superarlo es FAIL. |
 | `script` | Guion para `--mock`. Sin él, el escenario solo corre en live. |
@@ -150,9 +151,10 @@ trayectoria es el guion y sí hay que comprobarla. `stratum eval list` avisa de 
 | `command` | `run` (argv), `exitCode` (0), `stdoutContains` | el comando, lanzado en el workspace, sale con ese código |
 | `tool_called` | `tool`, `input` (regex sobre el JSON de argumentos), `status` (`any`·`ok`·`error`·`executed`), `min` (1), `max` | el nº de llamadas en la traza está en el rango |
 | `tool_output_contains` | `value`, `tool`, `negate` | la salida de alguna tool —lo que llegó al modelo— contiene (o no) el texto. Con `negate`, comprueba que un secreto no se filtró por ninguna vía |
+| `request_contains` | `request` (desde 1; negativo desde el final), `value`, `role`, `negate` | los mensajes de **esa** petición al modelo de guion contienen (o no) el texto. Es lo que demuestra qué había en el contexto en una llamada exacta. Solo con guion: va con `mode: "mock"` |
 | `host_received` | `host`, `pattern`, `min` (1), `max` | el host SSH simulado recibió comandos que casan. Es el **efecto** sobre el servidor, no la trayectoria: vale en los dos modos |
 | `metric` | `metric`, `min` / `max` / `equals` | la métrica de la traza está en la cota |
-| `runtime_event` | `event` (`veto`·`confirmation`·`retry`·`job`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto, `decision` de la confirmación o, en un `job`, su fase —`started`, `read`, `cancel`, `notified`— o fase y resultado: `ended:failed`, `ended:session-closed`) |
+| `runtime_event` | `event` (`veto`·`confirmation`·`retry`·`job`·`inbox`), `tool`, `detail`, `min` (1), `max` | el runtime registró esos eventos (`detail` = `source` del veto, `decision` de la confirmación o, en un `job`, su fase —`started`, `read`, `cancel`, `notified`— o fase y resultado: `ended:failed`, `ended:session-closed`; en `inbox`, su fase —`enqueue`, `consume`, `drop`— o fase y tipo: `consume:user-message`, `consume:job-failed`) |
 | `processes_gone` | `pidFile` | los procesos cuyos pids dejó el escenario en ese fichero (un JSON: número, lista u objeto de números) ya no existen. Distingue «el job figura como cancelado» de «su árbol murió de verdad»; vale en los dos modos |
 | `cache_break` | `cause` (`tools`·`system`·`history`·`compression`·`model`·`backend`·`unknown`), `min` (1), `max` | la traza tiene ese número de roturas de caché, de esa causa si se indica |
 | `llm_call` | `origin` (`agent`·`subagent`·`memory-extraction`·`context-compression`·`session-summary`), `status` (`any`·`ok`·`error`·`cancelled`), `min` (1), `max` | la traza tiene ese número de llamadas al modelo de ese origen. Exigir una (`min` > 0) es trayectoria: va con `mode: "mock"` |
@@ -166,8 +168,32 @@ Métricas acotables: `tokens`, `durationMs`, `llmCalls`, `llmErrors`, `toolCalls
 `compressionCalls`, `auxiliaryLlmErrors`, `auxiliaryPromptTokens`, `auxiliaryCompletionTokens`,
 `auxiliaryCachedReadTokens`, `auxiliaryCacheHitRate`; y las de jobs en segundo plano:
 `foregroundExecCalls`, `backgroundExecCalls`, `jobsStarted`, `jobsCompleted`, `jobsFailed`,
-`jobsCancelled`, `jobsOutputRead`, `jobNotifications`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
+`jobsCancelled`, `jobsOutputRead`, `jobNotifications`; y las de la Runtime Inbox:
+`runtimeUpdatesReceived`, `runtimeUpdatesConsumed`, `userSteeringMessages`, `steeringBatches`,
+`toolBatchesInvalidatedBySteering`. Una métrica que la traza no trae (el backend no reporta caché) **incumple** el
 criterio: no se da por buena.
+
+### Steering (`steering`)
+
+Reproduce, de forma determinista, lo que un usuario hace en el chat con el agente trabajando. Cada
+acción espera un evento del turno y entonces envía un mensaje (`text`) o cancela (`cancel: true`,
+lo que hace Ctrl+C). El runner se lo pasa a `stratum run` por la variable `STRATUM_STEER_SCRIPT`
+(`cli/steer-script.ts`); no es una opción de usuario.
+
+| Campo | Qué es |
+|---|---|
+| `on` | `tool_call_ready` · `tool_result` · `text_delta` · `subagent_started` · `job_started` · `job_ended` |
+| `tool` | Con `tool_call_ready` / `tool_result`: solo los de esa tool. |
+| `in` | `main` (por defecto) o `subagent`: el evento es de un subagente. |
+| `nth` | Cuál de las apariciones dispara (1). |
+| `delayMs` | Espera tras el evento (0). |
+| `text` / `cancel` | Uno de los dos. |
+
+El disparo es síncrono con el evento, y de ahí sale dónde cae el mensaje: sobre un
+`tool_call_ready` **sin** `delayMs` llega antes de que esa llamada se despache (el lote no se
+ejecuta); **con** `delayMs`, mientras la tool corre; sobre un `text_delta`, mientras el modelo
+escribe su respuesta. Un escenario con `steering` ata la trayectoria: sus criterios sobre lo que
+vio el modelo van con `mode: "mock"`.
 
 ### Acciones inseguras (`expect.forbidden`)
 
@@ -350,6 +376,21 @@ ve la cola del servidor, pero sí cuándo empezó y acabó cada petición:
 Son relojes del cliente: dicen que dos peticiones estaban en vuelo a la vez, **no** cuánto esperó
 una en la cola del servidor. Eso no se mide ni se deduce.
 
+**Runtime Inbox.** Lo que llegó con el agente trabajando (§12.20 de la definición). Opcionales y
+`null` en una traza sin el cap `inbox`:
+
+| Métrica | Definición |
+|---|---|
+| `runtimeUpdatesReceived` | Eventos que entraron en la inbox: mensajes del usuario y finales de job. |
+| `runtimeUpdatesConsumed` | Eventos que un punto seguro entregó al modelo. |
+| `userSteeringMessages` | Mensajes del usuario enviados con un turno en curso. |
+| `steeringBatches` | Entregas con al menos un mensaje del usuario; varios juntos cuentan una. |
+| `steeringLatencyMs` | Media de lo que esperó un mensaje en la cola hasta entregarse. |
+| `toolBatchesInvalidatedBySteering` | Lotes de tool calls que no se ejecutaron porque el usuario escribió antes del dispatch. |
+
+Son informativas: `compare` no las juzga. Una llamada que el steering dejó sin ejecutar no es un
+error de la tool ni un bloqueo de política: no entra en `toolErrors` ni en `policyBlocks`.
+
 **Acciones repetidas.** Solo se cuenta lo que se puede afirmar sin adivinar: la misma tool con los
 mismos argumentos que una llamada anterior del mismo agente y turno, **sin que entre las dos se haya
 ejecutado nada que cambie el estado**. Releer un fichero tras editarlo no cuenta; leerlo dos veces
@@ -432,9 +473,10 @@ modos distintos, no compara el coste).
 ### Baselines de referencia del repositorio
 
 `evals/baselines/` guarda la referencia con la que se valida cada cambio de Stratum (no va en el
-paquete de npm): `mock.json` (guion, 49/49) y `live-glm.json` (`glm5.3-flash` por nan, 49/49), los
+paquete de npm): `mock.json` (guion, 56/56) y `live-glm.json` (`glm5.3-flash` por nan, 49/49), los
 dos en Windows, con los 5 de `linux` en SKIP y sobre el commit que consta en cada fichero. Los dos
-incluyen ya los grupos `cache`, `auxiliary` y `jobs`. Una ruta vale como referencia, así que no hace falta
+incluyen los grupos `cache`, `auxiliary` y `jobs`; el grupo `steering` solo está en `mock.json`
+(contra `live-glm.json` sus 7 escenarios salen como «nuevos»). Una ruta vale como referencia, así que no hace falta
 importarlos:
 
 ```bash
@@ -739,6 +781,17 @@ Para las llamadas auxiliares:
   dentro de un subagente lleva su `parent`. De su prompt solo se guardan recuentos y huellas —es
   un derivado del historial, que ya está en la traza—; su salida, redactada como cualquier otra.
   No llevan `iteration`.
+
+Para la Runtime Inbox:
+
+- `TraceRuntimeEvent` `inbox`, con `meta.caps: ['inbox']`: `enqueue` (llegó un mensaje del usuario
+  o terminó un job), `consume` (un punto seguro lo entregó; `waitMs` en la cola y `batch` = cuántos
+  iban juntos) y `drop`. De un mensaje del usuario se guarda `id`, `scope` y `chars`, **nunca el
+  texto**: el contenido queda en el historial y la traza no lo duplica.
+- `veto` con `source: 'steering'`: una tool call que no se ejecutó porque el usuario escribió antes
+  del dispatch.
+- Un `user` que solo lleva un bloque `<runtime_updates>` se registra como paso `context` con su
+  tamaño, sin contenido.
 
 ## Escribir un escenario nuevo
 

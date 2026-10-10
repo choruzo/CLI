@@ -122,6 +122,22 @@ async function cancelAndExit() {
       assert.doesNotMatch(t.screen(), /once doce/);
     });
 
+    await check('steering: un mensaje a mitad de turno se encola y el turno sigue', t, async () => {
+      const before = mock.requests.length;
+      await t.submit('responde lento otra vez');
+      await t.waitFor(/type to steer it/);
+      await t.waitFor(/dos tres/);
+      await t.submit('no toques OAuth');
+      await t.waitFor(/queued as steering/);
+      await t.waitFor(/1 steering update pending/);
+      // No se canceló nada: la respuesta en curso termina y el modelo recibe el
+      // mensaje en una segunda llamada del mismo turno.
+      await t.waitFor(/agent received 1 user update/, 15000);
+      await t.waitFor(/Type a message or \/ for commands/, 20000);
+      assert.equal(mock.requests.length, before + 2);
+      assert.doesNotMatch(t.screen(), /steering update pending/);
+    });
+
     await check('/help se resuelve en local, sin llamar al modelo', t, async () => {
       const before = mock.requests.length;
       await t.submit('/help');

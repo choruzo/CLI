@@ -38,6 +38,7 @@ import { JobManager } from '../jobs/manager.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
+import { RuntimeInbox, formatUndeliveredUserMessages, type UserMessageEvent } from './inbox.js';
 import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
@@ -157,6 +158,12 @@ export class StratumAgent {
    * en el preset `assistant` (Desktop no ofrece `exec`).
    */
   readonly jobs: JobManager | undefined;
+  /**
+   * Runtime Inbox de la sesión: lo que llega mientras el agente trabaja
+   * (mensajes del usuario, finales de job). De sesión, como los jobs; la UI se
+   * suscribe aquí para pintar lo pendiente.
+   */
+  readonly inbox = new RuntimeInbox();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
   /**
@@ -206,6 +213,7 @@ export class StratumAgent {
     this.preset = options?.promptPreset ?? 'coding';
     this.jobs =
       this.preset === 'coding' && config.tools.jobs.enabled ? new JobManager(config) : undefined;
+    if (this.jobs) this.inbox.attachJobs(this.jobs);
     this.workspace = options?.workspace;
     this.workspaceFilesExpiredAt = options?.workspaceFilesExpiredAt;
     this._readOnly = options?.readOnly === true;
@@ -288,7 +296,32 @@ export class StratumAgent {
     }
   }
 
+  /**
+   * Mensaje del usuario con un turno en curso (*steering*). No cancela nada ni
+   * llama al modelo: queda en la Runtime Inbox y el loop lo incorpora en su
+   * siguiente punto seguro. Devuelve `null` si no hay turno que pueda
+   * incorporarlo —no hay ninguno, o ya ha dado su respuesta por terminada—: no
+   * se ha guardado nada y quien llama abre un turno nuevo con `run()`.
+   *
+   * Cancelar es otro camino: el `AbortSignal` del turno. Aquí no se interpreta
+   * el texto.
+   */
+  enqueueUserMessage(text: string): UserMessageEvent | null {
+    return this.inbox.enqueueUserMessage(text);
+  }
+
+  /** ¿Hay un turno que incorporaría ahora un mensaje del usuario como steering? */
+  get acceptsSteering(): boolean {
+    return this.inbox.acceptsSteering;
+  }
+
   async *run(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
+    // Steering que el turno anterior no llegó a entregar (se canceló o se
+    // cortó): va delante de la petición nueva, que es su sitio en el tiempo.
+    const undelivered = this.inbox.takeUndeliveredUserMessages(opts?.trace);
+    if (undelivered.length > 0) {
+      pushUserInput(this.messages, formatUndeliveredUserMessages(undelivered));
+    }
     pushUserInput(this.messages, input);
 
     // Hito 6: reiniciar el estado de fallback en cada turno para que el provider
@@ -301,6 +334,7 @@ export class StratumAgent {
     const tracker = this.targetTracker();
     const trace = opts?.trace;
     trace?.turnStart(input, this.messages);
+    this.inbox.beginTurn(trace);
     try {
       for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
         if (event.type === 'tool_result') this._toolCallCount++;
@@ -314,6 +348,10 @@ export class StratumAgent {
       // §12.12: un turno cancelado o abandonado a mitad no puede dejar tool
       // calls sin respuesta: el siguiente request al provider fallaría.
       closeDanglingToolCalls(this.messages);
+      // Desde aquí un mensaje del usuario ya no es steering de este turno. Lo
+      // que quedara sin entregar (turno cancelado o cortado) sigue en la inbox
+      // y abre el turno siguiente.
+      this.inbox.endTurn();
       trace?.turnEnd(stopReason);
     }
     // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
@@ -402,6 +440,7 @@ export class StratumAgent {
     this.contextManager?.forgetLastUsage();
     this._toolCallCount = 0;
     this._planRef = null;
+    this.inbox.clearUserMessages();
     this.todos.clear();
     this.tdd.clear();
   }
@@ -417,6 +456,7 @@ export class StratumAgent {
     readOnly?: boolean,
   ): string | null {
     this.messages = [...messages];
+    this.inbox.clearUserMessages();
     this.contextManager?.forgetLastUsage();
     this._toolCallCount = 0;
     this._planRef = null;
@@ -834,7 +874,7 @@ export class StratumAgent {
   /** Las opciones de la sesión (read-only) sobre las del turno. Nunca relajan. */
   private withSessionOptions(opts?: RunOptions): RunOptions {
     const base: RunOptions = this._readOnly ? { ...opts, readOnly: true } : (opts ?? {});
-    return this.jobs ? { ...base, jobs: this.jobs } : base;
+    return { ...base, inbox: this.inbox, ...(this.jobs ? { jobs: this.jobs } : {}) };
   }
 
   /**

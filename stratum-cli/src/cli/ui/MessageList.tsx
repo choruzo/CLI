@@ -32,7 +32,7 @@ function renderItem(
   liveActionLimit?: number,
 ) {
   if (item.kind === 'user') {
-    return <UserMessage key={key} text={item.text} />;
+    return <UserMessage key={key} text={item.text} note={item.note} />;
   }
   return (
     <AgentMessage

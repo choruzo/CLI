@@ -1,0 +1,136 @@
+{
+  "id": "job-and-user-update",
+  "group": "steering",
+  "title": "El final de un job y un mensaje del usuario llegan en el mismo lote",
+  "description": "El agente lanza los tests en segundo plano y sigue con otra tool. El job falla y, en ese momento, el usuario escribe. La siguiente peticion lleva las dos cosas juntas, en el orden en que ocurrieron, y ninguna fuerza una llamada propia.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "wait.js": "const name = process.argv[2] || 'wait';\nconst ms = Number(process.argv[3] || 2500);\nsetTimeout(() => {\n  require('fs').writeFileSync(name + '.txt', 'ok');\n  console.log(name + ' finished');\n}, ms);\n",
+      "fail.js": "setTimeout(() => {\n  console.log('1 test failed');\n  process.exit(1);\n}, 1500);\n"
+    }
+  },
+  "input": "Lanza `node fail.js` en segundo plano y, mientras, ejecuta `node wait.js build 5000`. Luego dime como ha ido todo.",
+  "steering": [
+    {
+      "on": "job_ended",
+      "text": "no toques OAuth"
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node fail.js",
+            "background": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node wait.js build 5000"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El build termino bien, pero el job #1 (los tests) fallo con exit 1. No toco OAuth."
+    }
+  ],
+  "expect": {
+    "description": "Un unico bloque de avisos con el job fallido y el mensaje del usuario.",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "build.txt"
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "request_contains",
+        "request": 3,
+        "value": "1. Background job #1",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 3,
+        "value": "failed (exit 1)",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 3,
+        "value": "2. User: no toques OAuth",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "no toques OAuth",
+        "negate": true,
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "inbox",
+        "detail": "consume:job-failed",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "inbox",
+        "detail": "consume:user-message",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "runtimeUpdatesConsumed",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "steeringBatches",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobNotifications",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "jobsFailed",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 3,
+        "mode": "mock"
+      }
+    ]
+  }
+}

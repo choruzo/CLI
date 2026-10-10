@@ -101,24 +101,25 @@ function jobLine(job: BackgroundJob, scope: string): string {
  * cambiaron de estado (ver `ReactLoop`). Una línea por job, con lo justo para
  * decidir si hace falta leer su salida.
  */
+export function formatJobNotificationLine(n: JobNotification): string {
+  const outcome = jobOutcomeLabel(n);
+  const detail = [
+    n.status === 'completed'
+      ? `completed with exit code ${n.exitCode ?? 'unknown'}`
+      : n.status === 'failed'
+        ? `failed${outcome ? ` (${outcome})` : ''}`
+        : `was cancelled${outcome ? ` (${outcome})` : ''}`,
+    `after ${formatJobDuration(n.durationMs)}`,
+  ].join(' ');
+  const unread =
+    n.unreadChars > 0
+      ? ` ${n.unreadChars} chars of output unread: get_job_output(jobId="${n.id}").`
+      : '';
+  return `Background job #${n.id} (${shortJobCommand(n.command, 80)}) ${detail}.${unread}`;
+}
+
 export function formatJobNotifications(items: readonly JobNotification[]): string {
-  const lines = items.map((n) => {
-    const outcome = jobOutcomeLabel(n);
-    const detail = [
-      n.status === 'completed'
-        ? `completed with exit code ${n.exitCode ?? 'unknown'}`
-        : n.status === 'failed'
-          ? `failed${outcome ? ` (${outcome})` : ''}`
-          : `was cancelled${outcome ? ` (${outcome})` : ''}`,
-      `after ${formatJobDuration(n.durationMs)}`,
-    ].join(' ');
-    const unread =
-      n.unreadChars > 0
-        ? ` ${n.unreadChars} chars of output unread: get_job_output(jobId="${n.id}").`
-        : '';
-    return `Background job #${n.id} (${shortJobCommand(n.command, 80)}) ${detail}.${unread}`;
-  });
-  return `<background_jobs>\n${lines.join('\n')}\n</background_jobs>`;
+  return `<background_jobs>\n${items.map(formatJobNotificationLine).join('\n')}\n</background_jobs>`;
 }
 
 export function createJobTools(config: StratumConfig): ToolDefinition[] {

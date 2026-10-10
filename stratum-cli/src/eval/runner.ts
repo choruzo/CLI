@@ -18,6 +18,7 @@ import { MOCK_MODEL, startMockLlm, type MockLlm } from './mock-llm.js';
 import { EVAL_RESULT_VERSION, summarize, type EvalResult, type ScenarioResult } from './result.js';
 import { scenarioFingerprint, type LoadedScenario } from './scenario.js';
 import { startSshFixture, type SshFixture } from './ssh-fixture.js';
+import { STEER_SCRIPT_ENV } from '../cli/steer-script.js';
 
 /** Variable por la que el hijo recibe la API key: nunca se escribe en disco. */
 const API_KEY_ENV = 'STRATUM_EVAL_API_KEY';
@@ -272,11 +273,18 @@ export async function runScenario(
         cwd: s.cwd ? join(work, s.cwd) : work,
       })),
     ];
+    // El guion de steering es de la primera sesión: lo que el usuario escribe
+    // mientras ese turno corre.
+    let steerFile: string | null = null;
+    if (scenario.steering.length > 0) {
+      steerFile = join(sandbox, 'steer.json');
+      writeFileSync(steerFile, JSON.stringify(scenario.steering), 'utf8');
+    }
     const outputs: string[] = [];
     const errors: string[] = [];
     let exitCode: number | null = null;
     let timedOut = false;
-    for (const inv of invocations) {
+    for (const [index, inv] of invocations.entries()) {
       mkdirSync(inv.cwd, { recursive: true });
       const child = await execa(
         env.spawn.command,
@@ -298,6 +306,7 @@ export async function runScenario(
             USERPROFILE: home,
             [API_KEY_ENV]: apiKey,
             STRATUM_NO_BROWSER: '1',
+            ...(steerFile && index === 0 ? { [STEER_SCRIPT_ENV]: steerFile } : {}),
             NO_COLOR: '1',
             FORCE_COLOR: '0',
           },
@@ -362,6 +371,7 @@ export async function runScenario(
       model,
       metrics,
       hostReceived,
+      requests: mock?.received(),
     });
     if (ran.mock) {
       // El guion es la trayectoria prevista: una petición de más o de menos es

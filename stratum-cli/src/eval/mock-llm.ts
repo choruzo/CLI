@@ -31,6 +31,11 @@ import type { ScriptStep } from './scenario.js';
 
 export type AuxiliaryScript = Partial<Record<AuxiliaryLlmOrigin, readonly ScriptStep[]>>;
 
+export interface MockRequestMessage {
+  role: string;
+  content: string;
+}
+
 export const MOCK_MODEL = 'eval-mock';
 const EXHAUSTED_TEXT = '[eval-mock] guion agotado: no hay respuesta prevista para esta petición.';
 
@@ -38,6 +43,8 @@ export interface MockLlm {
   baseUrl: string;
   /** Peticiones de chat contestadas con el guion principal. */
   requests(): number;
+  /** Mensajes de cada petición del guion principal, en orden (lo que vio el modelo). */
+  received(): MockRequestMessage[][];
   /** Peticiones contestadas con el guion auxiliar, por origen. */
   auxiliaryRequests(): Partial<Record<AuxiliaryLlmOrigin, number>>;
   close(): Promise<void>;
@@ -101,6 +108,7 @@ export function startMockLlm(
   let requests = 0;
   const auxRequests: Partial<Record<AuxiliaryLlmOrigin, number>> = {};
   const seenPrompts: string[] = [];
+  const received: MockRequestMessage[][] = [];
 
   const server: Server = createServer((req, res) => {
     const url = new URL(req.url ?? '/', 'http://localhost');
@@ -119,8 +127,16 @@ export function startMockLlm(
     req.on('end', () => {
       let rendered = '';
       let origin: AuxiliaryLlmOrigin | null = null;
+      let messages: MockRequestMessage[] = [];
       try {
         const body: unknown = JSON.parse(raw);
+        const list = (body as { messages?: unknown } | null)?.messages;
+        if (Array.isArray(list)) {
+          messages = list.map((m: { role?: unknown; content?: unknown }) => ({
+            role: String(m.role ?? ''),
+            content: typeof m.content === 'string' ? m.content : '',
+          }));
+        }
         rendered = renderPromptForCache(body);
         origin = classifyAuxiliaryRequest(body);
       } catch {
@@ -135,6 +151,7 @@ export function startMockLlm(
       } else {
         step = script[requests] ?? { text: EXHAUSTED_TEXT };
         requests++;
+        received.push(messages);
       }
       const prompt = approxTokens(raw.length);
       const cached = Math.min(Math.floor(cachedPrefixLength(rendered, seenPrompts) / 4), prompt);
@@ -221,6 +238,7 @@ export function startMockLlm(
       resolve({
         baseUrl: `http://127.0.0.1:${port}/v1`,
         requests: () => requests,
+        received: () => received,
         auxiliaryRequests: () => ({ ...auxRequests }),
         close: () =>
           new Promise<void>((done) => {

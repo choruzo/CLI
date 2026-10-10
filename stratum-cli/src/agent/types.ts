@@ -4,6 +4,7 @@ import type { IProvider } from '../providers/base.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
 import type { TraceScope } from '../trace/recorder.js';
 import type { JobManager } from '../jobs/manager.js';
+import type { RuntimeInbox } from './inbox.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -350,6 +351,13 @@ export interface RunOptions {
   jobs?: JobManager;
   /** Scope de este loop dentro de la sesión. Default `main`. */
   jobScope?: string;
+  /**
+   * Runtime Inbox de la sesión (`agent/inbox.ts`): lo que llega mientras el
+   * agente trabaja —mensajes del usuario, finales de job—. El loop la drena en
+   * sus puntos seguros con su `jobScope`. Lo aporta `StratumAgent` y lo heredan
+   * los subagentes. Ausente → sin steering, y los jobs se avisan como antes.
+   */
+  inbox?: RuntimeInbox;
 }
 
 /** Registro que el loop padre pasa a `onSubagentPersist` (Hito 8B). */

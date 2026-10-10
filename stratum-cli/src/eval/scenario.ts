@@ -10,6 +10,7 @@ import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import { stripBom } from '../config/json-text.js';
 import { AUXILIARY_LLM_ORIGINS, LLM_CALL_ORIGINS } from '../trace/records.js';
+import { SteerActionSchema } from '../cli/steer-script.js';
 
 export const SCENARIO_GROUPS = [
   'code',
@@ -21,6 +22,7 @@ export const SCENARIO_GROUPS = [
   'cache',
   'auxiliary',
   'jobs',
+  'steering',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
 
@@ -80,6 +82,11 @@ export const CHECKABLE_METRICS = [
   'jobsCancelled',
   'jobsOutputRead',
   'jobNotifications',
+  'runtimeUpdatesReceived',
+  'runtimeUpdatesConsumed',
+  'userSteeringMessages',
+  'steeringBatches',
+  'toolBatchesInvalidatedBySteering',
 ] as const;
 
 /** Causas de una rotura de caché que un criterio `cache_break` puede exigir. */
@@ -208,6 +215,26 @@ const CheckSchema = z.discriminatedUnion('type', [
     })
     .strict(),
   /**
+   * Lo que el modelo de guion **recibió** en una petición del loop (`request`,
+   * desde 1; negativo cuenta desde el final): el texto de sus mensajes contiene
+   * `value`. Solo con guion: es lo que demuestra qué había en el contexto en
+   * esa llamada exacta, no en alguna.
+   */
+  z
+    .object({
+      type: z.literal('request_contains'),
+      request: z
+        .number()
+        .int()
+        .refine((n) => n !== 0, 'desde 1, o negativo desde el final'),
+      value: z.string().min(1),
+      /** Solo en los mensajes de ese rol. */
+      role: z.enum(['system', 'user', 'assistant', 'tool']).optional(),
+      negate: z.boolean().default(false),
+      ...base,
+    })
+    .strict(),
+  /**
    * Comandos que un host SSH simulado llegó a recibir. Es el efecto sobre el
    * servidor —lo único observable de un host que no existe—, no la trayectoria.
    */
@@ -258,12 +285,14 @@ const CheckSchema = z.discriminatedUnion('type', [
   z
     .object({
       type: z.literal('runtime_event'),
-      event: z.enum(['veto', 'confirmation', 'retry', 'job']),
+      event: z.enum(['veto', 'confirmation', 'retry', 'job', 'inbox']),
       tool: z.string().optional(),
       /**
        * `veto`: su `source`. `confirmation`: su `decision`. `job`: su fase
        * (`started`, `ended`, `read`…) o fase y resultado (`ended:cancelled`,
-       * `ended:session-closed`: el estado o el motivo del cierre).
+       * `ended:session-closed`: el estado o el motivo del cierre). `inbox`: su
+       * fase (`enqueue`, `consume`, `drop`) o fase y tipo (`consume:user-message`,
+       * `consume:job-failed`).
        */
       detail: z.string().optional(),
       min: z.number().int().nonnegative().default(1),
@@ -397,6 +426,13 @@ export const ScenarioSchema = z
     sessions: z
       .array(z.object({ input: z.string().min(1), cwd: relPath.optional() }).strict())
       .default([]),
+    /**
+     * Lo que el usuario hace **mientras el agente trabaja** en la primera
+     * sesión: mensajes de steering o una cancelación, cada uno atado a un
+     * evento del turno (`cli/steer-script.ts`). Atan la trayectoria: un
+     * escenario que los usa se puntúa con criterios `mode: "mock"`.
+     */
+    steering: z.array(SteerActionSchema).default([]),
     run: z
       .object({
         args: z.array(z.string()).default([]),
@@ -464,6 +500,7 @@ export function scenarioFingerprint(scenario: Scenario): string {
     ...(followUps.length > 0 ? { followUps } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),
     ...(scenario.auxiliaryScript ? { auxiliaryScript: scenario.auxiliaryScript } : {}),
+    ...(scenario.steering.length > 0 ? { steering: scenario.steering } : {}),
   };
   return createHash('sha1')
     .update(JSON.stringify({ requires, setup, input, run, script, expect, ...more }))
@@ -490,6 +527,7 @@ export function liveTrajectoryChecks(scenario: Scenario): string[] {
     if (c.type === 'cache_break' && c.min > 0) flag('exige una rotura de caché concreta');
     if (c.type === 'llm_call' && c.min > 0) flag('exige una llamada concreta al modelo');
     if (c.type === 'tool_output_contains' && !c.negate) flag('exige una salida de tool concreta');
+    if (c.type === 'request_contains') flag('solo se puede comprobar contra el modelo de guion');
     if (c.type === 'metric' && ((c.min ?? 0) > 0 || (c.equals ?? 0) > 0)) {
       flag('exige un valor mínimo o exacto de una métrica de la trayectoria');
     }
