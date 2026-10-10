@@ -59,7 +59,27 @@ export interface RuntimeUpdateBatch {
   jobs: JobNotification[];
 }
 
-export type InboxDropReason = 'history-cleared' | 'scope-closed' | 'already-known' | 'empty';
+export type InboxDropReason =
+  | 'history-cleared'
+  | 'scope-closed'
+  | 'already-known'
+  | 'empty'
+  | 'too-large';
+
+/**
+ * Qué pasó con un mensaje del usuario enviado como steering. Solo `accepted`
+ * deja algo en la cola; en los otros tres casos no se ha guardado **nada** y
+ * decide quien llama:
+ *  - `not-accepting` — no hay turno que pueda incorporarlo: es un turno nuevo;
+ *  - `empty` — no había texto;
+ *  - `too-large` — supera `MAX_STEERING_CHARS`. No se recorta: una instrucción
+ *    a la que le falta el final puede decir lo contrario de lo que decía.
+ */
+export type SteeringEnqueueResult =
+  | { status: 'accepted'; event: UserMessageEvent }
+  | { status: 'not-accepting' }
+  | { status: 'empty' }
+  | { status: 'too-large'; chars: number; limit: number };
 
 /** Cambios de la cola, para la UI (contador de pendientes, aviso de entrega). */
 export type RuntimeInboxChange =
@@ -128,13 +148,26 @@ export class RuntimeInbox {
   // -------------------------------------------------------------------------
 
   /**
-   * Encola un mensaje del usuario para el turno en curso. Devuelve `null` si
-   * no hay turno que pueda incorporarlo (o el texto está vacío): entonces no
-   * se ha guardado nada y el llamador sigue el camino normal de un turno nuevo.
+   * Encola un mensaje del usuario para el turno en curso. El mensaje entra
+   * entero o no entra: ver `SteeringEnqueueResult`. Sin turno que pueda
+   * incorporarlo no se mira el tamaño — como turno nuevo no tiene este tope.
    */
-  enqueueUserMessage(text: string): UserMessageEvent | null {
-    const clean = text.trim().slice(0, MAX_STEERING_CHARS);
-    if (!this.accepting || !clean) return null;
+  enqueueUserMessage(text: string): SteeringEnqueueResult {
+    const clean = text.trim();
+    if (!clean) return { status: 'empty' };
+    if (!this.accepting) return { status: 'not-accepting' };
+    if (clean.length > MAX_STEERING_CHARS) {
+      this.trace?.runtime({
+        event: 'inbox',
+        phase: 'drop',
+        id: this.nextId(),
+        type: 'user-message',
+        scope: MAIN_JOB_SCOPE,
+        reason: 'too-large',
+        chars: clean.length,
+      });
+      return { status: 'too-large', chars: clean.length, limit: MAX_STEERING_CHARS };
+    }
     const event: UserMessageEvent = {
       id: this.nextId(),
       type: 'user-message',
@@ -143,7 +176,7 @@ export class RuntimeInbox {
       createdAt: this.now(),
     };
     this.push(event);
-    return event;
+    return { status: 'accepted', event };
   }
 
   /**
@@ -369,9 +402,40 @@ export function isRuntimeUpdatesMessage(content: string | null | undefined): boo
   return typeof content === 'string' && content.startsWith(RUNTIME_UPDATES_OPEN);
 }
 
-/** Varias líneas de un mismo mensaje quedan bajo su número, no como ítems nuevos. */
-function indentContinuation(text: string): string {
-  return text.replace(/\r?\n/g, '\n   ');
+/**
+ * `<runtime_updates` o `</runtime_updates` (o una de esas ya escapada) dentro
+ * de un texto que va en el bloque. Tolera espacios y no distingue mayúsculas.
+ */
+const RESERVED_TAG = /(<|&(?:amp;)*lt;)(?=\s*\/?\s*runtime_updates)/gi;
+const ESCAPED_TAG = /&((?:amp;)*)lt;(?=\s*\/?\s*runtime_updates)/gi;
+
+/**
+ * Protege el **encuadre** del bloque, no el contenido: lo único que cambia es
+ * el `<` de un delimitador reservado, que pasa a `&lt;`, para que ningún texto
+ * de dentro pueda cerrar el bloque o abrir otro. El resto —otras etiquetas,
+ * `&`, código— va tal cual. Es reversible (`unescapeRuntimeUpdatesText`): un
+ * `&lt;runtime_updates` que ya venía escrito así gana un `amp;`, de modo que
+ * dos textos distintos nunca se serializan igual.
+ */
+export function escapeRuntimeUpdatesText(text: string): string {
+  return text.replace(RESERVED_TAG, (m) => (m === '<' ? '&lt;' : `&amp;${m.slice(1)}`));
+}
+
+/** Inversa exacta de `escapeRuntimeUpdatesText`. */
+export function unescapeRuntimeUpdatesText(text: string): string {
+  return text.replace(ESCAPED_TAG, (_m, amps: string) =>
+    amps ? `&${amps.slice('amp;'.length)}lt;` : '<',
+  );
+}
+
+/**
+ * Un mensaje del usuario dentro del bloque: delimitadores escapados y cada
+ * línea de continuación sangrada bajo su número. Ninguna línea suya empieza en
+ * la columna 0, así que no puede pasar por otro ítem de la lista ni por el
+ * cierre. Los saltos de línea se conservan tal como venían.
+ */
+function frameUserText(text: string): string {
+  return escapeRuntimeUpdatesText(text).replace(/\r\n|[\n\r\u2028\u2029]/g, '$&   ');
 }
 
 /**
@@ -392,8 +456,8 @@ export function formatRuntimeUpdates(
     : 'Runtime updates since your previous model call, oldest first.';
   const lines = batch.updates.map((u, i) =>
     u.kind === 'user'
-      ? `${i + 1}. User: ${indentContinuation(u.event.text)}`
-      : `${i + 1}. ${jobLine(u.notification)}`,
+      ? `${i + 1}. User: ${frameUserText(u.event.text)}`
+      : `${i + 1}. ${escapeRuntimeUpdatesText(jobLine(u.notification))}`,
   );
   return `${RUNTIME_UPDATES_OPEN}\n${head}\n${lines.join('\n')}\n${RUNTIME_UPDATES_CLOSE}`;
 }
@@ -404,7 +468,7 @@ export function formatRuntimeUpdates(
  * que es su sitio en la cronología.
  */
 export function formatUndeliveredUserMessages(messages: readonly UserMessageEvent[]): string {
-  const lines = messages.map((m, i) => `${i + 1}. User: ${indentContinuation(m.text)}`);
+  const lines = messages.map((m, i) => `${i + 1}. User: ${frameUserText(m.text)}`);
   return (
     `${RUNTIME_UPDATES_OPEN}\n` +
     'The user sent these messages while the previous turn was still running. That turn ended ' +

@@ -38,7 +38,11 @@ import { JobManager } from '../jobs/manager.js';
 import { SkillRegistry } from '../skills/registry.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
-import { RuntimeInbox, formatUndeliveredUserMessages, type UserMessageEvent } from './inbox.js';
+import {
+  RuntimeInbox,
+  formatUndeliveredUserMessages,
+  type SteeringEnqueueResult,
+} from './inbox.js';
 import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
@@ -299,14 +303,14 @@ export class StratumAgent {
   /**
    * Mensaje del usuario con un turno en curso (*steering*). No cancela nada ni
    * llama al modelo: queda en la Runtime Inbox y el loop lo incorpora en su
-   * siguiente punto seguro. Devuelve `null` si no hay turno que pueda
-   * incorporarlo —no hay ninguno, o ya ha dado su respuesta por terminada—: no
-   * se ha guardado nada y quien llama abre un turno nuevo con `run()`.
+   * siguiente punto seguro. Solo `accepted` guarda algo: `not-accepting` (no
+   * hay turno, o ya ha dado su respuesta por terminada) es un turno nuevo con
+   * `run()`, y `too-large` se le devuelve al usuario sin recortar ni enviar.
    *
    * Cancelar es otro camino: el `AbortSignal` del turno. Aquí no se interpreta
    * el texto.
    */
-  enqueueUserMessage(text: string): UserMessageEvent | null {
+  enqueueUserMessage(text: string): SteeringEnqueueResult {
     return this.inbox.enqueueUserMessage(text);
   }
 

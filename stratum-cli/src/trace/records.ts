@@ -157,7 +157,16 @@ export type TraceInboxEvent =
       /** Se entregó al abrir el turno siguiente: el suyo se cortó antes. */
       late?: boolean;
     }
-  | { event: 'inbox'; phase: 'drop'; id: string; type: string; scope: string; reason: string };
+  | {
+      event: 'inbox';
+      phase: 'drop';
+      id: string;
+      type: string;
+      scope: string;
+      reason: string;
+      /** Tamaño de un mensaje rechazado por grande (`too-large`): nunca su texto. */
+      chars?: number;
+    };
 
 export type TraceJobEvent =
   | { event: 'job'; phase: 'created'; jobId: string; command: string; cwd: string; scope: string }

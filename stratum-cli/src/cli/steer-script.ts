@@ -62,7 +62,8 @@ export function loadSteerScript(env: NodeJS.ProcessEnv = process.env): SteerActi
 
 export interface SteerHost {
   /** Envía el mensaje al turno en curso; `false` si no había turno que lo aceptase. */
-  enqueue(text: string): boolean;
+  /** Estado de `StratumAgent.enqueueUserMessage`: solo `accepted` encola. */
+  enqueue(text: string): string;
   cancel(): void;
   log?(line: string): void;
 }
@@ -96,8 +97,10 @@ export function createSteerDriver(actions: readonly SteerAction[], host: SteerHo
       host.cancel();
       return;
     }
-    const queued = host.enqueue(action.text!);
-    host.log?.(`[steer] ${queued ? 'queued as steering' : 'not queued (no active turn)'}`);
+    const status = host.enqueue(action.text!);
+    host.log?.(
+      `[steer] ${status === 'accepted' ? 'queued as steering' : `not queued (${status})`}`,
+    );
   };
 
   return {

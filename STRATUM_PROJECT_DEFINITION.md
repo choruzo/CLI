@@ -2821,7 +2821,7 @@ Invariantes:
 - **FIFO** por orden de llegada, y cada evento se entrega **una sola vez** (`drain(scope)` lo saca de la cola).
 - **Por scope**: un loop drena con su `jobScope`. Los mensajes del usuario son del principal; un subagente solo ve los finales de sus propios jobs, y al terminar se cierra su scope (`closeScope`: lo pendiente se descarta).
 - **Encolar no hace nada más**: ni aborta la tool o el stream en curso, ni llama al modelo.
-- `enqueueUserMessage` devuelve `null` si no hay turno que pueda incorporar el mensaje; quien llama abre entonces un turno normal. Sin inbox (`RunOptions.inbox` ausente: un `ReactLoop` suelto) el comportamiento es el anterior a este hito.
+- `enqueueUserMessage` devuelve un resultado con `status`, y **solo `accepted` guarda algo**: `not-accepting` (no hay turno que pueda incorporar el mensaje; quien llama abre entonces un turno normal), `empty` y `too-large`. Un mensaje de más de `MAX_STEERING_CHARS` (8 000) **no se recorta ni se encola en parte** —a una instrucción sin su final le puede faltar justo la restricción—: se rechaza entero, la traza anota un `drop` `too-large` con su tamaño y decide quien llama; no se abre ninguna llamada al modelo. Sin turno activo no se mira el tamaño: como turno normal no tiene ese tope. Sin inbox (`RunOptions.inbox` ausente: un `ReactLoop` suelto) el comportamiento es el anterior a este hito.
 - No hay hilos: «llegar mientras el loop trabaja» es un callback entre dos `await`. Lo que evita perder un mensaje es que comprobar-y-cerrar sea **una operación síncrona** (`sealIfIdle`).
 
 Los jobs siguen siendo del `JobManager` (`subscribe`, ownership y `takeNotifications` no cambian). La inbox apunta *cuándo* terminó cada uno, para ordenarlo con los mensajes, y al drenar pregunta al manager si su dueño aún no lo sabe (`claimNotification`): un job que el agente ya vio con una tool sale de la cola sin contarse.
@@ -2854,6 +2854,7 @@ Runtime updates since your previous model call, oldest first. The user messages 
 - Se **anexa al último `user` o `tool`** (`appendRuntimeNotice`): no es un `user` nuevo, no toca el system prompt y no reescribe nada que el modelo ya hubiera visto, así que ni rompe la alternancia ni invalida el prefijo de caché. La petición original queda literal: «revisa auth» + un aviso posterior no es «revisa auth y no toques OAuth».
 - Tras una respuesta sin tools (punto 3) no hay dónde anexar: el bloque es un `user` propio. `ContextManager` no lo toma por la tarea —un `user` que empieza por `<runtime_updates>` ni es el ancla de compresión ni cuenta como que la cola ya la contiene— y la traza registra de él solo el tamaño.
 - Varios mensajes antes del mismo punto seguro van juntos y numerados: una llamada por lote, no por mensaje.
+- **Encuadre**: el texto de un mensaje no puede romper el bloque. `escapeRuntimeUpdatesText` cambia a `&lt;` el `<` de un `<runtime_updates` o `</runtime_updates` que venga dentro (sin distinguir mayúsculas y tolerando espacios), y **solo eso**: otras etiquetas, `&` o código van tal cual, porque se protege la serialización, no se sanea la instrucción. Es reversible (`unescapeRuntimeUpdatesText`; un `&lt;runtime_updates` ya escrito así gana un `amp;`). Cada línea de continuación va sangrada bajo su número, conservando el salto de línea original, así que ninguna línea del usuario empieza en la columna 0 ni puede pasar por otro ítem o por el cierre. La línea de un job (que lleva su comando) pasa por el mismo escape.
 
 #### Turno cortado
 
@@ -2861,7 +2862,7 @@ El steering que un turno cancelado, con error o agotado no llegó a entregar sig
 
 #### Traza y métricas
 
-`TraceRuntimeEvent` `inbox` (`meta.caps: ['inbox']`): `enqueue`, `consume` (`waitMs`, `batch`, `late` si se entregó al abrir el turno siguiente) y `drop` (`history-cleared`, `scope-closed`, `already-known`). De un mensaje del usuario se guarda `id`, `scope` y `chars`, **nunca el texto**. Métricas: `runtimeUpdatesReceived`, `runtimeUpdatesConsumed`, `userSteeringMessages`, `steeringBatches`, `steeringLatencyMs`, `toolBatchesInvalidatedBySteering`; informativas, `eval compare` no las juzga.
+`TraceRuntimeEvent` `inbox` (`meta.caps: ['inbox']`): `enqueue`, `consume` (`waitMs`, `batch`, `late` si se entregó al abrir el turno siguiente) y `drop` (`history-cleared`, `scope-closed`, `already-known`, y `too-large` —con `chars`— para un mensaje rechazado por grande, que nunca llegó a encolarse). De un mensaje del usuario se guarda `id`, `scope` y `chars`, **nunca el texto**. Métricas: `runtimeUpdatesReceived`, `runtimeUpdatesConsumed`, `userSteeringMessages`, `steeringBatches`, `steeringLatencyMs`, `toolBatchesInvalidatedBySteering`; informativas, `eval compare` no las juzga.
 
 #### Fuera de alcance
 

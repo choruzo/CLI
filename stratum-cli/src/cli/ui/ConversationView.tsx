@@ -227,7 +227,6 @@ export function ConversationView({
           </Text>
         </Text>
       )}
-      {!overlay && inputHint && <Text color={theme.textMuted}> {inputHint}</Text>}
       {!overlay && (
         <InputArea
           value={inputValue}
@@ -237,6 +236,9 @@ export function ConversationView({
           steering={steerable}
         />
       )}
+      {/* Debajo del input: un texto largo lo hace más alto que la pantalla, y un
+          aviso encima («demasiado grande para steering») quedaría fuera de la vista. */}
+      {!overlay && inputHint && <Text color={theme.warning}> {inputHint}</Text>}
     </Box>
   );
 }

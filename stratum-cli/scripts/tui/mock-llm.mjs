@@ -7,6 +7,7 @@
  * - «lista»    → `list_directory` de `.` y luego resume el resultado.
  * - «borra»    → `exec` que borra `victima.txt` (pide confirmación destructiva).
  * - «lento»    → doce palabras a 400 ms (para cancelar a mitad).
+ * - «despacio» → las mismas a 900 ms (da tiempo a escribir algo largo).
  * - «error401» → HTTP 401. «error500» → HTTP 500 (transitorio: se reintenta).
  * - otro       → razona un poco y saluda con markdown.
  *
@@ -61,6 +62,7 @@ export function defaultScript({ said, last }) {
     const command = process.platform === 'win32' ? 'Remove-Item victima.txt' : 'rm victima.txt';
     return toolCall('exec', { command });
   }
+  if (said.includes('despacio')) return text(SLOW_WORDS, 900);
   if (said.includes('lento')) return text(SLOW_WORDS, 400);
   return [...reasoning('Pienso un poco.'), ...text(GREETING)];
 }

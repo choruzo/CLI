@@ -2706,7 +2706,18 @@ export function App({
           return;
         }
         setInputHint(null);
-        if (agent.enqueueUserMessage(cmd)) return; // la suscripción a la inbox lo pinta
+        const queued = agent.enqueueUserMessage(cmd);
+        if (queued.status === 'accepted') return; // la suscripción a la inbox lo pinta
+        if (queued.status === 'too-large') {
+          // Ni se recorta ni se envía por su cuenta: lo escrito se queda en el
+          // input para acortarlo o enviarlo entero cuando acabe el turno.
+          setInputHint(
+            `Too large to steer (${queued.chars.toLocaleString('en-US')} chars, limit ` +
+              `${queued.limit.toLocaleString('en-US')}): not sent. ` +
+              'Shorten it, or send it when the agent finishes.',
+          );
+          return;
+        }
         // El turno ya no incorpora mensajes (está cerrando, o no es un turno del
         // agente): no se pierde, se envía como mensaje normal en cuanto acabe.
         deferredSendRef.current = cmd;

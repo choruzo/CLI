@@ -338,7 +338,7 @@ export const runCommand = new Command('run')
       const steerScript = loadSteerScript();
       const steer = steerScript
         ? createSteerDriver(steerScript, {
-            enqueue: (text) => agent.enqueueUserMessage(text) !== null,
+            enqueue: (text) => agent.enqueueUserMessage(text).status,
             cancel: () => controller.abort(),
             log: (line) => process.stderr.write(`${line}\n`),
           })

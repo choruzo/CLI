@@ -1166,6 +1166,9 @@ nada, se encola y el agente lo incorpora en su siguiente punto seguro.
   the user sent a new message…`: no se ejecutaron.
 - Un `/comando` o un `@perfil` no se encolan ni se ejecutan con el agente trabajando: aviso de una
   línea y el texto se queda en el input.
+- Un mensaje de más de 8 000 caracteres no se encola ni se recorta: aviso de una línea (`Too large to
+  steer (N chars, limit 8,000): not sent…`) y el texto **se queda en el input**, para acortarlo o
+  enviarlo entero como turno normal cuando el agente termine. No se envía solo.
 - Si el turno ya estaba cerrando cuando se pulsó Enter, el mensaje no se pierde: sale como turno
   nuevo en cuanto termina el anterior.
 - Con una confirmación, una tanda de preguntas o una aprobación de plan abierta, el teclado es del
