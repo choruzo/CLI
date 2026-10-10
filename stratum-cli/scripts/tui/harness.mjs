@@ -204,7 +204,9 @@ export function launch({
     /** Espera a que el turno termine y el input vuelva a estar libre. */
     async waitForIdle(ms = 30000) {
       await sleep(150);
-      await t.waitGone(/Stratum is thinking\.\.\./, ms);
+      // Con el agente trabajando el input sigue vivo (steering): el turno está
+      // en curso mientras se vea cualquiera de los dos textos.
+      await t.waitGone(/Stratum is thinking\.\.\.|Agent is working — type to steer/, ms);
     },
 
     /** Imprime la pantalla con una etiqueta (para mirarla desde un script). */

@@ -1,0 +1,102 @@
+{
+  "id": "explicit-cancel-still-cancels",
+  "group": "steering",
+  "title": "El steering no cancela; la cancelacion explicita si",
+  "description": "Durante la primera tool el usuario escribe un mensaje que suena a cancelar: no se interpreta, la tool termina y el turno sigue. Durante la segunda llega una cancelacion de verdad (Ctrl+C): la tool se corta y el turno acaba cancelado.",
+  "difficulty": "adversarial",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "wait.js": "const name = process.argv[2] || 'wait';\nconst ms = Number(process.argv[3] || 2500);\nsetTimeout(() => {\n  require('fs').writeFileSync(name + '.txt', 'ok');\n  console.log(name + ' finished');\n}, ms);\n"
+    }
+  },
+  "input": "Ejecuta `node wait.js first 2500` y despues `node wait.js second 8000`.",
+  "steering": [
+    {
+      "on": "tool_call_ready",
+      "tool": "exec",
+      "nth": 1,
+      "delayMs": 600,
+      "text": "para, cancela todo"
+    },
+    {
+      "on": "tool_call_ready",
+      "tool": "exec",
+      "nth": 2,
+      "delayMs": 1000,
+      "cancel": true
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node wait.js first 2500"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node wait.js second 8000"
+          }
+        }
+      ]
+    }
+  ],
+  "expect": {
+    "description": "La primera tool termina pese al mensaje; la segunda se corta con la cancelacion y stratum sale con 130.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 130
+      },
+      {
+        "type": "stop_reason",
+        "equals": "cancelled"
+      },
+      {
+        "type": "file_exists",
+        "path": "first.txt",
+        "label": "el mensaje no cancelo la tool en curso"
+      },
+      {
+        "type": "file_absent",
+        "path": "second.txt",
+        "label": "la cancelacion explicita si corto la tool"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "1. User: para, cancela todo",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "userSteeringMessages",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "steeringBatches",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 2,
+        "mode": "mock"
+      }
+    ]
+  }
+}

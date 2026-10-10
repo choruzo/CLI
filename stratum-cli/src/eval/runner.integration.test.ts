@@ -347,7 +347,9 @@ describe('escenarios incluidos, con el modelo de guion', () => {
     expect(stats.toolErrors).toBe(o.toolErrors);
     expect(stats.policyBlocks).toBe(o.policyBlocks);
     expect(stats.tokens).toBe(o.tokens);
-    expect(stats.turnCompletionRate).toBe(1);
+    // Todos los turnos acaban en `stop` menos uno, que se cancela a propósito:
+    // `explicit-cancel-still-cancels` (la cancelación explícita sigue cancelando).
+    expect(stats.turnCompletionRate).toBeCloseTo((stats.turns - 1) / stats.turns, 10);
     const llm = first.result.summary.overall.llm!;
     expect(stats.llm.auxiliarySessions).toBe(traces.length);
     expect(stats.llm.calls).toBe(llm.calls);

@@ -3,10 +3,12 @@ import { appendFile, mkdir } from 'fs/promises';
 import { dirname } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import type { AgentEvent, Message } from '../agent/types.js';
+import { isRuntimeUpdatesMessage } from '../agent/inbox.js';
 import { redactText } from '../security/redact-output.js';
 import { getLogger } from '../logging/index.js';
 import { normalizeUsage, type RawTimings, type RawUsage } from '../providers/cache.js';
 import {
+  TRACE_CAP_INBOX,
   TRACE_CAP_JOBS,
   TRACE_CAP_LLM_ORIGIN,
   TRACE_CAP_RUNTIME,
@@ -214,7 +216,7 @@ export class TraceRecorder {
         sessionId: this.opts.sessionId,
         ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
         ...(this.opts.version ? { version: this.opts.version } : {}),
-        caps: [TRACE_CAP_RUNTIME, TRACE_CAP_LLM_ORIGIN, TRACE_CAP_JOBS],
+        caps: [TRACE_CAP_RUNTIME, TRACE_CAP_LLM_ORIGIN, TRACE_CAP_JOBS, TRACE_CAP_INBOX],
       });
     }
     this.writer.write(record);
@@ -262,6 +264,13 @@ const VETO_LABEL = {
   environment: 'la política de entorno',
   toolset: 'el toolset de la sesión',
   plan: 'el modo plan',
+  steering: 'un mensaje nuevo del usuario',
+} as const;
+
+const INBOX_PHASE_LABEL = {
+  enqueue: 'encolado',
+  consume: 'entregado al agente',
+  drop: 'descartado',
 } as const;
 
 const JOB_PHASE_LABEL = {
@@ -435,6 +444,13 @@ class Scope implements TraceScope {
       this.seen.add(msg);
       if (msg.role !== 'user' && msg.role !== 'system') continue;
       const content = msg.content ?? '';
+      // Un `user` que solo lleva avisos del runtime (steering entregado tras
+      // una respuesta sin tools): su texto ya está en el historial y la traza
+      // no guarda una segunda copia, solo que entró y cuánto ocupa.
+      if (msg.role === 'user' && isRuntimeUpdatesMessage(content)) {
+        this.point('context', 'Avisos del runtime', { role: msg.role, chars: content.length });
+        continue;
+      }
       this.point('context', headline(content) || `Mensaje ${msg.role}`, {
         role: msg.role,
         content: this.rec.text(content),
@@ -672,6 +688,12 @@ class Scope implements TraceScope {
         this.point('notice', `Confirmación ${CONFIRMATION_LABEL[ev.decision]}: ${ev.tool}`, data);
       } else if (ev.event === 'veto') {
         this.point('notice', `Vetada por ${VETO_LABEL[ev.source]}: ${ev.tool}`, data);
+      } else if (ev.event === 'inbox') {
+        const what =
+          ev.type === 'user-message'
+            ? 'mensaje del usuario'
+            : `fin del job #${'jobId' in ev && ev.jobId ? ev.jobId : '?'}`;
+        this.point('notice', `Inbox: ${what} ${INBOX_PHASE_LABEL[ev.phase]}`, data);
       } else if (ev.event === 'job') {
         this.point(
           'notice',

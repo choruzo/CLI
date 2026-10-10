@@ -124,7 +124,7 @@ export type AgentConvItem = {
   streaming: boolean;
 };
 
-export type ConvItem = { kind: 'user'; text: string } | AgentConvItem;
+export type ConvItem = { kind: 'user'; text: string; note?: string } | AgentConvItem;
 
 export interface PendingConfirm {
   callId: string;
@@ -215,6 +215,8 @@ export type AppAction =
   | { type: 'CHANGES_UPDATE'; summary: ChangesSummary }
   | { type: 'INPUT_CHANGE'; value: string }
   | { type: 'SYSTEM_MESSAGE'; text: string }
+  /** Mensaje del usuario enviado con el turno en marcha (steering encolado). */
+  | { type: 'STEERING_MESSAGE'; text: string }
   | { type: 'INIT_START' }
   | { type: 'INIT_STEP'; step: InitStep }
   | { type: 'INIT_DONE'; summary?: string }
@@ -319,6 +321,13 @@ export function reducer(state: AppState, action: AppAction): AppState {
         focusState: 'input',
         focusedBlockIndex: 0,
       };
+    }
+
+    case 'STEERING_MESSAGE': {
+      // Va al historial visible, sobre el turno en curso, y no toca su estado:
+      // el agente sigue trabajando.
+      const item: ConvItem = { kind: 'user', text: action.text, note: 'queued as steering' };
+      return { ...state, completedItems: [...state.completedItems, item], inputValue: '' };
     }
 
     case 'SYSTEM_MESSAGE': {
@@ -1015,6 +1024,43 @@ export function App({
       }
     });
   }, [agent]);
+  // -------------------------------------------------------------------------
+  // Runtime Inbox: mensajes enviados con el agente trabajando. Como los jobs,
+  // cambia cuando quiere (el loop la drena en sus puntos seguros), así que la
+  // UI se suscribe a ella en vez de esperar a un evento del turno.
+  // -------------------------------------------------------------------------
+  const [pendingSteering, setPendingSteering] = useState(
+    () => agent.inbox.pendingUserMessages().length,
+  );
+  const [inputHint, setInputHint] = useState<string | null>(null);
+  useEffect(() => {
+    const inbox = agent.inbox;
+    setPendingSteering(inbox.pendingUserMessages().length);
+    return inbox.subscribe((change) => {
+      setPendingSteering(inbox.pendingUserMessages().length);
+      const users =
+        change.type === 'enqueued'
+          ? change.event.type === 'user-message'
+            ? 1
+            : 0
+          : change.events.filter((e) => e.type === 'user-message').length;
+      if (users === 0) return;
+      if (change.type === 'enqueued' && change.event.type === 'user-message') {
+        dispatch({ type: 'STEERING_MESSAGE', text: change.event.text });
+      } else if (change.type === 'consumed') {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `[agent received ${users} user ${users === 1 ? 'update' : 'updates'}]`,
+        });
+      } else if (change.type === 'dropped') {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `[${users} queued ${users === 1 ? 'update' : 'updates'} discarded]`,
+        });
+      }
+    });
+  }, [agent]);
+
   const jobsOnScreen = visibleJobs(jobs, jobsNow).length > 0;
   useEffect(() => {
     if (!jobsOnScreen) return;
@@ -1317,6 +1363,8 @@ export function App({
   const draftRef = useRef('');
   // `executeCommand` se define más abajo; Ctrl+L lo alcanza por ref.
   const executeCommandRef = useRef<((cmd: string) => void) | null>(null);
+  /** Mensaje enviado con el turno cerrándose: se envía como turno nuevo al terminar. */
+  const deferredSendRef = useRef<string | null>(null);
 
   useInput((input, key) => {
     if (key.ctrl && (input === 'c' || (key as { name?: string }).name === 'c')) {
@@ -2601,6 +2649,18 @@ export function App({
   // Ctrl+L necesita alcanzar `executeCommand` desde el useInput, que se declara antes.
   executeCommandRef.current = executeCommand;
 
+  // Mensaje que llegó cuando el turno ya no aceptaba steering: sale como turno
+  // nuevo en cuanto el anterior termina.
+  useEffect(() => {
+    if (state.thinking) return;
+    // Los avisos del input eran del turno que acaba de terminar.
+    setInputHint(null);
+    if (deferredSendRef.current === null) return;
+    const text = deferredSendRef.current;
+    deferredSendRef.current = null;
+    if (!state.fatalError) executeCommandRef.current?.(text);
+  }, [state.thinking, state.fatalError]);
+
   // Panel de arranque MCP (§14): solo con `mcp.startup: 'eager'`. Los timeouts
   // se leen de la config para poder distinguir un timeout de un fallo de arranque.
   const [mcpStartup] = useState(() => {
@@ -2637,7 +2697,35 @@ export function App({
         return;
       }
 
-      if (state.thinking) return;
+      // Con el agente trabajando, un mensaje es steering: no cancela nada, se
+      // encola y el loop lo incorpora en su siguiente punto seguro. Ctrl+C
+      // sigue siendo la única forma de cancelar.
+      if (state.thinking) {
+        if (/^[/@]/.test(cmd)) {
+          setInputHint('Commands are not available while the agent is working (Ctrl+C cancels).');
+          return;
+        }
+        setInputHint(null);
+        const queued = agent.enqueueUserMessage(cmd);
+        if (queued.status === 'accepted') return; // la suscripción a la inbox lo pinta
+        if (queued.status === 'too-large') {
+          // Ni se recorta ni se envía por su cuenta: lo escrito se queda en el
+          // input para acortarlo o enviarlo entero cuando acabe el turno.
+          setInputHint(
+            `Too large to steer (${queued.chars.toLocaleString('en-US')} chars, limit ` +
+              `${queued.limit.toLocaleString('en-US')}): not sent. ` +
+              'Shorten it, or send it when the agent finishes.',
+          );
+          return;
+        }
+        // El turno ya no incorpora mensajes (está cerrando, o no es un turno del
+        // agente): no se pierde, se envía como mensaje normal en cuanto acabe.
+        deferredSendRef.current = cmd;
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        setInputHint('The agent is finishing: your message will be sent as a new turn.');
+        return;
+      }
+      setInputHint(null);
 
       // Sin modelo elegido (se canceló el selector) no se puede hablar con el
       // provider: se vuelve a pedir, conservando lo escrito.
@@ -2920,6 +3008,8 @@ export function App({
         pendingQuestions={state.pendingQuestions}
         onQuestionsSubmit={(answers) => resolveQuestions(answers)}
         onQuestionsCancel={() => resolveQuestions(null)}
+        pendingSteering={pendingSteering}
+        inputHint={inputHint}
       />
     </Box>
   );

@@ -452,26 +452,42 @@ export class JobManager {
     const out: JobNotification[] = [];
     for (const rec of this.records.values()) {
       if (!this.pendingFor(rec, scope)) continue;
-      rec.ownerInformed = true;
-      const job = rec.job;
-      out.push({
-        id: job.id,
-        command: job.command,
-        status: job.status as JobNotification['status'],
-        exitCode: job.exitCode ?? null,
-        endReason: job.endReason ?? 'exit',
-        durationMs: (job.endedAt ?? Date.now()) - job.startedAt,
-        unreadChars: Math.max(0, rec.output.totalChars - (rec.cursors.get(scope) ?? 0)),
-      });
-      rec.trace?.runtime({
-        event: 'job',
-        phase: 'notified',
-        jobId: job.id,
-        status: job.status,
-        scope,
-      });
+      out.push(this.notify(rec, scope));
     }
     return out;
+  }
+
+  /**
+   * Como `takeNotifications`, pero de un solo job: lo usa la Runtime Inbox, que
+   * ya sabe en qué orden terminó cada uno. `null` si no existe, sigue vivo, no
+   * es de `scope` o su dueño ya lo conoce.
+   */
+  claimNotification(id: string, scope: string): JobNotification | null {
+    const rec = this.records.get(normalizeJobId(id));
+    if (!rec || !this.pendingFor(rec, scope)) return null;
+    return this.notify(rec, scope);
+  }
+
+  private notify(rec: JobRecord, scope: string): JobNotification {
+    rec.ownerInformed = true;
+    const job = rec.job;
+    const notification: JobNotification = {
+      id: job.id,
+      command: job.command,
+      status: job.status as JobNotification['status'],
+      exitCode: job.exitCode ?? null,
+      endReason: job.endReason ?? 'exit',
+      durationMs: (job.endedAt ?? Date.now()) - job.startedAt,
+      unreadChars: Math.max(0, rec.output.totalChars - (rec.cursors.get(scope) ?? 0)),
+    };
+    rec.trace?.runtime({
+      event: 'job',
+      phase: 'notified',
+      jobId: job.id,
+      status: job.status,
+      scope,
+    });
+    return notification;
   }
 
   private pendingFor(rec: JobRecord, scope: string): boolean {

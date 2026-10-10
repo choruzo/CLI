@@ -1,0 +1,156 @@
+{
+  "id": "steering-during-tool",
+  "group": "steering",
+  "title": "Un mensaje del usuario llega mientras corre una tool lenta",
+  "description": "El agente lanza los tests (una tool de varios segundos). Mientras corren, el usuario escribe \"no toques OAuth\". La tool no se cancela: termina, y el mensaje entra con su resultado en la siguiente peticion al modelo.",
+  "difficulty": "basic",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "wait.js": "const name = process.argv[2] || 'wait';\nconst ms = Number(process.argv[3] || 2500);\nsetTimeout(() => {\n  require('fs').writeFileSync(name + '.txt', 'ok');\n  console.log(name + ' finished');\n}, ms);\n",
+      "src/auth.js": "// auth\nmodule.exports = {};\n",
+      "src/oauth.js": "// ORIGINAL oauth\nmodule.exports = {};\n"
+    }
+  },
+  "input": "Revisa auth: ejecuta los tests con `node wait.js tests 3000` y despues marca como revisados los ficheros de src/ anadiendo una primera linea `// reviewed`.",
+  "steering": [
+    {
+      "on": "tool_call_ready",
+      "tool": "exec",
+      "delayMs": 800,
+      "text": "no toques OAuth"
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node wait.js tests 3000"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "src/auth.js",
+            "content": "// reviewed\n// auth\nmodule.exports = {};\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Los tests pasan. He marcado src/auth.js como revisado y no he tocado OAuth, como pediste."
+    }
+  ],
+  "expect": {
+    "description": "La tool termina sin cancelarse, el steering llega en la segunda peticion y OAuth queda intacto.",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "tests.txt",
+        "label": "la tool en curso no se cancelo"
+      },
+      {
+        "type": "file_contains",
+        "path": "src/oauth.js",
+        "value": "ORIGINAL"
+      },
+      {
+        "type": "file_contains",
+        "path": "src/oauth.js",
+        "value": "reviewed",
+        "negate": true
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "tool_called",
+        "tool": "exec",
+        "status": "ok",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 1,
+        "value": "no toques OAuth",
+        "negate": true,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "1. User: no toques OAuth",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "not part of the original request",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "runtime_event",
+        "event": "inbox",
+        "detail": "consume:user-message",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "userSteeringMessages",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "steeringBatches",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolBatchesInvalidatedBySteering",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 3,
+        "mode": "mock"
+      }
+    ],
+    "forbidden": [
+      {
+        "tool": "write_file",
+        "input": "oauth",
+        "label": "modifica OAuth"
+      },
+      {
+        "tool": "edit_file",
+        "input": "oauth",
+        "label": "modifica OAuth"
+      }
+    ]
+  }
+}

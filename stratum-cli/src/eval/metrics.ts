@@ -21,7 +21,12 @@ import {
   type TraceModel,
   type TraceStep,
 } from '../trace/model.js';
-import { TRACE_CAP_JOBS, TRACE_CAP_RUNTIME, type TraceRecord } from '../trace/records.js';
+import {
+  TRACE_CAP_INBOX,
+  TRACE_CAP_JOBS,
+  TRACE_CAP_RUNTIME,
+  type TraceRecord,
+} from '../trace/records.js';
 import { isJobTool } from '../jobs/types.js';
 
 export interface RunMetrics {
@@ -137,6 +142,24 @@ export interface RunMetrics {
   jobNotifications?: number | null;
   /** Bytes que escribieron los jobs (stdout + stderr), se conservasen o no. */
   jobOutputBytes?: number | null;
+  /**
+   * Runtime Inbox (`agent/inbox.ts`): lo que llegó con el agente trabajando.
+   * Opcionales y null en una traza que no la registraba. Son informativas:
+   * `compare` no las juzga, y una llamada que el steering dejó sin ejecutar no
+   * cuenta ni como `toolErrors` ni como `policyBlocks`.
+   */
+  /** Eventos que entraron en la inbox (mensajes del usuario + finales de job). */
+  runtimeUpdatesReceived?: number | null;
+  /** Eventos que un punto seguro entregó al modelo. */
+  runtimeUpdatesConsumed?: number | null;
+  /** Mensajes del usuario enviados con un turno en curso. */
+  userSteeringMessages?: number | null;
+  /** Entregas que llevaban al menos un mensaje del usuario (varios juntos cuentan una). */
+  steeringBatches?: number | null;
+  /** Media de lo que esperó un mensaje del usuario en la cola hasta entregarse. */
+  steeringLatencyMs?: number | null;
+  /** Lotes de tool calls que no se ejecutaron porque el usuario escribió antes del dispatch. */
+  toolBatchesInvalidatedBySteering?: number | null;
 }
 
 /**
@@ -210,6 +233,11 @@ export function buildTraceModel(records: readonly TraceRecord[]): TraceModel {
 /** ¿Registraba esta traza el ciclo de vida de los jobs en segundo plano? */
 export function hasJobEvents(records: readonly TraceRecord[]): boolean {
   return records.some((r) => r.t === 'meta' && r.caps?.includes(TRACE_CAP_JOBS) === true);
+}
+
+/** ¿Registraba esta traza la Runtime Inbox? */
+export function hasInboxEvents(records: readonly TraceRecord[]): boolean {
+  return records.some((r) => r.t === 'meta' && r.caps?.includes(TRACE_CAP_INBOX) === true);
 }
 
 /** ¿Registraba esta traza las decisiones del runtime? (las anteriores al cap, no). */
@@ -316,6 +344,13 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
   };
   let foregroundExec = 0;
   let backgroundExec = 0;
+  const inbox = { received: 0, consumed: 0, user: 0, batches: 0, waitMs: 0, waited: 0 };
+  // Eventos que quedan por ver de la entrega en curso, y si ya llevaba steering.
+  let batchLeft = 0;
+  let batchHasUser = false;
+  // Lotes invalidados: uno por llamada al modelo cuyas tool calls no corrieron.
+  const invalidated = new Set<string>();
+  let lastModel = '';
   const conf = { asked: 0, approved: 0, denied: 0, blocked: 0 };
   let tokens = 0;
   let prompt = 0;
@@ -328,6 +363,7 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
       // Las auxiliares se cuentan aparte (`llm`, más abajo): ni son del turno
       // ni un fallo suyo es un fallo del agente.
       if (isAuxiliaryCall(s)) continue;
+      if (!s.parent) lastModel = s.id;
       llmCalls++;
       if (s.status === 'error') llmErrors++;
       const u = usageOf(s);
@@ -362,6 +398,30 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
           jobs.bytes += Number(s.data.stdoutBytes ?? 0) + Number(s.data.stderrBytes ?? 0);
           if (s.data.outputRead === true) jobRead.set(id, true);
         }
+      } else if (ev === 'inbox') {
+        // Ni aviso ni bloqueo: lo que llegó mientras el agente trabajaba.
+        const isUser = s.data.type === 'user-message';
+        if (s.data.phase === 'enqueue') {
+          inbox.received++;
+          if (isUser) inbox.user++;
+        } else if (s.data.phase === 'consume') {
+          inbox.consumed++;
+          if (batchLeft === 0) {
+            batchLeft = Math.max(1, Number(s.data.batch ?? 1));
+            batchHasUser = false;
+          }
+          batchLeft--;
+          if (isUser) {
+            if (!batchHasUser) inbox.batches++;
+            batchHasUser = true;
+            inbox.waitMs += Number(s.data.waitMs ?? 0);
+            inbox.waited++;
+          }
+        }
+      } else if (ev === 'veto' && s.data.source === 'steering') {
+        // El usuario escribió antes del dispatch: no es una política que
+        // bloquee, es el lote que vuelve al modelo. Se cuenta por lote.
+        invalidated.add(`${s.turn}:${lastModel}`);
       } else if (ev === 'veto') vetoes++;
       else if (ev === 'confirmation') {
         conf.asked++;
@@ -389,6 +449,7 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
   }
   for (const id of [...jobRead.keys()]) closeJob(id);
   const jobsTracked = hasJobEvents(records);
+  const inboxTracked = hasInboxEvents(records);
 
   const closed = model.turns.filter((t) => t.end !== null);
   const cache = cacheSummary(model);
@@ -468,6 +529,13 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
     jobsOutputRead: jobsTracked ? jobsRead : null,
     jobNotifications: jobsTracked ? jobs.notified : null,
     jobOutputBytes: jobsTracked ? jobs.bytes : null,
+    runtimeUpdatesReceived: inboxTracked ? inbox.received : null,
+    runtimeUpdatesConsumed: inboxTracked ? inbox.consumed : null,
+    userSteeringMessages: inboxTracked ? inbox.user : null,
+    steeringBatches: inboxTracked ? inbox.batches : null,
+    steeringLatencyMs:
+      inboxTracked && inbox.waited > 0 ? Math.round(inbox.waitMs / inbox.waited) : null,
+    toolBatchesInvalidatedBySteering: inboxTracked ? invalidated.size : null,
   };
 }
 

@@ -1140,6 +1140,45 @@ haya o no un turno abierto.
 Al salir de Stratum los jobs que sigan vivos se cancelan. En Stratum Desktop no hay jobs: el modo
 asistente no ofrece `exec`.
 
+### 5.12 Steering: escribir mientras el agente trabaja
+
+Con un turno en curso el input **no se bloquea**. Lo que se envía es *steering* (§12.20): no cancela
+nada, se encola y el agente lo incorpora en su siguiente punto seguro.
+
+```
+ You
+ ▏ no toques OAuth
+   [queued as steering]
+
+ Stratum
+ ◎ exec │ 12.4s │ npm test
+
+ ⧗ 1 steering update pending · the agent picks them up at its next safe point
+┌──────────────────────────────────────────────────────────────────────────┐
+│ ❯❯ Agent is working — type to steer it (Enter queues, Ctrl+C cancels)... │
+└──────────────────────────────────────────────────────────────────────────┘
+```
+
+- El mensaje se imprime en el historial con la etiqueta `[queued as steering]`.
+- Sobre el input, el contador de pendientes (`⧗ N steering updates pending`).
+- Cuando el loop los entrega al modelo: `[agent received N user updates]`, y el contador baja.
+- Las tool calls que el agente había emitido sin conocer el mensaje aparecen como `✗ … Not executed:
+  the user sent a new message…`: no se ejecutaron.
+- Un `/comando` o un `@perfil` no se encolan ni se ejecutan con el agente trabajando: aviso de una
+  línea y el texto se queda en el input.
+- Un mensaje de más de 8 000 caracteres no se encola ni se recorta: aviso de una línea (`Too large to
+  steer (N chars, limit 8,000): not sent…`) y el texto **se queda en el input**, para acortarlo o
+  enviarlo entero como turno normal cuando el agente termine. No se envía solo.
+- Si el turno ya estaba cerrando cuando se pulsó Enter, el mensaje no se pierde: sale como turno
+  nuevo en cuanto termina el anterior.
+- Con una confirmación, una tanda de preguntas o una aprobación de plan abierta, el teclado es del
+  gate, como siempre.
+- `Ctrl+C` no cambia: cancela el turno. El steering que quedara sin entregar se conserva (el
+  contador pasa a `delivered with your next message`).
+
+La UI se suscribe a `agent.inbox` (como a los jobs), no a un evento del turno. `stratum run` escribe
+`[agent received N user updates]` por stderr. En Stratum Desktop todavía no hay steering.
+
 ## 6. Paleta de Colores
 
 La paleta es **fija** (no adapta light/dark mode — es una terminal UI, siempre oscura).
@@ -1287,7 +1326,7 @@ Ink detecta `SIGWINCH` y re-renderiza. Los componentes deben usar `useStdout().c
 
 | Atajo | Acción |
 |---|---|
-| `Enter` | Enviar mensaje / seleccionar en dropdown |
+| `Enter` | Enviar mensaje / seleccionar en dropdown. Con el agente trabajando, encola el mensaje como steering (§5.12) |
 | `↑ / ↓` | Navegar historial de inputs enviados en la sesión actual (igual que shell) / navegar dropdown. El historial vive en memoria (`string[]` en el estado de `<InputArea>`); no persiste entre sesiones. |
 | `Esc` | Cerrar dropdown de /comandos / cancelar input |
 | `Ctrl+C` | Interrumpir respuesta del agente en curso (graceful cancel). Con una confirmación, una tanda de preguntas o una aprobación de plan abierta, responde «no» **y** cancela el turno (§12.12); `Esc` responde «no» y deja seguir al agente |

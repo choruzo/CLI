@@ -369,7 +369,8 @@ const endOf = (s: TraceStep, now: number): number => s.end ?? now;
 
 /** Aviso del ciclo de vida de un job en segundo plano (`TraceJobEvent`). */
 export function isJobNotice(s: TraceStep): boolean {
-  return s.kind === 'notice' && s.data.event === 'job';
+  // El final de un job también deja su entrada en la Runtime Inbox.
+  return s.kind === 'notice' && (s.data.event === 'job' || s.data.event === 'inbox');
 }
 
 /**

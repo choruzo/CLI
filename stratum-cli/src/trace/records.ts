@@ -45,6 +45,13 @@ export const TRACE_CAP_LLM_ORIGIN = 'llm-origin';
 export const TRACE_CAP_JOBS = 'jobs';
 
 /**
+ * `meta.caps`: el escritor registra la Runtime Inbox (`TraceInboxEvent`) y las
+ * llamadas que el steering dejó sin ejecutar. Sin él, esas métricas son
+ * desconocidas.
+ */
+export const TRACE_CAP_INBOX = 'inbox';
+
+/**
  * Quién hizo una llamada al LLM (`data.origin` de un paso `model`):
  *  - `agent` — el loop del agente principal;
  *  - `subagent` — el loop de un subagente (su paso lleva además `parent`);
@@ -84,7 +91,10 @@ export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlm
  *    podía contestar (sin TTY, `--deny-destructive`)
  *  - `veto` — la llamada se rechazó sin preguntar: `preflight` de la tool, modo
  *    read-only, política de entorno que no se pudo evaluar, tool fuera del
- *    toolset de la sesión (`toolset`) o cambio fuera de un plan aprobado (`plan`)
+ *    toolset de la sesión (`toolset`), cambio fuera de un plan aprobado (`plan`)
+ *    o llamada que no se ejecutó porque el usuario escribió antes de que
+ *    corriese (`steering`: el lote entero vuelve al modelo)
+ *  - `inbox` — Runtime Inbox (`agent/inbox.ts`): ver `TraceInboxEvent`
  *  - `retry` — reintento de una llamada al modelo antes del primer chunk
  *  - `job` — ciclo de vida de un job en segundo plano (`exec` con `background:
  *    true`, `jobs/manager.ts`): `created` → `started` (con `pid`) → `ended`
@@ -94,6 +104,7 @@ export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlm
  *    del agente. Nunca llevan la salida del job, solo recuentos.
  */
 export type TraceRuntimeEvent =
+  | TraceInboxEvent
   | {
       event: 'confirmation';
       decision: 'approved' | 'allow-all' | 'denied' | 'blocked';
@@ -106,13 +117,56 @@ export type TraceRuntimeEvent =
     }
   | {
       event: 'veto';
-      source: 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan';
+      source: 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering';
       tool: string;
       callId: string;
       reason: string;
     }
   | { event: 'retry'; attempt: number; error: string }
   | TraceJobEvent;
+
+/**
+ * Runtime Inbox: `enqueue` cuando llega un evento (un mensaje del usuario con
+ * el agente trabajando, o el final de un job), `consume` cuando un punto seguro
+ * del loop lo entrega al modelo y `drop` si se descarta sin entregarlo. De un
+ * mensaje del usuario se guarda el **tamaño** (`chars`), nunca el texto: el
+ * contenido queda en el historial al entregarse y la traza no lo duplica.
+ */
+export type TraceInboxEvent =
+  | {
+      event: 'inbox';
+      phase: 'enqueue';
+      id: string;
+      type: string;
+      scope: string;
+      chars?: number;
+      jobId?: string;
+    }
+  | {
+      event: 'inbox';
+      phase: 'consume';
+      id: string;
+      type: string;
+      scope: string;
+      /** Tiempo en la cola: de que llegó a que se entregó. */
+      waitMs: number;
+      /** Eventos entregados juntos en ese punto seguro. */
+      batch: number;
+      chars?: number;
+      jobId?: string;
+      /** Se entregó al abrir el turno siguiente: el suyo se cortó antes. */
+      late?: boolean;
+    }
+  | {
+      event: 'inbox';
+      phase: 'drop';
+      id: string;
+      type: string;
+      scope: string;
+      reason: string;
+      /** Tamaño de un mensaje rechazado por grande (`too-large`): nunca su texto. */
+      chars?: number;
+    };
 
 export type TraceJobEvent =
   | { event: 'job'; phase: 'created'; jobId: string; command: string; cwd: string; scope: string }

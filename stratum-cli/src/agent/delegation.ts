@@ -214,6 +214,7 @@ export async function* executeDelegations(
             readOnly: opts?.readOnly,
             planApproved: opts?.planApproved,
             jobs: opts?.jobs,
+            inbox: opts?.inbox,
             makeRouter: opts?.makeSubagentRouter
               ? () => opts.makeSubagentRouter!(job.profile)
               : undefined,
@@ -235,6 +236,8 @@ export async function* executeDelegations(
         // El hijo terminó: sus jobs vivos se cancelan con él (nadie quedaría
         // para leerlos ni para pararlos). Los terminados siguen a la vista del padre.
         await opts?.jobs?.closeScope(job.subId);
+        // Y lo que su inbox tuviera pendiente ya no tiene quién lo lea.
+        opts?.inbox?.closeScope(job.subId);
         result = redactSubagentResult(result, ctx.config);
         results.set(job.subId, result);
         opts?.onSubagentPersist?.({

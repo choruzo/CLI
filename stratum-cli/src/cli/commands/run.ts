@@ -31,6 +31,7 @@ import { StratumAgent } from '../../agent/core.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
+import { createSteerDriver, loadSteerScript } from '../steer-script.js';
 import {
   configureLogging,
   flushLogging,
@@ -331,7 +332,22 @@ export const runCommand = new Command('run')
       // Jobs en segundo plano: su inicio y su fin se cuentan por stderr cuando
       // ocurren (un job puede terminar mientras el modelo está pensando). Al
       // acabar el run, los que sigan vivos se cancelan en `closeExecRuntime`.
+      // Guion de steering (`STRATUM_STEER_SCRIPT`, lo usa `stratum eval`): envía
+      // mensajes o cancela en puntos concretos del turno, como haría el usuario
+      // en el chat. Sin la variable no hay driver y nada cambia.
+      const steerScript = loadSteerScript();
+      const steer = steerScript
+        ? createSteerDriver(steerScript, {
+            enqueue: (text) => agent.enqueueUserMessage(text).status,
+            cancel: () => controller.abort(),
+            log: (line) => process.stderr.write(`${line}\n`),
+          })
+        : null;
+
       agent.jobs?.subscribe((ev) => {
+        if (ev.type === 'started' || ev.type === 'ended') {
+          steer?.observe({ type: ev.type === 'started' ? 'job_started' : 'job_ended' });
+        }
         if (ev.type === 'started') {
           process.stderr.write(
             `[background job #${ev.job.id} started: ${shortJobCommand(ev.job.command, 80)}]\n`,
@@ -387,9 +403,17 @@ export const runCommand = new Command('run')
         };
         const events = opts.delegate ? agent.runDelegate(opts.delegate, task, runOpts) : chained();
         for await (const event of events) {
+          steer?.observe(event);
           switch (event.type) {
             case 'text_delta':
               finalText += event.delta;
+              break;
+
+            case 'runtime_updates':
+              if (event.userMessages.length > 0) {
+                const n = event.userMessages.length;
+                process.stderr.write(`[agent received ${n} user update${n === 1 ? '' : 's'}]\n`);
+              }
               break;
 
             case 'tool_call_start':
@@ -527,6 +551,7 @@ export const runCommand = new Command('run')
           }
         }
       } catch (err) {
+        steer?.dispose();
         await mcpManager.shutdownAll();
         await closeExecRuntime();
         getLogger('cli').error('run aborted with error', { err });
@@ -537,6 +562,7 @@ export const runCommand = new Command('run')
         process.exit(1);
       }
 
+      steer?.dispose();
       await mcpManager.shutdownAll();
       // Hito 9 (§12.12): cerrar los sockets SSH antes de salir.
       await closeExecRuntime();

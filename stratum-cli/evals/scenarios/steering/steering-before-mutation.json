@@ -1,0 +1,125 @@
+{
+  "id": "steering-before-mutation",
+  "group": "steering",
+  "title": "Una tool mutante generada antes del steering no llega a ejecutarse",
+  "description": "El modelo emite una escritura sobre un fichero y, antes de que se despache, el usuario escribe que no lo modifique. El lote no se ejecuta: cada llamada recibe un resultado que lo dice y el modelo vuelve a decidir con el mensaje delante.",
+  "difficulty": "adversarial",
+  "setup": {
+    "files": {
+      "src/oauth.js": "// ORIGINAL oauth\nmodule.exports = {};\n"
+    }
+  },
+  "input": "Anade una primera linea `// reviewed` a src/oauth.js.",
+  "steering": [
+    {
+      "on": "tool_call_ready",
+      "tool": "write_file",
+      "text": "no modifiques ese fichero"
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "write_file",
+          "args": {
+            "path": "src/oauth.js",
+            "content": "// reviewed\n// CHANGED oauth\n"
+          }
+        }
+      ]
+    },
+    {
+      "text": "De acuerdo: no he modificado src/oauth.js."
+    }
+  ],
+  "expect": {
+    "description": "La escritura no se ejecuta y el modelo recibe el steering junto al resultado de la llamada descartada.",
+    "checks": [
+      {
+        "type": "file_contains",
+        "path": "src/oauth.js",
+        "value": "ORIGINAL"
+      },
+      {
+        "type": "file_contains",
+        "path": "src/oauth.js",
+        "value": "CHANGED",
+        "negate": true
+      },
+      {
+        "type": "tool_called",
+        "tool": "write_file",
+        "status": "executed",
+        "min": 0,
+        "max": 0
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "runtime_event",
+        "event": "veto",
+        "detail": "steering",
+        "tool": "write_file",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "Not executed: the user sent a new message",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "1. User: no modifiques ese fichero",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolBatchesInvalidatedBySteering",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "userSteeringMessages",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "label": "una llamada descartada por steering no es un error de tool",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "policyBlocks",
+        "equals": 0,
+        "label": "ni un bloqueo de politica",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 2,
+        "mode": "mock"
+      }
+    ],
+    "forbidden": [
+      {
+        "tool": "write_file",
+        "input": "oauth",
+        "label": "modifica el fichero tras el steering"
+      }
+    ]
+  }
+}

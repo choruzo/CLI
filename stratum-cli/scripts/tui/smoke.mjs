@@ -122,6 +122,66 @@ async function cancelAndExit() {
       assert.doesNotMatch(t.screen(), /once doce/);
     });
 
+    await check('steering: un mensaje a mitad de turno se encola y el turno sigue', t, async () => {
+      const before = mock.requests.length;
+      await t.submit('responde lento otra vez');
+      await t.waitFor(/type to steer it/);
+      await t.waitFor(/dos tres/);
+      await t.submit('no toques OAuth');
+      await t.waitFor(/queued as steering/);
+      await t.waitFor(/1 steering update pending/);
+      // No se canceló nada: la respuesta en curso termina y el modelo recibe el
+      // mensaje en una segunda llamada del mismo turno.
+      await t.waitFor(/agent received 1 user update/, 15000);
+      await t.waitFor(/Type a message or \/ for commands/, 20000);
+      assert.equal(mock.requests.length, before + 2);
+      assert.doesNotMatch(t.screen(), /steering update pending/);
+    });
+
+    await check(
+      'steering demasiado grande: avisa, no lo envía y lo deja en el input',
+      t,
+      async () => {
+        const before = mock.requests.length;
+        const tail = 'Y NO TOQUES OAUTH';
+        const huge = `Cambia el plan. ${'detalle '.repeat(1300)}${tail}`;
+        await t.submit('responde despacio');
+        await t.waitFor(/dos tres/);
+        // Por trozos: un pegado grande de golpe pierde caracteres en el pty.
+        for (let i = 0; i < huge.length; i += 200) {
+          t.paste(huge.slice(i, i + 200));
+          await sleep(40);
+        }
+        await t.waitFor(/NO TOQUES OAUTH/);
+        await t.key('enter');
+        await t.waitFor(/Too large to steer \([\d,]+ chars, limit 8,000\): not sent/);
+        // Con el input más alto que la pantalla Ink repinta entero y una lectura
+        // suelta puede pillarla en blanco: se espera, no se mira una sola vez.
+        await t.waitGone(/steering update pending/);
+        // El turno termina sin haberlo visto, ni entero ni recortado. El input tapa
+        // el placeholder: el fin de turno se reconoce por su última palabra.
+        const turns = () => (t.scrollback().match(/once doce/g) ?? []).length;
+        const seen = turns();
+        for (let i = 0; i < 150 && turns() === seen; i++) await sleep(200);
+        await sleep(1500);
+        assert.equal(mock.requests.length, before + 1);
+        assert.doesNotMatch(JSON.stringify(mock.requests), /Cambia el plan/);
+        await t.waitFor(/NO TOQUES OAUTH/);
+        // Sigue en el input: Enter lo envía entero, como turno normal.
+        await t.key('enter');
+        for (let i = 0; i < 60 && mock.requests.length < before + 2; i++) await sleep(200);
+        const sent = mock.requests
+          .at(-1)
+          .messages.filter((m) => m.role === 'user')
+          .at(-1).content;
+        assert.ok(
+          sent.length > 8000 && sent.endsWith(tail) && !sent.includes('runtime_updates'),
+          `turno normal: ${mock.requests.length - before} llamadas, ${sent.length} chars, …${sent.slice(-40)}`,
+        );
+        await t.waitFor(/Type a message or \/ for commands/, 20000);
+      },
+    );
+
     await check('/help se resuelve en local, sin llamar al modelo', t, async () => {
       const before = mock.requests.length;
       await t.submit('/help');

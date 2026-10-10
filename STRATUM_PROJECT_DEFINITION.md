@@ -2802,3 +2802,68 @@ Al pasar un job a un estado terminal:
 #### Fuera de alcance
 
 Persistencia tras reiniciar, daemon, jobs remotos por SSH, reanudación tras un crash, despertador automático del modelo y planificador.
+
+### 12.20 — Runtime asíncrono: Runtime Inbox y steering del usuario
+
+El usuario puede escribir mientras el agente trabaja. El mensaje **no cancela** el turno ni lanza una llamada al modelo: queda en la *Runtime Inbox* de la sesión y entra en el razonamiento del agente en su siguiente punto seguro, dentro del mismo turno. Cancelar sigue siendo otra cosa (Ctrl+C → `AbortSignal`) y nunca se infiere del texto.
+
+#### La cola (`agent/inbox.ts`)
+
+`RuntimeInbox`, una por `StratumAgent` (`agent.inbox`), sin persistencia. Eventos:
+
+| Evento | Scope | Lo encola |
+|---|---|---|
+| `user-message` | siempre `main` | `StratumAgent.enqueueUserMessage(text)` |
+| `job-completed` · `job-failed` · `job-cancelled` | el del dueño del job | la propia inbox, suscrita a `JobManager.subscribe` |
+
+Invariantes:
+
+- **FIFO** por orden de llegada, y cada evento se entrega **una sola vez** (`drain(scope)` lo saca de la cola).
+- **Por scope**: un loop drena con su `jobScope`. Los mensajes del usuario son del principal; un subagente solo ve los finales de sus propios jobs, y al terminar se cierra su scope (`closeScope`: lo pendiente se descarta).
+- **Encolar no hace nada más**: ni aborta la tool o el stream en curso, ni llama al modelo.
+- `enqueueUserMessage` devuelve un resultado con `status`, y **solo `accepted` guarda algo**: `not-accepting` (no hay turno que pueda incorporar el mensaje; quien llama abre entonces un turno normal), `empty` y `too-large`. Un mensaje de más de `MAX_STEERING_CHARS` (8 000) **no se recorta ni se encola en parte** —a una instrucción sin su final le puede faltar justo la restricción—: se rechaza entero, la traza anota un `drop` `too-large` con su tamaño y decide quien llama; no se abre ninguna llamada al modelo. Sin turno activo no se mira el tamaño: como turno normal no tiene ese tope. Sin inbox (`RunOptions.inbox` ausente: un `ReactLoop` suelto) el comportamiento es el anterior a este hito.
+- No hay hilos: «llegar mientras el loop trabaja» es un callback entre dos `await`. Lo que evita perder un mensaje es que comprobar-y-cerrar sea **una operación síncrona** (`sealIfIdle`).
+
+Los jobs siguen siendo del `JobManager` (`subscribe`, ownership y `takeNotifications` no cambian). La inbox apunta *cuándo* terminó cada uno, para ordenarlo con los mensajes, y al drenar pregunta al manager si su dueño aún no lo sabe (`claimNotification`): un job que el agente ya vio con una tool sale de la cola sin contarse.
+
+#### Puntos seguros del loop
+
+| # | Punto | Qué hace |
+|---|---|---|
+| 1 | **Antes de componer cada petición** (inicio de iteración, tras la compresión) | **Entrega**: `drain(scope)` y un único bloque `<runtime_updates>` con todo lo que llegó desde la petición anterior, en orden. |
+| 2 | **Antes del dispatch** (stream terminado, tool calls listas) | Si hay steering pendiente, **no se ejecuta nada del lote**: cada tool call recibe `Not executed: the user sent a new message…` y el loop pasa a la iteración siguiente, que entrega el mensaje (punto 1). Solo el principal. |
+| 3 | **Antes de `done(stop)`** | `sealIfIdle()`: con steering pendiente el turno **no termina** y sigue con otra iteración; sin él, la inbox deja de aceptar steering en esa misma llamada. |
+| 4 | Tras un lote de tools, tras los subagentes, antes de la siguiente iteración | No entregan por su cuenta: desembocan en el punto 1, el único desde el que algo puede llegar al modelo. Así, lo que llega antes de la misma petición viaja junto. |
+
+Una tool en ejecución nunca se interrumpe para aplicar steering, y un stream en curso tampoco: se deja terminar la respuesta y se aplica el punto 2 o el 3.
+
+La regla del punto 2 es única a propósito —tampoco corren las lecturas, las tools de control ni las delegaciones del lote—: cuesta una llamada más y a cambio ninguna acción generada sin conocer el mensaje sale adelante. Va **antes** de guardas, confirmaciones y políticas de entorno, que no cambian. En la traza es un `veto` con `source: 'steering'`; no cuenta como `toolErrors` ni como `policyBlocks`.
+
+Un job que termina **no** retiene el turno ni fuerza una llamada: solo el steering del usuario lo hace.
+
+#### Cómo entra en el contexto
+
+```
+<runtime_updates>
+Runtime updates since your previous model call, oldest first. The user messages below were sent while you were already working on the request above: they are newer than it, they are not part of the original request, and where they conflict with it they take precedence. …
+1. User: no toques OAuth
+2. Background job #3 (npm test) failed (exit 1) after 38.2s. …
+</runtime_updates>
+```
+
+- Se **anexa al último `user` o `tool`** (`appendRuntimeNotice`): no es un `user` nuevo, no toca el system prompt y no reescribe nada que el modelo ya hubiera visto, así que ni rompe la alternancia ni invalida el prefijo de caché. La petición original queda literal: «revisa auth» + un aviso posterior no es «revisa auth y no toques OAuth».
+- Tras una respuesta sin tools (punto 3) no hay dónde anexar: el bloque es un `user` propio. `ContextManager` no lo toma por la tarea —un `user` que empieza por `<runtime_updates>` ni es el ancla de compresión ni cuenta como que la cola ya la contiene— y la traza registra de él solo el tamaño.
+- Varios mensajes antes del mismo punto seguro van juntos y numerados: una llamada por lote, no por mensaje.
+- **Encuadre**: el texto de un mensaje no puede romper el bloque. `escapeRuntimeUpdatesText` cambia a `&lt;` el `<` de un `<runtime_updates` o `</runtime_updates` que venga dentro (sin distinguir mayúsculas y tolerando espacios), y **solo eso**: otras etiquetas, `&` o código van tal cual, porque se protege la serialización, no se sanea la instrucción. Es reversible (`unescapeRuntimeUpdatesText`; un `&lt;runtime_updates` ya escrito así gana un `amp;`). Cada línea de continuación va sangrada bajo su número, conservando el salto de línea original, así que ninguna línea del usuario empieza en la columna 0 ni puede pasar por otro ítem o por el cierre. La línea de un job (que lleva su comando) pasa por el mismo escape.
+
+#### Turno cortado
+
+El steering que un turno cancelado, con error o agotado no llegó a entregar sigue en la inbox. `StratumAgent.run` lo recoge al abrir el turno siguiente y lo pone **delante** de la petición nueva (`formatUndeliveredUserMessages` + `pushUserInput`), diciendo que es anterior a ella. `/clear` y cargar otra sesión lo descartan.
+
+#### Traza y métricas
+
+`TraceRuntimeEvent` `inbox` (`meta.caps: ['inbox']`): `enqueue`, `consume` (`waitMs`, `batch`, `late` si se entregó al abrir el turno siguiente) y `drop` (`history-cleared`, `scope-closed`, `already-known`, y `too-large` —con `chars`— para un mensaje rechazado por grande, que nunca llegó a encolarse). De un mensaje del usuario se guarda `id`, `scope` y `chars`, **nunca el texto**. Métricas: `runtimeUpdatesReceived`, `runtimeUpdatesConsumed`, `userSteeringMessages`, `steeringBatches`, `steeringLatencyMs`, `toolBatchesInvalidatedBySteering`; informativas, `eval compare` no las juzga.
+
+#### Fuera de alcance
+
+Prioridades o clasificación de mensajes (todo mensaje es steering), interrupción de streams o de tools, despertador automático del modelo, persistencia de la cola, steering dirigido a un subagente, varios usuarios e inbox remota. En Stratum Desktop el canal no lleva todavía la trama de steering.

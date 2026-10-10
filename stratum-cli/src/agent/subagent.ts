@@ -31,6 +31,7 @@ import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
 import type { JobManager } from '../jobs/manager.js';
+import type { RuntimeInbox } from './inbox.js';
 import type { TraceScope } from '../trace/recorder.js';
 
 const log = getLogger('agent.subagent');
@@ -78,6 +79,8 @@ export interface RunSubagentOptions {
    * (su id) y solo ve los suyos; quien lo lanza cierra ese scope al terminar.
    */
   jobs?: JobManager;
+  /** Runtime Inbox de la sesión: el hijo solo drena los eventos de su scope. */
+  inbox?: RuntimeInbox;
   /** Hito 17 — el padre trabaja bajo un plan aprobado (satisface `requirePlan`). */
   planApproved?: boolean;
   /** Scope de traza de este hijo (`TraceScope.child`): sus pasos cuelgan del subagente. */
@@ -228,6 +231,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     // Jobs en segundo plano: el mismo manager de la sesión, con scope propio.
     jobs: opts.jobs,
     jobScope: task.id,
+    inbox: opts.inbox,
     maxIterations: profile.budget.maxIterations,
     maxTokens: profile.budget.maxTokens,
     trace: opts.trace,

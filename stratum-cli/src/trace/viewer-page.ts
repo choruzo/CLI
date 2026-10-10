@@ -201,7 +201,7 @@ footer {
     return s.parent ? 'subagent' : 'agent';
   }
   function isAux(s) { var o = originOf(s); return o !== null && o !== 'agent' && o !== 'subagent'; }
-  function isJob(s) { return s.kind === 'notice' && !!s.data && s.data.event === 'job'; }
+  function isJob(s) { return s.kind === 'notice' && !!s.data && (s.data.event === 'job' || s.data.event === 'inbox'); }
   function isPrimary(s) { var o = originOf(s); return o === 'agent' || o === 'subagent'; }
   // Auxiliar lanzada con el turno ya cerrado: se pinta, pero no alarga el turno.
   function isBackground(s) {

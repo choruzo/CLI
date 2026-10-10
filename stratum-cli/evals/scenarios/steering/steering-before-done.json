@@ -1,0 +1,86 @@
+{
+  "id": "steering-before-done",
+  "group": "steering",
+  "title": "Un mensaje que llega cuando el modelo iba a terminar no se pierde",
+  "description": "El modelo esta escribiendo lo que iba a ser su respuesta final cuando el usuario envia otro mensaje. El turno no se cierra: el mensaje se incorpora y el agente continua en el mismo turno.",
+  "difficulty": "adversarial",
+  "input": "Resume en una frase que revisarias en un modulo de autenticacion.",
+  "steering": [
+    {
+      "on": "text_delta",
+      "text": "anade tambien tests de permisos"
+    }
+  ],
+  "script": [
+    {
+      "text": "Revisaria el manejo de sesiones y la caducidad de tokens."
+    },
+    {
+      "text": "Y, como pides, tambien anadiria tests de permisos."
+    }
+  ],
+  "expect": {
+    "description": "Un solo turno con dos llamadas: la segunda ve el mensaje como un aviso posterior, no como parte de la peticion.",
+    "checks": [
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "output_contains",
+        "value": "tests de permisos"
+      },
+      {
+        "type": "output_contains",
+        "value": "caducidad de tokens",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "turns",
+        "equals": 1,
+        "label": "el mensaje no abre un turno aparte",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 1,
+        "value": "anade tambien tests de permisos",
+        "negate": true,
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "1. User: anade tambien tests de permisos",
+        "role": "user",
+        "mode": "mock"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "Revisaria el manejo de sesiones",
+        "role": "assistant",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "steeringBatches",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolBatchesInvalidatedBySteering",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

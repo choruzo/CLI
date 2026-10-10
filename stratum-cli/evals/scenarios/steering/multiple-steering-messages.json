@@ -1,0 +1,101 @@
+{
+  "id": "multiple-steering-messages",
+  "group": "steering",
+  "title": "Tres mensajes antes del mismo punto seguro llegan juntos y en orden",
+  "description": "Durante una tool lenta el usuario envia tres mensajes seguidos. El modelo los recibe en un solo bloque, numerados en el orden en que llegaron, con una sola llamada mas.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "files": {
+      "wait.js": "const name = process.argv[2] || 'wait';\nconst ms = Number(process.argv[3] || 2500);\nsetTimeout(() => {\n  require('fs').writeFileSync(name + '.txt', 'ok');\n  console.log(name + ' finished');\n}, ms);\n"
+    }
+  },
+  "input": "Ejecuta `node wait.js build 3000` y dime como ha ido.",
+  "steering": [
+    {
+      "on": "tool_call_ready",
+      "tool": "exec",
+      "delayMs": 600,
+      "text": "no toques OAuth"
+    },
+    {
+      "on": "tool_call_ready",
+      "tool": "exec",
+      "delayMs": 900,
+      "text": "prioriza backend"
+    },
+    {
+      "on": "tool_call_ready",
+      "tool": "exec",
+      "delayMs": 1200,
+      "text": "y no cambies la API publica"
+    }
+  ],
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node wait.js build 3000"
+          }
+        }
+      ]
+    },
+    {
+      "text": "El build ha terminado bien. Anotado: sin tocar OAuth, backend primero y la API publica no cambia."
+    }
+  ],
+  "expect": {
+    "description": "Los tres mensajes entran en un unico lote, en orden, sin una llamada por mensaje.",
+    "checks": [
+      {
+        "type": "file_exists",
+        "path": "build.txt"
+      },
+      {
+        "type": "stop_reason",
+        "equals": "stop"
+      },
+      {
+        "type": "request_contains",
+        "request": 2,
+        "value": "1. User: no toques OAuth\n2. User: prioriza backend\n3. User: y no cambies la API publica",
+        "role": "tool",
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "userSteeringMessages",
+        "equals": 3,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "runtimeUpdatesConsumed",
+        "equals": 3,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "steeringBatches",
+        "equals": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "llmCalls",
+        "equals": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "equals": 0,
+        "mode": "mock"
+      }
+    ]
+  }
+}

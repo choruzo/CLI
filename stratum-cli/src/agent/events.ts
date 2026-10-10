@@ -57,6 +57,11 @@ export type AgentEvent =
   // El cambio de estado en sí no viaja como evento del turno — puede ocurrir
   // sin turno abierto —: la UI lo recibe del `JobManager`.
   | { type: 'job_notice'; jobs: JobNoticeItem[] }
+  // Runtime Inbox: un punto seguro del loop acaba de entregar al modelo lo que
+  // llegó mientras trabajaba. `userMessages` son los mensajes de steering del
+  // usuario (por id; el texto lo tiene quien los envió) y `jobs`, cuántos
+  // finales de job iban en el mismo lote (su detalle viaja en `job_notice`).
+  | { type: 'runtime_updates'; userMessages: { id: string; chars: number }[]; jobs: number }
   | { type: 'error'; message: string; fatal: boolean }
   | {
       type: 'done';

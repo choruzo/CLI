@@ -1,5 +1,6 @@
 import React from 'react';
-import { Box, useStdout } from 'ink';
+import { Box, Text, useStdout } from 'ink';
+import { theme } from './theme.js';
 import { StatusBar } from './StatusBar.js';
 import type { EnvironmentBadge, ProviderStatus } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
@@ -88,6 +89,10 @@ interface Props {
   pendingQuestions?: QuestionItem[] | null;
   onQuestionsSubmit?: (answers: QuestionAnswer[]) => void;
   onQuestionsCancel?: () => void;
+  /** Mensajes del usuario encolados para el turno en curso y aún sin entregar. */
+  pendingSteering?: number;
+  /** Aviso de una línea sobre el input (p. ej. por qué no se encoló algo). */
+  inputHint?: string | null;
 }
 
 export function ConversationView({
@@ -132,8 +137,14 @@ export function ConversationView({
   pendingQuestions,
   onQuestionsSubmit,
   onQuestionsCancel,
+  pendingSteering = 0,
+  inputHint,
 }: Props) {
   const liveNow = useLiveClock(thinking);
+  // Un gate (confirmación, preguntas, aprobación de plan) es dueño del teclado.
+  const gateOpen = !!pendingConfirm || !!pendingQuestions?.length || !!pendingApproval;
+  // Con el agente trabajando el input sigue vivo: lo enviado es steering.
+  const steerable = thinking && !gateOpen && !fatalError;
   const { stdout } = useStdout();
   const terminalRows = stdout.rows ?? 24;
   const panelMaxSteps = Math.max(2, Math.min(5, Math.floor(terminalRows / 5)));
@@ -205,14 +216,29 @@ export function ConversationView({
       )}
       {overlay}
       {!overlay && palette}
+      {!overlay && pendingSteering > 0 && (
+        <Text color={theme.warning}>
+          {' '}
+          ⧗ {pendingSteering} steering {pendingSteering === 1 ? 'update' : 'updates'} pending
+          <Text color={theme.textMuted}>
+            {thinking
+              ? ' · the agent picks them up at its next safe point'
+              : ' · delivered with your next message'}
+          </Text>
+        </Text>
+      )}
       {!overlay && (
         <InputArea
           value={inputValue}
           onChange={onInputChange}
           onSubmit={onInputSubmit}
-          disabled={thinking || !!pendingConfirm || !!pendingQuestions?.length || !!fatalError}
+          disabled={gateOpen || !!fatalError || (thinking && !steerable)}
+          steering={steerable}
         />
       )}
+      {/* Debajo del input: un texto largo lo hace más alto que la pantalla, y un
+          aviso encima («demasiado grande para steering») quedaría fuera de la vista. */}
+      {!overlay && inputHint && <Text color={theme.warning}> {inputHint}</Text>}
     </Box>
   );
 }

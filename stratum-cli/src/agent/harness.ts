@@ -45,7 +45,9 @@ import { TODO_TOOL } from '../tools/todo.js';
 import { untilAborted } from './concurrency.js';
 import { CANCELLED_BY_USER, appendRuntimeNotice } from './cancel.js';
 import { MAIN_JOB_SCOPE } from '../jobs/types.js';
-import { formatJobNotifications } from '../tools/jobs.js';
+import { formatJobNotificationLine, formatJobNotifications } from '../tools/jobs.js';
+import { SUPERSEDED_BY_STEERING, formatRuntimeUpdates, isRuntimeUpdatesMessage } from './inbox.js';
+import type { JobNotification } from '../jobs/types.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import {
   TddError,
@@ -372,11 +374,16 @@ export class ContextManager {
     if (assistants < this.keepRounds) tailStart = 1;
     if (tailStart > 1 && messages[tailStart - 1]?.role === 'user') tailStart--;
 
+    // Un `user` que solo lleva avisos del runtime (steering entregado tras una
+    // respuesta sin tools) no es la tarea: ni cuenta como que la cola ya la
+    // contiene, ni puede ser el ancla. La tarea sigue siendo la petición real.
+    const isTask = (m: Message | undefined): boolean =>
+      m?.role === 'user' && !isRuntimeUpdatesMessage(m.content);
     let anchor: number | null = null;
-    const tailHasUser = messages.slice(tailStart).some((m) => m.role === 'user');
+    const tailHasUser = messages.slice(tailStart).some(isTask);
     if (!tailHasUser) {
       for (let i = tailStart - 1; i > 0; i--) {
-        if (messages[i]?.role === 'user') {
+        if (isTask(messages[i])) {
           anchor = i;
           break;
         }
@@ -805,6 +812,7 @@ export class ReactLoop {
     // `requirePlan` escala a modo plan una sola vez por turno.
     let planEscalated = false;
     const jobScope = opts?.jobScope ?? MAIN_JOB_SCOPE;
+    const inbox = opts?.inbox;
 
     // Hito 2.5 (F7): la tanda de preguntas es ÚNICA por run. Una segunda llamada
     // a `question` se rechaza con tool_error recuperable para que un modelo
@@ -946,12 +954,47 @@ export class ReactLoop {
       // escribió el usuario) o a mitad de uno (acompaña al último resultado de
       // tool). Nunca se lanza una llamada al modelo solo para avisar: un job
       // que termina con el agente parado espera al siguiente turno.
-      const jobNotices = opts?.jobs?.takeNotifications(jobScope) ?? [];
+      //
+      // Runtime Inbox — este es EL punto de entrega: lo que llegó desde la
+      // petición anterior (steering del usuario y finales de job, en orden de
+      // llegada) entra aquí, junto, en un solo bloque. Los demás puntos seguros
+      // del loop (tras un lote de tools, tras los subagentes, antes de cerrar)
+      // no entregan nada por su cuenta: desembocan en este, que es el único
+      // sitio desde el que algo puede llegar al modelo, y así todo lo que
+      // llegó antes de la misma petición viaja junto.
+      let jobNotices: JobNotification[];
+      if (inbox) {
+        const batch = inbox.drain(jobScope, opts?.trace);
+        jobNotices = batch?.jobs ?? [];
+        if (batch) {
+          appendRuntimeNotice(
+            this.messages,
+            formatRuntimeUpdates(batch, (n) =>
+              redactText(formatJobNotificationLine(n), this.config),
+            ),
+          );
+          loopLog.info('runtime updates delivered', {
+            iter,
+            user: batch.userMessages.length,
+            jobs: batch.jobs.length,
+          });
+          yield {
+            type: 'runtime_updates',
+            userMessages: batch.userMessages.map((m) => ({ id: m.id, chars: m.text.length })),
+            jobs: batch.jobs.length,
+          };
+        }
+      } else {
+        // Sin inbox (un loop suelto, tests): el aviso de jobs de siempre.
+        jobNotices = opts?.jobs?.takeNotifications(jobScope) ?? [];
+        if (jobNotices.length > 0) {
+          appendRuntimeNotice(
+            this.messages,
+            redactText(formatJobNotifications(jobNotices), this.config),
+          );
+        }
+      }
       if (jobNotices.length > 0) {
-        appendRuntimeNotice(
-          this.messages,
-          redactText(formatJobNotifications(jobNotices), this.config),
-        );
         yield {
           type: 'job_notice',
           jobs: jobNotices.map((n) => ({
@@ -1203,6 +1246,15 @@ export class ReactLoop {
 
       // Parar solo cuando no hay ningún tool call (ni válido ni con parse error)
       if (readyCalls.length === 0 && parseErrors.length === 0) {
+        // Punto seguro antes de cerrar: si el usuario escribió mientras el
+        // modelo generaba esta respuesta, el turno NO termina — la siguiente
+        // iteración le entrega el mensaje. Comprobar y dejar de aceptar es una
+        // sola operación síncrona: después de ella ningún mensaje se encola
+        // contra un turno que ya ha dicho `done`.
+        if (inbox && !inbox.sealIfIdle(jobScope)) {
+          loopLog.info('steering pending at end of turn: continuing', { iter });
+          continue;
+        }
         loopLog.debug('done', { iter, stopReason: 'stop', textChars: assistantText.length });
         yield { type: 'done', stopReason: 'stop' };
         return;
@@ -1231,6 +1283,34 @@ export class ReactLoop {
             ),
           ),
         );
+      }
+
+      // -----------------------------------------------------------------------
+      // Punto seguro antes del dispatch. Estas tool calls se generaron sin
+      // conocer lo que el usuario escribió mientras el modelo respondía: puede
+      // que el mensaje las invalide («no toques ese fichero»). Regla única y
+      // conservadora: con steering pendiente NO se ejecuta nada del lote —ni
+      // tools de control, ni delegaciones, ni lecturas—; cada llamada recibe un
+      // resultado que lo dice y el modelo decide de nuevo con el mensaje
+      // delante. Cuesta una llamada más; a cambio, ninguna mutación sale
+      // adelante por delante de una corrección del usuario. No toca guardas,
+      // confirmaciones ni políticas de entorno: va antes de todas ellas.
+      // -----------------------------------------------------------------------
+      if (inbox && jobScope === MAIN_JOB_SCOPE && inbox.hasPendingUserMessages()) {
+        loopLog.info('tool batch superseded by steering', { iter, calls: readyCalls.length });
+        for (const call of readyCalls) {
+          opts?.trace?.runtime({
+            event: 'veto',
+            source: 'steering',
+            tool: call.name,
+            callId: call.id,
+            reason: 'a user message arrived before this call was dispatched',
+          });
+          const o = this.toolErrorOutcome(call.id, call.name, SUPERSEDED_BY_STEERING, true, fmt);
+          yield o.event;
+          this.messages.push(o.message);
+        }
+        continue;
       }
 
       // -----------------------------------------------------------------------

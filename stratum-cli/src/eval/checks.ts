@@ -28,6 +28,8 @@ export interface CheckContext {
   metrics: RunMetrics;
   /** Comandos que recibió cada host SSH simulado, en orden. */
   hostReceived?: Record<string, readonly string[]>;
+  /** Mensajes de cada petición que recibió el modelo de guion (solo con `--mock`). */
+  requests?: ReadonlyArray<ReadonlyArray<{ role: string; content: string }>>;
 }
 
 export interface CheckResult {
@@ -259,15 +261,33 @@ async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckR
       }
       return done(label, alive.length === 0, `siguen vivos: ${alive.join(', ')}`);
     }
+    case 'request_contains': {
+      const label = `la petición ${check.request} al modelo ${check.negate ? 'no ' : ''}contiene «${check.value}»`;
+      const requests = ctx.requests;
+      if (!requests) return done(label, false, 'sin modelo de guion: usa mode "mock"');
+      const index = check.request > 0 ? check.request - 1 : requests.length + check.request;
+      const request = requests[index];
+      if (!request) return done(label, false, `solo hubo ${requests.length} peticiones`);
+      const found = request.some(
+        (m) =>
+          (check.role === undefined || m.role === check.role) && m.content.includes(check.value),
+      );
+      return done(label, found !== check.negate);
+    }
     case 'runtime_event': {
       const detailKey = check.event === 'veto' ? 'source' : 'decision';
       const matches = (s: TraceStep): boolean => {
         if (check.detail === undefined) return true;
-        if (check.event !== 'job') return s.data[detailKey] === check.detail;
+        if (check.event !== 'job' && check.event !== 'inbox') {
+          return s.data[detailKey] === check.detail;
+        }
         const [phase, outcome] = check.detail.split(':');
         return (
           s.data.phase === phase &&
-          (outcome === undefined || s.data.status === outcome || s.data.reason === outcome)
+          (outcome === undefined ||
+            s.data.status === outcome ||
+            s.data.reason === outcome ||
+            s.data.type === outcome)
         );
       };
       const n = ctx.model.steps.filter(
