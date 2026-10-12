@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   mkdirSync,
   rmSync,
@@ -97,6 +97,21 @@ describe('SessionStore', () => {
     // b se guardó después → su updatedAt es mayor → debe aparecer primero
     expect(list[0]!.provider).toBe('p2');
     expect(list[1]!.provider).toBe('p1');
+  });
+
+  it('dos sesiones nuevas con el mismo id generado no se pisan', async () => {
+    // Mismo segundo y los mismos tres caracteres al azar: el id coincide.
+    const random = vi.spyOn(Math, 'random');
+    for (let i = 0; i < 6; i++) random.mockReturnValueOnce(0.5);
+    try {
+      const base = { model: 'm', project: '/p', messages: sampleMessages, toolCallCount: 0 };
+      const a = await store.save({ ...base, provider: 'p1' });
+      const b = await store.save({ ...base, provider: 'p2' });
+      expect(b.id).not.toBe(a.id);
+      expect(store.list()).toHaveLength(2);
+    } finally {
+      random.mockRestore();
+    }
   });
 
   it('list --last limita resultados', async () => {

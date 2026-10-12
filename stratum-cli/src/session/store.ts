@@ -193,6 +193,17 @@ export class SessionStore {
     }
   }
 
+  /**
+   * Un id que no está en disco. El id lleva la hora al segundo y tres
+   * caracteres al azar: dos sesiones guardadas en el mismo segundo pueden
+   * coincidir, y la segunda pisaría a la primera.
+   */
+  private freshSessionId(): string {
+    let id = generateSessionId();
+    while (existsSync(this.sessionPath(id))) id = generateSessionId();
+    return id;
+  }
+
   private sessionPath(id: string): string {
     if (!isSessionId(id)) {
       throw new Error(`Id de sesión inválido: ${JSON.stringify(id.slice(0, 80))}`);
@@ -221,7 +232,7 @@ export class SessionStore {
     this.ensureDir();
 
     const now = new Date().toISOString();
-    let id = params.existingId ?? generateSessionId();
+    let id = params.existingId ?? this.freshSessionId();
     let createdAt = params.createdAt ?? now;
     let forkedFrom: string | undefined = params.forkedFrom;
     // Concurrencia optimista: si la sesión cambió en disco desde que se cargó,
@@ -230,7 +241,7 @@ export class SessionStore {
       const onDisk = this.diskUpdatedAt(params.existingId);
       if (onDisk !== null && onDisk !== params.expectedUpdatedAt) {
         forkedFrom = params.existingId;
-        id = generateSessionId();
+        id = this.freshSessionId();
         createdAt = now;
         log.warn('session changed on disk: saving as a fork', { from: forkedFrom, to: id });
       }

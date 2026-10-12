@@ -6,6 +6,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Corregido
+- Dos sesiones nuevas guardadas en el mismo segundo podían recibir el mismo id y la segunda pisaba a la primera. Ahora el id generado se comprueba contra el disco.
+
 ## [0.8.0-beta.1] — 2026-10-12
 
 Segunda pre-release (`npm install -g stratum-cli@beta`), con lo visto al probar la beta.0.
