@@ -1,6 +1,6 @@
 {
   "name": "stratum-cli",
-  "version": "0.8.0-beta.1",
+  "version": "0.8.0-beta.2",
   "description": "Agente CLI extensible sobre un loop ReAct — provider-agnostic (Ollama, llama.cpp, vLLM, LiteLLM, OpenAI), con plan-and-execute, subagentes, MCP y SSH nativo",
   "keywords": [
     "cli",
