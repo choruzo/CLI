@@ -19,6 +19,9 @@ import type {
   ProtocolStateEvent,
   Role,
 } from '../protocol/index.js';
+import { PeerHostBridge, type PeerHostBridgeOptions } from '../host/peer-host-bridge.js';
+import { SessionHost } from '../host/session-host.js';
+import { createSessionEnv } from '../runtime/session-env.js';
 import { Stratumd, type StratumdOptions } from './daemon.js';
 
 /** Una ronda del modelo: sus chunks, o una espera antes de darlos. */
@@ -94,6 +97,103 @@ export interface TestDaemon {
   stop(): Promise<void>;
 }
 
+let configs = 0;
+
+/** Config de un test: provider de guion y nada del usuario (memoria, auditoría, traza). */
+export function testConfig(base: string, extra: Record<string, unknown> = {}): StratumConfig {
+  return StratumConfigSchema.parse({
+    provider: {
+      default: 'test',
+      providers: {
+        test: {
+          type: 'openai-compatible',
+          baseUrl: 'http://127.0.0.1:1/v1',
+          apiKey: '',
+          model: 'test-model',
+          contextWindow: 1_000_000,
+        },
+      },
+    },
+    // Nada de la memoria ni de la auditoría del usuario: todo en la carpeta del test.
+    memory: {
+      autoExtract: false,
+      decisionsFile: join(base, 'memory', 'decisions.json'),
+      vectorDb: join(base, 'memory', 'vectors.db'),
+    },
+    skills: { enabled: false },
+    tools: { auditLog: join(base, `audit-${++configs}.jsonl`) },
+    trace: { enabled: false },
+    ...extra,
+  });
+}
+
+/** Una sesión de la CLI de verdad, en este proceso, publicada por su puente. */
+export interface TestPeer {
+  host: SessionHost;
+  bridge: PeerHostBridge;
+  provider: ScriptedProvider;
+  sessionId: string;
+  /** Un turno completo, como lo consume `stratum run`. Devuelve el texto y el motivo de parada. */
+  run(input: string): Promise<{ text: string; stopReason: string | null }>;
+  /** Cierre normal: estado final, baja y desmontaje. */
+  stop(): Promise<void>;
+}
+
+/**
+ * Monta una sesión como lo hace `stratum run` —`SessionHost` + `PeerHostBridge`—
+ * y la publica en el daemon que haya en `dir` (o en ninguno).
+ */
+export async function startPeer(
+  where: { base: string; dir: string },
+  name: string,
+  rounds: Round[],
+  bridgeOptions: Partial<PeerHostBridgeOptions> = {},
+): Promise<TestPeer> {
+  const cwd = join(where.base, name);
+  mkdirSync(cwd, { recursive: true });
+  const config = testConfig(where.base);
+  const router = new ProviderRouter(config);
+  const provider = new ScriptedProvider(rounds);
+  router.getActive = () => provider;
+  const host = await SessionHost.create({
+    env: createSessionEnv({ cwd, env: { ...process.env } }),
+    config,
+    router,
+    mcp: 'none',
+    destructivePolicy: 'deny',
+  });
+  const bridge = new PeerHostBridge({
+    session: host,
+    control: { cancel: () => host.cancel(), steer: (text) => host.steer(text) },
+    name: 'test-peer',
+    version: '0.0.0-test',
+    discovery: fileDiscovery({ dir: where.dir }),
+    retry: { initialMs: 25, maxMs: 100, jitter: 0 },
+    ...bridgeOptions,
+  });
+  await bridge.start();
+  return {
+    host,
+    bridge,
+    provider,
+    sessionId: host.sessionId,
+    async run(input) {
+      bridge.expectRun({ input });
+      let text = '';
+      let stopReason: string | null = null;
+      for await (const event of host.run(input)) {
+        if (event.type === 'text_delta') text += event.delta;
+        if (event.type === 'done') stopReason = event.stopReason;
+      }
+      return { text, stopReason };
+    },
+    async stop() {
+      await host.dispose({ cancelBackground: true });
+      await bridge.close();
+    },
+  };
+}
+
 export async function startTestDaemon(
   options: Partial<StratumdOptions> & { base?: string } = {},
 ): Promise<TestDaemon> {
@@ -104,33 +204,8 @@ export async function startTestDaemon(
   const providers = new Map<string, ScriptedProvider>();
   const clients: StratumClient[] = [];
   let teardowns = 0;
-  let sessions = 0;
 
-  const configFor = (extra: Record<string, unknown> = {}): StratumConfig =>
-    StratumConfigSchema.parse({
-      provider: {
-        default: 'test',
-        providers: {
-          test: {
-            type: 'openai-compatible',
-            baseUrl: 'http://127.0.0.1:1/v1',
-            apiKey: '',
-            model: 'test-model',
-            contextWindow: 1_000_000,
-          },
-        },
-      },
-      // Nada de la memoria ni de la auditoría del usuario: todo en la carpeta del test.
-      memory: {
-        autoExtract: false,
-        decisionsFile: join(base, 'memory', 'decisions.json'),
-        vectorDb: join(base, 'memory', 'vectors.db'),
-      },
-      skills: { enabled: false },
-      tools: { auditLog: join(base, `audit-${++sessions}.jsonl`) },
-      trace: { enabled: false },
-      ...extra,
-    });
+  const configFor = (extra: Record<string, unknown> = {}): StratumConfig => testConfig(base, extra);
 
   const { base: _base, ...daemonOptions } = options;
   void _base;

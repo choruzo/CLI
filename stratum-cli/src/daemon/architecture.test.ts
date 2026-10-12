@@ -129,6 +129,56 @@ describe('arquitectura de src/daemon/', () => {
     }
   });
 
+  // --- M3: sesiones pares ---------------------------------------------------
+
+  it('de una sesión par el daemon solo tiene la proyección: nada del runtime', () => {
+    const peers = production.find((s) => s.file === 'peer-sessions.ts')!;
+    for (const spec of imports(peers.text)) {
+      expect(
+        /\/(host|agent|tools|jobs|memory|trace|session|providers|config|runtime)\//.test(spec),
+        `peer-sessions.ts importa ${spec}`,
+      ).toBe(false);
+    }
+    expect(/SessionHost|SessionPublisher|\.dispose\(/.test(code(peers.text))).toBe(false);
+  });
+
+  it('el daemon no numera: ningún seq se calcula ni se asigna a un evento', () => {
+    for (const { file, text } of production) {
+      const source = code(text);
+      expect(/\bseq\s*(\+\+|\+=)|\+\+\s*\w*[sS]eq\b/.test(source), file).toBe(false);
+      // Ni se construyen eventos de estado propios (un literal con `type` y `seq`).
+      expect(/type:\s*'session\.(detached|closed|updated|opened)'/.test(source), file).toBe(false);
+    }
+  });
+
+  it('hay un único publicador de sesiones, y el puente par lo reutiliza sin ser dueño del runtime', () => {
+    const src = join(here, '..');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? walk(join(dir, entry.name))
+          : /\.tsx?$/.test(entry.name) && !/\.test\.tsx?$/.test(entry.name)
+            ? [join(dir, entry.name)]
+            : [],
+      );
+    const publishers: string[] = [];
+    for (const file of walk(src)) {
+      for (const match of readFileSync(file, 'utf-8').matchAll(/class\s+(\w*Publisher)\b/g)) {
+        publishers.push(`${relative(src, file).replace(/\\/g, '/')}:${match[1]}`);
+      }
+    }
+    expect(publishers).toEqual(['host/session-publisher.ts:SessionPublisher']);
+
+    const bridge = code(readFileSync(join(src, 'host', 'peer-host-bridge.ts'), 'utf-8'));
+    expect(bridge).toContain('new SessionPublisher(');
+    // Transporte: ni desmonta la sesión, ni numera, ni construye fotos.
+    expect(/\.dispose\(/.test(bridge)).toBe(false);
+    expect(/\bseq\s*(\+\+|\+=)|seq:\s*\w+\s*\+\s*1/.test(bridge)).toBe(false);
+    expect(/SessionHost\b/.test(bridge)).toBe(false);
+    // Y el entorno de la terminal no viaja: el puente no lo toca.
+    expect(/process\.env|\benv\b\s*[:.]/.test(bridge)).toBe(false);
+  });
+
   it('la ruta de este test es la esperada (src/daemon)', () => {
     expect(relative(join(here, '..', '..'), here).replace(/\\/g, '/')).toBe('src/daemon');
   });

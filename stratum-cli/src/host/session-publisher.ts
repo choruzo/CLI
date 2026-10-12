@@ -1,29 +1,32 @@
 import { randomBytes } from 'crypto';
 import type { AgentEvent } from '../agent/types.js';
-import type { AgentObservation, AgentTurnKind } from '../agent/core.js';
+import type { AgentObservation, AgentTurnKind, StratumAgent } from '../agent/core.js';
+import type { StratumConfig } from '../config/schema.js';
 import type { BackgroundJob } from '../jobs/types.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
-import type {
-  ProtocolEvent,
-  ProtocolJob,
-  ProtocolRun,
-  ProtocolSession,
-  ProtocolSessionHostInfo,
-  ProtocolSessionSnapshot,
-  ProtocolStateEvent,
-  ProtocolSubagent,
-  ProtocolTodo,
-  ProtocolToolCall,
-  ProtocolVolatileEvent,
-  StateEventData,
-  StateEventType,
-  VolatileEventType,
+import {
+  SNAPSHOT_LIMITS,
+  snapshotSubagent,
+  snapshotToolCall,
+  type ProtocolEvent,
+  type ProtocolJob,
+  type ProtocolRun,
+  type ProtocolSession,
+  type ProtocolSessionHostInfo,
+  type ProtocolSessionSnapshot,
+  type ProtocolStateEvent,
+  type ProtocolSubagent,
+  type ProtocolTodo,
+  type ProtocolToolCall,
+  type ProtocolVolatileEvent,
+  type StateEventData,
+  type StateEventType,
+  type VolatileEventType,
 } from '../protocol/index.js';
 import { redactText } from '../security/redact-output.js';
 import { targetOfCall } from '../tools/environments.js';
 import { describeCall } from '../tools/registry.js';
 import { getLogger } from '../logging/index.js';
-import type { SessionHost } from './session-host.js';
 
 const log = getLogger('host').child('publisher');
 
@@ -42,8 +45,19 @@ export interface PublisherSink {
   onOverflow(): void;
 }
 
+/**
+ * Lo que el publicador necesita de la sesión que publica. Un `SessionHost` lo
+ * cumple tal cual; quien aún monta su sesión a mano (`chat`) lo da por piezas.
+ */
+export interface PublishedSession {
+  readonly sessionId: string;
+  readonly agent: StratumAgent;
+  readonly config: StratumConfig;
+  readonly env: { readonly cwd: string };
+}
+
 export interface SessionPublisherOptions {
-  host: SessionHost;
+  host: PublishedSession;
   /** Dónde corre la sesión, tal como lo verán los clientes. */
   hostInfo: ProtocolSessionHostInfo;
   sink: PublisherSink;
@@ -61,17 +75,13 @@ const TASK_CHARS = 1_000;
 /** Texto de un fragmento volátil agrupado: muy por debajo del tope de una trama. */
 const DELTA_CHARS = 32_000;
 /** Lo que el snapshot conserva del bloque abierto. */
-const PARTIAL_CHARS = 100_000;
+const PARTIAL_CHARS = SNAPSHOT_LIMITS.partialChars;
 /** Tool calls y subagentes del run que se recuerdan. */
 const RUN_ITEMS = 500;
-/**
- * Un snapshot es **un** mensaje y tiene que caber de sobra en una trama: lleva
- * las últimas llamadas y subagentes del run, con sus textos recortados. El
- * detalle completo viajó en los eventos y está en la traza.
- */
-const SNAPSHOT_TOOL_CALLS = 100;
-const SNAPSHOT_SUBAGENTS = 50;
-const SNAPSHOT_TEXT_CHARS = 1_000;
+// Un snapshot es **un** mensaje y tiene que caber de sobra en una trama: lleva
+// las últimas llamadas y subagentes del run, con sus textos recortados
+// (`SNAPSHOT_LIMITS`, en el protocolo: quien reduce eventos usa los mismos). El
+// detalle completo viajó en los eventos y está en la traza.
 
 function clip(text: string, max: number): string {
   return text.length > max ? `${text.slice(0, max - 1)}…` : text;
@@ -117,7 +127,7 @@ interface TextScope {
  * El runtime sigue siendo la autoridad: de aquí no sale ninguna decisión.
  */
 export class SessionPublisher {
-  private readonly host: SessionHost;
+  private readonly host: PublishedSession;
   private readonly hostInfo: ProtocolSessionHostInfo;
   private readonly sink: PublisherSink;
   private readonly maxQueue: number;
@@ -330,15 +340,12 @@ export class SessionPublisher {
       seq: this.seqValue,
       run: this.run ? { ...this.run, counters: { ...this.run.counters } } : null,
       partial: { text: this.main.text, reasoning: this.main.reasoning },
-      toolCalls: [...this.toolCalls.values()].slice(-SNAPSHOT_TOOL_CALLS).map((c) => ({
-        ...c,
-        ...(c.output !== undefined ? { output: clip(c.output, SNAPSHOT_TEXT_CHARS) } : {}),
-        ...(c.error !== undefined ? { error: clip(c.error, SNAPSHOT_TEXT_CHARS) } : {}),
-      })),
-      subagents: [...this.subagents.values()].slice(-SNAPSHOT_SUBAGENTS).map((s) => ({
-        ...s,
-        ...(s.summary !== undefined ? { summary: clip(s.summary, SNAPSHOT_TEXT_CHARS) } : {}),
-      })),
+      toolCalls: [...this.toolCalls.values()]
+        .slice(-SNAPSHOT_LIMITS.toolCalls)
+        .map(snapshotToolCall),
+      subagents: [...this.subagents.values()]
+        .slice(-SNAPSHOT_LIMITS.subagents)
+        .map(snapshotSubagent),
       todos: this.todos.map((t) => ({ ...t })),
       jobs,
       // Aprobaciones, preguntas y planes pendientes: los arbitra el centro de
