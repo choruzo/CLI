@@ -1,7 +1,7 @@
 {
   "name": "stratum-desktop",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0-beta.0",
   "description": "Stratum Desktop — shell Tauri v2 sobre el core de stratum-cli",
   "type": "module",
   "license": "MIT",
