@@ -1042,6 +1042,41 @@ base del daemon.
   siguiente arranque reconoce como rancio; un test de arquitectura afirma que `src/daemon/`
   no importa `StratumAgent` ni monta una sesión por otra vía que `SessionHost`.
 
+**Estado: implementado (2026-10-12), rama `feat/dot-m2-daemon`.** La referencia de lo que
+atiende el servidor y con qué garantías es `docs/protocol.md` §13.
+
+Hecho: `stratum daemon run|start|stop|status`; `endpoint.json` con instancia única y
+detección de rancio; servidor multi-cliente con handshake y un único punto de autorización
+por capacidad; `SessionPublisher` (en `host/`: traduce `observe()` a eventos, numera y
+guarda el estado del snapshot); `EventHub` y `RunRegistry`; sesiones alojadas mediante
+`SessionHost`; snapshots y resincronización; `operationId` con semántica en el servidor;
+apagado por inactividad. Cerrados además los pendientes de M0 que bloqueaban el daemon: los
+servers MCP nacen en el `cwd` de la sesión, `memory.write` se atribuye a quien lo intentó
+(`DecisionMemory.save(input, attempt)`), y el arranque de una sesión sin terminal es
+`host/session-startup.ts`, que también usa `stratum run`.
+
+Fuera de M2, de lo que listaba este hito: **`stratum ps`** y **`TraceFeed`**
+(`trace.subscribe`). El primero es un cliente de texto que encaja con M3, cuando haya
+sesiones de la CLI que listar; el segundo necesita un lector que respete la contrapresión
+del cliente (una traza grande no cabe en la salida de una conexión). Tampoco se persisten
+ni se reanudan las sesiones del daemon (`sessions.open { resume }` → `UNAVAILABLE`):
+`SessionHost` todavía no lleva checkpointer.
+
+Descubrimientos de implementación:
+
+1. **El `seq` y el estado del snapshot viven en `host/`, no en el daemon.** Es la pieza que
+   M3 reutiliza tal cual: un anfitrión par solo cambia el `sink` por `host.publish`.
+2. **Una sesión del daemon no tiene interlocutor hasta M4**: corre con política `deny` y sin
+   puertas, como `stratum run` sin TTY.
+3. **`tool.blocked` no se puede emitir desde `observe()`**: el veto es un evento de runtime
+   de la traza, no un `AgentEvent`. Igual `counters.llmCalls`. Quedan a 0, sin estimar.
+4. **Un snapshot tiene que caber en una trama.** Con 120 salidas de tool de 8 KB superaba
+   1 MiB; ahora lleva las últimas llamadas con el texto recortado.
+5. **Corregida una carrera del cliente de M1**: la primera foto de una suscripción se perdía
+   si llegaba en la misma lectura del socket que la respuesta de `events.subscribe`.
+6. **El id de sesión tiene poca entropía** (`sess_<fecha>_<hora>_<3 letras>`): el daemon
+   comprueba que no choca con una viva antes de usarlo.
+
 ### M3 — La CLI como anfitrión par
 - `chat` y `run` se registran si hay daemon; publican por `observe()`; atienden `cancel` y `steer`.
 - `daemon.autoStart` (por defecto `false` en la CLI).
