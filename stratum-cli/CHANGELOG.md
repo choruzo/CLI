@@ -6,11 +6,22 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.8.0-beta.0] — 2026-10-12
+
+Pre-release para pruebas (`npm install -g stratum-cli@beta`); `latest` sigue en la 0.7.0.
+
+Traza de sesión con su visor, evaluación reproducible sobre esa traza, jobs en segundo plano, mensajes al agente con el turno en curso (steering) y medición de la caché de prompt del backend.
 
 ### Añadido
+- **Traza de sesión y visor de trayectoria**: cada sesión de `chat` y `run` deja en `~/.stratum/traces/<sessionId>.jsonl` lo que entra al modelo, cada llamada al LLM (espera, generación, tokens), cada tool con su entrada y su salida, subagentes, avisos y compresión. La escribe el runtime —el modelo no la ve ni la toca— y pasa por la redacción de secretos antes de ir a disco. `/auditor` (y `/auditor stop`) en el chat y `stratum auditor [sessionId]` / `stratum auditor list` abren una web local, solo en loopback, con el timeline por carriles, la lista de pasos y el detalle; se actualiza sola. Config `trace.{enabled,dir,retentionDays,maxFieldChars}`; `sessions delete`/`prune` arrastran la traza.
+- **Jobs en segundo plano**: `exec` con `background: true` lanza el comando como un job de la sesión y vuelve con su `jobId` sin esperar; el agente sigue trabajando y se entera cuando termina. Tools `list_jobs`, `get_job_status`, `get_job_output` y `cancel_job`; panel de jobs en el chat, `/jobs` y `/jobs cancel <id>`. Pasa por las mismas guardas, read-only, entornos y confirmaciones que un `exec` normal, solo en el target local, y los jobs vivos se cancelan al cerrar la sesión. Config `tools.jobs` (`enabled`, `maxRunning`, límites de salida, `subagentAccess`).
+- **Steering**: con el agente trabajando el input sigue vivo. Lo que escribas no cancela el turno ni lanza otra llamada: queda en cola (`[queued as steering]`) y el agente lo recibe en su siguiente punto seguro, dentro del mismo turno. Si tenía tools a punto de ejecutar, no se ejecuta ninguna y decide de nuevo con tu mensaje delante. Cancelar sigue siendo solo `Ctrl+C`.
+- **Caché de prompt**: Stratum mide la caché de prefijo del backend (OpenAI, pasarelas compatibles con los campos de Anthropic, DeepSeek, llama.cpp) y la enseña en `/auditor`, `stratum stats` y `stratum eval`: acierto, llamadas frías y templadas, tiempo al primer token de cada clase y roturas con su causa. Lo que el backend no reporta se muestra como `n/d`, nunca se estima. `provider.providers.<alias>.cache` ajusta qué se envía (`cacheKey`, `explicitBreakpoints`, `sessionAffinity`). Ver `docs/prompt-caching.md`.
+- **Llamadas auxiliares al LLM en la traza**: la extracción de memoria, el resumen de la compresión de contexto y el resumen de sesión quedan registradas con su origen, aparte de las del agente. `/auditor`, `stratum stats` y el informe de eval muestran «LLM calls» con una fila por origen.
+- `stratum run --then <tarea>` (repetible) encadena turnos en la misma sesión y corta si uno no acaba bien.
 - **`stratum eval`**: escenarios reproducibles (`code`, `linux`, `ssh`, `safety`, `recovery`, `multi-agent`) que se ejecutan con `stratum run` en un proyecto temporal y se puntúan con el workspace, la salida y la traza de la sesión. `eval run` (`--mock` para un modelo de guion determinista; sin él, contra el provider configurado), `eval list`, `eval report`, `eval runs` y `eval compare`, que detecta regresiones aunque las dos ejecuciones den PASS (más tokens, tiempo, llamadas o errores) y sale con 1 si las hay. 21 escenarios incluidos; los propios van en `.stratum/evals/`. Resultado en `~/.stratum/evals/runs/<runId>/result.json`. Contra un modelo real, un error fatal del provider (caído, un `429`) deja el escenario en ERROR, no en FAIL. Ver `docs/eval.md`.
 - **Niveles de dificultad** en los escenarios (`basic`, `intermediate`, `adversarial`), con `--difficulty` en `eval run`/`eval list` y el éxito por nivel en el informe y en la comparación. 37 escenarios incluidos: 16 nuevos fuera del camino feliz —órdenes destructivas disfrazadas, alternativas equivalentes a un `rm -rf`, falsos positivos de las guardas, una acción vetada junto a otra permitida, una instrucción inyectada en la salida de un comando, un host que no está en el inventario, un despliegue que no se puede completar—. Los adversariales destaparon tres brechas en las guardas de `exec`, cerradas en esta misma versión (ver «Seguridad»).
+- Cuatro grupos más de escenarios, hasta 61 incluidos: `cache`, `auxiliary`, `jobs` y `steering`. `eval compare` trata la caché como categoría propia (un fallo de caché no es un error del agente) y solo juzga las métricas auxiliares si se piden con `--metric`.
 - **Baselines con nombre**: `stratum eval baseline save|list|delete` y `eval run --save-baseline`. Cada resultado guarda el commit (y si había cambios sin commit), la versión, el SO, el provider/modelo, el modo y la fecha. `stratum eval compare baseline current`.
 - **Tolerancias configurables** en `eval compare` y `eval run --baseline`: por métrica, en porcentaje y/o absoluto (`--tolerance tokens=30%,2k`, `--tolerances fichero.json`, o guardadas con el baseline). Las de partida son estrictas con guion y holgadas contra un modelo real, donde una llamada de más es ruido.
 - El informe de `eval compare` separa los hallazgos por gravedad: PASS → FAIL, PASS → ERROR, acciones inseguras nuevas, más bloqueos de política, regresiones de coste y de fiabilidad, y mejoras. Avisa si un escenario cambió de definición entre las dos ejecuciones, y entonces no compara su coste.
@@ -27,8 +38,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ### Corregido
 - Un comando de solo lectura ya no pide confirmación porque un argumento contenga un patrón destructivo: `grep -rn "rm -rf" …`, `echo "rm -rf /"` o `git commit -m "… rm -rf …"` se ejecutan sin preguntar (sin TTY quedaban bloqueados). Los comandos que sí ejecutan sus argumentos (`psql -c "DROP …"`, `ssh host "rm …"`) siguen pidiéndola.
+- **`Ctrl+C` cancela el turno** en el chat (dos veces para salir). Antes la tecla desmontaba la interfaz, el turno seguía por detrás y el proceso salía al terminar.
+- Un `/comando` que no existe responde «Comando desconocido» en vez de enviarse al modelo como mensaje; una ruta (`/etc/hosts …`) sigue llegando.
+- La pantalla de bienvenida tiene la misma paleta de `/comandos` y `@perfiles` que la conversación.
+
+### Cambiado
+- Las tools MCP se ofrecen al modelo ordenadas por nombre, detrás de las propias, y con sus schemas en forma canónica: el prompt no cambia de un arranque a otro según qué server conecte antes, y la caché del backend lo aprovecha.
 
 ### Cambios a tener en cuenta
+- **Desligar un proceso desde el shell local se veta**: `cmd &`, `nohup`, `setsid`, `disown`, `Start-Process`, `Start-Job`, `screen -dm`, `tmux new -d` (también dentro de un `sh -c`). Lo que tenga que seguir vivo va como job con `background: true`. `tools.guardedCommands.shellDetach` lo ajusta.
 - En una sesión sin TTY (o con `--deny-destructive`) ahora se bloquean comandos que antes pasaban: `git clean -f`, `find … -delete`, `$VAR args` con una variable que el comando no asigna y `… | sh`. Con `--allow-destructive`, o aprobándolos, se ejecutan como siempre. `tools.guardedCommands.gitCleanForce: "allow"` recupera el `git clean -f` sin confirmación.
 
 ## [0.7.0] — 2026-10-03
@@ -253,6 +271,8 @@ Primera versión etiquetada. Hitos 0 y 1.
 - `/init` para generar o actualizar `STRATUM.md`.
 - Render de markdown de las respuestas.
 
+[0.8.0-beta.0]: https://github.com/choruzo/CLI/compare/v0.7.0...v0.8.0-beta.0
+[0.7.0]: https://github.com/choruzo/CLI/compare/v0.6.0...v0.7.0
 [0.7.0-beta.0]: https://github.com/choruzo/CLI/compare/v0.6.0...v0.7.0-beta.0
 [0.6.0]: https://github.com/choruzo/CLI/compare/v0.5.0...v0.6.0
 [0.5.0]: https://github.com/choruzo/CLI/compare/v0.4.0...v0.5.0
