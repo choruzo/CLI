@@ -15,6 +15,7 @@ import { auditorCommand } from './commands/auditor.js';
 import { evalCommand } from './commands/eval.js';
 import { statsCommand } from './commands/stats.js';
 import { daemonCommand } from './commands/daemon.js';
+import { psCommand } from './commands/ps.js';
 import { cliVersion } from './version.js';
 import { ConfigError } from '../config/loader.js';
 import { SchemaVersionError } from '../config/schema-version.js';
@@ -41,6 +42,7 @@ program.addCommand(auditorCommand);
 program.addCommand(evalCommand);
 program.addCommand(statsCommand);
 program.addCommand(daemonCommand);
+program.addCommand(psCommand);
 
 // Una config rota se explica con su mensaje (fichero, línea o clave), no con
 // la traza: los comandos que no capturan `loadConfig()` llegan aquí.
