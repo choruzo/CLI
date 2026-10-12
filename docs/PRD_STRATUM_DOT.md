@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. En curso: **M0**.
+> anotados en el hito que los encuentra. **M0 implementado**; siguiente: M1.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -949,6 +949,45 @@ Cada hito es entregable y comprobable por separado. «Hecho» incluye tests, `ts
   `process.cwd()` fuera de `cli/`; y el **criterio obligatorio AC-0**: dos `SessionHost` con
   cwd diferentes coexisten en el mismo proceso y destruir uno no altera jobs, SSH,
   auditoría ni cwd del otro.
+
+**Estado: implementado (2026-10-12), rama `feat/dot-m0-session-host`.** Un commit por pieza:
+`SessionEnv` → cwd explícito en la composición → estado de exec/SSH/auditoría por sesión →
+`SessionHost` + `HostGates` → `run.ts` → `StratumAgent.observe()` → `DecisionMemory.subscribe()` → AC-0.
+
+Descubrimientos de implementación (afectan a hitos posteriores):
+
+1. **«Cero `process.cwd()` fuera de `cli/`» quedó como «cero en la composición».** Lo fija
+   `runtime/implicit-cwd.test.ts` con una lista cerrada y justificada de excepciones de
+   borde: los defaults de `loadConfig(startDir?)` y de `config/writer.ts` (API de los
+   comandos de la CLI), el orquestador de `eval`, y `runtime/session-env.ts`, que es el
+   único punto que lee el entorno del proceso. Un anfitrión siempre pasa `env.cwd`.
+2. **El estado por sesión cuelga de la identidad del objeto de config.** `SessionHost`
+   trabaja sobre una copia propia; su pool SSH y su auditoría son suyos. Consecuencia: dos
+   sesiones del mismo proyecto no comparten conexiones SSH (como hoy dos procesos de la
+   CLI). Compartirlas en el daemon sería una optimización posterior, no un requisito.
+3. **`SessionEnv.env` solo llega a `exec` local y a los jobs.** Siguen leyendo el entorno
+   del proceso: la expansión de `${VAR}` del loader de config, los secretos `env:` y
+   `SSH_AUTH_SOCK` del inventario SSH, `TAVILY_API_KEY` y la detección de infraestructura
+   del perfil de sesión (`PATH`). Es exactamente el inventario que necesita §22 Q1 (M10).
+4. **Los servers MCP se lanzan en el directorio del proceso** (`tools/mcp/client.ts` no
+   pasa `cwd`). Inocuo en la CLI; hay que pasarles el `cwd` de la sesión antes de alojar
+   sesiones `coding` en el daemon → **M2**.
+5. **`memory.write` no se puede atribuir todavía a una sesión.** `DecisionMemory` ya avisa
+   de cada escritura, pero ni `store_decision` ni la extracción automática rellenan
+   `session_id` en el registro. Rellenarlo cambia lo que se guarda en `decisions.json`, así
+   que quedó fuera de M0 → **M2**.
+6. **`SessionHost` recibe `config` y `router` ya resueltos.** Cargar la config y elegir
+   provider/modelo tiene UX propia en cada cliente (errores, selector, `--model`). El
+   daemon necesitará esa resolución sin terminal → helper compartido en **M2**.
+7. **Siguen con cableado propio `chat.ts` + `App.tsx` y `desktop/conversation.ts`**, como
+   estaba previsto (§18): solo `run.ts` usa `SessionHost`. `init.ts` tampoco se migró.
+8. **Único cambio observable de M0**: un `--profile` inválido en `stratum run` se rechaza
+   antes de conectar los servers MCP (mismo mensaje y exit code).
+9. **La suite completa no es estable en Windows bajo carga**, antes y después de M0: los
+   tests que matan árboles de procesos (`jobs/manager*.test.ts`, `tools/exec/local.test.ts`)
+   rozan su límite de 5 s cuando corren los 157 ficheros a la vez (6 fallos en `main`, 3
+   en la rama, todos «timed out»; aislados pasan). Conviene subirles el límite antes de M2,
+   que añadirá más tests con procesos.
 
 ### M1 — Protocolo
 - `src/protocol/` (tipos puros) + `schemas.ts` + envoltorio JSON-RPC sobre `codec.ts`.
