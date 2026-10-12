@@ -19,7 +19,7 @@ import type { ToolContext } from '../../agent/types.js';
 const FIXTURE = fileURLToPath(new URL('./fixtures/test-mcp-server.mjs', import.meta.url));
 const NO_LOG = (): void => {};
 /** Herramientas del fixture (sin extras). */
-const BASE_TOOLS = 9;
+const BASE_TOOLS = 10;
 
 let tmp: string;
 let managers: McpManager[] = [];

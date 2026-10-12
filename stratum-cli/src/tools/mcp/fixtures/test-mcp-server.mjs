@@ -21,6 +21,7 @@ const schema = (props = {}) => ({ type: 'object', properties: props });
 
 const tools = [
   { name: 'echo', description: 'Echo text', inputSchema: schema({ text: { type: 'string' } }) },
+  { name: 'cwd', description: 'Working directory of the server process', inputSchema: schema() },
   { name: 'slow', description: 'Wait ms', inputSchema: schema({ ms: { type: 'number' } }) },
   { name: 'crash', description: 'Exit mid-call', inputSchema: schema() },
   { name: 'freeze', description: 'Block the event loop', inputSchema: schema() },
@@ -61,6 +62,8 @@ server.setRequestHandler(CallToolRequestSchema, async (req, extra) => {
   switch (req.params.name) {
     case 'echo':
       return text(String(args.text ?? ''));
+    case 'cwd':
+      return text(process.cwd());
     case 'slow':
       await new Promise((resolve, reject) => {
         const t = setTimeout(resolve, Number(args.ms ?? 1000));

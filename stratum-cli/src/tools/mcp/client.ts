@@ -131,6 +131,7 @@ export class McpServerClient {
         command: resolved.command,
         args: resolved.args,
         env: resolved.env,
+        ...(this.runtime.cwd ? { cwd: this.runtime.cwd } : {}),
         // Por defecto el SDK usa 'inherit', lo que vuelca el stderr del server
         // (banners, avisos de telemetría, etc.) directamente a la terminal de
         // Stratum y ensucia la UI de arranque. Lo capturamos con 'pipe' para que

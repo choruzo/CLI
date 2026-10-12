@@ -159,7 +159,8 @@ export class SessionHost {
     const registry = new ToolRegistry();
     registerBuiltinTools(registry, config);
 
-    const mcp = new McpManager(config);
+    // Los servers MCP nacen en el directorio de la sesión, no en el del proceso.
+    const mcp = new McpManager(config, undefined, { cwd: opts.env.cwd });
     const mcpWarnings: McpManagerWarning[] = [];
     if ((opts.mcp ?? 'eager') === 'eager' && config.mcp.servers.length > 0) {
       mcpWarnings.push(...(await mcp.connectAll()));

@@ -45,6 +45,11 @@ export interface McpStatusSummary {
 export interface McpManagerOptions {
   /** Retardos del backoff de reconexión, en ms (tests). */
   reconnectDelaysMs?: number[];
+  /**
+   * Directorio de trabajo de los servers: el `cwd` de la sesión dueña de este
+   * manager. Sin él nacen en el directorio del proceso.
+   */
+  cwd?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -87,6 +92,7 @@ export class McpManager {
     const runtime: McpRuntimeOptions = {
       installDir: expandHome(config.mcp.installDir),
       autoInstall: config.mcp.autoInstall,
+      ...(options.cwd ? { cwd: options.cwd } : {}),
     };
     for (const serverCfg of config.mcp.servers) {
       const client = new McpServerClient(serverCfg, runtime, onLog);

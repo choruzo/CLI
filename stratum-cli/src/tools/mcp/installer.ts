@@ -42,6 +42,12 @@ import type { McpServer } from '../../config/schema.js';
 export interface McpRuntimeOptions {
   installDir: string; // ya expandido a ruta absoluta
   autoInstall: boolean;
+  /**
+   * Directorio en el que nace el proceso del server: el de la sesión que lo
+   * usa. Sin él hereda el del proceso de Stratum, que es lo correcto en una CLI
+   * de una sola sesión y no lo es en un proceso que aloja varias.
+   */
+  cwd?: string;
 }
 
 /** Comando ejecutable resuelto para `StdioClientTransport`. */
