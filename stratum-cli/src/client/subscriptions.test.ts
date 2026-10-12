@@ -2,6 +2,8 @@ import { describe, it, expect, afterEach, vi } from 'vitest';
 import { StratumClient } from './client.js';
 import { staticDiscovery } from './discovery.js';
 import { startFakeServer, type FakeServer } from './testing/fake-server.js';
+import { Subscriptions } from './subscriptions.js';
+import type { RpcPeer } from '../ipc/peer.js';
 import type {
   ProtocolEvent,
   ProtocolSessionSnapshot,
@@ -312,5 +314,34 @@ describe('suscripción a una traza', () => {
       { n: 1, reset: true },
       { n: 1, reset: true },
     ]);
+  });
+});
+
+describe('orden de llegada', () => {
+  it('una foto que llega en la misma lectura que la respuesta de subscribe no se pierde', async () => {
+    const subs = new Subscriptions();
+    let respond!: (result: unknown) => void;
+    const peer = {
+      request: () => new Promise((resolve) => (respond = resolve)),
+    } as unknown as RpcPeer;
+    const snapshots: ProtocolSessionSnapshot[] = [];
+    subs.subscribeSession(SESSION, { onSnapshot: (s) => snapshots.push(s), onEvent: () => {} });
+    void subs.attach(peer);
+
+    // La respuesta y la primera notificación, seguidas y sin ceder el turno:
+    // quien espera la respuesta todavía no ha podido enlazar el id.
+    respond({ subscriptionId: 'sub1', mode: 'snapshot' });
+    const snapshot = sampleSnapshot();
+    expect(subs.dispatch({ name: 'snapshot', params: { subscriptionId: 'sub1', snapshot } })).toBe(
+      true,
+    );
+    expect(snapshots).toEqual([]);
+    await new Promise((r) => setImmediate(r));
+    expect(snapshots).toEqual([snapshot]);
+
+    // Sin aperturas pendientes, una notificación de nadie no se guarda.
+    expect(subs.dispatch({ name: 'snapshot', params: { subscriptionId: 'otra', snapshot } })).toBe(
+      false,
+    );
   });
 });

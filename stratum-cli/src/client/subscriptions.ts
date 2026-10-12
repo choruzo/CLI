@@ -80,9 +80,21 @@ function safely(fn: () => void): void {
   }
 }
 
+/** Notificaciones que se guardan mientras hay una apertura sin enlazar. */
+const MAX_EARLY_NOTIFICATIONS = 256;
+
 export class Subscriptions {
   private readonly entries = new Set<Entry>();
   private peer: RpcPeer | null = null;
+  /** Aperturas enviadas cuya respuesta aún no se ha enlazado con su entrada. */
+  private opening = 0;
+  /**
+   * Notificaciones de una suscripción que este lado todavía no conoce. El
+   * servidor las envía **después** de la respuesta de `subscribe`, pero las dos
+   * pueden llegar en la misma lectura del socket, y la respuesta se enlaza en
+   * una microtarea: sin esto, la primera foto se perdería.
+   */
+  private early: ValidatedNotification[] = [];
 
   get size(): number {
     return this.entries.size;
@@ -137,10 +149,12 @@ export class Subscriptions {
   /** La conexión se perdió: los ids del servidor dejan de valer. Lo demás se conserva. */
   detach(): void {
     this.peer = null;
+    this.early = [];
     for (const entry of this.entries) entry.serverId = null;
   }
 
   private async open(entry: Entry, peer: RpcPeer): Promise<void> {
+    this.opening++;
     try {
       if (entry.kind === 'trace') {
         const { subscriptionId } = await peer.request('trace.subscribe', {
@@ -170,6 +184,10 @@ export class Subscriptions {
       if (this.peer === peer && this.entries.has(entry)) {
         safely(() => entry.handlers.onError?.(err));
       }
+    } finally {
+      this.opening--;
+      // Sin aperturas pendientes, lo que quede guardado no es de nadie.
+      if (this.opening === 0) this.early = [];
     }
   }
 
@@ -181,6 +199,13 @@ export class Subscriptions {
       return;
     }
     entry.serverId = serverId;
+    // Lo que llegó antes de saber de quién era.
+    const mine = this.early.filter(
+      (n) => n.name !== 'goodbye' && n.params.subscriptionId === serverId,
+    );
+    if (mine.length === 0) return;
+    this.early = this.early.filter((n) => !mine.includes(n));
+    for (const notification of mine) this.dispatch(notification);
   }
 
   private find(serverId: string): Entry | undefined {
@@ -192,7 +217,12 @@ export class Subscriptions {
   dispatch(notification: ValidatedNotification): boolean {
     if (notification.name === 'goodbye') return false;
     const entry = this.find(notification.params.subscriptionId);
-    if (!entry) return false;
+    if (!entry) {
+      if (this.opening === 0) return false;
+      // Puede ser de una suscripción cuya respuesta aún no se ha enlazado.
+      if (this.early.length < MAX_EARLY_NOTIFICATIONS) this.early.push(notification);
+      return true;
+    }
 
     switch (notification.name) {
       case 'snapshot':
