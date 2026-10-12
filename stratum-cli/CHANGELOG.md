@@ -6,6 +6,32 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.8.0] — 2026-10-12
+
+Versión estable de la 0.8.0: reúne todo lo de las cuatro pre-releases, de la [0.8.0-beta.0](#080-beta0--2026-10-12) a la [0.8.0-beta.3](#080-beta3--2026-10-12), sin cambios de código respecto a la última. El detalle está en sus secciones; en resumen:
+
+### Añadido
+- **Traza de sesión y visor de trayectoria** (`/auditor`, `stratum auditor`): lo que entra al modelo, cada llamada al LLM y cada tool, en una web local que se actualiza sola.
+- **Jobs en segundo plano**: `exec` con `background: true`, las tools `list_jobs`/`get_job_status`/`get_job_output`/`cancel_job` y `/jobs`.
+- **Steering**: con el agente trabajando el input sigue vivo y lo que escribas le llega dentro del mismo turno, sin cancelarlo.
+- **`stratum eval`** y **`stratum stats`**: 61 escenarios reproducibles puntuados desde la traza, baselines con nombre, comparación con tolerancias y estadísticas locales.
+- **Caché de prompt** del backend medida (acierto, llamadas frías y templadas, roturas con su causa) y las llamadas auxiliares al LLM registradas con su origen.
+- `stratum run --then <tarea>` y `/comandos` de consulta con el turno en curso.
+
+### Seguridad
+- **Las guardas de `exec` clasifican el comando que se ejecuta, no el texto escrito**: envoltorios, comandos anidados, variables y rutas equivalentes ya no esconden un borrado; lo que no se puede leer pide confirmación.
+
+### Cambiado
+- Los subagentes tienen por defecto 30 minutos y 50 iteraciones (`agents.subagentTimeoutMs`, `agents.subagentMaxIterations`).
+- Las tools MCP se ofrecen ordenadas por nombre y con schemas en forma canónica.
+
+### Corregido
+- `Ctrl+C` cancela el turno en el chat; el terminal ya no parpadea con varios subagentes ni recibe la salida de un comando fallido; un subagente que agota su tiempo termina como presupuesto agotado, no como cancelado.
+
+### Cambios a tener en cuenta
+- **Desligar un proceso desde el shell local se veta** (`cmd &`, `nohup`, `Start-Process`…): lo que tenga que seguir vivo va como job. `tools.guardedCommands.shellDetach` lo ajusta.
+- Sin TTY (o con `--deny-destructive`) se bloquean comandos que antes pasaban: `git clean -f`, `find … -delete`, `$VAR args` y `… | sh`. Ver la sección de la [0.8.0-beta.0](#080-beta0--2026-10-12).
+
 ## [0.8.0-beta.3] — 2026-10-12
 
 Cuarta pre-release (`npm install -g stratum-cli@beta`).
