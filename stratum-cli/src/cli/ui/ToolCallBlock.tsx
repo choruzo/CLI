@@ -2,6 +2,7 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import { spinnerFrameAt } from './spinner.js';
+import { primaryArg } from './tool-arg-label.js';
 
 export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'error';
 
@@ -66,25 +67,7 @@ function formatInput(state: ToolCallState): string {
     }
   }
 
-  return truncateLabel(labelOf(src[keys[0]!]));
-}
-
-/**
- * Texto de un argumento que no es un escalar. `String()` de un array de objetos
- * (las preguntas de `question`) da `[object Object],[object Object]`: se enseña
- * el primer texto del primer elemento y cuántos más hay.
- */
-function labelOf(value: unknown): string {
-  if (value === null || value === undefined) return '';
-  if (typeof value !== 'object') return String(value);
-  if (!Array.isArray(value)) return JSON.stringify(value);
-  const first: unknown = value[0];
-  const head =
-    typeof first === 'object' && first !== null
-      ? (Object.values(first).find((v): v is string => typeof v === 'string') ??
-        JSON.stringify(first))
-      : String(first ?? '');
-  return value.length > 1 ? `${head} (+${value.length - 1})` : head;
+  return truncateLabel(primaryArg(src));
 }
 
 function formatDuration(ms: number): string {

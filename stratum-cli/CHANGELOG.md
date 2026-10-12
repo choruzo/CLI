@@ -9,6 +9,8 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 ## [Sin publicar]
 
 ### Corregido
+- **El terminal parpadeaba con varios subagentes trabajando.** El árbol de subagentes listaba todas sus tool calls; al superar el alto del terminal, la pantalla entera se borraba y repintaba en cada actualización. Ahora cada subagente enseña solo las últimas (entre 1 y 6, según el alto del terminal) y resume las anteriores en una línea; el detalle completo sigue en `/subagents`.
+- La etiqueta de una tool call enseña el argumento que la identifica (la ruta, el comando, el patrón) aunque el modelo lo envíe detrás de otros: antes salía `read_file: 700` cuando `limit` llegaba antes que `path`.
 - Dos sesiones nuevas guardadas en el mismo segundo podían recibir el mismo id y la segunda pisaba a la primera. Ahora el id generado se comprueba contra el disco.
 
 ## [0.8.0-beta.1] — 2026-10-12

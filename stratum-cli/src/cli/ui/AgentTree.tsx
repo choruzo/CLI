@@ -1,9 +1,10 @@
 import React from 'react';
-import { Box, Text } from 'ink';
+import { Box, Text, useStdout } from 'ink';
 import { theme } from './theme.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import { spinnerFrameAt } from './spinner.js';
+import { primaryArg, tailWindow, treeToolBudget } from './tool-arg-label.js';
 
 /**
  * Árbol vivo de subagentes en paralelo (Hito 8C, §5.6). Sustituye al grupo de
@@ -31,10 +32,7 @@ function truncate(text: string, max: number): string {
 }
 
 function firstArg(tc: ToolCallState): string {
-  const src = tc.input ?? {};
-  const keys = Object.keys(src);
-  if (keys.length === 0) return '';
-  return truncate(String(src[keys[0]!] ?? ''), 40);
+  return truncate(primaryArg(tc.input), 40);
 }
 
 /** Línea compacta de un tool call interno del hijo (icono + name: primer arg). */
@@ -63,6 +61,8 @@ interface NodeProps {
   expanded: boolean;
   isLast: boolean;
   now: number;
+  /** Tool calls internas que se enseñan; las anteriores se resumen en una línea. */
+  maxToolLines: number;
 }
 
 function nodeIcon(status: SubagentBlockState['status']): { icon: string; color: string } {
@@ -84,7 +84,7 @@ function nodeIcon(status: SubagentBlockState['status']): { icon: string; color: 
   }
 }
 
-function SubagentNode({ node, speaking, focused, expanded, isLast, now }: NodeProps) {
+function SubagentNode({ node, speaking, focused, expanded, isLast, now, maxToolLines }: NodeProps) {
   const running = node.status === 'running';
   const elapsedMs = node.startedAt ? Math.max(0, now - node.startedAt) : 0;
 
@@ -112,7 +112,7 @@ function SubagentNode({ node, speaking, focused, expanded, isLast, now }: NodePr
         ? truncate(node.summary, 44)
         : truncate(node.task, 44);
 
-  const tcs = node.toolCalls ?? [];
+  const { hidden, visible: tcs } = tailWindow(node.toolCalls ?? [], maxToolLines);
   const files = node.filesChanged ?? [];
 
   return (
@@ -130,6 +130,12 @@ function SubagentNode({ node, speaking, focused, expanded, isLast, now }: NodePr
         {focused ? <Text color={theme.accent}> ◀</Text> : null}
       </Text>
       {/* Tool calls internos indentados bajo el nodo (no se muestra text_delta). */}
+      {hidden > 0 && (
+        <Text color={theme.textDisabled} wrap="truncate-end">
+          {'      '}… {hidden} {hidden === 1 ? 'acción anterior' : 'acciones anteriores'}{' '}
+          (/subagents para verlas)
+        </Text>
+      )}
       {tcs.map((tc) => (
         <ToolLine key={tc.id} tc={tc} />
       ))}
@@ -173,6 +179,8 @@ export function AgentTree({
   expandedBlockIds,
   now = Date.now(),
 }: Props) {
+  const { stdout } = useStdout();
+  const maxToolLines = treeToolBudget(stdout?.rows ?? 24, nodes.length);
   const allTerminal = nodes.every((n) => TERMINAL.has(n.status));
 
   if (allTerminal) {
@@ -218,6 +226,7 @@ export function AgentTree({
           expanded={expandedBlockIds?.has(n.id) ?? false}
           isLast={i === nodes.length - 1}
           now={now}
+          maxToolLines={maxToolLines}
         />
       ))}
     </Box>
