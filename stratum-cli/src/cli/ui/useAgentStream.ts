@@ -64,6 +64,8 @@ export function useAgentStream(
   agent: StratumAgent,
   dispatch: (action: AppAction) => void,
   getRunOptions?: () => Partial<RunOptions>,
+  /** Se llama al lanzar cada turno, con la entrada tal como la escribió el usuario. */
+  onTurn?: (turn: { input: string; mode: 'normal' | 'plan' }) => void,
 ) {
   const abortRef = useRef<AbortController | null>(null);
 
@@ -87,6 +89,10 @@ export function useAgentStream(
         ...(extra?.runOptions ?? {}),
         signal: controller.signal,
       };
+      onTurn?.({
+        input: extra?.displayText ?? input,
+        mode: runOptions.mode === 'plan' ? 'plan' : 'normal',
+      });
       const events = extra?.delegateProfile
         ? agent.runDelegate(extra.delegateProfile, input, runOptions)
         : agent.run(input, runOptions);
@@ -170,7 +176,7 @@ export function useAgentStream(
         abortRef.current = null;
       }
     },
-    [agent, dispatch, getRunOptions],
+    [agent, dispatch, getRunOptions, onTurn],
   );
 
   const cancel = useCallback(() => {

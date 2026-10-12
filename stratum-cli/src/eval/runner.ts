@@ -304,6 +304,8 @@ export async function runScenario(
           env: {
             HOME: home,
             USERPROFILE: home,
+            // Un escenario mide el runtime, no un daemon: nunca se publica ni se arranca uno.
+            STRATUM_NO_DAEMON: '1',
             [API_KEY_ENV]: apiKey,
             STRATUM_NO_BROWSER: '1',
             ...(steerFile && index === 0 ? { [STEER_SCRIPT_ENV]: steerFile } : {}),

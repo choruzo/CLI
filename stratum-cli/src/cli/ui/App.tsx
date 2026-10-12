@@ -921,6 +921,17 @@ interface Props {
   auditor?: SessionAuditor;
   /** Guarda un checkpoint de la sesión; se llama al terminar cada turno. */
   onCheckpoint?: () => void;
+  /**
+   * La sesión está publicada en `stratumd`: otro cliente puede cancelar el
+   * turno, y cada turno se anuncia con su entrada y su modo.
+   */
+  remote?: RemoteSessionLink;
+}
+
+export interface RemoteSessionLink {
+  /** `App` entrega aquí cómo se cancela el turno en curso. */
+  bindCancel(cancel: () => void): void;
+  expectRun(turn: { input: string; mode: 'normal' | 'plan' }): void;
 }
 
 export function App({
@@ -934,6 +945,7 @@ export function App({
   subagentStore,
   auditor,
   onCheckpoint,
+  remote,
 }: Props) {
   const { exit } = useApp();
 
@@ -1214,7 +1226,10 @@ export function App({
     return opts;
   }, [onConfirmDestructive, onAskQuestions, agent, sessionId, auditor]);
 
-  const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions);
+  const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions, remote?.expectRun);
+  useEffect(() => {
+    remote?.bindCancel(cancel);
+  }, [remote, cancel]);
 
   // -------------------------------------------------------------------------
   // Helpers de los comandos de sesión (§5.2, Hito 10)

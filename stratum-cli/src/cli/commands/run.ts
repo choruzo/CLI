@@ -22,6 +22,7 @@ import { processSessionEnv } from '../../runtime/session-env.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { sessionProfileFlag } from '../session-flags.js';
 import { createSteerDriver, loadSteerScript } from '../steer-script.js';
+import { createCliBridge } from '../daemon-link.js';
 import {
   configureLogging,
   flushLogging,
@@ -215,6 +216,24 @@ export const runCommand = new Command('run')
         controller.abort();
       });
 
+      // Si hay `stratumd`, la sesión se publica en él como anfitrión par: otros
+      // clientes la ven, la redirigen y la cancelan. El runtime sigue aquí, y
+      // sin daemon (o si se cae a mitad) no cambia nada.
+      const bridge = createCliBridge({
+        session: host,
+        name: 'stratum run',
+        config,
+        control: {
+          cancel: () => {
+            if (!aborting) process.stderr.write('\n[cancelled from another client]\n');
+            aborting = true;
+            controller.abort();
+          },
+          steer: (text) => agent.enqueueUserMessage(text),
+        },
+      });
+      await bridge?.start();
+
       // Un perfil principal solo endurece la política, nunca la relaja: el host
       // la da ya compuesta con la del perfil activo.
       const policy = host.destructivePolicy;
@@ -375,6 +394,10 @@ export const runCommand = new Command('run')
               if (stop !== 'stop') return;
               yield { type: 'text_delta', delta: '\n\n' };
             }
+            bridge?.expectRun({
+              mode: planMode ? 'plan' : 'normal',
+              input: turnInput === input ? task : turnInput,
+            });
             for await (const ev of host.run(turnInput, turn)) {
               if (ev.type === 'done') stop = ev.stopReason;
               yield ev;
@@ -534,6 +557,7 @@ export const runCommand = new Command('run')
         steer?.dispose();
         getLogger('cli').error('run aborted with error', { err });
         await host.dispose({ cancelBackground: true });
+        await bridge?.close();
         await closeExecRuntime();
         await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
@@ -551,6 +575,9 @@ export const runCommand = new Command('run')
           fatalError ||
           (opts.delegate !== undefined && delegateStatus !== 'completed'),
       });
+      // Estado final y baja en el daemon, si lo había. Después del desmontaje:
+      // los jobs que se cancelan al cerrar aún se publican.
+      await bridge?.close();
       // Y lo que quede del proceso (nada, con una sola sesión).
       await closeExecRuntime();
       await flushLogging();

@@ -26,6 +26,7 @@ import { animateStartupLogo } from '../ui/startup-logo-animation.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
+import { createCliBridge } from '../daemon-link.js';
 import {
   configureLogging,
   flushLogging,
@@ -310,6 +311,21 @@ export const chatCommand = new Command('chat')
       process.on('SIGTERM', onFatalSignal);
       process.on('SIGHUP', onFatalSignal);
 
+      // Si hay `stratumd`, la sesión se publica en él como anfitrión par (otros
+      // clientes la ven, la redirigen y cancelan su turno). El runtime sigue
+      // aquí: sin daemon, o si se cae, el chat no cambia.
+      let cancelTurn: () => void = () => undefined;
+      const bridge = createCliBridge({
+        session: { sessionId, agent, config, env: { cwd: process.cwd() } },
+        name: 'stratum chat',
+        config,
+        control: {
+          cancel: () => cancelTurn(),
+          steer: (text) => agent.enqueueUserMessage(text),
+        },
+      });
+      await bridge?.start();
+
       const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
       const { waitUntilExit } = render(
@@ -323,7 +339,22 @@ export const chatCommand = new Command('chat')
           registry,
           subagentStore,
           auditor,
-          onCheckpoint: () => void checkpointer.checkpoint(),
+          onCheckpoint: () => {
+            void checkpointer.checkpoint();
+            // Modelo, perfil o read-only pueden haber cambiado entre turnos.
+            bridge?.sessionChanged();
+          },
+          ...(bridge
+            ? {
+                remote: {
+                  bindCancel: (cancel: () => void) => {
+                    cancelTurn = cancel;
+                  },
+                  expectRun: (turn: { input: string; mode: 'normal' | 'plan' }) =>
+                    bridge.expectRun(turn),
+                },
+              }
+            : {}),
         }),
         // Ctrl+C es de App (cancelar el turno, doble pulsación para salir, §10):
         // con el default de Ink, la tecla desmontaba la UI y nunca llegaba.
@@ -361,6 +392,9 @@ export const chatCommand = new Command('chat')
           `[stratum] No se pudo guardar la sesión ${checkpointer.sessionId}: ${String(err)}\n`,
         );
       }
+
+      // Estado final y baja en el daemon, si lo había.
+      await settle('daemon bridge', () => bridge?.close());
 
       // Teardown: cada paso por separado, para que un fallo no deje el resto
       // sin cerrar (sin cerrar SSH el proceso no termina, §12.12).

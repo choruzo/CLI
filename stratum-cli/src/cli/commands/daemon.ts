@@ -1,10 +1,10 @@
 import { Command } from 'commander';
-import { execa } from 'execa';
 import { homedir } from 'os';
 import { StratumClient } from '../../client/client.js';
 import { fileDiscovery, type DiscoveryResult } from '../../client/discovery.js';
+import { locateLiveDaemon as locateLive, spawnDaemon } from '../daemon-link.js';
 import { loadConfig } from '../../config/loader.js';
-import { DaemonAlreadyRunningError, probeIpc } from '../../daemon/endpoint.js';
+import { DaemonAlreadyRunningError } from '../../daemon/endpoint.js';
 import { Stratumd } from '../../daemon/daemon.js';
 import { ProtocolError } from '../../ipc/codec.js';
 import { UnknownOutcomeError } from '../../ipc/peer.js';
@@ -19,16 +19,6 @@ import { cliVersion } from '../version.js';
  */
 
 const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms));
-
-/** ¿Hay un daemon publicado **y** escuchando? */
-async function locateLive(): Promise<DiscoveryResult> {
-  const found = await fileDiscovery().locate();
-  if (found.status === 'found' && !(await probeIpc(found.endpoint.ipcPath))) {
-    // El pid existe (o se reutilizó), pero nadie atiende: es un endpoint rancio.
-    return { status: 'stale', pid: found.endpoint.pid };
-  }
-  return found;
-}
 
 async function connect(roles: Role[]): Promise<StratumClient> {
   const client = new StratumClient({
@@ -119,14 +109,7 @@ const start = new Command('start')
       process.exitCode = 1;
       return;
     }
-    // Desligado de esta terminal: sobrevive a quien lo arranca.
-    const child = execa(
-      process.execPath,
-      [...process.execArgv, process.argv[1] ?? '', 'daemon', 'run'],
-      { detached: true, stdio: 'ignore', cleanup: false, windowsHide: true, reject: false },
-    );
-    child.unref();
-    void child.catch(() => undefined);
+    spawnDaemon();
 
     const deadline = Date.now() + 20_000;
     while (Date.now() < deadline) {

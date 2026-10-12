@@ -64,6 +64,7 @@
     "lint": "eslint src/",
     "format": "prettier --write src/",
     "tui:smoke": "node scripts/tui/smoke.mjs",
+    "tui:peer": "node scripts/tui/daemon-peer.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
