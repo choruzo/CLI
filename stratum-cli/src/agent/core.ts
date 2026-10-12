@@ -421,18 +421,6 @@ export class StratumAgent {
   }
 
   /**
-   * Cierra lo que es de este agente y de nadie más: el trabajo en segundo plano
-   * y sus jobs. Terminal para los jobs (`JobManager.shutdown`). No toca el
-   * estado que comparte la config (SSH, auditoría): eso lo cierra quien es
-   * dueño de la config — `SessionHost`, o `closeExecRuntime()` al apagar el
-   * proceso. Nunca lanza.
-   */
-  async dispose(): Promise<void> {
-    await this.cancelBackgroundWork();
-    await this.jobs?.shutdown().catch(() => undefined);
-  }
-
-  /**
    * Recarga la memoria del proyecto desde disco y reconstruye el system prompt.
    * Usado tras `/init` para que el STRATUM.md regenerado entre en el contexto.
    */
