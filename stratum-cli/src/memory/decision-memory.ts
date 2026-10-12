@@ -20,6 +20,18 @@ export interface RecallResult {
   score: number;
 }
 
+/**
+ * Lo que cambia en la memoria de decisiones, para quien la observa
+ * (`DecisionMemory.subscribe`). `saved` llega también cuando el guardado se
+ * resolvió como near-duplicado (`deduped`): no se escribió nada, pero alguien
+ * intentó guardar. El `record` dice quién (`source`, `session_id`).
+ */
+export type DecisionMemoryEvent =
+  | { type: 'saved'; record: DecisionRecord; deduped: boolean; indexed: boolean }
+  | { type: 'removed'; id: string };
+
+export type DecisionMemoryListener = (event: DecisionMemoryEvent) => void;
+
 export interface DecisionMemoryOptions {
   embedding?: EmbeddingServiceOptions;
   forceFallbackVectors?: boolean;
@@ -56,6 +68,7 @@ export class DecisionMemory {
    * a todos los agentes que comparten el store.
    */
   private readonly writeLock = new Mutex();
+  private readonly listeners = new Set<DecisionMemoryListener>();
 
   constructor(config: StratumConfig, opts?: DecisionMemoryOptions) {
     const paths = resolveMemoryPaths(config);
@@ -72,10 +85,46 @@ export class DecisionMemory {
   }
 
   /**
+   * Observa las escrituras de esta memoria: toda decisión guardada o eliminada,
+   * venga de la tool `store_decision`, de la extracción automática o de un
+   * comando. La instancia es única por fichero de decisiones, así que quien se
+   * suscribe ve las de todos los agentes que lo comparten. Un listener no puede
+   * hacer fallar una escritura: sus excepciones se descartan. Devuelve la
+   * función que lo retira.
+   */
+  subscribe(listener: DecisionMemoryListener): () => void {
+    this.listeners.add(listener);
+    return () => {
+      this.listeners.delete(listener);
+    };
+  }
+
+  private emit(event: DecisionMemoryEvent): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(event);
+      } catch {
+        /* la memoria no depende de quien la observa */
+      }
+    }
+  }
+
+  /**
    * Persiste una decisión con dedup semántico previo. Pipeline (§5):
    *   embed(content) → findSimilar ≥ threshold ? dedup : store.add + vectors.add
    */
   async save(input: DecisionInput): Promise<SaveResult> {
+    const result = await this.saveLocked(input);
+    this.emit({
+      type: 'saved',
+      record: result.record,
+      deduped: result.deduped,
+      indexed: result.indexed,
+    });
+    return result;
+  }
+
+  private saveLocked(input: DecisionInput): Promise<SaveResult> {
     // Serializado (Hito 8C): el pipeline dedup+add debe ser atómico frente a
     // escrituras concurrentes de subagentes paralelos que comparten el store.
     return this.writeLock.runExclusive(async () => {
@@ -130,6 +179,7 @@ export class DecisionMemory {
     const record = this.store.get(id);
     const removed = this.store.remove(id);
     if (record) await this.vectors.remove(record.embedding_ref);
+    if (removed) this.emit({ type: 'removed', id });
     return removed;
   }
 

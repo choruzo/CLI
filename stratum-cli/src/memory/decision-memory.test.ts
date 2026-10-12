@@ -3,7 +3,7 @@ import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { StratumConfigSchema } from '../config/schema.js';
-import { DecisionMemory } from './decision-memory.js';
+import { DecisionMemory, type DecisionMemoryEvent } from './decision-memory.js';
 import type { EmbedFn } from './embeddings.js';
 import type { DecisionInput } from './decisions.js';
 
@@ -64,6 +64,45 @@ describe('DecisionMemory', () => {
     const results = await mem.search('por qué elegimos sqlite embeddings');
     expect(results.length).toBeGreaterThanOrEqual(1);
     expect(results[0]!.record.id).toBe(record.id);
+  });
+
+  it('subscribe: avisa de cada guardado y borrado, con su origen', async () => {
+    const mem = makeMemory(dir);
+    const events: DecisionMemoryEvent[] = [];
+    const stop = mem.subscribe((ev) => events.push(ev));
+
+    const first = await mem.save({ ...sqliteDecision, source: 'agent', session_id: 's1' });
+    // Near-duplicado: no escribe, pero el intento se ve.
+    await mem.save({ ...sqliteDecision, title: 'Elegir sqlite-vec sobre Chroma', source: 'auto' });
+    await mem.remove(first.record.id);
+    await mem.remove('dec_00000000_nohay');
+
+    expect(events).toEqual([
+      { type: 'saved', record: first.record, deduped: false, indexed: true },
+      { type: 'saved', record: first.record, deduped: true, indexed: true },
+      { type: 'removed', id: first.record.id },
+    ]);
+    expect(first.record.source).toBe('agent');
+    expect(first.record.session_id).toBe('s1');
+
+    stop();
+    await mem.save({ ...sqliteDecision, title: 'Docker para vmware', content: 'docker vmware' });
+    expect(events).toHaveLength(3);
+  });
+
+  it('subscribe: un listener que lanza no hace fallar la escritura', async () => {
+    const mem = makeMemory(dir);
+    mem.subscribe(() => {
+      throw new Error('listener roto');
+    });
+    const seen: string[] = [];
+    mem.subscribe((ev) => seen.push(ev.type));
+
+    const result = await mem.save(sqliteDecision);
+
+    expect(result.deduped).toBe(false);
+    expect(mem.list()).toHaveLength(1);
+    expect(seen).toEqual(['saved']);
   });
 
   it('dedup: una decisión casi idéntica no crea entrada nueva', async () => {
