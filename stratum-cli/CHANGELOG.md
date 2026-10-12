@@ -6,7 +6,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.8.0-beta.1] — 2026-10-12
+
+Segunda pre-release (`npm install -g stratum-cli@beta`), con lo visto al probar la beta.0.
 
 ### Añadido
 - **`/comandos` con el agente trabajando**: los de consulta (`/context`, `/jobs`, `/jobs cancel`, `/todo`, `/changes`, `/auditor`, `/debug`, `/tools`, `/agents`, `/env`, `/memory show|list|search`, `/sessions list`, `/config get`, `/help`) se ejecutan sin esperar al final del turno, y la paleta se reduce a ellos. Los que tocan el historial, el modelo o el toolset siguen esperando.
@@ -282,6 +284,7 @@ Primera versión etiquetada. Hitos 0 y 1.
 - `/init` para generar o actualizar `STRATUM.md`.
 - Render de markdown de las respuestas.
 
+[0.8.0-beta.1]: https://github.com/choruzo/CLI/compare/v0.8.0-beta.0...v0.8.0-beta.1
 [0.8.0-beta.0]: https://github.com/choruzo/CLI/compare/v0.7.0...v0.8.0-beta.0
 [0.7.0]: https://github.com/choruzo/CLI/compare/v0.6.0...v0.7.0
 [0.7.0-beta.0]: https://github.com/choruzo/CLI/compare/v0.6.0...v0.7.0-beta.0
