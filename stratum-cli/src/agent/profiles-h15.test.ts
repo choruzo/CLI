@@ -9,6 +9,7 @@ import {
   isValidProfileName,
   parseProfile,
   profileMode,
+  resolveSubagentBudget,
   strictestPolicy,
 } from './profiles.js';
 import { formatProfilesReport, profilesToJson } from './profiles-report.js';
@@ -249,5 +250,56 @@ describe('ToolsetFilter.controlTools (perfil principal)', () => {
     expect(
       names('normal', { allowedTools: ['read_file', 'delegate_task'], controlTools: 'keep' }),
     ).toContain('delegate_task');
+  });
+});
+
+describe('presupuesto efectivo de un subagente', () => {
+  const agents = { subagentTimeoutMs: 1_800_000, subagentMaxIterations: 50 };
+  const base: AgentProfile = {
+    name: 'p',
+    allowedTools: null,
+    budget: { maxIterations: 50, timeoutMs: 1_800_000 },
+    systemPromptFragment: '',
+  };
+
+  it('lo que el perfil no declara lo pone la config', () => {
+    expect(resolveSubagentBudget({ ...base, declaredBudget: {} }, agents)).toEqual({
+      maxIterations: 50,
+      maxTokens: undefined,
+      timeoutMs: 1_800_000,
+    });
+    expect(
+      resolveSubagentBudget(
+        { ...base, declaredBudget: {} },
+        { subagentTimeoutMs: 0, subagentMaxIterations: 80 },
+      ),
+    ).toMatchObject({ maxIterations: 80, timeoutMs: 0 });
+  });
+
+  it('lo que declara el perfil gana a la config, campo a campo', () => {
+    const budget = resolveSubagentBudget(
+      { ...base, declaredBudget: { timeoutMs: 60_000 } },
+      agents,
+    );
+    expect(budget).toMatchObject({ maxIterations: 50, timeoutMs: 60_000 });
+  });
+
+  it('un perfil construido a mano conserva su presupuesto', () => {
+    const manual = { ...base, budget: { maxIterations: 3, timeoutMs: 50 } };
+    expect(resolveSubagentBudget(manual, agents)).toMatchObject({
+      maxIterations: 3,
+      timeoutMs: 50,
+    });
+    // Sin tiempo propio (el caso de `{ ...GENERAL_PROFILE, budget: { maxIterations: 1 } }`).
+    expect(resolveSubagentBudget({ ...base, budget: { maxIterations: 1 } }, agents)).toMatchObject({
+      maxIterations: 1,
+      timeoutMs: 1_800_000,
+    });
+  });
+
+  it('el perfil general sigue a la config', () => {
+    expect(
+      resolveSubagentBudget(GENERAL_PROFILE, { ...agents, subagentTimeoutMs: 0 }).timeoutMs,
+    ).toBe(0);
   });
 });

@@ -17,14 +17,45 @@ import { existsSync, readdirSync, readFileSync } from 'fs';
 import { homedir } from 'os';
 import { join, resolve } from 'path';
 import { z } from 'zod';
-import type { AgentProfile, DestructivePolicy, ProfileMode, ProfileSource } from './types.js';
+import type {
+  AgentProfile,
+  DestructivePolicy,
+  ProfileMode,
+  ProfileSource,
+  SubagentBudget,
+} from './types.js';
 import { splitFrontmatter } from './frontmatter.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('agent');
 
-/** Presupuesto por defecto cuando un perfil no lo especifica del todo. */
-const DEFAULT_BUDGET = { maxIterations: 25, timeoutMs: 300_000 } as const;
+/**
+ * Presupuesto que se muestra cuando un perfil no lo especifica del todo: los
+ * defaults de `agents.subagentMaxIterations`/`subagentTimeoutMs`. El que se
+ * aplica al lanzar un subagente sale de `resolveSubagentBudget`.
+ */
+const DEFAULT_BUDGET = { maxIterations: 50, timeoutMs: 30 * 60 * 1000 } as const;
+
+/**
+ * Presupuesto efectivo de un subagente: lo que el perfil declara gana; lo que
+ * no, lo pone la config. `timeoutMs: 0` es sin límite de tiempo.
+ */
+export function resolveSubagentBudget(
+  profile: AgentProfile,
+  agents: { subagentTimeoutMs: number; subagentMaxIterations: number },
+): SubagentBudget {
+  const declared = profile.declaredBudget ?? {};
+  // Un perfil construido a mano no trae `declaredBudget`: un valor de `budget`
+  // distinto del de relleno se puso a propósito y se respeta.
+  const own = <K extends 'maxIterations' | 'timeoutMs'>(key: K): number | undefined =>
+    declared[key] ??
+    (profile.budget[key] !== DEFAULT_BUDGET[key] ? profile.budget[key] : undefined);
+  return {
+    maxIterations: own('maxIterations') ?? agents.subagentMaxIterations,
+    maxTokens: declared.maxTokens ?? profile.budget.maxTokens,
+    timeoutMs: own('timeoutMs') ?? agents.subagentTimeoutMs,
+  };
+}
 
 /**
  * Gramática de nombres. Sin mayúsculas a propósito: en Windows y macOS el
@@ -276,6 +307,7 @@ function parseProfileDetailed(name: string, raw: string): ParseResult {
       destructivePolicy: fm.destructivePolicy as DestructivePolicy | undefined,
       budget,
       budgetDeclared: fm.budget !== undefined,
+      declaredBudget: fm.budget ?? {},
       systemPromptFragment: body.trim() || GENERAL_PROFILE.systemPromptFragment,
     },
   };

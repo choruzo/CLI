@@ -6,6 +6,16 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.8.0-beta.3] — 2026-10-12
+
+Cuarta pre-release (`npm install -g stratum-cli@beta`).
+
+### Cambiado
+- **Los subagentes tienen más margen**: el tiempo máximo por defecto pasa de 5 a 30 minutos y las iteraciones de 25 a 50. Ambos se ajustan en la config con `agents.subagentTimeoutMs` (`0` quita el límite de tiempo) y `agents.subagentMaxIterations`; lo que un perfil declare en su `budget` sigue ganando.
+
+### Corregido
+- Un subagente que agotaba su tiempo aparecía como «cancelado», como si alguien lo hubiera parado. Ahora termina como presupuesto agotado, y el agente principal recibe el límite que se alcanzó, el aviso de que el trabajo parcial puede estar en disco y dónde se cambia.
+
 ## [0.8.0-beta.2] — 2026-10-12
 
 Tercera pre-release (`npm install -g stratum-cli@beta`), con más arreglos de lo visto al probar la beta.
@@ -293,6 +303,7 @@ Primera versión etiquetada. Hitos 0 y 1.
 - `/init` para generar o actualizar `STRATUM.md`.
 - Render de markdown de las respuestas.
 
+[0.8.0-beta.3]: https://github.com/choruzo/CLI/compare/v0.8.0-beta.2...v0.8.0-beta.3
 [0.8.0-beta.2]: https://github.com/choruzo/CLI/compare/v0.8.0-beta.1...v0.8.0-beta.2
 [0.8.0-beta.1]: https://github.com/choruzo/CLI/compare/v0.8.0-beta.0...v0.8.0-beta.1
 [0.8.0-beta.0]: https://github.com/choruzo/CLI/compare/v0.7.0...v0.8.0-beta.0

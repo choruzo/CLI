@@ -10,6 +10,7 @@ import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/moc
 import type { AgentProfile, Message, SubagentResult, SubagentRouter } from './types.js';
 import type { CompletionRequest, OpenAIStreamChunk, IProvider } from '../providers/base.js';
 import { StratumConfigSchema } from '../config/schema.js';
+import { z } from 'zod';
 
 const config = StratumConfigSchema.parse({});
 
@@ -235,6 +236,43 @@ describe('runSubagent (Hito 8A)', () => {
     });
     expect(result.status).toBe('budget_exceeded');
     expect(result.error).toBeDefined();
+  });
+
+  it('agotar el tiempo → budget_exceeded con el límite en el mensaje, no cancelled', async () => {
+    // Una tool que tarda más que el presupuesto de tiempo del perfil.
+    const registry = newRegistry();
+    registry.register({
+      name: 'slow',
+      description: 'tarda',
+      schema: z.object({}),
+      destructive: false,
+      execute: async (_p, ctx) => {
+        await new Promise<void>((resolve) => {
+          const timer = setTimeout(resolve, 5000);
+          ctx.signal.addEventListener('abort', () => {
+            clearTimeout(timer);
+            resolve();
+          });
+        });
+        return { ok: true, output: 'tarde' };
+      },
+    });
+    const provider = new MockProvider([makeToolCallRound('s1', 'slow', {})]);
+    const profile: AgentProfile = {
+      ...GENERAL_PROFILE,
+      budget: { maxIterations: 5, timeoutMs: 200 },
+    };
+    const result = await runSubagent({
+      task: { id: 'sub_time', task: 't', profile: 'general', budget: profile.budget },
+      profile,
+      registry,
+      config,
+      parentSignal: new AbortController().signal,
+      makeRouter: () => mockRouter(provider),
+    });
+    expect(result.status).toBe('budget_exceeded');
+    expect(result.error).toContain('ran out of time');
+    expect(result.error).toContain('agents.subagentTimeoutMs');
   });
 
   it('signal del padre abortado → el hijo termina cancelado (signal encadenado)', async () => {

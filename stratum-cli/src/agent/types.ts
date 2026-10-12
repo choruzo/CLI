@@ -84,6 +84,12 @@ export interface AgentProfile {
    */
   budgetDeclared?: boolean;
   /**
+   * Lo que el frontmatter declaró de `budget`, sin defaults: lo que falte lo
+   * pone la config (`agents.subagentTimeoutMs`/`subagentMaxIterations`) al
+   * lanzar el subagente (`resolveSubagentBudget`).
+   */
+  declaredBudget?: Partial<SubagentBudget>;
+  /**
    * Tools permitidas al subagente. `null` = hereda todas (salvo delegate_task,
    * filtrado por construcción para forzar profundidad = 1).
    */

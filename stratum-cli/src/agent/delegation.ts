@@ -22,7 +22,7 @@ import type {
 } from './types.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type { ProfileLoader } from './profiles.js';
-import { isDelegable } from './profiles.js';
+import { isDelegable, resolveSubagentBudget } from './profiles.js';
 import { runSubagent } from './subagent.js';
 import { Semaphore, Mutex } from './concurrency.js';
 import { getLogger } from '../logging/index.js';
@@ -201,7 +201,7 @@ export async function* executeDelegations(
               task: job.taskText,
               profile: job.profile.name,
               context: job.context,
-              budget: job.profile.budget,
+              budget: resolveSubagentBudget(job.profile, ctx.config.agents),
             },
             profile: job.profile,
             registry: ctx.registry,

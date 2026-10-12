@@ -144,7 +144,9 @@
   "agents": {
     "defaultProfile": "general",
     "maxConcurrency": 1,
-    "subagentRetentionDays": 30
+    "subagentRetentionDays": 30,
+    "subagentTimeoutMs": 1800000,
+    "subagentMaxIterations": 50
   },
   "skills": {
     "enabled": true,

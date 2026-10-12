@@ -564,6 +564,18 @@ export const StratumConfigSchema = z.object({
        * `chat` purga al arrancar lo que lleve más sin tocarse; `0` lo desactiva.
        */
       subagentRetentionDays: z.number().int().nonnegative().default(30),
+      /**
+       * Tiempo máximo de un subagente en ms, para los perfiles que no declaran
+       * `budget.timeoutMs`. `0` quita el límite: solo lo paran sus iteraciones,
+       * la cancelación del usuario o el fin del turno.
+       */
+      subagentTimeoutMs: z
+        .number()
+        .int()
+        .nonnegative()
+        .default(30 * 60 * 1000),
+      /** Iteraciones máximas de un subagente, para los perfiles sin `budget.maxIterations`. */
+      subagentMaxIterations: z.number().int().positive().default(50),
     })
     .default({}),
 

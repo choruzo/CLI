@@ -25,7 +25,7 @@ import type {
 import { ReactLoop } from './harness.js';
 import { ProviderRouter } from '../providers/router.js';
 import { buildSystemPrompt } from './system-prompt.js';
-import { strictestPolicy } from './profiles.js';
+import { resolveSubagentBudget, strictestPolicy } from './profiles.js';
 import { prepareGuideIndex } from './guides.js';
 import { truncateToolOutput } from '../tools/truncate.js';
 import { getLogger } from '../logging/index.js';
@@ -150,10 +150,11 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   let lastError: string | undefined;
 
   // Signal encadenado: cancelación del padre + pared de tiempo del presupuesto.
+  const budget = resolveSubagentBudget(profile, config.agents);
   let signal = parentSignal;
-  if (profile.budget.timeoutMs && profile.budget.timeoutMs > 0) {
-    signal = AbortSignal.any([parentSignal, AbortSignal.timeout(profile.budget.timeoutMs)]);
-  }
+  const timeLimit =
+    budget.timeoutMs && budget.timeoutMs > 0 ? AbortSignal.timeout(budget.timeoutMs) : null;
+  if (timeLimit) signal = AbortSignal.any([parentSignal, timeLimit]);
 
   // Router PROPIO por hijo (§12.16): barato, sin conexiones persistentes. Un
   // switch/fallback del hijo muere con el hijo y no toca al padre.
@@ -232,8 +233,8 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     jobs: opts.jobs,
     jobScope: task.id,
     inbox: opts.inbox,
-    maxIterations: profile.budget.maxIterations,
-    maxTokens: profile.budget.maxTokens,
+    maxIterations: budget.maxIterations,
+    maxTokens: budget.maxTokens,
     trace: opts.trace,
   };
 
@@ -242,7 +243,8 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     profile: profile.name,
     provider: router.providerName,
     model: router.model,
-    maxIterations: profile.budget.maxIterations,
+    maxIterations: budget.maxIterations,
+    timeoutMs: budget.timeoutMs,
   });
 
   let stopReason = 'stop';
@@ -329,9 +331,13 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     log.debug('subagent tokens sin dato', { id: task.id, tokenStatus: accounting.status });
   }
 
-  // 'max_iterations' y 'budget_tokens' son ambos agotamiento de presupuesto.
-  const status: SubagentStatus =
-    stopReason === 'cancelled'
+  // 'max_iterations' y 'budget_tokens' son ambos agotamiento de presupuesto, y
+  // también el corte por tiempo: darlo por «cancelado» le decía al padre (y al
+  // usuario) que alguien lo paró, cuando lo que pasó es que no le dio tiempo.
+  const timedOut = timeLimit?.aborted === true && !parentSignal.aborted;
+  const status: SubagentStatus = timedOut
+    ? 'budget_exceeded'
+    : stopReason === 'cancelled'
       ? 'cancelled'
       : stopReason === 'max_iterations' || stopReason === 'budget_tokens'
         ? 'budget_exceeded'
@@ -354,7 +360,13 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     decisions: decisions.length ? decisions : undefined,
     usage: { iterations, tokens, tokenStatus, durationMs: Date.now() - start },
     error:
-      status === 'failed' && lastError ? `Subagent failed: ${lastError}` : statusErrorText(status),
+      status === 'failed' && lastError
+        ? `Subagent failed: ${lastError}`
+        : timedOut
+          ? `Subagent ran out of time (${Math.round((budget.timeoutMs ?? 0) / 1000)} s limit) before finishing. ` +
+            'Its partial work may be on disk: check before redoing it. The limit is ' +
+            'agents.subagentTimeoutMs in .stratumrc.json (0 = no limit), or budget.timeoutMs in the profile.'
+          : statusErrorText(status),
   };
 }
 
