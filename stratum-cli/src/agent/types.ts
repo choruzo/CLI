@@ -180,6 +180,11 @@ export interface ConfirmRequest {
 export interface ToolContext {
   signal: AbortSignal;
   cwd: string;
+  /**
+   * Variables de entorno de la sesión, para las tools que lanzan procesos
+   * locales. Ausente → las del proceso. Nunca se registra ni se devuelve.
+   */
+  env?: Readonly<NodeJS.ProcessEnv>;
   config: StratumConfig;
   /** Id de la sesión activa, cuando lo hay. Lo usa el log de auditoría SSH (§12.14). */
   sessionId?: string;

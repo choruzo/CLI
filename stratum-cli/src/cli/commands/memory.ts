@@ -72,7 +72,7 @@ const memoryShow = new Command('show')
       process.exit(1);
     }
 
-    const output = renderMemoryShow(config);
+    const output = renderMemoryShow(config, process.cwd());
     process.stdout.write(output + '\n');
   });
 

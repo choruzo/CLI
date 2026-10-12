@@ -5,8 +5,8 @@ import { MemoryManager } from './manager.js';
  * Genera el texto de salida para el comando `stratum memory show` y `/memory show`.
  * Compartido entre la CLI y la UI de chat para garantizar salida idéntica.
  */
-export function renderMemoryShow(config: StratumConfig): string {
-  const mgr = new MemoryManager(config);
+export function renderMemoryShow(config: StratumConfig, cwd: string): string {
+  const mgr = new MemoryManager(config, cwd);
   const { projectContent, globalContent, projectPath, globalPath } = mgr.getProjectMemory();
 
   if (!projectContent && !globalContent) {

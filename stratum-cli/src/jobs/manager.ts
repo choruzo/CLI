@@ -65,6 +65,8 @@ export interface JobLimits {
 export interface StartJobRequest {
   command: string;
   cwd: string;
+  /** Variables de la sesión que lo lanza. Solo se pasan al proceso: nunca se guardan ni se trazan. */
+  env?: Readonly<NodeJS.ProcessEnv>;
   owner: JobOwner;
   stdin?: string;
   /** Tiempo máximo; por defecto `limits.maxRuntimeMs`. */
@@ -76,7 +78,12 @@ export interface StartJobRequest {
 export interface JobManagerOptions {
   /** Margen entre SIGTERM y SIGKILL. Los tests lo acortan. */
   killGraceMs?: number;
-  spawn?: (command: string, cwd: string, stdin?: string) => LocalSubprocess;
+  spawn?: (
+    command: string,
+    cwd: string,
+    stdin?: string,
+    env?: Readonly<NodeJS.ProcessEnv>,
+  ) => LocalSubprocess;
 }
 
 /** No se pudo crear el job por un límite de la sesión (no es un fallo del comando). */
@@ -268,7 +275,7 @@ export class JobManager {
 
     let subprocess: LocalSubprocess;
     try {
-      subprocess = this.spawn(req.command, req.cwd, req.stdin);
+      subprocess = this.spawn(req.command, req.cwd, req.stdin, req.env);
       await spawned(subprocess);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

@@ -167,14 +167,22 @@ export type LocalSubprocess = ReturnType<typeof execa>;
  * para un job en segundo plano (`jobs/manager.ts`): mismo intérprete, mismo
  * entorno saneado y, en POSIX, grupo de procesos propio para poder cerrar el
  * árbol entero. Lanza si el proceso no se puede crear.
+ *
+ * `env` son las variables de la sesión (`ToolContext.env`); sin él, las del
+ * proceso. En ambos casos se sanea el enrutado de git.
  */
-export function spawnLocalShell(command: string, cwd: string, stdin?: string): LocalSubprocess {
+export function spawnLocalShell(
+  command: string,
+  cwd: string,
+  stdin?: string,
+  env?: Readonly<NodeJS.ProcessEnv>,
+): LocalSubprocess {
   const options = {
     cwd,
     // Entorno heredado MENOS las variables de enrutado de git (git/env.ts).
     // `extendEnv: false` es obligatorio: con el merge por defecto de execa,
     // quitarlas de la copia no las quitaría del proceso hijo.
-    env: scrubGitEnv(),
+    env: scrubGitEnv(env),
     extendEnv: false,
     // Sin buffer interno: execa acumula por defecto hasta `maxBuffer`
     // (100 MB) y falla después. La salida la consumen los listeners de quien llama.
@@ -350,7 +358,7 @@ export const localBackend: IExecBackend = {
 
     let subprocess: LocalSubprocess;
     try {
-      subprocess = spawnLocalShell(req.command, cwd, req.stdin);
+      subprocess = spawnLocalShell(req.command, cwd, req.stdin, ctx.env);
     } catch (err) {
       return Promise.reject(new ExecSpawnError((err as Error).message));
     }

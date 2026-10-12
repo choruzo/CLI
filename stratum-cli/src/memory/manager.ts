@@ -14,8 +14,12 @@ export class MemoryManager {
   private memory: ProjectMemory;
   private decisions: DecisionMemory | null = null;
 
-  constructor(private readonly config: StratumConfig) {
-    this.memory = loadProjectMemory(config);
+  /** `cwd`: directorio de la sesión, contra el que se resuelve el `STRATUM.md` de proyecto. */
+  constructor(
+    private readonly config: StratumConfig,
+    private readonly cwd: string,
+  ) {
+    this.memory = loadProjectMemory(config, cwd);
   }
 
   /** Acceso perezoso a las Capas 2/3 (carga el modelo de embeddings al usarse). */
@@ -26,7 +30,7 @@ export class MemoryManager {
 
   /** Recarga la memoria desde disco (útil tras `/init` o edición manual). */
   reload(): void {
-    this.memory = loadProjectMemory(this.config);
+    this.memory = loadProjectMemory(this.config, this.cwd);
   }
 
   /** Devuelve el contenido bruto de la memoria de proyecto. */

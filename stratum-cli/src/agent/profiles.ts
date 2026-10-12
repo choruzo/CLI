@@ -168,7 +168,7 @@ export class ProfileLoader {
    * del repo. Con un solo root se comporta como la versión anterior. Los roots
    * duplicados (p.ej. cwd === worktreeRoot) se cargan una sola vez.
    */
-  constructor(projectRoots: string | string[] = process.cwd()) {
+  constructor(projectRoots: string | string[]) {
     const roots = Array.isArray(projectRoots) ? projectRoots : [projectRoots];
     const dirs: Array<{ dir: string; scope: ProfileSource['scope'] }> = [
       { dir: join(homedir(), '.stratum', 'agents'), scope: 'global' },

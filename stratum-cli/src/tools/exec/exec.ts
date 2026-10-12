@@ -425,6 +425,7 @@ async function startBackgroundJob(
     const job = await ctx.jobs.start({
       command: input.command,
       cwd,
+      env: ctx.env,
       stdin: input.stdin,
       timeoutMs: input.timeout,
       owner: { sessionId: ctx.sessionId, scope: ctx.jobScope ?? MAIN_JOB_SCOPE },

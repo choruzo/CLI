@@ -93,7 +93,7 @@ export class SkillRegistry {
   private readonly fingerprintValue: string;
 
   /** `opts.home` existe para los tests: fija el home en vez de leer el del sistema. */
-  constructor(projectRoots: string | string[] = process.cwd(), opts?: { home?: string }) {
+  constructor(projectRoots: string | string[], opts?: { home?: string }) {
     const roots = Array.isArray(projectRoots) ? projectRoots : [projectRoots];
     const parts: string[] = [`v${SKILL_REGISTRY_SCHEMA}`];
     for (const { dir, scope, source } of skillDirs(roots, opts?.home)) {

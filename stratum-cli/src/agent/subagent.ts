@@ -33,6 +33,7 @@ import { FileStateTracker } from '../tools/fs/file-state.js';
 import type { JobManager } from '../jobs/manager.js';
 import type { RuntimeInbox } from './inbox.js';
 import type { TraceScope } from '../trace/recorder.js';
+import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
 
 const log = getLogger('agent.subagent');
 
@@ -85,6 +86,8 @@ export interface RunSubagentOptions {
   planApproved?: boolean;
   /** Scope de traza de este hijo (`TraceScope.child`): sus pasos cuelgan del subagente. */
   trace?: TraceScope;
+  /** Entorno de la sesión del padre. Sin él —tests— se usa el del proceso. */
+  env?: SessionEnv;
 }
 
 function pad2(n: number): string {
@@ -139,6 +142,7 @@ function statusErrorText(status: SubagentStatus): string | undefined {
  */
 export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentResult> {
   const { task, profile, registry, config, parentSignal } = opts;
+  const env = opts.env ?? processSessionEnv();
   const start = Date.now();
   const filesChanged = new Map<string, 'created' | 'modified' | 'deleted'>();
   const pendingCalls = new Map<string, { name: string; input: Record<string, unknown> }>();
@@ -192,10 +196,12 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
         isSubagent: true,
         skills: opts.skillsBlock,
         readOnly: opts.readOnly,
-        guides: prepareGuideIndex(config, {
-          isSubagent: true,
-          testCommand: config.tools.testCommand,
-        }),
+        cwd: env.cwd,
+        guides: prepareGuideIndex(
+          config,
+          { isSubagent: true, testCommand: config.tools.testCommand },
+          env.cwd,
+        ),
       }),
     },
     { role: 'user', content: buildTaskInjection(profile, task) },
@@ -214,6 +220,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
       // Propio, no el del padre: lo que escribe el hijo no cuenta como leído
       // por el padre, que tendrá que releerlo antes de sobrescribirlo.
       fileState: new FileStateTracker(),
+      env,
     },
   );
 
@@ -272,7 +279,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
         case 'tool_result': {
           const call = pendingCalls.get(ev.id);
           if (call) {
-            recordFileChange(filesChanged, call);
+            recordFileChange(filesChanged, call, env.cwd);
             if (call.name === 'store_decision' && typeof ev.result === 'string') {
               const m = ev.result.match(/\bdec_\d{8}_[A-Za-z0-9]+/);
               if (m) decisions.push(m[0]);
@@ -284,7 +291,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
           // Hito 16: un comando que escribió y luego salió ≠ 0, se truncó o
           // agotó el timeout es un tool_error, pero se ejecutó: sigue contando.
           const call = ev.executed ? pendingCalls.get(ev.id) : undefined;
-          if (call) recordFileChange(filesChanged, call);
+          if (call) recordFileChange(filesChanged, call, env.cwd);
           break;
         }
         case 'error':
@@ -375,7 +382,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
  * TODAS las tools mutantes: sin ella `./foo`, `foo`, `sub/../foo` y la ruta
  * absoluta no colisionaban entre sí, y un `foo` escrito en local se confundía
  * con el `foo` de un host remoto.
- *  - local → relativa al directorio del proceso si cae dentro, absoluta si no;
+ *  - local → relativa a `baseCwd` (el directorio de la sesión) si cae dentro, absoluta si no;
  *  - ssh   → `ssh:<alias>:<ruta POSIX normalizada contra el cwd solicitado>`.
  */
 export function canonicalChangePath(
@@ -390,7 +397,7 @@ export function canonicalChangePath(
     return `${target}:${posix.normalize(joined)}`;
   }
   const absolute = resolve(baseCwd, cwd ?? '', clean);
-  const rel = relative(process.cwd(), absolute);
+  const rel = relative(baseCwd, absolute);
   const inside = rel !== '' && !rel.startsWith('..') && !isAbsolute(rel);
   return (inside ? rel : absolute).replace(/\\/g, '/');
 }
@@ -406,7 +413,7 @@ function execTargetOf(input: Record<string, unknown>): string | null {
 function recordFileChange(
   acc: Map<string, 'created' | 'modified' | 'deleted'>,
   call: { name: string; input: Record<string, unknown> },
-  baseCwd: string = process.cwd(),
+  baseCwd: string,
 ): void {
   if (call.name === 'write_file' || call.name === 'edit_file') {
     const raw = typeof call.input.path === 'string' ? call.input.path : undefined;

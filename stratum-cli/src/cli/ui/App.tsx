@@ -2383,7 +2383,7 @@ export function App({
         import('../../memory/show.js')
           .then(({ renderMemoryShow }) => {
             const config = agent.getConfig();
-            dispatch({ type: 'SYSTEM_MESSAGE', text: renderMemoryShow(config) });
+            dispatch({ type: 'SYSTEM_MESSAGE', text: renderMemoryShow(config, process.cwd()) });
           })
           .catch((err: unknown) => {
             dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al cargar memoria: ${String(err)}` });

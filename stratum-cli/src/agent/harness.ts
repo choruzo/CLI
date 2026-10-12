@@ -74,6 +74,7 @@ import { getLogger } from '../logging/index.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
 import { tracedCompletion } from '../trace/llm-call.js';
 import type { TraceScope } from '../trace/recorder.js';
+import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
 
 const log = getLogger('agent');
 
@@ -655,6 +656,8 @@ export class ContextManager {
 // ---------------------------------------------------------------------------
 export class ReactLoop {
   private readonly dispatcher: ToolDispatcher;
+  /** Entorno de la sesión: de aquí salen el `cwd` y las variables del `ToolContext`. */
+  private readonly env: SessionEnv;
   private readonly contextManager: ContextManager;
   /** Lista de tareas del turno (Hito 11). De sesión cuando `extras.todos` la aporta. */
   private readonly todos: TodoList;
@@ -749,8 +752,14 @@ export class ReactLoop {
        * Se pasa en el `ToolContext` y hace de `cwd`.
        */
       workspace?: WorkspaceConfinement;
+      /**
+       * Entorno de la sesión (`cwd` y variables). Lo aporta `StratumAgent` y lo
+       * heredan los subagentes. Sin él —un loop suelto— se usa el del proceso.
+       */
+      env?: SessionEnv;
     },
   ) {
+    this.env = extras?.env ?? processSessionEnv();
     // Fix #3: pasa maxToolRetries al dispatcher para aplicarlo en sesión
     this.dispatcher = new ToolDispatcher(registry, config.agent.maxToolRetries);
     // Sin lista de sesión (tests, subagentes) el loop usa una propia: `todo`
@@ -1563,7 +1572,8 @@ export class ReactLoop {
       if (regularCalls.length > 0) {
         const ctx: ToolContext = {
           signal,
-          cwd: this.extras?.workspace?.root ?? process.cwd(),
+          cwd: this.extras?.workspace?.root ?? this.env.cwd,
+          env: this.env.env,
           config: this.config,
           sessionId: opts?.sessionId,
           workspace: this.extras?.workspace,
@@ -1851,6 +1861,7 @@ export class ReactLoop {
       signal,
       opts,
       skillsBlock: this.extras?.skillsBlock,
+      env: this.env,
     });
 
     for (const job of jobs) {

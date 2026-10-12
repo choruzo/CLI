@@ -46,6 +46,7 @@ import {
 import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
+import { resolve as resolvePath } from 'path';
 import { MemoryManager } from '../memory/manager.js';
 import { assistantToolsetFilter, type PromptPreset } from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
@@ -63,8 +64,15 @@ import {
 } from '../tools/environments.js';
 import { extractAndStore } from '../memory/extractor.js';
 import type { TraceScope } from '../trace/recorder.js';
+import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
 
 export interface StratumAgentOptions {
+  /**
+   * Entorno de la sesión: directorio de trabajo y variables con las que lanza
+   * procesos. Lo aporta quien aloja la sesión (`SessionHost`). Sin él se usa el
+   * del proceso, que es lo que corresponde a una CLI de una sola sesión.
+   */
+  env?: SessionEnv;
   /** Mensajes iniciales para reanudar una sesión guardada (incluye el system prompt original). */
   initialMessages?: Message[];
   /**
@@ -206,6 +214,8 @@ export class StratumAgent {
   private _activeTarget = 'local';
   private readonly workspace: WorkspaceConfinement | undefined;
   private readonly workspaceFilesExpiredAt: string | undefined;
+  /** Entorno de la sesión: el único origen del directorio de trabajo en esta clase. */
+  private readonly env: SessionEnv;
 
   constructor(
     private readonly config: StratumConfig,
@@ -213,7 +223,9 @@ export class StratumAgent {
     private readonly registry: ToolRegistry,
     options?: StratumAgentOptions,
   ) {
-    this.memoryManager = new MemoryManager(config);
+    this.env = options?.env ?? processSessionEnv();
+    const cwd = this.env.cwd;
+    this.memoryManager = new MemoryManager(config, cwd);
     this.preset = options?.promptPreset ?? 'coding';
     this.jobs =
       this.preset === 'coding' && config.tools.jobs.enabled ? new JobManager(config) : undefined;
@@ -236,8 +248,7 @@ export class StratumAgent {
     // subdirectorio del repo (p.ej. `stratum-cli/.stratum/agents/`). El cwd gana
     // en conflictos por ser el más específico. Si coinciden, se carga una vez.
     this.profiles =
-      options?.profileLoader ??
-      new ProfileLoader([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
+      options?.profileLoader ?? new ProfileLoader([findWorktreeRoot(cwd).worktree, cwd]);
 
     // Skills (Hito 12): mismos roots que los perfiles. El índice entra en el
     // system prompt; el cuerpo de cada skill se lee bajo demanda con read_file.
@@ -246,9 +257,9 @@ export class StratumAgent {
     // El asistente no tiene skills: su índice presupone un proyecto, y
     // materializarlo escribiría `skill-registry.md` en el cwd del sidecar.
     if (config.skills.enabled && this.preset === 'coding') {
-      const registry = new SkillRegistry([findWorktreeRoot(process.cwd()).worktree, process.cwd()]);
-      this.skillsBlock = registry.promptBlock(process.cwd());
-      registry.writeRegistryFile(config.skills.registryFile);
+      const registry = new SkillRegistry([findWorktreeRoot(cwd).worktree, cwd]);
+      this.skillsBlock = registry.promptBlock(cwd);
+      registry.writeRegistryFile(resolvePath(cwd, config.skills.registryFile));
     } else {
       this.skillsBlock = '';
     }
@@ -742,8 +753,9 @@ export class StratumAgent {
       guides: prepareGuideIndex(
         this.config,
         { agentProfiles, testCommand: testing ? this.config.tools.testCommand : '' },
-        process.cwd(),
+        this.env.cwd,
       ),
+      cwd: this.env.cwd,
     };
   }
 
@@ -777,6 +789,7 @@ export class StratumAgent {
         skillsBlock: this.skillsBlock,
         fileState: this.fileState,
         workspace: this.workspace,
+        env: this.env,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
         // control pasan aunque el perfil no las liste; `delegate_task` no.
         // Hito 17: el perfil de sesión se compone con el del agente principal.
@@ -1044,6 +1057,7 @@ export class StratumAgent {
       signal,
       opts: this.withSessionOptions(opts),
       skillsBlock: this.skillsBlock,
+      env: this.env,
     });
     try {
       for (;;) {

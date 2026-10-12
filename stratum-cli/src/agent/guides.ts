@@ -154,11 +154,7 @@ ${rows.join('\n')}`;
  * vacía si no hay guías activas o si ninguna se pudo escribir — y en ese caso
  * `buildSystemPrompt` inyecta los cuerpos inline, como siempre.
  */
-export function prepareGuideIndex(
-  config: StratumConfig,
-  ctx: GuideContext,
-  cwd: string = process.cwd(),
-): string {
+export function prepareGuideIndex(config: StratumConfig, ctx: GuideContext, cwd: string): string {
   if (config.prompt.guides !== 'pointers') return '';
   const guides = activeGuides(ctx);
   if (guides.length === 0) return '';

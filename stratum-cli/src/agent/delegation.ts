@@ -27,6 +27,7 @@ import { runSubagent } from './subagent.js';
 import { Semaphore, Mutex } from './concurrency.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
+import type { SessionEnv } from '../runtime/session-env.js';
 
 const log = getLogger('agent').child('subagent');
 
@@ -60,6 +61,8 @@ export interface DelegationContext {
   opts?: RunOptions;
   /** Índice `# Skills` del padre, heredado sin redescubrir (Hito 12). */
   skillsBlock?: string;
+  /** Entorno de la sesión del padre: el hijo trabaja en el mismo `cwd`. */
+  env?: SessionEnv;
 }
 
 export type ProfileResolution =
@@ -220,6 +223,7 @@ export async function* executeDelegations(
               : undefined,
             onEvent: (ev) => push({ type: 'subagent_event', subagentId: job.subId, event: ev }),
             skillsBlock: ctx.skillsBlock,
+            env: ctx.env,
             trace: opts?.trace?.child(job.subId),
           });
         } catch (err) {

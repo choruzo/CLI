@@ -11,14 +11,14 @@ export interface ProjectMemory {
 }
 
 /**
- * Carga el STRATUM.md del proyecto (desde cwd) y el global (~/.stratum/STRATUM.md).
+ * Carga el STRATUM.md del proyecto (desde `cwd`, el de la sesión) y el global (~/.stratum/STRATUM.md).
  * Nunca lanza por ausencia — devuelve strings vacíos si los archivos no existen.
  */
-export function loadProjectMemory(config: StratumConfig): ProjectMemory {
+export function loadProjectMemory(config: StratumConfig, cwd: string): ProjectMemory {
   const paths = resolveMemoryPaths(config);
 
   // El projectFile puede ser relativo → resolver desde cwd
-  const projectPath = resolve(process.cwd(), paths.projectFile);
+  const projectPath = resolve(cwd, paths.projectFile);
   const globalPath = paths.globalFile;
 
   const projectContent = existsSync(projectPath) ? readFileSync(projectPath, 'utf-8').trim() : '';

@@ -4,6 +4,7 @@ import type { StratumConfig } from '../config/schema.js';
 import type { PromptPreset } from './presets.js';
 import type { WorkspaceConfinement } from './types.js';
 import { describeEnvironmentRules, listEnvironments } from '../tools/environments.js';
+import { processSessionEnv } from '../runtime/session-env.js';
 
 // ---------------------------------------------------------------------------
 // Entorno (<env>) — formato exacto de OpenCode (F5)
@@ -14,7 +15,7 @@ export interface SystemPromptEnv {
   modelId?: string;
   /** Nombre del provider activo en .stratumrc.json. */
   providerName?: string;
-  /** Working directory (default: process.cwd()). */
+  /** Directorio de trabajo de la sesión. Sin él, el del proceso. */
   cwd?: string;
   /** Hito 8: marca que este prompt es para un subagente (sin acciones interactivas). */
   isSubagent?: boolean;
@@ -87,7 +88,7 @@ export function findWorktreeRoot(cwd: string): { worktree: string; isGitRepo: bo
 }
 
 function buildEnvBlock(env: SystemPromptEnv): string {
-  const cwd = env.cwd ?? process.cwd();
+  const cwd = env.cwd ?? processSessionEnv().cwd;
   const { worktree, isGitRepo } = findWorktreeRoot(cwd);
 
   const modelLine =
