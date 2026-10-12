@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0 implementado**; siguiente: M1.
+> anotados en el hito que los encuentra. **M0 y M1 implementados**; siguiente: M2.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -995,6 +995,40 @@ Descubrimientos de implementación (afectan a hitos posteriores):
 - `docs/protocol.md`.
 - *Hecho cuando*: tests de conformidad contra un servidor falso (handshake, roles, versión
   incompatible, trama grande, método desconocido); test de «sin imports de Node» en `protocol/`.
+
+**Estado: implementado (2026-10-12), rama `feat/dot-m1-protocol`.** Un commit por pieza:
+contrato → validación → códec → cliente → documentación. La referencia del protocolo es
+`docs/protocol.md`, que **sustituye a §10–§12 de este documento** donde discrepen.
+
+Alcance cerrado de M1: contrato, validación, framing, cliente Node y abstracciones de
+descubrimiento y reconexión. Sin `RunRegistry`, `EventHub`, `ApprovalCenter`, sesiones
+alojadas, ciclo de vida del daemon, publicación desde la CLI ni Dot.
+
+Cambios respecto a §10–§12, decididos al escribir el contrato:
+
+1. **Código de error como cadena** (`BUSY`, `ALREADY_RESOLVED`…) y sin campo `jsonrpc`: tiene
+   la forma de JSON-RPC 2.0, no su compatibilidad.
+2. **Eventos en dos clases.** Los de estado llevan `seq` por sesión; `message.delta` y
+   `reasoning.delta` son volátiles (llevan `after`, sin `seq`, agrupables y descartables).
+   Se añade `message.completed` (estado, texto entero) para no depender de los fragmentos.
+3. **DTOs con prefijo `Protocol`** y construidos aparte de los tipos internos.
+4. **Preguntas y planes tienen DTO propio** (`ProtocolQuestionRequest`, `ProtocolPlanRequest`);
+   `ProtocolApproval.kind` queda en `tool` | `host-key`. Se añade `plan.resolved`.
+5. **Anfitrión par.** `host.approvalRequested` / `host.approvalResolved` desaparecen: son
+   eventos dentro de `host.publish`. Se añaden `host.answerQuestions` y `host.decidePlan`
+   (servidor → anfitrión).
+6. **No existe `agent.status_changed`**: se deriva de `session.updated`.
+7. **Códigos añadidos**: `INVALID_REQUEST`, `FRAME_TOO_LARGE`, `UNAVAILABLE`. Notificación
+   `goodbye`. Campo reservado `operationId` en las peticiones mutantes.
+8. **`core.hello` no lleva `pid`**: es una afirmación no verificable del cliente (§22 Q2).
+9. **Suscripción de resumen**: `scope: { kind: 'overview' }` con foto de conjunto, en lugar
+   de `scope: 'all'`.
+10. **El código común vive en `src/ipc/`** (framing, códec, `RpcPeer`), no previsto en §17:
+    lo comparten el cliente y el futuro servidor. `desktop/codec.ts` reexporta el framing.
+
+Para M2: `RpcPeer` ya atiende peticiones con `guard` (autorización) y `handlers`; el servidor
+de pruebas (`client/testing/fake-server.ts`) muestra el cableado mínimo, pero **no** es la
+base del daemon.
 
 ### M2 — Daemon y flujo de eventos
 - `stratum daemon run|start|stop|status`; `endpoint.json`; instancia única; apagado por
