@@ -200,7 +200,9 @@
   "daemon": {
     "idleExitMinutes": 0,
     "eventBuffer": 2000,
-    "maxSessions": 16
+    "maxSessions": 16,
+    "autoStart": false,
+    "detachedTtlMinutes": 10
   },
   "desktop": {
     "maxConcurrentTurns": 2,

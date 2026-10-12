@@ -61,10 +61,21 @@ export class RunRegistry {
     }
   }
 
-  /** Rehace lo que se sabe de una sesión a partir de su snapshot. */
+  /**
+   * Rehace lo que se sabe de una sesión a partir de su snapshot. Un run que
+   * constaba en curso y no es el de la foto terminó sin que llegase su final:
+   * queda `interrupted`, que es lo único que se puede afirmar de él.
+   */
   replace(snapshot: ProtocolSessionSnapshot): void {
     this.sessions.set(snapshot.session.id, snapshot.session);
+    this.settle(snapshot.session.id, snapshot.run?.id);
     if (snapshot.run) this.setRun(snapshot.run);
+  }
+
+  /** La sesión dejó de existir sin un `session.closed` de su anfitrión. */
+  remove(sessionId: string): void {
+    this.sessions.delete(sessionId);
+    this.settle(sessionId);
   }
 
   private setRun(run: ProtocolRun): void {
@@ -79,9 +90,9 @@ export class RunRegistry {
   }
 
   /** La sesión se fue: lo que tuviera en curso ya no lo está. */
-  private settle(sessionId: string): void {
+  private settle(sessionId: string, except?: string): void {
     for (const [id, run] of this.runs) {
-      if (run.sessionId === sessionId && isActiveRun(run)) {
+      if (id !== except && run.sessionId === sessionId && isActiveRun(run)) {
         this.runs.set(id, { ...run, status: 'interrupted' });
       }
     }

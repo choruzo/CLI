@@ -46,6 +46,7 @@ import { claimEndpoint, newIpcPath, newToken, type EndpointClaim } from './endpo
 import { EventHub, type HubClientStats } from './event-hub.js';
 import { HostedSession } from './hosted-session.js';
 import { OperationCache, type OperationCacheOptions } from './operation-cache.js';
+import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
 import { RunRegistry } from './run-registry.js';
 
 const log = getLogger('daemon');
@@ -83,6 +84,10 @@ export interface StratumdOptions {
   highWaterBytes?: number;
   maxBufferedBytes?: number;
   operations?: OperationCacheOptions;
+  /** Cuánto se conserva una sesión par sin anfitrión. Por defecto, `daemon.detachedTtlMinutes`. */
+  detachedTtlMs?: number;
+  /** Cada cuánto se comprueba si el proceso de un anfitrión desconectado sigue vivo. */
+  peerWatchIntervalMs?: number;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -103,6 +108,8 @@ export class Stratumd {
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly registry = new RunRegistry();
   private readonly hub: EventHub;
+  /** Sesiones que alojan otros procesos: aquí solo está su proyección. */
+  private readonly peers: PeerSessions;
   private readonly operations: OperationCache;
   private readonly serverInfo: ProtocolServerInfo;
   private readonly startedAt: number;
@@ -136,8 +143,22 @@ export class Stratumd {
     this.hub = new EventHub({
       bufferSize: opts.eventBuffer ?? opts.config.daemon.eventBuffer,
       ...(opts.subscriptionQueue ? { maxQueue: opts.subscriptionQueue } : {}),
-      snapshotOf: (sessionId) => this.sessions.get(sessionId)?.snapshot() ?? null,
+      snapshotOf: (sessionId) =>
+        this.sessions.get(sessionId)?.snapshot() ?? this.peers.snapshotOf(sessionId),
       overviewOf: () => this.overview(),
+    });
+    this.peers = new PeerSessions({
+      hub: this.hub,
+      registry: this.registry,
+      isLocalSession: (sessionId) => this.sessions.has(sessionId),
+      detachedTtlMs:
+        opts.detachedTtlMs ?? Math.round(opts.config.daemon.detachedTtlMinutes * 60_000),
+      ...(opts.peerWatchIntervalMs ? { watchIntervalMs: opts.peerWatchIntervalMs } : {}),
+      ...(opts.isAlive ? { isAlive: opts.isAlive } : {}),
+      now: this.now,
+      onActivity: () => {
+        this.lastActivity = this.now();
+      },
     });
     this.closed = new Promise<ShutdownReason>((r) => (this.resolveClosed = r));
   }
@@ -164,7 +185,11 @@ export class Stratumd {
       server: daemon.serverInfo,
       handlers: (conn) => daemon.handlers(conn),
       onRequest: () => daemon.operationStarted(),
-      onDisconnected: (conn) => daemon.hub.dropClient(conn),
+      onDisconnected: (conn) => {
+        daemon.hub.dropClient(conn);
+        // Las sesiones que alojaba quedan sin anfitrión; no se cierran.
+        daemon.peers.disconnected(conn);
+      },
       onDrain: (conn) => daemon.hub.pump(conn),
       ...(opts.highWaterBytes ? { highWaterBytes: opts.highWaterBytes } : {}),
       ...(opts.maxBufferedBytes ? { maxBufferedBytes: opts.maxBufferedBytes } : {}),
@@ -220,6 +245,15 @@ export class Stratumd {
     return session;
   }
 
+  /**
+   * Una sesión que el daemon aloja y conduce. De una par solo tiene la
+   * proyección: lo que pide `what` es cosa del proceso que la aloja.
+   */
+  private local(sessionId: string, what: string): HostedSession {
+    if (this.peers.has(sessionId)) throw peerHostedOnly(what);
+    return this.need(sessionId);
+  }
+
   // ---------------------------------------------------------------------------
   // Actividad y apagado por inactividad
   // ---------------------------------------------------------------------------
@@ -250,6 +284,7 @@ export class Stratumd {
   private isIdle(): boolean {
     return (
       this.sessions.size === 0 &&
+      this.peers.size === 0 &&
       this.closingSessions.size === 0 &&
       this.opening === 0 &&
       this.activeOperations === 0 &&
@@ -272,6 +307,8 @@ export class Stratumd {
         ...sessions.map((s) => this.closeSession(s, 'server-shutdown')),
         ...this.closingSessions,
       ]);
+      // Las sesiones pares no se cierran: siguen en sus procesos, sin daemon.
+      this.peers.shutdown();
       // Los últimos eventos (`session.closed`) salen antes de la despedida.
       this.hub.flushAll();
       await this.settle('server', () => this.server.close(reason === 'idle' ? 'idle' : 'shutdown'));
@@ -359,7 +396,11 @@ export class Stratumd {
             );
       }
       let sessionId = generateSessionId();
-      while (this.sessions.has(sessionId) || this.hub.hasSession(sessionId)) {
+      while (
+        this.sessions.has(sessionId) ||
+        this.peers.has(sessionId) ||
+        this.hub.hasSession(sessionId)
+      ) {
         sessionId = generateSessionId();
       }
       const session = await HostedSession.open({
@@ -481,23 +522,25 @@ export class Stratumd {
         const sessions = params.live === false ? [] : this.registry.listSessions();
         return { sessions: params.limit ? sessions.slice(0, params.limit) : sessions };
       },
-      'sessions.get': (params) => ({ snapshot: this.need(params.sessionId).snapshot() }),
+      'sessions.get': (params) => ({
+        snapshot: this.peers.snapshotOf(params.sessionId) ?? this.need(params.sessionId).snapshot(),
+      }),
       'sessions.open': async (params) => ({ session: (await this.openSession(params)).session() }),
       'sessions.close': async (params) => {
-        const session = this.need(params.sessionId);
+        const session = this.local(params.sessionId, 'Closing it');
         // Deja de existir ya para los demás; lo que se desmonta es solo lo suyo.
         this.sessions.delete(params.sessionId);
         await this.closeSession(session, 'closed');
         return {};
       },
       'sessions.setModel': (params) => ({
-        session: this.need(params.sessionId).setModel(params.model),
+        session: this.local(params.sessionId, 'Changing its model').setModel(params.model),
       }),
       'sessions.setAgent': (params) => ({
-        session: this.need(params.sessionId).setAgent(params.agent),
+        session: this.local(params.sessionId, 'Changing its agent').setAgent(params.agent),
       }),
       'sessions.setReadOnly': (params) => ({
-        session: this.need(params.sessionId).setReadOnly(params.readOnly),
+        session: this.local(params.sessionId, 'Changing read-only').setReadOnly(params.readOnly),
       }),
 
       'runs.list': (params) => ({ runs: this.registry.listRuns(params) }),
@@ -507,11 +550,22 @@ export class Stratumd {
         return { run };
       },
       'runs.start': (params) => ({
-        run: this.need(params.sessionId).startRun(params.input, params.mode ?? 'normal'),
+        run: this.local(params.sessionId, 'Starting a run').startRun(
+          params.input,
+          params.mode ?? 'normal',
+        ),
       }),
-      'runs.steer': (params) => ({ status: this.need(params.sessionId).steer(params.text) }),
-      'runs.cancel': (params) => ({
-        status: this.need(params.sessionId).cancel(params.runId),
+      // Sobre una sesión par, cancelar y redirigir se reenvían a su anfitrión:
+      // el resultado es el que da su runtime, no uno calculado aquí.
+      'runs.steer': async (params) => ({
+        status: this.peers.has(params.sessionId)
+          ? await this.peers.steer(params.sessionId, params.text)
+          : this.need(params.sessionId).steer(params.text),
+      }),
+      'runs.cancel': async (params) => ({
+        status: this.peers.has(params.sessionId)
+          ? await this.peers.cancel(params.sessionId, params.runId)
+          : this.need(params.sessionId).cancel(params.runId),
       }),
       // Pausa cooperativa: M5.
       'runs.pause': notYet('Pausing a run'),
@@ -523,9 +577,11 @@ export class Stratumd {
       'questions.answer': nothingPending,
       'plans.decide': nothingPending,
 
-      'jobs.list': (params) => ({ jobs: this.need(params.sessionId).jobs() }),
+      'jobs.list': (params) => ({
+        jobs: this.peers.snapshotOf(params.sessionId)?.jobs ?? this.need(params.sessionId).jobs(),
+      }),
       'jobs.cancel': async (params) => {
-        await this.need(params.sessionId).cancelJob(params.jobId);
+        await this.local(params.sessionId, 'Cancelling a job').cancelJob(params.jobId);
         return {};
       },
 
@@ -560,6 +616,18 @@ export class Stratumd {
       'events.subscribe': (params) => this.hub.subscribe(conn, params.scope),
       'events.unsubscribe': (params) => {
         this.hub.unsubscribe(conn, params.subscriptionId);
+        return {};
+      },
+
+      // Anfitriones pares. La capacidad `host` da acceso a estos tres métodos;
+      // sobre qué sesiones, lo decide `PeerSessions`: las que registró esa conexión.
+      'host.register': (params) => this.peers.register(conn, params),
+      'host.publish': (params) => {
+        this.peers.publish(conn, params);
+        return {};
+      },
+      'host.unregister': (params) => {
+        this.peers.unregister(conn, params.sessionId);
         return {};
       },
     };

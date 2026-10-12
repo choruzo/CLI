@@ -699,6 +699,17 @@ export const StratumConfigSchema = z.object({
       eventBuffer: z.number().int().min(16).max(100_000).default(2000),
       /** Sesiones vivas a la vez. Abrir otra más contesta `UNAVAILABLE`. */
       maxSessions: z.number().int().min(1).max(256).default(16),
+      /**
+       * La CLI (`chat`, `run`) arranca el daemon si no hay ninguno, para
+       * publicar en él su sesión. Con `false` (default) solo publica si ya hay
+       * uno en marcha; en ningún caso depende de él para ejecutar.
+       */
+      autoStart: z.boolean().default(false),
+      /**
+       * Minutos que el daemon conserva una sesión de la CLI cuyo proceso dejó
+       * de estar conectado y no se sabe si sigue vivo. `0` = sin plazo.
+       */
+      detachedTtlMinutes: z.number().min(0).max(100_000).default(10),
     })
     .default({}),
 

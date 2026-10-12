@@ -72,11 +72,34 @@ describe('autorización por capacidad', () => {
     }
   });
 
-  it('host y broker no se conceden todavía; lo demás de esos roles, sí', () => {
-    expect(grantCapabilities(['host'])).toEqual(['observe']);
+  it('broker no se concede todavía; host sí, y no trae control ni approve', () => {
+    expect(grantCapabilities(['host'])).toEqual(['observe', 'host']);
     expect(grantCapabilities(['broker'])).toEqual([]);
     expect(grantCapabilities(['operator', 'approver'])).toEqual(['observe', 'control', 'approve']);
-    expect(code(as('host'), 'host.publish')).toBe('FORBIDDEN');
+
+    const host = { authenticated: true, capabilities: grantCapabilities(['host']) };
+    expect(authorize(host, 'host.register')).toBeNull();
+    expect(authorize(host, 'host.publish')).toBeNull();
+    expect(authorize(host, 'host.unregister')).toBeNull();
+    // Alojar una sesión no da derecho a gobernar ni a aprobar nada.
+    for (const method of [
+      'runs.cancel',
+      'runs.steer',
+      'runs.start',
+      'sessions.open',
+      'sessions.close',
+      'core.shutdown',
+      'approvals.resolve',
+      'questions.answer',
+      'plans.decide',
+    ] as const) {
+      expect(authorize(host, method)?.code, method).toBe('FORBIDDEN');
+    }
+    // Y lo que el servidor le pide a un anfitrión no lo puede pedir un cliente.
+    expect(authorize(host, 'host.cancel')?.code).toBe('METHOD_NOT_FOUND');
+    // Un operador no publica sesiones.
+    const operator = { authenticated: true, capabilities: grantCapabilities(['operator']) };
+    expect(authorize(operator, 'host.publish')?.code).toBe('FORBIDDEN');
   });
 
   it('un segundo core.hello en una conexión ya autenticada se rechaza', () => {

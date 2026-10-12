@@ -25,6 +25,8 @@ import {
   type HelloParams,
   type HelloResult,
   type MethodName,
+  type MethodParams,
+  type MethodResult,
   type NotificationName,
   type NotificationParams,
   type ProtocolNotifications,
@@ -32,7 +34,7 @@ import {
 } from '../protocol/index.js';
 import { ProtocolError, encodeMessage, errorResponse } from '../ipc/codec.js';
 import { FrameTooLargeError, LineDecoder } from '../ipc/framing.js';
-import { RpcPeer, type RequestHandlers } from '../ipc/peer.js';
+import { RpcPeer, type RequestHandlers, type RequestOptions } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { authorize, grantCapabilities, type Principal } from './authorize.js';
 import type { HubClient } from './event-hub.js';
@@ -47,6 +49,15 @@ export interface ClientConnection extends HubClient, Principal {
   client: { kind: ClientKind; name: string; version: string } | null;
   /** Bytes aceptados y aún sin enviar. */
   readonly bufferedBytes: number;
+  /**
+   * Petición del servidor a este cliente (un anfitrión par). Va con su propio
+   * id: no espera detrás de lo que el cliente esté enviando.
+   */
+  request<M extends MethodName>(
+    method: M,
+    params: MethodParams<M>,
+    options?: RequestOptions,
+  ): Promise<MethodResult<M>>;
 }
 
 export interface ControlServerOptions {
@@ -139,6 +150,14 @@ class Connection implements ClientConnection {
 
   notify<N extends NotificationName>(name: N, params: NotificationParams<N>): void {
     if (this.authenticated) this.peer.notify(name, params);
+  }
+
+  request<M extends MethodName>(
+    method: M,
+    params: MethodParams<M>,
+    options?: RequestOptions,
+  ): Promise<MethodResult<M>> {
+    return this.peer.request(method, params, options);
   }
 }
 

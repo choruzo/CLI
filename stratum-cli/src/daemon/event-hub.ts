@@ -81,6 +81,8 @@ interface Subscription {
   cursor: number;
   /** Desincronizada: lo siguiente que recibe es una foto. */
   needsSnapshot: boolean;
+  /** La sesión terminó sin un evento de su anfitrión: esta foto es lo último que recibe. */
+  final: ProtocolSessionSnapshot | null;
 }
 
 interface ClientState {
@@ -124,8 +126,30 @@ export class EventHub {
   // Lado del anfitrión
   // ---------------------------------------------------------------------------
 
-  openSession(sessionId: string): void {
-    if (!this.channels.has(sessionId)) this.channels.set(sessionId, { lastSeq: 0, buffer: [] });
+  /** `seq`: el del último evento de estado que ya ocurrió (una sesión par se registra en marcha). */
+  openSession(sessionId: string, seq = 0): void {
+    if (!this.channels.has(sessionId)) this.channels.set(sessionId, { lastSeq: seq, buffer: [] });
+  }
+
+  /**
+   * La sesión dejó de existir y su anfitrión no lo contó con un evento (murió,
+   * o se dio de baja). Nadie numera uno en su nombre: quien la seguía recibe
+   * esta foto, que es la última, y quien sigue el conjunto, la foto de conjunto.
+   */
+  endSession(sessionId: string, final: ProtocolSessionSnapshot): void {
+    this.channels.delete(sessionId);
+    for (const [client, state] of this.clients) {
+      for (const sub of state.subscriptions.values()) {
+        if (sub.kind === 'session' && sub.sessionId === sessionId) {
+          sub.queue = [];
+          sub.final = final;
+          sub.needsSnapshot = true;
+        } else if (sub.kind === 'overview') {
+          this.desync(sub, state, 'session-ended');
+        } else continue;
+        this.schedule(client);
+      }
+    }
   }
 
   /** La sesión terminó. Lo ya encolado para cada cliente se entrega igualmente. */
@@ -179,13 +203,14 @@ export class EventHub {
   /**
    * El anfitrión perdió eventos (su cola local se llenó): lo guardado ya no es
    * una secuencia completa. Se descarta, y todo el que siga la sesión recibe un
-   * snapshot.
+   * snapshot. Con `seq`, el del snapshot que lo sustituye: lo siguiente que se
+   * espera es `seq + 1`.
    */
-  resync(sessionId: string): void {
+  resync(sessionId: string, seq?: number): void {
     const channel = this.channels.get(sessionId);
     if (channel) {
       channel.buffer = [];
-      channel.lastSeq = null;
+      channel.lastSeq = seq ?? null;
     }
     for (const [client, state] of this.clients) {
       for (const sub of state.subscriptions.values()) {
@@ -313,6 +338,7 @@ export class EventHub {
       queue: [],
       cursor: 0,
       needsSnapshot: true,
+      final: null,
     };
     let mode: 'replay' | 'snapshot' = 'snapshot';
 
@@ -404,6 +430,13 @@ export class EventHub {
     if (sub.kind === 'overview') {
       sub.client.notify('overview', { subscriptionId: sub.id, overview: this.opts.overviewOf() });
       return true;
+    }
+    if (sub.final) {
+      const final = sub.final;
+      sub.final = null;
+      sub.queue = [];
+      sub.client.notify('snapshot', { subscriptionId: sub.id, snapshot: final });
+      return false;
     }
     const snapshot = this.opts.snapshotOf(sub.sessionId!);
     if (!snapshot) return false;

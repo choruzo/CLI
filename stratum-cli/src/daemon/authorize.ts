@@ -20,11 +20,15 @@ export interface Principal {
 }
 
 /**
- * Capacidades que este servidor concede. `host` (anfitriones pares, M3) y
- * `broker` (reservada) todavía no: quien las pida recibe el resto de lo que
- * sumen sus roles.
+ * Capacidades que este servidor concede. `broker` (reservada) todavía no: quien
+ * la pida recibe el resto de lo que sumen sus roles.
+ *
+ * `host` da acceso a `host.register` / `host.publish` / `host.unregister`, y
+ * nada más: no incluye `control` ni `approve`. Sobre **qué** sesiones puede
+ * publicar una conexión decide el registro de sesiones pares (las que ella
+ * misma registró), no esta tabla.
  */
-export const GRANTABLE: readonly Capability[] = ['observe', 'control', 'approve'];
+export const GRANTABLE: readonly Capability[] = ['observe', 'control', 'approve', 'host'];
 
 /** Lo concedido a unos roles: lo que suman, menos lo que el servidor no ofrece. */
 export function grantCapabilities(roles: readonly Role[]): Capability[] {
