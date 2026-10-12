@@ -748,7 +748,11 @@ export class ToolDispatcher {
       if (result.ok) {
         log.debug('tool ok', { tool: call.name, durationMs, outputChars: result.output.length });
       } else {
-        log.warn('tool error', {
+        // Un comando que se ejecutó y salió mal (`countsAsFailure: false`) es
+        // operación normal y el usuario ya lo ve en el bloque de la tool: va a
+        // `info`, que en el chat no llega a stderr.
+        const level = result.countsAsFailure === false ? 'info' : 'warn';
+        log[level]('tool error', {
           tool: call.name,
           durationMs,
           recoverable: result.recoverable,

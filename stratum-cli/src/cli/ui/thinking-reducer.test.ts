@@ -40,3 +40,24 @@ describe('razonamiento en el reducer de la CLI (D7)', () => {
     expect(agent(s).thinkingBlocks).toEqual(['busco', 'leo']);
   });
 });
+
+describe('texto de varias respuestas en un mismo turno', () => {
+  it('el texto que sigue a una tool empieza párrafo', () => {
+    const s = [
+      ev({ type: 'text_delta', delta: 'Te pregunto tres cosas:' }),
+      ev({ type: 'tool_call_start', id: 'c1', name: 'read_file', input_so_far: '' }),
+      ev({ type: 'text_delta', delta: 'Perfecto' }),
+      ev({ type: 'text_delta', delta: ', sigo.' }),
+    ].reduce(reducer, started());
+    expect(agent(s).text).toBe('Te pregunto tres cosas:\n\nPerfecto, sigo.');
+  });
+
+  it('sin texto previo no se añade nada, y los fragmentos de una respuesta van seguidos', () => {
+    const s = [
+      ev({ type: 'tool_call_start', id: 'c1', name: 'read_file', input_so_far: '' }),
+      ev({ type: 'text_delta', delta: 'Ho' }),
+      ev({ type: 'text_delta', delta: 'la' }),
+    ].reduce(reducer, started());
+    expect(agent(s).text).toBe('Hola');
+  });
+});

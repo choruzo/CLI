@@ -62,6 +62,8 @@ import { SelectList } from './components/SelectList.js';
 import {
   SESSION_COMMANDS,
   filterCommands,
+  BUSY_COMMANDS,
+  isBusyCommand,
   filterProfiles,
   slashCommandName,
 } from './session-commands.js';
@@ -115,6 +117,11 @@ export type AgentConvItem = {
   thinkingBlocks?: string[];
   /** El último bloque sigue abierto: el siguiente `thinking` se le añade. */
   thinkingOpen?: boolean;
+  /**
+   * Desde el último texto hubo una tool, una pregunta o un subagente: el texto
+   * siguiente es otra respuesta del mismo turno y empieza párrafo.
+   */
+  textBreak?: boolean;
   /** Subagentes delegados en este turno (Hito 8A). Opcional: items previos no lo traen. */
   subagents?: SubagentBlockState[];
   /** Subagente que emitió el evento más reciente (Hito 8C, marcador ▶ del árbol). */
@@ -470,12 +477,31 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case 'AGENT_EVENT': {
       const ev = action.event;
 
+      // Un turno puede traer varias respuestas del modelo con tools por medio.
+      // Sin esta marca sus textos se pintaban pegados («…rápidas:Perfecto…»).
+      if (
+        /^(tool_|subagent_|questions_|plan_)/.test(ev.type) &&
+        state.currentItem?.kind === 'agent' &&
+        state.currentItem.text &&
+        !state.currentItem.textBreak
+      ) {
+        return reducer(
+          { ...state, currentItem: { ...state.currentItem, textBreak: true } },
+          action,
+        );
+      }
+
       if (ev.type === 'text_delta') {
         return {
           ...state,
           currentItem: updateCurrentAgent(state.currentItem, (item) => ({
             ...item,
-            text: item.text + ev.delta,
+            text: item.textBreak
+              ? `${item.text.trimEnd()}
+
+${ev.delta}`
+              : item.text + ev.delta,
+            textBreak: false,
             thinkingOpen: false,
           })),
         };
@@ -1325,8 +1351,9 @@ export function App({
   const [paletteIndex, setPaletteIndex] = useState(0);
   const [paletteDismissed, setPaletteDismissed] = useState(false);
 
+  // Con el agente trabajando la paleta sigue disponible, reducida a los
+  // comandos que no tocan lo que el loop está usando (`BUSY_COMMANDS`).
   const paletteEligible =
-    !state.thinking &&
     !state.pendingConfirm &&
     !state.pendingQuestions &&
     !overlay &&
@@ -1336,8 +1363,10 @@ export function App({
   const paletteItems = !paletteEligible
     ? []
     : state.inputValue.trimStart().startsWith('@')
-      ? filterProfiles(state.inputValue, profileRows)
-      : filterCommands(state.inputValue, SESSION_COMMANDS);
+      ? state.thinking
+        ? []
+        : filterProfiles(state.inputValue, profileRows)
+      : filterCommands(state.inputValue, state.thinking ? BUSY_COMMANDS : SESSION_COMMANDS);
   const effPaletteIndex = Math.min(paletteIndex, Math.max(paletteItems.length - 1, 0));
 
   const handleInputChange = useCallback((value: string) => {
@@ -1467,8 +1496,22 @@ export function App({
 
     // ----- Edición de línea (§10) -----
     // Se evalúan tras la paleta: con el desplegable abierto, ↑↓ le pertenecen.
+    // `ink-text-input` no conoce estos atajos y escribe su letra en el input.
+    // Cuál de los dos manejadores corre antes depende de cuándo se montó el
+    // input, así que el valor que debe quedar se fija en el tick siguiente,
+    // cuando la letra ya está (o no) escrita.
+    const settleInput = (value: string): void => {
+      setTimeout(() => dispatch({ type: 'INPUT_CHANGE', value }), 0);
+    };
+
     if (key.ctrl && input === 'l') {
+      // Con un turno en curso el loop está usando el historial: no se limpia.
+      if (state.thinking) {
+        settleInput(state.inputValue);
+        return;
+      }
       executeCommandRef.current?.('/clear');
+      settleInput('');
       return;
     }
 
@@ -1476,6 +1519,7 @@ export function App({
     // atajo natural, no llega al proceso en la mayoría de terminales.
     if (key.ctrl && input === 't') {
       dispatch({ type: 'TOGGLE_TODO' });
+      settleInput(state.inputValue);
       return;
     }
 
@@ -1483,6 +1527,7 @@ export function App({
       draftRef.current = '';
       setHistoryIndex(null);
       dispatch({ type: 'INPUT_CHANGE', value: '' });
+      settleInput('');
       return;
     }
 
@@ -2702,7 +2747,22 @@ export function App({
       // sigue siendo la única forma de cancelar.
       if (state.thinking) {
         if (/^[/@]/.test(cmd)) {
-          setInputHint('Commands are not available while the agent is working (Ctrl+C cancels).');
+          // Los comandos de consulta sí se ejecutan; el resto espera al final
+          // del turno. Enter resuelve la selección de la paleta como en reposo.
+          const sel = paletteItems[effPaletteIndex];
+          if (sel && sel.name !== cmd) {
+            if (sel.hasArgs) completePaletteSelection(sel.name, true);
+            else executeCommand(sel.name);
+            return;
+          }
+          if (isBusyCommand(cmd)) {
+            setInputHint(null);
+            executeCommand(cmd);
+            return;
+          }
+          setInputHint(
+            'Not available while the agent is working (Ctrl+C cancels). Type / to see what is.',
+          );
           return;
         }
         setInputHint(null);

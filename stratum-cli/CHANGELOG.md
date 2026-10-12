@@ -6,6 +6,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- **`/comandos` con el agente trabajando**: los de consulta (`/context`, `/jobs`, `/jobs cancel`, `/todo`, `/changes`, `/auditor`, `/debug`, `/tools`, `/agents`, `/env`, `/memory show|list|search`, `/sessions list`, `/config get`, `/help`) se ejecutan sin esperar al final del turno, y la paleta se reduce a ellos. Los que tocan el historial, el modelo o el toolset siguen esperando.
+
+### Corregido
+- **La salida de un comando ya no se vuelca en la pantalla del chat.** Cuando un `exec` fallaba, el log escribía su salida completa en el terminal, encima de la interfaz. Ahora un comando que se ejecutó y salió mal no se registra como aviso, y cualquier campo del log que vaya al terminal sale en una línea y acotado a 300 caracteres; el fichero de logs lo guarda entero.
+- El texto de dos respuestas del mismo turno, con una tool o una pregunta por medio, ya no sale pegado («…rápidas:Perfecto…»): la segunda empieza párrafo.
+- El bloque de la tool `question` mostraba `[object Object],[object Object]`; ahora enseña la primera pregunta y cuántas más hay.
+- `Ctrl+U` y `Ctrl+T` podían dejar su letra escrita en el input en vez de actuar, y `Ctrl+L` limpiaba la conversación con un turno en curso.
+
 ## [0.8.0-beta.0] — 2026-10-12
 
 Pre-release para pruebas (`npm install -g stratum-cli@beta`); `latest` sigue en la 0.7.0.

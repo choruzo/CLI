@@ -138,6 +138,24 @@ async function cancelAndExit() {
       assert.doesNotMatch(t.screen(), /steering update pending/);
     });
 
+    await check('turno en curso: paleta reducida y /context sin llamar al modelo', t, async () => {
+      const before = mock.requests.length;
+      await t.submit('responde lento otra vez');
+      await t.waitFor(/type to steer it/);
+      await t.type('/');
+      await t.waitFor(/\/memory show/);
+      // Solo los comandos de consulta: /init abriría otro turno.
+      assert.doesNotMatch(t.screen(), /\/init/);
+      await t.type('clear');
+      await t.key('enter');
+      await t.waitFor(/Not available while the agent is working/);
+      await t.key('ctrl+u');
+      await t.submit('/context');
+      await t.waitFor(/Uso del contexto/);
+      await t.waitFor(/Type a message or \/ for commands/, 20000);
+      assert.equal(mock.requests.length, before + 1);
+    });
+
     await check(
       'steering demasiado grande: avisa, no lo envía y lo deja en el input',
       t,

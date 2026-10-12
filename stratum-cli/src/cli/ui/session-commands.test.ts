@@ -1,5 +1,12 @@
 import { describe, it, expect } from 'vitest';
-import { filterCommands, SESSION_COMMANDS, slashCommandName } from './session-commands.js';
+import {
+  BUSY_COMMANDS,
+  filterCommands,
+  isBusyCommand,
+  matchCommand,
+  SESSION_COMMANDS,
+  slashCommandName,
+} from './session-commands.js';
 
 describe('filterCommands (panel §5.2)', () => {
   it('"/" solo muestra todos los comandos', () => {
@@ -122,5 +129,45 @@ describe('slashCommandName', () => {
     expect(slashCommandName('/')).toBeNull();
     expect(slashCommandName('mira /help')).toBeNull();
     expect(slashCommandName('hola')).toBeNull();
+  });
+});
+
+describe('comandos con el agente trabajando', () => {
+  it('los de consulta están disponibles, también con argumentos', () => {
+    for (const line of ['/jobs', '/jobs cancel 3', '/context', '/memory search spark', '/help']) {
+      expect(isBusyCommand(line), line).toBe(true);
+    }
+  });
+
+  it('los que tocan el historial, el modelo o el toolset no', () => {
+    for (const line of [
+      '/clear',
+      '/compact',
+      '/model',
+      '/agent tdd',
+      '/memory forget dec_1',
+      '/plan x',
+      '/config set a b',
+      '/quit',
+    ]) {
+      expect(isBusyCommand(line), line).toBe(false);
+    }
+  });
+
+  it('gana el nombre más largo y un prefijo parecido no cuenta', () => {
+    expect(matchCommand('/jobs cancel 3')?.name).toBe('/jobs cancel');
+    expect(matchCommand('/agents')?.name).toBe('/agents');
+    expect(matchCommand('/agent tdd')?.name).toBe('/agent');
+    expect(matchCommand('/config_provider')?.name).toBe('/config_provider');
+    expect(matchCommand('/etc/hosts')).toBeNull();
+  });
+
+  it('la paleta reducida solo ofrece comandos que existen', () => {
+    expect(BUSY_COMMANDS.length).toBeGreaterThan(10);
+    expect(filterCommands('/cl', BUSY_COMMANDS)).toEqual([]);
+    expect(filterCommands('/jo', BUSY_COMMANDS).map((c) => c.name)).toEqual([
+      '/jobs',
+      '/jobs cancel',
+    ]);
   });
 });

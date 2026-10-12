@@ -14,6 +14,7 @@ import {
   type LogRecord,
 } from './index.js';
 import { StratumConfigSchema } from '../config/schema.js';
+import { STDERR_FIELD_MAX_CHARS } from './sinks.js';
 
 function capture(): MemorySink {
   const sink = new MemorySink('trace');
@@ -108,6 +109,24 @@ describe('StderrSink', () => {
     expect(out[0]).toContain('INFO');
     expect(out[0]).toContain('ns: hello');
     expect(out[0]).toContain('a=1');
+  });
+
+  it('un campo largo o multilínea sale acotado y en una sola línea', () => {
+    const out: string[] = [];
+    const sink = new StderrSink({
+      level: 'info',
+      color: false,
+      stream: { write: (s) => out.push(s) },
+    });
+    resetLogging([sink], true);
+    const output = Array.from({ length: 200 }, (_, i) => `línea ${i}`).join('\n');
+    getLogger('tools').warn('tool error', { tool: 'exec', error: output });
+    const line = out[0] ?? '';
+    expect(line.trimEnd().split('\n')).toHaveLength(1);
+    expect(line).toContain('línea 0 ⏎ línea 1');
+    expect(line).toContain(`(+`);
+    expect(line.length).toBeLessThan(STDERR_FIELD_MAX_CHARS + 200);
+    expect(line).not.toContain('línea 199');
   });
 });
 

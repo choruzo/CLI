@@ -183,6 +183,59 @@ export const SESSION_COMMANDS: SessionCommand[] = [
 ];
 
 /**
+ * Comandos que se pueden usar con el agente trabajando: solo consultan o
+ * cambian la vista. Queda fuera todo lo que toca el historial, el modelo, el
+ * toolset o la config de la sesión, o abre otro turno (`/clear`, `/compact`,
+ * `/model`, `/agent`, `/init`, `/plan`…): el loop los está usando.
+ */
+const BUSY_COMMAND_NAMES = new Set([
+  '/help',
+  '/context',
+  '/todo',
+  '/changes',
+  '/jobs',
+  '/jobs cancel',
+  '/auditor',
+  '/auditor stop',
+  '/debug',
+  '/tools',
+  '/agents',
+  '/env',
+  '/memory show',
+  '/memory list',
+  '/memory search',
+  '/sessions list',
+  '/config get',
+]);
+
+export const BUSY_COMMANDS: SessionCommand[] = SESSION_COMMANDS.filter((c) =>
+  BUSY_COMMAND_NAMES.has(c.name),
+);
+
+/**
+ * El comando que invoca una línea: el de nombre más largo que la línea iguala
+ * o prolonga con un espacio (`/jobs cancel 3` es `/jobs cancel`, no `/jobs`).
+ */
+export function matchCommand(
+  input: string,
+  commands: SessionCommand[] = SESSION_COMMANDS,
+): SessionCommand | null {
+  const line = input.trim();
+  let best: SessionCommand | null = null;
+  for (const c of commands) {
+    if (line !== c.name && !line.startsWith(c.name + ' ')) continue;
+    if (!best || c.name.length > best.name.length) best = c;
+  }
+  return best;
+}
+
+/** La línea invoca un comando disponible con el agente trabajando. */
+export function isBusyCommand(input: string): boolean {
+  const match = matchCommand(input);
+  return match !== null && BUSY_COMMAND_NAMES.has(match.name);
+}
+
+/**
  * Filtrado del panel (§5.2): substring match sobre el nombre, no solo prefijo.
  * `/mem` → `/memory show` · `/show` → `/memory show` · sin match → lista vacía.
  */

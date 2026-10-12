@@ -55,13 +55,27 @@ export interface StderrSinkOptions {
   stream?: { write(s: string): void; isTTY?: boolean };
 }
 
+/** Caracteres de un campo que se pintan en stderr; el fichero de logs lo guarda entero. */
+export const STDERR_FIELD_MAX_CHARS = 300;
+
+/**
+ * Un campo en una sola línea y acotado. La salida de una tool puede traer miles
+ * de líneas: volcada tal cual a stderr tapa la interfaz del chat, que comparte
+ * terminal.
+ */
+function formatFieldValue(v: unknown): string {
+  const raw = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
+  const flat = raw.replace(/\s*[\r\n]+\s*/g, ' ⏎ ');
+  if (flat.length <= STDERR_FIELD_MAX_CHARS) return flat;
+  return `${flat.slice(0, STDERR_FIELD_MAX_CHARS)}… (+${flat.length - STDERR_FIELD_MAX_CHARS} chars)`;
+}
+
 function formatFields(fields: Record<string, unknown> | undefined): string {
   if (!fields) return '';
   const parts: string[] = [];
   for (const [k, v] of Object.entries(fields)) {
     if (v === undefined) continue;
-    const val = typeof v === 'string' ? v : typeof v === 'object' ? JSON.stringify(v) : String(v);
-    parts.push(`${k}=${val}`);
+    parts.push(`${k}=${formatFieldValue(v)}`);
   }
   return parts.length > 0 ? ' ' + parts.join(' ') : '';
 }

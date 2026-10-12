@@ -1164,8 +1164,13 @@ nada, se encola y el agente lo incorpora en su siguiente punto seguro.
 - Cuando el loop los entrega al modelo: `[agent received N user updates]`, y el contador baja.
 - Las tool calls que el agente había emitido sin conocer el mensaje aparecen como `✗ … Not executed:
   the user sent a new message…`: no se ejecutaron.
-- Un `/comando` o un `@perfil` no se encolan ni se ejecutan con el agente trabajando: aviso de una
-  línea y el texto se queda en el input.
+- Un `/comando` nunca se encola. Los de consulta sí se ejecutan con el agente trabajando, y la
+  paleta se reduce a ellos: `/help`, `/context`, `/todo`, `/changes`, `/jobs`, `/jobs cancel`,
+  `/auditor`, `/auditor stop`, `/debug`, `/tools`, `/agents`, `/env`, `/memory show|list|search`,
+  `/sessions list` y `/config get`. Los que tocan el historial, el modelo, el toolset o la config, o
+  abren otro turno (`/clear`, `/compact`, `/model`, `/agent`, `/init`, `/plan`…), y los `@perfil`,
+  esperan al final del turno: aviso de una línea y el texto se queda en el input. `Ctrl+L` tampoco
+  limpia con un turno en curso.
 - Un mensaje de más de 8 000 caracteres no se encola ni se recorta: aviso de una línea (`Too large to
   steer (N chars, limit 8,000): not sent…`) y el texto **se queda en el input**, para acortarlo o
   enviarlo entero como turno normal cuando el agente termine. No se envía solo.
