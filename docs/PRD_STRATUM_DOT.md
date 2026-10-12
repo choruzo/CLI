@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0 y M1 implementados**; siguiente: M2.
+> anotados en el hito que los encuentra. **M0–M3 implementados**; siguiente: M4.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -1082,6 +1082,31 @@ Descubrimientos de implementación:
 - `daemon.autoStart` (por defecto `false` en la CLI).
 - *Hecho cuando*: criterio obligatorio AC-1 con `stratum ps --watch` como observador;
   `stratum run` sin daemon produce la misma traza y el mismo `result.json` de `eval` que antes.
+
+**Estado: implementado.** Referencia: `docs/protocol.md` §14. `PeerHostBridge`
+(`host/peer-host-bridge.ts`) publica con el mismo `SessionPublisher` que una sesión del daemon;
+`PeerSessions` (`daemon/peer-sessions.ts`) guarda la proyección; `stratum ps [--json] [--watch]`.
+Sin pausa (M5) ni resolución remota de aprobaciones (M4): en una sesión de la CLI siguen en su
+terminal.
+
+Descubrimientos de implementación:
+
+1. **`session.detached` no se emite.** El daemon no numera, así que lo que solo él sabe (el
+   anfitrión se fue, volvió, la proyección se descarta) llega como una foto. La sesión queda
+   `state: 'detached'` con `host.connected: false` y su run intacto.
+2. **Hace falta un reductor de fotos** (`protocol/reduce.ts`, puro): para servir una foto
+   coherente con el `seq` sin pedírsela al anfitrión en cada consulta, el daemon pone al día la
+   última con los eventos. Es el lado consumidor del contrato, y lo reutilizará Dot.
+3. **§10.4 cambia**: `host.register` lleva `pid` y `claim` y devuelve el `claim`;
+   `host.publish` admite una foto; `runs.cancel` / `host.cancel` devuelven
+   `cancelled | not-running`. La cola del puente no «descarta lo más antiguo»: al llenarse se
+   sustituye por una foto, que es lo único que no deja un hueco.
+4. **Un hueco se rechaza, no se repara**: `STALE_STATE` al lote entero, y el anfitrión publica
+   una foto.
+5. **Distinguir un anfitrión muerto de uno que puede volver** exige su `pid`; sin confirmación
+   se espera `daemon.detachedTtlMinutes`.
+6. **Los tests no pueden publicarse en el daemon del desarrollador**: `STRATUM_NO_DAEMON=1` en
+   la config de Vitest y en los hijos de `stratum eval`.
 
 ### M4 — Aprobaciones
 - `ApprovalCenter`; carrera local/remota en `HostGates`; retirada del prompt local en la

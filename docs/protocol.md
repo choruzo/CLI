@@ -3,10 +3,11 @@
 Contrato entre el harness Stratum y sus clientes (CLI, Dot y los que vengan).
 Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda este documento.
 
-> **Estado (M2).** Contrato, validación, códec y cliente Node (M1), y un servidor: `stratumd`
-> (`stratum daemon run`), que aloja sesiones y las sirve a varios clientes. **No hay todavía**
-> anfitriones pares (la CLI publicando sus sesiones, M3), centro de aprobaciones (M4) ni pausa
-> (M5). Qué atiende hoy el servidor y con qué garantías: §13.
+> **Estado (M3).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
+> (`stratum daemon run`), que aloja sesiones y las sirve a varios clientes (M2); y **anfitriones
+> pares**: `stratum run` y `stratum chat` publican en él su sesión sin dejar de alojarla (M3,
+> §14). **No hay todavía** centro de aprobaciones (M4) ni pausa (M5). Qué atiende hoy el
+> servidor y con qué garantías: §13 y §14.
 
 | Pieza | Dónde | Depende de |
 |---|---|---|
@@ -14,7 +15,9 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 | Validación (Zod) | `stratum-cli/src/protocol/schemas.ts` | `zod` |
 | Framing, códec, `RpcPeer` | `stratum-cli/src/ipc/` | Node (`Buffer`) |
 | Cliente Node | `stratum-cli/src/client/` | Node (`net`, `fs`) |
+| Reductor de fotos | `stratum-cli/src/protocol/reduce.ts` | nada |
 | Publicador de una sesión | `stratum-cli/src/host/session-publisher.ts` | el runtime |
+| Puente de un anfitrión par | `stratum-cli/src/host/peer-host-bridge.ts` | `client/`, el publicador |
 | Servidor (`stratumd`) | `stratum-cli/src/daemon/` | `host/`, `ipc/` |
 
 ## 1. Invariantes
@@ -150,7 +153,7 @@ rol. Qué identidad tiene derecho a `approve` es una decisión de M4 (PRD §22 Q
 | `runs.start` | control | ✓ | `BUSY` si hay un turno en curso |
 | `runs.steer` | control | ✓ | Devuelve `accepted` · `not-accepting` · `empty` · `too-large` |
 | `runs.pause` · `runs.resume` | control | ✓ | |
-| `runs.cancel` | control | ✓ | Con `runId`: `STALE_STATE` si ya no es el run en curso |
+| `runs.cancel` | control | ✓ | Devuelve `cancelled` · `not-running`. Con `runId`: `STALE_STATE` si ya no es el run en curso |
 | `approvals.list` | observe | | Aprobaciones, preguntas y planes pendientes |
 | `approvals.resolve` | **approve** | ✓ | `approve` · `deny` · `allow-all`; `phrase?` |
 | `questions.answer` · `plans.decide` | **approve** | ✓ | `ALREADY_RESOLVED` si otro llegó antes |
@@ -159,7 +162,9 @@ rol. Qué identidad tiene derecho a `approve` es una decisión de M4 (PRD §22 Q
 | `memory.status` · `memory.decisions` | observe | | |
 | `events.subscribe` · `events.unsubscribe` | observe | | Solo cambian el estado de la propia conexión |
 | `trace.subscribe` · `trace.unsubscribe` | observe | | |
-| `host.register` · `host.publish` · `host.unregister` | host | ✓ | Anfitrión par → servidor |
+| `host.register` | host | ✓ | Anfitrión par → servidor. `{ snapshot, pid?, claim? }` → `{ claim }` (§14) |
+| `host.publish` | host | ✓ | `{ sessionId, snapshot?, events[] }`. Un hueco de `seq` → `STALE_STATE` |
+| `host.unregister` | host | ✓ | Baja de una sesión propia. Repetirla no es un error |
 | `host.cancel` · `host.pause` · `host.resume` · `host.steer` | host | ✓ | **Servidor → anfitrión par** |
 | `host.resolveApproval` · `host.answerQuestions` · `host.decidePlan` | host | ✓ | **Servidor → anfitrión par**; llevan `by` |
 
@@ -196,7 +201,7 @@ Las notificaciones de una suscripción nunca preceden a la respuesta de su `subs
 | `ALREADY_RESOLVED` | Otro cliente resolvió antes (`data.resolution`) |
 | `STALE_STATE` | La petición parte de un estado que ya no es el vigente |
 | `FRAME_TOO_LARGE` | Mensaje mayor que el límite (`data.limit`) |
-| `UNAVAILABLE` | No se puede atender ahora (anfitrión desconectado, servidor apagándose) |
+| `UNAVAILABLE` | No se puede atender ahora (servidor apagándose…). Con `data.reason`: `host-unavailable` = el anfitrión par no está conectado o no contestó; `peer-hosted` = eso solo puede hacerlo el proceso que aloja la sesión |
 | `INTERNAL_ERROR` | Fallo del servidor. Sin detalle: está en su log |
 
 Solo un `ProtocolError` lanzado a propósito conserva su código y su mensaje. Cualquier otra
@@ -300,7 +305,9 @@ Ante un `UnknownOutcomeError` de un método mutante (`approvals.resolve`, `runs.
 
 ## 11. Qué queda sin hacer
 
-Definido en el contrato y sin implementación tras M2: anfitriones pares (`host.*`, M3), centro
+Definido en el contrato y sin implementación tras M3: `host.pause` / `host.resume` y la
+resolución remota de una decisión en un anfitrión par (`host.resolveApproval`,
+`host.answerQuestions`, `host.decidePlan`), centro
 de aprobaciones (`approvals.resolve`, `questions.answer`, `plans.decide`, M4), pausa
 (`runs.pause` / `runs.resume`, M5), `trace.subscribe`, reanudar una sesión guardada
 (`sessions.open { resume }`) y listar las guardadas, y Dot. Detalle en §13.6.
@@ -448,14 +455,141 @@ accidentales, no es una medida de seguridad. Un `INTERNAL_ERROR` no se recuerda.
 | Atendido | `core.*` · `agents.list` · `models.list` · `sessions.list` (solo vivas) · `sessions.get` · `sessions.open` · `sessions.close` · `sessions.set*` · `runs.list` · `runs.get` · `runs.start` · `runs.steer` · `runs.cancel` · `approvals.list` (siempre vacío) · `jobs.*` · `memory.*` · `events.*` |
 | `UNAVAILABLE` | `runs.pause` · `runs.resume` (M5) · `sessions.open { resume }` |
 | `NOT_FOUND` | `approvals.resolve` · `questions.answer` · `plans.decide`: no hay nada pendiente hasta M4 |
-| `METHOD_NOT_FOUND` | `trace.*` · `host.*` |
+| `METHOD_NOT_FOUND` | `trace.*` (y `host.*` hasta M3: ver §14) |
 
-Capacidades concedidas: `observe`, `control`, `approve`. `host` y `broker` aún no: quien pida
-el rol `host` recibe solo `observe`.
+Capacidades concedidas en M2: `observe`, `control`, `approve`. Desde M3 también `host`;
+`broker` sigue sin concederse.
 
 Eventos que **no** se emiten todavía: `tool.blocked` (la decisión no viaja como evento del
-turno), `plan.proposed` / `plan.resolved`, `question.*` y `approval.*` (M4), `session.detached`
-(M3). `ProtocolRun.counters.llmCalls` y `.blocked` valen 0: no se estiman.
+turno), `plan.proposed` / `plan.resolved`, `question.*` y `approval.*` (M4), y
+`session.detached`, que no lo emite nadie (§14.3). `ProtocolRun.counters.llmCalls` y
+`.blocked` valen 0: no se estiman.
 
 `memory.write` lleva la sesión que **intentó** guardar, no la del registro: con dedup, el
 registro que queda puede ser de otra sesión.
+
+## 14. Anfitriones pares: la CLI publica su sesión (M3)
+
+`stratum run` y `stratum chat` siguen ejecutándose **en su proceso**. Si hay un `stratumd`,
+publican en él su sesión, que aparece y se comporta como cualquier otra del protocolo:
+
+```text
+terminal → sesión → SessionPublisher → PeerHostBridge ── host.publish ──▶ stratumd
+                                                      ◀── host.cancel / host.steer ──
+```
+
+El daemon es plano de control. El runtime, sus jobs, sus servers MCP, su SSH, su memoria, su
+traza y su entorno son de la CLI, y de ellos al daemon solo llegan DTOs del protocolo.
+
+### 14.1 Una sola pieza, dos destinos
+
+Una sesión del daemon y una de la CLI usan **el mismo** `SessionPublisher`; solo cambia a dónde
+entrega (`PublisherSink`): el bus del daemon, o el puente (`host/peer-host-bridge.ts`) que lo
+envía por `host.publish`. El `seq` lo sigue poniendo el anfitrión —aquí, la CLI— y el daemon lo
+conserva: comprueba que es consecutivo y nada más. Un test de arquitectura fija que no hay otro
+publicador, que el puente no numera ni desmonta nada y que `src/daemon/` no construye eventos.
+
+El puente no guarda estado de la sesión: tiene la conexión, una cola de salida acotada y lo
+necesario para reclamar la sesión al reconectar.
+
+### 14.2 Registro, publicación y huecos
+
+| Paso | Qué viaja | Qué hace el servidor |
+|---|---|---|
+| `host.register` | La **foto** actual (`snapshot`), el `pid` del proceso y, si vuelve, su `claim` | Crea la proyección (o la devuelve a su anfitrión) y contesta con el `claim` |
+| `host.publish` | Eventos en orden; opcionalmente una foto, que va antes | Comprueba, aplica a la proyección y reparte |
+| `host.unregister` | — | Descarta la proyección |
+
+- Una sesión se registra normalmente con `seq` 0, antes de su primer evento: `session.opened`
+  es su evento 1, como en una sesión del daemon. Si el daemon aparece después, se registra con
+  la foto del `seq` por el que vaya.
+- **Validación**: todo evento es de esa sesión; un `session` o un `run` dentro de un evento
+  también, y un `runId` no puede ser el de otra sesión; `host.kind` es `peer`; un id que ya es
+  de una sesión del daemon no se puede registrar. Lo que no cumple es `INVALID_PARAMS` y no se
+  aplica nada del lote.
+- **Huecos**: si un evento de estado no es el siguiente (`seq + 1`), el lote entero se rechaza
+  con `STALE_STATE` (`data.reason: 'seq-gap'`). El servidor no rellena ni renumera: el
+  anfitrión contesta publicando una foto, que **sustituye** la proyección, y sigue desde ella.
+  Los repetidos (`seq` ≤ el último) se ignoran.
+- **Contrapresión**: el puente tiene una sola `host.publish` en vuelo y una cola acotada. Si se
+  llena, descarta lo volátil; si no basta, la vacía y lo siguiente que envía es una foto. Sin
+  conexión no encola nada. El agente nunca espera al daemon.
+- **Órdenes y eventos no se estorban**: cada petición va con su id. Un `host.cancel` no espera
+  detrás de lo que el anfitrión esté publicando.
+
+La proyección es la última foto del anfitrión, puesta al día con `applySessionEvent`
+(`protocol/reduce.ts`): el lado consumidor del contrato de las fotos, puro, el mismo que usará
+un cliente para pintar una sesión a partir de sus eventos. No decide ni numera; `partial` es
+aproximado mientras un bloque de texto está abierto, y `session.context` / `session.tokens`
+solo cambian con cada `session.updated`.
+
+### 14.3 Propiedad, desconexión y vuelta
+
+- **Una sesión es de la conexión que la registró.** Otra conexión con capacidad `host` no puede
+  publicar en ella, darla de baja ni registrarla (`FORBIDDEN`), aunque conozca su id. No
+  sustituye a la identidad del proceso (PRD §22 Q2): aísla dentro de un canal ya autenticado.
+- **`host` no es `control` ni `approve`.** Un anfitrión no puede cancelar, redirigir ni cerrar
+  nada por el protocolo, tampoco lo suyo: eso lo hace en su proceso.
+- **Perder al anfitrión no cierra la sesión.** Queda con `host.connected: false` y
+  `state: 'detached'`; **su run no se toca** (puede seguir en marcha: lo que falta es
+  visibilidad, no un resultado) y sigue contando como run en curso.
+- **El daemon no numera eventos propios.** Lo que él sabe —que el anfitrión se fue, que volvió,
+  que la proyección se descarta— llega a los clientes como una **foto** (`snapshot` a quien
+  sigue la sesión, `overview` a quien sigue el conjunto), que sustituye su estado. Por eso
+  `session.detached` no se emite.
+- **Vuelta**: el anfitrión reconecta, se registra con su `claim` y su foto actual, y la foto
+  manda. Sin el `claim` correcto no se puede reclamar una sesión sin anfitrión (`FORBIDDEN`);
+  con una foto anterior a lo ya conocido, tampoco (`STALE_STATE`). Lo ocurrido mientras tanto
+  **no se reenvía**. Si el que volvió es el daemon (otro proceso, sin memoria de la sesión),
+  es un registro nuevo con el `seq` por el que vaya la CLI.
+- **Sin anfitrión no para siempre**: la proyección se descarta cuando se confirma que el proceso
+  (`pid`) murió, o a los `daemon.detachedTtlMinutes` (10; `0` = sin plazo) si no se puede saber.
+  Los clientes reciben una última foto con la sesión `closed`, y su run queda `interrupted`.
+- **Cierre normal**: la CLI publica `session.closed` (su último evento), se da de baja y cierra.
+
+### 14.4 Control remoto
+
+| Petición del cliente | Sobre una sesión par |
+|---|---|
+| `runs.cancel` | Se reenvía (`host.cancel`): contesta el runtime — `cancelled`, `not-running`, o `STALE_STATE` |
+| `runs.steer` | Se reenvía (`host.steer`): contesta la Runtime Inbox — `accepted` · `not-accepting` · `empty` · `too-large` |
+| `sessions.get` · `jobs.list` · `events.subscribe` | Desde la proyección |
+| `runs.start` · `sessions.close` · `sessions.set*` · `jobs.cancel` | `UNAVAILABLE`, `reason: 'peer-hosted'` |
+
+El daemon no simula ningún resultado. Sin anfitrión conectado, o si no contesta en 5 s, la
+respuesta es `UNAVAILABLE` con `reason: 'host-unavailable'`.
+
+Las confirmaciones, preguntas y planes de una sesión de la CLI se siguen resolviendo en su
+terminal, como antes: el centro de aprobaciones es M4.
+
+### 14.5 La CLI nunca depende del daemon
+
+- Sin daemon, con un `endpoint.json` corrupto o rancio, con otra versión del protocolo, con el
+  token rechazado o con cualquier error de `host.*`, `stratum run` y `stratum chat` hacen lo
+  mismo que antes. Publicar es una mejora, y ningún fallo de esa ruta llega al turno.
+- Si el daemon muere a mitad de un run, el run sigue; el puente vuelve a buscarlo (cada 0,5–5 s,
+  sin retener el proceso) y, cuando lo hay, registra la sesión otra vez.
+- `daemon.autoStart` (default `false`): con `true`, la CLI arranca el daemon si no hay ninguno,
+  **una vez** y con plazo; si no arranca, sigue sin él. Con `false` solo publica si ya existe.
+- `STRATUM_NO_DAEMON=1` desactiva la publicación. `stratum eval` lo pone a sus escenarios.
+
+### 14.6 `stratum ps`
+
+`stratum ps [--json] [--watch]`: cliente `observer` (`sessions.list`, `runs.list`, suscripción
+`overview`). Columnas `SESSION · HOST · STATE · AGENT · MODEL · CWD · RUN`; `HOST` es `daemon` o
+el tipo de cliente que la aloja (`cli`). `--json` devuelve los DTOs del protocolo.
+
+### 14.7 Limitaciones conocidas
+
+- En `chat`, un cambio de modelo, perfil o read-only se publica al cerrar el turno siguiente, y
+  `/sessions resume` en caliente no cambia el id con el que la sesión ya está publicada.
+- `stratum init` no se publica.
+
+### 14.8 Tests
+
+`daemon/peer-host.test.ts` (daemon real + `SessionHost` con su puente, sobre el pipe):
+equivalencia entre una sesión del daemon y una par, caída y vuelta del daemon, muerte de la
+CLI, dos anfitriones, control remoto, sin daemon, `autoStart`, huecos y cola acotada.
+`cli/commands/peer.integration.test.ts` lo repite con procesos reales (`daemon start`,
+`stratum run`, `stratum ps`, `daemon stop --force`). `scripts/tui/daemon-peer.mjs` hace lo
+mismo con `stratum chat` en un terminal real.
