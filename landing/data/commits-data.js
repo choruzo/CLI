@@ -1,8 +1,278 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-10-07T19:52:13.9459069+02:00",
+  "generatedAt": "2026-10-12T16:38:00.0681184+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "ab7b4cd21c64bbe37e8666b0a480442ffc09b7c6",
+      "date": "2026-10-12T16:37:31+02:00",
+      "author": "Javi_1",
+      "subject": "feat(install): instalador por curl/irm para la CLI y Desktop, servido desde la landing",
+      "add": 1207,
+      "del": 17,
+      "files": 10
+    },
+    {
+      "sha": "1009eea0efc7ad9e43964c3d74cdba025e2c1cd5",
+      "date": "2026-10-12T15:48:54+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.8.0-beta.3",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "372c3ee6be0a822a8a2bd26e8db7eb9dc0f2fc8f",
+      "date": "2026-10-12T15:46:00+02:00",
+      "author": "Javi_1",
+      "subject": "feat(agents): presupuesto de subagentes configurable, 30 min y 50 iteraciones por defecto",
+      "add": 183,
+      "del": 17,
+      "files": 10
+    },
+    {
+      "sha": "e8c97b5f4344c130406173e0d914c6e0f9700ab1",
+      "date": "2026-10-12T15:05:50+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.8.0-beta.2",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "799add752b8c69563f0bfff0562d378444cf5d06",
+      "date": "2026-10-12T15:02:37+02:00",
+      "author": "Javi_1",
+      "subject": "docs(changelog): sección de la 0.8.0-beta.2",
+      "add": 4,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "c97206882a5b93b6e3333dd07e06b4c73ed508f6",
+      "date": "2026-10-12T15:01:48+02:00",
+      "author": "Javi_1",
+      "subject": "fix(chat): el árbol de subagentes cabe en el terminal y las tools se etiquetan por su argumento clave",
+      "add": 130,
+      "del": 26,
+      "files": 5
+    },
+    {
+      "sha": "621ce5dc7f3b07728dd8eae530264a56557015d7",
+      "date": "2026-10-12T14:29:38+02:00",
+      "author": "Javi_1",
+      "subject": "fix(session): un id de sesión generado nunca pisa una sesión que ya existe",
+      "add": 34,
+      "del": 3,
+      "files": 3
+    },
+    {
+      "sha": "882f4a4888a4a46a10d24403cb19048e1fdf91f2",
+      "date": "2026-10-12T14:22:49+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.8.0-beta.1",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "402fa288c83873ebe449d86edf94ae406022b93d",
+      "date": "2026-10-12T14:19:53+02:00",
+      "author": "Javi_1",
+      "subject": "docs(changelog): sección de la 0.8.0-beta.1",
+      "add": 4,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "3f8ac28837786bffac6a5fef8aea5a62abcdf29b",
+      "date": "2026-10-12T14:19:23+02:00",
+      "author": "Javi_1",
+      "subject": "fix(chat): log acotado en el terminal, /comandos de consulta durante el turno y pulido del turno",
+      "add": 282,
+      "del": 12,
+      "files": 11
+    },
+    {
+      "sha": "9749caf95d2d8a55b33ec7e0f68c76b6e7678ffa",
+      "date": "2026-10-12T13:23:05+02:00",
+      "author": "Javi_1",
+      "subject": "chore(desktop): versión 0.4.0-beta.0",
+      "add": 31,
+      "del": 6,
+      "files": 6
+    },
+    {
+      "sha": "fe40cc833ad9addaa356a85a6e3e44180bd1a1c5",
+      "date": "2026-10-12T13:23:05+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.8.0-beta.0",
+      "add": 24,
+      "del": 4,
+      "files": 3
+    },
+    {
+      "sha": "6450d446a1a04306a318e1932343cf12349c7bb5",
+      "date": "2026-10-10T12:25:26+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #5 from choruzo/feat/runtime-inbox",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "13bd155fc7d9f0e9820c6f592c0da0b4280cb157",
+      "date": "2026-10-10T11:59:31+02:00",
+      "author": "Javi_1",
+      "subject": "fix(inbox): steering demasiado grande se rechaza entero y el bloque no se puede romper",
+      "add": 429,
+      "del": 41,
+      "files": 13
+    },
+    {
+      "sha": "3e4e0e054d822a798322432d2137dcd715b4e3b3",
+      "date": "2026-10-10T09:55:21+02:00",
+      "author": "Javi_1",
+      "subject": "chore(eval): regenerar el baseline mock con el grupo steering",
+      "add": 2852,
+      "del": 880,
+      "files": 1
+    },
+    {
+      "sha": "05b335a9625e4db92a296cf4f16501e91d733222",
+      "date": "2026-10-10T09:52:10+02:00",
+      "author": "Javi_1",
+      "subject": "feat(inbox): Runtime Inbox y steering del usuario con el turno en curso",
+      "add": 3091,
+      "del": 71,
+      "files": 40
+    },
+    {
+      "sha": "c5021643eaeabfc155006390e0e3b8f4a032d136",
+      "date": "2026-10-09T23:46:18+02:00",
+      "author": "Javi_1",
+      "subject": "chore(eval): regenerar los baselines mock y live con el grupo jobs",
+      "add": 11177,
+      "del": 1721,
+      "files": 3
+    },
+    {
+      "sha": "3ec5c33426d37b6ddc75409d16fcfff0dc185bb7",
+      "date": "2026-10-09T23:30:38+02:00",
+      "author": "Javi_1",
+      "subject": "fix(eval): background-job-policy no ata la trayectoria en live",
+      "add": 5,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "05990a066ee63ca40de02bf90b593a07e0faf96e",
+      "date": "2026-10-09T22:51:44+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #4 from choruzo/feat/background-jobs",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "f75353a01f2e8930869248285ad7412d16ecdced",
+      "date": "2026-10-09T21:46:48+02:00",
+      "author": "Javi_1",
+      "subject": "fix(jobs): cierre terminal del JobManager y sin huérfanos al cancelar un job recién lanzado",
+      "add": 549,
+      "del": 190,
+      "files": 12
+    },
+    {
+      "sha": "68ce6af335ec991736d7f95a6e080e39c5023cae",
+      "date": "2026-10-09T21:19:22+02:00",
+      "author": "Javi_1",
+      "subject": "feat(jobs): jobs en segundo plano gestionados por el runtime",
+      "add": 5213,
+      "del": 69,
+      "files": 54
+    },
+    {
+      "sha": "2392db436eea5533880dd06e9cffc4645dd1f8db",
+      "date": "2026-10-09T19:14:46+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #3 from choruzo/feat/trace-auxiliary-llm-calls",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "00a486c560680c926d9c45d722ea0a89930ae487",
+      "date": "2026-10-09T19:01:47+02:00",
+      "author": "Javi_1",
+      "subject": "chore(eval): regenerar el baseline mock con los escenarios auxiliary",
+      "add": 5696,
+      "del": 493,
+      "files": 1
+    },
+    {
+      "sha": "f541114bb3f3572bdec657b5f0dbaa0cd9e04309",
+      "date": "2026-10-09T19:00:34+02:00",
+      "author": "Javi_1",
+      "subject": "feat(trace): trazar las llamadas auxiliares al LLM por origen",
+      "add": 4058,
+      "del": 155,
+      "files": 41
+    },
+    {
+      "sha": "2069578f606c8af18b056acfcb6e3584c2c7084f",
+      "date": "2026-10-09T11:35:46+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #2 from choruzo/feat/prompt-cache-observability",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "274f7b69f585fb4d5a7dfbd396a7ba8ffef9f955",
+      "date": "2026-10-09T10:54:04+02:00",
+      "author": "Javi_1",
+      "subject": "chore(eval): regenerar el baseline mock sobre un árbol limpio",
+      "add": 350,
+      "del": 350,
+      "files": 1
+    },
+    {
+      "sha": "7669afad8a0eae3738fc5b0ef1a856387f755021",
+      "date": "2026-10-09T10:53:24+02:00",
+      "author": "Javi_1",
+      "subject": "revert(prompt): devolver el bloque <env> a su posición de main",
+      "add": 126,
+      "del": 88,
+      "files": 5
+    },
+    {
+      "sha": "64aec3e1b665bf3b4aa434695ec58c1bd42723bc",
+      "date": "2026-10-08T23:17:43+02:00",
+      "author": "Javi_1",
+      "subject": "fix(cache): schemas MCP canónicos, roturas solo demostrables y validación live",
+      "add": 594,
+      "del": 48,
+      "files": 13
+    },
+    {
+      "sha": "a0e6718b723333b8b30dbcb98e9351b2ca7f4a5e",
+      "date": "2026-10-08T12:59:21+02:00",
+      "author": "Javi_1",
+      "subject": "feat(cache): observabilidad de prompt caching y prompt ordenado por estabilidad",
+      "add": 5896,
+      "del": 410,
+      "files": 40
+    },
+    {
+      "sha": "d18821cfafd3421adf70f353dc21ff57488dd9e0",
+      "date": "2026-10-07T19:57:17+02:00",
+      "author": "Javi_1",
+      "subject": "feat(landing): página de control (eval, guardas, stats) y menú de secciones",
+      "add": 694,
+      "del": 31,
+      "files": 9
+    },
     {
       "sha": "a23af5112a12c8718aebf7be283443edc5e066d1",
       "date": "2026-10-07T15:59:24+02:00",
@@ -1860,6 +2130,26 @@ window.__STRATUM_COMMITS__ = {
   ],
   "tags": [
     {
+      "name": "v0.8.0-beta.3",
+      "date": "2026-10-12T15:48:54+02:00"
+    },
+    {
+      "name": "v0.8.0-beta.2",
+      "date": "2026-10-12T15:05:50+02:00"
+    },
+    {
+      "name": "v0.8.0-beta.1",
+      "date": "2026-10-12T14:22:49+02:00"
+    },
+    {
+      "name": "desktop-v0.4.0-beta.0",
+      "date": "2026-10-12T13:23:05+02:00"
+    },
+    {
+      "name": "v0.8.0-beta.0",
+      "date": "2026-10-12T13:23:05+02:00"
+    },
+    {
       "name": "v0.7.0",
       "date": "2026-10-03T19:58:58+02:00"
     },
@@ -1917,6 +2207,50 @@ window.__STRATUM_COMMITS__ = {
     }
   ],
   "prs": [
+    {
+      "additions": 6331,
+      "createdAt": "2026-10-10T10:19:00Z",
+      "deletions": 951,
+      "headRefName": "feat/runtime-inbox",
+      "mergedAt": "2026-10-10T10:25:26Z",
+      "number": 5,
+      "state": "MERGED",
+      "title": "feat(inbox): Runtime Inbox y steering del usuario con el turno en curso",
+      "url": "https://github.com/choruzo/CLI/pull/5"
+    },
+    {
+      "additions": 5573,
+      "createdAt": "2026-10-09T20:51:37Z",
+      "deletions": 70,
+      "headRefName": "feat/background-jobs",
+      "mergedAt": "2026-10-09T20:51:45Z",
+      "number": 4,
+      "state": "MERGED",
+      "title": "feat(jobs): jobs en segundo plano gestionados por el runtime",
+      "url": "https://github.com/choruzo/CLI/pull/4"
+    },
+    {
+      "additions": 9754,
+      "createdAt": "2026-10-09T17:08:52Z",
+      "deletions": 648,
+      "headRefName": "feat/trace-auxiliary-llm-calls",
+      "mergedAt": "2026-10-09T17:14:47Z",
+      "number": 3,
+      "state": "MERGED",
+      "title": "feat(trace): trazar las llamadas auxiliares al LLM por origen",
+      "url": "https://github.com/choruzo/CLI/pull/3"
+    },
+    {
+      "additions": 6473,
+      "createdAt": "2026-10-09T09:29:20Z",
+      "deletions": 403,
+      "headRefName": "feat/prompt-cache-observability",
+      "mergedAt": "2026-10-09T09:35:46Z",
+      "number": 2,
+      "state": "MERGED",
+      "title": "feat(cache): observabilidad de prompt caching, tools y schemas canónicos",
+      "url": "https://github.com/choruzo/CLI/pull/2"
+    },
     {
       "additions": 323,
       "createdAt": "2026-08-27T11:54:29Z",
