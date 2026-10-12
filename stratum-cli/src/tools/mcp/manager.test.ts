@@ -19,6 +19,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     trace: DEFAULTS.trace,
     prompt: DEFAULTS.prompt,
     desktop: DEFAULTS.desktop,
+    daemon: DEFAULTS.daemon,
     session: DEFAULTS.session,
     provider: undefined,
     memory: {

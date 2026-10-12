@@ -683,6 +683,26 @@ export const StratumConfigSchema = z.object({
     .default({}),
 
   /**
+   * `stratumd` (PRD de Stratum Dot, M2): el plano de control local. Solo lo lee
+   * `stratum daemon`, y solo de la config **global**: el daemon no pertenece a
+   * ningún proyecto.
+   */
+  daemon: z
+    .object({
+      /**
+       * Minutos sin sesiones vivas ni operaciones en curso tras los que el
+       * daemon se apaga solo. `0` = nunca. Que no haya clientes conectados no
+       * cuenta: una sesión viva mantiene vivo al daemon.
+       */
+      idleExitMinutes: z.number().min(0).max(100_000).default(0),
+      /** Eventos de estado que se conservan por sesión para reenviar tras una reconexión. */
+      eventBuffer: z.number().int().min(16).max(100_000).default(2000),
+      /** Sesiones vivas a la vez. Abrir otra más contesta `UNAVAILABLE`. */
+      maxSessions: z.number().int().min(1).max(256).default(16),
+    })
+    .default({}),
+
+  /**
    * Stratum Desktop (D2). La CLI no lo lee: vive aquí porque la config es
    * compartida y así un `.stratumrc.json` con esta sección sigue validando.
    */

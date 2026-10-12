@@ -197,6 +197,11 @@
       }
     }
   },
+  "daemon": {
+    "idleExitMinutes": 0,
+    "eventBuffer": 2000,
+    "maxSessions": 16
+  },
   "desktop": {
     "maxConcurrentTurns": 2,
     "notifications": {
