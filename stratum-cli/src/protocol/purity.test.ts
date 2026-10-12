@@ -23,7 +23,10 @@ const NODE_BUILTINS = new Set(builtinModules.flatMap((m) => [m, `node:${m}`]));
 const NODE_GLOBALS = /\b(process|Buffer|__dirname|__filename|require)\b\s*[.([]/;
 
 function sources(): string[] {
-  return readdirSync(PROTOCOL_DIR).filter((f) => f.endsWith('.ts') && !f.endsWith('.test.ts'));
+  // Los ficheros *.fixtures.ts son valores de ejemplo para tests, no superficie pública.
+  return readdirSync(PROTOCOL_DIR).filter(
+    (f) => f.endsWith('.ts') && !f.endsWith('.test.ts') && !f.endsWith('.fixtures.ts'),
+  );
 }
 
 /** Especificadores de `import`/`export … from` de un fichero (también los de solo tipos). */
@@ -81,6 +84,12 @@ describe('pureza de src/protocol/', () => {
     expect([...external]).toEqual([]);
     expect(rel(files).filter((f) => f.startsWith('..'))).toEqual([]);
     expect(rel(files)).not.toContain(SCHEMAS);
+  });
+
+  it('schemas.ts solo añade zod', () => {
+    const { files, external } = closure(join(PROTOCOL_DIR, SCHEMAS));
+    expect([...external]).toEqual(['zod']);
+    expect(rel(files).filter((f) => f.startsWith('..'))).toEqual([]);
   });
 
   it('ningún módulo importa un built-in de Node ni usa sus globales', () => {
