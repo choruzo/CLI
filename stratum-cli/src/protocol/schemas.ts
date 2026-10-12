@@ -105,6 +105,7 @@ export const errorPayloadSchema = z.object({
       issues: z.array(z.object({ path: z.string(), message: z.string() })).optional(),
       capability: z.string().optional(),
       resolution: z.string().optional(),
+      reason: z.string().max(64).optional(),
       limit: z.number().int().optional(),
     })
     .optional(),
@@ -522,6 +523,7 @@ const subscriptionRef = z.object({ subscriptionId: id }).strict();
 const cwd = z.string().min(1).max(LIMITS.pathChars);
 const limit = z.number().int().positive().max(LIMITS.listLimit);
 const steerStatus = z.enum(['accepted', 'not-accepting', 'empty', 'too-large']);
+const cancelResult = z.object({ status: z.enum(['cancelled', 'not-running']) });
 const sessionResult = z.object({ session: sessionSchema });
 const runResult = z.object({ run: runSchema });
 
@@ -632,10 +634,25 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'trace.subscribe': sessionRef,
   'trace.unsubscribe': subscriptionRef,
 
-  'host.register': z.object({ snapshot: sessionSnapshotSchema, operationId }).strict(),
-  'host.publish': z
-    .object({ sessionId: id, events: z.array(eventSchema).min(1).max(LIMITS.publishBatch) })
+  'host.register': z
+    .object({
+      snapshot: sessionSnapshotSchema,
+      pid: z.number().int().positive().optional(),
+      claim: z.string().min(16).max(128).optional(),
+      operationId,
+    })
     .strict(),
+  'host.publish': z
+    .object({
+      sessionId: id,
+      snapshot: sessionSnapshotSchema.optional(),
+      events: z.array(eventSchema).max(LIMITS.publishBatch),
+    })
+    .strict()
+    .refine((p) => p.snapshot !== undefined || p.events.length > 0, {
+      message: 'events or snapshot required',
+      path: ['events'],
+    }),
   'host.unregister': sessionMutation,
 
   'host.cancel': z.object({ sessionId: id, runId: id.optional() }).strict(),
@@ -693,7 +710,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'runs.steer': z.object({ status: steerStatus }),
   'runs.pause': runResult,
   'runs.resume': runResult,
-  'runs.cancel': emptyResult,
+  'runs.cancel': cancelResult,
 
   'approvals.list': z.object({
     approvals: z.array(approvalSchema),
@@ -715,11 +732,11 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'trace.subscribe': z.object({ subscriptionId: id }),
   'trace.unsubscribe': emptyResult,
 
-  'host.register': emptyResult,
+  'host.register': z.object({ claim: z.string().min(16).max(128) }),
   'host.publish': emptyResult,
   'host.unregister': emptyResult,
 
-  'host.cancel': emptyResult,
+  'host.cancel': cancelResult,
   'host.pause': emptyResult,
   'host.resume': emptyResult,
   'host.steer': z.object({ status: steerStatus }),

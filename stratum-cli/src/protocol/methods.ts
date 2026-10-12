@@ -98,6 +98,13 @@ export interface RunsStartParams extends Mutation {
 /** Cómo quedó un mensaje de steering. Solo `accepted` lo encola. */
 export type SteerStatus = 'accepted' | 'not-accepting' | 'empty' | 'too-large';
 
+/**
+ * Cómo quedó una cancelación. `not-running`: no había turno en curso (ya había
+ * terminado). Un `runId` que no es el vigente es `STALE_STATE`, y un anfitrión
+ * par sin conexión, `UNAVAILABLE` con `reason: 'host-unavailable'`.
+ */
+export type CancelStatus = 'cancelled' | 'not-running';
+
 // --- suscripciones ----------------------------------------------------------
 
 export type SubscriptionScope =
@@ -118,8 +125,29 @@ export interface EventsSubscribeResult {
 
 // --- anfitrión par ----------------------------------------------------------
 
+export interface HostRegisterParams extends Mutation {
+  /** Foto de la sesión: es la autoridad, y sustituye lo que el servidor tuviera de ella. */
+  snapshot: ProtocolSessionSnapshot;
+  /**
+   * Pid del proceso que aloja la sesión. Solo sirve para que el servidor, si
+   * pierde la conexión, distinga un anfitrión muerto de uno que puede volver.
+   */
+  pid?: number;
+  /**
+   * Para reclamar una sesión que el servidor ya conoce y quedó sin anfitrión:
+   * el `claim` que devolvió su primer registro. Sin él, o con otro, no se puede.
+   */
+  claim?: string;
+}
+
 export interface HostPublishParams {
   sessionId: string;
+  /**
+   * Foto autoritativa: sustituye el estado que el servidor tuviera. El
+   * anfitrión la envía cuando perdió eventos (su cola se llenó). Los eventos
+   * del mismo lote son posteriores a ella.
+   */
+  snapshot?: ProtocolSessionSnapshot;
   /** Lote en orden. Los de estado, con `seq` consecutivo por sesión. */
   events: ProtocolEvent[];
 }
@@ -174,7 +202,7 @@ export interface ProtocolMethods {
   'runs.pause': Spec<Mutation & { sessionId: string }, { run: ProtocolRun }>;
   'runs.resume': Spec<Mutation & { sessionId: string }, { run: ProtocolRun }>;
   /** Con `runId`, solo cancela si ese sigue siendo el run en curso (`STALE_STATE` si no). */
-  'runs.cancel': Spec<Mutation & { sessionId: string; runId?: string }, Empty>;
+  'runs.cancel': Spec<Mutation & { sessionId: string; runId?: string }, { status: CancelStatus }>;
 
   'approvals.list': Spec<
     { sessionId?: string },
@@ -212,12 +240,12 @@ export interface ProtocolMethods {
   'trace.unsubscribe': Spec<{ subscriptionId: string }, Empty>;
 
   // Anfitrión par → servidor.
-  'host.register': Spec<Mutation & { snapshot: ProtocolSessionSnapshot }, Empty>;
+  'host.register': Spec<HostRegisterParams, { claim: string }>;
   'host.publish': Spec<HostPublishParams, Empty>;
   'host.unregister': Spec<Mutation & { sessionId: string }, Empty>;
 
   // Servidor → anfitrión par.
-  'host.cancel': Spec<{ sessionId: string; runId?: string }, Empty>;
+  'host.cancel': Spec<{ sessionId: string; runId?: string }, { status: CancelStatus }>;
   'host.pause': Spec<{ sessionId: string }, Empty>;
   'host.resume': Spec<{ sessionId: string }, Empty>;
   'host.steer': Spec<{ sessionId: string; text: string }, { status: SteerStatus }>;

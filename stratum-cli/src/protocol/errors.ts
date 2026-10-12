@@ -55,6 +55,12 @@ export interface ProtocolErrorData {
   capability?: string;
   /** `ALREADY_RESOLVED`: cómo quedó resuelto. */
   resolution?: string;
+  /**
+   * `UNAVAILABLE`: por qué. `host-unavailable` = el anfitrión par de la sesión
+   * no está conectado; `peer-hosted` = eso solo puede hacerlo el proceso que la
+   * aloja.
+   */
+  reason?: string;
   /** `FRAME_TOO_LARGE`: el límite en bytes. */
   limit?: number;
 }

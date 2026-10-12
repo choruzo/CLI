@@ -291,13 +291,20 @@ describe('peticiones', () => {
   it('sin la capacidad del método → FORBIDDEN', async () => {
     const resolve = vi.fn(() => ({}));
     const { client } = await setup(
-      { handlers: { 'approvals.resolve': resolve, 'runs.cancel': () => ({}) } },
+      {
+        handlers: {
+          'approvals.resolve': resolve,
+          'runs.cancel': () => ({ status: 'cancelled' as const }),
+        },
+      },
       { identity: { ...identity, roles: ['operator'] } },
     );
     await client.connect();
 
     // Puede cancelar…
-    await expect(client.request('runs.cancel', { sessionId: 's1' })).resolves.toEqual({});
+    await expect(client.request('runs.cancel', { sessionId: 's1' })).resolves.toEqual({
+      status: 'cancelled',
+    });
     // …pero no aprobar.
     expect(
       await caught(client.request('approvals.resolve', { approvalId: 'a1', decision: 'approve' })),

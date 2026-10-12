@@ -13,6 +13,7 @@ import { PLAN_MODE_PROMPT } from '../agent/plan.js';
 import { ProtocolError } from '../ipc/codec.js';
 import type { ProviderRouter } from '../providers/router.js';
 import type {
+  CancelStatus,
   ProtocolJob,
   ProtocolRun,
   ProtocolSession,
@@ -157,12 +158,14 @@ export class HostedSession {
    *
    * @throws ProtocolError `STALE_STATE` si `runId` ya no es el run en curso.
    */
-  cancel(runId?: string): void {
+  cancel(runId?: string): CancelStatus {
     const active = this.publisher.activeRun;
     if (runId !== undefined && active?.id !== runId) {
       throw new ProtocolError('STALE_STATE', 'That run is no longer the current one.');
     }
-    if (active) this.host.cancel();
+    if (!active) return 'not-running';
+    this.host.cancel();
+    return 'cancelled';
   }
 
   steer(text: string): SteerStatus {

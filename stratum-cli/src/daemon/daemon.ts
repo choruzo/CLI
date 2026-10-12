@@ -510,10 +510,9 @@ export class Stratumd {
         run: this.need(params.sessionId).startRun(params.input, params.mode ?? 'normal'),
       }),
       'runs.steer': (params) => ({ status: this.need(params.sessionId).steer(params.text) }),
-      'runs.cancel': (params) => {
-        this.need(params.sessionId).cancel(params.runId);
-        return {};
-      },
+      'runs.cancel': (params) => ({
+        status: this.need(params.sessionId).cancel(params.runId),
+      }),
       // Pausa cooperativa: M5.
       'runs.pause': notYet('Pausing a run'),
       'runs.resume': notYet('Pausing a run'),
