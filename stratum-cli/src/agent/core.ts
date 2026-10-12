@@ -65,6 +65,9 @@ import {
 import { extractAndStore } from '../memory/extractor.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
+import { getLogger } from '../logging/index.js';
+
+const log = getLogger('agent');
 
 export interface StratumAgentOptions {
   /**
@@ -133,6 +136,21 @@ export interface StratumAgentOptions {
   sessionProfile?: string;
 }
 
+/** Qué abrió un turno: una entrada al agente principal o una delegación directa (`@perfil`). */
+export type AgentTurnKind = 'run' | 'delegate';
+
+/**
+ * Lo que ve un observador del agente (`StratumAgent.observe`). No es un
+ * `AgentEvent` nuevo: los límites del turno no viajan por el generador, y
+ * añadirlos al schema de eventos cambiaría lo que consumen las interfaces.
+ */
+export type AgentObservation =
+  | { type: 'turn_started'; kind: AgentTurnKind; input: string }
+  | { type: 'event'; event: AgentEvent }
+  | { type: 'turn_ended'; kind: AgentTurnKind; stopReason: string | null };
+
+export type AgentObserver = (observation: AgentObservation) => void;
+
 export class StratumAgent {
   private messages: Message[];
   private currentLoop: ReactLoop | null = null;
@@ -176,6 +194,8 @@ export class StratumAgent {
    * suscribe aquí para pintar lo pendiente.
    */
   readonly inbox = new RuntimeInbox();
+  /** Observadores de la actividad del agente (`observe`). */
+  private readonly observers = new Set<AgentObserver>();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
   private readonly skillsBlock: string;
   /**
@@ -330,7 +350,57 @@ export class StratumAgent {
     return this.inbox.acceptsSteering;
   }
 
-  async *run(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
+  /**
+   * Observa la actividad del agente: el principio y el final de cada turno y
+   * todos los `AgentEvent` que emiten `run()` y `runDelegate()`, **además** de
+   * devolverlos a quien consume el generador. Es el punto único por el que un
+   * anfitrión publica lo que ocurre en la sesión sin ser quien la conduce.
+   *
+   * Un observador no puede alterar el turno: se le llama de forma síncrona, su
+   * valor de retorno se ignora y una excepción suya se registra y se descarta.
+   * Devuelve la función que lo retira.
+   */
+  observe(observer: AgentObserver): () => void {
+    this.observers.add(observer);
+    return () => {
+      this.observers.delete(observer);
+    };
+  }
+
+  private notify(observation: AgentObservation): void {
+    for (const observer of this.observers) {
+      try {
+        observer(observation);
+      } catch (err) {
+        log.warn('agent observer failed', { type: observation.type, err });
+      }
+    }
+  }
+
+  /** Envuelve un turno para que los observadores lo vean entero, también si se abandona. */
+  private async *observed(
+    kind: AgentTurnKind,
+    input: string,
+    turn: AsyncGenerator<AgentEvent>,
+  ): AsyncGenerator<AgentEvent> {
+    this.notify({ type: 'turn_started', kind, input });
+    let stopReason: string | null = null;
+    try {
+      for await (const event of turn) {
+        if (event.type === 'done') stopReason = event.stopReason;
+        this.notify({ type: 'event', event });
+        yield event;
+      }
+    } finally {
+      this.notify({ type: 'turn_ended', kind, stopReason });
+    }
+  }
+
+  run(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
+    return this.observed('run', input, this.runTurn(input, opts));
+  }
+
+  private async *runTurn(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
     // Steering que el turno anterior no llegó a entregar (se canceló o se
     // cortó): va delante de la petición nueva, que es su sitio en el tiempo.
     const undelivered = this.inbox.takeUndeliveredUserMessages(opts?.trace);
@@ -1010,7 +1080,15 @@ export class StratumAgent {
    * `user` (plantillas de chat estrictas), ni la sesión reanudada pierde qué
    * contestó el subagente.
    */
-  async *runDelegate(
+  runDelegate(profileName: string, task: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
+    return this.observed(
+      'delegate',
+      `@${profileName} ${task.trim()}`,
+      this.delegateTurn(profileName, task, opts),
+    );
+  }
+
+  private async *delegateTurn(
     profileName: string,
     task: string,
     opts?: RunOptions,
