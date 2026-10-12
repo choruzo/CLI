@@ -31,7 +31,7 @@
     "url": "git+https://github.com/choruzo/CLI.git",
     "directory": "stratum-cli"
   },
-  "license": "MIT",
+  "license": "Apache-2.0",
   "author": "Javier (choruzo)",
   "type": "module",
   "bin": {
@@ -44,7 +44,8 @@
     ".stratumrc.json.example",
     "README.md",
     "CHANGELOG.md",
-    "LICENSE"
+    "LICENSE",
+    "NOTICE"
   ],
   "engines": {
     "node": ">=22.0.0"

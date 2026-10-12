@@ -6,7 +6,7 @@
 
 [![npm](https://img.shields.io/npm/v/stratum-cli?style=flat-square&color=F5A623&labelColor=111111)](https://www.npmjs.com/package/stratum-cli)
 [![node](https://img.shields.io/badge/node-22+-F5A623?style=flat-square&labelColor=111111&logo=node.js&logoColor=F5A623)](https://nodejs.org)
-[![license](https://img.shields.io/badge/license-MIT-F5A623?style=flat-square&labelColor=111111)](https://github.com/choruzo/CLI/blob/main/LICENSE)
+[![license](https://img.shields.io/badge/license-Apache--2.0-F5A623?style=flat-square&labelColor=111111)](https://github.com/choruzo/CLI/blob/main/LICENSE)
 
 **Agente CLI extensible · Provider-agnostic · Local-first**
 
@@ -166,4 +166,4 @@ Dentro de `stratum chat`:
 
 ---
 
-<div align="center"><sub>MIT License</sub></div>
+<div align="center"><sub>Apache License 2.0</sub></div>

@@ -6,7 +6,7 @@
 
 [![npm](https://img.shields.io/npm/v/stratum-cli?style=flat-square&color=F5A623&labelColor=111111)](https://www.npmjs.com/package/stratum-cli)
 [![node](https://img.shields.io/badge/node-22+-F5A623?style=flat-square&labelColor=111111&logo=node.js&logoColor=F5A623)](https://nodejs.org)
-[![license](https://img.shields.io/badge/license-MIT-F5A623?style=flat-square&labelColor=111111)](LICENSE)
+[![license](https://img.shields.io/badge/license-Apache--2.0-F5A623?style=flat-square&labelColor=111111)](LICENSE)
 [![status](https://img.shields.io/badge/hito-10%20completado-F5A623?style=flat-square&labelColor=111111)](STRATUM_PROJECT_DEFINITION.md)
 
 **Agente CLI extensible · Provider-agnostic · Local-first**
@@ -308,5 +308,5 @@ npm run format       # Prettier
 ---
 
 <div align="center">
-  <sub>MIT License · <a href="STRATUM_PROJECT_DEFINITION.md">Roadmap completo →</a></sub>
+  <sub>Apache License 2.0 · <a href="STRATUM_PROJECT_DEFINITION.md">Roadmap completo →</a></sub>
 </div>
