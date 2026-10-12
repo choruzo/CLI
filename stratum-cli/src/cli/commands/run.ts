@@ -9,25 +9,17 @@ import type {
   DestructivePolicy,
   Plan,
   PlanDecision,
-  RunOptions,
 } from '../../agent/types.js';
-import { strictestPolicy } from '../../agent/profiles.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { makeCliQuestionAsker } from '../ask-questions.js';
-import { PlanStore, generatePlanId } from '../../session/plan-store.js';
-import { SubagentStore } from '../../session/subagent-store.js';
-import { generateSessionId } from '../../session/store.js';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { discoverContextWindow, resolveStartupModel } from '../startup-model.js';
-import { ToolRegistry } from '../../tools/registry.js';
-import { registerBuiltinTools } from '../../tools/index.js';
-import { McpManager } from '../../tools/mcp/manager.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
 import { formatJobEndLine, shortJobCommand } from '../../jobs/types.js';
-import { openSessionTrace } from '../../trace/store.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
-import { StratumAgent } from '../../agent/core.js';
+import { SessionHost, type TurnOptions } from '../../host/session-host.js';
+import { processSessionEnv } from '../../runtime/session-env.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
@@ -153,35 +145,45 @@ export const runCommand = new Command('run')
         await discoverContextWindow(router.getActiveConfig(), { timeoutMs: 3000 });
       }
 
-      const registry = new ToolRegistry();
-      registerBuiltinTools(registry, config);
-
-      // MCP servers: conexión eager antes de lanzar el agente (§12.8)
-      const mcpManager = new McpManager(config);
-      if (config.mcp.servers.length > 0) {
-        const mcpWarnings = await mcpManager.connectAll();
-        mcpWarnings.push(...mcpManager.registerInto(registry));
-        for (const w of mcpWarnings) {
-          process.stderr.write(`[mcp] ${w.message}\n`);
-        }
-        // Un server que se cuelga durante un run largo se detecta y se relanza.
-        mcpManager.startHeartbeat();
-      }
-
+      // Un perfil de sesión mal escrito es un error de invocación: se comprueba
+      // antes de montar nada (no hay servers MCP que cerrar todavía).
       if (profileFlag.profile) {
         const check = resolveSessionProfile(profileFlag.profile, config);
         if (!check.ok) {
-          await mcpManager.shutdownAll();
-          await closeExecRuntime();
           await flushLogging();
           process.stderr.write(`[fatal] --profile: ${check.error}\n`);
           process.exit(1);
         }
       }
-      const agent = new StratumAgent(config, router, registry, {
-        readOnly: opts.readOnly === true,
-        ...(profileFlag.profile ? { sessionProfile: profileFlag.profile } : {}),
+
+      // Política destructiva de la invocación (§12.5):
+      // --allow-destructive → 'allow'; --deny-destructive → 'deny';
+      // sin flags → 'ask' con prompt interactivo si stdin es TTY, 'deny' si no (CI/piped).
+      let basePolicy: DestructivePolicy = 'ask';
+      if (opts.allowDestructive) basePolicy = 'allow';
+      else if (opts.denyDestructive) basePolicy = 'deny';
+      else if (!process.stdin.isTTY) basePolicy = 'deny';
+
+      // La sesión: tools, servers MCP (conexión eager antes de lanzar el agente,
+      // §12.8), agente, stores y traza. `run` es one-shot y no persiste sesión,
+      // pero el id sí correlaciona en el log de auditoría los comandos de una
+      // misma invocación y nombra su traza (`stratum auditor <id>`).
+      const host = await SessionHost.create({
+        env: processSessionEnv(),
+        config,
+        router,
+        mcp: 'eager',
+        destructivePolicy: basePolicy,
+        allowDestructive: opts.allowDestructive,
+        agent: {
+          readOnly: opts.readOnly === true,
+          ...(profileFlag.profile ? { sessionProfile: profileFlag.profile } : {}),
+        },
       });
+      for (const w of host.mcpWarnings) {
+        process.stderr.write(`[mcp] ${w.message}\n`);
+      }
+      const agent = host.agent;
 
       // Hito 15 — perfiles: `--agent` activa uno como agente principal;
       // `--delegate` le entrega la tarea a un subagente sin pasar por el principal.
@@ -200,7 +202,7 @@ export const runCommand = new Command('run')
         }
       }
       if (profileFailure) {
-        await mcpManager.shutdownAll();
+        await host.dispose();
         await closeExecRuntime();
         await flushLogging();
         process.stderr.write(`[fatal] ${profileFailure}\n`);
@@ -219,15 +221,9 @@ export const runCommand = new Command('run')
         controller.abort();
       });
 
-      // Política destructiva (§12.5):
-      // --allow-destructive → 'allow'; --deny-destructive → 'deny';
-      // sin flags → 'ask' con prompt interactivo si stdin es TTY, 'deny' si no (CI/piped).
-      let policy: DestructivePolicy = 'ask';
-      if (opts.allowDestructive) policy = 'allow';
-      else if (opts.denyDestructive) policy = 'deny';
-      else if (!process.stdin.isTTY) policy = 'deny';
-      // Un perfil principal solo endurece la política, nunca la relaja.
-      policy = strictestPolicy(policy, agent.getActiveProfile()?.destructivePolicy);
+      // Un perfil principal solo endurece la política, nunca la relaja: el host
+      // la da ya compuesta con la del perfil activo.
+      const policy = host.destructivePolicy;
 
       const confirmDestructive = async (req: ConfirmRequest): Promise<DestructiveDecision> => {
         const env = req.environment
@@ -298,11 +294,8 @@ export const runCommand = new Command('run')
         }
       };
 
-      const planStore = new PlanStore(process.cwd());
-      const planRef = generatePlanId();
-      const planCreatedAt = new Date().toISOString();
+      const planPersister = host.planPersister(task);
       const planStepTitles = new Map<string, { n: number; title: string }>();
-      const subagentStore = new SubagentStore(process.cwd());
 
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
@@ -322,12 +315,6 @@ export const runCommand = new Command('run')
       // argumentos streameado; solo imprimimos la primera aparición (como el
       // handler principal con `toolStartTimes`). Clave = subagentId:innerId.
       const subToolSeen = new Set<string>();
-
-      // `run` es one-shot y no persiste sesión, pero el id sí correlaciona en el
-      // log de auditoría los comandos de una misma invocación y nombra su traza
-      // (`stratum auditor <id>`).
-      const sessionId = generateSessionId();
-      const trace = openSessionTrace(config, sessionId, { cwd: process.cwd() });
 
       // Jobs en segundo plano: su inicio y su fin se cuentan por stderr cuando
       // ocurren (un job puede terminar mientras el modelo está pensando). Al
@@ -362,26 +349,25 @@ export const runCommand = new Command('run')
       });
 
       try {
-        const runOpts: RunOptions = {
-          signal: controller.signal,
-          sessionId,
-          trace: trace?.scope(),
-          allowDestructive: opts.allowDestructive,
-          destructivePolicy: policy,
+        host.setGates({
           // Hito 17: con TTY el callback se pasa también con --allow-destructive:
           // un entorno `confirm-always` pregunta aunque la sesión permita todo.
-          onConfirmDestructive:
+          confirm:
             policy === 'ask' || (policy === 'allow' && process.stdin.isTTY)
               ? confirmDestructive
               : undefined,
           // Tanda única de preguntas (Hito 2.5, F7). Sin TTY no hay callback:
           // el loop se lo dice al agente y este continúa con supuestos.
-          onAskQuestions: makeCliQuestionAsker(),
-          onSubagentPersist: (rec) => subagentStore.persist(rec),
+          askQuestions: makeCliQuestionAsker(),
           // Hito 17: el gate de aprobación se pasa siempre — un entorno con
           // `requirePlan` puede escalar el turno a modo plan.
-          onApprovePlan,
-          onPlanPersist: (p: Plan) => planStore.save(planRef, task, p, planCreatedAt),
+          approvePlan: onApprovePlan,
+        });
+        // La cancelación es de la invocación entera (SIGINT), no de un turno:
+        // todos los turnos de `--then` comparten la misma señal.
+        const turn: TurnOptions = {
+          signal: controller.signal,
+          onPlanPersist: planPersister.persist,
           ...(planMode ? { mode: 'plan' as const } : {}),
         };
         // `--then`: turnos siguientes en la misma sesión (mismo historial, misma
@@ -390,18 +376,18 @@ export const runCommand = new Command('run')
         const followUps = opts.then ?? [];
         const chained = async function* (): AsyncGenerator<AgentEvent> {
           let stop: string | null = null;
-          for (const turn of [input, ...followUps]) {
+          for (const turnInput of [input, ...followUps]) {
             if (stop !== null) {
               if (stop !== 'stop') return;
               yield { type: 'text_delta', delta: '\n\n' };
             }
-            for await (const ev of agent.run(turn, runOpts)) {
+            for await (const ev of host.run(turnInput, turn)) {
               if (ev.type === 'done') stop = ev.stopReason;
               yield ev;
             }
           }
         };
-        const events = opts.delegate ? agent.runDelegate(opts.delegate, task, runOpts) : chained();
+        const events = opts.delegate ? host.runDelegate(opts.delegate, task, turn) : chained();
         for await (const event of events) {
           steer?.observe(event);
           switch (event.type) {
@@ -552,31 +538,27 @@ export const runCommand = new Command('run')
         }
       } catch (err) {
         steer?.dispose();
-        await mcpManager.shutdownAll();
-        await closeExecRuntime();
         getLogger('cli').error('run aborted with error', { err });
-        await agent.cancelBackgroundWork();
-        await trace?.flush();
+        await host.dispose({ cancelBackground: true });
+        await closeExecRuntime();
         await flushLogging();
         process.stderr.write(`${fatalLabel} ${String(err)}\n`);
         process.exit(1);
       }
 
       steer?.dispose();
-      await mcpManager.shutdownAll();
-      // Hito 9 (§12.12): cerrar los sockets SSH antes de salir.
-      await closeExecRuntime();
+      // Cierre de la sesión: servers MCP, jobs, sockets SSH (§12.12) y traza.
       // Las salidas con `process.exit` cortan la extracción de memoria de un
       // turno anterior (`--then`): se cancela para que la traza la cierre. En la
       // salida normal no se toca: el proceso espera a que termine, como siempre.
-      if (
-        controller.signal.aborted ||
-        fatalError ||
-        (opts.delegate && delegateStatus !== 'completed')
-      ) {
-        await agent.cancelBackgroundWork();
-      }
-      await trace?.flush();
+      await host.dispose({
+        cancelBackground:
+          controller.signal.aborted ||
+          fatalError ||
+          (opts.delegate !== undefined && delegateStatus !== 'completed'),
+      });
+      // Y lo que quede del proceso (nada, con una sola sesión).
+      await closeExecRuntime();
       await flushLogging();
 
       if (controller.signal.aborted) {
