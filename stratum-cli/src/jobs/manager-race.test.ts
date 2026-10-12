@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -6,6 +6,11 @@ import { JobManager } from './manager.js';
 import { MAIN_JOB_SCOPE } from './types.js';
 import { StratumConfigSchema } from '../config/schema.js';
 import { resetExecRuntime } from '../tools/exec/runtime.js';
+
+// Estos tests lanzan y matan árboles de procesos reales: en Windows cada
+// cancelación barre los descendientes (~1 s) y, con la suite completa en
+// paralelo, el límite por defecto de 5 s no da margen.
+vi.setConfig({ testTimeout: 30_000 });
 
 /**
  * Regresión: un job cancelado nada más arrancar. En Windows el cierre del árbol

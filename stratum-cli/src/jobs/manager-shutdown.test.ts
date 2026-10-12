@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,11 @@ import { StratumConfigSchema } from '../config/schema.js';
 import { ToolDispatcher, ToolRegistry } from '../tools/registry.js';
 import { registerBuiltinTools } from '../tools/index.js';
 import { closeExecRuntime, resetExecRuntime } from '../tools/exec/runtime.js';
+
+// Estos tests lanzan y matan árboles de procesos reales: en Windows cada
+// cancelación barre los descendientes (~1 s) y, con la suite completa en
+// paralelo, el límite por defecto de 5 s no da margen.
+vi.setConfig({ testTimeout: 30_000 });
 
 /**
  * `shutdown()` es terminal: un manager cerrado no vuelve a lanzar jobs ni a

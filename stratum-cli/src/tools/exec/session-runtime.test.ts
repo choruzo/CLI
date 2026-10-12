@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,6 +12,11 @@ import {
   getExecAuditLog,
   resetExecRuntime,
 } from './runtime.js';
+
+// Estos tests lanzan y matan árboles de procesos reales: en Windows cada
+// cancelación barre los descendientes (~1 s) y, con la suite completa en
+// paralelo, el límite por defecto de 5 s no da margen.
+vi.setConfig({ testTimeout: 30_000 });
 
 /**
  * Aislamiento del estado de ejecución entre sesiones de un mismo proceso (M0

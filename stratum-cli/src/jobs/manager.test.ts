@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, beforeEach } from 'vitest';
+import { describe, it, expect, afterEach, beforeEach, vi } from 'vitest';
 import { mkdtempSync, readFileSync, rmSync, writeFileSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -9,6 +9,11 @@ import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import { closeExecRuntime, resetExecRuntime } from '../tools/exec/runtime.js';
 import type { TraceScope } from '../trace/recorder.js';
 import type { TraceRuntimeEvent } from '../trace/records.js';
+
+// Estos tests lanzan y matan árboles de procesos reales: en Windows cada
+// cancelación barre los descendientes (~1 s) y, con la suite completa en
+// paralelo, el límite por defecto de 5 s no da margen.
+vi.setConfig({ testTimeout: 30_000 });
 
 function makeConfig(jobs: Record<string, unknown> = {}): StratumConfig {
   return StratumConfigSchema.parse({ tools: { auditLog: false, jobs } });
