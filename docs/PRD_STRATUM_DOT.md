@@ -1,7 +1,8 @@
 # PRD — Stratum Dot
 
 > Cockpit de escritorio del harness Stratum.
-> Estado: propuesta para implementación por hitos. Fecha: 2026-10-12.
+> Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
+> anotados en el hito que los encuentra. En curso: **M0**.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -367,6 +368,18 @@ Restricciones de diseño que mantienen abierta esa convergencia (obligatorias de
    podrá pasarle los que capture el cliente.
 2. `sessions.open` reserva desde la v1 del protocolo un campo opcional `env` (no usado en
    el MVP), para no romper compatibilidad al activarlo.
+
+   **`SessionEnv.env` no es `process.env` completo [decidido].** Es material sensible
+   (tokens, credenciales, rutas) y se trata como tal:
+   - nunca se emite en eventos, ni aparece en trazas ni en logs;
+   - nunca lo devuelve `sessions.get` ni ningún otro método;
+   - nunca se persiste como parte de `Session` ni de `SessionContext`;
+   - pasa por filtrado y redacción antes de usarse;
+   - **no** se implementa captura automática del entorno completo: qué variables se
+     pueden capturar y trasladar lo decide M10 (§22 Q1).
+
+   En M0, `SessionEnv.env` es solo el punto de inyección: el anfitrión par pasa el
+   entorno de su propio proceso, que es el que ya usa hoy, y nada lo serializa.
 3. Todo lo que un cliente necesita de una sesión sale por eventos y métodos del protocolo.
    Código nuevo de la TUI no añade llamadas directas a `StratumAgent`: pasa por `SessionHost`.
 4. Los gates (`HostGates`) son asíncronos y resolubles desde fuera del proceso en ambos anfitriones.
@@ -428,9 +441,23 @@ El plan de convergencia está en §15.
   `pid` no vive se considera rancio (mismo criterio que `ownerState` de `SubagentStore`).
 - Primera trama obligatoria: `core.hello { token, client: {kind, name, version, pid}, role, protocol }`.
   Se reutilizan `HANDSHAKE_TIMEOUT_MS`, el tope de 4 KiB antes de autenticar y `tokensMatch`.
-- **Roles**: `observer` (solo lectura), `operator` (control y aprobaciones), `host` (publica
-  sesiones propias), `broker` (ofrece capacidades de escritorio; post-MVP). Un rol limita
-  qué métodos acepta el daemon para esa conexión.
+- **Autorización por capacidades [decidido]**. Cada método exige una capacidad, y la
+  autoridad remota no se agrupa bajo un único rol: *poder cancelar no implica poder aprobar
+  una acción destructiva*.
+
+  | Capacidad | Permite |
+  |---|---|
+  | `observe` | Lectura. Estrictamente de solo lectura: ningún método con efecto |
+  | `control` | Control del run: `cancel`, `pause`, `resume`, `steer`; abrir y cerrar sesiones |
+  | `approve` | Resolver aprobaciones, preguntas y planes |
+  | `host` | Publicar y controlar las sesiones que aloja esa conexión (y solo esas) |
+  | `broker` | Ofrecer capacidades nativas (post-MVP) |
+
+  Un rol es un conjunto con nombre de capacidades: `observer` = {`observe`}; `operator` =
+  {`observe`, `control`}; `approver` = {`observe`, `approve`}; `host`; `broker`. La v1 puede
+  conceder varias a la vez a un mismo cliente (Dot: `control` + `approve`) si separarlas
+  como roles complica M1, pero el servidor comprueba **la capacidad por método**, nunca
+  «es operator». Qué identidad tiene derecho a `approve` es §22 Q2.
 
 ### 10.3 Métodos (cliente → daemon)
 
@@ -443,7 +470,7 @@ El plan de convergencia está en §15.
 | `models.list` `{provider?}` | observer | Modelos descubiertos (`fetchModelInfos`) |
 | `sessions.list` `{live?, limit?}` | observer | Vivas y guardadas |
 | `sessions.get` `{sessionId}` | observer | `Session` + `RunState` actual |
-| `sessions.open` `{cwd, profile?, model?, provider?, readOnly?, sessionProfile?, resume?}` | operator | Crea o reanuda una sesión **alojada en el daemon** |
+| `sessions.open` `{cwd, env?, profile?, model?, provider?, readOnly?, sessionProfile?, resume?}` | operator | Crea o reanuda una sesión **alojada en el daemon**. `env` reservado: de solo entrada, nunca se devuelve ni se registra (§9.3) |
 | `sessions.close` `{sessionId}` | operator | Cierra (cancela su run, guarda). Solo anfitrión local |
 | `sessions.setModel` / `sessions.setAgent` / `sessions.setReadOnly` | operator | Equivalen a `/model`, `/agent`, `/readonly` |
 | `runs.list` `{sessionId?, active?}` | observer | |
@@ -453,9 +480,9 @@ El plan de convergencia está en §15.
 | `runs.pause` / `runs.resume` `{sessionId}` | operator | Pausa cooperativa (§10.5) |
 | `runs.cancel` `{sessionId, runId?}` | operator | `AbortSignal`; con `runId`, solo si sigue siendo ese |
 | `approvals.list` | observer | Pendientes de todas las sesiones |
-| `approvals.resolve` `{approvalId, decision, phrase?}` | operator | `approve` · `deny` · `allow-all` |
-| `questions.answer` `{requestId, answers \| null}` | operator | Tanda de `question` |
-| `plans.decide` `{requestId, decision, plan?}` | operator | Gate de `present_plan` |
+| `approvals.resolve` `{approvalId, decision, phrase?}` | **approver** | `approve` · `deny` · `allow-all` |
+| `questions.answer` `{requestId, answers \| null}` | **approver** | Tanda de `question` |
+| `plans.decide` `{requestId, decision, plan?}` | **approver** | Gate de `present_plan` |
 | `jobs.list` / `jobs.cancel` `{sessionId, jobId}` | observer / operator | `JobManager` de la sesión |
 | `memory.status` | observer | Rutas, nº de decisiones, backend del índice, embedder |
 | `memory.decisions` `{query?, limit?}` | observer | `list` / `search` |
@@ -819,12 +846,13 @@ En orden sugerido:
 | Default de `chat` **[decidido]** | **En su proceso durante M0–M9; alojado en el daemon como dirección final**, sujeto a M11 | *Cambiarlo ya*: rompe el entorno de `exec` |
 | Dot y Desktop **[decidido]** | **Dos apps en el MVP, convergencia en M12** | *Fusionarlas ahora*: mezcla la migración de Desktop con el estreno del daemon |
 | `git push` **[decidido]** | **`confirm` por defecto**, forzados con confirmación reforzada (§13.2), en M4 | *Dejar el default actual*: una acción con efecto sobre terceros sin pregunta |
-| Distribución de Dot | **Usa el `stratum` instalado** (Node ≥ 22) | *Empaquetar el core como SEA* (como Desktop): +180 MB instalados; deja de ser «ligera». Se revisa en M12, cuando Desktop converja |
-| Quién arranca el daemon | **Dot siempre; la CLI solo con `daemon.autoStart: true`** | *Servicio de inicio de sesión del SO*: post-MVP |
-| Caducidad de aprobaciones | **Anfitrión local: caduca a `deny`. Par con TTY: sin caducidad**, como hoy | *Caducar también en la terminal*: cambia un comportamiento que funciona |
-| Alcance de `observer` | **Lee cualquier sesión de la máquina** | *Alcance por sesión*: solo tendría sentido con acceso remoto, que es un non-goal |
-| `McpManager` | **Uno por sesión** | *Compartido en el daemon*: `disabledTools` y el `cwd` de los servers son por sesión |
-| Nombres | **`stratum daemon run`** (alias `stratumd`), **`~/.stratum/daemon/`** | — |
+| Distribución de Dot **[decidido]** | **Usa el `stratum` instalado** (Node ≥ 22) | *Empaquetar el core como SEA* (como Desktop): +180 MB instalados; deja de ser «ligera». Se revisa en M12, cuando Desktop converja |
+| Quién arranca el daemon **[decidido]** | **Dot lo descubre y lo arranca; la CLI solo con `daemon.autoStart: true`** | *Servicio de inicio de sesión del SO*: post-MVP |
+| Caducidad de aprobaciones **[decidido]** | **Sesión en el daemon: caduca a `deny`. Par con TTY: sin caducidad**, como hoy | *Caducar también en la terminal*: cambia un comportamiento que funciona |
+| Alcance de `observer` **[decidido]** | **Lee las sesiones locales del usuario; estrictamente read-only** | *Alcance por sesión*: solo tendría sentido con acceso remoto, que es un non-goal |
+| Autorización **[decidido]** | **Capacidades por método** (`observe`/`control`/`approve`/`host`/`broker`) | *Un único rol `operator`*: haría que cancelar implicase aprobar |
+| `McpManager` **[decidido]** | **Uno por sesión** | *Compartido en el daemon*: `disabledTools` y el `cwd` de los servers son por sesión |
+| Nombres **[decidido]** | **`stratum daemon run`** (alias `stratumd`), **`~/.stratum/daemon/`** | — |
 | Estado nuevo en disco | **Solo `endpoint.json`** | *Base de datos del daemon*: duplicaría sesiones y trazas |
 | Pausa | **Cooperativa, en punto seguro** | *Suspender el proceso*: mata conexiones SSH/MCP y timeouts de provider |
 | Protocolo de Desktop v9 | **No se toca** | *Migrarlo ya*: riesgo sin beneficio para el MVP |
@@ -961,6 +989,9 @@ Cada hito es entregable y comprobable por separado. «Hecho» incluye tests, `ts
     marcada como cambio de comportamiento;
   - test de compatibilidad: configs existentes con y sin `gitPushForce` cargan y conservan su valor.
 - *Hecho cuando*: AC-3, AC-4, AC-5, AC-15; un `block` nunca genera una aprobación.
+- **Security blocker**: M4 no se declara terminado ni endurecido hasta resolver §22 Q2 —
+  documentar y probar qué identidad/capacidad tiene derecho a resolver aprobaciones. Las
+  guardas *best-effort* se pueden entregar antes, pero no cierran el hito.
 
 **Puerta de control.** M6 no empieza hasta que M0–M4 estén demostrados con clientes de
 texto (`stratum ps`, `stratum approvals`, `stratum attach`).
@@ -1072,9 +1103,9 @@ resto de la tabla de §16.
   *Se investiga en*: M10, con un escenario de `eval` por cada elemento de la lista de §9.3.
 - **Q2. Verificación de la identidad del proceso par.** Node no expone `SO_PEERCRED` ni
   `GetNamedPipeClientProcessId`. Opciones a evaluar: addon nativo; aceptar aprobaciones
-  solo a través del relay Rust de Dot (que sí puede consultarlo); o limitar el rol
-  `operator` a procesos que no desciendan de un anfitrión. Decide cuánto se cierra §13.4.
-  *Se investiga en*: M4, antes de dar por buenas las guardas.
+  solo a través del relay Rust de Dot (que sí puede consultarlo); o conceder la capacidad
+  `approve` solo a procesos que no desciendan de un anfitrión. Decide cuánto se cierra §13.4.
+  **Security blocker de M4**: el hito no se da por terminado sin esta respuesta documentada y probada.
 - **Q3. Detección fiable de un push forzado.** `--force`, `-f` y `--force-with-lease` son
   flags, pero `git push origin +main` fuerza por refspec y `push.default` o un alias de git
   pueden cambiar el significado del comando. Hay que comprobar qué resuelve hoy
