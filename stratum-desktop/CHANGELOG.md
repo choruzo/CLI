@@ -4,6 +4,13 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.4.0] — 2026-10-12
+
+Versión estable de la 0.4.0: incluye todo lo de la [0.4.0-beta.0](#040-beta0--2026-10-12) (panel de trayectoria, alta de providers con solo URL y key, conversaciones ilegibles que ya no se pierden) y se anuncia por el auto-update a las 0.2.0 y 0.3.0 instaladas.
+
+### Cambiado
+- El core es el de la CLI 0.8.0, con los arreglos de sus pre-releases posteriores a la beta de Desktop.
+
 ## [0.4.0-beta.0] — 2026-10-12
 
 Pre-release para pruebas: los instaladores están en la release `desktop-v0.4.0-beta.0`, que no se anuncia por el auto-update. Una 0.3.0 instalada no la recibe sola.
