@@ -175,7 +175,10 @@ export async function extractAndStore(opts: ExtractOptions): Promise<number> {
       const input = toDecisionInput(cand, sessionId);
       if (!input) continue;
       // memory.save aplica dedup semántico contra lo ya almacenado.
-      const result = await memory.save(input);
+      const result = await memory.save(input, {
+        source: 'auto-extract',
+        ...(sessionId ? { sessionId } : {}),
+      });
       if (!result.deduped) added++;
     }
     return added;

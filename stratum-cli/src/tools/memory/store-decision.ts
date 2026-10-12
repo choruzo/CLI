@@ -35,7 +35,10 @@ export const storeDecisionTool: ToolDefinition = {
     const input = schema.parse(params);
     try {
       const memory = getDecisionMemory(ctx.config);
-      const result = await memory.save({ ...input, source: 'agent' });
+      const result = await memory.save(
+        { ...input, source: 'agent' },
+        { source: 'tool', ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) },
+      );
       if (result.deduped) {
         return {
           ok: true,

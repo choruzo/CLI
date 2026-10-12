@@ -21,13 +21,30 @@ export interface RecallResult {
 }
 
 /**
+ * Quién intentó guardar: la sesión y la vía. Es un dato del **intento**, no del
+ * registro: con dedup, el registro que queda es el original —de otra sesión,
+ * quizá— y su `session_id` no dice nada de quien acaba de llamar.
+ */
+export interface SaveAttempt {
+  sessionId?: string;
+  source: 'tool' | 'auto-extract' | 'user';
+}
+
+/**
  * Lo que cambia en la memoria de decisiones, para quien la observa
  * (`DecisionMemory.subscribe`). `saved` llega también cuando el guardado se
  * resolvió como near-duplicado (`deduped`): no se escribió nada, pero alguien
- * intentó guardar. El `record` dice quién (`source`, `session_id`).
+ * intentó guardar. `record` es lo que quedó almacenado; `attempt`, quién lo
+ * intentó (ausente si quien llamó no lo dijo).
  */
 export type DecisionMemoryEvent =
-  | { type: 'saved'; record: DecisionRecord; deduped: boolean; indexed: boolean }
+  | {
+      type: 'saved';
+      record: DecisionRecord;
+      deduped: boolean;
+      indexed: boolean;
+      attempt?: SaveAttempt;
+    }
   | { type: 'removed'; id: string };
 
 export type DecisionMemoryListener = (event: DecisionMemoryEvent) => void;
@@ -113,13 +130,14 @@ export class DecisionMemory {
    * Persiste una decisión con dedup semántico previo. Pipeline (§5):
    *   embed(content) → findSimilar ≥ threshold ? dedup : store.add + vectors.add
    */
-  async save(input: DecisionInput): Promise<SaveResult> {
+  async save(input: DecisionInput, attempt?: SaveAttempt): Promise<SaveResult> {
     const result = await this.saveLocked(input);
     this.emit({
       type: 'saved',
       record: result.record,
       deduped: result.deduped,
       indexed: result.indexed,
+      ...(attempt ? { attempt } : {}),
     });
     return result;
   }
@@ -242,6 +260,11 @@ export function getDecisionMemory(
     instances.set(key, inst);
   }
   return inst;
+}
+
+/** Fija la instancia que verá quien pida la memoria de esa config (tests con embedder inyectado). */
+export function _setDecisionMemory(config: StratumConfig, memory: DecisionMemory): void {
+  instances.set(resolveMemoryPaths(config).decisionsFile, memory);
 }
 
 /** Limpia el cache de instancias (tests). */
