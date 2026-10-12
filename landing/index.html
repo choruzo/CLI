@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=ff2f283114" />
+    <link rel="stylesheet" href="./styles.css?v=2cdd476177" />
   </head>
   <body>
     <a class="skip" href="#main">Saltar al contenido</a>
@@ -67,13 +67,18 @@
         </p>
 
         <div class="boot" id="boot" aria-live="polite">
-          <div class="boot-line"><span class="p">❯</span>npm i -g stratum-cli</div>
+          <div class="boot-line"><span class="p">❯</span><span id="boot-install">curl -fsSL https://taskplatform.pro/install.sh | sh</span></div>
         </div>
 
         <div class="hero-actions">
-          <button class="btn btn-primary copy" type="button" data-copy="npm i -g stratum-cli">
-            <span class="p">$</span> npm i -g stratum-cli <span class="copy-hint">⧉ copiar</span>
+          <button class="btn btn-primary copy" id="install-main" type="button" data-copy="curl -fsSL https://taskplatform.pro/install.sh | sh">
+            <span class="p">$</span> <span id="install-main-cmd">curl -fsSL https://taskplatform.pro/install.sh | sh</span> <span class="copy-hint">⧉ copiar</span>
           </button>
+          <button class="btn copy" id="install-alt" type="button" data-copy="irm https://taskplatform.pro/install.ps1 | iex">
+            <span id="install-alt-os">windows</span> <span class="copy-hint">⧉ copiar</span>
+          </button>
+          <button class="btn copy" type="button" data-copy="npm i -g stratum-cli">npm <span class="copy-hint">⧉ copiar</span></button>
+          <a class="btn" href="./guias.html#cli-instalacion">[ opciones del instalador ]</a>
           <a class="btn" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">[ github ↗ ]</a>
           <a class="btn" href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">[ npm ↗ ]</a>
           <a class="btn" href="#demo">[ probar la demo ]</a>
@@ -371,7 +376,7 @@ stratum auditor sess_20261004_151424_2n6 --no-open</pre>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="./data/commits-data.js?v=ff2f283114"></script>
-    <script src="./app.js?v=ff2f283114" defer></script>
+    <script src="./data/commits-data.js?v=2cdd476177"></script>
+    <script src="./app.js?v=2cdd476177" defer></script>
   </body>
 </html>

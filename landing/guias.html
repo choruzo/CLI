@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=ff2f283114" />
+    <link rel="stylesheet" href="./styles.css?v=2cdd476177" />
   </head>
   <body>
     <a class="skip" href="#main">Saltar al contenido</a>
@@ -95,12 +95,54 @@
 
             <h4>Requisitos</h4>
             <ul>
-              <li><b>Node.js 22</b> o superior.</li>
+              <li><b>Node.js 22</b> o superior (el instalador lo pone si falta).</li>
               <li>
                 Un backend que exponga una API OpenAI-compatible: un servidor local (Ollama, llama.cpp, vLLM),
                 un proxy (LiteLLM) o un servicio alojado.
               </li>
             </ul>
+
+            <h4 id="instalador">Con el instalador</h4>
+            <div class="code"><pre><code># Linux / macOS
+curl -fsSL https://taskplatform.pro/install.sh | sh</code></pre></div>
+            <div class="code"><pre><code># Windows (PowerShell)
+irm https://taskplatform.pro/install.ps1 | iex</code></pre></div>
+            <p>
+              Comprueba Node.js, instala la CLI desde npm y, en una instalación nueva, pregunta por el provider
+              del modelo para dejar escrita la configuración global <code>~/.stratum/.stratumrc.json</code>, que
+              comparten la CLI y Stratum Desktop. Pregunta antes de instalar Node.js, y una configuración que ya
+              existe no la toca. Para actualizar basta con volver a lanzarlo.
+            </p>
+            <p>Con opciones, por ejemplo CLI y Desktop con el provider ya configurado y sin preguntas:</p>
+            <div class="code"><pre><code># Linux / macOS
+curl -fsSL https://taskplatform.pro/install.sh | sh -s -- \
+  --desktop --yes --base-url http://localhost:11434/v1 --provider ollama</code></pre></div>
+            <div class="code"><pre><code># Windows: irm | iex no admite argumentos, se invoca como bloque
+&amp; ([scriptblock]::Create((irm https://taskplatform.pro/install.ps1))) `
+  -Desktop -Yes -BaseUrl http://localhost:11434/v1 -Provider ollama</code></pre></div>
+            <div class="tscroll">
+            <table class="dtable">
+              <thead><tr><th>Linux / macOS</th><th>Windows</th><th>Qué hace</th></tr></thead>
+              <tbody>
+                <tr><td><code>--desktop</code></td><td><code>-Desktop</code></td><td>Instala también Stratum Desktop y verifica su SHA-256</td></tr>
+                <tr><td><code>--no-cli</code></td><td><code>-NoCli</code></td><td>No instala la CLI</td></tr>
+                <tr><td><code>--channel beta</code></td><td><code>-Channel beta</code></td><td>Canal beta en vez del estable</td></tr>
+                <tr><td><code>--version</code>, <code>--desktop-version</code></td><td><code>-Version</code>, <code>-DesktopVersion</code></td><td>Una versión concreta</td></tr>
+                <tr><td><code>--base-url</code>, <code>--provider</code>, <code>--model</code></td><td><code>-BaseUrl</code>, <code>-Provider</code>, <code>-Model</code></td><td>Da de alta el provider en la configuración global y lo deja activo</td></tr>
+                <tr><td><code>--api-key-env VAR</code></td><td><code>-ApiKeyEnv VAR</code></td><td>La key se guarda como <code>${VAR}</code></td></tr>
+                <tr><td><code>--api-key</code></td><td><code>-ApiKey</code></td><td>Key literal: queda en claro en el fichero</td></tr>
+                <tr><td><code>--config ruta|url</code></td><td><code>-Config</code></td><td>Instala un <code>.stratumrc.json</code> ya preparado, con copia del anterior</td></tr>
+                <tr><td><code>--no-config</code></td><td><code>-NoConfig</code></td><td>No pregunta ni toca la configuración</td></tr>
+                <tr><td><code>--yes</code></td><td><code>-Yes</code></td><td>No pregunta nada</td></tr>
+                <tr><td><code>--dry-run</code></td><td><code>-DryRun</code></td><td>Muestra lo que haría sin hacerlo</td></tr>
+              </tbody>
+            </table>
+            </div>
+            <p>
+              Cada opción tiene además su variable <code>STRATUM_INSTALL_*</code>. Los scripts son los de
+              <a href="https://github.com/choruzo/CLI/tree/main/install" target="_blank" rel="noreferrer">install/</a>
+              en el repositorio: conviene leerlos antes de pasarlos por un shell.
+            </p>
 
             <h4>Con npm</h4>
             <div class="code"><pre><code>npm install -g stratum-cli
@@ -405,6 +447,16 @@ stratum logs tail 100</code></pre></div>
               <a class="btn" id="dl-all" href="https://github.com/choruzo/CLI/releases/tag/desktop-v0.3.0" target="_blank" rel="noreferrer">[ todas las descargas ↗ ]</a>
             </div>
 
+            <p>
+              O con el <a href="#instalador">instalador</a>, que descarga la última versión, verifica su SHA-256
+              y, si además instala la CLI, deja configurado el provider para las dos:
+            </p>
+            <div class="code"><pre><code># Linux (x64)
+curl -fsSL https://taskplatform.pro/install.sh | sh -s -- --desktop</code></pre></div>
+            <div class="code"><pre><code># Windows (x64)
+&amp; ([scriptblock]::Create((irm https://taskplatform.pro/install.ps1))) -Desktop</code></pre></div>
+            <p>Solo Desktop, sin la CLI: añade <code>--no-cli</code> (<code>-NoCli</code> en Windows).</p>
+
             <h4>Windows</h4>
             <ul>
               <li>Ejecuta el <code>.exe</code> (o el <code>.msi</code> si lo despliegas con herramientas de empresa).</li>
@@ -674,6 +726,6 @@ npm run tauri build       # instaladores</code></pre></div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="./guias.js?v=ff2f283114" defer></script>
+    <script src="./guias.js?v=2cdd476177" defer></script>
   </body>
 </html>

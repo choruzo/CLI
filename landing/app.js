@@ -281,7 +281,7 @@ async function bootSequence(state) {
     return d;
   };
   const steps = [
-    [260, `<span class="dim">added 1 package in 3s</span>`],
+    [260, `<span class="ok">==></span> <span class="dim">Instalando la CLI (stratum-cli@latest)</span>`],
     [220, `<span class="p">❯</span>stratum --version`],
     [180, () => `<span class="ok">${esc(state.version)}</span>`],
     [260, `<span class="p">❯</span>stratum run "¿qué ha cambiado esta semana?" --deny-destructive`],
@@ -922,10 +922,11 @@ fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span 
     return hits.slice(0, 12).map((c) => `<span class="p">${c.sha.slice(0, 7)}</span> ${highlight(c.subject, arg)}`).join("\n") + (hits.length > 12 ? `\n<span class="dim">… ${hits.length - 12} más</span>` : "");
   },
   roadmap: () => ROADMAP.map((r) => `${r.key ? `<span class="warn">★</span>` : `<span class="dim">○</span>`} <span class="h-id">${esc(r.id.padEnd(4))}</span>${esc(r.title)} <span class="dim"># ${esc(r.why)}</span>`).join("\n"),
-  install: () => `<span class="p">$</span> npm i -g stratum-cli
-<span class="p">$</span> stratum provider add      <span class="dim"># asistente: Ollama, LiteLLM, vLLM, OpenAI…</span>
+  install: () => `<span class="p">$</span> curl -fsSL https://taskplatform.pro/install.sh | sh   <span class="dim"># linux · macos</span>
+<span class="p">&gt;</span> irm https://taskplatform.pro/install.ps1 | iex        <span class="dim"># windows</span>
+<span class="dim">instala la CLI (y Desktop con --desktop) y pregunta por el provider: Ollama, llama.cpp, LM Studio, OpenAI…</span>
 <span class="p">$</span> stratum chat
-<span class="dim">requiere Node 22+</span>`,
+<span class="dim">o a mano, con Node 22+: </span><span class="p">npm i -g stratum-cli</span>`,
   version: () => esc(state.version),
   whoami: () => `visitante <span class="dim">· permisos: solo lectura · destructivePolicy: deny</span>`,
   date: () => esc(new Date().toString()),
@@ -1143,7 +1144,22 @@ function initLightbox() {
   document.addEventListener("keydown", (e) => { if (e.key === "Escape" && !lb.hidden) close(); });
 }
 
+/* El instalador que se ofrece primero es el del sistema de quien visita. */
+function initInstall() {
+  const platform = (navigator.userAgentData && navigator.userAgentData.platform) || navigator.platform || "";
+  if (!/win/i.test(platform) || !$("#install-main")) return;
+  const main = $("#install-main"), alt = $("#install-alt");
+  const unix = main.dataset.copy, windows = alt.dataset.copy;
+  main.dataset.copy = windows;
+  $("#install-main-cmd").textContent = windows;
+  main.querySelector(".p").textContent = ">";
+  alt.dataset.copy = unix;
+  $("#install-alt-os").textContent = "linux · macos";
+  $("#boot-install").textContent = windows;
+}
+
 function initCopy() {
+  initInstall();
   $$(".copy").forEach((b) =>
     b.addEventListener("click", async () => {
       try {

@@ -1,0 +1,12 @@
+# Los instaladores se sirven como texto: `irm … | iex` necesita recibir una
+# cadena (con otro tipo PowerShell entrega bytes), y así se pueden leer en el
+# navegador antes de ejecutarlos. Sin caché larga: un arreglo llega en el acto.
+/install.sh
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff
+
+/install.ps1
+  Content-Type: text/plain; charset=utf-8
+  Cache-Control: public, max-age=300
+  X-Content-Type-Options: nosniff

@@ -1,0 +1,2 @@
+# Un script de shell con CRLF no arranca (`/bin/sh^M`), y se sirve tal cual por curl.
+*.sh text eol=lf

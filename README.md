@@ -41,7 +41,21 @@ Stratum es un agente de línea de comandos construido sobre un loop **ReAct** (R
 
 ## ✦ Inicio rápido
 
-Requiere **Node.js 22+**.
+Con el instalador (CLI, y Stratum Desktop si se pide):
+
+```bash
+# Linux / macOS
+curl -fsSL https://taskplatform.pro/install.sh | sh
+```
+
+```powershell
+# Windows
+irm https://taskplatform.pro/install.ps1 | iex
+```
+
+Comprueba Node.js 22+ (y lo instala si falta, preguntando antes), instala la CLI desde npm y, en una instalación nueva, pregunta por el provider del modelo para dejar escrita la config global `~/.stratum/.stratumrc.json`, que comparten la CLI y Desktop. Más opciones en [Instalador](#-instalador). Los scripts son los de [`install/`](install/), servidos tal cual desde la landing.
+
+O a mano, con **Node.js 22+**:
 
 ```bash
 npm install -g stratum-cli
@@ -79,6 +93,46 @@ Para usar el binario directamente durante el desarrollo:
 cd stratum-cli && npm link
 stratum --help
 ```
+
+## ✦ Instalador
+
+`install/install.sh` (Linux, macOS) e `install/install.ps1` (Windows) hacen lo mismo y aceptan las mismas opciones; cada una tiene además su variable `STRATUM_INSTALL_*`.
+
+| `install.sh` | `install.ps1` | Variable | Qué hace |
+|---|---|---|---|
+| `--desktop` | `-Desktop` | `DESKTOP=1` | Instala también Stratum Desktop (Linux x64: `.deb` si hay `apt` y `sudo`, si no AppImage en `~/.local`; Windows x64: instalador en silencio). Verifica el SHA-256 publicado en la release |
+| `--no-cli` | `-NoCli` | `NO_CLI=1` | No instala la CLI |
+| `--channel beta` | `-Channel beta` | `CHANNEL` | Canal `beta` en vez de `stable`, para la CLI y para Desktop |
+| `--version`, `--desktop-version` | `-Version`, `-DesktopVersion` | `VERSION`, `DESKTOP_VERSION` | Una versión concreta |
+| `--base-url <url>` | `-BaseUrl` | `BASE_URL` | Da de alta el provider en la config global y lo deja activo |
+| `--provider <alias>` | `-Provider` | `PROVIDER` | Alias del provider (`default`) |
+| `--api-key-env <VAR>` | `-ApiKeyEnv` | `API_KEY_ENV` | La key se guarda como `${VAR}`; la variable tiene que existir |
+| `--api-key <key>` | `-ApiKey` | `API_KEY` | Key literal: queda en claro en el fichero |
+| `--model <id>` | `-Model` | `MODEL` | Modelo por defecto; sin él se elige al arrancar |
+| `--config <ruta\|url>` | `-Config` | `CONFIG` | Instala un `.stratumrc.json` ya preparado; guarda copia del anterior y, si la CLI lo rechaza, lo restaura |
+| `--no-config` | `-NoConfig` | `NO_CONFIG=1` | No pregunta ni toca la configuración |
+| `--yes` | `-Yes` | `YES=1` | No pregunta nada (CI, aprovisionamiento) |
+| `--dry-run` | `-DryRun` | — | Muestra lo que haría |
+
+```bash
+# CLI + Desktop, canal beta, con el provider ya configurado y sin preguntas
+curl -fsSL https://taskplatform.pro/install.sh | sh -s -- \
+  --desktop --channel beta --yes --base-url http://localhost:11434/v1 --provider ollama
+```
+
+```powershell
+# Lo mismo en Windows: irm | iex no admite argumentos, así que se invoca como bloque
+& ([scriptblock]::Create((irm https://taskplatform.pro/install.ps1))) `
+  -Desktop -Channel beta -Yes -BaseUrl http://localhost:11434/v1 -Provider ollama
+```
+
+Qué toca y qué no:
+
+- **Node.js**: si falta o es anterior a la 22, en Linux/macOS se descarga el binario oficial a `~/.stratum/node` (sin `sudo`, verificando su SHA-256) y se enlaza en `~/.local/bin`; en Windows se instala con `winget`, igual que PowerShell 7, que es el shell con el que Stratum ejecuta comandos.
+- **npm**: si el prefijo global no es escribible (Node del sistema en Linux) se instala en `~/.local` en vez de pedir `sudo`.
+- **Configuración**: el alta la hace la propia CLI (`stratum provider add`), siempre sobre la config global aunque se lance desde un proyecto. Sin opciones solo se pregunta en una instalación nueva: una config que ya existe no se modifica.
+
+Para actualizar basta con volver a lanzarlo.
 
 ## ✦ Configuración
 
