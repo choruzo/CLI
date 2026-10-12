@@ -6,7 +6,7 @@ import React from 'react';
 import { render } from 'ink';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
-import { discoverContextWindow } from '../startup-model.js';
+import { discoverContextWindow } from '../../host/startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { McpManager } from '../../tools/mcp/manager.js';

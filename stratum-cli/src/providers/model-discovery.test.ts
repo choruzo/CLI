@@ -6,7 +6,7 @@ import { ProviderRouter } from './router.js';
 import { clearDiscoveredModels, discoveredContextWindow, fetchModelInfos } from './utils.js';
 import { DEFAULT_CONTEXT_WINDOW, StratumConfigSchema } from '../config/schema.js';
 import { removeProviderEverywhere, setProviderModel } from '../config/writer.js';
-import { resolveStartupModel } from '../cli/startup-model.js';
+import { resolveStartupModel } from '../host/startup-model.js';
 import { buildProviderEntry, discoverModels, resolveApiKey } from '../cli/ui/wizard-logic.js';
 
 const BASE = 'https://api.example.test/v1';

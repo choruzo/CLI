@@ -4,7 +4,7 @@ import { Command } from 'commander';
 import chalk from 'chalk';
 import { loadConfig } from '../../config/loader.js';
 import { ProviderRouter } from '../../providers/router.js';
-import { resolveStartupModel } from '../startup-model.js';
+import { resolveStartupModel } from '../../host/startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
 import { registerBuiltinTools } from '../../tools/index.js';
 import { StratumAgent } from '../../agent/core.js';

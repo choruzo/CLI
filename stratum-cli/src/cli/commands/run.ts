@@ -13,15 +13,13 @@ import type {
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { makeCliQuestionAsker } from '../ask-questions.js';
 import { loadConfig } from '../../config/loader.js';
-import { ProviderRouter } from '../../providers/router.js';
-import { discoverContextWindow, resolveStartupModel } from '../startup-model.js';
+import { resolveSessionStartup } from '../../host/session-startup.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
 import { formatJobEndLine, shortJobCommand } from '../../jobs/types.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { SessionHost, type TurnOptions } from '../../host/session-host.js';
 import { processSessionEnv } from '../../runtime/session-env.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
-import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
 import { createSteerDriver, loadSteerScript } from '../steer-script.js';
 import {
@@ -126,35 +124,31 @@ export const runCommand = new Command('run')
       warnInheritedGitRouting();
       warnConfigDeprecations();
 
-      const startupModel = await resolveStartupModel(config, opts);
-      if (!startupModel.ok) {
-        process.stderr.write(`[fatal] ${startupModel.error}\n`);
+      // Modelo, provider, ventana de contexto y perfil de sesión: el arranque
+      // común a todo anfitrión (`host/session-startup.ts`), que no sabe de
+      // terminales. Aquí solo se decide cómo se cuenta cada fallo.
+      const startup = await resolveSessionStartup({
+        cwd: process.cwd(),
+        config,
+        provider: opts.provider,
+        model: opts.model,
+        ...(profileFlag.profile ? { sessionProfile: profileFlag.profile } : {}),
+      });
+      if (!startup.ok) {
+        if (startup.stage === 'profile') await flushLogging();
+        const prefix =
+          startup.stage === 'provider'
+            ? 'Provider error: '
+            : startup.stage === 'profile'
+              ? '--profile: '
+              : startup.stage === 'config'
+                ? 'Config error: '
+                : '';
+        process.stderr.write(`[fatal] ${prefix}${startup.error}
+`);
         process.exit(1);
       }
-
-      let router;
-      try {
-        router = new ProviderRouter(config, opts.provider);
-      } catch (err) {
-        process.stderr.write(`[fatal] Provider error: ${String(err)}\n`);
-        process.exit(1);
-      }
-      // La ventana se fija al arrancar el turno, y aquí solo hay uno: se espera
-      // (acotado) a lo que declare `/models` si la config no la fija.
-      if (router.contextWindowIsDiscoverable && !startupModel.fetched) {
-        await discoverContextWindow(router.getActiveConfig(), { timeoutMs: 3000 });
-      }
-
-      // Un perfil de sesión mal escrito es un error de invocación: se comprueba
-      // antes de montar nada (no hay servers MCP que cerrar todavía).
-      if (profileFlag.profile) {
-        const check = resolveSessionProfile(profileFlag.profile, config);
-        if (!check.ok) {
-          await flushLogging();
-          process.stderr.write(`[fatal] --profile: ${check.error}\n`);
-          process.exit(1);
-        }
-      }
+      const router = startup.router;
 
       // Política destructiva de la invocación (§12.5):
       // --allow-destructive → 'allow'; --deny-destructive → 'deny';
