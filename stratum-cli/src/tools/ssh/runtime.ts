@@ -3,43 +3,48 @@ import type { ToolContext, DestructiveDecision } from '../../agent/types.js';
 import { SSHConnectionPool, type ConfirmFn } from './pool.js';
 
 /**
- * Estado SSH vivo del proceso. Singleton por config, mismo patrón que
- * `getDecisionMemory` en `src/memory/decision-memory.ts`: las tools no reciben
- * el pool por parámetro, lo piden aquí. La auditoría de comandos vive desde el
- * Hito 16 en `tools/exec/runtime.ts`, común a todos los targets.
+ * Estado SSH vivo del proceso: un pool **por objeto de config**. Las tools no
+ * reciben el pool por parámetro, lo piden aquí con la config de su contexto. La
+ * auditoría de comandos vive desde el Hito 16 en `tools/exec/runtime.ts`, común
+ * a todos los targets.
+ *
+ * Una sesión es dueña de su config, así que también lo es de su pool: varias
+ * sesiones en un mismo proceso no comparten conexiones ni se las cierran entre
+ * sí (antes había un único pool, y pedirlo con otra config cerraba el anterior).
+ * Los subagentes usan la config del padre y, por tanto, sus conexiones.
  */
-let pool: SSHConnectionPool | null = null;
-let poolConfig: StratumConfig | null = null;
+const pools = new Map<StratumConfig, SSHConnectionPool>();
 
 export function getSshPool(config: StratumConfig): SSHConnectionPool {
-  if (pool && poolConfig === config) return pool;
-
-  // Sustituir el pool sin cerrar el anterior filtraría sus sockets, que
-  // mantienen vivo el event loop. En producción la config es un único objeto y
-  // esta rama no se toma más de una vez.
-  if (pool) void pool.closeAll();
-
-  pool = new SSHConnectionPool(config);
-  poolConfig = config;
+  let pool = pools.get(config);
+  if (!pool) {
+    pool = new SSHConnectionPool(config);
+    pools.set(config, pool);
+  }
   return pool;
 }
 
 /**
- * Cierra las conexiones vivas. Lo llama `closeExecRuntime()` en el teardown de
- * `chat` y `run` (§12.12): sin esto los sockets abiertos mantienen vivo el
- * event loop y el proceso no termina.
+ * Cierra las conexiones vivas: las de `config` (el cierre de una sesión) o,
+ * sin argumento, todas (el apagado del proceso, vía `closeExecRuntime()`). Sin
+ * esto los sockets abiertos mantienen vivo el event loop y el proceso no
+ * termina (§12.12).
  */
-export async function closeSshPool(): Promise<void> {
-  const current = pool;
-  pool = null;
-  poolConfig = null;
-  if (current) await current.closeAll();
+export async function closeSshPool(config?: StratumConfig): Promise<void> {
+  if (config) {
+    const pool = pools.get(config);
+    pools.delete(config);
+    if (pool) await pool.closeAll();
+    return;
+  }
+  const all = [...pools.values()];
+  pools.clear();
+  await Promise.allSettled(all.map((p) => p.closeAll()));
 }
 
-/** Solo para tests: descarta el singleton sin tocar la red. */
+/** Solo para tests: descarta los pools sin tocar la red. */
 export function resetSshRuntime(): void {
-  pool = null;
-  poolConfig = null;
+  pools.clear();
 }
 
 /**
