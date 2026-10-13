@@ -4,6 +4,8 @@ import { StratumClient } from '../../client/client.js';
 import { fileDiscovery, type DiscoveryResult } from '../../client/discovery.js';
 import { locateLiveDaemon as locateLive, spawnDaemon } from '../daemon-link.js';
 import { loadConfig } from '../../config/loader.js';
+import { loadApproverAuth } from '../../daemon/approver-key.js';
+import { defaultEndpointDir } from '../../client/discovery.js';
 import { DaemonAlreadyRunningError } from '../../daemon/endpoint.js';
 import { Stratumd } from '../../daemon/daemon.js';
 import { ProtocolError } from '../../ipc/codec.js';
@@ -64,11 +66,22 @@ const run = new Command('run')
       debug: opts.debug,
     });
 
+    // Quién puede aprobar: la clave de aprobador que la persona haya fijado
+    // (`stratum approvals set-key`). Se lee aquí, una vez; sin ella —o si el
+    // fichero no vale— no se resuelve nada en remoto.
+    const approver = loadApproverAuth(defaultEndpointDir(), () =>
+      process.stderr.write(
+        '[warn] The approver key file cannot be read: remote approvals are disabled. ' +
+          'Run `stratum approvals set-key` to create it again.\n',
+      ),
+    );
+
     let daemon: Stratumd;
     try {
       daemon = await Stratumd.start({
         version: cliVersion(),
         config,
+        approver,
         // Copia del entorno al arrancar: es el que verán las sesiones del daemon.
         env: { ...process.env },
       });

@@ -1,6 +1,7 @@
 import { useCallback, useRef } from 'react';
 import type { StratumAgent } from '../../agent/core.js';
 import type { AgentEvent, RunOptions } from '../../agent/types.js';
+import type { PendingInteractions } from '../../host/interactions.js';
 import type { AppAction } from './App.js';
 
 const STREAM_FRAME_MS = 40;
@@ -66,6 +67,12 @@ export function useAgentStream(
   getRunOptions?: () => Partial<RunOptions>,
   /** Se llama al lanzar cada turno, con la entrada tal como la escribió el usuario. */
   onTurn?: (turn: { input: string; mode: 'normal' | 'plan' }) => void,
+  /**
+   * Decisiones pendientes de la sesión, cuando está publicada en `stratumd`:
+   * las puertas del turno pasan por aquí, que es donde el prompt de la TUI
+   * compite con una respuesta de otro cliente y se resuelve una sola vez.
+   */
+  interactions?: PendingInteractions,
 ) {
   const abortRef = useRef<AbortController | null>(null);
 
@@ -89,6 +96,19 @@ export function useAgentStream(
         ...(extra?.runOptions ?? {}),
         signal: controller.signal,
       };
+      if (interactions) {
+        // Los prompts de este turno son los locales; lo que quede pendiente se
+        // cancela con el turno.
+        interactions.setLocal({
+          ...(runOptions.onConfirmDestructive ? { confirm: runOptions.onConfirmDestructive } : {}),
+          ...(runOptions.onAskQuestions ? { askQuestions: runOptions.onAskQuestions } : {}),
+          ...(runOptions.onApprovePlan ? { approvePlan: runOptions.onApprovePlan } : {}),
+        });
+        const gates = interactions.gatesFor({ signal: controller.signal });
+        runOptions.onConfirmDestructive = gates.confirm;
+        runOptions.onAskQuestions = gates.askQuestions;
+        runOptions.onApprovePlan = gates.approvePlan;
+      }
       onTurn?.({
         input: extra?.displayText ?? input,
         mode: runOptions.mode === 'plan' ? 'plan' : 'normal',
@@ -176,7 +196,7 @@ export function useAgentStream(
         abortRef.current = null;
       }
     },
-    [agent, dispatch, getRunOptions, onTurn],
+    [agent, dispatch, getRunOptions, onTurn, interactions],
   );
 
   const cancel = useCallback(() => {

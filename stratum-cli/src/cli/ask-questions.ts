@@ -1,6 +1,7 @@
 import { createInterface } from 'readline';
-import { askLine } from './readline-prompt.js';
+import { askLine, dismissOn } from './readline-prompt.js';
 import type { QuestionAnswer, QuestionItem } from '../agent/types.js';
+import type { GateContext } from '../host/interactions.js';
 
 /**
  * Gate de la tool `question` para los comandos no-Ink (`run`, `init`).
@@ -16,15 +17,22 @@ import type { QuestionAnswer, QuestionItem } from '../agent/types.js';
  * libre solo se ofrece si la pregunta no tiene opciones o declara `allowCustom`;
  * en el resto de los casos, un número fuera de rango se vuelve a pedir en lugar
  * de colarse como respuesta escrita.
+ *
+ * `ctx.signal`: la tanda dejó de estar pendiente (la contestó otro cliente a
+ * través de `stratumd`, o se canceló el turno). El prompt se retira; lo que
+ * devuelva entonces no lo usa nadie.
  */
-export function makeCliQuestionAsker():
-  | ((questions: QuestionItem[]) => Promise<QuestionAnswer[] | null>)
+export function makeCliQuestionAsker(
+  onDismiss?: () => void,
+):
+  | ((questions: QuestionItem[], ctx?: GateContext) => Promise<QuestionAnswer[] | null>)
   | undefined {
   if (!process.stdin.isTTY || !process.stderr.isTTY) return undefined;
 
-  return async (questions: QuestionItem[]): Promise<QuestionAnswer[] | null> => {
+  return async (questions: QuestionItem[], ctx?: GateContext): Promise<QuestionAnswer[] | null> => {
     process.stderr.write('\n?  El agente necesita que decidas algo:\n');
     const rl = createInterface({ input: process.stdin, output: process.stderr });
+    const release = dismissOn(rl, ctx?.signal, onDismiss);
     // Ctrl+C (o EOF) en mitad de la tanda: se abandona entera y el comando
     // cancela el turno (§12.12). `null` = el usuario no respondió.
     class Interrupted extends Error {}
@@ -82,6 +90,7 @@ export function makeCliQuestionAsker():
       if (err instanceof Interrupted) return null;
       throw err;
     } finally {
+      release();
       rl.close();
     }
   };

@@ -17,6 +17,7 @@ import type {
   RunOptions,
   TokenAccounting,
 } from '../../agent/types.js';
+import type { PendingInteractions } from '../../host/interactions.js';
 import type { ProviderConfig, ProviderConfigInput } from '../../config/schema.js';
 import { expandEnvVars } from '../../config/loader.js';
 import { getByDotPath, formatConfigValue } from '../../config/dot-path.js';
@@ -932,6 +933,12 @@ export interface RemoteSessionLink {
   /** `App` entrega aquí cómo se cancela el turno en curso. */
   bindCancel(cancel: () => void): void;
   expectRun(turn: { input: string; mode: 'normal' | 'plan' }): void;
+  /**
+   * Decisiones pendientes de la sesión: una confirmación, una tanda de
+   * preguntas o un plan abiertos aquí también se pueden resolver desde otro
+   * cliente, y entonces el prompt de la TUI se retira.
+   */
+  interactions?: PendingInteractions;
 }
 
 export function App({
@@ -1226,7 +1233,13 @@ export function App({
     return opts;
   }, [onConfirmDestructive, onAskQuestions, agent, sessionId, auditor]);
 
-  const { send, cancel } = useAgentStream(agent, dispatch, getRunOptions, remote?.expectRun);
+  const { send, cancel } = useAgentStream(
+    agent,
+    dispatch,
+    getRunOptions,
+    remote?.expectRun,
+    remote?.interactions,
+  );
   useEffect(() => {
     remote?.bindCancel(cancel);
   }, [remote, cancel]);
@@ -1322,6 +1335,44 @@ export function App({
     agent.clearPlanRef();
     resolve?.({ decision: 'reject' });
   }, [agent]);
+
+  // Otro cliente resolvió lo que estaba abierto aquí (a través de `stratumd`):
+  // el prompt se retira, el estado queda como si se hubiera contestado en esta
+  // terminal y se dice quién lo hizo. Lo que se teclee después ya no cuenta.
+  useEffect(() => {
+    const interactions = remote?.interactions;
+    if (!interactions) return;
+    return interactions.subscribe((change) => {
+      if (change.type !== 'resolved' || change.outcome.by?.kind !== 'remote') return;
+      const { outcome } = change;
+      const who = outcome.by?.client ?? 'otro cliente';
+      if (outcome.kind === 'approval') {
+        confirmResolverRef.current = null;
+        if (outcome.decision === 'allow-all') allowAllRef.current = true;
+        dispatch({ type: 'CONFIRM_RESOLVE' });
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `[confirmación ${outcome.decision === 'deny' ? 'denegada' : 'aprobada'} desde ${who}]`,
+        });
+      } else if (outcome.kind === 'question') {
+        questionsResolverRef.current = null;
+        dispatch({ type: 'QUESTIONS_RESOLVE' });
+        dispatch({ type: 'SYSTEM_MESSAGE', text: `[preguntas contestadas desde ${who}]` });
+      } else {
+        planResolverRef.current = null;
+        if (outcome.decision.decision === 'approve') {
+          dispatch({ type: 'APPROVE_PLAN', plan: outcome.decision.plan });
+        } else {
+          dispatch({ type: 'REJECT_PLAN' });
+          agent.clearPlanRef();
+        }
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `[plan ${outcome.decision.decision === 'approve' ? 'aprobado' : 'rechazado'} desde ${who}]`,
+        });
+      }
+    });
+  }, [remote, agent]);
 
   /**
    * Lanza el modo plan-and-execute (Fase 1 → 2 → 3) en un único turno del

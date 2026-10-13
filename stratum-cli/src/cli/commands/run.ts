@@ -1,6 +1,6 @@
 import { Command } from 'commander';
 import { createInterface } from 'readline';
-import { askLine } from '../readline-prompt.js';
+import { askLine, dismissOn } from '../readline-prompt.js';
 import chalk from 'chalk';
 import type {
   AgentEvent,
@@ -17,7 +17,7 @@ import { resolveSessionStartup } from '../../host/session-startup.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
 import { formatJobEndLine, shortJobCommand } from '../../jobs/types.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
-import { SessionHost, type TurnOptions } from '../../host/session-host.js';
+import { SessionHost, type GateContext, type TurnOptions } from '../../host/session-host.js';
 import { processSessionEnv } from '../../runtime/session-env.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { sessionProfileFlag } from '../session-flags.js';
@@ -238,7 +238,19 @@ export const runCommand = new Command('run')
       // la da ya compuesta con la del perfil activo.
       const policy = host.destructivePolicy;
 
-      const confirmDestructive = async (req: ConfirmRequest): Promise<DestructiveDecision> => {
+      // Una solicitud abierta en esta terminal también se puede resolver desde
+      // otro cliente (a través de `stratumd`). Si alguien llega antes, el prompt
+      // se retira y se dice por qué; si lo que pasó es un Ctrl+C, ya se dijo.
+      const resolvedElsewhere = (): void => {
+        if (!controller.signal.aborted) {
+          process.stderr.write('\n[resolved from another client]\n');
+        }
+      };
+
+      const confirmDestructive = async (
+        req: ConfirmRequest,
+        ctx?: GateContext,
+      ): Promise<DestructiveDecision> => {
         const env = req.environment
           ? ` en el entorno ${req.environment.name} (${req.environment.tier})`
           : '';
@@ -246,6 +258,7 @@ export const runCommand = new Command('run')
           `\n⚠  El agente quiere ejecutar una operación${req.forced ? '' : ' destructiva'}${env}:\n   ${req.description}\n\n`,
         );
         const rl = createInterface({ input: process.stdin, output: process.stderr });
+        const release = dismissOn(rl, ctx?.signal, resolvedElsewhere);
         try {
           // Hito 17 — confirmación con nombre: hay que teclear el alias exacto.
           if (req.confirmPhrase) {
@@ -263,6 +276,7 @@ export const runCommand = new Command('run')
             ? 'approve'
             : 'deny';
         } finally {
+          release();
           rl.close();
         }
       };
@@ -286,7 +300,7 @@ export const runCommand = new Command('run')
         });
       };
 
-      const onApprovePlan = async (plan: Plan): Promise<PlanDecision> => {
+      const onApprovePlan = async (plan: Plan, ctx?: GateContext): Promise<PlanDecision> => {
         printPlan(plan);
         if (opts.approvePlan) return { decision: 'approve', plan };
         if (!process.stdout.isTTY) {
@@ -295,6 +309,7 @@ export const runCommand = new Command('run')
           return { decision: 'reject' };
         }
         const rl = createInterface({ input: process.stdin, output: process.stderr });
+        const release = dismissOn(rl, ctx?.signal, resolvedElsewhere);
         try {
           const answer = await askLine(rl, '[plan] ¿Ejecutar? (S/N) ');
           if (answer === null) return { decision: 'reject' };
@@ -303,6 +318,7 @@ export const runCommand = new Command('run')
             ? { decision: 'approve', plan }
             : { decision: 'reject' };
         } finally {
+          release();
           rl.close();
         }
       };
@@ -371,7 +387,7 @@ export const runCommand = new Command('run')
               : undefined,
           // Tanda única de preguntas (Hito 2.5, F7). Sin TTY no hay callback:
           // el loop se lo dice al agente y este continúa con supuestos.
-          askQuestions: makeCliQuestionAsker(),
+          askQuestions: makeCliQuestionAsker(resolvedElsewhere),
           // Hito 17: el gate de aprobación se pasa siempre — un entorno con
           // `requirePlan` puede escalar el turno a modo plan.
           approvePlan: onApprovePlan,

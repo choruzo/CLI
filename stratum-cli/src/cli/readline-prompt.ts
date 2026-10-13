@@ -33,3 +33,33 @@ export function askLine(rl: Interface, prompt: string): Promise<string | null> {
     rl.question(prompt, (answer) => finish(answer));
   });
 }
+
+/**
+ * Retira un prompt de readline cuando su solicitud deja de estar pendiente por
+ * otra vía: la resolvió otro cliente a través de `stratumd`, caducó o se
+ * canceló el turno. Cerrar el readline hace que `askLine` resuelva `null`; lo
+ * que devuelva el prompt después ya no cuenta para nadie.
+ *
+ * `onDismiss` se llama solo si fue la señal la que lo cerró. Devuelve la
+ * función que suelta el enganche (para el `finally` del prompt).
+ */
+export function dismissOn(
+  rl: Interface,
+  signal: AbortSignal | undefined,
+  onDismiss?: () => void,
+): () => void {
+  if (!signal) return () => undefined;
+  const dismiss = (): void => {
+    try {
+      onDismiss?.();
+    } finally {
+      rl.close();
+    }
+  };
+  if (signal.aborted) {
+    dismiss();
+    return () => undefined;
+  }
+  signal.addEventListener('abort', dismiss, { once: true });
+  return () => signal.removeEventListener('abort', dismiss);
+}
