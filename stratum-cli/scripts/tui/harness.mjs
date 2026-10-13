@@ -41,6 +41,7 @@ export const KEYS = {
  * Lanza `stratum <args>` en un terminal de `cols`×`rows`.
  * - `config`: objeto que se escribe como `.stratumrc.json` global (o `null`).
  * - `files`: `{ 'ruta/relativa': 'contenido' }` a crear en el proyecto temporal.
+ * - `homeFiles`: lo mismo, dentro del HOME temporal (antes de lanzar el proceso).
  * - `env`: variables extra para el proceso.
  */
 export function launch({
@@ -49,6 +50,7 @@ export function launch({
   cols = 110,
   rows = 40,
   files = {},
+  homeFiles = {},
   env = {},
 } = {}) {
   const root = mkdtempSync(join(tmpdir(), 'stratum-tui-'));
@@ -62,6 +64,10 @@ export function launch({
   for (const [rel, content] of Object.entries(files)) {
     mkdirSync(dirname(join(project, rel)), { recursive: true });
     writeFileSync(join(project, rel), content);
+  }
+  for (const [rel, content] of Object.entries(homeFiles)) {
+    mkdirSync(dirname(join(home, rel)), { recursive: true });
+    writeFileSync(join(home, rel), content);
   }
 
   const childEnv = {

@@ -65,6 +65,7 @@
     "format": "prettier --write src/",
     "tui:smoke": "node scripts/tui/smoke.mjs",
     "tui:peer": "node scripts/tui/daemon-peer.mjs",
+    "tui:approvals": "node scripts/tui/daemon-approvals.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {
