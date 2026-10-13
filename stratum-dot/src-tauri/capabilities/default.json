@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "default",
+  "description": "Permisos de la ventana de Stratum Dot: los mínimos. El webview no tiene sistema de ficheros, ni shell, ni diálogos, ni red (CSP), ni permisos de ventana: solo puede invocar los comandos `dot_*` de src-tauri/src/commands.rs y escuchar `dot://event`. No puede leer endpoint.json, ni conoce el token del canal, ni puede enviar un método cualquiera del Stratum Protocol: conectar, autenticar y suscribirse lo hace Rust (crates/dot-link).",
+  "windows": ["main"],
+  "permissions": ["core:default"]
+}

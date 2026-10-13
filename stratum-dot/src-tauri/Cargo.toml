@@ -1,0 +1,26 @@
+[package]
+name = "stratum-dot"
+description = "Stratum Dot — cockpit nativo de stratumd: cliente del Stratum Protocol"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[lib]
+# El sufijo `_lib` evita el choque de nombres entre el binario y la librería en Windows.
+name = "stratum_dot_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+dot-link = { path = "../crates/dot-link" }
+tauri = { version = "2", features = ["tray-icon"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+# Una sola instancia por usuario: abrir Dot otra vez enfoca la que ya hay.
+tauri-plugin-single-instance = "2"
+# Posición y tamaño de la ventana entre arranques (preferencia de interfaz).
+tauri-plugin-window-state = "2"

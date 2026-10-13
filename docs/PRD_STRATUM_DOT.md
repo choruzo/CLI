@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M5 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado); siguiente: M6.
+> anotados en el hito que los encuentra. **M0–M6 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 con su alcance acotado: ver su estado); siguiente: M7.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -1229,6 +1229,55 @@ Desviaciones:
 - `stratum-dot/`: Tauri v2, bandeja, relay con lista blanca, arranque del daemon
   (desligado: no muere con Dot), reconexión, dot compacto, ventana con Activity e History.
 - *Hecho cuando*: AC-1 en la interfaz; AC-7; el instalador pesa < 15 MB.
+
+**Estado: completado (2026-10-13), con el alcance acotado.** Referencia: `docs/dot.md`. `Dot CI` verde en Windows y Linux.
+
+- `stratum-dot/`: Tauri v2. Tres piezas: `crates/dot-link` (cliente nativo del protocolo, en
+  Rust y **sin Tauri**: descubrimiento, handshake, suscripciones, reconexión y un relé de
+  cuatro órdenes), `src-tauri` (ventana, bandeja, instancia única, comandos `dot_*`) y `src`
+  (React: `bridge/`, `protocol/`, `stores/`, `components/`, `screens/`).
+- **Transporte: cliente nativo, sin sidecar** (el «relay Rust» de §9.1). Rust solo lee el sobre
+  de los mensajes y los campos de orden; los DTOs los valida el webview con
+  `protocol/schemas.ts` y los reduce `applySessionEvent`. No hay otro reductor, ni un `struct`
+  de sesión o de run en Rust. Motivos y lo que se descartó: `docs/dot.md` §1.
+- Una suscripción `session` por sesión viva (la `overview` solo dice cuáles hay): la lista y
+  el detalle salen de fotos + el reductor del contrato.
+- Arranque del daemon con `stratum daemon start` (desligado: sobrevive a Dot), una vez por
+  intento explícito y nunca al reconectar. Dot no tiene `core.shutdown`.
+- Conexión como máquina de estados (`starting` · `daemon-starting` · `connecting` ·
+  `connected` · `reconnecting` · `incompatible` · `error`); toda suscripción se abre pidiendo
+  foto; un hueco pide otra; una orden sin respuesta tiene resultado desconocido y no se reenvía.
+- Rol `operator` y nada más. Controles: Pause, Resume, Cancel y Steer, por el protocolo y sin
+  actualización optimista.
+- AC-1 en la interfaz y AC-7 (lado de Dot) comprobados con procesos reales:
+  `scripts/smoke-real.mjs` (sin ventana, con `dot-probe`) y `e2e/dot.e2e.mjs` (la app en su
+  ventana, con tauri-driver). El instalador NSIS pesa **1,7 MB** (binario de 6,6 MB).
+- **Q4** (bandeja): respondida para Windows; en Linux, ninguna función depende de la bandeja
+  (`docs/dot.md` §6) y falta probarla en un escritorio real.
+
+Desviaciones:
+
+- **Sin *History*.** El daemon no lista sesiones guardadas (`docs/protocol.md` §11): no se
+  enseña una pestaña que no tiene con qué llenarse.
+- **Sin dot compacto flotante** (§8.2: siempre encima, sin marco, con «Ask Stratum…»). Su
+  entrada crea una sesión y abre un chat, que es M7. En su lugar la ventana única funciona
+  compacta (lista **o** detalle por debajo de 720 px) y se oculta con `Esc`.
+- **Bandeja mínima** frente a §8.1: *Open* · *Sessions: N* · *Quit Dot*. Sin *Aprobaciones*
+  (M8), sin *Pausar todo* y sin *Detener Stratum*: en M6 Dot no puede apagar el daemon, a
+  propósito. El icono no cambia con el estado; lo dice su texto.
+- **Aprobaciones solo a la vista.** Lo pendiente se enseña con dónde resolverlo; Dot no pide
+  `approver` (M8, y con ello el camino de Q2: `docs/dot.md` §7).
+- **El webview importa `protocol/schemas.ts`**, en contra de la nota de §17: la validación
+  tiene que estar en un sitio, y repetirla en Rust era la duplicación que se quería evitar.
+- **Estructura** distinta de la esbozada en §17: `crates/dot-link/` en vez de
+  `src-tauri/src/{transport,daemon}.rs`, para que el cliente del protocolo se pueda probar y
+  usar sin Tauri; y `bridge/` · `protocol/` · `stores/` · `screens/` en el frontend.
+- **Sin atajo global ni notificaciones** (M8).
+- **E2E de la ventana solo en local** (Windows). En CI (`dot-ci.yml`) corren `dot-link`, el
+  frontend, el smoke contra un `stratumd` real y la compilación del shell, en Linux y Windows.
+- **Un arreglo fuera de Dot**, destapado por su CI: `stratumd` no arrancaba en Linux con un
+  HOME limpio (escuchaba en el unix socket antes de crear `~/.stratum/daemon/`). Corregido en
+  `daemon/daemon.ts`; la suite del daemon no había corrido en Linux hasta entonces.
 
 ### M7 — Dot: chat y run detail
 - Chat sobre sesiones del daemon (reutiliza componentes de Desktop); selector de perfil y

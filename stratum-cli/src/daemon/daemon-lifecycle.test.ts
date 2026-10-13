@@ -51,6 +51,14 @@ async function until(check: () => boolean, timeoutMs = 5_000): Promise<void> {
 }
 
 describe('stratumd — instancia única y endpoint', () => {
+  it('arranca en una carpeta que aún no existe (en POSIX el socket vive dentro de ella)', async () => {
+    const base = sharedBase();
+    const dir = join(base, 'home-limpio', '.stratum', 'daemon');
+    expect(existsSync(dir)).toBe(false);
+    const t = await start({ base, dir });
+    expect(readEndpoint(dir).ipcPath).toBe(t.daemon.endpoint.ipcPath);
+  });
+
   it('el primero arranca y publica; el segundo no puede apropiarse del endpoint', async () => {
     const base = sharedBase();
     const first = await start({ base });

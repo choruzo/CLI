@@ -3,7 +3,7 @@
 Contrato entre el harness Stratum y sus clientes (CLI, Dot y los que vengan).
 Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda este documento.
 
-> **Estado (M5).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
+> **Estado (M5; M6 añade un cliente, no cambia el contrato).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
 > (`stratum daemon run`), que aloja sesiones y las sirve a varios clientes (M2); **anfitriones
 > pares**: `stratum run` y `stratum chat` publican en él su sesión sin dejar de alojarla (M3,
 > §14); y **centro de aprobaciones**: aprobaciones, preguntas y planes se ven y se resuelven
@@ -24,6 +24,7 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 | Reglas de qué respuestas valen | `stratum-cli/src/protocol/resolve.ts` | nada |
 | Decisiones pendientes de una sesión | `stratum-cli/src/host/interactions.ts` | el runtime |
 | Centro de aprobaciones | `stratum-cli/src/daemon/approval-center.ts` | `protocol/`, `ipc/` |
+| Cliente nativo de Dot | `stratum-dot/crates/dot-link/` (Rust) | este documento; ningún código de `stratum-cli` |
 
 ## 1. Invariantes
 
@@ -327,8 +328,13 @@ Ante un `UnknownOutcomeError` de un método mutante (`approvals.resolve`, `runs.
 
 ## 11. Qué queda sin hacer
 
-Definido en el contrato y sin implementación tras M5: `trace.subscribe`, reanudar una sesión guardada
-(`sessions.open { resume }`) y listar las guardadas, y Dot. Detalle en §13.6.
+Definido en el contrato y sin implementación tras M6: `trace.subscribe`, reanudar una sesión guardada
+(`sessions.open { resume }`) y listar las guardadas. Detalle en §13.6.
+
+Stratum Dot (M6) es el primer cliente que no es Node: su lado nativo (`stratum-dot/crates/dot-link`,
+Rust) habla este protocolo —framing, descubrimiento, handshake, las reglas de §9 y §10— y su
+webview valida y reduce con `protocol/schemas.ts` y `protocol/reduce.ts`. No añade ni cambia nada
+del contrato. Ver `docs/dot.md`.
 
 ## 12. Tests de conformidad
 
