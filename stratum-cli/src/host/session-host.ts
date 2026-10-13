@@ -1,6 +1,7 @@
 import type { StratumConfig } from '../config/schema.js';
 import type { AgentEvent, AgentMode, DestructivePolicy, Plan, RunOptions } from '../agent/types.js';
 import { StratumAgent, type StratumAgentOptions } from '../agent/core.js';
+import type { PauseRequestStatus, PauseState, ResumeStatus } from '../agent/pause.js';
 import { strictestPolicy } from '../agent/profiles.js';
 import type { ProviderRouter } from '../providers/router.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -254,6 +255,26 @@ export class SessionHost {
    */
   cancel(): void {
     this.turnAbort?.abort();
+  }
+
+  /**
+   * Pausa cooperativa del turno en curso (`agent/pause.ts`): desde su siguiente
+   * punto seguro el runtime no empieza nada nuevo —ni petición al modelo, ni
+   * tool, ni subagente—. Lo que ya está en marcha termina y los jobs siguen.
+   * No cancela: `cancel()` funciona igual con el turno en pausa.
+   */
+  pause(): PauseRequestStatus {
+    return this.agent.pause.requestPause();
+  }
+
+  /** Retira la pausa: el mismo turno continúa desde donde esperaba. */
+  resume(): ResumeStatus {
+    return this.agent.pause.resume();
+  }
+
+  /** `paused` solo cuando el runtime ya no avanza; `pause-requested` mientras llega. */
+  get pauseState(): PauseState {
+    return this.agent.pause.state;
   }
 
   /** Mensaje del usuario con el turno en curso (Runtime Inbox). Nunca cancela. */

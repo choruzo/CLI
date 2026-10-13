@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M4 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado); siguiente: M5.
+> anotados en el hito que los encuentra. **M0–M5 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado); siguiente: M6.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -508,14 +508,17 @@ publicar es *best-effort* con cola acotada que descarta lo más antiguo.
 
 ### 10.5 Pausa
 
-No existe hoy. Se define como **pausa cooperativa** en el punto seguro (1) del
-`ReactLoop` — antes de componer cada petición al modelo, donde ya se drena la inbox —:
+**Pausa cooperativa** (implementada en M5; referencia en `docs/protocol.md` §16). No congela
+nada: impide que el runtime **empiece** trabajo nuevo a partir de un punto seguro.
 
 - Lo que está en vuelo (una llamada al modelo, una tool, un subagente) termina.
-- No empieza ninguna petición nueva hasta `resume`.
+- No empieza nada nuevo hasta `resume`: ni una petición al modelo, ni una tool que el modelo
+  ya había propuesto, ni un subagente. El plan original solo tenía el primer punto; los otros
+  dos se añadieron para que nada arranque después de que alguien pulse pausa.
 - Los jobs en segundo plano siguen corriendo; sus avisos se acumulan en la inbox.
 - `cancel` durante la pausa funciona. Una pausa no caduca sola.
 - Un subagente hereda la pausa de su padre.
+- El steering se acepta en pausa y no reanuda; resolver una aprobación tampoco.
 
 ## 11. Event Model
 
@@ -1086,7 +1089,7 @@ Descubrimientos de implementación:
 **Estado: implementado.** Referencia: `docs/protocol.md` §14. `PeerHostBridge`
 (`host/peer-host-bridge.ts`) publica con el mismo `SessionPublisher` que una sesión del daemon;
 `PeerSessions` (`daemon/peer-sessions.ts`) guarda la proyección; `stratum ps [--json] [--watch]`.
-Sin pausa (M5) ni resolución remota de aprobaciones (M4): en una sesión de la CLI siguen en su
+Sin pausa (llegó en M5) ni resolución remota de aprobaciones (M4): en una sesión de la CLI siguen en su
 terminal.
 
 Descubrimientos de implementación:
@@ -1169,7 +1172,7 @@ Pase de endurecimiento (tras la revisión de M4):
 
 - **v1 no está congelada**: ningún paquete publicado contiene el protocolo. El cambio de
   `ProtocolResolver` no sube la versión; la compatibilidad estricta empieza con el primer tag
-  `v*` de `stratum-cli` que incluya `stratumd` (`docs/protocol.md` §16).
+  `v*` de `stratum-cli` que incluya `stratumd` (`docs/protocol.md` §17).
 - **Sin bloqueo global de la clave de aprobador**: un intento por conexión, comprobaciones de
   una en una y el fallo contestado con retraso solo a quien falló. Los fallos de otro ya no
   dejan a nadie sin aprobar.
@@ -1196,6 +1199,31 @@ texto (`stratum ps`, `stratum approvals`, `stratum attach`).
 ### M5 — Pausa y reanudación
 - Puerta de pausa en el punto seguro (1) del `ReactLoop`; herencia a subagentes; cap `control` en la traza.
 - *Hecho cuando*: AC-6; `spec-validator` sobre §12 de la definición sin hallazgos.
+
+**Estado: implementado.** Referencia en `docs/protocol.md` §16.
+
+- `agent/pause.ts` — `PauseController`: la única máquina de estados de la pausa
+  (`idle` · `running` · `pause-requested` · `paused`), una por `StratumAgent`
+  (`agent.pause`). La consultan el loop del agente, los de sus subagentes y el dispatcher.
+  `paused` solo cuando todos los loops que podrían empezar algo esperan en un punto seguro.
+- Puntos seguros: antes de cada petición al modelo, antes de ejecutar las tools de una
+  respuesta, entre la confirmación y la ejecución (dispatcher) y antes de lanzar un subagente.
+- `SessionHost.pause()` / `resume()` / `pauseState`: lo que usan `HostedSession` (daemon) y
+  `PeerHostControl` (CLI). El daemon y el puente reenvían; no guardan estado de pausa.
+- `SessionPublisher` publica `run.updated` (`paused` ↔ `running`) y `session.state: 'paused'`
+  cuando el runtime lo alcanza. `pause-requested` no se expone.
+- `runs.pause` / `runs.resume` y `host.pause` / `host.resume` devuelven `{ status }`.
+- AC-6 comprobado en `agent/pause-flow.test.ts` (mismas peticiones, eventos e historial que sin
+  pausa) y con procesos reales en `cli/commands/peer.integration.test.ts`.
+
+Desviaciones:
+
+- El cap de la traza es `pause`, no `control`: lo que se registra es la pausa
+  (`requested`/`paused`/`resumed`); las órdenes remotas de cancelar y redirigir siguen sin
+  anotar quién las dio, así que `control` prometería más de lo que hay.
+- No hay comando de CLI para pausar (`stratum pause`): el control se ejerce por el protocolo,
+  como `runs.cancel` y `runs.steer`, que tampoco lo tienen. Los clientes de texto de la
+  puerta de control (`stratum attach`) siguen pendientes.
 
 ### M6 — Dot: shell y Activity
 - `stratum-dot/`: Tauri v2, bandeja, relay con lista blanca, arranque del daemon

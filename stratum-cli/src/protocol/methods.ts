@@ -120,6 +120,22 @@ export type SteerStatus = 'accepted' | 'not-accepting' | 'empty' | 'too-large';
  */
 export type CancelStatus = 'cancelled' | 'not-running';
 
+/**
+ * Cómo quedó una petición de pausa. La pausa es cooperativa: `requested` quiere
+ * decir que el run dejará de empezar trabajo en su siguiente punto seguro, no
+ * que ya esté parado — eso lo dice `run.status: 'paused'`, que publica su
+ * anfitrión. Pedirla otra vez no es un error (`already-requested`,
+ * `already-paused`). `not-running`: no hay run que pausar.
+ */
+export type PauseStatus = 'requested' | 'already-requested' | 'already-paused' | 'not-running';
+
+/**
+ * Cómo quedó una reanudación. `resumed`: estaba en pausa (o con la pausa
+ * pedida, que se retira) y continúa, el mismo run. `not-paused`: hay un run,
+ * pero no estaba en pausa. `not-running`: no hay run.
+ */
+export type ResumeStatus = 'resumed' | 'not-paused' | 'not-running';
+
 // --- suscripciones ----------------------------------------------------------
 
 export type SubscriptionScope =
@@ -214,8 +230,8 @@ export interface ProtocolMethods {
   'runs.get': Spec<{ runId: string }, { run: ProtocolRun }>;
   'runs.start': Spec<RunsStartParams, { run: ProtocolRun }>;
   'runs.steer': Spec<Mutation & { sessionId: string; text: string }, { status: SteerStatus }>;
-  'runs.pause': Spec<Mutation & { sessionId: string }, { run: ProtocolRun }>;
-  'runs.resume': Spec<Mutation & { sessionId: string }, { run: ProtocolRun }>;
+  'runs.pause': Spec<Mutation & { sessionId: string; runId?: string }, { status: PauseStatus }>;
+  'runs.resume': Spec<Mutation & { sessionId: string; runId?: string }, { status: ResumeStatus }>;
   /** Con `runId`, solo cancela si ese sigue siendo el run en curso (`STALE_STATE` si no). */
   'runs.cancel': Spec<Mutation & { sessionId: string; runId?: string }, { status: CancelStatus }>;
 
@@ -261,8 +277,8 @@ export interface ProtocolMethods {
 
   // Servidor → anfitrión par.
   'host.cancel': Spec<{ sessionId: string; runId?: string }, { status: CancelStatus }>;
-  'host.pause': Spec<{ sessionId: string }, Empty>;
-  'host.resume': Spec<{ sessionId: string }, Empty>;
+  'host.pause': Spec<{ sessionId: string; runId?: string }, { status: PauseStatus }>;
+  'host.resume': Spec<{ sessionId: string; runId?: string }, { status: ResumeStatus }>;
   'host.steer': Spec<{ sessionId: string; text: string }, { status: SteerStatus }>;
   'host.resolveApproval': Spec<HostResolveApprovalParams, Empty>;
   'host.answerQuestions': Spec<

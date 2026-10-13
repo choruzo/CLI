@@ -66,6 +66,9 @@ vi.mock('../../providers/router.js', () => ({
 
 vi.mock('../../agent/core.js', () => ({
   StratumAgent: class StratumAgent {
+    // La pausa cooperativa: `run` se suscribe para avisar por stderr.
+    pause = { subscribe: () => () => undefined };
+
     constructor(_config: unknown, _router: unknown, _registry: unknown) {}
 
     run(input: string, opts?: unknown) {

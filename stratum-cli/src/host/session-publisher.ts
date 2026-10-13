@@ -233,6 +233,16 @@ export class SessionPublisher {
         }),
       ),
     );
+    // La pausa es del runtime: aquí solo se cuenta. `paused` se publica cuando
+    // el run ya no avanza (no cuando se pide), y deja de estarlo al reanudar.
+    // El final del turno (`idle`) no se traduce: lo cierra `turn_ended`.
+    this.detach.push(
+      agent.pause.subscribe((state) =>
+        this.guarded(() => {
+          if (state !== 'idle') this.syncWaiting();
+        }),
+      ),
+    );
     if (this.host.interactions) {
       this.detach.push(
         this.host.interactions.subscribe((change) =>
@@ -332,9 +342,11 @@ export class SessionPublisher {
         ? 'closed'
         : !this.runActive
           ? 'idle'
-          : this.pendingCount() > 0
-            ? 'waiting'
-            : 'running',
+          : this.paused()
+            ? 'paused'
+            : this.pendingCount() > 0
+              ? 'waiting'
+              : 'running',
       agent: agent.getActiveProfile()?.name ?? 'general',
       provider: agent.providerName,
       model: agent.model,
@@ -508,12 +520,22 @@ export class SessionPublisher {
     };
   }
 
-  /** El run espera a una persona, o deja de esperar: `run.updated` y el resumen. */
+  /** ¿Está el run en pausa de verdad? Lo dice el runtime, no quien la pidió. */
+  private paused(): boolean {
+    return this.host.agent.pause.state === 'paused';
+  }
+
+  /**
+   * El run espera a una persona, está en pausa, o deja de estarlo: `run.updated`
+   * y el resumen. En pausa no hay nada del agente avanzando, así que gana a
+   * cualquier otra espera.
+   */
   private syncWaiting(): void {
     const run = this.run;
     if (!run || !this.runActive) return;
-    const status: ProtocolRun['status'] =
-      this.approvals.size + this.plans.size > 0
+    const status: ProtocolRun['status'] = this.paused()
+      ? 'paused'
+      : this.approvals.size + this.plans.size > 0
         ? 'waiting_approval'
         : this.questions.size > 0
           ? 'waiting_input'

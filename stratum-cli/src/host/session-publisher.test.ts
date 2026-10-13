@@ -3,6 +3,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import type { AgentObservation } from '../agent/core.js';
+import { PauseController } from '../agent/pause.js';
 import type { AgentEvent } from '../agent/types.js';
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import {
@@ -11,7 +12,11 @@ import {
   _setDecisionMemory,
 } from '../memory/decision-memory.js';
 import type { EmbedFn } from '../memory/embeddings.js';
-import type { ProtocolEvent, ProtocolStateEvent } from '../protocol/index.js';
+import {
+  applySessionEvent,
+  type ProtocolEvent,
+  type ProtocolStateEvent,
+} from '../protocol/index.js';
 import { eventSchema, sessionSnapshotSchema } from '../protocol/schemas.js';
 import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { ProviderRouter } from '../providers/router.js';
@@ -214,6 +219,7 @@ function fakeHost(sessionId: string, config: StratumConfig) {
     },
     jobs: undefined,
     inbox: { subscribe: () => () => undefined },
+    pause: new PauseController(),
     getContextUsage: () => ({ used: 10, max: 100, pct: 10, estimated: true }),
     getTokenUsage: () => ({ status: 'unavailable' as const }),
     getActiveContext: () => ({ target: 'local', environment: null }),
@@ -230,10 +236,94 @@ function fakeHost(sessionId: string, config: StratumConfig) {
     env: { cwd: join(base, sessionId) },
     agent,
   } as unknown as SessionHost;
-  return { host, emit: (o: AgentObservation) => observer(o) };
+  return { host, pause: agent.pause, emit: (o: AgentObservation) => observer(o) };
 }
 
 const event = (e: AgentEvent): AgentObservation => ({ type: 'event', event: e });
+
+describe('SessionPublisher — pausa', () => {
+  it('publica paused cuando el runtime la alcanza, no cuando se pide; y deja de estarlo al reanudar', async () => {
+    const { host, pause, emit } = fakeHost('s-pause', testConfig('pause'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+    });
+    publisher.start();
+    pause.begin();
+    emit({ type: 'turn_started', kind: 'run', input: 'trabaja' });
+    emit(event({ type: 'text_delta', delta: 'a medias' }));
+    const before = publisher.snapshot();
+
+    // Pedida: nada que contar todavía.
+    pause.requestPause();
+    expect(publisher.seq).toBe(before.seq);
+    expect(publisher.snapshot().run?.status).toBe('running');
+
+    // Alcanzada: el run y la sesión lo dicen, y la foto conserva lo que había.
+    void pause.waitAtSafePoint();
+    const held = publisher.snapshot();
+    expect(held.run?.status).toBe('paused');
+    expect(held.session).toMatchObject({ state: 'paused', currentRunId: held.run!.id });
+    expect(held.partial.text).toBe('a medias');
+    expect(publisher.activeRun?.status).toBe('paused');
+
+    pause.resume();
+    expect(publisher.snapshot().run?.status).toBe('running');
+    expect(publisher.snapshot().session.state).toBe('running');
+
+    // Otra vez, y el turno se cancela en pausa: se cierra como cancelado, sin
+    // pasar por `running`.
+    pause.requestPause();
+    void pause.waitAtSafePoint();
+    pause.end();
+    emit({ type: 'turn_ended', kind: 'run', stopReason: 'cancelled' });
+    await tick();
+
+    const after = sink.states().filter((e) => e.seq > before.seq);
+    expect(after.map((e) => e.type)).toEqual([
+      'run.updated',
+      'session.updated',
+      'run.updated',
+      'session.updated',
+      'run.updated',
+      'session.updated',
+      'message.completed',
+      'run.cancelled',
+      'session.updated',
+    ]);
+    const statuses = after.flatMap((e) =>
+      e.type === 'run.updated' || e.type === 'run.cancelled' ? [e.data.run.status] : [],
+    );
+    expect(statuses).toEqual(['paused', 'running', 'paused', 'cancelled']);
+    // Sin huecos: el `seq` sigue siendo el de la sesión.
+    expect(after.map((e) => e.seq)).toEqual(after.map((_, i) => before.seq + 1 + i));
+
+    // Quien sigue la sesión por eventos llega a la misma foto que da el anfitrión.
+    let reduced = before;
+    for (const e of after) reduced = applySessionEvent(reduced, e);
+    expect(reduced).toEqual(publisher.snapshot());
+  });
+
+  it('con una solicitud abierta, la pausa pedida no tapa la espera', () => {
+    const { host, pause, emit } = fakeHost('s-pause-wait', testConfig('pause-wait'));
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink: recorder(),
+    });
+    publisher.start();
+    pause.begin();
+    // Un loop que aún puede empezar algo: está esperando a una persona.
+    const unit = pause.enter();
+    emit({ type: 'turn_started', kind: 'run', input: 'trabaja' });
+    pause.requestPause();
+    expect(pause.state).toBe('pause-requested');
+    expect(publisher.snapshot().session.state).toBe('running');
+    unit.leave();
+  });
+});
 
 describe('SessionPublisher — cola local acotada', () => {
   it('agrupa los fragmentos seguidos y cierra cada bloque con el texto entero', async () => {

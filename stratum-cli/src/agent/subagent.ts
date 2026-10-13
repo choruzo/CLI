@@ -32,6 +32,7 @@ import { getLogger } from '../logging/index.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
 import type { JobManager } from '../jobs/manager.js';
 import type { RuntimeInbox } from './inbox.js';
+import { pausableTimeout, type PauseController } from './pause.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
 
@@ -82,6 +83,8 @@ export interface RunSubagentOptions {
   jobs?: JobManager;
   /** Runtime Inbox de la sesión: el hijo solo drena los eventos de su scope. */
   inbox?: RuntimeInbox;
+  /** Pausa cooperativa del run del padre: el hijo espera en los mismos puntos seguros. */
+  pause?: PauseController;
   /** Hito 17 — el padre trabaja bajo un plan aprobado (satisface `requirePlan`). */
   planApproved?: boolean;
   /** Scope de traza de este hijo (`TraceScope.child`): sus pasos cuelgan del subagente. */
@@ -141,6 +144,22 @@ function statusErrorText(status: SubagentStatus): string | undefined {
  * SubagentResult{status:'failed'} para que el padre los reciba como tool result.
  */
 export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentResult> {
+  // Pared de tiempo del presupuesto. No corre mientras el run está en pausa:
+  // una pausa no caduca sola y no puede agotarle el tiempo a un hijo que espera.
+  const budget = resolveSubagentBudget(opts.profile, opts.config.agents);
+  const clock =
+    budget.timeoutMs && budget.timeoutMs > 0 ? pausableTimeout(budget.timeoutMs, opts.pause) : null;
+  try {
+    return await runSubagentWithin(opts, clock?.signal ?? null);
+  } finally {
+    clock?.dispose();
+  }
+}
+
+async function runSubagentWithin(
+  opts: RunSubagentOptions,
+  timeLimit: AbortSignal | null,
+): Promise<SubagentResult> {
   const { task, profile, registry, config, parentSignal } = opts;
   const env = opts.env ?? processSessionEnv();
   const start = Date.now();
@@ -156,8 +175,6 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
   // Signal encadenado: cancelación del padre + pared de tiempo del presupuesto.
   const budget = resolveSubagentBudget(profile, config.agents);
   let signal = parentSignal;
-  const timeLimit =
-    budget.timeoutMs && budget.timeoutMs > 0 ? AbortSignal.timeout(budget.timeoutMs) : null;
   if (timeLimit) signal = AbortSignal.any([parentSignal, timeLimit]);
 
   // Router PROPIO por hijo (§12.16): barato, sin conexiones persistentes. Un
@@ -240,6 +257,7 @@ export async function runSubagent(opts: RunSubagentOptions): Promise<SubagentRes
     jobs: opts.jobs,
     jobScope: task.id,
     inbox: opts.inbox,
+    pause: opts.pause,
     maxIterations: budget.maxIterations,
     maxTokens: budget.maxTokens,
     trace: opts.trace,

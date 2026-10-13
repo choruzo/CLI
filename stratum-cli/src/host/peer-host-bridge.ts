@@ -4,6 +4,7 @@
  *
  *   sesión → SessionPublisher → [este puente] → host.publish → stratumd
  *                                             ← host.cancel / host.steer
+ *                                             ← host.pause / host.resume
  *
  * El puente es transporte y nada más:
  *
@@ -30,9 +31,11 @@ import { getLogger } from '../logging/index.js';
 import {
   FEATURE_REMOTE_APPROVALS,
   isStateEvent,
+  type PauseStatus,
   type ProtocolEvent,
   type ProtocolResolver,
   type ProtocolRun,
+  type ResumeStatus,
   type StateEventData,
   type SteerStatus,
 } from '../protocol/index.js';
@@ -51,6 +54,13 @@ export interface PeerHostControl {
   cancel(): void;
   /** Mensaje del usuario con el turno en curso (Runtime Inbox). */
   steer(text: string): { status: SteerStatus };
+  /**
+   * Pausa cooperativa del turno en curso, y su retirada. La decide el runtime
+   * (`StratumAgent.pause`): el puente no guarda ni publica ningún estado de
+   * pausa por su cuenta — el que haya lo cuenta el `SessionPublisher`.
+   */
+  pause(): PauseStatus;
+  resume(): ResumeStatus;
 }
 
 export interface PeerHostBridgeOptions {
@@ -357,17 +367,33 @@ export class PeerHostBridge implements PublisherSink {
     if (sessionId !== this.sessionId) throw new ProtocolError('NOT_FOUND', 'Session not found.');
   }
 
+  /** El run sobre el que llega una orden: con `runId`, tiene que seguir siendo el vigente. */
+  private current(params: { sessionId: string; runId?: string }): ProtocolRun | null {
+    this.own(params.sessionId);
+    const active = this.publisher.activeRun;
+    if (params.runId !== undefined && active?.id !== params.runId) {
+      throw new ProtocolError('STALE_STATE', 'That run is no longer the current one.');
+    }
+    return active;
+  }
+
   private handlers(): RequestHandlers {
     return {
       'host.cancel': (params) => {
-        this.own(params.sessionId);
-        const active = this.publisher.activeRun;
-        if (params.runId !== undefined && active?.id !== params.runId) {
-          throw new ProtocolError('STALE_STATE', 'That run is no longer the current one.');
-        }
-        if (!active) return { status: 'not-running' };
+        if (!this.current(params)) return { status: 'not-running' };
         this.opts.control.cancel();
         return { status: 'cancelled' };
+      },
+      // Pausa cooperativa: se entrega al runtime y se contesta lo que él diga.
+      // Que el run esté en pausa no se afirma aquí: lo publica la sesión cuando
+      // alcanza su punto seguro.
+      'host.pause': (params) => {
+        if (!this.current(params)) return { status: 'not-running' };
+        return { status: this.opts.control.pause() };
+      },
+      'host.resume': (params) => {
+        if (!this.current(params)) return { status: 'not-running' };
+        return { status: this.opts.control.resume() };
       },
       'host.steer': (params) => {
         this.own(params.sessionId);

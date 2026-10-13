@@ -43,6 +43,7 @@ import {
   formatUndeliveredUserMessages,
   type SteeringEnqueueResult,
 } from './inbox.js';
+import { PauseController } from './pause.js';
 import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
@@ -194,6 +195,12 @@ export class StratumAgent {
    * suscribe aquí para pintar lo pendiente.
    */
   readonly inbox = new RuntimeInbox();
+  /**
+   * Pausa cooperativa del run en curso. De sesión, como la inbox, y **la única**
+   * autoridad de pausa: la consultan el loop del agente, los de sus subagentes
+   * y el dispatcher. Quien aloja la sesión pide y retira la pausa aquí.
+   */
+  readonly pause = new PauseController();
   /** Observadores de la actividad del agente (`observe`). */
   private readonly observers = new Set<AgentObserver>();
   /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
@@ -382,7 +389,11 @@ export class StratumAgent {
     kind: AgentTurnKind,
     input: string,
     turn: AsyncGenerator<AgentEvent>,
+    trace?: TraceScope,
   ): AsyncGenerator<AgentEvent> {
+    // Desde aquí hay un run que pausar; la pausa es suya y termina con él.
+    this.pause.begin();
+    const untrace = this.tracePause(trace);
     this.notify({ type: 'turn_started', kind, input });
     let stopReason: string | null = null;
     try {
@@ -392,12 +403,31 @@ export class StratumAgent {
         yield event;
       }
     } finally {
+      // Antes de dar el turno por cerrado: ninguna espera de pausa lo sobrevive.
+      untrace();
+      this.pause.end();
       this.notify({ type: 'turn_ended', kind, stopReason });
     }
   }
 
+  /** La pausa del turno, en su traza: cuándo se pidió, se alcanzó y se retiró. */
+  private tracePause(trace: TraceScope | undefined): () => void {
+    if (!trace) return () => undefined;
+    let requestedAt = 0;
+    return this.pause.subscribe((state, previous) => {
+      if (state === 'pause-requested') {
+        requestedAt = Date.now();
+        trace.runtime({ event: 'pause', phase: 'requested' });
+      } else if (state === 'paused') {
+        trace.runtime({ event: 'pause', phase: 'paused', waitMs: Date.now() - requestedAt });
+      } else if (state === 'running' && previous !== 'idle') {
+        trace.runtime({ event: 'pause', phase: 'resumed', waitMs: Date.now() - requestedAt });
+      }
+    });
+  }
+
   run(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
-    return this.observed('run', input, this.runTurn(input, opts));
+    return this.observed('run', input, this.runTurn(input, opts), opts?.trace);
   }
 
   private async *runTurn(input: string, opts?: RunOptions): AsyncGenerator<AgentEvent> {
@@ -961,7 +991,12 @@ export class StratumAgent {
   /** Las opciones de la sesión (read-only) sobre las del turno. Nunca relajan. */
   private withSessionOptions(opts?: RunOptions): RunOptions {
     const base: RunOptions = this._readOnly ? { ...opts, readOnly: true } : (opts ?? {});
-    return { ...base, inbox: this.inbox, ...(this.jobs ? { jobs: this.jobs } : {}) };
+    return {
+      ...base,
+      inbox: this.inbox,
+      pause: this.pause,
+      ...(this.jobs ? { jobs: this.jobs } : {}),
+    };
   }
 
   /**
@@ -1085,6 +1120,7 @@ export class StratumAgent {
       'delegate',
       `@${profileName} ${task.trim()}`,
       this.delegateTurn(profileName, task, opts),
+      opts?.trace,
     );
   }
 

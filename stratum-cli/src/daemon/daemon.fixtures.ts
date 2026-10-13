@@ -191,7 +191,12 @@ export async function startPeer(
   });
   const bridge = new PeerHostBridge({
     session: host,
-    control: { cancel: () => host.cancel(), steer: (text) => host.steer(text) },
+    control: {
+      cancel: () => host.cancel(),
+      steer: (text) => host.steer(text),
+      pause: () => host.pause(),
+      resume: () => host.resume(),
+    },
     name: 'test-peer',
     version: '0.0.0-test',
     discovery: fileDiscovery({ dir: where.dir }),

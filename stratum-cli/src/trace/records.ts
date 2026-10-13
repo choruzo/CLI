@@ -52,6 +52,12 @@ export const TRACE_CAP_JOBS = 'jobs';
 export const TRACE_CAP_INBOX = 'inbox';
 
 /**
+ * `meta.caps`: el escritor registra la pausa cooperativa del run
+ * (`TracePauseEvent`). Sin él, que no haya pausas en la traza no dice nada.
+ */
+export const TRACE_CAP_PAUSE = 'pause';
+
+/**
  * Quién hizo una llamada al LLM (`data.origin` de un paso `model`):
  *  - `agent` — el loop del agente principal;
  *  - `subagent` — el loop de un subagente (su paso lleva además `parent`);
@@ -139,7 +145,17 @@ export type TraceRuntimeEvent =
       tool?: string;
       callId?: string;
     }
+  | TracePauseEvent
   | TraceJobEvent;
+
+/**
+ * Pausa cooperativa del run (`agent/pause.ts`): `requested` cuando se pide,
+ * `paused` cuando el runtime alcanza el punto seguro y deja de avanzar, y
+ * `resumed` al reanudar. `waitMs` es el tiempo desde que se pidió.
+ */
+export type TracePauseEvent =
+  | { event: 'pause'; phase: 'requested' }
+  | { event: 'pause'; phase: 'paused' | 'resumed'; waitMs: number };
 
 /**
  * Runtime Inbox: `enqueue` cuando llega un evento (un mensaje del usuario con

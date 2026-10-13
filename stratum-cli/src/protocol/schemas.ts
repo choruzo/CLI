@@ -534,6 +534,12 @@ const cwd = z.string().min(1).max(LIMITS.pathChars);
 const limit = z.number().int().positive().max(LIMITS.listLimit);
 const steerStatus = z.enum(['accepted', 'not-accepting', 'empty', 'too-large']);
 const cancelResult = z.object({ status: z.enum(['cancelled', 'not-running']) });
+const pauseResult = z.object({
+  status: z.enum(['requested', 'already-requested', 'already-paused', 'not-running']),
+});
+const resumeResult = z.object({ status: z.enum(['resumed', 'not-paused', 'not-running']) });
+const runMutation = z.object({ sessionId: id, runId: id.optional(), operationId }).strict();
+const runRef = z.object({ sessionId: id, runId: id.optional() }).strict();
 const sessionResult = z.object({ session: sessionSchema });
 const runResult = z.object({ run: runSchema });
 
@@ -605,9 +611,9 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'runs.steer': z
     .object({ sessionId: id, text: z.string().max(LIMITS.inputChars), operationId })
     .strict(),
-  'runs.pause': sessionMutation,
-  'runs.resume': sessionMutation,
-  'runs.cancel': z.object({ sessionId: id, runId: id.optional(), operationId }).strict(),
+  'runs.pause': runMutation,
+  'runs.resume': runMutation,
+  'runs.cancel': runMutation,
 
   'approvals.list': z.object({ sessionId: id.optional() }).strict(),
   'approvals.resolve': z
@@ -666,9 +672,9 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
     }),
   'host.unregister': sessionMutation,
 
-  'host.cancel': z.object({ sessionId: id, runId: id.optional() }).strict(),
-  'host.pause': sessionRef,
-  'host.resume': sessionRef,
+  'host.cancel': runRef,
+  'host.pause': runRef,
+  'host.resume': runRef,
   'host.steer': z.object({ sessionId: id, text: z.string().max(LIMITS.inputChars) }).strict(),
   'host.resolveApproval': z
     .object({
@@ -719,8 +725,8 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'runs.get': runResult,
   'runs.start': runResult,
   'runs.steer': z.object({ status: steerStatus }),
-  'runs.pause': runResult,
-  'runs.resume': runResult,
+  'runs.pause': pauseResult,
+  'runs.resume': resumeResult,
   'runs.cancel': cancelResult,
 
   'approvals.list': z.object({
@@ -748,8 +754,8 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'host.unregister': emptyResult,
 
   'host.cancel': cancelResult,
-  'host.pause': emptyResult,
-  'host.resume': emptyResult,
+  'host.pause': pauseResult,
+  'host.resume': resumeResult,
   'host.steer': z.object({ status: steerStatus }),
   'host.resolveApproval': emptyResult,
   'host.answerQuestions': emptyResult,

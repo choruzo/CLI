@@ -253,9 +253,9 @@ describe('stratumd — varias sesiones', () => {
     await operator.request('runs.start', { sessionId: session.id, input: 'no acaba' });
     const busy = operator.request('sessions.setModel', { sessionId: session.id, model: 'x' });
     expect(await code(busy)).toBe('BUSY');
-    expect(await code(operator.request('runs.pause', { sessionId: session.id }))).toBe(
-      'UNAVAILABLE',
-    );
+    expect(await operator.request('runs.pause', { sessionId: session.id })).toEqual({
+      status: 'requested',
+    });
   });
 });
 

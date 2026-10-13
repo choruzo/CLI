@@ -230,7 +230,19 @@ export const runCommand = new Command('run')
             controller.abort();
           },
           steer: (text) => agent.enqueueUserMessage(text),
+          // Pausa cooperativa: la decide el runtime de esta sesión.
+          pause: () => host.pause(),
+          resume: () => host.resume(),
         },
+      });
+      // Una pausa pedida desde otro cliente no puede parecer un cuelgue: se dice
+      // cuándo el turno deja de avanzar y cuándo sigue.
+      agent.pause.subscribe((state, previous) => {
+        if (state === 'paused') {
+          process.stderr.write('\n[paused from another client · Ctrl+C cancels]\n');
+        } else if (state === 'running' && previous === 'paused') {
+          process.stderr.write('[resumed]\n');
+        }
       });
       await bridge?.start();
 

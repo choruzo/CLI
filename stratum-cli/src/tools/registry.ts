@@ -340,6 +340,14 @@ export class ToolDispatcher {
       if (verdict !== null) denied.set(call.id, redactResult(verdict, ctx));
     }
 
+    // Pausa cooperativa — punto seguro del dispatcher: entre decidir y ejecutar.
+    // Si se pidió pausa mientras una persona contestaba, su respuesta no la
+    // levanta: lo aprobado espera aquí y se ejecuta al reanudar. Una tool que
+    // ya empezó no pasa por aquí: termina.
+    if (ctx.pause?.pauseRequested && !ctx.signal.aborted && denied.size < calls.length) {
+      await ctx.pause.waitAtSafePoint(ctx.signal);
+    }
+
     // §12.12: una llamada que aún no empezó no se lanza con el turno ya
     // cancelado. Antes se ejecutaba con la señal abortada y el `race` la daba
     // por cancelada, pero una tool que no mira la señal (`write_file`) llegaba

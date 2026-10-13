@@ -5,6 +5,7 @@ import type { FileStateTracker } from '../tools/fs/file-state.js';
 import type { TraceScope } from '../trace/recorder.js';
 import type { JobManager } from '../jobs/manager.js';
 import type { RuntimeInbox } from './inbox.js';
+import type { PauseController, SafePointGate } from './pause.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -224,6 +225,12 @@ export interface ToolContext {
   jobs?: JobManager;
   /** Scope de quien llama dentro de la sesión: `main` o el id del subagente. */
   jobScope?: string;
+  /**
+   * Pausa cooperativa del run (`agent/pause.ts`). El dispatcher la consulta en
+   * su punto seguro: entre la fase de confirmación y la ejecución. Una tool no
+   * la usa: lo que ya empezó termina.
+   */
+  pause?: SafePointGate;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */
@@ -378,6 +385,14 @@ export interface RunOptions {
    * los subagentes. Ausente → sin steering, y los jobs se avisan como antes.
    */
   inbox?: RuntimeInbox;
+  /**
+   * Pausa cooperativa del run (`agent/pause.ts`). El loop espera en sus puntos
+   * seguros —antes de cada petición al modelo, antes de ejecutar tools y antes
+   * de lanzar un subagente— mientras haya una pausa pedida. Lo aporta
+   * `StratumAgent` y lo heredan los subagentes: una sola autoridad por run.
+   * Ausente → el loop no se pausa.
+   */
+  pause?: PauseController;
 }
 
 /** Registro que el loop padre pasa a `onSubagentPersist` (Hito 8B). */

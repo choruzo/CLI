@@ -2868,3 +2868,45 @@ El steering que un turno cancelado, con error o agotado no llegó a entregar sig
 #### Fuera de alcance
 
 Prioridades o clasificación de mensajes (todo mensaje es steering), interrupción de streams o de tools, despertador automático del modelo, persistencia de la cola, steering dirigido a un subagente, varios usuarios e inbox remota. En Stratum Desktop el canal no lleva todavía la trama de steering.
+
+### 12.21 — Pausa cooperativa del run
+
+Un run se puede **pausar** y **reanudar** (Stratum Dot, M5; protocolo en `docs/protocol.md` §16). Pausar no cancela ni congela nada: a partir de un punto seguro, el runtime no **empieza** trabajo nuevo del agente. Lo que ya estaba en marcha —una llamada al modelo, una tool, un job— termina.
+
+#### Controlador
+
+`PauseController` (`agent/pause.ts`, sin imports), uno por `StratumAgent` (`agent.pause`) y **el único**: lo consultan el loop del agente, los de sus subagentes y el dispatcher.
+
+| Estado | Significado |
+|---|---|
+| `idle` | No hay turno. `requestPause()` y `resume()` contestan `not-running` |
+| `running` | Hay turno (`begin()` al abrirlo) |
+| `pause-requested` | Pausa pedida; todavía hay trabajo en curso |
+| `paused` | Todos los loops que podrían empezar algo esperan en un punto seguro |
+
+Invariantes:
+
+- **Pedir no es alcanzar.** `paused` se alcanza, no se asigna: cada loop se registra (`enter()`), el que espera a sus subagentes se aparta (`park()`), y el estado pasa a `paused` cuando el número de esperas iguala al de loops que cuentan.
+- **La pausa es del turno.** `end()` (en el `finally` de `StratumAgent.observed`) vuelve a `idle` y suelta toda espera. El turno siguiente empieza sin pausa.
+- **Cancelar siempre gana.** `waitAtSafePoint(signal)` resuelve al reanudar, al abortarse la señal o al terminar el turno; nunca rechaza. El controlador no aborta nada: `pause ≠ cancel`.
+- **Idempotente.** `requestPause()`: `requested` · `already-requested` · `already-paused` · `not-running`. `resume()`: `resumed` (también sobre una pausa solo pedida, que se retira) · `not-paused` · `not-running`.
+
+#### Puntos seguros
+
+1. **Antes de cada petición al modelo** (`ReactLoop`, al principio de la iteración, antes de la compresión de §12.4, que es otra llamada). Lo que llegue a la inbox durante la espera se entrega al continuar, en esa misma iteración.
+2. **Antes del dispatch** (`ReactLoop`, tras guardar el `assistant` y los errores de parseo). Va **antes** del punto seguro de steering de §12.20: con un mensaje del usuario llegado en pausa, el lote se descarta al reanudar y el modelo decide de nuevo.
+3. **Entre confirmar y ejecutar** (`ToolDispatcher.dispatch`, `ToolContext.pause`): una aprobación resuelta con la pausa pedida no levanta la pausa; lo aprobado se ejecuta al reanudar, una vez.
+4. **Antes de lanzar un subagente** (`executeDelegations`, tras adquirir el semáforo y antes de `subagent_started`).
+
+Cancelado en el punto 2, el `assistant` queda con `tool_calls` sin respuesta y las cierra `closeDanglingToolCalls` (§12.12). Si la respuesta en curso no trae tools ni hay steering pendiente, el turno termina con `done(stop)`: no quedaba nada por empezar.
+
+#### Lo que no cambia
+
+- Ningún `AgentEvent` nuevo: la pausa se observa con `PauseController.subscribe` (lo hace el `SessionPublisher`).
+- El historial: un turno pausado y reanudado deja las mismas peticiones, eventos y mensajes que sin pausa.
+- Guardas, confirmaciones y políticas de entorno. Los jobs en segundo plano siguen corriendo.
+- El presupuesto de tiempo de un subagente (`pausableTimeout`) no corre en `paused`; sí con la pausa solo pedida.
+
+#### Traza
+
+`TraceRuntimeEvent` `pause` (`meta.caps: ['pause']`): `requested`, `paused` y `resumed`, los dos últimos con `waitMs` desde que se pidió.

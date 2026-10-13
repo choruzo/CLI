@@ -43,6 +43,7 @@ import {
 } from '../tools/question.js';
 import { TODO_TOOL } from '../tools/todo.js';
 import { untilAborted } from './concurrency.js';
+import type { PauseUnit } from './pause.js';
 import { CANCELLED_BY_USER, appendRuntimeNotice } from './cancel.js';
 import { MAIN_JOB_SCOPE } from '../jobs/types.js';
 import { formatJobNotificationLine, formatJobNotifications } from '../tools/jobs.js';
@@ -781,8 +782,23 @@ export class ReactLoop {
       );
   }
 
+  /**
+   * Un turno del loop. Mientras corre, el loop consta en el controlador de
+   * pausa del run (si lo hay): `paused` solo es cierto cuando todos los loops
+   * que podrían empezar algo esperan en un punto seguro.
+   */
   async *run(opts?: RunOptions): AsyncGenerator<AgentEvent> {
+    const unit = opts?.pause?.enter();
+    try {
+      yield* this.runLoop(opts, unit);
+    } finally {
+      unit?.leave();
+    }
+  }
+
+  private async *runLoop(opts?: RunOptions, pauseUnit?: PauseUnit): AsyncGenerator<AgentEvent> {
     const signal = opts?.signal ?? new AbortController().signal;
+    const pause = opts?.pause;
     const fmt = this.config.agent.toolErrorFormat;
     const compressionMode = opts?.compressionMode ?? 'normal';
     this.contextManager.setCompressionMode(compressionMode);
@@ -857,6 +873,20 @@ export class ReactLoop {
         loopLog.info('cancelled', { iter });
         yield { type: 'done', stopReason: 'cancelled' };
         return;
+      }
+      // Pausa cooperativa — punto seguro (1): antes de empezar una petición al
+      // modelo (y antes de la compresión, que es otra). Con una pausa pedida no
+      // se inicia nada: el loop espera aquí hasta `resume`. Lo que llegue
+      // entretanto —steering, finales de job— se queda en la inbox y se entrega
+      // al continuar, en esta misma iteración. Cancelar suelta la espera.
+      if (pause?.pauseRequested) {
+        loopLog.info('paused before model request', { iter });
+        await pause.waitAtSafePoint(signal);
+        if (signal.aborted) {
+          loopLog.info('cancelled while paused', { iter });
+          yield { type: 'done', stopReason: 'cancelled' };
+          return;
+        }
       }
       // Presupuesto de tokens (Hito 8B, best-effort): solo aplica si el backend
       // devolvió usage en iteraciones previas. Se comprueba entre iteraciones —
@@ -1295,6 +1325,25 @@ export class ReactLoop {
       }
 
       // -----------------------------------------------------------------------
+      // Pausa cooperativa — punto seguro (2): la respuesta del modelo ya llegó,
+      // pero ninguna de las tools que propone ha empezado. Si se pidió pausa
+      // mientras el modelo generaba, no se ejecuta nada hasta `resume`. Va
+      // ANTES de la comprobación de steering de abajo, para que «pausar →
+      // redirigir → reanudar» invalide este lote igual que cualquier otro
+      // mensaje llegado a tiempo. Cancelado aquí, las llamadas quedan sin
+      // respuesta y las cierra quien conduce el turno (`closeDanglingToolCalls`).
+      // -----------------------------------------------------------------------
+      if (pause?.pauseRequested) {
+        loopLog.info('paused before tool dispatch', { iter, calls: readyCalls.length });
+        await pause.waitAtSafePoint(signal);
+        if (signal.aborted) {
+          loopLog.info('cancelled while paused', { iter });
+          yield { type: 'done', stopReason: 'cancelled' };
+          return;
+        }
+      }
+
+      // -----------------------------------------------------------------------
       // Punto seguro antes del dispatch. Estas tool calls se generaron sin
       // conocer lo que el usuario escribió mientras el modelo respondía: puede
       // que el mensaje las invalide («no toques ese fichero»). Regla única y
@@ -1586,6 +1635,7 @@ export class ReactLoop {
           trace: opts?.trace,
           jobs: opts?.jobs,
           jobScope,
+          pause,
         };
 
         const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);
@@ -1663,7 +1713,14 @@ export class ReactLoop {
         // Hito 17: un hijo delegado durante la Fase 3 trabaja bajo el plan aprobado.
         const delegationOpts: RunOptions | undefined =
           mode === 'execute' ? { ...opts, planApproved: true } : opts;
-        yield* this.runDelegations(delegateCalls, delegationOpts, signal, fmt);
+        // Mientras espera a sus hijos este loop no puede empezar nada propio:
+        // para la pausa, los que cuentan son ellos.
+        const unpark = pauseUnit?.park();
+        try {
+          yield* this.runDelegations(delegateCalls, delegationOpts, signal, fmt);
+        } finally {
+          unpark?.();
+        }
       }
 
       // §12.12 — cancelado mientras corrían las tools o los subagentes: no se

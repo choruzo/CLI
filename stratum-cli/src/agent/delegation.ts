@@ -181,6 +181,28 @@ export async function* executeDelegations(
           });
           return;
         }
+        // Pausa cooperativa — punto seguro (3): antes de lanzar un subagente.
+        // Con el run en pausa no nace trabajo nuevo: el hijo que tenía el turno
+        // espera aquí, sin anunciarse, hasta `resume`.
+        if (opts?.pause?.pauseRequested) {
+          const unit = opts.pause.enter();
+          try {
+            await opts.pause.waitAtSafePoint(childSignal);
+          } finally {
+            unit.leave();
+          }
+          if (childSignal.aborted) {
+            results.set(job.subId, {
+              id: job.subId,
+              status: 'cancelled',
+              summary: '',
+              filesChanged: [],
+              usage: { iterations: 0, durationMs: 0 },
+              error: 'Subagent was cancelled.',
+            });
+            return;
+          }
+        }
         // Emitir started + persistir `running` al adquirir el slot (no antes):
         // el árbol muestra así qué subagentes están en cola vs. en ejecución.
         push({
@@ -218,6 +240,7 @@ export async function* executeDelegations(
             planApproved: opts?.planApproved,
             jobs: opts?.jobs,
             inbox: opts?.inbox,
+            pause: opts?.pause,
             makeRouter: opts?.makeSubagentRouter
               ? () => opts.makeSubagentRouter!(job.profile)
               : undefined,

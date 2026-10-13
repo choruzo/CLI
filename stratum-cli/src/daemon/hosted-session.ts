@@ -17,10 +17,12 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { ProviderRouter } from '../providers/router.js';
 import type {
   CancelStatus,
+  PauseStatus,
   ProtocolJob,
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionSnapshot,
+  ResumeStatus,
   StateEventData,
   SteerStatus,
 } from '../protocol/index.js';
@@ -170,13 +172,35 @@ export class HostedSession {
    * @throws ProtocolError `STALE_STATE` si `runId` ya no es el run en curso.
    */
   cancel(runId?: string): CancelStatus {
+    if (!this.current(runId)) return 'not-running';
+    this.host.cancel();
+    return 'cancelled';
+  }
+
+  /** El run en curso; con `runId`, tiene que seguir siendo ese. */
+  private current(runId: string | undefined): ProtocolRun | null {
     const active = this.publisher.activeRun;
     if (runId !== undefined && active?.id !== runId) {
       throw new ProtocolError('STALE_STATE', 'That run is no longer the current one.');
     }
-    if (!active) return 'not-running';
-    this.host.cancel();
-    return 'cancelled';
+    return active;
+  }
+
+  /**
+   * Pausa cooperativa del turno en curso. No espera a que se alcance: el run
+   * pasa a `paused` —y la sesión lo publica— en su siguiente punto seguro.
+   *
+   * @throws ProtocolError `STALE_STATE` si `runId` ya no es el run en curso.
+   */
+  pause(runId?: string): PauseStatus {
+    if (!this.current(runId)) return 'not-running';
+    return this.host.pause();
+  }
+
+  /** Retira la pausa: el mismo run continúa. */
+  resume(runId?: string): ResumeStatus {
+    if (!this.current(runId)) return 'not-running';
+    return this.host.resume();
   }
 
   steer(text: string): SteerStatus {

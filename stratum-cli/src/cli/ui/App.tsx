@@ -1338,6 +1338,21 @@ export function App({
     resolve?.({ decision: 'reject' });
   }, [agent]);
 
+  // Pausa cooperativa pedida desde otro cliente: el turno deja de avanzar en
+  // su siguiente punto seguro. Sin decirlo, parecería un cuelgue.
+  useEffect(() => {
+    return agent.pause.subscribe((state, previous) => {
+      if (state === 'paused') {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: '[en pausa desde otro cliente · Ctrl+C cancela el turno]',
+        });
+      } else if (state === 'running' && previous === 'paused') {
+        dispatch({ type: 'SYSTEM_MESSAGE', text: '[reanudado]' });
+      }
+    });
+  }, [agent]);
+
   // Otro cliente resolvió lo que estaba abierto aquí (a través de `stratumd`):
   // el prompt se retira, el estado queda como si se hubiera contestado en esta
   // terminal y se dice quién lo hizo. Lo que se teclee después ya no cuenta.

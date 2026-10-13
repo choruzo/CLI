@@ -20,7 +20,7 @@
  * paquete publicado la contiene (el último, `stratum-cli` 0.8.0, es anterior al
  * protocolo) y no hay clientes fuera de este repositorio. Mientras sea así, su
  * forma se puede corregir sin subir el número, y cada cambio se anota en
- * `docs/protocol.md` §16. La compatibilidad estricta empieza con **la primera
+ * `docs/protocol.md` §17. La compatibilidad estricta empieza con **la primera
  * versión publicada de `stratum-cli` que incluya `stratumd`** (su tag `v*`): a
  * partir de ese tag, lo que aquí se llama v1 es lo que esa versión publicó.
  */

@@ -3,12 +3,13 @@
 Contrato entre el harness Stratum y sus clientes (CLI, Dot y los que vengan).
 Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda este documento.
 
-> **Estado (M4).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
+> **Estado (M5).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
 > (`stratum daemon run`), que aloja sesiones y las sirve a varios clientes (M2); **anfitriones
 > pares**: `stratum run` y `stratum chat` publican en él su sesión sin dejar de alojarla (M3,
 > §14); y **centro de aprobaciones**: aprobaciones, preguntas y planes se ven y se resuelven
-> desde otro cliente, en carrera con el prompt local (M4, §15). **No hay todavía** pausa (M5).
-> Qué atiende hoy el servidor y con qué garantías: §13, §14 y §15.
+> desde otro cliente, en carrera con el prompt local (M4, §15); y **pausa cooperativa**: un run
+> se pausa y se reanuda desde otro cliente, en su runtime real (M5, §16).
+> Qué atiende hoy el servidor y con qué garantías: §13 a §16.
 
 | Pieza | Dónde | Depende de |
 |---|---|---|
@@ -118,7 +119,7 @@ método contesta `UNAUTHORIZED`.
 - `features` del servidor: `remote-approvals` si acredita aprobadores (solo entonces algo
   pendiente se puede resolver desde otro cliente).
 - Dentro de la v1 solo se añade: campos opcionales, métodos y eventos nuevos, anunciados en
-  `features` — **a partir de su congelación** (§16): hasta entonces la v1 se puede corregir.
+  `features` — **a partir de su congelación** (§17): hasta entonces la v1 se puede corregir.
 
 ### Descubrimiento
 
@@ -172,7 +173,8 @@ host ownership  !=  operator control  !=  approver authority
 | `runs.list` · `runs.get` | observe | | |
 | `runs.start` | control | ✓ | `BUSY` si hay un turno en curso |
 | `runs.steer` | control | ✓ | Devuelve `accepted` · `not-accepting` · `empty` · `too-large` |
-| `runs.pause` · `runs.resume` | control | ✓ | |
+| `runs.pause` | control | ✓ | Pausa cooperativa (§16). Devuelve `requested` · `already-requested` · `already-paused` · `not-running`. `runId?` como en `runs.cancel` |
+| `runs.resume` | control | ✓ | Devuelve `resumed` · `not-paused` · `not-running` |
 | `runs.cancel` | control | ✓ | Devuelve `cancelled` · `not-running`. Con `runId`: `STALE_STATE` si ya no es el run en curso |
 | `approvals.list` | observe | | Aprobaciones, preguntas y planes pendientes |
 | `approvals.resolve` | **approve** | ✓ | `approve` · `deny` · `allow-all`; `phrase?` |
@@ -325,8 +327,7 @@ Ante un `UnknownOutcomeError` de un método mutante (`approvals.resolve`, `runs.
 
 ## 11. Qué queda sin hacer
 
-Definido en el contrato y sin implementación tras M4: `host.pause` / `host.resume` y la pausa
-(`runs.pause` / `runs.resume`, M5), `trace.subscribe`, reanudar una sesión guardada
+Definido en el contrato y sin implementación tras M5: `trace.subscribe`, reanudar una sesión guardada
 (`sessions.open { resume }`) y listar las guardadas, y Dot. Detalle en §13.6.
 
 ## 12. Tests de conformidad
@@ -469,8 +470,8 @@ accidentales, no es una medida de seguridad. Un `INTERNAL_ERROR` no se recuerda.
 
 | Respuesta | Métodos |
 |---|---|
-| Atendido | `core.*` · `agents.list` · `models.list` · `sessions.list` (solo vivas) · `sessions.get` · `sessions.open` · `sessions.close` · `sessions.set*` · `runs.list` · `runs.get` · `runs.start` · `runs.steer` · `runs.cancel` · `approvals.list` · `approvals.resolve` · `questions.answer` · `plans.decide` (§15) · `jobs.*` · `memory.*` · `events.*` |
-| `UNAVAILABLE` | `runs.pause` · `runs.resume` (M5) · `sessions.open { resume }` |
+| Atendido | `core.*` · `agents.list` · `models.list` · `sessions.list` (solo vivas) · `sessions.get` · `sessions.open` · `sessions.close` · `sessions.set*` · `runs.list` · `runs.get` · `runs.start` · `runs.steer` · `runs.cancel` · `runs.pause` · `runs.resume` (§16) · `approvals.list` · `approvals.resolve` · `questions.answer` · `plans.decide` (§15) · `jobs.*` · `memory.*` · `events.*` |
+| `UNAVAILABLE` | `sessions.open { resume }` |
 | `METHOD_NOT_FOUND` | `trace.*` (y `host.*` hasta M3: ver §14) |
 
 Capacidades que se conceden: `observe`, `control`, `host` y, **solo con una clave de aprobador
@@ -568,6 +569,7 @@ solo cambian con cada `session.updated`.
 |---|---|
 | `runs.cancel` | Se reenvía (`host.cancel`): contesta el runtime — `cancelled`, `not-running`, o `STALE_STATE` |
 | `runs.steer` | Se reenvía (`host.steer`): contesta la Runtime Inbox — `accepted` · `not-accepting` · `empty` · `too-large` |
+| `runs.pause` · `runs.resume` | Se reenvían (`host.pause` · `host.resume`): contesta el controlador de pausa del runtime (§16) |
 | `sessions.get` · `jobs.list` · `events.subscribe` | Desde la proyección |
 | `runs.start` · `sessions.close` · `sessions.set*` · `jobs.cancel` | `UNAVAILABLE`, `reason: 'peer-hosted'` |
 
@@ -845,7 +847,7 @@ contra un aprobador externo).
 
 ### 15.10 Cambios en el contrato respecto a M1
 
-Se cambian dentro de la v1, que aún no está congelada (§16):
+Se cambian dentro de la v1, que aún no está congelada (§17):
 
 1. `ProtocolResolver` pasa de `{ client, connectionId }` a `{ kind, client?, connectionId?, at }`:
    hacía falta decir la vía, y una resolución local no tiene conexión.
@@ -855,7 +857,137 @@ Se cambian dentro de la v1, que aún no está congelada (§16):
    anfitrión publica con `host.publish`, explícito y con su `seq`. El daemon no la infiere de
    que aparezca un `tool.started`.
 
-## 16. Estabilidad: cuándo se congela la v1
+## 16. Pausa cooperativa (M5)
+
+> **Pausar no congela nada.** Ni threads, ni procesos, ni jobs, ni sockets: evita que el runtime
+> **empiece** trabajo nuevo del agente a partir de un punto seguro. Lo que ya estaba en marcha
+> termina por su cuenta.
+
+```text
+operador ── runs.pause ──▶ stratumd ──┬── HostedSession ──┐
+                                      │                   ├──▶ SessionHost.pause()
+                                      └── host.pause ─────┘        │
+                                          (sesión par)             ▼
+                                                        StratumAgent.pause  (PauseController)
+                                                                   │
+                                              puntos seguros del ReactLoop, de los
+                                              subagentes y del dispatcher
+```
+
+Una sola implementación (`agent/pause.ts`) y una sola autoridad por sesión: el daemon y el
+puente par **reenvían** la orden; ninguno guarda un estado de pausa ni da un run por pausado.
+
+### 16.1 Pedir no es alcanzar
+
+| | |
+|---|---|
+| `runs.pause` | Devuelve en el acto **cómo quedó la petición**: `requested` · `already-requested` · `already-paused` · `not-running` |
+| `run.status: 'paused'` | Lo publica **el anfitrión** (`run.updated` + `session.updated`, con su `seq`) cuando el runtime llega a un punto seguro y ya no avanza nada del agente |
+| `runs.resume` | `resumed` · `not-paused` · `not-running`. Sobre una pausa solo pedida, la retira (`resumed`) |
+
+Entre una cosa y otra el run sigue figurando `running` (o `waiting_approval` /
+`waiting_input`): el estado intermedio no se expone. Repetir cualquiera de las dos órdenes no
+es un error. Con `runId`, `STALE_STATE` si ya no es el run en curso — la orden no se aplica
+al siguiente.
+
+Mientras dure: `session.state: 'paused'`, `run.status: 'paused'`, y la foto conserva todo lo
+demás (texto parcial, llamadas, solicitudes, jobs, `currentRunId`).
+
+### 16.2 Puntos seguros
+
+| Punto | Qué no empieza |
+|---|---|
+| Antes de cada petición al modelo | La petición, y la compresión de contexto que la precede |
+| Tras la respuesta del modelo, antes de ejecutar sus tools | Ninguna tool del lote, ni de control ni delegaciones |
+| En el dispatcher, entre la confirmación y la ejecución | Lo que una persona acaba de aprobar |
+| Antes de lanzar un subagente | El subagente: ni se anuncia |
+
+Lo que ya estaba en marcha **termina**: una respuesta del modelo en curso no se corta (el
+texto sigue llegando) y una tool que ya se ejecuta no se interrumpe. Pausar no usa la señal de
+cancelación en ningún caso.
+
+Si la respuesta en curso era la última del turno (sin tools, sin steering pendiente), no queda
+nada por empezar: el run **termina** y la pausa se va con él. La pausa es del run: el
+siguiente empieza sin ella.
+
+`tool.started` anuncia la llamada cuando se conocen sus argumentos, antes de ejecutarla. Un
+run pausado en el segundo punto puede mostrar una llamada en `running` que todavía no ha
+empezado: se ejecuta (o se descarta, §16.4) al reanudar.
+
+### 16.3 Lo que la pausa no toca
+
+- **Jobs en segundo plano.** Siguen corriendo: `session.state = paused` con un job `running`
+  es correcto. Sus finales se acumulan en la inbox y se entregan al reanudar.
+- **Cancelar.** `runs.cancel` funciona igual con la pausa pedida o alcanzada, sin `resume`
+  previo, y el run termina `cancelled`. Cerrar la sesión o apagar el daemon también sueltan
+  la espera.
+- **El resto del sistema.** La espera está en el runtime de esa sesión. El daemon, el bus de
+  eventos, el centro de aprobaciones y las demás sesiones siguen atendiendo.
+- **La inactividad del daemon.** Una sesión en pausa es una sesión viva: no hay salida por
+  inactividad.
+
+Una pausa no caduca sola.
+
+### 16.4 Con steering, aprobaciones y subagentes
+
+- **Steering.** `runs.steer` con el run en pausa es `accepted` y **no reanuda**: queda en la
+  inbox y el modelo lo recibe al continuar. Si la pausa era anterior a ejecutar un lote de
+  tools, al reanudar ese lote se descarta por el steering (igual que cualquier mensaje que
+  llega antes del dispatch) y el modelo decide de nuevo. Es el flujo *pausar → mirar →
+  redirigir → reanudar*.
+- **Aprobaciones.** Pedir pausa con una solicitud abierta no la toca: sigue pendiente, el run
+  sigue `waiting_approval` y el prompt local no se retira. **Resolverla no es reanudar**: lo
+  aprobado no se ejecuta hasta `runs.resume`, y entonces se ejecuta una vez, sin volver a
+  preguntar. Una pregunta o un plan resueltos dejan el run en pausa antes de su siguiente
+  petición al modelo.
+- **Subagentes.** Comparten el controlador del run: un hijo espera en los mismos puntos
+  seguros que el padre. `paused` solo se publica cuando todos los loops que podrían empezar
+  algo están esperando. El tiempo en pausa no cuenta para el presupuesto de tiempo de un
+  subagente (`agents.subagentTimeoutMs`).
+
+### 16.5 Sesiones pares y caídas del plano de control
+
+`runs.pause` / `runs.resume` sobre una sesión par se reenvían (`host.pause` /
+`host.resume`) con la misma autoridad que `host.cancel`: contesta el runtime de la CLI; sin
+anfitrión o sin respuesta, `UNAVAILABLE` con `reason: 'host-unavailable'`. El daemon no marca
+la proyección: pasa a `paused` cuando el anfitrión lo publica.
+
+El estado de pausa es del runtime, no del daemon:
+
+| Qué ocurre | Qué pasa con la pausa |
+|---|---|
+| El daemon muere con una sesión par en pausa | El runtime sigue en pausa. Al volver un daemon, el anfitrión se registra con su foto: `paused` |
+| El anfitrión se desconecta en pausa | Proyección `detached`, y su run sigue `paused`: no es un fallo |
+| Se cierra la sesión del daemon, o `core.shutdown { force }` | Se cancela como cualquier turno: la espera se suelta |
+
+En la terminal, `stratum run` escribe `[paused from another client · Ctrl+C cancels]` y
+`[resumed]` en stderr, y `stratum chat` lo dice en la conversación: una pausa pedida desde
+fuera no puede parecer un cuelgue.
+
+### 16.6 Traza
+
+`TraceRuntimeEvent` `pause` (`requested` · `paused` · `resumed`, con `waitMs`), cap
+`pause`. La duración de un turno en la traza incluye el tiempo que pasó en pausa.
+
+### 16.7 Tests
+
+`agent/pause.test.ts` (máquina de estados, carreras, reloj pausable) · `agent/pause-flow.test.ts`
+(puntos seguros en el loop: tool en curso, respuesta en curso, tool no empezada, reanudar,
+cancelar, steering, jobs, subagentes, aprobación) · `host/session-publisher.test.ts` (eventos
+y foto) · `daemon/pause.test.ts` (a través del protocolo: sesión del daemon, sesión par,
+**equivalencia** entre las dos, aprobación, caída del daemon, desconexión, inactividad,
+apagado) · `cli/commands/peer.integration.test.ts` (procesos reales: `stratum run` +
+`stratumd` + `stratum ps --watch`) · `scripts/tui/daemon-pause.mjs` (`npm run tui:pause`:
+`stratum chat` en un terminal real) · `daemon/architecture.test.ts` (una sola pausa; daemon y
+puente no la guardan; nada suspende un proceso).
+
+### 16.8 Cambios en el contrato respecto a M1
+
+Dentro de la v1, que aún no está congelada (§17): `runs.pause` y `runs.resume` admiten
+`runId` y devuelven `{ status }` en vez de `{ run }`; `host.pause` y `host.resume`, lo
+mismo en vez de `{}`.
+
+## 17. Estabilidad: cuándo se congela la v1
 
 `STRATUM_PROTOCOL_VERSION` es `1` desde M1, pero **la v1 todavía no es una superficie
 estable**:
@@ -882,4 +1014,5 @@ Correcciones hechas a la v1 antes de congelarla:
 | M4 | `ProtocolResolver`: de `{ client, connectionId }` a `{ kind, client?, connectionId?, at }` | Sin publicar, y **ningún servidor llegó a emitirlo**: hasta M4 no había nada que resolver (`approvals.list` devolvía siempre vacío), así que tampoco existe ningún dato con la forma antigua. Por eso no se aceptan las dos formas |
 | M4 | `question.resolved` y `plan.resolved` ganan `status` y `resolvedBy` (opcionales) | Aditivo |
 | M4 | `core.hello.approverKey` (opcional) y la *feature* `remote-approvals` | Aditivo |
+| M5 | `runs.pause` / `runs.resume` / `host.pause` / `host.resume` admiten `runId` y devuelven `{ status }` (antes `{ run }` y `{}`) | Sin publicar, y **ningún servidor llegó a atenderlos**: hasta M5 contestaban `UNAVAILABLE` |
 | M4 | El servidor deja de conceder `approve` por el token, y `host` pasa a ser excluyente | Cambia lo que se **concede**, no el contrato: `capabilities` siempre pudo ser menos de lo pedido (§4) |

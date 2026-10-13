@@ -10,6 +10,7 @@ import { normalizeUsage, type RawTimings, type RawUsage } from '../providers/cac
 import {
   TRACE_CAP_INBOX,
   TRACE_CAP_JOBS,
+  TRACE_CAP_PAUSE,
   TRACE_CAP_LLM_ORIGIN,
   TRACE_CAP_RUNTIME,
   TRACE_FORMAT_VERSION,
@@ -216,7 +217,13 @@ export class TraceRecorder {
         sessionId: this.opts.sessionId,
         ...(this.opts.cwd ? { cwd: this.opts.cwd } : {}),
         ...(this.opts.version ? { version: this.opts.version } : {}),
-        caps: [TRACE_CAP_RUNTIME, TRACE_CAP_LLM_ORIGIN, TRACE_CAP_JOBS, TRACE_CAP_INBOX],
+        caps: [
+          TRACE_CAP_RUNTIME,
+          TRACE_CAP_LLM_ORIGIN,
+          TRACE_CAP_JOBS,
+          TRACE_CAP_INBOX,
+          TRACE_CAP_PAUSE,
+        ],
       });
     }
     this.writer.write(record);
@@ -265,6 +272,12 @@ const VETO_LABEL = {
   toolset: 'el toolset de la sesión',
   plan: 'el modo plan',
   steering: 'un mensaje nuevo del usuario',
+} as const;
+
+const PAUSE_PHASE_LABEL = {
+  requested: 'pedida',
+  paused: 'en pausa',
+  resumed: 'reanudada',
 } as const;
 
 const INBOX_PHASE_LABEL = {
@@ -694,6 +707,8 @@ class Scope implements TraceScope {
             ? 'mensaje del usuario'
             : `fin del job #${'jobId' in ev && ev.jobId ? ev.jobId : '?'}`;
         this.point('notice', `Inbox: ${what} ${INBOX_PHASE_LABEL[ev.phase]}`, data);
+      } else if (ev.event === 'pause') {
+        this.point('notice', `Pausa: ${PAUSE_PHASE_LABEL[ev.phase]}`, data);
       } else if (ev.event === 'resolution') {
         this.point('notice', `Resolución (${ev.kind}): ${ev.status} · ${ev.by}`, data);
       } else if (ev.event === 'job') {

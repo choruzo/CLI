@@ -331,6 +331,9 @@ export const chatCommand = new Command('chat')
         control: {
           cancel: () => cancelTurn(),
           steer: (text) => agent.enqueueUserMessage(text),
+          // Pausa cooperativa: la decide el runtime de esta sesión.
+          pause: () => agent.pause.requestPause(),
+          resume: () => agent.pause.resume(),
         },
       });
       await bridge?.start();

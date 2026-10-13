@@ -267,6 +267,61 @@ describe('arquitectura de src/daemon/', () => {
     expect(/remoteApprovals|interactionTimeoutMs/.test(run)).toBe(false);
   });
 
+  // --- M5: pausa cooperativa -------------------------------------------------
+
+  /** Todo el código de producción de `src/`, sin comentarios. */
+  function productionSources(): Array<{ file: string; source: string }> {
+    const src = join(here, '..');
+    const walk = (dir: string): string[] =>
+      readdirSync(dir, { withFileTypes: true }).flatMap((entry) =>
+        entry.isDirectory()
+          ? walk(join(dir, entry.name))
+          : /\.tsx?$/.test(entry.name) && !/\.(test|fixtures)\.tsx?$/.test(entry.name)
+            ? [join(dir, entry.name)]
+            : [],
+      );
+    return walk(src).map((file) => ({
+      file: relative(src, file).replace(/\\/g, '/'),
+      source: code(readFileSync(file, 'utf-8')),
+    }));
+  }
+
+  it('hay una sola pausa: una clase, y solo el agente la crea', () => {
+    const all = productionSources();
+    const classes = all.flatMap(({ file, source }) =>
+      [...source.matchAll(/class\s+(\w*Pause\w*)\b/g)].map((m) => `${file}:${m[1]}`),
+    );
+    expect(classes).toEqual(['agent/pause.ts:PauseController']);
+    const creators = all.filter((s) => /new\s+PauseController\(/.test(s.source)).map((s) => s.file);
+    expect(creators).toEqual(['agent/core.ts']);
+  });
+
+  it('el daemon y el puente par reenvían la pausa: ni la guardan ni la dan por alcanzada', () => {
+    const bridge = readFileSync(join(here, '..', 'host', 'peer-host-bridge.ts'), 'utf-8');
+    for (const { file, text } of [...production, { file: 'peer-host-bridge.ts', text: bridge }]) {
+      for (const spec of imports(text)) {
+        expect(spec.endsWith('agent/pause.js'), `${file} importa ${spec}`).toBe(false);
+      }
+      const source = code(text);
+      expect(/PauseController/.test(source), `${file} usa PauseController`).toBe(false);
+      // Nadie fuera del anfitrión escribe que un run o una sesión están en pausa.
+      expect(/(status|state)\s*[:=]\s*'paused'/.test(source), `${file} marca paused`).toBe(false);
+    }
+  });
+
+  it('pausar no suspende nada del sistema operativo', () => {
+    for (const { file, source } of productionSources()) {
+      expect(
+        /SIGSTOP|SIGTSTP|SIGCONT|SuspendThread|NtSuspendProcess|Suspend-Process/.test(source),
+        `${file} suspende un proceso`,
+      ).toBe(false);
+    }
+    // Y la pausa no pasa por la cancelación: el controlador no aborta nada.
+    const pause = code(readFileSync(join(here, '..', 'agent', 'pause.ts'), 'utf-8'));
+    const controller = pause.slice(0, pause.indexOf('export function pausableTimeout'));
+    expect(/\.abort\(|\.kill\(/.test(controller)).toBe(false);
+  });
+
   it('la ruta de este test es la esperada (src/daemon)', () => {
     expect(relative(join(here, '..', '..'), here).replace(/\\/g, '/')).toBe('src/daemon');
   });

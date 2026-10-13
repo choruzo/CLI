@@ -496,9 +496,6 @@ export class Stratumd {
   // ---------------------------------------------------------------------------
 
   private handlers(conn: ClientConnection): RequestHandlers {
-    const notYet = (what: string) => (): never => {
-      throw new ProtocolError('UNAVAILABLE', `${what} is not available yet.`);
-    };
     const handlers: RequestHandlers = {
       'core.status': () => ({
         server: this.serverInfo,
@@ -604,9 +601,19 @@ export class Stratumd {
           ? await this.peers.cancel(params.sessionId, params.runId)
           : this.need(params.sessionId).cancel(params.runId),
       }),
-      // Pausa cooperativa: M5.
-      'runs.pause': notYet('Pausing a run'),
-      'runs.resume': notYet('Pausing a run'),
+      // Pausa cooperativa. El daemon no pausa nada: entrega la orden a quien
+      // aloja la sesión —su `SessionHost`, aquí o en otro proceso— y no da el run
+      // por pausado hasta que su anfitrión lo publique (`run.updated`).
+      'runs.pause': async (params) => ({
+        status: this.peers.has(params.sessionId)
+          ? await this.peers.pause(params.sessionId, params.runId)
+          : this.need(params.sessionId).pause(params.runId),
+      }),
+      'runs.resume': async (params) => ({
+        status: this.peers.has(params.sessionId)
+          ? await this.peers.resume(params.sessionId, params.runId)
+          : this.need(params.sessionId).resume(params.runId),
+      }),
 
       // Centro de aprobaciones. Listar es de quien observa; resolver exige la
       // capacidad `approve` (`authorize.ts`) y, además, no ser el anfitrión de

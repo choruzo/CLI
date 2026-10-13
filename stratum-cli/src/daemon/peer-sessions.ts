@@ -5,7 +5,7 @@
  * al día con los eventos que el anfitrión va publicando.
  *
  *   anfitrión par ── host.publish ──▶ proyección ──▶ RunRegistry + EventHub
- *                 ◀── host.cancel / host.steer ──
+ *                 ◀── host.cancel / host.steer / host.pause / host.resume ──
  *
  * Lo que **no** hay aquí: ni `SessionHost`, ni agente, ni jobs, ni MCP, ni SSH,
  * ni memoria, ni traza, ni directorio de trabajo. Nada de esto ejecuta ni
@@ -40,12 +40,14 @@ import {
   type MethodName,
   type MethodParams,
   type MethodResult,
+  type PauseStatus,
   type ProtocolApprovalDecision,
   type ProtocolEvent,
   type ProtocolPlan,
   type ProtocolQuestionAnswer,
   type ProtocolResolver,
   type ProtocolSessionSnapshot,
+  type ResumeStatus,
   type SteerStatus,
 } from '../protocol/index.js';
 import type { EventHub } from './event-hub.js';
@@ -111,9 +113,19 @@ interface PeerSession {
 type ForwardedMethod =
   | 'host.cancel'
   | 'host.steer'
+  | 'host.pause'
+  | 'host.resume'
   | 'host.resolveApproval'
   | 'host.answerQuestions'
   | 'host.decidePlan';
+
+/** Órdenes sobre el run. Las demás reenviadas son decisiones sobre una solicitud. */
+const RUN_CONTROL: ReadonlySet<ForwardedMethod> = new Set([
+  'host.cancel',
+  'host.steer',
+  'host.pause',
+  'host.resume',
+]);
 
 function invalid(path: string, message: string): ProtocolError {
   return new ProtocolError('INVALID_PARAMS', message, { issues: [{ path, message }] });
@@ -546,10 +558,10 @@ export class PeerSessions {
             resolution: typeof how === 'string' ? how.slice(0, 32) : 'resolved',
           });
         }
-        if (err.code === 'NOT_FOUND' && method !== 'host.cancel' && method !== 'host.steer') {
+        if (err.code === 'NOT_FOUND' && !RUN_CONTROL.has(method)) {
           throw new ProtocolError('NOT_FOUND', 'No such pending request.');
         }
-        if (err.code === 'INVALID_PARAMS' && method !== 'host.cancel' && method !== 'host.steer') {
+        if (err.code === 'INVALID_PARAMS' && !RUN_CONTROL.has(method)) {
           throw new ProtocolError('INVALID_PARAMS', 'The host did not accept that answer.');
         }
         log.warn('host rejected a control request', { sessionId, method, code: err.code });
@@ -565,6 +577,26 @@ export class PeerSessions {
 
   async cancel(sessionId: string, runId?: string): Promise<CancelStatus> {
     const result = await this.forward('host.cancel', sessionId, {
+      sessionId,
+      ...(runId !== undefined ? { runId } : {}),
+    });
+    return result.status;
+  }
+
+  /**
+   * Pausa y reanudación: las decide el runtime del anfitrión. Aquí no se toca
+   * la proyección — pasará a `paused` cuando el anfitrión lo publique.
+   */
+  async pause(sessionId: string, runId?: string): Promise<PauseStatus> {
+    const result = await this.forward('host.pause', sessionId, {
+      sessionId,
+      ...(runId !== undefined ? { runId } : {}),
+    });
+    return result.status;
+  }
+
+  async resume(sessionId: string, runId?: string): Promise<ResumeStatus> {
+    const result = await this.forward('host.resume', sessionId, {
       sessionId,
       ...(runId !== undefined ? { runId } : {}),
     });

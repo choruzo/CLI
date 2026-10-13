@@ -235,6 +235,95 @@ describe('stratum run como anfitrión par (procesos reales)', () => {
     expect((await stratum(home, 'daemon', 'stop')).exitCode).toBe(0);
   }, 240_000);
 
+  it('M5: otro cliente la pausa sin matarla, la redirige en pausa, la reanuda y la cancela', async () => {
+    expect((await stratum(home, 'daemon', 'start')).exitCode).toBe(0);
+    const cwd = await project('pausa', [
+      { toolCalls: [{ name: 'exec', args: { command: SLEEP(4) } }] },
+      { toolCalls: [{ name: 'exec', args: { command: SLEEP(60) } }] },
+      { text: 'no debería llegar' },
+    ]);
+    const mock = mocks.at(-1)!;
+    const watcher = cli(home, ['ps', '--watch', '--json']);
+    children.push(watcher);
+    let watched = '';
+    watcher.stdout?.on('data', (chunk: Buffer) => (watched += chunk.toString('utf-8')));
+    const frames = (): PsJson[] =>
+      watched
+        .split(/\r?\n/)
+        .filter((line) => line.trim().startsWith('{'))
+        .map((line) => JSON.parse(line) as PsJson);
+
+    const task = cli(cwd, ['run', 'haz una tarea de varios pasos']);
+    children.push(task);
+    let stderr = '';
+    task.stderr?.on('data', (chunk: Buffer) => (stderr += chunk.toString('utf-8')));
+    const operator = await connect('operator');
+    const run = await until(async () => {
+      const { runs } = await operator.request('runs.list', { active: true });
+      return runs[0];
+    });
+    const status = async (): Promise<string> =>
+      (await operator.request('runs.get', { runId: run.id })).run.status;
+
+    // Con la tool en marcha: la pausa queda pedida y la tool sigue.
+    await until(async () => mock.requests() === 1);
+    // Margen para que la tool haya empezado de verdad: lo que se prueba es que termina.
+    await new Promise((r) => setTimeout(r, 1_500));
+    expect(await operator.request('runs.pause', { sessionId: run.sessionId })).toEqual({
+      status: 'requested',
+    });
+    expect(await status()).toBe('running');
+
+    // La tool termina por su cuenta y el run queda en pausa: el modelo no recibe nada.
+    await until(async () => (await status()) === 'paused');
+    await until(async () => stderr.includes('paused from another client'));
+    await new Promise((r) => setTimeout(r, 1_500));
+    expect(mock.requests()).toBe(1);
+    expect(task.exitCode).toBeNull();
+    const snapshot = (await operator.request('sessions.get', { sessionId: run.sessionId }))
+      .snapshot;
+    expect(snapshot.session.state).toBe('paused');
+    expect(snapshot.toolCalls.map((c) => c.state)).toEqual(['completed']);
+    // No se la mató: durmió lo suyo.
+    expect(snapshot.toolCalls[0]!.durationMs).toBeGreaterThanOrEqual(3_000);
+    const listed = (await ps()).sessions.find((s) => s.id === run.sessionId);
+    expect(listed?.state).toBe('paused');
+
+    // Redirigir en pausa: aceptado, y sigue en pausa.
+    expect(
+      await operator.request('runs.steer', { sessionId: run.sessionId, text: 'cambia el enfoque' }),
+    ).toEqual({ status: 'accepted' });
+    await new Promise((r) => setTimeout(r, 1_000));
+    expect(await status()).toBe('paused');
+    expect(mock.requests()).toBe(1);
+
+    // Reanudar: el mismo run sigue, y el modelo recibe el mensaje.
+    expect(await operator.request('runs.resume', { sessionId: run.sessionId })).toEqual({
+      status: 'resumed',
+    });
+    await until(async () => mock.requests() === 2);
+    expect(JSON.stringify(mock.received()[1])).toContain('cambia el enfoque');
+    expect(await status()).toBe('running');
+    await until(async () => stderr.includes('[resumed]'));
+
+    // Y cancelar sigue funcionando.
+    expect(
+      await operator.request('runs.cancel', { sessionId: run.sessionId, runId: run.id }),
+    ).toEqual({ status: 'cancelled' });
+    expect((await task).exitCode).toBe(130);
+    expect((await operator.request('runs.get', { runId: run.id })).run.status).toBe('cancelled');
+
+    // `ps --watch` lo fue contando: corriendo, en pausa, corriendo otra vez.
+    await until(async () => frames().at(-1)?.sessions.length === 0 && frames().length > 3);
+    const states = frames().flatMap((f) => f.sessions.map((s) => s.state));
+    const firstPaused = states.indexOf('paused');
+    expect(firstPaused).toBeGreaterThan(states.indexOf('running'));
+    expect(states.slice(firstPaused).includes('running')).toBe(true);
+    watcher.kill();
+    operator.close();
+    expect((await stratum(home, 'daemon', 'stop')).exitCode).toBe(0);
+  }, 240_000);
+
   it('daemon.autoStart: la CLI arranca el daemon y se publica en él', async () => {
     expect(existsSync(endpointFile)).toBe(false);
     const cwd = await project(
