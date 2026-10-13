@@ -15,6 +15,7 @@
 import { createHash, timingSafeEqual } from 'crypto';
 import { createServer, type Server, type Socket } from 'net';
 import {
+  FEATURE_REMOTE_APPROVALS,
   HANDSHAKE_TIMEOUT_MS,
   MAX_MESSAGE_BYTES,
   MAX_UNAUTHENTICATED_MESSAGE_BYTES,
@@ -36,6 +37,7 @@ import { ProtocolError, encodeMessage, errorResponse } from '../ipc/codec.js';
 import { FrameTooLargeError, LineDecoder } from '../ipc/framing.js';
 import { RpcPeer, type RequestHandlers, type RequestOptions } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
+import type { ApproverAuth } from './approver-key.js';
 import { authorize, grantCapabilities, type Principal } from './authorize.js';
 import type { HubClient } from './event-hub.js';
 
@@ -79,7 +81,17 @@ export interface ControlServerOptions {
   highWaterBytes?: number;
   /** Por encima, la conexión se corta. */
   maxBufferedBytes?: number;
+  /**
+   * Cómo se acredita un aprobador. Sin esto, ninguna conexión obtiene la
+   * capacidad `approve`.
+   */
+  approver?: ApproverAuth | null;
+  now?: () => number;
 }
+
+/** Claves de aprobador erróneas seguidas antes de dejar de comprobarlas un rato. */
+const APPROVER_MAX_FAILURES = 5;
+const APPROVER_LOCKOUT_MS = 60_000;
 
 const DEFAULT_HIGH_WATER = 1024 * 1024;
 const DEFAULT_MAX_BUFFERED = 16 * 1024 * 1024;
@@ -95,6 +107,8 @@ function tokensMatch(a: string, b: string): boolean {
 
 class Connection implements ClientConnection {
   authenticated = false;
+  /** Hay un `core.hello` comprobándose: no se atiende otro. */
+  greeting = false;
   capabilities: Capability[] = [];
   client: ClientConnection['client'] = null;
   readonly connectedAt = Date.now();
@@ -293,7 +307,40 @@ export class ControlServer {
     return out as RequestHandlers;
   }
 
-  private hello(conn: Connection, decoder: LineDecoder, params: HelloParams): HelloResult {
+  private approverFailures = 0;
+  private approverLockedUntil = 0;
+
+  /**
+   * ¿Acredita esa clave a un aprobador? Sin acreditación configurada, nunca.
+   * Tras varios fallos seguidos deja de comprobar durante un rato: la clave la
+   * teclea una persona, no hace falta admitir un intento tras otro.
+   */
+  private async verifyApprover(key: string): Promise<boolean> {
+    const auth = this.opts.approver;
+    const now = (this.opts.now ?? Date.now)();
+    if (!auth || now < this.approverLockedUntil) return false;
+    const ok = await auth.verify(key);
+    if (ok) {
+      this.approverFailures = 0;
+      return true;
+    }
+    if (++this.approverFailures >= APPROVER_MAX_FAILURES) {
+      this.approverFailures = 0;
+      this.approverLockedUntil = now + APPROVER_LOCKOUT_MS;
+      log.warn('too many invalid approver keys, verification paused', {
+        lockoutMs: APPROVER_LOCKOUT_MS,
+      });
+    }
+    return false;
+  }
+
+  private async hello(
+    conn: Connection,
+    decoder: LineDecoder,
+    params: HelloParams,
+  ): Promise<HelloResult> {
+    // La clave de aprobador no sale de aquí: ni al log ni a `conn.client`.
+    const { approverKey } = params;
     const client = { ...params.client };
     const reject = (err: ProtocolError): never => {
       log.info('handshake rejected', {
@@ -316,7 +363,25 @@ export class ControlServer {
     if (!tokensMatch(params.token, this.opts.token)) {
       reject(new ProtocolError('UNAUTHORIZED', 'Invalid token.'));
     }
-    const capabilities = grantCapabilities(params.roles);
+    if (conn.greeting) {
+      throw new ProtocolError('INVALID_REQUEST', 'Handshake already in progress.');
+    }
+    let approverVerified = false;
+    if (approverKey !== undefined) {
+      conn.greeting = true;
+      try {
+        approverVerified = await this.verifyApprover(approverKey);
+      } finally {
+        conn.greeting = false;
+      }
+      // Una clave que no vale no degrada a observador en silencio: quien la
+      // tecleó tiene que saberlo.
+      if (!approverVerified) {
+        reject(new ProtocolError('UNAUTHORIZED', 'Invalid approver key.'));
+      }
+      if (conn.closing) throw new ProtocolError('UNAVAILABLE', 'Connection closed.');
+    }
+    const capabilities = grantCapabilities(params.roles, { approverVerified });
     if (capabilities.length === 0) {
       reject(new ProtocolError('FORBIDDEN', 'None of the requested roles is available.'));
     }
@@ -337,7 +402,7 @@ export class ControlServer {
       server: this.opts.server,
       connectionId: conn.id,
       capabilities,
-      features: [],
+      features: this.opts.approver ? [FEATURE_REMOTE_APPROVALS] : [],
     };
   }
 

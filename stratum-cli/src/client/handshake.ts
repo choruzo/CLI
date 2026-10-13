@@ -18,6 +18,11 @@ export interface ClientIdentity {
   version: string;
   roles: Role[];
   features?: string[];
+  /**
+   * Clave de aprobador, para pedir el rol approver. La teclea una persona:
+   * no se toma de argumentos, del entorno ni de un fichero, y no se registra.
+   */
+  approverKey?: string;
 }
 
 /**
@@ -57,6 +62,7 @@ export async function performHandshake(
         client: { kind: identity.kind, name: identity.name, version: identity.version },
         roles: identity.roles,
         ...(identity.features ? { features: identity.features } : {}),
+        ...(identity.approverKey !== undefined ? { approverKey: identity.approverKey } : {}),
       },
       { timeoutMs },
     );

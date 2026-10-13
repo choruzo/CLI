@@ -710,6 +710,13 @@ export const StratumConfigSchema = z.object({
        * de estar conectado y no se sabe si sigue vivo. `0` = sin plazo.
        */
       detachedTtlMinutes: z.number().min(0).max(100_000).default(10),
+      /**
+       * Minutos que espera una aprobación, una tanda de preguntas o un plan
+       * que **nadie tiene delante** (una sesión alojada en el daemon, o una de
+       * la CLI sin terminal) antes de resolverse en negativo: denegar, omitir,
+       * rechazar. `0` = sin plazo. Con una terminal delante nunca caduca.
+       */
+      approvalTimeoutMinutes: z.number().min(0).max(100_000).default(10),
     })
     .default({}),
 

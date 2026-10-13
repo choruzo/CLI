@@ -30,9 +30,37 @@ export interface Principal {
  */
 export const GRANTABLE: readonly Capability[] = ['observe', 'control', 'approve', 'host'];
 
-/** Lo concedido a unos roles: lo que suman, menos lo que el servidor no ofrece. */
-export function grantCapabilities(roles: readonly Role[]): Capability[] {
-  return capabilitiesOf(roles).filter((cap) => GRANTABLE.includes(cap));
+/** Lo que el servidor sabe de quien se presenta, además de los roles que pide. */
+export interface GrantContext {
+  /**
+   * La conexión presentó una clave de aprobador y el servidor la comprobó. El
+   * token del canal no cuenta: lo conoce cualquier proceso que lea
+   * `endpoint.json`.
+   */
+  approverVerified: boolean;
+}
+
+/**
+ * Lo concedido a unos roles: lo que suman, menos lo que el servidor no ofrece
+ * y lo que esa conexión no puede tener.
+ *
+ *  - `approve` exige una clave de aprobador verificada. Pedir el rol
+ *    `approver` sin ella da `observe` y nada más.
+ *  - `host` es **excluyente**: una conexión que aloja sesiones no recibe ni
+ *    `control` ni `approve`, pida lo que pida. Alojar una sesión no es
+ *    gobernar las de otros ni autorizar lo que la propia pide.
+ */
+export function grantCapabilities(
+  roles: readonly Role[],
+  context: GrantContext = { approverVerified: false },
+): Capability[] {
+  const hosting = roles.includes('host');
+  return capabilitiesOf(roles).filter((cap) => {
+    if (!GRANTABLE.includes(cap)) return false;
+    if (cap === 'approve') return context.approverVerified && !hosting;
+    if (cap === 'control') return !hosting;
+    return true;
+  });
 }
 
 /** `null` = puede. Si no, el error con el que se contesta. */

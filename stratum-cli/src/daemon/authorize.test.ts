@@ -3,9 +3,11 @@ import { METHODS, type Capability, type MethodName, type Role } from '../protoco
 import { GRANTABLE, authorize, grantCapabilities } from './authorize.js';
 
 const methods = Object.keys(METHODS) as MethodName[];
+/** Una conexión que presentó una clave de aprobador válida. */
+const verified = { approverVerified: true };
 const as = (...roles: Role[]): { authenticated: boolean; capabilities: Capability[] } => ({
   authenticated: true,
-  capabilities: grantCapabilities(roles),
+  capabilities: grantCapabilities(roles, verified),
 });
 const code = (principal: ReturnType<typeof as>, method: MethodName): string | null =>
   authorize(principal, method)?.code ?? null;
@@ -44,6 +46,15 @@ describe('autorización por capacidad', () => {
     }
   });
 
+  it('sin clave de aprobador, pedir el rol approver no da la capacidad', () => {
+    const unverified = { authenticated: true, capabilities: grantCapabilities(['approver']) };
+    expect(unverified.capabilities).toEqual(['observe']);
+    for (const m of ['approvals.resolve', 'questions.answer', 'plans.decide'] as const) {
+      expect(authorize(unverified, m)?.code, m).toBe('FORBIDDEN');
+    }
+    expect(authorize(unverified, 'approvals.list')).toBeNull();
+  });
+
   it('approver aprueba y no cancela', () => {
     const approver = as('approver');
     expect(code(approver, 'approvals.resolve')).toBeNull();
@@ -75,7 +86,21 @@ describe('autorización por capacidad', () => {
   it('broker no se concede todavía; host sí, y no trae control ni approve', () => {
     expect(grantCapabilities(['host'])).toEqual(['observe', 'host']);
     expect(grantCapabilities(['broker'])).toEqual([]);
-    expect(grantCapabilities(['operator', 'approver'])).toEqual(['observe', 'control', 'approve']);
+    // `approve` no sale del token: exige una clave de aprobador verificada.
+    expect(grantCapabilities(['operator', 'approver'])).toEqual(['observe', 'control']);
+    expect(grantCapabilities(['approver'])).toEqual(['observe']);
+    expect(grantCapabilities(['operator', 'approver'], verified)).toEqual([
+      'observe',
+      'control',
+      'approve',
+    ]);
+    // `host` es excluyente: ni con la clave trae `approve`, ni pidiendo `operator`, `control`.
+    expect(grantCapabilities(['host', 'approver'], verified)).toEqual(['observe', 'host']);
+    expect(grantCapabilities(['host', 'operator'], verified)).toEqual(['observe', 'host']);
+    expect(grantCapabilities(['host', 'operator', 'approver'], verified)).toEqual([
+      'observe',
+      'host',
+    ]);
 
     const host = { authenticated: true, capabilities: grantCapabilities(['host']) };
     expect(authorize(host, 'host.register')).toBeNull();
