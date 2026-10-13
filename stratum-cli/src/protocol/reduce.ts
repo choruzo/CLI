@@ -1,6 +1,7 @@
 import type { ProtocolEvent, ProtocolSessionSnapshot } from './events.js';
 import { isStateEvent } from './events.js';
 import type { ProtocolJob, ProtocolSubagent, ProtocolToolCall } from './model.js';
+import { applyTranscriptEvent, clipText as clip } from './transcript.js';
 
 /**
  * De una foto y un evento, la foto siguiente. Es el lado **consumidor** del
@@ -33,10 +34,6 @@ export const SNAPSHOT_LIMITS = {
   /** Texto del bloque abierto. */
   partialChars: 100_000,
 } as const;
-
-function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
-}
 
 /** Una tool call tal como va dentro de una foto: con sus textos recortados. */
 export function snapshotToolCall(call: ProtocolToolCall): ProtocolToolCall {
@@ -178,6 +175,12 @@ export function applySessionEvent(
       break;
     default:
       break;
+  }
+  // La conversación sale de los mismos eventos, por la misma función que usa el anfitrión.
+  const transcript = applyTranscriptEvent(snapshot, event);
+  if (transcript !== snapshot) {
+    next.messages = transcript.messages;
+    next.messagesTruncated = transcript.messagesTruncated;
   }
   // El resumen de la sesión lleva siempre el `seq` y la hora del último evento.
   if (next.session.seq !== event.seq || next.session.updatedAt !== event.at) {

@@ -6,7 +6,10 @@ import type { BackgroundJob } from '../jobs/types.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import {
   LIMITS,
+  EMPTY_TRANSCRIPT,
   SNAPSHOT_LIMITS,
+  applyTranscriptEvent,
+  clipText,
   snapshotSubagent,
   snapshotToolCall,
   type ProtocolApproval,
@@ -23,6 +26,7 @@ import {
   type ProtocolSubagent,
   type ProtocolTodo,
   type ProtocolToolCall,
+  type ProtocolTranscript,
   type ProtocolVolatileEvent,
   type StateEventData,
   type StateEventType,
@@ -95,8 +99,232 @@ const RUN_ITEMS = 500;
 // (`SNAPSHOT_LIMITS`, en el protocolo: quien reduce eventos usa los mismos). El
 // detalle completo viajó en los eventos y está en la traza.
 
-function clip(text: string, max: number): string {
-  return text.length > max ? `${text.slice(0, max - 1)}…` : text;
+const clip = clipText;
+
+/**
+ * Una foto es un solo mensaje del protocolo. Los límites por elemento la dejan
+ * muy por debajo del tope con texto corriente, pero se cuentan en caracteres:
+ * con un run enorme y texto de varios bytes por carácter podría pasarse, y una
+ * foto que no cabe no llega nunca. Aquí se mide **en bytes**.
+ *
+ * Postcondición de `fitSnapshot`: lo que devuelve, serializado, ocupa como
+ * mucho `budget` bytes. Con el presupuesto por defecto se cumple para
+ * cualquier foto; con uno propio, a partir de `SNAPSHOT_MIN_BUDGET`.
+ */
+export const SNAPSHOT_BYTE_BUDGET = 768 * 1024;
+
+/** Por debajo de esto ni la foto mínima (sesión y run, sin nada más) tiene garantía de caber. */
+export const SNAPSHOT_MIN_BUDGET = 16 * 1024;
+
+function bytesOf(snapshot: ProtocolSessionSnapshot): number {
+  return Buffer.byteLength(JSON.stringify(snapshot), 'utf8');
+}
+
+const isOpenCall = (call: ProtocolToolCall): boolean =>
+  call.state === 'pending' || call.state === 'running';
+
+/** Lo vivo y, de lo terminado, lo último: el orden no cambia. */
+function liveAndRecent<T>(items: T[], live: (item: T) => boolean, recent: number): T[] {
+  const from = items.length - recent;
+  return items.filter((item, index) => live(item) || index >= from);
+}
+
+/**
+ * La foto con sus textos a `text` caracteres y, de lo que ya terminó, solo lo
+ * más reciente (`recent`). **Se conserva todo lo que describe el estado vivo**:
+ * la sesión, el run, las tools y subagentes abiertos, los jobs en marcha, las
+ * tareas sin terminar y cada solicitud pendiente, con sus ids, sus opciones y
+ * su `confirmPhrase` intactos (sin ellos no se podría resolver). `cap` acota
+ * esas listas vivas: solo se usa en la última etapa.
+ */
+function squeeze(
+  s: ProtocolSessionSnapshot,
+  text: number,
+  recent: number,
+  cap: number,
+): ProtocolSessionSnapshot {
+  const c = (value: string): string => clipText(value, text);
+  const opt = <K extends string>(key: K, value: string | undefined): Partial<Record<K, string>> =>
+    value === undefined ? {} : ({ [key]: c(value) } as Record<K, string>);
+  const last = <T>(items: T[]): T[] => (items.length > cap ? items.slice(-cap) : items);
+
+  const messages = recent > 0 ? s.messages.slice(-recent) : [];
+  return {
+    seq: s.seq,
+    session: {
+      ...s.session,
+      title: c(s.session.title),
+      cwd: c(s.session.cwd),
+      agent: c(s.session.agent),
+      provider: c(s.session.provider),
+      model: c(s.session.model),
+      sessionProfile: c(s.session.sessionProfile),
+      activeTarget: c(s.session.activeTarget),
+      ...(s.session.environment
+        ? { environment: { ...s.session.environment, name: c(s.session.environment.name) } }
+        : {}),
+    },
+    run: s.run ? { ...s.run, input: c(s.run.input), ...opt('error', s.run.error) } : null,
+    partial: { text: c(s.partial.text), reasoning: '' },
+    toolCalls: last(liveAndRecent(s.toolCalls, isOpenCall, recent)).map((call) => ({
+      ...call,
+      name: c(call.name),
+      description: c(call.description),
+      ...opt('target', call.target),
+      ...opt('output', call.output),
+      ...opt('error', call.error),
+    })),
+    subagents: last(liveAndRecent(s.subagents, (a) => a.status === 'running', recent)).map((a) => {
+      const { filesChanged: _files, ...rest } = a;
+      void _files;
+      return {
+        ...rest,
+        profile: c(a.profile),
+        task: c(a.task),
+        ...opt('summary', a.summary),
+        ...opt('error', a.error),
+      };
+    }),
+    todos: last(
+      liveAndRecent(s.todos, (t) => t.status === 'pending' || t.status === 'in_progress', recent),
+    ).map((t) => ({ ...t, title: c(t.title) })),
+    jobs: last(liveAndRecent(s.jobs, (j) => j.status === 'running', recent)).map((j) => ({
+      ...j,
+      command: c(j.command),
+      cwd: c(j.cwd),
+    })),
+    approvals: last(s.approvals).map((a) => ({
+      ...a,
+      tool: c(a.tool),
+      description: c(a.description),
+      ...opt('reason', a.reason),
+      ...opt('target', a.target),
+      ...(a.environment ? { environment: { ...a.environment, name: c(a.environment.name) } } : {}),
+    })),
+    questions: last(s.questions).map((q) => ({
+      ...q,
+      questions: last(q.questions).map((item) => ({
+        ...item,
+        question: c(item.question),
+        ...(item.options
+          ? { options: last(item.options).map((o) => ({ ...o, label: c(o.label) })) }
+          : {}),
+      })),
+    })),
+    plans: last(s.plans).map((p) => ({
+      ...p,
+      plan: {
+        summary: c(p.plan.summary),
+        steps: last(p.plan.steps).map((step) => ({
+          ...step,
+          title: c(step.title),
+          ...opt('detail', step.detail),
+        })),
+      },
+    })),
+    messages: messages.map((m) =>
+      m.kind === 'tool'
+        ? { ...m, name: c(m.name), description: c(m.description), ...opt('target', m.target) }
+        : m.kind === 'outcome'
+          ? { ...m, text: c(m.text) }
+          : { ...m, text: c(m.text), ...(m.text.length > text ? { truncated: true } : {}) },
+    ),
+    messagesTruncated: s.messagesTruncated || messages.length < s.messages.length,
+  };
+}
+
+/**
+ * Etapas del caso extremo, de más a menos detalle: `[texto, recientes, tope]`.
+ * Hasta la penúltima no se toca nada vivo; la última acota también las listas
+ * vivas, y con textos de 8 caracteres su tamaño tiene un máximo fijo.
+ */
+const SQUEEZE_STAGES: ReadonlyArray<readonly [text: number, recent: number, cap: number]> = [
+  [512, 20, Infinity],
+  [128, 5, Infinity],
+  [32, 1, Infinity],
+  [8, 0, 20],
+];
+
+export function fitSnapshot(
+  snapshot: ProtocolSessionSnapshot,
+  budget = SNAPSHOT_BYTE_BUDGET,
+): ProtocolSessionSnapshot {
+  let fit = snapshot;
+  if (bytesOf(fit) <= budget) return fit;
+
+  // 1. Lo menos valioso, sin quitar ningún elemento.
+  const steps: Array<(s: ProtocolSessionSnapshot) => ProtocolSessionSnapshot> = [
+    (s) => ({ ...s, partial: { ...s.partial, reasoning: '' } }),
+    (s) => ({
+      ...s,
+      toolCalls: s.toolCalls.map((c) => ({
+        ...c,
+        description: clipText(c.description, 200),
+        ...(c.output !== undefined ? { output: clipText(c.output, 200) } : {}),
+        ...(c.error !== undefined ? { error: clipText(c.error, 200) } : {}),
+      })),
+      subagents: s.subagents.map((a) => {
+        const { filesChanged: _files, ...rest } = a;
+        void _files;
+        return {
+          ...rest,
+          ...(a.summary !== undefined ? { summary: clipText(a.summary, 200) } : {}),
+        };
+      }),
+    }),
+    (s) => ({ ...s, partial: { ...s.partial, text: clipText(s.partial.text, 20_000) } }),
+  ];
+  for (const step of steps) {
+    fit = step(fit);
+    if (bytesOf(fit) <= budget) return fit;
+  }
+
+  // 2. La conversación más antigua, y se dice.
+  while (fit.messages.length > 1 && bytesOf(fit) > budget) {
+    fit = {
+      ...fit,
+      messages: fit.messages.slice(Math.ceil(fit.messages.length / 2)),
+      messagesTruncated: true,
+    };
+  }
+  if (bytesOf(fit) <= budget) {
+    log.warn('snapshot over budget, detail dropped', { sessionId: fit.session.id });
+    return fit;
+  }
+
+  // 3. Ni así: lo terminado se reduce a lo reciente y todos los textos se
+  //    acortan, etapa a etapa, conservando el estado vivo y lo pendiente.
+  for (const [text, recent, cap] of SQUEEZE_STAGES) {
+    fit = squeeze(snapshot, text, recent, cap);
+    if (bytesOf(fit) <= budget) {
+      log.warn('snapshot far over budget, only live state kept in full', {
+        sessionId: fit.session.id,
+        text,
+        recent,
+      });
+      return fit;
+    }
+  }
+
+  // 4. Garantía final. Inalcanzable con el presupuesto por defecto (la etapa
+  //    anterior tiene un tamaño máximo muy inferior): la sesión y su run, y nada más.
+  log.error('snapshot does not fit even squeezed: published without detail', {
+    sessionId: snapshot.session.id,
+    budget,
+  });
+  return {
+    ...fit,
+    partial: { text: '', reasoning: '' },
+    toolCalls: [],
+    subagents: [],
+    todos: [],
+    jobs: [],
+    approvals: [],
+    questions: [],
+    plans: [],
+    messages: [],
+    messagesTruncated: snapshot.messagesTruncated || snapshot.messages.length > 0,
+  };
 }
 
 function count(n: number | undefined): number {
@@ -169,6 +397,8 @@ export class SessionPublisher {
   private approvals = new Map<string, ProtocolApproval>();
   private questions = new Map<string, ProtocolQuestionRequest>();
   private plans = new Map<string, ProtocolPlanRequest>();
+  /** La conversación de la sesión: la misma función de los eventos que usa quien los reduce. */
+  private transcript: ProtocolTranscript = EMPTY_TRANSCRIPT;
 
   constructor(opts: SessionPublisherOptions) {
     this.host = opts.host;
@@ -375,7 +605,7 @@ export class SessionPublisher {
    */
   snapshot(): ProtocolSessionSnapshot {
     const jobs = this.host.agent.jobs?.list().map((j) => this.job(j)) ?? [];
-    return {
+    return fitSnapshot({
       session: this.session(),
       seq: this.seqValue,
       run: this.run ? { ...this.run, counters: { ...this.run.counters } } : null,
@@ -391,7 +621,9 @@ export class SessionPublisher {
       approvals: [...this.approvals.values()].map((a) => ({ ...a })),
       questions: [...this.questions.values()].map((q) => ({ ...q })),
       plans: [...this.plans.values()].map((p) => ({ ...p })),
-    };
+      messages: this.transcript.messages.map((m) => ({ ...m })),
+      messagesTruncated: this.transcript.messagesTruncated,
+    });
   }
 
   // ---------------------------------------------------------------------------
@@ -599,6 +831,7 @@ export class SessionPublisher {
       sessionId: this.sessionId,
       kind,
       input: clip(text, INPUT_CHARS),
+      ...(text.length > INPUT_CHARS ? { inputTruncated: true } : {}),
       mode: this.nextMode,
       status: 'running',
       startedAt: this.now(),
@@ -799,6 +1032,9 @@ export class SessionPublisher {
         if (event.event.type !== 'subagent_event') this.onEvent(event.event, event.subagentId);
         return;
       case 'runtime_updates':
+        // Lo entregado abre otra petición al modelo: lo que llevaba escrito es
+        // un bloque terminado, no el principio del siguiente.
+        this.closeText(subagentId);
         this.state('steering.delivered', () => ({
           ids: event.userMessages.map((m) => m.id),
           jobs: count(event.jobs),
@@ -876,6 +1112,7 @@ export class SessionPublisher {
       ...(subagentId ? { subagentId } : {}),
       data: data(),
     } as ProtocolStateEvent;
+    this.transcript = applyTranscriptEvent(this.transcript, event);
     this.enqueue(event);
   }
 

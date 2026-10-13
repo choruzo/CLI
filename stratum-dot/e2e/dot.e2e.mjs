@@ -186,14 +186,16 @@ try {
   });
 
   await check('Steer en pausa: en cola, y el run sigue en pausa', async () => {
-    const input = await session.find('.steer input');
+    const input = await session.find('.composer textarea');
+    // Con un run en curso el campo es de steering, y lo dice.
+    assert.match(await session.execute(`return document.querySelector('.composer textarea').getAttribute('aria-label')`), /^Steer this run/);
     await session.type(input, 'mejor no listes nada, resume el README');
     await session.clickButton('Send steering message');
     await session.waitForText('still paused');
     await sleep(800);
     assert.ok((await statuses()).includes('paused'));
     assert.equal(mock.requests.length, 1);
-    assert.equal(await session.execute(`return document.querySelector('.steer input').value`), '');
+    assert.equal(await session.execute(`return document.querySelector('.composer textarea').value`), '');
     await shot('steer-en-pausa');
   });
 
@@ -202,11 +204,14 @@ try {
     await until('running', async () => (await statuses()).includes('running') && !(await statuses()).includes('paused'));
     await until('segunda petición', () => mock.requests.length >= 2);
     assert.match(JSON.stringify(mock.requests[1].messages), /mejor no listes nada/);
-    await session.waitForText('Steering delivered to the agent');
-    // El texto que el modelo va generando llega a la sesión enfocada.
+    // El texto que el modelo va generando llega a la sesión enfocada, en su conversación.
     await until('texto parcial', async () =>
-      /De acuerdo\. palabra1/.test((await session.execute(`return document.querySelector('.partial')?.innerText ?? ''`)) ?? ''),
+      /De acuerdo\. palabra1/.test((await session.execute(`return document.querySelector('.msg.streaming')?.innerText ?? ''`)) ?? ''),
     );
+    // Y lo ocurrido sigue en Activity.
+    await session.clickButton('Activity');
+    await session.waitForText('Steering delivered to the agent');
+    await session.clickButton('Chat');
     await shot('reanudado');
   });
 

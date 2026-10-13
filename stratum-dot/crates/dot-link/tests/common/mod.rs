@@ -94,7 +94,8 @@ pub fn snapshot(id: &str, seq: u64) -> Value {
         "seq": seq, "run": run_dto(id, "running"),
         "partial": { "text": "", "reasoning": "" },
         "toolCalls": [], "subagents": [], "todos": [], "jobs": [],
-        "approvals": [], "questions": [], "plans": []
+        "approvals": [], "questions": [], "plans": [],
+        "messages": [], "messagesTruncated": false
     })
 }
 
@@ -436,6 +437,53 @@ impl Fake {
                     vec![ok(json!({ "status": "accepted" }))]
                 }
             }
+            // Como el daemon: la sesión nueva aparece por la suscripción de
+            // conjunto (`session.opened`), no solo en la respuesta.
+            "sessions.open" => {
+                if params["cwd"] == "/no/existe" {
+                    return vec![err("INVALID_PARAMS", json!({}))];
+                }
+                let n = state.sessions.len() + 1;
+                let id = format!("ses_new_{n}");
+                let mut snap = snapshot(&id, 1);
+                snap["session"]["host"]["kind"] = json!("daemon");
+                snap["session"]["state"] = json!("idle");
+                snap["session"]["currentRunId"] = Value::Null;
+                snap["run"] = Value::Null;
+                let session = snap["session"].clone();
+                state.sessions.push((id.clone(), snap));
+                let opened = json!({
+                    "type": "session.opened", "sessionId": id, "at": 11, "seq": 1,
+                    "data": { "session": session }
+                });
+                for conn in &state.conns {
+                    for (sub, scope) in &conn.subs {
+                        if matches!(scope, Scope::Overview) {
+                            let _ = conn.out.send(line(json!({
+                                "method": "events", "params": { "subscriptionId": sub, "events": [opened] }
+                            })));
+                        }
+                    }
+                }
+                vec![ok(json!({ "session": session }))]
+            }
+            "runs.start" => {
+                let session_id = params["sessionId"].as_str().unwrap_or("");
+                if !state.sessions.iter().any(|(id, _)| id == session_id) {
+                    return vec![err("NOT_FOUND", json!({}))];
+                }
+                if params["input"] == "ocupada" {
+                    return vec![err("BUSY", json!({}))];
+                }
+                vec![ok(json!({ "run": run_dto(session_id, "running") }))]
+            }
+            "agents.list" => vec![ok(json!({ "agents": [{
+                "name": "general", "description": "", "mode": "all", "origin": "builtin",
+                "allowedTools": null
+            }] }))],
+            "models.list" => vec![ok(json!({ "models": [{
+                "provider": "local", "id": "mock-model", "contextWindow": null, "default": true
+            }] }))],
             _ => vec![err("METHOD_NOT_FOUND", json!({}))],
         }
     }
@@ -537,6 +585,7 @@ pub fn fast() -> Timings {
         backoff_initial: Duration::from_millis(20),
         backoff_max: Duration::from_millis(80),
         request_timeout: Duration::from_millis(400),
+        open_timeout: Duration::from_millis(900),
         handshake_timeout: Duration::from_millis(400),
         daemon_start_wait: Duration::from_millis(800),
         idle_poll: Duration::from_millis(40),

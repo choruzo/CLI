@@ -2,7 +2,9 @@
 //!
 //! Qué hace: descubrir el daemon, conectar, hacer el handshake, mantener las
 //! suscripciones (una de conjunto y una por sesión viva), reconectar y relevar
-//! cuatro órdenes (`pause`, `resume`, `cancel`, `steer`).
+//! cuatro órdenes sobre un run (`pause`, `resume`, `cancel`, `steer`) y cuatro
+//! llamadas para conversar (`sessions.open`, `runs.start`, `agents.list`,
+//! `models.list`), cuyo resultado pasa sin interpretar.
 //!
 //! Qué **no** hace, a propósito: no interpreta los DTOs del protocolo ni
 //! reduce eventos. Solo lee el sobre de cada mensaje y los campos de orden
@@ -28,7 +30,9 @@ pub mod wire;
 pub use launcher::{CliLauncher, DaemonLauncher, NoLauncher};
 pub use link::{spawn, LinkConfig, LinkHandle};
 pub use log::Logger;
-pub use state::{CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent};
+pub use state::{
+    CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
+};
 
 /// Versión del protocolo que habla este cliente (`STRATUM_PROTOCOL_VERSION`).
 pub const PROTOCOL_VERSION: u64 = 1;
@@ -41,3 +45,9 @@ pub const MAX_INPUT_CHARS: usize = 200_000;
 
 /// Identificadores opacos (`LIMITS.idChars`).
 pub const MAX_ID_CHARS: usize = 128;
+
+/// Ruta absoluta de un `cwd` (`LIMITS.pathChars`).
+pub const MAX_PATH_CHARS: usize = 4_096;
+
+/// Nombre de perfil, modelo o provider (`LIMITS.nameChars`).
+pub const MAX_NAME_CHARS: usize = 256;

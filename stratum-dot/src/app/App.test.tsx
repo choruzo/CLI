@@ -196,7 +196,7 @@ describe('controles: el protocolo manda', () => {
     // La interfaz no se vació.
     expect(screen.getAllByRole('button', { name: /^Session / })).toHaveLength(1);
     expect((screen.getByRole('button', { name: 'Pause run' }) as HTMLButtonElement).disabled).toBe(true);
-    expect((screen.getByRole('textbox', { name: /Steer this run/ }) as HTMLInputElement).disabled).toBe(true);
+    expect((screen.getByRole('textbox') as HTMLTextAreaElement).disabled).toBe(true);
   });
 });
 
@@ -212,16 +212,31 @@ describe('detalle', () => {
     const pending = screen.getByRole('region', { name: 'Pending decisions' });
     expect(pending.textContent).toContain('git push origin main');
     expect(screen.queryByRole('button', { name: /approve|deny|allow/i })).toBeNull();
+    // En el chat, lo que se está escribiendo; en Activity, las tools del run.
+    expect(screen.getByText('Voy a subir los cambios')).toBeTruthy();
+    expect(screen.getByText(/1 pending/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
     const tools = screen.getByRole('list', { name: 'Tool calls' });
     expect(tools.textContent).toContain('Active');
     expect(document.body.textContent).not.toMatch(/Executing/i);
-    expect(screen.getByText('Voy a subir los cambios')).toBeTruthy();
-    expect(screen.getByText(/1 pending/)).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Pending decisions' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /approve|deny|allow/i })).toBeNull();
   });
 
-  it('no enseña botones de cosas que M6 no hace', () => {
+  it('Activity sigue ahí: el run, el anfitrión y lo último que pasó', () => {
+    const native = running();
+    fireEvent.click(screen.getByRole('tab', { name: 'Activity' }));
+    expect(screen.getByText('Directory')).toBeTruthy();
+    act(() => native.push({ type: 'events', sessionId: SID, events: [runUpdated(4, 'paused')] }));
+    expect(screen.getByRole('list', { name: 'Recent activity' }).textContent).toContain('Run paused');
+    // El campo de escritura y los controles son los mismos en las dos pestañas.
+    expect(screen.getByRole('textbox', { name: /Steer this run/ })).toBeTruthy();
+    expect(screen.getByRole('button', { name: 'Resume run' })).toBeTruthy();
+  });
+
+  it('no enseña botones de cosas que Dot aún no hace', () => {
     running();
-    for (const name of [/attach/i, /trace/i, /new session/i, /approve/i, /stop daemon/i, /history/i]) {
+    for (const name of [/attach/i, /trace/i, /close session/i, /approve/i, /stop daemon/i, /history/i, /memory/i]) {
       expect(screen.queryByRole('button', { name })).toBeNull();
     }
   });

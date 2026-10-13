@@ -77,6 +77,33 @@ export const STATUS_TONE: Record<DisplayStatus, Tone> = {
   closed: 'muted',
 };
 
+/**
+ * Qué hace el campo de escritura de una sesión. Son tres cosas distintas y no
+ * se mezclan: **preguntar** abre un run nuevo (`runs.start`), **redirigir**
+ * modifica el que hay (`runs.steer`), y a veces no se puede ninguna de las dos.
+ */
+export type ComposerMode =
+  | { kind: 'ask' }
+  | { kind: 'steer'; paused: boolean }
+  | { kind: 'off'; reason: string };
+
+export function composerMode(
+  snapshot: ProtocolSessionSnapshot,
+  link: { connected: boolean; canControl: boolean },
+): ComposerMode {
+  if (!link.connected) return { kind: 'off', reason: 'Not connected to the Stratum daemon' };
+  if (snapshot.session.state === 'closed') return { kind: 'off', reason: 'This session has ended' };
+  if (isDetached(snapshot)) return { kind: 'off', reason: "The session's host is not connected" };
+  if (!link.canControl) return { kind: 'off', reason: 'This client cannot control runs' };
+  const run = activeRun(snapshot);
+  // Con un run en curso —también en pausa o esperando— nunca se abre otro.
+  if (run) return { kind: 'steer', paused: run.status === 'paused' };
+  if (snapshot.session.host.kind === 'peer') {
+    return { kind: 'off', reason: 'This session lives in a terminal: new messages are typed there' };
+  }
+  return { kind: 'ask' };
+}
+
 /** Cuántas decisiones esperan a una persona en esta sesión. */
 export function pendingCount(snapshot: ProtocolSessionSnapshot): number {
   return snapshot.approvals.length + snapshot.questions.length + snapshot.plans.length;

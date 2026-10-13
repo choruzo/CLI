@@ -16,8 +16,9 @@
  * (`RunRegistry`, el buffer del `EventHub`) es una proyección en memoria de lo
  * que las sesiones publican: no se persiste y se puede rehacer.
  */
-import { statSync } from 'fs';
-import { mkdir } from 'fs/promises';
+import { constants } from 'fs';
+import { access, mkdir, stat } from 'fs/promises';
+import { homedir } from 'os';
 import { isAbsolute, resolve } from 'path';
 import { ProfileLoader, profileMode } from '../agent/profiles.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
@@ -70,6 +71,11 @@ export interface StratumdOptions {
   env: NodeJS.ProcessEnv;
   /** Carpeta del endpoint. Por defecto `~/.stratum/daemon/`. */
   dir?: string;
+  /**
+   * Directorio de una sesión abierta sin `cwd`. Por defecto, el *home* del
+   * usuario del daemon (nunca el directorio desde el que se lanzó el proceso).
+   */
+  defaultCwd?: string;
   /** Arranque de una sesión (config, provider, modelo). Inyectable para tests. */
   startup?: typeof resolveSessionStartup;
   /**
@@ -410,17 +416,26 @@ export class Stratumd {
     if (this.sessions.size + this.opening >= this.maxSessions) {
       throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
     }
-    if (!isAbsolute(params.cwd)) throw invalid('cwd', 'cwd must be an absolute path');
-    const cwd = resolve(params.cwd);
-    try {
-      if (!statSync(cwd).isDirectory()) throw new Error('not a directory');
-    } catch {
-      throw invalid('cwd', 'cwd is not an existing directory');
-    }
+    // El directorio lo valida quien va a trabajar en él, no quien lo pide.
+    const requested = params.cwd ?? this.opts.defaultCwd ?? homedir();
+    if (!isAbsolute(requested)) throw invalid('cwd', 'cwd must be an absolute path');
+    const cwd = resolve(requested);
     // `params.env` está reservado: ni se usa ni se registra.
 
+    // Desde aquí cuenta como sesión que se está abriendo (para `maxSessions`).
     this.opening++;
     try {
+      // Sin bloquear el bucle: la ruta la elige un cliente y puede ser una unidad de red.
+      const isDirectory = await stat(cwd).then(
+        (s) => s.isDirectory(),
+        () => false,
+      );
+      if (!isDirectory) throw invalid('cwd', 'cwd is not an existing directory');
+      const accessible = await access(cwd, constants.R_OK | constants.X_OK).then(
+        () => true,
+        () => false,
+      );
+      if (!accessible) throw invalid('cwd', 'cwd is not accessible to the daemon');
       const startup: SessionStartup = await this.startup({
         cwd,
         ...(params.provider ? { provider: params.provider } : {}),
@@ -521,6 +536,10 @@ export class Stratumd {
       },
 
       'agents.list': (params) => {
+        // Una ruta relativa se resolvería contra el directorio del proceso del daemon.
+        if (params.cwd !== undefined && !isAbsolute(params.cwd)) {
+          throw invalid('cwd', 'cwd must be an absolute path');
+        }
         const loader = new ProfileLoader(params.cwd ? [params.cwd] : []);
         return {
           agents: loader.list().map((p) => ({
@@ -535,21 +554,33 @@ export class Stratumd {
         };
       },
       'models.list': async (params) => {
+        // De la config solo salen alias e ids: ni `baseUrl`, ni claves, ni cabeceras.
         const providers = this.opts.config.provider?.providers ?? {};
+        const defaultProvider = this.opts.config.provider?.default;
         const names = params.provider ? [params.provider] : Object.keys(providers);
         const models: ProtocolModel[] = [];
         let error: string | undefined;
         for (const name of names) {
           const entry = providers[name];
           if (!entry) throw new ProtocolError('NOT_FOUND', 'Provider not found.');
+          const found: ProtocolModel[] = [];
           try {
             const infos = await fetchModelInfos(entry.baseUrl, entry.apiKey, { timeoutMs: 3000 });
             for (const m of infos) {
-              models.push({ provider: name, id: m.id, contextWindow: m.contextWindow ?? null });
+              found.push({ provider: name, id: m.id, contextWindow: m.contextWindow ?? null });
             }
           } catch {
             // Sin el detalle: puede nombrar la URL del backend.
             error ??= `Could not list the models of "${name}".`;
+          }
+          // El modelo configurado se ofrece aunque el backend no liste modelos.
+          if (entry.model && !found.some((m) => m.id === entry.model)) {
+            found.unshift({ provider: name, id: entry.model, contextWindow: null });
+          }
+          for (const m of found) {
+            models.push(
+              name === defaultProvider && m.id === entry.model ? { ...m, default: true } : m,
+            );
           }
         }
         return { models, ...(error ? { error } : {}) };

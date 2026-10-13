@@ -22,6 +22,8 @@ interface SessionStore {
   /** Sesiones vivas, en el orden que da el daemon. */
   order: string[];
   sessions: Record<string, SessionEntry>;
+  /** El daemon ya dijo alguna vez qué sesiones hay: antes de eso, «no está» no significa nada. */
+  listed: boolean;
   /** El daemon dice qué sesiones hay: las que no estén dejan de existir aquí. */
   setSessions(ids: string[]): void;
   /** Una foto sustituye lo que se tuviera de esa sesión. */
@@ -36,12 +38,13 @@ const EMPTY: SessionEntry = { snapshot: null, activity: [], unreadable: false };
 export const useSessions = create<SessionStore>((set, get) => ({
   order: [],
   sessions: {},
+  listed: false,
 
   setSessions: (ids) =>
     set((prev) => {
       const sessions: Record<string, SessionEntry> = {};
       for (const id of ids) sessions[id] = prev.sessions[id] ?? EMPTY;
-      return { order: ids, sessions };
+      return { order: ids, sessions, listed: true };
     }),
 
   applySnapshot: (sessionId, raw) =>
@@ -86,5 +89,5 @@ export const useSessions = create<SessionStore>((set, get) => ({
     return result.needsResync;
   },
 
-  reset: () => set({ order: [], sessions: {} }),
+  reset: () => set({ order: [], sessions: {}, listed: false }),
 }));

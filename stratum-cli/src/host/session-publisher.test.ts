@@ -23,7 +23,21 @@ import { ProviderRouter } from '../providers/router.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { closeExecRuntime } from '../tools/exec/runtime.js';
 import { SessionHost } from './session-host.js';
-import { SessionPublisher, type PublisherSink } from './session-publisher.js';
+import {
+  SNAPSHOT_BYTE_BUDGET,
+  SNAPSHOT_MIN_BUDGET,
+  SessionPublisher,
+  fitSnapshot,
+  type PublisherSink,
+} from './session-publisher.js';
+import { MAX_MESSAGE_BYTES, type ProtocolSessionSnapshot } from '../protocol/index.js';
+import {
+  sampleApproval,
+  sampleRun,
+  sampleSession,
+  sampleSnapshot,
+  sampleToolCall,
+} from '../protocol/protocol.fixtures.js';
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'stratum-publisher-')));
 afterAll(async () => {
@@ -493,5 +507,243 @@ describe('SessionPublisher — memory.write', () => {
         },
       },
     ]);
+  });
+});
+
+describe('fitSnapshot — una foto tiene que caber en una trama', () => {
+  it('con texto corriente no toca nada', () => {
+    const snapshot = sampleSnapshot();
+    expect(fitSnapshot(snapshot)).toBe(snapshot);
+  });
+
+  it('una foto al límite de todo, con texto de varios bytes, se reduce hasta caber y lo dice', () => {
+    const wide = (n: number): string => '漢'.repeat(n);
+    const messages = Array.from({ length: 12 }, (_, i) => ({
+      kind: 'assistant' as const,
+      id: `m${i + 1}`,
+      runId: 'run_1',
+      at: 1,
+      text: wide(12_000),
+    }));
+    const huge = sampleSnapshot({
+      partial: { text: wide(100_000), reasoning: wide(100_000) },
+      toolCalls: Array.from({ length: 100 }, (_, i) =>
+        sampleToolCall({ id: `c${i}`, description: wide(2_000), output: wide(1_000) }),
+      ),
+      messages,
+    });
+    expect(Buffer.byteLength(JSON.stringify(huge))).toBeGreaterThan(MAX_MESSAGE_BYTES);
+
+    const fit = fitSnapshot(huge);
+    expect(Buffer.byteLength(JSON.stringify(fit))).toBeLessThanOrEqual(SNAPSHOT_BYTE_BUDGET);
+    expect(sessionSnapshotSchema.safeParse(fit).success).toBe(true);
+    // Lo primero que se va es lo menos valioso; la conversación, lo último, y se avisa.
+    expect(fit.partial.reasoning).toBe('');
+    expect(fit.seq).toBe(huge.seq);
+    expect(fit.messages.at(-1)).toEqual(messages.at(-1));
+    expect(fit.messages.length < messages.length).toBe(fit.messagesTruncated);
+    expect(fit.toolCalls).toHaveLength(100);
+  });
+});
+
+describe('fitSnapshot — postcondición estricta', () => {
+  const bytes = (s: ProtocolSessionSnapshot): number =>
+    Buffer.byteLength(JSON.stringify(s), 'utf8');
+  /** Texto de 4 bytes por carácter visible, con pares de surrogates en cada corte posible. */
+  const emoji = (n: number): string => '😀漢'.repeat(Math.floor(n / 3));
+  const LONE_SURROGATE = /[\ud800-\udbff](?![\udc00-\udfff])|(?<![\ud800-\udbff])[\udc00-\udfff]/;
+
+  /** Una foto desmesurada en todas sus listas, con una sola entrada de conversación. */
+  function monster(messages = 1): ProtocolSessionSnapshot {
+    const approval = (i: number) =>
+      sampleApproval({
+        id: `appr_${i}`,
+        description: emoji(2_000),
+        reason: emoji(500),
+        confirmPhrase: `prod-${i}`,
+        forced: true,
+      });
+    return sampleSnapshot({
+      session: sampleSession({ title: emoji(80), cwd: `/work/${emoji(300)}` }),
+      run: sampleRun({ input: emoji(2_000), status: 'waiting_approval' }),
+      partial: { text: emoji(100_000), reasoning: emoji(100_000) },
+      toolCalls: Array.from({ length: 100 }, (_, i) =>
+        sampleToolCall({
+          id: `call_${i}`,
+          state: i % 10 === 0 ? 'running' : 'completed',
+          description: emoji(2_000),
+          output: emoji(1_000),
+        }),
+      ),
+      subagents: Array.from({ length: 50 }, (_, i) => ({
+        id: `sub_${i}`,
+        runId: 'run_1',
+        profile: 'code',
+        task: emoji(1_000),
+        status: i < 3 ? ('running' as const) : ('completed' as const),
+        summary: emoji(1_000),
+        filesChanged: Array.from({ length: 200 }, (_, f) => ({
+          path: `src/${emoji(60)}/${f}.ts`,
+          action: 'modified' as const,
+        })),
+      })),
+      todos: Array.from({ length: 400 }, (_, i) => ({
+        id: `todo_${i}`,
+        title: emoji(400),
+        status: i < 4 ? ('in_progress' as const) : ('done' as const),
+      })),
+      jobs: Array.from({ length: 1_500 }, (_, i) => ({
+        id: `job_${i}`,
+        sessionId: 'ses_20261012_abc123',
+        command: emoji(600),
+        cwd: `/work/${emoji(100)}`,
+        status: i < 5 ? ('running' as const) : ('completed' as const),
+        startedAt: 1,
+        scope: 'main',
+      })),
+      approvals: [approval(1), approval(2)],
+      questions: [
+        {
+          id: 'q_1',
+          sessionId: 'ses_20261012_abc123',
+          runId: 'run_1',
+          questions: [
+            {
+              question: emoji(4_000),
+              options: [
+                { id: 'opt_a', label: emoji(300) },
+                { id: 'opt_b', label: emoji(300) },
+              ],
+            },
+          ],
+          requestedAt: 1,
+          expiresAt: null,
+        },
+      ],
+      plans: [
+        {
+          id: 'plan_1',
+          sessionId: 'ses_20261012_abc123',
+          runId: 'run_1',
+          plan: {
+            summary: emoji(2_000),
+            steps: Array.from({ length: 100 }, (_, i) => ({
+              id: `step_${i}`,
+              title: emoji(2_000),
+              detail: emoji(2_000),
+              status: 'pending' as const,
+            })),
+          },
+          requestedAt: 1,
+          expiresAt: null,
+        },
+      ],
+      messages: Array.from({ length: messages }, (_, i) => ({
+        kind: 'assistant' as const,
+        id: `m${i + 1}`,
+        runId: 'run_1',
+        at: 1,
+        text: emoji(12_000),
+      })),
+    });
+  }
+
+  const ids = (items: Array<{ id: string }>): string[] => items.map((i) => i.id);
+
+  it('con una sola entrada de conversación y el resto desmesurado, cabe igual', () => {
+    const huge = monster(1);
+    // Recortar la conversación ya no puede ayudar: hay que llegar más lejos.
+    expect(bytes(huge)).toBeGreaterThan(4 * MAX_MESSAGE_BYTES);
+    const fit = fitSnapshot(huge);
+
+    expect(bytes(fit)).toBeLessThanOrEqual(SNAPSHOT_BYTE_BUDGET);
+    expect(sessionSnapshotSchema.safeParse(fit).success).toBe(true);
+    expect(LONE_SURROGATE.test(JSON.stringify(fit))).toBe(false);
+
+    // El estado vivo está entero: sesión, run, y todo lo que sigue abierto.
+    expect(fit.seq).toBe(huge.seq);
+    expect(fit.session.id).toBe(huge.session.id);
+    expect(fit.run).toMatchObject({ id: 'run_1', status: 'waiting_approval' });
+    const open = huge.toolCalls.filter((c) => c.state === 'running');
+    expect(ids(fit.toolCalls.filter((c) => c.state === 'running'))).toEqual(ids(open));
+    expect(ids(fit.subagents.filter((a) => a.status === 'running'))).toEqual([
+      'sub_0',
+      'sub_1',
+      'sub_2',
+    ]);
+    expect(ids(fit.jobs.filter((j) => j.status === 'running'))).toHaveLength(5);
+    expect(ids(fit.todos.filter((t) => t.status === 'in_progress'))).toHaveLength(4);
+    // Lo terminado se redujo, y en el mismo orden.
+    expect(fit.jobs.length).toBeLessThan(huge.jobs.length);
+    expect(ids(fit.jobs)).toEqual(ids(huge.jobs).filter((id) => ids(fit.jobs).includes(id)));
+
+    // Lo pendiente se puede seguir resolviendo: ids, opciones y frase, intactos.
+    expect(fit.approvals.map((a) => [a.id, a.confirmPhrase, a.forced, a.status])).toEqual([
+      ['appr_1', 'prod-1', true, 'pending'],
+      ['appr_2', 'prod-2', true, 'pending'],
+    ]);
+    expect(fit.questions[0]!.questions[0]!.options!.map((o) => o.id)).toEqual(['opt_a', 'opt_b']);
+    expect(ids(fit.plans[0]!.plan.steps)).toEqual(ids(huge.plans[0]!.plan.steps));
+    expect(fit.messagesTruncated).toBe(fit.messages.length < huge.messages.length);
+    // La de entrada no se toca.
+    expect(huge.partial.reasoning.length).toBe(99_999);
+  });
+
+  it('cada presupuesto fuerza una etapa más, y la postcondición se cumple en todas', () => {
+    const huge = monster(40);
+    const budgets = [
+      SNAPSHOT_BYTE_BUDGET,
+      512 * 1024,
+      256 * 1024,
+      128 * 1024,
+      64 * 1024,
+      32 * 1024,
+      SNAPSHOT_MIN_BUDGET,
+    ];
+    const sizes: number[] = [];
+    for (const budget of budgets) {
+      const fit = fitSnapshot(huge, budget);
+      const size = bytes(fit);
+      sizes.push(size);
+      expect(size, `budget ${budget}`).toBeLessThanOrEqual(budget);
+      expect(sessionSnapshotSchema.safeParse(fit).success, `budget ${budget}`).toBe(true);
+      expect(LONE_SURROGATE.test(JSON.stringify(fit)), `budget ${budget}`).toBe(false);
+      expect(fit.seq).toBe(huge.seq);
+      expect(fit.run?.id).toBe('run_1');
+      expect(fit.session.state).toBe(huge.session.state);
+      // Si falta conversación, se dice.
+      if (fit.messages.length < huge.messages.length) expect(fit.messagesTruncated).toBe(true);
+    }
+    // No es siempre la misma foto mínima: con más sitio se conserva más.
+    expect(new Set(sizes).size).toBeGreaterThan(3);
+    expect(sizes[0]!).toBeGreaterThan(sizes.at(-1)!);
+    // Con sitio, las aprobaciones pendientes no se pierden nunca.
+    for (const budget of budgets.slice(0, 5)) {
+      expect(ids(fitSnapshot(huge, budget).approvals), `budget ${budget}`).toEqual([
+        'appr_1',
+        'appr_2',
+      ]);
+    }
+  });
+
+  it('muchas formas de foto, un solo resultado: siempre cabe', () => {
+    // Variaciones deterministas: qué lista domina y con cuántos elementos.
+    for (let seed = 1; seed <= 24; seed++) {
+      const base = monster(seed % 5);
+      const pick = <T>(items: T[], every: number): T[] =>
+        seed % every === 0 ? items : items.slice(0, Math.max(1, items.length >> (seed % 4)));
+      const snapshot: ProtocolSessionSnapshot = {
+        ...base,
+        toolCalls: pick(base.toolCalls, 2),
+        subagents: pick(base.subagents, 3),
+        todos: pick(base.todos, 4),
+        jobs: pick(base.jobs, 5),
+        partial: seed % 2 ? base.partial : { text: '', reasoning: '' },
+      };
+      const fit = fitSnapshot(snapshot);
+      expect(bytes(fit), `seed ${seed}`).toBeLessThanOrEqual(SNAPSHOT_BYTE_BUDGET);
+      expect(sessionSnapshotSchema.safeParse(fit).success, `seed ${seed}`).toBe(true);
+      expect(ids(fit.approvals), `seed ${seed}`).toEqual(['appr_1', 'appr_2']);
+    }
   });
 });

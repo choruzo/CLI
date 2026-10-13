@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M6 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 con su alcance acotado: ver su estado); siguiente: M7.
+> anotados en el hito que los encuentra. **M0–M7 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado: ver su estado); siguiente: M8.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -1284,6 +1284,64 @@ Desviaciones:
   modelo; run detail con Timeline (`trace/model.ts`), Tools, Subagentes, Log.
 - Controles: Stop, Pause/Resume, Steer.
 - *Hecho cuando*: AC-2, AC-8.
+
+**Estado: completado (2026-10-13), con el alcance acotado al chat.** Referencia: `docs/dot.md`
+§12 y `docs/protocol.md` §13.7.
+
+> Stratum Dot puede crear una sesión alojada en el daemon y mantener con ella una conversación
+> de varios turnos exclusivamente a través del Stratum Protocol, reconstruyendo el chat desde
+> el estado del anfitrión y sin poseer ni duplicar el runtime.
+
+- **Chat sobre sesiones del daemon.** *New chat* → `sessions.open` → `HostedSession` →
+  `SessionHost.create` (el camino de M2, sin variantes); un mensaje → `runs.start`, un run
+  nuevo de la misma sesión. Un run a la vez: con uno en curso —también en pausa o esperando
+  una decisión— el campo de escritura es **steering** (`runs.steer`) y lo dice; nunca abre otro
+  run ni encola un mensaje.
+- **La conversación va en la foto.** `ProtocolSessionSnapshot.messages` + `messagesTruncated`:
+  entradas `user` · `assistant` · `tool` · `outcome`, de todos los runs de la sesión, acotadas
+  (`TRANSCRIPT_LIMITS`). Es una función pura de los eventos de estado
+  (`protocol/transcript.ts`) que usan **el publicador y el reductor**: no hay un reductor de
+  chat en Dot ni una segunda copia de la conversación (ni en un store, ni en `localStorage`,
+  ni en Rust). El texto en vivo llega por `message.delta` a `partial` y lo cierra
+  `message.completed`: con todos los fragmentos o con ninguno, el resultado es el mismo.
+- **Selector de perfil y modelo**, con lo que dice el daemon (`agents.list`, `models.list`):
+  Dot no lee ninguna configuración. Se eligen al abrir.
+- **`SessionEnv`**: el de cualquier sesión del daemon —copia de su entorno al arrancar + el
+  `cwd`, que valida el daemon—. El webview no puede pasar variables de entorno (el comando
+  nativo no tiene ese parámetro) y `sessions.open.env` sigue sin usarse.
+- **Sin capacidad nueva.** Abrir e iniciar exigen `control`, la que Dot ya tenía (motivos:
+  `docs/dot.md` §4). Dot sigue siendo `operator`: ni `approver`, ni `host`, ni `broker`.
+- **Sin actualización optimista**, también aquí: ni sesión en la lista antes de que el daemon
+  la publique, ni mensaje pintado antes de `run.started`. `runs.start` o `sessions.open` sin
+  respuesta tienen resultado desconocido: no se reenvían y decide la foto.
+- **AC-2 comprobado** con procesos reales, sin ventana (`scripts/smoke-chat.mjs`, `dot-probe`)
+  y en la ventana (`e2e/chat.e2e.mjs`): se cierra Dot a mitad de un run, el run termina en el
+  daemon, y al abrir Dot la sesión está con su conversación entera y se sigue hablando con ella.
+- **Controles**: Pause/Resume y Cancel (los de M6, junto al chat) y Steer en el campo de escritura.
+
+Desviaciones:
+
+- **Sin run detail con Timeline ni Log, y AC-8 sin tocar.** El visor de trayectoria necesita
+  `trace.subscribe`, que el daemon no atiende (`docs/protocol.md` §13.6), y «chat ≠ traza»:
+  queda para un hito posterior. La pestaña *Activity* de M6 sigue (run, tools, subagentes,
+  actividad reciente).
+- **No se reutilizan componentes de Desktop.** Los suyos cuelgan del protocolo v9 del sidecar
+  (su transcript, sus tramas); los de Dot pintan DTOs del Stratum Protocol. Lo que comparten
+  es la herramienta de E2E. La convergencia sigue siendo M12.
+- **Sin persistencia de las sesiones del daemon.** Si el daemon se reinicia, sus chats
+  desaparecen y Dot lo dice; no se finge una reanudación. `sessions.open { resume }` sigue en
+  `UNAVAILABLE`.
+- **Aprobaciones, preguntas y planes solo a la vista** dentro del chat. Resolverlos es M8; la
+  política de M4 no se relaja: sin `approver.json`, una sesión abierta desde Dot deniega lo
+  destructivo sin preguntar.
+- **El directorio se escribe**: sin diálogo nativo de carpeta ni explorador (habría dado al
+  lado nativo acceso al disco que hoy no tiene). Se recuerda el último como preferencia.
+- **Sin dot compacto flotante** («Ask Stratum…» siempre encima, §8.2): la entrada rápida es
+  *+ New chat* / `Ctrl+N` en la ventana única, que sigue funcionando a 440×680.
+- **Sin cambiar de modelo o perfil en una sesión viva, y sin cerrar sesiones** desde Dot.
+- **Cambios en el contrato** (anotados en `docs/protocol.md` §17): la conversación en la foto
+  (campos obligatorios), `sessions.open.cwd` opcional, `ProtocolRun.inputTruncated`,
+  `ProtocolModel.default`, y un bloque de texto que se cierra también al entregarse steering.
 
 ### M8 — Dot: aprobaciones y notificaciones
 - Tarjetas de aprobación / pregunta / plan; contador en bandeja; notificaciones (§8.6).

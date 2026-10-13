@@ -49,7 +49,14 @@ export interface AppInfo {
   trayAvailable: boolean;
 }
 
-export type CommandErrorKind = 'invalid' | 'not-sent' | 'unknown' | 'rejected';
+/**
+ * `unknown`: algo que cambia estado salió y no hubo respuesta —no se sabe si se
+ * aplicó, y no se reenvía—. `no-answer`: una consulta sin respuesta (repetirla
+ * es seguro).
+ */
+export type CommandErrorKind = 'invalid' | 'not-sent' | 'unknown' | 'no-answer' | 'rejected';
+
+const ERROR_KINDS: readonly CommandErrorKind[] = ['invalid', 'not-sent', 'unknown', 'no-answer', 'rejected'];
 
 /** Por qué no se pudo dar una orden (`CommandError` en `state.rs`). */
 export interface CommandError {
@@ -63,15 +70,25 @@ export function toCommandError(err: unknown): CommandError {
   if (typeof err === 'object' && err !== null && 'kind' in err && 'message' in err) {
     const e = err as Record<string, unknown>;
     return {
-      kind: (['invalid', 'not-sent', 'unknown', 'rejected'] as const).includes(e.kind as CommandErrorKind)
-        ? (e.kind as CommandErrorKind)
-        : 'unknown',
+      kind: ERROR_KINDS.includes(e.kind as CommandErrorKind) ? (e.kind as CommandErrorKind) : 'unknown',
       code: typeof e.code === 'string' ? e.code : null,
       reason: typeof e.reason === 'string' ? e.reason : null,
       message: String(e.message),
     };
   }
   return { kind: 'unknown', code: null, reason: null, message: typeof err === 'string' ? err : 'Unexpected error.' };
+}
+
+/**
+ * Lo que se puede pedir al abrir una sesión. Todo opcional: lo que falte lo
+ * decide el daemon. No hay variables de entorno, ni se puede: el entorno de
+ * una sesión del daemon es el del daemon.
+ */
+export interface OpenSessionRequest {
+  cwd?: string;
+  agent?: string;
+  provider?: string;
+  model?: string;
 }
 
 export interface NativeBridge {
@@ -91,6 +108,15 @@ export interface NativeBridge {
   resumeRun(sessionId: string, runId?: string): Promise<string>;
   cancelRun(sessionId: string, runId?: string): Promise<string>;
   steerRun(sessionId: string, text: string): Promise<string>;
+  /**
+   * Abre una sesión alojada en el daemon. Devuelve el resultado **sin validar**
+   * (`protocol/results.ts`); la sesión llega después por `onEvent`.
+   */
+  openSession(request: OpenSessionRequest): Promise<unknown>;
+  /** Un mensaje: un run nuevo de esa sesión. Resultado sin validar. */
+  startRun(sessionId: string, input: string): Promise<unknown>;
+  listAgents(cwd?: string): Promise<unknown>;
+  listModels(): Promise<unknown>;
   hideWindow(): Promise<void>;
   /** Cierra Dot. El daemon y las sesiones siguen. */
   quit(): Promise<void>;
@@ -109,6 +135,16 @@ export const tauriBridge: NativeBridge = {
   resumeRun: (sessionId, runId) => invoke<string>('dot_resume_run', { sessionId, runId: runId ?? null }),
   cancelRun: (sessionId, runId) => invoke<string>('dot_cancel_run', { sessionId, runId: runId ?? null }),
   steerRun: (sessionId, text) => invoke<string>('dot_steer_run', { sessionId, text }),
+  openSession: (request) =>
+    invoke<unknown>('dot_open_session', {
+      cwd: request.cwd ?? null,
+      agent: request.agent ?? null,
+      provider: request.provider ?? null,
+      model: request.model ?? null,
+    }),
+  startRun: (sessionId, input) => invoke<unknown>('dot_start_run', { sessionId, input }),
+  listAgents: (cwd) => invoke<unknown>('dot_list_agents', { cwd: cwd ?? null }),
+  listModels: () => invoke<unknown>('dot_list_models'),
   hideWindow: () => invoke('dot_hide'),
   quit: () => invoke('dot_quit'),
   onEvent: (handler) => listen<DotEvent>(DOT_EVENT, (e) => handler(e.payload)),
