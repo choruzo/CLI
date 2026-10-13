@@ -40,7 +40,11 @@ import {
   type MethodName,
   type MethodParams,
   type MethodResult,
+  type ProtocolApprovalDecision,
   type ProtocolEvent,
+  type ProtocolPlan,
+  type ProtocolQuestionAnswer,
+  type ProtocolResolver,
   type ProtocolSessionSnapshot,
   type SteerStatus,
 } from '../protocol/index.js';
@@ -78,6 +82,16 @@ export interface PeerSessionsOptions {
   now?: () => number;
   /** Algo cambió (para la cuenta de actividad del daemon). */
   onActivity?: () => void;
+  /**
+   * Lo pendiente de decisión que cuentan los anfitriones (aprobaciones,
+   * preguntas, planes): cada evento aplicado, cada foto que sustituye y cada
+   * sesión que deja de existir.
+   */
+  pending?: {
+    apply(event: ProtocolEvent): void;
+    sync(snapshot: ProtocolSessionSnapshot): void;
+    forget(sessionId: string): void;
+  };
 }
 
 interface PeerSession {
@@ -93,6 +107,13 @@ interface PeerSession {
   detachedAt: number | null;
   watch: NodeJS.Timeout | null;
 }
+
+type ForwardedMethod =
+  | 'host.cancel'
+  | 'host.steer'
+  | 'host.resolveApproval'
+  | 'host.answerQuestions'
+  | 'host.decidePlan';
 
 function invalid(path: string, message: string): ProtocolError {
   return new ProtocolError('INVALID_PARAMS', message, { issues: [{ path, message }] });
@@ -356,6 +377,7 @@ export class PeerSessions {
       }
       p.snapshot = applySessionEvent(p.snapshot, event);
       this.opts.registry.apply(event);
+      this.opts.pending?.apply(event);
       fresh.push(event);
       if (event.type === 'session.closed') {
         closed = true;
@@ -384,6 +406,7 @@ export class PeerSessions {
   /** Una foto del anfitrión sustituye lo que hubiera: la proyección y lo que ven los clientes. */
   private replace(p: PeerSession, snapshot: ProtocolSessionSnapshot): void {
     p.snapshot = snapshot;
+    this.opts.pending?.sync(snapshot);
     this.announce(p);
   }
 
@@ -460,20 +483,35 @@ export class PeerSessions {
     this.unwatch(p);
     this.sessions.delete(p.sessionId);
     p.owner = null;
+    // Lo que esa sesión tuviera pendiente de decisión deja de existir con ella.
+    this.opts.pending?.forget(p.sessionId);
     this.opts.hub.closeSession(p.sessionId);
   }
 
   /** El daemon se apaga: se sueltan los temporizadores. Las sesiones siguen en sus procesos. */
   shutdown(): void {
-    for (const p of this.sessions.values()) this.unwatch(p);
+    for (const p of this.sessions.values()) {
+      this.unwatch(p);
+      this.opts.pending?.forget(p.sessionId);
+    }
     this.sessions.clear();
+  }
+
+  /** ¿Aloja esa conexión la sesión? */
+  isHost(link: { id: number }, sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.owner?.id === link.id;
+  }
+
+  /** ¿Tiene la sesión a su anfitrión conectado? */
+  connected(sessionId: string): boolean {
+    return this.sessions.get(sessionId)?.owner != null;
   }
 
   // ---------------------------------------------------------------------------
   // Control: se reenvía al anfitrión, que es quien decide
   // ---------------------------------------------------------------------------
 
-  private async forward<M extends 'host.cancel' | 'host.steer'>(
+  private async forward<M extends ForwardedMethod>(
     method: M,
     sessionId: string,
     params: MethodParams<M>,
@@ -489,6 +527,19 @@ export class PeerSessions {
       if (err instanceof ProtocolError) {
         if (err.code === 'STALE_STATE') {
           throw new ProtocolError('STALE_STATE', 'That run is no longer the current one.');
+        }
+        // Una decisión: el anfitrión dice si llegó otro antes o si no vale.
+        if (err.code === 'ALREADY_RESOLVED') {
+          const how = err.data?.resolution;
+          throw new ProtocolError('ALREADY_RESOLVED', 'That request was already resolved.', {
+            resolution: typeof how === 'string' ? how.slice(0, 32) : 'resolved',
+          });
+        }
+        if (err.code === 'NOT_FOUND' && method !== 'host.cancel' && method !== 'host.steer') {
+          throw new ProtocolError('NOT_FOUND', 'No such pending request.');
+        }
+        if (err.code === 'INVALID_PARAMS' && method !== 'host.cancel' && method !== 'host.steer') {
+          throw new ProtocolError('INVALID_PARAMS', 'The host did not accept that answer.');
         }
         log.warn('host rejected a control request', { sessionId, method, code: err.code });
         throw new ProtocolError('UNAVAILABLE', 'The host of that session cannot do that.', {
@@ -511,5 +562,59 @@ export class PeerSessions {
 
   async steer(sessionId: string, text: string): Promise<SteerStatus> {
     return (await this.forward('host.steer', sessionId, { sessionId, text })).status;
+  }
+
+  /**
+   * Entrega una decisión al anfitrión de la sesión, que es quien tiene la
+   * promesa que espera el runtime. Solo se da por resuelta si el anfitrión lo
+   * confirma: sin él, o sin respuesta, `UNAVAILABLE` y nada cambia.
+   */
+  route(sessionId: string): {
+    resolveApproval(
+      id: string,
+      decision: ProtocolApprovalDecision,
+      phrase: string | undefined,
+      by: ProtocolResolver,
+    ): Promise<void>;
+    answerQuestions(
+      id: string,
+      answers: ProtocolQuestionAnswer[] | null,
+      by: ProtocolResolver,
+    ): Promise<void>;
+    decidePlan(
+      id: string,
+      decision: 'approve' | 'reject',
+      plan: ProtocolPlan | undefined,
+      by: ProtocolResolver,
+    ): Promise<void>;
+  } {
+    return {
+      resolveApproval: async (approvalId, decision, phrase, by) => {
+        await this.forward('host.resolveApproval', sessionId, {
+          sessionId,
+          approvalId,
+          decision,
+          ...(phrase !== undefined ? { phrase } : {}),
+          by,
+        });
+      },
+      answerQuestions: async (requestId, answers, by) => {
+        await this.forward('host.answerQuestions', sessionId, {
+          sessionId,
+          requestId,
+          answers,
+          by,
+        });
+      },
+      decidePlan: async (requestId, decision, plan, by) => {
+        await this.forward('host.decidePlan', sessionId, {
+          sessionId,
+          requestId,
+          decision,
+          ...(plan ? { plan } : {}),
+          by,
+        });
+      },
+    };
   }
 }

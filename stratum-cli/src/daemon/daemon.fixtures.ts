@@ -20,9 +20,13 @@ import type {
   Role,
 } from '../protocol/index.js';
 import { PeerHostBridge, type PeerHostBridgeOptions } from '../host/peer-host-bridge.js';
-import { SessionHost } from '../host/session-host.js';
+import { SessionHost, type HostGates, type SessionHostOptions } from '../host/session-host.js';
 import { createSessionEnv } from '../runtime/session-env.js';
+import { approverAuthFromKey } from './approver-key.js';
 import { Stratumd, type StratumdOptions } from './daemon.js';
+
+/** Clave de aprobador del daemon de pruebas. `connect(['approver'])` la presenta sola. */
+export const TEST_APPROVER_KEY = 'clave de aprobador de pruebas';
 
 /** Una ronda del modelo: sus chunks, o una espera antes de darlos. */
 export type Round = OpenAIStreamChunk[] | { wait: Promise<unknown>; then: OpenAIStreamChunk[] };
@@ -93,7 +97,15 @@ export interface TestDaemon {
   /** Crea un proyecto (un directorio) y fija el guion del modelo de sus sesiones. */
   project(name: string, rounds: Round[], config?: Record<string, unknown>): string;
   provider(cwd: string): ScriptedProvider;
-  connect(roles: Role[], name?: string): Promise<StratumClient>;
+  /**
+   * Conecta un cliente. Quien pide `approver` presenta la clave de pruebas;
+   * `approverKey: null` la omite, y una cadena presenta esa otra.
+   */
+  connect(
+    roles: Role[],
+    name?: string,
+    options?: { approverKey?: string | null },
+  ): Promise<StratumClient>;
   stop(): Promise<void>;
 }
 
@@ -148,19 +160,34 @@ export async function startPeer(
   name: string,
   rounds: Round[],
   bridgeOptions: Partial<PeerHostBridgeOptions> = {},
+  hostOptions: {
+    /** Prompts locales de la sesión, como la terminal de `stratum run`. */
+    gates?: HostGates;
+    destructivePolicy?: SessionHostOptions['destructivePolicy'];
+    interactionTimeoutMs?: number;
+    config?: Record<string, unknown>;
+  } = {},
 ): Promise<TestPeer> {
   const cwd = join(where.base, name);
   mkdirSync(cwd, { recursive: true });
-  const config = testConfig(where.base);
+  const config = testConfig(where.base, hostOptions.config);
   const router = new ProviderRouter(config);
   const provider = new ScriptedProvider(rounds);
   router.getActive = () => provider;
+  // Como `stratum run`: lo que pida la sesión lo puede contestar su prompt
+  // local o, si el daemon acredita aprobadores, un cliente remoto.
+  const link: { bridge?: PeerHostBridge } = {};
   const host = await SessionHost.create({
     env: createSessionEnv({ cwd, env: { ...process.env } }),
     config,
     router,
     mcp: 'none',
-    destructivePolicy: 'deny',
+    destructivePolicy: hostOptions.destructivePolicy ?? 'deny',
+    remoteApprovals: () => link.bridge?.remoteApprovals ?? false,
+    ...(hostOptions.gates ? { gates: hostOptions.gates } : {}),
+    ...(hostOptions.interactionTimeoutMs
+      ? { interactionTimeoutMs: hostOptions.interactionTimeoutMs }
+      : {}),
   });
   const bridge = new PeerHostBridge({
     session: host,
@@ -171,6 +198,7 @@ export async function startPeer(
     retry: { initialMs: 25, maxMs: 100, jitter: 0 },
     ...bridgeOptions,
   });
+  link.bridge = bridge;
   await bridge.start();
   return {
     host,
@@ -212,6 +240,7 @@ export async function startTestDaemon(
   const daemon = await Stratumd.start({
     version: '0.0.0-test',
     config: configFor(),
+    approver: await approverAuthFromKey(TEST_APPROVER_KEY),
     env: { ...process.env, STRATUMD_TEST: 'daemon-env' },
     dir,
     processTeardown: async () => {
@@ -242,10 +271,22 @@ export async function startTestDaemon(
       return cwd;
     },
     provider: (cwd) => providers.get(cwd)!,
-    async connect(roles, name = 'test-client') {
+    async connect(roles, name = 'test-client', connectOptions = {}) {
+      const approverKey =
+        connectOptions.approverKey === undefined
+          ? roles.includes('approver')
+            ? TEST_APPROVER_KEY
+            : undefined
+          : (connectOptions.approverKey ?? undefined);
       const client = new StratumClient({
         discovery: fileDiscovery({ dir }),
-        identity: { kind: 'cli', name, version: '0.0.0-test', roles },
+        identity: {
+          kind: 'cli',
+          name,
+          version: '0.0.0-test',
+          roles,
+          ...(approverKey !== undefined ? { approverKey } : {}),
+        },
         reconnect: false,
         requestTimeoutMs: 20_000,
       });

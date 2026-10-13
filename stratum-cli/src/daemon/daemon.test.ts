@@ -147,6 +147,10 @@ describe('stratumd — handshake y autorización', () => {
     // operator → aprobar no.
     const resolve = { approvalId: 'x', decision: 'approve' } as const;
     expect(await code(operator.request('approvals.resolve', resolve))).toBe('FORBIDDEN');
+    // El token no basta para el rol approver: sin clave, no trae la capacidad.
+    const unverified = await t.connect(['approver'], 'appr-sin-clave', { approverKey: null });
+    expect(unverified.capabilities).toEqual(['observe']);
+    expect(await code(unverified.request('approvals.resolve', resolve))).toBe('FORBIDDEN');
     // approver → aprobar le está permitido (no hay nada pendiente: NOT_FOUND, no FORBIDDEN)…
     expect(await code(approver.request('approvals.resolve', resolve))).toBe('NOT_FOUND');
     expect(await code(approver.request('approvals.list', {}))).toBe('OK');

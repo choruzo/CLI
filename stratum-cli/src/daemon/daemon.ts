@@ -41,6 +41,8 @@ import { fetchModelInfos } from '../providers/utils.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { generateSessionId } from '../session/store.js';
 import { closeExecRuntime } from '../tools/exec/runtime.js';
+import { ApprovalCenter } from './approval-center.js';
+import type { ApproverAuth } from './approver-key.js';
 import { ControlServer, type ClientConnection } from './control-server.js';
 import { claimEndpoint, newIpcPath, newToken, type EndpointClaim } from './endpoint.js';
 import { EventHub, type HubClientStats } from './event-hub.js';
@@ -88,6 +90,14 @@ export interface StratumdOptions {
   detachedTtlMs?: number;
   /** Cada cuánto se comprueba si el proceso de un anfitrión desconectado sigue vivo. */
   peerWatchIntervalMs?: number;
+  /**
+   * Cómo se acredita un aprobador (ver `approver-key.ts`). Sin esto ninguna
+   * conexión obtiene `approve`: nada se resuelve en remoto, y una sesión del
+   * daemon deniega lo que pediría confirmación.
+   */
+  approver?: ApproverAuth | null;
+  /** Plazo de una solicitud de una sesión del daemon. Por defecto, `daemon.approvalTimeoutMinutes`. */
+  approvalTimeoutMs?: number;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -110,6 +120,9 @@ export class Stratumd {
   private readonly hub: EventHub;
   /** Sesiones que alojan otros procesos: aquí solo está su proyección. */
   private readonly peers: PeerSessions;
+  /** Aprobaciones, preguntas y planes pendientes de todas las sesiones, y quién los resuelve. */
+  private readonly approvals: ApprovalCenter;
+  private readonly approvalTimeoutMs: number;
   private readonly operations: OperationCache;
   private readonly serverInfo: ProtocolServerInfo;
   private readonly startedAt: number;
@@ -147,9 +160,21 @@ export class Stratumd {
         this.sessions.get(sessionId)?.snapshot() ?? this.peers.snapshotOf(sessionId),
       overviewOf: () => this.overview(),
     });
+    this.approvalTimeoutMs =
+      opts.approvalTimeoutMs ?? Math.round(opts.config.daemon.approvalTimeoutMinutes * 60_000);
+    this.approvals = new ApprovalCenter({
+      // Alojada aquí: su promesa está en este proceso. Par: en el de su anfitrión.
+      routeOf: (sessionId) =>
+        this.sessions.get(sessionId)?.host.interactions ??
+        (this.peers.connected(sessionId) ? this.peers.route(sessionId) : null),
+      hostsSession: (link, sessionId) => this.peers.isHost(link, sessionId),
+      reachable: (sessionId) => this.sessions.has(sessionId) || this.peers.connected(sessionId),
+      now: this.now,
+    });
     this.peers = new PeerSessions({
       hub: this.hub,
       registry: this.registry,
+      pending: this.approvals,
       isLocalSession: (sessionId) => this.sessions.has(sessionId),
       detachedTtlMs:
         opts.detachedTtlMs ?? Math.round(opts.config.daemon.detachedTtlMinutes * 60_000),
@@ -191,6 +216,8 @@ export class Stratumd {
         daemon.peers.disconnected(conn);
       },
       onDrain: (conn) => daemon.hub.pump(conn),
+      approver: opts.approver ?? null,
+      ...(opts.now ? { now: opts.now } : {}),
       ...(opts.highWaterBytes ? { highWaterBytes: opts.highWaterBytes } : {}),
       ...(opts.maxBufferedBytes ? { maxBufferedBytes: opts.maxBufferedBytes } : {}),
     });
@@ -236,7 +263,7 @@ export class Stratumd {
   }
 
   private overview(): ProtocolOverviewSnapshot {
-    return { sessions: this.registry.listSessions(), approvals: [], questions: [], plans: [] };
+    return { sessions: this.registry.listSessions(), ...this.approvals.list() };
   }
 
   private need(sessionId: string): HostedSession {
@@ -347,13 +374,19 @@ export class Stratumd {
   } {
     return {
       onEvents: (events) => {
-        for (const event of events) this.registry.apply(event);
+        for (const event of events) {
+          this.registry.apply(event);
+          this.approvals.apply(event);
+        }
         this.hub.ingest(sessionId, events);
       },
       onOverflow: () => {
         log.warn('session queue overflow, resync forced', { sessionId });
         const snapshot = this.sessions.get(sessionId)?.snapshot();
-        if (snapshot) this.registry.replace(snapshot);
+        if (snapshot) {
+          this.registry.replace(snapshot);
+          this.approvals.sync(snapshot);
+        }
         this.hub.resync(sessionId);
       },
     };
@@ -410,6 +443,8 @@ export class Stratumd {
         router: startup.router,
         version: this.opts.version,
         sink: this.sinkFor(sessionId),
+        remoteApprovals: () => this.opts.approver != null,
+        approvalTimeoutMs: this.approvalTimeoutMs,
         ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
         ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
         ...(params.agent ? { agent: params.agent } : {}),
@@ -440,6 +475,8 @@ export class Stratumd {
       } catch (err) {
         log.error('session close failed', { sessionId, err });
       } finally {
+        // Nada de una sesión cerrada sigue pendiente de decisión.
+        this.approvals.forget(sessionId);
         this.hub.closeSession(sessionId);
         this.lastActivity = this.now();
         log.info('session closed', { sessionId, reason });
@@ -458,10 +495,6 @@ export class Stratumd {
     const notYet = (what: string) => (): never => {
       throw new ProtocolError('UNAVAILABLE', `${what} is not available yet.`);
     };
-    const nothingPending = (): never => {
-      throw new ProtocolError('NOT_FOUND', 'No such pending request.');
-    };
-
     const handlers: RequestHandlers = {
       'core.status': () => ({
         server: this.serverInfo,
@@ -470,7 +503,7 @@ export class Stratumd {
         clients: this.server.clients.length,
         liveSessions: this.registry.liveSessions,
         activeRuns: this.registry.activeRuns,
-        pendingApprovals: 0,
+        pendingApprovals: this.approvals.count,
       }),
       'core.shutdown': (params) => {
         if (!params.force && this.registry.activeRuns > 0) {
@@ -571,11 +604,36 @@ export class Stratumd {
       'runs.pause': notYet('Pausing a run'),
       'runs.resume': notYet('Pausing a run'),
 
-      // Centro de aprobaciones: M4. Hasta entonces no hay nada pendiente.
-      'approvals.list': () => ({ approvals: [], questions: [], plans: [] }),
-      'approvals.resolve': nothingPending,
-      'questions.answer': nothingPending,
-      'plans.decide': nothingPending,
+      // Centro de aprobaciones. Listar es de quien observa; resolver exige la
+      // capacidad `approve` (`authorize.ts`) y, además, no ser el anfitrión de
+      // esa sesión (`ApprovalCenter`). Gana la primera respuesta válida.
+      'approvals.list': (params) => this.approvals.list(params.sessionId),
+      'approvals.resolve': async (params) => {
+        await this.approvals.resolve(conn, {
+          kind: 'approval',
+          id: params.approvalId,
+          decision: params.decision,
+          ...(params.phrase !== undefined ? { phrase: params.phrase } : {}),
+        });
+        return {};
+      },
+      'questions.answer': async (params) => {
+        await this.approvals.resolve(conn, {
+          kind: 'question',
+          id: params.requestId,
+          answers: params.answers,
+        });
+        return {};
+      },
+      'plans.decide': async (params) => {
+        await this.approvals.resolve(conn, {
+          kind: 'plan',
+          id: params.requestId,
+          decision: params.decision,
+          ...(params.plan ? { plan: params.plan } : {}),
+        });
+        return {};
+      },
 
       'jobs.list': (params) => ({
         jobs: this.peers.snapshotOf(params.sessionId)?.jobs ?? this.need(params.sessionId).jobs(),

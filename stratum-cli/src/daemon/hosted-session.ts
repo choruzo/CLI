@@ -3,10 +3,13 @@
  * que tenga en curso. El daemon la **conduce** (lanza turnos y los consume),
  * pero la sesión se monta por la única vía que hay: `SessionHost.create`.
  *
- * En M2 una sesión del daemon no tiene a quién preguntar: no hay centro de
- * aprobaciones todavía (M4). Se comporta como `stratum run` sin terminal — lo
- * destructivo se deniega, las preguntas se contestan con supuestos y un plan no
- * se aprueba —, que es lo que el runtime hace cuando no hay puertas.
+ * Una sesión del daemon no tiene terminal: lo que pida a una persona —una
+ * aprobación, una tanda de preguntas, la decisión de un plan— solo lo puede
+ * contestar un cliente con la capacidad `approve`, a través del centro de
+ * aprobaciones, y **caduca** a la respuesta negativa si nadie contesta. Si el
+ * daemon no acredita aprobadores, no hay a quién preguntar y se comporta como
+ * `stratum run` sin terminal: lo destructivo se deniega, las preguntas se
+ * contestan con supuestos y un plan no se aprueba.
  */
 import type { StratumConfig } from '../config/schema.js';
 import { PLAN_MODE_PROMPT } from '../agent/plan.js';
@@ -40,6 +43,10 @@ export interface HostedSessionOptions {
   sessionProfile?: string;
   /** Perfil de agente principal con el que arranca. */
   agent?: string;
+  /** ¿Hay quien pueda resolver en remoto lo que la sesión pida? */
+  remoteApprovals: () => boolean;
+  /** Plazo de una solicitud sin contestar. `0` = sin plazo. */
+  approvalTimeoutMs: number;
 }
 
 /** Cuánto se espera a que un turno cancelado termine de cerrarse. */
@@ -68,8 +75,10 @@ export class HostedSession {
       sessionId: opts.sessionId,
       version: opts.version,
       mcp: 'eager',
-      // Sin puertas (M4): lo que pediría confirmación se deniega.
-      destructivePolicy: 'deny',
+      // Sin prompts locales: pregunta solo si un aprobador remoto puede contestar.
+      destructivePolicy: 'ask',
+      remoteApprovals: opts.remoteApprovals,
+      interactionTimeoutMs: opts.approvalTimeoutMs,
       agent: {
         readOnly: opts.readOnly === true,
         ...(opts.sessionProfile ? { sessionProfile: opts.sessionProfile } : {}),

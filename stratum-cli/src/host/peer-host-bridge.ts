@@ -28,12 +28,15 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import {
+  FEATURE_REMOTE_APPROVALS,
   isStateEvent,
   type ProtocolEvent,
+  type ProtocolResolver,
   type ProtocolRun,
   type StateEventData,
   type SteerStatus,
 } from '../protocol/index.js';
+import type { PendingInteractions, RemoteResolver } from './interactions.js';
 import {
   SessionPublisher,
   type PublishedSession,
@@ -93,6 +96,14 @@ function pause(ms: number, signal: AbortSignal): Promise<boolean> {
   });
 }
 
+/** Del `by` que manda el daemon solo se toma quién fue: que es remoto lo dice el camino. */
+function remoteResolver(by: ProtocolResolver): RemoteResolver {
+  return {
+    ...(by.client ? { client: by.client } : {}),
+    ...(by.connectionId !== undefined ? { connectionId: by.connectionId } : {}),
+  };
+}
+
 export class PeerHostBridge implements PublisherSink {
   /** El publicador de la sesión: la misma pieza que usa una sesión del daemon. */
   readonly publisher: SessionPublisher;
@@ -102,6 +113,8 @@ export class PeerHostBridge implements PublisherSink {
   private readonly requestTimeoutMs: number;
   /** Conexión con la sesión ya registrada, o `null`. */
   private client: StratumClient | null = null;
+  /** El daemon al que se está conectado acredita aprobadores. */
+  private approvers = false;
   /** Se registró (o se está registrando): los eventos se encolan desde la foto enviada. */
   private attached = false;
   /** Para reclamar la sesión si el daemon la conserva tras una desconexión. */
@@ -135,6 +148,15 @@ export class PeerHostBridge implements PublisherSink {
   /** ¿Está la sesión registrada ahora mismo en un daemon? */
   get connected(): boolean {
     return this.client !== null;
+  }
+
+  /**
+   * ¿Puede ahora un cliente remoto resolver lo que esta sesión pida? Solo con
+   * la sesión registrada en un daemon que acredita aprobadores. Es lo que
+   * decide si una sesión sin terminal pregunta o deniega.
+   */
+  get remoteApprovals(): boolean {
+    return this.client !== null && this.approvers;
   }
 
   /**
@@ -267,6 +289,7 @@ export class PeerHostBridge implements PublisherSink {
           client.close();
           return null;
         }
+        this.approvers = hello.features.includes(FEATURE_REMOTE_APPROVALS);
         return client;
       } catch (err) {
         if (
@@ -311,6 +334,7 @@ export class PeerHostBridge implements PublisherSink {
   private onClientClosed(client: StratumClient): void {
     if (this.client === client) {
       this.client = null;
+      this.approvers = false;
       this.attached = false;
       this.queue = [];
     }
@@ -349,7 +373,43 @@ export class PeerHostBridge implements PublisherSink {
         this.own(params.sessionId);
         return { status: this.opts.control.steer(params.text).status };
       },
+      // Decisiones que llegan de otro cliente. Aquí no se decide quién gana:
+      // se entregan a `PendingInteractions`, donde compiten con el prompt local,
+      // y lo que conteste (también `ALREADY_RESOLVED`) es la respuesta.
+      'host.resolveApproval': (params) => {
+        this.pending(params.sessionId).resolveApproval(
+          params.approvalId,
+          params.decision,
+          params.phrase,
+          remoteResolver(params.by),
+        );
+        return {};
+      },
+      'host.answerQuestions': (params) => {
+        this.pending(params.sessionId).answerQuestions(
+          params.requestId,
+          params.answers,
+          remoteResolver(params.by),
+        );
+        return {};
+      },
+      'host.decidePlan': (params) => {
+        this.pending(params.sessionId).decidePlan(
+          params.requestId,
+          params.decision,
+          params.plan,
+          remoteResolver(params.by),
+        );
+        return {};
+      },
     };
+  }
+
+  private pending(sessionId: string): PendingInteractions {
+    this.own(sessionId);
+    const interactions = this.opts.session.interactions;
+    if (!interactions) throw new ProtocolError('NOT_FOUND', 'No such pending request.');
+    return interactions;
   }
 
   // ---------------------------------------------------------------------------
