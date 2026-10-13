@@ -10,6 +10,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { z } from 'zod';
 import { StratumAgent } from './core.js';
+import { SUPERSEDED_BY_STEERING } from './inbox.js';
 import { ProfileLoader } from './profiles.js';
 import { ProviderRouter } from '../providers/router.js';
 import { ToolRegistry } from '../tools/registry.js';
@@ -136,6 +137,35 @@ function agentWith(
   });
   agents.push(agent);
   return agent;
+}
+
+/** Una respuesta del modelo con varias tool calls a la vez. */
+function callsRound(
+  calls: Array<{ id: string; name: string; args: Record<string, unknown> }>,
+): OpenAIStreamChunk[] {
+  return [
+    ...calls.map(
+      (c, index): OpenAIStreamChunk => ({
+        choices: [
+          {
+            delta: {
+              tool_calls: [
+                {
+                  index,
+                  id: c.id,
+                  type: 'function',
+                  function: { name: c.name, arguments: JSON.stringify(c.args) },
+                },
+              ],
+            },
+            finish_reason: null,
+            index: 0,
+          },
+        ],
+      }),
+    ),
+    { choices: [{ delta: {}, finish_reason: 'tool_calls', index: 0 }] },
+  ];
 }
 
 /** Una respuesta del modelo con dos `delegate_task` a la vez. */
@@ -395,6 +425,12 @@ describe('F — cancelar con el run en pausa', () => {
     await turn.done;
     expect(turn.events.at(-1)).toEqual({ type: 'done', stopReason: 'cancelled' });
     expect(p.executed).toEqual([]);
+    // La llamada ya estaba anunciada: se cierra en el stream, no solo en el historial.
+    expect(turn.events.some((e) => e.type === 'tool_call_ready' && e.id === 'c1')).toBe(true);
+    expect(turn.events.find((e) => e.type === 'tool_error')).toMatchObject({
+      id: 'c1',
+      recoverable: true,
+    });
 
     // La tool call sin respuesta no se queda colgando: el turno siguiente funciona.
     const history = agent.getMessages();
@@ -596,6 +632,100 @@ describe('I — subagentes', () => {
   });
 });
 
+describe('pausa a mitad de un lote', () => {
+  function setup(first: 'slow' | 'danger'): {
+    p: Probe;
+    agent: StratumAgent;
+    parent: ScriptedProvider;
+    child: ScriptedProvider;
+    opts: RunOptions;
+  } {
+    const p = probe();
+    const registry = new ToolRegistry();
+    registerBuiltinTools(registry, config);
+    registry.register(p.registry.get(first)!);
+    const parent = new ScriptedProvider([
+      callsRound([
+        { id: 'c1', name: first, args: {} },
+        { id: 'c2', name: 'delegate_task', args: { task: 'investiga', profile: 'general' } },
+      ]),
+      makeTextRound('Entendido.'),
+    ]);
+    const child = new ScriptedProvider([makeTextRound('Investigado.')]);
+    const agent = agentWith(parent, registry);
+    return { p, agent, parent, child, opts: { makeSubagentRouter: () => mockRouter(child) } };
+  }
+  const subagents = (events: AgentEvent[]): number =>
+    events.filter((e) => e.type === 'subagent_started').length;
+
+  it('pedida durante una tool: la delegación del mismo lote espera, y sin steering sigue al reanudar', async () => {
+    const { p, agent, child, opts } = setup('slow');
+    const turn = drive(agent.run('haz y delega', opts));
+    await p.slowStarted;
+    agent.pause.requestPause();
+    p.release();
+    await until(() => agent.pause.state === 'paused', 'paused');
+    await quiet();
+    expect(subagents(turn.events)).toBe(0);
+    expect(child.requests).toHaveLength(0);
+
+    agent.pause.resume();
+    await turn.done;
+    expect(subagents(turn.events)).toBe(1);
+    expect(turn.events.at(-1)).toEqual({ type: 'done', stopReason: 'stop' });
+  });
+
+  it('con steering en esa pausa, lo que quedaba del lote no empieza', async () => {
+    const { p, agent, parent, child, opts } = setup('slow');
+    const turn = drive(agent.run('haz y delega', opts));
+    await p.slowStarted;
+    agent.pause.requestPause();
+    p.release();
+    await until(() => agent.pause.state === 'paused', 'paused');
+    agent.enqueueUserMessage('no delegues nada');
+    agent.pause.resume();
+    await turn.done;
+
+    expect(subagents(turn.events)).toBe(0);
+    expect(child.requests).toHaveLength(0);
+    // La tool que ya había terminado conserva su resultado; la delegación, el rechazo.
+    expect(turn.events.find((e) => e.type === 'tool_result')).toMatchObject({ id: 'c1' });
+    expect(turn.events.find((e) => e.type === 'tool_error')).toMatchObject({
+      id: 'c2',
+      error: SUPERSEDED_BY_STEERING,
+    });
+    expect(parent.seen(1)).toContain('1. User: no delegues nada');
+    expect(rolesAlternate(agent.getMessages())).toBe(true);
+  });
+
+  it('aprobación + pausa + steering: ni la tool aprobada ni la delegación del lote', async () => {
+    const { p, agent, child, opts } = setup('danger');
+    let decide!: (d: DestructiveDecision) => void;
+    let asked = false;
+    const onConfirmDestructive = (): Promise<DestructiveDecision> => {
+      asked = true;
+      return new Promise((resolve) => (decide = resolve));
+    };
+    const turn = drive(
+      agent.run('haz y delega', { ...opts, destructivePolicy: 'ask', onConfirmDestructive }),
+    );
+    await until(() => asked, 'confirmation');
+    agent.pause.requestPause();
+    decide('approve');
+    await until(() => agent.pause.state === 'paused', 'paused');
+    agent.enqueueUserMessage('no hagas nada de eso');
+    agent.pause.resume();
+    await turn.done;
+
+    expect(p.executed).toEqual([]);
+    expect(subagents(turn.events)).toBe(0);
+    expect(child.requests).toHaveLength(0);
+    const rejected = turn.events.flatMap((e) => (e.type === 'tool_error' ? [e.id] : []));
+    expect(rejected.sort()).toEqual(['c1', 'c2']);
+    expect(turn.events.at(-1)).toEqual({ type: 'done', stopReason: 'stop' });
+  });
+});
+
 describe('J — aprobación pendiente', () => {
   it('aprobar no reanuda: la tool aprobada espera a resume', async () => {
     const p = probe();
@@ -629,6 +759,84 @@ describe('J — aprobación pendiente', () => {
     // Se ejecuta lo aprobado, una vez, sin volver a preguntar.
     expect(p.executed).toEqual(['danger']);
     expect(turn.events.at(-1)).toEqual({ type: 'done', stopReason: 'stop' });
+  });
+
+  it('steering con lo aprobado en pausa: la acción se descarta y el modelo decide de nuevo', async () => {
+    const p = probe();
+    const provider = new ScriptedProvider([
+      makeToolCallRound('c1', 'danger', {}),
+      makeTextRound('De acuerdo, no lo hago.'),
+    ]);
+    const agent = agentWith(provider, p.registry);
+    let decide!: (d: DestructiveDecision) => void;
+    let asks = 0;
+    const onConfirmDestructive = (): Promise<DestructiveDecision> => {
+      asks++;
+      return new Promise((resolve) => (decide = resolve));
+    };
+    const runtime: TraceRuntimeEvent[] = [];
+    const scope: TraceScope = {
+      turnStart: () => {},
+      turnEnd: () => {},
+      modelStart: () => ({ firstChunk: () => {}, usage: () => {}, end: () => {} }),
+      event: () => {},
+      runtime: (ev) => runtime.push(ev),
+      child: () => scope,
+    };
+    const turn = drive(
+      agent.run('hazlo', { destructivePolicy: 'ask', onConfirmDestructive, trace: scope }),
+    );
+    await until(() => asks === 1, 'confirmation');
+    agent.pause.requestPause();
+    decide('approve');
+    await until(() => agent.pause.state === 'paused', 'paused');
+
+    // La aprobación ya consta; ahora el usuario cambia de idea.
+    expect(agent.enqueueUserMessage('no lo hagas, cambia el enfoque').status).toBe('accepted');
+    agent.pause.resume();
+    await turn.done;
+
+    // Lo aprobado NO se ejecuta por delante del mensaje.
+    expect(p.executed).toEqual([]);
+    expect(turn.events.find((e) => e.type === 'tool_error')).toMatchObject({
+      id: 'c1',
+      error: SUPERSEDED_BY_STEERING,
+      recoverable: true,
+    });
+    // El modelo recibe el rechazo y el mensaje juntos, y no se vuelve a preguntar.
+    expect(provider.seen(1)).toContain(SUPERSEDED_BY_STEERING);
+    expect(provider.seen(1)).toContain('1. User: no lo hagas, cambia el enfoque');
+    expect(asks).toBe(1);
+    expect(rolesAlternate(agent.getMessages())).toBe(true);
+    expect(turn.events.at(-1)).toEqual({ type: 'done', stopReason: 'stop' });
+    // En la traza: aprobada, y después vetada por steering.
+    expect(runtime.find((e) => e.event === 'confirmation')).toMatchObject({ decision: 'approved' });
+    expect(runtime.find((e) => e.event === 'veto')).toMatchObject({
+      source: 'steering',
+      callId: 'c1',
+    });
+  });
+
+  it('sin steering, lo aprobado en pausa sí se ejecuta: solo un mensaje del usuario lo descarta', async () => {
+    const p = probe();
+    const provider = new ScriptedProvider([
+      makeToolCallRound('c1', 'danger', {}),
+      makeTextRound('Hecho.'),
+    ]);
+    const agent = agentWith(provider, p.registry);
+    let decide!: (d: DestructiveDecision) => void;
+    let asked = false;
+    const onConfirmDestructive = (): Promise<DestructiveDecision> => {
+      asked = true;
+      return new Promise((resolve) => (decide = resolve));
+    };
+    const turn = drive(agent.run('hazlo', { destructivePolicy: 'ask', onConfirmDestructive }));
+    await until(() => asked, 'confirmation');
+    // Steering ANTES de la aprobación y sin pausa: la semántica previa a M5 no cambia.
+    expect(agent.enqueueUserMessage('y luego avisa').status).toBe('accepted');
+    decide('approve');
+    await turn.done;
+    expect(p.executed).toEqual(['danger']);
   });
 
   it('denegar tampoco reanuda: el run queda en pausa antes de la siguiente petición', async () => {

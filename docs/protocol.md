@@ -900,11 +900,13 @@ demás (texto parcial, llamadas, solicitudes, jobs, `currentRunId`).
 | Antes de cada petición al modelo | La petición, y la compresión de contexto que la precede |
 | Tras la respuesta del modelo, antes de ejecutar sus tools | Ninguna tool del lote, ni de control ni delegaciones |
 | En el dispatcher, entre la confirmación y la ejecución | Lo que una persona acaba de aprobar |
+| Tras las tools de un lote, antes de delegar o de preguntar | Las delegaciones, la tanda de preguntas y el plan de ese mismo lote |
 | Antes de lanzar un subagente | El subagente: ni se anuncia |
 
 Lo que ya estaba en marcha **termina**: una respuesta del modelo en curso no se corta (el
 texto sigue llegando) y una tool que ya se ejecuta no se interrumpe. Pausar no usa la señal de
-cancelación en ningún caso.
+cancelación en ningún caso. Las tools de un mismo lote que ya se está ejecutando se completan
+todas (entre ellas no hay punto seguro): el run sigue sin figurar `paused` hasta que acaban.
 
 Si la respuesta en curso era la última del turno (sin tools, sin steering pendiente), no queda
 nada por empezar: el run **termina** y la pausa se va con él. La pausa es del run: el
@@ -912,7 +914,9 @@ siguiente empieza sin ella.
 
 `tool.started` anuncia la llamada cuando se conocen sus argumentos, antes de ejecutarla. Un
 run pausado en el segundo punto puede mostrar una llamada en `running` que todavía no ha
-empezado: se ejecuta (o se descarta, §16.4) al reanudar.
+empezado: se ejecuta (o se descarta, §16.4) al reanudar. Si el run se **cancela** en esa
+pausa, la llamada se cierra con `tool.failed`: ninguna queda `running` en un run terminado.
+Que `tool.started` no distinga «propuesta» de «en ejecución» es deuda conocida, anterior a M5.
 
 ### 16.3 Lo que la pausa no toca
 
@@ -938,7 +942,11 @@ Una pausa no caduca sola.
 - **Aprobaciones.** Pedir pausa con una solicitud abierta no la toca: sigue pendiente, el run
   sigue `waiting_approval` y el prompt local no se retira. **Resolverla no es reanudar**: lo
   aprobado no se ejecuta hasta `runs.resume`, y entonces se ejecuta una vez, sin volver a
-  preguntar. Una pregunta o un plan resueltos dejan el run en pausa antes de su siguiente
+  preguntar — **salvo que entretanto haya llegado steering**: la aprobación era anterior al
+  mensaje, así que la acción se descarta (`tool.failed`, sin ejecutarse) y el modelo decide de
+  nuevo con el mensaje delante. La aprobación sigue constando como resuelta
+  (`approval.resolved`); si el modelo repite la acción, se vuelve a preguntar. El descarte
+  alcanza a todo lo que quedaba del lote: delegaciones, preguntas y plan tampoco empiezan. Una pregunta o un plan resueltos dejan el run en pausa antes de su siguiente
   petición al modelo.
 - **Subagentes.** Comparten el controlador del run: un hijo espera en los mismos puntos
   seguros que el padre. `paused` solo se publica cuando todos los loops que podrían empezar

@@ -231,6 +231,14 @@ export interface ToolContext {
    * la usa: lo que ya empezó termina.
    */
   pause?: SafePointGate;
+  /**
+   * ¿Llegó un mensaje del usuario que deja sin efecto las llamadas aún no
+   * ejecutadas? Devuelve el texto del rechazo, o `null`. El dispatcher lo
+   * consulta al salir de una pausa: lo que una persona aprobó antes de ese
+   * mensaje no se ejecuta por delante de él. Lo aporta el loop del agente
+   * principal (el steering es suyo); ausente → nunca.
+   */
+  supersededBySteering?: () => string | null;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */
@@ -386,9 +394,10 @@ export interface RunOptions {
    */
   inbox?: RuntimeInbox;
   /**
-   * Pausa cooperativa del run (`agent/pause.ts`). El loop espera en sus puntos
-   * seguros —antes de cada petición al modelo, antes de ejecutar tools y antes
-   * de lanzar un subagente— mientras haya una pausa pedida. Lo aporta
+   * Pausa cooperativa del run (`agent/pause.ts`). Mientras haya una pausa pedida
+   * se espera en los puntos seguros: antes de cada petición al modelo, antes
+   * de ejecutar las tools de una respuesta, entre confirmar y ejecutar (en el
+   * dispatcher, vía `ToolContext.pause`) y antes de delegar o lanzar un subagente. Lo aporta
    * `StratumAgent` y lo heredan los subagentes: una sola autoridad por run.
    * Ausente → el loop no se pausa.
    */

@@ -253,6 +253,12 @@ async function pauseSteerResumeCancel(
   const final = await get();
   expect(final.run).toMatchObject({ id: runId, status: 'cancelled' });
   expect(final.session.state).toBe('idle');
+  // Nada queda «en curso» en un run cancelado: lo propuesto y no ejecutado se cerró.
+  expect(final.toolCalls.map((c) => [c.id, c.state])).toEqual([
+    ['c1', 'completed'],
+    ['c2', 'error'],
+    ['c3', 'error'],
+  ]);
   return { whilePaused, final };
 }
 
@@ -412,6 +418,45 @@ describe('J — aprobación pendiente y pausa', () => {
     // Se ejecutó lo aprobado, una vez.
     expect(existsSync(file)).toBe(false);
     expect(w.types().filter((x) => x === 'approval.requested')).toHaveLength(1);
+  }, 30_000);
+});
+
+describe('J — aprobación resuelta, pausa y steering', () => {
+  it('lo aprobado no se ejecuta al reanudar si entretanto llegó steering', async () => {
+    t = await startTestDaemon();
+    const cwd = t.project('aprobacion-steer', [
+      makeToolCallRound('c1', 'exec', { command: 'rm victim.txt' }),
+      makeTextRound('de acuerdo, no lo borro'),
+    ]);
+    const file = join(cwd, 'victim.txt');
+    writeFileSync(file, 'no me borres\n');
+    const operator = await t.connect(['operator']);
+    const approver = await t.connect(['approver']);
+    const { session } = await operator.request('sessions.open', { cwd });
+    const w = watch(approver, session.id);
+    await w.untilSnapshot();
+    await operator.request('runs.start', { sessionId: session.id, input: 'borra' });
+    const asked = await w.until((e) => e.type === 'approval.requested');
+    const approvalId = (asked as Extract<ProtocolEvent, { type: 'approval.requested' }>).data
+      .approval.id;
+
+    await operator.request('runs.pause', { sessionId: session.id });
+    await approver.request('approvals.resolve', { approvalId, decision: 'approve' });
+    await w.until(paused);
+    expect(
+      await operator.request('runs.steer', { sessionId: session.id, text: 'no lo borres' }),
+    ).toEqual({ status: 'accepted' });
+    await operator.request('runs.resume', { sessionId: session.id });
+    await w.until(runEnded);
+
+    // La aprobación consta como resuelta, pero la acción se descartó.
+    expect(existsSync(file)).toBe(true);
+    const resolved = w.states().find((e) => e.type === 'approval.resolved');
+    expect(resolved).toMatchObject({ data: { status: 'approved' } });
+    expect(w.types()).toContain('tool.failed');
+    expect(w.types()).not.toContain('tool.completed');
+    expect(w.types().filter((x) => x === 'approval.requested')).toHaveLength(1);
+    expect(t.provider(cwd).calls).toBe(2);
   }, 30_000);
 });
 

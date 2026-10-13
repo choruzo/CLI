@@ -2887,7 +2887,7 @@ Un run se puede **pausar** y **reanudar** (Stratum Dot, M5; protocolo en `docs/p
 Invariantes:
 
 - **Pedir no es alcanzar.** `paused` se alcanza, no se asigna: cada loop se registra (`enter()`), el que espera a sus subagentes se aparta (`park()`), y el estado pasa a `paused` cuando el número de esperas iguala al de loops que cuentan.
-- **La pausa es del turno.** `end()` (en el `finally` de `StratumAgent.observed`) vuelve a `idle` y suelta toda espera. El turno siguiente empieza sin pausa.
+- **La pausa es del turno.** `end()` (en el `finally` de `StratumAgent.observed`) vuelve a `idle` y suelta toda espera. El turno siguiente empieza sin pausa. Quien abandona un turno en pausa tiene que **abortar su señal**: el `return()` de un generador que espera en un punto seguro no progresa hasta que la espera se suelta (`SessionHost.dispose()` y `cancel()` lo hacen).
 - **Cancelar siempre gana.** `waitAtSafePoint(signal)` resuelve al reanudar, al abortarse la señal o al terminar el turno; nunca rechaza. El controlador no aborta nada: `pause ≠ cancel`.
 - **Idempotente.** `requestPause()`: `requested` · `already-requested` · `already-paused` · `not-running`. `resume()`: `resumed` (también sobre una pausa solo pedida, que se retira) · `not-paused` · `not-running`.
 
@@ -2895,10 +2895,13 @@ Invariantes:
 
 1. **Antes de cada petición al modelo** (`ReactLoop`, al principio de la iteración, antes de la compresión de §12.4, que es otra llamada). Lo que llegue a la inbox durante la espera se entrega al continuar, en esa misma iteración.
 2. **Antes del dispatch** (`ReactLoop`, tras guardar el `assistant` y los errores de parseo). Va **antes** del punto seguro de steering de §12.20: con un mensaje del usuario llegado en pausa, el lote se descarta al reanudar y el modelo decide de nuevo.
-3. **Entre confirmar y ejecutar** (`ToolDispatcher.dispatch`, `ToolContext.pause`): una aprobación resuelta con la pausa pedida no levanta la pausa; lo aprobado se ejecuta al reanudar, una vez.
-4. **Antes de lanzar un subagente** (`executeDelegations`, tras adquirir el semáforo y antes de `subagent_started`).
+3. **Entre confirmar y ejecutar** (`ToolDispatcher.dispatch`, `ToolContext.pause`): una aprobación resuelta con la pausa pedida no levanta la pausa; lo aprobado se ejecuta al reanudar, una vez. **Excepción**: si durante esa pausa llegó un mensaje del usuario (`ToolContext.supersededBySteering`), las llamadas aprobadas y aún no ejecutadas reciben `SUPERSEDED_BY_STEERING` (`veto` con `source: 'steering'`, `countsAsFailure: false`) y no se ejecutan — la misma regla que §12.20 aplica a un lote antes del dispatch. La confirmación queda registrada como aprobada. Fuera de una pausa, el steering que llega con una confirmación abierta no descarta nada: eso no cambia.
+   Dentro de un lote ya en ejecución no hay más puntos: las llamadas serializadas de un mismo `dispatch` se completan todas, y el estado se queda en `pause-requested` hasta que acaban.
+4. **Antes del resto del lote y de lanzar un subagente.** En el `ReactLoop`, tras las tools despachadas y antes de delegar o de abrir el gate de preguntas o de plan; y en `executeDelegations`, tras adquirir el semáforo y antes de `subagent_started`. Desde que adquiere el semáforo, el hijo cuenta para `paused` (su unidad se aparta cuando arranca su propio loop).
 
-Cancelado en el punto 2, el `assistant` queda con `tool_calls` sin respuesta y las cierra `closeDanglingToolCalls` (§12.12). Si la respuesta en curso no trae tools ni hay steering pendiente, el turno termina con `done(stop)`: no quedaba nada por empezar.
+**Steering llegado en pausa.** Si en la pausa del punto 3 o del punto 4 del loop hay un mensaje del usuario pendiente, **nada de lo que quedaba del lote empieza**: tools aprobadas, delegaciones, preguntas y plan reciben `SUPERSEDED_BY_STEERING` y el loop pasa a la siguiente iteración, que entrega el mensaje. Lo que ya había terminado conserva su resultado. Es la regla de §12.20 («con steering pendiente no se ejecuta nada del lote») extendida a los puntos de pausa de dentro del lote. `todo` y `update_plan`, que se aplican antes del dispatch y solo anotan estado, no se deshacen.
+
+Cancelado en el punto 2, cada llamada ya anunciada con `tool_call_ready` recibe su `tool_error` (`CANCELLED_BY_USER`) antes del `done(cancelled)`: la pausa puede durar indefinidamente y el stream no puede dejar una tool abierta en un turno cerrado (§12.1). `closeDanglingToolCalls` (§12.12) sigue siendo la red del historial. Si la respuesta en curso no trae tools ni hay steering pendiente, el turno termina con `done(stop)`: no quedaba nada por empezar.
 
 #### Lo que no cambia
 
@@ -2909,4 +2912,4 @@ Cancelado en el punto 2, el `assistant` queda con `tool_calls` sin respuesta y l
 
 #### Traza
 
-`TraceRuntimeEvent` `pause` (`meta.caps: ['pause']`): `requested`, `paused` y `resumed`, los dos últimos con `waitMs` desde que se pidió.
+`TraceRuntimeEvent` `pause` (`meta.caps: ['pause']`): `requested`, `paused` y `resumed`, los dos últimos con `waitMs` desde que se pidió. Un turno cancelado en pausa no deja `resumed`: su pausa la cierra el `turn_end`.

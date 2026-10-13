@@ -1330,14 +1330,21 @@ export class ReactLoop {
       // mientras el modelo generaba, no se ejecuta nada hasta `resume`. Va
       // ANTES de la comprobación de steering de abajo, para que «pausar →
       // redirigir → reanudar» invalide este lote igual que cualquier otro
-      // mensaje llegado a tiempo. Cancelado aquí, las llamadas quedan sin
-      // respuesta y las cierra quien conduce el turno (`closeDanglingToolCalls`).
+      // mensaje llegado a tiempo. Cancelado aquí, cada llamada ya anunciada
+      // (`tool_call_ready`) recibe su `tool_error`: la pausa puede durar
+      // indefinidamente, y quien sigue el turno no puede quedarse con una tool
+      // «en curso» en un run cancelado.
       // -----------------------------------------------------------------------
       if (pause?.pauseRequested) {
         loopLog.info('paused before tool dispatch', { iter, calls: readyCalls.length });
         await pause.waitAtSafePoint(signal);
         if (signal.aborted) {
           loopLog.info('cancelled while paused', { iter });
+          for (const call of readyCalls) {
+            const o = this.toolErrorOutcome(call.id, call.name, CANCELLED_BY_USER, true, fmt);
+            yield o.event;
+            this.messages.push(o.message);
+          }
           yield { type: 'done', stopReason: 'cancelled' };
           return;
         }
@@ -1617,6 +1624,13 @@ export class ReactLoop {
         this.messages.push(this.toolMessage(call.id, call.name, `Paso ${stepId} → ${status}.`));
       }
 
+      // Steering llegado durante una pausa a mitad del lote: lo que quede por
+      // empezar —tools aprobadas, delegaciones, preguntas, el plan— se descarta
+      // entero, como hace el punto seguro de antes del dispatch.
+      const steeringPending = (): boolean =>
+        inbox !== undefined && jobScope === MAIN_JOB_SCOPE && inbox.hasPendingUserMessages();
+      let batchSuperseded = false;
+
       // Despachar tool calls con JSON válido (excluyendo las de control de plan)
       if (regularCalls.length > 0) {
         const ctx: ToolContext = {
@@ -1636,11 +1650,14 @@ export class ReactLoop {
           jobs: opts?.jobs,
           jobScope,
           pause,
+          // El steering es del agente principal: un subagente nunca lo ve.
+          supersededBySteering: () => (steeringPending() ? SUPERSEDED_BY_STEERING : null),
         };
 
         const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);
 
         for (const res of results) {
+          if (!res.result.ok && res.result.error === SUPERSEDED_BY_STEERING) batchSuperseded = true;
           if (res.result.ok) {
             const o = this.toolResultOutcome(
               res.callId,
@@ -1709,6 +1726,35 @@ export class ReactLoop {
       // truncados, se inyectan como tool results (inject & recover). Ver
       // runDelegations() más abajo.
       // -----------------------------------------------------------------------
+      // Pausa cooperativa: lo que queda del lote es trabajo nuevo. Si se pidió
+      // pausa mientras corrían sus tools, espera aquí antes de delegar o de
+      // abrir un gate; y si en esa pausa (o en la del dispatcher) llegó
+      // steering, no se empieza nada de ello.
+      const restOfBatch = [...delegateCalls, questionCall, presentPlanCall].filter(
+        (c): c is ToolCallReady => c != null,
+      );
+      if (restOfBatch.length > 0 && !batchSuperseded && pause?.pauseRequested && !signal.aborted) {
+        loopLog.info('paused before the rest of the batch', { iter, calls: restOfBatch.length });
+        await pause.waitAtSafePoint(signal);
+        batchSuperseded = !signal.aborted && steeringPending();
+      }
+      if (batchSuperseded && !signal.aborted) {
+        loopLog.info('rest of the batch superseded by steering', { iter });
+        for (const call of restOfBatch) {
+          opts?.trace?.runtime({
+            event: 'veto',
+            source: 'steering',
+            tool: call.name,
+            callId: call.id,
+            reason: 'a user message arrived while the run was paused, before this call started',
+          });
+          const o = this.toolErrorOutcome(call.id, call.name, SUPERSEDED_BY_STEERING, true, fmt);
+          yield o.event;
+          this.messages.push(o.message);
+        }
+        continue;
+      }
+
       if (delegateCalls.length > 0) {
         // Hito 17: un hijo delegado durante la Fase 3 trabaja bajo el plan aprobado.
         const delegationOpts: RunOptions | undefined =

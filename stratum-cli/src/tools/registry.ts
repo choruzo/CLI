@@ -268,7 +268,7 @@ export class ToolRegistry {
 function traceVeto(
   ctx: ToolContext,
   call: ToolCallReady,
-  source: 'preflight' | 'read-only' | 'environment',
+  source: 'preflight' | 'read-only' | 'environment' | 'steering',
   veto: ToolResult,
 ): void {
   ctx.trace?.runtime({
@@ -346,6 +346,24 @@ export class ToolDispatcher {
     // ya empezó no pasa por aquí: termina.
     if (ctx.pause?.pauseRequested && !ctx.signal.aborted && denied.size < calls.length) {
       await ctx.pause.waitAtSafePoint(ctx.signal);
+      // Y si durante esa pausa el usuario redirigió al agente, lo aprobado
+      // tampoco se ejecuta: la aprobación era anterior al mensaje. Consta como
+      // resuelta, pero la acción se descarta —igual que un lote propuesto y
+      // aún no despachado— y el modelo decide de nuevo con el mensaje delante.
+      const superseded = ctx.signal.aborted ? null : (ctx.supersededBySteering?.() ?? null);
+      if (superseded !== null) {
+        for (const call of calls) {
+          if (denied.has(call.id)) continue;
+          const veto: ToolResult = {
+            ok: false,
+            error: superseded,
+            recoverable: true,
+            countsAsFailure: false,
+          };
+          denied.set(call.id, veto);
+          traceVeto(ctx, call, 'steering', veto);
+        }
+      }
     }
 
     // §12.12: una llamada que aún no empezó no se lanza con el turno ya

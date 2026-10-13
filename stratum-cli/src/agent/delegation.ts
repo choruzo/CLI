@@ -169,6 +169,11 @@ export async function* executeDelegations(
   for (const job of jobs) {
     void (async () => {
       const release = await sem.acquire();
+      // Desde que tiene el turno, este hijo cuenta para la pausa del run: sin
+      // esto habría un tramo —entre adquirir el semáforo y que su loop se
+      // registre— en el que `paused` podría darse por alcanzado con él a punto
+      // de anunciarse.
+      const unit = opts?.pause?.enter();
       try {
         if (childSignal.aborted) {
           results.set(job.subId, {
@@ -181,16 +186,11 @@ export async function* executeDelegations(
           });
           return;
         }
-        // Pausa cooperativa — punto seguro (3): antes de lanzar un subagente.
+        // Pausa cooperativa — punto seguro (4): antes de lanzar un subagente.
         // Con el run en pausa no nace trabajo nuevo: el hijo que tenía el turno
         // espera aquí, sin anunciarse, hasta `resume`.
         if (opts?.pause?.pauseRequested) {
-          const unit = opts.pause.enter();
-          try {
-            await opts.pause.waitAtSafePoint(childSignal);
-          } finally {
-            unit.leave();
-          }
+          await opts.pause.waitAtSafePoint(childSignal);
           if (childSignal.aborted) {
             results.set(job.subId, {
               id: job.subId,
@@ -220,6 +220,9 @@ export async function* executeDelegations(
 
         let result: SubagentResult;
         try {
+          // El loop del hijo se registra él mismo al arrancar (de forma síncrona
+          // dentro de esta llamada): desde aquí cuenta él, no esta unidad.
+          unit?.park();
           result = await runSubagent({
             task: {
               id: job.subId,
@@ -276,6 +279,7 @@ export async function* executeDelegations(
         });
         push({ type: 'subagent_completed', subagentId: job.subId, result });
       } finally {
+        unit?.leave();
         release();
         remaining--;
         if (remaining === 0) markAllDone();
