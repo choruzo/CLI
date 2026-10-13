@@ -1,6 +1,7 @@
 import type {
   ProtocolApproval,
   ProtocolApprovalDecision,
+  ProtocolInteractionStatus,
   ProtocolJob,
   ProtocolMemoryEvent,
   ProtocolPlan,
@@ -71,7 +72,14 @@ export interface StateEventData {
   'context.compressed': { tokensBefore: number; tokensAfter: number; roundsCompressed: number };
   'todo.updated': { items: ProtocolTodo[]; stale: number };
   'plan.proposed': { request: ProtocolPlanRequest };
-  'plan.resolved': { requestId: string; decision: 'approve' | 'reject'; plan?: ProtocolPlan };
+  'plan.resolved': {
+    requestId: string;
+    decision: 'approve' | 'reject';
+    plan?: ProtocolPlan;
+    /** Ausente = `resolved`. `expired` y `cancelled` llevan `decision: 'reject'`. */
+    status?: ProtocolInteractionStatus;
+    resolvedBy?: ProtocolResolver;
+  };
   'plan.step_updated': { stepId: string; status: ProtocolPlanStep['status'] };
 
   'job.started': { job: ProtocolJob };
@@ -94,6 +102,8 @@ export interface StateEventData {
     requestId: string;
     /** `null` = se omitió: el agente sigue con supuestos. */
     answers: ProtocolQuestionAnswer[] | null;
+    /** Ausente = `resolved`. `expired` y `cancelled` llevan `answers: null`. */
+    status?: ProtocolInteractionStatus;
     resolvedBy?: ProtocolResolver;
   };
 

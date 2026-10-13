@@ -49,7 +49,22 @@ export interface HelloParams {
   roles: Role[];
   /** Extensiones opcionales que el cliente entiende. */
   features?: string[];
+  /**
+   * **De solo entrada.** Lo que acredita a quien pide el rol `approver`: una
+   * clave que la persona teclea, que el servidor comprueba contra lo que tenga
+   * configurado y que no guarda. El token del canal **no** basta para obtener
+   * la capacidad `approve`. No se devuelve en ningún resultado, evento ni
+   * error, y no se registra.
+   */
+  approverKey?: string;
 }
+
+/**
+ * Extensión que el servidor anuncia en `core.hello.features` cuando tiene
+ * configurada una forma de acreditar aprobadores: solo entonces una solicitud
+ * pendiente puede resolverse desde otro cliente.
+ */
+export const FEATURE_REMOTE_APPROVALS = 'remote-approvals';
 
 export interface HelloResult {
   protocol: number;

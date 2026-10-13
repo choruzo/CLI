@@ -41,6 +41,8 @@ export const LIMITS = {
   nameChars: 256,
   /** Token del handshake. */
   tokenChars: 1_024,
+  /** Clave de aprobador del handshake (`core.hello.approverKey`). */
+  approverKeyChars: 1_024,
   /** Frase tecleada de una confirmación con nombre. */
   phraseChars: 256,
   /** Tanda de respuestas de `question`. */

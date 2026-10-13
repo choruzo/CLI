@@ -245,11 +245,26 @@ export interface ProtocolTodo {
 // Decisiones humanas pendientes
 // ---------------------------------------------------------------------------
 
-/** Quién resolvió algo. Sin datos del proceso: solo lo que un cliente declaró ser. */
+/**
+ * Quién resolvió algo. Sin datos del proceso ni credenciales: la vía por la que
+ * llegó la decisión y, si fue un cliente remoto, lo que **declaró** ser.
+ *
+ *  - `local`: la persona delante del proceso que aloja la sesión (su terminal).
+ *  - `remote`: un cliente con la capacidad `approve`, a través del servidor.
+ *  - `timeout`: nadie contestó a tiempo. Equivale a denegar / omitir / rechazar.
+ *  - `policy`: no había a quién preguntar, y se resolvió sin preguntar.
+ */
 export interface ProtocolResolver {
-  client: ClientKind;
-  connectionId: number;
+  kind: 'local' | 'remote' | 'timeout' | 'policy';
+  /** Solo con `remote`. No es una identidad verificada. */
+  client?: ClientKind;
+  /** Solo con `remote`: la conexión del servidor que la resolvió. */
+  connectionId?: number;
+  at: Timestamp;
 }
+
+/** Cómo terminó una pregunta o un plan pendientes. */
+export type ProtocolInteractionStatus = 'resolved' | 'expired' | 'cancelled';
 
 export type ProtocolApprovalDecision = 'approve' | 'deny' | 'allow-all';
 

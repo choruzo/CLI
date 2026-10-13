@@ -13,3 +13,4 @@ export * from './model.js';
 export * from './events.js';
 export * from './methods.js';
 export * from './reduce.js';
+export * from './resolve.js';

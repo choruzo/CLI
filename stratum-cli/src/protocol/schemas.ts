@@ -131,9 +131,12 @@ const environmentRef = z.object({
 });
 
 const resolver: z.ZodType<ProtocolResolver> = z.object({
-  client: clientKind,
-  connectionId: z.number().int(),
+  kind: z.enum(['local', 'remote', 'timeout', 'policy']),
+  client: clientKind.optional(),
+  connectionId: z.number().int().optional(),
+  at: z.number().int().nonnegative(),
 });
+const interactionStatus = z.enum(['resolved', 'expired', 'cancelled']);
 
 export const agentSchema: z.ZodType<ProtocolAgent> = z.object({
   name: z.string(),
@@ -403,6 +406,8 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
     requestId: id,
     decision: z.enum(['approve', 'reject']),
     plan: planSchema.optional(),
+    status: interactionStatus.optional(),
+    resolvedBy: resolver.optional(),
   }),
   'plan.step_updated': z.object({ stepId: z.string(), status: planStepStatus }),
   'job.started': z.object({ job: jobSchema }),
@@ -417,7 +422,12 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
     resolvedBy: resolver.optional(),
   }),
   'question.requested': z.object({ request: questionRequestSchema }),
-  'question.resolved': z.object({ requestId: id, answers, resolvedBy: resolver.optional() }),
+  'question.resolved': z.object({
+    requestId: id,
+    answers,
+    status: interactionStatus.optional(),
+    resolvedBy: resolver.optional(),
+  }),
   warning: z.object({ message: z.string() }),
   error: z.object({ message: z.string(), fatal: z.boolean() }),
 };
@@ -547,6 +557,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       client: z.object({ kind: clientKind, name, version: name }).strict(),
       roles: z.array(role).min(1).max(ROLES.length),
       features: z.array(name).max(64).optional(),
+      approverKey: z.string().min(1).max(LIMITS.approverKeyChars).optional(),
     })
     .strict(),
   'core.status': empty,
