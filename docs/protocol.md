@@ -584,10 +584,25 @@ y `at`.
 **Una foto cabe en una trama, medida en bytes.** Los límites de arriba son en caracteres; con
 un run enorme y texto de varios bytes por carácter la suma podría pasar de
 `MAX_MESSAGE_BYTES`, y una foto que no cabe no llega nunca. El anfitrión la mide al construirla
-(`fitSnapshot`, presupuesto de 768 KiB) y, solo si hace falta, le quita detalle en este orden:
-el razonamiento parcial, los textos largos de tools y subagentes, la cola del texto parcial y,
-lo último, la conversación más antigua (con `messagesTruncated`). Sigue siendo el estado en
-su `seq`, con menos detalle.
+(`fitSnapshot`, `host/session-publisher.ts`) con una **postcondición**: toda foto que publica,
+serializada, ocupa como mucho `SNAPSHOT_BYTE_BUDGET` (768 KiB). Solo si hace falta le quita
+detalle, por etapas, y se para en la primera que cabe:
+
+1. El razonamiento parcial; los textos largos de tools y subagentes (y `filesChanged`); la
+   cola del texto parcial. No se quita ningún elemento.
+2. La conversación más antigua, por mitades (con `messagesTruncated`).
+3. Si ni así —la conversación ya es una entrada y lo que pesa es lo demás—, lo **terminado**
+   se reduce a lo más reciente (tools cerradas, subagentes acabados, jobs terminados, tareas
+   hechas, conversación) y todos los textos se acortan, en tres pasos (512, 128 y 32
+   caracteres). **Lo vivo se conserva entero**: la sesión, el run, las tools y subagentes
+   abiertos, los jobs en marcha, las tareas sin terminar y cada solicitud pendiente con sus
+   ids, sus opciones y su `confirmPhrase`, sin los que no se podría resolver.
+4. Un último paso acota también esas listas vivas (20 por lista, textos de 8 caracteres), y
+   tiene un tamaño máximo fijo. Como garantía final, si aun así no cupiera —imposible con el
+   presupuesto por defecto—, se publica la sesión y su run sin nada más.
+
+En todos los casos sigue siendo el estado en su `seq`, con menos detalle, y nunca se inventa
+nada: lo que falta, falta. El detalle completo viajó en los eventos.
 
 `agents.list.cwd`, como `sessions.open.cwd`, tiene que ser una ruta absoluta.
 
