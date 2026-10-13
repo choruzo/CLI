@@ -96,6 +96,8 @@ export interface StratumdOptions {
    * daemon deniega lo que pediría confirmación.
    */
   approver?: ApproverAuth | null;
+  /** Retraso de la respuesta a una clave de aprobador errónea. Solo para tests. */
+  approverFailureDelayMs?: number;
   /** Plazo de una solicitud de una sesión del daemon. Por defecto, `daemon.approvalTimeoutMinutes`. */
   approvalTimeoutMs?: number;
   /** Inyectables para tests del endpoint. */
@@ -217,7 +219,9 @@ export class Stratumd {
       },
       onDrain: (conn) => daemon.hub.pump(conn),
       approver: opts.approver ?? null,
-      ...(opts.now ? { now: opts.now } : {}),
+      ...(opts.approverFailureDelayMs !== undefined
+        ? { approverFailureDelayMs: opts.approverFailureDelayMs }
+        : {}),
       ...(opts.highWaterBytes ? { highWaterBytes: opts.highWaterBytes } : {}),
       ...(opts.maxBufferedBytes ? { maxBufferedBytes: opts.maxBufferedBytes } : {}),
     });

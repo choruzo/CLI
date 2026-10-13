@@ -86,12 +86,15 @@ export interface ControlServerOptions {
    * capacidad `approve`.
    */
   approver?: ApproverAuth | null;
-  now?: () => number;
+  /** Retraso de la respuesta a una clave de aprobador errónea (tests). */
+  approverFailureDelayMs?: number;
 }
 
-/** Claves de aprobador erróneas seguidas antes de dejar de comprobarlas un rato. */
-const APPROVER_MAX_FAILURES = 5;
-const APPROVER_LOCKOUT_MS = 60_000;
+/**
+ * Cuánto tarda en contestarse una clave de aprobador errónea. Lo paga solo la
+ * conexión que la presentó: frena a quien prueba claves sin frenar a nadie más.
+ */
+const APPROVER_FAILURE_DELAY_MS = 1_000;
 
 const DEFAULT_HIGH_WATER = 1024 * 1024;
 const DEFAULT_MAX_BUFFERED = 16 * 1024 * 1024;
@@ -236,7 +239,9 @@ export class ControlServer {
 
     // Quien no se presenta a tiempo no se queda con un hueco.
     const handshakeTimer = setTimeout(() => {
-      if (!conn.authenticated) {
+      // Con el saludo ya recibido y su clave comprobándose, el plazo no corta:
+      // esa espera es del servidor, y termina aceptando o cerrando la conexión.
+      if (!conn.authenticated && !conn.greeting) {
         log.info('handshake timeout', { connectionId: conn.id });
         socket.destroy();
       }
@@ -307,28 +312,48 @@ export class ControlServer {
     return out as RequestHandlers;
   }
 
-  private approverFailures = 0;
-  private approverLockedUntil = 0;
+  /** Comprobaciones de clave en curso, de una en una (ver `verifyApprover`). */
+  private approverQueue: Promise<unknown> = Promise.resolve();
 
   /**
    * ¿Acredita esa clave a un aprobador? Sin acreditación configurada, nunca.
-   * Tras varios fallos seguidos deja de comprobar durante un rato: la clave la
-   * teclea una persona, no hace falta admitir un intento tras otro.
+   *
+   * Freno contra quien prueba claves, **sin bloqueo global**: que alguien falle
+   * no le quita a nadie más la posibilidad de aprobar.
+   *
+   *  - Una conexión tiene **un** intento: un fallo rechaza el handshake y la
+   *    cierra. Reintentar es abrir otra.
+   *  - Las comprobaciones van **de una en una**, en orden de llegada: el ritmo
+   *    al que se pueden probar claves es el de la derivación (scrypt), por
+   *    muchas conexiones que se abran, y no ocupa más de un núcleo.
+   *  - El fallo se contesta con retraso, y ese retraso lo espera solo la
+   *    conexión que falló, fuera de la cola.
+   *
+   * Lo que queda: quien tiene el token del canal puede llenar la cola y
+   * retrasar unos segundos el handshake de un aprobador legítimo (la cola no
+   * pasa del número de conexiones admitidas). No puede impedirlo.
    */
   private async verifyApprover(key: string): Promise<boolean> {
     const auth = this.opts.approver;
-    const now = (this.opts.now ?? Date.now)();
-    if (!auth || now < this.approverLockedUntil) return false;
-    const ok = await auth.verify(key);
-    if (ok) {
-      this.approverFailures = 0;
-      return true;
+    if (!auth) return false;
+    const turn = this.approverQueue.then(
+      () => auth.verify(key),
+      () => auth.verify(key),
+    );
+    this.approverQueue = turn.catch(() => undefined);
+    let ok = false;
+    try {
+      ok = await turn;
+    } catch {
+      ok = false;
     }
-    if (++this.approverFailures >= APPROVER_MAX_FAILURES) {
-      this.approverFailures = 0;
-      this.approverLockedUntil = now + APPROVER_LOCKOUT_MS;
-      log.warn('too many invalid approver keys, verification paused', {
-        lockoutMs: APPROVER_LOCKOUT_MS,
+    if (ok) return true;
+    log.warn('approver verification failed');
+    const delay = this.opts.approverFailureDelayMs ?? APPROVER_FAILURE_DELAY_MS;
+    if (delay > 0) {
+      await new Promise<void>((resolve) => {
+        const timer = setTimeout(resolve, delay);
+        timer.unref();
       });
     }
     return false;

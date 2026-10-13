@@ -3,6 +3,8 @@ import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { formatPendingTable } from '../cli/commands/approvals.js';
+import { StratumClient } from '../client/client.js';
+import { fileDiscovery } from '../client/discovery.js';
 import { ProtocolError } from '../ipc/codec.js';
 import {
   APPROVER_KEY_MIN_CHARS,
@@ -83,21 +85,61 @@ describe('handshake con clave de aprobador', () => {
     t = undefined;
   });
 
-  it('tras varios fallos seguidos deja de comprobar durante un rato, también la buena', async () => {
-    let now = 1_000_000;
-    t = await startTestDaemon({ now: () => now });
-    const attempt = (approverKey: string | null): Promise<string> =>
-      t!.connect(['approver'], 'a', { approverKey }).then(
-        (client) => (client.capabilities.includes('approve') ? 'approve' : 'observe'),
-        (err: unknown) => (err instanceof ProtocolError ? err.code : String(err)),
-      );
-    expect(await attempt(undefined as unknown as null)).toBe('approve');
-    for (let i = 0; i < 5; i++) expect(await attempt(`mala ${i}`)).toBe('UNAUTHORIZED');
-    // Bloqueado: ni la correcta entra, y el daemon sigue atendiendo a los demás.
-    expect(await attempt(undefined as unknown as null)).toBe('UNAUTHORIZED');
+  const attempt = (approverKey?: string): Promise<string> =>
+    t!.connect(['approver'], 'a', approverKey === undefined ? {} : { approverKey }).then(
+      (client) => (client.capabilities.includes('approve') ? 'approve' : 'observe'),
+      (err: unknown) => (err instanceof ProtocolError ? err.code : String(err)),
+    );
+
+  it('los fallos de otros no bloquean a un aprobador legítimo: no hay bloqueo global', async () => {
+    t = await startTestDaemon();
+    // Muchos más intentos fallidos de los que antes disparaban un bloqueo…
+    for (let i = 0; i < 12; i++) expect(await attempt(`mala ${i}`)).toBe('UNAUTHORIZED');
+    // …y la clave buena entra a la primera.
+    expect(await attempt()).toBe('approve');
+
+    // También con una ráfaga simultánea en curso: se atienden en orden y entra.
+    const flood = Array.from({ length: 8 }, (_, i) => attempt(`ráfaga ${i}`));
+    const good = attempt();
+    expect(await good).toBe('approve');
+    // Ninguna de la ráfaga entra (con la máquina cargada, alguna puede agotar su plazo).
+    expect((await Promise.all(flood)).filter((r) => r === 'approve' || r === 'observe')).toEqual(
+      [],
+    );
+    // El resto del daemon sigue atendiendo.
     expect((await t.connect(['observer'])).capabilities).toEqual(['observe']);
-    now += 61_000;
-    expect(await attempt(undefined as unknown as null)).toBe('approve');
+  }, 60_000);
+
+  it('una clave errónea se contesta tarde, y solo a quien la presentó', async () => {
+    t = await startTestDaemon({ approverFailureDelayMs: 600 });
+    const started = Date.now();
+    const bad = attempt('mala').then((code) => ({ code, ms: Date.now() - started }));
+    // Mientras esa espera, otra conexión con la clave buena no espera con ella.
+    await new Promise((r) => setTimeout(r, 50));
+    const goodStarted = Date.now();
+    expect(await attempt()).toBe('approve');
+    expect(Date.now() - goodStarted).toBeLessThan(500);
+    const failed = await bad;
+    expect(failed.code).toBe('UNAUTHORIZED');
+    expect(failed.ms).toBeGreaterThanOrEqual(550);
+  }, 30_000);
+
+  it('una conexión tiene un solo intento: tras fallar queda cerrada', async () => {
+    t = await startTestDaemon();
+    const client = new StratumClient({
+      discovery: fileDiscovery({ dir: t.dir }),
+      identity: {
+        kind: 'cli',
+        name: 'retry',
+        version: '0',
+        roles: ['approver'],
+        approverKey: 'mala',
+      },
+      reconnect: false,
+    });
+    await expect(client.connect()).rejects.toMatchObject({ code: 'UNAUTHORIZED' });
+    expect(client.status).toBe('closed');
+    await expect(client.request('approvals.list', {})).rejects.toBeDefined();
   }, 30_000);
 });
 

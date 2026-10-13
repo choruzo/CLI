@@ -241,6 +241,8 @@ export async function startTestDaemon(
     version: '0.0.0-test',
     config: configFor(),
     approver: await approverAuthFromKey(TEST_APPROVER_KEY),
+    // Sin el retraso de una clave errónea: lo prueba su propio test.
+    approverFailureDelayMs: 0,
     env: { ...process.env, STRATUMD_TEST: 'daemon-env' },
     dir,
     processTeardown: async () => {

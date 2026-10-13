@@ -238,6 +238,35 @@ describe('arquitectura de src/daemon/', () => {
     }
   });
 
+  it('la clave de aprobador solo se teclea: ni argumentos, ni entorno, ni fichero, ni hijos', () => {
+    const cli = code(readFileSync(join(here, '..', 'cli', 'commands', 'approvals.ts'), 'utf-8'));
+    // Ni una opción de línea de comandos que la reciba, ni el entorno, ni argv.
+    expect(/\.option\([^)]*(key|pass|secret|token)/i.test(cli)).toBe(false);
+    expect(/process\.env|process\.argv/.test(cli)).toBe(false);
+    // Ni se lee de un fichero, ni se lanza ningún proceso con ella.
+    expect(/readFileSync|readFile\(|execa|child_process|spawn\(/.test(cli)).toBe(false);
+    expect(cli).toContain('askSecret(');
+    expect(cli).toContain('delete identity.approverKey');
+    // Quien aloja sesiones (el puente de la CLI) nunca presenta una clave.
+    const bridge = code(readFileSync(join(here, '..', 'host', 'peer-host-bridge.ts'), 'utf-8'));
+    expect(/approverKey/.test(bridge)).toBe(false);
+    // En el servidor la clave no sale de `hello`: ni a la conexión ni al resto del daemon.
+    for (const { file, text } of production) {
+      const uses = (code(text).match(/approverKey/g) ?? []).length;
+      expect(uses > 0 ? file : 'control-server.ts', file).toBe('control-server.ts');
+    }
+    // Y lo que el daemon pone en el entorno de sus sesiones es una copia del suyo, tal cual.
+    const daemon = code(production.find((s) => s.file === 'daemon.ts')!.text);
+    expect(daemon).toContain('createSessionEnv({ cwd, env: this.opts.env })');
+  });
+
+  it('stratum run sin terminal deniega, haya o no aprobadores remotos', () => {
+    const run = code(readFileSync(join(here, '..', 'cli', 'commands', 'run.ts'), 'utf-8'));
+    expect(run).toContain("else if (!process.stdin.isTTY) basePolicy = 'deny';");
+    // No hay camino por el que `run` active la resolución remota sin prompt local.
+    expect(/remoteApprovals|interactionTimeoutMs/.test(run)).toBe(false);
+  });
+
   it('la ruta de este test es la esperada (src/daemon)', () => {
     expect(relative(join(here, '..', '..'), here).replace(/\\/g, '/')).toBe('src/daemon');
   });

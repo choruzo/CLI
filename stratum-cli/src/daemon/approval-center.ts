@@ -155,8 +155,10 @@ export class ApprovalCenter {
   /** Cierra una solicitud **de esa sesión**. */
   private close(sessionId: string, id: string, resolution: string): void {
     const known = this.pending.get(id);
-    if (known && known.sessionId !== sessionId) return;
-    if (!known && this.recent.has(id)) return;
+    // Solo se cierra lo que estaba pendiente y era de esa sesión. Un id ajeno,
+    // ya resuelto o que nunca existió no cambia nada: ni lo pendiente ni el
+    // recuerdo de cómo acabó cada solicitud.
+    if (!known || known.sessionId !== sessionId) return;
     this.done(id, resolution);
   }
 

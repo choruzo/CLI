@@ -15,6 +15,14 @@
  * Dentro de una versión solo se añade: campos opcionales, métodos y eventos
  * nuevos (anunciados en `features`). Quitar o cambiar el significado de algo
  * exige subir este número.
+ *
+ * **Desde cuándo obliga esa regla.** La v1 todavía **no está congelada**: ningún
+ * paquete publicado la contiene (el último, `stratum-cli` 0.8.0, es anterior al
+ * protocolo) y no hay clientes fuera de este repositorio. Mientras sea así, su
+ * forma se puede corregir sin subir el número, y cada cambio se anota en
+ * `docs/protocol.md` §16. La compatibilidad estricta empieza con **la primera
+ * versión publicada de `stratum-cli` que incluya `stratumd`** (su tag `v*`): a
+ * partir de ese tag, lo que aquí se llama v1 es lo que esa versión publicó.
  */
 export const STRATUM_PROTOCOL_VERSION = 1;
 

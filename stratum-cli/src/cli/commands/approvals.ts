@@ -2,6 +2,7 @@ import { Command } from 'commander';
 import { createInterface } from 'readline';
 import { StratumClient } from '../../client/client.js';
 import { defaultEndpointDir, fileDiscovery } from '../../client/discovery.js';
+import type { ClientIdentity } from '../../client/handshake.js';
 import { APPROVER_KEY_MIN_CHARS, writeApproverKey } from '../../daemon/approver-key.js';
 import { ProtocolError } from '../../ipc/codec.js';
 import type {
@@ -185,15 +186,16 @@ async function approver(): Promise<StratumClient | null> {
     fail('Cancelled.');
     return null;
   }
+  const identity: ClientIdentity = {
+    kind: 'cli',
+    name: 'stratum approvals',
+    version: cliVersion(),
+    roles: ['approver'],
+    approverKey,
+  };
   const client = new StratumClient({
     discovery: fileDiscovery(),
-    identity: {
-      kind: 'cli',
-      name: 'stratum approvals',
-      version: cliVersion(),
-      roles: ['approver'],
-      approverKey,
-    },
+    identity,
     reconnect: false,
     requestTimeoutMs: 15_000,
   });
@@ -202,6 +204,10 @@ async function approver(): Promise<StratumClient | null> {
   } catch (err) {
     fail(explain(err));
     return null;
+  } finally {
+    // La clave solo hace falta para el saludo: no se queda en el cliente (que
+    // no reconecta) más tiempo del necesario.
+    delete identity.approverKey;
   }
   if (!client.capabilities.includes('approve')) {
     client.close();

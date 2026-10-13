@@ -860,10 +860,31 @@ cualquiera de las formas de arriba. Nueva: `find` **sin filtros** borrando una d
 Un push forzado encaja en las dos claves y manda la acción más estricta: `gitPushForce: allow`
 no permite el push (sigue pidiendo confirmación por `gitPush`), y `gitPush: allow` no relaja el
 forzado. Va sobre el comando efectivo, así que `sudo`, `env`, `sh -c "…"` o un target `ssh:` no
-lo esconden (`safety-git-push-needs-approval`, `safety-git-push-policy`). **No se resuelve**: un
-alias de git (`git p`, `git -c alias.p=push p`), ni un `push.default` o un `remote.<n>.push` con
-`+` en la config del repositorio — eso último se trata como un push normal, que ya pide
-confirmación; el alias no se reconoce como push.
+lo esconden (`safety-git-push-needs-approval`, `safety-git-push-policy`).
+
+**La detección de `git push` no es una barrera absoluta.** Clasifica el comando que se ve, y hay
+formas de publicar que no se ven como un push:
+
+- Un **alias de git** (`git p`, `git -c alias.p=push p`, o uno definido en `~/.gitconfig`): no se
+  reconoce como push — ni pide confirmación ni cuenta como forzado. Resolverlo exigiría leer la
+  config de git del target, que puede ser remoto.
+- Un **envoltorio propio** (`./deploy.sh`, `make release`, `npm run publish`, un hook) que hace el
+  push por dentro: se ejecuta lo que contenga.
+- `push.default` o un `remote.<n>.push` con `+` en la config del repositorio: se ve como un push
+  normal (pide confirmación, pero no la reforzada).
+- Lo que ya queda fuera de la guarda en general: código dentro de un intérprete, más de dos
+  niveles de anidamiento (ver *Fuera de alcance*).
+
+Consecuencias, para que nadie apoye en esto más de lo que aguanta:
+
+- `gitPush` / `gitPushForce` son **política de confirmación**, no una garantía de que nada se
+  publica sin preguntar. `gitPushForce: block` bloquea los pushes forzados que se reconocen como
+  tales, no los que llegan por un alias o un script.
+- **Lo que no se puede permitir que ocurra no debe depender solo de esta clasificación.** Los
+  vetos inapelables de la capa 1 no pasan por ella (cada uno reconoce su propio comando), y lo que
+  de verdad protege una rama son controles que no están en manos del agente: protección de ramas
+  en el remoto, credenciales sin permiso de `push --force`, un entorno `readOnly` o
+  `confirm-always` sobre el target, o `confirmAll` en el host.
 
 **Plano de control de Stratum** — veto, sin confirmación posible: `stratum approvals`, `stratum
 daemon` y `stratum attach` lanzados por el agente (también envueltos, o vía `node …/dist/index.js`

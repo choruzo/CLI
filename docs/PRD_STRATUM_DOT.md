@@ -1165,6 +1165,22 @@ Descubrimientos de implementación:
 8. **No hay `stratum attach`** todavía (lo nombra §13.4): el veto de subcomandos de control ya
    lo cubre para cuando exista.
 
+Pase de endurecimiento (tras la revisión de M4):
+
+- **v1 no está congelada**: ningún paquete publicado contiene el protocolo. El cambio de
+  `ProtocolResolver` no sube la versión; la compatibilidad estricta empieza con el primer tag
+  `v*` de `stratum-cli` que incluya `stratumd` (`docs/protocol.md` §16).
+- **Sin bloqueo global de la clave de aprobador**: un intento por conexión, comprobaciones de
+  una en una y el fallo contestado con retraso solo a quien falló. Los fallos de otro ya no
+  dejan a nadie sin aprobar.
+- **Un `*.resolved` fabricado** por un anfitrión solo cierra lo pendiente de su propia sesión;
+  el pase encontró y corrigió que uno para un id inexistente lo dejaba marcado como resuelto.
+- **`stratum run` sin terminal deniega siempre**; la aprobación remota en CI, si llega, será
+  una opción explícita. Fijado con un test.
+- **Búsqueda de fugas** como test: clave de aprobador, token del canal y secretos de la orden
+  no aparecen en logs, eventos, fotos, DTOs, auditoría, traza ni en el entorno o los
+  argumentos de un proceso hijo.
+
 Pendiente, y por qué M4 no se da por **endurecido**:
 
 - **§22 Q2** (identidad del proceso par): respondida con lo que se puede hacer en Node puro —la
@@ -1307,6 +1323,9 @@ resto de la tabla de §16.
   git (`git p` no se reconoce como push: ni confirma ni fuerza) ni un `push.default` /
   `remote.<n>.push` con `+` en la config del repo (se trata como push normal, que ya confirma).
   Cerrar el alias exigiría leer la config de git del target, que puede ser remoto: queda fuera.
+  **La detección no es una barrera absoluta** frente a alias y envoltorios (`./deploy.sh`,
+  `make release`): `gitPush`/`gitPushForce` son política de confirmación, y nada que deba ser
+  imposible puede depender solo de ella (`stratum-cli/docs/eval.md`, «Qué cubre la guarda»).
 - **Q4. Bandeja y notificaciones en Tauri v2 por plataforma.** Soporte real de bandeja en
   GNOME/Wayland, y si las notificaciones de escritorio admiten acciones (el diseño no
   depende de ellas: una aprobación nunca se resuelve desde la notificación).

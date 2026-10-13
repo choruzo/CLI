@@ -117,7 +117,8 @@ método contesta `UNAUTHORIZED`.
   se concede sin la capacidad `approve`.
 - `features` del servidor: `remote-approvals` si acredita aprobadores (solo entonces algo
   pendiente se puede resolver desde otro cliente).
-- Dentro de la v1 solo se añade: campos opcionales, métodos y eventos nuevos, anunciados en `features`.
+- Dentro de la v1 solo se añade: campos opcionales, métodos y eventos nuevos, anunciados en
+  `features` — **a partir de su congelación** (§16): hasta entonces la v1 se puede corregir.
 
 ### Descubrimiento
 
@@ -679,11 +680,26 @@ solo, ninguna conexión obtiene `approve`. Hace falta además una frase que elig
 - El daemon la carga **al arrancar**. Sin fichero —o con uno que no valida: falla cerrado— no
   hay aprobadores: `features` no anuncia `remote-approvals`, nada se resuelve en remoto y todo
   se contesta donde siempre, en la terminal del anfitrión.
-- Tras 5 claves erróneas seguidas, el daemon deja de comprobarlas durante 60 s.
+- **Freno contra quien prueba claves, sin bloqueo global.** Cada conexión tiene un solo
+  intento (un fallo rechaza el handshake y la cierra); las comprobaciones van de una en una,
+  en orden de llegada, así que el ritmo de prueba es el de la derivación scrypt por muchas
+  conexiones que se abran; y el fallo se contesta con 1 s de retraso que espera solo la
+  conexión que falló. **Que alguien falle no le quita a nadie la posibilidad de aprobar.** Lo
+  que queda: quien tiene el token del canal puede llenar esa cola y retrasar unos segundos el
+  handshake de un aprobador legítimo (la cola no pasa del número de conexiones admitidas); no
+  puede impedirlo. El freno no sustituye a una clave que no sea adivinable.
+- La clave vive lo que dura el saludo: el servidor la comprueba y no la guarda en la conexión;
+  `stratum approvals` la borra de su cliente al terminar el handshake. No está en `argv` ni en
+  el entorno de ningún proceso, así que un proceso hijo —el `exec` de una sesión, por ejemplo—
+  no la hereda. Tampoco el token del canal: no se pone en el entorno de nadie.
 
 **Una solicitud es de la sesión que la abrió.** Un anfitrión no puede publicar una solicitud a
-nombre de otra sesión (`INVALID_PARAMS`), y si publica una con el id de una ajena —o dice que
-esa está resuelta— el centro lo ignora: la de la otra sesión sigue pendiente y es suya.
+nombre de otra sesión (`INVALID_PARAMS`), y si publica una con el id de una ajena el centro la
+ignora. Un `*.resolved` fabricado solo cierra lo que estaba **pendiente y era de la sesión que
+lo publica**: para una solicitud de otra sesión, una ya resuelta o una que nunca existió no
+cambia nada — ni lo pendiente, ni el recuerdo de cómo acabó (`ALREADY_RESOLVED` sigue diciendo
+la resolución real). De su propia sesión, en cambio, el anfitrión es la autoridad: ahí vive
+la promesa, y su `*.resolved` es la resolución local.
 
 **`pid` y `claim` no son credenciales de aprobación.** El `pid` que declara un anfitrión es una
 pista de ciclo de vida (¿murió o puede volver?); el `claim`, la propiedad de la *publicación* de
@@ -784,8 +800,11 @@ puede valer— y el anfitrión, que es la autoridad. Una respuesta que no vale c
 | En la CLI, sin terminal ni aprobadores | No | No se pregunta: lo destructivo se bloquea, como antes |
 
 Una sesión del daemon solo pregunta si el daemon acredita aprobadores; si no, se comporta como
-`stratum run` sin terminal (política `deny`, también en un entorno `allow`). `stratum run` sin terminal sigue denegando lo destructivo aunque
-haya un daemon con aprobadores: no cambia el comportamiento de una automatización existente.
+`stratum run` sin terminal (política `deny`, también en un entorno `allow`).
+
+**`stratum run` sin terminal deniega siempre**, haya o no un daemon con aprobadores: ese
+default no cambia. Una automatización que quiera aprobación remota (CI que espera a una
+persona) tendrá que pedirlo con una opción explícita, que hoy no existe. Lo fija un test.
 
 ### 15.7 Cancelación, cierre y desconexión
 
@@ -826,7 +845,7 @@ contra un aprobador externo).
 
 ### 15.10 Cambios en el contrato respecto a M1
 
-Nadie emitía todavía estos datos, así que se cambian dentro de la v1:
+Se cambian dentro de la v1, que aún no está congelada (§16):
 
 1. `ProtocolResolver` pasa de `{ client, connectionId }` a `{ kind, client?, connectionId?, at }`:
    hacía falta decir la vía, y una resolución local no tiene conexión.
@@ -835,3 +854,32 @@ Nadie emitía todavía estos datos, así que se cambian dentro de la v1:
 4. No existe `host.localApprovalResolved`: la resolución local es el evento `*.resolved` que el
    anfitrión publica con `host.publish`, explícito y con su `seq`. El daemon no la infiere de
    que aparezca un `tool.started`.
+
+## 16. Estabilidad: cuándo se congela la v1
+
+`STRATUM_PROTOCOL_VERSION` es `1` desde M1, pero **la v1 todavía no es una superficie
+estable**:
+
+- Ningún paquete publicado la contiene. El último, `stratum-cli` 0.8.0 (tag `v0.8.0`), es
+  anterior al protocolo: no trae `src/protocol/` ni `stratumd`.
+- No hay clientes fuera de este repositorio. Cliente y servidor se construyen del mismo árbol.
+
+Mientras eso sea así, la forma de la v1 se puede **corregir sin subir el número**, y cada
+corrección se anota aquí. Subirlo ahora no protegería a nadie y dejaría una «v1» que nunca
+existió fuera del repo.
+
+**La compatibilidad estricta empieza con la primera versión publicada de `stratum-cli` que
+incluya `stratumd`** (su tag `v*` en npm y GitHub). A partir de ese tag, v1 es exactamente lo
+que esa versión publicó, y rige la regla de §4: dentro de una versión solo se añade; quitar o
+cambiar el significado de algo exige `STRATUM_PROTOCOL_VERSION = 2`. Antes de publicar ese tag
+hay que revisar esta lista y dar la superficie por buena.
+
+Correcciones hechas a la v1 antes de congelarla:
+
+| Hito | Cambio | Por qué no es un bump |
+|---|---|---|
+| M3 | `host.register` lleva `pid` y `claim`; `host.publish` admite una foto; `runs.cancel` devuelve `cancelled \| not-running` | Sin publicar |
+| M4 | `ProtocolResolver`: de `{ client, connectionId }` a `{ kind, client?, connectionId?, at }` | Sin publicar, y **ningún servidor llegó a emitirlo**: hasta M4 no había nada que resolver (`approvals.list` devolvía siempre vacío), así que tampoco existe ningún dato con la forma antigua. Por eso no se aceptan las dos formas |
+| M4 | `question.resolved` y `plan.resolved` ganan `status` y `resolvedBy` (opcionales) | Aditivo |
+| M4 | `core.hello.approverKey` (opcional) y la *feature* `remote-approvals` | Aditivo |
+| M4 | El servidor deja de conceder `approve` por el token, y `host` pasa a ser excluyente | Cambia lo que se **concede**, no el contrato: `capabilities` siempre pudo ser menos de lo pedido (§4) |
