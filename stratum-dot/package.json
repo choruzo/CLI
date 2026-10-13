@@ -14,8 +14,9 @@
     "test:native": "cargo test -p dot-link",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "smoke:real": "cargo build -p dot-link && node scripts/smoke-real.mjs",
+    "smoke:chat": "cargo build -p dot-link && node scripts/smoke-chat.mjs",
     "e2e:build": "tauri build --debug --no-bundle",
-    "e2e": "node e2e/dot.e2e.mjs",
+    "e2e": "node e2e/dot.e2e.mjs && node e2e/chat.e2e.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

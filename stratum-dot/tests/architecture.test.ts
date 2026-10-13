@@ -152,13 +152,35 @@ describe('la frontera con el lado nativo', () => {
       'dot_cancel_run',
       'dot_focus_session',
       'dot_hide',
+      'dot_list_agents',
+      'dot_list_models',
+      'dot_open_session',
       'dot_pause_run',
       'dot_quit',
       'dot_resume_run',
       'dot_resync_session',
       'dot_retry',
+      'dot_start_run',
       'dot_steer_run',
     ]);
+  });
+
+  it('una sesión se abre sin entorno, sin `resume` y sin nada del sistema de ficheros', () => {
+    const commands = rustCode(join(DOT, 'src-tauri', 'src', 'commands.rs'));
+    const open = /pub async fn dot_open_session\(([\s\S]*?)\) ->/.exec(commands)?.[1] ?? '';
+    const params = [...open.matchAll(/(\w+): (?:Option<String>|String)/g)].map((m) => m[1]);
+    // Lo que el webview puede pedir al abrir: cuatro textos opcionales, y ninguno es un `env`.
+    expect(params).toEqual(['cwd', 'agent', 'provider', 'model']);
+    for (const file of rustShipped) {
+      const text = rustCode(file);
+      expect(/"env"|"resume"\s*:|"readOnly"|"sessionProfile"/.test(text), rel(file)).toBe(false);
+      // El directorio viaja como texto: Dot no lo abre, no lo lista y no lo comprueba.
+      if (!file.endsWith(`${sep}discovery.rs`) && !file.endsWith(`${sep}log.rs`) && !file.endsWith(`${sep}launcher.rs`)) {
+        expect(/std::fs::|read_dir|tokio::fs::/.test(text), `${rel(file)} toca el sistema de ficheros`).toBe(false);
+      }
+    }
+    const native = code(join(SRC, 'bridge', 'native.ts'));
+    expect(native).not.toMatch(/\benv\b/);
   });
 
   it('el webview no tiene más permisos que los de por defecto', () => {
@@ -178,6 +200,10 @@ describe('la frontera con el lado nativo', () => {
       [/endpoint\.json|ipcPath|endpointDir/, 'el endpoint del daemon'],
       [/approverKey|approver_key/, 'la clave de aprobador'],
       [/core\.shutdown|core\.hello/, 'métodos que solo envía (o nunca envía) el lado nativo'],
+      [/sessions\.close|sessions\.set/, 'cerrar o reconfigurar una sesión'],
+      [/apiKey|baseUrl|api_key|base_url/, 'la configuración de un provider'],
+      [/\.stratumrc|STRATUM\.md|\.stratum[/\\]/, 'ficheros de configuración de Stratum'],
+      [/dangerouslySetInnerHTML|innerHTML|insertAdjacentHTML|document\.write/, 'HTML sin escapar'],
       [/\bprocess\.env\b|\brequire\(|from 'node:|from 'fs'|from 'net'|from 'os'|from 'path'/, 'Node'],
       [/\bfetch\(|XMLHttpRequest|WebSocket/, 'red'],
     ];
@@ -194,12 +220,33 @@ describe('la frontera con el lado nativo', () => {
     }
   });
 
-  it('lo único que se guarda entre arranques es una preferencia de interfaz', () => {
+  it('lo único que se guarda entre arranques son dos preferencias de interfaz', () => {
     const users = shipped.filter((f) => /localStorage|sessionStorage|indexedDB/.test(code(f)));
     expect(users.map(rel)).toEqual(['src/stores/uiStore.ts']);
     const ui = code(join(SRC, 'stores', 'uiStore.ts'));
-    const keys = [...ui.matchAll(/(?:setItem|getItem|removeItem)\(\s*([A-Z_a-z']+)/g)].map((m) => m[1]);
-    expect(new Set(keys)).toEqual(new Set(['SELECTED_KEY']));
+    // El almacenamiento solo se toca en dos funciones, y solo con estas dos claves.
+    expect(ui.match(/localStorage/g)).toHaveLength(3);
+    const written = [...ui.matchAll(/writePreference\(\s*([A-Z_]+)/g)].map((m) => m[1]);
+    const read = [...ui.matchAll(/readPreference\(\s*([A-Z_]+)/g)].map((m) => m[1]);
+    expect(new Set([...written, ...read])).toEqual(new Set(['SELECTED_KEY', 'LAST_CWD_KEY']));
+    const names = [...ui.matchAll(/'(stratum-dot\.[A-Za-z]+)'/g)].map((m) => m[1]).sort();
+    expect(names).toEqual(['stratum-dot.lastCwd', 'stratum-dot.selectedSession']);
+  });
+
+  it('la conversación no se guarda ni se reconstruye en Dot: sale de la foto', () => {
+    const ui = code(join(SRC, 'stores', 'uiStore.ts'));
+    // Lo que se persiste nunca es un mensaje, un borrador ni una foto.
+    for (const m of ui.matchAll(/writePreference\(([^)]*)\)/g)) {
+      expect(/draft|message|snapshot|text\b/i.test(m[1]!), m[0]).toBe(false);
+    }
+    // Nadie trata los eventos de mensaje por su cuenta, salvo el registro de actividad (que solo los nombra).
+    const handlers = shipped.filter((f) => /'message\.(delta|completed)'/.test(code(f)));
+    expect(handlers.map(rel)).toEqual(['src/protocol/activity.ts']);
+    // El transcript se pinta de `snapshot.messages`: no hay un store de mensajes.
+    const stores = walk(join(SRC, 'stores'), (f) => f.endsWith('.ts')).map(code).join('\n');
+    expect(stores).not.toMatch(/\bmessages\s*[:=]\s*\[/);
+    const transcript = code(join(SRC, 'components', 'Transcript.tsx'));
+    expect(transcript).toMatch(/const \{ messages, messagesTruncated, partial \} = snapshot;/);
   });
 });
 
@@ -216,14 +263,19 @@ describe('el lado nativo', () => {
   it('los nombres de método solo salen de la lista cerrada de `wire.rs`', () => {
     const wire = rustCode(join(link, 'src', 'wire.rs'));
     const names = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]);
+    // De `sessions.*` solo abrir; de `runs.*`, iniciar y gobernar. Ni cerrar, ni apagar, ni aprobar.
     expect(names.sort()).toEqual([
+      'agents.list',
       'core.hello',
       'events.subscribe',
       'events.unsubscribe',
+      'models.list',
       'runs.cancel',
       'runs.pause',
       'runs.resume',
+      'runs.start',
       'runs.steer',
+      'sessions.open',
     ]);
     // Fuera de `wire.rs` nadie escribe un método a mano.
     const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace)\.[a-zA-Z]+"/;
@@ -235,6 +287,8 @@ describe('el lado nativo', () => {
     for (const file of rustShipped) {
       const text = rustCode(file);
       expect(/core\.shutdown|approvals\.resolve|questions\.answer|plans\.decide/.test(text), rel(file)).toBe(false);
+      // Cerrar Dot (o una vista) no cierra sesiones: el método ni existe aquí.
+      expect(/"(sessions\.close|sessions\.set\w*|jobs\.cancel)"/.test(text), rel(file)).toBe(false);
       expect(/"approver"|"host"|"broker"|approverKey/.test(text), rel(file)).toBe(false);
     }
     expect(rustCode(join(link, 'src', 'link.rs'))).toContain('"roles": ["operator"]');

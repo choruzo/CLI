@@ -39,11 +39,16 @@ use crate::discovery::{self, Discovery, Endpoint};
 use crate::framing::LineDecoder;
 use crate::launcher::DaemonLauncher;
 use crate::log::Logger;
-use crate::state::{CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent};
+use crate::state::{
+    CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
+};
 use crate::subscriptions::{Membership, OverviewSub, SessionSub};
 use crate::transport::{self, Stream};
 use crate::wire::{self, Incoming, Method, WireError};
-use crate::{MAX_ID_CHARS, MAX_INPUT_CHARS, MAX_MESSAGE_BYTES, PROTOCOL_VERSION};
+use crate::{
+    MAX_ID_CHARS, MAX_INPUT_CHARS, MAX_MESSAGE_BYTES, MAX_NAME_CHARS, MAX_PATH_CHARS,
+    PROTOCOL_VERSION,
+};
 
 /// Sesiones que Dot sigue a la vez. Por encima, las más recientes de la foto
 /// de conjunto se quedan sin seguir (y se registra).
@@ -54,6 +59,8 @@ pub struct Timings {
     pub backoff_initial: Duration,
     pub backoff_max: Duration,
     pub request_timeout: Duration,
+    /// Abrir una sesión arranca sus servers MCP: puede tardar mucho más que una orden.
+    pub open_timeout: Duration,
     pub handshake_timeout: Duration,
     /// Cuánto se espera a que el daemon recién arrancado atienda.
     pub daemon_start_wait: Duration,
@@ -68,6 +75,7 @@ impl Default for Timings {
             backoff_initial: Duration::from_millis(250),
             backoff_max: Duration::from_secs(5),
             request_timeout: Duration::from_secs(10),
+            open_timeout: Duration::from_secs(90),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
             idle_poll: Duration::from_secs(2),
@@ -89,6 +97,7 @@ pub struct LinkConfig {
 }
 
 type ControlReply = oneshot::Sender<Result<String, CommandError>>;
+type CallReply = oneshot::Sender<Result<Value, CommandError>>;
 
 enum Cmd {
     Attach,
@@ -96,6 +105,7 @@ enum Cmd {
     Focus(Option<String>),
     Resync(String),
     Control(ControlAction, ControlReply),
+    Call(CallAction, CallReply),
     Shutdown,
 }
 
@@ -160,6 +170,17 @@ impl LinkHandle {
         answer.await.unwrap_or_else(|_| Err(gone()))
     }
 
+    /// Hace una llamada y devuelve su `result` **sin interpretar** (un DTO del
+    /// protocolo, que valida quien lo recibe). Abrir una sesión o iniciar un run
+    /// no cambian nada de lo que ve la interfaz: la sesión y el run aparecen por
+    /// eventos, cuando su anfitrión los publica.
+    pub async fn call(&self, action: CallAction) -> Result<Value, CommandError> {
+        let (reply, answer) = oneshot::channel();
+        let gone = || CommandError::new(CommandErrorKind::NotSent, "Stratum Dot is shutting down.");
+        self.tx.send(Cmd::Call(action, reply)).map_err(|_| gone())?;
+        answer.await.unwrap_or_else(|_| Err(gone()))
+    }
+
     /// Dot se cierra: se suelta la conexión. El daemon y sus sesiones siguen.
     pub fn shutdown(&self) {
         let _ = self.tx.send(Cmd::Shutdown);
@@ -185,6 +206,15 @@ pub fn spawn(
         shared: shared.clone(),
         focus: None,
         rejected: None,
+        operations: 0,
+        operation_prefix: format!(
+            "dot-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        ),
     };
     (LinkHandle { tx, shared }, actor.run())
 }
@@ -221,6 +251,19 @@ enum Pending {
     SubSession { session_id: String, generation: u32 },
     Unsub,
     Control { reply: ControlReply },
+    Call { reply: CallReply, mutating: bool },
+}
+
+/// Lo que se contesta a una llamada que salió y se quedó sin respuesta.
+fn unanswered(mutating: bool, why: &str) -> CommandError {
+    if mutating {
+        CommandError::new(
+            CommandErrorKind::Unknown,
+            format!("{why} The result is unknown: check the session before trying again."),
+        )
+    } else {
+        CommandError::new(CommandErrorKind::NoAnswer, why)
+    }
 }
 
 enum Route {
@@ -271,10 +314,20 @@ impl Conn {
         params: Value,
         pending: Pending,
     ) -> std::io::Result<()> {
+        let timeout = self.request_timeout;
+        self.request_within(method, params, pending, timeout).await
+    }
+
+    async fn request_within(
+        &mut self,
+        method: Method,
+        params: Value,
+        pending: Pending,
+        timeout: Duration,
+    ) -> std::io::Result<()> {
         let id = self.next_id;
         self.next_id += 1;
-        self.pending
-            .insert(id, (pending, Instant::now() + self.request_timeout));
+        self.pending.insert(id, (pending, Instant::now() + timeout));
         self.send(wire::request_line(id, method, params)).await
     }
 
@@ -325,11 +378,20 @@ impl Conn {
     /// Toda orden sin respuesta queda con resultado desconocido. No se reenvía.
     fn fail_pending(&mut self) {
         for (_, (pending, _)) in self.pending.drain() {
-            if let Pending::Control { reply } = pending {
-                let _ = reply.send(Err(CommandError::new(
-                    CommandErrorKind::Unknown,
-                    "The connection was lost before the daemon answered. Check the run state before trying again.",
-                )));
+            match pending {
+                Pending::Control { reply } => {
+                    let _ = reply.send(Err(CommandError::new(
+                        CommandErrorKind::Unknown,
+                        "The connection was lost before the daemon answered. Check the run state before trying again.",
+                    )));
+                }
+                Pending::Call { reply, mutating } => {
+                    let _ = reply.send(Err(unanswered(
+                        mutating,
+                        "The connection was lost before the daemon answered.",
+                    )));
+                }
+                _ => {}
             }
         }
     }
@@ -344,6 +406,9 @@ struct Actor {
     autostart_armed: bool,
     /// El daemon (pid + arranque) que rechazó a este cliente: no se le insiste.
     rejected: Option<(u32, String)>,
+    /// Para dar a cada petición que cambia algo un `operationId` propio.
+    operations: u64,
+    operation_prefix: String,
 }
 
 fn not_connected() -> CommandError {
@@ -393,6 +458,81 @@ fn control_request(action: &ControlAction) -> Result<(Method, Value), CommandErr
                 json!({ "sessionId": session_id, "text": text }),
             ))
         }
+    }
+}
+
+/// Un campo opcional de texto: vacío es «no pedido».
+fn optional(
+    value: &Option<String>,
+    max: usize,
+    what: &str,
+) -> Result<Option<String>, CommandError> {
+    let Some(text) = value.as_deref().map(str::trim).filter(|t| !t.is_empty()) else {
+        return Ok(None);
+    };
+    if text.chars().count() > max {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            format!("The {what} is too long."),
+        ));
+    }
+    Ok(Some(text.to_string()))
+}
+
+/// Método y parámetros de una llamada, o por qué no vale. Solo se comprueba
+/// que quepa en el protocolo: si un directorio existe o un perfil vale lo dice
+/// el daemon, que es quien manda.
+fn call_request(action: &CallAction, operation_id: &str) -> Result<(Method, Value), CommandError> {
+    let invalid = |message: &str| CommandError::new(CommandErrorKind::Invalid, message);
+    match action {
+        CallAction::OpenSession {
+            cwd,
+            agent,
+            provider,
+            model,
+        } => {
+            let mut params = serde_json::Map::new();
+            let fields = [
+                ("cwd", optional(cwd, MAX_PATH_CHARS, "directory")?),
+                ("agent", optional(agent, MAX_NAME_CHARS, "agent name")?),
+                (
+                    "provider",
+                    optional(provider, MAX_NAME_CHARS, "provider name")?,
+                ),
+                ("model", optional(model, MAX_NAME_CHARS, "model name")?),
+            ];
+            for (key, value) in fields {
+                if let Some(value) = value {
+                    params.insert(key.to_string(), Value::String(value));
+                }
+            }
+            params.insert("operationId".into(), Value::String(operation_id.into()));
+            Ok((Method::SessionsOpen, Value::Object(params)))
+        }
+        CallAction::StartRun { session_id, input } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            if input.trim().is_empty() {
+                return Err(invalid("Nothing to send."));
+            }
+            // Nunca se recorta: o cabe entero o no se envía.
+            if input.chars().count() > MAX_INPUT_CHARS {
+                return Err(invalid("The message is too long."));
+            }
+            Ok((
+                Method::RunsStart,
+                json!({ "sessionId": session_id, "input": input, "operationId": operation_id }),
+            ))
+        }
+        CallAction::ListAgents { cwd } => Ok((
+            Method::AgentsList,
+            match optional(cwd, MAX_PATH_CHARS, "directory")? {
+                Some(cwd) => json!({ "cwd": cwd }),
+                None => json!({}),
+            },
+        )),
+        CallAction::ListModels => Ok((Method::ModelsList, json!({}))),
     }
 }
 
@@ -459,6 +599,9 @@ impl Actor {
             Cmd::Resync(_) => {}
             // No se encola para más tarde: falla en el acto.
             Cmd::Control(_, reply) => {
+                let _ = reply.send(Err(not_connected()));
+            }
+            Cmd::Call(_, reply) => {
                 let _ = reply.send(Err(not_connected()));
             }
         }
@@ -848,6 +991,12 @@ impl Actor {
                         "The daemon did not answer in time. Check the run state before trying again.",
                     )));
                 }
+                Some((Pending::Call { reply, mutating }, _)) => {
+                    let _ = reply.send(Err(unanswered(
+                        mutating,
+                        "The daemon did not answer in time.",
+                    )));
+                }
                 // Sin la suscripción de conjunto no se ve nada: se empieza de nuevo.
                 Some((Pending::SubOverview { .. }, _)) => return Ok(Some(End::Lost)),
                 Some((Pending::SubSession { session_id, .. }, _)) => {
@@ -1114,6 +1263,15 @@ impl Actor {
                 };
                 let _ = reply.send(answer);
             }
+            Pending::Call { reply, .. } => {
+                // El resultado es un DTO del protocolo: pasa sin tocar.
+                let _ = reply.send(outcome.map_err(|error| CommandError {
+                    kind: CommandErrorKind::Rejected,
+                    code: Some(error.code),
+                    reason: error.reason,
+                    message: error.message,
+                }));
+            }
         }
         Ok(None)
     }
@@ -1182,6 +1340,39 @@ impl Actor {
                     }
                 }
             }
+            Cmd::Call(action, reply) => {
+                let mutating = action.mutating();
+                let request = if mutating && !conn.can_control {
+                    Err(CommandError::new(
+                        CommandErrorKind::NotSent,
+                        "The Stratum daemon did not grant this client the right to control sessions.",
+                    ))
+                } else {
+                    self.operations += 1;
+                    let operation_id = format!("{}-{}", self.operation_prefix, self.operations);
+                    call_request(&action, &operation_id)
+                };
+                match request {
+                    Err(error) => {
+                        let _ = reply.send(Err(error));
+                    }
+                    Ok((method, params)) => {
+                        // Sin el contenido: ni el mensaje ni la ruta van al log.
+                        self.cfg.logger.info(&format!("call: {}", action.name()));
+                        let timeout = match action {
+                            CallAction::OpenSession { .. } => self.cfg.timings.open_timeout,
+                            _ => self.cfg.timings.request_timeout,
+                        };
+                        conn.request_within(
+                            method,
+                            params,
+                            Pending::Call { reply, mutating },
+                            timeout,
+                        )
+                        .await?;
+                    }
+                }
+            }
         }
         Ok(None)
     }
@@ -1224,6 +1415,105 @@ mod tests {
         .unwrap();
         assert_eq!(method, Method::RunsCancel);
         assert_eq!(params, json!({ "sessionId": "ses_1" }));
+    }
+
+    #[test]
+    fn las_llamadas_se_traducen_a_su_metodo() {
+        let (method, params) = call_request(
+            &CallAction::OpenSession {
+                cwd: Some("  /work/proj ".into()),
+                agent: Some(String::new()),
+                provider: None,
+                model: Some("m1".into()),
+            },
+            "op-1",
+        )
+        .unwrap();
+        assert_eq!(method, Method::SessionsOpen);
+        // Lo vacío no se pide; nunca viaja un `env`, un `resume` ni nada más.
+        assert_eq!(
+            params,
+            json!({ "cwd": "/work/proj", "model": "m1", "operationId": "op-1" })
+        );
+
+        let (method, params) = call_request(
+            &CallAction::OpenSession {
+                cwd: None,
+                agent: None,
+                provider: None,
+                model: None,
+            },
+            "op-2",
+        )
+        .unwrap();
+        assert_eq!(method, Method::SessionsOpen);
+        assert_eq!(params, json!({ "operationId": "op-2" }));
+
+        let (method, params) = call_request(
+            &CallAction::StartRun {
+                session_id: "ses_1".into(),
+                input: "hola\nmundo".into(),
+            },
+            "op-3",
+        )
+        .unwrap();
+        assert_eq!(method, Method::RunsStart);
+        assert_eq!(
+            params,
+            json!({ "sessionId": "ses_1", "input": "hola\nmundo", "operationId": "op-3" })
+        );
+
+        let (method, params) = call_request(&CallAction::ListModels, "x").unwrap();
+        assert_eq!((method, params), (Method::ModelsList, json!({})));
+        let (method, params) = call_request(
+            &CallAction::ListAgents {
+                cwd: Some("/w".into()),
+            },
+            "x",
+        )
+        .unwrap();
+        assert_eq!(
+            (method, params),
+            (Method::AgentsList, json!({ "cwd": "/w" }))
+        );
+    }
+
+    #[test]
+    fn una_llamada_que_no_cabe_no_se_envia_ni_se_recorta() {
+        let bad = [
+            CallAction::StartRun {
+                session_id: String::new(),
+                input: "hola".into(),
+            },
+            CallAction::StartRun {
+                session_id: "ses".into(),
+                input: "   ".into(),
+            },
+            CallAction::StartRun {
+                session_id: "ses".into(),
+                input: "x".repeat(MAX_INPUT_CHARS + 1),
+            },
+            CallAction::OpenSession {
+                cwd: Some("x".repeat(MAX_PATH_CHARS + 1)),
+                agent: None,
+                provider: None,
+                model: None,
+            },
+            CallAction::OpenSession {
+                cwd: None,
+                agent: Some("x".repeat(MAX_NAME_CHARS + 1)),
+                provider: None,
+                model: None,
+            },
+        ];
+        for action in bad {
+            assert_eq!(
+                call_request(&action, "op").unwrap_err().kind,
+                CommandErrorKind::Invalid,
+                "{}",
+                action.name()
+            );
+        }
     }
 
     #[test]

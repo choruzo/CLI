@@ -86,7 +86,12 @@ export interface SessionsListParams {
 }
 
 export interface SessionsOpenParams extends Mutation {
-  cwd: string;
+  /**
+   * Directorio de la sesión: absoluto, existente y accesible para el servidor,
+   * que es quien lo comprueba. Ausente: el directorio por defecto del servidor
+   * (el *home* de su usuario).
+   */
+  cwd?: string;
   /**
    * **Reservado y de solo entrada.** Variables de entorno para la sesión. No
    * forma parte de `ProtocolSession`, no se devuelve en ningún resultado,
@@ -95,7 +100,9 @@ export interface SessionsOpenParams extends Mutation {
   env?: Record<string, string>;
   /** Reanudar esta sesión guardada en lugar de crear una. */
   resume?: string;
+  /** Perfil de agente principal. Ausente: ninguno (`general`). */
   agent?: string;
+  /** Ausentes: los de la configuración que aplique a `cwd`. */
   provider?: string;
   model?: string;
   readOnly?: boolean;

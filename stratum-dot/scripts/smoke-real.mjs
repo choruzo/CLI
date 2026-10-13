@@ -19,6 +19,7 @@ import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { startMockLlm, mockConfig, text, toolCall } from '../../stratum-cli/scripts/tui/mock-llm.mjs';
+import { checker, sleep, startProbe as launchProbe, until } from './probe.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const CLI = join(here, '..', '..', 'stratum-cli', 'dist', 'index.js');
@@ -30,28 +31,8 @@ for (const [what, path] of [['la CLI compilada', CLI], ['dot-probe', PROBE]]) {
   }
 }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-let failed = 0;
-
-async function check(name, fn) {
-  try {
-    await fn();
-    console.log(`✓ ${name}`);
-  } catch (err) {
-    failed++;
-    console.log(`✗ ${name}\n  ${String(err?.stack ?? err).split('\n').join('\n  ')}`);
-  }
-}
-
-async function until(what, probe, timeoutMs = 30_000) {
-  const deadline = Date.now() + timeoutMs;
-  for (;;) {
-    const hit = await probe();
-    if (hit) return hit;
-    if (Date.now() > deadline) throw new Error(`no se cumplió a tiempo: ${what}`);
-    await sleep(100);
-  }
-}
+const runner = checker();
+const check = runner.check;
 
 // --- entorno aislado ---------------------------------------------------------
 
@@ -90,62 +71,7 @@ const cli = (args, opts = {}) => spawnSync(process.execPath, [CLI, ...args], { e
 const daemonRunning = () => cli(['daemon', 'status']).status === 0;
 
 /** `dot-probe`: lo que vería y haría la interfaz de Dot. */
-function startProbe() {
-  const child = spawn(PROBE, ['--log-dir', join(home, 'dot-logs')], { env, stdio: ['pipe', 'pipe', 'inherit'] });
-  const seen = [];
-  /** Lo último que se sabe de cada sesión, a partir de fotos y eventos. */
-  const sessions = new Map();
-  const results = new Map();
-  let connection = null;
-  let sessionIds = [];
-  let buffer = '';
-  let nextId = 1;
-  child.stdout.on('data', (chunk) => {
-    buffer += chunk.toString('utf-8');
-    for (let nl = buffer.indexOf('\n'); nl >= 0; nl = buffer.indexOf('\n')) {
-      const msg = JSON.parse(buffer.slice(0, nl));
-      buffer = buffer.slice(nl + 1);
-      seen.push(msg);
-      if (msg.type === 'connection') connection = msg.state;
-      else if (msg.type === 'sessions') sessionIds = msg.sessionIds;
-      else if (msg.type === 'snapshot') {
-        sessions.set(msg.sessionId, { session: msg.snapshot.session, run: msg.snapshot.run, snapshots: (sessions.get(msg.sessionId)?.snapshots ?? 0) + 1 });
-      } else if (msg.type === 'events') {
-        const known = sessions.get(msg.sessionId);
-        if (!known) continue;
-        for (const event of msg.events) {
-          if (event.type === 'session.updated') known.session = event.data.session;
-          if (event.type.startsWith('run.')) known.run = event.data.run;
-        }
-      } else if (msg.type === 'result') results.get(msg.id)?.(msg);
-    }
-  });
-  const exited = new Promise((resolve) => child.once('exit', resolve));
-  return {
-    seen,
-    sessions,
-    exited,
-    get connection() {
-      return connection;
-    },
-    get sessionIds() {
-      return sessionIds;
-    },
-    send: (cmd) => child.stdin.write(`${JSON.stringify(cmd)}\n`),
-    order(cmd, params) {
-      const id = nextId++;
-      const answer = new Promise((resolve) => results.set(id, resolve));
-      child.stdin.write(`${JSON.stringify({ cmd, id, ...params })}\n`);
-      return answer;
-    },
-    /** Cerrar Dot: se cierra su entrada, como al salir de la app. */
-    async close() {
-      child.stdin.end();
-      await Promise.race([exited, sleep(5000)]);
-      if (child.exitCode === null) child.kill();
-    },
-  };
-}
+const startProbe = () => launchProbe({ binary: PROBE, env, logDir: join(home, 'dot-logs') });
 
 /** Cliente mínimo del protocolo, para abrir una sesión alojada en el daemon. */
 async function rawClient(roles) {
@@ -329,5 +255,5 @@ try {
   for (const dir of [home, project]) rmSync(dir, { recursive: true, force: true, maxRetries: 5, retryDelay: 200 });
 }
 
-console.log(failed === 0 ? '\nTodo correcto.' : `\n${failed} comprobación(es) fallida(s).`);
-process.exit(failed === 0 ? 0 : 1);
+console.log(runner.failed === 0 ? '\nTodo correcto.' : `\n${runner.failed} comprobación(es) fallida(s).`);
+process.exit(runner.failed === 0 ? 0 : 1);

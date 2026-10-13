@@ -167,12 +167,12 @@ host ownership  !=  operator control  !=  approver authority
 | `core.hello` | — | | Handshake |
 | `core.status` | observe | | |
 | `core.shutdown` | control | ✓ | `force?` |
-| `agents.list` · `models.list` | observe | | |
+| `agents.list` · `models.list` | observe | | Lo que se puede elegir al abrir una sesión: nombres y alias, sin secretos (§13.7) |
 | `sessions.list` · `sessions.get` | observe | | `get` devuelve una foto |
-| `sessions.open` | control | ✓ | `cwd`, `resume?`, `agent?`, `model?`… y `env?` (reservado, solo entrada) |
+| `sessions.open` | control | ✓ | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4) |
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly` | control | ✓ | |
 | `runs.list` · `runs.get` | observe | | |
-| `runs.start` | control | ✓ | `BUSY` si hay un turno en curso |
+| `runs.start` | control | ✓ | Un mensaje del usuario: un run nuevo de una sesión existente. `BUSY` si hay un turno en curso (también en pausa o esperando una decisión) |
 | `runs.steer` | control | ✓ | Devuelve `accepted` · `not-accepting` · `empty` · `too-large` |
 | `runs.pause` | control | ✓ | Pausa cooperativa (§16). Devuelve `requested` · `already-requested` · `already-paused` · `not-running`. `runId?` como en `runs.cancel` |
 | `runs.resume` | control | ✓ | Devuelve `resumed` · `not-paused` · `not-running` |
@@ -285,8 +285,11 @@ Un evento de estado con `after`, o uno volátil con `seq`, no valida.
 ### Fotos
 
 `ProtocolSessionSnapshot` — `session`, `seq`, `run`, `partial { text, reasoning }`,
-`toolCalls`, `subagents`, `todos`, `jobs`, `approvals`, `questions`, `plans`. Quien la recibe
-**sustituye** lo que tenía de esa sesión y sigue desde `seq`.
+`toolCalls`, `subagents`, `todos`, `jobs`, `approvals`, `questions`, `plans`, `messages` y
+`messagesTruncated`. Quien la recibe **sustituye** lo que tenía de esa sesión y sigue desde `seq`.
+
+`toolCalls` y `subagents` son **del run** (uno nuevo los vacía). `messages` es **de la sesión**:
+su conversación, de todos sus runs (§13.7).
 
 `ProtocolOverviewSnapshot` — sesiones vivas y todo lo pendiente de una decisión.
 
@@ -328,13 +331,16 @@ Ante un `UnknownOutcomeError` de un método mutante (`approvals.resolve`, `runs.
 
 ## 11. Qué queda sin hacer
 
-Definido en el contrato y sin implementación tras M6: `trace.subscribe`, reanudar una sesión guardada
-(`sessions.open { resume }`) y listar las guardadas. Detalle en §13.6.
+Definido en el contrato y sin implementación tras M7: `trace.subscribe`, reanudar una sesión guardada
+(`sessions.open { resume }`) y listar las guardadas. Detalle en §13.6. Una sesión alojada en el
+servidor **no sobrevive a su reinicio**: no hay persistencia de las sesiones del daemon.
 
 Stratum Dot (M6) es el primer cliente que no es Node: su lado nativo (`stratum-dot/crates/dot-link`,
 Rust) habla este protocolo —framing, descubrimiento, handshake, las reglas de §9 y §10— y su
-webview valida y reduce con `protocol/schemas.ts` y `protocol/reduce.ts`. No añade ni cambia nada
-del contrato. Ver `docs/dot.md`.
+webview valida y reduce con `protocol/schemas.ts` y `protocol/reduce.ts`. Desde M7 también abre
+sesiones y conversa con ellas (`sessions.open`, `runs.start`), con los mismos métodos que
+cualquier otro cliente: no hay un canal propio de Dot. Lo que M7 añadió al contrato —la
+conversación en la foto— está en §13.7 y §17. Ver `docs/dot.md` §12.
 
 ## 12. Tests de conformidad
 
@@ -436,8 +442,8 @@ El cliente hace `replace(snapshot); lastSeq = N` y el siguiente evento de estado
 numera cada evento.
 
 Una foto es **un** mensaje y tiene que caber en una trama: lleva las últimas 100 llamadas a
-tools y 50 subagentes del run, con sus textos recortados (1 000 caracteres). El detalle
-completo viajó en los eventos y está en la traza.
+tools y 50 subagentes del run, con sus textos recortados (1 000 caracteres), y la conversación
+acotada de la sesión (§13.7). El detalle completo viajó en los eventos y está en la traza.
 
 `events.subscribe` con `sinceSeq`: si todo lo posterior sigue en el buffer del servidor
 (`daemon.eventBuffer`, 2 000 eventos de estado por sesión) el modo es `replay`; si no —o si
@@ -446,9 +452,16 @@ servidor—, `snapshot`.
 
 ### 13.4 Entorno y configuración de una sesión del daemon
 
+- **Directorio**: `sessions.open.cwd` es opcional. Ausente, el servidor usa el suyo por
+  defecto, que es el *home* de su usuario (nunca el directorio desde el que se lanzó el
+  proceso). Pedido o por defecto, **lo valida el servidor**, que es quien va a trabajar en él:
+  absoluto, existente, un directorio y accesible; si no, `INVALID_PARAMS` (`issues[0].path =
+  "cwd"`) y no se monta nada. Lo que diga el cliente es solo un texto.
 - **Config**: se carga desde el `cwd` de la sesión, como haría la CLI en ese directorio.
   Provider y modelo se resuelven sin preguntar (`host/session-startup.ts`): con varios modelos
-  y ninguno elegido, `sessions.open` falla listándolos.
+  y ninguno elegido, `sessions.open` falla listándolos. `agent`, `provider` y `model` ausentes
+  significan «lo que diga esa configuración».
+- **Límite**: `daemon.maxSessions` sesiones vivas (16). Por encima, `UNAVAILABLE`.
 - **Entorno**: una **copia del entorno del daemon tomada al arrancar**. No es el de ningún
   cliente: `sessions.open.env` sigue reservado, se acepta y no se usa. Reproducir el entorno
   de una terminal es M10.
@@ -489,6 +502,94 @@ turno) y `session.detached`, que no lo emite nadie (§14.3). `ProtocolRun.counte
 
 `memory.write` lleva la sesión que **intentó** guardar, no la del registro: con dedup, el
 registro que queda puede ser de otra sesión.
+
+### 13.7 Conversar con una sesión (M7)
+
+Una conversación es una **sesión** con varios **runs**: no hay una entidad «chat» ni un «turno»
+aparte.
+
+```text
+sessions.open { cwd?, agent?, provider?, model? }  →  { session }     una sesión alojada en el servidor
+runs.start    { sessionId, input }                 →  { run }         un mensaje = un run de esa sesión
+   run.started → message.delta* → [tool.*] → message.completed → run.completed
+runs.start    { sessionId, input }                 →  otro run, misma sesión, mismo contexto
+```
+
+- **Un run a la vez por sesión.** `runs.start` con un run en curso —en marcha, en pausa o
+  esperando una decisión— contesta `BUSY`. No hay cola de mensajes: para decirle algo a un run
+  que ya está en marcha existe `runs.steer`.
+- **Quién**: los dos métodos exigen `control`. Un `observer`, un `approver` o un anfitrión
+  (`host`, excluyente) reciben `FORBIDDEN`. No se añadió una capacidad nueva: abrir e iniciar
+  son, desde M1, lo que `control` significa (§5).
+- **Dueño**: el cliente que abre una sesión **no es su dueño**. Que se desconecte no la cierra
+  ni cancela su run (§13.1); la cierra `sessions.close` o el apagado del servidor.
+- **Sobre una sesión par**, `runs.start` es `UNAVAILABLE` (`reason: 'peer-hosted'`): su entrada
+  está en su proceso (§14.4).
+
+**Qué se puede elegir al abrir**, para un cliente que no lee la configuración:
+
+| Método | Devuelve | No devuelve |
+|---|---|---|
+| `agents.list { cwd? }` | Perfiles: `name`, `description`, `mode`, `origin`, `allowedTools`, `provider?`, `model?` | El prompt del perfil, su ruta |
+| `models.list { provider? }` | `provider` (alias de la config), `id`, `contextWindow`, `default?` | `baseUrl`, claves, cabeceras |
+
+`default: true` marca el modelo que usa una sesión abierta sin pedir provider ni modelo (el de
+la configuración global). El modelo configurado se ofrece aunque el backend no liste modelos;
+si un provider no contesta, `error` lo dice sin nombrar su dirección.
+
+#### La conversación en la foto
+
+`ProtocolSessionSnapshot.messages` es la conversación de la sesión como la ve una persona, y
+`messagesTruncated` dice si le falta el principio.
+
+| `kind` | Qué es | De qué evento sale |
+|---|---|---|
+| `user` | Entrada de un turno (`text`, `truncated?`) | `run.started` (`run.input`) |
+| `assistant` | Un bloque de texto cerrado del agente principal | `message.completed` |
+| `tool` | Una llamada del agente principal: `callId`, `name`, `description`, `target?`, `state` | `tool.started`; cambia de estado con `tool.completed` / `tool.failed` / `tool.blocked` |
+| `outcome` | Un turno que no terminó bien: `status` (`failed` · `cancelled`), `text` | `run.failed` / `run.cancelled` |
+
+Cada entrada lleva `id` (`m` + el `seq` del evento que la creó: estable entre fotos), `runId`
+y `at`.
+
+- **Es una función pura de los eventos de estado**: `applyTranscriptEvent`
+  (`protocol/transcript.ts`). El anfitrión la usa para llevar lo que pone en sus fotos y
+  `applySessionEvent` usa la misma, de modo que la foto en `seq = N` y los eventos hasta `N`
+  dan exactamente la misma conversación (§13.3). No hay dos implementaciones que mantener
+  iguales.
+- **Los fragmentos volátiles no entran.** El texto a medias vive en `partial`; se vuelve
+  mensaje cuando un `message.completed` lo cierra, y en ese mismo paso `partial` se vacía. Un
+  bloque se cierra al empezar una tool, al entregarse steering al modelo
+  (`steering.delivered`) y al terminar el turno.
+- **Está acotada** (`TRANSCRIPT_LIMITS`): 200 entradas, 12 000 caracteres por mensaje (más
+  largo se recorta y lleva `truncated`), 300 por descripción de tool y 150 000 en total. Lo
+  más antiguo se descarta primero, y entonces `messagesTruncated` es `true` y no vuelve a
+  `false`. `run.input` viaja recortado a 2 000 caracteres: si la entrada era más larga,
+  `run.inputTruncated` lo dice y el mensaje `user` lleva `truncated`.
+- **No es el historial del agente ni la traza.** No lleva el razonamiento, lo que dicen los
+  subagentes ni sus tools, la salida de una tool, ni el texto de un mensaje de steering (el
+  protocolo no lo transporta). De una tool viaja la misma `description` que en
+  `ProtocolToolCall`, más corta.
+- **Vale para los dos anfitriones.** Una sesión de la CLI publica su conversación igual; de
+  ella, desde que se publicó (lo anterior de un `chat --resume` no está).
+- **No se persiste.** Vive en el anfitrión de la sesión mientras vive la sesión.
+- **Una tool se identifica por `callId` dentro de su run.** Los ids del modelo se repiten: el
+  mismo `callId` en otro run es otra llamada, aunque la anterior quedase abierta. Una entrada
+  `tool` que sigue `pending`/`running` con su run ya terminado no llegó a cerrarse (turno
+  fallido o cancelado): un cliente no debe enseñarla como activa.
+- **Recortar no parte un carácter.** Todo recorte del contrato (`clipText`) respeta los pares
+  de *surrogates*: medio emoji es un texto mal formado que un parser JSON estricto rechaza con
+  todo el mensaje.
+
+**Una foto cabe en una trama, medida en bytes.** Los límites de arriba son en caracteres; con
+un run enorme y texto de varios bytes por carácter la suma podría pasar de
+`MAX_MESSAGE_BYTES`, y una foto que no cabe no llega nunca. El anfitrión la mide al construirla
+(`fitSnapshot`, presupuesto de 768 KiB) y, solo si hace falta, le quita detalle en este orden:
+el razonamiento parcial, los textos largos de tools y subagentes, la cola del texto parcial y,
+lo último, la conversación más antigua (con `messagesTruncated`). Sigue siendo el estado en
+su `seq`, con menos detalle.
+
+`agents.list.cwd`, como `sessions.open.cwd`, tiene que ser una ruta absoluta.
 
 ## 14. Anfitriones pares: la CLI publica su sesión (M3)
 
@@ -1030,3 +1131,8 @@ Correcciones hechas a la v1 antes de congelarla:
 | M4 | `core.hello.approverKey` (opcional) y la *feature* `remote-approvals` | Aditivo |
 | M5 | `runs.pause` / `runs.resume` / `host.pause` / `host.resume` admiten `runId` y devuelven `{ status }` (antes `{ run }` y `{}`) | Sin publicar, y **ningún servidor llegó a atenderlos**: hasta M5 contestaban `UNAVAILABLE` |
 | M4 | El servidor deja de conceder `approve` por el token, y `host` pasa a ser excluyente | Cambia lo que se **concede**, no el contrato: `capabilities` siempre pudo ser menos de lo pedido (§4) |
+| M7 | `ProtocolSessionSnapshot` gana `messages` y `messagesTruncated`, **obligatorios** (`ProtocolChatMessage`, `TRANSCRIPT_LIMITS`, `applyTranscriptEvent`) | Sin publicar. Son obligatorios y no opcionales a propósito: una foto sin conversación no es «una conversación vacía», y todos los que producen fotos (el daemon y la CLI) salen de este árbol. Es el cambio que hay que mirar antes de congelar |
+| M7 | `sessions.open.cwd` pasa a ser opcional (directorio por defecto del servidor) | Aditivo: quien lo enviaba sigue igual |
+| M7 | `ProtocolRun.inputTruncated?`, `ProtocolModel.default?` | Aditivos |
+| M7 | `models.list` incluye el modelo configurado de cada provider aunque su `/models` falle | No cambia el contrato |
+| M7 | Un bloque de texto se cierra (`message.completed`) también al entregarse steering | Corrige lo que se emite: antes el texto de dos respuestas del modelo separadas por steering salía en un solo bloque |

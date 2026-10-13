@@ -35,6 +35,8 @@ export interface ProtocolModel {
   id: string;
   /** `null` si el backend no la declara. */
   contextWindow: number | null;
+  /** El que usa una sesión abierta sin pedir provider ni modelo (config global). */
+  default?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -148,6 +150,8 @@ export interface ProtocolRun {
   kind: 'run' | 'delegate';
   /** Entrada del turno, recortada y redactada. */
   input: string;
+  /** `input` es solo el principio: la entrada era más larga. */
+  inputTruncated?: boolean;
   mode: 'normal' | 'plan' | 'execute';
   status: ProtocolRunStatus;
   stopReason?: ProtocolStopReason;
@@ -157,6 +161,49 @@ export interface ProtocolRun {
   /** Presente si `status` es `failed`. */
   error?: string;
 }
+
+// ---------------------------------------------------------------------------
+// La conversación
+// ---------------------------------------------------------------------------
+
+interface MessageBase {
+  /** Estable: sale del `seq` del evento que lo creó. */
+  id: string;
+  /** Run al que pertenece; vacío si su evento no lo traía. */
+  runId: string;
+  at: Timestamp;
+}
+
+/**
+ * Una entrada de la conversación de una sesión, tal como la ve una persona:
+ * lo que escribió, lo que contestó el asistente, qué tools usó y cómo acabó un
+ * turno que no terminó bien. **No es el historial del agente** (ese se comprime
+ * y lleva resultados de tools) **ni la traza**: es una vista acotada, redactada
+ * por el anfitrión, que se rehace igual desde los eventos (`applyTranscriptEvent`).
+ *
+ * Lo que no lleva, a sabiendas: el razonamiento, lo que dicen los subagentes,
+ * la salida de las tools y el texto de un mensaje de *steering* (el protocolo
+ * no lo transporta). De una tool viaja la misma `description` que en
+ * `ProtocolToolCall` —el resumen de la llamada que da el anfitrión, ya
+ * redactado—, más corta: no sus parámetros completos.
+ */
+export type ProtocolChatMessage =
+  /** Entrada de un turno. `truncated`: el texto es solo el principio. */
+  | (MessageBase & { kind: 'user'; text: string; truncated?: boolean })
+  /** Un bloque de texto cerrado del asistente. */
+  | (MessageBase & { kind: 'assistant'; text: string; truncated?: boolean })
+  /** Una llamada a una tool del agente principal. Sin su salida. */
+  | (MessageBase & {
+      kind: 'tool';
+      callId: string;
+      name: string;
+      /** Descripción legible, ya redactada y recortada. */
+      description: string;
+      target?: string;
+      state: ProtocolToolCall['state'];
+    })
+  /** Un turno que no terminó bien. `text`: el error, si lo hay. */
+  | (MessageBase & { kind: 'outcome'; status: 'failed' | 'cancelled'; text: string });
 
 // ---------------------------------------------------------------------------
 // Lo que ocurre dentro de un run

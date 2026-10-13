@@ -44,10 +44,17 @@ export function textRound(parts: string[]): OpenAIStreamChunk[] {
 /** Modelo de guion: una ronda por petición, en orden. Atiende la cancelación. */
 export class ScriptedProvider implements IProvider {
   calls = 0;
+  /** Textos de usuario que traía cada petición: lo que el modelo tenía de contexto. */
+  readonly userInputs: string[][] = [];
 
   constructor(private readonly rounds: Round[]) {}
 
   async *complete(req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
+    this.userInputs.push(
+      req.messages.flatMap((m) =>
+        m.role === 'user' && typeof m.content === 'string' ? [m.content] : [],
+      ),
+    );
     const round = this.rounds[this.calls++] ?? makeTextRound('(fin del guion)');
     let chunks: OpenAIStreamChunk[];
     if (Array.isArray(round)) chunks = round;

@@ -19,6 +19,27 @@ import {
 export { sampleApproval, sampleRun, sampleSession, sampleToolCall } from '../../../stratum-cli/src/protocol/protocol.fixtures';
 
 export const SID = 'ses_20261012_abc123';
+/** La sesión que «abre» el lado nativo de mentira. */
+export const NEW_SID = 'ses_20261013_new001';
+
+/** Una sesión del daemon parada: como queda un chat recién abierto o entre turnos. */
+export function hostedIdle(
+  overrides: Partial<ProtocolSessionSnapshot> = {},
+  session: Partial<ProtocolSession> = {},
+): ProtocolSessionSnapshot {
+  return snapshotOf(
+    { ...overrides },
+    {
+      id: NEW_SID,
+      title: '',
+      state: 'idle',
+      currentRunId: null,
+      host: { kind: 'daemon', client: 'daemon', connected: true },
+      ...session,
+    },
+    null,
+  );
+}
 
 /** Una foto válida, sin nada pendiente ni texto a medias. */
 export function snapshotOf(
@@ -78,6 +99,32 @@ export function fakeNative(): FakeNative {
     resumeRun: vi.fn(async () => 'resumed'),
     cancelRun: vi.fn(async () => 'cancelled'),
     steerRun: vi.fn(async () => 'accepted'),
+    openSession: vi.fn(async (): Promise<unknown> => ({
+      session: sampleSession({
+        id: NEW_SID,
+        title: '',
+        state: 'idle',
+        currentRunId: null,
+        seq: 1,
+        host: { kind: 'daemon', client: 'daemon', connected: true },
+      }),
+    })),
+    startRun: vi.fn(async (sessionId: string): Promise<unknown> => ({
+      run: sampleRun({ id: 'run_new', sessionId }),
+    })),
+    listAgents: vi.fn(async (): Promise<unknown> => ({
+      agents: [
+        { name: 'general', description: '', mode: 'all', origin: 'builtin', allowedTools: null },
+        { name: 'reviewer', description: 'Reviews changes', mode: 'primary', origin: 'project', allowedTools: null },
+        { name: 'helper', description: 'Only delegated', mode: 'subagent', origin: 'global', allowedTools: null },
+      ],
+    })),
+    listModels: vi.fn(async (): Promise<unknown> => ({
+      models: [
+        { provider: 'local', id: 'test-model', contextWindow: null, default: true },
+        { provider: 'local', id: 'big-model', contextWindow: 128000 },
+      ],
+    })),
     hideWindow: vi.fn(async () => undefined),
     quit: vi.fn(async () => undefined),
   };
@@ -94,7 +141,17 @@ export function fakeNative(): FakeNative {
 export function resetStores(): void {
   useConnection.setState({ state: { kind: 'starting' }, info: null, lastServerVersion: null });
   useSessions.getState().reset();
-  useUi.setState({ selectedId: null, pending: {}, notices: {} });
+  useUi.setState({
+    selectedId: null,
+    tab: 'chat',
+    composingNew: false,
+    lastCwd: '',
+    drafts: {},
+    pending: {},
+    sends: {},
+    opening: {},
+    notices: {},
+  });
   try {
     window.localStorage.clear();
   } catch {

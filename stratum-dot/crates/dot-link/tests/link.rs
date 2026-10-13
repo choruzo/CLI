@@ -5,7 +5,9 @@
 mod common;
 
 use common::*;
-use dot_link::{CommandErrorKind, ConnectionState, ControlAction, DaemonLauncher, DotEvent};
+use dot_link::{
+    CallAction, CommandErrorKind, ConnectionState, ControlAction, DaemonLauncher, DotEvent,
+};
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::Arc;
@@ -632,5 +634,225 @@ async fn el_token_no_llega_a_la_interfaz_ni_al_log() {
             assert!(!log.contains(secret), "el log contiene {secret}");
         }
     }
+    rig.quit().await;
+}
+
+// ---------------------------------------------------------------------------
+// M7: abrir una sesión del daemon y conversar con ella
+// ---------------------------------------------------------------------------
+
+fn open_default() -> CallAction {
+    CallAction::OpenSession {
+        cwd: None,
+        agent: None,
+        provider: None,
+        model: None,
+    }
+}
+
+/// N. New Chat: `sessions.open` por el protocolo; la sesión llega a la interfaz
+/// por el daemon (lista + foto), y un mensaje es un `runs.start`.
+#[tokio::test(flavor = "multi_thread")]
+async fn abrir_una_sesion_y_enviarle_un_mensaje() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.start(TOKEN_A, 1);
+    let rig = dot(dir.path(), None);
+    until("conectado", || connected(&rig)).await;
+    until("lista vacía", || rig.seen.last_sessions() == Some(vec![])).await;
+
+    let opened = rig
+        .link
+        .call(CallAction::OpenSession {
+            cwd: Some("/work/proj".into()),
+            agent: None,
+            provider: Some("local".into()),
+            model: Some("mock-model".into()),
+        })
+        .await
+        .unwrap();
+    // El resultado pasa sin interpretar: es el DTO que dio el daemon.
+    let id = opened["session"]["id"].as_str().unwrap().to_string();
+    assert_eq!(opened["session"]["host"]["kind"], "daemon");
+
+    // La sesión aparece porque el daemon la publica, y se sigue como cualquier otra.
+    until("la sesión nueva en la lista", || {
+        rig.seen.last_sessions() == Some(vec![id.clone()])
+    })
+    .await;
+    until("su foto", || rig.seen.snapshots(&id).len() == 1).await;
+
+    let started = rig
+        .link
+        .call(CallAction::StartRun {
+            session_id: id.clone(),
+            input: "hola".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(started["run"]["sessionId"], id.as_str());
+
+    let requests = fake.requests();
+    let open = requests
+        .iter()
+        .find(|r| r["method"] == "sessions.open")
+        .unwrap();
+    let start = requests
+        .iter()
+        .find(|r| r["method"] == "runs.start")
+        .unwrap();
+    // Solo lo que el contrato admite de un cliente: ni `env`, ni `resume`.
+    let mut keys: Vec<&String> = open["params"].as_object().unwrap().keys().collect();
+    keys.sort();
+    assert_eq!(keys, ["cwd", "model", "operationId", "provider"]);
+    assert_eq!(start["params"]["input"], "hola");
+    // Cada petición que cambia algo lleva su propio `operationId`.
+    let op_open = open["params"]["operationId"].as_str().unwrap();
+    let op_start = start["params"]["operationId"].as_str().unwrap();
+    assert!(op_open.starts_with("dot-") && op_open.len() <= 128);
+    assert_ne!(op_open, op_start);
+
+    // Las consultas devuelven el DTO tal cual.
+    let models = rig.link.call(CallAction::ListModels).await.unwrap();
+    assert_eq!(models["models"][0]["id"], "mock-model");
+    let agents = rig
+        .link
+        .call(CallAction::ListAgents { cwd: None })
+        .await
+        .unwrap();
+    assert_eq!(agents["agents"][0]["name"], "general");
+
+    // Ni el mensaje ni la ruta quedan en el log.
+    let log = rig.log();
+    assert!(log.contains("call: start-run"), "{log}");
+    assert!(
+        !log.contains("hola") && !log.contains("/work/proj"),
+        "{log}"
+    );
+
+    // Cerrar Dot con la sesión abierta no la cierra.
+    rig.quit().await;
+    until("conexión cerrada", || fake.live_connections() == 0).await;
+    assert_eq!(fake.count("sessions.close"), 0);
+    assert_eq!(fake.count("runs.cancel"), 0);
+    assert_eq!(fake.count("core.shutdown"), 0);
+}
+
+/// Lo que el daemon rechaza llega como rechazo, con su código; nada se inventa.
+#[tokio::test(flavor = "multi_thread")]
+async fn lo_que_el_daemon_rechaza_no_crea_nada() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_session(snapshot("s1", 5));
+    fake.start(TOKEN_A, 1);
+    let rig = dot(dir.path(), None);
+    until("foto", || rig.seen.snapshots("s1").len() == 1).await;
+    rig.seen.clear();
+
+    let bad_cwd = rig
+        .link
+        .call(CallAction::OpenSession {
+            cwd: Some("/no/existe".into()),
+            agent: None,
+            provider: None,
+            model: None,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(bad_cwd.kind, CommandErrorKind::Rejected);
+    assert_eq!(bad_cwd.code.as_deref(), Some("INVALID_PARAMS"));
+
+    let busy = rig
+        .link
+        .call(CallAction::StartRun {
+            session_id: "s1".into(),
+            input: "ocupada".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(busy.code.as_deref(), Some("BUSY"));
+
+    let gone = rig
+        .link
+        .call(CallAction::StartRun {
+            session_id: "ya-no".into(),
+            input: "hola".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(gone.code.as_deref(), Some("NOT_FOUND"));
+
+    // Un mensaje que no cabe ni sale.
+    let before = fake.count("runs.start");
+    let invalid = rig
+        .link
+        .call(CallAction::StartRun {
+            session_id: "s1".into(),
+            input: "   ".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(invalid.kind, CommandErrorKind::Invalid);
+    assert_eq!(fake.count("runs.start"), before);
+
+    // Ninguno de los rechazos hizo llegar nada a la interfaz.
+    tokio::time::sleep(Duration::from_millis(60)).await;
+    assert!(rig.seen.all().is_empty(), "{:?}", rig.seen.all());
+    rig.quit().await;
+}
+
+/// `runs.start` enviado y sin respuesta: resultado desconocido, **sin reenvío**.
+/// Una consulta sin respuesta no cambió nada y lo dice.
+#[tokio::test(flavor = "multi_thread")]
+async fn un_mensaje_sin_respuesta_no_se_reenvia() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_session(snapshot("s1", 5));
+    fake.set_silent("runs.start");
+    fake.set_silent("models.list");
+    fake.set_silent("sessions.open");
+    fake.start(TOKEN_A, 1);
+    let rig = dot(dir.path(), None);
+    until("foto", || rig.seen.snapshots("s1").len() == 1).await;
+
+    let quiet = rig.link.call(CallAction::ListModels).await.unwrap_err();
+    assert_eq!(quiet.kind, CommandErrorKind::NoAnswer);
+
+    // Abrir tiene su propio plazo, más largo que el de una orden.
+    let begun = tokio::time::Instant::now();
+    let open = rig.link.call(open_default()).await.unwrap_err();
+    assert_eq!(open.kind, CommandErrorKind::Unknown);
+    assert!(begun.elapsed() >= Duration::from_millis(800));
+
+    // La conexión cae con el mensaje en vuelo.
+    let link = rig.link.clone();
+    let flying = tokio::spawn(async move {
+        link.call(CallAction::StartRun {
+            session_id: "s1".into(),
+            input: "despliega".into(),
+        })
+        .await
+    });
+    until("enviado", || fake.count("runs.start") == 1).await;
+    fake.stop(false);
+    let lost = flying.await.unwrap().unwrap_err();
+    assert_eq!(lost.kind, CommandErrorKind::Unknown);
+    assert!(lost.message.contains("unknown"), "{}", lost.message);
+
+    fake.start(TOKEN_B, 1);
+    until("conectado otra vez", || connected(&rig)).await;
+    // Lo que decide es la foto que llega al reconectar.
+    until("foto tras reconectar", || {
+        rig.seen.snapshots("s1").len() == 2
+    })
+    .await;
+    assert_eq!(fake.count("runs.start"), 1);
+    assert_eq!(fake.count("sessions.open"), 1);
+
+    // Sin conexión no sale nada, y se dice que repetir es seguro.
+    fake.stop(true);
+    until("sin conexión", || !connected(&rig)).await;
+    let offline = rig.link.call(open_default()).await.unwrap_err();
+    assert_eq!(offline.kind, CommandErrorKind::NotSent);
     rig.quit().await;
 }

@@ -1,13 +1,21 @@
 # Stratum Dot
 
 Cockpit de escritorio de Stratum: una ventana pequeña y una bandeja desde las que ver qué
-sesiones hay, en qué están, y pausar, reanudar, cancelar o redirigir sus runs.
+sesiones hay, en qué están, pausar, reanudar, cancelar o redirigir sus runs y **conversar con
+Stratum**: abrir una sesión en el daemon y hablar con ella.
 
-> **Estado (M6).** Shell nativo con Tauri v2, conectado a `stratumd` por el Stratum Protocol
+> **Estado (M7).** Shell nativo con Tauri v2, conectado a `stratumd` por el Stratum Protocol
 > v1: descubre el daemon (o lo arranca), observa las sesiones vivas —las del daemon y las que
-> publica la CLI—, sobrevive a sus caídas y da cuatro órdenes (`pause`, `resume`, `cancel`,
-> `steer`). Sin chat, sin aprobaciones y sin trazas: eso es M7 y M8.
+> publica la CLI—, sobrevive a sus caídas, da cuatro órdenes (`pause`, `resume`, `cancel`,
+> `steer`) y, desde M7, **abre sesiones alojadas en el daemon y conversa con ellas** (§12). Sin
+> resolver aprobaciones y sin trazas: eso es M8 y posteriores.
 > Contrato: `docs/protocol.md`. Producto: `docs/PRD_STRATUM_DOT.md`.
+
+La regla que M7 no rompe:
+
+```text
+Dot = cliente        stratumd = plano de control        SessionHost = runtime
+```
 
 **Dot es un cliente.** No es un segundo runtime, ni un segundo `EventHub`, ni un sidecar, ni
 una API paralela: todo lo que sabe y todo lo que hace pasa por el protocolo, como
@@ -42,7 +50,7 @@ cerrar Dot  →  las sesiones siguen · los runs siguen · las aprobaciones sigu
 
 | Pieza | Dónde | Qué hace | Qué no hace |
 |---|---|---|---|
-| `dot-link` | `stratum-dot/crates/dot-link/` | Descubrir, conectar, `core.hello`, suscripciones, reconexión, relevar cuatro órdenes | Interpretar DTOs, reducir eventos, depender de Tauri |
+| `dot-link` | `stratum-dot/crates/dot-link/` | Descubrir, conectar, `core.hello`, suscripciones, reconexión, relevar cuatro órdenes y cuatro llamadas (abrir sesión, iniciar run, listar perfiles y modelos) | Interpretar DTOs, reducir eventos, depender de Tauri |
 | Shell | `stratum-dot/src-tauri/` | Ventana, bandeja, instancia única, comandos `dot_*`, emitir `dot://event` | Hablar el protocolo por su cuenta |
 | `bridge/` | `stratum-dot/src/bridge/` | Único punto que toca Tauri; reparte cada evento a su store | Lógica del protocolo |
 | `protocol/` | `stratum-dot/src/protocol/` | Reexporta el contrato; valida y aplica; cómo se lee una foto | Tipos o reglas propias |
@@ -206,11 +214,25 @@ contra el log.
 | `dot_focus_session` | Qué sesión se mira |
 | `dot_resync_session` | Pedir una foto nueva de una sesión |
 | `dot_pause_run` · `dot_resume_run` · `dot_cancel_run` · `dot_steer_run` | Las cuatro órdenes |
+| `dot_open_session` | Abrir una sesión **alojada en el daemon**: `cwd?`, `agent?`, `provider?`, `model?` (M7) |
+| `dot_start_run` | Un mensaje: un run nuevo de esa sesión (M7) |
+| `dot_list_agents` · `dot_list_models` | Qué se puede elegir al abrir, según el daemon (M7) |
 | `dot_hide` · `dot_quit` | Ocultar la ventana · salir de Dot |
 
 No existe un `rpc(method, params)` genérico. En Rust, los métodos del protocolo que se pueden
 enviar son un `enum` cerrado (`wire::Method`): `core.hello`, `events.subscribe`,
-`events.unsubscribe`, `runs.pause`, `runs.resume`, `runs.cancel`, `runs.steer`.
+`events.unsubscribe`, `runs.pause`, `runs.resume`, `runs.cancel`, `runs.steer` y, desde M7,
+`runs.start`, `sessions.open`, `agents.list` y `models.list`. Siguen fuera, a propósito:
+`core.shutdown`, `sessions.close`, `sessions.set*`, `jobs.cancel` y todo lo que exige `approve`.
+
+Los cuatro comandos de M7 devuelven el `result` del daemon **sin interpretar**: Rust no sabe
+qué forma tiene una sesión, un run, un perfil o un modelo. El webview lo valida con los schemas
+del contrato (`src/protocol/results.ts`), igual que una foto o un evento.
+
+`dot_open_session` acepta cuatro textos opcionales y nada más. **No hay forma de pasar
+variables de entorno a una sesión desde el webview** —el comando no tiene ese parámetro, y
+`dot-link` no sabe escribir un `env`—, ni un `resume`, ni `readOnly`. El directorio es un
+texto: Dot no lo abre, no lo lista y no comprueba que exista; eso lo hace el daemon.
 
 **Lo que llega al webview** — un solo canal, `dot://event`, que conserva el orden:
 
@@ -230,15 +252,25 @@ Permisos del webview: `core:default` y nada más. Sin sistema de ficheros, sin s
 diálogos, sin red (CSP `default-src 'self'`).
 
 Lo único que se guarda entre arranques son **preferencias de interfaz**: geometría de la
-ventana (`tauri-plugin-window-state`) y la última sesión seleccionada (`localStorage`). Nunca
-fotos, estado de un run, ni credenciales.
+ventana (`tauri-plugin-window-state`) y, en `localStorage`, la última sesión seleccionada y el
+último directorio con el que se abrió un chat. Nunca fotos, estado de un run, **la
+conversación**, un borrador, ni credenciales.
 
 ## 4. Roles y capacidades
 
 Dot pide **`operator`** (`observe` + `control`) y nada más. No pide `approver` y no manda
-ninguna `approverKey`: en M6 no hay centro de aprobaciones. Lo que una sesión espera de una
+ninguna `approverKey`: todavía no hay centro de aprobaciones. Lo que una sesión espera de una
 persona se **enseña** («Waiting for a person»), con dónde resolverlo (`stratum approvals`, o su
 terminal), y no hay botones de aprobar.
+
+**M7 no añade ninguna capacidad.** Abrir una sesión e iniciar un run exigen `control`, que es
+exactamente lo que esa capacidad significa en el contrato desde M1 («conducir runs y sesiones:
+abrir, cerrar, iniciar, cancelar…») y la que Dot ya tenía. Se valoró una capacidad más
+estrecha para «crear sesiones» y se descartó: quien puede cancelar o redirigir el run de
+cualquier sesión viva no gana autoridad por poder abrir una propia, y partir `control` habría
+cambiado lo que conceden `stratum run --detach` (M10) y los clientes de texto sin proteger nada.
+Lo que sí está separado sigue estándolo: `observe` no abre (un observador recibe `FORBIDDEN`),
+`host` es excluyente y tampoco, y `approve` no sale de esta conexión.
 
 La interfaz usa las capacidades **concedidas**, no las pedidas: sin `control` (o sin conexión,
 o con el anfitrión de la sesión desconectado) los controles están, deshabilitados, y dicen por qué.
@@ -250,12 +282,20 @@ conexión: será una capacidad aparte, sostenida por el lado nativo (§7).
 
 **Lista** (el `stratum ps --watch` visual): título, estado, perfil, modelo, anfitrión
 (`daemon`, o `cli (peer)`), tiempo del run, pendientes y directorio. La misma fila para las
-sesiones del daemon y las de una terminal: solo cambia `host.kind`.
+sesiones del daemon y las de una terminal: solo cambia `host.kind`. Arriba, **+ New chat**.
 
-**Detalle**: run (estado, duración, `stopReason`), anfitrión, perfil, modelo y provider,
-directorio, target y entorno, contexto, tokens (`n/a` si el backend no los reporta: no se
-estiman), jobs, tools, lo pendiente, el texto que se está generando, las últimas tool calls y
-un registro de actividad reciente. Sin transcript.
+**Una sesión** tiene una cabecera (título, estado, perfil, modelo, anfitrión, directorio), los
+controles de su run, dos pestañas y, abajo, el campo para escribirle:
+
+- **Chat** — la conversación (§12): lo que se le dijo, lo que contestó, qué tools usó, lo que
+  está escribiendo ahora y lo que espera de una persona.
+- **Activity** — la vista de M6, intacta: run (estado, duración, `stopReason`), anfitrión,
+  perfil, modelo y provider, directorio, target y entorno, contexto, tokens (`n/a` si el
+  backend no los reporta: no se estiman), jobs, tools, lo pendiente, las últimas tool calls y un
+  registro de actividad reciente.
+
+Las dos pestañas valen para las sesiones del daemon y para las de una terminal. Lo que cambia
+es qué se les puede pedir (ver *El campo de escritura*, §12.3).
 
 **Estados**: los del contrato y ninguno más — `running`, `waiting_approval`, `waiting_input`,
 `paused`, `queued`, `idle`, `completed`, `failed`, `cancelled`, `interrupted`, `detached`.
@@ -283,12 +323,20 @@ clic en Pause → runs.pause → «Pause requested…»        (aviso local, no 
 | Cancel (con confirmación) | `runs.cancel { sessionId, runId }` | llega `run.cancelled`. La sesión no se quita de la lista |
 | Steer | `runs.steer { sessionId, text }` | — (el campo se vacía solo si quedó `accepted`) |
 
+| New chat | `sessions.open { cwd?, agent?, provider?, model? }` | el daemon publica la sesión (`session.opened` + su foto). Hasta entonces, «Opening session…» |
+| Send (sesión parada) | `runs.start { sessionId, input }` | llega `run.started`: el mensaje aparece en la conversación. Hasta entonces, «Sending…» |
+
 Con `runId`, una orden sobre un run que ya no es el vigente contesta `STALE_STATE` en lugar de
 aplicarse a otro. Steering con el run en pausa se acepta y **no reanuda**: la interfaz lo dice.
 Una sesión de terminal conserva su entrada en su terminal; lo que se envía desde Dot es steering.
 
-**Teclado**: `Ctrl/Cmd+K` lleva al campo de steering; `Esc` suelta el campo y, si no hay
-ninguno enfocado, oculta la ventana.
+«← Sessions» **deja de mirar** una sesión; no la cierra. Dot no tiene cómo cerrar una sesión
+(`sessions.close` no está en su lista de métodos): si algún día lo hace, será una acción
+explícita y confirmada, no una X.
+
+**Teclado**: `Ctrl/Cmd+N` abre un chat nuevo; `Ctrl/Cmd+K` lleva al campo de escritura;
+`Enter` envía y `Shift+Enter` es una línea nueva; `Esc` suelta el campo y, si no hay ninguno
+enfocado, oculta la ventana.
 
 ## 6. Ventana, bandeja e instancia única
 
@@ -337,26 +385,40 @@ tendrá que entrar como una pieza nueva y visible, no como un parámetro más de
 | Validar y aplicar con el reductor del contrato; pérdida de fragmentos; eventos de un tipo futuro | `src/protocol/apply.test.ts` | `npm run test:run` |
 | Del lado nativo a los stores: la foto sustituye, hueco → foto, `detached` | `src/bridge/connect.test.ts` | ídem |
 | La interfaz: Pause sin optimismo, steer en pausa, cancel, sin conexión, incompatible, teclado | `src/app/App.test.tsx` | ídem |
+| **El chat** (M7): chat nuevo sin sesión fantasma, enviar sin optimismo, fragmentos perdidos, reconexión a mitad de un mensaje, resultado desconocido sin reenvío, preguntar ≠ redirigir, dos chats que no se cruzan, sesión que desaparece, markdown sin HTML | `src/app/Chat.test.tsx` | ídem |
 | **Arquitectura** (sobre el código) | `tests/architecture.test.ts` | ídem |
 | **Daemon real**, sin ventana: `dot-probe` (el mismo enlace) contra `stratumd`, `stratum run` y una sesión del daemon | `scripts/smoke-real.mjs` | `npm run smoke:real` |
-| **La app de verdad**, en su ventana, con tauri-driver | `e2e/dot.e2e.mjs` | `npm run e2e` |
+| **Chat contra un daemon real** (M7), sin ventana: abrir, conversar en varios turnos, `BUSY`, cerrar y reabrir Dot, dos chats, convivencia con una sesión de terminal, muerte del daemon | `scripts/smoke-chat.mjs` | `npm run smoke:chat` |
+| **La app de verdad**, en su ventana, con tauri-driver | `e2e/dot.e2e.mjs` (M6) · `e2e/chat.e2e.mjs` (M7) | `npm run e2e` |
+
+En el contrato y el daemon (`stratum-cli`, `npm test`): `protocol/transcript.test.ts` (la
+conversación como función de los eventos, sus límites y que una foto al límite cabe en una
+trama) y `daemon/daemon-chat.test.ts` (varios turnos con contexto, un run a la vez, dos chats,
+`cwd` por defecto y validado, `maxSessions`, quién puede abrir e iniciar, `env` del cliente
+ignorado, `models.list`/`agents.list` sin secretos).
 
 Invariantes que comprueba `tests/architecture.test.ts`: Dot solo importa de
 `stratum-cli/src/protocol/` (y de ahí no se alcanza el runtime ni Node); ningún fichero nombra
 `SessionHost`, `StratumAgent`, `EventHub`…; no hay otro reductor, ni en TS ni en Rust; solo
 `bridge/native.ts` toca Tauri y cada comando es un literal registrado en Rust (no hay RPC
-genérico); el webview no lee el endpoint, no usa Node ni red, y no guarda más que una
-preferencia; `dot-link` no depende de Tauri; los métodos salen de la lista cerrada; no hay
+genérico); el webview no lee el endpoint, no usa Node ni red, y no guarda más que dos
+preferencias; `dot-link` no depende de Tauri; los métodos salen de la lista cerrada; no hay
 `core.shutdown`, ni aprobaciones, ni otro rol que `operator`; no hay TCP; y Dot no escribe el
-endpoint ni lanza un daemon por su cuenta.
+endpoint ni lanza un daemon por su cuenta. Desde M7, además: `dot_open_session` solo acepta
+`cwd`, `agent`, `provider` y `model` (ni `env`, ni `resume`), y el lado nativo no toca el
+sistema de ficheros por un directorio que le pasen; no existe `sessions.close` ni
+`sessions.set*` en Dot; la conversación no se guarda ni se reconstruye en Dot (nadie trata
+`message.delta` / `message.completed` por su cuenta, no hay un store de mensajes y lo que se
+pinta es `snapshot.messages`); el webview no nombra la configuración de un provider; y no hay
+`innerHTML` ni equivalente.
 
 `dot-probe` (`crates/dot-link/src/bin/dot-probe.rs`) es el enlace de Dot con la interfaz
 cambiada por líneas JSON: permite probar contra un daemon real sin automatizar una ventana.
 
 ## 9. Limitaciones conocidas
 
-- **Sin chat, sin transcript, sin trazas, sin abrir sesiones, sin aprobar**: M7 y M8. No hay
-  botones para lo que no existe.
+- **Sin aprobar, sin contestar preguntas ni decidir planes, sin trazas, sin cerrar sesiones**:
+  M8 y posteriores. No hay botones para lo que no existe. Límites propios del chat: §12.8.
 - **Sesiones guardadas (*History*)**: el daemon no las lista todavía (`protocol.md` §11); Dot
   no enseña ninguna.
 - **Una tool descartada por steering se ve como *Failed***: el protocolo la publica como
@@ -402,7 +464,8 @@ cd ../stratum-dot && npm ci
 
 npm run test:native      # cargo test -p dot-link
 npm run test:run         # vitest (frontend + arquitectura)
-npm run smoke:real       # daemon real, sin ventana
+npm run smoke:real       # daemon real, sin ventana (M6)
+npm run smoke:chat       # chat contra un daemon real, sin ventana (M7)
 
 # La app, contra la CLI recién compilada:
 STRATUM_DOT_CLI=../stratum-cli/dist/index.js npm run tauri dev
@@ -413,5 +476,198 @@ npx tauri build --debug --no-bundle && npm run e2e
 
 Log de Dot: `dot.log` en la carpeta de logs de la app (`%LOCALAPPDATA%\dev.stratum.dot\logs`,
 `~/.local/share/dev.stratum.dot/logs`). Cuenta arranque, descubrimiento, arranque del daemon,
-conexión y desconexión, incompatibilidades, reconexiones y resincronizaciones. Nunca el token,
-claves, entorno ni el contenido de los eventos.
+conexión y desconexión, incompatibilidades, reconexiones y resincronizaciones. De una orden o
+una llamada, su nombre (`control: pause`, `call: start-run`). Nunca el token, claves, entorno,
+el contenido de los eventos, el texto de un mensaje ni el directorio de una sesión.
+
+## 12. Chat (M7)
+
+```text
+Dot ── sessions.open ──► stratumd ── HostedSession ── SessionHost.create ── StratumAgent
+Dot ── runs.start ─────► stratumd ── HostedSession.startRun ── host.run()
+Dot ◄── foto + eventos ── EventHub ◄── SessionPublisher ◄── StratumAgent.observe()
+```
+
+Dot no ejecuta el agente, ni directamente ni a través de un sidecar: una sesión abierta desde
+Dot es **una sesión del daemon como cualquier otra** (`HostedSession`, la de M2). No existe
+una «sesión de Dot», ni un canal especial, ni una entidad «turno de chat»: un mensaje del
+usuario es un **run** de una **sesión**.
+
+### 12.1 Abrir una sesión
+
+*New chat* abre un formulario con cuatro campos, todos opcionales:
+
+| Campo | Viaja como | Si se deja vacío |
+|---|---|---|
+| Message | `runs.start`, después de abrir | Se abre la sesión sin run |
+| Directory | `sessions.open.cwd` | El directorio por defecto del daemon: el *home* de su usuario |
+| Agent | `sessions.open.agent` | Ninguno (`general`) |
+| Model | `sessions.open.provider` + `.model` | Los de la configuración que aplique a ese directorio |
+
+- **Lo que se puede elegir lo dice el daemon**: `agents.list { cwd }` (perfiles `primary` o
+  `all`) y `models.list` (alias de provider + id de modelo; el de la configuración global va
+  marcado `default`). Dot no lee `~/.stratum`, ni `.stratumrc.json`, ni sabe qué es una
+  `baseUrl` o una API key: esos DTOs no las llevan.
+- **El directorio lo valida el daemon**, no Dot: absoluto, existente, directorio y accesible
+  para él (`INVALID_PARAMS` si no). El webview solo escribe un texto; no hay explorador de
+  ficheros ni diálogo nativo, y el lado nativo no toca el disco por él.
+- **El entorno de la sesión es el del daemon**: la copia que tomó al arrancar, más ese `cwd`
+  (`protocol.md` §13.4). Nada del webview ni de Dot llega al entorno de una sesión;
+  `sessions.open.env` sigue reservado y Dot no puede enviarlo.
+- **Límites del daemon**: `daemon.maxSessions` (16). Al llegar, `sessions.open` contesta
+  `UNAVAILABLE` y Dot enseña ese mensaje.
+- **Sin sesión fantasma.** Dot no añade nada a su lista al abrir. Con el id que devuelve
+  `sessions.open` solo hace dos cosas: seleccionarlo y pedir su texto en vivo. La sesión aparece
+  cuando el daemon la publica; hasta entonces se ve «Opening session…». Si abrir falla, no
+  queda nada a medias: ni fila, ni selección, y lo escrito sigue en el formulario.
+- Perfil y modelo se eligen **al abrir**. Cambiarlos en una sesión viva (`sessions.set*`) no
+  está en Dot.
+- Abrir una sesión arranca sus servers MCP, así que tiene un plazo propio (90 s, frente a los
+  10 s de una orden).
+
+### 12.2 La conversación sale de la foto
+
+Dot **no guarda la conversación**: ni en un store de mensajes, ni en `localStorage`, ni en
+Rust. Lo que se pinta es, tal cual, lo que trae la foto de la sesión:
+
+| De la foto | Qué es |
+|---|---|
+| `messages` | La conversación **cerrada**, de todos los runs de la sesión: lo que escribió el usuario (`user`), cada bloque del asistente (`assistant`), cada tool del agente principal con su estado (`tool`) y cómo acabó un turno que no terminó bien (`outcome`) |
+| `messagesTruncated` | Se descartaron entradas antiguas: se dice («Earlier messages are not shown») |
+| `partial.text` | Lo que el asistente está escribiendo **ahora**: efímero |
+
+`messages` lo lleva el anfitrión de la sesión (su `SessionPublisher`) y es una **función pura
+de los eventos de estado** (`applyTranscriptEvent`, en el contrato). `applySessionEvent` usa la
+misma función, así que una foto y los eventos que la siguen dan siempre la misma conversación:
+no hay un reductor de chat en Dot. Está acotada (`TRANSCRIPT_LIMITS`: 200 entradas, 12 000
+caracteres por mensaje, 150 000 en total; lo más antiguo se va primero) y lo dice cuando recorta.
+
+**Streaming.** El texto llega por `message.delta` a la sesión enfocada y va a `partial`. Es
+volátil: se puede perder, y no se guarda en ningún sitio como autoridad.
+
+```text
+runs.start → run.started → message.delta* → message.completed → run.completed
+                              (parcial)        (el bloque entero: entra en `messages`
+                                                y `partial` se vacía, en el mismo paso)
+```
+
+Con todos los fragmentos, con algunos o con ninguno, la conversación acaba igual. Un bloque
+se cierra cuando empieza una tool, cuando se entrega steering al modelo y al terminar el turno.
+
+**Qué no es la conversación.** No es el historial del agente (ese se comprime y lleva los
+resultados de las tools) ni la traza. No lleva el razonamiento del modelo, lo que dicen los
+subagentes, la salida de las tools ni el texto de un mensaje de steering. De una tool se ve su
+nombre, su estado —`pending` y `running` como **«Active»**, nunca «Executing»— y el resumen de
+la llamada que da el anfitrión, ya redactado.
+
+**Markdown.** Las respuestas se pintan como elementos de React, nunca como HTML: lo que el
+modelo escriba como etiqueta se ve como texto. Los enlaces no navegan —el webview no abre
+nada—: se ve su texto y, si es una dirección web, la dirección al lado.
+
+**Desplazamiento.** Quien está al final sigue el texto; quien ha subido a leer no se mueve, y
+aparece «↓ New output».
+
+### 12.3 El campo de escritura: preguntar no es redirigir
+
+Hace **una de dos cosas**, y dice cuál:
+
+| Estado de la sesión | El campo | Envía |
+|---|---|---|
+| Parada (`idle`), alojada en el daemon | *Ask Stratum…* · **Send** | `runs.start`: un run nuevo |
+| Con un run: `running`, `waiting_approval`, `waiting_input` | *Steer current run…* · **Steer**, con el aviso «Steering the current run. This does not start a new message.» | `runs.steer` |
+| Con un run en `paused` | Lo mismo, y «gets it when you resume» | `runs.steer` (no reanuda) |
+| Parada, de una terminal (`peer`) | Deshabilitado: «lives in a terminal» | — |
+| Sin conexión, anfitrión desconectado, sin `control` | Deshabilitado, con el motivo | — |
+
+- **Un run a la vez por sesión.** Nunca se abre un segundo run ni se encola un mensaje «para
+  después». Si aun así llega un `runs.start` con un run en curso (dos ventanas, una carrera),
+  el daemon contesta `BUSY`, Dot lo dice y el texto se queda en el campo.
+- Lo escrito es un **borrador de la interfaz**, uno por sesión, en memoria: no sale de Dot
+  hasta enviarlo, no se guarda entre arranques y no se borra si el envío falla.
+- Un mensaje que no cabe en el protocolo (`LIMITS.inputChars`, 200 000 caracteres) no se
+  envía **ni se recorta**: «Message too long».
+- *Pause* y *Cancel* siguen siendo los de M6, junto al chat. Pausar no es «detener la
+  generación»: es la pausa cooperativa de M5.
+
+### 12.4 Sin actualización optimista
+
+```text
+Send → runs.start → «Sending…»          (aviso local: el mensaje NO se añade a la conversación)
+     → run.started → el mensaje aparece, porque lo trae la foto / el reductor del contrato
+```
+
+Ni `run.status = running` a mano, ni un mensaje pintado antes de tiempo, ni una sesión en la
+lista antes de que el daemon la publique. «Sending…» se **deriva** de la foto: desaparece en
+cuanto enseña un run que no es el de antes (o a los 30 s).
+
+### 12.5 Resultado desconocido
+
+```text
+runs.start enviado → la conexión cae antes de la respuesta
+```
+
+Dot **no reintenta**. Dice «Result unknown… check the conversation before sending it again»,
+deja el texto en el campo y pide una foto: si el run existe, aparece en la conversación; si
+no, no. Lo mismo con `sessions.open`: si la sesión se creó, aparece en la lista. Cada
+`runs.start` y `sessions.open` lleva un `operationId` propio que pone el lado nativo, pero Dot
+no lo usa para reenviar nada: queda reservado.
+
+### 12.6 Reconexión, cerrar Dot y reiniciar el daemon
+
+| Qué pasa | Qué se ve |
+|---|---|
+| La conexión cae y vuelve | Lo último conocido, atenuado y sin poder escribir → foto nueva → la conversación entera, sin duplicados |
+| Se cambia de sesión mientras otra escribe | La que se deja pierde el texto en vivo; al volver, su foto y sus `message.completed` traen lo que faltó |
+| **Se cierra Dot** (también a mitad de un run) | Nada: Dot no cierra sesiones ni cancela runs. La sesión y su run siguen en el daemon |
+| **Se abre Dot otra vez**, con el mismo daemon | La sesión está en la lista y su conversación se reconstruye entera desde su foto |
+| **El daemon se reinicia** (o muere) | Sus sesiones **desaparecen**: no hay persistencia ni reanudación de sesiones del daemon. Dot enseña «Session ended or unavailable» y no deja escribir. Las de terminal vuelven cuando su proceso se registra otra vez |
+
+La diferencia entre las dos últimas filas es de fondo: **cerrar Dot no es cerrar la sesión; que
+muera el daemon, sí.** Una sesión del daemon vive lo que vive el daemon, y Dot no lo disimula.
+Un chat nuevo tras el reinicio es otra sesión, sin la conversación anterior.
+
+### 12.7 Aprobaciones, preguntas y planes en el chat
+
+Dot sigue siendo `operator`: **enseña** lo pendiente dentro de la conversación («Waiting for a
+person», con qué y dónde resolverlo) y no lo resuelve. Lo que eso supone para un chat abierto
+desde Dot es la política de M4, sin relajar:
+
+- Si el daemon **no** acredita aprobadores (no hay `approver.json`), no hay a quién preguntar:
+  lo destructivo se **deniega** sin preguntar, las preguntas del agente se contestan con
+  supuestos y un plan no se aprueba, como `stratum run` sin terminal.
+- Si los acredita, la solicitud queda pendiente —el run pasa a `waiting_approval` o
+  `waiting_input`, y el campo sigue siendo de steering— hasta que alguien la resuelve con
+  `stratum approvals` o caduca (`daemon.approvalTimeoutMinutes`).
+
+Aprobar desde Dot, con su frontera nativa, es M8 (§7).
+
+### 12.8 Limitaciones del chat
+
+- **Sin persistencia entre reinicios del daemon** (§12.6) y sin historial de sesiones guardadas.
+- **El texto del steering no aparece en la conversación**: el protocolo no lo transporta
+  (`steering.queued` lleva su tamaño, no su texto). Dot dice «Steering queued» y lo ocurrido
+  queda en Activity.
+- **El mensaje del usuario se ve recortado a 2 000 caracteres** (lo que lleva `run.input`),
+  con una nota que lo dice. El agente lo recibió entero.
+- **Las tools de un subagente y lo que dice** no están en la conversación (sí en Activity).
+- **Una sesión de terminal** enseña su conversación desde que se publicó en el daemon, no lo
+  que tuviera de antes (`chat --resume`).
+- **Sin cambiar de modelo o de perfil** en una sesión viva, **sin cerrar** una sesión desde
+  Dot y **sin elegir carpeta con un diálogo**: el directorio se escribe.
+- **Sin responder** a una pregunta del agente ni decidir un plan (M8).
+- Una tool descartada por steering se ve como *Failed* y `tool.started` no es «ejecutándose»
+  (deuda del protocolo, §9).
+- **Tablas e imágenes** de markdown se quedan en texto.
+- **«Default (modelo)» es el de la configuración global** del daemon (`models.list`). Si el
+  directorio elegido tiene su propio `.stratumrc.json`, la sesión usa el de ese proyecto, que
+  puede ser otro: lo que vale es lo que enseña la cabecera de la sesión una vez abierta.
+- **Sin directorio, la sesión trabaja en el *home*** del usuario del daemon: su `.stratum/`
+  «de proyecto» (planes, subagentes, guías) es entonces el global. Para trabajar sobre un
+  proyecto hay que escribir su directorio.
+- **Una tool que quedó abierta en un turno fallido o cancelado** se ve como *Interrupted*: el
+  protocolo no publica cómo acabó.
+- **En una sesión de terminal, `/clear` y `/sessions resume` no vacían la conversación
+  publicada**: Dot sigue enseñando la anterior hasta que esa sesión se cierre.
+- **Dot no puede cerrar sesiones**, así que los chats abiertos cuentan para
+  `daemon.maxSessions` (16) hasta que el daemon se pare (`stratum daemon stop`).
+- Por encima de 64 sesiones vivas, una recién abierta puede no seguirse (§9, deuda menor).

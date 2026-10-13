@@ -68,6 +68,10 @@ pub fn run() {
             commands::dot_resume_run,
             commands::dot_cancel_run,
             commands::dot_steer_run,
+            commands::dot_open_session,
+            commands::dot_start_run,
+            commands::dot_list_agents,
+            commands::dot_list_models,
             commands::dot_hide,
             commands::dot_quit,
         ])

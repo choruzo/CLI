@@ -45,6 +45,7 @@ import type {
   ProtocolJob,
   ProtocolMemoryEvent,
   ProtocolMemoryStatus,
+  ProtocolChatMessage,
   ProtocolModel,
   ProtocolPlan,
   ProtocolPlanRequest,
@@ -152,6 +153,7 @@ export const modelSchema: z.ZodType<ProtocolModel> = z.object({
   provider: z.string(),
   id: z.string(),
   contextWindow: z.number().int().positive().nullable(),
+  default: z.boolean().optional(),
 });
 
 export const sessionSchema: z.ZodType<ProtocolSession> = z.object({
@@ -188,6 +190,7 @@ export const runSchema: z.ZodType<ProtocolRun> = z.object({
   sessionId: id,
   kind: z.enum(['run', 'delegate']),
   input: z.string(),
+  inputTruncated: z.boolean().optional(),
   mode: z.enum(['normal', 'plan', 'execute']),
   status: z.enum([
     'queued',
@@ -216,19 +219,44 @@ export const runSchema: z.ZodType<ProtocolRun> = z.object({
   error: z.string().optional(),
 });
 
+const toolState = z.enum(['pending', 'running', 'completed', 'error', 'blocked']);
+
 export const toolCallSchema: z.ZodType<ProtocolToolCall> = z.object({
   id,
   runId: id,
   subagentId: id.optional(),
   name: z.string(),
   target: z.string().optional(),
-  state: z.enum(['pending', 'running', 'completed', 'error', 'blocked']),
+  state: toolState,
   description: z.string(),
   output: z.string().optional(),
   error: z.string().optional(),
   startedAt: timestamp,
   durationMs: z.number().finite().nonnegative().optional(),
 });
+
+const messageBase = { id, runId: z.string(), at: timestamp };
+const messageText = { text: z.string(), truncated: z.boolean().optional() };
+
+export const messageSchema: z.ZodType<ProtocolChatMessage> = z.discriminatedUnion('kind', [
+  z.object({ ...messageBase, kind: z.literal('user'), ...messageText }),
+  z.object({ ...messageBase, kind: z.literal('assistant'), ...messageText }),
+  z.object({
+    ...messageBase,
+    kind: z.literal('tool'),
+    callId: z.string(),
+    name: z.string(),
+    description: z.string(),
+    target: z.string().optional(),
+    state: toolState,
+  }),
+  z.object({
+    ...messageBase,
+    kind: z.literal('outcome'),
+    status: z.enum(['failed', 'cancelled']),
+    text: z.string(),
+  }),
+]);
 
 export const subagentSchema: z.ZodType<ProtocolSubagent> = z.object({
   id,
@@ -514,6 +542,8 @@ export const sessionSnapshotSchema: z.ZodType<ProtocolSessionSnapshot> = z.objec
   approvals: z.array(approvalSchema),
   questions: z.array(questionRequestSchema),
   plans: z.array(planRequestSchema),
+  messages: z.array(messageSchema),
+  messagesTruncated: z.boolean(),
 });
 
 export const overviewSnapshotSchema: z.ZodType<ProtocolOverviewSnapshot> = z.object({
@@ -576,7 +606,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'sessions.get': sessionRef,
   'sessions.open': z
     .object({
-      cwd,
+      cwd: cwd.optional(),
       // Reservado y de solo entrada: ver `SessionsOpenParams.env`.
       env: z
         .record(z.string().max(LIMITS.nameChars), z.string().max(LIMITS.envValueChars))

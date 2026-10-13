@@ -8,9 +8,12 @@
  */
 export type {
   Capability,
+  ProtocolAgent,
   ProtocolApproval,
+  ProtocolChatMessage,
   ProtocolEvent,
   ProtocolJob,
+  ProtocolModel,
   ProtocolPlanRequest,
   ProtocolQuestionRequest,
   ProtocolRun,
@@ -23,6 +26,7 @@ export type {
 } from '../../../stratum-cli/src/protocol/index';
 export {
   EVENT_CLASS,
+  LIMITS,
   STRATUM_PROTOCOL_VERSION,
   applySessionEvent,
   isStateEvent,

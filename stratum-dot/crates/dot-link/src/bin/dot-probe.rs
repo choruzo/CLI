@@ -4,7 +4,10 @@
 //!  - stdout: cada [`DotEvent`] como una línea JSON, más el resultado de cada orden;
 //!  - stdin: una orden por línea JSON
 //!    (`{"cmd":"pause","sessionId":"…","runId":"…","id":1}`; `resume`, `cancel`,
-//!    `steer` con `text`, `focus`, `resync`, `attach`, `retry`, `quit`).
+//!    `steer` con `text`, `focus`, `resync`, `attach`, `retry`, `quit`), y las
+//!    llamadas de chat: `open` (`cwd`, `agent`, `provider`, `model`), `send`
+//!    (`sessionId`, `input`), `agents` (`cwd`) y `models`, cuyo `result` se
+//!    imprime tal cual.
 //!
 //! Sirve para probar Dot contra un `stratumd` real sin automatizar una
 //! ventana (`scripts/smoke-real.mjs`). Cerrar stdin lo termina, como cerrar Dot:
@@ -14,7 +17,7 @@
 
 use dot_link::discovery::default_endpoint_dir;
 use dot_link::link::Timings;
-use dot_link::{CliLauncher, ControlAction, DotEvent, LinkConfig, Logger};
+use dot_link::{CallAction, CliLauncher, ControlAction, DotEvent, LinkConfig, Logger};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -73,6 +76,36 @@ async fn main() {
         let text = |key: &str| msg.get(key).and_then(Value::as_str).map(str::to_string);
         let session_id = text("sessionId").unwrap_or_default();
         let cmd = text("cmd").unwrap_or_default();
+        let call = match cmd.as_str() {
+            "open" => Some(CallAction::OpenSession {
+                cwd: text("cwd"),
+                agent: text("agent"),
+                provider: text("provider"),
+                model: text("model"),
+            }),
+            "send" => Some(CallAction::StartRun {
+                session_id: session_id.clone(),
+                input: text("input").unwrap_or_default(),
+            }),
+            "agents" => Some(CallAction::ListAgents { cwd: text("cwd") }),
+            "models" => Some(CallAction::ListModels),
+            _ => None,
+        };
+        if let Some(call) = call {
+            let link = link.clone();
+            let id = msg.get("id").cloned().unwrap_or(Value::Null);
+            tokio::spawn(async move {
+                match link.call(call).await {
+                    Ok(result) => print(
+                        &json!({ "type": "result", "cmd": cmd, "id": id, "ok": true, "result": result }),
+                    ),
+                    Err(error) => print(
+                        &json!({ "type": "result", "cmd": cmd, "id": id, "ok": false, "error": error }),
+                    ),
+                }
+            });
+            continue;
+        }
         let action = match cmd.as_str() {
             "quit" => break,
             "attach" => {

@@ -103,6 +103,8 @@ export function sampleSnapshot(
     approvals: [sampleApproval()],
     questions: [],
     plans: [],
+    messages: [],
+    messagesTruncated: false,
     ...overrides,
   };
 }

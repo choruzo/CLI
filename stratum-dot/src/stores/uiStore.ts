@@ -1,13 +1,18 @@
 import { create } from 'zustand';
-import type { ProtocolRun, ProtocolRunStatus } from '../protocol';
+import type { ProtocolRun, ProtocolRunStatus, ProtocolSessionSnapshot } from '../protocol';
 
 /**
- * Estado **de la interfaz**: qué sesión se mira, qué orden se acaba de dar y
- * qué contestó el daemon. Nada de aquí es estado del runtime, y lo único que se
- * guarda entre arranques es una preferencia (la última sesión seleccionada).
+ * Estado **de la interfaz**: qué sesión se mira, qué pestaña, qué se está
+ * escribiendo, qué orden se acaba de dar y qué contestó el daemon. Nada de aquí
+ * es estado del runtime ni de la conversación —esa sale de la foto de cada
+ * sesión—, y lo único que se guarda entre arranques son dos preferencias: la
+ * última sesión seleccionada y el último directorio de un chat nuevo.
  */
 
 export type ControlKind = 'pause' | 'resume' | 'cancel';
+
+/** Qué se enseña de la sesión seleccionada. */
+export type SessionTab = 'chat' | 'activity';
 
 /**
  * Una orden que el daemon aceptó y cuyo efecto aún no ha llegado por eventos.
@@ -22,6 +27,16 @@ export interface PendingControl {
   at: number;
 }
 
+/**
+ * Un mensaje enviado cuyo run aún no ha aparecido en la foto. Sirve para decir
+ * «Sending…»: el mensaje **no** se añade a la conversación a mano.
+ */
+export interface PendingSend {
+  /** El run que enseñaba la foto al enviar (o `null`): en cuanto es otro, ya llegó. */
+  previousRunId: string | null;
+  at: number;
+}
+
 export interface Notice {
   text: string;
   tone: 'info' | 'error';
@@ -30,21 +45,26 @@ export interface Notice {
 
 /** Cuánto se enseña una orden pendiente sin que el estado cambie. */
 export const PENDING_TTL_MS = 60_000;
+/** Cuánto se espera a que aparezca el run de un mensaje enviado. */
+export const SEND_TTL_MS = 30_000;
+/** Cuánto se espera a que el daemon publique una sesión recién abierta. */
+export const OPENING_TTL_MS = 20_000;
 
 const SELECTED_KEY = 'stratum-dot.selectedSession';
+const LAST_CWD_KEY = 'stratum-dot.lastCwd';
 
-function readSelected(): string | null {
+function readPreference(key: string): string | null {
   try {
-    return window.localStorage.getItem(SELECTED_KEY);
+    return window.localStorage.getItem(key);
   } catch {
     return null;
   }
 }
 
-function writeSelected(id: string | null): void {
+function writePreference(key: string, value: string | null): void {
   try {
-    if (id) window.localStorage.setItem(SELECTED_KEY, id);
-    else window.localStorage.removeItem(SELECTED_KEY);
+    if (value) window.localStorage.setItem(key, value);
+    else window.localStorage.removeItem(key);
   } catch {
     /* sin almacenamiento, la preferencia no se recuerda */
   }
@@ -52,35 +72,66 @@ function writeSelected(id: string | null): void {
 
 interface UiStore {
   selectedId: string | null;
+  tab: SessionTab;
+  /** El formulario de chat nuevo está abierto (en lugar del detalle). */
+  composingNew: boolean;
+  /** Directorio del último chat abierto desde Dot. */
+  lastCwd: string;
+  /** Lo que se está escribiendo en cada sesión. Solo vive en memoria. */
+  drafts: Record<string, string>;
   pending: Record<string, PendingControl>;
+  sends: Record<string, PendingSend>;
+  /** Sesiones que Dot acaba de pedir abrir y el daemon aún no ha publicado. */
+  opening: Record<string, number>;
   notices: Record<string, Notice>;
   select(id: string | null): void;
+  setTab(tab: SessionTab): void;
+  setComposingNew(open: boolean): void;
+  setLastCwd(cwd: string): void;
+  setDraft(sessionId: string, text: string): void;
   setPending(sessionId: string, pending: PendingControl | null): void;
+  setSend(sessionId: string, send: PendingSend | null): void;
+  setOpening(sessionId: string, at: number | null): void;
   setNotice(sessionId: string, notice: Omit<Notice, 'at'> | null): void;
 }
 
+function withEntry<T>(map: Record<string, T>, key: string, value: T | null): Record<string, T> {
+  const next = { ...map };
+  if (value === null) delete next[key];
+  else next[key] = value;
+  return next;
+}
+
 export const useUi = create<UiStore>((set) => ({
-  selectedId: readSelected(),
+  selectedId: readPreference(SELECTED_KEY),
+  tab: 'chat',
+  composingNew: false,
+  lastCwd: readPreference(LAST_CWD_KEY) ?? '',
+  drafts: {},
   pending: {},
+  sends: {},
+  opening: {},
   notices: {},
   select: (id) => {
-    writeSelected(id);
-    set({ selectedId: id });
+    writePreference(SELECTED_KEY, id);
+    // Elegir una sesión (o ninguna) cierra el formulario: nunca los dos a la vez.
+    set({ selectedId: id, composingNew: false });
   },
-  setPending: (sessionId, pending) =>
-    set((prev) => {
-      const next = { ...prev.pending };
-      if (pending) next[sessionId] = pending;
-      else delete next[sessionId];
-      return { pending: next };
-    }),
+  setTab: (tab) => set({ tab }),
+  setComposingNew: (open) => set({ composingNew: open }),
+  setLastCwd: (cwd) => {
+    writePreference(LAST_CWD_KEY, cwd || null);
+    set({ lastCwd: cwd });
+  },
+  setDraft: (sessionId, text) =>
+    set((prev) => ({ drafts: withEntry(prev.drafts, sessionId, text === '' ? null : text) })),
+  setPending: (sessionId, pending) => set((prev) => ({ pending: withEntry(prev.pending, sessionId, pending) })),
+  setSend: (sessionId, send) => set((prev) => ({ sends: withEntry(prev.sends, sessionId, send) })),
+  setOpening: (sessionId, at) => set((prev) => ({ opening: withEntry(prev.opening, sessionId, at) })),
   setNotice: (sessionId, notice) =>
-    set((prev) => {
-      const next = { ...prev.notices };
-      if (notice) next[sessionId] = { ...notice, at: Date.now() };
-      else delete next[sessionId];
-      return { notices: next };
-    }),
+    set((prev) => ({
+      notices: withEntry(prev.notices, sessionId, notice ? { ...notice, at: Date.now() } : null),
+    })),
 }));
 
 /**
@@ -96,4 +147,18 @@ export function activePending(
   if (!pending || !run) return null;
   if (run.id !== pending.runId || run.status !== pending.fromStatus) return null;
   return now - pending.at < PENDING_TTL_MS ? pending : null;
+}
+
+/**
+ * ¿Sigue «enviándose» ese mensaje? También se deriva de la foto: en cuanto
+ * enseña un run que no es el de antes, el mensaje ya está en la conversación.
+ */
+export function activeSend(
+  send: PendingSend | undefined,
+  snapshot: ProtocolSessionSnapshot | null,
+  now: number,
+): PendingSend | null {
+  if (!send) return null;
+  if (snapshot && (snapshot.run?.id ?? null) !== send.previousRunId) return null;
+  return now - send.at < SEND_TTL_MS ? send : null;
 }

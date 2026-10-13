@@ -6,7 +6,8 @@ use serde_json::{json, Value};
 
 /// Métodos que Dot envía. Es una lista cerrada: no existe forma de enviar un
 /// método que no esté aquí, y `core.shutdown` no está —cerrar Dot nunca apaga
-/// el daemon— ni ninguno que exija la capacidad `approve`.
+/// el daemon— ni ninguno que exija la capacidad `approve`. De una sesión, Dot
+/// puede **abrirla** e iniciar sus runs; cerrarla o cambiarle el modelo, no.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Method {
     CoreHello,
@@ -16,10 +17,14 @@ pub enum Method {
     RunsResume,
     RunsCancel,
     RunsSteer,
+    RunsStart,
+    SessionsOpen,
+    AgentsList,
+    ModelsList,
 }
 
 impl Method {
-    pub const ALL: [Method; 7] = [
+    pub const ALL: [Method; 11] = [
         Method::CoreHello,
         Method::EventsSubscribe,
         Method::EventsUnsubscribe,
@@ -27,6 +32,10 @@ impl Method {
         Method::RunsResume,
         Method::RunsCancel,
         Method::RunsSteer,
+        Method::RunsStart,
+        Method::SessionsOpen,
+        Method::AgentsList,
+        Method::ModelsList,
     ];
 
     pub fn name(self) -> &'static str {
@@ -38,6 +47,10 @@ impl Method {
             Method::RunsResume => "runs.resume",
             Method::RunsCancel => "runs.cancel",
             Method::RunsSteer => "runs.steer",
+            Method::RunsStart => "runs.start",
+            Method::SessionsOpen => "sessions.open",
+            Method::AgentsList => "agents.list",
+            Method::ModelsList => "models.list",
         }
     }
 }
@@ -174,7 +187,11 @@ mod tests {
                 "runs.pause",
                 "runs.resume",
                 "runs.cancel",
-                "runs.steer"
+                "runs.steer",
+                "runs.start",
+                "sessions.open",
+                "agents.list",
+                "models.list"
             ]
         );
         for forbidden in [
@@ -182,12 +199,17 @@ mod tests {
             "approvals.resolve",
             "questions.answer",
             "plans.decide",
+            "sessions.close",
         ] {
             assert!(!names.contains(&forbidden), "{forbidden}");
         }
         for name in names {
+            // De `sessions.*`, solo abrir: ni cerrar ni reconfigurar una sesión viva.
             assert!(
-                !name.starts_with("host.") && !name.starts_with("sessions."),
+                !name.starts_with("host.")
+                    && !name.starts_with("sessions.set")
+                    && !name.starts_with("jobs.")
+                    && !name.starts_with("memory."),
                 "{name}"
             );
         }

@@ -2913,3 +2913,32 @@ Cancelado en el punto 2, cada llamada ya anunciada con `tool_call_ready` recibe 
 #### Traza
 
 `TraceRuntimeEvent` `pause` (`meta.caps: ['pause']`): `requested`, `paused` y `resumed`, los dos últimos con `waitMs` desde que se pidió. Un turno cancelado en pausa no deja `resumed`: su pausa la cierra el `turn_end`.
+
+### 12.22 — Conversación publicada de una sesión
+
+Una sesión se puede **conversar desde otro proceso** (Stratum Dot, M7; protocolo en `docs/protocol.md` §13.7, cliente en `docs/dot.md` §12): un cliente abre una sesión alojada en `stratumd` (`sessions.open`) y cada mensaje suyo es un run de esa sesión (`runs.start`). El runtime no cambia: la sesión se monta con `SessionHost.create`, el turno es `host.run()` y sigue habiendo un run a la vez (`BUSY` con uno en curso, también en pausa; para un run en marcha existe el steering de §12.20).
+
+#### La conversación es una función de los eventos
+
+Lo que un cliente necesita para pintar el chat va en la foto de la sesión: `ProtocolSessionSnapshot.messages` y `messagesTruncated`. No es el historial del agente (`messages` de §12.4, que se comprime y lleva resultados de tools) ni la traza: es una vista para una persona.
+
+| Entrada | Sale de | Lleva |
+|---|---|---|
+| `user` | `run.started` | `run.input` (recortado a 2 000 caracteres; `inputTruncated` si era más largo) |
+| `assistant` | `message.completed` del agente principal | El bloque de texto cerrado |
+| `tool` | `tool.started`, y cambia con `tool.completed` / `tool.failed` / `tool.blocked` | `callId`, `name`, la `description` ya redactada, `target`, `state` |
+| `outcome` | `run.failed` / `run.cancelled` | Cómo acabó un turno que no terminó bien |
+
+`applyTranscriptEvent` (`protocol/transcript.ts`, puro y sin imports del runtime) es **la única implementación**: `SessionPublisher.state()` la aplica en el mismo paso síncrono que numera cada evento, y `applySessionEvent` la aplica al reducir. La foto en `seq = N` y los eventos hasta `N` dan la misma conversación por construcción, no por mantener dos reductores iguales. Un campo nuevo de la conversación se añade ahí y en ningún otro sitio.
+
+#### Invariantes
+
+- **Los fragmentos no son la conversación.** `text_delta` va a `partial` y viaja como `message.delta`, volátil; un bloque solo entra en `messages` cuando lo cierra un `message.completed`, que lo trae entero. El publicador cierra el bloque abierto al empezar una tool (`tool_call_start`), al entregarse steering (`runtime_updates`: lo entregado abre otra petición al modelo) y al terminar el turno.
+- **Acotada y explícita** (`TRANSCRIPT_LIMITS`): 200 entradas, 12 000 caracteres por mensaje, 300 por descripción de tool, 150 000 en total. Lo más antiguo se descarta primero y `messagesTruncated` lo dice; un texto recortado lleva `truncated`. Una foto sigue cabiendo en una trama.
+- **Solo el agente principal.** El texto y las tools de un subagente no entran (van por `subagent.*` y sus propios eventos).
+- **Sin datos nuevos del runtime.** Todo sale de eventos que ya se publicaban; el razonamiento, la salida de las tools y el texto de un mensaje de steering siguen sin viajar.
+- **No se persiste.** Vive en el publicador mientras vive la sesión: una sesión del daemon y su conversación mueren con el daemon. Reanudar una sesión guardada desde el daemon sigue sin existir.
+
+#### Quién puede y con qué entorno
+
+`sessions.open` y `runs.start` exigen la capacidad `control` (§5 del protocolo); no hay una capacidad nueva. El `cwd` es opcional —ausente, el *home* del usuario del daemon— y **lo valida el daemon**: absoluto, existente, directorio y accesible. El entorno de la sesión es la copia del entorno del daemon tomada al arrancar (`SessionEnv`, M0): `sessions.open.env` sigue reservado y sin usar, y un cliente no puede pasar variables. `agents.list` y `models.list` dan a un cliente lo que puede elegir al abrir —nombres de perfil, alias de provider, ids de modelo y cuál es el de por defecto— sin la configuración: ni `baseUrl`, ni claves, ni el prompt de un perfil.

@@ -127,6 +127,49 @@ impl ControlAction {
     }
 }
 
+/// Llamadas cuyo resultado es un DTO del protocolo. Aquí **no se interpreta**:
+/// vuelve tal cual a quien llama, que lo valida contra el contrato. Tampoco
+/// hay más: abrir una sesión del daemon, iniciar un run en ella y consultar
+/// qué perfiles y modelos se pueden elegir al abrirla.
+///
+/// Lo que no cabe, a propósito: variables de entorno para la sesión (su
+/// entorno es el del daemon), un `resume`, ni cerrar o reconfigurar una sesión.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CallAction {
+    /// `sessions.open`. Todo opcional: lo que falte lo decide el daemon.
+    OpenSession {
+        cwd: Option<String>,
+        agent: Option<String>,
+        provider: Option<String>,
+        model: Option<String>,
+    },
+    /// `runs.start`: un mensaje del usuario es un run nuevo de esa sesión.
+    StartRun { session_id: String, input: String },
+    /// `agents.list`, con los perfiles de proyecto de ese directorio.
+    ListAgents { cwd: Option<String> },
+    /// `models.list`.
+    ListModels,
+}
+
+impl CallAction {
+    pub fn name(&self) -> &'static str {
+        match self {
+            CallAction::OpenSession { .. } => "open-session",
+            CallAction::StartRun { .. } => "start-run",
+            CallAction::ListAgents { .. } => "list-agents",
+            CallAction::ListModels => "list-models",
+        }
+    }
+
+    /// Cambia algo: sin respuesta, su resultado es desconocido y no se repite.
+    pub fn mutating(&self) -> bool {
+        matches!(
+            self,
+            CallAction::OpenSession { .. } | CallAction::StartRun { .. }
+        )
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum CommandErrorKind {
@@ -137,6 +180,8 @@ pub enum CommandErrorKind {
     /// Salió y no hubo respuesta (conexión caída o plazo vencido): **no se sabe**
     /// si se aplicó. No se reenvía: el estado dirá qué pasó.
     Unknown,
+    /// Una **consulta** salió y no hubo respuesta. No cambió nada: repetir es seguro.
+    NoAnswer,
     /// El daemon (o el anfitrión de la sesión) contestó con un error.
     Rejected,
 }
@@ -206,6 +251,27 @@ mod tests {
             })
             .unwrap(),
             json!({ "type": "snapshot", "sessionId": "a", "snapshot": { "seq": 1 } })
+        );
+    }
+
+    #[test]
+    fn solo_abrir_e_iniciar_cambian_algo() {
+        let open = CallAction::OpenSession {
+            cwd: None,
+            agent: None,
+            provider: None,
+            model: None,
+        };
+        let start = CallAction::StartRun {
+            session_id: "s".into(),
+            input: "hola".into(),
+        };
+        assert!(open.mutating() && start.mutating());
+        assert!(!CallAction::ListModels.mutating());
+        assert!(!CallAction::ListAgents { cwd: None }.mutating());
+        assert_eq!(
+            serde_json::to_value(CommandErrorKind::NoAnswer).unwrap(),
+            json!("no-answer")
         );
     }
 

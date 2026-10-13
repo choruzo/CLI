@@ -4,6 +4,7 @@ import type {
   ProtocolInteractionStatus,
   ProtocolJob,
   ProtocolMemoryEvent,
+  ProtocolChatMessage,
   ProtocolPlan,
   ProtocolPlanRequest,
   ProtocolPlanStep,
@@ -238,6 +239,14 @@ export interface ProtocolSessionSnapshot {
   approvals: ProtocolApproval[];
   questions: ProtocolQuestionRequest[];
   plans: ProtocolPlanRequest[];
+  /**
+   * La conversación de la sesión, **de todos sus runs**, acotada
+   * (`TRANSCRIPT_LIMITS`): lo más antiguo se descarta primero. El bloque que
+   * el asistente tiene abierto no está aquí: está en `partial`.
+   */
+  messages: ProtocolChatMessage[];
+  /** Se descartaron entradas antiguas: `messages` no empieza en el principio. */
+  messagesTruncated: boolean;
 }
 
 /** Foto de conjunto para una suscripción de resumen. */

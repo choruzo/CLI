@@ -90,6 +90,8 @@ function setup(options: Partial<EventHubOptions> = {}) {
         approvals: [],
         questions: [],
         plans: [],
+        messages: [],
+        messagesTruncated: false,
       };
     },
     overviewOf: () => ({

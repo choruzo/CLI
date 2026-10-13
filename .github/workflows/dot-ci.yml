@@ -102,6 +102,10 @@ jobs:
         working-directory: stratum-dot
         run: npm run smoke:real
 
+      - name: Chat smoke against a real stratumd (M7)
+        working-directory: stratum-dot
+        run: npm run smoke:chat
+
       - name: Build the app (debug, no bundle)
         working-directory: stratum-dot
         run: |

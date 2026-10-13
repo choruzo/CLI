@@ -23,7 +23,14 @@ import { ProviderRouter } from '../providers/router.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { closeExecRuntime } from '../tools/exec/runtime.js';
 import { SessionHost } from './session-host.js';
-import { SessionPublisher, type PublisherSink } from './session-publisher.js';
+import {
+  SNAPSHOT_BYTE_BUDGET,
+  SessionPublisher,
+  fitSnapshot,
+  type PublisherSink,
+} from './session-publisher.js';
+import { MAX_MESSAGE_BYTES } from '../protocol/index.js';
+import { sampleSnapshot, sampleToolCall } from '../protocol/protocol.fixtures.js';
 
 const base = realpathSync(mkdtempSync(join(tmpdir(), 'stratum-publisher-')));
 afterAll(async () => {
@@ -493,5 +500,41 @@ describe('SessionPublisher — memory.write', () => {
         },
       },
     ]);
+  });
+});
+
+describe('fitSnapshot — una foto tiene que caber en una trama', () => {
+  it('con texto corriente no toca nada', () => {
+    const snapshot = sampleSnapshot();
+    expect(fitSnapshot(snapshot)).toBe(snapshot);
+  });
+
+  it('una foto al límite de todo, con texto de varios bytes, se reduce hasta caber y lo dice', () => {
+    const wide = (n: number): string => '漢'.repeat(n);
+    const messages = Array.from({ length: 12 }, (_, i) => ({
+      kind: 'assistant' as const,
+      id: `m${i + 1}`,
+      runId: 'run_1',
+      at: 1,
+      text: wide(12_000),
+    }));
+    const huge = sampleSnapshot({
+      partial: { text: wide(100_000), reasoning: wide(100_000) },
+      toolCalls: Array.from({ length: 100 }, (_, i) =>
+        sampleToolCall({ id: `c${i}`, description: wide(2_000), output: wide(1_000) }),
+      ),
+      messages,
+    });
+    expect(Buffer.byteLength(JSON.stringify(huge))).toBeGreaterThan(MAX_MESSAGE_BYTES);
+
+    const fit = fitSnapshot(huge);
+    expect(Buffer.byteLength(JSON.stringify(fit))).toBeLessThanOrEqual(SNAPSHOT_BYTE_BUDGET);
+    expect(sessionSnapshotSchema.safeParse(fit).success).toBe(true);
+    // Lo primero que se va es lo menos valioso; la conversación, lo último, y se avisa.
+    expect(fit.partial.reasoning).toBe('');
+    expect(fit.seq).toBe(huge.seq);
+    expect(fit.messages.at(-1)).toEqual(messages.at(-1));
+    expect(fit.messages.length < messages.length).toBe(fit.messagesTruncated);
+    expect(fit.toolCalls).toHaveLength(100);
   });
 });
