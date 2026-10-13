@@ -216,6 +216,8 @@ try {
     probe = startProbe();
     await until('una sesión', () => probe.sessionIds.length === 1 && probe.sessions.has(probe.sessionIds[0]));
     peer = probe.sessionIds[0];
+    // La sesión se registra antes de abrir su turno: la primera foto puede no traer run.
+    await until('el run en marcha', () => probe.sessions.get(peer).run?.status === 'running');
     const { session, run: current } = probe.sessions.get(peer);
     assert.equal(session.host.kind, 'peer');
     assert.equal(session.host.connected, true);

@@ -17,6 +17,7 @@
  * que las sesiones publican: no se persiste y se puede rehacer.
  */
 import { statSync } from 'fs';
+import { mkdir } from 'fs/promises';
 import { isAbsolute, resolve } from 'path';
 import { ProfileLoader, profileMode } from '../agent/profiles.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
@@ -225,6 +226,9 @@ export class Stratumd {
       ...(opts.highWaterBytes ? { highWaterBytes: opts.highWaterBytes } : {}),
       ...(opts.maxBufferedBytes ? { maxBufferedBytes: opts.maxBufferedBytes } : {}),
     });
+    // En POSIX el canal es un unix socket **dentro** de esta carpeta: tiene que
+    // existir antes de escuchar (un named pipe de Windows no la necesita).
+    await mkdir(dir, { recursive: true, mode: 0o700 });
     await daemon.server.listen();
     try {
       daemon.claim = await claimEndpoint({
