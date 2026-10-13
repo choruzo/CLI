@@ -694,6 +694,8 @@ class Scope implements TraceScope {
             ? 'mensaje del usuario'
             : `fin del job #${'jobId' in ev && ev.jobId ? ev.jobId : '?'}`;
         this.point('notice', `Inbox: ${what} ${INBOX_PHASE_LABEL[ev.phase]}`, data);
+      } else if (ev.event === 'resolution') {
+        this.point('notice', `Resolución (${ev.kind}): ${ev.status} · ${ev.by}`, data);
       } else if (ev.event === 'job') {
         this.point(
           'notice',

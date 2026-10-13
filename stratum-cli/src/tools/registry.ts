@@ -528,6 +528,7 @@ export class ToolDispatcher {
         description,
         ...(gate
           ? {
+              target: gate.target,
               environment: { name: gate.env.name, tier: gate.env.tier },
               ...(gate.phrase ? { confirmPhrase: gate.phrase } : {}),
               ...(forced ? { forced: true } : {}),

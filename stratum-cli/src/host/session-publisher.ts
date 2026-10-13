@@ -5,11 +5,16 @@ import type { StratumConfig } from '../config/schema.js';
 import type { BackgroundJob } from '../jobs/types.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import {
+  LIMITS,
   SNAPSHOT_LIMITS,
   snapshotSubagent,
   snapshotToolCall,
+  type ProtocolApproval,
   type ProtocolEvent,
   type ProtocolJob,
+  type ProtocolPlan,
+  type ProtocolPlanRequest,
+  type ProtocolQuestionRequest,
   type ProtocolRun,
   type ProtocolSession,
   type ProtocolSessionHostInfo,
@@ -27,6 +32,7 @@ import { redactText } from '../security/redact-output.js';
 import { targetOfCall } from '../tools/environments.js';
 import { describeCall } from '../tools/registry.js';
 import { getLogger } from '../logging/index.js';
+import type { InteractionChange, PendingInteractions } from './interactions.js';
 
 const log = getLogger('host').child('publisher');
 
@@ -54,6 +60,12 @@ export interface PublishedSession {
   readonly agent: StratumAgent;
   readonly config: StratumConfig;
   readonly env: { readonly cwd: string };
+  /**
+   * Las decisiones humanas pendientes de la sesión. Con ellas, el publicador
+   * cuenta cada solicitud y su resolución como eventos de la sesión (con su
+   * `seq`) y las lleva en la foto. No decide nada: solo las publica.
+   */
+  readonly interactions?: PendingInteractions;
 }
 
 export interface SessionPublisherOptions {
@@ -154,6 +166,9 @@ export class SessionPublisher {
   private toolCalls = new Map<string, ProtocolToolCall>();
   private subagents = new Map<string, ProtocolSubagent>();
   private todos: ProtocolTodo[] = [];
+  private approvals = new Map<string, ProtocolApproval>();
+  private questions = new Map<string, ProtocolQuestionRequest>();
+  private plans = new Map<string, ProtocolPlanRequest>();
 
   constructor(opts: SessionPublisherOptions) {
     this.host = opts.host;
@@ -218,6 +233,13 @@ export class SessionPublisher {
         }),
       ),
     );
+    if (this.host.interactions) {
+      this.detach.push(
+        this.host.interactions.subscribe((change) =>
+          this.guarded(() => this.onInteraction(change)),
+        ),
+      );
+    }
     try {
       this.detach.push(
         getDecisionMemory(this.host.config).subscribe((ev) =>
@@ -306,7 +328,13 @@ export class SessionPublisher {
       title: this.title,
       cwd: this.host.env.cwd,
       host: this.hostInfo,
-      state: this.closed ? 'closed' : this.runActive ? 'running' : 'idle',
+      state: this.closed
+        ? 'closed'
+        : !this.runActive
+          ? 'idle'
+          : this.pendingCount() > 0
+            ? 'waiting'
+            : 'running',
       agent: agent.getActiveProfile()?.name ?? 'general',
       provider: agent.providerName,
       model: agent.model,
@@ -348,12 +376,152 @@ export class SessionPublisher {
         .map(snapshotSubagent),
       todos: this.todos.map((t) => ({ ...t })),
       jobs,
-      // Aprobaciones, preguntas y planes pendientes: los arbitra el centro de
-      // aprobaciones (M4). Hasta entonces una sesión publicada no tiene ninguna.
-      approvals: [],
-      questions: [],
-      plans: [],
+      approvals: [...this.approvals.values()].map((a) => ({ ...a })),
+      questions: [...this.questions.values()].map((q) => ({ ...q })),
+      plans: [...this.plans.values()].map((p) => ({ ...p })),
     };
+  }
+
+  // ---------------------------------------------------------------------------
+  // Decisiones humanas pendientes
+  // ---------------------------------------------------------------------------
+
+  private pendingCount(): number {
+    return this.approvals.size + this.questions.size + this.plans.size;
+  }
+
+  /**
+   * Una solicitud se abrió o se resolvió. Aquí solo se **cuenta**: quién gana lo
+   * decide `PendingInteractions`. Lo que viaja es lo que una persona necesita
+   * para decidir, ya redactado: nunca los parámetros crudos de la tool.
+   */
+  private onInteraction(change: InteractionChange): void {
+    const run = this.run;
+    const { interaction } = change;
+    if (change.type === 'requested') {
+      if (!run || !this.runActive) {
+        log.warn('interaction outside a run, not published', { kind: interaction.kind });
+        return;
+      }
+      const base = {
+        id: interaction.id,
+        sessionId: this.sessionId,
+        runId: run.id,
+        requestedAt: interaction.requestedAt,
+        expiresAt: interaction.expiresAt,
+      };
+      if (interaction.kind === 'approval') {
+        const { request } = interaction;
+        const approval: ProtocolApproval = {
+          ...base,
+          kind: 'tool',
+          tool: request.toolName,
+          description: clip(this.redact(request.description), INPUT_CHARS),
+          ...(request.target ? { target: request.target } : {}),
+          ...(request.environment
+            ? { environment: { name: request.environment.name, tier: request.environment.tier } }
+            : {}),
+          forced: request.forced === true,
+          ...(request.confirmPhrase !== undefined ? { confirmPhrase: request.confirmPhrase } : {}),
+          resolvable: 'anywhere',
+          status: 'pending',
+        };
+        this.approvals.set(approval.id, approval);
+        this.state('approval.requested', () => ({ approval: { ...approval } }));
+      } else if (interaction.kind === 'question') {
+        const request: ProtocolQuestionRequest = {
+          ...base,
+          questions: interaction.questions.map((q) => ({
+            question: clip(this.redact(q.question), LIMITS.answerChars),
+            ...(q.options
+              ? { options: q.options.map((o) => ({ id: o.id, label: this.redact(o.label) })) }
+              : {}),
+            ...(q.allowCustom ? { allowCustom: true } : {}),
+          })),
+        };
+        this.questions.set(request.id, request);
+        this.state('question.requested', () => ({ request: { ...request } }));
+      } else {
+        const request: ProtocolPlanRequest = { ...base, plan: this.plan(interaction.plan) };
+        this.plans.set(request.id, request);
+        this.state('plan.proposed', () => ({ request: { ...request } }));
+      }
+      this.syncWaiting();
+      return;
+    }
+
+    const { outcome } = change;
+    const resolvedBy = outcome.by ? { resolvedBy: outcome.by } : {};
+    if (outcome.kind === 'approval') {
+      if (!this.approvals.delete(interaction.id)) return;
+      const status =
+        outcome.status !== 'resolved'
+          ? outcome.status
+          : outcome.decision === 'deny'
+            ? 'denied'
+            : 'approved';
+      this.state('approval.resolved', () => ({
+        approvalId: interaction.id,
+        status,
+        decision: outcome.decision,
+        ...resolvedBy,
+      }));
+    } else if (outcome.kind === 'question') {
+      if (!this.questions.delete(interaction.id)) return;
+      const answers =
+        outcome.answers?.map((a) => ({
+          question: clip(this.redact(a.question), LIMITS.answerChars),
+          answer: clip(this.redact(a.answer), LIMITS.answerChars),
+          ...(a.optionId ? { optionId: a.optionId } : {}),
+        })) ?? null;
+      this.state('question.resolved', () => ({
+        requestId: interaction.id,
+        answers,
+        status: outcome.status,
+        ...resolvedBy,
+      }));
+    } else {
+      if (!this.plans.delete(interaction.id)) return;
+      const { decision } = outcome;
+      this.state('plan.resolved', () => ({
+        requestId: interaction.id,
+        decision: decision.decision,
+        ...(decision.decision === 'approve' ? { plan: this.plan(decision.plan) } : {}),
+        status: outcome.status,
+        ...resolvedBy,
+      }));
+    }
+    this.syncWaiting();
+  }
+
+  private plan(plan: { summary: string; steps: ProtocolPlan['steps'] }): ProtocolPlan {
+    return {
+      summary: clip(this.redact(plan.summary), LIMITS.planStepChars),
+      steps: plan.steps.slice(0, LIMITS.planSteps).map((s) => ({
+        id: s.id,
+        title: clip(this.redact(s.title), LIMITS.planStepChars),
+        ...(s.detail !== undefined
+          ? { detail: clip(this.redact(s.detail), LIMITS.planStepChars) }
+          : {}),
+        status: s.status,
+      })),
+    };
+  }
+
+  /** El run espera a una persona, o deja de esperar: `run.updated` y el resumen. */
+  private syncWaiting(): void {
+    const run = this.run;
+    if (!run || !this.runActive) return;
+    const status: ProtocolRun['status'] =
+      this.approvals.size + this.plans.size > 0
+        ? 'waiting_approval'
+        : this.questions.size > 0
+          ? 'waiting_input'
+          : 'running';
+    if (run.status === status) return;
+    run.status = status;
+    this.state('run.updated', () => ({ run: this.runCopy() }));
+    this.state('session.updated', () => ({ session: this.session() }));
   }
 
   private job(job: BackgroundJob): ProtocolJob {
@@ -625,7 +793,7 @@ export class SessionPublisher {
       }
       // El final del turno llega por `turn_ended`, que también cubre el turno
       // abandonado. Planes y preguntas son solicitudes pendientes de una
-      // decisión: las publica el centro de aprobaciones (M4).
+      // decisión: se publican cuando se abren y se resuelven (`onInteraction`).
       case 'done':
       case 'plan_proposed':
       case 'questions_asked':

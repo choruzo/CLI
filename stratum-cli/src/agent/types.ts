@@ -168,6 +168,8 @@ export interface ConfirmRequest {
    * esta confirmación existe para evitar.
    */
   confirmPhrase?: string;
+  /** Target que la llamada cambia (`local`, `ssh:<alias>`), cuando una regla de entorno lo fija. */
+  target?: string;
   /** Hito 17 — entorno del target que la llamada cambia, para pintarlo en la confirmación. */
   environment?: { name: string; tier: 'production' | 'staging' | 'development' };
   /**

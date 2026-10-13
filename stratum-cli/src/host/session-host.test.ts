@@ -145,10 +145,17 @@ describe('SessionHost', () => {
     expect(before.onConfirmDestructive).toBeUndefined();
     expect(before.onSubagentPersist).toBeTypeOf('function');
 
-    const approvePlan = vi.fn();
+    const plan = { summary: 's', steps: [] };
+    const approvePlan = vi.fn(async () => ({ decision: 'approve' as const, plan }));
     host.setGates({ approvePlan });
     expect(host.runOptions({ mode: 'plan' })).toMatchObject({ mode: 'plan' });
-    expect(host.runOptions().onApprovePlan).toBe(approvePlan);
+    // La puerta que recibe el runtime pasa por las interacciones pendientes de
+    // la sesión, que es donde compite con una respuesta remota.
+    const after = host.runOptions();
+    expect(after.onConfirmDestructive).toBeUndefined();
+    expect(await after.onApprovePlan!(plan)).toEqual({ decision: 'approve', plan });
+    expect(approvePlan).toHaveBeenCalledTimes(1);
+    expect(host.interactions.size).toBe(0);
   });
 
   it('cancel() aborta el turno en curso', async () => {

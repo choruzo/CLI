@@ -1,16 +1,5 @@
 import type { StratumConfig } from '../config/schema.js';
-import type {
-  AgentEvent,
-  AgentMode,
-  ConfirmRequest,
-  DestructiveDecision,
-  DestructivePolicy,
-  Plan,
-  PlanDecision,
-  QuestionAnswer,
-  QuestionItem,
-  RunOptions,
-} from '../agent/types.js';
+import type { AgentEvent, AgentMode, DestructivePolicy, Plan, RunOptions } from '../agent/types.js';
 import { StratumAgent, type StratumAgentOptions } from '../agent/core.js';
 import { strictestPolicy } from '../agent/profiles.js';
 import type { ProviderRouter } from '../providers/router.js';
@@ -25,23 +14,11 @@ import { openSessionTrace } from '../trace/store.js';
 import type { TraceRecorder, TraceScope } from '../trace/recorder.js';
 import type { SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
+import { PendingInteractions, type HostGates, type InteractionChange } from './interactions.js';
+
+export type { GateContext, HostGates } from './interactions.js';
 
 const log = getLogger('host');
-
-/**
- * Las decisiones humanas de una sesión, como interfaz: quien aloja la sesión
- * dice cómo se contestan (readline, Ink, un cliente remoto). Sin una puerta, el
- * runtime hace lo que ya hacía sin callback: denegar la confirmación, seguir
- * con supuestos, rechazar el plan.
- */
-export interface HostGates {
-  /** Confirmación de una operación destructiva o forzada por un entorno. */
-  confirm?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
-  /** Tanda de preguntas de la tool `question`. `null` = nadie contesta. */
-  askQuestions?: (questions: QuestionItem[]) => Promise<QuestionAnswer[] | null>;
-  /** Aprobación de un plan (`present_plan`, o un entorno con `requirePlan`). */
-  approvePlan?: (plan: Plan) => Promise<PlanDecision>;
-}
 
 export interface SessionHostOptions {
   /** Entorno de la sesión. Siempre explícito: el host no lee el del proceso. */
@@ -63,7 +40,15 @@ export interface SessionHostOptions {
   destructivePolicy?: DestructivePolicy;
   /** `--allow-destructive`: se pasa tal cual al runtime. */
   allowDestructive?: boolean;
+  /** Prompts del proceso que aloja la sesión (readline, Ink). */
   gates?: HostGates;
+  /**
+   * Plazo de una solicitud que nadie tiene delante (sin prompt local): al
+   * vencer se resuelve en negativo. Ausente o `0` = sin plazo.
+   */
+  interactionTimeoutMs?: number;
+  /** ¿Puede contestar ahora un cliente remoto? Ver `PendingInteractions`. */
+  remoteApprovals?: () => boolean;
   /** Opciones del agente (reanudación, read-only, perfil de sesión…). `env` lo pone el host. */
   agent?: Omit<StratumAgentOptions, 'env'>;
 }
@@ -104,8 +89,12 @@ export class SessionHost {
   readonly trace: TraceRecorder | null;
   readonly planStore: PlanStore;
   readonly subagentStore: SubagentStore;
+  /**
+   * Decisiones humanas pendientes de la sesión: el único sitio donde compiten
+   * el prompt local, una respuesta remota, el plazo y la cancelación.
+   */
+  readonly interactions: PendingInteractions;
 
-  private gates: HostGates;
   private readonly basePolicy: DestructivePolicy;
   private readonly allowDestructive: boolean | undefined;
   private readonly traceScope: TraceScope | undefined;
@@ -129,7 +118,11 @@ export class SessionHost {
     this.mcp = parts.mcp;
     this.mcpWarnings = parts.mcpWarnings;
     this.sessionId = opts.sessionId ?? generateSessionId();
-    this.gates = opts.gates ?? {};
+    this.interactions = new PendingInteractions({
+      ...(opts.gates ? { local: opts.gates } : {}),
+      ...(opts.interactionTimeoutMs ? { timeoutMs: opts.interactionTimeoutMs } : {}),
+      ...(opts.remoteApprovals ? { remote: opts.remoteApprovals } : {}),
+    });
     this.basePolicy = opts.destructivePolicy ?? 'ask';
     this.allowDestructive = opts.allowDestructive;
 
@@ -140,6 +133,7 @@ export class SessionHost {
       ...(opts.version !== undefined ? { version: opts.version } : {}),
     });
     this.traceScope = this.trace?.scope();
+    this.interactions.subscribe((change) => this.traceResolution(change));
     this.agent = new StratumAgent(this.config, this.router, this.registry, {
       ...opts.agent,
       env: this.env,
@@ -171,9 +165,27 @@ export class SessionHost {
     return new SessionHost(opts, { config, registry, mcp, mcpWarnings });
   }
 
-  /** Sustituye las puertas (p. ej. cuando dependen de la política ya resuelta). */
+  /** Sustituye los prompts locales (p. ej. cuando dependen de la política ya resuelta). */
   setGates(gates: HostGates): void {
-    this.gates = gates;
+    this.interactions.setLocal(gates);
+  }
+
+  /** Quién resolvió cada solicitud queda en la traza de la sesión. Sin el contenido. */
+  private traceResolution(change: InteractionChange): void {
+    if (change.type !== 'resolved') return;
+    const { interaction, outcome } = change;
+    this.traceScope?.runtime({
+      event: 'resolution',
+      kind: interaction.kind,
+      id: interaction.id,
+      status: outcome.status,
+      by: outcome.by?.kind ?? 'none',
+      ...(outcome.by?.client ? { client: outcome.by.client } : {}),
+      ...(outcome.by?.connectionId !== undefined ? { connectionId: outcome.by.connectionId } : {}),
+      ...(interaction.kind === 'approval'
+        ? { tool: interaction.request.toolName, callId: interaction.request.callId }
+        : {}),
+    });
   }
 
   /** Política destructiva vigente: la base, endurecida por el perfil principal activo. */
@@ -187,15 +199,18 @@ export class SessionHost {
    * necesite llamar al agente por su cuenta parten de aquí.
    */
   runOptions(turn: TurnOptions = {}): RunOptions {
+    // Las puertas del turno: existen solo si alguien puede contestarlas, y lo
+    // que quede pendiente se cancela con el turno.
+    const gates = this.interactions.gatesFor({ signal: turn.signal });
     return {
       signal: turn.signal,
       sessionId: this.sessionId,
       trace: this.traceScope,
       allowDestructive: this.allowDestructive,
       destructivePolicy: this.destructivePolicy,
-      onConfirmDestructive: this.gates.confirm,
-      onAskQuestions: this.gates.askQuestions,
-      onApprovePlan: this.gates.approvePlan,
+      onConfirmDestructive: gates.confirm,
+      onAskQuestions: gates.askQuestions,
+      onApprovePlan: gates.approvePlan,
       onSubagentPersist: (rec) => this.subagentStore.persist(rec),
       ...(turn.onPlanPersist ? { onPlanPersist: turn.onPlanPersist } : {}),
       ...(turn.mode ? { mode: turn.mode } : {}),
@@ -268,6 +283,8 @@ export class SessionHost {
     if (this.disposed) return;
     this.disposed = true;
     this.turnAbort?.abort();
+    // Nada queda esperando a una persona: cada puerta recibe su respuesta negativa.
+    this.interactions.cancelAll();
     await this.settle('mcp shutdown', () => this.mcp.shutdownAll());
     await this.settle('exec runtime', () => closeSessionExecRuntime(this.config, this.agent.jobs));
     if (opts.cancelBackground) {

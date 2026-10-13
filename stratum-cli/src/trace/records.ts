@@ -123,6 +123,22 @@ export type TraceRuntimeEvent =
       reason: string;
     }
   | { event: 'retry'; attempt: number; error: string }
+  | {
+      /**
+       * Quién resolvió una aprobación, una pregunta o un plan. `none` = nadie:
+       * se canceló. Sin el contenido de la solicitud ni de la respuesta.
+       */
+      event: 'resolution';
+      kind: 'approval' | 'question' | 'plan';
+      id: string;
+      status: 'resolved' | 'expired' | 'cancelled';
+      by: 'local' | 'remote' | 'timeout' | 'policy' | 'none';
+      /** Con `remote`: lo que el cliente declaró ser y su conexión en el servidor. */
+      client?: string;
+      connectionId?: number;
+      tool?: string;
+      callId?: string;
+    }
   | TraceJobEvent;
 
 /**
