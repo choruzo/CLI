@@ -373,6 +373,18 @@ cambiada por líneas JSON: permite probar contra un daemon real sin automatizar 
   conoce avanza la secuencia sin aplicarse; el endurecimiento completo es M9.
 - **Sin firma ni auto-update**: empaquetado y firma son M9.
 
+### Deuda menor (no bloquea M6)
+
+- **Canal de órdenes sin tope.** El canal interno entre la app y el actor del enlace
+  (`link.rs`) es un `mpsc::unbounded_channel()`. Lo alimentan solo los comandos `dot_*` de una
+  interfaz, así que en la práctica no crece, pero no tiene límite formal.
+- **Tope de 64 sesiones seguidas** (`MAX_FOLLOWED_SESSIONS`). Por encima, las siguientes no se
+  siguen y solo se registra en el log: la interfaz no lo dice.
+- **Bandeja en GNOME/Wayland** sin probar en un escritorio Linux real (Q4, §6).
+
+Deuda del **protocolo**, no de Dot: `tool.started` se publica antes de ejecutar y `tool.blocked`
+no se emite (`protocol.md` §13.6 y §16).
+
 ## 10. Convivencia con Stratum Desktop
 
 Dos aplicaciones durante el MVP (`PRD_STRATUM_DOT.md` §9.5). `stratum-desktop` 0.4 —sidecar,
