@@ -459,7 +459,16 @@ export class ToolDispatcher {
     // `confirm-always`: se pregunta por todo cambio, y ni
     // `tools.confirmDestructive: false`, ni `--allow-destructive`, ni el
     // allow-all de sesión lo saltan.
-    const forced = gate?.forced === true;
+    // Lo mismo si la propia tool lo exige para esta llamada (un push forzado).
+    let toolForced = false;
+    try {
+      toolForced = tool.confirmAlways?.(call.input, ctx) ?? false;
+    } catch (err) {
+      // Falla cerrado: ante la duda, se pregunta siempre.
+      log.warn('confirmAlways threw', { tool: call.name, err });
+      toolForced = true;
+    }
+    const forced = gate?.forced === true || toolForced;
 
     if (!forced && !ctx.config.tools.confirmDestructive) return null;
 
@@ -512,8 +521,11 @@ export class ToolDispatcher {
           ? `Change blocked: ${description}. Environment "${gate.env.name}" requires the user to ` +
             'approve every change, and nobody can approve it in this session. Ask the user to run ' +
             'it from an interactive session.'
-          : `Destructive operation blocked: ${description}. ` +
-            'Destructive operations are not allowed in this session. Consider a non-destructive alternative.',
+          : toolForced
+            ? `Operation blocked: ${description}. It has to be approved by the user every time, ` +
+              'and nobody can approve it in this session. Ask the user to run it themselves.'
+            : `Destructive operation blocked: ${description}. ` +
+              'Destructive operations are not allowed in this session. Consider a non-destructive alternative.',
         recoverable: true,
       };
     }
@@ -531,9 +543,9 @@ export class ToolDispatcher {
               target: gate.target,
               environment: { name: gate.env.name, tier: gate.env.tier },
               ...(gate.phrase ? { confirmPhrase: gate.phrase } : {}),
-              ...(forced ? { forced: true } : {}),
             }
           : {}),
+        ...(forced ? { forced: true } : {}),
       });
       decision = await untilAborted(pending, ctx.signal, 'deny');
     } catch {

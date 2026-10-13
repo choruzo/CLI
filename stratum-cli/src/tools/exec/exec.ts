@@ -14,6 +14,7 @@ import { destructiveCommandReason } from '../destructive-command.js';
 import {
   commandPathVerdict,
   commandVeto,
+  guardedConfirmAlwaysLabel,
   guardedConfirmLabel,
   shellDetachConfirmReason,
 } from '../guards.js';
@@ -311,6 +312,15 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
         return true;
       }
       return destructiveCommandReason(command, ctx.config.tools.destructivePatterns) !== null;
+    },
+
+    /** `confirm-always` de `tools.guardedCommands` (un push forzado), en cualquier target. */
+    confirmAlways(params: unknown, ctx: ToolContext): boolean {
+      const parsed = schema.safeParse(params);
+      if (!parsed.success) return false;
+      return (
+        guardedConfirmAlwaysLabel(parsed.data.command, ctx.config.tools.guardedCommands) !== null
+      );
     },
 
     /** Local serializa (cwd, índice de git); hosts remotos van en paralelo. */

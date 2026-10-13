@@ -272,6 +272,13 @@ export interface ToolDefinition {
   preflight?(params: unknown, ctx: ToolContext): ToolResult | null;
   isDestructive?(params: unknown, ctx: ToolContext): boolean;
   /**
+   * La llamada hay que confirmarla **siempre**, diga lo que diga la política
+   * de la sesión: ni `--allow-destructive`, ni el allow-all, ni
+   * `tools.confirmDestructive: false` la saltan, y sin nadie que conteste se
+   * bloquea (como un entorno `confirm-always`). Si lanza, cuenta como `true`.
+   */
+  confirmAlways?(params: unknown, ctx: ToolContext): boolean;
+  /**
    * Hito 16 — serialización decidida por llamada (`exec` en local sí, en un
    * host remoto no). Se suma a `serialized`; si lanza, la llamada se serializa.
    */

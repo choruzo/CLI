@@ -376,7 +376,9 @@ export const StratumConfigSchema = z.object({
        * allow-all de sesión. `confirm` sí cede ante ellos, como cualquier otra
        * confirmación destructiva. La capa 1 (hard-deny) no es configurable.
        */
-      guardedCommands: z.record(z.enum(['allow', 'confirm', 'block'])).default({}),
+      guardedCommands: z
+        .record(z.enum(['allow', 'confirm', 'confirm-always', 'block']))
+        .default({}),
       /**
        * Hito 11 — capa 3: rutas que dejan de pedir confirmación aunque encajen
        * con los patrones sensibles del nivel `confirm` (.env, secrets/, .npmrc).

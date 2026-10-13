@@ -756,6 +756,15 @@ export function commandVeto(
       );
     }
   }
+  const control = stratumControlReason(command);
+  if (control) {
+    return (
+      `the command would drive Stratum's own control plane (${control}). Approving pending ` +
+      'requests and managing the daemon are decisions of the user, taken outside the agent: ' +
+      'no configuration or approval enables them from here. If something is waiting for an ' +
+      'approval, tell the user.'
+    );
+  }
   const guarded = guardedBlockReason(command, guardedCommands);
   if (guarded) {
     return (
@@ -783,6 +792,41 @@ export function commandVeto(
 // ---------------------------------------------------------------------------
 
 const LOCAL_TARGET = 'local';
+/** Subcomandos de la CLI que gobiernan el plano de control. */
+const STRATUM_CONTROL_SUBCOMMANDS = new Set(['approvals', 'daemon', 'attach']);
+/** Lanzadores por los que se puede llegar a la CLI sin escribir `stratum`. */
+const SCRIPT_RUNNERS = new Set(['node', 'npx', 'pnpm', 'yarn', 'bunx', 'bun', 'tsx', 'npm']);
+const STRATUM_SCRIPT = /(?:^|[\\/@])stratum(?:-cli)?(?:$|[\\/@.])|dist[\\/]index\.[cm]?js$/i;
+
+/**
+ * ¿Invoca el comando los subcomandos de control de Stratum (`stratum
+ * approvals`, `stratum daemon`, `stratum attach`)? Devuelve cuál, o `null`.
+ *
+ * Con un centro de aprobaciones, un agente con shell podría intentar contestar
+ * su propia solicitud lanzando un cliente. Este veto cierra el camino obvio; no
+ * es una frontera —el shell compone un comando de mil maneras, y quien aprueba
+ * de verdad necesita además una clave que el agente no tiene—, sino una capa
+ * más. No configurable.
+ */
+export function stratumControlReason(command: string): string | null {
+  for (const inv of effectiveInvocations(command)) {
+    const args = positionals(inv.rest);
+    if (inv.name.toLowerCase() === 'stratum') {
+      const sub = args[0]?.toLowerCase();
+      if (sub && STRATUM_CONTROL_SUBCOMMANDS.has(sub)) return `stratum ${sub}`;
+      continue;
+    }
+    if (!SCRIPT_RUNNERS.has(inv.name.toLowerCase())) continue;
+    const at = args.findIndex((tok) => STRATUM_SCRIPT.test(tok));
+    if (at < 0) continue;
+    const sub = args
+      .slice(at + 1)
+      .find((tok) => STRATUM_CONTROL_SUBCOMMANDS.has(tok.toLowerCase()));
+    if (sub) return `stratum ${sub.toLowerCase()}`;
+  }
+  return null;
+}
+
 /** Clave de `tools.guardedCommands` (default `block`). */
 export const SHELL_DETACH_GUARD = 'shellDetach';
 
@@ -920,7 +964,30 @@ export function shellDetachConfirmReason(
 // Capa 2 — Comandos guardados (configurables)
 // ---------------------------------------------------------------------------
 
-export type GuardAction = 'allow' | 'confirm' | 'block';
+/**
+ * `confirm` cede ante la política de la sesión (`--allow-destructive`, el
+ * allow-all). `confirm-always` no: se pregunta cada vez, como en un entorno
+ * `confirm-always`, y sin nadie que conteste se bloquea. `block` es absoluto.
+ */
+export type GuardAction = 'allow' | 'confirm' | 'confirm-always' | 'block';
+
+/**
+ * ¿Es este `git push` un push forzado? Por flag (`--force`, `-f`,
+ * `--force-with-lease`, `--force-if-includes`, `--mirror`) o por refspec
+ * (`+main`, `+refs/heads/a:refs/heads/b`): el `+` delante fuerza esa
+ * referencia aunque no haya ningún flag.
+ *
+ * Lo que **no** se resuelve aquí (y por tanto se trata como un push normal, que
+ * ya pide confirmación): un alias de git (`git p`, `git -c alias.p=push p`), un
+ * `push.default` o un `remote.<n>.push` con `+` en la config del repositorio.
+ */
+function isForcedPush(rest: string[]): boolean {
+  return (
+    hasLongFlag(rest, '--force', '--force-with-lease', '--force-if-includes', '--mirror') ||
+    hasShortFlags(rest, ['f']) ||
+    positionals(rest).some((tok) => tok.startsWith('+'))
+  );
+}
 
 export interface GuardedCommand {
   key: string;
@@ -935,16 +1002,26 @@ export interface GuardedCommand {
 
 export const GUARDED_COMMANDS: readonly GuardedCommand[] = [
   {
+    // Cualquier push: cambia estado remoto que afecta a terceros y puede
+    // disparar CI/CD. Un push forzado encaja además en `gitPushForce`, y manda
+    // la acción más estricta de las dos.
+    key: 'gitPush',
+    label: 'git push',
+    matches(name, rest) {
+      if (name !== 'git') return false;
+      const sub = subcommand(rest);
+      if (sub.name !== 'push') return false;
+      // Un ensayo no toca el remoto.
+      return !hasLongFlag(sub.rest, '--dry-run') && !hasShortFlags(sub.rest, ['n']);
+    },
+  },
+  {
     key: 'gitPushForce',
     label: 'git push --force',
     matches(name, rest) {
       if (name !== 'git') return false;
       const sub = subcommand(rest);
-      if (sub.name !== 'push') return false;
-      return (
-        hasLongFlag(sub.rest, '--force', '--force-with-lease', '--force-if-includes') ||
-        hasShortFlags(sub.rest, ['f'])
-      );
+      return sub.name === 'push' && isForcedPush(sub.rest);
     },
   },
   {
@@ -1019,7 +1096,10 @@ export const GUARDED_COMMANDS: readonly GuardedCommand[] = [
  * irreversible de cara al mundo y jamás debe salir de una decisión del modelo.
  */
 export const DEFAULT_GUARD_ACTIONS: Readonly<Record<string, GuardAction>> = {
-  gitPushForce: 'confirm',
+  gitPush: 'confirm',
+  // Reescribe la historia de otros: se confirma cada vez, y ni
+  // `--allow-destructive` ni el allow-all de la sesión lo levantan.
+  gitPushForce: 'confirm-always',
   gitResetHard: 'confirm',
   gitRebase: 'confirm',
   gitBranchDeleteForce: 'confirm',
@@ -1083,9 +1163,26 @@ export function guardedConfirmLabel(
   command: string,
   overrides?: Record<string, GuardAction>,
 ): string | null {
-  const confirm = matchGuardedCommands(command, overrides).filter((m) => m.action === 'confirm');
+  const confirm = matchGuardedCommands(command, overrides).filter(
+    (m) => m.action === 'confirm' || m.action === 'confirm-always',
+  );
   if (confirm.length === 0) return null;
   return confirm.map((m) => m.label).join(', ');
+}
+
+/**
+ * ¿Hay que confirmarlo **siempre** (`confirm-always`)? Devuelve la etiqueta que
+ * lo motiva, o `null`. Ninguna política de la sesión levanta esta confirmación.
+ */
+export function guardedConfirmAlwaysLabel(
+  command: string,
+  overrides?: Record<string, GuardAction>,
+): string | null {
+  const always = matchGuardedCommands(command, overrides).filter(
+    (m) => m.action === 'confirm-always',
+  );
+  if (always.length === 0) return null;
+  return always.map((m) => m.label).join(', ');
 }
 
 // ---------------------------------------------------------------------------
@@ -1114,6 +1211,13 @@ const PATH_RULES: readonly PathRule[] = [
   { tier: 'blocked', re: /(?:^|\/)\.credentials(?:\/|$)/, reason: 'almacén de credenciales' },
   { tier: 'blocked', re: /(?:^|\/)library\/keychains(?:\/|$)/, reason: 'llavero de macOS' },
   { tier: 'blocked', re: /(?:^|\/)\.netrc$/, reason: 'credenciales de red (.netrc)' },
+  // Canal y credenciales del plano de control (`endpoint.json`, `approver.json`):
+  // lo que hace falta para hablar con el daemon no es algo que el agente lea ni toque.
+  {
+    tier: 'blocked',
+    re: /(?:^|\/)\.stratum\/daemon(?:\/|$)/,
+    reason: 'ficheros de control de stratumd',
+  },
   { tier: 'blocked', re: /\.(?:pem|key|p12|pfx|jks|keystore)$/, reason: 'clave o certificado' },
   {
     tier: 'blocked',

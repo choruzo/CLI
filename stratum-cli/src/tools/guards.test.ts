@@ -7,6 +7,9 @@ import {
   matchGuardedCommands,
   guardedBlockReason,
   guardedConfirmLabel,
+  guardedConfirmAlwaysLabel,
+  stratumControlReason,
+  commandVeto,
   classifySensitivePath,
   collectCommandPaths,
   commandPathVerdict,
@@ -124,9 +127,96 @@ describe('guards — capa 2 (comandos guardados)', () => {
     expect(execTool.preflight!({ command: 'git rebase -i main' }, ctx())).toBeNull();
   });
 
-  it('un git push normal no dispara nada', () => {
-    expect(guardedConfirmLabel('git push origin main')).toBeNull();
-    expect(guardedBlockReason('git push origin main')).toBeNull();
+  it('un git push normal pide confirmación, y cede ante la política de la sesión', () => {
+    for (const command of [
+      'git push',
+      'git push origin main',
+      'git -C /repo push -u origin feat',
+    ]) {
+      expect(guardedConfirmLabel(command), command).toBe('git push');
+      expect(guardedConfirmAlwaysLabel(command), command).toBeNull();
+      expect(guardedBlockReason(command), command).toBeNull();
+      expect(execTool.isDestructive!({ command }, ctx()), command).toBe(true);
+      expect(execTool.confirmAlways!({ command }, ctx()), command).toBe(false);
+    }
+    // Un ensayo no toca el remoto; leer el estado tampoco.
+    for (const command of ['git push --dry-run origin main', 'git push -n', 'git status']) {
+      expect(guardedConfirmLabel(command), command).toBeNull();
+    }
+    // Quien quiere autonomía lo dice en la config.
+    expect(guardedConfirmLabel('git push origin main', { gitPush: 'allow' })).toBeNull();
+  });
+
+  it('un push forzado se confirma siempre: por flag o por refspec', () => {
+    for (const command of [
+      'git push --force',
+      'git push -f origin main',
+      'git push --force-with-lease',
+      'git push --force-with-lease=main:abc123 origin main',
+      'git push --force-if-includes origin main',
+      'git push origin +main',
+      'git push origin +refs/heads/a:refs/heads/b',
+      'git push --mirror backup',
+      'git -c user.name=x push -uf origin main',
+    ]) {
+      expect(guardedConfirmAlwaysLabel(command), command).toContain('git push --force');
+      expect(guardedConfirmLabel(command), command).toContain('git push');
+      expect(execTool.confirmAlways!({ command }, ctx()), command).toBe(true);
+    }
+    // Un `+` que no es un refspec de push no cuenta.
+    expect(guardedConfirmAlwaysLabel('git push origin main')).toBeNull();
+    expect(guardedConfirmAlwaysLabel('git commit -m "+main"')).toBeNull();
+  });
+
+  it('envoltorios, shells anidados y targets remotos no esconden el push', () => {
+    for (const command of [
+      'sudo git push origin main',
+      'env GIT_SSH_COMMAND=ssh git push origin main',
+      'sh -c "git push origin main"',
+      'cd repo && git push origin main',
+      'timeout 30 git push origin main',
+    ]) {
+      expect(guardedConfirmLabel(command), command).toBe('git push');
+    }
+    for (const command of [
+      'sudo git push --force',
+      'sh -c "git push origin +main"',
+      "bash -c 'cd repo && git push -f'",
+      'pwsh -Command "git push --force-with-lease"',
+    ]) {
+      expect(guardedConfirmAlwaysLabel(command), command).toContain('git push --force');
+    }
+    // El target no cambia nada: la guarda es del comando.
+    const remote = { command: 'git push -f', target: 'ssh:prod' };
+    expect(execTool.confirmAlways!(remote, ctx())).toBe(true);
+    expect(execTool.isDestructive!({ command: 'git push', target: 'ssh:prod' }, ctx())).toBe(true);
+  });
+
+  it('manda la acción más estricta; una config existente conserva lo que fijó', () => {
+    // Config anterior a `gitPush`, que ya fijaba `gitPushForce`: se respeta.
+    const before = StratumConfigSchema.parse({
+      tools: { guardedCommands: { gitPushForce: 'confirm' } },
+    }).tools.guardedCommands;
+    expect(before).toEqual({ gitPushForce: 'confirm' });
+    expect(guardedConfirmAlwaysLabel('git push --force', before)).toBeNull();
+    expect(guardedConfirmLabel('git push --force', before)).toContain('git push');
+    // …y sin la clave nueva, un push normal adopta `confirm`.
+    expect(guardedConfirmLabel('git push origin main', before)).toBe('git push');
+    const blocked = StratumConfigSchema.parse({
+      tools: { guardedCommands: { gitPushForce: 'block' } },
+    }).tools.guardedCommands;
+    expect(guardedBlockReason('git push -f', blocked)).toContain('git push --force');
+    expect(guardedBlockReason('git push origin main', blocked)).toBeNull();
+    // Permitir el forzado no permite el push: sigue pidiendo confirmación.
+    expect(guardedConfirmLabel('git push -f', { gitPushForce: 'allow' })).toBe('git push');
+    // Permitir el push no relaja el forzado.
+    expect(guardedConfirmAlwaysLabel('git push -f', { gitPush: 'allow' })).not.toBeNull();
+    // El valor nuevo vale para cualquier clave, y una config sin la sección carga igual.
+    expect(
+      StratumConfigSchema.parse({ tools: { guardedCommands: { gitRebase: 'confirm-always' } } })
+        .tools.guardedCommands,
+    ).toEqual({ gitRebase: 'confirm-always' });
+    expect(StratumConfigSchema.parse({}).tools.guardedCommands).toEqual({});
   });
 
   it('detecta una descarga canalizada a un intérprete', () => {
@@ -135,6 +225,36 @@ describe('guards — capa 2 (comandos guardados)', () => {
 });
 
 describe('guards — capa 3 (rutas sensibles)', () => {
+  it('los ficheros de control del daemon son inaccesibles, por tool o por shell', () => {
+    for (const path of [
+      '/home/u/.stratum/daemon/endpoint.json',
+      'C:\\Users\\u\\.stratum\\daemon\\approver.json',
+      '~/.stratum/daemon',
+      '~/.stratum/daemon/',
+    ]) {
+      expect(classifySensitivePath(path), path).toMatchObject({ tier: 'blocked' });
+    }
+    // El resto de `~/.stratum` no cambia.
+    expect(classifySensitivePath('/home/u/.stratum/STRATUM.md')).toBeNull();
+    expect(classifySensitivePath('/home/u/.stratum/daemons.md')).toBeNull();
+    for (const command of [
+      'cat ~/.stratum/daemon/endpoint.json',
+      'Get-Content $HOME/.stratum/daemon/endpoint.json',
+      'cp ~/.stratum/daemon/endpoint.json /tmp/e.json',
+      'echo x > ~/.stratum/daemon/approver.json',
+    ]) {
+      expect(commandPathVerdict(command), command).toMatchObject({ tier: 'blocked' });
+      expect(execTool.preflight!({ command }, ctx()), command).toMatchObject({ ok: false });
+    }
+    for (const tool of [readFileTool, writeFileTool]) {
+      const veto = tool.preflight!(
+        { path: '~/.stratum/daemon/endpoint.json', content: '{}' },
+        ctx(),
+      );
+      expect(veto, tool.name).toMatchObject({ ok: false, recoverable: false });
+    }
+  });
+
   it('clasifica material criptográfico y credenciales como bloqueado', () => {
     expect(classifySensitivePath('/home/u/.ssh/id_ed25519')?.tier).toBe('blocked');
     expect(classifySensitivePath('certs/server.pem')?.tier).toBe('blocked');
@@ -209,6 +329,130 @@ describe('guards — preflight en el dispatcher', () => {
     const result = results[0]!.result;
     expect(result.ok).toBe(false);
     expect(!result.ok && result.error).toContain('block');
+  });
+
+  // `exec` con sus guardas de verdad y sin ejecutar nada: aquí se aprueba un push.
+  const pushTool: typeof execTool = {
+    ...execTool,
+    execute: async () => ({ ok: true, output: 'pushed' }),
+  };
+  const push = (command: string, over: Partial<ToolContext>) =>
+    dispatcherWith(pushTool).dispatch([{ id: 'c1', name: 'exec', input: { command } }], ctx(over));
+
+  it('git push normal: se pregunta, se deniega sin terminal y pasa con gitPush: allow', async () => {
+    const asked: Array<{ forced?: boolean }> = [];
+    const confirmDestructive = async (req: { forced?: boolean }) => {
+      asked.push(req);
+      return 'approve' as const;
+    };
+    // Con alguien delante, se pregunta (sin forzar: admite allow-all).
+    const interactive = await push('git push origin main', {
+      destructivePolicy: 'ask',
+      confirmDestructive,
+    });
+    expect(interactive[0]!.result.ok).toBe(true);
+    expect(asked).toHaveLength(1);
+    expect(asked[0]!.forced).toBeUndefined();
+    // Sin terminal (`run` en CI): bloqueado, sin ejecutar.
+    const headless = await push('git push origin main', { destructivePolicy: 'deny' });
+    expect(headless[0]!.result.ok).toBe(false);
+    // `--allow-destructive` lo deja pasar: es una confirmación normal.
+    const allowed = await push('git push origin main', { destructivePolicy: 'allow' });
+    expect(allowed[0]!.result.ok).toBe(true);
+    // Y con la política en la config no se pregunta a nadie.
+    const open = StratumConfigSchema.parse({
+      tools: { auditLog: false, guardedCommands: { gitPush: 'allow' } },
+    });
+    const free = await push('git push origin main', { destructivePolicy: 'ask', config: open });
+    expect(free[0]!.result.ok).toBe(true);
+    expect(asked).toHaveLength(1);
+  });
+
+  it('push forzado: ni --allow-destructive ni el allow-all lo aprueban', async () => {
+    for (const command of [
+      'git push --force',
+      'git push --force-with-lease',
+      'git push origin +main',
+    ]) {
+      // `--allow-destructive` sin nadie que conteste: bloqueado.
+      const allow = await push(command, { destructivePolicy: 'allow', allowDestructive: true });
+      expect(allow[0]!.result.ok, command).toBe(false);
+      expect(!allow[0]!.result.ok && allow[0]!.result.error, command).toContain('every time');
+      // `tools.confirmDestructive: false` tampoco lo salta.
+      const noConfirm = StratumConfigSchema.parse({
+        tools: { auditLog: false, confirmDestructive: false },
+      });
+      const off = await push(command, { destructivePolicy: 'allow', config: noConfirm });
+      expect(off[0]!.result.ok, command).toBe(false);
+    }
+
+    // Un allow-all dado antes no cubre el forzado: se vuelve a preguntar, y forzado.
+    const asked: Array<{ description: string; forced?: boolean }> = [];
+    const dispatcher = dispatcherWith(pushTool);
+    const context = ctx({
+      destructivePolicy: 'ask',
+      confirmDestructive: async (req) => {
+        asked.push(req);
+        return 'allow-all';
+      },
+    });
+    const call = (id: string, command: string) => [{ id, name: 'exec', input: { command } }];
+    await dispatcher.dispatch(call('c1', 'git push origin main'), context);
+    await dispatcher.dispatch(call('c2', 'git push origin other'), context);
+    // El allow-all del primero cubre el segundo push normal…
+    expect(asked).toHaveLength(1);
+    await dispatcher.dispatch(call('c3', 'git push --force'), context);
+    await dispatcher.dispatch(call('c4', 'git push --force-with-lease'), context);
+    // …pero cada forzado se pregunta, aunque se conteste allow-all.
+    expect(asked).toHaveLength(3);
+    expect(asked[1]!.forced).toBe(true);
+    expect(asked[2]!.forced).toBe(true);
+  });
+
+  it('el agente no gobierna el plano de control de Stratum desde el shell', async () => {
+    for (const command of [
+      'stratum approvals approve apr_1',
+      'stratum approvals',
+      'stratum daemon stop',
+      'stratum attach sess_1',
+      'stratum.cmd approvals approve apr_1',
+      'sudo stratum approvals deny apr_1',
+      'sh -c "stratum approvals approve apr_1"',
+      'cd /tmp && stratum daemon start',
+      'node dist/index.js approvals approve apr_1',
+      'node /usr/lib/node_modules/stratum-cli/dist/index.js daemon stop',
+      'npx stratum-cli approvals approve apr_1',
+      'npx stratum approvals list',
+    ]) {
+      expect(stratumControlReason(command), command).not.toBeNull();
+      expect(commandVeto(command, undefined, 'local'), command).toContain('control plane');
+    }
+    for (const command of [
+      'stratum ps',
+      'stratum run "tarea"',
+      'stratum sessions list',
+      'echo stratum approvals approve',
+      'node dist/index.js run "x"',
+      'npm run build',
+      'grep -r approvals src/daemon',
+    ]) {
+      expect(stratumControlReason(command), command).toBeNull();
+    }
+    // Inapelable: ni se pregunta, ni lo levanta `--allow-destructive`.
+    let asked = 0;
+    const results = await dispatcherWith(execTool).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'stratum approvals approve apr_1' } }],
+      ctx({
+        destructivePolicy: 'allow',
+        allowDestructive: true,
+        confirmDestructive: async () => {
+          asked++;
+          return 'approve';
+        },
+      }),
+    );
+    expect(asked).toBe(0);
+    expect(results[0]!.result.ok).toBe(false);
   });
 
   it('una call sin veto sigue su curso normal', async () => {
