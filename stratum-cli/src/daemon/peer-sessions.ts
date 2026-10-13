@@ -253,6 +253,17 @@ export class PeerSessions {
           if (event.data.job.sessionId !== sessionId)
             throw invalid(path, 'a job of another session');
           return;
+        case 'approval.requested':
+          if (event.data.approval.sessionId !== sessionId) {
+            throw invalid(path, 'a pending request of another session');
+          }
+          return;
+        case 'question.requested':
+        case 'plan.proposed':
+          if (event.data.request.sessionId !== sessionId) {
+            throw invalid(path, 'a pending request of another session');
+          }
+          return;
         // Lo que el daemon cuenta por su cuenta con una foto no lo publica un anfitrión.
         case 'session.detached':
           throw invalid(path, 'not an event a host publishes');

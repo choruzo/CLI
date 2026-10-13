@@ -348,6 +348,7 @@ export const chatCommand = new Command('chat')
           registry,
           subagentStore,
           auditor,
+          interactions,
           onCheckpoint: () => {
             void checkpointer.checkpoint();
             // Modelo, perfil o read-only pueden haber cambiado entre turnos.
@@ -361,7 +362,6 @@ export const chatCommand = new Command('chat')
                   },
                   expectRun: (turn: { input: string; mode: 'normal' | 'plan' }) =>
                     bridge.expectRun(turn),
-                  interactions,
                 },
               }
             : {}),

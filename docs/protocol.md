@@ -681,6 +681,10 @@ solo, ninguna conexión obtiene `approve`. Hace falta además una frase que elig
   se contesta donde siempre, en la terminal del anfitrión.
 - Tras 5 claves erróneas seguidas, el daemon deja de comprobarlas durante 60 s.
 
+**Una solicitud es de la sesión que la abrió.** Un anfitrión no puede publicar una solicitud a
+nombre de otra sesión (`INVALID_PARAMS`), y si publica una con el id de una ajena —o dice que
+esa está resuelta— el centro lo ignora: la de la otra sesión sigue pendiente y es suya.
+
 **`pid` y `claim` no son credenciales de aprobación.** El `pid` que declara un anfitrión es una
 pista de ciclo de vida (¿murió o puede volver?); el `claim`, la propiedad de la *publicación* de
 una sesión. Ninguno de los dos interviene, ni directa ni indirectamente, en quién puede
@@ -780,7 +784,7 @@ puede valer— y el anfitrión, que es la autoridad. Una respuesta que no vale c
 | En la CLI, sin terminal ni aprobadores | No | No se pregunta: lo destructivo se bloquea, como antes |
 
 Una sesión del daemon solo pregunta si el daemon acredita aprobadores; si no, se comporta como
-`stratum run` sin terminal. `stratum run` sin terminal sigue denegando lo destructivo aunque
+`stratum run` sin terminal (política `deny`, también en un entorno `allow`). `stratum run` sin terminal sigue denegando lo destructivo aunque
 haya un daemon con aprobadores: no cambia el comportamiento de una automatización existente.
 
 ### 15.7 Cancelación, cierre y desconexión

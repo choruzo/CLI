@@ -133,9 +133,31 @@ export class ApprovalCenter {
   // Proyección: lo que cuentan los anfitriones
   // ---------------------------------------------------------------------------
 
+  /**
+   * Una solicitud es de la sesión que la abrió. Otra sesión no puede pisarla
+   * publicando el mismo id, ni cerrarla: lo que no es suyo se ignora.
+   */
   private add(entry: Entry): void {
-    if (this.recent.has(entry.dto.id)) return;
-    this.pending.set(entry.dto.id, entry);
+    const { id } = entry.dto;
+    if (this.recent.has(id)) return;
+    const known = this.pending.get(id);
+    if (known && known.sessionId !== entry.sessionId) {
+      log.warn('pending request id already used by another session, ignored', {
+        id,
+        sessionId: entry.sessionId,
+      });
+      return;
+    }
+    if (entry.dto.sessionId !== entry.sessionId) return;
+    this.pending.set(id, entry);
+  }
+
+  /** Cierra una solicitud **de esa sesión**. */
+  private close(sessionId: string, id: string, resolution: string): void {
+    const known = this.pending.get(id);
+    if (known && known.sessionId !== sessionId) return;
+    if (!known && this.recent.has(id)) return;
+    this.done(id, resolution);
   }
 
   private done(id: string, resolution: string): void {
@@ -157,10 +179,10 @@ export class ApprovalCenter {
       case 'plan.proposed':
         return this.add({ kind: 'plan', sessionId, dto: event.data.request, chain });
       case 'approval.resolved':
-        return this.done(event.data.approvalId, event.data.status);
+        return this.close(sessionId, event.data.approvalId, event.data.status);
       case 'question.resolved':
       case 'plan.resolved':
-        return this.done(event.data.requestId, event.data.status ?? 'resolved');
+        return this.close(sessionId, event.data.requestId, event.data.status ?? 'resolved');
       default:
         return;
     }
@@ -172,8 +194,11 @@ export class ApprovalCenter {
     const listed = new Set<string>();
     const chain = Promise.resolve();
     const keep = (entry: Entry): void => {
+      const known = this.pending.get(entry.dto.id);
+      // Un id que ya es de otra sesión no cuenta como de esta.
+      if (known && known.sessionId !== sessionId) return;
       listed.add(entry.dto.id);
-      if (!this.pending.has(entry.dto.id)) this.add(entry);
+      if (!known) this.add(entry);
     };
     for (const dto of snapshot.approvals) keep({ kind: 'approval', sessionId, dto, chain });
     for (const dto of snapshot.questions) keep({ kind: 'question', sessionId, dto, chain });

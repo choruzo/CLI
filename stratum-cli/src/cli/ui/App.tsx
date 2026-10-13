@@ -927,18 +927,19 @@ interface Props {
    * turno, y cada turno se anuncia con su entrada y su modo.
    */
   remote?: RemoteSessionLink;
+  /**
+   * Decisiones pendientes de la sesión: las puertas de cada turno pasan por
+   * aquí. Una confirmación, una tanda de preguntas o un plan abiertos en la TUI
+   * también se pueden resolver desde otro cliente (si la sesión está publicada
+   * en `stratumd`), y entonces el prompt se retira.
+   */
+  interactions?: PendingInteractions;
 }
 
 export interface RemoteSessionLink {
   /** `App` entrega aquí cómo se cancela el turno en curso. */
   bindCancel(cancel: () => void): void;
   expectRun(turn: { input: string; mode: 'normal' | 'plan' }): void;
-  /**
-   * Decisiones pendientes de la sesión: una confirmación, una tanda de
-   * preguntas o un plan abiertos aquí también se pueden resolver desde otro
-   * cliente, y entonces el prompt de la TUI se retira.
-   */
-  interactions?: PendingInteractions;
 }
 
 export function App({
@@ -953,6 +954,7 @@ export function App({
   auditor,
   onCheckpoint,
   remote,
+  interactions,
 }: Props) {
   const { exit } = useApp();
 
@@ -1238,7 +1240,7 @@ export function App({
     dispatch,
     getRunOptions,
     remote?.expectRun,
-    remote?.interactions,
+    interactions,
   );
   useEffect(() => {
     remote?.bindCancel(cancel);
@@ -1340,7 +1342,6 @@ export function App({
   // el prompt se retira, el estado queda como si se hubiera contestado en esta
   // terminal y se dice quién lo hizo. Lo que se teclee después ya no cuenta.
   useEffect(() => {
-    const interactions = remote?.interactions;
     if (!interactions) return;
     return interactions.subscribe((change) => {
       if (change.type !== 'resolved' || change.outcome.by?.kind !== 'remote') return;
@@ -1372,7 +1373,7 @@ export function App({
         });
       }
     });
-  }, [remote, agent]);
+  }, [interactions, agent]);
 
   /**
    * Lanza el modo plan-and-execute (Fase 1 → 2 → 3) en un único turno del

@@ -76,7 +76,9 @@ export class HostedSession {
       version: opts.version,
       mcp: 'eager',
       // Sin prompts locales: pregunta solo si un aprobador remoto puede contestar.
-      destructivePolicy: 'ask',
+      // Sin aprobadores acreditados no hay a quién preguntar, y la política es
+      // la de una sesión sin terminal: denegar (también en un entorno `allow`).
+      destructivePolicy: opts.remoteApprovals() ? 'ask' : 'deny',
       remoteApprovals: opts.remoteApprovals,
       interactionTimeoutMs: opts.approvalTimeoutMs,
       agent: {

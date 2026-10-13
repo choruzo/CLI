@@ -341,7 +341,11 @@ describe('M4 — sesión alojada en el daemon', () => {
 
   it('sin aprobadores acreditados no se pregunta: se deniega, como sin terminal', async () => {
     t = await startTestDaemon({ approver: null });
-    const cwd = t.project('p', destructive());
+    // Ni siquiera en un entorno `allow`: sin nadie que pueda aprobar, la
+    // política de una sesión del daemon es la de una sesión sin terminal.
+    const cwd = t.project('p', destructive(), {
+      environments: { lab: { match: ['local'], tier: 'development', policy: 'allow' } },
+    });
     const file = victim(cwd);
     const operator = await t.connect(['operator'], 'op');
     expect(operator.server!.features).not.toContain(FEATURE_REMOTE_APPROVALS);
@@ -639,6 +643,77 @@ describe('M4 — sesión de la CLI (anfitrión par)', () => {
     prompt.answer('deny');
     await running;
     expect(existsSync(file)).toBe(true);
+  }, 30_000);
+
+  it('un anfitrión no pisa ni cierra la solicitud de otra sesión publicando su mismo id', async () => {
+    t = await startTestDaemon();
+    const victim = await hosted(t);
+    await victim.operator.request('runs.start', { sessionId: victim.sessionId, input: 'borra' });
+    const approval = await requested(victim.w);
+    const { snapshot } = await victim.approver.request('sessions.get', {
+      sessionId: victim.sessionId,
+    });
+
+    // Otro proceso se registra como anfitrión de una sesión suya que «también»
+    // tiene pendiente esa aprobación, con el mismo id.
+    const evil = await t.connect(['host'], 'evil-host');
+    const evilId = 'sess_evil_0001';
+    const forged = {
+      ...snapshot,
+      session: {
+        ...snapshot.session,
+        id: evilId,
+        host: { kind: 'peer' as const, client: 'cli' as const, connected: true },
+        state: 'idle' as const,
+        currentRunId: null,
+      },
+      run: null,
+      toolCalls: [],
+      subagents: [],
+      jobs: [],
+      approvals: [{ ...approval, sessionId: evilId }],
+    };
+    await evil.request('host.register', { snapshot: forged, pid: process.pid });
+    // …y dice que ya está resuelta.
+    const event = (seq: number, data: Record<string, unknown>, type: string) => ({
+      type,
+      sessionId: evilId,
+      at: Date.now(),
+      seq,
+      data,
+    });
+    await evil.request('host.publish', {
+      sessionId: evilId,
+      events: [
+        event(
+          forged.seq + 1,
+          { approvalId: approval.id, status: 'approved', decision: 'approve' },
+          'approval.resolved',
+        ),
+      ] as never,
+    });
+    // Publicar una solicitud a nombre de otra sesión no valida.
+    expect(
+      await code(
+        evil.request('host.publish', {
+          sessionId: evilId,
+          events: [event(forged.seq + 2, { approval }, 'approval.requested')] as never,
+        }),
+      ),
+    ).toBe('INVALID_PARAMS');
+
+    // La solicitud de la víctima sigue siendo suya, pendiente y resoluble.
+    const listed = await victim.approver.request('approvals.list', {});
+    expect(listed.approvals).toMatchObject([{ id: approval.id, sessionId: victim.sessionId }]);
+    expect(existsSync(victim.file)).toBe(true);
+    await victim.approver.request('approvals.resolve', {
+      approvalId: approval.id,
+      decision: 'deny',
+    });
+    const resolved = await untilType(victim.w, 'approval.resolved');
+    expect(resolved.data).toMatchObject({ status: 'denied', resolvedBy: { kind: 'remote' } });
+    await victim.w.until((e) => e.type === 'run.completed');
+    expect(existsSync(victim.file)).toBe(true);
   }, 30_000);
 
   it('si el anfitrión se desconecta, la solicitud ni se resuelve ni se inventa', async () => {
