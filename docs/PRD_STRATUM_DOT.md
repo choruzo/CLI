@@ -1230,7 +1230,7 @@ Desviaciones:
   (desligado: no muere con Dot), reconexión, dot compacto, ventana con Activity e History.
 - *Hecho cuando*: AC-1 en la interfaz; AC-7; el instalador pesa < 15 MB.
 
-**Estado: implementado, con el alcance acotado.** Referencia: `docs/dot.md`.
+**Estado: completado (2026-10-13), con el alcance acotado.** Referencia: `docs/dot.md`. `Dot CI` verde en Windows y Linux.
 
 - `stratum-dot/`: Tauri v2. Tres piezas: `crates/dot-link` (cliente nativo del protocolo, en
   Rust y **sin Tauri**: descubrimiento, handshake, suscripciones, reconexión y un relé de
@@ -1275,6 +1275,9 @@ Desviaciones:
 - **Sin atajo global ni notificaciones** (M8).
 - **E2E de la ventana solo en local** (Windows). En CI (`dot-ci.yml`) corren `dot-link`, el
   frontend, el smoke contra un `stratumd` real y la compilación del shell, en Linux y Windows.
+- **Un arreglo fuera de Dot**, destapado por su CI: `stratumd` no arrancaba en Linux con un
+  HOME limpio (escuchaba en el unix socket antes de crear `~/.stratum/daemon/`). Corregido en
+  `daemon/daemon.ts`; la suite del daemon no había corrido en Linux hasta entonces.
 
 ### M7 — Dot: chat y run detail
 - Chat sobre sesiones del daemon (reutiliza componentes de Desktop); selector de perfil y
