@@ -235,6 +235,61 @@ function hasKey(schema: z.ZodTypeAny, key: string): boolean {
 
 const isEnvKey = (path: string): boolean => /(^|\.|\[\]|\{\})env$/i.test(path);
 
+describe('la clave de aprobador es de solo entrada', () => {
+  const isKey = (path: string): boolean => /approver|credential|passphrase|secret/i.test(path);
+
+  it('solo existe en core.hello, y en ningún resultado, notificación ni evento', () => {
+    expect(objectKeys(PARAMS['core.hello']).filter(isKey)).toEqual(['approverKey']);
+    const offenders: string[] = [];
+    const check = (label: string, schema: unknown): void => {
+      if (!(schema instanceof z.ZodType)) return;
+      for (const path of objectKeys(schema).filter(isKey)) offenders.push(`${label}: ${path}`);
+    };
+    for (const [name, value] of Object.entries(schemas)) check(name, value);
+    for (const [m, s] of Object.entries(RESULTS)) check(`result ${m}`, s);
+    for (const [n, s] of Object.entries(NOTIFICATION_PARAMS)) check(`notification ${n}`, s);
+    for (const [t, s] of Object.entries(STATE_EVENT_DATA)) check(`event ${t}`, s);
+    for (const [t, s] of Object.entries(VOLATILE_EVENT_DATA)) check(`event ${t}`, s);
+    for (const [m, s] of Object.entries(PARAMS)) {
+      if (m !== 'core.hello') check(`params ${m}`, s);
+    }
+    expect(offenders).toEqual([]);
+  });
+
+  it('una clave colada en el resultado del handshake no sobrevive a la validación', () => {
+    const hello = RESULTS['core.hello'].parse({
+      protocol: STRATUM_PROTOCOL_VERSION,
+      server: { version: '1', platform: 'linux' },
+      connectionId: 3,
+      capabilities: ['observe', 'approve'],
+      features: [],
+      approverKey: 'no debería volver',
+    });
+    expect(JSON.stringify(hello)).not.toContain('no debería volver');
+  });
+
+  it('quién resolvió: una vía y, como mucho, lo que el cliente declaró ser', () => {
+    const resolved = STATE_EVENT_DATA['approval.resolved'];
+    const ok = resolved.parse({
+      approvalId: 'apr_1',
+      status: 'approved',
+      decision: 'approve',
+      resolvedBy: { kind: 'remote', client: 'cli', connectionId: 4, at: 10, token: 't', pid: 9 },
+    });
+    expect(ok.resolvedBy).toEqual({ kind: 'remote', client: 'cli', connectionId: 4, at: 10 });
+    for (const kind of ['local', 'timeout', 'policy'] as const) {
+      expect(
+        resolved.safeParse({ approvalId: 'a', status: 'denied', resolvedBy: { kind, at: 1 } })
+          .success,
+      ).toBe(true);
+    }
+    expect(
+      resolved.safeParse({ approvalId: 'a', status: 'denied', resolvedBy: { kind: 'host', at: 1 } })
+        .success,
+    ).toBe(false);
+  });
+});
+
 describe('env es de solo entrada', () => {
   it('el recorrido de schemas ve las claves anidadas (control)', () => {
     const keys = objectKeys(sessionSnapshotSchema);

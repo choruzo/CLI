@@ -179,6 +179,65 @@ describe('arquitectura de src/daemon/', () => {
     expect(/process\.env|\benv\b\s*[:.]/.test(bridge)).toBe(false);
   });
 
+  // --- M4: aprobaciones -----------------------------------------------------
+
+  it('el centro de aprobaciones arbitra y nada más: ni tools, ni runtime, ni numeración', () => {
+    const center = production.find((s) => s.file === 'approval-center.ts')!;
+    for (const spec of imports(center.text)) {
+      expect(/\/(protocol|ipc|logging)\//.test(spec), `approval-center.ts importa ${spec}`).toBe(
+        true,
+      );
+    }
+    const source = code(center.text);
+    expect(/ToolDispatcher|ToolRegistry|\.dispatch\(|\.execute\(|SessionHost/.test(source)).toBe(
+      false,
+    );
+    expect(/\bseq\b/.test(source)).toBe(false);
+  });
+
+  it('ni el pid ni el claim de una sesión par cuentan para aprobar', () => {
+    const center = code(production.find((s) => s.file === 'approval-center.ts')!.text);
+    expect(/\bpid\b|\bclaim\b/.test(center)).toBe(false);
+    // En las sesiones pares, la entrega de una decisión tampoco los mira.
+    const peers = code(production.find((s) => s.file === 'peer-sessions.ts')!.text);
+    const route = peers.slice(peers.indexOf('route(sessionId: string)'));
+    expect(route.length).toBeGreaterThan(100);
+    expect(/\bpid\b|\bclaim\b/.test(route)).toBe(false);
+  });
+
+  it('la capacidad approve se concede en un solo sitio, y nunca por el token del canal', () => {
+    // (`'approve'` es también una decisión de plan: aquí se busca la capacidad.)
+    const granting = production.filter((s) =>
+      /cap\s*===\s*'approve'|includes\('approve'\)|capability:\s*'approve'/.test(code(s.text)),
+    );
+    expect(granting.map((s) => s.file).sort()).toEqual(['approval-center.ts', 'authorize.ts']);
+    const authorizeSource = code(production.find((s) => s.file === 'authorize.ts')!.text);
+    expect(authorizeSource).toContain("cap === 'approve'");
+    expect(authorizeSource).toContain('approverVerified && !hosting');
+    // El endpoint que se publica en disco no lleva nada que acredite a un aprobador.
+    const endpoint = code(production.find((s) => s.file === 'endpoint.ts')!.text);
+    expect(/approv/i.test(endpoint)).toBe(false);
+    const discovery = code(readFileSync(join(here, '..', 'client', 'discovery.ts'), 'utf-8'));
+    expect(/approv/i.test(discovery)).toBe(false);
+  });
+
+  it('ni la clave de aprobador, ni la frase, ni las respuestas se escriben en un log', () => {
+    const hostSide = ['interactions.ts', 'resolution-audit.ts', 'peer-host-bridge.ts'].map((f) => ({
+      file: `host/${f}`,
+      text: readFileSync(join(here, '..', 'host', f), 'utf-8'),
+    }));
+    for (const { file, text } of [...production, ...hostSide]) {
+      for (const call of code(text).matchAll(
+        /log\.(?:trace|debug|info|warn|error)\(([\s\S]*?)\);/g,
+      )) {
+        expect(
+          /approverKey|\bphrase\b|\banswers\b|\bkey\b|description/i.test(call[1]!),
+          `${file}: ${call[1]}`,
+        ).toBe(false);
+      }
+    }
+  });
+
   it('la ruta de este test es la esperada (src/daemon)', () => {
     expect(relative(join(here, '..', '..'), here).replace(/\\/g, '/')).toBe('src/daemon');
   });
