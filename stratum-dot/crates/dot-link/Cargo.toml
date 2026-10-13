@@ -1,0 +1,26 @@
+[package]
+name = "dot-link"
+description = "Cliente nativo del Stratum Protocol para Stratum Dot: transporte, handshake, suscripciones y relé de órdenes. Sin Tauri."
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["net", "io-util", "io-std", "sync", "time", "rt", "rt-multi-thread", "macros", "process"] }
+
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.60", features = ["Win32_Foundation", "Win32_System_Threading"] }
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
+
+[dev-dependencies]
+tempfile = "3"
+
+[[bin]]
+name = "dot-probe"
+path = "src/bin/dot-probe.rs"

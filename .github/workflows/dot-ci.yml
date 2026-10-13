@@ -1,0 +1,109 @@
+name: Dot CI
+
+# Stratum Dot (M6): el cliente nativo del protocolo (`dot-link`) contra un daemon
+# de pruebas sobre un pipe real —named pipe en Windows, unix socket en Linux—,
+# el frontend con sus invariantes de arquitectura, el smoke contra un `stratumd`
+# real y que el shell de Tauri compila en las dos plataformas. El E2E de la
+# ventana (tauri-driver) se ejecuta en local: ver stratum-dot/README.md.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stratum-dot/**'
+      - 'stratum-cli/src/protocol/**'
+      - 'stratum-cli/src/daemon/**'
+      - 'stratum-cli/src/client/**'
+      - 'stratum-cli/src/host/**'
+      - 'stratum-cli/package*.json'
+      - '.github/workflows/dot-ci.yml'
+  pull_request:
+    paths:
+      - 'stratum-dot/**'
+      - 'stratum-cli/src/protocol/**'
+      - 'stratum-cli/src/daemon/**'
+      - 'stratum-cli/src/client/**'
+      - 'stratum-cli/src/host/**'
+      - 'stratum-cli/package*.json'
+      - '.github/workflows/dot-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: dot-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  dot:
+    name: Dot (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            stratum-cli/package-lock.json
+            stratum-dot/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: stratum-dot -> target
+
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+
+      - name: Install dependencies
+        run: |
+          (cd stratum-cli && npm ci)
+          (cd stratum-dot && npm ci)
+
+      - name: Native client (dot-link)
+        working-directory: stratum-dot
+        run: |
+          cargo fmt --all -- --check
+          cargo test -p dot-link
+
+      - name: Frontend (types, tests, architecture)
+        working-directory: stratum-dot
+        run: |
+          npm run typecheck
+          npm run test:run
+
+      - name: Build the CLI
+        working-directory: stratum-cli
+        run: npm run build
+
+      - name: Smoke against a real stratumd
+        working-directory: stratum-dot
+        run: npm run smoke:real
+
+      - name: Build the app (debug, no bundle)
+        working-directory: stratum-dot
+        run: |
+          cargo clippy --all-targets -- -D warnings
+          npx tauri build --debug --no-bundle
