@@ -28,6 +28,7 @@ import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
 import { createCliBridge } from '../daemon-link.js';
 import { PendingInteractions } from '../../host/interactions.js';
+import { recordResolution } from '../../host/resolution-audit.js';
 import {
   configureLogging,
   flushLogging,
@@ -319,6 +320,10 @@ export const chatCommand = new Command('chat')
       // Lo que el chat pida a la persona (confirmaciones, preguntas, planes)
       // se publica con la sesión y lo puede resolver también otro cliente.
       const interactions = new PendingInteractions();
+      // Quién resolvió cada una queda en la traza y en la auditoría.
+      interactions.subscribe((change) =>
+        recordResolution({ config, sessionId, trace: auditor.scope }, change),
+      );
       const bridge = createCliBridge({
         session: { sessionId, agent, config, env: { cwd: process.cwd() }, interactions },
         name: 'stratum chat',

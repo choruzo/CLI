@@ -7,7 +7,7 @@
  * ejecutó, y cuántas veces.
  */
 import { afterEach, describe, expect, it } from 'vitest';
-import { existsSync, writeFileSync } from 'fs';
+import { existsSync, readFileSync, readdirSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import type { ConfirmRequest, DestructiveDecision } from '../agent/types.js';
 import { StratumClient } from '../client/client.js';
@@ -176,6 +176,26 @@ describe('M4 — sesión alojada en el daemon', () => {
     expect(existsSync(s.file)).toBe(false);
     expect((await observer.request('approvals.list', {})).approvals).toEqual([]);
     expect((await observer.request('core.status', {})).pendingApprovals).toBe(0);
+
+    // Quién lo aprobó queda en la auditoría, junto al comando que autorizó.
+    const audited = (): Array<Record<string, unknown>> =>
+      readdirSync(t!.base)
+        .filter((f) => /^audit-\d+\.jsonl$/.test(f))
+        .flatMap((f) => readFileSync(join(t!.base, f), 'utf-8').trim().split(/\r?\n/))
+        .filter(Boolean)
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+    await until(() => audited().some((r) => r['event'] === 'approval'));
+    expect(audited().find((r) => r['event'] === 'approval')).toMatchObject({
+      sessionId: s.sessionId,
+      approvalId: approval.id,
+      tool: 'exec',
+      status: 'resolved',
+      decision: 'approve',
+      by: 'remote',
+      client: 'cli',
+      connectionId: s.approver.server!.connectionId,
+    });
+    expect(audited().some((r) => r['command'] === RM && r['status'] === 'exited')).toBe(true);
 
     // El `seq` es de la sesión y no tiene huecos: el centro no numera nada.
     const seqs = s.w.seqs();

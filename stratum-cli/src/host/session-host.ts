@@ -15,6 +15,7 @@ import type { TraceRecorder, TraceScope } from '../trace/recorder.js';
 import type { SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
 import { PendingInteractions, type HostGates, type InteractionChange } from './interactions.js';
+import { recordResolution } from './resolution-audit.js';
 
 export type { GateContext, HostGates } from './interactions.js';
 
@@ -170,22 +171,12 @@ export class SessionHost {
     this.interactions.setLocal(gates);
   }
 
-  /** Quién resolvió cada solicitud queda en la traza de la sesión. Sin el contenido. */
+  /** Quién resolvió cada solicitud queda en la traza y en la auditoría de la sesión. */
   private traceResolution(change: InteractionChange): void {
-    if (change.type !== 'resolved') return;
-    const { interaction, outcome } = change;
-    this.traceScope?.runtime({
-      event: 'resolution',
-      kind: interaction.kind,
-      id: interaction.id,
-      status: outcome.status,
-      by: outcome.by?.kind ?? 'none',
-      ...(outcome.by?.client ? { client: outcome.by.client } : {}),
-      ...(outcome.by?.connectionId !== undefined ? { connectionId: outcome.by.connectionId } : {}),
-      ...(interaction.kind === 'approval'
-        ? { tool: interaction.request.toolName, callId: interaction.request.callId }
-        : {}),
-    });
+    recordResolution(
+      { config: this.config, sessionId: this.sessionId, trace: this.traceScope },
+      change,
+    );
   }
 
   /** Política destructiva vigente: la base, endurecida por el perfil principal activo. */

@@ -38,6 +38,31 @@ export interface ExecAuditRecord {
 }
 
 /**
+ * Quién resolvió una solicitud de aprobación (centro de aprobaciones). Va en el
+ * mismo fichero que los comandos que autoriza; se distingue por `event`.
+ * `description` llega ya redactada. Nunca lleva la frase tecleada ni credenciales.
+ */
+export interface ApprovalAuditRecord {
+  timestamp: string;
+  sessionId?: string;
+  event: 'approval';
+  approvalId: string;
+  tool: string;
+  description: string;
+  target?: string;
+  environment?: string;
+  /** La exigía una política `confirm-always`. */
+  forced?: boolean;
+  status: 'resolved' | 'expired' | 'cancelled';
+  decision: 'approve' | 'deny' | 'allow-all';
+  /** Por qué vía llegó la decisión. `none` = se canceló sin que nadie decidiese. */
+  by: 'local' | 'remote' | 'timeout' | 'policy' | 'none';
+  /** Con `remote`: lo que el cliente declaró ser y su conexión en el daemon. */
+  client?: string;
+  connectionId?: number;
+}
+
+/**
  * Log de auditoría de comandos en JSON Lines, para cualquier target.
  *
  * No se reutiliza el `FileSink` de `src/logging/sinks.ts` porque impone la
@@ -51,7 +76,7 @@ export class ExecAuditLog {
 
   constructor(readonly path: string) {}
 
-  write(record: ExecAuditRecord): void {
+  write(record: ExecAuditRecord | ApprovalAuditRecord): void {
     const line = JSON.stringify(record) + '\n';
     this.queue = this.queue
       .then(async () => {
@@ -91,7 +116,7 @@ export class ExecAuditLog {
 
 /** No-op cuando `tools.auditLog` es `false`. */
 class DisabledAuditLog {
-  write(): void {}
+  write(_record?: ExecAuditRecord | ApprovalAuditRecord): void {}
   async flush(): Promise<void> {}
 }
 
