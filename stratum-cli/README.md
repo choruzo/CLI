@@ -109,6 +109,8 @@ La primera conexión muestra el fingerprint y pregunta (TOFU); después verifica
 
 > **Sobre la detección de comandos destructivos:** es una red de seguridad blanda contra descuidos del modelo, no un control real — un `base64 -d | sh` la esquiva sin esfuerzo. La defensa de verdad en hosts de producción es `confirmAll: true`.
 
+> **`git push` pide confirmación.** Un push cambia estado remoto que afecta a terceros: en `chat` se pregunta y en `run` sin terminal se deniega. Un push forzado (`--force`, `--force-with-lease`, `git push origin +main`…) se confirma siempre, también con `--allow-destructive`. Para que el agente publique sin preguntar: `"tools": { "guardedCommands": { "gitPush": "allow" } }`.
+
 ### Dependencias opcionales
 
 La búsqueda semántica de memoria (capa 3) usa `@xenova/transformers`, `better-sqlite3` y `sqlite-vec`, declaradas como `optionalDependencies`. Si su compilación nativa falla o las omites, Stratum **sigue funcionando**: el índice degrada a una búsqueda brute-force en JS y `decisions.json` nunca se pierde.

@@ -93,7 +93,8 @@
       "wipefs"
     ],
     "guardedCommands": {
-      "gitPushForce": "confirm",
+      "gitPush": "confirm",
+      "gitPushForce": "confirm-always",
       "gitResetHard": "confirm",
       "gitRebase": "confirm",
       "gitBranchDeleteForce": "confirm",
@@ -202,7 +203,8 @@
     "eventBuffer": 2000,
     "maxSessions": 16,
     "autoStart": false,
-    "detachedTtlMinutes": 10
+    "detachedTtlMinutes": 10,
+    "approvalTimeoutMinutes": 10
   },
   "desktop": {
     "maxConcurrentTurns": 2,

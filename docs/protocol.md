@@ -3,11 +3,12 @@
 Contrato entre el harness Stratum y sus clientes (CLI, Dot y los que vengan).
 Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda este documento.
 
-> **Estado (M3).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
-> (`stratum daemon run`), que aloja sesiones y las sirve a varios clientes (M2); y **anfitriones
+> **Estado (M4).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
+> (`stratum daemon run`), que aloja sesiones y las sirve a varios clientes (M2); **anfitriones
 > pares**: `stratum run` y `stratum chat` publican en él su sesión sin dejar de alojarla (M3,
-> §14). **No hay todavía** centro de aprobaciones (M4) ni pausa (M5). Qué atiende hoy el
-> servidor y con qué garantías: §13 y §14.
+> §14); y **centro de aprobaciones**: aprobaciones, preguntas y planes se ven y se resuelven
+> desde otro cliente, en carrera con el prompt local (M4, §15). **No hay todavía** pausa (M5).
+> Qué atiende hoy el servidor y con qué garantías: §13, §14 y §15.
 
 | Pieza | Dónde | Depende de |
 |---|---|---|
@@ -19,6 +20,9 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 | Publicador de una sesión | `stratum-cli/src/host/session-publisher.ts` | el runtime |
 | Puente de un anfitrión par | `stratum-cli/src/host/peer-host-bridge.ts` | `client/`, el publicador |
 | Servidor (`stratumd`) | `stratum-cli/src/daemon/` | `host/`, `ipc/` |
+| Reglas de qué respuestas valen | `stratum-cli/src/protocol/resolve.ts` | nada |
+| Decisiones pendientes de una sesión | `stratum-cli/src/host/interactions.ts` | el runtime |
+| Centro de aprobaciones | `stratum-cli/src/daemon/approval-center.ts` | `protocol/`, `ipc/` |
 
 ## 1. Invariantes
 
@@ -107,6 +111,12 @@ método contesta `UNAUTHORIZED`.
 - El cliente comprueba además la versión que devuelve el servidor, y la del endpoint antes
   de conectar (`ProtocolMismatchError` en los tres casos).
 - `capabilities` es lo **concedido**, que puede ser menos de lo pedido.
+- `approverKey` (opcional, **de solo entrada**): lo que acredita a quien pide el rol
+  `approver` (§15.2). No se devuelve en ningún resultado, evento ni error, y no se registra.
+  Una clave que no vale rechaza el handshake con `UNAUTHORIZED`; sin clave, el rol `approver`
+  se concede sin la capacidad `approve`.
+- `features` del servidor: `remote-approvals` si acredita aprobadores (solo entonces algo
+  pendiente se puede resolver desde otro cliente).
 - Dentro de la v1 solo se añade: campos opcionales, métodos y eventos nuevos, anunciados en `features`.
 
 ### Descubrimiento
@@ -134,7 +144,16 @@ existe), `invalid` o `incompatible`. Lo publica el daemon (§13.1). El token no 
 | `broker` | `broker` |
 
 Un cliente pide uno o varios roles. El servidor comprueba **la capacidad del método**, nunca el
-rol. Qué identidad tiene derecho a `approve` es una decisión de M4 (PRD §22 Q2).
+rol. Dos reglas al conceder (`daemon/authorize.ts`, único punto):
+
+- **`approve` no sale del token del canal.** Exige una clave de aprobador verificada (§15.2).
+- **`host` es excluyente.** Una conexión que pide `host` recibe `observe` + `host` y nada más,
+  pida lo que pida y presente lo que presente: alojar una sesión no es gobernar las de otros
+  (`control`) ni autorizar lo que la propia pide (`approve`).
+
+```text
+host ownership  !=  operator control  !=  approver authority
+```
 
 ## 6. Métodos
 
@@ -305,10 +324,7 @@ Ante un `UnknownOutcomeError` de un método mutante (`approvals.resolve`, `runs.
 
 ## 11. Qué queda sin hacer
 
-Definido en el contrato y sin implementación tras M3: `host.pause` / `host.resume` y la
-resolución remota de una decisión en un anfitrión par (`host.resolveApproval`,
-`host.answerQuestions`, `host.decidePlan`), centro
-de aprobaciones (`approvals.resolve`, `questions.answer`, `plans.decide`, M4), pausa
+Definido en el contrato y sin implementación tras M4: `host.pause` / `host.resume` y la pausa
 (`runs.pause` / `runs.resume`, M5), `trace.subscribe`, reanudar una sesión guardada
 (`sessions.open { resume }`) y listar las guardadas, y Dot. Detalle en §13.6.
 
@@ -448,21 +464,19 @@ durante 10 minutos cada una; el «cliente» es lo que la conexión declaró ser 
 así que sobrevive a una reconexión pero no es una identidad verificada: evita duplicados
 accidentales, no es una medida de seguridad. Un `INTERNAL_ERROR` no se recuerda.
 
-### 13.6 Métodos atendidos en M2
+### 13.6 Métodos atendidos
 
 | Respuesta | Métodos |
 |---|---|
-| Atendido | `core.*` · `agents.list` · `models.list` · `sessions.list` (solo vivas) · `sessions.get` · `sessions.open` · `sessions.close` · `sessions.set*` · `runs.list` · `runs.get` · `runs.start` · `runs.steer` · `runs.cancel` · `approvals.list` (siempre vacío) · `jobs.*` · `memory.*` · `events.*` |
+| Atendido | `core.*` · `agents.list` · `models.list` · `sessions.list` (solo vivas) · `sessions.get` · `sessions.open` · `sessions.close` · `sessions.set*` · `runs.list` · `runs.get` · `runs.start` · `runs.steer` · `runs.cancel` · `approvals.list` · `approvals.resolve` · `questions.answer` · `plans.decide` (§15) · `jobs.*` · `memory.*` · `events.*` |
 | `UNAVAILABLE` | `runs.pause` · `runs.resume` (M5) · `sessions.open { resume }` |
-| `NOT_FOUND` | `approvals.resolve` · `questions.answer` · `plans.decide`: no hay nada pendiente hasta M4 |
 | `METHOD_NOT_FOUND` | `trace.*` (y `host.*` hasta M3: ver §14) |
 
-Capacidades concedidas en M2: `observe`, `control`, `approve`. Desde M3 también `host`;
-`broker` sigue sin concederse.
+Capacidades que se conceden: `observe`, `control`, `host` y, **solo con una clave de aprobador
+verificada**, `approve` (§5, §15.2). `broker` sigue sin concederse.
 
 Eventos que **no** se emiten todavía: `tool.blocked` (la decisión no viaja como evento del
-turno), `plan.proposed` / `plan.resolved`, `question.*` y `approval.*` (M4), y
-`session.detached`, que no lo emite nadie (§14.3). `ProtocolRun.counters.llmCalls` y
+turno) y `session.detached`, que no lo emite nadie (§14.3). `ProtocolRun.counters.llmCalls` y
 `.blocked` valen 0: no se estiman.
 
 `memory.write` lleva la sesión que **intentó** guardar, no la del registro: con dedup, el
@@ -581,6 +595,8 @@ el tipo de cliente que la aloja (`cli`). `--json` devuelve los DTOs del protocol
 
 ### 14.7 Limitaciones conocidas
 
+- Las aprobaciones, preguntas y planes de una sesión de la CLI se resuelven también desde otro
+  cliente (§15). `stratum run` **sin terminal** sigue denegando lo destructivo.
 - En `chat`, un cambio de modelo, perfil o read-only se publica al cerrar el turno siguiente, y
   `/sessions resume` en caliente no cambia el id con el que la sesión ya está publicada.
 - `stratum init` no se publica.
@@ -593,3 +609,225 @@ CLI, dos anfitriones, control remoto, sin daemon, `autoStart`, huecos y cola aco
 `cli/commands/peer.integration.test.ts` lo repite con procesos reales (`daemon start`,
 `stratum run`, `stratum ps`, `daemon stop --force`). `scripts/tui/daemon-peer.mjs` hace lo
 mismo con `stratum chat` en un terminal real.
+
+## 15. Aprobaciones, preguntas y planes (M4)
+
+Lo que una sesión pide a una persona —confirmar una operación, contestar una tanda de
+preguntas, decidir un plan— deja de vivir solo en la terminal que la aloja: se publica, se
+lista y se puede resolver desde otro cliente. Tres reglas lo gobiernan todo:
+
+```text
+1. Una solicitud se resuelve UNA vez. Gana la primera respuesta válida.
+2. Alojar una sesión, o poder cancelarla, no da autoridad para aprobar lo que pide.
+3. El centro arbitra una decisión; quien ejecuta, o no, es el runtime de la sesión.
+```
+
+### 15.1 Dónde vive cada cosa
+
+```text
+                          anfitrión de la sesión                        stratumd
+ runtime ── puerta ──▶ PendingInteractions ── eventos (su seq) ──▶ ApprovalCenter ◀── approvals.list
+              ▲          ▲   ▲   ▲                                      │
+              │  prompt  │   │   └─ cancelación del turno / cierre      │ approvals.resolve
+              │  local ──┘   └───── plazo                               │ questions.answer
+              │                                                         │ plans.decide
+              └──────────── decisión ◀── ruta de la sesión ◀────────────┘
+                                         · alojada en el daemon: llamada directa
+                                         · par: host.resolveApproval / answerQuestions / decidePlan
+```
+
+- **`PendingInteractions`** (`host/interactions.ts`) está en el proceso que aloja la sesión,
+  porque ahí está la promesa que espera el runtime. Es **una** pieza para los tres tipos
+  (`approval`, `question`, `plan`) con un ciclo de vida común: `pending` → `resolved` |
+  `expired` | `cancelled`. Prompt local, respuesta remota, plazo y cancelación compiten sobre
+  ese único estado; `settle` comprueba y cambia en un paso síncrono, así que de dos respuestas
+  simultáneas la segunda no cambia nada. Al resolverse, la señal de la solicitud se aborta: el
+  prompt local se retira.
+- **`ApprovalCenter`** (`daemon/approval-center.ts`) es el único sitio del daemon por el que se
+  resuelve algo. Guarda una **proyección** de lo pendiente de todas las sesiones (lo que cuentan
+  sus anfitriones: eventos y fotos), comprueba quién puede contestar, serializa los intentos
+  sobre una misma solicitud y entrega la decisión por la ruta de la sesión. **No ejecuta tools,
+  no numera eventos y no decide por su cuenta.**
+- El **runtime** no sabe quién contestó: espera la promesa de su puerta (`HostGates`), y
+  sigue —ejecuta la tool o la deja sin ejecutar— cuando se resuelve.
+
+Para una sesión **par**, la última palabra es del anfitrión: su prompt local compite con lo
+que el daemon le reenvía y él dice quién llegó antes. El daemon solo da una solicitud por
+resuelta cuando el anfitrión lo confirma —con la respuesta a la entrega, o con su evento
+`*.resolved`—. Si el anfitrión no está o no contesta: `UNAVAILABLE` (`reason:
+'host-unavailable'`), y la solicitud **sigue pendiente**. No se inventa un resultado.
+
+### 15.2 Quién puede resolver
+
+| Quién | `approvals.resolve` / `questions.answer` / `plans.decide` |
+|---|---|
+| `observer` | `FORBIDDEN` (ve lo pendiente con `approvals.list`) |
+| `operator` | `FORBIDDEN` (puede cancelar el run; aprobar es otra capacidad) |
+| `host` | `FORBIDDEN`, también sobre la sesión que aloja |
+| `approver` **sin** clave | `FORBIDDEN`: el rol se concede sin `approve` |
+| `approver` con clave verificada | Sí. Y `runs.cancel` → `FORBIDDEN` |
+
+**La clave de aprobador.** El token de `endpoint.json` autentica el acceso al canal; con él
+solo, ninguna conexión obtiene `approve`. Hace falta además una frase que elige la persona
+(`stratum approvals set-key`) y que teclea en cada cliente que quiera aprobar:
+
+- En disco solo hay una derivación `scrypt` con sal (`~/.stratum/daemon/approver.json`,
+  `0600`). Quien lea el fichero no obtiene la clave.
+- No se pasa por argumentos ni por variables de entorno, no está en el workspace, no se
+  registra, no llega a ninguna tool y no viaja en ningún evento. `stratum approvals` la pide
+  por la terminal, sin eco, y se niega a funcionar sin una.
+- El daemon la carga **al arrancar**. Sin fichero —o con uno que no valida: falla cerrado— no
+  hay aprobadores: `features` no anuncia `remote-approvals`, nada se resuelve en remoto y todo
+  se contesta donde siempre, en la terminal del anfitrión.
+- Tras 5 claves erróneas seguidas, el daemon deja de comprobarlas durante 60 s.
+
+**`pid` y `claim` no son credenciales de aprobación.** El `pid` que declara un anfitrión es una
+pista de ciclo de vida (¿murió o puede volver?); el `claim`, la propiedad de la *publicación* de
+una sesión. Ninguno de los dos interviene, ni directa ni indirectamente, en quién puede
+resolver: `ApprovalCenter` no los conoce (lo fija `daemon/architecture.test.ts`).
+
+### 15.3 Modelo de amenaza: lo que esto cierra y lo que no
+
+La amenaza que introduce un endpoint de aprobaciones:
+
+```text
+agente ─▶ exec ─▶ un cliente / el socket / endpoint.json ─▶ approvals.resolve ─▶ se aprueba a sí mismo
+```
+
+Capas, de fuera adentro:
+
+1. **Reparto de capacidades.** Con lo que un comando del agente tiene a mano —el token del
+   canal— se puede pedir cualquier rol, y ninguno aprueba: falta la clave. Es lo que
+   comprueban los tests adversariales (`daemon/approvals.test.ts`, `npm run tui:approvals`).
+2. **Guardas de shell** (`tools/guards.ts`, *best-effort*): `~/.stratum/daemon/` es ruta
+   bloqueada para las tools de fichero y para el shell, y `stratum approvals | daemon | attach`
+   se vetan en `preflight` cuando los lanza el agente (también envueltos o vía `node`/`npx`).
+3. **Sin terminal no hay clave.** `stratum approvals` no la acepta por otra vía, y `exec` local
+   no tiene PTY.
+4. **Rastro.** Cada resolución lleva `resolvedBy` en su evento, en la traza de la sesión y en
+   `exec-audit.jsonl`: una aprobación que no dio la persona es visible.
+5. **Lo inapelable no pasa por aquí.** Un `block` o un veto de `preflight` no genera una
+   solicitud: el daño máximo es lo que una persona podría aprobar.
+
+> **Lo que no se afirma.** La separación de capacidades evita los caminos accidentales y
+> ordinarios de auto-aprobación, pero **un proceso arbitrario que corre como el mismo usuario
+> del sistema sigue dentro del mismo dominio de confianza**. Puede sustituir `approver.json` y
+> reiniciar el daemon, leer la memoria del proceso en el que la persona teclea la clave, o
+> depurar el propio anfitrión. Los permisos `0600`, el token y la clave **no son un sandbox**:
+> protegen frente a otros usuarios y frente al camino obvio, no frente a código hostil con la
+> cuenta del usuario. Cerrarlo de verdad exige identidad del proceso par verificada por el
+> sistema operativo (`SO_PEERCRED`, `GetNamedPipeClientProcessId`: no disponibles en Node puro)
+> o aislar `exec`. Queda como endurecimiento posterior (PRD §22 Q2).
+
+Consecuencia práctica de lo anterior, y política por defecto: **sin clave de aprobador
+configurada, la resolución remota está denegada**. Se prefiere eso a una garantía falsa.
+
+### 15.4 Ciclo de vida y eventos
+
+Los publica el anfitrión de la sesión, con su `seq`. El daemon no numera nada.
+
+| Evento | Cuándo | Datos |
+|---|---|---|
+| `approval.requested` | El runtime pide confirmar una operación | `approval` (`ProtocolApproval`, `status: 'pending'`) |
+| `approval.resolved` | Deja de estar pendiente | `approvalId`, `status` (`approved` · `denied` · `expired` · `cancelled`), `decision`, `resolvedBy` |
+| `question.requested` / `question.resolved` | Tool `question` | `request` / `requestId`, `answers` (o `null`), `status`, `resolvedBy` |
+| `plan.proposed` / `plan.resolved` | `present_plan`, o un entorno con `requirePlan` | `request` / `requestId`, `decision`, `plan`, `status`, `resolvedBy` |
+| `run.updated` | El run empieza o deja de esperar | `status`: `waiting_approval` (aprobación o plan) · `waiting_input` (preguntas) · `running` |
+
+`resolvedBy` es `{ kind, client?, connectionId?, at }`, con `kind`:
+
+| `kind` | Qué pasó |
+|---|---|
+| `local` | Contestó la persona en la terminal del anfitrión |
+| `remote` | Un cliente con `approve`, a través del daemon (`client` y `connectionId` son los suyos) |
+| `timeout` | Nadie contestó a tiempo: equivale a denegar / omitir / rechazar |
+| `policy` | No había a quién preguntar y se resolvió sin preguntar |
+
+Una solicitud **cancelada** (se canceló el turno, se cerró la sesión) no lleva `resolvedBy`: no
+la resolvió nadie. `status` distingue `resolved` de `expired` y `cancelled` en preguntas y
+planes; ausente equivale a `resolved`.
+
+La foto de una sesión lleva `approvals`, `questions` y `plans`, y su `session.state` es
+`waiting` mientras haya algo pendiente. `approvals.list` y la suscripción `overview` dan lo
+pendiente de todas las sesiones; `core.status.pendingApprovals`, el recuento.
+
+**Lo que viaja de una aprobación** es lo que hace falta para decidir: sesión, run, tool,
+descripción ya redactada, target, entorno, si es forzada, si pide frase, cuándo se pidió y
+cuándo caduca. Nunca los parámetros crudos de la tool, la config ni el entorno.
+
+### 15.5 Qué respuestas valen
+
+Reglas puras (`protocol/resolve.ts`) que aplican igual el daemon —para no reenviar lo que no
+puede valer— y el anfitrión, que es la autoridad. Una respuesta que no vale contesta
+`INVALID_PARAMS` y **no resuelve nada**: la solicitud sigue pendiente.
+
+- **Aprobación.** `deny` vale siempre. `allow-all` no vale para una solicitud `forced`
+  (política `confirm-always`) ni para una con `confirmPhrase`: se aprueban de una en una. Con
+  `confirmPhrase`, aprobar exige `phrase` exactamente igual. `allow-all` cubre el resto de esa
+  sesión —no es global ni sobrevive a un reinicio—, nunca lo forzado, y queda auditado.
+- **Preguntas.** `answers: null` omite la tanda. Si no, una respuesta por pregunta; con
+  opciones, por su `optionId` o por una etiqueta que coincida con una sola. El texto libre
+  solo vale si la pregunta no tiene opciones o declara `allowCustom`. Nada se aproxima.
+- **Plan.** `approve` | `reject`. Aprobar sin `plan` aprueba el propuesto; con `plan`, la
+  versión editada (al menos un paso).
+
+### 15.6 Plazos
+
+| Dónde vive la sesión | Prompt local | Plazo |
+|---|---|---|
+| En el daemon | No hay | `daemon.approvalTimeoutMinutes` (10); al vencer, `expired` → denegar / omitir / rechazar |
+| En la CLI, con terminal | Sí | **Ninguno** (`expiresAt: null`): nadie corta una operación porque la persona tarde en leerla |
+| En la CLI, sin terminal ni aprobadores | No | No se pregunta: lo destructivo se bloquea, como antes |
+
+Una sesión del daemon solo pregunta si el daemon acredita aprobadores; si no, se comporta como
+`stratum run` sin terminal. `stratum run` sin terminal sigue denegando lo destructivo aunque
+haya un daemon con aprobadores: no cambia el comportamiento de una automatización existente.
+
+### 15.7 Cancelación, cierre y desconexión
+
+- **`runs.cancel` con algo pendiente**: la solicitud pasa a `cancelled`, la puerta devuelve su
+  respuesta negativa, el prompt local se retira y **la tool no se ejecuta**. Una respuesta que
+  llegue después recibe `ALREADY_RESOLVED`.
+- **Cerrar la sesión**: lo mismo con todo lo que tuviera pendiente. Ninguna promesa queda
+  colgada y nada suyo sigue en `approvals.list`.
+- **El anfitrión par se desconecta**: no se resuelve nada. La sesión queda `detached`, sus
+  aprobaciones siguen listadas con `resolvable: 'origin'` (solo se pueden contestar en su
+  terminal) y resolverlas en remoto contesta `UNAVAILABLE`. Si vuelve, su foto manda. Si la
+  proyección se descarta (su proceso murió, o venció `daemon.detachedTtlMinutes`), sus
+  solicitudes desaparecen con ella.
+- **Un aprobador lento** no frena a nadie: recibe sus eventos por la cola acotada de su
+  suscripción (§13.2), y el runtime, el prompt local y los demás aprobadores no esperan por él.
+
+### 15.8 `stratum approvals`
+
+Cliente de texto del centro de aprobaciones.
+
+| Comando | Rol | Qué hace |
+|---|---|---|
+| `stratum approvals [list] [--json]` | `observer` | Lo pendiente de todas las sesiones |
+| `stratum approvals approve <id> [--all]` | `approver` | Aprueba una aprobación o un plan; pide la frase si la hay. `--all` = `allow-all` |
+| `stratum approvals deny <id>` | `approver` | Deniega, rechaza el plan u omite las preguntas |
+| `stratum approvals answer <id>` | `approver` | Contesta una tanda de preguntas |
+| `stratum approvals set-key` | — | Fija la clave de aprobador (hay que reiniciar el daemon) |
+
+### 15.9 Tests
+
+`host/interactions.test.ts` (la carrera, sin daemon), `daemon/approvals.test.ts` (daemon real,
+sesiones alojadas y pares: roles, doble resolución, local contra remoto, cancelación, cierre,
+desconexión, plazo, `confirm-always`, lo que no sale en los logs, y el mismo ciclo visto desde
+fuera en los dos anfitriones), `daemon/architecture.test.ts` (el centro no ejecuta ni numera;
+`pid` y `claim` no cuentan; `approve` se concede en un solo sitio) y
+`scripts/tui/daemon-approvals.mjs` (`npm run tui:approvals`: `chat` y `run` en un terminal real
+contra un aprobador externo).
+
+### 15.10 Cambios en el contrato respecto a M1
+
+Nadie emitía todavía estos datos, así que se cambian dentro de la v1:
+
+1. `ProtocolResolver` pasa de `{ client, connectionId }` a `{ kind, client?, connectionId?, at }`:
+   hacía falta decir la vía, y una resolución local no tiene conexión.
+2. `question.resolved` y `plan.resolved` llevan `status` y `resolvedBy`.
+3. `core.hello` admite `approverKey`, y el servidor anuncia `remote-approvals` en `features`.
+4. No existe `host.localApprovalResolved`: la resolución local es el evento `*.resolved` que el
+   anfitrión publica con `host.publish`, explícito y con su `seq`. El daemon no la infiere de
+   que aparezca un `tool.started`.

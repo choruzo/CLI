@@ -6,6 +6,23 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Cambios a tener en cuenta
+- **`git push` pide confirmación** (`tools.guardedCommands.gitPush`, default `confirm`). Antes pasaba sin preguntar. En `stratum chat` aparece la confirmación de siempre; **`stratum run` sin terminal lo deniega**: una automatización que hacía `git push` deja de hacerlo. Para volver al comportamiento anterior: `"tools": { "guardedCommands": { "gitPush": "allow" } }` en `.stratumrc.json`, o `--allow-destructive` en esa invocación.
+- **Un push forzado se confirma siempre** (`gitPushForce`, default `confirm-always`): `--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror` o un refspec con `+` (`git push origin +main`). Ni `--allow-destructive` ni «permitir todo» lo aprueban, y sin terminal se bloquea. Una config que ya fijaba `gitPushForce` conserva su valor.
+- **El token del daemon ya no da derecho a aprobar.** La capacidad `approve` del Stratum Protocol exige una clave de aprobador (`stratum approvals set-key`); un cliente que pida el rol `approver` sin ella recibe solo `observe`. Una conexión de anfitrión (`host`) no recibe `control` ni `approve`.
+
+### Añadido
+- **Centro de aprobaciones en `stratumd`**: las confirmaciones, las preguntas del agente y los planes de cualquier sesión —alojada en el daemon o en una terminal con `chat`/`run`— se listan y se resuelven desde otro cliente. Gana la primera respuesta válida; si es la remota, el prompt de la terminal se retira, y si es la de la terminal, la remota recibe `ALREADY_RESOLVED`. Cada resolución dice quién la tomó (evento, traza y `exec-audit.jsonl`).
+- **`stratum approvals [list|approve|deny|answer|set-key]`**: ver y contestar lo pendiente desde otra terminal. Resolver pide la clave de aprobador por la terminal, sin eco.
+- `tools.guardedCommands` admite `confirm-always`: se confirma cada vez, sin que la política de la sesión lo levante.
+- `daemon.approvalTimeoutMinutes` (10): una solicitud que nadie tiene delante caduca a denegar. Con una terminal delante no caduca.
+- Las sesiones alojadas en el daemon ya pueden pedir confirmación (antes denegaban todo lo destructivo), si el daemon tiene una clave de aprobador.
+
+### Seguridad
+- Guardas contra la auto-aprobación: `~/.stratum/daemon/` es ruta bloqueada para el agente (tools de fichero y shell) y `stratum approvals | daemon | attach` se vetan cuando los lanza el agente. Son una capa, no un aislamiento: un proceso que corre como tu usuario sigue en tu mismo dominio de confianza (`docs/protocol.md` §15.3).
+
 ## [0.8.0] — 2026-10-12
 
 Versión estable de la 0.8.0: reúne todo lo de las cuatro pre-releases, de la [0.8.0-beta.0](#080-beta0--2026-10-12) a la [0.8.0-beta.3](#080-beta3--2026-10-12), sin cambios de código respecto a la última. El detalle está en sus secciones; en resumen:

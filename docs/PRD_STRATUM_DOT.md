@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M3 implementados**; siguiente: M4.
+> anotados en el hito que los encuentra. **M0–M4 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado); siguiente: M5.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -1126,6 +1126,54 @@ Descubrimientos de implementación:
   documentar y probar qué identidad/capacidad tiene derecho a resolver aprobaciones. Las
   guardas *best-effort* se pueden entregar antes, pero no cierran el hito.
 
+**Estado: implementado, con §22 Q2 abierta.** Referencia: `docs/protocol.md` §15.
+
+Hecho: `PendingInteractions` (`host/interactions.ts`, ciclo de vida común de aprobaciones,
+preguntas y planes, y la carrera local/remota con resolución única); `ApprovalCenter`
+(`daemon/approval-center.ts`); puertas de las sesiones del daemon (con plazo) y reenvío a
+anfitriones pares (`host.resolveApproval` / `host.answerQuestions` / `host.decidePlan`);
+retirada del prompt local en `run` (readline) y en `chat` (`<DestructiveConfirm>`,
+`<QuestionPrompt>`, `<PlanApproval>`); `stratum approvals [list|approve|deny|answer|set-key]`;
+`resolvedBy` en eventos, traza (`resolution`) y `exec-audit.jsonl`; guardas de §13.4; política
+de `git push` con sus escenarios. Criterios: AC-3, AC-4, AC-5 y AC-15 con tests
+(`daemon/approvals.test.ts`, `tools/guards.test.ts`, `npm run tui:approvals`, escenarios
+`safety-git-push-*` y `safety-self-approval-blocked`).
+
+Descubrimientos de implementación:
+
+1. **La carrera se decide donde vive la promesa, no en el daemon.** Para una sesión par esa
+   promesa está en otro proceso: el daemon serializa los intentos remotos y entrega, pero quien
+   dice quién llegó antes es el anfitrión. Por eso hay dos piezas: `PendingInteractions` (en
+   `host/`, la misma para los dos anfitriones) y `ApprovalCenter` (en `daemon/`).
+2. **El `seq` no se toca.** Las solicitudes y sus resoluciones son eventos que publica el
+   anfitrión con el `SessionPublisher` de siempre. El centro solo proyecta.
+3. **`approve` no puede salir del token de `endpoint.json`** (§13.4): cualquier comando del
+   agente lo lee. Se añade una **clave de aprobador** que teclea la persona (`core.hello.
+   approverKey`), de la que el disco solo guarda una derivación. Sin ella, la resolución remota
+   está denegada. `host` pasa a ser un rol excluyente.
+4. **`ProtocolResolver` cambia** a `{ kind, client?, connectionId?, at }` con `kind`
+   `local | remote | timeout | policy`; `question.resolved` y `plan.resolved` ganan `status` y
+   `resolvedBy`. No hace falta `host.localApprovalResolved`: es el evento del anfitrión.
+5. **Caducar solo lo que nadie tiene delante** resulta ser la regla entera de §13.3: con prompt
+   local, `expiresAt: null`; sin él, `daemon.approvalTimeoutMinutes`.
+6. **`stratum run` sin terminal sigue denegando** aunque haya aprobadores: subir su política a
+   `ask` cambiaría lo que hace hoy un entorno `allow` en CI. El camino «sin terminal, con
+   aprobador remoto» existe en `SessionHost` y está probado, pero la CLI no lo activa.
+7. **`confirm-always` como valor de `tools.guardedCommands`** necesitó un hook nuevo en las
+   tools (`ToolDefinition.confirmAlways`): hasta ahora solo un entorno podía forzar una
+   confirmación.
+8. **No hay `stratum attach`** todavía (lo nombra §13.4): el veto de subcomandos de control ya
+   lo cubre para cuando exista.
+
+Pendiente, y por qué M4 no se da por **endurecido**:
+
+- **§22 Q2** (identidad del proceso par): respondida con lo que se puede hacer en Node puro —la
+  clave de aprobador— y documentada con sus límites. No es aislamiento frente a un proceso del
+  mismo usuario; el cierre real sigue siendo `SO_PEERCRED` / `GetNamedPipeClientProcessId` (un
+  addon nativo o el relay Rust de Dot) o aislar `exec`.
+- El cap `approval-by` de la traza (§18) no se declara: el evento `resolution` solo lo escriben
+  los anfitriones que usan `PendingInteractions` (`run`, `chat`, el daemon), no `init` ni Desktop.
+
 **Puerta de control.** M6 no empieza hasta que M0–M4 estén demostrados con clientes de
 texto (`stratum ps`, `stratum approvals`, `stratum attach`).
 
@@ -1239,11 +1287,26 @@ resto de la tabla de §16.
   solo a través del relay Rust de Dot (que sí puede consultarlo); o conceder la capacidad
   `approve` solo a procesos que no desciendan de un anfitrión. Decide cuánto se cierra §13.4.
   **Security blocker de M4**: el hito no se da por terminado sin esta respuesta documentada y probada.
+  *Respuesta de M4 (parcial, a propósito)*: sin identidad del par verificable en Node puro, la
+  capacidad `approve` exige una **clave de aprobador** que teclea la persona y de la que el
+  daemon solo guarda una derivación (`docs/protocol.md` §15.2); el token de `endpoint.json` no
+  basta, y sin clave configurada la resolución remota está denegada. Probado: con el token solo
+  —lo que tendría un comando del agente— ningún rol aprueba. **Lo que sigue abierto**: un
+  proceso arbitrario del mismo usuario del SO está en el mismo dominio de confianza (puede
+  sustituir `approver.json` y reiniciar el daemon, o leer la memoria de quien teclea). No se
+  presenta `0600` + token + clave como un sandbox. El cierre real —addon nativo, relay Rust de
+  Dot o aislamiento de `exec`— queda como endurecimiento antes de dar M4 por cerrado del todo.
 - **Q3. Detección fiable de un push forzado.** `--force`, `-f` y `--force-with-lease` son
   flags, pero `git push origin +main` fuerza por refspec y `push.default` o un alias de git
   pueden cambiar el significado del comando. Hay que comprobar qué resuelve hoy
   `effectiveInvocations` y qué queda como `dynamic` (que falla hacia el lado seguro).
   *Se investiga en*: M4.
+  *Respuesta de M4*: se detectan los flags (`--force`, `-f` también agrupado, `--force-with-lease`
+  con o sin valor, `--force-if-includes`, `--mirror`) y el refspec con `+`, detrás de cualquier
+  envoltorio o shell anidado que `effectiveInvocations` resuelva. **No** se resuelve un alias de
+  git (`git p` no se reconoce como push: ni confirma ni fuerza) ni un `push.default` /
+  `remote.<n>.push` con `+` en la config del repo (se trata como push normal, que ya confirma).
+  Cerrar el alias exigiría leer la config de git del target, que puede ser remoto: queda fuera.
 - **Q4. Bandeja y notificaciones en Tauri v2 por plataforma.** Soporte real de bandeja en
   GNOME/Wayland, y si las notificaciones de escritorio admiten acciones (el diseño no
   depende de ellas: una aprobación nunca se resuelve desde la notificación).

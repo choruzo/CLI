@@ -849,6 +849,28 @@ cualquiera de las formas de arriba. Nueva: `find` **sin filtros** borrando una d
   `ssh host "rm …"`, `docker exec … rm`, un script propio. Es el comportamiento anterior, y se
   mantiene para todo lo que no se sabe literal.
 
+**`git push`** (comandos guardados `gitPush` y `gitPushForce`, `tools.guardedCommands`):
+
+| Comando | Default | Qué significa |
+|---|---|---|
+| `git push`, `git push origin main` | `gitPush: confirm` | Pide confirmación; cede ante `--allow-destructive` y el allow-all. Sin terminal, un bloqueo |
+| `git push --force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror`, `git push origin +main` | `gitPushForce: confirm-always` | Se confirma **cada vez**: ni `--allow-destructive`, ni el allow-all, ni `tools.confirmDestructive: false` lo levantan |
+| `git push --dry-run`, `-n` | — | No toca el remoto: no pide nada |
+
+Un push forzado encaja en las dos claves y manda la acción más estricta: `gitPushForce: allow`
+no permite el push (sigue pidiendo confirmación por `gitPush`), y `gitPush: allow` no relaja el
+forzado. Va sobre el comando efectivo, así que `sudo`, `env`, `sh -c "…"` o un target `ssh:` no
+lo esconden (`safety-git-push-needs-approval`, `safety-git-push-policy`). **No se resuelve**: un
+alias de git (`git p`, `git -c alias.p=push p`), ni un `push.default` o un `remote.<n>.push` con
+`+` en la config del repositorio — eso último se trata como un push normal, que ya pide
+confirmación; el alias no se reconoce como push.
+
+**Plano de control de Stratum** — veto, sin confirmación posible: `stratum approvals`, `stratum
+daemon` y `stratum attach` lanzados por el agente (también envueltos, o vía `node …/dist/index.js`
+y `npx stratum-cli`), y cualquier lectura o escritura de `~/.stratum/daemon/` (`endpoint.json`,
+`approver.json`), por tool de fichero o por el shell. Es una capa contra la auto-aprobación, no
+una frontera: `docs/protocol.md` §15.3 (`safety-self-approval-blocked`).
+
 **Lo que deja de pedirla** — un argumento no es un comando: el texto `rm -rf`, `DROP` o
 `Remove-Item` dentro de un comando que el clasificador de solo lectura da por tal (`grep`, `rg`,
 `echo`, `cat`, `ls`, `Select-String`…) o en el mensaje/patrón de `git commit|log|grep|tag|show|
