@@ -234,6 +234,44 @@ async function say(message) {
   await session.clickButton('Send message');
 }
 
+/**
+ * La confirmación nativa (M9): `trigger` pide algo sensible en la principal;
+ * se abre **otra ventana**, en otro origen y sin IPC, que enseña lo que dijo el
+ * daemon. Se comprueba, se espera a que deje confirmar y se confirma allí (o se
+ * cancela). Vuelve a la principal.
+ */
+let confirmations = 0;
+async function confirmNative(trigger, { expect: expected = [], phrase, cancel = false } = {}) {
+  const before = await handles();
+  await trigger();
+  const confirmHandle = await until('la ventana de confirmación', async () => (await handles()).find((h) => !before.includes(h)) ?? null, 20_000);
+  await windowTo(confirmHandle);
+  await session.waitForElement('#ok', { timeout: 20_000 });
+  assert.match(await session.execute('return location.origin'), /dot-confirm/);
+  // Sin IPC: ni aprobar ni nada desde aquí.
+  const invoked = await session.execute(`
+    const ipc = window.__TAURI_INTERNALS__;
+    if (!ipc) return 'no-ipc';
+    return ipc.invoke('dot_approver_status', {}).then(() => 'ok', () => 'denied');
+  `);
+  assert.ok(invoked === 'no-ipc' || invoked === 'denied', invoked);
+  await until('lo que dijo el daemon', async () => (await session.execute(`return document.getElementById('facts').innerText`)).length > 0, 10_000);
+  const text = await session.execute(`return document.body.innerText`);
+  for (const pattern of expected) assert.match(text, pattern);
+  // El foco empieza en Cancel, nunca en confirmar.
+  assert.equal(await session.execute(`return document.activeElement?.id`), 'cancel');
+  if (phrase !== undefined) await session.type(await session.find('#phrase'), phrase);
+  await shot(`confirmacion-${++confirmations}`);
+  if (cancel) {
+    await session.click(await session.find('#cancel'));
+  } else {
+    await until('deja confirmar', async () => !(await session.execute(`return document.getElementById('ok').disabled`)), 10_000);
+    await session.click(await session.find('#ok'));
+  }
+  await until('la ventana de confirmación se cierra', async () => !(await handles()).includes(confirmHandle), 20_000);
+  await windowTo(mainHandle);
+}
+
 /** Desbloquea en la ventana nativa: la clave solo se teclea allí. */
 async function unlockWith(key, { expectOk = true } = {}) {
   const before = await handles();
@@ -258,7 +296,7 @@ async function unlockWith(key, { expectOk = true } = {}) {
     if (!ipc) return 'no-ipc';
     const tries = [
       ['dot_approver_status', {}],
-      ['dot_approve', { sessionId: 'x', approvalId: 'y', phrase: null, forSession: false }],
+      ['dot_approve', { sessionId: 'x', approvalId: 'y', forSession: false }],
     ];
     return Promise.all(tries.map(([cmd, args]) => ipc.invoke(cmd, args).then(() => cmd + ':ok', () => cmd + ':denied')));
   `);
@@ -336,8 +374,50 @@ try {
     await shot('desbloqueado');
   });
 
-  await check('Approve → approval.resolved → la tool se ejecuta → el asistente responde', async () => {
-    await clickInCard(approvalId, 'Approve');
+  await check('M9: un webview que se salta la interfaz no aprueba nada; la principal ni ve ni toca la confirmación', async () => {
+    await openCenter();
+    const sessionId = await session.execute(`return document.querySelector('[data-item="' + arguments[0] + '"]').getAttribute('data-session')`, approvalId);
+    // Desbloqueado, la principal invoca `dot_approve` por su cuenta (lo que haría un script inyectado).
+    await session.execute(`
+      window.__forged = 'pending';
+      window.__TAURI_INTERNALS__.invoke('dot_approve', { sessionId: arguments[0], approvalId: arguments[1], forSession: false })
+        .then(() => (window.__forged = 'approved'), (e) => (window.__forged = (e && e.kind) + ':' + (e && e.reason)));
+    `, sessionId, approvalId);
+    const confirmHandle = await until('se abre la confirmación nativa', async () => (await handles()).find((h) => h !== mainHandle) ?? null, 20_000);
+    await sleep(1500);
+    // Nada salió: la solicitud sigue pendiente y la tool no se ejecutó.
+    assert.equal(existsSync(victim), true);
+    assert.equal((await cards('approval')).length, 1);
+    // La principal no puede confirmar por el esquema nativo, ni manejar ventanas.
+    const forged = await session.execute(`
+      const url = navigator.userAgent.includes('Windows') ? 'http://dot-confirm.localhost/confirm' : 'dot-confirm://localhost/confirm';
+      return fetch(url, { method: 'POST', body: '' }).then((r) => 'status:' + r.status, () => 'blocked');
+    `);
+    assert.ok(forged === 'blocked' || /^status:(403|404)$/.test(forged), forged);
+    const windows = await session.execute(`
+      return window.__TAURI_INTERNALS__.invoke('plugin:window|get_all_windows', {}).then(() => 'allowed', () => 'denied');
+    `);
+    assert.equal(windows, 'denied');
+    // Otra petición no sustituye la ventana abierta.
+    const second = await session.execute(`
+      return window.__TAURI_INTERNALS__.invoke('dot_approve', { sessionId: arguments[0], approvalId: arguments[1], forSession: true })
+        .then(() => 'approved', (e) => e.kind);
+    `, sessionId, approvalId);
+    assert.equal(second, 'not-sent');
+    // La persona cancela en la ventana nativa: no se aprueba nada.
+    await windowTo(confirmHandle);
+    await session.waitForElement('#cancel', { timeout: 10_000 });
+    await session.click(await session.find('#cancel'));
+    await until('se cierra', async () => !(await handles()).includes(confirmHandle), 20_000);
+    await windowTo(mainHandle);
+    await until('el comando falla sin confirmar', async () => (await session.execute('return window.__forged')) === 'not-confirmed:cancelled');
+    assert.equal(existsSync(victim), true);
+    assert.equal((await cards('approval')).length, 1);
+    await sleep(1200); // tras cancelar, un momento antes de otra confirmación
+  });
+
+  await check('Approve → confirmación nativa → approval.resolved → la tool se ejecuta → el asistente responde', async () => {
+    await confirmNative(() => clickInCard(approvalId, 'Approve'), { expect: [/exec/, /rm victim\.txt/, /Approve/] });
     await until('la tarjeta desaparece', async () => (await cards('approval')).length === 0, 30_000);
     await session.waitForText('from Stratum Dot');
     await until('el fichero ya no está', async () => !existsSync(victim));
@@ -355,7 +435,7 @@ try {
     await session.clickButton('Pause run');
     await openCenter();
     const [id] = await cards('approval');
-    await clickInCard(id, 'Approve');
+    await confirmNative(() => clickInCard(id, 'Approve'));
     await session.waitForText('Approved. The run remains paused', { timeout: 30_000 });
     await sleep(800);
     assert.equal(existsSync(victim), true, 'aprobar no reanuda');
@@ -378,7 +458,7 @@ try {
     );
     await session.click(await session.find('[data-e2e-target="1"] input'));
     await session.execute(`document.querySelector('[data-e2e-target="1"]')?.removeAttribute('data-e2e-target')`);
-    await clickInCard(id, 'Send answers');
+    await confirmNative(() => clickInCard(id, 'Send answers'), { expect: [/Answers you are sending/, /production/] });
     await until('respondida', async () => (await cards('question')).length === 0, 30_000);
     await backToSession();
     await until('la respuesta', async () => (await transcript()).at(-1)?.[1] === 'Anotado: production.', 30_000);
@@ -401,7 +481,7 @@ try {
     const [id] = await cards('plan');
     assert.match(await session.execute(`return document.querySelector('[data-item="${id}"]').innerText`), /Crear planned\.txt/);
     await shot('plan');
-    await clickInCard(id, 'Approve plan');
+    await confirmNative(() => clickInCard(id, 'Approve plan'), { expect: [/Crear planned\.txt/] });
     await until('se ejecuta', async () => existsSync(join(planned, 'planned.txt')), 40_000);
   });
 

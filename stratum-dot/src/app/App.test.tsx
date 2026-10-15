@@ -310,3 +310,20 @@ describe('teclado y resistencia', () => {
     expect(screen.getByRole('alert').textContent).toBe('No se pudo pintar: dato inesperado');
   });
 });
+
+describe('M9 — vista parcial', () => {
+  it('con más sesiones vivas de las que Dot sigue, la lista dice que es parcial', () => {
+    const native = fakeNative();
+    mount(native);
+    act(() => {
+      native.push({ type: 'connection', state: CONNECTED });
+      native.push({ type: 'sessions', sessionIds: [SID], unfollowed: 6 });
+      native.push({ type: 'snapshot', sessionId: SID, snapshot: snapshotOf() });
+    });
+    const note = document.querySelector<HTMLElement>('[data-partial]')!;
+    expect(note.dataset.partial).toBe('6');
+    expect(note.textContent).toContain('Partial view: 6 more live sessions are not shown');
+    act(() => native.push({ type: 'sessions', sessionIds: [SID], unfollowed: 0 }));
+    expect(document.querySelector('[data-partial]')).toBeNull();
+  });
+});

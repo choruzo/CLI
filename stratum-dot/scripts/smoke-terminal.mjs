@@ -95,8 +95,10 @@ async function terminalAndDot() {
       await check('Dot gana: el prompt de la terminal se retira y la tool corre una vez', async () => {
         assert.equal(s.approval.expiresAt, null, 'con terminal no caduca');
         assert.equal(s.probe.sessions.get(s.sessionId).session.host.kind, 'peer');
-        const done = await s.probe.order('approve', { sessionId: s.sessionId, approvalId: s.approval.id });
+        const done = await s.probe.resolve('approve', { sessionId: s.sessionId, approvalId: s.approval.id });
         assert.equal(done.ok, true, JSON.stringify(done));
+        // La confirmación nativa enseñó lo que dijo el daemon: una sesión de terminal.
+        assert.equal(done.confirmation.view.session.host, 'peer');
         await s.t.waitFor(/\[resolved from another client\]/);
         assert.equal(await s.t.waitExit(20_000), 0);
         assert.ok(!existsSync(s.victim));
@@ -118,7 +120,7 @@ async function terminalAndDot() {
   });
   if (s) {
     try {
-      await check('la terminal gana: a Dot le llega ALREADY_RESOLVED y lo pendiente desaparece', async () => {
+      await check('la terminal gana: lo pendiente desaparece y Dot ya no puede resolverlo', async () => {
         await s.t.submit('s');
         await until('resuelta en la terminal', () =>
           s.probe.seen.some(
@@ -128,8 +130,38 @@ async function terminalAndDot() {
               m.events.some((e) => e.type === 'approval.resolved' && e.data.resolvedBy?.kind === 'local'),
           ),
         );
-        const late = await s.probe.order('approve', { sessionId: s.sessionId, approvalId: s.approval.id });
-        assert.deepEqual([late.ok, late.error.code], [false, 'ALREADY_RESOLVED']);
+        // Ya no está pendiente: ni se llega a enseñar la confirmación.
+        const late = await s.probe.resolve('approve', { sessionId: s.sessionId, approvalId: s.approval.id });
+        assert.deepEqual([late.ok, late.error.code, late.confirmation], [false, 'NOT_FOUND', null]);
+        assert.equal(await s.t.waitExit(20_000), 0);
+        assert.ok(!existsSync(s.victim), 'la tool se ejecutó una vez, por la terminal');
+      });
+    } finally {
+      await s.stop();
+    }
+  }
+}
+
+{
+  const s = await terminalAndDot().catch((err) => {
+    console.log(`✗ preparar la terminal
+  ${err.message}`);
+    process.exitCode = 1;
+    return null;
+  });
+  if (s) {
+    try {
+      await check('la terminal gana con la confirmación de Dot abierta: se cancela y no se vuelve a resolver', async () => {
+        const before = s.probe.confirmations.length;
+        const asked = s.probe.order('approve', { sessionId: s.sessionId, approvalId: s.approval.id });
+        await until('Dot enseña la confirmación', () => s.probe.confirmations.length > before);
+        const { nonce } = s.probe.confirmations[before];
+        await s.t.submit('s');
+        const result = await asked;
+        assert.deepEqual([result.ok, result.error.kind, result.error.reason], [false, 'not-confirmed', 'resolved-elsewhere']);
+        // La persona pulsa tarde: la ventana ya no vale.
+        const late = await s.probe.order('confirm', { nonce });
+        assert.equal(late.ok, false);
         assert.equal(await s.t.waitExit(20_000), 0);
         assert.ok(!existsSync(s.victim), 'la tool se ejecutó una vez, por la terminal');
       });

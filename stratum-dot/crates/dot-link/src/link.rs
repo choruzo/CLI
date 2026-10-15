@@ -24,22 +24,31 @@
 //!  - **El daemon se arranca una vez por intento explícito** (al abrir Dot o al
 //!    pulsar reintentar), nunca al reconectar: si alguien lo paró, no se le
 //!    lleva la contraria.
+//!  - **Antes del token, quién escucha.** El sistema dice qué proceso atiende el
+//!    canal ([`crate::peer`]); si no es el que publicó el endpoint (u otro
+//!    usuario), no se envía nada.
+//!  - **Colas acotadas.** Las órdenes con respuesta van por una cola de
+//!    [`MAX_QUEUED_COMMANDS`] y, llena, se rechazan (`not-sent`) en vez de
+//!    crecer; las que no pueden perderse (cerrar, reintentar, `attach`, foco)
+//!    no ocupan cola: se anotan y se coalescen.
 
 use serde_json::{json, Value};
 use std::collections::HashMap;
+use std::collections::VecDeque;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt, WriteHalf};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::time::Instant;
 
 use crate::discovery::{self, Discovery, Endpoint};
 use crate::framing::LineDecoder;
 use crate::launcher::DaemonLauncher;
 use crate::log::Logger;
+use crate::peer::{self, PeerCheck};
 use crate::state::{
     CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
 };
@@ -54,6 +63,16 @@ use crate::{
 /// Sesiones que Dot sigue a la vez. Por encima, las más recientes de la foto
 /// de conjunto se quedan sin seguir (y se registra).
 pub const MAX_FOLLOWED_SESSIONS: usize = 64;
+
+/// De las sesiones que no se siguen, cuántas se recuerdan (para contarlas y
+/// seguirlas cuando quede hueco). Por encima, la cuenta se queda corta.
+pub const MAX_UNFOLLOWED_TRACKED: usize = 4_096;
+
+/// Órdenes con respuesta esperando al actor. Llena, la siguiente no se encola.
+pub const MAX_QUEUED_COMMANDS: usize = 64;
+
+/// Órdenes y llamadas enviadas al daemon y aún sin respuesta, a la vez.
+pub const MAX_IN_FLIGHT: usize = 32;
 
 #[derive(Debug, Clone)]
 pub struct Timings {
@@ -110,16 +129,71 @@ enum Cmd {
     Shutdown,
 }
 
+/// Lo que no puede perderse aunque la cola esté llena. Se coalesce: pedir dos
+/// veces lo mismo antes de que el actor lo vea es pedirlo una.
+#[derive(Default)]
+struct Flags {
+    shutdown: bool,
+    retry: bool,
+    attach: bool,
+    /// `Some(foco)`: el último foco pedido.
+    focus: Option<Option<String>>,
+}
+
 struct Shared {
     state: Mutex<ConnectionState>,
     sessions: AtomicUsize,
+    flags: Mutex<Flags>,
+    wake: Notify,
+}
+
+impl Shared {
+    fn flag(&self, set: impl FnOnce(&mut Flags)) {
+        if let Ok(mut flags) = self.flags.lock() {
+            set(&mut flags);
+        }
+        self.wake.notify_one();
+    }
+
+    fn take_flag(&self) -> Option<Cmd> {
+        let mut flags = self.flags.lock().ok()?;
+        if std::mem::take(&mut flags.shutdown) {
+            return Some(Cmd::Shutdown);
+        }
+        if std::mem::take(&mut flags.retry) {
+            return Some(Cmd::Retry);
+        }
+        if std::mem::take(&mut flags.attach) {
+            return Some(Cmd::Attach);
+        }
+        flags.focus.take().map(Cmd::Focus)
+    }
 }
 
 /// Lo que la app tiene del enlace. Barato de clonar.
 #[derive(Clone)]
 pub struct LinkHandle {
-    tx: mpsc::UnboundedSender<Cmd>,
+    tx: mpsc::Sender<Cmd>,
     shared: Arc<Shared>,
+}
+
+fn gone() -> CommandError {
+    CommandError::new(CommandErrorKind::NotSent, "Stratum Dot is shutting down.")
+}
+
+fn busy() -> CommandError {
+    CommandError::new(
+        CommandErrorKind::NotSent,
+        "Too many requests at once. Nothing was sent: try again in a moment.",
+    )
+}
+
+/// Encola una orden con respuesta, o dice por qué no (sin esperar a que haya sitio).
+fn enqueue(tx: &mpsc::Sender<Cmd>, cmd: Cmd) -> Result<(), CommandError> {
+    tx.try_send(cmd).map_err(|e| match e {
+        mpsc::error::TrySendError::Full(_) => busy(),
+        mpsc::error::TrySendError::Closed(_) => gone(),
+    })
 }
 
 impl LinkHandle {
@@ -140,22 +214,24 @@ impl LinkHandle {
     /// la conexión y todas las suscripciones se reabren, así que recibe una
     /// foto de cada sesión. Aquí no se guarda ninguna foto para reenviarla.
     pub fn attach(&self) {
-        let _ = self.tx.send(Cmd::Attach);
+        self.shared.flag(|f| f.attach = true);
     }
 
     /// Vuelve a empezar: descubrir, arrancar el daemon si hace falta, conectar.
     pub fn retry(&self) {
-        let _ = self.tx.send(Cmd::Retry);
+        self.shared.flag(|f| f.retry = true);
     }
 
     /// Qué sesión se está mirando: es la única que recibe el texto según se genera.
     pub fn focus(&self, session_id: Option<String>) {
-        let _ = self.tx.send(Cmd::Focus(session_id));
+        self.shared.flag(|f| f.focus = Some(session_id));
     }
 
     /// Pide una foto nueva de una sesión (la interfaz no pudo aplicar un evento).
+    /// Con la cola llena se descarta: es idempotente, y la foto llegará con la
+    /// siguiente petición o el siguiente hueco de `seq`.
     pub fn resync_session(&self, session_id: String) {
-        let _ = self.tx.send(Cmd::Resync(session_id));
+        let _ = self.tx.try_send(Cmd::Resync(session_id));
     }
 
     /// Da una orden y devuelve el `status` que contesta el anfitrión de la
@@ -164,10 +240,7 @@ impl LinkHandle {
     /// eventos, cuando el runtime lo alcanza.
     pub async fn control(&self, action: ControlAction) -> Result<String, CommandError> {
         let (reply, answer) = oneshot::channel();
-        let gone = || CommandError::new(CommandErrorKind::NotSent, "Stratum Dot is shutting down.");
-        self.tx
-            .send(Cmd::Control(action, reply))
-            .map_err(|_| gone())?;
+        enqueue(&self.tx, Cmd::Control(action, reply))?;
         answer.await.unwrap_or_else(|_| Err(gone()))
     }
 
@@ -177,14 +250,13 @@ impl LinkHandle {
     /// eventos, cuando su anfitrión los publica.
     pub async fn call(&self, action: CallAction) -> Result<Value, CommandError> {
         let (reply, answer) = oneshot::channel();
-        let gone = || CommandError::new(CommandErrorKind::NotSent, "Stratum Dot is shutting down.");
-        self.tx.send(Cmd::Call(action, reply)).map_err(|_| gone())?;
+        enqueue(&self.tx, Cmd::Call(action, reply))?;
         answer.await.unwrap_or_else(|_| Err(gone()))
     }
 
     /// Dot se cierra: se suelta la conexión. El daemon y sus sesiones siguen.
     pub fn shutdown(&self) {
-        let _ = self.tx.send(Cmd::Shutdown);
+        self.shared.flag(|f| f.shutdown = true);
     }
 }
 
@@ -194,10 +266,12 @@ pub fn spawn(
     config: LinkConfig,
     sink: impl Fn(DotEvent) + Send + Sync + 'static,
 ) -> (LinkHandle, impl Future<Output = ()> + Send + 'static) {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::channel(MAX_QUEUED_COMMANDS);
     let shared = Arc::new(Shared {
         state: Mutex::new(ConnectionState::Starting),
         sessions: AtomicUsize::new(0),
+        flags: Mutex::new(Flags::default()),
+        wake: Notify::new(),
     });
     let actor = Actor {
         autostart_armed: config.autostart,
@@ -282,6 +356,9 @@ struct Conn {
     sessions: HashMap<String, SessionSub>,
     /// Orden de la foto de conjunto; las nuevas, al final.
     order: Vec<String>,
+    /// Sesiones vivas que no caben en [`MAX_FOLLOWED_SESSIONS`], por orden de
+    /// llegada: se cuentan y se siguen cuando queda hueco.
+    unfollowed: VecDeque<String>,
     routes: HashMap<String, Route>,
     can_control: bool,
     request_timeout: Duration,
@@ -317,6 +394,14 @@ impl Conn {
     ) -> std::io::Result<()> {
         let timeout = self.request_timeout;
         self.request_within(method, params, pending, timeout).await
+    }
+
+    /// Órdenes y llamadas de la interfaz que esperan respuesta.
+    fn in_flight(&self) -> usize {
+        self.pending
+            .values()
+            .filter(|(p, _)| matches!(p, Pending::Control { .. } | Pending::Call { .. }))
+            .count()
     }
 
     async fn request_within(
@@ -401,7 +486,7 @@ impl Conn {
 
 struct Actor {
     cfg: LinkConfig,
-    rx: mpsc::UnboundedReceiver<Cmd>,
+    rx: mpsc::Receiver<Cmd>,
     sink: Box<dyn Fn(DotEvent) + Send + Sync>,
     shared: Arc<Shared>,
     focus: Option<String>,
@@ -538,6 +623,21 @@ fn call_request(
             },
         )),
         CallAction::ListModels => Ok((MainMethod::ModelsList, json!({}))),
+        CallAction::ListPending { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::ApprovalsList,
+                json!({ "sessionId": session_id }),
+            ))
+        }
+        CallAction::GetSession { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((MainMethod::SessionsGet, json!({ "sessionId": session_id })))
+        }
     }
 }
 
@@ -557,6 +657,22 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 impl Actor {
     fn emit(&self, event: DotEvent) {
         (self.sink)(event);
+    }
+
+    /// La siguiente orden: primero lo anotado (cerrar, reintentar, `attach`,
+    /// foco), después la cola. Se puede cancelar sin perder nada.
+    async fn next_cmd(&mut self) -> Option<Cmd> {
+        let shared = self.shared.clone();
+        loop {
+            if let Some(cmd) = shared.take_flag() {
+                return Some(cmd);
+            }
+            tokio::select! {
+                biased;
+                _ = shared.wake.notified() => {}
+                cmd = self.rx.recv() => return cmd,
+            }
+        }
     }
 
     fn state(&self) -> ConnectionState {
@@ -620,7 +736,7 @@ impl Actor {
         loop {
             tokio::select! {
                 _ = &mut sleep => return Wake::Timeout,
-                cmd = self.rx.recv() => match cmd {
+                cmd = self.next_cmd() => match cmd {
                     None => return Wake::Shutdown,
                     Some(cmd) => if let Some(wake) = self.offline(cmd) { return wake },
                 },
@@ -635,7 +751,7 @@ impl Actor {
         loop {
             tokio::select! {
                 out = &mut future => return Ok(out),
-                cmd = self.rx.recv() => match cmd {
+                cmd = self.next_cmd() => match cmd {
                     None => return Err(Wake::Shutdown),
                     Some(cmd) => {
                         if let Some(Wake::Shutdown) = self.offline(cmd) {
@@ -817,6 +933,21 @@ impl Actor {
                     return End::Unreachable("The Stratum daemon is not answering.".into());
                 }
             };
+        // Antes de enviar el token: ¿lo atiende el daemon que publicó el endpoint?
+        match peer::verify(&stream, endpoint.pid) {
+            Ok(PeerCheck::Verified) => {}
+            Ok(PeerCheck::Partial { what }) => self.cfg.logger.warn(&format!(
+                "peer identity: the OS did not confirm the {what} serving the channel"
+            )),
+            Err(mismatch) => {
+                self.cfg
+                    .logger
+                    .error(&format!("peer identity: {mismatch}; nothing was sent"));
+                return End::Fatal(
+                    "The process answering on the daemon's channel is not the daemon that published the endpoint. Nothing was sent.".into(),
+                );
+            }
+        }
         let (mut reader, writer) = tokio::io::split(stream);
 
         // El lector vive en su tarea: así el bucle de abajo nunca corta una lectura a medias.
@@ -849,6 +980,7 @@ impl Actor {
             overview_generation: 0,
             sessions: HashMap::new(),
             order: Vec::new(),
+            unfollowed: VecDeque::new(),
             routes: HashMap::new(),
             can_control: false,
             request_timeout: self.cfg.timings.request_timeout,
@@ -965,7 +1097,7 @@ impl Actor {
                     None => return End::Lost,
                     Some(line) => self.on_line(conn, &line).await,
                 },
-                cmd = self.rx.recv() => match cmd {
+                cmd = self.next_cmd() => match cmd {
                     None => return End::Shutdown,
                     Some(cmd) => self.on_cmd(conn, cmd).await,
                 },
@@ -1021,7 +1153,20 @@ impl Actor {
             .store(conn.order.len(), Ordering::Relaxed);
         self.emit(DotEvent::Sessions {
             session_ids: conn.order.clone(),
+            unfollowed: conn.unfollowed.len(),
         });
+    }
+
+    /// Si hay hueco, se siguen sesiones que esperaban. `true` si cambió algo.
+    async fn promote(&mut self, conn: &mut Conn) -> std::io::Result<bool> {
+        let mut changed = false;
+        while conn.sessions.len() < MAX_FOLLOWED_SESSIONS {
+            let Some(id) = conn.unfollowed.pop_front() else {
+                break;
+            };
+            changed |= self.follow(conn, &id).await?;
+        }
+        Ok(changed)
     }
 
     async fn follow(&mut self, conn: &mut Conn, session_id: &str) -> std::io::Result<bool> {
@@ -1029,10 +1174,16 @@ impl Actor {
             return Ok(false);
         }
         if conn.sessions.len() >= MAX_FOLLOWED_SESSIONS {
+            if conn.unfollowed.iter().any(|id| id == session_id)
+                || conn.unfollowed.len() >= MAX_UNFOLLOWED_TRACKED
+            {
+                return Ok(false);
+            }
             self.cfg.logger.warn(&format!(
                 "too many live sessions: not following {session_id}"
             ));
-            return Ok(false);
+            conn.unfollowed.push_back(session_id.to_string());
+            return Ok(true);
         }
         let volatile = self.focus.as_deref() == Some(session_id);
         conn.sessions
@@ -1044,7 +1195,9 @@ impl Actor {
 
     async fn unfollow(&mut self, conn: &mut Conn, session_id: &str) -> std::io::Result<bool> {
         let Some(sub) = conn.sessions.remove(session_id) else {
-            return Ok(false);
+            let before = conn.unfollowed.len();
+            conn.unfollowed.retain(|id| id != session_id);
+            return Ok(conn.unfollowed.len() != before);
         };
         conn.order.retain(|id| id != session_id);
         if let Some(server_id) = sub.server_id {
@@ -1107,6 +1260,7 @@ impl Actor {
                                 Membership::Closed(id) => self.unfollow(conn, &id).await?,
                             };
                         }
+                        changed |= self.promote(conn).await?;
                         if changed {
                             self.publish_sessions(conn);
                         }
@@ -1158,12 +1312,17 @@ impl Actor {
 
     /// La foto de conjunto dice qué sesiones hay: se siguen esas y solo esas.
     async fn reconcile(&mut self, conn: &mut Conn, mut ids: Vec<String>) -> std::io::Result<()> {
+        conn.unfollowed.clear();
         if ids.len() > MAX_FOLLOWED_SESSIONS {
             self.cfg.logger.warn(&format!(
                 "too many live sessions ({}): following the first {MAX_FOLLOWED_SESSIONS}",
                 ids.len()
             ));
-            ids.truncate(MAX_FOLLOWED_SESSIONS);
+            conn.unfollowed = ids
+                .split_off(MAX_FOLLOWED_SESSIONS)
+                .into_iter()
+                .take(MAX_UNFOLLOWED_TRACKED)
+                .collect();
         }
         let gone: Vec<String> = conn
             .order
@@ -1247,6 +1406,7 @@ impl Actor {
                         ));
                         conn.sessions.remove(&session_id);
                         conn.order.retain(|id| id != &session_id);
+                        self.promote(conn).await?;
                         self.publish_sessions(conn);
                     }
                     Err(_) => {}
@@ -1324,6 +1484,13 @@ impl Actor {
                     ));
                     conn.reopen_session(&session_id, volatile).await?;
                 }
+            }
+            // Acotado: con demasiado en vuelo, no sale nada más.
+            Cmd::Control(_, reply) if conn.in_flight() >= MAX_IN_FLIGHT => {
+                let _ = reply.send(Err(busy()));
+            }
+            Cmd::Call(_, reply) if conn.in_flight() >= MAX_IN_FLIGHT => {
+                let _ = reply.send(Err(busy()));
             }
             Cmd::Control(action, reply) => {
                 let request = if conn.can_control {

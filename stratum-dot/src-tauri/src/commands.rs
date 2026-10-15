@@ -13,6 +13,12 @@
 //! Los comandos de aprobador solo se atienden desde la ventana principal
 //! (además del manifiesto de `build.rs`, que ya se lo niega a cualquier otra).
 //!
+//! **Pedir no es resolver** (M9): `dot_approve`, `dot_answer_questions` con
+//! respuestas y `dot_decide_plan` con `approve` abren la confirmación nativa
+//! (`confirm.rs`) y solo envían si la persona confirma allí; la frase de una
+//! confirmación con nombre se teclea también allí. Denegar, omitir y rechazar
+//! van directos: es lo mismo que hace el runtime cuando nadie contesta.
+//!
 //! Lo que devuelven `dot_open_session`, `dot_start_run`, `dot_list_agents` y
 //! `dot_list_models` es el `result` del daemon **sin interpretar**: un DTO del
 //! protocolo que el webview valida contra el contrato antes de usarlo.
@@ -212,49 +218,75 @@ pub fn dot_approver_lock<R: Runtime>(
     Ok(())
 }
 
-/// Aprueba una solicitud. `phrase` es lo que tecleó la persona si la solicitud
-/// pide frase (no es la clave de aprobador); `for_session` = `allow-all`.
+/// Resuelve: lo sensible, solo si la persona lo confirma en la ventana nativa;
+/// lo negativo, directo. Nunca se confirma solo ni se reenvía.
+async fn resolve<R: Runtime>(
+    app: AppHandle<R>,
+    state: &DotState,
+    action: ApproverAction,
+) -> Result<(), CommandError> {
+    if !action.needs_confirmation() {
+        return state.broker.resolve(action).await;
+    }
+    let presenter = crate::confirm::TauriPresenter::new(app, state.confirm_windows.clone());
+    let confirmed = state
+        .confirm
+        .request(&state.link, &state.broker, &presenter, action)
+        .await?;
+    state.broker.resolve_confirmed(confirmed).await
+}
+
+/// Pide aprobar una solicitud: abre la confirmación nativa, y solo si la
+/// persona confirma allí se envía. `for_session` = `allow-all`. La frase de
+/// una confirmación con nombre **no** viaja por aquí: se teclea en la ventana.
 #[tauri::command]
 pub async fn dot_approve<R: Runtime>(
+    app: AppHandle<R>,
     window: WebviewWindow<R>,
     state: State<'_, DotState>,
     session_id: String,
     approval_id: String,
-    phrase: Option<String>,
     for_session: bool,
 ) -> Result<(), CommandError> {
     main_window(&window)?;
-    state
-        .broker
-        .resolve(ApproverAction::Approve {
+    resolve(
+        app,
+        &state,
+        ApproverAction::Approve {
             session_id,
             approval_id,
-            phrase,
+            phrase: None,
             for_session,
-        })
-        .await
+        },
+    )
+    .await
 }
 
+/// Deniega, directo (sin confirmación): es lo que pasa cuando nadie contesta.
 #[tauri::command]
 pub async fn dot_deny<R: Runtime>(
+    app: AppHandle<R>,
     window: WebviewWindow<R>,
     state: State<'_, DotState>,
     session_id: String,
     approval_id: String,
 ) -> Result<(), CommandError> {
     main_window(&window)?;
-    state
-        .broker
-        .resolve(ApproverAction::Deny {
+    resolve(
+        app,
+        &state,
+        ApproverAction::Deny {
             session_id,
             approval_id,
-        })
-        .await
+        },
+    )
+    .await
 }
 
-/// Contesta una tanda de preguntas. `None` la omite.
+/// Contesta una tanda de preguntas (con confirmación nativa). `None` la omite (directo).
 #[tauri::command]
 pub async fn dot_answer_questions<R: Runtime>(
+    app: AppHandle<R>,
     window: WebviewWindow<R>,
     state: State<'_, DotState>,
     session_id: String,
@@ -262,14 +294,16 @@ pub async fn dot_answer_questions<R: Runtime>(
     answers: Option<Vec<QuestionAnswer>>,
 ) -> Result<(), CommandError> {
     main_window(&window)?;
-    state
-        .broker
-        .resolve(ApproverAction::AnswerQuestions {
+    resolve(
+        app,
+        &state,
+        ApproverAction::AnswerQuestions {
             session_id,
             request_id,
             answers,
-        })
-        .await
+        },
+    )
+    .await
 }
 
 #[derive(Debug, Clone, Copy, Deserialize)]
@@ -279,9 +313,11 @@ pub enum PlanDecision {
     Reject,
 }
 
-/// Aprueba el plan propuesto **tal cual**, o lo rechaza. Sin edición.
+/// Aprueba el plan propuesto **tal cual** (con confirmación nativa), o lo
+/// rechaza (directo). Sin edición.
 #[tauri::command]
 pub async fn dot_decide_plan<R: Runtime>(
+    app: AppHandle<R>,
     window: WebviewWindow<R>,
     state: State<'_, DotState>,
     session_id: String,
@@ -289,14 +325,16 @@ pub async fn dot_decide_plan<R: Runtime>(
     decision: PlanDecision,
 ) -> Result<(), CommandError> {
     main_window(&window)?;
-    state
-        .broker
-        .resolve(ApproverAction::DecidePlan {
+    resolve(
+        app,
+        &state,
+        ApproverAction::DecidePlan {
             session_id,
             request_id,
             approve: matches!(decision, PlanDecision::Approve),
-        })
-        .await
+        },
+    )
+    .await
 }
 
 /// Lo pendiente que enseña la interfaz, para la bandeja. Es solo un contador

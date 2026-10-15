@@ -16,8 +16,14 @@
 //!  - La autoridad de aprobar es otra pieza (`dot_link::approver`), con otra
 //!    conexión, y su clave se teclea en otra ventana (`unlock.rs`) que el
 //!    webview principal no ve. Cerrar Dot la suelta.
+//!  - Lo sensible se confirma en otra ventana más (`confirm.rs`), con lo que
+//!    dice el daemon: el webview pide, la persona confirma allí, y solo
+//!    entonces sale (`dot_link::confirm`). Cada cambio del enlace o del broker
+//!    pasa por la puerta de confirmación, que se cancela si deja de tener sentido.
 
 mod commands;
+mod confirm;
+mod page;
 mod tray;
 mod unlock;
 
@@ -25,7 +31,8 @@ use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
 use dot_link::link::Timings;
 use dot_link::{
-    ApproverConfig, ApproverHandle, CliLauncher, DotEvent, LinkConfig, LinkHandle, Logger,
+    ApproverConfig, ApproverHandle, CancelReason, CliLauncher, ConfirmGate, ConfirmTimings,
+    DotEvent, LinkConfig, LinkHandle, Logger,
 };
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WindowEvent};
@@ -43,6 +50,10 @@ pub struct DotState {
     pub broker: ApproverHandle,
     /// La ventana de desbloqueo abierta ahora (su `nonce`), si la hay.
     pub prompt: unlock::UnlockPrompt,
+    /// La confirmación nativa de lo sensible (una a la vez).
+    pub confirm: Arc<ConfirmGate>,
+    /// Qué ventana de confirmación enseña qué confirmación.
+    pub confirm_windows: Arc<confirm::ConfirmWindows>,
     pub logger: Logger,
     /// `None` si el escritorio no tiene bandeja: entonces cerrar la ventana sale de Dot.
     pub tray: Option<tray::Tray>,
@@ -68,11 +79,12 @@ pub fn run() {
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
-                .with_denylist(&[unlock::WINDOW])
+                .with_filter(|label| label == "main")
                 .build(),
         )
-        // La página de desbloqueo, en su propio origen y sin IPC.
+        // Las páginas de desbloqueo y de confirmación, cada una en su origen y sin IPC.
         .register_asynchronous_uri_scheme_protocol(unlock::SCHEME, unlock::handle)
+        .register_asynchronous_uri_scheme_protocol(confirm::SCHEME, confirm::handle)
         .invoke_handler(tauri::generate_handler![
             commands::dot_attach,
             commands::dot_retry,
@@ -98,6 +110,15 @@ pub fn run() {
             commands::dot_quit,
         ])
         .on_window_event(|window, event| {
+            if window.label().starts_with(confirm::WINDOW_PREFIX) {
+                // Cerrar la ventana de confirmación es no confirmar.
+                if let WindowEvent::Destroyed = event {
+                    if let Some(state) = window.try_state::<DotState>() {
+                        state.confirm_windows.closed(window.label(), &state.confirm);
+                    }
+                }
+                return;
+            }
             if window.label() == unlock::WINDOW {
                 // Cerrar la ventana de desbloqueo la descarta: ya no se acepta nada de ella.
                 if let WindowEvent::Destroyed = event {
@@ -148,7 +169,9 @@ pub fn run() {
                 logger: logger.clone(),
                 timings: Timings::default(),
             };
+            let gate = Arc::new(ConfirmGate::new(ConfirmTimings::default(), logger.clone()));
             let broker_emitter = handle.clone();
+            let broker_gate = gate.clone();
             let (broker, broker_task) = dot_link::spawn_broker(
                 ApproverConfig {
                     endpoint_dir: config.endpoint_dir.clone(),
@@ -157,16 +180,21 @@ pub fn run() {
                     timings: ApproverTimings::default(),
                 },
                 move |event: DotEvent| {
+                    // Bloqueado, caducado o perdido: la confirmación abierta ya no vale.
+                    broker_gate.on_event(&event);
                     // Solo el estado del broker: nunca la clave ni nada derivado.
                     let _ = broker_emitter.emit_to("main", DOT_EVENT, &event);
                 },
             );
             let emitter = handle.clone();
             let observer = broker.clone();
+            let link_gate = gate.clone();
             let (link, task) = dot_link::spawn(config, move |event: DotEvent| {
                 if let DotEvent::Connection { state } = &event {
                     observer.observe_main(state);
                 }
+                // Resuelta en otro sitio, sesión que se va, daemon perdido: se cancela.
+                link_gate.on_event(&event);
                 tray::on_event(&emitter, &event);
                 // Lo que se emite es `DotEvent`: por construcción no lleva el token.
                 let _ = emitter.emit_to("main", DOT_EVENT, &event);
@@ -177,6 +205,8 @@ pub fn run() {
                 link,
                 broker,
                 prompt: unlock::UnlockPrompt::default(),
+                confirm: gate,
+                confirm_windows: Arc::new(confirm::ConfirmWindows::default()),
                 logger,
                 tray,
             });
@@ -193,6 +223,8 @@ pub fn run() {
                 // resolver lo pendiente. La autoridad de aprobar se va con Dot.
                 if let Some(state) = app.try_state::<DotState>() {
                     state.prompt.clear();
+                    // Una confirmación abierta no sobrevive a Dot: no se envía.
+                    state.confirm.invalidate(CancelReason::Closing);
                     state.broker.shutdown();
                     state.link.shutdown();
                     state.logger.info("dot exit");

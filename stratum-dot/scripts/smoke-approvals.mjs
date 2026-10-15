@@ -195,8 +195,12 @@ try {
     await until('esperando aprobación', () => runIs(probe, a, 'waiting_approval'));
     assert.equal(existsSync(join(projectA, 'victim.txt')), true);
 
-    const done = await probe.order('approve', { sessionId: a, approvalId: approval.id });
+    const done = await probe.resolve('approve', { sessionId: a, approvalId: approval.id });
     assert.equal(done.ok, true, JSON.stringify(done));
+    // Lo que enseñó la confirmación nativa salió del daemon, no de la interfaz.
+    assert.equal(done.confirmation.view.approval.tool, 'exec');
+    assert.match(done.confirmation.view.approval.description, /rm victim\.txt/);
+    assert.equal(done.confirmation.view.session.cwd, projectA);
     const resolved = await until('approval.resolved', () =>
       eventsOf(probe, a).find((e) => e.type === 'approval.resolved'),
     );
@@ -226,8 +230,10 @@ try {
     const dir = project('owner');
     const id = await chat(probe, dir, 'borra');
     const approval = await requested(probe, id);
-    const crossed = await probe.order('approve', { sessionId: a, approvalId: approval.id });
+    const crossed = await probe.resolve('approve', { sessionId: a, approvalId: approval.id });
     assert.deepEqual([crossed.ok, crossed.error.code], [false, 'NOT_FOUND']);
+    // Ni se llegó a enseñar: el daemon no la lista en esa sesión.
+    assert.equal(crossed.confirmation, null);
     await sleep(300);
     assert.equal(existsSync(join(dir, 'victim.txt')), true);
     assert.equal(runIs(probe, id, 'waiting_approval'), true);
@@ -244,12 +250,18 @@ try {
     const approval = await requested(probe, id);
     assert.equal(approval.confirmPhrase, 'local');
     assert.equal(approval.environment.name, 'prod');
-    for (const attempt of [{}, { phrase: 'Local' }, { phrase: 'local', forSession: true }]) {
-      const r = await probe.order('approve', { sessionId: id, approvalId: approval.id, ...attempt });
-      assert.deepEqual([r.ok, r.error?.code], [false, 'INVALID_PARAMS'], JSON.stringify(attempt));
+    // La frase se teclea en la confirmación: una que no vale ni sale hacia el daemon.
+    for (const phrase of [undefined, 'Local']) {
+      const r = await probe.resolve('approve', { sessionId: id, approvalId: approval.id }, { phrase });
+      assert.equal(r.confirmation.view.approval.confirmPhrase, 'local');
+      assert.deepEqual([r.confirmed.ok, r.confirmed.keepOpen], [false, true], JSON.stringify(phrase));
+      assert.deepEqual([r.ok, r.error?.kind], [false, 'not-confirmed'], JSON.stringify(phrase));
+      await sleep(1200); // tras cancelar, un momento antes de otra confirmación
     }
+    const allowAll = await probe.resolve('approve', { sessionId: id, approvalId: approval.id, forSession: true });
+    assert.deepEqual([allowAll.ok, allowAll.error?.kind, allowAll.confirmation], [false, 'invalid', null]);
     assert.equal(existsSync(join(dir, 'victim.txt')), true);
-    const ok = await probe.order('approve', { sessionId: id, approvalId: approval.id, phrase: 'local' });
+    const ok = await probe.resolve('approve', { sessionId: id, approvalId: approval.id }, { phrase: 'local' });
     assert.equal(ok.ok, true, JSON.stringify(ok));
     await until('termina', () => runIs(probe, id, 'completed'));
     assert.equal(existsSync(join(dir, 'victim.txt')), false);
@@ -260,7 +272,8 @@ try {
     const dirB = project('allow-b');
     const sa = await chat(probe, dirA, 'dos borrados');
     const first = await requested(probe, sa);
-    const ok = await probe.order('approve', { sessionId: sa, approvalId: first.id, forSession: true });
+    const ok = await probe.resolve('approve', { sessionId: sa, approvalId: first.id, forSession: true });
+    assert.equal(ok.confirmation.view.action, 'Allow for this session');
     assert.equal(ok.ok, true, JSON.stringify(ok));
     await until('A termina', () => runIs(probe, sa, 'completed'));
     // El segundo borrado de A no preguntó.
@@ -282,12 +295,13 @@ try {
     await until('esperando a la persona', () => runIs(probe, id, 'waiting_input'));
     const option = request.questions[0].options.find((o) => o.label === 'production');
     const runId = probe.sessions.get(id).run.id;
-    const answered = await probe.order('answer', {
+    const answered = await probe.resolve('answer', {
       sessionId: id,
       requestId: request.id,
       answers: [{ question: request.questions[0].question, answer: option.label, optionId: option.id }],
     });
     assert.equal(answered.ok, true, JSON.stringify(answered));
+    assert.deepEqual(answered.confirmation.view.answers, [{ question: request.questions[0].question, answer: option.label }]);
     await until('termina', () => runIs(probe, id, 'completed'));
     assert.equal(probe.sessions.get(id).run.id, runId);
     assert.equal((await probe.photo(id)).messages.at(-1).text, 'Anotado: production.');
@@ -300,7 +314,8 @@ try {
     const request = await requested(probe, id, 'plan.proposed');
     assert.deepEqual(request.plan.steps.map((s) => s.title), ['Escribir planned.txt', 'Comprobarlo']);
     const runId = probe.sessions.get(id).run.id;
-    const ok = await probe.order('plan', { sessionId: id, requestId: request.id, approve: true });
+    const ok = await probe.resolve('plan', { sessionId: id, requestId: request.id, approve: true });
+    assert.equal(ok.confirmation.view.action, 'Approve plan');
     assert.equal(ok.ok, true, JSON.stringify(ok));
     await until('termina', () => runIs(probe, id, 'completed'), 40_000);
     assert.equal(probe.sessions.get(id).run.id, runId);
@@ -315,6 +330,25 @@ try {
     assert.equal(existsSync(join(dir2, 'planned.txt')), false);
   });
 
+  // --- M9: pedir no es resolver -------------------------------------------------
+  await check('con la autoridad desbloqueada, pedir sin confirmar no resuelve nada', async () => {
+    const dir = project('unconfirmed');
+    const id = await chat(probe, dir, 'borra');
+    const approval = await requested(probe, id);
+    assert.equal(probe.approver.kind, 'ready');
+    // Lo que haría un webview comprometido: pedir y no esperar a nadie. Nada sale.
+    const r = await probe.resolve('approve', { sessionId: id, approvalId: approval.id }, { cancel: true });
+    assert.deepEqual([r.ok, r.error.kind, r.error.reason], [false, 'not-confirmed', 'cancelled']);
+    await sleep(500);
+    assert.equal(runIs(probe, id, 'waiting_approval'), true);
+    assert.equal(existsSync(join(dir, 'victim.txt')), true);
+    assert.equal(eventsOf(probe, id).filter((e) => e.type === 'approval.resolved').length, 0);
+    await sleep(1200);
+    const denied = await probe.order('deny', { sessionId: id, approvalId: approval.id });
+    assert.equal(denied.ok, true, 'denegar sigue siendo directo');
+    await until('termina', () => runIs(probe, id, 'completed'));
+  });
+
   // --- carreras ---------------------------------------------------------------
   await check('dos Dot a la vez sobre la misma solicitud: gana exactamente uno', async () => {
     other = dot();
@@ -325,12 +359,13 @@ try {
     const id = await chat(probe, dir, 'borra');
     const approval = await requested(probe, id);
     await until('el segundo la ve', () => other.sessions.has(id));
+    // Las dos personas confirman a la vez: el daemon arbitra y gana una.
     const [x, y] = await Promise.all([
-      probe.order('approve', { sessionId: id, approvalId: approval.id }),
-      other.order('deny', { sessionId: id, approvalId: approval.id }),
+      probe.resolve('approve', { sessionId: id, approvalId: approval.id }),
+      other.resolve('approve', { sessionId: id, approvalId: approval.id }),
     ]);
-    const outcomes = [x.ok ? 'OK' : x.error.code, y.ok ? 'OK' : y.error.code].sort();
-    assert.deepEqual(outcomes, ['ALREADY_RESOLVED', 'OK']);
+    const outcome = (r) => (r.ok ? 'OK' : r.error.kind === 'not-confirmed' ? 'ALREADY_RESOLVED' : r.error.code);
+    assert.deepEqual([outcome(x), outcome(y)].sort(), ['ALREADY_RESOLVED', 'OK'], JSON.stringify([x, y]));
     await until('termina', () => runIs(probe, id, 'completed'));
     const resolved = eventsOf(probe, id).filter((e) => e.type === 'approval.resolved');
     assert.equal(resolved.length, 1);
@@ -347,7 +382,7 @@ try {
     const runId = probe.sessions.get(id).run.id;
     const paused = await probe.order('pause', { sessionId: id, runId });
     assert.equal(paused.ok, true, JSON.stringify(paused));
-    const ok = await probe.order('approve', { sessionId: id, approvalId: approval.id });
+    const ok = await probe.resolve('approve', { sessionId: id, approvalId: approval.id });
     assert.equal(ok.ok, true);
     await until('en pausa tras aprobar', () => runIs(probe, id, 'paused'));
     await sleep(800);
@@ -365,7 +400,7 @@ try {
     const approval = await requested(probe, id);
     const runId = probe.sessions.get(id).run.id;
     await probe.order('pause', { sessionId: id, runId });
-    await probe.order('approve', { sessionId: id, approvalId: approval.id });
+    await probe.resolve('approve', { sessionId: id, approvalId: approval.id });
     await until('en pausa', () => runIs(probe, id, 'paused'));
     const steer = await probe.order('steer', { sessionId: id, text: 'no lo borres' });
     assert.equal(steer.status, 'accepted');
@@ -392,10 +427,10 @@ try {
     assert.deepEqual(probe.sessions.get(pendingSession).snapshot.approvals.map((x) => x.id), [approval.id]);
     assert.equal(probe.sessions.get(pendingSession).run.status, 'waiting_approval');
     await until('bloqueado', () => probe.approver?.kind === 'locked');
-    const locked = await probe.order('approve', { sessionId: pendingSession, approvalId: approval.id });
-    assert.deepEqual([locked.ok, locked.error.kind], [false, 'not-sent']);
+    const locked = await probe.resolve('approve', { sessionId: pendingSession, approvalId: approval.id });
+    assert.deepEqual([locked.ok, locked.error.kind, locked.confirmation], [false, 'not-sent', null]);
     assert.equal((await unlock(probe)).ok, true);
-    assert.equal((await probe.order('approve', { sessionId: pendingSession, approvalId: approval.id })).ok, true);
+    assert.equal((await probe.resolve('approve', { sessionId: pendingSession, approvalId: approval.id })).ok, true);
     await until('termina', () => runIs(probe, pendingSession, 'completed'));
     assert.equal(existsSync(join(pendingDir, 'victim.txt')), false);
   });
@@ -412,7 +447,7 @@ try {
     const dir = project('after');
     const id = await chat(probe, dir, 'borra');
     const approval = await requested(probe, id);
-    assert.equal((await probe.order('approve', { sessionId: id, approvalId: approval.id })).ok, true);
+    assert.equal((await probe.resolve('approve', { sessionId: id, approvalId: approval.id })).ok, true);
     await until('termina', () => runIs(probe, id, 'completed'));
   });
 
@@ -422,7 +457,7 @@ try {
     const approval = await requested(probe, id);
     probe.send({ cmd: 'lock' });
     await until('bloqueado', () => probe.approver?.kind === 'locked' && probe.approver.reason === 'manual');
-    const r = await probe.order('approve', { sessionId: id, approvalId: approval.id });
+    const r = await probe.resolve('approve', { sessionId: id, approvalId: approval.id });
     assert.deepEqual([r.ok, r.error.kind], [false, 'not-sent']);
     assert.equal(runIs(probe, id, 'waiting_approval'), true);
     probe.send({ cmd: 'cancel', sessionId: id, id: 99 });
@@ -432,7 +467,15 @@ try {
 
   await check('la clave no está en ningún fichero, ni en lo que ve la interfaz, ni en el log', async () => {
     const log = readFileSync(join(logDir, 'dot.log'), 'utf-8');
-    for (const expected of ['approver: unlock attempt', 'approver: unlocked', 'approver: unlock failed (UNAUTHORIZED)', 'approver: resolve approve request=']) {
+    for (const expected of [
+      'approver: unlock attempt',
+      'approver: unlocked',
+      'approver: unlock failed (UNAUTHORIZED)',
+      'approver: resolve approve request=',
+      'confirm: opened approve request=',
+      'confirm: confirmed approve request=',
+      'confirm: not confirmed (cancelled)',
+    ]) {
       assert.ok(log.includes(expected), `falta «${expected}» en el log`);
     }
     const ui = JSON.stringify(probe.seen);

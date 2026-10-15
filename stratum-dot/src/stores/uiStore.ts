@@ -23,7 +23,8 @@ export type MainView = 'sessions' | 'human-input';
  * «Sending…», «Sent, waiting for the session…» o por qué no se aceptó.
  */
 export interface Resolution {
-  state: 'sending' | 'sent' | 'failed';
+  /** `confirming`: esperando a que la persona confirme en la ventana nativa. */
+  state: 'confirming' | 'sending' | 'sent' | 'failed';
   /** Lo que se pidió, para decirlo («Approve», «Deny»…). */
   action: string;
   message?: string;
@@ -210,6 +211,7 @@ export function activeResolution(
   now: number,
 ): Resolution | null {
   if (!resolution || !stillPending) return null;
-  if (resolution.state === 'failed') return resolution;
+  // Lo fallido se queda hasta otro intento; la confirmación, hasta que la persona decida.
+  if (resolution.state === 'failed' || resolution.state === 'confirming') return resolution;
   return now - resolution.at < RESOLUTION_TTL_MS ? resolution : null;
 }

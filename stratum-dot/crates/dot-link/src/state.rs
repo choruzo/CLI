@@ -84,6 +84,10 @@ pub enum DotEvent {
     /// está aquí ya no existe para Dot.
     Sessions {
         session_ids: Vec<String>,
+        /// Sesiones vivas que Dot **no** sigue porque ya sigue
+        /// [`crate::link::MAX_FOLLOWED_SESSIONS`]: la lista es parcial y la
+        /// interfaz lo dice. `0` = se sigue todo lo que hay.
+        unfollowed: usize,
     },
     /// Foto de una sesión: sustituye lo que se tuviera de ella.
     Snapshot {
@@ -141,6 +145,10 @@ impl ControlAction {
 ///
 /// Lo que no cabe, a propósito: variables de entorno para la sesión (su
 /// entorno es el del daemon), un `resume`, ni cerrar o reconfigurar una sesión.
+///
+/// `ListPending` y `GetSession` son consultas del lado nativo: las usa la
+/// confirmación nativa ([`crate::confirm`]) para leer **del daemon** qué se va
+/// a resolver. Ningún comando del webview las expone.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CallAction {
     /// `sessions.open`. Todo opcional: lo que falte lo decide el daemon.
@@ -156,6 +164,10 @@ pub enum CallAction {
     ListAgents { cwd: Option<String> },
     /// `models.list`.
     ListModels,
+    /// `approvals.list` de una sesión: lo que tiene pendiente, según el daemon.
+    ListPending { session_id: String },
+    /// `sessions.get`: la foto de una sesión (su directorio, su título).
+    GetSession { session_id: String },
 }
 
 impl CallAction {
@@ -165,6 +177,8 @@ impl CallAction {
             CallAction::StartRun { .. } => "start-run",
             CallAction::ListAgents { .. } => "list-agents",
             CallAction::ListModels => "list-models",
+            CallAction::ListPending { .. } => "list-pending",
+            CallAction::GetSession { .. } => "get-session",
         }
     }
 
@@ -191,6 +205,11 @@ pub enum CommandErrorKind {
     NoAnswer,
     /// El daemon (o el anfitrión de la sesión) contestó con un error.
     Rejected,
+    /// Una resolución sensible que la persona **no confirmó** en la ventana
+    /// nativa (la canceló, caducó, o la solicitud o la autoridad cambiaron
+    /// mientras tanto). No se envió nada. `reason` dice cuál
+    /// ([`crate::confirm::CancelReason`]).
+    NotConfirmed,
 }
 
 /// Por qué no se pudo dar una orden.
@@ -246,10 +265,11 @@ mod tests {
     fn los_eventos_se_serializan_con_type() {
         assert_eq!(
             serde_json::to_value(DotEvent::Sessions {
-                session_ids: vec!["a".into()]
+                session_ids: vec!["a".into()],
+                unfollowed: 0,
             })
             .unwrap(),
-            json!({ "type": "sessions", "sessionIds": ["a"] })
+            json!({ "type": "sessions", "sessionIds": ["a"], "unfollowed": 0 })
         );
         assert_eq!(
             serde_json::to_value(DotEvent::Snapshot {
@@ -276,6 +296,18 @@ mod tests {
         assert!(open.mutating() && start.mutating());
         assert!(!CallAction::ListModels.mutating());
         assert!(!CallAction::ListAgents { cwd: None }.mutating());
+        assert!(!CallAction::ListPending {
+            session_id: "s".into()
+        }
+        .mutating());
+        assert!(!CallAction::GetSession {
+            session_id: "s".into()
+        }
+        .mutating());
+        assert_eq!(
+            serde_json::to_value(CommandErrorKind::NotConfirmed).unwrap(),
+            json!("not-confirmed")
+        );
         assert_eq!(
             serde_json::to_value(CommandErrorKind::NoAnswer).unwrap(),
             json!("no-answer")

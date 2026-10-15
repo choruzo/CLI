@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="dot-confirm" content="{{NONCE}}" />
+    <title>Confirm — Stratum Dot</title>
+    <link rel="stylesheet" href="confirm.css" />
+    <script src="confirm.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1 id="title">Confirm</h1>
+      <p class="muted small">
+        Stratum Dot asks you to confirm this here, outside its main window. What you see was read from the Stratum
+        daemon.
+      </p>
+      <dl id="facts" class="facts"></dl>
+      <section id="answers" class="block" hidden>
+        <h2>Answers you are sending</h2>
+        <dl id="answer-list" class="facts"></dl>
+      </section>
+      <section id="plan" class="block" hidden>
+        <h2>Plan</h2>
+        <p id="plan-summary"></p>
+        <ol id="plan-steps"></ol>
+      </section>
+      <ul id="notes" class="notes"></ul>
+      <form id="confirm" autocomplete="off" novalidate>
+        <div id="phrase-box" hidden>
+          <label for="phrase">To approve, type <code id="phrase-text"></code></label>
+          <input id="phrase" name="phrase" type="text" autocomplete="off" autocapitalize="off" spellcheck="false" />
+        </div>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button type="button" id="cancel" autofocus>Cancel</button>
+          <button type="button" id="ok" class="primary" disabled>Confirm</button>
+        </div>
+      </form>
+      <p id="expiry" class="small muted"></p>
+    </main>
+  </body>
+</html>

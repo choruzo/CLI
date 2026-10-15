@@ -14,6 +14,12 @@
 //!    `approve`). **Solo para pruebas**: la app nunca recibe la clave por aquí
 //!    —en la app la teclea la persona en la ventana de desbloqueo— y este
 //!    binario no se distribuye con ella.
+//!  - Lo sensible (aprobar, `allow-all`, responder, aprobar un plan) pasa por
+//!    la **confirmación nativa** como en la app: su «ventana» es una línea
+//!    `{"type":"confirmation","nonce":…,"view":…}` en stdout (lo que se enseña,
+//!    leído del daemon) y la persona contesta `confirm` (`nonce`, `phrase?`) o
+//!    `dismiss` (`nonce`). La frase de una confirmación con nombre se teclea
+//!    ahí, no en `approve`.
 //!
 //! Sirve para probar Dot contra un `stratumd` real sin automatizar una
 //! ventana (`scripts/smoke-real.mjs`). Cerrar stdin lo termina, como cerrar Dot:
@@ -25,8 +31,8 @@ use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
 use dot_link::link::Timings;
 use dot_link::{
-    ApproverAction, ApproverConfig, ApproverSecret, CallAction, CliLauncher, ControlAction,
-    DotEvent, LinkConfig, Logger, QuestionAnswer,
+    ApproverAction, ApproverConfig, ApproverSecret, CallAction, CliLauncher, ConfirmGate,
+    ConfirmTimings, ControlAction, DotEvent, LinkConfig, Logger, Presenter, QuestionAnswer,
 };
 use serde_json::{json, Value};
 use std::io::Write;
@@ -38,6 +44,23 @@ fn print(value: &Value) {
     let mut out = std::io::stdout().lock();
     let _ = writeln!(out, "{value}");
     let _ = out.flush();
+}
+
+/// La «ventana» de confirmación de `dot-probe`: una línea en stdout.
+struct StdoutPresenter {
+    gate: Arc<ConfirmGate>,
+}
+
+impl Presenter for StdoutPresenter {
+    fn show(&self, nonce: &str) -> Result<(), String> {
+        let view = self.gate.view(nonce).ok_or("closed")?;
+        print(&json!({ "type": "confirmation", "nonce": nonce, "view": view }));
+        Ok(())
+    }
+
+    fn close(&self) {
+        print(&json!({ "type": "confirmation-closed" }));
+    }
 }
 
 #[tokio::main]
@@ -65,6 +88,9 @@ async fn main() {
     let logger = log_dir
         .map(|dir| Logger::to_dir(&dir))
         .unwrap_or_else(Logger::none);
+    let gate = Arc::new(ConfirmGate::new(ConfirmTimings::default(), logger.clone()));
+    let presenter = Arc::new(StdoutPresenter { gate: gate.clone() });
+    let broker_gate = gate.clone();
     let (broker, broker_task) = dot_link::spawn_broker(
         ApproverConfig {
             endpoint_dir: endpoint_dir.clone(),
@@ -72,7 +98,10 @@ async fn main() {
             logger: logger.clone(),
             timings: ApproverTimings::default(),
         },
-        |event: DotEvent| print(&serde_json::to_value(&event).unwrap_or(Value::Null)),
+        move |event: DotEvent| {
+            broker_gate.on_event(&event);
+            print(&serde_json::to_value(&event).unwrap_or(Value::Null))
+        },
     );
     let broker_running = tokio::spawn(broker_task);
     let config = LinkConfig {
@@ -84,11 +113,13 @@ async fn main() {
         timings: Timings::default(),
     };
     let observer = broker.clone();
+    let link_gate = gate.clone();
     let (link, task) = dot_link::spawn(config, move |event: DotEvent| {
         // Como la app: el broker sabe por la conexión principal si hay a quién acreditarse.
         if let DotEvent::Connection { state } = &event {
             observer.observe_main(state);
         }
+        link_gate.on_event(&event);
         print(&serde_json::to_value(&event).unwrap_or(Value::Null));
     });
     let running = tokio::spawn(task);
@@ -121,7 +152,8 @@ async fn main() {
             "approve" => Some(ApproverAction::Approve {
                 session_id: session_id.clone(),
                 approval_id: text("approvalId").unwrap_or_default(),
-                phrase: text("phrase"),
+                // Como la app: la frase se teclea en la confirmación, no aquí.
+                phrase: None,
                 for_session: msg
                     .get("forSession")
                     .and_then(Value::as_bool)
@@ -145,8 +177,31 @@ async fn main() {
             }),
             _ => None,
         };
+        if cmd == "confirm" || cmd == "dismiss" {
+            let nonce = text("nonce").unwrap_or_default();
+            let id = msg.get("id").cloned().unwrap_or(Value::Null);
+            if cmd == "dismiss" {
+                gate.cancel(&nonce);
+                continue;
+            }
+            let (gate, link, broker) = (gate.clone(), link.clone(), broker.clone());
+            let phrase = text("phrase");
+            tokio::spawn(async move {
+                match gate.confirm(&link, &broker, &nonce, phrase).await {
+                    Ok(()) => {
+                        print(&json!({ "type": "result", "cmd": "confirm", "id": id, "ok": true }))
+                    }
+                    Err(failure) => print(&json!({
+                        "type": "result", "cmd": "confirm", "id": id, "ok": false,
+                        "message": failure.message, "keepOpen": failure.keep_open
+                    })),
+                }
+            });
+            continue;
+        }
         if cmd == "unlock" || approver.is_some() {
             let broker = broker.clone();
+            let (gate, link, presenter) = (gate.clone(), link.clone(), presenter.clone());
             let id = msg.get("id").cloned().unwrap_or(Value::Null);
             let secret = if cmd == "unlock" {
                 ApproverSecret::from_bytes(text("key").unwrap_or_default().into_bytes()).ok()
@@ -155,6 +210,15 @@ async fn main() {
             };
             tokio::spawn(async move {
                 let outcome = match (approver, secret) {
+                    (Some(action), _) if action.needs_confirmation() => {
+                        match gate
+                            .request(&link, &broker, presenter.as_ref(), action)
+                            .await
+                        {
+                            Ok(confirmed) => broker.resolve_confirmed(confirmed).await,
+                            Err(error) => Err(error),
+                        }
+                    }
                     (Some(action), _) => broker.resolve(action).await,
                     (None, Some(secret)) => broker.unlock(secret).await,
                     (None, None) => Err(dot_link::CommandError::new(
@@ -240,6 +304,7 @@ async fn main() {
             }
         });
     }
+    gate.invalidate(dot_link::CancelReason::Closing);
     broker.shutdown();
     link.shutdown();
     let _ = broker_running.await;

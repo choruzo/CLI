@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos de la ventana principal de Stratum Dot: los mínimos. El webview no tiene sistema de ficheros, ni shell, ni diálogos, ni red (CSP), ni permisos de ventana: solo puede invocar los comandos `dot_*` de src-tauri/src/commands.rs (declarados en build.rs, uno a uno aquí) y escuchar `dot://event`. No puede leer endpoint.json, ni conoce el token del canal, ni la clave de aprobador, ni puede enviar un método cualquiera del Stratum Protocol: conectar, autenticar y suscribirse lo hace Rust (crates/dot-link). La ventana de desbloqueo (`unlock`) no está en ninguna capacidad: no puede invocar nada.",
+  "description": "Permisos de la ventana principal de Stratum Dot: los mínimos. Del núcleo de Tauri solo escuchar eventos (`core:event:allow-listen`/`allow-unlisten`): ni emitir, ni ventanas, ni webviews, ni menús, ni bandeja, ni rutas. El webview no tiene sistema de ficheros, ni shell, ni diálogos, ni red (CSP): solo puede invocar los comandos `dot_*` de src-tauri/src/commands.rs (declarados en build.rs, uno a uno aquí) y escuchar `dot://event`. No puede leer endpoint.json, ni conoce el token del canal, ni la clave de aprobador, ni puede enviar un método cualquiera del Stratum Protocol: conectar, autenticar y suscribirse lo hace Rust (crates/dot-link). Las ventanas de desbloqueo (`unlock`) y de confirmación (`confirm-N`) no están en ninguna capacidad: no pueden invocar nada.",
   "windows": [
     "main"
   ],
   "permissions": [
-    "core:default",
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
     "allow-dot-attach",
     "allow-dot-retry",
     "allow-dot-focus-session",

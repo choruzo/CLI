@@ -53,6 +53,7 @@ const Row = memo(function Row({
 /** Las sesiones vivas que conoce el daemon —las suyas y las de una terminal— y cómo abrir una. */
 export function Overview({ selectedId, now, stale, connected, canOpen, onSelect, onNewChat }: Props) {
   const order = useSessions((s) => s.order);
+  const unfollowed = useSessions((s) => s.unfollowed);
 
   return (
     <nav className={`overview${stale ? ' stale' : ''}`} aria-label="Sessions">
@@ -72,6 +73,12 @@ export function Overview({ selectedId, now, stale, connected, canOpen, onSelect,
           + New chat
         </button>
       </div>
+      {unfollowed > 0 ? (
+        <p className="note small partial" role="note" data-partial={unfollowed}>
+          Partial view: {unfollowed} more live {unfollowed === 1 ? 'session is' : 'sessions are'} not shown. Dot
+          follows up to {order.length} at a time; they appear here when others end.
+        </p>
+      ) : null}
       {order.length === 0 ? (
         <p className="muted small empty">
           {connected

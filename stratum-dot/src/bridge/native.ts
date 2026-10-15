@@ -10,6 +10,11 @@
  * (`approve`, `deny`, `answerQuestions`, `decidePlan`) y el broker nativo lo
  * hace con su propia conexión. Desbloquearlo abre otra ventana, donde se
  * teclea la clave; de ella aquí solo llega el estado (`ApproverStatus`).
+ *
+ * Y pedir no es resolver (M9): aprobar, «para la sesión», enviar respuestas y
+ * aprobar un plan abren una **confirmación nativa** —otra ventana, que el
+ * webview no controla— y solo se envían si la persona confirma allí. La frase
+ * de una confirmación con nombre se teclea en esa ventana, no aquí.
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -60,7 +65,8 @@ export type DotView = 'human-input';
  */
 export type DotEvent =
   | { type: 'connection'; state: ConnectionState }
-  | { type: 'sessions'; sessionIds: string[] }
+  /** `unfollowed`: sesiones vivas que Dot no sigue (ya sigue 64): la lista es parcial. */
+  | { type: 'sessions'; sessionIds: string[]; unfollowed?: number }
   | { type: 'snapshot'; sessionId: string; snapshot: unknown }
   | { type: 'events'; sessionId: string; events: unknown[] }
   | { type: 'approver'; status: ApproverStatus }
@@ -77,11 +83,20 @@ export interface AppInfo {
 /**
  * `unknown`: algo que cambia estado salió y no hubo respuesta —no se sabe si se
  * aplicó, y no se reenvía—. `no-answer`: una consulta sin respuesta (repetirla
- * es seguro).
+ * es seguro). `not-confirmed`: la persona no confirmó en la ventana nativa (la
+ * canceló, caducó, o la solicitud o la autoridad cambiaron); no salió nada, y
+ * `reason` dice por qué (`cancelled`, `expired`, `locked`, `resolved-elsewhere`…).
  */
-export type CommandErrorKind = 'invalid' | 'not-sent' | 'unknown' | 'no-answer' | 'rejected';
+export type CommandErrorKind = 'invalid' | 'not-sent' | 'unknown' | 'no-answer' | 'rejected' | 'not-confirmed';
 
-const ERROR_KINDS: readonly CommandErrorKind[] = ['invalid', 'not-sent', 'unknown', 'no-answer', 'rejected'];
+const ERROR_KINDS: readonly CommandErrorKind[] = [
+  'invalid',
+  'not-sent',
+  'unknown',
+  'no-answer',
+  'rejected',
+  'not-confirmed',
+];
 
 /** Por qué no se pudo dar una orden (`CommandError` en `state.rs`). */
 export interface CommandError {
@@ -163,15 +178,17 @@ export interface NativeBridge {
   /** Suelta la autoridad. Lo pendiente sigue pendiente. */
   lockApprovals(): Promise<void>;
   /**
-   * Aprueba una solicitud de esa sesión, una vez. `phrase` es lo que tecleó la
-   * persona si la solicitud pide frase; `forSession` = `allow-all` (solo esa
-   * sesión). Resuelve cuando el daemon lo acepta: lo que cambie llega por eventos.
+   * Pide aprobar una solicitud de esa sesión. Abre la confirmación nativa y
+   * solo se envía (una vez) si la persona confirma allí; si la solicitud pide
+   * frase, se teclea allí. `forSession` = `allow-all` (solo esa sesión).
+   * Resuelve cuando el daemon lo acepta: lo que cambie llega por eventos.
    */
-  approve(sessionId: string, approvalId: string, opts: { phrase?: string; forSession: boolean }): Promise<void>;
+  approve(sessionId: string, approvalId: string, opts: { forSession: boolean }): Promise<void>;
+  /** Directo, sin confirmación: es lo que pasa cuando nadie contesta. */
   deny(sessionId: string, approvalId: string): Promise<void>;
-  /** `null` omite la tanda: el agente sigue con supuestos. */
+  /** Con respuestas, confirmación nativa; `null` omite la tanda (directo): el agente sigue con supuestos. */
   answerQuestions(sessionId: string, requestId: string, answers: QuestionAnswerInput[] | null): Promise<void>;
-  /** Aprueba el plan propuesto tal cual, o lo rechaza. */
+  /** Aprobar el plan tal cual pide confirmación nativa; rechazarlo, no. */
   decidePlan(sessionId: string, requestId: string, decision: 'approve' | 'reject'): Promise<void>;
   /** Para la bandeja: cuánto se enseña pendiente. */
   setAttention(counts: PendingCounts): Promise<void>;
@@ -206,8 +223,7 @@ export const tauriBridge: NativeBridge = {
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),
-  approve: (sessionId, approvalId, opts) =>
-    invoke('dot_approve', { sessionId, approvalId, phrase: opts.phrase ?? null, forSession: opts.forSession }),
+  approve: (sessionId, approvalId, opts) => invoke('dot_approve', { sessionId, approvalId, forSession: opts.forSession }),
   deny: (sessionId, approvalId) => invoke('dot_deny', { sessionId, approvalId }),
   answerQuestions: (sessionId, requestId, answers) =>
     invoke('dot_answer_questions', { sessionId, requestId, answers }),
