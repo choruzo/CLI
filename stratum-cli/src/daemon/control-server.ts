@@ -40,6 +40,7 @@ import { getLogger } from '../logging/index.js';
 import type { ApproverAuth } from './approver-key.js';
 import { authorize, grantCapabilities, type Principal } from './authorize.js';
 import type { HubClient } from './event-hub.js';
+import { peerVerification, type PeerVerification } from './peer-identity.js';
 
 const log = getLogger('daemon').child('server');
 
@@ -49,6 +50,11 @@ export interface ClientConnection extends HubClient, Principal {
   readonly connectedAt: number;
   /** Lo que el cliente declaró ser en `core.hello`. No es una identidad verificada. */
   client: { kind: ClientKind; name: string; version: string } | null;
+  /**
+   * Qué comprobó el sistema operativo antes de dejarle conectar (`peer-identity.ts`).
+   * No distingue procesos del mismo usuario, y no da ni quita capacidades.
+   */
+  readonly verification: PeerVerification;
   /** Bytes aceptados y aún sin enviar. */
   readonly bufferedBytes: number;
   /**
@@ -115,6 +121,7 @@ class Connection implements ClientConnection {
   capabilities: Capability[] = [];
   client: ClientConnection['client'] = null;
   readonly connectedAt = Date.now();
+  readonly verification = peerVerification();
   peer!: RpcPeer;
   closing = false;
   /** La salida vuelve a admitir datos. */
@@ -222,7 +229,7 @@ export class ControlServer {
     );
     const decoder = new LineDecoder(MAX_UNAUTHENTICATED_MESSAGE_BYTES);
     this.connections.add(conn);
-    log.debug('client connected', { connectionId: conn.id });
+    log.debug('client connected', { connectionId: conn.id, verification: conn.verification.check });
 
     const handlers: RequestHandlers = {
       ...this.wrap(conn, this.opts.handlers(conn)),

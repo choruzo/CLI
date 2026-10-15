@@ -16,11 +16,12 @@
  * El token no se registra ni viaja en ningún error.
  */
 import { randomBytes } from 'crypto';
-import { chmod, link, mkdir, readFile, rename, unlink, writeFile } from 'fs/promises';
+import { chmod, link, readFile, rename, unlink, writeFile } from 'fs/promises';
 import { createConnection } from 'net';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ENDPOINT_FILE, processAlive, type Endpoint } from '../client/discovery.js';
+import { ensurePrivateDir } from './private-dir.js';
 
 /** Ya hay un daemon vivo publicado en ese directorio. */
 export class DaemonAlreadyRunningError extends Error {
@@ -111,9 +112,8 @@ export async function claimEndpoint(opts: ClaimOptions): Promise<EndpointClaim> 
   const file = join(opts.dir, ENDPOINT_FILE);
   const mine = JSON.stringify(opts.endpoint, null, 2) + '\n';
 
-  await mkdir(opts.dir, { recursive: true, mode: 0o700 });
-  // `mode` solo cuenta al crear: una carpeta que ya existía se ajusta aparte.
-  await chmod(opts.dir, 0o700).catch(() => undefined);
+  // Privada o nada: ni un enlace, ni de otro usuario, ni accesible a otros (POSIX).
+  await ensurePrivateDir(opts.dir);
 
   const tmp = join(opts.dir, `.endpoint-${process.pid}-${randomBytes(6).toString('hex')}.tmp`);
   await writeFile(tmp, mine, { mode: 0o600, flag: 'wx' });

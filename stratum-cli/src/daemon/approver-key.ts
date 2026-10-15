@@ -22,9 +22,10 @@
  * de un atacante con el control de la cuenta. Ver `docs/protocol.md` §15.
  */
 import { randomBytes, scrypt, timingSafeEqual } from 'crypto';
-import { chmodSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'fs';
+import { chmodSync, readFileSync, renameSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
+import { ensurePrivateDirSync } from './private-dir.js';
 
 export const APPROVER_KEY_FILE = 'approver.json';
 /** Longitud mínima de la clave: se teclea, pero no puede ser trivial. */
@@ -129,7 +130,7 @@ export async function writeApproverKey(dir: string, key: string): Promise<string
     hash: hash.toString('hex'),
     createdAt: new Date().toISOString(),
   };
-  mkdirSync(dir, { recursive: true, mode: 0o700 });
+  ensurePrivateDirSync(dir);
   const path = approverKeyPath(dir);
   const tmp = `${path}.${process.pid}.tmp`;
   writeFileSync(tmp, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
