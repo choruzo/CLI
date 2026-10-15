@@ -1,7 +1,33 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos de la ventana de Stratum Dot: los mínimos. El webview no tiene sistema de ficheros, ni shell, ni diálogos, ni red (CSP), ni permisos de ventana: solo puede invocar los comandos `dot_*` de src-tauri/src/commands.rs y escuchar `dot://event`. No puede leer endpoint.json, ni conoce el token del canal, ni puede enviar un método cualquiera del Stratum Protocol: conectar, autenticar y suscribirse lo hace Rust (crates/dot-link).",
-  "windows": ["main"],
-  "permissions": ["core:default"]
+  "description": "Permisos de la ventana principal de Stratum Dot: los mínimos. El webview no tiene sistema de ficheros, ni shell, ni diálogos, ni red (CSP), ni permisos de ventana: solo puede invocar los comandos `dot_*` de src-tauri/src/commands.rs (declarados en build.rs, uno a uno aquí) y escuchar `dot://event`. No puede leer endpoint.json, ni conoce el token del canal, ni la clave de aprobador, ni puede enviar un método cualquiera del Stratum Protocol: conectar, autenticar y suscribirse lo hace Rust (crates/dot-link). La ventana de desbloqueo (`unlock`) no está en ninguna capacidad: no puede invocar nada.",
+  "windows": [
+    "main"
+  ],
+  "permissions": [
+    "core:default",
+    "allow-dot-attach",
+    "allow-dot-retry",
+    "allow-dot-focus-session",
+    "allow-dot-resync-session",
+    "allow-dot-pause-run",
+    "allow-dot-resume-run",
+    "allow-dot-cancel-run",
+    "allow-dot-steer-run",
+    "allow-dot-open-session",
+    "allow-dot-start-run",
+    "allow-dot-list-agents",
+    "allow-dot-list-models",
+    "allow-dot-approver-status",
+    "allow-dot-approver-unlock",
+    "allow-dot-approver-lock",
+    "allow-dot-approve",
+    "allow-dot-deny",
+    "allow-dot-answer-questions",
+    "allow-dot-decide-plan",
+    "allow-dot-set-attention",
+    "allow-dot-hide",
+    "allow-dot-quit"
+  ]
 }

@@ -1,4 +1,4 @@
-/* Stratum Dot — estilos de M6/M7: claros y legibles, sin diseño final. */
+/* Stratum Dot — estilos de M6–M8: claros y legibles, sin diseño final. */
 :root {
   color-scheme: dark light;
   --bg: #0d0d0d;
@@ -676,4 +676,205 @@ p {
   50% {
     opacity: 0.45;
   }
+}
+
+/* --- centro de aprobaciones (M8) ----------------------------------------- */
+.waiting-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  white-space: nowrap;
+}
+.waiting-badge .count,
+.hi-section .count {
+  display: inline-block;
+  min-width: 1.4em;
+  padding: 0 0.3em;
+  border-radius: 999px;
+  border: 1px solid var(--line);
+  text-align: center;
+  font-variant-numeric: tabular-nums;
+}
+.waiting-badge.has {
+  border-color: var(--wait);
+}
+.waiting-badge.has .count {
+  border-color: var(--wait);
+  color: var(--wait);
+  font-weight: 600;
+}
+.waiting-badge[aria-pressed='true'] {
+  border-color: var(--text);
+}
+
+.human-input {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  padding: 0.6rem 0.75rem 0;
+}
+.hi-head {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.hi-head h2:focus {
+  outline: none;
+}
+.hi-head h2:focus-visible {
+  outline: 2px solid var(--focus);
+}
+.authority {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.5rem 0.75rem;
+  margin: 0.5rem 0;
+  padding: 0.45rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.authority-state {
+  font-weight: 600;
+}
+.authority[data-approver='ready'] .authority-state {
+  color: var(--ok);
+}
+.authority-text {
+  flex: 1 1 14rem;
+  min-width: 0;
+}
+.hi-scroll {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding-bottom: 1rem;
+}
+.hi-section h3 {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+
+.card.interaction {
+  margin: 0.5rem 0;
+  padding: 0.6rem 0.75rem;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--wait);
+  border-radius: 6px;
+  background: var(--panel);
+}
+.card.interaction:focus {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+/* Forzada o con frase: más contexto, y no solo por el color (lleva su etiqueta). */
+.card.interaction.danger {
+  border-left-width: 5px;
+  border-left-color: var(--bad);
+}
+.card-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0.4rem 0.6rem;
+}
+.card-head h4 {
+  margin: 0;
+  font-size: 0.95rem;
+}
+.tag {
+  padding: 0 0.4rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  font-size: 0.8rem;
+}
+.tag.warn {
+  border-color: var(--bad);
+  color: var(--bad);
+}
+.facts {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 0.15rem 0.75rem;
+  margin: 0.5rem 0;
+}
+.facts dt {
+  color: var(--muted);
+}
+.facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+pre.action {
+  margin: 0;
+  padding: 0.3rem 0.45rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  font-family: ui-monospace, 'Cascadia Mono', Consolas, monospace;
+  font-size: 0.85rem;
+  background: var(--bg);
+  border-radius: 4px;
+}
+.phrase label,
+.question legend {
+  display: block;
+  margin-bottom: 0.25rem;
+}
+.phrase input,
+.question .answer {
+  width: 100%;
+  padding: 0.3rem 0.45rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+  background: var(--bg);
+  color: inherit;
+  font: inherit;
+}
+.phrase input[aria-invalid='true'] {
+  border-color: var(--bad);
+}
+.question {
+  margin: 0.5rem 0;
+  padding: 0.4rem 0.55rem;
+  border: 1px solid var(--line);
+  border-radius: 4px;
+}
+.question .option {
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+.decision {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin-top: 0.6rem;
+}
+.decision .spacer {
+  flex: 1;
+}
+.plan-summary {
+  white-space: pre-wrap;
+}
+.plan-steps {
+  margin: 0.25rem 0 0;
+  padding-left: 1.3rem;
+}
+.outcomes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.outcomes li {
+  overflow-wrap: anywhere;
+}
+.pending-box li .btn {
+  margin-left: 0.25rem;
 }

@@ -5,6 +5,11 @@
  * protocolo, y el webview nunca ve el token del canal, la ruta del pipe ni el
  * `endpoint.json`: conectar, autenticar y suscribirse es cosa de Rust
  * (`crates/dot-link`).
+ *
+ * Aprobar tampoco pasa credenciales por aquí: el webview pide **qué** resolver
+ * (`approve`, `deny`, `answerQuestions`, `decidePlan`) y el broker nativo lo
+ * hace con su propia conexión. Desbloquearlo abre otra ventana, donde se
+ * teclea la clave; de ella aquí solo llega el estado (`ApproverStatus`).
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -31,6 +36,24 @@ export type ConnectionState =
     }
   | { kind: 'error'; message: string };
 
+/** Por qué está bloqueada la autoridad de aprobar (`LockReason` en `dot-link/src/approver.rs`). */
+export type ApproverLockReason = 'initial' | 'manual' | 'expired' | 'connection-lost' | 'daemon-changed';
+
+/**
+ * Estado del broker de aprobador (`ApproverStatus`). Es lo único que el
+ * webview sabe de la autoridad de aprobar: ni la clave, ni nada derivado.
+ */
+export type ApproverStatus =
+  | { kind: 'locked'; reason: ApproverLockReason }
+  | { kind: 'unlocking' }
+  /** `expiresAt`: ms Unix, del reloj local. Solo para enseñarlo. */
+  | { kind: 'ready'; expiresAt: number }
+  | { kind: 'unavailable'; reason: 'not-connected' | 'no-approver-key' }
+  | { kind: 'error'; message: string };
+
+/** Vistas que el lado nativo puede pedir que se abran (la bandeja). */
+export type DotView = 'human-input';
+
 /**
  * Lo que llega del lado nativo. `snapshot` y `events` traen DTOs del protocolo
  * sin validar (`unknown`): quien los recibe los pasa por `protocol/apply.ts`.
@@ -39,7 +62,9 @@ export type DotEvent =
   | { type: 'connection'; state: ConnectionState }
   | { type: 'sessions'; sessionIds: string[] }
   | { type: 'snapshot'; sessionId: string; snapshot: unknown }
-  | { type: 'events'; sessionId: string; events: unknown[] };
+  | { type: 'events'; sessionId: string; events: unknown[] }
+  | { type: 'approver'; status: ApproverStatus }
+  | { type: 'open-view'; view: DotView };
 
 export interface AppInfo {
   dotVersion: string;
@@ -91,6 +116,20 @@ export interface OpenSessionRequest {
   model?: string;
 }
 
+/** Una respuesta a una pregunta del agente (`ProtocolQuestionAnswer`). */
+export interface QuestionAnswerInput {
+  question: string;
+  answer: string;
+  optionId?: string;
+}
+
+/** Cuánto espera a una persona, para la bandeja. Solo un contador. */
+export interface PendingCounts {
+  approvals: number;
+  questions: number;
+  plans: number;
+}
+
 export interface NativeBridge {
   /**
    * La interfaz está lista. El estado de la conexión y una foto de cada sesión
@@ -117,6 +156,25 @@ export interface NativeBridge {
   startRun(sessionId: string, input: string): Promise<unknown>;
   listAgents(cwd?: string): Promise<unknown>;
   listModels(): Promise<unknown>;
+  /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
+  approverStatus(): Promise<ApproverStatus>;
+  /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
+  unlockApprovals(): Promise<void>;
+  /** Suelta la autoridad. Lo pendiente sigue pendiente. */
+  lockApprovals(): Promise<void>;
+  /**
+   * Aprueba una solicitud de esa sesión, una vez. `phrase` es lo que tecleó la
+   * persona si la solicitud pide frase; `forSession` = `allow-all` (solo esa
+   * sesión). Resuelve cuando el daemon lo acepta: lo que cambie llega por eventos.
+   */
+  approve(sessionId: string, approvalId: string, opts: { phrase?: string; forSession: boolean }): Promise<void>;
+  deny(sessionId: string, approvalId: string): Promise<void>;
+  /** `null` omite la tanda: el agente sigue con supuestos. */
+  answerQuestions(sessionId: string, requestId: string, answers: QuestionAnswerInput[] | null): Promise<void>;
+  /** Aprueba el plan propuesto tal cual, o lo rechaza. */
+  decidePlan(sessionId: string, requestId: string, decision: 'approve' | 'reject'): Promise<void>;
+  /** Para la bandeja: cuánto se enseña pendiente. */
+  setAttention(counts: PendingCounts): Promise<void>;
   hideWindow(): Promise<void>;
   /** Cierra Dot. El daemon y las sesiones siguen. */
   quit(): Promise<void>;
@@ -145,6 +203,16 @@ export const tauriBridge: NativeBridge = {
   startRun: (sessionId, input) => invoke<unknown>('dot_start_run', { sessionId, input }),
   listAgents: (cwd) => invoke<unknown>('dot_list_agents', { cwd: cwd ?? null }),
   listModels: () => invoke<unknown>('dot_list_models'),
+  approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
+  unlockApprovals: () => invoke('dot_approver_unlock'),
+  lockApprovals: () => invoke('dot_approver_lock'),
+  approve: (sessionId, approvalId, opts) =>
+    invoke('dot_approve', { sessionId, approvalId, phrase: opts.phrase ?? null, forSession: opts.forSession }),
+  deny: (sessionId, approvalId) => invoke('dot_deny', { sessionId, approvalId }),
+  answerQuestions: (sessionId, requestId, answers) =>
+    invoke('dot_answer_questions', { sessionId, requestId, answers }),
+  decidePlan: (sessionId, requestId, decision) => invoke('dot_decide_plan', { sessionId, requestId, decision }),
+  setAttention: (counts) => invoke('dot_set_attention', { ...counts }),
   hideWindow: () => invoke('dot_hide'),
   quit: () => invoke('dot_quit'),
   onEvent: (handler) => listen<DotEvent>(DOT_EVENT, (e) => handler(e.payload)),

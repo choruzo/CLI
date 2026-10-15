@@ -2,6 +2,7 @@
  * Une el lado nativo con los stores: cada `DotEvent` va a su sitio, y nada más.
  * Aquí no hay lógica del protocolo: validar y reducir es de `protocol/apply.ts`.
  */
+import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
 import { useUi } from '../stores/uiStore';
@@ -27,6 +28,13 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
         void native.resyncSession(event.sessionId).catch(() => undefined);
       }
       break;
+    case 'approver':
+      useApprover.getState().setStatus(event.status);
+      break;
+    case 'open-view':
+      // La bandeja pide el centro de aprobaciones: se abre, sin resolver nada.
+      if (event.view === 'human-input') useUi.getState().openHumanInput();
+      break;
   }
 }
 
@@ -45,6 +53,11 @@ export async function startBridge(native: NativeBridge): Promise<() => void> {
   });
   const info = await native.attach();
   useConnection.getState().setInfo(info);
+  // Al recargar la interfaz, el broker sigue como estaba: se le pregunta.
+  void native
+    .approverStatus()
+    .then((status) => useApprover.getState().setStatus(status))
+    .catch(() => undefined);
   const selected = useUi.getState().selectedId;
   if (selected) void native.focusSession(selected).catch(() => undefined);
   return stop;

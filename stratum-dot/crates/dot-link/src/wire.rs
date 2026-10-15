@@ -4,12 +4,26 @@
 
 use serde_json::{json, Value};
 
-/// Métodos que Dot envía. Es una lista cerrada: no existe forma de enviar un
-/// método que no esté aquí, y `core.shutdown` no está —cerrar Dot nunca apaga
-/// el daemon— ni ninguno que exija la capacidad `approve`. De una sesión, Dot
-/// puede **abrirla** e iniciar sus runs; cerrarla o cambiarle el modelo, no.
+/// Lo que tiene un método que se puede escribir en una línea. Lo implementan
+/// [`MainMethod`] y [`ApproverMethod`], y nada más: el rasgo está sellado.
+pub trait WireMethod: Copy + sealed::Sealed {
+    fn name(self) -> &'static str;
+}
+
+mod sealed {
+    pub trait Sealed {}
+    impl Sealed for super::MainMethod {}
+    impl Sealed for super::ApproverMethod {}
+}
+
+/// Métodos de la **conexión principal** de Dot (`operator`: observar y
+/// conducir runs). Es una lista cerrada: no existe forma de enviar un método
+/// que no esté aquí, y `core.shutdown` no está —cerrar Dot nunca apaga el
+/// daemon— ni ninguno que exija la capacidad `approve`: esos son de
+/// [`ApproverMethod`], que va por otra conexión. De una sesión, Dot puede
+/// **abrirla** e iniciar sus runs; cerrarla o cambiarle el modelo, no.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Method {
+pub enum MainMethod {
     CoreHello,
     EventsSubscribe,
     EventsUnsubscribe,
@@ -23,40 +37,74 @@ pub enum Method {
     ModelsList,
 }
 
-impl Method {
-    pub const ALL: [Method; 11] = [
-        Method::CoreHello,
-        Method::EventsSubscribe,
-        Method::EventsUnsubscribe,
-        Method::RunsPause,
-        Method::RunsResume,
-        Method::RunsCancel,
-        Method::RunsSteer,
-        Method::RunsStart,
-        Method::SessionsOpen,
-        Method::AgentsList,
-        Method::ModelsList,
+impl MainMethod {
+    pub const ALL: [MainMethod; 11] = [
+        MainMethod::CoreHello,
+        MainMethod::EventsSubscribe,
+        MainMethod::EventsUnsubscribe,
+        MainMethod::RunsPause,
+        MainMethod::RunsResume,
+        MainMethod::RunsCancel,
+        MainMethod::RunsSteer,
+        MainMethod::RunsStart,
+        MainMethod::SessionsOpen,
+        MainMethod::AgentsList,
+        MainMethod::ModelsList,
     ];
+}
 
-    pub fn name(self) -> &'static str {
+impl WireMethod for MainMethod {
+    fn name(self) -> &'static str {
         match self {
-            Method::CoreHello => "core.hello",
-            Method::EventsSubscribe => "events.subscribe",
-            Method::EventsUnsubscribe => "events.unsubscribe",
-            Method::RunsPause => "runs.pause",
-            Method::RunsResume => "runs.resume",
-            Method::RunsCancel => "runs.cancel",
-            Method::RunsSteer => "runs.steer",
-            Method::RunsStart => "runs.start",
-            Method::SessionsOpen => "sessions.open",
-            Method::AgentsList => "agents.list",
-            Method::ModelsList => "models.list",
+            MainMethod::CoreHello => "core.hello",
+            MainMethod::EventsSubscribe => "events.subscribe",
+            MainMethod::EventsUnsubscribe => "events.unsubscribe",
+            MainMethod::RunsPause => "runs.pause",
+            MainMethod::RunsResume => "runs.resume",
+            MainMethod::RunsCancel => "runs.cancel",
+            MainMethod::RunsSteer => "runs.steer",
+            MainMethod::RunsStart => "runs.start",
+            MainMethod::SessionsOpen => "sessions.open",
+            MainMethod::AgentsList => "agents.list",
+            MainMethod::ModelsList => "models.list",
+        }
+    }
+}
+
+/// Métodos de la **conexión de aprobador** (`crate::approver`): saludar y
+/// resolver. Nada de observar ni de conducir: ni `runs.*`, ni `sessions.*`, ni
+/// suscripciones, ni `core.shutdown`. Resolver no se puede pedir por la
+/// conexión principal ni conducir un run por esta: son tipos distintos.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ApproverMethod {
+    CoreHello,
+    ApprovalsResolve,
+    QuestionsAnswer,
+    PlansDecide,
+}
+
+impl ApproverMethod {
+    pub const ALL: [ApproverMethod; 4] = [
+        ApproverMethod::CoreHello,
+        ApproverMethod::ApprovalsResolve,
+        ApproverMethod::QuestionsAnswer,
+        ApproverMethod::PlansDecide,
+    ];
+}
+
+impl WireMethod for ApproverMethod {
+    fn name(self) -> &'static str {
+        match self {
+            ApproverMethod::CoreHello => "core.hello",
+            ApproverMethod::ApprovalsResolve => "approvals.resolve",
+            ApproverMethod::QuestionsAnswer => "questions.answer",
+            ApproverMethod::PlansDecide => "plans.decide",
         }
     }
 }
 
 /// Una petición como línea NDJSON (con su `\n`).
-pub fn request_line(id: u64, method: Method, params: Value) -> String {
+pub fn request_line(id: u64, method: impl WireMethod, params: Value) -> String {
     let mut line = json!({ "id": id, "method": method.name(), "params": params }).to_string();
     line.push('\n');
     line
@@ -176,8 +224,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn la_lista_de_metodos_es_cerrada_y_no_apaga_ni_aprueba() {
-        let names: Vec<&str> = Method::ALL.iter().map(|m| m.name()).collect();
+    fn la_lista_principal_es_cerrada_y_no_apaga_ni_aprueba() {
+        let names: Vec<&str> = MainMethod::ALL.iter().map(|m| m.name()).collect();
         assert_eq!(
             names,
             [
@@ -216,8 +264,37 @@ mod tests {
     }
 
     #[test]
+    fn la_de_aprobador_solo_saluda_y_resuelve() {
+        let names: Vec<&str> = ApproverMethod::ALL.iter().map(|m| m.name()).collect();
+        assert_eq!(
+            names,
+            [
+                "core.hello",
+                "approvals.resolve",
+                "questions.answer",
+                "plans.decide"
+            ]
+        );
+        // Separación en los dos sentidos: lo que una tiene, la otra no (salvo el saludo).
+        for method in ApproverMethod::ALL {
+            let name = method.name();
+            assert!(
+                !name.starts_with("runs.")
+                    && !name.starts_with("sessions.")
+                    && !name.starts_with("events.")
+                    && !name.starts_with("host.")
+                    && name != "core.shutdown",
+                "{name}"
+            );
+            if name != "core.hello" {
+                assert!(!MainMethod::ALL.iter().any(|m| m.name() == name), "{name}");
+            }
+        }
+    }
+
+    #[test]
     fn peticion_en_una_linea() {
-        let line = request_line(7, Method::RunsPause, json!({ "sessionId": "ses_1" }));
+        let line = request_line(7, MainMethod::RunsPause, json!({ "sessionId": "ses_1" }));
         assert!(line.ends_with('\n'));
         assert_eq!(line.matches('\n').count(), 1);
         let v: Value = serde_json::from_str(line.trim_end()).unwrap();

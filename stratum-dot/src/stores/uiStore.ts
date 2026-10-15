@@ -14,6 +14,22 @@ export type ControlKind = 'pause' | 'resume' | 'cancel';
 /** Qué se enseña de la sesión seleccionada. */
 export type SessionTab = 'chat' | 'activity';
 
+/** La pantalla: sesiones (lista + detalle) o el centro de aprobaciones. */
+export type MainView = 'sessions' | 'human-input';
+
+/**
+ * Lo que la interfaz sabe de una resolución que **ella** envió. No es el
+ * estado de la solicitud —ese es la foto y su `*.resolved`—: sirve para decir
+ * «Sending…», «Sent, waiting for the session…» o por qué no se aceptó.
+ */
+export interface Resolution {
+  state: 'sending' | 'sent' | 'failed';
+  /** Lo que se pidió, para decirlo («Approve», «Deny»…). */
+  action: string;
+  message?: string;
+  at: number;
+}
+
 /**
  * Una orden que el daemon aceptó y cuyo efecto aún no ha llegado por eventos.
  * Sirve para decir «Pause requested»; **no** cambia el estado que se enseña del
@@ -49,6 +65,8 @@ export const PENDING_TTL_MS = 60_000;
 export const SEND_TTL_MS = 30_000;
 /** Cuánto se espera a que el daemon publique una sesión recién abierta. */
 export const OPENING_TTL_MS = 20_000;
+/** Cuánto se espera a que llegue el `*.resolved` de algo que se resolvió desde aquí. */
+export const RESOLUTION_TTL_MS = 30_000;
 
 const SELECTED_KEY = 'stratum-dot.selectedSession';
 const LAST_CWD_KEY = 'stratum-dot.lastCwd';
@@ -84,7 +102,16 @@ interface UiStore {
   /** Sesiones que Dot acaba de pedir abrir y el daemon aún no ha publicado. */
   opening: Record<string, number>;
   notices: Record<string, Notice>;
+  view: MainView;
+  /** La solicitud que hay que poner delante al abrir el centro (desde el chat). */
+  focusItem: string | null;
+  /** Por `sesión:id` de solicitud. Solo vive en memoria, y nunca guarda lo tecleado. */
+  resolutions: Record<string, Resolution>;
   select(id: string | null): void;
+  /** Abre el centro de aprobaciones, opcionalmente en esa solicitud. */
+  openHumanInput(itemId?: string | null): void;
+  setView(view: MainView): void;
+  setResolution(id: string, resolution: Omit<Resolution, 'at'> | null): void;
   setTab(tab: SessionTab): void;
   setComposingNew(open: boolean): void;
   setLastCwd(cwd: string): void;
@@ -112,10 +139,20 @@ export const useUi = create<UiStore>((set) => ({
   sends: {},
   opening: {},
   notices: {},
+  view: 'sessions',
+  focusItem: null,
+  resolutions: {},
+  openHumanInput: (itemId = null) => set({ view: 'human-input', focusItem: itemId }),
+  setView: (view) => set({ view, focusItem: null }),
+  setResolution: (id, resolution) =>
+    set((prev) => ({
+      resolutions: withEntry(prev.resolutions, id, resolution ? { ...resolution, at: Date.now() } : null),
+    })),
   select: (id) => {
     writePreference(SELECTED_KEY, id);
-    // Elegir una sesión (o ninguna) cierra el formulario: nunca los dos a la vez.
-    set({ selectedId: id, composingNew: false });
+    // Elegir una sesión (o ninguna) cierra el formulario —nunca los dos a la
+    // vez— y vuelve a la pantalla de sesiones.
+    set({ selectedId: id, composingNew: false, view: 'sessions' });
   },
   setTab: (tab) => set({ tab }),
   setComposingNew: (open) => set({ composingNew: open }),
@@ -161,4 +198,18 @@ export function activeSend(
   if (!send) return null;
   if (snapshot && (snapshot.run?.id ?? null) !== send.previousRunId) return null;
   return now - send.at < SEND_TTL_MS ? send : null;
+}
+
+/**
+ * ¿Sigue en curso esa resolución? Una enviada deja de estarlo cuando la
+ * solicitud ya no está pendiente (lo dice la foto) o pasado un rato.
+ */
+export function activeResolution(
+  resolution: Resolution | undefined,
+  stillPending: boolean,
+  now: number,
+): Resolution | null {
+  if (!resolution || !stillPending) return null;
+  if (resolution.state === 'failed') return resolution;
+  return now - resolution.at < RESOLUTION_TTL_MS ? resolution : null;
 }

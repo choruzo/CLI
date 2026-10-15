@@ -2,8 +2,10 @@
 
 Cockpit de escritorio de Stratum (Tauri v2): una ventana pequeña y una bandeja para ver las
 sesiones vivas de `stratumd` —las que aloja el daemon y las que publican `stratum run` y
-`stratum chat`—, pausar, reanudar, cancelar o redirigir sus runs y **conversar con Stratum**:
-*New chat* abre una sesión alojada en el daemon, que sigue viva aunque cierres Dot.
+`stratum chat`—, pausar, reanudar, cancelar o redirigir sus runs, **conversar con Stratum**
+(*New chat* abre una sesión alojada en el daemon, que sigue viva aunque cierres Dot) y
+**contestar lo que una sesión espera de ti** —aprobaciones, preguntas y planes— desde el
+*Approval Center*, desbloqueándolo con tu clave de aprobador en una ventana aparte.
 
 Dot es un **cliente del Stratum Protocol** y nada más: no aloja sesiones, no tiene runtime y se
 puede cerrar sin que cambie nada. Arquitectura, ciclo de vida, frontera de seguridad y
@@ -15,13 +17,14 @@ stratum-dot/
 │   ├── app/             raíz, acciones, atajos, ErrorBoundary
 │   ├── bridge/          la frontera con el lado nativo (comandos tipados + eventos)
 │   ├── protocol/        el contrato de stratum-cli, reexportado; validar y aplicar
-│   ├── stores/          connectionStore · sessionStore · uiStore (proyección para pintar)
-│   ├── components/      piezas
-│   └── screens/         Overview · SessionDetail (Chat / Activity) · NewChat · Incompatible
-├── src-tauri/           shell nativo: ventana, bandeja, comandos `dot_*`
-├── crates/dot-link/     cliente nativo del protocolo (sin Tauri) + `dot-probe`
+│   ├── stores/          connectionStore · sessionStore · uiStore · approverStore (proyección para pintar)
+│   ├── components/      piezas (InteractionCard: la tarjeta de aprobación / pregunta / plan)
+│   └── screens/         Overview · SessionDetail (Chat / Activity) · NewChat · HumanInput · Incompatible
+├── src-tauri/           shell nativo: ventana, bandeja, comandos `dot_*`, ventana de desbloqueo
+│   └── unlock/          la página de desbloqueo (propia, estática, sin IPC)
+├── crates/dot-link/     cliente nativo del protocolo (sin Tauri), broker de aprobador + `dot-probe`
 ├── tests/               invariantes de arquitectura
-├── scripts/             smokes contra un daemon real (`smoke-real`, `smoke-chat`)
+├── scripts/             smokes contra un daemon real (`smoke-real`, `smoke-chat`, `smoke-approvals`, `smoke-terminal`)
 └── e2e/                 la app de verdad, con tauri-driver
 ```
 
@@ -50,14 +53,16 @@ En PowerShell: `$env:STRATUM_DOT_CLI = "..\stratum-cli\dist\index.js"; npm run t
 ## Tests
 
 ```bash
-npm run test:native   # cargo test -p dot-link: unidad + enlace contra un daemon de pruebas (pipe real)
+npm run test:native   # cargo test: dot-link (enlace y broker contra un daemon de pruebas, pipe real) y el shell
 npm run test:run      # vitest: protocolo, stores, interfaz y arquitectura
 npm run typecheck
 npm run smoke:real    # `dot-probe` contra un stratumd real y un `stratum run` (necesita ../stratum-cli/dist)
 npm run smoke:chat    # abrir una sesión del daemon y conversar con ella, contra un stratumd real
+npm run smoke:approvals  # aprobar, contestar y decidir desde Dot, contra un stratumd real
+npm run smoke:terminal   # `stratum run` en una terminal real contra Dot por la misma aprobación
 
 npm run e2e:build     # app de depuración
-npm run e2e           # la ventana real con tauri-driver (`dot.e2e.mjs` y `chat.e2e.mjs`)
+npm run e2e           # la ventana real con tauri-driver (`dot.e2e.mjs`, `chat.e2e.mjs`, `approvals.e2e.mjs`)
 ```
 
 El E2E usa el mismo montaje que la suite de Desktop: `tauri-driver` (`cargo install

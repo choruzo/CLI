@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import { appendActivity, describeEvent, resyncMark, type ActivityEntry } from '../protocol/activity';
 import { applyEvents, parseSnapshot } from '../protocol/apply';
+import { OUTCOMES_LIMIT, outcomesOf, type Outcome } from '../protocol/interactions';
 import { isStateEvent, type ProtocolSessionSnapshot } from '../protocol';
 
 /**
@@ -16,6 +17,12 @@ export interface SessionEntry {
   activity: ActivityEntry[];
   /** La última foto no cumplía el contrato: no se pinta nada inventado. */
   unreadable: boolean;
+  /**
+   * Cómo acabaron las solicitudes que se vieron resolverse (sus `*.resolved`).
+   * Para decirlo cuando ya no están pendientes; **no** es lo pendiente —eso es
+   * la foto— y se pierde sin consecuencias.
+   */
+  outcomes: Outcome[];
 }
 
 interface SessionStore {
@@ -33,7 +40,7 @@ interface SessionStore {
   reset(): void;
 }
 
-const EMPTY: SessionEntry = { snapshot: null, activity: [], unreadable: false };
+const EMPTY: SessionEntry = { snapshot: null, activity: [], unreadable: false, outcomes: [] };
 
 export const useSessions = create<SessionStore>((set, get) => ({
   order: [],
@@ -62,7 +69,7 @@ export const useSessions = create<SessionStore>((set, get) => ({
       const activity = jumped
         ? appendActivity(known.activity, [resyncMark(snapshot.session.updatedAt)])
         : known.activity;
-      return { sessions: { ...prev.sessions, [sessionId]: { snapshot, activity, unreadable: false } } };
+      return { sessions: { ...prev.sessions, [sessionId]: { ...known, snapshot, activity, unreadable: false } } };
     }),
 
   applyEvents: (sessionId, raws) => {
@@ -70,10 +77,9 @@ export const useSessions = create<SessionStore>((set, get) => ({
     // Sin foto no hay de dónde partir: los eventos no construyen estado.
     if (!known?.snapshot) return false;
     const result = applyEvents(known.snapshot, raws);
-    const lines = result.applied
-      .filter(isStateEvent)
-      .map(describeEvent)
-      .filter((line): line is ActivityEntry => line !== null);
+    const states = result.applied.filter(isStateEvent);
+    const lines = states.map(describeEvent).filter((line): line is ActivityEntry => line !== null);
+    const resolved = outcomesOf(known.snapshot, states);
     if (result.snapshot !== known.snapshot || lines.length > 0) {
       set((prev) => ({
         sessions: {
@@ -82,6 +88,8 @@ export const useSessions = create<SessionStore>((set, get) => ({
             snapshot: result.snapshot,
             activity: appendActivity(known.activity, lines),
             unreadable: false,
+            outcomes:
+              resolved.length > 0 ? [...known.outcomes, ...resolved].slice(-OUTCOMES_LIMIT) : known.outcomes,
           },
         },
       }));

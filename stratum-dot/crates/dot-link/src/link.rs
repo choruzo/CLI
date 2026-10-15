@@ -13,7 +13,8 @@
 //! Reglas que no se rompen:
 //!
 //!  - **Dot es un cliente.** Pide el rol `operator` (`observe` + `control`) y
-//!    nunca `approver`. Los métodos que puede enviar son los de [`Method`].
+//!    nunca `approver`. Los métodos que puede enviar son los de [`MainMethod`]; la autoridad de
+//!    aprobar va por otra conexión ([`crate::approver`]).
 //!  - **Cerrar Dot no toca nada.** Al terminar solo se cierra el socket: no hay
 //!    `core.shutdown`, ni cancelaciones, ni cierre de sesiones.
 //!  - **La foto es la autoridad.** Toda suscripción de sesión se abre pidiendo
@@ -44,7 +45,7 @@ use crate::state::{
 };
 use crate::subscriptions::{Membership, OverviewSub, SessionSub};
 use crate::transport::{self, Stream};
-use crate::wire::{self, Incoming, Method, WireError};
+use crate::wire::{self, Incoming, MainMethod, WireError};
 use crate::{
     MAX_ID_CHARS, MAX_INPUT_CHARS, MAX_MESSAGE_BYTES, MAX_NAME_CHARS, MAX_PATH_CHARS,
     PROTOCOL_VERSION,
@@ -310,7 +311,7 @@ impl Conn {
 
     async fn request(
         &mut self,
-        method: Method,
+        method: MainMethod,
         params: Value,
         pending: Pending,
     ) -> std::io::Result<()> {
@@ -320,7 +321,7 @@ impl Conn {
 
     async fn request_within(
         &mut self,
-        method: Method,
+        method: MainMethod,
         params: Value,
         pending: Pending,
         timeout: Duration,
@@ -334,7 +335,7 @@ impl Conn {
     async fn unsubscribe(&mut self, server_id: String) -> std::io::Result<()> {
         self.routes.remove(&server_id);
         self.request(
-            Method::EventsUnsubscribe,
+            MainMethod::EventsUnsubscribe,
             json!({ "subscriptionId": server_id }),
             Pending::Unsub,
         )
@@ -345,7 +346,7 @@ impl Conn {
         self.overview_generation = self.overview_generation.wrapping_add(1);
         let generation = self.overview_generation;
         self.request(
-            Method::EventsSubscribe,
+            MainMethod::EventsSubscribe,
             json!({ "scope": { "kind": "overview" } }),
             Pending::SubOverview { generation },
         )
@@ -362,7 +363,8 @@ impl Conn {
             generation: sub.generation,
         };
         let params = json!({ "scope": { "kind": "session", "sessionId": session_id, "volatile": sub.volatile } });
-        self.request(Method::EventsSubscribe, params, pending).await
+        self.request(MainMethod::EventsSubscribe, params, pending)
+            .await
     }
 
     async fn reopen_session(&mut self, session_id: &str, volatile: bool) -> std::io::Result<()> {
@@ -423,7 +425,7 @@ fn valid_id(id: &str) -> bool {
 }
 
 /// Método y parámetros de una orden, o por qué no vale.
-fn control_request(action: &ControlAction) -> Result<(Method, Value), CommandError> {
+fn control_request(action: &ControlAction) -> Result<(MainMethod, Value), CommandError> {
     let invalid = |message: &str| CommandError::new(CommandErrorKind::Invalid, message);
     let run_scoped = |session_id: &str, run_id: &Option<String>| -> Result<Value, CommandError> {
         if !valid_id(session_id) {
@@ -437,13 +439,13 @@ fn control_request(action: &ControlAction) -> Result<(Method, Value), CommandErr
     };
     match action {
         ControlAction::Pause { session_id, run_id } => {
-            Ok((Method::RunsPause, run_scoped(session_id, run_id)?))
+            Ok((MainMethod::RunsPause, run_scoped(session_id, run_id)?))
         }
         ControlAction::Resume { session_id, run_id } => {
-            Ok((Method::RunsResume, run_scoped(session_id, run_id)?))
+            Ok((MainMethod::RunsResume, run_scoped(session_id, run_id)?))
         }
         ControlAction::Cancel { session_id, run_id } => {
-            Ok((Method::RunsCancel, run_scoped(session_id, run_id)?))
+            Ok((MainMethod::RunsCancel, run_scoped(session_id, run_id)?))
         }
         ControlAction::Steer { session_id, text } => {
             if !valid_id(session_id) {
@@ -454,7 +456,7 @@ fn control_request(action: &ControlAction) -> Result<(Method, Value), CommandErr
                 return Err(invalid("The message is too long."));
             }
             Ok((
-                Method::RunsSteer,
+                MainMethod::RunsSteer,
                 json!({ "sessionId": session_id, "text": text }),
             ))
         }
@@ -482,7 +484,10 @@ fn optional(
 /// Método y parámetros de una llamada, o por qué no vale. Solo se comprueba
 /// que quepa en el protocolo: si un directorio existe o un perfil vale lo dice
 /// el daemon, que es quien manda.
-fn call_request(action: &CallAction, operation_id: &str) -> Result<(Method, Value), CommandError> {
+fn call_request(
+    action: &CallAction,
+    operation_id: &str,
+) -> Result<(MainMethod, Value), CommandError> {
     let invalid = |message: &str| CommandError::new(CommandErrorKind::Invalid, message);
     match action {
         CallAction::OpenSession {
@@ -507,7 +512,7 @@ fn call_request(action: &CallAction, operation_id: &str) -> Result<(Method, Valu
                 }
             }
             params.insert("operationId".into(), Value::String(operation_id.into()));
-            Ok((Method::SessionsOpen, Value::Object(params)))
+            Ok((MainMethod::SessionsOpen, Value::Object(params)))
         }
         CallAction::StartRun { session_id, input } => {
             if !valid_id(session_id) {
@@ -521,18 +526,18 @@ fn call_request(action: &CallAction, operation_id: &str) -> Result<(Method, Valu
                 return Err(invalid("The message is too long."));
             }
             Ok((
-                Method::RunsStart,
+                MainMethod::RunsStart,
                 json!({ "sessionId": session_id, "input": input, "operationId": operation_id }),
             ))
         }
         CallAction::ListAgents { cwd } => Ok((
-            Method::AgentsList,
+            MainMethod::AgentsList,
             match optional(cwd, MAX_PATH_CHARS, "directory")? {
                 Some(cwd) => json!({ "cwd": cwd }),
                 None => json!({}),
             },
         )),
-        CallAction::ListModels => Ok((Method::ModelsList, json!({}))),
+        CallAction::ListModels => Ok((MainMethod::ModelsList, json!({}))),
     }
 }
 
@@ -852,7 +857,7 @@ impl Actor {
         // --- handshake: lo primero y lo único hasta que termina bien ---------
         let hello = wire::request_line(
             1,
-            Method::CoreHello,
+            MainMethod::CoreHello,
             json!({
                 "protocol": PROTOCOL_VERSION,
                 "token": endpoint.token.expose(),
@@ -1397,7 +1402,7 @@ mod tests {
             run_id: Some("run_1".into()),
         })
         .unwrap();
-        assert_eq!(method, Method::RunsPause);
+        assert_eq!(method, MainMethod::RunsPause);
         assert_eq!(params, json!({ "sessionId": "ses_1", "runId": "run_1" }));
 
         let (method, params) = control_request(&ControlAction::Steer {
@@ -1405,7 +1410,7 @@ mod tests {
             text: "hola".into(),
         })
         .unwrap();
-        assert_eq!(method, Method::RunsSteer);
+        assert_eq!(method, MainMethod::RunsSteer);
         assert_eq!(params, json!({ "sessionId": "ses_1", "text": "hola" }));
 
         let (method, params) = control_request(&ControlAction::Cancel {
@@ -1413,7 +1418,7 @@ mod tests {
             run_id: None,
         })
         .unwrap();
-        assert_eq!(method, Method::RunsCancel);
+        assert_eq!(method, MainMethod::RunsCancel);
         assert_eq!(params, json!({ "sessionId": "ses_1" }));
     }
 
@@ -1429,7 +1434,7 @@ mod tests {
             "op-1",
         )
         .unwrap();
-        assert_eq!(method, Method::SessionsOpen);
+        assert_eq!(method, MainMethod::SessionsOpen);
         // Lo vacío no se pide; nunca viaja un `env`, un `resume` ni nada más.
         assert_eq!(
             params,
@@ -1446,7 +1451,7 @@ mod tests {
             "op-2",
         )
         .unwrap();
-        assert_eq!(method, Method::SessionsOpen);
+        assert_eq!(method, MainMethod::SessionsOpen);
         assert_eq!(params, json!({ "operationId": "op-2" }));
 
         let (method, params) = call_request(
@@ -1457,14 +1462,14 @@ mod tests {
             "op-3",
         )
         .unwrap();
-        assert_eq!(method, Method::RunsStart);
+        assert_eq!(method, MainMethod::RunsStart);
         assert_eq!(
             params,
             json!({ "sessionId": "ses_1", "input": "hola\nmundo", "operationId": "op-3" })
         );
 
         let (method, params) = call_request(&CallAction::ListModels, "x").unwrap();
-        assert_eq!((method, params), (Method::ModelsList, json!({})));
+        assert_eq!((method, params), (MainMethod::ModelsList, json!({})));
         let (method, params) = call_request(
             &CallAction::ListAgents {
                 cwd: Some("/w".into()),
@@ -1474,7 +1479,7 @@ mod tests {
         .unwrap();
         assert_eq!(
             (method, params),
-            (Method::AgentsList, json!({ "cwd": "/w" }))
+            (MainMethod::AgentsList, json!({ "cwd": "/w" }))
         );
     }
 
