@@ -1,11 +1,12 @@
 name: Dot CI
 
-# Stratum Dot (M6–M8): el cliente nativo del protocolo (`dot-link`) y su broker
-# de aprobador contra un daemon de pruebas sobre un pipe real —named pipe en
-# Windows, unix socket en Linux—, el frontend con sus invariantes de
-# arquitectura, los smokes contra un `stratumd` real (también aprobar desde Dot y
-# la carrera con una terminal) y que el shell de Tauri compila en las dos
-# plataformas. El E2E de la ventana (tauri-driver) se ejecuta en local: ver
+# Stratum Dot (M6–M9): el cliente nativo del protocolo (`dot-link`), su broker
+# de aprobador y la confirmación nativa contra un daemon de pruebas sobre un pipe
+# real —named pipe en Windows, unix socket en Linux, con la identidad del par que
+# da cada sistema—, el endurecimiento del daemon (carpeta, endpoint y socket
+# privados), el frontend con sus invariantes de arquitectura, los smokes contra
+# un `stratumd` real (también aprobar desde Dot y la carrera con una terminal) y
+# que el shell de Tauri compila en las dos plataformas. El E2E de la ventana (tauri-driver) se ejecuta en local: ver
 # stratum-dot/README.md.
 
 on:
@@ -95,6 +96,10 @@ jobs:
         run: |
           npm run typecheck
           npm run test:run
+
+      - name: Daemon, protocol and client (M9 hardening on each OS)
+        working-directory: stratum-cli
+        run: npx vitest run src/daemon src/protocol src/client src/ipc src/host
 
       - name: Build the CLI
         working-directory: stratum-cli

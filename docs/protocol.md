@@ -128,6 +128,14 @@ método contesta `UNAUTHORIZED`.
 El cliente solo lo **lee** (`client/discovery.ts`): `found`, `absent`, `stale` (el pid ya no
 existe), `invalid` o `incompatible`. Lo publica el daemon (§13.1). El token no se registra.
 
+Un cliente que lleve credenciales (M9; lo hace Stratum Dot, `docs/dot.md` §14.3–14.4) debería
+además: abrir el endpoint **sin seguir enlaces** y comprobar lo abierto (en POSIX, de este
+usuario y sin escritura para otros, en una carpeta igual), y, tras conectar y **antes de
+enviar el token**, preguntar al sistema quién atiende el canal —`SO_PEERCRED` en un unix
+socket, `GetNamedPipeServerProcessId` en un named pipe— y negarse si no es el `pid` del
+endpoint o es otro usuario. El cliente Node (`client/`) no lo hace: Node no expone esas
+credenciales.
+
 ## 5. Roles y capacidades
 
 | Capacidad | Permite |
@@ -387,6 +395,11 @@ los suyos en `src/daemon/*.test.ts`, contra un `Stratumd` real con clientes real
 - **`endpoint.json`** se crea de forma atómica y exclusiva, con el servidor ya escuchando; el
   nombre del canal y el token son nuevos en cada arranque; la carpeta va en `0700` y el fichero
   en `0600`; al apagar se borra solo si sigue siendo el de ese proceso.
+- **Carpeta y canal privados (M9, `daemon/private-dir.ts`).** La carpeta no puede ser un enlace
+  simbólico; en POSIX tiene que ser del usuario del daemon y queda en `0700` (si sigue accesible
+  a otros, el daemon **no arranca**), y el unix socket queda en `0600` tras escuchar y antes de
+  publicar el endpoint. En Windows no se comprueban dueño ni ACL (hereda la del perfil) y el
+  named pipe tiene la DACL por defecto: Node no permite otra.
 - **Instancia única.** Si el endpoint publicado tiene dueño vivo —su pid existe **y** alguien
   escucha en su canal—, un segundo arranque falla y no toca nada. Si no, es **rancio** (un
   `kill -9`, un pid reutilizado, un fichero ilegible) y se sustituye. Queda una ventana de
@@ -869,6 +882,17 @@ Capas, de fuera adentro:
 > sistema operativo (`SO_PEERCRED`, `GetNamedPipeClientProcessId`: no disponibles en Node puro)
 > o aislar `exec`. Queda como endurecimiento posterior (PRD §22 Q2).
 
+**Q2 tras M9, por separado** (detalle: `docs/dot.md` §14.3):
+
+| | Qué hay |
+|---|---|
+| Qué protege M9 | En Dot, cada resolución sensible exige una confirmación nativa que su webview no controla; Dot no envía token ni clave a un canal que no atienda el proceso del endpoint (o que atienda otro usuario); carpeta, endpoint y socket privados |
+| Qué verifica el sistema, lado servidor | POSIX: el socket `0600` en carpeta `0700` solo admite conexiones de **este usuario o root** (`PeerVerification: socket-permissions`). Windows: **nada** más que el token (`none`). El daemon no sabe qué proceso es en ninguna plataforma |
+| Qué verifica el sistema, lado Dot | Usuario y pid del proceso que atiende el canal (`SO_PEERCRED`/`LOCAL_PEERCRED`; `GetNamedPipeServerProcessId` + SID del token) |
+| Qué sigue en el mismo dominio de confianza | Cualquier proceso del mismo usuario: puede conectarse con el token, reescribir el endpoint con su propio pid y canal, leer memoria, sustituir `approver.json`, o manejar la interfaz con las APIs del sistema. Y root |
+
+`client.kind` es una declaración, no una identidad, y no da ni quita capacidades.
+
 Consecuencia práctica de lo anterior, y política por defecto: **sin clave de aprobador
 configurada, la resolución remota está denegada**. Se prefiere eso a una garantía falsa.
 
@@ -1163,3 +1187,4 @@ Correcciones hechas a la v1 antes de congelarla:
 | M7 | `models.list` incluye el modelo configurado de cada provider aunque su `/models` falle | No cambia el contrato |
 | M7 | Un bloque de texto se cierra (`message.completed`) también al entregarse steering | Corrige lo que se emite: antes el texto de dos respuestas del modelo separadas por steering salía en un solo bloque |
 | M8 | `approvals.resolve`, `questions.answer` y `plans.decide` admiten `sessionId?`: con una sesión que no es la de la solicitud, `NOT_FOUND` | Aditivo: quien no lo envía sigue igual |
+| M9 | Ningún cambio de contrato. El daemon no arranca si su carpeta no es privada (POSIX) o es un enlace, y deja su socket en `0600`. Stratum Dot usa `approvals.list` y `sessions.get` (que ya existían) para la confirmación nativa | Comportamiento del servidor y de un cliente; el contrato no cambia |

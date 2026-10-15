@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M7 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado: ver su estado); siguiente: M8.
+> anotados en el hito que los encuentra. **M0–M9 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado); siguiente: M10.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -1386,7 +1386,8 @@ Desviaciones:
 - **Q2 sigue abierta**: M8 separa la autoridad del webview y de la conexión normal, pero no
   comprueba la identidad del proceso par (`docs/dot.md` §13.8–§13.9). Mientras está
   desbloqueado, quien controle el webview puede pedir resoluciones; de ahí el plazo y el
-  bloqueo manual.
+  bloqueo manual. *(M9 cierra lo segundo con la confirmación nativa y trata lo primero en el
+  lado de Dot: ver M9.)*
 - **AC-9** (notificaciones) queda parcial por lo anterior.
 
 ### M9 — Endurecimiento
@@ -1394,6 +1395,39 @@ Desviaciones:
   (re-registro al volver); anfitrión par muerto; carga (10 sesiones, 3 clientes); E2E de Dot
   en CI Linux y local en Windows; empaquetado y firma; documentación de usuario.
 - *Hecho cuando*: AC-10 a AC-13.
+
+**Estado: implementado como endurecimiento de seguridad, autoridad e IPC** (decisión al
+empezarlo: primero lo que M8 dejó dicho como abierto, sin capacidades nuevas ni cambios de
+arquitectura). Referencia: `docs/dot.md` §14; `docs/protocol.md` §4, §13.1, §15.3 y §17.
+
+- **Confirmación nativa** de cada resolución sensible (aprobar, `allow-all`, responder,
+  aprobar un plan): el webview pide; el lado nativo comprueba broker, solicitud y sesión
+  **con el daemon** (`approvals.list`, `sessions.get`); la persona confirma en una ventana
+  propia (otro origen, sin IPC, lo que dice el daemon, la frase de una confirmación con
+  nombre se teclea allí); solo entonces sale. Lo negativo (denegar, omitir, rechazar) va
+  directo, decidido: es lo que hace el runtime cuando nadie contesta. El tipo lo impone
+  (`ConfirmedAction`, solo la crea la puerta). Una a la vez, armada tras 800 ms, caduca por
+  plazo, bloqueo, época, daemon, resolución en otro sitio, sesión o cierre de Dot.
+- **Broker**: colas acotadas (y lo que no puede perderse, coalescido fuera de la cola), tope de
+  resoluciones en vuelo, época por desbloqueo, comprobación periódica del endpoint. Sin
+  cambios en lo de M8: sin reconexión con autoridad, sin reintentos de mutaciones.
+- **Identidad del par (Q2)**: Dot pregunta al sistema quién atiende el canal antes de enviar el
+  token o la clave (`SO_PEERCRED`/`LOCAL_PEERCRED`; `GetNamedPipeServerProcessId` + SID) y se
+  niega si no es el proceso del endpoint u otro usuario. El daemon declara qué verificó el
+  sistema (`PeerVerification`: permisos del socket en POSIX, nada en Windows); no sabe qué
+  proceso es.
+- **Endpoint e IPC**: el daemon no arranca con una carpeta que no sea privada o sea un enlace, y
+  deja el socket en `0600`; Dot lee el endpoint sin seguir enlaces y comprueba dueño y permisos
+  de lo abierto.
+- **Frontera webview/nativo**: la ventana principal pasa de `core:default` a solo escuchar
+  eventos; tests adversariales en código y en la ventana real.
+- **Deuda pequeña**: canales sin límite fuera; la lista dice cuándo es parcial (más de 64
+  sesiones); dos plazos de inactividad de tests del daemon que fallaban bajo carga.
+
+Pendiente del alcance original de M9 (no entra en esta ejecución): desfase de versiones,
+carga, anfitrión par muerto/re-registro bajo carga, E2E de la ventana en CI Linux,
+empaquetado y firma, documentación de usuario; y con ello AC-10 a AC-13, que no se dan por
+cumplidos aquí.
 
 ### Después del MVP
 
@@ -1444,7 +1478,7 @@ M10 (`--detach`/`--attach`), M11 (default de `chat`) y M12 (Desktop al Stratum P
 | Riesgo | Impacto | Mitigación |
 |---|---|---|
 | **Duplicación de lógica** (un cuarto cableado de sesión) | Alto | M0 extrae `SessionHost` *antes* del daemon; el daemon no puede instanciar `StratumAgent` por otra vía (test de arquitectura) |
-| **Auto-aprobación por el agente** (§13.4) | Alto | Guardas + auditoría de `by` + escenarios adversariales; cierre real pendiente de §22 Q2 |
+| **Auto-aprobación por el agente** (§13.4) | Alto | Guardas + auditoría de `by` + escenarios adversariales; en Dot, confirmación nativa por resolución (M9); cierre real frente al mismo usuario pendiente de §22 Q2 |
 | **Estado de módulo compartido** entre sesiones del daemon (SSH, auditoría, jobs) | Alto | Resuelto en M0 con test de dos sesiones; es código que hoy nunca corre con dos sesiones `coding` |
 | **Ciclo de vida del daemon**: huérfano, doble instancia, quién lo arranca | Medio | `listen` como exclusión; `endpoint.json` rancio detectable; `stop` explícito; apagado por inactividad opcional |
 | **Carreras**: aprobar y cancelar a la vez; `steer` tras `done`; cerrar durante un guardado | Medio | El anfitrión es la única autoridad; `sealIfIdle()` ya resuelve el steering tardío; cola ordenada por sesión (patrón `ConversationHost.queue`) |
@@ -1489,6 +1523,15 @@ resto de la tabla de §16.
   sustituir `approver.json` y reiniciar el daemon, o leer la memoria de quien teclea). No se
   presenta `0600` + token + clave como un sandbox. El cierre real —addon nativo, relay Rust de
   Dot o aislamiento de `exec`— queda como endurecimiento antes de dar M4 por cerrado del todo.
+  *Respuesta de M9 (parcial, a propósito; `docs/dot.md` §14.3)*. **Qué protege**: un webview
+  comprometido no puede usar por sí solo la autoridad desbloqueada (confirmación nativa); Dot no
+  envía token ni clave a un canal que no atienda el proceso del endpoint o que atienda otro
+  usuario; carpeta, endpoint y socket privados. **Qué verifica el SO**: del lado de Dot, usuario
+  y pid del servidor del canal; del lado del daemon, solo los permisos del socket en POSIX
+  (este usuario o root) y nada en Windows. **Qué sigue en el mismo dominio de confianza**:
+  cualquier proceso del mismo usuario (puede reescribir el endpoint con su propio pid, leer
+  memoria, sustituir `approver.json`, manejar la interfaz con las APIs del sistema) y root. Lo
+  que lo cerraría —credenciales del sistema, firma del par, addon nativo— sigue fuera.
 - **Q3. Detección fiable de un push forzado.** `--force`, `-f` y `--force-with-lease` son
   flags, pero `git push origin +main` fuerza por refspec y `push.default` o un alias de git
   pueden cambiar el significado del comando. Hay que comprobar qué resuelve hoy
