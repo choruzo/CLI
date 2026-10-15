@@ -305,7 +305,8 @@ describe('el lado nativo', () => {
   });
 
   it('los nombres de método salen de dos listas cerradas de `wire.rs`, una por conexión', () => {
-    const wire = rustCode(join(link, 'src', 'wire.rs'));
+    // Sin CRLF: un checkout en Windows los añade.
+    const wire = rustCode(join(link, 'src', 'wire.rs')).replace(/\r\n/g, '\n');
     const block = (type: string) => {
       const start = wire.indexOf(`impl WireMethod for ${type} {`);
       expect(start, type).toBeGreaterThan(-1);

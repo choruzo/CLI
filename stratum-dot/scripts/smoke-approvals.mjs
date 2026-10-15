@@ -442,7 +442,8 @@ try {
         const full = join(dir, name);
         const st = statSync(full);
         if (st.isDirectory()) walk(full);
-        else if (st.size < 32 * 1024 * 1024) scanned.push(full);
+        // Solo ficheros: en Linux el daemon deja su unix socket aquí.
+        else if (st.isFile() && st.size < 32 * 1024 * 1024) scanned.push(full);
       }
     };
     for (const dir of [home, ...projects]) walk(dir);
