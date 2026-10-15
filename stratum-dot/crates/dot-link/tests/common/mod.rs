@@ -64,7 +64,7 @@ impl PendingReq {
             }
             "question" => json!({
                 "id": self.id, "sessionId": self.session_id, "runId": "run_1",
-                "questions": [{ "question": "¿Cuál?", "options": [{ "id": "o1", "label": "A" }] }],
+                "questions": [{ "question": "¿Cuál?", "options": [{ "id": "o1", "label": "A" }], "allowCustom": true }],
                 "requestedAt": 1, "expiresAt": null
             }),
             _ => json!({

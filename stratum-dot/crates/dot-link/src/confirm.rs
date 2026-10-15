@@ -47,7 +47,8 @@ use tokio::sync::oneshot;
 use tokio::time::Instant;
 
 use crate::approver::{
-    ApproverAction, ApproverHandle, ApproverStatus, ConfirmedAction, LockReason,
+    ApproverAction, ApproverHandle, ApproverStatus, ConfirmedAction, LockReason, QuestionAnswer,
+    MAX_ANSWER_CHARS, MAX_PHRASE_CHARS,
 };
 use crate::link::LinkHandle;
 use crate::log::Logger;
@@ -322,14 +323,90 @@ fn find_request<'a>(listing: &'a Value, action: &ApproverAction) -> Option<&'a V
     })
 }
 
-/// Construye lo que se va a enseñar con lo que dijo el daemon. Puro.
+fn bad_answers(message: &str) -> CommandError {
+    CommandError::new(CommandErrorKind::Invalid, message)
+}
+
+/// Las respuestas **como las aplicará el anfitrión** (`checkQuestionAnswers` de
+/// `protocol/resolve.ts`, la regla del contrato): una por pregunta y en orden,
+/// con el texto de la pregunta del daemon y, si se eligió una opción, su
+/// etiqueta del daemon. Así lo que se enseña es exactamente lo que se envía: el
+/// webview no puede enseñar una pregunta o una etiqueta y mandar otra opción.
+pub fn canonical_answers(
+    questions: &[Value],
+    answers: &[QuestionAnswer],
+) -> Result<Vec<QuestionAnswer>, CommandError> {
+    if answers.len() != questions.len() {
+        return Err(bad_answers("These answers do not match the questions."));
+    }
+    let mut out = Vec::with_capacity(answers.len());
+    for (q, a) in questions.iter().zip(answers) {
+        let question = q
+            .get("question")
+            .and_then(Value::as_str)
+            .ok_or_else(|| bad_answers("These answers do not match the questions."))?
+            .to_string();
+        let options: Vec<(&str, &str)> = q
+            .get("options")
+            .and_then(Value::as_array)
+            .map(|list| {
+                list.iter()
+                    .filter_map(|o| Some((o.get("id")?.as_str()?, o.get("label")?.as_str()?)))
+                    .collect()
+            })
+            .unwrap_or_default();
+        let custom = q.get("allowCustom").and_then(Value::as_bool) == Some(true);
+        if let Some(id) = &a.option_id {
+            let Some((id, label)) = options.iter().find(|(o, _)| o == id) else {
+                return Err(bad_answers(
+                    "An answer chooses an option that does not exist.",
+                ));
+            };
+            out.push(QuestionAnswer {
+                question,
+                answer: label.to_string(),
+                option_id: Some(id.to_string()),
+            });
+            continue;
+        }
+        let text = a.answer.trim();
+        let matching: Vec<_> = options.iter().filter(|(_, l)| *l == text).collect();
+        if let [(id, label)] = matching.as_slice() {
+            out.push(QuestionAnswer {
+                question,
+                answer: label.to_string(),
+                option_id: Some(id.to_string()),
+            });
+            continue;
+        }
+        if !options.is_empty() && !custom {
+            return Err(bad_answers("An answer must be one of the options."));
+        }
+        if text.is_empty() {
+            return Err(bad_answers("An answer is empty."));
+        }
+        if text.chars().count() > MAX_ANSWER_CHARS {
+            return Err(bad_answers("An answer is too long."));
+        }
+        out.push(QuestionAnswer {
+            question,
+            answer: text.to_string(),
+            option_id: None,
+        });
+    }
+    Ok(out)
+}
+
+/// Construye lo que se va a enseñar con lo que dijo el daemon, y la acción que
+/// se enviará si se confirma (las respuestas, ya canónicas). Puro.
 pub fn build_view(
     action: &ApproverAction,
     listing: &Value,
     snapshot: &Value,
     expires_at: u64,
     arm_ms: u64,
-) -> Result<ConfirmationView, CommandError> {
+) -> Result<(ConfirmationView, ApproverAction), CommandError> {
+    let mut send = action.clone();
     let item = find_request(listing, action).ok_or_else(not_pending)?;
     if let Some(status) = item.get("status").and_then(Value::as_str) {
         if status != "pending" {
@@ -375,7 +452,21 @@ pub fn build_view(
                 });
             }
             let forced = item.get("forced").and_then(Value::as_bool).unwrap_or(false);
-            let confirm_phrase = field(item, "confirmPhrase", MAX_FIELD_CHARS);
+            // Sin recortar: es lo que hay que teclear y lo que se envía.
+            let confirm_phrase = item
+                .get("confirmPhrase")
+                .and_then(Value::as_str)
+                .filter(|p| !p.is_empty())
+                .map(str::to_string);
+            if confirm_phrase
+                .as_ref()
+                .is_some_and(|p| p.chars().count() > MAX_PHRASE_CHARS)
+            {
+                return Err(CommandError::new(
+                    CommandErrorKind::Invalid,
+                    "This request asks for a confirmation phrase Dot cannot send. Resolve it in its terminal.",
+                ));
+            }
             if *for_session && (forced || confirm_phrase.is_some()) {
                 return Err(CommandError::new(
                     CommandErrorKind::Invalid,
@@ -410,28 +501,29 @@ pub fn build_view(
             }
         }
         ApproverAction::AnswerQuestions {
+            session_id,
+            request_id,
             answers: Some(answers),
-            ..
         } => {
-            let asked = item
+            let questions = item
                 .get("questions")
                 .and_then(Value::as_array)
-                .map(Vec::len)
-                .unwrap_or(0);
-            if answers.is_empty() || answers.len() > asked {
-                return Err(CommandError::new(
-                    CommandErrorKind::Invalid,
-                    "These answers do not match the questions.",
-                ));
-            }
+                .map(Vec::as_slice)
+                .unwrap_or(&[]);
+            let canonical = canonical_answers(questions, answers)?;
             view.action = "Send answers";
-            view.answers = answers
+            view.answers = canonical
                 .iter()
                 .map(|a| AnswerFacts {
                     question: clip(&a.question, MAX_FIELD_CHARS),
-                    answer: clip(&a.answer, MAX_DESCRIPTION_CHARS),
+                    answer: a.answer.clone(),
                 })
                 .collect();
+            send = ApproverAction::AnswerQuestions {
+                session_id: session_id.clone(),
+                request_id: request_id.clone(),
+                answers: Some(canonical),
+            };
         }
         ApproverAction::DecidePlan { approve: true, .. } => {
             let plan = item.get("plan").unwrap_or(&Value::Null);
@@ -459,7 +551,7 @@ pub fn build_view(
             ))
         }
     }
-    Ok(view)
+    Ok((view, send))
 }
 
 /// Quita la confirmación si sigue siendo la suya y cierra lo que se enseñaba,
@@ -638,7 +730,7 @@ impl ConfirmGate {
         &self,
         link: &LinkHandle,
         action: &ApproverAction,
-    ) -> Result<ConfirmationView, CommandError> {
+    ) -> Result<(ConfirmationView, ApproverAction), CommandError> {
         let session_id = action.session_id().to_string();
         let unreadable = |_| {
             CommandError::new(
@@ -685,7 +777,8 @@ impl ConfirmGate {
         }
         let epoch = broker.ready_epoch().ok_or_else(locked)?;
         self.free()?;
-        let view = self.fetch_view(link, &action).await?;
+        // Lo que se enseña y lo que se enviará salen de lo mismo (respuestas canónicas).
+        let (view, action) = self.fetch_view(link, &action).await?;
         // Mientras se leía, pudo bloquearse.
         if broker.ready_epoch() != Some(epoch) {
             return Err(not_confirmed(CancelReason::Locked));
@@ -928,7 +1021,8 @@ mod tests {
             9,
             800,
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(view.kind, "approval");
         assert_eq!(view.action, "Approve");
         assert_eq!(view.session.cwd.as_deref(), Some("/work/proj"));
@@ -999,7 +1093,8 @@ mod tests {
             0,
             0,
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(view.action, "Allow for this session");
         assert!(!view.notes.is_empty());
         let view = build_view(
@@ -1009,7 +1104,8 @@ mod tests {
             0,
             0,
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(
             view.approval.unwrap().confirm_phrase.as_deref(),
             Some("prod")
@@ -1033,7 +1129,8 @@ mod tests {
             0,
             0,
         )
-        .unwrap();
+        .unwrap()
+        .0;
         assert_eq!(view.action, "Send answers");
         assert_eq!(view.answers[0].answer, "A");
         let view = build_view(
@@ -1047,16 +1144,83 @@ mod tests {
             0,
             0,
         )
-        .unwrap();
+        .unwrap()
+        .0;
         let plan = view.plan.unwrap();
         assert_eq!((plan.summary.as_str(), plan.steps.len()), ("Migrar", 1));
+    }
+
+    #[test]
+    fn lo_que_se_ensena_de_una_respuesta_es_lo_que_se_envia() {
+        let listing = json!({ "approvals": [], "plans": [], "questions": [{
+            "id": "q_9", "sessionId": "ses_a", "runId": "run_1", "requestedAt": 1, "expiresAt": null,
+            "questions": [{ "question": "¿Qué hago con la tabla?",
+                "options": [{ "id": "keep", "label": "Conservarla" }, { "id": "drop", "label": "Borrar la tabla de producción" }] }]
+        }]});
+        let ask = |answers: Vec<QuestionAnswer>| ApproverAction::AnswerQuestions {
+            session_id: "ses_a".into(),
+            request_id: "q_9".into(),
+            answers: Some(answers),
+        };
+        // Un webview que miente sobre la pregunta y la etiqueta, y elige otra opción.
+        let (view, send) = build_view(
+            &ask(vec![QuestionAnswer {
+                question: "¿Seguimos en modo prueba?".into(),
+                answer: "Conservarla".into(),
+                option_id: Some("drop".into()),
+            }]),
+            &listing,
+            &snapshot(),
+            0,
+            0,
+        )
+        .unwrap();
+        // Se enseña lo que dice el daemon y lo que de verdad se enviará.
+        assert_eq!(view.answers[0].question, "¿Qué hago con la tabla?");
+        assert_eq!(view.answers[0].answer, "Borrar la tabla de producción");
+        let ApproverAction::AnswerQuestions {
+            answers: Some(sent),
+            ..
+        } = send
+        else {
+            panic!("answers")
+        };
+        assert_eq!(sent[0].answer, view.answers[0].answer);
+        assert_eq!(sent[0].option_id.as_deref(), Some("drop"));
+        // Una opción que no existe, texto libre sin `allowCustom` o menos respuestas: no.
+        for bad in [
+            vec![QuestionAnswer {
+                question: "x".into(),
+                answer: "x".into(),
+                option_id: Some("nope".into()),
+            }],
+            vec![QuestionAnswer {
+                question: "x".into(),
+                answer: "otra cosa".into(),
+                option_id: None,
+            }],
+            vec![],
+        ] {
+            let err = build_view(&ask(bad), &listing, &snapshot(), 0, 0).unwrap_err();
+            assert_eq!(err.kind, CommandErrorKind::Invalid);
+        }
+    }
+
+    #[test]
+    fn una_frase_que_no_cabe_no_se_recorta() {
+        let mut l = listing();
+        l["approvals"][1]["confirmPhrase"] = json!("p".repeat(MAX_PHRASE_CHARS + 1));
+        let err = build_view(&approve("ses_a", "apr_2", false), &l, &snapshot(), 0, 0).unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::Invalid);
     }
 
     #[test]
     fn lo_largo_se_recorta_para_ensenarlo() {
         let mut l = listing();
         l["approvals"][0]["description"] = json!("x".repeat(MAX_DESCRIPTION_CHARS + 50));
-        let view = build_view(&approve("ses_a", "apr_1", false), &l, &snapshot(), 0, 0).unwrap();
+        let view = build_view(&approve("ses_a", "apr_1", false), &l, &snapshot(), 0, 0)
+            .unwrap()
+            .0;
         assert_eq!(
             view.approval.unwrap().description.chars().count(),
             MAX_DESCRIPTION_CHARS + 1

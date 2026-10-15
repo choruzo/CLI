@@ -39,12 +39,17 @@ export function newToken(): string {
 /** Límite práctico de la ruta de un unix socket (`sun_path`). */
 const MAX_SOCKET_PATH = 100;
 
-/** Nombre del canal, aleatorio en cada arranque. */
+/**
+ * Nombre del canal, aleatorio en cada arranque. En POSIX el socket va dentro de
+ * la carpeta del daemon; si la ruta no cabe en `sun_path`, va en una
+ * **subcarpeta propia** del temporal (que el daemon crea privada, `0700`, antes
+ * de escuchar): nunca suelto en un directorio compartido.
+ */
 export function newIpcPath(dir: string, platform: NodeJS.Platform = process.platform): string {
   const name = `stratumd-${randomBytes(8).toString('hex')}`;
   if (platform === 'win32') return `\\\\.\\pipe\\${name}`;
   const inDir = join(dir, `${name}.sock`);
-  return inDir.length <= MAX_SOCKET_PATH ? inDir : join(tmpdir(), `${name}.sock`);
+  return inDir.length <= MAX_SOCKET_PATH ? inDir : join(tmpdir(), name, 'd.sock');
 }
 
 /** ¿Hay alguien escuchando ahí? Solo conecta y cuelga: no envía nada. */

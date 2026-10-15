@@ -886,7 +886,7 @@ Capas, de fuera adentro:
 
 | | Qué hay |
 |---|---|
-| Qué protege M9 | En Dot, cada resolución sensible exige una confirmación nativa que su webview no controla; Dot no envía token ni clave a un canal que no atienda el proceso del endpoint (o que atienda otro usuario); carpeta, endpoint y socket privados |
+| Qué protege M9 | En Dot, cada resolución sensible exige una confirmación nativa que su webview no controla; Dot no envía token ni clave a un canal que el sistema diga que atiende otro proceso u otro usuario, y la clave solo si el sistema confirma usuario **y** pid (si el sistema no lo dice, el token sí sale —esa conexión solo observa y conduce— y la clave no); carpeta, endpoint y socket privados |
 | Qué verifica el sistema, lado servidor | POSIX: el socket `0600` en carpeta `0700` solo admite conexiones de **este usuario o root** (`PeerVerification: socket-permissions`). Windows: **nada** más que el token (`none`). El daemon no sabe qué proceso es en ninguna plataforma |
 | Qué verifica el sistema, lado Dot | Usuario y pid del proceso que atiende el canal (`SO_PEERCRED`/`LOCAL_PEERCRED`; `GetNamedPipeServerProcessId` + SID del token) |
 | Qué sigue en el mismo dominio de confianza | Cualquier proceso del mismo usuario: puede conectarse con el token, reescribir el endpoint con su propio pid y canal, leer memoria, sustituir `approver.json`, o manejar la interfaz con las APIs del sistema. Y root |

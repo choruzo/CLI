@@ -1024,8 +1024,11 @@ fija el test de arquitectura). `ApproverHandle::resolve` rechaza lo sensible sin
 descripción (la ya redactada por el anfitrión), target, entorno, motivo, si es forzada, la frase
 si la pide, sesión (título, perfil, modelo, anfitrión), directorio y run, leídos con
 `approvals.list` y `sessions.get`; si el id no está pendiente **en esa sesión**, ni se abre
-(`NOT_FOUND`). Las respuestas a preguntas son lo único que viene del webview —es lo que la
-persona va a enviar— y se enseñan tal cual para que las confirme. Nada se pinta como HTML: la
+(`NOT_FOUND`). Las respuestas a preguntas son lo único que viene del webview, y **no** se
+enseñan tal cual: el lado nativo las pone en su forma canónica con la regla del contrato
+(`checkQuestionAnswers`: una por pregunta, el texto de la pregunta del daemon, y si se eligió una
+opción, **su etiqueta del daemon**), y eso mismo es lo que se envía. Un webview que dijera
+«Conservarla» eligiendo la opción `drop` enseñaría «Borrar la tabla…»: lo que se envía. Nada se pinta como HTML: la
 página construye el DOM con `textContent`. Ni la clave, ni el token, ni nada derivado viajan a
 la ventana.
 
@@ -1137,8 +1140,10 @@ nativo en el daemon. Fuera de M9.
 - **El daemon** (`private-dir.ts`): la carpeta no puede ser un enlace; en POSIX tiene que ser de
   este usuario y queda en `0700` —si sigue accesible a otros tras el `chmod`, no arranca—; el
   socket queda en `0600` tras escuchar y **antes** de publicar el endpoint; `endpoint.json` y
-  `approver.json` en `0600`, escritos de forma atómica como en M2/M4. En Windows no se comprueba
-  dueño ni ACL: hereda la del perfil.
+  `approver.json` en `0600`, escritos de forma atómica como en M2/M4. Si la ruta del socket no
+  cabe en `sun_path`, va en una subcarpeta propia del temporal, creada también privada y quitada
+  al apagar: nunca suelto en un directorio compartido. En Windows no se comprueba dueño ni ACL:
+  hereda la del perfil.
 - **Endpoint sustituido o reiniciado**: la conexión principal reconecta contra el nuevo (con su
   token, y verificando el par); la de aprobador **no** —se bloquea (`daemon-changed` o
   `connection-lost`) y hay que desbloquear otra vez—, y cualquier confirmación abierta cae.

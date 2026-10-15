@@ -106,3 +106,28 @@ describe('el daemon arranca con su canal privado', () => {
     },
   );
 });
+
+describe('socket de reserva (ruta demasiado larga para sun_path)', () => {
+  it('va en una subcarpeta propia del temporal, nunca suelto', () => {
+    const long = join(base, 'x'.repeat(120));
+    const path = newIpcPath(long, 'linux');
+    expect(path.startsWith(join(tmpdir(), 'stratumd-'))).toBe(true);
+    expect(path.endsWith(join('', 'd.sock'))).toBe(true);
+  });
+
+  it.runIf(posix)('el daemon la crea privada y la quita al apagarse', async () => {
+    const { startTestDaemon } = await import('./daemon.fixtures.js');
+    const { readFileSync, existsSync } = await import('fs');
+    const { dirname } = await import('path');
+    const dir = join(base, 'y'.repeat(110), 'daemon');
+    const t = await startTestDaemon({ dir });
+    const { ipcPath } = JSON.parse(readFileSync(join(dir, 'endpoint.json'), 'utf-8')) as {
+      ipcPath: string;
+    };
+    expect(dirname(ipcPath)).not.toBe(dir);
+    expect(statSync(dirname(ipcPath)).mode & 0o777).toBe(0o700);
+    expect(statSync(ipcPath).mode & 0o777).toBe(0o600);
+    await t.stop();
+    expect(existsSync(dirname(ipcPath))).toBe(false);
+  });
+});
