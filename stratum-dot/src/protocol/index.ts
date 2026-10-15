@@ -4,7 +4,9 @@
  * sin Node). Un cambio del contrato llega a Dot al compilar, no por copia.
  *
  * Lo único que Dot añade está en `apply.ts` (qué hacer con lo que no valida) y
- * en `view.ts` / `activity.ts` (cómo se pinta), y ninguno decide estado.
+ * en `view.ts` / `activity.ts` / `interactions.ts` (cómo se pinta), y ninguno
+ * decide estado. Qué respuesta vale para una solicitud lo dicen las reglas del
+ * contrato (`checkApprovalResolution`, `checkQuestionAnswers`), no Dot.
  */
 export type {
   Capability,
@@ -14,8 +16,12 @@ export type {
   ProtocolEvent,
   ProtocolJob,
   ProtocolModel,
+  ProtocolInteractionStatus,
   ProtocolPlanRequest,
+  ProtocolQuestion,
+  ProtocolQuestionAnswer,
   ProtocolQuestionRequest,
+  ProtocolResolver,
   ProtocolRun,
   ProtocolRunStatus,
   ProtocolSession,
@@ -29,5 +35,7 @@ export {
   LIMITS,
   STRATUM_PROTOCOL_VERSION,
   applySessionEvent,
+  checkApprovalResolution,
+  checkQuestionAnswers,
   isStateEvent,
 } from '../../../stratum-cli/src/protocol/index';

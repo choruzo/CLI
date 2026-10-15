@@ -250,16 +250,31 @@ export interface ProtocolMethods {
       plans: ProtocolPlanRequest[];
     }
   >;
+  /**
+   * `sessionId` (opcional): la sesión a la que el cliente cree que pertenece la
+   * solicitud. Si se da y no es la suya, `NOT_FOUND` y no se resuelve nada: un
+   * id cruzado nunca resuelve la solicitud de otra sesión.
+   */
   'approvals.resolve': Spec<
-    Mutation & { approvalId: string; decision: ProtocolApprovalDecision; phrase?: string },
+    Mutation & {
+      sessionId?: string;
+      approvalId: string;
+      decision: ProtocolApprovalDecision;
+      phrase?: string;
+    },
     Empty
   >;
   'questions.answer': Spec<
-    Mutation & { requestId: string; answers: ProtocolQuestionAnswer[] | null },
+    Mutation & { sessionId?: string; requestId: string; answers: ProtocolQuestionAnswer[] | null },
     Empty
   >;
   'plans.decide': Spec<
-    Mutation & { requestId: string; decision: 'approve' | 'reject'; plan?: ProtocolPlan },
+    Mutation & {
+      sessionId?: string;
+      requestId: string;
+      decision: 'approve' | 'reject';
+      plan?: ProtocolPlan;
+    },
     Empty
   >;
 

@@ -1,10 +1,12 @@
 //! Lo que sale de este cliente hacia quien lo usa (la app o `dot-probe`).
 //!
 //! Todo lo de aquí se serializa y **llega al webview**: ningún tipo lleva el
-//! token del canal, la ruta del pipe ni la del endpoint.
+//! token del canal, la ruta del pipe, la del endpoint ni la clave de aprobador.
 
 use serde::Serialize;
 use serde_json::Value;
+
+use crate::approver::ApproverStatus;
 
 /// Estado de la conexión con el daemon. Una máquina de estados, no una
 /// colección de booleanos: en cada momento vale exactamente una variante.
@@ -92,6 +94,11 @@ pub enum DotEvent {
     Events {
         session_id: String,
         events: Vec<Value>,
+    },
+    /// Estado de la autoridad de aprobar (`crate::approver`). Sin datos: ni la
+    /// clave ni nada derivado de ella.
+    Approver {
+        status: ApproverStatus,
     },
 }
 

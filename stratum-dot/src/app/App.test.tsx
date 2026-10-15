@@ -201,7 +201,7 @@ describe('controles: el protocolo manda', () => {
 });
 
 describe('detalle', () => {
-  it('enseña lo pendiente sin ofrecer resolverlo, y las tools sin decir «ejecutando»', () => {
+  it('enseña lo pendiente y lleva al centro (sin resolverlo en el chat), y las tools sin decir «ejecutando»', () => {
     running(
       snapshotOf({
         approvals: [sampleApproval()],
@@ -209,9 +209,11 @@ describe('detalle', () => {
         partial: { text: 'Voy a subir los cambios', reasoning: '' },
       }),
     );
-    const pending = screen.getByRole('region', { name: 'Pending decisions' });
+    const pending = screen.getByRole('region', { name: 'Waiting for you' });
     expect(pending.textContent).toContain('git push origin main');
+    // En el chat no se resuelve: solo se lleva al centro de aprobaciones.
     expect(screen.queryByRole('button', { name: /approve|deny|allow/i })).toBeNull();
+    expect(screen.getByRole('button', { name: /^Open in the Approval Center/ })).toBeTruthy();
     // En el chat, lo que se está escribiendo; en Activity, las tools del run.
     expect(screen.getByText('Voy a subir los cambios')).toBeTruthy();
     expect(screen.getByText(/1 pending/)).toBeTruthy();
@@ -219,7 +221,7 @@ describe('detalle', () => {
     const tools = screen.getByRole('list', { name: 'Tool calls' });
     expect(tools.textContent).toContain('Active');
     expect(document.body.textContent).not.toMatch(/Executing/i);
-    expect(screen.getByRole('region', { name: 'Pending decisions' })).toBeTruthy();
+    expect(screen.getByRole('region', { name: 'Waiting for you' })).toBeTruthy();
     expect(screen.queryByRole('button', { name: /approve|deny|allow/i })).toBeNull();
   });
 

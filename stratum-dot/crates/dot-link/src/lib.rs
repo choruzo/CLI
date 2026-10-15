@@ -6,6 +6,9 @@
 //! llamadas para conversar (`sessions.open`, `runs.start`, `agents.list`,
 //! `models.list`), cuyo resultado pasa sin interpretar.
 //!
+//! La autoridad de aprobar va aparte, en [`approver`]: otra conexión, bajo
+//! demanda, con el rol `approver` y solo los métodos de resolver.
+//!
 //! Qué **no** hace, a propósito: no interpreta los DTOs del protocolo ni
 //! reduce eventos. Solo lee el sobre de cada mensaje y los campos de orden
 //! (`seq`, `after`, `sessionId`, `type`); lo demás pasa tal cual a quien
@@ -17,19 +20,25 @@
 //!
 //! Referencia del contrato: `docs/protocol.md`. Arquitectura de Dot: `docs/dot.md`.
 
+pub mod approver;
 pub mod discovery;
 pub mod framing;
 pub mod launcher;
 pub mod link;
 pub mod log;
+pub mod secret;
 pub mod state;
 pub mod subscriptions;
 pub mod transport;
 pub mod wire;
 
+pub use approver::{
+    spawn_broker, ApproverAction, ApproverConfig, ApproverHandle, ApproverStatus, QuestionAnswer,
+};
 pub use launcher::{CliLauncher, DaemonLauncher, NoLauncher};
 pub use link::{spawn, LinkConfig, LinkHandle};
 pub use log::Logger;
+pub use secret::ApproverSecret;
 pub use state::{
     CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
 };

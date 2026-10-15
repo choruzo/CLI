@@ -13,13 +13,20 @@
 //!  - Cerrar la ventana la oculta en la bandeja; «Quit Dot» termina Dot. Ninguna
 //!    de las dos cosas toca el daemon ni sus sesiones.
 //!  - Una sola instancia por usuario: abrir Dot otra vez enfoca la que ya hay.
+//!  - La autoridad de aprobar es otra pieza (`dot_link::approver`), con otra
+//!    conexión, y su clave se teclea en otra ventana (`unlock.rs`) que el
+//!    webview principal no ve. Cerrar Dot la suelta.
 
 mod commands;
 mod tray;
+mod unlock;
 
+use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
 use dot_link::link::Timings;
-use dot_link::{CliLauncher, DotEvent, LinkConfig, LinkHandle, Logger};
+use dot_link::{
+    ApproverConfig, ApproverHandle, CliLauncher, DotEvent, LinkConfig, LinkHandle, Logger,
+};
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, Runtime, WindowEvent};
 use tauri_plugin_window_state::StateFlags;
@@ -32,6 +39,10 @@ pub const NO_AUTOSTART_ENV: &str = "STRATUM_DOT_NO_AUTOSTART";
 
 pub struct DotState {
     pub link: LinkHandle,
+    /// La autoridad de aprobar: otra conexión, bajo demanda.
+    pub broker: ApproverHandle,
+    /// La ventana de desbloqueo abierta ahora (su `nonce`), si la hay.
+    pub prompt: unlock::UnlockPrompt,
     pub logger: Logger,
     /// `None` si el escritorio no tiene bandeja: entonces cerrar la ventana sale de Dot.
     pub tray: Option<tray::Tray>,
@@ -53,12 +64,15 @@ pub fn run() {
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
             show_main(app)
         }))
-        // Solo geometría: que estuviera oculta en la bandeja no se recuerda.
+        // Solo geometría, y solo de la principal: que estuviera oculta no se recuerda.
         .plugin(
             tauri_plugin_window_state::Builder::default()
                 .with_state_flags(StateFlags::all() & !StateFlags::VISIBLE)
+                .with_denylist(&[unlock::WINDOW])
                 .build(),
         )
+        // La página de desbloqueo, en su propio origen y sin IPC.
+        .register_asynchronous_uri_scheme_protocol(unlock::SCHEME, unlock::handle)
         .invoke_handler(tauri::generate_handler![
             commands::dot_attach,
             commands::dot_retry,
@@ -72,10 +86,31 @@ pub fn run() {
             commands::dot_start_run,
             commands::dot_list_agents,
             commands::dot_list_models,
+            commands::dot_approver_status,
+            commands::dot_approver_unlock,
+            commands::dot_approver_lock,
+            commands::dot_approve,
+            commands::dot_deny,
+            commands::dot_answer_questions,
+            commands::dot_decide_plan,
+            commands::dot_set_attention,
             commands::dot_hide,
             commands::dot_quit,
         ])
         .on_window_event(|window, event| {
+            if window.label() == unlock::WINDOW {
+                // Cerrar la ventana de desbloqueo la descarta: ya no se acepta nada de ella.
+                if let WindowEvent::Destroyed = event {
+                    if let Some(state) = window.try_state::<DotState>() {
+                        state.prompt.clear();
+                        // Cerrada a mitad de la comprobación: no queda nada desbloqueado.
+                        if matches!(state.broker.status(), dot_link::ApproverStatus::Unlocking) {
+                            state.broker.lock();
+                        }
+                    }
+                }
+                return;
+            }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Con bandeja, cerrar es ocultar. Sin ella, cerrar sale de Dot
                 // (si no, no habría forma de volver a la ventana ni de salir).
@@ -113,25 +148,52 @@ pub fn run() {
                 logger: logger.clone(),
                 timings: Timings::default(),
             };
+            let broker_emitter = handle.clone();
+            let (broker, broker_task) = dot_link::spawn_broker(
+                ApproverConfig {
+                    endpoint_dir: config.endpoint_dir.clone(),
+                    client_version: env!("CARGO_PKG_VERSION").to_string(),
+                    logger: logger.clone(),
+                    timings: ApproverTimings::default(),
+                },
+                move |event: DotEvent| {
+                    // Solo el estado del broker: nunca la clave ni nada derivado.
+                    let _ = broker_emitter.emit_to("main", DOT_EVENT, &event);
+                },
+            );
             let emitter = handle.clone();
+            let observer = broker.clone();
             let (link, task) = dot_link::spawn(config, move |event: DotEvent| {
+                if let DotEvent::Connection { state } = &event {
+                    observer.observe_main(state);
+                }
                 tray::on_event(&emitter, &event);
                 // Lo que se emite es `DotEvent`: por construcción no lleva el token.
-                let _ = emitter.emit(DOT_EVENT, &event);
+                let _ = emitter.emit_to("main", DOT_EVENT, &event);
             });
 
             let tray = tray::build(&handle, &logger);
-            app.manage(DotState { link, logger, tray });
+            app.manage(DotState {
+                link,
+                broker,
+                prompt: unlock::UnlockPrompt::default(),
+                logger,
+                tray,
+            });
             tauri::async_runtime::spawn(task);
+            tauri::async_runtime::spawn(broker_task);
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error al construir Stratum Dot")
         .run(|app, event| {
             if let RunEvent::Exit = event {
-                // Dot desaparece: se suelta la conexión y nada más. Ni
-                // `core.shutdown`, ni cancelar runs, ni cerrar sesiones.
+                // Dot desaparece: se sueltan las conexiones y nada más. Ni
+                // `core.shutdown`, ni cancelar runs, ni cerrar sesiones, ni
+                // resolver lo pendiente. La autoridad de aprobar se va con Dot.
                 if let Some(state) = app.try_state::<DotState>() {
+                    state.prompt.clear();
+                    state.broker.shutdown();
                     state.link.shutdown();
                     state.logger.info("dot exit");
                 }

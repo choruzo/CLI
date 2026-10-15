@@ -2942,3 +2942,20 @@ Lo que un cliente necesita para pintar el chat va en la foto de la sesión: `Pro
 #### Quién puede y con qué entorno
 
 `sessions.open` y `runs.start` exigen la capacidad `control` (§5 del protocolo); no hay una capacidad nueva. El `cwd` es opcional —ausente, el *home* del usuario del daemon— y **lo valida el daemon**: absoluto, existente, directorio y accesible. El entorno de la sesión es la copia del entorno del daemon tomada al arrancar (`SessionEnv`, M0): `sessions.open.env` sigue reservado y sin usar, y un cliente no puede pasar variables. `agents.list` y `models.list` dan a un cliente lo que puede elegir al abrir —nombres de perfil, alias de provider, ids de modelo y cuál es el de por defecto— sin la configuración: ni `baseUrl`, ni claves, ni el prompt de un perfil.
+
+### 12.23 — Resolver desde un cliente de escritorio: autoridad separada del webview
+
+Stratum Dot resuelve aprobaciones, preguntas y planes de cualquier sesión (M8; cliente en `docs/dot.md` §13, protocolo en `docs/protocol.md` §15). El runtime no cambia: la decisión llega a `PendingInteractions` por el `ApprovalCenter` del daemon, como la de `stratum approvals`, y gana la primera respuesta válida.
+
+```text
+webview = UI no confiable    lado nativo = frontera de autoridad    stratumd = árbitro    SessionHost = runtime
+```
+
+#### Invariantes
+
+- **Dos conexiones.** La principal de un cliente de escritorio es `operator` y no aprueba; la autoridad de aprobar es otra conexión, con el rol `approver` y solo los métodos de resolver (dos listas cerradas de métodos, una por conexión). Se abre bajo demanda, se da por buena solo si el servidor concede `approve`, caduca, se bloquea a mano, se suelta al cerrar el cliente y nunca reconecta sola: tras perderla o con otro daemon, hay que acreditarse otra vez.
+- **La clave no llega al webview.** Se teclea en una ventana propia del cliente (otro origen, sin IPC) que la entrega al lado nativo; allí vive lo que dura el `core.hello` y se borra. Nunca se persiste ni se registra, y los errores de acreditación son genéricos. El webview pide **qué** resolver y solo ve el estado de la autoridad.
+- **Una solicitud es de su sesión.** El cliente envía la sesión con cada resolución (`sessionId`); con otra, `NOT_FOUND`, sin resolver ni revelar nada.
+- **Sin optimismo ni reintentos.** Lo pendiente sale de la foto de cada sesión; una resolución aceptada no marca nada; sin respuesta, el resultado es desconocido y no se reenvía.
+- **M4 y M5 intactos.** Aprobar no reanuda una pausa; el steering llegado durante la pausa descarta lo aprobado; `allow-all` es de una sesión y nunca vale para lo forzado ni con frase; sin `approver.json` no se resuelve en remoto, y el cliente nunca crea una clave.
+- **Lo que no se afirma**: aislamiento frente a procesos del mismo usuario del sistema (Q2 sigue abierta; `docs/dot.md` §13.8).

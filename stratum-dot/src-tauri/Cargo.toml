@@ -20,6 +20,8 @@ dot-link = { path = "../crates/dot-link" }
 tauri = { version = "2", features = ["tray-icon"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+# El nonce de la ventana de desbloqueo, del generador del sistema operativo.
+getrandom = "0.3"
 # Una sola instancia por usuario: abrir Dot otra vez enfoca la que ya hay.
 tauri-plugin-single-instance = "2"
 # Posición y tamaño de la ventana entre arranques (preferencia de interfaz).

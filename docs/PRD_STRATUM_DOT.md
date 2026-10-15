@@ -1347,6 +1347,48 @@ Desviaciones:
 - Tarjetas de aprobación / pregunta / plan; contador en bandeja; notificaciones (§8.6).
 - *Hecho cuando*: AC-3 y AC-4 desde Dot; AC-9.
 
+**Estado: completado (2026-10-15).** Referencia: `docs/dot.md` §13 y `docs/protocol.md` §15.
+
+> Stratum Dot puede resolver approvals, questions y plans de cualquier sesión visible mediante
+> una autoridad de aprobación separada de su conexión normal y mantenida fuera del webview,
+> preservando first-valid-wins y todas las semánticas de M4/M5.
+
+- **`ApproverBroker`** (`dot-link/src/approver.rs`): la autoridad de aprobar es **otra
+  conexión**, bajo demanda, con el rol `approver` y solo los métodos de resolver
+  (`ApproverMethod`; la principal sigue con `MainMethod` y `operator`). Se da por buena solo si
+  el daemon concede `approve`; caduca a los 10 min, se bloquea a mano, se suelta al cerrar Dot
+  o al caer, y nunca reconecta sola ni reutiliza un desbloqueo contra otro daemon.
+- **La clave no pasa por el webview.** Se teclea en una ventana aparte, servida por un esquema
+  propio (otro origen, sin IPC, sin capacidades), que la entrega a Rust; allí es un
+  `ApproverSecret` (sin copia ni impresión, borrado al soltarse) que se escribe una vez en el
+  `core.hello` y se olvida. El webview pide **qué** resolver (`dot_approve`, `dot_deny`,
+  `dot_answer_questions`, `dot_decide_plan`) y solo ve el estado del broker.
+- **Comandos por ventana**: manifiesto de comandos en `build.rs` y una sola capacidad, de la
+  ventana `main`, con cada `dot_*` uno a uno.
+- **Centro de aprobaciones** (*Approvals N*, `Ctrl/Cmd+Shift+A`): lo pendiente de todas las
+  sesiones, de sus fotos (sin lista propia ni sondeo); una sola tarjeta (`InteractionCard`) para
+  los tres tipos, a la que lleva el chat; reglas de respuesta del contrato
+  (`checkApprovalResolution`, `checkQuestionAnswers`); sin optimismo y sin reintentos;
+  *Recently resolved* de los `*.resolved`.
+- **Contrato**: `sessionId?` en las tres resoluciones; con otra sesión, `NOT_FOUND` (anotado en
+  `docs/protocol.md` §17).
+- **Bandeja**: *Waiting for you: …* y *Open Approval Center*; atención del sistema (sin robar el
+  foco) cuando aparece algo con la ventana sin foco.
+- **AC-3 y AC-4 desde Dot comprobados** con procesos reales: `scripts/smoke-approvals.mjs`,
+  `scripts/smoke-terminal.mjs` (la terminal contra Dot, en los dos sentidos) y
+  `e2e/approvals.e2e.mjs` (la ventana).
+
+Desviaciones:
+
+- **Sin notificaciones del sistema** (§8.6): bandeja, contador y atención de la barra de tareas.
+  Una aprobación nunca se resolverá desde una notificación.
+- **Sin editar el plan** al aprobarlo, aunque el contrato lo admite.
+- **Q2 sigue abierta**: M8 separa la autoridad del webview y de la conexión normal, pero no
+  comprueba la identidad del proceso par (`docs/dot.md` §13.8–§13.9). Mientras está
+  desbloqueado, quien controle el webview puede pedir resoluciones; de ahí el plazo y el
+  bloqueo manual.
+- **AC-9** (notificaciones) queda parcial por lo anterior.
+
 ### M9 — Endurecimiento
 - Desfase de versiones CLI ↔ daemon ↔ Dot; caída del daemon con anfitriones pares vivos
   (re-registro al volver); anfitrión par muerto; carga (10 sesiones, 3 clientes); E2E de Dot

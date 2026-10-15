@@ -74,10 +74,15 @@ export interface ApproverLink {
   readonly capabilities: readonly Capability[];
 }
 
-export type Resolution =
+/**
+ * Lo que contesta un cliente. `sessionId`, si lo da, es la sesión a la que cree
+ * que pertenece la solicitud: si no es la suya, no se resuelve nada.
+ */
+export type Resolution = { sessionId?: string } & (
   | { kind: 'approval'; id: string; decision: ProtocolApprovalDecision; phrase?: string }
   | { kind: 'question'; id: string; answers: ProtocolQuestionAnswer[] | null }
-  | { kind: 'plan'; id: string; decision: 'approve' | 'reject'; plan?: ProtocolPlan };
+  | { kind: 'plan'; id: string; decision: 'approve' | 'reject'; plan?: ProtocolPlan }
+);
 
 export interface ApprovalCenterOptions {
   /** La ruta hacia la sesión, o `null` si ahora no se le puede entregar nada. */
@@ -116,8 +121,8 @@ function hostUnavailable(): ProtocolError {
 
 export class ApprovalCenter {
   private readonly pending = new Map<string, Entry>();
-  /** Lo ya resuelto: para contestar `ALREADY_RESOLVED` y no volver a darlo por pendiente. */
-  private readonly recent = new Map<string, string>();
+  /** Lo ya resuelto —cómo y de qué sesión—: para contestar `ALREADY_RESOLVED` y no volver a darlo por pendiente. */
+  private readonly recent = new Map<string, { resolution: string; sessionId: string }>();
   private readonly now: () => number;
 
   constructor(private readonly opts: ApprovalCenterOptions) {
@@ -163,9 +168,10 @@ export class ApprovalCenter {
   }
 
   private done(id: string, resolution: string): void {
+    const sessionId = this.pending.get(id)?.sessionId ?? this.recent.get(id)?.sessionId ?? '';
     this.pending.delete(id);
     this.recent.delete(id);
-    this.recent.set(id, resolution);
+    this.recent.set(id, { resolution, sessionId });
     if (this.recent.size > RECENT) this.recent.delete(this.recent.keys().next().value as string);
   }
 
@@ -250,10 +256,21 @@ export class ApprovalCenter {
   // ---------------------------------------------------------------------------
 
   private find(resolution: Resolution): Entry {
+    // Con `sessionId`, una solicitud de otra sesión no existe para esta
+    // petición: ni se resuelve, ni se dice cómo acabó. Un id cruzado nunca
+    // resuelve lo de otra sesión.
+    const mine = (sessionId: string) =>
+      resolution.sessionId === undefined || resolution.sessionId === sessionId;
     const entry = this.pending.get(resolution.id);
-    if (entry && entry.kind === resolution.kind) return entry;
+    if (entry && entry.kind === resolution.kind && mine(entry.sessionId)) return entry;
     const how = this.recent.get(resolution.id);
-    if (how !== undefined) throw alreadyResolved(how);
+    if (how !== undefined && mine(how.sessionId)) throw alreadyResolved(how.resolution);
+    if (entry && !mine(entry.sessionId)) {
+      log.warn('resolution names another session, ignored', {
+        id: resolution.id,
+        kind: resolution.kind,
+      });
+    }
     throw new ProtocolError('NOT_FOUND', 'No such pending request.');
   }
 
@@ -314,7 +331,9 @@ export class ApprovalCenter {
 
   private async deliver(link: ApproverLink, entry: Entry, resolution: Resolution): Promise<void> {
     const { id } = entry.dto;
-    if (this.pending.get(id) !== entry) throw alreadyResolved(this.recent.get(id) ?? 'resolved');
+    if (this.pending.get(id) !== entry) {
+      throw alreadyResolved(this.recent.get(id)?.resolution ?? 'resolved');
+    }
     const route = this.opts.routeOf(entry.sessionId);
     if (!route) throw hostUnavailable();
 

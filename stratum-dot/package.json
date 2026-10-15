@@ -11,12 +11,14 @@
     "preview": "vite preview",
     "test": "vitest",
     "test:run": "vitest run",
-    "test:native": "cargo test -p dot-link",
+    "test:native": "cargo test -p dot-link -p stratum-dot",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
     "smoke:real": "cargo build -p dot-link && node scripts/smoke-real.mjs",
     "smoke:chat": "cargo build -p dot-link && node scripts/smoke-chat.mjs",
+    "smoke:approvals": "cargo build -p dot-link && node scripts/smoke-approvals.mjs",
+    "smoke:terminal": "cargo build -p dot-link && node scripts/smoke-terminal.mjs",
     "e2e:build": "tauri build --debug --no-bundle",
-    "e2e": "node e2e/dot.e2e.mjs && node e2e/chat.e2e.mjs",
+    "e2e": "node e2e/dot.e2e.mjs && node e2e/chat.e2e.mjs && node e2e/approvals.e2e.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

@@ -825,6 +825,12 @@ cambia nada — ni lo pendiente, ni el recuerdo de cómo acabó (`ALREADY_RESOLV
 la resolución real). De su propia sesión, en cambio, el anfitrión es la autoridad: ahí vive
 la promesa, y su `*.resolved` es la resolución local.
 
+**Un id cruzado no resuelve nada (M8).** `approvals.resolve`, `questions.answer` y
+`plans.decide` admiten `sessionId` (opcional): la sesión a la que el cliente cree que pertenece
+la solicitud. Si se da y no es la suya, `NOT_FOUND`: no se resuelve nada, la solicitud sigue
+pendiente y **no se dice cómo acabó** (tampoco `ALREADY_RESOLVED` de una ya resuelta de otra
+sesión). Stratum Dot lo envía siempre; `stratum approvals` no lo necesita (trabaja por id).
+
 **`pid` y `claim` no son credenciales de aprobación.** El `pid` que declara un anfitrión es una
 pista de ciclo de vida (¿murió o puede volver?); el `claim`, la propiedad de la *publicación* de
 una sesión. Ninguno de los dos interviene, ni directa ni indirectamente, en quién puede
@@ -978,6 +984,11 @@ Se cambian dentro de la v1, que aún no está congelada (§17):
 4. No existe `host.localApprovalResolved`: la resolución local es el evento `*.resolved` que el
    anfitrión publica con `host.publish`, explícito y con su `seq`. El daemon no la infiere de
    que aparezca un `tool.started`.
+5. (M8) `approvals.resolve`, `questions.answer` y `plans.decide` admiten `sessionId` opcional
+   (§15.2). Aditivo.
+
+Desde M8, Stratum Dot resuelve con una conexión de aprobador propia, separada de la que observa
+y controla, y sin que la clave pase por su webview: `docs/dot.md` §13.
 
 ## 16. Pausa cooperativa (M5)
 
@@ -1151,3 +1162,4 @@ Correcciones hechas a la v1 antes de congelarla:
 | M7 | `ProtocolRun.inputTruncated?`, `ProtocolModel.default?` | Aditivos |
 | M7 | `models.list` incluye el modelo configurado de cada provider aunque su `/models` falle | No cambia el contrato |
 | M7 | Un bloque de texto se cierra (`message.completed`) también al entregarse steering | Corrige lo que se emite: antes el texto de dos respuestas del modelo separadas por steering salía en un solo bloque |
+| M8 | `approvals.resolve`, `questions.answer` y `plans.decide` admiten `sessionId?`: con una sesión que no es la de la solicitud, `NOT_FOUND` | Aditivo: quien no lo envía sigue igual |

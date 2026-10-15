@@ -50,6 +50,7 @@ export function startProbe({ binary, env, logDir }) {
   const sessions = new Map();
   const results = new Map();
   let connection = null;
+  let approver = null;
   let sessionIds = [];
   let buffer = '';
   let nextId = 1;
@@ -60,6 +61,7 @@ export function startProbe({ binary, env, logDir }) {
       buffer = buffer.slice(nl + 1);
       seen.push(msg);
       if (msg.type === 'connection') connection = msg.state;
+      else if (msg.type === 'approver') approver = msg.status;
       else if (msg.type === 'sessions') sessionIds = msg.sessionIds;
       else if (msg.type === 'snapshot') {
         sessions.set(msg.sessionId, {
@@ -85,6 +87,10 @@ export function startProbe({ binary, env, logDir }) {
     exited,
     get connection() {
       return connection;
+    },
+    /** Último estado del broker de aprobador (`ApproverStatus`). */
+    get approver() {
+      return approver;
     },
     get sessionIds() {
       return sessionIds;

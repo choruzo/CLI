@@ -3,6 +3,7 @@
  * contrato: no añaden estados ni deciden nada.
  */
 import type { ProtocolRun, ProtocolRunStatus, ProtocolSessionSnapshot } from './index';
+import type { HumanInputItem } from './interactions';
 
 /**
  * Lo que se enseña de una sesión. Son los estados del contrato y ninguno más:
@@ -142,3 +143,31 @@ export function preview(text: string, max: number): string {
   const flat = text.replace(/\s+/g, ' ').trim();
   return flat.length > max ? `${flat.slice(0, max - 1)}…` : flat;
 }
+
+/** Cuánto espera a una persona, por tipo. */
+export type PendingByKind = Record<'approvals' | 'questions' | 'plans', number>;
+
+export function countByKind(items: readonly HumanInputItem[]): PendingByKind {
+  let approvals = 0;
+  let questions = 0;
+  let plans = 0;
+  for (const item of items) {
+    if (item.kind === 'approval') approvals++;
+    else if (item.kind === 'question') questions++;
+    else plans++;
+  }
+  return { approvals, questions, plans };
+}
+
+/** «2 approvals · 1 question»: para leer, también con lector de pantalla. */
+export function countsLabel(counts: PendingByKind): string {
+  const parts: string[] = [];
+  const add = (n: number, one: string, many: string) => {
+    if (n > 0) parts.push(`${n} ${n === 1 ? one : many}`);
+  };
+  add(counts.approvals, 'approval', 'approvals');
+  add(counts.questions, 'question', 'questions');
+  add(counts.plans, 'plan', 'plans');
+  return parts.length > 0 ? parts.join(' · ') : 'Nothing waiting for you';
+}
+

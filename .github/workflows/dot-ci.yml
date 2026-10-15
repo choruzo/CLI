@@ -1,10 +1,12 @@
 name: Dot CI
 
-# Stratum Dot (M6): el cliente nativo del protocolo (`dot-link`) contra un daemon
-# de pruebas sobre un pipe real —named pipe en Windows, unix socket en Linux—,
-# el frontend con sus invariantes de arquitectura, el smoke contra un `stratumd`
-# real y que el shell de Tauri compila en las dos plataformas. El E2E de la
-# ventana (tauri-driver) se ejecuta en local: ver stratum-dot/README.md.
+# Stratum Dot (M6–M8): el cliente nativo del protocolo (`dot-link`) y su broker
+# de aprobador contra un daemon de pruebas sobre un pipe real —named pipe en
+# Windows, unix socket en Linux—, el frontend con sus invariantes de
+# arquitectura, los smokes contra un `stratumd` real (también aprobar desde Dot y
+# la carrera con una terminal) y que el shell de Tauri compila en las dos
+# plataformas. El E2E de la ventana (tauri-driver) se ejecuta en local: ver
+# stratum-dot/README.md.
 
 on:
   push:
@@ -82,7 +84,7 @@ jobs:
           (cd stratum-cli && npm ci)
           (cd stratum-dot && npm ci)
 
-      - name: Native client (dot-link)
+      - name: Native client (dot-link) and approver broker
         working-directory: stratum-dot
         run: |
           cargo fmt --all -- --check
@@ -106,8 +108,18 @@ jobs:
         working-directory: stratum-dot
         run: npm run smoke:chat
 
+      - name: Approvals smoke against a real stratumd (M8)
+        working-directory: stratum-dot
+        run: npm run smoke:approvals
+
+      - name: Terminal vs Dot approval race (M8)
+        working-directory: stratum-dot
+        run: npm run smoke:terminal
+
       - name: Build the app (debug, no bundle)
         working-directory: stratum-dot
         run: |
           cargo clippy --all-targets -- -D warnings
           npx tauri build --debug --no-bundle
+          # El shell (ventana de desbloqueo, bandeja), con la app ya compilada.
+          cargo test -p stratum-dot

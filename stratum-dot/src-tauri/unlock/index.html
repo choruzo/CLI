@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="dot-unlock" content="{{NONCE}}" />
+    <title>Unlock approvals — Stratum Dot</title>
+    <link rel="stylesheet" href="unlock.css" />
+    <script src="unlock.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>Unlock approval authority</h1>
+      <p class="muted">
+        Type the approver key you set with <code>stratum approvals set-key</code>. It goes straight to Stratum Dot's
+        native side; the main window never sees it.
+      </p>
+      <form id="unlock" autocomplete="off" novalidate>
+        <label for="key">Approver key</label>
+        <input
+          id="key"
+          name="key"
+          type="password"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          required
+          aria-describedby="status"
+        />
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button type="button" id="cancel">Cancel</button>
+          <button type="submit" id="submit" class="primary">Unlock</button>
+        </div>
+      </form>
+      <p class="small muted">
+        Approvals stay unlocked for {{MINUTES}} minutes, until you lock them, or until Dot quits. The key is not stored.
+      </p>
+    </main>
+  </body>
+</html>

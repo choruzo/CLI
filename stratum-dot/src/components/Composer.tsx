@@ -69,7 +69,9 @@ export const Composer = forwardRef<HTMLTextAreaElement, Props>(function Composer
       {steering ? (
         <p className="composer-mode small" role="note">
           <strong>Steering the current run.</strong> This does not start a new message
-          {mode.paused ? ': the run is paused, and gets it when you resume.' : '.'}
+          {mode.paused
+            ? ': the run is paused, and gets it when you resume. Anything approved during this pause is then discarded, not run.'
+            : '.'}
         </p>
       ) : null}
       {off ? <p className="composer-mode small muted">{mode.reason}.</p> : null}

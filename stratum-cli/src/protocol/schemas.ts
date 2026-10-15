@@ -648,15 +648,19 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'approvals.list': z.object({ sessionId: id.optional() }).strict(),
   'approvals.resolve': z
     .object({
+      sessionId: id.optional(),
       approvalId: id,
       decision: approvalDecision,
       phrase: z.string().max(LIMITS.phraseChars).optional(),
       operationId,
     })
     .strict(),
-  'questions.answer': z.object({ requestId: id, answers, operationId }).strict(),
+  'questions.answer': z
+    .object({ sessionId: id.optional(), requestId: id, answers, operationId })
+    .strict(),
   'plans.decide': z
     .object({
+      sessionId: id.optional(),
       requestId: id,
       decision: z.enum(['approve', 'reject']),
       plan: planSchema.optional(),

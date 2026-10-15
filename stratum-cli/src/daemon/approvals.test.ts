@@ -283,6 +283,109 @@ describe('M4 — sesión alojada en el daemon', () => {
     expect(existsSync(s.file)).toBe(resolved[0]!.data.decision === 'deny');
   }, 30_000);
 
+  it('M8: un id correcto con la sesión equivocada no resuelve nada, ni dice cómo acabó', async () => {
+    t = await startTestDaemon();
+    const a = await hosted(t);
+    const b = await hosted(t, [makeTextRound('nada')]);
+    await a.operator.request('runs.start', { sessionId: a.sessionId, input: 'borra' });
+    const approval = await requested(a.w);
+
+    // Con la sesión de otro, la solicitud no existe para esa petición…
+    for (const decision of ['approve', 'deny'] as const) {
+      expect(
+        await code(
+          a.approver.request('approvals.resolve', {
+            sessionId: b.sessionId,
+            approvalId: approval.id,
+            decision,
+          }),
+        ),
+      ).toBe('NOT_FOUND');
+    }
+    expect(
+      await code(
+        a.approver.request('questions.answer', {
+          sessionId: b.sessionId,
+          requestId: approval.id,
+          answers: null,
+        }),
+      ),
+    ).toBe('NOT_FOUND');
+    // …y sigue pendiente, sin ejecutar nada.
+    expect((await a.approver.request('approvals.list', {})).approvals.map((x) => x.id)).toEqual([
+      approval.id,
+    ]);
+    expect(existsSync(a.file)).toBe(true);
+
+    // Con la suya, se resuelve.
+    await a.approver.request('approvals.resolve', {
+      sessionId: a.sessionId,
+      approvalId: approval.id,
+      decision: 'approve',
+    });
+    await a.w.until((e) => e.type === 'run.completed');
+    expect(existsSync(a.file)).toBe(false);
+    // Ya resuelta: a quien nombra su sesión se le dice; a quien nombra otra, no existe.
+    const late = { approvalId: approval.id, decision: 'deny' } as const;
+    expect(
+      await code(a.approver.request('approvals.resolve', { ...late, sessionId: a.sessionId })),
+    ).toBe('ALREADY_RESOLVED');
+    expect(
+      await code(a.approver.request('approvals.resolve', { ...late, sessionId: b.sessionId })),
+    ).toBe('NOT_FOUND');
+  }, 30_000);
+
+  it('M8: lo mismo con una pregunta y con un plan de verdad', async () => {
+    t = await startTestDaemon();
+    const other = await hosted(t, [makeTextRound('nada')]);
+    const q = await hosted(t, [
+      makeToolCallRound('q1', 'question', { questions: [{ question: '¿Sigo?' }] }),
+      makeTextRound('vale'),
+    ]);
+    await q.operator.request('runs.start', { sessionId: q.sessionId, input: 'pregunta' });
+    const asked = (await untilType(q.w, 'question.requested')).data.request;
+    const answers = [{ question: '¿Sigo?', answer: 'sí' }];
+    expect(
+      await code(
+        q.approver.request('questions.answer', {
+          sessionId: other.sessionId,
+          requestId: asked.id,
+          answers,
+        }),
+      ),
+    ).toBe('NOT_FOUND');
+    expect((await q.approver.request('approvals.list', {})).questions).toHaveLength(1);
+    await q.approver.request('questions.answer', {
+      sessionId: q.sessionId,
+      requestId: asked.id,
+      answers,
+    });
+    await q.w.until((e) => e.type === 'run.completed');
+
+    const p = await hosted(t, [
+      makeToolCallRound('c1', 'present_plan', { summary: 'Plan', steps: [{ title: 'Uno' }] }),
+      makeTextRound('hecho'),
+    ]);
+    await p.operator.request('runs.start', { sessionId: p.sessionId, input: 'x', mode: 'plan' });
+    const proposed = (await untilType(p.w, 'plan.proposed')).data.request;
+    expect(
+      await code(
+        p.approver.request('plans.decide', {
+          sessionId: other.sessionId,
+          requestId: proposed.id,
+          decision: 'approve',
+        }),
+      ),
+    ).toBe('NOT_FOUND');
+    expect((await p.approver.request('approvals.list', {})).plans).toHaveLength(1);
+    await p.approver.request('plans.decide', {
+      sessionId: p.sessionId,
+      requestId: proposed.id,
+      decision: 'reject',
+    });
+    expect((await untilType(p.w, 'plan.resolved')).data.decision).toBe('reject');
+  }, 40_000);
+
   it('cancelar el run con una aprobación pendiente: no se ejecuta y la solicitud desaparece', async () => {
     t = await startTestDaemon();
     const s = await hosted(t);

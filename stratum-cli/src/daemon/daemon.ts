@@ -658,6 +658,7 @@ export class Stratumd {
         await this.approvals.resolve(conn, {
           kind: 'approval',
           id: params.approvalId,
+          ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
           decision: params.decision,
           ...(params.phrase !== undefined ? { phrase: params.phrase } : {}),
         });
@@ -667,6 +668,7 @@ export class Stratumd {
         await this.approvals.resolve(conn, {
           kind: 'question',
           id: params.requestId,
+          ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
           answers: params.answers,
         });
         return {};
@@ -675,6 +677,7 @@ export class Stratumd {
         await this.approvals.resolve(conn, {
           kind: 'plan',
           id: params.requestId,
+          ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
           decision: params.decision,
           ...(params.plan ? { plan: params.plan } : {}),
         });

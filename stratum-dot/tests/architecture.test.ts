@@ -128,6 +128,32 @@ describe('Dot solo conoce el contrato', () => {
   });
 });
 
+/** Los comandos `dot_*`: la lista blanca entera. */
+const COMMANDS = [
+  'dot_answer_questions',
+  'dot_approve',
+  'dot_approver_lock',
+  'dot_approver_status',
+  'dot_approver_unlock',
+  'dot_attach',
+  'dot_cancel_run',
+  'dot_decide_plan',
+  'dot_deny',
+  'dot_focus_session',
+  'dot_hide',
+  'dot_list_agents',
+  'dot_list_models',
+  'dot_open_session',
+  'dot_pause_run',
+  'dot_quit',
+  'dot_resume_run',
+  'dot_resync_session',
+  'dot_retry',
+  'dot_set_attention',
+  'dot_start_run',
+  'dot_steer_run',
+];
+
 describe('la frontera con el lado nativo', () => {
   const native = join(SRC, 'bridge', 'native.ts');
 
@@ -147,22 +173,12 @@ describe('la frontera con el lado nativo', () => {
     const lib = code(join(DOT, 'src-tauri', 'src', 'lib.rs'));
     const registered = [...lib.matchAll(/commands::(dot_[a-z_]+)/g)].map((m) => m[1]!).sort();
     expect(invoked).toEqual(registered);
-    expect(registered).toEqual([
-      'dot_attach',
-      'dot_cancel_run',
-      'dot_focus_session',
-      'dot_hide',
-      'dot_list_agents',
-      'dot_list_models',
-      'dot_open_session',
-      'dot_pause_run',
-      'dot_quit',
-      'dot_resume_run',
-      'dot_resync_session',
-      'dot_retry',
-      'dot_start_run',
-      'dot_steer_run',
-    ]);
+    expect(registered).toEqual(COMMANDS);
+    // Los mismos, declarados en el manifiesto de `build.rs`: cada uno exige permiso.
+    const build = code(join(DOT, 'src-tauri', 'build.rs'));
+    const declared = [...build.matchAll(/"(dot_[a-z_]+)"/g)].map((m) => m[1]!).sort();
+    expect(declared).toEqual(COMMANDS);
+    expect(build).toContain('app_manifest(');
   });
 
   it('una sesión se abre sin entorno, sin `resume` y sin nada del sistema de ficheros', () => {
@@ -183,9 +199,16 @@ describe('la frontera con el lado nativo', () => {
     expect(native).not.toMatch(/\benv\b/);
   });
 
-  it('el webview no tiene más permisos que los de por defecto', () => {
-    const capability = JSON.parse(read(join(DOT, 'src-tauri', 'capabilities', 'default.json')));
-    expect(capability.permissions).toEqual(['core:default']);
+  it('la ventana principal solo tiene los de por defecto y sus comandos; la de desbloqueo, nada', () => {
+    const dir = join(DOT, 'src-tauri', 'capabilities');
+    // Una sola capacidad, y es de la ventana principal.
+    expect(readdirSync(dir)).toEqual(['default.json']);
+    const capability = JSON.parse(read(join(dir, 'default.json')));
+    expect(capability.windows).toEqual(['main']);
+    expect([...capability.permissions].sort()).toEqual(
+      ['core:default', ...COMMANDS.map((c) => `allow-${c.replace(/_/g, '-')}`)].sort(),
+    );
+    expect(JSON.stringify(capability)).not.toMatch(/"unlock"|remote|fs:|shell:|dialog:|http:/);
     const conf = JSON.parse(read(join(DOT, 'src-tauri', 'tauri.conf.json')));
     // Sin red: el webview solo habla con el lado nativo.
     expect(conf.app.security.csp).toContain("default-src 'self'");
@@ -213,6 +236,10 @@ describe('la frontera con el lado nativo', () => {
       for (const [pattern, what] of banned) if (pattern.test(text)) hits.push(`${rel(file)}: ${what}`);
     }
     expect(hits).toEqual([]);
+    // Ningún campo de contraseña en el webview: la clave se teclea en la ventana nativa de desbloqueo.
+    for (const file of shipped) {
+      expect(/type=["']password["']|type:\s*'password'|\bsecret\b|passphrase/i.test(code(file)), rel(file)).toBe(false);
+    }
     // «token» solo aparece como uso de tokens del modelo (un contador), nunca como credencial.
     for (const file of shipped) {
       const stripped = code(file).replace(/tokensLabel|session\.tokens|tokens\.(status|total)|\{ tokens \}|Tokens/g, '');
@@ -250,6 +277,23 @@ describe('la frontera con el lado nativo', () => {
   });
 });
 
+describe('resolver es cosa de la persona', () => {
+  it('solo `app/resolve.ts` pide resolver, y nada más en el webview lo hace', () => {
+    const resolvers = shipped.filter((f) => /\bnative\.(approve|deny|answerQuestions|decidePlan)\(/.test(code(f)));
+    expect(resolvers.map(rel)).toEqual(['src/app/resolve.ts']);
+    // Nadie resuelve al llegar algo: ni el puente, ni los stores.
+    for (const dir of ['bridge', 'stores', 'protocol']) {
+      for (const file of walk(join(SRC, dir), (f) => /\.tsx?$/.test(f) && !isTest(f))) {
+        if (file.endsWith(`${sep}native.ts`)) continue;
+        expect(/\bnative\.(approve|deny|answerQuestions|decidePlan)\(/.test(code(file)), rel(file)).toBe(false);
+      }
+    }
+    // Una sola tarjeta de resolución.
+    const cards = shipped.filter((f) => /useResolve\(/.test(code(f))).map(rel);
+    expect(cards).toEqual(['src/app/resolve.ts', 'src/components/InteractionCard.tsx']);
+  });
+});
+
 describe('el lado nativo', () => {
   const link = join(DOT, 'crates', 'dot-link');
 
@@ -260,11 +304,19 @@ describe('el lado nativo', () => {
     expect(users).toEqual([]);
   });
 
-  it('los nombres de método solo salen de la lista cerrada de `wire.rs`', () => {
-    const wire = rustCode(join(link, 'src', 'wire.rs'));
-    const names = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]);
-    // De `sessions.*` solo abrir; de `runs.*`, iniciar y gobernar. Ni cerrar, ni apagar, ni aprobar.
-    expect(names.sort()).toEqual([
+  it('los nombres de método salen de dos listas cerradas de `wire.rs`, una por conexión', () => {
+    // Sin CRLF: un checkout en Windows los añade.
+    const wire = rustCode(join(link, 'src', 'wire.rs')).replace(/\r\n/g, '\n');
+    const block = (type: string) => {
+      const start = wire.indexOf(`impl WireMethod for ${type} {`);
+      expect(start, type).toBeGreaterThan(-1);
+      const end = wire.indexOf('\n}\n', start);
+      return [...wire.slice(start, end).matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!).sort();
+    };
+    const main = block('MainMethod');
+    const approver = block('ApproverMethod');
+    // Principal: de `sessions.*` solo abrir; de `runs.*`, iniciar y gobernar. Ni cerrar, ni apagar, ni aprobar.
+    expect(main).toEqual([
       'agents.list',
       'core.hello',
       'events.subscribe',
@@ -277,21 +329,58 @@ describe('el lado nativo', () => {
       'runs.steer',
       'sessions.open',
     ]);
+    // Aprobador: saludar y resolver. Ni observar, ni conducir, ni apagar.
+    expect(approver).toEqual(['approvals.resolve', 'core.hello', 'plans.decide', 'questions.answer']);
+    const all = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!);
+    expect(all.length).toBe(main.length + approver.length);
     // Fuera de `wire.rs` nadie escribe un método a mano.
     const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace)\.[a-zA-Z]+"/;
     const strays = rustShipped.filter((f) => !f.endsWith(`${sep}wire.rs`) && method.test(rustCode(f)));
     expect(strays.map(rel)).toEqual([]);
   });
 
-  it('Dot no apaga el daemon, no aprueba y no pide más rol que `operator`', () => {
+  it('Dot no apaga el daemon; la conexión principal no aprueba y la de aprobador no conduce', () => {
+    const approverFile = join(link, 'src', 'approver.rs');
+    const secretFile = join(link, 'src', 'secret.rs');
     for (const file of rustShipped) {
       const text = rustCode(file);
-      expect(/core\.shutdown|approvals\.resolve|questions\.answer|plans\.decide/.test(text), rel(file)).toBe(false);
+      expect(/core\.shutdown/.test(text), rel(file)).toBe(false);
       // Cerrar Dot (o una vista) no cierra sesiones: el método ni existe aquí.
       expect(/"(sessions\.close|sessions\.set\w*|jobs\.cancel)"/.test(text), rel(file)).toBe(false);
-      expect(/"approver"|"host"|"broker"|approverKey/.test(text), rel(file)).toBe(false);
+      // Ni `host` ni `broker`, en ninguna conexión.
+      expect(/"host"|"broker"/.test(text), rel(file)).toBe(false);
+      // El rol de aprobador y la clave, solo en la pieza del aprobador.
+      if (file !== approverFile && file !== secretFile) {
+        expect(/"approver"|approverKey/.test(text), rel(file)).toBe(false);
+      }
     }
-    expect(rustCode(join(link, 'src', 'link.rs'))).toContain('"roles": ["operator"]');
+    const main = rustCode(join(link, 'src', 'link.rs'));
+    expect(main).toContain('"roles": ["operator"]');
+    // La principal no conoce al aprobador; el aprobador no conoce los métodos principales.
+    expect(main).not.toMatch(/ApproverMethod|approver::|ApproverSecret/);
+    const approver = rustCode(approverFile);
+    expect(approver).toContain('json!(["approver"])');
+    expect(approver).not.toMatch(/MainMethod|"operator"|"observer"/);
+    // Antes de dar la autoridad por buena, el daemon tiene que haber concedido `approve`.
+    expect(approver).toMatch(/Some\("approve"\)/);
+  });
+
+  it('la clave de aprobador no tiene copia, ni forma de imprimirse, ni de llegar al webview', () => {
+    const secret = rustCode(join(link, 'src', 'secret.rs'));
+    expect(secret).toMatch(/pub struct ApproverSecret\(/);
+    // Sin derivar nada: ni Clone, ni Debug, ni Serialize. Y se borra al soltarse.
+    expect(secret).not.toMatch(/#\[derive\([^)]*\)\]\s*pub struct ApproverSecret/);
+    expect(secret).not.toMatch(/impl\s+(Clone|std::fmt::Debug|fmt::Debug|Display|Serialize)\s+for\s+ApproverSecret/);
+    expect(secret).toContain('Zeroizing');
+    // En el shell, solo la ventana de desbloqueo crea una; ningún comando la recibe.
+    const tauri = walk(join(DOT, 'src-tauri', 'src'), (f) => f.endsWith('.rs'));
+    const makers = tauri.filter((f) => /ApproverSecret::from_bytes/.test(rustCode(f))).map(rel);
+    expect(makers).toEqual(['src-tauri/src/unlock.rs']);
+    const commands = rustCode(join(DOT, 'src-tauri', 'src', 'commands.rs'));
+    expect(commands).not.toMatch(/ApproverSecret|\bkey: String|secret|password/i);
+    // Y la ventana de desbloqueo solo acepta lo que viene de ella.
+    const unlock = rustCode(join(DOT, 'src-tauri', 'src', 'unlock.rs'));
+    expect(unlock).toMatch(/ctx\.webview_label\(\) != WINDOW/);
   });
 
   it('sin TCP ni HTTP: el canal es el pipe que publica el daemon', () => {

@@ -1,7 +1,10 @@
-import { useCallback, useEffect, useRef } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNative } from '../bridge/context';
 import { ConnectionBanner, connectionLabel, connectionTone } from '../components/ConnectionBanner';
 import { Dot } from '../components/StatusBadge';
+import { collectPending } from '../protocol/interactions';
+import { countByKind, countsLabel } from '../protocol/view';
+import { HumanInput } from '../screens/HumanInput';
 import { Incompatible } from '../screens/Incompatible';
 import { NewChat } from '../screens/NewChat';
 import { Overview } from '../screens/Overview';
@@ -12,7 +15,10 @@ import { OPENING_TTL_MS, useUi } from '../stores/uiStore';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useNow } from './useNow';
 
-/** Cabecera (daemon + sesiones), lista, detalle (una sesión o un chat nuevo) y pie con las versiones. */
+/**
+ * Cabecera (daemon, sesiones, lo que espera a una persona), lista y detalle (una
+ * sesión o un chat nuevo) —o el centro de aprobaciones— y pie con las versiones.
+ */
 export function App() {
   const native = useNative();
   const connection = useConnection((s) => s.state);
@@ -27,6 +33,11 @@ export function App() {
   const openedAt = useUi((s) => (selectedId ? s.opening[selectedId] : undefined));
   const select = useUi((s) => s.select);
   const setComposingNew = useUi((s) => s.setComposingNew);
+  const view = useUi((s) => s.view);
+  const setView = useUi((s) => s.setView);
+  const openHumanInput = useUi((s) => s.openHumanInput);
+  const order = useSessions((s) => s.order);
+  const sessions = useSessions((s) => s.sessions);
   const now = useNow();
   const composerRef = useRef<HTMLTextAreaElement>(null);
 
@@ -43,12 +54,31 @@ export function App() {
   const retry = useCallback(() => void native.retry().catch(() => undefined), [native]);
   const newChat = useCallback(() => setComposingNew(true), [setComposingNew]);
 
+  // Lo que espera a una persona, de todas las sesiones: sale de sus fotos.
+  const counts = useMemo(() => {
+    const snapshots: Record<string, (typeof sessions)[string]['snapshot']> = {};
+    for (const id of order) snapshots[id] = sessions[id]?.snapshot ?? null;
+    return countByKind(collectPending(order, snapshots));
+  }, [order, sessions]);
+  const waiting = counts.approvals + counts.questions + counts.plans;
+  // La bandeja enseña lo mismo (y pide atención si aparece algo con la ventana sin foco).
+  const { approvals, questions, plans } = counts;
+  useEffect(() => {
+    void native.setAttention({ approvals, questions, plans }).catch(() => undefined);
+  }, [native, approvals, questions, plans]);
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const command = event.ctrlKey || event.metaKey;
       if (command && event.key.toLowerCase() === 'k') {
         event.preventDefault();
         composerRef.current?.focus();
+        return;
+      }
+      if (command && event.shiftKey && event.key.toLowerCase() === 'a') {
+        // Abre el centro. No hay atajo para aprobar.
+        event.preventDefault();
+        openHumanInput();
         return;
       }
       if (command && event.key.toLowerCase() === 'n') {
@@ -58,16 +88,21 @@ export function App() {
       }
       if (event.key !== 'Escape') return;
       const active = document.activeElement;
-      // Primero suelta el campo; un segundo Esc oculta la ventana.
+      // Primero suelta el campo; un segundo Esc cierra el centro (sin decidir
+      // nada: Esc nunca deniega) o, si no, oculta la ventana.
       if (active instanceof HTMLElement && active !== document.body) {
         active.blur();
+        return;
+      }
+      if (useUi.getState().view === 'human-input') {
+        setView('sessions');
         return;
       }
       void native.hideWindow().catch(() => undefined);
     };
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
-  }, [native, control, newChat]);
+  }, [native, control, newChat, openHumanInput, setView]);
 
   const back = (
     <button type="button" className="btn ghost back" onClick={() => choose(null)} aria-label="Back to sessions">
@@ -151,6 +186,17 @@ export function App() {
         <span className="top-count" aria-label={`${count} live sessions`}>
           {count} {count === 1 ? 'session' : 'sessions'}
         </span>
+        <button
+          type="button"
+          className={`btn small waiting-badge ${waiting > 0 ? 'has' : ''}`}
+          aria-pressed={view === 'human-input'}
+          aria-label={`Approval Center: ${countsLabel(counts)}`}
+          title="Approval Center (Ctrl+Shift+A)"
+          data-waiting={waiting}
+          onClick={() => (view === 'human-input' ? setView('sessions') : openHumanInput())}
+        >
+          Approvals <span className="count">{waiting}</span>
+        </button>
       </header>
 
       <ConnectionBanner state={connection} hasStaleSessions={count > 0} onRetry={retry} />
@@ -158,6 +204,10 @@ export function App() {
       {connection.kind === 'incompatible' ? (
         <main className="body">
           <Incompatible state={connection} onRetry={retry} />
+        </main>
+      ) : view === 'human-input' ? (
+        <main className="body">
+          <HumanInput now={now} connected={connected} onBack={() => setView('sessions')} />
         </main>
       ) : (
         <main className="body split">

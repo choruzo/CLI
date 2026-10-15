@@ -3,8 +3,12 @@
 //! daemon**: no aloja sesiones. Lo que contesta lo decide cada test.
 #![allow(dead_code)]
 
+use dot_link::approver::ApproverTimings;
 use dot_link::link::Timings;
-use dot_link::{DaemonLauncher, DotEvent, LinkConfig, LinkHandle, Logger, NoLauncher};
+use dot_link::{
+    ApproverConfig, ApproverHandle, DaemonLauncher, DotEvent, LinkConfig, LinkHandle, Logger,
+    NoLauncher,
+};
 use serde_json::{json, Value};
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -12,11 +16,23 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use tokio::sync::mpsc;
+use tokio::sync::{mpsc, Notify};
 use tokio::task::JoinHandle;
 
 pub const TOKEN_A: &str = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa0001";
 pub const TOKEN_B: &str = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb0002";
+/// La clave de aprobador de los tests (nunca debe aparecer fuera del `core.hello` del aprobador).
+pub const APPROVER_KEY: &str = "frase-de-aprobador-de-prueba-7f3a";
+
+/// Una solicitud pendiente del daemon de pruebas.
+#[derive(Clone)]
+pub struct PendingReq {
+    pub id: String,
+    pub session_id: String,
+    /// `approval` · `question` · `plan`.
+    pub kind: &'static str,
+    pub confirm_phrase: Option<String>,
+}
 
 static PIPE_COUNTER: AtomicU64 = AtomicU64::new(0);
 
@@ -39,6 +55,8 @@ struct ConnEntry {
     id: u64,
     out: mpsc::UnboundedSender<String>,
     subs: Vec<(String, Scope)>,
+    capabilities: Vec<String>,
+    kill: Arc<Notify>,
 }
 
 struct State {
@@ -52,6 +70,12 @@ struct State {
     connections: usize,
     /// Métodos que no se contestan (para probar el resultado desconocido).
     silent: HashSet<String>,
+    /// `Some`: el daemon acredita aprobadores con esa clave (y anuncia `remote-approvals`).
+    approver_key: Option<String>,
+    /// Concede el rol `approver` sin `approve` aunque la clave valga (un daemon raro).
+    withhold_approve: bool,
+    pending: Vec<PendingReq>,
+    resolved: Vec<String>,
     next_sub: u64,
     next_conn: u64,
     tasks: Vec<JoinHandle<()>>,
@@ -107,6 +131,9 @@ pub fn delta(id: &str, after: u64, text: &str) -> Value {
     json!({ "type": "message.delta", "sessionId": id, "at": 5, "after": after, "data": { "text": text } })
 }
 
+/// Marca interna: cerrar la conexión tras contestar.
+const CLOSE: &str = "<close>";
+
 fn line(value: Value) -> String {
     let mut text = value.to_string();
     text.push('\n');
@@ -127,6 +154,10 @@ impl Fake {
                     requests: Vec::new(),
                     connections: 0,
                     silent: HashSet::new(),
+                    approver_key: None,
+                    withhold_approve: false,
+                    pending: Vec::new(),
+                    resolved: Vec::new(),
                     next_sub: 1,
                     next_conn: 1,
                     tasks: Vec::new(),
@@ -145,6 +176,47 @@ impl Fake {
 
     pub fn set_silent(&self, method: &str) {
         self.lock().silent.insert(method.to_string());
+    }
+
+    pub fn set_approver_key(&self, key: Option<&str>) {
+        self.lock().approver_key = key.map(str::to_string);
+    }
+
+    pub fn withhold_approve(&self) {
+        self.lock().withhold_approve = true;
+    }
+
+    pub fn add_pending(&self, req: PendingReq) {
+        self.lock().pending.push(req);
+    }
+
+    pub fn pending_ids(&self) -> Vec<String> {
+        self.lock().pending.iter().map(|p| p.id.clone()).collect()
+    }
+
+    /// Resuelve «en otro sitio» (la terminal del anfitrión).
+    pub fn resolve_elsewhere(&self, id: &str) {
+        let mut state = self.lock();
+        state.pending.retain(|p| p.id != id);
+        state.resolved.push(id.to_string());
+    }
+
+    /// Corta las conexiones que tienen esa capacidad, sin tocar las demás.
+    pub fn kill_connections_with(&self, capability: &str) {
+        for conn in &self.lock().conns {
+            if conn.capabilities.iter().any(|c| c == capability) {
+                conn.kill.notify_one();
+            }
+        }
+    }
+
+    /// Conexiones vivas con esa capacidad.
+    pub fn live_with(&self, capability: &str) -> usize {
+        self.lock()
+            .conns
+            .iter()
+            .filter(|c| !c.out.is_closed() && c.capabilities.iter().any(|k| k == capability))
+            .count()
     }
 
     pub fn set_session(&self, snapshot: Value) {
@@ -306,6 +378,8 @@ impl Fake {
 
     fn serve<S: AsyncRead + AsyncWrite + Send + 'static>(&self, stream: S) {
         let (out, mut outbox) = mpsc::unbounded_channel::<String>();
+        let kill = Arc::new(Notify::new());
+        let killed = kill.clone();
         let conn_id = {
             let mut state = self.lock();
             let id = state.next_conn;
@@ -315,6 +389,8 @@ impl Fake {
                 id,
                 out: out.clone(),
                 subs: Vec::new(),
+                capabilities: Vec::new(),
+                kill,
             });
             id
         };
@@ -327,10 +403,20 @@ impl Fake {
                     incoming = lines.next_line() => {
                         let Ok(Some(text)) = incoming else { break };
                         let Ok(msg) = serde_json::from_str::<Value>(&text) else { continue };
+                        let mut close = false;
                         for reply in fake.handle(conn_id, msg) {
+                            if reply == CLOSE { close = true; continue }
                             let _ = out.send(reply);
                         }
+                        // Como el daemon tras una clave que no vale: contesta y cierra.
+                        if close {
+                            while let Ok(text) = outbox.try_recv() {
+                                let _ = writer.write_all(text.as_bytes()).await;
+                            }
+                            break;
+                        }
                     }
+                    _ = killed.notified() => break,
                     outgoing = outbox.recv() => {
                         let Some(text) = outgoing else { break };
                         if writer.write_all(text.as_bytes()).await.is_err() { break }
@@ -366,20 +452,93 @@ impl Fake {
             )
         };
         match method.as_str() {
-            "core.hello" => match state.hello.clone() {
-                _ if params["token"].as_str() != Some(state.token.as_str()) => {
-                    vec![err("UNAUTHORIZED", json!({}))]
+            "core.hello" => {
+                let roles: Vec<String> = params["roles"]
+                    .as_array()
+                    .map(|r| {
+                        r.iter()
+                            .filter_map(Value::as_str)
+                            .map(str::to_string)
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let presented = params.get("approverKey").and_then(Value::as_str);
+                match state.hello.clone() {
+                    _ if params["token"].as_str() != Some(state.token.as_str()) => {
+                        vec![err("UNAUTHORIZED", json!({}))]
+                    }
+                    Hello::Unauthorized => vec![err("UNAUTHORIZED", json!({}))],
+                    Hello::Mismatch(protocol) => {
+                        vec![err("PROTOCOL_MISMATCH", json!({ "protocol": protocol }))]
+                    }
+                    // Una clave que no vale rechaza el saludo y cierra (un intento por conexión).
+                    _ if presented.is_some() && presented != state.approver_key.as_deref() => {
+                        vec![err("UNAUTHORIZED", json!({})), CLOSE.to_string()]
+                    }
+                    hello => {
+                        let mut caps = vec!["observe".to_string()];
+                        if roles.iter().any(|r| r == "operator") {
+                            caps.push("control".into());
+                        }
+                        if roles.iter().any(|r| r == "approver")
+                            && presented.is_some()
+                            && !state.withhold_approve
+                        {
+                            caps.push("approve".into());
+                        }
+                        if let Some(conn) = state.conns.iter_mut().find(|c| c.id == conn_id) {
+                            conn.capabilities = caps.clone();
+                        }
+                        let features: Vec<&str> = if state.approver_key.is_some() {
+                            vec!["remote-approvals"]
+                        } else {
+                            vec![]
+                        };
+                        vec![ok(json!({
+                            "protocol": if let Hello::WrongVersion(v) = hello { v } else { 1 },
+                            "server": { "version": "0.9.0-test", "platform": "test" },
+                            "connectionId": conn_id, "capabilities": caps, "features": features,
+                        }))]
+                    }
                 }
-                Hello::Unauthorized => vec![err("UNAUTHORIZED", json!({}))],
-                Hello::Mismatch(protocol) => {
-                    vec![err("PROTOCOL_MISMATCH", json!({ "protocol": protocol }))]
+            }
+            "approvals.resolve" | "questions.answer" | "plans.decide" => {
+                let can = state
+                    .conns
+                    .iter()
+                    .find(|c| c.id == conn_id)
+                    .is_some_and(|c| c.capabilities.iter().any(|k| k == "approve"));
+                if !can {
+                    return vec![err("FORBIDDEN", json!({ "capability": "approve" }))];
                 }
-                hello => vec![ok(json!({
-                    "protocol": if let Hello::WrongVersion(v) = hello { v } else { 1 },
-                    "server": { "version": "0.9.0-test", "platform": "test" },
-                    "connectionId": conn_id, "capabilities": ["observe", "control"], "features": [],
-                }))],
-            },
+                let (kind, key) = match method.as_str() {
+                    "approvals.resolve" => ("approval", "approvalId"),
+                    "questions.answer" => ("question", "requestId"),
+                    _ => ("plan", "requestId"),
+                };
+                let id = params[key].as_str().unwrap_or("").to_string();
+                let session = params["sessionId"].as_str();
+                let found = state.pending.iter().position(|p| {
+                    p.id == id && p.kind == kind && session.map_or(true, |s| s == p.session_id)
+                });
+                let Some(index) = found else {
+                    if state.resolved.contains(&id) {
+                        return vec![err("ALREADY_RESOLVED", json!({ "resolution": "approved" }))];
+                    }
+                    return vec![err("NOT_FOUND", json!({}))];
+                };
+                let req = state.pending[index].clone();
+                if let Some(phrase) = &req.confirm_phrase {
+                    if params["decision"] == "approve"
+                        && params["phrase"].as_str() != Some(phrase.as_str())
+                    {
+                        return vec![err("INVALID_PARAMS", json!({}))];
+                    }
+                }
+                state.pending.remove(index);
+                state.resolved.push(id);
+                vec![ok(json!({}))]
+            }
             "events.subscribe" => {
                 let sub = format!("sub_{}", state.next_sub);
                 state.next_sub += 1;
@@ -630,6 +789,60 @@ pub fn dot(dir: &Path, launcher: Option<Arc<dyn DaemonLauncher>>) -> Rig {
     );
     Rig {
         link,
+        seen,
+        log_dir,
+        task: tokio::spawn(task),
+    }
+}
+
+pub fn fast_approver() -> ApproverTimings {
+    ApproverTimings {
+        handshake_timeout: Duration::from_millis(800),
+        request_timeout: Duration::from_millis(400),
+        unlocked_for: Duration::from_secs(30),
+        retry_cooldown: Duration::from_millis(300),
+        connect_wait: Duration::from_millis(200),
+    }
+}
+
+/// El broker de aprobador de Dot contra la carpeta de endpoint `dir`.
+pub struct BrokerRig {
+    pub broker: ApproverHandle,
+    pub seen: Seen,
+    pub log_dir: PathBuf,
+    task: JoinHandle<()>,
+}
+
+impl BrokerRig {
+    pub fn log(&self) -> String {
+        std::fs::read_to_string(self.log_dir.join("dot.log")).unwrap_or_default()
+    }
+
+    pub fn status(&self) -> String {
+        self.broker.status().name().to_string()
+    }
+
+    pub async fn quit(self) {
+        self.broker.shutdown();
+        let _ = tokio::time::timeout(Duration::from_secs(5), self.task).await;
+    }
+}
+
+pub fn broker(dir: &Path, timings: ApproverTimings) -> BrokerRig {
+    let seen = Seen::default();
+    let sink = seen.clone();
+    let log_dir = dir.join("broker-logs");
+    let (broker, task) = dot_link::spawn_broker(
+        ApproverConfig {
+            endpoint_dir: dir.to_path_buf(),
+            client_version: "0.1.0-test".into(),
+            logger: Logger::to_dir(&log_dir),
+            timings,
+        },
+        move |event| sink.events.lock().unwrap().push(event),
+    );
+    BrokerRig {
+        broker,
         seen,
         log_dir,
         task: tokio::spawn(task),

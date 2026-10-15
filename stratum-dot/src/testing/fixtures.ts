@@ -4,9 +4,10 @@
  * de mentira que registra lo que se le pide.
  */
 import { vi } from 'vitest';
-import type { AppInfo, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
+import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
 import type { ProtocolRun, ProtocolSession, ProtocolSessionSnapshot } from '../protocol';
+import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
 import { useUi } from '../stores/uiStore';
@@ -81,6 +82,12 @@ export const CONNECTED: ConnectionState = {
   features: [],
 };
 
+/** Conectado a un daemon que acredita aprobadores. */
+export const CONNECTED_APPROVALS: ConnectionState = { ...CONNECTED, features: ['remote-approvals'] };
+
+export const READY: ApproverStatus = { kind: 'ready', expiresAt: 1_760_000_600_000 };
+export const LOCKED: ApproverStatus = { kind: 'locked', reason: 'initial' };
+
 export const APP_INFO: AppInfo = { dotVersion: '0.1.0', protocol: 1, trayAvailable: true };
 
 export type FakeNative = NativeBridge & {
@@ -125,6 +132,14 @@ export function fakeNative(): FakeNative {
         { provider: 'local', id: 'big-model', contextWindow: 128000 },
       ],
     })),
+    approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
+    unlockApprovals: vi.fn(async () => undefined),
+    lockApprovals: vi.fn(async () => undefined),
+    approve: vi.fn(async () => undefined),
+    deny: vi.fn(async () => undefined),
+    answerQuestions: vi.fn(async () => undefined),
+    decidePlan: vi.fn(async () => undefined),
+    setAttention: vi.fn(async () => undefined),
     hideWindow: vi.fn(async () => undefined),
     quit: vi.fn(async () => undefined),
   };
@@ -151,7 +166,11 @@ export function resetStores(): void {
     sends: {},
     opening: {},
     notices: {},
+    view: 'sessions',
+    focusItem: null,
+    resolutions: {},
   });
+  useApprover.setState({ status: { kind: 'unavailable', reason: 'not-connected' } });
   try {
     window.localStorage.clear();
   } catch {

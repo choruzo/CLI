@@ -8,6 +8,12 @@
 //!    llamadas de chat: `open` (`cwd`, `agent`, `provider`, `model`), `send`
 //!    (`sessionId`, `input`), `agents` (`cwd`) y `models`, cuyo `result` se
 //!    imprime tal cual.
+//!  - y las del broker de aprobador, como las pide la app: `unlock` (`key`),
+//!    `lock`, `approve` (`sessionId`, `approvalId`, `phrase?`, `forSession?`),
+//!    `deny`, `answer` (`requestId`, `answers` o `null`) y `plan` (`requestId`,
+//!    `approve`). **Solo para pruebas**: la app nunca recibe la clave por aquí
+//!    —en la app la teclea la persona en la ventana de desbloqueo— y este
+//!    binario no se distribuye con ella.
 //!
 //! Sirve para probar Dot contra un `stratumd` real sin automatizar una
 //! ventana (`scripts/smoke-real.mjs`). Cerrar stdin lo termina, como cerrar Dot:
@@ -15,9 +21,13 @@
 //!
 //!   dot-probe [--endpoint-dir <dir>] [--log-dir <dir>] [--no-autostart]
 
+use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
 use dot_link::link::Timings;
-use dot_link::{CallAction, CliLauncher, ControlAction, DotEvent, LinkConfig, Logger};
+use dot_link::{
+    ApproverAction, ApproverConfig, ApproverSecret, CallAction, CliLauncher, ControlAction,
+    DotEvent, LinkConfig, Logger, QuestionAnswer,
+};
 use serde_json::{json, Value};
 use std::io::Write;
 use std::path::PathBuf;
@@ -52,17 +62,33 @@ async fn main() {
         std::process::exit(2);
     };
 
+    let logger = log_dir
+        .map(|dir| Logger::to_dir(&dir))
+        .unwrap_or_else(Logger::none);
+    let (broker, broker_task) = dot_link::spawn_broker(
+        ApproverConfig {
+            endpoint_dir: endpoint_dir.clone(),
+            client_version: env!("CARGO_PKG_VERSION").to_string(),
+            logger: logger.clone(),
+            timings: ApproverTimings::default(),
+        },
+        |event: DotEvent| print(&serde_json::to_value(&event).unwrap_or(Value::Null)),
+    );
+    let broker_running = tokio::spawn(broker_task);
     let config = LinkConfig {
         endpoint_dir,
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         autostart,
         launcher: Arc::new(CliLauncher::from_env()),
-        logger: log_dir
-            .map(|dir| Logger::to_dir(&dir))
-            .unwrap_or_else(Logger::none),
+        logger,
         timings: Timings::default(),
     };
-    let (link, task) = dot_link::spawn(config, |event: DotEvent| {
+    let observer = broker.clone();
+    let (link, task) = dot_link::spawn(config, move |event: DotEvent| {
+        // Como la app: el broker sabe por la conexión principal si hay a quién acreditarse.
+        if let DotEvent::Connection { state } = &event {
+            observer.observe_main(state);
+        }
         print(&serde_json::to_value(&event).unwrap_or(Value::Null));
     });
     let running = tokio::spawn(task);
@@ -91,6 +117,64 @@ async fn main() {
             "models" => Some(CallAction::ListModels),
             _ => None,
         };
+        let approver = match cmd.as_str() {
+            "approve" => Some(ApproverAction::Approve {
+                session_id: session_id.clone(),
+                approval_id: text("approvalId").unwrap_or_default(),
+                phrase: text("phrase"),
+                for_session: msg
+                    .get("forSession")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+            }),
+            "deny" => Some(ApproverAction::Deny {
+                session_id: session_id.clone(),
+                approval_id: text("approvalId").unwrap_or_default(),
+            }),
+            "answer" => Some(ApproverAction::AnswerQuestions {
+                session_id: session_id.clone(),
+                request_id: text("requestId").unwrap_or_default(),
+                answers: msg.get("answers").filter(|a| !a.is_null()).map(|a| {
+                    serde_json::from_value::<Vec<QuestionAnswer>>(a.clone()).unwrap_or_default()
+                }),
+            }),
+            "plan" => Some(ApproverAction::DecidePlan {
+                session_id: session_id.clone(),
+                request_id: text("requestId").unwrap_or_default(),
+                approve: msg.get("approve").and_then(Value::as_bool).unwrap_or(false),
+            }),
+            _ => None,
+        };
+        if cmd == "unlock" || approver.is_some() {
+            let broker = broker.clone();
+            let id = msg.get("id").cloned().unwrap_or(Value::Null);
+            let secret = if cmd == "unlock" {
+                ApproverSecret::from_bytes(text("key").unwrap_or_default().into_bytes()).ok()
+            } else {
+                None
+            };
+            tokio::spawn(async move {
+                let outcome = match (approver, secret) {
+                    (Some(action), _) => broker.resolve(action).await,
+                    (None, Some(secret)) => broker.unlock(secret).await,
+                    (None, None) => Err(dot_link::CommandError::new(
+                        dot_link::CommandErrorKind::Invalid,
+                        "No key.",
+                    )),
+                };
+                match outcome {
+                    Ok(()) => print(&json!({ "type": "result", "cmd": cmd, "id": id, "ok": true })),
+                    Err(error) => print(
+                        &json!({ "type": "result", "cmd": cmd, "id": id, "ok": false, "error": error }),
+                    ),
+                }
+            });
+            continue;
+        }
+        if cmd == "lock" {
+            broker.lock();
+            continue;
+        }
         if let Some(call) = call {
             let link = link.clone();
             let id = msg.get("id").cloned().unwrap_or(Value::Null);
@@ -110,6 +194,7 @@ async fn main() {
             "quit" => break,
             "attach" => {
                 link.attach();
+                broker.attach();
                 continue;
             }
             "retry" => {
@@ -155,6 +240,8 @@ async fn main() {
             }
         });
     }
+    broker.shutdown();
     link.shutdown();
+    let _ = broker_running.await;
     let _ = running.await;
 }
