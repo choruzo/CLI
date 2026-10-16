@@ -415,6 +415,8 @@ describe('guards — preflight en el dispatcher', () => {
       'stratum approvals',
       'stratum daemon stop',
       'stratum attach sess_1',
+      'stratum detach sess_1',
+      'npx stratum detach sess_1',
       'stratum.cmd approvals approve apr_1',
       'sudo stratum approvals deny apr_1',
       'sh -c "stratum approvals approve apr_1"',

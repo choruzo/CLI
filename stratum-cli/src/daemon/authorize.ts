@@ -23,10 +23,13 @@ export interface Principal {
  * Capacidades que este servidor concede. `broker` (reservada) todavía no: quien
  * la pida recibe el resto de lo que sumen sus roles.
  *
- * `host` da acceso a `host.register` / `host.publish` / `host.unregister`, y
- * nada más: no incluye `control` ni `approve`. Sobre **qué** sesiones puede
- * publicar una conexión decide el registro de sesiones pares (las que ella
- * misma registró), no esta tabla.
+ * `host` da acceso a `host.register` / `host.publish` / `host.unregister` y,
+ * desde M10, a traspasar al daemon **una sesión que esa conexión aloja**
+ * (`host.handoff*`), y nada más: no incluye `control` ni `approve`. Sobre
+ * **qué** sesiones decide el registro de sesiones pares (las que ella misma
+ * registró), no esta tabla. Traspasar hace que el daemon monte un runtime: el
+ * commit aplica al `cwd`, el provider y el modelo las mismas comprobaciones que
+ * `sessions.open`, y la sesión queda con la política del daemon.
  */
 export const GRANTABLE: readonly Capability[] = ['observe', 'control', 'approve', 'host'];
 

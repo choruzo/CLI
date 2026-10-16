@@ -793,7 +793,7 @@ export function commandVeto(
 
 const LOCAL_TARGET = 'local';
 /** Subcomandos de la CLI que gobiernan el plano de control. */
-const STRATUM_CONTROL_SUBCOMMANDS = new Set(['approvals', 'daemon', 'attach']);
+const STRATUM_CONTROL_SUBCOMMANDS = new Set(['approvals', 'daemon', 'attach', 'detach']);
 /** Lanzadores por los que se puede llegar a la CLI sin escribir `stratum`. */
 const SCRIPT_RUNNERS = new Set(['node', 'npx', 'pnpm', 'yarn', 'bunx', 'bun', 'tsx', 'npm']);
 const STRATUM_SCRIPT = /(?:^|[\\/@])stratum(?:-cli)?(?:$|[\\/@.])|dist[\\/]index\.[cm]?js$/i;

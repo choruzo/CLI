@@ -62,6 +62,11 @@ export class SessionAuditor {
     return true;
   }
 
+  /** Vacía la cola de escritura de la traza (antes de traspasar la sesión). */
+  async flush(): Promise<void> {
+    await this.recorder?.flush();
+  }
+
   /** Teardown de la sesión: cierra el visor y vacía la cola de escritura. */
   async dispose(): Promise<void> {
     await this.stop();

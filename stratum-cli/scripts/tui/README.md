@@ -77,3 +77,5 @@ apunte a él.
   `✗ Comando desconocido`. Una ruta (`/etc/hosts …`) sí se envía como texto.
 - **Sin `npm run build` se prueba código viejo.**
 - La pantalla tiene `rows` filas: lo que ya subió está en `scrollback()`.
+- **En un CI Ink no repinta** (`is-in-ci`: `CI`, `CONTINUOUS_INTEGRATION`, `CI_*`) y solo saldría el
+  banner: `launch()` quita esas variables al proceso hijo.

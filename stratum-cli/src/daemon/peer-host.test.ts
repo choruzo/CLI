@@ -365,12 +365,17 @@ describe('D — dos anfitriones', () => {
     // A conoce el id de B, y no le sirve de nada.
     expect(
       await intruder(
-        hostA.request('host.publish', { sessionId: 'sess_b', events: [warning('sess_b', 2)] }),
+        hostA.request('host.publish', {
+          epoch: 1,
+          sessionId: 'sess_b',
+          events: [warning('sess_b', 2)],
+        }),
       ),
     ).toBe('FORBIDDEN');
     expect(
       await intruder(
         hostA.request('host.publish', {
+          epoch: 1,
           sessionId: 'sess_b',
           snapshot: idleSnapshot('sess_b', 9),
           events: [],
@@ -386,10 +391,15 @@ describe('D — dos anfitriones', () => {
     // Tampoco colando en su propia sesión algo de la otra.
     expect(
       await intruder(
-        hostA.request('host.publish', { sessionId: 'sess_a', events: [warning('sess_b', 2)] }),
+        hostA.request('host.publish', {
+          epoch: 1,
+          sessionId: 'sess_a',
+          events: [warning('sess_b', 2)],
+        }),
       ),
     ).toBe('INVALID_PARAMS');
     await hostB.request('host.publish', {
+      epoch: 1,
       sessionId: 'sess_b',
       snapshot: runningSnapshot('sess_b', 5),
       events: [],
@@ -404,7 +414,9 @@ describe('D — dos anfitriones', () => {
       },
     };
     expect(
-      await intruder(hostA.request('host.publish', { sessionId: 'sess_a', events: [stolenRun] })),
+      await intruder(
+        hostA.request('host.publish', { epoch: 1, sessionId: 'sess_a', events: [stolenRun] }),
+      ),
     ).toBe('INVALID_PARAMS');
     // Alojar no es gobernar: ni la suya ni la ajena.
     expect(await intruder(hostA.request('runs.cancel', { sessionId: 'sess_b' }))).toBe('FORBIDDEN');
@@ -705,17 +717,23 @@ describe('H — huecos', () => {
     const w = watch(observer, 'sess_g', { sinceSeq: 1 });
 
     await host.request('host.publish', {
+      epoch: 1,
       sessionId: 'sess_g',
       events: [warning('sess_g', 2), warning('sess_g', 3)],
     });
     // Repetidos: se ignoran, no rompen nada.
-    await host.request('host.publish', { sessionId: 'sess_g', events: [warning('sess_g', 3)] });
+    await host.request('host.publish', {
+      epoch: 1,
+      sessionId: 'sess_g',
+      events: [warning('sess_g', 3)],
+    });
     await w.until((e) => 'seq' in e && e.seq === 3);
 
     // Faltan 4..8: no se aplica nada del lote, ni se renumera.
     expect(
       await failure(
         host.request('host.publish', {
+          epoch: 1,
           sessionId: 'sess_g',
           events: [warning('sess_g', 4), warning('sess_g', 9)],
         }),
@@ -725,6 +743,7 @@ describe('H — huecos', () => {
 
     // La foto del anfitrión manda, y lo que sigue continúa desde ella.
     await host.request('host.publish', {
+      epoch: 1,
       sessionId: 'sess_g',
       snapshot: idleSnapshot('sess_g', 9),
       events: [warning('sess_g', 10)],
@@ -732,7 +751,11 @@ describe('H — huecos', () => {
     // Quien la seguía recibe la foto (ya con el evento 10 dentro), no los eventos perdidos.
     const snapshot = await w.untilSnapshot();
     expect(snapshot.seq).toBe(10);
-    await host.request('host.publish', { sessionId: 'sess_g', events: [warning('sess_g', 11)] });
+    await host.request('host.publish', {
+      epoch: 1,
+      sessionId: 'sess_g',
+      events: [warning('sess_g', 11)],
+    });
     await w.until((e) => 'seq' in e && e.seq === 11);
     expect(w.seqs()).toEqual([2, 3, 11]);
     expect((await observer.request('sessions.get', { sessionId: 'sess_g' })).snapshot.seq).toBe(11);

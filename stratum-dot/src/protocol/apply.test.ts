@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { applySessionEvent, type ProtocolEvent } from './index';
 import { applyEvents, parseEvent, parseSnapshot } from './apply';
+import { composerMode, hostLabel } from './view';
 import { delta, runUpdated, sampleToolCall, snapshotOf, stateEvent } from '../testing/fixtures';
 
 describe('validación', () => {
@@ -114,5 +115,28 @@ describe('applyEvents: el reductor del contrato, y cuándo pedir foto', () => {
     const { snapshot, needsResync } = applyEvents(snapshotOf(), [stateEvent(9, 'warning', { message: 'x' }, 'ses_otra')]);
     expect(snapshot.seq).toBe(3);
     expect(needsResync).toBe(false);
+  });
+});
+
+describe('M10: una sesión que pasa de su terminal al daemon', () => {
+  it('es la misma sesión: un session.updated cambia el anfitrión, y el campo pasa a preguntar', () => {
+    const peer = snapshotOf(
+      {},
+      { state: 'idle', currentRunId: null, host: { kind: 'peer', client: 'cli', connected: true } },
+      null,
+    );
+    const link = { connected: true, canControl: true };
+    expect(composerMode(peer, link).kind).toBe('off');
+    expect(hostLabel(peer)).toBe('cli (peer)');
+
+    const session = { ...peer.session, seq: 4, host: { kind: 'daemon', client: 'daemon', connected: true } };
+    const { snapshot, needsResync } = applyEvents(peer, [stateEvent(4, 'session.updated', { session })]);
+    expect(needsResync).toBe(false);
+    expect(snapshot.session.id).toBe(peer.session.id);
+    expect(snapshot.seq).toBe(4);
+    expect(snapshot.messages).toEqual(peer.messages);
+    expect(snapshot.run).toEqual(peer.run);
+    expect(hostLabel(snapshot)).toBe('daemon');
+    expect(composerMode(snapshot, link)).toEqual({ kind: 'ask' });
   });
 });

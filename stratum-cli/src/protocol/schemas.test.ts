@@ -108,8 +108,15 @@ describe('parámetros: estrictos', () => {
     const mutating = (Object.keys(METHODS) as MethodName[]).filter(
       (m) => METHODS[m].mutating && METHODS[m].direction === 'client-to-server',
     );
-    // `host.publish` es un flujo, no una operación con identidad propia.
-    for (const m of mutating.filter((m) => m !== 'host.publish')) {
+    // `host.publish` es un flujo, no una operación con identidad propia; los
+    // pasos de un traspaso tras `host.handoffBegin` se identifican por su `handoffId`.
+    const flows: MethodName[] = [
+      'host.publish',
+      'host.handoffChunk',
+      'host.handoffCommit',
+      'host.handoffAbort',
+    ];
+    for (const m of mutating.filter((m) => !flows.includes(m))) {
       expect(hasKey(PARAMS[m], 'operationId'), m).toBe(true);
     }
   });
@@ -348,7 +355,7 @@ describe('env es de solo entrada', () => {
       RESULTS['sessions.get'].parse({ snapshot }),
       NOTIFICATION_PARAMS.snapshot.parse({ subscriptionId: 'sub1', snapshot }),
       PARAMS['host.register'].parse({ snapshot }),
-      PARAMS['host.publish'].parse({ sessionId: 's1', events: [event] }),
+      PARAMS['host.publish'].parse({ sessionId: 's1', epoch: 1, events: [event] }),
     ];
     for (const output of outputs) expect(JSON.stringify(output)).not.toContain(secret);
   });

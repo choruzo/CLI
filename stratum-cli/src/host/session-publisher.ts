@@ -80,6 +80,13 @@ export interface SessionPublisherOptions {
   /** Eventos que esperan en la cola local antes de descartar. */
   maxQueue?: number;
   now?: () => number;
+  /**
+   * M10 — la sesión **continúa** aquí tras traspasarla otro anfitrión: el
+   * estado publicado de partida es esta foto (la que el daemon tiene al día de
+   * lo que publicó el anterior), y la numeración sigue desde su `seq`. `start()`
+   * no abre la sesión: anuncia el cambio de anfitrión con un `session.updated`.
+   */
+  continueFrom?: ProtocolSessionSnapshot;
 }
 
 const DEFAULT_MAX_QUEUE = 4096;
@@ -399,6 +406,14 @@ export class SessionPublisher {
   private plans = new Map<string, ProtocolPlanRequest>();
   /** La conversación de la sesión: la misma función de los eventos que usa quien los reduce. */
   private transcript: ProtocolTranscript = EMPTY_TRANSCRIPT;
+  /**
+   * Jobs ya terminados que contaba el anfitrión anterior (M10). Sus procesos
+   * eran de aquel: aquí solo se conservan para que la foto no los pierda.
+   */
+  private inheritedJobs: ProtocolJob[] = [];
+  private readonly continuing: boolean;
+  /** Se traspasó la sesión: este publicador ya no es de su anfitrión y no publica nada más. */
+  private released = false;
 
   constructor(opts: SessionPublisherOptions) {
     this.host = opts.host;
@@ -408,6 +423,29 @@ export class SessionPublisher {
     this.now = opts.now ?? Date.now;
     this.createdAt = this.now();
     this.updatedAt = this.createdAt;
+    const from = opts.continueFrom;
+    this.continuing = from !== undefined;
+    if (from) {
+      if (from.session.id !== this.host.sessionId) {
+        throw new Error('continueFrom: the snapshot of another session');
+      }
+      this.seqValue = from.seq;
+      this.createdAt = from.session.createdAt;
+      this.updatedAt = from.session.updatedAt;
+      this.title = from.session.title;
+      // Sin turno en curso: un traspaso solo se hace con la sesión parada.
+      this.run = from.run ? { ...from.run, counters: { ...from.run.counters } } : null;
+      for (const call of from.toolCalls) {
+        this.toolCalls.set(`${call.subagentId ?? ''}:${call.id}`, { ...call });
+      }
+      for (const sub of from.subagents) this.subagents.set(sub.id, { ...sub });
+      this.todos = from.todos.map((t) => ({ ...t }));
+      this.inheritedJobs = from.jobs.filter((j) => j.status !== 'running').map((j) => ({ ...j }));
+      this.transcript = {
+        messages: from.messages.map((m) => ({ ...m })),
+        messagesTruncated: from.messagesTruncated,
+      };
+    }
   }
 
   get sessionId(): string {
@@ -437,7 +475,9 @@ export class SessionPublisher {
     if (this.started) return;
     this.started = true;
     const agent = this.host.agent;
-    this.state('session.opened', () => ({ session: this.session() }));
+    // Una sesión que continúa no se abre otra vez: cambia de anfitrión.
+    if (this.continuing) this.state('session.updated', () => ({ session: this.session() }));
+    else this.state('session.opened', () => ({ session: this.session() }));
 
     this.detach.push(agent.observe((o) => this.guarded(() => this.onObservation(o))));
     if (agent.jobs) {
@@ -529,7 +569,7 @@ export class SessionPublisher {
    * la cola— y se sueltan todos los enganches. Idempotente.
    */
   close(reason: StateEventData['session.closed']['reason']): void {
-    if (!this.started || this.closed) return;
+    if (!this.started || this.closed || this.released) return;
     if (this.runActive) this.endRun(this.run?.kind ?? 'run', 'cancelled');
     this.state('session.closed', () => ({ reason }));
     this.closed = true;
@@ -541,6 +581,26 @@ export class SessionPublisher {
       }
     }
     this.flush();
+  }
+
+  /**
+   * M10 — la sesión ya es de otro anfitrión: deja de publicar **sin** cerrarla
+   * (no hay `session.closed`: la sesión sigue viva en el daemon) y suelta sus
+   * enganches. Lo que quedase en la cola se descarta: la autoridad es ya el
+   * daemon, que continúa desde el `seq` que se le entregó. Idempotente.
+   */
+  release(): void {
+    if (this.released) return;
+    this.released = true;
+    this.queue = [];
+    this.overflowed = false;
+    for (const off of this.detach.splice(0)) {
+      try {
+        off();
+      } catch {
+        /* soltar un enganche no puede impedir el traspaso */
+      }
+    }
   }
 
   // ---------------------------------------------------------------------------
@@ -604,7 +664,12 @@ export class SessionPublisher {
    * y sigue desde `seq + 1`.
    */
   snapshot(): ProtocolSessionSnapshot {
-    const jobs = this.host.agent.jobs?.list().map((j) => this.job(j)) ?? [];
+    const live = this.host.agent.jobs?.list().map((j) => this.job(j)) ?? [];
+    // Los ids de jobs son por anfitrión: uno nuevo con el id de uno heredado lo
+    // sustituye, como hace quien reduce los eventos (`job.started`).
+    const liveIds = new Set(live.map((j) => j.id));
+    const inherited = this.inheritedJobs.filter((j) => !liveIds.has(j.id));
+    const jobs = inherited.length > 0 ? [...inherited, ...live] : live;
     return fitSnapshot({
       session: this.session(),
       seq: this.seqValue,
@@ -802,7 +867,7 @@ export class SessionPublisher {
 
   /** Un fallo al traducir se registra y se descarta: publicar no puede romper el turno. */
   private guarded(fn: () => void): void {
-    if (this.closed) return;
+    if (this.closed || this.released) return;
     try {
       fn();
     } catch (err) {
@@ -1101,6 +1166,7 @@ export class SessionPublisher {
     data: () => StateEventData[T],
     subagentId?: string,
   ): void {
+    if (this.released) return;
     this.seqValue++;
     this.updatedAt = this.now();
     const event = {
@@ -1117,7 +1183,7 @@ export class SessionPublisher {
   }
 
   private volatile(type: VolatileEventType, text: string, subagentId?: string): void {
-    if (!text) return;
+    if (!text || this.released) return;
     const runId = this.runActive && this.run ? this.run.id : undefined;
     // Agrupación: dos fragmentos seguidos del mismo bloque son uno más largo.
     const last = this.queue[this.queue.length - 1] as ProtocolVolatileEvent | undefined;
@@ -1171,6 +1237,7 @@ export class SessionPublisher {
   /** Entrega al sink lo que haya en la cola. Nunca lanza. */
   flush(): void {
     this.flushScheduled = false;
+    if (this.released) return;
     const overflowed = this.overflowed;
     const events = this.queue;
     this.overflowed = false;

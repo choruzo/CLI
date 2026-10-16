@@ -18,20 +18,25 @@ import type { ProviderRouter } from '../providers/router.js';
 import type {
   CancelStatus,
   PauseStatus,
+  ProtocolHandoffContext,
   ProtocolJob,
   ProtocolRun,
   ProtocolSession,
+  ProtocolSessionHostInfo,
   ProtocolSessionSnapshot,
   ResumeStatus,
   StateEventData,
   SteerStatus,
 } from '../protocol/index.js';
 import type { SessionEnv } from '../runtime/session-env.js';
-import { SessionHost } from '../host/session-host.js';
+import { handoffAgentOptions } from '../host/handoff.js';
+import { SessionHost, type SessionHostOptions } from '../host/session-host.js';
 import { SessionPublisher, type PublisherSink } from '../host/session-publisher.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('daemon').child('session');
+
+const DAEMON_HOST: ProtocolSessionHostInfo = { kind: 'daemon', client: 'daemon', connected: true };
 
 export interface HostedSessionOptions {
   sessionId: string;
@@ -70,6 +75,77 @@ export class HostedSession {
    * @throws ProtocolError `INVALID_PARAMS` si el perfil de agente no vale.
    */
   static async open(opts: HostedSessionOptions): Promise<HostedSession> {
+    const host = await HostedSession.mount(opts, {
+      readOnly: opts.readOnly === true,
+      ...(opts.sessionProfile ? { sessionProfile: opts.sessionProfile } : {}),
+    });
+    if (opts.agent) {
+      const applied = host.agent.setPrimaryProfile(opts.agent);
+      if (!applied.ok) {
+        await host.dispose({ cancelBackground: true });
+        throw new ProtocolError('INVALID_PARAMS', applied.error, {
+          issues: [{ path: 'agent', message: 'unknown or unusable agent profile' }],
+        });
+      }
+    }
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: DAEMON_HOST,
+      sink: opts.sink,
+    });
+    return new HostedSession(host, publisher);
+  }
+
+  /**
+   * M10 — monta aquí una sesión que **traspasa** su anfitrión par: el mismo id,
+   * el contexto del agente que entregó (rehidratado como una sesión reanudada)
+   * y un publicador que continúa desde la foto que el daemon ya tenía (`seq`,
+   * conversación, último run). Tampoco publica nada hasta `publisher.start()`,
+   * que anuncia el cambio de anfitrión; hasta entonces se puede desmontar sin
+   * que nadie lo vea.
+   *
+   * @throws ProtocolError `NOT_TRANSFERABLE` (`startup`) si el perfil principal
+   *   que tenía la sesión no se puede activar aquí: continuar con otro sería
+   *   cambiarle el agente sin decirlo.
+   */
+  static async adopt(
+    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent'> & {
+      context: ProtocolHandoffContext;
+      snapshot: ProtocolSessionSnapshot;
+    },
+  ): Promise<HostedSession> {
+    const host = await HostedSession.mount(opts, handoffAgentOptions(opts.context));
+    const wanted = opts.context.agent;
+    if (wanted && host.agent.getActiveProfile()?.name !== wanted) {
+      await host.dispose({ cancelBackground: true });
+      throw new ProtocolError(
+        'NOT_TRANSFERABLE',
+        `The agent profile "${wanted}" cannot be used by the daemon.`,
+        { reason: 'startup' },
+      );
+    }
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: DAEMON_HOST,
+      sink: opts.sink,
+      continueFrom: opts.snapshot,
+    });
+    return new HostedSession(host, publisher);
+  }
+
+  private static async mount(
+    opts: Pick<
+      HostedSessionOptions,
+      | 'env'
+      | 'config'
+      | 'router'
+      | 'sessionId'
+      | 'version'
+      | 'remoteApprovals'
+      | 'approvalTimeoutMs'
+    >,
+    agent: NonNullable<SessionHostOptions['agent']>,
+  ): Promise<SessionHost> {
     const host = await SessionHost.create({
       env: opts.env,
       config: opts.config,
@@ -83,29 +159,12 @@ export class HostedSession {
       destructivePolicy: opts.remoteApprovals() ? 'ask' : 'deny',
       remoteApprovals: opts.remoteApprovals,
       interactionTimeoutMs: opts.approvalTimeoutMs,
-      agent: {
-        readOnly: opts.readOnly === true,
-        ...(opts.sessionProfile ? { sessionProfile: opts.sessionProfile } : {}),
-      },
+      agent,
     });
     for (const warning of host.mcpWarnings) {
       log.warn('mcp warning', { sessionId: host.sessionId, message: warning.message });
     }
-    if (opts.agent) {
-      const applied = host.agent.setPrimaryProfile(opts.agent);
-      if (!applied.ok) {
-        await host.dispose({ cancelBackground: true });
-        throw new ProtocolError('INVALID_PARAMS', applied.error, {
-          issues: [{ path: 'agent', message: 'unknown or unusable agent profile' }],
-        });
-      }
-    }
-    const publisher = new SessionPublisher({
-      host,
-      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
-      sink: opts.sink,
-    });
-    return new HostedSession(host, publisher);
+    return host;
   }
 
   get sessionId(): string {

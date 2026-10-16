@@ -37,6 +37,7 @@ import {
   type ProtocolModel,
   type ProtocolOverviewSnapshot,
   type ProtocolServerInfo,
+  type ProtocolSession,
   type StateEventData,
 } from '../protocol/index.js';
 import { fetchModelInfos } from '../providers/utils.js';
@@ -440,17 +441,8 @@ export class Stratumd {
     // Desde aquí cuenta como sesión que se está abriendo (para `maxSessions`).
     this.opening++;
     try {
-      // Sin bloquear el bucle: la ruta la elige un cliente y puede ser una unidad de red.
-      const isDirectory = await stat(cwd).then(
-        (s) => s.isDirectory(),
-        () => false,
-      );
-      if (!isDirectory) throw invalid('cwd', 'cwd is not an existing directory');
-      const accessible = await access(cwd, constants.R_OK | constants.X_OK).then(
-        () => true,
-        () => false,
-      );
-      if (!accessible) throw invalid('cwd', 'cwd is not accessible to the daemon');
+      const unusable = await this.unusableCwd(cwd);
+      if (unusable) throw invalid('cwd', unusable);
       const startup: SessionStartup = await this.startup({
         cwd,
         ...(params.provider ? { provider: params.provider } : {}),
@@ -500,6 +492,145 @@ export class Stratumd {
     } finally {
       this.opening--;
     }
+  }
+
+  /** Por qué el daemon no puede trabajar en ese directorio, o `null` si puede. */
+  private async unusableCwd(cwd: string): Promise<string | null> {
+    // Sin bloquear el bucle: la ruta la elige un cliente y puede ser una unidad de red.
+    const isDirectory = await stat(cwd).then(
+      (s) => s.isDirectory(),
+      () => false,
+    );
+    if (!isDirectory) return 'cwd is not an existing directory';
+    const accessible = await access(cwd, constants.R_OK | constants.X_OK).then(
+      () => true,
+      () => false,
+    );
+    return accessible ? null : 'cwd is not accessible to the daemon';
+  }
+
+  // ---------------------------------------------------------------------------
+  // Traspaso de una sesión par al daemon (M10)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * `sessions.detach`: que una sesión par pase a alojarse aquí. Lo hace su
+   * anfitrión (se le pide con `host.detach` y él traspasa con `host.handoff*`);
+   * lo que se contesta sale del estado del daemon, no de su respuesta: si la
+   * respuesta se pierde pero la sesión ya es de aquí, el traspaso se hizo.
+   */
+  private async detachSession(
+    sessionId: string,
+  ): Promise<{ status: 'detached' | 'already-daemon'; session: ProtocolSession }> {
+    const hosted = this.sessions.get(sessionId);
+    if (hosted) return { status: 'already-daemon', session: hosted.session() };
+    if (!this.peers.has(sessionId)) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+    try {
+      await this.peers.requestDetach(sessionId);
+    } catch (err) {
+      const now = this.sessions.get(sessionId);
+      if (now) return { status: 'detached', session: now.session() };
+      throw err;
+    }
+    const now = this.sessions.get(sessionId);
+    if (!now) {
+      throw new ProtocolError('UNAVAILABLE', 'The handoff did not complete.', {
+        reason: 'host-unavailable',
+      });
+    }
+    return { status: 'detached', session: now.session() };
+  }
+
+  /**
+   * `host.handoffCommit`: monta la sesión con el contexto que entregó su
+   * anfitrión par y, **solo si todo salió bien**, pasa a ser su único
+   * anfitrión en un paso síncrono (valla al par, registra la sesión aquí y
+   * anuncia el cambio con el `seq` siguiente). Si algo falla antes de ese paso,
+   * la sesión montada se desmonta sin haber publicado nada y la sesión sigue
+   * siendo del par.
+   */
+  private async commitHandoff(
+    conn: ClientConnection,
+    params: { sessionId: string; handoffId: string },
+  ): Promise<{ session: ProtocolSession; epoch: number }> {
+    const { sessionId } = params;
+    // Desde aquí el traspaso está en `committing`: cualquier fallo lo devuelve al par.
+    const { context, snapshot } = this.peers.takeHandoff(conn, params);
+    this.opening++;
+    let session: HostedSession | null = null;
+    try {
+      if (this.shuttingDown) {
+        throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+      }
+      if (this.sessions.size + this.opening - 1 >= this.maxSessions) {
+        throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
+      }
+      const cwd = resolve(context.cwd);
+      const unusable = isAbsolute(context.cwd) ? await this.unusableCwd(cwd) : 'not absolute';
+      if (unusable) {
+        throw new ProtocolError('NOT_TRANSFERABLE', 'The daemon cannot use that directory.', {
+          reason: 'cwd',
+        });
+      }
+      const startup = await this.startup({
+        cwd,
+        provider: context.provider,
+        model: context.model,
+        sessionProfile: context.sessionProfile,
+      });
+      if (!startup.ok) {
+        log.warn('handoff startup failed', { sessionId, stage: startup.stage });
+        throw new ProtocolError(
+          'NOT_TRANSFERABLE',
+          `The daemon cannot start that session here (${startup.stage}).`,
+          { reason: 'startup' },
+        );
+      }
+      session = await HostedSession.adopt({
+        sessionId,
+        env: createSessionEnv({ cwd, env: this.opts.env }),
+        config: startup.config,
+        router: startup.router,
+        version: this.opts.version,
+        sink: this.sinkFor(sessionId),
+        remoteApprovals: () => this.opts.approver != null,
+        approvalTimeoutMs: this.approvalTimeoutMs,
+        context,
+        snapshot,
+      });
+      if (this.shuttingDown) {
+        throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+      }
+    } catch (err) {
+      try {
+        if (session) await session.host.dispose({ cancelBackground: true });
+      } catch (disposeErr) {
+        log.warn('handoff teardown failed', { sessionId, err: disposeErr });
+      } finally {
+        this.peers.abortHandoff(sessionId, params.handoffId);
+      }
+      if (err instanceof ProtocolError) throw err;
+      log.error('handoff failed', { sessionId, err });
+      throw new ProtocolError('NOT_TRANSFERABLE', 'The daemon could not take that session.', {
+        reason: 'startup',
+      });
+    } finally {
+      this.opening--;
+    }
+
+    // Commit: síncrono desde aquí. El par queda vallado y la sesión es de aquí.
+    const { epoch } = this.peers.release(sessionId);
+    this.sessions.set(sessionId, session);
+    // Ya es de aquí: lo que falle al anunciarlo no deshace el traspaso (el
+    // publicador nunca lanza; si lo hiciera, la foto lo corrige al resincronizar).
+    try {
+      session.publisher.start();
+      session.publisher.flush();
+    } catch (err) {
+      log.error('handoff announce failed', { sessionId, err });
+    }
+    log.info('session handed off to the daemon', { sessionId, epoch, cwd: context.cwd });
+    return { session: session.session(), epoch };
   }
 
   private closeSession(
@@ -626,6 +757,7 @@ export class Stratumd {
       'sessions.setReadOnly': (params) => ({
         session: this.local(params.sessionId, 'Changing read-only').setReadOnly(params.readOnly),
       }),
+      'sessions.detach': (params) => this.detachSession(params.sessionId),
 
       'runs.list': (params) => ({ runs: this.registry.listRuns(params) }),
       'runs.get': (params) => {
@@ -750,6 +882,17 @@ export class Stratumd {
       },
       'host.unregister': (params) => {
         this.peers.unregister(conn, params.sessionId);
+        return {};
+      },
+      // Traspaso al daemon (M10): solo de la sesión que aloja esa conexión, con su época.
+      'host.handoffBegin': (params) => this.peers.beginHandoff(conn, params),
+      'host.handoffChunk': (params) => {
+        this.peers.addChunk(conn, params);
+        return {};
+      },
+      'host.handoffCommit': (params) => this.commitHandoff(conn, params),
+      'host.handoffAbort': (params) => {
+        this.peers.abortOwnHandoff(conn, params);
         return {};
       },
     };

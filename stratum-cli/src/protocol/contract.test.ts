@@ -91,7 +91,10 @@ describe('métodos', () => {
       'runs.start',
       'runs.cancel',
       'sessions.open',
+      'sessions.detach',
       'host.publish',
+      'host.handoffBegin',
+      'host.handoffCommit',
     ] as const) {
       expect(METHODS[m].mutating, m).toBe(true);
     }

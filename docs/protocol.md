@@ -8,8 +8,10 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 > pares**: `stratum run` y `stratum chat` publican en él su sesión sin dejar de alojarla (M3,
 > §14); y **centro de aprobaciones**: aprobaciones, preguntas y planes se ven y se resuelven
 > desde otro cliente, en carrera con el prompt local (M4, §15); y **pausa cooperativa**: un run
-> se pausa y se reanuda desde otro cliente, en su runtime real (M5, §16).
-> Qué atiende hoy el servidor y con qué garantías: §13 a §16.
+> se pausa y se reanuda desde otro cliente, en su runtime real (M5, §16); y **continuidad**:
+> una sesión de `stratum chat` se traspasa viva al daemon, mismo id y contexto, y se vuelve a
+> ella desde cualquier cliente (M10, §18).
+> Qué atiende hoy el servidor y con qué garantías: §13 a §16 y §18.
 
 | Pieza | Dónde | Depende de |
 |---|---|---|
@@ -179,6 +181,7 @@ host ownership  !=  operator control  !=  approver authority
 | `sessions.list` · `sessions.get` | observe | | `get` devuelve una foto |
 | `sessions.open` | control | ✓ | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4) |
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly` | control | ✓ | |
+| `sessions.detach` | control | ✓ | Traspasa una sesión par al daemon, mismo id y contexto (§18). Devuelve `{ status: 'detached' \| 'already-daemon', session }`; `BUSY`/`NOT_TRANSFERABLE` con `data.reason` |
 | `runs.list` · `runs.get` | observe | | |
 | `runs.start` | control | ✓ | Un mensaje del usuario: un run nuevo de una sesión existente. `BUSY` si hay un turno en curso (también en pausa o esperando una decisión) |
 | `runs.steer` | control | ✓ | Devuelve `accepted` · `not-accepting` · `empty` · `too-large` |
@@ -193,10 +196,11 @@ host ownership  !=  operator control  !=  approver authority
 | `memory.status` · `memory.decisions` | observe | | |
 | `events.subscribe` · `events.unsubscribe` | observe | | Solo cambian el estado de la propia conexión |
 | `trace.subscribe` · `trace.unsubscribe` | observe | | |
-| `host.register` | host | ✓ | Anfitrión par → servidor. `{ snapshot, pid?, claim? }` → `{ claim }` (§14) |
-| `host.publish` | host | ✓ | `{ sessionId, snapshot?, events[] }`. Un hueco de `seq` → `STALE_STATE` |
+| `host.register` | host | ✓ | Anfitrión par → servidor. `{ snapshot, pid?, claim? }` → `{ claim, epoch }` (§14, §18.3) |
+| `host.publish` | host | ✓ | `{ sessionId, epoch, snapshot?, events[] }`. Un hueco de `seq` → `STALE_STATE` (`seq-gap`); otra época → `STALE_STATE` (`stale-epoch`) |
 | `host.unregister` | host | ✓ | Baja de una sesión propia. Repetirla no es un error |
-| `host.cancel` · `host.pause` · `host.resume` · `host.steer` | host | ✓ | **Servidor → anfitrión par** |
+| `host.handoffBegin` · `host.handoffChunk` · `host.handoffCommit` · `host.handoffAbort` | host | ✓ | Anfitrión par → servidor: el traspaso por etapas (§18.4). Tras `begin` se identifican por `handoffId` |
+| `host.cancel` · `host.pause` · `host.resume` · `host.steer` · `host.detach` | host | ✓ | **Servidor → anfitrión par**. `host.detach` lo envía `sessions.detach` |
 | `host.resolveApproval` · `host.answerQuestions` · `host.decidePlan` | host | ✓ | **Servidor → anfitrión par**; llevan `by` |
 
 Parámetros y resultados exactos: `protocol/methods.ts` (tipos) y `protocol/schemas.ts` (validación).
@@ -228,9 +232,10 @@ Las notificaciones de una suscripción nunca preceden a la respuesta de su `subs
 | `METHOD_NOT_FOUND` | El método no existe o no se atiende en ese extremo |
 | `INVALID_PARAMS` | Los parámetros no validan (`data.issues`: ruta y motivo, nunca el valor) |
 | `NOT_FOUND` | La sesión, el run, la aprobación… no existe |
-| `BUSY` | La sesión ya tiene un turno en curso |
+| `BUSY` | La sesión ya tiene un turno en curso. En un traspaso, `data.reason`: `run-active` · `handoff-in-progress` |
 | `ALREADY_RESOLVED` | Otro cliente resolvió antes (`data.resolution`) |
-| `STALE_STATE` | La petición parte de un estado que ya no es el vigente |
+| `STALE_STATE` | La petición parte de un estado que ya no es el vigente. `data.reason`: `seq-gap` · `changed` (la sesión cambió durante un traspaso) · `stale-epoch` · `handed-off` (quien publica ya no es su anfitrión, §18.3) |
+| `NOT_TRANSFERABLE` | La sesión no se puede traspasar al daemon: depende de algo del proceso que la aloja (`data.reason`, §18.5) |
 | `FRAME_TOO_LARGE` | Mensaje mayor que el límite (`data.limit`) |
 | `UNAVAILABLE` | No se puede atender ahora (servidor apagándose…). Con `data.reason`: `host-unavailable` = el anfitrión par no está conectado o no contestó; `peer-hosted` = eso solo puede hacerlo el proceso que aloja la sesión |
 | `INTERNAL_ERROR` | Fallo del servidor. Sin detalle: está en su log |
@@ -683,7 +688,9 @@ solo cambian con cada `session.updated`.
   nada por el protocolo, tampoco lo suyo: eso lo hace en su proceso.
 - **Perder al anfitrión no cierra la sesión.** Queda con `host.connected: false` y
   `state: 'detached'`; **su run no se toca** (puede seguir en marcha: lo que falta es
-  visibilidad, no un resultado) y sigue contando como run en curso.
+  visibilidad, no un resultado) y sigue contando como run en curso. `detached` es **siempre**
+  una pérdida inesperada del anfitrión; un traspaso explícito al daemon (`sessions.detach`,
+  §18) nunca pasa por ese estado.
 - **El daemon no numera eventos propios.** Lo que él sabe —que el anfitrión se fue, que volvió,
   que la proyección se descarta— llega a los clientes como una **foto** (`snapshot` a quien
   sigue la sesión, `overview` a quien sigue el conjunto), que sustituye su estado. Por eso
@@ -707,6 +714,7 @@ solo cambian con cada `session.updated`.
 | `runs.pause` · `runs.resume` | Se reenvían (`host.pause` · `host.resume`): contesta el controlador de pausa del runtime (§16) |
 | `sessions.get` · `jobs.list` · `events.subscribe` | Desde la proyección |
 | `runs.start` · `sessions.close` · `sessions.set*` · `jobs.cancel` | `UNAVAILABLE`, `reason: 'peer-hosted'` |
+| `sessions.detach` | Se le pide al anfitrión (`host.detach`), que hace el traspaso (§18) |
 
 El daemon no simula ningún resultado. Sin anfitrión conectado, o si no contesta en 5 s, la
 respuesta es `UNAVAILABLE` con `reason: 'host-unavailable'`.
@@ -1187,4 +1195,209 @@ Correcciones hechas a la v1 antes de congelarla:
 | M7 | `models.list` incluye el modelo configurado de cada provider aunque su `/models` falle | No cambia el contrato |
 | M7 | Un bloque de texto se cierra (`message.completed`) también al entregarse steering | Corrige lo que se emite: antes el texto de dos respuestas del modelo separadas por steering salía en un solo bloque |
 | M8 | `approvals.resolve`, `questions.answer` y `plans.decide` admiten `sessionId?`: con una sesión que no es la de la solicitud, `NOT_FOUND` | Aditivo: quien no lo envía sigue igual |
+| M10 | `host.register` devuelve `epoch`, y `host.publish` la exige; métodos `sessions.detach`, `host.handoffBegin/Chunk/Commit/Abort` y `host.detach`; código `NOT_TRANSFERABLE`; `ProtocolHandoffContext` (`HANDOFF_FORMAT` 1) | Sin publicar. `epoch` es obligatoria en `host.publish` a propósito: un anfitrión que no la mande no puede demostrar que sigue siéndolo. Todos los anfitriones salen de este árbol |
 | M9 | Ningún cambio de contrato. El daemon no arranca si su carpeta no es privada (POSIX) o es un enlace, y deja su socket en `0600`. Stratum Dot usa `approvals.list` y `sessions.get` (que ya existían) para la confirmación nativa | Comportamiento del servidor y de un cliente; el contrato no cambia |
+
+## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
+
+Una sesión viva de `stratum chat` (anfitrión par) puede **pasar a alojarse en `stratumd`** sin
+cambiar de id ni perder contexto, y después cualquier cliente autorizado puede volver a ella.
+Es **continuidad**, no persistencia: si el daemon se reinicia, la sesión se pierde como
+cualquier otra suya (§18.10).
+
+```text
+peer-hosted (época N)
+      │ sessions.detach / `/detach`
+      ▼
+  traspaso: el par deja de empezar trabajo, publica hasta su último seq,
+            entrega su contexto, y el daemon monta la sesión
+      │ commit (un paso síncrono en el daemon)
+      ▼
+daemon-hosted (época N+1) ── stratum attach / Dot: ver, escribir, redirigir, pausar, cancelar
+      el par anterior: vallado (STALE_STATE) y fuera
+```
+
+Invariantes: una sesión tiene **un solo anfitrión autoritativo** en cada momento; traspasar no
+crea otra sesión ni otro `sessionId`; adjuntarse no crea otro `SessionHost`; un run en curso
+nunca acaba con dos anfitriones escribiendo eventos; las fotos y el flujo de eventos siguen
+siendo la fuente de verdad; Dot y la CLI siguen siendo clientes.
+
+### 18.1 Estados de propiedad
+
+| Estado | Qué ve un cliente | Quién ejecuta |
+|---|---|---|
+| **peer-hosted** | `host: { kind: 'peer', connected: true }` | El proceso de la CLI |
+| **detaching** | Nada distinto: sigue `peer-hosted` hasta el commit | Nadie empieza trabajo: el par tiene la puerta de turnos cerrada (`SessionOwnership`) y el daemon está montando la sesión |
+| **daemon-hosted** | `host: { kind: 'daemon', connected: true }`, mismo id, `seq` siguiente | `stratumd` (su `SessionHost`) |
+| **detached** | `host.connected: false`, `state: 'detached'` | Quizá el par, sin conexión. Es una **pérdida inesperada** del anfitrión (§14.3), nunca un traspaso |
+| **closed** | `session.closed`, o la última foto `closed` | Nadie |
+
+`detaching` no se publica a propósito: el cambio de anfitrión es **un solo evento**
+(`session.updated` con `host.kind: 'daemon'`, el `seq` siguiente al último del par), así que
+ningún cliente ve un estado intermedio ni la sesión desaparece y reaparece. Los clientes que
+la seguían siguen en la misma suscripción.
+
+### 18.2 Quién lo pide y quién lo hace
+
+- **El par lo hace siempre.** `/detach` en `stratum chat` lo hace directamente; `sessions.detach`
+  (capacidad `control`: `stratum detach`, un cliente) llega al par como `host.detach` y es él
+  quien traspasa. Es quien sabe si puede soltar la sesión ahora.
+- `sessions.detach` sobre una sesión que ya es del daemon devuelve `already-daemon` sin tocar
+  nada. Su respuesta sale del **estado del daemon**: si la del par se pierde pero la sesión ya
+  es suya, el resultado es `detached`.
+- Solo sabe traspasar `stratum chat`. `stratum run` contesta `NOT_TRANSFERABLE`
+  (`unsupported-host`): es un turno que termina, y mientras corre está ocupado.
+
+### 18.3 Propiedad y vallado (`epoch`)
+
+Cada sesión par tiene una **época** que da el daemon al registrarla (`host.register` →
+`{ claim, epoch }`) y que el anfitrión manda en cada `host.publish`. Al traspasarla:
+
+- la sesión deja de ser par en el daemon y su id queda **vallado** (en memoria, mientras viva
+  el daemon): `host.publish` con la época vieja → `STALE_STATE` (`stale-epoch`);
+  `host.register` o `host.handoffBegin` de ese id → `STALE_STATE` (`handed-off`). Da igual que
+  la conexión vieja siga abierta: no se confía en que «la conexión vieja debería cerrarse»;
+- el daemon pasa a la época N+1 (`host.handoffCommit` → `{ session, epoch }`);
+- el par, al recibir `stale-epoch`/`handed-off`, deja de considerarse anfitrión y suelta la
+  sesión sin cerrarla (sin `session.closed` ni `host.unregister`);
+- las órdenes de control (`runs.*`, aprobaciones) ya no se reenvían al par: la sesión es local
+  del daemon.
+
+### 18.4 El traspaso, paso a paso (todo o nada)
+
+| Paso | Dónde | Qué pasa |
+|---|---|---|
+| 1 | Par | `prepareHandoff`: cierra la puerta de turnos **y** comprueba que nada del proceso esté en vuelo (§18.5), en un solo paso síncrono. Si algo lo impide, la puerta se reabre y se contesta con el motivo |
+| 2 | Par | Publica todo lo pendiente y espera a que el daemon lo tenga; desde ahí **retiene** lo nuevo. Vacía la traza a disco (el daemon sigue en el mismo fichero) |
+| 3 | Par → daemon | `host.handoffBegin { epoch, seq, chunks, chars }`: el daemon comprueba dueño, época, que su proyección está **exactamente** en ese `seq` (si no, `STALE_STATE` `changed`) y que, según lo publicado, no hay run ni nada pendiente |
+| 4 | Par → daemon | `host.handoffChunk` × n: el contexto (`ProtocolHandoffContext`) serializado y troceado (≤ 96 Ki caracteres por trozo, sin partir surrogates; en orden, o se invalida). Si el `seq` local cambió entretanto (un `/model`), el par aborta |
+| 5 | Par → daemon | `host.handoffCommit`: el daemon reúne y **valida** el contexto (Zod, `strict`), resuelve config/provider/modelo **con su entorno** para ese `cwd`, monta el `SessionHost` con ese id y ese contexto, y un publicador que continúa desde su foto. Durante el montaje (`committing`) la proyección no cambia, no se descarta y nadie puede registrar ni publicar en ella (`BUSY` `handoff-in-progress`) |
+| 6 | Daemon | **Commit, síncrono**: valla al par, registra la sesión como suya y publica `session.updated` (`seq` + 1). Si algo falló antes de este paso, desmonta lo montado **sin haber publicado nada** y la sesión sigue siendo del par |
+| 7 | Par | Con el commit confirmado: `handed-off` (definitivo), suelta la sesión y la terminal puede salir. Con un no del daemon: reabre la puerta y sigue siendo el anfitrión |
+
+Nunca hay dos anfitriones: antes del paso 6 el único que puede ejecutar es el par (y tiene la
+puerta cerrada); después, solo el daemon (y el par está vallado).
+
+| Si… | Entonces |
+|---|---|
+| el daemon rechaza (config/provider que no resuelve con su entorno, perfil que no existe, contexto inválido, demasiadas sesiones) | El par sigue siendo el anfitrión y vuelve a trabajar |
+| el par muere antes del commit | Lo recibido se descarta; la sesión queda sin anfitrión como cualquier otra (§14.3) y se descarta al confirmarse que el proceso murió |
+| el par muere (o se cae su canal) con el commit en marcha | Decide el montaje: si sale bien, la sesión es del daemon; si no, queda sin anfitrión, como cualquier otra |
+| el par sigue publicando tras el commit | Rechazado (`stale-epoch`); su publicador está soltado y su runtime no empieza turnos |
+
+### 18.5 Qué se traspasa, qué no, y qué lo impide
+
+**Se traspasa** (`ProtocolHandoffContext`, versionado con `HANDOFF_FORMAT`): el **historial del
+agente** completo —system prompt incluido, llamadas a tools y sus resultados, lo que dejó la
+compresión—, con el que el agente rehidrata su lista de tareas y su evidencia de TDD como al
+reanudar una sesión guardada; el provider y el modelo **por nombre**; el perfil principal; el
+modo read-only; el perfil de sesión pedido; la ref del plan; y los contadores (tool calls;
+tokens solo si el backend los había reportado). La **foto** (conversación, último run, tool
+calls, todos, jobs terminados) no viaja: el daemon ya la tiene por lo publicado, y el
+publicador nuevo continúa desde ella.
+
+**No se traspasa**: el entorno del terminal, la config cargada, `apiKey`/`baseUrl`, tokens del
+canal, la clave o la autoridad de aprobar, la política destructiva o `--allow-destructive`,
+procesos, sockets, descriptores, conexiones SSH ni servers MCP. El daemon monta los suyos.
+
+**Secretos: lo que el traspaso no lleva y lo que sí puede llevar.** El DTO no serializa
+ninguna credencial **del runtime**: ni entorno, ni config, ni API keys, ni tokens del canal, ni
+la autoridad de aprobar. Pero **sí lleva el historial interno completo del agente**, tal cual,
+porque es el contexto que el modelo ya tiene y sin él no hay continuidad. Por tanto, un dato
+sensible que **ya forme parte del contexto del modelo** viaja con él: lo que el usuario
+escribió en un mensaje, lo que el modelo repitió en su respuesta o en los argumentos de una
+tool, o la salida de una tool que la redacción del núcleo (`src/security/`, solo formatos
+reconocibles: PEM, `Bearer`, `sk-…`, JWT, tokens de GitHub…) no reconoció. Lo ya redactado
+viaja como `[redacted: …]`, igual que estaba en el historial. El traspaso no filtra ni borra
+contexto: hacerlo cambiaría lo que el modelo sabe. Ese historial va por el canal privado del
+daemon (M9), solo al daemon del mismo usuario; no se publica en ningún evento ni foto y no se
+registra. Tras el traspaso queda en el agente de `stratumd`, con
+el mismo tratamiento que el de una sesión abierta allí.
+
+**Lo impide** (`data.reason`):
+
+| Motivo | Código | Por qué |
+|---|---|---|
+| `run-active` | `BUSY` | Hay un turno —también en pausa, o esperando una aprobación, pregunta o plan—. Lo pendiente es una promesa del proceso par: **se rechaza el traspaso** en vez de mover o resolver nada; las solicitudes siguen siendo las mismas, con su id |
+| `handoff-in-progress` | `BUSY` | Ya se está traspasando |
+| `jobs-running` | `NOT_TRANSFERABLE` | Un job es un proceso del par: no se teletransporta. Hay que esperarlo o cancelarlo |
+| `inbox-pending` | `NOT_TRANSFERABLE` | Hay steering o el final de un job que el agente aún no ha visto: con un turno se le cuenta |
+| `background-work` | `NOT_TRANSFERABLE` | Trabajo auxiliar en vuelo (extracción de memoria) |
+| `unsupported-host` | `NOT_TRANSFERABLE` | Ese anfitrión no sabe traspasar (`stratum run`) |
+| `startup` | `NOT_TRANSFERABLE` | El daemon no puede montarla con **su** entorno: config, provider, modelo o perfil que no resuelve |
+| `cwd` | `NOT_TRANSFERABLE` | El daemon no puede usar el directorio |
+| `context` | `NOT_TRANSFERABLE` | El contexto no valida, no es de esa sesión o no cabe (48 Mi caracteres) |
+
+No se finge migrar una llamada al modelo en vuelo, un proceso, una conexión SSH ni una tool en
+ejecución: por eso solo se traspasa una sesión parada. Los jobs **terminados** se conservan en
+la foto, pero su salida se queda en el proceso par.
+
+### 18.6 El entorno después del traspaso
+
+Una sesión par nació con el entorno de su terminal; en el daemon, como las que abre
+`sessions.open` (§13.4), lanza procesos con la **copia del entorno del daemon tomada al
+arrancar** y resuelve su config desde el mismo `cwd` con ese entorno. No se copia ninguna
+variable de la terminal al daemon. Si el daemon no puede montar la sesión así (un provider cuya
+clave solo existía en la terminal), el traspaso se rechaza (`startup`): no se debilita el
+aislamiento de M0/M9 para conseguirlo. La política es la del daemon: `ask` si acredita
+aprobadores, `deny` si no (nunca la de la terminal).
+
+### 18.7 Conversación, contexto y pendientes
+
+- **Transcript idéntico**: la conversación de la foto del daemon antes y después es la misma
+  (mismos mensajes, mismos ids), y los turnos nuevos se añaden a continuación con `seq`
+  consecutivos.
+- **Mismo contexto lógico**: lo que el agente sabía (no solo lo que se ve) sigue ahí, porque
+  viaja su historial, no la vista para personas.
+- **Pendientes**: un traspaso exige no tener ninguno (§18.5), así que no hay ids que cambiar ni
+  nada que se resuelva solo. M8 y M9 no cambian.
+- La traza sigue en el mismo fichero (`<sessionId>.jsonl`); el par la vacía antes del commit.
+
+### 18.8 Resultado desconocido
+
+`sessions.detach` y `host.handoffCommit` son mutantes. Si el canal cae después de enviar el
+commit y antes de su respuesta, **no se reintenta**: el par vuelve a registrar la sesión con su
+`claim` para preguntar quién es el anfitrión — vallada (`handed-off`) → es del daemon;
+registrada → el daemon no la montó y sigue siendo del par; `BUSY` (`handoff-in-progress`) →
+aún se decide, espera. Si el daemon que la recibió ya no existe (no hay endpoint, su pid murió
+u otro proceso ocupa el endpoint), nadie puede alojarla —el daemon no persiste— y sigue siendo
+del par. Si no se puede saber, el par **no** vuelve a ejecutarla (podría ser ya del daemon) y lo
+dice. `stratum detach` hace lo mismo desde fuera: ante una respuesta perdida pregunta con
+`sessions.get` quién la aloja.
+
+### 18.9 Adjuntarse no es un método
+
+Ver y conducir una sesión del daemon ya existía (`events.subscribe` + `runs.*`). «Adjuntarse»
+es **elegir una sesión, seguirla y conducirla**; no hay `sessions.attach`, ni un anfitrión
+nuevo, ni ningún estado en el servidor. `stratum attach <id>` es exactamente eso, en una
+terminal: la conversación de la foto, el texto en streaming, `runs.start` con la sesión parada
+y alojada en el daemon, `runs.steer` con un run en curso, `/pause` · `/resume` · `/cancel`,
+`/pending` (lo que espera a una persona; se resuelve con `stratum approvals`: la clave de
+aprobador no pasa por `attach`) y `/detach` si aún la aloja una terminal. Salir —también con
+Ctrl+C— no toca la sesión.
+
+### 18.10 Fuera de alcance
+
+- **Reinicio del daemon**: una sesión traspasada vive en el daemon y muere con él (se cierra
+  con `server-shutdown`, o desaparece si se mata). No se recupera: la persistencia durable es
+  otro hito. El chat guarda al salir su copia local hasta el traspaso.
+- Persistir sesiones, migrar entre daemons, alta disponibilidad, máquinas remotas, la
+  convergencia de Desktop y un sistema de secretos nuevo.
+- Migrar trabajo en vuelo (llamadas al modelo, procesos, SSH, tools).
+- `chat --resume <id>` de una sesión que ya aloja el daemon abre otro runtime local con ese id
+  que el daemon **no** acepta como anfitrión (el id está vallado): no hay dos anfitriones en el
+  plano de control, pero sí dos copias de la conversación. Igual que reanudar una sesión en dos
+  terminales.
+
+### 18.11 Tests
+
+`daemon/handoff.test.ts` (daemon real, par con `SessionHost` + puente, sobre el pipe): traspaso
+en reposo de punta a punta (tres turnos, el par se va, Dot lo ve, turno nuevo con el contexto),
+`sessions.detach` desde otro cliente, vallado del par anterior, rechazo del daemon (el par
+sigue), muerte del par antes y durante el commit, resultado desconocido en los dos sentidos,
+caída del daemon con el commit en marcha, run activo, aprobación pendiente, job vivo y aviso
+sin ver, `stratum run`, sin daemon, dos sesiones, y la validación de cada paso.
+`host/handoff.test.ts`: captura, rehidratación, puerta de turnos, troceado y continuación del
+publicador. `scripts/tui/daemon-detach.mjs` (`npm run tui:detach`): `chat` → `/detach` →
+`stratum attach` en otra terminal, y `stratum detach` desde fuera, con procesos reales. En Dot,
+`npm run smoke:detach`.

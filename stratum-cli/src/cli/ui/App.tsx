@@ -1,4 +1,4 @@
-import React, { useReducer, useCallback, useRef, useState, useEffect } from 'react';
+import React, { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { Box, Text, useApp, useInput } from 'ink';
@@ -18,6 +18,9 @@ import type {
   TokenAccounting,
 } from '../../agent/types.js';
 import type { PendingInteractions } from '../../host/interactions.js';
+import type { SessionOwnership } from '../../host/handoff.js';
+import type { DetachOutcome } from '../../host/peer-host-bridge.js';
+import { describeDetachRefusal, handedOffNotice } from '../handoff-text.js';
 import type { ProviderConfig, ProviderConfigInput } from '../../config/schema.js';
 import { expandEnvVars } from '../../config/loader.js';
 import { getByDotPath, formatConfigValue } from '../../config/dot-path.js';
@@ -77,7 +80,7 @@ import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
 import { formatJobRows, visibleJobs } from './JobsView.js';
 import { formatJobEndLine, shortJobCommand, type BackgroundJob } from '../../jobs/types.js';
-import { useAgentStream } from './useAgentStream.js';
+import { TURN_REFUSED_HANDED_OFF, useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
 import { PlanStore, generatePlanId } from '../../session/plan-store.js';
@@ -940,6 +943,13 @@ export interface RemoteSessionLink {
   /** `App` entrega aquí cómo se cancela el turno en curso. */
   bindCancel(cancel: () => void): void;
   expectRun(turn: { input: string; mode: 'normal' | 'plan' }): void;
+  /**
+   * M10 — de quién es la sesión: mientras se traspasa al daemon (o cuando ya
+   * es suya) no empieza ningún turno aquí.
+   */
+  ownership?: SessionOwnership;
+  /** M10 — `/detach`: pasa la sesión a `stratumd`. Nunca lanza. */
+  detach?(): Promise<DetachOutcome>;
 }
 
 export function App({
@@ -1235,16 +1245,34 @@ export function App({
     return opts;
   }, [onConfirmDestructive, onAskQuestions, agent, sessionId, auditor]);
 
+  const ownership = remote?.ownership;
+  const beginTurn = useMemo(
+    () => (ownership ? () => ownership.tryBeginTurn() : undefined),
+    [ownership],
+  );
   const { send, cancel } = useAgentStream(
     agent,
     dispatch,
     getRunOptions,
     remote?.expectRun,
     interactions,
+    beginTurn,
   );
   useEffect(() => {
     remote?.bindCancel(cancel);
   }, [remote, cancel]);
+
+  // M10 — la sesión pasó al daemon (por `/detach` o porque otro cliente lo
+  // pidió): este proceso ya no la ejecuta. Se dice y se sale; `chat` guarda su
+  // copia local y desmonta lo suyo sin cerrar la sesión en el daemon.
+  useEffect(() => {
+    if (!ownership) return;
+    return ownership.subscribe((state) => {
+      if (state !== 'handed-off') return;
+      dispatch({ type: 'SYSTEM_MESSAGE', text: handedOffNotice(sessionId ?? '') });
+      setTimeout(() => exit(), 150);
+    });
+  }, [ownership, sessionId, exit]);
 
   // -------------------------------------------------------------------------
   // Helpers de los comandos de sesión (§5.2, Hito 10)
@@ -1673,51 +1701,58 @@ export function App({
 
           const consume = async (input: string): Promise<void> => {
             agentText = '';
-            for await (const event of agent.run(input, {
-              compressionMode: 'conservative',
-              // F7: `/init` es interactivo — el agente puede abrir la tanda única
-              // de preguntas antes de escribir STRATUM.md.
-              onAskQuestions,
-            })) {
-              if (event.type === 'questions_asked' || event.type === 'questions_answered') {
-                dispatch({ type: 'AGENT_EVENT', event });
-              } else if (event.type === 'text_delta') {
-                agentText += event.delta;
-              } else if (
-                event.type === 'tool_call_start' &&
-                currentTool !== event.name + event.id
-              ) {
-                currentTool = event.name + event.id;
-                toolCount++;
-                dispatch({
-                  type: 'INIT_STEP',
-                  step: { id: event.id, label: event.name, status: 'running' },
-                });
-              } else if (event.type === 'tool_call_ready') {
-                if (
-                  event.name === 'write_file' &&
-                  String((event.input as { path?: unknown }).path ?? '').includes('STRATUM.md')
+            // M10: `/init` es un turno más; con la sesión traspasándose no empieza.
+            const endTurn = ownership ? ownership.tryBeginTurn() : () => undefined;
+            if (!endTurn) throw new Error(TURN_REFUSED_HANDED_OFF);
+            try {
+              for await (const event of agent.run(input, {
+                compressionMode: 'conservative',
+                // F7: `/init` es interactivo — el agente puede abrir la tanda única
+                // de preguntas antes de escribir STRATUM.md.
+                onAskQuestions,
+              })) {
+                if (event.type === 'questions_asked' || event.type === 'questions_answered') {
+                  dispatch({ type: 'AGENT_EVENT', event });
+                } else if (event.type === 'text_delta') {
+                  agentText += event.delta;
+                } else if (
+                  event.type === 'tool_call_start' &&
+                  currentTool !== event.name + event.id
                 ) {
-                  stratumWriteIds.add(event.id);
+                  currentTool = event.name + event.id;
+                  toolCount++;
+                  dispatch({
+                    type: 'INIT_STEP',
+                    step: { id: event.id, label: event.name, status: 'running' },
+                  });
+                } else if (event.type === 'tool_call_ready') {
+                  if (
+                    event.name === 'write_file' &&
+                    String((event.input as { path?: unknown }).path ?? '').includes('STRATUM.md')
+                  ) {
+                    stratumWriteIds.add(event.id);
+                  }
+                } else if (event.type === 'tool_result') {
+                  if (stratumWriteIds.has(event.id)) wroteStratum = true;
+                  dispatch({
+                    type: 'INIT_STEP',
+                    step: { id: event.id, label: event.name, status: 'completed' },
+                  });
+                  currentTool = '';
+                } else if (event.type === 'error' && event.fatal) {
+                  dispatch({
+                    type: 'INIT_STEP',
+                    step: {
+                      id: `err-${toolCount}`,
+                      label: 'Error',
+                      status: 'failed',
+                      detail: event.message,
+                    },
+                  });
                 }
-              } else if (event.type === 'tool_result') {
-                if (stratumWriteIds.has(event.id)) wroteStratum = true;
-                dispatch({
-                  type: 'INIT_STEP',
-                  step: { id: event.id, label: event.name, status: 'completed' },
-                });
-                currentTool = '';
-              } else if (event.type === 'error' && event.fatal) {
-                dispatch({
-                  type: 'INIT_STEP',
-                  step: {
-                    id: `err-${toolCount}`,
-                    label: 'Error',
-                    status: 'failed',
-                    detail: event.message,
-                  },
-                });
               }
+            } finally {
+              endTurn();
             }
           };
 
@@ -1786,7 +1821,7 @@ export function App({
         }
       })();
     },
-    [agent, onAskQuestions],
+    [agent, onAskQuestions, ownership],
   );
 
   // -------------------------------------------------------------------------
@@ -1919,6 +1954,23 @@ export function App({
 
   const executeCommand = useCallback(
     (cmd: string) => {
+      // M10: mientras la sesión se traspasa al daemon (o ya es suya) solo se
+      // consulta: nada que cambie el historial, el modelo o los ajustes, que
+      // ya no llegarían a la sesión del daemon.
+      if (ownership && ownership.state !== 'owner') {
+        const quit = cmd === '/quit' || cmd === '/exit';
+        if (!isBusyCommand(cmd) && !(quit && ownership.state === 'handed-off')) {
+          dispatch({ type: 'INPUT_CHANGE', value: '' });
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text:
+              ownership.state === 'detaching'
+                ? 'The session is being handed off to stratumd: only read-only commands now.'
+                : TURN_REFUSED_HANDED_OFF,
+          });
+          return;
+        }
+      }
       if (cmd === '/quit' || cmd === '/exit') {
         exit();
         return;
@@ -1974,6 +2026,9 @@ export function App({
 
       if (cmd === '/compact') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
+        // M10: compactar reescribe el historial: cuenta como un turno.
+        const endCompact = ownership ? ownership.tryBeginTurn() : () => undefined;
+        if (!endCompact) return;
         void (async () => {
           try {
             const result = await agent.compactNow(auditor?.scope);
@@ -1991,8 +2046,38 @@ export function App({
             refreshContext();
           } catch (err) {
             dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al comprimir: ${String(err)}` });
+          } finally {
+            endCompact();
           }
         })();
+        return;
+      }
+
+      // M10 — pasar la sesión a stratumd sin cambiar de id ni perder contexto.
+      if (cmd === '/detach') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        if (!remote?.detach) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text:
+              'This session is not published in stratumd: there is nowhere to hand it off ' +
+              '(start the daemon with `stratum daemon start`, then open a new chat).',
+          });
+          return;
+        }
+        dispatch({ type: 'SYSTEM_MESSAGE', text: 'Handing the session off to stratumd…' });
+        void remote.detach().then((outcome) => {
+          // `detached`: lo dice la suscripción a `ownership`, que además sale.
+          if (outcome.status === 'detached') return;
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text:
+              outcome.status === 'unknown'
+                ? outcome.message
+                : `Not handed off: ${describeDetachRefusal(outcome.code, outcome.reason)}. ` +
+                  'The session stays here.',
+          });
+        });
         return;
       }
 
@@ -2770,6 +2855,8 @@ export function App({
       refreshSessionBadges,
       sessionStore,
       state.debug,
+      ownership,
+      remote,
     ],
   );
 

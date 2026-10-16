@@ -25,9 +25,20 @@
  *  - **Que el anfitrión se desconecte no cierra la sesión**: queda `detached`,
  *    con lo último que contó (su run sigue como estaba), hasta que vuelve y la
  *    reclama, su proceso muere o pasa el plazo.
+ *  - **Época de propiedad (M10).** Cada sesión par tiene una `epoch`, que el
+ *    anfitrión recibe al registrarla y manda en cada `host.publish`. Al
+ *    traspasarla al daemon (`host.handoff*`) la sesión deja de estar aquí y su
+ *    id queda **vallado**: lo que publique o registre el anfitrión anterior se
+ *    rechaza (`STALE_STATE`, `stale-epoch` / `handed-off`), aunque su conexión
+ *    siga abierta. No se confía en que «la conexión vieja debería cerrarse».
+ *  - **Un traspaso es todo o nada.** Mientras se monta la sesión en el daemon
+ *    (`committing`) la proyección no cambia ni se descarta; si el montaje
+ *    falla, la sesión vuelve a ser del par (o queda sin anfitrión, como
+ *    cualquier otra, si su conexión cayó entretanto).
  */
 import { createHash, randomBytes, timingSafeEqual } from 'crypto';
 import { ProtocolError } from '../ipc/codec.js';
+import { handoffContextSchema } from '../protocol/schemas.js';
 import type { RequestOptions } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import {
@@ -35,6 +46,8 @@ import {
   isStateEvent,
   type CancelStatus,
   type ClientKind,
+  type HandoffBlocker,
+  type HostHandoffBeginParams,
   type HostPublishParams,
   type HostRegisterParams,
   type MethodName,
@@ -43,6 +56,7 @@ import {
   type PauseStatus,
   type ProtocolApprovalDecision,
   type ProtocolEvent,
+  type ProtocolHandoffContext,
   type ProtocolPlan,
   type ProtocolQuestionAnswer,
   type ProtocolResolver,
@@ -78,6 +92,8 @@ export interface PeerSessionsOptions {
   detachedTtlMs?: number;
   /** Plazo de la respuesta de un anfitrión a una orden de control. */
   controlTimeoutMs?: number;
+  /** Plazo de un traspaso pedido por otro cliente (`host.detach`): incluye montar la sesión. */
+  detachTimeoutMs?: number;
   /** Cada cuánto se mira si el proceso de un anfitrión desconectado sigue vivo. */
   watchIntervalMs?: number;
   isAlive?: (pid: number) => boolean;
@@ -108,9 +124,43 @@ interface PeerSession {
   snapshot: ProtocolSessionSnapshot;
   detachedAt: number | null;
   watch: NodeJS.Timeout | null;
+  /** Época de propiedad de este anfitrión (ver arriba). */
+  epoch: number;
+  /** Traspaso al daemon en curso, si lo hay. */
+  handoff: HandoffStaging | null;
 }
 
+/** Un traspaso a medias: el contexto llega troceado y se monta al confirmar. */
+interface HandoffStaging {
+  id: string;
+  /** `seq` en el que el anfitrión dejó de publicar. La proyección tiene que seguir ahí. */
+  seq: number;
+  chunks: number;
+  chars: number;
+  parts: string[];
+  receivedChars: number;
+  /** `committing`: el daemon está montando la sesión; se decide ahí. */
+  phase: 'receiving' | 'committing';
+}
+
+/** Ids traspasados que se recuerdan para rechazar al anfitrión anterior. */
+const MAX_FENCED = 4096;
+
+/** Del motivo de un rechazo del anfitrión solo pasan los que el contrato conoce. */
+const HANDOFF_BLOCKERS: ReadonlySet<string> = new Set<HandoffBlocker>([
+  'run-active',
+  'handoff-in-progress',
+  'jobs-running',
+  'inbox-pending',
+  'background-work',
+  'unsupported-host',
+  'startup',
+  'cwd',
+  'context',
+]);
+
 type ForwardedMethod =
+  | 'host.detach'
   | 'host.cancel'
   | 'host.steer'
   | 'host.pause'
@@ -137,6 +187,53 @@ function sameSecret(a: string, b: string): boolean {
   return timingSafeEqual(ha, hb);
 }
 
+function busy(reason: HandoffBlocker, message: string): ProtocolError {
+  return new ProtocolError('BUSY', message, { reason });
+}
+
+function notTransferable(reason: HandoffBlocker, message: string): ProtocolError {
+  return new ProtocolError('NOT_TRANSFERABLE', message, { reason });
+}
+
+/** Quien publica o registra ya no es el anfitrión de esa sesión. */
+function superseded(reason: 'stale-epoch' | 'handed-off'): ProtocolError {
+  return new ProtocolError(
+    'STALE_STATE',
+    reason === 'handed-off'
+      ? 'That session is now hosted by the daemon.'
+      : 'This host is no longer the owner of that session.',
+    { reason },
+  );
+}
+
+/**
+ * Lo que contesta un anfitrión a `host.detach`, con un texto propio: del suyo
+ * solo pasan el código y un motivo que el contrato conozca.
+ */
+function detachRefusal(err: ProtocolError): ProtocolError {
+  const raw = err.data?.reason;
+  const reason = typeof raw === 'string' && HANDOFF_BLOCKERS.has(raw) ? raw : undefined;
+  const data = reason ? { reason } : {};
+  switch (err.code) {
+    case 'BUSY':
+      return new ProtocolError('BUSY', 'The session cannot be handed off while it is busy.', data);
+    case 'NOT_TRANSFERABLE':
+      return new ProtocolError(
+        'NOT_TRANSFERABLE',
+        'The session cannot be handed off to the daemon now.',
+        data,
+      );
+    case 'STALE_STATE':
+      return new ProtocolError('STALE_STATE', 'The session changed during the handoff.', {
+        reason: 'changed',
+      });
+    default:
+      return new ProtocolError('UNAVAILABLE', 'The host of that session could not hand it off.', {
+        reason: 'host-unavailable',
+      });
+  }
+}
+
 function hostUnavailable(): ProtocolError {
   return new ProtocolError('UNAVAILABLE', 'The host of that session is not connected.', {
     reason: 'host-unavailable',
@@ -152,9 +249,12 @@ export function peerHostedOnly(what: string): ProtocolError {
 
 export class PeerSessions {
   private readonly sessions = new Map<string, PeerSession>();
+  /** Sesiones traspasadas al daemon: su id ya no admite al anfitrión par anterior. */
+  private readonly fenced = new Map<string, number>();
   private readonly maxSessions: number;
   private readonly detachedTtlMs: number;
   private readonly controlTimeoutMs: number;
+  private readonly detachTimeoutMs: number;
   private readonly watchIntervalMs: number;
   private readonly isAlive: (pid: number) => boolean;
   private readonly now: () => number;
@@ -163,6 +263,7 @@ export class PeerSessions {
     this.maxSessions = opts.maxSessions ?? 128;
     this.detachedTtlMs = opts.detachedTtlMs ?? 10 * 60_000;
     this.controlTimeoutMs = opts.controlTimeoutMs ?? 5_000;
+    this.detachTimeoutMs = opts.detachTimeoutMs ?? 120_000;
     this.watchIntervalMs = opts.watchIntervalMs ?? 1_000;
     this.isAlive =
       opts.isAlive ??
@@ -293,10 +394,12 @@ export class PeerSessions {
    * Registra una sesión, o la **reclama** si el daemon ya la conocía y estaba
    * sin anfitrión. En los dos casos la foto que llega es la autoridad.
    */
-  register(link: PeerHostLink, params: HostRegisterParams): { claim: string } {
+  register(link: PeerHostLink, params: HostRegisterParams): { claim: string; epoch: number } {
     const { snapshot } = params;
     const sessionId = snapshot.session.id;
     this.checkSnapshot(snapshot);
+    // Traspasada: la tiene el daemon, y su anfitrión anterior ya no lo es.
+    if (this.fenced.has(sessionId)) throw superseded('handed-off');
     if (this.opts.isLocalSession(sessionId)) {
       throw new ProtocolError('FORBIDDEN', 'That session belongs to another host.');
     }
@@ -304,6 +407,10 @@ export class PeerSessions {
 
     const known = this.sessions.get(sessionId);
     if (known) {
+      // Mientras se monta en el daemon no se decide nada más: el traspaso dirá de quién es.
+      if (known.handoff?.phase === 'committing') {
+        throw busy('handoff-in-progress', 'That session is being handed off to the daemon.');
+      }
       if (known.owner && known.owner !== link) {
         throw new ProtocolError('FORBIDDEN', 'That session belongs to another host.');
       }
@@ -327,9 +434,11 @@ export class PeerSessions {
       known.owner = link;
       known.kind = link.client?.kind ?? known.kind;
       known.detachedAt = null;
+      // Un traspaso a medias no sobrevive a un registro nuevo: se vuelve a empezar si se quiere.
+      known.handoff = null;
       if (params.pid !== undefined) known.pid = params.pid;
       this.replace(known, snapshot);
-      return { claim: known.claim };
+      return { claim: known.claim, epoch: known.epoch };
     }
 
     if (this.sessions.size >= this.maxSessions) {
@@ -344,17 +453,20 @@ export class PeerSessions {
       snapshot,
       detachedAt: null,
       watch: null,
+      epoch: 1,
+      handoff: null,
     };
     this.sessions.set(sessionId, session);
     this.opts.hub.openSession(sessionId, snapshot.seq);
     this.replace(session, snapshot);
     log.info('peer session registered', { sessionId, connectionId: link.id, seq: snapshot.seq });
-    return { claim: session.claim };
+    return { claim: session.claim, epoch: session.epoch };
   }
 
   /** La sesión, si es de esa conexión. */
   private owned(link: PeerHostLink, sessionId: string): PeerSession {
     const p = this.sessions.get(sessionId);
+    if (!p && this.fenced.has(sessionId)) throw superseded('stale-epoch');
     if (!p) throw new ProtocolError('NOT_FOUND', 'Session not registered.');
     if (p.owner !== link) {
       throw new ProtocolError('FORBIDDEN', 'That session belongs to another host.');
@@ -365,6 +477,10 @@ export class PeerSessions {
   publish(link: PeerHostLink, params: HostPublishParams): void {
     const p = this.owned(link, params.sessionId);
     const { sessionId } = p;
+    if (params.epoch !== p.epoch) throw superseded('stale-epoch');
+    if (p.handoff?.phase === 'committing') {
+      throw busy('handoff-in-progress', 'That session is being handed off to the daemon.');
+    }
     if (params.snapshot) {
       if (params.snapshot.session.id !== sessionId) {
         throw invalid('snapshot', 'the snapshot of another session');
@@ -423,6 +539,9 @@ export class PeerSessions {
     if (p.owner !== link) {
       throw new ProtocolError('FORBIDDEN', 'That session belongs to another host.');
     }
+    if (p.handoff?.phase === 'committing') {
+      throw busy('handoff-in-progress', 'That session is being handed off to the daemon.');
+    }
     this.discard(p, 'unregistered');
   }
 
@@ -450,6 +569,18 @@ export class PeerSessions {
       if (p.owner !== link) continue;
       p.owner = null;
       p.detachedAt = this.now();
+      if (p.handoff?.phase === 'committing') {
+        // El montaje ya empezó y decide él: si sale bien, la sesión es del
+        // daemon; si no, `abortHandoff` la deja sin anfitrión como a cualquier otra.
+        log.info('peer host gone during a handoff commit', {
+          sessionId: p.sessionId,
+          connectionId: link.id,
+        });
+        continue;
+      }
+      // Lo que no llegó a confirmarse no se monta.
+      if (p.handoff) log.info('handoff dropped: host gone', { sessionId: p.sessionId });
+      p.handoff = null;
       log.info('peer session detached', {
         sessionId: p.sessionId,
         connectionId: link.id,
@@ -468,6 +599,8 @@ export class PeerSessions {
     this.unwatch(p);
     const check = (): void => {
       if (p.owner || this.sessions.get(p.sessionId) !== p) return this.unwatch(p);
+      // Un traspaso que se está montando decide antes que el plazo o el pid.
+      if (p.handoff?.phase === 'committing') return;
       if (p.pid !== null && !this.isAlive(p.pid)) return this.discard(p, 'host-exit');
       const waited = this.now() - (p.detachedAt ?? this.now());
       if (this.detachedTtlMs > 0 && waited >= this.detachedTtlMs) this.discard(p, 'expired');
@@ -511,6 +644,194 @@ export class PeerSessions {
     this.opts.hub.closeSession(p.sessionId);
   }
 
+  // ---------------------------------------------------------------------------
+  // Traspaso al daemon (M10)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Empieza un traspaso. El anfitrión tiene que ser el vigente (conexión y
+   * época), la sesión tiene que estar parada **según lo que publicó**, y la
+   * proyección tiene que estar exactamente en el `seq` en el que el anfitrión
+   * dejó de publicar: si no, faltan eventos y no se traspasa nada.
+   */
+  beginHandoff(link: PeerHostLink, params: HostHandoffBeginParams): { handoffId: string } {
+    if (this.fenced.has(params.sessionId)) throw superseded('handed-off');
+    const p = this.owned(link, params.sessionId);
+    if (params.epoch !== p.epoch) throw superseded('stale-epoch');
+    if (p.handoff) {
+      throw busy('handoff-in-progress', 'That session is already being handed off.');
+    }
+    const { snapshot } = p;
+    if (
+      snapshot.session.currentRunId !== null ||
+      snapshot.approvals.length + snapshot.questions.length + snapshot.plans.length > 0
+    ) {
+      throw busy('run-active', 'The session has a run in progress.');
+    }
+    if (params.seq !== snapshot.seq) {
+      throw new ProtocolError('STALE_STATE', 'The daemon has not seen all of the session yet.', {
+        reason: 'changed',
+      });
+    }
+    const handoffId = `hof_${randomBytes(12).toString('hex')}`;
+    p.handoff = {
+      id: handoffId,
+      seq: params.seq,
+      chunks: params.chunks,
+      chars: params.chars,
+      parts: [],
+      receivedChars: 0,
+      phase: 'receiving',
+    };
+    log.info('handoff started', { sessionId: p.sessionId, seq: params.seq, chars: params.chars });
+    return { handoffId };
+  }
+
+  private staging(link: PeerHostLink, sessionId: string, handoffId: string): HandoffStaging {
+    const p = this.owned(link, sessionId);
+    if (!p.handoff || p.handoff.id !== handoffId) {
+      throw new ProtocolError('NOT_FOUND', 'No such handoff.');
+    }
+    return p.handoff;
+  }
+
+  /** Un trozo del contexto, en orden. Uno fuera de orden o que se pasa del total invalida el traspaso. */
+  addChunk(
+    link: PeerHostLink,
+    params: { sessionId: string; handoffId: string; index: number; data: string },
+  ): void {
+    const staging = this.staging(link, params.sessionId, params.handoffId);
+    if (staging.phase !== 'receiving') {
+      throw busy('handoff-in-progress', 'The handoff is already being committed.');
+    }
+    if (
+      params.index !== staging.parts.length ||
+      params.index >= staging.chunks ||
+      staging.receivedChars + params.data.length > staging.chars
+    ) {
+      this.sessions.get(params.sessionId)!.handoff = null;
+      throw invalid('index', 'chunk out of order or beyond the declared size');
+    }
+    staging.parts.push(params.data);
+    staging.receivedChars += params.data.length;
+  }
+
+  /**
+   * Reúne y valida el contexto, y deja el traspaso en `committing`: desde aquí
+   * la proyección no cambia y solo `release` (montada) o `abortHandoff` (no)
+   * deciden. Lo que no valida descarta el traspaso y la sesión sigue en el par.
+   */
+  takeHandoff(
+    link: PeerHostLink,
+    params: { sessionId: string; handoffId: string },
+  ): { context: ProtocolHandoffContext; snapshot: ProtocolSessionSnapshot } {
+    const staging = this.staging(link, params.sessionId, params.handoffId);
+    const p = this.sessions.get(params.sessionId)!;
+    if (staging.phase !== 'receiving') {
+      throw busy('handoff-in-progress', 'The handoff is already being committed.');
+    }
+    const fail = (err: ProtocolError): never => {
+      p.handoff = null;
+      throw err;
+    };
+    if (staging.parts.length !== staging.chunks || staging.receivedChars !== staging.chars) {
+      fail(invalid('handoffId', 'the context is incomplete'));
+    }
+    if (p.snapshot.seq !== staging.seq || p.snapshot.session.currentRunId !== null) {
+      fail(
+        new ProtocolError('STALE_STATE', 'The session changed during the handoff.', {
+          reason: 'changed',
+        }),
+      );
+    }
+    let raw: unknown;
+    try {
+      raw = JSON.parse(staging.parts.join(''));
+    } catch {
+      return fail(notTransferable('context', 'The session context is not valid.'));
+    }
+    staging.parts = [];
+    const parsed = handoffContextSchema.safeParse(raw);
+    if (!parsed.success) {
+      log.warn('handoff context rejected', {
+        sessionId: p.sessionId,
+        paths: parsed.error.issues.slice(0, 5).map((i) => i.path.join('.')),
+      });
+      return fail(notTransferable('context', 'The session context is not valid.'));
+    }
+    const context = parsed.data;
+    if (context.sessionId !== p.sessionId || context.cwd !== p.snapshot.session.cwd) {
+      return fail(notTransferable('context', 'The context is not the one of that session.'));
+    }
+    staging.phase = 'committing';
+    return { context, snapshot: p.snapshot };
+  }
+
+  /**
+   * El traspaso no se hizo: la sesión sigue siendo del par. Si su conexión cayó
+   * mientras se montaba, queda sin anfitrión como cualquier otra (se avisa y se
+   * vigila su proceso). Sin `handoffId`, aborta el que haya.
+   */
+  abortHandoff(sessionId: string, handoffId?: string): void {
+    const p = this.sessions.get(sessionId);
+    if (!p?.handoff || (handoffId !== undefined && p.handoff.id !== handoffId)) return;
+    p.handoff = null;
+    log.info('handoff aborted', { sessionId });
+    if (!p.owner) {
+      this.announce(p);
+      this.watch(p);
+    }
+  }
+
+  /** `host.handoffAbort`: el anfitrión renuncia a un traspaso que aún no confirmó. */
+  abortOwnHandoff(link: PeerHostLink, params: { sessionId: string; handoffId: string }): void {
+    const staging = this.staging(link, params.sessionId, params.handoffId);
+    if (staging.phase === 'committing') {
+      throw busy('handoff-in-progress', 'The handoff is already being committed.');
+    }
+    this.abortHandoff(params.sessionId, params.handoffId);
+  }
+
+  /**
+   * Cierra un traspaso montado: la sesión deja de ser par y su id queda vallado
+   * para el anfitrión anterior. **No** se cierra en el bus ni en el registro de
+   * runs: es la misma sesión, y su nuevo anfitrión sigue la numeración. Devuelve
+   * la época del daemon.
+   */
+  release(sessionId: string): { epoch: number } {
+    const p = this.sessions.get(sessionId);
+    if (!p || p.handoff?.phase !== 'committing') {
+      throw new Error(`no handoff being committed for ${sessionId}`);
+    }
+    const epoch = p.epoch + 1;
+    this.unwatch(p);
+    this.sessions.delete(sessionId);
+    p.owner = null;
+    p.handoff = null;
+    this.fenced.set(sessionId, epoch);
+    if (this.fenced.size > MAX_FENCED) {
+      this.fenced.delete(this.fenced.keys().next().value as string);
+    }
+    // Nada estaba pendiente (se exige al empezar); si lo hubiera, era del par.
+    this.opts.pending?.forget(sessionId);
+    log.info('peer session handed off', { sessionId, epoch, seq: p.snapshot.seq });
+    return { epoch };
+  }
+
+  /** ¿Se traspasó esa sesión al daemon (y su anfitrión par anterior quedó vallado)? */
+  handedOff(sessionId: string): boolean {
+    return this.fenced.has(sessionId);
+  }
+
+  /**
+   * `sessions.detach` sobre una sesión par: se le pide a su anfitrión, que es
+   * quien sabe si puede soltarla, y él mismo hace el traspaso. Plazo largo:
+   * incluye montar la sesión aquí.
+   */
+  async requestDetach(sessionId: string): Promise<void> {
+    await this.forward('host.detach', sessionId, { sessionId }, this.detachTimeoutMs);
+  }
+
   /** El daemon se apaga: se sueltan los temporizadores. Las sesiones siguen en sus procesos. */
   shutdown(): void {
     for (const p of this.sessions.values()) {
@@ -538,16 +859,18 @@ export class PeerSessions {
     method: M,
     sessionId: string,
     params: MethodParams<M>,
+    timeoutMs: number = this.controlTimeoutMs,
   ): Promise<MethodResult<M>> {
     const p = this.sessions.get(sessionId);
     if (!p) throw new ProtocolError('NOT_FOUND', 'Session not found.');
     const owner = p.owner;
     if (!owner) throw hostUnavailable();
     try {
-      return await owner.request(method, params, { timeoutMs: this.controlTimeoutMs });
+      return await owner.request(method, params, { timeoutMs });
     } catch (err) {
       // Lo que contesta el anfitrión pasa con su código; su texto, no.
       if (err instanceof ProtocolError) {
+        if (method === 'host.detach') throw detachRefusal(err);
         if (err.code === 'STALE_STATE') {
           throw new ProtocolError('STALE_STATE', 'That run is no longer the current one.');
         }

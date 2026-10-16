@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M9 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado); siguiente: M10.
+> anotados en el hito que los encuentra. **M0–M10 implementados** (M10 completado) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado); siguiente: M11.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -376,7 +376,8 @@ Restricciones de diseño que mantienen abierta esa convergencia (obligatorias de
    - nunca se persiste como parte de `Session` ni de `SessionContext`;
    - pasa por filtrado y redacción antes de usarse;
    - **no** se implementa captura automática del entorno completo: qué variables se
-     pueden capturar y trasladar lo decide M10 (§22 Q1).
+     pueden capturar y trasladar lo decide M10 (§22 Q1). *(M10: ninguna. Una sesión
+     traspasada al daemon usa el entorno del daemon; ver la respuesta de M10 en Q1.)*
 
    En M0, `SessionEnv.env` es solo el punto de inyección: el anfitrión par pasa el
    entorno de su propio proceso, que es el que ya usa hoy, y nada lo serializa.
@@ -798,6 +799,10 @@ Fuera del MVP: todo §15.
 vuelve; `stratum chat --attach <sesión>` abre la TUI sobre una sesión alojada en el daemon.
 Son opt-in. Requisito previo de cualquier cambio de default, y el banco de pruebas de la
 conservación del entorno (§22 Q1).
+*Redefinido al empezarlo* (ver «M10 — Continuidad de sesión» en §19): lo que se construye es
+el **traspaso de una sesión viva** de su terminal al daemon —mismo id, mismo contexto, un solo
+anfitrión— y volver a ella desde cualquier cliente (`/detach`, `stratum detach`,
+`stratum attach`). `stratum run --detach` y la TUI completa sobre una sesión remota no entran.
 
 **M11 — Decisión sobre el default de `chat`.** Con datos de M9 y M10. Si se cumple la lista
 de §9.3, `stratum chat` pasa a alojarse en `stratumd`; el modo par se mantiene soportado.
@@ -1429,9 +1434,44 @@ carga, anfitrión par muerto/re-registro bajo carga, E2E de la ventana en CI Lin
 empaquetado y firma, documentación de usuario; y con ello AC-10 a AC-13, que no se dan por
 cumplidos aquí.
 
-### Después del MVP
+### M10 — Continuidad de sesión
 
-M10 (`--detach`/`--attach`), M11 (default de `chat`) y M12 (Desktop al Stratum Protocol): §15.1.
+- Una sesión viva de `stratum chat` (anfitrión par) pasa a alojarse en `stratumd` **sin
+  cambiar de `sessionId` ni perder contexto**, y cualquier cliente autorizado vuelve a ella.
+  Es continuidad, no persistencia: tras reiniciar el daemon no se recupera.
+- *Hecho cuando*: AC-17.
+
+**Estado: completado (2026-10-16).** `Dot CI` verde en Windows y Linux, con `smoke:detach`. Referencia: `docs/protocol.md` §18 (semántica, estados, vallado,
+qué se traspasa y qué lo impide); `docs/dot.md` §15.
+
+- **Un solo anfitrión.** Época de propiedad por sesión (`host.register` → `epoch`, exigida en
+  `host.publish`); al traspasar, el id queda vallado para el anfitrión anterior
+  (`STALE_STATE` `stale-epoch` / `handed-off`), aunque su conexión siga abierta.
+- **Traspaso, no reconstrucción.** No se cierra y se reabre nada: el par deja de empezar
+  trabajo, publica hasta su último `seq` y entrega por etapas (`host.handoffBegin/Chunk/Commit`)
+  un DTO explícito y versionado (`ProtocolHandoffContext`: el historial del agente y los
+  ajustes de la sesión, nunca entorno, claves, config ni autoridad). El daemon lo valida, monta
+  un `SessionHost` con ese id y ese contexto, y su publicador **continúa** desde la foto que ya
+  tenía: un solo `session.updated` con `host.kind: 'daemon'` en el `seq` siguiente.
+- **Todo o nada.** El commit es un paso síncrono en el daemon; antes de él, un fallo deja la
+  sesión en el par; con el resultado desconocido, el par pregunta (vuelve a registrarse) y no
+  reintenta.
+- **Solo en reposo.** Un run (también en pausa o esperando una aprobación), un job vivo, un aviso
+  que el agente no ha visto o trabajo auxiliar en vuelo lo impiden (`BUSY` /
+  `NOT_TRANSFERABLE` con el motivo); lo pendiente nunca se mueve ni se resuelve solo.
+- **CLI**: `/detach` en `chat` (la terminal sale al terminar), `stratum detach <id>` desde
+  fuera, `stratum attach <id>` (cliente interactivo: conversación, turnos, steering, pausa,
+  cancelación, pendientes) — adjuntarse no es un método nuevo. `stratum ps` ya distinguía el
+  anfitrión.
+- **Dot** lo refleja sin cambios: es la misma sesión, y el campo de escritura pasa a preguntar.
+
+Desviaciones respecto al texto original de §15.1: no hay `stratum run --detach` (`run` no se
+traspasa: mientras corre está ocupado) ni TUI completa sobre una sesión remota (`attach` es un
+cliente de líneas); Dot no ofrece aún un botón de traspaso. §22 Q1: ver su respuesta de M10.
+
+### Después de M10
+
+M11 (default de `chat`) y M12 (Desktop al Stratum Protocol): §15.1.
 
 ## 20. Acceptance Criteria
 
@@ -1472,6 +1512,15 @@ M10 (`--detach`/`--attach`), M11 (default de `chat`) y M12 (Desktop al Stratum P
   se deniega en `run` sin TTY y pasa con `gitPush: allow`; `--force-with-lease` y `--force`
   no se aprueban con `allow-all` ni con `--allow-destructive`.
 - **AC-16.** Stratum Desktop 0.4.x funciona sin cambios con y sin `stratumd` en marcha.
+- **AC-17 (M10).** Una sesión de `stratum chat` en reposo se traspasa a `stratumd` sin cambiar
+  de id; su terminal sale; Dot y `stratum attach` ven la misma conversación y un turno nuevo
+  llega al agente con el contexto de antes; el anfitrión anterior no puede publicar en ella; un
+  traspaso que falla deja la sesión en la terminal, y uno con resultado desconocido se resuelve
+  preguntando, nunca reintentando. El traspaso no lleva credenciales del runtime (entorno,
+  config, API keys, autoridad de aprobar), pero sí el historial completo del agente: lo
+  sensible que ya esté en el contexto del modelo viaja con él (`docs/protocol.md` §18.5).
+  *Comprobación*: `daemon/handoff.test.ts`, `npm run tui:detach` y, en Dot,
+  `npm run smoke:detach`.
 
 ## 21. Risks
 
@@ -1509,6 +1558,13 @@ resto de la tabla de §16.
   `GIT_*` que hoy sanea `scrubGitEnv`); y qué recibe una sesión de Dot, que no tiene
   terminal — el entorno del daemon o el de un shell de login capturado al arrancar.
   *Se investiga en*: M10, con un escenario de `eval` por cada elemento de la lista de §9.3.
+  *Respuesta de M10 (parcial, a propósito)*: el traspaso **no traslada ninguna variable** de la
+  terminal. Una sesión traspasada se comporta como una abierta en el daemon: su entorno es la
+  copia del del daemon tomada al arrancar, y su config se resuelve con él desde el mismo `cwd`;
+  si así no se puede montar (un provider cuya clave solo existía en la terminal), el traspaso
+  se rechaza (`NOT_TRANSFERABLE`, `startup`) y la sesión sigue en la terminal. Lo que una
+  sesión del daemon necesita de una terminal —y por tanto el cambio de default de M11— sigue
+  abierto aquí; los escenarios de `eval` de §9.3 no se hicieron en M10.
 - **Q2. Verificación de la identidad del proceso par.** Node no expone `SO_PEERCRED` ni
   `GetNamedPipeClientProcessId`. Opciones a evaluar: addon nativo; aceptar aprobaciones
   solo a través del relay Rust de Dot (que sí puede consultarlo); o conceder la capacidad

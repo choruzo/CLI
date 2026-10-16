@@ -67,6 +67,7 @@
     "tui:peer": "node scripts/tui/daemon-peer.mjs",
     "tui:approvals": "node scripts/tui/daemon-approvals.mjs",
     "tui:pause": "node scripts/tui/daemon-pause.mjs",
+    "tui:detach": "node scripts/tui/daemon-detach.mjs",
     "release": "bash scripts/release.sh"
   },
   "dependencies": {

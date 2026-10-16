@@ -7,6 +7,7 @@ import { mkdirSync, mkdtempSync, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { StratumClient } from '../client/client.js';
+import { socketConnector, type Connection, type Connector } from '../client/connection.js';
 import { fileDiscovery } from '../client/discovery.js';
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import type { SessionStartupOptions } from '../host/session-startup.js';
@@ -19,7 +20,12 @@ import type {
   ProtocolStateEvent,
   Role,
 } from '../protocol/index.js';
-import { PeerHostBridge, type PeerHostBridgeOptions } from '../host/peer-host-bridge.js';
+import { prepareHandoff, SessionOwnership } from '../host/handoff.js';
+import {
+  PeerHostBridge,
+  type DetachOutcome,
+  type PeerHostBridgeOptions,
+} from '../host/peer-host-bridge.js';
 import { SessionHost, type HostGates, type SessionHostOptions } from '../host/session-host.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { approverAuthFromKey } from './approver-key.js';
@@ -152,8 +158,14 @@ export interface TestPeer {
   bridge: PeerHostBridge;
   provider: ScriptedProvider;
   sessionId: string;
+  /** Propiedad de la sesión en este «proceso» (M10): cierra los turnos durante un traspaso. */
+  ownership: SessionOwnership;
+  /** Veces que el puente avisó de que la sesión pasó al daemon. */
+  handedOff: () => number;
   /** Un turno completo, como lo consume `stratum run`. Devuelve el texto y el motivo de parada. */
   run(input: string): Promise<{ text: string; stopReason: string | null }>;
+  /** Traspasa la sesión al daemon, como `/detach` en `stratum chat`. */
+  detach(): Promise<DetachOutcome>;
   /** Cierre normal: estado final, baja y desmontaje. */
   stop(): Promise<void>;
 }
@@ -173,6 +185,8 @@ export async function startPeer(
     destructivePolicy?: SessionHostOptions['destructivePolicy'];
     interactionTimeoutMs?: number;
     config?: Record<string, unknown>;
+    /** Sin traspaso, como `stratum run`. */
+    noHandoff?: boolean;
   } = {},
 ): Promise<TestPeer> {
   const cwd = join(where.base, name);
@@ -196,6 +210,8 @@ export async function startPeer(
       ? { interactionTimeoutMs: hostOptions.interactionTimeoutMs }
       : {}),
   });
+  const ownership = new SessionOwnership();
+  let handedOff = 0;
   const bridge = new PeerHostBridge({
     session: host,
     control: {
@@ -203,11 +219,23 @@ export async function startPeer(
       steer: (text) => host.steer(text),
       pause: () => host.pause(),
       resume: () => host.resume(),
+      ...(hostOptions.noHandoff
+        ? {}
+        : {
+            prepareHandoff: () =>
+              prepareHandoff(host, ownership, async () => {
+                await host.trace?.flush();
+              }),
+          }),
     },
     name: 'test-peer',
     version: '0.0.0-test',
     discovery: fileDiscovery({ dir: where.dir }),
     retry: { initialMs: 25, maxMs: 100, jitter: 0 },
+    onHandedOff: () => {
+      handedOff++;
+      ownership.completeHandoff();
+    },
     ...bridgeOptions,
   });
   link.bridge = bridge;
@@ -217,16 +245,25 @@ export async function startPeer(
     bridge,
     provider,
     sessionId: host.sessionId,
+    ownership,
+    handedOff: () => handedOff,
     async run(input) {
-      bridge.expectRun({ input });
-      let text = '';
-      let stopReason: string | null = null;
-      for await (const event of host.run(input)) {
-        if (event.type === 'text_delta') text += event.delta;
-        if (event.type === 'done') stopReason = event.stopReason;
+      const end = ownership.tryBeginTurn();
+      if (!end) throw new Error(`the session is ${ownership.state}: no turns here`);
+      try {
+        bridge.expectRun({ input });
+        let text = '';
+        let stopReason: string | null = null;
+        for await (const event of host.run(input)) {
+          if (event.type === 'text_delta') text += event.delta;
+          if (event.type === 'done') stopReason = event.stopReason;
+        }
+        return { text, stopReason };
+      } finally {
+        end();
       }
-      return { text, stopReason };
     },
+    detach: () => bridge.detach(),
     async stop() {
       await host.dispose({ cancelBackground: true });
       await bridge.close();
@@ -235,7 +272,11 @@ export async function startPeer(
 }
 
 export async function startTestDaemon(
-  options: Partial<StratumdOptions> & { base?: string } = {},
+  options: Partial<StratumdOptions> & {
+    base?: string;
+    /** Retiene el arranque de cada sesión (también la que llega por traspaso). */
+    holdStartup?: (cwd: string) => Promise<void>;
+  } = {},
 ): Promise<TestDaemon> {
   const ownBase = options.base === undefined;
   const base = options.base ?? realpathSync(mkdtempSync(join(tmpdir(), 'stratumd-')));
@@ -247,7 +288,7 @@ export async function startTestDaemon(
 
   const configFor = (extra: Record<string, unknown> = {}): StratumConfig => testConfig(base, extra);
 
-  const { base: _base, ...daemonOptions } = options;
+  const { base: _base, holdStartup, ...daemonOptions } = options;
   void _base;
   const daemon = await Stratumd.start({
     version: '0.0.0-test',
@@ -261,6 +302,7 @@ export async function startTestDaemon(
       teardowns++;
     },
     startup: async (opts: SessionStartupOptions) => {
+      await holdStartup?.(opts.cwd);
       const script = scripts.get(opts.cwd);
       if (!script) return { ok: false, stage: 'config', error: 'no script for that directory' };
       const config = configFor(script.config);
@@ -394,6 +436,49 @@ export function watch(
         timeoutMs,
       ),
     close: () => subscription.close(),
+  };
+}
+
+/**
+ * Un conector que el test puede cortar, como si el proceso par perdiese el
+ * canal: `cut()` cierra todas sus conexiones; `cutAfter(method)` cierra en
+ * cuanto sale una petición de ese método (su respuesta ya no llega).
+ */
+export function cuttableConnector(): {
+  connector: Connector;
+  cut(): void;
+  cutAfter(method: string): void;
+} {
+  const base = socketConnector();
+  const live = new Set<Connection>();
+  let after: string | null = null;
+  const cut = (): void => {
+    for (const c of [...live]) c.close();
+    live.clear();
+  };
+  return {
+    connector: async (path, handlers) => {
+      const c = await base(path, handlers);
+      live.add(c);
+      void c.closed.then(() => live.delete(c));
+      return {
+        closed: c.closed,
+        close: () => c.close(),
+        send: (line) => {
+          const sent = c.send(line);
+          if (after && line.includes(`"method":"${after}"`)) {
+            after = null;
+            // Sale entera y después se corta: llega al daemon, la respuesta no vuelve.
+            setTimeout(cut, 30);
+          }
+          return sent;
+        },
+      };
+    },
+    cut,
+    cutAfter: (method) => {
+      after = method;
+    },
   };
 }
 

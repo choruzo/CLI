@@ -26,6 +26,11 @@ export const PROTOCOL_ERROR_CODES = [
   'ALREADY_RESOLVED',
   /** La petición parte de un estado que ya no es el vigente (un `runId` que ya no es el actual). */
   'STALE_STATE',
+  /**
+   * La sesión no se puede traspasar al daemon (`sessions.detach`): depende de
+   * algo que es del proceso que la aloja. `data.reason` dice qué (`HandoffBlocker`).
+   */
+  'NOT_TRANSFERABLE',
   /** Un mensaje supera el tamaño máximo. La conexión se cierra tras avisar. */
   'FRAME_TOO_LARGE',
   /** No se puede atender ahora: el anfitrión de la sesión no está conectado, el servidor se apaga. */
@@ -59,6 +64,11 @@ export interface ProtocolErrorData {
    * `UNAVAILABLE`: por qué. `host-unavailable` = el anfitrión par de la sesión
    * no está conectado; `peer-hosted` = eso solo puede hacerlo el proceso que la
    * aloja.
+   *
+   * `BUSY` / `NOT_TRANSFERABLE` de un traspaso: el `HandoffBlocker`.
+   * `STALE_STATE`: `seq-gap` (faltan eventos), `changed` (la sesión cambió
+   * durante un traspaso), `stale-epoch` (quien publica ya no es el anfitrión
+   * vigente) o `handed-off` (la sesión ya la aloja el daemon).
    */
   reason?: string;
   /** `FRAME_TOO_LARGE`: el límite en bytes. */

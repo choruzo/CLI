@@ -2977,3 +2977,23 @@ webview pide  →  lado nativo comprueba (broker + solicitud + sesión, con el d
 - **Carpeta, endpoint y socket privados.** El daemon no arranca si su carpeta es un enlace o, en POSIX, no es privada; deja el socket en `0600` antes de publicar. El cliente lee el endpoint sin seguir enlaces y comprueba dueño y permisos de lo abierto.
 - **Colas acotadas.** Lo que espera respuesta va por colas con tope y, llenas, se rechaza sin enviar; lo que no puede perderse (bloquear, cerrar, el estado de la conexión) no ocupa cola.
 - **Lo que no se afirma**, por separado: qué protege M9, qué verifica el sistema operativo (en el cliente, usuario y pid del servidor del canal; en el daemon, solo los permisos del socket en POSIX y nada en Windows) y qué sigue en el mismo dominio de confianza (cualquier proceso del mismo usuario, y root): `docs/dot.md` §14.3.
+
+### 12.25 — Continuidad de sesión: traspasar una sesión viva al daemon (M10)
+
+Una sesión viva de `stratum chat` puede pasar a alojarse en `stratumd` **sin cambiar de `sessionId` ni perder contexto**, y cualquier cliente autorizado vuelve a ella (protocolo en `docs/protocol.md` §18; Dot en `docs/dot.md` §15). Es continuidad, no persistencia: tras reiniciar el daemon la sesión no se recupera.
+
+```text
+peer-hosted (época N) ── /detach · stratum detach · sessions.detach ──▶ daemon-hosted (época N+1)
+        el par: puerta de turnos cerrada → publica hasta su seq → entrega su contexto → vallado
+```
+
+#### Invariantes
+
+- **Un solo anfitrión autoritativo.** Antes del commit solo puede ejecutar el par (con la puerta de turnos cerrada: `SessionOwnership`); después, solo el daemon. El commit es un paso síncrono en el daemon; un fallo antes de él desmonta lo montado sin haber publicado nada y deja la sesión en el par.
+- **Traspaso, no reconstrucción.** Ni `sessions.close` ni `sessions.open`: el daemon monta un `SessionHost` con **el mismo id** y el contexto entregado, y su `SessionPublisher` **continúa** desde la foto que ya tenía (`continueFrom`): el cambio de anfitrión es un único `session.updated` en el `seq` siguiente.
+- **Vallado por época.** El daemon da una `epoch` a cada anfitrión par y la exige en cada `host.publish`; tras el traspaso, el anfitrión anterior queda rechazado (`STALE_STATE`, `stale-epoch` / `handed-off`) aunque su conexión siga abierta.
+- **Qué se traspasa**: un DTO explícito y versionado (`ProtocolHandoffContext`, `HANDOFF_FORMAT`) con el historial del agente (system prompt incluido) y los ajustes de la sesión (provider y modelo por nombre, perfil principal, read-only, perfil de sesión, plan, contadores; tokens solo si se reportaron). El agente lo rehidrata por el camino de una sesión reanudada (`StratumAgentOptions.initialMessages`, `activeAgent`, `usage`): lista de tareas y evidencia de TDD salen del historial. **Nunca**: entorno del terminal, config, claves, autoridad de aprobar, política destructiva, procesos, sockets, SSH o MCP. Eso no significa que «ningún secreto viaje»: el historial va **completo y tal cual**, así que un dato sensible que ya esté en el contexto del modelo (escrito por el usuario, repetido por el modelo o en una salida de tool que la redacción del núcleo no reconoció) viaja con él al daemon, por el canal privado y sin publicarse ni registrarse. El traspaso no borra contexto.
+- **Solo en reposo.** No se finge migrar trabajo en vuelo: un turno (también en pausa o esperando a una persona), un job vivo, un aviso o mensaje que el agente aún no ha visto o trabajo auxiliar en vuelo (`StratumAgent.hasBackgroundWork`) lo impiden (`BUSY` / `NOT_TRANSFERABLE`). Lo pendiente nunca se mueve ni se resuelve solo.
+- **Entorno**: la sesión traspasada usa el del daemon (como `sessions.open`); si no puede montarse con él, el traspaso se rechaza (`startup`). No se copia ninguna variable de la terminal.
+- **Resultado desconocido**: no se reintenta un commit; el par pregunta volviendo a registrarse (vallada → del daemon; registrada → sigue siendo suya). Un daemon que ya no existe no puede alojarla.
+- **Adjuntarse no es un método.** `stratum attach` es un cliente: sigue la sesión (`events.subscribe`) y la conduce con `runs.*`; no aloja nada y salir no la cambia.

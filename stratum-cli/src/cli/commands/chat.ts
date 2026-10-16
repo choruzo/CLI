@@ -28,6 +28,8 @@ import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
 import { createCliBridge } from '../daemon-link.js';
 import { PendingInteractions } from '../../host/interactions.js';
+import { prepareHandoff, SessionOwnership } from '../../host/handoff.js';
+import { handedOffNotice } from '../handoff-text.js';
 import { recordResolution } from '../../host/resolution-audit.js';
 import {
   configureLogging,
@@ -324,8 +326,13 @@ export const chatCommand = new Command('chat')
       interactions.subscribe((change) =>
         recordResolution({ config, sessionId, trace: auditor.scope }, change),
       );
+      // M10: la sesión puede pasar a `stratumd` (`/detach`, o `sessions.detach`
+      // desde otro cliente). Mientras se traspasa —y para siempre después— no
+      // empieza ningún turno aquí; `ownership` es esa puerta.
+      const ownership = new SessionOwnership();
+      const published = { sessionId, agent, config, env: { cwd: process.cwd() }, interactions };
       const bridge = createCliBridge({
-        session: { sessionId, agent, config, env: { cwd: process.cwd() }, interactions },
+        session: published,
         name: 'stratum chat',
         config,
         control: {
@@ -334,7 +341,13 @@ export const chatCommand = new Command('chat')
           // Pausa cooperativa: la decide el runtime de esta sesión.
           pause: () => agent.pause.requestPause(),
           resume: () => agent.pause.resume(),
+          // Lo que la traza tenga en cola se escribe antes de soltar la sesión:
+          // el daemon sigue en el mismo fichero.
+          prepareHandoff: () => prepareHandoff(published, ownership, () => auditor.flush()),
         },
+        // El daemon dice que la sesión ya es suya: aquí no empieza nada más, venga
+        // de un traspaso propio o no.
+        overrides: { onHandedOff: () => ownership.completeHandoff() },
       });
       await bridge?.start();
 
@@ -365,6 +378,8 @@ export const chatCommand = new Command('chat')
                   },
                   expectRun: (turn: { input: string; mode: 'normal' | 'plan' }) =>
                     bridge.expectRun(turn),
+                  ownership,
+                  detach: () => bridge.detach(),
                 },
               }
             : {}),
@@ -382,6 +397,11 @@ export const chatCommand = new Command('chat')
       clearInterval(checkpointTimer);
       process.off('SIGTERM', onFatalSignal);
       process.off('SIGHUP', onFatalSignal);
+      // M10: la sesión sigue viva en el daemon. Lo que queda aquí es una copia
+      // guardada hasta el traspaso y el desmontaje de lo de este proceso.
+      if (bridge?.handedOff)
+        process.stderr.write(`${handedOffNotice(sessionId)}
+`);
 
       // -----------------------------------------------------------------------
       // Guardar sesión al salir. Va ANTES del teardown: si el cierre de MCP o de
