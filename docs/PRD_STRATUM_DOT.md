@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M10 implementados** (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado); siguiente: M11.
+> anotados en el hito que los encuentra. **M0–M10 implementados** (M10 completado) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado); siguiente: M11.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -1441,7 +1441,7 @@ cumplidos aquí.
   Es continuidad, no persistencia: tras reiniciar el daemon no se recupera.
 - *Hecho cuando*: AC-17.
 
-**Estado: implementado.** Referencia: `docs/protocol.md` §18 (semántica, estados, vallado,
+**Estado: completado (2026-10-16).** `Dot CI` verde en Windows y Linux, con `smoke:detach`. Referencia: `docs/protocol.md` §18 (semántica, estados, vallado,
 qué se traspasa y qué lo impide); `docs/dot.md` §15.
 
 - **Un solo anfitrión.** Época de propiedad por sesión (`host.register` → `epoch`, exigida en
