@@ -82,6 +82,12 @@ export function launch({
     ...env,
   };
   delete childEnv.NO_COLOR;
+  // Ink no repinta en un CI (`is-in-ci`: `CI`, `CONTINUOUS_INTEGRATION` o `CI_*`): solo saldría
+  // lo estático. El pty es un terminal de verdad, así que el proceso no hereda esas marcas.
+  for (const key of Object.keys(childEnv)) {
+    if (key === 'CI' || key === 'CONTINUOUS_INTEGRATION' || key.startsWith('CI_'))
+      delete childEnv[key];
+  }
 
   const term = new xterm.Terminal({ cols, rows, allowProposedApi: true, scrollback: 5000 });
   const child = pty.spawn(process.execPath, [ENTRY, ...args], {

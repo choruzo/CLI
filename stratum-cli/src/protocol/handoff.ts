@@ -16,6 +16,11 @@
  * conexiones SSH): lo que es del proceso par no se teletransporta, y una sesión
  * que dependa de algo así en ese momento no es transferible.
  *
+ * Que no viajen credenciales del runtime no significa que no viaje nada
+ * sensible: el historial va completo y tal cual, así que lo que ya esté en el
+ * contexto del modelo (un mensaje del usuario, una salida de tool que la
+ * redacción no reconoció) llega al daemon con él. No se filtra: es el contexto.
+ *
  * La foto de la sesión **no** viaja aquí: el daemon ya la tiene, al día, por lo
  * que el par publicó (`host.publish`); `seq` dice hasta dónde. Si no coincide,
  * el traspaso no se hace (`STALE_STATE`).

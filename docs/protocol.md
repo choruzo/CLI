@@ -1298,9 +1298,21 @@ publicador nuevo continúa desde ella.
 
 **No se traspasa**: el entorno del terminal, la config cargada, `apiKey`/`baseUrl`, tokens del
 canal, la clave o la autoridad de aprobar, la política destructiva o `--allow-destructive`,
-procesos, sockets, descriptores, conexiones SSH ni servers MCP. El daemon monta los suyos. El
-historial viaja tal cual porque es el contexto que el modelo ya tiene; va por el canal privado
-del daemon (M9), no se publica en ningún evento ni foto y no se registra.
+procesos, sockets, descriptores, conexiones SSH ni servers MCP. El daemon monta los suyos.
+
+**Secretos: lo que el traspaso no lleva y lo que sí puede llevar.** El DTO no serializa
+ninguna credencial **del runtime**: ni entorno, ni config, ni API keys, ni tokens del canal, ni
+la autoridad de aprobar. Pero **sí lleva el historial interno completo del agente**, tal cual,
+porque es el contexto que el modelo ya tiene y sin él no hay continuidad. Por tanto, un dato
+sensible que **ya forme parte del contexto del modelo** viaja con él: lo que el usuario
+escribió en un mensaje, lo que el modelo repitió en su respuesta o en los argumentos de una
+tool, o la salida de una tool que la redacción del núcleo (`src/security/`, solo formatos
+reconocibles: PEM, `Bearer`, `sk-…`, JWT, tokens de GitHub…) no reconoció. Lo ya redactado
+viaja como `[redacted: …]`, igual que estaba en el historial. El traspaso no filtra ni borra
+contexto: hacerlo cambiaría lo que el modelo sabe. Ese historial va por el canal privado del
+daemon (M9), solo al daemon del mismo usuario; no se publica en ningún evento ni foto y no se
+registra. Tras el traspaso queda en el agente de `stratumd`, con
+el mismo tratamiento que el de una sesión abierta allí.
 
 **Lo impide** (`data.reason`):
 

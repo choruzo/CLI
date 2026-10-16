@@ -33,7 +33,9 @@ for (const [what, path] of [['la CLI compilada', CLI], ['dot-probe', PROBE]]) {
 }
 
 const runner = checker();
-const check = runner.check;
+// Cada comprobación parte de lo que dejó la anterior: tras un fallo, las siguientes no se ejecutan.
+const check = (name, fn) =>
+  runner.failed === 0 ? runner.check(name, fn) : (console.log(`- ${name} (omitida)`), Promise.resolve());
 
 function contentOf(message) {
   if (typeof message?.content === 'string') return message.content;

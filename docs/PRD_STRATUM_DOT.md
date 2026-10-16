@@ -1516,8 +1516,11 @@ M11 (default de `chat`) y M12 (Desktop al Stratum Protocol): §15.1.
   de id; su terminal sale; Dot y `stratum attach` ven la misma conversación y un turno nuevo
   llega al agente con el contexto de antes; el anfitrión anterior no puede publicar en ella; un
   traspaso que falla deja la sesión en la terminal, y uno con resultado desconocido se resuelve
-  preguntando, nunca reintentando. *Comprobación*: `daemon/handoff.test.ts`,
-  `npm run tui:detach` y, en Dot, `npm run smoke:detach`.
+  preguntando, nunca reintentando. El traspaso no lleva credenciales del runtime (entorno,
+  config, API keys, autoridad de aprobar), pero sí el historial completo del agente: lo
+  sensible que ya esté en el contexto del modelo viaja con él (`docs/protocol.md` §18.5).
+  *Comprobación*: `daemon/handoff.test.ts`, `npm run tui:detach` y, en Dot,
+  `npm run smoke:detach`.
 
 ## 21. Risks
 
