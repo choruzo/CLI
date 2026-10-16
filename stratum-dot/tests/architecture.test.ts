@@ -123,8 +123,21 @@ describe('Dot solo conoce el contrato', () => {
     });
     expect(reducers.map(rel)).toEqual([]);
     // En Rust tampoco: ni se nombra un tipo de evento de run, tool o mensaje.
-    const rustReducers = rustShipped.filter((f) => /"(run|tool|message|approval)\.[a-z_]+"/.test(rustCode(f)));
+    // La única excepción (M9) es la confirmación nativa, que **mira** los
+    // `*.resolved` para cancelar una confirmación abierta: ni reduce ni reenvía.
+    const confirmFile = join(DOT, 'crates', 'dot-link', 'src', 'confirm.rs');
+    const rustReducers = rustShipped.filter(
+      (f) => f !== confirmFile && /"(run|tool|message|approval)\.[a-z_]+"/.test(rustCode(f)),
+    );
     expect(rustReducers.map(rel)).toEqual([]);
+    const confirm = rustCode(confirmFile);
+    expect([...confirm.matchAll(/"((?:run|tool|message|approval|question|plan|session)\.[a-z_]+)"/g)].map((m) => m[1]).sort()).toEqual([
+      'approval.resolved',
+      'plan.resolved',
+      'question.resolved',
+      'session.closed',
+    ]);
+    expect(confirm).not.toMatch(/\bsink\b|\.emit\(|DotEvent::\w+\s*\{[^}]*\}\s*\)/);
   });
 });
 
@@ -199,16 +212,22 @@ describe('la frontera con el lado nativo', () => {
     expect(native).not.toMatch(/\benv\b/);
   });
 
-  it('la ventana principal solo tiene los de por defecto y sus comandos; la de desbloqueo, nada', () => {
+  it('la ventana principal solo escucha eventos y tiene sus comandos; las de desbloqueo y confirmación, nada', () => {
     const dir = join(DOT, 'src-tauri', 'capabilities');
     // Una sola capacidad, y es de la ventana principal.
     expect(readdirSync(dir)).toEqual(['default.json']);
     const capability = JSON.parse(read(join(dir, 'default.json')));
     expect(capability.windows).toEqual(['main']);
+    // Del núcleo de Tauri, solo escuchar (M9): ni `core:default`, ni emitir, ni ventanas.
     expect([...capability.permissions].sort()).toEqual(
-      ['core:default', ...COMMANDS.map((c) => `allow-${c.replace(/_/g, '-')}`)].sort(),
+      [
+        'core:event:allow-listen',
+        'core:event:allow-unlisten',
+        ...COMMANDS.map((c) => `allow-${c.replace(/_/g, '-')}`),
+      ].sort(),
     );
-    expect(JSON.stringify(capability)).not.toMatch(/"unlock"|remote|fs:|shell:|dialog:|http:/);
+    expect(JSON.stringify(capability.permissions)).not.toMatch(/core:default|core:window|core:webview|emit/);
+    expect(JSON.stringify(capability)).not.toMatch(/"unlock"|"confirm|remote|fs:|shell:|dialog:|http:/);
     const conf = JSON.parse(read(join(DOT, 'src-tauri', 'tauri.conf.json')));
     // Sin red: el webview solo habla con el lado nativo.
     expect(conf.app.security.csp).toContain("default-src 'self'");
@@ -315,9 +334,11 @@ describe('el lado nativo', () => {
     };
     const main = block('MainMethod');
     const approver = block('ApproverMethod');
-    // Principal: de `sessions.*` solo abrir; de `runs.*`, iniciar y gobernar. Ni cerrar, ni apagar, ni aprobar.
+    // Principal: de `sessions.*` solo abrir y leer una; de `runs.*`, iniciar y gobernar; de
+    // lo pendiente, solo listarlo (para la confirmación nativa). Ni cerrar, ni apagar, ni aprobar.
     expect(main).toEqual([
       'agents.list',
+      'approvals.list',
       'core.hello',
       'events.subscribe',
       'events.unsubscribe',
@@ -327,6 +348,7 @@ describe('el lado nativo', () => {
       'runs.resume',
       'runs.start',
       'runs.steer',
+      'sessions.get',
       'sessions.open',
     ]);
     // Aprobador: saludar y resolver. Ni observar, ni conducir, ni apagar.
@@ -391,14 +413,75 @@ describe('el lado nativo', () => {
   it('Dot no escribe el endpoint ni lanza un daemon por su cuenta', () => {
     for (const file of rustShipped) {
       const text = rustCode(file);
-      // El endpoint solo se lee.
+      // El endpoint solo se lee (se abre para leer, sin seguir enlaces: `discovery.rs`).
       if (/ENDPOINT_FILE|endpoint\.json/.test(text)) {
-        expect(/fs::write|File::create|OpenOptions/.test(text), `${rel(file)} escribe junto al endpoint`).toBe(false);
+        expect(
+          /fs::write|File::create|\.write\(true\)|\.create\(true\)|\.append\(true\)|create_new|fs::rename|remove_file/.test(text),
+          `${rel(file)} escribe junto al endpoint`,
+        ).toBe(false);
       }
     }
     const launcher = rustCode(join(link, 'src', 'launcher.rs'));
     // El único arranque es el comando oficial.
     expect(launcher).toContain('"daemon".to_string(), "start".to_string()');
     expect(launcher).not.toMatch(/"run"|daemon run/);
+  });
+});
+
+describe('M9 — pedir no es resolver', () => {
+  const tauriSrc = join(DOT, 'src-tauri', 'src');
+  const linkSrc = join(DOT, 'crates', 'dot-link', 'src');
+
+  it('desde un comando, lo sensible solo sale confirmado: un único `broker.resolve`, tras `needs_confirmation`', () => {
+    const commands = rustCode(join(tauriSrc, 'commands.rs'));
+    expect(commands.match(/\bbroker\s*\.resolve\(/g)?.length).toBe(1);
+    expect(commands).toMatch(/if !action\.needs_confirmation\(\) \{\s*return state\.broker\.resolve\(action\)/);
+    expect(commands).toMatch(/\.confirm\s*\.request\(/);
+    expect(commands).toMatch(/resolve_confirmed\(confirmed\)/);
+    // La frase de una confirmación con nombre no viaja desde el webview.
+    const approve = /pub async fn dot_approve<R: Runtime>\(([\s\S]*?)\) ->/.exec(commands)?.[1] ?? '';
+    expect(approve).not.toMatch(/phrase/);
+    // Ningún comando confirma: confirmar solo llega por la página nativa.
+    expect(commands).not.toMatch(/\.confirm\(&|\.confirm\s*\.confirm\(|ConfirmedAction/);
+  });
+
+  it('ni argv ni el entorno llevan credenciales: el lanzador no pasa nada más que `daemon start`', () => {
+    const launcher = rustCode(join(linkSrc, 'launcher.rs'));
+    expect(launcher).not.toMatch(/\.envs?\(|token|approver|secret/i);
+    for (const file of rustShipped) {
+      expect(/set_var\(|remove_var\(/.test(rustCode(file)), rel(file)).toBe(false);
+    }
+    // Ni el log del lado nativo recibe la frase, las respuestas o el plan.
+    for (const file of [join(linkSrc, 'confirm.rs'), join(linkSrc, 'approver.rs'), join(tauriSrc, 'confirm.rs')]) {
+      for (const call of rustCode(file).matchAll(/logger\s*\.\s*(?:info|warn|error)\(([\s\S]*?)\);/g)) {
+        expect(/phrase|answers?|plan|description|confirm_phrase|secret|token/i.test(call[1]!), `${rel(file)}: ${call[1]}`).toBe(false);
+      }
+    }
+  });
+
+  it('una `ConfirmedAction` solo la crea la puerta de confirmación', () => {
+    const makers = [...rustShipped]
+      .filter((f) => /ConfirmedAction::new\(/.test(rustCode(f)))
+      .map(rel)
+      .sort();
+    expect(makers).toEqual(['crates/dot-link/src/confirm.rs']);
+    const approver = rustCode(join(linkSrc, 'approver.rs'));
+    // Sin campos públicos ni constructor público.
+    expect(approver).toMatch(/pub struct ConfirmedAction \{\s*action: ApproverAction,\s*epoch: u64,\s*\}/);
+    expect(approver).toMatch(/pub\(crate\) fn new\(action: ApproverAction, epoch: u64\)/);
+  });
+
+  it('en el shell, solo la página nativa de confirmación confirma, y solo para su ventana', () => {
+    const confirmers = walk(tauriSrc, (f) => f.endsWith('.rs'))
+      .filter((f) => /\.confirm\(&link, &broker/.test(rustCode(f)))
+      .map(rel);
+    expect(confirmers).toEqual(['src-tauri/src/confirm.rs']);
+    const page = rustCode(join(tauriSrc, 'confirm.rs'));
+    expect(page).toMatch(/ctx\.webview_label\(\)/);
+    expect(page).toMatch(/nonce_of\(&label\)/);
+    expect(page).toMatch(/current_nonce\(\)/);
+    // Lo que enseña la ventana no lleva credenciales.
+    const view = rustCode(join(linkSrc, 'confirm.rs'));
+    expect(view).not.toMatch(/approverKey|ApproverSecret|token/i);
   });
 });

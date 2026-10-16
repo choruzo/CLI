@@ -210,27 +210,21 @@ describe('centro de aprobaciones', () => {
     expect(native.calls.approve).not.toHaveBeenCalled();
   });
 
-  it('con frase: hay que teclearla exacta (no se rellena) y no se ofrece «para la sesión»', async () => {
+  it('con frase: se teclea en la ventana nativa, no aquí, y no se ofrece «para la sesión»', async () => {
     const native = center({
       snapshots: [session(A, { approvals: [sampleApproval({ confirmPhrase: 'prod-db', target: 'ssh:prod-db' })] })],
     });
     const c = card('call_2')!;
     expect(c.className).toContain('danger');
     expect(c.textContent).toContain('Needs its confirmation phrase');
-    const field = within(c).getByLabelText(/To approve, type/) as HTMLInputElement;
-    expect(field.value).toBe('');
+    // El webview no tiene dónde teclearla ni la envía: la pide la ventana nativa.
+    expect(within(c).queryByRole('textbox')).toBeNull();
+    expect(c.querySelector('[data-phrase]')!.textContent).toContain('prod-db');
     expect(within(c).queryByRole('button', { name: 'Allow for this session' })).toBeNull();
-    expect(button(c, 'Approve').disabled).toBe(true);
-    fireEvent.change(field, { target: { value: 'prod-db ' } });
-    expect(button(c, 'Approve').disabled).toBe(true);
-    // Enter en el campo no envía.
-    fireEvent.keyDown(field, { key: 'Enter' });
-    expect(native.calls.approve).not.toHaveBeenCalled();
-    fireEvent.change(field, { target: { value: 'prod-db' } });
     // El daemon dice que no (la frase de verdad era otra): no se aprueba nada.
     native.calls.approve.mockRejectedValueOnce({ kind: 'rejected', code: 'INVALID_PARAMS', reason: null, message: 'x' });
     await act(async () => fireEvent.click(button(c, 'Approve')));
-    expect(native.calls.approve).toHaveBeenCalledWith(A, 'call_2', { phrase: 'prod-db', forSession: false });
+    expect(native.calls.approve).toHaveBeenCalledWith(A, 'call_2', { forSession: false });
     expect(card('call_2')!.textContent).toContain('The confirmation phrase does not match. Nothing was approved.');
     // Sigue pendiente y se puede volver a intentar a mano.
     expect(button(card('call_2')!, 'Approve').disabled).toBe(false);
@@ -439,5 +433,72 @@ describe('centro de aprobaciones', () => {
     });
     const ids = [...document.querySelectorAll<HTMLElement>('[data-kind="approval"][data-item]')].map((el) => el.dataset.item);
     expect(ids).toEqual(['early', 'mid', 'late']);
+  });
+});
+
+describe('confirmación nativa (M9)', () => {
+  it('mientras la ventana nativa está abierta, la tarjeta lo dice y no deja pedir otra cosa', async () => {
+    const native = center();
+    let finish: (() => void) | undefined;
+    native.calls.approve.mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          finish = resolve;
+        }),
+    );
+    await act(async () => fireEvent.click(button(card('call_2')!, 'Approve')));
+    expect(card('call_2')!.textContent).toContain('Approve: confirm it in the Stratum Dot confirmation window');
+    expect(button(card('call_2')!, 'Deny').disabled).toBe(true);
+    await act(async () => finish!());
+    expect(card('call_2')!.textContent).toContain('Approve: sent');
+  });
+
+  it('cancelar en la ventana no es un error: no salió nada y la tarjeta vuelve a estar como antes', async () => {
+    const native = center();
+    native.calls.approve.mockRejectedValueOnce({
+      kind: 'not-confirmed',
+      code: null,
+      reason: 'cancelled',
+      message: 'Not confirmed. Nothing was sent.',
+    });
+    await act(async () => fireEvent.click(button(card('call_2')!, 'Approve')));
+    const c = card('call_2')!;
+    expect(c.querySelector('[role="alert"]')).toBeNull();
+    expect(c.textContent).not.toContain('Not confirmed');
+    expect(button(c, 'Approve').disabled).toBe(false);
+    expect(native.calls.resyncSession).not.toHaveBeenCalled();
+  });
+
+  it('resuelta en otro sitio con la ventana abierta: se dice y se pide una foto, sin reenviar', async () => {
+    const native = center();
+    native.calls.approve.mockRejectedValueOnce({
+      kind: 'not-confirmed',
+      code: null,
+      reason: 'resolved-elsewhere',
+      message: 'The request was resolved elsewhere before you confirmed. Nothing was sent.',
+    });
+    await act(async () => fireEvent.click(button(card('call_2')!, 'Approve')));
+    expect(card('call_2')!.textContent).toContain('resolved elsewhere before you confirmed');
+    expect(native.calls.resyncSession).toHaveBeenCalledWith(A);
+    expect(native.calls.approve).toHaveBeenCalledTimes(1);
+  });
+
+  it('denegar, omitir y rechazar no piden confirmación; aprobar, responder y aprobar el plan sí', async () => {
+    const native = center({
+      snapshots: [
+        session(A, { approvals: [sampleApproval()] }),
+        session(B, { questions: [question({ questions: [{ question: '¿Puerto?' }] })] }),
+        session(C, { plans: [plan()] }),
+      ],
+    });
+    await act(async () => fireEvent.click(button(card('plan_1')!, 'Approve plan')));
+    expect(card('plan_1')!.textContent).toContain('Approve plan: sent');
+    const q = card('q_1')!;
+    fireEvent.change(within(q).getByRole('textbox'), { target: { value: '8080' } });
+    native.calls.answerQuestions.mockImplementationOnce(() => new Promise<void>(() => undefined));
+    await act(async () => fireEvent.click(button(q, 'Send answers')));
+    expect(card('q_1')!.textContent).toContain('confirm it in the Stratum Dot confirmation window');
+    await act(async () => fireEvent.click(button(card('call_2')!, 'Deny')));
+    expect(card('call_2')!.textContent).not.toContain('confirmation window…');
   });
 });

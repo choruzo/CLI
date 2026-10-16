@@ -17,7 +17,7 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       // La selección **no** se toca aunque su sesión no esté en la lista: tras
       // una caída del daemon, una sesión de terminal tarda un momento en volver
       // a registrarse, y al volver tiene que seguir seleccionada.
-      useSessions.getState().setSessions(event.sessionIds);
+      useSessions.getState().setSessions(event.sessionIds, event.unfollowed ?? 0);
       break;
     case 'snapshot':
       useSessions.getState().applySnapshot(event.sessionId, event.snapshot);

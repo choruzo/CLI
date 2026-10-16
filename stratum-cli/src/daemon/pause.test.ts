@@ -536,7 +536,9 @@ describe('M — el plano de control cae con un run en pausa', () => {
 
 describe('el daemon con una sesión en pausa', () => {
   it('no se apaga por inactividad: una sesión en pausa sigue viva', async () => {
-    t = await startTestDaemon({ idleExitMs: 150 });
+    // Holgado a propósito: hasta que se abre la sesión el daemon no tiene nada vivo, y con
+    // 150 ms una máquina cargada lo apagaba antes de empezar (flake visto en la suite entera).
+    t = await startTestDaemon({ idleExitMs: 1_000 });
     const operator = await t.connect(['operator']);
     const observer = await t.connect(['observer']);
     const s = await subject(t, operator, 'daemon');
@@ -551,7 +553,8 @@ describe('el daemon con una sesión en pausa', () => {
 
     let closed = false;
     void t.daemon.closed.then(() => (closed = true));
-    await settle(800);
+    // Más del doble del plazo de inactividad: sin la sesión en pausa ya se habría apagado.
+    await settle(2_500);
     expect(closed).toBe(false);
     expect(t.daemon.liveSessions).toBe(1);
   }, 30_000);

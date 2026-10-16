@@ -3,7 +3,6 @@ import { useResolve } from '../app/resolve';
 import type { ProtocolApproval, ProtocolPlanRequest, ProtocolQuestionRequest, ProtocolSessionSnapshot } from '../protocol';
 import {
   approvalChoices,
-  canApproveWith,
   draftToAnswers,
   expiryLabel,
   unresolvableReason,
@@ -47,6 +46,9 @@ function noSubmit(event: KeyboardEvent<HTMLInputElement>): void {
  *   tarjeta, y Enter en un campo no envía).
  * - Denegar / rechazar va primero; aprobar, al final y separado.
  * - Sin optimismo: tras aprobar se ve «Sent…» hasta que la foto la retira.
+ * - Aprobar, «para la sesión», enviar respuestas y aprobar el plan abren la
+ *   confirmación nativa (otra ventana, M9); aquí solo se pide. La frase de una
+ *   confirmación con nombre se teclea allí.
  */
 export const InteractionCard = forwardRef<HTMLElement, Props>(function InteractionCard(
   { item, snapshot, now, connected, ready },
@@ -141,7 +143,9 @@ export const InteractionCard = forwardRef<HTMLElement, Props>(function Interacti
       ) : null}
       {resolution ? (
         <p className={`note ${resolution.state === 'failed' ? 'bad' : ''}`} role={resolution.state === 'failed' ? 'alert' : 'status'}>
-          {resolution.state === 'sending'
+          {resolution.state === 'confirming'
+            ? `${resolution.action}: confirm it in the Stratum Dot confirmation window…`
+            : resolution.state === 'sending'
             ? `${resolution.action}: sending…`
             : resolution.state === 'sent'
               ? `${resolution.action}: sent. Waiting for the session to confirm…`
@@ -161,18 +165,8 @@ function ApprovalBody({
   off: boolean;
   actions: ReturnType<typeof useResolve>;
 }) {
-  // Lo tecleado vive en la tarjeta y se va con ella. No es la clave de aprobador.
-  const [phrase, setPhrase] = useState('');
   const choices = approvalChoices(approval);
-  const approvable = canApproveWith(approval, phrase);
-
-  const approve = async (forSession: boolean) => {
-    const sent = await actions.approve({
-      ...(choices.phrase !== null ? { phrase } : {}),
-      forSession,
-    });
-    if (sent) setPhrase('');
-  };
+  const approve = (forSession: boolean) => void actions.approve({ forSession });
 
   return (
     <>
@@ -206,22 +200,9 @@ function ApprovalBody({
       </dl>
 
       {choices.phrase !== null ? (
-        <div className="phrase">
-          <label htmlFor={`phrase-${approval.id}`}>
-            To approve, type <code className="mono">{choices.phrase}</code>
-          </label>
-          <input
-            id={`phrase-${approval.id}`}
-            type="text"
-            autoComplete="off"
-            spellCheck={false}
-            value={phrase}
-            disabled={off}
-            aria-invalid={phrase.length > 0 && !approvable}
-            onChange={(e) => setPhrase(e.target.value)}
-            onKeyDown={noSubmit}
-          />
-        </div>
+        <p className="phrase" data-phrase>
+          To approve, you will type <code className="mono">{choices.phrase}</code> in the confirmation window.
+        </p>
       ) : null}
 
       <div className="decision" role="group" aria-label="Decision">
@@ -235,15 +216,16 @@ function ApprovalBody({
             className="btn"
             disabled={off}
             aria-describedby={`allow-${approval.id}`}
-            onClick={() => void approve(true)}
+            onClick={() => approve(true)}
           >
             Allow for this session
           </button>
         ) : null}
-        <button type="button" className="btn primary" disabled={off || !approvable} onClick={() => void approve(false)}>
+        <button type="button" className="btn primary" disabled={off} onClick={() => approve(false)}>
           Approve
         </button>
       </div>
+      <p className="muted small">Approving opens a confirmation window. Deny is sent right away.</p>
       {choices.allowSession ? (
         <p id={`allow-${approval.id}`} className="muted small">
           “Allow for this session” approves this and later requests of this session only. It does not change any

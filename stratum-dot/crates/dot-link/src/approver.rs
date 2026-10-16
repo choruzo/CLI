@@ -23,6 +23,19 @@
 //!    sin datos: ni la clave, ni nada derivado de ella, ni el token del canal.
 //!  - Los errores de desbloqueo son genéricos: no dicen si la clave existía,
 //!    se parecía o se probó antes.
+//!  - **Lo sensible exige confirmación nativa** (M9). Aprobar, `allow-all`,
+//!    enviar respuestas y aprobar un plan solo salen con una
+//!    [`ConfirmedAction`], que solo construye [`crate::confirm`] cuando la
+//!    persona confirma en una ventana que el webview no controla, y que vale
+//!    para **ese** desbloqueo (su época). [`ApproverHandle::resolve`] solo
+//!    acepta lo negativo (denegar, omitir, rechazar): lo mismo que hace el
+//!    runtime cuando nadie contesta.
+//!  - **La clave solo va al daemon que publicó el endpoint**: antes del saludo
+//!    el sistema confirma usuario y pid del que atiende el canal
+//!    ([`crate::peer`]); si no puede, no se envía.
+//!  - **Colas acotadas.** Desbloquear y resolver van por una cola corta y,
+//!    llena, se rechaza (`not-sent`); bloquear, cerrar y lo que dice la
+//!    conexión principal no ocupan cola (no pueden perderse por una avalancha).
 
 use serde::Serialize;
 use serde_json::{json, Map, Value};
@@ -31,12 +44,13 @@ use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use tokio::io::{AsyncReadExt, AsyncWriteExt, WriteHalf};
-use tokio::sync::{mpsc, oneshot};
+use tokio::sync::{mpsc, oneshot, Notify};
 use tokio::time::Instant;
 
 use crate::discovery::{self, Discovery};
 use crate::framing::LineDecoder;
 use crate::log::Logger;
+use crate::peer::{self, PeerCheck};
 use crate::secret::ApproverSecret;
 use crate::state::{CommandError, CommandErrorKind, ConnectionState, DotEvent};
 use crate::transport::{self, Stream};
@@ -51,6 +65,16 @@ pub const MAX_PHRASE_CHARS: usize = 256;
 /// Respuestas de una tanda de preguntas (`LIMITS.answers`, `LIMITS.answerChars`).
 pub const MAX_ANSWERS: usize = 8;
 pub const MAX_ANSWER_CHARS: usize = 4_000;
+
+/// Desbloqueos y resoluciones esperando al broker. Llena, no se encola más.
+pub const MAX_QUEUED: usize = 16;
+/// Resoluciones enviadas y aún sin respuesta, a la vez.
+pub const MAX_IN_FLIGHT: usize = 8;
+
+/// `CommandError.reason` de una resolución sensible que llegó sin confirmar.
+pub const NEEDS_CONFIRMATION: &str = "native-confirmation-required";
+/// `CommandError.reason` de una confirmación de otro desbloqueo.
+pub const AUTHORITY_CHANGED: &str = "authority-changed";
 
 /// Por qué el broker está bloqueado. Para decirlo, sin datos.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -172,13 +196,66 @@ impl ApproverAction {
         }
     }
 
-    fn request_id(&self) -> &str {
+    /// ¿Hace falta que la persona lo confirme en la ventana nativa? Todo lo
+    /// que da permiso o dirige al agente, sí. Lo negativo (denegar, omitir,
+    /// rechazar) no: es lo mismo que pasa cuando nadie contesta, y pedir
+    /// confirmación para ello enseñaría a confirmar sin leer (`docs/dot.md` §13.9).
+    pub fn needs_confirmation(&self) -> bool {
+        match self {
+            ApproverAction::Approve { .. } => true,
+            ApproverAction::Deny { .. } => false,
+            ApproverAction::AnswerQuestions { answers, .. } => answers.is_some(),
+            ApproverAction::DecidePlan { approve, .. } => *approve,
+        }
+    }
+
+    pub fn session_id(&self) -> &str {
+        match self {
+            ApproverAction::Approve { session_id, .. }
+            | ApproverAction::Deny { session_id, .. }
+            | ApproverAction::AnswerQuestions { session_id, .. }
+            | ApproverAction::DecidePlan { session_id, .. } => session_id,
+        }
+    }
+
+    pub fn request_id(&self) -> &str {
         match self {
             ApproverAction::Approve { approval_id, .. }
             | ApproverAction::Deny { approval_id, .. } => approval_id,
             ApproverAction::AnswerQuestions { request_id, .. }
             | ApproverAction::DecidePlan { request_id, .. } => request_id,
         }
+    }
+}
+
+/// Una resolución sensible que la persona **confirmó** en la ventana nativa.
+///
+/// No se puede construir fuera de este crate: la única forma de tener una es
+/// que [`crate::confirm::ConfirmGate::confirm`] la entregue, y vale solo para
+/// el desbloqueo (`epoch`) en el que se pidió.
+///
+/// ```compile_fail
+/// use dot_link::{ApproverAction, ConfirmedAction};
+/// let forged = ConfirmedAction { action: ApproverAction::Deny { session_id: "s".into(), approval_id: "a".into() }, epoch: 1 };
+/// ```
+///
+/// ```compile_fail
+/// use dot_link::{ApproverAction, ConfirmedAction};
+/// let forged = ConfirmedAction::new(ApproverAction::Deny { session_id: "s".into(), approval_id: "a".into() }, 1);
+/// ```
+#[derive(Debug)]
+pub struct ConfirmedAction {
+    action: ApproverAction,
+    epoch: u64,
+}
+
+impl ConfirmedAction {
+    pub(crate) fn new(action: ApproverAction, epoch: u64) -> Self {
+        Self { action, epoch }
+    }
+
+    pub fn action(&self) -> &ApproverAction {
+        &self.action
     }
 }
 
@@ -193,6 +270,8 @@ pub struct ApproverTimings {
     /// Tras un fallo, cuánto hay que esperar para volver a probar.
     pub retry_cooldown: Duration,
     pub connect_wait: Duration,
+    /// Cada cuánto se comprueba, desbloqueado, que el daemon sigue siendo el mismo.
+    pub identity_check: Duration,
 }
 
 impl Default for ApproverTimings {
@@ -203,6 +282,7 @@ impl Default for ApproverTimings {
             unlocked_for: Duration::from_secs(10 * 60),
             retry_cooldown: Duration::from_secs(2),
             connect_wait: Duration::from_secs(2),
+            identity_check: Duration::from_secs(2),
         }
     }
 }
@@ -216,28 +296,77 @@ pub struct ApproverConfig {
 
 type Reply = oneshot::Sender<Result<(), CommandError>>;
 
+/// Lo que va por la cola (acotada): lo que espera respuesta.
 enum Cmd {
     Unlock(ApproverSecret, Reply),
-    Lock,
-    Resolve(ApproverAction, Reply),
-    Main { connected: bool, approvals: bool },
-    Attach,
-    Shutdown,
+    /// `epoch`: el desbloqueo en el que se confirmó; `None` = no necesitaba confirmación.
+    Resolve(ApproverAction, Option<u64>, Reply),
+}
+
+/// Lo que no puede perderse aunque la cola esté llena. Se coalesce.
+#[derive(Default)]
+struct Flags {
+    shutdown: bool,
+    lock: bool,
+    attach: bool,
+    /// El último estado de la conexión principal: `(connected, approvals)`.
+    main: Option<(bool, bool)>,
 }
 
 struct Shared {
     status: Mutex<ApproverStatus>,
+    /// El desbloqueo vigente (cambia con cada uno). 0 = ninguno todavía.
+    epoch: Mutex<u64>,
+    flags: Mutex<Flags>,
+    wake: Notify,
+}
+
+impl Shared {
+    fn flag(&self, set: impl FnOnce(&mut Flags)) {
+        if let Ok(mut flags) = self.flags.lock() {
+            set(&mut flags);
+        }
+        self.wake.notify_one();
+    }
+
+    fn take_flags(&self) -> Flags {
+        self.flags
+            .lock()
+            .map(|mut f| std::mem::take(&mut *f))
+            .unwrap_or_default()
+    }
 }
 
 /// Lo que la app tiene del broker. Barato de clonar.
 #[derive(Clone)]
 pub struct ApproverHandle {
-    tx: mpsc::UnboundedSender<Cmd>,
+    tx: mpsc::Sender<Cmd>,
     shared: Arc<Shared>,
 }
 
 fn gone() -> CommandError {
     CommandError::new(CommandErrorKind::NotSent, "Stratum Dot is shutting down.")
+}
+
+fn enqueue(tx: &mpsc::Sender<Cmd>, cmd: Cmd) -> Result<(), CommandError> {
+    tx.try_send(cmd).map_err(|e| match e {
+        mpsc::error::TrySendError::Full(_) => CommandError::new(
+            CommandErrorKind::NotSent,
+            "Too many requests at once. Nothing was sent: try again in a moment.",
+        ),
+        mpsc::error::TrySendError::Closed(_) => gone(),
+    })
+}
+
+/// Lo sensible que llegó sin pasar por la confirmación nativa. No se envía.
+pub fn needs_confirmation_error() -> CommandError {
+    CommandError {
+        kind: CommandErrorKind::NotConfirmed,
+        code: None,
+        reason: Some(NEEDS_CONFIRMATION.into()),
+        message: "This needs your confirmation in Dot's confirmation window. Nothing was sent."
+            .into(),
+    }
 }
 
 impl ApproverHandle {
@@ -251,29 +380,50 @@ impl ApproverHandle {
             })
     }
 
+    /// El desbloqueo vigente, si el broker está listo para resolver. Una
+    /// confirmación se ata a él: si se bloquea y se vuelve a desbloquear, la
+    /// confirmación de antes ya no vale.
+    pub fn ready_epoch(&self) -> Option<u64> {
+        if !matches!(self.status(), ApproverStatus::Ready { .. }) {
+            return None;
+        }
+        self.shared.epoch.lock().ok().map(|e| *e).filter(|e| *e > 0)
+    }
+
     /// Acredita una conexión de aprobador con esa clave. La clave se consume
     /// aquí: pase lo que pase, no sobrevive a la llamada.
     pub async fn unlock(&self, secret: ApproverSecret) -> Result<(), CommandError> {
         let (reply, answer) = oneshot::channel();
-        self.tx
-            .send(Cmd::Unlock(secret, reply))
-            .map_err(|_| gone())?;
+        enqueue(&self.tx, Cmd::Unlock(secret, reply))?;
         answer.await.unwrap_or_else(|_| Err(gone()))
     }
 
     /// Suelta la autoridad: cierra la conexión de aprobador. Lo pendiente sigue
-    /// pendiente; solo deja de poder resolverse desde Dot.
+    /// pendiente; solo deja de poder resolverse desde Dot. No ocupa cola: nunca
+    /// se pierde.
     pub fn lock(&self) {
-        let _ = self.tx.send(Cmd::Lock);
+        self.shared.flag(|f| f.lock = true);
     }
 
-    /// Envía una resolución, **una vez**. `Ok` = el daemon (y el anfitrión de
-    /// la sesión) la aceptaron; lo que cambie se ve por eventos.
+    /// Envía una resolución **negativa** (denegar, omitir, rechazar), una vez.
+    /// Lo sensible no sale por aquí ([`ApproverAction::needs_confirmation`]):
+    /// se rechaza sin enviar nada y hay que pasar por [`Self::resolve_confirmed`].
     pub async fn resolve(&self, action: ApproverAction) -> Result<(), CommandError> {
+        if action.needs_confirmation() {
+            return Err(needs_confirmation_error());
+        }
         let (reply, answer) = oneshot::channel();
-        self.tx
-            .send(Cmd::Resolve(action, reply))
-            .map_err(|_| gone())?;
+        enqueue(&self.tx, Cmd::Resolve(action, None, reply))?;
+        answer.await.unwrap_or_else(|_| Err(gone()))
+    }
+
+    /// Envía una resolución que la persona confirmó, **una vez**, y solo si el
+    /// desbloqueo sigue siendo aquel en el que se confirmó. `Ok` = el daemon (y
+    /// el anfitrión de la sesión) la aceptaron; lo que cambie se ve por eventos.
+    pub async fn resolve_confirmed(&self, confirmed: ConfirmedAction) -> Result<(), CommandError> {
+        let (reply, answer) = oneshot::channel();
+        let ConfirmedAction { action, epoch } = confirmed;
+        enqueue(&self.tx, Cmd::Resolve(action, Some(epoch), reply))?;
         answer.await.unwrap_or_else(|_| Err(gone()))
     }
 
@@ -285,20 +435,17 @@ impl ApproverHandle {
             }
             _ => (false, false),
         };
-        let _ = self.tx.send(Cmd::Main {
-            connected,
-            approvals,
-        });
+        self.shared.flag(|f| f.main = Some((connected, approvals)));
     }
 
     /// La interfaz acaba de cargar: se le repite el estado.
     pub fn attach(&self) {
-        let _ = self.tx.send(Cmd::Attach);
+        self.shared.flag(|f| f.attach = true);
     }
 
     /// Dot se cierra: se suelta la conexión de aprobador. El daemon sigue.
     pub fn shutdown(&self) {
-        let _ = self.tx.send(Cmd::Shutdown);
+        self.shared.flag(|f| f.shutdown = true);
     }
 }
 
@@ -311,12 +458,15 @@ pub fn spawn_broker(
     ApproverHandle,
     impl std::future::Future<Output = ()> + Send + 'static,
 ) {
-    let (tx, rx) = mpsc::unbounded_channel();
+    let (tx, rx) = mpsc::channel(MAX_QUEUED);
     let initial = ApproverStatus::Unavailable {
         reason: Unavailable::NotConnected,
     };
     let shared = Arc::new(Shared {
         status: Mutex::new(initial),
+        epoch: Mutex::new(0),
+        flags: Mutex::new(Flags::default()),
+        wake: Notify::new(),
     });
     let broker = Broker {
         operation_prefix: format!(
@@ -338,6 +488,8 @@ pub fn spawn_broker(
         failure: None,
         cooldown_until: None,
         operations: 0,
+        epochs: 0,
+        identity_checked: Instant::now(),
     };
     (ApproverHandle { tx, shared }, broker.run())
 }
@@ -361,13 +513,15 @@ struct Conn {
     phase: Phase,
     /// El arranque del daemon (pid + hora) al que se acreditó.
     identity: (u32, String),
+    /// El desbloqueo de esta conexión (ver [`ApproverHandle::ready_epoch`]).
+    epoch: u64,
     next_id: u64,
     pending: HashMap<u64, (Reply, Instant)>,
 }
 
 struct Broker {
     cfg: ApproverConfig,
-    rx: mpsc::UnboundedReceiver<Cmd>,
+    rx: mpsc::Receiver<Cmd>,
     sink: Box<dyn Fn(DotEvent) + Send + Sync>,
     shared: Arc<Shared>,
     conn: Option<Conn>,
@@ -379,6 +533,9 @@ struct Broker {
     cooldown_until: Option<Instant>,
     operations: u64,
     operation_prefix: String,
+    /// Desbloqueos que ha habido: el siguiente es `epochs + 1`.
+    epochs: u64,
+    identity_checked: Instant,
 }
 
 fn now_ms() -> u64 {
@@ -521,6 +678,7 @@ enum Wake {
     Cmd(Option<Cmd>),
     Line(Option<String>),
     Tick,
+    Flag,
 }
 
 /// Qué hacer con algo que llegó por la conexión de aprobador.
@@ -574,13 +732,43 @@ impl Broker {
         (self.sink)(DotEvent::Approver { status: next });
     }
 
+    /// Lo anotado (bloquear, cerrar, `attach`, la conexión principal). `true` = cerrar.
+    fn on_flags(&mut self) -> bool {
+        let flags = self.shared.take_flags();
+        if flags.shutdown {
+            return true;
+        }
+        if let Some((connected, approvals)) = flags.main {
+            self.main_connected = connected;
+            self.main_approvals = approvals;
+        }
+        if flags.lock {
+            self.failure = None;
+            if self.conn.is_some() {
+                self.cfg.logger.info("approver: lock requested");
+                self.close(LockReason::Manual);
+            }
+        }
+        if flags.attach {
+            self.publish(true);
+        }
+        false
+    }
+
     async fn run(mut self) {
         let mut tick = tokio::time::interval(Duration::from_millis(250));
+        let shared = self.shared.clone();
         loop {
+            if self.on_flags() {
+                break;
+            }
+            self.publish(false);
             let wake = {
                 let conn = &mut self.conn;
                 let rx = &mut self.rx;
                 tokio::select! {
+                    biased;
+                    _ = shared.wake.notified() => Wake::Flag,
                     cmd = rx.recv() => Wake::Cmd(cmd),
                     line = async {
                         match conn.as_mut() {
@@ -592,7 +780,8 @@ impl Broker {
                 }
             };
             let step = match wake {
-                Wake::Cmd(None) | Wake::Cmd(Some(Cmd::Shutdown)) => break,
+                Wake::Cmd(None) => break,
+                Wake::Flag => Step::Nothing,
                 Wake::Cmd(Some(cmd)) => self.on_cmd(cmd).await,
                 Wake::Line(None) => Step::Close(LockReason::ConnectionLost),
                 Wake::Line(Some(line)) => self.on_line(&line).await,
@@ -653,6 +842,19 @@ impl Broker {
             Phase::Ready { until, expires_at } if expired(*until, *expires_at) => {
                 return Step::Close(LockReason::Expired)
             }
+            // Desbloqueado: que el daemon siga siendo aquel al que se acreditó,
+            // aunque nadie resuelva nada (un endpoint sustituido invalida la autoridad).
+            Phase::Ready { .. }
+                if now.duration_since(self.identity_checked) >= self.cfg.timings.identity_check =>
+            {
+                self.identity_checked = now;
+                if !same_daemon(&self.cfg.endpoint_dir, &conn.identity) {
+                    self.cfg
+                        .logger
+                        .warn("approver: the daemon endpoint changed while unlocked");
+                    return Step::Close(LockReason::DaemonChanged);
+                }
+            }
             _ => {}
         }
         let late: Vec<u64> = conn
@@ -671,33 +873,11 @@ impl Broker {
 
     async fn on_cmd(&mut self, cmd: Cmd) -> Step {
         match cmd {
-            Cmd::Shutdown => Step::Nothing,
-            Cmd::Attach => {
-                self.publish(true);
-                Step::Nothing
-            }
-            Cmd::Main {
-                connected,
-                approvals,
-            } => {
-                self.main_connected = connected;
-                self.main_approvals = approvals;
-                Step::Nothing
-            }
-            Cmd::Lock => {
-                self.failure = None;
-                if self.conn.is_some() {
-                    self.cfg.logger.info("approver: lock requested");
-                    Step::Close(LockReason::Manual)
-                } else {
-                    Step::Nothing
-                }
-            }
             Cmd::Unlock(secret, reply) => {
                 self.unlock(secret, reply).await;
                 Step::Nothing
             }
-            Cmd::Resolve(action, reply) => self.resolve(action, reply).await,
+            Cmd::Resolve(action, epoch, reply) => self.resolve(action, epoch, reply).await,
         }
     }
 
@@ -764,6 +944,29 @@ impl Broker {
                     return;
                 }
             };
+        // La clave solo va al daemon que publicó el endpoint, y el sistema tiene
+        // que poder decirlo: sin esa confirmación, no sale (falla cerrado).
+        match peer::verify(&stream, endpoint.pid) {
+            Ok(PeerCheck::Verified) => {}
+            other => {
+                drop(secret);
+                let why = match other {
+                    Err(mismatch) => mismatch.to_string(),
+                    Ok(PeerCheck::Partial { what }) => {
+                        format!("the OS did not confirm the {what} serving the channel")
+                    }
+                    Ok(PeerCheck::Verified) => unreachable!(),
+                };
+                self.cfg.logger.error(&format!(
+                    "approver: peer identity: {why}; the key was not sent"
+                ));
+                let _ = reply.send(Err(CommandError::new(
+                    CommandErrorKind::NotSent,
+                    "Could not verify that the Stratum daemon is the one answering. The approver key was not sent.",
+                )));
+                return;
+            }
+        }
         let (mut reader, mut writer) = tokio::io::split(stream);
         let (line_tx, lines) = mpsc::channel::<String>(64);
         let reader_task = tokio::spawn(async move {
@@ -817,12 +1020,18 @@ impl Broker {
                 deadline: Instant::now() + self.cfg.timings.handshake_timeout,
             },
             identity: endpoint.identity(),
+            epoch: 0,
             next_id: 2,
             pending: HashMap::new(),
         });
     }
 
-    async fn resolve(&mut self, action: ApproverAction, reply: Reply) -> Step {
+    async fn resolve(&mut self, action: ApproverAction, epoch: Option<u64>, reply: Reply) -> Step {
+        // Segunda barrera (la primera es el mango): lo sensible, solo confirmado.
+        if action.needs_confirmation() && epoch.is_none() {
+            let _ = reply.send(Err(needs_confirmation_error()));
+            return Step::Nothing;
+        }
         let Some(conn) = self.conn.as_mut() else {
             let _ = reply.send(Err(locked()));
             return Step::Nothing;
@@ -838,12 +1047,28 @@ impl Broker {
                 return Step::Nothing;
             }
         }
+        // Confirmado en otro desbloqueo: la persona confirmó con otra autoridad.
+        if let Some(epoch) = epoch {
+            if epoch != conn.epoch {
+                let _ = reply.send(Err(CommandError {
+                    kind: CommandErrorKind::NotConfirmed,
+                    code: None,
+                    reason: Some(AUTHORITY_CHANGED.into()),
+                    message: "Approval authority changed after you confirmed. Nothing was sent."
+                        .into(),
+                }));
+                return Step::Nothing;
+            }
+        }
+        if conn.pending.len() >= MAX_IN_FLIGHT {
+            let _ = reply.send(Err(CommandError::new(
+                CommandErrorKind::NotSent,
+                "Too many resolutions waiting for the daemon. Nothing was sent.",
+            )));
+            return Step::Nothing;
+        }
         // Un desbloqueo es de un arranque concreto del daemon: si ya hay otro, no vale.
-        let current = match discovery::locate(&self.cfg.endpoint_dir) {
-            Discovery::Found(endpoint) => Some(endpoint.identity()),
-            _ => None,
-        };
-        if current.as_ref() != Some(&conn.identity) {
+        if !same_daemon(&self.cfg.endpoint_dir, &conn.identity) {
             let _ = reply.send(Err(locked()));
             return Step::Close(LockReason::DaemonChanged);
         }
@@ -953,6 +1178,12 @@ impl Broker {
         }
         let until = Instant::now() + self.cfg.timings.unlocked_for;
         let expires_at = now_ms() + self.cfg.timings.unlocked_for.as_millis() as u64;
+        self.epochs += 1;
+        conn.epoch = self.epochs;
+        if let Ok(mut epoch) = self.shared.epoch.lock() {
+            *epoch = self.epochs;
+        }
+        self.identity_checked = Instant::now();
         let phase = std::mem::replace(&mut conn.phase, Phase::Ready { until, expires_at });
         if let Phase::Handshake { reply, .. } = phase {
             let _ = reply.send(Ok(()));
@@ -969,6 +1200,14 @@ impl Broker {
             self.cfg.timings.unlocked_for.as_secs()
         ));
         Step::Nothing
+    }
+}
+
+/// ¿Sigue publicado el arranque del daemon al que se acreditó la conexión?
+fn same_daemon(dir: &std::path::Path, identity: &(u32, String)) -> bool {
+    match discovery::locate(dir) {
+        Discovery::Found(endpoint) => endpoint.identity() == *identity,
+        _ => false,
     }
 }
 
@@ -1119,6 +1358,121 @@ mod tests {
                 "{}",
                 action.name()
             );
+        }
+    }
+
+    #[test]
+    fn solo_lo_que_da_permiso_o_dirige_exige_confirmacion() {
+        let approve = ApproverAction::Approve {
+            session_id: "s".into(),
+            approval_id: "a".into(),
+            phrase: None,
+            for_session: false,
+        };
+        let allow_all = ApproverAction::Approve {
+            session_id: "s".into(),
+            approval_id: "a".into(),
+            phrase: None,
+            for_session: true,
+        };
+        let deny = ApproverAction::Deny {
+            session_id: "s".into(),
+            approval_id: "a".into(),
+        };
+        let answers = ApproverAction::AnswerQuestions {
+            session_id: "s".into(),
+            request_id: "q".into(),
+            answers: Some(vec![]),
+        };
+        let skip = ApproverAction::AnswerQuestions {
+            session_id: "s".into(),
+            request_id: "q".into(),
+            answers: None,
+        };
+        let plan = ApproverAction::DecidePlan {
+            session_id: "s".into(),
+            request_id: "p".into(),
+            approve: true,
+        };
+        let reject = ApproverAction::DecidePlan {
+            session_id: "s".into(),
+            request_id: "p".into(),
+            approve: false,
+        };
+        for sensitive in [&approve, &allow_all, &answers, &plan] {
+            assert!(sensitive.needs_confirmation(), "{}", sensitive.name());
+        }
+        for negative in [&deny, &skip, &reject] {
+            assert!(!negative.needs_confirmation(), "{}", negative.name());
+        }
+    }
+
+    #[tokio::test]
+    async fn lo_sensible_sin_confirmar_no_llega_ni_a_la_cola() {
+        let dir = tempfile::tempdir().unwrap();
+        let (handle, _task) = spawn_broker(
+            ApproverConfig {
+                endpoint_dir: dir.path().to_path_buf(),
+                client_version: "t".into(),
+                logger: Logger::none(),
+                timings: ApproverTimings::default(),
+            },
+            |_| {},
+        );
+        // Sin lanzar la tarea: si algo se encolase, la llamada no volvería nunca.
+        let err = handle
+            .resolve(ApproverAction::Approve {
+                session_id: "s".into(),
+                approval_id: "a".into(),
+                phrase: None,
+                for_session: false,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::NotConfirmed);
+        assert_eq!(err.reason.as_deref(), Some(NEEDS_CONFIRMATION));
+    }
+
+    #[tokio::test]
+    async fn una_avalancha_no_hace_crecer_la_cola_y_bloquear_no_se_pierde() {
+        let dir = tempfile::tempdir().unwrap();
+        let (handle, task) = spawn_broker(
+            ApproverConfig {
+                endpoint_dir: dir.path().to_path_buf(),
+                client_version: "t".into(),
+                logger: Logger::none(),
+                timings: ApproverTimings::default(),
+            },
+            |_| {},
+        );
+        // La tarea no corre todavía: la cola se llena y lo demás se rechaza en el acto.
+        let mut waiting = Vec::new();
+        let mut refused = 0;
+        for _ in 0..(MAX_QUEUED * 4) {
+            let h = handle.clone();
+            let deny = ApproverAction::Deny {
+                session_id: "s".into(),
+                approval_id: "a".into(),
+            };
+            let (reply, answer) = oneshot::channel();
+            match enqueue(&h.tx, Cmd::Resolve(deny, None, reply)) {
+                Ok(()) => waiting.push(answer),
+                Err(e) => {
+                    assert_eq!(e.kind, CommandErrorKind::NotSent);
+                    refused += 1;
+                }
+            }
+        }
+        assert_eq!(waiting.len(), MAX_QUEUED);
+        assert_eq!(refused, MAX_QUEUED * 3);
+        // Bloquear y cerrar no ocupan cola: llegan aunque esté llena.
+        handle.lock();
+        handle.shutdown();
+        tokio::time::timeout(Duration::from_secs(5), task)
+            .await
+            .expect("el broker atiende el cierre con la cola llena");
+        for answer in waiting {
+            assert!(answer.await.map(|r| r.is_err()).unwrap_or(true));
         }
     }
 

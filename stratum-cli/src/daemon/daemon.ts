@@ -17,9 +17,9 @@
  * que las sesiones publican: no se persiste y se puede rehacer.
  */
 import { constants } from 'fs';
-import { access, mkdir, stat } from 'fs/promises';
+import { access, rmdir, stat } from 'fs/promises';
 import { homedir } from 'os';
-import { isAbsolute, resolve } from 'path';
+import { dirname, isAbsolute, resolve } from 'path';
 import { ProfileLoader, profileMode } from '../agent/profiles.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
@@ -51,6 +51,7 @@ import { EventHub, type HubClientStats } from './event-hub.js';
 import { HostedSession } from './hosted-session.js';
 import { OperationCache, type OperationCacheOptions } from './operation-cache.js';
 import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
+import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
 
 const log = getLogger('daemon');
@@ -142,6 +143,8 @@ export class Stratumd {
 
   private server!: ControlServer;
   private claim!: EndpointClaim;
+  /** Subcarpeta propia del socket de reserva en el temporal (POSIX), si la hay. */
+  private socketDir: string | null = null;
   private activeOperations = 0;
   private opening = 0;
   private lastActivity: number;
@@ -233,10 +236,19 @@ export class Stratumd {
       ...(opts.maxBufferedBytes ? { maxBufferedBytes: opts.maxBufferedBytes } : {}),
     });
     // En POSIX el canal es un unix socket **dentro** de esta carpeta: tiene que
-    // existir antes de escuchar (un named pipe de Windows no la necesita).
-    await mkdir(dir, { recursive: true, mode: 0o700 });
+    // existir antes de escuchar (un named pipe de Windows no la necesita). Y
+    // tiene que ser privada: si no lo es, no se arranca (`private-dir.ts`).
+    await ensurePrivateDir(dir);
+    // Un socket de reserva en el temporal (ruta demasiado larga) va en su subcarpeta, también privada.
+    const socketDir = dirname(endpoint.ipcPath);
+    if (process.platform !== 'win32' && resolve(socketDir) !== resolve(dir)) {
+      await ensurePrivateDir(socketDir);
+      daemon.socketDir = socketDir;
+    }
     await daemon.server.listen();
     try {
+      // El socket, solo para este usuario, antes de que el endpoint diga dónde está.
+      await restrictSocket(endpoint.ipcPath);
       daemon.claim = await claimEndpoint({
         dir,
         endpoint,
@@ -354,6 +366,9 @@ export class Stratumd {
       this.hub.flushAll();
       await this.settle('server', () => this.server.close(reason === 'idle' ? 'idle' : 'shutdown'));
       await this.settle('endpoint', () => this.claim.release());
+      const socketDir = this.socketDir;
+      if (socketDir)
+        await this.settle('socket folder', () => rmdir(socketDir).catch(() => undefined));
       await this.settle('process teardown', () =>
         (this.opts.processTeardown ?? closeExecRuntime)(),
       );

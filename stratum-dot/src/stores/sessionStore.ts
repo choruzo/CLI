@@ -31,8 +31,10 @@ interface SessionStore {
   sessions: Record<string, SessionEntry>;
   /** El daemon ya dijo alguna vez qué sesiones hay: antes de eso, «no está» no significa nada. */
   listed: boolean;
+  /** Sesiones vivas que Dot no sigue porque ya sigue el máximo: la lista es parcial. */
+  unfollowed: number;
   /** El daemon dice qué sesiones hay: las que no estén dejan de existir aquí. */
-  setSessions(ids: string[]): void;
+  setSessions(ids: string[], unfollowed?: number): void;
   /** Una foto sustituye lo que se tuviera de esa sesión. */
   applySnapshot(sessionId: string, raw: unknown): void;
   /** Aplica un lote. Devuelve `true` si hay que pedir una foto nueva. */
@@ -46,12 +48,13 @@ export const useSessions = create<SessionStore>((set, get) => ({
   order: [],
   sessions: {},
   listed: false,
+  unfollowed: 0,
 
-  setSessions: (ids) =>
+  setSessions: (ids, unfollowed = 0) =>
     set((prev) => {
       const sessions: Record<string, SessionEntry> = {};
       for (const id of ids) sessions[id] = prev.sessions[id] ?? EMPTY;
-      return { order: ids, sessions, listed: true };
+      return { order: ids, sessions, listed: true, unfollowed };
     }),
 
   applySnapshot: (sessionId, raw) =>
@@ -97,5 +100,5 @@ export const useSessions = create<SessionStore>((set, get) => ({
     return result.needsResync;
   },
 
-  reset: () => set({ order: [], sessions: {}, listed: false }),
+  reset: () => set({ order: [], sessions: {}, listed: false, unfollowed: 0 }),
 }));

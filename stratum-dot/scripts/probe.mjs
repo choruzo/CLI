@@ -49,6 +49,8 @@ export function startProbe({ binary, env, logDir }) {
   const seen = [];
   const sessions = new Map();
   const results = new Map();
+  /** Lo que enseñó la «ventana» de confirmación nativa (M9), en orden. */
+  const confirmations = [];
   let connection = null;
   let approver = null;
   let sessionIds = [];
@@ -63,6 +65,7 @@ export function startProbe({ binary, env, logDir }) {
       if (msg.type === 'connection') connection = msg.state;
       else if (msg.type === 'approver') approver = msg.status;
       else if (msg.type === 'sessions') sessionIds = msg.sessionIds;
+      else if (msg.type === 'confirmation') confirmations.push({ nonce: msg.nonce, view: msg.view });
       else if (msg.type === 'snapshot') {
         sessions.set(msg.sessionId, {
           session: msg.snapshot.session,
@@ -85,6 +88,7 @@ export function startProbe({ binary, env, logDir }) {
     seen,
     sessions,
     exited,
+    confirmations,
     get connection() {
       return connection;
     },
@@ -102,6 +106,36 @@ export function startProbe({ binary, env, logDir }) {
       const answer = new Promise((resolve) => results.set(id, resolve));
       child.stdin.write(`${JSON.stringify({ cmd, id, ...params })}\n`);
       return answer;
+    },
+    /**
+     * Lo que hace la app con lo sensible (M9): pedirlo, que la «ventana» de
+     * confirmación lo enseñe, y que la persona lo lea y confirme (con `phrase`
+     * si la pide) —o lo cancele (`cancel`)—. Devuelve el `result` de la orden,
+     * con `confirmation` (lo que se enseñó, o `null` si no llegó a enseñarse) y
+     * `confirmed` (lo que contestó confirmar).
+     */
+    async resolve(cmd, params, { phrase, cancel = false } = {}) {
+      const before = confirmations.length;
+      let answered = null;
+      const result = probe.order(cmd, params).then((r) => (answered = r));
+      const deadline = Date.now() + 30_000;
+      while (confirmations.length === before && answered === null) {
+        if (Date.now() > deadline) throw new Error(`no confirmation nor result for ${cmd}`);
+        await sleep(20);
+      }
+      if (confirmations.length === before) return { ...(await result), confirmation: null, confirmed: null };
+      const shown = confirmations[before];
+      let confirmed = null;
+      if (cancel) {
+        probe.send({ cmd: 'dismiss', nonce: shown.nonce });
+      } else {
+        // Como la persona: lee antes de pulsar (la ventana no deja confirmar antes).
+        await sleep((shown.view.armMs ?? 800) + 150);
+        confirmed = await probe.order('confirm', { nonce: shown.nonce, ...(phrase !== undefined ? { phrase } : {}) });
+        // Una frase que no vale deja la ventana abierta: la persona la cierra.
+        if (!confirmed.ok && confirmed.keepOpen) probe.send({ cmd: 'dismiss', nonce: shown.nonce });
+      }
+      return { ...(await result), confirmation: shown, confirmed };
     },
     /** Pide una foto nueva de la sesión y la devuelve. */
     async photo(sessionId) {

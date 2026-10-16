@@ -2958,4 +2958,22 @@ webview = UI no confiable    lado nativo = frontera de autoridad    stratumd = �
 - **Una solicitud es de su sesión.** El cliente envía la sesión con cada resolución (`sessionId`); con otra, `NOT_FOUND`, sin resolver ni revelar nada.
 - **Sin optimismo ni reintentos.** Lo pendiente sale de la foto de cada sesión; una resolución aceptada no marca nada; sin respuesta, el resultado es desconocido y no se reenvía.
 - **M4 y M5 intactos.** Aprobar no reanuda una pausa; el steering llegado durante la pausa descarta lo aprobado; `allow-all` es de una sesión y nunca vale para lo forzado ni con frase; sin `approver.json` no se resuelve en remoto, y el cliente nunca crea una clave.
-- **Lo que no se afirma**: aislamiento frente a procesos del mismo usuario del sistema (Q2 sigue abierta; `docs/dot.md` §13.8).
+- **Lo que no se afirma**: aislamiento frente a procesos del mismo usuario del sistema (Q2 sigue abierta; `docs/dot.md` §13.8 y §14.3).
+
+### 12.24 — Endurecimiento de la autoridad de aprobar y del IPC (M9)
+
+Stratum Dot (M9; `docs/dot.md` §14, protocolo en `docs/protocol.md` §4, §13.1 y §15.3). Sin capacidades nuevas ni cambios de contrato: lo que M8 dejó dicho como abierto.
+
+```text
+webview pide  →  lado nativo comprueba (broker + solicitud + sesión, con el daemon)  →  la persona confirma (nativo)  →  stratumd arbitra
+```
+
+#### Invariantes
+
+- **Pedir no es resolver.** Aprobar, `allow-all`, responder preguntas y aprobar un plan solo salen tras una confirmación en una superficie nativa que el webview no controla (otra ventana, otro origen, sin IPC). Lo que enseña sale del daemon (`approvals.list`, `sessions.get`), nunca del webview; la frase de una confirmación con nombre se teclea allí. Nunca se confirma sola: foco en *Cancel*, Enter no confirma, armada tras un momento, una a la vez.
+- **El tipo lo impone.** El broker solo envía lo sensible con una `ConfirmedAction`, que solo crea la puerta de confirmación y que vale para el desbloqueo (época) en que se pidió. Lo negativo (denegar, omitir, rechazar) va directo, a propósito: es lo que hace el runtime cuando nadie contesta.
+- **Una confirmación caduca** por plazo, bloqueo o cambio de desbloqueo, daemon distinto o perdido, solicitud resuelta en otro sitio, sesión que se va y cierre del cliente; caducada no envía nada. Antes de entregarla se vuelve a preguntar al daemon; el árbitro sigue siendo él.
+- **Credenciales solo al daemon del endpoint.** Antes de enviar el token —o la clave— el cliente pregunta al sistema quién atiende el canal (usuario y pid) y se niega si no es el proceso que publicó el endpoint; sin respuesta del sistema, la clave no sale.
+- **Carpeta, endpoint y socket privados.** El daemon no arranca si su carpeta es un enlace o, en POSIX, no es privada; deja el socket en `0600` antes de publicar. El cliente lee el endpoint sin seguir enlaces y comprueba dueño y permisos de lo abierto.
+- **Colas acotadas.** Lo que espera respuesta va por colas con tope y, llenas, se rechaza sin enviar; lo que no puede perderse (bloquear, cerrar, el estado de la conexión) no ocupa cola.
+- **Lo que no se afirma**, por separado: qué protege M9, qué verifica el sistema operativo (en el cliente, usuario y pid del servidor del canal; en el daemon, solo los permisos del socket en POSIX y nada en Windows) y qué sigue en el mismo dominio de confianza (cualquier proceso del mismo usuario, y root): `docs/dot.md` §14.3.

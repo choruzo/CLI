@@ -35,10 +35,14 @@ pub enum MainMethod {
     SessionsOpen,
     AgentsList,
     ModelsList,
+    /// Lo pendiente de una sesión, para la confirmación nativa (`crate::confirm`).
+    ApprovalsList,
+    /// La foto de una sesión, para la confirmación nativa (su directorio, su título).
+    SessionsGet,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 11] = [
+    pub const ALL: [MainMethod; 13] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -50,6 +54,8 @@ impl MainMethod {
         MainMethod::SessionsOpen,
         MainMethod::AgentsList,
         MainMethod::ModelsList,
+        MainMethod::ApprovalsList,
+        MainMethod::SessionsGet,
     ];
 }
 
@@ -67,6 +73,8 @@ impl WireMethod for MainMethod {
             MainMethod::SessionsOpen => "sessions.open",
             MainMethod::AgentsList => "agents.list",
             MainMethod::ModelsList => "models.list",
+            MainMethod::ApprovalsList => "approvals.list",
+            MainMethod::SessionsGet => "sessions.get",
         }
     }
 }
@@ -239,7 +247,9 @@ mod tests {
                 "runs.start",
                 "sessions.open",
                 "agents.list",
-                "models.list"
+                "models.list",
+                "approvals.list",
+                "sessions.get"
             ]
         );
         for forbidden in [
@@ -252,7 +262,7 @@ mod tests {
             assert!(!names.contains(&forbidden), "{forbidden}");
         }
         for name in names {
-            // De `sessions.*`, solo abrir: ni cerrar ni reconfigurar una sesión viva.
+            // De `sessions.*`, solo abrir y leer: ni cerrar ni reconfigurar una sesión viva.
             assert!(
                 !name.starts_with("host.")
                     && !name.starts_with("sessions.set")

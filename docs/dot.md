@@ -5,20 +5,25 @@ sesiones hay, en qué están, pausar, reanudar, cancelar o redirigir sus runs, *
 Stratum** —abrir una sesión en el daemon y hablar con ella— y **contestar lo que una sesión
 espera de una persona**: aprobaciones, preguntas y planes.
 
-> **Estado (M8).** Shell nativo con Tauri v2, conectado a `stratumd` por el Stratum Protocol
+> **Estado (M9).** Shell nativo con Tauri v2, conectado a `stratumd` por el Stratum Protocol
 > v1: descubre el daemon (o lo arranca), observa las sesiones vivas —las del daemon y las que
 > publica la CLI—, sobrevive a sus caídas, da cuatro órdenes (`pause`, `resume`, `cancel`,
 > `steer`), abre sesiones alojadas en el daemon y conversa con ellas (M7, §12) y, desde M8,
 > **resuelve aprobaciones, preguntas y planes de cualquier sesión visible** con una autoridad
-> de aprobar separada de su conexión normal y mantenida fuera del webview (§13). Sin trazas
-> todavía. Contrato: `docs/protocol.md`. Producto: `docs/PRD_STRATUM_DOT.md`.
+> de aprobar separada de su conexión normal y mantenida fuera del webview (§13). M9 lo
+> endurece (§14): **cada resolución sensible exige una confirmación nativa**, el lado nativo
+> verifica con el sistema quién atiende el canal antes de enviar credenciales, el endpoint y el
+> socket son privados, y las colas están acotadas. Sin trazas todavía. Contrato:
+> `docs/protocol.md`. Producto: `docs/PRD_STRATUM_DOT.md`.
 
-Las reglas que M8 no rompe:
+Las reglas que M8 y M9 no rompen:
 
 ```text
 Dot = cliente        stratumd = plano de control        SessionHost = runtime
 
 webview = UI no confiable    lado nativo = frontera de autoridad    stratumd = árbitro
+
+webview pide  →  lado nativo comprueba  →  la persona confirma (nativo)  →  stratumd arbitra
 ```
 
 **Dot es un cliente.** No es un segundo runtime, ni un segundo `EventHub`, ni un sidecar, ni
@@ -376,23 +381,25 @@ app. Por eso *Quit Dot* está también en la ventana y relanzar Dot la trae al f
 librería falta, crear la bandeja puede acabar en pánico: se captura y Dot sigue sin ella.
 Comprobado en Windows 11; en Linux queda por probar en un escritorio real (ver §9).
 
-## 7. Q2 sigue abierta
+## 7. Q2: lo que hay y lo que no
 
-Ni M6 ni M8 **cierran** Q2 (`PRD_STRATUM_DOT.md` §22: verificar la identidad del proceso al otro
-lado del canal), y Tauri por sí solo no la arregla: un proceso del mismo usuario sigue pudiendo
-leer `endpoint.json` y conectarse como cualquier cliente. Lo que M8 hace es usar **el sitio**
-que M6 dejó preparado:
+Ni M6, ni M8, ni M9 **cierran** Q2 para procesos del mismo usuario (`PRD_STRATUM_DOT.md` §22:
+verificar la identidad del proceso al otro lado del canal), y Tauri por sí solo no la arregla:
+un proceso del mismo usuario sigue pudiendo leer `endpoint.json` y conectarse como cualquier
+cliente. Lo que se ha ido poniendo en **el sitio** que M6 dejó preparado:
 
 ```text
-webview            nunca ve una credencial; pide qué resolver
+webview            nunca ve una credencial; pide qué resolver                  (M6–M8)
    │
-lado nativo        conexión principal: operator       (M6/M7)
-   │               conexión de aprobador, aparte, bajo demanda (M8, §13)
-   ▼               ── comprobación del par del pipe: todavía no (§13.9)
-stratumd
+lado nativo        conexión principal: operator                               (M6/M7)
+   │               conexión de aprobador, aparte, bajo demanda                 (M8, §13)
+   │               confirmación nativa de cada resolución sensible             (M9, §14.1)
+   ▼               el sistema dice quién atiende el canal antes de enviar nada  (M9, §14.3)
+stratumd           carpeta, endpoint y socket privados                         (M9, §14.4)
 ```
 
-Lo que M8 afirma, y nada más, está en §13.8.
+Qué protege M9, qué verifica el sistema operativo y qué sigue dentro del mismo dominio de
+confianza, por separado: §14.3.
 
 ## 8. Tests
 
@@ -785,8 +792,8 @@ Unlock approvals ──► dot_approver_unlock ──► ventana «unlock» (otr
   página sale del generador del sistema (`getrandom`); sin él, la ventana no se abre.
 
 **La frase de confirmación no es la clave.** Una aprobación con `confirmPhrase` exige teclear esa
-frase, que viaja en el DTO de la solicitud: puede vivir en el webview (en la tarjeta, que la
-olvida al resolverse) y Dot no la rellena.
+frase, que viaja en el DTO de la solicitud. Desde M9 se teclea en la **ventana de confirmación
+nativa** (§14.1), no en la tarjeta: el webview ya no la envía, y Dot no la rellena.
 
 ### 13.3 Estados del broker y ciclo de vida
 
@@ -833,8 +840,8 @@ Lo único que el webview sabe de la autoridad (`ApproverStatus`, sin datos):
 - **Botones**: *Deny* primero; *Allow for this session* y *Approve* al final, separados.
   *Allow for this session* (`allow-all`) solo aparece cuando la regla del contrato lo admite
   (`checkApprovalResolution`: ni forzada ni con frase) y dice que es **solo esa sesión** y que
-  no cambia ninguna configuración. Con frase, *Approve* se habilita cuando lo tecleado coincide
-  exactamente.
+  no cambia ninguna configuración. Con frase, la tarjeta dice cuál; se teclea en la ventana de
+  confirmación (M9).
 - **Foco y teclado**: al abrir el centro el foco va al título, y desde el chat (*Open*) a la
   tarjeta; nunca a un botón de aprobar. Enter en un campo de la tarjeta no envía nada. Esc
   suelta el campo y, otra vez, cierra el centro: **Esc nunca deniega**. No hay atajo para
@@ -853,7 +860,8 @@ Lo único que el webview sabe de la autoridad (`ApproverStatus`, sin datos):
 ### 13.5 Resolver: sin optimismo, sin reintentos
 
 ```text
-Approve → dot_approve → broker → approvals.resolve → «Approve: sent. Waiting for the session…»
+Approve → dot_approve → confirmación nativa (M9, §14.1) → broker → approvals.resolve
+        → «Approve: sent. Waiting for the session…»
         → el anfitrión publica approval.resolved → la tarjeta desaparece (lo dice la foto)
 ```
 
@@ -863,6 +871,7 @@ Approve → dot_approve → broker → approvals.resolve → «Approve: sent. Wa
 | `ALREADY_RESOLVED` | «Already resolved elsewhere» | Foto nueva: converge sola |
 | `NOT_FOUND` | «This request no longer exists for this session» | Foto nueva |
 | `INVALID_PARAMS` | Con frase: «The confirmation phrase does not match. Nothing was approved.» | Sigue pendiente; se puede volver a intentar a mano |
+| `not-confirmed` (M9) | `cancelled`: nada (no es un error). El resto, su motivo («resolved elsewhere before you confirmed»…) | No salió nada. Con `resolved-elsewhere`, foto nueva |
 | `UNAVAILABLE` (`host-unavailable`) | Solo se puede resolver en su terminal | — |
 | Sin respuesta (`unknown`) | «Result unknown… It was not sent again» | Foto nueva. **No se reenvía** |
 | No salió (`not-sent`) | El motivo (p. ej. bloqueado) | — |
@@ -913,16 +922,18 @@ Lo que **no** se cierra, y no se afirma:
 - **Un proceso del mismo usuario** sigue en el mismo dominio de confianza: puede leer la memoria
   de Dot (o de su webview mientras la persona teclea), sustituir `approver.json` y reiniciar el
   daemon, o manipular la interfaz con las APIs de accesibilidad o de entrada del sistema.
-- **Mientras está desbloqueado**, quien controle el webview principal puede **pedir**
-  resoluciones de lo pendiente (sin obtener la clave ni prolongar el desbloqueo). Por eso el
-  desbloqueo caduca y se puede bloquear a mano, y por eso lo que pinta el webview se trata
-  como no confiable (React sin HTML, CSP sin red). Una confirmación nativa por cada aprobación
-  queda como endurecimiento posterior.
+- ~~Mientras está desbloqueado, quien controle el webview principal puede pedir resoluciones de
+  lo pendiente.~~ **Cerrado en M9** (§14.1): pedir ya no basta; cada resolución sensible exige
+  una confirmación en una ventana nativa que el webview no controla, con lo que dice el daemon.
+  Lo negativo (denegar, omitir, rechazar) sigue directo, a propósito.
 - En la ventana de desbloqueo la clave es, durante un momento, una cadena de JavaScript, que no
   se puede borrar; y lo que copie el motor del webview o el sistema queda fuera del alcance de
   Dot.
 
 ### 13.9 Preparado para la identidad del par
+
+> **M9** implementa el lado de Dot (cliente) de lo que sigue: §14.3. El lado del daemon sigue sin
+> poder leer las credenciales del par (Node no las expone).
 
 El broker es el sitio donde entrará la comprobación del proceso al otro lado del pipe; M8 no la
 implementa (es endurecimiento, M9 o después):
@@ -950,8 +961,8 @@ contrato: `daemon/approvals.test.ts` (id correcto con la sesión equivocada).
 
 ### 13.11 Limitaciones
 
-- La comprobación del proceso par no existe todavía (§13.9), y mientras está desbloqueado el
-  webview principal puede pedir resoluciones (§13.8).
+- (M8) La comprobación del proceso par no existía, y desbloqueado el webview podía pedir
+  resoluciones: ambas cosas se tratan en M9 (§14). Lo que queda, en §14.9.
 - El plazo del desbloqueo es fijo (10 min) y no se renueva con el uso.
 - Sin notificaciones del sistema; sin editar planes; *Recently resolved* no sobrevive a una
   recarga.
@@ -959,3 +970,249 @@ contrato: `daemon/approvals.test.ts` (id correcto con la sesión equivocada).
 - La ventana de desbloqueo está comprobada en Windows (WebView2); en Linux (WebKitGTK) compila
   en CI pero falta probarla en un escritorio real, como la bandeja (Q4).
 - El E2E de la ventana sigue siendo local (tauri-driver), como en M6/M7.
+
+## 14. Endurecimiento (M9)
+
+M9 no añade capacidades de producto ni cambia la arquitectura: cierra lo que M8 dejó dicho como
+abierto (§13.8, §13.9, §13.11) hasta donde se puede sin un addon nativo en el daemon, y dice con
+precisión lo que sigue abierto. Lo que se puede afirmar al terminarlo:
+
+> Un webview comprometido ya no puede usar por sí solo una autoridad de aprobación previamente
+> desbloqueada para ejecutar una resolución sensible; las conexiones privilegiadas y el IPC tienen
+> controles de identidad y de ciclo de vida más fuertes, las colas críticas están acotadas y las
+> garantías reales de Q2 están documentadas y probadas (§14.3).
+
+### 14.1 Confirmación nativa: pedir no es resolver
+
+```text
+webview (React)          pide QUÉ resolver: dot_approve(sessionId, approvalId, forSession)
+   │
+   ▼
+commands.rs              lo negativo, directo · lo sensible, a la puerta de confirmación
+   │
+   ▼
+ConfirmGate::request     broker `ready` (y su época) · lee DEL DAEMON la solicitud y su sesión
+   │                     (approvals.list + sessions.get, por la conexión principal)
+   ▼
+ventana «confirm-N»      otra ventana, otro origen (dot-confirm), sin IPC, página propia
+   │                     enseña lo que dijo el daemon · la persona lee y pulsa (o teclea la frase)
+   ▼
+ConfirmGate::confirm     su ventana y su nonce · ya armada · misma época · sigue pendiente
+   │
+   ▼
+ConfirmedAction ──► broker.resolve_confirmed ──► stratumd (árbitro) ──► anfitrión
+```
+
+**Qué es sensible.** `ApproverAction::needs_confirmation`: aprobar, *Allow for this session*
+(`allow-all`), enviar respuestas a preguntas y aprobar un plan. Lo que da permiso o dirige al
+agente.
+
+**Qué no, y por qué (decisión).** Denegar, omitir las preguntas y rechazar el plan van
+**directos**, sin confirmación. Es exactamente lo que hace el runtime cuando nadie contesta (el
+plazo, cancelar el turno, `cancelAll`): un webview comprometido que deniega todo puede estorbar,
+pero no consigue que se ejecute nada. Pedir confirmación también para lo negativo duplicaría las
+ventanas y enseñaría a confirmar sin leer, que es justo lo que la confirmación quiere evitar.
+
+**El tipo lo impone.** El broker solo envía lo sensible si recibe una `ConfirmedAction`, y una
+`ConfirmedAction` no se puede construir fuera de `dot-link` (campos privados, constructor
+`pub(crate)`; dos doc-tests `compile_fail` lo fijan). La única que la crea es
+`ConfirmGate::confirm`, y en el shell solo la llama la página de confirmación (`confirm.rs`, lo
+fija el test de arquitectura). `ApproverHandle::resolve` rechaza lo sensible sin encolarlo
+(`not-confirmed`, `reason: native-confirmation-required`), y el broker lo vuelve a comprobar.
+
+**Lo que se enseña sale del daemon.** El webview solo da ids. La ventana enseña acción, tool,
+descripción (la ya redactada por el anfitrión), target, entorno, motivo, si es forzada, la frase
+si la pide, sesión (título, perfil, modelo, anfitrión), directorio y run, leídos con
+`approvals.list` y `sessions.get`; si el id no está pendiente **en esa sesión**, ni se abre
+(`NOT_FOUND`). Las respuestas a preguntas son lo único que viene del webview, y **no** se
+enseñan tal cual: el lado nativo las pone en su forma canónica con la regla del contrato
+(`checkQuestionAnswers`: una por pregunta, el texto de la pregunta del daemon, y si se eligió una
+opción, **su etiqueta del daemon**), y eso mismo es lo que se envía. Un webview que dijera
+«Conservarla» eligiendo la opción `drop` enseñaría «Borrar la tabla…»: lo que se envía. Nada se pinta como HTML: la
+página construye el DOM con `textContent`. Ni la clave, ni el token, ni nada derivado viajan a
+la ventana.
+
+**La frase de una confirmación con nombre se teclea en la ventana nativa**, no en la tarjeta:
+el webview ya no la tiene ni la envía (`dot_approve` no tiene parámetro `phrase`). La puerta la
+compara exacta antes de nada; si no coincide, la ventana sigue abierta y no sale nada.
+
+**Nunca se confirma sola.** La ventana abre con el foco en *Cancel*; Enter no confirma; el botón
+se habilita solo con la ventana enfocada y tras `arm_delay` (800 ms) desde que se sirvió la
+página —un doble clic o un clic que iba a otra ventana no aprueba— y la puerta vuelve a exigirlo
+del lado nativo. Una confirmación a la vez: con una abierta, otra petición se rechaza
+(`not-sent`) en vez de sustituir la ventana bajo el cursor; tras cancelar, 1 s antes de poder
+abrir otra (sin bucles de ventanas).
+
+**Cuándo deja de valer** (`CancelReason`, en `CommandError.reason` con `kind: not-confirmed`):
+
+| Motivo | Qué lo dispara |
+|---|---|
+| `cancelled` | *Cancel*, Esc o cerrar la ventana |
+| `expired` | 2 min sin confirmar (`ConfirmTimings::ttl`) |
+| `locked` | El broker deja de estar `ready` (bloqueo, plazo, conexión perdida), o la confirmación es de **otro desbloqueo** (época) |
+| `daemon-changed` | El endpoint ya no es el del daemon al que se acreditó el broker |
+| `disconnected` | Se pierde la conexión principal, o el daemon no contesta al volver a comprobar |
+| `resolved-elsewhere` | Llega su `*.resolved` (la terminal, otro cliente, el plazo), una foto ya no la trae, o al confirmar el daemon dice que no está pendiente |
+| `session-gone` | Su sesión deja de estar en la lista, o llega `session.closed` |
+| `closing` | Dot se cierra |
+
+Caducada, **no se envía nada**. Confirmada, el broker comprueba otra vez la época y el daemon
+antes de escribir, y sin respuesta el resultado es `unknown` y **no se reenvía** (M8). Si otro
+llega antes entre la confirmación y la escritura, el árbitro contesta `ALREADY_RESOLVED`.
+
+En la interfaz: mientras la ventana está abierta, la tarjeta dice «Approve: confirm it in the
+Stratum Dot confirmation window…»; cancelar no es un error (la tarjeta vuelve a estar como
+antes); `resolved-elsewhere` pide una foto. `dot-probe` tiene la misma puerta, con stdout como
+«ventana» y `confirm`/`dismiss` por stdin (solo pruebas).
+
+### 14.2 `ApproverBroker` y enlace endurecidos
+
+- **Colas acotadas.** Fuera los `unbounded_channel`: el broker tiene una cola de 16 órdenes con
+  respuesta y el enlace una de 64; llenas, la siguiente se rechaza en el acto (`not-sent`, «Too
+  many requests at once») en vez de crecer. Lo que **no puede perderse** —bloquear, cerrar Dot,
+  lo que dice la conexión principal, `attach`, reintentar, el foco— no ocupa cola: se anota y se
+  coalesce, así que una avalancha no deja sin bloquear ni sin cerrar. En vuelo, como mucho 8
+  resoluciones y 32 órdenes/llamadas; por encima, `not-sent`. La entrada del socket ya iba por
+  canales acotados (64/256 líneas).
+- **Época.** Cada desbloqueo tiene la suya; una confirmación vale para la época en que se pidió.
+  Bloquear y desbloquear entre medias invalida lo confirmado (`authority-changed`).
+- **El daemon, vigilado.** Desbloqueado, el broker comprueba cada 2 s que el endpoint sigue
+  siendo el del arranque al que se acreditó: un endpoint sustituido o reiniciado bloquea
+  (`daemon-changed`) aunque nadie esté resolviendo. Antes de cada resolución, además.
+- **La clave solo va al daemon del endpoint** (§14.3): si el sistema no confirma usuario y pid,
+  no se envía.
+- Sin cambios en lo que M8 ya garantizaba: sin reconexión con autoridad, sin reintentos de una
+  mutación con resultado desconocido, TTL de 10 min con los dos relojes, *Lock* inmediato,
+  conexiones separadas `operator`/`approver` y `MainMethod`/`ApproverMethod` cerrados.
+
+### 14.3 Identidad del par: lo que hay de Q2
+
+Tres cosas distintas, que no hay que mezclar.
+
+**Qué protege M9**
+
+- La autoridad desbloqueada **no** la puede usar el webview por sí solo: cada resolución sensible
+  exige una confirmación en una superficie que el webview no puede leer, escribir, enfocar ni
+  enviar (§14.1, §14.5).
+- Antes de enviar el token —y, por la conexión de aprobador, la clave— Dot pregunta al sistema
+  **quién atiende el canal** y se niega si no es el proceso que publicó el endpoint o si es otro
+  usuario. Un proceso que se adelante a crear el canal, o que conteste en un endpoint rancio, no
+  recibe credenciales.
+- El endpoint se lee sin seguir enlaces y, en POSIX, solo si es de este usuario y nadie más puede
+  escribir en él ni en su carpeta; el daemon solo publica en una carpeta privada y deja su socket
+  en `0600` (§14.4).
+
+**Qué verifica el sistema operativo**
+
+| | Lado de Dot (cliente, Rust: `peer.rs`) | Lado del daemon (Node: `peer-identity.ts`) |
+|---|---|---|
+| Linux / macOS | `SO_PEERCRED` / `LOCAL_PEERCRED`: uid del que escucha = el de Dot, y su pid = el del endpoint | El núcleo solo deja conectar a quien puede escribir en el socket (`0600` en carpeta `0700`): **este usuario o root**. No sabe qué proceso es |
+| Windows | `GetNamedPipeServerProcessId` = pid del endpoint, y el SID de usuario del token de ese proceso = el de Dot | **Nada**: el pipe tiene la DACL por defecto (Node no permite otra). La barrera es el token, que vive en el perfil del usuario |
+| Si el sistema no lo dice | Conexión principal: se registra y sigue (solo observar/conducir). Aprobador: **no se envía la clave** (falla cerrado) | — |
+
+`client.kind` es lo que el cliente **declara** en `core.hello`: no es identidad y no da ni quita
+capacidades (lo fijan los tests de arquitectura del daemon y de Dot).
+
+**Qué sigue dentro del mismo dominio de confianza**
+
+- **Cualquier proceso del mismo usuario.** Puede leer `endpoint.json` y conectarse como un cliente
+  más; reescribir el endpoint con **su** pid y **su** canal (y entonces pasa la comprobación del
+  par, porque es el mismo usuario y el pid publicado es el suyo); leer la memoria de Dot o de sus
+  webviews mientras alguien teclea; sustituir `approver.json` y reiniciar el daemon; o manejar la
+  ventana de confirmación con las APIs de accesibilidad o de entrada del sistema. M9 no lo
+  impide y no lo afirma.
+- **El daemon no sabe qué proceso hay al otro lado** en ninguna plataforma (Node no expone las
+  credenciales del par). La abstracción `PeerVerification` está para que, si un día se puede, entre
+  como otra variante sin tocar la autorización.
+- **Root / administrador** queda por encima de todo esto.
+
+El cierre de verdad sigue siendo el mismo de antes (PRD §22 Q2): credenciales del sistema
+(Windows Hello, polkit) en vez de una clave tecleada, firma del ejecutable del par, o un addon
+nativo en el daemon. Fuera de M9.
+
+### 14.4 Endpoint e IPC
+
+- **Dot lee el endpoint** abriéndolo sin seguir enlaces (`O_NOFOLLOW`; en Windows,
+  `FILE_FLAG_OPEN_REPARSE_POINT` y se rechaza si es un enlace), y comprueba **lo abierto** —no la
+  ruta: sin carrera entre comprobar y leer—: fichero regular, como mucho 64 KiB y, en POSIX, de
+  este usuario y sin escritura para grupo u otros, en una carpeta de este usuario sin escritura
+  para otros. Si no, `Invalid` con el motivo (sin rutas ni contenido) y no se conecta.
+- **El daemon** (`private-dir.ts`): la carpeta no puede ser un enlace; en POSIX tiene que ser de
+  este usuario y queda en `0700` —si sigue accesible a otros tras el `chmod`, no arranca—; el
+  socket queda en `0600` tras escuchar y **antes** de publicar el endpoint; `endpoint.json` y
+  `approver.json` en `0600`, escritos de forma atómica como en M2/M4. Si la ruta del socket no
+  cabe en `sun_path`, va en una subcarpeta propia del temporal, creada también privada y quitada
+  al apagar: nunca suelto en un directorio compartido. En Windows no se comprueba dueño ni ACL:
+  hereda la del perfil.
+- **Endpoint sustituido o reiniciado**: la conexión principal reconecta contra el nuevo (con su
+  token, y verificando el par); la de aprobador **no** —se bloquea (`daemon-changed` o
+  `connection-lost`) y hay que desbloquear otra vez—, y cualquier confirmación abierta cae.
+- **Rancio**: lo resuelve el daemon al arrancar (M2: pid muerto o nadie escucha). Dot no toca el
+  endpoint nunca (test de arquitectura). Sin TCP.
+
+### 14.5 Frontera webview / nativo
+
+- **Capacidades mínimas.** La ventana principal ya no tiene `core:default`: del núcleo de Tauri,
+  solo `core:event:allow-listen` y `allow-unlisten`. Ni emitir eventos, ni listar o mover
+  ventanas, ni webviews, menús, bandeja o rutas. El E2E lo comprueba en ejecución
+  (`plugin:window|get_all_windows` → denegado).
+- **Lista blanca cerrada** de `dot_*`, sin RPC genérico, igual que en M8. Las ventanas de
+  desbloqueo y de confirmación no están en ninguna capacidad. `unlock` sigue sin IPC.
+- **La ventana de confirmación** se atiende solo si la petición viene de **su** ventana (la
+  etiqueta la da Tauri: `confirm-N`, una por confirmación, para que el cierre tardío de una no
+  cancele la siguiente) y para la confirmación abierta (su nonce). Desde la principal, un `POST`
+  a `dot-confirm` se rechaza.
+- **Sin fugas.** Ni la frase, ni las respuestas, ni el plan, ni la descripción van a un log (solo
+  qué y sobre qué id); los `DotEvent` siguen sin credenciales; los errores de desbloqueo siguen
+  siendo genéricos; el lanzador del daemon no pasa nada más que `daemon start`, ni toca el
+  entorno. Lo fijan tests de arquitectura (Dot y daemon), los de `dot-link` y los smokes, que
+  barren ficheros, interfaz y logs.
+
+### 14.6 Carreras cubiertas
+
+| Escenario | Dónde se prueba |
+|---|---|
+| Aprobar solicitado → confirmación abierta → se resuelve en la terminal antes de confirmar | `tests/confirm.rs` (por evento y al volver a comprobar), `smoke:terminal` (terminal real) |
+| Aprobar enviado → el daemon cae → `unknown`, no se reenvía | `tests/confirm.rs`, `tests/approver.rs` |
+| El broker caduca o se bloquea con la confirmación abierta | `tests/confirm.rs` |
+| Una confirmación de otro desbloqueo | `tests/confirm.rs` (`authority-changed`) |
+| Dot se cierra durante la confirmación | `tests/confirm.rs` (`closing`); en la app, `RunEvent::Exit` |
+| El daemon se reinicia o su endpoint se sustituye durante la confirmación | `tests/confirm.rs` |
+| Pausa + aprobación + steering (M5) | `tests/confirm.rs`, `smoke:approvals` |
+| Dos Dot sobre la misma solicitud: gana uno | `tests/confirm.rs`, `smoke:approvals` (dos `dot-probe` que confirman a la vez) |
+| Id de otra sesión: nunca resuelve | `confirm.rs` (unidad), `tests/approver.rs`, `smoke:approvals` |
+| Webview comprometido: invoca `dot_approve` por su cuenta | `tests/confirm.rs`, `e2e/approvals.e2e.mjs` (en la ventana real) |
+| El canal lo atiende otro proceso | `tests/peer.rs` (token y clave no salen) |
+| Avalancha de órdenes | `approver.rs` (unidad), `tests/peer.rs` |
+
+### 14.7 Vista parcial
+
+Dot sigue como mucho 64 sesiones a la vez (`MAX_FOLLOWED_SESSIONS`). Con más, `DotEvent::Sessions`
+dice cuántas no sigue (`unfollowed`) y la lista lo enseña: «Partial view: N more live sessions
+are not shown». Cuando una seguida termina, entra una de las que esperaban.
+
+### 14.8 Tests
+
+`crates/dot-link/tests/confirm.rs` (16, la confirmación contra el daemon de pruebas),
+`tests/peer.rs` (identidad del par con otro proceso vivo, avalancha, vista parcial),
+`tests/approver.rs` (adaptado: lo sensible pasa por la puerta), unidad en `confirm.rs`,
+`peer.rs`, `discovery.rs` (enlace, permisos, tamaño) y `approver.rs` (cola llena, lo sensible no
+se encola); `src-tauri/src/confirm.rs` (la página no trae nada de fuera ni pinta HTML; una
+etiqueta por ventana); `tests/architecture.test.ts` (*M9 — pedir no es resolver*: un único
+`broker.resolve` tras `needs_confirmation`, la `ConfirmedAction` solo la crea la puerta, solo la
+página nativa confirma, capacidades mínimas, sin credenciales en argv/entorno/logs);
+`src/app/HumanInput.test.tsx` y `App.test.tsx`; en la CLI, `daemon/private-dir.test.ts` y la
+regla nueva de `daemon/architecture.test.ts`; `smoke:approvals` y `smoke:terminal` contra un
+`stratumd` real; `e2e/approvals.e2e.mjs` con la ventana de confirmación real. CI (Windows y
+Linux) corre además los tests del daemon, protocolo y cliente de la CLI.
+
+### 14.9 Limitaciones de M9
+
+- Q2 sigue abierta para procesos del mismo usuario (§14.3), y el daemon no verifica al cliente
+  más allá de los permisos del socket (POSIX) o del token (Windows).
+- La ventana de confirmación es un webview controlado por Rust, no un diálogo del sistema: el
+  diálogo del sistema no tiene campo de texto (la frase) ni se puede probar en un E2E. Un proceso
+  del mismo usuario puede manejarla con las APIs de entrada, como manejaría un diálogo.
+- Probada en Windows (WebView2); en Linux (WebKitGTK) compila y sus tests nativos pasan en CI,
+  pero falta probar la ventana en un escritorio real, como la bandeja (Q4).
+- El E2E de la ventana sigue siendo local (tauri-driver).

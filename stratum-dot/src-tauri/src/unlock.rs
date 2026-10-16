@@ -28,8 +28,10 @@
 
 use dot_link::ApproverSecret;
 use std::sync::Mutex;
-use tauri::http::{header, Request, Response, StatusCode};
+use tauri::http::{Request, Response, StatusCode};
 use tauri::{AppHandle, Manager, Runtime, UriSchemeContext, UriSchemeResponder, WebviewUrl};
+
+use crate::page::{forbidden, not_found, respond, BASE_STYLE, MAX_BODY};
 
 /// Esquema propio de la página de desbloqueo.
 pub const SCHEME: &str = "dot-unlock";
@@ -38,13 +40,7 @@ pub const WINDOW: &str = "unlock";
 
 const PAGE: &str = include_str!("../unlock/index.html");
 const SCRIPT: &str = include_str!("../unlock/unlock.js");
-const STYLE: &str = include_str!("../unlock/unlock.css");
-
-/// Lo más que se acepta en el cuerpo: la clave (1 024 caracteres) en UTF-8.
-const MAX_BODY: usize = 4 * 1024;
-
-const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; \
-     img-src 'none'; form-action 'none'; frame-ancestors 'none'; base-uri 'none'";
+const STYLE: &str = BASE_STYLE;
 
 /// El `nonce` de la página servida ahora. `None`: no hay ventana de desbloqueo.
 #[derive(Default)]
@@ -125,32 +121,11 @@ fn close_window<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-fn respond(status: StatusCode, content_type: &str, body: Vec<u8>) -> Response<Vec<u8>> {
-    Response::builder()
-        .status(status)
-        .header(header::CONTENT_TYPE, content_type)
-        .header(header::CONTENT_SECURITY_POLICY, CSP)
-        .header(header::CACHE_CONTROL, "no-store")
-        .header("X-Content-Type-Options", "nosniff")
-        .header("Referrer-Policy", "no-referrer")
-        .body(body)
-        .unwrap_or_else(|_| Response::new(Vec::new()))
-}
-
 fn json(ok: bool, message: Option<&str>) -> Response<Vec<u8>> {
-    let body = match message {
+    crate::page::json(&match message {
         Some(message) => serde_json::json!({ "ok": ok, "message": message }),
         None => serde_json::json!({ "ok": ok }),
-    };
-    respond(
-        StatusCode::OK,
-        "application/json",
-        body.to_string().into_bytes(),
-    )
-}
-
-fn not_found() -> Response<Vec<u8>> {
-    respond(StatusCode::NOT_FOUND, "text/plain", b"not found".to_vec())
+    })
 }
 
 /// Lo que se puede pedir al esquema `dot-unlock`.
@@ -168,11 +143,7 @@ pub fn handle<R: Runtime>(
         state
             .logger
             .warn("unlock: request from another window refused");
-        return responder.respond(respond(
-            StatusCode::FORBIDDEN,
-            "text/plain",
-            b"forbidden".to_vec(),
-        ));
+        return responder.respond(forbidden());
     }
     let prompt = &state.prompt;
     let Some(nonce) = prompt.current() else {

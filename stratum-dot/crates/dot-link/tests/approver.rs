@@ -6,8 +6,13 @@ mod common;
 
 use common::*;
 use dot_link::approver::{ApproverStatus, LockReason, Unavailable};
-use dot_link::{ApproverAction, ApproverSecret, CommandErrorKind, QuestionAnswer};
+use dot_link::{
+    ApproverAction, ApproverSecret, CommandError, CommandErrorKind, ConfirmGate, Logger,
+    QuestionAnswer,
+};
 use serde_json::Value;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
 use std::time::Duration;
 
 fn key(text: &str) -> ApproverSecret {
@@ -20,6 +25,7 @@ fn approval(id: &str, session: &str) -> PendingReq {
         session_id: session.into(),
         kind: "approval",
         confirm_phrase: None,
+        forced: false,
     }
 }
 
@@ -32,6 +38,13 @@ fn approve(session: &str, id: &str) -> ApproverAction {
     }
 }
 
+fn deny(session: &str, id: &str) -> ApproverAction {
+    ApproverAction::Deny {
+        session_id: session.into(),
+        approval_id: id.into(),
+    }
+}
+
 /// Saludos que pidieron el rol `approver`.
 fn approver_hellos(fake: &Fake) -> Vec<Value> {
     fake.requests()
@@ -40,6 +53,70 @@ fn approver_hellos(fake: &Fake) -> Vec<Value> {
             r["method"] == "core.hello" && r["params"]["roles"] == serde_json::json!(["approver"])
         })
         .collect()
+}
+
+/// La confirmación nativa de un test: la puerta y la «persona» que mira la ventana.
+struct Confirm {
+    gate: Arc<ConfirmGate>,
+    person: Arc<TestPresenter>,
+    log_dir: std::path::PathBuf,
+}
+
+impl Confirm {
+    fn new(dir: &std::path::Path, rig: &Rig, b: &BrokerRig) -> Self {
+        let log_dir = dir.join("confirm-logs");
+        let gate = Arc::new(ConfirmGate::new(fast_confirm(), Logger::to_dir(&log_dir)));
+        rig.seen.hook(gate.clone());
+        b.seen.hook(gate.clone());
+        Self {
+            gate,
+            person: Arc::new(TestPresenter::default()),
+            log_dir,
+        }
+    }
+
+    fn log(&self) -> String {
+        std::fs::read_to_string(self.log_dir.join("dot.log")).unwrap_or_default()
+    }
+
+    /// Lo que hace `dot_approve` en la app: pedir confirmación, que la persona
+    /// confirme (con `phrase` si la pide), y enviar.
+    async fn resolve(
+        &self,
+        rig: &Rig,
+        b: &BrokerRig,
+        action: ApproverAction,
+        phrase: Option<&str>,
+    ) -> Result<(), CommandError> {
+        let n = self.person.count() + 1;
+        let done = AtomicBool::new(false);
+        let (asked, _) = tokio::join!(
+            async {
+                let out = self
+                    .gate
+                    .request(&rig.link, &b.broker, self.person.as_ref(), action)
+                    .await;
+                done.store(true, Ordering::SeqCst);
+                out
+            },
+            async {
+                // La persona lee y confirma; si no llega a enseñarse nada, no hace nada.
+                while self.person.count() < n {
+                    if done.load(Ordering::SeqCst) {
+                        return;
+                    }
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                let nonce = self.person.nth(n).await;
+                tokio::time::sleep(Duration::from_millis(80)).await;
+                let _ = self
+                    .gate
+                    .confirm(&rig.link, &b.broker, &nonce, phrase.map(str::to_string))
+                    .await;
+            }
+        );
+        b.broker.resolve_confirmed(asked?).await
+    }
 }
 
 /// Un daemon con aprobadores, Dot conectado y el broker al tanto de ello.
@@ -118,12 +195,24 @@ async fn desbloquear_abre_otra_conexion_solo_de_aprobador_y_resuelve_con_la_sesi
     assert_eq!(fake.live_with("control"), 1);
 
     fake.add_pending(approval("apr_1", "ses_a"));
-    b.broker.resolve(approve("ses_a", "apr_1")).await.unwrap();
+    let confirm = Confirm::new(dir.path(), &rig, &b);
+    confirm
+        .resolve(&rig, &b, approve("ses_a", "apr_1"), None)
+        .await
+        .unwrap();
     let sent = fake
         .requests()
         .into_iter()
         .find(|r| r["method"] == "approvals.resolve")
         .unwrap();
+    // Lo que se enseñó se leyó por la principal, no por la de aprobador.
+    let listed = fake
+        .requests()
+        .into_iter()
+        .find(|r| r["method"] == "approvals.list")
+        .unwrap();
+    assert_ne!(listed["conn"], hellos[0]["conn"]);
+    assert_eq!(listed["params"]["sessionId"], "ses_a");
     assert_eq!(sent["params"]["sessionId"], "ses_a");
     assert_eq!(sent["params"]["decision"], "approve");
     assert!(sent["params"]["operationId"]
@@ -182,11 +271,8 @@ async fn sin_approve_concedido_no_se_da_por_desbloqueado() {
     assert_eq!(err.message, "Could not unlock approval authority.");
     assert_eq!(b.status(), "error");
     fake.add_pending(approval("apr_1", "ses_a"));
-    let err = b
-        .broker
-        .resolve(approve("ses_a", "apr_1"))
-        .await
-        .unwrap_err();
+    // Ni lo que no necesita confirmación sale sin autoridad.
+    let err = b.broker.resolve(deny("ses_a", "apr_1")).await.unwrap_err();
     assert_eq!(err.kind, CommandErrorKind::NotSent);
     assert_eq!(fake.count("approvals.resolve"), 0);
     b.quit().await;
@@ -198,11 +284,8 @@ async fn bloqueado_no_se_envia_nada_y_bloquear_cierra_la_conexion() {
     let dir = tempfile::tempdir().unwrap();
     let (fake, rig, b) = rig_with_key(dir.path()).await;
     fake.add_pending(approval("apr_1", "ses_a"));
-    let err = b
-        .broker
-        .resolve(approve("ses_a", "apr_1"))
-        .await
-        .unwrap_err();
+    // Ni lo que no necesita confirmación sale sin autoridad.
+    let err = b.broker.resolve(deny("ses_a", "apr_1")).await.unwrap_err();
     assert_eq!(err.kind, CommandErrorKind::NotSent);
 
     b.broker.unlock(key(APPROVER_KEY)).await.unwrap();
@@ -224,7 +307,7 @@ async fn bloqueado_no_se_envia_nada_y_bloquear_cierra_la_conexion() {
     assert!(rig.link.connection().is_connected());
     assert_eq!(
         b.broker
-            .resolve(approve("ses_a", "apr_1"))
+            .resolve(deny("ses_a", "apr_1"))
             .await
             .unwrap_err()
             .kind,
@@ -242,16 +325,28 @@ async fn otra_via_llego_antes_y_un_id_de_otra_sesion_no_resuelve() {
     b.broker.unlock(key(APPROVER_KEY)).await.unwrap();
     fake.add_pending(approval("apr_1", "ses_a"));
 
-    // Id correcto, sesión equivocada: rechazado, y sigue pendiente.
-    let err = b
-        .broker
-        .resolve(approve("ses_b", "apr_1"))
+    // Id correcto, sesión equivocada: ni se enseña ni se envía, y sigue pendiente.
+    let confirm = Confirm::new(dir.path(), &rig, &b);
+    let err = confirm
+        .resolve(&rig, &b, approve("ses_b", "apr_1"), None)
         .await
         .unwrap_err();
     assert_eq!(
         (err.kind, err.code.as_deref()),
         (CommandErrorKind::Rejected, Some("NOT_FOUND"))
     );
+    assert_eq!(confirm.person.count(), 0);
+    assert_eq!(fake.pending_ids(), ["apr_1"]);
+    // Y el daemon lo rechaza también por su lado (un denegar no pasa por la confirmación).
+    let err = b
+        .broker
+        .resolve(ApproverAction::Deny {
+            session_id: "ses_b".into(),
+            approval_id: "apr_1".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.code.as_deref(), Some("NOT_FOUND"));
     assert_eq!(fake.pending_ids(), ["apr_1"]);
 
     // La terminal contesta primero: a Dot le llega `ALREADY_RESOLVED`.
@@ -281,26 +376,34 @@ async fn una_resolucion_sin_respuesta_es_desconocida_y_no_se_reenvia() {
         session_id: "ses_b".into(),
         kind: "question",
         confirm_phrase: None,
+        forced: false,
     });
     fake.set_silent("questions.answer");
-    let err = b
-        .broker
-        .resolve(ApproverAction::AnswerQuestions {
-            session_id: "ses_b".into(),
-            request_id: "q_1".into(),
-            answers: Some(vec![QuestionAnswer {
-                question: "¿Cuál?".into(),
-                answer: "respuesta privada".into(),
-                option_id: None,
-            }]),
-        })
+    let confirm = Confirm::new(dir.path(), &rig, &b);
+    let err = confirm
+        .resolve(
+            &rig,
+            &b,
+            ApproverAction::AnswerQuestions {
+                session_id: "ses_b".into(),
+                request_id: "q_1".into(),
+                answers: Some(vec![QuestionAnswer {
+                    question: "¿Cuál?".into(),
+                    answer: "respuesta privada".into(),
+                    option_id: None,
+                }]),
+            },
+            None,
+        )
         .await
         .unwrap_err();
     assert_eq!(err.kind, CommandErrorKind::Unknown);
     tokio::time::sleep(Duration::from_millis(300)).await;
     assert_eq!(fake.count("questions.answer"), 1);
-    // Las respuestas no van al log.
-    assert!(!b.log().contains("respuesta privada"), "{}", b.log());
+    // Las respuestas no van a ningún log.
+    for log in [b.log(), rig.log(), confirm.log()] {
+        assert!(!log.contains("respuesta privada"), "{log}");
+    }
     b.quit().await;
     rig.quit().await;
 }
@@ -327,7 +430,11 @@ async fn si_cae_la_conexion_de_aprobador_la_principal_sigue_y_no_se_reconecta_so
     b.broker.unlock(key(APPROVER_KEY)).await.unwrap();
     assert_eq!(approver_hellos(&fake).len(), 2);
     fake.add_pending(approval("apr_9", "ses_a"));
-    b.broker.resolve(approve("ses_a", "apr_9")).await.unwrap();
+    let confirm = Confirm::new(dir.path(), &rig, &b);
+    confirm
+        .resolve(&rig, &b, approve("ses_a", "apr_9"), None)
+        .await
+        .unwrap();
     b.quit().await;
     rig.quit().await;
 }
@@ -349,14 +456,16 @@ async fn un_daemon_nuevo_exige_desbloquear_otra_vez() {
     assert_eq!(b.status(), "locked");
     assert_eq!(approver_hellos(&fake).len(), 1);
     fake.add_pending(approval("apr_1", "ses_a"));
+    let confirm = Confirm::new(dir.path(), &rig, &b);
     assert_eq!(
-        b.broker
-            .resolve(approve("ses_a", "apr_1"))
+        confirm
+            .resolve(&rig, &b, approve("ses_a", "apr_1"), None)
             .await
             .unwrap_err()
             .kind,
         CommandErrorKind::NotSent
     );
+    assert_eq!(confirm.person.count(), 0);
     // Con el daemon nuevo hay que acreditarse de nuevo (con su token, que Dot relee).
     b.broker.unlock(key(APPROVER_KEY)).await.unwrap();
     assert_eq!(
@@ -408,31 +517,55 @@ async fn la_clave_no_sale_por_ningun_lado() {
         session_id: "ses_a".into(),
         kind: "approval",
         confirm_phrase: Some("frase-secreta-prod".into()),
+        forced: false,
     });
-    let err = b
-        .broker
-        .resolve(ApproverAction::Approve {
-            session_id: "ses_a".into(),
-            approval_id: "apr_2".into(),
-            phrase: Some("no".into()),
-            for_session: false,
-        })
-        .await
-        .unwrap_err();
-    assert_eq!(err.code.as_deref(), Some("INVALID_PARAMS"));
-    b.broker
-        .resolve(ApproverAction::Approve {
-            session_id: "ses_a".into(),
-            approval_id: "apr_2".into(),
-            phrase: Some("frase-secreta-prod".into()),
-            for_session: false,
-        })
-        .await
-        .unwrap();
+    // La frase se teclea en la ventana de confirmación: una que no vale ni sale.
+    let confirm = Confirm::new(dir.path(), &rig, &b);
+    let (asked, ()) = tokio::join!(
+        confirm.gate.request(
+            &rig.link,
+            &b.broker,
+            confirm.person.as_ref(),
+            ApproverAction::Approve {
+                session_id: "ses_a".into(),
+                approval_id: "apr_2".into(),
+                phrase: None,
+                for_session: false,
+            },
+        ),
+        async {
+            let nonce = confirm.person.nth(1).await;
+            tokio::time::sleep(Duration::from_millis(80)).await;
+            let wrong = confirm
+                .gate
+                .confirm(&rig.link, &b.broker, &nonce, Some("no".into()))
+                .await
+                .unwrap_err();
+            assert!(wrong.keep_open, "{wrong:?}");
+            confirm
+                .gate
+                .confirm(
+                    &rig.link,
+                    &b.broker,
+                    &nonce,
+                    Some("frase-secreta-prod".into()),
+                )
+                .await
+                .unwrap();
+        }
+    );
+    b.broker.resolve_confirmed(asked.unwrap()).await.unwrap();
+    let sent: Vec<Value> = fake
+        .requests()
+        .into_iter()
+        .filter(|r| r["method"] == "approvals.resolve")
+        .collect();
+    assert_eq!(sent.len(), 1);
+    assert_eq!(sent[0]["params"]["phrase"], "frase-secreta-prod");
 
     // Lo que llega a la interfaz (los `DotEvent`, serializados), los dos logs y el estado.
     let wire = serde_json::to_string(&[b.seen.all(), rig.seen.all()].concat()).unwrap();
-    let logs = format!("{}\n{}", b.log(), rig.log());
+    let logs = format!("{}\n{}\n{}", b.log(), rig.log(), confirm.log());
     let status = serde_json::to_string(&b.broker.status()).unwrap();
     for secret in [
         APPROVER_KEY,
@@ -448,6 +581,12 @@ async fn la_clave_no_sale_por_ningun_lado() {
     assert!(b.log().contains("approver: unlock attempt"));
     assert!(b.log().contains("approver: unlock failed (UNAUTHORIZED)"));
     assert!(b.log().contains("approver: resolve approve request=apr_2"));
+    assert!(confirm
+        .log()
+        .contains("confirm: opened approve request=apr_2"));
+    assert!(confirm
+        .log()
+        .contains("confirm: confirmed approve request=apr_2"));
     b.quit().await;
     rig.quit().await;
 }

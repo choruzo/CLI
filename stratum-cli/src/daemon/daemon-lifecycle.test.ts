@@ -184,7 +184,9 @@ describe('stratumd — apagado por inactividad', () => {
   });
 
   it('una sesión viva lo mantiene aunque no quede ningún cliente; al cerrarla, sale', async () => {
-    const t = await start({ idleExitMs: 150 });
+    // Holgado: hasta abrir la sesión no hay nada vivo, y con 150 ms una máquina cargada
+    // apagaba el daemon antes de que el test empezara.
+    const t = await start({ idleExitMs: 1_000 });
     const hold = gate();
     const cwd = t.project('p', [{ wait: hold.wait, then: makeTextRound('fin') }]);
     const operator = await t.connect(['operator']);
@@ -194,21 +196,21 @@ describe('stratumd — apagado por inactividad', () => {
 
     let closed = false;
     void t.daemon.closed.then(() => (closed = true));
-    // Varias veces el plazo de inactividad, sin clientes: sigue vivo.
-    await new Promise((r) => setTimeout(r, 700));
+    // Más del doble del plazo de inactividad, sin clientes: sigue vivo.
+    await new Promise((r) => setTimeout(r, 2_500));
     expect(closed).toBe(false);
     expect(t.daemon.liveSessions).toBe(1);
 
     // Tampoco con la sesión parada (sin run): sigue siendo una sesión viva.
     hold.open();
-    await new Promise((r) => setTimeout(r, 500));
+    await new Promise((r) => setTimeout(r, 1_500));
     expect(closed).toBe(false);
 
     const back = await t.connect(['operator']);
     await back.request('sessions.close', { sessionId: session.id });
     back.close();
     expect(await t.daemon.closed).toBe('idle');
-  });
+  }, 15_000);
 
   it('idleExitMs 0: nunca se apaga solo', async () => {
     const t = await start({ idleExitMs: 0 });

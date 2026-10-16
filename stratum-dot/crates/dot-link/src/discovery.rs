@@ -195,13 +195,103 @@ pub fn locate(dir: &Path) -> Discovery {
     locate_with(dir, process_alive)
 }
 
+/// Lo más que puede ocupar un `endpoint.json` (son unos cientos de bytes).
+const MAX_ENDPOINT_BYTES: u64 = 64 * 1024;
+
+/// Por qué no se lee el endpoint.
+enum ReadError {
+    NotFound,
+    /// El fichero o su carpeta no son de fiar (el motivo, sin rutas ni contenido).
+    Insecure(&'static str),
+    Io(std::io::ErrorKind),
+}
+
+/// Abre el endpoint **sin seguir enlaces** y comprueba lo que se abrió (no la
+/// ruta: así no hay carrera entre comprobar y leer). En POSIX, además, que sea
+/// de este usuario y que nadie más pueda escribir ni en él ni en su carpeta.
+/// En Windows no se comprueba el dueño: el perfil del usuario ya lo restringe
+/// (`docs/dot.md` §14).
+fn read_endpoint_file(dir: &Path) -> Result<String, ReadError> {
+    use std::io::Read;
+    let path = dir.join(ENDPOINT_FILE);
+    let mut options = std::fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::fs::OpenOptionsExt;
+        // El handle es el del propio enlace, si lo es: se ve abajo y se rechaza.
+        options.custom_flags(windows_sys::Win32::Storage::FileSystem::FILE_FLAG_OPEN_REPARSE_POINT);
+    }
+    let file = match options.open(&path) {
+        Ok(file) => file,
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Err(ReadError::NotFound),
+        #[cfg(unix)]
+        Err(e) if e.raw_os_error() == Some(libc::ELOOP) => {
+            return Err(ReadError::Insecure("the endpoint file is a symbolic link"))
+        }
+        Err(e) => return Err(ReadError::Io(e.kind())),
+    };
+    let meta = file.metadata().map_err(|e| ReadError::Io(e.kind()))?;
+    if meta.file_type().is_symlink() {
+        return Err(ReadError::Insecure("the endpoint file is a symbolic link"));
+    }
+    if !meta.is_file() {
+        return Err(ReadError::Insecure("the endpoint is not a regular file"));
+    }
+    if meta.len() > MAX_ENDPOINT_BYTES {
+        return Err(ReadError::Insecure("the endpoint file is too large"));
+    }
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::MetadataExt;
+        // SAFETY: `geteuid` no falla ni toca memoria.
+        let me = unsafe { libc::geteuid() };
+        if meta.uid() != me {
+            return Err(ReadError::Insecure(
+                "the endpoint file belongs to another user",
+            ));
+        }
+        if meta.mode() & 0o022 != 0 {
+            return Err(ReadError::Insecure(
+                "the endpoint file is writable by other users",
+            ));
+        }
+        let folder = std::fs::metadata(dir).map_err(|e| ReadError::Io(e.kind()))?;
+        if folder.uid() != me {
+            return Err(ReadError::Insecure(
+                "the endpoint folder belongs to another user",
+            ));
+        }
+        if folder.mode() & 0o022 != 0 {
+            return Err(ReadError::Insecure(
+                "the endpoint folder is writable by other users",
+            ));
+        }
+    }
+    let mut text = String::new();
+    file.take(MAX_ENDPOINT_BYTES)
+        .read_to_string(&mut text)
+        .map_err(|e| ReadError::Io(e.kind()))?;
+    Ok(text)
+}
+
 pub fn locate_with(dir: &Path, is_alive: impl Fn(u32) -> bool) -> Discovery {
-    let text = match std::fs::read_to_string(dir.join(ENDPOINT_FILE)) {
+    let text = match read_endpoint_file(dir) {
         Ok(t) => t,
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => return Discovery::Absent,
-        Err(e) => {
+        Err(ReadError::NotFound) => return Discovery::Absent,
+        Err(ReadError::Insecure(why)) => {
             return Discovery::Invalid {
-                reason: format!("cannot read endpoint file ({:?})", e.kind()),
+                reason: why.to_string(),
+            }
+        }
+        Err(ReadError::Io(kind)) => {
+            return Discovery::Invalid {
+                reason: format!("cannot read endpoint file ({kind:?})"),
             }
         }
     };
@@ -305,6 +395,84 @@ mod tests {
         assert!(matches!(
             locate_with(dir.path(), |_| true),
             Discovery::Found(_)
+        ));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn un_endpoint_que_otro_puede_escribir_no_se_cree() {
+        use std::os::unix::fs::PermissionsExt;
+        let dir = tempfile::tempdir().unwrap();
+        let file = dir.path().join(ENDPOINT_FILE);
+        std::fs::write(&file, endpoint_json(1)).unwrap();
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o666)).unwrap();
+        assert_eq!(
+            locate_with(dir.path(), |_| true),
+            Discovery::Invalid {
+                reason: "the endpoint file is writable by other users".into()
+            }
+        );
+        std::fs::set_permissions(&file, std::fs::Permissions::from_mode(0o600)).unwrap();
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o777)).unwrap();
+        assert_eq!(
+            locate_with(dir.path(), |_| true),
+            Discovery::Invalid {
+                reason: "the endpoint folder is writable by other users".into()
+            }
+        );
+        std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+        assert!(matches!(
+            locate_with(dir.path(), |_| true),
+            Discovery::Found(_)
+        ));
+    }
+
+    #[test]
+    fn un_endpoint_que_es_un_enlace_no_se_sigue() {
+        let dir = tempfile::tempdir().unwrap();
+        let elsewhere = dir.path().join("otro.json");
+        std::fs::write(&elsewhere, endpoint_json(1)).unwrap();
+        #[cfg(unix)]
+        let made = std::os::unix::fs::symlink(&elsewhere, dir.path().join(ENDPOINT_FILE)).is_ok();
+        // En Windows crear un enlace exige privilegio o modo desarrollador.
+        #[cfg(windows)]
+        let made =
+            std::os::windows::fs::symlink_file(&elsewhere, dir.path().join(ENDPOINT_FILE)).is_ok();
+        if !made {
+            return;
+        }
+        assert_eq!(
+            locate_with(dir.path(), |_| true),
+            Discovery::Invalid {
+                reason: "the endpoint file is a symbolic link".into()
+            }
+        );
+    }
+
+    #[test]
+    fn un_endpoint_enorme_no_se_lee() {
+        let dir = tempfile::tempdir().unwrap();
+        let big = format!(
+            "{}{}",
+            endpoint_json(1),
+            " ".repeat(MAX_ENDPOINT_BYTES as usize)
+        );
+        std::fs::write(dir.path().join(ENDPOINT_FILE), big).unwrap();
+        assert_eq!(
+            locate_with(dir.path(), |_| true),
+            Discovery::Invalid {
+                reason: "the endpoint file is too large".into()
+            }
+        );
+    }
+
+    #[test]
+    fn una_carpeta_en_lugar_del_fichero_no_vale() {
+        let dir = tempfile::tempdir().unwrap();
+        std::fs::create_dir(dir.path().join(ENDPOINT_FILE)).unwrap();
+        assert!(matches!(
+            locate_with(dir.path(), |_| true),
+            Discovery::Invalid { .. }
         ));
     }
 

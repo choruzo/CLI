@@ -221,6 +221,19 @@ describe('arquitectura de src/daemon/', () => {
     expect(/approv/i.test(discovery)).toBe(false);
   });
 
+  it('lo que un cliente declara (kind, nombre) o lo que verifica el sistema no da ni quita capacidades', () => {
+    const authorizeSource = code(production.find((s) => s.file === 'authorize.ts')!.text);
+    expect(/\.client|kind|verification|peerVerification/.test(authorizeSource)).toBe(false);
+    // La verificación del sistema solo se anota (y se registra): nadie decide con ella.
+    const deciding = production.filter(
+      (s) => s.file !== 'peer-identity.ts' && /\.verification/.test(code(s.text)),
+    );
+    for (const { file, text } of deciding) {
+      expect(file).toBe('control-server.ts');
+      expect(/if\s*\([^)]*verification/.test(code(text))).toBe(false);
+    }
+  });
+
   it('ni la clave de aprobador, ni la frase, ni las respuestas se escriben en un log', () => {
     const hostSide = ['interactions.ts', 'resolution-audit.ts', 'peer-host-bridge.ts'].map((f) => ({
       file: `host/${f}`,

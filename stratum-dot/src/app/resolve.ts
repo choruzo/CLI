@@ -13,6 +13,10 @@
  *    resultado es desconocido; se dice, se pide una foto y no se reenvía.
  *  - Si otro llegó antes (`ALREADY_RESOLVED`), se dice y se pide una foto.
  *  - Nunca se resuelve sola: cada llamada sale de un clic de la persona.
+ *  - **Lo sensible se confirma fuera** (M9): aprobar, «para la sesión», enviar
+ *    respuestas y aprobar un plan abren la confirmación nativa; mientras tanto
+ *    se dice «Confirm it in the window…». Cancelarla no es un error: no salió
+ *    nada y la tarjeta vuelve a estar como antes.
  */
 import { useCallback } from 'react';
 import { useNative } from '../bridge/context';
@@ -27,6 +31,7 @@ export function describeResolutionError(error: CommandError, item: HumanInputIte
     case 'not-sent':
     case 'invalid':
     case 'no-answer':
+    case 'not-confirmed':
       return error.message;
     case 'rejected':
       break;
@@ -53,11 +58,16 @@ export function describeResolutionError(error: CommandError, item: HumanInputIte
 
 /** Errores tras los que lo que se ve puede estar desfasado: se pide una foto. */
 function needsPhoto(error: CommandError): boolean {
-  return error.kind === 'unknown' || error.code === 'ALREADY_RESOLVED' || error.code === 'NOT_FOUND';
+  return (
+    error.kind === 'unknown' ||
+    error.code === 'ALREADY_RESOLVED' ||
+    error.code === 'NOT_FOUND' ||
+    (error.kind === 'not-confirmed' && error.reason === 'resolved-elsewhere')
+  );
 }
 
 export interface ResolveActions {
-  approve(opts: { phrase?: string; forSession: boolean }): Promise<boolean>;
+  approve(opts: { forSession: boolean }): Promise<boolean>;
   deny(): Promise<boolean>;
   answer(answers: QuestionAnswerInput[] | null): Promise<boolean>;
   decide(decision: 'approve' | 'reject'): Promise<boolean>;
@@ -70,16 +80,21 @@ export function useResolve(item: HumanInputItem): ResolveActions {
   // Por sesión e id: dos sesiones podrían publicar el mismo id.
   const key = `${sessionId}:${id}`;
 
-  /** Una vez. Devuelve `true` si el daemon la aceptó. */
+  /** Una vez. Devuelve `true` si el daemon la aceptó. `confirm`: pasa por la confirmación nativa. */
   const send = useCallback(
-    async (action: string, call: () => Promise<void>): Promise<boolean> => {
-      setResolution(key, { state: 'sending', action });
+    async (action: string, call: () => Promise<void>, confirm = false): Promise<boolean> => {
+      setResolution(key, { state: confirm ? 'confirming' : 'sending', action });
       try {
         await call();
         setResolution(key, { state: 'sent', action });
         return true;
       } catch (err) {
         const error = toCommandError(err);
+        // La persona dijo que no en la ventana: no hay nada que contar.
+        if (error.kind === 'not-confirmed' && error.reason === 'cancelled') {
+          setResolution(key, null);
+          return false;
+        }
         setResolution(key, { state: 'failed', action, message: describeResolutionError(error, item) });
         if (needsPhoto(error)) void native.resyncSession(sessionId).catch(() => undefined);
         return false;
@@ -89,14 +104,24 @@ export function useResolve(item: HumanInputItem): ResolveActions {
   );
 
   return {
-    approve: ({ phrase, forSession }) =>
-      send(forSession ? 'Allow for this session' : 'Approve', () =>
-        native.approve(sessionId, id, { ...(phrase !== undefined ? { phrase } : {}), forSession }),
+    approve: ({ forSession }) =>
+      send(
+        forSession ? 'Allow for this session' : 'Approve',
+        () => native.approve(sessionId, id, { forSession }),
+        true,
       ),
     deny: () => send('Deny', () => native.deny(sessionId, id)),
     answer: (answers) =>
-      send(answers ? 'Send answers' : 'Skip questions', () => native.answerQuestions(sessionId, id, answers)),
+      send(
+        answers ? 'Send answers' : 'Skip questions',
+        () => native.answerQuestions(sessionId, id, answers),
+        answers !== null,
+      ),
     decide: (decision) =>
-      send(decision === 'approve' ? 'Approve plan' : 'Reject plan', () => native.decidePlan(sessionId, id, decision)),
+      send(
+        decision === 'approve' ? 'Approve plan' : 'Reject plan',
+        () => native.decidePlan(sessionId, id, decision),
+        decision === 'approve',
+      ),
   };
 }

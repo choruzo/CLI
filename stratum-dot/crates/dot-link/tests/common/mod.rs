@@ -6,8 +6,8 @@
 use dot_link::approver::ApproverTimings;
 use dot_link::link::Timings;
 use dot_link::{
-    ApproverConfig, ApproverHandle, DaemonLauncher, DotEvent, LinkConfig, LinkHandle, Logger,
-    NoLauncher,
+    ApproverConfig, ApproverHandle, ConfirmGate, DaemonLauncher, DotEvent, LinkConfig, LinkHandle,
+    Logger, NoLauncher, Presenter,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -32,6 +32,48 @@ pub struct PendingReq {
     /// `approval` · `question` · `plan`.
     pub kind: &'static str,
     pub confirm_phrase: Option<String>,
+    /// La exige una política de entorno (no admite `allow-all`).
+    pub forced: bool,
+}
+
+impl PendingReq {
+    pub fn of(kind: &'static str, id: &str, session: &str) -> Self {
+        Self {
+            id: id.into(),
+            session_id: session.into(),
+            kind,
+            confirm_phrase: None,
+            forced: false,
+        }
+    }
+
+    /// Como la publica el daemon (`ProtocolApproval`, `ProtocolQuestionRequest`, `ProtocolPlanRequest`).
+    pub fn dto(&self) -> Value {
+        match self.kind {
+            "approval" => {
+                let mut dto = json!({
+                    "id": self.id, "kind": "tool", "sessionId": self.session_id, "runId": "run_1",
+                    "tool": "exec", "description": format!("rm -rf build/ ({})", self.id),
+                    "target": "local", "forced": self.forced, "resolvable": "anywhere",
+                    "requestedAt": 1, "expiresAt": null, "status": "pending"
+                });
+                if let Some(phrase) = &self.confirm_phrase {
+                    dto["confirmPhrase"] = json!(phrase);
+                }
+                dto
+            }
+            "question" => json!({
+                "id": self.id, "sessionId": self.session_id, "runId": "run_1",
+                "questions": [{ "question": "¿Cuál?", "options": [{ "id": "o1", "label": "A" }], "allowCustom": true }],
+                "requestedAt": 1, "expiresAt": null
+            }),
+            _ => json!({
+                "id": self.id, "sessionId": self.session_id, "runId": "run_1",
+                "plan": { "summary": "Migrar la base", "steps": [{ "id": "s1", "title": "Copiar", "status": "pending" }] },
+                "requestedAt": 1, "expiresAt": null
+            }),
+        }
+    }
 }
 
 static PIPE_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -76,6 +118,8 @@ struct State {
     withhold_approve: bool,
     pending: Vec<PendingReq>,
     resolved: Vec<String>,
+    /// El pid que se publica en el endpoint (`None` = el de este proceso).
+    endpoint_pid: Option<u32>,
     next_sub: u64,
     next_conn: u64,
     tasks: Vec<JoinHandle<()>>,
@@ -158,6 +202,7 @@ impl Fake {
                     withhold_approve: false,
                     pending: Vec::new(),
                     resolved: Vec::new(),
+                    endpoint_pid: None,
                     next_sub: 1,
                     next_conn: 1,
                     tasks: Vec::new(),
@@ -184,6 +229,11 @@ impl Fake {
 
     pub fn withhold_approve(&self) {
         self.lock().withhold_approve = true;
+    }
+
+    /// Publica en el endpoint otro pid que el del proceso que atiende el canal.
+    pub fn set_endpoint_pid(&self, pid: Option<u32>) {
+        self.lock().endpoint_pid = pid;
     }
 
     pub fn add_pending(&self, req: PendingReq) {
@@ -354,8 +404,9 @@ impl Fake {
         self.lock().tasks.push(accept);
 
         std::fs::create_dir_all(&self.inner.dir).unwrap();
+        let pid = self.lock().endpoint_pid.unwrap_or_else(std::process::id);
         let endpoint = json!({
-            "protocol": endpoint_protocol, "pid": std::process::id(),
+            "protocol": endpoint_protocol, "pid": pid,
             "startedAt": format!("2026-10-13T10:00:{:02}.000Z", n % 60),
             "version": "0.9.0-test", "ipcPath": path, "token": token,
         });
@@ -586,6 +637,27 @@ impl Fake {
                 }
                 vec![ok(json!({}))]
             }
+            "approvals.list" => {
+                let session = params["sessionId"].as_str();
+                let of = |kind: &str| -> Vec<Value> {
+                    state
+                        .pending
+                        .iter()
+                        .filter(|p| p.kind == kind && session.map_or(true, |s| s == p.session_id))
+                        .map(PendingReq::dto)
+                        .collect()
+                };
+                vec![ok(json!({
+                    "approvals": of("approval"), "questions": of("question"), "plans": of("plan")
+                }))]
+            }
+            "sessions.get" => {
+                let id = params["sessionId"].as_str().unwrap_or("");
+                match state.sessions.iter().find(|(known, _)| known == id) {
+                    Some((_, snapshot)) => vec![ok(json!({ "snapshot": snapshot }))],
+                    None => vec![err("NOT_FOUND", json!({}))],
+                }
+            }
             "runs.pause" => vec![ok(json!({ "status": "requested" }))],
             "runs.resume" => vec![ok(json!({ "status": "resumed" }))],
             "runs.cancel" => vec![ok(json!({ "status": "cancelled" }))],
@@ -668,13 +740,27 @@ impl DaemonLauncher for FakeLauncher {
     }
 }
 
-/// Lo que recibe la «interfaz» en un test.
+/// Lo que recibe la «interfaz» en un test. Con una puerta de confirmación
+/// enganchada (`hook`), cada evento le llega también, como en la app.
 #[derive(Clone, Default)]
 pub struct Seen {
     events: Arc<Mutex<Vec<DotEvent>>>,
+    gate: Arc<Mutex<Option<Arc<ConfirmGate>>>>,
 }
 
 impl Seen {
+    fn push(&self, event: DotEvent) {
+        let gate = self.gate.lock().unwrap().clone();
+        if let Some(gate) = gate {
+            gate.on_event(&event);
+        }
+        self.events.lock().unwrap().push(event);
+    }
+
+    pub fn hook(&self, gate: Arc<ConfirmGate>) {
+        *self.gate.lock().unwrap() = Some(gate);
+    }
+
     pub fn all(&self) -> Vec<DotEvent> {
         self.events.lock().unwrap().clone()
     }
@@ -723,7 +809,7 @@ impl Seen {
 
     pub fn last_sessions(&self) -> Option<Vec<String>> {
         self.all().into_iter().rev().find_map(|e| match e {
-            DotEvent::Sessions { session_ids } => Some(session_ids),
+            DotEvent::Sessions { session_ids, .. } => Some(session_ids),
             _ => None,
         })
     }
@@ -785,7 +871,7 @@ pub fn dot(dir: &Path, launcher: Option<Arc<dyn DaemonLauncher>>) -> Rig {
             logger: Logger::to_dir(&log_dir),
             timings: fast(),
         },
-        move |event| sink.events.lock().unwrap().push(event),
+        move |event| sink.push(event),
     );
     Rig {
         link,
@@ -802,6 +888,7 @@ pub fn fast_approver() -> ApproverTimings {
         unlocked_for: Duration::from_secs(30),
         retry_cooldown: Duration::from_millis(300),
         connect_wait: Duration::from_millis(200),
+        identity_check: Duration::from_millis(100),
     }
 }
 
@@ -839,12 +926,59 @@ pub fn broker(dir: &Path, timings: ApproverTimings) -> BrokerRig {
             logger: Logger::to_dir(&log_dir),
             timings,
         },
-        move |event| sink.events.lock().unwrap().push(event),
+        move |event| sink.push(event),
     );
     BrokerRig {
         broker,
         seen,
         log_dir,
         task: tokio::spawn(task),
+    }
+}
+
+/// La «persona» de un test: anota lo que se le enseña y cuántas veces se cerró.
+#[derive(Default)]
+pub struct TestPresenter {
+    pub shown: Mutex<Vec<String>>,
+    pub closed: AtomicU64,
+    /// `true`: abrir la ventana falla.
+    pub broken: std::sync::atomic::AtomicBool,
+}
+
+impl Presenter for TestPresenter {
+    fn show(&self, nonce: &str) -> Result<(), String> {
+        if self.broken.load(Ordering::Relaxed) {
+            return Err("no window".into());
+        }
+        self.shown.lock().unwrap().push(nonce.to_string());
+        Ok(())
+    }
+
+    fn close(&self) {
+        self.closed.fetch_add(1, Ordering::Relaxed);
+    }
+}
+
+impl TestPresenter {
+    pub fn count(&self) -> usize {
+        self.shown.lock().unwrap().len()
+    }
+
+    pub fn closes(&self) -> u64 {
+        self.closed.load(Ordering::Relaxed)
+    }
+
+    /// Espera a que se enseñe la `n`-ésima confirmación y devuelve su `nonce`.
+    pub async fn nth(&self, n: usize) -> String {
+        until("se enseña la confirmación", || self.count() >= n).await;
+        self.shown.lock().unwrap()[n - 1].clone()
+    }
+}
+
+pub fn fast_confirm() -> dot_link::ConfirmTimings {
+    dot_link::ConfirmTimings {
+        ttl: Duration::from_millis(1_500),
+        arm_delay: Duration::from_millis(50),
+        cooldown: Duration::from_millis(100),
     }
 }
