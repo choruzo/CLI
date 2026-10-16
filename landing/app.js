@@ -101,7 +101,7 @@ const MILESTONES = [
 const NEWS = [
   { id: "dot 0.1.0 β", title: "Stratum Dot: tus sesiones, en una ventana (pre-release)", date: "2026-10-16", match: /\(dot\)/,
     text: "Primera versión pública, experimental: puede hacer cosas raras. Lista todas las sesiones vivas, las de stratumd y las de cada terminal; abre chats que sobreviven a la app, pausa, cancela y redirige runs, y aprueba lo que pide el agente con la clave en una ventana nativa.",
-    pre: "Stratum Dot_0.1.0_x64-setup.exe · .deb · .AppImage\nnecesita stratum-cli@beta · sin firma ni auto-update",
+    pre: "Stratum.Dot_0.1.0_x64-setup.exe · .deb · .AppImage\nnecesita stratum-cli@beta · sin firma ni auto-update",
     href: "#dot", more: "qué hace y cómo instalarla →" },
   { id: "v0.9β", title: "stratumd: el plano de control local", date: "2026-10-16", match: /^feat\((daemon|protocol|host|ipc|client)\)/,
     text: "Un daemon por usuario que ve las sesiones de todas tus terminales. Desde otra terminal o desde Dot: stratum ps, pausar en un punto seguro, aprobar con una clave de aprobador separada del token, y pasar un chat vivo al daemon sin perder el contexto.",

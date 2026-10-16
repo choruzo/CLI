@@ -1,8 +1,17 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-10-16T14:06:52.4863871+02:00",
+  "generatedAt": "2026-10-16T14:17:50.7005512+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "8394ab1d68ab1e11b6fef552a63a818541f4b41f",
+      "date": "2026-10-16T14:07:36+02:00",
+      "author": "Javi_1",
+      "subject": "chore(landing): snapshot de commits y versión de assets tras el despliegue",
+      "add": 1407,
+      "del": 9,
+      "files": 5
+    },
     {
       "sha": "eb71f2162efd7ca8e8308d16aa831477bad59792",
       "date": "2026-10-16T14:05:57+02:00",
