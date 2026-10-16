@@ -1,8 +1,647 @@
 {
-  "generatedAt": "2026-10-12T16:38:00.0681184+02:00",
+  "generatedAt": "2026-10-16T14:06:52.4863871+02:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "eb71f2162efd7ca8e8308d16aa831477bad59792",
+      "date": "2026-10-16T14:05:57+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.9.0-beta.0 y Stratum Dot 0.1.0 (pre-release)",
+      "add": 427,
+      "del": 17,
+      "files": 11
+    },
+    {
+      "sha": "1257cba4dbc9f9d2b9eaeda32fb1ba802da526a0",
+      "date": "2026-10-16T13:43:44+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge branch 'feat/stratum-dot-m10': M10 — continuidad de sesión",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "08226d741f3555c1ce4781e98ae3f51edd0822f9",
+      "date": "2026-10-16T13:36:05+02:00",
+      "author": "Javi_1",
+      "subject": "docs(prd): M10 completado — Dot CI verde en Windows y Linux",
+      "add": 2,
+      "del": 2,
+      "files": 1
+    },
+    {
+      "sha": "04d21c27003c32697115f616b0f2fb52e196116d",
+      "date": "2026-10-16T13:27:18+02:00",
+      "author": "Javi_1",
+      "subject": "fix(m10): el arnés de la TUI funciona en CI; qué puede viajar con el historial",
+      "add": 37,
+      "del": 7,
+      "files": 7
+    },
+    {
+      "sha": "32f0857d7558233bc13b6629ed40a6bdc528e7f7",
+      "date": "2026-10-16T10:35:14+02:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): M10 — traspaso de una sesión viva de la CLI a stratumd",
+      "add": 4718,
+      "del": 234,
+      "files": 44
+    },
+    {
+      "sha": "a297e93a0c1fbfffc1be39a6f9632171ae5b6364",
+      "date": "2026-10-16T08:17:44+02:00",
+      "author": "Javi_1",
+      "subject": "Merge branch 'feat/stratum-dot-m9': M9 — endurecimiento de Dot y stratumd",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "e05c87edd293f67ea1457112780de75592226b6b",
+      "date": "2026-10-15T22:24:08+02:00",
+      "author": "Javi_1",
+      "subject": "fix(dot): la confirmación enseña las respuestas como se enviarán; socket de reserva privado",
+      "add": 245,
+      "del": 35,
+      "files": 7
+    },
+    {
+      "sha": "56bc26084ab81b35d76386ae5d6571007f7af4e3",
+      "date": "2026-10-15T22:14:19+02:00",
+      "author": "Javi_1",
+      "subject": "docs(dot): M9 — confirmación nativa, Q2 por separado e IPC privado; CI con los tests del daemon",
+      "add": 380,
+      "del": 37,
+      "files": 5
+    },
+    {
+      "sha": "e346874f5b46e84b73844a212a7e5914f1427e19",
+      "date": "2026-10-15T22:14:19+02:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): confirmación nativa, identidad del par y colas acotadas (M9)",
+      "add": 4614,
+      "del": 330,
+      "files": 38
+    },
+    {
+      "sha": "e0284a4bea4c5893c00574abcf456f511839fa17",
+      "date": "2026-10-15T22:14:15+02:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): carpeta, endpoint y socket privados y verificación declarada del par (M9)",
+      "add": 268,
+      "del": 17,
+      "files": 10
+    },
+    {
+      "sha": "fb3ef1b6b34161a950b66563d42a827ef4ae65ea",
+      "date": "2026-10-15T20:19:29+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #8 from choruzo/feat/stratum-dot-m8",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "140eea8f229ea984efb7f2b7d9ca25ec2847f779",
+      "date": "2026-10-15T20:03:08+02:00",
+      "author": "Javi_1",
+      "subject": "test(dot): CRLF en el test de arquitectura y solo ficheros al buscar la clave",
+      "add": 6,
+      "del": 3,
+      "files": 3
+    },
+    {
+      "sha": "fc2af53dd9670b25d5a419cfb8514d1f420dd7d3",
+      "date": "2026-10-15T17:31:05+02:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): aprobaciones, preguntas y planes desde Dot (M8)",
+      "add": 6929,
+      "del": 257,
+      "files": 57
+    },
+    {
+      "sha": "4f69b42f556b388f3aa6fc3cc67993d89c65c205",
+      "date": "2026-10-13T18:20:00+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #7 from choruzo/feat/stratum-dot-m7",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "f182d2ca4a92353db0cf7ba694f662087d79b5b6",
+      "date": "2026-10-13T17:51:06+02:00",
+      "author": "Javi_1",
+      "subject": "fix(protocol): fitSnapshot garantiza que la foto cabe en su presupuesto",
+      "add": 405,
+      "del": 13,
+      "files": 3
+    },
+    {
+      "sha": "520ddb1f2499e12cebbf8d7fbbd9f47012d044dc",
+      "date": "2026-10-13T17:24:51+02:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): chat sobre sesiones alojadas en el daemon (M7)",
+      "add": 5329,
+      "del": 516,
+      "files": 57
+    },
+    {
+      "sha": "9b486737e194fbaaea4cc71e918242b494a488ee",
+      "date": "2026-10-13T14:34:52+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #6 from choruzo/feat/stratum-dot-m6",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "d72e7edd6e02cdad94a3a218dc1c69595f6b1093",
+      "date": "2026-10-13T14:27:44+02:00",
+      "author": "Javi_1",
+      "subject": "docs(prd): M6 completado",
+      "add": 4,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "0c55ecc55d1407f650d39aec27f4f412f3cf3fc4",
+      "date": "2026-10-13T14:17:50+02:00",
+      "author": "Javi_1",
+      "subject": "fix(daemon): crear la carpeta del endpoint antes de escuchar",
+      "add": 14,
+      "del": 0,
+      "files": 3
+    },
+    {
+      "sha": "ee677c6ba3b024c66bb541588b702bd6f79a4846",
+      "date": "2026-10-13T14:04:49+02:00",
+      "author": "Javi_1",
+      "subject": "docs(dot): deuda menor de M6",
+      "add": 12,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "73eb27ea819f5282a83f735097596c63a97e70a8",
+      "date": "2026-10-13T13:41:23+02:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): Stratum Dot — shell nativo y Activity (M6)",
+      "add": 16517,
+      "del": 4,
+      "files": 75
+    },
+    {
+      "sha": "11a0e3a65b97bce3a44f33fdfa2f61c9849b8161",
+      "date": "2026-10-13T11:55:45+02:00",
+      "author": "Javi_1",
+      "subject": "fix(agent): pausa — hallazgos del spec-validator y steering sobre lo aprobado",
+      "add": 362,
+      "del": 21,
+      "files": 8
+    },
+    {
+      "sha": "bbba33f005f01776e08701195f948f3f38346d48",
+      "date": "2026-10-13T11:31:14+02:00",
+      "author": "Javi_1",
+      "subject": "feat(agent): pausa cooperativa del run (M5)",
+      "add": 2904,
+      "del": 69,
+      "files": 35
+    },
+    {
+      "sha": "5896448b3861d7dacb57c9d27e18f1c0043066da",
+      "date": "2026-10-13T10:15:56+02:00",
+      "author": "Javi_1",
+      "subject": "fix(daemon): pase de endurecimiento de M4",
+      "add": 399,
+      "del": 73,
+      "files": 12
+    },
+    {
+      "sha": "924876406a42d4f6c7cd4309b334756722f6c386",
+      "date": "2026-10-13T08:49:13+02:00",
+      "author": "Javi_1",
+      "subject": "fix(daemon): una solicitud pendiente es de la sesión que la abrió",
+      "add": 136,
+      "del": 18,
+      "files": 7
+    },
+    {
+      "sha": "21f0fb9c4b5c6c7776e84f4fd3cb5a6a738a5575",
+      "date": "2026-10-13T08:42:14+02:00",
+      "author": "Javi_1",
+      "subject": "docs(protocol): centro de aprobaciones, modelo de amenaza y estado de M4",
+      "add": 363,
+      "del": 19,
+      "files": 6
+    },
+    {
+      "sha": "80d0435d95ff6b9ea129ba24c98cd040faa300bd",
+      "date": "2026-10-13T08:38:35+02:00",
+      "author": "Javi_1",
+      "subject": "test(daemon): arquitectura de M4, clave de aprobador y contrato",
+      "add": 348,
+      "del": 0,
+      "files": 4
+    },
+    {
+      "sha": "31bf450e5a61788a81dc4be69fe06af673b96ee0",
+      "date": "2026-10-13T08:35:55+02:00",
+      "author": "Javi_1",
+      "subject": "feat(host): quién resolvió cada aprobación, en la traza y en exec-audit",
+      "add": 122,
+      "del": 18,
+      "files": 5
+    },
+    {
+      "sha": "3ab4c34d321b92241b107fabca43a3ba4418a39f",
+      "date": "2026-10-13T08:33:26+02:00",
+      "author": "Javi_1",
+      "subject": "test(tui): M4 en terminales reales (chat y run contra un aprobador externo)",
+      "add": 258,
+      "del": 0,
+      "files": 3
+    },
+    {
+      "sha": "3226a8e8f0d8100ad7763db0ad3249165348d40f",
+      "date": "2026-10-13T08:30:28+02:00",
+      "author": "Javi_1",
+      "subject": "feat(tools): política de git push y guardas del plano de control",
+      "add": 720,
+      "del": 16,
+      "files": 9
+    },
+    {
+      "sha": "b1029bb004864429090d7df682bf26d96183fed9",
+      "date": "2026-10-13T08:25:29+02:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): prompts que se retiran y stratum approvals",
+      "add": 581,
+      "del": 12,
+      "files": 9
+    },
+    {
+      "sha": "c1b948d0d06fea2b1460a285ecb70472dd5d0968",
+      "date": "2026-10-13T08:20:21+02:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): aprobaciones, preguntas y planes en sesiones del daemon y pares",
+      "add": 1111,
+      "del": 27,
+      "files": 7
+    },
+    {
+      "sha": "621f174d56f4e9b34ce5b4edb73920fef8255ea2",
+      "date": "2026-10-13T08:20:20+02:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): ApprovalCenter y autoridad de aprobador separada del canal",
+      "add": 631,
+      "del": 8,
+      "files": 7
+    },
+    {
+      "sha": "8bfad1b4670244e31502255ec946142672e4bbd0",
+      "date": "2026-10-13T08:20:20+02:00",
+      "author": "Javi_1",
+      "subject": "feat(host): las puertas de una sesión pasan por sus interacciones pendientes",
+      "add": 256,
+      "del": 43,
+      "files": 7
+    },
+    {
+      "sha": "3dbb841f11b8a6c289bb16d777ada90ea09b4dd7",
+      "date": "2026-10-13T08:09:12+02:00",
+      "author": "Javi_1",
+      "subject": "feat(host): modelo común de interacciones pendientes",
+      "add": 897,
+      "del": 7,
+      "files": 9
+    },
+    {
+      "sha": "e0c6b635da4282260362d350edf4078336164f0f",
+      "date": "2026-10-12T23:25:18+02:00",
+      "author": "Javi_1",
+      "subject": "docs(protocol): anfitriones pares y estado de M3",
+      "add": 173,
+      "del": 14,
+      "files": 2
+    },
+    {
+      "sha": "e54d6357a42aac56f93575cf9a260709a2f3dd6f",
+      "date": "2026-10-12T23:25:17+02:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): stratum ps [--json] [--watch]",
+      "add": 541,
+      "del": 0,
+      "files": 4
+    },
+    {
+      "sha": "e0341d9e575c40f6bb85fa710a3bcb26ef4408e6",
+      "date": "2026-10-12T23:25:17+02:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): run y chat se publican en stratumd si lo hay",
+      "add": 325,
+      "del": 23,
+      "files": 10
+    },
+    {
+      "sha": "06e617669763dd9019e8e5611547650c34f8b089",
+      "date": "2026-10-12T23:25:16+02:00",
+      "author": "Javi_1",
+      "subject": "feat(host): PeerHostBridge, el publicador de siempre sobre host.publish",
+      "add": 1451,
+      "del": 63,
+      "files": 5
+    },
+    {
+      "sha": "5eb373d9b8b481eff58472300c5d145ca83eb864",
+      "date": "2026-10-12T23:25:16+02:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): sesiones pares, proyección y control reenviado",
+      "add": 717,
+      "del": 31,
+      "files": 9
+    },
+    {
+      "sha": "fff466505624d6c53df5d7afc2372ada45cb398d",
+      "date": "2026-10-12T23:25:15+02:00",
+      "author": "Javi_1",
+      "subject": "feat(protocol): contrato de anfitrión par y reductor de fotos",
+      "add": 410,
+      "del": 17,
+      "files": 9
+    },
+    {
+      "sha": "086e2d4f89df6c7996501e8da29efc42a5fd42a3",
+      "date": "2026-10-12T21:22:53+02:00",
+      "author": "Javi_1",
+      "subject": "chore(license): cambio de MIT a Apache-2.0",
+      "add": 428,
+      "del": 55,
+      "files": 14
+    },
+    {
+      "sha": "86338882764735f42fb1fbac785e875ede20a95b",
+      "date": "2026-10-12T21:13:42+02:00",
+      "author": "Javi_1",
+      "subject": "docs(protocol): servidor stratumd y estado de M2",
+      "add": 185,
+      "del": 22,
+      "files": 2
+    },
+    {
+      "sha": "2c39d29d8d5366c0a3a36eabc197c2e7778fb03f",
+      "date": "2026-10-12T21:13:41+02:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): stratum daemon run|start|stop|status",
+      "add": 383,
+      "del": 16,
+      "files": 4
+    },
+    {
+      "sha": "ccf1dd443dbb4745631bd01b16839ae3bb73fc0f",
+      "date": "2026-10-12T21:13:41+02:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): stratumd, plano de control local",
+      "add": 4332,
+      "del": 0,
+      "files": 21
+    },
+    {
+      "sha": "39f64355d7cc18d1662159de14b3f6d51a11dcd3",
+      "date": "2026-10-12T21:13:40+02:00",
+      "author": "Javi_1",
+      "subject": "feat(host): SessionPublisher, de observe() a eventos del protocolo",
+      "add": 1166,
+      "del": 0,
+      "files": 2
+    },
+    {
+      "sha": "120caabc49abb441a6390f035773b127ba6570c2",
+      "date": "2026-10-12T21:13:39+02:00",
+      "author": "Javi_1",
+      "subject": "fix(client): la primera foto no se pierde si llega con la respuesta de subscribe",
+      "add": 62,
+      "del": 1,
+      "files": 2
+    },
+    {
+      "sha": "c55367a054f44c8d92796e230892d1f07aefcc10",
+      "date": "2026-10-12T21:13:39+02:00",
+      "author": "Javi_1",
+      "subject": "refactor(host): arranque de sesión sin terminal",
+      "add": 118,
+      "del": 34,
+      "files": 6
+    },
+    {
+      "sha": "e7fd93630044976d7f13de0b3b1e099db4813956",
+      "date": "2026-10-12T21:13:29+02:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): atribución del intento de escritura",
+      "add": 34,
+      "del": 5,
+      "files": 3
+    },
+    {
+      "sha": "a2b4e32de39128c30f2d6070c81ce6171b47430f",
+      "date": "2026-10-12T21:13:28+02:00",
+      "author": "Javi_1",
+      "subject": "fix(mcp): los servers nacen en el cwd de la sesión",
+      "add": 19,
+      "del": 2,
+      "files": 7
+    },
+    {
+      "sha": "dd05969b613b507eb972587514ee0ae3347c421c",
+      "date": "2026-10-12T19:54:28+02:00",
+      "author": "Javi_1",
+      "subject": "docs(protocol): referencia del Stratum Protocol v1 y estado de M1",
+      "add": 368,
+      "del": 1,
+      "files": 2
+    },
+    {
+      "sha": "a7bf37f795aee63e335a6d25c477a288c1ee2ce2",
+      "date": "2026-10-12T19:46:53+02:00",
+      "author": "Javi_1",
+      "subject": "feat(client): cliente Node del Stratum Protocol",
+      "add": 2112,
+      "del": 0,
+      "files": 10
+    },
+    {
+      "sha": "4427449e0189ffe6fad322687de364323f6810c0",
+      "date": "2026-10-12T19:37:54+02:00",
+      "author": "Javi_1",
+      "subject": "feat(ipc): códec y capa de petición/respuesta del Stratum Protocol",
+      "add": 1065,
+      "del": 50,
+      "files": 7
+    },
+    {
+      "sha": "34b2c1bc5f48c6554b233b94c5ef43c34083ecf1",
+      "date": "2026-10-12T19:30:11+02:00",
+      "author": "Javi_1",
+      "subject": "feat(protocol): validación del Stratum Protocol (schemas Zod)",
+      "add": 1176,
+      "del": 1,
+      "files": 4
+    },
+    {
+      "sha": "c343537ef584f146f060b3eb2805f056b791cb8b",
+      "date": "2026-10-12T19:25:33+02:00",
+      "author": "Javi_1",
+      "subject": "feat(protocol): contrato del Stratum Protocol v1",
+      "add": 1501,
+      "del": 0,
+      "files": 10
+    },
+    {
+      "sha": "aa7e6bbaf9024208eac4d645ccc388e7267ff2a1",
+      "date": "2026-10-12T20:01:23+02:00",
+      "author": "Javi_1",
+      "subject": "Merge branch 'release/0.8': v0.8.0 y desktop-v0.4.0",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "fa584853609c0d3868526b903c1a2910314d42d0",
+      "date": "2026-10-12T19:57:42+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.8.0",
+      "add": 29,
+      "del": 3,
+      "files": 3
+    },
+    {
+      "sha": "2de95413c819bccd94f8f6bf95390a9066417fc2",
+      "date": "2026-10-12T19:57:42+02:00",
+      "author": "Javi_1",
+      "subject": "chore(desktop): versión 0.4.0",
+      "add": 13,
+      "del": 11,
+      "files": 6
+    },
+    {
+      "sha": "847d6acf31e2427b6777fa69efdfef77ac121fe1",
+      "date": "2026-10-12T18:27:46+02:00",
+      "author": "Javi_1",
+      "subject": "test(jobs): 30 s de límite para los tests que matan árboles de procesos",
+      "add": 24,
+      "del": 4,
+      "files": 4
+    },
+    {
+      "sha": "f91ec2e8e9348ed439a3165e86968e42e1d88601",
+      "date": "2026-10-12T18:21:19+02:00",
+      "author": "Javi_1",
+      "subject": "docs(dot): M0 implementado y sus descubrimientos",
+      "add": 40,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "b73048ea76038f5ce78ea5edbd6411ede4fdc159",
+      "date": "2026-10-12T18:16:27+02:00",
+      "author": "Javi_1",
+      "subject": "test(host): AC-0, dos SessionHost conviven en un proceso",
+      "add": 198,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "913e9ec8757e9383f2dd1ee5422cbb6ae40d74f4",
+      "date": "2026-10-12T18:08:04+02:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): DecisionMemory.subscribe(), gancho de escrituras",
+      "add": 90,
+      "del": 1,
+      "files": 2
+    },
+    {
+      "sha": "87420fab257aa38728eac37236528716d99bf784",
+      "date": "2026-10-12T18:06:29+02:00",
+      "author": "Javi_1",
+      "subject": "feat(agent): StratumAgent.observe(), punto único de salida de la actividad",
+      "add": 204,
+      "del": 2,
+      "files": 2
+    },
+    {
+      "sha": "645eaae32352d94d4195d57ffd0cdb41843b0a11",
+      "date": "2026-10-12T18:04:28+02:00",
+      "author": "Javi_1",
+      "subject": "refactor(run): `stratum run` monta su sesión con SessionHost",
+      "add": 61,
+      "del": 79,
+      "files": 1
+    },
+    {
+      "sha": "40dcb7c40622fce3f1dacd8e01474813b24543bd",
+      "date": "2026-10-12T18:00:09+02:00",
+      "author": "Javi_1",
+      "subject": "feat(host): SessionHost y HostGates, la raíz de composición de una sesión",
+      "add": 469,
+      "del": 12,
+      "files": 3
+    },
+    {
+      "sha": "0fe2a5bcd994ad55c61718d22e5467f91f6732dd",
+      "date": "2026-10-12T17:56:26+02:00",
+      "author": "Javi_1",
+      "subject": "refactor(exec): estado de exec, SSH y auditoría por sesión",
+      "add": 233,
+      "del": 43,
+      "files": 4
+    },
+    {
+      "sha": "bf1d6c334b333f245468ed4059a70a7ce34c7689",
+      "date": "2026-10-12T17:52:47+02:00",
+      "author": "Javi_1",
+      "subject": "refactor(core): el cwd de una sesión llega por SessionEnv, no por el proceso",
+      "add": 270,
+      "del": 51,
+      "files": 20
+    },
+    {
+      "sha": "677be3750273f3ac53d79a7d4c530de34fe30093",
+      "date": "2026-10-12T17:47:29+02:00",
+      "author": "Javi_1",
+      "subject": "feat(runtime): SessionEnv, el entorno explícito de una sesión",
+      "add": 73,
+      "del": 0,
+      "files": 2
+    },
+    {
+      "sha": "d497b1d33a595b495109382e0c16eb01ba843cde",
+      "date": "2026-10-12T17:44:49+02:00",
+      "author": "Javi_1",
+      "subject": "docs(dot): PRD de Stratum Dot",
+      "add": 48,
+      "del": 17,
+      "files": 1
+    },
+    {
+      "sha": "7509efcff9b72871848f84ae001838cff23d3934",
+      "date": "2026-10-12T17:39:28+02:00",
+      "author": "Javi_1",
+      "subject": "dots_doc",
+      "add": 1090,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "fad34aaaaf053abe728ec8c0138495319b4719ef",
+      "date": "2026-10-12T16:38:23+02:00",
+      "author": "Javi_1",
+      "subject": "chore(landing): snapshot de commits y versión de assets tras el despliegue",
+      "add": 677,
+      "del": 9,
+      "files": 5
+    },
     {
       "sha": "ab7b4cd21c64bbe37e8666b0a480442ffc09b7c6",
       "date": "2026-10-12T16:37:31+02:00",
@@ -2130,6 +2769,22 @@
   ],
   "tags": [
     {
+      "name": "dot-v0.1.0",
+      "date": "2026-10-16T14:05:57+02:00"
+    },
+    {
+      "name": "v0.9.0-beta.0",
+      "date": "2026-10-16T14:05:57+02:00"
+    },
+    {
+      "name": "desktop-v0.4.0",
+      "date": "2026-10-12T19:57:42+02:00"
+    },
+    {
+      "name": "v0.8.0",
+      "date": "2026-10-12T19:57:42+02:00"
+    },
+    {
       "name": "v0.8.0-beta.3",
       "date": "2026-10-12T15:48:54+02:00"
     },
@@ -2207,6 +2862,50 @@
     }
   ],
   "prs": [
+    {
+      "additions": 4748,
+      "createdAt": "2026-10-16T11:36:28Z",
+      "deletions": 234,
+      "headRefName": "feat/stratum-dot-m10",
+      "mergedAt": "2026-10-16T11:43:44Z",
+      "number": 9,
+      "state": "MERGED",
+      "title": "M10 — continuidad de sesión: traspasar una sesión viva de la CLI a stratumd",
+      "url": "https://github.com/choruzo/CLI/pull/9"
+    },
+    {
+      "additions": 6933,
+      "createdAt": "2026-10-15T16:20:09Z",
+      "deletions": 258,
+      "headRefName": "feat/stratum-dot-m8",
+      "mergedAt": "2026-10-15T18:19:30Z",
+      "number": 8,
+      "state": "MERGED",
+      "title": "feat(dot): aprobaciones, preguntas y planes desde Dot (M8)",
+      "url": "https://github.com/choruzo/CLI/pull/8"
+    },
+    {
+      "additions": 5721,
+      "createdAt": "2026-10-13T15:51:10Z",
+      "deletions": 516,
+      "headRefName": "feat/stratum-dot-m7",
+      "mergedAt": "2026-10-13T16:20:01Z",
+      "number": 7,
+      "state": "MERGED",
+      "title": "feat(dot): chat sobre sesiones alojadas en el daemon (M7)",
+      "url": "https://github.com/choruzo/CLI/pull/7"
+    },
+    {
+      "additions": 16546,
+      "createdAt": "2026-10-13T12:04:53Z",
+      "deletions": 4,
+      "headRefName": "feat/stratum-dot-m6",
+      "mergedAt": "2026-10-13T12:34:53Z",
+      "number": 6,
+      "state": "MERGED",
+      "title": "feat(dot): Stratum Dot — shell nativo y Activity (M6)",
+      "url": "https://github.com/choruzo/CLI/pull/6"
+    },
     {
       "additions": 6331,
       "createdAt": "2026-10-10T10:19:00Z",
