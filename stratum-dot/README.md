@@ -79,4 +79,8 @@ que tengas en marcha.
 npm run tauri build           # instaladores de la plataforma (nsis · deb · appimage)
 ```
 
-Sin firma ni auto-update todavía (M9).
+Sin firma ni auto-update todavía. Las releases públicas salen de un tag `dot-vX.Y.Z`
+(versión igual en `package.json`, `tauri.conf.json` y `Cargo.toml`): el workflow
+`.github/workflows/dot-release.yml` corre los tests, construye los instaladores de Windows y
+Linux y publica la release de GitHub como **pre-release** con `RELEASE_NOTES.md` como notas.
+Cambios por versión: [`CHANGELOG.md`](CHANGELOG.md).

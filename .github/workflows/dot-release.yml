@@ -1,0 +1,168 @@
+name: Dot release
+
+# Stratum Dot: instaladores .exe (NSIS) en Windows y .deb/.AppImage en Linux.
+#
+# - Tag `dot-vX.Y.Z` (versión = tauri.conf.json = package.json = Cargo.toml):
+#   tests, build y GitHub Release publicada como **pre-release**. Mientras Dot
+#   sea 0.x, toda release suya es pre-release: nunca será el «latest» de GitHub,
+#   que es el de la CLI.
+# - Manual (workflow_dispatch): solo build; los instaladores quedan como
+#   artefactos del run.
+#
+# Sin firma ni auto-update todavía (ver docs/dot.md §9): los instaladores no
+# llevan Authenticode y Windows SmartScreen avisará al abrirlos.
+
+on:
+  push:
+    tags:
+      - 'dot-v*.*.*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: dot-release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build (${{ matrix.name }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: windows-x64
+            os: windows-latest
+            bundles: nsis
+          # 22.04: glibc antigua, así el .deb y el AppImage arrancan también en
+          # distribuciones de hace un par de años.
+          - name: linux-x64
+            os: ubuntu-22.04
+            bundles: deb,appimage
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 90
+    defaults:
+      run:
+        shell: bash
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Validate version
+        run: |
+          set -euo pipefail
+          cd stratum-dot
+          CONF=$(node -p "require('./src-tauri/tauri.conf.json').version")
+          PKG=$(node -p "require('./package.json').version")
+          CARGO=$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n 1)
+          echo "tauri.conf.json=$CONF package.json=$PKG Cargo.toml=$CARGO"
+          if [ "$CONF" != "$PKG" ] || [ "$CONF" != "$CARGO" ]; then
+            echo "::error::Las versiones de tauri.conf.json, package.json y Cargo.toml no coinciden"
+            exit 1
+          fi
+          if [[ "${GITHUB_REF}" == refs/tags/dot-v* ]] && [ "${GITHUB_REF_NAME}" != "dot-v$CONF" ]; then
+            echo "::error::El tag ${GITHUB_REF_NAME} no coincide con la versión $CONF"
+            exit 1
+          fi
+          echo "VERSION=$CONF" >> "$GITHUB_ENV"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            stratum-cli/package-lock.json
+            stratum-dot/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: stratum-dot -> target
+
+      - name: Linux system dependencies
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+
+      # El frontend importa el contrato de src/protocol/ de la CLI.
+      - name: Install dependencies
+        run: |
+          (cd stratum-cli && npm ci)
+          (cd stratum-dot && npm ci)
+
+      - name: Test (dot-link, frontend)
+        working-directory: stratum-dot
+        run: |
+          cargo test -p dot-link
+          npm run typecheck
+          npm run test:run
+
+      - name: Build installers
+        working-directory: stratum-dot
+        env:
+          # linuxdeploy es una AppImage: sin FUSE en el runner, se extrae y ejecuta.
+          APPIMAGE_EXTRACT_AND_RUN: '1'
+        run: npx tauri build --ci --bundles "${{ matrix.bundles }}"
+
+      - name: Collect installers
+        run: |
+          set -euo pipefail
+          OUT="$RUNNER_TEMP/installers"
+          mkdir -p "$OUT"
+          BUNDLE=stratum-dot/target/release/bundle
+          shopt -s nullglob
+          for f in "$BUNDLE"/nsis/*.exe "$BUNDLE"/deb/*.deb "$BUNDLE"/appimage/*.AppImage; do
+            cp "$f" "$OUT/"
+          done
+          FILES=("$OUT"/*)
+          if [ ${#FILES[@]} -eq 0 ]; then
+            echo "::error::No se generó ningún instalador"
+            exit 1
+          fi
+          (cd "$OUT" && sha256sum * > "SHA256SUMS-${{ matrix.name }}.txt")
+          ls -la "$OUT"
+          echo "INSTALLERS=$OUT" >> "$GITHUB_ENV"
+
+      - name: Upload installers
+        uses: actions/upload-artifact@v4
+        with:
+          name: stratum-dot-${{ env.VERSION }}-${{ matrix.name }}
+          path: ${{ env.INSTALLERS }}
+          if-no-files-found: error
+
+  release:
+    name: GitHub pre-release
+    needs: build
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/dot-v')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Download installers
+        uses: actions/download-artifact@v4
+        with:
+          path: installers
+          merge-multiple: true
+
+      - name: Create pre-release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME#dot-v}"
+          cat installers/SHA256SUMS-*.txt > installers/SHA256SUMS.txt
+          rm installers/SHA256SUMS-*.txt
+          gh release create "${GITHUB_REF_NAME}" installers/* \
+            --prerelease --latest=false \
+            --title "Stratum Dot ${VERSION} (pre-release)" \
+            --notes-file stratum-dot/RELEASE_NOTES.md

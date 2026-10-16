@@ -79,6 +79,14 @@ const MILESTONES = [
     body: ["Atajo global, notificaciones nativas y onboarding; pipeline de CI que produce .msi, .exe, .deb y .AppImage."] },
   { id: "D7", title: "Pulido", date: "2026-09-25", track: "desktop", status: "done", release: "desktop 0.3.0",
     body: ["Ventana frameless, razonamiento del modelo visible, animaciones y accesibilidad, tests E2E y auto-update firmado."] },
+  { id: "M0–M2", title: "Stratum Protocol y stratumd", date: "2026-10-12", track: "dot", status: "done",
+    body: ["SessionHost como raíz única de una sesión, contrato v1 del Stratum Protocol con schemas Zod y cliente Node.", "stratumd: un daemon por usuario, solo por named pipe o unix socket (sin TCP), que aloja sesiones que sobreviven a su terminal."] },
+  { id: "M3–M5", title: "Anfitriones pares, aprobaciones y pausa", date: "2026-10-13", track: "dot", status: "done",
+    body: ["chat y run se publican en el daemon si lo hay; stratum ps --watch las lista todas.", "Centro de aprobaciones con clave de aprobador separada del token: gana la primera respuesta y la terminal retira su prompt.", "Pausa cooperativa en el siguiente punto seguro, nunca a mitad de una tool."] },
+  { id: "M6–M8", title: "Stratum Dot: cockpit, chat y Approval Center", date: "2026-10-15", track: "dot", status: "done",
+    body: ["App Tauri con cliente nativo del protocolo en Rust (dot-link): lista de sesiones, Activity, bandeja e instancia única.", "New chat sobre sesiones del daemon; aprobaciones, preguntas y planes con la autoridad en otra conexión nativa."] },
+  { id: "M9–M10", title: "Endurecimiento y continuidad", date: "2026-10-16", track: "dot", status: "current", release: "dot 0.1.0 β",
+    body: ["Confirmación nativa de cada resolución sensible, identidad del par verificada por el SO en el lado de Dot e IPC privado.", "Una sesión viva de chat pasa al daemon con el mismo id y contexto: /detach, stratum detach, stratum attach."] },
   { id: "H18", title: "Tools de diagnóstico", date: "pendiente", track: "cli", status: "next",
     body: ["net_probe, sys_inspect, log_query y service_status."] },
   { id: "H19", title: "Diagnóstico verificado", date: "pendiente", track: "cli", status: "next",
@@ -91,6 +99,13 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "dot 0.1.0 β", title: "Stratum Dot: tus sesiones, en una ventana (pre-release)", date: "2026-10-16", match: /\(dot\)/,
+    text: "Primera versión pública, experimental: puede hacer cosas raras. Lista todas las sesiones vivas, las de stratumd y las de cada terminal; abre chats que sobreviven a la app, pausa, cancela y redirige runs, y aprueba lo que pide el agente con la clave en una ventana nativa.",
+    pre: "Stratum Dot_0.1.0_x64-setup.exe · .deb · .AppImage\nnecesita stratum-cli@beta · sin firma ni auto-update",
+    href: "#dot", more: "qué hace y cómo instalarla →" },
+  { id: "v0.9β", title: "stratumd: el plano de control local", date: "2026-10-16", match: /^feat\((daemon|protocol|host|ipc|client)\)/,
+    text: "Un daemon por usuario que ve las sesiones de todas tus terminales. Desde otra terminal o desde Dot: stratum ps, pausar en un punto seguro, aprobar con una clave de aprobador separada del token, y pasar un chat vivo al daemon sin perder el contexto.",
+    pre: "❯ npm i -g stratum-cli@beta && stratum daemon start\n❯ stratum ps --watch\n❯ stratum approvals approve <id>" },
   { id: "eval", title: "stratum eval: ¿esta versión es mejor, peor o más insegura?", date: "2026-10-05", match: /\(eval\)|stratum eval/,
     text: "37 escenarios reproducibles, de básicos a adversariales, que se ejecutan con stratum run y se puntúan desde la traza. Baselines con nombre y eval compare, que sale con 1 si hay regresión. stratum stats agrega tus sesiones en local.",
     pre: "❯ stratum eval run --mock --baseline mock\n32/32 PASS · 0 acciones inseguras · sin regresiones",
@@ -137,6 +152,12 @@ const PR_DETAILS = {
 };
 
 const ROADMAP = [
+  { id: "M11", title: "chat alojado en el daemon",
+    text: "Con los datos de M9 y M10, decidir si stratum chat pasa a vivir en stratumd por defecto.",
+    why: "siguiente del plano de control" },
+  { id: "M12", title: "Desktop al Stratum Protocol",
+    text: "Stratum Desktop deja su sidecar aislado y habla con stratumd, como Dot; las dos apps convergen.",
+    why: "una sola forma de alojar sesiones" },
   { id: "H18", title: "Diagnóstico puro",
     text: "net_probe, sys_inspect, log_query y service_status, sin dependencias externas.",
     why: "sustrato para el hito 19" },
@@ -158,6 +179,15 @@ const DESK_CARDS = [
   { t: "Retención", d: "A los N días se comprime a tar.gz verificado; más tarde se purga. Abrir una conversación no cuenta como uso." },
   { t: "Turnos en cola", d: "desktop.maxConcurrentTurns (2 por defecto) con cola FIFO; cancelar en cola ni siquiera llama al modelo." },
   { t: "Checkpoints", d: "Tras cada tool y cada 60 s; al reabrir, un turno que se quedó a medias aparece como interrumpido." }
+];
+
+const DOT_CARDS = [
+  { t: "Todas las sesiones", d: "Las que aloja stratumd y las de cada terminal con chat o run, en la misma lista: estado, perfil, modelo, anfitrión, duración y pendientes." },
+  { t: "Chat y Activity", d: "New chat abre una sesión del daemon que sobrevive a Dot. Activity enseña contexto, tokens (sin estimar), jobs y tools de cada sesión." },
+  { t: "Conducir el run", d: "Pause (en el siguiente punto seguro), Resume, Cancel y steering mientras trabaja. Sin estado optimista: la interfaz cambia cuando el daemon lo confirma." },
+  { t: "Approval Center", d: "Aprobaciones, preguntas y planes de cualquier sesión, también de una terminal: gana la primera respuesta y la otra se retira." },
+  { t: "La clave no toca la web", d: "Se teclea en una ventana nativa aparte y aprobar va por otra conexión; cada resolución sensible se confirma en otra ventana nativa." },
+  { t: "Continuidad", d: "Un chat que pasas al daemon con /detach sigue en su fila, con su conversación, y desde Dot ya se le puede escribir." }
 ];
 
 /* ═══ Utilidades ═══════════════════════════════════════════════════════════ */
@@ -309,7 +339,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.7.0",
+  version: "0.8.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -528,12 +558,16 @@ function renderMilestones() {
   const cliTotal = MILESTONES.filter((m) => m.track === "cli").length;
   const deskDone = MILESTONES.filter((m) => m.track === "desktop" && m.status !== "next").length;
   const deskTotal = MILESTONES.filter((m) => m.track === "desktop").length;
+  const dotDone = MILESTONES.filter((m) => m.track === "dot" && m.status !== "next").length;
+  const dotTotal = MILESTONES.filter((m) => m.track === "dot").length;
   const barW = window.innerWidth < 640 ? 18 : 40;
   const bar = (a, b) => `${asciiBar(a / b, barW)}<span class="rest">${"░".repeat(Math.max(0, barW - Math.ceil((a / b) * barW)))}</span>`;
   $("#bar-cli").innerHTML = bar(cliDone, cliTotal);
   $("#num-cli").textContent = `${cliDone}/${cliTotal} hitos`;
   $("#bar-desktop").innerHTML = bar(deskDone, deskTotal);
   $("#num-desktop").textContent = `${deskDone}/${deskTotal} (D0–D8)`;
+  $("#bar-dot").innerHTML = bar(dotDone, dotTotal);
+  $("#num-dot").textContent = "M0–M10 de M12";
 
   const ordered = [...MILESTONES].reverse();
   $("#graph").innerHTML = ordered
@@ -571,9 +605,14 @@ function filterMilestones(f) {
 
 function renderNews() {
   // `desktop-updater` es el canal de actualizaciones, no una versión.
+  // Las de Dot son pre-releases mientras sea 0.x: se enseñan, pero el «latest» es el de la CLI.
   const rels = state.tags.filter((t) => !t.name.includes("beta") && t.name !== "desktop-updater");
+  const latest = rels.find((t) => /^v\d/.test(t.name));
   $("#releases").innerHTML = rels
-    .map((t, i) => `<span class="rel ${i === 0 ? "latest" : ""}"><b>${esc(t.name)}</b><span class="dim">${esc(t.date.slice(0, 10))}</span>${i === 0 ? `<span class="ok">latest</span>` : ""}</span>`)
+    .map((t) => {
+      const pre = t.name.startsWith("dot-v");
+      return `<span class="rel ${t === latest ? "latest" : ""}"><b>${esc(t.name)}</b><span class="dim">${esc(t.date.slice(0, 10))}</span>${t === latest ? `<span class="ok">latest</span>` : ""}${pre ? `<span class="pre-tag">pre-release</span>` : ""}</span>`;
+    })
     .join("");
 
   $("#news").innerHTML = NEWS.map((n) => {
@@ -614,6 +653,7 @@ function renderRoadmap() {
     <header><span class="h-id">${esc(r.id)}</span><span class="dim">${r.key ? "★ clave" : "pendiente"}</span></header>
     <h4>${esc(r.title)}</h4><p>${esc(r.text)}</p><p class="why">${esc(r.why)}</p>
   </article>`).join("");
+  $("#dot-grid").innerHTML = DOT_CARDS.map((c) => `<div class="desk-card reveal"><h4>${esc(c.t)}</h4><p>${esc(c.d)}</p></div>`).join("");
   $("#desk-grid").innerHTML = DESK_CARDS.map((c) => `<div class="desk-card reveal"><h4>${esc(c.t)}</h4><p>${esc(c.d)}</p></div>`).join("");
 }
 

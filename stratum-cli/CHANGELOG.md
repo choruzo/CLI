@@ -6,21 +6,30 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.9.0-beta.0] — 2026-10-16
 
-### Cambios a tener en cuenta
-- **`git push` pide confirmación** (`tools.guardedCommands.gitPush`, default `confirm`). Antes pasaba sin preguntar. En `stratum chat` aparece la confirmación de siempre; **`stratum run` sin terminal lo deniega**: una automatización que hacía `git push` deja de hacerlo. Para volver al comportamiento anterior: `"tools": { "guardedCommands": { "gitPush": "allow" } }` en `.stratumrc.json`, o `--allow-destructive` en esa invocación.
-- **Un push forzado se confirma siempre** (`gitPushForce`, default `confirm-always`): `--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror` o un refspec con `+` (`git push origin +main`). Ni `--allow-destructive` ni «permitir todo» lo aprueban, y sin terminal se bloquea. Una config que ya fijaba `gitPushForce` conserva su valor.
-- **El token del daemon ya no da derecho a aprobar.** La capacidad `approve` del Stratum Protocol exige una clave de aprobador (`stratum approvals set-key`); un cliente que pida el rol `approver` sin ella recibe solo `observe`. Una conexión de anfitrión (`host`) no recibe `control` ni `approve`.
+Pre-release (`npm install -g stratum-cli@beta`) del **plano de control local**: `stratumd`, un daemon por usuario que ve todas tus sesiones vivas —las suyas y las de cada terminal con `chat` o `run`—, las deja pausar, redirigir y aprobar desde otro sitio, y recibe una sesión de `chat` viva sin perder su contexto. Es la versión de la CLI que necesita **Stratum Dot 0.1.0**, la app de escritorio que se publica a la vez como pre-release (release `dot-v0.1.0`). El Stratum Protocol v1 aún no está congelado: entre pre-releases puede cambiar.
 
 ### Añadido
+- **`stratumd`, el plano de control local** (`stratum daemon run|start|stop|status`): un proceso por usuario, solo por named pipe (Windows) o unix socket (Linux/macOS), sin TCP, con su `endpoint.json` y su token en `~/.stratum/daemon/`. Puede alojar sesiones propias, que siguen vivas aunque cierres la terminal o el cliente que las abrió. La referencia del protocolo está en [`docs/protocol.md`](../docs/protocol.md).
+- **`stratum run` y `stratum chat` se publican en el daemon si hay uno en marcha** (anfitrión par): la sesión sigue viviendo en su terminal y el daemon solo tiene una proyección. Sin daemon, la CLI funciona exactamente igual; nunca lo arranca sola (`daemon.autoStart: false`).
+- **`stratum ps [--json] [--watch]`**: las sesiones vivas que conoce el daemon, con estado, perfil, modelo, anfitrión y lo que tienen pendiente.
+- **Pausa cooperativa del run**: `runs.pause`/`runs.resume` desde otro cliente; el agente se detiene en el siguiente punto seguro (nunca a mitad de una tool) y lo publica como `paused`.
+- **Traspaso de una sesión viva** (`/detach` en el chat, `stratum detach <id>`): una sesión de `chat` pasa al daemon con el mismo id, la misma conversación y el mismo contexto del agente, y sobrevive a su terminal. **`stratum attach <id>`** la retoma como cliente desde cualquier terminal (`/pause`, `/resume`, `/cancel`, `/pending`).
 - **Centro de aprobaciones en `stratumd`**: las confirmaciones, las preguntas del agente y los planes de cualquier sesión —alojada en el daemon o en una terminal con `chat`/`run`— se listan y se resuelven desde otro cliente. Gana la primera respuesta válida; si es la remota, el prompt de la terminal se retira, y si es la de la terminal, la remota recibe `ALREADY_RESOLVED`. Cada resolución dice quién la tomó (evento, traza y `exec-audit.jsonl`).
 - **`stratum approvals [list|approve|deny|answer|set-key]`**: ver y contestar lo pendiente desde otra terminal. Resolver pide la clave de aprobador por la terminal, sin eco.
 - `tools.guardedCommands` admite `confirm-always`: se confirma cada vez, sin que la política de la sesión lo levante.
 - `daemon.approvalTimeoutMinutes` (10): una solicitud que nadie tiene delante caduca a denegar. Con una terminal delante no caduca.
 - Las sesiones alojadas en el daemon ya pueden pedir confirmación (antes denegaban todo lo destructivo), si el daemon tiene una clave de aprobador.
 
+### Cambios a tener en cuenta
+- **Licencia**: el proyecto pasa de MIT a **Apache-2.0**.
+- **`git push` pide confirmación** (`tools.guardedCommands.gitPush`, default `confirm`). Antes pasaba sin preguntar. En `stratum chat` aparece la confirmación de siempre; **`stratum run` sin terminal lo deniega**: una automatización que hacía `git push` deja de hacerlo. Para volver al comportamiento anterior: `"tools": { "guardedCommands": { "gitPush": "allow" } }` en `.stratumrc.json`, o `--allow-destructive` en esa invocación.
+- **Un push forzado se confirma siempre** (`gitPushForce`, default `confirm-always`): `--force`, `-f`, `--force-with-lease`, `--force-if-includes`, `--mirror` o un refspec con `+` (`git push origin +main`). Ni `--allow-destructive` ni «permitir todo» lo aprueban, y sin terminal se bloquea. Una config que ya fijaba `gitPushForce` conserva su valor.
+- **El token del daemon ya no da derecho a aprobar.** La capacidad `approve` del Stratum Protocol exige una clave de aprobador (`stratum approvals set-key`); un cliente que pida el rol `approver` sin ella recibe solo `observe`. Una conexión de anfitrión (`host`) no recibe `control` ni `approve`.
+
 ### Seguridad
+- En Linux/macOS la carpeta del daemon queda en `0700` (si sigue accesible a otros, no arranca) y su socket, `endpoint.json` y `approver.json` en `0600`; el socket nunca queda suelto en un directorio compartido. En Windows heredan la ACL del perfil y la barrera es el token. Un proceso de tu mismo usuario sigue pudiendo conectarse: el modelo de amenaza está en `docs/protocol.md` §15 y `docs/dot.md` §14.3.
 - Guardas contra la auto-aprobación: `~/.stratum/daemon/` es ruta bloqueada para el agente (tools de fichero y shell) y `stratum approvals | daemon | attach` se vetan cuando los lanza el agente. Son una capa, no un aislamiento: un proceso que corre como tu usuario sigue en tu mismo dominio de confianza (`docs/protocol.md` §15.3).
 
 ## [0.8.0] — 2026-10-12

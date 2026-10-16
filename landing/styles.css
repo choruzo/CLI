@@ -450,6 +450,44 @@ li.next .h-id { color: var(--dim); }
 .desk-card h4 { margin: 0 0 6px; font-size: 13px; }
 .desk-card p { margin: 0; color: var(--muted); font-size: 12px; }
 
+/* ─── Stratum Dot ────────────────────────────────────────────── */
+.prerelease {
+  border: 1px solid var(--accent); background: var(--accent-soft); border-radius: var(--radius);
+  padding: 10px 14px; margin: 0 0 14px; font-size: 13px; line-height: 1.55; color: var(--text);
+}
+.prerelease b:first-child { color: var(--accent); }
+.pre-tag {
+  display: inline-block; font-family: var(--mono); font-size: 10px; letter-spacing: .04em; text-transform: uppercase;
+  color: var(--accent); border: 1px solid currentColor; border-radius: 4px; padding: 0 5px; vertical-align: middle;
+}
+.dot-win .desk-bar { display: flex; gap: 10px; align-items: center; }
+.dot-win .desk-bar .dim { margin-left: auto; font-size: 11px; }
+.dot-win .desk-body { grid-template-columns: 250px minmax(0, 1fr); }
+.dot-row { display: flex; flex-direction: column; gap: 1px; padding: 7px 8px; border-radius: 6px; color: var(--muted); font-size: 12px; }
+.dot-row b { color: var(--text); font-weight: 500; }
+.dot-row.on { background: var(--accent-soft); }
+.dot-row .st { font-family: var(--mono); font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+.st.wait { color: var(--accent); }
+.st.run { color: var(--blue); }
+.st.paused { color: var(--purple); }
+.dot-head { display: flex; flex-wrap: wrap; gap: 4px 12px; align-items: baseline; }
+.dot-head .dim { font-size: 12px; }
+.dot-ctl { margin-left: auto; font-family: var(--mono); font-size: 11px; color: var(--muted); }
+.dot-tabs { display: flex; gap: 14px; border-bottom: 1px solid var(--border); font-size: 12px; color: var(--dim); }
+.dot-tabs span { padding: 0 0 6px; }
+.dot-tabs .on { color: var(--text); border-bottom: 2px solid var(--accent); }
+.dot-card { border: 1px solid var(--accent); border-radius: 8px; padding: 10px 12px; background: var(--surface); max-width: 560px; }
+.dot-card pre { margin: 6px 0 8px; font-family: var(--mono); font-size: 12px; color: var(--text); white-space: pre-wrap; overflow-wrap: anywhere; }
+.dot-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; font-size: 11px; }
+.btn-mini { border: 1px solid var(--border-2); border-radius: 5px; padding: 2px 10px; font-size: 12px; color: var(--text); }
+.btn-mini.ok { border-color: var(--green); color: var(--green); }
+.graph li.dot .rail::before { background: color-mix(in srgb, var(--purple) 40%, var(--border-2)); }
+li.dot .h-id { color: var(--purple); }
+@media (max-width: 720px) {
+  .dot-win .desk-body { grid-template-columns: minmax(0, 1fr); }
+  .dot-win .desk-side { border-right: 0; border-bottom: 1px solid var(--border); }
+}
+
 /* ─── Capturas ───────────────────────────────────────────────── */
 .shots { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; }
 .shots figure { margin: 0; min-width: 0; }

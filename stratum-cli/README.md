@@ -138,7 +138,15 @@ stratum eval run [--mock] [ids...]      Ejecuta escenarios y los puntúa desde l
 stratum eval baseline save [nombre]     Guarda una ejecución como referencia con nombre
 stratum eval compare <base> [head]      Regresiones entre dos ejecuciones (exit 1 si las hay)
 stratum stats [--days n]                Estadísticas locales de tus sesiones
+stratum daemon run|start|stop|status    Plano de control local (stratumd)          [beta]
+stratum ps [--json] [--watch]           Sesiones vivas que conoce el daemon        [beta]
+stratum approvals list|approve|deny|answer|set-key   Lo que esperan las sesiones   [beta]
+stratum detach <id> · attach <id>       Pasar una sesión de chat al daemon y retomarla [beta]
 ```
+
+Con `stratumd` en marcha, `chat` y `run` se publican en él y se pueden seguir, pausar y aprobar
+desde otra terminal o desde **Stratum Dot** (app de escritorio, pre-release). Sin daemon, nada
+cambia. Protocolo y modelo de amenaza: [`docs/protocol.md`](https://github.com/choruzo/CLI/blob/main/docs/protocol.md).
 
 `stratum eval` y `stratum stats` trabajan solo con las trazas locales (sin telemetría): formato de
 escenarios, métricas y uso en [`docs/eval.md`](docs/eval.md).
@@ -158,6 +166,7 @@ Dentro de `stratum chat`:
 /memory list|search|forget   Memoria de decisiones desde el chat
 /tools                       Tools disponibles, incluidas las MCP
 /context · /compact · /clear Gestión del contexto de la conversación
+/detach                      Pasa la sesión viva a stratumd (sigue sin esta terminal)  [beta]
 ```
 
 ## Enlaces

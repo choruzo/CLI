@@ -36,8 +36,9 @@
           <li><a href="#novedades" data-win="novedades">3:novedades</a></li>
           <li><a href="#actividad" data-win="actividad">4:log</a></li>
           <li><a href="#desktop" data-win="desktop">5:desktop</a></li>
-          <li><a href="#trayectoria" data-win="trayectoria">6:trazas</a></li>
-          <li><a href="#roadmap" data-win="roadmap">7:roadmap</a></li>
+          <li><a href="#dot" data-win="dot">6:dot β</a></li>
+          <li><a href="#trayectoria" data-win="trayectoria">7:trazas</a></li>
+          <li><a href="#roadmap" data-win="roadmap">8:roadmap</a></li>
         </ul>
       </div>
       <ul class="tmux-windows" role="list">
@@ -56,7 +57,7 @@
       <div class="wrap">
         <h1 class="logo" id="logo">STRATUM</h1>
         <p class="tagline">
-          <span class="dim">v</span><span id="hero-version">0.7.0</span>
+          <span class="dim">v</span><span id="hero-version">0.8.0</span>
           <span class="sep">·</span> extensible <span class="sep">·</span> local-first <span class="sep">·</span> provider-agnostic
         </p>
         <p class="lede">
@@ -64,6 +65,11 @@
           plan-and-execute, subagentes en paralelo, memoria persistente en tres capas y ejecución
           local o remota bajo guardas que no se pueden desactivar. Funciona con cualquier API
           OpenAI-compatible: Ollama, llama.cpp, vLLM, LiteLLM u OpenAI.
+        </p>
+        <p class="lede">
+          <span class="pre-tag">nuevo · pre-release</span> <code>stratumd</code>, el plano de control local, y
+          <a href="#dot"><b>Stratum Dot</b></a>: todas tus sesiones vivas, sus aprobaciones y su chat en una
+          ventana de escritorio.
         </p>
 
         <div class="boot" id="boot" aria-live="polite">
@@ -81,6 +87,7 @@
           <a class="btn" href="./guias.html#cli-instalacion">[ opciones del instalador ]</a>
           <a class="btn" href="https://github.com/choruzo/CLI" target="_blank" rel="noreferrer">[ github ↗ ]</a>
           <a class="btn" href="https://www.npmjs.com/package/stratum-cli" target="_blank" rel="noreferrer">[ npm ↗ ]</a>
+          <a class="btn" href="#dot">[ stratum dot · β ]</a>
           <a class="btn" href="#demo">[ probar la demo ]</a>
           <a class="btn" href="./guias.html">[ guías ]</a>
           <a class="btn" href="./control.html">[ evaluación y guardas ]</a>
@@ -94,12 +101,13 @@
         <div class="wrap">
           <h2 class="cmd" id="h-status" data-cmd="stratum status">stratum status</h2>
           <div class="kpis" id="kpis">
-            <div class="kpi"><span class="k">versión npm</span><span class="v" id="k-version">0.7.0</span><span class="s" id="k-version-src">snapshot</span></div>
+            <div class="kpi"><span class="k">versión npm</span><span class="v" id="k-version">0.8.0</span><span class="s" id="k-version-src">snapshot</span></div>
             <div class="kpi"><span class="k">hito actual</span><span class="v">17 <span class="ok">✓</span></span><span class="s">entornos y read-only</span></div>
             <div class="kpi"><span class="k">commits</span><span class="v" id="k-commits">—</span><span class="s" id="k-commits-30">— en 30 días</span></div>
             <div class="kpi"><span class="k">líneas</span><span class="v"><span class="add" id="k-add">+0</span></span><span class="s"><span class="del" id="k-del">−0</span> borradas</span></div>
             <div class="kpi"><span class="k">tests</span><span class="v">1908 <span class="ok">✓</span></span><span class="s">130 ficheros · vitest</span></div>
-            <div class="kpi"><span class="k">desktop</span><span class="v">D7</span><span class="s">de D0–D8 · v0.3.0 instalable</span></div>
+            <div class="kpi"><span class="k">desktop</span><span class="v">D7</span><span class="s">de D0–D8 · v0.4.0 instalable</span></div>
+            <div class="kpi"><span class="k">dot</span><span class="v">0.1.0 <span class="pre-tag">β</span></span><span class="s">plano de control M0–M10</span></div>
             <div class="kpi"><span class="k">último commit</span><span class="v" id="k-last">—</span><span class="s" id="k-last-sha">—</span></div>
             <div class="kpi"><span class="k">días de proyecto</span><span class="v" id="k-days">—</span><span class="s">desde 2026-05-27</span></div>
           </div>
@@ -154,11 +162,17 @@
               <span class="bar" id="bar-desktop"></span>
               <span class="progress-num" id="num-desktop"></span>
             </div>
+            <div class="progress" aria-label="Progreso del plano de control y Dot">
+              <span class="progress-label">dot</span>
+              <span class="bar" id="bar-dot"></span>
+              <span class="progress-num" id="num-dot"></span>
+            </div>
           </div>
           <div class="filters" role="group" aria-label="Filtrar hitos" id="hito-filters">
             <button type="button" class="chip on" data-f="all">--all</button>
             <button type="button" class="chip" data-f="cli">--cli</button>
             <button type="button" class="chip" data-f="desktop">--desktop</button>
+            <button type="button" class="chip" data-f="dot">--dot</button>
             <button type="button" class="chip" data-f="next">--pendientes</button>
           </div>
           <ol class="graph" id="graph"></ol>
@@ -169,7 +183,7 @@
       <section class="section" id="novedades" aria-labelledby="h-nov">
         <div class="wrap">
           <h2 class="cmd" id="h-nov" data-cmd="stratum changelog --since v0.4.0">stratum changelog --since v0.4.0</h2>
-          <p class="note">Lo último: <code>stratum eval</code> y unas guardas de comandos más difíciles de esquivar, con <a href="./control.html">página propia</a>; antes, el Hito 17 de la CLI (v0.5.0), una ronda de endurecimiento que sale en v0.6.0 y v0.7.0, y Stratum Desktop de D5 a D7, ya con instaladores y auto-update.</p>
+          <p class="note">Lo último: el <b>plano de control</b> —<code>stratumd</code>, aprobaciones desde otro sitio, pausa y traspaso de sesiones— en la CLI 0.9.0-beta.0, y <a href="#dot">Stratum Dot 0.1.0</a>, su app de escritorio, ambos en pre-release. Antes: <code>stratum eval</code> y unas guardas de comandos más difíciles de esquivar, con <a href="./control.html">página propia</a>; antes, el Hito 17 de la CLI (v0.5.0), una ronda de endurecimiento que sale en v0.6.0 y v0.7.0, y Stratum Desktop de D5 a D7, ya con instaladores y auto-update.</p>
 
           <div class="releases" id="releases"></div>
 
@@ -252,6 +266,82 @@
             </div>
           </div>
           <div class="desk-grid" id="desk-grid"></div>
+        </div>
+      </section>
+
+      <!-- DOT -->
+      <section class="section" id="dot" aria-labelledby="h-dot">
+        <div class="wrap">
+          <h2 class="cmd" id="h-dot" data-cmd="stratum daemon start && stratum ps --watch">stratum daemon start &amp;&amp; stratum ps --watch</h2>
+          <div class="prerelease" role="note">
+            <b>⚠ pre-release experimental</b> · Stratum Dot 0.1.0 es la primera versión pública y <b>puede hacer
+            cosas raras</b>: estados que tardan en reflejarse, ventanas fuera de sitio o cortes con el daemon. El
+            protocolo aún no está congelado. Instaladores sin firmar (SmartScreen avisará) y sin auto-update.
+            <a href="https://github.com/choruzo/CLI/issues" target="_blank" rel="noreferrer">Cuéntanos lo que veas ↗</a>
+          </div>
+          <p class="note">
+            <b>Stratum Dot</b> es el cockpit de escritorio de <code>stratumd</code>, el plano de control local que
+            llega con la CLI 0.9.0-beta: una ventana pequeña y un icono en la bandeja para ver <b>todas tus sesiones
+            vivas</b> —las del daemon y las de cada terminal con <code>chat</code> o <code>run</code>—, conversar con
+            el agente, pausarlo o redirigirlo y <b>aprobar lo que te pide</b> sin volver a la terminal. Es un cliente
+            del Stratum Protocol y nada más: cerrarlo no para ninguna sesión.
+          </p>
+          <div class="desk dot-win" aria-label="Recreación de la ventana de Stratum Dot">
+            <div class="desk-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Stratum Dot</span><span class="dim">● stratumd</span></div>
+            <div class="desk-body">
+              <aside class="desk-side">
+                <div class="desk-new">＋ New chat <span class="dim">Ctrl+N</span></div>
+                <div class="desk-group">sessions · 3</div>
+                <div class="dot-row on"><span class="st wait">● waiting approval</span><b>Migrar la base de datos</b><span class="dim">cli (peer) · infra · 4m</span></div>
+                <div class="dot-row"><span class="st run">● running</span><b>Revisar el diff de hoy</b><span class="dim">daemon · review · 1m</span></div>
+                <div class="dot-row"><span class="st paused">❚❚ paused</span><b>Informe de logs</b><span class="dim">daemon · code · 12m</span></div>
+              </aside>
+              <div class="desk-main">
+                <div class="dot-head"><b>Migrar la base de datos</b><span class="dim">qwen3.6 · ~/infra · cli (peer)</span><span class="dot-ctl">❚❚ Pause · ✕ Cancel</span></div>
+                <div class="dot-tabs"><span class="on">Chat</span><span>Activity</span></div>
+                <div class="desk-msg user">Aplica la migración 0042 en staging y comprueba que el servicio arranca</div>
+                <div class="desk-msg bot">
+                  <div class="tool"><span class="ok">✓</span> exec <span class="dim">ssh:staging-db · pg_dump --schema-only</span></div>
+                  <div class="tool"><span class="run">◐</span> exec <span class="dim">ssh:staging-db · psql -f 0042_users.sql</span></div>
+                </div>
+                <div class="dot-card">
+                  <div><b>Approval</b> <span class="dim">· exec en ssh:staging-db · entorno staging</span></div>
+                  <pre>psql -f migrations/0042_users.sql</pre>
+                  <div class="dot-actions"><span class="btn-mini ok">Approve</span><span class="btn-mini">Deny</span><span class="dim">se confirma en una ventana nativa</span></div>
+                </div>
+                <div class="desk-input">Steer the run… <span class="dim">Ctrl+K · ⏎</span></div>
+              </div>
+            </div>
+          </div>
+          <div class="desk-grid" id="dot-grid"></div>
+          <div class="traj-how">
+            <div class="panel">
+              <div class="panel-head"><span>instalar</span><span class="dim">windows · linux</span></div>
+              <pre class="traj-pre"><span class="dim"># 1. la CLI con el daemon (canal beta)</span>
+npm install -g stratum-cli@beta
+
+<span class="dim"># 2. una clave para aprobar desde Dot (opcional)</span>
+stratum approvals set-key
+
+<span class="dim"># 3. el instalador: .exe · .deb · .AppImage</span>
+github.com/choruzo/CLI/releases/tag/dot-v0.1.0</pre>
+              <p class="traj-p"><a class="btn" href="https://github.com/choruzo/CLI/releases/tag/dot-v0.1.0" target="_blank" rel="noreferrer">[ descargar dot 0.1.0 · pre-release ↗ ]</a></p>
+            </div>
+            <div class="panel">
+              <div class="panel-head"><span>desde la terminal</span><span class="dim">el mismo plano de control</span></div>
+              <pre class="traj-pre"><span class="dim"># sesiones vivas, también sin Dot</span>
+stratum ps --watch
+
+<span class="dim"># lo que esperan, y contestarlo</span>
+stratum approvals list
+stratum approvals approve &lt;id&gt;
+
+<span class="dim"># pasar un chat vivo al daemon y retomarlo</span>
+/detach                     <span class="dim"># dentro de stratum chat</span>
+stratum attach &lt;session-id&gt;</pre>
+            </div>
+          </div>
+          <p class="note dim">Limitaciones de esta versión: probada sobre todo en Windows 11 (en Linux faltan la bandeja y las ventanas nativas en un escritorio real; sin macOS), no cierra sesiones ni lista las guardadas, la conversación no sobrevive a reiniciar el daemon y algunas tools se ven con un estado engañoso (<code>question</code> como <i>Interrupted</i>). Detalle en <a href="https://github.com/choruzo/CLI/blob/main/docs/dot.md" target="_blank" rel="noreferrer">docs/dot.md</a>.</p>
         </div>
       </section>
 
