@@ -14,6 +14,12 @@
 import { z } from 'zod';
 import { PROTOCOL_ERROR_CODES } from './errors.js';
 import {
+  HANDOFF_FORMAT,
+  HANDOFF_LIMITS,
+  type ProtocolAgentMessage,
+  type ProtocolHandoffContext,
+} from './handoff.js';
+import {
   EVENT_CLASS,
   type ProtocolEvent,
   type ProtocolOverviewSnapshot,
@@ -557,6 +563,61 @@ export const overviewSnapshotSchema: z.ZodType<ProtocolOverviewSnapshot> = z.obj
 // Parámetros (strict) y resultados (tolerantes) de cada método
 // ---------------------------------------------------------------------------
 
+// ---------------------------------------------------------------------------
+// Traspaso (M10)
+// ---------------------------------------------------------------------------
+
+const agentMessage: z.ZodType<ProtocolAgentMessage> = z
+  .object({
+    role: z.enum(['system', 'user', 'assistant', 'tool']),
+    content: z.string().nullable(),
+    toolCalls: z
+      .array(
+        // Un nombre vacío (un modelo que lo inventó) es historial válido: no impide traspasar.
+        z
+          .object({
+            id: z.string().max(LIMITS.idChars * 4),
+            name: z.string().max(LIMITS.nameChars),
+            arguments: z.string(),
+          })
+          .strict(),
+      )
+      .optional(),
+    toolCallId: z
+      .string()
+      .max(LIMITS.idChars * 4)
+      .optional(),
+    name: z.string().max(LIMITS.nameChars).optional(),
+  })
+  .strict();
+
+/**
+ * El contexto que entrega un anfitrión par al traspasar su sesión. Es una
+ * entrada (alguien la manda): `strict()`, y se valida **entera** al reunir los
+ * trozos, antes de montar nada con ella.
+ */
+export const handoffContextSchema: z.ZodType<ProtocolHandoffContext> = z
+  .object({
+    format: z.literal(HANDOFF_FORMAT),
+    sessionId: id,
+    cwd: z.string().min(1).max(LIMITS.pathChars),
+    provider: name,
+    model: name,
+    agent: name.nullable(),
+    readOnly: z.boolean(),
+    sessionProfile: name,
+    planRef: z.string().min(1).max(LIMITS.pathChars).nullable(),
+    usage: z
+      .object({
+        toolCalls: count,
+        tokens: count.nullable(),
+        tokenStatus: z.enum(['reported', 'unavailable', 'unsupported']),
+      })
+      .strict(),
+    messages: z.array(agentMessage).min(1).max(HANDOFF_LIMITS.maxMessages),
+  })
+  .strict();
+
 const sessionRef = z.object({ sessionId: id }).strict();
 const sessionMutation = z.object({ sessionId: id, operationId }).strict();
 const subscriptionRef = z.object({ subscriptionId: id }).strict();
@@ -625,6 +686,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'sessions.setModel': z.object({ sessionId: id, model: name, operationId }).strict(),
   'sessions.setAgent': z.object({ sessionId: id, agent: name.nullable(), operationId }).strict(),
   'sessions.setReadOnly': z.object({ sessionId: id, readOnly: z.boolean(), operationId }).strict(),
+  'sessions.detach': sessionMutation,
 
   'runs.list': z
     .object({ sessionId: id.optional(), active: z.boolean().optional(), limit: limit.optional() })
@@ -696,6 +758,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'host.publish': z
     .object({
       sessionId: id,
+      epoch: z.number().int().positive(),
       snapshot: sessionSnapshotSchema.optional(),
       events: z.array(eventSchema).max(LIMITS.publishBatch),
     })
@@ -705,6 +768,31 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       path: ['events'],
     }),
   'host.unregister': sessionMutation,
+  'host.handoffBegin': z
+    .object({
+      sessionId: id,
+      epoch: z.number().int().positive(),
+      seq,
+      format: z.literal(HANDOFF_FORMAT),
+      chunks: z.number().int().positive().max(HANDOFF_LIMITS.maxChunks),
+      chars: z.number().int().positive().max(HANDOFF_LIMITS.maxChars),
+      operationId,
+    })
+    .strict(),
+  'host.handoffChunk': z
+    .object({
+      sessionId: id,
+      handoffId: id,
+      index: z
+        .number()
+        .int()
+        .nonnegative()
+        .max(HANDOFF_LIMITS.maxChunks - 1),
+      data: z.string().min(1).max(HANDOFF_LIMITS.chunkChars),
+    })
+    .strict(),
+  'host.handoffCommit': z.object({ sessionId: id, handoffId: id }).strict(),
+  'host.handoffAbort': z.object({ sessionId: id, handoffId: id }).strict(),
 
   'host.cancel': runRef,
   'host.pause': runRef,
@@ -731,6 +819,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       by: resolver,
     })
     .strict(),
+  'host.detach': sessionRef,
 };
 
 export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeDef, unknown> } = {
@@ -754,6 +843,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'sessions.setModel': sessionResult,
   'sessions.setAgent': sessionResult,
   'sessions.setReadOnly': sessionResult,
+  'sessions.detach': z.object({
+    status: z.enum(['detached', 'already-daemon']),
+    session: sessionSchema,
+  }),
 
   'runs.list': z.object({ runs: z.array(runSchema) }),
   'runs.get': runResult,
@@ -783,9 +876,16 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'trace.subscribe': z.object({ subscriptionId: id }),
   'trace.unsubscribe': emptyResult,
 
-  'host.register': z.object({ claim: z.string().min(16).max(128) }),
+  'host.register': z.object({
+    claim: z.string().min(16).max(128),
+    epoch: z.number().int().positive(),
+  }),
   'host.publish': emptyResult,
   'host.unregister': emptyResult,
+  'host.handoffBegin': z.object({ handoffId: id }),
+  'host.handoffChunk': emptyResult,
+  'host.handoffCommit': z.object({ session: sessionSchema, epoch: z.number().int().positive() }),
+  'host.handoffAbort': emptyResult,
 
   'host.cancel': cancelResult,
   'host.pause': pauseResult,
@@ -794,6 +894,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'host.resolveApproval': emptyResult,
   'host.answerQuestions': emptyResult,
   'host.decidePlan': emptyResult,
+  'host.detach': z.object({ status: z.literal('detached') }),
 };
 
 export const NOTIFICATION_PARAMS: {

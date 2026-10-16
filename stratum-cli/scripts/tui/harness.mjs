@@ -43,6 +43,8 @@ export const KEYS = {
  * - `files`: `{ 'ruta/relativa': 'contenido' }` a crear en el proyecto temporal.
  * - `homeFiles`: lo mismo, dentro del HOME temporal (antes de lanzar el proceso).
  * - `env`: variables extra para el proceso.
+ * - `beside`: otro terminal ya lanzado; este usa su HOME y su proyecto (un
+ *   segundo proceso de la misma persona) y al cerrarse no los borra.
  */
 export function launch({
   config = null,
@@ -52,8 +54,9 @@ export function launch({
   files = {},
   homeFiles = {},
   env = {},
+  beside = null,
 } = {}) {
-  const root = mkdtempSync(join(tmpdir(), 'stratum-tui-'));
+  const root = beside ? beside.root : mkdtempSync(join(tmpdir(), 'stratum-tui-'));
   const home = join(root, 'home');
   const project = join(root, 'project');
   mkdirSync(join(home, '.stratum'), { recursive: true });
@@ -257,6 +260,7 @@ export function launch({
         while (!exited && Date.now() - t0 < 3000) await sleep(50);
       }
       term.dispose();
+      if (beside) return;
       for (let i = 0; i < 5; i++) {
         try {
           rmSync(root, { recursive: true, force: true });

@@ -786,6 +786,7 @@ describe('M4 — sesión de la CLI (anfitrión par)', () => {
       data,
     });
     await evil.request('host.publish', {
+      epoch: 1,
       sessionId: evilId,
       events: [
         event(
@@ -799,6 +800,7 @@ describe('M4 — sesión de la CLI (anfitrión par)', () => {
     expect(
       await code(
         evil.request('host.publish', {
+          epoch: 1,
           sessionId: evilId,
           events: [event(forged.seq + 2, { approval }, 'approval.requested')] as never,
         }),
@@ -820,6 +822,7 @@ describe('M4 — sesión de la CLI (anfitrión par)', () => {
 
     // Ya resuelta (denegada): fabricar ahora un «aprobada» no reescribe cómo acabó…
     await evil.request('host.publish', {
+      epoch: 1,
       sessionId: evilId,
       events: [
         event(
@@ -859,6 +862,7 @@ describe('M4 — sesión de la CLI (anfitrión par)', () => {
     await asking.operator.request('runs.start', { sessionId: asking.sessionId, input: 'pregunta' });
     const question = (await untilType(asking.w, 'question.requested')).data.request;
     await evil.request('host.publish', {
+      epoch: 1,
       sessionId: evilId,
       events: [
         event(forged.seq + 4, { requestId: question.id, answers: null }, 'question.resolved'),

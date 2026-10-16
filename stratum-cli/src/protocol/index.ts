@@ -15,3 +15,4 @@ export * from './methods.js';
 export * from './transcript.js';
 export * from './reduce.js';
 export * from './resolve.js';
+export * from './handoff.js';

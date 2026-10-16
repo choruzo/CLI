@@ -135,6 +135,11 @@ export interface StratumAgentOptions {
    * cae a `auto` con aviso en `takeResumeNotice()`.
    */
   sessionProfile?: string;
+  /**
+   * M10 — contadores de una sesión que continúa en otro anfitrión (traspaso al
+   * daemon). Los tokens, solo si el backend los había reportado: nunca se estiman.
+   */
+  usage?: { toolCalls: number; tokens: number | null; tokenStatus: TokenStatus };
 }
 
 /** Qué abrió un turno: una entrada al agente principal o una delegación directa (`@perfil`). */
@@ -291,6 +296,11 @@ export class StratumAgent {
       this.skillsBlock = '';
     }
 
+    if (options?.usage) {
+      this._toolCallCount = options.usage.toolCalls;
+      this._tokenStatus = options.usage.tokenStatus;
+      if (options.usage.tokenStatus === 'reported') this._sessionTokens = options.usage.tokens ?? 0;
+    }
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {
       this._resumePlan = options.resumePlan;
@@ -506,6 +516,11 @@ export class StratumAgent {
     } catch {
       /* la memoria es auxiliar: un fallo nunca debe afectar a la sesión */
     }
+  }
+
+  /** ¿Hay trabajo en segundo plano en vuelo (la extracción de memoria)? */
+  get hasBackgroundWork(): boolean {
+    return this.background.size > 0;
   }
 
   /**

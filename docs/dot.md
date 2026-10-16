@@ -13,7 +13,9 @@ espera de una persona**: aprobaciones, preguntas y planes.
 > de aprobar separada de su conexión normal y mantenida fuera del webview (§13). M9 lo
 > endurece (§14): **cada resolución sensible exige una confirmación nativa**, el lado nativo
 > verifica con el sistema quién atiende el canal antes de enviar credenciales, el endpoint y el
-> socket son privados, y las colas están acotadas. Sin trazas todavía. Contrato:
+> socket son privados, y las colas están acotadas. Con M10 (§15), una sesión de la terminal que
+> pasa a alojarse en el daemon se sigue viendo como **la misma** y se puede conversar con ella.
+> Sin trazas todavía. Contrato:
 > `docs/protocol.md`. Producto: `docs/PRD_STRATUM_DOT.md`.
 
 Las reglas que M8 y M9 no rompen:
@@ -1216,3 +1218,29 @@ Linux) corre además los tests del daemon, protocolo y cliente de la CLI.
 - Probada en Windows (WebView2); en Linux (WebKitGTK) compila y sus tests nativos pasan en CI,
   pero falta probar la ventana en un escritorio real, como la bandeja (Q4).
 - El E2E de la ventana sigue siendo local (tauri-driver).
+
+## 15. Continuidad: una sesión que pasa de su terminal al daemon (M10)
+
+Una sesión de `stratum chat` se puede traspasar viva a `stratumd` (`/detach` en la terminal,
+`stratum detach <id>`, o `sessions.detach` desde un cliente): mismo id, misma conversación,
+mismo contexto del agente (`docs/protocol.md` §18). **Dot no cambia**: ni código nativo, ni
+`dot-link`, ni un estado propio.
+
+- **Es la misma sesión.** El cambio llega como un `session.updated` con `host.kind: 'daemon'`
+  en el `seq` siguiente, por la misma suscripción: la sesión **no desaparece ni reaparece** de
+  la lista, la selección no se pierde y la conversación sigue donde estaba (sale de la foto y
+  de `applySessionEvent`, como siempre).
+- **El campo de escritura cambia solo**: `composerMode` pasaba a *off* («This session lives in a
+  terminal») porque `host.kind` era `peer`; con `daemon`, pasa a *ask* (`runs.start`). La
+  etiqueta del anfitrión pasa de `cli (peer)` a `daemon`.
+- `detached` sigue significando **perder** al anfitrión (§9 de este documento y
+  `docs/protocol.md` §14.3); un traspaso nunca pasa por ese estado.
+- Dot no ofrece todavía un botón para traspasar (no es necesario para reflejarlo, y añadirlo
+  pasa por la lista blanca de `dot_*` y `MainMethod`).
+
+Tests: `src/protocol/apply.test.ts` (*M10*: el evento de cambio de anfitrión mantiene id,
+conversación y run, y el campo pasa a preguntar) y `npm run smoke:detach` (`stratum chat` en un
+terminal real + `dot-probe` contra un `stratumd` real: la sesión no sale de la lista durante el
+traspaso, no hay `session.closed`/`session.opened`, la foto conserva la conversación y Dot le
+escribe ya en el daemon con el contexto de la terminal; cerrar Dot no la toca).
+

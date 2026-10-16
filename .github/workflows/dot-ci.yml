@@ -121,6 +121,10 @@ jobs:
         working-directory: stratum-dot
         run: npm run smoke:terminal
 
+      - name: A chat session handed over to stratumd, seen from Dot (M10)
+        working-directory: stratum-dot
+        run: npm run smoke:detach
+
       - name: Build the app (debug, no bundle)
         working-directory: stratum-dot
         run: |

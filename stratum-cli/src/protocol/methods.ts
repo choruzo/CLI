@@ -18,6 +18,7 @@ import type {
   ProtocolSession,
 } from './model.js';
 import type { ProtocolEvent, ProtocolOverviewSnapshot, ProtocolSessionSnapshot } from './events.js';
+import type { HANDOFF_FORMAT } from './handoff.js';
 
 /**
  * Métodos del protocolo: nombre, parámetros, resultado, capacidad que exigen y
@@ -109,6 +110,12 @@ export interface SessionsOpenParams extends Mutation {
   sessionProfile?: string;
 }
 
+/**
+ * Cómo quedó un `sessions.detach`. `detached`: este traspaso la ha pasado al
+ * daemon. `already-daemon`: ya la alojaba el daemon (no ha cambiado nada).
+ */
+export type DetachStatus = 'detached' | 'already-daemon';
+
 // --- runs -------------------------------------------------------------------
 
 export interface RunsStartParams extends Mutation {
@@ -178,8 +185,20 @@ export interface HostRegisterParams extends Mutation {
   claim?: string;
 }
 
+export interface HostRegisterResult {
+  claim: string;
+  /**
+   * Época de propiedad que el servidor da a este anfitrión para esta sesión.
+   * Va en cada `host.publish`: tras un traspaso la sesión tiene otra y lo que
+   * publique con esta se rechaza (`STALE_STATE`, `stale-epoch`).
+   */
+  epoch: number;
+}
+
 export interface HostPublishParams {
   sessionId: string;
+  /** La época que devolvió `host.register`. */
+  epoch: number;
   /**
    * Foto autoritativa: sustituye el estado que el servidor tuviera. El
    * anfitrión la envía cuando perdió eventos (su cola se llenó). Los eventos
@@ -197,6 +216,22 @@ export interface HostResolveApprovalParams {
   /** Frase tecleada, si la solicitud lleva `confirmPhrase`. El anfitrión la comprueba. */
   phrase?: string;
   by: ProtocolResolver;
+}
+
+/**
+ * Empieza a traspasar al servidor una sesión que aloja esta conexión (M10). El
+ * anfitrión ya ha dejado de empezar trabajo nuevo y ha publicado todo hasta
+ * `seq`; el contexto llega después en `chunks` trozos (`host.handoffChunk`).
+ */
+export interface HostHandoffBeginParams extends Mutation {
+  sessionId: string;
+  epoch: number;
+  /** Último `seq` publicado: el servidor tiene que estar exactamente ahí. */
+  seq: number;
+  format: typeof HANDOFF_FORMAT;
+  chunks: number;
+  /** Longitud total del contexto serializado. */
+  chars: number;
 }
 
 /** Una entrada de la tabla de métodos, como tipo. */
@@ -228,6 +263,15 @@ export interface ProtocolMethods {
   'sessions.setReadOnly': Spec<
     Mutation & { sessionId: string; readOnly: boolean },
     { session: ProtocolSession }
+  >;
+  /**
+   * Pasa una sesión de su anfitrión par al daemon, sin cambiar de id ni perder
+   * contexto (M10). Lo hace el par: el servidor se lo pide y comprueba el
+   * resultado. `BUSY`/`NOT_TRANSFERABLE` con el motivo si no se puede.
+   */
+  'sessions.detach': Spec<
+    Mutation & { sessionId: string },
+    { status: DetachStatus; session: ProtocolSession }
   >;
 
   'runs.list': Spec<
@@ -293,9 +337,23 @@ export interface ProtocolMethods {
   'trace.unsubscribe': Spec<{ subscriptionId: string }, Empty>;
 
   // Anfitrión par → servidor.
-  'host.register': Spec<HostRegisterParams, { claim: string }>;
+  'host.register': Spec<HostRegisterParams, HostRegisterResult>;
   'host.publish': Spec<HostPublishParams, Empty>;
   'host.unregister': Spec<Mutation & { sessionId: string }, Empty>;
+  'host.handoffBegin': Spec<HostHandoffBeginParams, { handoffId: string }>;
+  'host.handoffChunk': Spec<
+    { sessionId: string; handoffId: string; index: number; data: string },
+    Empty
+  >;
+  /**
+   * Cierra el traspaso: el servidor monta la sesión con ese contexto y pasa a
+   * ser su único anfitrión, o falla y el par sigue siéndolo. No hay término medio.
+   */
+  'host.handoffCommit': Spec<
+    { sessionId: string; handoffId: string },
+    { session: ProtocolSession; epoch: number }
+  >;
+  'host.handoffAbort': Spec<{ sessionId: string; handoffId: string }, Empty>;
 
   // Servidor → anfitrión par.
   'host.cancel': Spec<{ sessionId: string; runId?: string }, { status: CancelStatus }>;
@@ -322,6 +380,8 @@ export interface ProtocolMethods {
     },
     Empty
   >;
+  /** Que el anfitrión traspase la sesión al servidor (lo pide `sessions.detach`). */
+  'host.detach': Spec<{ sessionId: string }, { status: 'detached' }>;
 }
 
 export type MethodName = keyof ProtocolMethods;
@@ -368,6 +428,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'sessions.setModel': write('control'),
   'sessions.setAgent': write('control'),
   'sessions.setReadOnly': write('control'),
+  'sessions.detach': write('control'),
 
   'runs.list': read('observe'),
   'runs.get': read('observe'),
@@ -397,6 +458,10 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'host.register': write('host'),
   'host.publish': write('host'),
   'host.unregister': write('host'),
+  'host.handoffBegin': write('host'),
+  'host.handoffChunk': write('host'),
+  'host.handoffCommit': write('host'),
+  'host.handoffAbort': write('host'),
 
   'host.cancel': toHost,
   'host.pause': toHost,
@@ -405,6 +470,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'host.resolveApproval': toHost,
   'host.answerQuestions': toHost,
   'host.decidePlan': toHost,
+  'host.detach': toHost,
 };
 
 export function isMethodName(value: string): value is MethodName {

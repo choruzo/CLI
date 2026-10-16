@@ -61,6 +61,10 @@ export function coalesceAgentEvents(events: AgentEvent[]): AgentEvent[] {
   return result;
 }
 
+/** Lo que ve quien intenta empezar un turno en una sesión que ya no es de este proceso. */
+export const TURN_REFUSED_HANDED_OFF =
+  'This session is being handed off to stratumd (or already is): no new turns here.';
+
 export function useAgentStream(
   agent: StratumAgent,
   dispatch: (action: AppAction) => void,
@@ -73,6 +77,12 @@ export function useAgentStream(
    * compite con una respuesta de otro cliente y se resuelve una sola vez.
    */
   interactions?: PendingInteractions,
+  /**
+   * M10 — abre un turno si la sesión es de este proceso (`SessionOwnership`):
+   * devuelve con qué cerrarlo, o `null` si se está traspasando al daemon o ya
+   * es suya. Sin esto, todo turno se puede empezar.
+   */
+  beginTurn?: () => (() => void) | null,
 ) {
   const abortRef = useRef<AbortController | null>(null);
 
@@ -86,117 +96,132 @@ export function useAgentStream(
         delegateProfile?: string;
       },
     ) => {
-      const controller = new AbortController();
-      abortRef.current = controller;
-
-      dispatch({ type: 'AGENT_START', input: extra?.displayText ?? input });
-
-      const runOptions: RunOptions = {
-        ...(getRunOptions?.() ?? {}),
-        ...(extra?.runOptions ?? {}),
-        signal: controller.signal,
-      };
-      if (interactions) {
-        // Los prompts de este turno son los locales; lo que quede pendiente se
-        // cancela con el turno.
-        interactions.setLocal({
-          ...(runOptions.onConfirmDestructive ? { confirm: runOptions.onConfirmDestructive } : {}),
-          ...(runOptions.onAskQuestions ? { askQuestions: runOptions.onAskQuestions } : {}),
-          ...(runOptions.onApprovePlan ? { approvePlan: runOptions.onApprovePlan } : {}),
-        });
-        const gates = interactions.gatesFor({ signal: controller.signal });
-        runOptions.onConfirmDestructive = gates.confirm;
-        runOptions.onAskQuestions = gates.askQuestions;
-        runOptions.onApprovePlan = gates.approvePlan;
+      // Un turno empieza aquí y solo aquí: con la sesión traspasándose al
+      // daemon (o ya suya) no empieza ninguno.
+      const endTurn = beginTurn ? beginTurn() : () => undefined;
+      if (!endTurn) {
+        dispatch({ type: 'SYSTEM_MESSAGE', text: TURN_REFUSED_HANDED_OFF });
+        return;
       }
-      onTurn?.({
-        input: extra?.displayText ?? input,
-        mode: runOptions.mode === 'plan' ? 'plan' : 'normal',
-      });
-      const events = extra?.delegateProfile
-        ? agent.runDelegate(extra.delegateProfile, input, runOptions)
-        : agent.run(input, runOptions);
-
-      let pending: AgentEvent[] = [];
-      let frameTimer: ReturnType<typeof setTimeout> | null = null;
-      let contextTimer: ReturnType<typeof setTimeout> | null = null;
-      let contextDirty = false;
-      const context = () => {
-        const ctx = agent.getContextUsage();
-        return {
-          used: ctx.used,
-          max: ctx.max,
-          estimated: ctx.estimated,
-          tokens: agent.getTokenUsage(),
-        };
-      };
-      const flush = (includeContext = false) => {
-        if (frameTimer) clearTimeout(frameTimer);
-        frameTimer = null;
-        if (pending.length === 0 && !includeContext) return;
-        const batched = coalesceAgentEvents(pending);
-        pending = [];
-        dispatch({
-          type: 'AGENT_FRAME',
-          events: batched,
-          context: includeContext ? context() : undefined,
-        });
-      };
-      const enqueue = (event: AgentEvent) => {
-        pending.push(event);
-        if (!frameTimer) frameTimer = setTimeout(() => flush(false), STREAM_FRAME_MS);
-      };
-
       try {
-        for await (const event of events) {
-          // Un tool_result se añade al historial justo cuando el generador se
-          // reanuda para producir el evento siguiente. Refrescar aquí evita leer
-          // el contexto un tick demasiado pronto.
-          if (contextTimer) clearTimeout(contextTimer);
-          contextTimer = null;
-          const refreshPreviousBoundary = contextDirty;
-          contextDirty = false;
-          if (isBufferedEvent(event)) {
-            enqueue(event);
-            if (refreshPreviousBoundary) flush(true);
-            continue;
-          }
-          flush(false);
-          pending.push(event);
-          // El historial/contexto solo cambia en fronteras de iteración y al
-          // inyectar resultados; los deltas intermedios devolverían el mismo dato.
-          const contextChanged =
-            refreshPreviousBoundary || event.type === 'context_compressed' || event.type === 'done';
-          flush(contextChanged);
-          if (event.type === 'tool_result' || event.type === 'tool_error') {
-            contextDirty = true;
-            // Al solicitar el siguiente item del generador, el harness inserta
-            // el resultado en `messages` antes de esperar la próxima respuesta.
-            contextTimer = setTimeout(() => {
-              if (!contextDirty) return;
-              contextDirty = false;
-              contextTimer = null;
-              dispatch({ type: 'AGENT_FRAME', events: [], context: context() });
-            }, 0);
-          }
+        const controller = new AbortController();
+        abortRef.current = controller;
+
+        dispatch({ type: 'AGENT_START', input: extra?.displayText ?? input });
+
+        const runOptions: RunOptions = {
+          ...(getRunOptions?.() ?? {}),
+          ...(extra?.runOptions ?? {}),
+          signal: controller.signal,
+        };
+        if (interactions) {
+          // Los prompts de este turno son los locales; lo que quede pendiente se
+          // cancela con el turno.
+          interactions.setLocal({
+            ...(runOptions.onConfirmDestructive
+              ? { confirm: runOptions.onConfirmDestructive }
+              : {}),
+            ...(runOptions.onAskQuestions ? { askQuestions: runOptions.onAskQuestions } : {}),
+            ...(runOptions.onApprovePlan ? { approvePlan: runOptions.onApprovePlan } : {}),
+          });
+          const gates = interactions.gatesFor({ signal: controller.signal });
+          runOptions.onConfirmDestructive = gates.confirm;
+          runOptions.onAskQuestions = gates.askQuestions;
+          runOptions.onApprovePlan = gates.approvePlan;
         }
-      } catch (err) {
-        flush(false);
-        const msg = err instanceof Error ? err.message : String(err);
-        const ev: AgentEvent = { type: 'error', message: msg, fatal: true };
-        dispatch({
-          type: 'AGENT_FRAME',
-          events: [ev, { type: 'done', stopReason: 'stop' }],
-          context: context(),
+        onTurn?.({
+          input: extra?.displayText ?? input,
+          mode: runOptions.mode === 'plan' ? 'plan' : 'normal',
         });
+        const events = extra?.delegateProfile
+          ? agent.runDelegate(extra.delegateProfile, input, runOptions)
+          : agent.run(input, runOptions);
+
+        let pending: AgentEvent[] = [];
+        let frameTimer: ReturnType<typeof setTimeout> | null = null;
+        let contextTimer: ReturnType<typeof setTimeout> | null = null;
+        let contextDirty = false;
+        const context = () => {
+          const ctx = agent.getContextUsage();
+          return {
+            used: ctx.used,
+            max: ctx.max,
+            estimated: ctx.estimated,
+            tokens: agent.getTokenUsage(),
+          };
+        };
+        const flush = (includeContext = false) => {
+          if (frameTimer) clearTimeout(frameTimer);
+          frameTimer = null;
+          if (pending.length === 0 && !includeContext) return;
+          const batched = coalesceAgentEvents(pending);
+          pending = [];
+          dispatch({
+            type: 'AGENT_FRAME',
+            events: batched,
+            context: includeContext ? context() : undefined,
+          });
+        };
+        const enqueue = (event: AgentEvent) => {
+          pending.push(event);
+          if (!frameTimer) frameTimer = setTimeout(() => flush(false), STREAM_FRAME_MS);
+        };
+
+        try {
+          for await (const event of events) {
+            // Un tool_result se añade al historial justo cuando el generador se
+            // reanuda para producir el evento siguiente. Refrescar aquí evita leer
+            // el contexto un tick demasiado pronto.
+            if (contextTimer) clearTimeout(contextTimer);
+            contextTimer = null;
+            const refreshPreviousBoundary = contextDirty;
+            contextDirty = false;
+            if (isBufferedEvent(event)) {
+              enqueue(event);
+              if (refreshPreviousBoundary) flush(true);
+              continue;
+            }
+            flush(false);
+            pending.push(event);
+            // El historial/contexto solo cambia en fronteras de iteración y al
+            // inyectar resultados; los deltas intermedios devolverían el mismo dato.
+            const contextChanged =
+              refreshPreviousBoundary ||
+              event.type === 'context_compressed' ||
+              event.type === 'done';
+            flush(contextChanged);
+            if (event.type === 'tool_result' || event.type === 'tool_error') {
+              contextDirty = true;
+              // Al solicitar el siguiente item del generador, el harness inserta
+              // el resultado en `messages` antes de esperar la próxima respuesta.
+              contextTimer = setTimeout(() => {
+                if (!contextDirty) return;
+                contextDirty = false;
+                contextTimer = null;
+                dispatch({ type: 'AGENT_FRAME', events: [], context: context() });
+              }, 0);
+            }
+          }
+        } catch (err) {
+          flush(false);
+          const msg = err instanceof Error ? err.message : String(err);
+          const ev: AgentEvent = { type: 'error', message: msg, fatal: true };
+          dispatch({
+            type: 'AGENT_FRAME',
+            events: [ev, { type: 'done', stopReason: 'stop' }],
+            context: context(),
+          });
+        } finally {
+          if (pending.length > 0) flush(true);
+          else if (frameTimer) clearTimeout(frameTimer);
+          if (contextTimer) clearTimeout(contextTimer);
+          abortRef.current = null;
+        }
       } finally {
-        if (pending.length > 0) flush(true);
-        else if (frameTimer) clearTimeout(frameTimer);
-        if (contextTimer) clearTimeout(contextTimer);
-        abortRef.current = null;
+        endTurn();
       }
     },
-    [agent, dispatch, getRunOptions, onTurn, interactions],
+    [agent, dispatch, getRunOptions, onTurn, interactions, beginTurn],
   );
 
   const cancel = useCallback(() => {

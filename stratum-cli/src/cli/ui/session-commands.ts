@@ -178,6 +178,12 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     description: 'Cambia una clave de configuración y la persiste en .stratumrc.json',
     hasArgs: true,
   },
+  {
+    name: '/detach',
+    description:
+      'Pasa la sesión a stratumd (mismo id y contexto): sigue viva al cerrar la terminal',
+    hasArgs: false,
+  },
   { name: '/quit', description: 'Termina la sesión y guarda el historial', hasArgs: false },
   { name: '/exit', description: 'Termina la sesión y guarda el historial', hasArgs: false },
 ];
