@@ -222,8 +222,13 @@ try {
     await until('la sesión par reaparece', () => probe.sessionIds.includes(peer) && probe.sessions.get(peer).snapshots > before, 40_000);
     assert.equal(probe.sessions.get(peer).session.host.kind, 'peer');
     assert.notEqual(endpoint().pid, pid);
-    // La sesión del daemon murió con él: ya no está.
-    assert.ok(!probe.sessionIds.includes(hosted));
+    // M11: la sesión del daemon se guardó y vuelve con él, parada: lo que estaba en
+    // marcha cuando murió no se reanuda (queda `interrupted`, o no llegó a guardarse).
+    await until('la sesión del daemon vuelve', () => probe.sessionIds.includes(hosted), 20_000);
+    const back = probe.sessions.get(hosted);
+    assert.equal(back.session.host.kind, 'daemon');
+    assert.equal(back.session.state, 'idle');
+    assert.ok(!back.run || !['running', 'paused', 'queued'].includes(back.run.status));
   });
 
   // --- Dot desaparece ---------------------------------------------------------

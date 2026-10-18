@@ -664,11 +664,12 @@ no lo usa para reenviar nada: queda reservado.
 | Se cambia de sesión mientras otra escribe | La que se deja pierde el texto en vivo; al volver, su foto y sus `message.completed` traen lo que faltó |
 | **Se cierra Dot** (también a mitad de un run) | Nada: Dot no cierra sesiones ni cancela runs. La sesión y su run siguen en el daemon |
 | **Se abre Dot otra vez**, con el mismo daemon | La sesión está en la lista y su conversación se reconstruye entera desde su foto |
-| **El daemon se reinicia** (o muere) | Sus sesiones **desaparecen**: no hay persistencia ni reanudación de sesiones del daemon. Dot enseña «Session ended or unavailable» y no deja escribir. Las de terminal vuelven cuando su proceso se registra otra vez |
+| **El daemon se reinicia** (o muere) | *Desde M11* sus sesiones **vuelven** con el daemon nuevo: la misma sesión, con su conversación, parada (lo que estaba en marcha queda `interrupted`), y se le puede escribir otra vez (`docs/protocol.md` §19.4). Mientras no hay daemon, Dot no envía nada. Las de terminal vuelven cuando su proceso se registra otra vez |
 
-La diferencia entre las dos últimas filas es de fondo: **cerrar Dot no es cerrar la sesión; que
-muera el daemon, sí.** Una sesión del daemon vive lo que vive el daemon, y Dot no lo disimula.
-Un chat nuevo tras el reinicio es otra sesión, sin la conversación anterior.
+La diferencia entre las dos últimas filas: **cerrar Dot no es cerrar la sesión, y desde M11
+tampoco lo es que el daemon muera**: sus sesiones se guardan y vuelven. Solo `sessions.close`
+acaba una sesión del daemon. (Hasta M10 una sesión del daemon vivía lo que vivía el daemon; los
+smokes `smoke:real` y `smoke:chat` comprueban ahora la garantía nueva.)
 
 ### 12.7 Aprobaciones, preguntas y planes en el chat
 
