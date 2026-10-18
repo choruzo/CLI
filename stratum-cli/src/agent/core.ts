@@ -67,6 +67,21 @@ import { extractAndStore } from '../memory/extractor.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
+import type {
+  ConversationStats,
+  SessionConversation,
+} from '../conversation/session-conversation.js';
+import { resolveMemoryModels } from '../conversation/models.js';
+import {
+  applySessionMemoryBlock,
+  clipMemoryLayer,
+  contextBreakdown,
+  resolveContextBudget,
+  tokensToChars,
+  type ContextBreakdown,
+  type ContextBudget,
+} from './context-builder.js';
+import type { SessionCompactor } from './harness.js';
 
 const log = getLogger('agent');
 
@@ -140,6 +155,25 @@ export interface StratumAgentOptions {
    * daemon). Los tokens, solo si el backend los había reportado: nunca se estiman.
    */
   usage?: { toolCalls: number; tokens: number | null; tokenStatus: TokenStatus };
+  /**
+   * M11 — conversación duradera de la sesión: su `ConversationStore`, su
+   * memoria de sesión y el estado de su contexto. Con ella el historial se
+   * registra en el store, lo antiguo se compacta a la memoria de sesión (si
+   * `memory.session.enabled`) y el contexto tiene presupuesto por capas. Con
+   * `restore`, el historial activo se reconstruye desde el store en vez de
+   * empezar vacío (sesión recuperada tras reiniciar el daemon).
+   */
+  conversation?: { conversation: SessionConversation; restore?: boolean };
+}
+
+/** Lo que se sabe del contexto de una sesión: presupuesto, desglose y conversación. */
+export interface ContextReport {
+  budget: ContextBudget;
+  breakdown: ContextBreakdown;
+  /** `null` en una sesión sin `ConversationStore`. */
+  conversation: ConversationStats | null;
+  /** ¿Compacta esta sesión a la memoria de sesión? */
+  sessionMemory: boolean;
 }
 
 /** Qué abrió un turno: una entrada al agente principal o una delegación directa (`@perfil`). */
@@ -248,6 +282,10 @@ export class StratumAgent {
   private readonly workspaceFilesExpiredAt: string | undefined;
   /** Entorno de la sesión: el único origen del directorio de trabajo en esta clase. */
   private readonly env: SessionEnv;
+  /** M11 — conversación duradera de la sesión, si la tiene. */
+  private readonly conversation: SessionConversation | null;
+  /** Caracteres de las capas de memoria global y de proyecto en el system prompt. */
+  private memoryLayerChars = { global: 0, project: 0 };
 
   constructor(
     private readonly config: StratumConfig,
@@ -256,6 +294,7 @@ export class StratumAgent {
     options?: StratumAgentOptions,
   ) {
     this.env = options?.env ?? processSessionEnv();
+    this.conversation = options?.conversation?.conversation ?? null;
     const cwd = this.env.cwd;
     this.memoryManager = new MemoryManager(config, cwd);
     this.preset = options?.promptPreset ?? 'coding';
@@ -309,7 +348,16 @@ export class StratumAgent {
       this._resumePlanRoot = options.resumePlanRoot ?? null;
     }
 
-    if (options?.initialMessages && options.initialMessages.length > 0) {
+    if (this.conversation && options?.conversation?.restore) {
+      // M11 — sesión recuperada: system prompt recompuesto aquí (entorno y
+      // perfil de este proceso) + el contexto activo que había, desde el store.
+      this.messages = [
+        { role: 'system', content: this.buildSystemContent() },
+        ...this.conversation.restoreActive(),
+      ];
+      this.todos.replace(rehydrateTodos(this.messages));
+      this.tdd.replace(rehydrateTdd(this.messages, TEST_EVIDENCE_TOOL));
+    } else if (options?.initialMessages && options.initialMessages.length > 0) {
       // Reanudar sesión: usar historial completo tal como fue guardado
       this.messages = [...options.initialMessages];
       // Hito 11: el estado de la lista viaja en el historial (cada tool result
@@ -346,6 +394,100 @@ export class StratumAgent {
         this.rebuildSystemPrompt();
       }
     }
+
+    // M11 — lo que trae la sesión (un traspaso, una recuperación) queda en el
+    // store desde ya, y la memoria de sesión en el system prompt.
+    if (this.conversation) {
+      this.applySessionMemory();
+      try {
+        this.conversation.saveState(this.messages);
+      } catch (err) {
+        log.warn('conversation not recorded', { err });
+      }
+    }
+  }
+
+  /** ¿Compacta esta sesión a la memoria de sesión? */
+  private get sessionMemoryEnabled(): boolean {
+    return this.conversation !== null && this.config.memory.session.enabled;
+  }
+
+  /** Presupuesto del contexto para el modelo activo. */
+  private contextBudget(): ContextBudget {
+    return resolveContextBudget(this.config, this.router.contextWindow);
+  }
+
+  /** Pone la memoria de sesión vigente en el system prompt (idempotente). */
+  private applySessionMemory(): void {
+    if (!this.sessionMemoryEnabled || !this.conversation) return;
+    const max = tokensToChars(this.contextBudget().sessionMemory);
+    applySessionMemoryBlock(this.messages, this.conversation.renderMemory(max));
+  }
+
+  /** Tokens estimados de las definiciones de tools que se envían. */
+  private toolSchemaChars(): number {
+    try {
+      return JSON.stringify(this.registry.toToolSchemas('normal')).length;
+    } catch {
+      return 0;
+    }
+  }
+
+  /**
+   * Lo que el `ContextManager` usa para compactar a la memoria de sesión. Los
+   * modelos de memoria se resuelven en cada compactación: `same` sigue al
+   * modelo que tenga la sesión en ese momento.
+   */
+  private sessionCompactor(): SessionCompactor | null {
+    const conversation = this.conversation;
+    if (!conversation || !this.sessionMemoryEnabled) return null;
+    return {
+      budget: () => this.contextBudget(),
+      overheadTokens: () => Math.ceil(this.toolSchemaChars() / 3.5),
+      record: (messages) => conversation.record(messages),
+      compact: (chunk, tokens, signal, trace) =>
+        conversation.compact({
+          chunk,
+          models: resolveMemoryModels(this.config, this.router),
+          timeoutMs: this.config.memory.session.timeoutMs,
+          tokensBefore: tokens.before,
+          tokensAfter: tokens.after,
+          ...(signal ? { signal } : {}),
+          ...(trace ? { trace } : {}),
+        }),
+      applyMemory: (messages) => {
+        const max = tokensToChars(this.contextBudget().sessionMemory);
+        applySessionMemoryBlock(messages, conversation.renderMemory(max));
+      },
+      committed: (messages) => conversation.saveState(messages),
+    };
+  }
+
+  /**
+   * M11 — presupuesto, desglose del contexto que se enviaría ahora (tokens
+   * **estimados**) y estado de la conversación. Para la observabilidad
+   * (`sessions.context`): no decide nada.
+   */
+  getContextReport(): ContextReport {
+    const budget = this.contextBudget();
+    const breakdown = contextBreakdown(this.messages, {
+      budget,
+      globalMemoryChars: this.memoryLayerChars.global,
+      projectMemoryChars: this.memoryLayerChars.project,
+      toolsChars: this.toolSchemaChars(),
+      ratio: this.getContextManager().calibration,
+    });
+    return {
+      budget,
+      breakdown,
+      conversation: this.conversation?.stats(breakdown.activeMessages) ?? null,
+      sessionMemory: this.sessionMemoryEnabled,
+    };
+  }
+
+  /** La conversación duradera de la sesión, si la tiene (M11). */
+  getConversation(): SessionConversation | null {
+    return this.conversation;
   }
 
   /**
@@ -473,6 +615,8 @@ export class StratumAgent {
       // §12.12: un turno cancelado o abandonado a mitad no puede dejar tool
       // calls sin respuesta: el siguiente request al provider fallaría.
       closeDanglingToolCalls(this.messages);
+      // M11 — el turno, entero, al store; y qué queda en el contexto activo.
+      this.recordConversation();
       // Desde aquí un mensaje del usuario ya no es steering de este turno. Lo
       // que quedara sin entregar (turno cancelado o cortado) sigue en la inbox
       // y abre el turno siguiente.
@@ -498,6 +642,17 @@ export class StratumAgent {
         this.background.delete(extraction),
       );
       this.background.add(extraction);
+    }
+  }
+
+  /** Registra el historial activo en el store y guarda el estado del contexto. Nunca lanza. */
+  private recordConversation(): void {
+    if (!this.conversation) return;
+    try {
+      this.conversation.saveState(this.messages);
+    } catch (err) {
+      // El store es la conversación duradera: que falle se registra, pero el turno sigue.
+      log.error('conversation not recorded', { err });
     }
   }
 
@@ -552,6 +707,8 @@ export class StratumAgent {
     } else {
       this.messages.unshift({ role: 'system', content: newSystemContent });
     }
+    // Recomponer el prompt no puede perder la memoria de sesión.
+    this.applySessionMemory();
   }
 
   /**
@@ -573,6 +730,8 @@ export class StratumAgent {
     this.inbox.clearUserMessages();
     this.todos.clear();
     this.tdd.clear();
+    // El contexto activo queda vacío; la conversación sigue entera en el store.
+    this.recordConversation();
   }
 
   /**
@@ -662,6 +821,8 @@ export class StratumAgent {
         this.config.agent.compressionTimeoutMs,
         this.router.providerName,
       );
+      // M11 — con memoria de sesión, lo antiguo se compacta ahí (nunca se trunca).
+      this.contextManager.attachSession(this.sessionCompactor());
       this.contextManagerKey = key;
     }
     return this.contextManager;
@@ -880,8 +1041,30 @@ export class StratumAgent {
     const memory =
       this.preset === 'assistant'
         ? this.memoryManager.getProjectMemory().globalContent
-        : this.memoryManager.getInjectableMemory();
+        : this.injectableMemory();
     return buildSystemPrompt(this.config, memory || undefined, this.promptEnv());
+  }
+
+  /**
+   * Memoria global + de proyecto para el system prompt. En una sesión con
+   * conversación duradera (M11) cada capa va a su presupuesto; sin ella, como
+   * siempre, entera.
+   */
+  private injectableMemory(): string {
+    const { globalContent, projectContent } = this.memoryManager.getProjectMemory();
+    if (!this.conversation) {
+      this.memoryLayerChars = { global: globalContent.length, project: projectContent.length };
+      return this.memoryManager.getInjectableMemory();
+    }
+    const budget = this.contextBudget();
+    const global = globalContent
+      ? clipMemoryLayer(globalContent, budget.globalMemory, 'Global memory')
+      : '';
+    const project = projectContent
+      ? clipMemoryLayer(projectContent, budget.projectMemory, 'Project memory')
+      : '';
+    this.memoryLayerChars = { global: global.length, project: project.length };
+    return [global, project].filter(Boolean).join('\n\n---\n\n');
   }
 
   /** `ReactLoop` de un turno del agente principal. */

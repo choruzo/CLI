@@ -10,8 +10,10 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 > desde otro cliente, en carrera con el prompt local (M4, §15); y **pausa cooperativa**: un run
 > se pausa y se reanuda desde otro cliente, en su runtime real (M5, §16); y **continuidad**:
 > una sesión de `stratum chat` se traspasa viva al daemon, mismo id y contexto, y se vuelve a
-> ella desde cualquier cliente (M10, §18).
-> Qué atiende hoy el servidor y con qué garantías: §13 a §16 y §18.
+> ella desde cualquier cliente (M10, §18); y **conversación duradera**: las sesiones del daemon
+> guardan su conversación entera, compactan lo antiguo a una memoria de sesión con procedencia y
+> sobreviven a un reinicio (M11, §19).
+> Qué atiende hoy el servidor y con qué garantías: §13 a §16, §18 y §19.
 
 | Pieza | Dónde | Depende de |
 |---|---|---|
@@ -590,7 +592,9 @@ y `at`.
   `ProtocolToolCall`, más corta.
 - **Vale para los dos anfitriones.** Una sesión de la CLI publica su conversación igual; de
   ella, desde que se publicó (lo anterior de un `chat --resume` no está).
-- **No se persiste.** Vive en el anfitrión de la sesión mientras vive la sesión.
+- **La foto no la guarda nadie; la conversación sí (M11).** La foto vive en el anfitrión de la
+  sesión mientras vive la sesión. Una sesión **del daemon** guarda además su conversación entera
+  —también lo que la foto ya no lleva— y sobrevive a un reinicio: §19.
 - **Una tool se identifica por `callId` dentro de su run.** Los ids del modelo se repiten: el
   mismo `callId` en otro run es otra llamada, aunque la anterior quedase abierta. Una entrada
   `tool` que sigue `pending`/`running` con su run ya terminado no llegó a cerrarse (turno
@@ -1197,6 +1201,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M8 | `approvals.resolve`, `questions.answer` y `plans.decide` admiten `sessionId?`: con una sesión que no es la de la solicitud, `NOT_FOUND` | Aditivo: quien no lo envía sigue igual |
 | M10 | `host.register` devuelve `epoch`, y `host.publish` la exige; métodos `sessions.detach`, `host.handoffBegin/Chunk/Commit/Abort` y `host.detach`; código `NOT_TRANSFERABLE`; `ProtocolHandoffContext` (`HANDOFF_FORMAT` 1) | Sin publicar. `epoch` es obligatoria en `host.publish` a propósito: un anfitrión que no la mande no puede demostrar que sigue siéndolo. Todos los anfitriones salen de este árbol |
 | M9 | Ningún cambio de contrato. El daemon no arranca si su carpeta no es privada (POSIX) o es un enlace, y deja su socket en `0600`. Stratum Dot usa `approvals.list` y `sessions.get` (que ya existían) para la confirmación nativa | Comportamiento del servidor y de un cliente; el contrato no cambia |
+| M11 | Métodos `sessions.history`, `sessions.context` y `sessions.memory` (`observe`); DTOs `ProtocolHistoryPage`, `ProtocolContextReport`, `ProtocolSessionMemory`; `HISTORY_LIMITS`. Las sesiones del daemon se recuperan tras un reinicio: el mismo id vuelve a `sessions.list` | Aditivo. Que una sesión del daemon sobreviva a su proceso cambia una garantía documentada (§13.7, §18.10), no la forma del contrato |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1378,16 +1383,15 @@ Ctrl+C— no toca la sesión.
 
 ### 18.10 Fuera de alcance
 
-- **Reinicio del daemon**: una sesión traspasada vive en el daemon y muere con él (se cierra
-  con `server-shutdown`, o desaparece si se mata). No se recupera: la persistencia durable es
-  otro hito. El chat guarda al salir su copia local hasta el traspaso.
-- Persistir sesiones, migrar entre daemons, alta disponibilidad, máquinas remotas, la
-  convergencia de Desktop y un sistema de secretos nuevo.
+- **Reinicio del daemon** *(cerrado en M11, §19.4)*: en M10 una sesión traspasada moría con el
+  daemon. Desde M11 se guarda (conversación, memoria de sesión, contexto y ajustes) y vuelve al
+  reiniciarlo. El chat sigue guardando al salir su copia local hasta el traspaso.
+- Migrar entre daemons, alta disponibilidad, máquinas remotas, la convergencia de Desktop y un
+  sistema de secretos nuevo.
 - Migrar trabajo en vuelo (llamadas al modelo, procesos, SSH, tools).
-- `chat --resume <id>` de una sesión que ya aloja el daemon abre otro runtime local con ese id
-  que el daemon **no** acepta como anfitrión (el id está vallado): no hay dos anfitriones en el
-  plano de control, pero sí dos copias de la conversación. Igual que reanudar una sesión en dos
-  terminales.
+- `chat --resume <id>` *(cambiado en M11, §19.6)*: antes abría otro runtime local con ese id
+  que el daemon no aceptaba como anfitrión (dos copias de la conversación). Ahora se niega si la
+  aloja el daemon y remite a `stratum attach`; `--fork` hace la copia explícita con otro id.
 
 ### 18.11 Tests
 
@@ -1401,3 +1405,145 @@ sin ver, `stratum run`, sin daemon, dos sesiones, y la validación de cada paso.
 publicador. `scripts/tui/daemon-detach.mjs` (`npm run tui:detach`): `chat` → `/detach` →
 `stratum attach` en otra terminal, y `stratum detach` desde fuera, con procesos reales. En Dot,
 `npm run smoke:detach`.
+
+## 19. Conversación duradera, contexto activo y memoria de sesión (M11)
+
+Una conversación con una sesión del daemon puede crecer indefinidamente sin que todo su
+historial entre en cada llamada al modelo, y sobrevive a un reinicio de `stratumd`. Tres capas
+que no se mezclan:
+
+```text
+Conversation Log  ≠  Active Agent Context  ≠  Session Memory
+```
+
+| Capa | Qué es | Quién la ve |
+|---|---|---|
+| **Conversation Log** | Todo lo que se dijo, entero y duradero (`ConversationStore`) | Las personas: la foto (lo último) y `sessions.history` (lo anterior) |
+| **Active Agent Context** | Lo que recibe el modelo: system prompt (con la memoria global y de proyecto, cada una con su tope) + memoria de sesión + conversación reciente + mensaje actual | El modelo |
+| **Session Memory** | Hechos, decisiones, restricciones, preferencias, tareas, resultados y entidades extraídos de lo antiguo, más un resumen narrativo, cada uno con su procedencia | El modelo (en el system prompt) y `sessions.memory` |
+
+Implementación y trampas: `.claude/docs/conversacion.md`.
+
+### 19.1 Compactar no es borrar
+
+Antes de cada llamada al modelo, si la entrada estimada (con las definiciones de tools) supera
+`memory.session.compactAt` (0.70) del **presupuesto de entrada** —ventana real del modelo menos
+la reserva de salida—, se toman los turnos **más antiguos** fuera de la zona protegida (los
+últimos `agent.compressionKeepRounds` y la petición en curso) hasta bajar de
+`memory.session.targetContext` (0.45), y:
+
+```text
+trozo antiguo ── extractor ──▶ hechos / decisiones / tareas …  ┐
+             └── resumen   ──▶ continuidad narrativa            ├─▶ memoria nueva (versión + 1) ─▶ disco
+memoria anterior ───────────────────────────────────────────────┘
+                                         solo entonces ─▶ el trozo sale del contexto activo
+```
+
+Los mensajes compactados **siguen** en el `ConversationStore` y en la conversación que ven Dot y
+la CLI: no se sustituyen por un resumen. Solo dejan de entrar literalmente en cada llamada.
+
+- **Una compactación a la vez por sesión**, en un punto seguro del turno (antes de una petición
+  al modelo), con commit atómico: la memoria nueva se escribe en disco antes de quitar nada.
+- **Un fallo no rompe el turno ni pierde nada.** Si el extractor o el resumen fallan (o no hay
+  JSON), la memoria anterior queda intacta, no se quita nada del contexto, se avisa
+  (`warning` `session_memory_deferred: …`) y se reintenta en la siguiente ocasión. Si además ya
+  no cabe, el turno termina con un error explícito (`context_full: … Nothing was deleted`) en
+  vez de truncar contenido arbitrario.
+- **Incremental**: memoria anterior + trozo nuevo → memoria nueva. Se puede regenerar desde el
+  store porque cada compactación guarda qué entradas cubrió (`context.json`).
+
+### 19.2 La memoria de sesión
+
+- **Es de esa sesión.** No se promociona sola a la memoria de proyecto (`decisions.json`,
+  `STRATUM.md`) ni a la global, ni la ve otra sesión. La promoción explícita queda para
+  después.
+- **Tiene procedencia.** Cada entrada lleva `sources`: ids (`e<n>`) de mensajes del historial
+  del agente guardado, que deben estar en el trozo compactado; una sin fuentes válidas no entra.
+  El resumen dice qué entradas cubre.
+- **Un hecho nuevo sustituye al que contradice** (misma clase y clave, o `supersedes`
+  explícito): el anterior queda `superseded` con `supersededBy`, auditable, y el modelo solo ve
+  el vigente. Si el extractor no sabe cuál vale, las dos quedan `conflict` y así se le enseñan.
+  Una tarea `done` cierra la abierta de su clave.
+- **No es autoridad.** Se inyecta con el aviso de que es contexto derivado: nunca concede
+  permisos ni aprobaciones, y ficheros, procesos, entornos, secretos o resultados de tools se
+  comprueban con tools. Ningún componente que decida permisos, aprobaciones, guardas o entornos
+  la lee (lo fija un test de arquitectura).
+- **Salidas de tools**: el extractor ve un extracto (cabeza y cola) con el id de la entrada
+  completa; la salida entera sigue en el store y a la memoria solo llega lo que se concluyó.
+
+### 19.3 El modelo de la memoria
+
+`memory.session.extractor` y `memory.session.summarizer` (`{ provider, model }`, `same` por
+defecto) pueden ser otro modelo u otro provider de la config. Son funciones distintas (el
+extractor da JSON con fuentes y tiende a la precisión; el resumen da texto narrativo) aunque
+usen el mismo modelo. Un provider distinto usa **sus** credenciales: nunca recibe la clave del
+provider de la sesión.
+
+**Frontera de privacidad.** Compactar envía contenido de la conversación (mensajes y extractos
+de tools) al modelo de memoria. Si es el provider de la sesión, ese contenido ya iba ahí en cada
+turno. Si es **otro provider y no está en esta máquina** (su `baseUrl` no es loopback), la
+config tiene que decirlo: `memory.session.allowRemote: true`. Sin ello no se compacta (se avisa
+con el motivo) y nada sale hacia ese provider.
+
+### 19.4 Persistencia y reinicio del daemon
+
+Con `daemon.persistSessions` (por defecto `true`) cada sesión del daemon —abierta con
+`sessions.open`, traspasada desde una terminal (M10) o recuperada— vive en
+`~/.stratum/daemon/sessions/<id>/` (dentro de la carpeta privada del daemon): `session.json`
+(cwd, alias de provider y modelo, perfil, read-only, perfil de sesión, plan, contadores),
+`snapshot.json` (la última foto), `conversation.jsonl`, `memory.json` y `context.json`. Se
+escriben al cerrar cada turno, al cambiar un ajuste y al apagarse; la conversación, según se
+produce. **Nunca** se guardan claves (`apiKey`, el token del endpoint, la clave de aprobador),
+el entorno, ni procesos, jobs o conexiones SSH/MCP.
+
+```text
+stratumd se reinicia
+  → cada sesión guardada vuelve a la lista (`sessions.list`), parada y con su foto
+  → Dot / `stratum attach` ven la misma conversación (foto + `sessions.history`)
+  → el primer uso que necesita su runtime la monta (`runs.start`, `sessions.set*`)
+  → el turno nuevo continúa con su contexto activo y su memoria de sesión
+```
+
+- **Recuperada no es montada.** Al arrancar, las guardadas se publican con su foto sin montar
+  nada (ni servers MCP ni agente). `runs.start`, `sessions.setModel|setAgent|setReadOnly` y
+  `sessions.close` la montan (una vez aunque lleguen dos a la vez) con el entorno del daemon,
+  como una traspasada. Si ya no se puede (directorio, provider, perfil), `UNAVAILABLE` con
+  `reason: 'cwd' | 'startup'` y sigue guardada. Sobre una sin montar, `runs.cancel|pause|resume`
+  contestan `not-running`, `runs.steer` `not-accepting` y `jobs.cancel` `NOT_FOUND`.
+- **El `seq` continúa**: la foto recuperada sigue desde lo más alto que se llegó a guardar
+  (también la conversación escrita a mitad de un turno). Lo que estaba en marcha cuando murió
+  el daemon queda `interrupted`; sin pendientes, ni texto a medias, ni jobs vivos.
+- **`sessions.close` la acaba**: se borra del disco y no vuelve. Apagar el daemon (o que muera)
+  no: vuelve al arrancar.
+- Sin `persistSessions` la conversación de cada sesión vive en memoria: `sessions.history` y la
+  memoria de sesión funcionan igual, pero mueren con el proceso.
+- Formatos versionados: `conversation.jsonl` lleva cabecera con `format` (1); los JSON llevan
+  `schemaVersion`. Uno de un Stratum más nuevo no se toca ni se monta. Una última línea a medias
+  del JSONL (el proceso murió escribiéndola) se descarta; una intermedia ilegible se salta.
+
+### 19.5 Métodos (`observe`)
+
+| Método | Parámetros | Resultado |
+|---|---|---|
+| `sessions.history` | `sessionId`, `before?` (id del primer mensaje que ya se tiene), `limit?` (≤ 100) | `ProtocolHistoryPage`: `messages` (los mismos `ProtocolChatMessage`, mismos ids que la foto, en orden), `hasMore`, `total`. Una página cabe en un mensaje (`HISTORY_LIMITS.pageBytes`); lo que no cabe queda para la siguiente |
+| `sessions.context` | `sessionId` | `{ report: ProtocolContextReport }`: `context` (ventana, reserva, entrada usable, entrada actual y por capas —system, tools, memoria global, de proyecto, de sesión, reciente—, mensajes activos y topes; tokens **estimados**, `estimated: true`; `null` si está recuperada sin montar), `conversation` (mensajes guardados, activos, compactaciones, última, último fallo) y `memory` (versión, resumen sí/no, entradas vigentes por clase) |
+| `sessions.memory` | `sessionId` | `{ memory: ProtocolSessionMemory }`: resumen (con cuántas fuentes y la primera y la última), entradas con `status`, `sources` (hasta 50), `supersedes`/`supersededBy` |
+
+Sobre una sesión par los tres son `UNAVAILABLE` (`peer-hosted`): el daemon no guarda su
+conversación. Un `before` que no es de la sesión es `INVALID_PARAMS`.
+
+### 19.6 `chat --resume` y `stratum attach`
+
+`stratum attach <id>` es la forma de continuar una sesión del daemon, también una recuperada
+(`/history [n]` pagina lo anterior). `chat --resume <id>` **no** abre en silencio un segundo
+anfitrión de una sesión que ya tiene uno: si la aloja el daemon (viva o guardada) o está abierta
+en otra terminal, se niega y dice cómo seguir; `chat --resume <id> --fork` continúa una copia
+local con **otro** id. Un anfitrión par desconectado (su terminal murió) no bloquea.
+
+### 19.7 Tests
+
+`conversation/*.test.ts` (store, memoria, agente con conversación: separación, compactación,
+procedencia, fallos, conversación larga, aislamiento, modelo distinto y credenciales contra un
+servidor HTTP local, egress, reconstrucción; reglas de arquitectura), `daemon/persistence.test.ts`
+(reinicio de punta a punta con compactación y pregunta sobre lo antiguo, cerrar frente a morir,
+sin carpeta, traspaso M10 → reinicio), `cli/resume-guard.test.ts` y `cli/attach-view.test.ts`.

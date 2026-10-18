@@ -8,6 +8,7 @@ import {
   formatHeader,
   formatPending,
   hostChange,
+  truncatedNote,
 } from './attach-view.js';
 import { describeDetachRefusal, handedOffNotice } from './handoff-text.js';
 
@@ -140,5 +141,22 @@ describe('textos del traspaso', () => {
     expect(describeDetachRefusal('NOT_FOUND')).toMatch(/no live session/);
     expect(describeDetachRefusal('SOMETHING_NEW', 'whatever')).toBe('something new');
     expect(handedOffNotice('sess_1')).toContain('stratum attach sess_1');
+  });
+});
+
+describe('attach — conversación guardada (M11)', () => {
+  it('/history pide lo anterior, con un tope', () => {
+    expect(attachAction(null, '/history')).toEqual({ kind: 'history', count: 20 });
+    expect(attachAction(null, '/history 5')).toEqual({ kind: 'history', count: 5 });
+    expect(attachAction(null, '/history 0').kind).toBe('refuse');
+    expect(attachAction(null, '/history mucho').kind).toBe('refuse');
+  });
+
+  it('una sesión del daemon dice cómo ver lo antiguo; una de terminal, que no se guarda', () => {
+    const base = { host: { kind: 'daemon', client: 'daemon', connected: true } };
+    expect(truncatedNote(base as never)).toContain('/history');
+    expect(
+      truncatedNote({ host: { kind: 'peer', client: 'cli', connected: true } } as never),
+    ).toContain('not kept');
   });
 });

@@ -261,6 +261,16 @@ const SessionProfileSchema = z.object({
   hiddenTools: z.array(z.string().min(1)).default([]),
 });
 
+/**
+ * Modelo de una función de memoria de sesión (M11). `same` reutiliza el
+ * provider o el modelo de la sesión; un alias de provider usa **sus**
+ * credenciales, nunca las del provider principal.
+ */
+const MemoryModelSchema = z.object({
+  provider: z.string().min(1).default('same'),
+  model: z.string().min(1).default('same'),
+});
+
 export const StratumConfigSchema = z.object({
   /**
    * Versión del formato del fichero (15.6, `config/schema-version.ts`). Ausente
@@ -315,6 +325,59 @@ export const StratumConfigSchema = z.object({
        * duplicadas al persistir y para filtrar resultados de recuperación.
        */
       similarityThreshold: z.number().min(0).max(1).default(0.9),
+      /**
+       * M11 — memoria **de sesión**: lo que el agente sabe de turnos antiguos de
+       * una conversación que ya no entran literalmente en su contexto. Es de esa
+       * conversación y de nadie más: nunca se promociona a `decisions.json` ni a
+       * `STRATUM.md`, y no la ve otra sesión. Hoy la usan las sesiones alojadas
+       * en el daemon (las que tienen un `ConversationStore`); el resto sigue
+       * con la compresión de `agent.compression*`.
+       */
+      session: z
+        .object({
+          enabled: z.boolean().default(true),
+          /**
+           * Modelo que extrae hechos, decisiones, restricciones y tareas de lo
+           * que se compacta. `same` = el provider/modelo de la sesión. Otro
+           * provider recibe **contenido de la conversación**: ver `allowRemote`.
+           */
+          extractor: MemoryModelSchema.default({}),
+          /** Modelo que mantiene el resumen narrativo. Mismo contrato que `extractor`. */
+          summarizer: MemoryModelSchema.default({}),
+          /**
+           * Frontera de privacidad: un provider de memoria distinto del de la
+           * sesión y que no está en esta máquina (no loopback) solo se usa con
+           * `allowRemote: true`. Sin ello la compactación no se hace (se avisa)
+           * en vez de mandar la conversación a otro sitio sin decirlo.
+           */
+          allowRemote: z.boolean().default(false),
+          /** Fracción del presupuesto de entrada a partir de la que se compacta. */
+          compactAt: z.number().min(0.2).max(0.95).default(0.7),
+          /** Fracción del presupuesto de entrada que se busca tras compactar. */
+          targetContext: z.number().min(0.1).max(0.9).default(0.45),
+          /** Plazo de cada llamada del extractor o del resumen. */
+          timeoutMs: z.number().int().positive().default(120_000),
+        })
+        .default({}),
+    })
+    .default({}),
+
+  /**
+   * M11 — presupuesto del contexto activo (lo que recibe el modelo en cada
+   * llamada), en tokens. Lo que no se escribe sale de la ventana real del
+   * modelo (`router.contextWindow`): `auto` no es un número fijo.
+   */
+  context: z
+    .object({
+      /** Tope de la ventana usable; `auto` = la del modelo. */
+      maxTokens: z.union([z.literal('auto'), z.number().int().positive()]).default('auto'),
+      /** Reservado para la respuesta. Por defecto, el 15 % de la ventana, entre 1 024 y 8 192. */
+      reserveOutput: z.number().int().positive().optional(),
+      /** Topes por capa. Por defecto, una fracción del presupuesto de entrada con un máximo. */
+      recent: z.object({ maxTokens: z.number().int().positive().optional() }).default({}),
+      sessionMemory: z.object({ maxTokens: z.number().int().positive().optional() }).default({}),
+      projectMemory: z.object({ maxTokens: z.number().int().positive().optional() }).default({}),
+      globalMemory: z.object({ maxTokens: z.number().int().positive().optional() }).default({}),
     })
     .default({}),
 
@@ -719,6 +782,12 @@ export const StratumConfigSchema = z.object({
        * rechazar. `0` = sin plazo. Con una terminal delante nunca caduca.
        */
       approvalTimeoutMinutes: z.number().min(0).max(100_000).default(10),
+      /**
+       * M11 — las sesiones del daemon (conversación, memoria de sesión, estado
+       * del contexto y ajustes) se guardan en `~/.stratum/daemon/sessions/` y
+       * se recuperan al reiniciar. Nunca se guardan claves, entorno ni handles.
+       */
+      persistSessions: z.boolean().default(true),
     })
     .default({}),
 

@@ -263,8 +263,9 @@ try {
   });
 
   // --- el daemon muere --------------------------------------------------------
-  await check('el daemon muere: sus chats desaparecen y no se fingen; la sesión de terminal vuelve', async () => {
+  await check('el daemon muere: sus chats vuelven con su conversación (M11); nada se encola sin conexión', async () => {
     const pid = endpoint().pid;
+    const seenBefore = probe.sessions.get(chat).snapshot.messages.map((m) => m.id);
     process.kill(pid, 'SIGKILL');
     await until('reconnecting', () => probe.connection?.kind === 'reconnecting');
     // Sin conexión no sale nada: ni se encola un mensaje para después.
@@ -274,17 +275,18 @@ try {
     const requests = mock.requests.length;
     assert.equal(cli(['daemon', 'start']).status, 0);
     await until('conectado otra vez', () => probe.connection?.kind === 'connected');
-    await until('la lista del daemon nuevo', () => !probe.sessionIds.includes(chat) && !probe.sessionIds.includes(other), 40_000);
-    // Ni persistencia ni reanudación: una sesión del daemon vive lo que vive el daemon.
-    const gone = await probe.order('send', { sessionId: chat, input: '¿sigues ahí?' });
-    assert.deepEqual([gone.ok, gone.error.code], [false, 'NOT_FOUND']);
+    // M11: las sesiones del daemon se guardaron y vuelven con él, con su conversación.
+    await until('los chats vuelven', () => probe.sessionIds.includes(chat) && probe.sessionIds.includes(other), 40_000);
+    const back = probe.sessions.get(chat).snapshot;
+    assert.equal(back.session.host.kind, 'daemon');
+    assert.deepEqual(back.messages.map((m) => m.id), seenBefore);
+    // Lo que se intentó sin conexión no se envió entonces ni ahora.
     assert.ok(!JSON.stringify(mock.requests.slice(requests)).includes('sigues ahí'));
-    // Un chat nuevo es otra sesión, sin la conversación anterior.
-    const again = await probe.order('open', { cwd: projectA });
-    assert.equal(again.ok, true);
-    assert.notEqual(again.result.session.id, chat);
-    await until('la sesión nueva', () => probe.sessions.has(again.result.session.id));
-    assert.deepEqual(probe.sessions.get(again.result.session.id).snapshot.messages, []);
+    // Un mensaje nuevo continúa la misma sesión, con el contexto de antes.
+    const resumed = await probe.order('send', { sessionId: chat, input: '¿sigues ahí, de vuelta?' });
+    assert.equal(resumed.ok, true);
+    await until('el modelo recibe el mensaje', () => JSON.stringify(mock.requests.slice(requests)).includes('de vuelta'), 40_000);
+    assert.match(JSON.stringify(mock.requests.at(-1).messages), /crea hello\.txt/);
   });
 
   await check('ni el token, ni el endpoint, ni nada del provider llegan a la interfaz o al log', async () => {

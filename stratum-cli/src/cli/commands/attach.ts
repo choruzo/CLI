@@ -20,6 +20,7 @@ import {
   formatHeader,
   formatPending,
   hostChange,
+  truncatedNote,
 } from '../attach-view.js';
 import { describeDetachRefusal } from '../handoff-text.js';
 import { cliVersion } from '../version.js';
@@ -100,6 +101,8 @@ export const attachCommand = new Command('attach')
     const remember = (s: ProtocolSessionSnapshot): void => {
       for (const m of s.messages) printed.add(m.id);
     };
+    // El mensaje más antiguo que se ha enseñado: `/history` pide lo anterior a él.
+    let oldest: string | null = null;
 
     let subscription: Subscription | null = null;
     const finish = (code = 0): void => {
@@ -120,9 +123,10 @@ export const attachCommand = new Command('attach')
           snapshot = next;
           if (!before) {
             print(formatHeader(next));
-            if (next.messagesTruncated) print('[earlier messages are not kept]');
+            if (next.messagesTruncated) print(truncatedNote(next.session));
             for (const m of next.messages) print(formatChatMessage(m));
             remember(next);
+            oldest = next.messages[0]?.id ?? null;
             if (next.approvals.length + next.questions.length + next.plans.length > 0) {
               print(formatPending(next));
             }
@@ -216,6 +220,25 @@ export const attachCommand = new Command('attach')
           return;
         case 'refuse':
           print(action.message);
+          return;
+        case 'history':
+          void run('history', async () => {
+            const page = await client.request('sessions.history', {
+              sessionId,
+              limit: action.count,
+              ...(oldest ? { before: oldest } : {}),
+            });
+            if (page.messages.length === 0) return '[nothing earlier]';
+            oldest = page.messages[0]!.id;
+            for (const m of page.messages) printed.add(m.id);
+            return [
+              page.hasMore
+                ? '── earlier (/history for more) ──'
+                : '── start of the conversation ──',
+              ...page.messages.map(formatChatMessage),
+              '── end of earlier messages ──',
+            ].join('\n');
+          });
           return;
         case 'pending':
           void run('pending', async () =>

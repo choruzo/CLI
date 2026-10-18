@@ -15,6 +15,12 @@
  * El runtime de cada sesión es la autoridad. Lo que guarda el daemon
  * (`RunRegistry`, el buffer del `EventHub`) es una proyección en memoria de lo
  * que las sesiones publican: no se persiste y se puede rehacer.
+ *
+ * M11 — lo que **sí** se guarda es cada sesión del daemon (su conversación, su
+ * memoria de sesión, su contexto y sus ajustes, `SessionArchive`). Al arrancar,
+ * las guardadas vuelven **sin montar** (se listan y se siguen por su foto) y se
+ * montan al primer uso que necesite su runtime (`wake`): recuperar diez
+ * sesiones no arranca diez veces sus servers MCP.
  */
 import { constants } from 'fs';
 import { access, rmdir, stat } from 'fs/promises';
@@ -38,6 +44,7 @@ import {
   type ProtocolOverviewSnapshot,
   type ProtocolServerInfo,
   type ProtocolSession,
+  type ProtocolSessionSnapshot,
   type StateEventData,
 } from '../protocol/index.js';
 import { fetchModelInfos } from '../providers/utils.js';
@@ -49,7 +56,19 @@ import type { ApproverAuth } from './approver-key.js';
 import { ControlServer, type ClientConnection } from './control-server.js';
 import { claimEndpoint, newIpcPath, newToken, type EndpointClaim } from './endpoint.js';
 import { EventHub, type HubClientStats } from './event-hub.js';
-import { HostedSession } from './hosted-session.js';
+import { DAEMON_HOST, HostedSession } from './hosted-session.js';
+import {
+  archivedContextReport,
+  historyPage,
+  liveContextReport,
+  protocolMemory,
+} from './conversation-dto.js';
+import {
+  SessionArchive,
+  restorableSnapshot,
+  type ArchivedSession,
+  type SessionFiles,
+} from './session-archive.js';
 import { OperationCache, type OperationCacheOptions } from './operation-cache.js';
 import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
@@ -109,6 +128,12 @@ export interface StratumdOptions {
   approverFailureDelayMs?: number;
   /** Plazo de una solicitud de una sesión del daemon. Por defecto, `daemon.approvalTimeoutMinutes`. */
   approvalTimeoutMs?: number;
+  /**
+   * M11 — carpeta de las sesiones guardadas (`~/.stratum/daemon/sessions/`).
+   * Sin ella (o `null`) las sesiones tienen su conversación en memoria y
+   * mueren con el proceso. La pasa `stratum daemon` según `daemon.persistSessions`.
+   */
+  sessionsDir?: string | null;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -125,6 +150,14 @@ export class Stratumd {
   readonly closed: Promise<ShutdownReason>;
 
   private readonly sessions = new Map<string, HostedSession>();
+  /** M11 — sesiones guardadas, recuperadas al arrancar y aún sin montar. */
+  private readonly dormant = new Map<
+    string,
+    { archived: ArchivedSession; snapshot: ProtocolSessionSnapshot }
+  >();
+  /** Montajes de sesiones guardadas en curso: dos peticiones a la vez montan una vez. */
+  private readonly waking = new Map<string, Promise<HostedSession>>();
+  private readonly archive: SessionArchive;
   /** Sesiones a medio cerrar: ya no se pueden pedir, pero el apagado las espera. */
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly registry = new RunRegistry();
@@ -166,11 +199,15 @@ export class Stratumd {
     this.maxSessions = opts.maxSessions ?? opts.config.daemon.maxSessions;
     this.idleExitMs = opts.idleExitMs ?? Math.round(opts.config.daemon.idleExitMinutes * 60_000);
     this.operations = new OperationCache({ now: this.now, ...opts.operations });
+    this.archive = new SessionArchive(opts.sessionsDir ?? null);
     this.hub = new EventHub({
       bufferSize: opts.eventBuffer ?? opts.config.daemon.eventBuffer,
       ...(opts.subscriptionQueue ? { maxQueue: opts.subscriptionQueue } : {}),
       snapshotOf: (sessionId) =>
-        this.sessions.get(sessionId)?.snapshot() ?? this.peers.snapshotOf(sessionId),
+        this.sessions.get(sessionId)?.snapshot() ??
+        this.peers.snapshotOf(sessionId) ??
+        this.dormant.get(sessionId)?.snapshot ??
+        null,
       overviewOf: () => this.overview(),
     });
     this.approvalTimeoutMs =
@@ -188,7 +225,7 @@ export class Stratumd {
       hub: this.hub,
       registry: this.registry,
       pending: this.approvals,
-      isLocalSession: (sessionId) => this.sessions.has(sessionId),
+      isLocalSession: (sessionId) => this.sessions.has(sessionId) || this.dormant.has(sessionId),
       detachedTtlMs:
         opts.detachedTtlMs ?? Math.round(opts.config.daemon.detachedTtlMinutes * 60_000),
       ...(opts.peerWatchIntervalMs ? { watchIntervalMs: opts.peerWatchIntervalMs } : {}),
@@ -261,6 +298,8 @@ export class Stratumd {
       throw err;
     }
     if (daemon.claim.replacedStale) log.info('stale endpoint replaced', { dir });
+    // Ya somos el daemon de esta carpeta: las sesiones guardadas son nuestras.
+    daemon.recoverArchived();
     log.info('daemon started', {
       pid: process.pid,
       version: opts.version,
@@ -340,6 +379,7 @@ export class Stratumd {
       this.sessions.size === 0 &&
       this.peers.size === 0 &&
       this.closingSessions.size === 0 &&
+      this.waking.size === 0 &&
       this.opening === 0 &&
       this.activeOperations === 0 &&
       this.now() - this.lastActivity >= this.idleExitMs
@@ -396,6 +436,169 @@ export class Stratumd {
   // ---------------------------------------------------------------------------
   // Sesiones
   // ---------------------------------------------------------------------------
+
+  // ---------------------------------------------------------------------------
+  // Sesiones guardadas (M11)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * Al arrancar: cada sesión guardada vuelve a estar en la lista, con su foto
+   * (saneada: nada en curso) y su `seq`, pero **sin montar**. Síncrono: ningún
+   * cliente la ve a medias. Una que no se puede leer se deja en disco.
+   */
+  private recoverArchived(): void {
+    if (!this.archive.persistent) return;
+    const { sessions, skipped } = this.archive.list();
+    for (const archived of sessions) {
+      const id = archived.meta.sessionId;
+      try {
+        const files = this.archive.read(id);
+        if (!files) continue;
+        let snapshot: ProtocolSessionSnapshot;
+        try {
+          snapshot = restorableSnapshot(archived.snapshot, files.store, DAEMON_HOST);
+        } finally {
+          files.store.close();
+        }
+        this.dormant.set(id, { archived, snapshot });
+        this.hub.openSession(id, snapshot.seq);
+        this.registry.replace(snapshot);
+      } catch (err) {
+        log.warn('archived session not recovered', { sessionId: id, err });
+      }
+    }
+    if (sessions.length > 0 || skipped.length > 0) {
+      log.info('archived sessions recovered', {
+        recovered: this.dormant.size,
+        skipped: skipped.length,
+      });
+    }
+  }
+
+  /**
+   * La sesión del daemon con su runtime montado: si es una guardada sin montar,
+   * se monta ahora (una vez, aunque lo pidan dos a la vez).
+   *
+   * @throws ProtocolError `NOT_FOUND`, `UNAVAILABLE` (`peer-hosted`, `startup`, `cwd`).
+   */
+  private wake(sessionId: string, what: string): Promise<HostedSession> {
+    if (this.peers.has(sessionId)) throw peerHostedOnly(what);
+    const live = this.sessions.get(sessionId);
+    if (live) return Promise.resolve(live);
+    const pending = this.waking.get(sessionId);
+    if (pending) return pending;
+    const dormant = this.dormant.get(sessionId);
+    if (!dormant) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+    const mounting = this.mountArchived(sessionId, dormant.archived).finally(() =>
+      this.waking.delete(sessionId),
+    );
+    this.waking.set(sessionId, mounting);
+    return mounting;
+  }
+
+  private async mountArchived(
+    sessionId: string,
+    archived: ArchivedSession,
+  ): Promise<HostedSession> {
+    if (this.shuttingDown) throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+    if (this.sessions.size + this.opening >= this.maxSessions) {
+      throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
+    }
+    const { meta } = archived;
+    this.opening++;
+    let files: SessionFiles | null = null;
+    let session: HostedSession | null = null;
+    try {
+      const unusable = await this.unusableCwd(meta.cwd);
+      if (unusable) {
+        throw new ProtocolError('UNAVAILABLE', `Cannot restore that session: ${unusable}.`, {
+          reason: 'cwd',
+        });
+      }
+      const startup = await this.startup({
+        cwd: meta.cwd,
+        provider: meta.provider,
+        model: meta.model,
+        sessionProfile: meta.sessionProfile,
+      });
+      if (!startup.ok) {
+        log.warn('archived session startup failed', { sessionId, stage: startup.stage });
+        throw new ProtocolError(
+          'UNAVAILABLE',
+          `Cannot restore that session here (${startup.stage}).`,
+          { reason: 'startup' },
+        );
+      }
+      files = this.archive.open(sessionId);
+      session = await HostedSession.restore({
+        sessionId,
+        env: createSessionEnv({ cwd: meta.cwd, env: this.opts.env }),
+        config: startup.config,
+        router: startup.router,
+        version: this.opts.version,
+        sink: this.sinkFor(sessionId),
+        remoteApprovals: () => this.opts.approver != null,
+        approvalTimeoutMs: this.approvalTimeoutMs,
+        files,
+        archived,
+        snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
+      });
+      if (this.shuttingDown) {
+        throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+      }
+    } catch (err) {
+      try {
+        if (session) await session.host.dispose({ cancelBackground: true });
+      } catch (disposeErr) {
+        log.warn('restore teardown failed', { sessionId, err: disposeErr });
+      } finally {
+        files?.close();
+      }
+      if (err instanceof ProtocolError) throw err;
+      log.error('archived session not restored', { sessionId, err });
+      throw new ProtocolError('UNAVAILABLE', 'The daemon could not restore that session.', {
+        reason: 'startup',
+      });
+    } finally {
+      this.opening--;
+    }
+    // Síncrono desde aquí: la sesión pasa de guardada a montada.
+    this.dormant.delete(sessionId);
+    this.sessions.set(sessionId, session);
+    session.publisher.start();
+    session.publisher.flush();
+    session.persist();
+    log.info('archived session restored', { sessionId });
+    return session;
+  }
+
+  /** Cierra de verdad una sesión guardada sin montar: deja de existir, también en disco. */
+  private closeDormant(sessionId: string): void {
+    const dormant = this.dormant.get(sessionId);
+    if (!dormant) return;
+    this.dormant.delete(sessionId);
+    this.archive.remove(sessionId);
+    this.registry.remove(sessionId);
+    this.hub.endSession(sessionId, {
+      ...dormant.snapshot,
+      session: { ...dormant.snapshot.session, state: 'closed' },
+    });
+    log.info('session closed', { sessionId, reason: 'closed', archived: true });
+  }
+
+  /** Lectura de una sesión guardada sin montar (historial, contexto, memoria). */
+  private readArchived<T>(
+    sessionId: string,
+    fn: (files: NonNullable<ReturnType<SessionArchive['read']>>) => T,
+  ): T {
+    const files = this.archive.read(sessionId);
+    if (!files) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+    try {
+      return fn(files);
+    } finally {
+      files.store.close();
+    }
+  }
 
   /** Lo que publica una sesión: primero la proyección, después el reparto. */
   private sinkFor(sessionId: string): {
@@ -462,31 +665,46 @@ export class Stratumd {
       while (
         this.sessions.has(sessionId) ||
         this.peers.has(sessionId) ||
+        this.dormant.has(sessionId) ||
+        this.archive.has(sessionId) ||
         this.hub.hasSession(sessionId)
       ) {
         sessionId = generateSessionId();
       }
-      const session = await HostedSession.open({
-        sessionId,
-        env: createSessionEnv({ cwd, env: this.opts.env }),
-        config: startup.config,
-        router: startup.router,
-        version: this.opts.version,
-        sink: this.sinkFor(sessionId),
-        remoteApprovals: () => this.opts.approver != null,
-        approvalTimeoutMs: this.approvalTimeoutMs,
-        ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
-        ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
-        ...(params.agent ? { agent: params.agent } : {}),
-      });
+      const files = this.archive.open(sessionId);
+      let session: HostedSession;
+      try {
+        session = await HostedSession.open({
+          sessionId,
+          env: createSessionEnv({ cwd, env: this.opts.env }),
+          config: startup.config,
+          router: startup.router,
+          version: this.opts.version,
+          sink: this.sinkFor(sessionId),
+          remoteApprovals: () => this.opts.approver != null,
+          approvalTimeoutMs: this.approvalTimeoutMs,
+          files,
+          ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
+          ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
+          ...(params.agent ? { agent: params.agent } : {}),
+        });
+      } catch (err) {
+        // Nada de una sesión que no llegó a abrirse queda en disco.
+        files.close();
+        this.archive.remove(sessionId);
+        throw err;
+      }
       if (this.shuttingDown) {
         await session.host.dispose({ cancelBackground: true });
+        files.close();
+        this.archive.remove(sessionId);
         throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
       }
       this.sessions.set(sessionId, session);
       this.hub.openSession(sessionId);
       session.publisher.start();
       session.publisher.flush();
+      session.persist();
       log.info('session opened', { sessionId, cwd });
       return session;
     } finally {
@@ -558,9 +776,18 @@ export class Stratumd {
     const { context, snapshot } = this.peers.takeHandoff(conn, params);
     this.opening++;
     let session: HostedSession | null = null;
+    let files: SessionFiles | null = null;
     try {
       if (this.shuttingDown) {
         throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+      }
+      // M11: ese id ya es de una sesión guardada aquí; no se mezclan dos historias.
+      if (this.dormant.has(sessionId) || this.archive.has(sessionId)) {
+        throw new ProtocolError(
+          'NOT_TRANSFERABLE',
+          'The daemon already has a saved session with that id; use `stratum attach`.',
+          { reason: 'context' },
+        );
       }
       if (this.sessions.size + this.opening - 1 >= this.maxSessions) {
         throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
@@ -586,7 +813,9 @@ export class Stratumd {
           { reason: 'startup' },
         );
       }
+      files = this.archive.open(sessionId);
       session = await HostedSession.adopt({
+        files,
         sessionId,
         env: createSessionEnv({ cwd, env: this.opts.env }),
         config: startup.config,
@@ -607,6 +836,11 @@ export class Stratumd {
       } catch (disposeErr) {
         log.warn('handoff teardown failed', { sessionId, err: disposeErr });
       } finally {
+        // Lo que se llegó a guardar no es de nadie: la sesión sigue en el par.
+        if (files) {
+          files.close();
+          this.archive.remove(sessionId);
+        }
         this.peers.abortHandoff(sessionId, params.handoffId);
       }
       if (err instanceof ProtocolError) throw err;
@@ -626,6 +860,7 @@ export class Stratumd {
     try {
       session.publisher.start();
       session.publisher.flush();
+      session.persist();
     } catch (err) {
       log.error('handoff announce failed', { sessionId, err });
     }
@@ -738,24 +973,86 @@ export class Stratumd {
         return { sessions: params.limit ? sessions.slice(0, params.limit) : sessions };
       },
       'sessions.get': (params) => ({
-        snapshot: this.peers.snapshotOf(params.sessionId) ?? this.need(params.sessionId).snapshot(),
+        snapshot:
+          this.peers.snapshotOf(params.sessionId) ??
+          this.dormant.get(params.sessionId)?.snapshot ??
+          this.need(params.sessionId).snapshot(),
       }),
+      // M11 — conversación guardada, contexto y memoria de sesión. De una par
+      // el daemon solo tiene la proyección: no guarda su conversación.
+      'sessions.history': (params) => {
+        if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its saved conversation');
+        const live = this.sessions.get(params.sessionId);
+        if (live) return historyPage(live.conversation.store, params.before, params.limit);
+        if (!this.dormant.has(params.sessionId)) {
+          throw new ProtocolError('NOT_FOUND', 'Session not found.');
+        }
+        return this.readArchived(params.sessionId, (files) =>
+          historyPage(files.store, params.before, params.limit),
+        );
+      },
+      'sessions.context': (params) => {
+        if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its context');
+        const live = this.sessions.get(params.sessionId);
+        if (live) {
+          return {
+            report: liveContextReport(
+              params.sessionId,
+              live.host.agent.getContextReport(),
+              live.conversation.memory,
+            ),
+          };
+        }
+        const dormant = this.dormant.get(params.sessionId);
+        if (!dormant) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+        const enabled = this.configFor(dormant.archived.meta.cwd).memory.session.enabled;
+        return this.readArchived(params.sessionId, (files) => ({
+          report: archivedContextReport(
+            params.sessionId,
+            files.store,
+            files.state,
+            files.memory,
+            enabled,
+          ),
+        }));
+      },
+      'sessions.memory': (params) => {
+        if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its session memory');
+        const live = this.sessions.get(params.sessionId);
+        if (live) return { memory: protocolMemory(live.conversation.memory) };
+        if (!this.dormant.has(params.sessionId)) {
+          throw new ProtocolError('NOT_FOUND', 'Session not found.');
+        }
+        return this.readArchived(params.sessionId, (files) => ({
+          memory: protocolMemory(files.memory),
+        }));
+      },
       'sessions.open': async (params) => ({ session: (await this.openSession(params)).session() }),
       'sessions.close': async (params) => {
-        const session = this.local(params.sessionId, 'Closing it');
+        if (this.dormant.has(params.sessionId) && !this.waking.has(params.sessionId)) {
+          this.closeDormant(params.sessionId);
+          return {};
+        }
+        const session = this.sessions.has(params.sessionId)
+          ? this.local(params.sessionId, 'Closing it')
+          : await this.wake(params.sessionId, 'Closing it');
         // Deja de existir ya para los demás; lo que se desmonta es solo lo suyo.
         this.sessions.delete(params.sessionId);
         await this.closeSession(session, 'closed');
+        // Cerrarla es acabarla: no vuelve al reiniciar (M11).
+        this.archive.remove(params.sessionId);
         return {};
       },
-      'sessions.setModel': (params) => ({
-        session: this.local(params.sessionId, 'Changing its model').setModel(params.model),
+      'sessions.setModel': async (params) => ({
+        session: (await this.wake(params.sessionId, 'Changing its model')).setModel(params.model),
       }),
-      'sessions.setAgent': (params) => ({
-        session: this.local(params.sessionId, 'Changing its agent').setAgent(params.agent),
+      'sessions.setAgent': async (params) => ({
+        session: (await this.wake(params.sessionId, 'Changing its agent')).setAgent(params.agent),
       }),
-      'sessions.setReadOnly': (params) => ({
-        session: this.local(params.sessionId, 'Changing read-only').setReadOnly(params.readOnly),
+      'sessions.setReadOnly': async (params) => ({
+        session: (await this.wake(params.sessionId, 'Changing read-only')).setReadOnly(
+          params.readOnly,
+        ),
       }),
       'sessions.detach': (params) => this.detachSession(params.sessionId),
 
@@ -765,8 +1062,8 @@ export class Stratumd {
         if (!run) throw new ProtocolError('NOT_FOUND', 'Run not found.');
         return { run };
       },
-      'runs.start': (params) => ({
-        run: this.local(params.sessionId, 'Starting a run').startRun(
+      'runs.start': async (params) => ({
+        run: (await this.wake(params.sessionId, 'Starting a run')).startRun(
           params.input,
           params.mode ?? 'normal',
         ),
@@ -776,12 +1073,16 @@ export class Stratumd {
       'runs.steer': async (params) => ({
         status: this.peers.has(params.sessionId)
           ? await this.peers.steer(params.sessionId, params.text)
-          : this.need(params.sessionId).steer(params.text),
+          : this.dormant.has(params.sessionId)
+            ? 'not-accepting'
+            : this.need(params.sessionId).steer(params.text),
       }),
       'runs.cancel': async (params) => ({
         status: this.peers.has(params.sessionId)
           ? await this.peers.cancel(params.sessionId, params.runId)
-          : this.need(params.sessionId).cancel(params.runId),
+          : this.dormant.has(params.sessionId)
+            ? 'not-running'
+            : this.need(params.sessionId).cancel(params.runId),
       }),
       // Pausa cooperativa. El daemon no pausa nada: entrega la orden a quien
       // aloja la sesión —su `SessionHost`, aquí o en otro proceso— y no da el run
@@ -789,12 +1090,16 @@ export class Stratumd {
       'runs.pause': async (params) => ({
         status: this.peers.has(params.sessionId)
           ? await this.peers.pause(params.sessionId, params.runId)
-          : this.need(params.sessionId).pause(params.runId),
+          : this.dormant.has(params.sessionId)
+            ? 'not-running'
+            : this.need(params.sessionId).pause(params.runId),
       }),
       'runs.resume': async (params) => ({
         status: this.peers.has(params.sessionId)
           ? await this.peers.resume(params.sessionId, params.runId)
-          : this.need(params.sessionId).resume(params.runId),
+          : this.dormant.has(params.sessionId)
+            ? 'not-running'
+            : this.need(params.sessionId).resume(params.runId),
       }),
 
       // Centro de aprobaciones. Listar es de quien observa; resolver exige la
@@ -832,9 +1137,16 @@ export class Stratumd {
       },
 
       'jobs.list': (params) => ({
-        jobs: this.peers.snapshotOf(params.sessionId)?.jobs ?? this.need(params.sessionId).jobs(),
+        jobs:
+          this.peers.snapshotOf(params.sessionId)?.jobs ??
+          this.dormant.get(params.sessionId)?.snapshot.jobs ??
+          this.need(params.sessionId).jobs(),
       }),
       'jobs.cancel': async (params) => {
+        // Una sesión guardada sin montar no tiene jobs: murieron con su proceso.
+        if (this.dormant.has(params.sessionId)) {
+          throw new ProtocolError('NOT_FOUND', 'Job not found.');
+        }
         await this.local(params.sessionId, 'Cancelling a job').cancelJob(params.jobId);
         return {};
       },

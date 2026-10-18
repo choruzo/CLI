@@ -26,6 +26,8 @@ export type AttachAction =
   | { kind: 'pause' }
   | { kind: 'resume' }
   | { kind: 'detach' }
+  /** M11: lo anterior de la conversación guardada (`sessions.history`). */
+  | { kind: 'history'; count: number }
   | { kind: 'start'; input: string }
   | { kind: 'steer'; text: string }
   /** No se envía nada: se le explica por qué a la persona. */
@@ -40,6 +42,7 @@ export const ATTACH_HELP = [
   '  /cancel    cancel the run in progress',
   '  /pending   list approvals, questions and plans waiting for a person',
   '  /detach    hand a terminal-hosted session over to stratumd',
+  '  /history [n]  show the n earlier messages of the saved conversation (default 20)',
   '  /quit      leave (the session keeps running; Ctrl+C and Ctrl+D also leave)',
 ].join('\n');
 
@@ -65,6 +68,14 @@ export function attachAction(session: ProtocolSession | null, line: string): Att
         return { kind: 'resume' };
       case '/detach':
         return { kind: 'detach' };
+      case '/history': {
+        const arg = text.split(/\s+/)[1];
+        const count = arg === undefined ? 20 : Number(arg);
+        if (!Number.isInteger(count) || count < 1 || count > 100) {
+          return { kind: 'refuse', message: 'Usage: /history [1-100]' };
+        }
+        return { kind: 'history', count };
+      }
       default:
         return { kind: 'refuse', message: `Unknown command ${command}. Type /help.` };
     }
@@ -109,6 +120,17 @@ export function formatChatMessage(m: ProtocolChatMessage): string {
 export function describeHost(session: ProtocolSession): string {
   if (session.host.kind === 'daemon') return 'stratumd';
   return `${session.host.client} (terminal)${session.host.connected ? '' : ', disconnected'}`;
+}
+
+/**
+ * Qué decir de lo que la foto ya no lleva. Una sesión del daemon guarda su
+ * conversación entera (M11): se pide con `/history`. De una de la terminal, el
+ * daemon solo tiene la foto.
+ */
+export function truncatedNote(session: ProtocolSession): string {
+  return session.host.kind === 'daemon'
+    ? '[earlier messages: /history to show them]'
+    : '[earlier messages are not kept]';
 }
 
 /** Cabecera al adjuntarse. */

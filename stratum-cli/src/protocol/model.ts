@@ -409,3 +409,132 @@ export interface ProtocolMemoryStatus {
   indexed: boolean;
   backend: 'sqlite-vec' | 'fallback' | 'none';
 }
+
+// ---------------------------------------------------------------------------
+// M11 — conversación duradera, contexto activo y memoria de sesión
+// ---------------------------------------------------------------------------
+
+/** Límites de `sessions.history`: una página cabe siempre en un mensaje. */
+export const HISTORY_LIMITS = {
+  /** Mensajes de una página. */
+  pageMessages: 100,
+  /** Bytes de una página serializada: lo antiguo de la página se deja para la siguiente. */
+  pageBytes: 768 * 1024,
+} as const;
+
+/**
+ * Una página de la conversación **guardada** de una sesión: los mismos
+ * `ProtocolChatMessage` (mismos ids) que la foto, también los que la foto ya no
+ * lleva. En orden cronológico; `hasMore` dice si hay anteriores.
+ */
+export interface ProtocolHistoryPage {
+  messages: ProtocolChatMessage[];
+  hasMore: boolean;
+  /** Mensajes guardados en total. */
+  total: number;
+}
+
+/** Topes del contexto activo por capa, en tokens. */
+export interface ProtocolContextBudgets {
+  recent: number;
+  sessionMemory: number;
+  projectMemory: number;
+  globalMemory: number;
+  /** Fracción del presupuesto de entrada a partir de la que se compacta. */
+  compactAt: number;
+  /** Fracción que se busca tras compactar. */
+  target: number;
+}
+
+/**
+ * Lo que recibiría el modelo ahora, por capas, en tokens **estimados**
+ * (`estimated: true`): no es un `usage` del backend.
+ */
+export interface ProtocolContextBreakdown {
+  window: number;
+  reserveOutput: number;
+  usableInput: number;
+  input: number;
+  system: number;
+  tools: number;
+  globalMemory: number;
+  projectMemory: number;
+  sessionMemory: number;
+  recent: number;
+  activeMessages: number;
+  estimated: boolean;
+  budgets: ProtocolContextBudgets;
+}
+
+export interface ProtocolConversationStats {
+  /** Mensajes de la conversación para personas guardados (los de `sessions.history`). */
+  storedMessages: number;
+  /** Mensajes del historial del agente guardados. */
+  storedAgentMessages: number;
+  /** Mensajes de la conversación en el contexto activo. */
+  activeMessages: number;
+  compactions: number;
+  lastCompactionAt: Timestamp | null;
+  /** Por qué se aplazó la última compactación, si se aplazó. */
+  lastCompactionError: string | null;
+  compacting: boolean;
+}
+
+export type ProtocolMemoryItemKind =
+  | 'fact'
+  | 'decision'
+  | 'constraint'
+  | 'preference'
+  | 'task'
+  | 'result'
+  | 'entity';
+
+export interface ProtocolSessionMemoryStats {
+  /** ¿Compacta esta sesión a su memoria de sesión? */
+  enabled: boolean;
+  version: number;
+  updatedAt: Timestamp | null;
+  hasSummary: boolean;
+  /** Entradas vigentes por clase. */
+  items: Record<ProtocolMemoryItemKind, number>;
+}
+
+/** `sessions.context`: observabilidad del contexto de una sesión. */
+export interface ProtocolContextReport {
+  sessionId: string;
+  /** `null` si la sesión está recuperada pero aún sin montar (sin su primer turno). */
+  context: ProtocolContextBreakdown | null;
+  conversation: ProtocolConversationStats | null;
+  memory: ProtocolSessionMemoryStats | null;
+}
+
+/** Una entrada de la memoria de sesión, con su procedencia. */
+export interface ProtocolMemoryItem {
+  id: string;
+  kind: ProtocolMemoryItemKind;
+  key: string;
+  text: string;
+  status: 'active' | 'superseded' | 'done' | 'conflict';
+  /** Ids de las entradas del historial del agente de las que sale (hasta 50). */
+  sources: string[];
+  supersedes?: string;
+  supersededBy?: string;
+  updatedAt: Timestamp;
+}
+
+/**
+ * `sessions.memory`: la memoria de **esa** sesión. Es contexto derivado de la
+ * conversación: puede contener lo que contenía la conversación.
+ */
+export interface ProtocolSessionMemory {
+  version: number;
+  updatedAt: Timestamp | null;
+  summary: {
+    text: string;
+    sourceCount: number;
+    firstSource: string | null;
+    lastSource: string | null;
+  } | null;
+  items: ProtocolMemoryItem[];
+  sourceCursor: string | null;
+}

@@ -195,7 +195,9 @@ describe('M4 — sesión alojada en el daemon', () => {
       client: 'cli',
       connectionId: s.approver.server!.connectionId,
     });
-    expect(audited().some((r) => r['command'] === RM && r['status'] === 'exited')).toBe(true);
+    // La auditoría se escribe en segundo plano: la fila del comando llega después de la de
+    // la aprobación, que se escribió antes de ejecutarlo.
+    await until(() => audited().some((r) => r['command'] === RM && r['status'] === 'exited'));
 
     // El `seq` es de la sesión y no tiene huecos: el centro no numera nada.
     const seqs = s.w.seqs();

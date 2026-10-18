@@ -44,7 +44,23 @@
     "similarityThreshold": 0.9,
     "autoExtract": true,
     "extractionModel": "qwen3.5:9b",
-    "embeddingWarmup": false
+    "embeddingWarmup": false,
+    "session": {
+      "enabled": true,
+      "extractor": { "provider": "same", "model": "same" },
+      "summarizer": { "provider": "same", "model": "same" },
+      "allowRemote": false,
+      "compactAt": 0.7,
+      "targetContext": 0.45,
+      "timeoutMs": 120000
+    }
+  },
+  "context": {
+    "maxTokens": "auto",
+    "recent": {},
+    "sessionMemory": {},
+    "projectMemory": {},
+    "globalMemory": {}
   },
   "tools": {
     "confirmDestructive": true,
@@ -204,7 +220,8 @@
     "maxSessions": 16,
     "autoStart": false,
     "detachedTtlMinutes": 10,
-    "approvalTimeoutMinutes": 10
+    "approvalTimeoutMinutes": 10,
+    "persistSessions": true
   },
   "desktop": {
     "maxConcurrentTurns": 2,

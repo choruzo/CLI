@@ -13,6 +13,7 @@ import {
   snapshotSubagent,
   snapshotToolCall,
   type ProtocolApproval,
+  type ProtocolChatMessage,
   type ProtocolEvent,
   type ProtocolJob,
   type ProtocolPlan,
@@ -87,6 +88,13 @@ export interface SessionPublisherOptions {
    * no abre la sesión: anuncia el cambio de anfitrión con un `session.updated`.
    */
   continueFrom?: ProtocolSessionSnapshot;
+  /**
+   * M11 — cada mensaje de la conversación publicada que aparece o cambia (una
+   * tool que termina), en el mismo paso que lo numera. Lo usa quien la guarda
+   * entera (`ConversationStore`): la foto solo lleva lo último. No decide nada
+   * y lo que lance se registra y se descarta.
+   */
+  onTranscript?: (messages: ProtocolChatMessage[]) => void;
 }
 
 const DEFAULT_MAX_QUEUE = 4096;
@@ -415,8 +423,11 @@ export class SessionPublisher {
   /** Se traspasó la sesión: este publicador ya no es de su anfitrión y no publica nada más. */
   private released = false;
 
+  private readonly onTranscript: ((messages: ProtocolChatMessage[]) => void) | undefined;
+
   constructor(opts: SessionPublisherOptions) {
     this.host = opts.host;
+    this.onTranscript = opts.onTranscript;
     this.hostInfo = opts.hostInfo;
     this.sink = opts.sink;
     this.maxQueue = Math.max(8, opts.maxQueue ?? DEFAULT_MAX_QUEUE);
@@ -1178,7 +1189,19 @@ export class SessionPublisher {
       ...(subagentId ? { subagentId } : {}),
       data: data(),
     } as ProtocolStateEvent;
-    this.transcript = applyTranscriptEvent(this.transcript, event);
+    const before = this.transcript;
+    this.transcript = applyTranscriptEvent(before, event);
+    if (this.transcript !== before && this.onTranscript) {
+      const known = new Set(before.messages);
+      const changed = this.transcript.messages.filter((m) => !known.has(m));
+      if (changed.length > 0) {
+        try {
+          this.onTranscript(changed.map((m) => ({ ...m })));
+        } catch (err) {
+          log.warn('transcript observer failed', { sessionId: this.sessionId, err });
+        }
+      }
+    }
     this.enqueue(event);
   }
 

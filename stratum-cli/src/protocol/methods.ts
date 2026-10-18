@@ -3,7 +3,9 @@ import type {
   ProtocolAgent,
   ProtocolApproval,
   ProtocolApprovalDecision,
+  ProtocolContextReport,
   ProtocolDecision,
+  ProtocolHistoryPage,
   ProtocolJob,
   ProtocolMemoryStatus,
   ProtocolModel,
@@ -16,6 +18,7 @@ import type {
   ProtocolServerInfo,
   ProtocolServerStatus,
   ProtocolSession,
+  ProtocolSessionMemory,
 } from './model.js';
 import type { ProtocolEvent, ProtocolOverviewSnapshot, ProtocolSessionSnapshot } from './events.js';
 import type { HANDOFF_FORMAT } from './handoff.js';
@@ -250,6 +253,15 @@ export interface ProtocolMethods {
 
   'sessions.list': Spec<SessionsListParams, { sessions: ProtocolSession[] }>;
   'sessions.get': Spec<{ sessionId: string }, { snapshot: ProtocolSessionSnapshot }>;
+  /** M11 — conversación guardada, de lo más reciente hacia atrás (`before`: el id del primero que ya se tiene). */
+  'sessions.history': Spec<
+    { sessionId: string; before?: string; limit?: number },
+    ProtocolHistoryPage
+  >;
+  /** M11 — contexto activo por capas, conversación guardada y memoria de sesión (recuentos). */
+  'sessions.context': Spec<{ sessionId: string }, { report: ProtocolContextReport }>;
+  /** M11 — la memoria de sesión, con su procedencia. */
+  'sessions.memory': Spec<{ sessionId: string }, { memory: ProtocolSessionMemory }>;
   'sessions.open': Spec<SessionsOpenParams, { session: ProtocolSession }>;
   'sessions.close': Spec<Mutation & { sessionId: string }, Empty>;
   'sessions.setModel': Spec<
@@ -423,6 +435,9 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'sessions.list': read('observe'),
   'sessions.get': read('observe'),
+  'sessions.history': read('observe'),
+  'sessions.context': read('observe'),
+  'sessions.memory': read('observe'),
   'sessions.open': write('control'),
   'sessions.close': write('control'),
   'sessions.setModel': write('control'),
