@@ -13,6 +13,15 @@ export function cacheCapabilitiesOf(cfg: ProviderConfig): CacheCapabilities {
   return resolveCacheCapabilities(classifyBackendByUrl(cfg.baseUrl), cfg.cache);
 }
 
+/**
+ * Cliente de un provider de la config. Único sitio que lo construye: el router
+ * y, en M11, los modelos de la memoria de sesión (`conversation/models.ts`),
+ * cada uno con **sus** credenciales.
+ */
+export function providerClient(cfg: ProviderConfig): IProvider {
+  return makeClient(cfg);
+}
+
 function makeClient(cfg: ProviderConfig): IProvider {
   return new OpenAICompatible(cfg.baseUrl, cfg.apiKey, cfg.model, {
     timeouts: cfg.timeouts,

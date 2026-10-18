@@ -18,6 +18,7 @@ import { StratumAgent } from '../../agent/core.js';
 import { SessionStore, generateSessionId } from '../../session/store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
 import { prepareSessionResume } from '../../session/resume.js';
+import { resumeDecision, whoHostsSession } from '../resume-guard.js';
 import { SessionCheckpointer } from '../../session/checkpoint.js';
 import { pruneOldPlans } from '../../session/cleanup.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
@@ -71,6 +72,10 @@ export const chatCommand = new Command('chat')
   .option('--provider <name>', 'use a specific provider from config')
   .option('--model <id>', 'start with a specific model of the provider (this session only)')
   .option('--resume <session-id>', 'resume a previous session')
+  .option(
+    '--fork',
+    'with --resume: continue a copy of that session under a new id (the original is left as is)',
+  )
   .option('--read-only', 'observation only: no file writes and only read-only commands')
   .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
   .option('--infra', 'shortcut for --profile infra')
@@ -82,6 +87,7 @@ export const chatCommand = new Command('chat')
       provider?: string;
       model?: string;
       resume?: string;
+      fork?: boolean;
       logLevel?: string;
       debug?: boolean;
       readOnly?: boolean;
@@ -92,6 +98,10 @@ export const chatCommand = new Command('chat')
       const profileFlag = sessionProfileFlag(opts);
       if (!profileFlag.ok) {
         process.stderr.write(`${profileFlag.error}\n`);
+        process.exit(1);
+      }
+      if (opts.fork && !opts.resume) {
+        process.stderr.write('--fork only makes sense with --resume <session-id>\n');
         process.exit(1);
       }
       if (opts.logLevel && !isLogLevel(opts.logLevel)) {
@@ -187,13 +197,29 @@ export const chatCommand = new Command('chat')
       let resumedProfile: string | undefined;
 
       if (opts.resume) {
+        // M11: una sesión que ya tiene anfitrión (el daemon, u otra terminal)
+        // no se reanuda aquí en silencio: se continúa con `stratum attach`.
+        const decision = resumeDecision(
+          opts.resume,
+          opts.fork ? null : await whoHostsSession(opts.resume),
+          opts.fork === true,
+        );
+        if (decision.action === 'refuse') {
+          process.stderr.write(`${decision.message}\n`);
+          process.exit(1);
+        }
         try {
           const saved = store.load(opts.resume);
           agentOptions = { initialMessages: saved.messages };
-          sessionId = saved.id;
-          sessionCreatedAt = saved.createdAt;
-          resumedUpdatedAt = saved.updatedAt;
-          process.stderr.write(`Reanudando sesión ${saved.id}\n`);
+          if (decision.action === 'fork') {
+            // Una copia: otro id, otra historia a partir de aquí.
+            process.stderr.write(`Copia de la sesión ${saved.id} como ${sessionId}\n`);
+          } else {
+            sessionId = saved.id;
+            sessionCreatedAt = saved.createdAt;
+            resumedUpdatedAt = saved.updatedAt;
+            process.stderr.write(`Reanudando sesión ${saved.id}\n`);
+          }
 
           // Hito 7 / 8B — plan a medias y subagentes interrumpidos (§12.6, §12.16),
           // buscados en el proyecto de la sesión. Los subagentes no se

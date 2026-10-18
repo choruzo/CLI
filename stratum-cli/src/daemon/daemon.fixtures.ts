@@ -13,6 +13,7 @@ import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import type { SessionStartupOptions } from '../host/session-startup.js';
 import type { CompletionRequest, IProvider, OpenAIStreamChunk } from '../providers/base.js';
 import { makeTextRound } from '../providers/mock.js';
+import { EXTRACTOR_PROMPT, SUMMARIZER_PROMPT } from '../conversation/extract.js';
 import { ProviderRouter } from '../providers/router.js';
 import type {
   ProtocolEvent,
@@ -47,15 +48,47 @@ export function textRound(parts: string[]): OpenAIStreamChunk[] {
   return round;
 }
 
-/** Modelo de guion: una ronda por petición, en orden. Atiende la cancelación. */
+/** Respuesta del modelo de memoria de sesión (M11) a una petición, o un fallo. */
+export type MemoryReply = (prompt: string) => string | Error;
+
+/**
+ * Modelo de guion: una ronda por petición del agente, en orden. Atiende la
+ * cancelación. Las llamadas de la memoria de sesión (M11: extractor y resumen)
+ * **no** consumen rondas: las contesta `memory` (por defecto, nada que extraer
+ * y un resumen fijo) y quedan en `memoryPrompts`.
+ */
 export class ScriptedProvider implements IProvider {
   calls = 0;
   /** Textos de usuario que traía cada petición: lo que el modelo tenía de contexto. */
   readonly userInputs: string[][] = [];
+  /** System prompt de cada petición del agente. */
+  readonly systemPrompts: string[] = [];
+  /** Peticiones del extractor y del resumen de la memoria de sesión. */
+  readonly memoryPrompts: Array<{ role: 'extractor' | 'summarizer'; prompt: string }> = [];
+  memory: { extractor: MemoryReply; summarizer: MemoryReply } = {
+    extractor: () => '{"items":[]}',
+    summarizer: () => 'Resumen de la conversación.',
+  };
 
   constructor(private readonly rounds: Round[]) {}
 
   async *complete(req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
+    const only = req.messages.length === 1 ? req.messages[0]?.content : undefined;
+    const role =
+      typeof only === 'string' && only.startsWith(EXTRACTOR_PROMPT)
+        ? 'extractor'
+        : typeof only === 'string' && only.startsWith(SUMMARIZER_PROMPT)
+          ? 'summarizer'
+          : null;
+    if (role && typeof only === 'string') {
+      this.memoryPrompts.push({ role, prompt: only });
+      const reply = this.memory[role](only);
+      if (reply instanceof Error) throw reply;
+      for (const chunk of makeTextRound(reply)) yield chunk;
+      return;
+    }
+    const system = req.messages[0];
+    this.systemPrompts.push(system?.role === 'system' ? (system.content ?? '') : '');
     this.userInputs.push(
       req.messages.flatMap((m) =>
         m.role === 'user' && typeof m.content === 'string' ? [m.content] : [],

@@ -64,7 +64,11 @@ import type {
   ProtocolSubagent,
   ProtocolTodo,
   ProtocolToolCall,
+  ProtocolContextReport,
+  ProtocolHistoryPage,
+  ProtocolSessionMemory,
 } from './model.js';
+import { HISTORY_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
 
@@ -397,6 +401,103 @@ export const memoryStatusSchema: z.ZodType<ProtocolMemoryStatus> = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// M11 — conversación guardada, contexto y memoria de sesión
+// ---------------------------------------------------------------------------
+
+const memoryItemKind = z.enum([
+  'fact',
+  'decision',
+  'constraint',
+  'preference',
+  'task',
+  'result',
+  'entity',
+]);
+
+export const historyPageSchema: z.ZodType<ProtocolHistoryPage> = z.object({
+  messages: z.array(messageSchema),
+  hasMore: z.boolean(),
+  total: count,
+});
+
+export const contextReportSchema: z.ZodType<ProtocolContextReport> = z.object({
+  sessionId: id,
+  context: z
+    .object({
+      window: count,
+      reserveOutput: count,
+      usableInput: count,
+      input: count,
+      system: count,
+      tools: count,
+      globalMemory: count,
+      projectMemory: count,
+      sessionMemory: count,
+      recent: count,
+      activeMessages: count,
+      estimated: z.boolean(),
+      budgets: z.object({
+        recent: count,
+        sessionMemory: count,
+        projectMemory: count,
+        globalMemory: count,
+        compactAt: z.number().finite(),
+        target: z.number().finite(),
+      }),
+    })
+    .nullable(),
+  conversation: z
+    .object({
+      storedMessages: count,
+      storedAgentMessages: count,
+      activeMessages: count,
+      compactions: count,
+      lastCompactionAt: timestamp.nullable(),
+      lastCompactionError: z.string().nullable(),
+      compacting: z.boolean(),
+    })
+    .nullable(),
+  memory: z
+    .object({
+      enabled: z.boolean(),
+      version: count,
+      updatedAt: timestamp.nullable(),
+      hasSummary: z.boolean(),
+      items: z.record(memoryItemKind, count) as unknown as z.ZodType<
+        Record<z.infer<typeof memoryItemKind>, number>
+      >,
+    })
+    .nullable(),
+});
+
+export const sessionMemorySchema: z.ZodType<ProtocolSessionMemory> = z.object({
+  version: count,
+  updatedAt: timestamp.nullable(),
+  summary: z
+    .object({
+      text: z.string(),
+      sourceCount: count,
+      firstSource: z.string().nullable(),
+      lastSource: z.string().nullable(),
+    })
+    .nullable(),
+  items: z.array(
+    z.object({
+      id,
+      kind: memoryItemKind,
+      key: z.string(),
+      text: z.string(),
+      status: z.enum(['active', 'superseded', 'done', 'conflict']),
+      sources: z.array(z.string()),
+      supersedes: z.string().optional(),
+      supersededBy: z.string().optional(),
+      updatedAt: timestamp,
+    }),
+  ),
+  sourceCursor: z.string().nullable(),
+});
+
+// ---------------------------------------------------------------------------
 // Eventos y snapshots
 // ---------------------------------------------------------------------------
 
@@ -665,6 +766,15 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
 
   'sessions.list': z.object({ live: z.boolean().optional(), limit: limit.optional() }).strict(),
   'sessions.get': sessionRef,
+  'sessions.history': z
+    .object({
+      sessionId: id,
+      before: id.optional(),
+      limit: z.number().int().positive().max(HISTORY_LIMITS.pageMessages).optional(),
+    })
+    .strict(),
+  'sessions.context': sessionRef,
+  'sessions.memory': sessionRef,
   'sessions.open': z
     .object({
       cwd: cwd.optional(),
@@ -838,6 +948,9 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'sessions.list': z.object({ sessions: z.array(sessionSchema) }),
   'sessions.get': z.object({ snapshot: sessionSnapshotSchema }),
+  'sessions.history': historyPageSchema,
+  'sessions.context': z.object({ report: contextReportSchema }),
+  'sessions.memory': z.object({ memory: sessionMemorySchema }),
   'sessions.open': sessionResult,
   'sessions.close': emptyResult,
   'sessions.setModel': sessionResult,

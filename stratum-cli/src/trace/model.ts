@@ -194,6 +194,8 @@ export const ORIGIN_LABEL: Record<LlmCallOrigin, string> = {
   'memory-extraction': 'extracción de memoria',
   'context-compression': 'compresión de contexto',
   'session-summary': 'resumen de sesión',
+  'session-memory-extraction': 'extracción de memoria de sesión',
+  'session-memory-summary': 'resumen de memoria de sesión',
 };
 
 const ORIGINS = new Set<string>(LLM_CALL_ORIGINS);

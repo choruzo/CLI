@@ -6,6 +6,21 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- **Las sesiones de `stratumd` sobreviven a un reinicio** (M11): su conversación, su memoria de sesión, su contexto y sus ajustes se guardan en `~/.stratum/daemon/sessions/<id>/` (`daemon.persistSessions`, por defecto `true`). Al volver a arrancar, cada sesión reaparece en la lista con toda su conversación y se monta al primer uso. Nunca se guardan claves, el entorno ni procesos.
+- **Conversación duradera y memoria de sesión** en las sesiones del daemon: la conversación entera se conserva aunque el contexto del modelo esté acotado; lo antiguo se compacta (al 70 % del presupuesto de entrada) a una memoria de sesión estructurada —hechos, decisiones, restricciones, preferencias, tareas, resultados, entidades y un resumen— con la procedencia de cada entrada. Lo compactado sigue visible en el chat.
+- **Modelo de memoria configurable**: `memory.session.extractor` y `memory.session.summarizer` (`same` por defecto). Un provider distinto usa sus propias credenciales, y uno que no está en esta máquina exige `memory.session.allowRemote: true`.
+- **Presupuesto del contexto** por capas (`context.*`), calculado desde la ventana real del modelo.
+- Stratum Protocol: `sessions.history` (lo anterior a la foto, paginado), `sessions.context` (desglose del contexto, conversación guardada, compactaciones) y `sessions.memory` (la memoria de sesión con su procedencia).
+- `stratum attach`: `/history [n]` para ver los mensajes anteriores de una sesión del daemon.
+- `stratum chat --resume <id> --fork`: continuar una copia de una sesión con otro id.
+
+### Cambios a tener en cuenta
+- **`chat --resume` de una sesión que aloja (o tiene guardada) `stratumd` se niega** y remite a `stratum attach <id>`; antes abría en silencio un segundo runtime con ese id. Lo mismo si la sesión está abierta ahora en otra terminal. Para una copia independiente, `--fork`.
+- En una sesión del daemon, si la memoria de sesión no se puede actualizar (modelo de memoria caído), no se trunca nada: se avisa (`session_memory_deferred`) y, si la conversación ya no cabe, el turno termina con `context_full` en vez de borrar mensajes.
+
 ## [0.9.0-beta.0] — 2026-10-16
 
 Pre-release (`npm install -g stratum-cli@beta`) del **plano de control local**: `stratumd`, un daemon por usuario que ve todas tus sesiones vivas —las suyas y las de cada terminal con `chat` o `run`—, las deja pausar, redirigir y aprobar desde otro sitio, y recibe una sesión de `chat` viva sin perder su contexto. Es la versión de la CLI que necesita **Stratum Dot 0.1.0**, la app de escritorio que se publica a la vez como pre-release (release `dot-v0.1.0`). El Stratum Protocol v1 aún no está congelado: entre pre-releases puede cambiar.

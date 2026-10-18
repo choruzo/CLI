@@ -8,6 +8,7 @@ import { loadApproverAuth } from '../../daemon/approver-key.js';
 import { defaultEndpointDir } from '../../client/discovery.js';
 import { DaemonAlreadyRunningError } from '../../daemon/endpoint.js';
 import { Stratumd } from '../../daemon/daemon.js';
+import { defaultSessionsDir } from '../../daemon/session-archive.js';
 import { ProtocolError } from '../../ipc/codec.js';
 import { UnknownOutcomeError } from '../../ipc/peer.js';
 import { configureLogging, flushLogging, isLogLevel, type LogLevel } from '../../logging/index.js';
@@ -84,6 +85,8 @@ const run = new Command('run')
         approver,
         // Copia del entorno al arrancar: es el que verán las sesiones del daemon.
         env: { ...process.env },
+        // M11: sus sesiones sobreviven a un reinicio (conversación, memoria, ajustes).
+        sessionsDir: config.daemon.persistSessions ? defaultSessionsDir() : null,
       });
     } catch (err) {
       await flushLogging();

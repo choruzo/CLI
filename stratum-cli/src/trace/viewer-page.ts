@@ -188,10 +188,13 @@ footer {
   };
   var STATUS = { ok: 'Completado', error: 'Error', cancelled: 'Cancelado' };
   // Origen de una llamada al modelo (mismo criterio que trace/model.ts).
-  var ORIGINS = ['agent', 'subagent', 'memory-extraction', 'context-compression', 'session-summary'];
+  var ORIGINS = ['agent', 'subagent', 'memory-extraction', 'context-compression', 'session-summary',
+    'session-memory-extraction', 'session-memory-summary'];
   var ORIGIN_LABEL = {
     agent: 'agente', subagent: 'subagente', 'memory-extraction': 'extracción de memoria',
-    'context-compression': 'compresión de contexto', 'session-summary': 'resumen de sesión'
+    'context-compression': 'compresión de contexto', 'session-summary': 'resumen de sesión',
+    'session-memory-extraction': 'extracción de memoria de sesión',
+    'session-memory-summary': 'resumen de memoria de sesión'
   };
   var auxTracked = null;
   function originOf(s) {

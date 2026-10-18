@@ -20,6 +20,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     prompt: DEFAULTS.prompt,
     desktop: DEFAULTS.desktop,
     daemon: DEFAULTS.daemon,
+    context: DEFAULTS.context,
     session: DEFAULTS.session,
     provider: undefined,
     memory: {
@@ -33,6 +34,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       embeddingWarmup: false,
       autoExtract: false,
       similarityThreshold: 0.9,
+      session: DEFAULTS.memory.session,
     },
     tools: {
       confirmDestructive: false,

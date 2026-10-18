@@ -18,11 +18,10 @@
  * daemon monta los suyos.
  */
 import type { StratumAgent, StratumAgentOptions } from '../agent/core.js';
-import type { Message } from '../agent/types.js';
+import { fromStoredMessage, toStoredMessage } from '../conversation/messages.js';
 import {
   HANDOFF_FORMAT,
   type HandoffBlocker,
-  type ProtocolAgentMessage,
   type ProtocolHandoffContext,
 } from '../protocol/index.js';
 import type { PendingInteractions } from './interactions.js';
@@ -82,42 +81,6 @@ export function handoffBlocker(source: HandoffSource): HandoffRefusal | null {
   return null;
 }
 
-function toProtocolMessage(m: Message): ProtocolAgentMessage {
-  return {
-    role: m.role,
-    content: m.content ?? null,
-    ...(m.tool_calls && m.tool_calls.length > 0
-      ? {
-          toolCalls: m.tool_calls.map((c) => ({
-            id: c.id,
-            name: c.function.name,
-            arguments: c.function.arguments,
-          })),
-        }
-      : {}),
-    ...(m.tool_call_id !== undefined ? { toolCallId: m.tool_call_id } : {}),
-    ...(m.name !== undefined ? { name: m.name } : {}),
-  };
-}
-
-function toAgentMessage(m: ProtocolAgentMessage): Message {
-  return {
-    role: m.role,
-    content: m.content,
-    ...(m.toolCalls && m.toolCalls.length > 0
-      ? {
-          tool_calls: m.toolCalls.map((c) => ({
-            id: c.id,
-            type: 'function' as const,
-            function: { name: c.name, arguments: c.arguments },
-          })),
-        }
-      : {}),
-    ...(m.toolCallId !== undefined ? { tool_call_id: m.toolCallId } : {}),
-    ...(m.name !== undefined ? { name: m.name } : {}),
-  };
-}
-
 /**
  * Captura el contexto de la sesión para traspasarla, o dice por qué no se
  * puede. Síncrono: entre comprobar y capturar no cabe un turno.
@@ -144,7 +107,7 @@ export function captureHandoff(source: HandoffSource): HandoffCapture {
         tokens: tokens.status === 'reported' ? (tokens.tokens ?? 0) : null,
         tokenStatus: tokens.status,
       },
-      messages: agent.getMessages().map(toProtocolMessage),
+      messages: agent.getMessages().map(toStoredMessage),
     },
   };
 }
@@ -158,7 +121,7 @@ export function handoffAgentOptions(
   context: ProtocolHandoffContext,
 ): Omit<StratumAgentOptions, 'env'> {
   return {
-    initialMessages: context.messages.map(toAgentMessage),
+    initialMessages: context.messages.map(fromStoredMessage),
     readOnly: context.readOnly,
     sessionProfile: context.sessionProfile,
     ...(context.agent ? { activeAgent: context.agent } : {}),

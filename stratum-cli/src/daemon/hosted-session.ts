@@ -10,12 +10,18 @@
  * daemon no acredita aprobadores, no hay a quién preguntar y se comporta como
  * `stratum run` sin terminal: lo destructivo se deniega, las preguntas se
  * contestan con supuestos y un plan no se aprueba.
+ *
+ * M11 — toda sesión del daemon tiene su conversación duradera (`SessionFiles`:
+ * store, memoria de sesión y estado del contexto, en disco o en memoria). Al
+ * cerrar cada turno se guardan además sus ajustes y su foto, de modo que se
+ * puede volver a montar tras reiniciar el daemon (`HostedSession.restore`).
  */
 import type { StratumConfig } from '../config/schema.js';
 import { PLAN_MODE_PROMPT } from '../agent/plan.js';
 import { ProtocolError } from '../ipc/codec.js';
 import type { ProviderRouter } from '../providers/router.js';
 import type {
+  ProtocolChatMessage,
   CancelStatus,
   PauseStatus,
   ProtocolHandoffContext,
@@ -33,10 +39,16 @@ import { handoffAgentOptions } from '../host/handoff.js';
 import { SessionHost, type SessionHostOptions } from '../host/session-host.js';
 import { SessionPublisher, type PublisherSink } from '../host/session-publisher.js';
 import { getLogger } from '../logging/index.js';
+import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
+import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 
 const log = getLogger('daemon').child('session');
 
-const DAEMON_HOST: ProtocolSessionHostInfo = { kind: 'daemon', client: 'daemon', connected: true };
+export const DAEMON_HOST: ProtocolSessionHostInfo = {
+  kind: 'daemon',
+  client: 'daemon',
+  connected: true,
+};
 
 export interface HostedSessionOptions {
   sessionId: string;
@@ -54,6 +66,8 @@ export interface HostedSessionOptions {
   remoteApprovals: () => boolean;
   /** Plazo de una solicitud sin contestar. `0` = sin plazo. */
   approvalTimeoutMs: number;
+  /** M11 — su conversación duradera y dónde guardar ajustes y foto. */
+  files: SessionFiles;
 }
 
 /** Cuánto se espera a que un turno cancelado termine de cerrarse. */
@@ -66,7 +80,16 @@ export class HostedSession {
   private constructor(
     readonly host: SessionHost,
     readonly publisher: SessionPublisher,
+    private readonly files: SessionFiles,
+    private readonly version: string,
   ) {}
+
+  /** La conversación publicada, al store según aparece (también lo que la foto ya no lleva). */
+  private static transcriptTo(files: SessionFiles): (messages: ProtocolChatMessage[]) => void {
+    return (messages) => {
+      for (const m of messages) files.conversation.store.putChat(m);
+    };
+  }
 
   /**
    * Monta la sesión. Aún no publica nada: `publisher.start()` lo llama quien la
@@ -78,6 +101,7 @@ export class HostedSession {
     const host = await HostedSession.mount(opts, {
       readOnly: opts.readOnly === true,
       ...(opts.sessionProfile ? { sessionProfile: opts.sessionProfile } : {}),
+      conversation: { conversation: opts.files.conversation },
     });
     if (opts.agent) {
       const applied = host.agent.setPrimaryProfile(opts.agent);
@@ -92,8 +116,9 @@ export class HostedSession {
       host,
       hostInfo: DAEMON_HOST,
       sink: opts.sink,
+      onTranscript: HostedSession.transcriptTo(opts.files),
     });
-    return new HostedSession(host, publisher);
+    return new HostedSession(host, publisher, opts.files, opts.version);
   }
 
   /**
@@ -114,7 +139,13 @@ export class HostedSession {
       snapshot: ProtocolSessionSnapshot;
     },
   ): Promise<HostedSession> {
-    const host = await HostedSession.mount(opts, handoffAgentOptions(opts.context));
+    // M11 — lo que ya se veía de la conversación queda guardado desde ya; el
+    // historial del agente lo registra el propio agente al montarse.
+    for (const m of opts.snapshot.messages) opts.files.conversation.store.putChat(m);
+    const host = await HostedSession.mount(opts, {
+      ...handoffAgentOptions(opts.context),
+      conversation: { conversation: opts.files.conversation },
+    });
     const wanted = opts.context.agent;
     if (wanted && host.agent.getActiveProfile()?.name !== wanted) {
       await host.dispose({ cancelBackground: true });
@@ -129,8 +160,97 @@ export class HostedSession {
       hostInfo: DAEMON_HOST,
       sink: opts.sink,
       continueFrom: opts.snapshot,
+      onTranscript: HostedSession.transcriptTo(opts.files),
     });
-    return new HostedSession(host, publisher);
+    return new HostedSession(host, publisher, opts.files, opts.version);
+  }
+
+  /**
+   * M11 — vuelve a montar una sesión guardada tras reiniciar el daemon: el
+   * mismo id, sus ajustes, el contexto activo que tenía (reconstruido desde
+   * su `ConversationStore`) y su memoria de sesión, con un publicador que
+   * continúa desde su última foto (`continueFrom`, ya saneada: lo que estaba
+   * en marcha cuando murió el daemon queda `interrupted`). Lo del proceso
+   * anterior (jobs, SSH, MCP, pendientes) no vuelve: se monta lo de este.
+   *
+   * @throws ProtocolError `UNAVAILABLE` (`startup`) si su perfil principal ya
+   *   no se puede activar: continuar con otro sería cambiarle el agente.
+   */
+  static async restore(
+    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent'> & {
+      archived: ArchivedSession;
+      snapshot: ProtocolSessionSnapshot;
+    },
+  ): Promise<HostedSession> {
+    const { meta } = opts.archived;
+    const host = await HostedSession.mount(opts, {
+      readOnly: meta.readOnly,
+      sessionProfile: meta.sessionProfile,
+      ...(meta.agent ? { activeAgent: meta.agent } : {}),
+      ...(meta.planRef ? { planRef: meta.planRef } : {}),
+      usage: meta.usage,
+      conversation: { conversation: opts.files.conversation, restore: true },
+    });
+    if (meta.agent && host.agent.getActiveProfile()?.name !== meta.agent) {
+      await host.dispose({ cancelBackground: true });
+      throw new ProtocolError(
+        'UNAVAILABLE',
+        `The agent profile "${meta.agent}" of this session cannot be used anymore.`,
+        { reason: 'startup' },
+      );
+    }
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: DAEMON_HOST,
+      sink: opts.sink,
+      continueFrom: opts.snapshot,
+      onTranscript: HostedSession.transcriptTo(opts.files),
+    });
+    return new HostedSession(host, publisher, opts.files, opts.version);
+  }
+
+  /** Ajustes para volver a montarla. Sin entorno, claves ni handles. */
+  private meta(): SessionMeta {
+    const agent = this.host.agent;
+    const session = this.publisher.session();
+    const tokens = agent.getTokenUsage();
+    return {
+      schemaVersion: SESSION_META_SCHEMA_VERSION,
+      sessionId: this.sessionId,
+      cwd: this.host.env.cwd,
+      provider: agent.providerName,
+      model: agent.model,
+      agent: agent.getActiveProfile()?.name ?? null,
+      readOnly: agent.isReadOnly(),
+      sessionProfile: agent.getSessionProfileRequest(),
+      planRef: agent.getPlanRef(),
+      usage: {
+        toolCalls: agent.toolCallCount,
+        tokens: tokens.status === 'reported' ? (tokens.tokens ?? 0) : null,
+        tokenStatus: tokens.status,
+      },
+      writtenBy: this.version,
+      createdAt: session.createdAt,
+      updatedAt: session.updatedAt,
+    };
+  }
+
+  /**
+   * Guarda ajustes y foto (fin de turno, cambio de ajustes, apagado). La
+   * conversación ya está en el store. Un fallo se registra: la sesión sigue.
+   */
+  persist(): void {
+    try {
+      this.files.saveMeta(this.meta());
+      this.files.saveSnapshot(this.publisher.snapshot());
+    } catch (err) {
+      log.error('session not persisted', { sessionId: this.sessionId, err });
+    }
+  }
+
+  /** La conversación duradera de la sesión (M11). */
+  get conversation(): SessionFiles['conversation'] {
+    return this.files.conversation;
   }
 
   private static async mount(
@@ -215,6 +335,7 @@ export class HostedSession {
         this.pump = null;
         // El cierre del run sale ya, no en la siguiente vuelta.
         this.publisher.flush();
+        this.persist();
       }
     })();
     this.pump = pump;
@@ -274,6 +395,7 @@ export class HostedSession {
   private changed(): ProtocolSession {
     this.publisher.sessionChanged();
     this.publisher.flush();
+    this.persist();
     return this.publisher.session();
   }
 
@@ -329,6 +451,14 @@ export class HostedSession {
       }
       // Antes de despedirse: los jobs que se cancelan al desmontar aún se publican.
       await this.host.dispose({ cancelBackground: true });
+      // M11 — lo último que se guarda es el estado de antes del cierre: una
+      // sesión que se apaga con el daemon vuelve con él.
+      this.persist();
+      try {
+        this.files.close();
+      } catch (err) {
+        log.warn('conversation not closed', { sessionId: this.sessionId, err });
+      }
       this.publisher.close(reason);
     })();
     return this.closing;

@@ -76,6 +76,8 @@ import type { FileStateTracker } from '../tools/fs/file-state.js';
 import { tracedCompletion } from '../trace/llm-call.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
+import type { CompactionOutcome } from '../conversation/session-conversation.js';
+import { sessionMemoryChars, type ContextBudget } from './context-builder.js';
 
 const log = getLogger('agent');
 
@@ -110,7 +112,43 @@ export type CompressionResult =
     }
   /** `/compact` forzado: el resumen falló y no hacía falta truncar nada. */
   | { kind: 'failed'; error: string }
-  | { kind: 'pressure'; compressorError?: string }; // zona protegida sola ya supera umbral
+  | { kind: 'pressure'; compressorError?: string } // zona protegida sola ya supera umbral
+  /**
+   * M11 — la compactación a la memoria de sesión falló y aún cabe: no se quitó
+   * nada (nunca se trunca a ciegas una sesión con memoria) y se reintenta en
+   * la siguiente ocasión.
+   */
+  | { kind: 'deferred'; error: string }
+  /**
+   * M11 — no cabe y no se pudo compactar: el turno se para con un error
+   * explícito en vez de borrar contenido arbitrario.
+   */
+  | { kind: 'full'; error: string };
+
+/**
+ * M11 — lo que el `ContextManager` necesita de una sesión con memoria de
+ * sesión para compactar en vez de resumir en línea o truncar. Lo implementa
+ * `StratumAgent` sobre su `SessionConversation`.
+ */
+export interface SessionCompactor {
+  /** Presupuesto vigente (sigue al modelo activo). */
+  budget(): ContextBudget;
+  /** Tokens estimados de las definiciones de tools: también ocupan la entrada. */
+  overheadTokens(): number;
+  /** Registra en el store lo nuevo del historial (antes de quitar nada). */
+  record(messages: Message[]): void;
+  /** Extrae y resume el trozo y guarda la memoria. Solo con `ok` se puede quitar. */
+  compact(
+    chunk: Message[],
+    tokens: { before: number; after: number },
+    signal?: AbortSignal,
+    trace?: TraceScope,
+  ): Promise<CompactionOutcome>;
+  /** Pone la memoria vigente en el system prompt. */
+  applyMemory(messages: Message[]): void;
+  /** El trozo ya salió del contexto: guarda qué queda activo. */
+  committed(messages: Message[]): void;
+}
 
 /** Timeout por defecto del resumen LLM: un modelo local con razonamiento tarda ~40 s. */
 export const DEFAULT_COMPRESSION_TIMEOUT_MS = 120_000;
@@ -156,6 +194,9 @@ export class ContextManager {
   /** Modo de compresión activo (F6). 'conservative' sube el umbral y conserva más rondas. */
   private mode: 'normal' | 'conservative' = 'normal';
 
+  /** M11 — con memoria de sesión, lo antiguo se compacta ahí en vez de resumirse en línea. */
+  private session: SessionCompactor | null = null;
+
   constructor(
     private readonly contextWindow: number,
     private readonly baseKeepRounds: number,
@@ -170,6 +211,16 @@ export class ContextManager {
 
   setCompressionMode(mode: 'normal' | 'conservative'): void {
     this.mode = mode;
+  }
+
+  /** M11 — engancha (o suelta) la compactación a la memoria de sesión. */
+  attachSession(session: SessionCompactor | null): void {
+    this.session = session;
+  }
+
+  /** Factor que corrige el proxy chars/3.5 con el último `usage` real (1 sin dato). */
+  get calibration(): number {
+    return this.tokenRatio !== null ? this.tokenRatio * 3.5 : 1;
   }
 
   /** Umbral efectivo según el modo (F6: en conservative se sube a ≥0.92). */
@@ -279,6 +330,7 @@ export class ContextManager {
     signal?: AbortSignal,
     trace?: TraceScope,
   ): Promise<CompressionResult> {
+    if (this.session) return this.compactSession(this.session, messages, signal, false, trace);
     // Sin redondear: `pct` viene de Math.round y un 80.4% real se leería como 0.80.
     const { used, max } = this.usage(messages);
     if (max > 0 && used / max <= this.compressionThreshold) return { kind: 'skipped' };
@@ -296,6 +348,7 @@ export class ContextManager {
     forced = true,
     trace?: TraceScope,
   ): Promise<CompressionResult> {
+    if (this.session) return this.compactSession(this.session, messages, signal, forced, trace);
     const tokensBefore = this.usage(messages).used;
     const zone = this.buildProtectedZone(messages);
     const oldMessages = zone.compressible.map((i) => messages[i]!);
@@ -341,6 +394,122 @@ export class ContextManager {
     // Caso B: truncado duro
     // -----------------------------------------------------------------------
     return this.hardTruncate(messages, tokensBefore, compressorError);
+  }
+
+  /**
+   * M11 — compactación a la memoria de sesión. A partir de `compactAt` del
+   * presupuesto de entrada, se toman las unidades **más antiguas** fuera de la
+   * zona protegida (un `user`, o un assistant con sus resultados) hasta que lo
+   * que queda baje del objetivo; se extraen y resumen a la memoria, y solo si
+   * eso se guardó salen del contexto. Siguen en el `ConversationStore`.
+   *
+   * Nunca trunca: si la compactación falla, el historial queda como estaba
+   * (`deferred`) y, si ya no cabe, el turno se para (`full`).
+   */
+  private async compactSession(
+    session: SessionCompactor,
+    messages: Message[],
+    signal: AbortSignal | undefined,
+    forced: boolean,
+    trace: TraceScope | undefined,
+  ): Promise<CompressionResult> {
+    const budget = session.budget();
+    const usable = budget.usableInput;
+    const overhead = session.overheadTokens();
+    const before = this.usage(messages).used + overhead;
+    if (!forced && before / usable <= budget.compactAt) return { kind: 'skipped' };
+
+    const zone = this.buildProtectedZone(messages);
+    const fullError =
+      'the conversation no longer fits in the model context window and nothing old enough can be compacted';
+    if (zone.compressible.length === 0) {
+      return before >= usable ? { kind: 'full', error: fullError } : { kind: 'pressure' };
+    }
+
+    // Unidades en orden: un assistant arrastra sus resultados de tool.
+    const units: number[][] = [];
+    for (let k = 0; k < zone.compressible.length; k++) {
+      const i = zone.compressible[k]!;
+      const unit = [i];
+      if (messages[i]?.role === 'assistant') {
+        while (
+          k + 1 < zone.compressible.length &&
+          zone.compressible[k + 1] === unit[unit.length - 1]! + 1 &&
+          messages[zone.compressible[k + 1]!]?.role === 'tool'
+        ) {
+          unit.push(zone.compressible[++k]!);
+        }
+      }
+      units.push(unit);
+    }
+
+    // Hueco para que la memoria crezca hasta su tope.
+    const memoryNow = Math.ceil((sessionMemoryChars(messages) / 3.5) * this.calibration);
+    const growth = Math.max(0, budget.sessionMemory - memoryNow);
+    const target = budget.target * usable;
+    let remaining = before;
+    const chosen: number[] = [];
+    for (const unit of units) {
+      if (!forced && remaining + growth <= target) break;
+      chosen.push(...unit);
+      remaining -= this.estimateCalibrated(unit.map((i) => messages[i]!));
+    }
+    const chunk = chosen.map((i) => messages[i]!);
+
+    // Un fallo del store o de la memoria (disco) antes de quitar nada es un
+    // aplazamiento como cualquier otro, nunca una excepción en mitad del turno.
+    let outcome: CompactionOutcome;
+    try {
+      session.record(messages);
+      outcome = await session.compact(
+        chunk,
+        { before, after: Math.max(0, remaining) },
+        signal,
+        trace,
+      );
+    } catch (err) {
+      const error = `conversation store failed: ${err instanceof Error ? err.message : String(err)}`;
+      log.warn('session compaction failed before removing anything');
+      return before >= usable
+        ? { kind: 'full', error: `${fullError} (${error})` }
+        : { kind: 'deferred', error };
+    }
+    if (!outcome.ok) {
+      if (outcome.cancelled || outcome.reason === 'busy') return { kind: 'skipped' };
+      return before >= usable
+        ? { kind: 'full', error: `${fullError} (${outcome.error})` }
+        : { kind: 'deferred', error: outcome.error };
+    }
+
+    const drop = new Set(chunk);
+    const kept = messages.filter((m) => !drop.has(m));
+    messages.splice(0, messages.length, ...kept);
+    // Muchas plantillas exigen que tras el system venga un `user`.
+    if (messages[1] && messages[1].role !== 'user') {
+      messages.splice(1, 0, {
+        role: 'user',
+        content:
+          '<context_compacted>Earlier messages of this conversation were moved to the session memory.</context_compacted>',
+      });
+    }
+    this.sanitizeToolPairing(messages);
+    session.applyMemory(messages);
+    // La memoria ya está guardada: si no se puede anotar qué queda activo, se
+    // registra y el turno sigue (el siguiente cierre de turno lo vuelve a intentar).
+    try {
+      session.committed(messages);
+    } catch (err) {
+      log.warn('context state not saved after compaction', {
+        error: err instanceof Error ? err.name : 'unknown',
+      });
+    }
+    this.lastPromptTokens = null;
+    return {
+      kind: 'compressed',
+      tokensBefore: before,
+      tokensAfter: this.usage(messages).used + overhead,
+      roundsCompressed: chunk.length,
+    };
   }
 
   // -------------------------------------------------------------------------
@@ -927,6 +1096,24 @@ export class ReactLoop {
         });
       } else if (comprResult.kind === 'pressure') {
         loopLog.warn('context window pressure', { ctxPct: ctxUsage.pct });
+      } else if (comprResult.kind === 'deferred') {
+        // Sin el contenido de la conversación: solo el motivo.
+        loopLog.warn('session memory compaction deferred', { ctxPct: ctxUsage.pct });
+        yield {
+          type: 'warning',
+          message: `session_memory_deferred: ${redactText(comprResult.error, this.config)}; nothing was removed from the context`,
+        };
+      } else if (comprResult.kind === 'full') {
+        loopLog.error('context full and not compactable', { ctxPct: ctxUsage.pct });
+        yield {
+          type: 'error',
+          message:
+            `context_full: ${redactText(comprResult.error, this.config)}. Nothing was deleted: the conversation is intact. ` +
+            'Check the session memory model (memory.session) or use a model with a larger context window.',
+          fatal: true,
+        };
+        yield { type: 'done', stopReason: 'error' };
+        return;
       }
       // Un resumen que no llega cae al truncado duro: sin este aviso el usuario
       // solo vería que el agente ha olvidado cosas.

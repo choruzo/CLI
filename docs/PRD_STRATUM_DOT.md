@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M10 implementados** (M10 completado) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado); siguiente: M11.
+> anotados en el hito que los encuentra. **M0–M11 implementados** (M11 completado) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado; M11 redefinido al empezarlo como conversación duradera y memoria de sesión —la decisión del default de `chat` se aplaza—: ver su estado); siguiente: M12.
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -806,6 +806,10 @@ anfitrión— y volver a ella desde cualquier cliente (`/detach`, `stratum detac
 
 **M11 — Decisión sobre el default de `chat`.** Con datos de M9 y M10. Si se cumple la lista
 de §9.3, `stratum chat` pasa a alojarse en `stratumd`; el modo par se mantiene soportado.
+*Redefinido al empezarlo* (ver «M11 — Conversación duradera y memoria de sesión» en §19): antes
+de decidir que `chat` viva en el daemon, una sesión del daemon tenía que poder crecer sin límite
+y sobrevivir a un reinicio. Lo construido es eso; la decisión del default queda pendiente, con
+un requisito menos.
 
 **M12 — Desktop al Stratum Protocol.**
 
@@ -1469,9 +1473,43 @@ Desviaciones respecto al texto original de §15.1: no hay `stratum run --detach`
 traspasa: mientras corre está ocupado) ni TUI completa sobre una sesión remota (`attach` es un
 cliente de líneas); Dot no ofrece aún un botón de traspaso. §22 Q1: ver su respuesta de M10.
 
-### Después de M10
+### M11 — Conversación duradera y memoria de sesión
 
-M11 (default de `chat`) y M12 (Desktop al Stratum Protocol): §15.1.
+- Una sesión del daemon conserva su conversación **entera y duradera**, independiente de lo que
+  el modelo tiene en su contexto; trabaja con un contexto acotado (memoria de sesión + memoria
+  de proyecto/global con topes + conversación reciente) y compacta lo antiguo con modelos de
+  extracción y resumen configurables, sin que desaparezca del chat ni contamine otras memorias.
+  Sobrevive a un reinicio de `stratumd`.
+- *Hecho cuando*: AC-18.
+
+**Estado: completado (2026-10-18).** Referencia: `docs/protocol.md` §19;
+`.claude/docs/conversacion.md`.
+
+- **Tres capas**: `ConversationStore` (JSONL de solo añadir, versionado, con cerrojo de
+  escritor; no carga los mensajes al abrir), contexto activo (`ContextBuilder`: presupuesto por
+  capas desde la ventana real) y `SessionMemory` (estructurada, con procedencia; un hecho nuevo
+  sustituye al que contradice sin borrarlo; no es autoridad; no se promociona sola).
+- **Compactar no es borrar**: al 70 % del presupuesto de entrada, lo más antiguo se extrae y se
+  resume a la memoria (una compactación a la vez, commit atómico) y solo entonces sale del
+  contexto; sigue en el store y en el chat. Un fallo se aplaza y nunca trunca; si ya no cabe,
+  error explícito.
+- **Modelo de memoria configurable** (`memory.session.extractor/summarizer`), con sus propias
+  credenciales y frontera explícita para un provider remoto (`allowRemote`).
+- **Persistencia y reinicio**: `~/.stratum/daemon/sessions/<id>/`; al arrancar, las sesiones
+  vuelven sin montarse y se montan al primer uso; el `seq` continúa; `sessions.close` las acaba.
+- **Protocolo**: `sessions.history`, `sessions.context`, `sessions.memory` (aditivos, §17).
+- **CLI**: `/history` en `stratum attach`; `chat --resume` de una sesión del daemon remite a
+  `attach` (`--fork` para una copia).
+
+Desviaciones y pendientes: la CLI en su proceso (`chat`/`run`) sigue con la compresión en línea
+(sin conversación duradera); Dot no pagina todavía lo anterior a la foto (el protocolo ya lo
+expone) ni enseña el desglose del contexto; la extracción se hace en el turno (en un punto
+seguro), no en segundo plano; el traspaso sigue llevando el historial entero; la promoción
+explícita de memoria de sesión a proyecto queda para después.
+
+### Después de M11
+
+El default de `chat` (pendiente de M11 original) y M12 (Desktop al Stratum Protocol): §15.1.
 
 ## 20. Acceptance Criteria
 
@@ -1521,6 +1559,14 @@ M11 (default de `chat`) y M12 (Desktop al Stratum Protocol): §15.1.
   sensible que ya esté en el contexto del modelo viaja con él (`docs/protocol.md` §18.5).
   *Comprobación*: `daemon/handoff.test.ts`, `npm run tui:detach` y, en Dot,
   `npm run smoke:detach`.
+- **AC-18 (M11).** Stratum conserva la conversación completa y duradera de una sesión del
+  daemon, independiente del contexto activo del modelo: tras muchos turnos se compacta, los
+  mensajes compactados siguen en el store y en el chat (foto + `sessions.history`), la memoria
+  de sesión los resume con procedencia y sin contaminar la de otra sesión ni la de
+  proyecto/global; el daemon se reinicia y la misma sesión vuelve con toda su conversación, y una
+  pregunta sobre lo antiguo se contesta con la memoria de sesión. Un fallo del modelo de memoria
+  no pierde mensajes ni la memoria anterior. *Comprobación*: `daemon/persistence.test.ts`,
+  `conversation/*.test.ts` y `cli/resume-guard.test.ts`.
 
 ## 21. Risks
 
