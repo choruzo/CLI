@@ -1,5 +1,5 @@
 import { useId, useState } from 'react';
-import type { ToolCallState, ToolCallView } from '../../hooks/conversation-reducer';
+import type { ToolCallState, ToolCallView } from '../../view/model';
 import { Collapse } from './Collapse';
 import { ICON, StrokeIcon } from './icons';
 

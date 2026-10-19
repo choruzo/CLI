@@ -44,7 +44,9 @@ import {
   HANDOFF_LIMITS,
   isStateEvent,
   splitHandoff,
+  type ClientKind,
   type PauseStatus,
+  type ProtocolChatMessage,
   type ProtocolErrorCode,
   type ProtocolEvent,
   type ProtocolResolver,
@@ -125,6 +127,12 @@ export interface PeerHostBridgeOptions {
    * lo pidió (`sessions.detach`)—. Quien aloja la sesión deja de usarla.
    */
   onHandedOff?: () => void;
+  /** M12 — desde qué cliente se inició (por defecto, la terminal). Solo procedencia. */
+  origin?: ClientKind;
+  /** M12 — conversación previa que no sale de eventos (ver `SessionPublisherOptions`). */
+  transcript?: ProtocolChatMessage[];
+  /** M12 — su título, con `transcript`. */
+  title?: string;
 }
 
 /** Tras tantos rechazos seguidos del daemon, se deja de insistir. */
@@ -218,6 +226,9 @@ export class PeerHostBridge implements PublisherSink {
     this.publisher = new SessionPublisher({
       host: opts.session,
       hostInfo: { kind: 'peer', client: 'cli', connected: true },
+      origin: opts.origin ?? 'cli',
+      ...(opts.transcript ? { seedTranscript: opts.transcript } : {}),
+      ...(opts.title ? { seedTitle: opts.title } : {}),
       sink: this,
     });
   }

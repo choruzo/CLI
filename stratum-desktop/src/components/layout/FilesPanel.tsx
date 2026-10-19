@@ -1,5 +1,4 @@
 import { useCallback, useEffect, useState } from 'react';
-import type { WorkspaceStatus } from '../../ipc/types';
 import {
   canOpen,
   errorMessage,
@@ -10,7 +9,7 @@ import {
   type ListedFile,
 } from '../../ipc/files';
 
-function FileRow({ conversationId, file }: { conversationId: string; file: ListedFile }) {
+function FileRow({ cwd, file }: { cwd: string; file: ListedFile }) {
   const [note, setNote] = useState<{ tone: 'error' | 'muted'; text: string } | null>(null);
   const run = (p: Promise<unknown>, ok?: string) =>
     p
@@ -26,7 +25,7 @@ function FileRow({ conversationId, file }: { conversationId: string; file: Liste
         <button
           type="button"
           className="button"
-          onClick={() => run(saveOutput(conversationId, file.path), 'Guardado.')}
+          onClick={() => run(saveOutput(cwd, file.path), 'Guardado.')}
         >
           Guardar
         </button>
@@ -34,7 +33,7 @@ function FileRow({ conversationId, file }: { conversationId: string; file: Liste
           <button
             type="button"
             className="button"
-            onClick={() => run(openOutput(conversationId, file.path))}
+            onClick={() => run(openOutput(cwd, file.path))}
           >
             Abrir
           </button>
@@ -55,12 +54,10 @@ function FileRow({ conversationId, file }: { conversationId: string; file: Liste
  * sirve; el webview solo ve rutas del workspace.
  */
 export function FilesPanel({
-  conversationId,
-  workspace,
+  cwd,
   refreshKey,
 }: {
-  conversationId: string;
-  workspace: WorkspaceStatus | null;
+  cwd: string;
   /** Cambia cuando puede haber ficheros nuevos (turno terminado, subida…). */
   refreshKey: string;
 }) {
@@ -69,13 +66,13 @@ export function FilesPanel({
 
   const load = useCallback(() => {
     setError(null);
-    listWorkspaceFiles(conversationId)
+    listWorkspaceFiles(cwd)
       .then(setFiles)
       .catch((err) => {
         setFiles([]);
         setError(errorMessage(err));
       });
-  }, [conversationId]);
+  }, [cwd]);
 
   useEffect(() => {
     setFiles(null);
@@ -99,15 +96,7 @@ export function FilesPanel({
             {error}
           </p>
         )}
-        {workspace?.state === 'purged' && (
-          <p className="side-panel__empty">
-            Los ficheros anteriores de esta conversación caducaron. Puedes volver a subirlos.
-          </p>
-        )}
-        {workspace?.state === 'restoring' && (
-          <p className="side-panel__empty">Restaurando los ficheros…</p>
-        )}
-        {files && files.length === 0 && workspace?.state !== 'purged' && (
+        {files && files.length === 0 && !error && (
           <p className="side-panel__empty">
             Esta conversación no tiene ficheros. Adjunta uno con el botón o soltándolo sobre la
             ventana.
@@ -123,7 +112,7 @@ export function FilesPanel({
                 <h3 className="conv-group__title">{g.title}</h3>
                 <ul className="file-list">
                   {g.items.map((f) => (
-                    <FileRow key={f.path} conversationId={conversationId} file={f} />
+                    <FileRow key={f.path} cwd={cwd} file={f} />
                   ))}
                 </ul>
               </section>

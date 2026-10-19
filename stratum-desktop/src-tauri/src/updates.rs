@@ -9,8 +9,9 @@
 //!
 //! El webview no tiene permisos del plugin: pregunta y pide instalar con estos
 //! comandos. Nunca se instala sin que el usuario lo pida. Antes de instalar se
-//! apaga el sidecar (en Windows el instalador cierra la app con
-//! `process::exit`, sin pasar por `RunEvent::Exit`).
+//! guarda el estado de la ventana (en Windows el instalador cierra la app con
+//! `process::exit`, sin pasar por `RunEvent::Exit`). Desde M12 no hay sidecar
+//! que apagar: el daemon y sus sesiones no dependen de Desktop y siguen.
 //!
 //! `STRATUM_UPDATE_ENDPOINT` sustituye el endpoint (pruebas contra un servidor
 //! local); la firma se sigue exigiendo con la misma clave.
@@ -65,7 +66,7 @@ fn updater<R: Runtime>(app: &AppHandle<R>) -> Result<Updater, String> {
     }
     let handle = app.clone();
     builder
-        // Windows: el instalador termina el proceso; antes, sidecar y ventana.
+        // Windows: el instalador termina el proceso; antes, la ventana.
         .on_before_exit(move || crate::prepare_exit(&handle))
         .build()
         .map_err(|e| e.to_string())
@@ -106,10 +107,8 @@ pub async fn update_check<R: Runtime>(
 /// Descarga, verifica la firma, instala y reinicia. Informa del progreso por
 /// `on_progress`. Solo instala lo que encontró el último `update_check`.
 ///
-/// El sidecar se apaga antes de instalar (en Windows, desde `on_before_exit`,
-/// justo antes de lanzar el instalador). Si la instalación falla después —el
-/// usuario rechaza el UAC, el AppImage no se puede escribir—, la app sigue
-/// abierta: el sidecar se relanza antes de devolver el error.
+/// Si la instalación falla —el usuario rechaza el UAC, el AppImage no se puede
+/// escribir—, la app sigue abierta y conectada como estaba.
 #[tauri::command]
 pub async fn update_install(
     app: AppHandle,
@@ -134,21 +133,12 @@ pub async fn update_install(
         .await
         .map_err(|e| e.to_string())?;
     let _ = on_progress.send(UpdateProgress::Installing);
-    // En Linux el AppImage se sustituye con la app viva: el sidecar se apaga
-    // aquí y la app se reinicia con la versión nueva. En Windows, si el
-    // instalador arranca, no se vuelve de `install` (el hook `on_before_exit`
-    // ya apagó todo); si no arranca, `install` devuelve el error con el
-    // sidecar ya apagado.
+    // En Linux el AppImage se sustituye con la app viva y la app se reinicia
+    // con la versión nueva. En Windows, si el instalador arranca, no se vuelve
+    // de `install` (el hook `on_before_exit` ya guardó la ventana).
     #[cfg(not(windows))]
     crate::prepare_exit(&app);
-    if let Err(e) = update.install(bytes) {
-        let resumed = app.clone();
-        let _ = tauri::async_runtime::spawn_blocking(move || {
-            crate::supervisor::resume_after_aborted_exit(resumed)
-        })
-        .await;
-        return Err(e.to_string());
-    }
+    update.install(bytes).map_err(|e| e.to_string())?;
     app.restart();
 }
 

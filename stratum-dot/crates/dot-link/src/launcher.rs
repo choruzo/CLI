@@ -31,6 +31,9 @@ impl DaemonLauncher for NoLauncher {
 /// ejecutable, o un `.js` que se lanza con `node` (desarrollo y tests).
 pub const CLI_ENV: &str = "STRATUM_DOT_CLI";
 
+/// La misma, para Stratum Desktop (M12).
+pub const DESKTOP_CLI_ENV: &str = "STRATUM_DESKTOP_CLI";
+
 /// `stratum daemon start`, con la CLI instalada.
 pub struct CliLauncher {
     /// CLI explícita. `None`: `stratum` del `PATH`.
@@ -40,7 +43,12 @@ pub struct CliLauncher {
 
 impl CliLauncher {
     pub fn from_env() -> Self {
-        let cli = std::env::var_os(CLI_ENV)
+        Self::from_env_var(CLI_ENV)
+    }
+
+    /// `stratum daemon start` con la CLI de esa variable, o la del `PATH`.
+    pub fn from_env_var(var: &str) -> Self {
+        let cli = std::env::var_os(var)
             .filter(|v| !v.is_empty())
             .map(PathBuf::from);
         Self {

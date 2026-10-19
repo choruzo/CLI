@@ -1,10 +1,11 @@
 name: Desktop E2E
 
-# Suite E2E de Stratum Desktop (D7): la app de verdad —shell de Tauri + sidecar
-# SEA— manejada con tauri-driver/WebKitWebDriver sobre Xvfb, contra un servidor
-# OpenAI de mentira (stratum-desktop/e2e/mock-llm.mjs). Cubre chat con
-# razonamiento, subida/descarga, retención, conversaciones, ajustes y
-# onboarding. En Windows se ejecuta en local (msedgedriver va ligado a la
+# Suite E2E de Stratum Desktop (D7, M12): la app de verdad, manejada con
+# tauri-driver/WebKitWebDriver sobre Xvfb, como cliente de un `stratumd` real
+# (lo arranca el test con la CLI compilada) contra un servidor OpenAI de
+# mentira (stratum-desktop/e2e/mock-llm.mjs). Cubre chat, controles del run,
+# ficheros y adjuntos, cerrar Desktop a mitad de un run y reiniciar el daemon,
+# y la ventana. En Windows se ejecuta en local (msedgedriver va ligado a la
 # versión exacta de WebView2): ver stratum-desktop/README.md.
 
 on:
@@ -12,12 +13,14 @@ on:
     branches: [main]
     paths:
       - 'stratum-desktop/**'
+      - 'stratum-dot/crates/dot-link/**'
       - 'stratum-cli/src/**'
       - 'stratum-cli/package*.json'
       - '.github/workflows/desktop-e2e.yml'
   pull_request:
     paths:
       - 'stratum-desktop/**'
+      - 'stratum-dot/crates/dot-link/**'
       - 'stratum-cli/src/**'
       - 'stratum-cli/package*.json'
       - '.github/workflows/desktop-e2e.yml'
@@ -76,9 +79,9 @@ jobs:
           (cd stratum-cli && npm ci)
           (cd stratum-desktop && npm ci)
 
-      - name: Build sidecar (SEA)
-        working-directory: stratum-desktop
-        run: npm run sidecar:build
+      - name: Build the CLI (the daemon of the tests)
+        working-directory: stratum-cli
+        run: npm run build
 
       - name: Build app (debug + feature e2e)
         working-directory: stratum-desktop

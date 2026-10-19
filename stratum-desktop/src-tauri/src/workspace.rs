@@ -1,6 +1,15 @@
 //! Ficheros de las conversaciones (D2): subidas a `inputs/`, descargas y vista
-//! previa de `outputs/`. Ver `stratum-cli/src/desktop/workspace.ts` para el
-//! layout; el sidecar es quien crea el workspace y escribe `.workspace.json`.
+//! previa de `outputs/`.
+//!
+//! M12 — una conversación del asistente es una sesión Stratum normal del
+//! daemon (`sessions.open { agent: 'assistant', cwd }`) cuyo directorio es una
+//! carpeta de esta raíz, `<root>/<uuid>/{inputs,outputs,scratch}`. La crea
+//! Desktop justo antes de abrir la sesión ([`WorkspacesInfo::create_folder`]);
+//! el agente la usa como su directorio y solo escribe en `outputs/` y
+//! `scratch/` (lo confina el runtime, `host/assistant.ts`). Qué carpeta es la
+//! de una sesión lo dice su `cwd` publicado ([`WorkspacesInfo::folder_of`]): de
+//! una sesión que no vive aquí (una de código, de la terminal) no se toca nada.
+//! Ya no hay `.workspace.json` ni retención (D3): quedan para después de M12.
 //!
 //! Reparto de responsabilidades, y por qué:
 //! - **El diálogo y el drag & drop los recibe Rust.** Lo que el usuario elige
@@ -17,10 +26,9 @@
 //!   un prompt injection en un fichero subido podría dejar ahí un `.bat` o un
 //!   `.html`.
 //!
-//! La raíz y los límites llegan del sidecar en `handshake_ok.workspaces`.
+//! La raíz y los límites salen de las preferencias (`prefs.rs`).
 
 use serde::Serialize;
-use serde_json::Value;
 use std::collections::{HashMap, HashSet};
 use std::fs;
 use std::io::{self, Read, Write};
@@ -29,6 +37,7 @@ use std::sync::Mutex;
 
 pub const INPUTS: &str = "inputs";
 pub const OUTPUTS: &str = "outputs";
+pub const SCRATCH: &str = "scratch";
 
 /// Concesiones vivas como mucho (una tanda de drag & drop grande no crece sin fin).
 const MAX_GRANTS: usize = 256;
@@ -69,23 +78,59 @@ pub struct WorkspacesInfo {
 }
 
 impl WorkspacesInfo {
-    /// `handshake_ok.workspaces` del sidecar. `None` si falta o está mal formado
-    /// (un sidecar sin D2): entonces no se admiten ficheros.
-    pub fn from_handshake(value: &Value) -> Option<Self> {
-        let root = value.get("root")?.as_str()?;
-        let path = PathBuf::from(root);
-        if !path.is_absolute() {
-            return None;
+    /// Carpeta nueva para una conversación: `<root>/<uuid>/` con `inputs/`,
+    /// `outputs/` y `scratch/`. Devuelve su id y su ruta absoluta (que será el
+    /// `cwd` de la sesión).
+    pub fn create_folder(&self) -> Result<(String, PathBuf), String> {
+        fs::create_dir_all(&self.root)
+            .map_err(|e| format!("no se pudo crear {}: {e}", self.root.display()))?;
+        let id = new_uuid();
+        let dir = self.root.join(&id);
+        fs::create_dir(&dir).map_err(|e| format!("no se pudo crear la carpeta: {e}"))?;
+        for sub in [INPUTS, OUTPUTS, SCRATCH] {
+            if let Err(e) = fs::create_dir(dir.join(sub)) {
+                let _ = fs::remove_dir_all(&dir);
+                return Err(format!("no se pudo crear la carpeta: {e}"));
+            }
         }
-        Some(Self {
-            root: path,
-            max_file_bytes: value.get("maxFileBytes")?.as_u64()?,
-            max_workspace_bytes: value.get("maxWorkspaceBytes")?.as_u64()?,
-        })
+        Ok((id, dir))
     }
 
-    /// Carpeta del workspace de una conversación. Tiene que existir: la crea el
-    /// sidecar al abrir la conversación.
+    /// Quita una carpeta recién creada que no llegó a ser de ninguna sesión
+    /// (el daemon rechazó abrirla). Solo si sigue vacía de ficheros.
+    pub fn remove_unused_folder(&self, id: &str) {
+        let Ok(dir) = self.conversation_dir(id) else {
+            return;
+        };
+        if dir_size(&dir) == 0 {
+            let _ = fs::remove_dir_all(&dir);
+        }
+    }
+
+    /// Id de la carpeta de una sesión a partir de su `cwd`, si es una carpeta
+    /// de esta raíz (comparando rutas reales: ni `..` ni enlaces). Una sesión de
+    /// otro sitio no tiene ficheros de Desktop.
+    pub fn folder_of(&self, cwd: &str) -> Result<String, String> {
+        let not_ours = || "esta sesión no tiene carpeta de ficheros de Desktop".to_string();
+        let path = Path::new(cwd);
+        if !path.is_absolute() {
+            return Err(not_ours());
+        }
+        let id = path
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .filter(|n| is_uuid(n))
+            .ok_or_else(not_ours)?;
+        let real = fs::canonicalize(path).map_err(|_| not_ours())?;
+        let root = fs::canonicalize(&self.root).map_err(|_| not_ours())?;
+        if real.parent() != Some(root.as_path()) {
+            return Err(not_ours());
+        }
+        Ok(id)
+    }
+
+    /// Carpeta del workspace de una conversación. Tiene que existir: la crea
+    /// Desktop al abrir la conversación.
     pub fn conversation_dir(&self, conversation_id: &str) -> Result<PathBuf, String> {
         if !is_uuid(conversation_id) {
             return Err("identificador de conversación no válido".into());
@@ -135,9 +180,17 @@ pub struct Attached {
 #[derive(Debug, Clone, Serialize, PartialEq)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum Preview {
-    Text { text: String, truncated: bool },
-    Image { #[serde(rename = "dataUrl")] data_url: String },
-    Unsupported { reason: String },
+    Text {
+        text: String,
+        truncated: bool,
+    },
+    Image {
+        #[serde(rename = "dataUrl")]
+        data_url: String,
+    },
+    Unsupported {
+        reason: String,
+    },
 }
 
 #[derive(Default)]
@@ -166,13 +219,19 @@ impl WorkspaceState {
             .unwrap()
             .info
             .clone()
-            .ok_or_else(|| "el agente no está conectado o no admite ficheros".to_string())
+            .ok_or_else(|| "la carpeta de conversaciones no está disponible".to_string())
     }
 
     /// Registra lo que el usuario eligió y devuelve lo que puede ver el webview.
     /// Los ficheros que no se pueden adjuntar se informan sin concesión.
     pub fn grant(&self, paths: Vec<PathBuf>) -> Vec<Candidate> {
-        let max_file = self.inner.lock().unwrap().info.as_ref().map(|i| i.max_file_bytes);
+        let max_file = self
+            .inner
+            .lock()
+            .unwrap()
+            .info
+            .as_ref()
+            .map(|i| i.max_file_bytes);
         let mut out = Vec::with_capacity(paths.len());
         for path in paths {
             let name = path
@@ -181,12 +240,15 @@ impl WorkspaceState {
                 .unwrap_or_else(|| "fichero".into());
             let (size, error) = match fs::metadata(&path) {
                 Ok(m) if m.is_file() => {
-                    let error = max_file
-                        .filter(|max| m.len() > *max)
-                        .map(|max| format!("supera el límite de {} por fichero", format_bytes(max)));
+                    let error = max_file.filter(|max| m.len() > *max).map(|max| {
+                        format!("supera el límite de {} por fichero", format_bytes(max))
+                    });
                     (m.len(), error)
                 }
-                Ok(_) => (0, Some("solo se pueden adjuntar ficheros, no carpetas".into())),
+                Ok(_) => (
+                    0,
+                    Some("solo se pueden adjuntar ficheros, no carpetas".into()),
+                ),
                 Err(e) => (0, Some(format!("no se puede leer: {e}"))),
             };
             let id = if error.is_none() {
@@ -194,7 +256,12 @@ impl WorkspaceState {
             } else {
                 random_id()
             };
-            out.push(Candidate { id, name, size, error });
+            out.push(Candidate {
+                id,
+                name,
+                size,
+                error,
+            });
         }
         out
     }
@@ -300,7 +367,11 @@ impl WorkspaceState {
     pub fn file_path(&self, conversation_id: &str, rel: &str) -> Result<PathBuf, String> {
         let info = self.info()?;
         let dir = info.conversation_dir(conversation_id)?;
-        let area = if rel.starts_with("inputs/") { INPUTS } else { OUTPUTS };
+        let area = if rel.starts_with("inputs/") {
+            INPUTS
+        } else {
+            OUTPUTS
+        };
         resolve_in(&dir, area, rel)
     }
 
@@ -318,11 +389,6 @@ impl WorkspaceState {
             walk_area(&dir.join(area), area, &mut files, &mut budget);
         }
         Ok(files)
-    }
-
-    /// La conversación se eliminó: sus adjuntos pendientes ya no existen.
-    pub fn forget(&self, conversation_id: &str) {
-        self.inner.lock().unwrap().pending.remove(conversation_id);
     }
 }
 
@@ -373,7 +439,11 @@ fn walk_area(dir: &Path, prefix: &str, out: &mut Vec<ListedFile>, budget: &mut u
                 path: rel,
                 name,
                 size: meta.len(),
-                area: if prefix.starts_with(INPUTS) { INPUTS } else { OUTPUTS },
+                area: if prefix.starts_with(INPUTS) {
+                    INPUTS
+                } else {
+                    OUTPUTS
+                },
                 modified_ms,
             });
         }
@@ -458,11 +528,10 @@ pub fn copy_into_inputs(
         ));
     }
     let inputs = dir.join(INPUTS);
-    // El workspace lo crea (y lo restaura, D3) el sidecar al abrir la
-    // conversación. Crearlo aquí dejaría una carpeta suelta junto a un
-    // workspace archivado.
+    // `inputs/` la crea Desktop con la carpeta de la conversación. Una sesión
+    // de antes de D2 puede no tenerla: se crea, dentro de su propia carpeta.
     if !inputs.is_dir() {
-        return Err("la carpeta de ficheros de la conversación no está lista; vuelve a intentarlo".into());
+        fs::create_dir(&inputs).map_err(|e| format!("no se pudo preparar la carpeta: {e}"))?;
     }
     let raw_name = source
         .file_name()
@@ -632,7 +701,10 @@ pub fn export_zip(dir: &Path, target: &Path) -> Result<u64, String> {
     }
     let tmp = target.with_file_name(format!(
         ".{}.{}.part",
-        target.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default(),
+        target
+            .file_name()
+            .map(|n| n.to_string_lossy().into_owned())
+            .unwrap_or_default(),
         random_id()
     ));
     let result = (|| -> Result<u64, String> {
@@ -692,8 +764,8 @@ fn add_to_zip<W: Write + io::Seek>(
         } else if meta.is_file() {
             zip.start_file(name.as_str(), zip_options(meta.len()))
                 .map_err(|e| e.to_string())?;
-            let mut input =
-                fs::File::open(entry.path()).map_err(|e| format!("no se puede leer {name}: {e}"))?;
+            let mut input = fs::File::open(entry.path())
+                .map_err(|e| format!("no se puede leer {name}: {e}"))?;
             io::copy(&mut input, zip).map_err(|e| e.to_string())?;
             *count += 1;
         }
@@ -718,6 +790,23 @@ pub fn format_bytes(bytes: u64) -> String {
     }
 }
 
+/// UUID v4 en forma canónica (el id de la carpeta de una conversación).
+pub fn new_uuid() -> String {
+    let mut b = [0u8; 16];
+    getrandom::fill(&mut b).expect("getrandom");
+    b[6] = (b[6] & 0x0f) | 0x40;
+    b[8] = (b[8] & 0x3f) | 0x80;
+    let hex: String = b.iter().map(|x| format!("{x:02x}")).collect();
+    format!(
+        "{}-{}-{}-{}-{}",
+        &hex[0..8],
+        &hex[8..12],
+        &hex[12..16],
+        &hex[16..20],
+        &hex[20..32]
+    )
+}
+
 fn random_id() -> String {
     let mut bytes = [0u8; 12];
     getrandom::fill(&mut bytes).expect("getrandom");
@@ -736,8 +825,16 @@ fn base64(data: &[u8]) -> String {
         let n = (u32::from(b[0]) << 16) | (u32::from(b[1]) << 8) | u32::from(b[2]);
         out.push(TABLE[(n >> 18) as usize & 63] as char);
         out.push(TABLE[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 { TABLE[(n >> 6) as usize & 63] as char } else { '=' });
-        out.push(if chunk.len() > 2 { TABLE[n as usize & 63] as char } else { '=' });
+        out.push(if chunk.len() > 1 {
+            TABLE[(n >> 6) as usize & 63] as char
+        } else {
+            '='
+        });
+        out.push(if chunk.len() > 2 {
+            TABLE[n as usize & 63] as char
+        } else {
+            '='
+        });
     }
     out
 }
@@ -745,7 +842,6 @@ fn base64(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use serde_json::json;
 
     const CID: &str = "0b5b2c7e-5c1a-4f7e-8d3a-000000000001";
 
@@ -774,21 +870,42 @@ mod tests {
     }
 
     #[test]
-    fn lee_los_datos_del_handshake() {
-        let info = WorkspacesInfo::from_handshake(&json!({
-            "root": std::env::temp_dir().to_string_lossy(),
-            "maxFileBytes": 10, "maxWorkspaceBytes": 20
-        }))
-        .unwrap();
-        assert_eq!(info.max_file_bytes, 10);
-        assert!(WorkspacesInfo::from_handshake(&json!({"root": "relativa", "maxFileBytes": 1, "maxWorkspaceBytes": 1})).is_none());
-        assert!(WorkspacesInfo::from_handshake(&json!({})).is_none());
+    fn crea_la_carpeta_de_una_conversacion_y_la_reconoce_por_su_cwd() {
+        let (tmp, state, _) = setup(100, 1000);
+        let info = state.info().unwrap();
+        let (id, dir) = info.create_folder().unwrap();
+        assert!(is_uuid(&id));
+        for sub in ["inputs", "outputs", "scratch"] {
+            assert!(dir.join(sub).is_dir(), "{sub}");
+        }
+        assert_eq!(info.folder_of(&dir.to_string_lossy()).unwrap(), id);
+        // Una sesión de otro sitio (de código, de la terminal) no es de aquí.
+        let elsewhere = tmp.path().join(new_uuid());
+        fs::create_dir_all(&elsewhere).unwrap();
+        assert!(info.folder_of(&elsewhere.to_string_lossy()).is_err());
+        assert!(info.folder_of("relativa").is_err());
+        assert!(info
+            .folder_of(&info.root.join("..").join(&id).to_string_lossy())
+            .is_err());
+        // Sin usar se puede quitar; con un fichero dentro, no.
+        info.remove_unused_folder(&id);
+        assert!(!dir.exists());
+        let (id2, dir2) = info.create_folder().unwrap();
+        fs::write(dir2.join("outputs").join("a.txt"), "x").unwrap();
+        info.remove_unused_folder(&id2);
+        assert!(dir2.exists());
     }
 
     #[test]
     fn valida_el_id_de_conversacion() {
         assert!(is_uuid(CID));
-        for bad in ["", "..", "../etc", "0b5b2c7e-5c1a-4f7e-8d3a-00000000000g", "a/b"] {
+        for bad in [
+            "",
+            "..",
+            "../etc",
+            "0b5b2c7e-5c1a-4f7e-8d3a-00000000000g",
+            "a/b",
+        ] {
             assert!(!is_uuid(bad), "{bad}");
         }
         let (_t, state, _) = setup(100, 1000);
@@ -820,11 +937,20 @@ mod tests {
         let mut paths = vec![];
         for _ in 0..3 {
             let c = state.grant(vec![src.clone()]);
-            paths.push(state.attach(CID, &[c[0].id.clone()]).unwrap()[0].path.clone().unwrap());
+            paths.push(
+                state.attach(CID, &[c[0].id.clone()]).unwrap()[0]
+                    .path
+                    .clone()
+                    .unwrap(),
+            );
         }
         assert_eq!(
             paths,
-            ["inputs/informe.pdf", "inputs/informe (1).pdf", "inputs/informe (2).pdf"]
+            [
+                "inputs/informe.pdf",
+                "inputs/informe (1).pdf",
+                "inputs/informe (2).pdf"
+            ]
         );
     }
 
@@ -842,7 +968,9 @@ mod tests {
         let a = user_file(&tmp, "a.bin", 80);
         let b = user_file(&tmp, "b.bin", 80);
         let ca = state.grant(vec![a]);
-        assert!(state.attach(CID, &[ca[0].id.clone()]).unwrap()[0].error.is_none());
+        assert!(state.attach(CID, &[ca[0].id.clone()]).unwrap()[0]
+            .error
+            .is_none());
         let cb = state.grant(vec![b]);
         let rb = state.attach(CID, &[cb[0].id.clone()]).unwrap();
         assert!(rb[0].error.as_deref().unwrap().contains("superaría"));
@@ -873,10 +1001,16 @@ mod tests {
     fn solo_se_descartan_adjuntos_pendientes() {
         let (tmp, state, dir) = setup(1000, 10_000);
         let c = state.grant(vec![user_file(&tmp, "x.txt", 3)]);
-        let rel = state.attach(CID, &[c[0].id.clone()]).unwrap()[0].path.clone().unwrap();
+        let rel = state.attach(CID, &[c[0].id.clone()]).unwrap()[0]
+            .path
+            .clone()
+            .unwrap();
         let c2 = state.grant(vec![user_file(&tmp, "y.txt", 3)]);
-        let rel2 = state.attach(CID, &[c2[0].id.clone()]).unwrap()[0].path.clone().unwrap();
-        state.commit(CID, &[rel2.clone()]);
+        let rel2 = state.attach(CID, &[c2[0].id.clone()]).unwrap()[0]
+            .path
+            .clone()
+            .unwrap();
+        state.commit(CID, std::slice::from_ref(&rel2));
         state.discard(CID, &rel).unwrap();
         assert!(!dir.join(&rel).exists());
         assert!(state.discard(CID, &rel2).is_err());
@@ -937,7 +1071,18 @@ mod tests {
         for ok in ["a.pdf", "b.CSV", "c.docx", "d.png", "e.md"] {
             assert!(can_open(ok), "{ok}");
         }
-        for bad in ["a.bat", "b.ps1", "c.html", "d.svg", "e.js", "f.exe", "g.lnk", "h.docm", "sin-extension", "i.sh"] {
+        for bad in [
+            "a.bat",
+            "b.ps1",
+            "c.html",
+            "d.svg",
+            "e.js",
+            "f.exe",
+            "g.lnk",
+            "h.docm",
+            "sin-extension",
+            "i.sh",
+        ] {
             assert!(!can_open(bad), "{bad}");
         }
     }
@@ -949,7 +1094,10 @@ mod tests {
         fs::write(&txt, "# Hola").unwrap();
         assert_eq!(
             preview(&txt).unwrap(),
-            Preview::Text { text: "# Hola".into(), truncated: false }
+            Preview::Text {
+                text: "# Hola".into(),
+                truncated: false
+            }
         );
         let png = dir.join("outputs/p.png");
         fs::write(&png, [0x89, b'P', b'N', b'G']).unwrap();
@@ -959,7 +1107,10 @@ mod tests {
         }
         let bin = dir.join("outputs/x.bin");
         fs::write(&bin, [0u8]).unwrap();
-        assert!(matches!(preview(&bin).unwrap(), Preview::Unsupported { .. }));
+        assert!(matches!(
+            preview(&bin).unwrap(),
+            Preview::Unsupported { .. }
+        ));
     }
 
     #[test]
@@ -968,20 +1119,27 @@ mod tests {
         let src = user_file(&tmp, "a.txt", 10);
         let info = state.info().unwrap();
         // Sin carpeta: ni siquiera se resuelve.
-        assert!(info.conversation_dir("0b5b2c7e-5c1a-4f7e-8d3a-0000000000ff").is_err());
-        // Con carpeta pero sin `inputs/` (no la preparó el sidecar): no se crea.
+        assert!(info
+            .conversation_dir("0b5b2c7e-5c1a-4f7e-8d3a-0000000000ff")
+            .is_err());
+        // Con carpeta pero sin `inputs/` (una conversación anterior a D2): se
+        // crea dentro de su carpeta y se copia.
         let other = info.root.join("0b5b2c7e-5c1a-4f7e-8d3a-0000000000fe");
         fs::create_dir_all(&other).unwrap();
-        let err = copy_into_inputs(&info, &other, &src).unwrap_err();
-        assert!(err.contains("no está lista"), "{err}");
-        assert!(!other.join(INPUTS).exists());
+        let (rel, _) = copy_into_inputs(&info, &other, &src).unwrap();
+        assert!(rel.starts_with("inputs/"), "{rel}");
+        assert!(other.join(INPUTS).is_dir());
     }
 
     #[test]
     fn exporta_inputs_y_outputs_a_zip() {
         let (tmp, _state, dir) = setup(1024, 4096);
-        fs::write(dir.join(INPUTS).join("ventas.csv"), "mes,total
-").unwrap();
+        fs::write(
+            dir.join(INPUTS).join("ventas.csv"),
+            "mes,total
+",
+        )
+        .unwrap();
         fs::create_dir_all(dir.join(OUTPUTS).join("sub")).unwrap();
         fs::write(dir.join(OUTPUTS).join("sub").join("año.md"), "# ñ").unwrap();
         fs::write(dir.join("scratch").join("notas.txt"), "privado").unwrap();
@@ -992,7 +1150,10 @@ mod tests {
         let mut archive = zip::ZipArchive::new(fs::File::open(&target).unwrap()).unwrap();
         let mut names: Vec<String> = archive.file_names().map(String::from).collect();
         names.sort();
-        assert_eq!(names, ["inputs/ventas.csv", "outputs/sub/", "outputs/sub/año.md"]);
+        assert_eq!(
+            names,
+            ["inputs/ventas.csv", "outputs/sub/", "outputs/sub/año.md"]
+        );
         let mut content = String::new();
         archive
             .by_name("outputs/sub/año.md")
@@ -1029,7 +1190,10 @@ mod tests {
         fs::write(dir.join("scratch").join("tmp.txt"), "x").unwrap();
         let files = state.list_files(&cid).unwrap();
         let paths: Vec<_> = files.iter().map(|f| (f.path.as_str(), f.area)).collect();
-        assert_eq!(paths, vec![("inputs/a.csv", "inputs"), ("outputs/sub/b.md", "outputs")]);
+        assert_eq!(
+            paths,
+            vec![("inputs/a.csv", "inputs"), ("outputs/sub/b.md", "outputs")]
+        );
         assert_eq!(files[0].size, 3);
         // Guardar y abrir aceptan las dos carpetas, nunca scratch/.
         assert!(state.file_path(&cid, "inputs/a.csv").is_ok());

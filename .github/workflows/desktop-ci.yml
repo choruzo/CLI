@@ -1,0 +1,130 @@
+name: Desktop CI
+
+# Stratum Desktop desde M12: un cliente de `stratumd`, hermano de la CLI y de
+# Stratum Dot (docs/STRATUM_CLIENT_ARCHITECTURE.md). En Windows y Linux:
+#
+# - el webview (tipos, tests e invariantes de arquitectura: sin runtime, sin
+#   sidecar, sin RPC genérico, solo el contrato del protocolo);
+# - el lado nativo (formato, clippy y tests: preferencias, carpetas de
+#   conversación, ficheros) y el enlace compartido `dot-link` con el perfil de
+#   Desktop;
+# - el core que lo sostiene (clientes hermanos, agente `assistant`, protocolo);
+# - y el smoke entre clientes contra un `stratumd` real: Desktop abre una
+#   sesión → Dot la ve → `stratum attach` igual; la terminal hace `/detach` →
+#   Desktop la continúa; cerrar Desktop no cierra nada; reiniciar el daemon →
+#   la sesión vuelve y se continúa.
+#
+# El E2E de la ventana está en desktop-e2e.yml (Linux) y en local (Windows).
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'stratum-desktop/**'
+      - 'stratum-dot/crates/dot-link/**'
+      - 'stratum-dot/scripts/probe.mjs'
+      - 'stratum-cli/src/protocol/**'
+      - 'stratum-cli/src/daemon/**'
+      - 'stratum-cli/src/host/**'
+      - 'stratum-cli/src/client/**'
+      - 'stratum-cli/package*.json'
+      - '.github/workflows/desktop-ci.yml'
+  pull_request:
+    paths:
+      - 'stratum-desktop/**'
+      - 'stratum-dot/crates/dot-link/**'
+      - 'stratum-dot/scripts/probe.mjs'
+      - 'stratum-cli/src/protocol/**'
+      - 'stratum-cli/src/daemon/**'
+      - 'stratum-cli/src/host/**'
+      - 'stratum-cli/src/client/**'
+      - 'stratum-cli/package*.json'
+      - '.github/workflows/desktop-ci.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: desktop-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  desktop:
+    name: Desktop (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-22.04, windows-latest]
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: |
+            stratum-cli/package-lock.json
+            stratum-desktop/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy, rustfmt
+
+      - name: Rust cache
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: |
+            stratum-desktop/src-tauri -> target
+            stratum-dot -> target
+
+      - name: System dependencies (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config
+
+      - name: Install dependencies
+        run: |
+          (cd stratum-cli && npm ci)
+          (cd stratum-desktop && npm ci)
+
+      - name: Webview (types, tests, architecture)
+        working-directory: stratum-desktop
+        run: |
+          npm run typecheck
+          npm run test:run
+
+      - name: Native shell (fmt, clippy, tests)
+        working-directory: stratum-desktop
+        run: |
+          npx vite build
+          cargo fmt --manifest-path src-tauri/Cargo.toml -- --check
+          cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+          cargo test --manifest-path src-tauri/Cargo.toml
+
+      - name: Shared native client (dot-link, Desktop profile)
+        working-directory: stratum-dot
+        run: cargo test -p dot-link --test desktop
+
+      - name: Core (sibling clients, assistant agent, protocol)
+        working-directory: stratum-cli
+        run: npx vitest run src/daemon/sibling-clients.test.ts src/protocol src/host
+
+      - name: Build the CLI and dot-probe
+        run: |
+          (cd stratum-cli && npm run build)
+          (cd stratum-dot && cargo build -p dot-link)
+
+      - name: Cross-client smoke against a real stratumd (M12)
+        working-directory: stratum-desktop
+        run: npm run smoke:clients

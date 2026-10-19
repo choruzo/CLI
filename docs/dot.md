@@ -15,8 +15,11 @@ espera de una persona**: aprobaciones, preguntas y planes.
 > verifica con el sistema quién atiende el canal antes de enviar credenciales, el endpoint y el
 > socket son privados, y las colas están acotadas. Con M10 (§15), una sesión de la terminal que
 > pasa a alojarse en el daemon se sigue viendo como **la misma** y se puede conversar con ella.
+> Con M12 (§16), Stratum Desktop pasa a ser un cliente hermano que **comparte el enlace nativo**
+> (`dot-link`, con su propio perfil); Dot no cambia de comportamiento.
 > Sin trazas todavía. Contrato:
-> `docs/protocol.md`. Producto: `docs/PRD_STRATUM_DOT.md`.
+> `docs/protocol.md`. Producto: `docs/PRD_STRATUM_DOT.md`. Fronteras entre clientes:
+> `docs/STRATUM_CLIENT_ARCHITECTURE.md`.
 
 Las reglas que M8 y M9 no rompen:
 
@@ -487,12 +490,12 @@ no se emite (`protocol.md` §13.6 y §16).
 
 ## 10. Convivencia con Stratum Desktop
 
-Dos aplicaciones durante el MVP (`PRD_STRATUM_DOT.md` §9.5). `stratum-desktop` 0.4 —sidecar,
-protocolo v9— **no cambia**: M6 no toca ni una línea suya ni de `stratum-cli/src/desktop/`.
-Dot usa otro identificador (`dev.stratum.dot`), otro puerto de desarrollo (1421) y no comparte
-estado con ella. Lo único que Dot toma de Desktop es su cliente WebDriver de pruebas
-(`stratum-desktop/e2e/webdriver.mjs`), que es herramienta de tests, no código de la app. La
-convergencia es M12.
+Dos aplicaciones (`PRD_STRATUM_DOT.md` §9.5). Hasta M11, `stratum-desktop` tenía su sidecar y su
+protocolo v9 y Dot no compartía nada con ella salvo el cliente WebDriver de pruebas. **Desde M12
+(§16)** las dos son clientes hermanos del mismo `stratumd` y comparten el enlace nativo
+(`dot-link`) y la capa cliente del contrato (`followSession`); no comparten estado, ni
+identificador (`dev.stratum.dot` / `dev.stratum.desktop`), ni interfaz. La convergencia de
+producto (si una es el modo compacto de la otra) queda fuera de M12.
 
 ## 11. Desarrollo
 
@@ -1245,3 +1248,32 @@ terminal real + `dot-probe` contra un `stratumd` real: la sesión no sale de la 
 traspaso, no hay `session.closed`/`session.opened`, la foto conserva la conversación y Dot le
 escribe ya en el daemon con el contexto de la terminal; cerrar Dot no la toca).
 
+## 16. Un enlace para dos clientes (M12)
+
+Desde M12, Stratum Desktop es un cliente hermano de Dot (`docs/STRATUM_CLIENT_ARCHITECTURE.md` §8,
+`docs/protocol.md` §20) y usa **el mismo** `dot-link`, con su propio perfil. Lo que cambia en el
+crate, sin cambiar lo que hace Dot:
+
+- **`ClientProfile`** (`link.rs`): `DOT` y `DESKTOP`, cerrados. Cada uno fija `core.hello.client`
+  (`dot`/`stratum-dot`, `desktop`/`stratum-desktop`), qué sesiones se siguen y la **lista blanca**
+  de métodos (`DOT_METHODS`, `DESKTOP_METHODS`). El perfil solo resta: lo que no está en su lista
+  no sale (`invalid`, sin enviar nada); lo que sí, lo decide el daemon. Dot conserva exactamente su
+  lista de M9 —ni cerrar ni reconfigurar sesiones—, y su test de arquitectura ahora lo comprueba
+  sobre `DOT_METHODS` (antes, sobre que `wire.rs` no nombrara esos métodos: `MainMethod` es ahora
+  la lista común y añade `sessions.history|context|memory|close|setModel`, que solo usa Desktop).
+- **`FollowPolicy`**: `All` (Dot, como siempre) o `Focused` (Desktop: solo la sesión que se mira
+  tiene suscripción `session`; la lista sale de la foto de conjunto, que con
+  `forward_overview` se reenvía sin interpretar como `DotEvent::Overview`/`OverviewEvents`).
+- `CliLauncher::from_env_var` (`STRATUM_DESKTOP_CLI` para Desktop; Dot sigue con
+  `STRATUM_DOT_CLI`) y `Logger::to_file` (`desktop.log`).
+- `dot-probe --client desktop` es el enlace de Desktop sin ventana: lo usa
+  `stratum-desktop/scripts/smoke-clients.mjs`. `scripts/probe.mjs` acepta `client` y
+  `autostart`.
+- En el webview, `src/protocol/apply.ts` delega en `followSession`/`classifyEvent` del contrato
+  (`stratum-cli/src/protocol/follow.ts`): la misma función que usa Desktop. Sus tests no cambian.
+
+El nombre del crate se queda en `dot-link` (renombrarlo era ruido para el mismo código).
+
+Tests: `cargo test -p dot-link` (añade `tests/desktop.rs`: perfil, seguimiento por foco, lo de
+M11, cerrar, la lista blanca de Dot y una orden sin respuesta que no se repite) y todos los de Dot,
+sin cambios de comportamiento (`npm run test:run`, `smoke:real`, `smoke:chat`, `smoke:detach`).

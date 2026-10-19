@@ -16,6 +16,7 @@ import { makeTextRound } from '../providers/mock.js';
 import { EXTRACTOR_PROMPT, SUMMARIZER_PROMPT } from '../conversation/extract.js';
 import { ProviderRouter } from '../providers/router.js';
 import type {
+  ClientKind,
   ProtocolEvent,
   ProtocolSessionSnapshot,
   ProtocolStateEvent,
@@ -63,6 +64,8 @@ export class ScriptedProvider implements IProvider {
   readonly userInputs: string[][] = [];
   /** System prompt de cada petición del agente. */
   readonly systemPrompts: string[] = [];
+  /** Nombres de las tools que se ofrecieron en cada petición del agente. */
+  readonly toolNames: string[][] = [];
   /** Peticiones del extractor y del resumen de la memoria de sesión. */
   readonly memoryPrompts: Array<{ role: 'extractor' | 'summarizer'; prompt: string }> = [];
   memory: { extractor: MemoryReply; summarizer: MemoryReply } = {
@@ -89,6 +92,7 @@ export class ScriptedProvider implements IProvider {
     }
     const system = req.messages[0];
     this.systemPrompts.push(system?.role === 'system' ? (system.content ?? '') : '');
+    this.toolNames.push((req.tools ?? []).map((t) => t.function.name));
     this.userInputs.push(
       req.messages.flatMap((m) =>
         m.role === 'user' && typeof m.content === 'string' ? [m.content] : [],
@@ -150,7 +154,7 @@ export interface TestDaemon {
   connect(
     roles: Role[],
     name?: string,
-    options?: { approverKey?: string | null },
+    options?: { approverKey?: string | null; kind?: ClientKind },
   ): Promise<StratumClient>;
   stop(): Promise<void>;
 }
@@ -331,6 +335,8 @@ export async function startTestDaemon(
     approverFailureDelayMs: 0,
     env: { ...process.env, STRATUMD_TEST: 'daemon-env' },
     dir,
+    // El asistente guarda su memoria en la carpeta del test y no migra nada del usuario.
+    assistantData: { dir: join(base, 'assistant'), legacyMemoryDir: null },
     processTeardown: async () => {
       teardowns++;
     },
@@ -370,7 +376,7 @@ export async function startTestDaemon(
       const client = new StratumClient({
         discovery: fileDiscovery({ dir }),
         identity: {
-          kind: 'cli',
+          kind: connectOptions.kind ?? 'cli',
           name,
           version: '0.0.0-test',
           roles,

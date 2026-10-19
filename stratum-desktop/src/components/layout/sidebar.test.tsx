@@ -1,116 +1,76 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
-import type { ConversationSummary } from '../../ipc/types';
-import { ConversationsPanel } from './ConversationsPanel';
+import { SessionsPanel } from './SessionsPanel';
 import { OutlinePanel, outlineLabel } from './OutlinePanel';
-import { MemoryPanel } from './MemoryPanel';
 import { StatusBar, contextTone, formatTokens } from './StatusBar';
 import { togglePanel } from './Sidebar';
 import { InputArea } from '../chat/InputArea';
 import { matchCommands, parseCommand } from '../chat/commands';
-import { initialSidecarState } from '../../hooks/useSidecar';
-import type { Memory } from '../../hooks/useMemory';
+import { sampleSession } from '../../../../stratum-cli/src/protocol/protocol.fixtures';
+import { sessionItems, type SessionItem } from '../../view/sessions';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn() }));
 
 afterEach(cleanup);
 
-const A = '6f1c1c0e-3d2a-4b8e-9c1d-00000000000a';
-const B = '6f1c1c0e-3d2a-4b8e-9c1d-00000000000b';
-const now = new Date().toISOString();
-const item = (id: string, title: string): ConversationSummary => ({
-  conversationId: id,
-  title,
-  titleEdited: false,
-  createdAt: now,
-  updatedAt: now,
-  provider: 'local',
-  model: 'gemma',
-  turnCount: 2,
-  workspace: null,
+const now = Date.now();
+const items: SessionItem[] = sessionItems({
+  sessions: [
+    sampleSession({ id: 'a', title: 'Plan de viaje a Lisboa', agent: 'assistant', origin: 'desktop', currentRunId: null, state: 'idle', host: { kind: 'daemon', client: 'daemon', connected: true }, updatedAt: now }),
+    sampleSession({ id: 'b', title: 'Refactor del parser', agent: 'general', origin: 'cli', state: 'running', currentRunId: 'run_1', host: { kind: 'peer', client: 'cli', connected: true }, updatedAt: now - 1000 }),
+    sampleSession({ id: 'c', title: '', agent: 'assistant', origin: 'dot', currentRunId: null, state: 'idle', host: { kind: 'daemon', client: 'daemon', connected: true }, updatedAt: now - 2000 }),
+  ],
+  approvals: [],
+  questions: [{ id: 'q1', sessionId: 'c', runId: 'r', questions: [], requestedAt: now, expiresAt: null }],
+  plans: [],
 });
 
-function panel(overrides: Partial<Parameters<typeof ConversationsPanel>[0]> = {}) {
+function panel(overrides: Partial<Parameters<typeof SessionsPanel>[0]> = {}) {
   const props = {
-    list: [item(A, 'Plan de viaje a Lisboa'), item(B, 'Receta de pan')],
-    loaded: true,
-    activeId: A,
-    byId: {},
+    items,
+    listed: true,
+    selectedId: 'a',
+    creating: false,
+    closing: new Set<string>(),
     onSelect: vi.fn(),
     onNew: vi.fn(),
-    onRename: vi.fn(),
-    onDelete: vi.fn(),
-    onPin: vi.fn(),
+    onClose: vi.fn(),
     ...overrides,
   };
-  render(<ConversationsPanel {...props} />);
+  render(<SessionsPanel {...props} />);
   return props;
 }
 
-describe('ConversationsPanel (§7.1)', () => {
-  it('lista agrupada, marca la activa y filtra al buscar', () => {
+describe('SessionsPanel (§7.1, M12)', () => {
+  it('lista todas las sesiones del daemon con su procedencia, marca la activa y filtra al buscar', () => {
     const props = panel();
-    expect(screen.getByRole('heading', { name: 'Hoy' })).toBeTruthy();
     expect(screen.getByRole('button', { name: /Plan de viaje/ }).getAttribute('aria-current')).toBe('page');
-    fireEvent.change(screen.getByLabelText('Buscar conversaciones'), { target: { value: 'pan' } });
-    expect(screen.queryByText('Plan de viaje a Lisboa')).toBeNull();
-    fireEvent.click(screen.getByRole('button', { name: /Receta de pan/ }));
-    expect(props.onSelect).toHaveBeenCalledWith(B);
-    fireEvent.change(screen.getByLabelText('Buscar conversaciones'), { target: { value: 'zzz' } });
-    expect(screen.getByText(/No se encontraron conversaciones para «zzz»/)).toBeTruthy();
+    // Las de otros clientes también están, y dicen de dónde vinieron.
+    expect(screen.getByText(/código · desde terminal · en su terminal/)).toBeTruthy();
+    expect(screen.getByText('Conversación nueva')).toBeTruthy();
+    expect(screen.getByTitle('Espera a una persona')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: /Refactor/ }));
+    expect(props.onSelect).toHaveBeenCalledWith('b');
+    fireEvent.change(screen.getByLabelText('Buscar sesiones'), { target: { value: 'lisboa' } });
+    expect(screen.queryByText('Refactor del parser')).toBeNull();
   });
 
-  it('empty state sin conversaciones guardadas', () => {
-    panel({ list: [] });
-    expect(screen.getByText(/Sin conversaciones guardadas/)).toBeTruthy();
-  });
-
-  it('renombrar en el sitio: Enter guarda, Escape cancela', () => {
+  it('cerrar pide confirmación; no se ofrece con un run en marcha ni en una sesión de la terminal', () => {
     const props = panel();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Renombrar' })[1]!);
-    const input = screen.getByLabelText('Nuevo título');
-    fireEvent.change(input, { target: { value: 'Pan de centeno' } });
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(props.onRename).toHaveBeenCalledWith(B, 'Pan de centeno');
-    fireEvent.click(screen.getAllByRole('button', { name: 'Renombrar' })[0]!);
-    fireEvent.keyDown(screen.getByLabelText('Nuevo título'), { key: 'Escape' });
-    expect(props.onRename).toHaveBeenCalledTimes(1);
+    const rows = screen.getAllByRole('listitem');
+    const closeA = within(rows[0]!).getByRole('button', { name: 'Cerrar la sesión' });
+    fireEvent.click(closeA);
+    expect(props.onClose).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar sesión' }));
+    expect(props.onClose).toHaveBeenCalledWith('a');
+    // La de la terminal (par) no se cierra desde aquí.
+    expect(within(screen.getAllByRole('listitem')[1]!).queryByRole('button', { name: 'Cerrar la sesión' })).toBeNull();
   });
 
-  it('eliminar pide confirmación en línea', () => {
-    const props = panel();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0]!);
-    expect(screen.getByText(/¿Eliminar esta conversación y sus ficheros\?/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Cancelar' }));
-    expect(props.onDelete).not.toHaveBeenCalled();
-    fireEvent.click(screen.getAllByRole('button', { name: 'Eliminar' })[0]!);
-    const group = screen.getByRole('group');
-    fireEvent.click(within(group).getByRole('button', { name: 'Eliminar' }));
-    expect(props.onDelete).toHaveBeenCalledWith(A);
-  });
-
-  it('no se puede eliminar una conversación que está generando', () => {
-    panel({
-      byId: {
-        [A]: {
-          messages: [],
-          activeTurnId: 't1',
-          pendingQuestions: null,
-          pendingConfirm: null,
-          todos: [],
-          opened: true,
-          notice: null,
-          workspace: null,
-          title: null,
-          stats: null,
-          info: null,
-        },
-      },
-    });
-    const del = screen.getAllByRole('button', { name: 'Eliminar' })[0] as HTMLButtonElement;
-    expect(del.disabled).toBe(true);
-    expect(screen.getByLabelText('Generando')).toBeTruthy();
+  it('antes de saber qué sesiones hay no dice que no hay ninguna', () => {
+    panel({ items: [], listed: false });
+    expect(screen.getByText('Esperando a Stratum…')).toBeTruthy();
   });
 });
 
@@ -137,85 +97,25 @@ describe('OutlinePanel (§7.2)', () => {
   });
 });
 
-describe('MemoryPanel (§7.3)', () => {
-  function memory(patch: Partial<Memory> = {}): Memory {
-    return {
-      global: { path: '/h/.stratum/STRATUM.md', exists: true, content: '# Yo', mtimeMs: 111 },
-      decisions: [
-        {
-          id: 'd1',
-          title: 'Usa tablas',
-          content: 'Prefiere tablas',
-          type: 'user_preference',
-          tags: ['formato'],
-          importance: 'medium',
-          timestamp: now,
-        },
-      ],
-      conflict: null,
-      error: null,
-      saving: false,
-      savedAt: null,
-      refresh: vi.fn(),
-      save: vi.fn(),
-      forget: vi.fn(),
-      dismissConflict: vi.fn(),
-      ...patch,
-    };
-  }
-
-  it('edita el STRATUM.md y guarda sobre la versión leída', () => {
-    const m = memory();
-    render(<MemoryPanel memory={m} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Editar' }));
-    fireEvent.change(screen.getByLabelText('Contenido de STRATUM.md'), { target: { value: '# Nuevo' } });
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
-    expect(m.save).toHaveBeenCalledWith('# Nuevo', 111);
-  });
-
-  it('conflicto: se puede cargar la versión del disco o sobrescribir', () => {
-    const m = memory({ conflict: { content: '# CLI', mtimeMs: 222 } });
-    render(<MemoryPanel memory={m} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Editar' }));
-    expect(screen.getByText(/cambió en disco/)).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Sobrescribir con la mía' }));
-    expect(m.save).toHaveBeenCalledWith('# Yo', 222);
-  });
-
-  it('busca y olvida decisiones con confirmación', () => {
-    const m = memory();
-    render(<MemoryPanel memory={m} />);
-    fireEvent.change(screen.getByLabelText('Buscar decisiones'), { target: { value: 'formato' } });
-    expect(screen.getByText('Usa tablas')).toBeTruthy();
-    fireEvent.click(screen.getByRole('button', { name: 'Olvidar «Usa tablas»' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Olvidar' }));
-    expect(m.forget).toHaveBeenCalledWith('d1');
-  });
-});
-
-describe('StatusBar', () => {
-  it('modelo, contexto con los umbrales de la CLI y tamaño de ficheros', () => {
+describe('StatusBar (M12)', () => {
+  it('modelo y contexto de la foto, dónde corre y desde dónde vino', () => {
     render(
       <StatusBar
-        sidecar={initialSidecarState}
-        stats={{ provider: 'local', model: 'gemma', context: { used: 28_000, max: 32_000, pct: 88, estimated: false } }}
-        workspace={{
-          state: 'active',
-          pinned: false,
-          lastUsedAt: now,
-          purgeAt: null,
-          filesExpiredAt: null,
-          sizeBytes: 2048,
-        }}
-        generating={1}
-        queued={1}
+        connection={{ kind: 'connected', serverVersion: '1', serverPlatform: 'x', protocol: 1, capabilities: [], features: [] }}
+        session={sampleSession({
+          model: 'gemma',
+          origin: 'desktop',
+          host: { kind: 'daemon', client: 'daemon', connected: true },
+          context: { used: 28_000, max: 32_000, pct: 88, estimated: false },
+        })}
+        working={2}
       />,
     );
     const bar = screen.getByRole('contentinfo');
     expect(bar.textContent).toContain('gemma');
     expect(bar.textContent).toContain('28k / 32k');
-    expect(bar.textContent).toContain('2.0 KB');
-    expect(bar.textContent).toContain('1 generando · 1 en cola');
+    expect(bar.textContent).toContain('en el daemon · desde Desktop');
+    expect(bar.textContent).toContain('2 sesiones trabajando');
     expect(contextTone(59)).toBe('ok');
     expect(contextTone(60)).toBe('warn');
     expect(contextTone(85)).toBe('error');
@@ -232,11 +132,14 @@ describe('Sidebar', () => {
 
 describe('slash-commands', () => {
   it('menú mientras se escribe el nombre; parseo con argumentos', () => {
-    expect(matchCommands('/c')?.map((c) => c.name)).toEqual(['clear', 'compact']);
+    expect(matchCommands('/c')?.map((c) => c.name)).toEqual(['context']);
     expect(matchCommands('/model gemma')).toBeNull();
     expect(matchCommands('hola')).toBeNull();
     expect(parseCommand('/model  gemma-4 ')).toEqual({ ok: true, name: 'model', arg: 'gemma-4' });
-    expect(parseCommand('/clear ya')).toMatchObject({ ok: false });
+    expect(parseCommand('/context ya')).toMatchObject({ ok: false });
+    // Lo que era del runtime propio de Desktop ya no existe (M12).
+    expect(parseCommand('/clear')).toMatchObject({ ok: false });
+    expect(parseCommand('/compact')).toMatchObject({ ok: false });
     expect(parseCommand('/init')).toMatchObject({ ok: false, error: expect.stringContaining('desconocido') });
     // Una ruta no es un comando: se envía como mensaje.
     expect(parseCommand('/etc/hosts no resuelve')).toBeNull();
@@ -250,10 +153,10 @@ describe('slash-commands', () => {
       <InputArea disabled={false} generating={false} onSend={onSend} onCancel={vi.fn()} onCommand={onCommand} />,
     );
     const box = screen.getByLabelText('Mensaje para el asistente');
-    fireEvent.change(box, { target: { value: '/cl' } });
+    fireEvent.change(box, { target: { value: '/con' } });
     expect(screen.getByRole('listbox', { name: 'Comandos' })).toBeTruthy();
     fireEvent.keyDown(box, { key: 'Enter' });
-    expect(onCommand).toHaveBeenCalledWith('clear', '');
+    expect(onCommand).toHaveBeenCalledWith('context', '');
     // /model con argumento: Tab completa y Enter envía el comando.
     fireEvent.change(box, { target: { value: '/mo' } });
     fireEvent.keyDown(box, { key: 'Tab' });
@@ -271,5 +174,28 @@ describe('slash-commands', () => {
     fireEvent.change(box, { target: { value: 'hola' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     expect(onSend).toHaveBeenCalledWith('hola', []);
+  });
+});
+
+describe('InputArea con un run en marcha (M12)', () => {
+  it('sin steer solo se puede detener; con steer, escribir redirige y vacío sigue siendo detener', () => {
+    const onSend = vi.fn();
+    const onCancel = vi.fn();
+    const { rerender } = render(
+      <InputArea disabled={false} generating onSend={onSend} onCancel={onCancel} />,
+    );
+    const box = screen.getByLabelText('Mensaje para el asistente');
+    fireEvent.change(box, { target: { value: 'otra cosa' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onSend).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Detener' })).toBeTruthy();
+
+    rerender(<InputArea disabled={false} generating steer onSend={onSend} onCancel={onCancel} />);
+    expect(screen.getByRole('button', { name: 'Redirigir' })).toBeTruthy();
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onSend).toHaveBeenCalledWith('otra cosa', []);
+    expect(screen.getByRole('button', { name: 'Detener' })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Detener' }));
+    expect(onCancel).toHaveBeenCalled();
   });
 });

@@ -75,6 +75,14 @@ function bounded(messages: ProtocolChatMessage[], truncated: boolean): ProtocolT
     : { messages: messages.slice(from), messagesTruncated: true };
 }
 
+/**
+ * Una conversación que no sale de eventos (M12: la que se importa de Stratum
+ * Desktop D4), acotada con los mismos topes que la que sí.
+ */
+export function boundedTranscript(messages: ProtocolChatMessage[]): ProtocolTranscript {
+  return bounded(messages, false);
+}
+
 function isOpen(state: ProtocolToolCall['state']): boolean {
   return state === 'pending' || state === 'running';
 }

@@ -104,6 +104,16 @@ pub enum DotEvent {
     Approver {
         status: ApproverStatus,
     },
+    /// M12 — la foto de conjunto **sin interpretar** (estado operativo de todas
+    /// las sesiones, sin conversaciones). Sustituye a la anterior. Solo con un
+    /// perfil que la reenvía ([`crate::link::ClientProfile::forward_overview`]).
+    Overview {
+        overview: Value,
+    },
+    /// M12 — eventos de la suscripción de conjunto, sin interpretar, en orden.
+    OverviewEvents {
+        events: Vec<Value>,
+    },
 }
 
 /// Órdenes que Dot puede dar sobre un run. No hay más: es la lista blanca.
@@ -139,12 +149,14 @@ impl ControlAction {
 }
 
 /// Llamadas cuyo resultado es un DTO del protocolo. Aquí **no se interpreta**:
-/// vuelve tal cual a quien llama, que lo valida contra el contrato. Tampoco
-/// hay más: abrir una sesión del daemon, iniciar un run en ella y consultar
-/// qué perfiles y modelos se pueden elegir al abrirla.
+/// vuelve tal cual a quien llama, que lo valida contra el contrato. Abrir una
+/// sesión del daemon, iniciar un run en ella, consultar qué perfiles y modelos
+/// se pueden elegir y, para Desktop (M12), leer su historial, contexto y
+/// memoria, cerrarla y cambiarle el modelo. Qué puede usar cada cliente lo
+/// dice su perfil ([`crate::link::ClientProfile`]): Dot no cierra sesiones.
 ///
 /// Lo que no cabe, a propósito: variables de entorno para la sesión (su
-/// entorno es el del daemon), un `resume`, ni cerrar o reconfigurar una sesión.
+/// entorno es el del daemon) ni un `resume`.
 ///
 /// `ListPending` y `GetSession` son consultas del lado nativo: las usa la
 /// confirmación nativa ([`crate::confirm`]) para leer **del daemon** qué se va
@@ -168,6 +180,21 @@ pub enum CallAction {
     ListPending { session_id: String },
     /// `sessions.get`: la foto de una sesión (su directorio, su título).
     GetSession { session_id: String },
+    /// M12 — `sessions.history`: una página de la conversación guardada, hacia
+    /// atrás desde `before` (un id de mensaje), o la última.
+    History {
+        session_id: String,
+        before: Option<String>,
+        limit: Option<u32>,
+    },
+    /// M12 — `sessions.context`: qué recibe el modelo ahora.
+    Context { session_id: String },
+    /// M12 — `sessions.memory`: la memoria de sesión.
+    Memory { session_id: String },
+    /// M12 — `sessions.close`: cerrarla. En el daemon también deja de estar guardada.
+    CloseSession { session_id: String },
+    /// M12 — `sessions.setModel`: otro modelo para una sesión parada.
+    SetModel { session_id: String, model: String },
 }
 
 impl CallAction {
@@ -179,6 +206,11 @@ impl CallAction {
             CallAction::ListModels => "list-models",
             CallAction::ListPending { .. } => "list-pending",
             CallAction::GetSession { .. } => "get-session",
+            CallAction::History { .. } => "history",
+            CallAction::Context { .. } => "context",
+            CallAction::Memory { .. } => "memory",
+            CallAction::CloseSession { .. } => "close-session",
+            CallAction::SetModel { .. } => "set-model",
         }
     }
 
@@ -186,7 +218,10 @@ impl CallAction {
     pub fn mutating(&self) -> bool {
         matches!(
             self,
-            CallAction::OpenSession { .. } | CallAction::StartRun { .. }
+            CallAction::OpenSession { .. }
+                | CallAction::StartRun { .. }
+                | CallAction::CloseSession { .. }
+                | CallAction::SetModel { .. }
         )
     }
 }

@@ -1,6 +1,6 @@
-import type { ConversationStats, WorkspaceStatus } from '../../ipc/types';
-import type { SidecarState } from '../../hooks/useSidecar';
-import { formatBytes } from '../../ipc/files';
+import type { ConnectionState } from '../../ipc/native';
+import type { ProtocolSession } from '../../protocol';
+import { ORIGIN_LABEL } from '../../view/sessions';
 import { describeConnection } from './ConnectionIndicator';
 
 /** Umbrales de color del contexto, los mismos que la StatusBar de la CLI. */
@@ -17,41 +17,31 @@ export function formatTokens(n: number): string {
 }
 
 /**
- * Barra inferior (D4, §8): conexión, provider y modelo de la conversación
- * activa, uso de contexto con los umbrales de la CLI, tamaño de sus ficheros y
- * cuántas conversaciones están generando o en cola.
+ * Barra inferior (D4, §8): conexión con Stratum, provider y modelo de la sesión
+ * que se mira, uso de contexto con los umbrales de la CLI, dónde corre y cuántas
+ * sesiones están trabajando. Todo sale de las fotos del daemon (M12).
  */
 export function StatusBar({
-  sidecar,
-  stats,
-  workspace,
-  generating,
-  queued,
-  trajectoryOpen,
-  onToggleTrajectory,
+  connection,
+  session,
+  working,
 }: {
-  sidecar: SidecarState;
-  stats: ConversationStats | null;
-  workspace: WorkspaceStatus | null;
-  /** Conversaciones con un turno en marcha. */
-  generating: number;
-  /** Turnos esperando hueco de generación. */
-  queued: number;
-  /** Panel de trayectoria: el botón lo muestra y lo esconde. */
-  trajectoryOpen?: boolean;
-  onToggleTrajectory?: () => void;
+  connection: ConnectionState;
+  session: ProtocolSession | null;
+  /** Sesiones con un run en marcha (de la foto de conjunto). */
+  working: number;
 }) {
-  const { label, tone } = describeConnection(sidecar);
-  const ctx = stats?.context;
+  const { label, tone } = describeConnection(connection);
+  const ctx = session?.context;
   return (
     <footer className="status-bar" aria-label="Estado">
       <span className="status-bar__item connection" role="status" aria-live="polite" data-tone={tone}>
         <span className="connection__dot" aria-hidden="true" />
         <span className="connection__label">{label}</span>
       </span>
-      {stats && (
-        <span className="status-bar__item" title="Provider y modelo de esta conversación">
-          {stats.provider} / <span className="status-bar__model">{stats.model}</span>
+      {session && (
+        <span className="status-bar__item" title="Provider y modelo de esta sesión">
+          {session.provider} / <span className="status-bar__model">{session.model}</span>
         </span>
       )}
       {ctx && ctx.max > 0 && (
@@ -62,33 +52,20 @@ export function StatusBar({
         >
           ctx {ctx.estimated ? '~' : ''}
           {formatTokens(ctx.used)} / {formatTokens(ctx.max)} ·{' '}
-          <span className="status-bar__pct">{ctx.pct}%</span>
+          <span className="status-bar__pct">{Math.round(ctx.pct)}%</span>
         </span>
       )}
-      {workspace && workspace.state !== 'purged' && (
-        <span className="status-bar__item" title="Tamaño de los ficheros de esta conversación">
-          ficheros {formatBytes(workspace.sizeBytes)}
-          {workspace.state === 'archived' ? ' (comprimidos)' : ''}
+      {session && (
+        <span className="status-bar__item" title="Dónde corre esta sesión y desde dónde se inició">
+          {session.host.kind === 'daemon' ? 'en el daemon' : 'en su terminal'}
+          {session.origin ? ` · desde ${ORIGIN_LABEL[session.origin]}` : ''}
         </span>
       )}
       <span className="status-bar__spacer" />
-      {(generating > 0 || queued > 0) && (
+      {working > 0 && (
         <span className="status-bar__item" aria-live="polite">
-          {generating > 0 && `${generating} generando`}
-          {generating > 0 && queued > 0 && ' · '}
-          {queued > 0 && `${queued} en cola`}
+          {working === 1 ? '1 sesión trabajando' : `${working} sesiones trabajando`}
         </span>
-      )}
-      {onToggleTrajectory && (
-        <button
-          type="button"
-          className="status-bar__item status-bar__toggle"
-          aria-pressed={trajectoryOpen === true}
-          title={`${trajectoryOpen ? 'Ocultar' : 'Mostrar'} la trayectoria del agente (Ctrl+J)`}
-          onClick={onToggleTrajectory}
-        >
-          Trayectoria
-        </button>
       )}
     </footer>
   );

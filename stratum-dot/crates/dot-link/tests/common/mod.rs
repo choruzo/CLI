@@ -6,8 +6,8 @@
 use dot_link::approver::ApproverTimings;
 use dot_link::link::Timings;
 use dot_link::{
-    ApproverConfig, ApproverHandle, ConfirmGate, DaemonLauncher, DotEvent, LinkConfig, LinkHandle,
-    Logger, NoLauncher, Presenter,
+    ApproverConfig, ApproverHandle, ClientProfile, ConfirmGate, DaemonLauncher, DotEvent,
+    LinkConfig, LinkHandle, Logger, NoLauncher, Presenter,
 };
 use serde_json::{json, Value};
 use std::collections::HashSet;
@@ -708,6 +708,45 @@ impl Fake {
                 }
                 vec![ok(json!({ "run": run_dto(session_id, "running") }))]
             }
+            // M12 (Desktop): lo de M11 y cerrar/cambiar el modelo.
+            "sessions.history" | "sessions.context" | "sessions.memory" | "sessions.setModel" => {
+                let session_id = params["sessionId"].as_str().unwrap_or("");
+                let Some((_, snap)) = state.sessions.iter().find(|(id, _)| id == session_id) else {
+                    return vec![err("NOT_FOUND", json!({}))];
+                };
+                match method.as_str() {
+                    "sessions.history" => vec![ok(json!({
+                        "messages": snap["messages"].clone(), "hasMore": false, "truncated": false
+                    }))],
+                    "sessions.context" => {
+                        vec![ok(json!({ "report": { "sessionId": session_id } }))]
+                    }
+                    "sessions.memory" => vec![ok(json!({ "memory": null }))],
+                    _ => vec![ok(json!({ "session": snap["session"].clone() }))],
+                }
+            }
+            "sessions.close" => {
+                let session_id = params["sessionId"].as_str().unwrap_or("").to_string();
+                let before = state.sessions.len();
+                state.sessions.retain(|(id, _)| *id != session_id);
+                if state.sessions.len() == before {
+                    return vec![err("NOT_FOUND", json!({}))];
+                }
+                let closed = json!({
+                    "type": "session.closed", "sessionId": session_id, "at": 12, "seq": 99,
+                    "data": { "reason": "closed" }
+                });
+                for conn in &state.conns {
+                    for (sub, scope) in &conn.subs {
+                        if matches!(scope, Scope::Overview) {
+                            let _ = conn.out.send(line(json!({
+                                "method": "events", "params": { "subscriptionId": sub, "events": [closed] }
+                            })));
+                        }
+                    }
+                }
+                vec![ok(json!({}))]
+            }
             "agents.list" => vec![ok(json!({ "agents": [{
                 "name": "general", "description": "", "mode": "all", "origin": "builtin",
                 "allowedTools": null
@@ -859,12 +898,22 @@ impl Rig {
 
 /// Lanza el enlace de Dot contra la carpeta de endpoint `dir`.
 pub fn dot(dir: &Path, launcher: Option<Arc<dyn DaemonLauncher>>) -> Rig {
+    client(dir, launcher, ClientProfile::DOT)
+}
+
+/// Lanza el enlace con otro perfil (M12: el de Desktop).
+pub fn client(
+    dir: &Path,
+    launcher: Option<Arc<dyn DaemonLauncher>>,
+    profile: ClientProfile,
+) -> Rig {
     let seen = Seen::default();
     let sink = seen.clone();
     let log_dir = dir.join("logs");
     let (link, task) = dot_link::spawn(
         LinkConfig {
             endpoint_dir: dir.to_path_buf(),
+            profile,
             client_version: "0.1.0-test".into(),
             autostart: launcher.is_some(),
             launcher: launcher.unwrap_or_else(|| Arc::new(NoLauncher)),

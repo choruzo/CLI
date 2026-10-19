@@ -114,8 +114,10 @@ describe('Dot solo conoce el contrato', () => {
   });
 
   it('el reductor es el del contrato: Dot no tiene otro', () => {
+    // Desde M12, seguir una sesión es la función compartida del contrato
+    // (`followSession`, que reduce con `applySessionEvent`): la misma que usa Desktop.
     const apply = code(join(SRC, 'protocol', 'apply.ts'));
-    expect(apply).toContain('applySessionEvent(');
+    expect(apply).toContain('followSession(');
     // Un reductor propio tendría un `switch` por tipo de evento que toca la foto.
     const reducers = shipped.filter((f) => {
       const text = code(f);
@@ -323,7 +325,7 @@ describe('el lado nativo', () => {
     expect(users).toEqual([]);
   });
 
-  it('los nombres de método salen de dos listas cerradas de `wire.rs`, una por conexión', () => {
+  it('los nombres de método salen de dos listas cerradas de `wire.rs`, una por conexión, y Dot usa su perfil', () => {
     // Sin CRLF: un checkout en Windows los añade.
     const wire = rustCode(join(link, 'src', 'wire.rs')).replace(/\r\n/g, '\n');
     const block = (type: string) => {
@@ -334,8 +336,7 @@ describe('el lado nativo', () => {
     };
     const main = block('MainMethod');
     const approver = block('ApproverMethod');
-    // Principal: de `sessions.*` solo abrir y leer una; de `runs.*`, iniciar y gobernar; de
-    // lo pendiente, solo listarlo (para la confirmación nativa). Ni cerrar, ni apagar, ni aprobar.
+    // Principal (compartida con Desktop desde M12): ni apagar, ni aprobar, ni alojar, ni jobs.
     expect(main).toEqual([
       'agents.list',
       'approvals.list',
@@ -348,9 +349,42 @@ describe('el lado nativo', () => {
       'runs.resume',
       'runs.start',
       'runs.steer',
+      'sessions.close',
+      'sessions.context',
       'sessions.get',
+      'sessions.history',
+      'sessions.memory',
       'sessions.open',
+      'sessions.setModel',
     ]);
+    // Lo que Dot puede pedir es su perfil (`ClientProfile::DOT` en `link.rs`): de `sessions.*`
+    // solo abrir y leer una; de `runs.*`, iniciar y gobernar; de lo pendiente, solo listarlo
+    // (para la confirmación nativa). Ni cerrar, ni reconfigurar, ni el historial de M11.
+    const linkRs = rustCode(join(link, 'src', 'link.rs')).replace(/\r\n/g, '\n');
+    const dotStart = linkRs.indexOf('const DOT_METHODS: &[MainMethod] = &[');
+    expect(dotStart).toBeGreaterThan(-1);
+    const dotMethods = [...linkRs.slice(dotStart, linkRs.indexOf('];', dotStart)).matchAll(/MainMethod::(\w+)/g)]
+      .map((m) => m[1]!)
+      .sort();
+    expect(dotMethods).toEqual([
+      'AgentsList',
+      'ApprovalsList',
+      'CoreHello',
+      'EventsSubscribe',
+      'EventsUnsubscribe',
+      'ModelsList',
+      'RunsCancel',
+      'RunsPause',
+      'RunsResume',
+      'RunsStart',
+      'RunsSteer',
+      'SessionsGet',
+      'SessionsOpen',
+    ]);
+    // La app de Dot se presenta con su perfil, y solo con él.
+    const dotApp = rustCode(join(DOT, 'src-tauri', 'src', 'lib.rs'));
+    expect(dotApp).toContain('ClientProfile::DOT');
+    expect(dotApp).not.toContain('ClientProfile::DESKTOP');
     // Aprobador: saludar y resolver. Ni observar, ni conducir, ni apagar.
     expect(approver).toEqual(['approvals.resolve', 'core.hello', 'plans.decide', 'questions.answer']);
     const all = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!);
@@ -367,8 +401,12 @@ describe('el lado nativo', () => {
     for (const file of rustShipped) {
       const text = rustCode(file);
       expect(/core\.shutdown/.test(text), rel(file)).toBe(false);
-      // Cerrar Dot (o una vista) no cierra sesiones: el método ni existe aquí.
-      expect(/"(sessions\.close|sessions\.set\w*|jobs\.cancel)"/.test(text), rel(file)).toBe(false);
+      // Cerrar Dot (o una vista) no cierra sesiones: fuera de la lista de `wire.rs` (que
+      // comparte con Desktop) el método no se nombra, y el perfil de Dot no lo lleva.
+      if (!file.endsWith(`${sep}wire.rs`)) {
+        expect(/"(sessions\.close|sessions\.set\w*|jobs\.cancel)"/.test(text), rel(file)).toBe(false);
+      }
+      expect(/"jobs\.cancel"/.test(text), rel(file)).toBe(false);
       // Ni `host` ni `broker`, en ninguna conexión.
       expect(/"host"|"broker"/.test(text), rel(file)).toBe(false);
       // El rol de aprobador y la clave, solo en la pieza del aprobador.

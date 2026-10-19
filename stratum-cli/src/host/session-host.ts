@@ -17,6 +17,15 @@ import type { SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
 import { PendingInteractions, type HostGates, type InteractionChange } from './interactions.js';
 import { recordResolution } from './resolution-audit.js';
+import {
+  assistantDataDir,
+  assistantWorkspace,
+  buildAssistantConfig,
+  buildAssistantRegistry,
+  legacyAssistantMemoryDir,
+  migrateLegacyAssistantMemory,
+  type AssistantData,
+} from './assistant.js';
 
 export type { GateContext, HostGates } from './interactions.js';
 
@@ -52,7 +61,20 @@ export interface SessionHostOptions {
   /** ¿Puede contestar ahora un cliente remoto? Ver `PendingInteractions`. */
   remoteApprovals?: () => boolean;
   /** Opciones del agente (reanudación, read-only, perfil de sesión…). `env` lo pone el host. */
-  agent?: Omit<StratumAgentOptions, 'env'>;
+  agent?: Omit<StratumAgentOptions, 'env' | 'promptPreset' | 'workspace'>;
+  /**
+   * M12 — `assistant`: la sesión es del agente embebido `assistant`
+   * (`host/assistant.ts`): su prompt, solo sus tools, ficheros confinados al
+   * `cwd`, sin MCP, skills ni perfiles, y su propia memoria de decisiones. Se
+   * fija aquí, al montar, y no cambia. Ausente: una sesión de código.
+   */
+  preset?: 'assistant';
+  /**
+   * Datos del asistente: `dir` (su memoria; por defecto `~/.stratum/assistant/`)
+   * y `legacyMemoryDir`, de dónde se migra una vez (por defecto la de Stratum
+   * Desktop; `null`, nada).
+   */
+  assistantData?: AssistantData;
 }
 
 export interface TurnOptions {
@@ -138,6 +160,9 @@ export class SessionHost {
     this.interactions.subscribe((change) => this.traceResolution(change));
     this.agent = new StratumAgent(this.config, this.router, this.registry, {
       ...opts.agent,
+      ...(opts.preset === 'assistant'
+        ? { promptPreset: 'assistant', workspace: assistantWorkspace(this.env.cwd) }
+        : {}),
       env: this.env,
     });
   }
@@ -151,14 +176,28 @@ export class SessionHost {
     // Copia propia: de la identidad de este objeto cuelgan el pool SSH y la
     // auditoría de la sesión (`closeSessionExecRuntime`), y dos sesiones no
     // pueden compartirla aunque partan de la misma config cargada.
-    const config: StratumConfig = { ...opts.config };
-    const registry = new ToolRegistry();
-    registerBuiltinTools(registry, config);
+    const assistant = opts.preset === 'assistant';
+    let config: StratumConfig = { ...opts.config };
+    let registry: ToolRegistry;
+    if (assistant) {
+      const dataDir = opts.assistantData?.dir ?? assistantDataDir();
+      const legacy =
+        opts.assistantData?.legacyMemoryDir === undefined
+          ? legacyAssistantMemoryDir()
+          : opts.assistantData.legacyMemoryDir;
+      if (legacy) migrateLegacyAssistantMemory(dataDir, legacy);
+      config = buildAssistantConfig(config, dataDir);
+      registry = buildAssistantRegistry();
+    } else {
+      registry = new ToolRegistry();
+      registerBuiltinTools(registry, config);
+    }
 
     // Los servers MCP nacen en el directorio de la sesión, no en el del proceso.
+    // El asistente no tiene: sus tools son las suyas y nada más.
     const mcp = new McpManager(config, undefined, { cwd: opts.env.cwd });
     const mcpWarnings: McpManagerWarning[] = [];
-    if ((opts.mcp ?? 'eager') === 'eager' && config.mcp.servers.length > 0) {
+    if (!assistant && (opts.mcp ?? 'eager') === 'eager' && config.mcp.servers.length > 0) {
       mcpWarnings.push(...(await mcp.connectAll()));
       mcpWarnings.push(...mcp.registerInto(registry));
       // Un server que se cuelga durante una sesión larga se detecta y se relanza.

@@ -74,6 +74,9 @@ pub const MAX_QUEUED_COMMANDS: usize = 64;
 /// Órdenes y llamadas enviadas al daemon y aún sin respuesta, a la vez.
 pub const MAX_IN_FLIGHT: usize = 32;
 
+/// Mensajes por página de `sessions.history` (`HISTORY_LIMITS.messages`).
+pub const MAX_HISTORY_PAGE: u32 = 100;
+
 #[derive(Debug, Clone)]
 pub struct Timings {
     pub backoff_initial: Duration,
@@ -104,10 +107,122 @@ impl Default for Timings {
     }
 }
 
+/// Qué sesiones sigue el enlace con una suscripción propia (con su foto).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum FollowPolicy {
+    /// Todas las vivas (hasta [`MAX_FOLLOWED_SESSIONS`]): Dot pinta su
+    /// actividad en la lista.
+    All,
+    /// Solo la enfocada (M12, Desktop): la lista sale de la foto de conjunto,
+    /// que ya trae el estado operativo de cada sesión, y la conversación
+    /// solo se pide de la que se está mirando.
+    Focused,
+}
+
+/// Quién es este cliente para el daemon y qué puede pedirle. Es un perfil
+/// cerrado: solo existen [`ClientProfile::DOT`] y [`ClientProfile::DESKTOP`].
+/// No da autoridad: lo que se puede hacer lo decide el daemon por las
+/// capacidades que concede; el perfil solo **resta** (lo que no está en
+/// `methods` no sale de aquí aunque el daemon lo permitiera).
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct ClientProfile {
+    kind: &'static str,
+    name: &'static str,
+    follow: FollowPolicy,
+    forward_overview: bool,
+    methods: &'static [MainMethod],
+}
+
+const DOT_METHODS: &[MainMethod] = &[
+    MainMethod::CoreHello,
+    MainMethod::EventsSubscribe,
+    MainMethod::EventsUnsubscribe,
+    MainMethod::RunsPause,
+    MainMethod::RunsResume,
+    MainMethod::RunsCancel,
+    MainMethod::RunsSteer,
+    MainMethod::RunsStart,
+    MainMethod::SessionsOpen,
+    MainMethod::AgentsList,
+    MainMethod::ModelsList,
+    MainMethod::ApprovalsList,
+    MainMethod::SessionsGet,
+];
+
+const DESKTOP_METHODS: &[MainMethod] = &[
+    MainMethod::CoreHello,
+    MainMethod::EventsSubscribe,
+    MainMethod::EventsUnsubscribe,
+    MainMethod::RunsPause,
+    MainMethod::RunsResume,
+    MainMethod::RunsCancel,
+    MainMethod::RunsSteer,
+    MainMethod::RunsStart,
+    MainMethod::SessionsOpen,
+    MainMethod::AgentsList,
+    MainMethod::ModelsList,
+    MainMethod::ApprovalsList,
+    MainMethod::SessionsGet,
+    MainMethod::SessionsHistory,
+    MainMethod::SessionsContext,
+    MainMethod::SessionsMemory,
+    MainMethod::SessionsClose,
+    MainMethod::SessionsSetModel,
+];
+
+impl ClientProfile {
+    /// Stratum Dot: sigue todas las sesiones; de una sesión, abrirla e iniciar
+    /// sus runs, pero no cerrarla ni reconfigurarla.
+    pub const DOT: ClientProfile = ClientProfile {
+        kind: "dot",
+        name: "stratum-dot",
+        follow: FollowPolicy::All,
+        forward_overview: false,
+        methods: DOT_METHODS,
+    };
+
+    /// Stratum Desktop (M12): lista por la foto de conjunto, conversación solo
+    /// de la sesión abierta, y lo de M11 (historial, contexto, memoria),
+    /// cerrar y cambiar el modelo.
+    pub const DESKTOP: ClientProfile = ClientProfile {
+        kind: "desktop",
+        name: "stratum-desktop",
+        follow: FollowPolicy::Focused,
+        forward_overview: true,
+        methods: DESKTOP_METHODS,
+    };
+
+    pub fn kind(&self) -> &'static str {
+        self.kind
+    }
+
+    pub fn name(&self) -> &'static str {
+        self.name
+    }
+
+    pub fn follow(&self) -> FollowPolicy {
+        self.follow
+    }
+
+    pub fn forward_overview(&self) -> bool {
+        self.forward_overview
+    }
+
+    pub fn methods(&self) -> &'static [MainMethod] {
+        self.methods
+    }
+
+    pub fn allows(&self, method: MainMethod) -> bool {
+        self.methods.contains(&method)
+    }
+}
+
 pub struct LinkConfig {
     /// Carpeta de `endpoint.json` (`~/.stratum/daemon/`).
     pub endpoint_dir: PathBuf,
-    /// Versión de Dot, para `core.hello`.
+    /// Qué cliente es (M12): Dot o Desktop.
+    pub profile: ClientProfile,
+    /// Versión del cliente, para `core.hello`.
     pub client_version: String,
     /// Arrancar el daemon si no hay ninguno al abrir Dot (o al reintentar).
     pub autostart: bool,
@@ -359,6 +474,9 @@ struct Conn {
     /// Sesiones vivas que no caben en [`MAX_FOLLOWED_SESSIONS`], por orden de
     /// llegada: se cuentan y se siguen cuando queda hueco.
     unfollowed: VecDeque<String>,
+    /// Con [`FollowPolicy::Focused`]: todas las sesiones vivas según la foto de
+    /// conjunto (en `order` solo está la seguida).
+    live: Vec<String>,
     routes: HashMap<String, Route>,
     can_control: bool,
     request_timeout: Duration,
@@ -638,6 +756,69 @@ fn call_request(
             }
             Ok((MainMethod::SessionsGet, json!({ "sessionId": session_id })))
         }
+        CallAction::History {
+            session_id,
+            before,
+            limit,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            let mut params = serde_json::Map::new();
+            params.insert("sessionId".into(), Value::String(session_id.clone()));
+            if let Some(before) = before {
+                if !valid_id(before) {
+                    return Err(invalid("Invalid message id."));
+                }
+                params.insert("before".into(), Value::String(before.clone()));
+            }
+            if let Some(limit) = limit {
+                if *limit == 0 || *limit > MAX_HISTORY_PAGE {
+                    return Err(invalid("Invalid page size."));
+                }
+                params.insert("limit".into(), json!(limit));
+            }
+            Ok((MainMethod::SessionsHistory, Value::Object(params)))
+        }
+        CallAction::Context { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::SessionsContext,
+                json!({ "sessionId": session_id }),
+            ))
+        }
+        CallAction::Memory { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::SessionsMemory,
+                json!({ "sessionId": session_id }),
+            ))
+        }
+        CallAction::CloseSession { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::SessionsClose,
+                json!({ "sessionId": session_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::SetModel { session_id, model } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            let Some(model) = optional(&Some(model.clone()), MAX_NAME_CHARS, "model name")? else {
+                return Err(invalid("Choose a model."));
+            };
+            Ok((
+                MainMethod::SessionsSetModel,
+                json!({ "sessionId": session_id, "model": model, "operationId": operation_id }),
+            ))
+        }
     }
 }
 
@@ -657,6 +838,18 @@ fn strings(value: Option<&Value>) -> Vec<String> {
 impl Actor {
     fn emit(&self, event: DotEvent) {
         (self.sink)(event);
+    }
+
+    /// Lo que no está en el perfil de este cliente no sale (no se envía nada).
+    fn allowed(&self, method: MainMethod) -> Result<(), CommandError> {
+        if self.cfg.profile.allows(method) {
+            Ok(())
+        } else {
+            Err(CommandError::new(
+                CommandErrorKind::Invalid,
+                "This client does not make that request.",
+            ))
+        }
     }
 
     /// La siguiente orden: primero lo anotado (cerrar, reintentar, `attach`,
@@ -981,6 +1174,7 @@ impl Actor {
             sessions: HashMap::new(),
             order: Vec::new(),
             unfollowed: VecDeque::new(),
+            live: Vec::new(),
             routes: HashMap::new(),
             can_control: false,
             request_timeout: self.cfg.timings.request_timeout,
@@ -993,7 +1187,11 @@ impl Actor {
             json!({
                 "protocol": PROTOCOL_VERSION,
                 "token": endpoint.token.expose(),
-                "client": { "kind": "dot", "name": "stratum-dot", "version": self.cfg.client_version },
+                "client": {
+                    "kind": self.cfg.profile.kind(),
+                    "name": self.cfg.profile.name(),
+                    "version": self.cfg.client_version,
+                },
                 // Mínima autoridad: observar y conducir runs. Nunca `approver`.
                 "roles": ["operator"],
             }),
@@ -1148,13 +1346,45 @@ impl Actor {
     }
 
     fn publish_sessions(&self, conn: &Conn) {
-        self.shared
-            .sessions
-            .store(conn.order.len(), Ordering::Relaxed);
+        let ids = match self.cfg.profile.follow() {
+            FollowPolicy::All => &conn.order,
+            FollowPolicy::Focused => &conn.live,
+        };
+        self.shared.sessions.store(ids.len(), Ordering::Relaxed);
         self.emit(DotEvent::Sessions {
-            session_ids: conn.order.clone(),
+            session_ids: ids.clone(),
             unfollowed: conn.unfollowed.len(),
         });
+    }
+
+    /// Una sesión nueva en la foto de conjunto. `true` si cambió la lista.
+    async fn joined(&mut self, conn: &mut Conn, session_id: &str) -> std::io::Result<bool> {
+        match self.cfg.profile.follow() {
+            FollowPolicy::All => self.follow(conn, session_id).await,
+            FollowPolicy::Focused => {
+                if conn.live.iter().any(|id| id == session_id) {
+                    return Ok(false);
+                }
+                conn.live.push(session_id.to_string());
+                if self.focus.as_deref() == Some(session_id) {
+                    self.follow(conn, session_id).await?;
+                }
+                Ok(true)
+            }
+        }
+    }
+
+    /// Una sesión que deja de existir. `true` si cambió la lista.
+    async fn left(&mut self, conn: &mut Conn, session_id: &str) -> std::io::Result<bool> {
+        match self.cfg.profile.follow() {
+            FollowPolicy::All => self.unfollow(conn, session_id).await,
+            FollowPolicy::Focused => {
+                self.unfollow(conn, session_id).await?;
+                let before = conn.live.len();
+                conn.live.retain(|id| id != session_id);
+                Ok(conn.live.len() != before)
+            }
+        }
     }
 
     /// Si hay hueco, se siguen sesiones que esperaban. `true` si cambió algo.
@@ -1244,6 +1474,11 @@ impl Actor {
                 };
                 match (method.as_str(), session_id) {
                     ("overview", None) => {
+                        if self.cfg.profile.forward_overview() {
+                            self.emit(DotEvent::Overview {
+                                overview: params["overview"].clone(),
+                            });
+                        }
                         let ids = conn.overview.on_overview(&params["overview"]);
                         self.reconcile(conn, ids).await?;
                     }
@@ -1253,11 +1488,16 @@ impl Actor {
                             .and_then(Value::as_array)
                             .cloned()
                             .unwrap_or_default();
+                        if self.cfg.profile.forward_overview() && !events.is_empty() {
+                            self.emit(DotEvent::OverviewEvents {
+                                events: events.clone(),
+                            });
+                        }
                         let mut changed = false;
                         for change in conn.overview.on_events(&events) {
                             changed |= match change {
-                                Membership::Opened(id) => self.follow(conn, &id).await?,
-                                Membership::Closed(id) => self.unfollow(conn, &id).await?,
+                                Membership::Opened(id) => self.joined(conn, &id).await?,
+                                Membership::Closed(id) => self.left(conn, &id).await?,
                             };
                         }
                         changed |= self.promote(conn).await?;
@@ -1310,8 +1550,27 @@ impl Actor {
         Ok(None)
     }
 
-    /// La foto de conjunto dice qué sesiones hay: se siguen esas y solo esas.
+    /// La foto de conjunto dice qué sesiones hay: se siguen esas y solo esas
+    /// (con [`FollowPolicy::Focused`], de esas solo la enfocada).
     async fn reconcile(&mut self, conn: &mut Conn, mut ids: Vec<String>) -> std::io::Result<()> {
+        if self.cfg.profile.follow() == FollowPolicy::Focused {
+            let keep = self.focus.clone().filter(|id| ids.contains(id));
+            let followed: Vec<String> = conn.order.clone();
+            for id in followed {
+                if Some(&id) != keep.as_ref() {
+                    self.unfollow(conn, &id).await?;
+                }
+            }
+            conn.live = ids;
+            if let Some(id) = keep {
+                self.follow(conn, &id).await?;
+            }
+            self.cfg
+                .logger
+                .info(&format!("overview: {} live session(s)", conn.live.len()));
+            self.publish_sessions(conn);
+            return Ok(());
+        }
         conn.unfollowed.clear();
         if ids.len() > MAX_FOLLOWED_SESSIONS {
             self.cfg.logger.warn(&format!(
@@ -1463,6 +1722,21 @@ impl Actor {
                 conn.overview = OverviewSub::default();
                 conn.open_overview().await?;
             }
+            Cmd::Focus(focus) if self.cfg.profile.follow() == FollowPolicy::Focused => {
+                if focus == self.focus {
+                    return Ok(None);
+                }
+                let previous = std::mem::replace(&mut self.focus, focus.clone());
+                // Solo se sigue lo que se mira: la anterior se suelta entera.
+                if let Some(id) = previous {
+                    self.unfollow(conn, &id).await?;
+                }
+                if let Some(id) = focus {
+                    if conn.live.contains(&id) {
+                        self.follow(conn, &id).await?;
+                    }
+                }
+            }
             Cmd::Focus(focus) => {
                 if focus == self.focus {
                     return Ok(None);
@@ -1495,6 +1769,7 @@ impl Actor {
             Cmd::Control(action, reply) => {
                 let request = if conn.can_control {
                     control_request(&action)
+                        .and_then(|(method, params)| self.allowed(method).map(|_| (method, params)))
                 } else {
                     Err(CommandError::new(
                         CommandErrorKind::NotSent,
@@ -1523,6 +1798,7 @@ impl Actor {
                     self.operations += 1;
                     let operation_id = format!("{}-{}", self.operation_prefix, self.operations);
                     call_request(&action, &operation_id)
+                        .and_then(|(method, params)| self.allowed(method).map(|_| (method, params)))
                 };
                 match request {
                     Err(error) => {

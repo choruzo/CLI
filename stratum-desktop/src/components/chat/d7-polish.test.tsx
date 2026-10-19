@@ -11,18 +11,10 @@ import {
 import { ReasoningBlock, countWords } from './ReasoningBlock';
 import { AgentMessage, turnPhase } from './AgentMessage';
 import { ToolCallBlock } from './ToolCallBlock';
-import {
-  conversationReducer as reduce,
-  initialConversationState,
-  type AgentTurn,
-  type ConversationAction,
-  type ConversationState,
-} from '../../hooks/conversation-reducer';
+import type { AgentTurn } from '../../view/model';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
 import { Sidebar } from '../layout/Sidebar';
 import { TitleBar } from '../layout/TitleBar';
-import type { AgentEvent } from '../../../../stratum-cli/src/agent/events';
-import { agentEvent, transcriptTurn } from '../../ipc/validate';
 
 const win = vi.hoisted(() => ({
   minimize: vi.fn(() => Promise.resolve()),
@@ -67,50 +59,8 @@ describe('frases de espera (D7)', () => {
   });
 });
 
-const T = 't1';
-const ev = (event: AgentEvent, now?: number): ConversationAction => ({
-  type: 'agent_event',
-  turnId: T,
-  event,
-  now,
-});
-function turnOf(state: ConversationState): AgentTurn {
-  const t = state.messages.find((m) => m.role === 'agent');
-  if (!t || t.role !== 'agent') throw new Error('sin turno');
-  return t;
-}
 
-describe('razonamiento en el reducer (D7)', () => {
-  const start = reduce(initialConversationState, { type: 'user_sent', turnId: T, text: 'hola' });
-
-  it('agrupa fragmentos, mide el bloque y lo cierra al llegar texto', () => {
-    const s = [
-      ev({ type: 'thinking', text: 'Primero ' }, 1_000),
-      ev({ type: 'thinking', text: 'esto' }, 1_500),
-      ev({ type: 'text_delta', delta: 'Hola' }, 4_000),
-      ev({ type: 'thinking', text: 'otra vez' }, 5_000),
-    ].reduce(reduce, start);
-    expect(turnOf(s).parts).toEqual([
-      { kind: 'reasoning', text: 'Primero esto', startedAt: 1_000, endedAt: 4_000 },
-      { kind: 'text', text: 'Hola' },
-      { kind: 'reasoning', text: 'otra vez', startedAt: 5_000 },
-    ]);
-  });
-
-  it('una tool call también cierra el bloque, y el fin del turno cierra el último', () => {
-    let s = [
-      ev({ type: 'thinking', text: 'busco' }, 1_000),
-      ev({ type: 'tool_call_start', id: 'c', name: 'web_search', input_so_far: '' }, 2_000),
-      ev({ type: 'thinking', text: 'leo' }, 3_000),
-    ].reduce(reduce, start);
-    const parts = turnOf(s).parts;
-    expect(parts[0]).toMatchObject({ kind: 'reasoning', endedAt: 2_000 });
-    expect(parts[2]).toMatchObject({ kind: 'reasoning', text: 'leo' });
-    s = reduce(s, { type: 'turn_ended', turnId: T, stopReason: 'stop' });
-    const last = turnOf(s).parts[2];
-    expect(last.kind === 'reasoning' && last.endedAt).toBeTypeOf('number');
-  });
-
+describe('fases del turno (D7)', () => {
   it('turnPhase: esperando, razonando, en una tool o con el texto llegando', () => {
     expect(turnPhase({ parts: [], toolCalls: {} })).toBe('waiting');
     expect(turnPhase({ parts: [{ kind: 'reasoning', text: 'x', startedAt: 1 }], toolCalls: {} })).toBe(
@@ -313,24 +263,5 @@ describe('Sidebar (D7)', () => {
     } finally {
       vi.useRealTimers();
     }
-  });
-});
-
-describe('validación del canal (D7)', () => {
-  it('acepta el evento thinking y la parte reasoning del transcript', () => {
-    expect(agentEvent({ type: 'thinking', text: 'hmm' })).toEqual({ type: 'thinking', text: 'hmm' });
-    expect(agentEvent({ type: 'thinking' })).toBeNull();
-    const turn = transcriptTurn({
-      turnId: 't',
-      user: { text: 'hola' },
-      parts: [
-        { kind: 'reasoning', text: 'pienso' },
-        { kind: 'text', text: 'Hola' },
-      ],
-      toolCalls: {},
-      status: 'done',
-      startedAt: '2026-09-25T10:00:00Z',
-    });
-    expect(turn?.parts.map((p) => p.kind)).toEqual(['reasoning', 'text']);
   });
 });

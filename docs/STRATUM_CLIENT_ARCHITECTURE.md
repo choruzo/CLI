@@ -160,3 +160,58 @@ cliente pide → stratumd arbitra → SessionHost ejecuta
 Esta decisión complementa `PRD_STRATUM_DOT.md`, `dot.md` y `protocol.md`. Si durante M12 se
 descubre que alguno de esos documentos presupone que Desktop/Dot poseen el plano de control,
 prevalece la regla de este documento y el descubrimiento debe anotarse en el hito correspondiente.
+
+## 8. M12 — Desktop, cliente hermano (estado)
+
+Implementado en M12. Desktop ya no tiene runtime ni plano de control propios: es un cliente de
+`stratumd` como la CLI y Dot.
+
+```text
+CLI      ┐
+Desktop  ├─ clientes hermanos → Stratum Protocol → stratumd → SessionHost
+Dot      ┘
+```
+
+### 8.1 Auditoría y mapa
+
+| Pieza de Desktop D0–D7 | Clasificación | Qué es ahora |
+|---|---|---|
+| Sidecar Node SEA (`stratum-cli/src/desktop/`, `desktop-server.ts`), supervisor, relé IPC y protocolo propio v9 (`sidecar_send`) | DELETE DUPLICATE | Nada: retirado. Desktop habla el Stratum Protocol con el enlace nativo compartido |
+| `ConversationHost`/`ConversationSession` (un `StratumAgent` por conversación, sin `SessionHost`), `TurnScheduler` | DELETE DUPLICATE → `SessionHost` en `stratumd` | Cada conversación es una sesión del daemon; un run a la vez por sesión |
+| Modo asistente (preset `assistant`, 12 tools, sin `exec`, ficheros confinados, memoria propia) | MOVE TO STRATUMD | Agente embebido `assistant`: `sessions.open { agent: 'assistant', cwd }`; lo monta `SessionHost` (`host/assistant.ts`). Lo puede abrir cualquier cliente |
+| `DesktopSessionStore`, `DesktopConversationStore`, `transcript.ts`, reductor del webview | DELETE DUPLICATE → M11 + contrato | Conversación de la sesión: `ConversationStore` del daemon, foto + `sessions.history`; el webview reduce con `followSession`/`applyOverviewEvent` del contrato |
+| Confirmaciones y preguntas propias | DEFER (sin autoridad) | Se ven en solo lectura; se resuelven desde Dot o `stratum approvals`. Desktop no aprueba hasta tener broker nativo + confirmación (M8/M9) |
+| Carpetas de conversación (D2): subidas, descargas, vista previa, exportar | KEEP UI (Rust) | La carpeta es el `cwd` de la sesión; Desktop la crea al abrir la conversación y Rust solo toca carpetas de su raíz (`folder_of`) |
+| Retención y archivo de carpetas (D3) | DEFER | Las carpetas se conservan; `compressAfterDays`/`deleteAfterDays` quedan sin efecto |
+| Ajustes (editor del `.stratumrc.json` global, asistente de providers) | DEFER | Solo lectura (`prefs.rs`): se edita con `stratum config` o abriendo el fichero. El protocolo no expone la configuración (lleva credenciales) |
+| Panel de memoria global (`STRATUM.md`, decisiones) | DEFER | Sustituido por el panel de contexto y memoria **de la sesión** (`sessions.context`/`sessions.memory`) |
+| Panel de trayectoria | DEFER | El daemon no sirve `trace.subscribe` |
+| `/clear`, `/compact` | DELETE | Eran del runtime propio; la compactación la decide la sesión (M11) |
+| Ventana, tema, atajo, notificaciones, logs, actualizaciones, componentes de chat y Markdown | KEEP UI | Igual; las notificaciones salen de la foto de conjunto |
+
+### 8.2 Decisiones
+
+- **Un enlace nativo para los dos escritorios.** `stratum-dot/crates/dot-link` es el cliente nativo
+  compartido; cada app usa su `ClientProfile` (`DOT`, `DESKTOP`): tipo y nombre en `core.hello`, qué
+  sesiones sigue y qué métodos puede pedir. El perfil solo **resta**: la autorización sigue siendo
+  del daemon. Dot sigue sin poder cerrar ni reconfigurar sesiones; Desktop sí (`sessions.close`,
+  `sessions.setModel`) y además lee `sessions.history|context|memory`.
+- **Estado operativo, contexto y transcript, por capas (§4).** Desktop sigue la foto de conjunto
+  (`overview`) para la lista y **solo** la sesión que se mira para su conversación
+  (`FollowPolicy::Focused`); lo anterior a la foto se pide bajo demanda (`sessions.history`).
+- **Origen sin autoridad (§3).** `ProtocolSession.origin` (el `ClientKind` de quien la abrió o la
+  aloja como par; se conserva al traspasar y al reiniciar el daemon). No se introdujo un enum nuevo:
+  reutiliza `CLIENT_KINDS`. Nada lo lee para decidir permisos.
+- **Daemon.** Desktop usa el Stratum instalado y el mecanismo oficial: descubre
+  `~/.stratum/daemon/endpoint.json` y, si no hay daemon, `stratum daemon start` (una vez por
+  intento). Cerrar Desktop suelta la conexión y nada más.
+- **Lo antiguo, una vez.** `stratum desktop import` traspasa las conversaciones de Desktop D1–D7 al
+  daemon por el camino de M10 (registro `~/.stratum/desktop/imported.json`, versión 1). Desktop no
+  vuelve a leer `~/.stratum/desktop/{sessions,conversations}`; la memoria de decisiones del
+  asistente se copia una vez a `~/.stratum/assistant/memory/`.
+
+### 8.3 Lo que M12 deja fuera
+
+Aprobar desde Desktop (necesita la autoridad separada de M8/M9), retención de carpetas, editor de
+ajustes, memoria global, trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
+producto entre Dot y Desktop.

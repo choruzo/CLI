@@ -794,14 +794,14 @@ export const StratumConfigSchema = z.object({
   /**
    * Stratum Desktop (D2). La CLI no lo lee: vive aquí porque la config es
    * compartida y así un `.stratumrc.json` con esta sección sigue validando.
+   * Desde M12 lo lee Desktop por su cuenta, en solo lectura (`prefs.rs`).
    */
   desktop: z
     .object({
       /**
-       * Generaciones simultáneas entre todas las conversaciones (D4, 15.15).
-       * Las demás esperan en cola: con un servidor local de un solo slot, dos a
-       * la vez van a la mitad de velocidad cada una, y uno remoto puede
-       * responder con rate limit.
+       * **Sin efecto desde M12** (se acepta para no invalidar configs): era la
+       * cola de turnos del sidecar de Desktop. Ahora cada sesión es del daemon
+       * y tiene un run a la vez (D4, 15.15).
        */
       maxConcurrentTurns: z.number().int().min(1).max(8).default(2),
       /**
@@ -843,10 +843,11 @@ export const StratumConfigSchema = z.object({
       workspaces: z
         .object({
           /**
-           * Raíz de los workspaces. Por defecto `~/.stratum/desktop/workspaces`.
-           * Cualquier ruta absoluta (p. ej. otro disco); `~/` se expande. Una
-           * relativa, la raíz de una unidad o el propio home se rechazan al
-           * arrancar el sidecar y se usa el default.
+           * Raíz de las carpetas de las conversaciones del asistente. Por
+           * defecto `~/.stratum/desktop/workspaces`. Cualquier ruta absoluta
+           * (p. ej. otro disco); `~/` se expande. Una relativa, la raíz de una
+           * unidad o el propio home se rechazan al abrir Desktop y se usa el
+           * default.
            */
           root: z.string().optional(),
           /** Tope por fichero subido (16.3). */
@@ -854,12 +855,11 @@ export const StratumConfigSchema = z.object({
           /** Tope de un workspace entero: subidas + lo que genere el agente (16.3). */
           maxWorkspaceMB: z.number().positive().max(65536).default(250),
           /**
-           * Retención (D3). Días sin uso (turnos y subidas; abrir no cuenta)
-           * tras los que el workspace se comprime a `tar.gz`. `0` desactiva la
-           * etapa. Se admiten fracciones de día.
+           * **Sin efecto desde M12** (la retención de D3 era del sidecar y queda
+           * para después). Días sin uso tras los que el workspace se comprimía.
            */
           compressAfterDays: z.number().min(0).max(3650).default(7),
-          /** Días sin uso tras los que los ficheros se eliminan (la conversación se conserva). `0` desactiva. */
+          /** **Sin efecto desde M12** (ver `compressAfterDays`). */
           deleteAfterDays: z.number().min(0).max(3650).default(30),
         })
         .refine((w) => w.maxWorkspaceMB >= w.maxFileMB, {

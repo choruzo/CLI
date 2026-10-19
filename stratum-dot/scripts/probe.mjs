@@ -44,8 +44,10 @@ export function checker() {
  * foto tal cual**. La conversación solo se lee de una foto —pedir una con
  * `resync`—: aquí no hay reductor, ese es del contrato.
  */
-export function startProbe({ binary, env, logDir }) {
-  const child = spawn(binary, ['--log-dir', logDir], { env, stdio: ['pipe', 'pipe', 'inherit'] });
+export function startProbe({ binary, env, logDir, client = 'dot', autostart = true }) {
+  // M12: con `client: 'desktop'` es el enlace de Stratum Desktop (mismo crate, su perfil).
+  const args = ['--log-dir', logDir, '--client', client, ...(autostart ? [] : ['--no-autostart'])];
+  const child = spawn(binary, args, { env, stdio: ['pipe', 'pipe', 'inherit'] });
   const seen = [];
   const sessions = new Map();
   const results = new Map();
@@ -54,6 +56,9 @@ export function startProbe({ binary, env, logDir }) {
   let connection = null;
   let approver = null;
   let sessionIds = [];
+  /** Perfil de Desktop: la última foto de conjunto, sin interpretar, y sus eventos. */
+  let overview = null;
+  const overviewEvents = [];
   let buffer = '';
   let nextId = 1;
   child.stdout.on('data', (chunk) => {
@@ -65,6 +70,8 @@ export function startProbe({ binary, env, logDir }) {
       if (msg.type === 'connection') connection = msg.state;
       else if (msg.type === 'approver') approver = msg.status;
       else if (msg.type === 'sessions') sessionIds = msg.sessionIds;
+      else if (msg.type === 'overview') overview = msg.overview;
+      else if (msg.type === 'overview-events') overviewEvents.push(...msg.events);
       else if (msg.type === 'confirmation') confirmations.push({ nonce: msg.nonce, view: msg.view });
       else if (msg.type === 'snapshot') {
         sessions.set(msg.sessionId, {
@@ -99,6 +106,10 @@ export function startProbe({ binary, env, logDir }) {
     get sessionIds() {
       return sessionIds;
     },
+    get overview() {
+      return overview;
+    },
+    overviewEvents,
     send: (cmd) => child.stdin.write(`${JSON.stringify(cmd)}\n`),
     /** Una orden o una llamada: devuelve la línea `result` de `dot-probe`. */
     order(cmd, params) {

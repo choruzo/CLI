@@ -2,7 +2,7 @@
   "name": "stratum-desktop",
   "private": true,
   "version": "0.4.0",
-  "description": "Stratum Desktop — shell Tauri v2 sobre el core de stratum-cli",
+  "description": "Stratum Desktop — cliente de escritorio de stratumd (Tauri v2)",
   "type": "module",
   "license": "Apache-2.0",
   "scripts": {
@@ -12,7 +12,8 @@
     "test": "vitest",
     "test:run": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.node.json",
-    "sidecar:build": "node scripts/build-sea.mjs",
+    "test:native": "cargo test --manifest-path src-tauri/Cargo.toml",
+    "smoke:clients": "node scripts/smoke-clients.mjs",
     "e2e:build": "tauri build --debug --no-bundle --features e2e",
     "e2e": "node --test --test-concurrency=1 e2e/*.e2e.mjs",
     "tauri": "tauri"

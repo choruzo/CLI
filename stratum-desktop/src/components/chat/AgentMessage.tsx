@@ -1,5 +1,5 @@
 import { useEffect, useRef, type RefObject } from 'react';
-import type { AgentPart, AgentTurn } from '../../hooks/conversation-reducer';
+import type { AgentPart, AgentTurn } from '../../view/model';
 import { useCopy } from '../../hooks/useCopy';
 import { useNow } from '../../hooks/useNow';
 import { ReasoningBlock } from './ReasoningBlock';
@@ -122,14 +122,14 @@ export function AgentMessage({
   turn,
   onRetry,
   canRetry = false,
-  conversationId,
+  cwd,
   filesExpiredAt,
 }: {
   turn: AgentTurn;
   /** Los ficheros anteriores a esta fecha se purgaron (D3): tarjetas «caducado». */
   filesExpiredAt?: string | null;
   /** Para las tarjetas de fichero (D2); sin él no se pintan. */
-  conversationId?: string;
+  cwd?: string;
   /** Reenvía el mensaje del usuario de este turno. */
   onRetry?: () => void;
   /** No hay ningún turno en marcha: la barra de acciones ofrece reintentar. */
@@ -178,12 +178,12 @@ export function AgentMessage({
           </p>
         );
       })}
-      {conversationId && turn.files && turn.files.length > 0 && (
+      {cwd && turn.files && turn.files.length > 0 && (
         <div className="file-cards" aria-label="Ficheros generados">
           {turn.files.map((f) => (
             <FileCard
               key={f.path}
-              conversationId={conversationId}
+              cwd={cwd}
               file={f}
               expired={isExpired(f, filesExpiredAt)}
             />

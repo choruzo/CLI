@@ -100,11 +100,11 @@ function PreviewBody({ name, preview }: { name: string; preview: Preview }) {
  * el fichero caducó por retención (D3), queda solo el nombre, sin acciones.
  */
 export function FileCard({
-  conversationId,
+  cwd,
   file,
   expired = false,
 }: {
-  conversationId: string;
+  cwd: string;
   file: WorkspaceFileInfo;
   expired?: boolean;
 }) {
@@ -128,7 +128,7 @@ export function FileCard({
     }
     setOpen(true);
     if (!preview) {
-      previewOutput(conversationId, file.path)
+      previewOutput(cwd, file.path)
         .then(setPreview)
         .catch((err) => setPreview({ kind: 'unsupported', reason: errorMessage(err) }));
     }
@@ -174,7 +174,7 @@ export function FileCard({
             <button
               type="button"
               className="button"
-              onClick={() => run(() => openOutput(conversationId, file.path))}
+              onClick={() => run(() => openOutput(cwd, file.path))}
             >
               Abrir
             </button>
@@ -182,7 +182,7 @@ export function FileCard({
           <button
             type="button"
             className="button button--primary"
-            onClick={() => run(() => saveOutput(conversationId, file.path), 'Guardado.')}
+            onClick={() => run(() => saveOutput(cwd, file.path), 'Guardado.')}
           >
             Guardar como…
           </button>

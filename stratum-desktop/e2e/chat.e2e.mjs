@@ -1,9 +1,17 @@
 import { after, before, describe, it } from 'node:test';
 import assert from 'node:assert/strict';
-import { launch, send, waitForIdle, waitForReady } from './harness.mjs';
-import { GREETING, REASONING } from './mock-llm.mjs';
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { cliSessions, launch, send, waitForIdle, waitForReady } from './harness.mjs';
+import { GREETING } from './mock-llm.mjs';
 
-describe('chat (E2E)', () => {
+/**
+ * M12 — Desktop conversa como cliente de `stratumd`: cada conversación es una
+ * sesión normal del daemon (agente `assistant`, en su carpeta), que la CLI ve
+ * igual que Desktop.
+ */
+describe('chat sobre stratumd (E2E, M12)', () => {
   let app;
   before(async () => {
     app = await launch();
@@ -24,49 +32,82 @@ describe('chat (E2E)', () => {
     assert.equal(decorated, true);
   });
 
-  it('responde en streaming y guarda el razonamiento plegado', async () => {
+  it('el primer mensaje abre una sesión del daemon; la respuesta llega en streaming', async () => {
     const s = app.session;
     await send(s, 'hola');
     await s.waitForText(GREETING, { timeout: 60_000 });
     await waitForIdle(s);
-    // Bloque de razonamiento, plegado, que al abrirse enseña lo que pensó.
-    const header = await s.waitForElement('.reasoning__header');
-    // textContent: el texto «visible» de WebDriver sale vacío mientras el
-    // mensaje aún anima su opacidad (WebKitWebDriver de Ubuntu 22.04).
-    assert.match(
-      await s.execute(`return document.querySelector('.reasoning__header').textContent`),
-      /Razonó|Razonamiento/,
-    );
-    assert.equal(await s.attribute(header, 'aria-expanded'), 'false');
-    await s.click(header);
+    // La sesión está en la lista porque el daemon la publica.
     await s.waitFor(
-      async () =>
-        (await s.execute(`return document.querySelector('.reasoning__body')?.innerText ?? ''`)).includes(
-          REASONING.split(' ')[0],
-        ),
-      { message: 'el razonamiento desplegado' },
+      () => s.execute(`return [...document.querySelectorAll('.conv-item__title')].some((e) => e.textContent.includes('hola'))`),
+      { message: 'la sesión en la lista' },
     );
-    // El anuncio para lectores de pantalla.
+    // La CLI, otro cliente del mismo daemon, ve la misma sesión.
+    const sessions = await cliSessions(app.home);
+    assert.equal(sessions.length, 1);
+    assert.equal(sessions[0].origin, 'desktop');
+    assert.equal(sessions[0].agent, 'assistant');
+    assert.equal(sessions[0].host.kind, 'daemon');
     const announced = await s.execute(
       `return document.querySelector('.conversation [role="status"].sr-only')?.textContent`,
     );
     assert.equal(announced, 'Respuesta lista.');
-    // El mock recibió la conversación con el mensaje del usuario.
-    assert.ok(app.mock.requests.length >= 1);
   });
 
-  it('mientras espera, el indicador de estratos; «Detener» corta la respuesta', async () => {
+  it('con un run en marcha: indicador de estratos, controles del run y «Detener» lo cancela en el daemon', async () => {
     const s = app.session;
     await send(s, 'despacio, cuenta hasta doscientos');
-    // textContent y no el texto «visible»: la frase entra con opacidad 0.
     const phrase = await s.waitFor(
       () => s.execute(`return document.querySelector('.thinking__phrase')?.textContent ?? null`),
       { timeout: 10_000, message: 'el indicador de espera' },
     );
     assert.match(phrase, /…$/);
+    await s.waitFor(() => s.button('Pausar'), { message: 'los controles del run' });
     await s.waitForText('3 4 5', { timeout: 30_000 });
     await s.clickButton('Detener');
     await s.waitForText('Respuesta detenida.');
+    await waitForIdle(s);
+  });
+
+  it('lo que el asistente escribe en outputs/ aparece en el panel de ficheros', async () => {
+    const s = app.session;
+    await send(s, 'genera un informe');
+    await s.waitForText('informe', { timeout: 60_000 });
+    await waitForIdle(s);
+    await s.clickButton('Ficheros de la conversación');
+    await s.waitFor(
+      () => s.execute(`return document.querySelector('.side-panel')?.innerText.includes('informe.md') ?? false`),
+      { timeout: 20_000, message: 'informe.md en el panel de ficheros' },
+    );
+  });
+});
+
+describe('adjuntos en la carpeta de la sesión (E2E, D2 + M12)', () => {
+  let app;
+  before(async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stratum-e2e-pick-'));
+    const file = join(dir, 'nota.txt');
+    writeFileSync(file, 'El código es 4217.\n');
+    // Con la feature `e2e`, el diálogo de abrir «elige» esta ruta.
+    app = await launch({ env: { STRATUM_E2E_PICK: file } });
+    await waitForReady(app.session);
+  });
+  after(async () => {
+    await app?.close();
+  });
+
+  it('se adjunta en una conversación ya abierta y el asistente lo lee', async () => {
+    const s = app.session;
+    await send(s, 'hola');
+    await s.waitForText(GREETING, { timeout: 60_000 });
+    await waitForIdle(s);
+    await s.clickButton('Adjuntar ficheros');
+    await s.waitFor(
+      () => s.execute(`return document.querySelector('.input-area')?.innerText.includes('nota.txt') ?? false`),
+      { message: 'el adjunto listo' },
+    );
+    await send(s, 'lee el adjunto');
+    await s.waitForText('El adjunto dice: El código es 4217.', { timeout: 60_000 });
     await waitForIdle(s);
   });
 });

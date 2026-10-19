@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../hooks/conversation-reducer';
+import type { ChatMessage } from '../../view/model';
 import { AgentMessage } from './AgentMessage';
 import { UserMessage } from './UserMessage';
 import { userMessageAnchor } from '../layout/OutlinePanel';
@@ -6,13 +6,13 @@ import { userMessageAnchor } from '../layout/OutlinePanel';
 export function MessageList({
   messages,
   onRetry,
-  conversationId,
+  cwd,
   filesExpiredAt,
   canRetry = false,
 }: {
   messages: ChatMessage[];
   onRetry: (turnId: string) => void;
-  conversationId?: string;
+  cwd?: string;
   filesExpiredAt?: string | null;
   /** No hay ningún turno en marcha: las respuestas se pueden reintentar. */
   canRetry?: boolean;
@@ -32,7 +32,7 @@ export function MessageList({
           <AgentMessage
             key={`a-${m.turnId}`}
             turn={m}
-            conversationId={conversationId}
+            cwd={cwd}
             filesExpiredAt={filesExpiredAt}
             onRetry={() => onRetry(m.turnId)}
             canRetry={canRetry}

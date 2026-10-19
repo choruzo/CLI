@@ -1,4 +1,4 @@
-import type { SentAttachment } from '../../hooks/conversation-reducer';
+import type { SentAttachment } from '../../view/model';
 import { SentChips } from './files/AttachmentChips';
 
 /** Mensaje del usuario: texto plano, nunca markdown (es lo que escribió), y sus adjuntos. */

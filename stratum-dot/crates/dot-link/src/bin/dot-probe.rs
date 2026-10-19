@@ -21,18 +21,25 @@
 //!    `dismiss` (`nonce`). La frase de una confirmación con nombre se teclea
 //!    ahí, no en `approve`.
 //!
-//! Sirve para probar Dot contra un `stratumd` real sin automatizar una
-//! ventana (`scripts/smoke-real.mjs`). Cerrar stdin lo termina, como cerrar Dot:
-//! el daemon y sus sesiones siguen.
+//! Con `--client desktop` es el enlace de Stratum Desktop (M12: el mismo
+//! crate con [`ClientProfile::DESKTOP`]): sigue solo la sesión enfocada,
+//! imprime la foto de conjunto (`overview`, `overview-events`) y admite
+//! además `history` (`sessionId`, `before?`, `limit?`), `context`, `memory`,
+//! `close` y `set-model` (`model`).
 //!
-//!   dot-probe [--endpoint-dir <dir>] [--log-dir <dir>] [--no-autostart]
+//! Sirve para probar Dot y Desktop contra un `stratumd` real sin automatizar
+//! una ventana (`scripts/smoke-real.mjs`). Cerrar stdin lo termina, como
+//! cerrar la app: el daemon y sus sesiones siguen.
+//!
+//!   dot-probe [--endpoint-dir <dir>] [--log-dir <dir>] [--no-autostart] [--client dot|desktop]
 
 use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
 use dot_link::link::Timings;
 use dot_link::{
-    ApproverAction, ApproverConfig, ApproverSecret, CallAction, CliLauncher, ConfirmGate,
-    ConfirmTimings, ControlAction, DotEvent, LinkConfig, Logger, Presenter, QuestionAnswer,
+    ApproverAction, ApproverConfig, ApproverSecret, CallAction, CliLauncher, ClientProfile,
+    ConfirmGate, ConfirmTimings, ControlAction, DotEvent, LinkConfig, Logger, Presenter,
+    QuestionAnswer,
 };
 use serde_json::{json, Value};
 use std::io::Write;
@@ -68,9 +75,20 @@ async fn main() {
     let mut endpoint_dir: Option<PathBuf> = None;
     let mut log_dir: Option<PathBuf> = None;
     let mut autostart = true;
+    let mut profile = ClientProfile::DOT;
     let mut args = std::env::args().skip(1);
     while let Some(arg) = args.next() {
         match arg.as_str() {
+            "--client" => {
+                profile = match args.next().as_deref() {
+                    Some("dot") => ClientProfile::DOT,
+                    Some("desktop") => ClientProfile::DESKTOP,
+                    other => {
+                        eprintln!("dot-probe: unknown client {other:?}");
+                        std::process::exit(2);
+                    }
+                }
+            }
             "--endpoint-dir" => endpoint_dir = args.next().map(PathBuf::from),
             "--log-dir" => log_dir = args.next().map(PathBuf::from),
             "--no-autostart" => autostart = false,
@@ -104,11 +122,17 @@ async fn main() {
         },
     );
     let broker_running = tokio::spawn(broker_task);
+    let launcher = if profile == ClientProfile::DESKTOP {
+        CliLauncher::from_env_var(dot_link::launcher::DESKTOP_CLI_ENV)
+    } else {
+        CliLauncher::from_env()
+    };
     let config = LinkConfig {
         endpoint_dir,
+        profile,
         client_version: env!("CARGO_PKG_VERSION").to_string(),
         autostart,
-        launcher: Arc::new(CliLauncher::from_env()),
+        launcher: Arc::new(launcher),
         logger,
         timings: Timings::default(),
     };
@@ -146,6 +170,24 @@ async fn main() {
             }),
             "agents" => Some(CallAction::ListAgents { cwd: text("cwd") }),
             "models" => Some(CallAction::ListModels),
+            "history" => Some(CallAction::History {
+                session_id: session_id.clone(),
+                before: text("before"),
+                limit: msg.get("limit").and_then(Value::as_u64).map(|n| n as u32),
+            }),
+            "context" => Some(CallAction::Context {
+                session_id: session_id.clone(),
+            }),
+            "memory" => Some(CallAction::Memory {
+                session_id: session_id.clone(),
+            }),
+            "close" => Some(CallAction::CloseSession {
+                session_id: session_id.clone(),
+            }),
+            "set-model" => Some(CallAction::SetModel {
+                session_id: session_id.clone(),
+                model: text("model").unwrap_or_default(),
+            }),
             _ => None,
         };
         let approver = match cmd.as_str() {

@@ -3,11 +3,12 @@ import { openLogsDir, readLogTail, type LogTail } from '../../ipc/os';
 import { AppLogo } from './AppLogo';
 
 /**
- * Fallo de inicio (D6): el agente no llegó a conectar ni una vez en esta
- * sesión y el supervisor se rindió (o falta el binario). Sin agente la app no
- * sirve de nada, así que ocupa la ventana: qué pasó, las últimas líneas del log
- * del sidecar, Reintentar y Ver logs. Una caída posterior, con la app ya en
- * uso, es un banner no bloqueante (`ReconnectBanner`).
+ * Fallo de inicio (D6, M12): Desktop no llegó a conectar con `stratumd` ni una
+ * vez en esta sesión (no hay daemon y no se pudo arrancar con
+ * `stratum daemon start`, o habla otra versión). Sin daemon la app no sirve de
+ * nada, así que ocupa la ventana: qué pasó, las últimas líneas del log del
+ * enlace, Reintentar y Ver logs. Una caída posterior, con la app ya en uso, es
+ * un aviso no bloqueante (`ConnectionBanner`).
  */
 export function StartupFailure({ message, onRetry }: { message: string; onRetry: () => void }) {
   const [tail, setTail] = useState<LogTail | null>(null);
@@ -28,9 +29,13 @@ export function StartupFailure({ message, onRetry }: { message: string; onRetry:
       <div className="startup-failure__card">
         <AppLogo className="startup-failure__logo" />
         <h1 id="startup-failure-title" className="startup-failure__title">
-          No se pudo iniciar el agente
+          No se pudo conectar con Stratum
         </h1>
         <p className="startup-failure__message">{message}</p>
+        <p className="startup-failure__message">
+          Stratum Desktop usa el Stratum instalado en este equipo: comprueba que{' '}
+          <code>stratum daemon start</code> funciona en una terminal (Node 22 o más reciente).
+        </p>
         <div className="startup-failure__actions">
           <button
             type="button"

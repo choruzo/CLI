@@ -2,7 +2,7 @@
 
 > Cockpit de escritorio del harness Stratum.
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
-> anotados en el hito que los encuentra. **M0–M11 implementados** (M11 completado) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado; M11 redefinido al empezarlo como conversación duradera y memoria de sesión —la decisión del default de `chat` se aplaza—: ver su estado); siguiente: M12.
+> anotados en el hito que los encuentra. **M0–M12 implementados** (M12 completado: Desktop es un cliente hermano de `stratumd`; ver su estado y `docs/STRATUM_CLIENT_ARCHITECTURE.md` §8) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado; M11 redefinido al empezarlo como conversación duradera y memoria de sesión —la decisión del default de `chat` se aplaza—: ver su estado).
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
@@ -858,7 +858,7 @@ En orden sugerido:
 | Default de `chat` **[decidido]** | **En su proceso durante M0–M9; alojado en el daemon como dirección final**, sujeto a M11 | *Cambiarlo ya*: rompe el entorno de `exec` |
 | Dot y Desktop **[decidido]** | **Dos apps en el MVP, convergencia en M12** | *Fusionarlas ahora*: mezcla la migración de Desktop con el estreno del daemon |
 | `git push` **[decidido]** | **`confirm` por defecto**, forzados con confirmación reforzada (§13.2), en M4 | *Dejar el default actual*: una acción con efecto sobre terceros sin pregunta |
-| Distribución de Dot **[decidido]** | **Usa el `stratum` instalado** (Node ≥ 22) | *Empaquetar el core como SEA* (como Desktop): +180 MB instalados; deja de ser «ligera». Se revisa en M12, cuando Desktop converja |
+| Distribución de Dot **[decidido]** | **Usa el `stratum` instalado** (Node ≥ 22) | *Empaquetar el core como SEA* (como Desktop): +180 MB instalados; deja de ser «ligera». Revisado en M12: **Desktop también** usa la CLI instalada y deja el SEA |
 | Quién arranca el daemon **[decidido]** | **Dot lo descubre y lo arranca; la CLI solo con `daemon.autoStart: true`** | *Servicio de inicio de sesión del SO*: post-MVP |
 | Caducidad de aprobaciones **[decidido]** | **Sesión en el daemon: caduca a `deny`. Par con TTY: sin caducidad**, como hoy | *Caducar también en la terminal*: cambia un comportamiento que funciona |
 | Alcance de `observer` **[decidido]** | **Lee las sesiones locales del usuario; estrictamente read-only** | *Alcance por sesión*: solo tendría sentido con acceso remoto, que es un non-goal |
@@ -867,7 +867,7 @@ En orden sugerido:
 | Nombres **[decidido]** | **`stratum daemon run`** (alias `stratumd`), **`~/.stratum/daemon/`** | — |
 | Estado nuevo en disco | **Solo `endpoint.json`** | *Base de datos del daemon*: duplicaría sesiones y trazas |
 | Pausa | **Cooperativa, en punto seguro** | *Suspender el proceso*: mata conexiones SSH/MCP y timeouts de provider |
-| Protocolo de Desktop v9 | **No se toca** | *Migrarlo ya*: riesgo sin beneficio para el MVP |
+| Protocolo de Desktop v9 | **No se toca** en el MVP; **retirado en M12** (Desktop habla el Stratum Protocol) | *Migrarlo ya*: riesgo sin beneficio para el MVP |
 
 Decisiones previas que este PRD **cambia** (hay que actualizar sus documentos al implementar):
 
@@ -1507,9 +1507,43 @@ expone) ni enseña el desglose del contexto; la extracción se hace en el turno 
 seguro), no en segundo plano; el traspaso sigue llevando el historial entero; la promoción
 explícita de memoria de sesión a proyecto queda para después.
 
-### Después de M11
+### M12 — Desktop al Stratum Protocol
 
-El default de `chat` (pendiente de M11 original) y M12 (Desktop al Stratum Protocol): §15.1.
+- Stratum Desktop deja su runtime/sidecar y su protocolo v9 y es un cliente de `stratumd`, hermano
+  de la CLI y de Dot (`docs/STRATUM_CLIENT_ARCHITECTURE.md`, normativo para este hito).
+- *Hecho cuando*: una sesión de Desktop es una sesión Stratum normal (mismo `SessionHost`, M11,
+  `sessions.list`), sobrevive al cierre de Desktop y a un reinicio del daemon, se abre desde Dot o
+  `stratum attach` con el mismo id, y Desktop continúa una sesión de la terminal traspasada.
+
+**Estado: completado (2026-10-19).** Referencia: `docs/protocol.md` §20;
+`docs/STRATUM_CLIENT_ARCHITECTURE.md` §8 (auditoría KEEP/MIGRATE/MOVE/DELETE/DEFER).
+
+- **Un solo plano de control**: retirados el sidecar (`stratum-cli/src/desktop/`, SEA,
+  supervisor, relé IPC, protocolo v9) y los stores propios. Desktop habla el protocolo con el
+  enlace nativo de Dot (`dot-link`, perfil `DESKTOP`): lista por la foto de conjunto, conversación
+  solo de la sesión que se mira, historial bajo demanda (M11), sin estado optimista.
+- **El modo asistente pasa al daemon** como agente embebido `assistant` (preset fijado por
+  `SessionHost`, ficheros confinados a su carpeta, nunca `exec`, directorio propio obligatorio);
+  cualquier cliente lo puede abrir.
+- **Origen sin autoridad**: `ProtocolSession.origin` (aditivo, §17 de `protocol.md`).
+- **Daemon**: el mecanismo oficial (`stratum daemon start`); Desktop usa la CLI instalada y su
+  instalador ya no lleva runtime.
+- **Lo antiguo**: `stratum desktop import`, una vez y por el camino de M10.
+- **Tests**: clientes hermanos y asistente en el daemon, capa cliente compartida, perfil Desktop
+  de `dot-link`, arquitectura de Desktop (TS + Rust), integración del webview, smoke entre
+  clientes contra un `stratumd` real y E2E de la ventana (chat, adjuntos, cerrar a mitad de run,
+  reinicio). CI: `desktop-ci.yml` (Windows y Linux).
+
+Desviaciones y pendientes (DEFER): Desktop **no aprueba** (lo pendiente se ve; se resuelve desde
+Dot o `stratum approvals`) hasta tener broker nativo y confirmación como Dot; sin retención de
+carpetas (D3), editor de ajustes, panel de memoria global ni trayectoria; el razonamiento ya no
+queda en la conversación tras el turno; la extracción del paquete común con Dot se limitó al
+enlace nativo y a la capa cliente del contrato. La decisión de §15.1.4 (si Dot es el modo
+compacto de Desktop) sigue abierta.
+
+### Después de M12
+
+El default de `chat` (pendiente de M11 original) y la convergencia de producto Dot/Desktop: §15.1.
 
 ## 20. Acceptance Criteria
 

@@ -1,125 +1,85 @@
 # Stratum Desktop
 
-Shell de escritorio (Tauri v2 + React 18) sobre el core de `stratum-cli`. La
-definición completa está en `../STRATUM_DESKTOP_PROJECT_DEFINITION.md` y el plan
-por hitos en `../STRATUM_DESKTOP_HITOS.md`. Estado: **D1 cerrado**; D2–D5
-implementados y verificados; **D6 cerrado** (integración con el SO y pipeline de
-build, instaladores de CI probados en Windows y Linux) — ver abajo.
+App de escritorio de Stratum (Tauri v2 + React 18). **Desde M12 es un cliente de `stratumd`**,
+hermano de la CLI y de Stratum Dot: no tiene runtime de agente ni sidecar. Las fronteras entre
+clientes están en `../docs/STRATUM_CLIENT_ARCHITECTURE.md` (normativo) y el contrato en
+`../docs/protocol.md` (§20 para M12). La definición original y los hitos D0–D7 siguen en
+`../STRATUM_DESKTOP_PROJECT_DEFINITION.md` y `../STRATUM_DESKTOP_HITOS.md`.
 
-## Requisitos de desarrollo
+```text
+Desktop (webview) ──invoke──► Rust (dot-link, perfil DESKTOP) ──pipe / socket──► stratumd ──► SessionHost
+     UI, nada de estado          descubre, arranca el daemon,                     arbitra      ejecuta
+     de sesión propio            saluda, se suscribe, reenvía
+```
+
+## Requisitos
 
 | Herramienta | Versión | Para qué |
 |---|---|---|
-| Node.js | 22.x (probado con 22.20) | frontend, build del sidecar. **Es también el runtime que se embebe en el sidecar**: los `.node` de `stratum-cli/node_modules` se compilaron para su ABI |
-| Rust | stable (MSVC en Windows) | shell Tauri |
+| Stratum (`stratum-cli`) | la de este repo | el daemon: Desktop usa la CLI instalada (`stratum daemon start`) o la de `STRATUM_DESKTOP_CLI` (un ejecutable o un `.js`, en desarrollo `../stratum-cli/dist/index.js`) |
+| Node.js | 22.x | frontend y la CLI |
+| Rust | stable (MSVC en Windows) | shell Tauri (incluye `../stratum-dot/crates/dot-link` por ruta) |
 | Windows | MSVC Build Tools + WebView2 | — |
 | Linux | `libwebkit2gtk-4.1-dev build-essential curl wget file libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev pkg-config` | — |
 
-El usuario final **no** necesita ni Rust ni Node: la app instalada es un binario
-nativo con el sidecar autónomo dentro.
+El usuario final necesita Stratum instalado (`npm i -g stratum-cli`, Node ≥ 22), como con Dot.
 
 ## Comandos
 
 ```bash
-npm install                      # también `npm install` en ../stratum-cli
-npm run sidecar:build            # bundle + SEA + resources nativos + self-test
+npm install                      # también `npm install` y `npm run build` en ../stratum-cli
 npm run tauri dev                # ventana con hot-reload
 npm run tauri build              # .msi / .exe (NSIS) en Windows, .deb / .AppImage en Linux
 
-npm run test:run                 # tests del frontend (Vitest + jsdom)
+npm run test:run                 # webview (Vitest + jsdom) + arquitectura (tests/)
 npm run typecheck
-cd src-tauri && cargo test       # unitarios + integración contra el SEA real
+npm run test:native              # cargo test del lado nativo
+npm run smoke:clients            # Desktop ↔ Dot ↔ CLI contra un stratumd real
 ```
 
-`sidecar:build` hay que repetirlo cada vez que cambia el core (`stratum-cli/src`).
-Los tests de integración de Rust se saltan con un aviso si el SEA no está construido.
+`smoke:clients` necesita `npm run build` en `../stratum-cli` y `cargo build -p dot-link` en
+`../stratum-dot` (usa `dot-probe --client desktop`, el mismo enlace que la app, sin ventana).
 
-## Arquitectura de D0
+## Arquitectura (M12)
 
-```
-webview (React) ──invoke/Channel──► Rust (relay) ──named pipe / unix socket──► stratum-core (SEA)
-                                     │ genera token + ruta                         │ valida token
-                                     │ hace el handshake                           │ ping → pong
-                                     │ Job Object / PDEATHSIG                      │ ganchos de apagado
-```
+- **Lado nativo** (`src-tauri/src/`): `lib.rs` arranca el enlace (`dot_link::spawn` con
+  `ClientProfile::DESKTOP`: `core.hello` como `desktop`, rol `operator`, sigue la foto de conjunto y
+  **solo** la sesión que se mira) y reenvía cada evento al webview por `desktop://event`, sin
+  interpretarlo. `commands.rs` es la **lista blanca tipada** `desktop_*` (no hay método genérico).
+  `prefs.rs` lee en solo lectura `desktop.*` del `.stratumrc.json` global. `workspace.rs` y
+  `files.rs`: las carpetas de conversación (subidas, descargas, vista previa, exportar); cada
+  comando recibe el `cwd` de la sesión y Rust solo toca carpetas de su raíz. `os.rs`
+  (atajo, notificaciones, logs), `updates.rs`, `window_state.rs`. Salir suelta el enlace y nada más.
+- **Webview** (`src/`):
 
-- **`src-tauri/src/sidecar.rs`**: lanza el sidecar con `std::process` (no con el
-  plugin shell: hace falta controlar stdin y meterlo en un Job Object), con
-  stdout/stderr a `logs/sidecar.log`.
-- **`src-tauri/src/transport.rs`**: conexión al pipe, handshake y filtrado de las
-  tramas que manda el frontend.
-- **`src-tauri/src/ipc.rs`**: relay y comandos `sidecar_status`,
-  `sidecar_subscribe`, `sidecar_send`; eventos `sidecar://status` y `sidecar://ready`.
-- **`stratum-cli/src/desktop/`**: el lado Node (servidor del canal, protocolo,
-  ciclo de vida, sondeo de nativos). Entry: `stratum-cli/src/desktop-server.ts`.
-- **Frontend**: `src/ipc/bridge.ts` es el único punto de contacto con Rust;
-  `src/hooks/useSidecar.ts` mantiene el estado; `src/theme.ts` reexporta la
-  paleta de la CLI y la vuelca como variables CSS.
+  ```text
+  Stratum Protocol → client/protocol-store (foto de conjunto, sesión enfocada, historial)
+                   → view/ (puro: lista, turnos, modo del campo) → componentes
+  ```
 
-### Decisiones de D0 que se apartan del texto original de la definición
+  `ipc/native.ts` es la única frontera con Rust para el daemon. `client/protocol-store.ts` valida
+  con el contrato y reduce con sus funciones (`applyOverviewEvent`, `followSession`): una foto
+  **sustituye**, un hueco pide foto, nada se escribe a mano. `client/ui-store.ts` guarda solo lo de
+  la interfaz: qué se mira y lo **pedido aún no visto** («Enviando…», «Pausa pedida…»), que se
+  retira cuando la foto lo alcanza. `client/actions.ts`: cada acción es una petición; una mutación
+  sin respuesta no se repite. `view/chat.ts` agrupa la conversación del protocolo en turnos para los
+  componentes de chat de D1–D7.
+- **Conversación nueva**: Rust crea `<raíz>/<uuid>/{inputs,outputs,scratch}` y pide
+  `sessions.open { agent: 'assistant', cwd }`. El primer mensaje la abre; si abrir no tuvo
+  respuesta, no se envía nada.
+- **Lo que Desktop no hace (M12)**: aprobar, contestar preguntas o decidir planes (se ven; se
+  resuelven desde Dot o `stratum approvals`), editar la configuración (Ajustes es de solo lectura),
+  retención de carpetas, memoria global, trayectoria.
+- **Conversaciones de antes de M12**: `stratum desktop import` (una vez). Desktop avisa si quedan;
+  no las lee.
 
-| Tema | Definición original | Implementado | Motivo |
-|---|---|---|---|
-| Transporte del webview | WebSocket contra el pipe/socket | Relay por Rust (Tauri `Channel` + `invoke`) | Un webview no puede abrir un named pipe ni un unix socket: WebSocket solo habla TCP. El relay mantiene el canal único y ordenado (15.9) sin abrir TCP (15.1, 15.10) |
-| Quién hace el handshake | El frontend | Rust | El token no sale nunca del proceso Tauri: un fallo de contenido en el webview no puede filtrarlo |
-| Paso del token | `--desktop-token <TOKEN>` | Variable de entorno `STRATUM_DESKTOP_TOKEN` | La línea de comandos de un proceso la lee cualquier usuario (`ps`, `/proc/<pid>/cmdline`); el entorno solo el mismo usuario. El sidecar la borra de su entorno al leerla |
-| Validación de `Origin` | Rechazar `Origin ≠ tauri://localhost` | No aplica | Sin HTTP/WebSocket no hay cabecera `Origin`; la defensa es el token más el nombre aleatorio del pipe |
-| Framing | WebSocket | NDJSON (una línea JSON por trama) | Tope de 4 KiB antes de autenticar y 16 MiB después |
-| Binario base del SEA | Descargado de nodejs.org | `process.execPath` del Node que construye | Los `.node` se usan tal cual los compiló `npm install`: el runtime embebido tiene que tener exactamente esa ABI |
-| Plugin shell | `shell:execute` | Ninguno; `capabilities/default.json` solo con `core:default` | El sidecar lo lanza Rust directamente |
+Tests: `tests/architecture.test.ts` (sin runtime, sin sidecar, solo el contrato, frontera tipada,
+nada que apruebe ni apague el daemon), `src/client/client.test.ts`, `src/view/view.test.ts`,
+`src/App.test.tsx`, `cargo test` (`prefs`, `workspace`…), `scripts/smoke-clients.mjs` y las E2E.
 
-## Empaquetado del sidecar (15.2)
-
-Método: **Node SEA** (`node --experimental-sea-config` + `postject`), en
-`scripts/build-sea.mjs`:
-
-1. `npm run build:desktop` en stratum-cli: un único CommonJS
-   (`dist-desktop/stratum-core.cjs`) con todo el core menos los paquetes de
-   `stratum-cli/src/desktop/resource-packages.json`.
-2. Blob SEA con `useCodeCache`, inyectado en una copia del ejecutable de Node →
-   `src-tauri/binaries/stratum-core-<target-triple>[.exe]` (`bundle.externalBin`).
-3. Los paquetes nativos y su clausura de dependencias se copian a
-   `src-tauri/resources/sidecar/node_modules` (`bundle.resources`), podados a lo
-   que se ejecuta en esta plataforma. El sidecar los resuelve con un
-   `createRequire` apuntado a `STRATUM_RESOURCES_DIR` (ver
-   `stratum-cli/src/runtime/optional-import.ts` y el banner de
-   `stratum-cli/tsup.desktop.config.ts`).
-4. Self-test: el binario se ejecuta con un PATH sin Node y tiene que reportar
-   `sea: true` y los tres nativos cargados.
-
-La poda no copia las dependencias que solo sirven para instalar un nativo
-(`prebuild-install`, `node-gyp`…) ni los `prebuilds/<so>-<arch>` de otras
-plataformas. Además de ahorrar espacio, evita que linuxdeploy aborte al generar el
-AppImage por pasar `ldd` sobre binarios de Android o iOS. `build-sea.mjs` también
-borra `src-tauri/target/*/{sidecar,bundle}`, porque Tauri copia ahí los resources
-y nunca elimina los ficheros que desaparecen de la fuente.
-
-### Tamaños medidos (D0, x64)
-
-| Pieza | Windows | Linux |
-|---|---|---|
-| Shell Tauri (`stratum-desktop`, release) | 8,9 MB | — |
-| Sidecar SEA (runtime Node incluido) | 86 MB | 124 MB |
-| Resources nativos (better-sqlite3, sqlite-vec, onnxruntime-node, sharp…) | 98 MB | 54 MB |
-| Instaladores | `.msi` 61 MB · NSIS 40 MB | `.deb` 65 MB · `.AppImage` 140 MB (lleva WebKitGTK) |
-
-La cifra «5–10 MB» solo vale para el shell Rust.
-
-En WSL, linuxdeploy no puede montar su propia AppImage sin FUSE:
-`APPIMAGE_EXTRACT_AND_RUN=1 npm run tauri build`.
-
-## Ciclo de vida (15.11)
-
-1. **Cierre normal**: Tauri cierra el stdin del sidecar, que ejecuta sus ganchos
-   (`ShutdownRegistry`: servidor IPC, runtime de `exec`, logging y, desde D1, los
-   servers MCP de cada agente) y sale con 0. Se espera hasta 2 s.
-2. Si no ha salido a tiempo: `kill`.
-3. **Si Tauri muere sin poder hacer nada**: en Windows, el Job Object con
-   `KILL_ON_JOB_CLOSE` mata el sidecar y todos sus hijos; en Linux, `PR_SET_PDEATHSIG`
-   más el EOF en stdin. `PDEATHSIG` se dispara cuando muere el **hilo** que lanzó
-   el proceso, así que `SidecarProcess::spawn` solo se llama desde el hilo
-   dedicado del supervisor (D1), que vive tanto como la app; nunca desde un
-   worker de Tokio.
+> Las secciones siguientes describen D1–D7. Lo que en ellas dependía del sidecar (protocolo v9,
+> `ConversationHost`, retención, Ajustes editables, onboarding, trayectoria) se retiró en M12; lo
+> de la ventana, las carpetas de conversación y el sistema operativo sigue vigente.
 
 ## Chat de asistente (D1)
 
@@ -335,32 +295,26 @@ paquetes firmados con ella. `STRATUM_UPDATE_ENDPOINT` sustituye el endpoint
 
 ### Tests E2E
 
-`e2e/` maneja la app de verdad (shell + sidecar SEA) por WebDriver
-(tauri-driver), con un cliente W3C propio (`webdriver.mjs`, sin webdriverio) y
-`node:test`. Cada suite arranca la app con un HOME aislado (config, sesiones,
-workspaces y datos del webview) contra `mock-llm.mjs`, un servidor
-OpenAI-compatible que responde en streaming con razonamiento y tool calls según
-lo que escriba el test.
+`e2e/` maneja la app de verdad por WebDriver (tauri-driver), con un cliente W3C propio
+(`webdriver.mjs`) y `node:test`. Cada suite usa un HOME aislado y **arranca un `stratumd` real**
+con la CLI compilada antes de abrir la app (si lo arrancase la app colgaría del driver), contra
+`mock-llm.mjs`, un servidor OpenAI-compatible que responde en streaming según lo que escriba el test.
 
 | Suite | Qué cubre |
 |---|---|
-| `window` | Posición guardada fuera de todo monitor → la ventana aparece visible; maximizar/restaurar con los controles propios; «Cerrar» guarda la posición |
-| `chat` | TitleBar frameless, respuesta en streaming, razonamiento plegado, anuncio accesible, indicador de espera y «Detener» |
-| `files` | Adjuntar → el agente lo lee de `inputs/`; genera un fichero en `outputs/` → «Guardar como…» |
-| `retention` | Conversación con ficheros → relanzar con retención de segundos → `tar.gz` → abrirla lo restaura |
-| `conversations` | Título automático, «Nueva», cambiar, renombrar, eliminar |
-| `settings` | Cambiar una preferencia y guardar escribe el `.stratumrc.json`; pestañas con flechas; Esc |
-| `onboarding` | Sin config: bienvenida → wizard contra el mock (sondea `/models`) → primera respuesta |
+| `window` | Posición guardada fuera de todo monitor → visible; maximizar/restaurar; «Cerrar» guarda la posición |
+| `chat` | El primer mensaje abre una sesión del daemon (la CLI la ve igual, origen `desktop`); streaming; controles del run; «Detener» la cancela en el daemon; ficheros de `outputs/`; adjuntar y que el asistente lo lea |
+| `lifecycle` | Cerrar Desktop a mitad de un run → el daemon lo termina; reabrir → la misma sesión desde sus fotos; reiniciar el daemon con Desktop abierto → reconecta y se continúa |
 
-Los diálogos nativos de abrir/guardar no se pueden manejar por WebDriver: la
-feature de Cargo **`e2e`** (solo en `npm run e2e:build`, nunca en release) los
-sustituye por `STRATUM_E2E_PICK` / `STRATUM_E2E_SAVE_DIR` cuando la suite los
-define.
+Los diálogos nativos de abrir/guardar no se pueden manejar por WebDriver: la feature de Cargo
+**`e2e`** (solo en `npm run e2e:build`, nunca en release) los sustituye por `STRATUM_E2E_PICK` /
+`STRATUM_E2E_SAVE_DIR`. Con WebDriver cada arranque es un perfil de WebView2 nuevo: no hay
+`localStorage` entre aperturas.
 
 ```bash
-npm run sidecar:build   # el SEA con el core actual
-npm run e2e:build       # app de depuración con la feature e2e
-npm run e2e             # Linux: xvfb-run -a npm run e2e
+(cd ../stratum-cli && npm run build)   # el daemon de los tests
+npm run e2e:build                      # app de depuración con la feature e2e
+npm run e2e                            # Linux: xvfb-run -a npm run e2e
 ```
 
 - **Linux**: `webkit2gtk-driver` (`WebKitWebDriver`) y `xvfb`; `cargo install

@@ -550,10 +550,10 @@ ${testing}`;
  * repositorio, justo lo que aquí sobra. Conserva la identidad, el idioma, las
  * reglas de `question` y la memoria de largo plazo.
  */
-const ASSISTANT_HEAD = `You are Stratum, a general-purpose assistant running inside Stratum Desktop, a desktop app. Help the user with whatever they ask: questions, explanations, writing, analysis, planning, research on the web, and code they paste into the conversation.
+const ASSISTANT_HEAD = `You are Stratum, a general-purpose assistant. The user talks to you from a Stratum app (usually Stratum Desktop, a desktop app). Help the user with whatever they ask: questions, explanations, writing, analysis, planning, research on the web, and code they paste into the conversation.
 
 # Identity
-You are Stratum: an assistant that runs locally, in the Stratum Desktop app, against the user's own model provider. When the user asks what you are, say exactly that — name the app and the model you are running on, and describe what you can do here. Never introduce yourself as a generic chatbot, and never claim capabilities you do not have: what you can do is the set of tools actually available to you in this conversation, which you can see.
+You are Stratum: an assistant that runs locally, on the user's own Stratum (reachable from Stratum Desktop and the other Stratum apps), against the user's own model provider. When the user asks what you are, say exactly that — name Stratum and the model you are running on, and describe what you can do here. Never introduce yourself as a generic chatbot, and never claim capabilities you do not have: what you can do is the set of tools actually available to you in this conversation, which you can see.
 
 `;
 
@@ -587,8 +587,9 @@ const ASSISTANT_FILE_TOOLS_LINE =
   '- read_file, list_directory, glob and grep: to read and find files in the workspace. write_file and edit_file: to create or change files in outputs/ or scratch/.\n';
 
 /**
- * Bloque `# Workspace` (D2, 16.4). Describe el layout que monta Stratum Desktop
- * (`src/desktop/workspace.ts`) y declara el contenido de los ficheros como
+ * Bloque `# Workspace` (D2, 16.4). Describe el directorio de una sesión del
+ * agente `assistant` (`host/assistant.ts`: `inputs/` de solo lectura, escritura
+ * en `outputs/` y `scratch/`) y declara el contenido de los ficheros como
  * dato: un fichero subido puede traer instrucciones escritas para el modelo.
  */
 const ASSISTANT_WORKSPACE_BLOCK = `# Workspace

@@ -16,12 +16,16 @@ mod sealed {
     impl Sealed for super::ApproverMethod {}
 }
 
-/// Métodos de la **conexión principal** de Dot (`operator`: observar y
-/// conducir runs). Es una lista cerrada: no existe forma de enviar un método
-/// que no esté aquí, y `core.shutdown` no está —cerrar Dot nunca apaga el
+/// Métodos de la **conexión principal** de un cliente (`operator`: observar y
+/// conducir). Es una lista cerrada: no existe forma de enviar un método que no
+/// esté aquí, y `core.shutdown` no está —cerrar un cliente nunca apaga el
 /// daemon— ni ninguno que exija la capacidad `approve`: esos son de
-/// [`ApproverMethod`], que va por otra conexión. De una sesión, Dot puede
-/// **abrirla** e iniciar sus runs; cerrarla o cambiarle el modelo, no.
+/// [`ApproverMethod`], que va por otra conexión.
+///
+/// Cada cliente usa además **su** subconjunto ([`crate::link::ClientProfile`]):
+/// Dot puede abrir una sesión e iniciar sus runs, pero no cerrarla ni cambiarle
+/// el modelo; Desktop (M12), sí, y lee el historial, el contexto y la memoria
+/// de sesión (M11). Lo que no está en el perfil no se envía.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum MainMethod {
     CoreHello,
@@ -39,10 +43,20 @@ pub enum MainMethod {
     ApprovalsList,
     /// La foto de una sesión, para la confirmación nativa (su directorio, su título).
     SessionsGet,
+    /// M12 (Desktop) — la conversación guardada, por páginas (M11).
+    SessionsHistory,
+    /// M12 (Desktop) — qué recibe el modelo ahora (M11).
+    SessionsContext,
+    /// M12 (Desktop) — la memoria de sesión (M11).
+    SessionsMemory,
+    /// M12 (Desktop) — cerrar una sesión (en el daemon, también la borra del disco).
+    SessionsClose,
+    /// M12 (Desktop) — cambiar el modelo de una sesión parada.
+    SessionsSetModel,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 13] = [
+    pub const ALL: [MainMethod; 18] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -56,6 +70,11 @@ impl MainMethod {
         MainMethod::ModelsList,
         MainMethod::ApprovalsList,
         MainMethod::SessionsGet,
+        MainMethod::SessionsHistory,
+        MainMethod::SessionsContext,
+        MainMethod::SessionsMemory,
+        MainMethod::SessionsClose,
+        MainMethod::SessionsSetModel,
     ];
 }
 
@@ -75,6 +94,11 @@ impl WireMethod for MainMethod {
             MainMethod::ModelsList => "models.list",
             MainMethod::ApprovalsList => "approvals.list",
             MainMethod::SessionsGet => "sessions.get",
+            MainMethod::SessionsHistory => "sessions.history",
+            MainMethod::SessionsContext => "sessions.context",
+            MainMethod::SessionsMemory => "sessions.memory",
+            MainMethod::SessionsClose => "sessions.close",
+            MainMethod::SessionsSetModel => "sessions.setModel",
         }
     }
 }
@@ -249,7 +273,12 @@ mod tests {
                 "agents.list",
                 "models.list",
                 "approvals.list",
-                "sessions.get"
+                "sessions.get",
+                "sessions.history",
+                "sessions.context",
+                "sessions.memory",
+                "sessions.close",
+                "sessions.setModel"
             ]
         );
         for forbidden in [
@@ -257,15 +286,16 @@ mod tests {
             "approvals.resolve",
             "questions.answer",
             "plans.decide",
-            "sessions.close",
+            "sessions.setAgent",
+            "sessions.setReadOnly",
+            "sessions.detach",
         ] {
             assert!(!names.contains(&forbidden), "{forbidden}");
         }
         for name in names {
-            // De `sessions.*`, solo abrir y leer: ni cerrar ni reconfigurar una sesión viva.
+            // Ni alojar, ni gobernar jobs, ni la memoria global: eso no es de un cliente.
             assert!(
                 !name.starts_with("host.")
-                    && !name.starts_with("sessions.set")
                     && !name.starts_with("jobs.")
                     && !name.starts_with("memory."),
                 "{name}"

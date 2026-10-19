@@ -54,9 +54,9 @@ const ICONS: Record<SidebarPanel | 'settings', string> = {
 };
 
 const LABELS: Record<SidebarPanel, string> = {
-  conversations: 'Conversaciones (Ctrl+K para buscar)',
+  conversations: 'Sesiones (Ctrl+K para buscar)',
   outline: 'Índice de la conversación',
-  memory: 'Memoria global',
+  memory: 'Contexto y memoria de la sesión',
   files: 'Ficheros de la conversación',
 };
 

@@ -1,10 +1,11 @@
 /**
- * Slash-commands del modo Chat (D4). Catálogo reducido: los de código
- * (`/init`, `/changes`, `/plan`, `/agent`) llegan con el modo Code (D8).
+ * Slash-commands de Desktop. Desde M12 cada uno es una capacidad de Stratum
+ * (protocolo) o de la interfaz: ya no hay `/clear` ni `/compact` (eran del
+ * runtime propio de Desktop; la compactación la decide la sesión, M11).
  * Puro, para los tests.
  */
 
-export type CommandName = 'new' | 'clear' | 'compact' | 'model' | 'memory' | 'settings';
+export type CommandName = 'new' | 'model' | 'context' | 'settings';
 
 export interface SlashCommand {
   name: CommandName;
@@ -15,11 +16,9 @@ export interface SlashCommand {
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'new', description: 'Empezar una conversación nueva' },
-  { name: 'clear', description: 'Vaciar esta conversación (sus ficheros se conservan)' },
-  { name: 'compact', description: 'Comprimir el contexto ahora' },
-  { name: 'model', args: '[modelo]', description: 'Ver o cambiar el modelo de esta conversación' },
-  { name: 'memory', description: 'Ver y editar la memoria global' },
-  { name: 'settings', description: 'Ajustes de Stratum' },
+  { name: 'model', args: '[modelo]', description: 'Ver o cambiar el modelo de esta sesión' },
+  { name: 'context', description: 'Ver el contexto y la memoria de esta sesión' },
+  { name: 'settings', description: 'Ajustes de Stratum Desktop' },
 ];
 
 /**

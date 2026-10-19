@@ -1,6 +1,6 @@
 # Stratum Protocol v1
 
-Contrato entre el harness Stratum y sus clientes (CLI, Dot y los que vengan).
+Contrato entre el harness Stratum y sus clientes (CLI, Desktop, Dot y los que vengan).
 Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda este documento.
 
 > **Estado (M5; M6 añade un cliente, no cambia el contrato).** Contrato, validación, códec y cliente Node (M1); un servidor, `stratumd`
@@ -12,8 +12,10 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 > una sesión de `stratum chat` se traspasa viva al daemon, mismo id y contexto, y se vuelve a
 > ella desde cualquier cliente (M10, §18); y **conversación duradera**: las sesiones del daemon
 > guardan su conversación entera, compactan lo antiguo a una memoria de sesión con procedencia y
-> sobreviven a un reinicio (M11, §19).
-> Qué atiende hoy el servidor y con qué garantías: §13 a §16, §18 y §19.
+> sobreviven a un reinicio (M11, §19); y **clientes hermanos**: Stratum Desktop deja su runtime
+> propio y es un cliente más, con el origen de cada sesión y el agente embebido `assistant` (M12,
+> §20).
+> Qué atiende hoy el servidor y con qué garantías: §13 a §16 y §18 a §20.
 
 | Pieza | Dónde | Depende de |
 |---|---|---|
@@ -22,13 +24,14 @@ Es la referencia: donde discrepe de `docs/PRD_STRATUM_DOT.md` §10–§12, manda
 | Framing, códec, `RpcPeer` | `stratum-cli/src/ipc/` | Node (`Buffer`) |
 | Cliente Node | `stratum-cli/src/client/` | Node (`net`, `fs`) |
 | Reductor de fotos | `stratum-cli/src/protocol/reduce.ts` | nada |
+| Seguir una sesión y la foto de conjunto desde un cliente (M12) | `stratum-cli/src/protocol/follow.ts`, `overview.ts` (+ `classifyEvent` en `schemas.ts`) | nada |
 | Publicador de una sesión | `stratum-cli/src/host/session-publisher.ts` | el runtime |
 | Puente de un anfitrión par | `stratum-cli/src/host/peer-host-bridge.ts` | `client/`, el publicador |
 | Servidor (`stratumd`) | `stratum-cli/src/daemon/` | `host/`, `ipc/` |
 | Reglas de qué respuestas valen | `stratum-cli/src/protocol/resolve.ts` | nada |
 | Decisiones pendientes de una sesión | `stratum-cli/src/host/interactions.ts` | el runtime |
 | Centro de aprobaciones | `stratum-cli/src/daemon/approval-center.ts` | `protocol/`, `ipc/` |
-| Cliente nativo de Dot | `stratum-dot/crates/dot-link/` (Rust) | este documento; ningún código de `stratum-cli` |
+| Cliente nativo de Dot y de Desktop (M12) | `stratum-dot/crates/dot-link/` (Rust; un `ClientProfile` por app) | este documento; ningún código de `stratum-cli` |
 
 ## 1. Invariantes
 
@@ -1202,6 +1205,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M10 | `host.register` devuelve `epoch`, y `host.publish` la exige; métodos `sessions.detach`, `host.handoffBegin/Chunk/Commit/Abort` y `host.detach`; código `NOT_TRANSFERABLE`; `ProtocolHandoffContext` (`HANDOFF_FORMAT` 1) | Sin publicar. `epoch` es obligatoria en `host.publish` a propósito: un anfitrión que no la mande no puede demostrar que sigue siéndolo. Todos los anfitriones salen de este árbol |
 | M9 | Ningún cambio de contrato. El daemon no arranca si su carpeta no es privada (POSIX) o es un enlace, y deja su socket en `0600`. Stratum Dot usa `approvals.list` y `sessions.get` (que ya existían) para la confirmación nativa | Comportamiento del servidor y de un cliente; el contrato no cambia |
 | M11 | Métodos `sessions.history`, `sessions.context` y `sessions.memory` (`observe`); DTOs `ProtocolHistoryPage`, `ProtocolContextReport`, `ProtocolSessionMemory`; `HISTORY_LIMITS`. Las sesiones del daemon se recuperan tras un reinicio: el mismo id vuelve a `sessions.list` | Aditivo. Que una sesión del daemon sobreviva a su proceso cambia una garantía documentada (§13.7, §18.10), no la forma del contrato |
+| M12 | `ProtocolSession.origin?` (`ClientKind`); `sessions.open { agent: 'assistant' }` abre el agente embebido y `agents.list` lo ofrece el primero; `sessions.setAgent` hacia o desde `assistant` → `INVALID_PARAMS`; `ProtocolHandoffContext.agent` puede ser `assistant`. Funciones de cliente puras `followSession`, `applyOverviewEvent`, `boundedTranscript` y, en `schemas.ts`, `classifyEvent`/`parseSessionSnapshot`/`parseOverviewSnapshot` | Aditivo: `origin` es opcional y solo procedencia; el resto no cambia la forma de ningún mensaje |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1547,3 +1551,108 @@ procedencia, fallos, conversación larga, aislamiento, modelo distinto y credenc
 servidor HTTP local, egress, reconstrucción; reglas de arquitectura), `daemon/persistence.test.ts`
 (reinicio de punta a punta con compactación y pregunta sobre lo antiguo, cerrar frente a morir,
 sin carpeta, traspaso M10 → reinicio), `cli/resume-guard.test.ts` y `cli/attach-view.test.ts`.
+
+## 20. Clientes hermanos: Desktop sobre `stratumd` (M12)
+
+Decisión normativa: `docs/STRATUM_CLIENT_ARCHITECTURE.md` (§8, estado de M12). Desde M12 la CLI,
+Stratum Desktop y Stratum Dot son **clientes hermanos** del mismo plano de control:
+
+```text
+cliente pide → stratumd arbitra → SessionHost ejecuta
+```
+
+Desktop ya no tiene runtime, sidecar ni protocolo propio (el v9 de D0–D7 se retiró): habla este
+protocolo con el enlace nativo compartido con Dot (`dot-link`, perfil `DESKTOP`). Una sesión que
+abre Desktop es una sesión Stratum normal: aparece en `sessions.list`, la publica el mismo
+`SessionHost`, guarda su conversación (M11), sobrevive al cierre de Desktop y a un reinicio del
+daemon, y se abre desde Dot o `stratum attach` con el mismo id.
+
+### 20.1 Origen (`ProtocolSession.origin`)
+
+`origin` es el `ClientKind` (`cli`, `desktop`, `dot`, `daemon`, `other`) desde el que se **inició**
+la sesión: el de la conexión que llamó a `sessions.open`, o `cli` para una sesión que publica una
+terminal. Se conserva al traspasarla (M10) y al recuperarla tras un reinicio (va en su foto
+guardada). Ausente en sesiones de un anfitrión anterior a M12.
+
+**Origen no es autoridad.** Nada en el servidor lo lee para decidir quién ve, conduce, aprueba o
+cierra una sesión: eso siguen siendo las capacidades de la conexión (§5) y, en una sesión par,
+quien la aloja (§14). No hay jerarquía entre clientes.
+
+### 20.2 El agente embebido `assistant`
+
+El modo Chat de Desktop (D1–D2) es ahora un agente que cualquier cliente puede abrir:
+
+```json
+{ "method": "sessions.open", "params": { "cwd": "/home/ana/.stratum/desktop/workspaces/<uuid>", "agent": "assistant" } }
+```
+
+- Lo monta `SessionHost` con el preset `assistant` (`host/assistant.ts`): su prompt, solo sus tools
+  (web, `question`, `todo`, memoria de decisiones y ficheros), **nunca `exec`**, y los ficheros
+  confinados al `cwd` (`inputs/` de solo lectura; escritura en `outputs/` y `scratch/`, que se
+  crean si faltan). Sin MCP, skills ni perfiles. Su memoria de decisiones es suya
+  (`~/.stratum/assistant/memory/`), separada de la de cualquier proyecto.
+- **Necesita su propio directorio**: `cwd` es obligatorio y no puede ser el home del usuario, un
+  ancestro suyo ni la raíz de una unidad (`INVALID_PARAMS`; en un traspaso, `NOT_TRANSFERABLE`
+  `cwd`). El asistente lee todo lo que hay bajo su directorio, así que lo elige quien lo abre:
+  Desktop crea una carpeta por conversación.
+- Una conversación que no sale de eventos (la importada de Desktop) entra en la foto redactada,
+  con ids `m<n>`; la numeración del publicador sigue después del mayor.
+- `ProtocolSession.agent` es `assistant`. `agents.list` lo ofrece el primero (`origin: 'builtin'`,
+  `mode: 'primary'`); un perfil de usuario con ese nombre no se lista.
+- Se elige al abrir y no cambia: `sessions.setAgent` sobre una sesión del asistente, o pidiendo
+  `assistant` en otra, contesta `INVALID_PARAMS`. `sessionProfile` no aplica.
+- Se traspasa (M10: `ProtocolHandoffContext.agent = 'assistant'`) y se recupera tras un reinicio
+  (M11) como asistente.
+- Sin aprobadores acreditados se comporta como cualquier sesión del daemon (§13.7): lo destructivo
+  se deniega y las preguntas se contestan con supuestos.
+
+### 20.3 Estado operativo, conversación e historial
+
+Un cliente que pinta muchas sesiones no necesita la conversación de todas (§4 de la arquitectura de
+clientes):
+
+1. **Estado operativo**: la suscripción `overview` (foto de conjunto + `OVERVIEW_EVENT_TYPES`), que
+   el cliente avanza con `applyOverviewEvent` (puro, en `protocol/overview.ts`; en `overview` los
+   saltos de `seq` son normales).
+2. **Conversación** de la sesión que se mira: su suscripción `session` (foto + eventos), avanzada con
+   `followSession` (`protocol/follow.ts`), que reduce con `applySessionEvent` y pide otra foto ante
+   un hueco o un evento que no valida. Lo que llega sin tipar se clasifica antes con `classifyEvent`
+   (`schemas.ts`). Dot y Desktop usan esta misma función.
+3. **Historial completo**, bajo demanda: `sessions.history` hacia atrás desde el primer mensaje de la
+   foto. Una página que llega cuando ya se mira otra sesión, o que ya no empalma, se descarta.
+
+### 20.4 Lo que puede pedir cada cliente nativo
+
+`dot-link` lleva un perfil por aplicación (`ClientProfile`). El perfil solo **resta**: lo que no está
+en su lista no sale del cliente, aunque el daemon lo permitiera; lo que sí está lo sigue decidiendo
+el daemon por capacidades.
+
+| | Dot | Desktop |
+|---|---|---|
+| `core.hello.client.kind` | `dot` | `desktop` |
+| Roles | `operator` (y `approver` por otra conexión, M8) | `operator` |
+| Sigue con suscripción `session` | todas las vivas | solo la que se mira |
+| `sessions.open`, `runs.start`, `runs.pause`/`resume`/`cancel`/`steer`, `agents.list`, `models.list` | sí | sí |
+| `sessions.history`/`context`/`memory` | — | sí |
+| `sessions.close`, `sessions.setModel` | — | sí |
+| `approvals.resolve`, `questions.answer`, `plans.decide` | por el broker nativo con confirmación (M8/M9) | — (se ven; se resuelven desde Dot o `stratum approvals`) |
+| `core.shutdown` | nunca | nunca |
+
+### 20.5 Lo antiguo de Desktop: `stratum desktop import`
+
+Las conversaciones de Desktop D1–D7 (`~/.stratum/desktop/{sessions,conversations}`) se pasan al
+daemon **una vez** con `stratum desktop import [--dry-run]`, por el camino de M10: se monta cada una
+como sesión del asistente en su carpeta, con su historial, se publica con su conversación visible y
+origen `desktop`, y se traspasa. Lo hecho queda en `~/.stratum/desktop/imported.json` (versión 1);
+un resultado desconocido se anota y **no** se reintenta. No se borra ni se modifica nada de
+Desktop, y Desktop no lo vuelve a leer. No viajan el razonamiento (la conversación del protocolo no
+lo lleva) ni los ficheros que D3 archivó o purgó.
+
+### 20.6 Tests
+
+`stratum-cli/src/daemon/sibling-clients.test.ts` (origen, asistente, cerrar Desktop durante un run,
+reinicio, traspaso), `protocol/follow.test.ts`, `migrate/desktop-legacy.test.ts`;
+`stratum-dot/crates/dot-link/tests/desktop.rs` (perfil, seguimiento por foco, lista blanca,
+resultado desconocido); `stratum-desktop/scripts/smoke-clients.mjs` (`npm run smoke:clients`:
+Desktop → Dot → `stratum attach`, `/detach` → Desktop, reinicio) y las E2E de
+`stratum-desktop/e2e/`.

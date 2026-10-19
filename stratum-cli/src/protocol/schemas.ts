@@ -13,6 +13,7 @@
  */
 import { z } from 'zod';
 import { PROTOCOL_ERROR_CODES } from './errors.js';
+import type { ClassifiedEvent } from './follow.js';
 import {
   HANDOFF_FORMAT,
   HANDOFF_LIMITS,
@@ -171,6 +172,7 @@ export const sessionSchema: z.ZodType<ProtocolSession> = z.object({
   title: z.string(),
   cwd: z.string(),
   host: z.object({ kind: z.enum(['daemon', 'peer']), client: clientKind, connected: z.boolean() }),
+  origin: clientKind.optional(),
   state: z.enum(['idle', 'running', 'waiting', 'paused', 'detached', 'closed']),
   agent: z.string(),
   provider: z.string(),
@@ -1031,3 +1033,39 @@ export const SCHEMA_COVERAGE = {
   methods: Object.keys(METHODS) as MethodName[],
   notifications: [...NOTIFICATIONS],
 };
+
+// --- clientes: de JSON sin tipar a lo que entienden `follow.ts`/`overview.ts` (M12)
+
+/** Una foto de sesión validada, o `null` si no cumple el contrato. */
+export function parseSessionSnapshot(raw: unknown): ProtocolSessionSnapshot | null {
+  const parsed = sessionSnapshotSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Una foto de conjunto validada, o `null` si no cumple el contrato. */
+export function parseOverviewSnapshot(raw: unknown): ProtocolOverviewSnapshot | null {
+  const parsed = overviewSnapshotSchema.safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+/**
+ * Clasifica un evento recibido sin tipar (`followSession` decide qué hacer con
+ * cada clase). Un tipo de estado desconocido con `seq` no es inválido: un
+ * daemon más nuevo puede añadir eventos dentro de la v1.
+ */
+export function classifyEvent(raw: unknown): ClassifiedEvent {
+  const parsed = eventSchema.safeParse(raw);
+  if (parsed.success) return { kind: 'event', event: parsed.data };
+  if (!isPlainRecord(raw) || typeof raw.type !== 'string') return { kind: 'invalid' };
+  if (Object.prototype.hasOwnProperty.call(EVENT_CLASS, raw.type)) return { kind: 'invalid' };
+  const { seq, at, sessionId } = raw;
+  if (typeof sessionId !== 'string') return { kind: 'invalid' };
+  if (typeof seq === 'number' && Number.isInteger(seq) && seq >= 1 && !('after' in raw)) {
+    return { kind: 'unknown-state', sessionId, seq, at: typeof at === 'number' ? at : 0 };
+  }
+  return 'after' in raw ? { kind: 'skip' } : { kind: 'invalid' };
+}
