@@ -1,42 +1,56 @@
-//! Stratum Desktop: ventana Tauri + sidecar `stratum-core` con canal local
-//! autenticado (D0), chat de asistente (D1), integración con el SO (D6) y
-//! ventana frameless con auto-update (D7). Ver
-//! STRATUM_DESKTOP_HITOS.md.
+//! Stratum Desktop: ventana Tauri, cliente de `stratumd` (M12).
+//!
+//! Desde M12 Desktop es un **cliente hermano** de la CLI y de Stratum Dot
+//! (`docs/STRATUM_CLIENT_ARCHITECTURE.md`): no tiene runtime de agente ni
+//! sidecar. Habla el Stratum Protocol con el daemon por el enlace nativo
+//! compartido (`dot_link`, perfil [`ClientProfile::DESKTOP`]): descubre el
+//! daemon, lo arranca con el comando oficial (`stratum daemon start`) si no
+//! hay ninguno, se suscribe y reenvía al webview lo que llega, sin
+//! interpretarlo. Cerrar Desktop suelta la conexión y nada más: el daemon, sus
+//! sesiones y sus runs siguen.
+//!
+//! Lo que sigue siendo de Desktop (interfaz, no estado de sesión): la ventana
+//! (D7), el atajo global y las notificaciones (D6), las actualizaciones (D7) y
+//! los ficheros de las conversaciones del asistente (D2: subidas, descargas,
+//! vista previa), confinados a su carpeta.
 
-#[cfg(test)]
-mod e2e_tests;
+mod commands;
 mod files;
-mod ipc;
 mod logs;
 mod os;
-mod sidecar;
-mod supervisor;
-mod transport;
+mod prefs;
 mod updates;
 mod window_state;
 mod workspace;
 
-use ipc::SidecarState;
+use dot_link::discovery::default_endpoint_dir;
+use dot_link::link::Timings;
+use dot_link::{CliLauncher, ClientProfile, DotEvent, LinkConfig, LinkHandle, Logger};
 use os::OsState;
-use tauri::{AppHandle, Manager, RunEvent, WindowEvent};
+use std::sync::Arc;
+use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
 use window_state::WindowStateStore;
 use workspace::WorkspaceState;
 
-/// Todo lo que hay que hacer antes de que el proceso termine: guardar dónde
-/// estaba la ventana y apagar el sidecar. Lo usan la salida normal y el
-/// instalador de una actualización (que en Windows sale con `process::exit`).
-pub(crate) fn prepare_exit<R: tauri::Runtime>(app: &AppHandle<R>) {
-    window_state::save(app);
-    shutdown_sidecar(app);
+/// Canal único nativo → interfaz: mantiene el orden entre fotos, eventos y estado.
+pub const DESKTOP_EVENT: &str = "desktop://event";
+
+/// `STRATUM_DESKTOP_NO_AUTOSTART=1`: no arrancar el daemon (pruebas).
+const NO_AUTOSTART_ENV: &str = "STRATUM_DESKTOP_NO_AUTOSTART";
+
+/// Lo que la app tiene en marcha. Nada de esto es estado de una sesión.
+pub struct DesktopState {
+    pub link: LinkHandle,
+    pub prefs: prefs::DesktopPrefs,
+    pub hotkey_error: Option<String>,
+    pub logger: Logger,
 }
 
-/// Salida de la app: se marca antes de apagar, así el supervisor no relanza el
-/// sidecar que se está deteniendo.
-fn shutdown_sidecar<R: tauri::Runtime>(app: &AppHandle<R>) {
-    if let Some(process) = app.state::<SidecarState>().begin_exit() {
-        let outcome = process.shutdown(sidecar::GRACE);
-        eprintln!("[stratum] sidecar detenido: {outcome:?}");
-    }
+/// Lo que hay que hacer antes de que el proceso termine: guardar dónde estaba
+/// la ventana. Lo usan la salida normal y el instalador de una actualización
+/// (que en Windows sale con `process::exit`). No hay nada más que apagar.
+pub(crate) fn prepare_exit<R: tauri::Runtime>(app: &AppHandle<R>) {
+    window_state::save(app);
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -50,26 +64,38 @@ pub fn run() {
         .plugin(os::global_shortcut_plugin())
         // D7: solo lo usa Rust (`updates.rs`); el webview no tiene sus permisos.
         .plugin(tauri_plugin_updater::Builder::new().build())
-        .manage(SidecarState::new())
         .manage(WorkspaceState::default())
         .manage(OsState::default())
         .manage(WindowStateStore::default())
         .manage(updates::UpdateState::default())
         .invoke_handler(tauri::generate_handler![
-            ipc::sidecar_status,
-            ipc::sidecar_subscribe,
-            ipc::sidecar_send,
-            ipc::sidecar_restart,
-            ipc::sidecar_reload,
+            commands::desktop_attach,
+            commands::desktop_retry,
+            commands::desktop_focus_session,
+            commands::desktop_resync_session,
+            commands::desktop_pause_run,
+            commands::desktop_resume_run,
+            commands::desktop_cancel_run,
+            commands::desktop_steer_run,
+            commands::desktop_new_chat,
+            commands::desktop_start_run,
+            commands::desktop_list_models,
+            commands::desktop_set_model,
+            commands::desktop_close_session,
+            commands::desktop_history,
+            commands::desktop_context,
+            commands::desktop_memory,
+            commands::desktop_prefs,
+            commands::desktop_open_config,
             files::attachments_pick,
             files::attachments_add,
+            files::attachments_commit,
             files::attachments_discard,
             files::output_save,
             files::output_open,
             files::output_preview,
             files::workspace_export,
             files::workspace_files,
-            os::os_set_hotkey,
             os::os_notify,
             os::logs_open,
             os::logs_tail,
@@ -85,23 +111,71 @@ pub fn run() {
             window_state::track(window, event);
         })
         .setup(|app| {
+            let handle = app.handle().clone();
             // Arranca oculta: se coloca donde estaba y entonces se muestra.
-            window_state::restore(app.handle());
-            // Hasta que el sidecar diga cuál es el configurado (D6).
-            os::register_default(app.handle());
-            // Un fallo al lanzar no aborta la app: queda como estado `failed`
-            // para que la UI lo muestre, con Reintentar.
-            supervisor::start(app.handle().clone());
+            window_state::restore(&handle);
+
+            let logger = Logger::to_file(&logs::log_dir(&handle), logs::LINK_LOG);
+            logger.info(&format!(
+                "desktop startup (version {})",
+                env!("CARGO_PKG_VERSION")
+            ));
+            let home = handle
+                .path()
+                .home_dir()
+                .map_err(|_| "cannot resolve the home directory")?;
+            let prefs = prefs::load(&home);
+            for warning in &prefs.warnings {
+                logger.warn(warning);
+            }
+            handle
+                .state::<WorkspaceState>()
+                .set_info(Some(prefs.workspaces()));
+            let hotkey_error = os::register_configured(&handle, &prefs.global_hotkey);
+
+            // El mecanismo oficial de los clientes: descubrir `~/.stratum/daemon/`
+            // y, si no hay daemon, `stratum daemon start` (una vez por intento).
+            let endpoint_dir = default_endpoint_dir().ok_or("cannot resolve the home directory")?;
+            let autostart = std::env::var(NO_AUTOSTART_ENV)
+                .map(|v| v != "1")
+                .unwrap_or(true);
+            let config = LinkConfig {
+                endpoint_dir,
+                profile: ClientProfile::DESKTOP,
+                client_version: env!("CARGO_PKG_VERSION").to_string(),
+                autostart,
+                launcher: Arc::new(CliLauncher::from_env_var(
+                    dot_link::launcher::DESKTOP_CLI_ENV,
+                )),
+                logger: logger.clone(),
+                timings: Timings::default(),
+            };
+            let emitter = handle.clone();
+            let (link, task) = dot_link::spawn(config, move |event: DotEvent| {
+                // Lo que se emite es `DotEvent`: por construcción no lleva el token.
+                let _ = emitter.emit_to("main", DESKTOP_EVENT, &event);
+            });
+            app.manage(DesktopState {
+                link,
+                prefs,
+                hotkey_error,
+                logger,
+            });
+            tauri::async_runtime::spawn(task);
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error al construir la aplicación Tauri")
         .run(|app, event| {
             // `Exit` llega tanto al cerrar la última ventana como al salir por
-            // código. Si Tauri muere sin llegar aquí, el Job Object (Windows) o
-            // PDEATHSIG + EOF en stdin (Linux) se encargan del sidecar.
+            // código. Desktop desaparece: se suelta la conexión y nada más. Ni
+            // `core.shutdown`, ni cancelar runs, ni cerrar sesiones.
             if let RunEvent::Exit = event {
                 prepare_exit(app);
+                if let Some(state) = app.try_state::<DesktopState>() {
+                    state.link.shutdown();
+                    state.logger.info("desktop exit");
+                }
             }
         });
 }

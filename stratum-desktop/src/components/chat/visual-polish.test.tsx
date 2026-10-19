@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, cleanup, fireEvent, render, screen } from '@testing-library/react';
-import type { AgentTurn } from '../../hooks/conversation-reducer';
+import type { AgentTurn } from '../../view/model';
 import { AgentMessage, turnMarkdown } from './AgentMessage';
 import { ToolCallBlock, toolIcon } from './ToolCallBlock';
 import { ICON } from './icons';

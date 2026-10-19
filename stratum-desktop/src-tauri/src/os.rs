@@ -1,11 +1,9 @@
 //! Integración con el sistema operativo (D6): atajo global, notificaciones
-//! nativas y acceso a los logs del sidecar desde la UI.
+//! nativas y acceso a los logs desde la UI.
 //!
 //! Las preferencias (`desktop.globalHotkey`, `desktop.notifications`) viven en
-//! el `.stratumrc.json` que gestiona el sidecar (D5); el webview las recibe en
-//! `config_state.applied.os` y se las pasa a Rust. Hasta que el sidecar conecta
-//! se registra el atajo por defecto, para que la ventana se pueda traer al
-//! frente aunque el agente no arranque.
+//! el `.stratumrc.json` global; desde M12 las lee Rust al arrancar
+//! (`prefs.rs`) y registra aquí el atajo, haya o no daemon.
 //!
 //! El webview no recibe permisos de los plugins: notificar y registrar el atajo
 //! lo hace Rust a través de estos comandos, que acotan lo que se puede pedir.
@@ -15,13 +13,10 @@ use serde::Serialize;
 use std::str::FromStr;
 use std::sync::Mutex;
 use tauri::plugin::TauriPlugin;
-use tauri::{AppHandle, Manager, Runtime, State};
+use tauri::{AppHandle, Manager, Runtime};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, Shortcut, ShortcutState};
 use tauri_plugin_notification::NotificationExt;
 use tauri_plugin_opener::OpenerExt;
-
-/// Igual que `DEFAULT_GLOBAL_HOTKEY` de `stratum-cli/src/config/accelerator.ts`.
-pub const DEFAULT_HOTKEY: &str = "CommandOrControl+Shift+Space";
 
 const MAX_TITLE_CHARS: usize = 80;
 const MAX_BODY_CHARS: usize = 200;
@@ -53,11 +48,16 @@ pub fn bring_to_front<R: Runtime>(app: &AppHandle<R>) {
     }
 }
 
-/// Atajo por defecto al arrancar. Un fallo (otra app ya lo usa) no es fatal.
-pub fn register_default<R: Runtime>(app: &AppHandle<R>) {
+/// El atajo configurado al arrancar (`""`: ninguno). Un fallo (otra app ya lo
+/// usa) no es fatal: se devuelve para enseñarlo en Ajustes.
+pub fn register_configured<R: Runtime>(app: &AppHandle<R>, accelerator: &str) -> Option<String> {
     let state = app.state::<OsState>();
-    if let Err(e) = apply_hotkey(app, &state, DEFAULT_HOTKEY) {
-        eprintln!("[stratum] atajo global por defecto no registrado: {e}");
+    match apply_hotkey(app, &state, accelerator) {
+        Ok(_) => None,
+        Err(e) => {
+            eprintln!("[stratum] atajo global no registrado: {e}");
+            Some(e)
+        }
     }
 }
 
@@ -126,19 +126,6 @@ fn register_error(accelerator: &str, e: &tauri_plugin_global_shortcut::Error) ->
     } else {
         format!("No se pudo registrar «{accelerator}»: {detail}")
     }
-}
-
-/// `desktop.globalHotkey` efectivo, desde el webview. `""` desactiva el atajo.
-#[tauri::command]
-pub fn os_set_hotkey(
-    app: AppHandle,
-    state: State<'_, OsState>,
-    accelerator: String,
-) -> Result<Option<String>, String> {
-    if accelerator.len() > 64 {
-        return Err("atajo demasiado largo".into());
-    }
-    apply_hotkey(&app, &state, &accelerator)
 }
 
 /// Estado de la ventana principal que decide si una notificación tiene sentido.
@@ -222,10 +209,10 @@ pub struct LogTail {
     text: String,
 }
 
-/// Últimas líneas de `sidecar.log`, para la pantalla de fallo de arranque.
+/// Últimas líneas de `desktop.log`, para la pantalla de fallo de conexión.
 #[tauri::command]
 pub fn logs_tail(app: AppHandle, lines: usize) -> Result<LogTail, String> {
-    let path = logs::log_dir(&app).join(logs::SIDECAR_LOG);
+    let path = logs::log_dir(&app).join(logs::LINK_LOG);
     let text = logs::read_tail(&path, lines.min(MAX_TAIL_LINES))
         .map_err(|e| format!("no se pudo leer {}: {e}", path.display()))?;
     Ok(LogTail {
@@ -237,6 +224,7 @@ pub fn logs_tail(app: AppHandle, lines: usize) -> Result<LogTail, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::prefs::DEFAULT_HOTKEY;
 
     fn presence(focused: bool, minimized: bool, visible: bool) -> WindowPresence {
         WindowPresence {

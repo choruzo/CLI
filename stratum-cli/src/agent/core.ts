@@ -1170,6 +1170,11 @@ export class StratumAgent {
     return { ok: true, profile, notes };
   }
 
+  /** Preset de prompt y toolset, fijado al construir el agente. */
+  get promptPreset(): PromptPreset {
+    return this.preset;
+  }
+
   /** Perfil activo como agente principal, o null. */
   getActiveProfile(): AgentProfile | null {
     return this._activeProfile;

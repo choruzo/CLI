@@ -3333,3 +3333,69 @@ kbd {
 .status-bar__toggle[aria-pressed='true'] {
   color: var(--color-accent);
 }
+
+/* ------------------------------------------------------------------------- */
+/* M12: cliente de stratumd (controles del run, historial, contexto, ajustes) */
+/* ------------------------------------------------------------------------- */
+
+.run-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  border-top: 1px solid var(--color-borderSubtle);
+  color: var(--color-textMuted);
+  font-size: 13px;
+}
+.run-controls__state {
+  flex: 1;
+}
+.conversation__older {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 6px;
+  padding: 12px 0 4px;
+}
+.conversation__loading {
+  margin: 24px auto;
+  color: var(--color-textFaint);
+  text-align: center;
+}
+.context-grid {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 8px 0;
+  font-size: 13px;
+}
+.context-grid dt {
+  color: var(--color-textFaint);
+}
+.context-grid dd {
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+.memory-summary {
+  margin: 6px 0;
+  font-size: 13px;
+  white-space: pre-wrap;
+}
+.memory-items {
+  margin: 6px 0;
+  padding-left: 18px;
+  font-size: 13px;
+}
+.memory-items li[data-status='conflict'] {
+  color: var(--color-warning);
+}
+.settings__content {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  max-width: 760px;
+}

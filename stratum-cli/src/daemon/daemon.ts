@@ -27,10 +27,12 @@ import { access, rmdir, stat } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, isAbsolute, resolve } from 'path';
 import { ProfileLoader, profileMode } from '../agent/profiles.js';
+import { ASSISTANT_AGENT, assistantAgentInfo } from '../agent/presets.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
 import type { StratumConfig } from '../config/schema.js';
 import { resolveSessionStartup, type SessionStartup } from '../host/session-startup.js';
+import { assistantCwdProblem, type AssistantData } from '../host/assistant.js';
 import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
@@ -38,6 +40,7 @@ import { getDecisionMemory } from '../memory/decision-memory.js';
 import {
   METHODS,
   STRATUM_PROTOCOL_VERSION,
+  type ClientKind,
   type MethodName,
   type ProtocolEvent,
   type ProtocolModel,
@@ -134,6 +137,13 @@ export interface StratumdOptions {
    * mueren con el proceso. La pasa `stratum daemon` según `daemon.persistSessions`.
    */
   sessionsDir?: string | null;
+  /**
+   * M12 — dónde guarda su memoria el agente embebido `assistant` y de dónde la
+   * migra. Ausente: `~/.stratum/assistant/` desde la de Stratum Desktop.
+   */
+  assistantData?: AssistantData;
+  /** Home del usuario, para lo que no puede ser el directorio del asistente. Por defecto `homedir()`. */
+  home?: string;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -541,6 +551,7 @@ export class Stratumd {
         approvalTimeoutMs: this.approvalTimeoutMs,
         files,
         archived,
+        ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
       });
       if (this.shuttingDown) {
@@ -627,6 +638,7 @@ export class Stratumd {
 
   private async openSession(
     params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
+    origin?: ClientKind,
   ): Promise<HostedSession> {
     if (this.shuttingDown) throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
     if (params.resume) {
@@ -636,9 +648,18 @@ export class Stratumd {
       throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
     }
     // El directorio lo valida quien va a trabajar en él, no quien lo pide.
+    // El asistente lee todo lo que hay bajo su directorio: lo elige quien lo abre
+    // (Desktop, una carpeta por conversación), y nunca vale el home (M12).
+    const assistant = params.agent === ASSISTANT_AGENT;
+    if (assistant && !params.cwd)
+      throw invalid('cwd', 'the assistant needs its own directory (cwd)');
     const requested = params.cwd ?? this.opts.defaultCwd ?? homedir();
     if (!isAbsolute(requested)) throw invalid('cwd', 'cwd must be an absolute path');
     const cwd = resolve(requested);
+    const assistantProblem = assistant
+      ? assistantCwdProblem(cwd, this.opts.home ?? homedir())
+      : null;
+    if (assistantProblem) throw invalid('cwd', assistantProblem);
     // `params.env` está reservado: ni se usa ni se registra.
 
     // Desde aquí cuenta como sesión que se está abriendo (para `maxSessions`).
@@ -684,9 +705,11 @@ export class Stratumd {
           remoteApprovals: () => this.opts.approver != null,
           approvalTimeoutMs: this.approvalTimeoutMs,
           files,
+          ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
           ...(params.agent ? { agent: params.agent } : {}),
+          ...(origin ? { origin } : {}),
         });
       } catch (err) {
         // Nada de una sesión que no llegó a abrirse queda en disco.
@@ -793,7 +816,11 @@ export class Stratumd {
         throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
       }
       const cwd = resolve(context.cwd);
-      const unusable = isAbsolute(context.cwd) ? await this.unusableCwd(cwd) : 'not absolute';
+      const unusable = isAbsolute(context.cwd)
+        ? ((context.agent === ASSISTANT_AGENT
+            ? assistantCwdProblem(cwd, this.opts.home ?? homedir())
+            : null) ?? (await this.unusableCwd(cwd)))
+        : 'not absolute';
       if (unusable) {
         throw new ProtocolError('NOT_TRANSFERABLE', 'The daemon cannot use that directory.', {
           reason: 'cwd',
@@ -826,6 +853,7 @@ export class Stratumd {
         approvalTimeoutMs: this.approvalTimeoutMs,
         context,
         snapshot,
+        ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
       });
       if (this.shuttingDown) {
         throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
@@ -923,15 +951,23 @@ export class Stratumd {
         }
         const loader = new ProfileLoader(params.cwd ? [params.cwd] : []);
         return {
-          agents: loader.list().map((p) => ({
-            name: p.name,
-            description: p.description ?? '',
-            mode: profileMode(p),
-            origin: p.source?.scope ?? 'builtin',
-            allowedTools: p.allowedTools ?? null,
-            ...(p.provider ? { provider: p.provider } : {}),
-            ...(p.model ? { model: p.model } : {}),
-          })),
+          // El asistente embebido (M12) va primero; un perfil con su nombre no
+          // se puede abrir como tal (`sessions.open` elige el asistente).
+          agents: [
+            assistantAgentInfo(),
+            ...loader
+              .list()
+              .filter((p) => p.name !== ASSISTANT_AGENT)
+              .map((p) => ({
+                name: p.name,
+                description: p.description ?? '',
+                mode: profileMode(p),
+                origin: p.source?.scope ?? 'builtin',
+                allowedTools: p.allowedTools ?? null,
+                ...(p.provider ? { provider: p.provider } : {}),
+                ...(p.model ? { model: p.model } : {}),
+              })),
+          ],
         };
       },
       'models.list': async (params) => {
@@ -1027,7 +1063,9 @@ export class Stratumd {
           memory: protocolMemory(files.memory),
         }));
       },
-      'sessions.open': async (params) => ({ session: (await this.openSession(params)).session() }),
+      'sessions.open': async (params) => ({
+        session: (await this.openSession(params, conn.client?.kind)).session(),
+      }),
       'sessions.close': async (params) => {
         if (this.dormant.has(params.sessionId) && !this.waking.has(params.sessionId)) {
           this.closeDormant(params.sessionId);

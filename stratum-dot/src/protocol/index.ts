@@ -10,6 +10,8 @@
  */
 export type {
   Capability,
+  ClassifiedEvent,
+  FollowResult,
   ProtocolAgent,
   ProtocolApproval,
   ProtocolChatMessage,
@@ -37,5 +39,6 @@ export {
   applySessionEvent,
   checkApprovalResolution,
   checkQuestionAnswers,
+  followSession,
   isStateEvent,
 } from '../../../stratum-cli/src/protocol/index';

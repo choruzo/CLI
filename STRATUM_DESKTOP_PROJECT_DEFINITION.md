@@ -1,5 +1,10 @@
 # Stratum Desktop — Project Definition
 
+> **M12 (2026-10-19).** Desktop ya no envuelve el core ni lleva sidecar: es un cliente de
+> `stratumd`, hermano de la CLI y de Stratum Dot (`docs/STRATUM_CLIENT_ARCHITECTURE.md`, que
+> prevalece sobre este documento donde discrepen; `stratum-desktop/README.md`). Lo que aquí se
+> dice de instancias aisladas, del sidecar y de su protocolo v9 describe D0–D7.
+
 > Aplicación de escritorio para Stratum CLI. Envuelve el core del agente en una
 > ventana nativa con UI web, manteniendo total compatibilidad con la instalación
 > CLI existente. Comparte configuración y memoria con la terminal — son instancias

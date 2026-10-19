@@ -1,15 +1,22 @@
 /**
- * Arnés de la suite E2E (D7): cada `launch()` arranca la app de verdad —
- * binario de Tauri + sidecar SEA— a través de tauri-driver, con un HOME
- * propio (config, sesiones, workspaces y datos del webview aislados de los del
- * usuario) y un servidor OpenAI de mentira (`mock-llm.mjs`).
+ * Arnés de la suite E2E (D7, M12): cada `launch()` arranca la app de verdad a
+ * través de tauri-driver, con un HOME propio (config, daemon, sesiones,
+ * carpetas de conversación y datos del webview aislados de los del usuario) y
+ * un servidor OpenAI de mentira (`mock-llm.mjs`).
  *
- * Requisitos: `npm run e2e:build` (app de depuración con la feature `e2e`),
- * `tauri-driver` en el PATH o en `~/.cargo/bin`, y el driver nativo:
- * `msedgedriver` de la versión de WebView2 en Windows (`STRATUM_E2E_NATIVE_DRIVER`
- * o en el PATH) y `WebKitWebDriver` en Linux.
+ * Desde M12 Desktop es un cliente de `stratumd`: el **test** arranca el daemon
+ * con la CLI compilada (`stratum daemon start`) antes de abrir la app, y la
+ * app conecta por el mecanismo oficial. No lo arranca la app: lo que lanza la
+ * app cuelga del driver nativo, y cerrar la app (matar `tauri-driver`) se lo
+ * llevaría por delante (la misma trampa que en Stratum Dot).
+ *
+ * Requisitos: `npm run build` en `stratum-cli/`, `npm run e2e:build` (app de
+ * depuración con la feature `e2e`), `tauri-driver` en el PATH o en
+ * `~/.cargo/bin`, y el driver nativo: `msedgedriver` de la versión de WebView2
+ * en Windows (`STRATUM_E2E_NATIVE_DRIVER` o en el PATH) y `WebKitWebDriver` en
+ * Linux.
  */
-import { spawn } from 'node:child_process';
+import { execFile, spawn, spawnSync } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:net';
 import { homedir, tmpdir } from 'node:os';
@@ -24,6 +31,9 @@ const WINDOWS = process.platform === 'win32';
 export const APP =
   process.env.STRATUM_E2E_APP ??
   join(ROOT, 'src-tauri', 'target', 'debug', WINDOWS ? 'stratum-desktop.exe' : 'stratum-desktop');
+
+/** La CLI compilada: la que arranca y para el daemon del test. */
+export const CLI = process.env.STRATUM_E2E_CLI ?? join(ROOT, '..', 'stratum-cli', 'dist', 'index.js');
 
 function tauriDriver() {
   const local = join(homedir(), '.cargo', 'bin', WINDOWS ? 'tauri-driver.exe' : 'tauri-driver');
@@ -52,6 +62,8 @@ export function e2eConfig(baseUrl, extra = {}) {
       },
     },
     memory: { autoExtract: false, embeddingWarmup: false },
+    // El daemon lo arranca el test; las sesiones se guardan (M11) para el reinicio.
+    daemon: { autoStart: false, persistSessions: true },
     desktop: {
       notifications: { enabled: false },
       globalHotkey: '',
@@ -81,8 +93,21 @@ export function readConfig(home) {
   return JSON.parse(readFileSync(configPath(home), 'utf8'));
 }
 
-function isolatedEnv(home, extra) {
-  const env = { ...process.env, HOME: home, USERPROFILE: home, ...extra };
+export function isolatedEnv(home, extra = {}) {
+  const env = {
+    ...process.env,
+    HOME: home,
+    USERPROFILE: home,
+    // La app no arranca daemon (lo hace el test) y, si lo necesitara, usaría esta CLI.
+    STRATUM_DESKTOP_CLI: CLI,
+    STRATUM_DESKTOP_NO_AUTOSTART: '1',
+    NO_COLOR: '1',
+    ...extra,
+  };
+  delete env.STRATUM_NO_DAEMON;
+  // `node --test` marca a sus hijos como procesos de test: la CLI y el daemon
+  // que se lanzan desde aquí no lo son (heredarlo cambia cómo escribe un hijo).
+  delete env.NODE_TEST_CONTEXT;
   if (WINDOWS) {
     env.APPDATA = join(home, 'AppData', 'Roaming');
     env.LOCALAPPDATA = join(home, 'AppData', 'Local');
@@ -96,17 +121,48 @@ function isolatedEnv(home, extra) {
   return env;
 }
 
+/** La CLI del test, con el HOME aislado. */
+export function stratum(home, args) {
+  return spawnSync(process.execPath, [CLI, ...args], { env: isolatedEnv(home), encoding: 'utf-8' });
+}
+
+export const daemonRunning = (home) => stratum(home, ['daemon', 'status']).status === 0;
+
+/** Arranca el daemon del test (si no lo está ya). */
+export function startDaemon(home) {
+  if (daemonRunning(home)) return;
+  const r = stratum(home, ['daemon', 'start']);
+  if (r.status !== 0) throw new Error(`stratum daemon start: ${r.stderr || r.stdout}`);
+}
+
+export function stopDaemon(home, { force = false } = {}) {
+  stratum(home, ['daemon', 'stop', ...(force ? ['--force'] : [])]);
+}
+
+/**
+ * `stratum ps --json`: lo que ve la CLI (otro cliente del mismo daemon).
+ * Asíncrono a propósito: el modelo falso vive en este proceso, y un
+ * `spawnSync` lo dejaría sin emitir mientras dura.
+ */
+export function cliSessions(home) {
+  return new Promise((resolvePs, reject) => {
+    execFile(process.execPath, [CLI, 'ps', '--json'], { env: isolatedEnv(home) }, (err, stdout) =>
+      err ? reject(err) : resolvePs(JSON.parse(stdout).sessions),
+    );
+  });
+}
+
 /**
  * Arranca la app. `config`: objeto a escribir (con `baseUrl` del mock ya
- * dentro), `false` para no escribir ninguno (onboarding) o una función que
- * recibe la `baseUrl`. Devuelve la sesión y cómo cerrar todo.
+ * dentro) o una función que recibe la `baseUrl`. `daemon: false` no arranca el
+ * daemon (para probar la pantalla sin Stratum). Devuelve la sesión y cómo
+ * cerrar todo.
  */
-export async function launch({ home = makeHome(), config, env = {}, mock } = {}) {
+export async function launch({ home = makeHome(), config, env = {}, mock, daemon = true } = {}) {
   const llm = mock ?? (await startMockLlm());
-  if (config !== false) {
-    const value = typeof config === 'function' ? config(llm.baseUrl) : (config ?? e2eConfig(llm.baseUrl));
-    writeConfig(home, value);
-  }
+  const value = typeof config === 'function' ? config(llm.baseUrl) : (config ?? e2eConfig(llm.baseUrl));
+  writeConfig(home, value);
+  if (daemon) startDaemon(home);
   const port = await freePort();
   const nativePort = await freePort();
   const args = ['--port', String(port), '--native-port', String(nativePort)];
@@ -124,8 +180,8 @@ export async function launch({ home = makeHome(), config, env = {}, mock } = {})
   let session;
   try {
     session = await Session.create(`http://127.0.0.1:${port}`, APP);
-    // La TitleBar se pinta en cuanto carga el webview; el input, cuando el
-    // agente conecta y la conversación está abierta.
+    // La TitleBar se pinta en cuanto carga el webview; el input, cuando
+    // Desktop conecta con el daemon.
     await session.waitForElement('.titlebar', { timeout: 30_000 });
   } catch (err) {
     driver.kill();
@@ -138,12 +194,16 @@ export async function launch({ home = makeHome(), config, env = {}, mock } = {})
     home,
     mock: llm,
     driverLog: () => driverLog,
-    /** Cierra la app (la sesión) y el driver. `keepHome` para relanzar sobre el mismo HOME. */
+    /**
+     * Cierra la app (la sesión) y el driver. `keepHome` para relanzar sobre el
+     * mismo HOME (y entonces el daemon sigue, como sigue al cerrar Desktop).
+     */
     async close({ keepHome = false, keepMock = false } = {}) {
       await saveArtifacts(session, home, driverLog);
       await session.close();
       driver.kill();
       await new Promise((r) => setTimeout(r, 800));
+      if (!keepHome) stopDaemon(home, { force: true });
       if (!keepMock && !mock) await llm.close();
       if (!keepHome) rmSync(home, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
     },
@@ -169,6 +229,7 @@ async function saveArtifacts(session, home, driverLog) {
   writeFileSync(join(dir, 'tauri-driver.log'), driverLog);
   for (const logs of [
     join(home, '.stratum', 'logs'),
+    join(home, '.stratum', 'daemon'),
     join(home, '.local', 'share', 'dev.stratum.desktop', 'logs'),
     join(home, 'AppData', 'Local', 'dev.stratum.desktop', 'logs'),
   ]) {
@@ -178,14 +239,14 @@ async function saveArtifacts(session, home, driverLog) {
   }
 }
 
-/** Espera a que el input esté habilitado: agente conectado y conversación abierta. */
+/** Espera a que el input esté habilitado: Desktop conectado con el daemon. */
 export async function waitForReady(session, timeout = 60_000) {
   return session.waitFor(
     () =>
       session.execute(
         `const t = document.querySelector('#chat-input'); return !!t && !t.disabled;`,
       ),
-    { timeout, message: 'el input habilitado (agente conectado)' },
+    { timeout, message: 'el input habilitado (conectado con stratumd)' },
   );
 }
 

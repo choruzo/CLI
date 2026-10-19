@@ -163,6 +163,7 @@ pub fn run() {
                 .unwrap_or(true);
             let config = LinkConfig {
                 endpoint_dir,
+                profile: dot_link::ClientProfile::DOT,
                 client_version: env!("CARGO_PKG_VERSION").to_string(),
                 autostart,
                 launcher: Arc::new(CliLauncher::from_env()),

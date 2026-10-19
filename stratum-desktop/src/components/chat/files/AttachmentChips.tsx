@@ -1,5 +1,5 @@
 import type { DraftAttachment } from '../../../hooks/useAttachments';
-import type { SentAttachment } from '../../../hooks/conversation-reducer';
+import type { SentAttachment } from '../../../view/model';
 import { formatBytes } from '../../../ipc/files';
 
 const STATUS_TEXT: Record<DraftAttachment['status'], string> = {

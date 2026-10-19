@@ -3,11 +3,13 @@
 //! Los diálogos de abrir/guardar los abre Rust (`tauri-plugin-dialog` desde
 //! Rust): el webview no tiene permisos del plugin, así que no puede abrir un
 //! diálogo por su cuenta ni recibir rutas del disco (15.8).
+//!
+//! M12 — cada comando recibe el `cwd` de la sesión tal como lo publica el
+//! daemon, y Rust decide si es una carpeta de conversación de Desktop
+//! (`WorkspacesInfo::folder_of`): el webview no puede nombrar otra carpeta.
 
-use crate::ipc::SidecarState;
 use crate::workspace::{self, Attached, Candidate, ListedFile, Preview, WorkspaceState};
 use serde::Serialize;
-use serde_json::json;
 use std::path::PathBuf;
 use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State, WebviewWindow, Window};
 use tauri_plugin_dialog::DialogExt;
@@ -107,38 +109,42 @@ pub async fn attachments_pick(
     Ok(app.state::<WorkspaceState>().grant(paths))
 }
 
-/// Copia al workspace las concesiones elegidas y avisa al sidecar.
+/// La carpeta de conversación de una sesión, por su `cwd`.
+fn folder(app: &AppHandle, cwd: &str) -> Result<String, String> {
+    app.state::<WorkspaceState>().info()?.folder_of(cwd)
+}
+
+/// Copia al `inputs/` de la sesión las concesiones elegidas.
 #[tauri::command]
 pub async fn attachments_add(
     app: AppHandle,
-    conversation_id: String,
+    cwd: String,
     ids: Vec<String>,
 ) -> Result<Vec<Attached>, String> {
-    let handle = app.clone();
-    let cid = conversation_id.clone();
-    let results = tauri::async_runtime::spawn_blocking(move || {
-        handle.state::<WorkspaceState>().attach(&cid, &ids)
-    })
-    .await
-    .map_err(|e| e.to_string())??;
-    if results.iter().any(|r| r.path.is_some()) {
-        // Marca de uso para el sidecar (D3 no archivará un workspace recién usado).
-        let _ = app.state::<SidecarState>().send_internal(json!({
-            "type": "workspace_touch",
-            "conversationId": conversation_id,
-        }));
-    }
-    Ok(results)
+    let id = folder(&app, &cwd)?;
+    tauri::async_runtime::spawn_blocking(move || app.state::<WorkspaceState>().attach(&id, &ids))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// El mensaje que los llevaba salió: ya son parte de la conversación.
+#[tauri::command]
+pub fn attachments_commit(app: AppHandle, cwd: String, paths: Vec<String>) -> Result<(), String> {
+    let id = folder(&app, &cwd)?;
+    app.state::<WorkspaceState>().commit(&id, &paths);
+    Ok(())
 }
 
 /// Quita un adjunto que aún no se ha enviado.
 #[tauri::command]
 pub fn attachments_discard(
+    app: AppHandle,
     state: State<'_, WorkspaceState>,
-    conversation_id: String,
+    cwd: String,
     path: String,
 ) -> Result<(), String> {
-    state.discard(&conversation_id, &path)
+    let id = folder(&app, &cwd)?;
+    state.discard(&id, &path)
 }
 
 /// «Guardar como…»: copia un fichero de `outputs/` (o de `inputs/`, desde el
@@ -148,10 +154,11 @@ pub fn attachments_discard(
 pub async fn output_save(
     app: AppHandle,
     window: WebviewWindow,
-    conversation_id: String,
+    cwd: String,
     path: String,
 ) -> Result<bool, String> {
-    let source = app.state::<WorkspaceState>().file_path(&conversation_id, &path)?;
+    let id = folder(&app, &cwd)?;
+    let source = app.state::<WorkspaceState>().file_path(&id, &path)?;
     let file_name = source
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
@@ -190,13 +197,14 @@ pub async fn output_save(
 pub async fn workspace_export(
     app: AppHandle,
     window: WebviewWindow,
-    conversation_id: String,
+    cwd: String,
 ) -> Result<bool, String> {
+    let id = folder(&app, &cwd)?;
     let dir = app
         .state::<WorkspaceState>()
         .info()?
-        .conversation_dir(&conversation_id)?;
-    let file_name = format!("stratum-ficheros-{}.zip", &conversation_id[..8]);
+        .conversation_dir(&id)?;
+    let file_name = format!("stratum-ficheros-{}.zip", &id[..8]);
     if let Some(target) = e2e_dialogs::save(&file_name) {
         return tauri::async_runtime::spawn_blocking(move || workspace::export_zip(&dir, &target))
             .await
@@ -230,27 +238,27 @@ pub async fn workspace_export(
 
 /// Ficheros de `inputs/` y `outputs/` para el panel del sidebar (D4).
 #[tauri::command]
-pub async fn workspace_files(
-    app: AppHandle,
-    conversation_id: String,
-) -> Result<Vec<ListedFile>, String> {
-    tauri::async_runtime::spawn_blocking(move || {
-        app.state::<WorkspaceState>().list_files(&conversation_id)
-    })
-    .await
-    .map_err(|e| e.to_string())?
+pub async fn workspace_files(app: AppHandle, cwd: String) -> Result<Vec<ListedFile>, String> {
+    let id = folder(&app, &cwd)?;
+    tauri::async_runtime::spawn_blocking(move || app.state::<WorkspaceState>().list_files(&id))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// «Abrir» con la app por defecto del SO, solo para tipos inertes.
 #[tauri::command]
-pub fn output_open(app: AppHandle, conversation_id: String, path: String) -> Result<(), String> {
-    let real = app.state::<WorkspaceState>().file_path(&conversation_id, &path)?;
+pub fn output_open(app: AppHandle, cwd: String, path: String) -> Result<(), String> {
+    let id = folder(&app, &cwd)?;
+    let real = app.state::<WorkspaceState>().file_path(&id, &path)?;
     let name = real
         .file_name()
         .map(|n| n.to_string_lossy().into_owned())
         .unwrap_or_default();
     if !workspace::can_open(&name) {
-        return Err("por seguridad, este tipo de fichero no se abre desde la app: guárdalo y ábrelo tú".into());
+        return Err(
+            "por seguridad, este tipo de fichero no se abre desde la app: guárdalo y ábrelo tú"
+                .into(),
+        );
     }
     app.opener()
         .open_path(strip_verbatim(&real), None::<&str>)
@@ -258,12 +266,9 @@ pub fn output_open(app: AppHandle, conversation_id: String, path: String) -> Res
 }
 
 #[tauri::command]
-pub async fn output_preview(
-    app: AppHandle,
-    conversation_id: String,
-    path: String,
-) -> Result<Preview, String> {
-    let real = app.state::<WorkspaceState>().file_path(&conversation_id, &path)?;
+pub async fn output_preview(app: AppHandle, cwd: String, path: String) -> Result<Preview, String> {
+    let id = folder(&app, &cwd)?;
+    let real = app.state::<WorkspaceState>().file_path(&id, &path)?;
     tauri::async_runtime::spawn_blocking(move || workspace::preview(&real))
         .await
         .map_err(|e| e.to_string())?

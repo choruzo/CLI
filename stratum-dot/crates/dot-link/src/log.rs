@@ -31,7 +31,12 @@ impl Logger {
     /// Abre `dir/dot.log` en modo append, rotándolo antes si es grande. Si no
     /// se puede, Dot sigue sin log: quedarse sin log no puede dejarla sin conexión.
     pub fn to_dir(dir: &Path) -> Self {
-        let path = dir.join(LOG_FILE);
+        Self::to_file(dir, LOG_FILE)
+    }
+
+    /// Como [`Logger::to_dir`], con otro nombre de fichero (M12: `desktop.log`).
+    pub fn to_file(dir: &Path, name: &str) -> Self {
+        let path = dir.join(name);
         let open = || -> std::io::Result<File> {
             fs::create_dir_all(dir)?;
             if fs::metadata(&path)

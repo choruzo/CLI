@@ -56,7 +56,12 @@ export function candidatesToDrafts(candidates: Candidate[]): DraftAttachment[] {
   }));
 }
 
-export function useAttachments(conversationId: string, enabled: boolean): Attachments {
+/**
+ * `cwd`: el directorio de la sesión. Rust solo copia si es una carpeta de
+ * conversación de Desktop; con `null` (otra clase de sesión) no hay adjuntos.
+ */
+export function useAttachments(cwd: string | null, enabled: boolean): Attachments {
+  const conversationId = cwd ?? '';
   const [items, setItems] = useState<DraftAttachment[]>([]);
   const [dragging, setDragging] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -75,7 +80,7 @@ export function useAttachments(conversationId: string, enabled: boolean): Attach
       const drafts = candidatesToDrafts(candidates);
       setItems((prev) => [...prev, ...drafts]);
       const ids = drafts.filter((d) => d.status === 'copying').map((d) => d.id);
-      if (ids.length === 0) return;
+      if (ids.length === 0 || !conversationId) return;
       addAttachments(conversationId, ids)
         .then((results) => {
           for (const r of results) {

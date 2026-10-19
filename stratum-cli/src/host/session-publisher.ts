@@ -4,14 +4,17 @@ import type { AgentObservation, AgentTurnKind, StratumAgent } from '../agent/cor
 import type { StratumConfig } from '../config/schema.js';
 import type { BackgroundJob } from '../jobs/types.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { ASSISTANT_AGENT } from '../agent/presets.js';
 import {
   LIMITS,
   EMPTY_TRANSCRIPT,
   SNAPSHOT_LIMITS,
   applyTranscriptEvent,
+  boundedTranscript,
   clipText,
   snapshotSubagent,
   snapshotToolCall,
+  type ClientKind,
   type ProtocolApproval,
   type ProtocolChatMessage,
   type ProtocolEvent,
@@ -95,6 +98,20 @@ export interface SessionPublisherOptions {
    * y lo que lance se registra y se descarta.
    */
   onTranscript?: (messages: ProtocolChatMessage[]) => void;
+  /**
+   * M12 — desde qué cliente se inició la sesión (`ProtocolSession.origin`).
+   * Solo procedencia. Con `continueFrom`, si falta, se conserva el de la foto.
+   */
+  origin?: ClientKind;
+  /**
+   * M12 — conversación que la sesión ya tenía y que no sale de eventos (la de
+   * una conversación de Stratum Desktop D1–D7 que se importa). Sus ids son
+   * `m<n>`; la numeración empieza después del mayor, así ningún mensaje nuevo
+   * repite id. Sin efecto con `continueFrom`.
+   */
+  seedTranscript?: ProtocolChatMessage[];
+  /** M12 — título que ya tenía (con `seedTranscript`). */
+  seedTitle?: string;
 }
 
 const DEFAULT_MAX_QUEUE = 4096;
@@ -424,11 +441,13 @@ export class SessionPublisher {
   private released = false;
 
   private readonly onTranscript: ((messages: ProtocolChatMessage[]) => void) | undefined;
+  private readonly origin: ClientKind | undefined;
 
   constructor(opts: SessionPublisherOptions) {
     this.host = opts.host;
     this.onTranscript = opts.onTranscript;
     this.hostInfo = opts.hostInfo;
+    this.origin = opts.origin ?? opts.continueFrom?.session.origin;
     this.sink = opts.sink;
     this.maxQueue = Math.max(8, opts.maxQueue ?? DEFAULT_MAX_QUEUE);
     this.now = opts.now ?? Date.now;
@@ -456,6 +475,22 @@ export class SessionPublisher {
         messages: from.messages.map((m) => ({ ...m })),
         messagesTruncated: from.messagesTruncated,
       };
+    } else if (opts.seedTranscript && opts.seedTranscript.length > 0) {
+      // Lo sembrado no salió de eventos: se redacta aquí, como todo lo que publica.
+      const redact = (text: string): string => redactText(text, this.host.config);
+      this.transcript = boundedTranscript(
+        opts.seedTranscript.map((m) =>
+          m.kind === 'tool'
+            ? { ...m, description: redact(m.description) }
+            : { ...m, text: redact(m.text) },
+        ),
+      );
+      if (opts.seedTitle?.trim())
+        this.title = clipText(redactText(opts.seedTitle.trim(), this.host.config), TITLE_CHARS);
+      for (const m of opts.seedTranscript) {
+        const n = Number.parseInt(m.id.slice(1), 10);
+        if (Number.isFinite(n) && n > this.seqValue) this.seqValue = n;
+      }
     }
   }
 
@@ -639,6 +674,7 @@ export class SessionPublisher {
       title: this.title,
       cwd: this.host.env.cwd,
       host: this.hostInfo,
+      ...(this.origin ? { origin: this.origin } : {}),
       state: this.closed
         ? 'closed'
         : !this.runActive
@@ -648,7 +684,9 @@ export class SessionPublisher {
             : this.pendingCount() > 0
               ? 'waiting'
               : 'running',
-      agent: agent.getActiveProfile()?.name ?? 'general',
+      agent:
+        agent.getActiveProfile()?.name ??
+        (agent.promptPreset === 'assistant' ? ASSISTANT_AGENT : 'general'),
       provider: agent.providerName,
       model: agent.model,
       sessionProfile: agent.getSessionProfile()?.name ?? agent.getSessionProfileRequest(),

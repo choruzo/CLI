@@ -1,4 +1,5 @@
 import type { ToolsetFilter } from '../tools/registry.js';
+import type { ProtocolAgent } from '../protocol/index.js';
 
 /**
  * Presets de prompt (Stratum Desktop D1, punto ciego 16.6).
@@ -13,6 +14,14 @@ import type { ToolsetFilter } from '../tools/registry.js';
  * acabaría filtrando el prompt de un modo al otro.
  */
 export type PromptPreset = 'coding' | 'assistant';
+
+/**
+ * M12 — nombre con el que una sesión pide el preset `assistant` al abrirse
+ * (`sessions.open { agent: 'assistant' }`) y con el que se publica
+ * (`ProtocolSession.agent`). No es un perfil de `ProfileLoader`: el preset se
+ * fija al montar la sesión (`SessionHost`, `presetOf`) y no se cambia después.
+ */
+export const ASSISTANT_AGENT = 'assistant';
 
 /**
  * Toolset del modo Chat. Se lista entero y sin `controlTools: 'keep'`: ese modo
@@ -46,5 +55,17 @@ export const ASSISTANT_FILE_TOOLS: readonly string[] = [
 export function assistantToolsetFilter(opts: { workspace?: boolean } = {}): ToolsetFilter {
   return {
     allowedTools: opts.workspace ? [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS] : ASSISTANT_TOOLS,
+  };
+}
+
+/** M12 — cómo aparece el asistente en `agents.list`. */
+export function assistantAgentInfo(): ProtocolAgent {
+  return {
+    name: ASSISTANT_AGENT,
+    description:
+      'Conversational assistant: web, its own decisions memory and files confined to the session directory. No shell.',
+    mode: 'primary',
+    origin: 'builtin',
+    allowedTools: [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS],
   };
 }

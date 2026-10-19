@@ -2997,3 +2997,16 @@ peer-hosted (época N) ── /detach · stratum detach · sessions.detach ─�
 - **Entorno**: la sesión traspasada usa el del daemon (como `sessions.open`); si no puede montarse con él, el traspaso se rechaza (`startup`). No se copia ninguna variable de la terminal.
 - **Resultado desconocido**: no se reintenta un commit; el par pregunta volviendo a registrarse (vallada → del daemon; registrada → sigue siendo suya). Un daemon que ya no existe no puede alojarla.
 - **Adjuntarse no es un método.** `stratum attach` es un cliente: sigue la sesión (`events.subscribe`) y la conduce con `runs.*`; no aloja nada y salir no la cambia.
+
+### 12.26 — Clientes hermanos y el agente embebido `assistant` (M12)
+
+Stratum Desktop deja de ser un runtime aislado y pasa a ser un **cliente** de `stratumd`, como la CLI y Stratum Dot (decisión normativa en `docs/STRATUM_CLIENT_ARCHITECTURE.md`; protocolo en `docs/protocol.md` §20). Regla: `interfaz ≠ runtime ≠ autoridad` y `cliente pide → stratumd arbitra → SessionHost ejecuta`.
+
+#### Invariantes
+
+- **Un runtime.** Solo `SessionHost` monta agentes. El modo Chat de Desktop es el agente embebido `assistant`: `SessionHostOptions.preset = 'assistant'` fija, al montar, el prompt, un registry solo con sus tools (nunca `exec`, sin MCP, skills ni perfiles), los ficheros confinados al `cwd` (`inputs/` de solo lectura; escritura en `outputs/` y `scratch/`) y una memoria de decisiones propia (`~/.stratum/assistant/memory/`, copiada una vez de la de Desktop). Lo pide un cliente con `sessions.open { agent: 'assistant', cwd }`; no se cambia después (`setAgent` → `INVALID_PARAMS`), y se conserva al traspasar y al recuperar.
+- **El asistente necesita su propio directorio.** Lee todo lo que hay bajo su `cwd`: es obligatorio y no puede ser el home, un ancestro suyo ni la raíz de una unidad (falla cerrado).
+- **Origen no es autoridad.** `ProtocolSession.origin` dice desde qué cliente se inició una sesión; nada que decida permisos, aprobaciones o guardas lo lee.
+- **Un estado autoritativo.** Desktop no guarda sesiones, runs, conversación, aprobaciones ni memoria: los pinta desde la foto de conjunto, la foto de la sesión que mira y `sessions.history`, reducidos con las funciones del contrato (`applyOverviewEvent`, `followSession`). Una petición se ve **cuando el daemon la publica**; una mutación sin respuesta no se repite.
+- **Cerrar un cliente no cierra nada.** Ni el daemon, ni sesiones, ni runs.
+- **Lo antiguo, una vez.** `stratum desktop import` traspasa las conversaciones de Desktop D1–D7 por el camino de §12.25; lo importado se redacta antes de publicarse.

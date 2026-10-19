@@ -1,5 +1,10 @@
 # Stratum Desktop — Plan de hitos de implementación
 
+> **M12 (2026-10-19).** Desktop ya no envuelve el core ni lleva sidecar: es un cliente de
+> `stratumd`, hermano de la CLI y de Stratum Dot (`docs/STRATUM_CLIENT_ARCHITECTURE.md`, que
+> prevalece sobre este documento donde discrepen; `stratum-desktop/README.md`). Lo que aquí se
+> dice de instancias aisladas, del sidecar y de su protocolo v9 describe D0–D7.
+
 > Desglose ejecutable de Stratum Desktop a partir de
 > `STRATUM_DESKTOP_PROJECT_DEFINITION.md`, con las resoluciones de sus puntos
 > ciegos (sección 15) y los nuevos de este plan (sección *Puntos ciegos del modo

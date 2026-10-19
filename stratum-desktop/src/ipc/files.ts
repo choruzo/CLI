@@ -1,11 +1,13 @@
 import { invoke } from '@tauri-apps/api/core';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
-import type { WorkspaceFileInfo } from '../../../stratum-cli/src/desktop/protocol';
+import type { WorkspaceFileInfo } from '../view/model';
 
 export type { WorkspaceFileInfo };
 
 /**
  * Ficheros de la conversación (D2), vía los comandos de `src-tauri/src/files.rs`.
+ * Desde M12 cada comando lleva el `cwd` que publica la sesión: Rust decide si
+ * es una carpeta de conversación de Desktop y, si no, no toca nada.
  *
  * El webview nunca maneja rutas del disco del usuario: el diálogo y el drag &
  * drop los recibe Rust, que devuelve *candidatos* con un id opaco; para
@@ -44,25 +46,30 @@ export function pickAttachments(): Promise<Candidate[]> {
   return invoke<Candidate[]>('attachments_pick');
 }
 
-export function addAttachments(conversationId: string, ids: string[]): Promise<Attached[]> {
-  return invoke<Attached[]>('attachments_add', { conversationId, ids });
+export function addAttachments(cwd: string, ids: string[]): Promise<Attached[]> {
+  return invoke<Attached[]>('attachments_add', { cwd, ids });
 }
 
-export function discardAttachment(conversationId: string, path: string): Promise<void> {
-  return invoke('attachments_discard', { conversationId, path });
+/** El mensaje que los llevaba salió: ya no se pueden quitar. */
+export function attachmentsCommit(cwd: string, paths: string[]): Promise<void> {
+  return invoke('attachments_commit', { cwd, paths });
+}
+
+export function discardAttachment(cwd: string, path: string): Promise<void> {
+  return invoke('attachments_discard', { cwd, path });
 }
 
 /** «Guardar como…» de `outputs/` o `inputs/`. `false` si el usuario canceló el diálogo. */
-export function saveOutput(conversationId: string, path: string): Promise<boolean> {
-  return invoke<boolean>('output_save', { conversationId, path });
+export function saveOutput(cwd: string, path: string): Promise<boolean> {
+  return invoke<boolean>('output_save', { cwd, path });
 }
 
-export function openOutput(conversationId: string, path: string): Promise<void> {
-  return invoke('output_open', { conversationId, path });
+export function openOutput(cwd: string, path: string): Promise<void> {
+  return invoke('output_open', { cwd, path });
 }
 
-export function previewOutput(conversationId: string, path: string): Promise<Preview> {
-  return invoke<Preview>('output_preview', { conversationId, path });
+export function previewOutput(cwd: string, path: string): Promise<Preview> {
+  return invoke<Preview>('output_preview', { cwd, path });
 }
 
 /** Un fichero de `inputs/` u `outputs/` (espejo de `ListedFile` en `workspace.rs`). */
@@ -74,13 +81,13 @@ export interface ListedFile {
   modifiedMs: number;
 }
 
-export function listWorkspaceFiles(conversationId: string): Promise<ListedFile[]> {
-  return invoke<ListedFile[]>('workspace_files', { conversationId });
+export function listWorkspaceFiles(cwd: string): Promise<ListedFile[]> {
+  return invoke<ListedFile[]>('workspace_files', { cwd });
 }
 
 /** «Descargar todo (.zip)»: `inputs/` y `outputs/`. `false` si el usuario canceló. */
-export function exportWorkspace(conversationId: string): Promise<boolean> {
-  return invoke<boolean>('workspace_export', { conversationId });
+export function exportWorkspace(cwd: string): Promise<boolean> {
+  return invoke<boolean>('workspace_export', { cwd });
 }
 
 export function onDragState(cb: (active: boolean) => void): Promise<UnlistenFn> {

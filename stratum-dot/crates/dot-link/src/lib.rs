@@ -1,4 +1,7 @@
-//! Cliente nativo del Stratum Protocol v1 para Stratum Dot.
+//! Cliente nativo del Stratum Protocol v1 de Stratum Dot y, desde M12, de
+//! Stratum Desktop: los dos son clientes hermanos de `stratumd` y comparten
+//! este enlace, cada uno con su [`ClientProfile`] (qué es, qué sigue y qué
+//! puede pedir). El nombre del crate es de cuando solo lo usaba Dot.
 //!
 //! Qué hace: descubrir el daemon, conectar, hacer el handshake, mantener las
 //! suscripciones (una de conjunto y una por sesión viva), reconectar y relevar
@@ -45,7 +48,7 @@ pub use confirm::{
     CancelReason, ConfirmFailure, ConfirmGate, ConfirmTimings, ConfirmationView, Presenter,
 };
 pub use launcher::{CliLauncher, DaemonLauncher, NoLauncher};
-pub use link::{spawn, LinkConfig, LinkHandle};
+pub use link::{spawn, ClientProfile, FollowPolicy, LinkConfig, LinkHandle};
 pub use log::Logger;
 pub use secret::ApproverSecret;
 pub use state::{

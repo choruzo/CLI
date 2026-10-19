@@ -16,8 +16,13 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 - Stratum Protocol: `sessions.history` (lo anterior a la foto, paginado), `sessions.context` (desglose del contexto, conversación guardada, compactaciones) y `sessions.memory` (la memoria de sesión con su procedencia).
 - `stratum attach`: `/history [n]` para ver los mensajes anteriores de una sesión del daemon.
 - `stratum chat --resume <id> --fork`: continuar una copia de una sesión con otro id.
+- **Agente embebido `assistant`** (M12): el modo Chat de Stratum Desktop es ahora una sesión normal de `stratumd` que cualquier cliente abre con `sessions.open { agent: 'assistant', cwd }`: web, preguntas, tareas, memoria de decisiones propia (`~/.stratum/assistant/`) y ficheros confinados a su carpeta; nunca `exec`. Necesita su propio directorio (no el home).
+- Stratum Protocol: `ProtocolSession.origin` dice desde qué cliente se inició una sesión (solo procedencia, no da permisos). Funciones de cliente puras para seguir una sesión y la foto de conjunto (`followSession`, `applyOverviewEvent`, `classifyEvent`), compartidas por Stratum Dot y Stratum Desktop.
+- `stratum desktop import [--dry-run]`: pasa una vez las conversaciones de Stratum Desktop anteriores a M12 a sesiones de `stratumd` (por el traspaso de M10), sin borrar nada.
 
 ### Cambios a tener en cuenta
+- Stratum Desktop ya no se construye desde aquí: se retiran `src/desktop/`, `src/desktop-server.ts` y `npm run build:desktop` (el sidecar SEA). Desktop es un cliente de `stratumd` y usa la CLI instalada.
+- `stratum desktop` se añade a los subcomandos que el agente no puede invocar (como `daemon`, `approvals`, `attach` y `detach`).
 - **`chat --resume` de una sesión que aloja (o tiene guardada) `stratumd` se niega** y remite a `stratum attach <id>`; antes abría en silencio un segundo runtime con ese id. Lo mismo si la sesión está abierta ahora en otra terminal. Para una copia independiente, `--fork`.
 - En una sesión del daemon, si la memoria de sesión no se puede actualizar (modelo de memoria caído), no se trunca nada: se avisa (`session_memory_deferred`) y, si la conversación ya no cabe, el turno termina con `context_full` en vez de borrar mensajes.
 

@@ -6,16 +6,7 @@ import { DraftChips } from './AttachmentChips';
 import { parseDelimited } from './csv';
 import { InputArea } from '../InputArea';
 import { canOpen } from '../../../ipc/files';
-import { workspaceFiles } from '../../../ipc/validate';
-import { frameToAction } from '../../../hooks/useAgentStream';
 import { candidatesToDrafts, type Attachments } from '../../../hooks/useAttachments';
-import {
-  conversationReducer as reduce,
-  initialConversationState,
-  type AgentTurn,
-  type ConversationAction,
-} from '../../../hooks/conversation-reducer';
-import type { SidecarFrame } from '../../../ipc/types';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -26,7 +17,8 @@ afterEach(() => {
   vi.mocked(invoke).mockReset();
 });
 
-const CID = '6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e';
+/** El `cwd` de una sesión del asistente: una carpeta de conversación de Desktop. */
+const CWD = '/home/ana/.stratum/desktop/workspaces/6f1c1c0e-3d2a-4b8e-9c1d-2f3a4b5c6d7e';
 const CSV = {
   path: 'outputs/resumen.csv',
   name: 'resumen.csv',
@@ -49,58 +41,16 @@ describe('parseDelimited', () => {
   });
 });
 
-describe('workspace_files en el webview', () => {
-  it('solo acepta rutas de outputs/ sin ..', () => {
-    const files = workspaceFiles([
-      CSV,
-      { ...CSV, path: 'inputs/orig.csv' },
-      { ...CSV, path: 'outputs/../inputs/x' },
-      { ...CSV, path: '/etc/passwd' },
-      { nada: 1 },
-    ]);
-    expect(files?.map((f) => f.path)).toEqual(['outputs/resumen.csv']);
-  });
-
-  it('frameToAction y el reducer adjuntan los ficheros al turno', () => {
-    const action = frameToAction(
-      {
-        type: 'workspace_files',
-        conversationId: CID,
-        turnId: 't1',
-        files: [CSV],
-      } as unknown as SidecarFrame,
-      CID,
-    );
-    expect(action).toEqual({ type: 'workspace_files', turnId: 't1', files: [CSV] });
-    const actions: ConversationAction[] = [
-      {
-        type: 'user_sent',
-        turnId: 't1',
-        text: '',
-        attachments: [{ path: 'inputs/a.csv', name: 'a.csv', size: 3 }],
-      },
-      action!,
-      // Reescrito en el mismo turno: sustituye a la tarjeta anterior.
-      { type: 'workspace_files', turnId: 't1', files: [{ ...CSV, size: 10 }] },
-    ];
-    const state = actions.reduce(reduce, initialConversationState);
-    const user = state.messages[0];
-    expect(user?.role === 'user' && user.attachments?.[0]?.path).toBe('inputs/a.csv');
-    const turn = state.messages[1] as AgentTurn;
-    expect(turn.files).toEqual([{ ...CSV, size: 10 }]);
-  });
-});
-
 describe('FileCard', () => {
   it('muestra nombre, tipo y tamaño, y guarda con el diálogo de Rust', async () => {
     vi.mocked(invoke).mockResolvedValue(true);
-    render(<FileCard conversationId={CID} file={CSV} />);
+    render(<FileCard cwd={CWD} file={CSV} />);
     expect(screen.getByText('resumen.csv')).toBeTruthy();
     expect(screen.getByText('CSV · 2.0 KB')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Guardar como…' }));
     await waitFor(() => expect(screen.getByText('Guardado.')).toBeTruthy());
     expect(invoke).toHaveBeenCalledWith('output_save', {
-      conversationId: CID,
+      cwd: CWD,
       path: 'outputs/resumen.csv',
     });
   });
@@ -111,7 +61,7 @@ describe('FileCard', () => {
       text: 'mes,total\nenero,10\n',
       truncated: false,
     });
-    render(<FileCard conversationId={CID} file={CSV} />);
+    render(<FileCard cwd={CWD} file={CSV} />);
     fireEvent.click(screen.getByRole('button', { name: 'Vista previa' }));
     await waitFor(() => expect(screen.getByRole('table')).toBeTruthy());
     expect(screen.getByRole('columnheader', { name: 'total' })).toBeTruthy();
@@ -124,7 +74,7 @@ describe('FileCard', () => {
       cleanup();
       render(
         <FileCard
-          conversationId={CID}
+          cwd={CWD}
           file={{ ...CSV, name, path: `outputs/${name}`, mime: 'text/html' }}
         />,
       );
@@ -135,7 +85,7 @@ describe('FileCard', () => {
 
   it('cancelar el diálogo de guardar no dice «Guardado»', async () => {
     vi.mocked(invoke).mockResolvedValue(false);
-    render(<FileCard conversationId={CID} file={CSV} />);
+    render(<FileCard cwd={CWD} file={CSV} />);
     fireEvent.click(screen.getByRole('button', { name: 'Guardar como…' }));
     await new Promise((r) => setTimeout(r, 10));
     expect(screen.queryByText('Guardado.')).toBeNull();

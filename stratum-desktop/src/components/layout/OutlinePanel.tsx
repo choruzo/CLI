@@ -1,4 +1,4 @@
-import type { ChatMessage } from '../../hooks/conversation-reducer';
+import type { ChatMessage } from '../../view/model';
 
 /** Id del elemento de un mensaje de usuario, ancla del índice (§7.2). */
 export const userMessageAnchor = (turnId: string): string => `msg-${turnId}`;

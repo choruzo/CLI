@@ -93,6 +93,13 @@ export interface ProtocolSession {
   title: string;
   cwd: string;
   host: ProtocolSessionHostInfo;
+  /**
+   * Desde qué cliente se inició la sesión (`core.hello` de quien la abrió o la
+   * aloja como par). **Solo procedencia**: no decide quién la ve, la conduce ni
+   * aprueba nada, y no cambia al traspasarla (M12). Ausente en sesiones de un
+   * anfitrión anterior a M12.
+   */
+  origin?: ClientKind;
   state: ProtocolSessionState;
   /** Perfil principal activo, o `general`. */
   agent: string;

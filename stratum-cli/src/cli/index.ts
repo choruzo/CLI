@@ -18,6 +18,7 @@ import { daemonCommand } from './commands/daemon.js';
 import { psCommand } from './commands/ps.js';
 import { attachCommand } from './commands/attach.js';
 import { detachCommand } from './commands/detach.js';
+import { desktopCommand } from './commands/desktop.js';
 import { approvalsCommand } from './commands/approvals.js';
 import { cliVersion } from './version.js';
 import { ConfigError } from '../config/loader.js';
@@ -48,6 +49,7 @@ program.addCommand(daemonCommand);
 program.addCommand(psCommand);
 program.addCommand(attachCommand);
 program.addCommand(detachCommand);
+program.addCommand(desktopCommand);
 program.addCommand(approvalsCommand);
 
 // Una config rota se explica con su mensaje (fichero, línea o clave), no con

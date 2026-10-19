@@ -1,4 +1,4 @@
-import type { TodoItem } from '../../../../stratum-cli/src/agent/events';
+import type { ProtocolTodo as TodoItem } from '../../protocol';
 
 const ICON: Record<TodoItem['status'], string> = {
   pending: '○',

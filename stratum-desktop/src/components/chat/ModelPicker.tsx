@@ -1,10 +1,16 @@
 import { useState } from 'react';
-import type { ModelsOffer } from '../../hooks/useConversations';
+/** Lo que se ofrece al elegir modelo: los que lista `models.list` y el actual. */
+export interface ModelsOffer {
+  models: string[];
+  current: string;
+  /** El daemon no pudo listarlos (o la lista está incompleta). */
+  error?: string;
+}
 
 /**
- * `/model` sin argumento (D4): los modelos que lista el provider, o entrada
- * manual si no los lista (llama.cpp sin `/models`). Solo cambia el modelo de
- * esta conversación.
+ * `/model` sin argumento (D4): los modelos que lista el daemon (`models.list`),
+ * o entrada manual si no los lista (llama.cpp sin `/models`). Solo cambia el
+ * modelo de esta sesión (`sessions.setModel`).
  */
 export function ModelPicker({
   offer,

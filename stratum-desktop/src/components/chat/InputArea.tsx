@@ -8,7 +8,7 @@ import {
   type KeyboardEvent,
 } from 'react';
 import type { Attachments } from '../../hooks/useAttachments';
-import type { SentAttachment } from '../../hooks/conversation-reducer';
+import type { SentAttachment } from '../../view/model';
 import { DraftChips } from './files/AttachmentChips';
 import { matchCommands, parseCommand, type CommandName, type SlashCommand } from './commands';
 
@@ -27,14 +27,18 @@ const MAX_HEIGHT = 240;
 
 export interface InputAreaHandle {
   focus: () => void;
+  /** Devuelve un texto al campo (un envío que seguro no salió), si está vacío. */
+  restore: (text: string) => void;
 }
 
 /**
  * Entrada del chat (D1 + adjuntos de D2 + D4): Enter envía, Shift+Enter salta
  * de línea y el textarea crece con el texto. Escribir `/` abre el menú de
  * comandos (↑↓ para elegir, Enter o Tab para completar, Escape para cerrar).
- * Mientras el asistente responde, el botón pasa a Detener (`cancel`). Los
- * botones son iconos (`+` adjuntar, `>` enviar, ■ detener) con `aria-label`.
+ * Mientras el asistente responde, el botón pasa a Detener (`cancel`) y, con
+ * `steer`, lo que se escribe **redirige** el run en marcha (M12: `runs.steer`)
+ * en vez de esperar. Los botones son iconos (`+` adjuntar, `>` enviar,
+ * ■ detener) con `aria-label`.
  */
 export const InputArea = forwardRef<
   InputAreaHandle,
@@ -42,6 +46,8 @@ export const InputArea = forwardRef<
     /** Sin conexión o conversación sin abrir: no se puede enviar. */
     disabled: boolean;
     generating: boolean;
+    /** Con un run en marcha, escribir lo redirige (sin adjuntos). */
+    steer?: boolean;
     onSend: (text: string, attachments: SentAttachment[]) => void;
     onCancel: () => void;
     /** Un slash-command válido; sin él, no hay menú de comandos. */
@@ -51,7 +57,7 @@ export const InputArea = forwardRef<
     placeholder?: string;
   }
 >(function InputArea(
-  { disabled, generating, onSend, onCancel, onCommand, attachments, placeholder = 'Escribe un mensaje…' },
+  { disabled, generating, steer = false, onSend, onCancel, onCommand, attachments, placeholder = 'Escribe un mensaje…' },
   ref,
 ) {
   const [text, setText] = useState('');
@@ -60,7 +66,14 @@ export const InputArea = forwardRef<
   const [commandError, setCommandError] = useState<string | null>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  useImperativeHandle(ref, () => ({ focus: () => textareaRef.current?.focus() }), []);
+  useImperativeHandle(
+    ref,
+    () => ({
+      focus: () => textareaRef.current?.focus(),
+      restore: (previous) => setText((current) => (current.trim() ? current : previous)),
+    }),
+    [],
+  );
 
   // Autoexpansión: el alto sigue al contenido hasta MAX_HEIGHT.
   useLayoutEffect(() => {
@@ -76,11 +89,14 @@ export const InputArea = forwardRef<
   const menu = matches && matches.length > 0 ? matches : null;
   useEffect(() => setSelected(0), [menu?.length]);
 
-  const ready = attachments?.items.filter((a) => a.status === 'ready' && a.path) ?? [];
+  const steering = generating && steer;
+  // Redirigir lleva solo texto: los adjuntos esperan al siguiente mensaje.
+  const ready = steering ? [] : (attachments?.items.filter((a) => a.status === 'ready' && a.path) ?? []);
   const hasContent = text.trim().length > 0 || ready.length > 0;
   const isCommand = onCommand !== undefined && parseCommand(text) !== null;
   const canSend =
-    !disabled && (isCommand || (!generating && !attachments?.busy && hasContent));
+    !disabled &&
+    (isCommand || ((!generating || steering) && !attachments?.busy && hasContent));
 
   const runCommand = (name: CommandName, arg: string) => {
     setText('');
@@ -104,7 +120,7 @@ export const InputArea = forwardRef<
       ready.map((a) => ({ path: a.path!, name: a.name, size: a.size })),
     );
     setText('');
-    attachments?.clear();
+    if (!steering) attachments?.clear();
   };
 
   const choose = (cmd: SlashCommand) => {
@@ -230,7 +246,7 @@ export const InputArea = forwardRef<
             }}
             onKeyDown={onKeyDown}
           />
-          {generating && !isCommand ? (
+          {generating && !isCommand && !(steering && hasContent) ? (
             <button
               type="button"
               className="composer-button composer-button--stop"
@@ -247,8 +263,8 @@ export const InputArea = forwardRef<
               type="submit"
               className="composer-button composer-button--send"
               disabled={!canSend}
-              aria-label="Enviar"
-              title="Enviar (Enter)"
+              aria-label={steering ? 'Redirigir' : 'Enviar'}
+              title={steering ? 'Redirigir el trabajo en marcha (Enter)' : 'Enviar (Enter)'}
             >
               <ComposerIcon d={SEND} />
             </button>
