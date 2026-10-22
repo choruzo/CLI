@@ -29,6 +29,8 @@ export interface InputAreaHandle {
   focus: () => void;
   /** Devuelve un texto al campo (un envío que seguro no salió), si está vacío. */
   restore: (text: string) => void;
+  /** Sustituye el texto del campo (una sugerencia del estado vacío). */
+  fill: (text: string) => void;
 }
 
 /**
@@ -71,6 +73,7 @@ export const InputArea = forwardRef<
     () => ({
       focus: () => textareaRef.current?.focus(),
       restore: (previous) => setText((current) => (current.trim() ? current : previous)),
+      fill: setText,
     }),
     [],
   );

@@ -23,7 +23,7 @@ mod updates;
 mod window_state;
 mod workspace;
 
-use dot_link::discovery::default_endpoint_dir;
+use dot_link::discovery::{default_endpoint_dir, home_dir};
 use dot_link::link::Timings;
 use dot_link::{CliLauncher, ClientProfile, DotEvent, LinkConfig, LinkHandle, Logger};
 use os::OsState;
@@ -120,10 +120,9 @@ pub fn run() {
                 "desktop startup (version {})",
                 env!("CARGO_PKG_VERSION")
             ));
-            let home = handle
-                .path()
-                .home_dir()
-                .map_err(|_| "cannot resolve the home directory")?;
+            // El mismo home que el enlace (y que Node): `USERPROFILE`/`HOME`, no la
+            // carpeta de perfil del SO, que ignora un HOME aislado (las E2E).
+            let home = home_dir().ok_or("cannot resolve the home directory")?;
             let prefs = prefs::load(&home);
             for warning in &prefs.warnings {
                 logger.warn(warning);

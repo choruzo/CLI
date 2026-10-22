@@ -49,6 +49,22 @@ Revisión del frontend (`src/styles.css`, `src/components/**`) con una restricci
 
 Tests en `chat/visual-polish.test.tsx` (9).
 
+### 4. Retoque de 2026-10: ámbar solo para lo principal (sección «Retoque visual» al final de `styles.css`)
+
+Tras una ronda de capturas de todas las pantallas, el naranja estaba en todos los botones y ya no distinguía nada. Criterio: **el ámbar marca solo la acción principal y lo activo**; el resto, neutros.
+
+- **Botones**: `.button` pasa a neutro (borde `borderMedium`, texto `textResponse`); `.button--primary` (relleno ámbar) queda para la acción principal de cada sitio («Nueva», «Abrir la configuración», instalar actualización…). Nuevo `.button--small`.
+- **Raíl**: el panel activo se marca una vez (fondo tintado + icono ámbar), sin la barra lateral además de la caja. Conversaciones e índice, igual: fondo, sin barra.
+- **Paneles**: cabecera de alto fijo en los cuatro (el índice ya no queda desalineado); «Recargar» es un icono (`ICON.refresh`, `aria-label` «Recargar»).
+- **Ficheros**: icono, nombre y tamaño en una fila; «Guardar» y «Abrir» son iconos (`download`, `external`) que aparecen con `:hover`/`:focus-within`, con sus `aria-label` de siempre.
+- **Contexto**: total grande, barra apilada por capas (sistema, tools, memoria de sesión, reciente) en proporción a la entrada utilizable, y leyenda con sus colores; la conversación guardada, en dos tarjetas de cifra. Solo pinta las cifras del informe.
+- **Avisos de la app**: tira fina con filo ámbar a la izquierda y el comando en una píldora. Arreglo: el texto va en un `span.notice__text`; antes cada nodo suelto era un hijo del flex y `space-between` abría huecos enormes alrededor del `<code>`.
+- **Composer**: un único borde ámbar tenue con el foco, sin el anillo de 3 px.
+- **Estado vacío**: cuatro chips de sugerencia (`SUGGESTIONS` en `ConversationView.tsx`) que **rellenan** el campo (`InputAreaHandle.fill`), no envían.
+- **Ajustes**: columna centrada de tarjetas (Configuración, Ventana, Conversaciones, Actualizaciones, Diagnóstico), rutas en monoespaciada, atajo en `<kbd>`, título en neutro. Mismos datos y mismos botones; el scroll queda en el borde de la ventana (la columna se centra con `padding`).
+
+**Verificación**: `tsc`, 108 tests de Vitest, `test:native` y la suite E2E (12) pasan; capturas antes/después con el arnés E2E.
+
 ## Sugerencias pendientes
 
 Por orden de relación impacto/esfuerzo. Todas son compatibles con la restricción de rendimiento.
@@ -57,7 +73,7 @@ Por orden de relación impacto/esfuerzo. Todas son compatibles con la restricci�
 
 1. ✅ *(aplicada, ver §3)* **Botón «Copiar» en los bloques de código**, con la etiqueta del lenguaje en una cabecera fina (`pre` → `div.code-block` con `header`). Hoy no hay forma de copiar un bloque sin seleccionarlo a mano. Solo aparece con `:hover`/`:focus-within`, con `navigator.clipboard` y un «✓ Copiado» de 1,5 s.
 2. ✅ *(aplicada, ver §3)* **Botón flotante «Ir al final»** cuando el usuario ha subido y llega texto nuevo (`ConversationView` ya sabe si está «pegado» abajo: `stickRef`). Pequeño círculo sobre el composer con una flecha ↓ y un punto ámbar si hay contenido sin leer.
-3. **Sugerencias en el estado vacío**: 3–4 chips («Resume un fichero», «Explica este error», «Redacta un correo») que rellenan el composer. Reutilizan `.chip`.
+3. ✅ *(aplicada, ver §4)* **Sugerencias en el estado vacío**: 3–4 chips («Resume un fichero», «Explica este error», «Redacta un correo») que rellenan el composer. Reutilizan `.chip`.
 4. ✅ *(aplicada, ver §3)* **Iconos por tipo de tool** en `ToolCallBlock`: fichero (read/write/edit), lupa (glob/grep/web_search), globo (web_fetch), cerebro (memoria). Hoy todas llevan el mismo glifo; con un `Record<toolName, path>` como el del sidebar se lee de un vistazo qué está haciendo el agente.
 
 ### Media prioridad

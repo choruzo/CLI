@@ -4,6 +4,7 @@ import type { NativeBridge } from '../../ipc/native';
 import { toCommandError } from '../../ipc/native';
 import type { ProtocolContextReport, ProtocolSessionMemory } from '../../protocol';
 import { describeFailure } from '../../client/actions';
+import { ICON, StrokeIcon } from '../chat/icons';
 import { formatTokens } from './StatusBar';
 
 const KIND_LABEL: Record<string, string> = {
@@ -15,6 +16,26 @@ const KIND_LABEL: Record<string, string> = {
   result: 'Resultado',
   entity: 'Entidad',
 };
+
+/**
+ * Barra apilada del contexto activo: cada capa en proporción a la entrada
+ * utilizable. Solo pinta las cifras del informe; el texto va en la leyenda.
+ */
+function ContextBar({ parts, total }: { parts: { key: string; value: number }[]; total: number }) {
+  return (
+    <div className="context-bar" aria-hidden="true">
+      {total > 0 &&
+        parts.map((p) => (
+          <span
+            key={p.key}
+            className="context-bar__part"
+            data-part={p.key}
+            style={{ width: `${Math.min(100, (p.value / total) * 100)}%` }}
+          />
+        ))}
+    </div>
+  );
+}
 
 /**
  * Contexto y memoria de la sesión que se mira (M11 visible desde Desktop):
@@ -76,8 +97,15 @@ export function SessionContextPanel({
     <div className="side-panel">
       <div className="side-panel__header">
         <h2 className="side-panel__title">Contexto</h2>
-        <button type="button" className="button" onClick={() => load()} disabled={!sessionId || loading}>
-          Recargar
+        <button
+          type="button"
+          className="icon-button"
+          aria-label="Recargar"
+          title="Recargar"
+          onClick={() => load()}
+          disabled={!sessionId || loading}
+        >
+          <StrokeIcon d={ICON.refresh} />
         </button>
       </div>
       <div className="side-panel__body">
@@ -97,18 +125,29 @@ export function SessionContextPanel({
             <h3 className="conv-group__title">
               Contexto activo {ctx.estimated ? '(estimado)' : ''}
             </h3>
-            <dl className="context-grid">
-              <dt>Entrada</dt>
-              <dd>
-                {formatTokens(ctx.input)} / {formatTokens(ctx.usableInput)}
-              </dd>
-              <dt>Sistema</dt>
+            <div className="context-usage">
+              <div className="context-usage__total">
+                <span className="context-usage__value">{formatTokens(ctx.input)}</span>
+                <span className="context-usage__limit">de {formatTokens(ctx.usableInput)} de entrada</span>
+              </div>
+              <ContextBar
+                parts={[
+                  { key: 'system', value: ctx.system },
+                  { key: 'tools', value: ctx.tools },
+                  { key: 'memory', value: ctx.sessionMemory },
+                  { key: 'recent', value: ctx.recent },
+                ]}
+                total={ctx.usableInput}
+              />
+            </div>
+            <dl className="context-grid context-grid--legend">
+              <dt data-part="system">Sistema</dt>
               <dd>{formatTokens(ctx.system)}</dd>
-              <dt>Tools</dt>
+              <dt data-part="tools">Tools</dt>
               <dd>{formatTokens(ctx.tools)}</dd>
-              <dt>Memoria de sesión</dt>
+              <dt data-part="memory">Memoria de sesión</dt>
               <dd>{formatTokens(ctx.sessionMemory)}</dd>
-              <dt>Reciente</dt>
+              <dt data-part="recent">Reciente</dt>
               <dd>
                 {formatTokens(ctx.recent)} · {ctx.activeMessages} mensajes
               </dd>
@@ -118,11 +157,19 @@ export function SessionContextPanel({
         {conv && (
           <section className="conv-group" aria-label="Conversación guardada">
             <h3 className="conv-group__title">Conversación guardada</h3>
-            <p className="side-panel__empty">
-              {conv.storedMessages} mensajes guardados · {conv.compactions}{' '}
-              {conv.compactions === 1 ? 'compactación' : 'compactaciones'}
-              {conv.compacting ? ' · compactando…' : ''}
-            </p>
+            <div className="stat-tiles">
+              <div className="stat-tile">
+                <span className="stat-tile__value">{conv.storedMessages}</span>
+                <span className="stat-tile__label">mensajes guardados</span>
+              </div>
+              <div className="stat-tile">
+                <span className="stat-tile__value">{conv.compactions}</span>
+                <span className="stat-tile__label">
+                  {conv.compactions === 1 ? 'compactación' : 'compactaciones'}
+                  {conv.compacting ? ' · compactando…' : ''}
+                </span>
+              </div>
+            </div>
             {conv.lastCompactionError && (
               <p className="notice" data-tone="warning">
                 Última compactación aplazada: {conv.lastCompactionError}

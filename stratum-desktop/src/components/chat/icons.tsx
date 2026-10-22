@@ -16,6 +16,9 @@ export const ICON = {
   retry: 'M4 12a8 8 0 1 0 2.3-5.6M4 4v4h4',
   markdown: 'M3 6h18v12H3zM6 15V9l3 3 3-3v6M16 9v6M14 13l2 2 2-2',
   arrowDown: 'M12 5v14M6 13l6 6 6-6',
+  refresh: 'M20 12a8 8 0 1 1-2.3-5.6M20 4v4h-4',
+  download: 'M12 4v11M7 10l5 5 5-5M5 20h14',
+  external: 'M14 4h6v6M20 4l-9 9M18 14v6H4V6h6',
   // Tipos de tool.
   file: 'M6 3h8l4 4v14H6zM14 3v4h4',
   filePen: 'M6 21V3h8l4 4v5M14 3v4h4M13 21l1-3 5-5 2 2-5 5z',

@@ -350,8 +350,11 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
         <UpdateBanner updates={updates} />
         {prefs && prefs.legacyConversations > 0 && !legacyHidden && (
           <p className="notice notice--dismissable app__notice" data-tone="info" role="status">
-            Tienes {prefs.legacyConversations} conversación(es) de la versión anterior de Desktop. Para
-            seguir con ellas, impórtalas una vez con <code>stratum desktop import</code>.
+            {/* Un solo hijo de texto: en un flex, cada nodo suelto sería una columna. */}
+            <span className="notice__text">
+              Tienes {prefs.legacyConversations} conversación(es) de la versión anterior de Desktop. Para
+              seguir con ellas, impórtalas una vez con <code>stratum desktop import</code>.
+            </span>
             <button
               type="button"
               className="icon-button"

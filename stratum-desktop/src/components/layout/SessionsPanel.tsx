@@ -132,7 +132,7 @@ export const SessionsPanel = forwardRef<
         <h2 className="side-panel__title">Sesiones</h2>
         <button
           type="button"
-          className="button"
+          className="button button--primary button--small"
           onClick={onNew}
           disabled={creating}
           title="Nueva conversación (Ctrl+N)"

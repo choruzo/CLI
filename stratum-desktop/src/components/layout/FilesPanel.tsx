@@ -8,6 +8,7 @@ import {
   saveOutput,
   type ListedFile,
 } from '../../ipc/files';
+import { ICON, StrokeIcon } from '../chat/icons';
 
 function FileRow({ cwd, file }: { cwd: string; file: ListedFile }) {
   const [note, setNote] = useState<{ tone: 'error' | 'muted'; text: string } | null>(null);
@@ -17,6 +18,9 @@ function FileRow({ cwd, file }: { cwd: string; file: ListedFile }) {
       .catch((err) => setNote({ tone: 'error', text: errorMessage(err) }));
   return (
     <li className="file-row">
+      <span className="file-row__icon" aria-hidden="true">
+        <StrokeIcon d={ICON.file} />
+      </span>
       <span className="file-row__name" title={file.path}>
         {file.path.split('/').slice(1).join('/')}
       </span>
@@ -24,18 +28,22 @@ function FileRow({ cwd, file }: { cwd: string; file: ListedFile }) {
       <span className="file-row__actions">
         <button
           type="button"
-          className="button"
+          className="icon-button"
+          aria-label="Guardar"
+          title="Guardar como…"
           onClick={() => run(saveOutput(cwd, file.path), 'Guardado.')}
         >
-          Guardar
+          <StrokeIcon d={ICON.download} />
         </button>
         {canOpen(file.name) && (
           <button
             type="button"
-            className="button"
+            className="icon-button"
+            aria-label="Abrir"
+            title="Abrir"
             onClick={() => run(openOutput(cwd, file.path))}
           >
-            Abrir
+            <StrokeIcon d={ICON.external} />
           </button>
         )}
       </span>
@@ -86,8 +94,8 @@ export function FilesPanel({
     <div className="side-panel">
       <div className="side-panel__header">
         <h2 className="side-panel__title">Ficheros</h2>
-        <button type="button" className="button" onClick={load}>
-          Recargar
+        <button type="button" className="icon-button" aria-label="Recargar" title="Recargar" onClick={load}>
+          <StrokeIcon d={ICON.refresh} />
         </button>
       </div>
       <div className="side-panel__body">

@@ -14,6 +14,14 @@ import { ICON, StrokeIcon } from './icons';
 import { userMessageAnchor } from '../layout/OutlinePanel';
 import { AppLogo } from '../onboarding/AppLogo';
 
+/** Sugerencias del estado vacío: rellenan el campo, no envían. */
+export const SUGGESTIONS = [
+  { label: 'Resume un documento', text: 'Resume el documento que adjunto: ' },
+  { label: 'Redacta un correo', text: 'Redacta un correo para ' },
+  { label: 'Explícame un concepto', text: 'Explícame, paso a paso, ' },
+  { label: 'Planifica una tarea', text: 'Ayúdame a planificar ' },
+] as const;
+
 /** Distancia al fondo por debajo de la cual se sigue el stream automáticamente. */
 const STICK_PX = 80;
 
@@ -229,6 +237,22 @@ export const ConversationView = forwardRef(function ConversationView(
                 Adjunta ficheros con el botón + o soltándolos sobre la ventana. Escribe / para ver los
                 comandos.
               </p>
+              <div className="conversation__suggestions" role="group" aria-label="Sugerencias">
+                {SUGGESTIONS.map((s) => (
+                  <button
+                    key={s.label}
+                    type="button"
+                    className="chip"
+                    disabled={inputDisabled}
+                    onClick={() => {
+                      inputRef.current?.fill(s.text);
+                      inputRef.current?.focus();
+                    }}
+                  >
+                    {s.label}
+                  </button>
+                ))}
+              </div>
             </div>
           ) : (
             <MessageList

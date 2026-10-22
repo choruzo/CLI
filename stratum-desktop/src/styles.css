@@ -3399,3 +3399,381 @@ kbd {
   gap: 10px;
   max-width: 760px;
 }
+
+/* ------------------------------------------------------------------------ */
+/* Retoque visual (2026-10): el ámbar solo marca lo principal y lo activo;  */
+/* el resto va en neutros. Mismas reglas de coste que el pulido anterior.   */
+/* Ver MEJORAS_VISUALES.md §4.                                               */
+/* ------------------------------------------------------------------------ */
+
+/* Botón por defecto neutro; `.button--primary` es la única acción en ámbar. */
+.button {
+  border-color: var(--color-borderMedium);
+  color: var(--color-textResponse);
+  font-size: 13px;
+}
+.button:hover:not(:disabled) {
+  border-color: var(--color-textFaint);
+  background: var(--color-bgStatusbar);
+  color: var(--color-textPrimary);
+}
+.button--primary {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+  color: var(--color-bgApp);
+  font-weight: 600;
+}
+.button--primary:hover:not(:disabled) {
+  border-color: var(--color-accentBright);
+  background: var(--color-accentBright);
+  color: var(--color-bgApp);
+}
+.button--danger {
+  border-color: color-mix(in srgb, var(--color-error) 60%, transparent);
+  color: var(--color-errorMuted);
+}
+.button--danger:hover:not(:disabled) {
+  border-color: var(--color-error);
+  background: var(--color-error);
+  color: var(--color-textPrimary);
+}
+.button--small,
+.side-panel__header .button {
+  padding: 3px 10px;
+  font-size: 12px;
+}
+
+/* Iconos de acción: algo más de área, mismo trazo que el raíl. */
+.icon-button {
+  width: 26px;
+  height: 26px;
+  border-radius: 6px;
+}
+
+/* Raíl: una sola marca del panel activo (fondo tintado + icono en ámbar). */
+.sidebar__rail {
+  width: 48px;
+  gap: 6px;
+}
+.rail-button {
+  border-left: 0;
+  border-radius: 8px;
+}
+.rail-button[data-active] {
+  background: color-mix(in srgb, var(--color-accent) 12%, transparent);
+  color: var(--color-accentBright);
+}
+
+/* Paneles: la misma cabecera en todos (alto fijo aunque no lleve botón). */
+.side-panel {
+  gap: 10px;
+  padding: 14px 12px 10px 14px;
+}
+.side-panel__header {
+  min-height: 28px;
+}
+.side-panel__title {
+  font-size: 13px;
+  letter-spacing: 0.01em;
+}
+.side-panel__search {
+  border-radius: 8px;
+}
+.side-panel__search:focus-visible {
+  outline: 0;
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-borderMedium));
+}
+.side-panel__empty {
+  margin: 8px 2px;
+}
+.conv-group__title {
+  margin-bottom: 6px;
+  padding-left: 2px;
+  font-size: 10.5px;
+  letter-spacing: 0.08em;
+}
+
+/* Listas: el elemento activo se marca con fondo, sin barra lateral. */
+.conv-item,
+.outline-item {
+  border-left: 0;
+  border-radius: 6px;
+}
+.conv-item[data-active],
+.outline-item[data-active] {
+  background: color-mix(in srgb, var(--color-textPrimary) 6%, transparent);
+}
+.outline-item[data-active] {
+  color: var(--color-textPrimary);
+}
+
+/* Ficheros: icono, nombre y tamaño en una línea; acciones al pasar el ratón. */
+.file-row {
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 5px 6px;
+  border-bottom: 0;
+  border-radius: 6px;
+}
+.file-row:hover,
+.file-row:focus-within {
+  background: var(--color-bgStatusbar);
+}
+.file-row__icon {
+  display: grid;
+  color: var(--color-textFaint);
+}
+.file-row__actions {
+  grid-column: auto;
+  gap: 2px;
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+.file-row:hover .file-row__actions,
+.file-row:focus-within .file-row__actions {
+  opacity: 1;
+}
+.file-row__note {
+  grid-column: 2 / -1;
+}
+
+/* Contexto: barra apilada por capas con su leyenda. */
+.context-usage {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin: 4px 0 10px;
+}
+.context-usage__total {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  font-variant-numeric: tabular-nums;
+}
+.context-usage__value {
+  font-size: 20px;
+  font-weight: 600;
+  color: var(--color-textPrimary);
+}
+.context-usage__limit {
+  font-size: 12px;
+  color: var(--color-textFaint);
+}
+.context-bar {
+  display: flex;
+  height: 6px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: var(--color-bgStatusbar);
+}
+.context-bar__part + .context-bar__part {
+  margin-left: 1px;
+}
+[data-part='system'] {
+  --part: var(--color-textFaint);
+}
+[data-part='tools'] {
+  --part: color-mix(in srgb, var(--color-accent) 45%, var(--color-borderMedium));
+}
+[data-part='memory'] {
+  --part: var(--color-code);
+}
+[data-part='recent'] {
+  --part: var(--color-accent);
+}
+.context-bar__part {
+  background: var(--part);
+}
+.context-grid--legend {
+  gap: 6px 12px;
+  font-variant-numeric: tabular-nums;
+}
+.context-grid--legend dt {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--color-textMuted);
+}
+.context-grid--legend dt::before {
+  content: '';
+  width: 8px;
+  height: 8px;
+  border-radius: 2px;
+  background: var(--part);
+}
+.context-grid--legend dd {
+  text-align: right;
+  color: var(--color-textResponse);
+}
+.stat-tiles {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+}
+.stat-tile {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 10px 12px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
+  background: var(--color-bgApp);
+}
+.stat-tile__value {
+  font-size: 18px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  color: var(--color-textPrimary);
+}
+.stat-tile__label {
+  font-size: 11.5px;
+  color: var(--color-textFaint);
+}
+
+/* Avisos de la app: tira fina con el comando en su píldora. */
+.app__notice {
+  margin: 8px 12px 0;
+}
+.notice--dismissable {
+  padding: 6px 6px 6px 12px;
+  border-radius: 8px;
+  font-size: 13px;
+}
+.notice--dismissable[data-tone='info'] {
+  border-left: 2px solid var(--color-accent);
+}
+.notice__text {
+  flex: 1;
+  min-width: 0;
+}
+.notice code,
+.settings-card code,
+.settings__lead code {
+  padding: 1px 6px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 4px;
+  background: var(--color-bgApp);
+  font-size: 12px;
+  color: var(--color-code);
+}
+
+/* Composer: un solo anillo, fino. */
+.input-area__box {
+  border-color: var(--color-borderSubtle);
+}
+.input-area__box:focus-within {
+  border-color: color-mix(in srgb, var(--color-accent) 45%, var(--color-borderMedium));
+  box-shadow: none;
+}
+
+/* Estado vacío: sugerencias que rellenan el campo. */
+.conversation__suggestions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 8px;
+  max-width: 520px;
+  margin-top: 18px;
+}
+.conversation__suggestions .chip {
+  padding: 6px 14px;
+  border-color: var(--color-borderMedium);
+  background: var(--color-bgPanel);
+  color: var(--color-textResponse);
+  font-size: 13px;
+}
+.conversation__suggestions .chip:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-borderMedium));
+  color: var(--color-textPrimary);
+}
+.conversation__suggestions .chip:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Ajustes: columna centrada de tarjetas por sección. */
+.settings__header {
+  align-items: center;
+  padding: 12px 20px;
+}
+.settings__title {
+  font-size: 16px;
+  color: var(--color-textPrimary);
+}
+/* La columna se centra con el padding, no con max-width: así el scroll va al borde de la ventana. */
+.settings__content {
+  max-width: none;
+  padding: 24px max(20px, calc((100% - 720px) / 2)) 32px;
+  gap: 14px;
+}
+.settings__lead {
+  margin: 0 0 4px;
+  font-size: 13.5px;
+  line-height: 1.6;
+  color: var(--color-textMuted);
+}
+.settings-card {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 14px 16px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 10px;
+  background: var(--color-bgPanel);
+}
+.settings-card__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+.settings-card__title {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--color-textPrimary);
+}
+.settings-card__path,
+.settings-rows__path {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-textMuted);
+  overflow-wrap: anywhere;
+}
+.settings-card__hint {
+  margin: 0;
+  font-size: 12.5px;
+  color: var(--color-textFaint);
+}
+.settings-card .notice {
+  margin: 0;
+  font-size: 12.5px;
+}
+.settings-rows {
+  display: grid;
+  grid-template-columns: 160px 1fr;
+  gap: 8px 16px;
+  margin: 0;
+  font-size: 13px;
+}
+.settings-rows dt {
+  color: var(--color-textFaint);
+}
+.settings-rows dd {
+  margin: 0;
+  color: var(--color-textResponse);
+}
+.settings-rows kbd {
+  padding: 1px 6px;
+  border: 1px solid var(--color-borderMedium);
+  border-bottom-width: 2px;
+  border-radius: 4px;
+  font-size: 12px;
+}
+.settings__footnote {
+  margin: 4px 2px 0;
+  font-size: 12px;
+  color: var(--color-textFaint);
+}
