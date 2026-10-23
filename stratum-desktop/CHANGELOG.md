@@ -4,6 +4,17 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.6.0] — 2026-10-23
+
+### Cambios a tener en cuenta
+- **Necesita Stratum CLI 0.10.0 o más reciente** para cambiar de provider (con la 0.9.0 solo se puede cambiar el modelo).
+
+### Añadido
+- **Elegir provider y modelo desde el cuadro de mensaje**: el botón «provider · modelo» abre un selector que pide primero el provider y después uno de sus modelos (o uno escrito a mano si el provider no los lista). En una conversación abierta cambia los suyos; en una nueva, los de la conversación que se abrirá al enviar.
+
+### Corregido
+- `/model` no hacía nada en una conversación nueva; ahora abre el selector.
+
 ## [0.5.0] — 2026-10-23
 
 Stratum Desktop pasa a ser un **cliente de `stratumd`**, hermano de la CLI y de Stratum Dot (M12).

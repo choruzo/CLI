@@ -6,6 +6,13 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.10.0] — 2026-10-23
+
+Es la versión de la CLI que necesita **Stratum Desktop 0.6.0** para cambiar de provider.
+
+### Añadido
+- Stratum Protocol: `sessions.setModel` admite `provider` (opcional) para cambiar a la vez el provider y el modelo de una sesión del daemon. Un provider que no está en la configuración se rechaza (`INVALID_PARAMS`) sin tocar la sesión; sin `provider`, el modelo sigue siendo del provider actual.
+
 ## [0.9.0] — 2026-10-23
 
 Versión estable de la 0.9.0. Reúne la [0.9.0-beta.0](#090-beta0--2026-10-16) (el plano de control local, `stratumd`) y todo lo posterior: sesiones del daemon con conversación duradera (M11), Stratum Desktop como cliente de `stratumd` (M12), deshacer por turno y una TUI que ya no se desborda. Es la versión de la CLI que necesita **Stratum Desktop 0.5.0**.
