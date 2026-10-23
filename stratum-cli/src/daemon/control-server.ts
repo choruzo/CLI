@@ -176,6 +176,11 @@ class Connection implements ClientConnection {
     if (this.authenticated) this.peer.notify(name, params);
   }
 
+  sendEncoded(line: string): void {
+    // Las mismas condiciones que `notify`: autenticada y con el peer abierto.
+    if (this.authenticated && !this.peer.isClosed) this.send(line);
+  }
+
   request<M extends MethodName>(
     method: M,
     params: MethodParams<M>,

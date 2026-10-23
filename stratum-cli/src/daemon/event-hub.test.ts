@@ -9,6 +9,7 @@ import type {
   ProtocolVolatileEvent,
 } from '../protocol/index.js';
 import { NOTIFICATION_PARAMS } from '../protocol/schemas.js';
+import { encodeMessage } from '../ipc/codec.js';
 import { EventHub, type EventHubOptions, type HubClient } from './event-hub.js';
 
 const tick = (): Promise<void> => new Promise((r) => setImmediate(r));
@@ -58,6 +59,12 @@ class FakeClient implements HubClient {
     // Lo que sale tiene que cumplir el contrato tal cual.
     expect(NOTIFICATION_PARAMS[name].safeParse(params).success, name).toBe(true);
     this.sent.push({ name, params } as Sent);
+  }
+  sendEncoded(line: string): void {
+    // La trama montada a mano es, byte a byte, la del codificador.
+    const { method, params } = JSON.parse(line) as { method: NotificationName; params: never };
+    expect(line).toBe(encodeMessage({ method, params }));
+    this.notify(method, params);
   }
   /** Eventos recibidos, en orden. */
   events(): ProtocolEvent[] {

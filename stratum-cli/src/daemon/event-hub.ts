@@ -48,6 +48,29 @@ export interface HubClient {
   ready(): boolean;
   /** Envía una notificación. No bloquea ni lanza. */
   notify<N extends NotificationName>(name: N, params: NotificationParams<N>): void;
+  /**
+   * Envía una notificación ya codificada: una línea idéntica a la que daría
+   * `encodeMessage`. Es la de los lotes de eventos, que se arman con cada evento
+   * serializado una sola vez para todos los clientes. No bloquea ni lanza.
+   */
+  sendEncoded(line: string): void;
+}
+
+/**
+ * La línea de una notificación `events`, montada con eventos ya serializados.
+ * Es exactamente `encodeMessage({ method: 'events', params: { subscriptionId, events } })`.
+ */
+export function encodeEventsNotification(
+  subscriptionId: string,
+  events: readonly string[],
+): string {
+  return (
+    '{"method":"events","params":{"subscriptionId":' +
+    JSON.stringify(subscriptionId) +
+    ',"events":[' +
+    events.join(',') +
+    ']}}\n'
+  );
 }
 
 export interface EventHubOptions {
@@ -113,6 +136,12 @@ export class EventHub {
   private readonly maxSubscriptions: number;
   private readonly channels = new Map<string, Channel>();
   private readonly clients = new Map<HubClient, ClientState>();
+  /**
+   * Cada evento, serializado una vez para todos los que lo reciben. Un evento no
+   * cambia después de entrar (`coalesce` crea uno nuevo), así que su texto vale
+   * mientras exista el objeto.
+   */
+  private readonly encoded = new WeakMap<ProtocolEvent, string>();
   private nextSubscription = 1;
 
   constructor(private readonly opts: EventHubOptions) {
@@ -413,16 +442,25 @@ export class EventHub {
           continue;
         }
         if (sub.queue.length === 0) break;
-        const events: ProtocolEvent[] = [];
+        const events: string[] = [];
         let chars = 0;
         while (sub.queue.length > 0 && events.length < this.batchSize && chars < BATCH_CHARS) {
-          const event = sub.queue.shift()!;
-          chars += JSON.stringify(event).length;
-          events.push(event);
+          const json = this.encode(sub.queue.shift()!);
+          chars += json.length;
+          events.push(json);
         }
-        client.notify('events', { subscriptionId: sub.id, events });
+        client.sendEncoded(encodeEventsNotification(sub.id, events));
       }
     }
+  }
+
+  private encode(event: ProtocolEvent): string {
+    let json = this.encoded.get(event);
+    if (json === undefined) {
+      json = JSON.stringify(event);
+      this.encoded.set(event, json);
+    }
+    return json;
   }
 
   /** `false` si no había nada que fotografiar (la sesión ya no existe). */
