@@ -14,7 +14,15 @@
  * árboles difieren, el diff (`diff-tree --name-status`/`--numstat`) entra en el
  * registro y `revertTurns()` puede devolver el work-tree al estado de T0.
  */
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, unlinkSync, writeFileSync } from 'fs';
+import {
+  closeSync,
+  existsSync,
+  mkdirSync,
+  openSync,
+  readFileSync,
+  unlinkSync,
+  writeFileSync,
+} from 'fs';
 import { lstat, readdir, rm, stat } from 'fs/promises';
 import { isAbsolute, join, resolve, sep } from 'path';
 import { hostname } from 'os';
@@ -34,12 +42,7 @@ import {
   tail,
   type GitRunResult,
 } from './git.js';
-import {
-  loadTurnsFile,
-  saveTurnsFile,
-  type TurnFileEntry,
-  type TurnRecord,
-} from './registry.js';
+import { loadTurnsFile, saveTurnsFile, type TurnFileEntry, type TurnRecord } from './registry.js';
 
 const log = getLogger('snapshots');
 
@@ -186,7 +189,11 @@ export function formatFilesReverted(
  */
 function safeId(id: string): string {
   if (/^[A-Za-z0-9_-]{1,64}$/.test(id)) return id;
-  const clean = id.replace(/[^\w-]+/g, '_').replace(/_+/g, '_').slice(0, 40) || 'session';
+  const clean =
+    id
+      .replace(/[^\w-]+/g, '_')
+      .replace(/_+/g, '_')
+      .slice(0, 40) || 'session';
   const hash = createHash('sha256').update(id).digest('hex').slice(0, 8);
   return `${clean}-${hash}`;
 }
@@ -645,7 +652,10 @@ export class SnapshotStore {
    * T1 + diff + registro. Sin cambios (T0 == T1) no se registra nada. Nunca
    * lanza; un fallo aquí desactiva los snapshots de la sesión y el turno sigue.
    */
-  async finishTurn(tracked: TrackedTurn | null, endedAt: string = new Date().toISOString()): Promise<TurnRecord | null> {
+  async finishTurn(
+    tracked: TrackedTurn | null,
+    endedAt: string = new Date().toISOString(),
+  ): Promise<TurnRecord | null> {
     if (!tracked) return null;
     try {
       if (!this.active) return null;
@@ -734,10 +744,7 @@ export class SnapshotStore {
    * el diff no los ve: se detectan comparando su stat entre T0 y T1 (nuevo o
    * modificado), y los que existían en T0 y faltan ahora (borrados).
    */
-  private async computeTurnSkipped(
-    before: SkippedPath[],
-    after: SkippedPath[],
-  ): Promise<string[]> {
+  private async computeTurnSkipped(before: SkippedPath[], after: SkippedPath[]): Promise<string[]> {
     const beforeMap = new Map(before.map((s) => [s.path, s]));
     const afterSet = new Set(after.map((s) => s.path));
     const out: string[] = [];
@@ -1053,7 +1060,11 @@ export class SnapshotStore {
     ident.GIT_COMMITTER_DATE = now;
 
     const lines = trees.map((hash, i) => `040000 tree ${hash}\tkeep-${String(i).padStart(8, '0')}`);
-    const tree = await this.git(['mktree'], { cwd: this.root, env: ident, input: lines.join('\n') + '\n' });
+    const tree = await this.git(['mktree'], {
+      cwd: this.root,
+      env: ident,
+      input: lines.join('\n') + '\n',
+    });
     if (!tree.ok) throw new Error(`mktree failed: ${tail(tree.stderr)}`);
     const commit = await this.git(['commit-tree', tree.stdout.trim()], {
       cwd: this.root,

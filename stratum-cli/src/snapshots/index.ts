@@ -4,11 +4,7 @@
  * nivel de módulo (`SnapshotStore`) — la fachada en `StratumAgent` llega en la
  * fase 2 junto al cableado de `runTurn`.
  */
-export {
-  normalizeRootForId,
-  snapshotDirForRoot,
-  snapshotRootId,
-} from './paths.js';
+export { normalizeRootForId, snapshotDirForRoot, snapshotRootId } from './paths.js';
 export { snapshotGitEnv, type SnapshotGitEnvOptions } from './env.js';
 export {
   SNAPSHOT_TURNS_SCHEMA_VERSION,

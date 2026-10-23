@@ -125,7 +125,8 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   },
   {
     name: '/undo',
-    description: 'Deshace los cambios de ficheros del último turno (pide confirmación con la lista)',
+    description:
+      'Deshace los cambios de ficheros del último turno (pide confirmación con la lista)',
     hasArgs: false,
   },
   {

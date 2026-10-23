@@ -145,22 +145,26 @@ describe('StratumAgent + snapshots (UX-1)', () => {
     expect(agent.getUndoableTurns()).toHaveLength(1);
   });
 
-  it('sin `sessionId` los snapshots quedan desactivados sin romper el turno', { timeout: 90_000 }, async () => {
-    const provider = new MockProvider([makeTextRound('hola')]);
-    const router = new ProviderRouter(config);
-    vi.spyOn(router, 'getActive').mockReturnValue(provider);
-    const registry = new ToolRegistry();
-    registerBuiltinTools(registry, config);
-    const agent = new StratumAgent(config, router, registry, {
-      env: createSessionEnv({ cwd: repo, env: {} }),
-      snapshotsHome: home,
-      initialMessages: [{ role: 'system', content: 'sys' }],
-    });
+  it(
+    'sin `sessionId` los snapshots quedan desactivados sin romper el turno',
+    { timeout: 90_000 },
+    async () => {
+      const provider = new MockProvider([makeTextRound('hola')]);
+      const router = new ProviderRouter(config);
+      vi.spyOn(router, 'getActive').mockReturnValue(provider);
+      const registry = new ToolRegistry();
+      registerBuiltinTools(registry, config);
+      const agent = new StratumAgent(config, router, registry, {
+        env: createSessionEnv({ cwd: repo, env: {} }),
+        snapshotsHome: home,
+        initialMessages: [{ role: 'system', content: 'sys' }],
+      });
 
-    const events = await collect(agent.run('saluda'));
-    expect(events.some((e) => e.type === 'done')).toBe(true);
-    expect(agent.getUndoableTurns()).toEqual([]);
-    expect(await agent.revertTurns(1)).toEqual({ ok: false, reason: 'disabled' });
-    expect(await agent.planRevert(1)).toMatchObject({ turns: [] });
-  });
+      const events = await collect(agent.run('saluda'));
+      expect(events.some((e) => e.type === 'done')).toBe(true);
+      expect(agent.getUndoableTurns()).toEqual([]);
+      expect(await agent.revertTurns(1)).toEqual({ ok: false, reason: 'disabled' });
+      expect(await agent.planRevert(1)).toMatchObject({ turns: [] });
+    },
+  );
 });

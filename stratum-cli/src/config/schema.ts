@@ -378,7 +378,11 @@ export const SnapshotsConfigSchema = z.object({
    * Ficheros de más de este tamaño no entran en los snapshots (no se pueden
    * deshacer); el turno los lista como `skipped`. Default 2 MiB.
    */
-  maxFileBytes: z.number().int().positive().default(2 * 1024 * 1024),
+  maxFileBytes: z
+    .number()
+    .int()
+    .positive()
+    .default(2 * 1024 * 1024),
   /**
    * Días que se conservan los turnos en el registro de la sesión. Al abrir una
    * sesión se purgan los más viejos y, si se borró algo, se lanza un `git gc`

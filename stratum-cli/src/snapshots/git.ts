@@ -53,7 +53,9 @@ export async function gitRun(args: string[], opts: GitRunOptions): Promise<GitRu
       ok: !timedOut && result.exitCode === 0,
       exitCode: result.exitCode ?? -1,
       stdout: result.stdout ?? '',
-      stderr: timedOut ? `git ${args[0] ?? ''} timed out after ${opts.timeoutMs} ms`.trim() : (result.stderr ?? ''),
+      stderr: timedOut
+        ? `git ${args[0] ?? ''} timed out after ${opts.timeoutMs} ms`.trim()
+        : (result.stderr ?? ''),
       ...(timedOut ? { timedOut: true } : {}),
     };
   } catch (err) {
@@ -150,8 +152,16 @@ export function parseNumstatZ(text: string): NumstatEntry[] {
 export function mergeTreeDiff(
   nameStatus: NameStatusEntry[],
   numstat: NumstatEntry[],
-): Array<{ path: string; status: NameStatusEntry['status']; additions?: number; deletions?: number }> {
-  const byPath = new Map<string, { path: string; status: NameStatusEntry['status']; additions?: number; deletions?: number }>();
+): Array<{
+  path: string;
+  status: NameStatusEntry['status'];
+  additions?: number;
+  deletions?: number;
+}> {
+  const byPath = new Map<
+    string,
+    { path: string; status: NameStatusEntry['status']; additions?: number; deletions?: number }
+  >();
   for (const ns of nameStatus) {
     byPath.set(ns.path, { path: ns.path, status: ns.status });
   }

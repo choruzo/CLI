@@ -2058,7 +2058,9 @@ export function App({
             result.skipped.length ? `${result.skipped.length} sin copia` : '',
           ].filter(Boolean);
           const which =
-            result.turns.length === 1 ? `turno ${result.turns[0]}` : `${result.turns.length} turnos`;
+            result.turns.length === 1
+              ? `turno ${result.turns[0]}`
+              : `${result.turns.length} turnos`;
           dispatch({
             type: 'SYSTEM_MESSAGE',
             text: `↶ Deshecho ${which}: ${parts.join(' · ') || 'sin ficheros'}. El agente lo sabrá en tu próximo mensaje.`,
@@ -3220,7 +3222,12 @@ export function App({
   } else if (overlay?.kind === 'rewind-select') {
     const now = Date.now();
     overlayNode = (
-      <Box flexDirection="column" borderStyle="single" borderColor={theme.borderAccent} paddingX={1}>
+      <Box
+        flexDirection="column"
+        borderStyle="single"
+        borderColor={theme.borderAccent}
+        paddingX={1}
+      >
         <Text color={theme.accent} bold>
           ↶ Volver atrás
           <Text color={theme.textMuted} bold={false}>

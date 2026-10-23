@@ -32,7 +32,11 @@ async function git(cwd: string, args: string[], env?: NodeJS.ProcessEnv): Promis
     reject: false,
     ...(env ? { env } : {}),
   });
-  return { exitCode: result.exitCode ?? -1, stdout: result.stdout ?? '', stderr: result.stderr ?? '' };
+  return {
+    exitCode: result.exitCode ?? -1,
+    stdout: result.stdout ?? '',
+    stderr: result.stderr ?? '',
+  };
 }
 
 const CONFIG: SnapshotsConfig = {
@@ -228,57 +232,67 @@ describe('SnapshotStore: conflictos contra T1', () => {
 });
 
 describe('SnapshotStore: límites y exclusiones', () => {
-  it('un fichero > maxFileBytes no entra y se reporta como skipped', { timeout: 60_000 }, async () => {
-    await writeFile(join(repo, 'base.txt'), 'base\n');
-    const store = await open({ maxFileBytes: 32 });
-    await store.track();
+  it(
+    'un fichero > maxFileBytes no entra y se reporta como skipped',
+    { timeout: 60_000 },
+    async () => {
+      await writeFile(join(repo, 'base.txt'), 'base\n');
+      const store = await open({ maxFileBytes: 32 });
+      await store.track();
 
-    const turn = await store.beginTurn();
-    await writeFile(join(repo, 'pequeno.txt'), 'x\n');
-    await writeFile(join(repo, 'grande.bin'), Buffer.alloc(256, 7));
-    const record = await store.finishTurn(turn);
+      const turn = await store.beginTurn();
+      await writeFile(join(repo, 'pequeno.txt'), 'x\n');
+      await writeFile(join(repo, 'grande.bin'), Buffer.alloc(256, 7));
+      const record = await store.finishTurn(turn);
 
-    expect(record).not.toBeNull();
-    expect(record!.files.map((f) => f.path)).toEqual(['pequeno.txt']);
-    expect(record!.skipped).toEqual(['grande.bin']);
+      expect(record).not.toBeNull();
+      expect(record!.files.map((f) => f.path)).toEqual(['pequeno.txt']);
+      expect(record!.skipped).toEqual(['grande.bin']);
 
-    const plan = await store.planRevert(1);
-    expect(plan.skipped).toEqual(['grande.bin']);
-    expect(plan.remove).toEqual(['pequeno.txt']);
+      const plan = await store.planRevert(1);
+      expect(plan.skipped).toEqual(['grande.bin']);
+      expect(plan.remove).toEqual(['pequeno.txt']);
 
-    const result = await store.revertTurns(1);
-    expect(result.ok).toBe(true);
-    // Lo que no tiene snapshot no se puede deshacer: queda en disco.
-    expect(existsSync(join(repo, 'grande.bin'))).toBe(true);
-    expect(existsSync(join(repo, 'pequeno.txt'))).toBe(false);
-  });
+      const result = await store.revertTurns(1);
+      expect(result.ok).toBe(true);
+      // Lo que no tiene snapshot no se puede deshacer: queda en disco.
+      expect(existsSync(join(repo, 'grande.bin'))).toBe(true);
+      expect(existsSync(join(repo, 'pequeno.txt'))).toBe(false);
+    },
+  );
 
-  it('.stratum/ y lo ignorado por .gitignore nunca entran en el snapshot', { timeout: 60_000 }, async () => {
-    await writeFile(join(repo, '.gitignore'), 'ignorado/\n');
-    await mkdir(join(repo, '.stratum', 'plans'), { recursive: true });
-    await writeFile(join(repo, '.stratum', 'plans', 'p.json'), '{}');
-    await mkdir(join(repo, 'ignorado'), { recursive: true });
-    await writeFile(join(repo, 'ignorado', 'x.txt'), 'no\n');
-    await writeFile(join(repo, 'base.txt'), 'base\n');
+  it(
+    '.stratum/ y lo ignorado por .gitignore nunca entran en el snapshot',
+    { timeout: 60_000 },
+    async () => {
+      await writeFile(join(repo, '.gitignore'), 'ignorado/\n');
+      await mkdir(join(repo, '.stratum', 'plans'), { recursive: true });
+      await writeFile(join(repo, '.stratum', 'plans', 'p.json'), '{}');
+      await mkdir(join(repo, 'ignorado'), { recursive: true });
+      await writeFile(join(repo, 'ignorado', 'x.txt'), 'no\n');
+      await writeFile(join(repo, 'base.txt'), 'base\n');
 
-    const store = await open();
-    await store.track();
+      const store = await open();
+      await store.track();
 
-    const turn = await store.beginTurn();
-    await writeFile(join(repo, 'visibles.txt'), 'si\n');
-    await writeFile(join(repo, '.stratum', 'plans', 'p.json'), '{"otra":"cosa"}');
-    await writeFile(join(repo, 'ignorado', 'x.txt'), 'sigue sin entrar\n');
-    const record = await store.finishTurn(turn);
+      const turn = await store.beginTurn();
+      await writeFile(join(repo, 'visibles.txt'), 'si\n');
+      await writeFile(join(repo, '.stratum', 'plans', 'p.json'), '{"otra":"cosa"}');
+      await writeFile(join(repo, 'ignorado', 'x.txt'), 'sigue sin entrar\n');
+      const record = await store.finishTurn(turn);
 
-    expect(record).not.toBeNull();
-    expect(record!.files.map((f) => f.path)).toEqual(['visibles.txt']);
+      expect(record).not.toBeNull();
+      expect(record!.files.map((f) => f.path)).toEqual(['visibles.txt']);
 
-    const result = await store.revertTurns(1);
-    expect(result.ok).toBe(true);
-    // Ni se revierten ni se borran: nunca fueron parte del snapshot.
-    expect(existsSync(join(repo, 'ignorado', 'x.txt'))).toBe(true);
-    expect(readFileSync(join(repo, '.stratum', 'plans', 'p.json'), 'utf-8')).toBe('{"otra":"cosa"}');
-  });
+      const result = await store.revertTurns(1);
+      expect(result.ok).toBe(true);
+      // Ni se revierten ni se borran: nunca fueron parte del snapshot.
+      expect(existsSync(join(repo, 'ignorado', 'x.txt'))).toBe(true);
+      expect(readFileSync(join(repo, '.stratum', 'plans', 'p.json'), 'utf-8')).toBe(
+        '{"otra":"cosa"}',
+      );
+    },
+  );
 });
 
 describe('SnapshotStore: pathspecs literales', () => {
@@ -410,31 +424,27 @@ describe('entorno de git aislado (punto 2)', () => {
 });
 
 describe('SnapshotStore: activación, ubicación y registro versionado', () => {
-  it(
-    'fuera de un repo git queda desactivado sin lanzar',
-    { timeout: 60_000 },
-    async () => {
-      const plano = await mkdtemp(join(tmpdir(), 'stratum-snap-plano-'));
-      try {
-        const store = await SnapshotStore.open({
-          cwd: plano,
-          sessionId: 'ses_test',
-          config: CONFIG,
-          home,
-        });
-        expect(store.isActive()).toBe(false);
-        expect(store.disabledReason).toContain('not inside a git repository');
-        expect(await store.track()).toBeNull();
-        expect(await store.beginTurn()).toBeNull();
-        expect((await store.planRevert(1)).turns).toEqual([]);
-        expect(await store.revertTurns(1)).toMatchObject({ ok: false, reason: 'disabled' });
-      } finally {
-        await rm(plano, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }).catch(
-          () => undefined,
-        );
-      }
-    },
-  );
+  it('fuera de un repo git queda desactivado sin lanzar', { timeout: 60_000 }, async () => {
+    const plano = await mkdtemp(join(tmpdir(), 'stratum-snap-plano-'));
+    try {
+      const store = await SnapshotStore.open({
+        cwd: plano,
+        sessionId: 'ses_test',
+        config: CONFIG,
+        home,
+      });
+      expect(store.isActive()).toBe(false);
+      expect(store.disabledReason).toContain('not inside a git repository');
+      expect(await store.track()).toBeNull();
+      expect(await store.beginTurn()).toBeNull();
+      expect((await store.planRevert(1)).turns).toEqual([]);
+      expect(await store.revertTurns(1)).toMatchObject({ ok: false, reason: 'disabled' });
+    } finally {
+      await rm(plano, { recursive: true, force: true, maxRetries: 10, retryDelay: 50 }).catch(
+        () => undefined,
+      );
+    }
+  });
 
   it('enabled:false desactiva sin crear nada', { timeout: 60_000 }, async () => {
     const store = await open({ enabled: false });
@@ -443,34 +453,40 @@ describe('SnapshotStore: activación, ubicación y registro versionado', () => {
     expect(existsSync(store.dir)).toBe(false);
   });
 
-  it(
-    'la raíz es el worktree (no el cwd) y el id sale de ella',
-    { timeout: 60_000 },
-    async () => {
-      const sub = join(repo, 'paquete');
-      await mkdir(sub);
-      const store = await open({}, sub);
-      expect(store.root).toBe(repo);
-      // El id se hashea de la raíz del worktree, no del cwd: abrir desde
-      // `paquete/` y desde la raíz comparten almacén e índice por sesión.
-      expect(store.dir).toBe(snapshotDirForRoot(repo, home));
-      expect(store.gitDir).toBe(join(store.dir, 'git'));
-      expect(store.globalConfig).toBe(join(store.dir, 'empty.gitconfig'));
-      expect(store.indexFile).toBe(join(store.dir, 'index-ses_test'));
-      expect(store.turnsFile).toBe(join(store.dir, 'turns-ses_test.json'));
-      expect(existsSync(join(store.dir, 'empty.gitconfig'))).toBe(true);
-      // Config dura del repo de la sombra.
-      const config = await git(join(repo, 'paquete'), ['config', '--list'], snapshotGitEnv({
+  it('la raíz es el worktree (no el cwd) y el id sale de ella', { timeout: 60_000 }, async () => {
+    const sub = join(repo, 'paquete');
+    await mkdir(sub);
+    const store = await open({}, sub);
+    expect(store.root).toBe(repo);
+    // El id se hashea de la raíz del worktree, no del cwd: abrir desde
+    // `paquete/` y desde la raíz comparten almacén e índice por sesión.
+    expect(store.dir).toBe(snapshotDirForRoot(repo, home));
+    expect(store.gitDir).toBe(join(store.dir, 'git'));
+    expect(store.globalConfig).toBe(join(store.dir, 'empty.gitconfig'));
+    expect(store.indexFile).toBe(join(store.dir, 'index-ses_test'));
+    expect(store.turnsFile).toBe(join(store.dir, 'turns-ses_test.json'));
+    expect(existsSync(join(store.dir, 'empty.gitconfig'))).toBe(true);
+    // Config dura del repo de la sombra.
+    const config = await git(
+      join(repo, 'paquete'),
+      ['config', '--list'],
+      snapshotGitEnv({
         gitDir: store.gitDir,
         workTree: store.root,
         indexFile: store.indexFile,
         globalConfig: store.globalConfig,
-      }));
-      for (const line of ['core.autocrlf=false', 'core.safecrlf=false', 'core.longpaths=true', 'core.quotepath=false', 'gc.auto=0']) {
-        expect(config.stdout).toContain(line);
-      }
-    },
-  );
+      }),
+    );
+    for (const line of [
+      'core.autocrlf=false',
+      'core.safecrlf=false',
+      'core.longpaths=true',
+      'core.quotepath=false',
+      'gc.auto=0',
+    ]) {
+      expect(config.stdout).toContain(line);
+    }
+  });
 
   it('normaliza la raíz antes de hashear (mismo id con otro separador)', () => {
     const a = snapshotRootId('D:\\Repo\\Sub');
@@ -547,7 +563,10 @@ describe('SnapshotStore: atributos del proyecto no normalizan los bytes', () => 
     async () => {
       // Si el repo de la sombra respetara esto, `git add` guardaría LF y el
       // revert devolvería un fichero distinto al que el usuario tenía.
-      await writeFile(join(repo, '.gitattributes'), '*.sh text eol=lf\n*.txt working-tree-encoding=UTF-16\n');
+      await writeFile(
+        join(repo, '.gitattributes'),
+        '*.sh text eol=lf\n*.txt working-tree-encoding=UTF-16\n',
+      );
       const original = Buffer.from('#!/bin/sh\r\necho hola\r\n', 'utf-8');
       await writeFile(join(repo, 'deploy.sh'), original);
 
@@ -708,18 +727,25 @@ describe('SnapshotStore: confinamiento y secretos', () => {
     },
   );
 
-  it('roba un lock huérfano del registro en vez de quedarse esperando', { timeout: 60_000 }, async () => {
-    await writeFile(join(repo, 'base.txt'), 'base\n');
-    const store = await open();
-    await store.track();
+  it(
+    'roba un lock huérfano del registro en vez de quedarse esperando',
+    { timeout: 60_000 },
+    async () => {
+      await writeFile(join(repo, 'base.txt'), 'base\n');
+      const store = await open();
+      await store.track();
 
-    const turn = await store.beginTurn();
-    await writeFile(join(repo, 'lock.txt'), 'x\n');
-    // Lock de un pid muerto y viejo, como el de una CLI que se colgó.
-    await writeFile(store.lockFile, JSON.stringify({ pid: 999_999, host: 'otro-host', at: Date.now() - 5 * 60_000 }));
+      const turn = await store.beginTurn();
+      await writeFile(join(repo, 'lock.txt'), 'x\n');
+      // Lock de un pid muerto y viejo, como el de una CLI que se colgó.
+      await writeFile(
+        store.lockFile,
+        JSON.stringify({ pid: 999_999, host: 'otro-host', at: Date.now() - 5 * 60_000 }),
+      );
 
-    const record = await store.finishTurn(turn);
-    expect(record).not.toBeNull();
-    expect(existsSync(store.lockFile)).toBe(false);
-  });
+      const record = await store.finishTurn(turn);
+      expect(record).not.toBeNull();
+      expect(existsSync(store.lockFile)).toBe(false);
+    },
+  );
 });
