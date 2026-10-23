@@ -257,7 +257,9 @@ describe('M11 — fallos del modelo de memoria', () => {
         expect(e.type).not.toBe('error');
       }
     }
-    expect(warnings.some((w) => /session_memory_deferred: conversation store failed/.test(w))).toBe(true);
+    expect(warnings.some((w) => /session_memory_deferred: conversation store failed/.test(w))).toBe(
+      true,
+    );
     expect(agent.getMessages().length).toBe(before + 40);
     expect(conversation.memory.version).toBe(0);
   });

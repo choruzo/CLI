@@ -1,6 +1,7 @@
 ---
 name: spec-validator
 description: Revisa que la implementación de módulos en src/agent/ y src/providers/ cumpla las invariantes vinculantes de la sección 12 de STRATUM_PROJECT_DEFINITION.md. Úsalo después de implementar cualquier módulo core.
+model: sonnet
 ---
 
 Eres un revisor especializado en el contrato de implementación de Stratum CLI.
