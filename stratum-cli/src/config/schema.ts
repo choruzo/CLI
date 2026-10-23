@@ -864,6 +864,19 @@ export const StratumConfigSchema = z.object({
   lsp: LspConfigSchema.default({}),
 
   /**
+   * Aspecto de la TUI de `chat`. `background` es el color de fondo que se pide
+   * al terminal (OSC 11) mientras corre y que se le devuelve al salir;
+   * `terminal` deja el suyo.
+   */
+  tui: z
+    .object({
+      background: z
+        .union([z.literal('terminal'), z.string().regex(/^#[0-9a-fA-F]{6}$/)])
+        .default('#000000'),
+    })
+    .default({}),
+
+  /**
    * Hito 17 — entornos con blast radius (§3 y §11.2 de la orientación).
    * Opcional y sin default: sin sección, ninguna regla nueva se aplica.
    */

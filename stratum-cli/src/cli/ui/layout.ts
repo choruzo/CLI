@@ -35,3 +35,35 @@ export function resolveLayout(columns: number, rows: number): Layout {
     contentWidth: Math.min(cols, MAX_CONTENT_WIDTH),
   };
 }
+
+/**
+ * Filas fijas bajo la conversación viva: input con borde (3), pie del prompt
+ * (1), barra de estado (1), un aviso (1) y una de holgura.
+ */
+export const PROMPT_CHROME_ROWS = 7;
+
+export interface PinnedPanels {
+  plan: boolean;
+  todo: 'open' | 'collapsed' | null;
+  jobs: boolean;
+  /** Filas de contenido de cada panel abierto. */
+  maxSteps: number;
+}
+
+/** Alto de los paneles anclados sobre el input. */
+export function pinnedPanelRows({ plan, todo, jobs, maxSteps }: PinnedPanels): number {
+  // Borde (2) + cabecera + filas + «… fuera de vista».
+  const box = maxSteps + 4;
+  const todoRows = todo === 'open' ? box + 1 : todo === 'collapsed' ? 1 : 0;
+  return (plan ? box : 0) + todoRows + (jobs ? box : 0);
+}
+
+/**
+ * Filas que puede ocupar el turno en curso. La región viva de Ink (turno +
+ * paneles + input + barras) tiene que caber en la pantalla: si la pasa, Ink
+ * borra el terminal y reimprime todo lo de `<Static>`, y el historial sale
+ * duplicado.
+ */
+export function conversationRows(rows: number, panelRows: number): number {
+  return Math.max(8, rows - PROMPT_CHROME_ROWS - panelRows);
+}

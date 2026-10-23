@@ -230,7 +230,9 @@ async function cancelAndExit() {
       await t.waitFor(/✗ Comando desconocido: \/noexiste/);
       await sleep(500);
       assert.equal(mock.requests.length, before);
-      assert.match(t.tail(3), /Type a message or \/ for commands/);
+      // Bajo el input van el pie del prompt y, en la última línea, la barra de estado.
+      assert.match(t.tail(5), /Type a message or \/ for commands/);
+      assert.match(t.tail(1), /● mock │ mock-model/);
     });
 
     await check('doble Ctrl+C sale con exit 0', t, async () => {

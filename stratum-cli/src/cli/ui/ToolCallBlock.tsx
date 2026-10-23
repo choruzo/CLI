@@ -70,6 +70,24 @@ function formatInput(state: ToolCallState): string {
   return truncateLabel(primaryArg(src));
 }
 
+/**
+ * Primera línea de un error. Un `exec` que salió con código ≠ 0 trae su sobre
+ * `<exec_result …>` entero: de él solo interesa cómo acabó, y lo que identifica
+ * la llamada es el comando, como en una terminada bien.
+ */
+export function errorHeadline(state: ToolCallState): string {
+  const msg = state.errorMsg ?? 'error';
+  const envelope = /^<exec_result\b[^>]*\bstatus="([^"]*)"[^>]*\bexitCode="([^"]*)"/.exec(msg);
+  if (envelope) {
+    const [, status, code] = envelope;
+    const outcome =
+      status === 'timeout' ? 'timeout' : status === 'cancelled' ? 'cancelado' : `exit ${code}`;
+    const label = formatInput(state);
+    return label ? `${outcome} │ ${label}` : outcome;
+  }
+  return msg.split('\n')[0]?.slice(0, 80) ?? '';
+}
+
 function formatDuration(ms: number): string {
   return `${(ms / 1000).toFixed(1)}s`;
 }
@@ -196,7 +214,7 @@ export function ToolCallBlock({
         <HostTag alias={sshHost} />
         <Text color={theme.errorMuted} dimColor>
           {' '}
-          │ {(state.errorMsg ?? 'error').split('\n')[0]?.slice(0, 80)}
+          │ {errorHeadline(state)}
         </Text>
         {chevron}
       </Box>

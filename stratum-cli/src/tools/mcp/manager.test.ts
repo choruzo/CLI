@@ -85,6 +85,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       compressionThreshold: 0.8,
     },
     lsp: DEFAULTS.lsp,
+    tui: DEFAULTS.tui,
   };
 }
 

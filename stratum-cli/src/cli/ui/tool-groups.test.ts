@@ -1,6 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import type { ToolCallState } from './ToolCallBlock.js';
-import { describeGroup, groupTargets, groupToolCalls, shortLabel } from './tool-groups.js';
+import {
+  describeActionTools,
+  describeGroup,
+  groupTargets,
+  groupToolCalls,
+  shortLabel,
+  summarizeActions,
+} from './tool-groups.js';
 
 let n = 0;
 function call(
@@ -79,5 +86,29 @@ describe('groupTargets', () => {
     const long = 'stratum-cli/src/cli/ui/components/very/deep/folder/MaskedInput.tsx';
     expect(shortLabel(long)).toBe('…/folder/MaskedInput.tsx');
     expect(shortLabel('corto.ts')).toBe('corto.ts');
+  });
+});
+
+describe('summarizeActions', () => {
+  it('cuenta por tool, de la más usada a la menos, y los fallos', () => {
+    const calls = [
+      call('read_file'),
+      call('exec'),
+      call('exec', {}, 'error'),
+      call('exec'),
+      call('write_file'),
+    ];
+    const summary = summarizeActions(calls);
+    expect(summary).toEqual({
+      total: 5,
+      failed: 1,
+      byTool: [
+        ['exec', 3],
+        ['read_file', 1],
+        ['write_file', 1],
+      ],
+    });
+    expect(describeActionTools(summary)).toBe('3 exec · 1 read_file · 1 write_file');
+    expect(describeActionTools(summary, 1)).toBe('3 exec · +2');
   });
 });

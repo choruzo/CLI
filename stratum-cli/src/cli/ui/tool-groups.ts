@@ -113,3 +113,34 @@ export function shortLabel(label: string): string {
   }
   return `…${label.slice(-39)}`;
 }
+
+/**
+ * Por encima de este número de acciones, un turno cerrado no las lista: las
+ * resume en una línea. Es el mismo tope que la región viva, así que al acabar el
+ * turno no aparecen de golpe decenas de filas que no se vieron mientras corría.
+ */
+export const CLOSED_TURN_ACTION_LIMIT = 6;
+
+export interface ActionSummary {
+  total: number;
+  failed: number;
+  /** `[nombre, veces]`, de la tool más usada a la menos; empate, por orden de aparición. */
+  byTool: Array<[string, number]>;
+}
+
+export function summarizeActions(calls: readonly ToolCallState[]): ActionSummary {
+  const counts = new Map<string, number>();
+  for (const call of calls) counts.set(call.name, (counts.get(call.name) ?? 0) + 1);
+  return {
+    total: calls.length,
+    failed: calls.filter((c) => c.status === 'error').length,
+    byTool: [...counts].sort((a, b) => b[1] - a[1]),
+  };
+}
+
+/** `38 exec · 3 read_file · +2`: las `maxTools` más usadas y cuántas quedan. */
+export function describeActionTools(summary: ActionSummary, maxTools = 4): string {
+  const shown = summary.byTool.slice(0, maxTools).map(([name, n]) => `${n} ${name}`);
+  const rest = summary.byTool.length - shown.length;
+  return rest > 0 ? `${shown.join(' · ')} · +${rest}` : shown.join(' · ');
+}

@@ -3430,7 +3430,8 @@ export function App({
         readOnly={sessionBadges.readOnly}
         sessionProfile={sessionBadges.profile}
         environment={sessionBadges.environment}
-        todos={state.todoCollapsed ? [] : state.todos}
+        todos={state.todos}
+        todoCollapsed={state.todoCollapsed}
         todoStale={state.todoStale}
         jobs={jobs}
         jobsNow={jobsNow}

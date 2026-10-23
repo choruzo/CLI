@@ -158,7 +158,9 @@ export function MessageList({
           debug,
           now,
           liveTextLines,
-          contentWidth,
+          // `paddingX={1}` resta dos columnas: con el ancho entero, las líneas
+          // que envuelven se contaban de menos y el turno vivo no cabía.
+          contentWidth - 2,
           liveActionLimit,
         )}
     </Box>

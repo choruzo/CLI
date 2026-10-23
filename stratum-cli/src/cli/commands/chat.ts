@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import React from 'react';
 import { render } from 'ink';
 import { loadConfig } from '../../config/loader.js';
+import { applyTerminalBackground } from '../terminal-background.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { discoverContextWindow } from '../../host/startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
@@ -380,6 +381,7 @@ export const chatCommand = new Command('chat')
       });
       await bridge?.start();
 
+      const restoreBackground = applyTerminalBackground(process.stdout, config.tui.background);
       const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
       const { waitUntilExit } = render(
@@ -423,6 +425,7 @@ export const chatCommand = new Command('chat')
       } catch {
         // exit() was called — normal shutdown
       }
+      restoreBackground();
       clearInterval(checkpointTimer);
       process.off('SIGTERM', onFatalSignal);
       process.off('SIGHUP', onFatalSignal);

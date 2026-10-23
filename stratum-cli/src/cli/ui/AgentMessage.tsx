@@ -7,9 +7,15 @@ import { AgentTree } from './AgentTree.js';
 import { StreamingText } from './StreamingText.js';
 import { MarkdownText } from './MarkdownText.js';
 import { InitProgressBlock, type InitStep } from './InitProgressBlock.js';
-import { reasoningPreview } from './reasoning-preview.js';
+import { countWords, reasoningPreview } from './reasoning-preview.js';
 import { ToolGroupBlock } from './ToolGroupBlock.js';
-import { groupToolCalls, type Verbosity } from './tool-groups.js';
+import {
+  CLOSED_TURN_ACTION_LIMIT,
+  describeActionTools,
+  groupToolCalls,
+  summarizeActions,
+  type Verbosity,
+} from './tool-groups.js';
 import { turnUsageParts, type UsageView } from './telemetry-format.js';
 
 interface Props {
@@ -96,6 +102,12 @@ export function AgentMessage({
   const grouped = !streaming && verbosity !== 'verbose';
   const hideThinking = verbosity === 'compact';
   const showAllThinking = debug || verbosity === 'verbose';
+  // Turno cerrado con más acciones de las que se veían en vivo: una línea de
+  // resumen. Listarlas todas volcaba de golpe decenas de filas al acabar.
+  const summarizeTools = grouped && toolCalls.length > CLOSED_TURN_ACTION_LIMIT;
+  const closedThinking =
+    !streaming && !hideThinking && !showAllThinking ? thinkingBlocks : undefined;
+  const summarizeThinking = (closedThinking?.length ?? 0) > 2;
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -111,17 +123,23 @@ export function AgentMessage({
           now={now}
         />
       )}
-      {(streaming ? thinkingBlocks?.slice(-2) : hideThinking ? [] : thinkingBlocks)?.map(
-        (t, i, shown) => (
-          <ThinkingLine
-            key={`think-${i}`}
-            text={t}
-            live={streaming && thinkingOpen && i === shown.length - 1}
-            debug={showAllThinking}
-          />
-        ),
-      )}
+      {summarizeThinking && <ThinkingSummaryLine blocks={closedThinking ?? []} />}
+      {(streaming
+        ? thinkingBlocks?.slice(-2)
+        : hideThinking || summarizeThinking
+          ? []
+          : thinkingBlocks
+      )?.map((t, i, shown) => (
+        <ThinkingLine
+          key={`think-${i}`}
+          text={t}
+          live={streaming && thinkingOpen && i === shown.length - 1}
+          debug={showAllThinking}
+        />
+      ))}
+      {!isInit && summarizeTools && <ActionSummaryLine calls={toolCalls} />}
       {!isInit &&
+        !summarizeTools &&
         (grouped
           ? groupToolCalls(visibleToolCalls).map((row) =>
               row.kind === 'group' ? (
@@ -152,8 +170,7 @@ export function AgentMessage({
             )))}
       {streaming && hiddenActions > 0 && (
         <Text color={theme.textDisabled} dimColor>
-          … {hiddenActions} acción{hiddenActions === 1 ? '' : 'es'} anterior
-          {hiddenActions === 1 ? '' : 'es'} fijada{hiddenActions === 1 ? '' : 's'} en el scrollback
+          … y {hiddenActions === 1 ? '1 acción anterior' : `${hiddenActions} acciones anteriores`}
         </Text>
       )}
       {/* Hito 8C: >1 subagente en el turno ⇒ árbol vivo; 1 solo ⇒ bloque plano (§5.6). */}
@@ -225,6 +242,43 @@ function ThinkingLine({ text, live, debug }: { text: string; live: boolean; debu
         ) : (
           <Text dimColor>{live ? '…' : ' · /debug para verlo'}</Text>
         )}
+      </Text>
+    </Box>
+  );
+}
+
+/**
+ * Las acciones de un turno cerrado largo, en una línea:
+ * `✓ 42 acciones │ 38 exec · 3 read_file · 1 write_file │ ✗ 4 con error`.
+ * Los fallos se cuentan aparte porque son lo único que el usuario querría ir a
+ * mirar; `Tab` sigue inspeccionando cada acción del último turno.
+ */
+function ActionSummaryLine({ calls }: { calls: ToolCallState[] }) {
+  const summary = summarizeActions(calls);
+  return (
+    <Box>
+      <Text color={theme.success}>✓ </Text>
+      <Text color={theme.textMuted}>{summary.total} acciones</Text>
+      <Text color={theme.textFaint} wrap="truncate-end">
+        {' '}
+        │ {describeActionTools(summary)}
+      </Text>
+      {summary.failed > 0 && <Text color={theme.errorMuted}> │ ✗ {summary.failed} con error</Text>}
+    </Box>
+  );
+}
+
+/** Varios bloques de razonamiento de un turno cerrado, en una línea. */
+function ThinkingSummaryLine({ blocks }: { blocks: string[] }) {
+  const words = blocks.reduce((sum, b) => sum + countWords(b), 0);
+  return (
+    <Box marginLeft={2}>
+      <Text color={theme.textDisabled} wrap="truncate-end">
+        ⊙ razonó
+        <Text dimColor>
+          {' '}
+          · {blocks.length} veces · {words} palabras · /debug para verlo
+        </Text>
       </Text>
     </Box>
   );

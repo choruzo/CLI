@@ -26,6 +26,7 @@ import type {
 } from '../../agent/types.js';
 import type { TodoItem } from '../../agent/todo.js';
 import { useLiveClock } from './spinner.js';
+import { conversationRows, pinnedPanelRows } from './layout.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -77,8 +78,10 @@ interface Props {
   onPlanApprove?: (plan: Plan) => void;
   onPlanReject?: () => void;
   // ----- Lista de tareas (Hito 11) -----
-  /** Tareas vivas; vacio tambien cuando el usuario colapso el panel. */
+  /** Tareas vivas. */
   todos?: TodoItem[];
+  /** El usuario plegó el panel (`Ctrl+T`, `/todo`): queda una línea. */
+  todoCollapsed?: boolean;
   /** Turnos con tareas abiertas sin actualizar (marca de staleness). */
   todoStale?: number;
   // ----- Jobs en segundo plano -----
@@ -139,6 +142,7 @@ export function ConversationView({
   onPlanApprove,
   onPlanReject,
   todos,
+  todoCollapsed = false,
   todoStale,
   jobs,
   jobsNow,
@@ -161,34 +165,21 @@ export function ConversationView({
   const panelMaxSteps = Math.max(2, Math.min(5, Math.floor(terminalRows / 5)));
   const jobsClock = jobsNow ?? Date.now();
   const showJobs = Boolean(jobs && visibleJobs(jobs, jobsClock).length > 0);
-  const pinnedPanels =
-    Number(Boolean(plan && planMode === 'execute')) +
-    Number(Boolean(todos?.length)) +
-    Number(showJobs);
-  const availableConversationRows = Math.max(8, terminalRows - pinnedPanels * (panelMaxSteps + 3));
+  const showPlan = Boolean(plan && planMode === 'execute');
+  const showTodos = Boolean(todos?.length);
+  const panelRows = pinnedPanelRows({
+    plan: showPlan,
+    todo: showTodos ? (todoCollapsed ? 'collapsed' : 'open') : null,
+    jobs: showJobs,
+    maxSteps: panelMaxSteps,
+  });
+  const availableConversationRows = conversationRows(terminalRows, panelRows);
+  // De arriba abajo: el turno en curso, los paneles anclados (plan, tareas,
+  // jobs) justo encima del input, el input y, al pie, la telemetría y la barra
+  // de estado. Lo que se queda fijo va abajo: arriba, el turno crece y lo
+  // empujaría hacia el scrollback.
   return (
     <Box flexDirection="column" width="100%">
-      <StatusBar
-        providerName={providerName}
-        model={model}
-        contextUsed={contextUsed}
-        contextMax={contextMax}
-        estimated={contextEstimated}
-        mcpStatus={mcpStatus}
-        providerStatus={providerStatus}
-        mode={planMode}
-        changes={changes}
-        tokens={tokens}
-        activeAgent={activeAgent}
-        readOnly={readOnly}
-        sessionProfile={sessionProfile}
-        environment={environment}
-      />
-      {plan && planMode === 'execute' && <PlanView plan={plan} maxSteps={panelMaxSteps} />}
-      {todos && todos.length > 0 && (
-        <TodoView items={todos} stale={todoStale ?? 0} maxSteps={panelMaxSteps} />
-      )}
-      {showJobs && <JobsView jobs={jobs ?? []} now={jobsClock} maxRows={panelMaxSteps} />}
       <MessageList
         completedItems={completedItems}
         currentItem={currentItem}
@@ -200,6 +191,16 @@ export function ConversationView({
         verbosity={verbosity}
       />
       {fatalError && <FatalError message={fatalError.message} />}
+      {showPlan && plan && <PlanView plan={plan} maxSteps={panelMaxSteps} />}
+      {showTodos && (
+        <TodoView
+          items={todos ?? []}
+          stale={todoStale ?? 0}
+          maxSteps={panelMaxSteps}
+          collapsed={todoCollapsed}
+        />
+      )}
+      {showJobs && <JobsView jobs={jobs ?? []} now={jobsClock} maxRows={panelMaxSteps} />}
       {plan && pendingApproval && (
         <PlanApproval
           plan={plan}
@@ -258,6 +259,22 @@ export function ConversationView({
           telemetry={telemetry}
         />
       )}
+      <StatusBar
+        providerName={providerName}
+        model={model}
+        contextUsed={contextUsed}
+        contextMax={contextMax}
+        estimated={contextEstimated}
+        mcpStatus={mcpStatus}
+        providerStatus={providerStatus}
+        mode={planMode}
+        changes={changes}
+        tokens={tokens}
+        activeAgent={activeAgent}
+        readOnly={readOnly}
+        sessionProfile={sessionProfile}
+        environment={environment}
+      />
     </Box>
   );
 }
