@@ -78,7 +78,7 @@ export function applyOverviewEvent(
         ),
       };
     default:
-      // `run.*` y `session.detached`: el estado que se pinta en la lista viaja
+      // `run.*`: el estado que se pinta en la lista viaja
       // en `session.updated` (`state`, `currentRunId`); el run, en su sesión.
       return overview;
   }

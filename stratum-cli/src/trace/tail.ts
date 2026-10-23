@@ -11,6 +11,11 @@ export class FileTail {
   private offset = 0;
   private partial = '';
   private busy = false;
+  /**
+   * Uno por fichero, no por lectura: con un presupuesto, un carácter multibyte
+   * puede quedar partido entre dos sondeos.
+   */
+  private decoder = new TextDecoder('utf-8');
 
   constructor(
     private readonly file: string,
@@ -18,33 +23,39 @@ export class FileTail {
     private readonly onReset: () => void,
   ) {}
 
-  async poll(): Promise<void> {
-    if (this.busy) return;
+  /**
+   * Lee lo nuevo, hasta `maxBytes` (de más, en el siguiente sondeo). Devuelve
+   * los bytes leídos, o `null` si ya había otro sondeo en curso.
+   */
+  async poll(maxBytes = Infinity): Promise<number | null> {
+    if (this.busy) return null;
     this.busy = true;
+    let read = 0;
     try {
       let size: number;
       try {
         size = (await stat(this.file)).size;
       } catch {
-        return; // todavía no existe: la sesión no ha tenido ningún turno
+        return 0; // todavía no existe: la sesión no ha tenido ningún turno
       }
       if (size < this.offset) {
         // Truncado o sustituido: se vuelve a empezar.
         this.offset = 0;
         this.partial = '';
+        this.decoder = new TextDecoder('utf-8');
         this.onReset();
       }
-      if (size === this.offset) return;
+      if (size === this.offset) return 0;
       const handle = await open(this.file, 'r');
       try {
-        // Un decoder por tanda: un carácter multibyte puede caer entre dos lecturas.
-        const decoder = new TextDecoder('utf-8');
         const buf = Buffer.alloc(READ_CHUNK);
-        while (this.offset < size) {
-          const { bytesRead } = await handle.read(buf, 0, READ_CHUNK, this.offset);
+        while (this.offset < size && read < maxBytes) {
+          const want = Math.min(READ_CHUNK, size - this.offset, maxBytes - read);
+          const { bytesRead } = await handle.read(buf, 0, want, this.offset);
           if (bytesRead === 0) break;
           this.offset += bytesRead;
-          this.partial += decoder.decode(buf.subarray(0, bytesRead), { stream: true });
+          read += bytesRead;
+          this.partial += this.decoder.decode(buf.subarray(0, bytesRead), { stream: true });
           const lines = this.partial.split('\n');
           this.partial = lines.pop() ?? '';
           for (const line of lines) if (line.trim()) this.onLine(line);
@@ -57,5 +68,6 @@ export class FileTail {
     } finally {
       this.busy = false;
     }
+    return read;
   }
 }

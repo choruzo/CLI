@@ -525,7 +525,6 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
   'session.opened': z.object({ session: sessionSchema }),
   'session.updated': z.object({ session: sessionSchema }),
   'session.closed': z.object({ reason: z.enum(['closed', 'host-exit', 'server-shutdown']) }),
-  'session.detached': emptyResult,
   'run.started': z.object({ run: runSchema }),
   'run.updated': z.object({ run: runSchema }),
   'run.completed': z.object({ run: runSchema }),

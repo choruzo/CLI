@@ -747,3 +747,66 @@ describe('fitSnapshot — postcondición estricta', () => {
     }
   });
 });
+
+describe('SessionPublisher — tool_error vetada', () => {
+  it('un tool_error con blocked publica tool.blocked y cuenta en blocked, no en toolErrors', async () => {
+    const { host, emit } = fakeHost('s-blocked', testConfig('blocked'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'peer', client: 'cli', connected: true },
+      sink,
+    });
+    publisher.start();
+    emit({ type: 'turn_started', kind: 'run', input: 'hola' });
+    emit(event({ type: 'tool_call_ready', id: 't1', name: 'read_file', input: {} }));
+    emit(
+      event({
+        type: 'tool_error',
+        id: 't1',
+        name: 'read_file',
+        error: 'modo read-only',
+        recoverable: true,
+        blocked: 'read-only',
+      }),
+    );
+    await tick();
+    expect(sink.states().filter((e) => e.type === 'tool.blocked')).toMatchObject([
+      { data: { call: { id: 't1', state: 'blocked' }, source: 'read-only' } },
+    ]);
+    expect(sink.events.some((e) => e.type === 'tool.failed')).toBe(false);
+    expect(publisher.snapshot()).toMatchObject({
+      run: { counters: { blocked: 1, toolErrors: 0 } },
+    });
+  });
+
+  it('sin blocked sigue siendo un fallo de la tool: tool.failed y toolErrors', async () => {
+    const { host, emit } = fakeHost('s-failed', testConfig('failed'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'peer', client: 'cli', connected: true },
+      sink,
+    });
+    publisher.start();
+    emit({ type: 'turn_started', kind: 'run', input: 'hola' });
+    emit(event({ type: 'tool_call_ready', id: 't1', name: 'read_file', input: {} }));
+    emit(
+      event({
+        type: 'tool_error',
+        id: 't1',
+        name: 'read_file',
+        error: 'falló de verdad',
+        recoverable: true,
+      }),
+    );
+    await tick();
+    expect(sink.states().filter((e) => e.type === 'tool.failed')).toMatchObject([
+      { data: { call: { id: 't1', state: 'error' }, recoverable: true } },
+    ]);
+    expect(sink.events.some((e) => e.type === 'tool.blocked')).toBe(false);
+    expect(publisher.snapshot()).toMatchObject({
+      run: { counters: { blocked: 0, toolErrors: 1 } },
+    });
+  });
+});

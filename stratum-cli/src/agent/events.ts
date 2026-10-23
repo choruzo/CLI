@@ -6,6 +6,15 @@
  * importando de allí.
  */
 
+/** Quién vetó una tool call antes de ejecutarla (`tool_error.blocked`). */
+export type ToolBlockSource =
+  | 'preflight'
+  | 'read-only'
+  | 'environment'
+  | 'toolset'
+  | 'plan'
+  | 'steering';
+
 export type AgentEvent =
   | { type: 'text_delta'; delta: string }
   | { type: 'tool_call_start'; id: string; name: string; input_so_far: string }
@@ -19,6 +28,11 @@ export type AgentEvent =
       recoverable: boolean;
       /** Hito 16 — la tool llegó a ejecutar (un comando que salió ≠ 0, se truncó o se canceló). */
       executed?: boolean;
+      /**
+       * El runtime no dejó ejecutarla (un veto, también anotado en la traza). Lo
+       * pone quien vetó: nunca se deduce del texto del error.
+       */
+      blocked?: ToolBlockSource;
     }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   /**

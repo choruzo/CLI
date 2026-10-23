@@ -254,9 +254,10 @@ async function pauseSteerResumeCancel(
   expect(final.run).toMatchObject({ id: runId, status: 'cancelled' });
   expect(final.session.state).toBe('idle');
   // Nada queda «en curso» en un run cancelado: lo propuesto y no ejecutado se cerró.
+  // `c2` lo descartó el steering (un veto); `c3`, la cancelación (un error).
   expect(final.toolCalls.map((c) => [c.id, c.state])).toEqual([
     ['c1', 'completed'],
-    ['c2', 'error'],
+    ['c2', 'blocked'],
     ['c3', 'error'],
   ]);
   return { whilePaused, final };
@@ -453,7 +454,10 @@ describe('J — aprobación resuelta, pausa y steering', () => {
     expect(existsSync(file)).toBe(true);
     const resolved = w.states().find((e) => e.type === 'approval.resolved');
     expect(resolved).toMatchObject({ data: { status: 'approved' } });
-    expect(w.types()).toContain('tool.failed');
+    expect(w.states().find((e) => e.type === 'tool.blocked')).toMatchObject({
+      data: { source: 'steering' },
+    });
+    expect(w.types()).not.toContain('tool.failed');
     expect(w.types()).not.toContain('tool.completed');
     expect(w.types().filter((x) => x === 'approval.requested')).toHaveLength(1);
     expect(t.provider(cwd).calls).toBe(2);

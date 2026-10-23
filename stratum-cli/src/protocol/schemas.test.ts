@@ -159,7 +159,7 @@ describe('eventos', () => {
   };
 
   it('hay schema de datos para cada tipo de evento', () => {
-    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(35);
+    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(34);
   });
 
   it('valida los de estado y los volátiles', () => {

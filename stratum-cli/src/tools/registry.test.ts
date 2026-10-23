@@ -412,4 +412,26 @@ describe('ToolDispatcher — Hito 16', () => {
     );
     expect(res!.result.ok).toBe(false);
   });
+
+  it('un veto de preflight marca blocked en el resultado; un fallo al ejecutar no', async () => {
+    const reg = new ToolRegistry();
+    reg.register(
+      makeTool(
+        'vetada',
+        { ok: true, output: '' },
+        { preflight: () => ({ ok: false, error: 'no', recoverable: true }) },
+      ),
+    );
+    reg.register(makeTool('rompe', { ok: false, error: 'falló', recoverable: true }));
+    const results = await new ToolDispatcher(reg).dispatch(
+      [
+        { id: 'a', name: 'vetada', input: {} },
+        { id: 'b', name: 'rompe', input: {} },
+      ],
+      ctx,
+    );
+    expect(results[0]!.result).toMatchObject({ ok: false, error: 'no', blocked: 'preflight' });
+    expect(results[1]!.result).toMatchObject({ ok: false, error: 'falló' });
+    expect(results[1]!.result).not.toHaveProperty('blocked');
+  });
 });

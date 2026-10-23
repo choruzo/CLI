@@ -82,6 +82,8 @@ import { OperationCache, type OperationCacheOptions } from './operation-cache.js
 import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
+import { TraceFeeds } from './trace-feeds.js';
+import { traceFilePath } from '../trace/store.js';
 
 const log = getLogger('daemon');
 
@@ -116,6 +118,8 @@ export interface StratumdOptions {
   /** `0` = no se apaga solo. Por defecto, `daemon.idleExitMinutes`. */
   idleExitMs?: number;
   eventBuffer?: number;
+  /** Cada cuánto mira `trace.subscribe` si la traza creció (250 ms). */
+  tracePollMs?: number;
   maxSessions?: number;
   /** Cola de eventos por suscripción. */
   subscriptionQueue?: number;
@@ -156,6 +160,16 @@ export interface StratumdOptions {
   now?: () => number;
 }
 
+/** Ajustes de una sesión nueva que no caben en `sessions.open { resume }`. */
+const RESUME_EXCLUSIVE = [
+  'cwd',
+  'agent',
+  'provider',
+  'model',
+  'readOnly',
+  'sessionProfile',
+] as const;
+
 function invalid(path: string, message: string): ProtocolError {
   return new ProtocolError('INVALID_PARAMS', message, { issues: [{ path, message }] });
 }
@@ -178,6 +192,8 @@ export class Stratumd {
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly registry = new RunRegistry();
   private readonly hub: EventHub;
+  /** `trace.subscribe`: la traza de cada sesión, leída de su fichero. */
+  private readonly traces: TraceFeeds;
   /** Sesiones que alojan otros procesos: aquí solo está su proyección. */
   private readonly peers: PeerSessions;
   /** Aprobaciones, preguntas y planes pendientes de todas las sesiones, y quién los resuelve. */
@@ -226,6 +242,7 @@ export class Stratumd {
         null,
       overviewOf: () => this.overview(),
     });
+    this.traces = new TraceFeeds(opts.tracePollMs ? { pollMs: opts.tracePollMs } : {});
     this.approvalTimeoutMs =
       opts.approvalTimeoutMs ?? Math.round(opts.config.daemon.approvalTimeoutMinutes * 60_000);
     this.approvals = new ApprovalCenter({
@@ -278,10 +295,14 @@ export class Stratumd {
       onRequest: () => daemon.operationStarted(),
       onDisconnected: (conn) => {
         daemon.hub.dropClient(conn);
+        daemon.traces.dropClient(conn);
         // Las sesiones que alojaba quedan sin anfitrión; no se cierran.
         daemon.peers.disconnected(conn);
       },
-      onDrain: (conn) => daemon.hub.pump(conn),
+      onDrain: (conn) => {
+        daemon.hub.pump(conn);
+        daemon.traces.pump(conn);
+      },
       approver: opts.approver ?? null,
       ...(opts.approverFailureDelayMs !== undefined
         ? { approverFailureDelayMs: opts.approverFailureDelayMs }
@@ -421,6 +442,7 @@ export class Stratumd {
       this.peers.shutdown();
       // Los últimos eventos (`session.closed`) salen antes de la despedida.
       this.hub.flushAll();
+      this.traces.closeAll();
       await this.settle('server', () => this.server.close(reason === 'idle' ? 'idle' : 'shutdown'));
       await this.settle('endpoint', () => this.claim.release());
       const socketDir = this.socketDir;
@@ -642,14 +664,31 @@ export class Stratumd {
     };
   }
 
+  /**
+   * `sessions.open { resume }`: la sesión guardada del daemon con ese id, montada
+   * (M11). Es la misma sesión, con sus ajustes: no admite los de una sesión nueva.
+   * Una que ya está montada se devuelve tal cual; `origin` no cambia.
+   *
+   * @throws ProtocolError `INVALID_PARAMS` (otros ajustes), `NOT_FOUND`,
+   *   `UNAVAILABLE` (`peer-hosted`, `startup`, `cwd`).
+   */
+  private resumeSession(
+    params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
+  ): Promise<HostedSession> {
+    for (const field of RESUME_EXCLUSIVE) {
+      if (params[field] !== undefined) {
+        throw invalid(field, 'a resumed session keeps its own settings');
+      }
+    }
+    return this.wake(params.resume as string, 'Resuming it');
+  }
+
   private async openSession(
     params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
     origin?: ClientKind,
   ): Promise<HostedSession> {
     if (this.shuttingDown) throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
-    if (params.resume) {
-      throw new ProtocolError('UNAVAILABLE', 'Resuming a saved session is not available yet.');
-    }
+    if (params.resume !== undefined) return this.resumeSession(params);
     if (this.sessions.size + this.opening >= this.maxSessions) {
       throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
     }
@@ -1256,6 +1295,12 @@ export class Stratumd {
         this.hub.unsubscribe(conn, params.subscriptionId);
         return {};
       },
+      'trace.subscribe': (params) =>
+        this.traces.subscribe(conn, params.sessionId, this.traceFileOf(params.sessionId)),
+      'trace.unsubscribe': (params) => {
+        this.traces.unsubscribe(conn, params.subscriptionId);
+        return {};
+      },
 
       // Anfitriones pares. La capacidad `host` da acceso a estos tres métodos;
       // sobre qué sesiones, lo decide `PeerSessions`: las que registró esa conexión.
@@ -1294,6 +1339,24 @@ export class Stratumd {
       this.opts.config,
       this.opts.assistantData?.dir ?? assistantDataDir(),
     );
+  }
+
+  /**
+   * El fichero de traza de una sesión del daemon, montada o guardada sin montar
+   * (con la config de su directorio, sin montarla). La de una sesión par la
+   * escribe su proceso: no es del daemon.
+   *
+   * @throws ProtocolError `NOT_FOUND`, `UNAVAILABLE` (`peer-hosted`, config).
+   */
+  private traceFileOf(sessionId: string): string {
+    if (this.peers.has(sessionId)) throw peerHostedOnly('Its trace');
+    const live = this.sessions.get(sessionId);
+    const recorded = live?.host.trace?.file;
+    if (recorded) return recorded;
+    const cwd = live?.session().cwd ?? this.dormant.get(sessionId)?.archived.meta.cwd;
+    const file = cwd !== undefined ? traceFilePath(this.configFor(cwd), sessionId) : null;
+    if (!file) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+    return file;
   }
 
   private configFor(cwd: string | undefined): StratumConfig {

@@ -185,7 +185,7 @@ host ownership  !=  operator control  !=  approver authority
 | `agents.list` · `models.list` | observe | | Lo que se puede elegir al abrir una sesión: nombres y alias, sin secretos (§13.7) |
 | `skills.list` | observe | | Skills que vería una sesión nueva de ese agente: `{ cwd?, agent? }`; `cwd` absoluto obligatorio salvo con `agent: 'assistant'` |
 | `sessions.list` · `sessions.get` | observe | | `get` devuelve una foto |
-| `sessions.open` | control | ✓ | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4) |
+| `sessions.open` | control | ✓ | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4). `resume`: id de una sesión guardada del daemon, que se monta y se devuelve con sus ajustes (§19.4); no admite `cwd`, `agent`, `provider`, `model`, `readOnly` ni `sessionProfile` (`INVALID_PARAMS`) |
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly` | control | ✓ | |
 | `sessions.detach` | control | ✓ | Traspasa una sesión par al daemon, mismo id y contexto (§18). Devuelve `{ status: 'detached' \| 'already-daemon', session }`; `BUSY`/`NOT_TRANSFERABLE` con `data.reason` |
 | `runs.list` · `runs.get` | observe | | |
@@ -274,7 +274,7 @@ un cliente detecta una pérdida.
   "seq": 4, "data": { "call": { /* ProtocolToolCall */ } } }
 ```
 
-`session.opened` · `session.updated` · `session.closed` · `session.detached` ·
+`session.opened` · `session.updated` · `session.closed` ·
 `run.started` · `run.updated` · `run.completed` · `run.failed` · `run.cancelled` ·
 `message.completed` · `tool.started` · `tool.completed` · `tool.failed` · `tool.blocked` ·
 `subagent.started` · `subagent.completed` · `memory.read` · `memory.write` ·
@@ -350,9 +350,11 @@ Ante un `UnknownOutcomeError` de un método mutante (`approvals.resolve`, `runs.
 
 ## 11. Qué queda sin hacer
 
-Definido en el contrato y sin implementación tras M7: `trace.subscribe`, reanudar una sesión guardada
-(`sessions.open { resume }`) y listar las guardadas. Detalle en §13.6. Una sesión alojada en el
-servidor **no sobrevive a su reinicio**: no hay persistencia de las sesiones del daemon.
+Desde Contrato-1 todo lo que declara el contrato está atendido o retirado (§13.6, §17): no queda
+ningún método que conteste `METHOD_NOT_FOUND` o `UNAVAILABLE` por no estar hecho. Lo único
+reservado es la capacidad `broker` (y su rol), que el servidor **nunca concede**: los clientes
+nativos aprueban con la clave de aprobador (§15.2), no con ella. Las sesiones del daemon se
+guardan y vuelven tras un reinicio desde M11 (§19.4).
 
 Stratum Dot (M6) es el primer cliente que no es Node: su lado nativo (`stratum-dot/crates/dot-link`,
 Rust) habla este protocolo —framing, descubrimiento, handshake, las reglas de §9 y §10— y su
@@ -513,16 +515,31 @@ accidentales, no es una medida de seguridad. Un `INTERNAL_ERROR` no se recuerda.
 
 | Respuesta | Métodos |
 |---|---|
-| Atendido | `core.*` · `agents.list` · `models.list` · `sessions.list` (solo vivas) · `sessions.get` · `sessions.open` · `sessions.close` · `sessions.set*` · `runs.list` · `runs.get` · `runs.start` · `runs.steer` · `runs.cancel` · `runs.pause` · `runs.resume` (§16) · `approvals.list` · `approvals.resolve` · `questions.answer` · `plans.decide` (§15) · `jobs.*` · `memory.*` · `events.*` |
-| `UNAVAILABLE` | `sessions.open { resume }` |
-| `METHOD_NOT_FOUND` | `trace.*` (y `host.*` hasta M3: ver §14) |
+| Atendido | Todos los métodos de §6. `sessions.open { resume }` monta una sesión guardada (§19.4); `trace.subscribe` sirve la traza (abajo) |
 
 Capacidades que se conceden: `observe`, `control`, `host` y, **solo con una clave de aprobador
-verificada**, `approve` (§5, §15.2). `broker` sigue sin concederse.
+verificada**, `approve` (§5, §15.2). `broker` está reservada y no se concede nunca (§11).
 
-Eventos que **no** se emiten todavía: `tool.blocked` (la decisión no viaja como evento del
-turno) y `session.detached`, que no lo emite nadie (§14.3). `ProtocolRun.counters.llmCalls` y
-`.blocked` valen 0: no se estiman.
+**`trace.subscribe { sessionId }`** (`observe`). Retransmite la traza de una sesión del daemon
+(`<trace.dir>/<id>.jsonl`, la que escribe su runtime ya redactada) como `trace.records`:
+
+- El primer `trace.records` de la suscripción lleva `reset: true`, también si la traza aún no
+  existe (va vacío). Después, solo lo nuevo con `reset: false`. Si el fichero se trunca o se
+  sustituye, otro `reset: true` con el contenido desde el principio.
+- `format` es el de la traza (`TRACE_FORMAT_VERSION`); cada registro es opaco para el protocolo.
+- Sirve las sesiones montadas y las guardadas sin montar (no las monta). La de una sesión par la
+  escribe su proceso: `UNAVAILABLE` (`peer-hosted`). Un id que no es del daemon, `NOT_FOUND`.
+- El fichero es el búfer: se lee por tramos y solo mientras la salida del cliente admite datos,
+  así que un cliente lento no hace crecer la memoria del daemon ni pierde registros. Un registro
+  de más de 512 KB se salta. Como mucho 8 suscripciones de traza por conexión.
+- La traza no tiene `seq`: tras reconectar, el cliente se suscribe otra vez y recibe un `reset`.
+
+Eventos que **no** se emiten: `ProtocolRun.counters.llmCalls` vale 0 (no se estima). Desde
+Contrato-1, `tool.blocked` sí: lo publica el anfitrión cuando el runtime veta una llamada antes
+de ejecutarla (`source`: `preflight`, `read-only`, `environment`, `toolset`, `plan` o
+`steering`), con `call.state: 'blocked'`, y cuenta en `counters.blocked`, no en `toolErrors`. Una
+confirmación denegada (por una persona o por la política de la sesión) no es un veto: sigue
+siendo `tool.failed`.
 
 `memory.write` lleva la sesión que **intentó** guardar, no la del registro: con dedup, el
 registro que queda puede ser de otra sesión.
@@ -702,8 +719,8 @@ solo cambian con cada `session.updated`.
   §18) nunca pasa por ese estado.
 - **El daemon no numera eventos propios.** Lo que él sabe —que el anfitrión se fue, que volvió,
   que la proyección se descarta— llega a los clientes como una **foto** (`snapshot` a quien
-  sigue la sesión, `overview` a quien sigue el conjunto), que sustituye su estado. Por eso
-  `session.detached` no se emite.
+  sigue la sesión, `overview` a quien sigue el conjunto), que sustituye su estado. Por eso no
+  hay un evento `session.detached` (se retiró del contrato en Contrato-1, §17).
 - **Vuelta**: el anfitrión reconecta, se registra con su `claim` y su foto actual, y la foto
   manda. Sin el `claim` correcto no se puede reclamar una sesión sin anfitrión (`FORBIDDEN`);
   con una foto anterior a lo ya conocido, tampoco (`STALE_STATE`). Lo ocurrido mientras tanto
@@ -1209,6 +1226,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M11 | Métodos `sessions.history`, `sessions.context` y `sessions.memory` (`observe`); DTOs `ProtocolHistoryPage`, `ProtocolContextReport`, `ProtocolSessionMemory`; `HISTORY_LIMITS`. Las sesiones del daemon se recuperan tras un reinicio: el mismo id vuelve a `sessions.list` | Aditivo. Que una sesión del daemon sobreviva a su proceso cambia una garantía documentada (§13.7, §18.10), no la forma del contrato |
 | M12 | `ProtocolSession.origin?` (`ClientKind`); `sessions.open { agent: 'assistant' }` abre el agente embebido y `agents.list` lo ofrece el primero; `sessions.setAgent` hacia o desde `assistant` → `INVALID_PARAMS`; `ProtocolHandoffContext.agent` puede ser `assistant`. Funciones de cliente puras `followSession`, `applyOverviewEvent`, `boundedTranscript` y, en `schemas.ts`, `classifyEvent`/`parseSessionSnapshot`/`parseOverviewSnapshot` | Aditivo: `origin` es opcional y solo procedencia; el resto no cambia la forma de ningún mensaje |
 | Skills de serie | Método `skills.list` (`observe`) y DTO `ProtocolSkill`. `memory.status`/`memory.decisions` sin `cwd` miran la memoria global (la del asistente), no la del directorio del proceso del daemon; con `cwd`, la del proyecto (`<raíz del worktree>/.stratum/memory/`) | Método aditivo. Lo de `memory.*` cambia qué memoria se mira, no la forma: la de la CLI dejó de ser global |
+| Contrato-1 | Se **retira** el evento `session.detached` (y de `OVERVIEW_EVENT_TYPES`). `tool.blocked` se emite; `sessions.open { resume }` y `trace.subscribe`/`unsubscribe` se atienden (§13.6, §19.4). `broker` queda reservada y sin conceder | Sin publicar, y **ningún servidor llegó a emitir `session.detached`**: lo que contaba ya viaja como foto (§14.3), y emitirlo exigiría que el daemon numerase eventos propios. Lo demás era contrato declarado sin atender: atenderlo no cambia ninguna forma |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1512,11 +1530,16 @@ stratumd se reinicia
 ```
 
 - **Recuperada no es montada.** Al arrancar, las guardadas se publican con su foto sin montar
-  nada (ni servers MCP ni agente). `runs.start`, `sessions.setModel|setAgent|setReadOnly` y
-  `sessions.close` la montan (una vez aunque lleguen dos a la vez) con el entorno del daemon,
+  nada (ni servers MCP ni agente). `sessions.open { resume: id }`, `runs.start`,
+  `sessions.setModel|setAgent|setReadOnly` y `sessions.close` la montan (una vez aunque lleguen
+  dos a la vez) con el entorno del daemon,
   como una traspasada. Si ya no se puede (directorio, provider, perfil), `UNAVAILABLE` con
   `reason: 'cwd' | 'startup'` y sigue guardada. Sobre una sin montar, `runs.cancel|pause|resume`
   contestan `not-running`, `runs.steer` `not-accepting` y `jobs.cancel` `NOT_FOUND`.
+- **`sessions.open { resume }`** es montarla a propósito: devuelve la misma sesión (mismo id,
+  `origin` y ajustes). Ya montada, la devuelve tal cual. Es la sesión guardada, no una nueva,
+  así que no admite ajustes de apertura (`INVALID_PARAMS`). Un id que no es del daemon es
+  `NOT_FOUND`, y el de una sesión par, `UNAVAILABLE` (`peer-hosted`).
 - **El `seq` continúa**: la foto recuperada sigue desde lo más alto que se llegó a guardar
   (también la conversación escrita a mitad de un turno). Lo que estaba en marcha cuando murió
   el daemon queda `interrupted`; sin pendientes, ni texto a medias, ni jobs vivos.

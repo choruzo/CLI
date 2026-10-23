@@ -260,6 +260,49 @@ describe('M11 — una sesión del daemon sobrevive a un reinicio', () => {
     expect(existsSync(join(base, 'daemon', 'sessions', b.id))).toBe(false);
   });
 
+  it('sessions.open { resume } monta la guardada: misma sesión, sus ajustes, una sola vez', async () => {
+    const base = newBase();
+    const first = await daemonAt(base);
+    const cwd = first.project('r', [makeTextRound('Antes.')]);
+    const client = await first.connect(['operator'], 'dot', { kind: 'dot' });
+    const { session } = await client.request('sessions.open', { cwd, readOnly: true });
+    const live = watch(client, session.id);
+    await live.untilSnapshot();
+    await ask(client, live, session.id, 'hola');
+    await first.stop();
+    daemons.splice(daemons.indexOf(first), 1);
+
+    const second = await daemonAt(base);
+    second.project('r', [makeTextRound('Después.')]);
+    const c2 = await second.connect(['operator']);
+    // Es la misma sesión: no admite los ajustes de una nueva.
+    expect(await failure(c2.request('sessions.open', { resume: session.id, cwd }))).toBe(
+      'INVALID_PARAMS',
+    );
+    expect(
+      await failure(c2.request('sessions.open', { resume: session.id, readOnly: false })),
+    ).toBe('INVALID_PARAMS');
+    expect(second.daemon.liveSessions).toBe(0);
+
+    // Dos a la vez montan una sola.
+    const [a, b] = await Promise.all([
+      c2.request('sessions.open', { resume: session.id }),
+      c2.request('sessions.open', { resume: session.id }),
+    ]);
+    expect(a.session).toMatchObject({ id: session.id, cwd, readOnly: true, origin: 'dot' });
+    expect(b.session.id).toBe(session.id);
+    expect(second.daemon.liveSessions).toBe(1);
+    // Montada: el contexto activo ya existe, y la conversación sigue ahí.
+    const report = (await c2.request('sessions.context', { sessionId: session.id })).report;
+    expect(report.context).not.toBeNull();
+    expect((await fullHistory(c2, session.id)).map((m) => m.kind)).toEqual(['user', 'assistant']);
+    // Ya montada: se devuelve tal cual.
+    const again = await c2.request('sessions.open', { resume: session.id });
+    expect(again.session.id).toBe(session.id);
+    expect(second.daemon.liveSessions).toBe(1);
+    expect((await c2.request('sessions.list', {})).sessions.map((s) => s.id)).toEqual([session.id]);
+  });
+
   it('sin la carpeta de sesiones, la conversación vive en memoria y se pagina igual', async () => {
     const base = newBase();
     const t = await daemonAt(base, false);
@@ -288,6 +331,9 @@ describe('M11 — compatibilidad con M10 (traspaso)', () => {
     await peer.run('dato: equipo=rojo');
     const observer = await first.connect(['operator']);
     expect(await failure(observer.request('sessions.history', { sessionId: peer.sessionId }))).toBe(
+      'UNAVAILABLE:peer-hosted',
+    );
+    expect(await failure(observer.request('sessions.open', { resume: peer.sessionId }))).toBe(
       'UNAVAILABLE:peer-hosted',
     );
     // El daemon monta la sesión que recibe en ese directorio.

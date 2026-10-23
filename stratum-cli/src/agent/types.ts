@@ -14,6 +14,7 @@ import type {
   QuestionItem,
   SubagentResult,
   TokenStatus,
+  ToolBlockSource,
 } from './events.js';
 
 // Tipos del evento y de sus datos: viven en `events.ts` (sin dependencias, lo
@@ -33,6 +34,7 @@ export type {
   TodoItem,
   TodoStatus,
   TokenStatus,
+  ToolBlockSource,
 } from './events.js';
 
 export type PlanDecision = { decision: 'approve'; plan: Plan } | { decision: 'reject' };
@@ -289,6 +291,8 @@ export type ToolResult =
       countsAsFailure?: boolean;
       /** Hito 16 — la operación llegó a ejecutarse (el write-log la sigue contando). */
       executed?: boolean;
+      /** El dispatcher la vetó antes de ejecutarla (y lo anotó en la traza). */
+      blocked?: ToolBlockSource;
     };
 
 export interface ToolDefinition {

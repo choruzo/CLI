@@ -211,7 +211,13 @@ describe('M12 — el agente embebido `assistant`', () => {
     expect(existsSync(join(cwd, 'fuera.md'))).toBe(false);
     const outcomes = await toolOutcomes(desktop, session.id);
     expect(outcomes.map((o) => o.name)).toEqual(['write_file', 'write_file', 'read_file', 'exec']);
-    expect(outcomes.map((o) => o.status)).toEqual(['completed', 'error', 'completed', 'error']);
+    // Las dos rechazadas no llegan a ejecutarse: las veta el runtime (`tool.blocked`).
+    expect(outcomes.map((o) => o.status)).toEqual(['completed', 'blocked', 'completed', 'blocked']);
+    const vetoes = live.states().filter((e) => e.type === 'tool.blocked');
+    expect(vetoes.map((e) => (e.data as { source: string }).source)).toEqual([
+      'preflight',
+      'toolset',
+    ]);
     // Las tools que recibió el modelo son las del asistente.
     const offered = t.provider(cwd).toolNames.at(0) ?? [];
     expect(offered).not.toContain('exec');

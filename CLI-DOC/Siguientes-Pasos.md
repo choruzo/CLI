@@ -233,9 +233,14 @@ en worktrees aparte, cada bloque pasado por un reviewer de opencode y con sus ha
 - `/btw <pregunta>`: `tracedCompletion` con un origen nuevo, sin entrar en la conversación ni en la memoria.
 - «Pasar a segundo plano» un `exec` en curso → job, con las mismas guardas.
 
-### Contrato-1 — Cerrar v1 *(M)*
-- Implementar o retirar `sessions.open{resume}`, `trace.subscribe`, `session.detached` y `tool.blocked`.
-  Fan-out de `EventHub` con frame único por evento. Anotar en §17 y preparar la congelación.
+### Contrato-1 — Cerrar v1 *(M)* ✅ (2026-10-23, sin commit)
+- `sessions.open { resume }`: monta una sesión guardada del daemon (mismo id y ajustes; rechaza los de apertura).
+- `trace.subscribe`/`unsubscribe`: `daemon/trace-feeds.ts` sigue el fichero de traza por tramos (el fichero es el búfer).
+- `tool.blocked`: `tool_error.blocked` desde `vetoed()` (dispatcher) y `vetoOutcome()` (loop); `counters.blocked`.
+- `session.detached` **retirado** del contrato (lo cuenta la foto, §14.3). `broker` queda reservada y sin conceder.
+- Anotado en `docs/protocol.md` §11, §13.6 y §17.
+- **Pendiente:** fan-out de `EventHub` con frame único (antes, medirlo: cada notificación lleva su `subscriptionId`);
+  `sessions.revert` (decisión §6.3); la congelación en sí llega con el primer tag que publique `stratumd`.
 
 ### Eval-1 — Replay de sesión grabada *(M)*
 - Escenario = traza grabada + `workspace.expected/`. Corre sin modelo en CI y verifica el mundo, no la

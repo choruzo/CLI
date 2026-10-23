@@ -1058,8 +1058,16 @@ export class SessionPublisher {
       }
       case 'tool_error': {
         const call = this.toolCall(event.id, event.name, subagentId);
-        call.state = 'error';
         call.error = clip(this.redact(event.error), OUTPUT_CHARS);
+        if (event.blocked) {
+          // Vetada por el runtime: no llegó a ejecutarse, no es un fallo de la tool.
+          call.state = 'blocked';
+          run.counters.blocked++;
+          const source = event.blocked;
+          this.state('tool.blocked', () => ({ call: { ...call }, source }), subagentId);
+          return;
+        }
+        call.state = 'error';
         run.counters.toolErrors++;
         this.state(
           'tool.failed',

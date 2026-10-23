@@ -269,13 +269,17 @@ export class ToolRegistry {
   }
 }
 
-/** Anota en la traza una llamada rechazada sin preguntar (el motivo ya llega redactado). */
-function traceVeto(
+/**
+ * Una llamada rechazada sin preguntar: se anota en la traza y el resultado
+ * lleva quién la vetó (`blocked`), que viaja hasta el `tool_error`. El motivo
+ * ya llega redactado.
+ */
+function vetoed(
   ctx: ToolContext,
   call: ToolCallReady,
   source: 'preflight' | 'read-only' | 'environment' | 'steering',
   veto: ToolResult,
-): void {
+): ToolResult {
   ctx.trace?.runtime({
     event: 'veto',
     source,
@@ -283,6 +287,7 @@ function traceVeto(
     callId: call.id,
     reason: veto.ok ? '' : veto.error,
   });
+  return veto.ok ? veto : { ...veto, blocked: source };
 }
 
 /** Resultado de una llamada que no llegó a ejecutarse porque el turno se canceló. */
@@ -332,8 +337,7 @@ export class ToolDispatcher {
       const readOnly = this.readOnlyVeto(call, ctx);
       const veto = readOnly ?? this.preflight(call, ctx);
       if (veto === null) continue;
-      denied.set(call.id, veto);
-      traceVeto(ctx, call, readOnly ? 'read-only' : 'preflight', veto);
+      denied.set(call.id, vetoed(ctx, call, readOnly ? 'read-only' : 'preflight', veto));
     }
 
     for (const call of calls) {
@@ -365,8 +369,7 @@ export class ToolDispatcher {
             recoverable: true,
             countsAsFailure: false,
           };
-          denied.set(call.id, veto);
-          traceVeto(ctx, call, 'steering', veto);
+          denied.set(call.id, vetoed(ctx, call, 'steering', veto));
         }
       }
     }
@@ -476,16 +479,14 @@ export class ToolDispatcher {
       // Falla cerrado: sin poder decidir el entorno, un `confirm-always` o un
       // `typed` quedarían sin efecto.
       log.warn('environment gate threw', { tool: call.name, err });
-      const veto: ToolResult = {
+      return vetoed(ctx, call, 'environment', {
         ok: false,
         error:
           `Tool "${call.name}": the environment policy could not be evaluated for this call, ` +
           'so it was not executed.',
         recoverable: true,
         countsAsFailure: false,
-      };
-      traceVeto(ctx, call, 'environment', veto);
-      return veto;
+      });
     }
     // `confirm-always`: se pregunta por todo cambio, y ni
     // `tools.confirmDestructive: false`, ni `--allow-destructive`, ni el

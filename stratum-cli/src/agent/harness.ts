@@ -23,6 +23,7 @@ import type {
   PlanStepStatus,
   QuestionAnswer,
   TokenAccounting,
+  ToolBlockSource,
   ToolCallReady,
   ToolContext,
   RunOptions,
@@ -1635,14 +1636,9 @@ export class ReactLoop {
       if (inbox && jobScope === MAIN_JOB_SCOPE && inbox.hasPendingUserMessages()) {
         loopLog.info('tool batch superseded by steering', { iter, calls: readyCalls.length });
         for (const call of readyCalls) {
-          opts?.trace?.runtime({
-            event: 'veto',
-            source: 'steering',
-            tool: call.name,
-            callId: call.id,
+          const o = this.vetoOutcome(opts?.trace, call, 'steering', SUPERSEDED_BY_STEERING, fmt, {
             reason: 'a user message arrived before this call was dispatched',
           });
-          const o = this.toolErrorOutcome(call.id, call.name, SUPERSEDED_BY_STEERING, true, fmt);
           yield o.event;
           this.messages.push(o.message);
         }
@@ -1669,21 +1665,9 @@ export class ReactLoop {
             readOnly && !isToolVisibleForProfile(call.name, READ_ONLY_TOOLSET)
               ? `tool '${call.name}' is not available in a read-only session`
               : `tool '${call.name}' is not available to this agent profile`;
-          opts?.trace?.runtime({
-            event: 'veto',
-            source: 'toolset',
-            tool: call.name,
-            callId: call.id,
-            reason: err,
+          const o = this.vetoOutcome(opts?.trace, call, 'toolset', err, fmt, {
+            suggestion: 'Use only the tools offered to you in this conversation.',
           });
-          const o = this.toolErrorOutcome(
-            call.id,
-            call.name,
-            err,
-            true,
-            fmt,
-            'Use only the tools offered to you in this conversation.',
-          );
           yield o.event;
           this.messages.push(o.message);
           continue;
@@ -1812,21 +1796,9 @@ export class ReactLoop {
           const err = effects
             ? `Plan mode: only read-only commands can run until the plan is approved (${effects.reason ?? 'this command changes state'})`
             : `Plan mode: tool '${call.name}' deshabilitada hasta aprobar el plan`;
-          opts?.trace?.runtime({
-            event: 'veto',
-            source: 'plan',
-            tool: call.name,
-            callId: call.id,
-            reason: err,
+          const o = this.vetoOutcome(opts?.trace, call, 'plan', err, fmt, {
+            suggestion: 'Use only read-only tools, then call present_plan with your plan.',
           });
-          const o = this.toolErrorOutcome(
-            call.id,
-            call.name,
-            err,
-            true,
-            fmt,
-            'Use only read-only tools, then call present_plan with your plan.',
-          );
           yield o.event;
           this.messages.push(o.message);
           continue;
@@ -1860,14 +1832,9 @@ export class ReactLoop {
                 `${target}, and this session cannot present one for approval. Report what you ` +
                 'would change and ask the user to run the task as a plan (/plan in the chat, or ' +
                 'stratum run --plan).';
-            opts?.trace?.runtime({
-              event: 'veto',
-              source: 'plan',
-              tool: call.name,
-              callId: call.id,
+            const o = this.vetoOutcome(opts?.trace, call, 'plan', err, fmt, {
               reason: redactText(err, this.config),
             });
-            const o = this.toolErrorOutcome(call.id, call.name, err, true, fmt);
             yield o.event;
             this.messages.push(o.message);
             continue;
@@ -1977,6 +1944,7 @@ export class ReactLoop {
               fmt,
               undefined,
               res.result.executed,
+              res.result.blocked,
             );
             yield o.event;
             this.messages.push(o.message);
@@ -2016,14 +1984,9 @@ export class ReactLoop {
       if (batchSuperseded && !signal.aborted) {
         loopLog.info('rest of the batch superseded by steering', { iter });
         for (const call of restOfBatch) {
-          opts?.trace?.runtime({
-            event: 'veto',
-            source: 'steering',
-            tool: call.name,
-            callId: call.id,
+          const o = this.vetoOutcome(opts?.trace, call, 'steering', SUPERSEDED_BY_STEERING, fmt, {
             reason: 'a user message arrived while the run was paused, before this call started',
           });
-          const o = this.toolErrorOutcome(call.id, call.name, SUPERSEDED_BY_STEERING, true, fmt);
           yield o.event;
           this.messages.push(o.message);
         }
@@ -2283,6 +2246,22 @@ export class ReactLoop {
     };
   }
 
+  /**
+   * Una llamada que el loop no deja ejecutar: el veto va a la traza y el
+   * `tool_error` dice quién la vetó (`blocked`). Siempre recuperable.
+   */
+  private vetoOutcome(
+    trace: TraceScope | undefined,
+    call: ToolCallReady,
+    source: ToolBlockSource,
+    error: string,
+    fmt: 'xml' | 'json',
+    { reason = error, suggestion }: { reason?: string; suggestion?: string } = {},
+  ): { event: AgentEvent; message: Message } {
+    trace?.runtime({ event: 'veto', source, tool: call.name, callId: call.id, reason });
+    return this.toolErrorOutcome(call.id, call.name, error, true, fmt, suggestion, false, source);
+  }
+
   private toolErrorOutcome(
     id: string,
     name: string,
@@ -2291,6 +2270,7 @@ export class ReactLoop {
     fmt: 'xml' | 'json',
     suggestion?: string,
     executed?: boolean,
+    blocked?: ToolBlockSource,
   ): { event: AgentEvent; message: Message } {
     const safe = redactText(error, this.config);
     return {
@@ -2301,6 +2281,7 @@ export class ReactLoop {
         error: safe,
         recoverable,
         ...(executed ? { executed: true } : {}),
+        ...(blocked ? { blocked } : {}),
       },
       message: {
         role: 'tool',

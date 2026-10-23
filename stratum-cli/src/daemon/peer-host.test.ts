@@ -418,6 +418,19 @@ describe('D — dos anfitriones', () => {
         hostA.request('host.publish', { epoch: 1, sessionId: 'sess_a', events: [stolenRun] }),
       ),
     ).toBe('INVALID_PARAMS');
+    // `session.detached` se retiró del contrato (lo cuenta la foto): publicarlo no vale.
+    const retired = {
+      type: 'session.detached',
+      sessionId: 'sess_a',
+      at: Date.now(),
+      seq: 2,
+      data: {},
+    } as unknown as ProtocolEvent;
+    expect(
+      await intruder(
+        hostA.request('host.publish', { epoch: 1, sessionId: 'sess_a', events: [retired] }),
+      ),
+    ).toBe('INVALID_PARAMS');
     // Alojar no es gobernar: ni la suya ni la ajena.
     expect(await intruder(hostA.request('runs.cancel', { sessionId: 'sess_b' }))).toBe('FORBIDDEN');
     expect(await intruder(hostA.request('sessions.close', { sessionId: 'sess_a' }))).toBe(

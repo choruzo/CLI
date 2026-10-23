@@ -377,9 +377,6 @@ export class PeerSessions {
             throw invalid(path, 'a pending request of another session');
           }
           return;
-        // Lo que el daemon cuenta por su cuenta con una foto no lo publica un anfitrión.
-        case 'session.detached':
-          throw invalid(path, 'not an event a host publishes');
         default:
           return;
       }

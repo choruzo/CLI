@@ -42,8 +42,8 @@ export interface StateEventData {
   /** Cambió algo del resumen: estado, modelo, perfil, read-only, contexto, tokens. */
   'session.updated': { session: ProtocolSession };
   'session.closed': { reason: 'closed' | 'host-exit' | 'server-shutdown' };
-  /** El anfitrión de la sesión perdió la conexión. Puede volver. */
-  'session.detached': Record<string, never>;
+  // Que el anfitrión se fue no es un evento: el daemon no numera, y lo cuenta
+  // con una foto (`state: 'detached'`, `host.connected: false`). §14.3.
 
   'run.started': { run: ProtocolRun };
   /** Cambio de estado dentro del run (`running` ↔ `waiting_approval` ↔ `paused`…). */
@@ -130,7 +130,6 @@ export const EVENT_CLASS: Readonly<Record<ProtocolEventType, 'state' | 'volatile
   'session.opened': 'state',
   'session.updated': 'state',
   'session.closed': 'state',
-  'session.detached': 'state',
   'run.started': 'state',
   'run.updated': 'state',
   'run.completed': 'state',
@@ -172,7 +171,6 @@ export const OVERVIEW_EVENT_TYPES: readonly StateEventType[] = [
   'session.opened',
   'session.updated',
   'session.closed',
-  'session.detached',
   'run.started',
   'run.updated',
   'run.completed',

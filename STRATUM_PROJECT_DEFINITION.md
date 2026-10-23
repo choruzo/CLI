@@ -844,13 +844,18 @@ type AgentEvent =
   | { type: 'tool_call_start';  id: string; name: string; input_so_far: string }
   | { type: 'tool_call_ready';  id: string; name: string; input: Record<string, unknown> }
   | { type: 'tool_result';      id: string; name: string; result: string; durationMs: number }
-  | { type: 'tool_error';       id: string; name: string; error: string; recoverable: boolean }
+  | { type: 'tool_error';       id: string; name: string; error: string; recoverable: boolean;
+      executed?: boolean;           // Hito 16 — la tool llegó a ejecutarse
+      blocked?: ToolBlockSource }   // Contrato-1 — el runtime la vetó antes de ejecutarla
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   | { type: 'thinking';         text: string }          // fragmento del razonamiento (§12.2); no entra en el historial
   | { type: 'plan_proposed';    plan: Plan }            // Hito 7 — fin de la fase de planificación
   | { type: 'plan_step_update'; stepId: string; status: PlanStepStatus }  // Hito 7
   | { type: 'error';            message: string; fatal: boolean }
   | { type: 'done';             stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' }
+
+// Quién vetó una llamada (lo pone quien vetó; nunca se deduce del texto del error)
+type ToolBlockSource = 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering';
 
 // Hito 7 — Plan & Execute (ver §12.15)
 type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped';

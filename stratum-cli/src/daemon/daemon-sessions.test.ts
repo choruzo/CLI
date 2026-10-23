@@ -216,8 +216,9 @@ describe('stratumd — varias sesiones', () => {
       'INVALID_PARAMS',
     );
     expect(await code(operator.request('sessions.open', { cwd, resume: 'sess_x' }))).toBe(
-      'UNAVAILABLE',
+      'INVALID_PARAMS',
     );
+    expect(await code(operator.request('sessions.open', { resume: 'sess_x' }))).toBe('NOT_FOUND');
     expect(await code(operator.request('sessions.open', { cwd, agent: 'no-existe' }))).toBe(
       'INVALID_PARAMS',
     );

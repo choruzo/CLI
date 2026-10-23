@@ -460,10 +460,10 @@ cambiada por líneas JSON: permite probar contra un daemon real sin automatizar 
 
 - **Sin trazas y sin cerrar sesiones**: posteriores. Límites propios del chat: §12.8; del
   centro de aprobaciones: §13.11.
-- **Sesiones guardadas (*History*)**: el daemon no las lista todavía (`protocol.md` §11); Dot
-  no enseña ninguna.
-- **Una tool descartada por steering se ve como *Failed***: el protocolo la publica como
-  `tool.failed` (`tool.blocked` aún no se emite, `protocol.md` §13.6).
+- **Sesiones guardadas (*History*)**: el daemon ya las lista (`sessions.list`) y las monta con
+  `sessions.open { resume }` (`protocol.md` §19.4); Dot todavía no las enseña.
+- Una tool vetada por el runtime (también la descartada por steering) llega como
+  `tool.blocked` con su `source` desde Contrato-1 (`protocol.md` §13.6).
 - **`tool.started` no es «ejecutándose»** (ver §5).
 - **El entorno de una sesión del daemon arrancado por Dot es el de Dot** (el de la sesión
   gráfica, no el de una terminal): es Q1 del PRD, sin cambios en M6.
@@ -485,8 +485,8 @@ cambiada por líneas JSON: permite probar contra un daemon real sin automatizar 
   siguen y solo se registra en el log: la interfaz no lo dice.
 - **Bandeja en GNOME/Wayland** sin probar en un escritorio Linux real (Q4, §6).
 
-Deuda del **protocolo**, no de Dot: `tool.started` se publica antes de ejecutar y `tool.blocked`
-no se emite (`protocol.md` §13.6 y §16).
+Deuda del **protocolo**, no de Dot: `tool.started` se publica antes de ejecutar (`protocol.md`
+§13.6 y §16).
 
 ## 10. Convivencia con Stratum Desktop
 
