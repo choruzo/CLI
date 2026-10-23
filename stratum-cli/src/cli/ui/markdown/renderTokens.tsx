@@ -4,6 +4,7 @@ import type { Token, Tokens } from 'marked';
 import { theme } from '../theme.js';
 import { CodeBlock } from './CodeBlock.js';
 import { InlineCode } from './InlineCode.js';
+import { unescapeHtml } from './entities.js';
 
 function ruleWidth(): number {
   return Math.min((process.stdout.columns ?? 80) - 4, 100);
@@ -37,7 +38,7 @@ export function renderInline(tokens: Token[] | undefined, keyPrefix = 'i'): Reac
           </Text>
         );
       case 'codespan':
-        return <InlineCode key={k}>{(token as Tokens.Codespan).text}</InlineCode>;
+        return <InlineCode key={k}>{unescapeHtml((token as Tokens.Codespan).text)}</InlineCode>;
       case 'link': {
         const link = token as Tokens.Link;
         const label = link.tokens ? renderInline(link.tokens, k) : link.text;
@@ -54,13 +55,13 @@ export function renderInline(tokens: Token[] | undefined, keyPrefix = 'i'): Reac
       case 'br':
         return <Text key={k}>{'\n'}</Text>;
       case 'escape':
-        return <Text key={k}>{(token as Tokens.Escape).text}</Text>;
+        return <Text key={k}>{unescapeHtml((token as Tokens.Escape).text)}</Text>;
       case 'text': {
         const t = token as Tokens.Text;
         if (t.tokens && t.tokens.length > 0) {
           return <Text key={k}>{renderInline(t.tokens, k)}</Text>;
         }
-        return <Text key={k}>{t.text}</Text>;
+        return <Text key={k}>{unescapeHtml(t.text)}</Text>;
       }
       default:
         // Fallback plano: ningún elemento no soportado rompe el render
@@ -123,6 +124,79 @@ function QuoteBlock({ token, k }: { token: Tokens.Blockquote; k: string }) {
   );
 }
 
+/** Texto visible de unos tokens inline, sin estilos: para medir columnas. */
+export function inlinePlain(tokens: Token[] | undefined): string {
+  if (!tokens) return '';
+  return tokens
+    .map((token) => {
+      const nested = (token as { tokens?: Token[] }).tokens;
+      if (nested && nested.length > 0 && token.type !== 'codespan') return inlinePlain(nested);
+      if (token.type === 'br') return ' ';
+      return unescapeHtml((token as { text?: string }).text ?? '');
+    })
+    .join('');
+}
+
+/** Hueco entre columnas de una tabla. */
+const TABLE_GAP = 2;
+/** Ninguna columna se encoge por debajo de esto, aunque la tabla no quepa. */
+const MIN_TABLE_COLUMN = 6;
+
+/**
+ * Ancho de cada columna: el natural (la celda más larga) si cabe en `room`; si
+ * no, se recortan las más anchas hasta caber y sus celdas envuelven. Puro.
+ */
+export function tableColumnWidths(natural: number[], room: number): number[] {
+  const widths = natural.map((w) => Math.max(1, w));
+  const budget = room - TABLE_GAP * Math.max(0, widths.length - 1);
+  let excess = widths.reduce((a, b) => a + b, 0) - budget;
+  while (excess > 0) {
+    const widest = Math.max(...widths);
+    if (widest <= MIN_TABLE_COLUMN) break;
+    const i = widths.indexOf(widest);
+    widths[i] = widest - 1;
+    excess--;
+  }
+  return widths;
+}
+
+const JUSTIFY = { left: 'flex-start', center: 'center', right: 'flex-end' } as const;
+
+function TableBlock({ token, k }: { token: Tokens.Table; k: string }) {
+  const natural = token.header.map((cell, c) =>
+    Math.max(
+      inlinePlain(cell.tokens).length,
+      ...token.rows.map((row) => inlinePlain(row[c]?.tokens).length),
+    ),
+  );
+  const widths = tableColumnWidths(natural, ruleWidth());
+  const row = (cells: Tokens.TableCell[], rk: string, header: boolean) => (
+    <Box key={rk}>
+      {widths.map((w, c) => (
+        <Box
+          key={`${rk}-${c}`}
+          width={w}
+          marginRight={c < widths.length - 1 ? TABLE_GAP : 0}
+          justifyContent={JUSTIFY[token.align[c] ?? 'left']}
+        >
+          <Text wrap="wrap" bold={header} color={header ? theme.accent : theme.textResponse}>
+            {renderInline(cells[c]?.tokens, `${rk}-${c}`)}
+          </Text>
+        </Box>
+      ))}
+    </Box>
+  );
+  return (
+    <Box flexDirection="column" marginBottom={1} marginLeft={1}>
+      {row(token.header, `${k}-h`, true)}
+      <Text color={theme.textDisabled}>
+        {widths.map((w) => '─'.repeat(w)).join(' '.repeat(TABLE_GAP))}
+      </Text>
+      {token.rows.map((cells, r) => row(cells, `${k}-r${r}`, false))}
+    </Box>
+  );
+}
+
 /**
  * Función recursiva principal: Token[] (block-level) → JSX.Element[].
  * `inline=true` aplana párrafos a texto (para blockquotes).
@@ -164,18 +238,20 @@ export function renderTokens(tokens: Token[], keyPrefix = 't', inline = false): 
             <Text color={theme.textDisabled}>{'─'.repeat(ruleWidth())}</Text>
           </Box>
         );
+      case 'table':
+        return <TableBlock key={k} token={token as Tokens.Table} k={k} />;
       case 'space':
         return <React.Fragment key={k} />;
       case 'text': {
         const t = token as Tokens.Text;
         return (
           <Text key={k} wrap="wrap" color={theme.textResponse}>
-            {t.tokens && t.tokens.length > 0 ? renderInline(t.tokens, k) : t.text}
+            {t.tokens && t.tokens.length > 0 ? renderInline(t.tokens, k) : unescapeHtml(t.text)}
           </Text>
         );
       }
       default:
-        // Tablas, HTML inline, footnotes... → texto plano sin parsear (v1)
+        // HTML inline, footnotes... → texto plano sin parsear (v1)
         return (
           <Text key={k} wrap="wrap" color={theme.textResponse}>
             {(token as { raw?: string }).raw ?? ''}

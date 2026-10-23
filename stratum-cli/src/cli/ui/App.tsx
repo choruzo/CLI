@@ -530,16 +530,22 @@ export function reducer(state: AppState, action: AppAction): AppState {
       if (ev.type === 'text_delta') {
         return {
           ...state,
-          currentItem: updateCurrentAgent(state.currentItem, (item) => ({
-            ...item,
-            text: item.textBreak
-              ? `${item.text.trimEnd()}
-
-${ev.delta}`
-              : item.text + ev.delta,
-            textBreak: false,
-            thinkingOpen: false,
-          })),
+          currentItem: updateCurrentAgent(state.currentItem, (item) => {
+            if (!item.textBreak) {
+              return { ...item, text: item.text + ev.delta, thinkingOpen: false };
+            }
+            // La respuesta nueva suele abrir con saltos de línea: sumados al
+            // separador dejaban huecos de varias líneas en blanco. Mientras solo
+            // llega blanco, el separador sigue pendiente.
+            const delta = ev.delta.trimStart();
+            if (!delta) return { ...item, thinkingOpen: false };
+            return {
+              ...item,
+              text: `${item.text.trimEnd()}\n\n${delta}`,
+              textBreak: false,
+              thinkingOpen: false,
+            };
+          }),
         };
       }
 

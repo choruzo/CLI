@@ -61,3 +61,17 @@ describe('texto de varias respuestas en un mismo turno', () => {
     expect(agent(s).text).toBe('Hola');
   });
 });
+
+describe('texto de varias respuestas en un turno', () => {
+  it('las separa con una sola línea en blanco aunque el modelo abra con saltos', () => {
+    const s = [
+      ev({ type: 'text_delta', delta: 'Para resetear la contraseña:\n\n' }),
+      ev({ type: 'tool_call_start', id: 'c1', name: 'exec', input_so_far: '' }),
+      ev({ type: 'text_delta', delta: '\n\n' }),
+      ev({ type: 'text_delta', delta: '\n' }),
+      ev({ type: 'text_delta', delta: '  \nNo hay CLI' }),
+      ev({ type: 'text_delta', delta: ' en el contenedor.' }),
+    ].reduce(reducer, started());
+    expect(agent(s).text).toBe('Para resetear la contraseña:\n\nNo hay CLI en el contenedor.');
+  });
+});
