@@ -148,6 +148,9 @@ export function useAgentStream(
             max: ctx.max,
             estimated: ctx.estimated,
             tokens: agent.getTokenUsage(),
+            // UX-3: uso del turno en curso para el pie del prompt y para el
+            // pie del turno (el reductor lo aplica antes del `done`).
+            turnUsage: agent.getLiveTurnUsage(),
           };
         };
         const flush = (includeContext = false) => {
@@ -216,6 +219,8 @@ export function useAgentStream(
           else if (frameTimer) clearTimeout(frameTimer);
           if (contextTimer) clearTimeout(contextTimer);
           abortRef.current = null;
+          // El generador ya terminó: `runTurn` consolidó el turno en la sesión.
+          dispatch({ type: 'USAGE_UPDATE', session: agent.getSessionUsage() });
         }
       } finally {
         endTurn();

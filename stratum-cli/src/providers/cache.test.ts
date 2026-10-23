@@ -123,6 +123,31 @@ describe('normalizeUsage', () => {
       promptTokens: 10,
     });
   });
+
+  it('lee reasoning_tokens donde el backend lo manda, y no lo inventa si no viene', () => {
+    expect(
+      normalizeUsage({
+        prompt_tokens: 100,
+        completion_tokens: 60,
+        completion_tokens_details: { reasoning_tokens: 40 },
+      }),
+    ).toEqual({ promptTokens: 100, completionTokens: 60, totalTokens: 160, reasoningTokens: 40 });
+    // Anthropic a través de pasarela.
+    expect(
+      normalizeUsage({
+        prompt_tokens: 100,
+        completion_tokens: 60,
+        output_tokens_details: { reasoning_tokens: 25 },
+      })?.reasoningTokens,
+    ).toBe(25);
+    expect(
+      normalizeUsage({
+        prompt_tokens: 100,
+        completion_tokens: 60,
+        completion_tokens_details: null,
+      }),
+    ).not.toHaveProperty('reasoningTokens');
+  });
 });
 
 describe('withCacheDerived', () => {

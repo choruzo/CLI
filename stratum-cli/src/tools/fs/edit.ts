@@ -3,7 +3,9 @@ import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
 import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
+import { withDiagnostics } from './attach-diagnostics.js';
 import { generateUnifiedDiff } from './diff.js';
+import { MATCH_LEVELS, findSpans, replaceSpans, type MatchLevel, type Span } from './match.js';
 import {
   FileChangedError,
   UnsupportedEncodingError,
@@ -28,55 +30,34 @@ const schema = z.object({
     .describe('Replace every occurrence of old_string (default: false)'),
 });
 
-function countOccurrences(haystack: string, needle: string): number {
-  let count = 0;
-  let idx = haystack.indexOf(needle);
-  while (idx !== -1) {
-    count++;
-    idx = haystack.indexOf(needle, idx + needle.length);
-  }
-  return count;
-}
+const levelLabels: Record<MatchLevel, string> = {
+  exact: 'exact match',
+  unicode: 'after normalizing unicode punctuation/spaces',
+  'trailing-whitespace': 'ignoring trailing whitespace',
+};
 
 /**
- * Reemplazo literal. `String.prototype.replace` con un string de reemplazo
- * interpreta `$&`, `$1`, `$$`…: un `new_string` con código de shell, PHP o
- * plantillas JS salía corrompido.
- */
-function replaceLiteral(text: string, search: string, replacement: string, all: boolean): string {
-  if (all) return text.split(search).join(replacement);
-  const idx = text.indexOf(search);
-  return text.slice(0, idx) + replacement + text.slice(idx + search.length);
-}
-
-/**
+ * Escalera de búsqueda: exacto, luego normalizando unicode, luego por líneas
+ * ignorando espacios finales. Se para en el primer nivel que encuentra algo.
+ *
  * En un fichero CRLF el modelo casi siempre escribe `old_string` con `\n`
- * (read_file no le enseña los `\r`), así que la búsqueda exacta no casaba nunca
- * con más de una línea. Se prueba primero tal cual y, si no aparece, con los
- * saltos convertidos a CRLF. El reemplazo siempre se adapta a CRLF, para no
- * dejar líneas LF sueltas en medio del fichero.
+ * (read_file no le enseña los `\r`), así que el nivel exacto prueba primero tal
+ * cual y, si no aparece, con los saltos convertidos a CRLF. Los otros niveles
+ * trabajan sobre el texto tal cual.
  */
-function matchInFile(
+function locateInFile(
   file: TextFile,
   oldString: string,
-  newString: string,
-): { search: string; replacement: string; occurrences: number } {
-  if (file.eol !== 'crlf') {
-    return {
-      search: oldString,
-      replacement: newString,
-      occurrences: countOccurrences(file.text, oldString),
-    };
+): { level: MatchLevel; spans: Span[] } | null {
+  for (const level of MATCH_LEVELS) {
+    const needles =
+      level === 'exact' && file.eol === 'crlf' ? [oldString, toCrlf(oldString)] : [oldString];
+    for (const needle of needles) {
+      const spans = findSpans(file.text, needle, level);
+      if (spans.length > 0) return { level, spans };
+    }
   }
-  const replacement = toCrlf(newString);
-  const exact = countOccurrences(file.text, oldString);
-  if (exact > 0) return { search: oldString, replacement, occurrences: exact };
-  const search = toCrlf(oldString);
-  return {
-    search,
-    replacement,
-    occurrences: search === oldString ? 0 : countOccurrences(file.text, search),
-  };
+  return null;
 }
 
 export const editFileTool: ToolDefinition = {
@@ -85,6 +66,8 @@ export const editFileTool: ToolDefinition = {
     'Performs exact string replacement in a file.\n' +
     '- old_string must match the file contents EXACTLY, including indentation and line breaks. ' +
     'When copying from read_file output, strip the "N: " line-number prefix first.\n' +
+    '- As a last resort the match tolerates typographic quotes/dashes/spaces and trailing ' +
+    'whitespace; this is a safety net for small slips, not a reason to be sloppy.\n' +
     '- old_string must be unique in the file; include surrounding lines to disambiguate, ' +
     'or set replace_all: true to replace every occurrence.\n' +
     '- Only UTF-8 text files can be edited; the file keeps its BOM and line endings.\n' +
@@ -132,29 +115,41 @@ export const editFileTool: ToolDefinition = {
       };
     }
 
-    const { search, replacement, occurrences } = matchInFile(file, old_string, new_string);
+    // Un `old_string` que empieza por BOM no casa nunca: el BOM no está en
+    // `file.text` (se conserva aparte y se reescribe al guardar).
+    const needle = old_string.startsWith('\ufeff') ? old_string.slice(1) : old_string;
+    const located = locateInFile(file, needle);
 
-    if (occurrences === 0) {
+    if (!located) {
       return {
         ok: false,
         error:
-          `old_string not found in "${path}". Ensure it matches the file exactly ` +
-          '(whitespace, indentation, line breaks) and does not include read_file line-number prefixes.',
+          `old_string not found in "${path}", even after normalizing typographic ` +
+          'punctuation/spaces and ignoring trailing whitespace. Ensure it matches the file ' +
+          'exactly (whitespace, indentation, line breaks) and does not include read_file ' +
+          'line-number prefixes.',
         recoverable: true,
       };
     }
+
+    const { level, spans } = located;
+    const occurrences = spans.length;
 
     if (occurrences > 1 && !replace_all) {
       return {
         ok: false,
         error:
-          `old_string appears ${occurrences} times in "${path}". ` +
+          `old_string appears ${occurrences} times in "${path}" (${levelLabels[level]}). ` +
           'Add surrounding context to make it unique, or set replace_all: true.',
         recoverable: true,
       };
     }
 
-    const updated = replaceLiteral(file.text, search, replacement, replace_all === true);
+    // El reemplazo siempre se adapta a CRLF, para no dejar líneas LF sueltas en
+    // medio del fichero. `new_string` no se normaliza de ninguna otra forma: lo
+    // que escribe el modelo es lo que queda.
+    const replacement = file.eol === 'crlf' ? toCrlf(new_string) : new_string;
+    const updated = replaceSpans(file.text, replace_all ? spans : [spans[0]], replacement);
 
     try {
       // `expected`: si el fichero cambió desde la lectura de arriba (un editor
@@ -183,6 +178,20 @@ export const editFileTool: ToolDefinition = {
       updated.replace(/\r\n/g, '\n'),
     );
     const replacedNote = replace_all ? ` (${occurrences} occurrences replaced)` : '';
-    return { ok: true, output: `File edited: ${path}${replacedNote}\n\n${diff}` };
+    const levelNote =
+      level === 'unicode'
+        ? ' (matched after normalizing unicode punctuation/spaces)'
+        : level === 'trailing-whitespace'
+          ? ' (matched ignoring trailing whitespace)'
+          : '';
+    // UX-2b: los diagnósticos del language server van detrás del diff, ya
+    // formateados. Un `null` o un fallo del LSP dejan el resultado intacto.
+    const output = await withDiagnostics(
+      `File edited: ${path}${levelNote}${replacedNote}\n\n${diff}`,
+      target,
+      updated,
+      ctx,
+    );
+    return { ok: true, output };
   },
 };

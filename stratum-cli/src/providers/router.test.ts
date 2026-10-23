@@ -133,3 +133,55 @@ describe('ProviderRouter — fallback automático por orden (Hito 6)', () => {
     expect(router.providerNames).toEqual(['primary', 'secondary', 'tertiary']);
   });
 });
+
+describe('ProviderRouter — precio del provider activo (UX-3)', () => {
+  function makePricingConfig() {
+    return StratumConfigSchema.parse({
+      provider: {
+        default: 'gateway',
+        providers: {
+          gateway: {
+            type: 'openai-compatible',
+            baseUrl: 'http://localhost:4000/v1',
+            model: 'claude-sonnet-4-5',
+            apiKey: 'sk-x',
+            pricing: { input: 3, output: 15 },
+            models: {
+              'claude-haiku-4-5': { pricing: { input: 0.8, output: 4 } },
+            },
+          },
+          local: {
+            type: 'openai-compatible',
+            baseUrl: 'http://localhost:11434/v1',
+            model: 'qwen2.5-coder:32b',
+            apiKey: 'ollama',
+          },
+        },
+      },
+    });
+  }
+
+  it('devuelve el precio del provider del modelo activo', () => {
+    const router = new ProviderRouter(makePricingConfig());
+    expect(router.pricing).toEqual({ input: 3, output: 15 });
+  });
+
+  it('el precio del modelo gana al del provider', () => {
+    const router = new ProviderRouter(makePricingConfig());
+    router.switchModel('claude-haiku-4-5');
+    expect(router.pricing).toEqual({ input: 0.8, output: 4 });
+  });
+
+  it('sin pricing declarado no hay tarifa (no se inventa)', () => {
+    const router = new ProviderRouter(makeMultiConfig());
+    expect(router.pricing).toBeUndefined();
+  });
+
+  it('con fallback, el precio es el del provider que atiende ahora', () => {
+    const router = new ProviderRouter(makePricingConfig());
+    expect(router.pricing).toEqual({ input: 3, output: 15 });
+    const next = router.advanceProvider();
+    expect(next?.name).toBe('local');
+    expect(router.pricing).toBeUndefined();
+  });
+});

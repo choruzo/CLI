@@ -132,6 +132,21 @@ Modo one-shot sin Ink. Separa stdout/stderr:
 
 Política destructiva via `--allow-destructive` / `--deny-destructive`; confirmación interactiva con readline; CI sin TTY → deny. Chalk se autodesactiva si stdout no es TTY.
 
+### `--output-format text|json|stream-json` (UX-3)
+
+| Valor | stdout |
+|-------|--------|
+| `text` (default) | la respuesta final, como siempre |
+| `stream-json` | **solo** JSON Lines: cada `AgentEvent` tal cual y, al cerrar cada turno, una línea `{"type":"result","stopReason","text","usage","sessionId"}` |
+| `json` | nada hasta el final: un único objeto `{type:"result",stopReason,text,usage,sessionId,events}` |
+
+- En los dos modos JSON, **todo lo humano va a stderr**: avisos, `[tool]`, `[plan]`, jobs, subagentes, preguntas de readline y confirmaciones destructivas. El consumidor puede parsear stdout línea a línea sin filtrar.
+- `usage` es el desglose de la sesión (`StratumAgent.getSessionUsage()`: tokens, caché, tiempos, `costUsd` y `turns`), y se lee al cerrar cada turno, cuando el agente ya lo ha consolidado.
+- Con `--then` encadenado: en `stream-json` hay **un `result` por turno**; en `json` el objeto lleva además `"turns": [<result por turno>]`.
+- `events` cuenta los `AgentEvent` recibidos (en `stream-json`, las líneas de evento equivalen a ese número).
+- El código de salida no cambia (0 correcto, 1 error fatal o `--delegate` no completado, 130 cancelado). Con un formato desconocido se aborta con `[fatal] Invalid --output-format` antes de cargar la config.
+- En modo JSON el gate del plan pregunta por `stdin` (no por `stdout`, que es un canal de datos) y escribe el prompt en stderr.
+
 ---
 
 ## Comando `stratum init`

@@ -11,6 +11,7 @@ import type {
   PlanDecision,
 } from '../../agent/types.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
+import type { TurnUsage } from '../../agent/usage.js';
 import { makeCliQuestionAsker } from '../ask-questions.js';
 import { loadConfig } from '../../config/loader.js';
 import { resolveSessionStartup } from '../../host/session-startup.js';
@@ -59,6 +60,11 @@ export const runCommand = new Command('run')
     [] as string[],
   )
   .option('--read-only', 'observation only: no file writes and only read-only commands')
+  .option(
+    '--output-format <format>',
+    'stdout format: text (default) | json | stream-json (JSON Lines)',
+    'text',
+  )
   .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
   .option('--infra', 'shortcut for --profile infra')
   .option('--code', 'shortcut for --profile code')
@@ -83,8 +89,19 @@ export const runCommand = new Command('run')
         profile?: string;
         infra?: boolean;
         code?: boolean;
+        outputFormat?: string;
       },
     ) => {
+      // `--output-format` decide qué puede salir por stdout: en `json` y
+      // `stream-json` solo JSON, y todo lo humano (avisos, plan, prompts,
+      // confirmaciones) va a stderr.
+      const outputFormat = opts.outputFormat ?? 'text';
+      if (outputFormat !== 'text' && outputFormat !== 'json' && outputFormat !== 'stream-json') {
+        process.stderr.write(`[fatal] Invalid --output-format: ${outputFormat}\n`);
+        process.exit(1);
+      }
+      const jsonMode = outputFormat !== 'text';
+
       const profileFlag = sessionProfileFlag(opts);
       if (!profileFlag.ok) {
         process.stderr.write(`[fatal] ${profileFlag.error}\n`);
@@ -206,9 +223,20 @@ export const runCommand = new Command('run')
 
       const controller = new AbortController();
       let aborting = false;
+      /**
+       * Salidas JSON (UX-3). Se asignan más abajo, cuando existen los
+       * acumuladores del turno: el manejador de SIGINT se registra antes y
+       * puede dispararse en mitad del arranque.
+       */
+      let emitFinalJson: () => void = () => undefined;
+      let emitAbortResult: () => void = () => undefined;
       process.on('SIGINT', () => {
         if (aborting) {
-          process.exit(1);
+          // Segundo Ctrl+C: se sale ya. En `json`/`stream-json` el consumidor
+          // recibe antes el `result` (si no, se quedaría sin registro final) y
+          // el código es el mismo que el del primer corte: 130.
+          emitAbortResult();
+          process.exit(130);
           return;
         }
         aborting = true;
@@ -315,7 +343,12 @@ export const runCommand = new Command('run')
       const onApprovePlan = async (plan: Plan, ctx?: GateContext): Promise<PlanDecision> => {
         printPlan(plan);
         if (opts.approvePlan) return { decision: 'approve', plan };
-        if (!process.stdout.isTTY) {
+        // En `text` el prompt "cabe" si stdout es una terminal (la respuesta va
+        // a stdout). En JSON stdout es un canal de datos aunque haya terminal:
+        // lo que decide es que se pueda preguntar por stdin, como en las
+        // confirmaciones destructivas.
+        const canPrompt = jsonMode ? process.stdin.isTTY : process.stdout.isTTY;
+        if (!canPrompt) {
           // CI/pipe sin --yes: el plan es el entregable; no se ejecuta.
           process.stderr.write('[plan] sin TTY y sin --yes: no se ejecuta el plan.\n');
           return { decision: 'reject' };
@@ -340,6 +373,58 @@ export const runCommand = new Command('run')
 
       let toolStartTimes = new Map<string, number>();
       let finalText = '';
+      /**
+       * Resultado de cada turno para `--output-format`: `stopReason` del turno,
+       * su texto final y el uso de sesión **acumulado hasta cerrarlo** (el
+       * `done` llega antes de que el agente consolide el uso, así que el
+       * registro se cierra cuando la iteración del turno termina).
+       */
+      const turnResults: Array<{
+        type: 'result';
+        stopReason: string;
+        text: string;
+        usage: TurnUsage & { turns: number };
+      }> = [];
+      /** Eventos del agente vistos (campo `events` del objeto de `--output-format json`). */
+      let eventCount = 0;
+      /** Turnos de `--then`: en `json` el resultado lleva un `turns` con uno por turno. */
+      const followUps = opts.then ?? [];
+      /** Texto y `stopReason` del turno en curso (para el `result` de un corte). */
+      let turnText = '';
+      let turnStop: string | null = null;
+      /** El `result` de `json` se escribe una sola vez, antes del teardown o en un corte. */
+      let jsonResultWritten = false;
+      const sessionResult = (stopReason: string, text: string) => ({
+        type: 'result' as const,
+        stopReason,
+        text,
+        usage: agent.getSessionUsage(),
+        sessionId: host.sessionId,
+      });
+      emitFinalJson = (): void => {
+        if (outputFormat !== 'json' || jsonResultWritten) return;
+        jsonResultWritten = true;
+        const last = turnResults.at(-1);
+        const payload: Record<string, unknown> = {
+          ...sessionResult(last?.stopReason ?? 'stop', last?.text ?? finalText),
+          events: eventCount,
+        };
+        // Con `--then`, un `result` por turno dentro del array.
+        if (followUps.length > 0) payload['turns'] = turnResults;
+        process.stdout.write(JSON.stringify(payload) + '\n');
+      };
+      emitAbortResult = (): void => {
+        if (!jsonMode || jsonResultWritten) return;
+        jsonResultWritten = true;
+        // `stream-json` ya emitió un `result` por turno cerrado: el que falta es
+        // el del turno que se corta.
+        const last = turnResults.at(-1);
+        const payload =
+          outputFormat === 'stream-json' && turnStop === null && last
+            ? sessionResult('cancelled', turnText || last.text)
+            : sessionResult('cancelled', turnText || finalText);
+        process.stdout.write(JSON.stringify(payload) + '\n');
+      };
       // Un error fatal (provider caído, fallback agotado) no es un éxito para
       // quien encadena `stratum run` en un script.
       let fatalError = false;
@@ -414,30 +499,17 @@ export const runCommand = new Command('run')
         // `--then`: turnos siguientes en la misma sesión (mismo historial, misma
         // traza). Un turno que no acaba en `stop` corta la cadena: seguir tras un
         // error fatal o una cancelación sería trabajar sobre un turno a medias.
-        const followUps = opts.then ?? [];
-        const chained = async function* (): AsyncGenerator<AgentEvent> {
-          let stop: string | null = null;
-          for (const turnInput of [input, ...followUps]) {
-            if (stop !== null) {
-              if (stop !== 'stop') return;
-              yield { type: 'text_delta', delta: '\n\n' };
-            }
-            bridge?.expectRun({
-              mode: planMode ? 'plan' : 'normal',
-              input: turnInput === input ? task : turnInput,
-            });
-            for await (const ev of host.run(turnInput, turn)) {
-              if (ev.type === 'done') stop = ev.stopReason;
-              yield ev;
-            }
+        /** Un evento: lo humano a stderr; su JSON a stdout solo en `stream-json`. */
+        const handleEvent = (event: AgentEvent): void => {
+          eventCount++;
+          if (outputFormat === 'stream-json') {
+            process.stdout.write(JSON.stringify(event) + '\n');
           }
-        };
-        const events = opts.delegate ? host.runDelegate(opts.delegate, task, turn) : chained();
-        for await (const event of events) {
           steer?.observe(event);
           switch (event.type) {
             case 'text_delta':
               finalText += event.delta;
+              turnText += event.delta;
               break;
 
             case 'runtime_updates':
@@ -578,7 +650,55 @@ export const runCommand = new Command('run')
               break;
 
             case 'done':
+              turnStop = event.stopReason;
               break;
+          }
+        };
+
+        /**
+         * Cierra el registro de un turno: su `stopReason`, su texto y el uso de
+         * sesión **ya consolidado** (el `done` del agente llega antes de que
+         * `StratumAgent` sume el turno, así que se lee aquí, no en el evento).
+         */
+        const closeTurn = (stopReason: string, text: string): void => {
+          if (!jsonMode) return;
+          const result = {
+            type: 'result' as const,
+            stopReason,
+            text,
+            usage: agent.getSessionUsage(),
+            sessionId: host.sessionId,
+          };
+          turnResults.push(result);
+          if (outputFormat === 'stream-json') {
+            process.stdout.write(JSON.stringify(result) + '\n');
+          }
+        };
+
+        if (opts.delegate) {
+          // Un `--delegate` es un único turno: el del subagente.
+          for await (const event of host.runDelegate(opts.delegate, task, turn)) {
+            handleEvent(event);
+          }
+          closeTurn(delegateStatus ?? turnStop ?? 'stop', finalText);
+        } else {
+          for (const [index, turnInput] of [input, ...followUps].entries()) {
+            if (index > 0) {
+              // La cadena continúa solo si el turno anterior terminó bien.
+              if (turnStop !== 'stop') break;
+              // Separador humano entre respuestas; en JSON cada turno va aparte.
+              if (!jsonMode) finalText += '\n\n';
+            }
+            turnText = '';
+            turnStop = null;
+            bridge?.expectRun({
+              mode: planMode ? 'plan' : 'normal',
+              input: turnInput === input ? task : turnInput,
+            });
+            for await (const event of host.run(turnInput, turn)) {
+              handleEvent(event);
+            }
+            closeTurn(turnStop ?? 'stop', turnText);
           }
         }
       } catch (err) {
@@ -593,6 +713,10 @@ export const runCommand = new Command('run')
       }
 
       steer?.dispose();
+      // UX-3: el `result` sale ANTES del teardown. Un cierre que falle, un MCP
+      // que no responda o un Ctrl+C a mitad no pueden dejar al consumidor sin el
+      // registro final de la sesión.
+      emitFinalJson();
       // Cierre de la sesión: servers MCP, jobs, sockets SSH (§12.12) y traza.
       // Las salidas con `process.exit` cortan la extracción de memoria de un
       // turno anterior (`--then`): se cancela para que la traza la cierre. En la
@@ -610,12 +734,13 @@ export const runCommand = new Command('run')
       await closeExecRuntime();
       await flushLogging();
 
-      if (controller.signal.aborted) {
-        process.exit(130);
+      // `text`: la respuesta, como siempre (en los modos JSON ya está escrito).
+      if (!jsonMode && !controller.signal.aborted && finalText) {
+        process.stdout.write(finalText + '\n');
       }
 
-      if (finalText) {
-        process.stdout.write(finalText + '\n');
+      if (controller.signal.aborted) {
+        process.exit(130);
       }
 
       if (fatalError) {

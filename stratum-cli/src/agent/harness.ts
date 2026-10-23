@@ -4,6 +4,16 @@ import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
 import { StreamBuffer, ThinkTagSplitter } from '../providers/openai-compatible.js';
 import { streamWithRetry } from '../providers/retry.js';
+import { normalizeUsage } from '../providers/cache.js';
+import type { RawTimings, RawUsage } from '../providers/cache.js';
+import {
+  addCostTotal,
+  computeCostUsd,
+  emptyCostTotal,
+  hasBillableTokens,
+} from '../providers/pricing.js';
+import type { CostTotal, Pricing } from '../providers/pricing.js';
+import { addCallUsage, emptyTurnUsage, type TurnUsage } from './usage.js';
 import type {
   AgentEvent,
   AgentMode,
@@ -74,6 +84,7 @@ import { executeDelegations, resolveDelegationProfile, type DelegationJob } from
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import { getLogger } from '../logging/index.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
+import type { DiagnosticsProvider } from './types.js';
 import { tracedCompletion } from '../trace/llm-call.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
@@ -854,6 +865,13 @@ export class ReactLoop {
   private _completedRequests = 0;
   /** El aviso de presupuesto sin métrica se emite una sola vez por loop. */
   private _warnedUnmeteredBudget = false;
+  /**
+   * Desglose del turno en curso (UX-3): tokens por concepto, caché, tiempos y
+   * coste. Se reinicia en cada `run` y crece con una entrada por request.
+   */
+  private _turnUsage: TurnUsage = emptyTurnUsage();
+  /** Coste acumulado del turno; `incomplete` cuando algún tramo quedó sin precio. */
+  private _turnCost: CostTotal = emptyCostTotal();
 
   constructor(
     private readonly provider: IProvider,
@@ -872,6 +890,11 @@ export class ReactLoop {
       readonly model: string;
       readonly hasFallback: boolean;
       readonly providerName: string;
+      /**
+       * Precio del provider/modelo activos (UX-3). Se lee al empezar cada
+       * request: con fallback, cada llamada se factura con quien la atendió.
+       */
+      readonly pricing?: Pricing;
       advanceProvider(): { name: string; model: string } | null;
     },
     /**
@@ -928,6 +951,11 @@ export class ReactLoop {
        * heredan los subagentes. Sin él —un loop suelto— se usa el del proceso.
        */
       env?: SessionEnv;
+      /**
+       * Diagnósticos del language server (UX-2b). Lo aporta `StratumAgent` cuando
+       * la config lo activa; los subagentes heredan el mismo manager.
+       */
+      diagnostics?: DiagnosticsProvider;
     },
   ) {
     this.env = extras?.env ?? processSessionEnv();
@@ -1031,6 +1059,9 @@ export class ReactLoop {
     const maxIterations = opts?.maxIterations ?? this.config.agent.maxIterations;
 
     const loopLog = log.child('loop', { model: this.model });
+    // UX-3: el desglose de uso es del turno, no del loop: un `run` = un turno.
+    this._turnUsage = emptyTurnUsage();
+    this._turnCost = emptyCostTotal();
     loopLog.debug('run start', {
       mode,
       messages: this.messages.length,
@@ -1280,6 +1311,15 @@ export class ReactLoop {
         // ¿Se emitió algún evento visible? Si no, es seguro reintentar con otro provider.
         let emittedVisible = false;
         let streamErr: unknown = null;
+        // UX-3: tiempos de esta request. Cada intento (incluido uno que cae y
+        // provoca fallback) es una request de verdad y se mide como tal.
+        let requestStart = performance.now();
+        // Precio del provider que va a atender ESTA request (UX-3): se lee antes
+        // de la llamada, así que un fallback posterior no re-factura el intento.
+        const requestPricing = router?.pricing;
+        let firstChunkAt: number | undefined;
+        let lastRawUsage: RawUsage | undefined;
+        let lastRawTimings: RawTimings | undefined;
         const modelSpan = opts?.trace?.modelStart({
           iteration: iter,
           provider: router?.providerName,
@@ -1314,16 +1354,31 @@ export class ReactLoop {
         };
 
         try {
-          const onRetry = (attempt: number, err: unknown): void =>
+          const onRetry = (attempt: number, err: unknown): void => {
+            // UX-3: `llmMs` mide tiempo *hablando con el modelo*, no esperando
+            // backoffs. Al reintentar se reinicia el cronómetro (y el TTFT): lo
+            // que cuenta es el intento que valió, no la suma con los fallidos.
+            requestStart = performance.now();
+            firstChunkAt = undefined;
+            lastRawUsage = undefined;
+            lastRawTimings = undefined;
             opts?.trace?.runtime({
               event: 'retry',
               attempt,
               error: err instanceof Error ? err.message : String(err),
             });
+          };
           for await (const chunk of streamWithRetry(activeProvider, request, { onRetry })) {
             if (signal.aborted) break;
+            if (firstChunkAt === undefined) firstChunkAt = performance.now();
             modelSpan?.firstChunk();
-            if (chunk.usage || chunk.timings) modelSpan?.usage(chunk.usage, chunk.timings);
+            if (chunk.usage || chunk.timings) {
+              modelSpan?.usage(chunk.usage, chunk.timings);
+              // El `usage` llega en el chunk final: se guarda el último visto y
+              // se normaliza al cerrar la request.
+              if (chunk.usage) lastRawUsage = chunk.usage;
+              if (chunk.timings) lastRawTimings = chunk.timings;
+            }
 
             // Registrar usage real si viene en el chunk (§12.4)
             if (chunk.usage?.prompt_tokens) {
@@ -1374,6 +1429,34 @@ export class ReactLoop {
                 ? streamErr.message
                 : String(streamErr),
         });
+        // UX-3: una request = una entrada en el desglose del turno. Se cuenta
+        // siempre (también la que falló: consumió tiempo de pared); los tokens
+        // solo si el backend los reportó.
+        const callUsage = normalizeUsage(lastRawUsage, lastRawTimings);
+        const billable = hasBillableTokens(callUsage);
+        // Una request que no cerró normalmente (error, cancelación) o que cerró
+        // sin métricas habiendo tarifa deja consumo sin contabilizar: el turno
+        // se marca incompleto y no publica coste. Un backend sin `pricing` y sin
+        // `usage` no envenena nada — no hay tarifa que echar de menos.
+        const closedNormally = streamErr === null && !signal.aborted;
+        const unmeteredWithPricing = !billable && requestPricing !== undefined;
+        this._turnCost = addCostTotal(
+          this._turnCost,
+          computeCostUsd(callUsage, requestPricing),
+          billable,
+        );
+        if (!closedNormally || unmeteredWithPricing) {
+          this._turnCost = { ...this._turnCost, incomplete: true };
+        }
+        this._turnUsage = addCallUsage(this._turnUsage, {
+          usage: callUsage,
+          durationMs: performance.now() - requestStart,
+          firstChunkMs: firstChunkAt === undefined ? undefined : firstChunkAt - requestStart,
+        });
+        // Incompleto ⇒ sin coste: nunca un importe parcial presentado como total.
+        this._turnUsage.costUsd = this._turnCost.incomplete ? undefined : this._turnCost.costUsd;
+        if (this._turnCost.incomplete) this._turnUsage.incomplete = true;
+        else delete this._turnUsage.incomplete;
         yield* drainStreamWarnings();
 
         // Request completa (ni error ni cancelación): si no trajo `usage` pese a
@@ -1830,6 +1913,7 @@ export class ReactLoop {
           workspace: this.extras?.workspace,
           fileState: this.extras?.fileState,
           skills: this.extras?.skills,
+          diagnostics: this.extras?.diagnostics,
           allowDestructive: opts?.allowDestructive,
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
@@ -1843,7 +1927,9 @@ export class ReactLoop {
           supersededBySteering: () => (steeringPending() ? SUPERSEDED_BY_STEERING : null),
         };
 
+        const dispatchStart = performance.now();
         const results: DispatchResult[] = await this.dispatcher.dispatch(regularCalls, ctx);
+        this._turnUsage.toolMs += performance.now() - dispatchStart;
 
         for (const res of results) {
           if (!res.result.ok && res.result.error === SUPERSEDED_BY_STEERING) batchSuperseded = true;
@@ -2154,6 +2240,7 @@ export class ReactLoop {
       opts,
       skills: this.extras?.skills,
       env: this.env,
+      diagnostics: this.extras?.diagnostics,
     });
 
     for (const job of jobs) {
@@ -2250,5 +2337,13 @@ export class ReactLoop {
     if (this._usageReports > 0) return { status: 'reported', tokens: this._tokensUsed };
     if (this._completedRequests > 0) return { status: 'unsupported' };
     return { status: 'unavailable' };
+  }
+
+  /**
+   * Desglose de uso del turno en curso (UX-3): tokens por concepto, caché,
+   * tiempos y coste. Copia: mutarlo desde fuera no altera la contabilidad.
+   */
+  get turnUsage(): TurnUsage {
+    return { ...this._turnUsage };
   }
 }

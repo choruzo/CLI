@@ -1,9 +1,25 @@
 import { z } from 'zod';
 import { unsafeReasonProblem } from '../security/secrets.js';
+import { LSP_PRESETS } from '../lsp/presets.js';
 import { DEFAULT_GLOBAL_HOTKEY, parseAccelerator } from './accelerator.js';
 
 /** Ventana de contexto cuando ni la config ni `/models` dicen otra. */
 export const DEFAULT_CONTEXT_WINDOW = 32768;
+
+/**
+ * Precio del backend en **USD por millón de tokens** (UX-3). Opcional: sin
+ * esta sección el coste de cada turno queda sin definir — Stratum no estima
+ * tarifas. `cachedInput`/`cacheWrite` solo hacen falta si el backend cobra la
+ * caché a un precio distinto del de entrada.
+ */
+const PricingSchema = z
+  .object({
+    input: z.number().nonnegative(),
+    output: z.number().nonnegative(),
+    cachedInput: z.number().nonnegative().optional(),
+    cacheWrite: z.number().nonnegative().optional(),
+  })
+  .strict();
 
 const ProviderConfigSchema = z.object({
   type: z.literal('openai-compatible'),
@@ -23,7 +39,15 @@ const ProviderConfigSchema = z.object({
   contextWindow: z.number().int().positive().optional(),
   /** Ajustes por modelo (id exacto); ganan a los del provider. */
   models: z
-    .record(z.object({ contextWindow: z.number().int().positive().optional() }).strict())
+    .record(
+      z
+        .object({
+          contextWindow: z.number().int().positive().optional(),
+          /** Precio propio del modelo: en una pasarela cada modelo cuesta lo suyo. */
+          pricing: PricingSchema.optional(),
+        })
+        .strict(),
+    )
     .optional(),
   /**
    * Timeouts de inactividad del cliente en ms (§12.3); `0` desactiva. Por
@@ -57,6 +81,12 @@ const ProviderConfigSchema = z.object({
     })
     .strict()
     .optional(),
+  /**
+   * Precio del provider en USD por millón de tokens (UX-3). Sin él, el coste
+   * de los turnos queda sin definir (`undefined`), nunca a 0 ni estimado. Los
+   * `models.<id>.pricing` ganan a este.
+   */
+  pricing: PricingSchema.optional(),
 });
 
 const McpServerSchema = z
@@ -213,6 +243,71 @@ const SSHConfigSchema = z
   });
 
 /**
+ * Diagnósticos LSP tras editar (encargo UX-2b). Opt-in: con `enabled` en
+ * `false` no se arranca ningún language server.
+ */
+const LspServerSchema = z
+  .object({
+    /** Si falta, se toma del preset del mismo nombre. */
+    command: z.string().min(1).optional(),
+    args: z.array(z.string()).optional(),
+    /** Extensiones que atiende, con punto (`.ts`). Si faltan, las del preset. */
+    extensions: z.array(z.string().min(1)).optional(),
+    env: z.record(z.string(), z.string()).default({}),
+    initializationOptions: z.record(z.string(), z.unknown()).optional(),
+  })
+  .strict();
+
+export const LspConfigSchema = z
+  .object({
+    enabled: z.boolean().default(false),
+    /** Espera máxima de diagnósticos por edición. */
+    timeoutMs: z.number().int().positive().default(3000),
+    /** Espera máxima del `initialize` del servidor. */
+    startupTimeoutMs: z.number().int().positive().default(15000),
+    /** Cuántos diagnósticos se anexan al resultado de la tool. */
+    maxDiagnostics: z.number().int().positive().default(20),
+    /** Umbral mínimo: `error` solo errores; `warning` errores y avisos. */
+    severity: z.enum(['error', 'warning']).default('error'),
+    /**
+     * Por nombre de preset (`"typescript": {}`) o completo (`command`, `args`…).
+     * Se valida aquí lo que el `LspManager` no podría arreglar al arrancar: un
+     * nombre sin preset necesita comando, y todo servidor necesita extensiones.
+     */
+    servers: z.record(z.string().min(1), LspServerSchema).default({}),
+  })
+  .strict()
+  .superRefine((lsp, ctx) => {
+    for (const [name, server] of Object.entries(lsp.servers)) {
+      const preset = LSP_PRESETS[name];
+      if (!server.command && !preset) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['servers', name, 'command'],
+          message: `lsp.servers.${name}: "${name}" no es un preset conocido; declara su command.`,
+        });
+      }
+      const extensions = server.extensions ?? preset?.extensions ?? [];
+      if (extensions.length === 0) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: ['servers', name, 'extensions'],
+          message: `lsp.servers.${name}: declara al menos una extensión (con punto, \`.foo\`).`,
+        });
+      }
+      for (const ext of extensions) {
+        if (!ext.startsWith('.')) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ['servers', name, 'extensions'],
+            message: `lsp.servers.${name}.extensions: "${ext}" debe empezar por punto.`,
+          });
+        }
+      }
+    }
+  });
+
+/**
  * Hito 17 — entorno de infraestructura (§3 de `Orientacion-Infraestructura.md`).
  * Agrupa targets por patrón y les da reglas propias: el mismo comando es trivial
  * en el portátil y catastrófico en `ssh:prod-db`. Solo cuenta lo que MUTA: un
@@ -269,6 +364,40 @@ const SessionProfileSchema = z.object({
 const MemoryModelSchema = z.object({
   provider: z.string().min(1).default('same'),
   model: z.string().min(1).default('same'),
+});
+
+/**
+ * UX-1 — ajustes del sistema de snapshots (deshacer por turno). El resto de
+ * parámetros (dónde vive el repo en la sombra, límites por lotes) no son
+ * configurables: son invariantes del módulo, no gustos del usuario.
+ */
+export const SnapshotsConfigSchema = z.object({
+  /** Interruptor maestro. Default `true`: deshacer es una red de seguridad. */
+  enabled: z.boolean().default(true),
+  /**
+   * Ficheros de más de este tamaño no entran en los snapshots (no se pueden
+   * deshacer); el turno los lista como `skipped`. Default 2 MiB.
+   */
+  maxFileBytes: z.number().int().positive().default(2 * 1024 * 1024),
+  /**
+   * Días que se conservan los turnos en el registro de la sesión. Al abrir una
+   * sesión se purgan los más viejos y, si se borró algo, se lanza un `git gc`
+   * en segundo plano. `0` no purga nunca.
+   */
+  retentionDays: z.number().int().min(0).default(7),
+  /**
+   * Techo por invocación de git del almacén (`git add`, `write-tree`, `gc`…).
+   * El snapshot va en el camino crítico del turno: un git colgado (repo enorme,
+   * disco de red, antivirus) dejaría al agente esperando. Al agotarse, los
+   * snapshots se desactivan para la sesión y el turno sigue. Default 20 s.
+   */
+  timeoutMs: z.number().int().positive().default(20_000),
+  /**
+   * Tope de candidatos por snapshot. Por encima, la sesión se desactiva con un
+   * warning en vez de recorrer un proyecto entero (monorepos, `node_modules`
+   * sin ignorar, un home por error). Default 20 000.
+   */
+  maxFiles: z.number().int().positive().default(20_000),
 });
 
 export const StratumConfigSchema = z.object({
@@ -709,11 +838,26 @@ export const StratumConfigSchema = z.object({
     .default({}),
 
   /**
+   * UX-1 — deshacer por turno con snapshots en un git en la sombra
+   * (`src/snapshots/`). El repo de la sombra vive en `~/.stratum/snapshots/<id>/`;
+   * el `.git` del usuario nunca se toca. Solo se activa si el cwd está dentro
+   * de un repo git y `enabled` es `true`.
+   */
+  snapshots: SnapshotsConfigSchema.default({}),
+
+  /**
    * Inventario SSH (Hito 9, §12.14). Deliberadamente **opcional** y sin
    * `.default({})`: si no hay sección `ssh`, las tools SSH no se registran en
    * el `ToolRegistry` y el LLM no las ve.
    */
   ssh: SSHConfigSchema.optional(),
+
+  /**
+   * Diagnósticos LSP tras editar (encargo UX-2b). `enabled: false` por defecto:
+   * sin opt-in no se arranca ningún language server y `edit_file`/`write_file`
+   * se comportan como siempre.
+   */
+  lsp: LspConfigSchema.default({}),
 
   /**
    * Hito 17 — entornos con blast radius (§3 y §11.2 de la orientación).
@@ -895,8 +1039,13 @@ export type StratumConfig = z.infer<typeof StratumConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 /** Lo que se escribe en disco: `model` y `contextWindow` pueden omitirse. */
 export type ProviderConfigInput = z.input<typeof ProviderConfigSchema>;
+/** Precio de un provider/modelo, en USD por millón de tokens (UX-3). */
+export type ProviderPricing = z.infer<typeof PricingSchema>;
 export type McpServer = z.infer<typeof McpServerSchema>;
 export type SSHHostConfig = z.infer<typeof SSHHostSchema>;
 export type SSHConfig = z.infer<typeof SSHConfigSchema>;
 export type EnvironmentConfig = z.infer<typeof EnvironmentSchema>;
+export type LspConfig = z.infer<typeof LspConfigSchema>;
+export type LspServerConfig = z.infer<typeof LspServerSchema>;
 export type SessionProfileConfig = z.infer<typeof SessionProfileSchema>;
+export type SnapshotsConfig = z.infer<typeof SnapshotsConfigSchema>;

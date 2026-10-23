@@ -7,6 +7,10 @@ import { AgentTree } from './AgentTree.js';
 import { StreamingText } from './StreamingText.js';
 import { MarkdownText } from './MarkdownText.js';
 import { InitProgressBlock, type InitStep } from './InitProgressBlock.js';
+import { reasoningPreview } from './reasoning-preview.js';
+import { ToolGroupBlock } from './ToolGroupBlock.js';
+import { groupToolCalls, type Verbosity } from './tool-groups.js';
+import { turnUsageParts, type UsageView } from './telemetry-format.js';
 
 interface Props {
   text: string;
@@ -32,6 +36,13 @@ interface Props {
   thinkingOpen?: boolean;
   /** `/debug`: el razonamiento entero; sin él, una línea plegada por bloque. */
   debug?: boolean;
+  /**
+   * `/verbosity` (UX-3). Solo afecta al turno cerrado: el vivo se pinta siempre
+   * igual, porque es el que el usuario está siguiendo.
+   */
+  verbosity?: Verbosity;
+  /** Uso del turno cerrado (UX-3): una línea al pie. */
+  usage?: UsageView;
   /** Reloj único de la conversación; evita intervalos por bloque. */
   now?: number;
   /** Límites de la región viva para que Ink no reescriba todo el scrollback. */
@@ -59,6 +70,8 @@ export function AgentMessage({
   thinkingBlocks,
   thinkingOpen = false,
   debug = false,
+  verbosity = 'standard',
+  usage,
   now = Date.now(),
   liveTextLines = 12,
   liveColumns = 80,
@@ -78,6 +91,11 @@ export function AgentMessage({
   const hasContent =
     toolCalls.length > 0 || subs.length > 0 || text || isInit || thinkingBlocks?.length;
   if (!hasContent) return null;
+  // Turno cerrado: `compact` y `standard` agrupan lo exploratorio; `verbose` lo
+  // enseña todo, también el razonamiento entero. `compact` además lo pliega.
+  const grouped = !streaming && verbosity !== 'verbose';
+  const hideThinking = verbosity === 'compact';
+  const showAllThinking = debug || verbosity === 'verbose';
 
   return (
     <Box flexDirection="column" marginBottom={1}>
@@ -93,31 +111,45 @@ export function AgentMessage({
           now={now}
         />
       )}
-      {(streaming ? thinkingBlocks?.slice(-2) : thinkingBlocks)?.map((t, i, shown) => {
-        const flat = t.replace(/\s+/g, ' ').trim();
-        const live = streaming && thinkingOpen && i === shown.length - 1;
-        return (
-          <Box key={`think-${i}`} marginLeft={2}>
-            <Text color={theme.textDisabled} dimColor wrap={debug ? 'wrap' : 'truncate-end'}>
-              {debug
-                ? `⊙ thinking ${flat}`
-                : live
-                  ? `⊙ razonando… ${flat.slice(-120)}`
-                  : `⊙ razonó · ${countWords(flat)} palabras (/debug para verlo)`}
-            </Text>
-          </Box>
-        );
-      })}
-      {!isInit &&
-        visibleToolCalls.map((tc) => (
-          <ToolCallBlock
-            key={tc.id}
-            state={tc}
-            focused={focusedBlockId === tc.id}
-            expanded={expandedBlockIds?.has(tc.id) ?? false}
-            now={now}
+      {(streaming ? thinkingBlocks?.slice(-2) : hideThinking ? [] : thinkingBlocks)?.map(
+        (t, i, shown) => (
+          <ThinkingLine
+            key={`think-${i}`}
+            text={t}
+            live={streaming && thinkingOpen && i === shown.length - 1}
+            debug={showAllThinking}
           />
-        ))}
+        ),
+      )}
+      {!isInit &&
+        (grouped
+          ? groupToolCalls(visibleToolCalls).map((row) =>
+              row.kind === 'group' ? (
+                <ToolGroupBlock
+                  key={row.id}
+                  calls={row.calls}
+                  detail={verbosity !== 'compact'}
+                  columns={liveColumns}
+                />
+              ) : (
+                <ToolCallBlock
+                  key={row.call.id}
+                  state={row.call}
+                  focused={focusedBlockId === row.call.id}
+                  expanded={expandedBlockIds?.has(row.call.id) ?? false}
+                  now={now}
+                />
+              ),
+            )
+          : visibleToolCalls.map((tc) => (
+              <ToolCallBlock
+                key={tc.id}
+                state={tc}
+                focused={focusedBlockId === tc.id}
+                expanded={expandedBlockIds?.has(tc.id) ?? false}
+                now={now}
+              />
+            )))}
       {streaming && hiddenActions > 0 && (
         <Text color={theme.textDisabled} dimColor>
           … {hiddenActions} acción{hiddenActions === 1 ? '' : 'es'} anterior
@@ -157,10 +189,69 @@ export function AgentMessage({
         ) : (
           <MarkdownText text={text} />
         ))}
+      {!streaming && usage && <TurnUsageLine usage={usage} compact={verbosity === 'compact'} />}
     </Box>
   );
 }
 
-function countWords(text: string): number {
-  return text ? text.split(' ').length : 0;
+/**
+ * Una línea por bloque de razonamiento (UX-3). Plegada enseña el último párrafo
+ * terminado (`reasoningPreview`), en cursiva y apagada: se lee de un vistazo y no
+ * compite con la respuesta. Con `/debug`, el bloque entero.
+ */
+function ThinkingLine({ text, live, debug }: { text: string; live: boolean; debug: boolean }) {
+  if (debug) {
+    return (
+      <Box marginLeft={2}>
+        <Text color={theme.textDisabled} dimColor wrap="wrap">
+          ⊙ thinking {text.replace(/\s+/g, ' ').trim()}
+        </Text>
+      </Box>
+    );
+  }
+  const { preview, words } = reasoningPreview(text, live);
+  const head = live ? '⊙ razonando' : '⊙ razonó';
+  const count = `${words} palabra${words === 1 ? '' : 's'}`;
+  return (
+    <Box marginLeft={2}>
+      <Text color={theme.textDisabled} wrap="truncate-end">
+        <Text color={live ? theme.textFaint : theme.textDisabled}>{head}</Text>
+        <Text dimColor> · {count}</Text>
+        {preview ? (
+          <Text color={theme.textFaint} italic>
+            {'  '}
+            {preview}
+          </Text>
+        ) : (
+          <Text dimColor>{live ? '…' : ' · /debug para verlo'}</Text>
+        )}
+      </Text>
+    </Box>
+  );
+}
+
+/**
+ * Pie del turno (UX-3): lo que costó, en una línea apagada. Va pegado al final
+ * de la respuesta y por debajo de ella en jerarquía; el coste, si lo hay, un
+ * punto más claro porque es el número que se busca.
+ */
+function TurnUsageLine({ usage, compact }: { usage: UsageView; compact: boolean }) {
+  const parts = turnUsageParts(usage, compact);
+  if (parts.length === 0) return null;
+  const cost = usage.costUsd !== undefined ? parts.at(-1) : undefined;
+  const rest = cost ? parts.slice(0, -1) : parts;
+  return (
+    <Box marginTop={0}>
+      <Text color={theme.textDisabled} wrap="truncate-end">
+        {'─ '}
+        {rest.join(' · ')}
+        {cost && (
+          <Text color={theme.textFaint}>
+            {rest.length > 0 ? ' · ' : ''}
+            {cost}
+          </Text>
+        )}
+      </Text>
+    </Box>
+  );
 }

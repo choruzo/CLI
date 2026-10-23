@@ -20,6 +20,7 @@ Implementado en Hitos 1–5. Ver [[Arquitectura]] y [[Roadmap]].
 | `src/agent/harness.ts` | `ReactLoop`, `ContextManager`, `streamWithRetry` |
 | `src/agent/system-prompt.ts` | `buildSystemPrompt(config, memory?)` — default.txt + bloque `<env>` + memoria |
 | `src/agent/initialize-prompt.ts` | `INITIALIZE_PROMPT` — comando-plantilla de init estilo opencode (§12.13) |
+| `src/agent/usage.ts` | `TurnUsage` — desglose de uso por turno (tokens, caché, tiempos, coste). Puro |
 
 ---
 
@@ -99,6 +100,68 @@ intento 1 → espera 1s → intento 2 → espera 2s → intento 3 → espera 4s 
 ```
 
 Priming: llama a `gen.next()` antes de hacer yield para detectar errores de conexión antes del streaming.
+
+---
+
+## Uso por turno — `TurnUsage` (`usage.ts`)
+
+El loop acumula un `TurnUsage` por `run` (una entrada por request al LLM) y lo
+expone con `ReactLoop.turnUsage`; `StratumAgent` lo consolida al cerrar el turno
+(`getLastTurnUsage()`, `getSessionUsage()` con `turns`, y `getLiveTurnUsage()`
+con el turno en curso para la telemetría). `clearHistory()` no borra el uso de
+la sesión.
+
+| Campo | Qué mide |
+|---|---|
+| `llmCalls` / `reportedCalls` | requests del turno / cuántas trajeron `usage` |
+| `promptTokens`, `completionTokens`, `cachedReadTokens`, `cacheWriteTokens`, `reasoningTokens` | suma de lo **reportado** |
+| `cacheHitRate` | `cachedReadTokens / promptTokens`, solo si ambos existen |
+| `llmMs` / `toolMs` | pared **hablando con el modelo** / dentro del despacho de tools |
+| `firstTokenMs` / `generationMs` | TTFT de la primera request / suma de (fin − primer chunk) |
+| `outputTokensPerSec` | `completionTokens / (generationMs/1000)`, solo con ambos > 0 |
+| `costUsd` | ver «Precios» (USD) |
+| `incomplete?: true` | hay consumo que este desglose **no** incluye |
+
+**Regla: nada se estima.** Un campo es `undefined` hasta que alguna request lo
+reporte; `undefined + n = n`; ningún hueco se rellena con 0. «0 tokens de caché»
+y «este backend no lo dice» son respuestas distintas.
+
+**Qué no entra aquí** (y por eso no coincide con `getTokenUsage()`, que sí suma
+lo que reportan los hijos):
+
+- **subagentes**: cada `ReactLoop` hijo tiene su propio acumulador y no se suma;
+- **llamadas auxiliares** del agente: compresor de contexto (`tracedCompletion`)
+  y extracción de memoria.
+
+`llmMs` excluye los **backoffs de `streamWithRetry`**: el cronómetro se reinicia
+en cada reintento (`onRetry`), así que mide el intento que valió, no la suma de
+los fallidos con las esperas entre ellos.
+
+`incomplete` es la señal de «al menos esto»:
+
+- un **turno delegado** (`run --delegate`, `runDelegate`) cuenta en `turns` pero
+  su consumo lo midió el hijo, así que el registro queda `incomplete`;
+- una request que **no cerró normalmente** (error, cancelación) o que cerró **sin
+  `usage` habiendo `pricing`** deja el turno `incomplete`;
+- es **pegajoso**: una vez marcado, `sumUsage` lo propaga y `costUsd` nunca se
+  publica como total.
+
+---
+
+## Precios y coste (`providers/pricing.ts`)
+
+`pricing` en la config del provider (USD por **millón** de tokens) permite
+rellenar `costUsd`: `computeCostUsd(usage, pricing)` cobra lo no cacheado a
+`input`, lo leído en caché a `cachedInput` (o `input`), lo escrito a `cacheWrite`
+(o `input`) y la salida a `output`. Sin `pricing`, o sin `promptTokens`/
+`completionTokens`, devuelve `undefined`. El loop lee el precio del provider
+**activo de cada request**, así que un fallback factura con quien atendió cada
+llamada; en la sesión, `sumUsage` suma costes cuando ambos tramos lo tienen y
+deja el total sin definir si un tramo gastó tokens sin precio (`addCostTotal`
+marca `incomplete` y es pegajoso: un importe parcial nunca se presenta como total).
+También queda `undefined` cuando una request del turno no cerró normalmente
+(error, cancelación) o cerró sin `usage` habiendo `pricing`: de ese consumo no se
+sabe el importe, y el turno se marca `incomplete`.
 
 ---
 

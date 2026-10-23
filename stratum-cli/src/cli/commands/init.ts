@@ -86,7 +86,8 @@ export const initCommand = new Command('init')
 
       const registry = new ToolRegistry();
       registerBuiltinTools(registry, config);
-      const agent = new StratumAgent(config, router, registry);
+      // `init` no es trabajo de la sesión: sus snapshots no se deshacen.
+      const agent = new StratumAgent(config, router, registry, { snapshots: false });
 
       // Construir el prompt reemplazando las variables
       const prompt = INITIALIZE_PROMPT.replaceAll('${path}', cwd).replaceAll(
@@ -199,6 +200,7 @@ export const initCommand = new Command('init')
       }
 
       // §12.12: cerrar los sockets SSH y vaciar la auditoría antes de salir.
+      await agent.dispose();
       await closeExecRuntime();
 
       if (controller.signal.aborted) {

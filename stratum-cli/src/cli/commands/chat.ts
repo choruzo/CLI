@@ -277,6 +277,9 @@ export const chatCommand = new Command('chat')
       }
       const agent = new StratumAgent(config, router, registry, {
         ...agentOptions,
+        // UX-1: el id de la sesión es la clave del índice y del registro de
+        // snapshots; sin él, deshacer queda desactivado.
+        sessionId,
         readOnly: opts.readOnly === true || resumedReadOnly,
         ...(requestedProfile ? { sessionProfile: requestedProfile } : {}),
       });
@@ -462,6 +465,7 @@ export const chatCommand = new Command('chat')
       // vivo el event loop y el proceso nunca termina.
       await settle('exec runtime shutdown', () => closeExecRuntime());
       await settle('subagent store dispose', () => subagentStore.dispose());
+      await settle('lsp dispose', () => agent.dispose());
       await settle('auditor shutdown', () => auditor.dispose());
       await flushLogging();
     },

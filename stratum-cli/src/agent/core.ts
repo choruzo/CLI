@@ -5,6 +5,7 @@ import type { IProvider } from '../providers/base.js';
 import type {
   AgentEvent,
   AgentProfile,
+  DiagnosticsProvider,
   Message,
   RunOptions,
   SubagentResult,
@@ -14,6 +15,7 @@ import type {
 } from './types.js';
 import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
+import { emptyTurnUsage, sumUsage, type TurnUsage } from './usage.js';
 import {
   buildAgentProfilesBlock,
   buildSystemPrompt,
@@ -45,10 +47,17 @@ import {
   type SteeringEnqueueResult,
 } from './inbox.js';
 import { PauseController } from './pause.js';
+import { SnapshotStore } from '../snapshots/store.js';
+import type { RevertPlan, RevertResult } from '../snapshots/store.js';
+import type { TurnRecord } from '../snapshots/registry.js';
+import { formatFilesReverted } from '../snapshots/store.js';
 import { TddLedger, rehydrateTdd } from './tdd.js';
 import { TEST_EVIDENCE_TOOL } from '../tools/tdd.js';
 import type { TodoItem } from './todo.js';
-import { resolve as resolvePath } from 'path';
+import { resolve as resolvePath, relative as relativePath, sep as pathSep } from 'path';
+import { LspManager } from '../lsp/manager.js';
+import { resolveLspServers } from '../lsp/presets.js';
+import { formatDiagnostics } from '../lsp/format.js';
 import { MemoryManager } from '../memory/manager.js';
 import { assistantToolsetFilter, type PromptPreset } from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
@@ -165,6 +174,22 @@ export interface StratumAgentOptions {
    * empezar vacío (sesión recuperada tras reiniciar el daemon).
    */
   conversation?: { conversation: SessionConversation; restore?: boolean };
+  /**
+   * UX-1 — id de sesión estable. Es la clave del índice y del registro de
+   * turnos de `~/.stratum/snapshots/<id>/`: sin él los snapshots quedan
+   * desactivados (no hay forma de no mezclar dos sesiones del mismo proyecto).
+   */
+  sessionId?: string;
+  /**
+   * UX-1 — `false` desactiva deshacer por turno en este agente. Lo usa
+   * `stratum init`, que es una operación de un solo uso sobre el proyecto.
+   */
+  snapshots?: false;
+  /**
+   * UX-1 — home inyectable para el almacén de snapshots. Solo para tests: en
+   * producción se usa el del proceso (nunca se escribe en el proyecto).
+   */
+  snapshotsHome?: string;
 }
 
 /** Lo que se sabe del contexto de una sesión: presupuesto, desglose y conversación. */
@@ -223,6 +248,14 @@ export class StratumAgent {
   /** Versión de cada fichero leída por el agente: protege `write_file` de pisar cambios ajenos. */
   private readonly fileState = new FileStateTracker();
   /**
+   * Language servers de la sesión (UX-2b). Solo si `lsp.enabled` y hay
+   * servidores: arranque perezoso, y un fallo desactiva el servidor para el
+   * resto de la sesión sin romper nada.
+   */
+  private readonly lsp: LspManager | undefined;
+  /** Lo que ve `ToolContext.diagnostics`: pide diagnósticos y los formatea. */
+  private readonly diagnosticsProvider: DiagnosticsProvider | undefined;
+  /**
    * Jobs en segundo plano de la sesión (`exec` con `background: true`). De
    * sesión, como la lista de tareas: un job sobrevive al turno que lo lanzó.
    * La UI se suscribe aquí para pintarlos. `undefined` si están desactivados o
@@ -257,6 +290,14 @@ export class StratumAgent {
    */
   private _sessionTokens = 0;
   private _tokenStatus: TokenStatus = 'unavailable';
+  /**
+   * Uso por turno (UX-3): el del último turno cerrado y el acumulado de la
+   * sesión. `_sessionTurns` cuenta turnos cerrados, aunque el backend no haya
+   * reportado tokens: son turnos reales, con su tiempo y sus llamadas.
+   */
+  private _lastTurnUsage: TurnUsage | null = null;
+  private _sessionUsage: TurnUsage = emptyTurnUsage();
+  private _sessionTurns = 0;
   /** Ref al fichero de plan activo (Hito 7), para persistir el `planRef` de la sesión. */
   private _planRef: string | null = null;
   /** Plan reanudado (§12.6): expuesto una sola vez a la UI al init, luego se borra. */
@@ -292,6 +333,24 @@ export class StratumAgent {
   private readonly conversation: SessionConversation | null;
   /** Caracteres de las capas de memoria global y de proyecto en el system prompt. */
   private memoryLayerChars = { global: 0, project: 0 };
+  /**
+   * UX-1 — almacén de snapshots de la sesión, abierto perezosamente en el
+   * primer turno (`SnapshotStore.open` es async y hace I/O de git). `null` es
+   * «deshacer no está disponible»: sin `sessionId`, con `snapshots: false`, sin
+   * repo git o con el registro incompatible.
+   */
+  private snapshotStore: SnapshotStore | null = null;
+  /**
+   * Apertura en vuelo. Se cachea la promesa (no un flag «ya intentado») para
+   * que dos llamadas concurrentes —un `runTurn` y un `getUndoableTurns` de la
+   * UI— compartan el mismo `open` y ningún turno se quede sin snapshot.
+   */
+  private snapshotOpening?: Promise<SnapshotStore | null>;
+  private readonly snapshotsEnabled: boolean;
+  private readonly snapshotsSessionId: string | null;
+  private readonly snapshotsHome: string | undefined;
+  /** Texto `<files_reverted>` pendiente de anteponer a la siguiente entrada. */
+  private revertNotice: string | null = null;
 
   constructor(
     private readonly config: StratumConfig,
@@ -301,6 +360,11 @@ export class StratumAgent {
   ) {
     this.env = options?.env ?? processSessionEnv();
     this.conversation = options?.conversation?.conversation ?? null;
+    // UX-1: el almacén de snapshots necesita un id de sesión estable; sin él
+    // deshacer queda desactivado en vez de mezclar turnos de dos sesiones.
+    this.snapshotsEnabled = options?.snapshots !== false;
+    this.snapshotsSessionId = options?.sessionId ?? null;
+    this.snapshotsHome = options?.snapshotsHome;
     const cwd = this.env.cwd;
     this.preset = options?.promptPreset ?? 'coding';
     // El agente de código solo ve el proyecto; el asistente, solo lo global.
@@ -314,6 +378,35 @@ export class StratumAgent {
     if (this.jobs) this.inbox.attachJobs(this.jobs);
     this.workspace = options?.workspace;
     this.workspaceFilesExpiredAt = options?.workspaceFilesExpiredAt;
+    // UX-2b: language servers, solo si la config lo pide. La raíz es la misma
+    // que ve el modelo como `cwd` (el workspace de Desktop, si lo hay).
+    const lspRoot = this.workspace?.root ?? cwd;
+    const lspServers = config.lsp.enabled ? resolveLspServers(config.lsp.servers) : [];
+    const lsp =
+      lspServers.length > 0
+        ? new LspManager({
+            servers: lspServers,
+            cwd: lspRoot,
+            timeoutMs: config.lsp.timeoutMs,
+            startupTimeoutMs: config.lsp.startupTimeoutMs,
+          })
+        : undefined;
+    this.lsp = lsp;
+    this.diagnosticsProvider =
+      lsp === undefined
+        ? undefined
+        : {
+            diagnose: async (absPath, text, signal) => {
+              const report = await lsp.diagnose(absPath, text, signal);
+              if (report === null) return null;
+              return formatDiagnostics(report, {
+                maxDiagnostics: config.lsp.maxDiagnostics,
+                severity: config.lsp.severity,
+                // Igual que el nombre con el que el modelo llamó a la tool.
+                displayPath: relativePath(lspRoot, absPath).split(pathSep).join('/'),
+              });
+            },
+          };
     this._readOnly = options?.readOnly === true;
     // Hito 17: el perfil de sesión decide bloques del prompt, así que se
     // resuelve antes de componerlo. El asistente de Desktop no tiene perfil.
@@ -608,6 +701,14 @@ export class StratumAgent {
     if (undelivered.length > 0) {
       pushUserInput(this.messages, formatUndeliveredUserMessages(undelivered));
     }
+    // UX-1: un deshacer hecho entre turnos se avisa aquí, delante de la
+    // petición nueva (mismo sitio que el steering no entregado): el modelo no
+    // puede seguir editando ficheros con la versión que ya no existe.
+    const revertNotice = this.revertNotice;
+    if (revertNotice) {
+      this.revertNotice = null;
+      pushUserInput(this.messages, revertNotice);
+    }
     pushUserInput(this.messages, input);
 
     // Hito 6: reiniciar el estado de fallback en cada turno para que el provider
@@ -615,6 +716,10 @@ export class StratumAgent {
     this.router.resetFallback();
 
     this.currentLoop = this.makeLoop();
+
+    // UX-1: T0 del turno. Nunca lanza ni bloquea el turno si git falla.
+    const snapshots = await this.openSnapshots();
+    const trackedTurn = snapshots ? await snapshots.beginTurn() : null;
 
     let stopReason: string | null = null;
     const tracker = this.targetTracker();
@@ -641,6 +746,9 @@ export class StratumAgent {
       // y abre el turno siguiente.
       this.inbox.endTurn();
       trace?.turnEnd(stopReason);
+      // UX-1: T1 en el finally, también si el loop lanzó (cancelación, error).
+      // `finishTurn` nunca lanza: un fallo de git desactiva los snapshots.
+      if (snapshots && trackedTurn) await snapshots.finishTurn(trackedTurn);
     }
     // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
     // `unsupported` es pegajoso — si este backend no manda usage, no lo va a
@@ -652,6 +760,12 @@ export class StratumAgent {
     } else if (this._tokenStatus !== 'reported') {
       this._tokenStatus = accounting.status;
     }
+    // UX-3: el desglose del turno se consolida en el mismo punto. Se guarda
+    // aunque no traiga tokens (tiempos y número de llamadas son datos reales).
+    const turnUsage = this.currentLoop.turnUsage;
+    this._lastTurnUsage = turnUsage;
+    this._sessionUsage = sumUsage(this._sessionUsage, turnUsage);
+    this._sessionTurns++;
     this.currentLoop = null;
 
     // Extracción automática de decisiones en background (§9, detección
@@ -662,6 +776,93 @@ export class StratumAgent {
       );
       this.background.add(extraction);
     }
+  }
+
+  // -------------------------------------------------------------------------
+  // UX-1 — deshacer por turno (puntos 5 y 7 del brief)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Abre el almacén la primera vez y cachea el resultado; si queda inactivo (sin
+   * repo git, sin `sessionId`, registro de una versión más nueva) no se reintenta
+   * en toda la sesión. Nunca lanza.
+   */
+  private async openSnapshots(): Promise<SnapshotStore | null> {
+    if (!this.snapshotsEnabled || !this.snapshotsSessionId) return null;
+    if (this.snapshotStore) return this.snapshotStore;
+    this.snapshotOpening ??= this.openSnapshotsOnce();
+    return this.snapshotOpening;
+  }
+
+  private async openSnapshotsOnce(): Promise<SnapshotStore | null> {
+    if (!this.snapshotsSessionId) return null;
+    try {
+      const store = await SnapshotStore.open({
+        cwd: this.env.cwd,
+        sessionId: this.snapshotsSessionId,
+        config: this.config.snapshots,
+        ...(this.snapshotsHome ? { home: this.snapshotsHome } : {}),
+      });
+      this.snapshotStore = store.isActive() ? store : null;
+      if (!this.snapshotStore) {
+        log.debug('snapshots unavailable in this session', {
+          reason: store.disabledReason ?? 'unknown',
+        });
+      }
+    } catch (err) {
+      this.snapshotStore = null;
+      log.warn('snapshots unavailable in this session', { err });
+    }
+    return this.snapshotStore;
+  }
+
+  /**
+   * Turnos con cambios que se pueden deshacer, el más reciente primero. Es
+   * síncrono (la UI lo consulta al pintar): si el almacén todavía no se abrió
+   * —ningún turno aún— devuelve [] y dispara la apertura en segundo plano.
+   */
+  getUndoableTurns(): TurnRecord[] {
+    if (this.snapshotStore) return this.snapshotStore.getUndoableTurns();
+    void this.openSnapshots();
+    return [];
+  }
+
+  /**
+   * Qué haría `revertTurns(count)`: rutas a restaurar, a borrar, conflictos
+   * (tocadas por el usuario o por otra cosa después del último turno) y rutas
+   * sin snapshot. Nunca lanza: sin almacén devuelve un plan vacío.
+   */
+  async planRevert(count = 1): Promise<RevertPlan> {
+    const empty: RevertPlan = { turns: [], restore: [], remove: [], conflicts: [], skipped: [] };
+    if (this.currentLoop) {
+      log.warn('planRevert ignored: a turn is in progress');
+      return empty;
+    }
+    const store = await this.openSnapshots();
+    if (!store) return empty;
+    return store.planRevert(count);
+  }
+
+  /**
+   * Deshace los `count` últimos turnos. Rechaza con resultado (nunca excepción)
+   * si hay un turno en curso o si hay conflictos sin `force`. Tras revertir deja
+   * el aviso `<files_reverted>` para que abra el turno siguiente y olvida las
+   * versiones vistas de esos ficheros (`FileStateTracker`), que ya no valen.
+   */
+  async revertTurns(count = 1, opts: { force?: boolean } = {}): Promise<RevertResult> {
+    if (this.currentLoop) return { ok: false, reason: 'turn-in-progress' };
+    const store = await this.openSnapshots();
+    if (!store) return { ok: false, reason: 'disabled' };
+    const result = await store.revertTurns(count, opts);
+    if (result.ok) {
+      // El registro guarda rutas relativas a la RAÍZ del worktree, no al cwd.
+      const storeRoot = this.snapshotStore?.root ?? this.env.cwd;
+      for (const path of [...result.restored, ...result.removed]) {
+        this.fileState.forget(resolvePath(storeRoot, path));
+      }
+      this.revertNotice = formatFilesReverted(result.turns, result.restored, result.removed);
+    }
+    return result;
   }
 
   /** Registra el historial activo en el store y guarda el estado del contexto. Nunca lanza. */
@@ -707,6 +908,15 @@ export class StratumAgent {
     this.backgroundAbort.abort();
     await Promise.allSettled([...this.background]);
     this.backgroundAbort = new AbortController();
+  }
+
+  /**
+   * Cierra lo que no muere con el turno: hoy, los language servers (UX-2b).
+   * Idempotente y nunca rechaza; el teardown de la sesión lo llama junto al del
+   * resto de subsistemas (§12.12).
+   */
+  async dispose(): Promise<void> {
+    await this.lsp?.dispose();
   }
 
   /**
@@ -963,6 +1173,36 @@ export class StratumAgent {
     return this._toolCallCount;
   }
 
+  /**
+   * Desglose de uso del último turno cerrado (UX-3), o `null` si aún no hay
+   * ninguno. Nunca estima: los campos que el backend no reporta van indefinidos.
+   */
+  getLastTurnUsage(): TurnUsage | null {
+    return this._lastTurnUsage ? { ...this._lastTurnUsage } : null;
+  }
+
+  /**
+   * Acumulado de la sesión (UX-3) más el número de turnos que lo componen.
+   * `clearHistory()` no lo borra: limpiar el contexto no devuelve los tokens.
+   *
+   * **Excluye subagentes y llamadas auxiliares**: solo suma lo que midió el loop
+   * principal (compresor de contexto y extracción de memoria no entran). Para la
+   * contabilidad total de la sesión —que sí incluye lo que reportan los hijos,
+   * en tokens— está `getTokenUsage()`. Un turno delegado (`runDelegate`) cuenta
+   * en `turns` pero marca `incomplete`: su consumo no está en este desglose.
+   */
+  getSessionUsage(): TurnUsage & { turns: number } {
+    return { ...this._sessionUsage, turns: this._sessionTurns };
+  }
+
+  /**
+   * Desglose del turno **en curso** (UX-3), para la telemetría en vivo; `null`
+   * si no hay turno abierto. Es una foto parcial: crece con cada request.
+   */
+  getLiveTurnUsage(): TurnUsage | null {
+    return this.currentLoop ? this.currentLoop.turnUsage : null;
+  }
+
   get providerName(): string {
     return this.router.providerName;
   }
@@ -1107,6 +1347,7 @@ export class StratumAgent {
         tdd: this.tdd,
         skills: this.skills,
         fileState: this.fileState,
+        diagnostics: this.diagnosticsProvider,
         workspace: this.workspace,
         env: this.env,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
@@ -1436,6 +1677,12 @@ export class StratumAgent {
       this.messages.push({ role: 'assistant', content: directSummaryText(profile.name, final) });
       this._toolCallCount++;
       if (result) this.addChildTokens(result);
+      // UX-3: el turno delegado cuenta como turno de sesión, pero su desglose
+      // (tokens, caché, tiempos, coste) lo lleva el loop del hijo y aquí no
+      // llega: se marca `incomplete` para que nadie lea ese 0 como medido.
+      this._sessionTurns++;
+      this._sessionUsage = { ...this._sessionUsage, incomplete: true };
+      this._lastTurnUsage = { ...emptyTurnUsage(), incomplete: true };
       trace?.turnEnd(result ? 'stop' : 'cancelled');
     }
 

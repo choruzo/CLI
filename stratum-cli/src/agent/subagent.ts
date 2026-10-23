@@ -14,6 +14,7 @@ import type {
   AgentProfile,
   ConfirmRequest,
   DestructiveDecision,
+  DiagnosticsProvider,
   DestructivePolicy,
   Message,
   RunOptions,
@@ -92,6 +93,11 @@ export interface RunSubagentOptions {
   trace?: TraceScope;
   /** Entorno de la sesión del padre. Sin él —tests— se usa el del proceso. */
   env?: SessionEnv;
+  /**
+   * Diagnósticos del language server del padre (UX-2b). El hijo no arranca
+   * servers propios: hereda el mismo manager de la sesión.
+   */
+  diagnostics?: DiagnosticsProvider;
 }
 
 function pad2(n: number): string {
@@ -240,6 +246,7 @@ async function runSubagentWithin(
       fileState: new FileStateTracker(),
       skills: opts.skills,
       env,
+      diagnostics: opts.diagnostics,
     },
   );
 

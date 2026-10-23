@@ -16,14 +16,18 @@
         "model": "claude-sonnet-4-5",
         "apiKey": "${LITELLM_API_KEY}",
         "contextWindow": 200000,
-        "cache": { "explicitBreakpoints": true }
+        "cache": { "explicitBreakpoints": true },
+        "pricing": { "input": 3, "output": 15, "cachedInput": 0.3, "cacheWrite": 3.75 }
       },
       "hosted": {
         "type": "openai-compatible",
         "baseUrl": "https://api.example.com/v1",
         "apiKey": "${EXAMPLE_API_KEY}",
         "models": {
-          "big-model": { "contextWindow": 200000 }
+          "big-model": {
+            "contextWindow": 200000,
+            "pricing": { "input": 1.5, "output": 6 }
+          }
         }
       }
     }
@@ -213,6 +217,17 @@
         "user": "javi",
         "useAgent": true
       }
+    }
+  },
+  "lsp": {
+    "enabled": false,
+    "timeoutMs": 3000,
+    "startupTimeoutMs": 15000,
+    "maxDiagnostics": 20,
+    "severity": "error",
+    "servers": {
+      "typescript": {},
+      "pyright": {}
     }
   },
   "daemon": {

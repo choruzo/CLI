@@ -181,6 +181,15 @@ export interface ConfirmRequest {
   forced?: boolean;
 }
 
+/**
+ * Puente con el language server de la sesión (UX-2b). Devuelve los diagnósticos
+ * **ya formateados** para el modelo, o `null` si no hay nada que decir. No
+ * lanza: un fallo auxiliar no puede convertir una edición correcta en error.
+ */
+export interface DiagnosticsProvider {
+  diagnose(absPath: string, text: string, signal?: AbortSignal): Promise<string | null>;
+}
+
 export interface ToolContext {
   signal: AbortSignal;
   cwd: string;
@@ -245,6 +254,12 @@ export interface ToolContext {
    * la sesión no tiene skills.
    */
   skills?: SkillRegistry;
+  /**
+   * Diagnósticos del language server tras editar (UX-2b). `edit_file` y
+   * `write_file` lo llaman después de escribir y anexan el texto que devuelva.
+   * Ausente → las ediciones se comportan como siempre.
+   */
+  diagnostics?: DiagnosticsProvider;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */

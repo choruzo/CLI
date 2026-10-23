@@ -3,6 +3,7 @@ import { resolve } from 'path';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../../agent/types.js';
 import { sensitivePathPreflight, sensitivePathNeedsConfirm } from './sensitive.js';
+import { withDiagnostics } from './attach-diagnostics.js';
 import { stringParam, workspaceExecuteGuard, workspacePathPreflight } from './confine.js';
 import {
   FileChangedError,
@@ -76,10 +77,14 @@ export const writeFileTool: ToolDefinition = {
 
       const written = writeTextFileAtomic(target, text, { bom, expected: before ?? undefined });
       ctx.fileState?.record(target, written);
-      return {
-        ok: true,
-        output: `File ${before ? 'overwritten' : 'created'}: ${path} (${written.size} bytes)`,
-      };
+      // UX-2b: diagnósticos del language server, si la sesión los tiene.
+      const output = await withDiagnostics(
+        `File ${before ? 'overwritten' : 'created'}: ${path} (${written.size} bytes)`,
+        target,
+        text,
+        ctx,
+      );
+      return { ok: true, output };
     } catch (err) {
       const msg =
         err instanceof FileChangedError

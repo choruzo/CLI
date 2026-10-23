@@ -5,6 +5,8 @@ import { StatusBar } from './StatusBar.js';
 import type { EnvironmentBadge, ProviderStatus } from './StatusBar.js';
 import { MessageList } from './MessageList.js';
 import { InputArea } from './InputArea.js';
+import { PromptFooter } from './PromptFooter.js';
+import type { Verbosity } from './tool-groups.js';
 import { DestructiveConfirm } from './DestructiveConfirm.js';
 import { PlanView } from './PlanView.js';
 import { TodoView } from './TodoView.js';
@@ -91,6 +93,12 @@ interface Props {
   onQuestionsCancel?: () => void;
   /** Mensajes del usuario encolados para el turno en curso y aún sin entregar. */
   pendingSteering?: number;
+  /** Doble Esc a medias (UX-3): el pie avisa de que la siguiente para el turno. */
+  escArmed?: boolean;
+  /** Telemetría del pie del prompt, ya compuesta. */
+  telemetry?: React.ReactNode;
+  /** `/verbosity` (UX-3). */
+  verbosity?: Verbosity;
   /** Aviso de una línea sobre el input (p. ej. por qué no se encoló algo). */
   inputHint?: string | null;
 }
@@ -139,6 +147,9 @@ export function ConversationView({
   onQuestionsCancel,
   pendingSteering = 0,
   inputHint,
+  escArmed = false,
+  telemetry,
+  verbosity,
 }: Props) {
   const liveNow = useLiveClock(thinking);
   // Un gate (confirmación, preguntas, aprobación de plan) es dueño del teclado.
@@ -186,6 +197,7 @@ export function ConversationView({
         debug={debug}
         now={liveNow}
         availableRows={availableConversationRows}
+        verbosity={verbosity}
       />
       {fatalError && <FatalError message={fatalError.message} />}
       {plan && pendingApproval && (
@@ -239,6 +251,13 @@ export function ConversationView({
       {/* Debajo del input: un texto largo lo hace más alto que la pantalla, y un
           aviso encima («demasiado grande para steering») quedaría fuera de la vista. */}
       {!overlay && inputHint && <Text color={theme.warning}> {inputHint}</Text>}
+      {!overlay && (
+        <PromptFooter
+          mode={gateOpen || fatalError ? null : steerable ? 'steer' : thinking ? null : 'send'}
+          escArmed={escArmed}
+          telemetry={telemetry}
+        />
+      )}
     </Box>
   );
 }

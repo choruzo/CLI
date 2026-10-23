@@ -30,6 +30,14 @@ describe('useAgentStream', () => {
       }),
       getContextUsage: vi.fn(() => ({ used: 1, max: 10, estimated: true })),
       getTokenUsage: vi.fn(() => ({ status: 'reported' as const, tokens: 42 })),
+      getLiveTurnUsage: vi.fn(() => null),
+      getSessionUsage: vi.fn(() => ({
+        llmCalls: 0,
+        reportedCalls: 0,
+        llmMs: 0,
+        toolMs: 0,
+        turns: 0,
+      })),
     };
 
     const { send, cancel } = useAgentStream(agent as never, dispatch);
@@ -50,6 +58,7 @@ describe('useAgentStream', () => {
         max: 10,
         estimated: true,
         tokens: { status: 'reported', tokens: 42 },
+        turnUsage: null,
       },
     });
     // El contexto se consulta una vez en la frontera `done`, no por text_delta.
@@ -85,6 +94,14 @@ describe('useAgentStream', () => {
       }),
       getContextUsage: vi.fn(() => ({ used: inserted ? 2 : 1, max: 10, estimated: true })),
       getTokenUsage: vi.fn(() => ({ status: 'unavailable' as const })),
+      getLiveTurnUsage: vi.fn(() => null),
+      getSessionUsage: vi.fn(() => ({
+        llmCalls: 0,
+        reportedCalls: 0,
+        llmMs: 0,
+        toolMs: 0,
+        turns: 0,
+      })),
     };
 
     const { send } = useAgentStream(agent as never, dispatch);

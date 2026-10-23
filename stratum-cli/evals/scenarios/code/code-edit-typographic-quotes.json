@@ -1,0 +1,58 @@
+{
+  "id": "code-edit-typographic-quotes",
+  "group": "code",
+  "title": "Editar una línea con comillas tipográficas y guion largo",
+  "difficulty": "basic",
+  "setup": {
+    "files": {
+      "docs/nota.md": "# Nota\n\nEl \u201cinforme\u201d \u2014 pendiente de revisi\u00f3n\n"
+    }
+  },
+  "input": "En docs/nota.md, marca el informe como listo: deja la línea del informe como `El \"informe\" - listo`. No cambies nada más.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "read_file",
+          "args": {
+            "path": "docs/nota.md"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "docs/nota.md",
+            "old_string": "El \"informe\" - pendiente de revisi\u00f3n",
+            "new_string": "El \"informe\" - listo"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Línea actualizada: el informe queda como listo."
+    }
+  ],
+  "expect": {
+    "description": "La línea del informe queda con comillas rectas y guion normal, sin tocar el resto del documento.",
+    "checks": [
+      {
+        "type": "command",
+        "label": "docs/nota.md tiene la línea reescrita y el resto intacto",
+        "run": [
+          "node",
+          "-e",
+          "const fs=require('fs');const want='# Nota\\n\\nEl \"informe\" - listo\\n';const got=fs.readFileSync('docs/nota.md','utf8');if(got!==want){console.error(JSON.stringify(got));process.exit(1)}"
+        ]
+      },
+      {
+        "type": "metric",
+        "metric": "toolCalls",
+        "max": 6
+      }
+    ]
+  }
+}

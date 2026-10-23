@@ -162,6 +162,8 @@ export class SessionHost {
     this.interactions.subscribe((change) => this.traceResolution(change));
     this.agent = new StratumAgent(this.config, this.router, this.registry, {
       ...opts.agent,
+      // UX-1: misma clave de sesión para snapshots que para trazas y store.
+      sessionId: this.sessionId,
       ...(opts.preset === 'assistant'
         ? { promptPreset: 'assistant', workspace: assistantWorkspace(this.env.cwd) }
         : {}),
@@ -350,6 +352,7 @@ export class SessionHost {
       await this.settle('background work', () => this.agent.cancelBackgroundWork());
     }
     await this.settle('subagent store', () => this.subagentStore.dispose());
+    await this.settle('lsp dispose', () => this.agent.dispose());
     await this.settle('trace flush', () => this.trace?.flush());
   }
 

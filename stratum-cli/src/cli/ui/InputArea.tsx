@@ -32,7 +32,7 @@ export function InputArea({ value, onChange, onSubmit, disabled, steering }: Pro
           onSubmit={onSubmit}
           placeholder={
             steering
-              ? 'Agent is working — type to steer it (Enter queues, Ctrl+C cancels)...'
+              ? 'Agent is working — type to steer it...'
               : 'Type a message or / for commands...'
           }
           focus={!disabled}

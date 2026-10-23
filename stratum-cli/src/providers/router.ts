@@ -4,6 +4,7 @@ import type { IProvider } from './base.js';
 import { OpenAICompatible } from './openai-compatible.js';
 import { classifyBackendByUrl, discoveredContextWindow } from './utils.js';
 import { resolveCacheCapabilities, type CacheCapabilities } from './cache.js';
+import type { Pricing } from './pricing.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('provider');
@@ -193,6 +194,17 @@ export class ProviderRouter {
   /** Qué admite el provider activo en caché de prompt. */
   get cacheCapabilities(): CacheCapabilities {
     return cacheCapabilitiesOf(this.activeConfig);
+  }
+
+  /**
+   * Precio del modelo activo (UX-3): `models.<id>.pricing` gana al del
+   * provider; `undefined` si nadie declaró tarifa. Se lee por request, así que
+   * un fallback o un `/provider` en caliente factura con el proveedor que
+   * realmente atendió esa llamada.
+   */
+  get pricing(): Pricing | undefined {
+    const cfg = this.activeConfig;
+    return cfg.models?.[cfg.model]?.pricing ?? cfg.pricing;
   }
 
   /**

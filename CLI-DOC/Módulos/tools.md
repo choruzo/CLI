@@ -128,8 +128,29 @@ Errores: tool no encontrada o `schema.parse` fallido → `{ ok:false, recoverabl
 ### write_file
 `path`, `content`. Crea/sobrescribe; crea directorios padre recursivamente.
 
+Con `lsp.enabled` (UX-2b), tras escribir anexa los **diagnósticos del language server** del fichero, separados del resultado por una línea en blanco (ver `edit_file`).
+
 ### edit_file
-`path`, `old_string`, `new_string`, `replace_all?`. Reemplazo exacto de única ocurrencia (o todas con `replace_all`). Devuelve un **unified diff** generado por `fs/diff.ts` (algoritmo LCS propio, sin dependencias).
+`path`, `old_string`, `new_string`, `replace_all?`. Reemplazo literal de única ocurrencia (o todas con `replace_all`) sobre el tramo del original: nunca `String.replace`, así que `$&`/`$$`/`$1` de `new_string` salen tal cual. Devuelve un **unified diff** generado por `fs/diff.ts` (algoritmo LCS propio, sin dependencias).
+
+El match va en **escalera** (`fs/match.ts`, funciones puras `findSpans`/`locate`/`replaceSpans`) y se para en el primer nivel con al menos una coincidencia:
+
+1. `exact` — el comportamiento de siempre. En un fichero CRLF se prueba `old_string` tal cual y luego con los saltos convertidos a CRLF.
+2. `unicode` — se normalizan **ambos lados** conservando un mapa de offsets al original: comillas tipográficas (`‘ ’ ‚ ‛ “ ” „ ‟`) → rectas, guiones (`‐ ‑ ‒ – — ―`) → `-`, espacios raros (NBSP, `U+2000–200A`, `U+202F`, `U+205F`, `U+3000`) → espacio, `…` → `...` y se descartan los zero-width (`U+200B–200D`, `U+FEFF` en medio del texto; el BOM inicial se conserva).
+3. `trailing-whitespace` — coincidencia por líneas completas ignorando espacios/tabs/`\r` al final de cada una, en ambos lados. El tramo cubre líneas enteras del original; si `old_string` acaba en salto de línea, el salto de la última línea entra en el tramo. Un `old_string` que solo son espacios no casa en este nivel.
+
+Reglas: la unicidad se exige en todos los niveles (el error dice en cuál falló) y `replace_all` reemplaza todas las del nivel que casó; `new_string` no se normaliza nunca (solo se convierte a CRLF en ficheros CRLF); en niveles 2 y 3 la primera línea del resultado lo indica —`(matched after normalizing unicode punctuation/spaces)` / `(matched ignoring trailing whitespace)`— y el error de «no encontrado» recuerda que la normalización ya se probó. El fichero conserva BOM y finales de línea.
+
+**Diagnósticos LSP (UX-2b).** Si la sesión tiene `lsp.enabled` y hay un servidor para la extensión, tras escribir se piden los diagnósticos del fichero y se anexan al resultado, tras una línea en blanco, ya formateados (`src/lsp/format.ts`):
+
+```
+File edited: src/a.ts
+
+Diagnostics (typescript) for src/a.ts — 1 error:
+  12:5  error  TS2322  Type 'string' is not assignable to type 'number'.
+```
+
+`ToolContext.diagnostics` es el puente y su contrato es blando a propósito: `null`, cadena vacía, timeout o una excepción del provider dejan el resultado de la tool **exactamente** como estaba (la edición ya está en disco). Respeta el `AbortSignal` del turno. Línea/columna 1-based, umbral `severity` (`error`/`warning`), tope `maxDiagnostics` con `… +N more`, y `no errors.` cuando el fichero está limpio.
 
 ### glob
 Búsqueda por patrón glob de archivos.

@@ -6,6 +6,7 @@ import { resolveLayout } from './layout.js';
 import type { ConvItem } from './App.js';
 import { ToolCallBlock, type ToolCallState } from './ToolCallBlock.js';
 import { SubagentBlock, type SubagentBlockState } from './SubagentBlock.js';
+import type { Verbosity } from './tool-groups.js';
 
 interface Props {
   completedItems: ConvItem[];
@@ -18,6 +19,8 @@ interface Props {
   now?: number;
   /** Filas disponibles tras descontar paneles pinned. */
   availableRows?: number;
+  /** `/verbosity` (UX-3): cuánto detalle llevan los turnos que se cierran. */
+  verbosity?: Verbosity;
 }
 
 function renderItem(
@@ -30,6 +33,7 @@ function renderItem(
   liveTextLines?: number,
   liveColumns?: number,
   liveActionLimit?: number,
+  verbosity?: Verbosity,
 ) {
   if (item.kind === 'user') {
     return <UserMessage key={key} text={item.text} note={item.note} />;
@@ -54,6 +58,8 @@ function renderItem(
       liveTextLines={liveTextLines}
       liveColumns={liveColumns}
       liveActionLimit={liveActionLimit}
+      verbosity={verbosity}
+      usage={item.usage}
     />
   );
 }
@@ -91,6 +97,7 @@ export function MessageList({
   debug,
   now = Date.now(),
   availableRows,
+  verbosity = 'standard',
 }: Props) {
   const { stdout } = useStdout();
   // §9: en terminales anchas el contenido se limita para no leer líneas de 200 chars.
@@ -111,7 +118,22 @@ export function MessageList({
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={1} width={contentWidth}>
-      <Static items={completedItems}>{(item, i) => renderItem(item, i)}</Static>
+      <Static items={completedItems}>
+        {(item, i) =>
+          renderItem(
+            item,
+            i,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            undefined,
+            contentWidth,
+            undefined,
+            verbosity,
+          )
+        }
+      </Static>
       {inspectable && 'name' in inspectable ? (
         <ToolCallBlock
           state={inspectable}

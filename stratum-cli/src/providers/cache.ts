@@ -19,6 +19,8 @@ export interface TokenUsage {
   cachedReadTokens?: number;
   /** Tokens de entrada que esta llamada escribió en caché (Anthropic). */
   cacheWriteTokens?: number;
+  /** Tokens de razonamiento ya incluidos en `completionTokens` (OpenAI, vLLM, DeepSeek). */
+  reasoningTokens?: number;
 }
 
 /** `TokenUsage` con lo que se deriva de él. Todo `undefined` si falta el dato de caché. */
@@ -48,6 +50,10 @@ export interface RawUsage {
   /** DeepSeek. */
   prompt_cache_hit_tokens?: number;
   prompt_cache_miss_tokens?: number;
+  /** OpenAI, vLLM, DeepSeek: el razonamiento va aquí, ya dentro de `completion_tokens`. */
+  completion_tokens_details?: { reasoning_tokens?: number } | null;
+  /** Anthropic vía pasarela. */
+  output_tokens_details?: { reasoning_tokens?: number } | null;
 }
 
 /** `timings` de llama.cpp: `cache_n` son los tokens del prompt reutilizados del KV cache. */
@@ -94,6 +100,9 @@ export function normalizeUsage(
   }
 
   const completion = count(u.completion_tokens) ?? count(u.output_tokens);
+  const reasoning =
+    count(u.completion_tokens_details?.reasoning_tokens) ??
+    count(u.output_tokens_details?.reasoning_tokens);
   const out: TokenUsage = {};
   if (prompt !== undefined) out.promptTokens = prompt;
   if (completion !== undefined) out.completionTokens = completion;
@@ -103,6 +112,7 @@ export function normalizeUsage(
   if (total !== undefined) out.totalTokens = total;
   if (cachedRead !== undefined) out.cachedReadTokens = cachedRead;
   if (cacheWrite !== undefined) out.cacheWriteTokens = cacheWrite;
+  if (reasoning !== undefined) out.reasoningTokens = reasoning;
   return Object.keys(out).length > 0 ? out : undefined;
 }
 

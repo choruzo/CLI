@@ -20,6 +20,8 @@ Implementado en Hito 1, ampliado en Hitos 2 y 3.5. Ver [[Arquitectura]] y [[Mód
 | `src/providers/router.ts` | `ProviderRouter` — selección del provider activo + fallback |
 | `src/providers/utils.ts` | Utilidades compartidas de provider |
 | `src/providers/mock.ts` | `MockProvider` — guion de chunks para tests |
+| `src/providers/cache.ts` | `TokenUsage`/`RawUsage`/`normalizeUsage` — lo que el backend reporta de caché (puro) |
+| `src/providers/pricing.ts` | `Pricing`/`computeCostUsd`/`addCostTotal` — coste en USD, sin estimar (puro) |
 
 > **Hito 3.5 — Provider & Model UX:** wizard `stratum provider add` (`ProviderWizard.tsx` + `wizard-logic.ts`), `provider list/use/remove`, y slash commands `/model` (cambio de modelo en caliente) y `/config_provider` (selección de provider activo). Ver [[Módulos/cli]].
 
@@ -80,6 +82,8 @@ fetch(baseUrl + '/chat/completions', {
 
 **`stream_options.include_usage`** (añadido en Hito 2): solicita al provider que incluya los tokens reales en el último chunk. El `ContextManager` llama a `recordUsage(chunk.usage.prompt_tokens)` al recibir ese chunk, lo que activa la estimación real (`estimated: false`) en lugar del proxy `chars/3.5` (`estimated: true`).
 
+`normalizeUsage` (`cache.ts`) traduce el `usage` crudo de cada backend a `TokenUsage` y lo que no viene queda `undefined`: `cachedReadTokens` (`prompt_tokens_details.cached_tokens`, `cache_read_input_tokens`, `prompt_cache_hit_tokens`, `timings.cache_n`), `cacheWriteTokens` (`cache_creation_input_tokens`, `prompt_tokens_details.cache_write_tokens`) y `reasoningTokens` (`completion_tokens_details.reasoning_tokens`, `output_tokens_details.reasoning_tokens`), este último ya incluido en `completionTokens`. El `ReactLoop` lo usa para el desglose por turno (`TurnUsage`, `agent/usage.ts`).
+
 ### healthCheck()
 
 `GET baseUrl/models` — devuelve `true` si responde 2xx. El indicador `●` dinámico en StatusBar está diferido a Hito 6.
@@ -132,6 +136,8 @@ class ProviderRouter {
   get providerName(): string
   get model(): string
   get contextWindow(): number
+  get cacheCapabilities(): CacheCapabilities
+  get pricing(): Pricing | undefined   // UX-3: models.<id>.pricing ?? provider.pricing
   async healthCheck(): Promise<boolean>
 }
 ```

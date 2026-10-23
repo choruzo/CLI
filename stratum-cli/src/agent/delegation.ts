@@ -13,6 +13,7 @@
  */
 import type { StratumConfig } from '../config/schema.js';
 import type { SkillRegistry } from '../skills/registry.js';
+import type { DiagnosticsProvider } from './types.js';
 import type {
   AgentEvent,
   AgentProfile,
@@ -64,6 +65,8 @@ export interface DelegationContext {
   skills?: SkillRegistry;
   /** Entorno de la sesión del padre: el hijo trabaja en el mismo `cwd`. */
   env?: SessionEnv;
+  /** Diagnósticos LSP del padre (UX-2b): el hijo usa el mismo manager. */
+  diagnostics?: DiagnosticsProvider;
 }
 
 export type ProfileResolution =
@@ -251,6 +254,7 @@ export async function* executeDelegations(
             onEvent: (ev) => push({ type: 'subagent_event', subagentId: job.subId, event: ev }),
             skills: ctx.skills,
             env: ctx.env,
+            diagnostics: ctx.diagnostics,
             trace: opts?.trace?.child(job.subId),
           });
         } catch (err) {

@@ -18,6 +18,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     skills: DEFAULTS.skills,
     trace: DEFAULTS.trace,
     prompt: DEFAULTS.prompt,
+    snapshots: DEFAULTS.snapshots,
     desktop: DEFAULTS.desktop,
     daemon: DEFAULTS.daemon,
     context: DEFAULTS.context,
@@ -83,6 +84,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       compressionTimeoutMs: 120_000,
       compressionThreshold: 0.8,
     },
+    lsp: DEFAULTS.lsp,
   };
 }
 

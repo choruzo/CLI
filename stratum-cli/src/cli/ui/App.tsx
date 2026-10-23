@@ -78,6 +78,16 @@ import { listEnvironments } from '../../tools/environments.js';
 import { formatEnvironmentsReport, formatSessionProfileReport } from '../session-report.js';
 import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
+import { VERBOSITY_LEVELS, type Verbosity } from './tool-groups.js';
+import { liveTelemetry, type UsageView } from './telemetry-format.js';
+import { RevertConfirm, type RevertPlanView } from './RevertConfirm.js';
+import {
+  describeUndoableTurn,
+  fileHint,
+  revertFailureText,
+  type UndoableTurnView,
+} from './undo-format.js';
+import { REVERT_SCOPE_NOTE } from '../../snapshots/index.js';
 import { formatJobRows, visibleJobs } from './JobsView.js';
 import { formatJobEndLine, shortJobCommand, type BackgroundJob } from '../../jobs/types.js';
 import { TURN_REFUSED_HANDED_OFF, useAgentStream } from './useAgentStream.js';
@@ -94,6 +104,9 @@ import { deleteTrace } from '../../trace/store.js';
 type OverlayState =
   | { kind: 'model-loading' }
   | { kind: 'model-select'; models: string[] }
+  // UX-1 — `/rewind` elige turno; `/undo` y `/rewind` confirman con la lista.
+  | { kind: 'rewind-select'; turns: UndoableTurnView[] }
+  | { kind: 'revert-confirm'; count: number; plan: RevertPlanView }
   | { kind: 'model-manual'; note?: string }
   | {
       kind: 'wizard';
@@ -132,6 +145,8 @@ export type AgentConvItem = {
   speakingSubagentId?: string | null;
   /** maxConcurrency del turno (Hito 8C, cabecera de `<AgentTree>`). */
   maxConcurrency?: number;
+  /** Uso del turno (UX-3): se fija al cerrarse; ausente en turnos sin loop. */
+  usage?: UsageView;
   streaming: boolean;
 };
 
@@ -194,6 +209,11 @@ export interface AppState {
   changes: ChangesSummary;
   /** Contabilidad de tokens de la sesión para el medidor de la barra. */
   tokens: TokenAccounting;
+  // ----- Telemetría (UX-3) -----
+  /** Uso del turno en curso, tal como lo lleva el loop; null fuera de un turno. */
+  liveUsage: UsageView | null;
+  /** Uso acumulado de la sesión (turnos cerrados). */
+  sessionUsage: (UsageView & { turns: number }) | null;
 }
 
 /**
@@ -214,8 +234,16 @@ export type AppAction =
   | {
       type: 'AGENT_FRAME';
       events: AgentEvent[];
-      context?: { used: number; max: number; estimated: boolean; tokens: TokenAccounting };
+      context?: {
+        used: number;
+        max: number;
+        estimated: boolean;
+        tokens: TokenAccounting;
+        /** Uso del turno en curso; se aplica ANTES de los eventos, para que `done` lo encuentre. */
+        turnUsage?: UsageView | null;
+      };
     }
+  | { type: 'USAGE_UPDATE'; session: (UsageView & { turns: number }) | null }
   | {
       type: 'CONTEXT_UPDATE';
       used: number;
@@ -306,9 +334,13 @@ function updateToolCall(
 export function reducer(state: AppState, action: AppAction): AppState {
   switch (action.type) {
     case 'AGENT_FRAME': {
+      const start =
+        action.context?.turnUsage !== undefined
+          ? { ...state, liveUsage: action.context.turnUsage }
+          : state;
       const next = action.events.reduce<AppState>(
         (current, event) => reducer(current, { type: 'AGENT_EVENT', event }),
-        state,
+        start,
       );
       if (!action.context) return next;
       return {
@@ -778,7 +810,13 @@ ${ev.delta}`
         const rawCurrent = state.currentItem;
         const finalItem =
           rawCurrent && rawCurrent.kind === 'agent'
-            ? { ...rawCurrent, streaming: false }
+            ? {
+                ...rawCurrent,
+                streaming: false,
+                ...(state.liveUsage && state.liveUsage.llmCalls > 0
+                  ? { usage: state.liveUsage }
+                  : {}),
+              }
             : rawCurrent;
         const completed = finalItem
           ? [...state.completedItems, finalItem]
@@ -873,6 +911,9 @@ ${ev.delta}`
         contextEstimated: action.estimated,
         tokens: action.tokens ?? state.tokens,
       };
+
+    case 'USAGE_UPDATE':
+      return { ...state, sessionUsage: action.session, liveUsage: null };
 
     case 'CHANGES_UPDATE':
       return { ...state, changes: action.summary };
@@ -1035,6 +1076,8 @@ export function App({
     todoCollapsed: false,
     changes: EMPTY_SUMMARY,
     tokens: { status: 'unavailable' },
+    liveUsage: null,
+    sessionUsage: null,
   });
 
   // -------------------------------------------------------------------------
@@ -1504,6 +1547,16 @@ export function App({
   const executeCommandRef = useRef<((cmd: string) => void) | null>(null);
   /** Mensaje enviado con el turno cerrándose: se envía como turno nuevo al terminar. */
   const deferredSendRef = useRef<string | null>(null);
+  // `/verbosity` (UX-3): cuánto detalle llevan los turnos al cerrarse.
+  const [verbosity, setVerbosity] = useState<Verbosity>('standard');
+  // Doble Esc para parar el turno (UX-3): la primera arma, la segunda cancela.
+  const [escArmed, setEscArmed] = useState(false);
+  const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (state.thinking) return;
+    if (escTimerRef.current) clearTimeout(escTimerRef.current);
+    setEscArmed(false);
+  }, [state.thinking]);
 
   useInput((input, key) => {
     if (key.ctrl && (input === 'c' || (key as { name?: string }).name === 'c')) {
@@ -1602,6 +1655,21 @@ export function App({
         setPaletteDismissed(true);
         return;
       }
+    }
+
+    // ----- Esc Esc: parar el turno (UX-3) -----
+    // Una Esc suelta no hace nada con el agente: se pulsa sin querer al cerrar
+    // la paleta o un desplegable. Dos seguidas (1,5 s) cancelan como Ctrl+C.
+    if (key.escape && state.thinking && state.focusState === 'input') {
+      if (escTimerRef.current) clearTimeout(escTimerRef.current);
+      if (escArmed) {
+        setEscArmed(false);
+        cancel();
+      } else {
+        setEscArmed(true);
+        escTimerRef.current = setTimeout(() => setEscArmed(false), 1500);
+      }
+      return;
     }
 
     // ----- Edición de línea (§10) -----
@@ -1952,6 +2020,56 @@ export function App({
     [agent],
   );
 
+  // ----- UX-1: deshacer por turno -----
+  /** Calcula qué haría deshacer los `count` últimos turnos y abre la confirmación. */
+  const openRevertConfirm = useCallback(
+    (count: number) => {
+      setOverlay(null);
+      void agent
+        .planRevert(count)
+        .then((plan) => {
+          if (plan.turns.length === 0) {
+            dispatch({ type: 'SYSTEM_MESSAGE', text: revertFailureText('no-turns') });
+            return;
+          }
+          setOverlay({ kind: 'revert-confirm', count, plan });
+        })
+        .catch(() => dispatch({ type: 'SYSTEM_MESSAGE', text: revertFailureText('error') }));
+    },
+    [agent],
+  );
+
+  const confirmRevert = useCallback(
+    (count: number, force: boolean) => {
+      setOverlay(null);
+      void agent
+        .revertTurns(count, { force })
+        .then((result) => {
+          if (!result.ok) {
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: revertFailureText(result.reason, result.conflicts),
+            });
+            return;
+          }
+          const parts = [
+            result.restored.length ? `${result.restored.length} restaurado(s)` : '',
+            result.removed.length ? `${result.removed.length} borrado(s)` : '',
+            result.skipped.length ? `${result.skipped.length} sin copia` : '',
+          ].filter(Boolean);
+          const which =
+            result.turns.length === 1 ? `turno ${result.turns[0]}` : `${result.turns.length} turnos`;
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `↶ Deshecho ${which}: ${parts.join(' · ') || 'sin ficheros'}. El agente lo sabrá en tu próximo mensaje.`,
+          });
+          refreshChanges();
+        })
+        .catch(() => dispatch({ type: 'SYSTEM_MESSAGE', text: revertFailureText('error') }));
+    },
+    [agent, refreshChanges],
+  );
+
   const executeCommand = useCallback(
     (cmd: string) => {
       // M10: mientras la sesión se traspasa al daemon (o ya es suya) solo se
@@ -2174,6 +2292,26 @@ export function App({
 
       // Hito 13: el usuario mira `git status` constantemente mientras el agente
       // trabaja. El desglose completo va aquí; la barra solo lleva el total.
+      // UX-1 — deshacer por turno. Nada se toca hasta confirmar sobre la lista.
+      if (cmd === '/undo' || cmd === '/rewind') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        if (state.thinking) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: revertFailureText('turn-in-progress') });
+          return;
+        }
+        const turns = agent.getUndoableTurns();
+        if (turns.length === 0) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: revertFailureText('no-turns') });
+          return;
+        }
+        if (cmd === '/rewind') {
+          setOverlay({ kind: 'rewind-select', turns });
+          return;
+        }
+        openRevertConfirm(1);
+        return;
+      }
+
       if (cmd === '/changes') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         void (async () => {
@@ -2222,6 +2360,32 @@ export function App({
             });
           }
         })();
+        return;
+      }
+
+      if (cmd === '/verbosity' || cmd.startsWith('/verbosity ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const arg = cmd.slice('/verbosity'.length).trim().toLowerCase();
+        if (!arg) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Detalle actual: ${verbosity}. Opciones: ${VERBOSITY_LEVELS.join(' | ')}.`,
+          });
+          return;
+        }
+        const level = VERBOSITY_LEVELS.find((v) => v === arg);
+        if (!level) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `Nivel desconocido «${arg}». Opciones: ${VERBOSITY_LEVELS.join(' | ')}.`,
+          });
+          return;
+        }
+        setVerbosity(level);
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `Detalle: ${level}. Se aplica a los turnos que se cierren a partir de ahora (los ya impresos se quedan como están).`,
+        });
         return;
       }
 
@@ -2855,6 +3019,8 @@ export function App({
       refreshSessionBadges,
       sessionStore,
       state.debug,
+      verbosity,
+      openRevertConfirm,
       ownership,
       remote,
     ],
@@ -3051,6 +3217,38 @@ export function App({
         <Text color={theme.textMuted}>◌ Obteniendo modelos del provider activo...</Text>
       </Box>
     );
+  } else if (overlay?.kind === 'rewind-select') {
+    const now = Date.now();
+    overlayNode = (
+      <Box flexDirection="column" borderStyle="single" borderColor={theme.borderAccent} paddingX={1}>
+        <Text color={theme.accent} bold>
+          ↶ Volver atrás
+          <Text color={theme.textMuted} bold={false}>
+            {'  ·  '}se deshace el turno elegido y todos los posteriores
+          </Text>
+        </Text>
+        <Text> </Text>
+        <SelectList
+          items={overlay.turns.map((t, i) => ({
+            label: describeUndoableTurn(t, now),
+            value: i + 1,
+            hint: fileHint(t),
+          }))}
+          onSelect={(item) => openRevertConfirm(item.value)}
+          onCancel={() => setOverlay(null)}
+        />
+      </Box>
+    );
+  } else if (overlay?.kind === 'revert-confirm') {
+    const { count, plan } = overlay;
+    overlayNode = (
+      <RevertConfirm
+        plan={plan}
+        scopeNote={REVERT_SCOPE_NOTE}
+        onConfirm={(force) => confirmRevert(count, force)}
+        onCancel={() => setOverlay(null)}
+      />
+    );
   } else if (overlay?.kind === 'model-select') {
     const current = agent.model;
     overlayNode = (
@@ -3239,7 +3437,32 @@ export function App({
         onQuestionsCancel={() => resolveQuestions(null)}
         pendingSteering={pendingSteering}
         inputHint={inputHint}
+        escArmed={escArmed}
+        verbosity={verbosity}
+        telemetry={<TelemetryPills live={state.liveUsage} session={state.sessionUsage} />}
       />
     </Box>
+  );
+}
+
+/**
+ * Pastillas del pie del prompt (UX-3): actividad un tono más clara que el uso,
+ * porque es lo que cambia mientras se mira. Sin datos no pinta nada.
+ */
+function TelemetryPills({
+  live,
+  session,
+}: {
+  live: UsageView | null;
+  session: (UsageView & { turns: number }) | null;
+}) {
+  const { activity, usage } = liveTelemetry(live, session);
+  if (!activity && !usage) return null;
+  return (
+    <Text wrap="truncate-start">
+      {activity && <Text color={theme.textFaint}>{activity}</Text>}
+      {activity && usage && <Text color={theme.textDisabled}>{'   '}</Text>}
+      {usage && <Text color={theme.textDisabled}>{usage}</Text>}
+    </Text>
   );
 }

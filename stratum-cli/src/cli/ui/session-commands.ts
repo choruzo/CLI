@@ -124,6 +124,16 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/undo',
+    description: 'Deshace los cambios de ficheros del último turno (pide confirmación con la lista)',
+    hasArgs: false,
+  },
+  {
+    name: '/rewind',
+    description: 'Elige un turno y deshace los cambios de ficheros desde él hasta ahora',
+    hasArgs: false,
+  },
+  {
     name: '/jobs',
     description: 'Lista los jobs en segundo plano de la sesión (estado, exit code, duración)',
     hasArgs: false,
@@ -147,6 +157,12 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     name: '/debug',
     description: 'Muestra el razonamiento completo (⊙ thinking) en vez de la línea plegada',
     hasArgs: false,
+  },
+  {
+    name: '/verbosity',
+    description:
+      'Detalle de los turnos cerrados: compact (solo recuentos), standard (agrupa lecturas) o verbose (todo)',
+    hasArgs: true,
   },
   {
     name: '/mcp reload',
@@ -204,6 +220,7 @@ const BUSY_COMMAND_NAMES = new Set([
   '/auditor',
   '/auditor stop',
   '/debug',
+  '/verbosity',
   '/tools',
   '/agents',
   '/env',

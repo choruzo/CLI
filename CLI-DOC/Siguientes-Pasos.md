@@ -20,6 +20,9 @@ está en los documentos y en huecos de producto. Propuesta de orden:
 | 6 | **Hitos 18–19 de infraestructura** (`net_probe`/`sys_inspect`/`log_query`/`service_status` → `diagnosis` + triaje) | Es el diferenciador que se escribió para Stratum | L + L |
 | 7 | **Cola no-seguridad de M9** (desfase de versiones, carga, empaquetado y firma) | Bloquea release firmada y, con ella, la congelación del protocolo | L |
 
+> **Actualización 2026-10-23:** los bloques 1–3 están implementados (detalle y pendientes en §5, «Estado»).
+> El siguiente según este orden es el 4, cerrar el contrato v1, con `sessions.revert` como candidato a entrar en él.
+
 Decisiones abiertas que conviene no dejar sin fecha: **default de `chat`** (vivir en `stratumd`, bloqueado
 por Q1, el entorno de la terminal) y **convergencia Dot/Desktop** (§15.1.4: ¿Dot es el modo compacto de
 Desktop?). Hay que decidir §15.1.4 *antes* de extraer componentes compartidos, para no extraerlos dos veces.
@@ -179,29 +182,52 @@ Se aprovecha el **modelo de información**, no los píxeles.
 Numeración tentativa. 18–20 siguen reservados a infraestructura, así que esto va como **«Hito UX-n»**
 hasta decidir dónde encaja.
 
-### UX-1 — Undo por turno *(M)*
-- `src/snapshots/`: git en la sombra fuera del repo del usuario (con `scrubGitEnv`), snapshot al empezar y
-  al terminar cada turno que mute, límite por fichero, `gc`. Escritura atómica y validación al leer.
-- `/undo` (último turno) y `/rewind` (elegir turno); confirmación con la lista de ficheros que se van a
-  restaurar. **No** deshace efectos de `exec` ni de SSH: decirlo en la propia UI.
-- Método de protocolo `sessions.revert` (+ `schemas.ts`) para que Dot/Desktop lo ofrezcan.
-- Leer antes: `riesgo.md`, `git-changes.md`, `sesiones.md`, `protocol.md`.
+### Estado (2026-10-23): UX-1, UX-2 y UX-3 implementados
 
-### UX-2 — Edición robusta y diagnósticos *(S + L)*
-- Escalera de match en `edit_file` (exacto → Unicode → líneas sin espacios finales), siempre exigiendo
-  unicidad y con el nivel en la traza. Escenarios de eval con comillas tipográficas, tabs y espacios.
-- `lsp` opcional por `importOptional()`: tras `edit_file`/`write_file` se piden diagnósticos del fichero
-  (TypeScript/pyright/rust-analyzer configurables en `.stratumrc.json`) y se anexan al resultado de la tool.
-  Si falla, es un fallo auxiliar y no del agente. Conviene medir con eval si ahorra iteraciones frente a
-  `exec tsc`.
+Rama `feat/ux-tui` (sin commit). La UI la hizo Opus; el núcleo, coders de opencode (`deepseek-v4-flash`)
+en worktrees aparte, cada bloque pasado por un reviewer de opencode y con sus hallazgos corregidos.
 
-### UX-3 — Telemetría y densidad de la TUI *(S–M)*
-- Pills de actividad y uso, uso por turno, desglose del contexto, coste en $ (tabla de precios en config o
-  snapshot de models.dev; sin precio → `n/d`).
-- Razonamiento con vista previa por párrafo, `/verbosity`, tool calls agrupadas por familia, Esc Esc y el
-  indicador Send/Steer/Queue.
-- `run --output-format json|stream-json` (eventos `AgentEvent` serializados) para CI.
-- Probar con build + `npm run tui:smoke` + un escenario propio (skill `tui-test`).
+#### UX-1 — Undo por turno ✅ (salvo protocolo)
+- `src/snapshots/`: git en la sombra en `~/.stratum/snapshots/<id>/` (work-tree = proyecto; `GIT_DIR`,
+  índice por sesión y config propios, `GIT_CONFIG_GLOBAL` vacío, `GIT_CONFIG_NOSYSTEM`,
+  `GIT_LITERAL_PATHSPECS`). T0/T1 en `StratumAgent.runTurn`; registro por sesión con Zod, escritura
+  atómica y lock entre procesos. `info/attributes` neutraliza los `.gitattributes` del proyecto (bytes
+  exactos, CRLF/BOM incluidos). Límites: `maxFileBytes`, `maxFiles`, `timeoutMs` por invocación, y fuera
+  `.git/`, `.stratum/` y `.stratumrc*`. GC que protege los árboles de todas las sesiones del proyecto.
+- `planRevert`/`revertTurns`: conflictos contra T1 (con `f` para forzar), rutas confinadas a la raíz,
+  registro persistido antes de tocar disco y aviso `<files_reverted>` al modelo en el siguiente mensaje.
+- TUI: `/undo` y `/rewind` (selector de turnos) con `RevertConfirm`: listas restaurar / borrar /
+  ⚠ cambiado / sin copia y qué **no** se deshace.
+- Config `snapshots { enabled, maxFileBytes, retentionDays, timeoutMs, maxFiles }`. Doc: `.claude/docs/snapshots.md`.
+- **Pendiente:** `sessions.revert` en el protocolo para Dot/Desktop. Antes hay que decidir si exige la
+  clave de aprobador (ver §6.3). También falta «cambios por turno» en la UI.
+
+#### UX-2 — Edición robusta y diagnósticos ✅
+- `tools/fs/match.ts`: escalera `exact` (con el reintento CRLF) → `unicode` (comillas, guiones, espacios
+  raros, `…`, zero-width; mapa de offsets al original, sin cortar expansiones) → `trailing-whitespace`.
+  Exige unicidad en cada nivel, el nivel va en la salida, `new_string` nunca se normaliza y se quita un
+  BOM inicial del `old_string`. Escenario de eval `code-edit-typographic-quotes`.
+- `src/lsp/`: JSON-RPC propio (con tope de cabecera y cuerpo), `LspClient` (execa), `LspManager` (arranque
+  perezoso, un fallo desactiva el servidor, cancelable, `dispose` también de los que están arrancando) y
+  formato de diagnósticos. Tras `edit_file`/`write_file` se anexan los errores (`ToolContext.diagnostics`,
+  compartido con los subagentes). Config `lsp` opt-in (`enabled: false`) con presets
+  `typescript`/`pyright`/`rust-analyzer`.
+- **Pendiente:** medir con eval si ahorra iteraciones frente a `exec tsc`; diagnósticos *pull*
+  (`textDocument/diagnostic`) para los servidores sin `version`; un test de extremo a extremo con un
+  servidor real.
+
+#### UX-3 — Telemetría y densidad de la TUI ✅ (salvo desglose del contexto)
+- Núcleo: `agent/usage.ts` (`TurnUsage` por request: tokens, caché, razonamiento, `llmMs` del intento que
+  valió, `toolMs`, TTFT, tok/s, coste e `incomplete`). Nada se estima. `providers/pricing.ts` con
+  `pricing` por provider o modelo en config (sin models.dev); el precio se toma por intento, así que un
+  fallback factura con el suyo.
+- `stratum run --output-format text|json|stream-json`: stdout solo JSON, `result` por turno, emitido antes
+  del teardown y también en el segundo Ctrl+C.
+- TUI: pie de prompt con `↵ enviar`/`↵ steer`, Esc Esc para parar y pastillas `⊙ paso 3 · 42 tok/s ⛁ 12K ·
+  87% caché · $0.031`; pie de uso por turno; razonamiento plegado con el último párrafo terminado;
+  `/verbosity compact|standard|verbose`; rachas de lecturas y búsquedas agrupadas en `✓ explorado │ …`.
+- **Pendiente:** el desglose del medidor de contexto (sistema/tools/mensajes), las tarjetas de tool por
+  intención, la confirmación con Enter/Esc, persistir `/verbosity` y restaurar el uso de sesión al reanudar.
 
 ### UX-4 — `/btw` y tool a segundo plano *(S + M)*
 - `/btw <pregunta>`: `tracedCompletion` con un origen nuevo, sin entrar en la conversación ni en la memoria.
@@ -227,11 +253,11 @@ Después, por orden: **plugins (R1 → PL1)**, **Hitos 18–19** y la **cola de 
 
 ## 6. Decisiones que tomar
 
-1. ¿UX-1/UX-2/UX-3 antes que plugins y que el Hito 18? (recomendado: sí; son de M y se notan en el día a día).
+1. ~~¿UX-1/UX-2/UX-3 antes que plugins y que el Hito 18?~~ Decidido: sí, ya implementados.
 2. Semántica de `@`: perfiles frente a ficheros.
-3. ¿El undo se ofrece también en Dot/Desktop desde el principio (`sessions.revert`) o solo en la TUI?
-4. Coste en $: tabla de precios propia en config o snapshot de models.dev empaquetado (choca con «sin red» si
-   se refresca solo).
+3. ¿El undo se ofrece también en Dot/Desktop (`sessions.revert`)? Por ahora solo en la TUI. Si se abre, ¿lo
+   exigimos con la clave de aprobador? Revertir pisa ficheros sin pasar por las aprobaciones.
+4. ~~Coste en $~~ Decidido en la implementación: tabla de precios propia en config (`pricing`), sin models.dev.
 5. §15.1.4 (Dot como modo compacto de Desktop), antes de rehacer el layout de Desktop con las 3 columnas.
 
 ## Anexo — fuentes
