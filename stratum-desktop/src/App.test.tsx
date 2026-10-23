@@ -211,3 +211,63 @@ describe('Desktop sobre stratumd (M12)', () => {
     expect(screen.getByText(/ya no existe o no está disponible/)).toBeTruthy();
   });
 });
+
+describe('elegir provider y modelo desde el composer', () => {
+  const MODELS = {
+    models: [
+      { provider: 'local', id: 'test-model', contextWindow: null, default: true },
+      { provider: 'local', id: 'otro-local', contextWindow: null },
+      { provider: 'nube', id: 'grande', contextWindow: 128000 },
+      { provider: 'nube', id: 'rapido', contextWindow: null },
+    ],
+  };
+
+  it('en una sesión: primero el provider, después su modelo; cambiar de provider lo envía', async () => {
+    const { native, emit } = rig();
+    native.listModels = vi.fn(async () => MODELS);
+    render(<App native={native} />);
+    await emit({ type: 'connection', state: connected() });
+    await emit({ type: 'overview', overview: { sessions: [idleSession()], approvals: [], questions: [], plans: [] } });
+    await emit({ type: 'snapshot', sessionId: SID, snapshot: sampleSnapshot({ session: idleSession(), run: null, messages: [] }) });
+
+    fireEvent.click(screen.getByRole('button', { name: /^Modelo: local · test-model/ }));
+    const providers = await screen.findByRole('listbox', { name: 'Providers' });
+    expect(providers.textContent).toMatch(/local.*2 modelos.*actual/);
+    fireEvent.click(screen.getByRole('button', { name: /^nube/ }));
+    const models = screen.getByRole('listbox', { name: 'Modelos disponibles' });
+    expect(models.textContent).toBe('granderapido');
+    fireEvent.click(screen.getByRole('button', { name: 'rapido' }));
+    await waitFor(() => expect(native.setModel).toHaveBeenCalledWith(SID, 'rapido', 'nube'));
+    expect(screen.queryByRole('listbox')).toBeNull();
+
+    // El mismo provider: solo el modelo.
+    fireEvent.click(screen.getByRole('button', { name: /^Modelo: local · test-model/ }));
+    fireEvent.click(await screen.findByRole('button', { name: /^local/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'otro-local' }));
+    await waitFor(() => expect(native.setModel).toHaveBeenLastCalledWith(SID, 'otro-local', undefined));
+  });
+
+  it('en una conversación nueva: lo elegido abre la sesión con ese provider y modelo', async () => {
+    uiStore.set({ selectedId: null, pending: [], notices: [] });
+    const { native, emit } = rig();
+    native.listModels = vi.fn(async () => MODELS);
+    render(<App native={native} />);
+    await emit({ type: 'connection', state: connected() });
+    await emit({ type: 'overview', overview: { sessions: [], approvals: [], questions: [], plans: [] } });
+
+    // Sin elegir nada, el de la config.
+    const chip = await screen.findByRole('button', { name: /^Modelo: local · test-model/ });
+    // `/model` también abre el selector, sin sesión.
+    const box = screen.getByLabelText('Mensaje para el asistente');
+    fireEvent.change(box, { target: { value: '/model' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    fireEvent.click(await screen.findByRole('button', { name: /^nube/ }));
+    fireEvent.click(screen.getByRole('button', { name: 'grande' }));
+    expect(chip.textContent).toBe('nube · grande');
+    expect(native.setModel).not.toHaveBeenCalled();
+
+    fireEvent.change(box, { target: { value: 'Hola' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(native.newChat).toHaveBeenCalledWith({ provider: 'nube', model: 'grande' }));
+  });
+});

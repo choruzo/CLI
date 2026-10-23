@@ -226,6 +226,47 @@ describe('stratumd — varias sesiones', () => {
     expect((await operator.request('sessions.list', {})).sessions).toEqual([]);
   });
 
+  it('cambiar de provider con el modelo; un alias desconocido no toca la sesión', async () => {
+    t = await startTestDaemon();
+    const provider = {
+      default: 'test',
+      providers: {
+        test: {
+          type: 'openai-compatible',
+          baseUrl: 'http://127.0.0.1:1/v1',
+          apiKey: '',
+          model: 'test-model',
+        },
+        otro: {
+          type: 'openai-compatible',
+          baseUrl: 'http://127.0.0.1:2/v1',
+          apiKey: '',
+          model: 'otro-base',
+        },
+      },
+    };
+    const cwd = t.project('p', [], { provider });
+    const operator = await t.connect(['operator']);
+    const { session } = await operator.request('sessions.open', { cwd });
+    expect(session.provider).toBe('test');
+
+    const changed = await operator.request('sessions.setModel', {
+      sessionId: session.id,
+      provider: 'otro',
+      model: 'otro-grande',
+    });
+    expect(changed.session).toMatchObject({ provider: 'otro', model: 'otro-grande' });
+
+    const unknown = operator.request('sessions.setModel', {
+      sessionId: session.id,
+      provider: 'no-existe',
+      model: 'x',
+    });
+    expect(await code(unknown)).toBe('INVALID_PARAMS');
+    const { snapshot } = await operator.request('sessions.get', { sessionId: session.id });
+    expect(snapshot.session).toMatchObject({ provider: 'otro', model: 'otro-grande' });
+  });
+
   it('cambiar modelo y read-only se publica, y no se puede con un turno en curso', async () => {
     t = await startTestDaemon();
     const cwd = t.project('p', [{ wait: new Promise(() => undefined), then: [] }]);

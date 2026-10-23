@@ -309,8 +309,9 @@ export interface ProtocolMethods {
   'sessions.memory': Spec<{ sessionId: string }, { memory: ProtocolSessionMemory }>;
   'sessions.open': Spec<SessionsOpenParams, { session: ProtocolSession }>;
   'sessions.close': Spec<Mutation & { sessionId: string }, Empty>;
+  /** `provider`: otro alias de la config para la sesión; sin él, el modelo es del provider actual. */
   'sessions.setModel': Spec<
-    Mutation & { sessionId: string; model: string },
+    Mutation & { sessionId: string; model: string; provider?: string },
     { session: ProtocolSession }
   >;
   'sessions.setAgent': Spec<

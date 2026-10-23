@@ -22,6 +22,15 @@ const ComposerIcon = ({ d }: { d: string }) => (
   </svg>
 );
 
+/** El botón «provider · modelo» del composer: abre el selector. */
+export interface ComposerModel {
+  /** Lo que se enseña: `provider · modelo`, o un texto si aún no se sabe. */
+  label: string;
+  onOpen: () => void;
+  /** Con un run en marcha no se cambia (el daemon lo rechaza). */
+  disabled?: boolean;
+}
+
 /** Alto máximo del textarea antes de hacer scroll (px). */
 const MAX_HEIGHT = 240;
 
@@ -57,9 +66,21 @@ export const InputArea = forwardRef<
     /** Sin él (tests, sidecar sin workspaces), no hay botón de adjuntar. */
     attachments?: Attachments;
     placeholder?: string;
+    /** Sin él, no hay botón de modelo. */
+    model?: ComposerModel;
   }
 >(function InputArea(
-  { disabled, generating, steer = false, onSend, onCancel, onCommand, attachments, placeholder = 'Escribe un mensaje…' },
+  {
+    disabled,
+    generating,
+    steer = false,
+    onSend,
+    onCancel,
+    onCommand,
+    attachments,
+    placeholder = 'Escribe un mensaje…',
+    model,
+  },
   ref,
 ) {
   const [text, setText] = useState('');
@@ -249,6 +270,28 @@ export const InputArea = forwardRef<
             }}
             onKeyDown={onKeyDown}
           />
+          {model && (
+            <button
+              type="button"
+              className="composer-model"
+              onClick={model.onOpen}
+              disabled={model.disabled}
+              aria-label={`Modelo: ${model.label}. Cambiar`}
+              title={model.disabled ? 'Se cambia cuando acabe la respuesta' : 'Elegir provider y modelo'}
+            >
+              <span className="composer-model__label">{model.label}</span>
+              <svg viewBox="0 0 24 24" width="12" height="12" aria-hidden="true" focusable="false">
+                <path
+                  d="M7 10l5 5 5-5"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2.2"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
           {generating && !isCommand && !(steering && hasContent) ? (
             <button
               type="button"

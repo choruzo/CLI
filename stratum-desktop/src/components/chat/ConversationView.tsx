@@ -5,9 +5,9 @@ import { useAttachments } from '../../hooks/useAttachments';
 import type { ProtocolTodo } from '../../protocol';
 import type { ComposerMode } from '../../view/chat';
 import type { ChatMessage, SentAttachment } from '../../view/model';
-import { InputArea, type InputAreaHandle } from './InputArea';
+import { InputArea, type ComposerModel, type InputAreaHandle } from './InputArea';
 import { MessageList } from './MessageList';
-import { ModelPicker, type ModelsOffer } from './ModelPicker';
+import { ModelPicker, type ModelChoice, type ModelsOffer } from './ModelPicker';
 import { TodoPanel } from './TodoPanel';
 import type { CommandName } from './commands';
 import { ICON, StrokeIcon } from './icons';
@@ -84,6 +84,7 @@ export const ConversationView = forwardRef(function ConversationView(
     models,
     onPickModel,
     onCloseModels,
+    model,
   }: {
     stream: SessionStream;
     onSend: (text: string, attachments: SentAttachment[]) => Promise<SendOutcome>;
@@ -94,8 +95,10 @@ export const ConversationView = forwardRef(function ConversationView(
     onCommand?: (name: CommandName, arg: string) => void;
     onVisibleTurn?: (turnId: string | null) => void;
     models?: ModelsOffer | null;
-    onPickModel?: (model: string) => void;
+    onPickModel?: (choice: ModelChoice) => void;
     onCloseModels?: () => void;
+    /** El botón «provider · modelo» del composer. */
+    model?: ComposerModel;
   },
   ref: Ref<ConversationViewHandle>,
 ) {
@@ -323,6 +326,7 @@ export const ConversationView = forwardRef(function ConversationView(
         attachments={composer.kind === 'ask' && stream.cwd ? attachments : undefined}
         onCancel={onCancel}
         placeholder={placeholderOf(composer, stream.sending)}
+        model={model}
       />
     </section>
   );

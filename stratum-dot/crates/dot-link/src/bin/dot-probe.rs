@@ -191,6 +191,7 @@ async fn main() {
             "set-model" => Some(CallAction::SetModel {
                 session_id: session_id.clone(),
                 model: text("model").unwrap_or_default(),
+                provider: text("provider"),
             }),
             _ => None,
         };

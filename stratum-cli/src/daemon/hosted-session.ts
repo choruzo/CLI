@@ -559,9 +559,19 @@ export class HostedSession {
     return this.publisher.session();
   }
 
-  setModel(model: string): ProtocolSession {
+  setModel(model: string, provider?: string): ProtocolSession {
     this.assertIdle();
-    this.host.agent.switchModel(model);
+    const agent = this.host.agent;
+    if (provider !== undefined && provider !== agent.providerName) {
+      // Se comprueba antes de tocar nada: un alias desconocido no cambia la sesión.
+      if (!agent.providerNames.includes(provider)) {
+        throw new ProtocolError('INVALID_PARAMS', 'Unknown provider.', {
+          issues: [{ path: 'provider', message: 'not a configured provider' }],
+        });
+      }
+      agent.switchProvider(provider);
+    }
+    agent.switchModel(model);
     return this.changed();
   }
 

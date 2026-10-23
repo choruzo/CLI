@@ -1,16 +1,36 @@
 import { useState } from 'react';
-/** Lo que se ofrece al elegir modelo: los que lista `models.list` y el actual. */
+import type { ProtocolModel } from '../../protocol';
+
+/** Un provider (alias de la config) y un modelo suyo. */
+export interface ModelChoice {
+  provider: string;
+  model: string;
+}
+
+/** Lo que se ofrece al elegir modelo: lo que lista `models.list` y lo actual. */
 export interface ModelsOffer {
-  models: string[];
-  current: string;
+  /** `null` mientras el daemon aún no ha contestado. */
+  models: ProtocolModel[] | null;
+  /** Lo de la sesión, o lo elegido para la conversación nueva; `null` si no se sabe. */
+  current: ModelChoice | null;
   /** El daemon no pudo listarlos (o la lista está incompleta). */
   error?: string;
 }
 
+/** Los providers en el orden en que los lista el daemon, con el actual aunque no liste nada. */
+export function providersOf(offer: ModelsOffer): string[] {
+  const names = [...new Set((offer.models ?? []).map((m) => m.provider))];
+  if (offer.current && !names.includes(offer.current.provider)) names.unshift(offer.current.provider);
+  return names;
+}
+
 /**
- * `/model` sin argumento (D4): los modelos que lista el daemon (`models.list`),
- * o entrada manual si no los lista (llama.cpp sin `/models`). Solo cambia el
- * modelo de esta sesión (`sessions.setModel`).
+ * Elegir provider y modelo (botón del composer o `/model` sin argumento). Con
+ * varios providers, primero se elige el provider y después uno de sus modelos;
+ * con uno solo, se va directo a sus modelos. Si el backend no lista modelos
+ * (llama.cpp sin `/models`), se escribe a mano. En una sesión, solo cambia el
+ * de esa sesión (`sessions.setModel`); en una conversación nueva, el de la
+ * sesión que se abrirá.
  */
 export function ModelPicker({
   offer,
@@ -18,10 +38,19 @@ export function ModelPicker({
   onClose,
 }: {
   offer: ModelsOffer;
-  onPick: (model: string) => void;
+  onPick: (choice: ModelChoice) => void;
   onClose: () => void;
 }) {
+  const providers = providersOf(offer);
+  const single = providers.length === 1 ? providers[0]! : null;
+  const [chosen, setChosen] = useState<string | null>(null);
+  const provider = chosen ?? single;
   const [manual, setManual] = useState('');
+
+  const models = provider ? (offer.models ?? []).filter((m) => m.provider === provider) : [];
+  const isCurrent = (p: string, m?: string) =>
+    offer.current?.provider === p && (m === undefined || offer.current.model === m);
+
   return (
     <section
       className="model-picker"
@@ -29,58 +58,105 @@ export function ModelPicker({
       onKeyDown={(e) => {
         if (e.key === 'Escape') {
           e.stopPropagation();
-          onClose();
+          if (chosen && !single) setChosen(null);
+          else onClose();
         }
       }}
     >
       <header className="model-picker__header">
-        <strong>Modelo de esta conversación</strong>
+        {provider && !single ? (
+          <button
+            type="button"
+            className="model-picker__back"
+            aria-label="Volver a los providers"
+            onClick={() => {
+              setChosen(null);
+              setManual('');
+            }}
+          >
+            ‹ <strong>{provider}</strong>
+          </button>
+        ) : (
+          <strong>{provider ? `Modelos de ${provider}` : 'Elige un provider'}</strong>
+        )}
         <button type="button" className="icon-button" aria-label="Cerrar" onClick={onClose}>
           ×
         </button>
       </header>
       {offer.error && (
         <p className="notice" data-tone="warning">
-          El provider no lista sus modelos ({offer.error}). Escribe el nombre a mano.
+          {offer.error}
         </p>
       )}
-      {offer.models.length > 0 && (
+      {offer.models === null && providers.length === 0 && (
+        <p className="model-picker__loading" role="status">
+          Pidiendo los modelos…
+        </p>
+      )}
+      {!provider && providers.length > 0 && (
+        <ul className="model-picker__list" role="listbox" aria-label="Providers">
+          {providers.map((p, i) => {
+            const count = (offer.models ?? []).filter((m) => m.provider === p).length;
+            return (
+              <li key={p} role="option" aria-selected={isCurrent(p)}>
+                <button
+                  type="button"
+                  className="model-picker__item"
+                  data-current={isCurrent(p) || undefined}
+                  autoFocus={i === 0}
+                  onClick={() => setChosen(p)}
+                >
+                  {p}
+                  <span className="model-picker__current">
+                    {' '}
+                    · {count === 1 ? '1 modelo' : `${count} modelos`}
+                    {isCurrent(p) && ' · actual'}
+                  </span>
+                </button>
+              </li>
+            );
+          })}
+        </ul>
+      )}
+      {provider && models.length > 0 && (
         <ul className="model-picker__list" role="listbox" aria-label="Modelos disponibles">
-          {offer.models.map((m, i) => (
-            <li key={m} role="option" aria-selected={m === offer.current}>
+          {models.map((m, i) => (
+            <li key={m.id} role="option" aria-selected={isCurrent(provider, m.id)}>
               <button
                 type="button"
                 className="model-picker__item"
-                data-current={m === offer.current || undefined}
+                data-current={isCurrent(provider, m.id) || undefined}
                 autoFocus={i === 0}
-                onClick={() => onPick(m)}
+                onClick={() => onPick({ provider, model: m.id })}
               >
-                {m}
-                {m === offer.current && <span className="model-picker__current"> · actual</span>}
+                {m.id}
+                {isCurrent(provider, m.id) && <span className="model-picker__current"> · actual</span>}
               </button>
             </li>
           ))}
         </ul>
       )}
-      <form
-        className="model-picker__manual"
-        onSubmit={(e) => {
-          e.preventDefault();
-          if (manual.trim()) onPick(manual);
-        }}
-      >
-        <input
-          className="side-panel__search"
-          aria-label="Nombre del modelo"
-          placeholder={`Otro modelo (actual: ${offer.current})`}
-          value={manual}
-          autoFocus={offer.models.length === 0}
-          onChange={(e) => setManual(e.target.value)}
-        />
-        <button type="submit" className="button" disabled={!manual.trim()}>
-          Usar
-        </button>
-      </form>
+      {provider && (
+        <form
+          className="model-picker__manual"
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (manual.trim()) onPick({ provider, model: manual.trim() });
+          }}
+        >
+          <input
+            className="side-panel__search"
+            aria-label="Nombre del modelo"
+            placeholder={models.length > 0 ? 'Otro modelo' : `Modelo de ${provider} (no lista los suyos)`}
+            value={manual}
+            autoFocus={models.length === 0}
+            onChange={(e) => setManual(e.target.value)}
+          />
+          <button type="submit" className="button" disabled={!manual.trim()}>
+            Usar
+          </button>
+        </form>
+      )}
     </section>
   );
 }

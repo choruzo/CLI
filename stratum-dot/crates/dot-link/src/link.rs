@@ -821,17 +821,23 @@ fn call_request(
                 json!({ "sessionId": session_id, "operationId": operation_id }),
             ))
         }
-        CallAction::SetModel { session_id, model } => {
+        CallAction::SetModel {
+            session_id,
+            model,
+            provider,
+        } => {
             if !valid_id(session_id) {
                 return Err(invalid("Invalid session id."));
             }
             let Some(model) = optional(&Some(model.clone()), MAX_NAME_CHARS, "model name")? else {
                 return Err(invalid("Choose a model."));
             };
-            Ok((
-                MainMethod::SessionsSetModel,
-                json!({ "sessionId": session_id, "model": model, "operationId": operation_id }),
-            ))
+            let mut params =
+                json!({ "sessionId": session_id, "model": model, "operationId": operation_id });
+            if let Some(provider) = optional(provider, MAX_NAME_CHARS, "provider name")? {
+                params["provider"] = Value::String(provider);
+            }
+            Ok((MainMethod::SessionsSetModel, params))
         }
     }
 }

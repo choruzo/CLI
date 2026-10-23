@@ -1383,6 +1383,25 @@ body {
 .model-picker__current {
   color: var(--color-textFaint);
 }
+.model-picker__back {
+  display: inline-flex;
+  gap: 4px;
+  padding: 2px 6px 2px 0;
+  border: 0;
+  background: none;
+  color: var(--color-textResponse);
+  font: inherit;
+  cursor: pointer;
+}
+.model-picker__back:hover,
+.model-picker__back:focus-visible {
+  color: var(--color-accentBright);
+  outline: none;
+}
+.model-picker__loading {
+  margin: 0;
+  color: var(--color-textFaint);
+}
 .model-picker__manual {
   display: flex;
   gap: 6px;
@@ -2678,6 +2697,40 @@ kbd {
 .composer-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
+}
+/* «provider · modelo»: abre el selector; se recorta con el composer estrecho. */
+.composer-model {
+  height: 36px;
+  max-width: 260px;
+  flex-shrink: 1;
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 8px;
+  border: 0;
+  border-radius: 10px;
+  background: transparent;
+  color: var(--color-textMuted);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+.composer-model:hover:not(:disabled) {
+  background: var(--color-bgStatusbar);
+  color: var(--color-textPrimary);
+}
+.composer-model:disabled {
+  cursor: default;
+  color: var(--color-textDisabled);
+}
+.composer-model__label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .composer-button--send {
   border-radius: 50%;

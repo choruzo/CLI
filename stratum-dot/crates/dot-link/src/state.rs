@@ -199,8 +199,13 @@ pub enum CallAction {
     Memory { session_id: String },
     /// M12 — `sessions.close`: cerrarla. En el daemon también deja de estar guardada.
     CloseSession { session_id: String },
-    /// M12 — `sessions.setModel`: otro modelo para una sesión parada.
-    SetModel { session_id: String, model: String },
+    /// M12 — `sessions.setModel`: otro modelo (y, si se da, otro provider)
+    /// para una sesión parada.
+    SetModel {
+        session_id: String,
+        model: String,
+        provider: Option<String>,
+    },
 }
 
 impl CallAction {

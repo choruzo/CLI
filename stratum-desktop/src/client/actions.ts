@@ -63,11 +63,14 @@ export function selectSession(native: NativeBridge, sessionId: string | null): v
  * (`agent: 'assistant'`) en una carpeta nueva de Desktop. Se selecciona cuando
  * el daemon la devuelve. Devuelve su id, o `null` si no se abrió (o no se sabe).
  */
-export async function newChat(native: NativeBridge, model?: string): Promise<string | null> {
+export async function newChat(
+  native: NativeBridge,
+  choice?: { provider: string; model: string },
+): Promise<string | null> {
   const request: PendingRequest = { kind: 'new-chat' };
   if (!uiActions.begin(request)) return null;
   try {
-    const session = parseOpenedSession(await native.newChat(model));
+    const session = parseOpenedSession(await native.newChat(choice));
     if (session) {
       selectSession(native, session.id);
       return session.id;
@@ -93,8 +96,12 @@ export async function newChat(native: NativeBridge, model?: string): Promise<str
  * El primer mensaje de una conversación nueva: abre la sesión y, si se abrió,
  * lo envía. Si abrirla no tuvo respuesta, **no** se envía nada.
  */
-export async function startConversation(native: NativeBridge, text: string): Promise<SendOutcome> {
-  const sessionId = await newChat(native);
+export async function startConversation(
+  native: NativeBridge,
+  text: string,
+  choice?: { provider: string; model: string },
+): Promise<SendOutcome> {
+  const sessionId = await newChat(native, choice);
   if (!sessionId) return { restore: true };
   return sendMessage(native, { sessionId, cwd: null, mode: 'ask', text, attachments: [] });
 }
@@ -180,20 +187,26 @@ export async function control(
   }
 }
 
-export async function listModels(native: NativeBridge): Promise<ModelList | null> {
+/** `quiet`: sin aviso si falla (la etiqueta del composer, que se pide sola). */
+export async function listModels(native: NativeBridge, quiet = false): Promise<ModelList | null> {
   try {
     return parseModels(await native.listModels());
   } catch (err) {
-    uiActions.notify(null, 'warning', describeFailure('No se pudieron listar los modelos', toCommandError(err)));
+    if (!quiet) uiActions.notify(null, 'warning', describeFailure('No se pudieron listar los modelos', toCommandError(err)));
     return null;
   }
 }
 
-export async function setModel(native: NativeBridge, sessionId: string, model: string): Promise<void> {
+export async function setModel(
+  native: NativeBridge,
+  sessionId: string,
+  model: string,
+  provider?: string,
+): Promise<void> {
   const request: PendingRequest = { kind: 'set-model', sessionId };
   if (!uiActions.begin(request)) return;
   try {
-    await native.setModel(sessionId, model);
+    await native.setModel(sessionId, model, provider);
   } catch (err) {
     uiActions.notify(sessionId, 'warning', describeFailure('No se pudo cambiar el modelo', toCommandError(err)));
   } finally {

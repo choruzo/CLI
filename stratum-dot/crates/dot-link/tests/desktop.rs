@@ -152,6 +152,7 @@ async fn usa_lo_de_m11_y_cierra_sesiones_pero_dot_no_puede() {
         CallAction::SetModel {
             session_id: "s1".into(),
             model: "otro".into(),
+            provider: None,
         },
         page(10),
     ] {
@@ -160,6 +161,30 @@ async fn usa_lo_de_m11_y_cierra_sesiones_pero_dot_no_puede() {
     }
     assert_eq!(fake.count("sessions.close"), 0);
     assert_eq!(fake.count("sessions.setModel"), 0);
+
+    // Desktop sí cambia modelo y provider; sin provider, el campo no viaja.
+    for provider in [Some("otro-provider"), None] {
+        desktop
+            .link
+            .call(CallAction::SetModel {
+                session_id: "s1".into(),
+                model: "otro".into(),
+                provider: provider.map(str::to_string),
+            })
+            .await
+            .unwrap();
+        let sent = fake
+            .requests()
+            .into_iter()
+            .filter(|r| r["method"] == "sessions.setModel")
+            .last()
+            .unwrap();
+        assert_eq!(sent["params"]["model"], "otro");
+        match provider {
+            Some(p) => assert_eq!(sent["params"]["provider"], p),
+            None => assert!(sent["params"].get("provider").is_none()),
+        }
+    }
 
     // Desktop sí, con su `operationId`; la sesión desaparece de las dos listas por eventos.
     desktop

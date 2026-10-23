@@ -119,11 +119,12 @@ export interface NativeBridge {
   resumeRun(sessionId: string, runId?: string): Promise<string>;
   cancelRun(sessionId: string, runId?: string): Promise<string>;
   steerRun(sessionId: string, text: string): Promise<string>;
-  /** Conversación nueva con el asistente. Resultado sin validar. */
-  newChat(model?: string): Promise<unknown>;
+  /** Conversación nueva con el asistente; sin elección, provider y modelo de la config. Resultado sin validar. */
+  newChat(choice?: { provider: string; model: string }): Promise<unknown>;
   startRun(sessionId: string, input: string): Promise<unknown>;
   listModels(): Promise<unknown>;
-  setModel(sessionId: string, model: string): Promise<unknown>;
+  /** Sin `provider`, el modelo es del provider actual de la sesión. */
+  setModel(sessionId: string, model: string, provider?: string): Promise<unknown>;
   closeSession(sessionId: string): Promise<unknown>;
   history(sessionId: string, before?: string, limit?: number): Promise<unknown>;
   context(sessionId: string): Promise<unknown>;
@@ -147,10 +148,12 @@ export const tauriBridge: NativeBridge = {
   resumeRun: (sessionId, runId) => invoke<string>('desktop_resume_run', { sessionId, runId: runId ?? null }),
   cancelRun: (sessionId, runId) => invoke<string>('desktop_cancel_run', { sessionId, runId: runId ?? null }),
   steerRun: (sessionId, text) => invoke<string>('desktop_steer_run', { sessionId, text }),
-  newChat: (model) => invoke<unknown>('desktop_new_chat', { model: model ?? null }),
+  newChat: (choice) =>
+    invoke<unknown>('desktop_new_chat', { provider: choice?.provider ?? null, model: choice?.model ?? null }),
   startRun: (sessionId, input) => invoke<unknown>('desktop_start_run', { sessionId, input }),
   listModels: () => invoke<unknown>('desktop_list_models'),
-  setModel: (sessionId, model) => invoke<unknown>('desktop_set_model', { sessionId, model }),
+  setModel: (sessionId, model, provider) =>
+    invoke<unknown>('desktop_set_model', { sessionId, model, provider: provider ?? null }),
   closeSession: (sessionId) => invoke<unknown>('desktop_close_session', { sessionId }),
   history: (sessionId, before, limit) =>
     invoke<unknown>('desktop_history', { sessionId, before: before ?? null, limit: limit ?? null }),

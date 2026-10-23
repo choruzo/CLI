@@ -19,7 +19,7 @@ import {
   type ConversationViewHandle,
   type SessionStream,
 } from './components/chat/ConversationView';
-import type { ModelsOffer } from './components/chat/ModelPicker';
+import type { ModelChoice, ModelsOffer } from './components/chat/ModelPicker';
 import type { CommandName } from './components/chat/commands';
 import { ConnectionBanner } from './components/layout/ConnectionIndicator';
 import { FilesPanel } from './components/layout/FilesPanel';
@@ -43,6 +43,7 @@ import { TurnWatch } from './hooks/turn-notifications';
 import { useUpdates } from './hooks/useUpdates';
 import { tauriBridge, type DesktopPrefs, type NativeBridge } from './ipc/native';
 import { notify } from './ipc/os';
+import type { ModelList } from './protocol/results';
 import { chatMessages, composerMode, draftComposer, hasOlder } from './view/chat';
 import { sessionItems, sessionTitle } from './view/sessions';
 
@@ -101,6 +102,10 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   const [visibleTurn, setVisibleTurn] = useState<string | null>(null);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [models, setModels] = useState<ModelsOffer | null>(null);
+  // Lo elegido para las conversaciones nuevas (`null`: lo de la config) y la
+  // última lista de modelos, para la etiqueta del composer.
+  const [draftModel, setDraftModel] = useState<ModelChoice | null>(null);
+  const [catalog, setCatalog] = useState<ModelList | null>(null);
 
   // Llegó a conectar alguna vez: si no, un fallo ocupa la ventana.
   const [everConnected, setEverConnected] = useState(false);
@@ -115,6 +120,46 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   const selected = selectedId ? (overview.sessions.find((s) => s.id === selectedId) ?? null) : null;
   const snapshot = focused?.sessionId === selectedId ? (focused?.snapshot ?? null) : null;
   const olderMessages = history?.sessionId === selectedId ? history.older : [];
+
+  useEffect(() => {
+    if (connected) void listModels(native, true).then((list) => list && setCatalog(list));
+  }, [native, connected]);
+
+  // Lo que dice el botón del composer: lo de la sesión, o lo que usará la nueva.
+  const currentModel: ModelChoice | null = useMemo(() => {
+    const session = snapshot?.session ?? selected;
+    if (selectedId) return session ? { provider: session.provider, model: session.model } : null;
+    if (draftModel) return draftModel;
+    const fallback = catalog?.models.find((m) => m.default);
+    return fallback ? { provider: fallback.provider, model: fallback.id } : null;
+  }, [selectedId, snapshot, selected, draftModel, catalog]);
+
+  const openModels = useCallback(() => {
+    setModels({ models: catalog?.models ?? null, current: currentModel });
+    void listModels(native).then((list) => {
+      if (list) setCatalog(list);
+      // Solo si sigue abierto: cerrarlo mientras se pedía gana.
+      setModels((open) => {
+        if (!open) return open;
+        if (!list) return { ...open, models: open.models ?? [] };
+        const error = list.incomplete ? 'Algún provider no contestó: la lista puede estar incompleta.' : undefined;
+        return { ...open, models: list.models, ...(error ? { error } : {}) };
+      });
+    });
+  }, [native, catalog, currentModel]);
+
+  const pickModel = useCallback(
+    (choice: ModelChoice) => {
+      setModels(null);
+      if (!selectedId) {
+        setDraftModel(choice);
+        return;
+      }
+      const provider = currentModel && choice.provider !== currentModel.provider ? choice.provider : undefined;
+      void setModel(native, selectedId, choice.model, provider);
+    },
+    [native, selectedId, currentModel],
+  );
 
   // Notificaciones (D6) de las sesiones de Desktop: de la foto de conjunto.
   const watch = useRef(new TurnWatch());
@@ -190,7 +235,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
 
   const onSend = useCallback(
     (text: string, attachments: { path: string }[]) => {
-      if (!selectedId) return startConversation(native, text);
+      if (!selectedId) return startConversation(native, text, draftModel ?? undefined);
       const mode = stream.composer.kind === 'steer' ? 'steer' : 'ask';
       return sendMessage(native, {
         sessionId: selectedId,
@@ -200,7 +245,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
         attachments: attachments.map((a) => a.path),
       });
     },
-    [native, selectedId, stream.composer.kind, stream.cwd],
+    [native, selectedId, stream.composer.kind, stream.cwd, draftModel],
   );
 
   const runControl = useCallback(
@@ -219,17 +264,11 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
           newConversation();
           return;
         case 'model':
-          if (!selectedId || !selected) return;
-          if (arg) void setModel(native, selectedId, arg);
-          else
-            void listModels(native).then((list) => {
-              if (!list) return;
-              setModels({
-                models: list.models.filter((m) => m.provider === selected.provider).map((m) => m.id),
-                current: selected.model,
-                ...(list.incomplete ? { error: 'algún provider no contestó' } : {}),
-              });
-            });
+          // `/model nombre`: otro modelo del provider actual; sin nombre, el selector.
+          if (!arg) openModels();
+          else if (selectedId) void setModel(native, selectedId, arg);
+          else if (currentModel) setDraftModel({ provider: currentModel.provider, model: arg });
+          else openModels();
           return;
         case 'context':
           openPanel('memory');
@@ -239,7 +278,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
           return;
       }
     },
-    [native, newConversation, openPanel, selectedId, selected],
+    [native, newConversation, openPanel, selectedId, openModels, currentModel],
   );
 
   useHotkeys('ctrl+n, meta+n', newConversation, GLOBAL, [newConversation]);
@@ -415,11 +454,17 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
               onCommand={onCommand}
               onVisibleTurn={setVisibleTurn}
               models={models}
-              onPickModel={(m) => {
-                setModels(null);
-                if (selectedId) void setModel(native, selectedId, m);
-              }}
+              onPickModel={pickModel}
               onCloseModels={() => setModels(null)}
+              model={
+                connected
+                  ? {
+                      label: currentModel ? `${currentModel.provider} · ${currentModel.model}` : 'Modelo',
+                      onOpen: () => (models ? setModels(null) : openModels()),
+                      disabled: stream.activeTurnId !== null || ui.pending.some((p) => p.kind === 'set-model'),
+                    }
+                  : undefined
+              }
             />
           )}
         </div>

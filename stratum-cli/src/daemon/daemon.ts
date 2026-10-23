@@ -1160,7 +1160,10 @@ export class Stratumd {
         return {};
       },
       'sessions.setModel': async (params) => ({
-        session: (await this.wake(params.sessionId, 'Changing its model')).setModel(params.model),
+        session: (await this.wake(params.sessionId, 'Changing its model')).setModel(
+          params.model,
+          params.provider,
+        ),
       }),
       'sessions.setAgent': async (params) => ({
         session: (await this.wake(params.sessionId, 'Changing its agent')).setAgent(params.agent),

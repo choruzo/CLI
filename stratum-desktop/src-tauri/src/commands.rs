@@ -123,6 +123,7 @@ pub async fn desktop_steer_run(
 pub async fn desktop_new_chat(
     app: AppHandle,
     state: State<'_, DesktopState>,
+    provider: Option<String>,
     model: Option<String>,
 ) -> Result<Value, CommandError> {
     let local = |message: String| CommandError::new(CommandErrorKind::NotSent, message);
@@ -137,7 +138,7 @@ pub async fn desktop_new_chat(
         .call(CallAction::OpenSession {
             cwd: Some(dir.to_string_lossy().into_owned()),
             agent: Some(ASSISTANT_AGENT.into()),
-            provider: None,
+            provider,
             model,
         })
         .await;
@@ -172,10 +173,15 @@ pub async fn desktop_set_model(
     state: State<'_, DesktopState>,
     session_id: String,
     model: String,
+    provider: Option<String>,
 ) -> Result<Value, CommandError> {
     state
         .link
-        .call(CallAction::SetModel { session_id, model })
+        .call(CallAction::SetModel {
+            session_id,
+            model,
+            provider,
+        })
         .await
 }
 

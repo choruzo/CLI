@@ -813,7 +813,9 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
     })
     .strict(),
   'sessions.close': sessionMutation,
-  'sessions.setModel': z.object({ sessionId: id, model: name, operationId }).strict(),
+  'sessions.setModel': z
+    .object({ sessionId: id, model: name, provider: name.optional(), operationId })
+    .strict(),
   'sessions.setAgent': z.object({ sessionId: id, agent: name.nullable(), operationId }).strict(),
   'sessions.setReadOnly': z.object({ sessionId: id, readOnly: z.boolean(), operationId }).strict(),
   'sessions.detach': sessionMutation,
