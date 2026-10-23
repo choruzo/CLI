@@ -18,8 +18,10 @@ async function frame(text: string, columns = 80): Promise<string> {
     debug: true,
   });
   await new Promise((r) => setTimeout(r, 30));
+  // Antes de desmontar: en CI (`is-in-ci`) Ink escribe al desmontar un `\n` más.
+  const last = writes.at(-1) ?? '';
   app.unmount();
-  return (writes.at(-1) ?? '').replace(ANSI, '');
+  return last.replace(ANSI, '');
 }
 
 describe('unescapeHtml', () => {
