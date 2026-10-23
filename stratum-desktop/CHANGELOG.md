@@ -4,12 +4,12 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
-## [Sin publicar]
+## [0.5.0] — 2026-10-23
 
 Stratum Desktop pasa a ser un **cliente de `stratumd`**, hermano de la CLI y de Stratum Dot (M12).
 
 ### Cambios a tener en cuenta
-- **Necesita Stratum instalado** (`npm i -g stratum-cli`, Node 22 o más reciente): Desktop ya no lleva el core empaquetado. Si no hay daemon, lo arranca con `stratum daemon start`; cerrarlo no lo para.
+- **Necesita Stratum CLI 0.9.0 o más reciente instalado** (`npm i -g stratum-cli`, Node 22 o más reciente): Desktop ya no lleva el core empaquetado. Si no hay daemon, lo arranca con `stratum daemon start`; cerrarlo no lo para.
 - Las conversaciones de versiones anteriores no se abren solas: impórtalas una vez con `stratum desktop import` (Desktop avisa si quedan). No se borra nada.
 - Retirados por ahora: aprobar o contestar preguntas desde Desktop (se ven; se resuelven desde Stratum Dot o `stratum approvals`), el editor de Ajustes (ahora de solo lectura, con «Abrir la configuración»), la retención de ficheros, el panel de memoria global, la trayectoria y `/clear` y `/compact`. El razonamiento se ve mientras se genera, pero no queda en la conversación.
 
@@ -18,6 +18,10 @@ Stratum Desktop pasa a ser un **cliente de `stratumd`**, hermano de la CLI y de 
 - La lista enseña **todas** las sesiones del daemon —también las de la terminal y de Dot— con su procedencia; Desktop puede continuar las del daemon y redirigir las de una terminal.
 - Controles del trabajo en marcha (pausar, reanudar, cancelar) y escribir con un run en marcha lo redirige.
 - Panel de **contexto y memoria de la sesión** (`/context`) y «Ver mensajes anteriores» para el historial completo.
+- El asistente tiene las skills de serie de Stratum que lo declaran.
+
+### Cambiado
+- Retoque visual: el ámbar queda para la acción principal; botones, listas y cabeceras de panel más sobrios y Ajustes en tarjetas por sección.
 
 ### Eliminado
 - El sidecar (`stratum-core`), su supervisor y su protocolo propio.

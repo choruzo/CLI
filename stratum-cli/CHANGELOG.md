@@ -6,9 +6,18 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.9.0] — 2026-10-23
+
+Versión estable de la 0.9.0. Reúne la [0.9.0-beta.0](#090-beta0--2026-10-16) (el plano de control local, `stratumd`) y todo lo posterior: sesiones del daemon con conversación duradera (M11), Stratum Desktop como cliente de `stratumd` (M12), deshacer por turno y una TUI que ya no se desborda. Es la versión de la CLI que necesita **Stratum Desktop 0.5.0**.
 
 ### Añadido
+- **Deshacer por turno**: `/undo` deshace los cambios en ficheros del último turno del agente y `/rewind` deja elegir hasta qué turno volver. Se guardan en un repo git en la sombra (`~/.stratum/snapshots/`), sin tocar el git del proyecto. Antes de revertir se enseña qué cambia, y un fichero que tocaste tú después no se pisa sin avisar. En el Stratum Protocol, `sessions.revert` (exige la clave de aprobador).
+- **`edit_file` más tolerante**: si el texto a sustituir no coincide exactamente, se prueba con comillas y guiones tipográficos normalizados y sin el blanco al final de línea. Diagnósticos LSP opcionales tras editar (TypeScript, Pyright, rust-analyzer).
+- **Uso y coste por turno**: los tokens de cada petición, sin estimar lo que el backend no reporta, y el coste si el modelo tiene precio configurado. `stratum run --output-format text|json|stream-json`.
+- TUI: pie del prompt con la telemetría del turno, `Esc` `Esc` para parar, `/verbosity` y las lecturas agrupadas como «explorado».
+- TUI: **fondo negro** mientras dura `stratum chat` (`tui.background`, por defecto `#000000`; `"terminal"` deja el del terminal). Se restaura al salir.
+- TUI: el panel de tareas se pliega a una línea con `Ctrl+T` o `/todo`.
+- Stratum Protocol: `sessions.open { resume }` monta una sesión guardada del daemon; `trace.subscribe` sigue la traza de una sesión; `tool.blocked` distingue una tool vetada de una que falló.
 - **Las sesiones de `stratumd` sobreviven a un reinicio** (M11): su conversación, su memoria de sesión, su contexto y sus ajustes se guardan en `~/.stratum/daemon/sessions/<id>/` (`daemon.persistSessions`, por defecto `true`). Al volver a arrancar, cada sesión reaparece en la lista con toda su conversación y se monta al primer uso. Nunca se guardan claves, el entorno ni procesos.
 - **Conversación duradera y memoria de sesión** en las sesiones del daemon: la conversación entera se conserva aunque el contexto del modelo esté acotado; lo antiguo se compacta (al 70 % del presupuesto de entrada) a una memoria de sesión estructurada —hechos, decisiones, restricciones, preferencias, tareas, resultados, entidades y un resumen— con la procedencia de cada entrada. Lo compactado sigue visible en el chat.
 - **Modelo de memoria configurable**: `memory.session.extractor` y `memory.session.summarizer` (`same` por defecto). Un provider distinto usa sus propias credenciales, y uno que no está en esta máquina exige `memory.session.allowRemote: true`.
@@ -32,6 +41,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 - `stratum desktop` se añade a los subcomandos que el agente no puede invocar (como `daemon`, `approvals`, `attach` y `detach`).
 - **`chat --resume` de una sesión que aloja (o tiene guardada) `stratumd` se niega** y remite a `stratum attach <id>`; antes abría en silencio un segundo runtime con ese id. Lo mismo si la sesión está abierta ahora en otra terminal. Para una copia independiente, `--fork`.
 - En una sesión del daemon, si la memoria de sesión no se puede actualizar (modelo de memoria caído), no se trunca nada: se avisa (`session_memory_deferred`) y, si la conversación ya no cabe, el turno termina con `context_full` en vez de borrar mensajes.
+- TUI: el plan, las tareas y los jobs se anclan encima del input, y la telemetría y la barra de estado van debajo.
+
+### Corregido
+- **La TUI ya no duplica el historial**: con un turno largo, la parte viva de la pantalla superaba la altura del terminal y se reimprimía todo (historial, barra de estado y logo repetidos). Un turno terminado con muchas acciones se resume en una línea (`✓ 42 acciones │ 38 exec · 3 read_file │ ✗ 4 con error`), y el razonamiento largo en otra.
+- El error de un `exec` se resume como `exit 3 │ comando` en vez del sobre `<exec_result …>` entero.
+- Markdown: las tablas se pintan en columnas alineadas; `->`, `&` y las comillas ya no salen como `-&gt;`, `&amp;` o `&#39;`; y no quedan varias líneas en blanco entre respuestas del mismo turno.
+
+### Rendimiento
+- `stratumd` serializa cada evento una sola vez para todos sus clientes: con 50 clientes, el reparto es unas 4 veces más rápido.
 
 ## [0.9.0-beta.0] — 2026-10-16
 
