@@ -30,6 +30,7 @@ export type {
   ProtocolSessionMemory,
   ProtocolSessionSnapshot,
   ProtocolSessionState,
+  ProtocolSkill,
   ProtocolStateEvent,
   ProtocolTodo,
   ProtocolToolCall,

@@ -176,6 +176,12 @@ pub enum CallAction {
     ListAgents { cwd: Option<String> },
     /// `models.list`.
     ListModels,
+    /// M12 — `skills.list`: las skills disponibles para un agente (`agent`, y
+    /// `cwd` para las de proyecto). Solo lectura.
+    ListSkills {
+        agent: Option<String>,
+        cwd: Option<String>,
+    },
     /// `approvals.list` de una sesión: lo que tiene pendiente, según el daemon.
     ListPending { session_id: String },
     /// `sessions.get`: la foto de una sesión (su directorio, su título).
@@ -204,6 +210,7 @@ impl CallAction {
             CallAction::StartRun { .. } => "start-run",
             CallAction::ListAgents { .. } => "list-agents",
             CallAction::ListModels => "list-models",
+            CallAction::ListSkills { .. } => "list-skills",
             CallAction::ListPending { .. } => "list-pending",
             CallAction::GetSession { .. } => "get-session",
             CallAction::History { .. } => "history",
@@ -330,6 +337,11 @@ mod tests {
         };
         assert!(open.mutating() && start.mutating());
         assert!(!CallAction::ListModels.mutating());
+        assert!(!CallAction::ListSkills {
+            agent: None,
+            cwd: None
+        }
+        .mutating());
         assert!(!CallAction::ListAgents { cwd: None }.mutating());
         assert!(!CallAction::ListPending {
             session_id: "s".into()

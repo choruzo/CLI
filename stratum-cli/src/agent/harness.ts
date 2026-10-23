@@ -1,4 +1,5 @@
 import type { StratumConfig } from '../config/schema.js';
+import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
 import { StreamBuffer, ThinkTagSplitter } from '../providers/openai-compatible.js';
@@ -907,10 +908,10 @@ export class ReactLoop {
        */
       tdd?: TddLedger;
       /**
-       * Bloque `# Skills` renderizado por `StratumAgent` (Hito 12). El loop solo
-       * lo transporta: se lo pasa a los subagentes que delegue.
+       * Skills de la sesión, descubiertas por `StratumAgent` (Hito 12). El loop
+       * las pone en el `ToolContext` (`read_skill`) y las pasa a los subagentes.
        */
-      skillsBlock?: string;
+      skills?: SkillRegistry;
       /**
        * Versión de cada fichero vista por este agente (`read_file`), que
        * `write_file` consulta antes de sobrescribir. De sesión: una lectura de
@@ -1828,6 +1829,7 @@ export class ReactLoop {
           sessionId: opts?.sessionId,
           workspace: this.extras?.workspace,
           fileState: this.extras?.fileState,
+          skills: this.extras?.skills,
           allowDestructive: opts?.allowDestructive,
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
@@ -2150,7 +2152,7 @@ export class ReactLoop {
       config: this.config,
       signal,
       opts,
-      skillsBlock: this.extras?.skillsBlock,
+      skills: this.extras?.skills,
       env: this.env,
     });
 

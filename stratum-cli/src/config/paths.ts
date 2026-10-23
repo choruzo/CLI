@@ -1,5 +1,6 @@
+import { existsSync } from 'fs';
 import { homedir } from 'os';
-import { join } from 'path';
+import { dirname, isAbsolute, join, resolve } from 'path';
 import type { StratumConfig } from './schema.js';
 
 /** Expande `~` inicial al directorio home del usuario. */
@@ -19,6 +20,40 @@ export interface MemoryPaths {
   vectorFallback: string; // sidecar JSON para el índice brute-force (sin sqlite-vec)
   modelsDir: string; // caché de modelos ONNX (~/.stratum/models)
   sessionsDir: string; // ruta absoluta del directorio de sesiones
+}
+
+/** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
+export function findWorktreeRoot(cwd: string): { worktree: string; isGitRepo: boolean } {
+  let dir = cwd;
+  for (;;) {
+    if (existsSync(join(dir, '.git'))) {
+      return { worktree: dir, isGitRepo: true };
+    }
+    const parent = dirname(dir);
+    if (parent === dir) return { worktree: cwd, isGitRepo: false };
+    dir = parent;
+  }
+}
+
+/**
+ * La memoria de decisiones de un proyecto vive en su raíz: `decisionsFile` y
+ * `vectorDb` relativos se anclan a la raíz del worktree de `startDir`, así que
+ * la CLI lanzada desde una subcarpeta ve la misma memoria. Una ruta absoluta o
+ * con `~` la eligió el usuario y se respeta. La aplica `loadConfig`: todo el
+ * que carga la config de un directorio (CLI, daemon, tools) ve la misma ruta.
+ */
+export function anchorMemoryPaths(config: StratumConfig, startDir: string): StratumConfig {
+  const root = findWorktreeRoot(startDir).worktree;
+  const anchor = (p: string): string =>
+    isAbsolute(p) || expandHome(p) !== p ? p : resolve(root, p);
+  return {
+    ...config,
+    memory: {
+      ...config.memory,
+      decisionsFile: anchor(config.memory.decisionsFile),
+      vectorDb: anchor(config.memory.vectorDb),
+    },
+  };
 }
 
 /** Resuelve las rutas de memoria a rutas absolutas, expandiendo `~`. */

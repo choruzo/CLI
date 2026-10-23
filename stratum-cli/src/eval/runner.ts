@@ -130,9 +130,14 @@ function sandboxConfig(
   // en los tokens y peticiones fuera del guion. Solo se deja encendido en el
   // escenario que lo pide a propósito (los que miden esas llamadas).
   const memory = scenario.setup.config.memory as { autoExtract?: unknown } | undefined;
+  // Las skills de serie añaden su índice al prompt: cambiaría el tamaño (y la
+  // compresión, la caché) de cada escenario con cada skill nueva del paquete.
+  // Solo entran si el escenario las pide (`skills.builtin`).
+  const skills = scenario.setup.config.skills as { builtin?: unknown } | undefined;
   const forced: Record<string, unknown> = {
     provider: { default: 'eval', providers: { eval: provider } },
     memory: { autoExtract: memory?.autoExtract === true, embeddingWarmup: false },
+    skills: { builtin: skills?.builtin ?? false },
     trace: { enabled: true, dir: traceDir },
   };
   if (ssh) forced.ssh = { hosts: ssh.hosts };

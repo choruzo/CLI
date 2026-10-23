@@ -22,6 +22,7 @@ import { DELEGATE_TASK_TOOL } from './agent/delegate.js';
 import { QUESTION_TOOL } from './question.js';
 import { TODO_TOOL } from './todo.js';
 import { TEST_EVIDENCE_TOOL } from './tdd.js';
+import { READ_SKILL_TOOL } from './skills/read-skill.js';
 import { isJobTool } from '../jobs/types.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
@@ -141,6 +142,10 @@ export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): b
   if (isJobTool(name)) return isToolVisibleForProfile(EXEC_TOOL_NAME, filter);
   if (filter.also && !isToolVisibleForProfile(name, filter.also)) return false;
   if (filter.hiddenTools?.some((p) => toolNameMatches(p, name))) return false;
+  // `read_skill` acompaña al índice `# Skills`, que todo agente recibe (también
+  // un subagente): solo lee instrucciones que eligió el runtime, así que un
+  // perfil restringido no la pierde por no listarla. Ocultarla sí la quita.
+  if (name === READ_SKILL_TOOL) return true;
   if (filter.controlTools === 'keep' && CONTROL_TOOLS.has(name)) return true;
   // Hito 11: `todo` también queda fuera. La lista es del padre y se reinyecta
   // en SU system prompt; un hijo con contexto aislado no comparte ese estado.

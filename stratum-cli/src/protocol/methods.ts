@@ -1,6 +1,7 @@
 import type { Capability, ClientKind, Role } from './roles.js';
 import type {
   ProtocolAgent,
+  ProtocolSkill,
   ProtocolApproval,
   ProtocolApprovalDecision,
   ProtocolContextReport,
@@ -249,6 +250,12 @@ export interface ProtocolMethods {
   'core.shutdown': Spec<Mutation & { force?: boolean }, Empty>;
 
   'agents.list': Spec<{ cwd?: string }, { agents: ProtocolAgent[] }>;
+  /**
+   * Skills que vería una sesión nueva de ese agente: las de serie, de usuario
+   * y del proyecto de `cwd` (obligatorio) para uno de código; solo las de
+   * serie que declaran `assistant` para el asistente (sin `cwd`).
+   */
+  'skills.list': Spec<{ cwd?: string; agent?: string }, { skills: ProtocolSkill[] }>;
   'models.list': Spec<{ provider?: string }, { models: ProtocolModel[]; error?: string }>;
 
   'sessions.list': Spec<SessionsListParams, { sessions: ProtocolSession[] }>;
@@ -337,6 +344,10 @@ export interface ProtocolMethods {
   'jobs.list': Spec<{ sessionId: string }, { jobs: ProtocolJob[] }>;
   'jobs.cancel': Spec<Mutation & { sessionId: string; jobId: string }, Empty>;
 
+  /**
+   * Memoria de decisiones: la del proyecto de `cwd` o, sin `cwd`, la global
+   * (la del asistente). Nunca las dos a la vez.
+   */
   'memory.status': Spec<{ cwd?: string }, ProtocolMemoryStatus>;
   'memory.decisions': Spec<
     { cwd?: string; query?: string; limit?: number },
@@ -431,6 +442,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'core.shutdown': write('control'),
 
   'agents.list': read('observe'),
+  'skills.list': read('observe'),
   'models.list': read('observe'),
 
   'sessions.list': read('observe'),

@@ -100,7 +100,7 @@ desconocidas se rechazan.
 | `requires` | Si no se cumple, el escenario queda en **SKIP** (no cuenta como fallo): `platform` y ejecutables en el PATH. |
 | `setup.files` | Ficheros de partida, ruta relativa → contenido. No pueden salir del workspace. |
 | `setup.commands` | Comandos (argv, sin shell) lanzados en el workspace tras escribir los ficheros. |
-| `setup.config` | Capa de `.stratumrc.json` (entornos, perfiles, `tools.*`…). `provider`, `trace` y `memory.autoExtract` los fija el runner. |
+| `setup.config` | Capa de `.stratumrc.json` (entornos, perfiles, `tools.*`…). `provider`, `trace` y `memory.autoExtract` los fija el runner; `skills.builtin` es `false` salvo que el escenario lo fije (las skills de serie cambiarían el tamaño del prompt de todos). |
 | `setup.ssh.hosts` | Hosts simulados (ver abajo). |
 | `input` | **Entrada**: la tarea, tal cual se le pasa a `stratum run`. |
 | `followUps` | Turnos siguientes en la **misma sesión**: se lanzan con `stratum run … --then …`, uno tras otro. Un turno que no acaba en `stop` corta la cadena. |

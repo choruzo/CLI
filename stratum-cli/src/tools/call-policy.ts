@@ -30,6 +30,7 @@ export const READ_ONLY_SESSION_TOOLS: readonly string[] = [
   'web_search',
   'web_fetch',
   'recall_decisions',
+  'read_skill',
   'exec',
   // El hijo hereda el modo read-only (RunOptions.readOnly).
   'delegate_task',

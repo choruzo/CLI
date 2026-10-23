@@ -85,6 +85,7 @@ pub fn run() {
             commands::desktop_history,
             commands::desktop_context,
             commands::desktop_memory,
+            commands::desktop_list_skills,
             commands::desktop_prefs,
             commands::desktop_open_config,
             files::attachments_pick,

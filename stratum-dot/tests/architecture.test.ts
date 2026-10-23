@@ -356,6 +356,7 @@ describe('el lado nativo', () => {
       'sessions.memory',
       'sessions.open',
       'sessions.setModel',
+      'skills.list',
     ]);
     // Lo que Dot puede pedir es su perfil (`ClientProfile::DOT` en `link.rs`): de `sessions.*`
     // solo abrir y leer una; de `runs.*`, iniciar y gobernar; de lo pendiente, solo listarlo

@@ -183,6 +183,7 @@ host ownership  !=  operator control  !=  approver authority
 | `core.status` | observe | | |
 | `core.shutdown` | control | ✓ | `force?` |
 | `agents.list` · `models.list` | observe | | Lo que se puede elegir al abrir una sesión: nombres y alias, sin secretos (§13.7) |
+| `skills.list` | observe | | Skills que vería una sesión nueva de ese agente: `{ cwd?, agent? }`; `cwd` absoluto obligatorio salvo con `agent: 'assistant'` |
 | `sessions.list` · `sessions.get` | observe | | `get` devuelve una foto |
 | `sessions.open` | control | ✓ | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4) |
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly` | control | ✓ | |
@@ -555,6 +556,7 @@ runs.start    { sessionId, input }                 →  otro run, misma sesión,
 |---|---|---|
 | `agents.list { cwd? }` | Perfiles: `name`, `description`, `mode`, `origin`, `allowedTools`, `provider?`, `model?` | El prompt del perfil, su ruta |
 | `models.list { provider? }` | `provider` (alias de la config), `id`, `contextWindow`, `default?` | `baseUrl`, claves, cabeceras |
+| `skills.list { cwd?, agent? }` | `name`, `description`, `scope` (`builtin`/`user`/`project`), `presets`. Agente de código: las de serie, de usuario y del proyecto de `cwd` que declaran `coding`; `assistant`: solo las de serie que declaran `assistant` | La ruta y el cuerpo |
 
 `default: true` marca el modelo que usa una sesión abierta sin pedir provider ni modelo (el de
 la configuración global). El modelo configurado se ofrece aunque el backend no liste modelos;
@@ -1206,6 +1208,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M9 | Ningún cambio de contrato. El daemon no arranca si su carpeta no es privada (POSIX) o es un enlace, y deja su socket en `0600`. Stratum Dot usa `approvals.list` y `sessions.get` (que ya existían) para la confirmación nativa | Comportamiento del servidor y de un cliente; el contrato no cambia |
 | M11 | Métodos `sessions.history`, `sessions.context` y `sessions.memory` (`observe`); DTOs `ProtocolHistoryPage`, `ProtocolContextReport`, `ProtocolSessionMemory`; `HISTORY_LIMITS`. Las sesiones del daemon se recuperan tras un reinicio: el mismo id vuelve a `sessions.list` | Aditivo. Que una sesión del daemon sobreviva a su proceso cambia una garantía documentada (§13.7, §18.10), no la forma del contrato |
 | M12 | `ProtocolSession.origin?` (`ClientKind`); `sessions.open { agent: 'assistant' }` abre el agente embebido y `agents.list` lo ofrece el primero; `sessions.setAgent` hacia o desde `assistant` → `INVALID_PARAMS`; `ProtocolHandoffContext.agent` puede ser `assistant`. Funciones de cliente puras `followSession`, `applyOverviewEvent`, `boundedTranscript` y, en `schemas.ts`, `classifyEvent`/`parseSessionSnapshot`/`parseOverviewSnapshot` | Aditivo: `origin` es opcional y solo procedencia; el resto no cambia la forma de ningún mensaje |
+| Skills de serie | Método `skills.list` (`observe`) y DTO `ProtocolSkill`. `memory.status`/`memory.decisions` sin `cwd` miran la memoria global (la del asistente), no la del directorio del proceso del daemon; con `cwd`, la del proyecto (`<raíz del worktree>/.stratum/memory/`) | Método aditivo. Lo de `memory.*` cambia qué memoria se mira, no la forma: la de la CLI dejó de ser global |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 

@@ -1,12 +1,12 @@
 import type { StratumConfig } from '../config/schema.js';
-import { loadProjectMemory, type ProjectMemory } from './project.js';
+import { loadProjectMemory, type MemoryScope, type ProjectMemory } from './project.js';
 import { getDecisionMemory, type DecisionMemory } from './decision-memory.js';
 import type { DecisionInput, DecisionRecord } from './decisions.js';
 
 /**
  * Orquesta las 3 capas de memoria de Stratum.
  *
- * Capa 1 — STRATUM.md proyecto + global (Hito 2).
+ * Capa 1 — STRATUM.md del proyecto o el global, según el `scope` (Hito 2).
  * Capas 2 (decisions.json) y 3 (vectores semánticos) — Hito 5, vía
  * `DecisionMemory`.
  */
@@ -18,8 +18,9 @@ export class MemoryManager {
   constructor(
     private readonly config: StratumConfig,
     private readonly cwd: string,
+    private readonly scope: MemoryScope = 'project',
   ) {
-    this.memory = loadProjectMemory(config, cwd);
+    this.memory = loadProjectMemory(config, cwd, scope);
   }
 
   /** Acceso perezoso a las Capas 2/3 (carga el modelo de embeddings al usarse). */
@@ -30,7 +31,7 @@ export class MemoryManager {
 
   /** Recarga la memoria desde disco (útil tras `/init` o edición manual). */
   reload(): void {
-    this.memory = loadProjectMemory(this.config, this.cwd);
+    this.memory = loadProjectMemory(this.config, this.cwd, this.scope);
   }
 
   /** Devuelve el contenido bruto de la memoria de proyecto. */

@@ -3,6 +3,7 @@ import { Command } from 'commander';
 import { chatCommand } from './commands/chat.js';
 import { runCommand } from './commands/run.js';
 import { memoryCommand } from './commands/memory.js';
+import { skillsCommand } from './commands/skills.js';
 import { sessionsCommand } from './commands/sessions.js';
 import { configCommand } from './commands/config.js';
 import { initCommand } from './commands/init.js';
@@ -34,6 +35,7 @@ program
 program.addCommand(chatCommand);
 program.addCommand(runCommand);
 program.addCommand(memoryCommand);
+program.addCommand(skillsCommand);
 program.addCommand(sessionsCommand);
 program.addCommand(configCommand);
 program.addCommand(initCommand);

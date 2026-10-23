@@ -168,6 +168,7 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     MainMethod::SessionsMemory,
     MainMethod::SessionsClose,
     MainMethod::SessionsSetModel,
+    MainMethod::SkillsList,
 ];
 
 impl ClientProfile {
@@ -741,6 +742,19 @@ fn call_request(
             },
         )),
         CallAction::ListModels => Ok((MainMethod::ModelsList, json!({}))),
+        CallAction::ListSkills { agent, cwd } => {
+            let mut params = serde_json::Map::new();
+            let fields = [
+                ("agent", optional(agent, MAX_NAME_CHARS, "agent name")?),
+                ("cwd", optional(cwd, MAX_PATH_CHARS, "directory")?),
+            ];
+            for (key, value) in fields {
+                if let Some(value) = value {
+                    params.insert(key.to_string(), Value::String(value));
+                }
+            }
+            Ok((MainMethod::SkillsList, Value::Object(params)))
+        }
         CallAction::ListPending { session_id } => {
             if !valid_id(session_id) {
                 return Err(invalid("Invalid session id."));
@@ -1924,6 +1938,36 @@ mod tests {
             (method, params),
             (MainMethod::AgentsList, json!({ "cwd": "/w" }))
         );
+        let (method, params) = call_request(
+            &CallAction::ListSkills {
+                agent: Some("assistant".into()),
+                cwd: None,
+            },
+            "x",
+        )
+        .unwrap();
+        assert_eq!(
+            (method, params),
+            (MainMethod::SkillsList, json!({ "agent": "assistant" }))
+        );
+        let (method, params) = call_request(
+            &CallAction::ListSkills {
+                agent: None,
+                cwd: None,
+            },
+            "x",
+        )
+        .unwrap();
+        assert_eq!((method, params), (MainMethod::SkillsList, json!({})));
+        let (_, params) = call_request(
+            &CallAction::ListSkills {
+                agent: Some("a".into()),
+                cwd: Some("/w".into()),
+            },
+            "x",
+        )
+        .unwrap();
+        assert_eq!(params, json!({ "agent": "a", "cwd": "/w" }));
     }
 
     #[test]
@@ -1952,6 +1996,14 @@ mod tests {
                 agent: Some("x".repeat(MAX_NAME_CHARS + 1)),
                 provider: None,
                 model: None,
+            },
+            CallAction::ListSkills {
+                agent: None,
+                cwd: Some("x".repeat(MAX_PATH_CHARS + 1)),
+            },
+            CallAction::ListSkills {
+                agent: Some("x".repeat(MAX_NAME_CHARS + 1)),
+                cwd: None,
             },
         ];
         for action in bad {

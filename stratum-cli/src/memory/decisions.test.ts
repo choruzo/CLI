@@ -127,4 +127,49 @@ describe('DecisionStore', () => {
     for (let i = 0; i < 50; i++) ids.add(DecisionStore.generateId());
     expect(ids.size).toBe(50);
   });
+
+  describe('importMissing', () => {
+    function sourceRecords(n: number) {
+      const src = new DecisionStore(join(dir, 'src.json'));
+      return Array.from({ length: n }, () => src.add(sampleInput));
+    }
+
+    it('añade las nuevas y devuelve cuántas', () => {
+      const records = sourceRecords(2);
+      const store = new DecisionStore(file);
+      expect(store.importMissing(records)).toBe(2);
+      expect(store.load().map((r) => r.id)).toEqual(records.map((r) => r.id));
+    });
+
+    it('no duplica ids: repetir la importación no añade nada', () => {
+      const records = sourceRecords(2);
+      const store = new DecisionStore(file);
+      store.importMissing(records);
+      expect(store.importMissing(records)).toBe(0);
+      expect(store.load()).toHaveLength(2);
+    });
+
+    it('conserva las entradas existentes, también las que no validan', () => {
+      const foreign = { id: 'dec_future', kind: 'from-the-future' };
+      const existing = new DecisionStore(file).add(sampleInput);
+      const raw = JSON.parse(readFileSync(file, 'utf-8')) as unknown[];
+      writeFileSync(file, JSON.stringify([...raw, foreign]), 'utf-8');
+
+      const records = sourceRecords(1);
+      const store = new DecisionStore(file);
+      expect(store.importMissing([...records, existing])).toBe(1);
+      const after = JSON.parse(readFileSync(file, 'utf-8')) as Array<{ id: string }>;
+      expect(after.map((e) => e.id)).toEqual([existing.id, 'dec_future', records[0]!.id]);
+      expect(after[1]).toEqual(foreign);
+    });
+
+    it('lanza con un fichero de un Stratum más nuevo y no lo modifica', () => {
+      const newer = JSON.stringify({ schemaVersion: 99, decisions: [] });
+      writeFileSync(file, newer, 'utf-8');
+      expect(() => new DecisionStore(file).importMissing(sourceRecords(1))).toThrow(
+        DecisionStoreError,
+      );
+      expect(readFileSync(file, 'utf-8')).toBe(newer);
+    });
+  });
 });

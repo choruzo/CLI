@@ -170,6 +170,10 @@ async fn main() {
             }),
             "agents" => Some(CallAction::ListAgents { cwd: text("cwd") }),
             "models" => Some(CallAction::ListModels),
+            "skills" => Some(CallAction::ListSkills {
+                agent: text("agent"),
+                cwd: text("cwd"),
+            }),
             "history" => Some(CallAction::History {
                 session_id: session_id.clone(),
                 before: text("before"),

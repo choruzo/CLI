@@ -53,10 +53,12 @@ pub enum MainMethod {
     SessionsClose,
     /// M12 (Desktop) — cambiar el modelo de una sesión parada.
     SessionsSetModel,
+    /// M12 (Desktop) — las skills disponibles para un agente.
+    SkillsList,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 18] = [
+    pub const ALL: [MainMethod; 19] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -75,6 +77,7 @@ impl MainMethod {
         MainMethod::SessionsMemory,
         MainMethod::SessionsClose,
         MainMethod::SessionsSetModel,
+        MainMethod::SkillsList,
     ];
 }
 
@@ -99,6 +102,7 @@ impl WireMethod for MainMethod {
             MainMethod::SessionsMemory => "sessions.memory",
             MainMethod::SessionsClose => "sessions.close",
             MainMethod::SessionsSetModel => "sessions.setModel",
+            MainMethod::SkillsList => "skills.list",
         }
     }
 }
@@ -278,7 +282,8 @@ mod tests {
                 "sessions.context",
                 "sessions.memory",
                 "sessions.close",
-                "sessions.setModel"
+                "sessions.setModel",
+                "skills.list"
             ]
         );
         for forbidden in [

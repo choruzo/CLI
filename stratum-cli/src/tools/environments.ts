@@ -112,6 +112,8 @@ const PURE_READERS = new Set([
   'web_search',
   'web_fetch',
   'recall_decisions',
+  // Lee el cuerpo de una skill del registro de la sesión: ni ruta ni target.
+  'read_skill',
   // Jobs en segundo plano: mirar un job no cambia nada, y `cancel_job` solo
   // detiene un proceso que la propia sesión lanzó — poder pararlo tiene que
   // seguir siendo posible en read-only y en modo plan. Lo que el job HACE ya

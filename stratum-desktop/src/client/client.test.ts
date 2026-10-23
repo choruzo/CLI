@@ -47,6 +47,7 @@ function fakeNative(overrides: Partial<NativeBridge> = {}): NativeBridge {
     history: vi.fn(async () => ({ messages: [], hasMore: false, total: 0 })),
     context: vi.fn(async () => ({})),
     memory: vi.fn(async () => ({})),
+    listSkills: vi.fn(async () => ({ skills: [] })),
     prefs: vi.fn(),
     openConfig: vi.fn(async () => undefined),
     onEvent: vi.fn(async () => () => undefined),

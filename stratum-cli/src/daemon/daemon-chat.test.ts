@@ -1,5 +1,5 @@
 import { describe, it, expect, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ProtocolError } from '../ipc/codec.js';
@@ -11,7 +11,14 @@ import {
   type ProtocolSessionSnapshot,
 } from '../protocol/index.js';
 import { RESULTS } from '../protocol/schemas.js';
-import { gate, idleAgain, startTestDaemon, watch, type TestDaemon } from './daemon.fixtures.js';
+import {
+  gate,
+  idleAgain,
+  startTestDaemon,
+  testConfig,
+  watch,
+  type TestDaemon,
+} from './daemon.fixtures.js';
 
 /**
  * M7: una conversación de varios turnos con una sesión del daemon, conducida
@@ -320,5 +327,45 @@ describe('stratumd — agentes y modelos para quien abre una sesión', () => {
         expect.not.arrayContaining(['prompt', 'body', 'source', 'path']),
       );
     }
+  });
+
+  it('skills.list da las skills de un agente sin ruta ni cuerpo', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'stratumd-skills-')));
+    t = await startTestDaemon({ base, config: testConfig(base, { skills: { enabled: true } }) });
+    const cwd = t.project('skills', []);
+    mkdirSync(join(cwd, '.stratum', 'skills', 'deploy'), { recursive: true });
+    writeFileSync(
+      join(cwd, '.stratum', 'skills', 'deploy', 'SKILL.md'),
+      '---\nname: deploy\ndescription: Publicar una release\n---\nCUERPO',
+    );
+    writeFileSync(join(cwd, '.stratumrc.json'), JSON.stringify({ skills: { enabled: true } }));
+    const observer = await t.connect(['observer']);
+
+    // Las de código dependen del proyecto: sin `cwd`, o relativo, no hay lista.
+    for (const params of [{}, { cwd: 'relativo' }, { agent: 'general' }]) {
+      await expect(observer.request('skills.list', params)).rejects.toMatchObject({
+        code: 'INVALID_PARAMS',
+      });
+    }
+
+    const coding = await observer.request('skills.list', { cwd });
+    expect(RESULTS['skills.list'].safeParse(coding).success).toBe(true);
+    const names = coding.skills.map((s) => s.name);
+    expect(names).toEqual(expect.arrayContaining(['deploy', 'stratum-project-memory']));
+    expect(names).not.toContain('stratum-global-memory');
+    expect(coding.skills.find((s) => s.name === 'deploy')).toMatchObject({
+      scope: 'project',
+      presets: ['coding'],
+    });
+    const wire = JSON.stringify(coding);
+    for (const leak of ['CUERPO', 'SKILL.md', cwd]) expect(wire, leak).not.toContain(leak);
+
+    // El asistente: solo las de serie que declaran `assistant`, nunca las del proyecto.
+    const assistant = await observer.request('skills.list', { agent: 'assistant', cwd });
+    const own = assistant.skills.map((s) => s.name);
+    expect(own).toEqual(expect.arrayContaining(['stratum-global-memory']));
+    expect(own).not.toContain('deploy');
+    expect(own).not.toContain('stratum-project-memory');
+    expect(assistant.skills.every((s) => s.scope === 'builtin')).toBe(true);
   });
 });

@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { ReactLoop } from './harness.js';
@@ -10,7 +10,7 @@ import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/moc
 import { StratumConfigSchema } from '../config/schema.js';
 import { ChangeTracker, LARGE_AUTHORED_CHANGE_LINES } from './risk.js';
 import { buildSystemPrompt } from './system-prompt.js';
-import { buildSkillsBlock } from '../skills/registry.js';
+import { SkillRegistry, buildSkillsBlock } from '../skills/registry.js';
 import type { AgentEvent, Message, RunOptions, SubagentRouter } from './types.js';
 import type { CompletionRequest, IProvider, OpenAIStreamChunk } from '../providers/base.js';
 
@@ -90,6 +90,7 @@ describe('índice de skills en el prompt (Hito 12)', () => {
       path: '/p/.stratum/skills/deploy/SKILL.md',
       scope: 'project',
       source: '.stratum/skills',
+      presets: ['coding'],
     },
   ]);
 
@@ -103,6 +104,14 @@ describe('índice de skills en el prompt (Hito 12)', () => {
   });
 
   it('el hijo delegado hereda el índice del padre (no redescubre)', async () => {
+    const skillsRoot = mkdtempSync(join(tmpdir(), 'stratum-childskills-'));
+    mkdirSync(join(skillsRoot, '.stratum', 'skills', 'deploy'), { recursive: true });
+    writeFileSync(
+      join(skillsRoot, '.stratum', 'skills', 'deploy', 'SKILL.md'),
+      '---\nname: deploy\ndescription: Publicar una release\n---\nPasos',
+      'utf-8',
+    );
+    const registry = new SkillRegistry([skillsRoot], { home: skillsRoot, builtinDir: null });
     const parent = new MockProvider([
       makeToolCallRound('d1', 'delegate_task', { task: 'Explora', profile: 'general' }),
       makeTextRound('Listo.'),
@@ -129,7 +138,7 @@ describe('índice de skills en el prompt (Hito 12)', () => {
     const messages: Message[] = [{ role: 'system', content: 'sys' }];
     const loop = new ReactLoop(parent, newRegistry(), messages, config, 'm', 32768, undefined, {
       profiles: new ProfileLoader(mkdtempSync(join(tmpdir(), 'stratum-noprofiles-'))),
-      skillsBlock: skills,
+      skills: registry,
     });
     const opts: RunOptions = { makeSubagentRouter: () => childRouter };
     await collect(loop.run(opts));
@@ -137,5 +146,6 @@ describe('índice de skills en el prompt (Hito 12)', () => {
     const childSystem = seen[0]?.messages.find((m) => m.role === 'system')?.content ?? '';
     expect(childSystem).toContain('# Skills');
     expect(childSystem).toContain('deploy');
+    rmSync(skillsRoot, { recursive: true, force: true });
   });
 });

@@ -1,5 +1,6 @@
 import type { ZodTypeAny } from 'zod';
 import type { StratumConfig } from '../config/schema.js';
+import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider } from '../providers/base.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
 import type { TraceScope } from '../trace/recorder.js';
@@ -239,6 +240,11 @@ export interface ToolContext {
    * principal (el steering es suyo); ausente → nunca.
    */
   supersededBySteering?: () => string | null;
+  /**
+   * Skills de la sesión: el conjunto cerrado que sirve `read_skill`. Ausente →
+   * la sesión no tiene skills.
+   */
+  skills?: SkillRegistry;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */

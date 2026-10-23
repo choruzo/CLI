@@ -105,6 +105,22 @@ describe('perfil de sesión (Hito 17, §10.5)', () => {
     expect(isToolVisibleForProfile('todo', filter)).toBe(true);
     expect(composeToolsetFilters(undefined, undefined)).toBeUndefined();
   });
+
+  it('read_skill acompaña al índice de skills aunque el perfil no la liste, salvo si la oculta', () => {
+    const restricted = { allowedTools: ['read_file', 'grep'] };
+    expect(isToolVisibleForProfile('read_skill', restricted)).toBe(true);
+    expect(isToolVisibleForProfile('read_skill', { ...restricted, isSubagent: true })).toBe(true);
+    const infra = listSessionProfiles(base).find((p) => p.name === 'infra')!;
+    expect(
+      isToolVisibleForProfile(
+        'read_skill',
+        composeToolsetFilters(sessionProfileFilter(infra), restricted),
+      ),
+    ).toBe(true);
+    expect(isToolVisibleForProfile('read_skill', { ...restricted, hiddenTools: ['read_*'] })).toBe(
+      false,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

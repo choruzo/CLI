@@ -10,6 +10,7 @@ import { webSearchTool } from '../tools/web/search.js';
 import { webFetchTool } from '../tools/web/fetch.js';
 import { storeDecisionTool } from '../tools/memory/store-decision.js';
 import { recallDecisionsTool } from '../tools/memory/recall-decisions.js';
+import { readSkillTool } from '../tools/skills/read-skill.js';
 import { questionTool } from '../tools/question.js';
 import { todoTool } from '../tools/todo.js';
 import { readFileTool } from '../tools/fs/read.js';
@@ -19,6 +20,7 @@ import { globTool } from '../tools/fs/glob.js';
 import { grepTool } from '../tools/fs/grep.js';
 import { listDirectoryTool } from '../tools/fs/list.js';
 import { getLogger } from '../logging/index.js';
+import { DecisionStore } from '../memory/decisions.js';
 
 /**
  * El agente embebido `assistant` (M12): el modo Chat que nació en Stratum
@@ -29,9 +31,10 @@ import { getLogger } from '../logging/index.js';
  * Qué cambia respecto a una sesión de código: el prompt (`promptPreset`), las
  * tools (solo `ASSISTANT_TOOLS` + `ASSISTANT_FILE_TOOLS`; `exec` nunca), los
  * ficheros confinados al directorio de la sesión (`inputs/` de solo lectura,
- * escritura solo en `outputs/` y `scratch/`), sin skills, MCP ni perfiles, y
- * una memoria de decisiones propia del asistente, separada de la de cualquier
- * proyecto.
+ * escritura solo en `outputs/` y `scratch/`), sin MCP ni perfiles, solo las
+ * skills de serie que declaran `assistant`, y una
+ * memoria propia (sus decisiones y el `STRATUM.md` global), separada de la de
+ * cualquier proyecto: es la única memoria global de Stratum.
  */
 
 const log = getLogger('host').child('assistant');
@@ -40,6 +43,8 @@ const log = getLogger('host').child('assistant');
 export interface AssistantData {
   dir: string;
   legacyMemoryDir?: string | null;
+  /** Decisiones globales de la CLI anteriores a la memoria por proyecto. `null` = no importar. */
+  legacyGlobalDecisionsDir?: string | null;
 }
 
 /** Subcarpetas del directorio de una sesión del asistente. */
@@ -96,6 +101,47 @@ export function migrateLegacyAssistantMemory(dataDir: string, legacyDir: string)
   }
 }
 
+/** Dónde guardaba la CLI sus decisiones, globales, antes de la memoria por proyecto. */
+export function legacyGlobalDecisionsDir(home: string = homedir()): string {
+  return join(home, '.stratum', 'memory');
+}
+
+/** Marca, junto al original, de que ya se importó a la memoria del asistente. */
+const GLOBAL_IMPORT_MARK = '.imported-to-assistant';
+export const GLOBAL_DECISIONS_IMPORT = 1;
+
+/**
+ * Importación **única** de las decisiones que la CLI guardaba en
+ * `~/.stratum/memory/` (globales, de cualquier proyecto) a la memoria del
+ * asistente, que es ahora la única global. Ningún proyecto las hereda: no hay
+ * forma fiable de saber de cuál era cada una. Se fusiona por `id` (repetirla
+ * no duplica), el original no se toca y una marca junto a él evita repetirla;
+ * el índice vectorial se regenera solo (`ensureIndexed`). Sin marca si falla
+ * o si no había nada legible, así que se reintenta la próxima vez; un fallo
+ * nunca impide abrir la sesión. Devuelve cuántas decisiones añadió.
+ */
+export function importLegacyGlobalDecisions(dataDir: string, legacyDir: string): number {
+  const source = join(legacyDir, 'decisions.json');
+  const mark = join(legacyDir, GLOBAL_IMPORT_MARK);
+  if (!existsSync(source) || existsSync(mark)) return 0;
+  try {
+    const records = new DecisionStore(source).load();
+    if (records.length === 0) return 0;
+    const added = new DecisionStore(join(dataDir, 'memory', 'decisions.json')).importMissing(
+      records,
+    );
+    writeFileAtomic(
+      mark,
+      `${JSON.stringify({ version: GLOBAL_DECISIONS_IMPORT, to: dataDir, added })}\n`,
+    );
+    if (added > 0) log.info('global CLI decisions imported into the assistant memory', { added });
+    return added;
+  } catch (err) {
+    log.warn('global decisions import failed', { err });
+    return 0;
+  }
+}
+
 /**
  * Config de una sesión del asistente a partir de la de su directorio. La
  * memoria de decisiones es **del asistente**: lo que se le cuenta no aparece
@@ -109,9 +155,9 @@ export function buildAssistantConfig(base: StratumConfig, dataDir: string): Stra
       decisionsFile: join(dataDir, 'memory', 'decisions.json'),
       vectorDb: join(dataDir, 'memory', 'vectors.db'),
     },
-    // Sin skills ni guías materializadas: presuponen un proyecto y escribirían
-    // ficheros en el directorio de la sesión.
-    skills: { ...base.skills, enabled: false },
+    // Sin guías materializadas: presuponen un proyecto y escribirían ficheros
+    // en el directorio de la sesión. Las skills sí: solo las de serie para el
+    // asistente, y sin tabla en disco (`StratumAgent`).
     prompt: { ...base.prompt, guides: 'inline' },
   };
 }
@@ -128,6 +174,7 @@ export function buildAssistantRegistry(): ToolRegistry {
     webFetchTool,
     storeDecisionTool,
     recallDecisionsTool,
+    readSkillTool,
     questionTool,
     todoTool,
     readFileTool,

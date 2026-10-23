@@ -1,6 +1,5 @@
-import { existsSync } from 'fs';
-import { join, dirname } from 'path';
 import type { StratumConfig } from '../config/schema.js';
+import { findWorktreeRoot } from '../config/paths.js';
 import type { PromptPreset } from './presets.js';
 import type { WorkspaceConfinement } from './types.js';
 import { describeEnvironmentRules, listEnvironments } from '../tools/environments.js';
@@ -53,7 +52,7 @@ export interface SystemPromptEnv {
   /**
    * Preset del prompt (Stratum Desktop D1). Ausente o `coding` → el prompt de
    * la CLI, sin cambios. `assistant` → `buildAssistantPrompt`: el resto de
-   * campos de este entorno (perfiles, skills, guías, cwd) se ignoran.
+   * campos de este entorno (perfiles, guías, cwd) se ignoran; `skills` no.
    */
   preset?: PromptPreset;
   /**
@@ -74,18 +73,7 @@ export interface SystemPromptEnv {
   testing?: boolean;
 }
 
-/** Busca la raíz del repo git ascendiendo desde `cwd`. Devuelve `cwd` si no hay repo. */
-export function findWorktreeRoot(cwd: string): { worktree: string; isGitRepo: boolean } {
-  let dir = cwd;
-  for (;;) {
-    if (existsSync(join(dir, '.git'))) {
-      return { worktree: dir, isGitRepo: true };
-    }
-    const parent = dirname(dir);
-    if (parent === dir) return { worktree: cwd, isGitRepo: false };
-    dir = parent;
-  }
-}
+export { findWorktreeRoot } from '../config/paths.js';
 
 function buildEnvBlock(env: SystemPromptEnv): string {
   const cwd = env.cwd ?? processSessionEnv().cwd;
@@ -662,6 +650,7 @@ export function buildAssistantPrompt(memory: string | undefined, env: SystemProm
 You have two tools backed by a long-term memory that persists across conversations:
 - store_decision: use it when the user states a preference, a stable fact about themselves or their work, or a decision they want you to remember in future conversations. Do NOT use it for passing details of the current conversation.
 - recall_decisions: use it to retrieve what you stored before, when a past preference or fact could change your answer.`;
+  if (env.skills && env.skills.trim()) prompt += `\n\n${env.skills.trim()}`;
   prompt += `\n\n${buildAskingBlock('assistant')}`;
   if (memory && memory.trim()) {
     prompt += `\n\n## User Memory\nThe following is persistent context the user wrote for you (from their global STRATUM.md). Honor these instructions and preferences:\n\n${memory.trim()}`;

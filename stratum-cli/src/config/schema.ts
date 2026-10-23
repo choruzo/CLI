@@ -290,8 +290,13 @@ export const StratumConfigSchema = z.object({
     .object({
       projectFile: z.string().default('./STRATUM.md'),
       globalFile: z.string().default('~/.stratum/STRATUM.md'),
-      decisionsFile: z.string().default('~/.stratum/memory/decisions.json'),
-      vectorDb: z.string().default('~/.stratum/memory/vectors.db'),
+      /**
+       * Memoria de decisiones **del proyecto**: relativas, se anclan a la raíz
+       * del worktree al cargar la config (`anchorMemoryPaths`). El asistente usa
+       * la suya, global (`buildAssistantConfig`).
+       */
+      decisionsFile: z.string().default('./.stratum/memory/decisions.json'),
+      vectorDb: z.string().default('./.stratum/memory/vectors.db'),
       embeddingModel: z.string().default('Xenova/all-MiniLM-L6-v2'),
       /**
        * Dimensión del vector de embeddings del modelo activo.
@@ -675,6 +680,12 @@ export const StratumConfigSchema = z.object({
        * al cwd. Se reescribe solo cuando cambia el fingerprint del conjunto.
        */
       registryFile: z.string().default('./.stratum/skill-registry.md'),
+      /**
+       * Skills de serie (las del paquete): `true` todas, `false` ninguna, o la
+       * lista de las que se cargan. Una skill del usuario o del proyecto con el
+       * mismo nombre la sustituye igualmente.
+       */
+      builtin: z.union([z.boolean(), z.array(z.string())]).default(true),
     })
     .default({}),
 

@@ -19,8 +19,15 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 - **Agente embebido `assistant`** (M12): el modo Chat de Stratum Desktop es ahora una sesión normal de `stratumd` que cualquier cliente abre con `sessions.open { agent: 'assistant', cwd }`: web, preguntas, tareas, memoria de decisiones propia (`~/.stratum/assistant/`) y ficheros confinados a su carpeta; nunca `exec`. Necesita su propio directorio (no el home).
 - Stratum Protocol: `ProtocolSession.origin` dice desde qué cliente se inició una sesión (solo procedencia, no da permisos). Funciones de cliente puras para seguir una sesión y la foto de conjunto (`followSession`, `applyOverviewEvent`, `classifyEvent`), compartidas por Stratum Dot y Stratum Desktop.
 - `stratum desktop import [--dry-run]`: pasa una vez las conversaciones de Stratum Desktop anteriores a M12 a sesiones de `stratumd` (por el traspaso de M10), sin borrar nada.
+- **Skills de serie**: Stratum trae sus propias skills (`stratum-project-memory`, `stratum-global-memory`, `stratum-skill-authoring`), con la menor precedencia: una skill tuya o del proyecto con el mismo nombre las sustituye. `skills.builtin` (`true`/`false`/lista) elige cuáles se cargan.
+- Frontmatter `presets` en las skills (`coding`, `assistant`): el asistente de Desktop ahora tiene skills (solo las de serie que lo declaran).
+- Tool `read_skill`: el agente carga una skill por su nombre. `stratum skills list [--assistant] [--json]` y, en el Stratum Protocol, `skills.list`.
+- `stratum memory list|search|forget|show --global`: la memoria global (la del asistente).
 
 ### Cambios a tener en cuenta
+- **La memoria de la CLI es ahora del proyecto**: las decisiones se guardan en `<raíz del repo>/.stratum/memory/` (con un `.gitignore` para el índice) y la CLI ya no carga `~/.stratum/STRATUM.md`. La memoria global es la del asistente de Desktop (`~/.stratum/assistant/memory/` y `~/.stratum/STRATUM.md`). Las decisiones que la CLI guardaba en `~/.stratum/memory/` se importan una vez a la del asistente (el original no se toca); ningún proyecto las hereda. Una ruta `memory.decisionsFile`/`vectorDb` absoluta en tu config se respeta.
+- El índice `# Skills` del prompt ya no lleva rutas: las skills se leen con `read_skill`. `.stratum/skill-registry.md` solo se escribe si hay skills tuyas o del proyecto.
+- `memory.status`/`memory.decisions` sin `cwd` (Stratum Protocol) miran la memoria global.
 - Stratum Desktop ya no se construye desde aquí: se retiran `src/desktop/`, `src/desktop-server.ts` y `npm run build:desktop` (el sidecar SEA). Desktop es un cliente de `stratumd` y usa la CLI instalada.
 - `stratum desktop` se añade a los subcomandos que el agente no puede invocar (como `daemon`, `approvals`, `attach` y `detach`).
 - **`chat --resume` de una sesión que aloja (o tiene guardada) `stratumd` se niega** y remite a `stratum attach <id>`; antes abría en silencio un segundo runtime con ese id. Lo mismo si la sesión está abierta ahora en otra terminal. Para una copia independiente, `--fork`.

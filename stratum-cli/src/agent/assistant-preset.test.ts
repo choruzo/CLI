@@ -1,4 +1,5 @@
-import { describe, it, expect, vi } from 'vitest';
+import { createSessionEnv } from '../runtime/session-env.js';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { StratumAgent } from './core.js';
 import { ProfileLoader } from './profiles.js';
 import { ASSISTANT_FILE_TOOLS, ASSISTANT_TOOLS } from './presets.js';
@@ -257,5 +258,87 @@ describe('preset assistant — workspace (D2)', () => {
     } finally {
       rmSync(base, { recursive: true, force: true });
     }
+  });
+});
+
+describe('memoria por preset', () => {
+  let dir: string;
+
+  afterEach(() => {
+    if (dir) rmSync(dir, { recursive: true, force: true });
+  });
+
+  function agentWith(preset: 'coding' | 'assistant'): string {
+    dir = mkdtempSync(join(tmpdir(), 'stratum-preset-mem-'));
+    const globalFile = join(dir, 'global-STRATUM.md');
+    const projectFile = join(dir, 'project-STRATUM.md');
+    writeFileSync(globalFile, 'MEMORIA-GLOBAL-XYZ', 'utf-8');
+    writeFileSync(projectFile, 'MEMORIA-PROYECTO-XYZ', 'utf-8');
+    const cfg = StratumConfigSchema.parse({
+      ...config,
+      memory: { ...config.memory, globalFile, projectFile },
+    });
+    const registry = new ToolRegistry();
+    registerBuiltinTools(registry, cfg);
+    const agent = new StratumAgent(cfg, new ProviderRouter(cfg), registry, {
+      profileLoader: new ProfileLoader([]),
+      promptPreset: preset,
+    });
+    return agent.getMessages()[0]?.content ?? '';
+  }
+
+  it('el agente de código ve la memoria del proyecto y no la global', () => {
+    const prompt = agentWith('coding');
+    expect(prompt).toContain('MEMORIA-PROYECTO-XYZ');
+    expect(prompt).not.toContain('MEMORIA-GLOBAL-XYZ');
+  });
+
+  it('el asistente ve la memoria global y no la del proyecto', () => {
+    const prompt = agentWith('assistant');
+    expect(prompt).toContain('MEMORIA-GLOBAL-XYZ');
+    expect(prompt).not.toContain('MEMORIA-PROYECTO-XYZ');
+  });
+});
+
+describe('skills por preset', () => {
+  let cwd: string;
+
+  beforeEach(() => {
+    cwd = mkdtempSync(join(tmpdir(), 'stratum-preset-skills-'));
+  });
+
+  afterEach(() => {
+    rmSync(cwd, { recursive: true, force: true });
+  });
+
+  function agentFor(preset: 'coding' | 'assistant'): string {
+    const cfg = StratumConfigSchema.parse({
+      ...config,
+      memory: { ...config.memory, projectFile: join(cwd, 'STRATUM.md') },
+      skills: { enabled: true },
+    });
+    const registry = new ToolRegistry();
+    registerBuiltinTools(registry, cfg);
+    const agent = new StratumAgent(cfg, new ProviderRouter(cfg), registry, {
+      profileLoader: new ProfileLoader([]),
+      promptPreset: preset,
+      env: createSessionEnv({ cwd, env: process.env }),
+    });
+    return agent.getMessages()[0]?.content ?? '';
+  }
+
+  it('el asistente ve solo las skills de serie para assistant y no escribe skill-registry.md', () => {
+    const prompt = agentFor('assistant');
+    expect(prompt).toContain('# Skills');
+    expect(prompt).toContain('stratum-global-memory');
+    expect(prompt).toContain('stratum-skill-authoring');
+    expect(prompt).not.toContain('stratum-project-memory');
+    expect(existsSync(join(cwd, '.stratum', 'skill-registry.md'))).toBe(false);
+  });
+
+  it('el agente de código ve las de serie para coding y no las del asistente', () => {
+    const prompt = agentFor('coding');
+    expect(prompt).toContain('stratum-project-memory');
+    expect(prompt).not.toContain('stratum-global-memory');
   });
 });
