@@ -176,8 +176,8 @@ async fn usa_lo_de_m11_y_cierra_sesiones_pero_dot_no_puede() {
         let sent = fake
             .requests()
             .into_iter()
-            .filter(|r| r["method"] == "sessions.setModel")
-            .last()
+            .rev()
+            .find(|r| r["method"] == "sessions.setModel")
             .unwrap();
         assert_eq!(sent["params"]["model"], "otro");
         match provider {
