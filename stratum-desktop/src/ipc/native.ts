@@ -128,6 +128,8 @@ export interface NativeBridge {
   history(sessionId: string, before?: string, limit?: number): Promise<unknown>;
   context(sessionId: string): Promise<unknown>;
   memory(sessionId: string): Promise<unknown>;
+  /** `skills.list` del asistente (agente fijo en el lado nativo). */
+  listSkills(): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
   onEvent(handler: (event: DesktopEvent) => void): Promise<() => void>;
@@ -154,6 +156,7 @@ export const tauriBridge: NativeBridge = {
     invoke<unknown>('desktop_history', { sessionId, before: before ?? null, limit: limit ?? null }),
   context: (sessionId) => invoke<unknown>('desktop_context', { sessionId }),
   memory: (sessionId) => invoke<unknown>('desktop_memory', { sessionId }),
+  listSkills: () => invoke<unknown>('desktop_list_skills'),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
   onEvent: (handler) => listen<DesktopEvent>(DESKTOP_EVENT, (e) => handler(e.payload)),

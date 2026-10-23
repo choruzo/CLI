@@ -246,4 +246,18 @@ export class DecisionStore {
   all(): DecisionRecord[] {
     return this.load();
   }
+
+  /**
+   * Añade las decisiones cuyo `id` aún no está, conservando todo lo demás
+   * (migraciones). Lanza, como cualquier escritura, con un fichero de un
+   * Stratum más nuevo. Devuelve cuántas añadió.
+   */
+  importMissing(records: DecisionRecord[]): number {
+    const entries = this.entriesForWrite();
+    const ids = new Set(entries.filter(isObject).map((e) => e.id));
+    const fresh = records.filter((r) => !ids.has(r.id));
+    if (fresh.length === 0) return 0;
+    this.writeEntries([...entries, ...fresh]);
+    return fresh.length;
+  }
 }

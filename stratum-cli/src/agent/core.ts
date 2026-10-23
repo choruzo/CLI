@@ -35,7 +35,8 @@ import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { ChangeTracker } from './risk.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
 import { JobManager } from '../jobs/manager.js';
-import { SkillRegistry } from '../skills/registry.js';
+import { sessionSkills, type SkillRegistry } from '../skills/registry.js';
+import { READ_SKILL_TOOL } from '../tools/skills/read-skill.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
 import {
@@ -242,7 +243,12 @@ export class StratumAgent {
   readonly pause = new PauseController();
   /** Observadores de la actividad del agente (`observe`). */
   private readonly observers = new Set<AgentObserver>();
-  /** Índice de skills (Hito 12). Se descubre una vez y se hereda a los hijos. */
+  /**
+   * Skills de la sesión (Hito 12): se descubren una vez y los hijos heredan el
+   * mismo registro. Es además el conjunto cerrado que `read_skill` sirve.
+   */
+  private readonly skills: SkillRegistry | undefined;
+  /** Índice `# Skills` del system prompt, renderizado de `skills`. */
   private readonly skillsBlock: string;
   /**
    * Contabilidad de tokens de la sesión (Hito 13). El `ReactLoop` vive un turno,
@@ -296,8 +302,13 @@ export class StratumAgent {
     this.env = options?.env ?? processSessionEnv();
     this.conversation = options?.conversation?.conversation ?? null;
     const cwd = this.env.cwd;
-    this.memoryManager = new MemoryManager(config, cwd);
     this.preset = options?.promptPreset ?? 'coding';
+    // El agente de código solo ve el proyecto; el asistente, solo lo global.
+    this.memoryManager = new MemoryManager(
+      config,
+      cwd,
+      this.preset === 'assistant' ? 'global' : 'project',
+    );
     this.jobs =
       this.preset === 'coding' && config.tools.jobs.enabled ? new JobManager(config) : undefined;
     if (this.jobs) this.inbox.attachJobs(this.jobs);
@@ -321,18 +332,26 @@ export class StratumAgent {
     this.profiles =
       options?.profileLoader ?? new ProfileLoader([findWorktreeRoot(cwd).worktree, cwd]);
 
-    // Skills (Hito 12): mismos roots que los perfiles. El índice entra en el
-    // system prompt; el cuerpo de cada skill se lee bajo demanda con read_file.
-    // La tabla materializada en disco es auditable y sirve de caché: si el
-    // fingerprint no cambia, no se reescribe.
-    // El asistente no tiene skills: su índice presupone un proyecto, y
-    // materializarlo escribiría `skill-registry.md` en el cwd del sidecar.
-    if (config.skills.enabled && this.preset === 'coding') {
-      const registry = new SkillRegistry([findWorktreeRoot(cwd).worktree, cwd]);
-      this.skillsBlock = registry.promptBlock(cwd);
-      registry.writeRegistryFile(resolvePath(cwd, config.skills.registryFile));
+    // Skills (Hito 12): mismos roots que los perfiles, más las de serie. El
+    // índice entra en el system prompt; el cuerpo de cada skill se lee bajo
+    // demanda con `read_skill`. La tabla materializada en disco es auditable y
+    // sirve de caché: si el fingerprint no cambia, no se reescribe.
+    // El asistente solo ve las de serie que declaran `assistant`: no trabaja
+    // en un proyecto, y nunca materializa la tabla (escribiría en su carpeta).
+    if (config.skills.enabled) {
+      this.skills = sessionSkills(config, this.preset, cwd);
+      this.skillsBlock = this.skills.promptBlock();
+      if (this.preset === 'coding') {
+        this.skills.writeRegistryFile(resolvePath(cwd, config.skills.registryFile));
+      }
     } else {
+      this.skills = undefined;
       this.skillsBlock = '';
+    }
+    // Sin ninguna skill que servir, `read_skill` sobra: su schema solo gastaría
+    // contexto en cada petición.
+    if (!this.skills || this.skills.entries.length === 0) {
+      registry.disableForSession(READ_SKILL_TOOL);
     }
 
     if (options?.usage) {
@@ -982,13 +1001,14 @@ export class StratumAgent {
    * suyo, el primero que olvidase un campo borraría el bloque del perfil.
    */
   private promptEnv(): SystemPromptEnv {
-    // El asistente no delega ni tiene perfiles, skills o guías: nada de eso se
-    // calcula (las guías, además, se materializarían en el cwd).
+    // El asistente no delega ni tiene perfiles o guías: nada de eso se calcula
+    // (las guías, además, se materializarían en el cwd). Skills, solo las suyas.
     if (this.preset === 'assistant') {
       return {
         modelId: this.router.model,
         providerName: this.router.providerName,
         preset: 'assistant',
+        skills: this.skillsBlock,
         workspace: this.workspace,
         workspaceFilesExpiredAt: this.workspaceFilesExpiredAt,
       };
@@ -1036,8 +1056,8 @@ export class StratumAgent {
   }
 
   private buildSystemContent(): string {
-    // Modo Chat: solo el `STRATUM.md` global. El de proyecto se resolvería
-    // contra el cwd del sidecar, que no es ningún proyecto.
+    // Modo Chat: solo el `STRATUM.md` global (su `MemoryManager` tiene scope
+    // `global`). El agente de código, solo el del proyecto.
     const memory =
       this.preset === 'assistant'
         ? this.memoryManager.getProjectMemory().globalContent
@@ -1046,9 +1066,10 @@ export class StratumAgent {
   }
 
   /**
-   * Memoria global + de proyecto para el system prompt. En una sesión con
-   * conversación duradera (M11) cada capa va a su presupuesto; sin ella, como
-   * siempre, entera.
+   * Memoria para el system prompt del agente de código. Con scope `project` la
+   * capa global llega vacía: se conserva el presupuesto por capa (M11) para que
+   * una config con otro reparto no cambie de forma. Sin conversación duradera,
+   * entera.
    */
   private injectableMemory(): string {
     const { globalContent, projectContent } = this.memoryManager.getProjectMemory();
@@ -1084,7 +1105,7 @@ export class StratumAgent {
         todos: this.todos,
         changes: this.changes,
         tdd: this.tdd,
-        skillsBlock: this.skillsBlock,
+        skills: this.skills,
         fileState: this.fileState,
         workspace: this.workspace,
         env: this.env,
@@ -1373,7 +1394,7 @@ export class StratumAgent {
       config: this.config,
       signal,
       opts: this.withSessionOptions(opts),
-      skillsBlock: this.skillsBlock,
+      skills: this.skills,
       env: this.env,
     });
     try {

@@ -73,6 +73,7 @@ function rig() {
     history: vi.fn(async () => ({ messages: [msg(1, 'user', 'lo primero')], hasMore: false, total: 3 })),
     context: vi.fn(async () => ({})),
     memory: vi.fn(async () => ({})),
+    listSkills: vi.fn(async () => ({ skills: [] })),
     prefs: vi.fn(async () => {
       throw new Error('sin prefs en el test');
     }),

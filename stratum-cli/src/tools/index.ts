@@ -12,6 +12,7 @@ import { webSearchTool } from './web/search.js';
 import { webFetchTool } from './web/fetch.js';
 import { storeDecisionTool } from './memory/store-decision.js';
 import { recallDecisionsTool } from './memory/recall-decisions.js';
+import { readSkillTool } from './skills/read-skill.js';
 import { presentPlanTool } from './plan/present-plan.js';
 import { updatePlanTool } from './plan/update-plan.js';
 import { delegateTaskTool } from './agent/delegate.js';
@@ -38,6 +39,8 @@ export function registerBuiltinTools(registry: ToolRegistry, config: StratumConf
   registry.register(webFetchTool);
   registry.register(storeDecisionTool);
   registry.register(recallDecisionsTool);
+  // Skills: el cuerpo de una skill del registro de la sesión, por su nombre.
+  if (config.skills.enabled) registry.register(readSkillTool);
   // Hito 2.5 (F7) — tanda única de preguntas: control, interceptada por el loop.
   registry.register(questionTool);
   // Hito 11 — lista de tareas del turno: control, interceptada por el loop.

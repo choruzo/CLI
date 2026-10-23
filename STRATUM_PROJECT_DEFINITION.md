@@ -2656,7 +2656,7 @@ Solo cuenta como marca ya aplicada un `[redacted: <motivo>]` con motivo canónic
 | Tool | Efectos |
 |---|---|
 | `read_file`, `glob`, `grep`, `list_directory` | `local`, solo lectura |
-| `web_search`, `web_fetch`, `recall_decisions` | ningún target, solo lectura |
+| `web_search`, `web_fetch`, `recall_decisions`, `read_skill` | ningún target, solo lectura |
 | `write_file`, `edit_file` | `local`, muta |
 | `store_decision` | muta (memoria), sin target |
 | `exec` | su target; muta salvo que el comando sea read-only |
@@ -2708,7 +2708,7 @@ Un comando es read-only según `readOnlyCommandVerdict` (`tools/readonly-command
 
 #### Modo read-only
 
-`--read-only` (`chat`, `run`), `/readonly [on|off]`, `StratumAgentOptions.readOnly`. `RunOptions.readOnly` → `ToolContext.readOnly`, y se hereda a los subagentes. Toolset visible: `READ_ONLY_SESSION_TOOLS` (`read_file`, `glob`, `list_directory`, `grep`, `web_search`, `web_fetch`, `recall_decisions`, `exec`, `delegate_task`) más las de control. El system prompt gana `# Read-only mode`, que nombra lo que **sí** se puede hacer. Se persiste en la sesión (`SessionContext.readOnly`): `chat --resume` y `/sessions resume` nunca sacan de read-only. `/init` se rechaza en read-only.
+`--read-only` (`chat`, `run`), `/readonly [on|off]`, `StratumAgentOptions.readOnly`. `RunOptions.readOnly` → `ToolContext.readOnly`, y se hereda a los subagentes. Toolset visible: `READ_ONLY_SESSION_TOOLS` (`read_file`, `glob`, `list_directory`, `grep`, `web_search`, `web_fetch`, `recall_decisions`, `read_skill`, `exec`, `delegate_task`) más las de control. El system prompt gana `# Read-only mode`, que nombra lo que **sí** se puede hacer. Se persiste en la sesión (`SessionContext.readOnly`): `chat --resume` y `/sessions resume` nunca sacan de read-only. `/init` se rechaza en read-only.
 
 #### Perfil de sesión
 

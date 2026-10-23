@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { mkdirSync, writeFileSync, rmSync } from 'fs';
+import { mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { expandEnvVars, findConfigFile, loadConfig } from './loader.js';
@@ -191,5 +191,36 @@ describe('loadConfig', () => {
     const config = loadConfig(tmpDir);
     expect(config.provider?.providers['remote'].apiKey).toBe('my-api-key');
     delete process.env.TEST_STRATUM_KEY;
+  });
+});
+
+describe('loadConfig — memoria por proyecto', () => {
+  it('desde una subcarpeta, decisionsFile queda absoluto bajo <raíz>/.stratum/memory/', async () => {
+    const base = mkdtempSync(join(tmpdir(), 'stratum-loader-mem-'));
+    const fakeHome = join(base, 'fake-home');
+    const repo = join(base, 'repo');
+    const sub = join(repo, 'pkg', 'inner');
+    mkdirSync(join(fakeHome, '.stratum'), { recursive: true });
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    mkdirSync(sub, { recursive: true });
+
+    const prevHome = process.env.HOME;
+    const prevUserProfile = process.env.USERPROFILE;
+    process.env.HOME = fakeHome;
+    process.env.USERPROFILE = fakeHome;
+    try {
+      vi.resetModules();
+      const { loadConfig: isolatedLoadConfig } = await import('./loader.js');
+      const config = isolatedLoadConfig(sub);
+      expect(config.memory.decisionsFile).toBe(join(repo, '.stratum', 'memory', 'decisions.json'));
+      expect(config.memory.vectorDb).toBe(join(repo, '.stratum', 'memory', 'vectors.db'));
+    } finally {
+      if (prevHome === undefined) delete process.env.HOME;
+      else process.env.HOME = prevHome;
+      if (prevUserProfile === undefined) delete process.env.USERPROFILE;
+      else process.env.USERPROFILE = prevUserProfile;
+      vi.resetModules();
+      cleanupDir(base);
+    }
   });
 });

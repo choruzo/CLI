@@ -30,6 +30,17 @@ export interface ProtocolAgent {
   model?: string;
 }
 
+/**
+ * Una skill disponible para un agente (`skills.list`): la definición que ve el
+ * índice del prompt, sin ruta ni cuerpo — un cliente no lee ficheros.
+ */
+export interface ProtocolSkill {
+  name: string;
+  description: string;
+  scope: 'builtin' | 'user' | 'project';
+  presets: ('coding' | 'assistant')[];
+}
+
 export interface ProtocolModel {
   provider: string;
   id: string;

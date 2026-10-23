@@ -129,6 +129,15 @@ describe('políticas por llamada (Hito 17)', () => {
     expect(readOnlyVeto('mcp__x__y', {}, ctx)).not.toBeNull();
   });
 
+  it('read_skill es lector puro: no muta, sin targets y no se veta en read-only', () => {
+    expect(callEffects('read_skill', { name: 'x' })).toMatchObject({
+      known: true,
+      mutating: false,
+      targets: [],
+    });
+    expect(readOnlyVeto('read_skill', { name: 'x' }, { readOnly: true, config })).toBeNull();
+  });
+
   it('entorno read-only: veta cambios solo en sus targets', () => {
     const ctx = { config };
     expect(readOnlyVeto('exec', { command: 'rm x', target: 'ssh:audit-1' }, ctx)).not.toBeNull();

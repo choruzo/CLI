@@ -16,6 +16,7 @@ import type {
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionMemory,
+  ProtocolSkill,
 } from './index';
 
 export { classifyEvent, parseOverviewSnapshot, parseSessionSnapshot };
@@ -61,4 +62,9 @@ export function parseContextReport(raw: unknown): ProtocolContextReport | null {
 export function parseSessionMemory(raw: unknown): ProtocolSessionMemory | null {
   const parsed = RESULTS['sessions.memory'].safeParse(raw);
   return parsed.success ? parsed.data.memory : null;
+}
+
+export function parseSkills(raw: unknown): ProtocolSkill[] | null {
+  const parsed = RESULTS['skills.list'].safeParse(raw);
+  return parsed.success ? parsed.data.skills : null;
 }

@@ -12,6 +12,7 @@
  * el par sintético), así que lo hace cada llamante con el `Map` de resultados.
  */
 import type { StratumConfig } from '../config/schema.js';
+import type { SkillRegistry } from '../skills/registry.js';
 import type {
   AgentEvent,
   AgentProfile,
@@ -60,7 +61,7 @@ export interface DelegationContext {
   signal: AbortSignal;
   opts?: RunOptions;
   /** Índice `# Skills` del padre, heredado sin redescubrir (Hito 12). */
-  skillsBlock?: string;
+  skills?: SkillRegistry;
   /** Entorno de la sesión del padre: el hijo trabaja en el mismo `cwd`. */
   env?: SessionEnv;
 }
@@ -248,7 +249,7 @@ export async function* executeDelegations(
               ? () => opts.makeSubagentRouter!(job.profile)
               : undefined,
             onEvent: (ev) => push({ type: 'subagent_event', subagentId: job.subId, event: ev }),
-            skillsBlock: ctx.skillsBlock,
+            skills: ctx.skills,
             env: ctx.env,
             trace: opts?.trace?.child(job.subId),
           });

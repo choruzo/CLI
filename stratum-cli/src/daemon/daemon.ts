@@ -28,11 +28,17 @@ import { homedir } from 'os';
 import { dirname, isAbsolute, resolve } from 'path';
 import { ProfileLoader, profileMode } from '../agent/profiles.js';
 import { ASSISTANT_AGENT, assistantAgentInfo } from '../agent/presets.js';
+import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
 import type { StratumConfig } from '../config/schema.js';
 import { resolveSessionStartup, type SessionStartup } from '../host/session-startup.js';
-import { assistantCwdProblem, type AssistantData } from '../host/assistant.js';
+import {
+  assistantCwdProblem,
+  assistantDataDir,
+  buildAssistantConfig,
+  type AssistantData,
+} from '../host/assistant.js';
 import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
@@ -970,6 +976,34 @@ export class Stratumd {
           ],
         };
       },
+      'skills.list': (params) => {
+        const assistant = params.agent === ASSISTANT_AGENT;
+        if (params.cwd !== undefined && !isAbsolute(params.cwd)) {
+          throw invalid('cwd', 'cwd must be an absolute path');
+        }
+        // Las de código dependen del proyecto: sin `cwd` se listarían las del
+        // directorio del proceso del daemon, que no es el de nadie.
+        if (!assistant && params.cwd === undefined) {
+          throw invalid('cwd', 'cwd is required to list the skills of a coding agent');
+        }
+        const config = assistant ? this.opts.config : this.configFor(params.cwd);
+        if (!config.skills.enabled) return { skills: [] };
+        // El asistente no mira ningún directorio: su `cwd` no se usa.
+        const registry = sessionSkills(
+          config,
+          assistant ? 'assistant' : 'coding',
+          params.cwd ?? '',
+        );
+        // Sin ruta ni cuerpo: un cliente no lee ficheros del anfitrión.
+        return {
+          skills: registry.entries.map((e) => ({
+            name: e.name,
+            description: e.description,
+            scope: e.scope,
+            presets: e.presets,
+          })),
+        };
+      },
       'models.list': async (params) => {
         // De la config solo salen alias e ids: ni `baseUrl`, ni claves, ni cabeceras.
         const providers = this.opts.config.provider?.providers ?? {};
@@ -1190,7 +1224,7 @@ export class Stratumd {
       },
 
       'memory.status': async (params) => {
-        const memory = getDecisionMemory(this.configFor(params.cwd));
+        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd));
         const backend = await memory.vectors.backendName().catch(() => 'none');
         return {
           decisions: memory.list().length,
@@ -1200,7 +1234,7 @@ export class Stratumd {
         };
       },
       'memory.decisions': async (params) => {
-        const memory = getDecisionMemory(this.configFor(params.cwd));
+        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd));
         const limit = params.limit ?? 50;
         const records = params.query
           ? (await memory.search(params.query, limit)).map((r) => r.record)
@@ -1247,6 +1281,19 @@ export class Stratumd {
       },
     };
     return this.withOperationIds(conn, handlers);
+  }
+
+  /**
+   * La memoria de decisiones que miran `memory.*`: la del proyecto de `cwd`
+   * (la del agente de código) o, sin `cwd`, la del asistente, que es la única
+   * global. Nunca la que resultaría del directorio del proceso del daemon.
+   */
+  private memoryConfigFor(cwd: string | undefined): StratumConfig {
+    if (cwd) return this.configFor(cwd);
+    return buildAssistantConfig(
+      this.opts.config,
+      this.opts.assistantData?.dir ?? assistantDataDir(),
+    );
   }
 
   private configFor(cwd: string | undefined): StratumConfig {

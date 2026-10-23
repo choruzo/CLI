@@ -5,6 +5,7 @@ import { StratumConfigSchema, type StratumConfig } from './schema.js';
 import { assertSchemaVersion } from './schema-version.js';
 import { jsonErrorPosition, stripBom } from './json-text.js';
 import { expandEnvVars } from './env-vars.js';
+import { anchorMemoryPaths } from './paths.js';
 
 export const CONFIG_FILENAME = '.stratumrc.json';
 export const GLOBAL_CONFIG_PATH = join(homedir(), '.stratum', CONFIG_FILENAME);
@@ -233,7 +234,7 @@ export function loadConfig(startDir?: string): StratumConfig {
     layers.push({ path: projectConfigPath, raw: readConfigFile(projectConfigPath) });
   }
 
-  return buildConfig(layers, { warn: true });
+  return anchorMemoryPaths(buildConfig(layers, { warn: true }), searchDir);
 }
 
 /**

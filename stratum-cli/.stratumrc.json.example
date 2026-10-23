@@ -31,8 +31,8 @@
   "memory": {
     "projectFile": "./STRATUM.md",
     "globalFile": "~/.stratum/STRATUM.md",
-    "decisionsFile": "~/.stratum/memory/decisions.json",
-    "vectorDb": "~/.stratum/memory/vectors.db",
+    "decisionsFile": "./.stratum/memory/decisions.json",
+    "vectorDb": "./.stratum/memory/vectors.db",
     "embeddingModel": "Xenova/all-MiniLM-L6-v2",
     "embeddingDimension": 384,
     "embeddingEndpoint": {
@@ -167,7 +167,8 @@
   },
   "skills": {
     "enabled": true,
-    "registryFile": "./.stratum/skill-registry.md"
+    "registryFile": "./.stratum/skill-registry.md",
+    "builtin": true
   },
   "trace": {
     "enabled": true,

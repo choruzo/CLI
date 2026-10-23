@@ -35,6 +35,7 @@ export const ASSISTANT_TOOLS: readonly string[] = [
   'todo',
   'store_decision',
   'recall_decisions',
+  'read_skill',
 ];
 
 /**

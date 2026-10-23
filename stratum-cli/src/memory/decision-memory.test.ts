@@ -1,9 +1,9 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, existsSync, writeFileSync } from 'fs';
+import { mkdirSync, mkdtempSync, rmSync, existsSync, readFileSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import { StratumConfigSchema } from '../config/schema.js';
-import { DecisionMemory, type DecisionMemoryEvent } from './decision-memory.js';
+import { DecisionMemory, ignoreDerivedIndex, type DecisionMemoryEvent } from './decision-memory.js';
 import type { EmbedFn } from './embeddings.js';
 import type { DecisionInput } from './decisions.js';
 
@@ -206,5 +206,74 @@ describe('DecisionMemory', () => {
     expect(deduped).toBe(true);
     expect(duplicateOf).toBe(existing.id);
     expect(mem.list()).toHaveLength(1);
+  });
+});
+
+describe('ignoreDerivedIndex', () => {
+  let base: string;
+
+  beforeEach(() => {
+    base = mkdtempSync(join(tmpdir(), 'stratum-ign-'));
+  });
+  afterEach(() => {
+    rmSync(base, { recursive: true, force: true });
+  });
+
+  function memoryDir(repo: string, git: boolean): string {
+    if (git) mkdirSync(join(repo, '.git'), { recursive: true });
+    const dir = join(repo, '.stratum', 'memory');
+    mkdirSync(dir, { recursive: true });
+    return dir;
+  }
+
+  it('escribe el .gitignore en <repo>/.stratum/memory/', () => {
+    const dir = memoryDir(join(base, 'repo'), true);
+    ignoreDerivedIndex(join(dir, 'vectors.db'));
+    const text = readFileSync(join(dir, '.gitignore'), 'utf-8');
+    expect(text).toContain('vectors.db*');
+    expect(text).toContain('*.fallback.json');
+  });
+
+  it('no lo escribe fuera de un repo git', () => {
+    const dir = memoryDir(join(base, 'plain'), false);
+    ignoreDerivedIndex(join(dir, 'vectors.db'));
+    expect(existsSync(join(dir, '.gitignore'))).toBe(false);
+  });
+
+  it('no lo escribe si el directorio no es .stratum/memory', () => {
+    const repo = join(base, 'repo');
+    mkdirSync(join(repo, '.git'), { recursive: true });
+    const other = join(repo, 'custom');
+    mkdirSync(other, { recursive: true });
+    ignoreDerivedIndex(join(other, 'vectors.db'));
+    expect(existsSync(join(other, '.gitignore'))).toBe(false);
+    const wrongParent = join(repo, 'data', 'memory');
+    mkdirSync(wrongParent, { recursive: true });
+    ignoreDerivedIndex(join(wrongParent, 'vectors.db'));
+    expect(existsSync(join(wrongParent, '.gitignore'))).toBe(false);
+  });
+
+  it('no pisa un .gitignore existente', () => {
+    const dir = memoryDir(join(base, 'repo'), true);
+    writeFileSync(join(dir, '.gitignore'), 'mio\n', 'utf-8');
+    ignoreDerivedIndex(join(dir, 'vectors.db'));
+    expect(readFileSync(join(dir, '.gitignore'), 'utf-8')).toBe('mio\n');
+  });
+
+  it('DecisionMemory lo deja al indexar (save)', async () => {
+    const dir = memoryDir(join(base, 'repo'), true);
+    const config = StratumConfigSchema.parse({
+      memory: {
+        decisionsFile: join(dir, 'decisions.json'),
+        vectorDb: join(dir, 'vectors.db'),
+        embeddingDimension: VOCAB.length,
+      },
+    });
+    const mem = new DecisionMemory(config, {
+      embedding: { embedFn: fakeEmbed },
+      forceFallbackVectors: true,
+    });
+    await mem.save(sqliteDecision);
+    expect(existsSync(join(dir, '.gitignore'))).toBe(true);
   });
 });

@@ -55,23 +55,34 @@ describe('loadProjectMemory', () => {
     expect(mem.projectContent).toBe('# Título');
   });
 
-  it('carga el STRATUM.md global desde la ruta configurada', () => {
+  it("con scope 'global' carga el STRATUM.md global desde la ruta configurada", () => {
     const globalPath = join(tmpDir, 'global-STRATUM.md');
     writeFileSync(globalPath, '# Global\n\nConvenciones globales.', 'utf-8');
     const config = StratumConfigSchema.parse({ memory: { globalFile: globalPath } });
-    const mem = loadProjectMemory(config, process.cwd());
+    const mem = loadProjectMemory(config, process.cwd(), 'global');
     expect(mem.globalContent).toContain('Convenciones globales');
     expect(mem.globalPath).toBe(globalPath);
   });
 
-  it('carga global y proyecto a la vez cuando ambos existen', () => {
+  it("con scope 'project' (por defecto) el global queda vacío aunque exista", () => {
+    const globalPath = join(tmpDir, 'global-STRATUM.md');
+    writeFileSync(globalPath, '# Global', 'utf-8');
+    const config = StratumConfigSchema.parse({ memory: { globalFile: globalPath } });
+    expect(loadProjectMemory(config, process.cwd()).globalContent).toBe('');
+    expect(loadProjectMemory(config, process.cwd(), 'project').globalContent).toBe('');
+  });
+
+  it('ninguna combinación carga global y proyecto a la vez', () => {
     writeFileSync(join(tmpDir, 'STRATUM.md'), '# Proyecto', 'utf-8');
     const globalPath = join(tmpDir, 'global-STRATUM.md');
     writeFileSync(globalPath, '# Global', 'utf-8');
     const config = StratumConfigSchema.parse({ memory: { globalFile: globalPath } });
-    const mem = loadProjectMemory(config, process.cwd());
-    expect(mem.projectContent).toBe('# Proyecto');
-    expect(mem.globalContent).toBe('# Global');
+    const project = loadProjectMemory(config, process.cwd(), 'project');
+    expect(project.projectContent).toBe('# Proyecto');
+    expect(project.globalContent).toBe('');
+    const global = loadProjectMemory(config, process.cwd(), 'global');
+    expect(global.projectContent).toBe('');
+    expect(global.globalContent).toBe('# Global');
   });
 });
 
@@ -90,17 +101,19 @@ describe('MemoryManager.getInjectableMemory', () => {
     if (existsSync(tmpDir)) rmSync(tmpDir, { recursive: true, force: true });
   });
 
-  it('inyecta global primero y proyecto al final (mayor prioridad), separados por ---', () => {
+  it("scope 'project' inyecta solo el proyecto; 'global' solo el global", () => {
     writeFileSync(join(tmpDir, 'STRATUM.md'), '# Proyecto', 'utf-8');
     const globalPath = join(tmpDir, 'global-STRATUM.md');
     writeFileSync(globalPath, '# Global', 'utf-8');
     const config = StratumConfigSchema.parse({ memory: { globalFile: globalPath } });
 
-    const manager = new MemoryManager(config, process.cwd());
-    const injectable = manager.getInjectableMemory();
+    const project = new MemoryManager(config, process.cwd());
+    expect(project.getInjectableMemory()).toBe('# Proyecto');
+    expect(project.hasMemory()).toBe(true);
 
-    expect(injectable).toBe('# Global\n\n---\n\n# Proyecto');
-    expect(manager.hasMemory()).toBe(true);
+    const global = new MemoryManager(config, process.cwd(), 'global');
+    expect(global.getInjectableMemory()).toBe('# Global');
+    expect(global.hasMemory()).toBe(true);
   });
 
   it('devuelve solo una capa cuando la otra no existe', () => {

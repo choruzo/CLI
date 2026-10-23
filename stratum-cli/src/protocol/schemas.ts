@@ -47,6 +47,7 @@ import type {
 } from './messages.js';
 import type {
   ProtocolAgent,
+  ProtocolSkill,
   ProtocolApproval,
   ProtocolDecision,
   ProtocolJob,
@@ -158,6 +159,13 @@ export const agentSchema: z.ZodType<ProtocolAgent> = z.object({
   allowedTools: z.array(z.string()).nullable(),
   provider: z.string().optional(),
   model: z.string().optional(),
+});
+
+export const skillSchema: z.ZodType<ProtocolSkill> = z.object({
+  name: z.string(),
+  description: z.string(),
+  scope: z.enum(['builtin', 'user', 'project']),
+  presets: z.array(z.enum(['coding', 'assistant'])),
 });
 
 export const modelSchema: z.ZodType<ProtocolModel> = z.object({
@@ -764,6 +772,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'core.shutdown': z.object({ force: z.boolean().optional(), operationId }).strict(),
 
   'agents.list': z.object({ cwd: cwd.optional() }).strict(),
+  'skills.list': z.object({ cwd: cwd.optional(), agent: name.optional() }).strict(),
   'models.list': z.object({ provider: name.optional() }).strict(),
 
   'sessions.list': z.object({ live: z.boolean().optional(), limit: limit.optional() }).strict(),
@@ -946,6 +955,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'core.shutdown': emptyResult,
 
   'agents.list': z.object({ agents: z.array(agentSchema) }),
+  'skills.list': z.object({ skills: z.array(skillSchema) }),
   'models.list': z.object({ models: z.array(modelSchema), error: z.string().optional() }),
 
   'sessions.list': z.object({ sessions: z.array(sessionSchema) }),

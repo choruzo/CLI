@@ -1,27 +1,38 @@
-import { useCallback, useEffect, useState } from 'react';
-import { readContext } from '../../client/actions';
-import type { NativeBridge } from '../../ipc/native';
-import { toCommandError } from '../../ipc/native';
-import type { ProtocolContextReport, ProtocolSessionMemory } from '../../protocol';
-import { describeFailure } from '../../client/actions';
-import { ICON, StrokeIcon } from '../chat/icons';
-import { formatTokens } from './StatusBar';
+import { useCallback, useEffect, useState } from "react";
+import { readContext } from "../../client/actions";
+import type { NativeBridge } from "../../ipc/native";
+import { toCommandError } from "../../ipc/native";
+import type {
+  ProtocolContextReport,
+  ProtocolSessionMemory,
+  ProtocolSkill,
+} from "../../protocol";
+import { parseSkills } from "../../protocol/results";
+import { describeFailure } from "../../client/actions";
+import { ICON, StrokeIcon } from "../chat/icons";
+import { formatTokens } from "./StatusBar";
 
 const KIND_LABEL: Record<string, string> = {
-  fact: 'Hecho',
-  decision: 'Decisión',
-  constraint: 'Restricción',
-  preference: 'Preferencia',
-  task: 'Tarea',
-  result: 'Resultado',
-  entity: 'Entidad',
+  fact: "Hecho",
+  decision: "Decisión",
+  constraint: "Restricción",
+  preference: "Preferencia",
+  task: "Tarea",
+  result: "Resultado",
+  entity: "Entidad",
 };
 
 /**
  * Barra apilada del contexto activo: cada capa en proporción a la entrada
  * utilizable. Solo pinta las cifras del informe; el texto va en la leyenda.
  */
-function ContextBar({ parts, total }: { parts: { key: string; value: number }[]; total: number }) {
+function ContextBar({
+  parts,
+  total,
+}: {
+  parts: { key: string; value: number }[];
+  total: number;
+}) {
   return (
     <div className="context-bar" aria-hidden="true">
       {total > 0 &&
@@ -57,6 +68,9 @@ export function SessionContextPanel({
 }) {
   const [report, setReport] = useState<ProtocolContextReport | null>(null);
   const [memory, setMemory] = useState<ProtocolSessionMemory | null>(null);
+  // Las skills del asistente no dependen de la sesión: `null` = aún sin cargar.
+  const [skills, setSkills] = useState<ProtocolSkill[] | null>(null);
+  const [skillsError, setSkillsError] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
 
@@ -72,10 +86,32 @@ export function SessionContextPanel({
         setMemory(r.memory);
       })
       .catch((err) => {
-        if (current) setError(describeFailure('No se pudo leer el contexto', toCommandError(err)));
+        if (current)
+          setError(
+            describeFailure("No se pudo leer el contexto", toCommandError(err)),
+          );
       })
       .finally(() => {
         if (current) setLoading(false);
+      });
+    native
+      .listSkills()
+      .then((raw) => {
+        if (!current) return;
+        const list = parseSkills(raw);
+        setSkills(list);
+        setSkillsError(
+          list ? null : "La lista de skills que llegó no se entiende.",
+        );
+      })
+      .catch((err) => {
+        if (current)
+          setSkillsError(
+            describeFailure(
+              "No se pudieron leer las skills",
+              toCommandError(err),
+            ),
+          );
       });
     // Una respuesta que llega tras cambiar de sesión no se pinta.
     return () => {
@@ -91,7 +127,10 @@ export function SessionContextPanel({
 
   const ctx = report?.context ?? null;
   const conv = report?.conversation ?? null;
-  const active = memory?.items.filter((i) => i.status === 'active' || i.status === 'conflict') ?? [];
+  const active =
+    memory?.items.filter(
+      (i) => i.status === "active" || i.status === "conflict",
+    ) ?? [];
 
   return (
     <div className="side-panel">
@@ -117,25 +156,30 @@ export function SessionContextPanel({
         )}
         {sessionId && report && !ctx && (
           <p className="side-panel__empty">
-            La sesión está guardada y aún no se ha montado: el contexto se ve tras su primer turno.
+            La sesión está guardada y aún no se ha montado: el contexto se ve
+            tras su primer turno.
           </p>
         )}
         {ctx && (
           <section className="conv-group" aria-label="Contexto activo">
             <h3 className="conv-group__title">
-              Contexto activo {ctx.estimated ? '(estimado)' : ''}
+              Contexto activo {ctx.estimated ? "(estimado)" : ""}
             </h3>
             <div className="context-usage">
               <div className="context-usage__total">
-                <span className="context-usage__value">{formatTokens(ctx.input)}</span>
-                <span className="context-usage__limit">de {formatTokens(ctx.usableInput)} de entrada</span>
+                <span className="context-usage__value">
+                  {formatTokens(ctx.input)}
+                </span>
+                <span className="context-usage__limit">
+                  de {formatTokens(ctx.usableInput)} de entrada
+                </span>
               </div>
               <ContextBar
                 parts={[
-                  { key: 'system', value: ctx.system },
-                  { key: 'tools', value: ctx.tools },
-                  { key: 'memory', value: ctx.sessionMemory },
-                  { key: 'recent', value: ctx.recent },
+                  { key: "system", value: ctx.system },
+                  { key: "tools", value: ctx.tools },
+                  { key: "memory", value: ctx.sessionMemory },
+                  { key: "recent", value: ctx.recent },
                 ]}
                 total={ctx.usableInput}
               />
@@ -165,8 +209,8 @@ export function SessionContextPanel({
               <div className="stat-tile">
                 <span className="stat-tile__value">{conv.compactions}</span>
                 <span className="stat-tile__label">
-                  {conv.compactions === 1 ? 'compactación' : 'compactaciones'}
-                  {conv.compacting ? ' · compactando…' : ''}
+                  {conv.compactions === 1 ? "compactación" : "compactaciones"}
+                  {conv.compacting ? " · compactando…" : ""}
                 </span>
               </div>
             </div>
@@ -181,17 +225,43 @@ export function SessionContextPanel({
           <section className="conv-group" aria-label="Memoria de sesión">
             <h3 className="conv-group__title">Memoria de sesión</h3>
             <p className="side-panel__empty">
-              Lo que la sesión resumió de su conversación antigua. Es contexto, no autoridad.
+              Lo que la sesión resumió de su conversación antigua. Es contexto,
+              no autoridad.
             </p>
-            {memory.summary && <p className="memory-summary">{memory.summary.text}</p>}
+            {memory.summary && (
+              <p className="memory-summary">{memory.summary.text}</p>
+            )}
             <ul className="memory-items">
               {active.map((item) => (
                 <li key={item.id} data-status={item.status}>
-                  <strong>{KIND_LABEL[item.kind] ?? item.kind}</strong> · {item.text}
-                  {item.status === 'conflict' && ' (en conflicto)'}
+                  <strong>{KIND_LABEL[item.kind] ?? item.kind}</strong> ·{" "}
+                  {item.text}
+                  {item.status === "conflict" && " (en conflicto)"}
                 </li>
               ))}
             </ul>
+          </section>
+        )}
+        {(skills || skillsError) && (
+          <section className="conv-group" aria-label="Skills">
+            <h3 className="conv-group__title">Skills</h3>
+            {skillsError && (
+              <p className="notice" data-tone="warning" role="alert">
+                {skillsError}
+              </p>
+            )}
+            {skills && skills.length === 0 && (
+              <p className="side-panel__empty">Sin skills disponibles.</p>
+            )}
+            {skills && skills.length > 0 && (
+              <ul className="memory-items">
+                {skills.map((skill) => (
+                  <li key={`${skill.scope}:${skill.name}`}>
+                    <strong>{skill.name}</strong> · {skill.description}
+                  </li>
+                ))}
+              </ul>
+            )}
           </section>
         )}
       </div>

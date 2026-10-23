@@ -7,6 +7,7 @@
  */
 import { isAbsolute, posix, relative, resolve } from 'path';
 import type { StratumConfig } from '../config/schema.js';
+import type { SkillRegistry } from '../skills/registry.js';
 import type { ToolRegistry } from '../tools/registry.js';
 import type {
   AgentEvent,
@@ -70,10 +71,10 @@ export interface RunSubagentOptions {
    */
   onEvent?: (event: AgentEvent) => void;
   /**
-   * Bloque `# Skills` ya renderizado por el padre (Hito 12). El hijo no
-   * redescubre skills: el índice se resuelve una vez por sesión y se hereda.
+   * Skills de la sesión del padre (Hito 12). El hijo no redescubre: el índice
+   * se resuelve una vez por sesión y se hereda, y `read_skill` sirve el mismo.
    */
-  skillsBlock?: string;
+  skills?: SkillRegistry;
   /** Hito 17 — modo read-only del padre: el hijo nunca puede escribir por él. */
   readOnly?: boolean;
   /**
@@ -211,7 +212,7 @@ async function runSubagentWithin(
         modelId: router.model,
         providerName: router.providerName,
         isSubagent: true,
-        skills: opts.skillsBlock,
+        skills: opts.skills?.promptBlock(),
         readOnly: opts.readOnly,
         cwd: env.cwd,
         guides: prepareGuideIndex(
@@ -237,6 +238,7 @@ async function runSubagentWithin(
       // Propio, no el del padre: lo que escribe el hijo no cuenta como leído
       // por el padre, que tendrá que releerlo antes de sobrescribirlo.
       fileState: new FileStateTracker(),
+      skills: opts.skills,
       env,
     },
   );

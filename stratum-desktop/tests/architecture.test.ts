@@ -136,6 +136,7 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_focus_session',
       'desktop_history',
       'desktop_list_models',
+      'desktop_list_skills',
       'desktop_memory',
       'desktop_new_chat',
       'desktop_open_config',

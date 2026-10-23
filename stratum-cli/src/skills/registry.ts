@@ -27,8 +27,11 @@ import {
   writeFileSync,
 } from 'fs';
 import { homedir } from 'os';
-import { dirname, join, relative, resolve, sep } from 'path';
+import { dirname, join, resolve } from 'path';
+import { fileURLToPath } from 'url';
 import { splitFrontmatter } from '../agent/frontmatter.js';
+import { findWorktreeRoot } from '../config/paths.js';
+import type { StratumConfig } from '../config/schema.js';
 import { getLogger } from '../logging/index.js';
 
 const log = getLogger('skills');
@@ -40,7 +43,12 @@ export const SKILL_REGISTRY_SCHEMA = 1;
 const REGISTRY_HEADER = '<!-- Generado por Stratum. No editar a mano. -->';
 const FINGERPRINT_RE = /<!--\s*stratum-skill-registry\s+v(\d+)\s+fingerprint:\s*([0-9a-f]+)\s*-->/;
 
-export type SkillScope = 'project' | 'user';
+/** `builtin`: las que trae Stratum en su paquete (`skills/`), las de menor precedencia. */
+export type SkillScope = 'builtin' | 'project' | 'user';
+
+/** Agentes para los que una skill vale (frontmatter `presets`). */
+export type SkillPreset = 'coding' | 'assistant';
+const SKILL_PRESETS: readonly SkillPreset[] = ['coding', 'assistant'];
 
 export interface SkillEntry {
   /** Nombre canónico (frontmatter `name`, o el del directorio/fichero). */
@@ -52,6 +60,8 @@ export interface SkillEntry {
   scope: SkillScope;
   /** Etiqueta del directorio de origen, p.ej. `.stratum/skills`. */
   source: string;
+  /** Frontmatter `presets`. Sin declarar: `['coding']`, lo que era toda skill antes. */
+  presets: SkillPreset[];
 }
 
 interface SkillDir {
@@ -61,12 +71,56 @@ interface SkillDir {
 }
 
 /**
- * Directorios a escanear, de MENOR a MAYOR precedencia: el último que declara
- * un nombre gana. Proyecto sobre usuario, y `.stratum` sobre `.claude` dentro
- * de cada ámbito (lo nuestro manda sobre la cortesía).
+ * Skills incluidas en el paquete (`skills/`). El módulo puede estar en `dist/`
+ * (bundle) o en `src/skills/` (tsx, tests): se sube hasta dar con la carpeta,
+ * como `bundledScenariosDir`.
  */
-export function skillDirs(projectRoots: string[], home: string = homedir()): SkillDir[] {
+export function bundledSkillsDir(): string | null {
+  let dir = dirname(fileURLToPath(import.meta.url));
+  for (let i = 0; i < 4; i++) {
+    const candidate = join(dir, 'skills');
+    if (existsSync(join(candidate, BUNDLED_MARKER))) return candidate;
+    dir = dirname(dir);
+  }
+  return null;
+}
+
+/**
+ * Fichero que identifica la carpeta de serie: `src/skills/` (este módulo) se
+ * llama igual, y sin la marca la búsqueda se quedaría en ella.
+ */
+const BUNDLED_MARKER = '.stratum-builtin-skills';
+
+/**
+ * Qué escanea una sesión. Por defecto, lo de siempre (usuario y proyecto) más
+ * las de serie. El asistente solo ve las de serie: no trabaja en un proyecto, y
+ * los directorios del usuario son de su agente de código.
+ */
+export interface SkillRegistryOptions {
+  /** Fija el home en vez de leer el del sistema (tests). */
+  home?: string;
+  /** Solo entran las skills que declaran este preset. Default `coding`. */
+  preset?: SkillPreset;
+  /** `skills.builtin`: `true` todas las de serie, `false` ninguna, lista = esas. Default `true`. */
+  builtin?: boolean | string[];
+  /** Carpeta de serie (tests). `null` = ninguna. Default `bundledSkillsDir()`. */
+  builtinDir?: string | null;
+  /** `false` → no se escanean usuario ni proyecto (el asistente). Default `true`. */
+  userAndProject?: boolean;
+}
+
+/**
+ * Directorios a escanear, de MENOR a MAYOR precedencia: el último que declara
+ * un nombre gana. Proyecto sobre usuario sobre las de serie, y `.stratum` sobre
+ * `.claude` dentro de cada ámbito (lo nuestro manda sobre la cortesía).
+ */
+export function skillDirs(
+  projectRoots: string[],
+  home: string = homedir(),
+  builtinDir: string | null = null,
+): SkillDir[] {
   const dirs: SkillDir[] = [
+    ...(builtinDir ? [{ dir: builtinDir, scope: 'builtin' as const, source: 'stratum' }] : []),
     { dir: join(home, '.claude', 'skills'), scope: 'user', source: '.claude/skills' },
     { dir: join(home, '.stratum', 'skills'), scope: 'user', source: '.stratum/skills' },
   ];
@@ -92,11 +146,21 @@ export class SkillRegistry {
   /** sha1 del contenido + mtime de cada skill: si no cambia, no se reescribe el índice. */
   private readonly fingerprintValue: string;
 
-  /** `opts.home` existe para los tests: fija el home en vez de leer el del sistema. */
-  constructor(projectRoots: string | string[], opts?: { home?: string }) {
+  constructor(projectRoots: string | string[], opts: SkillRegistryOptions = {}) {
     const roots = Array.isArray(projectRoots) ? projectRoots : [projectRoots];
+    const preset = opts.preset ?? 'coding';
+    const builtin = opts.builtin ?? true;
+    const builtinDir =
+      builtin === false
+        ? null
+        : opts.builtinDir === undefined
+          ? bundledSkillsDir()
+          : opts.builtinDir;
+    const dirs = skillDirs(roots, opts.home, builtinDir).filter(
+      (d) => d.scope === 'builtin' || opts.userAndProject !== false,
+    );
     const parts: string[] = [`v${SKILL_REGISTRY_SCHEMA}`];
-    for (const { dir, scope, source } of skillDirs(roots, opts?.home)) {
+    for (const { dir, scope, source } of dirs) {
       for (const file of listSkillFiles(dir)) {
         let raw: string;
         let mtimeMs = 0;
@@ -108,7 +172,10 @@ export class SkillRegistry {
           continue;
         }
         const entry = parseSkill(file, raw, scope, source);
-        if (!entry) continue;
+        if (!entry || !entry.presets.includes(preset)) continue;
+        if (scope === 'builtin' && Array.isArray(builtin) && !builtin.includes(entry.name)) {
+          continue;
+        }
         // Dedup por nombre: el directorio posterior (más específico) gana.
         this.byName.set(entry.name, entry);
         parts.push(`${entry.name} ${file} ${mtimeMs} ${sha1(raw)}`);
@@ -127,12 +194,12 @@ export class SkillRegistry {
   }
 
   resolve(name: string): SkillEntry | undefined {
-    return this.byName.get(name);
+    return this.byName.get(normalizeName(name));
   }
 
   /** Bloque `# Skills` del system prompt. Cadena vacía si no hay skills. */
-  promptBlock(cwd?: string): string {
-    return buildSkillsBlock(this.entries, cwd);
+  promptBlock(): string {
+    return buildSkillsBlock(this.entries);
   }
 
   /**
@@ -143,7 +210,9 @@ export class SkillRegistry {
    */
   writeRegistryFile(registryFile: string): string | null {
     const target = resolve(registryFile);
-    if (this.byName.size === 0) return null;
+    // Solo con skills del usuario o del proyecto: las de serie no justifican
+    // escribir un fichero en cada repo donde se abra Stratum.
+    if (!this.entries.some((e) => e.scope !== 'builtin')) return null;
     try {
       if (existsSync(target)) {
         const current = readFileSync(target, 'utf-8');
@@ -164,6 +233,23 @@ export class SkillRegistry {
       return null;
     }
   }
+}
+
+/**
+ * El registro de skills de una sesión, en un solo punto (`StratumAgent`,
+ * `skills.list` del daemon y `stratum skills list` lo construyen igual): el
+ * agente de código ve las de serie, las del usuario y las del proyecto de
+ * `cwd`; el asistente, solo las de serie que declaran `assistant`.
+ */
+export function sessionSkills(
+  config: StratumConfig,
+  preset: SkillPreset,
+  cwd: string,
+): SkillRegistry {
+  const builtin = config.skills.builtin;
+  return preset === 'assistant'
+    ? new SkillRegistry([], { preset, builtin, userAndProject: false })
+    : new SkillRegistry([findWorktreeRoot(cwd).worktree, cwd], { preset, builtin });
 }
 
 /** Lista los ficheros de skill de un directorio: `<dir>/<n>/SKILL.md` y `<dir>/<n>.md`. */
@@ -211,7 +297,26 @@ export function parseSkill(
   const fmDesc = typeof frontmatter.description === 'string' ? frontmatter.description.trim() : '';
   const name = normalizeName(fmName || fallbackName(path));
   if (!name) return null;
-  return { name, description: collapse(fmDesc), path, scope, source };
+  return {
+    name,
+    description: collapse(fmDesc),
+    path,
+    scope,
+    source,
+    presets: parsePresets(frontmatter.presets),
+  };
+}
+
+/**
+ * Frontmatter `presets` (lista o un solo valor). Sin declarar, o sin ningún
+ * valor conocido, `['coding']`: lo que era toda skill antes de existir.
+ */
+function parsePresets(value: unknown): SkillPreset[] {
+  const raw = Array.isArray(value) ? value : typeof value === 'string' ? [value] : [];
+  const out = SKILL_PRESETS.filter((p) =>
+    raw.some((v) => typeof v === 'string' && v.trim().toLowerCase() === p),
+  );
+  return out.length > 0 ? out : ['coding'];
 }
 
 function fallbackName(path: string): string {
@@ -239,35 +344,21 @@ function sha1(text: string): string {
 }
 
 /**
- * Ruta mostrada al modelo: relativa al cwd cuando cae dentro (más corta y
- * usable tal cual por `read_file`), absoluta cuando no.
- */
-export function displayPath(path: string, cwd?: string): string {
-  if (!cwd) return path;
-  const rel = relative(cwd, path);
-  if (!rel || rel.startsWith('..')) return path;
-  return rel.split(sep).join('/');
-}
-
-/**
  * Bloque `# Skills` del system prompt: solo el índice. El cuerpo NO se carga —
  * ese es el punto: el índice es barato y está siempre; el cuerpo se paga solo
  * cuando la tarea encaja con el disparador.
  */
-export function buildSkillsBlock(entries: SkillEntry[], cwd?: string): string {
+export function buildSkillsBlock(entries: SkillEntry[]): string {
   if (entries.length === 0) return '';
   const rows = entries.map(
-    (e) =>
-      `| ${cell(e.name)} | ${cell(e.description || '(no description declared)')} | ${cell(
-        displayPath(e.path, cwd),
-      )} |`,
+    (e) => `| ${cell(e.name)} | ${cell(e.description || '(no description declared)')} |`,
   );
   return `# Skills
 These are task instructions written for this environment. Only the index is loaded here; the bodies are not.
-Before starting work that matches one of the triggers below, read that file with read_file and follow it: it overrides your default approach for that task. If nothing matches, ignore this section and work normally. Never guess the content of a skill from its name.
+Before starting work that matches one of the triggers below, load that skill with the read_skill tool (by its name) and follow it: it overrides your default approach for that task. If nothing matches, ignore this section and work normally. Never guess the content of a skill from its name.
 
-| Skill | Use it when | Path |
-|---|---|---|
+| Skill | Use it when |
+|---|---|
 ${rows.join('\n')}`;
 }
 

@@ -22,7 +22,9 @@ import {
   assistantWorkspace,
   buildAssistantConfig,
   buildAssistantRegistry,
+  importLegacyGlobalDecisions,
   legacyAssistantMemoryDir,
+  legacyGlobalDecisionsDir,
   migrateLegacyAssistantMemory,
   type AssistantData,
 } from './assistant.js';
@@ -186,6 +188,12 @@ export class SessionHost {
           ? legacyAssistantMemoryDir()
           : opts.assistantData.legacyMemoryDir;
       if (legacy) migrateLegacyAssistantMemory(dataDir, legacy);
+      // Con un `assistantData` propio (tests, fixtures) solo se importa si lo
+      // pide: la marca se escribe junto al original y no debe tocar el real.
+      const legacyGlobal = opts.assistantData
+        ? (opts.assistantData.legacyGlobalDecisionsDir ?? null)
+        : legacyGlobalDecisionsDir();
+      if (legacyGlobal) importLegacyGlobalDecisions(dataDir, legacyGlobal);
       config = buildAssistantConfig(config, dataDir);
       registry = buildAssistantRegistry();
     } else {

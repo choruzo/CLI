@@ -226,6 +226,19 @@ pub async fn desktop_memory(
     state.link.call(CallAction::Memory { session_id }).await
 }
 
+/// Las skills que tiene el asistente (`skills.list`), según el daemon. El
+/// agente es fijo: el webview no elige de quién se piden.
+#[tauri::command]
+pub async fn desktop_list_skills(state: State<'_, DesktopState>) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ListSkills {
+            agent: Some("assistant".into()),
+            cwd: None,
+        })
+        .await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrefsView {

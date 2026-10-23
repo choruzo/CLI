@@ -1,9 +1,38 @@
+import { existsSync } from 'fs';
+import { basename, dirname, join } from 'path';
 import type { StratumConfig } from '../config/schema.js';
-import { resolveMemoryPaths } from '../config/paths.js';
+import { findWorktreeRoot, resolveMemoryPaths } from '../config/paths.js';
+import { writeFileAtomic } from '../config/writer.js';
+import { getLogger } from '../logging/index.js';
 import { DecisionStore, type DecisionInput, type DecisionRecord } from './decisions.js';
 import { VectorStore } from './vectors.js';
 import { EmbeddingService, type EmbeddingServiceOptions } from './embeddings.js';
 import { Mutex } from '../agent/concurrency.js';
+
+const log = getLogger('memory');
+
+/** Lo derivado de la memoria de un proyecto: se reconstruye desde `decisions.json`. */
+const DERIVED_INDEX_IGNORE = ['vectors.db*', '*.fallback.json', ''].join('\n');
+
+/**
+ * El índice vectorial de un proyecto (`<repo>/.stratum/memory/`) es binario y
+ * derivado: no debe acabar en git. Se deja un `.gitignore` junto a él la
+ * primera vez, solo con la forma por defecto (`.stratum/memory` dentro de un
+ * repo) — una ruta elegida por el usuario no se toca — y nunca se pisa uno
+ * existente. `decisions.json` queda versionable. Un fallo solo se avisa.
+ */
+export function ignoreDerivedIndex(vectorDb: string): void {
+  const dir = dirname(vectorDb);
+  if (basename(dir) !== 'memory' || basename(dirname(dir)) !== '.stratum') return;
+  if (!findWorktreeRoot(dir).isGitRepo) return;
+  const file = join(dir, '.gitignore');
+  if (existsSync(file)) return;
+  try {
+    writeFileAtomic(file, DERIVED_INDEX_IGNORE);
+  } catch (err) {
+    log.warn('memory .gitignore write failed', { file, err });
+  }
+}
 
 export interface SaveResult {
   record: DecisionRecord;
@@ -85,10 +114,13 @@ export class DecisionMemory {
    * a todos los agentes que comparten el store.
    */
   private readonly writeLock = new Mutex();
+  private readonly vectorDbPath: string;
+  private indexIgnored = false;
   private readonly listeners = new Set<DecisionMemoryListener>();
 
   constructor(config: StratumConfig, opts?: DecisionMemoryOptions) {
     const paths = resolveMemoryPaths(config);
+    this.vectorDbPath = paths.vectorDb;
     this.store = new DecisionStore(paths.decisionsFile);
     this.vectors = new VectorStore({
       dbPath: paths.vectorDb,
@@ -213,6 +245,11 @@ export class DecisionMemory {
    * encontraba esas decisiones nunca. Solo se calculan los embeddings que faltan.
    */
   private async ensureIndexed(): Promise<void> {
+    // Todo lo que escribe el índice pasa por aquí antes (guardar y buscar).
+    if (!this.indexIgnored) {
+      this.indexIgnored = true;
+      ignoreDerivedIndex(this.vectorDbPath);
+    }
     const missing: DecisionRecord[] = [];
     for (const r of this.store.all()) {
       if (!(await this.vectors.has(r.embedding_ref))) missing.push(r);

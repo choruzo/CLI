@@ -1,23 +1,27 @@
 import type { StratumConfig } from '../config/schema.js';
 import { MemoryManager } from './manager.js';
+import type { MemoryScope } from './project.js';
 
 /**
  * Genera el texto de salida para el comando `stratum memory show` y `/memory show`.
  * Compartido entre la CLI y la UI de chat para garantizar salida idéntica.
  */
-export function renderMemoryShow(config: StratumConfig, cwd: string): string {
-  const mgr = new MemoryManager(config, cwd);
+export function renderMemoryShow(
+  config: StratumConfig,
+  cwd: string,
+  scope: MemoryScope = 'project',
+): string {
+  const mgr = new MemoryManager(config, cwd, scope);
   const { projectContent, globalContent, projectPath, globalPath } = mgr.getProjectMemory();
 
   if (!projectContent && !globalContent) {
     return [
       '  No se encontró ningún STRATUM.md activo.',
       '',
-      `  Rutas buscadas:`,
-      `    Proyecto : ${projectPath}`,
-      `    Global   : ${globalPath}`,
-      '',
-      '  Ejecuta `stratum init` para generar el archivo de memoria del proyecto.',
+      `  Ruta buscada: ${scope === 'global' ? globalPath : projectPath}`,
+      ...(scope === 'project'
+        ? ['', '  Ejecuta `stratum init` para generar el archivo de memoria del proyecto.']
+        : []),
     ].join('\n');
   }
 
