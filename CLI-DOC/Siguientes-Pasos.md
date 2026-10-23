@@ -239,8 +239,12 @@ en worktrees aparte, cada bloque pasado por un reviewer de opencode y con sus ha
 - `tool.blocked`: `tool_error.blocked` desde `vetoed()` (dispatcher) y `vetoOutcome()` (loop); `counters.blocked`.
 - `session.detached` **retirado** del contrato (lo cuenta la foto, §14.3). `broker` queda reservada y sin conceder.
 - Anotado en `docs/protocol.md` §11, §13.6 y §17.
-- **Pendiente:** fan-out de `EventHub` con frame único (antes, medirlo: cada notificación lleva su `subscriptionId`);
-  `sessions.revert` (decisión §6.3); la congelación en sí llega con el primer tag que publique `stratumd`.
+- Fan-out de `EventHub` ✅: medido con `scripts/bench/event-hub-fanout.ts` y optimizado (cada evento se serializa
+  una vez; la trama se monta concatenando, idéntica byte a byte). 50 clientes: de 1266 ms a 281 ms de CPU por 40 turnos.
+- `sessions.revert` ✅ con la decisión §6.3 tomada: exige **`approve`** (clave de aprobador). Solo sesiones del daemon,
+  en reposo; `dryRun`, `force`, `conflicts` sin tocar nada (`docs/protocol.md` §19.8).
+- **Pendiente:** que Dot/Desktop llamen a `sessions.revert` (en Dot, por la conexión de aprobador y su confirmación
+  nativa); la congelación en sí llega con el primer tag que publique `stratumd`.
 
 ### Eval-1 — Replay de sesión grabada *(M)*
 - Escenario = traza grabada + `workspace.expected/`. Corre sin modelo en CI y verifica el mundo, no la
@@ -260,8 +264,7 @@ Después, por orden: **plugins (R1 → PL1)**, **Hitos 18–19** y la **cola de 
 
 1. ~~¿UX-1/UX-2/UX-3 antes que plugins y que el Hito 18?~~ Decidido: sí, ya implementados.
 2. Semántica de `@`: perfiles frente a ficheros.
-3. ¿El undo se ofrece también en Dot/Desktop (`sessions.revert`)? Por ahora solo en la TUI. Si se abre, ¿lo
-   exigimos con la clave de aprobador? Revertir pisa ficheros sin pasar por las aprobaciones.
+3. ~~¿`sessions.revert` exige la clave de aprobador?~~ Decidido (2026-10-23): sí, capacidad `approve`.
 4. ~~Coste en $~~ Decidido en la implementación: tabla de precios propia en config (`pricing`), sin models.dev.
 5. §15.1.4 (Dot como modo compacto de Desktop), antes de rehacer el layout de Desktop con las 3 columnas.
 

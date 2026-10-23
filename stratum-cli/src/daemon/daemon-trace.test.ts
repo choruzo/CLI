@@ -154,6 +154,14 @@ describe('trace.subscribe contra el daemon', () => {
     const live = watch(client, session.id);
     await live.untilSnapshot();
     await ask(client, live, session.id, 'primero la traza');
+    // `run.completed` no garantiza que el recorder ya haya volcado la traza:
+    // el caso es suscribirse cuando lo escrito ya está en disco.
+    const traceFile = join(t.base, 'traces', `${session.id}.jsonl`);
+    await untilFile(() => {
+      if (!existsSync(traceFile)) return false;
+      const text = readFileSync(traceFile, 'utf8');
+      return text.includes('"t":"turn"') && text.includes('"kind":"model"');
+    });
 
     const sight = collectTrace(client, session.id);
     await untilTrace(

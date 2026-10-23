@@ -337,6 +337,8 @@ export async function startTestDaemon(
     dir,
     // El asistente guarda su memoria en la carpeta del test y no migra nada del usuario.
     assistantData: { dir: join(base, 'assistant'), legacyMemoryDir: null },
+    // Los snapshots de deshacer (en un proyecto git) tampoco van al `~` real.
+    snapshotsHome: join(base, 'home'),
     processTeardown: async () => {
       teardowns++;
     },

@@ -120,6 +120,44 @@ export interface SessionsOpenParams extends Mutation {
  */
 export type DetachStatus = 'detached' | 'already-daemon';
 
+/** Topes de `sessions.revert`: turnos de una vez y rutas por lista. */
+export const REVERT_LIMITS = { turns: 100, paths: 200 } as const;
+
+export interface SessionsRevertParams extends Mutation {
+  sessionId: string;
+  /** Cuántos de los últimos turnos con cambios se deshacen. Por defecto 1. */
+  turns?: number;
+  /** Solo calcular qué se haría: no toca nada. */
+  dryRun?: boolean;
+  /** Deshacer aunque haya rutas cambiadas después del último turno (se pisan). */
+  force?: boolean;
+}
+
+/**
+ * Qué haría (o hizo) deshacer esos turnos. Las listas son rutas relativas a la
+ * raíz del proyecto, recortadas a `REVERT_LIMITS.paths` (`truncated`).
+ */
+export interface ProtocolRevertPlan {
+  turns: number[];
+  /** Existían antes del turno más antiguo: se restauran. */
+  restore: string[];
+  /** No existían: se borran. */
+  remove: string[];
+  /** Cambiadas después del último turno: deshacer las pisaría. */
+  conflicts: string[];
+  /** Tocadas por esos turnos pero sin copia (demasiado grandes): no se deshacen. */
+  skipped: string[];
+  truncated: boolean;
+}
+
+/**
+ * Cómo quedó un `sessions.revert`. `planned`: era `dryRun`. `reverted`: hecho.
+ * `conflicts`: no se tocó nada (falta `force`). `nothing`: no hay turnos que
+ * deshacer (o la sesión no guarda copias). `failed`: falló a medias; `plan`
+ * dice lo que sí se llegó a deshacer.
+ */
+export type RevertStatus = 'planned' | 'reverted' | 'conflicts' | 'nothing' | 'failed';
+
 // --- runs -------------------------------------------------------------------
 
 export interface RunsStartParams extends Mutation {
@@ -292,6 +330,15 @@ export interface ProtocolMethods {
     Mutation & { sessionId: string },
     { status: DetachStatus; session: ProtocolSession }
   >;
+  /**
+   * Deshace los ficheros de los últimos turnos de una sesión del daemon (UX-1).
+   * Exige `approve`: pisa ficheros sin pasar por las aprobaciones del agente.
+   * `BUSY` con un turno en curso; `UNAVAILABLE` (`peer-hosted`) en una sesión par.
+   */
+  'sessions.revert': Spec<
+    SessionsRevertParams,
+    { status: RevertStatus; plan: ProtocolRevertPlan | null }
+  >;
 
   'runs.list': Spec<
     { sessionId?: string; active?: boolean; limit?: number },
@@ -456,6 +503,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'sessions.setAgent': write('control'),
   'sessions.setReadOnly': write('control'),
   'sessions.detach': write('control'),
+  // Pisa ficheros sin pasar por las aprobaciones: la autoridad es la de aprobar.
+  'sessions.revert': write('approve'),
 
   'runs.list': read('observe'),
   'runs.get': read('observe'),

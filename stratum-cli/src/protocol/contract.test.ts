@@ -47,7 +47,13 @@ describe('contrato del protocolo', () => {
 describe('roles y capacidades', () => {
   it('cancelar, pausar o redirigir no es aprobar', () => {
     const control: MethodName[] = ['runs.cancel', 'runs.pause', 'runs.resume', 'runs.steer'];
-    const approve: MethodName[] = ['approvals.resolve', 'questions.answer', 'plans.decide'];
+    const approve: MethodName[] = [
+      'approvals.resolve',
+      'questions.answer',
+      'plans.decide',
+      // Deshacer pisa ficheros sin pasar por las aprobaciones: misma autoridad.
+      'sessions.revert',
+    ];
     for (const m of control) expect(METHODS[m].capability).toBe('control');
     for (const m of approve) expect(METHODS[m].capability).toBe('approve');
 
@@ -92,6 +98,7 @@ describe('métodos', () => {
       'runs.cancel',
       'sessions.open',
       'sessions.detach',
+      'sessions.revert',
       'host.publish',
       'host.handoffBegin',
       'host.handoffCommit',

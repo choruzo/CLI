@@ -187,6 +187,7 @@ host ownership  !=  operator control  !=  approver authority
 | `sessions.list` · `sessions.get` | observe | | `get` devuelve una foto |
 | `sessions.open` | control | ✓ | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4). `resume`: id de una sesión guardada del daemon, que se monta y se devuelve con sus ajustes (§19.4); no admite `cwd`, `agent`, `provider`, `model`, `readOnly` ni `sessionProfile` (`INVALID_PARAMS`) |
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly` | control | ✓ | |
+| `sessions.revert` | **approve** | ✓ | Deshace los ficheros de los últimos turnos de una sesión del daemon: `{ sessionId, turns?, dryRun?, force? }` → `{ status, plan }` (§19.8). Exige la clave de aprobador |
 | `sessions.detach` | control | ✓ | Traspasa una sesión par al daemon, mismo id y contexto (§18). Devuelve `{ status: 'detached' \| 'already-daemon', session }`; `BUSY`/`NOT_TRANSFERABLE` con `data.reason` |
 | `runs.list` · `runs.get` | observe | | |
 | `runs.start` | control | ✓ | Un mensaje del usuario: un run nuevo de una sesión existente. `BUSY` si hay un turno en curso (también en pausa o esperando una decisión) |
@@ -831,7 +832,7 @@ resuelta cuando el anfitrión lo confirma —con la respuesta a la entrega, o co
 
 ### 15.2 Quién puede resolver
 
-| Quién | `approvals.resolve` / `questions.answer` / `plans.decide` |
+| Quién | `approvals.resolve` / `questions.answer` / `plans.decide` / `sessions.revert` |
 |---|---|
 | `observer` | `FORBIDDEN` (ve lo pendiente con `approvals.list`) |
 | `operator` | `FORBIDDEN` (puede cancelar el run; aprobar es otra capacidad) |
@@ -1227,6 +1228,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M12 | `ProtocolSession.origin?` (`ClientKind`); `sessions.open { agent: 'assistant' }` abre el agente embebido y `agents.list` lo ofrece el primero; `sessions.setAgent` hacia o desde `assistant` → `INVALID_PARAMS`; `ProtocolHandoffContext.agent` puede ser `assistant`. Funciones de cliente puras `followSession`, `applyOverviewEvent`, `boundedTranscript` y, en `schemas.ts`, `classifyEvent`/`parseSessionSnapshot`/`parseOverviewSnapshot` | Aditivo: `origin` es opcional y solo procedencia; el resto no cambia la forma de ningún mensaje |
 | Skills de serie | Método `skills.list` (`observe`) y DTO `ProtocolSkill`. `memory.status`/`memory.decisions` sin `cwd` miran la memoria global (la del asistente), no la del directorio del proceso del daemon; con `cwd`, la del proyecto (`<raíz del worktree>/.stratum/memory/`) | Método aditivo. Lo de `memory.*` cambia qué memoria se mira, no la forma: la de la CLI dejó de ser global |
 | Contrato-1 | Se **retira** el evento `session.detached` (y de `OVERVIEW_EVENT_TYPES`). `tool.blocked` se emite; `sessions.open { resume }` y `trace.subscribe`/`unsubscribe` se atienden (§13.6, §19.4). `broker` queda reservada y sin conceder | Sin publicar, y **ningún servidor llegó a emitir `session.detached`**: lo que contaba ya viaja como foto (§14.3), y emitirlo exigiría que el daemon numerase eventos propios. Lo demás era contrato declarado sin atender: atenderlo no cambia ninguna forma |
+| Contrato-1 | Método `sessions.revert` (**`approve`**) y DTO `ProtocolRevertPlan`, `REVERT_LIMITS` | Aditivo. Es `approve` y no `control` a propósito: pisa ficheros del proyecto sin pasar por las aprobaciones del agente, así que pide la misma autoridad que resolverlas (§15.2) |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1577,6 +1579,33 @@ procedencia, fallos, conversación larga, aislamiento, modelo distinto y credenc
 servidor HTTP local, egress, reconstrucción; reglas de arquitectura), `daemon/persistence.test.ts`
 (reinicio de punta a punta con compactación y pregunta sobre lo antiguo, cerrar frente a morir,
 sin carpeta, traspaso M10 → reinicio), `cli/resume-guard.test.ts` y `cli/attach-view.test.ts`.
+
+### 19.8 Deshacer turnos desde un cliente (`sessions.revert`)
+
+El deshacer por turno de la TUI (`/undo`, `/rewind`) por el protocolo, para Dot y Desktop. Usa el
+mismo almacén de snapshots y la misma lógica (`StratumAgent.planRevert` / `revertTurns`).
+
+- **Autoridad: `approve`.** Revertir pisa o borra ficheros del proyecto sin pasar por las
+  aprobaciones del agente, así que exige la misma autoridad que resolverlas: la clave de
+  aprobador (§15.2). `control` no basta (`FORBIDDEN`). En Dot pasaría por su conexión de
+  aprobador y su confirmación nativa, como cualquier resolución (todavía no lo llama).
+- **Parámetros**: `turns` (los últimos N turnos con cambios, 1 por defecto, hasta
+  `REVERT_LIMITS.turns`), `dryRun` (solo el plan) y `force` (pisar los conflictos).
+- **Resultado**: `{ status, plan }`. `planned` (era `dryRun`), `reverted`, `conflicts` (hay
+  rutas cambiadas después del último turno y falta `force`: **no se toca nada**), `nothing`
+  (no hay turnos con cambios, o la sesión no guarda copias: fuera de un repo git, o
+  desactivado) y `failed` (falló a medias; `plan` dice lo que sí se deshizo, y el detalle va al
+  log del daemon). Cada lista de `plan` se recorta a `REVERT_LIMITS.paths` (`truncated`).
+- **Solo en reposo**: con un turno en curso, `BUSY`; mientras se revierte, `runs.start` y los
+  `sessions.set*` también son `BUSY`. Una sesión guardada sin montar se monta para revertir.
+- **Nunca a medias**: cerrar la sesión (o apagar el daemon) espera a que termine el revert en
+  curso. Una sesión en **solo lectura** no revierte (`INVALID_PARAMS`): promete que nada cambia el
+  proyecto, tampoco por esta vía.
+- **Sesión par**: `UNAVAILABLE` (`peer-hosted`). Sus snapshots son del proceso que la aloja;
+  ahí está `/undo`.
+- **El modelo lo sabe**: el turno siguiente empieza con el aviso `<files_reverted>`, como en la
+  TUI. No se publica ningún evento: no cambia el estado de la sesión, sino ficheros.
+- No deshace lo que no son ficheros del proyecto (SSH, otros directorios, procesos).
 
 ## 20. Clientes hermanos: Desktop sobre `stratumd` (M12)
 

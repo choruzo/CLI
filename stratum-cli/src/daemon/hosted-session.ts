@@ -30,11 +30,15 @@ import type {
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionHostInfo,
+  ProtocolRevertPlan,
   ProtocolSessionSnapshot,
   ResumeStatus,
+  RevertStatus,
   StateEventData,
   SteerStatus,
 } from '../protocol/index.js';
+import { REVERT_LIMITS } from '../protocol/index.js';
+import type { RevertPlan } from '../snapshots/store.js';
 import type { SessionEnv } from '../runtime/session-env.js';
 import { handoffAgentOptions } from '../host/handoff.js';
 import { SessionHost, type SessionHostOptions } from '../host/session-host.js';
@@ -46,6 +50,27 @@ import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archi
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 
 const log = getLogger('daemon').child('session');
+
+type RevertParams = { turns?: number; dryRun?: boolean; force?: boolean };
+type RevertOutcome = { status: RevertStatus; plan: ProtocolRevertPlan | null };
+
+/** El plan del almacén de snapshots, recortado al tope de una respuesta. */
+export function protocolRevertPlan(plan: RevertPlan): ProtocolRevertPlan {
+  let truncated = false;
+  const cap = (paths: string[]): string[] => {
+    if (paths.length <= REVERT_LIMITS.paths) return [...paths];
+    truncated = true;
+    return paths.slice(0, REVERT_LIMITS.paths);
+  };
+  return {
+    turns: plan.turns.slice(0, REVERT_LIMITS.turns),
+    restore: cap(plan.restore),
+    remove: cap(plan.remove),
+    conflicts: cap(plan.conflicts),
+    skipped: cap(plan.skipped),
+    truncated,
+  };
+}
 
 export const DAEMON_HOST: ProtocolSessionHostInfo = {
   kind: 'daemon',
@@ -72,6 +97,8 @@ export interface HostedSessionOptions {
   origin?: ClientKind;
   /** M12 — dónde guarda el asistente su memoria (`SessionHostOptions.assistantData`). */
   assistantData?: AssistantData;
+  /** Home de los snapshots de deshacer (UX-1). Ausente: el del usuario. Tests. */
+  snapshotsHome?: string;
   /** ¿Hay quien pueda resolver en remoto lo que la sesión pida? */
   remoteApprovals: () => boolean;
   /** Plazo de una solicitud sin contestar. `0` = sin plazo. */
@@ -86,6 +113,12 @@ const RUN_SETTLE_MS = 10_000;
 export class HostedSession {
   private pump: Promise<void> | null = null;
   private closing: Promise<void> | null = null;
+  /**
+   * El `sessions.revert` en marcha: ni turnos ni otro revert hasta que acabe, y
+   * `close()` lo espera (el registro ya no tiene esos turnos y el disco quedaría
+   * a medias).
+   */
+  private reverting: Promise<unknown> | null = null;
 
   private constructor(
     readonly host: SessionHost,
@@ -297,6 +330,7 @@ export class HostedSession {
       | 'remoteApprovals'
       | 'approvalTimeoutMs'
       | 'assistantData'
+      | 'snapshotsHome'
     >,
     agent: NonNullable<SessionHostOptions['agent']>,
     assistant = false,
@@ -316,7 +350,7 @@ export class HostedSession {
       destructivePolicy: opts.remoteApprovals() ? 'ask' : 'deny',
       remoteApprovals: opts.remoteApprovals,
       interactionTimeoutMs: opts.approvalTimeoutMs,
-      agent,
+      agent: opts.snapshotsHome ? { ...agent, snapshotsHome: opts.snapshotsHome } : agent,
     });
     for (const warning of host.mcpWarnings) {
       log.warn('mcp warning', { sessionId: host.sessionId, message: warning.message });
@@ -353,6 +387,7 @@ export class HostedSession {
   startRun(input: string, mode: 'normal' | 'plan' = 'normal'): ProtocolRun {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'The session already has a run in progress.');
+    if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
 
     this.publisher.expectRun({ mode, input });
     const turn = this.host.run(
@@ -427,6 +462,94 @@ export class HostedSession {
   private assertIdle(): void {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'Not while a run is in progress.');
+    if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
+  }
+
+  /**
+   * `sessions.revert`: deshace los ficheros de los últimos `turns` turnos con
+   * el mismo `StratumAgent.planRevert`/`revertTurns` que `/undo`. Solo en reposo,
+   * y nada arranca mientras dura. Con conflictos y sin `force` no toca nada. El
+   * modelo lo sabe en su siguiente turno (`<files_reverted>`).
+   *
+   * Una sesión en solo lectura no revierte: promete que nada cambia el proyecto.
+   *
+   * @throws ProtocolError `BUSY`, `UNAVAILABLE` (cerrándose), `INVALID_PARAMS`
+   *   (solo lectura).
+   */
+  async revert(params: RevertParams): Promise<RevertOutcome> {
+    this.assertIdle();
+    if (this.host.agent.isReadOnly()) {
+      throw new ProtocolError('INVALID_PARAMS', 'A read-only session does not revert files.', {
+        issues: [{ path: 'sessionId', message: 'read-only session' }],
+      });
+    }
+    const job = this.applyRevert(params);
+    this.reverting = job;
+    try {
+      return await job;
+    } finally {
+      this.reverting = null;
+    }
+  }
+
+  private async applyRevert(params: RevertParams): Promise<RevertOutcome> {
+    const count = params.turns ?? 1;
+    const agent = this.host.agent;
+    const plan = await agent.planRevert(count);
+    if (plan.turns.length === 0) return { status: 'nothing', plan: null };
+    if (params.dryRun) return { status: 'planned', plan: protocolRevertPlan(plan) };
+    if (plan.conflicts.length > 0 && !params.force) {
+      return { status: 'conflicts', plan: protocolRevertPlan(plan) };
+    }
+    const result = await agent.revertTurns(count, { force: params.force === true });
+    if (result.ok) {
+      log.info('session files reverted', {
+        sessionId: this.sessionId,
+        turns: result.turns,
+        restored: result.restored.length,
+        removed: result.removed.length,
+      });
+      return {
+        status: 'reverted',
+        plan: protocolRevertPlan({
+          turns: result.turns,
+          restore: result.restored,
+          remove: result.removed,
+          conflicts: [],
+          skipped: result.skipped,
+        }),
+      };
+    }
+    switch (result.reason) {
+      case 'conflicts':
+        // Algo cambió entre el plan y el revert: lo de ahora manda.
+        return {
+          status: 'conflicts',
+          plan: protocolRevertPlan({ ...plan, conflicts: result.conflicts ?? plan.conflicts }),
+        };
+      case 'turn-in-progress':
+        throw new ProtocolError('BUSY', 'Not while a run is in progress.');
+      case 'disabled':
+      case 'no-turns':
+        return { status: 'nothing', plan: null };
+      case 'error': {
+        // El detalle (git, rutas) va al log del daemon, no al cliente.
+        log.error('session revert failed', { sessionId: this.sessionId, error: result.error });
+        const applied = result.applied;
+        return {
+          status: 'failed',
+          plan: applied
+            ? protocolRevertPlan({
+                turns: applied.turns,
+                restore: applied.restored,
+                remove: applied.removed,
+                conflicts: [],
+                skipped: [],
+              })
+            : null,
+        };
+      }
+    }
   }
 
   private changed(): ProtocolSession {
@@ -483,6 +606,8 @@ export class HostedSession {
   close(reason: StateEventData['session.closed']['reason']): Promise<void> {
     this.closing ??= (async () => {
       this.host.cancel();
+      // Un revert no se corta a medias: termina antes de desmontar.
+      if (this.reverting) await this.reverting.catch(() => undefined);
       const pump = this.pump;
       if (pump) {
         let timer: NodeJS.Timeout | undefined;

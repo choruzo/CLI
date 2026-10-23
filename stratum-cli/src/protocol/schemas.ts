@@ -33,6 +33,7 @@ import {
 import {
   METHODS,
   NOTIFICATIONS,
+  REVERT_LIMITS,
   type MethodName,
   type MethodParams,
   type MethodResult,
@@ -742,6 +743,15 @@ const resumeResult = z.object({ status: z.enum(['resumed', 'not-paused', 'not-ru
 const runMutation = z.object({ sessionId: id, runId: id.optional(), operationId }).strict();
 const runRef = z.object({ sessionId: id, runId: id.optional() }).strict();
 const sessionResult = z.object({ session: sessionSchema });
+const revertPaths = z.array(z.string().max(LIMITS.pathChars)).max(REVERT_LIMITS.paths);
+const revertPlanSchema = z.object({
+  turns: z.array(z.number().int().positive()).max(REVERT_LIMITS.turns),
+  restore: revertPaths,
+  remove: revertPaths,
+  conflicts: revertPaths,
+  skipped: revertPaths,
+  truncated: z.boolean(),
+});
 const runResult = z.object({ run: runSchema });
 
 const scope = z.discriminatedUnion('kind', [
@@ -807,6 +817,15 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'sessions.setAgent': z.object({ sessionId: id, agent: name.nullable(), operationId }).strict(),
   'sessions.setReadOnly': z.object({ sessionId: id, readOnly: z.boolean(), operationId }).strict(),
   'sessions.detach': sessionMutation,
+  'sessions.revert': z
+    .object({
+      sessionId: id,
+      turns: z.number().int().positive().max(REVERT_LIMITS.turns).optional(),
+      dryRun: z.boolean().optional(),
+      force: z.boolean().optional(),
+      operationId,
+    })
+    .strict(),
 
   'runs.list': z
     .object({ sessionId: id.optional(), active: z.boolean().optional(), limit: limit.optional() })
@@ -970,6 +989,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'sessions.detach': z.object({
     status: z.enum(['detached', 'already-daemon']),
     session: sessionSchema,
+  }),
+  'sessions.revert': z.object({
+    status: z.enum(['planned', 'reverted', 'conflicts', 'nothing', 'failed']),
+    plan: revertPlanSchema.nullable(),
   }),
 
   'runs.list': z.object({ runs: z.array(runSchema) }),

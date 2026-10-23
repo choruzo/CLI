@@ -120,6 +120,8 @@ export interface StratumdOptions {
   eventBuffer?: number;
   /** Cada cuánto mira `trace.subscribe` si la traza creció (250 ms). */
   tracePollMs?: number;
+  /** Home de los snapshots de deshacer de sus sesiones. Ausente: el del usuario. Tests. */
+  snapshotsHome?: string;
   maxSessions?: number;
   /** Cola de eventos por suscripción. */
   subscriptionQueue?: number;
@@ -580,6 +582,7 @@ export class Stratumd {
         files,
         archived,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
+        ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
       });
       if (this.shuttingDown) {
@@ -751,6 +754,7 @@ export class Stratumd {
           approvalTimeoutMs: this.approvalTimeoutMs,
           files,
           ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
+          ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
           ...(params.agent ? { agent: params.agent } : {}),
@@ -899,6 +903,7 @@ export class Stratumd {
         context,
         snapshot,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
+        ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
       });
       if (this.shuttingDown) {
         throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
@@ -1166,6 +1171,20 @@ export class Stratumd {
         ),
       }),
       'sessions.detach': (params) => this.detachSession(params.sessionId),
+      // `approve` lo comprueba `authorize` antes de llegar aquí. Una sesión par
+      // deshace en su terminal (`/undo`); una guardada se monta para hacerlo.
+      'sessions.revert': async ({ sessionId, operationId: _op, ...params }) => {
+        void _op;
+        const session = await this.wake(sessionId, 'Reverting its files');
+        log.info('session revert requested', {
+          sessionId,
+          connectionId: conn.id,
+          client: conn.client?.name,
+          dryRun: params.dryRun === true,
+          force: params.force === true,
+        });
+        return session.revert(params);
+      },
 
       'runs.list': (params) => ({ runs: this.registry.listRuns(params) }),
       'runs.get': (params) => {
