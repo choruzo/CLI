@@ -78,7 +78,8 @@ describe('auditoría universal de exec (Hito 16)', () => {
     expect(line).not.toContain('hunter2hunter2');
     expect(line).not.toContain('stdin-secreto');
     expect(line).toContain('[redacted: db password]');
-  });
+    // Lanza un shell real: con la suite completa en paralelo no cabe en 5 s.
+  }, 20_000);
 
   it('un comando vetado no llega a ejecutarse y no se audita', async () => {
     const path = await tempLog();

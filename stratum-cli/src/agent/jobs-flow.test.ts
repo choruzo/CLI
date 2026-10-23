@@ -102,7 +102,8 @@ describe('aviso de jobs en el loop', () => {
     // Entregado una vez: no queda nada pendiente.
     expect(jobs.hasNotifications(MAIN_JOB_SCOPE)).toBe(false);
     expect(events.at(-1)).toEqual({ type: 'done', stopReason: 'stop' });
-  });
+    // Dos procesos reales (~3 s solo): con la suite completa no caben en 5 s.
+  }, 20_000);
 
   it('un job que termina con el agente parado no fuerza una llamada: espera al turno siguiente', async () => {
     const provider = new MockProvider([
