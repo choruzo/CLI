@@ -237,9 +237,15 @@ en worktrees aparte, cada bloque pasado por un reviewer de opencode y con sus ha
 - La confirmación con Enter/Esc **ya estaba**: Enter permite y Esc deniega en `DestructiveConfirm`,
   `RevertConfirm`, `PlanApproval` y `QuestionPrompt`; `confirmPhrase` y los conflictos (`f`) siguen exigiendo
   un gesto explícito.
-- **Pendiente:** el desglose del medidor de contexto (sistema/tools/mensajes). `ContextBreakdown`
-  (`agent/context-builder.ts`) ya lo calcula, pero solo para las sesiones con conversación duradera (daemon).
-  También faltan las tarjetas de tool por intención.
+- ✅ (2026-10-28) Desglose del contexto en `/context` (sistema / tools / memorias / conversación, estimado y
+  rotulado con `~`; `cli/ui/context-format.ts`). `ContextBreakdown` ya se calculaba en cualquier sesión. De paso,
+  dos bugs de su calibración, que también afectaban a `sessions.context` del daemon: `ContextManager.calibration`
+  devolvía ×3,5 de más (también lo usaba la compactación M11 para medir la memoria de sesión) y las tools
+  contaban dos veces (`prompt_tokens` las incluye y el factor se calibraba solo contra los mensajes).
+- **Pendiente:** las tarjetas de tool por intención; un panel de contexto vivo (hoy es un comando). En la
+  compactación M11, `before = usage().used + overhead` suma las tools encima de un `used` que ya las incluye
+  (por `prompt_tokens` o por el factor calibrado): compacta antes de tiempo. Es la dirección segura, pero hay
+  que decidirlo con eval.
 
 ### UX-4 — `/btw` y tool a segundo plano *(S + M)*
 - ✅ (2026-10-27) `/btw <pregunta>`: `StratumAgent.askSideQuestion` (`agent/side-question.ts`), sin tools, por

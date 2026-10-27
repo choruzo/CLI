@@ -269,6 +269,56 @@ describe('ContextManager — usage tras tool results', () => {
 
     expect(u.used).toBe(10_000);
     expect(u.estimated).toBe(true);
+    // El factor se aplica a tokens del proxy, no a chars: 0,5, no 0,5 × 3,5.
+    expect(cm.calibration).toBe(0.5);
+    expect(cm.lastCalibration).toEqual({ promptTokens: 5000, proxyTokens: 10_000 });
+  });
+
+  it('M11: la memoria de sesión que ya hay se mide en las mismas unidades que lo que se compacta', async () => {
+    const cm = new ContextManager(100_000, 1, undefined, undefined, 0.8);
+    const memory = 'm'.repeat(3_500); // ≈ 1 000 tokens de memoria de sesión
+    const messages: import('./types.js').Message[] = [
+      {
+        role: 'system',
+        content: `${'x'.repeat(350)}\n\n<session_memory>\n${memory}\n</session_memory>`,
+      },
+    ];
+    for (let i = 0; i < 8; i++) {
+      messages.push({ role: 'user', content: 'u'.repeat(3_500) }); // 1 000 tokens
+      messages.push({ role: 'assistant', content: 'ok' });
+    }
+    // Calibración neutra: el provider confirma el proxy (factor 1).
+    const proxy = cm.usage(messages).used;
+    cm.recordUsage(proxy, messages);
+
+    let chunk: import('./types.js').Message[] = [];
+    cm.attachSession({
+      budget: () => ({
+        window: 12_000,
+        reserveOutput: 2_000,
+        usableInput: 10_000,
+        recent: 6_000,
+        sessionMemory: 2_000,
+        projectMemory: 0,
+        globalMemory: 0,
+        compactAt: 0.6,
+        target: 0.5,
+      }),
+      overheadTokens: () => 0,
+      record: () => {},
+      compact: async (c) => {
+        chunk = c;
+        return { ok: false, cancelled: false, reason: 'summarizer', error: 'no hace falta' };
+      },
+      applyMemory: () => {},
+      committed: () => {},
+    });
+    await cm.maybeCompress(messages);
+
+    // ~9 100 de entrada, objetivo 5 000, hueco de la memoria 2 000 − 1 000: hay
+    // que dejar ≤ 4 000, seis turnos. Con la memoria medida ×3,5 (el fallo) el
+    // hueco era 0 y salían cinco.
+    expect(chunk.filter((m) => m.role === 'user')).toHaveLength(6);
   });
 
   it('sin calibración cae al proxy chars/3.5 sin corregir', () => {

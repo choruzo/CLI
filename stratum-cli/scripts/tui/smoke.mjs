@@ -152,6 +152,9 @@ async function cancelAndExit() {
       await t.key('ctrl+u');
       await t.submit('/context');
       await t.waitFor(/Uso del contexto/);
+      // El desglose también con el turno en curso.
+      await t.waitFor(/tools\s+~[\d.]+K?\s+\d+%/);
+      await t.waitFor(/total entrada\s+~/);
       await t.waitFor(/Type a message or \/ for commands/, 20000);
       assert.equal(mock.requests.length, before + 1);
     });

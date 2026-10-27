@@ -203,6 +203,7 @@ export class ContextManager {
    * (null = sin dato todavía → se usa el proxy chars/3.5 sin corregir).
    */
   private tokenRatio: number | null = null;
+  private calibrationSample: { promptTokens: number; proxyTokens: number } | null = null;
 
   /** Modo de compresión activo (F6). 'conservative' sube el umbral y conserva más rondas. */
   private mode: 'normal' | 'conservative' = 'normal';
@@ -231,9 +232,24 @@ export class ContextManager {
     this.session = session;
   }
 
-  /** Factor que corrige el proxy chars/3.5 con el último `usage` real (1 sin dato). */
+  /**
+   * Factor que corrige el proxy chars/3.5 con el último `usage` real (1 sin
+   * dato): tokens reales por token del proxy, el mismo que `estimateCalibrated`.
+   * Se multiplica por `chars / 3.5`, no por chars. Como `prompt_tokens` incluye
+   * las tools y el proxy solo los mensajes, el factor las absorbe: no sirve para
+   * repartir por capas (ver `lastCalibration`).
+   */
   get calibration(): number {
-    return this.tokenRatio !== null ? this.tokenRatio * 3.5 : 1;
+    return this.tokenRatio ?? 1;
+  }
+
+  /**
+   * El último `prompt_tokens` con el que se calibró y el proxy (chars/3.5) de
+   * los mensajes de esa request, para quien reparte la entrada por capas
+   * (`StratumAgent.getContextReport`); `null` sin dato.
+   */
+  get lastCalibration(): { promptTokens: number; proxyTokens: number } | null {
+    return this.calibrationSample;
   }
 
   /** Umbral efectivo según el modo (F6: en conservative se sube a ≥0.92). */
@@ -273,7 +289,10 @@ export class ContextManager {
     this.lastPromptTokens = promptTokens;
     if (messages) {
       const chars = this.estimateFromChars(messages);
-      if (chars > 0 && promptTokens > 0) this.tokenRatio = promptTokens / chars;
+      if (chars > 0 && promptTokens > 0) {
+        this.tokenRatio = promptTokens / chars;
+        this.calibrationSample = { promptTokens, proxyTokens: chars };
+      }
       log.debug('context calibration', { promptTokens, proxy: chars, ratio: this.tokenRatio });
     }
   }
@@ -456,7 +475,9 @@ export class ContextManager {
       units.push(unit);
     }
 
-    // Hueco para que la memoria crezca hasta su tope.
+    // Hueco para que la memoria crezca hasta su tope. En las unidades de
+    // `before` y `estimateCalibrated` (el factor absorbe las tools, así que
+    // sobrestima algo la memoria y el hueco sale corto: se compacta un poco más).
     const memoryNow = Math.ceil((sessionMemoryChars(messages) / 3.5) * this.calibration);
     const growth = Math.max(0, budget.sessionMemory - memoryNow);
     const target = budget.target * usable;

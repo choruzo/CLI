@@ -86,6 +86,7 @@ import type {
 import { resolveMemoryModels } from '../conversation/models.js';
 import {
   applySessionMemoryBlock,
+  charsToTokens,
   clipMemoryLayer,
   contextBreakdown,
   resolveContextBudget,
@@ -581,12 +582,18 @@ export class StratumAgent {
    */
   getContextReport(): ContextReport {
     const budget = this.contextBudget();
+    const toolsChars = this.toolSchemaChars();
+    // `prompt_tokens` cuenta mensajes **y** tools; el factor del ContextManager
+    // se calibró solo contra los mensajes. Para repartir por capas, el factor
+    // sale de dividir entre los dos proxies, o las tools contarían dos veces.
+    const sample = this.getContextManager().lastCalibration;
+    const proxy = sample ? sample.proxyTokens + charsToTokens(toolsChars) : 0;
     const breakdown = contextBreakdown(this.messages, {
       budget,
       globalMemoryChars: this.memoryLayerChars.global,
       projectMemoryChars: this.memoryLayerChars.project,
-      toolsChars: this.toolSchemaChars(),
-      ratio: this.getContextManager().calibration,
+      toolsChars,
+      ratio: sample && proxy > 0 ? sample.promptTokens / proxy : 1,
     });
     return {
       budget,
@@ -594,6 +601,15 @@ export class StratumAgent {
       conversation: this.conversation?.stats(breakdown.activeMessages) ?? null,
       sessionMemory: this.sessionMemoryEnabled,
     };
+  }
+
+  /**
+   * Fracción de la ventana a la que se comprime en línea en un turno normal
+   * (`agent.compressionThreshold`; `/init` la sube solo durante su turno). Con
+   * memoria de sesión manda `budget.compactAt` sobre la entrada útil.
+   */
+  get compressionThreshold(): number {
+    return this.config.agent.compressionThreshold;
   }
 
   /** La conversación duradera de la sesión, si la tiene (M11). */

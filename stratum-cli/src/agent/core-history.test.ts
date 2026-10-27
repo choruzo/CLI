@@ -1,4 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import { StratumAgent } from './core.js';
 import { ContextManager } from './harness.js';
 import { ProviderRouter } from '../providers/router.js';
@@ -87,6 +88,30 @@ describe('StratumAgent.clearHistory (/clear, §5.2)', () => {
     const agent = newAgent([{ role: 'user', content: 'hola' }]);
     agent.clearHistory();
     expect(agent.getMessages()).toEqual([]);
+  });
+});
+
+describe('StratumAgent.getContextReport — desglose calibrado', () => {
+  it('tras un usage real el total del desglose cuadra con prompt_tokens: las tools no cuentan dos veces', async () => {
+    const registry = new ToolRegistry();
+    registry.register({
+      name: 'big_tool',
+      description: 'd'.repeat(7_000),
+      schema: z.object({}),
+      async execute() {
+        return { ok: true, output: '' };
+      },
+    });
+    const agent = new StratumAgent(config, routerWith([reportedRound('ok', 3_000)]), registry, {
+      initialMessages: [{ role: 'system', content: 's'.repeat(3_500) }],
+    });
+    for await (const _ of agent.run('hola')) void _;
+
+    const { breakdown } = agent.getContextReport();
+    expect(breakdown.tools).toBeGreaterThan(0);
+    // Lo que el provider contó para la request, más la respuesta `ok` que llegó después.
+    expect(breakdown.input).toBeGreaterThanOrEqual(3_000);
+    expect(breakdown.input).toBeLessThan(3_010);
   });
 });
 

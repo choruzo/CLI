@@ -110,7 +110,7 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   },
   {
     name: '/context',
-    description: 'Estadísticas de uso del contexto actual',
+    description: 'Uso del contexto y desglose: sistema, tools, memoria, conversación',
     hasArgs: false,
   },
   {

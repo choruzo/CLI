@@ -170,7 +170,10 @@ export function contextBreakdown(
     globalMemoryChars: number;
     projectMemoryChars: number;
     toolsChars: number;
-    /** Tokens por char-token calibrado (`ContextManager`), o 1. */
+    /**
+     * Tokens reales por token del proxy chars/3.5, calibrado sobre la entrada
+     * entera (mensajes + tools; `StratumAgent.getContextReport`), o 1.
+     */
     ratio: number;
   },
 ): ContextBreakdown {

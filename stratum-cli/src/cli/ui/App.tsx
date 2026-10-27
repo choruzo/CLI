@@ -81,6 +81,7 @@ import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
 import { VERBOSITY_LEVELS, type Verbosity } from './tool-groups.js';
 import { liveTelemetry, type UsageView } from './telemetry-format.js';
+import { formatContextReport } from './context-format.js';
 import { RevertConfirm, type RevertPlanView } from './RevertConfirm.js';
 import {
   describeUndoableTurn,
@@ -2226,23 +2227,20 @@ export function App({
 
       if (cmd === '/context') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
-        const usage = agent.getContextUsage();
-        const source = usage.estimated ? 'estimado (chars/3.5)' : 'reportado por el provider';
+        const report = agent.getContextReport();
         dispatch({
           type: 'SYSTEM_MESSAGE',
-          text: [
-            'Uso del contexto:',
-            '',
-            `  contexto       ${usage.used} / ${usage.max} (${usage.pct}%)`,
-            `  origen         ${source}`,
-            `  mensajes       ${agent.getMessages().length}`,
-            `  tool calls     ${agent.toolCallCount}`,
-            `  gasto sesión   ${describeTokenUsage(agent.getTokenUsage())}`,
-            `  provider       ${agent.providerName} / ${agent.model}`,
-            '',
-            'El contexto es el tamaño del prompt actual (se reduce al comprimir);',
-            'el gasto de sesión es el total consumido, y solo crece.',
-          ].join('\n'),
+          text: formatContextReport({
+            usage: agent.getContextUsage(),
+            breakdown: report.breakdown,
+            reduceAt: report.sessionMemory
+              ? { kind: 'compact', fraction: report.budget.compactAt }
+              : { kind: 'compress', fraction: agent.compressionThreshold },
+            messages: agent.getMessages().length,
+            toolCalls: agent.toolCallCount,
+            spend: describeTokenUsage(agent.getTokenUsage()),
+            provider: `${agent.providerName} / ${agent.model}`,
+          }),
         });
         return;
       }
