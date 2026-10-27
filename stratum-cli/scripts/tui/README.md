@@ -53,7 +53,8 @@ try {
 
 `startMockLlm(script)` sirve `/models` y `/chat/completions` en streaming. El
 guion recibe `{ body, messages, last, said, n }` y devuelve pasos construidos
-con `text()`, `reasoning()` y `toolCall()`, o `httpError(status, mensaje)`. El
+con `text()`, `reasoning()`, `toolCall()` y `usage(prompt, completion)` (un chunk
+de solo-usage, para que el backend «reporte» tokens), o `httpError(status, mensaje)`. El
 guion por defecto está descrito en la cabecera de `mock-llm.mjs`; `mock.requests`
 guarda cada petición recibida.
 

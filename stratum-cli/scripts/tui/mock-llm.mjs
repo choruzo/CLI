@@ -39,6 +39,17 @@ export const toolCall = (name, args, id = `call_${Math.random().toString(36).sli
     },
   },
 ];
+/** Chunk final de solo-usage (`choices` vacío), como el de `include_usage`. */
+export const usage = (promptTokens, completionTokens) => [
+  {
+    delay: 0,
+    usage: {
+      prompt_tokens: promptTokens,
+      completion_tokens: completionTokens,
+      total_tokens: promptTokens + completionTokens,
+    },
+  },
+];
 /** Respuesta HTTP de error en lugar de un stream. */
 export const httpError = (status, message) => ({ status, message });
 
@@ -120,7 +131,8 @@ export function startMockLlm(script = defaultScript) {
     for (const step of plan) {
       await sleep(step.delay ?? 0);
       if (closed) return;
-      res.write(`data: ${JSON.stringify(chunk(step.delta))}\n\n`);
+      const data = step.usage ? { ...chunk({}), choices: [], usage: step.usage } : chunk(step.delta);
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
     }
     const finish = plan.some((s) => s.toolCall) ? 'tool_calls' : 'stop';
     res.write(`data: ${JSON.stringify(chunk({}, finish))}\n\n`);

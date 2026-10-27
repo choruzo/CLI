@@ -6,6 +6,17 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- TUI: **`/btw <pregunta>`**, una pregunta lateral sobre la conversación, también con el agente trabajando. Responde sin tools y no entra en el historial, la memoria ni el uso de la sesión. En la traza aparece con el origen `side-question`.
+- TUI: `/verbosity` se recuerda entre sesiones (`tui.verbosity`). Se guarda en la config global, salvo que el `.stratumrc.json` del proyecto ya declare la clave.
+- Las sesiones guardan sus tokens y su desglose de uso: `chat --resume` y `/sessions resume` los restauran (`--fork` empieza a cero).
+
+### Corregido
+- `/sessions resume` en caliente: la barra de estado y las pastillas seguían mostrando los tokens de la sesión anterior, y el agente sumaba los de las dos sesiones.
+- `chat --resume` reiniciaba a 0 el contador de tool calls de la sesión al guardarla de nuevo.
+
 ## [0.10.0] — 2026-10-23
 
 Es la versión de la CLI que necesita **Stratum Desktop 0.6.0** para cambiar de provider.

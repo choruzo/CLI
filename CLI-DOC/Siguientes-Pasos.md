@@ -22,6 +22,10 @@ está en los documentos y en huecos de producto. Propuesta de orden:
 
 > **Actualización 2026-10-23:** los bloques 1–3 están implementados (detalle y pendientes en §5, «Estado»).
 > El siguiente según este orden es el 4, cerrar el contrato v1, con `sessions.revert` como candidato a entrar en él.
+>
+> **Actualización 2026-10-27:** también Contrato-1 (publicado en la 0.9.0/0.10.0). Hoy: cola de UX-3 (uso de
+> sesión al reanudar, con el bug de `/sessions resume`; `/verbosity` persistido) y `/btw` de UX-4. Ver §5 y,
+> para lo que queda, §7.
 
 Decisiones abiertas que conviene no dejar sin fecha: **default de `chat`** (vivir en `stratumd`, bloqueado
 por Q1, el entorno de la terminal) y **convergencia Dot/Desktop** (§15.1.4: ¿Dot es el modo compacto de
@@ -226,12 +230,25 @@ en worktrees aparte, cada bloque pasado por un reviewer de opencode y con sus ha
 - TUI: pie de prompt con `↵ enviar`/`↵ steer`, Esc Esc para parar y pastillas `⊙ paso 3 · 42 tok/s ⛁ 12K ·
   87% caché · $0.031`; pie de uso por turno; razonamiento plegado con el último párrafo terminado;
   `/verbosity compact|standard|verbose`; rachas de lecturas y búsquedas agrupadas en `✓ explorado │ …`.
-- **Pendiente:** el desglose del medidor de contexto (sistema/tools/mensajes), las tarjetas de tool por
-  intención, la confirmación con Enter/Esc, persistir `/verbosity` y restaurar el uso de sesión al reanudar.
+- ✅ (2026-10-27) Persistir `/verbosity` (`tui.verbosity`, en la config global salvo que el proyecto la declare)
+  y restaurar el uso de sesión al reanudar (`SessionContext.usage`). De paso, dos bugs: `/sessions resume` en
+  caliente seguía mostrando y sumando el uso de la sesión anterior (`CLEAR` no lo toca y el agente no lo
+  reiniciaba), y `chat --resume` reescribía a 0 `toolCallCount`.
+- La confirmación con Enter/Esc **ya estaba**: Enter permite y Esc deniega en `DestructiveConfirm`,
+  `RevertConfirm`, `PlanApproval` y `QuestionPrompt`; `confirmPhrase` y los conflictos (`f`) siguen exigiendo
+  un gesto explícito.
+- **Pendiente:** el desglose del medidor de contexto (sistema/tools/mensajes). `ContextBreakdown`
+  (`agent/context-builder.ts`) ya lo calcula, pero solo para las sesiones con conversación duradera (daemon).
+  También faltan las tarjetas de tool por intención.
 
 ### UX-4 — `/btw` y tool a segundo plano *(S + M)*
-- `/btw <pregunta>`: `tracedCompletion` con un origen nuevo, sin entrar en la conversación ni en la memoria.
-- «Pasar a segundo plano» un `exec` en curso → job, con las mismas guardas.
+- ✅ (2026-10-27) `/btw <pregunta>`: `StratumAgent.askSideQuestion` (`agent/side-question.ts`), sin tools, por
+  `tracedCompletion` con origen `side-question`. No entra en la conversación, la memoria ni el uso; vale con el
+  turno en curso (`BUSY_COMMANDS`). La respuesta llega entera, no en streaming.
+- «Pasar a segundo plano» un `exec` en curso → job: **sin empezar, y no es S**. El backend local se queda el
+  proceso (`tools/exec/backends/local.ts`) y `JobManager` solo sabe lanzar los suyos (`start`): hace falta un
+  `adopt` con su `JobOutput` redactado y decidir cómo encaja con «todo proceso que sobreviva a su exec es un
+  job» (`decisiones.md`). Necesita un diseño antes de implementarlo.
 
 ### Contrato-1 — Cerrar v1 *(M)* ✅ (2026-10-23, sin commit)
 - `sessions.open { resume }`: monta una sesión guardada del daemon (mismo id y ajustes; rechaza los de apertura).
@@ -267,6 +284,24 @@ Después, por orden: **plugins (R1 → PL1)**, **Hitos 18–19** y la **cola de 
 3. ~~¿`sessions.revert` exige la clave de aprobador?~~ Decidido (2026-10-23): sí, capacidad `approve`.
 4. ~~Coste en $~~ Decidido en la implementación: tabla de precios propia en config (`pricing`), sin models.dev.
 5. §15.1.4 (Dot como modo compacto de Desktop), antes de rehacer el layout de Desktop con las 3 columnas.
+
+## 7. Estado verificado (2026-10-27)
+
+Comprobado contra el código por cuatro investigaciones de opencode (`stratum-buscador`, solo lectura). Las
+rutas son de `stratum-cli/src/` salvo que se diga otra cosa.
+
+| Bloque | Estado |
+|---|---|
+| **Loop-1** — paralelismo | Parcial. El lote ya va con `Promise.allSettled` (`tools/registry.ts`, `dispatchApproved`), pero el criterio es `serialized` y no `callEffects`. Un solo `exec` local hace ir en serie todo el lote, también las lecturas. El arreglo: `callEffects(...).mutating === false` nunca serializa |
+| **Loop-1** — aviso de tool repetida | No existe en el runtime. La regla ya está escrita como métrica (`countRepeatedCalls`, `eval/metrics.ts`); falta emitirla como `TraceScope.runtime` |
+| **Loop-1** — compactación con prefijo cacheado | No existe: `callCompressor` y la ruta M11 mandan un único `user` sin system ni tools. Sí recortan los resultados de tools antes de resumir |
+| **Eval-1** — replay | No existe: el runner siempre lanza `stratum run`, y no hay `workspace.expected/` |
+| `sessions.revert` en Dot/Desktop | No: ningún bridge lo expone. Desktop no puede aprobar (le falta el broker nativo) |
+| Plugins (R1 → PL1) | Sin código. R1 propone tomar como unidad de confianza el candidato resuelto (todos los ficheros que el entry puede cargar) |
+| Hito 18 | Sin tools. Los nombres ya están reservados en `INFRA_TOOLS` (`agent/session-profile.ts`) |
+
+Orden que se propone desde aquí: **Loop-1** (paralelismo → aviso de repetición → compactación, esta última
+medida con eval), **Eval-1**, y después plugins, el Hito 18 y el revert en Dot.
 
 ## Anexo — fuentes
 

@@ -16,7 +16,7 @@ import { openSessionTrace, pruneTraces } from '../../trace/store.js';
 import { SessionAuditor } from '../../trace/auditor.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { StratumAgent } from '../../agent/core.js';
-import { SessionStore, generateSessionId } from '../../session/store.js';
+import { SessionStore, generateSessionId, resumedUsage, savedUsage } from '../../session/store.js';
 import { SubagentStore } from '../../session/subagent-store.js';
 import { prepareSessionResume } from '../../session/resume.js';
 import { resumeDecision, whoHostsSession } from '../resume-guard.js';
@@ -256,6 +256,10 @@ export const chatCommand = new Command('chat')
           if (saved.activeAgent) {
             agentOptions = { ...agentOptions, activeAgent: saved.activeAgent };
           }
+          // UX-3: la misma sesión sigue con su uso; una copia empieza a cero.
+          if (decision.action !== 'fork') {
+            agentOptions = { ...agentOptions, usage: resumedUsage(saved) };
+          }
           resumedReadOnly = saved.readOnly === true;
           resumedProfile = saved.sessionProfile;
         } catch (err) {
@@ -321,6 +325,7 @@ export const chatCommand = new Command('chat')
           project: process.cwd(),
           messages: agent.getMessages(),
           toolCallCount: agent.toolCallCount,
+          usage: savedUsage(agent.getUsageSnapshot()),
           planRef: agent.getPlanRef(),
           activeAgent: agent.getActiveProfile()?.name ?? null,
           readOnly: agent.isReadOnly(),

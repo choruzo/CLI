@@ -66,7 +66,9 @@ export const TRACE_CAP_PAUSE = 'pause';
  *  - `session-summary` — el resumen de una línea al guardar la sesión;
  *  - `session-memory-extraction` — M11: hechos, decisiones y tareas de un trozo
  *    de conversación que se compacta a la memoria de sesión;
- *  - `session-memory-summary` — M11: el resumen narrativo de esa memoria.
+ *  - `session-memory-summary` — M11: el resumen narrativo de esa memoria;
+ *  - `side-question` — UX-4: `/btw`, una pregunta lateral que no entra en la
+ *    conversación.
  *
  * Todas menos las dos primeras son **auxiliares**: no las pide el modelo ni forman parte del
  * turno, pero ocupan el backend y su caché igual que las demás.
@@ -79,6 +81,7 @@ export const LLM_CALL_ORIGINS = [
   'session-summary',
   'session-memory-extraction',
   'session-memory-summary',
+  'side-question',
 ] as const;
 export type LlmCallOrigin = (typeof LLM_CALL_ORIGINS)[number];
 
@@ -88,6 +91,7 @@ export const AUXILIARY_LLM_ORIGINS = [
   'session-summary',
   'session-memory-extraction',
   'session-memory-summary',
+  'side-question',
 ] as const satisfies readonly LlmCallOrigin[];
 export type AuxiliaryLlmOrigin = (typeof AUXILIARY_LLM_ORIGINS)[number];
 

@@ -1,4 +1,8 @@
 import type { Message } from '../agent/types.js';
+import type { SessionUsageSnapshot } from '../agent/usage.js';
+
+/** Uso de la sesión al guardar; las tool calls van aparte (`toolCallCount`). */
+export type SavedSessionUsage = Omit<SessionUsageSnapshot, 'toolCalls'>;
 
 /**
  * Schema de sesión guardada — §12.6.
@@ -18,6 +22,11 @@ export interface SessionContext {
   project: string; // cwd absoluto al momento de crear la sesión
   messages: Message[];
   toolCallCount: number;
+  /**
+   * UX-3 — tokens y desglose de uso al guardar; reanudar los restaura. Ausente
+   * en sesiones anteriores, que se reanudan con el uso a cero.
+   */
+  usage?: SavedSessionUsage;
   summary: string; // resumen ≤100 chars (vacío si < 5 rondas)
   /**
    * Hito 7 — ref al fichero de plan asociado (relativo a `.stratum/plans/`).

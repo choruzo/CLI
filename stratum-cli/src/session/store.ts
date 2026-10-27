@@ -1,9 +1,10 @@
 import { existsSync, mkdirSync, readFileSync, readdirSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import { z } from 'zod';
-import type { SessionContext } from './types.js';
+import type { SavedSessionUsage, SessionContext } from './types.js';
 import type { IProvider } from '../providers/base.js';
 import type { Message } from '../agent/types.js';
+import type { SessionUsageSnapshot } from '../agent/usage.js';
 import {
   SESSION_SCHEMA_VERSION,
   SchemaVersionError,
@@ -67,6 +68,42 @@ const MessageSchema = z
   })
   .passthrough();
 
+const count = z.number().int().nonnegative();
+const amount = z.number().nonnegative();
+
+/** `TurnUsage` + `turns` (`agent/usage.ts`). Los campos sin dato van ausentes, nunca a 0. */
+const SessionBreakdownSchema = z.object({
+  llmCalls: count,
+  reportedCalls: count,
+  promptTokens: amount.optional(),
+  completionTokens: amount.optional(),
+  cachedReadTokens: amount.optional(),
+  cacheWriteTokens: amount.optional(),
+  reasoningTokens: amount.optional(),
+  cacheHitRate: amount.optional(),
+  llmMs: amount,
+  toolMs: amount,
+  firstTokenMs: amount.optional(),
+  generationMs: amount.optional(),
+  outputTokensPerSec: amount.optional(),
+  costUsd: amount.optional(),
+  incomplete: z.literal(true).optional(),
+  turns: count,
+});
+
+/**
+ * Uso guardado (UX-3). Un dato auxiliar: si no valida, la sesión se reanuda con
+ * el uso a cero en vez de quedar ilegible.
+ */
+const SavedUsageSchema = z
+  .object({
+    tokens: amount.nullable(),
+    tokenStatus: z.enum(['reported', 'unavailable', 'unsupported']),
+    session: SessionBreakdownSchema.optional(),
+  })
+  .optional()
+  .catch(undefined);
+
 // Solo la forma que el resto del código da por supuesta; `passthrough` para no
 // perder al reescribir un campo que añada una versión compatible.
 const SessionSchema = z
@@ -80,6 +117,7 @@ const SessionSchema = z
     project: z.string(),
     messages: z.array(MessageSchema),
     toolCallCount: z.number().default(0),
+    usage: SavedUsageSchema,
     summary: z.string().default(''),
     planRef: z.string().optional(),
     activeAgent: z.string().optional(),
@@ -120,6 +158,25 @@ export function parseSession(raw: unknown, id: string, source: string): SessionC
   return parsed.data as unknown as SessionContext;
 }
 
+/**
+ * Contadores de uso con los que continúa una sesión cargada (`chat --resume`,
+ * `/sessions resume`). Sin `usage` guardado, los tokens quedan sin dato.
+ */
+export function resumedUsage(saved: SessionContext): SessionUsageSnapshot {
+  return {
+    toolCalls: saved.toolCallCount,
+    tokens: saved.usage?.tokens ?? null,
+    tokenStatus: saved.usage?.tokenStatus ?? 'unavailable',
+    ...(saved.usage?.session ? { session: saved.usage.session } : {}),
+  };
+}
+
+/** Lo que se guarda del uso: las tool calls ya van en `toolCallCount`. */
+export function savedUsage(snapshot: SessionUsageSnapshot): SavedSessionUsage {
+  const { toolCalls: _toolCalls, ...usage } = snapshot;
+  return usage;
+}
+
 /** Sesión que `scan` no pudo leer y omitió. */
 export interface SkippedSession {
   file: string;
@@ -149,6 +206,8 @@ export interface SaveSessionParams {
   project: string;
   messages: Message[];
   toolCallCount: number;
+  /** UX-3 — uso de la sesión, para restaurarlo al reanudar. */
+  usage?: SavedSessionUsage;
   /** Si se pasa, se usa para generar el resumen automático (≤100 chars). */
   llmProvider?: IProvider;
   /** Traza de la sesión: la llamada del resumen se registra como `session-summary`. */
@@ -271,6 +330,7 @@ export class SessionStore {
       project: params.project,
       messages: params.messages,
       toolCallCount: params.toolCallCount,
+      ...(params.usage ? { usage: params.usage } : {}),
       summary,
       ...(params.planRef ? { planRef: params.planRef } : {}),
       ...(params.activeAgent ? { activeAgent: params.activeAgent } : {}),

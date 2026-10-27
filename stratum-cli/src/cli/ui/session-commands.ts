@@ -160,6 +160,12 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/btw',
+    description:
+      'Pregunta lateral sobre la conversación: responde sin tools y no entra en el historial',
+    hasArgs: true,
+  },
+  {
     name: '/verbosity',
     description:
       'Detalle de los turnos cerrados: compact (solo recuentos), standard (agrupa lecturas) o verbose (todo)',
@@ -222,6 +228,7 @@ const BUSY_COMMAND_NAMES = new Set([
   '/auditor stop',
   '/debug',
   '/verbosity',
+  '/btw',
   '/tools',
   '/agents',
   '/env',

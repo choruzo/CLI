@@ -12,6 +12,7 @@
  */
 
 import type { TokenUsage } from '../providers/cache.js';
+import type { TokenStatus } from './events.js';
 
 /**
  * Desglose del uso (tokens, caché, tiempos, coste) de un turno del loop
@@ -60,6 +61,23 @@ export interface TurnUsage {
    * como «al menos esto», no como la cifra completa.
    */
   incomplete?: true;
+}
+
+/**
+ * Contadores de uso de una sesión que sobreviven a reanudarla: se guardan con
+ * ella (`SessionContext.usage` + `toolCallCount`) y viajan en un traspaso (M10).
+ * Los tokens, solo si el backend los reportó: nunca se estiman.
+ */
+export interface SessionUsageSnapshot {
+  toolCalls: number;
+  /** Contabilidad total (`getTokenUsage`); `null` si no hay dato reportado. */
+  tokens: number | null;
+  tokenStatus: TokenStatus;
+  /**
+   * Desglose del loop principal (`getSessionUsage`). Opcional: un traspaso y
+   * las sesiones guardadas antes de UX-3 no lo llevan, y entonces empieza a cero.
+   */
+  session?: TurnUsage & { turns: number };
 }
 
 /** Lo que aporta una sola request al acumulador. */

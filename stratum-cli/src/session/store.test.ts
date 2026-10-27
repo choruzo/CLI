@@ -15,8 +15,11 @@ import {
   SessionCorruptError,
   describeSkippedSessions,
   parseDuration,
+  resumedUsage,
+  savedUsage,
 } from './store.js';
 import type { Message } from '../agent/types.js';
+import { emptyTurnUsage } from '../agent/usage.js';
 
 function makeTmpDir(): string {
   const dir = join(tmpdir(), `stratum-sessions-${Date.now()}`);
@@ -210,6 +213,68 @@ describe('SessionStore — activeAgent (Hito 15)', () => {
     const plain = await store.save({ ...base, readOnly: false, sessionProfile: null });
     expect('readOnly' in store.load(plain.id)).toBe(false);
     expect('sessionProfile' in store.load(plain.id)).toBe(false);
+  });
+});
+
+describe('SessionStore — uso de la sesión (UX-3)', () => {
+  let dir: string;
+  beforeEach(() => {
+    dir = makeTmpDir();
+  });
+  afterEach(() => {
+    if (existsSync(dir)) rmSync(dir, { recursive: true, force: true });
+  });
+
+  const base = {
+    provider: 'p',
+    model: 'm',
+    project: '/x',
+    messages: sampleMessages,
+    toolCallCount: 4,
+  };
+
+  it('guarda el uso y reanudar lo devuelve con las tool calls', async () => {
+    const store = new SessionStore(dir);
+    const snapshot = {
+      toolCalls: 4,
+      tokens: 900,
+      tokenStatus: 'reported' as const,
+      session: { ...emptyTurnUsage(), llmCalls: 2, promptTokens: 800, costUsd: 0.01, turns: 2 },
+    };
+    const saved = await store.save({ ...base, usage: savedUsage(snapshot) });
+
+    const loaded = store.load(saved.id);
+    expect(loaded.usage).not.toHaveProperty('toolCalls');
+    expect(resumedUsage(loaded)).toEqual(snapshot);
+  });
+
+  it('una sesión sin uso guardado se reanuda sin dato de tokens, no con 0', async () => {
+    const store = new SessionStore(dir);
+    const saved = await store.save(base);
+    expect(resumedUsage(store.load(saved.id))).toEqual({
+      toolCalls: 4,
+      tokens: null,
+      tokenStatus: 'unavailable',
+    });
+  });
+
+  it('un uso dañado se descarta sin dejar la sesión ilegible', () => {
+    const store = new SessionStore(dir);
+    const id = 'sess_20261027_120000_abc';
+    writeFileSync(
+      join(dir, `${id}.json`),
+      JSON.stringify({
+        id,
+        createdAt: 'x',
+        updatedAt: 'x',
+        ...base,
+        summary: '',
+        usage: { tokens: -3, tokenStatus: 'quizá' },
+      }),
+    );
+    const loaded = store.load(id);
+    expect(loaded.messages).toHaveLength(sampleMessages.length);
+    expect(loaded.usage).toBeUndefined();
   });
 });
 

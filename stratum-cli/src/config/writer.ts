@@ -6,7 +6,7 @@ import {
   readConfigFile,
   validateConfigLayer,
 } from './loader.js';
-import { setByDotPath } from './dot-path.js';
+import { getByDotPath, setByDotPath } from './dot-path.js';
 import type { ProviderConfigInput } from './schema.js';
 
 /**
@@ -210,6 +210,28 @@ export function setProviderModel(name: string, model: string, startDir?: string)
   >;
   providers[name]['model'] = model;
   writeConfigWithBackup(path, raw);
+  return path;
+}
+
+/**
+ * Preferencia del usuario que fija la propia TUI (`/verbosity`): va a la config
+ * global, salvo que el `.stratumrc.json` de proyecto ya declare la clave — ahí
+ * manda el de proyecto y escribir en el global no se notaría. Valida y escribe
+ * de forma atómica como `setConfigValue`; devuelve la ruta escrita.
+ */
+export function setUserPreference(
+  key: string,
+  value: string,
+  cwd: string = process.cwd(),
+  globalPath: string = GLOBAL_CONFIG_PATH,
+): string {
+  const projectPath = findConfigFile(cwd);
+  const path =
+    projectPath && getByDotPath(readRaw(projectPath), key) !== undefined ? projectPath : globalPath;
+  const raw = readRaw(path);
+  setByDotPath(raw, key, value);
+  validateConfigLayer(path, raw, globalPath);
+  writeFileAtomic(path, JSON.stringify(raw, null, 2) + '\n');
   return path;
 }
 

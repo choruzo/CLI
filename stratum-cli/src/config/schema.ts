@@ -866,13 +866,15 @@ export const StratumConfigSchema = z.object({
   /**
    * Aspecto de la TUI de `chat`. `background` es el color de fondo que se pide
    * al terminal (OSC 11) mientras corre y que se le devuelve al salir;
-   * `terminal` deja el suyo.
+   * `terminal` deja el suyo. `verbosity` es el detalle con que se cierran los
+   * turnos; lo fija `/verbosity <nivel>`.
    */
   tui: z
     .object({
       background: z
         .union([z.literal('terminal'), z.string().regex(/^#[0-9a-fA-F]{6}$/)])
         .default('#000000'),
+      verbosity: z.enum(['compact', 'standard', 'verbose']).default('standard'),
     })
     .default({}),
 

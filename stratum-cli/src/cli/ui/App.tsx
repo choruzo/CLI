@@ -25,13 +25,14 @@ import type { ProviderConfig, ProviderConfigInput } from '../../config/schema.js
 import { expandEnvVars } from '../../config/loader.js';
 import { getByDotPath, formatConfigValue } from '../../config/dot-path.js';
 import { resolveMemoryPaths } from '../../config/paths.js';
-import { SessionStore, describeSkippedSessions } from '../../session/store.js';
+import { SessionStore, describeSkippedSessions, resumedUsage } from '../../session/store.js';
 import {
   upsertProvider,
   readRawProvider,
   removeProviderEverywhere,
   setConfigValue,
   setProviderModel,
+  setUserPreference,
 } from '../../config/writer.js';
 import { detectCapabilities } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
@@ -226,6 +227,12 @@ function describeTokenUsage(usage: TokenAccounting): string {
     return 'sin dato — este backend no devuelve `usage` en el stream';
   }
   return 'sin dato todavía';
+}
+
+/** Uso acumulado para las pastillas; `null` mientras no haya ningún turno. */
+function sessionUsageView(agent: StratumAgent): (UsageView & { turns: number }) | null {
+  const usage = agent.getSessionUsage();
+  return usage.turns > 0 ? usage : null;
 }
 
 export type AppAction =
@@ -1081,9 +1088,10 @@ export function App({
     todoStale: 0,
     todoCollapsed: false,
     changes: EMPTY_SUMMARY,
-    tokens: { status: 'unavailable' },
+    // Una sesión reanudada arranca con el uso que guardó.
+    tokens: agent.getTokenUsage(),
     liveUsage: null,
-    sessionUsage: null,
+    sessionUsage: sessionUsageView(agent),
   });
 
   // -------------------------------------------------------------------------
@@ -1330,7 +1338,13 @@ export function App({
   /** Repinta el status bar tras una operación que altera el historial. */
   const refreshContext = useCallback(() => {
     const u = agent.getContextUsage();
-    dispatch({ type: 'CONTEXT_UPDATE', used: u.used, max: u.max, estimated: u.estimated });
+    dispatch({
+      type: 'CONTEXT_UPDATE',
+      used: u.used,
+      max: u.max,
+      estimated: u.estimated,
+      tokens: agent.getTokenUsage(),
+    });
   }, [agent]);
 
   /**
@@ -1554,7 +1568,10 @@ export function App({
   /** Mensaje enviado con el turno cerrándose: se envía como turno nuevo al terminar. */
   const deferredSendRef = useRef<string | null>(null);
   // `/verbosity` (UX-3): cuánto detalle llevan los turnos al cerrarse.
-  const [verbosity, setVerbosity] = useState<Verbosity>('standard');
+  const [verbosity, setVerbosity] = useState<Verbosity>(agent.getConfig().tui.verbosity);
+  // `/btw` (UX-4): la pregunta lateral en curso; una a la vez y se corta al salir.
+  const sideQuestionRef = useRef<AbortController | null>(null);
+  useEffect(() => () => sideQuestionRef.current?.abort(), []);
   // Doble Esc para parar el turno (UX-3): la primera arma, la segunda cancela.
   const [escArmed, setEscArmed] = useState(false);
   const escTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -2371,6 +2388,58 @@ export function App({
         return;
       }
 
+      if (cmd === '/btw' || cmd.startsWith('/btw ')) {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const question = cmd.slice('/btw'.length).trim();
+        if (!question) {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: 'Uso: /btw <pregunta>' });
+          return;
+        }
+        // Tras un traspaso la sesión es del daemon: esta copia ya no es la suya.
+        if (ownership && ownership.state !== 'owner') {
+          dispatch({ type: 'SYSTEM_MESSAGE', text: TURN_REFUSED_HANDED_OFF });
+          return;
+        }
+        if (sideQuestionRef.current) {
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: 'Ya hay una pregunta /btw en curso: espera a su respuesta.',
+          });
+          return;
+        }
+        const controller = new AbortController();
+        sideQuestionRef.current = controller;
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `↳ /btw ${question}\n  (pensando… no entra en la conversación)`,
+        });
+        void (async () => {
+          let answer = '';
+          try {
+            for await (const text of agent.askSideQuestion(question, {
+              trace: auditor?.scope,
+              signal: controller.signal,
+            })) {
+              answer += text;
+            }
+            dispatch({
+              type: 'SYSTEM_MESSAGE',
+              text: `↳ /btw ${question}\n\n${answer.trim() || '(sin respuesta)'}`,
+            });
+          } catch (err) {
+            if (!controller.signal.aborted) {
+              dispatch({
+                type: 'SYSTEM_MESSAGE',
+                text: `✗ /btw: ${err instanceof Error ? err.message : String(err)}`,
+              });
+            }
+          } finally {
+            sideQuestionRef.current = null;
+          }
+        })();
+        return;
+      }
+
       if (cmd === '/verbosity' || cmd.startsWith('/verbosity ')) {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         const arg = cmd.slice('/verbosity'.length).trim().toLowerCase();
@@ -2390,9 +2459,17 @@ export function App({
           return;
         }
         setVerbosity(level);
+        // Se recuerda para las sesiones siguientes; si no se puede escribir, vale
+        // para esta y se dice.
+        let saved: string;
+        try {
+          saved = `Guardado en ${setUserPreference('tui.verbosity', level)}.`;
+        } catch (err) {
+          saved = `Solo para esta sesión: no se pudo guardar (${err instanceof Error ? err.message : String(err)}).`;
+        }
         dispatch({
           type: 'SYSTEM_MESSAGE',
-          text: `Detalle: ${level}. Se aplica a los turnos que se cierren a partir de ahora (los ya impresos se quedan como están).`,
+          text: `Detalle: ${level}. Se aplica a los turnos que se cierren a partir de ahora (los ya impresos se quedan como están). ${saved}`,
         });
         return;
       }
@@ -2472,7 +2549,12 @@ export function App({
         }
         try {
           const saved = sessionStore().load(id);
-          const notice = agent.replaceHistory(saved.messages, saved.activeAgent, saved.readOnly);
+          const notice = agent.replaceHistory(
+            saved.messages,
+            saved.activeAgent,
+            saved.readOnly,
+            resumedUsage(saved),
+          );
           // Lo mismo que `chat --resume` (Hito 7 / 8B): plan a medias y subagentes
           // huérfanos; estos se marcan cuando esta sesión se guarde.
           const resume = prepareSessionResume(saved, process.cwd());
@@ -2501,6 +2583,9 @@ export function App({
           lines.push(...resume.warnings);
           if (notice) lines.push(notice);
           dispatch({ type: 'SYSTEM_MESSAGE', text: lines.join('\n') });
+          // `CLEAR` no toca el uso (`/clear` no devuelve los tokens): aquí sí
+          // cambia, al de la sesión cargada.
+          dispatch({ type: 'USAGE_UPDATE', session: sessionUsageView(agent) });
           refreshContext();
         } catch (err) {
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Error al reanudar: ${String(err)}` });

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -11,7 +11,7 @@ import {
   validateConfigLayer,
   type MissingEnvVar,
 } from './loader.js';
-import { setConfigValue } from './writer.js';
+import { setConfigValue, setUserPreference } from './writer.js';
 import { setByDotPath } from './dot-path.js';
 import { stripBom } from './json-text.js';
 
@@ -181,6 +181,47 @@ describe('setConfigValue', () => {
     writeJson(file, { tools: { webSearch: { tavilyApiKey: '${TAVILY_KEY_X}' } } });
     setConfigValue('agent.maxIterations', '4', dir);
     expect(readFileSync(file, 'utf-8')).toContain('${TAVILY_KEY_X}');
+  });
+});
+
+describe('setUserPreference (/verbosity)', () => {
+  function layout(): { project: string; global: string } {
+    const project = join(dir, 'proyecto');
+    const home = join(dir, 'home');
+    mkdirSync(project);
+    mkdirSync(home);
+    return { project, global: join(home, '.stratumrc.json') };
+  }
+
+  it('sin la clave en el proyecto, va a la config global aunque el proyecto tenga fichero', () => {
+    const { project, global } = layout();
+    const projectFile = join(project, '.stratumrc.json');
+    writeJson(projectFile, { agent: { maxIterations: 3 } });
+    const before = readFileSync(projectFile, 'utf-8');
+
+    expect(setUserPreference('tui.verbosity', 'compact', project, global)).toBe(global);
+    expect(JSON.parse(readFileSync(global, 'utf-8'))).toEqual({ tui: { verbosity: 'compact' } });
+    expect(readFileSync(projectFile, 'utf-8')).toBe(before);
+  });
+
+  it('si el proyecto ya declara la clave, la cambia allí: es el que manda', () => {
+    const { project, global } = layout();
+    const projectFile = join(project, '.stratumrc.json');
+    writeJson(projectFile, { tui: { verbosity: 'verbose' } });
+
+    expect(setUserPreference('tui.verbosity', 'standard', project, global)).toBe(projectFile);
+    expect(JSON.parse(readFileSync(projectFile, 'utf-8'))).toEqual({
+      tui: { verbosity: 'standard' },
+    });
+    expect(existsSync(global)).toBe(false);
+  });
+
+  it('un valor que no valida no escribe nada', () => {
+    const { project, global } = layout();
+    expect(() => setUserPreference('tui.verbosity', 'enorme', project, global)).toThrow(
+      ConfigError,
+    );
+    expect(existsSync(global)).toBe(false);
   });
 });
 

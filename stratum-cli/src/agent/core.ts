@@ -15,7 +15,7 @@ import type {
 } from './types.js';
 import { ReactLoop, ContextManager } from './harness.js';
 import type { CompressionResult } from './harness.js';
-import { emptyTurnUsage, sumUsage, type TurnUsage } from './usage.js';
+import { emptyTurnUsage, sumUsage, type SessionUsageSnapshot, type TurnUsage } from './usage.js';
 import {
   buildAgentProfilesBlock,
   buildSystemPrompt,
@@ -41,6 +41,7 @@ import { sessionSkills, type SkillRegistry } from '../skills/registry.js';
 import { READ_SKILL_TOOL } from '../tools/skills/read-skill.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
+import { SIDE_QUESTION_TIMEOUT_MS, sideQuestionMessages } from './side-question.js';
 import {
   RuntimeInbox,
   formatUndeliveredUserMessages,
@@ -75,6 +76,7 @@ import {
 } from '../tools/environments.js';
 import { extractAndStore } from '../memory/extractor.js';
 import type { TraceScope } from '../trace/recorder.js';
+import { tracedCompletion } from '../trace/llm-call.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
 import type {
@@ -161,10 +163,11 @@ export interface StratumAgentOptions {
    */
   sessionProfile?: string;
   /**
-   * M10 — contadores de una sesión que continúa en otro anfitrión (traspaso al
-   * daemon). Los tokens, solo si el backend los había reportado: nunca se estiman.
+   * Contadores de una sesión que continúa: en otro anfitrión (M10, traspaso al
+   * daemon) o reanudada (`chat --resume`). Los tokens, solo si el backend los
+   * había reportado: nunca se estiman.
    */
-  usage?: { toolCalls: number; tokens: number | null; tokenStatus: TokenStatus };
+  usage?: SessionUsageSnapshot;
   /**
    * M11 — conversación duradera de la sesión: su `ConversationStore`, su
    * memoria de sesión y el estado de su contexto. Con ella el historial se
@@ -447,11 +450,7 @@ export class StratumAgent {
       registry.disableForSession(READ_SKILL_TOOL);
     }
 
-    if (options?.usage) {
-      this._toolCallCount = options.usage.toolCalls;
-      this._tokenStatus = options.usage.tokenStatus;
-      if (options.usage.tokenStatus === 'reported') this._sessionTokens = options.usage.tokens ?? 0;
-    }
+    if (options?.usage) this.restoreUsage(options.usage);
     if (options?.planRef) this._planRef = options.planRef;
     if (options?.resumePlan) {
       this._resumePlan = options.resumePlan;
@@ -967,16 +966,20 @@ export class StratumAgent {
    * Sustituye el historial completo (`/sessions resume <id>` en caliente).
    * A diferencia de `clearHistory`, el system prompt viene dentro de los
    * mensajes cargados: se guardaron tal cual estaban en la sesión original.
+   *
+   * Los contadores de uso pasan a ser los de la sesión cargada (`usage`), o
+   * cero si no los guardó: no se mezclan con los de la que había.
    */
   replaceHistory(
     messages: Message[],
     activeAgent?: string | null,
     readOnly?: boolean,
+    usage?: SessionUsageSnapshot,
   ): string | null {
     this.messages = [...messages];
     this.inbox.clearUserMessages();
     this.contextManager?.forgetLastUsage();
-    this._toolCallCount = 0;
+    this.restoreUsage(usage);
     this._planRef = null;
     this.todos.replace(rehydrateTodos(this.messages));
     this.tdd.replace(rehydrateTdd(this.messages, TEST_EVIDENCE_TOOL));
@@ -1195,6 +1198,37 @@ export class StratumAgent {
     return { ...this._sessionUsage, turns: this._sessionTurns };
   }
 
+  /** Contadores de uso para guardar con la sesión o traspasarla. */
+  getUsageSnapshot(): SessionUsageSnapshot {
+    const tokens = this.getTokenUsage();
+    return {
+      toolCalls: this._toolCallCount,
+      tokens: tokens.status === 'reported' ? (tokens.tokens ?? 0) : null,
+      tokenStatus: tokens.status,
+      session: this.getSessionUsage(),
+    };
+  }
+
+  /**
+   * Fija los contadores de uso a los de una sesión que continúa; sin `usage`,
+   * los deja a cero. El desglose del último turno no se restaura: es del turno,
+   * no de la sesión.
+   */
+  private restoreUsage(usage: SessionUsageSnapshot | undefined): void {
+    this._toolCallCount = usage?.toolCalls ?? 0;
+    this._tokenStatus = usage?.tokenStatus ?? 'unavailable';
+    this._sessionTokens = usage?.tokenStatus === 'reported' ? (usage.tokens ?? 0) : 0;
+    this._lastTurnUsage = null;
+    if (usage?.session) {
+      const { turns, ...breakdown } = usage.session;
+      this._sessionUsage = breakdown;
+      this._sessionTurns = turns;
+    } else {
+      this._sessionUsage = emptyTurnUsage();
+      this._sessionTurns = 0;
+    }
+  }
+
   /**
    * Desglose del turno **en curso** (UX-3), para la telemetría en vivo; `null`
    * si no hay turno abierto. Es una foto parcial: crece con cada request.
@@ -1214,6 +1248,35 @@ export class StratumAgent {
   /** Expone el provider activo para subsistemas que necesiten hacer LLM calls directas. */
   getProvider(): IProvider {
     return this.router.getActive();
+  }
+
+  /**
+   * `/btw` (UX-4): responde una pregunta lateral sobre la conversación y va
+   * devolviendo el texto. Llamada auxiliar sin tools (origen `side-question`):
+   * no toca el historial, la memoria ni el uso de la sesión, así que vale
+   * también con un turno en curso. Lanza si el provider falla.
+   */
+  async *askSideQuestion(
+    question: string,
+    opts: { trace?: TraceScope; signal?: AbortSignal } = {},
+  ): AsyncGenerator<string> {
+    const timeout = AbortSignal.timeout(SIDE_QUESTION_TIMEOUT_MS);
+    for await (const chunk of tracedCompletion({
+      origin: 'side-question',
+      provider: this.router.getActive(),
+      providerName: this.router.providerName,
+      request: {
+        messages: sideQuestionMessages(this.messages, question),
+        stream: true,
+        model: this.router.model,
+        signal: opts.signal ? AbortSignal.any([opts.signal, timeout]) : timeout,
+      },
+      trace: opts.trace,
+      cancelSignal: opts.signal,
+    })) {
+      const text = chunk.choices?.[0]?.delta?.content;
+      if (text) yield text;
+    }
   }
 
   /** Tamaño del contexto del provider activo. */

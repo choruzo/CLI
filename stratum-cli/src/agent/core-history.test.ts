@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import { StratumAgent } from './core.js';
 import { ContextManager } from './harness.js';
 import { ProviderRouter } from '../providers/router.js';
@@ -6,6 +6,8 @@ import { ToolRegistry } from '../tools/registry.js';
 import { MockProvider, makeTextRound } from '../providers/mock.js';
 import { StratumConfigSchema } from '../config/schema.js';
 import type { Message } from './types.js';
+import type { OpenAIStreamChunk } from '../providers/base.js';
+import { emptyTurnUsage } from './usage.js';
 
 const config = StratumConfigSchema.parse({
   provider: {
@@ -22,10 +24,25 @@ const config = StratumConfigSchema.parse({
   },
 });
 
-function newAgent(initialMessages?: Message[]): StratumAgent {
+/** Router cuyo provider activo responde con `rounds` (MockProvider). */
+function routerWith(rounds: OpenAIStreamChunk[][] = []): ProviderRouter {
+  const router = new ProviderRouter(config);
+  vi.spyOn(router, 'getActive').mockReturnValue(new MockProvider(rounds));
+  return router;
+}
+
+/** Una respuesta de texto que reporta `tokens` de uso. */
+function reportedRound(text: string, tokens: number): OpenAIStreamChunk[] {
+  return [
+    ...makeTextRound(text),
+    { choices: [], usage: { prompt_tokens: tokens, completion_tokens: 0, total_tokens: tokens } },
+  ];
+}
+
+function newAgent(initialMessages?: Message[], rounds?: OpenAIStreamChunk[][]): StratumAgent {
   return new StratumAgent(
     config,
-    new ProviderRouter(config),
+    routerWith(rounds),
     new ToolRegistry(),
     initialMessages ? { initialMessages } : undefined,
   );
@@ -92,6 +109,60 @@ describe('StratumAgent.replaceHistory (/sessions resume en caliente)', () => {
     agent.replaceHistory(source);
     source.push({ role: 'user', content: 'intruso' });
     expect(agent.getMessages()).toHaveLength(1);
+  });
+
+  it('el uso pasa a ser el de la sesión cargada, no la suma con la anterior', async () => {
+    const agent = newAgent([{ role: 'system', content: 'sys' }], [reportedRound('hola', 40)]);
+    for await (const _ of agent.run('pregunta')) void _;
+    expect(agent.getTokenUsage()).toEqual({ status: 'reported', tokens: 40 });
+
+    agent.replaceHistory([{ role: 'system', content: 'sys' }], null, false, {
+      toolCalls: 7,
+      tokens: 1200,
+      tokenStatus: 'reported',
+      session: { ...emptyTurnUsage(), llmCalls: 3, promptTokens: 1000, turns: 2 },
+    });
+
+    expect(agent.toolCallCount).toBe(7);
+    expect(agent.getTokenUsage()).toEqual({ status: 'reported', tokens: 1200 });
+    expect(agent.getSessionUsage()).toMatchObject({ llmCalls: 3, promptTokens: 1000, turns: 2 });
+    expect(agent.getLastTurnUsage()).toBeNull();
+  });
+
+  it('sin uso guardado, los contadores vuelven a cero y los tokens quedan sin dato', async () => {
+    const agent = newAgent([{ role: 'system', content: 'sys' }], [reportedRound('hola', 40)]);
+    for await (const _ of agent.run('pregunta')) void _;
+
+    agent.replaceHistory([{ role: 'system', content: 'sys' }]);
+
+    expect(agent.toolCallCount).toBe(0);
+    expect(agent.getTokenUsage()).toEqual({ status: 'unavailable' });
+    expect(agent.getSessionUsage()).toEqual({ ...emptyTurnUsage(), turns: 0 });
+  });
+});
+
+describe('StratumAgent — uso de una sesión reanudada (chat --resume)', () => {
+  it('arranca con los contadores guardados y sigue sumando sobre ellos', async () => {
+    const agent = new StratumAgent(
+      config,
+      routerWith([reportedRound('hola', 40)]),
+      new ToolRegistry(),
+      {
+        initialMessages: [{ role: 'system', content: 'sys' }],
+        usage: {
+          toolCalls: 2,
+          tokens: 100,
+          tokenStatus: 'reported',
+          session: { ...emptyTurnUsage(), llmCalls: 1, turns: 1 },
+        },
+      },
+    );
+    for await (const _ of agent.run('otra')) void _;
+
+    const snapshot = agent.getUsageSnapshot();
+    expect(snapshot.toolCalls).toBe(2);
+    expect(snapshot.tokens).toBe(140);
+    expect(snapshot.session).toMatchObject({ llmCalls: 2, turns: 2 });
   });
 });
 

@@ -354,6 +354,9 @@ que las anota en la traza con el mismo `ModelSpan` del loop y su **origen**:
 | `memory-extraction` | `extractAndStore` (`memory/extractor.ts`) | En segundo plano al cerrar un turno con `stop`, si `memory.autoExtract`. |
 | `context-compression` | `ContextManager` (`agent/harness.ts`) | Antes de una iteración que supera el umbral, o con `/compact`. |
 | `session-summary` | `SessionStore.save` (`session/store.ts`) | Al salir de `chat`, si la sesión tiene 5 turnos o más. |
+| `session-memory-extraction` | `conversation/extract.ts` | M11: al compactar un trozo de conversación a la memoria de sesión (sesiones del daemon). |
+| `session-memory-summary` | `conversation/extract.ts` | M11: el resumen narrativo de esa memoria de sesión. |
+| `side-question` | `StratumAgent.askSideQuestion` (`agent/side-question.ts`) | `/btw`: una pregunta lateral sin tools que no entra en la conversación. Lleva el historial, pero sin las definiciones de tools, que van antes en el prompt: su prefijo no coincide con el del loop y no hay que contar con la caché. |
 
 Cada una queda con provider, modelo, inicio, primer token, fin, `usage`, uso de caché y estado, y se
 registra aunque falle, se cancele, no produzca texto o no traiga `usage`. Instrumentarlas no cambia
@@ -413,8 +416,10 @@ de sesión; `session | prompt | none` queda pendiente de una medida contra un ba
   poco) puede desperdiciar caché recién escrita sin que lo leído baje: no se marca, porque no se
   puede demostrar. Con un backend que reportase de forma fiable lo que escribe en cada llamada
   se podría afinar; hoy solo lo hace Anthropic y no está verificado aquí.
-- **La llamada del compresor de contexto no está en la traza** (no pasa por el loop): su coste y su
-  efecto sobre la caché de un servidor de un solo slot no se ven.
+- **La llamada del compresor de contexto no reutiliza el prefijo del loop**: se manda como un único
+  mensaje `user` con un digest del historial, sin system ni tools (y puede ir a `compressorModel`).
+  Está en la traza (origen `context-compression`), así que su coste se ve, pero en un servidor de un
+  solo slot desplaza la caché del loop.
 - **`explicitBreakpoints` y `sessionAffinity` no se han probado contra un backend real**: la forma
   de la petición está cubierta por tests, pero no hay verificación de extremo a extremo con
   Anthropic ni con SGLang. Por eso son opt-in.
