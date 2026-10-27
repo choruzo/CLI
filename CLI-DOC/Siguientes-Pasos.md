@@ -292,7 +292,7 @@ rutas son de `stratum-cli/src/` salvo que se diga otra cosa.
 
 | Bloque | Estado |
 |---|---|
-| **Loop-1** — paralelismo | Parcial. El lote ya va con `Promise.allSettled` (`tools/registry.ts`, `dispatchApproved`), pero el criterio es `serialized` y no `callEffects`. Un solo `exec` local hace ir en serie todo el lote, también las lecturas. El arreglo: `callEffects(...).mutating === false` nunca serializa |
+| **Loop-1** — paralelismo | ✅ (2026-10-27). `dispatchApproved` decide con `callEffects`: lo no mutante va en un pool de `PARALLEL_READ_LIMIT` = 2 y todo lo demás (escrituras, `exec` que muta, MCP, desconocidas) es barrera y va solo, en el orden del modelo. `isSerialized` retirado |
 | **Loop-1** — aviso de tool repetida | No existe en el runtime. La regla ya está escrita como métrica (`countRepeatedCalls`, `eval/metrics.ts`); falta emitirla como `TraceScope.runtime` |
 | **Loop-1** — compactación con prefijo cacheado | No existe: `callCompressor` y la ruta M11 mandan un único `user` sin system ni tools. Sí recortan los resultados de tools antes de resumir |
 | **Eval-1** — replay | No existe: el runner siempre lanza `stratum run`, y no hay `workspace.expected/` |

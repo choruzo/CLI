@@ -323,14 +323,6 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
       );
     },
 
-    /** Local serializa (cwd, índice de git); hosts remotos van en paralelo. */
-    isSerialized(params: unknown): boolean {
-      const parsed = schema.safeParse(params);
-      if (!parsed.success) return true;
-      const target = parseTarget(parsed.data.target);
-      return !target.ok || target.target.kind === 'local';
-    },
-
     async execute(params: unknown, ctx: ToolContext): Promise<ToolResult> {
       const input = schema.parse(params);
       const resolved = parseAndResolve(input, ctx.config);

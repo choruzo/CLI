@@ -64,17 +64,10 @@ describe('exec — preflight', () => {
   });
 });
 
-describe('exec — isDestructive e isSerialized', () => {
+describe('exec — isDestructive', () => {
   it('confirmAll del host confirma cualquier comando remoto', () => {
     expect(tool.isDestructive!({ target: 'ssh:prod', command: 'ls' }, ctx())).toBe(true);
     expect(tool.isDestructive!({ target: 'ssh:bastion', command: 'ls' }, ctx())).toBe(false);
     expect(tool.isDestructive!({ command: 'rm -rf build' }, ctx())).toBe(true);
-  });
-
-  it('local serializa, ssh no, y un input inválido serializa', () => {
-    expect(tool.isSerialized!({ command: 'ls' }, ctx())).toBe(true);
-    expect(tool.isSerialized!({ target: 'ssh:prod', command: 'ls' }, ctx())).toBe(false);
-    expect(tool.isSerialized!({ nope: 1 }, ctx())).toBe(true);
-    expect(tool.isSerialized!({ target: 'bogus:x', command: 'ls' }, ctx())).toBe(true);
   });
 });

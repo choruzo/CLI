@@ -319,11 +319,6 @@ export interface ToolDefinition {
    */
   confirmAlways?(params: unknown, ctx: ToolContext): boolean;
   /**
-   * Hito 16 — serialización decidida por llamada (`exec` en local sí, en un
-   * host remoto no). Se suma a `serialized`; si lanza, la llamada se serializa.
-   */
-  isSerialized?(params: unknown, ctx: ToolContext): boolean;
-  /**
    * Hito 16 — la tool resuelve por sí misma cuando se cancela (mata su proceso
    * y devuelve un resultado `cancelled`). El dispatcher no compite con el abort
    * y solo impone una red de seguridad de unos segundos.

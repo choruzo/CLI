@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from 'vitest';
-import { ToolRegistry, ToolDispatcher } from './registry.js';
+import { ToolRegistry, ToolDispatcher, PARALLEL_READ_LIMIT } from './registry.js';
 import { z } from 'zod';
 import type { ToolDefinition, ToolContext, ToolResult } from '../agent/types.js';
 import { StratumConfigSchema } from '../config/schema.js';
@@ -130,13 +130,13 @@ describe('ToolDispatcher', () => {
     expect(order).toEqual([1, 2, 3]);
   });
 
-  it('runs non-serialized tools in parallel', async () => {
+  it('runs read-only tools in parallel', async () => {
     const reg = new ToolRegistry();
     let concurrency = 0;
     let maxConcurrency = 0;
 
     reg.register({
-      name: 'parallel_tool',
+      name: 'read_file',
       description: 'parallel',
       schema: z.object({}),
       async execute(): Promise<ToolResult> {
@@ -151,13 +151,141 @@ describe('ToolDispatcher', () => {
     const dispatcher = new ToolDispatcher(reg);
     await dispatcher.dispatch(
       [
-        { id: 'c1', name: 'parallel_tool', input: {} },
-        { id: 'c2', name: 'parallel_tool', input: {} },
+        { id: 'c1', name: 'read_file', input: {} },
+        { id: 'c2', name: 'read_file', input: {} },
       ],
       ctx,
     );
 
     expect(maxConcurrency).toBe(2);
+  });
+});
+
+describe('ToolDispatcher — Loop-1: lecturas en paralelo, escrituras de barrera', () => {
+  /**
+   * Registra tools con los nombres reales (la clasificación es de
+   * `callEffects`) que anotan inicio y fin y miden cuántas van a la vez.
+   */
+  function harness(names: string[], delay = (_id: string) => 15) {
+    const reg = new ToolRegistry();
+    const log: string[] = [];
+    let running = 0;
+    let max = 0;
+    for (const name of names) {
+      reg.register({
+        name,
+        description: name,
+        schema: z.object({ id: z.string() }).passthrough(),
+        async execute(params): Promise<ToolResult> {
+          const id = (params as { id: string }).id;
+          running++;
+          max = Math.max(max, running);
+          log.push(`start:${id}`);
+          await new Promise((r) => setTimeout(r, delay(id)));
+          log.push(`end:${id}`);
+          running--;
+          return { ok: true, output: id };
+        },
+      });
+    }
+    return { reg, log, maxConcurrency: () => max };
+  }
+
+  it(`acota a ${PARALLEL_READ_LIMIT} las lecturas en vuelo y devuelve en el orden del modelo`, async () => {
+    // La primera tarda más: si el orden fuese el de terminación, saldría la última.
+    const h = harness(['read_file', 'grep', 'glob'], (id) => (id === 'a' ? 40 : 5));
+    const results = await new ToolDispatcher(h.reg).dispatch(
+      [
+        { id: 'c1', name: 'read_file', input: { id: 'a' } },
+        { id: 'c2', name: 'grep', input: { id: 'b' } },
+        { id: 'c3', name: 'glob', input: { id: 'c' } },
+        { id: 'c4', name: 'read_file', input: { id: 'd' } },
+      ],
+      ctx,
+    );
+    expect(h.maxConcurrency()).toBe(PARALLEL_READ_LIMIT);
+    expect(results.map((r) => r.callId)).toEqual(['c1', 'c2', 'c3', 'c4']);
+    expect(results.map((r) => r.result)).toEqual(
+      ['a', 'b', 'c', 'd'].map((output) => ({ ok: true, output })),
+    );
+  });
+
+  it('un exec local de solo lectura ya no pone en serie a las lecturas', async () => {
+    const h = harness(['exec', 'read_file']);
+    await new ToolDispatcher(h.reg).dispatch(
+      [
+        { id: 'c1', name: 'exec', input: { id: 'a', command: 'git status' } },
+        { id: 'c2', name: 'read_file', input: { id: 'b' } },
+      ],
+      ctx,
+    );
+    expect(h.maxConcurrency()).toBe(2);
+  });
+
+  it('una escritura es barrera: espera a las lecturas previas y las siguientes la esperan', async () => {
+    const h = harness(['read_file', 'write_file', 'edit_file']);
+    await new ToolDispatcher(h.reg).dispatch(
+      [
+        { id: 'c1', name: 'read_file', input: { id: 'r1' } },
+        { id: 'c2', name: 'read_file', input: { id: 'r2' } },
+        { id: 'c3', name: 'write_file', input: { id: 'w1' } },
+        { id: 'c4', name: 'edit_file', input: { id: 'w2' } },
+        { id: 'c5', name: 'read_file', input: { id: 'r3' } },
+      ],
+      ctx,
+    );
+    const at = (e: string) => h.log.indexOf(e);
+    expect(at('start:w1')).toBeGreaterThan(Math.max(at('end:r1'), at('end:r2')));
+    expect(at('start:w2')).toBeGreaterThan(at('end:w1'));
+    expect(at('start:r3')).toBeGreaterThan(at('end:w2'));
+  });
+
+  it('exec que muta, MCP y tools desconocidas van en serie', async () => {
+    const h = harness(['exec', 'mcp__srv__do', 'custom_tool']);
+    await new ToolDispatcher(h.reg).dispatch(
+      [
+        { id: 'c1', name: 'exec', input: { id: 'a', command: 'npm install' } },
+        { id: 'c2', name: 'mcp__srv__do', input: { id: 'b' } },
+        { id: 'c3', name: 'custom_tool', input: { id: 'c' } },
+      ],
+      ctx,
+    );
+    expect(h.maxConcurrency()).toBe(1);
+  });
+
+  it('una lectura `serialized` es barrera aunque no mute', async () => {
+    const reg = new ToolRegistry();
+    let running = 0;
+    let max = 0;
+    for (const [name, serialized] of [
+      ['read_file', false],
+      ['read_skill', true],
+    ] as const) {
+      reg.register(
+        makeTool(
+          name,
+          { ok: true, output: '' },
+          {
+            serialized,
+            async execute(): Promise<ToolResult> {
+              running++;
+              max = Math.max(max, running);
+              await new Promise((r) => setTimeout(r, 10));
+              running--;
+              return { ok: true, output: '' };
+            },
+          },
+        ),
+      );
+    }
+    await new ToolDispatcher(reg).dispatch(
+      [
+        { id: 'c1', name: 'read_file', input: {} },
+        { id: 'c2', name: 'read_skill', input: {} },
+      ],
+      ctx,
+    );
+    expect(max).toBe(1);
   });
 });
 
@@ -287,30 +415,6 @@ describe('ToolDispatcher — Hito 16', () => {
     expect(fifth[0]!.result).toMatchObject({ error: 'boom', recoverable: true });
     const sixth = await call('6'); // fallo → 3: alcanza el límite
     expect(sixth[0]!.result).toMatchObject({ recoverable: false });
-  });
-
-  it('un isSerialized que lanza serializa la tanda', async () => {
-    const order: number[] = [];
-    const reg = new ToolRegistry();
-    reg.register({
-      name: 'maybe_serial',
-      description: 'x',
-      schema: z.object({ n: z.number() }),
-      isSerialized() {
-        throw new Error('bad hook');
-      },
-      async execute(params): Promise<ToolResult> {
-        const n = (params as { n: number }).n;
-        await new Promise((r) => setTimeout(r, 10 - n));
-        order.push(n);
-        return { ok: true, output: String(n) };
-      },
-    });
-    await new ToolDispatcher(reg).dispatch(
-      [1, 2, 3].map((n) => ({ id: `c${n}`, name: 'maybe_serial', input: { n } })),
-      ctx,
-    );
-    expect(order).toEqual([1, 2, 3]);
   });
 
   it('structuredCancellation: el resultado cancelled de la tool llega intacto y no suma', async () => {

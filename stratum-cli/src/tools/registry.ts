@@ -27,6 +27,7 @@ import { isJobTool } from '../jobs/types.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
 import { environmentGate, readOnlyVeto, type EnvironmentGate } from './call-policy.js';
+import { callEffects } from './environments.js';
 
 const log = getLogger('tools');
 
@@ -46,16 +47,26 @@ function redactResult(result: ToolResult, ctx: ToolContext): ToolResult {
     : { ...result, error: redactText(result.error, ctx.config) };
 }
 
-/** `serialized` estático o `isSerialized` por llamada; un hook que lanza serializa. */
-function wantsSerial(tool: ToolDefinition | undefined, input: unknown, ctx: ToolContext): boolean {
-  if (!tool) return false;
-  if (tool.serialized === true) return true;
-  if (!tool.isSerialized) return false;
+/** Loop-1 — cuántas llamadas de solo lectura de un lote van a la vez. */
+export const PARALLEL_READ_LIMIT = 2;
+
+/**
+ * Loop-1 — ¿puede la llamada ir en el pool de lecturas? Solo lo que
+ * `callEffects` sabe que no muta (lecturas, `exec` read-only en cualquier
+ * target) y no se declara `serialized`. Todo lo demás —escrituras, MCP, lo
+ * desconocido— es una barrera: va solo, en el orden del modelo. Si clasificar
+ * lanza, barrera.
+ */
+function runsConcurrently(tool: ToolDefinition | undefined, call: ToolCallReady): boolean {
+  if (tool?.serialized === true) return false;
   try {
-    return tool.isSerialized(input, ctx);
+    const input =
+      call.input && typeof call.input === 'object' ? (call.input as Record<string, unknown>) : {};
+    const effects = callEffects(call.name, input);
+    return effects.known && !effects.mutating;
   } catch (err) {
-    log.warn('isSerialized threw, serializing', { tool: tool.name, err });
-    return true;
+    log.warn('callEffects threw, serializing', { tool: call.name, err });
+    return false;
   }
 }
 
@@ -620,34 +631,56 @@ export class ToolDispatcher {
       return [await this.dispatchOne(calls[0]!, ctx)];
     }
 
-    const hasSerializedCall = calls.some((c) =>
-      wantsSerial(this.registry.get(c.name), c.input, ctx),
-    );
-
-    if (hasSerializedCall) {
-      const results: DispatchResult[] = [];
-      for (const call of calls) {
-        results.push(await this.dispatchOne(call, ctx));
-      }
-      return results;
-    }
-
-    const settled = await Promise.allSettled(calls.map((call) => this.dispatchOne(call, ctx)));
-
-    return settled.map((r, i) => {
-      if (r.status === 'fulfilled') return r.value;
+    // Loop-1: las lecturas seguidas forman un grupo que corre en un pool de
+    // PARALLEL_READ_LIMIT; una llamada que no es de solo lectura espera a que
+    // el grupo termine y corre sola. Así una lectura posterior a una escritura
+    // ve lo escrito, y los resultados quedan en el orden del modelo.
+    const results: DispatchResult[] = new Array(calls.length);
+    let group: number[] = [];
+    for (let i = 0; i < calls.length; i++) {
       const call = calls[i]!;
+      if (runsConcurrently(this.registry.get(call.name), call)) {
+        group.push(i);
+        continue;
+      }
+      await this.dispatchPool(calls, group, results, ctx);
+      group = [];
+      results[i] = await this.settleOne(call, ctx);
+    }
+    await this.dispatchPool(calls, group, results, ctx);
+    return results;
+  }
+
+  /** Ejecuta `indices` de `calls` con a lo sumo PARALLEL_READ_LIMIT en vuelo. */
+  private async dispatchPool(
+    calls: ToolCallReady[],
+    indices: number[],
+    results: DispatchResult[],
+    ctx: ToolContext,
+  ): Promise<void> {
+    let next = 0;
+    const worker = async (): Promise<void> => {
+      while (next < indices.length) {
+        const i = indices[next++]!;
+        results[i] = await this.settleOne(calls[i]!, ctx);
+      }
+    };
+    const workers = Math.min(PARALLEL_READ_LIMIT, indices.length);
+    await Promise.all(Array.from({ length: workers }, worker));
+  }
+
+  /** `dispatchOne` sin rechazos: una excepción es un error recuperable de esa llamada. */
+  private async settleOne(call: ToolCallReady, ctx: ToolContext): Promise<DispatchResult> {
+    try {
+      return await this.dispatchOne(call, ctx);
+    } catch (err) {
       return {
         callId: call.id,
         toolName: call.name,
-        result: {
-          ok: false,
-          error: String((r as PromiseRejectedResult).reason),
-          recoverable: true,
-        },
+        result: { ok: false, error: String(err), recoverable: true },
         durationMs: 0,
       };
-    });
+    }
   }
 
   private recordFailure(name: string): void {
