@@ -355,8 +355,9 @@ revisarlas antes de copiar nada.
   - Gemma 4 12B no sirvió: llama.cpp `31385c9ce` revienta con `bad allocation` pasados ~11K tokens.
     Los `launch-*.ps1` de `G:\models` que llevan `--mlock` ya no arrancan con ese build.
 - **Pendiente:**
-  - Decidir si la instrucción va pegada al último resultado de tool (conserva el prefijo, pero mete
-    una instrucción del runtime en un canal de datos) o se deja la opción como está.
+  - ~~Decidir si la instrucción va pegada al último resultado de tool~~ Decidido (2026-10-28): **no**.
+    Mete una instrucción del runtime en un canal de datos que no es de fiar, y el beneficio es pequeño
+    (opción opt-in, solo en el caso favorable). La causa es la plantilla, no el cliente.
   - Comprobar que el resumen es igual de bueno viendo el historial entero.
   - La misma plantilla rompería la caché en cada turno nuevo de `chat` con Qwen3: está por medir.
   - Que la traza compare el prefijo de la compresión con el del loop: hoy lo compara por origen y

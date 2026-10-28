@@ -443,8 +443,10 @@ cómo se pintan las tools. El cliente no puede verlo: lo que manda sí es prefij
 servidor tokeniza no.
 
 Con la instrucción pegada al **último resultado de tool**, en lugar de en un `user` nuevo, el
-prompt renderizado comparte el 96,5 % con el del loop y solo diverge al final. Es una opción por
-decidir: pone una instrucción del runtime dentro de un canal que el modelo trata como datos.
+prompt renderizado comparte el 96,5 % con el del loop y solo diverge al final. **Descartado**
+(2026-10-28): pondría una instrucción del runtime dentro de un resultado de tool, que es un canal de
+datos no fiable (la misma frontera por la que el steering va como bloque propio), a cambio de un
+beneficio pequeño en una opción opt-in.
 
 Conclusión: `agent.compressionReusePrefix` **sigue apagada por defecto**. Activada, en un backend
 cuya plantilla depende de la posición del último `user` (Qwen3 y derivados), empeora lo que
