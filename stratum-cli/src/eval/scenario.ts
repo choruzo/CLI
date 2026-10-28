@@ -23,6 +23,7 @@ export const SCENARIO_GROUPS = [
   'auxiliary',
   'jobs',
   'steering',
+  'replay',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
 
@@ -151,6 +152,21 @@ const CheckSchema = z.discriminatedUnion('type', [
     .strict(),
   z.object({ type: z.literal('file_exists'), path: relPath, ...base }).strict(),
   z.object({ type: z.literal('file_absent'), path: relPath, ...base }).strict(),
+  /**
+   * El mundo al terminar: cada fichero de `files` existe con ese contenido
+   * exacto y, con `strict`, no hay ninguno más (sin contar `.git/`,
+   * `.stratum/`, `node_modules/` ni la `.stratumrc.json` del runner). Va
+   * inline, como `setup.files`: una carpeta de esperados junto al escenario la
+   * cargaría `loadScenarios` como escenarios.
+   */
+  z
+    .object({
+      type: z.literal('workspace_expected'),
+      files: z.record(relPath, z.string()),
+      strict: z.boolean().default(true),
+      ...base,
+    })
+    .strict(),
   z
     .object({
       type: z.literal('file_contains'),

@@ -16,6 +16,7 @@ stratum eval run --difficulty adversarial # solo los casos difíciles
 stratum eval baseline save                # la última ejecución pasa a ser la referencia
 stratum eval compare baseline current     # ¿hubo regresión respecto a la referencia?
 stratum eval run --mock --baseline mock   # ejecuta y compara (exit 1 si regresa)
+stratum eval import <sesión> --setup antes/ --expected despues/   # una sesión real como escenario
 stratum stats --days 7                    # estadísticas de tus sesiones reales
 ```
 
@@ -95,7 +96,7 @@ desconocidas se rechazan.
 | Campo | Qué es |
 |---|---|
 | `id` | Minúsculas, dígitos y guiones. Único. |
-| `group` | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` |
+| `group` | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` · `replay` |
 | `difficulty` | `basic` (por defecto) · `intermediate` · `adversarial`. Ver [Niveles de dificultad](#niveles-de-dificultad). |
 | `requires` | Si no se cumple, el escenario queda en **SKIP** (no cuenta como fallo): `platform` y ejecutables en el PATH. |
 | `setup.files` | Ficheros de partida, ruta relativa → contenido. No pueden salir del workspace. |
@@ -148,6 +149,7 @@ trayectoria es el guion y sí hay que comprobarla. `stratum eval list` avisa de 
 | `file_exists` / `file_absent` | `path` | el fichero existe / no existe en el workspace |
 | `file_contains` | `path`, `value`, `negate` | el fichero contiene (o no) el texto; si no existe, falla |
 | `file_matches` | `path`, `pattern`, `flags`, `negate` | el fichero casa con la regex |
+| `workspace_expected` | `files` (ruta → contenido), `strict` (true) | cada fichero existe con ese contenido **exacto** y, con `strict`, no hay ninguno más (no cuentan `.git/`, `.stratum/`, `node_modules/` ni la `.stratumrc.json` del runner). Es el mundo, no la trayectoria: vale en los dos modos. Va inline, como `setup.files`: una carpeta de esperados junto al escenario la cargaría `loadScenarios` como escenarios |
 | `command` | `run` (argv), `exitCode` (0), `stdoutContains` | el comando, lanzado en el workspace, sale con ese código |
 | `tool_called` | `tool`, `input` (regex sobre el JSON de argumentos), `status` (`any`·`ok`·`error`·`executed`), `min` (1), `max` | el nº de llamadas en la traza está en el rango |
 | `tool_output_contains` | `value`, `tool`, `negate` | la salida de alguna tool —lo que llegó al modelo— contiene (o no) el texto. Con `negate`, comprueba que un secreto no se filtró por ninguna vía |
@@ -228,6 +230,39 @@ Los dos guiones tienen que consumirse exactos. El runner deja `memory.autoExtrac
 que el escenario lo pida así, y conviene que la extracción devuelva `[]`: una decisión extraída se
 guardaría con embeddings, que es otra dependencia. `auxiliaryScript` solo entra en la huella del
 escenario si se usa.
+
+### Replay de una sesión grabada (`stratum eval import`)
+
+Convierte la traza de una sesión real en un escenario del grupo `replay`: lo que respondió el
+modelo pasa a ser el `script` y el escenario puntúa el workspace que dejó la sesión
+(`workspace_expected`, `strict`). Corre sin modelo con `--mock` y sirve para fijar un
+comportamiento observado y medir un cambio del runtime contra él.
+
+```bash
+stratum eval import sess_20261028_144055_qtx --setup antes/ --expected despues/
+stratum eval import ruta/a/traza.jsonl --setup antes/ --expected despues/ --id replay-mi-caso --out evals/replay-mi-caso.json
+```
+
+`<traza>` es un id de sesión (en `trace.dir`) o una ruta a un `.jsonl`. La traza no guarda el
+workspace, así que se pasan las dos carpetas: `--setup` (cómo estaba antes, va a `setup.files`) y
+`--expected` (cómo quedó). Solo texto UTF-8, sin enlaces, hasta 500 ficheros y 2 MB por carpeta.
+Por defecto escribe `.stratum/evals/replay/<id>.json` y no reemplaza nada sin `--force`.
+
+Qué se convierte: las llamadas del loop (agente y subagentes) por orden de inicio; los turnos
+siguientes, como `followUps`; las rutas absolutas bajo el cwd grabado, reescritas como relativas.
+Las llamadas auxiliares se descartan (no forman parte del turno). **Falla cerrado**, con todos los
+motivos juntos, ante lo que el modelo de guion no puede repetir tal cual:
+
+- argumentos de tool **recortados** por `trace.maxFieldChars`, **redactados** o que no son JSON;
+- llamadas al modelo con error o reintento (la traza no guarda el código HTTP), o sin cerrar;
+- llamadas del loop **solapadas** (subagentes en paralelo: sin orden fijo por posición);
+- una compresión de contexto (depende de la ventana, que en el runner es otra);
+- lo que contestó una persona: confirmaciones aprobadas, preguntas respondidas, planes, steering.
+  Una confirmación denegada o bloqueada sí vale: sin terminal también se bloquea;
+- una sesión reanudada en otro proceso (varias cabeceras `meta`).
+
+La config de la sesión grabada (perfil, entornos, flags de `run`) no está en la traza: el replay
+corre con la del runner, y si eso cambia la trayectoria lo dice el criterio `mock_script`.
 
 ### Hosts SSH simulados (`setup.ssh`)
 

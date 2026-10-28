@@ -1,6 +1,8 @@
 import { Command } from 'commander';
-import { readFileSync } from 'fs';
+import { existsSync, readFileSync } from 'fs';
 import { cpus } from 'os';
+import { join, resolve } from 'path';
+import { writeFileAtomic } from '../../config/writer.js';
 import { loadConfig } from '../../config/loader.js';
 import { stripBom } from '../../config/json-text.js';
 import { ProviderRouter } from '../../providers/router.js';
@@ -20,7 +22,11 @@ import {
   formatScenarioList,
   scenarioWarnings,
 } from '../../eval/report.js';
+import { ReplayError, scenarioFromTrace } from '../../eval/replay.js';
 import { runEval, type EvalProvider } from '../../eval/runner.js';
+import { readWorkspaceDir, WorkspaceReadError } from '../../eval/workspace.js';
+import { readTraceFile } from '../../trace/read.js';
+import { isTraceId, traceFilePath } from '../../trace/store.js';
 import {
   bundledScenariosDir,
   DIFFICULTIES,
@@ -457,6 +463,73 @@ const baselineSub = new Command('baseline')
       }),
   );
 
+interface ImportOpts {
+  setup: string;
+  expected: string;
+  id?: string;
+  title?: string;
+  out?: string;
+  force?: boolean;
+}
+
+const importSub = new Command('import')
+  .description(
+    'Turn a recorded session trace into a replay scenario: its model responses become the ' +
+      '--mock script and the scenario scores the final workspace',
+  )
+  .argument('<trace>', 'session id (in trace.dir) or path to a .jsonl trace')
+  .requiredOption('--setup <dir>', 'workspace as it was before the session (setup.files)')
+  .requiredOption('--expected <dir>', 'workspace as the session left it (workspace_expected)')
+  .option('--id <id>', 'scenario id (default: replay-<session id>)')
+  .option('--title <text>', 'scenario title')
+  .option('--out <file>', 'where to write it (default: .stratum/evals/replay/<id>.json)')
+  .option('--force', 'overwrite an existing file')
+  .action((trace: string, opts: ImportOpts) => {
+    let file = resolve(trace);
+    if (!existsSync(file)) {
+      const fromId = isTraceId(trace) ? traceFilePath(loadConfig(), trace) : null;
+      if (!fromId || !existsSync(fromId)) fail(`No existe la traza "${trace}".`);
+      file = fromId!;
+    }
+    const records = readTraceFile(file);
+    if (records.length === 0) fail(`${file}: traza vacía o ilegible.`);
+    const sessionId = records.find((r) => r.t === 'meta')?.sessionId ?? '';
+    const id =
+      opts.id ??
+      `replay-${sessionId
+        .toLowerCase()
+        .replace(/[^a-z0-9-]/g, '-')
+        .slice(0, 40)}`;
+
+    let setup: Record<string, string>;
+    let expected: Record<string, string>;
+    try {
+      setup = readWorkspaceDir(resolve(opts.setup));
+      expected = readWorkspaceDir(resolve(opts.expected));
+    } catch (err) {
+      if (err instanceof WorkspaceReadError) return fail(`Workspace: ${err.message}`);
+      throw err;
+    }
+    let built: ReturnType<typeof scenarioFromTrace>;
+    try {
+      built = scenarioFromTrace(records, { id, title: opts.title, setup, expected });
+    } catch (err) {
+      if (err instanceof ReplayError) return fail(`${file}: ${err.message}`);
+      throw err;
+    }
+    const out = opts.out
+      ? resolve(opts.out)
+      : join(projectScenariosDir(process.cwd()), 'replay', `${id}.json`);
+    if (existsSync(out) && !opts.force) fail(`${out} ya existe (usa --force para reemplazarlo).`);
+    writeFileAtomic(out, built.json);
+    for (const note of built.notes) process.stderr.write(`[eval] ${note}\n`);
+    process.stderr.write(
+      `Escenario «${id}»: ${built.scenario.script?.length ?? 0} respuestas del modelo, ` +
+        `${Object.keys(expected).length} ficheros esperados. Pruébalo con: stratum eval run --mock ${id}\n`,
+    );
+    process.stdout.write(`${out}\n`);
+  });
+
 export const evalCommand = new Command('eval')
   .description('Run reproducible scenarios, score them from the trace and compare runs')
   .addCommand(runSub)
@@ -464,4 +537,5 @@ export const evalCommand = new Command('eval')
   .addCommand(reportSub)
   .addCommand(runsSub)
   .addCommand(compareSub)
-  .addCommand(baselineSub);
+  .addCommand(baselineSub)
+  .addCommand(importSub);

@@ -1,0 +1,85 @@
+{
+  "id": "replay-rename-across-files",
+  "group": "replay",
+  "title": "Replay: renombrar una función en todo el proyecto",
+  "description": "Sesión sess_20261028_144055_qtx reproducida desde su traza: 4 respuestas del modelo como guion. Corre sin modelo (--mock) y puntúa el workspace que dejó la sesión.",
+  "difficulty": "basic",
+  "setup": {
+    "files": {
+      "lib/cart.js": "function calcTotal(items) {\n  return items.reduce((sum, item) => sum + item.price * item.qty, 0);\n}\n\nmodule.exports = { calcTotal };\n",
+      "lib/report.js": "const { calcTotal } = require('./cart');\n\nfunction report(items) {\n  return `Total: ${calcTotal(items)}`;\n}\n\nmodule.exports = { report };\n",
+      "main.js": "const { calcTotal } = require('./lib/cart');\nconst { report } = require('./lib/report');\n\nconst items = [{ price: 10, qty: 3 }, { price: 6, qty: 2 }];\nconsole.log(calcTotal(items));\nconsole.log(report(items));\n"
+    }
+  },
+  "input": "Renombra la función `calcTotal` a `computeTotal` en todo el proyecto y comprueba que `node main.js` sigue funcionando.",
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "grep",
+          "args": {
+            "pattern": "calcTotal"
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "lib/cart.js",
+            "old_string": "calcTotal",
+            "new_string": "computeTotal",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "lib/report.js",
+            "old_string": "calcTotal",
+            "new_string": "computeTotal",
+            "replace_all": true
+          }
+        },
+        {
+          "name": "edit_file",
+          "args": {
+            "path": "main.js",
+            "old_string": "calcTotal",
+            "new_string": "computeTotal",
+            "replace_all": true
+          }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "exec",
+          "args": {
+            "command": "node main.js"
+          }
+        }
+      ]
+    },
+    {
+      "text": "Renombrada en los tres ficheros; `node main.js` imprime 42."
+    }
+  ],
+  "expect": {
+    "description": "El workspace queda como al terminar la sesión grabada.",
+    "checks": [
+      {
+        "type": "workspace_expected",
+        "files": {
+          "lib/cart.js": "function computeTotal(items) {\n  return items.reduce((sum, item) => sum + item.price * item.qty, 0);\n}\n\nmodule.exports = { computeTotal };\n",
+          "lib/report.js": "const { computeTotal } = require('./cart');\n\nfunction report(items) {\n  return `Total: ${computeTotal(items)}`;\n}\n\nmodule.exports = { report };\n",
+          "main.js": "const { computeTotal } = require('./lib/cart');\nconst { report } = require('./lib/report');\n\nconst items = [{ price: 10, qty: 3 }, { price: 6, qty: 2 }];\nconsole.log(computeTotal(items));\nconsole.log(report(items));\n"
+        },
+        "strict": true
+      }
+    ]
+  }
+}

@@ -376,6 +376,26 @@ describe('criterios', () => {
     );
   });
 
+  it('workspace_expected: contenido exacto y, con strict, ningún fichero más', async () => {
+    mkdirSync(join(work, '.stratum'), { recursive: true });
+    writeFileSync(join(work, '.stratum', 'x.md'), 'interno');
+    writeFileSync(join(work, '.stratumrc.json'), '{}');
+    const same = { type: 'workspace_expected', files: { 'out.txt': 'timeout = 60\n' } };
+    expect(await passes(same)).toBe(true);
+
+    const [diff] = await run({
+      type: 'workspace_expected',
+      files: { 'out.txt': 'timeout = 30\n', 'sub/a.txt': 'a' },
+    });
+    expect(diff!.pass).toBe(false);
+    expect(diff!.detail).toBe('out.txt difiere (línea 1); falta sub/a.txt');
+
+    writeFileSync(join(work, 'extra.txt'), 'x');
+    const [extra] = await run(same);
+    expect(extra!.detail).toBe('sobra extra.txt');
+    expect(await passes({ ...same, strict: false })).toBe(true);
+  });
+
   it('comandos sin shell en el workspace', async () => {
     const node = process.execPath;
     expect(await passes({ type: 'command', run: [node, '-e', 'process.exit(0)'] })).toBe(true);

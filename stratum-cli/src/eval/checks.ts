@@ -15,6 +15,7 @@ import {
 } from '../trace/model.js';
 import { stepExecuted, type RunMetrics } from './metrics.js';
 import type { ForbiddenRule, ScenarioCheck } from './scenario.js';
+import { firstDifferingLine, listWorkspace } from './workspace.js';
 
 export type EvalMode = 'mock' | 'live';
 
@@ -135,6 +136,27 @@ async function evaluate(check: ScenarioCheck, ctx: CheckContext): Promise<CheckR
       return done(`existe ${check.path}`, existsSync(join(ctx.workDir, check.path)), 'no existe');
     case 'file_absent':
       return done(`no existe ${check.path}`, !existsSync(join(ctx.workDir, check.path)), 'existe');
+    case 'workspace_expected': {
+      const expected = Object.entries(check.files);
+      const label =
+        `el workspace queda como se espera (${expected.length} ficheros` +
+        `${check.strict ? ', ninguno más' : ''})`;
+      const problems: string[] = [];
+      for (const [path, want] of expected) {
+        const got = readWorkFile(ctx, path);
+        if (got === null) problems.push(`falta ${path}`);
+        else if (got !== want)
+          problems.push(`${path} difiere (línea ${firstDifferingLine(got, want)})`);
+      }
+      if (check.strict) {
+        for (const entry of listWorkspace(ctx.workDir)) {
+          if (!Object.hasOwn(check.files, entry.path)) problems.push(`sobra ${entry.path}`);
+        }
+      }
+      const shown = problems.slice(0, 5).join('; ');
+      const more = problems.length > 5 ? ` (y ${problems.length - 5} más)` : '';
+      return done(label, problems.length === 0, shown + more);
+    }
     case 'file_contains': {
       const text = readWorkFile(ctx, check.path);
       const label = `${check.path} ${check.negate ? 'no ' : ''}contiene "${check.value}"`;
