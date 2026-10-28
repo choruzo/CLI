@@ -299,15 +299,17 @@ rutas son de `stratum-cli/src/` salvo que se diga otra cosa.
 | Bloque | Estado |
 |---|---|
 | **Loop-1** — paralelismo | ✅ (2026-10-27). `dispatchApproved` decide con `callEffects`: lo no mutante va en un pool de `PARALLEL_READ_LIMIT` = 2 y todo lo demás (escrituras, `exec` que muta, MCP, desconocidas) es barrera y va solo, en el orden del modelo. `isSerialized` retirado |
-| **Loop-1** — aviso de tool repetida | No existe en el runtime. La regla ya está escrita como métrica (`countRepeatedCalls`, `eval/metrics.ts`); falta emitirla como `TraceScope.runtime` |
-| **Loop-1** — compactación con prefijo cacheado | No existe: `callCompressor` y la ruta M11 mandan un único `user` sin system ni tools. Sí recortan los resultados de tools antes de resumir |
-| **Eval-1** — replay | No existe: el runner siempre lanza `stratum run`, y no hay `workspace.expected/` |
+| **Loop-1** — aviso de tool repetida | ✅ (2026-10-28). Regla única en `agent/repeat.ts` (`RepeatTracker`), compartida con `countRepeatedCalls`. Sin veto: bloque `<repeated_tool_call>` al final del lote con `appendRuntimeNotice` y evento runtime `repeat` (no suma `warnings`). Solo cuenta lo ejecutado (`DispatchResult.notRun`) y la ventana se cierra tras delegar o preguntar. La métrica cuenta además lo vetado y las tools de control |
+| **Loop-1** — doble conteo en M11 | ✅ (2026-10-28). `compactSession` sumaba `overheadTokens()` a un `used` que ya incluía las tools: compactaba antes de tiempo. Ahora `sessionInput` calibra contra mensajes + tools, como `getContextReport`. Queda: `overheadTokens()` mide el toolset `normal` sin filtro de perfil ni plan |
+| **Loop-1** — compactación con prefijo cacheado | No existe, y no es solo fontanería: las dos rutas mandan un digest recompuesto (no el historial), así que reutilizar el prefijo cambia lo que ve el resumen y exige eval. El cliente no soporta `tool_choice` (fijo `'auto'`) y `tracedCompletion` descarta tool calls; el `sessionId` de M11 no llega al `CompletionRequest` (`conversation/extract.ts`) |
+| **Eval-1** — replay | No existe, pero `--mock` ya es un replay posicional (`eval/mock-llm.ts`): basta derivar el `script` de una traza y un criterio `workspace_expected`. Trampas: `walk()` cargaría los `.json` del esperado, rutas absolutas de la grabación, argumentos truncados o redactados |
 | `sessions.revert` en Dot/Desktop | No: ningún bridge lo expone. Desktop no puede aprobar (le falta el broker nativo) |
 | Plugins (R1 → PL1) | Sin código. R1 propone tomar como unidad de confianza el candidato resuelto (todos los ficheros que el entry puede cargar) |
 | Hito 18 | Sin tools. Los nombres ya están reservados en `INFRA_TOOLS` (`agent/session-profile.ts`) |
 
-Orden que se propone desde aquí: **Loop-1** (paralelismo → aviso de repetición → compactación, esta última
-medida con eval), **Eval-1**, y después plugins, el Hito 18 y el revert en Dot.
+Orden que se propone desde aquí: **Eval-1**, la **compactación con prefijo cacheado** medida con él, y
+después plugins, el Hito 18 y el revert en Dot (que choca con dos invariantes de Dot: la confirmación nativa
+está construida sobre una solicitud pendiente y `ApproverMethod` no admite `sessions.*`).
 
 ## Anexo — fuentes
 

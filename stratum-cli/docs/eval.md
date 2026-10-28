@@ -400,6 +400,11 @@ mismos argumentos que una llamada anterior del mismo agente y turno, **sin que e
 ejecutado nada que cambie el estado**. Releer un fichero tras editarlo no cuenta; leerlo dos veces
 seguidas, o relanzar tal cual el comando que acaba de fallar, sí. «Innecesaria» en sentido amplio
 (un paso que sobraba) no se intenta detectar: para eso están las cotas `metric` por escenario.
+La regla vive en `src/agent/repeat.ts` y es la misma con la que el loop avisa al modelo de una
+llamada repetida (evento de runtime `repeat`, que no suma `warnings`). Los dos números pueden
+diferir. La métrica cuenta todos los pasos de tool, también los vetados y las tools de control. El
+aviso solo cuenta lo que llegó a ejecutarse, y además cierra la ventana tras delegar o preguntar al
+usuario.
 
 ### Métricas derivadas (`summary`)
 

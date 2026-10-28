@@ -321,6 +321,78 @@ describe('ContextManager — usage tras tool results', () => {
     expect(chunk.filter((m) => m.role === 'user')).toHaveLength(6);
   });
 
+  describe('M11: las tools se cuentan una sola vez', () => {
+    const budget = () => ({
+      window: 12_000,
+      reserveOutput: 2_000,
+      usableInput: 10_000,
+      recent: 6_000,
+      sessionMemory: 2_000,
+      projectMemory: 0,
+      globalMemory: 0,
+      compactAt: 0.65,
+      target: 0.5,
+    });
+    // ≈ 5 000 tokens de proxy de mensajes; las tools, otros 1 000.
+    const history = (): import('./types.js').Message[] => {
+      const messages: import('./types.js').Message[] = [{ role: 'system', content: 'sys' }];
+      for (let i = 0; i < 10; i++) {
+        messages.push({ role: 'user', content: 'u'.repeat(1_750) }); // 500 tokens
+        messages.push({ role: 'assistant', content: 'ok' });
+      }
+      return messages;
+    };
+    const session = (
+      onCompact: (tokens: { before: number; after: number }) => void,
+    ): import('./harness.js').SessionCompactor => ({
+      budget,
+      overheadTokens: () => 1_000,
+      record: () => {},
+      compact: async (_chunk, tokens) => {
+        onCompact(tokens);
+        return {
+          ok: true,
+          memoryVersion: 1,
+          report: { added: 0, superseded: 0, completed: 0, conflicts: 0, rejected: 0 },
+        };
+      },
+      applyMemory: () => {},
+      committed: () => {},
+    });
+
+    it('prompt_tokens ya incluye las tools: no compacta por debajo del umbral', async () => {
+      const cm = new ContextManager(100_000, 1, undefined, undefined, 0.8);
+      const messages = history();
+      const proxy = cm.usage(messages).used;
+      // El provider cuenta mensajes + tools: 6 000 de 10 000 (60 % < 65 %).
+      cm.recordUsage(proxy + 1_000, messages);
+      let called = false;
+      cm.attachSession(session(() => (called = true)));
+      const result = await cm.maybeCompress(messages);
+      // Antes sumaba las tools encima (7 000, 70 %) y compactaba.
+      expect(result).toEqual({ kind: 'skipped' });
+      expect(called).toBe(false);
+    });
+
+    it('tokensBefore y tokensAfter no inflan con las tools', async () => {
+      const cm = new ContextManager(100_000, 1, undefined, undefined, 0.8);
+      const messages = history();
+      const proxy = cm.usage(messages).used;
+      cm.recordUsage(proxy + 1_000, messages);
+      let seen: { before: number; after: number } | undefined;
+      cm.attachSession(session((t) => (seen = t)));
+      const result = await cm.compress(messages);
+      expect(seen?.before).toBe(proxy + 1_000);
+      expect(result.kind).toBe('compressed');
+      if (result.kind !== 'compressed') return;
+      expect(result.tokensBefore).toBe(proxy + 1_000);
+      // Tras quitar lo compactado: el proxy de lo que queda + las tools, con el
+      // factor real (1). `cm.usage` aplicaría el de solo mensajes, que absorbe las tools.
+      const uncalibrated = new ContextManager(100_000, 1, undefined, undefined, 0.8);
+      expect(result.tokensAfter).toBe(uncalibrated.usage(messages).used + 1_000);
+    });
+  });
+
   it('sin calibración cae al proxy chars/3.5 sin corregir', () => {
     const cm = new ContextManager(100_000, 2, undefined, undefined, 0.8);
     const messages: import('./types.js').Message[] = [{ role: 'user', content: 'X'.repeat(3500) }];
@@ -391,6 +463,91 @@ describe('ReactLoop', () => {
 
     const done = events.find((e) => e.type === 'done');
     expect(done).toEqual({ type: 'done', stopReason: 'max_iterations' });
+  });
+
+  describe('aviso de llamada repetida', () => {
+    const scopeCapturing = () => {
+      const events: import('../trace/records.js').TraceRuntimeEvent[] = [];
+      const scope: import('../trace/recorder.js').TraceScope = {
+        turnStart: () => {},
+        turnEnd: () => {},
+        modelStart: () => ({ firstChunk: () => {}, usage: () => {}, end: () => {} }),
+        event: () => {},
+        runtime: (ev) => void events.push(ev),
+        child: () => scope,
+      };
+      return { scope, events };
+    };
+    const runWith = async (rounds: ReturnType<typeof makeTextRound>[]) => {
+      const registry = new ToolRegistry();
+      registry.register(noopTool('read_file', 'contenido'));
+      registry.register(noopTool('write_file', 'escrito'));
+      registry.register({
+        ...noopTool('nuke', 'nunca'),
+        preflight: () => ({ ok: false, error: 'vetada', recoverable: true }),
+      });
+      const messages: Message[] = [{ role: 'system', content: 'sys' }];
+      const { scope, events } = scopeCapturing();
+      const loop = new ReactLoop(
+        new MockProvider(rounds),
+        registry,
+        messages,
+        defaultConfig,
+        'test-model',
+        32768,
+      );
+      await collectEvents(loop.run({ trace: scope }));
+      const repeats = events.filter((e) => e.event === 'repeat');
+      const toolMessages = messages.filter((m) => m.role === 'tool');
+      return { repeats, toolMessages };
+    };
+
+    it('la misma lectura dos veces: avisa al modelo, lo traza y no veta', async () => {
+      const { repeats, toolMessages } = await runWith([
+        makeToolCallRound('c1', 'read_file', { value: 'a.txt' }),
+        makeToolCallRound('c2', 'read_file', { value: 'a.txt' }),
+        makeTextRound('listo'),
+      ]);
+      expect(repeats).toEqual([{ event: 'repeat', tool: 'read_file', callId: 'c2', count: 1 }]);
+      // La segunda se ejecutó igual y el aviso va detrás de su resultado.
+      expect(toolMessages[1]?.content).toMatch(/^contenido\n\n<repeated_tool_call>/);
+      expect(toolMessages[1]?.content).toContain('`read_file`');
+      expect(toolMessages[0]?.content).toBe('contenido');
+    });
+
+    it('otros argumentos, o un cambio entre medias, no son repetición', async () => {
+      const { repeats, toolMessages } = await runWith([
+        makeToolCallRound('c1', 'read_file', { value: 'a.txt' }),
+        makeToolCallRound('c2', 'read_file', { value: 'b.txt' }),
+        makeToolCallRound('c3', 'write_file', { value: 'a.txt' }),
+        makeToolCallRound('c4', 'read_file', { value: 'a.txt' }),
+        makeTextRound('listo'),
+      ]);
+      expect(repeats).toEqual([]);
+      expect(toolMessages.some((m) => m.content?.includes('<repeated_tool_call>'))).toBe(false);
+    });
+
+    it('relanzar tal cual la misma tool que cambia el estado sí cuenta', async () => {
+      const { repeats } = await runWith([
+        makeToolCallRound('c1', 'write_file', { value: 'a.txt' }),
+        makeToolCallRound('c2', 'write_file', { value: 'a.txt' }),
+        makeToolCallRound('c3', 'write_file', { value: 'a.txt' }),
+        makeTextRound('listo'),
+      ]);
+      expect(repeats.map((r) => (r.event === 'repeat' ? r.count : -1))).toEqual([1, 2]);
+    });
+
+    it('una llamada vetada no se ejecutó: ni cuenta ni cierra la ventana', async () => {
+      const { repeats } = await runWith([
+        makeToolCallRound('c1', 'read_file', { value: 'a.txt' }),
+        makeToolCallRound('c2', 'nuke', { value: 'x' }),
+        makeToolCallRound('c3', 'nuke', { value: 'x' }),
+        makeToolCallRound('c4', 'read_file', { value: 'a.txt' }),
+        makeTextRound('listo'),
+      ]);
+      // Sin veto, la segunda `nuke` sería repetición y cerraría la ventana.
+      expect(repeats).toEqual([{ event: 'repeat', tool: 'read_file', callId: 'c4', count: 1 }]);
+    });
   });
 
   it('injects tool error into history and continues loop (inject & recover)', async () => {

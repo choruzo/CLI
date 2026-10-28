@@ -57,6 +57,7 @@ import { TODO_TOOL } from '../tools/todo.js';
 import { untilAborted } from './concurrency.js';
 import type { PauseUnit } from './pause.js';
 import { CANCELLED_BY_USER, appendRuntimeNotice } from './cancel.js';
+import { RepeatTracker, formatRepeatNotice } from './repeat.js';
 import { MAIN_JOB_SCOPE } from '../jobs/types.js';
 import { formatJobNotificationLine, formatJobNotifications } from '../tools/jobs.js';
 import { SUPERSEDED_BY_STEERING, formatRuntimeUpdates, isRuntimeUpdatesMessage } from './inbox.js';
@@ -448,7 +449,7 @@ export class ContextManager {
     const budget = session.budget();
     const usable = budget.usableInput;
     const overhead = session.overheadTokens();
-    const before = this.usage(messages).used + overhead;
+    const { used: before, ratio } = this.sessionInput(messages, overhead);
     if (!forced && before / usable <= budget.compactAt) return { kind: 'skipped' };
 
     const zone = this.buildProtectedZone(messages);
@@ -475,10 +476,8 @@ export class ContextManager {
       units.push(unit);
     }
 
-    // Hueco para que la memoria crezca hasta su tope. En las unidades de
-    // `before` y `estimateCalibrated` (el factor absorbe las tools, así que
-    // sobrestima algo la memoria y el hueco sale corto: se compacta un poco más).
-    const memoryNow = Math.ceil((sessionMemoryChars(messages) / 3.5) * this.calibration);
+    // Hueco para que la memoria crezca hasta su tope, en las unidades de `before`.
+    const memoryNow = Math.ceil((sessionMemoryChars(messages) / 3.5) * ratio);
     const growth = Math.max(0, budget.sessionMemory - memoryNow);
     const target = budget.target * usable;
     let remaining = before;
@@ -486,7 +485,7 @@ export class ContextManager {
     for (const unit of units) {
       if (!forced && remaining + growth <= target) break;
       chosen.push(...unit);
-      remaining -= this.estimateCalibrated(unit.map((i) => messages[i]!));
+      remaining -= Math.ceil(this.estimateFromChars(unit.map((i) => messages[i]!)) * ratio);
     }
     const chunk = chosen.map((i) => messages[i]!);
 
@@ -541,9 +540,25 @@ export class ContextManager {
     return {
       kind: 'compressed',
       tokensBefore: before,
-      tokensAfter: this.usage(messages).used + overhead,
+      tokensAfter: this.sessionInput(messages, overhead).used,
       roundsCompressed: chunk.length,
     };
+  }
+
+  /**
+   * M11 — entrada en tokens con las tools (`overhead`: proxy chars/3.5 de sus
+   * definiciones) y el factor con que se mide. `prompt_tokens` ya incluye las
+   * tools, así que el factor sale de dividir entre los dos proxies (mensajes +
+   * tools), como en `StratumAgent.getContextReport`: sumar `overhead` encima de
+   * `usage().used` las contaba dos veces y compactaba antes de tiempo.
+   */
+  private sessionInput(messages: Message[], overhead: number): { used: number; ratio: number } {
+    const sample = this.calibrationSample;
+    const proxy = sample ? sample.proxyTokens + overhead : 0;
+    const ratio = sample && proxy > 0 ? sample.promptTokens / proxy : 1;
+    const fromChars = Math.ceil((this.estimateFromChars(messages) + overhead) * ratio);
+    const real = this.lastPromptTokens;
+    return { used: real !== null ? Math.max(real, fromChars) : fromChars, ratio };
   }
 
   // -------------------------------------------------------------------------
@@ -1084,6 +1099,8 @@ export class ReactLoop {
     // UX-3: el desglose de uso es del turno, no del loop: un `run` = un turno.
     this._turnUsage = emptyTurnUsage();
     this._turnCost = emptyCostTotal();
+    // Ventana de llamadas repetidas: la de este agente en este run.
+    const repeats = new RepeatTracker();
     loopLog.debug('run start', {
       mode,
       messages: this.messages.length,
@@ -1972,6 +1989,24 @@ export class ReactLoop {
           }
         }
 
+        // Llamadas repetidas (`agent/repeat.ts`): solo las que llegaron a
+        // ejecutarse, y sin vetar nada. Se avisa al modelo al final del lote, sin
+        // tocar el system prompt, y la decisión queda en la traza.
+        const repeated: { tool: string; count: number }[] = [];
+        for (const res of results) {
+          if (res.notRun) continue;
+          const call = regularCalls.find((c) => c.id === res.callId);
+          if (!call) continue;
+          const count = repeats.observe(res.toolName, call.input);
+          if (count === 0) continue;
+          repeated.push({ tool: res.toolName, count });
+          opts?.trace?.runtime({ event: 'repeat', tool: res.toolName, callId: res.callId, count });
+        }
+        if (repeated.length > 0) {
+          appendRuntimeNotice(this.messages, formatRepeatNotice(repeated));
+          loopLog.info('repeated tool calls', { tools: repeated.map((r) => r.tool) });
+        }
+
         // Protección del revisor (Hito 12): un aviso cuando el cambio acumulado
         // de la sesión cruza el umbral de lo que un humano revisa bien. No
         // bloquea nada; solo informa, y se re-arma cada vez que se duplica.
@@ -1981,6 +2016,9 @@ export class ReactLoop {
           yield { type: 'warning', message: largeChange };
         }
       }
+      // Un subagente puede cambiar el estado y el usuario puede contar algo
+      // nuevo: tras delegar o preguntar, lo leído antes ya no es «lo mismo».
+      if (delegateCalls.length > 0 || questionCall) repeats.reset();
 
       // -----------------------------------------------------------------------
       // Hito 8 — Delegación (§12.16). En 8C, los delegate_task de un mismo turno

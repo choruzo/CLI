@@ -217,4 +217,23 @@ describe('el recorder los guarda como puntos `notice` y declara el cap', () => {
       warnings: 0,
     });
   });
+
+  it('el aviso de llamada repetida es un `notice` propio y no cuenta como warning', async () => {
+    const file = join(dir, 's2.jsonl');
+    const rec = new TraceRecorder({ file, sessionId: 's2', config });
+    const scope = rec.scope();
+    scope.turnStart('tarea', [{ role: 'user', content: 'tarea' }]);
+    scope.runtime({ event: 'repeat', tool: 'read_file', callId: 'c2', count: 1 });
+    scope.turnEnd('stop');
+    await rec.flush();
+
+    const records = readTraceFile(file);
+    const points = records.filter((r) => r.t === 'point' && r.kind === 'notice');
+    expect(points).toHaveLength(1);
+    expect(points[0]).toMatchObject({
+      name: 'Llamada repetida: read_file (2.ª vez)',
+      data: { event: 'repeat', tool: 'read_file', callId: 'c2', count: 1 },
+    });
+    expect(computeMetrics(records)).toMatchObject({ warnings: 0, retries: 0 });
+  });
 });

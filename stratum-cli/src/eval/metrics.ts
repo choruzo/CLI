@@ -27,7 +27,7 @@ import {
   TRACE_CAP_RUNTIME,
   type TraceRecord,
 } from '../trace/records.js';
-import { isJobTool } from '../jobs/types.js';
+import { RepeatTracker } from '../agent/repeat.js';
 
 export interface RunMetrics {
   turns: number;
@@ -215,17 +215,6 @@ export const HIGHER_IS_BETTER: ReadonlySet<ComparableMetric> = new Set([
   'prefixStability',
 ]);
 
-/** Tools que solo observan: repetirlas sin un cambio entre medias no aporta nada. */
-const OBSERVING_TOOLS = new Set([
-  'read_file',
-  'glob',
-  'grep',
-  'list_directory',
-  'web_search',
-  'web_fetch',
-  'recall_decisions',
-]);
-
 export function buildTraceModel(records: readonly TraceRecord[]): TraceModel {
   return applyRecords(emptyTrace(), records);
 }
@@ -248,38 +237,22 @@ export function hasRuntimeEvents(records: readonly TraceRecord[]): boolean {
 const eventOf = (s: TraceStep): string | null =>
   s.kind === 'notice' && typeof s.data.event === 'string' ? s.data.event : null;
 
-function canonical(value: unknown): string {
-  if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? 'null';
-  if (Array.isArray(value)) return `[${value.map(canonical).join(',')}]`;
-  const obj = value as Record<string, unknown>;
-  return `{${Object.keys(obj)
-    .sort()
-    .map((k) => `${JSON.stringify(k)}:${canonical(obj[k])}`)
-    .join(',')}}`;
-}
-
 /**
- * Llamadas repetidas, con una regla que no da falsos positivos razonables: la
- * misma tool con los mismos argumentos que una llamada anterior del mismo
- * agente y turno, sin que entre las dos se haya ejecutado nada que cambie el
- * estado. Releer un fichero tras editarlo no cuenta; releerlo dos veces
- * seguidas, o relanzar tal cual el comando que acaba de fallar, sí.
+ * Llamadas repetidas, con la regla de `agent/repeat.ts` (la misma que usa el
+ * aviso del loop): la misma tool con los mismos argumentos que una llamada
+ * anterior del mismo agente y turno, sin nada que cambie el estado entre las
+ * dos. Aquí cuentan todos los pasos de tool, también los vetados y las de
+ * control; el aviso del loop solo cuenta lo que llegó a ejecutarse.
  */
 export function countRepeatedCalls(model: TraceModel): number {
-  const seenByScope = new Map<string, Set<string>>();
+  const byScope = new Map<string, RepeatTracker>();
   let repeated = 0;
   for (const s of model.steps) {
     if (s.kind !== 'tool') continue;
-    // Las tools de jobs se repiten con los mismos argumentos por diseño: cada
-    // `get_job_output(jobId)` devuelve lo que hay de nuevo.
-    if (isJobTool(s.name)) continue;
     const scope = `${s.turn}:${s.parent ?? ''}`;
-    let seen = seenByScope.get(scope);
-    if (!seen) seenByScope.set(scope, (seen = new Set()));
-    const key = `${s.name}:${canonical(s.data.input)}`;
-    if (seen.has(key)) repeated++;
-    if (!OBSERVING_TOOLS.has(s.name)) seen.clear();
-    seen.add(key);
+    let tracker = byScope.get(scope);
+    if (!tracker) byScope.set(scope, (tracker = new RepeatTracker()));
+    if (tracker.observe(s.name, s.data.input) > 0) repeated++;
   }
   return repeated;
 }
@@ -423,7 +396,9 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
         // bloquee, es el lote que vuelve al modelo. Se cuenta por lote.
         invalidated.add(`${s.turn}:${lastModel}`);
       } else if (ev === 'veto') vetoes++;
-      else if (ev === 'confirmation') {
+      else if (ev === 'repeat') {
+        // Ni aviso del agente ni veto: ya cuenta en `repeatedCalls`, desde los pasos.
+      } else if (ev === 'confirmation') {
         conf.asked++;
         const d = s.data.decision;
         if (d === 'approved' || d === 'allow-all') conf.approved++;

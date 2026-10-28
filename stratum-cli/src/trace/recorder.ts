@@ -718,6 +718,8 @@ class Scope implements TraceScope {
           data,
           ev.phase === 'ended' && ev.status === 'failed' ? 'error' : undefined,
         );
+      } else if (ev.event === 'repeat') {
+        this.point('notice', `Llamada repetida: ${ev.tool} (${ev.count + 1}.ª vez)`, data);
       } else {
         this.point('notice', `Reintento ${ev.attempt} de la llamada al modelo`, data);
       }

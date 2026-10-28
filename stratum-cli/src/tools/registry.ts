@@ -316,6 +316,8 @@ export interface DispatchResult {
   toolName: string;
   result: ToolResult;
   durationMs: number;
+  /** No llegó a ejecutarse: vetada, denegada, descartada por steering o cancelada antes. */
+  notRun?: true;
 }
 
 export class ToolDispatcher {
@@ -404,6 +406,7 @@ export class ToolDispatcher {
         toolName: c.name,
         result: denied.get(c.id)!,
         durationMs: 0,
+        notRun: true as const,
       }));
 
     const executed = await this.dispatchApproved(approved, ctx);

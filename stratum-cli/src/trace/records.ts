@@ -119,6 +119,10 @@ export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlm
  *    leyó); `read` cada vez que un agente lee su salida, `cancel` cuando se
  *    pide cancelarlo y `notified` cuando el aviso de fin entra en el contexto
  *    del agente. Nunca llevan la salida del job, solo recuentos.
+ *  - `repeat` — el loop avisó al modelo de una llamada repetida (misma tool y
+ *    argumentos, sin nada que cambie el estado entre medias; `agent/repeat.ts`).
+ *    No veta: la llamada ya se ejecutó. `count` = llamadas idénticas anteriores
+ *    en la ventana. Sin los argumentos.
  */
 export type TraceRuntimeEvent =
   | TraceInboxEvent
@@ -140,6 +144,7 @@ export type TraceRuntimeEvent =
       reason: string;
     }
   | { event: 'retry'; attempt: number; error: string }
+  | { event: 'repeat'; tool: string; callId: string; count: number }
   | {
       /**
        * Quién resolvió una aprobación, una pregunta o un plan. `none` = nadie:
