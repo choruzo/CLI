@@ -748,6 +748,15 @@ export const StratumConfigSchema = z.object({
       compressorModel: z.string().optional(),
       /** Timeout del resumen LLM de la compresión (§12.4). */
       compressionTimeoutMs: z.number().int().positive().default(120_000),
+      /**
+       * El resumen de la compresión en línea manda el historial tal cual (mismo
+       * system, tools y mensajes que el loop) con la instrucción al final, para
+       * que un backend con caché de prefijo lo sirva casi todo de caché, y solo
+       * cuando deja menos fuera de caché que el digest. Opt-in hasta medirlo con
+       * eval en un backend real (decisiones.md, «Orden del prompt»). No aplica a
+       * la memoria de sesión de M11.
+       */
+      compressionReusePrefix: z.boolean().default(false),
     })
     .default({}),
 

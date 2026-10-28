@@ -1068,6 +1068,7 @@ export class StratumAgent {
         this.config.agent.compressorModel,
         this.config.agent.compressionTimeoutMs,
         this.router.providerName,
+        this.config.agent.compressionReusePrefix,
       );
       // M11 — con memoria de sesión, lo antiguo se compacta ahí (nunca se trunca).
       this.contextManager.attachSession(this.sessionCompactor());

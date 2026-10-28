@@ -148,6 +148,7 @@ resolveMemoryPaths(config): MemoryPaths
 |-------|---------|-------------|
 | `agent.compressionThreshold` | `0.8` | Umbral (0–1) para activar compresión de contexto |
 | `agent.compressorModel` | _(activo)_ | Modelo alternativo para el LLM call de compresión; si no se define, usa el provider activo |
+| `agent.compressionReusePrefix` | `false` | El resumen manda el historial tal cual (mismas tools, `tool_choice: 'none'`) para reutilizar la caché de prefijo del backend, solo cuando deja menos fuera de caché que el digest. Ver `stratum-cli/docs/prompt-caching.md` |
 
 ---
 

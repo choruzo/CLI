@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { COMPRESSOR_PROMPT } from '../agent/harness.js';
+import {
+  COMPRESSOR_PREFIX_CLOSE,
+  COMPRESSOR_PREFIX_OPEN,
+  COMPRESSOR_PROMPT,
+} from '../agent/harness.js';
 import { EXTRACT_SYSTEM_PROMPT } from '../memory/extractor.js';
 import { TRACE_CAP_LLM_ORIGIN, type TraceRecord } from '../trace/records.js';
 import { buildTraceModel, computeMetrics, turnOutcomes, AUXILIARY_METRICS } from './metrics.js';
@@ -401,6 +405,32 @@ describe('modelo de guion — llamadas auxiliares', () => {
       classifyAuxiliaryRequest({
         messages: [...agentBody.messages, { role: 'user', content: COMPRESSOR_PROMPT }],
       }),
+    ).toBeNull();
+  });
+
+  it('reconoce el resumen que reutiliza el prefijo por su instrucción final y tool_choice none', () => {
+    const instruction = `${COMPRESSOR_PREFIX_OPEN}\nresume\n${COMPRESSOR_PREFIX_CLOSE}`;
+    const tools = [{ type: 'function', function: { name: 'read_file' } }];
+    const withPrefix = (last: string, extra: Record<string, unknown>) => ({
+      messages: [...agentBody.messages.slice(0, 1), { role: 'user', content: last }],
+      ...extra,
+    });
+    expect(
+      classifyAuxiliaryRequest(
+        withPrefix(`hola\n\n${instruction}`, { tools, tool_choice: 'none' }),
+      ),
+    ).toBe('context-compression');
+    // Sin tools en la sesión no hay `tool_choice` que mirar.
+    expect(classifyAuxiliaryRequest(withPrefix(instruction, {}))).toBe('context-compression');
+    // El loop nunca manda `none`: con `auto`, es el agente citando la instrucción.
+    expect(
+      classifyAuxiliaryRequest(withPrefix(instruction, { tools, tool_choice: 'auto' })),
+    ).toBeNull();
+    // La instrucción tiene que cerrar el mensaje.
+    expect(
+      classifyAuxiliaryRequest(
+        withPrefix(`${instruction}\n¿y esto?`, { tools, tool_choice: 'none' }),
+      ),
     ).toBeNull();
   });
 

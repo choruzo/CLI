@@ -47,6 +47,13 @@ export interface OpenAIStreamChunk {
 export interface CompletionRequest {
   messages: Message[];
   tools?: ToolSchema[];
+  /**
+   * `tool_choice` cuando hay `tools` (por defecto `'auto'`). `'none'` manda las
+   * definiciones sin dejar que el modelo las llame: lo usa la compresión que
+   * reutiliza el prefijo cacheado, que necesita las tools idénticas a las del
+   * loop para no romper la caché pero solo quiere texto.
+   */
+  toolChoice?: 'auto' | 'none';
   stream: boolean;
   model: string;
   signal?: AbortSignal;

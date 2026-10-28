@@ -1060,6 +1060,8 @@ La status bar muestra el conteo con prefijo `~` mientras se usa el proxy (`~4.2k
 
 Un resumen vacío (o solo espacios, o solo un bloque `<think>`) cuenta como fallo del compresor. Cancelar el turno durante el resumen deja el historial intacto.
 
+**Variante opt-in que reutiliza el prefijo cacheado (`agent.compressionReusePrefix`, por defecto `false`).** En vez del digest, la entrada del resumen es el historial tal cual (el mismo system, las mismas tools con `tool_choice: 'none'` y los mismos mensajes que la última petición del loop) con la instrucción al final, pegada al último `user` si el historial acaba en uno. Solo se usa con el mismo modelo y provider que el loop, si cabe en la ventana con margen para el resumen y si lo que quedaría fuera de la caché (lo añadido desde la última petición) es menor que el digest entero; si no, el digest. Si el backend **rechaza** esa petición (error no reintentable, como un 400 por `tool_choice`, o un resumen vacío), se resume con el digest: es otra petición, no un reintento de la misma. Un fallo de red, un 5xx/429, el timeout o la cancelación siguen el Caso A sin probar el digest. Detalle y medidas en `stratum-cli/docs/prompt-caching.md`.
+
 **Política de fallback cuando la compresión falla o no reduce suficiente:**
 
 ```

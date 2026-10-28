@@ -300,6 +300,8 @@ escenario de eval, como el resto.
 | `cache-tool-loop-prefix` | Seis llamadas en un turno agéntico: el prompt anterior es prefijo exacto del siguiente. |
 | `cache-stable-toolset-order` | Un server MCP anuncia sus tools en otro orden en su segundo arranque: la segunda sesión reutiliza igual. |
 | `cache-compression-cache-impact` | Una compresión a mitad de turno: menos tokens, una rotura con causa `compression` y ningún error. |
+| `cache-compression-reuses-prefix` | Con `agent.compressionReusePrefix`, una compresión tras una lectura pequeña manda el historial tal cual y lee de caché casi toda su entrada. |
+| `cache-compression-prefix-not-worth` | Con la opción, una compresión justo tras una lectura grande usa el digest: reutilizar dejaría más fuera de caché. |
 
 Cada uno distingue la primera llamada fría de las templadas con `coldCalls` y `warmCalls`.
 
@@ -379,6 +381,45 @@ Lo que **no** es una llamada al LLM y por tanto no está en la traza: `GET /mode
 de modelos, ventana de contexto, health check del status bar) y `POST /embeddings` si hay
 `memory.embeddingEndpoint`.
 
+## Compresión que reutiliza el prefijo
+
+`agent.compressionReusePrefix` (por defecto `false`). La compresión en línea de `chat`/`run` puede
+mandar el historial **tal cual** —el mismo system, las mismas tools y los mismos mensajes que la
+última petición del loop, con su `sessionId`— y añadir la instrucción al final, entre
+`<context_compression_request>` (pegada al último `user` si el historial acaba en uno: nunca dos
+`user` seguidos). Las tools van con `tool_choice: 'none'` (`CompletionRequest.toolChoice`): hacen
+falta idénticas para no romper el prefijo, pero solo se quiere texto.
+
+Solo se usa cuando sale a cuenta, y si no, el digest de siempre:
+
+- mismo modelo (sin `compressorModel` distinto) y mismo provider que atendió al loop (tras un
+  fallback, la caché es la de otro);
+- la petición cabe en la ventana con 2 048 tokens para el resumen (el digest sí recorta);
+- se sabe qué se mandó en la última petición (`ContextManager.recordSent`) y sigue siendo prefijo:
+  el mismo system y el mismo último mensaje mandado en su sitio, las mismas tools y el mismo modelo;
+- lo que quedaría **fuera** de caché —lo añadido desde esa petición más la instrucción— es menor
+  que el digest entero. Son estimaciones del proxy por caracteres para decidir, no métricas.
+
+Lo último descarta el caso típico: la compresión salta justo después de que un resultado grande de
+tool entre en el historial, y eso es lo único que no está en caché, mientras que el digest lo
+recorta a 1 500 caracteres. Medido con el guion (`stratum eval run --mock --group cache`):
+
+| Escenario | Petición elegida | Entrada del resumen | Leída de caché | Sin caché |
+|---|---|---|---|---|
+| `cache-compression-reuses-prefix`, opción apagada | digest | 3 495 | 0 | 3 495 |
+| `cache-compression-reuses-prefix` | historial tal cual | 22 292 | 20 549 | **1 743** |
+| `cache-compression-prefix-not-worth` (salta tras una lectura grande) | digest | 1 003 | 0 | 1 003 |
+
+Sin la heurística, ese último habría mandado 22 696 tokens con 5 041 sin caché: cinco veces más que
+el digest. Si el backend **rechaza** la petición con prefijo (un error no reintentable, p. ej. un
+400 por `tool_choice: 'none'`, o un resumen vacío), se resume con el digest; un fallo de red, un
+5xx o el timeout no se reintentan con otra petición (Caso A de §12.4). La caché del guion es ideal:
+queda por medir contra llama.cpp antes de activarla por defecto, y que el resumen sea igual de bueno
+viendo el historial entero (ve las salidas completas, no recortadas).
+
+No aplica a la memoria de sesión de M11: su extractor necesita cada mensaje etiquetado con su id
+para la procedencia, y eso cambiaría el prefijo.
+
 ## Siguiente trabajo
 
 Nada de esto está implementado.
@@ -416,10 +457,12 @@ de sesión; `session | prompt | none` queda pendiente de una medida contra un ba
   poco) puede desperdiciar caché recién escrita sin que lo leído baje: no se marca, porque no se
   puede demostrar. Con un backend que reportase de forma fiable lo que escribe en cada llamada
   se podría afinar; hoy solo lo hace Anthropic y no está verificado aquí.
-- **La llamada del compresor de contexto no reutiliza el prefijo del loop**: se manda como un único
-  mensaje `user` con un digest del historial, sin system ni tools (y puede ir a `compressorModel`).
-  Está en la traza (origen `context-compression`), así que su coste se ve, pero en un servidor de un
-  solo slot desplaza la caché del loop.
+- **La llamada del compresor de contexto, por defecto, no reutiliza el prefijo del loop**: se manda
+  como un único mensaje `user` con un digest del historial, sin system ni tools (y puede ir a
+  `compressorModel`). Está en la traza (origen `context-compression`), así que su coste se ve, pero en
+  un servidor de un solo slot desplaza la caché del loop. Con `agent.compressionReusePrefix` (ver
+  [Compresión que reutiliza el prefijo](#compresión-que-reutiliza-el-prefijo)) puede mandar el
+  historial tal cual, solo cuando sale a cuenta. La memoria de sesión de M11 sigue con su digest.
 - **`explicitBreakpoints` y `sessionAffinity` no se han probado contra un backend real**: la forma
   de la petición está cubierta por tests, pero no hay verificación de extremo a extremo con
   Anthropic ni con SGLang. Por eso son opt-in.

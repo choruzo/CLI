@@ -26,6 +26,10 @@ está en los documentos y en huecos de producto. Propuesta de orden:
 > **Actualización 2026-10-27:** también Contrato-1 (publicado en la 0.9.0/0.10.0). Hoy: cola de UX-3 (uso de
 > sesión al reanudar, con el bug de `/sessions resume`; `/verbosity` persistido) y `/btw` de UX-4. Ver §5 y,
 > para lo que queda, §7.
+>
+> **Actualización 2026-10-28:** Eval-1 (replay) y la compresión que reutiliza el prefijo cacheado (opt-in,
+> `agent.compressionReusePrefix`). El estado de los siguientes candidatos —exec a segundo plano, plugins PL1 y
+> Hito 18—, contrastado con el código, está en §8.
 
 Decisiones abiertas que conviene no dejar sin fecha: **default de `chat`** (vivir en `stratumd`, bloqueado
 por Q1, el entorno de la terminal) y **convergencia Dot/Desktop** (§15.1.4: ¿Dot es el modo compacto de
@@ -301,7 +305,7 @@ rutas son de `stratum-cli/src/` salvo que se diga otra cosa.
 | **Loop-1** — paralelismo | ✅ (2026-10-27). `dispatchApproved` decide con `callEffects`: lo no mutante va en un pool de `PARALLEL_READ_LIMIT` = 2 y todo lo demás (escrituras, `exec` que muta, MCP, desconocidas) es barrera y va solo, en el orden del modelo. `isSerialized` retirado |
 | **Loop-1** — aviso de tool repetida | ✅ (2026-10-28). Regla única en `agent/repeat.ts` (`RepeatTracker`), compartida con `countRepeatedCalls`. Sin veto: bloque `<repeated_tool_call>` al final del lote con `appendRuntimeNotice` y evento runtime `repeat` (no suma `warnings`). Solo cuenta lo ejecutado (`DispatchResult.notRun`) y la ventana se cierra tras delegar o preguntar. La métrica cuenta además lo vetado y las tools de control |
 | **Loop-1** — doble conteo en M11 | ✅ (2026-10-28). `compactSession` sumaba `overheadTokens()` a un `used` que ya incluía las tools: compactaba antes de tiempo. Ahora `sessionInput` calibra contra mensajes + tools, como `getContextReport`. Queda: `overheadTokens()` mide el toolset `normal` sin filtro de perfil ni plan |
-| **Loop-1** — compactación con prefijo cacheado | No existe, y no es solo fontanería: las dos rutas mandan un digest recompuesto (no el historial), así que reutilizar el prefijo cambia lo que ve el resumen y exige eval. El cliente no soporta `tool_choice` (fijo `'auto'`) y `tracedCompletion` descarta tool calls; el `sessionId` de M11 no llega al `CompletionRequest` (`conversation/extract.ts`) |
+| **Loop-1** — compactación con prefijo cacheado | ✅ (2026-10-28), **opt-in** (`agent.compressionReusePrefix`, por defecto `false`) y solo en la compresión en línea de `chat`/`run`. El resumen manda el historial tal cual (mismas tools con `tool_choice: 'none'`, campo nuevo `CompletionRequest.toolChoice`) **solo si** deja fuera de caché menos que el digest; si no, el digest de siempre. Medido con el guion: en el caso favorable, 1 743 tokens sin caché frente a 3 495; en el típico (salta justo tras un resultado grande, lo único que no está en caché) reutilizar dejaría 5 041 frente a 1 003, y se elige el digest. M11 queda fuera: su extractor necesita los mensajes etiquetados con id para la procedencia. Detalle en §8.1 y `stratum-cli/docs/prompt-caching.md` |
 | **Eval-1** — replay | ✅ (2026-10-28). `stratum eval import <traza> --setup <dir> --expected <dir>` (`eval/replay.ts`) escribe un escenario del grupo `replay`: guion = respuestas del loop, criterio nuevo `workspace_expected` (inline, `strict`). Falla cerrado ante lo que el guion no puede repetir (argumentos recortados o redactados, errores/reintentos, solapes, compresión, lo contestado por una persona). Incluido `replay-rename-across-files`, generado de una traza real. Queda: la traza no guarda la config ni los flags de `run` de la sesión |
 | `sessions.revert` en Dot/Desktop | No: ningún bridge lo expone. Desktop no puede aprobar (le falta el broker nativo) |
 | Plugins (R1 → PL1) | Sin código. R1 propone tomar como unidad de confianza el candidato resuelto (todos los ficheros que el entry puede cargar) |
@@ -310,6 +314,136 @@ rutas son de `stratum-cli/src/` salvo que se diga otra cosa.
 Orden que se propone desde aquí: **Eval-1**, la **compactación con prefijo cacheado** medida con él, y
 después plugins, el Hito 18 y el revert en Dot (que choca con dos invariantes de Dot: la confirmación nativa
 está construida sobre una solicitud pendiente y `ApproverMethod` no admite `sessions.*`).
+
+> 2026-10-28: Eval-1 y la compactación con prefijo, hechos. El orden actualizado está al final de §8.
+
+## 8. Siguientes candidatos, contrastados con el código (2026-10-28)
+
+Cuatro investigaciones de solo lectura (opencode, `stratum-buscador`, `deepseek-v4-flash`). Las rutas son de
+`stratum-cli/src/` y las de §8.1 se comprobaron al implementar; las demás vienen de los informes y conviene
+revisarlas antes de copiar nada.
+
+### 8.1 Compactación con prefijo cacheado — hecha (opt-in)
+
+- **Qué había:** las dos rutas mandaban un digest sin system ni tools: la compresión en línea, con
+  recortes de 1 500/4 000 caracteres por mensaje y un tope del 60 % de la ventana, y M11, con
+  extractor + resumen y `renderChunk`. `tool_choice` era fijo `'auto'` y el `ContextManager` no
+  recibía ni las tools ni el `sessionId`.
+- **Qué se hizo:**
+  - `CompletionRequest.toolChoice`.
+  - `CompressionPrefix` (las tools, la sesión y el provider del loop). El toolset se calcula antes
+    de comprimir.
+  - `ContextManager.recordSent`: qué se mandó, con el system, el último mensaje, las tools y el
+    modelo para validar que sigue siendo prefijo.
+  - `prefixRequest`: el historial tal cual más la instrucción entre `<context_compression_request>`,
+    pegada al último `user` si acaba en uno.
+  - Se elige la petición que deja menos fuera de caché.
+  - Solo un **rechazo** del backend (error no reintentable o resumen vacío) prueba con el digest. Red,
+    5xx o timeout son el Caso A de §12.4.
+  - El modelo de guion la reconoce por la instrucción final y `tool_choice: 'none'`.
+  - Escenarios: `cache-compression-reuses-prefix` y `cache-compression-prefix-not-worth`.
+- **Hallazgo que decide el diseño:** reutilizar el prefijo casi nunca compensa en el momento en que salta
+  la compresión, porque salta tras un resultado grande y eso es lo único que no está en caché, mientras
+  que el digest lo recorta a 1 500 caracteres. Sin la heurística, la opción empeoraba el caso típico ×5.
+- **Pendiente:**
+  - Medir contra llama.cpp antes de activarla por defecto: la caché del guion es ideal.
+  - Comprobar que el resumen es igual de bueno viendo el historial entero.
+  - Que la traza compare el prefijo de la compresión con el del loop: hoy lo compara por origen y
+    `sharedChars` no lo refleja.
+  - M11 no aplica.
+
+### 8.2 Pasar un `exec` en curso a segundo plano (UX-4) — diseñable ya, M
+
+- **Hoy:**
+  - El backend local (`tools/exec/backends/local.ts`, `run()`) guarda el proceso en una closure
+    (`settle`/`cleanup`/`timers`). El abort de la llamada y su timeout siguen armados y matan el árbol.
+  - `JobManager` solo nace de `spawnLocalShell` (`jobs/manager.ts`, `launch()`).
+  - `ToolContext` no lleva `callId`, así que nadie puede pedir «pasa a segundo plano la llamada X».
+- **Diseño propuesto:**
+  - `JobManager.adopt(handover)`, sacando de `launch()` un `attach(rec, subprocess)` común: límite
+    `maxRunning`, `JobOutput` redactado, fin por `exit`, auditoría `background_started` y traza.
+  - En `local.ts`, un `handOver()` que en el **mismo tick** quite el listener de abort, limpie los
+    temporizadores, marque `settled` y devuelva el proceso y lo acumulado.
+  - Un estado nuevo de `ExecOutcome` que `exec.ts` formatee como `<exec_job>`.
+  - `ToolContext.callId` desde `dispatchOne` (`tools/registry.ts`).
+  - En la TUI, la tecla `b` sobre el bloque de un `exec` en curso.
+- **Trampas:**
+  - `SessionPublisher` publica cualquier `JobEvent` que no sea `created` como `job.ended`
+    (`host/session-publisher.ts`).
+  - Auditoría doble: el registro de primer plano de `exec.ts` y el de `background_started`.
+  - `ByteBudget` guarda la **cabeza** y `JobOutput` la **cola**.
+  - El job adoptado desde un subagente muere al cerrar su ámbito (`closeScope`).
+  - `adopt` tiene que rechazar tras `shutdown()` o por encima de `maxRunning`, y el `exec` sigue en
+    primer plano.
+- **Decisiones pendientes:** si el reloj del timeout se reinicia al adoptar. SSH queda fuera: el manager
+  mata por pid y el remoto es un `ClientChannel`.
+- **Tests:** `local.test.ts` (ceder no mata; un abort posterior no toca al job), `exec.test.ts`,
+  `manager.test.ts` y `manager-race.test.ts`, `output.test.ts`, `jobs-flow.test.ts`,
+  `session-publisher.test.ts` y `session-runtime.test.ts`. Hay que añadir una frase a `jobs.md` y un
+  matiz a `decisiones.md`: adoptar no relaja ninguna guarda, porque la confirmación ya ocurrió.
+
+### 8.3 Plugins PL1 — se puede empezar, pero antes hay que corregir el diseño
+
+- **R1** (huella de confianza del proyecto) sigue **sin decidir**. No bloquea PL1, que solo carga
+  orígenes de confianza implícita (flag, config global y `~/.stratum/plugins/`). Hoy **no existe ningún
+  mecanismo de confianza de proyecto**: el `.stratumrc.json` y `.stratum/agents/` del proyecto se cargan
+  sin puerta.
+- **R2 y R3 cambian PL1 y hay que cerrarlos antes:**
+  - R2: el write-log se calcula después de `tool.after` (`agent/harness.ts`, tras `dispatch`). Hace
+    falta guardar a la vez el resultado interno y el presentado, o calcular el write-log y la auditoría
+    antes de `tool.after`.
+  - R3: el orden real es en dos fases. Primero los vetos de todas las llamadas (`readOnlyVeto ??
+    preflight`, `tools/registry.ts`) y después las confirmaciones, con `environmentGate` dentro.
+    `tool.before` va en la fase de veto, y además hay que situarlo respecto a la pausa, el descarte por
+    steering y la repetición, que el diseño no contempla.
+- **Referencias obsoletas del documento:**
+  - `run` ya no se cablea en `run.ts`: va por `resolveSessionStartup` → `SessionHost`. Cargar plugins
+    dentro de `SessionHost.create` los cargaría también en `stratumd`, así que hace falta un
+    `SessionHostOptions.plugins` que rellenen `chat` y `run`.
+  - Desktop ya no es un sidecar: no hay `src/desktop/`.
+  - Las skills tienen ahora una dimensión `preset`: el punto único es `sessionSkills()`, no `skillDirs()`.
+  - R6 ya está resuelto en `observe()` (`agent/core.ts`), que es el punto único de `run()` y
+    `runDelegate()`.
+  - Las líneas citadas en R2, R3, R8 y R12 se han movido.
+- **Además:** añadir `plugin__*` al perfil `infra` (`agent/session-profile.ts`, R9) y un test que fije que
+  una tool con `callEffects` desconocido cuenta como mutante sin target (R8). R4, R5, R7 y R1 se aplazan a
+  PL4/PL5 con una nota explícita. Tamaño de PL1: M.
+
+### 8.4 Hito 18 — no se puede implementar sin escribir antes la spec
+
+- `CLI-DOC/Orientacion-Infraestructura.md` no es vinculante y da **prosa, no contratos**: no hay schemas,
+  ni forma de salida, ni criterio de terminado, ni §12.21. Los nombres están reservados en `INFRA_TOOLS`
+  (`agent/session-profile.ts`), pero la reserva es inerte hasta que algo se registre.
+- **Lo que el documento no menciona y rompería invariantes:**
+  - Sin declararlas en `callEffects` (`tools/environments.ts`), las tools nacen como mutantes sin
+    target: el modo read-only las vetaría y `environmentGate` no vería su target.
+  - Tienen que entrar en `READ_ONLY_SESSION_TOOLS` (`tools/call-policy.ts`) y en `PLAN_ALLOWLIST`
+    (`agent/plan.ts`), o no estarán en `/readonly` ni en la Fase 1 del plan, que es justo donde más
+    se usan.
+  - Para el badge y la confirmación legible, `targetOfCall` y `describeCall`.
+  - `auto` resuelve a `full`: quien tenga docker en el PATH vería estas tools, contra el principio de
+    que quien solo escribe código no las ve.
+  - No hay deduplicación de logs: el truncado 80/20 se come el medio.
+  - La redacción es **por forma**: un token cualquiera en una línea de journal no casa.
+- **Decisiones abiertas:**
+  - Ejecución remota: sondas nativas de Node, solo en local, o `dig`/`curl` por SSH, que exige parsear.
+  - Política de `n/d` por SO: Linux, PowerShell/CIM y macOS.
+  - Si una lectura de logs en `prod` se audita.
+  - §8.1 del documento está obsoleto: el ejecutor de PowerShell ya existe.
+- **Primer corte propuesto, sin red ni servidores:**
+  - `sys_inspect`, solo en local, con parsers puros en `tools/infra/sysinfo/` probados con salidas
+    capturadas de Ubuntu y Windows, y el runner inyectado.
+  - Después, `net_probe` reducido a `dns`/`tcp` con el resolver y el conector inyectados.
+- **Antes de escribir código:** §12.21 con los schemas de las cuatro tools.
+
+### 8.5 Orden propuesto
+
+1. **Exec a segundo plano** (§8.2): se nota en cada sesión y está acotado. Antes, decidir lo del timeout.
+2. En paralelo y sin código: **corregir el diseño de plugins** (R2, R3 y las referencias obsoletas, §8.3)
+   y **escribir §12.21** del Hito 18 (§8.4). Las dos cosas desbloquean bloques L.
+3. **Medir la compactación con prefijo contra llama.cpp** (§8.1) y decidir si pasa a estar activa por
+   defecto.
+4. Después, PL1, el primer corte del Hito 18 y el revert en Dot.
 
 ## Anexo — fuentes
 

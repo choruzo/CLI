@@ -391,7 +391,7 @@ export class OpenAICompatible implements IProvider {
     }
     if (req.tools && req.tools.length > 0) {
       body['tools'] = req.tools;
-      body['tool_choice'] = 'auto';
+      body['tool_choice'] = req.toolChoice ?? 'auto';
     }
     if (req.temperature !== undefined) {
       body['temperature'] = req.temperature;

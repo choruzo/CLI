@@ -160,7 +160,8 @@
     "maxToolRetries": 3,
     "toolErrorFormat": "xml",
     "compressionKeepRounds": 6,
-    "compressionTimeoutMs": 120000
+    "compressionTimeoutMs": 120000,
+    "compressionReusePrefix": false
   },
   "agents": {
     "defaultProfile": "general",

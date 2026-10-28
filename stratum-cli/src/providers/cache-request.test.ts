@@ -95,6 +95,45 @@ describe('OpenAICompatible — lo que la caché añade a la petición', () => {
     expect(lastBody).not.toHaveProperty('prompt_cache_key');
   });
 
+  it('tool_choice es auto por defecto y none si la petición lo pide; sin tools no sale', async () => {
+    const tools = [
+      {
+        type: 'function' as const,
+        function: { name: 'read_file', description: 'd', parameters: {} },
+      },
+    ];
+    const client = new OpenAICompatible(await serve([TEXT]), 'key', 'm');
+    for await (const _ of client.complete({
+      messages: MESSAGES,
+      tools,
+      stream: true,
+      model: 'm',
+    })) {
+      /* consumir */
+    }
+    expect(lastBody.tool_choice).toBe('auto');
+    for await (const _ of client.complete({
+      messages: MESSAGES,
+      tools,
+      toolChoice: 'none',
+      stream: true,
+      model: 'm',
+    })) {
+      /* consumir */
+    }
+    expect(lastBody.tool_choice).toBe('none');
+    expect(lastBody.tools).toEqual(tools);
+    for await (const _ of client.complete({
+      messages: MESSAGES,
+      toolChoice: 'none',
+      stream: true,
+      model: 'm',
+    })) {
+      /* consumir */
+    }
+    expect(lastBody).not.toHaveProperty('tool_choice');
+  });
+
   it('sin id de sesión no se manda ninguna de las dos', async () => {
     const caps = resolveCacheCapabilities('openai', { sessionAffinity: true });
     const client = new OpenAICompatible(await serve([TEXT]), 'key', 'm', { cache: caps });

@@ -83,6 +83,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       compressionKeepRounds: 6,
       compressionTimeoutMs: 120_000,
       compressionThreshold: 0.8,
+      compressionReusePrefix: false,
     },
     lsp: DEFAULTS.lsp,
     tui: DEFAULTS.tui,

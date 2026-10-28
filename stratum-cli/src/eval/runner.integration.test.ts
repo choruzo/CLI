@@ -325,7 +325,8 @@ describe('escenarios incluidos, con el modelo de guion', () => {
     // El resumen de la ejecución lleva el desglose.
     const llm = first.result.summary.overall.llm!;
     expect(llm.byOrigin['memory-extraction'].calls).toBe(4);
-    expect(llm.byOrigin['context-compression'].calls).toBe(2);
+    // compression-visible, cache-compression-cache-impact, -reuses-prefix y -prefix-not-worth.
+    expect(llm.byOrigin['context-compression'].calls).toBe(4);
     expect(llm.auxiliary.errors).toBe(1);
     expect(formatEvalReport(first.result)).toContain(`LLM calls: ${llm.calls}`);
   });

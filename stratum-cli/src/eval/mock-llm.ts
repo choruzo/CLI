@@ -24,7 +24,11 @@
  */
 import { createServer, type Server } from 'http';
 import type { AddressInfo } from 'net';
-import { COMPRESSOR_PROMPT } from '../agent/harness.js';
+import {
+  COMPRESSOR_PREFIX_CLOSE,
+  COMPRESSOR_PREFIX_OPEN,
+  COMPRESSOR_PROMPT,
+} from '../agent/harness.js';
 import { EXTRACT_SYSTEM_PROMPT } from '../memory/extractor.js';
 import type { AuxiliaryLlmOrigin } from '../trace/records.js';
 import type { ScriptStep } from './scenario.js';
@@ -95,6 +99,20 @@ export function classifyAuxiliaryRequest(body: unknown): AuxiliaryLlmOrigin | nu
     messages.length === 1 &&
     first.role === 'user' &&
     first.content.startsWith(COMPRESSOR_PROMPT)
+  ) {
+    return 'context-compression';
+  }
+  // El resumen que reutiliza el prefijo (`agent.compressionReusePrefix`) lleva
+  // el historial del agente entero y la instrucción al final del último `user`.
+  // Lo distingue además `tool_choice: 'none'`, que el loop nunca manda.
+  const last = messages[messages.length - 1] as { role?: unknown; content?: unknown } | undefined;
+  const { tools, tool_choice } = body as { tools?: unknown; tool_choice?: unknown };
+  if (
+    last?.role === 'user' &&
+    typeof last.content === 'string' &&
+    last.content.includes(COMPRESSOR_PREFIX_OPEN) &&
+    last.content.trimEnd().endsWith(COMPRESSOR_PREFIX_CLOSE) &&
+    (tool_choice === 'none' || tools === undefined)
   ) {
     return 'context-compression';
   }

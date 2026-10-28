@@ -12,6 +12,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 - TUI: **`/btw <pregunta>`**, una pregunta lateral sobre la conversación, también con el agente trabajando. Responde sin tools y no entra en el historial, la memoria ni el uso de la sesión. En la traza aparece con el origen `side-question`.
 - TUI: `/verbosity` se recuerda entre sesiones (`tui.verbosity`). Se guarda en la config global, salvo que el `.stratumrc.json` del proyecto ya declare la clave.
 - Las sesiones guardan sus tokens y su desglose de uso: `chat --resume` y `/sessions resume` los restauran (`--fork` empieza a cero).
+- `agent.compressionReusePrefix` (opt-in, por defecto `false`): la compresión de contexto de `chat`/`run` puede mandar el historial tal cual, para aprovechar la caché de prefijo del backend, solo cuando deja fuera de caché menos que el resumen de siempre. Ver `docs/prompt-caching.md`.
 
 ### Corregido
 - `/sessions resume` en caliente: la barra de estado y las pastillas seguían mostrando los tokens de la sesión anterior, y el agente sumaba los de las dos sesiones.

@@ -4,6 +4,7 @@ import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
 import { StreamBuffer, ThinkTagSplitter } from '../providers/openai-compatible.js';
 import { streamWithRetry } from '../providers/retry.js';
+import { ProviderError } from '../providers/errors.js';
 import { normalizeUsage } from '../providers/cache.js';
 import type { RawTimings, RawUsage } from '../providers/cache.js';
 import {
@@ -164,6 +165,18 @@ export interface SessionCompactor {
   committed(messages: Message[]): void;
 }
 
+/**
+ * Lo que necesita el resumen para reutilizar el prefijo que el backend acaba
+ * de cachear (`agent.compressionReusePrefix`): las tools de la petición del
+ * loop, su sesión y quién la atiende.
+ */
+export interface CompressionPrefix {
+  tools: ToolSchema[];
+  sessionId?: string;
+  /** Provider que atiende ahora el loop: tras un fallback no es el del compresor. */
+  provider?: IProvider;
+}
+
 /** Timeout por defecto del resumen LLM: un modelo local con razonamiento tarda ~40 s. */
 export const DEFAULT_COMPRESSION_TIMEOUT_MS = 120_000;
 
@@ -180,13 +193,60 @@ export const COMPRESSOR_PROMPT =
   'Output only the summary.';
 
 /**
+ * Marcas de la instrucción del resumen con prefijo. Va al final de la petición
+ * (un `user` propio, o pegada al `user` final si el historial acaba en uno):
+ * todo lo anterior es el prompt que el loop acaba de mandar. Exportadas para
+ * el modelo de guion de `stratum eval`.
+ */
+export const COMPRESSOR_PREFIX_OPEN = '<context_compression_request>';
+export const COMPRESSOR_PREFIX_CLOSE = '</context_compression_request>';
+
+const COMPRESSOR_PREFIX_PROMPT =
+  'This is not a message from the user: the conversation above is about to be shortened. ' +
+  'Summarize it so an agent can continue the work without it. ' +
+  'At most 500 words. Preserve: the user requests and goals, technical decisions and ' +
+  'their reasons, files read or changed, commands run and their outcome, errors found, ' +
+  'and what is still pending. Write in the language the user writes in. ' +
+  'Do not call any tool. Output only the summary.';
+
+/** Hueco para el propio resumen (≤500 palabras) en la petición con prefijo. */
+const COMPRESSOR_OUTPUT_RESERVE = 2_048;
+
+/**
+ * Instrucción del resumen con prefijo. El modelo ve el historial entero, así
+ * que se le dice dónde empieza lo que se queda literal (la cola y, si la hay,
+ * la tarea anclada): solo hace falta resumir lo anterior.
+ */
+function compressorPrefixInstruction(tailStart: Message | undefined, anchored: boolean): string {
+  let keep = '';
+  if (tailStart) {
+    const text = (tailStart.content ?? '').replace(/\s+/g, ' ').trim();
+    const where = text
+      ? `the ${tailStart.role} message that starts with "${text.slice(0, 120)}"`
+      : tailStart.tool_calls?.length
+        ? `the assistant message that calls ${tailStart.tool_calls.map((tc) => tc.function.name).join(', ')}`
+        : `the last ${tailStart.role} message`;
+    keep =
+      ` The most recent messages, from ${where} onward,` +
+      `${anchored ? " and the user's current request" : ''} stay in the conversation verbatim:` +
+      ' summarize what comes before them.';
+  }
+  return `${COMPRESSOR_PREFIX_OPEN}\n${COMPRESSOR_PREFIX_PROMPT}${keep}\n${COMPRESSOR_PREFIX_CLOSE}`;
+}
+
+/**
  * Error del compresor. `cancelled` distingue la cancelación del usuario de un
- * fallo: cancelar no debe tocar el historial.
+ * fallo: cancelar no debe tocar el historial. `timedOut`: el backend no
+ * contestó a tiempo. `rejected`: el backend rechazó esta petición concreta
+ * (un error no reintentable, p. ej. un 400 por `tool_choice`) o devolvió un
+ * resumen vacío; solo eso justifica probar con la petición del digest.
  */
 class CompressorError extends Error {
   constructor(
     message: string,
     readonly cancelled = false,
+    readonly timedOut = false,
+    readonly rejected = false,
   ) {
     super(message);
   }
@@ -212,6 +272,20 @@ export class ContextManager {
   /** M11 — con memoria de sesión, lo antiguo se compacta ahí en vez de resumirse en línea. */
   private session: SessionCompactor | null = null;
 
+  /**
+   * Última petición del loop: cuántos mensajes llevaba, el system y el último
+   * de ellos, sus tools (serializadas) y el modelo. Es lo que el backend tiene
+   * en caché; el resumen con prefijo lo necesita para saber qué parte de su
+   * petición no lo estaría.
+   */
+  private lastSent: {
+    count: number;
+    system: Message | undefined;
+    last: Message | undefined;
+    tools: string;
+    model: string;
+  } | null = null;
+
   constructor(
     private readonly contextWindow: number,
     private readonly baseKeepRounds: number,
@@ -222,6 +296,8 @@ export class ContextManager {
     private readonly compressionTimeoutMs = DEFAULT_COMPRESSION_TIMEOUT_MS,
     /** Nombre del provider en la config: solo para la traza de la llamada del compresor. */
     private readonly providerName?: string,
+    /** `agent.compressionReusePrefix`: el resumen manda el historial tal cual. */
+    private readonly reusePrefix = false,
   ) {}
 
   setCompressionMode(mode: 'normal' | 'conservative'): void {
@@ -284,6 +360,33 @@ export class ContextManager {
    */
   forgetLastUsage(): void {
     this.lastPromptTokens = null;
+  }
+
+  /** El loop manda `messages` al modelo (antes de añadir la respuesta). */
+  recordSent(messages: Message[], tools: ToolSchema[] = [], model = this.model ?? ''): void {
+    this.lastSent = {
+      count: messages.length,
+      system: messages[0],
+      last: messages[messages.length - 1],
+      tools: JSON.stringify(tools),
+      model,
+    };
+  }
+
+  /**
+   * Cuántos mensajes del principio de `messages` son los de la última petición
+   * del loop; `null` si no lo sabemos o si el prefijo ya no es aquel. El
+   * historial solo crece por el final entre peticiones: si el último mensaje
+   * mandado ya no está en su sitio, algo lo rehízo (compresión, `/clear`,
+   * reanudar); si cambió el system (`rebuildSystemPrompt`), las tools (modo
+   * plan, MCP) o el modelo, la caché se pierde desde el principio.
+   */
+  private sentPrefixLength(messages: Message[], tools: ToolSchema[]): number | null {
+    const sent = this.lastSent;
+    if (!sent || sent.count === 0 || sent.count > messages.length) return null;
+    if (messages[0] !== sent.system || messages[sent.count - 1] !== sent.last) return null;
+    if (sent.model !== this.model || sent.tools !== JSON.stringify(tools)) return null;
+    return sent.count;
   }
 
   recordUsage(promptTokens: number, messages?: Message[]): void {
@@ -356,18 +459,20 @@ export class ContextManager {
    * Modifica `messages` en el lugar. Devuelve el resultado para emitir eventos.
    * `signal` es la cancelación del turno: cancelar durante el resumen deja el
    * historial intacto. Con `trace`, la llamada del compresor queda registrada
-   * como `context-compression`.
+   * como `context-compression`. Con `prefix` (y `agent.compressionReusePrefix`),
+   * el resumen reutiliza el prompt de la última petición del loop.
    */
   async maybeCompress(
     messages: Message[],
     signal?: AbortSignal,
     trace?: TraceScope,
+    prefix?: CompressionPrefix,
   ): Promise<CompressionResult> {
     if (this.session) return this.compactSession(this.session, messages, signal, false, trace);
     // Sin redondear: `pct` viene de Math.round y un 80.4% real se leería como 0.80.
     const { used, max } = this.usage(messages);
     if (max > 0 && used / max <= this.compressionThreshold) return { kind: 'skipped' };
-    return this.compress(messages, signal, false, trace);
+    return this.compress(messages, signal, false, trace, prefix);
   }
 
   /**
@@ -380,6 +485,7 @@ export class ContextManager {
     signal?: AbortSignal,
     forced = true,
     trace?: TraceScope,
+    prefix?: CompressionPrefix,
   ): Promise<CompressionResult> {
     if (this.session) return this.compactSession(this.session, messages, signal, forced, trace);
     const tokensBefore = this.usage(messages).used;
@@ -397,8 +503,7 @@ export class ContextManager {
     let compressorError: string | undefined;
     if (this.provider) {
       try {
-        const anchor = zone.anchor !== null ? messages[zone.anchor] : undefined;
-        const summary = await this.callCompressor(oldMessages, anchor, signal, trace);
+        const summary = await this.summarize(messages, zone, oldMessages, signal, trace, prefix);
         this.applySummary(messages, zone, summary);
         this.sanitizeToolPairing(messages);
         // Invalidar cache de tokens reales (el historial cambió)
@@ -817,10 +922,113 @@ export class ContextManager {
     return `${COMPRESSOR_PROMPT}\n\n${context}<conversation>\n${conversation}\n</conversation>`;
   }
 
+  /**
+   * Resume lo antiguo. Con `agent.compressionReusePrefix` y si sale a cuenta
+   * (ver `prefixRequest`), primero con el historial tal cual; si el backend
+   * rechaza esa petición (error no reintentable, p. ej. un 400 por
+   * `tool_choice: 'none'`, o un resumen vacío), con el digest: es otra
+   * petición, no un reintento de la misma. Un fallo de red, un 5xx/429 o el
+   * timeout van directos al Caso A de §12.4, como el fallo del digest.
+   */
+  private async summarize(
+    messages: Message[],
+    zone: { tailStart: number; anchor: number | null },
+    oldMessages: Message[],
+    signal: AbortSignal | undefined,
+    trace: TraceScope | undefined,
+    prefix: CompressionPrefix | undefined,
+  ): Promise<string> {
+    const anchor = zone.anchor !== null ? messages[zone.anchor] : undefined;
+    const digest = this.compressorInput(oldMessages, anchor);
+    const withPrefix = this.prefixRequest(messages, zone, prefix, digest);
+    if (withPrefix) {
+      try {
+        return await this.callCompressor(withPrefix, signal, trace);
+      } catch (err) {
+        if (!(err instanceof CompressorError) || !err.rejected) throw err;
+        log.warn('context compressor with the cached prefix failed; using the digest', {
+          error: err.message,
+        });
+      }
+    }
+    return this.callCompressor(
+      {
+        messages: [{ role: 'user', content: digest }],
+        model: this.compressorModel ?? this.model ?? '',
+      },
+      signal,
+      trace,
+    );
+  }
+
+  /**
+   * Petición del resumen que reutiliza el prefijo de la última del loop: los
+   * mismos mensajes, tools y sesión, y la instrucción al final, con las tools
+   * en `tool_choice: 'none'`. `null` si no aplica: opción apagada, sin datos
+   * del loop, otro modelo de compresión, otro provider (fallback), una
+   * petición que no cabría en la ventana con el resumen (el digest sí recorta)
+   * o que no sale a cuenta.
+   *
+   * Sale a cuenta si lo que quedaría **fuera** de caché (lo añadido desde la
+   * última petición del loop, más la instrucción) es menor que el digest
+   * entero. No suele: la compresión salta justo después de que un resultado
+   * grande de tool entre en el historial, y eso es lo que no está en caché
+   * (el digest lo recorta a 1 500 caracteres). Sin saber qué se mandó (no hay
+   * petición registrada, o el historial cambió debajo), no se arriesga.
+   * Son estimaciones del proxy por caracteres para decidir, no métricas.
+   */
+  private prefixRequest(
+    messages: Message[],
+    zone: { tailStart: number; anchor: number | null },
+    prefix: CompressionPrefix | undefined,
+    digest: string,
+  ): Omit<CompletionRequest, 'stream' | 'signal'> | null {
+    if (!this.reusePrefix || !prefix || !this.model) return null;
+    if (this.compressorModel && this.compressorModel !== this.model) return null;
+    if (prefix.provider && prefix.provider !== this.provider) return null;
+
+    const ratio = this.tokenRatio ?? 1;
+    const instruction = compressorPrefixInstruction(messages[zone.tailStart], zone.anchor !== null);
+    const instructionTokens = Math.ceil((instruction.length / 3.5) * ratio);
+    const fits =
+      this.contextWindow <= 0 ||
+      this.usage(messages).used + instructionTokens + COMPRESSOR_OUTPUT_RESERVE <=
+        this.contextWindow;
+    if (!fits) return null;
+
+    const sent = this.sentPrefixLength(messages, prefix.tools);
+    if (sent === null) return null;
+    const uncached =
+      Math.ceil(this.estimateFromChars(messages.slice(sent)) * ratio) + instructionTokens;
+    const digestTokens = Math.ceil((digest.length / 3.5) * ratio);
+    log.debug('context compressor request', {
+      uncachedWithPrefix: uncached,
+      digest: digestTokens,
+    });
+    if (uncached >= digestTokens) return null;
+
+    // Nunca dos `user` seguidos: si el historial acaba en uno, la instrucción
+    // va pegada detrás de su texto (el prefijo cacheado llega hasta ahí).
+    const last = messages[messages.length - 1];
+    const requestMessages: Message[] =
+      last?.role === 'user'
+        ? [
+            ...messages.slice(0, -1),
+            { ...last, content: last.content ? `${last.content}\n\n${instruction}` : instruction },
+          ]
+        : [...messages, { role: 'user', content: instruction }];
+    const tools = prefix.tools.length > 0 ? prefix.tools : undefined;
+    return {
+      messages: requestMessages,
+      ...(tools ? { tools, toolChoice: 'none' as const } : {}),
+      model: this.model,
+      sessionId: prefix.sessionId,
+    };
+  }
+
   /** Llama al LLM para comprimir el historial antiguo. */
   private async callCompressor(
-    oldMessages: Message[],
-    anchor?: Message,
+    base: Omit<CompletionRequest, 'stream' | 'signal'>,
     signal?: AbortSignal,
     trace?: TraceScope,
   ): Promise<string> {
@@ -828,7 +1036,6 @@ export class ContextManager {
 
     const timeout = AbortSignal.timeout(this.compressionTimeoutMs);
     const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
-    const model = this.compressorModel ?? this.model;
     // Un `<think>` al principio es razonamiento (backends que no lo separan a
     // `reasoning_content`): no es parte del resumen.
     const think = new ThinkTagSplitter();
@@ -839,12 +1046,7 @@ export class ContextManager {
         origin: 'context-compression',
         provider: this.provider,
         providerName: this.providerName,
-        request: {
-          messages: [{ role: 'user', content: this.compressorInput(oldMessages, anchor) }],
-          stream: true,
-          model,
-          signal: combined,
-        },
+        request: { ...base, stream: true, signal: combined },
         trace,
         cancelSignal: signal,
       })) {
@@ -856,16 +1058,28 @@ export class ContextManager {
       if (timeout.aborted) {
         throw new CompressorError(
           `timed out after ${Math.round(this.compressionTimeoutMs / 1000)} s`,
+          false,
+          true,
         );
       }
-      throw new CompressorError(err instanceof Error ? err.message : String(err));
+      // Lo no reintentable (un 4xx) es un rechazo de esta petición, no un fallo
+      // del backend: otra petición distinta puede servir.
+      const rejected = err instanceof ProviderError && !err.retryable;
+      throw new CompressorError(
+        err instanceof Error ? err.message : String(err),
+        false,
+        false,
+        rejected,
+      );
     }
     if (signal?.aborted) throw new CompressorError('cancelled', true);
     result += think.flush().text;
 
     const summary = result.trim();
     // Un resumen vacío no sustituye a nada: sería borrar el historial.
-    if (!summary) throw new CompressorError('the compressor returned an empty summary');
+    if (!summary) {
+      throw new CompressorError('the compressor returned an empty summary', false, false, true);
+    }
     return summary;
   }
 }
@@ -1014,6 +1228,7 @@ export class ReactLoop {
         config.agent.compressorModel,
         config.agent.compressionTimeoutMs,
         router?.providerName,
+        config.agent.compressionReusePrefix,
       );
   }
 
@@ -1154,11 +1369,19 @@ export class ReactLoop {
         ctxEstimated: ctxUsage.estimated,
       });
 
+      // Toolset según el modo activo (Hito 7): en 'plan' se restringe a la
+      // allowlist read-only + present_plan; en 'execute' aparece update_plan.
+      // Hito 8: el filtro de subagente restringe además por perfil + profundidad=1.
+      // Se calcula antes de comprimir: el resumen que reutiliza el prefijo
+      // cacheado manda las mismas tools que esta petición.
+      const tools: ToolSchema[] = this.registry.toToolSchemas(mode, toolsetFilter);
+
       // Comprimir contexto antes de cada iteración (§12.4)
       const comprResult = await this.contextManager.maybeCompress(
         this.messages,
         signal,
         opts?.trace,
+        { tools, sessionId: opts?.sessionId, provider: this.router?.getActive() ?? this.provider },
       );
       if (comprResult.kind === 'compressed' || comprResult.kind === 'truncated') {
         loopLog.info(`context ${comprResult.kind}`, {
@@ -1227,11 +1450,6 @@ export class ReactLoop {
       } else if (comprResult.kind === 'pressure') {
         yield { type: 'warning', message: 'context_window_pressure' };
       }
-
-      // Toolset según el modo activo (Hito 7): en 'plan' se restringe a la
-      // allowlist read-only + present_plan; en 'execute' aparece update_plan.
-      // Hito 8: el filtro de subagente restringe además por perfil + profundidad=1.
-      const tools: ToolSchema[] = this.registry.toToolSchemas(mode, toolsetFilter);
 
       // Hito 11 — re-inyectar las tareas abiertas en el system prompt antes de
       // cada iteración. Una descripción estática de tool no basta para que un
@@ -1313,6 +1531,7 @@ export class ReactLoop {
         sessionId: opts?.sessionId,
         onStreamWarning: (message) => streamWarnings.push(message),
       };
+      this.contextManager.recordSent(this.messages, tools, this.router?.model ?? this.model);
       // Incidencias del stream (chunks descartados): se emiten como `warning`
       // en cuanto el loop recupera el control, sin cortar la respuesta.
       const streamWarnings: string[] = [];

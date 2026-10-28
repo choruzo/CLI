@@ -1,0 +1,101 @@
+{
+  "id": "cache-compression-reuses-prefix",
+  "group": "cache",
+  "title": "Con agent.compressionReusePrefix, el resumen reutiliza el prefijo que el backend acaba de cachear",
+  "description": "Ocho lecturas medianas y una novena que cruza el umbral. Lo que entró desde la última petición del loop (la novena) es menos que el resumen de siempre de las ocho anteriores, así que la compresión manda el historial tal cual (mismas tools, en tool_choice none) con la instrucción al final, y casi toda su entrada sale de caché. Su pareja, cache-compression-prefix-not-worth, es el caso contrario.",
+  "difficulty": "intermediate",
+  "requires": {
+    "commands": ["node"]
+  },
+  "setup": {
+    "commands": [
+      [
+        "node",
+        "-e",
+        "const fs = require('fs'); const nl = String.fromCharCode(10); fs.mkdirSync('docs'); const write = (name, n) => { const lines = []; for (let i = 0; i < n; i++) lines.push(name + ' line ' + String(i).padStart(3, '0') + ' lorem ipsum dolor sit amet consectetur'); fs.writeFileSync('docs/' + name + '.md', lines.join(nl) + nl); }; for (let k = 1; k <= 8; k++) write('part' + k, 100); write('notes', 100);"
+      ]
+    ],
+    "config": {
+      "agent": {
+        "compressionThreshold": 0.67,
+        "compressionKeepRounds": 1,
+        "compressionReusePrefix": true
+      }
+    }
+  },
+  "input": "Lee docs/part1.md a docs/part8.md, de uno en uno, y después docs/notes.md. Dime cuántos ficheros has leído.",
+  "script": [
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part1.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part2.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part3.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part4.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part5.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part6.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part7.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/part8.md" } }] },
+    { "toolCalls": [{ "name": "read_file", "args": { "path": "docs/notes.md" } }] },
+    { "text": "He leído 9 ficheros." }
+  ],
+  "auxiliaryScript": {
+    "context-compression": [
+      {
+        "text": "Read so far: docs/part1.md to docs/part8.md, 100 lines each."
+      }
+    ]
+  },
+  "expect": {
+    "description": "Una sola compresión, reconocida como llamada auxiliar, que lee de caché casi toda su entrada; el agente termina sin errores.",
+    "checks": [
+      {
+        "type": "output_contains",
+        "value": "9 ficheros"
+      },
+      {
+        "type": "metric",
+        "metric": "compressions",
+        "mode": "mock",
+        "equals": 1
+      },
+      {
+        "type": "llm_call",
+        "origin": "context-compression",
+        "status": "ok",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryCachedReadTokens",
+        "min": 1,
+        "mode": "mock",
+        "label": "el resumen lee de caché el prompt que el loop acaba de mandar"
+      },
+      {
+        "type": "metric",
+        "metric": "auxiliaryCacheHitRate",
+        "min": 0.85,
+        "mode": "mock"
+      },
+      {
+        "type": "cache_break",
+        "cause": "compression",
+        "min": 1,
+        "max": 1,
+        "mode": "mock"
+      },
+      {
+        "type": "metric",
+        "metric": "toolErrors",
+        "mode": "mock",
+        "equals": 0
+      },
+      {
+        "type": "metric",
+        "metric": "llmErrors",
+        "mode": "mock",
+        "equals": 0
+      }
+    ]
+  }
+}
