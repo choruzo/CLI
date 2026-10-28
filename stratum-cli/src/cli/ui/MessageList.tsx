@@ -60,6 +60,7 @@ function renderItem(
       liveActionLimit={liveActionLimit}
       verbosity={verbosity}
       usage={item.usage}
+      outcome={item.outcome}
     />
   );
 }

@@ -216,13 +216,13 @@ export function launch({
       return exited.exitCode;
     },
     /** Espera al prompt de la pantalla de bienvenida. */
-    waitForBanner: (ms) => t.waitFor(/Type your first message/, ms),
+    waitForBanner: (ms) => t.waitFor(/Escribe tu primer mensaje/, ms),
     /** Espera a que el turno termine y el input vuelva a estar libre. */
     async waitForIdle(ms = 30000) {
       await sleep(150);
-      // Con el agente trabajando el input sigue vivo (steering): el turno está
-      // en curso mientras se vea cualquiera de los dos textos.
-      await t.waitGone(/Stratum is thinking\.\.\.|Agent is working — type to steer/, ms);
+      // Con el agente trabajando el input sigue vivo (steering) y va vacío: el
+      // turno ha terminado cuando el pie del prompt vuelve a decir «↵ enviar».
+      await t.waitFor(/↵ enviar/, ms);
     },
 
     /** Imprime la pantalla con una etiqueta (para mirarla desde un script). */

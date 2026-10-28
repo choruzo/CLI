@@ -70,7 +70,8 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   },
   {
     name: '/subagents',
-    description: 'Inspecciona el transcript de un subagente de la sesión (read-only)',
+    description:
+      'Ventana de un subagente, solo lectura (sin args: lista · /subagents explorer#2 la abre)',
     hasArgs: false,
   },
   {
@@ -232,6 +233,7 @@ const BUSY_COMMAND_NAMES = new Set([
   '/verbosity',
   '/btw',
   '/tools',
+  '/subagents',
   '/agents',
   '/env',
   '/memory show',

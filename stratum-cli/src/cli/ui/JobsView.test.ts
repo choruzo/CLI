@@ -43,10 +43,10 @@ describe('panel de jobs', () => {
       NOW,
       14,
     );
-    expect(rows[0]).toMatch(/^#3\s+npm test\s+running\s+18\.0s$/);
-    expect(rows[1]).toMatch(/^#4\s+cargo build\s+failed\s+exit 101$/);
+    expect(rows[0]).toMatch(/^#3\s+npm test\s+en curso\s+18\.0s$/);
+    expect(rows[1]).toMatch(/^#4\s+cargo build\s+fallido\s+exit 101$/);
     // Columnas alineadas.
-    expect(rows[0]!.indexOf('running')).toBe(rows[1]!.indexOf('failed'));
+    expect(rows[0]!.indexOf('en curso')).toBe(rows[1]!.indexOf('fallido'));
   });
 
   it('el detalle de un job terminado es su desenlace', () => {
@@ -65,7 +65,7 @@ describe('panel de jobs', () => {
         job({ status: 'cancelled', exitCode: null, endReason: 'session-closed', ...done }),
         NOW,
       ),
-    ).toBe('session closed');
+    ).toBe('sesión cerrada');
     // Cancelado a mano: no hay desenlace que contar, se enseña lo que duró.
     expect(
       jobStatusDetail(

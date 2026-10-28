@@ -14,6 +14,12 @@ export interface ModelInfo {
   id: string;
   /** Ventana de contexto, si el backend la declara (la mayoría solo da el id). */
   contextWindow?: number;
+  /**
+   * El modelo razona, según `supported_parameters` (OpenRouter): `true` si
+   * declara `reasoning`, `false` si declara parámetros sin él y ausente si el
+   * backend no lo dice. Nunca se deduce del nombre.
+   */
+  reasoning?: boolean;
 }
 
 /**
@@ -35,6 +41,12 @@ function contextWindowOf(entry: Record<string, unknown>): number | undefined {
     if (typeof value === 'number' && Number.isInteger(value) && value > 0) return value;
   }
   return undefined;
+}
+
+function reasoningOf(entry: Record<string, unknown>): boolean | undefined {
+  const params = entry.supported_parameters;
+  if (!Array.isArray(params)) return undefined;
+  return params.includes('reasoning') || params.includes('include_reasoning');
 }
 
 /**
@@ -113,7 +125,12 @@ export async function fetchModelInfos(
     const id = entry?.id;
     if (typeof id !== 'string' || id.length === 0 || byId.has(id)) continue;
     const contextWindow = contextWindowOf(entry);
-    byId.set(id, contextWindow ? { id, contextWindow } : { id });
+    const reasoning = reasoningOf(entry);
+    byId.set(id, {
+      id,
+      ...(contextWindow ? { contextWindow } : {}),
+      ...(reasoning !== undefined ? { reasoning } : {}),
+    });
   }
   const infos = [...byId.values()].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -145,6 +162,8 @@ export interface ProviderCapabilities {
   listsModels: boolean;
   /** Modelos descubiertos (vacío si `listsModels` es false). */
   models: string[];
+  /** Lo que el backend declara de cada modelo (ventana, razonamiento), por id. */
+  infos?: ModelInfo[];
   /** Mensaje legible cuando `/models` no está disponible (para mostrar en UI). */
   note?: string;
 }
@@ -180,7 +199,8 @@ export async function detectCapabilities(
 ): Promise<ProviderCapabilities> {
   const backend = classifyBackendByUrl(baseUrl);
   try {
-    const models = await fetchModels(baseUrl, apiKey, opts);
+    const infos = await fetchModelInfos(baseUrl, apiKey, opts);
+    const models = infos.map((m) => m.id);
     if (models.length === 0) {
       return {
         backend,
@@ -193,7 +213,7 @@ export async function detectCapabilities(
             : '.'),
       };
     }
-    return { backend, listsModels: true, models };
+    return { backend, listsModels: true, models, infos };
   } catch (err) {
     return {
       backend,

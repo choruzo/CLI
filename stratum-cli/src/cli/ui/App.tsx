@@ -20,7 +20,7 @@ import type {
 import type { PendingInteractions } from '../../host/interactions.js';
 import type { SessionOwnership } from '../../host/handoff.js';
 import type { DetachOutcome } from '../../host/peer-host-bridge.js';
-import { describeDetachRefusal, handedOffNotice } from '../handoff-text.js';
+import { describeDetachRefusalEs, handedOffNoticeEs } from './handoff-text.js';
 import type { ProviderConfig, ProviderConfigInput } from '../../config/schema.js';
 import { expandEnvVars } from '../../config/loader.js';
 import { getByDotPath, formatConfigValue } from '../../config/dot-path.js';
@@ -34,7 +34,7 @@ import {
   setProviderModel,
   setUserPreference,
 } from '../../config/writer.js';
-import { detectCapabilities } from '../../providers/utils.js';
+import { detectCapabilities, type ModelInfo } from '../../providers/utils.js';
 import type { ProviderStatus } from './StatusBar.js';
 import type { McpManager, McpStatusSummary } from '../../tools/mcp/manager.js';
 import type { ToolRegistry } from '../../tools/registry.js';
@@ -45,6 +45,7 @@ import {
   SubagentView,
   appendTranscriptEvent,
   createTranscriptEventLog,
+  findSubagent,
   type SubagentTranscript,
 } from './SubagentView.js';
 import { applyToolEvent } from './tool-call-reducer.js';
@@ -59,6 +60,8 @@ import {
   type ChangesSummary,
 } from '../../git/changes.js';
 import { Banner } from './Banner.js';
+import { modelHint } from './model-list.js';
+import { recentSessionRows, type RecentSessionRow } from './banner-info.js';
 import type { InitStep } from './InitProgressBlock.js';
 import { ConversationView } from './ConversationView.js';
 import { CommandPalette } from './CommandPalette.js';
@@ -80,7 +83,13 @@ import { formatEnvironmentsReport, formatSessionProfileReport } from '../session
 import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
 import { VERBOSITY_LEVELS, type Verbosity } from './tool-groups.js';
-import { liveTelemetry, type UsageView } from './telemetry-format.js';
+import {
+  liveTelemetry,
+  shouldNotifyTurnEnd,
+  turnEndNotification,
+  type TurnOutcome,
+  type UsageView,
+} from './telemetry-format.js';
 import { formatContextReport } from './context-format.js';
 import { RevertConfirm, type RevertPlanView } from './RevertConfirm.js';
 import {
@@ -91,7 +100,8 @@ import {
 } from './undo-format.js';
 import { REVERT_SCOPE_NOTE } from '../../snapshots/index.js';
 import { formatJobRows, visibleJobs } from './JobsView.js';
-import { formatJobEndLine, shortJobCommand, type BackgroundJob } from '../../jobs/types.js';
+import { shortJobCommand, type BackgroundJob } from '../../jobs/types.js';
+import { formatJobEndText } from './job-text.js';
 import { TURN_REFUSED_HANDED_OFF, useAgentStream } from './useAgentStream.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { PLAN_MODE_PROMPT } from '../../agent/plan.js';
@@ -105,7 +115,7 @@ import { deleteTrace } from '../../trace/store.js';
 /** Overlays interactivos de sesión (Hito 3.5): /model y /config_provider. */
 type OverlayState =
   | { kind: 'model-loading' }
-  | { kind: 'model-select'; models: string[] }
+  | { kind: 'model-select'; models: string[]; infos?: ModelInfo[] }
   // UX-1 — `/rewind` elige turno; `/undo` y `/rewind` confirman con la lista.
   | { kind: 'rewind-select'; turns: UndoableTurnView[] }
   | { kind: 'revert-confirm'; count: number; plan: RevertPlanView }
@@ -149,8 +159,22 @@ export type AgentConvItem = {
   maxConcurrency?: number;
   /** Uso del turno (UX-3): se fija al cerrarse; ausente en turnos sin loop. */
   usage?: UsageView;
+  /** Cuándo empezó el turno (`AGENT_START`). */
+  startedAt?: number;
+  /** Cómo y en cuánto acabó; se fija en el `done` (`✓ hecho · 42 s`). */
+  outcome?: TurnOutcome;
   streaming: boolean;
 };
+
+/**
+ * Algo que espera una respuesta (confirmación, preguntas, plan) o un error
+ * fatal cierra la ventana de un subagente: es de solo lectura y no lo enseña.
+ */
+function leaveSubagentView(state: AppState): Partial<AppState> {
+  return state.focusState === 'subagent-view'
+    ? { focusState: 'input', viewingSubagentId: null }
+    : {};
+}
 
 export type ConvItem = { kind: 'user'; text: string; note?: string } | AgentConvItem;
 
@@ -269,6 +293,7 @@ export type AppAction =
   | { type: 'INIT_DONE'; summary?: string }
   | { type: 'CLEAR' }
   | { type: 'TOGGLE_DEBUG' }
+  | { type: 'ENTER_CONVERSATION' }
   | { type: 'TOGGLE_TODO' }
   | { type: 'RESTORE_HISTORY'; items: ConvItem[] }
   | { type: 'CONFIRM_SHOW'; request: PendingConfirm }
@@ -361,7 +386,13 @@ export function reducer(state: AppState, action: AppAction): AppState {
     }
     case 'AGENT_START': {
       const userItem: ConvItem = { kind: 'user', text: action.input };
-      const agentItem: AgentConvItem = { kind: 'agent', text: '', toolCalls: [], streaming: true };
+      const agentItem: AgentConvItem = {
+        kind: 'agent',
+        text: '',
+        toolCalls: [],
+        streaming: true,
+        startedAt: Date.now(),
+      };
       return {
         ...state,
         phase: 'conversation',
@@ -377,7 +408,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case 'STEERING_MESSAGE': {
       // Va al historial visible, sobre el turno en curso, y no toca su estado:
       // el agente sigue trabajando.
-      const item: ConvItem = { kind: 'user', text: action.text, note: 'queued as steering' };
+      const item: ConvItem = { kind: 'user', text: action.text, note: 'en cola para el agente' };
       return { ...state, completedItems: [...state.completedItems, item], inputValue: '' };
     }
 
@@ -465,6 +496,11 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case 'TOGGLE_DEBUG':
       return { ...state, debug: !state.debug };
 
+    // Lo primero que se envía desde el banner: los overlays (`/model`,
+    // `/rewind`…) solo se pintan en la vista de conversación.
+    case 'ENTER_CONVERSATION':
+      return state.phase === 'conversation' ? state : { ...state, phase: 'conversation' };
+
     case 'TOGGLE_TODO':
       return { ...state, todoCollapsed: !state.todoCollapsed };
 
@@ -473,7 +509,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
       return { ...state, phase: 'conversation', completedItems: action.items };
 
     case 'CONFIRM_SHOW':
-      return { ...state, pendingConfirm: action.request };
+      return { ...state, ...leaveSubagentView(state), pendingConfirm: action.request };
 
     case 'CONFIRM_RESOLVE':
       return { ...state, pendingConfirm: null };
@@ -785,7 +821,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
       // resuelve desde <QuestionPrompt> (igual que el destructivo y el de plan);
       // questions_answered solo confirma el cierre.
       if (ev.type === 'questions_asked') {
-        return { ...state, pendingQuestions: ev.questions };
+        return { ...state, ...leaveSubagentView(state), pendingQuestions: ev.questions };
       }
       if (ev.type === 'questions_answered') {
         return { ...state, pendingQuestions: null };
@@ -803,7 +839,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
 
       // Hito 7 — Fase 2: el agente propuso un plan; abrir el gate de aprobación.
       if (ev.type === 'plan_proposed') {
-        return { ...state, plan: ev.plan, pendingApproval: true };
+        return { ...state, ...leaveSubagentView(state), plan: ev.plan, pendingApproval: true };
       }
 
       // Hito 7 — Fase 3: actualización in-place del estado de un paso.
@@ -829,6 +865,14 @@ export function reducer(state: AppState, action: AppAction): AppState {
                 streaming: false,
                 ...(state.liveUsage && state.liveUsage.llmCalls > 0
                   ? { usage: state.liveUsage }
+                  : {}),
+                ...(rawCurrent.startedAt !== undefined
+                  ? {
+                      outcome: {
+                        stopReason: ev.stopReason,
+                        durationMs: Date.now() - rawCurrent.startedAt,
+                      },
+                    }
                   : {}),
               }
             : rawCurrent;
@@ -892,6 +936,7 @@ export function reducer(state: AppState, action: AppAction): AppState {
             streaming: false,
           })),
           thinking: false,
+          ...leaveSubagentView(state),
           fatalError: { message: ev.message },
         };
       }
@@ -1126,12 +1171,12 @@ export function App({
       if (ev.type === 'started') {
         dispatch({
           type: 'SYSTEM_MESSAGE',
-          text: `[background job #${ev.job.id} started: ${shortJobCommand(ev.job.command, 80)}]`,
+          text: `[job #${ev.job.id} en segundo plano: ${shortJobCommand(ev.job.command, 80)}]`,
         });
       } else if (ev.type === 'ended' && ev.job.endReason !== 'spawn-error') {
         dispatch({
           type: 'SYSTEM_MESSAGE',
-          text: formatJobEndLine({
+          text: formatJobEndText({
             ...ev.job,
             durationMs: (ev.job.endedAt ?? Date.now()) - ev.job.startedAt,
           }),
@@ -1165,12 +1210,12 @@ export function App({
       } else if (change.type === 'consumed') {
         dispatch({
           type: 'SYSTEM_MESSAGE',
-          text: `[agent received ${users} user ${users === 1 ? 'update' : 'updates'}]`,
+          text: `[el agente recibió ${users} ${users === 1 ? 'mensaje' : 'mensajes'}]`,
         });
       } else if (change.type === 'dropped') {
         dispatch({
           type: 'SYSTEM_MESSAGE',
-          text: `[${users} queued ${users === 1 ? 'update' : 'updates'} discarded]`,
+          text: `[${users} ${users === 1 ? 'mensaje en cola descartado' : 'mensajes en cola descartados'}]`,
         });
       }
     });
@@ -1327,7 +1372,7 @@ export function App({
     if (!ownership) return;
     return ownership.subscribe((state) => {
       if (state !== 'handed-off') return;
-      dispatch({ type: 'SYSTEM_MESSAGE', text: handedOffNotice(sessionId ?? '') });
+      dispatch({ type: 'SYSTEM_MESSAGE', text: handedOffNoticeEs(sessionId ?? '') });
       setTimeout(() => exit(), 150);
     });
   }, [ownership, sessionId, exit]);
@@ -1393,6 +1438,16 @@ export function App({
     () => new SessionStore(resolveMemoryPaths(agent.getConfig()).sessionsDir),
     [agent],
   );
+
+  // Sesiones que la bienvenida ofrece reanudar. Se leen una vez: un fallo deja
+  // la lista vacía, no la pantalla sin pintar.
+  const [recentSessions] = useState<RecentSessionRow[]>(() => {
+    try {
+      return recentSessionRows(sessionStore().scan({ last: 8 }).sessions, sessionId, Date.now());
+    } catch {
+      return [];
+    }
+  });
 
   // -------------------------------------------------------------------------
   // Plan & Execute (Hito 7, UI §5.4): el loop emite plan_proposed y espera la
@@ -1516,8 +1571,6 @@ export function App({
   const [overlay, setOverlay] = useState<OverlayState | null>(null);
   /** Valor en edición del input de modelo manual (overlay model-manual, Hito 6). */
   const [modelManualValue, setModelManualValue] = useState('');
-  /** Hint inline de la Vista de Subagente cuando se teclea algo distinto de /quit (§5.7). */
-  const [subagentViewHint, setSubagentViewHint] = useState<string | null>(null);
 
   // -------------------------------------------------------------------------
   // Paleta de /comandos (UI §5.2)
@@ -1621,12 +1674,20 @@ export function App({
       return;
     }
 
-    // Vista de Subagente (Hito 8C, §5.7): Esc cierra y vuelve al agente principal;
-    // el resto del input lo teclea el TextInput (solo /quit es válido al enviar).
+    // Ventana de un subagente (Hito 8C, §5.7): de solo lectura, sin entrada de
+    // texto. Esc (o q) vuelve al agente principal; ←/→ pasa a otro subagente.
     if (state.focusState === 'subagent-view') {
-      if (key.escape) {
-        setSubagentViewHint(null);
+      if (key.escape || input === 'q') {
         dispatch({ type: 'EXIT_SUBAGENT_VIEW' });
+        return;
+      }
+      if (key.leftArrow || key.rightArrow) {
+        const ids = [...state.subagentTranscripts.keys()];
+        const at = ids.indexOf(state.viewingSubagentId ?? '');
+        if (ids.length > 1 && at >= 0) {
+          const next = (at + (key.rightArrow ? 1 : -1) + ids.length) % ids.length;
+          dispatch({ type: 'ENTER_SUBAGENT_VIEW', id: ids[next]! });
+        }
       }
       return;
     }
@@ -1962,7 +2023,7 @@ export function App({
           refreshProviderHealth();
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Modelo: ${caps.models[0]}` });
         } else if (caps.listsModels && caps.models.length > 0) {
-          setOverlay({ kind: 'model-select', models: caps.models });
+          setOverlay({ kind: 'model-select', models: caps.models, infos: caps.infos });
         } else {
           setModelManualValue(agent.model);
           setOverlay({ kind: 'model-manual', note: caps.note });
@@ -2136,7 +2197,7 @@ export function App({
             type: 'SYSTEM_MESSAGE',
             text:
               ownership.state === 'detaching'
-                ? 'The session is being handed off to stratumd: only read-only commands now.'
+                ? 'La sesión se está traspasando a stratumd: ahora solo valen los comandos de solo lectura.'
                 : TURN_REFUSED_HANDED_OFF,
           });
           return;
@@ -2231,12 +2292,12 @@ export function App({
           dispatch({
             type: 'SYSTEM_MESSAGE',
             text:
-              'This session is not published in stratumd: there is nowhere to hand it off ' +
-              '(start the daemon with `stratum daemon start`, then open a new chat).',
+              'Esta sesión no está publicada en stratumd: no hay adónde traspasarla ' +
+              '(arranca el daemon con `stratum daemon start` y abre un chat nuevo).',
           });
           return;
         }
-        dispatch({ type: 'SYSTEM_MESSAGE', text: 'Handing the session off to stratumd…' });
+        dispatch({ type: 'SYSTEM_MESSAGE', text: 'Traspasando la sesión a stratumd…' });
         void remote.detach().then((outcome) => {
           // `detached`: lo dice la suscripción a `ownership`, que además sale.
           if (outcome.status === 'detached') return;
@@ -2245,8 +2306,8 @@ export function App({
             text:
               outcome.status === 'unknown'
                 ? outcome.message
-                : `Not handed off: ${describeDetachRefusal(outcome.code, outcome.reason)}. ` +
-                  'The session stays here.',
+                : `No se ha traspasado: ${describeDetachRefusalEs(outcome.code, outcome.reason)}. ` +
+                  'La sesión se queda aquí.',
           });
         });
         return;
@@ -2515,7 +2576,7 @@ export function App({
           dispatch({ type: 'SYSTEM_MESSAGE', text: 'No hay MCP servers configurados.' });
           return;
         }
-        dispatch({ type: 'SYSTEM_MESSAGE', text: 'Reiniciando MCP servers...' });
+        dispatch({ type: 'SYSTEM_MESSAGE', text: 'Reiniciando los servidores MCP…' });
         void (async () => {
           try {
             // Retira las tools del ciclo anterior (un server que deja de
@@ -2822,8 +2883,22 @@ export function App({
         return;
       }
 
-      if (cmd === '/subagents') {
-        dispatch({ type: 'OPEN_SUBAGENT_PICKER' });
+      // `/subagents` elige de una lista; `/subagents <nombre|n>` abre directamente
+      // su ventana (`explorer`, `explorer#2` o `2`; con el nombre solo, el último).
+      if (cmd === '/subagents' || cmd.startsWith('/subagents ')) {
+        const query = cmd.slice('/subagents'.length).trim();
+        if (!query) {
+          dispatch({ type: 'OPEN_SUBAGENT_PICKER' });
+          return;
+        }
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        const found = findSubagent([...state.subagentTranscripts.values()], query);
+        if (found) dispatch({ type: 'ENTER_SUBAGENT_VIEW', id: found.id });
+        else
+          dispatch({
+            type: 'SYSTEM_MESSAGE',
+            text: `No hay ningún subagente «${query}» en esta sesión. /subagents los lista.`,
+          });
         return;
       }
 
@@ -3074,7 +3149,7 @@ export function App({
             ];
             const lines: string[] = ['Tools disponibles:\n'];
 
-            lines.push('  Built-in:');
+            lines.push('  Integradas:');
             for (const t of builtins) lines.push(`    • ${t}`);
 
             if (mcpManager) {
@@ -3137,6 +3212,7 @@ export function App({
       refreshSessionBadges,
       sessionStore,
       state.debug,
+      state.subagentTranscripts,
       verbosity,
       openRevertConfirm,
       ownership,
@@ -3159,6 +3235,21 @@ export function App({
     if (!state.fatalError) executeCommandRef.current?.(text);
   }, [state.thinking, state.fatalError]);
 
+  // Un turno largo que acaba avisa al terminal (campana / notificación): quien
+  // se fue a otra ventana se entera sin mirar. Solo al pasar de trabajando a
+  // en reposo, y una vez por turno.
+  const wasThinkingRef = useRef(false);
+  useEffect(() => {
+    const was = wasThinkingRef.current;
+    wasThinkingRef.current = state.thinking;
+    if (!was || state.thinking) return;
+    const last = state.completedItems.at(-1);
+    const outcome = last?.kind === 'agent' ? last.outcome : undefined;
+    if (outcome && shouldNotifyTurnEnd(outcome) && process.stdout.isTTY) {
+      process.stdout.write(turnEndNotification(outcome));
+    }
+  }, [state.thinking, state.completedItems]);
+
   // Panel de arranque MCP (§14): solo con `mcp.startup: 'eager'`. Los timeouts
   // se leen de la config para poder distinguir un timeout de un fallo de arranque.
   const [mcpStartup] = useState(() => {
@@ -3173,27 +3264,12 @@ export function App({
       if (!text.trim()) return;
 
       const cmd = text.trim();
+      if (state.phase === 'banner') dispatch({ type: 'ENTER_CONVERSATION' });
 
       // Historial de inputs (§10): se registra todo lo enviado, comandos incluidos.
       historyRef.current = pushHistory(historyRef.current, cmd);
       setHistoryIndex(null);
       draftRef.current = '';
-
-      // Vista de Subagente (Hito 8C, §5.7): la línea de entrada es read-only; el
-      // único comando aceptado es /quit (Esc es alias, gestionado en useInput).
-      // Cualquier otra cosa se rechaza con un hint inline sin salir de la vista.
-      if (state.focusState === 'subagent-view') {
-        dispatch({ type: 'INPUT_CHANGE', value: '' });
-        if (cmd === '/quit' || cmd === '/exit') {
-          setSubagentViewHint(null);
-          dispatch({ type: 'EXIT_SUBAGENT_VIEW' });
-        } else {
-          setSubagentViewHint(
-            '⚠ Aquí solo está disponible /quit (vuelve al agente principal). Esc también cierra.',
-          );
-        }
-        return;
-      }
 
       // Con el agente trabajando, un mensaje es steering: no cancela nada, se
       // encola y el loop lo incorpora en su siguiente punto seguro. Ctrl+C
@@ -3214,7 +3290,7 @@ export function App({
             return;
           }
           setInputHint(
-            'Not available while the agent is working (Ctrl+C cancels). Type / to see what is.',
+            'No disponible mientras el agente trabaja (Ctrl+C cancela). Escribe / para ver lo que sí.',
           );
           return;
         }
@@ -3225,9 +3301,9 @@ export function App({
           // Ni se recorta ni se envía por su cuenta: lo escrito se queda en el
           // input para acortarlo o enviarlo entero cuando acabe el turno.
           setInputHint(
-            `Too large to steer (${queued.chars.toLocaleString('en-US')} chars, limit ` +
-              `${queued.limit.toLocaleString('en-US')}): not sent. ` +
-              'Shorten it, or send it when the agent finishes.',
+            `Demasiado largo para enviarlo ahora (${queued.chars.toLocaleString('es-ES')} caracteres, límite ` +
+              `${queued.limit.toLocaleString('es-ES')}): no se ha enviado. ` +
+              'Acórtalo o envíalo cuando el agente termine.',
           );
           return;
         }
@@ -3235,7 +3311,7 @@ export function App({
         // agente): no se pierde, se envía como mensaje normal en cuanto acabe.
         deferredSendRef.current = cmd;
         dispatch({ type: 'INPUT_CHANGE', value: '' });
-        setInputHint('The agent is finishing: your message will be sent as a new turn.');
+        setInputHint('El agente está terminando: tu mensaje saldrá como un turno nuevo.');
         return;
       }
       setInputHint(null);
@@ -3263,6 +3339,7 @@ export function App({
       executeCommand(cmd);
     },
     [
+      state.phase,
       state.thinking,
       state.focusState,
       paletteItems,
@@ -3283,6 +3360,12 @@ export function App({
           logoPreRendered={logoPreRendered}
           mcpStartup={mcpStartup}
           profiles={profileRows}
+          info={{
+            provider: agent.providerName,
+            model: agent.model,
+            cwd: process.cwd(),
+            recent: recentSessions,
+          }}
         />
       </Box>
     );
@@ -3298,27 +3381,19 @@ export function App({
     return (
       <Box flexDirection="column" width="100%">
         {transcript ? (
-          <SubagentView transcript={transcript} expandedBlockIds={state.expandedBlockIds} />
+          <SubagentView
+            transcript={transcript}
+            position={{
+              index: [...state.subagentTranscripts.keys()].indexOf(transcript.id),
+              total: state.subagentTranscripts.size,
+            }}
+            expandedBlockIds={state.expandedBlockIds}
+          />
         ) : (
           <Box paddingX={1}>
-            <Text color={theme.textMuted}>Subagente no encontrado.</Text>
+            <Text color={theme.textMuted}>Subagente no encontrado · esc para volver</Text>
           </Box>
         )}
-        {subagentViewHint && (
-          <Box paddingX={1}>
-            <Text color={theme.warning}>{subagentViewHint}</Text>
-          </Box>
-        )}
-        <Box paddingX={1}>
-          <Text color={theme.accent}>❯❯ </Text>
-          <TextInput
-            value={state.inputValue}
-            onChange={handleInputChange}
-            onSubmit={handleSend}
-            placeholder="/quit para volver al agente principal"
-            showCursor
-          />
-        </Box>
       </Box>
     );
   }
@@ -3332,7 +3407,7 @@ export function App({
   if (overlay?.kind === 'model-loading') {
     overlayNode = (
       <Box borderStyle="single" borderColor={theme.borderSubtle} paddingX={1}>
-        <Text color={theme.textMuted}>◌ Obteniendo modelos del provider activo...</Text>
+        <Text color={theme.textMuted}>◌ Obteniendo modelos del provider activo…</Text>
       </Box>
     );
   } else if (overlay?.kind === 'rewind-select') {
@@ -3394,7 +3469,10 @@ export function App({
             ...overlay.models.map((m) => ({
               label: m,
               value: m,
-              hint: m === current ? '(actual)' : undefined,
+              hint: modelHint(
+                overlay.infos?.find((i) => i.id === m),
+                m === current,
+              ),
             })),
             { label: '✎ Escribir modelo manualmente…', value: '\u0000manual' },
           ]}

@@ -63,7 +63,7 @@ export function coalesceAgentEvents(events: AgentEvent[]): AgentEvent[] {
 
 /** Lo que ve quien intenta empezar un turno en una sesión que ya no es de este proceso. */
 export const TURN_REFUSED_HANDED_OFF =
-  'This session is being handed off to stratumd (or already is): no new turns here.';
+  'Esta sesión se está traspasando a stratumd (o ya lo está): aquí no hay más turnos.';
 
 export function useAgentStream(
   agent: StratumAgent,

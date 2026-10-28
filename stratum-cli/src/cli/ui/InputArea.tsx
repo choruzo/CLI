@@ -21,20 +21,16 @@ export function InputArea({ value, onChange, onSubmit, disabled, steering }: Pro
       <Text color={disabled ? theme.textDisabled : theme.accent} bold>
         ❯❯{' '}
       </Text>
+      {/* Trabajando, el input va vacío: el estado lo cuenta <ThinkingIndicator>
+          encima y qué hace Enter, el pie del prompt. */}
       {disabled ? (
-        <Text color={theme.textDisabled} dimColor>
-          Stratum is thinking...
-        </Text>
+        <Text> </Text>
       ) : (
         <TextInput
           value={value}
           onChange={onChange}
           onSubmit={onSubmit}
-          placeholder={
-            steering
-              ? 'Agent is working — type to steer it...'
-              : 'Type a message or / for commands...'
-          }
+          placeholder={steering ? '' : 'Escribe un mensaje o / para comandos…'}
           focus={!disabled}
           showCursor
         />

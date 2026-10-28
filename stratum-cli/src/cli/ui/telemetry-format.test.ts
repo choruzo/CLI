@@ -4,6 +4,9 @@ import {
   formatCount,
   formatSeconds,
   liveTelemetry,
+  shouldNotifyTurnEnd,
+  turnEndNotification,
+  turnOutcomeText,
   turnUsageParts,
   type UsageView,
 } from './telemetry-format.js';
@@ -101,5 +104,33 @@ describe('liveTelemetry', () => {
     const session = { ...base, turns: 1, promptTokens: 10, completionTokens: 2, incomplete: true };
     expect(liveTelemetry(null, session).usage).toBe('⛁ 12 · caché n/d · parcial');
     expect(turnUsageParts({ ...base, incomplete: true }, true)).toEqual(['tokens n/d', 'parcial']);
+  });
+});
+
+describe('cierre del turno', () => {
+  it('dice cómo acabó y cuánto tardó', () => {
+    expect(turnOutcomeText({ stopReason: 'stop', durationMs: 42_000 })).toEqual({
+      icon: '✓',
+      text: 'hecho · 42 s',
+      ok: true,
+    });
+    expect(turnOutcomeText({ stopReason: 'cancelled', durationMs: 3_100 }).text).toBe(
+      'cancelado · 3.1 s',
+    );
+    expect(turnOutcomeText({ stopReason: 'max_iterations', durationMs: 90_000 }).icon).toBe('⚠');
+  });
+
+  it('avisa solo de los turnos largos que no se cancelaron a mano', () => {
+    expect(shouldNotifyTurnEnd({ stopReason: 'stop', durationMs: 29_999 })).toBe(false);
+    expect(shouldNotifyTurnEnd({ stopReason: 'stop', durationMs: 30_000 })).toBe(true);
+    expect(shouldNotifyTurnEnd({ stopReason: 'error', durationMs: 60_000 })).toBe(true);
+    expect(shouldNotifyTurnEnd({ stopReason: 'cancelled', durationMs: 60_000 })).toBe(false);
+    expect(shouldNotifyTurnEnd(undefined)).toBe(false);
+  });
+
+  it('la notificación acaba en campana', () => {
+    const seq = turnEndNotification({ stopReason: 'stop', durationMs: 45_000 });
+    expect(seq.endsWith('')).toBe(true);
+    expect(seq).toContain('hecho · 45 s');
   });
 });

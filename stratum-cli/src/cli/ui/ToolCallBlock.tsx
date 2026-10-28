@@ -43,10 +43,11 @@ function sshHostOf(state: ToolCallState): string | null {
 }
 
 function truncateLabel(value: string): string {
-  return value.length > 50 ? value.slice(0, 47) + '...' : value;
+  return value.length > 50 ? value.slice(0, 47) + '…' : value;
 }
 
-function formatInput(state: ToolCallState): string {
+/** Lo que identifica la llamada (el comando, la ruta…), ya recortado. */
+export function formatInput(state: ToolCallState): string {
   const src = state.input ?? {};
   const keys = Object.keys(src);
   if (keys.length === 0) return '';
@@ -128,7 +129,7 @@ function ExpandedOutput({ text }: { text: string }) {
       ))}
       {hidden > 0 && (
         <Text color={theme.textDisabled} dimColor>
-          [+{hidden} more lines]
+          [+{hidden} líneas más]
         </Text>
       )}
     </Box>
@@ -157,7 +158,7 @@ export function ToolCallBlock({
         <Text color={theme.textDisabled}>○ </Text>
         <Text color={theme.textFaint}>{state.name}</Text>
         <HostTag alias={sshHost} />
-        <Text color={theme.textFaint}> │ en cola...</Text>
+        <Text color={theme.textFaint}> │ en cola…</Text>
       </Box>
     );
   }

@@ -3,6 +3,7 @@ import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 import { spinnerFrameAt } from './spinner.js';
+import { actionCount } from './AgentTree.js';
 
 /**
  * Estado de un bloque de subagente (Hito 8A, §12.16). Render colapsable estilo
@@ -117,23 +118,31 @@ export function SubagentBlock({
   const elapsedMs = state.startedAt ? Math.max(0, now - state.startedAt) : 0;
 
   const focusPrefix = focused ? <Text color={theme.accent}>▶ </Text> : null;
+  // Solo el nombre: las acciones del subagente se ven en su ventana (`/subagents`).
+  const name = `⊳ ${state.profile}#${state.n ?? 1}`;
   const label = (
     <Text color={theme.accent} bold>
-      ⊳ subagent
+      {name}
     </Text>
   );
-  const profileTag = <Text color={theme.textFaint}> ({state.profile})</Text>;
 
   if (state.status === 'running') {
+    const actions = actionCount(state);
     return (
       <Box marginBottom={0}>
-        {focusPrefix}
-        <Text color={theme.accent}>{spinnerFrameAt(now)} </Text>
-        {label}
-        {profileTag}
-        <Text color={theme.textFaint}> │ {formatDuration(elapsedMs)} │ </Text>
-        <Text color={theme.textFaint} dimColor>
-          {truncate(state.task, 50)}
+        <Text wrap="truncate-end">
+          {focusPrefix}
+          <Text color={theme.accent}>{spinnerFrameAt(now)} </Text>
+          {label}
+          <Text color={theme.textFaint}>
+            {' '}
+            │ {formatDuration(elapsedMs)}
+            {actions ? ` · ${actions}` : ''} │{' '}
+          </Text>
+          <Text color={theme.textFaint} dimColor>
+            {truncate(state.task, 50)}
+          </Text>
+          <Text color={theme.textDisabled}> · /subagents para ver su ventana</Text>
         </Text>
       </Box>
     );
@@ -145,7 +154,6 @@ export function SubagentBlock({
         {focusPrefix}
         <Text color={theme.textDisabled}>⋯ </Text>
         {label}
-        {profileTag}
         <Text color={theme.textFaint}> │ en cola │ </Text>
         <Text color={theme.textFaint} dimColor>
           {truncate(state.task, 50)}
@@ -167,7 +175,6 @@ export function SubagentBlock({
           {focusPrefix}
           <Text color={theme.success}>✓ </Text>
           {label}
-          {profileTag}
           {meta && <Text color={theme.textFaint}> │ {meta}</Text>}
           {state.summary && <Text color={theme.textFaint}> │ {truncate(state.summary, 50)}</Text>}
           {chevron}
@@ -201,9 +208,8 @@ export function SubagentBlock({
         {focusPrefix}
         <Text color={theme.error}>{icon} </Text>
         <Text color={theme.errorMuted} bold>
-          ⊳ subagent
+          {name}
         </Text>
-        {profileTag}
         <Text color={theme.errorMuted} dimColor>
           {' '}
           │ {statusLabel}

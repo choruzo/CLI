@@ -49,7 +49,7 @@ export function InitProgressBlock({ steps, summary, now = Date.now() }: Props) {
           <Text color={theme.textResponse}>{summary}</Text>
         </Box>
         <Text color={theme.textFaint} dimColor>
-          {'  '}Tip: edita STRATUM.md para añadir instrucciones permanentes al agente.
+          {'  '}Consejo: edita STRATUM.md para añadir instrucciones permanentes al agente.
         </Text>
       </Box>
     );

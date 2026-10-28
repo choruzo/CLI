@@ -16,7 +16,12 @@ import {
   summarizeActions,
   type Verbosity,
 } from './tool-groups.js';
-import { turnUsageParts, type UsageView } from './telemetry-format.js';
+import {
+  turnOutcomeText,
+  turnUsageParts,
+  type TurnOutcome,
+  type UsageView,
+} from './telemetry-format.js';
 
 interface Props {
   text: string;
@@ -49,6 +54,8 @@ interface Props {
   verbosity?: Verbosity;
   /** Uso del turno cerrado (UX-3): una línea al pie. */
   usage?: UsageView;
+  /** Cómo y en cuánto acabó el turno cerrado (`✓ hecho · 42 s`). */
+  outcome?: TurnOutcome;
   /** Reloj único de la conversación; evita intervalos por bloque. */
   now?: number;
   /** Límites de la región viva para que Ink no reescriba todo el scrollback. */
@@ -78,6 +85,7 @@ export function AgentMessage({
   debug = false,
   verbosity = 'standard',
   usage,
+  outcome,
   now = Date.now(),
   liveTextLines = 12,
   liveColumns = 80,
@@ -206,7 +214,9 @@ export function AgentMessage({
         ) : (
           <MarkdownText text={text} />
         ))}
-      {!streaming && usage && <TurnUsageLine usage={usage} compact={verbosity === 'compact'} />}
+      {!streaming && (usage || outcome) && (
+        <TurnUsageLine usage={usage} outcome={outcome} compact={verbosity === 'compact'} />
+      )}
     </Box>
   );
 }
@@ -289,15 +299,29 @@ function ThinkingSummaryLine({ blocks }: { blocks: string[] }) {
  * de la respuesta y por debajo de ella en jerarquía; el coste, si lo hay, un
  * punto más claro porque es el número que se busca.
  */
-function TurnUsageLine({ usage, compact }: { usage: UsageView; compact: boolean }) {
-  const parts = turnUsageParts(usage, compact);
-  if (parts.length === 0) return null;
-  const cost = usage.costUsd !== undefined ? parts.at(-1) : undefined;
+function TurnUsageLine({
+  usage,
+  outcome,
+  compact,
+}: {
+  usage?: UsageView;
+  outcome?: TurnOutcome;
+  compact: boolean;
+}) {
+  const parts = usage ? turnUsageParts(usage, compact) : [];
+  const end = outcome ? turnOutcomeText(outcome) : null;
+  if (parts.length === 0 && !end) return null;
+  const cost = usage?.costUsd !== undefined ? parts.at(-1) : undefined;
   const rest = cost ? parts.slice(0, -1) : parts;
   return (
     <Box marginTop={0}>
       <Text color={theme.textDisabled} wrap="truncate-end">
-        {'─ '}
+        {end && (
+          <Text color={end.ok ? theme.success : theme.warning}>
+            {end.icon} {end.text}
+          </Text>
+        )}
+        {end ? (parts.length > 0 ? '  ─ ' : '') : '─ '}
         {rest.join(' · ')}
         {cost && (
           <Text color={theme.textFaint}>

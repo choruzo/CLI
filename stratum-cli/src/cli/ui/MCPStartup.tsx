@@ -90,7 +90,7 @@ export function MCPStartup({ manager, timeouts, onAllSettled }: Props) {
   return (
     <Box flexDirection="column" paddingX={2}>
       <Text color={theme.textFaint} dimColor>
-        Conectando servicios...
+        Conectando servicios…
       </Text>
       {rows.map((row) => (
         <Box key={row.name}>
@@ -98,7 +98,7 @@ export function MCPStartup({ manager, timeouts, onAllSettled }: Props) {
           <Text color={theme.textMuted}> {row.name.padEnd(width)}</Text>
           <Text color={theme.textFaint} dimColor>
             {'  '}
-            {row.phase === 'connecting' && '(conectando...)'}
+            {row.phase === 'connecting' && '(conectando…)'}
             {row.phase === 'connected' && `(${row.elapsedMs}ms)`}
             {row.phase === 'failed' && '(no disponible)'}
             {row.phase === 'timeout' && '(timeout)'}

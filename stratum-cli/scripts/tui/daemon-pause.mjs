@@ -136,7 +136,7 @@ try {
       text: 'mejor no listes nada',
     });
     assert.deepEqual(result, { status: 'accepted' });
-    await t.waitFor(/steering update/);
+    await t.waitFor(/mensaje en cola/);
     await sleep(1000);
     assert.equal(await status(), 'paused');
     assert.equal(mock.requests.length, 1);
@@ -161,7 +161,7 @@ try {
     });
     await until(async () => (await status()) === 'cancelled');
     await t.waitForIdle();
-    await t.waitFor(/Type a message or \/ for commands/);
+    await t.waitFor(/Escribe un mensaje o \/ para comandos/);
     assert.equal(t.exited(), null);
     assert.deepEqual(await operator.request('runs.pause', { sessionId }), {
       status: 'not-running',

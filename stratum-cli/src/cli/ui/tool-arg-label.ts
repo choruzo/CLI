@@ -59,13 +59,3 @@ export function tailWindow<T>(items: readonly T[], max: number): { hidden: numbe
   if (items.length <= keep) return { hidden: 0, visible: [...items] };
   return { hidden: items.length - keep, visible: items.slice(-keep) };
 }
-
-/**
- * Tool calls que se enseñan bajo cada subagente del árbol, según el alto del
- * terminal y cuántos subagentes hay. `reservedRows` es lo que ocupa el resto de
- * la zona viva (acciones del agente, panel de tareas, barra de estado, input).
- */
-export function treeToolBudget(rows: number, nodes: number, reservedRows = 22): number {
-  const perNode = Math.floor((rows - reservedRows) / Math.max(1, nodes)) - 2;
-  return Math.min(6, Math.max(1, perNode));
-}

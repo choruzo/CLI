@@ -58,7 +58,8 @@ async function connect(home, roles) {
       const waiter = pending.get(message.id);
       if (!waiter) continue;
       pending.delete(message.id);
-      if (message.error) waiter.reject(new Error(`${message.error.code}: ${message.error.message}`));
+      if (message.error)
+        waiter.reject(new Error(`${message.error.code}: ${message.error.message}`));
       else waiter.resolve(message.result);
     }
   });
@@ -94,30 +95,38 @@ try {
 
   let sessionId;
   let runId;
-  await check('un turno del chat se ve desde fuera, con lo que escribió el usuario', t, async () => {
-    await t.submit('responde despacio');
-    const run = await until(async () => (await operator.request('runs.list', { active: true })).runs[0]);
-    sessionId = run.sessionId;
-    runId = run.id;
-    assert.equal(run.input, 'responde despacio');
-    const { snapshot } = await operator.request('sessions.get', { sessionId });
-    assert.equal(snapshot.session.state, 'running');
-    assert.equal(snapshot.session.title, 'responde despacio');
-  });
+  await check(
+    'un turno del chat se ve desde fuera, con lo que escribió el usuario',
+    t,
+    async () => {
+      await t.submit('responde despacio');
+      const run = await until(
+        async () => (await operator.request('runs.list', { active: true })).runs[0],
+      );
+      sessionId = run.sessionId;
+      runId = run.id;
+      assert.equal(run.input, 'responde despacio');
+      const { snapshot } = await operator.request('sessions.get', { sessionId });
+      assert.equal(snapshot.session.state, 'running');
+      assert.equal(snapshot.session.title, 'responde despacio');
+    },
+  );
 
   await check('steering desde otro cliente: lo recibe la sesión del chat', t, async () => {
     const result = await operator.request('runs.steer', { sessionId, text: 'acaba ya' });
     assert.deepEqual(result, { status: 'accepted' });
-    await t.waitFor(/steering update/);
+    await t.waitFor(/mensaje en cola/);
   });
 
   await check('cancel desde otro cliente: el turno se corta y el input sigue vivo', t, async () => {
     assert.deepEqual(await operator.request('runs.cancel', { sessionId, runId }), {
       status: 'cancelled',
     });
-    await until(async () => (await operator.request('runs.get', { runId })).run.status === 'cancelled');
+    await until(
+      async () => (await operator.request('runs.get', { runId })).run.status === 'cancelled',
+    );
     await t.waitForIdle();
-    await t.waitFor(/Type a message or \/ for commands/);
+    await t.waitFor(/Escribe un mensaje o \/ para comandos/);
     assert.equal(t.exited(), null);
     const { snapshot } = await operator.request('sessions.get', { sessionId });
     assert.equal(snapshot.session.state, 'idle');

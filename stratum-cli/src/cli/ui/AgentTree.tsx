@@ -1,10 +1,8 @@
 import React from 'react';
-import { Box, Text, useStdout } from 'ink';
+import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import type { SubagentBlockState } from './SubagentBlock.js';
-import type { ToolCallState } from './ToolCallBlock.js';
 import { spinnerFrameAt } from './spinner.js';
-import { primaryArg, tailWindow, treeToolBudget } from './tool-arg-label.js';
 
 /**
  * Árbol vivo de subagentes en paralelo (Hito 8C, §5.6). Sustituye al grupo de
@@ -12,6 +10,9 @@ import { primaryArg, tailWindow, treeToolBudget } from './tool-arg-label.js';
  * hijos corren acotados por el semáforo (`maxConcurrency`) y emiten eventos
  * entrelazados que el reducer desanida por `subagentId`. Con un solo subagente
  * NO se monta este árbol (se usa `<SubagentBlock>`, §5.5).
+ *
+ * Una línea por subagente: sus acciones no se listan en la ventana principal,
+ * se ven en la suya (`/subagents`), que es de solo lectura.
  */
 
 const TERMINAL: ReadonlySet<SubagentBlockState['status']> = new Set([
@@ -31,27 +32,10 @@ function truncate(text: string, max: number): string {
   return oneLine.length > max ? oneLine.slice(0, max - 1) + '…' : oneLine;
 }
 
-function firstArg(tc: ToolCallState): string {
-  return truncate(primaryArg(tc.input), 40);
-}
-
-/** Línea compacta de un tool call interno del hijo (icono + name: primer arg). */
-function ToolLine({ tc }: { tc: ToolCallState }) {
-  const icon = tc.status === 'completed' ? '✓' : tc.status === 'error' ? '✗' : '⟳';
-  const color =
-    tc.status === 'completed'
-      ? theme.success
-      : tc.status === 'error'
-        ? theme.error
-        : theme.textFaint;
-  const arg = firstArg(tc);
-  return (
-    <Text color={theme.textFaint} wrap="truncate-end">
-      {'      '}
-      <Text color={color}>{icon}</Text> {tc.name}
-      {arg ? <Text color={theme.textDisabled}>: {arg}</Text> : null}
-    </Text>
-  );
+/** `5 acciones`; nada si el hijo aún no ha hecho ninguna. */
+export function actionCount(node: SubagentBlockState): string {
+  const n = node.toolCalls?.length ?? 0;
+  return n === 0 ? '' : `${n} ${n === 1 ? 'acción' : 'acciones'}`;
 }
 
 interface NodeProps {
@@ -61,8 +45,6 @@ interface NodeProps {
   expanded: boolean;
   isLast: boolean;
   now: number;
-  /** Tool calls internas que se enseñan; las anteriores se resumen en una línea. */
-  maxToolLines: number;
 }
 
 function nodeIcon(status: SubagentBlockState['status']): { icon: string; color: string } {
@@ -84,7 +66,7 @@ function nodeIcon(status: SubagentBlockState['status']): { icon: string; color: 
   }
 }
 
-function SubagentNode({ node, speaking, focused, expanded, isLast, now, maxToolLines }: NodeProps) {
+function SubagentNode({ node, speaking, focused, expanded, isLast, now }: NodeProps) {
   const running = node.status === 'running';
   const elapsedMs = node.startedAt ? Math.max(0, now - node.startedAt) : 0;
 
@@ -96,14 +78,17 @@ function SubagentNode({ node, speaking, focused, expanded, isLast, now, maxToolL
   const meta =
     node.status === 'queued'
       ? 'en cola'
-      : running
-        ? `${fmtDur(elapsedMs)}${node.iterations ? ` · ${node.iterations} it` : ''}`
-        : [
-            node.durationMs !== undefined ? fmtDur(node.durationMs) : '',
-            node.iterations !== undefined ? `${node.iterations} it` : '',
-          ]
-            .filter(Boolean)
-            .join(' · ');
+      : [
+          running
+            ? fmtDur(elapsedMs)
+            : node.durationMs !== undefined
+              ? fmtDur(node.durationMs)
+              : '',
+          node.iterations ? `${node.iterations} it` : '',
+          actionCount(node),
+        ]
+          .filter(Boolean)
+          .join(' · ');
 
   const tail =
     node.status === 'failed' && node.error
@@ -112,14 +97,13 @@ function SubagentNode({ node, speaking, focused, expanded, isLast, now, maxToolL
         ? truncate(node.summary, 44)
         : truncate(node.task, 44);
 
-  const { hidden, visible: tcs } = tailWindow(node.toolCalls ?? [], maxToolLines);
   const files = node.filesChanged ?? [];
 
   return (
     <Box flexDirection="column">
       <Text wrap="truncate-end">
         <Text color={theme.textFaint}>{branch}</Text>
-        <Text color={theme.accentBright ?? theme.accent}>{marker}</Text>
+        <Text color={theme.accentBright}>{marker}</Text>
         <Text color={color}> {spinner} </Text>
         <Text color={theme.accent} bold>
           ⊳ {node.profile}#{node.n ?? '?'}
@@ -129,16 +113,6 @@ function SubagentNode({ node, speaking, focused, expanded, isLast, now, maxToolL
         </Text>
         {focused ? <Text color={theme.accent}> ◀</Text> : null}
       </Text>
-      {/* Tool calls internos indentados bajo el nodo (no se muestra text_delta). */}
-      {hidden > 0 && (
-        <Text color={theme.textDisabled} wrap="truncate-end">
-          {'      '}… {hidden} {hidden === 1 ? 'acción anterior' : 'acciones anteriores'}{' '}
-          (/subagents para verlas)
-        </Text>
-      )}
-      {tcs.map((tc) => (
-        <ToolLine key={tc.id} tc={tc} />
-      ))}
       {expanded && node.summary && (
         <Text color={theme.textFaint} wrap="truncate-end">
           {'      '}
@@ -179,8 +153,6 @@ export function AgentTree({
   expandedBlockIds,
   now = Date.now(),
 }: Props) {
-  const { stdout } = useStdout();
-  const maxToolLines = treeToolBudget(stdout?.rows ?? 24, nodes.length);
   const allTerminal = nodes.every((n) => TERMINAL.has(n.status));
 
   if (allTerminal) {
@@ -210,11 +182,18 @@ export function AgentTree({
   const active = nodes.filter((n) => n.status === 'running').length;
   return (
     <Box flexDirection="column">
-      <Text color={theme.accent} bold>
+      <Text color={theme.accent} bold wrap="truncate-end">
         ◮ delegando {nodes.length} subagentes
         <Text color={theme.textFaint} bold={false}>
           {' · '}
-          {active}/{nodes.length} activos (maxConcurrency {maxConcurrency})
+          {active}/{nodes.length} activos (maxConcurrency {maxConcurrency}) ·{' '}
+        </Text>
+        <Text color={theme.textMuted} bold={false}>
+          /subagents
+        </Text>
+        <Text color={theme.textFaint} bold={false}>
+          {' '}
+          para ver su ventana
         </Text>
       </Text>
       {nodes.map((n, i) => (
@@ -226,7 +205,6 @@ export function AgentTree({
           expanded={expandedBlockIds?.has(n.id) ?? false}
           isLast={i === nodes.length - 1}
           now={now}
-          maxToolLines={maxToolLines}
         />
       ))}
     </Box>

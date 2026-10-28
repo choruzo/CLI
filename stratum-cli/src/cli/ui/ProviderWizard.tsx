@@ -181,7 +181,7 @@ export function ProviderWizard({
                   if (mode === 'edit') startFetch(baseUrl, v);
                   else setStep('name');
                 }}
-                placeholder="sk-... (Enter para dejar vacía)"
+                placeholder="sk-… (Enter para dejar vacía)"
               />
             </Box>
             <Text color={theme.textFaint}>
@@ -224,7 +224,7 @@ export function ProviderWizard({
 
       case 'fetching':
         return (
-          <Text color={theme.textMuted}>◌ Consultando {baseUrl.replace(/\/$/, '')}/models...</Text>
+          <Text color={theme.textMuted}>◌ Consultando {baseUrl.replace(/\/$/, '')}/models…</Text>
         );
 
       case 'model-select':

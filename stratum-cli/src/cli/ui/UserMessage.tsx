@@ -12,7 +12,7 @@ export function UserMessage({ text, note }: Props) {
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text color={theme.textFaint} dimColor>
-        You
+        Tú
       </Text>
       <Box>
         <Text color={theme.textInvisible}>▏ </Text>

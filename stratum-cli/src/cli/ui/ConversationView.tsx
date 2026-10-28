@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useRef } from 'react';
 import { Box, Text, useStdout } from 'ink';
 import { theme } from './theme.js';
 import { StatusBar } from './StatusBar.js';
@@ -26,6 +26,7 @@ import type {
 } from '../../agent/types.js';
 import type { TodoItem } from '../../agent/todo.js';
 import { useLiveClock } from './spinner.js';
+import { ThinkingIndicator, thinkingIndicatorRows } from './ThinkingIndicator.js';
 import { conversationRows, pinnedPanelRows } from './layout.js';
 
 interface Props {
@@ -180,7 +181,17 @@ export function ConversationView({
     jobs: showJobs,
     maxSteps: panelMaxSteps,
   });
-  const availableConversationRows = conversationRows(terminalRows, panelRows);
+  // Indicador de trabajo (una fila sobre el input): sale mientras el agente
+  // trabaja y nada le pide al usuario una respuesta.
+  const showIndicator = thinking && !gateOpen && !fatalError && !overlay;
+  const turnStartRef = useRef<number | null>(null);
+  if (!thinking) turnStartRef.current = null;
+  else turnStartRef.current ??= Date.now();
+  const liveAgentItem = currentItem?.kind === 'agent' ? currentItem : null;
+  const availableConversationRows = conversationRows(
+    terminalRows,
+    panelRows + (showIndicator ? thinkingIndicatorRows(liveAgentItem) : 0),
+  );
   // De arriba abajo: el turno en curso, los paneles anclados (plan, tareas,
   // jobs) justo encima del input, el input y, al pie, la telemetría y la barra
   // de estado. Lo que se queda fijo va abajo: arriba, el turno crece y lo
@@ -235,15 +246,22 @@ export function ConversationView({
         />
       )}
       {overlay}
+      {showIndicator && (
+        <ThinkingIndicator
+          seed={String(completedItems.length)}
+          item={liveAgentItem}
+          startedAt={turnStartRef.current ?? Date.now()}
+        />
+      )}
       {!overlay && palette}
       {!overlay && pendingSteering > 0 && (
         <Text color={theme.warning}>
           {' '}
-          ⧗ {pendingSteering} steering {pendingSteering === 1 ? 'update' : 'updates'} pending
+          ⧗ {pendingSteering} {pendingSteering === 1 ? 'mensaje en cola' : 'mensajes en cola'}
           <Text color={theme.textMuted}>
             {thinking
-              ? ' · the agent picks them up at its next safe point'
-              : ' · delivered with your next message'}
+              ? ` · el agente ${pendingSteering === 1 ? 'lo recoge' : 'los recoge'} en su próximo punto seguro`
+              : ` · ${pendingSteering === 1 ? 'se entrega' : 'se entregan'} con tu próximo mensaje`}
           </Text>
         </Text>
       )}

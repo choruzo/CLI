@@ -1,7 +1,8 @@
 import React from 'react';
 import { Box, Text } from 'ink';
 import type { BackgroundJob } from '../../jobs/types.js';
-import { formatJobDuration, jobOutcomeLabel, shortJobCommand } from '../../jobs/types.js';
+import { formatJobDuration, shortJobCommand } from '../../jobs/types.js';
+import { jobOutcomeText, jobStatusLabel } from './job-text.js';
 import { theme } from './theme.js';
 
 /** Un job terminado sigue a la vista este tiempo; después solo queda en `/jobs`. */
@@ -14,13 +15,13 @@ const STATUS_COLOR: Record<BackgroundJob['status'], string> = {
   cancelled: theme.warning,
 };
 
-/** `running  18s` mientras corre; `failed  exit 101` al terminar. */
+/** `en curso  18s` mientras corre; `fallido  exit 101` al terminar. */
 export function jobStatusDetail(job: BackgroundJob, now: number): string {
   if (job.status === 'running') return formatJobDuration(now - job.startedAt);
-  return jobOutcomeLabel(job) || formatJobDuration((job.endedAt ?? now) - job.startedAt);
+  return jobOutcomeText(job) || formatJobDuration((job.endedAt ?? now) - job.startedAt);
 }
 
-/** `#3  npm test        running   18s` — una fila por job, columnas alineadas. */
+/** `#3  npm test        en curso   18s` — una fila por job, columnas alineadas. */
 export function formatJobRows(
   jobs: readonly BackgroundJob[],
   now: number,
@@ -30,7 +31,7 @@ export function formatJobRows(
   return jobs.map((job) => {
     const id = `#${job.id}`.padEnd(idWidth + 1);
     const command = shortJobCommand(job.command, commandWidth).padEnd(commandWidth);
-    return `${id} ${command}  ${job.status.padEnd(9)} ${jobStatusDetail(job, now)}`;
+    return `${id} ${command}  ${jobStatusLabel(job.status).padEnd(10)} ${jobStatusDetail(job, now)}`;
   });
 }
 

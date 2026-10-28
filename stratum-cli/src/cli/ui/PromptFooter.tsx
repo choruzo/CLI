@@ -39,7 +39,7 @@ export function PromptFooter({ mode, escArmed = false, canBackground = false, te
             <Text color={theme.warning}>esc otra vez para parar el turno</Text>
           ) : (
             <Text color={theme.textDisabled}>
-              <Text color={theme.accent}>↵ steer</Text> · lo recibe en su próximo punto seguro ·{' '}
+              <Text color={theme.accent}>↵ redirigir</Text> · lo recibe en su próximo punto seguro ·{' '}
               <Text color={theme.textFaint}>esc esc</Text> parar
               {canBackground && (
                 <>

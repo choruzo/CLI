@@ -48,6 +48,48 @@ function cachePart(u: UsageView): string | null {
   return u.cacheHitRate === undefined ? 'caché n/d' : `${Math.round(u.cacheHitRate * 100)}% caché`;
 }
 
+/** Cómo acabó un turno y cuánto duró de punta a punta. */
+export interface TurnOutcome {
+  stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' | 'budget_tokens';
+  durationMs: number;
+}
+
+/** Cierre visible del turno: `✓ hecho · 42 s`, `⊘ cancelado · 3.1 s`… */
+export function turnOutcomeText(o: TurnOutcome): { icon: string; text: string; ok: boolean } {
+  const label =
+    o.stopReason === 'stop'
+      ? 'hecho'
+      : o.stopReason === 'cancelled'
+        ? 'cancelado'
+        : o.stopReason === 'max_iterations'
+          ? 'límite de pasos'
+          : o.stopReason === 'budget_tokens'
+            ? 'presupuesto de tokens agotado'
+            : 'error';
+  const icon = o.stopReason === 'stop' ? '✓' : o.stopReason === 'cancelled' ? '⊘' : '⚠';
+  return { icon, text: `${label} · ${formatSeconds(o.durationMs)}`, ok: o.stopReason === 'stop' };
+}
+
+/** A partir de aquí un turno terminado avisa al terminal. */
+export const NOTIFY_AFTER_MS = 30_000;
+
+/** Un turno largo que no se canceló a mano avisa al acabar. */
+export function shouldNotifyTurnEnd(o: TurnOutcome | undefined): boolean {
+  return !!o && o.stopReason !== 'cancelled' && o.durationMs >= NOTIFY_AFTER_MS;
+}
+
+/**
+ * Aviso al terminal de que el turno acabó. BEL: los terminales lo convierten
+ * en algo visible solo si la ventana no tiene el foco (Windows Terminal hace
+ * parpadear la barra de tareas; otros, una insignia). OSC 9 y OSC 777: la
+ * notificación del escritorio en los que la soportan (iTerm2, ConEmu, WezTerm,
+ * kitty, foot); el resto ignora la secuencia sin pintar nada.
+ */
+export function turnEndNotification(o: TurnOutcome): string {
+  const { text } = turnOutcomeText(o);
+  return `\x1b]9;Stratum: ${text}\x07\x1b]777;notify;Stratum;${text}\x07\x07`;
+}
+
 /** Segmentos del pie de turno; `compact` se queda con lo esencial. */
 export function turnUsageParts(u: UsageView, compact: boolean): string[] {
   const parts: string[] = [];

@@ -46,7 +46,7 @@ async function conversation() {
       await t.key('esc');
       await t.waitGone(/▶ \/context/);
       await t.key('ctrl+u');
-      await t.waitFor(/Type your first message/);
+      await t.waitFor(/Escribe tu primer mensaje/);
     });
 
     await check('bienvenida: Enter ejecuta el comando seleccionado', t, async () => {
@@ -54,7 +54,7 @@ async function conversation() {
       await t.waitFor(/▶ \/context/);
       await t.key('enter');
       await t.waitFor(/Uso del contexto:/);
-      await t.waitFor(/Type a message or \/ for commands/);
+      await t.waitFor(/Escribe un mensaje o \/ para comandos/);
     });
 
     await check('conversación: paleta, Tab completa y Ctrl+U limpia', t, async () => {
@@ -63,7 +63,7 @@ async function conversation() {
       await t.key('tab');
       await t.waitFor(/❯❯ \/model/);
       await t.key('ctrl+u');
-      await t.waitFor(/Type a message or \/ for commands/);
+      await t.waitFor(/Escribe un mensaje o \/ para comandos/);
     });
 
     await check('turno: razonamiento plegado, markdown y barra de estado', t, async () => {
@@ -117,7 +117,7 @@ async function cancelAndExit() {
       await t.submit('responde lento');
       await t.waitFor(/dos tres/);
       await t.key('ctrl+c');
-      await t.waitFor(/Type a message or \/ for commands/, 5000);
+      await t.waitFor(/Escribe un mensaje o \/ para comandos/, 5000);
       assert.equal(t.exited(), null);
       assert.doesNotMatch(t.screen(), /once doce/);
     });
@@ -125,37 +125,39 @@ async function cancelAndExit() {
     await check('steering: un mensaje a mitad de turno se encola y el turno sigue', t, async () => {
       const before = mock.requests.length;
       await t.submit('responde lento otra vez');
-      await t.waitFor(/type to steer it/);
+      await t.waitFor(/↵ redirigir/);
+      // Trabajando: el símbolo de Stratum y una frase sobre el input, que va vacío.
+      await t.waitFor(/[⠀-⣿]{2} [^\n]*…/);
       await t.waitFor(/dos tres/);
       await t.submit('no toques OAuth');
-      await t.waitFor(/queued as steering/);
-      await t.waitFor(/1 steering update pending/);
+      await t.waitFor(/en cola para el agente/);
+      await t.waitFor(/1 mensaje en cola/);
       // No se canceló nada: la respuesta en curso termina y el modelo recibe el
       // mensaje en una segunda llamada del mismo turno.
-      await t.waitFor(/agent received 1 user update/, 15000);
-      await t.waitFor(/Type a message or \/ for commands/, 20000);
+      await t.waitFor(/el agente recibió 1 mensaje/, 15000);
+      await t.waitFor(/Escribe un mensaje o \/ para comandos/, 20000);
       assert.equal(mock.requests.length, before + 2);
-      assert.doesNotMatch(t.screen(), /steering update pending/);
+      assert.doesNotMatch(t.screen(), /mensaje en cola/);
     });
 
     await check('turno en curso: paleta reducida y /context sin llamar al modelo', t, async () => {
       const before = mock.requests.length;
       await t.submit('responde lento otra vez');
-      await t.waitFor(/type to steer it/);
+      await t.waitFor(/↵ redirigir/);
       await t.type('/');
       await t.waitFor(/\/memory show/);
       // Solo los comandos de consulta: /init abriría otro turno.
       assert.doesNotMatch(t.screen(), /\/init/);
       await t.type('clear');
       await t.key('enter');
-      await t.waitFor(/Not available while the agent is working/);
+      await t.waitFor(/No disponible mientras el agente trabaja/);
       await t.key('ctrl+u');
       await t.submit('/context');
       await t.waitFor(/Uso del contexto/);
       // El desglose también con el turno en curso.
       await t.waitFor(/tools\s+~[\d.]+K?\s+\d+%/);
       await t.waitFor(/total entrada\s+~/);
-      await t.waitFor(/Type a message or \/ for commands/, 20000);
+      await t.waitFor(/Escribe un mensaje o \/ para comandos/, 20000);
       assert.equal(mock.requests.length, before + 1);
     });
 
@@ -175,10 +177,12 @@ async function cancelAndExit() {
         }
         await t.waitFor(/NO TOQUES OAUTH/);
         await t.key('enter');
-        await t.waitFor(/Too large to steer \([\d,]+ chars, limit 8,000\): not sent/);
+        await t.waitFor(
+          /Demasiado largo para enviarlo ahora \([\d.]+ caracteres, límite 8\.?000\): no se ha enviado/,
+        );
         // Con el input más alto que la pantalla Ink repinta entero y una lectura
         // suelta puede pillarla en blanco: se espera, no se mira una sola vez.
-        await t.waitGone(/steering update pending/);
+        await t.waitGone(/mensaje en cola/);
         // El turno termina sin haberlo visto, ni entero ni recortado. El input tapa
         // el placeholder: el fin de turno se reconoce por su última palabra.
         const turns = () => (t.scrollback().match(/once doce/g) ?? []).length;
@@ -199,7 +203,7 @@ async function cancelAndExit() {
           sent.length > 8000 && sent.endsWith(tail) && !sent.includes('runtime_updates'),
           `turno normal: ${mock.requests.length - before} llamadas, ${sent.length} chars, …${sent.slice(-40)}`,
         );
-        await t.waitFor(/Type a message or \/ for commands/, 20000);
+        await t.waitFor(/Escribe un mensaje o \/ para comandos/, 20000);
       },
     );
 
@@ -234,7 +238,7 @@ async function cancelAndExit() {
       await sleep(500);
       assert.equal(mock.requests.length, before);
       // Bajo el input van el pie del prompt y, en la última línea, la barra de estado.
-      assert.match(t.tail(5), /Type a message or \/ for commands/);
+      assert.match(t.tail(5), /Escribe un mensaje o \/ para comandos/);
       assert.match(t.tail(1), /● mock │ mock-model/);
     });
 
@@ -270,7 +274,27 @@ async function backgroundExec() {
       await t.waitFor(/pasado a segundo plano como job #1/);
       await t.waitFor(/Sigue en segundo plano/);
       assert.match(toolResult, /handedOver="true"/);
-      await t.waitFor(/background job #1 completed · exit 0/, 15000);
+      await t.waitFor(/job #1 terminado · exit 0/, 15000);
+    });
+  } finally {
+    await t.close();
+    await mock.close();
+  }
+}
+
+async function modelFromBanner() {
+  const mock = await startMockLlm();
+  const t = launch({ config: mockConfig(mock.baseUrl) });
+  try {
+    // Los overlays solo se pintan en la vista de conversación: desde el banner,
+    // `/model` abría el selector sin que se viera nada.
+    await check('bienvenida: /model abre el selector de modelos', t, async () => {
+      await t.waitForBanner();
+      await t.submit('/model');
+      await t.waitFor(/otro-modelo/, 10000);
+      await t.key('down');
+      await t.key('enter');
+      await t.waitFor(/Modelo cambiado a otro-modelo/);
     });
   } finally {
     await t.close();
@@ -304,6 +328,7 @@ async function startupErrors() {
 }
 
 await conversation();
+await modelFromBanner();
 await cancelAndExit();
 await backgroundExec();
 await startupErrors();
