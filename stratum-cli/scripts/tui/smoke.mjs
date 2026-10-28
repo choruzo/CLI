@@ -10,7 +10,7 @@ import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { launch, sleep } from './harness.mjs';
-import { startMockLlm, mockConfig } from './mock-llm.mjs';
+import { startMockLlm, mockConfig, text, toolCall } from './mock-llm.mjs';
 
 const SHOW = process.argv.includes('--show');
 let failed = 0;
@@ -251,6 +251,33 @@ async function cancelAndExit() {
   }
 }
 
+async function backgroundExec() {
+  // Un exec que tarda ~4 s; Ctrl+B lo pasa a un job y el turno sigue (UX-4).
+  const command = `node -e "console.log('a'); setTimeout(() => console.log('b'), 4000)"`;
+  let toolResult = '';
+  const mock = await startMockLlm(({ last }) => {
+    if (last.role !== 'tool') return toolCall('exec', { command });
+    toolResult = String(last.content);
+    return text('Sigue en segundo plano.');
+  });
+  const t = launch({ config: mockConfig(mock.baseUrl) });
+  try {
+    await check('Ctrl+B pasa el exec en curso a un job y el turno sigue', t, async () => {
+      await t.waitForBanner();
+      await t.submit('lanza el comando');
+      await t.waitFor(/ctrl\+b comando a segundo plano/);
+      await t.key('ctrl+b');
+      await t.waitFor(/pasado a segundo plano como job #1/);
+      await t.waitFor(/Sigue en segundo plano/);
+      assert.match(toolResult, /handedOver="true"/);
+      await t.waitFor(/background job #1 completed · exit 0/, 15000);
+    });
+  } finally {
+    await t.close();
+    await mock.close();
+  }
+}
+
 async function startupErrors() {
   const down = launch({ config: mockConfig('http://127.0.0.1:9/v1') });
   try {
@@ -278,6 +305,7 @@ async function startupErrors() {
 
 await conversation();
 await cancelAndExit();
+await backgroundExec();
 await startupErrors();
 console.log(failed === 0 ? '\nTUI smoke: todo en orden' : `\nTUI smoke: ${failed} fallo(s)`);
 process.exit(failed === 0 ? 0 : 1);

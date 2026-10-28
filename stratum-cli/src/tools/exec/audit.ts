@@ -33,6 +33,8 @@ export interface ExecAuditRecord {
   truncated: boolean;
   /** Job en segundo plano (`exec` con `background: true`). Ausente en primer plano. */
   background?: boolean;
+  /** El job nació de un `exec` en primer plano que el usuario pasó a segundo plano (UX-4). */
+  handedOver?: boolean;
   jobId?: string;
   pid?: number;
 }

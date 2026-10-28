@@ -14,6 +14,7 @@
  */
 import type { StratumConfig } from '../../config/schema.js';
 import type { ToolContext } from '../../agent/types.js';
+import type { BackgroundJob } from '../../jobs/types.js';
 import type { ExecutionTarget, TargetKind } from './target.js';
 
 export interface ExecCapabilities {
@@ -50,11 +51,28 @@ export interface ExecOutcome {
   killedOnMaxBytes?: boolean;
 }
 
+/**
+ * La llamada no terminó en primer plano: el usuario pasó el proceso en curso a
+ * un job (UX-4, solo local). El comando sigue vivo, ahora del `JobManager`.
+ */
+export interface ExecHandedOver {
+  handedOver: BackgroundJob;
+  cwd: string;
+}
+
 export interface IExecBackend {
   kind: TargetKind;
   capabilities: ExecCapabilities;
   defaults(target: ExecutionTarget, config: StratumConfig): { timeoutMs: number; maxBytes: number };
-  run(target: ExecutionTarget, req: ExecRequest, ctx: ToolContext): Promise<ExecOutcome>;
+  run(
+    target: ExecutionTarget,
+    req: ExecRequest,
+    ctx: ToolContext,
+  ): Promise<ExecOutcome | ExecHandedOver>;
+}
+
+export function isHandedOver(result: ExecOutcome | ExecHandedOver): result is ExecHandedOver {
+  return 'handedOver' in result;
 }
 
 /** El proceso no llegó a arrancar (shell ausente, canal SSH rechazado…). */

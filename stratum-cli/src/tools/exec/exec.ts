@@ -21,7 +21,13 @@ import {
 import { HostKeyError } from '../ssh/known-hosts.js';
 import { redactText } from '../../security/redact-output.js';
 import { getLogger } from '../../logging/index.js';
-import { ExecConnectError, type ExecCapabilities, type ExecOutcome } from './backend.js';
+import {
+  ExecConnectError,
+  isHandedOver,
+  type ExecCapabilities,
+  type ExecHandedOver,
+  type ExecOutcome,
+} from './backend.js';
 import { getExecBackend } from './router.js';
 import {
   escapeXmlAttr,
@@ -33,7 +39,7 @@ import {
 } from './target.js';
 import { getExecAuditLog } from './runtime.js';
 import { JobLimitError, JobManagerClosedError } from '../../jobs/manager.js';
-import { MAIN_JOB_SCOPE, shortJobCommand } from '../../jobs/types.js';
+import { MAIN_JOB_SCOPE, shortJobCommand, type BackgroundJob } from '../../jobs/types.js';
 
 const log = getLogger('tools').child('exec');
 
@@ -352,7 +358,7 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
         command: redactText(input.command, ctx.config),
       };
 
-      let outcome: ExecOutcome;
+      let outcome: ExecOutcome | ExecHandedOver;
       try {
         outcome = await backend.run(
           target,
@@ -379,6 +385,13 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
         });
         const recoverable = err instanceof HostKeyError ? err.recoverable : true;
         return { ok: false, error: `[${label}] ${(err as Error).message}`, recoverable };
+      }
+
+      // UX-4: el usuario lo pasó a segundo plano. Su auditoría es ya la del job
+      // (`background_started` + cierre): aquí no se escribe otro registro.
+      if (isHandedOver(outcome)) {
+        log.debug('exec handed over', { target: label, jobId: outcome.handedOver.id });
+        return { ok: true, output: formatExecJob(label, outcome.handedOver, true) };
       }
 
       const durationMs = Date.now() - started;
@@ -410,6 +423,31 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
 }
 
 /**
+ * `<exec_job>`: la llamada vuelve con un job vivo. `handedOver`: arrancó en
+ * primer plano y el usuario lo pasó a segundo plano (UX-4); su salida desde el
+ * principio está en el job, así que el modelo la lee de ahí.
+ */
+function formatExecJob(label: string, job: BackgroundJob, handedOver: boolean): string {
+  const head =
+    `<exec_job target="${escapeXmlAttr(label)}" jobId="${escapeXmlAttr(job.id)}" status="running"` +
+    `${job.pid !== undefined ? ` pid="${job.pid}"` : ''} cwd="${escapeXmlAttr(job.cwd)}"` +
+    `${handedOver ? ' handedOver="true"' : ''}>`;
+  const what = handedOver
+    ? `[the user moved this command to the background as job #${job.id}: ` +
+      `${escapeXmlText(shortJobCommand(job.command, 120))}]`
+    : `[background job #${job.id} started: ${escapeXmlText(shortJobCommand(job.command, 120))}]`;
+  return [
+    head,
+    what,
+    'The command keeps running. You will be told when it ends, so carry on with other work ' +
+      `instead of polling. get_job_output(jobId="${job.id}") reads its output so far` +
+      `${handedOver ? ' (from the start of the command)' : ''}, ` +
+      `get_job_status(jobId="${job.id}", waitMs=…) waits for it, cancel_job stops it.`,
+    '</exec_job>',
+  ].join('\n');
+}
+
+/**
  * `exec` con `background: true`: el comando pasa a ser un job del `JobManager`
  * de la sesión y la llamada vuelve en cuanto el proceso existe. A esta función
  * solo se llega después de todas las guardas — las mismas que en primer plano.
@@ -434,18 +472,7 @@ async function startBackgroundJob(
       trace: ctx.trace,
     });
     log.debug('exec background', { target: label, jobId: job.id, pid: job.pid });
-    return {
-      ok: true,
-      output: [
-        `<exec_job target="${escapeXmlAttr(label)}" jobId="${escapeXmlAttr(job.id)}" status="running"` +
-          `${job.pid !== undefined ? ` pid="${job.pid}"` : ''} cwd="${escapeXmlAttr(job.cwd)}">`,
-        `[background job #${job.id} started: ${escapeXmlText(shortJobCommand(job.command, 120))}]`,
-        'The command keeps running. You will be told when it ends, so carry on with other work ' +
-          `instead of polling. get_job_output(jobId="${job.id}") reads its output so far, ` +
-          `get_job_status(jobId="${job.id}", waitMs=…) waits for it, cancel_job stops it.`,
-        '</exec_job>',
-      ].join('\n'),
-    };
+    return { ok: true, output: formatExecJob(label, job, false) };
   } catch (err) {
     if (err instanceof JobLimitError) {
       return { ok: false, error: err.message, recoverable: true, countsAsFailure: false };

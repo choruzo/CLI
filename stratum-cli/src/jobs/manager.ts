@@ -25,6 +25,7 @@ import {
   signalProcessTree,
   sweepProcessDescendants,
   spawnLocalShell,
+  type LocalHandover,
   type LocalSubprocess,
 } from '../tools/exec/backends/local.js';
 import { ExecSpawnError, KILL_GRACE_MS, SETTLE_GRACE_MS } from '../tools/exec/backend.js';
@@ -75,6 +76,18 @@ export interface StartJobRequest {
   trace?: TraceScope;
 }
 
+/**
+ * Un `exec` local en primer plano mientras corre (UX-4). `take` lo pone el
+ * backend: cede el proceso a `adopt` y devuelve el job, o `null` si la llamada
+ * ya había terminado o se estaba matando. Si `adopt` lanza, no cede nada.
+ */
+export interface ForegroundExec {
+  command: string;
+  owner: JobOwner;
+  trace?: TraceScope;
+  take: (adopt: (handover: LocalHandover) => BackgroundJob) => BackgroundJob | null;
+}
+
 export interface JobManagerOptions {
   /** Margen entre SIGTERM y SIGKILL. Los tests lo acortan. */
   killGraceMs?: number;
@@ -111,6 +124,14 @@ interface JobRecord {
   output: JobOutput;
   subprocess?: LocalSubprocess;
   trace?: TraceScope;
+  /**
+   * Cuándo nació el proceso. Coincide con `job.startedAt` salvo en un job
+   * adoptado, cuyo reloj empieza al adoptarlo; el barrido de descendientes de
+   * Windows necesita el nacimiento real (solo mata lo creado después).
+   */
+  spawnedAt: number;
+  /** Bytes que un `exec` adoptado ya había descartado en primer plano. */
+  foregroundDiscarded: number;
   /** Motivo de la cancelación pedida; decide el estado final. */
   cancelReason?: JobEndReason;
   timedOut: boolean;
@@ -142,6 +163,8 @@ export class JobManager {
   private shutdownPromise: Promise<void> | null = null;
   /** `start()` en vuelo: `shutdown` los espera para no dejar un proceso recién nacido sin dueño. */
   private readonly starting = new Set<Promise<unknown>>();
+  /** `exec` en primer plano que se pueden pasar a segundo plano (UX-4). */
+  private readonly foreground = new Set<ForegroundExec & { since: number }>();
 
   constructor(
     private readonly config: StratumConfig,
@@ -223,27 +246,129 @@ export class JobManager {
   }
 
   private async launch(req: StartJobRequest): Promise<BackgroundJob> {
+    this.checkRunningLimit();
+
+    // Solo un manager con jobs entra en el registro del proceso (cierre y
+    // gancho de `exit`): la mayoría de las sesiones nunca lanza ninguno.
+    registerJobManager(this);
+    const rec = this.createRecord(req.command, req.cwd, req.owner, req.trace);
+
+    let subprocess: LocalSubprocess;
+    try {
+      subprocess = this.spawn(req.command, req.cwd, req.stdin, req.env);
+      await spawned(subprocess);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      this.records.delete(rec.job.id);
+      this.finishRecord(rec, null, 'spawn-error');
+      throw new ExecSpawnError(message);
+    }
+
+    this.attach(rec, subprocess, req.timeoutMs ?? this.limits.maxRuntimeMs, false);
+    return this.snapshot(rec);
+  }
+
+  // -------------------------------------------------------------------------
+  // Traspaso de un `exec` en primer plano (UX-4)
+  // -------------------------------------------------------------------------
+
+  /**
+   * Un `exec` local en primer plano se anuncia mientras corre, para que la
+   * sesión pueda pasarlo a un job (`backgroundForeground`). Devuelve la baja.
+   */
+  registerForeground(entry: ForegroundExec): () => void {
+    const registered = { ...entry, since: Date.now() };
+    this.foreground.add(registered);
+    return () => void this.foreground.delete(registered);
+  }
+
+  /** `exec` en primer plano que ahora mismo se podrían pasar a segundo plano. */
+  get foregroundCount(): number {
+    return this.foreground.size;
+  }
+
+  /**
+   * Pasa a jobs los `exec` en primer plano que estén corriendo: cada llamada
+   * vuelve en el acto con su `jobId` y el proceso sigue vivo, ahora del
+   * manager. Lo pide el usuario (no el modelo) y no relaja ninguna guarda: la
+   * llamada ya pasó por todas. Los que no se pueden adoptar (sesión cerrada,
+   * límite de jobs) siguen en primer plano y su motivo va en `errors`.
+   */
+  backgroundForeground(): { jobs: BackgroundJob[]; errors: string[] } {
+    const jobs: BackgroundJob[] = [];
+    const errors: string[] = [];
+    for (const entry of [...this.foreground]) {
+      try {
+        const job = entry.take((handover) => this.adopt(handover, entry));
+        if (job) jobs.push(job);
+      } catch (err) {
+        errors.push(err instanceof Error ? err.message : String(err));
+      }
+    }
+    return { jobs, errors };
+  }
+
+  /**
+   * Adopta un proceso ya en marcha. Síncrono: comprueba los límites **antes**
+   * de tocar nada (si lanza, el backend no ha soltado el proceso) y engancha
+   * sus listeners en el mismo tick en que el backend suelta los suyos.
+   *
+   * El reloj es el de un job: `startedAt`, la duración y el timeout
+   * (`limits.maxRuntimeMs`) cuentan desde la adopción, no desde el arranque
+   * del proceso. El `timeout` de la llamada original era para primer plano.
+   */
+  private adopt(handover: LocalHandover, entry: ForegroundExec): BackgroundJob {
+    if (this.closed) throw new JobManagerClosedError();
+    this.checkRunningLimit();
+
+    registerJobManager(this);
+    const rec = this.createRecord(entry.command, handover.cwd, entry.owner, entry.trace);
+    rec.spawnedAt = handover.spawnedAt;
+    rec.output.push('stdout', handover.stdout);
+    rec.output.push('stderr', handover.stderr);
+    if (handover.discardedBytes > 0) {
+      rec.foregroundDiscarded = handover.discardedBytes;
+      rec.output.push(
+        'stdout',
+        `\n[${handover.discardedBytes} bytes of output were discarded (maxBytes) ` +
+          'before this command moved to the background]\n',
+      );
+    }
+    this.attach(rec, handover.subprocess, this.limits.maxRuntimeMs, true);
+    return this.snapshot(rec);
+  }
+
+  // -------------------------------------------------------------------------
+  // Ciclo de vida común
+  // -------------------------------------------------------------------------
+
+  private checkRunningLimit(): void {
     if (this.runningCount >= this.limits.maxRunning) {
       throw new JobLimitError(
         `There are already ${this.limits.maxRunning} background jobs running ` +
           '(tools.jobs.maxRunning). Wait for one to finish or cancel one with cancel_job.',
       );
     }
+  }
 
-    // Solo un manager con jobs entra en el registro del proceso (cierre y
-    // gancho de `exit`): la mayoría de las sesiones nunca lanza ninguno.
-    registerJobManager(this);
+  private createRecord(
+    command: string,
+    cwd: string,
+    owner: JobOwner,
+    trace: TraceScope | undefined,
+  ): JobRecord {
     const id = String(++this.seq);
+    const now = Date.now();
     let resolveEnded!: () => void;
     const ended = new Promise<void>((resolve) => (resolveEnded = resolve));
     const rec: JobRecord = {
       job: {
         id,
-        command: redactText(req.command, this.config),
-        cwd: req.cwd,
+        command: redactText(command, this.config),
+        cwd,
         status: 'running',
-        startedAt: Date.now(),
-        owner: { ...req.owner },
+        startedAt: now,
+        owner: { ...owner },
         stdoutBytes: 0,
         stderrBytes: 0,
         outputChars: 0,
@@ -251,7 +376,9 @@ export class JobManager {
         outputRead: false,
       },
       output: new JobOutput(this.limits.maxOutputChars, (text) => redactText(text, this.config)),
-      trace: req.trace,
+      trace,
+      spawnedAt: now,
+      foregroundDiscarded: 0,
       timedOut: false,
       killing: false,
       reaping: false,
@@ -272,18 +399,17 @@ export class JobManager {
       scope: rec.job.owner.scope,
     });
     this.emit({ type: 'created', job: this.snapshot(rec) });
+    return rec;
+  }
 
-    let subprocess: LocalSubprocess;
-    try {
-      subprocess = this.spawn(req.command, req.cwd, req.stdin, req.env);
-      await spawned(subprocess);
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      this.records.delete(id);
-      this.finishRecord(rec, null, 'spawn-error');
-      throw new ExecSpawnError(message);
-    }
-
+  /** Engancha el job a su proceso vivo: salida, final, timeout, auditoría y aviso de arranque. */
+  private attach(
+    rec: JobRecord,
+    subprocess: LocalSubprocess,
+    timeoutMs: number,
+    handedOver: boolean,
+  ): void {
+    const id = rec.job.id;
     rec.subprocess = subprocess;
     rec.job.pid = subprocess.pid;
     // Cancelado mientras nacía (un cierre o un `closeScope` a la vez): aquella
@@ -298,11 +424,17 @@ export class JobManager {
     // El final se decide con `exit` (el proceso murió) y no con el cierre de
     // los pipes: un nieto que los herede los mantendría abiertos y el job no
     // terminaría nunca. Tras `exit` se da un margen corto para vaciar lo escrito.
+    // Un proceso adoptado puede haber salido ya (sus pipes aún sin cerrar).
     let exitCode: number | null = null;
-    subprocess.once('exit', (code) => {
+    const exited = (code: number | null): void => {
       exitCode = code;
       this.timer(rec, DRAIN_GRACE_MS, () => this.finish(rec, exitCode));
-    });
+    };
+    if (typeof subprocess.exitCode === 'number' || typeof subprocess.signalCode === 'string') {
+      exited(subprocess.exitCode);
+    } else {
+      subprocess.once('exit', exited);
+    }
     subprocess.once('close', (code) => this.finish(rec, exitCode ?? code));
     // Red de seguridad: execa resuelve aunque no llegase ningún evento.
     void Promise.resolve(subprocess).then(
@@ -310,7 +442,6 @@ export class JobManager {
       () => this.finish(rec, exitCode),
     );
 
-    const timeoutMs = req.timeoutMs ?? this.limits.maxRuntimeMs;
     this.timer(rec, timeoutMs, () => {
       rec.timedOut = true;
       this.kill(rec);
@@ -327,13 +458,13 @@ export class JobManager {
       durationMs: 0,
       truncated: false,
       background: true,
+      ...(handedOver ? { handedOver: true } : {}),
       jobId: id,
       ...(rec.job.pid !== undefined ? { pid: rec.job.pid } : {}),
     });
     rec.trace?.runtime({ event: 'job', phase: 'started', jobId: id, pid: rec.job.pid ?? null });
-    log.info('job started', { id, pid: rec.job.pid, scope: rec.job.owner.scope });
+    log.info('job started', { id, pid: rec.job.pid, scope: rec.job.owner.scope, handedOver });
     this.emit({ type: 'started', job: this.snapshot(rec) });
-    return this.snapshot(rec);
   }
 
   // -------------------------------------------------------------------------
@@ -568,7 +699,7 @@ export class JobManager {
   killAllSync(): void {
     for (const rec of this.records.values()) {
       if (rec.job.status !== 'running' || rec.job.pid === undefined) continue;
-      killProcessTreeSync(rec.job.pid, rec.job.startedAt);
+      killProcessTreeSync(rec.job.pid, rec.spawnedAt);
     }
   }
 
@@ -620,7 +751,7 @@ export class JobManager {
     this.timer(rec, REAP_CAP_MS, done);
     const pid = rec.job.pid;
     void (rec.treeSignalled ?? Promise.resolve())
-      .then(() => (pid === undefined ? 0 : sweepProcessDescendants(pid, rec.job.startedAt)))
+      .then(() => (pid === undefined ? 0 : sweepProcessDescendants(pid, rec.spawnedAt)))
       .then((swept) => {
         if (swept > 0) log.warn('job descendants swept', { id: rec.job.id, pid, swept });
       })
@@ -678,7 +809,7 @@ export class JobManager {
               : 'exited',
       exitCode,
       durationMs,
-      truncated: rec.output.droppedChars > 0,
+      truncated: rec.output.droppedChars > 0 || rec.foregroundDiscarded > 0,
       background: true,
       jobId: job.id,
       ...(job.pid !== undefined ? { pid: job.pid } : {}),

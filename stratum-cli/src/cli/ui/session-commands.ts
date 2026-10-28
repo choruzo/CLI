@@ -136,7 +136,9 @@ export const SESSION_COMMANDS: SessionCommand[] = [
   },
   {
     name: '/jobs',
-    description: 'Lista los jobs en segundo plano de la sesión (estado, exit code, duración)',
+    description:
+      'Lista los jobs en segundo plano de la sesión (estado, exit code, duración). ' +
+      'Ctrl+B pasa a segundo plano el comando en curso',
     hasArgs: false,
   },
   {

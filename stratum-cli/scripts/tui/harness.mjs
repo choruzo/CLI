@@ -31,6 +31,7 @@ export const KEYS = {
   down: '\x1b[B',
   right: '\x1b[C',
   left: '\x1b[D',
+  'ctrl+b': '\x02',
   'ctrl+c': '\x03',
   'ctrl+l': '\x0c',
   'ctrl+t': '\x14',

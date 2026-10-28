@@ -29,7 +29,8 @@ está en los documentos y en huecos de producto. Propuesta de orden:
 >
 > **Actualización 2026-10-28:** Eval-1 (replay) y la compresión que reutiliza el prefijo cacheado (opt-in,
 > `agent.compressionReusePrefix`). El estado de los siguientes candidatos —exec a segundo plano, plugins PL1 y
-> Hito 18—, contrastado con el código, está en §8.
+> Hito 18—, contrastado con el código, está en §8. Después, el `exec` a segundo plano con Ctrl+B (§8.2) y
+> dos correcciones a los diseños de plugins (§8.3) y del Hito 18 (§8.4).
 
 Decisiones abiertas que conviene no dejar sin fecha: **default de `chat`** (vivir en `stratumd`, bloqueado
 por Q1, el entorno de la terminal) y **convergencia Dot/Desktop** (§15.1.4: ¿Dot es el modo compacto de
@@ -255,10 +256,8 @@ en worktrees aparte, cada bloque pasado por un reviewer de opencode y con sus ha
 - ✅ (2026-10-27) `/btw <pregunta>`: `StratumAgent.askSideQuestion` (`agent/side-question.ts`), sin tools, por
   `tracedCompletion` con origen `side-question`. No entra en la conversación, la memoria ni el uso; vale con el
   turno en curso (`BUSY_COMMANDS`). La respuesta llega entera, no en streaming.
-- «Pasar a segundo plano» un `exec` en curso → job: **sin empezar, y no es S**. El backend local se queda el
-  proceso (`tools/exec/backends/local.ts`) y `JobManager` solo sabe lanzar los suyos (`start`): hace falta un
-  `adopt` con su `JobOutput` redactado y decidir cómo encaja con «todo proceso que sobreviva a su exec es un
-  job» (`decisiones.md`). Necesita un diseño antes de implementarlo.
+- ✅ (2026-10-28) «Pasar a segundo plano» un `exec` en curso → job, con **Ctrl+B** en la TUI. Detalle y
+  decisiones en §8.2.
 
 ### Contrato-1 — Cerrar v1 *(M)* ✅ (2026-10-23, sin commit)
 - `sessions.open { resume }`: monta una sesión guardada del daemon (mismo id y ajustes; rechaza los de apertura).
@@ -352,7 +351,34 @@ revisarlas antes de copiar nada.
     `sharedChars` no lo refleja.
   - M11 no aplica.
 
-### 8.2 Pasar un `exec` en curso a segundo plano (UX-4) — diseñable ya, M
+### 8.2 Pasar un `exec` en curso a segundo plano (UX-4) — hecho (2026-10-28)
+
+- **Qué se hizo** (contrastado antes con una investigación de opencode que corrigió el diseño de abajo):
+  - El `exec` en primer plano no cambia; el traspaso es un gesto del usuario, **Ctrl+B**, con el agente
+    trabajando. El pie del prompt lo ofrece solo mientras hay un comando que ceder.
+  - `backends/local.ts`: con `ctx.jobs`, la llamada se anuncia al manager mientras corre
+    (`registerForeground`). `handOver` está **dentro** de la promesa (ahí viven `settled`, los
+    temporizadores y el abort): primero adopta y después suelta, todo en el mismo tick, y resuelve con un
+    tipo nuevo, `ExecHandedOver`, no con un `ExecStatus` (así no contamina la auditoría).
+  - `JobManager`: `launch()` se parte en `createRecord` + `attach`, compartidos con `adopt()`.
+    `backgroundForeground()` devuelve `{ jobs, errors }`. `closed` y `maxRunning` se comprueban **antes**
+    de que el backend suelte nada: si fallan, el comando sigue en primer plano. La salida acumulada se
+    siembra en bruto (el `JobOutput` la redacta al entrar), y lo que `maxBytes` ya había descartado queda
+    como una línea en la salida y como `truncated` en la auditoría.
+  - `exec` devuelve `<exec_job … handedOver="true">` y **no** escribe su registro: el único es el del job
+    (`background_started` con `handedOver: true`, más el de cierre).
+  - **Reloj (decidido: opción b):** `startedAt`, la duración y el timeout (`tools.jobs.maxRuntimeMs`) cuentan
+    desde la adopción; el `timeout` de la llamada era de primer plano. Pero el barrido de descendientes de
+    Windows usa el nacimiento real (`JobRecord.spawnedAt`): con `startedAt` no vería a los hijos creados antes.
+  - Subagentes: el dueño es el scope de la llamada, así que lo adoptado se cancela con su `closeScope`, igual
+    que un `background: true` suyo. Un proceso que ya salió con los pipes abiertos se adopta y termina en el
+    acto. `ToolContext.callId` no hizo falta.
+  - Tests: `jobs/handover.test.ts` (7, con procesos reales). Docs: `jobs.md`, `exec.md`, `cli-ui.md` y
+    `decisiones.md` (fila de jobs).
+- **Pendiente:** el traspaso por el protocolo (Dot/Desktop: un método que exigiría decidir la capacidad)
+  y en `run` sin terminal no hay quien lo pida. SSH sigue fuera.
+
+Diseño original, para referencia:
 
 - **Hoy:**
   - El backend local (`tools/exec/backends/local.ts`, `run()`) guarda el proceso en una closure
@@ -384,6 +410,16 @@ revisarlas antes de copiar nada.
 
 ### 8.3 Plugins PL1 — se puede empezar, pero antes hay que corregir el diseño
 
+> **Corrección (2026-10-28, investigación de opencode contrastada):** `chat` **no** arranca por
+> `SessionHost` (`chat.ts` no lo importa; lo dice `session-host.md`), solo `run` y el daemon. Un
+> `SessionHostOptions.plugins` no llegaría a `chat`: allí van por `StratumAgentOptions` → `extras` del
+> `ReactLoop` → `ToolContext`, con `PluginHost.empty()` por defecto. Propuesta para R3: `tool.before`
+> como primera sentencia de la fase de vetos (`tools/registry.ts`, antes de `readOnlyVeto ?? preflight`),
+> con `ToolBlockSource` `'plugin'` y `countsAsFailure: false`; un lote descartado por steering nunca
+> dispara hooks. Para R2: `tool.after` en `dispatchOne`, después de `redactResult` y antes del truncado, y
+> `DispatchResult` con el resultado interno (para el write-log) y el presentado (para el modelo). R2 solo
+> afecta al write-log: la auditoría de `exec` se escribe dentro de la tool.
+
 - **R1** (huella de confianza del proyecto) sigue **sin decidir**. No bloquea PL1, que solo carga
   orígenes de confianza implícita (flag, config global y `~/.stratum/plugins/`). Hoy **no existe ningún
   mecanismo de confianza de proyecto**: el `.stratumrc.json` y `.stratum/agents/` del proyecto se cargan
@@ -410,6 +446,10 @@ revisarlas antes de copiar nada.
   PL4/PL5 con una nota explícita. Tamaño de PL1: M.
 
 ### 8.4 Hito 18 — no se puede implementar sin escribir antes la spec
+
+> **Corrección (2026-10-28):** la §12.21 está ocupada (pausa cooperativa) y también de la 12.22 a la 12.26.
+> La sección de `sys_inspect` será la **§12.27**. Decisión previa: si la tool lanza sus propios procesos
+> (`df`, `Get-CimInstance`), no pasa por las guardas de comando ni por `exec-audit.jsonl`, que son de `exec`.
 
 - `CLI-DOC/Orientacion-Infraestructura.md` no es vinculante y da **prosa, no contratos**: no hay schemas,
   ni forma de salida, ni criterio de terminado, ni §12.21. Los nombres están reservados en `INFRA_TOOLS`
@@ -438,7 +478,7 @@ revisarlas antes de copiar nada.
 
 ### 8.5 Orden propuesto
 
-1. **Exec a segundo plano** (§8.2): se nota en cada sesión y está acotado. Antes, decidir lo del timeout.
+1. ~~**Exec a segundo plano** (§8.2)~~ ✅ 2026-10-28.
 2. En paralelo y sin código: **corregir el diseño de plugins** (R2, R3 y las referencias obsoletas, §8.3)
    y **escribir §12.21** del Hito 18 (§8.4). Las dos cosas desbloquean bloques L.
 3. **Medir la compactación con prefijo contra llama.cpp** (§8.1) y decidir si pasa a estar activa por

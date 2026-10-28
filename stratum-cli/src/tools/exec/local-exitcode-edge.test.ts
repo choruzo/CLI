@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { localBackend } from './backends/local.js';
+import { runLocal } from './run-local.test-util.js';
 import { StratumConfigSchema } from '../../config/schema.js';
 import type { ToolContext } from '../../agent/types.js';
 
@@ -17,7 +17,7 @@ function ctx(): ToolContext {
 }
 
 async function exitCodeOf(command: string): Promise<number | null> {
-  const out = await localBackend.run(
+  const out = await runLocal(
     { kind: 'local' },
     { command, timeoutMs: 20000, maxBytes: 1024 * 1024, signal: new AbortController().signal },
     ctx(),

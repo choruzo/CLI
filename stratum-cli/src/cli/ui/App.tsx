@@ -1696,6 +1696,33 @@ export function App({
       return;
     }
 
+    // ----- Ctrl+B: pasar a segundo plano el `exec` en curso (UX-4) -----
+    // La llamada vuelve en el acto con un job y el comando sigue vivo. Es un
+    // gesto del usuario sobre algo ya aprobado: no relaja ninguna guarda.
+    if (key.ctrl && input === 'b' && state.thinking && state.focusState === 'input') {
+      const manager = agent.jobs;
+      const { jobs: moved, errors } = manager?.backgroundForeground() ?? { jobs: [], errors: [] };
+      for (const job of moved) {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: `Comando pasado a segundo plano como job #${job.id}: ${shortJobCommand(job.command, 80)}`,
+        });
+      }
+      for (const error of errors) {
+        dispatch({ type: 'SYSTEM_MESSAGE', text: `No se pudo pasar a segundo plano: ${error}` });
+      }
+      if (moved.length === 0 && errors.length === 0) {
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: manager
+            ? 'No hay ningún comando local en primer plano que pasar a segundo plano.'
+            : 'Los jobs en segundo plano están desactivados (tools.jobs.enabled: false).',
+        });
+      }
+      setTimeout(() => dispatch({ type: 'INPUT_CHANGE', value: state.inputValue }), 0);
+      return;
+    }
+
     // ----- Edición de línea (§10) -----
     // Se evalúan tras la paleta: con el desplegable abierto, ↑↓ le pertenecen.
     // `ink-text-input` no conoce estos atajos y escribe su letra en el input.
@@ -3535,6 +3562,7 @@ export function App({
         pendingSteering={pendingSteering}
         inputHint={inputHint}
         escArmed={escArmed}
+        canBackground={() => (agent.jobs?.foregroundCount ?? 0) > 0}
         verbosity={verbosity}
         telemetry={<TelemetryPills live={state.liveUsage} session={state.sessionUsage} />}
       />

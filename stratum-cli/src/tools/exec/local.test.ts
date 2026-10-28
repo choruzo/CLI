@@ -3,7 +3,8 @@ import { execa } from 'execa';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { localBackend, ByteBudget } from './backends/local.js';
+import { ByteBudget } from './backends/local.js';
+import { runLocal } from './run-local.test-util.js';
 import { createExecTool } from './exec.js';
 import { resetExecRuntime } from './runtime.js';
 import { StratumConfigSchema } from '../../config/schema.js';
@@ -53,7 +54,7 @@ describe('ByteBudget', () => {
 
 describe('backend local (Hito 16)', () => {
   it('ejecuta, captura stdout/stderr y el exit code real', async () => {
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(node("process.stdout.write('hola'); process.stderr.write('mal'); process.exit(3)")),
       ctx(),
@@ -66,7 +67,7 @@ describe('backend local (Hito 16)', () => {
 
   it('pasa buffer:false a execa (su buffer interno falla a partir de 100 MB)', async () => {
     vi.mocked(execa).mockClear();
-    await localBackend.run({ kind: 'local' }, req(node('0')), ctx());
+    await runLocal({ kind: 'local' }, req(node('0')), ctx());
     // En Windows se invoca `pwsh.exe <args> <options>`; en POSIX `<command> <options>`.
     const call = vi.mocked(execa).mock.calls[0] as unknown[];
     const options = call[call.length - 1] as Record<string, unknown>;
@@ -75,14 +76,14 @@ describe('backend local (Hito 16)', () => {
   });
 
   it('envía stdin y cierra la entrada; sin stdin, EOF inmediato', async () => {
-    const withInput = await localBackend.run(
+    const withInput = await runLocal(
       { kind: 'local' },
       req(node('process.stdin.pipe(process.stdout)'), { stdin: 'desde stdin' }),
       ctx(),
     );
     expect(withInput.stdout).toBe('desde stdin');
 
-    const withoutInput = await localBackend.run(
+    const withoutInput = await runLocal(
       { kind: 'local' },
       req(node('process.stdin.pipe(process.stdout)'), { timeoutMs: 8000 }),
       ctx(),
@@ -92,7 +93,7 @@ describe('backend local (Hito 16)', () => {
   });
 
   it('resuelve un cwd relativo contra el directorio del proyecto', async () => {
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(node('process.stdout.write(process.cwd())'), { cwd: 'src' }),
       ctx(),
@@ -102,7 +103,7 @@ describe('backend local (Hito 16)', () => {
   });
 
   it('pasado maxBytes descarta el resto pero deja terminar el proceso', async () => {
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(node("process.stdout.write('x'.repeat(3000000)); process.exitCode = 0"), {
         maxBytes: 1000,
@@ -117,7 +118,7 @@ describe('backend local (Hito 16)', () => {
 
   it('mata el proceso al vencer el timeout', async () => {
     const started = Date.now();
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(node('setTimeout(() => {}, 60000)'), { timeoutMs: 700 }),
       ctx(),
@@ -127,7 +128,7 @@ describe('backend local (Hito 16)', () => {
   });
 
   it('truncado seguido de timeout termina como timeout, con los bytes descartados', async () => {
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(node("process.stdout.write('y'.repeat(5000)); setTimeout(() => {}, 60000)"), {
         maxBytes: 100,
@@ -142,7 +143,7 @@ describe('backend local (Hito 16)', () => {
   it('una cancelación resuelve con cancelled, no rechaza', async () => {
     const controller = new AbortController();
     setTimeout(() => controller.abort(), 500);
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(node('setTimeout(() => {}, 60000)'), { signal: controller.signal }),
       ctx(),
@@ -154,7 +155,7 @@ describe('backend local (Hito 16)', () => {
     const previous = process.env.GIT_DIR;
     process.env.GIT_DIR = '/otro/repo/.git';
     try {
-      const out = await localBackend.run(
+      const out = await runLocal(
         { kind: 'local' },
         req(node('process.stdout.write(String(process.env.GIT_DIR))')),
         ctx(),
@@ -183,7 +184,7 @@ describe.skipIf(process.platform !== 'win32')(
     ];
     for (const [command, expected] of cases) {
       it(`${command} → ${expected}`, async () => {
-        const out = await localBackend.run({ kind: 'local' }, req(command), ctx());
+        const out = await runLocal({ kind: 'local' }, req(command), ctx());
         expect(out.exitCode).toBe(expected);
       });
     }
@@ -252,7 +253,7 @@ describe('terminación del árbol de procesos', () => {
   it('cancelar mata también a los nietos', async () => {
     const pidFile = join(dir, 'pid-cancel');
     const controller = new AbortController();
-    const running = localBackend.run(
+    const running = runLocal(
       { kind: 'local' },
       req(`node "${join(dir, 'parent.cjs')}" "${pidFile}"`, { signal: controller.signal }),
       ctx(),
@@ -266,7 +267,7 @@ describe('terminación del árbol de procesos', () => {
 
   it('el timeout mata también a los nietos', async () => {
     const pidFile = join(dir, 'pid-timeout');
-    const running = localBackend.run(
+    const running = runLocal(
       { kind: 'local' },
       req(`node "${join(dir, 'parent.cjs')}" "${pidFile}"`, { timeoutMs: 1500 }),
       ctx(),

@@ -98,6 +98,12 @@ interface Props {
   pendingSteering?: number;
   /** Doble Esc a medias (UX-3): el pie avisa de que la siguiente para el turno. */
   escArmed?: boolean;
+  /**
+   * ¿Hay un `exec` en primer plano que Ctrl+B pueda pasar a segundo plano?
+   * (UX-4). Es una consulta y no un valor: un comando que corre no emite
+   * eventos, así que se reevalúa con el reloj vivo de cada render.
+   */
+  canBackground?: () => boolean;
   /** Telemetría del pie del prompt, ya compuesta. */
   telemetry?: React.ReactNode;
   /** `/verbosity` (UX-3). */
@@ -152,6 +158,7 @@ export function ConversationView({
   pendingSteering = 0,
   inputHint,
   escArmed = false,
+  canBackground,
   telemetry,
   verbosity,
 }: Props) {
@@ -256,6 +263,7 @@ export function ConversationView({
         <PromptFooter
           mode={gateOpen || fatalError ? null : steerable ? 'steer' : thinking ? null : 'send'}
           escArmed={escArmed}
+          canBackground={steerable && (canBackground?.() ?? false)}
           telemetry={telemetry}
         />
       )}

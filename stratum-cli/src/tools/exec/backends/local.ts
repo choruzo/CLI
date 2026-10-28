@@ -18,11 +18,13 @@ import {
   KILL_GRACE_MS,
   SETTLE_GRACE_MS,
   resolveStatus,
+  type ExecHandedOver,
   type ExecOutcome,
   type ExecRequest,
   type IExecBackend,
 } from '../backend.js';
 import type { ExecutionTarget } from '../target.js';
+import { MAIN_JOB_SCOPE, type BackgroundJob } from '../../../jobs/types.js';
 
 const IS_WINDOWS = process.platform === 'win32';
 
@@ -161,6 +163,22 @@ function safely(fn: () => void): void {
 }
 
 export type LocalSubprocess = ReturnType<typeof execa>;
+
+/**
+ * Lo que el backend local entrega al ceder un `exec` en curso a un job
+ * (`JobManager.adopt`, UX-4): el proceso vivo y lo que ya había escrito.
+ */
+export interface LocalHandover {
+  subprocess: LocalSubprocess;
+  cwd: string;
+  /** Cuándo se lanzó el proceso: el barrido de descendientes de Windows lo necesita. */
+  spawnedAt: number;
+  /** Salida recibida hasta ahora, en bruto: `JobOutput` la redacta al entrar. */
+  stdout: Buffer;
+  stderr: Buffer;
+  /** Bytes que el tope de primer plano (`maxBytes`) ya había descartado. */
+  discardedBytes: number;
+}
 
 /**
  * Lanza `command` en el shell local, igual para un `exec` en primer plano que
@@ -353,10 +371,15 @@ export const localBackend: IExecBackend = {
     return { timeoutMs: config.tools.bashTimeout, maxBytes: config.tools.execMaxBytes };
   },
 
-  run(_target: ExecutionTarget, req: ExecRequest, ctx: ToolContext): Promise<ExecOutcome> {
+  run(
+    _target: ExecutionTarget,
+    req: ExecRequest,
+    ctx: ToolContext,
+  ): Promise<ExecOutcome | ExecHandedOver> {
     const cwd = req.cwd ? resolve(ctx.cwd, req.cwd) : ctx.cwd;
 
     let subprocess: LocalSubprocess;
+    const spawnedAt = Date.now();
     try {
       subprocess = spawnLocalShell(req.command, cwd, req.stdin, ctx.env);
     } catch (err) {
@@ -364,10 +387,12 @@ export const localBackend: IExecBackend = {
     }
 
     const budget = new ByteBudget(req.maxBytes);
-    subprocess.stdout?.on('data', (chunk: Buffer | string) => budget.push(chunk, 'stdout'));
-    subprocess.stderr?.on('data', (chunk: Buffer | string) => budget.push(chunk, 'stderr'));
+    const onStdout = (chunk: Buffer | string): void => budget.push(chunk, 'stdout');
+    const onStderr = (chunk: Buffer | string): void => budget.push(chunk, 'stderr');
+    subprocess.stdout?.on('data', onStdout);
+    subprocess.stderr?.on('data', onStderr);
 
-    return new Promise<ExecOutcome>((resolvePromise, rejectPromise) => {
+    return new Promise<ExecOutcome | ExecHandedOver>((resolvePromise, rejectPromise) => {
       let cancelled = false;
       let timedOut = false;
       let killing = false;
@@ -377,9 +402,38 @@ export const localBackend: IExecBackend = {
       const signalTree = (sig: NodeJS.Signals): void =>
         void signalProcessTree(subprocess.pid, sig, () => subprocess.kill(sig));
 
+      // UX-4: mientras corre, la sesión puede pasarlo a un job. `adopt` (el
+      // `JobManager`) comprueba sus límites y engancha sus listeners antes de
+      // que el backend suelte nada; si lanza, el comando sigue en primer plano.
+      // Todo ocurre en el mismo tick: entre soltar y adoptar no llega salida.
+      const handOver = (adopt: (h: LocalHandover) => BackgroundJob): BackgroundJob | null => {
+        if (settled || killing) return null;
+        const job = adopt({
+          subprocess,
+          cwd,
+          spawnedAt,
+          stdout: Buffer.concat(budget.stdout),
+          stderr: Buffer.concat(budget.stderr),
+          discardedBytes: budget.discarded,
+        });
+        settled = true;
+        cleanup();
+        subprocess.stdout?.off('data', onStdout);
+        subprocess.stderr?.off('data', onStderr);
+        resolvePromise({ handedOver: job, cwd });
+        return job;
+      };
+      const unregister = ctx.jobs?.registerForeground({
+        command: req.command,
+        owner: { sessionId: ctx.sessionId, scope: ctx.jobScope ?? MAIN_JOB_SCOPE },
+        trace: ctx.trace,
+        take: handOver,
+      });
+
       const cleanup = (): void => {
         for (const t of timers) clearTimeout(t);
         req.signal.removeEventListener('abort', onAbort);
+        unregister?.();
       };
 
       const settle = (exitCode: number | null): void => {

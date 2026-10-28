@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { localBackend } from './backends/local.js';
+import { runLocal } from './run-local.test-util.js';
 import { StratumConfigSchema } from '../../config/schema.js';
 import type { ToolContext } from '../../agent/types.js';
 import type { ExecRequest } from './backend.js';
@@ -22,7 +22,7 @@ function req(command: string, overrides: Partial<ExecRequest> = {}): ExecRequest
 
 describe('backend local — la decisión del exit code no toca la salida (Hito 16)', () => {
   it('un stderr legítimo con la frase NativeCommandExitException se conserva', async () => {
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(`node -e "process.stderr.write('NativeCommandExitException: keep me'); process.exit(2)"`),
       ctx(),
@@ -32,7 +32,7 @@ describe('backend local — la decisión del exit code no toca la salida (Hito 1
   });
 
   it('un maxBytes pequeño con un nativo que sale ≠ 0 no se trunca por ruido del envoltorio', async () => {
-    const out = await localBackend.run(
+    const out = await runLocal(
       { kind: 'local' },
       req(`node -e "process.stderr.write('ab'); process.exit(3)"`, { maxBytes: 10 }),
       ctx(),
@@ -66,7 +66,7 @@ describe.skipIf(process.platform !== 'win32')(
     ];
     for (const [command, expected] of cases) {
       it(`${JSON.stringify(command)} → ${expected}`, async () => {
-        const out = await localBackend.run({ kind: 'local' }, req(command), ctx());
+        const out = await runLocal({ kind: 'local' }, req(command), ctx());
         expect(out.exitCode).toBe(expected);
         expect(out.stderr).not.toMatch(
           /PostCommandLookupAction|InvalidOperation|NativeCommandExitException/,
