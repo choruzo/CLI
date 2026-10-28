@@ -413,9 +413,43 @@ recorta a 1 500 caracteres. Medido con el guion (`stratum eval run --mock --grou
 Sin la heurística, ese último habría mandado 22 696 tokens con 5 041 sin caché: cinco veces más que
 el digest. Si el backend **rechaza** la petición con prefijo (un error no reintentable, p. ej. un
 400 por `tool_choice: 'none'`, o un resumen vacío), se resume con el digest; un fallo de red, un
-5xx o el timeout no se reintentan con otra petición (Caso A de §12.4). La caché del guion es ideal:
-queda por medir contra llama.cpp antes de activarla por defecto, y que el resumen sea igual de bueno
-viendo el historial entero (ve las salidas completas, no recortadas).
+5xx o el timeout no se reintentan con otra petición (Caso A de §12.4). La caché del guion es ideal;
+contra llama.cpp no se cumple con todas las plantillas (abajo). Queda por ver si el resumen es igual
+de bueno viendo el historial entero (ve las salidas completas, no recortadas).
+
+### Medido contra llama.cpp (2026-10-28): la plantilla rompe el prefijo
+
+llama.cpp `31385c9ce` con `Qwen3.5-9B-Q8_0` (`--jinja --parallel 1 -c 32768`) y un provider con
+`contextWindow: 24576`. Se usó el escenario `cache-compression-reuses-prefix` con las lecturas
+encadenadas: cada fichero dice cuál leer después, porque un modelo real lee los nueve en paralelo
+en una ronda y entonces no queda nada antiguo que comprimir. Fila de `context-compression` de la
+traza:
+
+| Opción | Petición | Entrada | Leída de caché | Sin caché | Salida | Duración |
+|---|---|---|---|---|---|---|
+| apagada | digest | 2,2K | 0 | **2,2K** | 2,6K | 61 s |
+| encendida | historial tal cual | 17,1K | 8,2K | **8,9K** | 99 | 6,7 s |
+
+La heurística eligió el prefijo creyendo que casi todo estaba en caché, pero llama.cpp solo
+reutilizó el system, las tools y el primer mensaje (`f_sim_best = 0.479` en su log): quedó
+**cuatro veces más** entrada sin caché que con el digest. La duración no se debe a la caché: la
+diferencia es la salida, porque con el digest Qwen razonó 2,6K tokens antes de resumir.
+
+**Causa, comprobada con `POST /apply-template`.** La plantilla de Qwen3.5 añade un bloque
+`<think>\n\n</think>` vacío a cada turno del asistente que va **detrás del último mensaje de
+usuario**. La instrucción de compresión entra como un `user` nuevo, así que esos bloques
+desaparecen y el prompt diverge en el primer turno del asistente. `tool_choice: 'none'` no cambia
+cómo se pintan las tools. El cliente no puede verlo: lo que manda sí es prefijo, pero lo que el
+servidor tokeniza no.
+
+Con la instrucción pegada al **último resultado de tool**, en lugar de en un `user` nuevo, el
+prompt renderizado comparte el 96,5 % con el del loop y solo diverge al final. Es una opción por
+decidir: pone una instrucción del runtime dentro de un canal que el modelo trata como datos.
+
+Conclusión: `agent.compressionReusePrefix` **sigue apagada por defecto**. Activada, en un backend
+cuya plantilla depende de la posición del último `user` (Qwen3 y derivados), empeora lo que
+pretende mejorar. La comprobación de «sigue siendo prefijo» de `prefixRequest` mira los mensajes,
+no el prompt renderizado.
 
 No aplica a la memoria de sesión de M11: su extractor necesita cada mensaje etiquetado con su id
 para la procedencia, y eso cambiaría el prefijo.

@@ -344,9 +344,21 @@ revisarlas antes de copiar nada.
 - **Hallazgo que decide el diseño:** reutilizar el prefijo casi nunca compensa en el momento en que salta
   la compresión, porque salta tras un resultado grande y eso es lo único que no está en caché, mientras
   que el digest lo recorta a 1 500 caracteres. Sin la heurística, la opción empeoraba el caso típico ×5.
+- **Medido contra llama.cpp (2026-10-28) — no se activa por defecto.** Con Qwen3.5-9B, el prefijo
+  dejó 8,9K tokens sin caché frente a 2,2K del digest. La plantilla añade `<think></think>` a los
+  turnos del asistente posteriores al último `user`, y la instrucción entra como un `user` nuevo,
+  así que el prompt renderizado diverge en el primer turno del asistente (comprobado con
+  `/apply-template`). Pegada al último resultado de tool, comparte el 96,5 %. Detalle en
+  `stratum-cli/docs/prompt-caching.md`, «Medido contra llama.cpp».
+  - Para medirlo hubo que encadenar las lecturas: un modelo real lee los nueve ficheros en una ronda
+    y no queda nada que comprimir. Los escenarios del repo solo comprueban la caché en `mock`.
+  - Gemma 4 12B no sirvió: llama.cpp `31385c9ce` revienta con `bad allocation` pasados ~11K tokens.
+    Los `launch-*.ps1` de `G:\models` que llevan `--mlock` ya no arrancan con ese build.
 - **Pendiente:**
-  - Medir contra llama.cpp antes de activarla por defecto: la caché del guion es ideal.
+  - Decidir si la instrucción va pegada al último resultado de tool (conserva el prefijo, pero mete
+    una instrucción del runtime en un canal de datos) o se deja la opción como está.
   - Comprobar que el resumen es igual de bueno viendo el historial entero.
+  - La misma plantilla rompería la caché en cada turno nuevo de `chat` con Qwen3: está por medir.
   - Que la traza compare el prefijo de la compresión con el del loop: hoy lo compara por origen y
     `sharedChars` no lo refleja.
   - M11 no aplica.
@@ -481,8 +493,9 @@ Diseño original, para referencia:
 1. ~~**Exec a segundo plano** (§8.2)~~ ✅ 2026-10-28.
 2. En paralelo y sin código: **corregir el diseño de plugins** (R2, R3 y las referencias obsoletas, §8.3)
    y **escribir §12.21** del Hito 18 (§8.4). Las dos cosas desbloquean bloques L.
-3. **Medir la compactación con prefijo contra llama.cpp** (§8.1) y decidir si pasa a estar activa por
-   defecto.
+3. ~~**Medir la compactación con prefijo contra llama.cpp** (§8.1)~~ ✅ 2026-10-28: sigue apagada por
+   defecto (la plantilla de Qwen3 rompe el prefijo). Corregido también el diseño de plugins (§11 de
+   `Plugins-Implementacion.md`), con sus tres decisiones tomadas: PL1 se puede empezar.
 4. Después, PL1, el primer corte del Hito 18 y el revert en Dot.
 
 ## Anexo — fuentes

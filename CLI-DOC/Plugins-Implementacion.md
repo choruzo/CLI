@@ -16,6 +16,8 @@ status: aprobado
 Ideas reescritas para Stratum, no código portado.
 
 > **Revisión pendiente:** §10 recoge 12 hallazgos de una revisión de Codex (2026-10-03), uno bloqueante (R1, huella de confianza). Conviene resolverlos antes de empezar PL1.
+>
+> **Corregido el 2026-10-28** contra el código: las fases reales del dispatcher (R3), el resultado doble para el write-log (R2), dónde se carga el host (`chat` no pasa por `SessionHost`), R6, R8, R9, R11 y las rutas y líneas desplazadas. El detalle, y lo que sigue pendiente de decidir, está en §11. R1 no bloquea PL1, que solo carga orígenes de confianza implícita.
 
 ---
 
@@ -91,7 +93,7 @@ Aprobado el 2026-10-03 (D1 de §8): §10.5 de la orientación lleva una nota de 
 4. **Sin sandbox, y se dice.** El plugin corre en el proceso con los permisos del usuario. La defensa es *qué se carga* (confianza), no *qué puede hacer*.
 5. **Cero dependencias nuevas.** Sin transpilador, sin `semver`, sin `npm-package-arg`.
 6. **Nada cambia sin plugins.** Sin ninguno cargado, el host es un no-op: mismo prompt, mismo toolset, mismos tests.
-7. **Solo CLI en v1.** El sidecar de Desktop es un Node SEA sin `import()`, y el preset `assistant` tiene un toolset cerrado: ahí no se carga ningún plugin.
+7. **Solo el agente de código en v1.** Desde M12 Desktop no tiene runtime propio: es un cliente de `stratumd`, y su agente es el preset `assistant` de `SessionHost`, con toolset cerrado. Con `preset: 'assistant'` no se carga ningún plugin.
 
 ---
 
@@ -136,14 +138,25 @@ export default {
 Decisiones que no se deducen de la tabla:
 
 - **`tool.before` no muta argumentos en v1.** opencode y Pi lo permiten, pero en Stratum los argumentos ya han pasado por demasiados puntos cuando llega el dispatcher: `requirePlanViolation` (en el `ReactLoop`, antes de despachar), `callEffects`, el evento `tool_call_ready` que la UI ya pintó, el write-log y la auditoría. Un plugin que cambiase `target: local` por `ssh:prod` después de esas comprobaciones sería un bypass de entornos. Bloquear con un `reason` instructivo consigue lo mismo: el modelo reintenta con los argumentos corregidos y esa llamada nueva pasa por todas las guardas.
-- **Orden en `ToolDispatcher.dispatch`**: `tool.before` de plugins → `readOnlyVeto` → `environmentGate` → `preflight` → confirmación → ejecución → redacción → `tool.after` → redacción otra vez → truncado. Va primero para que al usuario no se le pregunte por algo que un plugin va a vetar; como no muta, el orden relativo con las guardas no afecta a la seguridad.
-- **Un veto de plugin** es `{ ok:false, recoverable:true, countsAsFailure:false }`: no consume reintento ni deshabilita la tool. El `reason` se redacta y se prefija `Blocked by plugin <id>: `.
+- **Orden en `ToolDispatcher.dispatch`** (`tools/registry.ts`, `dispatch()`), que tiene tres fases:
+  1. **Vetos**, para todas las llamadas del lote antes de preguntar nada: `tool.before` de plugins → `readOnlyVeto ?? preflight`.
+  2. **Confirmaciones**, secuenciales (`confirmIfDestructive`, con `environmentGate` dentro).
+  3. **Punto seguro de pausa y descarte por steering**, y después la ejecución. Dentro de `dispatchOne`: redacción → `tool.after` → redacción otra vez → truncado.
+
+  `tool.before` va primero para que al usuario no se le pregunte por algo que un plugin va a vetar; como no muta, el orden relativo con las guardas no afecta a la seguridad.
+- **Pausa y steering.** El loop ya tiene un punto seguro justo antes de despachar (`agent/harness.ts`, «paused before tool dispatch»), y el descarte de un lote por steering del loop también es previo: un lote así nunca dispara hooks. Dentro del dispatcher, `tool.before` forma parte de «decidir», como el `preflight`, y el punto seguro sigue estando entre decidir y ejecutar. Consecuencia que hay que documentar: un `tool.before` puede haber visto una llamada que después descarta el steering llegado durante una pausa, y no se ejecuta.
+- **La fase de vetos pasa a ser asíncrona.** Hoy es síncrona; con hooks cada llamada del lote espera a sus handlers en secuencia, y eso alarga lo que tarda en llegar la primera confirmación. Por eso, además de `hookTimeoutMs` por handler, hay un tope por lote: agotado, las llamadas que quedan se vetan (§11.2). Se comprueba `ctx.signal.aborted` antes de cada handler (R5).
+- **Un veto de plugin** es `{ ok:false, recoverable:true, countsAsFailure:false }`: no consume reintento ni deshabilita la tool. El `reason` se redacta y se prefija `Blocked by plugin <id>: `. Sale por `vetoed()` con una fuente nueva, `'plugin'`, que hay que añadir a su unión y a `ToolBlockSource` (`agent/events.ts`); así llega a la traza y al `tool.blocked` del protocolo. Como lo vetado sale con `notRun`, no cuenta para el aviso de llamada repetida (`agent/repeat.ts`).
 - **`tool.before` lanza o vence su timeout → la llamada se bloquea.** Si un plugin de guarda está roto, todo se bloquea hasta que el usuario lo desactive (`/plugins disable <id>` o `--no-plugins`). Es deliberado: lo contrario convierte un fallo del plugin en un bypass.
-- **`tool.after`** no puede cambiar `ok` ni convertir un error en éxito. Los consumidores internos (`ChangeTracker` lee el diff de `edit_file`, la auditoría, el write-log) leen el resultado **original**; solo cambia lo que va al modelo y a la UI.
+- **`tool.after`** no puede cambiar `ok` ni convertir un error en éxito. Los consumidores internos leen el resultado **original** y solo cambia lo que va al modelo y a la UI. Para eso `DispatchResult` lleva dos resultados:
+  - `result`: el de hoy, redactado y truncado, sin `tool.after`. Es lo que lee el write-log (`changeFromToolCall` en `agent/harness.ts`).
+  - `presented`: con `tool.after`, una segunda redacción y el truncado. Es lo que va al historial y al evento. Sin plugins no existe y el loop usa `result`.
+
+  «Original» es, por tanto, el resultado redactado y truncado, no el crudo, para que el recuento de líneas no cambie respecto a hoy. La auditoría de `exec` no se ve afectada: se escribe dentro de la propia tool, antes del dispatcher.
 - **Las tools de control** (`todo`, `question`, `present_plan`, `update_plan`, `delegate_task`, `test_evidence`) no pasan por el dispatcher: no disparan `tool.before`/`tool.after`. Se observan por `event`.
 - **Subagentes**: los hooks de tool aplican también a los hijos (`agent: { kind: 'subagent', profile, id }`). Si no, una guarda se saltaría delegando.
-- **Concurrencia**: varias llamadas de un turno corren en paralelo, así que `tool.after` puede reentrar. `tool.before` es secuencial (la fase previa del dispatcher ya lo es).
-- **`event`** se alimenta en `StratumAgent.run`, el único punto por el que pasan todos los eventos. Es *fire-and-forget*: no se espera, no retrasa el stream. `thinking` y `text_delta` se entregan (el plugin corre en proceso, ocultárselos no protege nada), pero el payload es un clon: mutarlo no afecta a la UI.
+- **Concurrencia**: solo las lecturas corren en paralelo (`callEffects` no mutante, en un pool de `PARALLEL_READ_LIMIT` = 2); todo lo demás es barrera y va solo. Aun así `tool.after` reentra por dos vías: ese pool y el dispatcher de otro subagente. `tool.before` se serializa con un mutex del host, también entre subagentes (R7, §11.2).
+- **`event`** se alimenta con un observador de `StratumAgent.observe()` (`agent/core.ts`), el punto único por el que pasan los eventos de `run()` y de `runDelegate()` (así queda resuelto R6). Como cualquier observador, es síncrono por fuera y *fire-and-forget*: no se espera, no retrasa el stream. `thinking` y `text_delta` se entregan (el plugin corre en proceso, ocultárselos no protege nada), pero el payload es un clon: mutarlo no afecta a la UI. Los eventos de un subagente llegan envueltos en `subagent_event`, no sueltos.
 - **Timeouts**: `plugins.hookTimeoutMs` (5 s) por handler. Tres fallos consecutivos de un handler de notificación lo dan de baja para la sesión, con un `warning` `plugin_hook_disabled:<id>`.
 
 ### 3.3 Tools (`stratum.registerTool`)
@@ -157,13 +170,16 @@ stratum.registerTool({
 });
 ```
 
-- Nombre final **`plugin__<id>__<tool>`**, con las mismas reglas que MCP (≤64, hash si hay que recortar). **Nunca pisa un nombre existente**: colisión → se omite con aviso.
+- Nombre final **`plugin__<id>__<tool>`**, con las mismas reglas que MCP (≤64, hash si hay que recortar). **Nunca pisa un nombre existente**: colisión → se omite con aviso. Tiene que ser una comprobación explícita, no un orden de registro: `ToolRegistry.register()` sobrescribe sin mirar, y en `chat` las tools MCP se registran en segundo plano, después de montar el agente.
 - `parameters` es **JSON Schema**, por el mismo camino que MCP (`rawParameters` + `z.record(z.unknown())`). No se acepta un schema Zod del plugin: sería otra instancia de Zod y `zodToJsonSchema` sobre ella es frágil entre versiones. La validación de entrada es responsabilidad del plugin, como en MCP.
 - `execute` recibe `{ signal, cwd, sessionId, log }` — **no** el `ToolContext` interno (lleva `config` con secretos expandidos y `confirmDestructive`).
 - Opcionales: `destructive: true` (pide confirmación por el camino normal), `timeout`, `serialized`.
 - La salida entra por el dispatcher: redacción y truncado automáticos.
-- **`callEffects`**: una tool de plugin cuenta como **mutante sin target**, igual que una MCP. Consecuencia: no está disponible en sesiones read-only ni en la Fase 1 del modo plan (D3).
-- Perfiles: se filtran como cualquier tool (`allowedTools`, `hiddenTools`, glob `plugin__*`). El perfil de sesión `code`/`infra` las trata como las MCP.
+- **`callEffects`**: una tool de plugin cuenta como **mutante sin target**, igual que una MCP. Consecuencias:
+  - No está disponible en sesiones read-only ni en la Fase 1 del modo plan (D3).
+  - Como no tiene target, no la ven el `readOnly` de entorno, `requirePlan` ni la confirmación de producción (R8). Es una **limitación declarada**: para operar sobre un target gestionado, el plugin pasa por `exec` del host, y `destructive: true` no sustituye a un contrato de efectos.
+  - Va siempre como barrera en el lote, nunca en el pool de lecturas.
+- Perfiles: se filtran como cualquier tool (`allowedTools`, `hiddenTools`, glob `plugin__*`). El perfil de sesión `code` las ve (`allowedTools: null`); `infra` necesita `plugin__*` junto a `mcp__*` (`agent/session-profile.ts`, R9).
 
 ### 3.4 Comandos (`stratum.registerCommand`)
 
@@ -258,7 +274,7 @@ stratum-plugin-acme/
 └── commands/<nombre>.md
 ```
 
-- `skills/` y `agents/` se añaden como raíces extra a `skillDirs()` y al `ProfileLoader`, con la **menor** precedencia (plugin < usuario < proyecto). Un perfil de plugin sigue sujeto a `strictestPolicy`: no puede relajar la política destructiva.
+- `skills/` y `agents/` se añaden al registro de la sesión y al `ProfileLoader` con la **menor** precedencia entre las de usuario. Propuesta: `builtin` < plugin < usuario < proyecto, de modo que un plugin puede sustituir una skill de serie, como ya puede hacerlo el usuario (`skillDirs()` ordena de menor a mayor y gana la última). Un perfil de plugin sigue sujeto a `strictestPolicy`: no puede relajar la política destructiva. El punto único de las skills es `sessionSkills()` (`skills/registry.ts`), que ya filtra por preset. `<pkg>/skills` no encaja como «raíz» de `skillDirs()`, que deriva `.stratum/skills` de cada raíz: hace falta una opción nueva en `SkillRegistryOptions`. Además hay que ampliar dos uniones cerradas: `SkillScope` y `ProtocolSkill.scope` (`protocol/model.ts`, que lee `skills.list`).
 - `commands/*.md`: frontmatter `description` + cuerpo como plantilla (`$ARGUMENTS`), parseado con `agent/frontmatter.ts`. Equivale a un `registerCommand` que devuelve `{ prompt }`. De paso habilita comandos de usuario sin código en `~/.stratum/commands/` y `<proyecto>/.stratum/commands/`.
 - **Un paquete sin `index.js` no ejecuta código**: solo recursos. Aun así, en proyecto exige confianza — una skill instruye al modelo, que tiene `exec`.
 
@@ -307,26 +323,33 @@ Observación fuera de alcance: `mcp.servers` de un `.stratumrc.json` de proyecto
 | `report.ts` | `formatPluginsReport` / `pluginsToJson` puros (como `profiles-report.ts`) |
 | `index.ts` | `loadPlugins(config, opts) → PluginHost` — único punto de entrada |
 
-`PluginHost.empty()` es el no-op que se usa cuando no hay plugins, en Desktop y en los tests existentes.
+`PluginHost.empty()` es el no-op que se usa cuando no hay plugins, en el preset `assistant` y en los tests existentes.
 
 ### 6.2 Puntos de enganche
 
 | Dónde | Cambio |
 |---|---|
 | `config/schema.ts` | Sección `plugins` (opcional, defaults inertes) |
-| `cli/commands/chat.ts`, `run.ts` | `loadPlugins()` tras `configureLogging`; gate de confianza; `host.dispose()` en el teardown, **antes** de `closeExecRuntime()` |
-| `agent/core.ts` | `StratumAgentOptions.plugins?: PluginHost`. `promptEnv()` añade los bloques; `makeLoop()` pasa el host por `extras`; `run()` alimenta `event`; `session.start`/`session.end` |
+| `host/session-host.ts` | `SessionHostOptions.plugins` (la lista ya resuelta o `false` por `--no-plugins`). `SessionHost.create` es la raíz de composición de `run` **y** del daemon: carga los plugins ahí, salvo con `preset: 'assistant'`. `host.dispose()` en su teardown, **antes** de `closeSessionExecRuntime(config, jobs)` |
+| `cli/commands/run.ts` | Solo rellena `SessionHostOptions.plugins` con los flags; `run` va por `resolveSessionStartup` → `SessionHost` y no monta nada a mano |
+| `cli/commands/chat.ts` | `chat` **no** pasa por `SessionHost`: monta router, registro y agente a mano. Necesita su propio cableado: `loadPlugins()` junto a `registerBuiltinTools`, `StratumAgentOptions.plugins` y `host.dispose()` en su teardown, **antes** de `closeExecRuntime()` |
+| `cli/commands/init.ts` | Nada: `init` no carga plugins (R11) |
+| `agent/core.ts` | `StratumAgentOptions.plugins?: PluginHost`. `promptEnv()` añade los bloques; `makeLoop()` pasa el host por `extras` del `ReactLoop`; el hook `event` es un observador de `observe()`; `session.start`/`session.end` |
 | `agent/types.ts` | `ToolContext.plugins?: PluginHost` (lo propaga el loop; los subagentes heredan el del padre vía `RunSubagentOptions`) |
-| `tools/registry.ts` | `dispatch()`: fase `tool.before` antes de `readOnlyVeto`. `dispatchOne`: `tool.after` tras la primera redacción, y segunda redacción sobre lo que devuelva |
-| `tools/index.ts` | `registerPluginTools(registry, host)` tras las built-in y MCP (así una colisión siempre la pierde el plugin) |
-| `tools/environments.ts` | `callEffects`: `plugin__*` → mutante sin target (ya es el default de «desconocida»; añadir test que lo fije) |
-| `agent/harness.ts` | `ContextManager.compress`: `compaction.context` → se anexa a `compressorInput` bajo un encabezado propio, recortado |
-| `skills/registry.ts`, `agent/profiles.ts` | Raíces extra de paquetes, precedencia mínima |
+| `agent/events.ts` | `'plugin'` en `ToolBlockSource` |
+| `tools/registry.ts` | `dispatch()`: `tool.before` en la fase de vetos, antes de `readOnlyVeto ?? preflight`, con `'plugin'` en la fuente de `vetoed()`. `dispatchOne`: `tool.after` tras `redactResult` y antes del truncado, segunda redacción, y `DispatchResult.presented` |
+| `agent/harness.ts` | El write-log sigue leyendo `res.result`; el historial y el evento leen `res.presented ?? res.result`. `ContextManager.compress`: `compaction.context` se anexa a `compressorInput` bajo un encabezado propio, recortado (PL2) |
+| `tools/index.ts` | `registerPluginTools(registry, host)`, con comprobación explícita de colisión (§3.3), no por orden |
+| `tools/environments.ts` | `callEffects`: `plugin__*` → mutante sin target (ya es el default de «desconocida»; añadir un test que lo fije, R8) |
+| `agent/session-profile.ts` | `plugin__*` en `infra`, junto a `mcp__*` (R9) |
+| `skills/registry.ts`, `agent/profiles.ts`, `protocol/model.ts` | Raíces de paquetes por una opción nueva, precedencia mínima entre las de usuario; ampliar `SkillScope` y `ProtocolSkill.scope` (PL3) |
 | `cli/ui/session-commands.ts`, `App.tsx` | Comandos de plugin en la paleta y en `executeCommand`; `/plugins` |
 | `cli/index.ts` | `stratum plugin …`, flags `--no-plugins`, `--plugin`, `--trust-project-plugins` |
-| `desktop/*` | Nada. `StratumAgentOptions.plugins` no se pasa |
+| `../stratum-desktop/` | Nada: es cliente de `stratumd` y su agente es el preset `assistant`, que no carga plugins |
 
-### 6.3 Invariantes para la §12 de la definición (propuesta §12.19)
+`configureLogging` respecto a `loadPlugins()`: `chat`, `run` y `stratumd` (`cli/commands/daemon.ts`) configuran el logging antes de montar nada, así que basta con cargar después. `SessionHost.create` no lo configura: lo hace quien lo llama.
+
+### 6.3 Invariantes para la §12 de la definición (número por asignar: hasta la §12.26 está ocupada y la §12.27 queda para el Hito 18)
 
 1. Un veto de plugin nunca se convierte en aprobación; ningún hook levanta `preflight`, entornos, read-only ni confirmación.
 2. `tool.before` recibe un clon congelado; los argumentos ejecutados son los que emitió el modelo.
@@ -346,7 +369,14 @@ Numeración pendiente (18–20 están reservados al roadmap de infraestructura).
 
 ### PL1 — Host, carga global y hooks de tool
 `src/plugins/{api,discover,load-module,host,report,index}.ts`; orígenes 1–3; `tool.before`, `tool.after`, `event`, `session.start`/`session.end`; `stratum plugin list`, `/plugins`, `--no-plugins`, `--plugin`; subagentes heredan el host.
-**Tests**: plugin real en `fixtures/plugins/` cargado con `import()`; veto antes de confirmar (no se llama a `onConfirmDestructive`); `input` congelado; handler que lanza → bloqueo; timeout → bloqueo; `tool.after` re-redactado (devuelve un `sk-…` y sale `[redacted: …]`); veto aplicado a un subagente; `ChangeTracker` ve el diff original; sin plugins el prompt y los schemas son byte a byte los de hoy.
+**Tests**: plugin real en `fixtures/plugins/` cargado con `import()`; veto antes de confirmar (no se llama a `onConfirmDestructive`); `input` congelado; handler que lanza → bloqueo; timeout → bloqueo; `tool.after` re-redactado (devuelve un `sk-…` y sale `[redacted: …]`); veto aplicado a un subagente; `ChangeTracker` ve el diff original; sin plugins el prompt y los schemas son byte a byte los de hoy. Además:
+- `blocked: 'plugin'` en el `tool_error` y en la traza.
+- Un veto de plugin no cuenta como llamada repetida.
+- Con pausa pedida, un lote vetado por plugin no ejecuta nada al reanudar.
+- `plugin__*` aparece en `infra`.
+- `run` y el daemon cargan por `SessionHost`, y `preset: 'assistant'` no carga nada.
+
+Ficheros de tests: `tools/registry.test.ts`, `tools/fail-closed.test.ts`, `agent/repeat.test.ts`, `agent/pause-flow.test.ts`, `agent/delegate-flow.test.ts` y `agent/session-profile.test.ts`.
 **Entregable**: un `.js` en `~/.stratum/plugins/` veta o anota tools.
 
 ### PL2 — Tools, comandos, prompt y compresión
@@ -382,7 +412,7 @@ Resueltas el 2026-10-03: el usuario aceptó las ocho recomendaciones.
 | D5 | `.ts` local vía type-stripping nativo, ¿o `jiti`? | Nativo, sin `jiti`. Subir `engines` a `>=22.18` lo haría universal; ese cambio no está decidido |
 | D6 | ¿Fuentes `git:` además de npm? | No en v1 |
 | D7 | ¿El gate de confianza cubre también `mcp.servers` de proyecto? | Sí, pero como cambio aparte de estas fases: altera el comportamiento actual |
-| D8 | ¿Plugins en Desktop? | No hasta que haya un caso de uso; exigiría un loader para el SEA y decidir qué significa un hook en el preset `assistant` |
+| D8 | ¿Plugins en Desktop? | No hasta que haya un caso de uso; habría que decidir qué significa un hook en el preset `assistant`. *(2026-10-28: el argumento del SEA ya no aplica, porque desde M12 Desktop no tiene sidecar. La decisión se mantiene: el preset `assistant` no carga plugins)* |
 
 ---
 
@@ -482,3 +512,41 @@ Lecturas:
 - R4 y R5 existen porque los hooks corren en proceso. Un hook que es un comando externo se mata con una señal y no puede bloquear el event loop. §9 descarta el proceso hijo «con protocolo»; un hook de comando (`{ event, matcher, command }`) es más simple que eso y cubre el caso de la guarda sin cargar código. Candidato a PL5, o a PL1 si se quiere empezar por lo de menor riesgo.
 - Codex gatea **toda** la capa de proyecto, no una sección. D7 cubre `mcp.servers`; siguen fuera `tools.testCommand`, `tools.sensitivePathAllowlist`, `tools.guardedCommands`, `environments` y `.stratum/agents/` con `destructivePolicy`, que también relajan guardas desde un repo clonado.
 - Hooks que Codex tiene y §3.2 no: `Stop` que bloquea la terminación del turno (inyecta el motivo como continuación), `UserPromptSubmit`, `SubagentStart`/`SubagentStop`. Ampliación posible, no una omisión: un `Stop` bloqueante necesita un tope de bloqueos por turno.
+
+---
+
+## 11. Correcciones contra el código (2026-10-28)
+
+Contrastado con `stratum-cli/src` en `fb8705700` por una investigación de solo lectura (opencode, `stratum-buscador`), con los puntos que deciden algo verificados a mano. Las secciones de arriba ya están corregidas; aquí queda qué cambió y qué falta por decidir. Las líneas se mueven: se citan funciones, no números.
+
+### 11.1 Estado de cada hallazgo
+
+| # | Estado | Dónde ha quedado |
+|---|---|---|
+| R1 | **Abierto.** No bloquea PL1, que solo carga orígenes 1–3; bloquea PL4. Hoy no hay ningún mecanismo de confianza de proyecto: `.stratumrc.json` y `.stratum/agents/` de proyecto se cargan sin puerta | §5 |
+| R2 | Corregido: `DispatchResult.result` (interno) y `presented` (hacia el modelo) | §3.2, §6.2 |
+| R3 | Corregido: tres fases reales; `tool.before` en la de vetos; pausa y steering descritos | §3.2, §6.2 |
+| R4, R5 | Abiertos, aplazados a PL4/PL5. Para PL1 basta con comprobar la señal antes de cada handler y con descartar los resultados tardíos | §3.2 |
+| R6 | **Resuelto en el código**: `observe()` cubre `run()` y `runDelegate()` | §3.2 |
+| R7 | Decidido: mutex del host para `tool.before` (11.2) | §3.2 |
+| R8 | Corregido como limitación declarada | §3.3 |
+| R9 | Corregido: `plugin__*` en `infra` | §3.3, §6.2 |
+| R10 | Abierto, aplica a PL2 (comandos, bloques, `notify`) | §6.3 |
+| R11 | Corregido: `init` no carga plugins | §6.2 |
+| R12 | Sigue válido: además, la rama `legacy` de `markerEntry` no comprueba contención | §4.1 |
+
+Otras referencias obsoletas corregidas:
+- No existe `src/desktop/` ni el sidecar SEA (principio 7, D8, §6.2).
+- `run` va por `resolveSessionStartup` → `SessionHost` y `chat` monta a mano.
+- Las skills se resuelven con `sessionSkills()`.
+- `closeSessionExecRuntime` en `SessionHost` frente a `closeExecRuntime` en `chat`.
+- La colisión de nombres no se resuelve por orden de registro.
+- Solo las lecturas corren en paralelo.
+
+### 11.2 Decidido antes de escribir PL1 (2026-10-28)
+
+El usuario aceptó las tres propuestas:
+
+1. **R7: `tool.before` se serializa con un mutex del host.** Así, dos subagentes nunca ejecutan a la vez el mismo handler de veto. Para quien escribe el plugin es lo más simple, y dentro de un dispatcher el lote ya era secuencial. `tool.after` sigue pudiendo reentrar (pool de lecturas y subagentes), y eso queda como contrato documentado.
+2. **Tope de tiempo por lote para los hooks de veto.** Además de `hookTimeoutMs` por handler, los `tool.before` de un lote tienen un tope conjunto. Si se agota, las llamadas que quedan se vetan (falla cerrado). Así, N plugins no pueden retrasar la primera confirmación N × 5 s por llamada.
+3. **El daemon solo carga los plugins globales.** `sessions.open` no acepta plugins por sesión: el protocolo no transporta rutas de código. `--no-plugins` y `--plugin` son flags de `run`/`chat` y llegan por `SessionHostOptions.plugins`.
