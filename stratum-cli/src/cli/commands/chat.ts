@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import React from 'react';
 import { render } from 'ink';
 import { loadConfig } from '../../config/loader.js';
+import { createAltScreen } from '../alt-screen.js';
 import { applyTerminalBackground } from '../terminal-background.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { discoverContextWindow } from '../../host/startup-model.js';
@@ -389,9 +390,12 @@ export const chatCommand = new Command('chat')
       const restoreBackground = applyTerminalBackground(process.stdout, config.tui.background);
       const logoPreRendered = await animateStartupLogo({ stdout: process.stdout });
 
+      // La ventana de un subagente va en la pantalla alternativa (no borra el historial).
+      const altScreen = createAltScreen(process.stdout);
       const { waitUntilExit } = render(
         React.createElement(App, {
           agent,
+          altScreen,
           version,
           mcpManager,
           mcpEager,
@@ -430,6 +434,7 @@ export const chatCommand = new Command('chat')
       } catch {
         // exit() was called — normal shutdown
       }
+      altScreen.leave();
       restoreBackground();
       clearInterval(checkpointTimer);
       process.off('SIGTERM', onFatalSignal);

@@ -28,30 +28,35 @@ export function PromptFooter({ mode, escArmed = false, canBackground = false, te
   if (!mode && !telemetry) return null;
   return (
     <Box justifyContent="space-between" paddingX={2} width="100%">
-      <Box flexShrink={0}>
+      {/* El aviso cede antes que la telemetría: recortada no se leía (`…so 2`). */}
+      <Box flexShrink={1}>
         {mode === 'send' && (
-          <Text color={theme.textDisabled}>
+          <Text color={theme.textDisabled} wrap="truncate-end">
             <Text color={theme.textFaint}>↵ enviar</Text> · / comandos · @ perfiles
           </Text>
         )}
         {mode === 'steer' &&
           (escArmed ? (
-            <Text color={theme.warning}>esc otra vez para parar el turno</Text>
+            <Text color={theme.warning} wrap="truncate-end">
+              esc otra vez para parar el turno
+            </Text>
           ) : (
-            <Text color={theme.textDisabled}>
-              <Text color={theme.accent}>↵ redirigir</Text> · lo recibe en su próximo punto seguro ·{' '}
+            <Text color={theme.textDisabled} wrap="truncate-end">
+              <Text color={theme.accent}>↵ redirigir</Text>
+              {/* Con Ctrl+B disponible no cabe todo: se cae la explicación. */}
+              {canBackground ? '' : ' · lo recibe en su próximo punto seguro'} ·{' '}
               <Text color={theme.textFaint}>esc esc</Text> parar
               {canBackground && (
                 <>
                   {' · '}
-                  <Text color={theme.textFaint}>ctrl+b</Text> comando a segundo plano
+                  <Text color={theme.textFaint}>ctrl+b</Text> a segundo plano
                 </>
               )}
             </Text>
           ))}
       </Box>
       {telemetry ? (
-        <Box flexShrink={1} marginLeft={2}>
+        <Box flexShrink={0} marginLeft={2}>
           {telemetry}
         </Box>
       ) : null}

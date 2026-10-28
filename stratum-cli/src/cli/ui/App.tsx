@@ -1,7 +1,15 @@
-import React, { useReducer, useCallback, useRef, useState, useEffect, useMemo } from 'react';
+import React, {
+  useReducer,
+  useCallback,
+  useRef,
+  useState,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+} from 'react';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { Box, Text, useApp, useInput } from 'ink';
+import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
 import type { StratumAgent } from '../../agent/core.js';
 import type {
@@ -60,6 +68,7 @@ import {
   type ChangesSummary,
 } from '../../git/changes.js';
 import { Banner } from './Banner.js';
+import type { AltScreen } from '../alt-screen.js';
 import { modelHint } from './model-list.js';
 import { recentSessionRows, type RecentSessionRow } from './banner-info.js';
 import type { InitStep } from './InitProgressBlock.js';
@@ -1037,6 +1046,11 @@ interface Props {
    * en `stratumd`), y entonces el prompt se retira.
    */
   interactions?: PendingInteractions;
+  /**
+   * Pantalla alternativa del terminal para la ventana de un subagente: ocupa la
+   * pantalla entera y al cerrarla vuelve la conversación con su historial.
+   */
+  altScreen?: Pick<AltScreen, 'enter' | 'leave'>;
 }
 
 export interface RemoteSessionLink {
@@ -1065,8 +1079,10 @@ export function App({
   onCheckpoint,
   remote,
   interactions,
+  altScreen,
 }: Props) {
   const { exit } = useApp();
+  const { write: writeAboveInk } = useStdout();
 
   // Getter de un solo uso: devuelve el plan reanudado (si lo hay) para init de UI.
   // useState con función initializer garantiza que getResumePlan() se llame una sola vez.
@@ -1139,6 +1155,16 @@ export function App({
     liveUsage: null,
     sessionUsage: sessionUsageView(agent),
   });
+  // Abrir la ventana de un subagente: primero a la pantalla alternativa y luego
+  // la vista. Al revés, Ink pinta un fotograma de la vista (casi tan alto como
+  // el terminal) en la pantalla normal y la hace desplazarse.
+  const openSubagentView = useCallback(
+    (id: string) => {
+      altScreen?.enter(writeAboveInk);
+      dispatch({ type: 'ENTER_SUBAGENT_VIEW', id });
+    },
+    [altScreen, writeAboveInk],
+  );
 
   // -------------------------------------------------------------------------
   // Estado MCP: polling del resumen de conectividad para el status bar.
@@ -2893,7 +2919,7 @@ export function App({
         }
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         const found = findSubagent([...state.subagentTranscripts.values()], query);
-        if (found) dispatch({ type: 'ENTER_SUBAGENT_VIEW', id: found.id });
+        if (found) openSubagentView(found.id);
         else
           dispatch({
             type: 'SYSTEM_MESSAGE',
@@ -3213,6 +3239,7 @@ export function App({
       sessionStore,
       state.debug,
       state.subagentTranscripts,
+      openSubagentView,
       verbosity,
       openRevertConfirm,
       ownership,
@@ -3234,6 +3261,21 @@ export function App({
     deferredSendRef.current = null;
     if (!state.fatalError) executeCommandRef.current?.(text);
   }, [state.thinking, state.fatalError]);
+
+  // Ventana de un subagente en la pantalla alternativa: ocupa la pantalla entera
+  // y al cerrarla vuelve la conversación con su historial. Por el `write` de
+  // Ink, que vacía su región viva antes y repinta el fotograma después.
+  const inSubagentView = state.focusState === 'subagent-view';
+  useLayoutEffect(() => {
+    if (!altScreen) return;
+    if (inSubagentView) altScreen.enter(writeAboveInk);
+    else altScreen.leave(writeAboveInk);
+  }, [altScreen, inSubagentView, writeAboveInk]);
+  // El historial (`<Static>`) se congela mientras la ventana está abierta: lo
+  // que se cierre entretanto se imprime al volver, en la pantalla normal, y no
+  // en la alternativa, donde se perdería.
+  const shownHistoryRef = useRef(state.completedItems);
+  if (!inSubagentView) shownHistoryRef.current = state.completedItems;
 
   // Un turno largo que acaba avisa al terminal (campana / notificación): quien
   // se fue a otra ventana se entera sin mirar. Solo al pasar de trabajando a
@@ -3371,29 +3413,27 @@ export function App({
     );
   }
 
-  // ----- Vista de Subagente read-only (Hito 8C, §5.7) -----
-  // Sustituye toda el área de conversación mientras está activa. El input solo
-  // acepta /quit (Esc como alias); la lógica está en handleSend/useInput.
-  if (state.focusState === 'subagent-view') {
+  // ----- Ventana de un subagente, solo lectura (Hito 8C, §5.7) -----
+  // Ocupa la pantalla (alternativa) en lugar de la conversación, pero dentro de
+  // `<ConversationView>`: el `<Static>` del historial no se desmonta, que al
+  // volver a montarse reimprimiría todo. Esc/q y ←/→ en useInput.
+  let subagentViewNode: React.ReactNode = null;
+  if (inSubagentView) {
     const transcript = state.viewingSubagentId
       ? state.subagentTranscripts.get(state.viewingSubagentId)
       : undefined;
-    return (
-      <Box flexDirection="column" width="100%">
-        {transcript ? (
-          <SubagentView
-            transcript={transcript}
-            position={{
-              index: [...state.subagentTranscripts.keys()].indexOf(transcript.id),
-              total: state.subagentTranscripts.size,
-            }}
-            expandedBlockIds={state.expandedBlockIds}
-          />
-        ) : (
-          <Box paddingX={1}>
-            <Text color={theme.textMuted}>Subagente no encontrado · esc para volver</Text>
-          </Box>
-        )}
+    subagentViewNode = transcript ? (
+      <SubagentView
+        transcript={transcript}
+        position={{
+          index: [...state.subagentTranscripts.keys()].indexOf(transcript.id),
+          total: state.subagentTranscripts.size,
+        }}
+        expandedBlockIds={state.expandedBlockIds}
+      />
+    ) : (
+      <Box paddingX={1}>
+        <Text color={theme.textMuted}>Subagente no encontrado · esc para volver</Text>
       </Box>
     );
   }
@@ -3577,7 +3617,7 @@ export function App({
                   (t.iterations !== undefined ? ` · ${t.iterations} it` : '') +
                   (t.durationMs !== undefined ? ` · ${(t.durationMs / 1000).toFixed(1)}s` : ''),
               }))}
-              onSelect={(item) => dispatch({ type: 'ENTER_SUBAGENT_VIEW', id: item.value })}
+              onSelect={(item) => openSubagentView(item.value)}
               onCancel={() => dispatch({ type: 'CLOSE_SUBAGENT_PICKER' })}
             />
             <Text color={theme.textDisabled}> ↑↓ seleccionar · Enter abrir · Esc cerrar</Text>
@@ -3595,7 +3635,8 @@ export function App({
   return (
     <Box flexDirection="column" width="100%">
       <ConversationView
-        completedItems={state.completedItems}
+        completedItems={shownHistoryRef.current}
+        subagentView={subagentViewNode}
         currentItem={state.currentItem}
         inputValue={state.inputValue}
         onInputChange={handleInputChange}

@@ -21,6 +21,11 @@ interface Props {
   availableRows?: number;
   /** `/verbosity` (UX-3): cuánto detalle llevan los turnos que se cierran. */
   verbosity?: Verbosity;
+  /**
+   * Solo el historial (`<Static>`), sin el turno vivo ni el inspector: lo usa
+   * la ventana de un subagente, que necesita el `<Static>` montado y nada más.
+   */
+  historyOnly?: boolean;
 }
 
 function renderItem(
@@ -99,6 +104,7 @@ export function MessageList({
   now = Date.now(),
   availableRows,
   verbosity = 'standard',
+  historyOnly = false,
 }: Props) {
   const { stdout } = useStdout();
   // §9: en terminales anchas el contenido se limita para no leer líneas de 200 chars.
@@ -135,7 +141,7 @@ export function MessageList({
           )
         }
       </Static>
-      {inspectable && 'name' in inspectable ? (
+      {historyOnly ? null : inspectable && 'name' in inspectable ? (
         <ToolCallBlock
           state={inspectable}
           focused={focusedBlockId === inspectable.id}
@@ -150,7 +156,8 @@ export function MessageList({
           now={now}
         />
       ) : null}
-      {currentItem &&
+      {!historyOnly &&
+        currentItem &&
         renderItem(
           currentItem,
           'current',

@@ -269,7 +269,7 @@ async function backgroundExec() {
     await check('Ctrl+B pasa el exec en curso a un job y el turno sigue', t, async () => {
       await t.waitForBanner();
       await t.submit('lanza el comando');
-      await t.waitFor(/ctrl\+b comando a segundo plano/);
+      await t.waitFor(/ctrl\+b a segundo plano/);
       await t.key('ctrl+b');
       await t.waitFor(/pasado a segundo plano como job #1/);
       await t.waitFor(/Sigue en segundo plano/);

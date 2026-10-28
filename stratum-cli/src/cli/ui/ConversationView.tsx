@@ -111,6 +111,11 @@ interface Props {
   verbosity?: Verbosity;
   /** Aviso de una línea sobre el input (p. ej. por qué no se encoló algo). */
   inputHint?: string | null;
+  /**
+   * Ventana de un subagente: sustituye a todo lo vivo (turno, paneles, input,
+   * barras). El historial sigue montado para que `<Static>` no se reimprima.
+   */
+  subagentView?: React.ReactNode;
 }
 
 export function ConversationView({
@@ -162,6 +167,7 @@ export function ConversationView({
   canBackground,
   telemetry,
   verbosity,
+  subagentView,
 }: Props) {
   const liveNow = useLiveClock(thinking);
   // Un gate (confirmación, preguntas, aprobación de plan) es dueño del teclado.
@@ -196,6 +202,19 @@ export function ConversationView({
   // jobs) justo encima del input, el input y, al pie, la telemetría y la barra
   // de estado. Lo que se queda fijo va abajo: arriba, el turno crece y lo
   // empujaría hacia el scrollback.
+  if (subagentView) {
+    return (
+      <Box flexDirection="column" width="100%">
+        <MessageList
+          completedItems={completedItems}
+          currentItem={null}
+          historyOnly
+          verbosity={verbosity}
+        />
+        {subagentView}
+      </Box>
+    );
+  }
   return (
     <Box flexDirection="column" width="100%">
       <MessageList
