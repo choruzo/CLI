@@ -156,7 +156,11 @@ export function cardSummary(state: ToolCallState): string | null {
     const lines = state.output.split('\n').filter((l) => /^\d+: /.test(l));
     // El salto final genera una última numerada vacía (`4: `): no es contenido.
     const last = lines[lines.length - 1];
-    if (last !== undefined && /^\d+: $/.test(last) && !state.output.includes('(File has more lines')) {
+    if (
+      last !== undefined &&
+      /^\d+: $/.test(last) &&
+      !state.output.includes('(File has more lines')
+    ) {
       lines.pop();
     }
     if (lines.length === 0) return null;

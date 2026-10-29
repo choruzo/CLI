@@ -273,9 +273,7 @@ export function ToolCallBlock({
           <HostTag alias={sshHost} />
           {dur && <Text color={slow ? theme.warning : theme.textFaint}> │ {dur}</Text>}
           {label && <Text color={theme.textFaint}> │ {label}</Text>}
-          {summary !== null && (
-            <Text color={theme.textFaint}> │ {summaryNode}</Text>
-          )}
+          {summary !== null && <Text color={theme.textFaint}> │ {summaryNode}</Text>}
           {chevron}
         </Box>
         {expanded && state.output && <ExpandedBody state={state} text={state.output} />}

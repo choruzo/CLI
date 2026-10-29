@@ -10,7 +10,11 @@ import {
 } from './tool-card.js';
 import type { ToolCallState } from './ToolCallBlock.js';
 
-const completed = (name: string, input: Record<string, unknown>, output: string): ToolCallState => ({
+const completed = (
+  name: string,
+  input: Record<string, unknown>,
+  output: string,
+): ToolCallState => ({
   id: '1',
   name,
   status: 'completed',
@@ -169,16 +173,24 @@ describe('execSummary', () => {
 
 describe('cardLabel', () => {
   it('recorta una ruta POSIX larga conservando el nombre del fichero', () => {
-    const state = completed('read_file', {
-      path: 'src/deep/nested/folders/that/are/very/long/indeed/component.tsx',
-    }, '');
+    const state = completed(
+      'read_file',
+      {
+        path: 'src/deep/nested/folders/that/are/very/long/indeed/component.tsx',
+      },
+      '',
+    );
     expect(cardLabel(state)).toBe('…/indeed/component.tsx');
   });
 
   it('recorta una ruta de Windows larga conservando el nombre del fichero', () => {
-    const state = completed('edit_file', {
-      path: 'D:\\proyectos\\muy\\largos\\por\\aqui\\reporte-final.pdf',
-    }, '');
+    const state = completed(
+      'edit_file',
+      {
+        path: 'D:\\proyectos\\muy\\largos\\por\\aqui\\reporte-final.pdf',
+      },
+      '',
+    );
     expect(cardLabel(state)).toBe('…/aqui/reporte-final.pdf');
   });
 
@@ -251,13 +263,18 @@ describe('cardSummary', () => {
   });
 
   it('estado running → null', () => {
-    const state: ToolCallState = { id: '1', name: 'edit_file', status: 'running', input: { path: 'src/a.ts' } };
+    const state: ToolCallState = {
+      id: '1',
+      name: 'edit_file',
+      status: 'running',
+      input: { path: 'src/a.ts' },
+    };
     expect(cardSummary(state)).toBeNull();
   });
 });
 
 describe('diffTrailer', () => {
-  it('sin diff o sin informe → \'\'', () => {
+  it("sin diff o sin informe → ''", () => {
     expect(diffTrailer(SIMPLE_EDIT)).toBe('');
     expect(diffTrailer('File created: p (12 bytes)')).toBe('');
   });
