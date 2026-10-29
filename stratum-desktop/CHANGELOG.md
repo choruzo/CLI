@@ -4,6 +4,14 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.7.0] — 2026-10-29
+
+Acompaña a **Stratum CLI 0.11.0**, que es la que conviene tener instalada.
+
+### Cambiado
+- El indicador de espera usa las mismas frases de estratos que la CLI (ahora compartidas).
+- Reconoce las llamadas vetadas por un **plugin** de la CLI (fuente `plugin` de `tool.blocked`).
+
 ## [0.6.0] — 2026-10-23
 
 ### Cambios a tener en cuenta

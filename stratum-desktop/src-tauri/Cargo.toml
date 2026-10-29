@@ -1,6 +1,6 @@
 [package]
 name = "stratum-desktop"
-version = "0.6.0"
+version = "0.7.0"
 description = "Stratum Desktop — cliente de escritorio de stratumd (Tauri v2)"
 authors = ["Javier (choruzo)"]
 license = "Apache-2.0"

@@ -74,9 +74,10 @@ async function frameOf(state: ToolCallState, expanded = false): Promise<string> 
     patchConsole: false,
   });
   await new Promise((r) => setImmediate(r));
-  const frame = [...frames].reverse().find((f) => f.trim() !== '') ?? '';
+  // En CI (`is-in-ci`) Ink no pinta nada hasta desmontar: se lee después.
   app.unmount();
-  return frame.replace(/\u001B\[[0-9;]*[A-Za-z]/g, '');
+  const plain = frames.map((f) => f.replace(/\u001B\[[0-9;]*[A-Za-z]/g, ''));
+  return plain.reverse().find((f) => f.trim() !== '') ?? '';
 }
 
 describe('ToolCallBlock (render)', () => {

@@ -85,9 +85,11 @@ function coreImports(files: string[]): Set<string> {
 }
 
 describe('el webview solo conoce el contrato', () => {
-  it('del core importa el Stratum Protocol (y la paleta del tema), nada del runtime', () => {
+  it('del core importa el Stratum Protocol (y la paleta y las frases de espera), nada del runtime', () => {
     expect([...coreImports(shipped)].sort()).toEqual([
       'cli/ui/theme.ts',
+      // Sin imports (ver CLAUDE.md): las frases del indicador, compartidas con la CLI.
+      'cli/ui/thinking-phrases.ts',
       'protocol/index.ts',
       'protocol/schemas.ts',
     ]);

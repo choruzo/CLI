@@ -6,9 +6,24 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.11.0] — 2026-10-29
+
+Es la versión de la CLI que necesita **Stratum Desktop 0.7.0**.
 
 ### Añadido
+- **Plugins en proceso** (PL1): módulos JS/TS que se cargan de `~/.stratum/plugins/`, de `plugins.entries` en la config global o con `--plugin <ruta>`. Solo restringen: `tool.before` puede vetar una llamada (falla cerrado: si lanza o vence su plazo, veta) y `tool.after` anotar lo que ve el modelo; nunca aprueban ni cambian argumentos. `stratum plugin list`, `/plugins` y `--no-plugins` en `run` y `chat`. El asistente de Desktop no carga ninguno.
+- **`Ctrl+B` pasa a segundo plano un `exec` en curso**: el proceso sigue vivo como job, con la salida acumulada, y el agente recupera el turno al momento.
+- TUI: **tarjetas de tool por intención** (terminal, diff, lectura, búsqueda, web): `+N −M` en `edit_file`, líneas en `exec` y `read_file`; al expandir, el diff coloreado con el informe LSP y la cola de la salida de `exec`.
+- TUI: **indicador de trabajo** con el símbolo de Stratum y las frases de estratos (las mismas que Desktop), con la tool o el subagente en curso encima. Bienvenida con provider · modelo, carpeta y sesiones recientes. Cierre de turno «✓ hecho · 42 s» y aviso al terminal en turnos de 30 s o más.
+- TUI: **subagentes en su propia ventana** (`/subagents [perfil#n]`), de solo lectura y en vivo, en la pantalla alternativa del terminal; en la conversación principal ocupan una línea.
+- TUI: «cambios por turno» en el pie (`✎ N ficheros · +X −Y`); `/context` con el reparto estimado de la entrada (sistema, tools, memorias, conversación) y el umbral real de compresión.
+- TUI: textos unificados en español.
+- `stratum sessions export <id> [--format json|markdown] [-o fichero]`, con el historial redactado.
+- `stratum eval import <traza>`: convierte una sesión grabada en un escenario de replay; criterio nuevo `workspace_expected`, que puntúa los ficheros que dejó la sesión.
+- Las lecturas de un mismo lote de tools corren en paralelo (hasta 2); las escrituras siguen en serie y esperan a lo anterior.
+- Aviso de **llamada repetida**: misma tool con los mismos argumentos sin que nada cambie entre medias. No veta; se le indica al modelo.
+- `/model`, `/provider`, `/agent`, `/readonly` y `/profile` se publican en el daemon al momento.
+- Stratum Protocol: `tool.blocked` admite la fuente `plugin`.
 - TUI: **`/btw <pregunta>`**, una pregunta lateral sobre la conversación, también con el agente trabajando. Responde sin tools y no entra en el historial, la memoria ni el uso de la sesión. En la traza aparece con el origen `side-question`.
 - TUI: `/verbosity` se recuerda entre sesiones (`tui.verbosity`). Se guarda en la config global, salvo que el `.stratumrc.json` del proyecto ya declare la clave.
 - Las sesiones guardan sus tokens y su desglose de uso: `chat --resume` y `/sessions resume` los restauran (`--fork` empieza a cero).
@@ -17,6 +32,9 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 ### Corregido
 - `/sessions resume` en caliente: la barra de estado y las pastillas seguían mostrando los tokens de la sesión anterior, y el agente sumaba los de las dos sesiones.
 - `chat --resume` reiniciaba a 0 el contador de tool calls de la sesión al guardarla de nuevo.
+- Compactación de la memoria de sesión (M11) y `sessions.context`: la calibración de tokens salía multiplicada por 3,5 y las tools se contaban dos veces, así que se compactaba a destiempo.
+- `/model` desde la bienvenida abría el selector sin pintarlo.
+- El pie del prompt recortaba la telemetría cuando no cabía; ahora recorta el aviso.
 
 ## [0.10.0] — 2026-10-23
 
