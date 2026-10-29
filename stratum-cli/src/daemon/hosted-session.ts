@@ -45,7 +45,7 @@ import { SessionHost, type SessionHostOptions } from '../host/session-host.js';
 import type { AssistantData } from '../host/assistant.js';
 import { SessionPublisher, type PublisherSink } from '../host/session-publisher.js';
 import { getLogger } from '../logging/index.js';
-import { ASSISTANT_AGENT } from '../agent/presets.js';
+import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 
@@ -97,6 +97,8 @@ export interface HostedSessionOptions {
   origin?: ClientKind;
   /** M12 — dónde guarda el asistente su memoria (`SessionHostOptions.assistantData`). */
   assistantData?: AssistantData;
+  /** M14 — dónde guarda el `companion` lo suyo (`SessionHostOptions.companionDataDir`). */
+  companionDataDir?: string;
   /** Home de los snapshots de deshacer (UX-1). Ausente: el del usuario. Tests. */
   snapshotsHome?: string;
   /** ¿Hay quien pueda resolver en remoto lo que la sesión pida? */
@@ -141,18 +143,18 @@ export class HostedSession {
    * @throws ProtocolError `INVALID_PARAMS` si el perfil de agente no vale.
    */
   static async open(opts: HostedSessionOptions): Promise<HostedSession> {
-    const assistant = opts.agent === ASSISTANT_AGENT;
+    const preset = embeddedPresetOf(opts.agent);
     const host = await HostedSession.mount(
       opts,
       {
         readOnly: opts.readOnly === true,
-        // El asistente no tiene perfil de sesión (Hito 17): es de código.
-        ...(opts.sessionProfile && !assistant ? { sessionProfile: opts.sessionProfile } : {}),
+        // Un agente embebido no tiene perfil de sesión (Hito 17): es de código.
+        ...(opts.sessionProfile && !preset ? { sessionProfile: opts.sessionProfile } : {}),
         conversation: { conversation: opts.files.conversation },
       },
-      assistant,
+      preset,
     );
-    if (opts.agent && !assistant) {
+    if (opts.agent && !preset) {
       const applied = host.agent.setPrimaryProfile(opts.agent);
       if (!applied.ok) {
         await host.dispose({ cancelBackground: true });
@@ -192,20 +194,20 @@ export class HostedSession {
     // M11 — lo que ya se veía de la conversación queda guardado desde ya; el
     // historial del agente lo registra el propio agente al montarse.
     for (const m of opts.snapshot.messages) opts.files.conversation.store.putChat(m);
-    const assistant = opts.context.agent === ASSISTANT_AGENT;
+    const preset = embeddedPresetOf(opts.context.agent);
     const { sessionProfile, ...agentOptions } = handoffAgentOptions(opts.context);
     const host = await HostedSession.mount(
       opts,
       {
         ...agentOptions,
-        // El asistente no tiene perfil de sesión (como en `open` y `restore`).
-        ...(assistant ? {} : { sessionProfile }),
+        // Un agente embebido no tiene perfil de sesión (como en `open` y `restore`).
+        ...(preset ? {} : { sessionProfile }),
         conversation: { conversation: opts.files.conversation },
       },
-      assistant,
+      preset,
     );
     const wanted = opts.context.agent;
-    if (wanted && !assistant && host.agent.getActiveProfile()?.name !== wanted) {
+    if (wanted && !preset && host.agent.getActiveProfile()?.name !== wanted) {
       await host.dispose({ cancelBackground: true });
       throw new ProtocolError(
         'NOT_TRANSFERABLE',
@@ -241,20 +243,20 @@ export class HostedSession {
     },
   ): Promise<HostedSession> {
     const { meta } = opts.archived;
-    const assistant = meta.agent === ASSISTANT_AGENT;
+    const preset = embeddedPresetOf(meta.agent);
     const host = await HostedSession.mount(
       opts,
       {
         readOnly: meta.readOnly,
-        ...(assistant ? {} : { sessionProfile: meta.sessionProfile }),
-        ...(meta.agent && !assistant ? { activeAgent: meta.agent } : {}),
+        ...(preset ? {} : { sessionProfile: meta.sessionProfile }),
+        ...(meta.agent && !preset ? { activeAgent: meta.agent } : {}),
         ...(meta.planRef ? { planRef: meta.planRef } : {}),
         usage: meta.usage,
         conversation: { conversation: opts.files.conversation, restore: true },
       },
-      assistant,
+      preset,
     );
-    if (meta.agent && !assistant && host.agent.getActiveProfile()?.name !== meta.agent) {
+    if (meta.agent && !preset && host.agent.getActiveProfile()?.name !== meta.agent) {
       await host.dispose({ cancelBackground: true });
       throw new ProtocolError(
         'UNAVAILABLE',
@@ -283,10 +285,7 @@ export class HostedSession {
       cwd: this.host.env.cwd,
       provider: agent.providerName,
       model: agent.model,
-      agent:
-        agent.promptPreset === 'assistant'
-          ? ASSISTANT_AGENT
-          : (agent.getActiveProfile()?.name ?? null),
+      agent: embeddedAgentName(agent.promptPreset) ?? agent.getActiveProfile()?.name ?? null,
       readOnly: agent.isReadOnly(),
       sessionProfile: agent.getSessionProfileRequest(),
       planRef: agent.getPlanRef(),
@@ -330,14 +329,20 @@ export class HostedSession {
       | 'remoteApprovals'
       | 'approvalTimeoutMs'
       | 'assistantData'
+      | 'companionDataDir'
       | 'snapshotsHome'
     >,
     agent: NonNullable<SessionHostOptions['agent']>,
-    assistant = false,
+    preset: SessionHostOptions['preset'] | null = null,
   ): Promise<SessionHost> {
     const host = await SessionHost.create({
-      ...(assistant ? { preset: 'assistant' as const } : {}),
-      ...(assistant && opts.assistantData ? { assistantData: opts.assistantData } : {}),
+      ...(preset ? { preset } : {}),
+      ...(preset === 'assistant' && opts.assistantData
+        ? { assistantData: opts.assistantData }
+        : {}),
+      ...(preset === 'companion' && opts.companionDataDir
+        ? { companionDataDir: opts.companionDataDir }
+        : {}),
       env: opts.env,
       config: opts.config,
       router: opts.router,
@@ -577,12 +582,12 @@ export class HostedSession {
 
   setAgent(agent: string | null): ProtocolSession {
     this.assertIdle();
-    // El asistente se elige al abrir la sesión y no se cambia: es otro preset,
-    // no un perfil que se active o desactive (M12).
-    if (agent === ASSISTANT_AGENT || this.host.agent.promptPreset === 'assistant') {
+    // Un agente embebido (asistente, companion) se elige al abrir la sesión y no
+    // se cambia: es otro preset, no un perfil que se active o desactive (M12, M14).
+    if (embeddedPresetOf(agent) || embeddedAgentName(this.host.agent.promptPreset)) {
       throw new ProtocolError(
         'INVALID_PARAMS',
-        'The assistant agent is chosen when the session is opened and cannot be switched.',
+        'An embedded agent (assistant, companion) is chosen when the session is opened and cannot be switched.',
         { issues: [{ path: 'agent', message: 'not switchable' }] },
       );
     }

@@ -34,7 +34,14 @@ import {
   BoxUnavailableError,
   type BoxStatus,
 } from '../box/manager.js';
-import { ASSISTANT_AGENT, assistantAgentInfo } from '../agent/presets.js';
+import {
+  ASSISTANT_AGENT,
+  COMPANION_AGENT,
+  EMBEDDED_AGENTS,
+  assistantAgentInfo,
+  companionAgentInfo,
+  embeddedPresetOf,
+} from '../agent/presets.js';
 import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
@@ -46,6 +53,7 @@ import {
   buildAssistantConfig,
   type AssistantData,
 } from '../host/assistant.js';
+import { companionDataDir, ensureCompanionWorkspace } from '../host/companion.js';
 import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
@@ -163,6 +171,11 @@ export interface StratumdOptions {
   assistantData?: AssistantData;
   /** Home del usuario, para lo que no puede ser el directorio del asistente. Por defecto `homedir()`. */
   home?: string;
+  /**
+   * M14 — dónde guarda lo suyo el agente embebido `companion` (memoria y su
+   * directorio de trabajo). Ausente: `<home>/.stratum/companion/`.
+   */
+  companionDataDir?: string;
   /** M13 — la caja (`box.*`). Por defecto, la de `config.box`. Inyectable para tests. */
   box?: BoxManager;
   /** Inyectables para tests del endpoint. */
@@ -216,6 +229,8 @@ export class Stratumd {
   >();
   /** Montajes de sesiones guardadas en curso: dos peticiones a la vez montan una vez. */
   private readonly waking = new Map<string, Promise<HostedSession>>();
+  /** M14 — la apertura del `companion` en curso: dos peticiones a la vez abren una sesión. */
+  private companionOpening: Promise<HostedSession> | null = null;
   private readonly archive: SessionArchive;
   /** Sesiones a medio cerrar: ya no se pueden pedir, pero el apagado las espera. */
   private readonly closingSessions = new Set<Promise<void>>();
@@ -618,6 +633,7 @@ export class Stratumd {
         files,
         archived,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
+        companionDataDir: this.companionDir,
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
       });
@@ -728,6 +744,62 @@ export class Stratumd {
   ): Promise<HostedSession> {
     if (this.shuttingDown) throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
     if (params.resume !== undefined) return this.resumeSession(params);
+    if (params.agent === COMPANION_AGENT) return this.openCompanion(params, origin);
+    return this.openNewSession(params, origin);
+  }
+
+  /** Dónde guarda lo suyo el `companion` (M14). */
+  private get companionDir(): string {
+    return this.opts.companionDataDir ?? companionDataDir(this.opts.home ?? homedir());
+  }
+
+  /**
+   * M14 — `sessions.open { agent: 'companion' }`: la sesión del asistente de
+   * Stratum Dot, que es **una** y de larga vida. Si ya hay una (montada o
+   * guardada sin montar) se devuelve esa, con sus ajustes; si no, se abre en su
+   * propio directorio, que elige el daemon y nunca el cliente. Una sesión nueva
+   * es explícita: se cierra la actual (`sessions.close`) y se abre otra.
+   *
+   * @throws ProtocolError `INVALID_PARAMS` (`cwd`), y los de `openNewSession`/`wake`.
+   */
+  private openCompanion(
+    params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
+    origin?: ClientKind,
+  ): Promise<HostedSession> {
+    if (params.cwd !== undefined) {
+      throw invalid('cwd', 'the companion works in its own directory; do not pass cwd');
+    }
+    if (this.companionOpening) return this.companionOpening;
+    const opening = (async (): Promise<HostedSession> => {
+      const existing = this.companionSessionId();
+      if (existing) return this.wake(existing, 'Opening the companion');
+      const cwd = ensureCompanionWorkspace(this.companionDir);
+      return this.openNewSession({ ...params, cwd }, origin);
+    })().finally(() => {
+      this.companionOpening = null;
+    });
+    this.companionOpening = opening;
+    return opening;
+  }
+
+  /** La sesión del `companion` que ya tiene el daemon (la más reciente), o `null`. */
+  private companionSessionId(): string | null {
+    for (const [id, s] of this.sessions) {
+      if (s.host.agent.promptPreset === 'companion') return id;
+    }
+    let best: { id: string; updatedAt: number } | null = null;
+    for (const [id, d] of this.dormant) {
+      if (d.archived.meta.agent !== COMPANION_AGENT) continue;
+      const updatedAt = d.archived.meta.updatedAt;
+      if (!best || updatedAt > best.updatedAt) best = { id, updatedAt };
+    }
+    return best?.id ?? null;
+  }
+
+  private async openNewSession(
+    params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
+    origin?: ClientKind,
+  ): Promise<HostedSession> {
     if (this.sessions.size + this.opening >= this.maxSessions) {
       throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
     }
@@ -790,6 +862,7 @@ export class Stratumd {
           approvalTimeoutMs: this.approvalTimeoutMs,
           files,
           ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
+          companionDataDir: this.companionDir,
           ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
@@ -900,6 +973,14 @@ export class Stratumd {
       if (this.sessions.size + this.opening - 1 >= this.maxSessions) {
         throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
       }
+      // M14: el companion es una sesión del daemon, nunca de un anfitrión par.
+      if (embeddedPresetOf(context.agent) === 'companion') {
+        throw new ProtocolError(
+          'NOT_TRANSFERABLE',
+          'A companion session lives in the daemon; it cannot be handed over.',
+          { reason: 'context' },
+        );
+      }
       const cwd = resolve(context.cwd);
       const unusable = isAbsolute(context.cwd)
         ? ((context.agent === ASSISTANT_AGENT
@@ -939,6 +1020,7 @@ export class Stratumd {
         context,
         snapshot,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
+        companionDataDir: this.companionDir,
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
       });
       if (this.shuttingDown) {
@@ -1037,13 +1119,14 @@ export class Stratumd {
         }
         const loader = new ProfileLoader(params.cwd ? [params.cwd] : []);
         return {
-          // El asistente embebido (M12) va primero; un perfil con su nombre no
-          // se puede abrir como tal (`sessions.open` elige el asistente).
+          // Los agentes embebidos (M12, M14) van primero; un perfil con su
+          // nombre no se puede abrir como tal (`sessions.open` elige el embebido).
           agents: [
             assistantAgentInfo(),
+            companionAgentInfo(),
             ...loader
               .list()
-              .filter((p) => p.name !== ASSISTANT_AGENT)
+              .filter((p) => !EMBEDDED_AGENTS.includes(p.name))
               .map((p) => ({
                 name: p.name,
                 description: p.description ?? '',
@@ -1057,7 +1140,8 @@ export class Stratumd {
         };
       },
       'skills.list': (params) => {
-        const assistant = params.agent === ASSISTANT_AGENT;
+        const embedded = embeddedPresetOf(params.agent);
+        const assistant = embedded !== null;
         if (params.cwd !== undefined && !isAbsolute(params.cwd)) {
           throw invalid('cwd', 'cwd must be an absolute path');
         }
@@ -1069,11 +1153,7 @@ export class Stratumd {
         const config = assistant ? this.opts.config : this.configFor(params.cwd);
         if (!config.skills.enabled) return { skills: [] };
         // El asistente no mira ningún directorio: su `cwd` no se usa.
-        const registry = sessionSkills(
-          config,
-          assistant ? 'assistant' : 'coding',
-          params.cwd ?? '',
-        );
+        const registry = sessionSkills(config, embedded ?? 'coding', params.cwd ?? '');
         // Sin ruta ni cuerpo: un cliente no lee ficheros del anfitrión.
         return {
           skills: registry.entries.map((e) => ({

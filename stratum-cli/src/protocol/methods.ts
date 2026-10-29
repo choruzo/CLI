@@ -106,7 +106,11 @@ export interface SessionsOpenParams extends Mutation {
   env?: Record<string, string>;
   /** Reanudar esta sesión guardada en lugar de crear una. */
   resume?: string;
-  /** Perfil de agente principal. Ausente: ninguno (`general`). */
+  /**
+   * Perfil de agente principal. Ausente: ninguno (`general`). `assistant` (M12)
+   * y `companion` (M14) son agentes embebidos: el segundo no admite `cwd` y, si
+   * ya existe su sesión, se devuelve esa (§22 de `docs/protocol.md`).
+   */
   agent?: string;
   /** Ausentes: los de la configuración que aplique a `cwd`. */
   provider?: string;
