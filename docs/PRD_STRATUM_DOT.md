@@ -1736,7 +1736,7 @@ Por eso el asistente de Dot es un **agente embebido nuevo, `companion`**, con su
 del de `assistant`), su directorio y su memoria (`~/.stratum/companion/`). Frente al `assistant`
 de Desktop, gana:
 
-- **un ordenador propio contenido** (la caja: un contenedor Docker que gestiona `stratumd`);
+- **un ordenador propio contenido** (la caja: un contenedor Podman o Docker que gestiona `stratumd`);
 - **computer use dentro de esa caja** (pantalla, ratón y teclado sobre un escritorio virtual);
 - **trabajo en segundo plano y rutinas** programadas;
 - **memoria propia, visible y editable** desde Dot (la del `companion` y la de sesión de M11);
@@ -1787,7 +1787,7 @@ antes de decidir (§23.9).
 ### 23.3 La caja del asistente
 
 - **Target de `exec`**: `container:<nombre>` (la sintaxis ya está reservada en `parseTarget`).
-  Backend `IExecBackend` nuevo que lanza `docker exec` con execa, con el mismo contrato que `ssh`:
+  Backend `IExecBackend` nuevo que lanza `podman exec` o `docker exec` con execa, con el mismo contrato que `ssh`:
   cancelación estructurada, `timeout`, `maxBytes`, auditoría en `exec-audit.jsonl` y comando
   redactado. Es un target general: una sesión `coding` también puede usar una caja.
 - **Ciclo de vida a cargo del daemon**: crear, arrancar, parar y recrear con órdenes fijas (nunca
@@ -1801,8 +1801,8 @@ antes de decidir (§23.9).
   explícita (`~/.stratum/companion/exchange` ↔ `/exchange`) para pasarle o recoger ficheros.
 - **La caja es un entorno** (H17) con su política: lo que muta **dentro** está permitido; lo que
   sale de ella (otro target, un conector que actúa fuera, enviar o publicar) sigue en `confirm`.
-- **Sin Docker** el asistente funciona como hoy (sin caja ni pantalla) y Dot lo dice. Stratum
-  detecta Docker; no lo instala.
+- **Sin Docker** (ni Podman, preferido desde A5) el asistente funciona como hoy (sin caja ni
+  pantalla) y Dot lo dice. Stratum detecta el runtime; no lo instala.
 - **Decisión nueva [confirmada 2026-10-29]** (se aplica en M14, no antes): el `companion` **sí
   tiene `exec`**, solo contra **su** caja; nunca `local` ni `ssh:`. El `assistant` de Desktop no
   cambia (sin `exec`, ficheros confinados a su carpeta). En M14 hay que actualizar a la vez
@@ -1924,7 +1924,8 @@ spike pasan a ser el criterio de M15.
   una persona.
 - **Red de la caja**: con salida a internet por defecto. El acceso a la red local y al host
   (`host.docker.internal`) está por decidir (§23.13 A2).
-- **Docker es privilegiado** (en Linux, equivalente a root): solo el daemon habla con Docker, con
+- **Docker es privilegiado** (en Linux, equivalente a root; Podman sin root no lo es, una razón
+  más para preferirlo): solo el daemon habla con el runtime, con
   órdenes fijas. El agente nunca recibe el socket ni compone un `docker`.
 - **Capturas**: no se redactan, así que no salen de la sesión salvo como metadatos (§23.4).
 
@@ -1932,7 +1933,8 @@ spike pasan a ser el criterio de M15.
 
 Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintarlo en Dot.
 
-- **M13 — La caja.** Backend `container:` de `exec`, imagen versionada, ciclo de vida en el daemon
+- **M13 — La caja.** *Hecho 2026-10-29* (`.claude/docs/box.md`, `docs/protocol.md` §21). Backend
+  `container:` de `exec`, imagen versionada, ciclo de vida en el daemon
   (`stratum box …` y su método), volumen persistente, carpeta de intercambio, la caja como
   entorno. *Hecho cuando*: una sesión hace `exec` en `container:<caja>` con el mismo contrato que
   `ssh:` (auditoría, cancelación, timeout, `maxBytes`), la caja sobrevive a un reinicio del daemon
@@ -1968,13 +1970,17 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
 - **A1. Dot y Desktop.** *Resuelta 2026-10-29*: son productos distintos. Dot acompaña en el día
   a día (`companion`); Desktop es la app para trabajar en local (`assistant`), y cada uno tiene su
   memoria (§23, introducción). Cierra §15.1.4: Dot no es el modo compacto de Desktop.
-- **A2. Red de la caja.** ¿Salida a internet sin más? ¿Bloquear la LAN y el host por defecto?
-  ¿Lista de dominios?
+- **A2. Red de la caja.** *Resuelta 2026-10-29*: salida a la red **por defecto** (sin ella el
+  navegador de la caja no sirve), con un ajuste para quitarla (`box.network: false` → `--network
+  none`; se aplica al recrear la caja en su siguiente `start`). Bloquear solo la LAN o el host, o
+  una lista de dominios, queda para más adelante.
 - **A3. Concesiones con caducidad** («permitir N minutos») frente a `allow-all` de sesión, y cómo
   se muestran en Dot.
 - **A4. Rutinas**: ¿sesión propia por rutina (propuesta) o la sesión principal del asistente?
   ¿Qué parte del resultado vuelve al chat principal?
-- **A5. Docker en Windows**: depender de Docker Desktop (licencia en empresas) o admitir Podman.
+- **A5. Docker en Windows**. *Resuelta 2026-10-29*: **Podman preferido** (no necesita un servicio
+  en Linux; en Windows y macOS usa su `podman machine`) y Docker como alternativa
+  (`box.runtime: auto | podman | docker`; `auto` prueba Podman y luego Docker).
 - **A6. Capturas en la traza**: ¿se guardan los ficheros para el auditor (depuración) o solo
   metadatos (privacidad)? Propuesta: solo metadatos por defecto, y los ficheros con opción explícita.
 - **A7. Modelo con visión**: cómo se declara (`vision: true` en la config del modelo) y qué ve el

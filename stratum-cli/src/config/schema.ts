@@ -404,6 +404,40 @@ export const SnapshotsConfigSchema = z.object({
   maxFiles: z.number().int().positive().default(20_000),
 });
 
+/** Nombre de la caja: forma parte del nombre del contenedor y del volumen (`stratum-box-<n>`). */
+export const BOX_NAME_RE = /^[a-z][a-z0-9-]{0,30}$/;
+
+/**
+ * M13 — la caja: un contenedor que gestiona Stratum (`src/box/`), target
+ * `container:<name>` de `exec`. **Solo cuenta la sección de la config global**:
+ * el loader la quita de una capa de proyecto, porque elegir la imagen o la red
+ * de la caja no puede depender de un repo clonado.
+ */
+export const BoxConfigSchema = z
+  .object({
+    /**
+     * `exec` admite `container:<name>` en las sesiones. Default `false`: sin
+     * opt-in el target ni se anuncia. El ciclo de vida (`stratum box …`) no
+     * depende de esto.
+     */
+    enabled: z.boolean().default(false),
+    name: z
+      .string()
+      .regex(BOX_NAME_RE, 'nombre de caja: minúsculas, dígitos y "-", hasta 31')
+      .default('box'),
+    /** `auto`: Podman si está y responde; si no, Docker. */
+    runtime: z.enum(['auto', 'podman', 'docker']).default('auto'),
+    /** Imagen propia. Ausente: la de Stratum (`stratum-box:<versión>`), construida en local. */
+    image: z.string().min(1).optional(),
+    /**
+     * Salida a la red. Default `true`: sin red el navegador de la caja no sirve.
+     * `false` crea la caja con `--network none`. Cambiarlo recrea la caja en el
+     * siguiente `box start`, sin borrar su home.
+     */
+    network: z.boolean().default(true),
+  })
+  .strict();
+
 /** Gramática de un id de plugin (la de los perfiles): minúsculas, dígitos y `-`. */
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -904,6 +938,9 @@ export const StratumConfigSchema = z.object({
    */
   ssh: SSHConfigSchema.optional(),
 
+  /** M13 — la caja (target `container:<name>`). Solo de la config global. */
+  box: BoxConfigSchema.default({}),
+
   /**
    * Diagnósticos LSP tras editar (encargo UX-2b). `enabled: false` por defecto:
    * sin opt-in no se arranca ningún language server y `edit_file`/`write_file`
@@ -1106,6 +1143,7 @@ export const StratumConfigSchema = z.object({
 
 export type StratumConfig = z.infer<typeof StratumConfigSchema>;
 export type PluginsConfig = z.infer<typeof PluginsConfigSchema>;
+export type BoxConfig = z.infer<typeof BoxConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 /** Lo que se escribe en disco: `model` y `contextWindow` pueden omitirse. */
 export type ProviderConfigInput = z.input<typeof ProviderConfigSchema>;

@@ -49,14 +49,15 @@ const schema = z.object({
   target: z
     .string()
     .optional()
-    .describe('Where to run the command: "local" (default) or "ssh:<alias>".'),
+    .describe('Where to run the command: "local" (default), "ssh:<alias>" or "container:<box>".'),
   command: z.string().describe('Shell command to execute'),
   cwd: z
     .string()
     .optional()
     .describe(
       'Working directory. On local, relative paths resolve against the project directory. ' +
-        'On ssh, the command runs as `cd <cwd> && <command>`.',
+        'On ssh, the command runs as `cd <cwd> && <command>`. In a box, relative paths ' +
+        'resolve against its home.',
     ),
   pty: z
     .boolean()
@@ -111,6 +112,9 @@ function targetsWith(capability: keyof ExecCapabilities, config: StratumConfig):
     if (aliases.length > 0) out.push(...aliases.map((a) => `ssh:${a}`));
     else out.push('ssh:<alias> (no hosts configured in .stratumrc.json)');
   }
+  if (config.box?.enabled && getExecBackend('container').capabilities[capability]) {
+    out.push(`container:${config.box.name}`);
+  }
   return out.length > 0 ? out.join(', ') : 'none';
 }
 
@@ -143,6 +147,13 @@ export function describeExecTool(config: StratumConfig): string {
       const suffix = flags.length > 0 ? ` (${flags.join('; ')})` : '';
       return `- ssh:${alias}${suffix}. Supports pty. When output exceeds maxBytes the remote process is killed.`;
     }),
+    ...(config.box?.enabled
+      ? [
+          `- container:${config.box.name} — your own isolated Linux box (/bin/sh, user "stratum" ` +
+            'with passwordless sudo, home /home/stratum). It cannot see this machine: the only ' +
+            'shared folder is /exchange. Its home survives restarts. No pty.',
+        ]
+      : []),
   ];
 
   const jobs = config.tools.jobs.enabled

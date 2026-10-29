@@ -56,8 +56,36 @@ function resolveOne(name: string, env: EnvironmentConfig): ResolvedEnvironment {
   };
 }
 
+/** Nombre del entorno implícito de la caja (M13). Uno declarado con ese nombre lo sustituye. */
+export const BOX_ENVIRONMENT = 'box';
+
+/**
+ * M13 — la caja es un entorno: lo que cambia **dentro** no pide confirmación,
+ * porque es su radio de daños. Va con `tier: development`, así que un entorno
+ * declarado que también la abarque y sea más estricto gana (`resolveEnvironment`):
+ * la config del usuario solo puede endurecerlo. Lo que sale de la caja (otro
+ * target) se rige por el entorno de ese otro target.
+ */
+function boxEnvironment(config: StratumConfig): ResolvedEnvironment | null {
+  if (!config.box?.enabled) return null;
+  if (config.environments && BOX_ENVIRONMENT in config.environments) return null;
+  return {
+    name: BOX_ENVIRONMENT,
+    tier: 'development',
+    policy: 'allow',
+    requirePlan: false,
+    readOnly: false,
+    confirmation: 'simple',
+    match: [`container:${config.box.name}`],
+  };
+}
+
 export function listEnvironments(config: StratumConfig): ResolvedEnvironment[] {
-  return Object.entries(config.environments ?? {}).map(([name, env]) => resolveOne(name, env));
+  const declared = Object.entries(config.environments ?? {}).map(([name, env]) =>
+    resolveOne(name, env),
+  );
+  const box = boxEnvironment(config);
+  return box ? [...declared, box] : declared;
 }
 
 /**
@@ -89,7 +117,7 @@ export function resolveEnvironment(
 // ---------------------------------------------------------------------------
 
 export interface TargetEffect {
-  /** Etiqueta del target: `local`, `ssh:<alias>`. */
+  /** Etiqueta del target: `local`, `ssh:<alias>`, `container:<caja>`. */
   target: string;
   /** true si la llamada cambia algo en ese target. */
   mutating: boolean;
@@ -187,7 +215,9 @@ export function callEffects(name: string, input: Record<string, unknown>): CallE
 
 /** Frase a teclear para confirmar un cambio en un target: el alias, no la etiqueta completa. */
 export function confirmPhraseFor(target: string): string {
-  return target.startsWith('ssh:') ? target.slice(4) : target;
+  if (target.startsWith('ssh:')) return target.slice(4);
+  if (target.startsWith('container:')) return target.slice('container:'.length);
+  return target;
 }
 
 /** Resumen de una línea de las reglas de un entorno (prompt, `/env`). */

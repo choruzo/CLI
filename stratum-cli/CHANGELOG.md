@@ -6,6 +6,11 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- **La caja** (M13): un contenedor aislado que gestiona Stratum, con **Podman** (preferido) o Docker, y en el que las sesiones ejecutan con `exec` y target `container:<caja>`. Lleva Xvfb, Chromium, `xdotool` e ImageMagick, con un usuario sin root; su home está en un volumen que sobrevive a reinicios y actualizaciones, y solo comparte con tu equipo la carpeta `~/.stratum/companion/exchange` (`/exchange` dentro). `stratum box status|start|stop|reset` (la primera vez, `start` construye la imagen) y, en el daemon, `box.status|start|stop|reset`. Se activa con `"box": { "enabled": true }` en la config **global**; `box.network` (activada por defecto) le quita la red si se pone a `false`. Lo que cambia dentro de la caja no pide confirmación (entorno implícito `box`); cancelar o vencer el plazo mata el comando **dentro** de la caja.
+
 ## [0.11.0] — 2026-10-29
 
 Es la versión de la CLI que necesita **Stratum Desktop 0.7.0**.

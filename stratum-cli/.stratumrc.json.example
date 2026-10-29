@@ -249,6 +249,12 @@
     "approvalTimeoutMinutes": 10,
     "persistSessions": true
   },
+  "box": {
+    "enabled": false,
+    "name": "box",
+    "runtime": "auto",
+    "network": true
+  },
   "desktop": {
     "maxConcurrentTurns": 2,
     "notifications": {

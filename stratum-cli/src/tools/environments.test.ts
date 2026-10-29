@@ -320,3 +320,89 @@ describe('ToolDispatcher con entornos y read-only (Hito 17)', () => {
     expect(run).not.toHaveBeenCalled();
   });
 });
+
+describe('la caja como entorno (M13)', () => {
+  const withBox = (extra: Record<string, unknown> = {}) =>
+    StratumConfigSchema.parse({ box: { enabled: true, name: 'box' }, ...extra });
+
+  it('con la caja habilitada hay un entorno implícito "box" que permite cambiar dentro', () => {
+    expect(resolveEnvironment('container:box', withBox())).toMatchObject({
+      name: 'box',
+      tier: 'development',
+      policy: 'allow',
+      readOnly: false,
+    });
+    // Sin opt-in no existe: ni entorno ni target.
+    expect(resolveEnvironment('container:box', StratumConfigSchema.parse({}))).toBeNull();
+    expect(listEnvironments(StratumConfigSchema.parse({}))).toEqual([]);
+  });
+
+  it('solo abarca su caja: local y ssh siguen con sus reglas', () => {
+    expect(resolveEnvironment('local', withBox())).toBeNull();
+    expect(resolveEnvironment('container:other', withBox())).toBeNull();
+  });
+
+  it('la config del usuario solo puede endurecerlo', () => {
+    // Un entorno más crítico que también la abarca gana.
+    const strict = withBox({
+      environments: { all: { match: ['*'], tier: 'staging' } },
+    });
+    expect(resolveEnvironment('container:box', strict)).toMatchObject({
+      name: 'all',
+      policy: 'ask',
+    });
+    // Un entorno declarado con su nombre lo sustituye (p. ej. read-only).
+    const ro = withBox({ environments: { box: { match: ['container:box'], readOnly: true } } });
+    expect(listEnvironments(ro)).toHaveLength(1);
+    expect(resolveEnvironment('container:box', ro)).toMatchObject({ readOnly: true });
+  });
+
+  it('callEffects y targetOfCall reconocen container:<caja>', () => {
+    expect(
+      callEffects('exec', { command: 'apt-get install -y jq', target: 'container:box' }),
+    ).toEqual(
+      expect.objectContaining({
+        mutating: true,
+        targets: [{ target: 'container:box', mutating: true }],
+      }),
+    );
+    expect(callEffects('exec', { command: 'ls', target: 'container:box' })).toMatchObject({
+      mutating: false,
+    });
+    expect(targetOfCall('exec', JSON.stringify({ command: 'ls', target: 'container:box' }))).toBe(
+      'container:box',
+    );
+  });
+
+  it('dispatcher: un cambio dentro de la caja no pregunta; con --deny-destructive se deniega', async () => {
+    const { registry, run } = fakeExec();
+    const confirm = vi.fn(async (): Promise<DestructiveDecision> => 'deny');
+    const d = new ToolDispatcher(registry);
+    const [ok] = await d.dispatch([call('rm -r build', 'container:box')], {
+      ...ctxWith(withBox()),
+      confirmDestructive: confirm,
+    });
+    expect(ok!.result.ok).toBe(true);
+    expect(confirm).not.toHaveBeenCalled();
+
+    const [denied] = await d.dispatch(
+      [call('rm -r build', 'container:box')],
+      ctxWith(withBox(), { destructivePolicy: 'deny' }),
+    );
+    expect(denied!.result.ok).toBe(false);
+
+    // El mismo rm en local sigue preguntando.
+    await d.dispatch([call('rm -r build')], { ...ctxWith(withBox()), confirmDestructive: confirm });
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(run).toHaveBeenCalledTimes(1);
+  });
+
+  it('un read-only de sesión también veta lo que cambia dentro de la caja', () => {
+    const veto = readOnlyVeto(
+      'exec',
+      { command: 'touch x', target: 'container:box' },
+      { config: withBox(), readOnly: true },
+    );
+    expect(veto).toMatchObject({ ok: false });
+  });
+});

@@ -160,6 +160,30 @@ describe('validateConfigLayer', () => {
   });
 });
 
+describe('secciones solo globales (M13: box)', () => {
+  it('la sección box de un proyecto se ignora, con aviso; la de la global cuenta', () => {
+    const globalFile = join(dir, 'global.json');
+    const projectFile = join(dir, 'project.json');
+    writeJson(globalFile, { box: { enabled: true, name: 'mine' } });
+    const project = { box: { image: 'evil/image:latest', network: false, name: 'other' } };
+
+    const merged = validateConfigLayer(projectFile, project, globalFile);
+    expect(merged.box).toMatchObject({ enabled: true, name: 'mine', network: true });
+    expect(merged.box.image).toBeUndefined();
+
+    expect(
+      validateConfigLayer(globalFile, { box: { network: false } }, globalFile).box.network,
+    ).toBe(false);
+  });
+
+  it('loadConfig no aplica la caja de un repo clonado', () => {
+    writeJson(join(dir, '.stratumrc.json'), { box: { image: 'evil/image:latest', enabled: true } });
+    const config = loadConfig(dir);
+    expect(config.box.image).not.toBe('evil/image:latest');
+    expect(takeConfigDeprecations().join('\n')).toMatch(/"box" solo se lee de la config global/);
+  });
+});
+
 describe('setConfigValue', () => {
   it('escribe en el .stratumrc.json del proyecto aunque tenga BOM', () => {
     const file = join(dir, '.stratumrc.json');

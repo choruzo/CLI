@@ -1,0 +1,32 @@
+# Imagen de la caja de Stratum (M13, docs/PRD_STRATUM_DOT.md §23.3).
+# Versión: BOX_IMAGE_VERSION en src/box/spec.ts. Cambiar este fichero exige subirla.
+#
+# Escritorio virtual (Xvfb) con Chromium y las utilidades que usará el computer
+# use de M15 (xdotool, ImageMagick). Usuario sin root; sudo sin contraseña
+# porque instalar dentro de la caja es su razón de ser y la caja es el radio de
+# daños: no ve los ficheros del anfitrión, ni ~/.stratum, ni el runtime.
+FROM docker.io/library/debian:bookworm-slim
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    LANG=C.UTF-8 \
+    DISPLAY=:99
+
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends \
+      ca-certificates curl wget git jq less nano procps sudo unzip xz-utils \
+      python3 python3-pip python3-venv \
+      xvfb xauth x11-utils xdotool imagemagick \
+      chromium fonts-dejavu-core fonts-liberation \
+ && rm -rf /var/lib/apt/lists/*
+
+RUN useradd --create-home --uid 1000 --shell /bin/bash stratum \
+ && echo 'stratum ALL=(ALL) NOPASSWD:ALL' > /etc/sudoers.d/stratum \
+ && chmod 0440 /etc/sudoers.d/stratum \
+ && mkdir -p /exchange && chown stratum:stratum /exchange
+
+COPY entrypoint.sh /usr/local/bin/stratum-box-entrypoint
+RUN chmod 0755 /usr/local/bin/stratum-box-entrypoint
+
+USER stratum
+WORKDIR /home/stratum
+ENTRYPOINT ["/usr/local/bin/stratum-box-entrypoint"]

@@ -429,6 +429,34 @@ export interface ProtocolMemoryStatus {
 }
 
 // ---------------------------------------------------------------------------
+// M13 — la caja
+// ---------------------------------------------------------------------------
+
+/**
+ * `unavailable`: no hay runtime de contenedores (o no responde, o hay un
+ * contenedor con su nombre que no creó Stratum); `absent`: nunca se creó o se
+ * borró con `box.reset`.
+ */
+export type ProtocolBoxState = 'unavailable' | 'absent' | 'stopped' | 'running';
+
+export interface ProtocolBoxStatus {
+  name: string;
+  state: ProtocolBoxState;
+  runtime: 'podman' | 'docker' | null;
+  /** Con `unavailable`: por qué, para personas. */
+  reason?: string;
+  image: string;
+  /** Salida a la red. */
+  network: boolean;
+  /** Existe con otra imagen o ajustes: `box.start` la recrea sin borrar su home. */
+  outdated: boolean;
+  /** `exec` admite `container:<name>` en las sesiones. */
+  enabled: boolean;
+  /** Carpeta del anfitrión que la caja ve en `/exchange`. */
+  exchangeDir: string;
+}
+
+// ---------------------------------------------------------------------------
 // M11 — conversación duradera, contexto activo y memoria de sesión
 // ---------------------------------------------------------------------------
 

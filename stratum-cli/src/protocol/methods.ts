@@ -4,6 +4,7 @@ import type {
   ProtocolSkill,
   ProtocolApproval,
   ProtocolApprovalDecision,
+  ProtocolBoxStatus,
   ProtocolContextReport,
   ProtocolDecision,
   ProtocolHistoryPage,
@@ -402,6 +403,18 @@ export interface ProtocolMethods {
     { decisions: ProtocolDecision[] }
   >;
 
+  /**
+   * M13 — la caja del daemon. Las órdenes al runtime son fijas: el cliente
+   * solo elige cuál. `box.start` puede tardar minutos la primera vez (construye
+   * la imagen). `box.reset` borra la caja **y su home**; quien la pide ya ha
+   * confirmado. Sin runtime: `UNAVAILABLE` (`no-runtime`); con otra operación en
+   * curso: `BUSY` (`box-busy`); si el runtime la rechaza: `UNAVAILABLE` (`box-failed`).
+   */
+  'box.status': Spec<Empty, { box: ProtocolBoxStatus }>;
+  'box.start': Spec<Mutation, { box: ProtocolBoxStatus }>;
+  'box.stop': Spec<Mutation, { box: ProtocolBoxStatus }>;
+  'box.reset': Spec<Mutation, { box: ProtocolBoxStatus }>;
+
   'events.subscribe': Spec<{ scope: SubscriptionScope }, EventsSubscribeResult>;
   'events.unsubscribe': Spec<{ subscriptionId: string }, Empty>;
   'trace.subscribe': Spec<{ sessionId: string }, { subscriptionId: string }>;
@@ -525,6 +538,11 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'memory.status': read('observe'),
   'memory.decisions': read('observe'),
+
+  'box.status': read('observe'),
+  'box.start': write('control'),
+  'box.stop': write('control'),
+  'box.reset': write('control'),
 
   // Suscribirse solo cambia el estado de la propia conexión: se puede repetir.
   'events.subscribe': read('observe'),

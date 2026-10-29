@@ -70,6 +70,7 @@ import type {
   ProtocolContextReport,
   ProtocolHistoryPage,
   ProtocolSessionMemory,
+  ProtocolBoxStatus,
 } from './model.js';
 import { HISTORY_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
@@ -410,6 +411,19 @@ export const memoryStatusSchema: z.ZodType<ProtocolMemoryStatus> = z.object({
   indexed: z.boolean(),
   backend: z.enum(['sqlite-vec', 'fallback', 'none']),
 });
+
+export const boxStatusSchema: z.ZodType<ProtocolBoxStatus> = z.object({
+  name,
+  state: z.enum(['unavailable', 'absent', 'stopped', 'running']),
+  runtime: z.enum(['podman', 'docker']).nullable(),
+  reason: z.string().max(LIMITS.answerChars).optional(),
+  image: name,
+  network: z.boolean(),
+  outdated: z.boolean(),
+  enabled: z.boolean(),
+  exchangeDir: z.string().max(LIMITS.pathChars),
+});
+const boxResult = z.object({ box: boxStatusSchema });
 
 // ---------------------------------------------------------------------------
 // M11 — conversación guardada, contexto y memoria de sesión
@@ -884,6 +898,11 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
     })
     .strict(),
 
+  'box.status': empty,
+  'box.start': z.object({ operationId }).strict(),
+  'box.stop': z.object({ operationId }).strict(),
+  'box.reset': z.object({ operationId }).strict(),
+
   'events.subscribe': z.object({ scope }).strict(),
   'events.unsubscribe': subscriptionRef,
   'trace.subscribe': sessionRef,
@@ -1020,6 +1039,11 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'memory.status': memoryStatusSchema,
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),
+
+  'box.status': boxResult,
+  'box.start': boxResult,
+  'box.stop': boxResult,
+  'box.reset': boxResult,
 
   'events.subscribe': z.object({ subscriptionId: id, mode: z.enum(['replay', 'snapshot']) }),
   'events.unsubscribe': emptyResult,

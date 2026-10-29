@@ -22,6 +22,7 @@ import { detachCommand } from './commands/detach.js';
 import { desktopCommand } from './commands/desktop.js';
 import { approvalsCommand } from './commands/approvals.js';
 import { pluginCommand } from './commands/plugin.js';
+import { boxCommand } from './commands/box.js';
 import { cliVersion } from './version.js';
 import { ConfigError } from '../config/loader.js';
 import { SchemaVersionError } from '../config/schema-version.js';
@@ -55,6 +56,7 @@ program.addCommand(detachCommand);
 program.addCommand(desktopCommand);
 program.addCommand(approvalsCommand);
 program.addCommand(pluginCommand);
+program.addCommand(boxCommand);
 
 // Una config rota se explica con su mensaje (fichero, línea o clave), no con
 // la traza: los comandos que no capturan `loadConfig()` llegan aquí.

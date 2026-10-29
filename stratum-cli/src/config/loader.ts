@@ -70,9 +70,36 @@ interface ConfigLayer {
   path: string;
   /** JSON crudo del fichero (con `${VAR}` sin expandir). */
   raw: Record<string, unknown>;
+  /** La capa global: la única de la que salen las claves de `GLOBAL_ONLY_KEYS`. */
+  global?: boolean;
 }
 
-function prepareLayer(layer: ConfigLayer, warn: boolean): Record<string, unknown> {
+/**
+ * Secciones que solo cuentan en la config global. `box` (M13): la imagen, la
+ * red y el nombre de la caja no pueden depender de un repo clonado. Una capa de
+ * proyecto que las declare se carga sin ellas, con un aviso.
+ */
+const GLOBAL_ONLY_KEYS = ['box'] as const;
+
+function dropGlobalOnlyKeys(layer: ConfigLayer, warn: boolean): ConfigLayer {
+  if (layer.global) return layer;
+  const present = GLOBAL_ONLY_KEYS.filter((k) => k in layer.raw);
+  if (present.length === 0) return layer;
+  const raw = { ...layer.raw };
+  for (const key of present) {
+    delete raw[key];
+    if (warn) {
+      pushWarning(
+        `${layer.path}: la sección "${key}" solo se lee de la config global ` +
+          `(${GLOBAL_CONFIG_PATH}); aquí se ignora.`,
+      );
+    }
+  }
+  return { ...layer, raw };
+}
+
+function prepareLayer(input: ConfigLayer, warn: boolean): Record<string, unknown> {
+  const layer = dropGlobalOnlyKeys(input, warn);
   // 15.6 — antes de migrar o validar: un fichero de un Stratum más nuevo no se
   // interpreta a medias. Cada capa se comprueba por separado, así el error
   // nombra el fichero concreto.
@@ -224,7 +251,11 @@ export function loadConfig(startDir?: string): StratumConfig {
 
   // 1. Config global (~/.stratum/.stratumrc.json)
   if (existsSync(GLOBAL_CONFIG_PATH)) {
-    layers.push({ path: GLOBAL_CONFIG_PATH, raw: readConfigFile(GLOBAL_CONFIG_PATH) });
+    layers.push({
+      path: GLOBAL_CONFIG_PATH,
+      raw: readConfigFile(GLOBAL_CONFIG_PATH),
+      global: true,
+    });
   }
 
   // 2. Config de proyecto (sube desde cwd hasta encontrar uno). Desde
@@ -250,9 +281,10 @@ export function validateConfigLayer(
   globalPath: string = GLOBAL_CONFIG_PATH,
 ): StratumConfig {
   const layers: ConfigLayer[] = [];
-  if (!samePath(path, globalPath) && existsSync(globalPath)) {
-    layers.push({ path: globalPath, raw: readConfigFile(globalPath) });
+  const isGlobal = samePath(path, globalPath);
+  if (!isGlobal && existsSync(globalPath)) {
+    layers.push({ path: globalPath, raw: readConfigFile(globalPath), global: true });
   }
-  layers.push({ path, raw });
+  layers.push({ path, raw, global: isGlobal });
   return buildConfig(layers, { warn: false });
 }

@@ -27,6 +27,13 @@ import { access, rmdir, stat } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, isAbsolute, resolve } from 'path';
 import { ProfileLoader, profileMode } from '../agent/profiles.js';
+import {
+  BoxBusyError,
+  BoxCommandError,
+  BoxManager,
+  BoxUnavailableError,
+  type BoxStatus,
+} from '../box/manager.js';
 import { ASSISTANT_AGENT, assistantAgentInfo } from '../agent/presets.js';
 import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
@@ -156,6 +163,8 @@ export interface StratumdOptions {
   assistantData?: AssistantData;
   /** Home del usuario, para lo que no puede ser el directorio del asistente. Por defecto `homedir()`. */
   home?: string;
+  /** M13 — la caja (`box.*`). Por defecto, la de `config.box`. Inyectable para tests. */
+  box?: BoxManager;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -174,6 +183,24 @@ const RESUME_EXCLUSIVE = [
 
 function invalid(path: string, message: string): ProtocolError {
   return new ProtocolError('INVALID_PARAMS', message, { issues: [{ path, message }] });
+}
+
+/** Una orden de ciclo de vida de la caja, con sus errores traducidos al protocolo. */
+async function boxOperation(fn: () => Promise<BoxStatus>): Promise<{ box: BoxStatus }> {
+  try {
+    return { box: await fn() };
+  } catch (err) {
+    if (err instanceof BoxBusyError) {
+      throw new ProtocolError('BUSY', err.message, { reason: 'box-busy' });
+    }
+    if (err instanceof BoxUnavailableError) {
+      throw new ProtocolError('UNAVAILABLE', err.message, { reason: 'no-runtime' });
+    }
+    if (err instanceof BoxCommandError) {
+      throw new ProtocolError('UNAVAILABLE', err.message, { reason: 'box-failed' });
+    }
+    throw err;
+  }
 }
 
 export class Stratumd {
@@ -200,6 +227,8 @@ export class Stratumd {
   private readonly peers: PeerSessions;
   /** Aprobaciones, preguntas y planes pendientes de todas las sesiones, y quién los resuelve. */
   private readonly approvals: ApprovalCenter;
+  /** M13 — la caja: el daemon pide sus órdenes fijas; no es dueño del contenedor. */
+  private readonly box: BoxManager;
   private readonly approvalTimeoutMs: number;
   private readonly operations: OperationCache;
   private readonly serverInfo: ProtocolServerInfo;
@@ -245,6 +274,13 @@ export class Stratumd {
       overviewOf: () => this.overview(),
     });
     this.traces = new TraceFeeds(opts.tracePollMs ? { pollMs: opts.tracePollMs } : {});
+    // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
+    this.box =
+      opts.box ??
+      new BoxManager({
+        config: opts.config.box,
+        onProgress: (line) => log.debug('box build', { line }),
+      });
     this.approvalTimeoutMs =
       opts.approvalTimeoutMs ?? Math.round(opts.config.daemon.approvalTimeoutMinutes * 60_000);
     this.approvals = new ApprovalCenter({
@@ -1311,6 +1347,11 @@ export class Stratumd {
           })),
         };
       },
+
+      'box.status': async () => ({ box: await this.box.status() }),
+      'box.start': () => boxOperation(() => this.box.start()),
+      'box.stop': () => boxOperation(() => this.box.stop()),
+      'box.reset': () => boxOperation(() => this.box.reset()),
 
       'events.subscribe': (params) => this.hub.subscribe(conn, params.scope),
       'events.unsubscribe': (params) => {

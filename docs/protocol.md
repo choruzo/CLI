@@ -201,6 +201,8 @@ host ownership  !=  operator control  !=  approver authority
 | `jobs.list` | observe | | |
 | `jobs.cancel` | control | ✓ | |
 | `memory.status` · `memory.decisions` | observe | | |
+| `box.status` | observe | | Estado de la caja del daemon: `{ box: ProtocolBoxStatus }` (§21) |
+| `box.start` · `box.stop` · `box.reset` | control | ✓ | Ciclo de vida de la caja con órdenes fijas. `reset` borra también su home. `UNAVAILABLE` (`no-runtime` · `box-failed`), `BUSY` (`box-busy`) (§21) |
 | `events.subscribe` · `events.unsubscribe` | observe | | Solo cambian el estado de la propia conexión |
 | `trace.subscribe` · `trace.unsubscribe` | observe | | |
 | `host.register` | host | ✓ | Anfitrión par → servidor. `{ snapshot, pid?, claim? }` → `{ claim, epoch }` (§14, §18.3) |
@@ -1231,6 +1233,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | Desktop-modelo | `sessions.setModel` admite `provider?`: otro alias de la config de la sesión, que se cambia junto con el modelo; un alias que no existe → `INVALID_PARAMS` sin tocar la sesión | Aditivo: sin `provider`, el modelo sigue siendo del provider actual |
 | Contrato-1 | Método `sessions.revert` (**`approve`**) y DTO `ProtocolRevertPlan`, `REVERT_LIMITS` | Aditivo. Es `approve` y no `control` a propósito: pisa ficheros del proyecto sin pasar por las aprobaciones del agente, así que pide la misma autoridad que resolverlas (§15.2) |
 | PL1 | `tool.blocked.source` admite `plugin` (un `tool.before` de un plugin vetó la llamada) | Aditivo para quien emite; un cliente que valide la unión cerrada tiene que aceptar el valor nuevo. Los clientes del árbol validan con `schemas.ts`, que ya lo incluye |
+| M13 | Métodos `box.status` (`observe`) y `box.start`/`box.stop`/`box.reset` (`control`); DTO `ProtocolBoxStatus`. `data.reason` de `UNAVAILABLE` admite `no-runtime` y `box-failed`, y el de `BUSY`, `box-busy` | Aditivo |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1713,3 +1716,36 @@ reinicio, traspaso), `protocol/follow.test.ts`, `migrate/desktop-legacy.test.ts`
 resultado desconocido); `stratum-desktop/scripts/smoke-clients.mjs` (`npm run smoke:clients`:
 Desktop → Dot → `stratum attach`, `/detach` → Desktop, reinicio) y las E2E de
 `stratum-desktop/e2e/`.
+
+## 21. La caja (M13)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.3. La caja es un contenedor que gestiona Stratum, con
+Podman (preferido) o Docker: un ordenador propio y aislado en el que las sesiones pueden ejecutar
+con `exec` y target `container:<caja>`. Este protocolo solo expone su **ciclo de vida**; ejecutar
+dentro es cosa de las sesiones, no de los clientes.
+
+```json
+{ "method": "box.start", "params": {} }
+→ { "box": { "name": "box", "state": "running", "runtime": "podman", "image": "stratum-box:1",
+             "network": true, "outdated": false, "enabled": true,
+             "exchangeDir": "/home/ana/.stratum/companion/exchange" } }
+```
+
+- **Órdenes fijas.** El cliente elige `status`, `start`, `stop` o `reset`; los argumentos que
+  recibe el runtime los decide el servidor (`src/box/spec.ts`). Ningún parámetro llega al runtime.
+- `state`: `unavailable` (sin runtime, o con un contenedor de ese nombre que no lleva la etiqueta
+  de Stratum: no se toca), `absent`, `stopped` o `running`. `reason` explica `unavailable`.
+- `box.start` crea la caja si falta (construyendo antes la imagen de Stratum, lo que puede tardar
+  minutos la primera vez: el cliente pone un plazo largo) y la **recrea** si quedó desfasada
+  (`outdated`: otra imagen u otros ajustes, como `box.network`). Recrearla conserva su home.
+- `box.stop` la para. Apagar o reiniciar el daemon **no** la toca: la caja no es suya.
+- `box.reset` borra la caja **y su home** (el volumen). Es irreversible: quien la pide ya ha
+  confirmado (la CLI pide teclear el nombre). Es `control`, como cerrar una sesión: no toca nada
+  fuera de la caja.
+- Una operación a la vez: otra en curso → `BUSY` (`box-busy`). Sin runtime → `UNAVAILABLE`
+  (`no-runtime`); el runtime rechaza una orden → `UNAVAILABLE` (`box-failed`), con su motivo en el
+  mensaje.
+- La configuración (`box.*`) sale solo de la config global del servidor.
+
+Tests: `stratum-cli/src/daemon/daemon-box.test.ts`, `src/box/*.test.ts` y, contra un runtime real,
+`src/tools/exec/container.integration.test.ts`.
