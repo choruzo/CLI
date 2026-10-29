@@ -19,7 +19,9 @@ import { closeExecRuntime } from '../../tools/exec/runtime.js';
 import { formatJobEndLine, shortJobCommand } from '../../jobs/types.js';
 import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { SessionHost, type GateContext, type TurnOptions } from '../../host/session-host.js';
-import { processSessionEnv } from '../../runtime/session-env.js';
+import { createSessionEnv, processSessionEnv } from '../../runtime/session-env.js';
+import { COMPANION_AGENT } from '../../agent/presets.js';
+import { ensureCompanionWorkspace } from '../../host/companion.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { sessionProfileFlag } from '../session-flags.js';
 import { createSteerDriver, loadSteerScript } from '../steer-script.js';
@@ -48,7 +50,10 @@ export const runCommand = new Command('run')
   .option('--deny-destructive', 'block all destructive operations automatically')
   .option('--plan', 'plan-and-execute mode: produce a plan, approve, then execute step by step')
   .option('--yes, --approve-plan', 'auto-approve the plan in --plan mode (no prompt)')
-  .option('--agent <profile>', 'use an agent profile (mode primary/all) as the main agent')
+  .option(
+    '--agent <profile>',
+    'use an agent profile (mode primary/all) as the main agent, or "companion" (the assistant of Stratum Dot)',
+  )
   .option(
     '--delegate <profile>',
     'hand the task straight to a subagent profile (mode subagent/all), without the main agent',
@@ -125,6 +130,12 @@ export const runCommand = new Command('run')
         process.exit(1);
       }
 
+      // El companion no planifica ni delega: no tiene esas tools.
+      if (opts.agent === COMPANION_AGENT && opts.plan) {
+        process.stderr.write('[fatal] --agent companion no se combina con --plan.\n');
+        process.exit(1);
+      }
+
       if (opts.logLevel && !isLogLevel(opts.logLevel)) {
         process.stderr.write(`[fatal] Invalid --log-level: ${opts.logLevel}\n`);
         process.exit(1);
@@ -189,8 +200,14 @@ export const runCommand = new Command('run')
       // §12.8), agente, stores y traza. `run` es one-shot y no persiste sesión,
       // pero el id sí correlaciona en el log de auditoría los comandos de una
       // misma invocación y nombra su traza (`stratum auditor <id>`).
+      // M14: `--agent companion` monta el agente embebido de Stratum Dot, en su
+      // propio directorio (nunca el del proceso) y con `exec` solo en su caja.
+      const companion = opts.agent === COMPANION_AGENT;
       const host = await SessionHost.create({
-        env: processSessionEnv(),
+        env: companion
+          ? createSessionEnv({ cwd: ensureCompanionWorkspace(), env: process.env })
+          : processSessionEnv(),
+        ...(companion ? { preset: 'companion' as const } : {}),
         config,
         router,
         mcp: 'eager',
@@ -213,7 +230,7 @@ export const runCommand = new Command('run')
       // Hito 15 — perfiles: `--agent` activa uno como agente principal;
       // `--delegate` le entrega la tarea a un subagente sin pasar por el principal.
       let profileFailure: string | null = null;
-      if (opts.agent) {
+      if (opts.agent && !companion) {
         const applied = agent.setPrimaryProfile(opts.agent);
         if (!applied.ok) profileFailure = `--agent: ${applied.error}`;
         else for (const note of applied.notes) process.stderr.write(`[agent] ${note}\n`);

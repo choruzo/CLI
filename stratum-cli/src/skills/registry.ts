@@ -47,8 +47,8 @@ const FINGERPRINT_RE = /<!--\s*stratum-skill-registry\s+v(\d+)\s+fingerprint:\s*
 export type SkillScope = 'builtin' | 'project' | 'user';
 
 /** Agentes para los que una skill vale (frontmatter `presets`). */
-export type SkillPreset = 'coding' | 'assistant';
-const SKILL_PRESETS: readonly SkillPreset[] = ['coding', 'assistant'];
+export type SkillPreset = 'coding' | 'assistant' | 'companion';
+const SKILL_PRESETS: readonly SkillPreset[] = ['coding', 'assistant', 'companion'];
 
 export interface SkillEntry {
   /** Nombre canónico (frontmatter `name`, o el del directorio/fichero). */
@@ -239,7 +239,7 @@ export class SkillRegistry {
  * El registro de skills de una sesión, en un solo punto (`StratumAgent`,
  * `skills.list` del daemon y `stratum skills list` lo construyen igual): el
  * agente de código ve las de serie, las del usuario y las del proyecto de
- * `cwd`; el asistente, solo las de serie que declaran `assistant`.
+ * `cwd`; el asistente y el companion, solo las de serie que declaran su preset.
  */
 export function sessionSkills(
   config: StratumConfig,
@@ -247,7 +247,8 @@ export function sessionSkills(
   cwd: string,
 ): SkillRegistry {
   const builtin = config.skills.builtin;
-  return preset === 'assistant'
+  // Los agentes embebidos (asistente, companion) solo ven las de serie.
+  return preset !== 'coding'
     ? new SkillRegistry([], { preset, builtin, userAndProject: false })
     : new SkillRegistry([findWorktreeRoot(cwd).worktree, cwd], { preset, builtin });
 }

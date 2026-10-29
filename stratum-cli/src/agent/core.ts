@@ -60,7 +60,12 @@ import { LspManager } from '../lsp/manager.js';
 import { resolveLspServers } from '../lsp/presets.js';
 import { formatDiagnostics } from '../lsp/format.js';
 import { MemoryManager } from '../memory/manager.js';
-import { assistantToolsetFilter, type PromptPreset } from './presets.js';
+import {
+  assistantToolsetFilter,
+  companionToolsetFilter,
+  isEmbeddedPreset,
+  type PromptPreset,
+} from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
 import {
   profileAllows,
@@ -392,11 +397,13 @@ export class StratumAgent {
     }
     const cwd = this.env.cwd;
     this.preset = options?.promptPreset ?? 'coding';
-    // El agente de código solo ve el proyecto; el asistente, solo lo global.
+    // El agente de código solo ve el proyecto; un agente embebido, solo su
+    // memoria (la global en el asistente; la suya en el companion, cuya config
+    // apunta `memory.globalFile` a `~/.stratum/companion/STRATUM.md`).
     this.memoryManager = new MemoryManager(
       config,
       cwd,
-      this.preset === 'assistant' ? 'global' : 'project',
+      isEmbeddedPreset(this.preset) ? 'global' : 'project',
     );
     this.jobs =
       this.preset === 'coding' && config.tools.jobs.enabled ? new JobManager(config) : undefined;
@@ -505,7 +512,7 @@ export class StratumAgent {
       // otro modo, de una versión anterior o editada a mano podría traer el
       // prompt de código (16.6). Se conserva el historial y se recompone el
       // system prompt desde el preset actual.
-      if (this.preset === 'assistant') {
+      if (isEmbeddedPreset(this.preset)) {
         this.messages = this.messages.filter((m) => m.role !== 'system');
         this.rebuildSystemPrompt();
       }
@@ -1377,6 +1384,18 @@ export class StratumAgent {
         workspaceFilesExpiredAt: this.workspaceFilesExpiredAt,
       };
     }
+    // El companion: lo mismo, sin carpeta, y con su caja si `exec` está registrado.
+    if (this.preset === 'companion') {
+      const box =
+        this.registry.get('exec') && this.config.box?.enabled ? this.config.box.name : null;
+      return {
+        modelId: this.router.model,
+        providerName: this.router.providerName,
+        preset: 'companion',
+        skills: this.skillsBlock,
+        ...(box ? { box } : {}),
+      };
+    }
     const active = this._activeProfile;
     const session = this._sessionProfile;
     // Un perfil principal sin `delegate_task` no puede delegar: anunciarle
@@ -1422,10 +1441,9 @@ export class StratumAgent {
   private buildSystemContent(): string {
     // Modo Chat: solo el `STRATUM.md` global (su `MemoryManager` tiene scope
     // `global`). El agente de código, solo el del proyecto.
-    const memory =
-      this.preset === 'assistant'
-        ? this.memoryManager.getProjectMemory().globalContent
-        : this.injectableMemory();
+    const memory = isEmbeddedPreset(this.preset)
+      ? this.memoryManager.getProjectMemory().globalContent
+      : this.injectableMemory();
     return buildSystemPrompt(this.config, memory || undefined, this.promptEnv());
   }
 
@@ -1481,10 +1499,12 @@ export class StratumAgent {
         toolsetFilter:
           this.preset === 'assistant'
             ? assistantToolsetFilter({ workspace: this.workspace !== undefined })
-            : composeToolsetFilters(
-                this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
-                active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
-              ),
+            : this.preset === 'companion'
+              ? companionToolsetFilter()
+              : composeToolsetFilters(
+                  this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
+                  active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
+                ),
       },
     );
   }
@@ -1513,7 +1533,7 @@ export class StratumAgent {
       this.rebuildSystemPrompt();
       return { ok: true, profile: null, notes: [] };
     }
-    if (this.preset === 'assistant') {
+    if (isEmbeddedPreset(this.preset)) {
       return {
         ok: false,
         error: 'los perfiles de agente no están disponibles en el modo asistente.',
@@ -1655,7 +1675,7 @@ export class StratumAgent {
   ):
     | { ok: true; profile: SessionProfile; detection: InfraDetection | null }
     | { ok: false; error: string } {
-    if (this.preset === 'assistant') {
+    if (isEmbeddedPreset(this.preset)) {
       return {
         ok: false,
         error: 'los perfiles de sesión no están disponibles en el modo asistente.',

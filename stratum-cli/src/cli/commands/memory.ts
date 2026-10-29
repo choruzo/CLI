@@ -10,20 +10,34 @@ import {
   importLegacyGlobalDecisions,
   legacyGlobalDecisionsDir,
 } from '../../host/assistant.js';
+import { buildCompanionConfig, companionDataDir } from '../../host/companion.js';
+
+interface MemoryScopeFlags {
+  global?: boolean;
+  companion?: boolean;
+}
 
 /**
  * La memoria sobre la que actúa un subcomando: la del proyecto del directorio
- * actual o, con `--global`, la del asistente (la única global), importando
- * antes, una sola vez, las decisiones globales antiguas de la CLI.
+ * actual; con `--global`, la del asistente (la única global), importando
+ * antes, una sola vez, las decisiones globales antiguas de la CLI; con
+ * `--companion`, la del asistente de Stratum Dot (M14).
  */
-function memoryConfig(config: StratumConfig, global: boolean | undefined): StratumConfig {
-  if (!global) return config;
+function memoryConfig(config: StratumConfig, flags: MemoryScopeFlags): StratumConfig {
+  if (flags.global && flags.companion) {
+    process.stderr.write('--global y --companion no se combinan: son memorias distintas.\n');
+    process.exit(1);
+  }
+  if (flags.companion) return buildCompanionConfig(config, companionDataDir());
+  if (!flags.global) return config;
   const dataDir = assistantDataDir();
   importLegacyGlobalDecisions(dataDir, legacyGlobalDecisionsDir());
   return buildAssistantConfig(config, dataDir);
 }
 
 const GLOBAL_HELP = "use the assistant's global memory instead of this project's";
+const COMPANION_HELP =
+  "use the memory of Stratum Dot's assistant (companion) instead of this project's";
 
 function loadConfigOrExit() {
   try {
@@ -46,8 +60,9 @@ function formatDecision(d: DecisionRecord, score?: number): string {
 const memoryList = new Command('list')
   .description('List stored decisions')
   .option('-g, --global', GLOBAL_HELP)
-  .action((opts: { global?: boolean }) => {
-    const config = memoryConfig(loadConfigOrExit(), opts.global);
+  .option('--companion', COMPANION_HELP)
+  .action((opts: MemoryScopeFlags) => {
+    const config = memoryConfig(loadConfigOrExit(), opts);
     const decisions = getDecisionMemory(config).list();
     if (decisions.length === 0) {
       process.stdout.write('No hay decisiones almacenadas.\n');
@@ -62,8 +77,9 @@ const memorySearch = new Command('search')
   .argument('<query>', 'search query')
   .option('-k, --top <n>', 'number of results', (v) => parseInt(v, 10))
   .option('-g, --global', GLOBAL_HELP)
-  .action(async (query: string, opts: { top?: number; global?: boolean }) => {
-    const config = memoryConfig(loadConfigOrExit(), opts.global);
+  .option('--companion', COMPANION_HELP)
+  .action(async (query: string, opts: { top?: number } & MemoryScopeFlags) => {
+    const config = memoryConfig(loadConfigOrExit(), opts);
     const results = await getDecisionMemory(config).search(query, opts.top);
     if (results.length === 0) {
       process.stdout.write('Sin resultados relevantes.\n');
@@ -76,8 +92,9 @@ const memoryForget = new Command('forget')
   .description('Remove a stored decision')
   .argument('<id>', 'decision ID to remove')
   .option('-g, --global', GLOBAL_HELP)
-  .action(async (id: string, opts: { global?: boolean }) => {
-    const config = memoryConfig(loadConfigOrExit(), opts.global);
+  .option('--companion', COMPANION_HELP)
+  .action(async (id: string, opts: MemoryScopeFlags) => {
+    const config = memoryConfig(loadConfigOrExit(), opts);
     const removed = await getDecisionMemory(config).remove(id);
     if (removed) {
       process.stdout.write(`Decisión ${id} eliminada.\n`);
@@ -90,7 +107,8 @@ const memoryForget = new Command('forget')
 const memoryShow = new Command('show')
   .description('Show the active STRATUM.md content')
   .option('-g, --global', "show the global STRATUM.md (the assistant's) instead of this project's")
-  .action((opts: { global?: boolean }) => {
+  .option('--companion', "show the STRATUM.md of Stratum Dot's assistant instead of this project's")
+  .action((opts: MemoryScopeFlags) => {
     let config;
     try {
       config = loadConfig();
@@ -99,7 +117,10 @@ const memoryShow = new Command('show')
       process.exit(1);
     }
 
-    const output = renderMemoryShow(config, process.cwd(), opts.global ? 'global' : 'project');
+    // `--companion` es una memoria «global» con otra ruta (`buildCompanionConfig`).
+    const output = opts.companion
+      ? renderMemoryShow(memoryConfig(config, opts), process.cwd(), 'global')
+      : renderMemoryShow(config, process.cwd(), opts.global ? 'global' : 'project');
     process.stdout.write(output + '\n');
   });
 

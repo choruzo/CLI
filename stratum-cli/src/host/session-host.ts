@@ -30,6 +30,7 @@ import {
   migrateLegacyAssistantMemory,
   type AssistantData,
 } from './assistant.js';
+import { buildCompanionConfig, buildCompanionRegistry, companionDataDir } from './companion.js';
 
 export type { GateContext, HostGates } from './interactions.js';
 
@@ -71,8 +72,15 @@ export interface SessionHostOptions {
    * (`host/assistant.ts`): su prompt, solo sus tools, ficheros confinados al
    * `cwd`, sin MCP, skills ni perfiles, y su propia memoria de decisiones. Se
    * fija aquí, al montar, y no cambia. Ausente: una sesión de código.
+   *
+   * M14 — `companion`: el agente embebido de Stratum Dot (`host/companion.ts`):
+   * sin ficheros del anfitrión, `exec` solo en su caja, sin MCP, skills de
+   * usuario, perfiles ni plugins, y su propia memoria. Quien lo aloja le da su
+   * directorio (`ensureCompanionWorkspace`), no el del proceso.
    */
-  preset?: 'assistant';
+  preset?: 'assistant' | 'companion';
+  /** M14 — dónde guarda el `companion` lo suyo. Por defecto `~/.stratum/companion/`. */
+  companionDataDir?: string;
   /**
    * Datos del asistente: `dir` (su memoria; por defecto `~/.stratum/assistant/`)
    * y `legacyMemoryDir`, de dónde se migra una vez (por defecto la de Stratum
@@ -179,7 +187,9 @@ export class SessionHost {
       sessionId: this.sessionId,
       ...(opts.preset === 'assistant'
         ? { promptPreset: 'assistant', workspace: assistantWorkspace(this.env.cwd) }
-        : {}),
+        : opts.preset === 'companion'
+          ? { promptPreset: 'companion' }
+          : {}),
       ...(this.plugins.size > 0 ? { plugins: this.plugins } : {}),
       env: this.env,
     });
@@ -202,10 +212,14 @@ export class SessionHost {
     // Copia propia: de la identidad de este objeto cuelgan el pool SSH y la
     // auditoría de la sesión (`closeSessionExecRuntime`), y dos sesiones no
     // pueden compartirla aunque partan de la misma config cargada.
-    const assistant = opts.preset === 'assistant';
+    // Un agente embebido (asistente o companion): toolset cerrado, sin MCP ni plugins.
+    const embedded = opts.preset !== undefined;
     let config: StratumConfig = { ...opts.config };
     let registry: ToolRegistry;
-    if (assistant) {
+    if (opts.preset === 'companion') {
+      config = buildCompanionConfig(config, opts.companionDataDir ?? companionDataDir());
+      registry = buildCompanionRegistry(config);
+    } else if (opts.preset === 'assistant') {
       const dataDir = opts.assistantData?.dir ?? assistantDataDir();
       const legacy =
         opts.assistantData?.legacyMemoryDir === undefined
@@ -226,18 +240,18 @@ export class SessionHost {
     }
 
     // Los servers MCP nacen en el directorio de la sesión, no en el del proceso.
-    // El asistente no tiene: sus tools son las suyas y nada más.
+    // Los agentes embebidos no tienen: sus tools son las suyas y nada más.
     const mcp = new McpManager(config, undefined, { cwd: opts.env.cwd });
     const mcpWarnings: McpManagerWarning[] = [];
-    if (!assistant && (opts.mcp ?? 'eager') === 'eager' && config.mcp.servers.length > 0) {
+    if (!embedded && (opts.mcp ?? 'eager') === 'eager' && config.mcp.servers.length > 0) {
       mcpWarnings.push(...(await mcp.connectAll()));
       mcpWarnings.push(...mcp.registerInto(registry));
       // Un server que se cuelga durante una sesión larga se detecta y se relanza.
       mcp.startHeartbeat();
     }
-    // PL1: el asistente no carga plugins (su toolset es cerrado); el resto, los
-    // globales más lo que pidan los flags de quien aloja.
-    const plugins = assistant
+    // PL1: los agentes embebidos no cargan plugins (su toolset es cerrado); el
+    // resto, los globales más lo que pidan los flags de quien aloja.
+    const plugins = embedded
       ? PluginHost.empty(false)
       : await loadPlugins({
           cwd: opts.env.cwd,

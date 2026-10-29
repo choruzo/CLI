@@ -38,7 +38,7 @@ export interface ProtocolSkill {
   name: string;
   description: string;
   scope: 'builtin' | 'user' | 'project';
-  presets: ('coding' | 'assistant')[];
+  presets: ('coding' | 'assistant' | 'companion')[];
 }
 
 export interface ProtocolModel {

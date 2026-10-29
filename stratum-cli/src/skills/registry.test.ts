@@ -255,19 +255,20 @@ describe('SkillRegistry — de serie, presets y ámbitos (contrato builtin)', ()
     );
   });
 
-  it('bundledSkillsDir encuentra stratum-cli/skills y sus tres skills reales parsean', () => {
+  it('bundledSkillsDir encuentra stratum-cli/skills y sus cuatro skills reales parsean', () => {
     const dir = bundledSkillsDir();
     expect(dir).not.toBeNull();
     expect(existsSync(join(dir!, '.stratum-builtin-skills'))).toBe(true);
     const all = new Map<string, SkillEntry>();
-    for (const preset of ['coding', 'assistant'] as const) {
+    for (const preset of ['coding', 'assistant', 'companion'] as const) {
       const reg = new SkillRegistry([], { home, preset, userAndProject: false });
       for (const e of reg.entries) all.set(e.name, e);
     }
     const expected: Record<string, string[]> = {
       'stratum-project-memory': ['coding'],
       'stratum-global-memory': ['assistant'],
-      'stratum-skill-authoring': ['coding', 'assistant'],
+      'stratum-companion-memory': ['companion'],
+      'stratum-skill-authoring': ['coding', 'assistant', 'companion'],
     };
     for (const [name, presets] of Object.entries(expected)) {
       const e = all.get(name);

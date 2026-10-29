@@ -167,7 +167,7 @@ export const skillSchema: z.ZodType<ProtocolSkill> = z.object({
   name: z.string(),
   description: z.string(),
   scope: z.enum(['builtin', 'user', 'project']),
-  presets: z.array(z.enum(['coding', 'assistant'])),
+  presets: z.array(z.enum(['coding', 'assistant', 'companion'])),
 });
 
 export const modelSchema: z.ZodType<ProtocolModel> = z.object({

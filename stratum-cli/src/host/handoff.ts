@@ -17,7 +17,7 @@
  * destructiva ni la autoridad de aprobar, conexiones SSH o servers MCP. El
  * daemon monta los suyos.
  */
-import { ASSISTANT_AGENT } from '../agent/presets.js';
+import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
 import type { StratumAgent, StratumAgentOptions } from '../agent/core.js';
 import { fromStoredMessage, toStoredMessage } from '../conversation/messages.js';
 import {
@@ -99,11 +99,8 @@ export function captureHandoff(source: HandoffSource): HandoffCapture {
       cwd: source.env.cwd,
       provider: agent.providerName,
       model: agent.model,
-      // El asistente (M12) viaja como su nombre: el daemon lo monta con su preset.
-      agent:
-        agent.promptPreset === 'assistant'
-          ? ASSISTANT_AGENT
-          : (agent.getActiveProfile()?.name ?? null),
+      // Un agente embebido (M12, M14) viaja como su nombre: el daemon lo monta con su preset.
+      agent: embeddedAgentName(agent.promptPreset) ?? agent.getActiveProfile()?.name ?? null,
       readOnly: agent.isReadOnly(),
       sessionProfile: agent.getSessionProfileRequest(),
       planRef: agent.getPlanRef(),
@@ -129,8 +126,8 @@ export function handoffAgentOptions(
     initialMessages: context.messages.map(fromStoredMessage),
     readOnly: context.readOnly,
     sessionProfile: context.sessionProfile,
-    // `assistant` no es un perfil que se active: es el preset con el que se monta.
-    ...(context.agent && context.agent !== ASSISTANT_AGENT ? { activeAgent: context.agent } : {}),
+    // Un agente embebido no es un perfil que se active: es el preset con el que se monta.
+    ...(context.agent && !embeddedPresetOf(context.agent) ? { activeAgent: context.agent } : {}),
     ...(context.planRef ? { planRef: context.planRef } : {}),
     usage: {
       toolCalls: context.usage.toolCalls,

@@ -1,7 +1,7 @@
 ---
 name: stratum-skill-authoring
 description: Úsala cuando el usuario quiera crear, escribir, mejorar o revisar una skill de Stratum, o convertir una forma de trabajar que repite en instrucciones reutilizables.
-presets: [coding, assistant]
+presets: [coding, assistant, companion]
 ---
 
 # Diseñar una skill
@@ -42,14 +42,16 @@ presets: [coding]          # coding, assistant, o ambos
 
 ## 4. Guárdala en su sitio
 
-| Para | Ruta |
-|---|---|
-| Este proyecto | `<repo>/.stratum/skills/<name>/SKILL.md` |
-| Todos los proyectos del usuario | `~/.stratum/skills/<name>/SKILL.md` |
+| Para                            | Ruta                                     |
+| ------------------------------- | ---------------------------------------- |
+| Este proyecto                   | `<repo>/.stratum/skills/<name>/SKILL.md` |
+| Todos los proyectos del usuario | `~/.stratum/skills/<name>/SKILL.md`      |
 
 Precedencia: proyecto > usuario > las de serie de Stratum. Las nuevas se ven al empezar la siguiente sesión (`stratum skills list` las enumera).
 
 **Si eres el asistente** (no puedes escribir fuera de tu carpeta): escribe el fichero en `outputs/<name>/SKILL.md` y dile al usuario a qué ruta de la tabla copiarlo. Recuerda que el asistente solo carga las skills de serie de Stratum: una skill de usuario la usará su agente de código.
+
+**Si eres el asistente de Stratum Dot** (trabajas en tu caja y no ves los ficheros del usuario): escribe el fichero en la carpeta compartida, `/exchange/<name>/SKILL.md`, y dile al usuario a qué ruta de la tabla copiarlo. Tú tampoco cargas skills de usuario: la usará su agente de código.
 
 ## 5. Revísala con el usuario
 

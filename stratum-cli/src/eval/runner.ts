@@ -260,6 +260,18 @@ export async function runScenario(
       providerEntry = { ...rest, ...(key ? { apiKey: `\${${API_KEY_ENV}}` } : {}) };
     }
 
+    // La capa global del HOME del escenario: lo que solo se lee de ahí (`box`).
+    // Sin `provider` ni `trace`: los fija la capa del proyecto.
+    const { provider: _p, trace: _t, ...globalLayer } = scenario.setup.globalConfig;
+    if (Object.keys(globalLayer).length > 0) {
+      mkdirSync(join(home, '.stratum'), { recursive: true });
+      writeFileSync(
+        join(home, '.stratum', '.stratumrc.json'),
+        JSON.stringify(globalLayer, null, 2),
+        'utf8',
+      );
+    }
+
     writeFileSync(
       join(work, '.stratumrc.json'),
       JSON.stringify(sandboxConfig(scenario, providerEntry, artifactDir, ssh), null, 2),

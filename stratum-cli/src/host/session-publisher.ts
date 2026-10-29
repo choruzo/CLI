@@ -4,7 +4,7 @@ import type { AgentObservation, AgentTurnKind, StratumAgent } from '../agent/cor
 import type { StratumConfig } from '../config/schema.js';
 import type { BackgroundJob } from '../jobs/types.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
-import { ASSISTANT_AGENT } from '../agent/presets.js';
+import { embeddedAgentName } from '../agent/presets.js';
 import {
   LIMITS,
   EMPTY_TRANSCRIPT,
@@ -684,9 +684,7 @@ export class SessionPublisher {
             : this.pendingCount() > 0
               ? 'waiting'
               : 'running',
-      agent:
-        agent.getActiveProfile()?.name ??
-        (agent.promptPreset === 'assistant' ? ASSISTANT_AGENT : 'general'),
+      agent: agent.getActiveProfile()?.name ?? embeddedAgentName(agent.promptPreset) ?? 'general',
       provider: agent.providerName,
       model: agent.model,
       sessionProfile: agent.getSessionProfile()?.name ?? agent.getSessionProfileRequest(),

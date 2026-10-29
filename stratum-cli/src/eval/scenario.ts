@@ -412,6 +412,12 @@ export const ScenarioSchema = z
         commands: z.array(z.array(z.string()).min(1)).default([]),
         /** Capa de `.stratumrc.json` que se fusiona sobre la base del runner. */
         config: z.record(z.unknown()).default({}),
+        /**
+         * Config **global** del HOME del escenario (`~/.stratum/.stratumrc.json`):
+         * para lo que solo se lee de esa capa (`box`). `provider` y `trace` los
+         * fija el runner en la del proyecto; aquí se ignoran.
+         */
+        globalConfig: z.record(z.unknown()).default({}),
         /** Hosts SSH simulados: alias → respuestas por comando. */
         ssh: z
           .object({

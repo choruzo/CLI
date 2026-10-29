@@ -133,8 +133,41 @@ function parseAndResolve(
   return parsed;
 }
 
+/**
+ * M14 — `exec` atado a un solo target (el `companion`, a su caja). Cualquier
+ * otro target —también `local` por omisión— se veta en `preflight`, antes de
+ * cualquier confirmación: ninguna aprobación lo levanta.
+ */
+export interface ExecToolOptions {
+  onlyTarget?: ExecutionTarget;
+}
+
+function boxTargetLine(name: string): string {
+  return (
+    `- container:${name} — your own isolated Linux box (/bin/sh, user "stratum" ` +
+    'with passwordless sudo, home /home/stratum). It cannot see this machine: the only ' +
+    'shared folder is /exchange. Its home survives restarts. No pty.'
+  );
+}
+
 /** Descripción generada con los targets de ESTA config (Hito 16, §2.5). */
-export function describeExecTool(config: StratumConfig): string {
+export function describeExecTool(config: StratumConfig, opts: ExecToolOptions = {}): string {
+  if (opts.onlyTarget) {
+    const only = formatTarget(opts.onlyTarget);
+    return [
+      'Execute a shell command and return its exit code, stdout and stderr.',
+      '',
+      `Target: always pass target "${only}". It is the only place where you can run commands; ` +
+        'any other target, including omitting it, is rejected.',
+      ...(opts.onlyTarget.kind === 'container' ? [boxTargetLine(opts.onlyTarget.name)] : []),
+      '',
+      'A command that runs but exits non-zero, times out or is truncated is reported as an error that ' +
+        'includes its output; that is information about the command, not a broken tool.',
+      'A few catastrophic commands (rm -rf on / or ~, mkfs, chmod -R 777, dd onto a block device) are ' +
+        'rejected outright and no approval can enable them.',
+      'Avoid commands that never terminate (tail -f, watch, top): they are killed at the timeout.',
+    ].join('\n');
+  }
   const hosts = Object.entries(config.ssh?.hosts ?? {});
   const targetLines = [
     '- local — this machine' +
@@ -147,13 +180,7 @@ export function describeExecTool(config: StratumConfig): string {
       const suffix = flags.length > 0 ? ` (${flags.join('; ')})` : '';
       return `- ssh:${alias}${suffix}. Supports pty. When output exceeds maxBytes the remote process is killed.`;
     }),
-    ...(config.box?.enabled
-      ? [
-          `- container:${config.box.name} — your own isolated Linux box (/bin/sh, user "stratum" ` +
-            'with passwordless sudo, home /home/stratum). It cannot see this machine: the only ' +
-            'shared folder is /exchange. Its home survives restarts. No pty.',
-        ]
-      : []),
+    ...(config.box?.enabled ? [boxTargetLine(config.box.name)] : []),
   ];
 
   const jobs = config.tools.jobs.enabled
@@ -234,10 +261,11 @@ function formatExecResult(
   return lines.join('\n');
 }
 
-export function createExecTool(config: StratumConfig): ToolDefinition {
+export function createExecTool(config: StratumConfig, opts: ExecToolOptions = {}): ToolDefinition {
+  const only = opts.onlyTarget ? formatTarget(opts.onlyTarget) : null;
   return {
     name: EXEC_TOOL,
-    description: describeExecTool(config),
+    description: describeExecTool(config, opts),
     schema,
     destructive: false,
     // Red de seguridad del dispatcher: el timeout real lo gestiona el backend.
@@ -253,6 +281,23 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
       const parsed = schema.safeParse(params);
       if (!parsed.success) return null;
       const input = parsed.data;
+
+      // M14: antes que nada, el target. Uno que no es el permitido no se
+      // resuelve siquiera (ni inventario SSH, ni capacidades).
+      if (only !== null) {
+        const asked = parseTarget(input.target);
+        const label = asked.ok ? formatTarget(asked.target) : (input.target ?? 'local');
+        if (!asked.ok || label !== only) {
+          return {
+            ok: false,
+            error:
+              `This agent can only run commands in its box ("${only}"), not on "${label}". ` +
+              `Pass target "${only}". No approval can lift this.`,
+            recoverable: true,
+            countsAsFailure: false,
+          };
+        }
+      }
 
       const resolved = parseAndResolve(input, ctx.config);
       if (!resolved.ok) return recoverableError(resolved.error);
@@ -347,6 +392,14 @@ export function createExecTool(config: StratumConfig): ToolDefinition {
 
       const target = resolved.target;
       const label = formatTarget(target);
+      // Defensa en profundidad: el veto real es el de `preflight`.
+      if (only !== null && label !== only) {
+        return {
+          ok: false,
+          error: `This agent can only run commands in "${only}".`,
+          recoverable: false,
+        };
+      }
       if (input.background === true) return startBackgroundJob(input, ctx, label);
       const backend = getExecBackend(target.kind);
       const audit = getExecAuditLog(ctx.config);
