@@ -4,6 +4,14 @@
 > Estado: **congelado** (2026-10-12). Solo cambia por descubrimientos de implementación,
 > anotados en el hito que los encuentra. **M0–M12 implementados** (M12 completado: Desktop es un cliente hermano de `stratumd`; ver su estado y `docs/STRATUM_CLIENT_ARCHITECTURE.md` §8) (M4 con §22 Q2 abierta como endurecimiento: ver su estado; M6 y M7 con su alcance acotado; M9 ejecutado como endurecimiento de seguridad, autoridad e IPC, con el resto de su alcance original pendiente: ver su estado; M10 redefinido al empezarlo como continuidad de sesión —traspaso de una sesión viva al daemon—: ver su estado; M11 redefinido al empezarlo como conversación duradera y memoria de sesión —la decisión del default de `chat` se aplaza—: ver su estado).
 > Base de código analizada: `stratum-cli` 0.8.0-beta.3, `stratum-desktop` 0.4.0-beta.0 (protocolo v9).
+>
+> **Revisión 2026-10-29 — dirección «asistente virtual».** Dot evoluciona de cockpit a asistente
+> virtual **sin dejar de ser cockpit**: un agente embebido nuevo, `companion` (el que acompaña en
+> el día a día, con memoria propia), pasa a ser su cara principal y gana un ordenador propio
+> contenido (la caja), computer use dentro de ella, rutinas en segundo plano y herramientas
+> conectables. Desktop sigue siendo la app de trabajo en local con su `assistant` y su memoria.
+> Todo lo de M0–M12 se conserva. Diseño, evidencia e
+> hitos (M13–M18) en **§23**; los apartados que cambian lo indican (§1, §5, §8.2, §13.6, §15.2).
 
 Convención: **[existe]** = ya está en el repositorio; **[nuevo]** = hay que construirlo;
 **[verificado]** = comprobado contra el código actual; **[decidido]** = decisión de producto
@@ -44,6 +52,13 @@ Dot no ejecuta agentes. Para que pueda observarlos hace falta una pieza que hoy 
 existe: un **plano de control** local y persistente, `stratumd`, al que se conectan todos
 los clientes con un mismo protocolo. El grueso de este PRD es ese plano de control; la
 interfaz de Dot es la parte pequeña.
+
+*Desde la revisión de 2026-10-29 (§23)*, Dot es además **la casa del asistente** (`companion`,
+distinto del `assistant` de Desktop y con su propia memoria): un agente de
+larga vida, alojado en `stratumd`, con su propio ordenador en un contenedor (donde puede
+instalar, ejecutar y manejar un navegador por la pantalla), rutinas programadas, memoria y
+herramientas conectables. Lo que sale de su caja sigue pasando por el mismo centro de
+aprobaciones, con la autoridad fuera del webview.
 
 ## 2. Problem Statement
 
@@ -107,6 +122,9 @@ Tres invariantes de producto:
 
 - Voz, hotkey con captura de contexto, clipboard, captura de pantalla, computer-use.
   El modelo de seguridad los contempla (§13); la v1 no los implementa.
+  *Revisión 2026-10-29*: computer use **dentro de la caja del asistente** y las rutinas en
+  segundo plano dejan de ser non-goals (§23, M13–M16). Siguen fuera la voz y el escritorio del
+  propio host (§13.6).
 - Acceso remoto o por red. El daemon es local y de un solo usuario. Nada de TCP.
 - Cambiar dónde se ejecuta `stratum chat`: durante M0–M9 sigue en su proceso (§9.3).
 - Fusionar o migrar Stratum Desktop: durante M0–M9 no se toca (§9.5).
@@ -184,6 +202,8 @@ o al perder el foco.
 ```
 
 `Enter` crea una sesión alojada en el daemon y abre la ventana principal en su chat.
+*Revisión 2026-10-29 (§23.8)*: `Enter` habla con **el asistente** (su sesión persistente); una
+sesión nueva pasa a ser una acción explícita.
 Los botones `[file] [screen] [voice]` del boceto original **no** aparecen en v1: un botón
 que no hace nada no se enseña. Su hueco queda reservado en el layout.
 
@@ -774,6 +794,11 @@ Agente → tool desktop_* → ToolDispatcher (preflight · entorno 'desktop:loca
 - El broker devuelve datos, no decisiones; su salida pasa por la redacción como cualquier otra.
 - Indicador persistente mientras una capacidad de escritorio esté en uso, y un «parar todo».
 
+*Revisión 2026-10-29*: el primer computer use **no** es el escritorio del host sino la pantalla
+de la caja del asistente (§23.4): target `container:<caja>`, sin broker nativo, porque el radio
+de daños es el contenedor y no la máquina del usuario. Lo de este apartado (escritorio del host,
+broker de Rust con concesiones propias) sigue siendo futuro y aparte.
+
 ## 14. MVP
 
 Pequeño, pero ya responde a «qué está pasando y qué me están pidiendo»:
@@ -844,6 +869,10 @@ En orden sugerido:
 4. Captura de pantalla → computer-use con el broker de §13.6.
 5. Voz.
 6. Editor de entornos y políticas.
+
+*Revisión 2026-10-29*: el orden lo sustituyen los hitos M13–M18 de §23.11. El inspector de
+memoria (2) entra en M17; el computer use (4) entra en M15, en la caja y no en el escritorio del
+host.
 
 ## 16. Technical Decisions
 
@@ -1544,6 +1573,7 @@ compacto de Desktop) sigue abierta.
 ### Después de M12
 
 El default de `chat` (pendiente de M11 original) y la convergencia de producto Dot/Desktop: §15.1.
+Dirección decidida el 2026-10-29: Dot como asistente virtual, hitos **M13–M18** en §23.11.
 
 ## 20. Acceptance Criteria
 
@@ -1690,3 +1720,262 @@ resto de la tabla de §16.
   agrupación de `message.delta` y umbral de corte para un cliente lento, medidos con un
   modelo local rápido y tres clientes. Los valores de §11 son puntos de partida.
   *Se investiga en*: M2, y se revisa en M9.
+
+## 23. Dirección: Dot como asistente virtual [decidido 2026-10-29]
+
+Dot pasa de ser solo el cockpit del harness a ser **la casa del asistente**, sin perder nada de
+lo que ya hace.
+
+**Dot y Desktop son productos distintos [decidido 2026-10-29, responde a §15.1.4].** Dot te
+acompaña en el día a día; Desktop es la aplicación de escritorio para **trabajar en local**
+(conversaciones por carpeta, su agente `assistant`, sin cambios). Cada uno tiene **su propia
+memoria**: lo que aprende uno no lo ve el otro. Los dos siguen siendo clientes hermanos de
+`stratumd` (M12) y la cabina de Dot ve también las sesiones de Desktop.
+
+Por eso el asistente de Dot es un **agente embebido nuevo, `companion`**, con su preset (derivado
+del de `assistant`), su directorio y su memoria (`~/.stratum/companion/`). Frente al `assistant`
+de Desktop, gana:
+
+- **un ordenador propio contenido** (la caja: un contenedor Docker que gestiona `stratumd`);
+- **computer use dentro de esa caja** (pantalla, ratón y teclado sobre un escritorio virtual);
+- **trabajo en segundo plano y rutinas** programadas;
+- **memoria propia, visible y editable** desde Dot (la del `companion` y la de sesión de M11);
+- **herramientas conectables** (MCP) con sus efectos declarados.
+
+La cabina (Activity, Approvals, sesiones de terminal, run detail) sigue igual: el asistente es una
+sesión más, de larga vida, que se supervisa como las demás.
+
+### 23.1 Por qué
+
+Comparativa del 2026-10-29 (fuentes mayoritariamente secundarias):
+
+| Producto | Qué es | Cómo protege |
+|---|---|---|
+| Grok Bot (SpaceXAI + Cursor), *dots* de OpenAI | Agentes en un ordenador de la nube del proveedor; cerrados; atados a su modelo | Reglas del servicio |
+| Vellum (MIT) | Un asistente personal multicanal, local o en su nube | Sandbox por tool + permiso por acción (una vez / 10 min / siempre) |
+| Rakazo (Apache-2.0) | Equipo de bots autónomos, autoalojado con Postgres | Aislamiento por bot; sin aprobación humana documentada |
+| Codex app-server, opencode, Goose | Núcleo local con servidor y varios clientes | Aprueba el cliente conectado |
+
+Lo que ninguno documenta y Stratum ya tiene: runtime local y agnóstico de provider, autoridad de
+aprobar separada del webview con confirmación nativa (M8–M9), una misma sesión observada y
+gobernada desde varios clientes y su traspaso entre anfitriones (M10). La dirección combina el
+**aislamiento** de Rakazo (la caja es el radio de daños) con la **autorización** de Stratum (lo que
+sale de la caja lo aprueba una persona), y el principio de Vellum de que el asistente toca la
+máquina real solo con aprobación.
+
+La pieza que hacía dudar de la viabilidad —que un modelo accesible maneje una pantalla— se midió
+antes de decidir (§23.9).
+
+### 23.2 Invariantes que no cambian
+
+- **Dot sigue siendo un cliente.** El asistente corre en `stratumd` por `SessionHost` con el preset
+  `companion`; Dot no ejecuta agentes, no habla con Docker ni toca la caja. Lo fija su test de
+  arquitectura, que no cambia.
+- **La autoridad de aprobar sigue fuera del webview** (broker nativo, clave de aprobador,
+  confirmación nativa por resolución). Una rutina o un conector no traen autoridad propia.
+- **Memoria por preset**, ahora con tres: `coding` ve la del proyecto, `assistant` (Desktop) la
+  global, y `companion` (Dot) solo la suya (`~/.stratum/companion/memory/` y
+  `~/.stratum/companion/STRATUM.md`), además de su memoria de sesión. Ninguno ve la de otro. Lo
+  recordado no es autoridad.
+- **`origin` no decide permisos**; tampoco que un run lo haya lanzado una rutina.
+- **Falla cerrado**: sin Docker, sin caja o con la caja caída, las tools de la caja no se
+  registran o se vetan; nunca caen a `local`.
+- **Nada se estima**: el formato de coordenadas, la visión de un modelo o el coste de una rutina
+  se declaran o se miden, no se suponen.
+- **El asistente no carga plugins** (decisión PL1) y **la CLI no depende del daemon**.
+
+### 23.3 La caja del asistente
+
+- **Target de `exec`**: `container:<nombre>` (la sintaxis ya está reservada en `parseTarget`).
+  Backend `IExecBackend` nuevo que lanza `docker exec` con execa, con el mismo contrato que `ssh`:
+  cancelación estructurada, `timeout`, `maxBytes`, auditoría en `exec-audit.jsonl` y comando
+  redactado. Es un target general: una sesión `coding` también puede usar una caja.
+- **Ciclo de vida a cargo del daemon**: crear, arrancar, parar y recrear con órdenes fijas (nunca
+  un `docker` que componga el agente). CLI `stratum box status|start|stop|reset` y su método de
+  protocolo; Dot solo los pide.
+- **Imagen de Stratum versionada**: Xvfb, Chromium, `xdotool`, ImageMagick y utilidades básicas,
+  usuario no root. Un **volumen persistente** para su `home`: reiniciar o actualizar la caja no
+  borra su trabajo; `reset` lo borra, con confirmación.
+- **Aislamiento por defecto**: no se monta el `home` del usuario ni `~/.stratum`; no hay socket de
+  Docker ni pipe del daemon dentro; sin `--privileged`. Una única **carpeta de intercambio**
+  explícita (`~/.stratum/companion/exchange` ↔ `/exchange`) para pasarle o recoger ficheros.
+- **La caja es un entorno** (H17) con su política: lo que muta **dentro** está permitido; lo que
+  sale de ella (otro target, un conector que actúa fuera, enviar o publicar) sigue en `confirm`.
+- **Sin Docker** el asistente funciona como hoy (sin caja ni pantalla) y Dot lo dice. Stratum
+  detecta Docker; no lo instala.
+- **Decisión nueva [confirmada 2026-10-29]** (se aplica en M14, no antes): el `companion` **sí
+  tiene `exec`**, solo contra **su** caja; nunca `local` ni `ssh:`. El `assistant` de Desktop no
+  cambia (sin `exec`, ficheros confinados a su carpeta). En M14 hay que actualizar a la vez
+  `.claude/docs/decisiones.md` (filas de clientes hermanos y de memoria por preset), `CLAUDE.md`,
+  `.claude/docs/memoria.md`, `.claude/docs/skills.md` (las skills de serie declaran también
+  `companion`) y añadir los tests que fijen el `exec` del `companion` a su caja.
+
+### 23.4 Computer use en la caja
+
+- **Tools** `screen_screenshot`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`,
+  `screen_wait` contra la pantalla de la caja. Solo se registran si la caja tiene escritorio y el
+  modelo está declarado con visión. Declaradas en `callEffects`: la captura es lectura; el resto
+  muta sobre el target `container:<caja>`.
+- **Formato de coordenadas por modelo**, en la config del modelo (`vision.coordinates:
+  "pixels" | "norm1000"`), por defecto `pixels`. El spike mostró que modelos que localizan bien
+  devuelven 0–1000 (`gemma4`, `qwen3.6`) y, sin reescalar, parecen ciegos (§23.9).
+- **Las capturas no inflan el contexto**: solo las últimas N (el spike usó 2) van como imagen; las
+  anteriores se sustituyen por un marcador. La compactación de M11 nunca resume una imagen.
+- **Las capturas no se redactan** (la redacción es de texto): no van a logs, a la memoria de
+  sesión ni a la traza en línea. La traza guarda metadatos (tamaño, hash, paso); guardar los
+  ficheros es una opción explícita (§23.13 A6).
+- **Dot enseña la pantalla en vivo, en solo lectura**, con un indicador mientras el asistente la
+  usa y un «parar» que es la cancelación del run. Tomar el control desde Dot queda fuera de M15.
+- Prompt injection por lo que aparece en pantalla: el radio es la caja; lo que sale de ella pide
+  aprobación (§23.10).
+
+### 23.5 Trabajo en segundo plano y rutinas
+
+- **Planificador en `stratumd`** (`RoutineScheduler`): una rutina es `{ id, schedule (cron o
+  intervalo), prompt, modelo?, límites }`, guardada en `~/.stratum/companion/routines.json`
+  (escritura atómica, Zod, `schemaVersion`). Al vencer, hace `runs.start` en **su propia sesión**
+  del asistente (visible en Activity con su nombre) y pasa antes por `waitAtSafePoint`.
+- **Nadie mirando**: una aprobación pendiente caduca a `deny` (§13.3) y la rutina sigue o falla;
+  nunca se rebaja una política porque el run sea programado. Al terminar, notificación en Dot
+  (§8.6) con el resumen.
+- **Quién crea una rutina**: la persona, desde Dot o `stratum routines add|list|rm|run`. El agente
+  solo puede **proponerla** con una tool de control (`propose_routine`, interceptada como
+  `present_plan`), que se resuelve en el centro de aprobaciones: es trabajo autónomo futuro.
+- **Jobs**: la regla de jobs no cambia; los de la caja viven con su sesión, que es de larga vida.
+- **Proactividad libre** (que el asistente escriba por iniciativa propia fuera de una rutina):
+  fuera por ahora.
+- **Límite físico**: sin nube, una rutina solo corre con la máquina encendida y el daemon vivo.
+  El arranque del daemon con la sesión del SO entra en M16 como opción.
+
+### 23.6 Memoria
+
+El `companion` tiene **su propia memoria**, separada de la de Desktop (`assistant`, que sigue
+usando `~/.stratum/assistant/memory/` y `~/.stratum/STRATUM.md`) y de la de cualquier proyecto:
+`~/.stratum/companion/memory/` (decisiones e índice) y `~/.stratum/companion/STRATUM.md`, más la
+memoria de sesión de M11. Se monta con el mismo `MemoryManager`, solo cambian las rutas (por
+preset, en `buildCompanionConfig`, como hoy `buildAssistantConfig`). No hay importación de la
+memoria de Desktop: empieza vacía. Lo nuevo en Dot es el **inspector**: ver, buscar y borrar lo
+que recuerda, con procedencia. Nada de lo recordado decide permisos, aprobaciones ni guardas.
+
+### 23.7 Herramientas conectables
+
+- **MCP del asistente**: servidores declarados en la capa global de la config (nunca la de un
+  proyecto), con efectos en `callEffects`. Una tool sin declarar cuenta como mutante sin target y
+  pide confirmación.
+- **Credenciales**: las de los conectores no entran en el contexto del modelo ni en la caja. Un
+  proceso aparte que las custodie (como el `credential-executor` de Vellum) queda como
+  endurecimiento posterior.
+- **Concesiones con caducidad** («permitir 10 minutos») como término medio entre una vez y la
+  sesión: abierto (§23.13 A3), sin tocar `confirm-always` ni las solicitudes `forced`.
+
+### 23.8 UX
+
+- **Dos vistas, una app**:
+  - *Asistente* (la de inicio): chat con el asistente, panel de la caja (pantalla en vivo,
+    estado, jobs), rutinas y memoria.
+  - *Cabina*: lo actual (Activity, Approvals, run detail).
+- **Dot compacto**: `Enter` habla con el asistente persistente; una sesión nueva es explícita.
+- Las aprobaciones del asistente son tarjetas del mismo centro: misma confirmación nativa.
+
+### 23.9 Evidencia: spike del 2026-10-29
+
+Fuera del repo, con Docker 29.9 en Windows y los modelos del provider de NaN.
+
+**Localización en pantalla.** Capturas reales a 1280×800 de Wikipedia y GitHub hechas por Chromium
+dentro de Docker, 9 elementos con su caja real sacada del DOM (algunos de 20 px), 2 pasadas. Cuenta
+como acierto solo si el punto cae dentro del elemento:
+
+| Modelo | Aciertos | Coordenadas |
+|---|---|---|
+| `glm5.3-flash` | 18/18 | píxeles |
+| `gemma4` | 18/18 | 0–1000 |
+| `qwen3.6` | 17/18 | 0–1000 |
+| `deepseek-v4-flash` | 16/18 | píxeles |
+| `mimo-v2.6-flash` | variable | mezcla ambos según la llamada |
+| `qwen3.8-flash` | bajo | — |
+
+**Bucle completo.** Un agente con `glm5.3-flash` y solo captura, clic, escribir, tecla, scroll y
+espera, sobre Chromium con su interfaz normal en un escritorio virtual (Xvfb) dentro de la caja,
+sin acceso al DOM. Una acción por turno; en el contexto, las 2 últimas capturas:
+
+| Tarea | Resultado | Pasos | Tiempo | Tokens |
+|---|---|---|---|---|
+| Buscar un artículo con el buscador de Wikipedia y leer un dato de la ficha | 3/3 | 6–7 | 68–77 s | ~20–24 k |
+| Navegar por las carpetas de un repo de GitHub y comprobar si existe una | 3/3 | 7–11 | 98–294 s | ~25–47 k |
+| Rellenar un formulario (texto, radio, dos checkbox), enviarlo y leer la respuesta | 4/4 | 11–18 | 117–175 s | ~40–70 k |
+
+10/10. La tarea de GitHub se dio primero por fallida y era error del esperado: la carpeta no
+existe, y el modelo lo dijo con la lista real.
+
+**Límites de la evidencia**: tareas cortas, páginas públicas sin sesión iniciada, 10 ejecuciones;
+no se probó recuperarse de errores, ventanas emergentes, descargas ni sesiones largas. Conclusión:
+el computer use en la caja es **trabajo de ingeniería, no una apuesta**; los escenarios de este
+spike pasan a ser el criterio de M15.
+
+### 23.10 Seguridad
+
+- **La caja es el radio de daños**: lo que haga dentro no alcanza los ficheros del usuario, sus
+  claves SSH ni el daemon. De paso, cierra para el asistente la vía de auto-aprobación de §13.4:
+  desde la caja no hay `endpoint.json` ni pipe que alcanzar.
+- **Lo que sale de la caja pide aprobación**: otro target, un conector que actúa fuera, enviar,
+  publicar o pagar.
+- **Contenido no confiable**: la web y lo que aparezca en pantalla pueden intentar dar órdenes al
+  modelo. No se mitiga en el modelo sino en la política: dentro de la caja da igual; fuera, decide
+  una persona.
+- **Red de la caja**: con salida a internet por defecto. El acceso a la red local y al host
+  (`host.docker.internal`) está por decidir (§23.13 A2).
+- **Docker es privilegiado** (en Linux, equivalente a root): solo el daemon habla con Docker, con
+  órdenes fijas. El agente nunca recibe el socket ni compone un `docker`.
+- **Capturas**: no se redactan, así que no salen de la sesión salvo como metadatos (§23.4).
+
+### 23.11 Hitos
+
+Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintarlo en Dot.
+
+- **M13 — La caja.** Backend `container:` de `exec`, imagen versionada, ciclo de vida en el daemon
+  (`stratum box …` y su método), volumen persistente, carpeta de intercambio, la caja como
+  entorno. *Hecho cuando*: una sesión hace `exec` en `container:<caja>` con el mismo contrato que
+  `ssh:` (auditoría, cancelación, timeout, `maxBytes`), la caja sobrevive a un reinicio del daemon
+  con su volumen, y sin Docker todo lo anterior se deshabilita con un mensaje y sin errores. Los
+  tests que necesitan Docker se saltan si no está.
+- **M14 — El `companion` en su caja.** Agente embebido `companion` (preset, directorio y memoria
+  propios, §23.6) con `exec` solo contra su caja (§23.3). Vista *Asistente* básica en Dot
+  (conversación con el `companion`, estado de la caja, `start`/`stop`). *Hecho cuando*: el
+  `companion` instala y ejecuta en su caja sin pedir aprobación; cualquier `exec` suyo a `local` o
+  `ssh:` se veta en `preflight` (escenario adversarial en `evals/`); lo que recuerda no aparece
+  en Desktop ni lo de Desktop en él (test de memoria por preset); el `assistant` de Desktop no
+  cambia; y la documentación de decisiones está actualizada.
+- **M15 — Computer use en la caja.** Tools `screen_*`, formato de coordenadas por modelo, poda de
+  capturas, capturas fuera de traza y logs, pantalla en vivo en Dot con indicador. *Hecho cuando*:
+  las tres tareas de §23.9, ejecutadas por las tools reales, salen al menos 8 de 10 veces cada una
+  con `glm5.3-flash`, y un modelo `norm1000` declarado acierta igual que uno en píxeles.
+- **M16 — Rutinas.** `RoutineScheduler`, `routines.json`, `stratum routines …`,
+  `propose_routine`, notificaciones, arranque del daemon con la sesión (opcional). *Hecho
+  cuando*: una rutina corre a su hora con nadie mirando, lo que pide aprobación caduca a `deny`
+  sin bloquear el daemon, y su resultado está en Dot.
+- **M17 — Conectores e inspector de memoria.** MCP del asistente desde la capa global con
+  `callEffects`; inspector de memoria en Dot.
+- **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
+  confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
+
+### 23.12 Fuera, por ahora
+
+Proactividad libre, voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
+o en una nube, multiusuario, y tomar el control de la caja desde Dot.
+
+### 23.13 Preguntas abiertas
+
+- **A1. Dot y Desktop.** *Resuelta 2026-10-29*: son productos distintos. Dot acompaña en el día
+  a día (`companion`); Desktop es la app para trabajar en local (`assistant`), y cada uno tiene su
+  memoria (§23, introducción). Cierra §15.1.4: Dot no es el modo compacto de Desktop.
+- **A2. Red de la caja.** ¿Salida a internet sin más? ¿Bloquear la LAN y el host por defecto?
+  ¿Lista de dominios?
+- **A3. Concesiones con caducidad** («permitir N minutos») frente a `allow-all` de sesión, y cómo
+  se muestran en Dot.
+- **A4. Rutinas**: ¿sesión propia por rutina (propuesta) o la sesión principal del asistente?
+  ¿Qué parte del resultado vuelve al chat principal?
+- **A5. Docker en Windows**: depender de Docker Desktop (licencia en empresas) o admitir Podman.
+- **A6. Capturas en la traza**: ¿se guardan los ficheros para el auditor (depuración) o solo
+  metadatos (privacidad)? Propuesta: solo metadatos por defecto, y los ficheros con opción explícita.
+- **A7. Modelo con visión**: cómo se declara (`vision: true` en la config del modelo) y qué ve el
+  usuario si elige uno sin visión con computer use activo.
