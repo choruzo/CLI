@@ -550,3 +550,27 @@ El usuario aceptó las tres propuestas:
 1. **R7: `tool.before` se serializa con un mutex del host.** Así, dos subagentes nunca ejecutan a la vez el mismo handler de veto. Para quien escribe el plugin es lo más simple, y dentro de un dispatcher el lote ya era secuencial. `tool.after` sigue pudiendo reentrar (pool de lecturas y subagentes), y eso queda como contrato documentado.
 2. **Tope de tiempo por lote para los hooks de veto.** Además de `hookTimeoutMs` por handler, los `tool.before` de un lote tienen un tope conjunto. Si se agota, las llamadas que quedan se vetan (falla cerrado). Así, N plugins no pueden retrasar la primera confirmación N × 5 s por llamada.
 3. **El daemon solo carga los plugins globales.** `sessions.open` no acepta plugins por sesión: el protocolo no transporta rutas de código. `--no-plugins` y `--plugin` son flags de `run`/`chat` y llegan por `SessionHostOptions.plugins`.
+
+## 12. PL1 implementado (2026-10-28)
+
+Código en `stratum-cli/src/plugins/`; detalle de área en `.claude/docs/plugins.md` y las invariantes en la §12.28 de la definición (la §12.27 queda para el Hito 18).
+
+### 12.1 Las dos decisiones que faltaban
+
+1. **Tope por lote: `plugins.batchTimeoutMs`, 15 s por defecto** (tres handlers con su `hookTimeoutMs` entero). Corre desde que el lote entra en el mutex de `tool.before`. Agotado, se vetan la llamada en curso y las que quedan, nunca las que ya pasaron todos sus handlers.
+2. **`apiVersion` se valida ya en PL1** (§3.1 manda sobre §7): tiene que ser un entero positivo, y uno mayor que `PLUGIN_API_VERSION` (1) no se carga y queda en el informe. Falla cerrado y no cuesta nada; PL3 solo añade el `apiVersion` del `package.json` de un paquete.
+
+### 12.2 Qué se hizo distinto de lo escrito arriba
+
+- **La config de plugins sale solo de la capa global.** `loadPlugins` valida `~/.stratum/.stratumrc.json` por separado (`validateConfigLayer`): un `plugins` de proyecto no carga nada hasta PL4, y un id que solo declara el proyecto queda en el informe con su motivo. Era el origen 4 de §4.1; sin confianza de proyecto no hay otra forma segura.
+- **Uno apagado (`enabled: false`) no se importa**: importar ya ejecuta su código. Para los del directorio se usa como id provisional el nombre del fichero o carpeta, y se comprueba otra vez con el id del módulo. `--plugin` no se apaga: es explícito.
+- **El aviso de un handler dado de baja no es un `warning` del turno**: queda en el log (`plugin_hook_disabled:<id>`) y en `/plugins` (`disabledHooks`). Emitirlo en el turno exige que el host tenga un canal hacia el loop; queda para PL2 junto a `notify`.
+- **`STRATUM_NO_PLUGINS=1`** (lo pone `vitest.config.ts`) no carga los plugins del usuario; lo explícito sí. Las evals ya corren con un `HOME` temporal.
+- **`dispose()` entrega antes lo que quede en cola** (eventos, `session.start`) y después `session.end`, todo dentro de un plazo.
+- R2 y R3 tal como los corrige §11: `DispatchResult.presented` y `tool.before` antes de `readOnlyVeto ?? preflight`. La unión de la fuente del veto estaba en **cuatro** sitios, no en uno: `agent/events.ts`, `vetoed()` en `tools/registry.ts`, `trace/records.ts` y el protocolo (`protocol/events.ts` y `blockSource` de `schemas.ts`), más la etiqueta del recorder. Anotado en `docs/protocol.md` §17.
+
+### 12.3 Pendiente
+
+- PL2 (tools, comandos, bloques de prompt, `compaction.context`, `notify`, entry `./plugin` con `.d.ts`). R10 aplica ahí.
+- Los fixtures viven junto a los tests (`src/plugins/fixtures/`), como los de MCP y LSP, no en `fixtures/plugins/`.
+- R1, R4 y R5 siguen abiertos para PL4/PL5. De R5 ya está lo mínimo: se mira la señal antes de cada handler, cada handler recibe una señal propia que se aborta con el turno o su plazo, y un resultado tardío se descarta.

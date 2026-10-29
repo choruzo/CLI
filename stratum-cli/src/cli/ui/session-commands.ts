@@ -69,6 +69,11 @@ export const SESSION_COMMANDS: SessionCommand[] = [
     hasArgs: false,
   },
   {
+    name: '/plugins',
+    description: 'Plugins de la sesión: cargados, sus hooks y los omitidos con su motivo',
+    hasArgs: false,
+  },
+  {
     name: '/subagents',
     description:
       'Ventana de un subagente, solo lectura (sin args: lista · /subagents explorer#2 la abre)',

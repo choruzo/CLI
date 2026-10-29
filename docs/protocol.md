@@ -537,8 +537,8 @@ verificada**, `approve` (§5, §15.2). `broker` está reservada y no se concede 
 
 Eventos que **no** se emiten: `ProtocolRun.counters.llmCalls` vale 0 (no se estima). Desde
 Contrato-1, `tool.blocked` sí: lo publica el anfitrión cuando el runtime veta una llamada antes
-de ejecutarla (`source`: `preflight`, `read-only`, `environment`, `toolset`, `plan` o
-`steering`), con `call.state: 'blocked'`, y cuenta en `counters.blocked`, no en `toolErrors`. Una
+de ejecutarla (`source`: `preflight`, `read-only`, `environment`, `toolset`, `plan`,
+`steering` o `plugin`), con `call.state: 'blocked'`, y cuenta en `counters.blocked`, no en `toolErrors`. Una
 confirmación denegada (por una persona o por la política de la sesión) no es un veto: sigue
 siendo `tool.failed`.
 
@@ -1230,6 +1230,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | Contrato-1 | Se **retira** el evento `session.detached` (y de `OVERVIEW_EVENT_TYPES`). `tool.blocked` se emite; `sessions.open { resume }` y `trace.subscribe`/`unsubscribe` se atienden (§13.6, §19.4). `broker` queda reservada y sin conceder | Sin publicar, y **ningún servidor llegó a emitir `session.detached`**: lo que contaba ya viaja como foto (§14.3), y emitirlo exigiría que el daemon numerase eventos propios. Lo demás era contrato declarado sin atender: atenderlo no cambia ninguna forma |
 | Desktop-modelo | `sessions.setModel` admite `provider?`: otro alias de la config de la sesión, que se cambia junto con el modelo; un alias que no existe → `INVALID_PARAMS` sin tocar la sesión | Aditivo: sin `provider`, el modelo sigue siendo del provider actual |
 | Contrato-1 | Método `sessions.revert` (**`approve`**) y DTO `ProtocolRevertPlan`, `REVERT_LIMITS` | Aditivo. Es `approve` y no `control` a propósito: pisa ficheros del proyecto sin pasar por las aprobaciones del agente, así que pide la misma autoridad que resolverlas (§15.2) |
+| PL1 | `tool.blocked.source` admite `plugin` (un `tool.before` de un plugin vetó la llamada) | Aditivo para quien emite; un cliente que valide la unión cerrada tiene que aceptar el valor nuevo. Los clientes del árbol validan con `schemas.ts`, que ya lo incluye |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 

@@ -61,7 +61,7 @@ export interface StateEventData {
   /** El runtime no dejó ejecutar la llamada. */
   'tool.blocked': {
     call: ProtocolToolCall;
-    source: 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering';
+    source: 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering' | 'plugin';
   };
 
   'subagent.started': { subagent: ProtocolSubagent };

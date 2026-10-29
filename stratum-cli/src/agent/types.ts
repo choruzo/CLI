@@ -7,6 +7,8 @@ import type { TraceScope } from '../trace/recorder.js';
 import type { JobManager } from '../jobs/manager.js';
 import type { RuntimeInbox } from './inbox.js';
 import type { PauseController, SafePointGate } from './pause.js';
+import type { PluginHost } from '../plugins/host.js';
+import type { PluginAgentRef } from '../plugins/api.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -262,6 +264,14 @@ export interface ToolContext {
    * Ausente → las ediciones se comportan como siempre.
    */
   diagnostics?: DiagnosticsProvider;
+  /**
+   * PL1 — plugins de la sesión. El dispatcher les pide vetos (`tool.before`,
+   * antes de las guardas y de toda confirmación) y anotaciones (`tool.after`).
+   * Ausente → como sin plugins. Los subagentes heredan el del padre.
+   */
+  plugins?: PluginHost;
+  /** Quién hace las llamadas, para los hooks de plugin. Ausente → el principal. */
+  pluginAgent?: PluginAgentRef;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */

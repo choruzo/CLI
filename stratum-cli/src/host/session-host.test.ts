@@ -2,6 +2,7 @@ import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { mkdtempSync, realpathSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
+import { fileURLToPath } from 'url';
 import { z } from 'zod';
 import { SessionHost, type SessionHostOptions } from './session-host.js';
 import { ProviderRouter } from '../providers/router.js';
@@ -12,6 +13,7 @@ import type { OpenAIStreamChunk } from '../providers/base.js';
 import type { AgentEvent, RunOptions, ToolContext, ToolDefinition } from '../agent/types.js';
 
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'stratum-host-')));
+const GUARD_PLUGIN = fileURLToPath(new URL('../plugins/fixtures/guard-env.mjs', import.meta.url));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
 function makeConfig(): StratumConfig {
@@ -93,6 +95,31 @@ describe('SessionHost', () => {
     expect(seen[0]!.sessionId).toBe(host.sessionId);
     // La sesión trabaja sobre una copia propia de la config.
     expect(seen[0]!.config).toBe(host.config);
+  });
+
+  it('PL1: carga los plugins pedidos y sus vetos llegan al runtime', async () => {
+    const seen: ToolContext[] = [];
+    const host = await makeHost(
+      [makeToolCallRound('c1', 'exec', { command: 'terraform destroy' }), makeTextRound('vale')],
+      { plugins: { paths: [GUARD_PLUGIN] } },
+    );
+    host.registry.register(tool('exec', seen, { schema: z.object({ command: z.string() }) }));
+    expect(host.plugins.report().loaded.map((p) => p.id)).toEqual(['guard-env']);
+
+    const events = await collect(host.run('destruye'));
+    expect(seen).toHaveLength(0);
+    expect(events.find((e) => e.type === 'tool_error')).toMatchObject({ blocked: 'plugin' });
+  });
+
+  it('PL1: --no-plugins no carga nada, y el asistente tampoco', async () => {
+    const off = await makeHost([], { plugins: { disabled: true, paths: [GUARD_PLUGIN] } });
+    expect(off.plugins.report()).toMatchObject({ enabled: false, loaded: [] });
+    const assistant = await makeHost([], {
+      preset: 'assistant',
+      plugins: { paths: [GUARD_PLUGIN] },
+      assistantData: { dir: join(root, 'assistant-data'), legacyMemoryDir: null },
+    });
+    expect(assistant.plugins.report().loaded).toEqual([]);
   });
 
   it('dos hosts de la misma config cargada no comparten objeto de config', async () => {

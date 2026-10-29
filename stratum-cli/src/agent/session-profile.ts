@@ -63,6 +63,8 @@ const BUILTIN: Record<string, Omit<SessionProfile, 'source'>> = {
       'delegate_task',
       ...INFRA_TOOLS,
       'mcp__*',
+      // PL2: las tools de plugin, como las MCP.
+      'plugin__*',
     ],
     // `test_evidence` es de control y pasaría el filtro: se oculta a propósito.
     hiddenTools: ['test_evidence'],

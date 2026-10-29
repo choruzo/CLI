@@ -5,6 +5,7 @@ import {
   fileHint,
   lineDelta,
   revertFailureText,
+  turnChangesText,
   type UndoableTurnView,
 } from './undo-format.js';
 
@@ -36,6 +37,12 @@ describe('undo-format', () => {
   it('fila del selector y pista de ficheros', () => {
     expect(describeUndoableTurn(turn, now)).toBe('turno 5 · hace 3 min · 4 ficheros · +12 −10');
     expect(fileHint(turn)).toBe('App.tsx, theme.ts, logo.png, +1');
+  });
+
+  it('cambios del turno al pie: sin ficheros no hay segmento', () => {
+    expect(turnChangesText(turn.files)).toBe('✎ 4 ficheros · +12 −10');
+    expect(turnChangesText([{ path: 'a.png', status: 'modified' }])).toBe('✎ 1 fichero');
+    expect(turnChangesText([])).toBeNull();
   });
 
   it('motivos de fallo legibles', () => {

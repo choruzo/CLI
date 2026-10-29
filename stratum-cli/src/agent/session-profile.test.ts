@@ -53,6 +53,9 @@ describe('perfil de sesión (Hito 17, §10.5)', () => {
     expect(profileAllows(infra, 'write_file')).toBe(false);
     expect(profileAllows(infra, 'exec')).toBe(true);
     expect(profileAllows(infra, 'mcp__k8s__get_pods')).toBe(true);
+    // PL1/R9: las tools de plugin, como las MCP; `code` también las ve.
+    expect(profileAllows(infra, 'plugin__jira__issue')).toBe(true);
+    expect(profileAllows(code, 'plugin__jira__issue')).toBe(true);
     // las de control pasan, salvo test_evidence
     expect(profileAllows(infra, 'present_plan')).toBe(true);
     expect(profileAllows(infra, 'test_evidence')).toBe(false);

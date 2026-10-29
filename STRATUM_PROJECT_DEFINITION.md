@@ -855,7 +855,7 @@ type AgentEvent =
   | { type: 'done';             stopReason: 'stop' | 'max_iterations' | 'cancelled' | 'error' }
 
 // Quién vetó una llamada (lo pone quien vetó; nunca se deduce del texto del error)
-type ToolBlockSource = 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering';
+type ToolBlockSource = 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering' | 'plugin';
 
 // Hito 7 — Plan & Execute (ver §12.15)
 type PlanStepStatus = 'pending' | 'in_progress' | 'done' | 'skipped';
@@ -3017,3 +3017,18 @@ Stratum Desktop deja de ser un runtime aislado y pasa a ser un **cliente** de `s
 - **Un estado autoritativo.** Desktop no guarda sesiones, runs, conversación, aprobaciones ni memoria: los pinta desde la foto de conjunto, la foto de la sesión que mira y `sessions.history`, reducidos con las funciones del contrato (`applyOverviewEvent`, `followSession`). Una petición se ve **cuando el daemon la publica**; una mutación sin respuesta no se repite.
 - **Cerrar un cliente no cierra nada.** Ni el daemon, ni sesiones, ni runs.
 - **Lo antiguo, una vez.** `stratum desktop import` traspasa las conversaciones de Desktop D1–D7 por el camino de §12.25; lo importado se redacta antes de publicarse.
+
+### 12.28 — Plugins en proceso (PL1)
+
+> Numeración: la §12.27 queda reservada para el Hito 18 (`sys_inspect`). Diseño y fases en `CLI-DOC/Plugins-Implementacion.md`; código en `src/plugins/`.
+
+Un plugin es código JavaScript que corre **en el proceso** de la sesión y se engancha al loop por hooks (`tool.before`, `tool.after`, `event`, `session.start`, `session.end`). No es un sandbox y no compite con MCP por las tools: es para lo que tiene que estar *dentro* del loop.
+
+#### Invariantes
+
+- **Solo restringe.** Un veto de plugin nunca se convierte en aprobación; ningún hook levanta un `preflight`, una regla de entorno, el read-only ni una confirmación, ni cambia los argumentos de una llamada (`tool.before` recibe un clon congelado; se ejecuta lo que emitió el modelo).
+- **Falla cerrado donde protege.** `tool.before` que lanza, vence `plugins.hookTimeoutMs` o se queda sin el tope del lote (`plugins.batchTimeoutMs`) veta la llamada (`blocked: 'plugin'`, `countsAsFailure: false`). Los hooks que observan fallan abierto: el error se registra y, tres seguidos, dan de baja el handler.
+- **Veto antes de preguntar.** Los `tool.before` de todo el lote corren en la fase de vetos del dispatcher, antes de `readOnlyVeto ?? preflight` y de toda confirmación, en secuencia y serializados entre subagentes. Los subagentes heredan el host: una guarda no se salta delegando.
+- **Todo lo que devuelve un plugin hacia el modelo se redacta** (motivo del veto y salida de `tool.after`), y la salida anotada se trunca otra vez. Los consumidores internos (write-log) leen el resultado de la tool, nunca el anotado; un error no se convierte en éxito.
+- **Qué se carga.** Solo orígenes de confianza implícita: `--plugin`, `plugins.entries` de la config **global** y `~/.stratum/plugins/`. Nada de proyecto hasta la confianza de proyecto (PL4). Un plugin roto queda en el informe y no impide arrancar; uno con `apiVersion` mayor que la del host no se carga. El preset `assistant` no carga ninguno.
+- **Cierre acotado.** `dispose()` es idempotente y entrega `session.end` con plazo; un plazo deja de esperar, no detiene al plugin.

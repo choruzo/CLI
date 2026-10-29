@@ -272,6 +272,7 @@ const VETO_LABEL = {
   toolset: 'el toolset de la sesión',
   plan: 'el modo plan',
   steering: 'un mensaje nuevo del usuario',
+  plugin: 'un plugin',
 } as const;
 
 const PAUSE_PHASE_LABEL = {

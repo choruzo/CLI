@@ -138,7 +138,14 @@ export type TraceRuntimeEvent =
     }
   | {
       event: 'veto';
-      source: 'preflight' | 'read-only' | 'environment' | 'toolset' | 'plan' | 'steering';
+      source:
+        | 'preflight'
+        | 'read-only'
+        | 'environment'
+        | 'toolset'
+        | 'plan'
+        | 'steering'
+        | 'plugin';
       tool: string;
       callId: string;
       reason: string;

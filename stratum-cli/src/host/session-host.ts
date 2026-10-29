@@ -15,6 +15,8 @@ import { openSessionTrace } from '../trace/store.js';
 import type { TraceRecorder, TraceScope } from '../trace/recorder.js';
 import type { SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
+import { findWorktreeRoot } from '../config/paths.js';
+import { PluginHost, loadPlugins, type PluginLoadRequest } from '../plugins/index.js';
 import { PendingInteractions, type HostGates, type InteractionChange } from './interactions.js';
 import { recordResolution } from './resolution-audit.js';
 import {
@@ -63,7 +65,7 @@ export interface SessionHostOptions {
   /** ¿Puede contestar ahora un cliente remoto? Ver `PendingInteractions`. */
   remoteApprovals?: () => boolean;
   /** Opciones del agente (reanudación, read-only, perfil de sesión…). `env` lo pone el host. */
-  agent?: Omit<StratumAgentOptions, 'env' | 'promptPreset' | 'workspace'>;
+  agent?: Omit<StratumAgentOptions, 'env' | 'promptPreset' | 'workspace' | 'plugins'>;
   /**
    * M12 — `assistant`: la sesión es del agente embebido `assistant`
    * (`host/assistant.ts`): su prompt, solo sus tools, ficheros confinados al
@@ -77,6 +79,13 @@ export interface SessionHostOptions {
    * Desktop; `null`, nada).
    */
   assistantData?: AssistantData;
+  /**
+   * PL1 — plugins de la sesión: los flags de quien la aloja (`--no-plugins`,
+   * `--plugin`). Ausente → los globales (config global y `~/.stratum/plugins/`);
+   * es lo que hace el daemon, que nunca carga plugins por sesión. El preset
+   * `assistant` no carga ninguno.
+   */
+  plugins?: PluginLoadRequest;
 }
 
 export interface TurnOptions {
@@ -120,6 +129,8 @@ export class SessionHost {
    * el prompt local, una respuesta remota, el plazo y la cancelación.
    */
   readonly interactions: PendingInteractions;
+  /** PL1 — plugins cargados para esta sesión (vacío en el asistente o con `--no-plugins`). */
+  readonly plugins: PluginHost;
 
   private readonly basePolicy: DestructivePolicy;
   private readonly allowDestructive: boolean | undefined;
@@ -135,6 +146,7 @@ export class SessionHost {
       registry: ToolRegistry;
       mcp: McpManager;
       mcpWarnings: McpManagerWarning[];
+      plugins: PluginHost;
     },
   ) {
     this.env = opts.env;
@@ -143,6 +155,7 @@ export class SessionHost {
     this.registry = parts.registry;
     this.mcp = parts.mcp;
     this.mcpWarnings = parts.mcpWarnings;
+    this.plugins = parts.plugins;
     this.sessionId = opts.sessionId ?? generateSessionId();
     this.interactions = new PendingInteractions({
       ...(opts.gates ? { local: opts.gates } : {}),
@@ -167,7 +180,16 @@ export class SessionHost {
       ...(opts.preset === 'assistant'
         ? { promptPreset: 'assistant', workspace: assistantWorkspace(this.env.cwd) }
         : {}),
+      ...(this.plugins.size > 0 ? { plugins: this.plugins } : {}),
       env: this.env,
+    });
+    this.plugins.startSession({
+      sessionId: this.sessionId,
+      cwd: this.env.cwd,
+      worktree: findWorktreeRoot(this.env.cwd).worktree,
+      resumed:
+        (opts.agent?.initialMessages?.length ?? 0) > 0 ||
+        opts.agent?.conversation?.restore === true,
     });
   }
 
@@ -213,7 +235,18 @@ export class SessionHost {
       // Un server que se cuelga durante una sesión larga se detecta y se relanza.
       mcp.startHeartbeat();
     }
-    return new SessionHost(opts, { config, registry, mcp, mcpWarnings });
+    // PL1: el asistente no carga plugins (su toolset es cerrado); el resto, los
+    // globales más lo que pidan los flags de quien aloja.
+    const plugins = assistant
+      ? PluginHost.empty(false)
+      : await loadPlugins({
+          cwd: opts.env.cwd,
+          config,
+          ...(opts.version !== undefined ? { version: opts.version } : {}),
+          ...(opts.plugins?.disabled ? { disabled: true } : {}),
+          ...(opts.plugins?.paths ? { paths: opts.plugins.paths } : {}),
+        });
+    return new SessionHost(opts, { config, registry, mcp, mcpWarnings, plugins });
   }
 
   /** Sustituye los prompts locales (p. ej. cuando dependen de la política ya resuelta). */
@@ -347,6 +380,8 @@ export class SessionHost {
     // Nada queda esperando a una persona: cada puerta recibe su respuesta negativa.
     this.interactions.cancelAll();
     await this.settle('mcp shutdown', () => this.mcp.shutdownAll());
+    // `session.end` antes de cerrar jobs y SSH: el plugin aún ve la sesión entera.
+    await this.settle('plugins', () => this.plugins.dispose('closed'));
     await this.settle('exec runtime', () => closeSessionExecRuntime(this.config, this.agent.jobs));
     if (opts.cancelBackground) {
       await this.settle('background work', () => this.agent.cancelBackgroundWork());

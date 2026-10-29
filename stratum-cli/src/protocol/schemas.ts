@@ -519,6 +519,7 @@ const blockSource = z.enum([
   'toolset',
   'plan',
   'steering',
+  'plugin',
 ]);
 
 /** Datos de cada evento de estado. Exportado para poder recorrerlo en los tests. */

@@ -37,6 +37,7 @@ import type { RuntimeInbox } from './inbox.js';
 import { pausableTimeout, type PauseController } from './pause.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
+import type { PluginHost } from '../plugins/host.js';
 
 const log = getLogger('agent.subagent');
 
@@ -98,6 +99,8 @@ export interface RunSubagentOptions {
    * servers propios: hereda el mismo manager de la sesión.
    */
   diagnostics?: DiagnosticsProvider;
+  /** PL1 — plugins de la sesión: el hijo pasa por los mismos vetos que el padre. */
+  plugins?: PluginHost;
 }
 
 function pad2(n: number): string {
@@ -247,6 +250,8 @@ async function runSubagentWithin(
       skills: opts.skills,
       env,
       diagnostics: opts.diagnostics,
+      plugins: opts.plugins,
+      pluginAgent: { kind: 'subagent', profile: profile.name, id: task.id },
     },
   );
 

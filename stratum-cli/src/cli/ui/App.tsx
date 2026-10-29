@@ -101,6 +101,8 @@ import {
 } from './telemetry-format.js';
 import { formatContextReport } from './context-format.js';
 import { RevertConfirm, type RevertPlanView } from './RevertConfirm.js';
+import { PluginHost } from '../../plugins/host.js';
+import { formatPluginsReport } from '../../plugins/report.js';
 import {
   describeUndoableTurn,
   fileHint,
@@ -172,6 +174,8 @@ export type AgentConvItem = {
   startedAt?: number;
   /** Cómo y en cuánto acabó; se fija en el `done` (`✓ hecho · 42 s`). */
   outcome?: TurnOutcome;
+  /** Ficheros que cambió el turno según su snapshot (`✎ 3 ficheros · +12 −3`). */
+  changes?: UndoableTurnView['files'];
   streaming: boolean;
 };
 
@@ -285,6 +289,7 @@ export type AppAction =
       };
     }
   | { type: 'USAGE_UPDATE'; session: (UsageView & { turns: number }) | null }
+  | { type: 'TURN_CHANGES'; files: UndoableTurnView['files'] }
   | {
       type: 'CONTEXT_UPDATE';
       used: number;
@@ -983,6 +988,13 @@ export function reducer(state: AppState, action: AppAction): AppState {
     case 'USAGE_UPDATE':
       return { ...state, sessionUsage: action.session, liveUsage: null };
 
+    case 'TURN_CHANGES':
+      // Llega justo antes del `done`, que copia el turno vivo a `<Static>`: un
+      // turno ya cerrado no se repinta, así que después sería tarde.
+      return state.currentItem?.kind === 'agent'
+        ? { ...state, currentItem: { ...state.currentItem, changes: action.files } }
+        : state;
+
     case 'CHANGES_UPDATE':
       return { ...state, changes: action.summary };
 
@@ -1051,12 +1063,19 @@ interface Props {
    * pantalla entera y al cerrarla vuelve la conversación con su historial.
    */
   altScreen?: Pick<AltScreen, 'enter' | 'leave'>;
+  /** PL1 — plugins de la sesión, para `/plugins` (también lo que no se cargó). */
+  plugins?: PluginHost;
 }
 
 export interface RemoteSessionLink {
   /** `App` entrega aquí cómo se cancela el turno en curso. */
   bindCancel(cancel: () => void): void;
   expectRun(turn: { input: string; mode: 'normal' | 'plan' }): void;
+  /**
+   * Algo del resumen publicado cambió en reposo (modelo, provider, agente
+   * principal, read-only, perfil): se publica ya, no al cerrar el turno siguiente.
+   */
+  sessionChanged?(): void;
   /**
    * M10 — de quién es la sesión: mientras se traspasa al daemon (o cuando ya
    * es suya) no empieza ningún turno aquí.
@@ -1080,6 +1099,7 @@ export function App({
   remote,
   interactions,
   altScreen,
+  plugins,
 }: Props) {
   const { exit } = useApp();
   const { write: writeAboveInk } = useStdout();
@@ -1450,6 +1470,10 @@ export function App({
     () => setSessionBadges(readSessionBadges()),
     [readSessionBadges],
   );
+  // Tras un comando que cambia el resumen de la sesión (modelo, provider,
+  // agente principal, read-only, perfil): sin esto, el daemon no lo veía hasta
+  // cerrar el turno siguiente.
+  const publishSessionChange = useCallback(() => remote?.sessionChanged?.(), [remote]);
 
   useEffect(() => {
     if (!state.thinking) {
@@ -2047,6 +2071,7 @@ export function App({
           setOverlay(null);
           agent.switchModel(caps.models[0]!);
           refreshProviderHealth();
+          publishSessionChange();
           dispatch({ type: 'SYSTEM_MESSAGE', text: `Modelo: ${caps.models[0]}` });
         } else if (caps.listsModels && caps.models.length > 0) {
           setOverlay({ kind: 'model-select', models: caps.models, infos: caps.infos });
@@ -2059,7 +2084,7 @@ export function App({
         setModelManualValue(agent.model);
         setOverlay({ kind: 'model-manual', note: String(err) });
       });
-  }, [agent, refreshProviderHealth]);
+  }, [agent, refreshProviderHealth, publishSessionChange]);
 
   // Aplica un modelo (de la lista o escrito a mano) a la sesión en curso.
   const applyModel = useCallback(
@@ -2072,6 +2097,7 @@ export function App({
       const wasUnset = !agent.model;
       agent.switchModel(trimmed);
       refreshProviderHealth();
+      publishSessionChange();
       if (!wasUnset) {
         dispatch({
           type: 'SYSTEM_MESSAGE',
@@ -2093,7 +2119,7 @@ export function App({
           : `Modelo: ${trimmed} (solo esta sesión${saveError ? `; no se pudo guardar: ${saveError}` : ''}).`,
       });
     },
-    [agent, refreshProviderHealth],
+    [agent, refreshProviderHealth, publishSessionChange],
   );
 
   // Provider configurado solo con URL + key: sin modelo no hay a quién hablar,
@@ -2828,6 +2854,7 @@ export function App({
           return;
         }
         setActiveAgent(applied.profile?.name ?? null);
+        publishSessionChange();
         const head = applied.profile
           ? `Agente principal: ${applied.profile.name}. El historial se conserva; el system prompt y las tools cambian desde el próximo mensaje.`
           : 'De vuelta al agente por defecto.';
@@ -2847,6 +2874,7 @@ export function App({
         const next = arg === '' ? !agent.isReadOnly() : arg === 'on';
         agent.setReadOnly(next);
         refreshSessionBadges();
+        publishSessionChange();
         refreshContext();
         dispatch({
           type: 'SYSTEM_MESSAGE',
@@ -2886,6 +2914,7 @@ export function App({
           return;
         }
         refreshSessionBadges();
+        publishSessionChange();
         refreshContext();
         const why = applied.detection
           ? applied.detection.detected
@@ -3127,6 +3156,7 @@ export function App({
         try {
           agent.switchProvider(target);
           refreshProviderHealth();
+          publishSessionChange();
           if (!agent.model) {
             promptForModel();
             return;
@@ -3147,6 +3177,15 @@ export function App({
       if (cmd === '/config_provider') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         openProviderEditor();
+        return;
+      }
+
+      if (cmd === '/plugins') {
+        dispatch({ type: 'INPUT_CHANGE', value: '' });
+        dispatch({
+          type: 'SYSTEM_MESSAGE',
+          text: formatPluginsReport(plugins?.report() ?? PluginHost.empty().report()),
+        });
         return;
       }
 
@@ -3236,6 +3275,7 @@ export function App({
       registry,
       refreshContext,
       refreshSessionBadges,
+      publishSessionChange,
       sessionStore,
       state.debug,
       state.subagentTranscripts,
@@ -3244,6 +3284,7 @@ export function App({
       openRevertConfirm,
       ownership,
       remote,
+      plugins,
     ],
   );
 

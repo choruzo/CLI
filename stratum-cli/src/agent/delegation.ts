@@ -30,6 +30,7 @@ import { Semaphore, Mutex } from './concurrency.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
 import type { SessionEnv } from '../runtime/session-env.js';
+import type { PluginHost } from '../plugins/host.js';
 
 const log = getLogger('agent').child('subagent');
 
@@ -67,6 +68,8 @@ export interface DelegationContext {
   env?: SessionEnv;
   /** Diagnósticos LSP del padre (UX-2b): el hijo usa el mismo manager. */
   diagnostics?: DiagnosticsProvider;
+  /** PL1 — plugins del padre: sus vetos aplican también al hijo. */
+  plugins?: PluginHost;
 }
 
 export type ProfileResolution =
@@ -255,6 +258,7 @@ export async function* executeDelegations(
             skills: ctx.skills,
             env: ctx.env,
             diagnostics: ctx.diagnostics,
+            plugins: ctx.plugins,
             trace: opts?.trace?.child(job.subId),
           });
         } catch (err) {

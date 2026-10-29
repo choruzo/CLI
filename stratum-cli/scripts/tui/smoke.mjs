@@ -7,8 +7,10 @@
  *   npm run tui:smoke -- --show                   # además, cada pantalla
  */
 import assert from 'node:assert/strict';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { launch, sleep } from './harness.mjs';
 import { startMockLlm, mockConfig, text, toolCall } from './mock-llm.mjs';
 
@@ -282,6 +284,51 @@ async function backgroundExec() {
   }
 }
 
+/**
+ * UX-1 «cambios por turno» y PL1: el pie del turno dice qué ficheros cambió
+ * (hace falta un repo git para los snapshots) y un plugin de `--plugin` veta sin
+ * preguntar.
+ */
+async function turnChangesAndPlugins() {
+  const plugin = fileURLToPath(new URL('../../src/plugins/fixtures/guard-env.mjs', import.meta.url));
+  const mock = await startMockLlm(({ said, last }) => {
+    if (last.role === 'tool') return text('hecho');
+    if (said.includes('escribe')) {
+      return toolCall('write_file', { path: 'nota.txt', content: 'uno\ndos\ntres\n' });
+    }
+    return toolCall('exec', { command: 'terraform destroy' });
+  });
+  const t = launch({
+    config: mockConfig(mock.baseUrl),
+    args: ['chat', '--plugin', plugin],
+    files: { 'README.md': '# demo\n' },
+  });
+  try {
+    const git = (...a) =>
+      execFileSync('git', ['-C', t.project, '-c', 'user.email=t@t', '-c', 'user.name=t', ...a], {
+        stdio: 'ignore',
+      });
+    git('init', '-q');
+    git('add', '-A');
+    git('commit', '-qm', 'init');
+    await check('el pie del turno dice qué ficheros cambió', t, async () => {
+      await t.waitForBanner();
+      await t.submit('escribe una nota');
+      await t.waitFor(/✓ hecho · [\d.]+ s · ✎ 1 fichero · \+3 −0/);
+    });
+    await check('/plugins y un veto de plugin sin confirmación', t, async () => {
+      await t.submit('/plugins');
+      await t.waitFor(/guard-env\s+\[--plugin\]\s+tool\.before, tool\.after/);
+      await t.submit('destruye la infra');
+      await t.waitFor(/Blocked by plugin guard-env/);
+      await t.waitForIdle();
+    });
+  } finally {
+    await t.close();
+    await mock.close();
+  }
+}
+
 async function modelFromBanner() {
   const mock = await startMockLlm();
   const t = launch({ config: mockConfig(mock.baseUrl) });
@@ -331,6 +378,7 @@ await conversation();
 await modelFromBanner();
 await cancelAndExit();
 await backgroundExec();
+await turnChangesAndPlugins();
 await startupErrors();
 console.log(failed === 0 ? '\nTUI smoke: todo en orden' : `\nTUI smoke: ${failed} fallo(s)`);
 process.exit(failed === 0 ? 0 : 1);

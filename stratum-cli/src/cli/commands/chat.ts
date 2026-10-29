@@ -23,7 +23,8 @@ import { prepareSessionResume } from '../../session/resume.js';
 import { resumeDecision, whoHostsSession } from '../resume-guard.js';
 import { SessionCheckpointer } from '../../session/checkpoint.js';
 import { pruneOldPlans } from '../../session/cleanup.js';
-import { resolveMemoryPaths } from '../../config/paths.js';
+import { findWorktreeRoot, resolveMemoryPaths } from '../../config/paths.js';
+import { loadPlugins } from '../../plugins/index.js';
 import { App } from '../ui/App.js';
 import { animateStartupLogo } from '../ui/startup-logo-animation.js';
 import { warnInheritedGitRouting } from '../../git/env-warning.js';
@@ -82,6 +83,13 @@ export const chatCommand = new Command('chat')
   .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
   .option('--infra', 'shortcut for --profile infra')
   .option('--code', 'shortcut for --profile code')
+  .option('--no-plugins', 'load no plugins, not even the global ones')
+  .option(
+    '--plugin <path>',
+    'load this plugin file or folder for this session (repeatable)',
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[],
+  )
   .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
   .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
@@ -96,6 +104,8 @@ export const chatCommand = new Command('chat')
       profile?: string;
       infra?: boolean;
       code?: boolean;
+      plugins?: boolean;
+      plugin?: string[];
     }) => {
       const profileFlag = sessionProfileFlag(opts);
       if (!profileFlag.ok) {
@@ -281,6 +291,21 @@ export const chatCommand = new Command('chat')
           process.exit(1);
         }
       }
+      // PL1 — plugins: los globales más los de `--plugin`. `chat` no pasa por
+      // `SessionHost`, así que los carga aquí; un fallo de uno queda en el
+      // informe (`/plugins`) y nunca impide arrancar.
+      const version = resolveVersion();
+      const plugins = await loadPlugins({
+        cwd: process.cwd(),
+        config,
+        version,
+        disabled: opts.plugins === false,
+        paths: opts.plugin ?? [],
+      });
+      for (const s of plugins.report().skipped) {
+        process.stderr.write(`[plugins] ${s.id ?? s.entry ?? '?'}: ${s.reason}\n`);
+      }
+
       const agent = new StratumAgent(config, router, registry, {
         ...agentOptions,
         // UX-1: el id de la sesión es la clave del índice y del registro de
@@ -288,6 +313,13 @@ export const chatCommand = new Command('chat')
         sessionId,
         readOnly: opts.readOnly === true || resumedReadOnly,
         ...(requestedProfile ? { sessionProfile: requestedProfile } : {}),
+        ...(plugins.size > 0 ? { plugins } : {}),
+      });
+      plugins.startSession({
+        sessionId,
+        cwd: process.cwd(),
+        worktree: findWorktreeRoot(process.cwd()).worktree,
+        resumed: opts.resume !== undefined,
       });
       const resumeNotice = agent.takeResumeNotice();
       if (resumeNotice) process.stderr.write(`${resumeNotice}\n`);
@@ -301,7 +333,6 @@ export const chatCommand = new Command('chat')
         );
       }
 
-      const version = resolveVersion();
       const sessionStart = new Date().toISOString();
 
       // Traza de la sesión (`/auditor`): se graba siempre; el visor web solo se
@@ -405,6 +436,7 @@ export const chatCommand = new Command('chat')
           subagentStore,
           auditor,
           interactions,
+          plugins,
           onCheckpoint: () => {
             void checkpointer.checkpoint();
             // Modelo, perfil o read-only pueden haber cambiado entre turnos.
@@ -418,6 +450,7 @@ export const chatCommand = new Command('chat')
                   },
                   expectRun: (turn: { input: string; mode: 'normal' | 'plan' }) =>
                     bridge.expectRun(turn),
+                  sessionChanged: () => bridge.sessionChanged(),
                   ownership,
                   detach: () => bridge.detach(),
                 },
@@ -474,6 +507,9 @@ export const chatCommand = new Command('chat')
       // Teardown: cada paso por separado, para que un fallo no deje el resto
       // sin cerrar (sin cerrar SSH el proceso no termina, §12.12).
       await settle('mcp shutdown', () => mcpManager.shutdownAll());
+      // PL1: `session.end` antes de cerrar jobs y SSH (con plazo: un plugin no
+      // retiene la salida).
+      await settle('plugins', () => plugins.dispose(bridge?.handedOff ? 'handed-off' : 'closed'));
       // Hito 9 (§12.12): sin cerrar las conexiones SSH, sus sockets mantienen
       // vivo el event loop y el proceso nunca termina.
       await settle('exec runtime shutdown', () => closeExecRuntime());

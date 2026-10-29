@@ -103,6 +103,8 @@ describe('StratumAgent + snapshots (UX-1)', () => {
       expect(turns).toHaveLength(1);
       expect(turns[0]!.files.map((f) => f.path)).toContain('creado.txt');
       expect(turns[0]!.files.find((f) => f.path === 'creado.txt')!.status).toBe('added');
+      // «Cambios por turno»: el registro del turno recién cerrado.
+      expect(agent.getLastTurnChanges()?.turn).toBe(turns[0]!.turn);
 
       const plan = await agent.planRevert(1);
       expect(plan.turns).toEqual([turns[0]!.turn]);
@@ -124,6 +126,8 @@ describe('StratumAgent + snapshots (UX-1)', () => {
       expect(notice).toBeDefined();
       expect(notice!.content).toContain(`turns="${turns[0]!.turn}"`);
       expect(notice!.content).toContain('Removed: creado.txt');
+      // Un turno que no toca ficheros no arrastra el registro del anterior.
+      expect(agent.getLastTurnChanges()).toBeNull();
     },
   );
 
@@ -163,6 +167,7 @@ describe('StratumAgent + snapshots (UX-1)', () => {
       const events = await collect(agent.run('saluda'));
       expect(events.some((e) => e.type === 'done')).toBe(true);
       expect(agent.getUndoableTurns()).toEqual([]);
+      expect(agent.getLastTurnChanges()).toBeNull();
       expect(await agent.revertTurns(1)).toEqual({ ok: false, reason: 'disabled' });
       expect(await agent.planRevert(1)).toMatchObject({ turns: [] });
     },

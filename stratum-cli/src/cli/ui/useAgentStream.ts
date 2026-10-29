@@ -185,6 +185,13 @@ export function useAgentStream(
               continue;
             }
             flush(false);
+            // UX-1 — «cambios por turno»: el agente toma el T1 antes de entregar
+            // el `done`, y el turno se fija al reducirlo; tiene que llegar antes.
+            // Un `@perfil` no pasa por `runTurn` y no tiene registro propio.
+            if (event.type === 'done' && !extra?.delegateProfile) {
+              const changes = agent.getLastTurnChanges();
+              if (changes) dispatch({ type: 'TURN_CHANGES', files: changes.files });
+            }
             pending.push(event);
             // El historial/contexto solo cambia en fronteras de iteración y al
             // inyectar resultados; los deltas intermedios devolverían el mismo dato.

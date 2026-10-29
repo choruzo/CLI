@@ -8,6 +8,13 @@ import {
   pruneSessionsWithArtifacts,
 } from '../../session/cleanup.js';
 import { deleteTrace, pruneTraces } from '../../trace/store.js';
+import {
+  SESSION_EXPORT_FORMATS,
+  exportSession,
+  type SessionExportFormat,
+} from '../../session/export.js';
+import { redactText } from '../../security/redact-output.js';
+import { writeFileAtomic } from '../../config/writer.js';
 
 function getStore(): SessionStore {
   const config = loadConfig();
@@ -85,6 +92,35 @@ const sessionsDelete = new Command('delete')
     }
   });
 
+const sessionsExport = new Command('export')
+  .description('Export a saved session as JSON or Markdown (secrets redacted)')
+  .argument('<id>', 'session ID to export')
+  .option('--format <format>', `output format: ${SESSION_EXPORT_FORMATS.join(' | ')}`, 'markdown')
+  .option('-o, --output <file>', 'write to this file instead of stdout')
+  .action((id: string, opts: { format: string; output?: string }) => {
+    const format = opts.format as SessionExportFormat;
+    if (!SESSION_EXPORT_FORMATS.includes(format)) {
+      process.stderr.write(
+        `Error: formato "${opts.format}" no válido (usa ${SESSION_EXPORT_FORMATS.join(' o ')}).\n`,
+      );
+      process.exit(1);
+    }
+    try {
+      const config = loadConfig();
+      const store = new SessionStore(resolveMemoryPaths(config).sessionsDir);
+      const text = exportSession(store.load(id), format, (t) => redactText(t, config));
+      if (opts.output) {
+        writeFileAtomic(opts.output, text);
+        process.stderr.write(`Sesión "${id}" exportada a ${opts.output}.\n`);
+      } else {
+        process.stdout.write(text);
+      }
+    } catch (err) {
+      process.stderr.write(`Error: ${err instanceof Error ? err.message : String(err)}\n`);
+      process.exit(1);
+    }
+  });
+
 const sessionsPrune = new Command('prune')
   .description('Remove sessions older than a given age')
   .option('--older <duration>', 'remove sessions older than this duration (e.g. 30d)', '30d')
@@ -118,4 +154,5 @@ export const sessionsCommand = new Command('sessions')
   .addCommand(sessionsList)
   .addCommand(sessionsResume)
   .addCommand(sessionsDelete)
+  .addCommand(sessionsExport)
   .addCommand(sessionsPrune);

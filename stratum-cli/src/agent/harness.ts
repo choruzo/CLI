@@ -57,6 +57,8 @@ import {
 import { TODO_TOOL } from '../tools/todo.js';
 import { untilAborted } from './concurrency.js';
 import type { PauseUnit } from './pause.js';
+import type { PluginHost } from '../plugins/host.js';
+import type { PluginAgentRef } from '../plugins/api.js';
 import { CANCELLED_BY_USER, appendRuntimeNotice } from './cancel.js';
 import { RepeatTracker, formatRepeatNotice } from './repeat.js';
 import { MAIN_JOB_SCOPE } from '../jobs/types.js';
@@ -1207,6 +1209,14 @@ export class ReactLoop {
        * la config lo activa; los subagentes heredan el mismo manager.
        */
       diagnostics?: DiagnosticsProvider;
+      /**
+       * PL1 — plugins de la sesión (los aporta `StratumAgent`). Llegan al
+       * `ToolContext` y los heredan los subagentes: una guarda no se salta
+       * delegando.
+       */
+      plugins?: PluginHost;
+      /** Quién es este loop para los hooks de plugin. Ausente → el principal. */
+      pluginAgent?: PluginAgentRef;
     },
   ) {
     this.env = extras?.env ?? processSessionEnv();
@@ -2138,6 +2148,8 @@ export class ReactLoop {
           fileState: this.extras?.fileState,
           skills: this.extras?.skills,
           diagnostics: this.extras?.diagnostics,
+          plugins: this.extras?.plugins,
+          pluginAgent: this.extras?.pluginAgent,
           allowDestructive: opts?.allowDestructive,
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
@@ -2158,12 +2170,10 @@ export class ReactLoop {
         for (const res of results) {
           if (!res.result.ok && res.result.error === SUPERSEDED_BY_STEERING) batchSuperseded = true;
           if (res.result.ok) {
-            const o = this.toolResultOutcome(
-              res.callId,
-              res.toolName,
-              res.result.output,
-              res.durationMs,
-            );
+            // PL1: lo que ve el modelo puede llevar la anotación de un plugin
+            // (`presented`); el write-log lee siempre el resultado de la tool.
+            const shown = res.presented?.ok ? res.presented.output : res.result.output;
+            const o = this.toolResultOutcome(res.callId, res.toolName, shown, res.durationMs);
             yield o.event;
             this.messages.push(o.message);
             // Hito 12 — write-log de sesión: alimenta la protección del revisor.
@@ -2482,6 +2492,7 @@ export class ReactLoop {
       skills: this.extras?.skills,
       env: this.env,
       diagnostics: this.extras?.diagnostics,
+      plugins: this.extras?.plugins,
     });
 
     for (const job of jobs) {

@@ -52,6 +52,16 @@ export function describeUndoableTurn(t: UndoableTurnView, now: number): string {
     .join(' · ');
 }
 
+/**
+ * «Cambios por turno» al pie del turno: `✎ 3 ficheros · +12 −3`. Sin ficheros no
+ * hay segmento: lo que no se midió no se pinta como 0.
+ */
+export function turnChangesText(files: UndoableTurnView['files']): string | null {
+  if (files.length === 0) return null;
+  const n = files.length;
+  return [`✎ ${n} fichero${n === 1 ? '' : 's'}`, lineDelta(files)].filter(Boolean).join(' · ');
+}
+
 /** Lista corta de nombres para el hint del selector: `App.tsx, theme.ts, +2`. */
 export function fileHint(t: UndoableTurnView, max = 3): string {
   const names = t.files.map((f) => f.path.split(/[\\/]/).at(-1) ?? f.path);

@@ -131,7 +131,20 @@ try {
     const { snapshot } = await operator.request('sessions.get', { sessionId });
     assert.equal(snapshot.session.state, 'idle');
     // Lo que no llegó a entregarse sigue en la inbox del chat: va con el próximo mensaje.
-    await t.waitFor(/delivered with your next message/);
+    await t.waitFor(/se entrega con tu próximo mensaje/);
+  });
+
+  // Lo que cambia el resumen en reposo se publica ya, no al cerrar el turno siguiente.
+  await check('/model en reposo se ve desde fuera sin otro turno', t, async () => {
+    await t.submit('/model');
+    await t.waitFor(/otro-modelo/, 10000);
+    await t.key('down');
+    await t.key('enter');
+    await t.waitFor(/Modelo cambiado a otro-modelo/);
+    await until(async () => {
+      const { sessions } = await operator.request('sessions.list');
+      return sessions[0]?.model === 'otro-modelo';
+    }, 10_000);
   });
 
   await check('al salir del chat la sesión desaparece del daemon', t, async () => {

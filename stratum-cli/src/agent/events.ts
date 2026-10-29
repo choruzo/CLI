@@ -13,7 +13,8 @@ export type ToolBlockSource =
   | 'environment'
   | 'toolset'
   | 'plan'
-  | 'steering';
+  | 'steering'
+  | 'plugin';
 
 export type AgentEvent =
   | { type: 'text_delta'; delta: string }

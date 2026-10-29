@@ -288,7 +288,7 @@ export class ToolRegistry {
 function vetoed(
   ctx: ToolContext,
   call: ToolCallReady,
-  source: 'preflight' | 'read-only' | 'environment' | 'steering',
+  source: 'preflight' | 'read-only' | 'environment' | 'steering' | 'plugin',
   veto: ToolResult,
 ): ToolResult {
   ctx.trace?.runtime({
@@ -314,7 +314,16 @@ function cancelledBeforeRun(): ToolResult {
 export interface DispatchResult {
   callId: string;
   toolName: string;
+  /**
+   * El resultado de la tool, redactado y truncado. Es el que leen los
+   * consumidores internos (el write-log): ningún plugin lo cambia.
+   */
   result: ToolResult;
+  /**
+   * PL1 — lo que ve el modelo cuando un `tool.after` de plugin cambió la salida
+   * (redactado y truncado otra vez). Ausente → `result`.
+   */
+  presented?: ToolResult;
   durationMs: number;
   /** No llegó a ejecutarse: vetada, denegada, descartada por steering o cancelada antes. */
   notRun?: true;
@@ -344,7 +353,17 @@ export class ToolDispatcher {
     // Capa de veto (Hito 11): se evalúa ANTES de confirmar nada. Al usuario no
     // se le pregunta por un `rm -rf /` que nunca se va a ejecutar, y ninguna
     // política de sesión puede levantar este rechazo.
+    // PL1: primero los `tool.before` de los plugins, para todo el lote. Solo
+    // vetan (no cambian argumentos ni aprueban), así que su orden respecto a las
+    // guardas no afecta a la seguridad: va primero para no preguntar por algo
+    // que un plugin va a vetar.
+    const pluginVetoes = await this.pluginVetoes(calls, ctx);
     for (const call of calls) {
+      const byPlugin = pluginVetoes.get(call.id);
+      if (byPlugin) {
+        denied.set(call.id, vetoed(ctx, call, 'plugin', byPlugin));
+        continue;
+      }
       // Hito 17: el modo read-only (de sesión o de entorno) va antes que el
       // preflight de la tool — es una política de la sesión, no de la tool.
       const readOnly = this.readOnlyVeto(call, ctx);
@@ -415,6 +434,85 @@ export class ToolDispatcher {
     const byId = new Map<string, DispatchResult>();
     for (const r of [...deniedResults, ...executed]) byId.set(r.callId, r);
     return calls.map((c) => byId.get(c.id)!);
+  }
+
+  /**
+   * PL1 — vetos de `tool.before` del lote. El host ya falla cerrado (un handler
+   * que lanza o vence su plazo veta); si el propio host lanzase, se vetan todas.
+   * El motivo lo escribe un tercero: se redacta como cualquier otro.
+   */
+  private async pluginVetoes(
+    calls: ToolCallReady[],
+    ctx: ToolContext,
+  ): Promise<Map<string, ToolResult>> {
+    const out = new Map<string, ToolResult>();
+    const plugins = ctx.plugins;
+    if (!plugins?.hasHook('tool.before')) return out;
+    const blocked = (reason: string): ToolResult =>
+      redactResult({ ok: false, error: reason, recoverable: true, countsAsFailure: false }, ctx);
+    try {
+      const vetoes = await plugins.vetoBatch(
+        calls.map((call) => ({
+          callId: call.id,
+          tool: call.name,
+          input: call.input,
+          agent: ctx.pluginAgent ?? { kind: 'main' },
+          ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
+        })),
+        ctx.signal,
+      );
+      for (const [callId, veto] of vetoes) {
+        out.set(callId, blocked(veto.reason));
+        log.warn('plugin blocked', { callId, plugin: veto.pluginId });
+      }
+    } catch (err) {
+      log.warn('plugin veto phase threw', { err });
+      for (const call of calls) {
+        out.set(
+          call.id,
+          blocked(
+            'Blocked: the plugin checks could not be evaluated, so this call was not executed.',
+          ),
+        );
+      }
+    }
+    return out;
+  }
+
+  /**
+   * PL1 — `tool.after`: los plugins ven el resultado ya redactado y pueden
+   * sustituir la salida que verá el modelo, solo si fue bien. Lo que devuelven
+   * se redacta y trunca otra vez. `undefined` si nadie la cambió (o falló: los
+   * hooks que observan fallan abierto).
+   */
+  private async pluginAfter(
+    call: ToolCallReady,
+    result: ToolResult,
+    durationMs: number,
+    ctx: ToolContext,
+  ): Promise<ToolResult | undefined> {
+    const plugins = ctx.plugins;
+    if (!plugins?.hasHook('tool.after')) return undefined;
+    try {
+      const output = await plugins.afterTool(
+        {
+          tool: call.name,
+          input: call.input,
+          callId: call.id,
+          ...(ctx.sessionId !== undefined ? { sessionId: ctx.sessionId } : {}),
+          agent: ctx.pluginAgent ?? { kind: 'main' },
+          ok: result.ok,
+          ...(result.ok ? { output: result.output } : { error: result.error }),
+          durationMs,
+        },
+        ctx.signal,
+      );
+      if (output === undefined || !result.ok) return undefined;
+      return { ok: true, output: truncateToolOutput(redactText(output, ctx.config)) };
+    } catch (err) {
+      log.warn('plugin tool.after phase threw', { tool: call.name, err });
+      return undefined;
+    }
   }
 
   /** Hito 17 — veto de modo read-only (§12.18), de sesión o de entorno. */
@@ -845,10 +943,12 @@ export class ToolDispatcher {
       const truncated: ToolResult = result.ok
         ? { ok: true, output: truncateToolOutput(result.output) }
         : { ...result, error: truncateToolOutput(result.error) };
+      const presented = await this.pluginAfter(call, result, durationMs, ctx);
       return {
         callId: call.id,
         toolName: call.name,
         result: truncated,
+        ...(presented ? { presented } : {}),
         durationMs,
       };
     } catch (err) {
@@ -871,6 +971,8 @@ export class ToolDispatcher {
         durationMs: Date.now() - start,
         error: result.ok ? '' : result.error,
       });
+      // Un error no se convierte en éxito: el plugin solo lo observa.
+      await this.pluginAfter(call, result, Date.now() - start, ctx);
       return {
         callId: call.id,
         toolName: call.name,

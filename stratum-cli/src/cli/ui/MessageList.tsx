@@ -66,6 +66,7 @@ function renderItem(
       verbosity={verbosity}
       usage={item.usage}
       outcome={item.outcome}
+      changes={item.changes}
     />
   );
 }

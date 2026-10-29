@@ -68,6 +68,13 @@ export const runCommand = new Command('run')
   .option('--profile <name>', 'session profile: auto | code | infra | full | <custom>')
   .option('--infra', 'shortcut for --profile infra')
   .option('--code', 'shortcut for --profile code')
+  .option('--no-plugins', 'load no plugins, not even the global ones')
+  .option(
+    '--plugin <path>',
+    'load this plugin file or folder for this run (repeatable)',
+    (value: string, previous: string[]) => [...previous, value],
+    [] as string[],
+  )
   .option('--log-level <level>', 'log level: trace|debug|info|warn|error|silent')
   .option('--debug', 'enable verbose debug logging (level debug + file sink)')
   .action(
@@ -90,6 +97,8 @@ export const runCommand = new Command('run')
         infra?: boolean;
         code?: boolean;
         outputFormat?: string;
+        plugins?: boolean;
+        plugin?: string[];
       },
     ) => {
       // `--output-format` decide qué puede salir por stdout: en `json` y
@@ -191,9 +200,13 @@ export const runCommand = new Command('run')
           readOnly: opts.readOnly === true,
           ...(profileFlag.profile ? { sessionProfile: profileFlag.profile } : {}),
         },
+        plugins: { disabled: opts.plugins === false, paths: opts.plugin ?? [] },
       });
       for (const w of host.mcpWarnings) {
         process.stderr.write(`[mcp] ${w.message}\n`);
+      }
+      for (const s of host.plugins.report().skipped) {
+        process.stderr.write(`[plugins] ${s.id ?? s.entry ?? '?'}: ${s.reason}\n`);
       }
       const agent = host.agent;
 

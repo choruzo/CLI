@@ -95,6 +95,7 @@ import {
   type ContextBudget,
 } from './context-builder.js';
 import type { SessionCompactor } from './harness.js';
+import type { PluginHost } from '../plugins/host.js';
 
 const log = getLogger('agent');
 
@@ -194,6 +195,13 @@ export interface StratumAgentOptions {
    * producción se usa el del proceso (nunca se escribe en el proyecto).
    */
   snapshotsHome?: string;
+  /**
+   * PL1 — plugins de la sesión (`plugins/index.ts`, `loadPlugins`). Llegan al
+   * dispatcher (vetos y anotaciones de tools, también de los subagentes) y ven
+   * cada `AgentEvent` por `observe()`. Ausente → como sin plugins. Lo carga y
+   * lo cierra quien aloja la sesión.
+   */
+  plugins?: PluginHost;
 }
 
 /** Lo que se sabe del contexto de una sesión: presupuesto, desglose y conversación. */
@@ -355,6 +363,10 @@ export class StratumAgent {
   private readonly snapshotsHome: string | undefined;
   /** Texto `<files_reverted>` pendiente de anteponer a la siguiente entrada. */
   private revertNotice: string | null = null;
+  /** Registro de snapshots del último turno terminado (`getLastTurnChanges`). */
+  private _lastTurnChanges: TurnRecord | null = null;
+  /** PL1 — plugins de la sesión (los cierra quien aloja la sesión). */
+  readonly plugins: PluginHost | undefined;
 
   constructor(
     private readonly config: StratumConfig,
@@ -369,6 +381,15 @@ export class StratumAgent {
     this.snapshotsEnabled = options?.snapshots !== false;
     this.snapshotsSessionId = options?.sessionId ?? null;
     this.snapshotsHome = options?.snapshotsHome;
+    // PL1: el hook `event` es un observador más (`observe()` cubre `run()` y
+    // `runDelegate()`). Fire-and-forget: no retrasa el stream.
+    this.plugins = options?.plugins;
+    const plugins = this.plugins;
+    if (plugins) {
+      this.observe((o) => {
+        if (o.type === 'event') plugins.notifyEvent(o.event);
+      });
+    }
     const cwd = this.env.cwd;
     this.preset = options?.promptPreset ?? 'coding';
     // El agente de código solo ve el proyecto; el asistente, solo lo global.
@@ -735,6 +756,14 @@ export class StratumAgent {
     // UX-1: T0 del turno. Nunca lanza ni bloquea el turno si git falla.
     const snapshots = await this.openSnapshots();
     const trackedTurn = snapshots ? await snapshots.beginTurn() : null;
+    this._lastTurnChanges = null;
+    // T1 una sola vez: en el `done` si llega, o en el `finally` si no.
+    let snapshotTaken = false;
+    const takeT1 = async (): Promise<void> => {
+      if (snapshotTaken || !snapshots || !trackedTurn) return;
+      snapshotTaken = true;
+      this._lastTurnChanges = await snapshots.finishTurn(trackedTurn);
+    };
 
     let stopReason: string | null = null;
     const tracker = this.targetTracker();
@@ -745,7 +774,13 @@ export class StratumAgent {
       for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
         if (event.type === 'tool_result') this._toolCallCount++;
         if (event.type === 'subagent_completed') this.addChildTokens(event.result);
-        if (event.type === 'done') stopReason = event.stopReason;
+        if (event.type === 'done') {
+          stopReason = event.stopReason;
+          // UX-1: T1 antes de entregar el `done`, cuando ya no corre ninguna
+          // tool: quien cierra el turno con él ya puede leer sus cambios
+          // (`getLastTurnChanges`). La TUI fija el turno cerrado en ese momento.
+          await takeT1();
+        }
         tracker(event);
         trace?.event(event);
         yield event;
@@ -761,9 +796,9 @@ export class StratumAgent {
       // y abre el turno siguiente.
       this.inbox.endTurn();
       trace?.turnEnd(stopReason);
-      // UX-1: T1 en el finally, también si el loop lanzó (cancelación, error).
+      // UX-1: si no llegó el `done` (el loop lanzó o se abandonó), T1 aquí.
       // `finishTurn` nunca lanza: un fallo de git desactiva los snapshots.
-      if (snapshots && trackedTurn) await snapshots.finishTurn(trackedTurn);
+      await takeT1();
     }
     // Contabilidad de tokens (Hito 13): se consolida al cerrar el turno. Un
     // `unsupported` es pegajoso — si este backend no manda usage, no lo va a
@@ -840,6 +875,15 @@ export class StratumAgent {
     if (this.snapshotStore) return this.snapshotStore.getUndoableTurns();
     void this.openSnapshots();
     return [];
+  }
+
+  /**
+   * Ficheros que cambió el último turno terminado, según su snapshot. `null` si
+   * no cambió nada o no hay dato (sin snapshots, o fallaron): la UI no pinta
+   * nada antes que un «0 ficheros» que no ha medido.
+   */
+  getLastTurnChanges(): TurnRecord | null {
+    return this._lastTurnChanges;
   }
 
   /**
@@ -1428,6 +1472,7 @@ export class StratumAgent {
         skills: this.skills,
         fileState: this.fileState,
         diagnostics: this.diagnosticsProvider,
+        plugins: this.plugins,
         workspace: this.workspace,
         env: this.env,
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
@@ -1717,6 +1762,7 @@ export class StratumAgent {
       opts: this.withSessionOptions(opts),
       skills: this.skills,
       env: this.env,
+      plugins: this.plugins,
     });
     try {
       for (;;) {

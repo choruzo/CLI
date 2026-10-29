@@ -32,6 +32,9 @@ está en los documentos y en huecos de producto. Propuesta de orden:
 > Hito 18—, contrastado con el código, está en §8. Después, el `exec` a segundo plano con Ctrl+B (§8.2) y
 > dos correcciones a los diseños de plugins (§8.3) y del Hito 18 (§8.4).
 
+> **Actualización 2026-10-29:** cambios rápidos (publicar `/model` y compañía en reposo, «cambios por
+> turno» en el pie, `stratum sessions export`) y **PL1 de plugins** hechos. Estado y lo que queda en §9.
+
 Decisiones abiertas que conviene no dejar sin fecha: **default de `chat`** (vivir en `stratumd`, bloqueado
 por Q1, el entorno de la terminal) y **convergencia Dot/Desktop** (§15.1.4: ¿Dot es el modo compacto de
 Desktop?). Hay que decidir §15.1.4 *antes* de extraer componentes compartidos, para no extraerlos dos veces.
@@ -506,3 +509,37 @@ Diseño original, para referencia:
 - Documentos internos citados: `CLAUDE.md`, `.claude/docs/hitos.md`, `docs/PRD_STRATUM_DOT.md`,
   `docs/protocol.md` §13.6/§17, `docs/STRATUM_CLIENT_ARCHITECTURE.md`,
   `CLI-DOC/Orientacion-Infraestructura.md`, `CLI-DOC/Plugins-Implementacion.md`.
+
+## 9. Cambios rápidos y PL1 (2026-10-29)
+
+Elegidos tras cuatro investigaciones de solo lectura (opencode, `stratum-buscador`): PL1 listo para empezar,
+Hito 18 sin spec (la §12.27 sigue sin escribir), revert en Dot bloqueado por invariantes de Dot (el broker
+solo admite 4 métodos, descarta el `result` y la confirmación nativa exige una solicitud pendiente) y una
+lista de piezas pequeñas.
+
+### 9.1 Cambios rápidos — hechos
+
+- `/model`, `/provider`, `/agent`, `/readonly` y `/profile` publican `session.updated` en el acto
+  (`RemoteSessionLink.sessionChanged`), no al cerrar el turno siguiente. Cubierto en `npm run tui:peer`.
+- «Cambios por turno»: `✓ hecho · 1.0 s · ✎ 1 fichero · +3 −0`. Trampa encontrada al probarlo en la TUI
+  real: el turno entra en `<Static>` en el mismo `done` y no se repinta, así que T1 se toma **antes** de
+  entregar el `done` (`runTurn`). Sin snapshots no se pinta nada. Cubierto en `npm run tui:smoke`.
+- `stratum sessions export <id> [--format json|markdown] [-o fichero]`, con todo el historial redactado.
+- `peer-host.md` decía que `/init` no se publicaba; sí se publica.
+- De paso: `daemon-peer.mjs` esperaba un texto en inglés que la TUI ya no pinta (fallaba también en HEAD).
+
+### 9.2 PL1 de plugins — hecho
+
+Ver `Plugins-Implementacion.md` §12 y la §12.28 de la definición. Decisiones: tope por lote
+`plugins.batchTimeoutMs` = 15 s, y `apiVersion` validado ya en PL1. La config de plugins sale solo de la capa
+global. Probado en la TUI real: `/plugins` y un veto de `--plugin` sin pedir confirmación.
+
+### 9.3 Lo siguiente
+
+1. **PL2** (tools, comandos, bloques de prompt, `compaction.context`, `notify`, `.d.ts`); R10 aplica ahí.
+2. **§12.27 y primer corte del Hito 18** (`sys_inspect` local): `LOCAL_READERS`, `READ_ONLY_SESSION_TOOLS`,
+   `PLAN_ALLOWLIST` y `registerBuiltinTools` son los cuatro puntos de registro.
+3. Piezas M que siguen pendientes: tarjetas de tool por intención, temas, `@fichero` (decidir la semántica
+   de `@`), panel de contexto vivo y `/sessions resume` en caliente (cambiar el id publicado exige cerrar y
+   registrar otra sesión).
+4. Revert en Dot: exige decidir si se rompe «el aprobador solo resuelve» o se abre otra lista de métodos.

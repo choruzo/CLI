@@ -404,6 +404,45 @@ export const SnapshotsConfigSchema = z.object({
   maxFiles: z.number().int().positive().default(20_000),
 });
 
+/** Gramática de un id de plugin (la de los perfiles): minúsculas, dígitos y `-`. */
+export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
+
+/**
+ * PL1 — plugins en proceso (`src/plugins/`). **Solo cuenta la sección de la
+ * config global**: una de proyecto se ignora (cargar código de un repo clonado
+ * necesita la confianza de proyecto de PL4). Ver `CLI-DOC/Plugins-Implementacion.md`.
+ */
+export const PluginsConfigSchema = z.object({
+  /** `false` no carga ninguno (como `--no-plugins`). */
+  enabled: z.boolean().default(true),
+  /** Plazo de cada handler. Un `tool.before` que lo vence veta la llamada. */
+  hookTimeoutMs: z.number().int().positive().default(5_000),
+  /** Plazo del `setup` de cada plugin. Vencido, el plugin no se carga. */
+  setupTimeoutMs: z.number().int().positive().default(10_000),
+  /**
+   * Tope conjunto de los `tool.before` de un lote de llamadas. Agotado, las que
+   * quedan se vetan (falla cerrado): N plugins no retrasan la primera
+   * confirmación N × `hookTimeoutMs` por llamada. Default 15 s (tres handlers
+   * con su plazo entero).
+   */
+  batchTimeoutMs: z.number().int().positive().default(15_000),
+  /** Por id: `path` a un entry `.js`/`.mjs`/`.ts`; `enabled: false` desactiva uno descubierto. */
+  entries: z
+    .record(
+      z.string().regex(PLUGIN_ID_RE, 'id de plugin: minúsculas, dígitos y "-", hasta 32'),
+      z
+        .object({
+          path: z.string().min(1).optional(),
+          /** Paquete npm instalado (llega en PL3): hoy se informa y no se carga. */
+          package: z.string().min(1).optional(),
+          enabled: z.boolean().optional(),
+          options: z.record(z.unknown()).optional(),
+        })
+        .strict(),
+    )
+    .default({}),
+});
+
 export const StratumConfigSchema = z.object({
   /**
    * Versión del formato del fichero (15.6, `config/schema-version.ts`). Ausente
@@ -1061,9 +1100,12 @@ export const StratumConfigSchema = z.object({
         .default({}),
     })
     .default({}),
+
+  plugins: PluginsConfigSchema.default({}),
 });
 
 export type StratumConfig = z.infer<typeof StratumConfigSchema>;
+export type PluginsConfig = z.infer<typeof PluginsConfigSchema>;
 export type ProviderConfig = z.infer<typeof ProviderConfigSchema>;
 /** Lo que se escribe en disco: `model` y `contextWindow` pueden omitirse. */
 export type ProviderConfigInput = z.input<typeof ProviderConfigSchema>;

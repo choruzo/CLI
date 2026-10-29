@@ -49,7 +49,9 @@ const mockState = vi.hoisted(() => {
   };
 });
 
-vi.mock('../../config/loader.js', () => ({
+vi.mock('../../config/loader.js', async (importOriginal) => ({
+  // El resto del módulo real: lo usa la carga de plugins (`GLOBAL_CONFIG_PATH`…).
+  ...(await importOriginal<typeof import('../../config/loader.js')>()),
   loadConfig: mockState.loadConfig,
   takeConfigDeprecations: () => [],
 }));

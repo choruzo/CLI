@@ -22,6 +22,7 @@ import {
   type TurnOutcome,
   type UsageView,
 } from './telemetry-format.js';
+import { turnChangesText, type UndoableTurnView } from './undo-format.js';
 
 interface Props {
   text: string;
@@ -56,6 +57,8 @@ interface Props {
   usage?: UsageView;
   /** Cómo y en cuánto acabó el turno cerrado (`✓ hecho · 42 s`). */
   outcome?: TurnOutcome;
+  /** Ficheros que cambió el turno cerrado, según su snapshot (UX-1). */
+  changes?: UndoableTurnView['files'];
   /** Reloj único de la conversación; evita intervalos por bloque. */
   now?: number;
   /** Límites de la región viva para que Ink no reescriba todo el scrollback. */
@@ -86,6 +89,7 @@ export function AgentMessage({
   verbosity = 'standard',
   usage,
   outcome,
+  changes,
   now = Date.now(),
   liveTextLines = 12,
   liveColumns = 80,
@@ -215,7 +219,12 @@ export function AgentMessage({
           <MarkdownText text={text} />
         ))}
       {!streaming && (usage || outcome) && (
-        <TurnUsageLine usage={usage} outcome={outcome} compact={verbosity === 'compact'} />
+        <TurnUsageLine
+          usage={usage}
+          outcome={outcome}
+          changes={changes ? turnChangesText(changes) : null}
+          compact={verbosity === 'compact'}
+        />
       )}
     </Box>
   );
@@ -302,10 +311,13 @@ function ThinkingSummaryLine({ blocks }: { blocks: string[] }) {
 function TurnUsageLine({
   usage,
   outcome,
+  changes,
   compact,
 }: {
   usage?: UsageView;
   outcome?: TurnOutcome;
+  /** `✎ 3 ficheros · +12 −3`, o `null` si el turno no cambió nada medible. */
+  changes: string | null;
   compact: boolean;
 }) {
   const parts = usage ? turnUsageParts(usage, compact) : [];
@@ -321,7 +333,13 @@ function TurnUsageLine({
             {end.icon} {end.text}
           </Text>
         )}
-        {end ? (parts.length > 0 ? '  ─ ' : '') : '─ '}
+        {changes && (
+          <Text color={theme.textFaint}>
+            {end ? ' · ' : ''}
+            {changes}
+          </Text>
+        )}
+        {end || changes ? (parts.length > 0 ? '  ─ ' : '') : '─ '}
         {rest.join(' · ')}
         {cost && (
           <Text color={theme.textFaint}>

@@ -231,6 +231,15 @@
       "pyright": {}
     }
   },
+  "plugins": {
+    "enabled": true,
+    "hookTimeoutMs": 5000,
+    "setupTimeoutMs": 10000,
+    "batchTimeoutMs": 15000,
+    "entries": {
+      "guard-env": { "path": "~/dev/guard-env/index.js", "options": { "tag": "dev" } }
+    }
+  },
   "daemon": {
     "idleExitMinutes": 0,
     "eventBuffer": 2000,
