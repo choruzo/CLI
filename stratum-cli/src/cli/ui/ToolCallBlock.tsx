@@ -2,7 +2,20 @@ import React from 'react';
 import { Box, Text } from 'ink';
 import { theme } from './theme.js';
 import { spinnerFrameAt } from './spinner.js';
-import { primaryArg } from './tool-arg-label.js';
+import { formatInput } from './tool-arg-label.js';
+import {
+  cardLabel,
+  cardSummary,
+  diffLines,
+  diffStats,
+  diffTrailer,
+  execSummary,
+  toolIntent,
+  type DiffLine,
+} from './tool-card.js';
+
+// Los importadores existentes (ThinkingIndicator…) siguen tomándolo de aquí.
+export { formatInput } from './tool-arg-label.js';
 
 export type ToolCallStatus = 'pending' | 'running' | 'completed' | 'error';
 
@@ -20,6 +33,7 @@ export interface ToolCallState {
 }
 
 const MAX_EXPANDED_LINES = 10;
+const MAX_DIFF_LINES = 20;
 
 /** Umbral de latencia SSH que se resalta en el bloque (UI §5.8). */
 const SLOW_MS = 1000;
@@ -40,35 +54,6 @@ function sshHostOf(state: ToolCallState): string | null {
   if (!state.name.startsWith('ssh_')) return null;
   const host = state.input?.host;
   return typeof host === 'string' && host ? host : null;
-}
-
-function truncateLabel(value: string): string {
-  return value.length > 50 ? value.slice(0, 47) + '…' : value;
-}
-
-/** Lo que identifica la llamada (el comando, la ruta…), ya recortado. */
-export function formatInput(state: ToolCallState): string {
-  const src = state.input ?? {};
-  const keys = Object.keys(src);
-  if (keys.length === 0) return '';
-
-  // `exec`: el target ya va en el prefijo; lo que identifica la llamada es el comando.
-  if (state.name === 'exec' && typeof src.command === 'string') {
-    return truncateLabel(src.command);
-  }
-
-  // Tools SSH (UI §5.8): la primera clave es siempre `host`, que ya va en el
-  // prefijo. Mostrar en su lugar lo que de verdad identifica la operación.
-  if (state.name.startsWith('ssh_')) {
-    if (typeof src.command === 'string') return truncateLabel(src.command);
-    const from = state.name === 'ssh_upload' ? src.localPath : src.remotePath;
-    const to = state.name === 'ssh_upload' ? src.remotePath : src.localPath;
-    if (typeof from === 'string' && typeof to === 'string') {
-      return truncateLabel(`${from} → ${to}`);
-    }
-  }
-
-  return truncateLabel(primaryArg(src));
 }
 
 /**
@@ -109,9 +94,9 @@ interface Props {
   now?: number;
 }
 
-function ExpandedOutput({ text }: { text: string }) {
+function ExpandedOutput({ text, tail = false }: { text: string; tail?: boolean }) {
   const lines = text.split('\n');
-  const visible = lines.slice(0, MAX_EXPANDED_LINES);
+  const visible = tail ? lines.slice(-MAX_EXPANDED_LINES) : lines.slice(0, MAX_EXPANDED_LINES);
   const hidden = lines.length - visible.length;
 
   return (
@@ -122,18 +107,94 @@ function ExpandedOutput({ text }: { text: string }) {
       paddingX={1}
       marginLeft={2}
     >
+      {tail && hidden > 0 && (
+        <Text color={theme.textDisabled} dimColor>
+          [+{hidden} líneas antes]
+        </Text>
+      )}
       {visible.map((line, i) => (
         <Text key={i} color={theme.textFaint} dimColor wrap="truncate-end">
           {line || ' '}
         </Text>
       ))}
-      {hidden > 0 && (
+      {!tail && hidden > 0 && (
         <Text color={theme.textDisabled} dimColor>
           [+{hidden} líneas más]
         </Text>
       )}
     </Box>
   );
+}
+
+/** Diff de `edit_file` coloreado: verde lo añadido, rojo lo quitado, tope MAX_DIFF_LINES. */
+function DiffBody({ lines, trailer }: { lines: DiffLine[]; trailer: string }) {
+  const visible = lines.slice(0, MAX_DIFF_LINES);
+  const hidden = lines.length - visible.length;
+
+  return (
+    <Box
+      flexDirection="column"
+      borderStyle="single"
+      borderColor={theme.borderSubtle}
+      paddingX={1}
+      marginLeft={2}
+    >
+      {visible.map((line, i) => {
+        const text =
+          line.kind === 'add'
+            ? `+${line.text}`
+            : line.kind === 'del'
+              ? `-${line.text}`
+              : line.kind === 'ctx'
+                ? ` ${line.text}`
+                : line.text;
+        const color =
+          line.kind === 'add'
+            ? theme.success
+            : line.kind === 'del'
+              ? theme.error
+              : line.kind === 'hunk'
+                ? theme.textDisabled
+                : theme.textFaint;
+        return (
+          <Text key={i} color={color} wrap="truncate-end">
+            {text || ' '}
+          </Text>
+        );
+      })}
+      {hidden > 0 && (
+        <Text color={theme.textDisabled} dimColor>
+          [+{hidden} líneas más]
+        </Text>
+      )}
+      {trailer !== '' &&
+        trailer
+          .split('\n')
+          .slice(0, 10)
+          .map((line, i) => (
+            <Text key={`t${i}`} color={theme.textFaint} wrap="truncate-end">
+              {line || ' '}
+            </Text>
+          ))}
+    </Box>
+  );
+}
+
+/** Cuerpo expandido según la intención: diff coloreado, terminal en cola, resto tal cual. */
+function ExpandedBody({ state, text }: { state: ToolCallState; text: string }) {
+  const intent = toolIntent(state.name);
+  if (intent === 'diff') {
+    const lines = diffLines(text);
+    if (lines.length === 0) return <ExpandedOutput text={text} />;
+    return <DiffBody lines={lines} trailer={diffTrailer(text)} />;
+  }
+  if (intent === 'terminal') {
+    // Un exec a segundo plano no produce cuerpo: el sobre `<exec_job>` es lo que hay.
+    if (text.trimStart().startsWith('<exec_job')) return <ExpandedOutput text={text} />;
+    const body = execSummary(text).body;
+    return body !== '' ? <ExpandedOutput text={body} tail /> : <ExpandedOutput text={text} />;
+  }
+  return <ExpandedOutput text={text} />;
 }
 
 export function ToolCallBlock({
@@ -174,7 +235,7 @@ export function ToolCallBlock({
         <HostTag alias={sshHost} />
         <Text color={theme.textFaint}> │ {formatDuration(elapsedMs)} │ </Text>
         <Text color={theme.textFaint} dimColor>
-          {(state.input ? formatInput(state) : state.inputSoFar?.slice(0, 60)) ?? ''}
+          {(state.input ? cardLabel(state) : state.inputSoFar?.slice(0, 60)) ?? ''}
         </Text>
       </Box>
     );
@@ -182,7 +243,22 @@ export function ToolCallBlock({
 
   if (state.status === 'completed') {
     const dur = state.durationMs !== undefined ? formatDuration(state.durationMs) : '';
-    const label = formatInput(state);
+    const label = cardLabel(state);
+    const summary = cardSummary(state);
+    const stats =
+      summary !== null && state.output && toolIntent(state.name) === 'diff'
+        ? diffStats(state.output)
+        : null;
+    // El diff se pinta partido (verde/rojo); el resto del resumen, de una pieza.
+    const summaryNode = stats ? (
+      <>
+        <Text color={theme.success}>+{stats.added}</Text>
+        <Text color={theme.error}> −{stats.removed}</Text>
+        {stats.partial && <Text color={theme.textFaint}>…</Text>}
+      </>
+    ) : (
+      summary
+    );
     // Indicador de latencia (UI §5.8): una operación remota lenta es
     // información operativa, no ruido.
     const slow = (state.durationMs ?? 0) > SLOW_MS;
@@ -197,9 +273,12 @@ export function ToolCallBlock({
           <HostTag alias={sshHost} />
           {dur && <Text color={slow ? theme.warning : theme.textFaint}> │ {dur}</Text>}
           {label && <Text color={theme.textFaint}> │ {label}</Text>}
+          {summary !== null && (
+            <Text color={theme.textFaint}> │ {summaryNode}</Text>
+          )}
           {chevron}
         </Box>
-        {expanded && state.output && <ExpandedOutput text={state.output} />}
+        {expanded && state.output && <ExpandedBody state={state} text={state.output} />}
       </Box>
     );
   }
@@ -219,7 +298,7 @@ export function ToolCallBlock({
         </Text>
         {chevron}
       </Box>
-      {expanded && state.errorMsg && <ExpandedOutput text={state.errorMsg} />}
+      {expanded && state.errorMsg && <ExpandedBody state={state} text={state.errorMsg} />}
     </Box>
   );
 }

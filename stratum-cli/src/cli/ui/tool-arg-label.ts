@@ -59,3 +59,38 @@ export function tailWindow<T>(items: readonly T[], max: number): { hidden: numbe
   if (items.length <= keep) return { hidden: 0, visible: [...items] };
   return { hidden: items.length - keep, visible: items.slice(-keep) };
 }
+
+/** Lo que `formatInput` mira de una llamada; el resto del estado (tiempos, salida) no importa. */
+export interface ToolCallLike {
+  name: string;
+  input?: Record<string, unknown>;
+}
+
+function truncateLabel(value: string): string {
+  return value.length > 50 ? value.slice(0, 47) + '…' : value;
+}
+
+/** Lo que identifica la llamada (el comando, la ruta…), ya recortado. */
+export function formatInput(state: ToolCallLike): string {
+  const src = state.input ?? {};
+  const keys = Object.keys(src);
+  if (keys.length === 0) return '';
+
+  // `exec`: el target ya va en el prefijo; lo que identifica la llamada es el comando.
+  if (state.name === 'exec' && typeof src.command === 'string') {
+    return truncateLabel(src.command);
+  }
+
+  // Tools SSH (UI §5.8): la primera clave es siempre `host`, que ya va en el
+  // prefijo. Mostrar en su lugar lo que de verdad identifica la operación.
+  if (state.name.startsWith('ssh_')) {
+    if (typeof src.command === 'string') return truncateLabel(src.command);
+    const from = state.name === 'ssh_upload' ? src.localPath : src.remotePath;
+    const to = state.name === 'ssh_upload' ? src.remotePath : src.localPath;
+    if (typeof from === 'string' && typeof to === 'string') {
+      return truncateLabel(`${from} → ${to}`);
+    }
+  }
+
+  return truncateLabel(primaryArg(src));
+}
