@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=d6f57216b4" />
+    <link rel="stylesheet" href="./styles.css?v=705ad9ed7f" />
   </head>
   <body>
     <a class="skip" href="#main">Saltar al contenido</a>
@@ -435,16 +435,17 @@ stratum logs tail 100</code></pre></div>
           <section id="desktop-instalacion" class="doc-sec" aria-labelledby="h-desk-inst">
             <h3 class="sub" id="h-desk-inst">Instalación</h3>
             <p>
-              La app instalada es autónoma: <b>no necesita Node ni Rust</b>. Los instaladores están en las
-              releases de GitHub con etiqueta <code>desktop-v…</code>; la actual es la
-              <b id="desk-version">0.3.0</b> (pre-release).
+              Desde la 0.5.0, Desktop es un cliente de <code>stratumd</code> y <b>necesita la CLI instalada</b>
+              (<code>npm i -g stratum-cli</code>, Node 22 o más reciente); si el daemon no está en marcha, lo
+              arranca. Los instaladores están en las releases de GitHub con etiqueta <code>desktop-v…</code>;
+              la actual es la <b id="desk-version">0.7.0</b>.
             </p>
             <div class="hero-actions doc-downloads">
-              <a class="btn btn-primary" id="dl-exe" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_x64-setup.exe">↓ Windows · .exe</a>
-              <a class="btn" id="dl-msi" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_x64_en-US.msi">↓ Windows · .msi</a>
-              <a class="btn" id="dl-deb" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_amd64.deb">↓ Linux · .deb</a>
-              <a class="btn" id="dl-appimage" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.3.0/Stratum_0.3.0_amd64.AppImage">↓ Linux · .AppImage</a>
-              <a class="btn" id="dl-all" href="https://github.com/choruzo/CLI/releases/tag/desktop-v0.3.0" target="_blank" rel="noreferrer">[ todas las descargas ↗ ]</a>
+              <a class="btn btn-primary" id="dl-exe" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.7.0/Stratum_0.7.0_x64-setup.exe">↓ Windows · .exe</a>
+              <a class="btn" id="dl-msi" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.7.0/Stratum_0.7.0_x64_en-US.msi">↓ Windows · .msi</a>
+              <a class="btn" id="dl-deb" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.7.0/Stratum_0.7.0_amd64.deb">↓ Linux · .deb</a>
+              <a class="btn" id="dl-appimage" href="https://github.com/choruzo/CLI/releases/download/desktop-v0.7.0/Stratum_0.7.0_amd64.AppImage">↓ Linux · .AppImage</a>
+              <a class="btn" id="dl-all" href="https://github.com/choruzo/CLI/releases/tag/desktop-v0.7.0" target="_blank" rel="noreferrer">[ todas las descargas ↗ ]</a>
             </div>
 
             <p>
@@ -455,7 +456,7 @@ stratum logs tail 100</code></pre></div>
 curl -fsSL https://taskplatform.pro/install.sh | sh -s -- --desktop</code></pre></div>
             <div class="code"><pre><code># Windows (x64)
 &amp; ([scriptblock]::Create((irm https://taskplatform.pro/install.ps1))) -Desktop</code></pre></div>
-            <p>Solo Desktop, sin la CLI: añade <code>--no-cli</code> (<code>-NoCli</code> en Windows).</p>
+            <p>Si ya tienes la CLI instalada, añade <code>--no-cli</code> (<code>-NoCli</code> en Windows) para instalar solo Desktop.</p>
 
             <h4>Windows</h4>
             <ul>
@@ -466,11 +467,11 @@ curl -fsSL https://taskplatform.pro/install.sh | sh -s -- --desktop</code></pre>
 
             <h4>Linux</h4>
             <div class="code"><pre><code># Debian / Ubuntu
-sudo apt install ./Stratum_0.3.0_amd64.deb
+sudo apt install ./Stratum_0.7.0_amd64.deb
 
 # Cualquier distribución
-chmod +x Stratum_0.3.0_amd64.AppImage
-./Stratum_0.3.0_amd64.AppImage</code></pre></div>
+chmod +x Stratum_0.7.0_amd64.AppImage
+./Stratum_0.7.0_amd64.AppImage</code></pre></div>
 
             <h4>Comprobar la descarga</h4>
             <p>Cada release incluye <code>SHA256SUMS.txt</code>:</p>
@@ -478,7 +479,7 @@ chmod +x Stratum_0.3.0_amd64.AppImage
 sha256sum -c SHA256SUMS.txt --ignore-missing
 
 # Windows (PowerShell): compara el resultado con la línea del fichero
-Get-FileHash .\Stratum_0.3.0_x64-setup.exe -Algorithm SHA256</code></pre></div>
+Get-FileHash .\Stratum_0.7.0_x64-setup.exe -Algorithm SHA256</code></pre></div>
 
             <h4>Actualizaciones</h4>
             <p>
@@ -492,7 +493,6 @@ Get-FileHash .\Stratum_0.3.0_x64-setup.exe -Algorithm SHA256</code></pre></div>
             <div class="code"><pre><code>git clone https://github.com/choruzo/CLI.git
 cd CLI/stratum-cli &amp;&amp; npm install
 cd ../stratum-desktop &amp;&amp; npm install
-npm run sidecar:build     # empaqueta el núcleo; repítelo si cambia stratum-cli
 npm run tauri dev         # ventana de desarrollo
 npm run tauri build       # instaladores</code></pre></div>
           </section>
@@ -726,6 +726,6 @@ npm run tauri build       # instaladores</code></pre></div>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="./guias.js?v=d6f57216b4" defer></script>
+    <script src="./guias.js?v=705ad9ed7f" defer></script>
   </body>
 </html>

@@ -16,7 +16,7 @@
       href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:ital,wght@0,400;0,500;0,700;0,800;1,400&display=swap"
       rel="stylesheet"
     />
-    <link rel="stylesheet" href="./styles.css?v=d6f57216b4" />
+    <link rel="stylesheet" href="./styles.css?v=705ad9ed7f" />
   </head>
   <body>
     <a class="skip" href="#main">Saltar al contenido</a>
@@ -57,7 +57,7 @@
       <div class="wrap">
         <h1 class="logo" id="logo">STRATUM</h1>
         <p class="tagline">
-          <span class="dim">v</span><span id="hero-version">0.8.0</span>
+          <span class="dim">v</span><span id="hero-version">0.11.0</span>
           <span class="sep">·</span> extensible <span class="sep">·</span> local-first <span class="sep">·</span> provider-agnostic
         </p>
         <p class="lede">
@@ -101,13 +101,13 @@
         <div class="wrap">
           <h2 class="cmd" id="h-status" data-cmd="stratum status">stratum status</h2>
           <div class="kpis" id="kpis">
-            <div class="kpi"><span class="k">versión npm</span><span class="v" id="k-version">0.8.0</span><span class="s" id="k-version-src">snapshot</span></div>
+            <div class="kpi"><span class="k">versión npm</span><span class="v" id="k-version">0.11.0</span><span class="s" id="k-version-src">snapshot</span></div>
             <div class="kpi"><span class="k">hito actual</span><span class="v">17 <span class="ok">✓</span></span><span class="s">entornos y read-only</span></div>
             <div class="kpi"><span class="k">commits</span><span class="v" id="k-commits">—</span><span class="s" id="k-commits-30">— en 30 días</span></div>
             <div class="kpi"><span class="k">líneas</span><span class="v"><span class="add" id="k-add">+0</span></span><span class="s"><span class="del" id="k-del">−0</span> borradas</span></div>
             <div class="kpi"><span class="k">tests</span><span class="v">1908 <span class="ok">✓</span></span><span class="s">130 ficheros · vitest</span></div>
-            <div class="kpi"><span class="k">desktop</span><span class="v">D7</span><span class="s">de D0–D8 · v0.4.0 instalable</span></div>
-            <div class="kpi"><span class="k">dot</span><span class="v">0.1.0 <span class="pre-tag">β</span></span><span class="s">plano de control M0–M10</span></div>
+            <div class="kpi"><span class="k">desktop</span><span class="v">0.7.0</span><span class="s">cliente de stratumd · auto-update</span></div>
+            <div class="kpi"><span class="k">dot</span><span class="v">0.1.0 <span class="pre-tag">β</span></span><span class="s">plano de control M0–M12</span></div>
             <div class="kpi"><span class="k">último commit</span><span class="v" id="k-last">—</span><span class="s" id="k-last-sha">—</span></div>
             <div class="kpi"><span class="k">días de proyecto</span><span class="v" id="k-days">—</span><span class="s">desde 2026-05-27</span></div>
           </div>
@@ -183,7 +183,7 @@
       <section class="section" id="novedades" aria-labelledby="h-nov">
         <div class="wrap">
           <h2 class="cmd" id="h-nov" data-cmd="stratum changelog --since v0.4.0">stratum changelog --since v0.4.0</h2>
-          <p class="note">Lo último: el <b>plano de control</b> —<code>stratumd</code>, aprobaciones desde otro sitio, pausa y traspaso de sesiones— en la CLI 0.9.0-beta.0, y <a href="#dot">Stratum Dot 0.1.0</a>, su app de escritorio, ambos en pre-release. Antes: <code>stratum eval</code> y unas guardas de comandos más difíciles de esquivar, con <a href="./control.html">página propia</a>; antes, el Hito 17 de la CLI (v0.5.0), una ronda de endurecimiento que sale en v0.6.0 y v0.7.0, y Stratum Desktop de D5 a D7, ya con instaladores y auto-update.</p>
+          <p class="note">Lo último: la CLI 0.11.0, con <b>plugins</b> que pueden vetar tools, <kbd>Ctrl+B</kbd> para pasar a segundo plano un comando en curso y una TUI renovada, y Stratum Desktop 0.7.0. Antes, en la 0.9.0 y la 0.10.0: <b>deshacer por turno</b>, sesiones del daemon que sobreviven a un reinicio y Desktop convertido en cliente de <code>stratumd</code>. Y antes, el <b>plano de control</b> —<code>stratumd</code>, aprobaciones desde otro sitio, pausa y traspaso de sesiones— en la CLI 0.9.0-beta.0, y <a href="#dot">Stratum Dot 0.1.0</a>, su app de escritorio, ambos en pre-release. Antes: <code>stratum eval</code> y unas guardas de comandos más difíciles de esquivar, con <a href="./control.html">página propia</a>; antes, el Hito 17 de la CLI (v0.5.0), una ronda de endurecimiento que sale en v0.6.0 y v0.7.0, y Stratum Desktop de D5 a D7, ya con instaladores y auto-update.</p>
 
           <div class="releases" id="releases"></div>
 
@@ -235,9 +235,11 @@
         <div class="wrap">
           <h2 class="cmd" id="h-desk" data-cmd="cd ../stratum-desktop && npm run tauri dev">cd ../stratum-desktop &amp;&amp; npm run tauri dev</h2>
           <p class="note">
-            Stratum Desktop reutiliza el core de la CLI como <b>sidecar</b> (binario Node SEA) detrás de una app
-            Tauri. Hoy es un asistente de chat con workspace aislado, instalable en Windows y Linux
-            (<a href="./guias.html#desktop-instalacion">cómo instalarlo</a>); el modo Code llega en D8.
+            Stratum Desktop es una app Tauri y, desde la 0.5.0, un <b>cliente de <code>stratumd</code></b>, hermano
+            de la CLI y de Dot: no lleva runtime propio, así que necesita la CLI instalada. Cada conversación es una
+            sesión del daemon con el asistente embebido —su propia carpeta, sin <code>exec</code>— y sigue viva al
+            cerrar la app. Instalable en Windows y Linux, con auto-update
+            (<a href="./guias.html#desktop-instalacion">cómo instalarlo</a>).
           </p>
           <div class="desk" aria-label="Recreación de la ventana de Stratum Desktop">
             <div class="desk-bar"><span class="dots" aria-hidden="true"><i></i><i></i><i></i></span><span>Stratum Desktop</span></div>
@@ -247,10 +249,10 @@
                 <div class="desk-group">fijadas</div>
                 <div class="desk-conv on">📌 Informe trimestral <span class="dim">2</span></div>
                 <div class="desk-group">hoy</div>
-                <div class="desk-conv">Resumen del PDF <span class="q">en cola</span></div>
+                <div class="desk-conv">Resumen del PDF <span class="q">en marcha</span></div>
                 <div class="desk-conv">Traducir contrato</div>
-                <div class="desk-group">archivadas</div>
-                <div class="desk-conv dim">Notas de reunión <span class="dim">.tar.gz</span></div>
+                <div class="desk-group">otras sesiones</div>
+                <div class="desk-conv dim">Refactor del parser <span class="dim">terminal</span></div>
               </aside>
               <div class="desk-main">
                 <div class="desk-msg user">Resume <span class="file">inputs/ventas-q3.xlsx</span> y deja un informe en outputs/</div>
@@ -261,7 +263,7 @@
                   <div class="desk-files"><span>📄 informe-q3.md</span><span class="dim">Abrir · Guardar como…</span></div>
                 </div>
                 <div class="desk-input">Escribe un mensaje… <span class="dim">⏎</span></div>
-                <div class="desk-status"><span><span class="ok">●</span> litellm · qwen3.6</span><span>workspace 3.2 MB</span><span>2 turnos activos · 1 en cola</span></div>
+                <div class="desk-status"><span><span class="ok">●</span> litellm · qwen3.6</span><span><span class="ok">●</span> stratumd</span><span>2 sesiones en marcha</span></div>
               </div>
             </div>
           </div>
@@ -466,7 +468,7 @@ stratum auditor sess_20261004_151424_2n6 --no-open</pre>
 
     <div class="toast" id="toast" role="status" aria-live="polite"></div>
 
-    <script src="./data/commits-data.js?v=d6f57216b4"></script>
-    <script src="./app.js?v=d6f57216b4" defer></script>
+    <script src="./data/commits-data.js?v=705ad9ed7f"></script>
+    <script src="./app.js?v=705ad9ed7f" defer></script>
   </body>
 </html>

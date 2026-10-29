@@ -85,8 +85,12 @@ const MILESTONES = [
     body: ["chat y run se publican en el daemon si lo hay; stratum ps --watch las lista todas.", "Centro de aprobaciones con clave de aprobador separada del token: gana la primera respuesta y la terminal retira su prompt.", "Pausa cooperativa en el siguiente punto seguro, nunca a mitad de una tool."] },
   { id: "M6–M8", title: "Stratum Dot: cockpit, chat y Approval Center", date: "2026-10-15", track: "dot", status: "done",
     body: ["App Tauri con cliente nativo del protocolo en Rust (dot-link): lista de sesiones, Activity, bandeja e instancia única.", "New chat sobre sesiones del daemon; aprobaciones, preguntas y planes con la autoridad en otra conexión nativa."] },
-  { id: "M9–M10", title: "Endurecimiento y continuidad", date: "2026-10-16", track: "dot", status: "current", release: "dot 0.1.0 β",
+  { id: "M9–M10", title: "Endurecimiento y continuidad", date: "2026-10-16", track: "dot", status: "done", release: "dot 0.1.0 β",
     body: ["Confirmación nativa de cada resolución sensible, identidad del par verificada por el SO en el lado de Dot e IPC privado.", "Una sesión viva de chat pasa al daemon con el mismo id y contexto: /detach, stratum detach, stratum attach."] },
+  { id: "M11–M12", title: "Conversación duradera y Desktop al protocolo", date: "2026-10-23", track: "dot", status: "current", release: "v0.9.0 · desktop 0.5.0",
+    body: ["Las sesiones del daemon guardan su conversación entera, compactan lo antiguo a una memoria de sesión con procedencia y sobreviven a un reinicio.", "Stratum Desktop deja su sidecar: es un cliente de stratumd, hermano de la CLI y de Dot, con el asistente embebido como agente."] },
+  { id: "M13–M18", title: "Dot como asistente virtual", date: "pendiente", track: "dot", status: "next",
+    body: ["Un agente embebido, companion, con memoria propia y exec solo dentro de una caja Docker; computer use en ella, rutinas y conectores."] },
   { id: "H18", title: "Tools de diagnóstico", date: "pendiente", track: "cli", status: "next",
     body: ["net_probe, sys_inspect, log_query y service_status."] },
   { id: "H19", title: "Diagnóstico verificado", date: "pendiente", track: "cli", status: "next",
@@ -99,6 +103,12 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "v0.11", title: "Plugins que vetan y comandos que pasan a segundo plano", date: "2026-10-29", match: /^feat\((cli|tui|jobs|plugins)\)|plugins en proceso/, since: "2026-10-23T23:00",
+    text: "Un plugin JS/TS puede vetar una llamada antes de las guardas o anotar lo que ve el modelo, nunca aprobar. Ctrl+B pasa un exec en curso a job sin matarlo. La TUI pinta cada tool por su intención (+N −M, líneas leídas), abre los subagentes en su ventana y estrena /btw y /context con desglose.",
+    pre: "❯ npm i -g stratum-cli\n❯ stratum plugin list\n✗ exec · vetado por plugin guard-env" },
+  { id: "v0.9–0.10", title: "Deshacer por turno y Desktop sobre stratumd", date: "2026-10-23", match: /\(desktop\)|feat\(protocol\)|\/undo|M1[12]/, since: "2026-10-17",
+    text: "/undo y /rewind deshacen los cambios de ficheros de un turno desde un git en la sombra. Las sesiones del daemon conservan la conversación y sobreviven a un reinicio. Stratum Desktop pasa a ser un cliente de stratumd: sus conversaciones se abren también desde Dot o con stratum attach.",
+    pre: "❯ /rewind\n↺ turno 3 · 2 ficheros restaurados\nStratum_0.7.0_x64-setup.exe · necesita stratum-cli ≥ 0.11" },
   { id: "dot 0.1.0 β", title: "Stratum Dot: tus sesiones, en una ventana (pre-release)", date: "2026-10-16", match: /\(dot\)/,
     text: "Primera versión pública, experimental: puede hacer cosas raras. Lista todas las sesiones vivas, las de stratumd y las de cada terminal; abre chats que sobreviven a la app, pausa, cancela y redirige runs, y aprueba lo que pide el agente con la clave en una ventana nativa.",
     pre: "Stratum.Dot_0.1.0_x64-setup.exe · .deb · .AppImage\nnecesita stratum-cli@beta · sin firma ni auto-update",
@@ -152,12 +162,9 @@ const PR_DETAILS = {
 };
 
 const ROADMAP = [
-  { id: "M11", title: "chat alojado en el daemon",
-    text: "Con los datos de M9 y M10, decidir si stratum chat pasa a vivir en stratumd por defecto.",
+  { id: "M13–M18", title: "Dot como asistente virtual",
+    text: "Dot aloja a companion: un agente del día a día con memoria propia, exec solo dentro de su caja Docker, computer use en ella, rutinas y conectores.",
     why: "siguiente del plano de control" },
-  { id: "M12", title: "Desktop al Stratum Protocol",
-    text: "Stratum Desktop deja su sidecar aislado y habla con stratumd, como Dot; las dos apps convergen.",
-    why: "una sola forma de alojar sesiones" },
   { id: "H18", title: "Diagnóstico puro",
     text: "net_probe, sys_inspect, log_query y service_status, sin dependencias externas.",
     why: "sustrato para el hito 19" },
@@ -173,12 +180,12 @@ const ROADMAP = [
 ];
 
 const DESK_CARDS = [
-  { t: "Sidecar Node SEA", d: "El core de la CLI compilado en un solo binario; las dependencias nativas se cargan desde los resources de Tauri." },
-  { t: "Canal autenticado", d: "Named pipe o unix socket, token por variable de entorno y tramas de 4 KiB como máximo antes de autenticar." },
-  { t: "Workspace confinado", d: "Cada conversación tiene su carpeta; las tools de fichero no salen de ella y exec no existe en este modo." },
-  { t: "Retención", d: "A los N días se comprime a tar.gz verificado; más tarde se purga. Abrir una conversación no cuenta como uso." },
-  { t: "Turnos en cola", d: "desktop.maxConcurrentTurns (2 por defecto) con cola FIFO; cancelar en cola ni siquiera llama al modelo." },
-  { t: "Checkpoints", d: "Tras cada tool y cada 60 s; al reabrir, un turno que se quedó a medias aparece como interrumpido." }
+  { t: "Cliente de stratumd", d: "Sin runtime ni sidecar propios: habla el Stratum Protocol con el daemon de la CLI y, si no hay ninguno, lo arranca. Cerrar la app no para nada." },
+  { t: "Asistente embebido", d: "Cada conversación es una sesión del agente assistant: carpeta propia, sin exec y con la memoria global, no la de un proyecto." },
+  { t: "Todas tus sesiones", d: "La lista enseña también las de la terminal y las de Dot, con su procedencia; las del daemon se continúan desde la app." },
+  { t: "Conversación duradera", d: "La conversación entera se guarda en el daemon y sobrevive a un reinicio; lo antiguo se compacta a una memoria de sesión." },
+  { t: "Provider y modelo", d: "Se eligen desde el cuadro de mensaje: primero el provider, después uno de sus modelos, por conversación." },
+  { t: "Auto-update", d: "Instaladores firmados para Windows y Linux; la app avisa de una versión nueva y nunca se instala sin que lo pidas." }
 ];
 
 const DOT_CARDS = [
@@ -339,7 +346,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.8.0",
+  version: "0.11.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -567,7 +574,7 @@ function renderMilestones() {
   $("#bar-desktop").innerHTML = bar(deskDone, deskTotal);
   $("#num-desktop").textContent = `${deskDone}/${deskTotal} (D0–D8)`;
   $("#bar-dot").innerHTML = bar(dotDone, dotTotal);
-  $("#num-dot").textContent = "M0–M10 de M12";
+  $("#num-dot").textContent = "M0–M12 de M18";
 
   const ordered = [...MILESTONES].reverse();
   $("#graph").innerHTML = ordered
@@ -942,7 +949,7 @@ hito       17 ✓ entornos y read-only · siguiente: 18
 commits    ${fmt(c.length)} <span class="dim">(${state.weekCommits} esta semana)</span>
 líneas     <span class="add">+${fmt(c.reduce((a, x) => a + (x.add || 0), 0))}</span> <span class="del">−${fmt(c.reduce((a, x) => a + (x.del || 0), 0))}</span>
 tests      1587 ✓
-desktop    D7 <span class="dim">(D0–D8)</span>
+desktop    0.7.0 <span class="dim">(cliente de stratumd)</span>
 fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span class="dim">● snapshot</span>`}`;
   },
   hitos: (arg) => {

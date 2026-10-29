@@ -1,8 +1,395 @@
 {
-  "generatedAt": "2026-10-16T14:17:50.7005512+02:00",
+  "generatedAt": "2026-10-29T17:50:05.5932663+01:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "402d2cbdf5a5bb14f7b93d1f43b4675a868abd8e",
+      "date": "2026-10-29T17:20:49+01:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.11.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "d1977fd8a8fcde5d6a399d7ca762e9a679f576f9",
+      "date": "2026-10-29T17:16:27+01:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.11.0 y Desktop 0.7.0",
+      "add": 39,
+      "del": 10,
+      "files": 9
+    },
+    {
+      "sha": "fc801ad2ee33e0a3ecf83b22011534a484fb6159",
+      "date": "2026-10-29T16:23:19+01:00",
+      "author": "Javi_1",
+      "subject": "docs(dot): dirección de Dot como asistente virtual (PRD §23, M13–M18)",
+      "add": 289,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "dda6b261cde37744f12fba9615e26580f37ab3b0",
+      "date": "2026-10-29T13:11:33+01:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): tarjetas de tool por intención",
+      "add": 734,
+      "del": 37,
+      "files": 5
+    },
+    {
+      "sha": "cf2542f398a76383091edcdd0b028749324ac879",
+      "date": "2026-10-29T08:49:00+01:00",
+      "author": "Javi_1",
+      "subject": "feat: cambios rápidos de la TUI y plugins en proceso (PL1)",
+      "add": 2992,
+      "del": 27,
+      "files": 53
+    },
+    {
+      "sha": "f148a83cc026a0bcc544bbe80dc184731a137cf2",
+      "date": "2026-10-28T21:26:21+01:00",
+      "author": "Javi_1",
+      "subject": "fix(cli): ventana de subagente en la pantalla alternativa y pie del prompt que cabe",
+      "add": 211,
+      "del": 35,
+      "files": 8
+    },
+    {
+      "sha": "e1194605f5d04cef6c8f523b62292048bde4d794",
+      "date": "2026-10-28T20:35:13+01:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): indicador de Stratum, subagentes en su ventana y TUI en español",
+      "add": 1428,
+      "del": 375,
+      "files": 41
+    },
+    {
+      "sha": "76ac9b0b5b9379e821b6af056e4611203f47a389",
+      "date": "2026-10-28T18:27:35+01:00",
+      "author": "Javi_1",
+      "subject": "docs: descartada la instrucción de compresión pegada al resultado de tool",
+      "add": 7,
+      "del": 4,
+      "files": 2
+    },
+    {
+      "sha": "5f64d1c996ec0943ce3f4c293db3a21202f7b758",
+      "date": "2026-10-28T18:23:34+01:00",
+      "author": "Javi_1",
+      "subject": "docs: compresión con prefijo medida contra llama.cpp y diseño de plugins corregido",
+      "add": 143,
+      "del": 28,
+      "files": 3
+    },
+    {
+      "sha": "fb8705700395ee3c66c1d9b1eb2433f2bcd63591",
+      "date": "2026-10-28T17:38:36+01:00",
+      "author": "Javi_1",
+      "subject": "feat(jobs): pasar a segundo plano un exec en curso con Ctrl+B (UX-4)",
+      "add": 700,
+      "del": 77,
+      "files": 17
+    },
+    {
+      "sha": "dfdec116ec537ca1f9e8a43c2f7fde8fade093b0",
+      "date": "2026-10-28T15:31:51+01:00",
+      "author": "Javi_1",
+      "subject": "feat(agent): compresión que reutiliza el prefijo cacheado (opt-in)",
+      "add": 1108,
+      "del": 33,
+      "files": 19
+    },
+    {
+      "sha": "641125416c7bd9bd125b3659207b0cec0da1d109",
+      "date": "2026-10-28T14:48:43+01:00",
+      "author": "Javi_1",
+      "subject": "feat(eval): replay de una sesión grabada (Eval-1)",
+      "add": 843,
+      "del": 4,
+      "files": 10
+    },
+    {
+      "sha": "9dcc659d7400461a0e5641f5cbd0dbaadff1a16b",
+      "date": "2026-10-28T14:11:48+01:00",
+      "author": "Javi_1",
+      "subject": "feat(agent): aviso de llamada repetida (Loop-1) y tools contadas una vez en M11",
+      "add": 361,
+      "del": 50,
+      "files": 11
+    },
+    {
+      "sha": "ace19a876cdc8ea5a8017a4259744261d0fe6c34",
+      "date": "2026-10-28T00:13:36+01:00",
+      "author": "Javi_1",
+      "subject": "feat(tui): /context con desglose de la entrada y calibración corregida",
+      "add": 317,
+      "del": 26,
+      "files": 11
+    },
+    {
+      "sha": "10fea6db35adb749a18a78e12cc8cfc5b7b99197",
+      "date": "2026-10-27T23:51:26+01:00",
+      "author": "Javi_1",
+      "subject": "feat(tools): lecturas del lote en paralelo (2) y escrituras de barrera",
+      "add": 195,
+      "del": 78,
+      "files": 6
+    },
+    {
+      "sha": "f24ce76446cbba211ed7eb91a0e8875c21f00a94",
+      "date": "2026-10-27T23:22:04+01:00",
+      "author": "Javi_1",
+      "subject": "feat(tui): /btw, /verbosity persistido y uso de sesión al reanudar",
+      "add": 729,
+      "del": 37,
+      "files": 23
+    },
+    {
+      "sha": "480fe38e7931beca9726a4f3942d6f6846ad1810",
+      "date": "2026-10-23T22:43:19+02:00",
+      "author": "Javi_1",
+      "subject": "test(dot-link): buscar el último setModel sin recorrerlo entero (clippy)",
+      "add": 2,
+      "del": 2,
+      "files": 1
+    },
+    {
+      "sha": "c8798d33aa7c40c8443ea3cbc7a6402ca42f0549",
+      "date": "2026-10-23T22:27:46+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.10.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "f0bef56bb91af58e00f60011c181e89ea940cdc9",
+      "date": "2026-10-23T22:23:54+02:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.10.0 y Desktop 0.6.0",
+      "add": 24,
+      "del": 6,
+      "files": 7
+    },
+    {
+      "sha": "94ef49791739bfa3664a4effd25441ac50b917fd",
+      "date": "2026-10-23T22:23:18+02:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): elegir provider y modelo desde el composer",
+      "add": 484,
+      "del": 86,
+      "files": 19
+    },
+    {
+      "sha": "92fcf1773b8cde9de74fe08d7cd7de334e6a416d",
+      "date": "2026-10-23T21:26:17+02:00",
+      "author": "Javi_1",
+      "subject": "test(tui): leer el frame de markdown antes de desmontar Ink",
+      "add": 3,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "635c1f2367ec0f22b3cff5631150292f42ce0a0a",
+      "date": "2026-10-23T21:16:01+02:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.9.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "876153c2e9b7af7fde40d7c73842c16222520c57",
+      "date": "2026-10-23T21:11:20+02:00",
+      "author": "Javi_1",
+      "subject": "test: plazo de 20 s en dos tests que lanzan procesos reales",
+      "add": 4,
+      "del": 2,
+      "files": 2
+    },
+    {
+      "sha": "369ba464886fdc6b14d8960ab9ecdced8651c356",
+      "date": "2026-10-23T21:03:02+02:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.9.0 y Desktop 0.5.0",
+      "add": 31,
+      "del": 9,
+      "files": 7
+    },
+    {
+      "sha": "c805289684a6c60e9727be027b3c838711530dda",
+      "date": "2026-10-23T20:53:35+02:00",
+      "author": "Javi_1",
+      "subject": "fix(tui): tablas de markdown, entidades HTML y huecos entre respuestas",
+      "add": 192,
+      "del": 15,
+      "files": 5
+    },
+    {
+      "sha": "61bc1431c9b237ed83c5acb54b8d28bc8dc907f9",
+      "date": "2026-10-23T20:38:44+02:00",
+      "author": "Javi_1",
+      "subject": "fix(tui): turno cerrado resumido, paneles y barra de estado bajo el input y fondo negro",
+      "add": 391,
+      "del": 56,
+      "files": 16
+    },
+    {
+      "sha": "f2ec3c879988aa42c00d12b7468e6cbeb591a09a",
+      "date": "2026-10-23T15:52:54+02:00",
+      "author": "Javi_1",
+      "subject": "feat(protocol): sessions.revert — deshacer turnos desde un cliente",
+      "add": 572,
+      "del": 7,
+      "files": 11
+    },
+    {
+      "sha": "b522a7025ca24f0d0b647f48eb0e0e9c69f848b0",
+      "date": "2026-10-23T15:52:53+02:00",
+      "author": "Javi_1",
+      "subject": "perf(daemon): EventHub serializa cada evento una sola vez",
+      "add": 180,
+      "del": 5,
+      "files": 4
+    },
+    {
+      "sha": "2e7ac8921bd297c7874127867db65d90cc0a0e5c",
+      "date": "2026-10-23T14:53:23+02:00",
+      "author": "Javi_1",
+      "subject": "feat(protocol): Contrato-1 — cerrar el contrato v1 del protocolo",
+      "add": 1253,
+      "del": 112,
+      "files": 29
+    },
+    {
+      "sha": "2c6f372d092dbf120ef8a77a4926ba15d944ba60",
+      "date": "2026-10-23T14:53:22+02:00",
+      "author": "Javi_1",
+      "subject": "style: formato de prettier en snapshots, App y schema de config",
+      "add": 208,
+      "del": 149,
+      "files": 8
+    },
+    {
+      "sha": "69daf7db89dbd27f4ccc38f019467cb2361cf5b7",
+      "date": "2026-10-23T12:30:29+02:00",
+      "author": "Javi_1",
+      "subject": "feat(ux): deshacer por turno, edición tolerante con LSP y telemetría de la TUI",
+      "add": 9155,
+      "del": 147,
+      "files": 72
+    },
+    {
+      "sha": "17b56517ca5735e1a9d2907c9c08914c4b7eb807",
+      "date": "2026-10-23T10:14:41+02:00",
+      "author": "Javi_1",
+      "subject": "fix(tests): format warning assertion for clarity in session conversation tests",
+      "add": 252,
+      "del": 2,
+      "files": 4
+    },
+    {
+      "sha": "6489f52e5b16f160aea1aa5289874d6e74b82ebd",
+      "date": "2026-10-23T07:53:19+02:00",
+      "author": "Javi_1",
+      "subject": "Merge branch 'feat/builtin-skills'",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "6c101de253a6a8a29e76b5ac73022b8621a6afb3",
+      "date": "2026-10-23T07:53:19+02:00",
+      "author": "Javi_1",
+      "subject": "feat(skills): skills de serie, read_skill y memoria por preset",
+      "add": 1888,
+      "del": 204,
+      "files": 71
+    },
+    {
+      "sha": "8545a375bb7c7b2f060aad2e87e40182d5450741",
+      "date": "2026-10-22T21:40:09+02:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): retoque visual — ámbar solo para lo principal",
+      "add": 616,
+      "del": 101,
+      "files": 11
+    },
+    {
+      "sha": "86462f68da29163fbe3fe4061b911d54cf4b857d",
+      "date": "2026-10-19T17:20:08+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #12 from choruzo/feat/m12-desktop-client",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "5b5c8e3c576c195958a1bda46b1abc6ec792eccc",
+      "date": "2026-10-19T17:07:59+02:00",
+      "author": "Javi_1",
+      "subject": "feat(m12): Stratum Desktop como cliente hermano de stratumd",
+      "add": 8270,
+      "del": 23244,
+      "files": 198
+    },
+    {
+      "sha": "55b3d8bfe2e875dd1cb727e1c96dda255e9276b7",
+      "date": "2026-10-19T11:22:29+02:00",
+      "author": "Javi Martin",
+      "subject": "docs: define shared client architecture before M12",
+      "add": 162,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "37e6522b48a69db34724e6e39a44e4d9f69542c8",
+      "date": "2026-10-18T22:20:25+02:00",
+      "author": "Javi Martin",
+      "subject": "Merge pull request #10 from choruzo/feat/m11-session-memory",
+      "add": 0,
+      "del": 0,
+      "files": 0
+    },
+    {
+      "sha": "fd501188a24dded4a19bc9e0588804462fb5a470",
+      "date": "2026-10-18T22:03:40+02:00",
+      "author": "Javi_1",
+      "subject": "test(daemon): esperar a la fila de auditoría del comando aprobado",
+      "add": 3,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "b674b88846c25dd1d827628b9aceafb8c274b9cb",
+      "date": "2026-10-18T21:53:12+02:00",
+      "author": "Javi_1",
+      "subject": "test(dot): smokes con la garantía de M11 (las sesiones del daemon vuelven)",
+      "add": 25,
+      "del": 17,
+      "files": 3
+    },
+    {
+      "sha": "76d7f547b67a34ed2feb435e2002cc4c6f930a72",
+      "date": "2026-10-18T21:26:54+02:00",
+      "author": "Javi_1",
+      "subject": "feat(m11): conversación duradera y memoria de sesión en stratumd",
+      "add": 5750,
+      "del": 112,
+      "files": 44
+    },
+    {
+      "sha": "ea5e0b3e5878b4b182b76d29c198d2e5f855537e",
+      "date": "2026-10-16T14:18:04+02:00",
+      "author": "Javi_1",
+      "subject": "fix(landing): nombre real del instalador de Dot",
+      "add": 28,
+      "del": 10,
+      "files": 6
+    },
     {
       "sha": "8394ab1d68ab1e11b6fef552a63a818541f4b41f",
       "date": "2026-10-16T14:07:36+02:00",
@@ -2778,6 +3165,30 @@
   ],
   "tags": [
     {
+      "name": "desktop-v0.7.0",
+      "date": "2026-10-29T17:20:49+01:00"
+    },
+    {
+      "name": "v0.11.0",
+      "date": "2026-10-29T17:20:49+01:00"
+    },
+    {
+      "name": "desktop-v0.6.0",
+      "date": "2026-10-23T22:27:46+02:00"
+    },
+    {
+      "name": "v0.10.0",
+      "date": "2026-10-23T22:27:46+02:00"
+    },
+    {
+      "name": "v0.9.0",
+      "date": "2026-10-23T21:26:17+02:00"
+    },
+    {
+      "name": "desktop-v0.5.0",
+      "date": "2026-10-23T21:03:02+02:00"
+    },
+    {
       "name": "dot-v0.1.0",
       "date": "2026-10-16T14:05:57+02:00"
     },
@@ -2871,6 +3282,28 @@
     }
   ],
   "prs": [
+    {
+      "additions": 8270,
+      "createdAt": "2026-10-19T15:19:45Z",
+      "deletions": 23244,
+      "headRefName": "feat/m12-desktop-client",
+      "mergedAt": "2026-10-19T15:20:09Z",
+      "number": 12,
+      "state": "MERGED",
+      "title": "feat(m12): Stratum Desktop como cliente hermano de stratumd",
+      "url": "https://github.com/choruzo/CLI/pull/12"
+    },
+    {
+      "additions": 5778,
+      "createdAt": "2026-10-18T19:40:20Z",
+      "deletions": 130,
+      "headRefName": "feat/m11-session-memory",
+      "mergedAt": "2026-10-18T20:20:26Z",
+      "number": 10,
+      "state": "MERGED",
+      "title": "M11: conversación duradera y memoria de sesión en stratumd",
+      "url": "https://github.com/choruzo/CLI/pull/10"
+    },
     {
       "additions": 4748,
       "createdAt": "2026-10-16T11:36:28Z",
