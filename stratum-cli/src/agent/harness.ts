@@ -1,4 +1,4 @@
-import type { StratumConfig } from '../config/schema.js';
+import type { ModelVision, StratumConfig } from '../config/schema.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
@@ -1148,6 +1148,8 @@ export class ReactLoop {
        * request: con fallback, cada llamada se factura con quien la atendió.
        */
       readonly pricing?: Pricing;
+      /** M15 — visión declarada del modelo activo; ausente = sin visión. */
+      readonly vision?: ModelVision;
       advanceProvider(): { name: string; model: string } | null;
     },
     /**
@@ -2161,6 +2163,8 @@ export class ReactLoop {
           pause,
           // El steering es del agente principal: un subagente nunca lo ve.
           supersededBySteering: () => (steeringPending() ? SUPERSEDED_BY_STEERING : null),
+          // M15: la del modelo que atendió esta petición (un fallback la cambia).
+          vision: this.router?.vision,
         };
 
         const dispatchStart = performance.now();

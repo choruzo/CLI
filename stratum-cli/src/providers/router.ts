@@ -1,5 +1,5 @@
 import { DEFAULT_CONTEXT_WINDOW } from '../config/schema.js';
-import type { StratumConfig, ProviderConfig } from '../config/schema.js';
+import type { StratumConfig, ProviderConfig, ModelVision } from '../config/schema.js';
 import type { IProvider } from './base.js';
 import { OpenAICompatible } from './openai-compatible.js';
 import { classifyBackendByUrl, discoveredContextWindow } from './utils.js';
@@ -205,6 +205,16 @@ export class ProviderRouter {
   get pricing(): Pricing | undefined {
     const cfg = this.activeConfig;
     return cfg.models?.[cfg.model]?.pricing ?? cfg.pricing;
+  }
+
+  /**
+   * M15 — visión del modelo activo, solo si su ajuste (`models.<id>.vision`) la
+   * declara; `undefined` = sin visión. Se lee por request, como `pricing`: un
+   * fallback a un modelo sin visión deja de recibir imágenes.
+   */
+  get vision(): ModelVision | undefined {
+    const cfg = this.activeConfig;
+    return cfg.models?.[cfg.model]?.vision;
   }
 
   /**

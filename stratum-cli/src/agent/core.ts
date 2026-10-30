@@ -67,6 +67,7 @@ import {
   type PromptPreset,
 } from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
+import { SCREEN_SCREENSHOT_TOOL, SCREEN_TOOLS } from '../tools/screen/names.js';
 import {
   profileAllows,
   resolveSessionProfile,
@@ -1388,12 +1389,19 @@ export class StratumAgent {
     if (this.preset === 'companion') {
       const box =
         this.registry.get('exec') && this.config.box?.enabled ? this.config.box.name : null;
+      // M15: la pantalla, si están sus tools y el modelo activo tiene visión
+      // (el mismo criterio con el que `makeLoop` las ofrece).
+      const screen =
+        box !== null &&
+        this.registry.get(SCREEN_SCREENSHOT_TOOL) !== undefined &&
+        !!this.router.vision;
       return {
         modelId: this.router.model,
         providerName: this.router.providerName,
         preset: 'companion',
         skills: this.skillsBlock,
         ...(box ? { box } : {}),
+        ...(screen ? { boxScreen: true } : {}),
       };
     }
     const active = this._activeProfile;
@@ -1496,7 +1504,9 @@ export class StratumAgent {
         // Sin `isSubagent`: el principal conserva `question`/`todo`. Las tools de
         // control pasan aunque el perfil no las liste; `delegate_task` no.
         // Hito 17: el perfil de sesión se compone con el del agente principal.
-        toolsetFilter:
+        // M15: un modelo sin visión declarada no ve las `screen_*` (se decide
+        // por turno: el modelo de la sesión puede cambiar entre turnos).
+        toolsetFilter: composeToolsetFilters(
           this.preset === 'assistant'
             ? assistantToolsetFilter({ workspace: this.workspace !== undefined })
             : this.preset === 'companion'
@@ -1505,6 +1515,8 @@ export class StratumAgent {
                   this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
                   active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
                 ),
+          this.router.vision ? undefined : { hiddenTools: SCREEN_TOOLS },
+        ),
       },
     );
   }

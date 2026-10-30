@@ -11,6 +11,7 @@ import type { EnvironmentConfig, StratumConfig } from '../config/schema.js';
 import { formatTarget, parseTarget } from './exec/target.js';
 import { readOnlyCommandVerdict } from './readonly-commands.js';
 import { JOB_TOOLS } from '../jobs/types.js';
+import { isScreenTool, SCREEN_READ_TOOLS } from './screen/names.js';
 
 export type EnvironmentTier = 'production' | 'staging' | 'development';
 export type EnvironmentPolicy = 'allow' | 'ask' | 'confirm-always';
@@ -154,7 +155,25 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
-export function callEffects(name: string, input: Record<string, unknown>): CallEffects {
+export function callEffects(
+  name: string,
+  input: Record<string, unknown>,
+  config?: Pick<StratumConfig, 'box'>,
+): CallEffects {
+  // M15 — la pantalla de la caja: capturar (y esperar) observa; el resto
+  // actúa dentro de ella. El target es la caja configurada (sin config, la de
+  // por defecto: solo lo usa el reparto de lecturas en paralelo).
+  if (isScreenTool(name)) {
+    const target = `container:${config?.box?.name ?? 'box'}`;
+    return SCREEN_READ_TOOLS.includes(name)
+      ? { known: true, mutating: false, targets: [{ target, mutating: false }] }
+      : {
+          known: true,
+          mutating: true,
+          targets: [{ target, mutating: true }],
+          reason: `${name} acts on the box screen`,
+        };
+  }
   if (LOCAL_READERS.has(name)) {
     return { known: true, mutating: false, targets: [{ target: 'local', mutating: false }] };
   }

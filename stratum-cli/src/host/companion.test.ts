@@ -15,6 +15,7 @@ import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { ASSISTANT_TOOLS, COMPANION_TOOLS } from '../agent/presets.js';
 import { buildCompanionPrompt } from '../agent/system-prompt.js';
+import { isScreenTool, SCREEN_TOOLS } from '../tools/screen/names.js';
 import { containerBackend } from '../tools/exec/backends/container.js';
 import { localBackend } from '../tools/exec/backends/local.js';
 import { sshBackend } from '../tools/exec/backends/ssh.js';
@@ -29,7 +30,10 @@ import type { AgentEvent } from '../agent/types.js';
 const root = realpathSync(mkdtempSync(join(tmpdir(), 'stratum-companion-')));
 afterAll(() => rmSync(root, { recursive: true, force: true }));
 
-function makeConfig(extra: Record<string, unknown> = {}): StratumConfig {
+function makeConfig(
+  extra: Record<string, unknown> = {},
+  vision?: 'pixels' | 'norm1000',
+): StratumConfig {
   return StratumConfigSchema.parse({
     provider: {
       default: 'test',
@@ -40,6 +44,10 @@ function makeConfig(extra: Record<string, unknown> = {}): StratumConfig {
           apiKey: '',
           model: 'test-model',
           contextWindow: 32768,
+          models: {
+            'other-model': {},
+            ...(vision ? { 'test-model': { vision: { coordinates: vision } } } : {}),
+          },
         },
       },
     },
@@ -68,10 +76,18 @@ afterEach(async () => {
 let n = 0;
 async function companionHost(
   provider: MockProvider,
-  opts: { box?: boolean; extra?: Partial<SessionHostOptions> } = {},
+  opts: {
+    box?: boolean;
+    boxConfig?: Record<string, unknown>;
+    vision?: 'pixels' | 'norm1000';
+    extra?: Partial<SessionHostOptions>;
+  } = {},
 ): Promise<{ host: SessionHost; dataDir: string }> {
   const dataDir = join(root, `data-${++n}`);
-  const config = makeConfig(opts.box === false ? {} : { box: { enabled: true, name: 'box' } });
+  const config = makeConfig(
+    opts.box === false ? {} : { box: { enabled: true, name: 'box', ...opts.boxConfig } },
+    opts.vision,
+  );
   const router = new ProviderRouter(config);
   vi.spyOn(router, 'getActive').mockReturnValue(provider);
   const host = await SessionHost.create({
@@ -114,7 +130,9 @@ describe('companion — prompt y toolset', () => {
     const provider = new RecordingProvider([makeTextRound('hola')]);
     const { host } = await companionHost(provider);
     await collect(host.run('hola'));
-    expect(offered(provider)).toEqual([...COMPANION_TOOLS].sort());
+    // Sin visión declarada, ni rastro de la pantalla.
+    expect(offered(provider)).toEqual(COMPANION_TOOLS.filter((t) => !isScreenTool(t)).sort());
+    expect(host.agent.getMessages()[0]?.content).not.toContain('# Your box screen');
     for (const tool of ['read_file', 'write_file', 'list_directory', 'glob', 'grep']) {
       expect(offered(provider)).not.toContain(tool);
     }
@@ -208,6 +226,91 @@ describe('companion — exec solo en su caja (§23.3)', () => {
     expect(events.some((e) => e.type === 'tool_error')).toBe(false);
     expect(box).toHaveBeenCalledTimes(2);
     expect(confirm).not.toHaveBeenCalled();
+  });
+});
+
+function pngBase64(width: number, height: number): string {
+  const ihdr = Buffer.alloc(25);
+  ihdr.writeUInt32BE(13, 0);
+  ihdr.write('IHDR', 4, 'ascii');
+  ihdr.writeUInt32BE(width, 8);
+  ihdr.writeUInt32BE(height, 12);
+  return Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    ihdr,
+  ]).toString('base64');
+}
+
+describe('companion — la pantalla de su caja (M15, §23.4)', () => {
+  it('con visión declarada y caja con escritorio: las screen_* y su bloque de prompt', async () => {
+    const provider = new RecordingProvider([makeTextRound('hola')]);
+    const { host } = await companionHost(provider, { vision: 'pixels' });
+    await collect(host.run('hola'));
+    expect(offered(provider)).toEqual([...COMPANION_TOOLS].sort());
+    expect(host.agent.getMessages()[0]?.content).toContain('# Your box screen');
+  });
+
+  it('una imagen propia sin `desktop` no registra la pantalla, aunque haya visión', async () => {
+    const provider = new RecordingProvider([makeTextRound('hola')]);
+    const { host } = await companionHost(provider, {
+      vision: 'pixels',
+      boxConfig: { image: 'mi/imagen:1' },
+    });
+    await collect(host.run('hola'));
+    for (const t of SCREEN_TOOLS) expect(offered(provider)).not.toContain(t);
+    expect(offered(provider)).toContain('exec');
+  });
+
+  it('cambiar a un modelo sin visión las retira en el turno siguiente', async () => {
+    const provider = new RecordingProvider([makeTextRound('uno'), makeTextRound('dos')]);
+    const { host } = await companionHost(provider, { vision: 'norm1000' });
+    await collect(host.run('uno'));
+    expect(offered(provider)).toContain('screen_click');
+    host.agent.switchModel('other-model');
+    await collect(host.run('dos'));
+    const second = (provider.requests[1]?.tools ?? []).map((t) => t.function.name);
+    for (const t of SCREEN_TOOLS) expect(second).not.toContain(t);
+  });
+
+  it('un modelo sin visión que la inventa: se veta sin llegar a la caja', async () => {
+    const box = vi.spyOn(containerBackend, 'run');
+    const { host } = await companionHost(
+      new MockProvider([
+        makeToolCallRound('c1', 'screen_click', { x: 10, y: 10 }),
+        makeTextRound('vale'),
+      ]),
+    );
+    const events = await collect(host.run('pulsa'));
+    const err = events.find((e) => e.type === 'tool_error') as { blocked?: string } | undefined;
+    expect(err?.blocked).toBe('toolset');
+    expect(box).not.toHaveBeenCalled();
+  });
+
+  it('con visión, actuar en su pantalla no pide aprobación (la caja es su radio)', async () => {
+    const box = vi.spyOn(containerBackend, 'run').mockImplementation(async (_t, req) => ({
+      status: 'exited',
+      exitCode: 0,
+      stdout: req.command.includes('getdisplaygeometry') ? '1280 800\n' : pngBase64(1280, 800),
+      stderr: '',
+    }));
+    const confirm = vi.fn(async () => 'deny' as const);
+    const { host } = await companionHost(
+      new MockProvider([
+        makeToolCallRound('c1', 'screen_click', { x: 10, y: 10 }),
+        makeToolCallRound('c2', 'screen_type', { text: 'hola' }),
+        makeTextRound('hecho'),
+      ]),
+      { vision: 'pixels', extra: { destructivePolicy: 'ask', gates: { confirm } } },
+    );
+    const events = await collect(host.run('escribe hola'));
+    const results = events.filter((e) => e.type === 'tool_result') as { result: string }[];
+    expect(results).toHaveLength(2);
+    expect(confirm).not.toHaveBeenCalled();
+    expect(box).toHaveBeenCalled();
+    // La imagen nunca va en el texto del resultado ni en el historial.
+    const history = JSON.stringify(host.agent.getMessages());
+    expect(history).not.toContain(pngBase64(1280, 800));
+    for (const r of results) expect(r.result).toContain('1280×800');
   });
 });
 

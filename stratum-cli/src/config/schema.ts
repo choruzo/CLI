@@ -21,6 +21,20 @@ const PricingSchema = z
   })
   .strict();
 
+/**
+ * M15 — visión declarada de un modelo (PRD de Stratum Dot §23.13 A7).
+ * `coordinates`: cómo da el modelo un punto de la pantalla. `pixels`, en
+ * píxeles de la captura; `norm1000`, normalizado a 0–1000 en cada eje (lo que
+ * devuelven `gemma4` o `qwen3.6`: sin reescalar, parecen ciegos).
+ */
+export const ModelVisionSchema = z
+  .object({
+    coordinates: z.enum(['pixels', 'norm1000']).default('pixels'),
+  })
+  .strict();
+
+export type ModelVision = z.infer<typeof ModelVisionSchema>;
+
 const ProviderConfigSchema = z.object({
   type: z.literal('openai-compatible'),
   baseUrl: z.string().url(),
@@ -45,6 +59,12 @@ const ProviderConfigSchema = z.object({
           contextWindow: z.number().int().positive().optional(),
           /** Precio propio del modelo: en una pasarela cada modelo cuesta lo suyo. */
           pricing: PricingSchema.optional(),
+          /**
+           * M15 — el modelo ve imágenes (computer use en la caja). Solo
+           * declarada: ni se descubre por `/models` ni se sondea. Ausente → sin
+           * visión, y las tools `screen_*` no se ofrecen.
+           */
+          vision: ModelVisionSchema.optional(),
         })
         .strict(),
     )
@@ -435,8 +455,19 @@ export const BoxConfigSchema = z
      * siguiente `box start`, sin borrar su home.
      */
     network: z.boolean().default(true),
+    /**
+     * M15 — la imagen trae escritorio virtual (Xvfb en `:99`, `xdotool`,
+     * ImageMagick): sin él no hay tools `screen_*`. Ausente: sí con la imagen
+     * de Stratum, no con una propia (`image`), que tiene que declararlo.
+     */
+    desktop: z.boolean().optional(),
   })
   .strict();
+
+/** ¿Tiene escritorio la caja configurada? (M15: de él dependen las tools `screen_*`). */
+export function boxHasDesktop(box: z.infer<typeof BoxConfigSchema>): boolean {
+  return box.desktop ?? box.image === undefined;
+}
 
 /** Gramática de un id de plugin (la de los perfiles): minúsculas, dígitos y `-`. */
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;

@@ -1,5 +1,6 @@
 import type { ToolsetFilter } from '../tools/registry.js';
 import type { ProtocolAgent } from '../protocol/index.js';
+import { SCREEN_TOOLS } from '../tools/screen/names.js';
 
 /**
  * Presets de prompt (Stratum Desktop D1, punto ciego 16.6).
@@ -95,9 +96,10 @@ export function embeddedAgentName(preset: PromptPreset): string | null {
  * Toolset del `companion`: el del asistente sin ficheros del anfitrión, más
  * `exec`, que su registry solo deja apuntar a su caja (`host/companion.ts`).
  * `exec` solo existe si la caja está habilitada: sin ella, el `companion`
- * trabaja como el asistente sin carpeta.
+ * trabaja como el asistente sin carpeta. M15: las `screen_*`, con una caja con
+ * escritorio, y solo se ofrecen a un modelo con visión (`makeLoop`).
  */
-export const COMPANION_TOOLS: readonly string[] = [...ASSISTANT_TOOLS, 'exec'];
+export const COMPANION_TOOLS: readonly string[] = [...ASSISTANT_TOOLS, 'exec', ...SCREEN_TOOLS];
 
 export function companionToolsetFilter(): ToolsetFilter {
   return { allowedTools: COMPANION_TOOLS };
@@ -108,7 +110,7 @@ export function companionAgentInfo(): ProtocolAgent {
   return {
     name: COMPANION_AGENT,
     description:
-      "Stratum Dot's assistant: web, its own memory and a shell only inside its own box. " +
+      "Stratum Dot's assistant: web, its own memory and a shell and a screen only inside its own box. " +
       'It never runs commands on this machine.',
     mode: 'primary',
     origin: 'builtin',

@@ -1,7 +1,9 @@
 import { mkdirSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
-import type { StratumConfig } from '../config/schema.js';
+import { boxHasDesktop, type StratumConfig } from '../config/schema.js';
+import { createScreenTools } from '../tools/screen/screen.js';
+import { isScreenTool } from '../tools/screen/names.js';
 import { COMPANION_TOOLS } from '../agent/presets.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { webSearchTool } from '../tools/web/search.js';
@@ -95,7 +97,13 @@ export function buildCompanionRegistry(config: StratumConfig): ToolRegistry {
   }
   const box = companionExecTarget(config);
   if (box) registry.register(createExecTool(config, { onlyTarget: box }));
-  const expected = COMPANION_TOOLS.filter((name) => box !== null || name !== EXEC_TOOL);
+  // M15 — la pantalla de su caja, si la caja tiene escritorio. Que el modelo
+  // tenga visión se decide por turno (`makeLoop`): el modelo puede cambiar.
+  const screen = box !== null && box.kind === 'container' && boxHasDesktop(config.box);
+  if (screen) for (const tool of createScreenTools(box)) registry.register(tool);
+  const expected = COMPANION_TOOLS.filter(
+    (name) => (box !== null || name !== EXEC_TOOL) && (screen || !isScreenTool(name)),
+  );
   const missing = expected.filter((name) => !registry.get(name));
   if (missing.length > 0) throw new Error(`faltan tools del companion: ${missing.join(', ')}`);
   return registry;

@@ -32,6 +32,9 @@ export const READ_ONLY_SESSION_TOOLS: readonly string[] = [
   'recall_decisions',
   'read_skill',
   'exec',
+  // M15 — mirar la pantalla de la caja; actuar en ella se veta.
+  'screen_screenshot',
+  'screen_wait',
   // El hijo hereda el modo read-only (RunOptions.readOnly).
   'delegate_task',
 ];
@@ -56,7 +59,7 @@ export function readOnlyVeto(
   input: Record<string, unknown>,
   ctx: Pick<ToolContext, 'readOnly' | 'config' | 'workspace'>,
 ): ToolResult | null {
-  const effects = callEffects(name, input);
+  const effects = callEffects(name, input, ctx.config);
   if (ctx.readOnly && effects.mutating) {
     return reject(
       `Read-only session: ${effects.reason ?? `${name} changes state`}. ` +
@@ -89,7 +92,7 @@ export function requirePlanViolation(
   workspace?: WorkspaceConfinement,
 ): { env: ResolvedEnvironment; target: string } | null {
   if (workspace) return null;
-  for (const t of callEffects(name, input).targets) {
+  for (const t of callEffects(name, input, config).targets) {
     if (!t.mutating) continue;
     const env = resolveEnvironment(t.target, config);
     if (env?.requirePlan) return { env, target: t.target };
@@ -122,7 +125,7 @@ export function environmentGate(
 ): EnvironmentGate | null {
   if (ctx.workspace) return null;
   let gate: EnvironmentGate | null = null;
-  for (const t of callEffects(name, input).targets) {
+  for (const t of callEffects(name, input, ctx.config).targets) {
     if (!t.mutating) continue;
     const env = resolveEnvironment(t.target, ctx.config);
     if (!env) continue;

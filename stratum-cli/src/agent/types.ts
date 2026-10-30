@@ -1,5 +1,5 @@
 import type { ZodTypeAny } from 'zod';
-import type { StratumConfig } from '../config/schema.js';
+import type { ModelVision, StratumConfig } from '../config/schema.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider } from '../providers/base.js';
 import type { FileStateTracker } from '../tools/fs/file-state.js';
@@ -272,6 +272,11 @@ export interface ToolContext {
   plugins?: PluginHost;
   /** Quién hace las llamadas, para los hooks de plugin. Ausente → el principal. */
   pluginAgent?: PluginAgentRef;
+  /**
+   * M15 — visión del modelo que hace las llamadas (`models.<id>.vision`).
+   * Ausente → sin visión: las tools `screen_*` se niegan a ejecutar.
+   */
+  vision?: ModelVision;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */
@@ -287,8 +292,26 @@ export interface WorkspaceConfinement {
   writable?: string[];
 }
 
+/**
+ * M15 — una captura de pantalla que devuelve una tool `screen_*`. Viaja junto
+ * al resultado hasta el loop, que decide si va al modelo (solo las últimas y
+ * solo a un modelo con visión). Nunca entra en el historial, ni en la traza, ni
+ * en los logs, ni en eventos: no se puede redactar.
+ */
+export interface ToolImage {
+  mime: 'image/png';
+  /** PNG en base64. */
+  data: string;
+  width: number;
+  height: number;
+  /** Tamaño del PNG en bytes. */
+  bytes: number;
+  /** sha256 del PNG, en hex. */
+  sha256: string;
+}
+
 export type ToolResult =
-  | { ok: true; output: string }
+  | { ok: true; output: string; image?: ToolImage }
   | {
       ok: false;
       error: string;

@@ -406,3 +406,29 @@ describe('la caja como entorno (M13)', () => {
     expect(veto).toMatchObject({ ok: false });
   });
 });
+
+describe('callEffects — pantalla de la caja (M15)', () => {
+  const boxed = cfg({ box: { enabled: true, name: 'mibox' } });
+
+  it('capturar y esperar observan; el resto muta en la caja configurada', () => {
+    for (const name of ['screen_screenshot', 'screen_wait']) {
+      expect(callEffects(name, {}, boxed)).toEqual({
+        known: true,
+        mutating: false,
+        targets: [{ target: 'container:mibox', mutating: false }],
+      });
+    }
+    for (const name of ['screen_click', 'screen_type', 'screen_key', 'screen_scroll']) {
+      const e = callEffects(name, {}, boxed);
+      expect(e).toMatchObject({ known: true, mutating: true });
+      expect(e.targets).toEqual([{ target: 'container:mibox', mutating: true }]);
+    }
+  });
+
+  it('el entorno implícito de la caja deja actuar sin confirmar; read-only veta actuar, no mirar', () => {
+    const ctx = { config: boxed };
+    expect(environmentGate('screen_click', {}, ctx)?.env.policy).toBe('allow');
+    expect(readOnlyVeto('screen_click', {}, { ...ctx, readOnly: true })).not.toBeNull();
+    expect(readOnlyVeto('screen_screenshot', {}, { ...ctx, readOnly: true })).toBeNull();
+  });
+});
