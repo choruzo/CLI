@@ -19,7 +19,7 @@
     "smoke:terminal": "cargo build -p dot-link && node scripts/smoke-terminal.mjs",
     "smoke:detach": "cargo build -p dot-link && node scripts/smoke-detach.mjs",
     "e2e:build": "tauri build --debug --no-bundle",
-    "e2e": "node e2e/dot.e2e.mjs && node e2e/chat.e2e.mjs && node e2e/approvals.e2e.mjs",
+    "e2e": "node e2e/dot.e2e.mjs && node e2e/chat.e2e.mjs && node e2e/approvals.e2e.mjs && node e2e/assistant.e2e.mjs",
     "tauri": "tauri"
   },
   "dependencies": {

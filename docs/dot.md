@@ -423,7 +423,7 @@ confianza, por separado: §14.3.
 | **Chat contra un daemon real** (M7), sin ventana: abrir, conversar en varios turnos, `BUSY`, cerrar y reabrir Dot, dos chats, convivencia con una sesión de terminal, muerte del daemon | `scripts/smoke-chat.mjs` | `npm run smoke:chat` |
 | **Aprobar contra un daemon real** (M8), sin ventana: clave mala y buena, aprobar y la tool corre, denegar, id de otra sesión, frase de un entorno de producción, `allow-all` por sesión, preguntas, planes, dos Dot a la vez, pausa (y pausa + steering), cerrar y reabrir Dot, reinicio del daemon, bloquear, la clave en ningún fichero | `scripts/smoke-approvals.mjs` | `npm run smoke:approvals` |
 | **La terminal contra Dot** (M8): `stratum run` en un pty de verdad con su prompt local; gana Dot / gana la terminal | `scripts/smoke-terminal.mjs` | `npm run smoke:terminal` |
-| **La app de verdad**, en su ventana, con tauri-driver | `e2e/dot.e2e.mjs` (M6) · `e2e/chat.e2e.mjs` (M7) · `e2e/approvals.e2e.mjs` (M8) | `npm run e2e` |
+| **La app de verdad**, en su ventana, con tauri-driver | `e2e/dot.e2e.mjs` (M6) · `e2e/chat.e2e.mjs` (M7) · `e2e/approvals.e2e.mjs` (M8) · `e2e/assistant.e2e.mjs` (M14) | `npm run e2e` |
 
 En el contrato y el daemon (`stratum-cli`, `npm test`): `protocol/transcript.test.ts` (la
 conversación como función de los eventos, sus límites y que una foto al límite cabe en una
@@ -1304,8 +1304,13 @@ gobierna el daemon.
   `dot_box_status`, `dot_box_start` y `dot_box_stop`, registrados como el resto (`lib.rs`,
   `build.rs`, `capabilities/default.json`, test de arquitectura).
 
-Pendiente: que *Asistente* sea la vista de inicio y el modo compacto (PRD §23.8), y su E2E en la
-ventana.
+Pendiente (fuera de M14): que *Asistente* sea la vista de inicio y el modo compacto (PRD §23.8),
+y empezar desde Dot una conversación nueva del asistente (el perfil de Dot no tiene
+`sessions.close`).
 
 Tests: `src/app/Assistant.test.tsx`, `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
-(`crates/dot-link/src/link.rs`) y `tests/architecture.test.ts`.
+(`crates/dot-link/src/link.rs`), `tests/architecture.test.ts` y, en la ventana real,
+`e2e/assistant.e2e.mjs`: abre al asistente sin directorio del cliente, enseña la caja tal como la
+contesta el daemon (con un nombre propio y sin arrancarla), conversa con el prompt y las tools del
+`companion`, ve vetado sin aprobación un `exec` a `local`, y tras cerrar Dot y reiniciar el daemon
+vuelve la misma sesión con su conversación.

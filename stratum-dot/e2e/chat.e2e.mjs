@@ -277,7 +277,7 @@ try {
     assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 1);
   });
 
-  await check('el daemon se reinicia: su chat desaparece y Dot lo dice, sin dejar escribir', async () => {
+  await check('el daemon se reinicia: sin él no se escribe; al volver, el chat sigue (M11)', async () => {
     const pid = endpoint().pid;
     process.kill(pid, 'SIGKILL');
     await until('reconnecting', async () => (await connection()) === 'reconnecting');
@@ -286,13 +286,19 @@ try {
     assert.ok((await transcript()).length > 0);
     await shot('sin-daemon');
 
+    // Desde M11 el daemon guarda la conversación y recupera la sesión al
+    // arrancar: la misma, con lo dicho, y se puede seguir hablando.
     assert.equal(cli(['daemon', 'start']).status, 0);
     await until('conectado otra vez', async () => (await connection()) === 'connected');
-    await session.waitForText('Session ended or unavailable', { timeout: 40_000 });
-    assert.equal(await composer(), null);
-    assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 0);
     assert.notEqual(endpoint().pid, pid);
-    await shot('sesion-terminada');
+    await until('se puede escribir', async () => (await composer())?.disabled === false, 40_000);
+    assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 1);
+    await until('la conversación vuelve', async () =>
+      (await transcript()).filter(([kind]) => kind === 'user').map(([, t]) => t).includes('crea hello.txt con hola'),
+    );
+    await say('otra vez', 'Send message');
+    await until('responde tras el reinicio', async () => (await idle()) && (await transcript()).at(-1)?.[1] === 'Vale.', 30_000);
+    await shot('tras-reinicio');
   });
 
   await check('ni el token ni nada del provider están en la ventana', async () => {
