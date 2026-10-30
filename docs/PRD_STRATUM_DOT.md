@@ -1814,16 +1814,18 @@ antes de decidir (§23.9).
 
 - **Tools** `screen_screenshot`, `screen_click`, `screen_type`, `screen_key`, `screen_scroll`,
   `screen_wait` contra la pantalla de la caja. Solo se registran si la caja tiene escritorio y el
-  modelo está declarado con visión. Declaradas en `callEffects`: la captura es lectura; el resto
-  muta sobre el target `container:<caja>`.
-- **Formato de coordenadas por modelo**, en la config del modelo (`vision.coordinates:
-  "pixels" | "norm1000"`), por defecto `pixels`. El spike mostró que modelos que localizan bien
-  devuelven 0–1000 (`gemma4`, `qwen3.6`) y, sin reescalar, parecen ciegos (§23.9).
+  modelo está declarado con visión (§23.13 A7); si no, no se registran y Dot lo avisa. Declaradas
+  en `callEffects`: la captura es lectura; el resto muta sobre el target `container:<caja>`.
+- **Visión y formato de coordenadas por modelo**, declarados en sus ajustes
+  (`providers.<p>.models.<id>.vision: { coordinates: "pixels" | "norm1000" }`, `coordinates` por
+  defecto `pixels`). Sin `vision`, el modelo no tiene visión: no se descubre ni se sondea. El spike
+  mostró que modelos que localizan bien devuelven 0–1000 (`gemma4`, `qwen3.6`) y, sin reescalar,
+  parecen ciegos (§23.9).
 - **Las capturas no inflan el contexto**: solo las últimas N (el spike usó 2) van como imagen; las
   anteriores se sustituyen por un marcador. La compactación de M11 nunca resume una imagen.
 - **Las capturas no se redactan** (la redacción es de texto): no van a logs, a la memoria de
-  sesión ni a la traza en línea. La traza guarda metadatos (tamaño, hash, paso); guardar los
-  ficheros es una opción explícita (§23.13 A6).
+  sesión ni a la traza en línea. La traza guarda metadatos (tamaño, dimensiones, hash, paso);
+  guardar los ficheros es una opción explícita de la config global (§23.13 A6).
 - **Dot enseña la pantalla en vivo, en solo lectura**, con un indicador mientras el asistente la
   usa y un «parar» que es la cancelación del run. Tomar el control desde Dot queda fuera de M15.
 - Prompt injection por lo que aparece en pantalla: el radio es la caja; lo que sale de ella pide
@@ -1982,7 +1984,13 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
 - **A5. Docker en Windows**. *Resuelta 2026-10-29*: **Podman preferido** (no necesita un servicio
   en Linux; en Windows y macOS usa su `podman machine`) y Docker como alternativa
   (`box.runtime: auto | podman | docker`; `auto` prueba Podman y luego Docker).
-- **A6. Capturas en la traza**: ¿se guardan los ficheros para el auditor (depuración) o solo
-  metadatos (privacidad)? Propuesta: solo metadatos por defecto, y los ficheros con opción explícita.
-- **A7. Modelo con visión**: cómo se declara (`vision: true` en la config del modelo) y qué ve el
-  usuario si elige uno sin visión con computer use activo.
+- **A6. Capturas en la traza.** *Resuelta 2026-10-30*: por defecto, **solo metadatos** (tamaño,
+  dimensiones, hash, paso). Con `trace.screenshots: true`, leído **solo de la config global**
+  (un proyecto no puede activarlo), los PNG se guardan junto a la traza de la sesión y el
+  `/auditor` los muestra. Ni con la opción van a logs, a la memoria de sesión ni al protocolo.
+- **A7. Modelo con visión.** *Resuelta 2026-10-30*: **solo declarada**, en los ajustes por modelo
+  (`providers.<p>.models.<id>.vision: { coordinates: "pixels" | "norm1000" }`); sin ella no hay
+  visión, ni descubierta por `/models` ni sondeada. Si el modelo activo no la tiene, las `screen_*`
+  **no se registran** (falla cerrado) y el `companion` sigue con `exec` en su caja; Dot lo avisa en
+  el panel de la caja, su selector de modelo marca los que tienen visión, y la pantalla en vivo
+  se sigue viendo.
