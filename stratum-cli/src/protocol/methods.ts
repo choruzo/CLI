@@ -5,6 +5,7 @@ import type {
   ProtocolApproval,
   ProtocolApprovalDecision,
   ProtocolBoxStatus,
+  ProtocolBoxScreen,
   ProtocolContextReport,
   ProtocolDecision,
   ProtocolHistoryPage,
@@ -415,6 +416,13 @@ export interface ProtocolMethods {
    * curso: `BUSY` (`box-busy`); si el runtime la rechaza: `UNAVAILABLE` (`box-failed`).
    */
   'box.status': Spec<Empty, { box: ProtocolBoxStatus }>;
+  /**
+   * M15 — la pantalla de la caja ahora, en JPEG, para enseñarla en solo
+   * lectura (un cliente la pide cada poco mientras se ve). Peticiones a la vez
+   * comparten una captura. Caja sin escritorio: `UNAVAILABLE` (`no-desktop`);
+   * parada o ausente: `UNAVAILABLE` (`box-stopped`); sin runtime: `no-runtime`.
+   */
+  'box.screen': Spec<Empty, { screen: ProtocolBoxScreen }>;
   'box.start': Spec<Mutation, { box: ProtocolBoxStatus }>;
   'box.stop': Spec<Mutation, { box: ProtocolBoxStatus }>;
   'box.reset': Spec<Mutation, { box: ProtocolBoxStatus }>;
@@ -544,6 +552,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'memory.decisions': read('observe'),
 
   'box.status': read('observe'),
+  'box.screen': read('observe'),
   'box.start': write('control'),
   'box.stop': write('control'),
   'box.reset': write('control'),

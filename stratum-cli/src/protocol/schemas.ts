@@ -71,8 +71,9 @@ import type {
   ProtocolHistoryPage,
   ProtocolSessionMemory,
   ProtocolBoxStatus,
+  ProtocolBoxScreen,
 } from './model.js';
-import { HISTORY_LIMITS } from './model.js';
+import { BOX_SCREEN_LIMITS, HISTORY_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
 
@@ -175,6 +176,7 @@ export const modelSchema: z.ZodType<ProtocolModel> = z.object({
   id: z.string(),
   contextWindow: z.number().int().positive().nullable(),
   default: z.boolean().optional(),
+  vision: z.object({ coordinates: z.enum(['pixels', 'norm1000']) }).optional(),
 });
 
 export const sessionSchema: z.ZodType<ProtocolSession> = z.object({
@@ -422,8 +424,24 @@ export const boxStatusSchema: z.ZodType<ProtocolBoxStatus> = z.object({
   outdated: z.boolean(),
   enabled: z.boolean(),
   exchangeDir: z.string().max(LIMITS.pathChars),
+  desktop: z.boolean().optional(),
 });
 const boxResult = z.object({ box: boxStatusSchema });
+
+const screenDimension = z.number().int().positive().max(16_384);
+export const boxScreenSchema: z.ZodType<ProtocolBoxScreen> = z.object({
+  mime: z.literal('image/jpeg'),
+  // base64 de como mucho `maxBytes`: 4 caracteres por cada 3 bytes.
+  data: z
+    .string()
+    .max(Math.ceil(BOX_SCREEN_LIMITS.maxBytes / 3) * 4)
+    .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+  width: screenDimension,
+  height: screenDimension,
+  screenWidth: screenDimension,
+  screenHeight: screenDimension,
+  takenAt: z.number().int().nonnegative(),
+});
 
 // ---------------------------------------------------------------------------
 // M11 — conversación guardada, contexto y memoria de sesión
@@ -899,6 +917,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
     .strict(),
 
   'box.status': empty,
+  'box.screen': empty,
   'box.start': z.object({ operationId }).strict(),
   'box.stop': z.object({ operationId }).strict(),
   'box.reset': z.object({ operationId }).strict(),
@@ -1041,6 +1060,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),
 
   'box.status': boxResult,
+  'box.screen': z.object({ screen: boxScreenSchema }),
   'box.start': boxResult,
   'box.stop': boxResult,
   'box.reset': boxResult,

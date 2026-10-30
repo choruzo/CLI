@@ -313,6 +313,42 @@ describe('stratumd — agentes y modelos para quien abre una sesión', () => {
     });
   });
 
+  it('M15: models.list marca la visión solo si la config la declara', async () => {
+    const base = realpathSync(mkdtempSync(join(tmpdir(), 'stratumd-vision-')));
+    try {
+      const config = testConfig(base, {
+        provider: {
+          default: 'test',
+          providers: {
+            test: {
+              type: 'openai-compatible',
+              baseUrl: 'http://127.0.0.1:1/v1',
+              apiKey: '',
+              model: 'test-model',
+              models: { 'test-model': { vision: { coordinates: 'norm1000' } } },
+            },
+          },
+        },
+      });
+      t = await startTestDaemon({ base, config });
+      const observer = await t.connect(['observer']);
+      const result = await observer.request('models.list', {});
+      expect(result.models).toEqual([
+        {
+          provider: 'test',
+          id: 'test-model',
+          contextWindow: null,
+          default: true,
+          vision: { coordinates: 'norm1000' },
+        },
+      ]);
+      expect(RESULTS['models.list'].safeParse(result).success).toBe(true);
+    } finally {
+      await t.stop();
+      rmSync(base, { recursive: true, force: true });
+    }
+  });
+
   it('agents.list da los perfiles de un directorio sin su prompt', async () => {
     t = await startTestDaemon();
     const cwd = t.project('agents', []);

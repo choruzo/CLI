@@ -48,6 +48,12 @@ export interface ProtocolModel {
   contextWindow: number | null;
   /** El que usa una sesión abierta sin pedir provider ni modelo (config global). */
   default?: boolean;
+  /**
+   * M15 — el modelo está declarado con visión en la config del servidor
+   * (`models.<id>.vision`): solo con ella usa la pantalla de la caja. Ausente →
+   * sin visión (nunca se descubre ni se supone).
+   */
+  vision?: { coordinates: 'pixels' | 'norm1000' };
 }
 
 // ---------------------------------------------------------------------------
@@ -454,6 +460,37 @@ export interface ProtocolBoxStatus {
   enabled: boolean;
   /** Carpeta del anfitrión que la caja ve en `/exchange`. */
   exchangeDir: string;
+  /**
+   * M15 — la caja tiene escritorio virtual (`box.desktop`; por defecto, sí con
+   * la imagen de Stratum): hay `box.screen` y, con un modelo con visión, el
+   * `companion` puede usar su pantalla. Ausente en un servidor anterior.
+   */
+  desktop?: boolean;
+}
+
+/** M15 — límites de `box.screen`: una captura cabe siempre en un mensaje. */
+export const BOX_SCREEN_LIMITS = {
+  /** Bytes del JPEG (antes de base64). Más grande: el servidor la reduce a la mitad. */
+  maxBytes: 512 * 1024,
+} as const;
+
+/**
+ * M15 — la pantalla de la caja en un momento dado, para que un cliente la
+ * enseñe en solo lectura. La toma el servidor con órdenes fijas; no son las
+ * capturas que ve el agente (esas no salen de su sesión).
+ */
+export interface ProtocolBoxScreen {
+  mime: 'image/jpeg';
+  /** JPEG en base64. */
+  data: string;
+  /** Dimensiones de la imagen (puede ser la mitad de la pantalla, por tamaño). */
+  width: number;
+  height: number;
+  /** Dimensiones de la pantalla de la caja. */
+  screenWidth: number;
+  screenHeight: number;
+  /** Cuándo se tomó, en ms desde la época. */
+  takenAt: number;
 }
 
 // ---------------------------------------------------------------------------

@@ -1773,6 +1773,37 @@ dentro es cosa de las sesiones, no de los clientes.
 Tests: `stratum-cli/src/daemon/daemon-box.test.ts`, `src/box/*.test.ts` y, contra un runtime real,
 `src/tools/exec/container.integration.test.ts`.
 
+### 21.1 La pantalla de la caja (M15)
+
+```json
+{ "method": "box.screen", "params": {} }
+→ { "screen": { "mime": "image/jpeg", "data": "<base64>", "width": 1280, "height": 800,
+                "screenWidth": 1280, "screenHeight": 800, "takenAt": 1793000000000 } }
+```
+
+- Para **enseñar** la pantalla de la caja en solo lectura (la vista *Asistente* de Dot la pide cada
+  poco mientras se ve). Capacidad `observe`, como `box.status`: quien ve la conversación del
+  asistente puede ver lo que hace en su pantalla. No hay forma de actuar en ella desde un cliente.
+- La toma el servidor con una orden fija (`BOX_SCREEN_CAPTURE` en `src/box/manager.ts`): ningún
+  parámetro. JPEG de como mucho `BOX_SCREEN_LIMITS.maxBytes` (512 KiB); si no cabe, se repite a la
+  mitad (`width`/`height` son los de la imagen; `screenWidth`/`screenHeight`, los de la pantalla).
+- Peticiones a la vez, o en menos de 400 ms, comparten una misma captura.
+- No son las capturas que ve el agente: esas no salen de su sesión (ni a eventos, ni a la foto, ni a
+  este método).
+- Errores: caja sin escritorio → `UNAVAILABLE` (`no-desktop`); parada o ausente → `UNAVAILABLE`
+  (`box-stopped`); sin runtime → `no-runtime`; el runtime falla → `box-failed`.
+- `ProtocolBoxStatus.desktop`: la caja tiene escritorio (`box.desktop`; por defecto sí con la imagen
+  de Stratum y no con una propia). Ausente en un servidor anterior.
+- **Visión del modelo**: `ProtocolModel.vision` (`models.list`) es `{ coordinates: 'pixels' |
+  'norm1000' }` solo si la config del servidor la declara (`models.<id>.vision`); nunca se descubre.
+  Un cliente la usa para marcar en su selector qué modelos pueden usar la pantalla y para avisar si el
+  del `companion` no puede.
+- **Saber que el asistente está usando la pantalla** no necesita nada nuevo: un `tool.started` de una
+  tool `screen_*` en un run en curso. Pararlo es cancelar el run (`runs.cancel`).
+
+Tests: `stratum-cli/src/daemon/daemon-box.test.ts` (`box.screen`) y
+`src/daemon/daemon-chat.test.ts` (`models.list` con visión).
+
 ## 22. El agente embebido `companion` (M14)
 
 Dirección en `docs/PRD_STRATUM_DOT.md` §23. Es el asistente de Stratum Dot: un agente embebido,

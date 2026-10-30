@@ -17,7 +17,7 @@ import { mkdir } from 'fs/promises';
 import { homedir } from 'os';
 import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
-import type { BoxConfig } from '../config/schema.js';
+import { boxHasDesktop, type BoxConfig } from '../config/schema.js';
 import {
   BOX_LABEL,
   DEFAULT_BOX_IMAGE,
@@ -55,7 +55,45 @@ export interface BoxStatus {
   enabled: boolean;
   /** Carpeta del anfitrión montada en `/exchange`. */
   exchangeDir: string;
+  /** M15 — tiene escritorio virtual (`box.desktop`, `boxHasDesktop`). */
+  desktop: boolean;
 }
+
+/** M15 — la pantalla de la caja en un momento dado (JPEG en base64). */
+export interface BoxScreen {
+  mime: 'image/jpeg';
+  data: string;
+  width: number;
+  height: number;
+  screenWidth: number;
+  screenHeight: number;
+  takenAt: number;
+}
+
+/** La caja no tiene escritorio, o no está en marcha: no hay pantalla que ver. */
+export class BoxScreenUnavailableError extends Error {
+  override readonly name = 'BoxScreenUnavailableError';
+  constructor(
+    message: string,
+    readonly reason: 'no-desktop' | 'box-stopped',
+  ) {
+    super(message);
+  }
+}
+
+/**
+ * Orden fija de la captura para clientes: `<ancho> <alto>` de la pantalla en
+ * la primera línea y el JPEG en base64 en la segunda. `$1` es el factor de
+ * escala (`100` o `50`), que decide el servidor, nunca un cliente.
+ */
+export const BOX_SCREEN_CAPTURE =
+  'export DISPLAY="${DISPLAY:-:99}"; ' +
+  'xdotool getdisplaygeometry || exit 1; ' +
+  'import -window root -resize "$1%" -quality 70 jpeg:- | base64 -w0';
+
+/** Peticiones de pantalla dentro de esta ventana comparten la misma captura. */
+const SCREEN_REUSE_MS = 400;
+const SCREEN_TIMEOUT_MS = 15_000;
 
 /** No hay runtime de contenedores. */
 export class BoxUnavailableError extends Error {
@@ -154,7 +192,83 @@ export class BoxManager {
       network: this.opts.config.network,
       enabled: this.opts.config.enabled,
       exchangeDir: this.exchangeDir,
+      desktop: boxHasDesktop(this.opts.config),
     };
+  }
+
+  private screenInFlight: Promise<BoxScreen> | null = null;
+  private lastScreen: BoxScreen | null = null;
+
+  /**
+   * M15 — la pantalla de la caja, para enseñarla en solo lectura. No es una
+   * operación de ciclo de vida (no espera a `exclusive`), y peticiones a la vez
+   * o muy seguidas comparten una sola captura. Si el JPEG no cabe en
+   * `maxBytes`, se repite a la mitad de tamaño.
+   */
+  screen(maxBytes: number): Promise<BoxScreen> {
+    if (this.lastScreen && Date.now() - this.lastScreen.takenAt < SCREEN_REUSE_MS) {
+      return Promise.resolve(this.lastScreen);
+    }
+    if (!this.screenInFlight) {
+      this.screenInFlight = this.captureScreen(maxBytes).finally(() => {
+        this.screenInFlight = null;
+      });
+    }
+    return this.screenInFlight;
+  }
+
+  private async captureScreen(maxBytes: number): Promise<BoxScreen> {
+    if (!boxHasDesktop(this.opts.config)) {
+      throw new BoxScreenUnavailableError('The box has no virtual desktop.', 'no-desktop');
+    }
+    const rt = await this.requireRuntime();
+    const found = await this.inspect(rt);
+    if (!found?.running) {
+      throw new BoxScreenUnavailableError('The box is not running.', 'box-stopped');
+    }
+    for (const scale of [100, 50] as const) {
+      const r = await this.run(
+        rt.bin,
+        [
+          'exec',
+          boxContainerName(this.name),
+          'sh',
+          '-c',
+          BOX_SCREEN_CAPTURE,
+          'stratum',
+          String(scale),
+        ],
+        { timeoutMs: SCREEN_TIMEOUT_MS },
+      );
+      if (r.exitCode !== 0) {
+        throw new BoxCommandError(
+          `Could not capture the box screen: ${clip(r.stderr) || 'no output'}`,
+        );
+      }
+      const [geometry = '', data = ''] = r.stdout.split('\n');
+      const m = /^(\d+) (\d+)$/.exec(geometry.trim());
+      const b64 = data.trim();
+      if (!m || !/^[A-Za-z0-9+/]+={0,2}$/.test(b64)) {
+        throw new BoxCommandError('Unexpected output from the box screen capture.');
+      }
+      const bytes = Buffer.from(b64, 'base64').length;
+      if (bytes > maxBytes && scale === 100) continue;
+      if (bytes > maxBytes) throw new BoxCommandError('The box screen capture is too large.');
+      const screenWidth = Number(m[1]);
+      const screenHeight = Number(m[2]);
+      const shot: BoxScreen = {
+        mime: 'image/jpeg',
+        data: b64,
+        width: Math.round((screenWidth * scale) / 100),
+        height: Math.round((screenHeight * scale) / 100),
+        screenWidth,
+        screenHeight,
+        takenAt: Date.now(),
+      };
+      this.lastScreen = shot;
+      return shot;
+    }
+    throw new BoxCommandError('The box screen capture is too large.');
   }
 
   async status(): Promise<BoxStatus> {

@@ -31,6 +31,7 @@ import {
   BoxBusyError,
   BoxCommandError,
   BoxManager,
+  BoxScreenUnavailableError,
   BoxUnavailableError,
   type BoxStatus,
 } from '../box/manager.js';
@@ -59,6 +60,7 @@ import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import {
+  BOX_SCREEN_LIMITS,
   METHODS,
   STRATUM_PROTOCOL_VERSION,
   type ClientKind,
@@ -1189,8 +1191,13 @@ export class Stratumd {
             found.unshift({ provider: name, id: entry.model, contextWindow: null });
           }
           for (const m of found) {
+            // M15: la visión solo es la declarada en la config, nunca la de `/models`.
+            const vision = entry.models?.[m.id]?.vision;
+            const withVision = vision ? { ...m, vision: { coordinates: vision.coordinates } } : m;
             models.push(
-              name === defaultProvider && m.id === entry.model ? { ...m, default: true } : m,
+              name === defaultProvider && m.id === entry.model
+                ? { ...withVision, default: true }
+                : withVision,
             );
           }
         }
@@ -1429,6 +1436,22 @@ export class Stratumd {
       },
 
       'box.status': async () => ({ box: await this.box.status() }),
+      'box.screen': async () => {
+        try {
+          return { screen: await this.box.screen(BOX_SCREEN_LIMITS.maxBytes) };
+        } catch (err) {
+          if (err instanceof BoxScreenUnavailableError) {
+            throw new ProtocolError('UNAVAILABLE', err.message, { reason: err.reason });
+          }
+          if (err instanceof BoxUnavailableError) {
+            throw new ProtocolError('UNAVAILABLE', err.message, { reason: 'no-runtime' });
+          }
+          if (err instanceof BoxCommandError) {
+            throw new ProtocolError('UNAVAILABLE', err.message, { reason: 'box-failed' });
+          }
+          throw err;
+        }
+      },
       'box.start': () => boxOperation(() => this.box.start()),
       'box.stop': () => boxOperation(() => this.box.stop()),
       'box.reset': () => boxOperation(() => this.box.reset()),

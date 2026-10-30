@@ -7,7 +7,7 @@ import { BoxConfigSchema } from '../config/schema.js';
 import { BoxManager } from '../box/manager.js';
 import { BOX_LABEL } from '../box/spec.js';
 import type { RuntimeRunner } from '../box/runtime.js';
-import { boxStatusSchema } from '../protocol/schemas.js';
+import { boxScreenSchema, boxStatusSchema } from '../protocol/schemas.js';
 import { startTestDaemon, type TestDaemon } from './daemon.fixtures.js';
 
 /**
@@ -126,5 +126,96 @@ describe('box.* (M13)', () => {
     expect((err as ProtocolError).code).toBe('UNAVAILABLE');
     expect((err as ProtocolError).data?.reason).toBe('box-failed');
     expect((err as ProtocolError).message).toContain('no space left on device');
+  });
+});
+
+describe('box.screen (M15)', () => {
+  const JPEG = Buffer.alloc(2000, 7).toString('base64');
+
+  function screenRunner(opts: { running: boolean; big?: boolean }): {
+    run: RuntimeRunner;
+    captures: string[][];
+  } {
+    const captures: string[][] = [];
+    const run: RuntimeRunner = async (_bin, args) => {
+      if (args[0] === 'container' && args[1] === 'inspect') {
+        return {
+          exitCode: 0,
+          stdout: JSON.stringify([
+            { State: { Running: opts.running }, Config: { Labels: { [BOX_LABEL]: 'box' } } },
+          ]),
+          stderr: '',
+        };
+      }
+      if (args[0] === 'exec') {
+        captures.push(args);
+        const scale = args.at(-1);
+        const data =
+          opts.big && scale === '100' ? Buffer.alloc(600 * 1024, 1).toString('base64') : JPEG;
+        return { exitCode: 0, stdout: `1280 800\n${data}`, stderr: '' };
+      }
+      return { exitCode: 1, stdout: '', stderr: 'unexpected' };
+    };
+    return { run, captures };
+  }
+
+  async function daemonWith(
+    runner: RuntimeRunner,
+    config: Record<string, unknown> = {},
+  ): Promise<TestDaemon> {
+    return startTestDaemon({
+      base,
+      box: new BoxManager({
+        config: BoxConfigSchema.parse(config),
+        exchangeDir: join(base, 'exchange'),
+        run: runner,
+        detect: async () => ({ ok: true, runtime: { kind: 'podman', bin: 'podman' } }),
+      }),
+    });
+  }
+
+  it('un observador ve la pantalla; peticiones a la vez comparten una captura', async () => {
+    const { run, captures } = screenRunner({ running: true });
+    t = await daemonWith(run);
+    const observer = await t.connect(['observer'], 'obs');
+    const [a, b] = await Promise.all([
+      observer.request('box.screen', {}),
+      observer.request('box.screen', {}),
+    ]);
+    expect(boxScreenSchema.parse(a.screen)).toMatchObject({
+      mime: 'image/jpeg',
+      data: JPEG,
+      width: 1280,
+      height: 800,
+      screenWidth: 1280,
+      screenHeight: 800,
+    });
+    expect(b.screen.takenAt).toBe(a.screen.takenAt);
+    expect(captures).toHaveLength(1);
+    // Orden fija: el cliente no elige nada de lo que llega al runtime.
+    expect(captures[0]!.slice(0, 4)).toEqual(['exec', 'stratum-box-box', 'sh', '-c']);
+    expect(captures[0]!.at(-1)).toBe('100');
+    expect((await observer.request('box.status', {})).box.desktop).toBe(true);
+  });
+
+  it('si no cabe, se repite a la mitad', async () => {
+    const { run, captures } = screenRunner({ running: true, big: true });
+    t = await daemonWith(run);
+    const observer = await t.connect(['observer'], 'obs');
+    const { screen } = await observer.request('box.screen', {});
+    expect(screen).toMatchObject({ width: 640, height: 400, screenWidth: 1280 });
+    expect(captures.map((c) => c.at(-1))).toEqual(['100', '50']);
+  });
+
+  it('caja parada: box-stopped; imagen propia sin escritorio: no-desktop', async () => {
+    t = await daemonWith(screenRunner({ running: false }).run);
+    const observer = await t.connect(['observer'], 'obs');
+    expect(await code(observer.request('box.screen', {}))).toBe('UNAVAILABLE:box-stopped');
+    await t.stop();
+
+    t = await daemonWith(screenRunner({ running: true }).run, { image: 'custom/box:1' });
+    const again = await t.connect(['observer'], 'obs');
+    expect(await code(again.request('box.screen', {}))).toBe('UNAVAILABLE:no-desktop');
+    expect((await again.request('box.status', {})).box.desktop).toBe(false);
   });
 });
