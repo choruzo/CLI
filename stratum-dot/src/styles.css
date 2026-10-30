@@ -168,6 +168,18 @@ p {
   }
 }
 
+/* M14 — el asistente: su caja a la izquierda; en compacto, encima de la conversación. */
+@media (max-width: 719px) {
+  .body.split.assistant {
+    grid-template-rows: auto 1fr;
+  }
+  .shell[data-detail] .box-panel {
+    display: block;
+    max-height: 40vh;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 /* --- lista ---------------------------------------------------------------- */
 .rows {
   list-style: none;

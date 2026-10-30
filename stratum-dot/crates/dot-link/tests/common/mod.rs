@@ -870,6 +870,7 @@ pub fn fast() -> Timings {
         backoff_max: Duration::from_millis(80),
         request_timeout: Duration::from_millis(400),
         open_timeout: Duration::from_millis(900),
+        box_timeout: Duration::from_millis(900),
         handshake_timeout: Duration::from_millis(400),
         daemon_start_wait: Duration::from_millis(800),
         idle_poll: Duration::from_millis(40),

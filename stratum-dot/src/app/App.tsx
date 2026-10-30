@@ -4,6 +4,7 @@ import { ConnectionBanner, connectionLabel, connectionTone } from '../components
 import { Dot } from '../components/StatusBadge';
 import { collectPending } from '../protocol/interactions';
 import { countByKind, countsLabel } from '../protocol/view';
+import { Assistant } from '../screens/Assistant';
 import { HumanInput } from '../screens/HumanInput';
 import { Incompatible } from '../screens/Incompatible';
 import { NewChat } from '../screens/NewChat';
@@ -17,7 +18,8 @@ import { useNow } from './useNow';
 
 /**
  * Cabecera (daemon, sesiones, lo que espera a una persona), lista y detalle (una
- * sesión o un chat nuevo) —o el centro de aprobaciones— y pie con las versiones.
+ * sesión o un chat nuevo) —o el asistente (M14), o el centro de aprobaciones— y
+ * pie con las versiones.
  */
 export function App() {
   const native = useNative();
@@ -94,7 +96,7 @@ export function App() {
         active.blur();
         return;
       }
-      if (useUi.getState().view === 'human-input') {
+      if (useUi.getState().view !== 'sessions') {
         setView('sessions');
         return;
       }
@@ -175,7 +177,7 @@ export function App() {
   }
 
   return (
-    <div className="shell" data-detail={composingNew || selectedId ? 'open' : 'closed'}>
+    <div className="shell" data-detail={composingNew || selectedId || view === 'assistant' ? 'open' : 'closed'}>
       <header className="top">
         <h1>Stratum Dot</h1>
         <span className="top-status" role="status" aria-live="polite" data-connection={connection.kind}>
@@ -186,6 +188,15 @@ export function App() {
         <span className="top-count" aria-label={`${count} live sessions`}>
           {count} {count === 1 ? 'session' : 'sessions'}
         </span>
+        <button
+          type="button"
+          className="btn small"
+          aria-pressed={view === 'assistant'}
+          title="Talk to your assistant and manage its box"
+          onClick={() => setView(view === 'assistant' ? 'sessions' : 'assistant')}
+        >
+          Assistant
+        </button>
         <button
           type="button"
           className={`btn small waiting-badge ${waiting > 0 ? 'has' : ''}`}
@@ -209,6 +220,14 @@ export function App() {
         <main className="body">
           <HumanInput now={now} connected={connected} onBack={() => setView('sessions')} />
         </main>
+      ) : view === 'assistant' ? (
+        <Assistant
+          now={now}
+          canControl={control}
+          connected={connected}
+          composerRef={composerRef}
+          onBack={() => setView('sessions')}
+        />
       ) : (
         <main className="body split">
           <Overview

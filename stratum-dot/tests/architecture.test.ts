@@ -151,6 +151,9 @@ const COMMANDS = [
   'dot_approver_status',
   'dot_approver_unlock',
   'dot_attach',
+  'dot_box_start',
+  'dot_box_status',
+  'dot_box_stop',
   'dot_cancel_run',
   'dot_decide_plan',
   'dot_deny',
@@ -340,6 +343,9 @@ describe('el lado nativo', () => {
     expect(main).toEqual([
       'agents.list',
       'approvals.list',
+      'box.start',
+      'box.status',
+      'box.stop',
       'core.hello',
       'events.subscribe',
       'events.unsubscribe',
@@ -360,7 +366,8 @@ describe('el lado nativo', () => {
     ]);
     // Lo que Dot puede pedir es su perfil (`ClientProfile::DOT` en `link.rs`): de `sessions.*`
     // solo abrir y leer una; de `runs.*`, iniciar y gobernar; de lo pendiente, solo listarlo
-    // (para la confirmación nativa). Ni cerrar, ni reconfigurar, ni el historial de M11.
+    // (para la confirmación nativa); de la caja del asistente (M14), consultarla, arrancarla y
+    // pararla, nunca borrarla. Ni cerrar, ni reconfigurar, ni el historial de M11.
     const linkRs = rustCode(join(link, 'src', 'link.rs')).replace(/\r\n/g, '\n');
     const dotStart = linkRs.indexOf('const DOT_METHODS: &[MainMethod] = &[');
     expect(dotStart).toBeGreaterThan(-1);
@@ -370,6 +377,9 @@ describe('el lado nativo', () => {
     expect(dotMethods).toEqual([
       'AgentsList',
       'ApprovalsList',
+      'BoxStart',
+      'BoxStatus',
+      'BoxStop',
       'CoreHello',
       'EventsSubscribe',
       'EventsUnsubscribe',
@@ -391,7 +401,7 @@ describe('el lado nativo', () => {
     const all = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!);
     expect(all.length).toBe(main.length + approver.length);
     // Fuera de `wire.rs` nadie escribe un método a mano.
-    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace)\.[a-zA-Z]+"/;
+    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box)\.[a-zA-Z]+"/;
     const strays = rustShipped.filter((f) => !f.endsWith(`${sep}wire.rs`) && method.test(rustCode(f)));
     expect(strays.map(rel)).toEqual([]);
   });

@@ -84,6 +84,8 @@ pub struct Timings {
     pub request_timeout: Duration,
     /// Abrir una sesión arranca sus servers MCP: puede tardar mucho más que una orden.
     pub open_timeout: Duration,
+    /// M14 — arrancar la caja: la primera vez construye su imagen (minutos).
+    pub box_timeout: Duration,
     pub handshake_timeout: Duration,
     /// Cuánto se espera a que el daemon recién arrancado atienda.
     pub daemon_start_wait: Duration,
@@ -99,6 +101,7 @@ impl Default for Timings {
             backoff_max: Duration::from_secs(5),
             request_timeout: Duration::from_secs(10),
             open_timeout: Duration::from_secs(90),
+            box_timeout: Duration::from_secs(20 * 60),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
             idle_poll: Duration::from_secs(2),
@@ -147,6 +150,10 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::ModelsList,
     MainMethod::ApprovalsList,
     MainMethod::SessionsGet,
+    // M14: la caja del asistente (sin `box.reset`, que no está en `MainMethod`).
+    MainMethod::BoxStatus,
+    MainMethod::BoxStart,
+    MainMethod::BoxStop,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -839,6 +846,9 @@ fn call_request(
             }
             Ok((MainMethod::SessionsSetModel, params))
         }
+        CallAction::BoxStatus => Ok((MainMethod::BoxStatus, json!({}))),
+        CallAction::BoxStart => Ok((MainMethod::BoxStart, json!({ "operationId": operation_id }))),
+        CallAction::BoxStop => Ok((MainMethod::BoxStop, json!({ "operationId": operation_id }))),
     }
 }
 
@@ -1829,6 +1839,9 @@ impl Actor {
                         self.cfg.logger.info(&format!("call: {}", action.name()));
                         let timeout = match action {
                             CallAction::OpenSession { .. } => self.cfg.timings.open_timeout,
+                            CallAction::BoxStart | CallAction::BoxStop => {
+                                self.cfg.timings.box_timeout
+                            }
                             _ => self.cfg.timings.request_timeout,
                         };
                         conn.request_within(
@@ -1974,6 +1987,33 @@ mod tests {
         )
         .unwrap();
         assert_eq!(params, json!({ "agent": "a", "cwd": "/w" }));
+    }
+
+    #[test]
+    fn la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot() {
+        let (method, params) = call_request(&CallAction::BoxStatus, "op").unwrap();
+        assert_eq!((method, params), (MainMethod::BoxStatus, json!({})));
+        let (method, params) = call_request(&CallAction::BoxStart, "op-1").unwrap();
+        assert_eq!(
+            (method, params),
+            (MainMethod::BoxStart, json!({ "operationId": "op-1" }))
+        );
+        let (method, params) = call_request(&CallAction::BoxStop, "op-2").unwrap();
+        assert_eq!(
+            (method, params),
+            (MainMethod::BoxStop, json!({ "operationId": "op-2" }))
+        );
+        assert!(CallAction::BoxStart.mutating() && CallAction::BoxStop.mutating());
+        assert!(!CallAction::BoxStatus.mutating());
+        for m in [
+            MainMethod::BoxStatus,
+            MainMethod::BoxStart,
+            MainMethod::BoxStop,
+        ] {
+            assert!(DOT_METHODS.contains(&m), "{m:?}");
+            // Desktop no tiene caja: es de Dot (PRD §23).
+            assert!(!DESKTOP_METHODS.contains(&m), "{m:?}");
+        }
     }
 
     #[test]

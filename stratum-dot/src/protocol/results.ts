@@ -4,7 +4,7 @@
  * foto o un evento. Lo que no valida no se usa.
  */
 import { RESULTS } from '../../../stratum-cli/src/protocol/schemas';
-import type { ProtocolAgent, ProtocolModel, ProtocolRun, ProtocolSession } from './index';
+import type { ProtocolAgent, ProtocolBoxStatus, ProtocolModel, ProtocolRun, ProtocolSession } from './index';
 
 export function parseOpenedSession(raw: unknown): ProtocolSession | null {
   const parsed = RESULTS['sessions.open'].safeParse(raw);
@@ -30,4 +30,10 @@ export interface ModelList {
 export function parseModels(raw: unknown): ModelList | null {
   const parsed = RESULTS['models.list'].safeParse(raw);
   return parsed.success ? { models: parsed.data.models, incomplete: parsed.data.error !== undefined } : null;
+}
+
+/** M14 — `box.status`, `box.start` y `box.stop` devuelven lo mismo: el estado de la caja. */
+export function parseBoxStatus(raw: unknown): ProtocolBoxStatus | null {
+  const parsed = RESULTS['box.status'].safeParse(raw);
+  return parsed.success ? parsed.data.box : null;
 }

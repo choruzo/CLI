@@ -171,6 +171,15 @@ export interface NativeBridge {
   startRun(sessionId: string, input: string): Promise<unknown>;
   listAgents(cwd?: string): Promise<unknown>;
   listModels(): Promise<unknown>;
+  /** M14 — estado de la caja del asistente. Resultado sin validar. */
+  boxStatus(): Promise<unknown>;
+  /**
+   * M14 — arrancar la caja: la crea, o la recrea si quedó desfasada. La primera
+   * vez el daemon construye su imagen: puede tardar minutos. Sin validar.
+   */
+  boxStart(): Promise<unknown>;
+  /** M14 — pararla. Su home se conserva. Borrarla no se puede desde Dot. */
+  boxStop(): Promise<unknown>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -220,6 +229,9 @@ export const tauriBridge: NativeBridge = {
   startRun: (sessionId, input) => invoke<unknown>('dot_start_run', { sessionId, input }),
   listAgents: (cwd) => invoke<unknown>('dot_list_agents', { cwd: cwd ?? null }),
   listModels: () => invoke<unknown>('dot_list_models'),
+  boxStatus: () => invoke<unknown>('dot_box_status'),
+  boxStart: () => invoke<unknown>('dot_box_start'),
+  boxStop: () => invoke<unknown>('dot_box_stop'),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

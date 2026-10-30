@@ -6,7 +6,7 @@
 import { vi } from 'vitest';
 import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
-import type { ProtocolRun, ProtocolSession, ProtocolSessionSnapshot } from '../protocol';
+import type { ProtocolBoxStatus, ProtocolRun, ProtocolSession, ProtocolSessionSnapshot } from '../protocol';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
@@ -73,6 +73,21 @@ export function runUpdated(seq: number, status: ProtocolRun['status']): Record<s
   return stateEvent(seq, 'run.updated', { run: sampleRun({ status }) });
 }
 
+/** M14 — la caja del asistente, como la describe `box.status`. */
+export function sampleBox(overrides: Partial<ProtocolBoxStatus> = {}): ProtocolBoxStatus {
+  return {
+    name: 'box',
+    state: 'stopped',
+    runtime: 'podman',
+    image: 'stratum-box:1',
+    network: true,
+    outdated: false,
+    enabled: true,
+    exchangeDir: '/home/ana/.stratum/companion/exchange',
+    ...overrides,
+  };
+}
+
 export const CONNECTED: ConnectionState = {
   kind: 'connected',
   serverVersion: '0.9.0',
@@ -132,6 +147,9 @@ export function fakeNative(): FakeNative {
         { provider: 'local', id: 'big-model', contextWindow: 128000 },
       ],
     })),
+    boxStatus: vi.fn(async (): Promise<unknown> => ({ box: sampleBox() })),
+    boxStart: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'running' }) })),
+    boxStop: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'stopped' }) })),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),
@@ -167,6 +185,7 @@ export function resetStores(): void {
     opening: {},
     notices: {},
     view: 'sessions',
+    companionId: null,
     focusItem: null,
     resolutions: {},
   });

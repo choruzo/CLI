@@ -14,8 +14,11 @@ export type ControlKind = 'pause' | 'resume' | 'cancel';
 /** Qué se enseña de la sesión seleccionada. */
 export type SessionTab = 'chat' | 'activity';
 
-/** La pantalla: sesiones (lista + detalle) o el centro de aprobaciones. */
-export type MainView = 'sessions' | 'human-input';
+/**
+ * La pantalla: el asistente (M14: su conversación y su caja), sesiones (lista +
+ * detalle) o el centro de aprobaciones.
+ */
+export type MainView = 'assistant' | 'sessions' | 'human-input';
 
 /**
  * Lo que la interfaz sabe de una resolución que **ella** envió. No es el
@@ -104,6 +107,12 @@ interface UiStore {
   opening: Record<string, number>;
   notices: Record<string, Notice>;
   view: MainView;
+  /**
+   * M14 — la sesión del asistente (`companion`) que dio el daemon al abrirla.
+   * Solo en memoria: al volver a abrir Dot se pide otra vez, y el daemon
+   * devuelve la misma si sigue existiendo.
+   */
+  companionId: string | null;
   /** La solicitud que hay que poner delante al abrir el centro (desde el chat). */
   focusItem: string | null;
   /** Por `sesión:id` de solicitud. Solo vive en memoria, y nunca guarda lo tecleado. */
@@ -112,6 +121,7 @@ interface UiStore {
   /** Abre el centro de aprobaciones, opcionalmente en esa solicitud. */
   openHumanInput(itemId?: string | null): void;
   setView(view: MainView): void;
+  setCompanionId(id: string | null): void;
   setResolution(id: string, resolution: Omit<Resolution, 'at'> | null): void;
   setTab(tab: SessionTab): void;
   setComposingNew(open: boolean): void;
@@ -141,10 +151,12 @@ export const useUi = create<UiStore>((set) => ({
   opening: {},
   notices: {},
   view: 'sessions',
+  companionId: null,
   focusItem: null,
   resolutions: {},
   openHumanInput: (itemId = null) => set({ view: 'human-input', focusItem: itemId }),
   setView: (view) => set({ view, focusItem: null }),
+  setCompanionId: (id) => set({ companionId: id }),
   setResolution: (id, resolution) =>
     set((prev) => ({
       resolutions: withEntry(prev.resolutions, id, resolution ? { ...resolution, at: Date.now() } : null),

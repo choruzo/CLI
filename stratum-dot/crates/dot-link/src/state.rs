@@ -206,6 +206,12 @@ pub enum CallAction {
         model: String,
         provider: Option<String>,
     },
+    /// M14 — `box.status`: el estado de la caja del asistente. Solo lectura.
+    BoxStatus,
+    /// M14 — `box.start`: arrancarla. La primera vez construye su imagen: tarda.
+    BoxStart,
+    /// M14 — `box.stop`: pararla. Su home se conserva.
+    BoxStop,
 }
 
 impl CallAction {
@@ -223,6 +229,9 @@ impl CallAction {
             CallAction::Memory { .. } => "memory",
             CallAction::CloseSession { .. } => "close-session",
             CallAction::SetModel { .. } => "set-model",
+            CallAction::BoxStatus => "box-status",
+            CallAction::BoxStart => "box-start",
+            CallAction::BoxStop => "box-stop",
         }
     }
 
@@ -234,6 +243,8 @@ impl CallAction {
                 | CallAction::StartRun { .. }
                 | CallAction::CloseSession { .. }
                 | CallAction::SetModel { .. }
+                | CallAction::BoxStart
+                | CallAction::BoxStop
         )
     }
 }

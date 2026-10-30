@@ -19,8 +19,8 @@
 //! confirmación con nombre se teclea también allí. Denegar, omitir y rechazar
 //! van directos: es lo mismo que hace el runtime cuando nadie contesta.
 //!
-//! Lo que devuelven `dot_open_session`, `dot_start_run`, `dot_list_agents` y
-//! `dot_list_models` es el `result` del daemon **sin interpretar**: un DTO del
+//! Lo que devuelven `dot_open_session`, `dot_start_run`, `dot_list_agents`,
+//! `dot_list_models` y `dot_box_*` es el `result` del daemon **sin interpretar**: un DTO del
 //! protocolo que el webview valida contra el contrato antes de usarlo.
 
 use dot_link::{
@@ -167,6 +167,25 @@ pub async fn dot_list_agents(
 #[tauri::command]
 pub async fn dot_list_models(state: State<'_, DotState>) -> Result<Value, CommandError> {
     state.link.call(CallAction::ListModels).await
+}
+
+/// M14 — estado de la caja del asistente. El `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_box_status(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::BoxStatus).await
+}
+
+/// M14 — arrancar la caja. La primera vez el daemon construye su imagen: puede
+/// tardar minutos. Las órdenes que recibe el runtime las decide el daemon.
+#[tauri::command]
+pub async fn dot_box_start(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::BoxStart).await
+}
+
+/// M14 — pararla. Su home se conserva. Borrarla (`box.reset`) no es de Dot.
+#[tauri::command]
+pub async fn dot_box_stop(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::BoxStop).await
 }
 
 fn main_window<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), CommandError> {

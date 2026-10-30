@@ -55,10 +55,16 @@ pub enum MainMethod {
     SessionsSetModel,
     /// M12 (Desktop) — las skills disponibles para un agente.
     SkillsList,
+    /// M14 (Dot) — estado de la caja del asistente (M13).
+    BoxStatus,
+    /// M14 (Dot) — arrancar la caja (la crea, o la recrea si quedó desfasada).
+    BoxStart,
+    /// M14 (Dot) — pararla. `box.reset` (borra su home) no está: no es de un cliente.
+    BoxStop,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 19] = [
+    pub const ALL: [MainMethod; 22] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -78,6 +84,9 @@ impl MainMethod {
         MainMethod::SessionsClose,
         MainMethod::SessionsSetModel,
         MainMethod::SkillsList,
+        MainMethod::BoxStatus,
+        MainMethod::BoxStart,
+        MainMethod::BoxStop,
     ];
 }
 
@@ -103,6 +112,9 @@ impl WireMethod for MainMethod {
             MainMethod::SessionsClose => "sessions.close",
             MainMethod::SessionsSetModel => "sessions.setModel",
             MainMethod::SkillsList => "skills.list",
+            MainMethod::BoxStatus => "box.status",
+            MainMethod::BoxStart => "box.start",
+            MainMethod::BoxStop => "box.stop",
         }
     }
 }
@@ -283,7 +295,10 @@ mod tests {
                 "sessions.memory",
                 "sessions.close",
                 "sessions.setModel",
-                "skills.list"
+                "skills.list",
+                "box.status",
+                "box.start",
+                "box.stop"
             ]
         );
         for forbidden in [
@@ -294,6 +309,8 @@ mod tests {
             "sessions.setAgent",
             "sessions.setReadOnly",
             "sessions.detach",
+            // Borra el home de la caja: lo hace la persona desde la CLI, que pide su nombre.
+            "box.reset",
         ] {
             assert!(!names.contains(&forbidden), "{forbidden}");
         }

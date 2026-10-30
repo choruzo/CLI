@@ -14,6 +14,7 @@ export type {
   FollowResult,
   ProtocolAgent,
   ProtocolApproval,
+  ProtocolBoxStatus,
   ProtocolChatMessage,
   ProtocolEvent,
   ProtocolJob,
