@@ -182,6 +182,29 @@ describe('secciones solo globales (M13: box)', () => {
     expect(config.box.image).not.toBe('evil/image:latest');
     expect(takeConfigDeprecations().join('\n')).toMatch(/"box" solo se lee de la config global/);
   });
+
+  it('M15: trace.screenshots de un proyecto se ignora; el resto de trace sí cuenta', () => {
+    const globalFile = join(dir, 'global.json');
+    const projectFile = join(dir, 'project.json');
+    writeJson(globalFile, { trace: { retentionDays: 7 } });
+    const project = { trace: { screenshots: true, maxFieldChars: 5000 } };
+    const merged = validateConfigLayer(projectFile, project, globalFile);
+    expect(merged.trace.screenshots).toBe(false);
+    expect(merged.trace.maxFieldChars).toBe(5000);
+    expect(merged.trace.retentionDays).toBe(7);
+    // La capa de entrada no se toca.
+    expect(project.trace.screenshots).toBe(true);
+    expect(
+      validateConfigLayer(globalFile, { trace: { screenshots: true } }, globalFile).trace
+        .screenshots,
+    ).toBe(true);
+
+    writeJson(join(dir, '.stratumrc.json'), { trace: { screenshots: true } });
+    expect(loadConfig(dir).trace.screenshots).toBe(false);
+    expect(takeConfigDeprecations().join('\n')).toMatch(
+      /"trace\.screenshots" solo se lee de la config global/,
+    );
+  });
 });
 
 describe('setConfigValue', () => {

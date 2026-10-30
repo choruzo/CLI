@@ -1,6 +1,7 @@
 import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from './base.js';
 import type { AgentEvent, Message } from '../agent/types.js';
+import type { RequestImage } from '../agent/screenshots.js';
 import type { CacheCapabilities } from './cache.js';
 import { getLogger } from '../logging/index.js';
 import {
@@ -308,6 +309,65 @@ export function withCacheBreakpoints(messages: readonly Message[]): unknown[] {
   );
 }
 
+type WirePart =
+  | { type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }
+  | { type: 'image_url'; image_url: { url: string } };
+
+function partsOf(content: unknown): WirePart[] {
+  if (Array.isArray(content)) return content as WirePart[];
+  return typeof content === 'string' && content.length > 0 ? [{ type: 'text', text: content }] : [];
+}
+
+/**
+ * M15 — inserta las capturas en la petición. `wire` es `messages` ya
+ * serializado (mismo orden y longitud). Cada captura va en un mensaje `user`
+ * justo detrás del bloque de resultados de tool que la contiene: muchos
+ * backends no admiten imágenes en un mensaje `tool`. Si tras ese bloque ya
+ * viene un `user`, se le anteponen (nunca dos `user` seguidos). Devuelve
+ * copias: el historial del agente no se toca.
+ */
+export function withImages(
+  wire: readonly unknown[],
+  messages: readonly Message[],
+  images: readonly RequestImage[],
+): unknown[] {
+  if (images.length === 0) return [...wire];
+  const byCall = new Map<string, RequestImage[]>();
+  for (const img of images) {
+    const list = byCall.get(img.toolCallId) ?? [];
+    list.push(img);
+    byCall.set(img.toolCallId, list);
+  }
+  const imageParts = (list: RequestImage[]): WirePart[] =>
+    list.flatMap(({ toolCallId, image }) => [
+      {
+        type: 'text' as const,
+        text: `Screenshot ${image.sha256.slice(0, 12)} (from tool call ${toolCallId}):`,
+      },
+      { type: 'image_url' as const, image_url: { url: `data:${image.mime};base64,${image.data}` } },
+    ]);
+
+  const out: unknown[] = [];
+  let pending: RequestImage[] = [];
+  for (let i = 0; i < messages.length; i++) {
+    const m = messages[i]!;
+    if (pending.length > 0 && m.role !== 'tool') {
+      const parts = imageParts(pending);
+      pending = [];
+      if (m.role === 'user') {
+        const w = wire[i] as Record<string, unknown>;
+        out.push({ ...w, content: [...parts, ...partsOf(w.content)] });
+        continue;
+      }
+      out.push({ role: 'user', content: parts });
+    }
+    out.push(wire[i]);
+    if (m.role === 'tool' && m.tool_call_id) pending.push(...(byCall.get(m.tool_call_id) ?? []));
+  }
+  if (pending.length > 0) out.push({ role: 'user', content: imageParts(pending) });
+  return out;
+}
+
 /** Lee como mucho `limit` bytes del cuerpo y cancela el resto. */
 async function readCapped(body: ReadableStream<Uint8Array> | null, limit: number): Promise<string> {
   if (!body) return '';
@@ -377,9 +437,15 @@ export class OpenAICompatible implements IProvider {
 
   async *complete(req: CompletionRequest): AsyncGenerator<OpenAIStreamChunk> {
     const url = `${this.baseUrl.replace(/\/$/, '')}/chat/completions`;
+    const serialized = this.cache?.explicitBreakpoints
+      ? withCacheBreakpoints(req.messages)
+      : req.messages;
     const body: Record<string, unknown> = {
       model: req.model,
-      messages: this.cache?.explicitBreakpoints ? withCacheBreakpoints(req.messages) : req.messages,
+      messages:
+        req.images && req.images.length > 0
+          ? withImages(serialized, req.messages, req.images)
+          : serialized,
       stream: true,
       stream_options: { include_usage: true },
     };
@@ -402,6 +468,8 @@ export class OpenAICompatible implements IProvider {
       model: req.model,
       url,
       messages: req.messages.length,
+      // M15: de las capturas, solo cuántas (nunca su contenido).
+      ...(req.images?.length ? { images: req.images.length } : {}),
       tools: req.tools?.length ?? 0,
       stream: true,
     });

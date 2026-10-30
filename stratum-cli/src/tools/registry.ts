@@ -42,8 +42,13 @@ export const STRUCTURED_CANCEL_GRACE_MS = 5000;
 
 /** Hito 16 — redacción de secretos (§11.3) sobre la salida o el error de una tool. */
 function redactResult(result: ToolResult, ctx: ToolContext): ToolResult {
+  // M15: la captura no es texto y no se redacta; sigue aparte hasta el loop.
   return result.ok
-    ? { ok: true, output: redactText(result.output, ctx.config) }
+    ? {
+        ok: true,
+        output: redactText(result.output, ctx.config),
+        ...(result.image ? { image: result.image } : {}),
+      }
     : { ...result, error: redactText(result.error, ctx.config) };
 }
 
@@ -941,7 +946,11 @@ export class ToolDispatcher {
       // F4: truncar cualquier salida de tool antes de que entre al historial,
       // para proteger el contexto del modelo (cabeza 80% + cola 20%).
       const truncated: ToolResult = result.ok
-        ? { ok: true, output: truncateToolOutput(result.output) }
+        ? {
+            ok: true,
+            output: truncateToolOutput(result.output),
+            ...(result.image ? { image: result.image } : {}),
+          }
         : { ...result, error: truncateToolOutput(result.error) };
       const presented = await this.pluginAfter(call, result, durationMs, ctx);
       return {

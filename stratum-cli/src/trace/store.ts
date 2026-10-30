@@ -1,8 +1,8 @@
-import { existsSync, readdirSync, statSync, unlinkSync } from 'fs';
+import { existsSync, readdirSync, rmSync, statSync, unlinkSync } from 'fs';
 import { join } from 'path';
 import type { StratumConfig } from '../config/schema.js';
 import { expandHome } from '../config/paths.js';
-import { TraceRecorder } from './recorder.js';
+import { TraceRecorder, traceShotsDir } from './recorder.js';
 
 /**
  * Ficheros de traza en disco: `<trace.dir>/<sessionId>.jsonl`. Son derivados
@@ -73,11 +73,21 @@ export function listTraces(config: StratumConfig): TraceFileInfo[] {
   return out.sort((a, b) => b.updatedAt - a.updatedAt);
 }
 
+/** M15: las capturas guardadas junto a una traza (`trace.screenshots`) se van con ella. */
+function removeShots(file: string): void {
+  try {
+    rmSync(traceShotsDir(file), { recursive: true, force: true });
+  } catch {
+    /* best-effort, como el resto */
+  }
+}
+
 export function deleteTrace(config: StratumConfig, sessionId: string): boolean {
   const file = traceFilePath(config, sessionId);
   if (!file || !existsSync(file)) return false;
   try {
     unlinkSync(file);
+    removeShots(file);
     return true;
   } catch {
     return false;
@@ -91,6 +101,7 @@ export function pruneTraces(config: StratumConfig, olderThanMs: number, now = Da
     if (now - t.updatedAt <= olderThanMs) continue;
     try {
       unlinkSync(t.file);
+      removeShots(t.file);
       removed++;
     } catch {
       /* en uso o sin permisos: se intentará en el siguiente arranque */

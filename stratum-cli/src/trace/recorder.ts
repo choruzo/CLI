@@ -1,8 +1,8 @@
 import { createHash } from 'crypto';
-import { appendFile, mkdir } from 'fs/promises';
-import { dirname } from 'path';
+import { appendFile, mkdir, rename, writeFile } from 'fs/promises';
+import { dirname, join } from 'path';
 import type { StratumConfig } from '../config/schema.js';
-import type { AgentEvent, Message } from '../agent/types.js';
+import type { AgentEvent, Message, ToolImage } from '../agent/types.js';
 import { isRuntimeUpdatesMessage } from '../agent/inbox.js';
 import { redactText } from '../security/redact-output.js';
 import { getLogger } from '../logging/index.js';
@@ -49,6 +49,8 @@ export interface ModelCallInfo {
    * para medir cuánto del prompt repite el de la llamada anterior (`prefix`).
    */
   toolSchemas?: readonly unknown[];
+  /** M15 — capturas de pantalla que acompañan a la llamada (solo cuántas). */
+  images?: number;
 }
 
 /** `usage` crudo del backend; la traza guarda su forma normalizada (`normalizeUsage`). */
@@ -84,9 +86,24 @@ export interface TraceScope {
   event(event: AgentEvent): void;
   /** Una decisión del runtime que no viaja como `AgentEvent` (confirmación, veto, reintento). */
   runtime(event: TraceRuntimeEvent): void;
+  /**
+   * M15 — la captura que devolvió la tool `callId`. Antes de su `tool_result`:
+   * sus metadatos (dimensiones, tamaño, sha256) van en el `data.image` de ese
+   * paso. La imagen solo se guarda, como fichero aparte, con `trace.screenshots`.
+   * Opcional: un scope que no lo implementa no registra capturas.
+   */
+  screenshot?(callId: string, image: ToolImage): void;
   /** Scope de un subagente: sus pasos cuelgan del paso `subagentId`. */
   child(subagentId: string): TraceScope;
 }
+
+/** M15 — carpeta de las capturas de una traza: `<id>.jsonl` → `<id>.shots/`. */
+export function traceShotsDir(file: string): string {
+  return `${file.replace(/\.jsonl$/, '')}.shots`;
+}
+
+/** Nombre de fichero de una captura en `traceShotsDir`: su sha256, nada del modelo. */
+export const TRACE_SHOT_RE = /^[0-9a-f]{64}\.png$/;
 
 // ---------------------------------------------------------------------------
 // Escritura
@@ -191,7 +208,37 @@ export class TraceRecorder {
   }
 
   flush(): Promise<void> {
-    return this.writer.flush();
+    return Promise.all([this.writer.flush(), this.shots]).then(() => undefined);
+  }
+
+  private shots: Promise<void> = Promise.resolve();
+  private shotsBroken = false;
+
+  /**
+   * M15 — guarda la captura si la config lo pide (`trace.screenshots`, solo de
+   * la capa global). Devuelve el nombre del fichero, o `undefined`. Temporal +
+   * rename; el nombre es el sha256, así que repetir la misma imagen no duplica.
+   * Un fallo desactiva el guardado de capturas, no la traza. @internal
+   */
+  saveShot(image: ToolImage): string | undefined {
+    if (this.shotsBroken || this.opts.config.trace?.screenshots !== true) return undefined;
+    const name = `${image.sha256}.png`;
+    if (!TRACE_SHOT_RE.test(name)) return undefined;
+    const dir = traceShotsDir(this.file);
+    const target = join(dir, name);
+    const tmp = `${target}.${process.pid}.tmp`;
+    this.shots = this.shots.then(async () => {
+      if (this.shotsBroken) return;
+      try {
+        await mkdir(dir, { recursive: true });
+        await writeFile(tmp, Buffer.from(image.data, 'base64'));
+        await rename(tmp, target);
+      } catch (err) {
+        this.shotsBroken = true;
+        log.warn('trace screenshots disabled: write failed', { dir, err });
+      }
+    });
+    return name;
   }
 
   /** @internal */
@@ -381,6 +428,8 @@ class Scope implements TraceScope {
   private started = false;
   /** tool call id del modelo → paso abierto (los ids del modelo se repiten entre turnos). */
   private readonly openTools = new Map<string, string>();
+  /** M15 — metadatos de la captura de cada tool, hasta que su resultado cierra el paso. */
+  private readonly shotsByCall = new Map<string, TraceData>();
   private readonly openSubagents = new Set<string>();
   /** Uno por origen: el prompt del compresor no se compara con el del agente. */
   private readonly prefixes = new Map<LlmCallOrigin, PrefixTracker>();
@@ -532,6 +581,7 @@ class Scope implements TraceScope {
         model: info.model,
         messages: info.messages.length,
         tools: info.tools,
+        ...(info.images ? { images: info.images } : {}),
         prefix: prefix.measure(info.messages, info.toolSchemas),
       });
     });
@@ -595,9 +645,15 @@ class Scope implements TraceScope {
       }
       case 'tool_result':
       case 'tool_error': {
+        const shot = this.shotsByCall.get(ev.id);
+        this.shotsByCall.delete(ev.id);
         const data: TraceData =
           ev.type === 'tool_result'
-            ? { output: this.rec.text(ev.result), execMs: ev.durationMs }
+            ? {
+                output: this.rec.text(ev.result),
+                execMs: ev.durationMs,
+                ...(shot ? { image: shot } : {}),
+              }
             : {
                 error: this.rec.text(ev.error),
                 recoverable: ev.recoverable,
@@ -724,6 +780,19 @@ class Scope implements TraceScope {
       } else {
         this.point('notice', `Reintento ${ev.attempt} de la llamada al modelo`, data);
       }
+    });
+  }
+
+  screenshot(callId: string, image: ToolImage): void {
+    this.guard(() => {
+      const file = this.rec.saveShot(image);
+      this.shotsByCall.set(callId, {
+        width: image.width,
+        height: image.height,
+        bytes: image.bytes,
+        sha256: image.sha256,
+        ...(file ? { file } : {}),
+      });
     });
   }
 

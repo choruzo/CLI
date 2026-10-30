@@ -914,6 +914,13 @@ export const StratumConfigSchema = z.object({
       retentionDays: z.number().int().min(0).default(30),
       /** Tope por cadena guardada (el contenido va completo y redactado hasta aquí). */
       maxFieldChars: z.number().int().min(1_000).default(200_000),
+      /**
+       * M15 (A6) — guardar junto a la traza las capturas de pantalla de la caja
+       * (`<id>.shots/<sha256>.png`) para verlas en el auditor. Default `false`:
+       * la traza solo lleva sus metadatos. Son imágenes sin redactar, así que
+       * **solo se lee de la config global** (el loader la quita de un proyecto).
+       */
+      screenshots: z.boolean().default(false),
     })
     .default({}),
 

@@ -314,6 +314,53 @@ describe('companion — la pantalla de su caja (M15, §23.4)', () => {
   });
 });
 
+describe('companion — las capturas que ve el modelo (M15, §23.4)', () => {
+  function shotsBox(): void {
+    let n = 0;
+    vi.spyOn(containerBackend, 'run').mockImplementation(async (_t, req) => ({
+      status: 'exited',
+      exitCode: 0,
+      // Cada captura, distinta: otro ancho → otro sha.
+      stdout: req.command.includes('getdisplaygeometry')
+        ? '1280 800\n'
+        : pngBase64(1280 + ++n, 800),
+      stderr: '',
+    }));
+  }
+
+  it('van tras su resultado, solo las 2 últimas, y nunca al historial', async () => {
+    shotsBox();
+    const provider = new RecordingProvider([
+      makeToolCallRound('c1', 'screen_screenshot', {}),
+      makeToolCallRound('c2', 'screen_wait', { seconds: 0.1 }),
+      makeToolCallRound('c3', 'screen_wait', { seconds: 0.1 }),
+      makeTextRound('listo'),
+    ]);
+    const { host } = await companionHost(provider, { vision: 'pixels' });
+    await collect(host.run('mira la pantalla'));
+    const counts = provider.requests.map((r) => r.images?.length ?? 0);
+    expect(counts).toEqual([0, 1, 2, 2]);
+    expect(provider.requests[3]!.images!.map((i) => i.toolCallId)).toEqual(['c2', 'c3']);
+    const history = JSON.stringify(host.agent.getMessages());
+    for (const w of [1281, 1282, 1283]) expect(history).not.toContain(pngBase64(w, 800));
+  });
+
+  it('un modelo sin visión no recibe las que ya había', async () => {
+    shotsBox();
+    const provider = new RecordingProvider([
+      makeToolCallRound('c1', 'screen_screenshot', {}),
+      makeTextRound('vista'),
+      makeTextRound('sin ojos'),
+    ]);
+    const { host } = await companionHost(provider, { vision: 'pixels' });
+    await collect(host.run('mira'));
+    expect(provider.requests[1]!.images).toHaveLength(1);
+    host.agent.switchModel('other-model');
+    await collect(host.run('¿y ahora?'));
+    expect(provider.requests[2]!.images).toBeUndefined();
+  });
+});
+
 describe('companion — su memoria (§23.6)', () => {
   it('ve su STRATUM.md, no el global del asistente, y el asistente no ve el suyo', async () => {
     const { host, dataDir } = await companionHost(new MockProvider([]), {

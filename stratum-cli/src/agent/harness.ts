@@ -1,4 +1,5 @@
 import type { ModelVision, StratumConfig } from '../config/schema.js';
+import type { ScreenshotBuffer } from './screenshots.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
@@ -1212,6 +1213,12 @@ export class ReactLoop {
        */
       diagnostics?: DiagnosticsProvider;
       /**
+       * M15 — capturas de pantalla que el modelo puede ver (las últimas). De
+       * sesión, como los todos: el loop vive un turno. Sin él, una captura se
+       * queda en sus metadatos y el modelo no la ve.
+       */
+      screenshots?: ScreenshotBuffer;
+      /**
        * PL1 — plugins de la sesión (los aporta `StratumAgent`). Llegan al
        * `ToolContext` y los heredan los subagentes: una guarda no se salta
        * delegando.
@@ -1577,6 +1584,13 @@ export class ReactLoop {
       streamLoop: while (true) {
         const activeProvider = router?.getActive() ?? this.provider;
         request.model = router?.model ?? this.model;
+        // M15: las capturas, solo a un modelo con visión declarada. Se decide en
+        // cada intento: un fallback a un modelo sin visión deja de recibirlas.
+        const images = router?.vision
+          ? (this.extras?.screenshots?.forRequest(this.messages) ?? [])
+          : [];
+        if (images.length > 0) request.images = images;
+        else delete request.images;
 
         // ¿Se emitió algún evento visible? Si no, es seguro reintentar con otro provider.
         let emittedVisible = false;
@@ -1597,6 +1611,7 @@ export class ReactLoop {
           messages: this.messages,
           tools: tools.length,
           toolSchemas: tools,
+          ...(images.length > 0 ? { images: images.length } : {}),
         });
 
         // Acumula cada evento del buffer en el estado del turno y devuelve el
@@ -2178,6 +2193,13 @@ export class ReactLoop {
             // (`presented`); el write-log lee siempre el resultado de la tool.
             const shown = res.presented?.ok ? res.presented.output : res.result.output;
             const o = this.toolResultOutcome(res.callId, res.toolName, shown, res.durationMs);
+            // M15: la captura no entra en el historial ni en el evento; va al
+            // búfer de la sesión y, a la traza, solo como metadatos (antes del
+            // evento, que es el que cierra el paso de la tool).
+            if (res.result.image) {
+              this.extras?.screenshots?.add(res.callId, res.result.image);
+              opts?.trace?.screenshot?.(res.callId, res.result.image);
+            }
             yield o.event;
             this.messages.push(o.message);
             // Hito 12 — write-log de sesión: alimenta la protección del revisor.

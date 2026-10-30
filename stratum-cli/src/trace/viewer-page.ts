@@ -579,7 +579,13 @@ footer {
     if (s.kind === 'tool') {
       kv(dl, 'Ejecución', d.execMs !== undefined ? fmtDur(d.execMs) : null);
       if (d.recoverable !== undefined) kv(dl, 'Recuperable', d.recoverable ? 'sí' : 'no');
+      // M15: captura de pantalla de la caja (metadatos; el fichero, solo con trace.screenshots).
+      if (d.image && typeof d.image === 'object') {
+        kv(dl, 'Captura', d.image.width + '×' + d.image.height + ' · ' + Math.round(d.image.bytes / 1024) + ' KB · ' + String(d.image.sha256).slice(0, 12));
+        if (!d.image.file) kv(dl, 'Imagen', 'no guardada (trace.screenshots)');
+      }
     }
+    if (s.kind === 'model' && typeof d.images === 'number') kv(dl, 'Capturas enviadas', d.images);
     if (s.kind === 'subagent' && d.usage) {
       kv(dl, 'Resultado', d.result);
       kv(dl, 'Iteraciones', d.usage.iterations);
@@ -587,6 +593,14 @@ footer {
     }
     if (d.chars !== undefined) kv(dl, 'Caracteres', d.chars);
     body.appendChild(dl);
+    if (s.kind === 'tool' && d.image && typeof d.image.file === 'string' && /^[0-9a-f]{64}\.png$/.test(d.image.file)) {
+      var img = document.createElement('img');
+      img.src = 'shots/' + d.image.file;
+      img.alt = 'Captura de la caja';
+      img.style.maxWidth = '100%';
+      img.style.border = '1px solid #8884';
+      body.appendChild(img);
+    }
     var preview = s.kind === 'tool' && d.input !== undefined && d.output === undefined && !d.error ? pretty(d.input) : mainText(s);
     if (preview) {
       body.appendChild(el('div', 'sect', 'Vista previa'));

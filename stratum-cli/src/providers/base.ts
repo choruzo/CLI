@@ -1,4 +1,5 @@
 import type { Message } from '../agent/types.js';
+import type { RequestImage } from '../agent/screenshots.js';
 import type { RawTimings, RawUsage } from './cache.js';
 
 export interface ToolFunctionSchema {
@@ -73,6 +74,13 @@ export interface CompletionRequest {
    * por qué.
    */
   onStreamWarning?: (message: string) => void;
+  /**
+   * M15 — capturas de pantalla que acompañan a la petición, cada una tras el
+   * resultado de la tool que la tomó. No están en `messages`: el provider las
+   * inserta al serializar (`withImages`). Solo las pone el loop, y solo para un
+   * modelo con visión declarada.
+   */
+  images?: readonly RequestImage[];
 }
 
 export interface IProvider {

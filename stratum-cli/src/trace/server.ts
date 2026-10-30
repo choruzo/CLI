@@ -3,6 +3,9 @@ import { randomBytes } from 'crypto';
 import type { AddressInfo } from 'net';
 import { VIEWER_PAGE } from './viewer-page.js';
 import { FileTail } from './tail.js';
+import { readFile } from 'fs/promises';
+import { join } from 'path';
+import { TRACE_SHOT_RE, traceShotsDir } from './recorder.js';
 
 /**
  * Servidor efímero del visor de trayectoria (`/auditor`, `stratum auditor`).
@@ -84,7 +87,7 @@ export async function startAuditorServer(opts: AuditorServerOptions): Promise<Au
         'Content-Type': 'text/html; charset=utf-8',
         'Cache-Control': 'no-store',
         'Content-Security-Policy':
-          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; " +
+          "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; img-src 'self'; " +
           "connect-src 'self'; base-uri 'none'; form-action 'none'",
         'Referrer-Policy': 'no-referrer',
         'X-Content-Type-Options': 'nosniff',
@@ -94,6 +97,27 @@ export async function startAuditorServer(opts: AuditorServerOptions): Promise<Au
     }
     if (route === '/events') {
       serveEvents(res);
+      return;
+    }
+    // M15: las capturas que la traza guardó (`trace.screenshots`). El nombre es
+    // un sha256: nada de lo pedido puede salir de su carpeta.
+    if (route.startsWith('/shots/')) {
+      const name = route.slice('/shots/'.length);
+      if (!TRACE_SHOT_RE.test(name)) {
+        res.writeHead(404).end();
+        return;
+      }
+      readFile(join(traceShotsDir(opts.file), name)).then(
+        (png) => {
+          res.writeHead(200, {
+            'Content-Type': 'image/png',
+            'Cache-Control': 'no-store',
+            'X-Content-Type-Options': 'nosniff',
+          });
+          res.end(png);
+        },
+        () => res.writeHead(404).end(),
+      );
       return;
     }
     res.writeHead(404).end();

@@ -68,6 +68,7 @@ import {
 } from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
 import { SCREEN_SCREENSHOT_TOOL, SCREEN_TOOLS } from '../tools/screen/names.js';
+import { ScreenshotBuffer } from './screenshots.js';
 import {
   profileAllows,
   resolveSessionProfile,
@@ -286,6 +287,11 @@ export class StratumAgent {
    * suscribe aquí para pintar lo pendiente.
    */
   readonly inbox = new RuntimeInbox();
+  /**
+   * M15 — las últimas capturas de pantalla de la caja, que el loop manda a un
+   * modelo con visión. Solo en memoria: ni historial, ni sesión, ni traza.
+   */
+  private readonly screenshots = new ScreenshotBuffer();
   /**
    * Pausa cooperativa del run en curso. De sesión, como la inbox, y **la única**
    * autoridad de pausa: la consultan el loop del agente, los de sus subagentes
@@ -1498,6 +1504,7 @@ export class StratumAgent {
         skills: this.skills,
         fileState: this.fileState,
         diagnostics: this.diagnosticsProvider,
+        screenshots: this.screenshots,
         plugins: this.plugins,
         workspace: this.workspace,
         env: this.env,

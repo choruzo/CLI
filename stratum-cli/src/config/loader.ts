@@ -76,26 +76,43 @@ interface ConfigLayer {
 
 /**
  * Secciones que solo cuentan en la config global. `box` (M13): la imagen, la
- * red y el nombre de la caja no pueden depender de un repo clonado. Una capa de
- * proyecto que las declare se carga sin ellas, con un aviso.
+ * red y el nombre de la caja no pueden depender de un repo clonado.
+ * `trace.screenshots` (M15): guardar en disco capturas sin redactar de la caja
+ * lo decide la persona, no un repo. Una capa de proyecto que las declare se
+ * carga sin ellas, con un aviso.
  */
-const GLOBAL_ONLY_KEYS = ['box'] as const;
+const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [['box'], ['trace', 'screenshots']];
+
+function isRecord(v: unknown): v is Record<string, unknown> {
+  return typeof v === 'object' && v !== null && !Array.isArray(v);
+}
 
 function dropGlobalOnlyKeys(layer: ConfigLayer, warn: boolean): ConfigLayer {
   if (layer.global) return layer;
-  const present = GLOBAL_ONLY_KEYS.filter((k) => k in layer.raw);
-  if (present.length === 0) return layer;
-  const raw = { ...layer.raw };
-  for (const key of present) {
-    delete raw[key];
+  let raw = layer.raw;
+  for (const path of GLOBAL_ONLY_KEYS) {
+    const parents: Record<string, unknown>[] = [raw];
+    for (const key of path.slice(0, -1)) {
+      const next = parents[parents.length - 1]![key];
+      if (!isRecord(next)) break;
+      parents.push(next);
+    }
+    if (parents.length !== path.length) continue;
+    const leaf = path[path.length - 1]!;
+    if (!(leaf in parents[parents.length - 1]!)) continue;
+    // Copia por niveles: la capa de entrada no se toca.
+    const copies = parents.map((p) => ({ ...p }));
+    delete copies[copies.length - 1]![leaf];
+    for (let i = copies.length - 1; i > 0; i--) copies[i - 1]![path[i - 1]!] = copies[i];
+    raw = copies[0]!;
     if (warn) {
       pushWarning(
-        `${layer.path}: la sección "${key}" solo se lee de la config global ` +
+        `${layer.path}: la sección "${path.join('.')}" solo se lee de la config global ` +
           `(${GLOBAL_CONFIG_PATH}); aquí se ignora.`,
       );
     }
   }
-  return { ...layer, raw };
+  return raw === layer.raw ? layer : { ...layer, raw };
 }
 
 function prepareLayer(input: ConfigLayer, warn: boolean): Record<string, unknown> {
