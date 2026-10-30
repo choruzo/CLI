@@ -18,6 +18,7 @@ const COMMANDS: &[&str] = &[
     "dot_box_status",
     "dot_box_start",
     "dot_box_stop",
+    "dot_box_screen",
     "dot_approver_status",
     "dot_approver_unlock",
     "dot_approver_lock",

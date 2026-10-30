@@ -151,6 +151,7 @@ const COMMANDS = [
   'dot_approver_status',
   'dot_approver_unlock',
   'dot_attach',
+  'dot_box_screen',
   'dot_box_start',
   'dot_box_status',
   'dot_box_stop',
@@ -343,6 +344,7 @@ describe('el lado nativo', () => {
     expect(main).toEqual([
       'agents.list',
       'approvals.list',
+      'box.screen',
       'box.start',
       'box.status',
       'box.stop',
@@ -377,6 +379,7 @@ describe('el lado nativo', () => {
     expect(dotMethods).toEqual([
       'AgentsList',
       'ApprovalsList',
+      'BoxScreen',
       'BoxStart',
       'BoxStatus',
       'BoxStop',

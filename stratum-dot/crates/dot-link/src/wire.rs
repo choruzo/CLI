@@ -61,10 +61,12 @@ pub enum MainMethod {
     BoxStart,
     /// M14 (Dot) — pararla. `box.reset` (borra su home) no está: no es de un cliente.
     BoxStop,
+    /// M15 (Dot) — la pantalla de la caja ahora (JPEG), para verla en solo lectura.
+    BoxScreen,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 22] = [
+    pub const ALL: [MainMethod; 23] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -87,6 +89,7 @@ impl MainMethod {
         MainMethod::BoxStatus,
         MainMethod::BoxStart,
         MainMethod::BoxStop,
+        MainMethod::BoxScreen,
     ];
 }
 
@@ -115,6 +118,7 @@ impl WireMethod for MainMethod {
             MainMethod::BoxStatus => "box.status",
             MainMethod::BoxStart => "box.start",
             MainMethod::BoxStop => "box.stop",
+            MainMethod::BoxScreen => "box.screen",
         }
     }
 }
@@ -298,7 +302,8 @@ mod tests {
                 "skills.list",
                 "box.status",
                 "box.start",
-                "box.stop"
+                "box.stop",
+                "box.screen"
             ]
         );
         for forbidden in [

@@ -154,6 +154,8 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::BoxStatus,
     MainMethod::BoxStart,
     MainMethod::BoxStop,
+    // M15: su pantalla, en solo lectura.
+    MainMethod::BoxScreen,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -849,6 +851,7 @@ fn call_request(
         CallAction::BoxStatus => Ok((MainMethod::BoxStatus, json!({}))),
         CallAction::BoxStart => Ok((MainMethod::BoxStart, json!({ "operationId": operation_id }))),
         CallAction::BoxStop => Ok((MainMethod::BoxStop, json!({ "operationId": operation_id }))),
+        CallAction::BoxScreen => Ok((MainMethod::BoxScreen, json!({}))),
     }
 }
 
@@ -1835,8 +1838,11 @@ impl Actor {
                         let _ = reply.send(Err(error));
                     }
                     Ok((method, params)) => {
-                        // Sin el contenido: ni el mensaje ni la ruta van al log.
-                        self.cfg.logger.info(&format!("call: {}", action.name()));
+                        // Sin el contenido: ni el mensaje ni la ruta van al log. La
+                        // pantalla de la caja se pide cada poco: no llena el log.
+                        if !matches!(action, CallAction::BoxScreen) {
+                            self.cfg.logger.info(&format!("call: {}", action.name()));
+                        }
                         let timeout = match action {
                             CallAction::OpenSession { .. } => self.cfg.timings.open_timeout,
                             CallAction::BoxStart | CallAction::BoxStop => {
@@ -2003,12 +2009,16 @@ mod tests {
             (method, params),
             (MainMethod::BoxStop, json!({ "operationId": "op-2" }))
         );
+        // M15: ver su pantalla es una consulta sin parámetros.
+        let (method, params) = call_request(&CallAction::BoxScreen, "op").unwrap();
+        assert_eq!((method, params), (MainMethod::BoxScreen, json!({})));
         assert!(CallAction::BoxStart.mutating() && CallAction::BoxStop.mutating());
-        assert!(!CallAction::BoxStatus.mutating());
+        assert!(!CallAction::BoxStatus.mutating() && !CallAction::BoxScreen.mutating());
         for m in [
             MainMethod::BoxStatus,
             MainMethod::BoxStart,
             MainMethod::BoxStop,
+            MainMethod::BoxScreen,
         ] {
             assert!(DOT_METHODS.contains(&m), "{m:?}");
             // Desktop no tiene caja: es de Dot (PRD §23).

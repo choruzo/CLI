@@ -177,6 +177,8 @@ export function NewChat({ canOpen, onCancel }: Props) {
               {models.map((m) => (
                 <option key={modelKeyOf(m)} value={modelKeyOf(m)}>
                   {m.id} · {m.provider}
+                  {/* M15: declarada en la config del daemon; sin ella no usa la pantalla de la caja. */}
+                  {m.vision ? ' · vision' : ''}
                 </option>
               ))}
             </select>

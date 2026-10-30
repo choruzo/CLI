@@ -180,6 +180,8 @@ export interface NativeBridge {
   boxStart(): Promise<unknown>;
   /** M14 — pararla. Su home se conserva. Borrarla no se puede desde Dot. */
   boxStop(): Promise<unknown>;
+  /** M15 — la pantalla de la caja ahora, para verla en solo lectura. Sin validar. */
+  boxScreen(): Promise<unknown>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -232,6 +234,7 @@ export const tauriBridge: NativeBridge = {
   boxStatus: () => invoke<unknown>('dot_box_status'),
   boxStart: () => invoke<unknown>('dot_box_start'),
   boxStop: () => invoke<unknown>('dot_box_stop'),
+  boxScreen: () => invoke<unknown>('dot_box_screen'),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

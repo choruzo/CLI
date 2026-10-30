@@ -6,7 +6,13 @@
 import { vi } from 'vitest';
 import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
-import type { ProtocolBoxStatus, ProtocolRun, ProtocolSession, ProtocolSessionSnapshot } from '../protocol';
+import type {
+  ProtocolBoxScreen,
+  ProtocolBoxStatus,
+  ProtocolRun,
+  ProtocolSession,
+  ProtocolSessionSnapshot,
+} from '../protocol';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
@@ -84,6 +90,21 @@ export function sampleBox(overrides: Partial<ProtocolBoxStatus> = {}): ProtocolB
     outdated: false,
     enabled: true,
     exchangeDir: '/home/ana/.stratum/companion/exchange',
+    desktop: true,
+    ...overrides,
+  };
+}
+
+/** M15 — la pantalla de la caja, como la devuelve `box.screen`. */
+export function sampleScreen(overrides: Partial<ProtocolBoxScreen> = {}): ProtocolBoxScreen {
+  return {
+    mime: 'image/jpeg',
+    data: '/9j/AAAA',
+    width: 1280,
+    height: 800,
+    screenWidth: 1280,
+    screenHeight: 800,
+    takenAt: 1_760_000_000_000,
     ...overrides,
   };
 }
@@ -150,6 +171,7 @@ export function fakeNative(): FakeNative {
     boxStatus: vi.fn(async (): Promise<unknown> => ({ box: sampleBox() })),
     boxStart: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'running' }) })),
     boxStop: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'stopped' }) })),
+    boxScreen: vi.fn(async (): Promise<unknown> => ({ screen: sampleScreen() })),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),

@@ -23,6 +23,7 @@
     "allow-dot-box-status",
     "allow-dot-box-start",
     "allow-dot-box-stop",
+    "allow-dot-box-screen",
     "allow-dot-approver-status",
     "allow-dot-approver-unlock",
     "allow-dot-approver-lock",

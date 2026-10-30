@@ -1,10 +1,17 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
-import { describeCommandError } from '../app/actions';
+import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
 import { useNative } from '../bridge/context';
 import { toCommandError } from '../bridge/native';
-import type { ProtocolBoxStatus } from '../protocol';
-import { parseBoxStatus, parseOpenedSession } from '../protocol/results';
+import type {
+  ProtocolBoxScreen,
+  ProtocolBoxStatus,
+  ProtocolModel,
+  ProtocolRun,
+  ProtocolSessionSnapshot,
+} from '../protocol';
+import { parseBoxScreen, parseBoxStatus, parseModels, parseOpenedSession } from '../protocol/results';
+import { activeRun, usingScreen } from '../protocol/view';
 import { useSessions } from '../stores/sessionStore';
 import { OPENING_TTL_MS, useUi } from '../stores/uiStore';
 import { SessionDetail } from './SessionDetail';
@@ -156,9 +163,107 @@ export function Assistant({ now, canControl, connected, composerRef, onBack }: P
 
   return (
     <main className="body split assistant">
-      <BoxPanel connected={connected} canControl={canControl} />
+      <BoxPanel
+        connected={connected}
+        canControl={canControl}
+        sessionId={companionId}
+        snapshot={entry?.snapshot ?? null}
+      />
       {conversation}
     </main>
+  );
+}
+
+/** Cada cuánto se pide la pantalla: más a menudo mientras el asistente la usa. */
+export const SCREEN_POLL_MS = { inUse: 1_000, idle: 4_000, hidden: 15_000 } as const;
+
+/**
+ * M15 — la pantalla de la caja en vivo, en **solo lectura** (PRD §23.4): lo que
+ * contesta `box.screen`, pedido cada poco mientras se ve. No hay forma de
+ * actuar en ella desde aquí; parar es cancelar el run del asistente.
+ */
+function ScreenView({ connected, inUse }: { connected: boolean; inUse: boolean }) {
+  const native = useNative();
+  const [shot, setShot] = useState<ProtocolBoxScreen | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const inUseRef = useRef(inUse);
+  inUseRef.current = inUse;
+
+  useEffect(() => {
+    if (!connected) return;
+    let stopped = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const tick = async () => {
+      try {
+        const parsed = parseBoxScreen(await native.boxScreen());
+        if (stopped) return;
+        if (parsed) {
+          setShot(parsed);
+          setError(null);
+        } else {
+          setError('The daemon answered in a way this version of Dot cannot read.');
+        }
+      } catch (err) {
+        if (!stopped) setError(describeCommandError(toCommandError(err)));
+      }
+      if (stopped) return;
+      const wait =
+        typeof document !== 'undefined' && document.hidden
+          ? SCREEN_POLL_MS.hidden
+          : inUseRef.current
+            ? SCREEN_POLL_MS.inUse
+            : SCREEN_POLL_MS.idle;
+      timer = setTimeout(() => void tick(), wait);
+    };
+    void tick();
+    return () => {
+      stopped = true;
+      if (timer !== undefined) clearTimeout(timer);
+    };
+  }, [native, connected]);
+
+  return (
+    <figure className="box-screen" data-e2e="box-screen" data-in-use={inUse ? 'yes' : 'no'}>
+      {shot ? (
+        <img
+          src={`data:${shot.mime};base64,${shot.data}`}
+          width={shot.width}
+          height={shot.height}
+          alt="The assistant's box screen (view only)"
+          style={{ width: '100%', height: 'auto', display: 'block' }}
+        />
+      ) : !error ? (
+        <p className="muted small" role="status">
+          Loading the screen…
+        </p>
+      ) : null}
+      <figcaption className="muted small">
+        View only{shot ? ` · ${new Date(shot.takenAt).toLocaleTimeString()}` : ''}
+      </figcaption>
+      {error ? (
+        <p className="note small" role="alert">
+          {error}
+        </p>
+      ) : null}
+    </figure>
+  );
+}
+
+/** «Parar»: cancelar el run del asistente. El estado cambia cuando el daemon lo publica. */
+function StopRun({ sessionId, run, canControl }: { sessionId: string; run: ProtocolRun; canControl: boolean }) {
+  const { control } = useRunActions(sessionId);
+  const pending = useUi((s) => s.pending[sessionId]);
+  const requested =
+    pending?.kind === 'cancel' && pending.runId === run.id && pending.fromStatus === run.status;
+  return (
+    <button
+      type="button"
+      className="btn danger small"
+      disabled={!canControl || requested}
+      onClick={() => void control('cancel', run)}
+    >
+      {requested ? 'Stopping…' : 'Stop'}
+    </button>
   );
 }
 
@@ -176,11 +281,23 @@ type BoxOrder = 'start' | 'stop';
  * enseña es lo que contesta el daemon —a la consulta o a la orden—, nunca un
  * estado supuesto. Borrarla (`box.reset`) no está aquí: se hace desde la CLI.
  */
-function BoxPanel({ connected, canControl }: { connected: boolean; canControl: boolean }) {
+function BoxPanel({
+  connected,
+  canControl,
+  sessionId,
+  snapshot,
+}: {
+  connected: boolean;
+  canControl: boolean;
+  /** La sesión del asistente, cuando ya está abierta. */
+  sessionId: string | null;
+  snapshot: ProtocolSessionSnapshot | null;
+}) {
   const native = useNative();
   const [box, setBox] = useState<ProtocolBoxStatus | null>(null);
   const [busy, setBusy] = useState<BoxOrder | 'status' | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const [models, setModels] = useState<ProtocolModel[] | null>(null);
   const alive = useRef(true);
 
   useEffect(() => {
@@ -189,6 +306,26 @@ function BoxPanel({ connected, canControl }: { connected: boolean; canControl: b
       alive.current = false;
     };
   }, []);
+
+  // M15: qué modelos están declarados con visión lo dice el daemon (su config).
+  useEffect(() => {
+    if (!connected) return;
+    void native
+      .listModels()
+      .then((raw) => {
+        const list = parseModels(raw);
+        if (alive.current && list) setModels(list.models);
+      })
+      .catch(() => undefined);
+  }, [native, connected]);
+
+  const session = snapshot?.session;
+  const model = session && models?.find((m) => m.provider === session.provider && m.id === session.model);
+  // Solo se avisa con el dato: un modelo que la lista no trae es «no se sabe», no «sin visión».
+  const noVision = box?.desktop === true && model !== undefined && model !== null && !model.vision;
+  const hasScreen = box?.state === 'running' && box.desktop !== false;
+  const inUse = snapshot ? usingScreen(snapshot) : false;
+  const run = snapshot ? activeRun(snapshot) : null;
 
   const apply = useCallback((raw: unknown) => {
     const parsed = parseBoxStatus(raw);
@@ -323,6 +460,30 @@ function BoxPanel({ connected, canControl }: { connected: boolean; canControl: b
           </>
         ) : null}
       </div>
+      {noVision && model ? (
+        <p className="note small" role="note" data-e2e="no-vision">
+          The assistant&apos;s model ({model.id}) is not declared with vision, so it cannot use the box screen. Declare
+          it in the global Stratum configuration (
+          <span className="mono">
+            providers.{model.provider}.models.{model.id}.vision
+          </span>
+          ).
+        </p>
+      ) : null}
+      {hasScreen ? (
+        <section className="box-screen-panel" aria-label="Box screen">
+          <div className="overview-head">
+            <h3>Screen</h3>
+            {inUse && run && sessionId ? <StopRun sessionId={sessionId} run={run} canControl={canControl} /> : null}
+          </div>
+          {inUse ? (
+            <p className="pending small" role="status" data-e2e="screen-in-use">
+              The assistant is using the screen.
+            </p>
+          ) : null}
+          <ScreenView connected={connected} inUse={inUse} />
+        </section>
+      ) : null}
     </aside>
   );
 }

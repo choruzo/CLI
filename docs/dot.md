@@ -1314,3 +1314,27 @@ Tests: `src/app/Assistant.test.tsx`, `la_caja_solo_se_consulta_arranca_o_para_y_
 contesta el daemon (con un nombre propio y sin arrancarla), conversa con el prompt y las tools del
 `companion`, ve vetado sin aprobación un `exec` a `local`, y tras cerrar Dot y reiniciar el daemon
 vuelve la misma sesión con su conversación.
+
+## 18. La pantalla de la caja (M15)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.4; contrato en `docs/protocol.md` §21.1.
+
+- **Pantalla en vivo, solo lectura** (*Screen*, en el panel de la caja): con la caja en marcha y con
+  escritorio (`box.desktop`), Dot pide `box.screen` cada poco (`SCREEN_POLL_MS`: 1 s mientras el
+  asistente la usa, 4 s si no, 15 s con la ventana oculta) y enseña la imagen que contesta el daemon.
+  No hay forma de actuar en ella desde Dot (tomar el control queda fuera de M15). Un fallo se dice y
+  no deja una imagen inventada.
+- **Indicador y *Stop***: «The assistant is using the screen» cuando el run en curso del asistente
+  tiene como última llamada una `screen_*` (`usingScreen`, `src/protocol/view.ts`: sale de la foto,
+  no hay evento propio). *Stop* cancela ese run (`runs.cancel`, `useRunActions`) y, sin estado
+  optimista, queda en «Stopping…» hasta que el daemon publica el run.
+- **Visión del modelo**: Dot pide `models.list` y, si el modelo de la sesión del asistente está en la
+  lista sin `vision`, avisa de que no puede usar la pantalla y de dónde se declara
+  (`providers.<p>.models.<id>.vision`). Un modelo que la lista no trae no se da por «sin visión». En
+  *New chat*, el selector marca `· vision`.
+- **Nativo**: `MainMethod::BoxScreen` (solo en `DOT_METHODS`), `CallAction::BoxScreen` (consulta: no
+  cambia nada; no se anota en el log, porque se pide cada poco) y el comando `dot_box_screen`,
+  registrado como los demás. La respuesta cabe en un mensaje del enlace (JPEG ≤ 512 KiB).
+
+Tests: `src/app/Assistant.test.tsx` (*la pantalla de la caja*), `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
+y `tests/architecture.test.ts`.

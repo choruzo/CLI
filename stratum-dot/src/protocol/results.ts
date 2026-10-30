@@ -4,7 +4,14 @@
  * foto o un evento. Lo que no valida no se usa.
  */
 import { RESULTS } from '../../../stratum-cli/src/protocol/schemas';
-import type { ProtocolAgent, ProtocolBoxStatus, ProtocolModel, ProtocolRun, ProtocolSession } from './index';
+import type {
+  ProtocolAgent,
+  ProtocolBoxScreen,
+  ProtocolBoxStatus,
+  ProtocolModel,
+  ProtocolRun,
+  ProtocolSession,
+} from './index';
 
 export function parseOpenedSession(raw: unknown): ProtocolSession | null {
   const parsed = RESULTS['sessions.open'].safeParse(raw);
@@ -36,4 +43,10 @@ export function parseModels(raw: unknown): ModelList | null {
 export function parseBoxStatus(raw: unknown): ProtocolBoxStatus | null {
   const parsed = RESULTS['box.status'].safeParse(raw);
   return parsed.success ? parsed.data.box : null;
+}
+
+/** M15 — `box.screen`: la pantalla de la caja ahora (JPEG en base64). */
+export function parseBoxScreen(raw: unknown): ProtocolBoxScreen | null {
+  const parsed = RESULTS['box.screen'].safeParse(raw);
+  return parsed.success ? parsed.data.screen : null;
 }

@@ -10,6 +10,8 @@ import {
   hostedIdle,
   resetStores,
   sampleBox,
+  sampleToolCall,
+  snapshotOf,
   type FakeNative,
 } from '../testing/fixtures';
 
@@ -125,5 +127,105 @@ describe('vista Asistente', () => {
     openAssistant();
     await waitFor(() => expect(boxPanel().textContent).toContain('Neither Podman nor Docker'));
     expect((screen.getByRole('button', { name: 'Start box' }) as HTMLButtonElement).disabled).toBe(true);
+  });
+});
+
+describe('vista Asistente — la pantalla de la caja (M15)', () => {
+  /** El asistente abierto, con la caja en marcha. */
+  async function withRunningBox(native = fakeNative()): Promise<FakeNative> {
+    native.calls.boxStatus.mockResolvedValue({ box: sampleBox({ state: 'running' }) });
+    connected(native);
+    openAssistant();
+    await waitFor(() => expect(useUi.getState().companionId).toBe(NEW_SID));
+    return native;
+  }
+
+  function publish(native: FakeNative, snapshot: ReturnType<typeof hostedIdle>) {
+    act(() => {
+      native.push({ type: 'sessions', sessionIds: [NEW_SID] });
+      native.push({ type: 'snapshot', sessionId: NEW_SID, snapshot });
+    });
+  }
+
+  /** El asistente trabajando, con su última llamada en la pantalla. */
+  function busyOnScreen(last: string) {
+    return snapshotOf(
+      {
+        toolCalls: [
+          sampleToolCall({ id: 'c1', name: 'exec', runId: 'run_1', state: 'completed' }),
+          sampleToolCall({ id: 'c2', name: last, runId: 'run_1', state: 'running', target: 'container:box' }),
+        ],
+      },
+      { id: NEW_SID, agent: 'companion', state: 'running', host: { kind: 'daemon', client: 'daemon', connected: true } },
+      { id: 'run_1', sessionId: NEW_SID, status: 'running' },
+    );
+  }
+
+  it('enseña la pantalla en solo lectura, con lo que contesta box.screen', async () => {
+    const native = await withRunningBox();
+    await waitFor(() => expect(native.calls.boxScreen).toHaveBeenCalled());
+    const img = await screen.findByRole('img', { name: /box screen \(view only\)/ });
+    expect(img.getAttribute('src')).toBe('data:image/jpeg;base64,/9j/AAAA');
+    // Solo verla: ni clics, ni teclado, ni un control que actúe en ella.
+    expect(screen.queryByRole('button', { name: /take control|click|type/i })).toBeNull();
+  });
+
+  it('sin escritorio o con la caja parada, no se pide la pantalla', async () => {
+    const native = fakeNative();
+    native.calls.boxStatus.mockResolvedValue({ box: sampleBox({ state: 'running', desktop: false }) });
+    connected(native);
+    openAssistant();
+    await waitFor(() => expect(boxPanel().getAttribute('data-box-state')).toBe('running'));
+    expect(native.calls.boxScreen).not.toHaveBeenCalled();
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('si box.screen falla, lo dice sin inventar una imagen', async () => {
+    const native = fakeNative();
+    native.calls.boxScreen.mockRejectedValue({
+      kind: 'rejected',
+      code: 'UNAVAILABLE',
+      reason: 'box-stopped',
+      message: 'The box is not running.',
+    });
+    await withRunningBox(native);
+    await waitFor(() => expect(boxPanel().textContent).toContain('The box is not running.'));
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('con el asistente en la pantalla: indicador y «Stop», que cancela su run', async () => {
+    const native = await withRunningBox();
+    publish(native, busyOnScreen('screen_click'));
+    expect(screen.getByText('The assistant is using the screen.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Stop' }));
+    await waitFor(() => expect(native.calls.cancelRun).toHaveBeenCalledWith(NEW_SID, 'run_1'));
+    // Sin estado optimista: hasta que el daemon publique el run, «Stopping…».
+    await waitFor(() => expect(screen.getByRole('button', { name: 'Stopping…' })).toBeTruthy());
+  });
+
+  it('si su última llamada no es de pantalla, no hay indicador', async () => {
+    const native = await withRunningBox();
+    publish(native, busyOnScreen('exec'));
+    expect(screen.queryByText('The assistant is using the screen.')).toBeNull();
+    expect(screen.queryByRole('button', { name: 'Stop' })).toBeNull();
+  });
+
+  it('avisa si el modelo del asistente no está declarado con visión, y no si lo está', async () => {
+    const native = await withRunningBox();
+    publish(native, hostedIdle({}, { agent: 'companion' }));
+    await waitFor(() => expect(boxPanel().textContent).toContain('is not declared with vision'));
+    expect(boxPanel().textContent).toContain('providers.local.models.test-model.vision');
+    cleanup();
+    resetStores();
+
+    const seeing = fakeNative();
+    seeing.calls.listModels.mockResolvedValue({
+      models: [{ provider: 'local', id: 'test-model', contextWindow: null, default: true, vision: { coordinates: 'pixels' } }],
+    });
+    await withRunningBox(seeing);
+    publish(seeing, hostedIdle({}, { agent: 'companion' }));
+    await waitFor(() => expect(seeing.calls.listModels).toHaveBeenCalled());
+    await screen.findByRole('img', { name: /box screen/ });
+    expect(boxPanel().textContent).not.toContain('not declared with vision');
   });
 });

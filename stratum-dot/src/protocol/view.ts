@@ -30,6 +30,19 @@ export function activeRun(snapshot: ProtocolSessionSnapshot): ProtocolRun | null
   return session.currentRunId === null || session.currentRunId === run.id ? run : null;
 }
 
+/**
+ * M15 — ¿Está el agente usando la pantalla de su caja? Sí si hay un run en
+ * curso y su última llamada a una tool es de pantalla (`screen_*`, PRD §23.4).
+ * Sale de la foto, como todo lo demás: no hay un evento propio.
+ */
+export function usingScreen(snapshot: ProtocolSessionSnapshot): boolean {
+  const run = activeRun(snapshot);
+  if (!run) return false;
+  const calls = snapshot.toolCalls.filter((c) => c.runId === run.id && c.subagentId === undefined);
+  const last = calls[calls.length - 1];
+  return last !== undefined && last.name.startsWith('screen_');
+}
+
 /** El último run terminado, si la sesión está parada. */
 export function lastRun(snapshot: ProtocolSessionSnapshot): ProtocolRun | null {
   const { run } = snapshot;

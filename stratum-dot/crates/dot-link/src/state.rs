@@ -212,6 +212,8 @@ pub enum CallAction {
     BoxStart,
     /// M14 — `box.stop`: pararla. Su home se conserva.
     BoxStop,
+    /// M15 — `box.screen`: la pantalla de la caja ahora. Solo lectura.
+    BoxScreen,
 }
 
 impl CallAction {
@@ -232,6 +234,7 @@ impl CallAction {
             CallAction::BoxStatus => "box-status",
             CallAction::BoxStart => "box-start",
             CallAction::BoxStop => "box-stop",
+            CallAction::BoxScreen => "box-screen",
         }
     }
 

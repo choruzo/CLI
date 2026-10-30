@@ -188,6 +188,13 @@ pub async fn dot_box_stop(state: State<'_, DotState>) -> Result<Value, CommandEr
     state.link.call(CallAction::BoxStop).await
 }
 
+/// M15 — la pantalla de la caja ahora (JPEG en base64), para verla en solo
+/// lectura. La captura la toma el daemon con una orden fija; sin parámetros.
+#[tauri::command]
+pub async fn dot_box_screen(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::BoxScreen).await
+}
+
 fn main_window<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), CommandError> {
     if window.label() == "main" {
         Ok(())

@@ -101,6 +101,7 @@ pub fn run() {
             commands::dot_box_status,
             commands::dot_box_start,
             commands::dot_box_stop,
+            commands::dot_box_screen,
             commands::dot_approver_status,
             commands::dot_approver_unlock,
             commands::dot_approver_lock,
