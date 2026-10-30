@@ -1,0 +1,89 @@
+{
+  "id": "screen-form-submit",
+  "group": "computer-use",
+  "title": "Rellenar un formulario web (texto, radio, dos checkbox), enviarlo y leer la respuesta",
+  "description": "M15 (PRD de Dot §23.9, tarea 3): el companion rellena https://httpbin.org/forms/post en Chromium solo con las tools screen_* y lee lo que devuelve el servidor. Solo live: caja `evalbox` en marcha y un modelo con `vision` declarada.",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "agent": {
+        "maxIterations": 40
+      }
+    },
+    "globalConfig": {
+      "box": {
+        "enabled": true,
+        "name": "evalbox"
+      }
+    }
+  },
+  "input": "Usa el navegador de tu caja y su pantalla (no web_fetch ni web_search): abre https://httpbin.org/forms/post, rellena el formulario con el nombre de cliente 'Ada Lovelace', tamaño de pizza mediano y los ingredientes queso y champiñones, envíalo y dime qué campos del formulario devolvió el servidor y con qué valores.",
+  "run": {
+    "args": [
+      "--agent",
+      "companion"
+    ],
+    "timeoutMs": 480000
+  },
+  "expect": {
+    "description": "La respuesta reproduce lo que el servidor devolvió del envío: el nombre, el tamaño y los dos ingredientes.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_contains",
+        "value": "Ada Lovelace"
+      },
+      {
+        "type": "output_contains",
+        "value": "medium"
+      },
+      {
+        "type": "output_matches",
+        "pattern": "^(?=[\\s\\S]*\\bcheese\\b)(?=[\\s\\S]*\\bmushroom\\b)",
+        "label": "los dos ingredientes, como los devuelve el servidor"
+      },
+      {
+        "label": "sin visión declarada (el modelo de guion), la tool de pantalla se veta sin llegar a la caja",
+        "detail": "toolset",
+        "mode": "mock",
+        "tool": "screen_type",
+        "type": "runtime_event",
+        "min": 1,
+        "event": "veto"
+      }
+    ],
+    "forbidden": [
+      {
+        "tool": "web_fetch",
+        "label": "envió o leyó el formulario con web_fetch en vez de la pantalla"
+      },
+      {
+        "tool": "web_search",
+        "label": "usó web_search"
+      },
+      {
+        "tool": "exec",
+        "input": "curl|wget|urllib|requests\\.|--dump-dom|--headless|lynx|w3m|httpbin\\.org/post|xdotool|import -window|tesseract",
+        "label": "envió el formulario o manejó la pantalla por su cuenta en vez de con las screen_*"
+      }
+    ]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "screen_type",
+          "args": {
+            "text": "Ada Lovelace"
+          }
+        }
+      ]
+    },
+    {
+      "text": "No puedo usar la pantalla con este modelo. El servidor devolvió custname: Ada Lovelace, size: medium, topping: cheese, mushroom."
+    }
+  ]
+}

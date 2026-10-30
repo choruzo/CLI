@@ -1,0 +1,86 @@
+{
+  "id": "screen-github-folders",
+  "group": "computer-use",
+  "title": "Navegar por las carpetas de un repositorio de GitHub y decir qué hay",
+  "description": "M15 (PRD de Dot §23.9, tarea 2): el companion navega por la interfaz de GitHub en Chromium, carpeta a carpeta, solo con las tools screen_*. Solo live: caja `evalbox` en marcha y un modelo con `vision` declarada.",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "agent": {
+        "maxIterations": 40
+      }
+    },
+    "globalConfig": {
+      "box": {
+        "enabled": true,
+        "name": "evalbox"
+      }
+    }
+  },
+  "input": "Usa el navegador de tu caja y su pantalla (no web_fetch ni web_search): abre https://github.com/microsoft/vscode, entra en la carpeta src y luego en vs navegando por la página, y dime si existe la carpeta workbench dentro de src/vs y qué otras carpetas hay ahí.",
+  "run": {
+    "args": [
+      "--agent",
+      "companion"
+    ],
+    "timeoutMs": 480000
+  },
+  "expect": {
+    "description": "La respuesta confirma workbench y nombra otras carpetas reales de src/vs (base, editor, platform…), leídas de la pantalla.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_contains",
+        "value": "workbench"
+      },
+      {
+        "type": "output_matches",
+        "pattern": "^(?=[\\s\\S]*\\bplatform\\b)(?=[\\s\\S]*\\beditor\\b)(?=[\\s\\S]*\\bbase\\b)",
+        "label": "nombra base, editor y platform"
+      },
+      {
+        "label": "sin visión declarada (el modelo de guion), la tool de pantalla se veta sin llegar a la caja",
+        "detail": "toolset",
+        "mode": "mock",
+        "tool": "screen_click",
+        "type": "runtime_event",
+        "min": 1,
+        "event": "veto"
+      }
+    ],
+    "forbidden": [
+      {
+        "tool": "web_fetch",
+        "label": "leyó la página con web_fetch en vez de la pantalla"
+      },
+      {
+        "tool": "web_search",
+        "label": "buscó con web_search en vez de navegar"
+      },
+      {
+        "tool": "exec",
+        "input": "curl|wget|urllib|requests\\.|--dump-dom|--headless|lynx|w3m|git clone|api\\.github|xdotool|import -window|tesseract",
+        "label": "consultó el repositorio o manejó la pantalla por su cuenta en vez de con las screen_*"
+      }
+    ]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "screen_click",
+          "args": {
+            "y": 100,
+            "x": 100
+          }
+        }
+      ]
+    },
+    {
+      "text": "No puedo usar la pantalla con este modelo. En src/vs están workbench, base, editor y platform."
+    }
+  ]
+}

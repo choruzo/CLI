@@ -1954,6 +1954,19 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   capturas, capturas fuera de traza y logs, pantalla en vivo en Dot con indicador. *Hecho cuando*:
   las tres tareas de §23.9, ejecutadas por las tools reales, salen al menos 8 de 10 veces cada una
   con `glm5.3-flash`, y un modelo `norm1000` declarado acierta igual que uno en píxeles.
+  *Hecho 2026-10-30, salvo el criterio `norm1000`* (`.claude/docs/box.md`, `docs/protocol.md`
+  §21.1, `docs/dot.md` §18, escenarios `evals/scenarios/computer-use/`). Medido en live contra el
+  provider de NaN, una pasada por escenario y Chromium cerrado entre pasadas:
+  - `glm5.3-flash` (`pixels`): **10/10** en las tres tareas, con el prompt final (y 30/30 con el
+    anterior, sin la pista de las etiquetas); las 30 navegaron por pantalla (4–12 `screen_*`). Tres
+    pasadas que dieron `error` del backend (timeout de 120 s, 401) se repitieron.
+  - `norm1000`: **no acierta igual**. `qwen3.6`: Wikipedia 3/3, GitHub 2/3, formulario 0/6 (no
+    atina en radios y checkbox pequeños y acaba rellenando el formulario por el protocolo de
+    depuración de Chromium, que el escenario cuenta como fallo). `gemma4`: los pasos son correctos
+    pero su backend tarda 2–3 min en algunas llamadas y no cabe en los 480 s del escenario.
+    El reescalado se comprobó a mano: el píxel convertido cae donde apunta el modelo (p. ej. a 9 px
+    del texto de un enlace de GitHub); lo que falla es la precisión del modelo en objetivos
+    pequeños. Queda abierto (§23.13 A8).
 - **M16 — Rutinas.** `RoutineScheduler`, `routines.json`, `stratum routines …`,
   `propose_routine`, notificaciones, arranque del daemon con la sesión (opcional). *Hecho
   cuando*: una rutina corre a su hora con nadie mirando, lo que pide aprobación caduca a `deny`
@@ -1994,3 +2007,8 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
   **no se registran** (falla cerrado) y el `companion` sigue con `exec` en su caja; Dot lo avisa en
   el panel de la caja, su selector de modelo marca los que tienen visión, y la pantalla en vivo
   se sigue viendo.
+- **A8. Modelos `norm1000` y objetivos pequeños** (abierta 2026-10-30, de la medición de M15): con
+  `qwen3.6` y `gemma4` el reescalado es correcto pero fallan en controles pequeños (radios,
+  checkbox, nombres cortos de enlace). Opciones: una tool de zoom (recortar y ampliar una zona antes
+  de hacer clic), capturas a más resolución para esos modelos, o recomendar solo modelos medidos.
+  Decidir con datos, no suponer que un modelo `norm1000` sirve porque localiza bien en el spike.

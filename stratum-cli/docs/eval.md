@@ -96,7 +96,7 @@ desconocidas se rechazan.
 | Campo                | Qué es                                                                                                                                                                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                 | Minúsculas, dígitos y guiones. Único.                                                                                                                                                                                                                                   |
-| `group`              | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` · `replay`                                                                                                                                               |
+| `group`              | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` · `replay` · `computer-use`                                                                                                                                             |
 | `difficulty`         | `basic` (por defecto) · `intermediate` · `adversarial`. Ver [Niveles de dificultad](#niveles-de-dificultad).                                                                                                                                                            |
 | `requires`           | Si no se cumple, el escenario queda en **SKIP** (no cuenta como fallo): `platform` y ejecutables en el PATH.                                                                                                                                                            |
 | `setup.files`        | Ficheros de partida, ruta relativa → contenido. No pueden salir del workspace.                                                                                                                                                                                          |
@@ -231,6 +231,34 @@ Los dos guiones tienen que consumirse exactos. El runner deja `memory.autoExtrac
 que el escenario lo pida así, y conviene que la extracción devuelva `[]`: una decisión extraída se
 guardaría con embeddings, que es otra dependencia. `auxiliaryScript` solo entra en la huella del
 escenario si se usa.
+
+### Computer use en la caja (grupo `computer-use`, M15)
+
+Las tres tareas del spike de `docs/PRD_STRATUM_DOT.md` §23.9 —buscar en Wikipedia y leer la ficha,
+navegar por las carpetas de un repositorio de GitHub, rellenar y enviar un formulario— ejecutadas
+por el `companion` (`run.args: ["--agent", "companion"]`) con las tools `screen_*` reales. Lo que
+se puntúa en live es el **resultado** (la respuesta trae el dato de la página) y que la página se
+manejó por la pantalla: `forbidden` prohíbe `web_fetch`, `web_search` y, en `exec`, descargar la
+página (`curl`, `wget`, `--dump-dom`…) o manejar la pantalla por su cuenta (`xdotool`, `import`,
+`tesseract`). En `--mock` el modelo de guion no declara visión: su llamada a la pantalla se veta
+por el toolset (`runtime_event` `veto`/`toolset`) y nunca llega a la caja.
+
+Requisitos de live, que el runner no prepara:
+
+- la caja `evalbox` en marcha: `stratum box start` con `{ "box": { "enabled": true, "name": "evalbox" } }`
+  en la config global (los escenarios la usan por nombre, así que no tocan la caja del asistente);
+- un modelo con visión declarada en la config desde la que se lanza `stratum eval`
+  (`providers.<p>.models.<id>.vision`, `coordinates` `pixels` o `norm1000`);
+- una pasada por escenario si se quiere que ninguna herede el Chromium de la anterior (`--scenarios`
+  con una carpeta por escenario, y `pkill -f chromium` en la caja entre medias).
+
+Criterio de M15: cada tarea, al menos 8 de 10 pasadas con `glm5.3-flash` (`pixels`), y un modelo
+`norm1000` declarado acertando igual. Los tres llevan `run.timeoutMs: 480000`: en el spike la tarea
+de GitHub llegó a 294 s, y con los 180 s por defecto una pasada lenta pero correcta salía como fallo.
+
+Límite conocido del criterio en live: la respuesta de GitHub (`base`, `editor`, `platform`) es
+conocida, y un modelo puede darla sin navegar; los `forbidden` impiden los atajos, no responder de
+memoria. Para saber si navegó, mírese la traza (las `screen_*` y sus capturas).
 
 ### Replay de una sesión grabada (`stratum eval import`)
 

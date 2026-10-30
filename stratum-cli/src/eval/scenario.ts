@@ -24,6 +24,8 @@ export const SCENARIO_GROUPS = [
   'jobs',
   'steering',
   'replay',
+  // M15: el companion maneja la pantalla de su caja (solo live: caja y modelo con visión reales).
+  'computer-use',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
 

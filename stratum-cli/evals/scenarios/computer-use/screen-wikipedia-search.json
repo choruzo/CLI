@@ -1,0 +1,79 @@
+{
+  "id": "screen-wikipedia-search",
+  "group": "computer-use",
+  "title": "Buscar en Wikipedia con el buscador de la página y leer un dato de la ficha",
+  "description": "M15 (PRD de Dot §23.9, tarea 1): el companion abre Chromium en su caja y lo maneja solo con las tools screen_* (sin DOM, sin descargar la página). Solo live: necesita la caja `evalbox` en marcha (`stratum box start` con `box.name: evalbox` en la config global) y un modelo con `vision` declarada en la config desde la que se lanza `stratum eval`.",
+  "difficulty": "intermediate",
+  "setup": {
+    "config": {
+      "agent": {
+        "maxIterations": 40
+      }
+    },
+    "globalConfig": {
+      "box": {
+        "enabled": true,
+        "name": "evalbox"
+      }
+    }
+  },
+  "input": "Usa el navegador de tu caja y su pantalla (no web_fetch ni web_search): abre https://es.wikipedia.org, busca 'Monte Everest' con el buscador de la página y dime la altitud que da su ficha.",
+  "run": {
+    "args": [
+      "--agent",
+      "companion"
+    ],
+    "timeoutMs": 480000
+  },
+  "expect": {
+    "description": "La respuesta da la altitud de la ficha (8848,86 m o 8849 m) y la página se leyó por la pantalla, no descargándola.",
+    "checks": [
+      {
+        "type": "exit_code",
+        "equals": 0
+      },
+      {
+        "type": "output_matches",
+        "pattern": "8[\\s.,]?84[89]",
+        "label": "da la altitud de la ficha"
+      },
+      {
+        "label": "sin visión declarada (el modelo de guion), la tool de pantalla se veta sin llegar a la caja",
+        "detail": "toolset",
+        "mode": "mock",
+        "tool": "screen_screenshot",
+        "type": "runtime_event",
+        "min": 1,
+        "event": "veto"
+      }
+    ],
+    "forbidden": [
+      {
+        "tool": "web_fetch",
+        "label": "leyó la página con web_fetch en vez de la pantalla"
+      },
+      {
+        "tool": "web_search",
+        "label": "buscó con web_search en vez del buscador de la página"
+      },
+      {
+        "tool": "exec",
+        "input": "curl|wget|urllib|requests\\.|--dump-dom|--headless|lynx|w3m|xdotool|import -window|tesseract",
+        "label": "descargó la página o manejó la pantalla por su cuenta en vez de con las screen_*"
+      }
+    ]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "screen_screenshot",
+          "args": {}
+        }
+      ]
+    },
+    {
+      "text": "No puedo usar la pantalla de mi caja con este modelo. La ficha de Wikipedia da 8848,86 m."
+    }
+  ]
+}
