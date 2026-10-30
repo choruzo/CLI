@@ -1803,7 +1803,7 @@ antes de decidir (§23.9).
   sale de ella (otro target, un conector que actúa fuera, enviar o publicar) sigue en `confirm`.
 - **Sin Docker** (ni Podman, preferido desde A5) el asistente funciona como hoy (sin caja ni
   pantalla) y Dot lo dice. Stratum detecta el runtime; no lo instala.
-- **Decisión nueva [confirmada 2026-10-29]** (se aplica en M14, no antes): el `companion` **sí
+- **Decisión nueva [confirmada 2026-10-29, aplicada en M14]**: el `companion` **sí
   tiene `exec`**, solo contra **su** caja; nunca `local` ni `ssh:`. El `assistant` de Desktop no
   cambia (sin `exec`, ficheros confinados a su carpeta). En M14 hay que actualizar a la vez
   `.claude/docs/decisiones.md` (filas de clientes hermanos y de memoria por preset), `CLAUDE.md`,
@@ -1940,7 +1940,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   `ssh:` (auditoría, cancelación, timeout, `maxBytes`), la caja sobrevive a un reinicio del daemon
   con su volumen, y sin Docker todo lo anterior se deshabilita con un mensaje y sin errores. Los
   tests que necesitan Docker se saltan si no está.
-- **M14 — El `companion` en su caja.** Agente embebido `companion` (preset, directorio y memoria
+- **M14 — El `companion` en su caja.** *Hecho 2026-10-30* (`docs/protocol.md` §22,
+  `.claude/docs/session-host.md`). Agente embebido `companion` (preset, directorio y memoria
   propios, §23.6) con `exec` solo contra su caja (§23.3). Vista *Asistente* básica en Dot
   (conversación con el `companion`, estado de la caja, `start`/`stop`). *Hecho cuando*: el
   `companion` instala y ejecuta en su caja sin pedir aprobación; cualquier `exec` suyo a `local` o

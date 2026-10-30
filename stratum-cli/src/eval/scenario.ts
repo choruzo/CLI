@@ -516,8 +516,10 @@ export interface LoadedScenario extends Scenario {
  * `compare` lo avisa en vez de atribuir la diferencia a Stratum.
  */
 export function scenarioFingerprint(scenario: Scenario): string {
-  const { requires, setup, input, followUps, sessions, run, script, expect } = scenario;
+  const { requires, input, followUps, sessions, run, script, expect } = scenario;
   // Solo entran si se usan: la huella de los escenarios de siempre no cambia.
+  const { globalConfig, ...baseSetup } = scenario.setup;
+  const setup = Object.keys(globalConfig).length > 0 ? scenario.setup : baseSetup;
   const more = {
     ...(followUps.length > 0 ? { followUps } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),

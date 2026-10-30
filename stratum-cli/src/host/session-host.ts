@@ -188,7 +188,8 @@ export class SessionHost {
       ...(opts.preset === 'assistant'
         ? { promptPreset: 'assistant', workspace: assistantWorkspace(this.env.cwd) }
         : opts.preset === 'companion'
-          ? { promptPreset: 'companion' }
+          ? // Sin tools de fichero no hay nada que deshacer: sin snapshots (UX-1).
+            { promptPreset: 'companion', snapshots: false }
           : {}),
       ...(this.plugins.size > 0 ? { plugins: this.plugins } : {}),
       env: this.env,

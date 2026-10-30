@@ -1277,3 +1277,35 @@ El nombre del crate se queda en `dot-link` (renombrarlo era ruido para el mismo 
 Tests: `cargo test -p dot-link` (añade `tests/desktop.rs`: perfil, seguimiento por foco, lo de
 M11, cerrar, la lista blanca de Dot y una orden sin respuesta que no se repite) y todos los de Dot,
 sin cambios de comportamiento (`npm run test:run`, `smoke:real`, `smoke:chat`, `smoke:detach`).
+
+## 17. El asistente y su caja (M14)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23. Dot es la casa del asistente: el agente embebido
+`companion` (`docs/protocol.md` §22), con su memoria y un ordenador propio, la caja
+(`docs/protocol.md` §21). Sigue siendo un cliente: el asistente corre en `stratumd`, y la caja la
+gobierna el daemon.
+
+- **Vista *Asistente*** (botón *Assistant* de la cabecera; `src/screens/Assistant.tsx`). Al
+  abrirse pide `sessions.open { agent: 'companion' }` **sin directorio**: el daemon devuelve la
+  sesión del asistente si ya existe (también tras un reinicio) o crea una en el suyo. El id se
+  guarda solo en memoria (`uiStore.companionId`); la conversación se pinta con el mismo detalle de
+  sesión que la cabina, a partir de su foto. Si la sesión desaparece (se cerró en otro sitio), abrir
+  otra es un botón, nunca automático. El asistente es además una sesión más de la cabina.
+- **Panel de la caja**: estado (`unavailable`, `absent`, `stopped`, `running`), runtime, imagen,
+  red y carpeta compartida (`/exchange`), tal como los contesta el daemon; *Start box*, *Stop box* y
+  *Recreate box* cuando quedó desfasada. Lo que se enseña es la respuesta del daemon a la consulta o
+  a la orden, nunca un estado supuesto; un arranque sin respuesta queda como «resultado
+  desconocido» y no se repite. La primera vez el daemon construye la imagen: puede tardar minutos.
+- **Lo que no hay**: borrar la caja (`box.reset` borra su home: se hace desde la CLI, que pide
+  teclear el nombre). No está en `MainMethod`, así que ningún cliente del enlace puede enviarlo.
+- **Nativo**: `MainMethod::BoxStatus|BoxStart|BoxStop`, solo en `DOT_METHODS` (Desktop no tiene
+  caja); `CallAction::BoxStatus|BoxStart|BoxStop`, con arrancar y parar como órdenes que cambian
+  algo (sin respuesta, `unknown`) y un plazo propio (`Timings.box_timeout`, 20 min). Comandos
+  `dot_box_status`, `dot_box_start` y `dot_box_stop`, registrados como el resto (`lib.rs`,
+  `build.rs`, `capabilities/default.json`, test de arquitectura).
+
+Pendiente: que *Asistente* sea la vista de inicio y el modo compacto (PRD §23.8), y su E2E en la
+ventana.
+
+Tests: `src/app/Assistant.test.tsx`, `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
+(`crates/dot-link/src/link.rs`) y `tests/architecture.test.ts`.
