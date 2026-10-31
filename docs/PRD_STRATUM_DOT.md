@@ -1836,7 +1836,8 @@ antes de decidir (§23.9).
 - **Planificador en `stratumd`** (`RoutineScheduler`): una rutina es `{ id, schedule (cron o
   intervalo), prompt, modelo?, límites }`, guardada en `~/.stratum/companion/routines.json`
   (escritura atómica, Zod, `schemaVersion`). Al vencer, hace `runs.start` en **su propia sesión**
-  del asistente (visible en Activity con su nombre) y pasa antes por `waitAtSafePoint`.
+  del asistente, de larga vida y una por rutina (visible en Activity con su nombre; §23.13 A4), y
+  pasa antes por `waitAtSafePoint`.
 - **Nadie mirando**: una aprobación pendiente caduca a `deny` (§13.3) y la rutina sigue o falla;
   nunca se rebaja una política porque el run sea programado. Al terminar, notificación en Dot
   (§8.6) con el resumen.
@@ -1847,7 +1848,20 @@ antes de decidir (§23.9).
 - **Proactividad libre** (que el asistente escriba por iniciativa propia fuera de una rutina):
   fuera por ahora.
 - **Límite físico**: sin nube, una rutina solo corre con la máquina encendida y el daemon vivo.
-  El arranque del daemon con la sesión del SO entra en M16 como opción.
+  El arranque del daemon con la sesión del SO entra en M16 como opción
+  (`stratum daemon autostart on|off`: clave `Run` del usuario en Windows, `systemd --user` o
+  XDG autostart en Linux, LaunchAgent en macOS), y es su última porción.
+- **Horario** [decidido 2026-10-31]: intervalo (`30m`, `2h`, `1d`) o cron de 5 campos en hora
+  local, con un parser propio y puro (sin dependencia nueva), probado con reloj falso. Un
+  vencimiento perdido (daemon parado o máquina dormida) **no se recupera**: se calcula el
+  siguiente desde ahora. Si el run anterior de la rutina sigue en curso, el vencimiento se
+  **salta** y se cuenta; nunca se solapan dos runs de la misma rutina.
+- **La pantalla de la caja es una** [decidido 2026-10-31]: las `screen_*` toman un cerrojo
+  por run sobre la pantalla; quien llega segundo recibe un error claro (pantalla en uso por otra
+  sesión) y puede esperar o seguir con `exec`. Las rutinas conservan el computer use.
+- **Aviso al terminar** [decidido 2026-10-31]: **notificación del SO** en Dot (la primera de
+  Dot, §8.6) con el nombre de la rutina, su resultado y el resumen redactado; al pulsar, abre
+  la sesión de la rutina. Como toda notificación, nunca resuelve una aprobación.
 
 ### 23.6 Memoria
 
@@ -1992,8 +2006,14 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
   una lista de dominios, queda para más adelante.
 - **A3. Concesiones con caducidad** («permitir N minutos») frente a `allow-all` de sesión, y cómo
   se muestran en Dot.
-- **A4. Rutinas**: ¿sesión propia por rutina (propuesta) o la sesión principal del asistente?
-  ¿Qué parte del resultado vuelve al chat principal?
+- **A4. Rutinas.** *Resuelta 2026-10-31*: **una sesión propia por rutina**, de larga vida en el
+  daemon (como la del `companion`, §23.3): cada vencimiento es un run en ella, así que la rutina
+  ve sus ejecuciones anteriores (compactadas por M11) y sus fallos o aprobaciones caducadas no
+  ensucian la conversación principal. Es del preset `companion`: su misma caja y su misma memoria
+  (§23.6). Al chat principal **no vuelve nada a su contexto**: el resultado llega como
+  notificación en Dot con el resumen (la respuesta final del run, redactada) y un enlace a la
+  sesión de la rutina. Que el asistente principal pueda leer lo que hizo una rutina queda para
+  más adelante.
 - **A5. Docker en Windows**. *Resuelta 2026-10-29*: **Podman preferido** (no necesita un servicio
   en Linux; en Windows y macOS usa su `podman machine`) y Docker como alternativa
   (`box.runtime: auto | podman | docker`; `auto` prueba Podman y luego Docker).
