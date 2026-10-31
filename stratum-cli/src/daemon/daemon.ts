@@ -97,6 +97,8 @@ import {
 } from './session-archive.js';
 import { OperationCache, type OperationCacheOptions } from './operation-cache.js';
 import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
+import { RoutineScheduler, type RoutineSession } from './routine-scheduler.js';
+import { RoutineStore, routinesFile, type Routine } from '../routines/store.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
@@ -180,6 +182,11 @@ export interface StratumdOptions {
   companionDataDir?: string;
   /** M13 — la caja (`box.*`). Por defecto, la de `config.box`. Inyectable para tests. */
   box?: BoxManager;
+  /**
+   * M16 — almacén de las rutinas del asistente. Por defecto, `routines.json` en
+   * los datos del `companion`; `null` desactiva las rutinas (sin planificador).
+   */
+  routines?: RoutineStore | null;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -218,8 +225,29 @@ async function boxOperation(fn: () => Promise<BoxStatus>): Promise<{ box: BoxSta
   }
 }
 
+/** La sesión de una rutina, tal como la ve el planificador. */
+function asRoutineSession(s: HostedSession): RoutineSession {
+  return {
+    sessionId: s.sessionId,
+    get running() {
+      return s.running;
+    },
+    startRun: (input, mode, turn) => s.startRun(input, mode, turn),
+    cancel: (runId) => s.cancel(runId),
+    idle: () => s.idle(),
+    snapshot: () => s.snapshot(),
+    waitAtSafePoint: () => s.host.agent.pause.waitAtSafePoint(),
+    setModel: (model) => s.setModel(model),
+    get model() {
+      return s.host.agent.model;
+    },
+  };
+}
+
 export class Stratumd {
   readonly endpoint: Endpoint;
+  /** M16 — el planificador de rutinas, o `null` con `routines: null`. */
+  readonly routines: RoutineScheduler | null;
   /** Se resuelve cuando el daemon ha terminado de apagarse, con el motivo. */
   readonly closed: Promise<ShutdownReason>;
 
@@ -233,6 +261,8 @@ export class Stratumd {
   private readonly waking = new Map<string, Promise<HostedSession>>();
   /** M14 — la apertura del `companion` en curso: dos peticiones a la vez abren una sesión. */
   private companionOpening: Promise<HostedSession> | null = null;
+  /** M16 — la sesión de cada rutina que se está abriendo: dos disparos a la vez la abren una vez. */
+  private readonly routineOpening = new Map<string, Promise<RoutineSession>>();
   private readonly archive: SessionArchive;
   /** Sesiones a medio cerrar: ya no se pueden pedir, pero el apagado las espera. */
   private readonly closingSessions = new Set<Promise<void>>();
@@ -291,6 +321,31 @@ export class Stratumd {
       overviewOf: () => this.overview(),
     });
     this.traces = new TraceFeeds(opts.tracePollMs ? { pollMs: opts.tracePollMs } : {});
+    this.routines =
+      opts.routines === null
+        ? null
+        : new RoutineScheduler({
+            store: opts.routines ?? new RoutineStore(routinesFile(this.companionDir)),
+            sessionFor: (routine) => this.routineSession(routine),
+            existingSession: (routineId) => this.existingRoutineSession(routineId),
+            closeSession: (routineId) => this.closeRoutineSession(routineId),
+            now: this.now,
+            // La porción 3 los publica; de momento, solo el log (sin prompt ni resumen).
+            onFire: (fire) =>
+              log.info('routine fired', {
+                routineId: fire.routineId,
+                outcome: fire.outcome,
+                manual: fire.manual,
+                ...(fire.runId ? { runId: fire.runId } : {}),
+              }),
+            onFinished: (done) =>
+              log.info('routine run finished', {
+                routineId: done.routineId,
+                sessionId: done.sessionId,
+                runId: done.run.id,
+                status: done.run.status,
+              }),
+          });
     // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
     this.box =
       opts.box ??
@@ -392,6 +447,8 @@ export class Stratumd {
     if (daemon.claim.replacedStale) log.info('stale endpoint replaced', { dir });
     // Ya somos el daemon de esta carpeta: las sesiones guardadas son nuestras.
     daemon.recoverArchived();
+    // Las sesiones guardadas de rutinas ya están en `dormant`: el planificador las encuentra.
+    daemon.routines?.start();
     log.info('daemon started', {
       pid: process.pid,
       version: opts.version,
@@ -468,6 +525,8 @@ export class Stratumd {
    */
   private isIdle(): boolean {
     return (
+      // Una rutina habilitada tiene que poder vencer: el daemon no se apaga solo.
+      !this.routines?.hasEnabled &&
       this.sessions.size === 0 &&
       this.peers.size === 0 &&
       this.closingSessions.size === 0 &&
@@ -486,6 +545,8 @@ export class Stratumd {
   shutdown(reason: ShutdownReason = 'requested'): Promise<void> {
     this.shuttingDown ??= (async () => {
       log.info('daemon shutting down', { reason, sessions: this.sessions.size });
+      // Lo primero: ninguna rutina vence mientras se apaga.
+      this.routines?.stop();
       if (this.idleTimer) clearInterval(this.idleTimer);
       const sessions = [...this.sessions.values()];
       this.sessions.clear();
@@ -787,20 +848,97 @@ export class Stratumd {
   /** La sesión del `companion` que ya tiene el daemon (la más reciente), o `null`. */
   private companionSessionId(): string | null {
     for (const [id, s] of this.sessions) {
-      if (s.host.agent.promptPreset === 'companion') return id;
+      if (s.host.agent.promptPreset === 'companion' && !s.routineId) return id;
     }
     let best: { id: string; updatedAt: number } | null = null;
     for (const [id, d] of this.dormant) {
-      if (d.archived.meta.agent !== COMPANION_AGENT) continue;
+      // Las sesiones de rutinas (M16) no son «la» del companion.
+      if (d.archived.meta.agent !== COMPANION_AGENT || d.archived.meta.routineId) continue;
       const updatedAt = d.archived.meta.updatedAt;
       if (!best || updatedAt > best.updatedAt) best = { id, updatedAt };
     }
     return best?.id ?? null;
   }
 
+  // ---------------------------------------------------------------------------
+  // Rutinas (M16)
+  // ---------------------------------------------------------------------------
+
+  /** El id de la sesión de una rutina (montada o guardada), o `null`. */
+  private routineSessionId(routineId: string): string | null {
+    for (const [id, s] of this.sessions) {
+      if (s.routineId === routineId) return id;
+    }
+    let best: { id: string; updatedAt: number } | null = null;
+    for (const [id, d] of this.dormant) {
+      if (d.archived.meta.routineId !== routineId) continue;
+      const updatedAt = d.archived.meta.updatedAt;
+      if (!best || updatedAt > best.updatedAt) best = { id, updatedAt };
+    }
+    return best?.id ?? null;
+  }
+
+  /** Lo que ya hay de la sesión de una rutina, sin montar ni abrir nada. */
+  private existingRoutineSession(
+    routineId: string,
+  ): { sessionId: string; running: boolean } | null {
+    const id = this.routineSessionId(routineId);
+    if (!id) return null;
+    return { sessionId: id, running: this.sessions.get(id)?.running ?? false };
+  }
+
+  /**
+   * La sesión de una rutina: la montada, la guardada (se monta) o una nueva del
+   * `companion` en su directorio, con la misma caja y la misma memoria. Dos
+   * disparos a la vez comparten la apertura.
+   */
+  private routineSession(routine: Routine): Promise<RoutineSession> {
+    const pending = this.routineOpening.get(routine.id);
+    if (pending) return pending;
+    const opening = (async (): Promise<RoutineSession> => {
+      if (this.shuttingDown) {
+        throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+      }
+      const existing = this.routineSessionId(routine.id);
+      const hosted = existing
+        ? await this.wake(existing, 'Running a routine')
+        : await this.openNewSession(
+            {
+              agent: COMPANION_AGENT,
+              cwd: ensureCompanionWorkspace(this.companionDir),
+              ...(routine.model ? { model: routine.model } : {}),
+            },
+            undefined,
+            routine.id,
+          );
+      return asRoutineSession(hosted);
+    })().finally(() => {
+      this.routineOpening.delete(routine.id);
+    });
+    this.routineOpening.set(routine.id, opening);
+    return opening;
+  }
+
+  /** Cierra y borra la sesión de una rutina que se elimina (como `sessions.close`). */
+  private async closeRoutineSession(routineId: string): Promise<void> {
+    await this.routineOpening.get(routineId)?.catch(() => undefined);
+    const id = this.routineSessionId(routineId);
+    if (!id) return;
+    if (this.dormant.has(id) && !this.waking.has(id)) {
+      this.closeDormant(id);
+      return;
+    }
+    const session = this.sessions.get(id) ?? (await this.wake(id, 'Closing it'));
+    this.sessions.delete(id);
+    await this.closeSession(session, 'closed');
+    this.archive.remove(id);
+  }
+
   private async openNewSession(
     params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
     origin?: ClientKind,
+    /** M16 — solo el planificador de rutinas; `sessions.open` no puede pedirlo. */
+    routineId?: string,
   ): Promise<HostedSession> {
     if (this.sessions.size + this.opening >= this.maxSessions) {
       throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
@@ -870,6 +1008,7 @@ export class Stratumd {
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
           ...(params.agent ? { agent: params.agent } : {}),
           ...(origin ? { origin } : {}),
+          ...(routineId ? { routineId } : {}),
         });
       } catch (err) {
         // Nada de una sesión que no llegó a abrirse queda en disco.

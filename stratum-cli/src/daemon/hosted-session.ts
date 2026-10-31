@@ -107,6 +107,8 @@ export interface HostedSessionOptions {
   approvalTimeoutMs: number;
   /** M11 — su conversación duradera y dónde guardar ajustes y foto. */
   files: SessionFiles;
+  /** M16 — la rutina a la que pertenece la sesión. Solo la abre el planificador del daemon. */
+  routineId?: string;
 }
 
 /** Cuánto se espera a que un turno cancelado termine de cerrarse. */
@@ -127,6 +129,8 @@ export class HostedSession {
     readonly publisher: SessionPublisher,
     private readonly files: SessionFiles,
     private readonly version: string,
+    /** M16 — la rutina dueña de esta sesión, o `null`. */
+    readonly routineId: string | null = null,
   ) {}
 
   /** La conversación publicada, al store según aparece (también lo que la foto ya no lleva). */
@@ -170,7 +174,7 @@ export class HostedSession {
       onTranscript: HostedSession.transcriptTo(opts.files),
       ...(opts.origin ? { origin: opts.origin } : {}),
     });
-    return new HostedSession(host, publisher, opts.files, opts.version);
+    return new HostedSession(host, publisher, opts.files, opts.version, opts.routineId ?? null);
   }
 
   /**
@@ -186,7 +190,7 @@ export class HostedSession {
    *   cambiarle el agente sin decirlo.
    */
   static async adopt(
-    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent'> & {
+    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent' | 'routineId'> & {
       context: ProtocolHandoffContext;
       snapshot: ProtocolSessionSnapshot;
     },
@@ -237,7 +241,7 @@ export class HostedSession {
    *   no se puede activar: continuar con otro sería cambiarle el agente.
    */
   static async restore(
-    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent'> & {
+    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent' | 'routineId'> & {
       archived: ArchivedSession;
       snapshot: ProtocolSessionSnapshot;
     },
@@ -271,7 +275,7 @@ export class HostedSession {
       continueFrom: opts.snapshot,
       onTranscript: HostedSession.transcriptTo(opts.files),
     });
-    return new HostedSession(host, publisher, opts.files, opts.version);
+    return new HostedSession(host, publisher, opts.files, opts.version, meta.routineId ?? null);
   }
 
   /** Ajustes para volver a montarla. Sin entorno, claves ni handles. */
@@ -289,6 +293,7 @@ export class HostedSession {
       readOnly: agent.isReadOnly(),
       sessionProfile: agent.getSessionProfileRequest(),
       planRef: agent.getPlanRef(),
+      ...(this.routineId ? { routineId: this.routineId } : {}),
       usage: {
         toolCalls: agent.toolCallCount,
         tokens: tokens.status === 'reported' ? (tokens.tokens ?? 0) : null,
@@ -371,6 +376,14 @@ export class HostedSession {
     return this.pump !== null;
   }
 
+  /**
+   * Resuelve cuando no hay run en curso (en el acto si ya no lo hay). Nunca
+   * rechaza: el fallo de un turno ya se registró y se publicó.
+   */
+  idle(): Promise<void> {
+    return this.pump ?? Promise.resolve();
+  }
+
   session(): ProtocolSession {
     return this.publisher.session();
   }
@@ -389,7 +402,11 @@ export class HostedSession {
    *
    * @throws ProtocolError `BUSY` si ya hay uno en curso.
    */
-  startRun(input: string, mode: 'normal' | 'plan' = 'normal'): ProtocolRun {
+  startRun(
+    input: string,
+    mode: 'normal' | 'plan' = 'normal',
+    options: { maxIterations?: number } = {},
+  ): ProtocolRun {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'The session already has a run in progress.');
     if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
@@ -397,7 +414,10 @@ export class HostedSession {
     this.publisher.expectRun({ mode, input });
     const turn = this.host.run(
       mode === 'plan' ? PLAN_MODE_PROMPT.replaceAll('$ARGUMENTS', input) : input,
-      mode === 'plan' ? { mode: 'plan' } : {},
+      {
+        ...(mode === 'plan' ? { mode: 'plan' as const } : {}),
+        ...(options.maxIterations ? { maxIterations: options.maxIterations } : {}),
+      },
     );
     // El arranque del turno es síncrono hasta su primera espera: al volver de
     // `next()`, el publicador ya ha visto `turn_started` y el run existe.

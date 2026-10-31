@@ -65,6 +65,8 @@ export interface SessionMeta {
   readOnly: boolean;
   sessionProfile: string;
   planRef: string | null;
+  /** M16 — la rutina a la que pertenece esta sesión (opcional: no sube la versión). */
+  routineId?: string;
   usage: {
     toolCalls: number;
     tokens: number | null;
@@ -86,6 +88,7 @@ const metaSchema = z.object({
   readOnly: z.boolean(),
   sessionProfile: z.string(),
   planRef: z.string().nullable(),
+  routineId: z.string().min(1).optional(),
   usage: z.object({
     toolCalls: z.number().int().min(0),
     tokens: z.number().nullable(),

@@ -103,6 +103,8 @@ export interface TurnOptions {
   /** Persistencia del plan del turno (ver `planPersister`). */
   onPlanPersist?: (plan: Plan, done: boolean) => void;
   compressionMode?: RunOptions['compressionMode'];
+  /** M16 — tope de iteraciones del turno (rutinas). Sin él, el de `config.agent`. */
+  maxIterations?: number;
 }
 
 /**
@@ -304,6 +306,7 @@ export class SessionHost {
       ...(turn.onPlanPersist ? { onPlanPersist: turn.onPlanPersist } : {}),
       ...(turn.mode ? { mode: turn.mode } : {}),
       ...(turn.compressionMode ? { compressionMode: turn.compressionMode } : {}),
+      ...(turn.maxIterations ? { maxIterations: turn.maxIterations } : {}),
     };
   }
 

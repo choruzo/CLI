@@ -176,6 +176,9 @@ describe('SessionHost', () => {
     const approvePlan = vi.fn(async () => ({ decision: 'approve' as const, plan }));
     host.setGates({ approvePlan });
     expect(host.runOptions({ mode: 'plan' })).toMatchObject({ mode: 'plan' });
+    // M16: el tope de iteraciones del turno llega al runtime; sin él no se fija.
+    expect(host.runOptions({ maxIterations: 7 })).toMatchObject({ maxIterations: 7 });
+    expect(host.runOptions()).not.toHaveProperty('maxIterations');
     // La puerta que recibe el runtime pasa por las interacciones pendientes de
     // la sesión, que es donde compite con una respuesta remota.
     const after = host.runOptions();
