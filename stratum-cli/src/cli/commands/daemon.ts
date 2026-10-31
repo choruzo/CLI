@@ -6,6 +6,14 @@ import { locateLiveDaemon as locateLive, spawnDaemon } from '../daemon-link.js';
 import { loadConfig } from '../../config/loader.js';
 import { loadApproverAuth } from '../../daemon/approver-key.js';
 import { defaultEndpointDir } from '../../client/discovery.js';
+import {
+  autostartStatus,
+  currentLaunch,
+  defaultAutostartDeps,
+  disableAutostart,
+  enableAutostart,
+  type AutostartState,
+} from '../../daemon/autostart.js';
 import { DaemonAlreadyRunningError } from '../../daemon/endpoint.js';
 import { Stratumd } from '../../daemon/daemon.js';
 import { defaultSessionsDir } from '../../daemon/session-archive.js';
@@ -233,9 +241,67 @@ const status = new Command('status')
     }
   });
 
+function printAutostart(state: AutostartState, json?: boolean): void {
+  if (json) {
+    process.stdout.write(JSON.stringify(state) + '\n');
+    return;
+  }
+  if (!state.enabled) {
+    process.stdout.write('Autostart is off.\n');
+    return;
+  }
+  process.stdout.write(
+    'Autostart is on.\n' +
+      `  method    ${state.method}\n` +
+      `  location  ${state.location}\n` +
+      `  command   ${state.command ?? '(unknown)'}\n`,
+  );
+}
+
+/** Ejecuta una operación de autoarranque; un fallo se imprime y marca el exit code. */
+async function autostartAction(op: () => Promise<AutostartState>, json?: boolean): Promise<void> {
+  try {
+    printAutostart(await op(), json);
+  } catch (err) {
+    process.stderr.write(`${err instanceof Error ? err.message : String(err)}\n`);
+    process.exitCode = 1;
+  }
+}
+
+const autostart = new Command('autostart')
+  .description('Start the daemon when you log in to the OS')
+  .addCommand(
+    new Command('on')
+      .description('Enable autostart')
+      .option('--json', 'machine-readable output')
+      .action((opts: { json?: boolean }) =>
+        autostartAction(
+          () => enableAutostart(currentLaunch(), defaultAutostartDeps()),
+          opts.json,
+        ),
+      ),
+  )
+  .addCommand(
+    new Command('off')
+      .description('Disable autostart')
+      .option('--json', 'machine-readable output')
+      .action((opts: { json?: boolean }) =>
+        autostartAction(() => disableAutostart(defaultAutostartDeps()), opts.json),
+      ),
+  )
+  .addCommand(
+    new Command('status')
+      .description('Show whether autostart is enabled')
+      .option('--json', 'machine-readable output')
+      .action((opts: { json?: boolean }) =>
+        autostartAction(() => autostartStatus(defaultAutostartDeps()), opts.json),
+      ),
+  );
+
 export const daemonCommand = new Command('daemon')
-  .description('Local control plane (stratumd): run, start, stop, status')
+  .description('Local control plane (stratumd): run, start, stop, status, autostart')
   .addCommand(run)
   .addCommand(start)
   .addCommand(stop)
-  .addCommand(status);
+  .addCommand(status)
+  .addCommand(autostart);
