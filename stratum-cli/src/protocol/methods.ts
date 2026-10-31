@@ -6,6 +6,9 @@ import type {
   ProtocolApprovalDecision,
   ProtocolBoxStatus,
   ProtocolBoxScreen,
+  ProtocolRoutine,
+  ProtocolRoutineFire,
+  ProtocolRoutineLimits,
   ProtocolContextReport,
   ProtocolDecision,
   ProtocolHistoryPage,
@@ -427,6 +430,44 @@ export interface ProtocolMethods {
   'box.stop': Spec<Mutation, { box: ProtocolBoxStatus }>;
   'box.reset': Spec<Mutation, { box: ProtocolBoxStatus }>;
 
+  /**
+   * M16 — las rutinas del asistente (`docs/protocol.md` §23). Sin planificador
+   * (`routines: null`): `UNAVAILABLE` (`routines-disabled`); almacén en solo
+   * lectura (fichero de un Stratum más nuevo o dañado): las mutaciones, `UNAVAILABLE`
+   * (`read-only`). `null` en `update` quita `model` o `limits`.
+   */
+  'routines.list': Spec<Empty, { routines: ProtocolRoutine[]; readOnly: boolean }>;
+  'routines.add': Spec<
+    {
+      name: string;
+      schedule: string;
+      prompt: string;
+      model?: string;
+      enabled?: boolean;
+      limits?: ProtocolRoutineLimits;
+    } & Mutation,
+    { routine: ProtocolRoutine }
+  >;
+  'routines.update': Spec<
+    {
+      routineId: string;
+      patch: {
+        name?: string;
+        schedule?: string;
+        prompt?: string;
+        model?: string | null;
+        enabled?: boolean;
+        limits?: ProtocolRoutineLimits | null;
+      };
+    } & Mutation,
+    { routine: ProtocolRoutine }
+  >;
+  'routines.remove': Spec<{ routineId: string } & Mutation, { routine: ProtocolRoutine }>;
+  'routines.run': Spec<
+    { routineId: string } & Mutation,
+    { fire: ProtocolRoutineFire; routine: ProtocolRoutine }
+  >;
+
   'events.subscribe': Spec<{ scope: SubscriptionScope }, EventsSubscribeResult>;
   'events.unsubscribe': Spec<{ subscriptionId: string }, Empty>;
   'trace.subscribe': Spec<{ sessionId: string }, { subscriptionId: string }>;
@@ -556,6 +597,12 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'box.start': write('control'),
   'box.stop': write('control'),
   'box.reset': write('control'),
+
+  'routines.list': read('observe'),
+  'routines.add': write('control'),
+  'routines.update': write('control'),
+  'routines.remove': write('control'),
+  'routines.run': write('control'),
 
   // Suscribirse solo cambia el estado de la propia conexión: se puede repetir.
   'events.subscribe': read('observe'),

@@ -173,6 +173,7 @@ export class HostedSession {
       sink: opts.sink,
       onTranscript: HostedSession.transcriptTo(opts.files),
       ...(opts.origin ? { origin: opts.origin } : {}),
+      ...(opts.routineId ? { routineId: opts.routineId } : {}),
     });
     return new HostedSession(host, publisher, opts.files, opts.version, opts.routineId ?? null);
   }
@@ -274,6 +275,7 @@ export class HostedSession {
       sink: opts.sink,
       continueFrom: opts.snapshot,
       onTranscript: HostedSession.transcriptTo(opts.files),
+      ...(meta.routineId ? { routineId: meta.routineId } : {}),
     });
     return new HostedSession(host, publisher, opts.files, opts.version, meta.routineId ?? null);
   }

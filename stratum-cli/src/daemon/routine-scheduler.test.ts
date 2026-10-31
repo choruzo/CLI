@@ -500,6 +500,30 @@ describe('RoutineScheduler', () => {
     expect(finished[1]).toMatchObject({ summary: null, run: { status: 'cancelled' } });
   });
 
+  it('lastResult guarda el último run terminado y remove lo borra', async () => {
+    const { scheduler } = make();
+    scheduler.start();
+    const { routine } = scheduler.add({ name: 'a', schedule: '30m', prompt: 'p' });
+    expect(scheduler.list()[0]!.lastResult).toBeNull();
+    await scheduler.runNow(routine.id);
+    const s = sessions.get(routine.id)!;
+    const runId = s.lastRun!.id;
+    s.messages = [assistant(runId, 'todo bien', 2)];
+    s.finish();
+    await settle();
+
+    expect(scheduler.list()[0]!.lastResult).toMatchObject({
+      runId,
+      sessionId: s.sessionId,
+      status: 'completed',
+      summary: 'todo bien',
+    });
+    await scheduler.remove(routine.id);
+    expect(scheduler.list()).toEqual([]);
+    const again = scheduler.add({ name: 'a', schedule: '30m', prompt: 'p' });
+    expect(again.lastResult).toBeNull();
+  });
+
   it('maxIterations y model llegan a la sesión; el mismo modelo no se cambia', async () => {
     const { scheduler } = make();
     scheduler.start();

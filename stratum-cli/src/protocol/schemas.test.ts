@@ -367,3 +367,68 @@ describe('env es de solo entrada', () => {
     expect(open.safeParse({ cwd: '/w', env: 'PATH=/bin' }).success).toBe(false);
   });
 });
+
+describe('routines.* (M16)', () => {
+  const add = PARAMS['routines.add'];
+  const base = { name: 'n', schedule: '1h', prompt: 'p' };
+
+  it('add acepta lo mínimo y los límites completos, y rechaza claves ajenas', () => {
+    expect(add.safeParse(base).success).toBe(true);
+    expect(
+      add.safeParse({
+        ...base,
+        model: 'm',
+        enabled: false,
+        limits: { maxIterations: 200, timeoutMinutes: 1440 },
+        operationId: 'op1',
+      }).success,
+    ).toBe(true);
+    expect(add.safeParse({ ...base, extra: 1 }).success).toBe(false);
+    expect(add.safeParse({ ...base, limits: { maxIterations: 5, extra: 1 } }).success).toBe(false);
+  });
+
+  it('add respeta los topes del almacén', () => {
+    expect(add.safeParse({ ...base, name: '' }).success).toBe(false);
+    expect(add.safeParse({ ...base, name: 'x'.repeat(81) }).success).toBe(false);
+    expect(add.safeParse({ ...base, name: 'x'.repeat(80) }).success).toBe(true);
+    expect(add.safeParse({ ...base, prompt: '' }).success).toBe(false);
+    expect(add.safeParse({ ...base, prompt: 'x'.repeat(8001) }).success).toBe(false);
+    expect(add.safeParse({ ...base, schedule: 'x'.repeat(201) }).success).toBe(false);
+    expect(add.safeParse({ ...base, limits: { maxIterations: 0 } }).success).toBe(false);
+    expect(add.safeParse({ ...base, limits: { maxIterations: 201 } }).success).toBe(false);
+    expect(add.safeParse({ ...base, limits: { timeoutMinutes: 1441 } }).success).toBe(false);
+    expect(add.safeParse({ ...base, limits: { timeoutMinutes: 1.5 } }).success).toBe(false);
+  });
+
+  it('update admite null para quitar model y limits, y no admite otras claves en el parche', () => {
+    const update = PARAMS['routines.update'];
+    expect(
+      update.safeParse({ routineId: 'r', patch: { model: null, limits: null, enabled: true } })
+        .success,
+    ).toBe(true);
+    expect(update.safeParse({ routineId: 'r', patch: { name: null } }).success).toBe(false);
+    expect(update.safeParse({ routineId: 'r', patch: { id: 'otro' } }).success).toBe(false);
+    expect(update.safeParse({ patch: {} }).success).toBe(false);
+  });
+
+  it('list/remove/run: formas estrictas', () => {
+    expect(PARAMS['routines.list'].safeParse({}).success).toBe(true);
+    expect(PARAMS['routines.list'].safeParse({ x: 1 }).success).toBe(false);
+    expect(PARAMS['routines.remove'].safeParse({ routineId: 'r' }).success).toBe(true);
+    expect(PARAMS['routines.run'].safeParse({}).success).toBe(false);
+    expect(PARAMS['routines.run'].safeParse({ routineId: 'r', x: 1 }).success).toBe(false);
+  });
+
+  it('capacidades: observe lee, control muta', () => {
+    expect(METHODS['routines.list']).toMatchObject({ capability: 'observe', mutating: false });
+    for (const m of ['add', 'update', 'remove', 'run'] as const) {
+      expect(METHODS[`routines.${m}`]).toMatchObject({ capability: 'control', mutating: true });
+    }
+  });
+
+  it('ProtocolSession.routineId es opcional y de solo procedencia', () => {
+    const session = sampleSession();
+    expect(sessionSchema.safeParse(session).success).toBe(true);
+    expect(sessionSchema.safeParse({ ...session, routineId: 'rt_abc' }).success).toBe(true);
+  });
+});

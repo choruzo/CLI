@@ -104,6 +104,11 @@ export interface SessionPublisherOptions {
    */
   origin?: ClientKind;
   /**
+   * M16 — la rutina a la que pertenece la sesión (`ProtocolSession.routineId`).
+   * Solo procedencia. Con `continueFrom`, si falta, se conserva el de la foto.
+   */
+  routineId?: string;
+  /**
    * M12 — conversación que la sesión ya tenía y que no sale de eventos (la de
    * una conversación de Stratum Desktop D1–D7 que se importa). Sus ids son
    * `m<n>`; la numeración empieza después del mayor, así ningún mensaje nuevo
@@ -442,12 +447,14 @@ export class SessionPublisher {
 
   private readonly onTranscript: ((messages: ProtocolChatMessage[]) => void) | undefined;
   private readonly origin: ClientKind | undefined;
+  private readonly routineId: string | undefined;
 
   constructor(opts: SessionPublisherOptions) {
     this.host = opts.host;
     this.onTranscript = opts.onTranscript;
     this.hostInfo = opts.hostInfo;
     this.origin = opts.origin ?? opts.continueFrom?.session.origin;
+    this.routineId = opts.routineId ?? opts.continueFrom?.session.routineId;
     this.sink = opts.sink;
     this.maxQueue = Math.max(8, opts.maxQueue ?? DEFAULT_MAX_QUEUE);
     this.now = opts.now ?? Date.now;
@@ -675,6 +682,7 @@ export class SessionPublisher {
       cwd: this.host.env.cwd,
       host: this.hostInfo,
       ...(this.origin ? { origin: this.origin } : {}),
+      ...(this.routineId ? { routineId: this.routineId } : {}),
       state: this.closed
         ? 'closed'
         : !this.runActive

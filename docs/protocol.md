@@ -1251,6 +1251,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | PL1             | `tool.blocked.source` admite `plugin` (un `tool.before` de un plugin vetó la llamada)                                                                                                                                                                                                                                                                                                                                                           | Aditivo para quien emite; un cliente que valide la unión cerrada tiene que aceptar el valor nuevo. Los clientes del árbol validan con `schemas.ts`, que ya lo incluye                                                                                        |
 | M13             | Métodos `box.status` (`observe`) y `box.start`/`box.stop`/`box.reset` (`control`); DTO `ProtocolBoxStatus`. `data.reason` de `UNAVAILABLE` admite `no-runtime` y `box-failed`, y el de `BUSY`, `box-busy`                                                                                                                                                                                                                                       | Aditivo                                                                                                                                                                                                                                                      |
 | M14             | `sessions.open { agent: 'companion' }` abre (o devuelve, si ya existe) la sesión del agente embebido de Stratum Dot, sin `cwd`; `agents.list` lo ofrece tras `assistant`; `ProtocolSkill.presets` admite `companion`; un traspaso con `agent: 'companion'` → `NOT_TRANSFERABLE` (`context`)                                                                                                                                                     | Aditivo para quien no lo pide. Un cliente que valide la unión de `presets` tiene que aceptar el valor nuevo; los del árbol validan con `schemas.ts`, que ya lo incluye                                                                                       |
+| M16             | Métodos `routines.list` (`observe`) y `routines.add`/`update`/`remove`/`run` (`control`); DTOs `ProtocolRoutine*`; `ProtocolSession.routineId` (solo procedencia). `data.reason` de `UNAVAILABLE` admite `routines-disabled` y `read-only`                                                                                                                                                                                                      | Aditivo                                                                                                                                                                                                                                                      |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1835,3 +1836,55 @@ como `assistant` (§20.2), con su propia memoria y un ordenador propio, la caja 
 
 Tests: `stratum-cli/src/daemon/daemon-companion.test.ts`, `src/host/companion.test.ts` y el escenario
 `evals/scenarios/safety/safety-companion-exec-confined.json`.
+
+## 23. Rutinas (M16)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.5. Una rutina es una tarea que el asistente (`companion`,
+§22) hace solo, a una hora o a intervalos: un horario y un `prompt`. Cada rutina tiene **su propia
+sesión** del `companion`, de larga vida, distinta de la sesión principal; cada vencimiento es un run
+en ella. El planificador vive en el daemon: sin daemon no hay rutinas.
+
+```json
+{ "method": "routines.add", "params": { "name": "Resumen", "schedule": "every day at 09:00",
+                                         "prompt": "Resume mis correos de ayer" } }
+→ { "routine": { "id": "rt_k3j9x0a1bc", "name": "Resumen", "enabled": true, "nextFireAt": 1761890400000,
+                 "sessionId": null, "running": false, "lastFire": null, "lastResult": null, … } }
+```
+
+- **Métodos.** `routines.list` (`observe`) → `{ routines, readOnly }`. `routines.add`,
+  `routines.update`, `routines.remove` y `routines.run` (`control`, con `operationId` como el resto de
+  mutaciones). `routines.update` lleva un `patch`; en él, `model: null` y `limits: null` quitan el
+  valor. `routines.remove` borra la rutina **y su sesión**. `routines.run` dispara ya, también con la
+  rutina deshabilitada, y devuelve el `fire` y la rutina resultante.
+- **Topes.** `name` 1–80 caracteres, `prompt` 1–8000, `schedule` hasta 200 (su sintaxis la valida el
+  servidor), `limits.maxIterations` 1–200 y `limits.timeoutMinutes` 1–1440. Los nombres son únicos sin
+  distinguir mayúsculas.
+- **El `prompt` viaja tal cual**: es la definición que escribió la persona (como su configuración) y
+  se edita desde el cliente. El servidor no lo escribe nunca en sus logs.
+- **`ProtocolRoutine`.** Además de la definición: `createdAt` y `nextFireAt` (ms; `null` si está
+  deshabilitada o el horario no tiene próximo vencimiento, con `scheduleError` explicando por qué),
+  `sessionId` (`null` hasta el primer disparo), `running`, `lastFire` (el último vencimiento y qué
+  pasó: `started`, `skipped-busy`, `missed` o `failed-to-start`) y `lastResult`.
+- **`lastResult`** (`runId`, `sessionId`, `status`, `endedAt`, `summary`) es el último run **terminado**
+  de la rutina; `summary` es el último mensaje del asistente en ese run, recortado, o `null`. Vive en
+  la memoria del daemon: un reinicio lo olvida (la conversación sigue en la sesión).
+- **Reglas del planificador.** Nunca dos runs a la vez de una rutina (con uno en curso, el vencimiento
+  se salta: `skipped-busy`). Un vencimiento perdido (daemon parado, equipo dormido) no se recupera:
+  `missed`. El siguiente vencimiento se arma siempre, falle lo que falle.
+- **`ProtocolSession.routineId`**: presente solo en la sesión de una rutina. **Solo procedencia**:
+  nadie lo lee para autorizar nada y no cambia ninguna política. Aparece en `sessions.list|get` y en
+  los eventos de sesión.
+- **Cómo se ve el final de una rutina.** No hay evento nuevo (el daemon no numera eventos): un cliente
+  con la suscripción `overview` ya recibe el `run.completed|failed|cancelled` de la sesión de la
+  rutina; con él, pide `routines.list` para leer `lastResult`.
+- **Aprobaciones.** Una rutina no rebaja nada: lo que pida aprobación se publica como en cualquier
+  sesión del daemon (§13) y, sin respuesta, caduca a `deny` y el run sigue.
+- **Errores.** Daemon sin planificador → `UNAVAILABLE` (`routines-disabled`); fichero de rutinas de un
+  Stratum más nuevo o dañado (`readOnly: true`) → las mutaciones, `UNAVAILABLE` (`read-only`); valor
+  inválido o nombre repetido → `INVALID_PARAMS` con `issues` (`name`, `schedule`…); rutina inexistente
+  → `NOT_FOUND`.
+- `stratum routines list|add|rm|run|enable|disable` es un cliente más de estos métodos (rol `observer`
+  para `list`, `operator` para el resto): no lee ni escribe `routines.json`.
+
+Tests: `stratum-cli/src/daemon/daemon-routines-protocol.test.ts`, `routine-scheduler.test.ts`,
+`src/protocol/schemas.test.ts` y `src/cli/commands/routines.test.ts`.

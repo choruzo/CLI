@@ -98,6 +98,12 @@ import {
 import { OperationCache, type OperationCacheOptions } from './operation-cache.js';
 import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
 import { RoutineScheduler, type RoutineSession } from './routine-scheduler.js';
+import {
+  routineOperation,
+  toProtocolFire,
+  toProtocolRoutine,
+  toRoutinePatch,
+} from './routines-dto.js';
 import { RoutineStore, routinesFile, type Routine } from '../routines/store.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
@@ -330,7 +336,8 @@ export class Stratumd {
             existingSession: (routineId) => this.existingRoutineSession(routineId),
             closeSession: (routineId) => this.closeRoutineSession(routineId),
             now: this.now,
-            // La porción 3 los publica; de momento, solo el log (sin prompt ni resumen).
+            // Solo al log (sin prompt ni resumen): Dot ve el final por el `run.*` de la
+            // sesión de la rutina y el resultado por `routines.list`.
             onFire: (fire) =>
               log.info('routine fired', {
                 routineId: fire.routineId,
@@ -1595,6 +1602,40 @@ export class Stratumd {
       'box.stop': () => boxOperation(() => this.box.stop()),
       'box.reset': () => boxOperation(() => this.box.reset()),
 
+      // M16 — rutinas. Ninguna línea de log lleva el `prompt`.
+      'routines.list': () => {
+        const routines = this.routinesOrThrow();
+        return { routines: routines.list().map(toProtocolRoutine), readOnly: routines.readOnly };
+      },
+      'routines.add': (params) =>
+        routineOperation(() => {
+          const { operationId: _op, ...input } = params;
+          return { routine: toProtocolRoutine(this.routinesOrThrow().add(input)) };
+        }),
+      'routines.update': (params) =>
+        routineOperation(() => ({
+          routine: toProtocolRoutine(
+            this.routinesOrThrow().update(params.routineId, toRoutinePatch(params.patch)),
+          ),
+        })),
+      'routines.remove': (params) =>
+        routineOperation(async () => {
+          const routines = this.routinesOrThrow();
+          const status = routines.get(params.routineId);
+          await routines.remove(params.routineId);
+          // `remove` ya lanzó `not-found` si no existía.
+          return { routine: toProtocolRoutine(status!) };
+        }),
+      'routines.run': (params) =>
+        routineOperation(async () => {
+          const routines = this.routinesOrThrow();
+          const fire = await routines.runNow(params.routineId);
+          return {
+            fire: toProtocolFire(fire),
+            routine: toProtocolRoutine(routines.get(params.routineId)!),
+          };
+        }),
+
       'events.subscribe': (params) => this.hub.subscribe(conn, params.scope),
       'events.unsubscribe': (params) => {
         this.hub.unsubscribe(conn, params.subscriptionId);
@@ -1671,6 +1712,16 @@ export class Stratumd {
     } catch {
       throw new ProtocolError('UNAVAILABLE', 'Cannot load the configuration of that directory.');
     }
+  }
+
+  /** El planificador de rutinas, o `UNAVAILABLE` si el daemon corre sin él. */
+  private routinesOrThrow(): RoutineScheduler {
+    if (!this.routines) {
+      throw new ProtocolError('UNAVAILABLE', 'Routines are disabled in this daemon.', {
+        reason: 'routines-disabled',
+      });
+    }
+    return this.routines;
   }
 
   /**

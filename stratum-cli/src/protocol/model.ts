@@ -117,6 +117,12 @@ export interface ProtocolSession {
    * anfitrión anterior a M12.
    */
   origin?: ClientKind;
+  /**
+   * M16 — presente solo en la sesión de una rutina del asistente (`routines.*`).
+   * **Solo procedencia**: nadie lo lee para autorizar nada. El final de una
+   * rutina se ve con el `run.completed|failed|cancelled` de esa sesión.
+   */
+  routineId?: string;
   state: ProtocolSessionState;
   /** Perfil principal activo, o `general`. */
   agent: string;
@@ -491,6 +497,58 @@ export interface ProtocolBoxScreen {
   screenHeight: number;
   /** Cuándo se tomó, en ms desde la época. */
   takenAt: number;
+}
+
+// ---------------------------------------------------------------------------
+// M16 — rutinas del asistente
+// ---------------------------------------------------------------------------
+
+export interface ProtocolRoutineLimits {
+  maxIterations?: number;
+  timeoutMinutes?: number;
+}
+
+export type ProtocolRoutineFireOutcome = 'started' | 'skipped-busy' | 'missed' | 'failed-to-start';
+
+/** Un vencimiento (o disparo manual) de una rutina y qué pasó con él. */
+export interface ProtocolRoutineFire {
+  at: Timestamp;
+  outcome: ProtocolRoutineFireOutcome;
+  manual: boolean;
+  sessionId?: string;
+  runId?: string;
+  error?: string;
+}
+
+/** Cómo acabó el último run de una rutina (solo en memoria del daemon: un reinicio lo olvida). */
+export interface ProtocolRoutineResult {
+  runId: string;
+  sessionId: string;
+  status: ProtocolRunStatus;
+  endedAt?: Timestamp;
+  /** Último mensaje del asistente en ese run, recortado, o `null`. */
+  summary: string | null;
+}
+
+export interface ProtocolRoutine {
+  id: string;
+  name: string;
+  /** Texto del horario tal como se escribió (`parseSchedule`). */
+  schedule: string;
+  /** La definición que escribió la persona; viaja tal cual y no va a los logs. */
+  prompt: string;
+  model?: string;
+  enabled: boolean;
+  limits?: ProtocolRoutineLimits;
+  createdAt: Timestamp;
+  nextFireAt: Timestamp | null;
+  /** Por qué no tiene próximo vencimiento aun estando habilitada, o `null`. */
+  scheduleError: string | null;
+  /** Su sesión, si ya la tiene (se abre en el primer disparo). */
+  sessionId: string | null;
+  running: boolean;
+  lastFire: ProtocolRoutineFire | null;
+  lastResult: ProtocolRoutineResult | null;
 }
 
 // ---------------------------------------------------------------------------

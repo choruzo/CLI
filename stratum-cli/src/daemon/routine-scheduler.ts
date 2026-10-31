@@ -17,7 +17,7 @@
  *  - un fallo de una rutina (abrir, arrancar) nunca afecta a las demás ni
  *    lanza fuera de aquí, y el siguiente vencimiento se arma pase lo que pase.
  */
-import type { ProtocolRun, ProtocolSessionSnapshot } from '../protocol/index.js';
+import type { ProtocolRun, ProtocolRunStatus, ProtocolSessionSnapshot } from '../protocol/index.js';
 import { getLogger } from '../logging/index.js';
 import { nextFire, parseSchedule } from '../routines/schedule.js';
 import {
@@ -57,11 +57,21 @@ export interface RoutineFinished {
   summary: string | null;
 }
 
+/** Cómo acabó el último run de una rutina (en memoria: un reinicio del daemon lo olvida). */
+export interface RoutineLastResult {
+  runId: string;
+  sessionId: string;
+  status: ProtocolRunStatus;
+  endedAt?: number;
+  summary: string | null;
+}
+
 export interface RoutineStatus {
   routine: Routine;
   nextFireAt: number | null;
   scheduleError: string | null;
   lastFire: RoutineFire | null;
+  lastResult: RoutineLastResult | null;
   sessionId: string | null;
   running: boolean;
 }
@@ -112,6 +122,7 @@ export class RoutineScheduler {
   private readonly armed = new Map<string, Armed>();
   private readonly scheduleErrors = new Map<string, string>();
   private readonly lastFires = new Map<string, RoutineFire>();
+  private readonly lastResults = new Map<string, RoutineLastResult>();
   /** Rutinas con un disparo en marcha: nunca se solapan dos. */
   private readonly firing = new Set<string>();
   private started = false;
@@ -149,6 +160,16 @@ export class RoutineScheduler {
     return this.armed.size > 0;
   }
 
+  /** El almacén no se puede modificar (fichero de un Stratum más nuevo o dañado). */
+  get readOnly(): boolean {
+    return this.store.readOnly;
+  }
+
+  get(id: string): RoutineStatus | undefined {
+    const routine = this.store.get(id);
+    return routine ? this.statusOf(routine) : undefined;
+  }
+
   list(): RoutineStatus[] {
     return this.store.list().map((r) => this.statusOf(r));
   }
@@ -170,6 +191,7 @@ export class RoutineScheduler {
     this.disarm(id);
     this.scheduleErrors.delete(id);
     this.lastFires.delete(id);
+    this.lastResults.delete(id);
     try {
       await this.opts.closeSession(id);
     } catch (err) {
@@ -195,6 +217,7 @@ export class RoutineScheduler {
       nextFireAt: this.armed.get(routine.id)?.due ?? null,
       scheduleError: this.scheduleErrors.get(routine.id) ?? null,
       lastFire: this.lastFires.get(routine.id) ?? null,
+      lastResult: this.lastResults.get(routine.id) ?? null,
       sessionId: existing?.sessionId ?? null,
       running: existing?.running ?? false,
     };
@@ -352,11 +375,22 @@ export class RoutineScheduler {
     try {
       const snapshot = session.snapshot();
       const finished = snapshot.run?.id === run.id ? snapshot.run : run;
+      const summary = summaryOf(snapshot, run.id);
+      // Una rutina quitada mientras corría no deja resultado huérfano.
+      if (this.store.get(routine.id)) {
+        this.lastResults.set(routine.id, {
+          runId: finished.id,
+          sessionId: session.sessionId,
+          status: finished.status,
+          ...(finished.endedAt !== undefined ? { endedAt: finished.endedAt } : {}),
+          summary,
+        });
+      }
       this.opts.onFinished?.({
         routineId: routine.id,
         sessionId: session.sessionId,
         run: finished,
-        summary: summaryOf(snapshot, run.id),
+        summary,
       });
     } catch (err) {
       log.warn('routine finish handler failed', { routineId: routine.id, err });

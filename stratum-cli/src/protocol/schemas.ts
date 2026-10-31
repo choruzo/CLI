@@ -72,6 +72,10 @@ import type {
   ProtocolSessionMemory,
   ProtocolBoxStatus,
   ProtocolBoxScreen,
+  ProtocolRoutine,
+  ProtocolRoutineFire,
+  ProtocolRoutineLimits,
+  ProtocolRoutineResult,
 } from './model.js';
 import { BOX_SCREEN_LIMITS, HISTORY_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
@@ -185,6 +189,7 @@ export const sessionSchema: z.ZodType<ProtocolSession> = z.object({
   cwd: z.string(),
   host: z.object({ kind: z.enum(['daemon', 'peer']), client: clientKind, connected: z.boolean() }),
   origin: clientKind.optional(),
+  routineId: id.optional(),
   state: z.enum(['idle', 'running', 'waiting', 'paused', 'detached', 'closed']),
   agent: z.string(),
   provider: z.string(),
@@ -442,6 +447,65 @@ export const boxScreenSchema: z.ZodType<ProtocolBoxScreen> = z.object({
   screenHeight: screenDimension,
   takenAt: z.number().int().nonnegative(),
 });
+
+// ---------------------------------------------------------------------------
+// M16 — rutinas del asistente (topes iguales a los de `routines/store.ts`)
+// ---------------------------------------------------------------------------
+
+const routineLimitsSchema: z.ZodType<ProtocolRoutineLimits> = z
+  .object({
+    maxIterations: z.number().int().min(1).max(200).optional(),
+    timeoutMinutes: z.number().int().min(1).max(1440).optional(),
+  })
+  .strict();
+const routineName = z.string().min(1).max(80);
+const routinePrompt = z.string().min(1).max(8000);
+const routineSchedule = z.string().min(1).max(200);
+
+export const routineFireSchema: z.ZodType<ProtocolRoutineFire> = z.object({
+  at: timestamp,
+  outcome: z.enum(['started', 'skipped-busy', 'missed', 'failed-to-start']),
+  manual: z.boolean(),
+  sessionId: id.optional(),
+  runId: id.optional(),
+  error: z.string().max(LIMITS.answerChars).optional(),
+});
+
+export const routineResultSchema: z.ZodType<ProtocolRoutineResult> = z.object({
+  runId: id,
+  sessionId: id,
+  status: z.enum([
+    'queued',
+    'running',
+    'waiting_approval',
+    'waiting_input',
+    'paused',
+    'completed',
+    'failed',
+    'cancelled',
+    'interrupted',
+  ]),
+  endedAt: timestamp.optional(),
+  summary: z.string().max(LIMITS.answerChars).nullable(),
+});
+
+export const routineSchema: z.ZodType<ProtocolRoutine> = z.object({
+  id,
+  name: routineName,
+  schedule: routineSchedule,
+  prompt: routinePrompt,
+  model: z.string().max(LIMITS.nameChars).optional(),
+  enabled: z.boolean(),
+  limits: routineLimitsSchema.optional(),
+  createdAt: timestamp,
+  nextFireAt: timestamp.nullable(),
+  scheduleError: z.string().max(LIMITS.answerChars).nullable(),
+  sessionId: id.nullable(),
+  running: z.boolean(),
+  lastFire: routineFireSchema.nullable(),
+  lastResult: routineResultSchema.nullable(),
+});
+const routineResult = z.object({ routine: routineSchema });
 
 // ---------------------------------------------------------------------------
 // M11 — conversación guardada, contexto y memoria de sesión
@@ -922,6 +986,37 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'box.stop': z.object({ operationId }).strict(),
   'box.reset': z.object({ operationId }).strict(),
 
+  'routines.list': empty,
+  'routines.add': z
+    .object({
+      name: routineName,
+      schedule: routineSchedule,
+      prompt: routinePrompt,
+      model: z.string().max(LIMITS.nameChars).optional(),
+      enabled: z.boolean().optional(),
+      limits: routineLimitsSchema.optional(),
+      operationId,
+    })
+    .strict(),
+  'routines.update': z
+    .object({
+      routineId: id,
+      patch: z
+        .object({
+          name: routineName.optional(),
+          schedule: routineSchedule.optional(),
+          prompt: routinePrompt.optional(),
+          model: z.string().max(LIMITS.nameChars).nullable().optional(),
+          enabled: z.boolean().optional(),
+          limits: routineLimitsSchema.nullable().optional(),
+        })
+        .strict(),
+      operationId,
+    })
+    .strict(),
+  'routines.remove': z.object({ routineId: id, operationId }).strict(),
+  'routines.run': z.object({ routineId: id, operationId }).strict(),
+
   'events.subscribe': z.object({ scope }).strict(),
   'events.unsubscribe': subscriptionRef,
   'trace.subscribe': sessionRef,
@@ -1064,6 +1159,12 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'box.start': boxResult,
   'box.stop': boxResult,
   'box.reset': boxResult,
+
+  'routines.list': z.object({ routines: z.array(routineSchema), readOnly: z.boolean() }),
+  'routines.add': routineResult,
+  'routines.update': routineResult,
+  'routines.remove': routineResult,
+  'routines.run': z.object({ fire: routineFireSchema, routine: routineSchema }),
 
   'events.subscribe': z.object({ subscriptionId: id, mode: z.enum(['replay', 'snapshot']) }),
   'events.unsubscribe': emptyResult,
