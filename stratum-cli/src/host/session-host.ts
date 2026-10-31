@@ -7,6 +7,7 @@ import type { ProviderRouter } from '../providers/router.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { registerBuiltinTools } from '../tools/index.js';
 import { McpManager, type McpManagerWarning } from '../tools/mcp/manager.js';
+import { screenLocks } from '../tools/screen/lock.js';
 import { closeSessionExecRuntime } from '../tools/exec/runtime.js';
 import { PlanStore, generatePlanId } from '../session/plan-store.js';
 import { SubagentStore } from '../session/subagent-store.js';
@@ -346,6 +347,8 @@ export class SessionHost {
       yield* start(this.runOptions({ ...turn, signal }));
     } finally {
       if (own && this.turnAbort === own) this.turnAbort = null;
+      // La pantalla de la caja es de un turno: la siguiente rutina no espera al lease.
+      screenLocks.release(this.sessionId);
     }
   }
 
@@ -395,6 +398,7 @@ export class SessionHost {
     if (this.disposed) return;
     this.disposed = true;
     this.turnAbort?.abort();
+    screenLocks.release(this.sessionId); // cierre sin turno terminado: no dejar la pantalla tomada
     // Nada queda esperando a una persona: cada puerta recibe su respuesta negativa.
     this.interactions.cancelAll();
     await this.settle('mcp shutdown', () => this.mcp.shutdownAll());

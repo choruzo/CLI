@@ -8,6 +8,7 @@ import { SessionHost, type SessionHostOptions } from './session-host.js';
 import { ProviderRouter } from '../providers/router.js';
 import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
+import { screenLocks } from '../tools/screen/lock.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import type { OpenAIStreamChunk } from '../providers/base.js';
 import type { AgentEvent, RunOptions, ToolContext, ToolDefinition } from '../agent/types.js';
@@ -216,5 +217,16 @@ describe('SessionHost', () => {
     await host.dispose();
 
     expect(jobs!.isClosed).toBe(true);
+  });
+
+  it('la pantalla de la caja se suelta al terminar el turno y al cerrar', async () => {
+    const host = await makeHost([makeTextRound('x')]);
+    screenLocks.claim('box-test', host.sessionId);
+    await collect(host.run('hola'));
+    expect(screenLocks.holderOf('box-test')).toBeNull();
+
+    screenLocks.claim('box-test', host.sessionId);
+    await host.dispose();
+    expect(screenLocks.holderOf('box-test')).toBeNull();
   });
 });

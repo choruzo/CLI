@@ -21,6 +21,7 @@ import type { ModelVision } from '../../config/schema.js';
 import { ExecConnectError, isHandedOver } from '../exec/backend.js';
 import { containerBackend } from '../exec/backends/container.js';
 import type { ExecutionTarget } from '../exec/target.js';
+import { screenLocks, type ScreenLocks } from './lock.js';
 import { coordinatesHint, pngImage, toScreenPoint, type ScreenGeometry } from './geometry.js';
 
 /** Plazo de cada orden en la caja. Una captura tarda bastante menos. */
@@ -103,6 +104,17 @@ function describeShot(image: ToolImage, vision: ModelVision): string {
   );
 }
 
+function screenBusy(): ToolResult {
+  return {
+    ok: false,
+    error:
+      'The box screen is being used by another session (a routine or the main chat). ' +
+      'Wait a bit and try again, or work with exec in the box meanwhile.',
+    recoverable: true,
+    countsAsFailure: false,
+  };
+}
+
 function noVision(): ToolResult {
   return {
     ok: false,
@@ -121,6 +133,7 @@ function noVision(): ToolResult {
  */
 export function createScreenTools(
   target: ExecutionTarget & { kind: 'container' },
+  locks: ScreenLocks = screenLocks,
 ): ToolDefinition[] {
   let geometry: ScreenGeometry | undefined;
 
@@ -232,6 +245,10 @@ export function createScreenTools(
     return p.ok ? { x: p.x, y: p.y } : recoverable(p.error);
   }
 
+  /** Cerrojo de las acciones: tras validar y antes de tocar la caja. `null` si se tiene. */
+  const claimScreen = (ctx: ToolContext): ToolResult | null =>
+    locks.claim(target.name, ctx.sessionId ?? 'local').ok ? null : screenBusy();
+
   const visionGate = (_params: unknown, ctx: ToolContext): ToolResult | null =>
     ctx.vision ? null : noVision();
 
@@ -277,6 +294,8 @@ export function createScreenTools(
         const input = clickSchema.parse(params);
         const p = await point(ctx, ctx.vision, input.x, input.y);
         if ('ok' in p) return p;
+        const busy = claimScreen(ctx);
+        if (busy) return busy;
         const button = BUTTONS[input.button ?? 'left'];
         const repeat = input.double ? ' --repeat 2 --delay 120' : '';
         return actAndCapture(
@@ -298,6 +317,8 @@ export function createScreenTools(
       async execute(params, ctx) {
         if (!ctx.vision) return noVision();
         const input = typeSchema.parse(params);
+        const busy = claimScreen(ctx);
+        if (busy) return busy;
         return actAndCapture(
           ctx,
           ctx.vision,
@@ -324,6 +345,8 @@ export function createScreenTools(
               '(e.g. "Return", "ctrl+l", "ctrl+a BackSpace").',
           );
         }
+        const busy = claimScreen(ctx);
+        if (busy) return busy;
         return actAndCapture(
           ctx,
           ctx.vision,
@@ -354,6 +377,8 @@ export function createScreenTools(
           move = `xdotool mousemove --sync ${p.x} ${p.y} && `;
           where = ` at ${at({ x: input.x, y: input.y }, p, ctx.vision)}`;
         }
+        const busy = claimScreen(ctx);
+        if (busy) return busy;
         const amount = input.amount ?? 5;
         return actAndCapture(
           ctx,

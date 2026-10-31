@@ -20,6 +20,7 @@ vi.mock('../exec/backends/container.js', () => ({
 }));
 
 const { createScreenTools } = await import('./screen.js');
+const { ScreenLocks } = await import('./lock.js');
 const { SCREEN_TOOLS } = await import('./names.js');
 
 function fakePng(width: number, height: number): string {
@@ -178,5 +179,68 @@ describe('createScreenTools', () => {
     respond = () => ({ stdout: '', stderr: '', exitCode: null, status: 'cancelled' });
     const r = await tool('screen_screenshot').execute({}, ctx());
     expect(r).toMatchObject({ ok: false, recoverable: false });
+  });
+});
+
+describe('cerrojo de la pantalla', () => {
+  const BUSY = /being used by another session/;
+
+  function pair() {
+    const locks = new ScreenLocks();
+    const mk = () =>
+      new Map(createScreenTools({ kind: 'container', name: 'box' }, locks).map((t) => [t.name, t]));
+    return { locks, mk };
+  }
+
+  it('una acción de otra sesión con el cerrojo vigente falla recuperable y sin tocar la caja', async () => {
+    const { locks, mk } = pair();
+    locks.claim('box', 'A');
+    const t = mk();
+    const calls: [string, Record<string, unknown>][] = [
+      ['screen_click', { x: 5, y: 5 }],
+      ['screen_type', { text: 'hola' }],
+      ['screen_key', { keys: 'Return' }],
+      ['screen_scroll', { direction: 'down' }],
+    ];
+    for (const [name, params] of calls) {
+      const r = await t.get(name)!.execute(params, ctx({ sessionId: 'B' }));
+      expect(r).toMatchObject({ ok: false, recoverable: true, countsAsFailure: false });
+      if (!r.ok) {
+        expect(r.error).toMatch(BUSY);
+        expect(r.error).not.toContain('A');
+      }
+    }
+    // Solo puede haber la lectura del tamaño (la necesita el clic para validar su punto).
+    expect(runs.every((q) => q.command.includes('getdisplaygeometry'))).toBe(true);
+  });
+
+  it('mirar no toma el cerrojo: la captura y la espera de B funcionan', async () => {
+    const { locks, mk } = pair();
+    locks.claim('box', 'A');
+    const t = mk();
+    expect((await t.get('screen_screenshot')!.execute({}, ctx({ sessionId: 'B' }))).ok).toBe(true);
+    expect(
+      (await t.get('screen_wait')!.execute({ seconds: 0.1 }, ctx({ sessionId: 'B' }))).ok,
+    ).toBe(true);
+    expect(locks.holderOf('box')).toBe('A');
+  });
+
+  it('tras release(A), B puede actuar y queda como dueño', async () => {
+    const { locks, mk } = pair();
+    locks.claim('box', 'A');
+    const t = mk();
+    locks.release('A');
+    const r = await t.get('screen_click')!.execute({ x: 5, y: 5 }, ctx({ sessionId: 'B' }));
+    expect(r.ok).toBe(true);
+    expect(locks.holderOf('box')).toBe('B');
+  });
+
+  it('una acción con parámetros inválidos no toma el cerrojo', async () => {
+    const { locks, mk } = pair();
+    const r = await mk()
+      .get('screen_key')!
+      .execute({ keys: 'no; valid' }, ctx({ sessionId: 'B' }));
+    expect(r.ok).toBe(false);
+    expect(locks.holderOf('box')).toBeNull();
   });
 });
