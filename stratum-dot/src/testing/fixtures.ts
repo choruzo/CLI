@@ -6,15 +6,18 @@
 import { vi } from 'vitest';
 import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
+import { resetRoutineWatch } from '../app/routines';
 import type {
   ProtocolBoxScreen,
   ProtocolBoxStatus,
+  ProtocolRoutine,
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionSnapshot,
 } from '../protocol';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
+import { useRoutines } from '../stores/routineStore';
 import { useSessions } from '../stores/sessionStore';
 import { useUi } from '../stores/uiStore';
 import {
@@ -109,6 +112,25 @@ export function sampleScreen(overrides: Partial<ProtocolBoxScreen> = {}): Protoc
   };
 }
 
+/** M16 — una rutina, como la devuelve `routines.list`. */
+export function sampleRoutine(overrides: Partial<ProtocolRoutine> = {}): ProtocolRoutine {
+  return {
+    id: 'rt_abc1234567',
+    name: 'Morning summary',
+    schedule: '1d',
+    prompt: 'Summarise my day',
+    enabled: true,
+    createdAt: 1_760_000_000_000,
+    nextFireAt: 1_760_086_400_000,
+    scheduleError: null,
+    sessionId: null,
+    running: false,
+    lastFire: null,
+    lastResult: null,
+    ...overrides,
+  };
+}
+
 export const CONNECTED: ConnectionState = {
   kind: 'connected',
   serverVersion: '0.9.0',
@@ -172,6 +194,17 @@ export function fakeNative(): FakeNative {
     boxStart: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'running' }) })),
     boxStop: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'stopped' }) })),
     boxScreen: vi.fn(async (): Promise<unknown> => ({ screen: sampleScreen() })),
+    routinesList: vi.fn(async (): Promise<unknown> => ({ routines: [], readOnly: false })),
+    routinesAdd: vi.fn(async (): Promise<unknown> => ({ routine: sampleRoutine() })),
+    routinesUpdate: vi.fn(async (): Promise<unknown> => ({ routine: sampleRoutine() })),
+    routinesRemove: vi.fn(async (): Promise<unknown> => ({ routine: sampleRoutine() })),
+    routinesRun: vi.fn(
+      async (): Promise<unknown> => ({
+        fire: { at: 1_760_000_000_000, outcome: 'started', manual: true },
+        routine: sampleRoutine({ running: true }),
+      }),
+    ),
+    notifyRoutine: vi.fn(async () => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),
@@ -196,6 +229,8 @@ export function fakeNative(): FakeNative {
 export function resetStores(): void {
   useConnection.setState({ state: { kind: 'starting' }, info: null, lastServerVersion: null });
   useSessions.getState().reset();
+  useRoutines.getState().reset();
+  resetRoutineWatch();
   useUi.setState({
     selectedId: null,
     tab: 'chat',

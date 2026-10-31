@@ -2,6 +2,7 @@
  * Une el lado nativo con los stores: cada `DotEvent` va a su sitio, y nada más.
  * Aquí no hay lógica del protocolo: validar y reducir es de `protocol/apply.ts`.
  */
+import { watchRoutineRuns } from '../app/routines';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
@@ -27,6 +28,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       if (useSessions.getState().applyEvents(event.sessionId, event.events)) {
         void native.resyncSession(event.sessionId).catch(() => undefined);
       }
+      // M16: el inicio o el fin de un run de la sesión de una rutina refresca la lista (y avisa).
+      watchRoutineRuns(native, event.sessionId, event.events);
       break;
     case 'approver':
       useApprover.getState().setStatus(event.status);
@@ -34,6 +37,11 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
     case 'open-view':
       // La bandeja pide el centro de aprobaciones: se abre, sin resolver nada.
       if (event.view === 'human-input') useUi.getState().openHumanInput();
+      break;
+    case 'open-session':
+      // M16: se pulsó el aviso de una rutina. Solo se selecciona su sesión: nada se resuelve.
+      useUi.getState().select(event.sessionId);
+      void native.focusSession(event.sessionId).catch(() => undefined);
       break;
   }
 }

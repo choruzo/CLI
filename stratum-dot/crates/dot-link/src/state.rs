@@ -3,7 +3,7 @@
 //! Todo lo de aquí se serializa y **llega al webview**: ningún tipo lleva el
 //! token del canal, la ruta del pipe, la del endpoint ni la clave de aprobador.
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
 use crate::approver::ApproverStatus;
@@ -214,6 +214,53 @@ pub enum CallAction {
     BoxStop,
     /// M15 — `box.screen`: la pantalla de la caja ahora. Solo lectura.
     BoxScreen,
+    /// M16 — `routines.list`. Solo lectura.
+    RoutinesList,
+    /// M16 — `routines.add`. Campos uno a uno: no hay un objeto libre.
+    RoutinesAdd {
+        name: String,
+        schedule: String,
+        prompt: String,
+        model: Option<String>,
+        enabled: Option<bool>,
+        limits: Option<RoutineLimits>,
+    },
+    /// M16 — `routines.update`: solo lo que cambia (`RoutinePatch`).
+    RoutinesUpdate {
+        routine_id: String,
+        patch: RoutinePatch,
+    },
+    /// M16 — `routines.remove`: borra la rutina y su sesión.
+    RoutinesRemove { routine_id: String },
+    /// M16 — `routines.run`: dispararla ya, también deshabilitada.
+    RoutinesRun { routine_id: String },
+}
+
+/// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
+/// [`crate::link`] antes de salir; el daemon vuelve a comprobarlos.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RoutineLimits {
+    pub max_iterations: Option<u32>,
+    pub timeout_minutes: Option<u32>,
+}
+
+/// M16 — qué cambia `routines.update`. Todo opcional; lo que no se nombra no
+/// se toca. `clear_model` / `clear_limits` expresan el `null` del contrato
+/// (quitar el valor) sin depender de la diferencia entre «ausente» y `null`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct RoutinePatch {
+    pub name: Option<String>,
+    pub schedule: Option<String>,
+    pub prompt: Option<String>,
+    pub model: Option<String>,
+    #[serde(default)]
+    pub clear_model: bool,
+    pub enabled: Option<bool>,
+    pub limits: Option<RoutineLimits>,
+    #[serde(default)]
+    pub clear_limits: bool,
 }
 
 impl CallAction {
@@ -235,6 +282,11 @@ impl CallAction {
             CallAction::BoxStart => "box-start",
             CallAction::BoxStop => "box-stop",
             CallAction::BoxScreen => "box-screen",
+            CallAction::RoutinesList => "routines-list",
+            CallAction::RoutinesAdd { .. } => "routines-add",
+            CallAction::RoutinesUpdate { .. } => "routines-update",
+            CallAction::RoutinesRemove { .. } => "routines-remove",
+            CallAction::RoutinesRun { .. } => "routines-run",
         }
     }
 
@@ -248,6 +300,10 @@ impl CallAction {
                 | CallAction::SetModel { .. }
                 | CallAction::BoxStart
                 | CallAction::BoxStop
+                | CallAction::RoutinesAdd { .. }
+                | CallAction::RoutinesUpdate { .. }
+                | CallAction::RoutinesRemove { .. }
+                | CallAction::RoutinesRun { .. }
         )
     }
 }

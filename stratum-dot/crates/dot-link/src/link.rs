@@ -51,6 +51,7 @@ use crate::log::Logger;
 use crate::peer::{self, PeerCheck};
 use crate::state::{
     CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
+    RoutineLimits,
 };
 use crate::subscriptions::{Membership, OverviewSub, SessionSub};
 use crate::transport::{self, Stream};
@@ -156,6 +157,12 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::BoxStop,
     // M15: su pantalla, en solo lectura.
     MainMethod::BoxScreen,
+    // M16: sus rutinas (Desktop no las tiene: son del asistente de Dot).
+    MainMethod::RoutinesList,
+    MainMethod::RoutinesAdd,
+    MainMethod::RoutinesUpdate,
+    MainMethod::RoutinesRemove,
+    MainMethod::RoutinesRun,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -852,7 +859,167 @@ fn call_request(
         CallAction::BoxStart => Ok((MainMethod::BoxStart, json!({ "operationId": operation_id }))),
         CallAction::BoxStop => Ok((MainMethod::BoxStop, json!({ "operationId": operation_id }))),
         CallAction::BoxScreen => Ok((MainMethod::BoxScreen, json!({}))),
+        CallAction::RoutinesList => Ok((MainMethod::RoutinesList, json!({}))),
+        CallAction::RoutinesAdd {
+            name,
+            schedule,
+            prompt,
+            model,
+            enabled,
+            limits,
+        } => {
+            let mut params = json!({
+                "name": routine_text(name, MAX_ROUTINE_NAME_CHARS, "name")?,
+                "schedule": routine_text(schedule, MAX_ROUTINE_SCHEDULE_CHARS, "schedule")?,
+                "prompt": routine_prompt(prompt)?,
+                "operationId": operation_id,
+            });
+            if let Some(model) = optional(model, MAX_NAME_CHARS, "model name")? {
+                params["model"] = Value::String(model);
+            }
+            if let Some(enabled) = enabled {
+                params["enabled"] = Value::Bool(*enabled);
+            }
+            if let Some(limits) = limits {
+                if let Some(limits) = routine_limits(limits)? {
+                    params["limits"] = limits;
+                }
+            }
+            Ok((MainMethod::RoutinesAdd, params))
+        }
+        CallAction::RoutinesUpdate { routine_id, patch } => {
+            if !valid_id(routine_id) {
+                return Err(invalid("Invalid routine id."));
+            }
+            let mut changes = serde_json::Map::new();
+            if let Some(name) = &patch.name {
+                changes.insert(
+                    "name".into(),
+                    Value::String(routine_text(name, MAX_ROUTINE_NAME_CHARS, "name")?),
+                );
+            }
+            if let Some(schedule) = &patch.schedule {
+                changes.insert(
+                    "schedule".into(),
+                    Value::String(routine_text(
+                        schedule,
+                        MAX_ROUTINE_SCHEDULE_CHARS,
+                        "schedule",
+                    )?),
+                );
+            }
+            if let Some(prompt) = &patch.prompt {
+                changes.insert("prompt".into(), Value::String(routine_prompt(prompt)?));
+            }
+            // `null` quita el valor; poner y quitar a la vez no tiene sentido.
+            if patch.clear_model && patch.model.is_some() {
+                return Err(invalid("Choose a model or clear it, not both."));
+            }
+            if patch.clear_model {
+                changes.insert("model".into(), Value::Null);
+            } else if let Some(model) = optional(&patch.model, MAX_NAME_CHARS, "model name")? {
+                changes.insert("model".into(), Value::String(model));
+            }
+            if let Some(enabled) = patch.enabled {
+                changes.insert("enabled".into(), Value::Bool(enabled));
+            }
+            if patch.clear_limits && patch.limits.is_some() {
+                return Err(invalid("Set the limits or clear them, not both."));
+            }
+            if patch.clear_limits {
+                changes.insert("limits".into(), Value::Null);
+            } else if let Some(limits) = &patch.limits {
+                if let Some(limits) = routine_limits(limits)? {
+                    changes.insert("limits".into(), limits);
+                }
+            }
+            if changes.is_empty() {
+                return Err(invalid("Nothing to change."));
+            }
+            Ok((
+                MainMethod::RoutinesUpdate,
+                json!({
+                    "routineId": routine_id,
+                    "patch": Value::Object(changes),
+                    "operationId": operation_id,
+                }),
+            ))
+        }
+        CallAction::RoutinesRemove { routine_id } => {
+            if !valid_id(routine_id) {
+                return Err(invalid("Invalid routine id."));
+            }
+            Ok((
+                MainMethod::RoutinesRemove,
+                json!({ "routineId": routine_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::RoutinesRun { routine_id } => {
+            if !valid_id(routine_id) {
+                return Err(invalid("Invalid routine id."));
+            }
+            Ok((
+                MainMethod::RoutinesRun,
+                json!({ "routineId": routine_id, "operationId": operation_id }),
+            ))
+        }
     }
+}
+
+// Topes de una rutina (`docs/protocol.md` §23): los mismos que valida el
+// daemon, comprobados antes de salir para que lo que no cabe no se envíe.
+const MAX_ROUTINE_NAME_CHARS: usize = 80;
+const MAX_ROUTINE_SCHEDULE_CHARS: usize = 200;
+const MAX_ROUTINE_PROMPT_CHARS: usize = 8_000;
+const MAX_ROUTINE_ITERATIONS: u32 = 200;
+const MAX_ROUTINE_TIMEOUT_MINUTES: u32 = 1_440;
+
+/// Nombre u horario: recortado de espacios, no vacío y dentro de su tope.
+fn routine_text(value: &str, max: usize, what: &str) -> Result<String, CommandError> {
+    optional(&Some(value.to_string()), max, what)?.ok_or_else(|| {
+        CommandError::new(CommandErrorKind::Invalid, format!("The {what} is empty."))
+    })
+}
+
+/// El `prompt` viaja **tal cual** (es la definición de la persona): solo se
+/// exige que no esté en blanco y que quepa.
+fn routine_prompt(value: &str) -> Result<String, CommandError> {
+    if value.trim().is_empty() {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "The prompt is empty.",
+        ));
+    }
+    if value.chars().count() > MAX_ROUTINE_PROMPT_CHARS {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "The prompt is too long.",
+        ));
+    }
+    Ok(value.to_string())
+}
+
+/// `None` si no se pide ningún tope (el objeto vacío no se envía).
+fn routine_limits(limits: &RoutineLimits) -> Result<Option<Value>, CommandError> {
+    let bad = |what: &str| CommandError::new(CommandErrorKind::Invalid, format!("Invalid {what}."));
+    let mut out = serde_json::Map::new();
+    if let Some(n) = limits.max_iterations {
+        if n == 0 || n > MAX_ROUTINE_ITERATIONS {
+            return Err(bad("iteration limit"));
+        }
+        out.insert("maxIterations".into(), json!(n));
+    }
+    if let Some(n) = limits.timeout_minutes {
+        if n == 0 || n > MAX_ROUTINE_TIMEOUT_MINUTES {
+            return Err(bad("time limit"));
+        }
+        out.insert("timeoutMinutes".into(), json!(n));
+    }
+    Ok(if out.is_empty() {
+        None
+    } else {
+        Some(Value::Object(out))
+    })
 }
 
 fn strings(value: Option<&Value>) -> Vec<String> {
@@ -1876,6 +2043,7 @@ impl Drop for AbortOnDrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::state::RoutinePatch;
 
     #[test]
     fn las_ordenes_se_traducen_a_su_metodo() {
@@ -2024,6 +2192,166 @@ mod tests {
             // Desktop no tiene caja: es de Dot (PRD §23).
             assert!(!DESKTOP_METHODS.contains(&m), "{m:?}");
         }
+    }
+
+    #[test]
+    fn las_rutinas_viajan_campo_a_campo_y_las_mutaciones_con_operation_id() {
+        let (method, params) = call_request(&CallAction::RoutinesList, "op").unwrap();
+        assert_eq!((method, params), (MainMethod::RoutinesList, json!({})));
+
+        let (method, params) = call_request(
+            &CallAction::RoutinesAdd {
+                name: "  Resumen ".into(),
+                schedule: "1d".into(),
+                prompt: "  Resume mis correos\n".into(),
+                model: Some("m".into()),
+                enabled: Some(false),
+                limits: Some(RoutineLimits {
+                    max_iterations: Some(20),
+                    timeout_minutes: None,
+                }),
+            },
+            "op-1",
+        )
+        .unwrap();
+        assert_eq!(method, MainMethod::RoutinesAdd);
+        // El nombre se recorta; el prompt viaja tal cual.
+        assert_eq!(
+            params,
+            json!({
+                "name": "Resumen", "schedule": "1d", "prompt": "  Resume mis correos\n",
+                "model": "m", "enabled": false, "limits": { "maxIterations": 20 },
+                "operationId": "op-1",
+            })
+        );
+
+        let (method, params) = call_request(
+            &CallAction::RoutinesUpdate {
+                routine_id: "rt_1".into(),
+                patch: RoutinePatch {
+                    enabled: Some(true),
+                    clear_model: true,
+                    clear_limits: true,
+                    ..RoutinePatch::default()
+                },
+            },
+            "op-2",
+        )
+        .unwrap();
+        assert_eq!(method, MainMethod::RoutinesUpdate);
+        assert_eq!(
+            params,
+            json!({
+                "routineId": "rt_1",
+                "patch": { "enabled": true, "model": null, "limits": null },
+                "operationId": "op-2",
+            })
+        );
+        let (_, params) = call_request(
+            &CallAction::RoutinesRemove {
+                routine_id: "rt_1".into(),
+            },
+            "op-3",
+        )
+        .unwrap();
+        assert_eq!(
+            params,
+            json!({ "routineId": "rt_1", "operationId": "op-3" })
+        );
+        let (_, params) = call_request(
+            &CallAction::RoutinesRun {
+                routine_id: "rt_1".into(),
+            },
+            "op-4",
+        )
+        .unwrap();
+        assert_eq!(
+            params,
+            json!({ "routineId": "rt_1", "operationId": "op-4" })
+        );
+
+        // Solo la consulta no cambia nada.
+        assert!(!CallAction::RoutinesList.mutating());
+        for action in [
+            CallAction::RoutinesRemove {
+                routine_id: "r".into(),
+            },
+            CallAction::RoutinesRun {
+                routine_id: "r".into(),
+            },
+        ] {
+            assert!(action.mutating());
+        }
+        // Solo desde Dot.
+        for m in [
+            MainMethod::RoutinesList,
+            MainMethod::RoutinesAdd,
+            MainMethod::RoutinesUpdate,
+            MainMethod::RoutinesRemove,
+            MainMethod::RoutinesRun,
+        ] {
+            assert!(DOT_METHODS.contains(&m), "{m:?}");
+            assert!(!DESKTOP_METHODS.contains(&m), "{m:?}");
+        }
+    }
+
+    #[test]
+    fn una_rutina_que_no_cabe_o_no_dice_nada_no_se_envia() {
+        let add = |name: &str, schedule: &str, prompt: &str, limits: Option<RoutineLimits>| {
+            call_request(
+                &CallAction::RoutinesAdd {
+                    name: name.into(),
+                    schedule: schedule.into(),
+                    prompt: prompt.into(),
+                    model: None,
+                    enabled: None,
+                    limits,
+                },
+                "op",
+            )
+        };
+        assert!(add("ok", "30m", "hola", None).is_ok());
+        assert!(add("  ", "30m", "hola", None).is_err());
+        assert!(add(&"x".repeat(81), "30m", "hola", None).is_err());
+        assert!(add("ok", "", "hola", None).is_err());
+        assert!(add("ok", &"x".repeat(201), "hola", None).is_err());
+        assert!(add("ok", "30m", " \n ", None).is_err());
+        assert!(add("ok", "30m", &"x".repeat(8_001), None).is_err());
+        for limits in [
+            RoutineLimits {
+                max_iterations: Some(0),
+                timeout_minutes: None,
+            },
+            RoutineLimits {
+                max_iterations: Some(201),
+                timeout_minutes: None,
+            },
+            RoutineLimits {
+                max_iterations: None,
+                timeout_minutes: Some(1_441),
+            },
+        ] {
+            assert!(add("ok", "30m", "hola", Some(limits)).is_err());
+        }
+        // Un parche vacío o contradictorio tampoco sale.
+        for patch in [
+            RoutinePatch::default(),
+            RoutinePatch {
+                model: Some("m".into()),
+                clear_model: true,
+                ..RoutinePatch::default()
+            },
+        ] {
+            let update = CallAction::RoutinesUpdate {
+                routine_id: "rt".into(),
+                patch,
+            };
+            assert!(call_request(&update, "op").is_err());
+        }
+        let bad_id = CallAction::RoutinesRun {
+            routine_id: String::new(),
+        };
+        assert!(call_request(&bad_id, "op").is_err());
     }
 
     #[test]

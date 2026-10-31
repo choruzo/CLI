@@ -9,6 +9,8 @@ import type {
   ProtocolBoxScreen,
   ProtocolBoxStatus,
   ProtocolModel,
+  ProtocolRoutine,
+  ProtocolRoutineFire,
   ProtocolRun,
   ProtocolSession,
 } from './index';
@@ -49,4 +51,27 @@ export function parseBoxStatus(raw: unknown): ProtocolBoxStatus | null {
 export function parseBoxScreen(raw: unknown): ProtocolBoxScreen | null {
   const parsed = RESULTS['box.screen'].safeParse(raw);
   return parsed.success ? parsed.data.screen : null;
+}
+
+/** M16 — `routines.list`: las rutinas y si el almacén está en solo lectura. */
+export interface RoutineList {
+  routines: ProtocolRoutine[];
+  readOnly: boolean;
+}
+
+export function parseRoutines(raw: unknown): RoutineList | null {
+  const parsed = RESULTS['routines.list'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** M16 — `routines.add`, `routines.update` y `routines.remove` devuelven la rutina (la borrada, en `remove`). */
+export function parseRoutine(raw: unknown): ProtocolRoutine | null {
+  const parsed = RESULTS['routines.add'].safeParse(raw);
+  return parsed.success ? parsed.data.routine : null;
+}
+
+/** M16 — `routines.run`: qué pasó con el disparo y la rutina resultante. */
+export function parseRoutineRun(raw: unknown): { fire: ProtocolRoutineFire; routine: ProtocolRoutine } | null {
+  const parsed = RESULTS['routines.run'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }

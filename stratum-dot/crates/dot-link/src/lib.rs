@@ -53,6 +53,7 @@ pub use log::Logger;
 pub use secret::ApproverSecret;
 pub use state::{
     CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
+    RoutineLimits, RoutinePatch,
 };
 
 /// Versión del protocolo que habla este cliente (`STRATUM_PROTOCOL_VERSION`).

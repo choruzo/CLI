@@ -20,19 +20,19 @@
 //! van directos: es lo mismo que hace el runtime cuando nadie contesta.
 //!
 //! Lo que devuelven `dot_open_session`, `dot_start_run`, `dot_list_agents`,
-//! `dot_list_models` y `dot_box_*` es el `result` del daemon **sin interpretar**: un DTO del
+//! `dot_list_models`, `dot_box_*` y `dot_routines_*` es el `result` del daemon **sin interpretar**: un DTO del
 //! protocolo que el webview valida contra el contrato antes de usarlo.
 
 use dot_link::{
     ApproverAction, ApproverStatus, CallAction, CommandError, CommandErrorKind, ControlAction,
-    QuestionAnswer,
+    QuestionAnswer, RoutineLimits, RoutinePatch,
 };
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
 use tauri::{AppHandle, Runtime, State, WebviewWindow};
 
-use crate::DotState;
+use crate::{notify, DotState};
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -193,6 +193,124 @@ pub async fn dot_box_stop(state: State<'_, DotState>) -> Result<Value, CommandEr
 #[tauri::command]
 pub async fn dot_box_screen(state: State<'_, DotState>) -> Result<Value, CommandError> {
     state.link.call(CallAction::BoxScreen).await
+}
+
+/// M16 — las rutinas del asistente. El `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_routines_list(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::RoutinesList).await
+}
+
+/// M16 — crear una rutina. Los campos van uno a uno: el lado nativo los valida
+/// (topes del contrato) y arma la petición; el webview no pasa un objeto libre.
+#[tauri::command]
+#[allow(clippy::too_many_arguments)]
+pub async fn dot_routines_add(
+    state: State<'_, DotState>,
+    name: String,
+    schedule: String,
+    prompt: String,
+    model: Option<String>,
+    enabled: Option<bool>,
+    max_iterations: Option<u32>,
+    timeout_minutes: Option<u32>,
+) -> Result<Value, CommandError> {
+    let limits = RoutineLimits {
+        max_iterations,
+        timeout_minutes,
+    };
+    state
+        .link
+        .call(CallAction::RoutinesAdd {
+            name,
+            schedule,
+            prompt,
+            model,
+            enabled,
+            limits: (limits != RoutineLimits::default()).then_some(limits),
+        })
+        .await
+}
+
+/// M16 — cambiar una rutina: solo lo que viene en el parche (tipado y cerrado).
+#[tauri::command]
+pub async fn dot_routines_update(
+    state: State<'_, DotState>,
+    routine_id: String,
+    patch: RoutinePatch,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::RoutinesUpdate { routine_id, patch })
+        .await
+}
+
+/// M16 — borrar una rutina **y su sesión**.
+#[tauri::command]
+pub async fn dot_routines_remove(
+    state: State<'_, DotState>,
+    routine_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::RoutinesRemove { routine_id })
+        .await
+}
+
+/// M16 — dispararla ya (también deshabilitada).
+#[tauri::command]
+pub async fn dot_routines_run(
+    state: State<'_, DotState>,
+    routine_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::RoutinesRun { routine_id })
+        .await
+}
+
+/// M16 — avisa al sistema de que una rutina terminó. El texto es plano y
+/// acotado aquí, no en el webview; la notificación no lleva acciones. Si la
+/// ventana recibe el foco poco después, Dot abre esa sesión (`notify.rs`).
+#[tauri::command]
+pub fn dot_notify_routine<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+    title: String,
+    body: String,
+    session_id: String,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    if session_id.is_empty() || session_id.chars().count() > dot_link::MAX_ID_CHARS {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "Invalid session id.",
+        ));
+    }
+    let title = notify::plain(&title, notify::MAX_TITLE_CHARS);
+    let body = notify::plain(&body, notify::MAX_BODY_CHARS);
+    if title.is_empty() {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "The notification has no title.",
+        ));
+    }
+    // Sin el texto: ni el título ni el cuerpo van al log.
+    match notify::show(&app, &title, &body) {
+        Ok(()) => {
+            state.logger.info("notify: routine");
+            state.notice.remember(session_id, std::time::Instant::now());
+            Ok(())
+        }
+        Err(_) => {
+            state.logger.warn("notify: the system did not show it");
+            Err(CommandError::new(
+                CommandErrorKind::NotSent,
+                "The system did not show the notification.",
+            ))
+        }
+    }
 }
 
 fn main_window<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), CommandError> {

@@ -26,3 +26,6 @@ getrandom = "0.3"
 tauri-plugin-single-instance = "2"
 # Posición y tamaño de la ventana entre arranques (preferencia de interfaz).
 tauri-plugin-window-state = "2"
+# M16: la notificación del sistema al terminar una rutina. Solo la usa el lado
+# nativo (`notify.rs`); el webview no recibe su permiso.
+tauri-plugin-notification = "2"

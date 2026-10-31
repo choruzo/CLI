@@ -1338,3 +1338,55 @@ Dirección en `docs/PRD_STRATUM_DOT.md` §23.4; contrato en `docs/protocol.md` �
 
 Tests: `src/app/Assistant.test.tsx` (*la pantalla de la caja*), `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
 y `tests/architecture.test.ts`.
+
+## 19. Rutinas (M16)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.5; contrato en `docs/protocol.md` §23. Una rutina es algo que
+el asistente hace solo, a una hora o a intervalos, en su propia sesión. El planificador vive en el
+daemon: Dot solo las ve y las gobierna.
+
+- **Panel *Routines*** (`src/components/RoutinesPanel.tsx`, en la vista *Asistente* bajo la caja): lista
+  con nombre, horario, siguiente vencimiento en hora local, habilitada o no, si se está ejecutando, el
+  último resultado (estado, hora y resumen recortado), el último intento que no arrancó (`skipped-busy`,
+  `missed`, `failed-to-start`), el `scheduleError` y, si `origin === 'agent'`, «Proposed by the
+  assistant». Por rutina: *Run now*, *Enable/Disable*, *Edit*, *Open* (su sesión, en el detalle de la
+  cabina como cualquier otra) y *Delete* (confirmación dentro de la página; borra también su
+  conversación). El formulario pide nombre, horario (con ayuda `30m`/`2h`/`1d`/cron de 5 campos en hora
+  local), prompt, modelo opcional (de `models.list`) y topes opcionales.
+- **Sin estado optimista.** Lo que se ve es la última `routines.list` o la respuesta de la mutación
+  (`stores/routineStore.ts`). Una mutación sin respuesta es «Result unknown» y no se repite sola. Un
+  `INVALID_PARAMS` se pinta junto a su campo (el lado nativo pasa el mensaje, no la lista `issues`:
+  `routineFieldOf` lee «Invalid <campo>: …»); `UNAVAILABLE` `read-only` / `routines-disabled` se
+  explican en el panel. Con el almacén en solo lectura no se puede cambiar nada.
+- **Cuándo se refresca la lista** (`src/app/routines.ts`): al abrir la vista, tras cada mutación y
+  cuando por la suscripción llega el inicio o el fin de un run de una sesión con `routineId`
+  (`watchRoutineRuns`, llamado desde `bridge/connect.ts`). Ningún sondeo. Si el fin del run llega antes
+  de que el daemon anote su `lastResult`, se relee una vez a los 1,5 s. Un fin que se pierde (Dot
+  desconectado) no se avisa después: la foto no lo repite.
+- **Marca en la lista de sesiones**: una sesión con `routineId` lleva «Routine · <nombre>» (de la
+  última lista; sin ella, «Routine»).
+- **Aviso del sistema** (la primera notificación de Dot). Al terminar un run de una rutina
+  (`routine-notices.ts`, puro): título «<nombre> finished|failed|was cancelled», cuerpo el `summary` de
+  **ese** run recortado a 200 caracteres (ya redactado por el daemon) o, si no hay, el estado. Una vez
+  por `runId` (memoria), y ninguno si la ventana tiene el foco y esa sesión está delante. El webview no
+  tiene el permiso del plugin: pide `dot_notify_routine { title, body, sessionId }` y el lado nativo
+  (`src-tauri/src/notify.rs`) lo deja en texto plano acotado (120 / 400 caracteres) y lo muestra con
+  `tauri-plugin-notification` 2.8.0. Sin acciones: un aviso nunca aprueba ni deniega nada.
+- **El clic.** En el escritorio el plugin no avisa de que se pulsó la notificación (`onAction` es de
+  móvil). Lo que hace Dot: recuerda la sesión de la última notificación mostrada y, si la ventana
+  principal **recibe el foco en los 30 s siguientes** (`FOCUS_WINDOW`), emite `open-session` y la
+  interfaz selecciona esa sesión (solo la selecciona). Se consume con el primer foco. Límites: darle
+  el foco a mano justo después es, desde aquí, lo mismo que pulsar; una notificación pulsada pasados 30 s
+  (p. ej. desde el centro de notificaciones) solo trae la ventana al frente; y en una compilación de
+  desarrollo Windows atribuye la notificación a PowerShell, por lo que el clic no activa Dot (en una
+  instalada, con su identificador, sí).
+- **Nativo**: `MainMethod::RoutinesList|Add|Update|Remove|Run`, solo en `DOT_METHODS`;
+  `CallAction::Routines*` con parámetros tipados y cerrados (`RoutineLimits`, `RoutinePatch` con
+  `clear_model`/`clear_limits` para el `null` del contrato; topes del contrato comprobados antes de
+  salir; el `prompt` viaja tal cual y no va al log). `add`, `update`, `remove` y `run` son órdenes que
+  cambian algo (`operationId` propio, sin respuesta `unknown`, nunca se reenvían); `list`, una consulta.
+  Comandos `dot_routines_list|add|update|remove|run` y `dot_notify_routine`, registrados como el resto.
+
+Tests: `src/app/Routines.test.tsx`, `src/protocol/routine-notices.test.ts`, `link.rs` (unidad) y
+`las_rutinas_solo_salen_por_dot_y_las_mutaciones_llevan_operation_id` (`tests/link.rs`),
+`wire.rs` y `tests/architecture.test.ts` (el webview no tiene permiso de notificaciones).

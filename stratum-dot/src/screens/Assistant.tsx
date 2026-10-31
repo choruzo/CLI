@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
+import { RoutinesPanel } from '../components/RoutinesPanel';
 import { useNative } from '../bridge/context';
 import { toCommandError } from '../bridge/native';
 import type {
@@ -27,6 +28,8 @@ interface Props {
   composerRef: RefObject<HTMLTextAreaElement>;
   /** Vuelve a la cabina (las sesiones). El asistente sigue vivo en el daemon. */
   onBack(): void;
+  /** M16 — abre la sesión de una rutina en el detalle de la cabina, como cualquier otra. */
+  onOpenSession(sessionId: string): void;
 }
 
 /**
@@ -35,7 +38,7 @@ interface Props {
  * ya existe; Dot solo la pide y la pinta como cualquier otra (sale de su foto).
  * La caja la gobierna el daemon: aquí se consulta, se arranca y se para.
  */
-export function Assistant({ now, canControl, connected, composerRef, onBack }: Props) {
+export function Assistant({ now, canControl, connected, composerRef, onBack, onOpenSession }: Props) {
   const native = useNative();
   const companionId = useUi((s) => s.companionId);
   const openedAt = useUi((s) => (s.companionId ? s.opening[s.companionId] : undefined));
@@ -163,12 +166,15 @@ export function Assistant({ now, canControl, connected, composerRef, onBack }: P
 
   return (
     <main className="body split assistant">
-      <BoxPanel
-        connected={connected}
-        canControl={canControl}
-        sessionId={companionId}
-        snapshot={entry?.snapshot ?? null}
-      />
+      <div className="assistant-side">
+        <BoxPanel
+          connected={connected}
+          canControl={canControl}
+          sessionId={companionId}
+          snapshot={entry?.snapshot ?? null}
+        />
+        <RoutinesPanel connected={connected} canControl={canControl} onOpenSession={onOpenSession} />
+      </div>
       {conversation}
     </main>
   );

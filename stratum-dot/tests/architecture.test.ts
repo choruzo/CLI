@@ -162,12 +162,18 @@ const COMMANDS = [
   'dot_hide',
   'dot_list_agents',
   'dot_list_models',
+  'dot_notify_routine',
   'dot_open_session',
   'dot_pause_run',
   'dot_quit',
   'dot_resume_run',
   'dot_resync_session',
   'dot_retry',
+  'dot_routines_add',
+  'dot_routines_list',
+  'dot_routines_remove',
+  'dot_routines_run',
+  'dot_routines_update',
   'dot_set_attention',
   'dot_start_run',
   'dot_steer_run',
@@ -234,6 +240,10 @@ describe('la frontera con el lado nativo', () => {
     );
     expect(JSON.stringify(capability.permissions)).not.toMatch(/core:default|core:window|core:webview|emit/);
     expect(JSON.stringify(capability)).not.toMatch(/"unlock"|"confirm|remote|fs:|shell:|dialog:|http:/);
+    // M16: el aviso de una rutina lo muestra el lado nativo (`dot_notify_routine`); el webview no
+    // tiene el permiso del plugin de notificaciones ni lo importa.
+    expect(JSON.stringify(capability)).not.toMatch(/notification:/);
+    expect(read(join(DOT, 'package.json'))).not.toMatch(/plugin-notification/);
     const conf = JSON.parse(read(join(DOT, 'src-tauri', 'tauri.conf.json')));
     // Sin red: el webview solo habla con el lado nativo.
     expect(conf.app.security.csp).toContain("default-src 'self'");
@@ -352,6 +362,11 @@ describe('el lado nativo', () => {
       'events.subscribe',
       'events.unsubscribe',
       'models.list',
+      'routines.add',
+      'routines.list',
+      'routines.remove',
+      'routines.run',
+      'routines.update',
       'runs.cancel',
       'runs.pause',
       'runs.resume',
@@ -369,7 +384,7 @@ describe('el lado nativo', () => {
     // Lo que Dot puede pedir es su perfil (`ClientProfile::DOT` en `link.rs`): de `sessions.*`
     // solo abrir y leer una; de `runs.*`, iniciar y gobernar; de lo pendiente, solo listarlo
     // (para la confirmación nativa); de la caja del asistente (M14), consultarla, arrancarla y
-    // pararla, nunca borrarla. Ni cerrar, ni reconfigurar, ni el historial de M11.
+    // pararla, nunca borrarla; de las rutinas (M16), listarlas, crearlas, cambiarlas, borrarlas y dispararlas. Ni cerrar, ni reconfigurar, ni el historial de M11.
     const linkRs = rustCode(join(link, 'src', 'link.rs')).replace(/\r\n/g, '\n');
     const dotStart = linkRs.indexOf('const DOT_METHODS: &[MainMethod] = &[');
     expect(dotStart).toBeGreaterThan(-1);
@@ -387,6 +402,11 @@ describe('el lado nativo', () => {
       'EventsSubscribe',
       'EventsUnsubscribe',
       'ModelsList',
+      'RoutinesAdd',
+      'RoutinesList',
+      'RoutinesRemove',
+      'RoutinesRun',
+      'RoutinesUpdate',
       'RunsCancel',
       'RunsPause',
       'RunsResume',
@@ -404,7 +424,7 @@ describe('el lado nativo', () => {
     const all = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!);
     expect(all.length).toBe(main.length + approver.length);
     // Fuera de `wire.rs` nadie escribe un método a mano.
-    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box)\.[a-zA-Z]+"/;
+    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box|routines)\.[a-zA-Z]+"/;
     const strays = rustShipped.filter((f) => !f.endsWith(`${sep}wire.rs`) && method.test(rustCode(f)));
     expect(strays.map(rel)).toEqual([]);
   });

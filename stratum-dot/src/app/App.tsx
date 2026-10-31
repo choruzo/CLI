@@ -227,6 +227,7 @@ export function App() {
           connected={connected}
           composerRef={composerRef}
           onBack={() => setView('sessions')}
+          onOpenSession={(id) => choose(id)}
         />
       ) : (
         <main className="body split">

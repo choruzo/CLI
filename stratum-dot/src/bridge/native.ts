@@ -70,7 +70,12 @@ export type DotEvent =
   | { type: 'snapshot'; sessionId: string; snapshot: unknown }
   | { type: 'events'; sessionId: string; events: unknown[] }
   | { type: 'approver'; status: ApproverStatus }
-  | { type: 'open-view'; view: DotView };
+  | { type: 'open-view'; view: DotView }
+  /**
+   * M16 — la ventana recibió el foco poco después de la notificación de una
+   * rutina: abrir la sesión de esa rutina (solo se selecciona). Nunca resuelve nada.
+   */
+  | { type: 'open-session'; sessionId: string };
 
 export interface AppInfo {
   dotVersion: string;
@@ -131,6 +136,45 @@ export interface OpenSessionRequest {
   model?: string;
 }
 
+/** M16 — topes opcionales de una rutina (`ProtocolRoutineLimits`). */
+export interface RoutineLimitsInput {
+  maxIterations?: number;
+  timeoutMinutes?: number;
+}
+
+/** M16 — los campos de `routines.add`, uno a uno. El lado nativo los valida y arma la petición. */
+export interface NewRoutineInput {
+  name: string;
+  schedule: string;
+  prompt: string;
+  model?: string;
+  enabled?: boolean;
+  limits?: RoutineLimitsInput;
+}
+
+/**
+ * M16 — qué cambia `routines.update`; lo que no se nombra no se toca. Quitar el
+ * modelo o los topes es `clearModel` / `clearLimits` (el `null` del contrato).
+ */
+export interface RoutinePatchInput {
+  name?: string;
+  schedule?: string;
+  prompt?: string;
+  model?: string;
+  clearModel?: boolean;
+  enabled?: boolean;
+  limits?: RoutineLimitsInput;
+  clearLimits?: boolean;
+}
+
+/** M16 — el aviso del sistema al terminar una rutina. El lado nativo acota el texto. */
+export interface RoutineNotification {
+  title: string;
+  body: string;
+  /** La sesión que se abre si la ventana recibe el foco enseguida. */
+  sessionId: string;
+}
+
 /** Una respuesta a una pregunta del agente (`ProtocolQuestionAnswer`). */
 export interface QuestionAnswerInput {
   question: string;
@@ -182,6 +226,18 @@ export interface NativeBridge {
   boxStop(): Promise<unknown>;
   /** M15 — la pantalla de la caja ahora, para verla en solo lectura. Sin validar. */
   boxScreen(): Promise<unknown>;
+  /** M16 — las rutinas del asistente. Resultado sin validar. */
+  routinesList(): Promise<unknown>;
+  /** M16 — crear una rutina. Sin respuesta, `unknown`: no se repite. */
+  routinesAdd(input: NewRoutineInput): Promise<unknown>;
+  /** M16 — cambiar una rutina (solo el parche). */
+  routinesUpdate(routineId: string, patch: RoutinePatchInput): Promise<unknown>;
+  /** M16 — borrar una rutina **y su sesión**. */
+  routinesRemove(routineId: string): Promise<unknown>;
+  /** M16 — dispararla ya, también deshabilitada. */
+  routinesRun(routineId: string): Promise<unknown>;
+  /** M16 — notificación del sistema (texto plano; sin acciones). */
+  notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -235,6 +291,21 @@ export const tauriBridge: NativeBridge = {
   boxStart: () => invoke<unknown>('dot_box_start'),
   boxStop: () => invoke<unknown>('dot_box_stop'),
   boxScreen: () => invoke<unknown>('dot_box_screen'),
+  routinesList: () => invoke<unknown>('dot_routines_list'),
+  routinesAdd: (input) =>
+    invoke<unknown>('dot_routines_add', {
+      name: input.name,
+      schedule: input.schedule,
+      prompt: input.prompt,
+      model: input.model ?? null,
+      enabled: input.enabled ?? null,
+      maxIterations: input.limits?.maxIterations ?? null,
+      timeoutMinutes: input.limits?.timeoutMinutes ?? null,
+    }),
+  routinesUpdate: (routineId, patch) => invoke<unknown>('dot_routines_update', { routineId, patch }),
+  routinesRemove: (routineId) => invoke<unknown>('dot_routines_remove', { routineId }),
+  routinesRun: (routineId) => invoke<unknown>('dot_routines_run', { routineId }),
+  notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

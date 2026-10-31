@@ -6,7 +6,8 @@ mod common;
 
 use common::*;
 use dot_link::{
-    CallAction, CommandErrorKind, ConnectionState, ControlAction, DaemonLauncher, DotEvent,
+    CallAction, ClientProfile, CommandErrorKind, ConnectionState, ControlAction, DaemonLauncher,
+    DotEvent, RoutineLimits, RoutinePatch,
 };
 use serde_json::json;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -854,5 +855,108 @@ async fn un_mensaje_sin_respuesta_no_se_reenvia() {
     until("sin conexión", || !connected(&rig)).await;
     let offline = rig.link.call(open_default()).await.unwrap_err();
     assert_eq!(offline.kind, CommandErrorKind::NotSent);
+    rig.quit().await;
+}
+
+/// M16: las rutinas solo salen por el perfil de Dot; cada mutación lleva su
+/// `operationId` y, sin respuesta, queda desconocida y no se reenvía.
+#[tokio::test(flavor = "multi_thread")]
+async fn las_rutinas_solo_salen_por_dot_y_las_mutaciones_llevan_operation_id() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_silent("routines.run");
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    let list = rig.link.call(CallAction::RoutinesList).await.unwrap();
+    assert_eq!(list["readOnly"], false);
+    rig.link
+        .call(CallAction::RoutinesAdd {
+            name: "Resumen".into(),
+            schedule: "1d".into(),
+            prompt: "secreto-del-prompt".into(),
+            model: None,
+            enabled: None,
+            limits: Some(RoutineLimits {
+                max_iterations: Some(10),
+                timeout_minutes: None,
+            }),
+        })
+        .await
+        .unwrap();
+    rig.link
+        .call(CallAction::RoutinesUpdate {
+            routine_id: "rt_1".into(),
+            patch: RoutinePatch {
+                enabled: Some(false),
+                ..RoutinePatch::default()
+            },
+        })
+        .await
+        .unwrap();
+    rig.link
+        .call(CallAction::RoutinesRemove {
+            routine_id: "rt_1".into(),
+        })
+        .await
+        .unwrap();
+    // Sin respuesta: desconocido, y no se reenvía.
+    let silent = rig
+        .link
+        .call(CallAction::RoutinesRun {
+            routine_id: "rt_1".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(silent.kind, CommandErrorKind::Unknown);
+    assert_eq!(fake.count("routines.run"), 1);
+
+    let requests = fake.requests();
+    let sent = |m: &str| requests.iter().find(|r| r["method"] == m).unwrap().clone();
+    assert!(sent("routines.list")["params"].get("operationId").is_none());
+    let mut ops = Vec::new();
+    for m in [
+        "routines.add",
+        "routines.update",
+        "routines.remove",
+        "routines.run",
+    ] {
+        let op = sent(m)["params"]["operationId"]
+            .as_str()
+            .unwrap()
+            .to_string();
+        assert!(op.starts_with("dot-"), "{m}");
+        ops.push(op);
+    }
+    ops.sort();
+    ops.dedup();
+    assert_eq!(ops.len(), 4);
+    let add = sent("routines.add");
+    assert_eq!(add["params"]["limits"], json!({ "maxIterations": 10 }));
+    assert_eq!(
+        sent("routines.update")["params"]["patch"],
+        json!({ "enabled": false })
+    );
+    // El prompt no queda en el log.
+    assert!(!rig.log().contains("secreto-del-prompt"));
+
+    // Desktop no tiene rutinas: nada sale.
+    let before = requests.len();
+    for action in [
+        CallAction::RoutinesList,
+        CallAction::RoutinesRun {
+            routine_id: "rt_1".into(),
+        },
+        CallAction::RoutinesRemove {
+            routine_id: "rt_1".into(),
+        },
+    ] {
+        let err = desktop.link.call(action).await.unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::Invalid);
+    }
+    assert_eq!(fake.requests().len(), before);
+    desktop.quit().await;
     rig.quit().await;
 }

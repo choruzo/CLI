@@ -1,4 +1,5 @@
 import type { SessionEntry } from '../stores/sessionStore';
+import { routineNameOf, useRoutines } from '../stores/routineStore';
 import { activeRun, displayStatus, formatDuration, hostLabel, pendingCount, preview } from '../protocol/view';
 import { StatusBadge } from './StatusBadge';
 
@@ -13,6 +14,10 @@ interface Props {
 /** Una sesión viva en la lista. La misma fila para las del daemon y las de una terminal. */
 export function SessionRow({ sessionId, entry, selected, now, onSelect }: Props) {
   const { snapshot } = entry;
+  // M16: la sesión de una rutina lo dice (el nombre sale de la última lista; sin ella, «Routine»).
+  const routineName = useRoutines((s) =>
+    snapshot?.session.routineId ? routineNameOf(s.routines, snapshot.session.routineId) : null,
+  );
   if (!snapshot) {
     return (
       <button type="button" className="row" aria-current={selected || undefined} onClick={onSelect}>
@@ -44,6 +49,11 @@ export function SessionRow({ sessionId, entry, selected, now, onSelect }: Props)
         {run && status !== 'detached' ? <span>{formatDuration(now - run.startedAt)}</span> : null}
         {pending > 0 ? <span className="tone-waiting">{pending} pending</span> : null}
       </span>
+      {session.routineId ? (
+        <span className="row-meta" data-e2e="routine-mark">
+          <span className="routine-mark">{routineName ? `Routine · ${routineName}` : 'Routine'}</span>
+        </span>
+      ) : null}
       <span className="row-meta mono" title={session.cwd}>
         {session.cwd}
       </span>

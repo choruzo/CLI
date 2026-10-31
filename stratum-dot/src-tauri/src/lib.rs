@@ -23,6 +23,7 @@
 
 mod commands;
 mod confirm;
+mod notify;
 mod page;
 mod tray;
 mod unlock;
@@ -54,6 +55,8 @@ pub struct DotState {
     pub confirm: Arc<ConfirmGate>,
     /// Qué ventana de confirmación enseña qué confirmación.
     pub confirm_windows: Arc<confirm::ConfirmWindows>,
+    /// M16 — la sesión de la última notificación de una rutina, hasta el primer foco.
+    pub notice: notify::PendingNotice,
     pub logger: Logger,
     /// `None` si el escritorio no tiene bandeja: entonces cerrar la ventana sale de Dot.
     pub tray: Option<tray::Tray>,
@@ -82,6 +85,9 @@ pub fn run() {
                 .with_filter(|label| label == "main")
                 .build(),
         )
+        // M16: notificaciones del sistema. El webview no tiene el permiso del plugin
+        // (`capabilities/default.json`): solo `dot_notify_routine`, que valida el texto.
+        .plugin(tauri_plugin_notification::init())
         // Las páginas de desbloqueo y de confirmación, cada una en su origen y sin IPC.
         .register_asynchronous_uri_scheme_protocol(unlock::SCHEME, unlock::handle)
         .register_asynchronous_uri_scheme_protocol(confirm::SCHEME, confirm::handle)
@@ -102,6 +108,12 @@ pub fn run() {
             commands::dot_box_start,
             commands::dot_box_stop,
             commands::dot_box_screen,
+            commands::dot_routines_list,
+            commands::dot_routines_add,
+            commands::dot_routines_update,
+            commands::dot_routines_remove,
+            commands::dot_routines_run,
+            commands::dot_notify_routine,
             commands::dot_approver_status,
             commands::dot_approver_unlock,
             commands::dot_approver_lock,
@@ -135,6 +147,21 @@ pub fn run() {
                     }
                 }
                 return;
+            }
+            // M16: el foco poco después de mostrar la notificación de una rutina es
+            // «la pulsó»: se abre esa sesión (solo se selecciona). Ver `notify.rs`.
+            if let WindowEvent::Focused(true) = event {
+                if window.label() == "main" {
+                    if let Some(state) = window.try_state::<DotState>() {
+                        if let Some(session_id) = state.notice.take_fresh(std::time::Instant::now()) {
+                            let _ = window.app_handle().emit_to(
+                                "main",
+                                DOT_EVENT,
+                                serde_json::json!({ "type": "open-session", "sessionId": session_id }),
+                            );
+                        }
+                    }
+                }
             }
             if let WindowEvent::CloseRequested { api, .. } = event {
                 // Con bandeja, cerrar es ocultar. Sin ella, cerrar sale de Dot
@@ -212,6 +239,7 @@ pub fn run() {
                 prompt: unlock::UnlockPrompt::default(),
                 confirm: gate,
                 confirm_windows: Arc::new(confirm::ConfirmWindows::default()),
+                notice: notify::PendingNotice::default(),
                 logger,
                 tray,
             });

@@ -173,12 +173,67 @@ p {
   .body.split.assistant {
     grid-template-rows: auto 1fr;
   }
-  .shell[data-detail] .box-panel {
+  .shell[data-detail] .assistant-side {
     display: block;
     max-height: 40vh;
     border-bottom: 1px solid var(--line);
   }
 }
+
+/* M16 — a la izquierda del asistente, su caja y sus rutinas, una debajo de otra. */
+.body.split.assistant {
+  grid-template-columns: minmax(300px, 400px) 1fr;
+}
+@media (max-width: 719px) {
+  .body.split.assistant {
+    grid-template-columns: 1fr;
+  }
+}
+.assistant-side {
+  overflow: auto;
+  min-width: 0;
+  border-right: 1px solid var(--line);
+}
+.assistant-side .overview {
+  overflow: visible;
+  border-right: 0;
+}
+.routines-panel {
+  padding: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+.routines {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.routine {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  overflow-wrap: anywhere;
+}
+.routine[data-enabled='no'] .row-title {
+  color: var(--muted);
+}
+.routine-summary {
+  margin-top: 0.15rem;
+}
+.routine-mark {
+  color: var(--accent);
+}
+.field-error {
+  color: var(--bad);
+}
+.routine-form {
+  margin-top: 0.5rem;
+  max-width: none;
+}
+
 
 /* --- lista ---------------------------------------------------------------- */
 .rows {

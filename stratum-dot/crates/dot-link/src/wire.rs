@@ -63,10 +63,16 @@ pub enum MainMethod {
     BoxStop,
     /// M15 (Dot) — la pantalla de la caja ahora (JPEG), para verla en solo lectura.
     BoxScreen,
+    /// M16 (Dot) — las rutinas del asistente (`docs/protocol.md` §23).
+    RoutinesList,
+    RoutinesAdd,
+    RoutinesUpdate,
+    RoutinesRemove,
+    RoutinesRun,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 23] = [
+    pub const ALL: [MainMethod; 28] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -90,6 +96,11 @@ impl MainMethod {
         MainMethod::BoxStart,
         MainMethod::BoxStop,
         MainMethod::BoxScreen,
+        MainMethod::RoutinesList,
+        MainMethod::RoutinesAdd,
+        MainMethod::RoutinesUpdate,
+        MainMethod::RoutinesRemove,
+        MainMethod::RoutinesRun,
     ];
 }
 
@@ -119,6 +130,11 @@ impl WireMethod for MainMethod {
             MainMethod::BoxStart => "box.start",
             MainMethod::BoxStop => "box.stop",
             MainMethod::BoxScreen => "box.screen",
+            MainMethod::RoutinesList => "routines.list",
+            MainMethod::RoutinesAdd => "routines.add",
+            MainMethod::RoutinesUpdate => "routines.update",
+            MainMethod::RoutinesRemove => "routines.remove",
+            MainMethod::RoutinesRun => "routines.run",
         }
     }
 }
@@ -303,7 +319,12 @@ mod tests {
                 "box.status",
                 "box.start",
                 "box.stop",
-                "box.screen"
+                "box.screen",
+                "routines.list",
+                "routines.add",
+                "routines.update",
+                "routines.remove",
+                "routines.run"
             ]
         );
         for forbidden in [
