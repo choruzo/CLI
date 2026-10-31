@@ -1989,7 +1989,12 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
 - **M16 — Rutinas.** `RoutineScheduler`, `routines.json`, `stratum routines …`,
   `propose_routine`, notificaciones, arranque del daemon con la sesión (opcional). *Hecho
   cuando*: una rutina corre a su hora con nadie mirando, lo que pide aprobación caduca a `deny`
-  sin bloquear el daemon, y su resultado está en Dot.
+  sin bloquear el daemon, y su resultado está en Dot. *Hecho 2026-10-31* (`docs/protocol.md` §23,
+  `docs/dot.md` §19, `.claude/docs/daemon.md`). El criterio lo fija
+  `daemon/daemon-routines-timed.test.ts` (daemon real, timers reales, sin clientes mientras vence)
+  y el panel de rutinas de Dot lee `lastResult` de `routines.list`. Sin probar en real: el
+  autoarranque en el registro de Windows y la notificación en una ventana real (el clic se
+  aproxima con el foco de la ventana en los 30 s siguientes; `docs/dot.md` §19).
 - **M17 — Conectores e inspector de memoria.** MCP del asistente desde la capa global con
   `callEffects`; inspector de memoria en Dot.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
