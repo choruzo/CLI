@@ -498,6 +498,7 @@ export const routineSchema: z.ZodType<ProtocolRoutine> = z.object({
   enabled: z.boolean(),
   limits: routineLimitsSchema.optional(),
   createdAt: timestamp,
+  origin: z.enum(['person', 'agent']).optional(),
   nextFireAt: timestamp.nullable(),
   scheduleError: z.string().max(LIMITS.answerChars).nullable(),
   sessionId: id.nullable(),

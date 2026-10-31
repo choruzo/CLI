@@ -15,6 +15,11 @@ import { questionTool } from '../tools/question.js';
 import { todoTool } from '../tools/todo.js';
 import { createExecTool, EXEC_TOOL } from '../tools/exec/exec.js';
 import type { ExecutionTarget } from '../tools/exec/target.js';
+import {
+  createProposeRoutineTool,
+  PROPOSE_ROUTINE_TOOL,
+  type RoutineProposals,
+} from '../tools/routines/propose.js';
 
 /**
  * El agente embebido `companion` (M14, PRD de Stratum Dot §23): el asistente
@@ -80,9 +85,13 @@ export function buildCompanionConfig(base: StratumConfig, dataDir: string): Stra
 /**
  * Registry del `companion`: solo sus tools. `exec` va atado a su caja
  * (`onlyTarget`: cualquier otro target se veta en `preflight`) y solo existe
- * con la caja habilitada.
+ * con la caja habilitada. M16: `propose_routine` solo con `routines` (la
+ * sesión principal en el daemon; nunca una sesión de rutina).
  */
-export function buildCompanionRegistry(config: StratumConfig): ToolRegistry {
+export function buildCompanionRegistry(
+  config: StratumConfig,
+  opts: { routines?: RoutineProposals } = {},
+): ToolRegistry {
   const registry = new ToolRegistry();
   for (const tool of [
     webSearchTool,
@@ -101,8 +110,12 @@ export function buildCompanionRegistry(config: StratumConfig): ToolRegistry {
   // tenga visión se decide por turno (`makeLoop`): el modelo puede cambiar.
   const screen = box !== null && box.kind === 'container' && boxHasDesktop(config.box);
   if (screen) for (const tool of createScreenTools(box)) registry.register(tool);
+  if (opts.routines) registry.register(createProposeRoutineTool(opts.routines));
   const expected = COMPANION_TOOLS.filter(
-    (name) => (box !== null || name !== EXEC_TOOL) && (screen || !isScreenTool(name)),
+    (name) =>
+      (box !== null || name !== EXEC_TOOL) &&
+      (screen || !isScreenTool(name)) &&
+      (opts.routines !== undefined || name !== PROPOSE_ROUTINE_TOOL),
   );
   const missing = expected.filter((name) => !registry.get(name));
   if (missing.length > 0) throw new Error(`faltan tools del companion: ${missing.join(', ')}`);

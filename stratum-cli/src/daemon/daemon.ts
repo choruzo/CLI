@@ -98,6 +98,7 @@ import {
 import { OperationCache, type OperationCacheOptions } from './operation-cache.js';
 import { PeerSessions, peerHostedOnly } from './peer-sessions.js';
 import { RoutineScheduler, type RoutineSession } from './routine-scheduler.js';
+import type { RoutineProposals } from '../tools/routines/propose.js';
 import {
   routineOperation,
   toProtocolFire,
@@ -704,6 +705,7 @@ export class Stratumd {
         archived,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
         companionDataDir: this.companionDir,
+        ...this.routineProposals(),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
       });
@@ -1010,6 +1012,7 @@ export class Stratumd {
           files,
           ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
           companionDataDir: this.companionDir,
+          ...this.routineProposals(),
           ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
@@ -1610,7 +1613,10 @@ export class Stratumd {
       'routines.add': (params) =>
         routineOperation(() => {
           const { operationId: _op, ...input } = params;
-          return { routine: toProtocolRoutine(this.routinesOrThrow().add(input)) };
+          // Por el protocolo crea la persona; el agente solo con `propose_routine`.
+          return {
+            routine: toProtocolRoutine(this.routinesOrThrow().add({ ...input, origin: 'person' })),
+          };
         }),
       'routines.update': (params) =>
         routineOperation(() => ({
@@ -1712,6 +1718,28 @@ export class Stratumd {
     } catch {
       throw new ProtocolError('UNAVAILABLE', 'Cannot load the configuration of that directory.');
     }
+  }
+
+  /**
+   * M16 — `propose_routine` del `companion`: crea, con `origin: 'agent'`, la
+   * rutina que una persona ya aprobó. Sin planificador, la tool no existe.
+   * `HostedSession` solo se lo da a la sesión principal, nunca a la de una rutina.
+   */
+  private routineProposals(): { routineProposals?: RoutineProposals } {
+    const routines = this.routines;
+    if (!routines) return {};
+    return {
+      routineProposals: {
+        create: (proposal) => {
+          const status = routines.add({ ...proposal, origin: 'agent' });
+          return {
+            id: status.routine.id,
+            name: status.routine.name,
+            nextFireAt: status.nextFireAt,
+          };
+        },
+      },
+    };
   }
 
   /** El planificador de rutinas, o `UNAVAILABLE` si el daemon corre sin él. */

@@ -99,7 +99,13 @@ export function embeddedAgentName(preset: PromptPreset): string | null {
  * trabaja como el asistente sin carpeta. M15: las `screen_*`, con una caja con
  * escritorio, y solo se ofrecen a un modelo con visión (`makeLoop`).
  */
-export const COMPANION_TOOLS: readonly string[] = [...ASSISTANT_TOOLS, 'exec', ...SCREEN_TOOLS];
+export const COMPANION_TOOLS: readonly string[] = [
+  ...ASSISTANT_TOOLS,
+  'exec',
+  ...SCREEN_TOOLS,
+  // M16 — solo en la sesión principal del daemon (`buildCompanionRegistry`).
+  'propose_routine',
+];
 
 export function companionToolsetFilter(): ToolsetFilter {
   return { allowedTools: COMPANION_TOOLS };

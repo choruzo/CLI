@@ -23,6 +23,7 @@ import { QUESTION_TOOL } from './question.js';
 import { TODO_TOOL } from './todo.js';
 import { TEST_EVIDENCE_TOOL } from './tdd.js';
 import { READ_SKILL_TOOL } from './skills/read-skill.js';
+import { describeRoutineProposal, PROPOSE_ROUTINE_TOOL } from './routines/propose.js';
 import { isJobTool } from '../jobs/types.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
@@ -1007,6 +1008,8 @@ export function describeCall(call: ToolCallReady): string {
     const detail = [call.input.localPath, call.input.remotePath].filter(Boolean).join(' → ');
     return `${call.name} [${call.input.host}]: ${detail}`;
   }
+  // M16 — aprobar una rutina es aprobar su prompt: entero, nunca el resumen de 120.
+  if (call.name === PROPOSE_ROUTINE_TOOL) return describeRoutineProposal(call.input);
   // Redacción estructural antes de serializar: `redactText` (que el dispatcher
   // aplica después) solo reconoce formas de secreto, no un `{"password": "…"}`
   // cualquiera. La descripción viaja al usuario — a la terminal y, en Stratum

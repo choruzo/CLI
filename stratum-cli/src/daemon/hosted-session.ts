@@ -46,6 +46,7 @@ import type { AssistantData } from '../host/assistant.js';
 import { SessionPublisher, type PublisherSink } from '../host/session-publisher.js';
 import { getLogger } from '../logging/index.js';
 import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
+import type { RoutineProposals } from '../tools/routines/propose.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 
@@ -109,6 +110,11 @@ export interface HostedSessionOptions {
   files: SessionFiles;
   /** M16 — la rutina a la que pertenece la sesión. Solo la abre el planificador del daemon. */
   routineId?: string;
+  /**
+   * M16 — dónde crea el `companion` una rutina aprobada (`propose_routine`).
+   * Solo llega a su sesión principal: una sesión de rutina no propone rutinas.
+   */
+  routineProposals?: RoutineProposals;
 }
 
 /** Cuánto se espera a que un turno cancelado termine de cerrarse. */
@@ -157,6 +163,7 @@ export class HostedSession {
         conversation: { conversation: opts.files.conversation },
       },
       preset,
+      opts.routineId ? undefined : opts.routineProposals,
     );
     if (opts.agent && !preset) {
       const applied = host.agent.setPrimaryProfile(opts.agent);
@@ -191,7 +198,10 @@ export class HostedSession {
    *   cambiarle el agente sin decirlo.
    */
   static async adopt(
-    opts: Omit<HostedSessionOptions, 'readOnly' | 'sessionProfile' | 'agent' | 'routineId'> & {
+    opts: Omit<
+      HostedSessionOptions,
+      'readOnly' | 'sessionProfile' | 'agent' | 'routineId' | 'routineProposals'
+    > & {
       context: ProtocolHandoffContext;
       snapshot: ProtocolSessionSnapshot;
     },
@@ -260,6 +270,7 @@ export class HostedSession {
         conversation: { conversation: opts.files.conversation, restore: true },
       },
       preset,
+      meta.routineId ? undefined : opts.routineProposals,
     );
     if (meta.agent && !preset && host.agent.getActiveProfile()?.name !== meta.agent) {
       await host.dispose({ cancelBackground: true });
@@ -341,9 +352,11 @@ export class HostedSession {
     >,
     agent: NonNullable<SessionHostOptions['agent']>,
     preset: SessionHostOptions['preset'] | null = null,
+    routineProposals?: RoutineProposals,
   ): Promise<SessionHost> {
     const host = await SessionHost.create({
       ...(preset ? { preset } : {}),
+      ...(preset === 'companion' && routineProposals ? { routineProposals } : {}),
       ...(preset === 'assistant' && opts.assistantData
         ? { assistantData: opts.assistantData }
         : {}),

@@ -8,6 +8,7 @@ import { ToolRegistry } from '../tools/registry.js';
 import { registerBuiltinTools } from '../tools/index.js';
 import { McpManager, type McpManagerWarning } from '../tools/mcp/manager.js';
 import { screenLocks } from '../tools/screen/lock.js';
+import type { RoutineProposals } from '../tools/routines/propose.js';
 import { closeSessionExecRuntime } from '../tools/exec/runtime.js';
 import { PlanStore, generatePlanId } from '../session/plan-store.js';
 import { SubagentStore } from '../session/subagent-store.js';
@@ -82,6 +83,12 @@ export interface SessionHostOptions {
   preset?: 'assistant' | 'companion';
   /** M14 — dónde guarda el `companion` lo suyo. Por defecto `~/.stratum/companion/`. */
   companionDataDir?: string;
+  /**
+   * M16 — dónde crea el `companion` una rutina que una persona aprobó
+   * (`propose_routine`). Solo el daemon, y solo para su sesión principal:
+   * sin esto la tool no existe.
+   */
+  routineProposals?: RoutineProposals;
   /**
    * Datos del asistente: `dir` (su memoria; por defecto `~/.stratum/assistant/`)
    * y `legacyMemoryDir`, de dónde se migra una vez (por defecto la de Stratum
@@ -222,7 +229,10 @@ export class SessionHost {
     let registry: ToolRegistry;
     if (opts.preset === 'companion') {
       config = buildCompanionConfig(config, opts.companionDataDir ?? companionDataDir());
-      registry = buildCompanionRegistry(config);
+      registry = buildCompanionRegistry(
+        config,
+        opts.routineProposals ? { routines: opts.routineProposals } : {},
+      );
     } else if (opts.preset === 'assistant') {
       const dataDir = opts.assistantData?.dir ?? assistantDataDir();
       const legacy =

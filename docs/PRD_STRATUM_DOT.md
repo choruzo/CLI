@@ -1842,8 +1842,13 @@ antes de decidir (§23.9).
   nunca se rebaja una política porque el run sea programado. Al terminar, notificación en Dot
   (§8.6) con el resumen.
 - **Quién crea una rutina**: la persona, desde Dot o `stratum routines add|list|rm|run`. El agente
-  solo puede **proponerla** con una tool de control (`propose_routine`, interceptada como
-  `present_plan`), que se resuelve en el centro de aprobaciones: es trabajo autónomo futuro.
+  solo puede **proponerla** con `propose_routine`, que se resuelve en el centro de aprobaciones:
+  es trabajo autónomo futuro. [Ajustado 2026-10-31 al implementarlo] No es una tool de control
+  interceptada sino una tool con **confirmación forzada** (`confirmAlways`): pasa por el mismo
+  dispatcher y la misma confirmación nativa de Dot, nunca la levanta un *allow-all*, sin nadie
+  que conteste caduca a `deny`, y no hace falta un tipo nuevo de solicitud en el protocolo. Quien
+  aprueba ve el prompt **entero** (sus topes caben en una solicitud). Solo la tiene la sesión
+  principal del `companion` en el daemon; la rutina queda con `origin: 'agent'`.
 - **Jobs**: la regla de jobs no cambia; los de la caja viven con su sesión, que es de larga vida.
 - **Proactividad libre** (que el asistente escriba por iniciativa propia fuera de una rutina):
   fuera por ahora.

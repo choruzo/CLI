@@ -275,10 +275,7 @@ const autostart = new Command('autostart')
       .description('Enable autostart')
       .option('--json', 'machine-readable output')
       .action((opts: { json?: boolean }) =>
-        autostartAction(
-          () => enableAutostart(currentLaunch(), defaultAutostartDeps()),
-          opts.json,
-        ),
+        autostartAction(() => enableAutostart(currentLaunch(), defaultAutostartDeps()), opts.json),
       ),
   )
   .addCommand(

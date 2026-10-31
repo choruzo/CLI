@@ -36,6 +36,7 @@ export function toProtocolRoutine(status: RoutineStatus): ProtocolRoutine {
     ...(r.limits ? { limits: r.limits } : {}),
     // `createdAt` del almacén es ISO; el protocolo, ms. Ilegible → 0 (no se inventa).
     createdAt: Number.isNaN(created) ? 0 : created,
+    ...(r.origin ? { origin: r.origin } : {}),
     nextFireAt: status.nextFireAt,
     scheduleError: status.scheduleError,
     sessionId: status.sessionId,

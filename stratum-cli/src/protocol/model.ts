@@ -541,6 +541,11 @@ export interface ProtocolRoutine {
   enabled: boolean;
   limits?: ProtocolRoutineLimits;
   createdAt: Timestamp;
+  /**
+   * Quién la creó: `person` (CLI, Dot) o `agent` (`propose_routine`, aprobada
+   * por una persona). Solo procedencia. Ausente en las anteriores a saberlo.
+   */
+  origin?: 'person' | 'agent';
   nextFireAt: Timestamp | null;
   /** Por qué no tiene próximo vencimiento aun estando habilitada, o `null`. */
   scheduleError: string | null;

@@ -45,7 +45,14 @@ export interface Routine {
   limits?: RoutineLimits;
   /** ISO 8601; es el anchor de los intervalos. */
   createdAt: string;
+  /**
+   * Quién la creó: la persona (CLI, Dot) o el agente con `propose_routine`, que
+   * una persona aprobó. Solo procedencia. Ausente en las de antes de saberlo.
+   */
+  origin?: RoutineOrigin;
 }
+
+export type RoutineOrigin = 'person' | 'agent';
 
 export interface NewRoutine {
   name: string;
@@ -54,8 +61,10 @@ export interface NewRoutine {
   model?: string;
   enabled?: boolean;
   limits?: RoutineLimits;
+  origin?: RoutineOrigin;
 }
 
+/** La procedencia no se edita. */
 export type RoutinePatch = Partial<
   Pick<Routine, 'name' | 'schedule' | 'prompt' | 'model' | 'enabled' | 'limits'>
 >;
@@ -99,8 +108,9 @@ const NewRoutineSchema = z.object({
   model: ModelSchema.optional(),
   enabled: z.boolean().optional(),
   limits: LimitsSchema.optional(),
+  origin: z.enum(['person', 'agent']).optional(),
 });
-const PatchSchema = NewRoutineSchema.partial();
+const PatchSchema = NewRoutineSchema.omit({ origin: true }).partial();
 
 // Lo que se lee del disco: forma ya normalizada, con campos desconocidos preservados.
 const StoredRoutineSchema = z
@@ -113,6 +123,7 @@ const StoredRoutineSchema = z
     enabled: z.boolean(),
     limits: LimitsSchema.optional(),
     createdAt: z.string().min(1),
+    origin: z.enum(['person', 'agent']).optional(),
   })
   .passthrough();
 
@@ -230,6 +241,7 @@ export class RoutineStore {
     };
     if (v.model) routine.model = v.model;
     if (v.limits) routine.limits = v.limits;
+    if (v.origin) routine.origin = v.origin;
 
     this.persist([...this.routines, routine]);
     return copyRoutine(routine);

@@ -131,7 +131,10 @@ describe('companion — prompt y toolset', () => {
     const { host } = await companionHost(provider);
     await collect(host.run('hola'));
     // Sin visión declarada, ni rastro de la pantalla.
-    expect(offered(provider)).toEqual(COMPANION_TOOLS.filter((t) => !isScreenTool(t)).sort());
+    // Sin quien cree rutinas (lo da el daemon), tampoco propose_routine.
+    expect(offered(provider)).toEqual(
+      COMPANION_TOOLS.filter((t) => !isScreenTool(t) && t !== 'propose_routine').sort(),
+    );
     expect(host.agent.getMessages()[0]?.content).not.toContain('# Your box screen');
     for (const tool of ['read_file', 'write_file', 'list_directory', 'glob', 'grep']) {
       expect(offered(provider)).not.toContain(tool);
@@ -246,7 +249,9 @@ describe('companion — la pantalla de su caja (M15, §23.4)', () => {
     const provider = new RecordingProvider([makeTextRound('hola')]);
     const { host } = await companionHost(provider, { vision: 'pixels' });
     await collect(host.run('hola'));
-    expect(offered(provider)).toEqual([...COMPANION_TOOLS].sort());
+    expect(offered(provider)).toEqual(
+      COMPANION_TOOLS.filter((t) => t !== 'propose_routine').sort(),
+    );
     expect(host.agent.getMessages()[0]?.content).toContain('# Your box screen');
   });
 

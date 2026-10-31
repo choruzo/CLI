@@ -1845,7 +1845,7 @@ sesión** del `companion`, de larga vida, distinta de la sesión principal; cada
 en ella. El planificador vive en el daemon: sin daemon no hay rutinas.
 
 ```json
-{ "method": "routines.add", "params": { "name": "Resumen", "schedule": "every day at 09:00",
+{ "method": "routines.add", "params": { "name": "Resumen", "schedule": "0 9 * * *",
                                          "prompt": "Resume mis correos de ayer" } }
 → { "routine": { "id": "rt_k3j9x0a1bc", "name": "Resumen", "enabled": true, "nextFireAt": 1761890400000,
                  "sessionId": null, "running": false, "lastFire": null, "lastResult": null, … } }
@@ -1879,6 +1879,12 @@ en ella. El planificador vive en el daemon: sin daemon no hay rutinas.
   rutina; con él, pide `routines.list` para leer `lastResult`.
 - **Aprobaciones.** Una rutina no rebaja nada: lo que pida aprobación se publica como en cualquier
   sesión del daemon (§13) y, sin respuesta, caduca a `deny` y el run sigue.
+- **`origin`** (`person` | `agent`, opcional): quién la creó. Por `routines.add` siempre es `person`
+  (un cliente no puede pedir otro). `agent` = la propuso el `companion` con la tool
+  `propose_routine` y una persona la aprobó: es una solicitud de aprobación normal (§15) con
+  `forced: true` (no admite `allow-all`) cuya `description` lleva nombre, horario, límites y el
+  `prompt` **entero**; sin respuesta caduca a `deny` y la rutina no existe. Solo la sesión
+  principal del `companion` tiene esa tool; la de una rutina, no. Solo procedencia.
 - **Errores.** Daemon sin planificador → `UNAVAILABLE` (`routines-disabled`); fichero de rutinas de un
   Stratum más nuevo o dañado (`readOnly: true`) → las mutaciones, `UNAVAILABLE` (`read-only`); valor
   inválido o nombre repetido → `INVALID_PARAMS` con `issues` (`name`, `schedule`…); rutina inexistente
