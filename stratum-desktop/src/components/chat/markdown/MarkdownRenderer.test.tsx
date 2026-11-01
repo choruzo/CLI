@@ -17,6 +17,7 @@ vi.mock('@tauri-apps/plugin-opener', () => ({ openUrl: vi.fn() }));
 
 import { openUrl } from '@tauri-apps/plugin-opener';
 import { MarkdownRenderer, safeUrl } from './MarkdownRenderer';
+import { VISUAL_CSP, VISUAL_SANDBOX } from './VisualBlock';
 
 afterEach(() => {
   cleanup();
@@ -68,6 +69,59 @@ describe('MarkdownRenderer', () => {
     cleanup();
     const open = render(<MarkdownRenderer text={'```ts\nconst a = 1;\n'} streaming />);
     expect(open.container.querySelector('code.hljs')).toBeNull();
+  });
+
+  describe('vallas ```visual', () => {
+    const VISUAL = '```visual\n<svg viewBox="0 0 10 10"><rect width="5" height="5"/></svg>\n<script>parent.alert(1)</script>\n```\n';
+
+    it('con `visuals`, se pintan en un iframe sin scripts y con CSP propia', () => {
+      const { container } = render(<MarkdownRenderer text={VISUAL} visuals />);
+      const frame = container.querySelector('iframe');
+      expect(frame).not.toBeNull();
+      // Sin `allow-scripts`: ni el <script> ni un on*= se ejecutan dentro.
+      expect(frame!.getAttribute('sandbox')).toBe(VISUAL_SANDBOX);
+      expect(frame!.getAttribute('sandbox')).not.toContain('allow-scripts');
+      const doc = frame!.getAttribute('srcdoc') ?? '';
+      expect(doc.indexOf(VISUAL_CSP)).toBeGreaterThan(-1);
+      expect(doc.indexOf(VISUAL_CSP)).toBeLessThan(doc.indexOf('<rect'));
+      expect(doc).toContain('--viz-1:');
+      expect(doc).toContain('--color-accent:');
+      // Nada del visual entra en el DOM de la app.
+      expect(container.querySelector('svg rect')).toBeNull();
+      expect(container.querySelector('script')).toBeNull();
+      expect(container.querySelector('.code-block')).toBeNull();
+    });
+
+    it('«Ver HTML» enseña el fuente como texto', () => {
+      const { container } = render(<MarkdownRenderer text={VISUAL} visuals />);
+      fireEvent.click(screen.getByRole('button', { name: 'Ver HTML' }));
+      expect(container.querySelector('iframe')).toBeNull();
+      expect(container.querySelector('.visual-block__source')?.textContent).toContain('<script>parent.alert(1)</script>');
+      expect(container.querySelector('script')).toBeNull();
+      fireEvent.click(screen.getByRole('button', { name: 'Ver visual' }));
+      expect(container.querySelector('iframe')).not.toBeNull();
+    });
+
+    it('mientras la valla sigue abierta no se monta el marco', () => {
+      const open = render(<MarkdownRenderer text={'```visual\n<div>a</div>\n'} streaming visuals />);
+      expect(open.container.querySelector('iframe')).toBeNull();
+      expect(open.container.textContent).toContain('Preparando visual');
+      cleanup();
+      const closed = render(<MarkdownRenderer text={'```visual\n<div>a</div>\n```\n'} streaming visuals />);
+      expect(closed.container.querySelector('iframe')).not.toBeNull();
+    });
+
+    it('sin `visuals` (vista previa de un fichero) es un bloque de código', () => {
+      const { container } = render(<MarkdownRenderer text={VISUAL} />);
+      expect(container.querySelector('iframe')).toBeNull();
+      expect(container.querySelector('.code-block')).not.toBeNull();
+    });
+
+    it('otras vallas siguen siendo código aunque haya `visuals`', () => {
+      const { container } = render(<MarkdownRenderer text={'```html\n<b>x</b>\n```\n'} visuals />);
+      expect(container.querySelector('iframe')).toBeNull();
+      expect(container.querySelector('code.hljs')).not.toBeNull();
+    });
   });
 
   it('en streaming solo re-renderiza el último bloque', () => {

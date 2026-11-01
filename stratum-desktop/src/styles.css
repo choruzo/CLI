@@ -2885,6 +2885,53 @@ kbd {
   outline-offset: 1px;
 }
 
+/* Bloque ```visual (VisualBlock): el HTML del asistente en un iframe sin scripts. */
+.visual-block {
+  margin: 0 0 10px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
+  background: var(--color-bgPanel);
+  overflow: hidden;
+}
+.visual-block--pending {
+  padding: 14px 12px;
+}
+.visual-block__label {
+  color: var(--color-textFaint);
+  font-size: 12px;
+}
+.visual-block__frame {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+}
+.visual-block__toggle {
+  padding: 2px 8px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-textMuted);
+  font-size: 12px;
+  cursor: pointer;
+}
+.visual-block__toggle:hover {
+  background: var(--color-bgApp);
+  color: var(--color-textPrimary);
+}
+.visual-block__toggle:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.markdown .visual-block__source {
+  margin: 0;
+  border: 0;
+  border-radius: 0;
+  background: none;
+  max-height: 480px;
+  overflow: auto;
+}
+
 /* 2. «Ir al final»: círculo flotante sobre el borde inferior del historial. */
 .conversation__viewport {
   position: relative;

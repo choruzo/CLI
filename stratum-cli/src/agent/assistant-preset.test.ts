@@ -205,6 +205,16 @@ describe('preset assistant — workspace (D2)', () => {
     expect(prompt).toContain('You have no access to the user');
   });
 
+  it('anuncia los visuales solo si la skill stratum-visuals está en su índice', () => {
+    const withSkill = buildAssistantPrompt(undefined, {
+      skills: '# Skills\n| stratum-visuals | gráficos |',
+    });
+    expect(withSkill).toContain('# Visuals');
+    expect(withSkill.indexOf('# Visuals')).toBeLessThan(withSkill.indexOf('# Skills'));
+    expect(buildAssistantPrompt(undefined, { skills: '# Skills\n| otra | x |' })).not.toContain('# Visuals');
+    expect(buildAssistantPrompt(undefined, {})).not.toContain('# Visuals');
+  });
+
   it('con workspace añade # Workspace, las tools de fichero y el aviso de dato no confiable', () => {
     const prompt = buildAssistantPrompt(undefined, {
       workspace: { root: '/x', readOnly: ['inputs'] },

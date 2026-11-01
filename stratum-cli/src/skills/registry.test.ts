@@ -255,7 +255,7 @@ describe('SkillRegistry — de serie, presets y ámbitos (contrato builtin)', ()
     );
   });
 
-  it('bundledSkillsDir encuentra stratum-cli/skills y sus cuatro skills reales parsean', () => {
+  it('bundledSkillsDir encuentra stratum-cli/skills y sus cinco skills reales parsean', () => {
     const dir = bundledSkillsDir();
     expect(dir).not.toBeNull();
     expect(existsSync(join(dir!, '.stratum-builtin-skills'))).toBe(true);
@@ -269,6 +269,7 @@ describe('SkillRegistry — de serie, presets y ámbitos (contrato builtin)', ()
       'stratum-global-memory': ['assistant'],
       'stratum-companion-memory': ['companion'],
       'stratum-skill-authoring': ['coding', 'assistant', 'companion'],
+      'stratum-visuals': ['assistant'],
     };
     for (const [name, presets] of Object.entries(expected)) {
       const e = all.get(name);

@@ -7,6 +7,7 @@ import { EMPTY_SPLIT, isClosedFence, splitBlocks, type SplitState } from './bloc
 import { openExternal } from '../../../ipc/external';
 import { useCopy } from '../../../hooks/useCopy';
 import { ICON, StrokeIcon } from '../icons';
+import { VISUAL_LANGUAGE, VisualBlock } from './VisualBlock';
 
 /**
  * Render del markdown del asistente (15.13).
@@ -99,6 +100,25 @@ const components: Components = {
   },
 };
 
+/**
+ * Con `visuals`, una valla ```visual se pinta como visual (`VisualBlock`) en
+ * vez de como código. Solo lo pide el chat: la vista previa de un `.md` del
+ * usuario sigue enseñando el HTML como texto.
+ */
+function withVisuals(settled: boolean): Components {
+  return {
+    ...components,
+    pre: ({ children }) =>
+      codeLanguage(children) === VISUAL_LANGUAGE ? (
+        <VisualBlock settled={settled}>{children}</VisualBlock>
+      ) : (
+        <CodeBlock>{children}</CodeBlock>
+      ),
+  };
+}
+const VISUALS_SETTLED = withVisuals(true);
+const VISUALS_PENDING = withVisuals(false);
+
 const PLAIN: Options['rehypePlugins'] = [];
 const HIGHLIGHT: Options['rehypePlugins'] = [
   [rehypeHighlight, { languages: common, detect: false, plainText: ['text', 'txt'] }],
@@ -109,21 +129,24 @@ interface BlockProps {
   raw: string;
   /** El bloque ya no va a cambiar: si es código, se resalta. */
   settled: boolean;
+  /** Pinta las vallas ```visual (solo el chat). */
+  visuals?: boolean;
 }
 
 /**
  * Un bloque de primer nivel. Memoizado por su texto: mientras llega la
  * respuesta, los bloques anteriores al último no se vuelven a parsear.
  */
-export const MarkdownBlock = memo(function MarkdownBlock({ raw, settled }: BlockProps) {
+export const MarkdownBlock = memo(function MarkdownBlock({ raw, settled, visuals = false }: BlockProps) {
   // Una valla cerrada y seguida de salto de línea ya no puede cambiar aunque
   // sea el último bloque: lo siguiente que llegue abrirá otro.
   const highlight = isClosedFence(raw) && (settled || raw.endsWith('\n'));
+  const map = visuals ? (highlight ? VISUALS_SETTLED : VISUALS_PENDING) : components;
   return (
     <ReactMarkdown
       remarkPlugins={REMARK}
       rehypePlugins={highlight ? HIGHLIGHT : PLAIN}
-      components={components}
+      components={map}
       urlTransform={safeUrl}
     >
       {raw}
@@ -135,9 +158,11 @@ interface MarkdownRendererProps {
   text: string;
   /** La respuesta sigue llegando: el último bloque puede cambiar. */
   streaming?: boolean;
+  /** Pinta las vallas ```visual como visual en vez de como código. */
+  visuals?: boolean;
 }
 
-export function MarkdownRenderer({ text, streaming = false }: MarkdownRendererProps) {
+export function MarkdownRenderer({ text, streaming = false, visuals = false }: MarkdownRendererProps) {
   const split = useRef<SplitState>(EMPTY_SPLIT);
   split.current = splitBlocks(text, split.current);
   const { blocks } = split.current;
@@ -149,6 +174,7 @@ export function MarkdownRenderer({ text, streaming = false }: MarkdownRendererPr
           key={b.offset}
           raw={b.raw}
           settled={!streaming || i < blocks.length - 1}
+          visuals={visuals}
         />
       ))}
     </div>
