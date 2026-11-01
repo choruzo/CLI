@@ -34,6 +34,7 @@ export const READ_ONLY_SESSION_TOOLS: readonly string[] = [
   'exec',
   // M15 — mirar la pantalla de la caja; actuar en ella se veta.
   'screen_screenshot',
+  'screen_zoom',
   'screen_wait',
   // El hijo hereda el modo read-only (RunOptions.readOnly).
   'delegate_task',

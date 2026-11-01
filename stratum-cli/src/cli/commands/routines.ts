@@ -184,7 +184,10 @@ interface AddOptions {
 const add = new Command('add')
   .description('Add a routine')
   .requiredOption('--name <name>', 'unique name')
-  .requiredOption('--schedule <schedule>', 'for example "30m", "every day at 09:00"')
+  .requiredOption(
+    '--schedule <schedule>',
+    'an interval ("30m", "2h", "1d") or a 5-field cron ("0 9 * * 1-5")',
+  )
   .requiredOption('--prompt <prompt>', 'what the assistant does each time')
   .option('--model <model>', 'model for the routine (default: the assistant one)')
   .option('--max-iterations <n>', 'iteration cap of each run')

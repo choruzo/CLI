@@ -22,7 +22,15 @@ import { ExecConnectError, isHandedOver } from '../exec/backend.js';
 import { containerBackend } from '../exec/backends/container.js';
 import type { ExecutionTarget } from '../exec/target.js';
 import { screenLocks, type ScreenLocks } from './lock.js';
-import { coordinatesHint, pngImage, toScreenPoint, type ScreenGeometry } from './geometry.js';
+import {
+  coordinatesHint,
+  fromZoomPoint,
+  pngImage,
+  toScreenPoint,
+  zoomRegion,
+  type ScreenGeometry,
+  type ZoomRegion,
+} from './geometry.js';
 
 /** Plazo de cada orden en la caja. Una captura tarda bastante menos. */
 const COMMAND_TIMEOUT_MS = 30_000;
@@ -50,11 +58,25 @@ const coordinate = (axis: 'x' | 'y') =>
     );
 
 const screenshotSchema = z.object({});
+const zoomSchema = z.object({
+  x1: coordinate('x').describe(
+    'Left edge of the area, in the convention of the latest full screenshot',
+  ),
+  y1: coordinate('y').describe('Top edge of the area'),
+  x2: coordinate('x').describe('Right edge of the area'),
+  y2: coordinate('y').describe('Bottom edge of the area'),
+});
 const clickSchema = z.object({
   x: coordinate('x'),
   y: coordinate('y'),
   button: z.enum(['left', 'middle', 'right']).optional().describe('Mouse button (default left)'),
   double: z.boolean().optional().describe('Double click'),
+  zoom: z
+    .boolean()
+    .optional()
+    .describe(
+      'x and y are in the image returned by the screen_zoom just before (same convention, on that image)',
+    ),
 });
 const typeSchema = z.object({
   text: z
@@ -127,7 +149,7 @@ function noVision(): ToolResult {
 }
 
 /**
- * Las seis tools sobre la pantalla de `target` (la caja). Comparten la última
+ * Las siete tools sobre la pantalla de `target` (la caja). Comparten la última
  * geometría vista: un modelo `norm1000` necesita el tamaño de la pantalla
  * para convertir su punto, y así no se pregunta en cada clic.
  */
@@ -136,6 +158,10 @@ export function createScreenTools(
   locks: ScreenLocks = screenLocks,
 ): ToolDefinition[] {
   let geometry: ScreenGeometry | undefined;
+  // A8: la última ampliación de cada sesión. Solo vale para la acción que la
+  // sigue: cualquier otra captura la retira (la pantalla puede haber cambiado).
+  const zooms = new Map<string, { region: ZoomRegion; image: ScreenGeometry }>();
+  const sessionKey = (ctx: ToolContext): string => ctx.sessionId ?? 'local';
 
   type BoxRun = { ok: true; stdout: string } | { ok: false; result: ToolResult };
 
@@ -212,6 +238,7 @@ export function createScreenTools(
     settle: number,
     stdin?: string,
   ): Promise<ToolResult> {
+    zooms.delete(sessionKey(ctx));
     const steps = [
       ...(action ? [action] : []),
       ...(settle > 0 ? [`sleep ${settle}`] : []),
@@ -285,6 +312,56 @@ export function createScreenTools(
     },
     {
       ...base,
+      name: 'screen_zoom',
+      description:
+        "Look closer at an area of your box's screen: returns that area enlarged (up to 4×), without " +
+        'acting. Use it before clicking a small target (a radio button, a checkbox, a short link): ' +
+        'then call screen_click with zoom: true and the point in the enlarged image.',
+      schema: zoomSchema,
+      async execute(params, ctx) {
+        if (!ctx.vision) return noVision();
+        const vision = ctx.vision;
+        const input = zoomSchema.parse(params);
+        const screen = await screenGeometry(ctx);
+        if ('ok' in screen) return screen;
+        const z = zoomRegion(input, vision, screen);
+        if (!z.ok) return recoverable(z.error);
+        const { region } = z;
+        // Todo entero calculado aquí: nada del modelo entra en la orden.
+        const r = await runInBox(
+          ctx,
+          'import -window root png:- | convert png:- ' +
+            `-crop ${region.width}x${region.height}+${region.x}+${region.y} +repage ` +
+            `-resize ${region.outWidth}x${region.outHeight}! png:- | base64 -w0`,
+        );
+        if (!r.ok) return r.result;
+        let image: ToolImage;
+        try {
+          image = pngImage(r.stdout);
+        } catch (err) {
+          return recoverable(`Could not read the zoomed screenshot: ${(err as Error).message}.`);
+        }
+        // La geometría de la pantalla no cambia: la imagen es solo de la zona.
+        zooms.set(sessionKey(ctx), { region, image: { width: image.width, height: image.height } });
+        const scale = Math.round((image.width / region.width) * 10) / 10;
+        const area =
+          vision.coordinates === 'pixels'
+            ? `(${region.x}, ${region.y})–(${region.x + region.width - 1}, ${region.y + region.height - 1})`
+            : `(${input.x1}, ${input.y1})–(${input.x2}, ${input.y2})`;
+        return {
+          ok: true,
+          output:
+            `Zoomed ${scale}× into the screen area ${area}. ` +
+            `Screenshot ${image.sha256.slice(0, 12)} (${image.width}×${image.height}) shows only that area. ` +
+            'To click something in it, call screen_click with zoom: true and x, y in this image. ' +
+            coordinatesHint(vision, image) +
+            ' Any other screen action returns to full-screen coordinates.',
+          image,
+        };
+      },
+    },
+    {
+      ...base,
       name: 'screen_click',
       description:
         "Move the mouse to a point of your box's screen and click there. Returns a new screenshot.",
@@ -292,16 +369,32 @@ export function createScreenTools(
       async execute(params, ctx) {
         if (!ctx.vision) return noVision();
         const input = clickSchema.parse(params);
-        const p = await point(ctx, ctx.vision, input.x, input.y);
+        let p: { x: number; y: number } | ToolResult;
+        if (input.zoom) {
+          const zoom = zooms.get(sessionKey(ctx));
+          if (!zoom) {
+            return recoverable(
+              'zoom: true only works right after screen_zoom. Zoom into the area again, or click ' +
+                'with full-screen coordinates.',
+            );
+          }
+          const z = fromZoomPoint(input.x, input.y, ctx.vision, zoom);
+          p = z.ok ? { x: z.x, y: z.y } : recoverable(z.error);
+        } else {
+          p = await point(ctx, ctx.vision, input.x, input.y);
+        }
         if ('ok' in p) return p;
         const busy = claimScreen(ctx);
         if (busy) return busy;
         const button = BUTTONS[input.button ?? 'left'];
         const repeat = input.double ? ' --repeat 2 --delay 120' : '';
+        const where = input.zoom
+          ? `(${input.x}, ${input.y}) in the zoom → pixel (${p.x}, ${p.y})`
+          : at(input, p, ctx.vision);
         return actAndCapture(
           ctx,
           ctx.vision,
-          `${input.double ? 'Double-clicked' : 'Clicked'} ${input.button ?? 'left'} at ${at(input, p, ctx.vision)}.`,
+          `${input.double ? 'Double-clicked' : 'Clicked'} ${input.button ?? 'left'} at ${where}.`,
           `xdotool mousemove --sync ${p.x} ${p.y} click${repeat} ${button}`,
           SETTLE_SECONDS,
         );

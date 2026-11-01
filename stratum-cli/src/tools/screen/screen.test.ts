@@ -64,7 +64,7 @@ beforeEach(() => {
 });
 
 describe('createScreenTools', () => {
-  it('crea las seis, con los nombres de SCREEN_TOOLS y en su orden', () => {
+  it('crea las siete, con los nombres de SCREEN_TOOLS y en su orden', () => {
     expect([...tools.keys()]).toEqual(SCREEN_TOOLS);
   });
 
@@ -182,6 +182,81 @@ describe('createScreenTools', () => {
   });
 });
 
+describe('screen_zoom (A8)', () => {
+  beforeEach(() => {
+    respond = (req) => {
+      if (req.command.includes('getdisplaygeometry')) return outcome('1280 800\n');
+      if (req.command.includes('-crop')) return outcome(fakePng(640, 400));
+      return outcome(fakePng(1280, 800));
+    };
+  });
+
+  const zoomIn = (c: ToolContext = ctx()) =>
+    tool('screen_zoom').execute({ x1: 100, y1: 100, x2: 259, y2: 199 }, c);
+
+  it('recorta y amplía con enteros calculados, y devuelve la imagen de la zona', async () => {
+    const r = await zoomIn();
+    expect(r.ok).toBe(true);
+    expect(runs.at(-1)!.command).toContain(
+      'import -window root png:- | convert png:- -crop 160x100+100+100 +repage -resize 640x400! png:-',
+    );
+    if (!r.ok) return;
+    expect(r.image).toMatchObject({ width: 640, height: 400 });
+    expect(r.output).toContain('Zoomed 4×');
+    expect(r.output).toContain('zoom: true');
+  });
+
+  it('un clic con zoom: true se traduce al píxel de la pantalla', async () => {
+    await zoomIn();
+    const r = await tool('screen_click').execute({ x: 320, y: 200, zoom: true }, ctx());
+    expect(r.ok).toBe(true);
+    expect(runs.at(-1)!.command).toContain('xdotool mousemove --sync 180 150 click 1');
+    if (r.ok) expect(r.output).toContain('(320, 200) in the zoom → pixel (180, 150)');
+  });
+
+  it('norm1000 sobre la imagen ampliada', async () => {
+    const norm = ctx({ vision: { coordinates: 'norm1000' } });
+    await tool('screen_zoom').execute({ x1: 78.125, y1: 125, x2: 202.344, y2: 248.75 }, norm);
+    await tool('screen_click').execute({ x: 500, y: 500, zoom: true }, norm);
+    expect(runs.at(-1)!.command).toMatch(/mousemove --sync 1\d\d 1\d\d click 1/);
+  });
+
+  it('la ampliación no cambia la geometría de la pantalla: un clic normal sigue en pantalla completa', async () => {
+    await zoomIn();
+    const r = await tool('screen_click').execute({ x: 1000, y: 700 }, ctx());
+    expect(r.ok).toBe(true);
+    expect(runs.at(-1)!.command).toContain('mousemove --sync 1000 700');
+  });
+
+  it('zoom: true sin ampliación previa, o tras otra acción, no actúa', async () => {
+    const none = await tool('screen_click').execute({ x: 5, y: 5, zoom: true }, ctx());
+    expect(none).toMatchObject({ ok: false, recoverable: true });
+    await zoomIn();
+    await tool('screen_key').execute({ keys: 'Tab' }, ctx());
+    runs.length = 0;
+    const stale = await tool('screen_click').execute({ x: 5, y: 5, zoom: true }, ctx());
+    expect(stale).toMatchObject({ ok: false, recoverable: true });
+    expect(runs.some((q) => q.command.includes('mousemove'))).toBe(false);
+  });
+
+  it('la ampliación es de cada sesión', async () => {
+    await zoomIn(ctx({ sessionId: 'A' }));
+    const r = await tool('screen_click').execute(
+      { x: 5, y: 5, zoom: true },
+      ctx({ sessionId: 'B' }),
+    );
+    expect(r.ok).toBe(false);
+  });
+
+  it('un punto fuera de la imagen ampliada no actúa', async () => {
+    await zoomIn();
+    runs.length = 0;
+    const r = await tool('screen_click').execute({ x: 700, y: 10, zoom: true }, ctx());
+    expect(r).toMatchObject({ ok: false, recoverable: true });
+    expect(runs).toHaveLength(0);
+  });
+});
+
 describe('cerrojo de la pantalla', () => {
   const BUSY = /being used by another session/;
 
@@ -221,6 +296,13 @@ describe('cerrojo de la pantalla', () => {
     expect((await t.get('screen_screenshot')!.execute({}, ctx({ sessionId: 'B' }))).ok).toBe(true);
     expect(
       (await t.get('screen_wait')!.execute({ seconds: 0.1 }, ctx({ sessionId: 'B' }))).ok,
+    ).toBe(true);
+    expect(
+      (
+        await t
+          .get('screen_zoom')!
+          .execute({ x1: 0, y1: 0, x2: 100, y2: 100 }, ctx({ sessionId: 'B' }))
+      ).ok,
     ).toBe(true);
     expect(locks.holderOf('box')).toBe('A');
   });

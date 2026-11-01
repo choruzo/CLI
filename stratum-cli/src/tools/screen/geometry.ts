@@ -83,6 +83,91 @@ export function toScreenPoint(
   return { ok: true, x: px, y: py };
 }
 
+/** Ampliación máxima de `screen_zoom` y el lienzo en que cabe lo ampliado. */
+export const ZOOM_MAX_SCALE = 4;
+export const ZOOM_CANVAS: ScreenGeometry = { width: 1280, height: 800 };
+/** Lado mínimo del recorte, en píxeles de la pantalla: uno menor se agranda alrededor de su centro. */
+export const ZOOM_MIN_SIDE = 32;
+
+/** El recorte de la pantalla que amplía `screen_zoom` y el tamaño de la imagen que sale. */
+export interface ZoomRegion {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  outWidth: number;
+  outHeight: number;
+}
+
+export type ZoomResult = { ok: true; region: ZoomRegion } | { ok: false; error: string };
+
+/**
+ * Rectángulo del modelo (dos esquinas, en su convención) → recorte en píxeles
+ * de la pantalla y tamaño de salida: ampliado hasta `ZOOM_MAX_SCALE` sin pasar
+ * de `ZOOM_CANVAS`, con la misma proporción.
+ */
+export function zoomRegion(
+  corners: { x1: number; y1: number; x2: number; y2: number },
+  vision: ModelVision,
+  screen: ScreenGeometry,
+): ZoomResult {
+  const a = toScreenPoint(corners.x1, corners.y1, vision, screen);
+  if (!a.ok) return a;
+  const b = toScreenPoint(corners.x2, corners.y2, vision, screen);
+  if (!b.ok) return b;
+  const span = (lo: number, hi: number, size: number): [number, number] => {
+    let start = Math.min(lo, hi);
+    let len = Math.abs(hi - lo) + 1;
+    if (len < ZOOM_MIN_SIDE) {
+      const side = Math.min(ZOOM_MIN_SIDE, size);
+      start = Math.round((lo + hi) / 2 - side / 2);
+      len = side;
+    }
+    start = Math.max(0, Math.min(start, size - len));
+    return [start, len];
+  };
+  const [x, width] = span(a.x, b.x, screen.width);
+  const [y, height] = span(a.y, b.y, screen.height);
+  const scale = Math.max(
+    1,
+    Math.min(ZOOM_MAX_SCALE, ZOOM_CANVAS.width / width, ZOOM_CANVAS.height / height),
+  );
+  return {
+    ok: true,
+    region: {
+      x,
+      y,
+      width,
+      height,
+      outWidth: Math.round(width * scale),
+      outHeight: Math.round(height * scale),
+    },
+  };
+}
+
+/**
+ * Punto del modelo en la imagen ampliada (su convención, sobre esa imagen) →
+ * píxel de la pantalla. La escala sale de la imagen que devolvió la caja, no
+ * de la que se pidió.
+ */
+export function fromZoomPoint(
+  x: number,
+  y: number,
+  vision: ModelVision,
+  zoom: { region: ZoomRegion; image: ScreenGeometry },
+): PointResult {
+  const p = toScreenPoint(x, y, vision, zoom.image);
+  if (!p.ok) return { ok: false, error: `${p.error} (in the zoomed image)` };
+  const { region, image } = zoom;
+  const axis = (v: number, from: number, to: number, start: number): number =>
+    start + Math.min(to - 1, Math.floor(((v + 0.5) * to) / from));
+  return {
+    ok: true,
+    x: axis(p.x, image.width, region.width, region.x),
+    y: axis(p.y, image.height, region.height, region.y),
+  };
+}
+
 /** Cómo tiene que dar el modelo un punto, para el texto de cada captura. */
 export function coordinatesHint(vision: ModelVision, screen: ScreenGeometry): string {
   return vision.coordinates === 'norm1000'

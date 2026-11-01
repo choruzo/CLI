@@ -1887,7 +1887,8 @@ que recuerda, con procedencia. Nada de lo recordado decide permisos, aprobacione
   proceso aparte que las custodie (como el `credential-executor` de Vellum) queda como
   endurecimiento posterior.
 - **Concesiones con caducidad** («permitir 10 minutos») como término medio entre una vez y la
-  sesión: abierto (§23.13 A3), sin tocar `confirm-always` ni las solicitudes `forced`.
+  sesión: decidido en §23.13 A3 (una sesión y una tool + target, 10/30/60 min, en memoria del
+  anfitrión), sin tocar `confirm-always` ni las solicitudes `forced`; entra en M17.
 
 ### 23.8 UX
 
@@ -1985,7 +1986,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     pero su backend tarda 2–3 min en algunas llamadas y no cabe en los 480 s del escenario.
     El reescalado se comprobó a mano: el píxel convertido cae donde apunta el modelo (p. ej. a 9 px
     del texto de un enlace de GitHub); lo que falla es la precisión del modelo en objetivos
-    pequeños. Queda abierto (§23.13 A8).
+    pequeños. *Cerrado 2026-11-01* (§23.13 A8): con `screen_zoom`, `qwen3.6` llega a 5/10 en el
+    formulario; el criterio `norm1000` se sustituye por recomendar solo modelos medidos.
 - **M16 — Rutinas.** `RoutineScheduler`, `routines.json`, `stratum routines …`,
   `propose_routine`, notificaciones, arranque del daemon con la sesión (opcional). *Hecho
   cuando*: una rutina corre a su hora con nadie mirando, lo que pide aprobación caduca a `deny`
@@ -1995,8 +1997,13 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   y el panel de rutinas de Dot lee `lastResult` de `routines.list`. Sin probar en real: el
   autoarranque en el registro de Windows y la notificación en una ventana real (el clic se
   aproxima con el foco de la ventana en los 30 s siguientes; `docs/dot.md` §19).
+  *Probado en real 2026-11-01*: `daemon autostart on` escribe `HKCU\…\Run\StratumDaemon`, y su
+  línea, lanzada tal cual, arranca el daemon sin ventana y responde por el protocolo (falta solo
+  un inicio de sesión real). Con Dot instalado (NSIS), el aviso de una rutina sale a nombre de
+  `dev.stratum.dot` con su título y su texto (historial de notificaciones de Windows). El clic
+  sobre el aviso sigue sin probar.
 - **M17 — Conectores e inspector de memoria.** MCP del asistente desde la capa global con
-  `callEffects`; inspector de memoria en Dot.
+  `callEffects`; concesiones con caducidad (§23.13 A3); inspector de memoria en Dot.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
   confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
 
@@ -2015,7 +2022,27 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
   none`; se aplica al recrear la caja en su siguiente `start`). Bloquear solo la LAN o el host, o
   una lista de dominios, queda para más adelante.
 - **A3. Concesiones con caducidad** («permitir N minutos») frente a `allow-all` de sesión, y cómo
-  se muestran en Dot.
+  se muestran en Dot. *Resuelta 2026-11-01*; se implementa en **M17**, cuyos conectores son lo
+  primero que la pide:
+  - **Qué es**: una tercera respuesta a una aprobación, junto a «una vez» y `allow-all`: permitir
+    durante **10, 30 o 60 minutos** (valores fijos, no libres).
+  - **Ámbito**: **una sesión y una pareja tool + target** (el `ConfirmRequest.target`; sin target,
+    solo la tool). Nunca «todo»: para eso ya está `allow-all`. Para `exec`, un target entero es
+    mucho; se acepta porque es lo mismo que hoy da `allow-all`, pero acotado en tiempo y target.
+  - **Dónde no vale** (como `allow-all`, `protocol/resolve.ts`): solicitudes `forced`,
+    `confirm-always`, `confirmPhrase`, y los vetos (entorno, read-only, `onlyTarget`, plugins), que
+    ninguna aprobación levanta. En la sesión de una **rutina** no se ofrece ni se acepta: programado
+    no rebaja ninguna política (§23.5).
+  - **Dónde vive**: en memoria del **anfitrión** de la sesión (junto a `PendingInteractions`), con
+    reloj monotónico; la caducidad se comprueba en cada confirmación. No se guarda en disco, no
+    sobrevive a un reinicio y **no viaja en un traspaso** (el DTO de M10 no lleva autoridad).
+  - **Autoridad**: concederla es resolver una aprobación, así que exige la clave de aprobador y,
+    en Dot, la confirmación nativa, que muestra la duración. **Revocarla solo resta**: basta
+    `control`. Dot lista las concesiones vigentes de la sesión (tool, target, minutos que quedan)
+    con un botón de revocar; la CLI, en `/permissions` o equivalente.
+  - **Traza**: la concesión es una decisión del runtime (`TraceScope.runtime`) con duración y
+    caducidad; cada llamada que pasa por ella, también, para que el `/auditor` distinga «aprobada
+    por concesión» de «aprobada».
 - **A4. Rutinas.** *Resuelta 2026-10-31*: **una sesión propia por rutina**, de larga vida en el
   daemon (como la del `companion`, §23.3): cada vencimiento es un run en ella, así que la rutina
   ve sus ejecuciones anteriores (compactadas por M11) y sus fallos o aprobaciones caducadas no
@@ -2042,3 +2069,14 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
   checkbox, nombres cortos de enlace). Opciones: una tool de zoom (recortar y ampliar una zona antes
   de hacer clic), capturas a más resolución para esos modelos, o recomendar solo modelos medidos.
   Decidir con datos, no suponer que un modelo `norm1000` sirve porque localiza bien en el spike.
+  *Resuelta 2026-11-01*: **tool de zoom y, por debajo del criterio, solo modelos medidos**.
+  `screen_zoom { x1, y1, x2, y2 }` recorta y amplía (hasta 4×) una zona sin actuar, y
+  `screen_click { zoom: true }` toma el punto sobre la imagen ampliada; Stratum lo traduce
+  (`.claude/docs/box.md`). Medido contra NaN, formulario de §23.9: `qwen3.6` pasa de 0/6 a
+  **5/10**. Usa el zoom en todas las pasadas, pero sigue localizando mal dentro de la imagen
+  ampliada (puntos pegados a la esquina) y, cuando falla, se pasa a `exec`. `glm5.3-flash` sigue
+  igual con el prompt nuevo (3/3, 8–10 tools). Como no llega a 8/10, el criterio `norm1000` de M15
+  se sustituye: **para computer use solo se recomiendan los modelos medidos** (hoy, `glm5.3-flash`
+  en píxeles), y declarar `vision` en otro modelo sigue funcionando, bajo la responsabilidad de
+  quien lo declara. La medición de M15 se repitió quitando un artefacto del bucle: tras cada
+  `pkill`, Chromium abría con la burbuja «Restore pages?» encima de la esquina superior derecha.

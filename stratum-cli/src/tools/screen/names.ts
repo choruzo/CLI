@@ -7,6 +7,7 @@ export const SCREEN_SCREENSHOT_TOOL = 'screen_screenshot';
 /** Todas, en el orden en que se registran (y se ofrecen al modelo). */
 export const SCREEN_TOOLS: readonly string[] = [
   SCREEN_SCREENSHOT_TOOL,
+  'screen_zoom',
   'screen_click',
   'screen_type',
   'screen_key',
@@ -14,8 +15,12 @@ export const SCREEN_TOOLS: readonly string[] = [
   'screen_wait',
 ];
 
-/** Solo miran la pantalla (capturar, esperar y capturar): no cambian nada en la caja. */
-export const SCREEN_READ_TOOLS: readonly string[] = [SCREEN_SCREENSHOT_TOOL, 'screen_wait'];
+/** Solo miran la pantalla (capturar, ampliar, esperar y capturar): no cambian nada en la caja. */
+export const SCREEN_READ_TOOLS: readonly string[] = [
+  SCREEN_SCREENSHOT_TOOL,
+  'screen_zoom',
+  'screen_wait',
+];
 
 export function isScreenTool(name: string): boolean {
   return SCREEN_TOOLS.includes(name);
