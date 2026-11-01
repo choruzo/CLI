@@ -1370,16 +1370,22 @@ daemon: Dot solo las ve y las gobierna.
   **ese** run recortado a 200 caracteres (ya redactado por el daemon) o, si no hay, el estado. Una vez
   por `runId` (memoria), y ninguno si la ventana tiene el foco y esa sesión está delante. El webview no
   tiene el permiso del plugin: pide `dot_notify_routine { title, body, sessionId }` y el lado nativo
-  (`src-tauri/src/notify.rs`) lo deja en texto plano acotado (120 / 400 caracteres) y lo muestra con
-  `tauri-plugin-notification` 2.8.0. Sin acciones: un aviso nunca aprueba ni deniega nada.
+  (`src-tauri/src/notify.rs`) lo deja en texto plano acotado (120 / 400 caracteres) y lo muestra:
+  en Windows con `tauri-winrt-notification` 0.8 (la crate que el plugin usa por debajo, sin sonido,
+  con el mismo AppUserModelID: `dev.stratum.dot` instalado, el de PowerShell desde `target/`); en el
+  resto con `tauri-plugin-notification` 2.8.0. Sin acciones: un aviso nunca aprueba ni deniega nada.
 - **El clic.** En el escritorio el plugin no avisa de que se pulsó la notificación (`onAction` es de
-  móvil). Lo que hace Dot: recuerda la sesión de la última notificación mostrada y, si la ventana
-  principal **recibe el foco en los 30 s siguientes** (`FOCUS_WINDOW`), emite `open-session` y la
-  interfaz selecciona esa sesión (solo la selecciona). Se consume con el primer foco. Límites: darle
-  el foco a mano justo después es, desde aquí, lo mismo que pulsar; una notificación pulsada pasados 30 s
-  (p. ej. desde el centro de notificaciones) solo trae la ventana al frente; y en una compilación de
-  desarrollo Windows atribuye la notificación a PowerShell, por lo que el clic no activa Dot (en una
-  instalada, con su identificador, sí).
+  móvil).
+  - **Windows**: el evento `Activated` del aviso llega al proceso de Dot mientras sigue abierto, y
+    `on_click` trae la ventana (`show_main`) y emite `open-session`: la interfaz selecciona esa
+    sesión (solo la selecciona). Sin plazo, y no depende del foco. *Probado en real 2026-11-01* con
+    Dot instalado (NSIS). Antes se fiaba del foco, y al pulsar no pasaba nada: el acceso directo de
+    NSIS no lleva activador COM, así que Windows cierra el aviso sin relanzar ni activar la app.
+    Con Dot cerrado, pulsar no lo abre.
+  - **Resto**: Dot recuerda la sesión de la última notificación mostrada y, si la ventana principal
+    **recibe el foco en los 30 s siguientes** (`FOCUS_WINDOW`), emite `open-session`. Se consume con
+    el primer foco. Límites: darle el foco a mano justo después es, desde aquí, lo mismo que pulsar,
+    y una notificación pulsada pasados 30 s solo trae la ventana al frente.
 - **Nativo**: `MainMethod::RoutinesList|Add|Update|Remove|Run`, solo en `DOT_METHODS`;
   `CallAction::Routines*` con parámetros tipados y cerrados (`RoutineLimits`, `RoutinePatch` con
   `clear_model`/`clear_limits` para el `null` del contrato; topes del contrato comprobados antes de

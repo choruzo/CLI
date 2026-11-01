@@ -29,3 +29,9 @@ tauri-plugin-window-state = "2"
 # M16: la notificación del sistema al terminar una rutina. Solo la usa el lado
 # nativo (`notify.rs`); el webview no recibe su permiso.
 tauri-plugin-notification = "2"
+
+# En Windows el aviso se muestra con la misma crate que usa el plugin por debajo,
+# para engancharse a su evento `Activated`: el plugin no avisa del clic en el
+# escritorio y, sin activador COM, Windows no relanza la app al pulsarlo.
+[target.'cfg(windows)'.dependencies]
+tauri-winrt-notification = "0.8"

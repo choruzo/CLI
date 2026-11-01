@@ -6,16 +6,26 @@
 //! nunca aprueba ni deniega una solicitud.
 //!
 //! **El clic.** En el escritorio el plugin oficial no avisa de que se pulsó la
-//! notificación (`onAction` es de móvil). Lo que sí se sabe es que la ventana
-//! recibe el foco: si ocurre poco después de mostrar una, Dot abre la sesión de
-//! esa rutina. Se recuerda solo la última, solo `FOCUS_WINDOW` y solo hasta el
-//! primer foco: pulsar la notificación y cambiar de ventana a mano justo después
-//! son, desde aquí, lo mismo. Abrir la sesión solo la selecciona.
+//! notificación (`onAction` es de móvil).
+//!
+//! - **Windows**: el aviso se muestra aquí con `tauri-winrt-notification` y su
+//!   evento `Activated` (llega a este proceso mientras Dot sigue abierto) trae
+//!   la ventana y abre la sesión. Sin activador COM en el acceso directo,
+//!   Windows no relanza la app al pulsar, así que el foco no serviría: se probó
+//!   con Dot instalado y el clic no hacía nada.
+//! - **Resto**: lo que sí se sabe es que la ventana recibe el foco. Si ocurre
+//!   poco después de mostrar una, Dot abre la sesión de esa rutina. Se recuerda
+//!   solo la última, solo `FOCUS_WINDOW` y solo hasta el primer foco: pulsar la
+//!   notificación y cambiar de ventana a mano justo después son, desde aquí, lo
+//!   mismo.
+//!
+//! Abrir la sesión solo la selecciona.
 
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
 use tauri::{AppHandle, Runtime};
+#[cfg(not(windows))]
 use tauri_plugin_notification::NotificationExt;
 
 /// Tope del título (caracteres).
@@ -70,10 +80,53 @@ impl PendingNotice {
     }
 }
 
-/// Muestra la notificación. Un fallo del sistema (sin servicio de
-/// notificaciones, permiso denegado) no es un error de Dot: se devuelve el
-/// texto para el log y nada más.
-pub fn show<R: Runtime>(app: &AppHandle<R>, title: &str, body: &str) -> Result<(), String> {
+/// Muestra la notificación; `on_click` se llama al pulsarla donde el sistema lo
+/// dice (Windows). Un fallo del sistema (sin servicio de notificaciones,
+/// permiso denegado) no es un error de Dot: se devuelve el texto para el log y
+/// nada más.
+#[cfg(windows)]
+pub fn show<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    body: &str,
+    on_click: impl Fn() + Send + 'static,
+) -> Result<(), String> {
+    use tauri_winrt_notification::Toast;
+    // El mismo AppUserModelID que el plugin: el de Dot instalado; desde `target/`
+    // (sin acceso directo que lo registre), el de PowerShell.
+    let exe = tauri::utils::platform::current_exe().map_err(|e| e.to_string())?;
+    let dir = exe
+        .parent()
+        .map(|d| d.display().to_string())
+        .unwrap_or_default();
+    let sep = std::path::MAIN_SEPARATOR;
+    let from_target = dir.ends_with(&format!("{sep}target{sep}debug"))
+        || dir.ends_with(&format!("{sep}target{sep}release"));
+    let identifier = app.config().identifier.clone();
+    let app_id = if from_target {
+        Toast::POWERSHELL_APP_ID
+    } else {
+        &identifier
+    };
+    Toast::new(app_id)
+        .title(title)
+        .text1(body)
+        .sound(None)
+        .on_activated(move |_| {
+            on_click();
+            Ok(())
+        })
+        .show()
+        .map_err(|e| e.to_string())
+}
+
+#[cfg(not(windows))]
+pub fn show<R: Runtime>(
+    app: &AppHandle<R>,
+    title: &str,
+    body: &str,
+    _on_click: impl Fn() + Send + 'static,
+) -> Result<(), String> {
     app.notification()
         .builder()
         .title(title)

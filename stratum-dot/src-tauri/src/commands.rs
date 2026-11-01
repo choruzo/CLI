@@ -30,7 +30,7 @@ use dot_link::{
 use serde::Deserialize;
 use serde::Serialize;
 use serde_json::Value;
-use tauri::{AppHandle, Runtime, State, WebviewWindow};
+use tauri::{AppHandle, Emitter, Runtime, State, WebviewWindow};
 
 use crate::{notify, DotState};
 
@@ -270,8 +270,9 @@ pub async fn dot_routines_run(
 }
 
 /// M16 — avisa al sistema de que una rutina terminó. El texto es plano y
-/// acotado aquí, no en el webview; la notificación no lleva acciones. Si la
-/// ventana recibe el foco poco después, Dot abre esa sesión (`notify.rs`).
+/// acotado aquí, no en el webview; la notificación no lleva acciones. Pulsarla
+/// (Windows) o dar el foco a la ventana poco después (resto) abre esa sesión
+/// (`notify.rs`).
 #[tauri::command]
 pub fn dot_notify_routine<R: Runtime>(
     app: AppHandle<R>,
@@ -297,10 +298,25 @@ pub fn dot_notify_routine<R: Runtime>(
         ));
     }
     // Sin el texto: ni el título ni el cuerpo van al log.
-    match notify::show(&app, &title, &body) {
+    let on_click = {
+        let app = app.clone();
+        let session_id = session_id.clone();
+        move || {
+            crate::show_main(&app);
+            let _ = app.emit_to(
+                "main",
+                crate::DOT_EVENT,
+                serde_json::json!({ "type": "open-session", "sessionId": session_id }),
+            );
+        }
+    };
+    match notify::show(&app, &title, &body, on_click) {
         Ok(()) => {
             state.logger.info("notify: routine");
-            state.notice.remember(session_id, std::time::Instant::now());
+            // Windows avisa del clic: no hace falta adivinarlo por el foco.
+            if !cfg!(windows) {
+                state.notice.remember(session_id, std::time::Instant::now());
+            }
             Ok(())
         }
         Err(_) => {

@@ -2000,8 +2000,10 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   *Probado en real 2026-11-01*: `daemon autostart on` escribe `HKCU\…\Run\StratumDaemon`, y su
   línea, lanzada tal cual, arranca el daemon sin ventana y responde por el protocolo (falta solo
   un inicio de sesión real). Con Dot instalado (NSIS), el aviso de una rutina sale a nombre de
-  `dev.stratum.dot` con su título y su texto (historial de notificaciones de Windows). El clic
-  sobre el aviso sigue sin probar.
+  `dev.stratum.dot` con su título y su texto (historial de notificaciones de Windows). El clic no
+  hacía nada: sin activador COM, Windows no activa la app, y Dot se fiaba del foco. Ahora Dot
+  escucha el evento `Activated` del propio aviso, y pulsarlo trae Dot con la sesión de la rutina
+  seleccionada, también comprobado con Dot instalado (`docs/dot.md` §19).
 - **M17 — Conectores e inspector de memoria.** MCP del asistente desde la capa global con
   `callEffects`; concesiones con caducidad (§23.13 A3); inspector de memoria en Dot.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
