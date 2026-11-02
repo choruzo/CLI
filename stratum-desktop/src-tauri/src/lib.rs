@@ -16,6 +16,7 @@
 
 mod commands;
 mod files;
+mod images;
 mod logs;
 mod os;
 mod prefs;
@@ -79,6 +80,7 @@ pub fn run() {
             commands::desktop_steer_run,
             commands::desktop_new_chat,
             commands::desktop_start_run,
+            commands::desktop_save_pasted_image,
             commands::desktop_list_models,
             commands::desktop_set_model,
             commands::desktop_close_session,

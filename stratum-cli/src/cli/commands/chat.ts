@@ -31,6 +31,7 @@ import { warnInheritedGitRouting } from '../../git/env-warning.js';
 import { resolveSessionProfile } from '../../agent/session-profile.js';
 import { sessionProfileFlag } from '../session-flags.js';
 import { createCliBridge } from '../daemon-link.js';
+import { loadUserImages } from '../../images/store.js';
 import { PendingInteractions } from '../../host/interactions.js';
 import { prepareHandoff, SessionOwnership } from '../../host/handoff.js';
 import { handedOffNotice } from '../handoff-text.js';
@@ -404,7 +405,12 @@ export const chatCommand = new Command('chat')
         config,
         control: {
           cancel: () => cancelTurn(),
-          steer: (text) => agent.enqueueUserMessage(text),
+          // Imágenes de otro cliente: confinadas al `cwd` de esta sesión.
+          steer: (text, images) =>
+            agent.enqueueUserMessage(
+              text,
+              images?.length ? loadUserImages(images, { cwd: published.env.cwd }) : [],
+            ),
           // Pausa cooperativa: la decide el runtime de esta sesión.
           pause: () => agent.pause.requestPause(),
           resume: () => agent.pause.resume(),

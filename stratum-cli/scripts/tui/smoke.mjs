@@ -8,7 +8,7 @@
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { launch, sleep } from './harness.mjs';
@@ -214,6 +214,26 @@ async function cancelAndExit() {
       await t.submit('/help');
       await t.waitFor(/\/quit\s+Termina la sesión/);
       assert.equal(mock.requests.length, before);
+    });
+
+    await check('imagen: una ruta pegada es un chip y el mensaje sale con ella', t, async () => {
+      // PNG de 1x1: al runtime le basta la cabecera para reconocerlo.
+      const png = join(t.project, 'foto.png');
+      writeFileSync(
+        png,
+        Buffer.from(
+          'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNkYPhfDwAChwGA60e6kgAAAABJRU5ErkJggg==',
+          'base64',
+        ),
+      );
+      const before = mock.requests.length;
+      t.paste(png);
+      await t.waitFor(/\[imagen 1\]/);
+      await sleep(500);
+      await t.key('enter');
+      await t.waitFor(/▏ \[imagen 1\]/);
+      await t.waitForIdle();
+      assert.equal(mock.requests.length, before + 1);
     });
 
     await check('/auditor levanta el visor con la traza de la sesión', t, async () => {

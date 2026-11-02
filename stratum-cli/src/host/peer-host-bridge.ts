@@ -36,6 +36,7 @@ import { fileDiscovery, type Discovery } from '../client/discovery.js';
 import { ProtocolMismatchError } from '../client/handshake.js';
 import { createBackoff, type BackoffOptions } from '../client/reconnect.js';
 import { ProtocolError } from '../ipc/codec.js';
+import { UserImageError } from '../images/store.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import {
@@ -69,8 +70,13 @@ const log = getLogger('host').child('bridge');
 export interface PeerHostControl {
   /** Cancela el turno en curso. */
   cancel(): void;
-  /** Mensaje del usuario con el turno en curso (Runtime Inbox). */
-  steer(text: string): { status: SteerStatus };
+  /**
+   * Mensaje del usuario con el turno en curso (Runtime Inbox). `imagePaths`: las
+   * imágenes adjuntas, como rutas; quien implementa las carga con
+   * `loadUserImages` (confinadas al `cwd` de la sesión) y deja pasar su
+   * `UserImageError`.
+   */
+  steer(text: string, imagePaths?: readonly string[]): { status: SteerStatus };
   /**
    * Pausa cooperativa del turno en curso, y su retirada. La decide el runtime
    * (`StratumAgent.pause`): el puente no guarda ni publica ningún estado de
@@ -502,7 +508,14 @@ export class PeerHostBridge implements PublisherSink {
       },
       'host.steer': (params) => {
         this.own(params.sessionId);
-        return { status: this.opts.control.steer(params.text).status };
+        // Las rutas de imagen las carga (y confina a su `cwd`) la sesión; el
+        // puente solo traduce el rechazo.
+        try {
+          return { status: this.opts.control.steer(params.text, params.images ?? []).status };
+        } catch (err) {
+          if (err instanceof UserImageError) throw new ProtocolError('INVALID_PARAMS', err.message);
+          throw err;
+        }
       },
       // Decisiones que llegan de otro cliente. Aquí no se decide quién gana:
       // se entregan a `PendingInteractions`, donde compiten con el prompt local,

@@ -253,7 +253,7 @@ export async function startPeer(
     session: host,
     control: {
       cancel: () => host.cancel(),
-      steer: (text) => host.steer(text),
+      steer: (text, images) => host.steer(text, host.loadImages(images)),
       pause: () => host.pause(),
       resume: () => host.resume(),
       ...(hostOptions.noHandoff

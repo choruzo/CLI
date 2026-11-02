@@ -115,7 +115,11 @@ pub async fn dot_steer_run(
 ) -> Result<String, CommandError> {
     state
         .link
-        .control(ControlAction::Steer { session_id, text })
+        .control(ControlAction::Steer {
+            session_id,
+            text,
+            images: Vec::new(),
+        })
         .await
 }
 
@@ -152,7 +156,11 @@ pub async fn dot_start_run(
 ) -> Result<Value, CommandError> {
     state
         .link
-        .call(CallAction::StartRun { session_id, input })
+        .call(CallAction::StartRun {
+            session_id,
+            input,
+            images: Vec::new(),
+        })
         .await
 }
 

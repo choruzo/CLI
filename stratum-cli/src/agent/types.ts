@@ -7,6 +7,7 @@ import type { TraceScope } from '../trace/recorder.js';
 import type { JobManager } from '../jobs/manager.js';
 import type { RuntimeInbox } from './inbox.js';
 import type { PauseController, SafePointGate } from './pause.js';
+import type { UserImage } from './user-images.js';
 import type { PluginHost } from '../plugins/host.js';
 import type { PluginAgentRef } from '../plugins/api.js';
 import type {
@@ -368,6 +369,12 @@ export interface ToolCallReady {
 
 export interface RunOptions {
   signal?: AbortSignal;
+  /**
+   * Imágenes que el usuario adjuntó a la entrada de este turno, ya cargadas
+   * (`images/store.ts`). Solo las lee `StratumAgent.run`: deja su marca en el
+   * mensaje y las guarda en el buffer de la sesión.
+   */
+  images?: readonly UserImage[];
   /** Id de la sesión activa; se propaga al `ToolContext` para la auditoría SSH. */
   sessionId?: string;
   allowDestructive?: boolean;

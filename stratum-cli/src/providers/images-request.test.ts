@@ -4,6 +4,7 @@ import type { AddressInfo } from 'node:net';
 import { OpenAICompatible, withImages } from './openai-compatible.js';
 import type { Message, ToolImage } from '../agent/types.js';
 import type { RequestImage } from '../agent/screenshots.js';
+import { withImageMarkers, type RequestUserImage, type UserImage } from '../agent/user-images.js';
 
 /** M15 — cómo salen las capturas hacia el backend (cuerpo exacto, servidor real). */
 
@@ -157,5 +158,95 @@ describe('OpenAICompatible con imágenes', () => {
     expect(sent).toHaveLength(MESSAGES.length + 1);
     expect(sent[4]!.role).toBe('user');
     expect(JSON.stringify(sent[4])).toContain('image_url');
+  });
+});
+
+/** Imágenes del usuario: van junto al mensaje que lleva su marca. */
+function userImage(tag: string): UserImage {
+  return {
+    id: `img-${tag.padEnd(12, '0').slice(0, 12)}`,
+    name: `${tag}.png`,
+    mime: 'image/png',
+    data: `U64${tag}`,
+    bytes: 1024,
+    sha256: tag.repeat(64).slice(0, 64),
+  };
+}
+const mine = (...list: UserImage[]): RequestUserImage[] => list.map((image) => ({ image }));
+type Wire = Array<Record<string, unknown>>;
+
+describe('withImages con imágenes del usuario', () => {
+  it('anclada a un user: sus partes van tras el texto del mensaje', () => {
+    const a = userImage('a');
+    const msgs: Message[] = [
+      { role: 'system', content: 'sys' },
+      { role: 'user', content: withImageMarkers('mira esto', [a]) },
+    ];
+    const out = withImages(msgs, msgs, [], mine(a)) as Wire;
+    expect(out).toHaveLength(2);
+    const parts = out[1]!.content as Array<Record<string, unknown>>;
+    expect(parts.map((p) => p.type)).toEqual(['text', 'text', 'image_url']);
+    expect(parts[0]).toEqual({ type: 'text', text: msgs[1]!.content });
+    expect(parts[2]).toEqual({
+      type: 'image_url',
+      image_url: { url: 'data:image/png;base64,U64a' },
+    });
+    // El historial no se toca.
+    expect(msgs[1]!.content).toBe(withImageMarkers('mira esto', [a]));
+  });
+
+  it('con la marca en un tool (steering), van en un user tras el bloque, detrás de las capturas', () => {
+    const a = userImage('a');
+    const msgs: Message[] = [
+      ...MESSAGES,
+      { role: 'assistant', content: null, tool_calls: [call('c4')] },
+      { role: 'tool', tool_call_id: 'c4', content: withImageMarkers('Screenshot d… ', [a]) },
+    ];
+    const out = withImages(msgs, msgs, imgs('c4'), mine(a)) as Wire;
+    expect(out).toHaveLength(msgs.length + 1);
+    expect(out.at(-1)!.role).toBe('user');
+    const parts = out.at(-1)!.content as Array<Record<string, unknown>>;
+    expect(parts.map((p) => p.type)).toEqual(['text', 'image_url', 'text', 'image_url']);
+    expect(JSON.stringify(parts[1])).toContain('B64');
+    expect(JSON.stringify(parts[3])).toContain('U64a');
+  });
+
+  it('sin marca en el historial no se manda', () => {
+    const out = withImages(MESSAGES, MESSAGES, [], mine(userImage('a')));
+    expect(out).toEqual(MESSAGES);
+  });
+
+  it('captura y imagen del usuario en el user siguiente: captura delante, imagen detrás', () => {
+    const a = userImage('a');
+    const msgs: Message[] = [
+      ...MESSAGES,
+      { role: 'user', content: withImageMarkers('y esto', [a]) },
+    ];
+    const out = withImages(msgs, msgs, imgs('c3'), mine(a)) as Wire;
+    expect(out).toHaveLength(msgs.length);
+    const parts = out[7]!.content as Array<Record<string, unknown>>;
+    expect(parts.map((p) => p.type)).toEqual(['text', 'image_url', 'text', 'text', 'image_url']);
+    expect(JSON.stringify(parts[1])).toContain('B643');
+    expect(JSON.stringify(parts[4])).toContain('U64a');
+  });
+});
+
+describe('OpenAICompatible con imágenes del usuario', () => {
+  it('las serializa en el cuerpo', async () => {
+    const url = await serve();
+    const client = new OpenAICompatible(url, 'k', 'm');
+    const a = userImage('a');
+    const messages: Message[] = [{ role: 'user', content: withImageMarkers('hola', [a]) }];
+    for await (const _ of client.complete({
+      messages,
+      stream: true,
+      model: 'm',
+      userImages: mine(a),
+    })) {
+      /* consumir */
+    }
+    const sent = lastBody.messages as Wire;
+    expect(sent).toHaveLength(1);
+    expect(JSON.stringify(sent[0])).toContain('data:image/png;base64,U64a');
   });
 });

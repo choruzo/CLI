@@ -831,6 +831,11 @@ const sessionRef = z.object({ sessionId: id }).strict();
 const sessionMutation = z.object({ sessionId: id, operationId }).strict();
 const subscriptionRef = z.object({ subscriptionId: id }).strict();
 const cwd = z.string().min(1).max(LIMITS.pathChars);
+/** Rutas de imágenes de un mensaje; quien las lee las confina (`images/store.ts`). */
+const imagePaths = z
+  .array(z.string().min(1).max(LIMITS.pathChars))
+  .min(1)
+  .max(LIMITS.imagesPerMessage);
 const limit = z.number().int().positive().max(LIMITS.listLimit);
 const steerStatus = z.enum(['accepted', 'not-accepting', 'empty', 'too-large']);
 const cancelResult = z.object({ status: z.enum(['cancelled', 'not-running']) });
@@ -936,11 +941,17 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       sessionId: id,
       input: z.string().min(1).max(LIMITS.inputChars),
       mode: z.enum(['normal', 'plan']).optional(),
+      images: imagePaths.optional(),
       operationId,
     })
     .strict(),
   'runs.steer': z
-    .object({ sessionId: id, text: z.string().max(LIMITS.inputChars), operationId })
+    .object({
+      sessionId: id,
+      text: z.string().max(LIMITS.inputChars),
+      images: imagePaths.optional(),
+      operationId,
+    })
     .strict(),
   'runs.pause': runMutation,
   'runs.resume': runMutation,
@@ -1073,7 +1084,13 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'host.cancel': runRef,
   'host.pause': runRef,
   'host.resume': runRef,
-  'host.steer': z.object({ sessionId: id, text: z.string().max(LIMITS.inputChars) }).strict(),
+  'host.steer': z
+    .object({
+      sessionId: id,
+      text: z.string().max(LIMITS.inputChars),
+      images: imagePaths.optional(),
+    })
+    .strict(),
   'host.resolveApproval': z
     .object({
       sessionId: id,

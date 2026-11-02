@@ -32,7 +32,7 @@ export function PromptFooter({ mode, escArmed = false, canBackground = false, te
       <Box flexShrink={1}>
         {mode === 'send' && (
           <Text color={theme.textDisabled} wrap="truncate-end">
-            <Text color={theme.textFaint}>↵ enviar</Text> · / comandos · @ perfiles
+            <Text color={theme.textFaint}>↵ enviar</Text> · / comandos · @ perfiles · alt+v imagen
           </Text>
         )}
         {mode === 'steer' &&

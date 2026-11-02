@@ -287,7 +287,7 @@ export const runCommand = new Command('run')
             aborting = true;
             controller.abort();
           },
-          steer: (text) => agent.enqueueUserMessage(text),
+          steer: (text, images) => host.steer(text, host.loadImages(images)),
           // Pausa cooperativa: la decide el runtime de esta sesión.
           pause: () => host.pause(),
           resume: () => host.resume(),

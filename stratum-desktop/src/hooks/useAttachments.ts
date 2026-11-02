@@ -8,6 +8,7 @@ import {
   pickAttachments,
   type Candidate,
 } from '../ipc/files';
+import { tauriBridge } from '../ipc/native';
 
 /**
  * Adjuntos del mensaje que se está escribiendo (D2).
@@ -29,6 +30,8 @@ export interface DraftAttachment {
   /** Ruta en el workspace, con `status: 'ready'`. */
   path?: string;
   error?: string;
+  /** Imagen pegada (no está en `inputs/`): `path` es absoluta y viaja solo en `images`. */
+  pasted?: boolean;
 }
 
 export interface Attachments {
@@ -39,6 +42,8 @@ export interface Attachments {
   readyPaths: string[];
   busy: boolean;
   pick: () => void;
+  /** Una imagen pegada del portapapeles: se guarda en `~/.stratum/images/`. */
+  paste: (file: File) => void;
   remove: (id: string) => void;
   /** Tras enviar: los adjuntos ya son parte de la conversación. */
   clear: () => void;
@@ -132,6 +137,22 @@ export function useAttachments(cwd: string | null, enabled: boolean): Attachment
       .catch((err) => setError(`No se pudo abrir el selector de ficheros: ${errorMessage(err)}`));
   }, [accept]);
 
+  const pasteCount = useRef(0);
+  const paste = useCallback((file: File) => {
+    if (!enabledRef.current) return;
+    setError(null);
+    const id = `pasted-${Date.now()}-${pasteCount.current}`;
+    const name = `imagen pegada ${(pasteCount.current += 1)}`;
+    setItems((prev) => [...prev, { id, name, size: file.size, status: 'copying', pasted: true }]);
+    file
+      .arrayBuffer()
+      .then((buffer) => tauriBridge.savePastedImage(Array.from(new Uint8Array(buffer))))
+      .then((path) => {
+        if (itemsRef.current.some((d) => d.id === id)) patch(id, { status: 'ready', path });
+      })
+      .catch((err) => patch(id, { status: 'rejected', error: errorMessage(err) }));
+  }, []);
+
   const remove = useCallback(
     (id: string) => {
       const item = itemsRef.current.find((d) => d.id === id);
@@ -149,5 +170,5 @@ export function useAttachments(cwd: string | null, enabled: boolean): Attachment
 
   const readyPaths = items.flatMap((d) => (d.status === 'ready' && d.path ? [d.path] : []));
   const busy = items.some((d) => d.status === 'copying');
-  return { items, dragging, readyPaths, busy, pick, remove, clear, error };
+  return { items, dragging, readyPaths, busy, pick, paste, remove, clear, error };
 }

@@ -67,6 +67,7 @@ function rig() {
     steerRun: vi.fn(async () => 'accepted'),
     newChat: vi.fn(async () => ({ session: idleSession({ id: 'ses_new' }) })),
     startRun: vi.fn(async () => ({ run: sampleRun({ id: 'run_9', sessionId: SID }) })),
+    savePastedImage: vi.fn(async () => '/home/u/.stratum/images/1-abc.png'),
     listModels: vi.fn(async () => ({ models: [] })),
     setModel: vi.fn(async () => ({ session: idleSession() })),
     closeSession: vi.fn(async () => ({})),
@@ -151,7 +152,7 @@ describe('Desktop sobre stratumd (M12)', () => {
     const box = screen.getByLabelText('Mensaje para el asistente');
     fireEvent.change(box, { target: { value: 'Hola' } });
     fireEvent.keyDown(box, { key: 'Enter' });
-    await waitFor(() => expect(native.startRun).toHaveBeenCalledWith(SID, 'Hola'));
+    await waitFor(() => expect(native.startRun).toHaveBeenCalledWith(SID, 'Hola', []));
     // Aceptado no es pintado: el mensaje no aparece hasta que llega en la foto.
     expect(screen.queryByText('Hola')).toBeNull();
     await emit({

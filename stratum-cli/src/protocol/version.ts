@@ -45,6 +45,8 @@ export const LIMITS = {
   inputChars: 200_000,
   /** Ruta absoluta (`cwd`). */
   pathChars: 4_096,
+  /** Imágenes adjuntas a un mensaje (`runs.start`/`runs.steer`), como rutas. */
+  imagesPerMessage: 5,
   /** Nombre de perfil, modelo, provider, cliente. */
   nameChars: 256,
   /** Token del handshake. */

@@ -118,10 +118,13 @@ export interface NativeBridge {
   pauseRun(sessionId: string, runId?: string): Promise<string>;
   resumeRun(sessionId: string, runId?: string): Promise<string>;
   cancelRun(sessionId: string, runId?: string): Promise<string>;
-  steerRun(sessionId: string, text: string): Promise<string>;
+  /** `images`: rutas de imágenes que acompañan al mensaje (máx 5; vacío = ninguna). */
+  steerRun(sessionId: string, text: string, images: string[]): Promise<string>;
   /** Conversación nueva con el asistente; sin elección, provider y modelo de la config. Resultado sin validar. */
   newChat(choice?: { provider: string; model: string }): Promise<unknown>;
-  startRun(sessionId: string, input: string): Promise<unknown>;
+  startRun(sessionId: string, input: string, images: string[]): Promise<unknown>;
+  /** Guarda una imagen pegada (bytes) en `~/.stratum/images/` y devuelve su ruta absoluta. */
+  savePastedImage(bytes: number[]): Promise<string>;
   listModels(): Promise<unknown>;
   /** Sin `provider`, el modelo es del provider actual de la sesión. */
   setModel(sessionId: string, model: string, provider?: string): Promise<unknown>;
@@ -147,10 +150,11 @@ export const tauriBridge: NativeBridge = {
   pauseRun: (sessionId, runId) => invoke<string>('desktop_pause_run', { sessionId, runId: runId ?? null }),
   resumeRun: (sessionId, runId) => invoke<string>('desktop_resume_run', { sessionId, runId: runId ?? null }),
   cancelRun: (sessionId, runId) => invoke<string>('desktop_cancel_run', { sessionId, runId: runId ?? null }),
-  steerRun: (sessionId, text) => invoke<string>('desktop_steer_run', { sessionId, text }),
+  steerRun: (sessionId, text, images) => invoke<string>('desktop_steer_run', { sessionId, text, images }),
   newChat: (choice) =>
     invoke<unknown>('desktop_new_chat', { provider: choice?.provider ?? null, model: choice?.model ?? null }),
-  startRun: (sessionId, input) => invoke<unknown>('desktop_start_run', { sessionId, input }),
+  startRun: (sessionId, input, images) => invoke<unknown>('desktop_start_run', { sessionId, input, images }),
+  savePastedImage: (bytes) => invoke<string>('desktop_save_pasted_image', { bytes }),
   listModels: () => invoke<unknown>('desktop_list_models'),
   setModel: (sessionId, model, provider) =>
     invoke<unknown>('desktop_set_model', { sessionId, model, provider: provider ?? null }),

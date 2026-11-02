@@ -45,6 +45,8 @@ import { SessionHost, type SessionHostOptions } from '../host/session-host.js';
 import type { AssistantData } from '../host/assistant.js';
 import { SessionPublisher, type PublisherSink } from '../host/session-publisher.js';
 import { getLogger } from '../logging/index.js';
+import type { UserImage } from '../agent/user-images.js';
+import { UserImageError } from '../images/store.js';
 import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
 import type { RoutineProposals } from '../tools/routines/propose.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
@@ -420,11 +422,12 @@ export class HostedSession {
   startRun(
     input: string,
     mode: 'normal' | 'plan' = 'normal',
-    options: { maxIterations?: number } = {},
+    options: { maxIterations?: number; images?: readonly string[] } = {},
   ): ProtocolRun {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'The session already has a run in progress.');
     if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
+    const images = this.loadImages(options.images);
 
     this.publisher.expectRun({ mode, input });
     const turn = this.host.run(
@@ -432,6 +435,7 @@ export class HostedSession {
       {
         ...(mode === 'plan' ? { mode: 'plan' as const } : {}),
         ...(options.maxIterations ? { maxIterations: options.maxIterations } : {}),
+        ...(images.length > 0 ? { images } : {}),
       },
     );
     // El arranque del turno es síncrono hasta su primera espera: al volver de
@@ -495,8 +499,23 @@ export class HostedSession {
     return this.host.resume();
   }
 
-  steer(text: string): SteerStatus {
-    return this.host.steer(text).status;
+  steer(text: string, imagePaths?: readonly string[]): SteerStatus {
+    return this.host.steer(text, this.loadImages(imagePaths)).status;
+  }
+
+  /**
+   * Las imágenes de un mensaje, leídas solo del `cwd` de la sesión o de
+   * `~/.stratum/images` (`loadUserImages`). Una que no vale rechaza el
+   * mensaje entero con `INVALID_PARAMS`: nada se arranca ni se encola.
+   */
+  private loadImages(paths: readonly string[] | undefined): UserImage[] {
+    if (!paths?.length) return [];
+    try {
+      return this.host.loadImages(paths);
+    } catch (err) {
+      if (err instanceof UserImageError) throw new ProtocolError('INVALID_PARAMS', err.message);
+      throw err;
+    }
   }
 
   private assertIdle(): void {

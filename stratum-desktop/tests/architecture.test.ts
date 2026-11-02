@@ -147,6 +147,7 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_resume_run',
       'desktop_resync_session',
       'desktop_retry',
+      'desktop_save_pasted_image',
       'desktop_set_model',
       'desktop_start_run',
       'desktop_steer_run',

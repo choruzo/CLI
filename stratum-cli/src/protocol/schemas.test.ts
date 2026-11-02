@@ -104,6 +104,25 @@ describe('parámetros: estrictos', () => {
     expect(PARAMS['sessions.list'].safeParse({ limit: 100_000 }).success).toBe(false);
   });
 
+  it('runs.start, runs.steer y host.steer: images son de 1 a 5 rutas', () => {
+    const paths = (k: number) => Array.from({ length: k }, (_, i) => `/p/${i}.png`);
+    const base = {
+      'runs.start': { sessionId: 's', input: 'hola' },
+      'runs.steer': { sessionId: 's', text: 'ojo' },
+      'host.steer': { sessionId: 's', text: 'ojo' },
+    } as const;
+    for (const method of ['runs.start', 'runs.steer', 'host.steer'] as const) {
+      const ok = (images: unknown) => PARAMS[method].safeParse({ ...base[method], images }).success;
+      expect(PARAMS[method].safeParse(base[method]).success, `${method} sin images`).toBe(true);
+      expect(ok(paths(1)), `${method} 1`).toBe(true);
+      expect(ok(paths(5)), `${method} 5`).toBe(true);
+      expect(ok([]), `${method} vacío`).toBe(false);
+      expect(ok(paths(6)), `${method} 6`).toBe(false);
+      expect(ok(['']), `${method} ruta vacía`).toBe(false);
+      expect(ok([7]), `${method} no cadena`).toBe(false);
+    }
+  });
+
   it('las peticiones mutantes admiten operationId; las de lectura no lo necesitan', () => {
     const mutating = (Object.keys(METHODS) as MethodName[]).filter(
       (m) => METHODS[m].mutating && METHODS[m].direction === 'client-to-server',

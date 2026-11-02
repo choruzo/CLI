@@ -173,6 +173,13 @@ export interface RunsStartParams extends Mutation {
   sessionId: string;
   input: string;
   mode?: 'normal' | 'plan';
+  /**
+   * Imágenes adjuntas, como rutas (absolutas o relativas al `cwd` de la
+   * sesión). Solo se leen del `cwd` de la sesión o de `~/.stratum/images`; una
+   * que no vale rechaza el run con `INVALID_PARAMS`. Van al modelo solo si
+   * tiene visión declarada, y no sobreviven a un reinicio del anfitrión.
+   */
+  images?: string[];
 }
 
 /** Cómo quedó un mensaje de steering. Solo `accepted` lo encola. */
@@ -356,7 +363,10 @@ export interface ProtocolMethods {
   >;
   'runs.get': Spec<{ runId: string }, { run: ProtocolRun }>;
   'runs.start': Spec<RunsStartParams, { run: ProtocolRun }>;
-  'runs.steer': Spec<Mutation & { sessionId: string; text: string }, { status: SteerStatus }>;
+  'runs.steer': Spec<
+    Mutation & { sessionId: string; text: string; images?: string[] },
+    { status: SteerStatus }
+  >;
   'runs.pause': Spec<Mutation & { sessionId: string; runId?: string }, { status: PauseStatus }>;
   'runs.resume': Spec<Mutation & { sessionId: string; runId?: string }, { status: ResumeStatus }>;
   /** Con `runId`, solo cancela si ese sigue siendo el run en curso (`STALE_STATE` si no). */
@@ -496,7 +506,10 @@ export interface ProtocolMethods {
   'host.cancel': Spec<{ sessionId: string; runId?: string }, { status: CancelStatus }>;
   'host.pause': Spec<{ sessionId: string; runId?: string }, { status: PauseStatus }>;
   'host.resume': Spec<{ sessionId: string; runId?: string }, { status: ResumeStatus }>;
-  'host.steer': Spec<{ sessionId: string; text: string }, { status: SteerStatus }>;
+  'host.steer': Spec<
+    { sessionId: string; text: string; images?: string[] },
+    { status: SteerStatus }
+  >;
   'host.resolveApproval': Spec<HostResolveApprovalParams, Empty>;
   'host.answerQuestions': Spec<
     {

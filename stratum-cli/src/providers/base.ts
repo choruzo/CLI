@@ -1,5 +1,6 @@
 import type { Message } from '../agent/types.js';
 import type { RequestImage } from '../agent/screenshots.js';
+import type { RequestUserImage } from '../agent/user-images.js';
 import type { RawTimings, RawUsage } from './cache.js';
 
 export interface ToolFunctionSchema {
@@ -81,6 +82,12 @@ export interface CompletionRequest {
    * modelo con visión declarada.
    */
   images?: readonly RequestImage[];
+  /**
+   * Imágenes que adjuntó el usuario, cada una junto a la marca que dejó en su
+   * mensaje (`agent/user-images.ts`). Como `images`: fuera de `messages`, solo
+   * las pone el loop y solo para un modelo con visión declarada.
+   */
+  userImages?: readonly RequestUserImage[];
 }
 
 export interface IProvider {

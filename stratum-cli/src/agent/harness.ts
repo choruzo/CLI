@@ -1,5 +1,6 @@
 import type { ModelVision, StratumConfig } from '../config/schema.js';
 import type { ScreenshotBuffer } from './screenshots.js';
+import type { UserImageBuffer } from './user-images.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider, CompletionRequest } from '../providers/base.js';
 import type { ToolSchema } from '../providers/base.js';
@@ -1219,6 +1220,11 @@ export class ReactLoop {
        */
       screenshots?: ScreenshotBuffer;
       /**
+       * Imágenes que adjuntó el usuario (las últimas). De sesión, como las
+       * capturas; sin él, un mensaje con imagen se queda en su marca de texto.
+       */
+      userImages?: UserImageBuffer;
+      /**
        * PL1 — plugins de la sesión (los aporta `StratumAgent`). Llegan al
        * `ToolContext` y los heredan los subagentes: una guarda no se salta
        * delegando.
@@ -1591,6 +1597,11 @@ export class ReactLoop {
           : [];
         if (images.length > 0) request.images = images;
         else delete request.images;
+        const userImages = router?.vision
+          ? (this.extras?.userImages?.forRequest(this.messages) ?? [])
+          : [];
+        if (userImages.length > 0) request.userImages = userImages;
+        else delete request.userImages;
 
         // ¿Se emitió algún evento visible? Si no, es seguro reintentar con otro provider.
         let emittedVisible = false;
@@ -1611,7 +1622,9 @@ export class ReactLoop {
           messages: this.messages,
           tools: tools.length,
           toolSchemas: tools,
-          ...(images.length > 0 ? { images: images.length } : {}),
+          ...(images.length + userImages.length > 0
+            ? { images: images.length + userImages.length }
+            : {}),
         });
 
         // Acumula cada evento del buffer en el estado del turno y devuelve el

@@ -1471,16 +1471,17 @@ export class Stratumd {
         run: (await this.wake(params.sessionId, 'Starting a run')).startRun(
           params.input,
           params.mode ?? 'normal',
+          params.images?.length ? { images: params.images } : {},
         ),
       }),
       // Sobre una sesión par, cancelar y redirigir se reenvían a su anfitrión:
       // el resultado es el que da su runtime, no uno calculado aquí.
       'runs.steer': async (params) => ({
         status: this.peers.has(params.sessionId)
-          ? await this.peers.steer(params.sessionId, params.text)
+          ? await this.peers.steer(params.sessionId, params.text, params.images)
           : this.dormant.has(params.sessionId)
             ? 'not-accepting'
-            : this.need(params.sessionId).steer(params.text),
+            : this.need(params.sessionId).steer(params.text, params.images),
       }),
       'runs.cancel': async (params) => ({
         status: this.peers.has(params.sessionId)

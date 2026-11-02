@@ -1,6 +1,8 @@
 import type { StratumConfig } from '../config/schema.js';
 import type { AgentEvent, AgentMode, DestructivePolicy, Plan, RunOptions } from '../agent/types.js';
 import { StratumAgent, type StratumAgentOptions } from '../agent/core.js';
+import type { UserImage } from '../agent/user-images.js';
+import { loadUserImages } from '../images/store.js';
 import type { PauseRequestStatus, PauseState, ResumeStatus } from '../agent/pause.js';
 import { strictestPolicy } from '../agent/profiles.js';
 import type { ProviderRouter } from '../providers/router.js';
@@ -113,6 +115,8 @@ export interface TurnOptions {
   compressionMode?: RunOptions['compressionMode'];
   /** M16 — tope de iteraciones del turno (rutinas). Sin él, el de `config.agent`. */
   maxIterations?: number;
+  /** Imágenes adjuntas a la entrada, ya cargadas (`images/store.ts`). */
+  images?: readonly UserImage[];
 }
 
 /**
@@ -318,6 +322,7 @@ export class SessionHost {
       ...(turn.mode ? { mode: turn.mode } : {}),
       ...(turn.compressionMode ? { compressionMode: turn.compressionMode } : {}),
       ...(turn.maxIterations ? { maxIterations: turn.maxIterations } : {}),
+      ...(turn.images?.length ? { images: turn.images } : {}),
     };
   }
 
@@ -391,8 +396,21 @@ export class SessionHost {
   }
 
   /** Mensaje del usuario con el turno en curso (Runtime Inbox). Nunca cancela. */
-  steer(text: string): ReturnType<StratumAgent['enqueueUserMessage']> {
-    return this.agent.enqueueUserMessage(text);
+  steer(
+    text: string,
+    images: readonly UserImage[] = [],
+  ): ReturnType<StratumAgent['enqueueUserMessage']> {
+    return this.agent.enqueueUserMessage(text, images);
+  }
+
+  /**
+   * Las imágenes de un mensaje que llegan como rutas (de otro cliente),
+   * confinadas al `cwd` de la sesión y a `~/.stratum/images`.
+   *
+   * @throws UserImageError si alguna no vale: el mensaje no se acepta.
+   */
+  loadImages(paths: readonly string[] | undefined): UserImage[] {
+    return paths?.length ? loadUserImages(paths, { cwd: this.env.cwd }) : [];
   }
 
   /**

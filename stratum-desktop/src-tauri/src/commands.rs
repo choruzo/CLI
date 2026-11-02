@@ -108,10 +108,15 @@ pub async fn desktop_steer_run(
     state: State<'_, DesktopState>,
     session_id: String,
     text: String,
+    images: Vec<String>,
 ) -> Result<String, CommandError> {
     state
         .link
-        .control(ControlAction::Steer { session_id, text })
+        .control(ControlAction::Steer {
+            session_id,
+            text,
+            images,
+        })
         .await
 }
 
@@ -156,11 +161,37 @@ pub async fn desktop_start_run(
     state: State<'_, DesktopState>,
     session_id: String,
     input: String,
+    images: Vec<String>,
 ) -> Result<Value, CommandError> {
     state
         .link
-        .call(CallAction::StartRun { session_id, input })
+        .call(CallAction::StartRun {
+            session_id,
+            input,
+            images,
+        })
         .await
+}
+
+/// Una imagen pegada en el campo: valida la firma y el tamaño, la guarda en
+/// `<home>/.stratum/images/` (el home de `dot_link`, no el del SO: ver
+/// `images.rs`) y devuelve su ruta absoluta para `images` de `runs.start`.
+#[tauri::command]
+pub async fn desktop_save_pasted_image(bytes: Vec<u8>) -> Result<String, CommandError> {
+    let local = |message: String| CommandError::new(CommandErrorKind::NotSent, message);
+    let home = dot_link::discovery::home_dir()
+        .ok_or_else(|| local("No se pudo resolver el directorio del usuario.".into()))?;
+    let saved = tauri::async_runtime::spawn_blocking(move || {
+        crate::images::save_in(
+            &crate::images::images_dir(&home),
+            &bytes,
+            std::time::SystemTime::now(),
+        )
+    })
+    .await
+    .map_err(|e| local(e.to_string()))?
+    .map_err(local)?;
+    Ok(saved.to_string_lossy().into_owned())
 }
 
 #[tauri::command]

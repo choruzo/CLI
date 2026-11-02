@@ -134,6 +134,8 @@ pub enum ControlAction {
     Steer {
         session_id: String,
         text: String,
+        /// Rutas de imágenes que acompañan al mensaje (1..5; vacío = ninguna).
+        images: Vec<String>,
     },
 }
 
@@ -171,7 +173,12 @@ pub enum CallAction {
         model: Option<String>,
     },
     /// `runs.start`: un mensaje del usuario es un run nuevo de esa sesión.
-    StartRun { session_id: String, input: String },
+    StartRun {
+        session_id: String,
+        input: String,
+        /// Rutas de imágenes que acompañan al mensaje (1..5; vacío = ninguna).
+        images: Vec<String>,
+    },
     /// `agents.list`, con los perfiles de proyecto de ese directorio.
     ListAgents { cwd: Option<String> },
     /// `models.list`.
@@ -409,6 +416,7 @@ mod tests {
         let start = CallAction::StartRun {
             session_id: "s".into(),
             input: "hola".into(),
+            images: Vec::new(),
         };
         assert!(open.mutating() && start.mutating());
         assert!(!CallAction::ListModels.mutating());

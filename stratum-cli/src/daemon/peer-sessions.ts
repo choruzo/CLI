@@ -923,8 +923,10 @@ export class PeerSessions {
     return result.status;
   }
 
-  async steer(sessionId: string, text: string): Promise<SteerStatus> {
-    return (await this.forward('host.steer', sessionId, { sessionId, text })).status;
+  /** Las rutas de imagen viajan tal cual: las carga y confina el anfitrión. */
+  async steer(sessionId: string, text: string, images?: readonly string[]): Promise<SteerStatus> {
+    const params = images?.length ? { sessionId, text, images: [...images] } : { sessionId, text };
+    return (await this.forward('host.steer', sessionId, params)).status;
   }
 
   /**

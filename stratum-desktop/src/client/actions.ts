@@ -111,21 +111,45 @@ export interface SendOutcome {
   restore: boolean;
 }
 
+/** Imágenes que admite un mensaje (`imagePaths` del protocolo). */
+export const MAX_MESSAGE_IMAGES = 5;
+const IMAGE_EXTENSION = /\.(png|jpe?g|webp|gif)$/i;
+
+/**
+ * Qué imágenes van en `images`: las pegadas (`pasted`, rutas absolutas) y los
+ * adjuntos de `inputs/` con extensión de imagen. Máximo 5, en ese orden; el
+ * resto no se envía como imagen (sigue listado en el texto si es un adjunto).
+ */
+export function pickImages(attachments: string[], pasted: string[]): { images: string[]; dropped: number } {
+  const all = [...pasted, ...attachments.filter((p) => IMAGE_EXTENSION.test(p))];
+  return { images: all.slice(0, MAX_MESSAGE_IMAGES), dropped: Math.max(0, all.length - MAX_MESSAGE_IMAGES) };
+}
+
 /**
  * Un mensaje: `ask` es un run nuevo (`runs.start`); `steer` redirige el que
- * está en marcha (`runs.steer`). `attachments`: rutas de `inputs/` ya copiadas.
+ * está en marcha (`runs.steer`). `attachments`: rutas de `inputs/` ya copiadas
+ * (se listan en el texto; las de imagen van además en `images`). `pasted`: rutas
+ * absolutas de imágenes pegadas, que van solo en `images`.
  */
 export async function sendMessage(
   native: NativeBridge,
-  opts: { sessionId: string; cwd: string | null; mode: 'ask' | 'steer'; text: string; attachments: string[] },
+  opts: { sessionId: string; cwd: string | null; mode: 'ask' | 'steer'; text: string; attachments: string[]; pasted?: string[] },
 ): Promise<SendOutcome> {
   const { sessionId, mode } = opts;
   const input = composeInput(opts.text, opts.attachments);
+  const { images, dropped } = pickImages(opts.attachments, opts.pasted ?? []);
+  if (dropped > 0) {
+    uiActions.notify(
+      sessionId,
+      'warning',
+      `Solo se envían ${MAX_MESSAGE_IMAGES} imágenes por mensaje: ${dropped} no ${dropped === 1 ? 'se ha enviado' : 'se han enviado'} como imagen.`,
+    );
+  }
   if (mode === 'steer') {
     const request: PendingRequest = { kind: 'control', sessionId, action: 'steer', runId: null };
     if (!uiActions.begin(request)) return { restore: true };
     try {
-      await native.steerRun(sessionId, input);
+      await native.steerRun(sessionId, input, images);
       return { restore: false };
     } catch (err) {
       const error = toCommandError(err);
@@ -138,7 +162,7 @@ export async function sendMessage(
   const request: PendingRequest = { kind: 'send', sessionId, runId: null };
   if (!uiActions.begin(request)) return { restore: true };
   try {
-    const run = parseStartedRun(await native.startRun(sessionId, input));
+    const run = parseStartedRun(await native.startRun(sessionId, input, images));
     if (opts.cwd && opts.attachments.length > 0) {
       void attachmentsCommit(opts.cwd, opts.attachments).catch(() => undefined);
     }

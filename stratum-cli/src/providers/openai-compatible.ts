@@ -2,6 +2,7 @@ import { EventSourceParserStream } from 'eventsource-parser/stream';
 import type { IProvider, CompletionRequest, OpenAIStreamChunk } from './base.js';
 import type { AgentEvent, Message } from '../agent/types.js';
 import type { RequestImage } from '../agent/screenshots.js';
+import { anchorIndex, type RequestUserImage } from '../agent/user-images.js';
 import type { CacheCapabilities } from './cache.js';
 import { getLogger } from '../logging/index.js';
 import {
@@ -330,8 +331,9 @@ export function withImages(
   wire: readonly unknown[],
   messages: readonly Message[],
   images: readonly RequestImage[],
+  userImages: readonly RequestUserImage[] = [],
 ): unknown[] {
-  if (images.length === 0) return [...wire];
+  if (images.length === 0 && userImages.length === 0) return [...wire];
   const byCall = new Map<string, RequestImage[]>();
   for (const img of images) {
     const list = byCall.get(img.toolCallId) ?? [];
@@ -346,25 +348,44 @@ export function withImages(
       },
       { type: 'image_url' as const, image_url: { url: `data:${image.mime};base64,${image.data}` } },
     ]);
+  // Imágenes del usuario: junto al mensaje que lleva su marca.
+  const byAnchor = new Map<number, WirePart[]>();
+  for (const { image } of userImages) {
+    const at = anchorIndex(messages, image);
+    if (at < 0) continue;
+    const list = byAnchor.get(at) ?? [];
+    list.push(
+      { type: 'text', text: `Image ${image.id} (${image.name}):` },
+      { type: 'image_url', image_url: { url: `data:${image.mime};base64,${image.data}` } },
+    );
+    byAnchor.set(at, list);
+  }
 
   const out: unknown[] = [];
-  let pending: RequestImage[] = [];
+  let pending: WirePart[] = [];
   for (let i = 0; i < messages.length; i++) {
     const m = messages[i]!;
-    if (pending.length > 0 && m.role !== 'tool') {
-      const parts = imageParts(pending);
+    const own = byAnchor.get(i) ?? [];
+    if (m.role === 'user' && (pending.length > 0 || own.length > 0)) {
+      // Las capturas del bloque de tools anterior van delante del texto; las
+      // imágenes del usuario, detrás de él (donde está su marca).
+      const w = wire[i] as Record<string, unknown>;
+      out.push({ ...w, content: [...pending, ...partsOf(w.content), ...own] });
       pending = [];
-      if (m.role === 'user') {
-        const w = wire[i] as Record<string, unknown>;
-        out.push({ ...w, content: [...parts, ...partsOf(w.content)] });
-        continue;
-      }
-      out.push({ role: 'user', content: parts });
+      continue;
+    }
+    if (pending.length > 0 && m.role !== 'tool') {
+      out.push({ role: 'user', content: pending });
+      pending = [];
     }
     out.push(wire[i]);
-    if (m.role === 'tool' && m.tool_call_id) pending.push(...(byCall.get(m.tool_call_id) ?? []));
+    if (m.role === 'tool') {
+      if (m.tool_call_id) pending.push(...imageParts(byCall.get(m.tool_call_id) ?? []));
+      // Un `tool` no admite imágenes en muchos backends: tras el bloque.
+      pending.push(...own);
+    }
   }
-  if (pending.length > 0) out.push({ role: 'user', content: imageParts(pending) });
+  if (pending.length > 0) out.push({ role: 'user', content: pending });
   return out;
 }
 
@@ -443,8 +464,8 @@ export class OpenAICompatible implements IProvider {
     const body: Record<string, unknown> = {
       model: req.model,
       messages:
-        req.images && req.images.length > 0
-          ? withImages(serialized, req.messages, req.images)
+        (req.images?.length ?? 0) > 0 || (req.userImages?.length ?? 0) > 0
+          ? withImages(serialized, req.messages, req.images ?? [], req.userImages ?? [])
           : serialized,
       stream: true,
       stream_options: { include_usage: true },
@@ -470,6 +491,7 @@ export class OpenAICompatible implements IProvider {
       messages: req.messages.length,
       // M15: de las capturas, solo cuántas (nunca su contenido).
       ...(req.images?.length ? { images: req.images.length } : {}),
+      ...(req.userImages?.length ? { userImages: req.userImages.length } : {}),
       tools: req.tools?.length ?? 0,
       stream: true,
     });

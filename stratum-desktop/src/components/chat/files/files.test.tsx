@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { cleanup, fireEvent, render, renderHook, act, screen, waitFor } from '@testing-library/react';
 import { invoke } from '@tauri-apps/api/core';
 import { FileCard, kindLabel } from './FileCard';
 import { DraftChips } from './AttachmentChips';
 import { parseDelimited } from './csv';
 import { InputArea } from '../InputArea';
 import { canOpen } from '../../../ipc/files';
-import { candidatesToDrafts, type Attachments } from '../../../hooks/useAttachments';
+import { candidatesToDrafts, useAttachments, type Attachments } from '../../../hooks/useAttachments';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(), Channel: class {} }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -99,6 +99,7 @@ function attachments(partial: Partial<Attachments>): Attachments {
     readyPaths: [],
     busy: false,
     pick: vi.fn(),
+    paste: vi.fn(),
     remove: vi.fn(),
     clear: vi.fn(),
     error: null,
@@ -143,6 +144,41 @@ describe('adjuntos en el InputArea', () => {
     expect(clear).toHaveBeenCalled();
   });
 
+  it('pegar una imagen la entrega a paste y no pega texto; pegar texto no cambia nada', () => {
+    const paste = vi.fn();
+    render(
+      <InputArea disabled={false} generating={false} onSend={vi.fn()} onCancel={vi.fn()} attachments={attachments({ paste })} />,
+    );
+    const box = screen.getByLabelText('Mensaje para el asistente');
+    const image = new File([new Uint8Array([1, 2, 3])], 'x.png', { type: 'image/png' });
+    const withImage = fireEvent.paste(box, { clipboardData: { files: [image], getData: () => '' } });
+    expect(paste).toHaveBeenCalledWith(image);
+    expect(withImage).toBe(false); // preventDefault
+    paste.mockClear();
+    const withText = fireEvent.paste(box, { clipboardData: { files: [], getData: () => 'hola' } });
+    expect(paste).not.toHaveBeenCalled();
+    expect(withText).toBe(true);
+  });
+
+  it('una imagen pegada sale en onSend marcada como pegada', () => {
+    const onSend = vi.fn();
+    render(
+      <InputArea
+        disabled={false}
+        generating={false}
+        onSend={onSend}
+        onCancel={vi.fn()}
+        attachments={attachments({
+          items: [{ id: 'p', name: 'imagen pegada 1', size: 3, status: 'ready', path: '/h/.stratum/images/1-a.png', pasted: true }],
+        })}
+      />,
+    );
+    fireEvent.click(screen.getByRole('button', { name: 'Enviar' }));
+    expect(onSend).toHaveBeenCalledWith('', [
+      { path: '/h/.stratum/images/1-a.png', name: 'imagen pegada 1', size: 3, pasted: true },
+    ]);
+  });
+
   it('no se puede enviar mientras un adjunto se está copiando', () => {
     const pick = vi.fn();
     render(
@@ -162,5 +198,31 @@ describe('adjuntos en el InputArea', () => {
     expect(send.disabled).toBe(true);
     fireEvent.click(screen.getByRole('button', { name: 'Adjuntar ficheros' }));
     expect(pick).toHaveBeenCalled();
+  });
+});
+
+describe('useAttachments.paste', () => {
+  const file = (bytes: number[]) => {
+    const f = new File([new Uint8Array(bytes)], 'x.png', { type: 'image/png' });
+    // jsdom no implementa Blob.arrayBuffer.
+    f.arrayBuffer = async () => new Uint8Array(bytes).buffer;
+    return f;
+  };
+
+  it('guarda por el comando nativo y deja un chip listo con su ruta', async () => {
+    vi.mocked(invoke).mockResolvedValue('/h/.stratum/images/1-a.png');
+    const { result } = renderHook(() => useAttachments('/cwd', true));
+    act(() => result.current.paste(file([1, 2, 3])));
+    expect(result.current.items[0]).toMatchObject({ status: 'copying', pasted: true, name: 'imagen pegada 1' });
+    await waitFor(() => expect(result.current.items[0]?.status).toBe('ready'));
+    expect(invoke).toHaveBeenCalledWith('desktop_save_pasted_image', { bytes: [1, 2, 3] });
+    expect(result.current.items[0]).toMatchObject({ path: '/h/.stratum/images/1-a.png', size: 3 });
+  });
+
+  it('si el guardado falla, el chip queda rechazado con el motivo', async () => {
+    vi.mocked(invoke).mockRejectedValue({ kind: 'not-sent', message: 'La imagen pesa más de 5 MB.' });
+    const { result } = renderHook(() => useAttachments('/cwd', true));
+    act(() => result.current.paste(file([1])));
+    await waitFor(() => expect(result.current.items[0]?.status).toBe('rejected'));
   });
 });

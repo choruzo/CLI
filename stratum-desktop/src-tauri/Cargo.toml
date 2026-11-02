@@ -21,6 +21,8 @@ tauri = { version = "2", features = [] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 getrandom = "0.3"
+# Nombre de las imágenes pegadas (`images.rs`).
+sha2 = "0.10"
 # M12: el cliente nativo del Stratum Protocol, compartido con Stratum Dot
 # (descubrimiento, arranque oficial del daemon, handshake, suscripciones).
 dot-link = { path = "../../stratum-dot/crates/dot-link" }

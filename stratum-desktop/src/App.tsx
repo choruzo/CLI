@@ -234,7 +234,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   }, [native]);
 
   const onSend = useCallback(
-    (text: string, attachments: { path: string }[]) => {
+    (text: string, attachments: { path: string; pasted?: boolean }[]) => {
       if (!selectedId) return startConversation(native, text, draftModel ?? undefined);
       const mode = stream.composer.kind === 'steer' ? 'steer' : 'ask';
       return sendMessage(native, {
@@ -242,7 +242,8 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
         cwd: stream.cwd,
         mode,
         text,
-        attachments: attachments.map((a) => a.path),
+        attachments: attachments.filter((a) => !a.pasted).map((a) => a.path),
+        pasted: attachments.filter((a) => a.pasted).map((a) => a.path),
       });
     },
     [native, selectedId, stream.composer.kind, stream.cwd, draftModel],

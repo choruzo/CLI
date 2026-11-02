@@ -167,6 +167,7 @@ async fn main() {
             "send" => Some(CallAction::StartRun {
                 session_id: session_id.clone(),
                 input: text("input").unwrap_or_default(),
+                images: Vec::new(),
             }),
             "agents" => Some(CallAction::ListAgents { cwd: text("cwd") }),
             "models" => Some(CallAction::ListModels),
@@ -335,6 +336,7 @@ async fn main() {
             "steer" => ControlAction::Steer {
                 session_id,
                 text: text("text").unwrap_or_default(),
+                images: Vec::new(),
             },
             _ => continue,
         };

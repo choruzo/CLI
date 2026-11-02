@@ -150,3 +150,28 @@ describe('useAgentStream', () => {
     await pending;
   });
 });
+
+describe('useAgentStream con imágenes', () => {
+  it('pasa runOptions.images a agent.run', async () => {
+    const dispatch = vi.fn();
+    const run = vi.fn(async function* () {
+      yield { type: 'done' as const, stopReason: 'stop' as const };
+    });
+    const agent = {
+      run,
+      getContextUsage: () => ({ used: 1, max: 10, estimated: true }),
+      getTokenUsage: () => ({ status: 'reported' as const, tokens: 1 }),
+      getLiveTurnUsage: () => null,
+      getSessionUsage: () => ({ llmCalls: 0, reportedCalls: 0, llmMs: 0, toolMs: 0, turns: 0 }),
+      getLastTurnChanges: () => null,
+    };
+    const images = [{ id: 'img-1' }];
+    const { send } = useAgentStream(agent as never, dispatch);
+    await send('', { displayText: '[imagen 1]', runOptions: { images: images as never } });
+    expect(run).toHaveBeenCalledTimes(1);
+    const [input, opts] = run.mock.calls[0] as unknown as [string, { images: unknown }];
+    expect(input).toBe('');
+    expect(opts.images).toBe(images);
+    expect(dispatch).toHaveBeenCalledWith({ type: 'AGENT_START', input: '[imagen 1]' });
+  });
+});

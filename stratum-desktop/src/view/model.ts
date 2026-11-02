@@ -32,6 +32,8 @@ export interface SentAttachment {
   path: string;
   name: string;
   size: number;
+  /** Imagen pegada: ruta absoluta en `~/.stratum/images/`; va solo en `images`, no en el texto. */
+  pasted?: boolean;
 }
 
 export interface UserMessage {

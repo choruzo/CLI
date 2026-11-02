@@ -5,6 +5,7 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type ClipboardEvent,
   type KeyboardEvent,
 } from 'react';
 import type { Attachments } from '../../hooks/useAttachments';
@@ -141,7 +142,7 @@ export const InputArea = forwardRef<
     }
     onSend(
       text,
-      ready.map((a) => ({ path: a.path!, name: a.name, size: a.size })),
+      ready.map((a) => ({ path: a.path!, name: a.name, size: a.size, ...(a.pasted ? { pasted: true } : {}) })),
     );
     setText('');
     if (!steering) attachments?.clear();
@@ -155,6 +156,16 @@ export const InputArea = forwardRef<
     } else {
       runCommand(cmd.name, '');
     }
+  };
+
+  // Ctrl+V con una imagen en el portapapeles: se guarda y queda como adjunto.
+  // El texto pegado normal no se toca.
+  const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!attachments) return;
+    const file = [...(e.clipboardData?.files ?? [])].find((f) => f.type.startsWith('image/'));
+    if (!file) return;
+    e.preventDefault();
+    attachments.paste(file);
   };
 
   const onKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -269,6 +280,7 @@ export const InputArea = forwardRef<
               setCommandError(null);
             }}
             onKeyDown={onKeyDown}
+            onPaste={onPaste}
           />
           {model && (
             <button

@@ -608,6 +608,7 @@ async fn pausa_y_aprobacion_no_se_mezclan() {
         .control(dot_link::ControlAction::Steer {
             session_id: "ses_a".into(),
             text: "y luego revisa los tests".into(),
+            images: Vec::new(),
         })
         .await
         .unwrap();

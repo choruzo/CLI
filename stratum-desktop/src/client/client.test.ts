@@ -41,6 +41,7 @@ function fakeNative(overrides: Partial<NativeBridge> = {}): NativeBridge {
     steerRun: vi.fn(async () => 'accepted'),
     newChat: vi.fn(async () => ({ session: sampleSession({ id: 'ses_new' }) })),
     startRun: vi.fn(async () => ({ run: sampleRun({ id: 'run_9' }) })),
+    savePastedImage: vi.fn(async () => '/home/u/.stratum/images/1-abc.png'),
     listModels: vi.fn(async () => ({ models: [] })),
     setModel: vi.fn(async () => ({ session: sampleSession() })),
     closeSession: vi.fn(async () => ({})),
@@ -172,7 +173,7 @@ describe('acciones: pedir no es aplicar, y lo desconocido no se repite', () => {
   it('enviado y aceptado: queda «enviando» hasta que la foto trae su run', async () => {
     const native = fakeNative();
     await sendMessage(native, { sessionId: SID, cwd: null, mode: 'ask', text: 'hola', attachments: ['inputs/a.csv'] });
-    expect(native.startRun).toHaveBeenCalledWith(SID, expect.stringContaining('- inputs/a.csv'));
+    expect(native.startRun).toHaveBeenCalledWith(SID, expect.stringContaining('- inputs/a.csv'), []);
     expect(uiStore.get().pending).toEqual([{ kind: 'send', sessionId: SID, runId: 'run_9' }]);
     protocolActions.focus(SID);
     protocolActions.applySnapshot(SID, sampleSnapshot({ run: sampleRun({ id: 'run_9' }) }));
@@ -180,10 +181,43 @@ describe('acciones: pedir no es aplicar, y lo desconocido no se repite', () => {
     expect(uiStore.get().pending).toEqual([]);
   });
 
+  it('las imágenes viajan en images: adjuntos de imagen y pegadas, máx 5, y se siguen listando en el texto', async () => {
+    const native = fakeNative();
+    await sendMessage(native, {
+      sessionId: SID,
+      cwd: null,
+      mode: 'ask',
+      text: 'mira',
+      attachments: ['inputs/a.csv', 'inputs/b.PNG', 'inputs/c.jpeg'],
+      pasted: ['/home/u/.stratum/images/1-abc.png'],
+    });
+    expect(native.startRun).toHaveBeenCalledWith(SID, expect.stringContaining('- inputs/b.PNG'), [
+      '/home/u/.stratum/images/1-abc.png',
+      'inputs/b.PNG',
+      'inputs/c.jpeg',
+    ]);
+    // La pegada no se lista en el texto.
+    expect(vi.mocked(native.startRun).mock.calls[0]![1]).not.toContain('.stratum/images');
+  });
+
+  it('más de 5 imágenes: solo las 5 primeras y un aviso', async () => {
+    const native = fakeNative();
+    const attachments = ['1', '2', '3', '4', '5', '6', '7'].map((n) => `inputs/${n}.webp`);
+    await sendMessage(native, { sessionId: SID, cwd: null, mode: 'ask', text: 'todas', attachments });
+    expect(vi.mocked(native.startRun).mock.calls[0]![2]).toEqual(attachments.slice(0, 5));
+    expect(uiStore.get().notices.at(-1)?.text).toMatch(/Solo se envían 5 imágenes/);
+  });
+
+  it('sin imágenes, images va vacío', async () => {
+    const native = fakeNative();
+    await sendMessage(native, { sessionId: SID, cwd: null, mode: 'ask', text: 'hola', attachments: ['inputs/a.csv'] });
+    expect(vi.mocked(native.startRun).mock.calls[0]![2]).toEqual([]);
+  });
+
   it('con un run en marcha, escribir redirige (steer), no abre otro run', async () => {
     const native = fakeNative();
     await sendMessage(native, { sessionId: SID, cwd: null, mode: 'steer', text: 'mejor en tabla', attachments: [] });
-    expect(native.steerRun).toHaveBeenCalledWith(SID, 'mejor en tabla');
+    expect(native.steerRun).toHaveBeenCalledWith(SID, 'mejor en tabla', []);
     expect(native.startRun).not.toHaveBeenCalled();
   });
 

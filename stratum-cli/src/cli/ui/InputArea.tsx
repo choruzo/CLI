@@ -13,9 +13,15 @@ interface Props {
    * nada, se encola y entra en su siguiente punto seguro.
    */
   steering?: boolean;
+  /**
+   * Cambia cuando el valor se reescribe por debajo del input (una ruta pegada
+   * que se convierte en chip): `ink-text-input` guarda su cursor y, con el
+   * mismo valor, no lo reajusta; remontarlo lo deja a cero.
+   */
+  resetKey?: number;
 }
 
-export function InputArea({ value, onChange, onSubmit, disabled, steering }: Props) {
+export function InputArea({ value, onChange, onSubmit, disabled, steering, resetKey }: Props) {
   return (
     <Box borderStyle="single" borderColor={theme.borderMedium} paddingX={1}>
       <Text color={disabled ? theme.textDisabled : theme.accent} bold>
@@ -27,6 +33,7 @@ export function InputArea({ value, onChange, onSubmit, disabled, steering }: Pro
         <Text> </Text>
       ) : (
         <TextInput
+          key={resetKey}
           value={value}
           onChange={onChange}
           onSubmit={onSubmit}

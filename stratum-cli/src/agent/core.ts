@@ -69,6 +69,7 @@ import {
 import { composeToolsetFilters } from '../tools/registry.js';
 import { SCREEN_SCREENSHOT_TOOL, SCREEN_TOOLS } from '../tools/screen/names.js';
 import { ScreenshotBuffer } from './screenshots.js';
+import { UserImageBuffer, withImageMarkers, type UserImage } from './user-images.js';
 import {
   profileAllows,
   resolveSessionProfile,
@@ -292,6 +293,7 @@ export class StratumAgent {
    * modelo con visión. Solo en memoria: ni historial, ni sesión, ni traza.
    */
   private readonly screenshots = new ScreenshotBuffer();
+  private readonly userImages = new UserImageBuffer();
   /**
    * Pausa cooperativa del run en curso. De sesión, como la inbox, y **la única**
    * autoridad de pausa: la consultan el loop del agente, los de sus subagentes
@@ -662,8 +664,11 @@ export class StratumAgent {
    * Cancelar es otro camino: el `AbortSignal` del turno. Aquí no se interpreta
    * el texto.
    */
-  enqueueUserMessage(text: string): SteeringEnqueueResult {
-    return this.inbox.enqueueUserMessage(text);
+  enqueueUserMessage(text: string, images: readonly UserImage[] = []): SteeringEnqueueResult {
+    const result = this.inbox.enqueueUserMessage(withImageMarkers(text, images));
+    // Solo lo encolado deja sus imágenes: un `not-accepting` vuelve como turno nuevo.
+    if (result.status === 'accepted') for (const image of images) this.userImages.add(image);
+    return result;
   }
 
   /** ¿Hay un turno que incorporaría ahora un mensaje del usuario como steering? */
@@ -759,7 +764,9 @@ export class StratumAgent {
       this.revertNotice = null;
       pushUserInput(this.messages, revertNotice);
     }
-    pushUserInput(this.messages, input);
+    const images = opts?.images ?? [];
+    pushUserInput(this.messages, withImageMarkers(input, images));
+    for (const image of images) this.userImages.add(image);
 
     // Hito 6: reiniciar el estado de fallback en cada turno para que el provider
     // primario se reintente aunque haya fallado en un turno anterior.
@@ -785,6 +792,15 @@ export class StratumAgent {
     trace?.turnStart(input, this.messages);
     this.inbox.beginTurn(trace);
     try {
+      if (images.length > 0 && !this.router.vision) {
+        const warning: AgentEvent = {
+          type: 'warning',
+          message:
+            'The active model has no declared vision (models.<id>.vision): the attached images are not sent to it.',
+        };
+        trace?.event(warning);
+        yield warning;
+      }
       for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
         if (event.type === 'tool_result') this._toolCallCount++;
         if (event.type === 'subagent_completed') this.addChildTokens(event.result);
@@ -1505,6 +1521,7 @@ export class StratumAgent {
         fileState: this.fileState,
         diagnostics: this.diagnosticsProvider,
         screenshots: this.screenshots,
+        userImages: this.userImages,
         plugins: this.plugins,
         workspace: this.workspace,
         env: this.env,

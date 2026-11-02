@@ -360,6 +360,7 @@ async fn las_ordenes_viajan_y_no_cambian_el_estado_local() {
     let steer = ControlAction::Steer {
         session_id: "s1".into(),
         text: "prueba otra cosa".into(),
+        images: Vec::new(),
     };
     assert_eq!(rig.link.control(steer).await.unwrap(), "accepted");
     let resume = ControlAction::Resume {
@@ -398,6 +399,7 @@ async fn las_ordenes_viajan_y_no_cambian_el_estado_local() {
         .control(ControlAction::Steer {
             session_id: "detached".into(),
             text: "x".into(),
+            images: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -688,6 +690,7 @@ async fn abrir_una_sesion_y_enviarle_un_mensaje() {
         .call(CallAction::StartRun {
             session_id: id.clone(),
             input: "hola".into(),
+            images: Vec::new(),
         })
         .await
         .unwrap();
@@ -768,6 +771,7 @@ async fn lo_que_el_daemon_rechaza_no_crea_nada() {
         .call(CallAction::StartRun {
             session_id: "s1".into(),
             input: "ocupada".into(),
+            images: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -778,6 +782,7 @@ async fn lo_que_el_daemon_rechaza_no_crea_nada() {
         .call(CallAction::StartRun {
             session_id: "ya-no".into(),
             input: "hola".into(),
+            images: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -790,6 +795,7 @@ async fn lo_que_el_daemon_rechaza_no_crea_nada() {
         .call(CallAction::StartRun {
             session_id: "s1".into(),
             input: "   ".into(),
+            images: Vec::new(),
         })
         .await
         .unwrap_err();
@@ -831,6 +837,7 @@ async fn un_mensaje_sin_respuesta_no_se_reenvia() {
         link.call(CallAction::StartRun {
             session_id: "s1".into(),
             input: "despliega".into(),
+            images: Vec::new(),
         })
         .await
     });

@@ -7,7 +7,7 @@ import React, {
   useLayoutEffect,
   useMemo,
 } from 'react';
-import { readFileSync } from 'node:fs';
+import { readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { Box, Text, useApp, useInput, useStdout } from 'ink';
 import TextInput from 'ink-text-input';
@@ -91,6 +91,18 @@ import { listEnvironments } from '../../tools/environments.js';
 import { formatEnvironmentsReport, formatSessionProfileReport } from '../session-report.js';
 import { pushHistory, historyPrev, historyNext } from './input-history.js';
 import { theme } from './theme.js';
+import { readClipboardImage } from '../clipboard-image.js';
+import { saveUserImage, UserImageError } from '../../images/store.js';
+import { USER_IMAGE_LIMITS } from '../../agent/user-images.js';
+import {
+  IMAGE_CHIPS_FULL,
+  NO_CLIPBOARD_IMAGE,
+  formatImageChips,
+  imagePathFromInput,
+  loadChipImages,
+  messageWithImagesLabel,
+  steerWithImages,
+} from './image-attach.js';
 import { VERBOSITY_LEVELS, type Verbosity } from './tool-groups.js';
 import {
   liveTelemetry,
@@ -1646,11 +1658,95 @@ export function App({
       : filterCommands(state.inputValue, state.thinking ? BUSY_COMMANDS : SESSION_COMMANDS);
   const effPaletteIndex = Math.min(paletteIndex, Math.max(paletteItems.length - 1, 0));
 
-  const handleInputChange = useCallback((value: string) => {
-    setPaletteDismissed(false);
-    setPaletteIndex(0);
-    dispatch({ type: 'INPUT_CHANGE', value });
+  // ----- Imágenes adjuntas al próximo mensaje (chips `[imagen N]`) -----
+  // Rutas ya guardadas en `~/.stratum/images`; se cargan al enviar. La ref
+  // sigue al estado para que los manejadores síncronos vean el valor al día.
+  const [imagePaths, setImagePathsState] = useState<string[]>([]);
+  const imagePathsRef = useRef<string[]>([]);
+  const setImagePaths = useCallback((next: string[]) => {
+    imagePathsRef.current = next;
+    setImagePathsState(next);
   }, []);
+  const inputValueRef = useRef('');
+  inputValueRef.current = state.inputValue;
+  const [inputResetKey, setInputResetKey] = useState(0);
+
+  /** Guarda los bytes de una imagen y la añade como chip. Avisa si no puede. */
+  const addImageBytes = useCallback(
+    (bytes: Uint8Array): boolean => {
+      if (imagePathsRef.current.length >= USER_IMAGE_LIMITS.perMessage) {
+        setInputHint(IMAGE_CHIPS_FULL);
+        return false;
+      }
+      try {
+        const saved = saveUserImage(bytes);
+        setImagePaths([...imagePathsRef.current, saved]);
+        setInputHint(null);
+        return true;
+      } catch (err) {
+        setInputHint(
+          err instanceof UserImageError
+            ? err.message
+            : `No se pudo guardar la imagen: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return false;
+      }
+    },
+    [setImagePaths],
+  );
+
+  /** Adjunta un fichero de imagen del disco (ruta pegada o arrastrada). */
+  const addImageFile = useCallback(
+    (path: string): boolean => {
+      try {
+        if (statSync(path).size > USER_IMAGE_LIMITS.maxBytes) {
+          setInputHint(
+            `La imagen es demasiado grande (el límite es ${USER_IMAGE_LIMITS.maxBytes / 1024 / 1024} MB).`,
+          );
+          return false;
+        }
+        return addImageBytes(readFileSync(path));
+      } catch (err) {
+        setInputHint(
+          `No se pudo leer la imagen: ${err instanceof Error ? err.message : String(err)}`,
+        );
+        return false;
+      }
+    },
+    [addImageBytes],
+  );
+
+  /** Alt+V / Ctrl+V: la imagen del portapapeles como chip. */
+  const pasteClipboardImage = useCallback(async () => {
+    dispatch({ type: 'ENTER_CONVERSATION' });
+    const bytes = await readClipboardImage();
+    if (!bytes) {
+      setInputHint(NO_CLIPBOARD_IMAGE);
+      return;
+    }
+    addImageBytes(bytes);
+  }, [addImageBytes]);
+
+  const handleInputChange = useCallback(
+    (value: string) => {
+      // Un pegado (o un fichero arrastrado al terminal) llega de golpe: si todo
+      // el input es la ruta de una imagen, se adjunta en vez de quedar como texto.
+      if (value.length - inputValueRef.current.length > 1) {
+        const path = imagePathFromInput(value, { cwd: process.cwd() });
+        if (path) {
+          dispatch({ type: 'ENTER_CONVERSATION' });
+          addImageFile(path);
+          dispatch({ type: 'INPUT_CHANGE', value: inputValueRef.current });
+          setInputResetKey((k) => k + 1);
+          return;
+        }
+      }
+      setPaletteDismissed(false);
+      setPaletteIndex(0);
+      dispatch({ type: 'INPUT_CHANGE', value });
+    },
+    [addImageFile],
+  );
 
   /** Completa el comando seleccionado en el input (Tab, o Enter en comandos con args). */
   const completePaletteSelection = useCallback((cmdName: string, hasArgs: boolean) => {
@@ -1669,6 +1765,7 @@ export function App({
   const draftRef = useRef('');
   // `executeCommand` se define más abajo; Ctrl+L lo alcanza por ref.
   const executeCommandRef = useRef<((cmd: string) => void) | null>(null);
+  const sendWithImagesRef = useRef<((text: string) => boolean) | null>(null);
   /** Mensaje enviado con el turno cerrándose: se envía como turno nuevo al terminar. */
   const deferredSendRef = useRef<string | null>(null);
   // `/verbosity` (UX-3): cuánto detalle llevan los turnos al cerrarse.
@@ -1788,6 +1885,29 @@ export function App({
       }
       if (key.escape) {
         setPaletteDismissed(true);
+        return;
+      }
+    }
+
+    // ----- Imágenes: Alt+V (siempre) y Ctrl+V (menos en Windows, donde el
+    // terminal se queda Ctrl+V para pegar texto) leen el portapapeles; con el
+    // input vacío, Retroceso quita el último chip. La letra que el input haya
+    // escrito se deshace en el tick siguiente.
+    if (state.focusState === 'input') {
+      const altV = key.meta && !key.ctrl && input.toLowerCase() === 'v';
+      const ctrlV = key.ctrl && input === 'v' && process.platform !== 'win32';
+      if (altV || ctrlV) {
+        const keep = state.inputValue;
+        setTimeout(() => dispatch({ type: 'INPUT_CHANGE', value: keep }), 0);
+        void pasteClipboardImage();
+        return;
+      }
+      if (
+        (key.backspace || key.delete) &&
+        state.inputValue === '' &&
+        imagePathsRef.current.length > 0
+      ) {
+        setImagePaths(imagePathsRef.current.slice(0, -1));
         return;
       }
     }
@@ -2302,6 +2422,7 @@ export function App({
       // no puede "desimprimirlos": hay que limpiar la pantalla a mano.
       if (cmd === '/clear') {
         agent.clearHistory();
+        setImagePaths([]);
         process.stdout.write('\x1b[2J\x1b[3J\x1b[H');
         dispatch({ type: 'CLEAR' });
         refreshContext();
@@ -3291,6 +3412,32 @@ export function App({
   // Ctrl+L necesita alcanzar `executeCommand` desde el useInput, que se declara antes.
   executeCommandRef.current = executeCommand;
 
+  /**
+   * Turno nuevo con los chips adjuntos. Si la sesión ya no es de este proceso
+   * o la carga falla, no sale nada y los chips y el texto se quedan.
+   */
+  const sendWithImages = useCallback(
+    (text: string): boolean => {
+      if (ownership && ownership.state !== 'owner') {
+        setInputHint(TURN_REFUSED_HANDED_OFF);
+        return false;
+      }
+      const loaded = loadChipImages(imagePathsRef.current, process.cwd());
+      if (!loaded.ok) {
+        setInputHint(loaded.message);
+        return false;
+      }
+      setImagePaths([]);
+      void send(text, {
+        displayText: messageWithImagesLabel(text, loaded.images.length),
+        runOptions: { images: loaded.images },
+      });
+      return true;
+    },
+    [ownership, send, setImagePaths],
+  );
+  sendWithImagesRef.current = sendWithImages;
+
   // Mensaje que llegó cuando el turno ya no aceptaba steering: sale como turno
   // nuevo en cuanto el anterior termina.
   useEffect(() => {
@@ -3300,7 +3447,9 @@ export function App({
     if (deferredSendRef.current === null) return;
     const text = deferredSendRef.current;
     deferredSendRef.current = null;
-    if (!state.fatalError) executeCommandRef.current?.(text);
+    if (state.fatalError) return;
+    if (imagePathsRef.current.length > 0 && !/^[/@]/.test(text)) sendWithImagesRef.current?.(text);
+    else executeCommandRef.current?.(text);
   }, [state.thinking, state.fatalError]);
 
   // Ventana de un subagente en la pantalla alternativa: ocupa la pantalla entera
@@ -3344,13 +3493,25 @@ export function App({
 
   const handleSend = useCallback(
     (text: string) => {
-      if (!text.trim()) return;
+      // Un mensaje puede ser solo imágenes: texto vacío y al menos un chip.
+      if (!text.trim() && imagePathsRef.current.length === 0) return;
 
       const cmd = text.trim();
       if (state.phase === 'banner') dispatch({ type: 'ENTER_CONVERSATION' });
 
+      // El input entero es la ruta de una imagen (no llegó como pegado en
+      // bloque): se adjunta, no se envía como texto.
+      const asImage = cmd ? imagePathFromInput(cmd, { cwd: process.cwd() }) : null;
+      if (asImage) {
+        if (addImageFile(asImage)) {
+          dispatch({ type: 'INPUT_CHANGE', value: '' });
+          setInputResetKey((k) => k + 1);
+        }
+        return;
+      }
+
       // Historial de inputs (§10): se registra todo lo enviado, comandos incluidos.
-      historyRef.current = pushHistory(historyRef.current, cmd);
+      if (cmd) historyRef.current = pushHistory(historyRef.current, cmd);
       setHistoryIndex(null);
       draftRef.current = '';
 
@@ -3378,8 +3539,16 @@ export function App({
           return;
         }
         setInputHint(null);
-        const queued = agent.enqueueUserMessage(cmd);
-        if (queued.status === 'accepted') return; // la suscripción a la inbox lo pinta
+        const queued = steerWithImages(agent, cmd, imagePathsRef.current, process.cwd());
+        if (queued.status === 'load-failed') {
+          // Ni el texto ni los chips se tocan: se arregla o se quita la imagen.
+          setInputHint(queued.message);
+          return;
+        }
+        if (queued.status === 'accepted') {
+          setImagePaths([]);
+          return; // la suscripción a la inbox lo pinta
+        }
         if (queued.status === 'too-large') {
           // Ni se recorta ni se envía por su cuenta: lo escrito se queda en el
           // input para acortarlo o enviarlo entero cuando acabe el turno.
@@ -3392,6 +3561,7 @@ export function App({
         }
         // El turno ya no incorpora mensajes (está cerrando, o no es un turno del
         // agente): no se pierde, se envía como mensaje normal en cuanto acabe.
+        // Los chips se quedan y salen con él.
         deferredSendRef.current = cmd;
         dispatch({ type: 'INPUT_CHANGE', value: '' });
         setInputHint('El agente está terminando: tu mensaje saldrá como un turno nuevo.');
@@ -3403,6 +3573,12 @@ export function App({
       // provider: se vuelve a pedir, conservando lo escrito.
       if (!agent.model && (!cmd.startsWith('/') || /^\/(init|plan|compact)(\s|$)/.test(cmd))) {
         promptForModel();
+        return;
+      }
+
+      // Con imágenes adjuntas, un mensaje normal sale con ellas.
+      if (imagePathsRef.current.length > 0 && !/^[/@]/.test(cmd)) {
+        sendWithImagesRef.current?.(cmd);
         return;
       }
 
@@ -3431,6 +3607,8 @@ export function App({
       executeCommand,
       agent,
       promptForModel,
+      addImageFile,
+      setImagePaths,
     ],
   );
 
@@ -3721,6 +3899,8 @@ export function App({
         onQuestionsCancel={() => resolveQuestions(null)}
         pendingSteering={pendingSteering}
         inputHint={inputHint}
+        imageChips={imagePaths.length > 0 ? formatImageChips(imagePaths.length) : null}
+        inputResetKey={inputResetKey}
         escArmed={escArmed}
         canBackground={() => (agent.jobs?.foregroundCount ?? 0) > 0}
         verbosity={verbosity}

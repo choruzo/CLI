@@ -111,6 +111,10 @@ interface Props {
   verbosity?: Verbosity;
   /** Aviso de una línea sobre el input (p. ej. por qué no se encoló algo). */
   inputHint?: string | null;
+  /** Chips de las imágenes adjuntas al próximo mensaje (`[imagen 1] [imagen 2]`). */
+  imageChips?: string | null;
+  /** Ver `InputArea.resetKey`. */
+  inputResetKey?: number;
   /**
    * Ventana de un subagente: sustituye a todo lo vivo (turno, paneles, input,
    * barras). El historial sigue montado para que `<Static>` no se reimprima.
@@ -163,6 +167,8 @@ export function ConversationView({
   onQuestionsCancel,
   pendingSteering = 0,
   inputHint,
+  imageChips,
+  inputResetKey,
   escArmed = false,
   canBackground,
   telemetry,
@@ -291,10 +297,18 @@ export function ConversationView({
           onSubmit={onInputSubmit}
           disabled={gateOpen || !!fatalError || (thinking && !steerable)}
           steering={steerable}
+          resetKey={inputResetKey}
         />
       )}
       {/* Debajo del input: un texto largo lo hace más alto que la pantalla, y un
           aviso encima («demasiado grande para steering») quedaría fuera de la vista. */}
+      {!overlay && imageChips && (
+        <Text color={theme.accent}>
+          {' '}
+          {imageChips}
+          <Text color={theme.textDisabled}> · ⌫ con el input vacío quita la última</Text>
+        </Text>
+      )}
       {!overlay && inputHint && <Text color={theme.warning}> {inputHint}</Text>}
       {!overlay && (
         <PromptFooter

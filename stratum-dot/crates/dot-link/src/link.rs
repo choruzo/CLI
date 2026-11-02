@@ -667,7 +667,11 @@ fn control_request(action: &ControlAction) -> Result<(MainMethod, Value), Comman
         ControlAction::Cancel { session_id, run_id } => {
             Ok((MainMethod::RunsCancel, run_scoped(session_id, run_id)?))
         }
-        ControlAction::Steer { session_id, text } => {
+        ControlAction::Steer {
+            session_id,
+            text,
+            images,
+        } => {
             if !valid_id(session_id) {
                 return Err(invalid("Invalid session id."));
             }
@@ -675,12 +679,38 @@ fn control_request(action: &ControlAction) -> Result<(MainMethod, Value), Comman
             if text.chars().count() > MAX_INPUT_CHARS {
                 return Err(invalid("The message is too long."));
             }
-            Ok((
-                MainMethod::RunsSteer,
-                json!({ "sessionId": session_id, "text": text }),
-            ))
+            let mut params = json!({ "sessionId": session_id, "text": text });
+            add_images(&mut params, images)?;
+            Ok((MainMethod::RunsSteer, params))
         }
     }
+}
+
+/// Máximo de imágenes por mensaje (`imagePaths` del protocolo).
+const MAX_IMAGES: usize = 5;
+
+/// `images` del mensaje: solo se manda si hay; 1..5 rutas no vacías de ≤ 4096.
+fn add_images(params: &mut Value, images: &[String]) -> Result<(), CommandError> {
+    if images.is_empty() {
+        return Ok(());
+    }
+    if images.len() > MAX_IMAGES {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "Too many images.",
+        ));
+    }
+    if images
+        .iter()
+        .any(|p| p.trim().is_empty() || p.chars().count() > MAX_PATH_CHARS)
+    {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "Invalid image path.",
+        ));
+    }
+    params["images"] = json!(images);
+    Ok(())
 }
 
 /// Un campo opcional de texto: vacío es «no pedido».
@@ -734,7 +764,11 @@ fn call_request(
             params.insert("operationId".into(), Value::String(operation_id.into()));
             Ok((MainMethod::SessionsOpen, Value::Object(params)))
         }
-        CallAction::StartRun { session_id, input } => {
+        CallAction::StartRun {
+            session_id,
+            input,
+            images,
+        } => {
             if !valid_id(session_id) {
                 return Err(invalid("Invalid session id."));
             }
@@ -745,10 +779,10 @@ fn call_request(
             if input.chars().count() > MAX_INPUT_CHARS {
                 return Err(invalid("The message is too long."));
             }
-            Ok((
-                MainMethod::RunsStart,
-                json!({ "sessionId": session_id, "input": input, "operationId": operation_id }),
-            ))
+            let mut params =
+                json!({ "sessionId": session_id, "input": input, "operationId": operation_id });
+            add_images(&mut params, images)?;
+            Ok((MainMethod::RunsStart, params))
         }
         CallAction::ListAgents { cwd } => Ok((
             MainMethod::AgentsList,
@@ -2058,6 +2092,7 @@ mod tests {
         let (method, params) = control_request(&ControlAction::Steer {
             session_id: "ses_1".into(),
             text: "hola".into(),
+            images: Vec::new(),
         })
         .unwrap();
         assert_eq!(method, MainMethod::RunsSteer);
@@ -2108,6 +2143,7 @@ mod tests {
             &CallAction::StartRun {
                 session_id: "ses_1".into(),
                 input: "hola\nmundo".into(),
+                images: Vec::new(),
             },
             "op-3",
         )
@@ -2355,19 +2391,47 @@ mod tests {
     }
 
     #[test]
+    fn las_imagenes_viajan_solo_si_hay_y_caben() {
+        let start = |images: Vec<String>| CallAction::StartRun {
+            session_id: "ses_1".into(),
+            input: "mira".into(),
+            images,
+        };
+        let (_, params) = call_request(&start(vec![]), "op").unwrap();
+        assert!(params.get("images").is_none());
+        let (_, params) = call_request(&start(vec!["/a/b.png".into()]), "op").unwrap();
+        assert_eq!(params["images"], json!(["/a/b.png"]));
+        assert!(call_request(&start(vec!["a.png".into(); 6]), "op").is_err());
+        assert!(call_request(&start(vec!["x".repeat(MAX_PATH_CHARS + 1)]), "op").is_err());
+        let steer = |images: Vec<String>| ControlAction::Steer {
+            session_id: "ses_1".into(),
+            text: "mira".into(),
+            images,
+        };
+        let (_, params) = control_request(&steer(vec![])).unwrap();
+        assert!(params.get("images").is_none());
+        let (_, params) = control_request(&steer(vec!["a.png".into()])).unwrap();
+        assert_eq!(params["images"], json!(["a.png"]));
+        assert!(control_request(&steer(vec!["a.png".into(); 6])).is_err());
+    }
+
+    #[test]
     fn una_llamada_que_no_cabe_no_se_envia_ni_se_recorta() {
         let bad = [
             CallAction::StartRun {
                 session_id: String::new(),
                 input: "hola".into(),
+                images: Vec::new(),
             },
             CallAction::StartRun {
                 session_id: "ses".into(),
                 input: "   ".into(),
+                images: Vec::new(),
             },
             CallAction::StartRun {
                 session_id: "ses".into(),
                 input: "x".repeat(MAX_INPUT_CHARS + 1),
+                images: Vec::new(),
             },
             CallAction::OpenSession {
                 cwd: Some("x".repeat(MAX_PATH_CHARS + 1)),
@@ -2418,6 +2482,7 @@ mod tests {
             ControlAction::Steer {
                 session_id: "ses".into(),
                 text: "x".repeat(MAX_INPUT_CHARS + 1),
+                images: Vec::new(),
             },
         ];
         for action in bad {
