@@ -450,6 +450,60 @@ The user selected this profile for the session. Follow these instructions on top
 ${fragment.trim()}`;
 }
 
+/**
+ * Bloque `# Long-term memory`, uno por preset. Dice CUÁNDO usar la memoria sin
+ * que el usuario lo pida (consultar antes de actuar, guardar al ser corregido);
+ * el detalle (corregir, olvidar, `STRATUM.md`) queda en la skill del preset,
+ * que solo se nombra si está en el índice (`skills.builtin` puede quitarla).
+ */
+const MEMORY_SKILLS = {
+  coding: 'stratum-project-memory',
+  assistant: 'stratum-global-memory',
+  companion: 'stratum-companion-memory',
+} as const;
+
+export function buildMemoryBlock(preset: keyof typeof MEMORY_SKILLS, env: SystemPromptEnv): string {
+  const lines: string[] = [];
+  if (preset === 'coding') {
+    lines.push(
+      `# Long-term memory
+You have a long-term memory of this project that persists across sessions, through two tools. Use it proactively: the user should not have to ask you to look something up or to remember it.`,
+      `- recall_decisions: check before you act, not after you get it wrong. Before your first change to the project in a session (editing or creating a file, installing a dependency, running a command that changes something), call it once with a query about what you are going to do and the area you will touch: even a task that looks small can go against a convention you cannot see in the code. Call it again before choosing between alternatives that may already be settled (a library, a pattern, how to name, structure or test something), and when the user refers to the past ("like last time", "as we agreed", "why did we…"). If a result applies, follow it and mention it in one line; if it conflicts with what the user asks now, ask them. Pure questions that change nothing do not need it.`,
+      `- store_decision: write down what a future session would need and could not deduce from the code, as soon as it happens, not at the end. Store it when the user corrects you or tells you how they want things done ("don't…", "always…", "we use…"); when you choose between real alternatives (with the reason); when you settle a project convention that is not written anywhere; when you find the root cause of a non-obvious bug. One decision per call, with its why. Do NOT store routine actions, intermediate steps, the state of the current task (that goes in todo), what is already in the project memory below or obvious from the code, or secrets of any kind.`,
+    );
+  } else {
+    const own =
+      preset === 'companion'
+        ? 'a long-term memory of your own that persists across conversations (it is not shared with Stratum Desktop or with any project)'
+        : 'a long-term memory that persists across conversations';
+    const facts =
+      preset === 'companion'
+        ? 'about themselves, their life and work'
+        : 'about themselves or their work';
+    lines.push(
+      `# Long-term memory
+You have ${own}, through two tools. Use it proactively, as a good assistant who knows the user would: they should not have to repeat themselves or ask you to remember.`,
+      `- recall_decisions: call it when a past preference or fact could change your answer: before writing something for the user (tone, length, format, language), before recommending or planning something personal (their tools, their schedule, their tastes), and whenever they refer to something they told you before ("as I said", "my project", "the usual"). Skip it for small talk and for questions whose answer does not depend on who is asking.`,
+      `- store_decision: store it as soon as the user tells you a stable preference, a fact ${facts} that will matter in other conversations, or something they ask you to remember, and when they correct how you did something ("shorter", "don't…", "always…"). One fact per call. Do NOT store passing details of the current conversation, or secrets, passwords, payment or health data unless they explicitly ask you to.`,
+    );
+  }
+  lines.push(
+    `- If recall_decisions says the memory is unavailable, continue without it and do not retry. If store_decision reports the decision already existed, nothing new was saved: do not rephrase it and retry. Do not store trivial things by hand: Stratum may also extract memories on its own after each reply.`,
+  );
+  if (preset === 'coding') {
+    lines.push(
+      `- When store_decision is not available (a read-only session, or before a plan is approved), note what you would store and propose it to the user at the end.`,
+    );
+  }
+  const skill = MEMORY_SKILLS[preset];
+  if (env.skills?.includes(skill)) {
+    lines.push(
+      `Read the ${skill} skill before correcting or forgetting a stored memory, or when you are unsure whether something belongs in memory.`,
+    );
+  }
+  return lines.join('\n');
+}
+
 export function buildSystemPrompt(
   config: StratumConfig,
   memory?: string,
@@ -461,10 +515,7 @@ export function buildSystemPrompt(
 
   prompt += `\n\n${buildEnvBlock(env ?? {})}`;
   prompt += `\n\n# Shell\n${getShellInstructions()}`;
-  prompt += `\n\n# Long-term memory
-You have two tools backed by long-term memory that persists across sessions:
-- store_decision: use it proactively when you make a significant technical decision (choosing between alternatives, defining a project convention, fixing a non-trivial bug) or when the user states a preference that should persist. Think of it as writing in your long-term notebook. Do NOT use it for routine actions or intermediate steps.
-- recall_decisions: use it to retrieve past decisions semantically before acting, when you need to remember why something was chosen, a project convention, a previous bug fix, or a user preference.`;
+  prompt += `\n\n${buildMemoryBlock('coding', env ?? {})}`;
 
   prompt += buildSshBlock(config);
   prompt += buildEnvironmentsBlock(config);
@@ -659,10 +710,7 @@ export function buildAssistantPrompt(memory: string | undefined, env: SystemProm
       prompt += `\n${buildFilesExpiredNote(env.workspaceFilesExpiredAt)}`;
     }
   }
-  prompt += `\n\n# Long-term memory
-You have two tools backed by a long-term memory that persists across conversations:
-- store_decision: use it when the user states a preference, a stable fact about themselves or their work, or a decision they want you to remember in future conversations. Do NOT use it for passing details of the current conversation.
-- recall_decisions: use it to retrieve what you stored before, when a past preference or fact could change your answer.`;
+  prompt += `\n\n${buildMemoryBlock('assistant', env)}`;
   if (env.skills && env.skills.trim()) {
     // Solo Desktop aloja al asistente y pinta las vallas ```visual; sin la
     // skill (`skills.builtin` puede quitarla) no se anuncian.
@@ -745,10 +793,7 @@ export function buildCompanionPrompt(memory: string | undefined, env: SystemProm
     tools +
     ASSISTANT_LANGUAGE;
   prompt += `\n\n${buildAssistantEnvBlock(env)}`;
-  prompt += `\n\n# Long-term memory
-You have two tools backed by a long-term memory of your own that persists across conversations (it is not shared with Stratum Desktop or with any project):
-- store_decision: use it when the user states a preference, a stable fact about themselves or their life and work, or something they want you to remember. Do NOT use it for passing details of the current conversation.
-- recall_decisions: use it to retrieve what you stored before, when a past preference or fact could change your answer.`;
+  prompt += `\n\n${buildMemoryBlock('companion', env)}`;
   if (env.skills && env.skills.trim()) prompt += `\n\n${env.skills.trim()}`;
   prompt += `\n\n${buildAskingBlock('companion')}`;
   if (memory && memory.trim()) {
