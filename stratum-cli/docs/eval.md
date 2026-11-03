@@ -563,7 +563,7 @@ modos distintos, no compara el coste).
 ### Baselines de referencia del repositorio
 
 `evals/baselines/` guarda la referencia con la que se valida cada cambio de Stratum (no va en el
-paquete de npm): `mock.json` (guion, 56/56) y `live-glm.json` (`glm5.3-flash` por nan, 49/49), los
+paquete de npm): `mock.json` (guion, 67/67) y `live-glm.json` (`glm5.3-flash` por nan, 49/49), los
 dos en Windows, con los 5 de `linux` en SKIP y sobre el commit que consta en cada fichero. Los dos
 incluyen los grupos `cache`, `auxiliary` y `jobs`; el grupo `steering` solo está en `mock.json`
 (contra `live-glm.json` sus 7 escenarios salen como «nuevos»). Una ruta vale como referencia, así que no hace falta
