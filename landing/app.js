@@ -87,10 +87,12 @@ const MILESTONES = [
     body: ["App Tauri con cliente nativo del protocolo en Rust (dot-link): lista de sesiones, Activity, bandeja e instancia única.", "New chat sobre sesiones del daemon; aprobaciones, preguntas y planes con la autoridad en otra conexión nativa."] },
   { id: "M9–M10", title: "Endurecimiento y continuidad", date: "2026-10-16", track: "dot", status: "done", release: "dot 0.1.0 β",
     body: ["Confirmación nativa de cada resolución sensible, identidad del par verificada por el SO en el lado de Dot e IPC privado.", "Una sesión viva de chat pasa al daemon con el mismo id y contexto: /detach, stratum detach, stratum attach."] },
-  { id: "M11–M12", title: "Conversación duradera y Desktop al protocolo", date: "2026-10-23", track: "dot", status: "current", release: "v0.9.0 · desktop 0.5.0",
+  { id: "M11–M12", title: "Conversación duradera y Desktop al protocolo", date: "2026-10-23", track: "dot", status: "done", release: "v0.9.0 · desktop 0.5.0",
     body: ["Las sesiones del daemon guardan su conversación entera, compactan lo antiguo a una memoria de sesión con procedencia y sobreviven a un reinicio.", "Stratum Desktop deja su sidecar: es un cliente de stratumd, hermano de la CLI y de Dot, con el asistente embebido como agente."] },
-  { id: "M13–M18", title: "Dot como asistente virtual", date: "pendiente", track: "dot", status: "next",
-    body: ["Un agente embebido, companion, con memoria propia y exec solo dentro de una caja Docker; computer use en ella, rutinas y conectores."] },
+  { id: "M13–M16", title: "Dot como asistente: caja, computer use y rutinas", date: "2026-11-03", track: "dot", status: "current", release: "v0.12.0 · dot 0.2.0 β",
+    body: ["companion: el asistente de Dot, con memoria propia y exec solo dentro de su caja (Podman o Docker), vetado fuera antes de cualquier aprobación.", "Computer use en el escritorio virtual de la caja, solo con modelos de visión declarada, y rutinas programadas que el agente propone y tú apruebas."] },
+  { id: "M17–M18", title: "Conectores e inspector de memoria", date: "pendiente", track: "dot", status: "next",
+    body: ["Conectores para el companion y un inspector de lo que recuerda cada agente."] },
   { id: "H18", title: "Tools de diagnóstico", date: "pendiente", track: "cli", status: "next",
     body: ["net_probe, sys_inspect, log_query y service_status."] },
   { id: "H19", title: "Diagnóstico verificado", date: "pendiente", track: "cli", status: "next",
@@ -103,6 +105,13 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "v0.12 · dot 0.2.0 β", title: "Dot estrena asistente, con su caja y sus rutinas", date: "2026-11-03", match: /M1[3-6]|\((companion|box|routines|dot)\)/, since: "2026-10-29T18:00",
+    text: "El companion vive en Dot con su propia memoria y solo ejecuta dentro de una caja de Podman o Docker. Maneja el escritorio virtual de la caja con modelos de visión declarada, mientras lo ves en vivo, y corre rutinas programadas que solo existen si las apruebas.",
+    pre: "❯ stratum box start\n❯ stratum routines add --name resumen --schedule \"0 8 * * *\" --prompt \"…\"\nStratum.Dot_0.2.0_x64-setup.exe · necesita stratum-cli ≥ 0.12",
+    href: "#dot", more: "qué hace y cómo instalarla →" },
+  { id: "desktop 0.8", title: "Imágenes en el chat de Desktop", date: "2026-11-03", match: /\((images|desktop)\)/, since: "2026-10-29T18:00",
+    text: "Pega una imagen con Ctrl+V y el modelo la ve. /imagen convierte tu descripción en una petición al modelo de imágenes de tu provider, y el asistente acompaña sus explicaciones con gráficos y diagramas aislados, sin scripts.",
+    pre: "❯ /imagen un zorro en acuarela al amanecer\n✓ outputs/zorro-acuarela.png · Abrir · Guardar como…" },
   { id: "v0.11", title: "Plugins que vetan y comandos que pasan a segundo plano", date: "2026-10-29", match: /^feat\((cli|tui|jobs|plugins)\)|plugins en proceso/, since: "2026-10-23T23:00",
     text: "Un plugin JS/TS puede vetar una llamada antes de las guardas o anotar lo que ve el modelo, nunca aprobar. Ctrl+B pasa un exec en curso a job sin matarlo. La TUI pinta cada tool por su intención (+N −M, líneas leídas), abre los subagentes en su ventana y estrena /btw y /context con desglose.",
     pre: "❯ npm i -g stratum-cli\n❯ stratum plugin list\n✗ exec · vetado por plugin guard-env" },
@@ -162,8 +171,8 @@ const PR_DETAILS = {
 };
 
 const ROADMAP = [
-  { id: "M13–M18", title: "Dot como asistente virtual",
-    text: "Dot aloja a companion: un agente del día a día con memoria propia, exec solo dentro de su caja Docker, computer use en ella, rutinas y conectores.",
+  { id: "M17–M18", title: "Conectores e inspector de memoria",
+    text: "El companion se conecta a tus servicios y puedes ver y corregir lo que recuerda cada agente.",
     why: "siguiente del plano de control" },
   { id: "H18", title: "Diagnóstico puro",
     text: "net_probe, sys_inspect, log_query y service_status, sin dependencias externas.",
@@ -185,6 +194,7 @@ const DESK_CARDS = [
   { t: "Todas tus sesiones", d: "La lista enseña también las de la terminal y las de Dot, con su procedencia; las del daemon se continúan desde la app." },
   { t: "Conversación duradera", d: "La conversación entera se guarda en el daemon y sobrevive a un reinicio; lo antiguo se compacta a una memoria de sesión." },
   { t: "Provider y modelo", d: "Se eligen desde el cuadro de mensaje: primero el provider, después uno de sus modelos, por conversación." },
+  { t: "Imágenes y visuales", d: "Pega imágenes con Ctrl+V, genera otras con /imagen y recibe gráficos y diagramas en el chat, pintados sin scripts." },
   { t: "Auto-update", d: "Instaladores firmados para Windows y Linux; la app avisa de una versión nueva y nunca se instala sin que lo pidas." }
 ];
 
@@ -194,7 +204,10 @@ const DOT_CARDS = [
   { t: "Conducir el run", d: "Pause (en el siguiente punto seguro), Resume, Cancel y steering mientras trabaja. Sin estado optimista: la interfaz cambia cuando el daemon lo confirma." },
   { t: "Approval Center", d: "Aprobaciones, preguntas y planes de cualquier sesión, también de una terminal: gana la primera respuesta y la otra se retira." },
   { t: "La clave no toca la web", d: "Se teclea en una ventana nativa aparte y aprobar va por otra conexión; cada resolución sensible se confirma en otra ventana nativa." },
-  { t: "Continuidad", d: "Un chat que pasas al daemon con /detach sigue en su fila, con su conversación, y desde Dot ya se le puede escribir." }
+  { t: "Continuidad", d: "Un chat que pasas al daemon con /detach sigue en su fila, con su conversación, y desde Dot ya se le puede escribir." },
+  { t: "Tu asistente", d: "La vista Asistente aloja al companion: memoria propia, una conversación de larga vida y exec solo dentro de su caja." },
+  { t: "La caja y su pantalla", d: "Arranca, para o recrea la caja desde Dot y mira en vivo su escritorio mientras el asistente lo maneja, con Stop a mano." },
+  { t: "Rutinas", d: "Tareas programadas del asistente, cada una en su sesión, con aviso del sistema al terminar. Si él propone una, solo existe cuando la apruebas." }
 ];
 
 /* ═══ Utilidades ═══════════════════════════════════════════════════════════ */
@@ -346,7 +359,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.11.0",
+  version: "0.12.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -949,7 +962,7 @@ hito       17 ✓ entornos y read-only · siguiente: 18
 commits    ${fmt(c.length)} <span class="dim">(${state.weekCommits} esta semana)</span>
 líneas     <span class="add">+${fmt(c.reduce((a, x) => a + (x.add || 0), 0))}</span> <span class="del">−${fmt(c.reduce((a, x) => a + (x.del || 0), 0))}</span>
 tests      1587 ✓
-desktop    0.7.0 <span class="dim">(cliente de stratumd)</span>
+desktop    0.8.0 <span class="dim">(cliente de stratumd)</span>
 fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span class="dim">● snapshot</span>`}`;
   },
   hitos: (arg) => {

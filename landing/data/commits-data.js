@@ -1,8 +1,296 @@
 window.__STRATUM_COMMITS__ = {
-  "generatedAt": "2026-10-29T17:50:05.5932663+01:00",
+  "generatedAt": "2026-11-03T20:57:21.9444674+01:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "d8d090e1177cf4d374844a280fb781e6eecf7ebb",
+      "date": "2026-11-03T20:55:57+01:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.12.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "4b4888e1d29a4ef8952b93405e1982f95bcd6294",
+      "date": "2026-11-03T20:51:06+01:00",
+      "author": "Javi_1",
+      "subject": "test(eval): baseline de referencia mock regenerado (67/67)",
+      "add": 10049,
+      "del": 4514,
+      "files": 2
+    },
+    {
+      "sha": "479d9750412f8ad79c83518008775d6c5231b296",
+      "date": "2026-11-03T20:46:51+01:00",
+      "author": "Javi_1",
+      "subject": "test(eval): umbral de compresión 0.66 en los escenarios de compresión",
+      "add": 3,
+      "del": 3,
+      "files": 3
+    },
+    {
+      "sha": "20883e8b25386f4d90f525e1428d237667d65bef",
+      "date": "2026-11-03T20:30:22+01:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.12.0, Desktop 0.8.0 y Dot 0.2.0",
+      "add": 63,
+      "del": 21,
+      "files": 14
+    },
+    {
+      "sha": "ef58add37ec661c3e99b36a00efdf2af01e4a302",
+      "date": "2026-11-03T20:30:19+01:00",
+      "author": "Javi_1",
+      "subject": "feat(images): generar imágenes desde el asistente y /imagen en Desktop",
+      "add": 927,
+      "del": 18,
+      "files": 28
+    },
+    {
+      "sha": "9abcf3182e2d6b5c34f09e7bc4887fbbca880746",
+      "date": "2026-11-02T14:58:35+01:00",
+      "author": "Javi_1",
+      "subject": "feat(agent): el agente usa la memoria de largo plazo de forma proactiva",
+      "add": 113,
+      "del": 12,
+      "files": 2
+    },
+    {
+      "sha": "c4e87c17659a64cf75127e20ef7d47b77ea56183",
+      "date": "2026-11-02T11:03:41+01:00",
+      "author": "Javi_1",
+      "subject": "feat(images): pegar y adjuntar imágenes en la CLI y en Desktop",
+      "add": 2416,
+      "del": 82,
+      "files": 57
+    },
+    {
+      "sha": "2309741b257747b524df34bdf4a149a510e09537",
+      "date": "2026-11-01T20:33:48+01:00",
+      "author": "Javi_1",
+      "subject": "fix(dot): pulsar el aviso de una rutina abre su sesión en Windows",
+      "add": 109,
+      "del": 25,
+      "files": 6
+    },
+    {
+      "sha": "c2b5207cad1d73c0399c6a25a10191d21809da51",
+      "date": "2026-11-01T20:23:32+01:00",
+      "author": "Javi_1",
+      "subject": "feat(companion): screen_zoom para objetivos pequeños; A3 y A8 cerradas",
+      "add": 418,
+      "del": 15,
+      "files": 9
+    },
+    {
+      "sha": "b4fa4c92100516c91aa37a7659744afe32f7ec9b",
+      "date": "2026-11-01T15:26:59+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): visuales en el chat y skill de serie stratum-visuals",
+      "add": 434,
+      "del": 6,
+      "files": 9
+    },
+    {
+      "sha": "2bc5dce19d1c89ba9032ab13fbfb0fb269279539",
+      "date": "2026-10-31T23:19:56+01:00",
+      "author": "Javi_1",
+      "subject": "test(daemon): M16 cerrado, la rutina vence sola con nadie mirando",
+      "add": 89,
+      "del": 1,
+      "files": 2
+    },
+    {
+      "sha": "166482b1634ce760f47b5f01b17a84d3d3f08d69",
+      "date": "2026-10-31T23:19:55+01:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): M16 (6/7), las rutinas en la vista Asistente y su notificación",
+      "add": 2665,
+      "del": 19,
+      "files": 30
+    },
+    {
+      "sha": "07cd003198592c92745e64e9a0c117a1a4a2ad10",
+      "date": "2026-10-31T19:00:55+01:00",
+      "author": "Javi_1",
+      "subject": "feat(companion): M16 (4/7), propose_routine con aprobación forzada",
+      "add": 533,
+      "del": 17,
+      "files": 17
+    },
+    {
+      "sha": "b3193fd08fc6033a2935dfc05cfe22c14f0ce349",
+      "date": "2026-10-31T18:47:35+01:00",
+      "author": "Javi_1",
+      "subject": "feat(protocol): M16 (3/7), las rutinas por el protocolo y stratum routines",
+      "add": 1139,
+      "del": 3,
+      "files": 15
+    },
+    {
+      "sha": "679589eb394ff10f1fa9c517b2f7841b446fa65f",
+      "date": "2026-10-31T18:43:43+01:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): M16 (7/7), stratum daemon autostart",
+      "add": 613,
+      "del": 2,
+      "files": 3
+    },
+    {
+      "sha": "1f7e5cb232eded600484219896151802c0717bee",
+      "date": "2026-10-31T18:42:55+01:00",
+      "author": "Javi_1",
+      "subject": "feat(companion): M16 (5/7), el cerrojo de la pantalla de la caja",
+      "add": 223,
+      "del": 0,
+      "files": 6
+    },
+    {
+      "sha": "72d35af82882b48226620473375800d212dba7a9",
+      "date": "2026-10-31T18:38:45+01:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): M16 (2/7), el planificador de rutinas",
+      "add": 1355,
+      "del": 8,
+      "files": 8
+    },
+    {
+      "sha": "e5ead294ad8a773bba02e8c67364f439ce2802ac",
+      "date": "2026-10-31T18:27:30+01:00",
+      "author": "Javi_1",
+      "subject": "feat(routines): M16 (1/7), el horario y el almacén de las rutinas",
+      "add": 973,
+      "del": 4,
+      "files": 6
+    },
+    {
+      "sha": "fa4695cb8c903df6a984a18aeefc1841f9de139b",
+      "date": "2026-10-30T22:10:46+01:00",
+      "author": "Javi_1",
+      "subject": "test(eval): M15 (5/5), las tareas del spike con las tools reales",
+      "add": 304,
+      "del": 1,
+      "files": 7
+    },
+    {
+      "sha": "af0fbeac9825aaba11a16b536e3426a28b96f3cd",
+      "date": "2026-10-30T18:33:07+01:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): M15 (4/5), la pantalla de la caja en vivo en la vista Asistente",
+      "add": 384,
+      "del": 12,
+      "files": 17
+    },
+    {
+      "sha": "aac0a461e3bd68fe582a87ea3315f93f82bb351b",
+      "date": "2026-10-30T18:23:48+01:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): M15 (3/5), la pantalla de la caja por el protocolo",
+      "add": 365,
+      "del": 4,
+      "files": 8
+    },
+    {
+      "sha": "997a3ba1de8e6860b0d3a431fbe85ec5b0c71178",
+      "date": "2026-10-30T18:14:45+01:00",
+      "author": "Javi_1",
+      "subject": "feat(companion): M15 (2/5), las capturas llegan al modelo y a la traza",
+      "add": 700,
+      "del": 22,
+      "files": 18
+    },
+    {
+      "sha": "1386395d457a2150f5b7168707e6084064e72e2d",
+      "date": "2026-10-30T18:00:29+01:00",
+      "author": "Javi_1",
+      "subject": "feat(companion): M15 (1/5), las tools screen_* en la caja",
+      "add": 1029,
+      "del": 18,
+      "files": 17
+    },
+    {
+      "sha": "c93b4e587cbbe2d4ec8d6b237fae9f1677bc7b31",
+      "date": "2026-10-30T17:21:15+01:00",
+      "author": "Javi_1",
+      "subject": "docs(prd): resuelve A6 y A7 (capturas en la traza, modelo con visión)",
+      "add": 19,
+      "del": 11,
+      "files": 1
+    },
+    {
+      "sha": "dc6a93511f0b70d66d95961c4259994d983c0ad0",
+      "date": "2026-10-30T08:00:17+01:00",
+      "author": "Javi_1",
+      "subject": "test(dot): M14, E2E de la vista Asistente en la ventana real",
+      "add": 310,
+      "del": 10,
+      "files": 4
+    },
+    {
+      "sha": "70cc179877fa7626f7c71a1d4bff41b15013366f",
+      "date": "2026-10-30T01:19:44+01:00",
+      "author": "Javi_1",
+      "subject": "docs(companion): M14 (4/4), documentación y decisiones del companion",
+      "add": 43,
+      "del": 5,
+      "files": 5
+    },
+    {
+      "sha": "d0da6fd84939c4fe985911b3afb32abcd7df8207",
+      "date": "2026-10-30T01:07:40+01:00",
+      "author": "Javi_1",
+      "subject": "feat(dot): M14 (3/4), vista Asistente con el companion y su caja",
+      "add": 658,
+      "del": 13,
+      "files": 18
+    },
+    {
+      "sha": "d3f9f1bd8c26217fac41fbbf54693937222eefca",
+      "date": "2026-10-30T00:56:35+01:00",
+      "author": "Javi_1",
+      "subject": "feat(daemon): M14 (2/4), la sesión de larga vida del companion",
+      "add": 649,
+      "del": 326,
+      "files": 6
+    },
+    {
+      "sha": "f021c1d232a0a523beba48990fa5a8914b2d789b",
+      "date": "2026-10-30T00:50:40+01:00",
+      "author": "Javi_1",
+      "subject": "feat(companion): M14 (1/4), el agente embebido companion en el runtime",
+      "add": 1082,
+      "del": 284,
+      "files": 22
+    },
+    {
+      "sha": "dce0236915d6c302ed6dc3789b9f7a39c322a66e",
+      "date": "2026-10-29T22:05:37+01:00",
+      "author": "Javi_1",
+      "subject": "style(cli): formato de Prettier en las tarjetas de tool",
+      "add": 32,
+      "del": 13,
+      "files": 3
+    },
+    {
+      "sha": "1c40b7a755ec509a2d8b853b1fc68384bd4698da",
+      "date": "2026-10-29T21:42:03+01:00",
+      "author": "Javi_1",
+      "subject": "feat(box): M13, la caja como target container: de exec",
+      "add": 2178,
+      "del": 26,
+      "files": 32
+    },
+    {
+      "sha": "659b5c0faeaeaf6e09cd771f9352dab7cb0dd99f",
+      "date": "2026-10-29T17:50:13+01:00",
+      "author": "Javi_1",
+      "subject": "docs(landing): CLI 0.11.0 y Desktop 0.7.0",
+      "add": 925,
+      "del": 50,
+      "files": 6
+    },
     {
       "sha": "402d2cbdf5a5bb14f7b93d1f43b4675a868abd8e",
       "date": "2026-10-29T17:20:49+01:00",
@@ -3164,6 +3452,18 @@ window.__STRATUM_COMMITS__ = {
     }
   ],
   "tags": [
+    {
+      "name": "desktop-v0.8.0",
+      "date": "2026-11-03T20:55:57+01:00"
+    },
+    {
+      "name": "dot-v0.2.0",
+      "date": "2026-11-03T20:55:57+01:00"
+    },
+    {
+      "name": "v0.12.0",
+      "date": "2026-11-03T20:55:57+01:00"
+    },
     {
       "name": "desktop-v0.7.0",
       "date": "2026-10-29T17:20:49+01:00"
