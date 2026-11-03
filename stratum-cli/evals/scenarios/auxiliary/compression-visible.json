@@ -20,7 +20,7 @@
     ],
     "config": {
       "agent": {
-        "compressionThreshold": 0.62,
+        "compressionThreshold": 0.66,
         "compressionKeepRounds": 1
       }
     }
