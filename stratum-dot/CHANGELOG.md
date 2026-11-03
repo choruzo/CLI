@@ -4,6 +4,19 @@ Cambios de cada versión de Stratum Dot, el cockpit de escritorio de `stratumd`,
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.2.0] — 2026-11-03
+
+Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.12.0** o posterior (`npm install -g stratum-cli`). Instaladores sin firmar y sin auto-update.
+
+### Añadido
+- **Vista *Asistente***: Dot tiene su propio asistente, el agente `companion`, con su memoria y una sola conversación de larga vida en el daemon que sigue ahí tras cerrar Dot o reiniciar el daemon.
+- **Panel de la caja**: estado, runtime, imagen, red y carpeta compartida de la caja del asistente, con arrancar, parar y recrear. El asistente solo ejecuta dentro de ella.
+- **La pantalla de la caja en vivo** (solo lectura), con el indicador «using the screen» y Stop mientras el asistente la maneja. Avisa si el modelo no está declarado con visión, y el selector de *New chat* marca los que la tienen.
+- **Rutinas**: panel para crear, editar, ejecutar ya, activar, desactivar y borrar tareas programadas del asistente, con su sesión propia («Routine · nombre» en la lista) y la marca «Proposed by the assistant» en las que propuso él. Al terminar una rutina, una notificación del sistema que, al pulsarla, abre su sesión.
+
+### Cambiado
+- Las sesiones del daemon y su conversación vuelven tras un reinicio del daemon (con Stratum CLI 0.9.0 o posterior).
+
 ## [0.1.0] — 2026-10-16
 
 Primera pre-release pública, experimental: puede hacer cosas raras. Necesita **Stratum CLI 0.9.0-beta.0** o posterior (`npm install -g stratum-cli@beta`). Instaladores sin firmar y sin auto-update.

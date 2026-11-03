@@ -4,6 +4,15 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.8.0] — 2026-11-03
+
+Acompaña a **Stratum CLI 0.12.0**, que es la que conviene tener instalada (las imágenes pegadas y `/imagen` la necesitan).
+
+### Añadido
+- **Visuales en el chat**: el asistente puede acompañar una explicación con un gráfico, fichas de métricas o un diagrama, pintados en un marco aislado sin scripts ni nada externo («Ver HTML» enseña el código).
+- **Pegar imágenes**: `Ctrl+V` adjunta una imagen del portapapeles y los adjuntos de imagen llegan al modelo, si tiene visión declarada en la config de la CLI.
+- **`/imagen <descripción>`**: el asistente convierte tu descripción en una petición al modelo de imágenes de tu provider y la imagen aparece en el chat, con «Abrir» y «Guardar como…» (también en los turnos antiguos). Necesita `imageGeneration` en la config global de la CLI.
+
 ## [0.7.0] — 2026-10-29
 
 Acompaña a **Stratum CLI 0.11.0**, que es la que conviene tener instalada.
