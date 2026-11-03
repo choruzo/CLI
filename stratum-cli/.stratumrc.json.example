@@ -255,6 +255,11 @@
     "runtime": "auto",
     "network": true
   },
+  "imageGeneration": {
+    "provider": "nan",
+    "model": "flux-2-klein",
+    "size": "1024x1024"
+  },
   "desktop": {
     "maxConcurrentTurns": 2,
     "notifications": {

@@ -81,7 +81,11 @@ interface ConfigLayer {
  * lo decide la persona, no un repo. Una capa de proyecto que las declare se
  * carga sin ellas, con un aviso.
  */
-const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [['box'], ['trace', 'screenshots']];
+const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
+  ['box'],
+  ['trace', 'screenshots'],
+  ['imageGeneration'],
+];
 
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);

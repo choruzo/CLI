@@ -1,4 +1,4 @@
-import { useEffect, useRef, type RefObject } from 'react';
+import { Fragment, useEffect, useRef, type RefObject } from 'react';
 import type { AgentPart, AgentTurn } from '../../view/model';
 import { useCopy } from '../../hooks/useCopy';
 import { useNow } from '../../hooks/useNow';
@@ -8,6 +8,7 @@ import { ThinkingIndicator } from './ThinkingIndicator';
 import type { ThinkingPhase } from './thinking-phrases';
 import { ToolCallBlock } from './ToolCallBlock';
 import { FileCard, isExpired } from './files/FileCard';
+import { GeneratedImages } from './files/GeneratedImages';
 import { ICON, StrokeIcon } from './icons';
 
 const STATUS_NOTE: Partial<Record<AgentTurn['status'], string>> = {
@@ -170,7 +171,14 @@ export function AgentMessage({
         }
         if (part.kind === 'tool') {
           const call = turn.toolCalls[part.id];
-          return call ? <ToolCallBlock key={part.id} call={call} /> : null;
+          if (!call) return null;
+          const images = cwd && call.name === 'generate_image' && call.state === 'completed';
+          return (
+            <Fragment key={part.id}>
+              <ToolCallBlock call={call} />
+              {images && <GeneratedImages cwd={cwd} callId={call.id} output={call.output} />}
+            </Fragment>
+          );
         }
         return (
           <p key={i} className="notice" data-tone={part.tone} role={part.tone === 'error' ? 'alert' : undefined}>

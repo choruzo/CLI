@@ -3877,3 +3877,52 @@ kbd {
   font-size: 12px;
   color: var(--color-textFaint);
 }
+
+/* Imágenes de `generate_image`, en línea en la respuesta. */
+.generated-images {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin: 6px 0;
+}
+.generated-image {
+  margin: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-width: min(100%, 520px);
+  padding: 8px;
+  border: 1px solid var(--color-borderAccent);
+  border-radius: 8px;
+  background: var(--color-bgPanel);
+}
+.generated-image__img {
+  display: block;
+  max-width: 100%;
+  max-height: 520px;
+  border-radius: 6px;
+  object-fit: contain;
+}
+.generated-image__placeholder {
+  display: grid;
+  place-items: center;
+  width: 320px;
+  max-width: 100%;
+  aspect-ratio: 1;
+  border-radius: 6px;
+  color: var(--color-textFaint);
+  background: var(--color-bgPanel);
+}
+.generated-image__bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.generated-image__name {
+  flex: 1;
+  min-width: 120px;
+  color: var(--color-textFaint);
+  font-size: 13px;
+  overflow-wrap: anywhere;
+}

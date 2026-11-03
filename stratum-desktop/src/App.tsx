@@ -20,7 +20,7 @@ import {
   type SessionStream,
 } from './components/chat/ConversationView';
 import type { ModelChoice, ModelsOffer } from './components/chat/ModelPicker';
-import type { CommandName } from './components/chat/commands';
+import { imageRequest, type CommandName } from './components/chat/commands';
 import { ConnectionBanner } from './components/layout/ConnectionIndicator';
 import { FilesPanel } from './components/layout/FilesPanel';
 import { OutlinePanel } from './components/layout/OutlinePanel';
@@ -277,9 +277,18 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
         case 'settings':
           setSettingsOpen(true);
           return;
+        case 'imagen':
+          if (!prefs?.imageGeneration) {
+            return (
+              'La generación de imágenes no está configurada: añade una sección imageGeneration ' +
+              '(provider y model de imágenes) a la config global y reinicia Stratum Desktop.'
+            );
+          }
+          void onSend(imageRequest(arg), []);
+          return;
       }
     },
-    [native, newConversation, openPanel, selectedId, openModels, currentModel],
+    [native, newConversation, openPanel, selectedId, openModels, currentModel, prefs, onSend],
   );
 
   useHotkeys('ctrl+n, meta+n', newConversation, GLOBAL, [newConversation]);

@@ -270,6 +270,7 @@ describe('SkillRegistry — de serie, presets y ámbitos (contrato builtin)', ()
       'stratum-companion-memory': ['companion'],
       'stratum-skill-authoring': ['coding', 'assistant', 'companion'],
       'stratum-visuals': ['assistant'],
+      'stratum-images': ['assistant'],
     };
     for (const [name, presets] of Object.entries(expected)) {
       const e = all.get(name);

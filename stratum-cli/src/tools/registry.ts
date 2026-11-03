@@ -888,7 +888,7 @@ export class ToolDispatcher {
       timeoutMs,
     );
     const combinedSignal = AbortSignal.any([ctx.signal, timeoutController.signal]);
-    const execCtx: ToolContext = { ...ctx, signal: combinedSignal };
+    const execCtx: ToolContext = { ...ctx, signal: combinedSignal, callId: call.id };
     // Hito 16: con `structuredCancellation` la tool mata su propio trabajo y
     // devuelve un resultado `cancelled`; si el race rechazase en el acto, ese
     // resultado (y su auditoría) se perdería. Solo queda una red de seguridad.

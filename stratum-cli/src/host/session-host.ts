@@ -251,7 +251,7 @@ export class SessionHost {
         : legacyGlobalDecisionsDir();
       if (legacyGlobal) importLegacyGlobalDecisions(dataDir, legacyGlobal);
       config = buildAssistantConfig(config, dataDir);
-      registry = buildAssistantRegistry();
+      registry = buildAssistantRegistry(config);
     } else {
       registry = new ToolRegistry();
       registerBuiltinTools(registry, config);

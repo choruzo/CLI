@@ -92,7 +92,7 @@ export const ConversationView = forwardRef(function ConversationView(
     onControl?: (action: 'pause' | 'resume' | 'cancel') => void;
     onLoadOlder: () => void;
     onDismissNotice: (id: number) => void;
-    onCommand?: (name: CommandName, arg: string) => void;
+    onCommand?: (name: CommandName, arg: string) => string | void;
     onVisibleTurn?: (turnId: string | null) => void;
     models?: ModelsOffer | null;
     onPickModel?: (choice: ModelChoice) => void;

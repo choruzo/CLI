@@ -198,6 +198,8 @@ export interface DiagnosticsProvider {
 export interface ToolContext {
   signal: AbortSignal;
   cwd: string;
+  /** Id de la llamada que se ejecuta (lo pone el dispatcher). */
+  callId?: string;
   /**
    * Variables de entorno de la sesión, para las tools que lanzan procesos
    * locales. Ausente → las del proceso. Nunca se registra ni se devuelve.

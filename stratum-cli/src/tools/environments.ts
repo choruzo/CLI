@@ -149,7 +149,7 @@ const PURE_READERS = new Set([
   // se clasificó al crearlo, en su `exec`.
   ...JOB_TOOLS,
 ]);
-const LOCAL_WRITERS = new Set(['write_file', 'edit_file']);
+const LOCAL_WRITERS = new Set(['write_file', 'edit_file', 'generate_image']);
 
 function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;

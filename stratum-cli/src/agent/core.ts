@@ -68,6 +68,7 @@ import {
 } from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
 import { SCREEN_SCREENSHOT_TOOL, SCREEN_TOOLS } from '../tools/screen/names.js';
+import { GENERATE_IMAGE_TOOL } from '../tools/images/generate.js';
 import { ScreenshotBuffer } from './screenshots.js';
 import { UserImageBuffer, withImageMarkers, type UserImage } from './user-images.js';
 import {
@@ -1405,6 +1406,7 @@ export class StratumAgent {
         skills: this.skillsBlock,
         workspace: this.workspace,
         workspaceFilesExpiredAt: this.workspaceFilesExpiredAt,
+        imageGeneration: this.registry.get(GENERATE_IMAGE_TOOL) !== undefined,
       };
     }
     // El companion: lo mismo, sin carpeta, y con su caja si `exec` está registrado.

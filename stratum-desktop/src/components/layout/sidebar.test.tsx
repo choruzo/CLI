@@ -175,6 +175,25 @@ describe('slash-commands', () => {
     fireEvent.keyDown(box, { key: 'Enter' });
     expect(onSend).toHaveBeenCalledWith('hola', []);
   });
+
+  it('InputArea: /imagen exige descripción y un error del comando deja el texto', () => {
+    const onCommand = vi.fn((name: string) =>
+      name === 'imagen' ? 'La generación de imágenes no está configurada' : undefined,
+    );
+    render(
+      <InputArea disabled={false} generating={false} onSend={vi.fn()} onCancel={vi.fn()} onCommand={onCommand} />,
+    );
+    const box = screen.getByLabelText('Mensaje para el asistente') as HTMLTextAreaElement;
+    fireEvent.change(box, { target: { value: '/imagen' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onCommand).not.toHaveBeenCalled();
+    expect(screen.getByRole('alert').textContent).toContain('Escribe qué quieres');
+    fireEvent.change(box, { target: { value: '/imagen un zorro' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(onCommand).toHaveBeenCalledWith('imagen', 'un zorro');
+    expect(screen.getByRole('alert').textContent).toContain('no está configurada');
+    expect(box.value).toBe('/imagen un zorro');
+  });
 });
 
 describe('InputArea con un run en marcha (M12)', () => {

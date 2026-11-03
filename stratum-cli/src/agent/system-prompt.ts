@@ -63,6 +63,8 @@ export interface SystemPromptEnv {
   workspace?: WorkspaceConfinement;
   /** Ver `StratumAgentOptions.workspaceFilesExpiredAt` (D3). Solo con `workspace`. */
   workspaceFilesExpiredAt?: string;
+  /** El asistente tiene `generate_image` (hay `imageGeneration` y workspace). */
+  imageGeneration?: boolean;
   /**
    * M14 — nombre de la caja del `companion`, solo si tiene `exec` en ella.
    * Ausente: el prompt dice que no puede ejecutar nada.
@@ -652,6 +654,10 @@ const VISUALS_SKILL = 'stratum-visuals';
 const ASSISTANT_VISUALS = `# Visuals
 Besides markdown, the app renders a fenced code block with the language tag \`visual\` as a visual: a chart, metric tiles or a diagram you write as HTML, CSS and inline SVG (no JavaScript, nothing external). When an explanation would be clearer with one — quantities to compare, a trend, proportions, the steps of a process — add it next to the text that explains it. Read the ${VISUALS_SKILL} skill before writing your first one in a conversation.`;
 
+const IMAGES_SKILL = 'stratum-images';
+const ASSISTANT_IMAGES = `# Images
+You can create images with generate_image: it sends a text prompt to an image model and the images appear in the chat, saved in outputs/. Use it when the user asks you to draw, generate, create or design an image, picture, illustration, logo, icon or photo. You write the prompt: turn the user's words into a detailed English description. Read the ${IMAGES_SKILL} skill before your first image in a conversation. After it finishes, answer in one or two sentences (what you made, and offer to adjust it); do not paste the file paths or embed the image in markdown, the app already shows it.`;
+
 const ASSISTANT_LANGUAGE = `# Language
 Answer in the language the user writes in. If the user writes in Spanish, answer in Spanish. Keep code, identifiers and quoted text exactly as they are.`;
 
@@ -717,6 +723,7 @@ export function buildAssistantPrompt(memory: string | undefined, env: SystemProm
     if (env.skills.includes(VISUALS_SKILL)) prompt += `\n\n${ASSISTANT_VISUALS}`;
     prompt += `\n\n${env.skills.trim()}`;
   }
+  if (env.workspace && env.imageGeneration) prompt += `\n\n${ASSISTANT_IMAGES}`;
   prompt += `\n\n${buildAskingBlock('assistant')}`;
   if (memory && memory.trim()) {
     prompt += `\n\n## User Memory\nThe following is persistent context the user wrote for you (from their global STRATUM.md). Honor these instructions and preferences:\n\n${memory.trim()}`;

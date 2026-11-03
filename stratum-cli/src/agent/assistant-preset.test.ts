@@ -211,7 +211,9 @@ describe('preset assistant — workspace (D2)', () => {
     });
     expect(withSkill).toContain('# Visuals');
     expect(withSkill.indexOf('# Visuals')).toBeLessThan(withSkill.indexOf('# Skills'));
-    expect(buildAssistantPrompt(undefined, { skills: '# Skills\n| otra | x |' })).not.toContain('# Visuals');
+    expect(buildAssistantPrompt(undefined, { skills: '# Skills\n| otra | x |' })).not.toContain(
+      '# Visuals',
+    );
     expect(buildAssistantPrompt(undefined, {})).not.toContain('# Visuals');
   });
 
@@ -236,7 +238,10 @@ describe('preset assistant — workspace (D2)', () => {
       const provider = new RecordingProvider([makeTextRound('hola')]);
       await collect(newAgent(provider, 'assistant', ws).run('hola'));
       const offered = (provider.requests[0]?.tools ?? []).map((t) => t.function.name).sort();
-      expect(offered).toEqual([...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS].sort());
+      // `generate_image` solo con `imageGeneration` (`tools/images/generate.test.ts`).
+      expect(offered).toEqual(
+        [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS].filter((n) => n !== 'generate_image').sort(),
+      );
       expect(offered).not.toContain('exec');
     } finally {
       rmSync(base, { recursive: true, force: true });

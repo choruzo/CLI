@@ -105,6 +105,8 @@ export interface DesktopPrefs {
   hotkeyError: string | null;
   /** Conversaciones de antes de M12 sin importar al daemon (`stratum desktop import`). */
   legacyConversations: number;
+  /** Hay `imageGeneration` en la config global: `/imagen` disponible. */
+  imageGeneration: boolean;
 }
 
 export interface NativeBridge {

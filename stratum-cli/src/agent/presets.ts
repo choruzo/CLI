@@ -61,6 +61,9 @@ export const ASSISTANT_FILE_TOOLS: readonly string[] = [
   'glob',
   'grep',
   'list_directory',
+  // Solo con `imageGeneration` en la config (`buildAssistantRegistry`): deja
+  // sus imágenes en `outputs/`, así que necesita el workspace.
+  'generate_image',
 ];
 
 export function assistantToolsetFilter(opts: { workspace?: boolean } = {}): ToolsetFilter {

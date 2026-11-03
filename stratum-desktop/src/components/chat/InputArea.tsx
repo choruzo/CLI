@@ -63,7 +63,7 @@ export const InputArea = forwardRef<
     onSend: (text: string, attachments: SentAttachment[]) => void;
     onCancel: () => void;
     /** Un slash-command válido; sin él, no hay menú de comandos. */
-    onCommand?: (name: CommandName, arg: string) => void;
+    onCommand?: (name: CommandName, arg: string) => string | void;
     /** Sin él (tests, sidecar sin workspaces), no hay botón de adjuntar. */
     attachments?: Attachments;
     placeholder?: string;
@@ -124,9 +124,14 @@ export const InputArea = forwardRef<
     (isCommand || ((!generating || steering) && !attachments?.busy && hasContent));
 
   const runCommand = (name: CommandName, arg: string) => {
+    // Un comando que no puede ejecutarse deja lo escrito en el campo.
+    const error = onCommand?.(name, arg);
+    if (typeof error === 'string') {
+      setCommandError(error);
+      return;
+    }
     setText('');
     setCommandError(null);
-    onCommand?.(name, arg);
   };
 
   const submit = () => {
@@ -181,8 +186,13 @@ export const InputArea = forwardRef<
         e.preventDefault();
         const cmd = menu[Math.min(selected, menu.length - 1)]!;
         // Enter sobre un comando ya escrito entero lo ejecuta tal cual (`/model`
-        // sin argumento abre el selector); Tab siempre completa.
-        if (e.key === 'Enter' && text.trim().toLowerCase() === `/${cmd.name}`) runCommand(cmd.name, '');
+        // sin argumento abre el selector); Tab siempre completa. Uno que exige
+        // argumento (`/imagen`) pasa por `parseCommand`, que avisa.
+        const whole = text.trim().toLowerCase() === `/${cmd.name}`;
+        if (e.key === 'Enter' && whole && cmd.argRequired) {
+          const parsed = parseCommand(text);
+          if (parsed && !parsed.ok) setCommandError(parsed.error);
+        } else if (e.key === 'Enter' && whole) runCommand(cmd.name, '');
         else choose(cmd);
         return;
       }

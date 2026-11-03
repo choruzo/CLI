@@ -19,6 +19,11 @@ import { editFileTool } from '../tools/fs/edit.js';
 import { globTool } from '../tools/fs/glob.js';
 import { grepTool } from '../tools/fs/grep.js';
 import { listDirectoryTool } from '../tools/fs/list.js';
+import {
+  createGenerateImageTool,
+  GENERATE_IMAGE_TOOL,
+  resolveImageEndpoint,
+} from '../tools/images/generate.js';
 import { getLogger } from '../logging/index.js';
 import { DecisionStore } from '../memory/decisions.js';
 
@@ -167,7 +172,7 @@ export function buildAssistantConfig(base: StratumConfig, dataDir: string): Stra
  * restringe en el loop; no registrar el resto es defensa en profundidad.
  * `exec` no se registra nunca (16.1: un directorio no confina un shell).
  */
-export function buildAssistantRegistry(): ToolRegistry {
+export function buildAssistantRegistry(config?: StratumConfig): ToolRegistry {
   const registry = new ToolRegistry();
   for (const tool of [
     webSearchTool,
@@ -186,8 +191,11 @@ export function buildAssistantRegistry(): ToolRegistry {
   ]) {
     registry.register(tool);
   }
+  // Generar imágenes solo si la config declara con qué modelo y provider.
+  const images = config !== undefined && resolveImageEndpoint(config) !== null;
+  if (images) registry.register(createGenerateImageTool());
   const missing = [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS].filter(
-    (name) => !registry.get(name),
+    (name) => (images || name !== GENERATE_IMAGE_TOOL) && !registry.get(name),
   );
   if (missing.length > 0) throw new Error(`faltan tools del asistente: ${missing.join(', ')}`);
   return registry;

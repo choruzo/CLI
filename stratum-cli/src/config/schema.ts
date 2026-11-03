@@ -35,6 +35,26 @@ export const ModelVisionSchema = z
 
 export type ModelVision = z.infer<typeof ModelVisionSchema>;
 
+/** Tamaño de imagen `ANCHOxALTO` en píxeles (`1024x1024`). */
+export const IMAGE_SIZE_PATTERN = /^\d{2,4}x\d{2,4}$/;
+
+/**
+ * Generación de imágenes (`POST <baseUrl>/images/generations`, el endpoint
+ * OpenAI-compatible). `provider`: uno de `provider.providers` (su `baseUrl` y
+ * su `apiKey`); ausente, el `default`. `model`: el id del modelo de imágenes.
+ */
+export const ImageGenerationSchema = z
+  .object({
+    provider: z.string().min(1).optional(),
+    model: z.string().min(1),
+    size: z.string().regex(IMAGE_SIZE_PATTERN).default('1024x1024'),
+    /** Por petición; la API de imágenes tarda mucho más que un chat. */
+    timeoutMs: z.number().int().positive().default(180_000),
+  })
+  .strict();
+
+export type ImageGenerationConfig = z.infer<typeof ImageGenerationSchema>;
+
 const ProviderConfigSchema = z.object({
   type: z.literal('openai-compatible'),
   baseUrl: z.string().url(),
@@ -978,6 +998,14 @@ export const StratumConfigSchema = z.object({
 
   /** M13 — la caja (target `container:<name>`). Solo de la config global. */
   box: BoxConfigSchema.default({}),
+
+  /**
+   * Generación de imágenes del asistente (tool `generate_image`). Opcional y
+   * sin default: sin sección la tool no se registra. Solo declarada (como la
+   * visión de M15): `/models` no dice qué modelo genera imágenes. Solo de la
+   * config global.
+   */
+  imageGeneration: ImageGenerationSchema.optional(),
 
   /**
    * Diagnósticos LSP tras editar (encargo UX-2b). `enabled: false` por defecto:

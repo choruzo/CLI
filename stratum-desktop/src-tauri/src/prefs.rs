@@ -47,6 +47,10 @@ pub struct DesktopPrefs {
     /// Conversaciones de Desktop anteriores a M12 que aún no se importaron al
     /// daemon (`stratum desktop import`). Solo se cuentan: Desktop no las lee.
     pub legacy_conversations: usize,
+    /// Hay `imageGeneration.model` en la config global: el asistente tiene
+    /// `generate_image` y `/imagen` está disponible. Solo informativo: quien
+    /// decide es la sesión (`buildAssistantRegistry`).
+    pub image_generation: bool,
 }
 
 impl DesktopPrefs {
@@ -167,6 +171,9 @@ fn from_value(raw: &Value, home: &Path, path: &Path, mut warnings: Vec<String>) 
         config_path: path.to_string_lossy().into_owned(),
         warnings,
         legacy_conversations: 0,
+        image_generation: raw["imageGeneration"]["model"]
+            .as_str()
+            .is_some_and(|m| !m.trim().is_empty()),
     }
 }
 
@@ -219,6 +226,13 @@ mod tests {
 
     fn prefs(raw: Value) -> DesktopPrefs {
         from_value(&raw, &home(), &config_path(&home()), Vec::new())
+    }
+
+    #[test]
+    fn image_generation_solo_con_modelo() {
+        assert!(!prefs(Value::Null).image_generation);
+        assert!(!prefs(json!({ "imageGeneration": { "model": " " } })).image_generation);
+        assert!(prefs(json!({ "imageGeneration": { "model": "flux-2-klein" } })).image_generation);
     }
 
     #[test]
