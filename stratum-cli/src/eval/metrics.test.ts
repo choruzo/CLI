@@ -174,6 +174,24 @@ describe('computeMetrics', () => {
     expect(m.toolErrors).toBe(0);
   });
 
+  it('una llamada cubierta por una concesión (M17) no es una confirmación ni un bloqueo', () => {
+    const t = trace()
+      .turn()
+      .notice({
+        event: 'confirmation',
+        decision: 'granted',
+        tool: 'exec',
+        callId: 'a',
+        description: 'x',
+        grantId: 'grt_1',
+      })
+      .tool('exec', {}, { callId: 'a' })
+      .end();
+    const m = computeMetrics(t.records);
+    expect(m.confirmations).toEqual({ asked: 0, approved: 0, denied: 0, blocked: 0 });
+    expect(m.policyBlocks).toBe(0);
+  });
+
   it('una traza anterior al cap `runtime` da n/d, no ceros', () => {
     const t = trace({ runtime: false }).turn().model().tool('exec', {}).end();
     const m = computeMetrics(t.records);

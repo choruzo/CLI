@@ -756,7 +756,8 @@ impl Fake {
             }] }))],
             // M16: el daemon de pruebas solo contesta; lo que importa es lo que le llega.
             "routines.list" => vec![ok(json!({ "routines": [], "readOnly": false }))],
-            "routines.add" | "routines.update" | "routines.remove" | "routines.run" => {
+            "routines.add" | "routines.update" | "routines.remove" | "routines.run"
+            | "grants.revoke" => {
                 vec![ok(json!({ "echo": method }))]
             }
             _ => vec![err("METHOD_NOT_FOUND", json!({}))],

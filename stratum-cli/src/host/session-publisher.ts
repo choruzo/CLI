@@ -16,6 +16,7 @@ import {
   snapshotToolCall,
   type ClientKind,
   type ProtocolApproval,
+  type ProtocolApprovalGrant,
   type ProtocolChatMessage,
   type ProtocolEvent,
   type ProtocolJob,
@@ -41,6 +42,7 @@ import { targetOfCall } from '../tools/environments.js';
 import { describeCall } from '../tools/registry.js';
 import { getLogger } from '../logging/index.js';
 import type { InteractionChange, PendingInteractions } from './interactions.js';
+import type { GrantChange } from './approval-grants.js';
 
 const log = getLogger('host').child('publisher');
 
@@ -248,6 +250,15 @@ function squeeze(
           : {}),
       })),
     })),
+    ...(s.grants
+      ? {
+          grants: last(s.grants).map((g) => ({
+            ...g,
+            tool: c(g.tool),
+            ...opt('target', g.target),
+          })),
+        }
+      : {}),
     plans: last(s.plans).map((p) => ({
       ...p,
       plan: {
@@ -359,6 +370,7 @@ export function fitSnapshot(
     approvals: [],
     questions: [],
     plans: [],
+    ...(snapshot.grants ? { grants: [] } : {}),
     messages: [],
     messagesTruncated: snapshot.messagesTruncated || snapshot.messages.length > 0,
   };
@@ -434,6 +446,13 @@ export class SessionPublisher {
   private approvals = new Map<string, ProtocolApproval>();
   private questions = new Map<string, ProtocolQuestionRequest>();
   private plans = new Map<string, ProtocolPlanRequest>();
+  /** M17 — concesiones vigentes, por id. Las decide `ApprovalGrants`; aquí se cuentan. */
+  private grants = new Map<string, ProtocolApprovalGrant>();
+  /**
+   * M17 — las que contaba el anfitrión anterior (traspaso o reinicio): no
+   * valen aquí, y `start()` publica que terminaron.
+   */
+  private readonly inheritedGrants: string[] = [];
   /** La conversación de la sesión: la misma función de los eventos que usa quien los reduce. */
   private transcript: ProtocolTranscript = EMPTY_TRANSCRIPT;
   /**
@@ -478,6 +497,7 @@ export class SessionPublisher {
       for (const sub of from.subagents) this.subagents.set(sub.id, { ...sub });
       this.todos = from.todos.map((t) => ({ ...t }));
       this.inheritedJobs = from.jobs.filter((j) => j.status !== 'running').map((j) => ({ ...j }));
+      this.inheritedGrants = (from.grants ?? []).map((g) => g.id);
       this.transcript = {
         messages: from.messages.map((m) => ({ ...m })),
         messagesTruncated: from.messagesTruncated,
@@ -531,6 +551,10 @@ export class SessionPublisher {
     // Una sesión que continúa no se abre otra vez: cambia de anfitrión.
     if (this.continuing) this.state('session.updated', () => ({ session: this.session() }));
     else this.state('session.opened', () => ({ session: this.session() }));
+    // M17: las concesiones no viajan con la sesión; quien las tenía las ve terminar.
+    for (const grantId of this.inheritedGrants.splice(0)) {
+      this.state('grant.ended', () => ({ grantId, reason: 'host-changed' as const }));
+    }
 
     this.detach.push(agent.observe((o) => this.guarded(() => this.onObservation(o))));
     if (agent.jobs) {
@@ -572,6 +596,9 @@ export class SessionPublisher {
           this.guarded(() => this.onInteraction(change)),
         ),
       );
+      const { grants } = this.host.interactions;
+      for (const grant of grants.list()) this.grants.set(grant.id, grant);
+      this.detach.push(grants.subscribe((change) => this.guarded(() => this.onGrant(change))));
     }
     try {
       this.detach.push(
@@ -741,6 +768,7 @@ export class SessionPublisher {
       approvals: [...this.approvals.values()].map((a) => ({ ...a })),
       questions: [...this.questions.values()].map((q) => ({ ...q })),
       plans: [...this.plans.values()].map((p) => ({ ...p })),
+      grants: [...this.grants.values()].map((g) => ({ ...g })),
       messages: this.transcript.messages.map((m) => ({ ...m })),
       messagesTruncated: this.transcript.messagesTruncated,
     });
@@ -787,6 +815,9 @@ export class SessionPublisher {
             : {}),
           forced: request.forced === true,
           ...(request.confirmPhrase !== undefined ? { confirmPhrase: request.confirmPhrase } : {}),
+          ...(request.grantable === true && this.host.interactions?.grants.enabled
+            ? { grantable: true }
+            : {}),
           resolvable: 'anywhere',
           status: 'pending',
         };
@@ -856,6 +887,24 @@ export class SessionPublisher {
       }));
     }
     this.syncWaiting();
+  }
+
+  /**
+   * M17 — una concesión se abrió o terminó. Renovar la de una tool y target
+   * sustituye la anterior (como hace quien reduce `grant.created`).
+   */
+  private onGrant(change: GrantChange): void {
+    const { grant } = change;
+    if (change.type === 'created') {
+      for (const [id, g] of this.grants) {
+        if (g.tool === grant.tool && g.target === grant.target) this.grants.delete(id);
+      }
+      this.grants.set(grant.id, { ...grant });
+      this.state('grant.created', () => ({ grant: { ...grant } }));
+      return;
+    }
+    if (!this.grants.delete(grant.id)) return;
+    this.state('grant.ended', () => ({ grantId: grant.id, reason: change.reason }));
   }
 
   private plan(plan: { summary: string; steps: ProtocolPlan['steps'] }): ProtocolPlan {

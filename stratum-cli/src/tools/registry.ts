@@ -6,6 +6,7 @@ import type {
   ToolResult,
   ToolCallReady,
   DestructiveDecision,
+  GrantMatch,
 } from '../agent/types.js';
 import type { ToolSchema } from '../providers/base.js';
 import type { AgentMode } from '../agent/types.js';
@@ -335,6 +336,16 @@ export interface DispatchResult {
   notRun?: true;
 }
 
+/** La concesión que cubre la llamada, o `null`. Un fallo de la consulta es `null`: se pregunta. */
+function matchGrant(ctx: ToolContext, tool: string, target: string | undefined): GrantMatch | null {
+  try {
+    return ctx.approvalGrants?.match(tool, target) ?? null;
+  } catch (err) {
+    log.warn('grant lookup threw', { tool, err });
+    return null;
+  }
+}
+
 export class ToolDispatcher {
   private readonly toolFailureCounts = new Map<string, number>();
   /** El usuario respondió `!` (allow-all): no volver a preguntar en esta sesión. */
@@ -645,7 +656,10 @@ export class ToolDispatcher {
     // Hito 16: la descripción cita el comando (puede llevar un secreto) y va al
     // log y al prompt de confirmación: redactada con el núcleo y los extras.
     const description = redactText(describeCall(call), ctx.config);
-    const traceDecision = (decision: 'approved' | 'allow-all' | 'denied' | 'blocked'): void =>
+    const traceDecision = (
+      decision: 'approved' | 'allow-all' | 'granted' | 'denied' | 'blocked',
+      grant?: GrantMatch,
+    ): void =>
       ctx.trace?.runtime({
         event: 'confirmation',
         decision,
@@ -654,7 +668,24 @@ export class ToolDispatcher {
         description,
         ...(gate ? { environment: gate.env.name } : {}),
         ...(forced ? { forced: true } : {}),
+        ...(grant ? { grantId: grant.id, grantExpiresAt: grant.expiresAt } : {}),
       });
+
+    // M17 — una concesión temporal de la sesión cubre la llamada: no se
+    // pregunta. Nunca en lo forzado ni con frase (`grantScope` da `null`), y
+    // nunca contra `--deny-destructive`.
+    const scope = this.grantScope(call, ctx, gate, forced);
+    const grant = policy !== 'deny' && scope ? matchGrant(ctx, call.name, scope.target) : null;
+    if (grant) {
+      log.info('destructive allowed by grant', {
+        tool: call.name,
+        grantId: grant.id,
+        description,
+        env: gate?.env.name,
+      });
+      traceDecision('granted', grant);
+      return null;
+    }
 
     if (policy === 'deny' || !ctx.confirmDestructive) {
       // --deny-destructive explícito, o modo piped/CI sin TTY (§12.5)
@@ -694,8 +725,11 @@ export class ToolDispatcher {
               environment: { name: gate.env.name, tier: gate.env.tier },
               ...(gate.phrase ? { confirmPhrase: gate.phrase } : {}),
             }
-          : {}),
+          : scope?.target !== undefined
+            ? { target: scope.target }
+            : {}),
         ...(forced ? { forced: true } : {}),
+        ...(scope ? { grantable: true } : {}),
       });
       decision = await untilAborted(pending, ctx.signal, 'deny');
     } catch {
@@ -727,6 +761,38 @@ export class ToolDispatcher {
       error: `User denied execution of: ${description}. Ask the user how to proceed or try a non-destructive alternative.`,
       recoverable: true,
     };
+  }
+
+  /**
+   * M17 — la pareja tool + target que cubriría una concesión para esta llamada,
+   * o `null` si no admite ninguna: forzada, con frase, una sesión sin
+   * concesiones, o una llamada que cambia más de un target (una concesión
+   * cubre uno). Sin target (una tool que Stratum no sabe clasificar), la tool
+   * entera. Un fallo al clasificar es `null`: se pregunta.
+   */
+  private grantScope(
+    call: ToolCallReady,
+    ctx: ToolContext,
+    gate: EnvironmentGate | null,
+    forced: boolean,
+  ): { target?: string } | null {
+    if (forced || gate?.phrase !== undefined || ctx.approvalGrants?.enabled !== true) return null;
+    let targets: string[];
+    try {
+      targets = [
+        ...new Set(
+          callEffects(call.name, call.input, ctx.config)
+            .targets.filter((t) => t.mutating)
+            .map((t) => t.target),
+        ),
+      ];
+    } catch (err) {
+      log.warn('grant scope threw', { tool: call.name, err });
+      return null;
+    }
+    if (targets.length > 1) return null;
+    if (gate && targets[0] !== gate.target) return null;
+    return targets.length === 1 ? { target: targets[0]! } : {};
   }
 
   private async dispatchApproved(

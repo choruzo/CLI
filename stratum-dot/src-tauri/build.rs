@@ -24,6 +24,7 @@ const COMMANDS: &[&str] = &[
     "dot_routines_update",
     "dot_routines_remove",
     "dot_routines_run",
+    "dot_grants_revoke",
     "dot_notify_routine",
     "dot_approver_status",
     "dot_approver_unlock",

@@ -113,6 +113,7 @@ pub fn run() {
             commands::dot_routines_update,
             commands::dot_routines_remove,
             commands::dot_routines_run,
+            commands::dot_grants_revoke,
             commands::dot_notify_routine,
             commands::dot_approver_status,
             commands::dot_approver_unlock,

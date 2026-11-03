@@ -264,7 +264,12 @@ const callKey = (s: TraceStep, callId: unknown): string =>
 function isPolicyBlock(s: TraceStep): boolean {
   const ev = eventOf(s);
   if (ev === 'veto') return true;
-  return ev === 'confirmation' && s.data.decision !== 'approved' && s.data.decision !== 'allow-all';
+  return ev === 'confirmation' && !isApproval(s.data.decision);
+}
+
+/** Decisiones de una confirmación que dejan ejecutar la llamada (`granted`: por concesión, M17). */
+function isApproval(decision: unknown): boolean {
+  return decision === 'approved' || decision === 'allow-all' || decision === 'granted';
 }
 
 /**
@@ -399,9 +404,11 @@ export function computeMetrics(records: readonly TraceRecord[], now = 0): RunMet
       else if (ev === 'repeat') {
         // Ni aviso del agente ni veto: ya cuenta en `repeatedCalls`, desde los pasos.
       } else if (ev === 'confirmation') {
-        conf.asked++;
         const d = s.data.decision;
-        if (d === 'approved' || d === 'allow-all') conf.approved++;
+        // M17: una llamada cubierta por una concesión no se le preguntó a nadie.
+        if (d === 'granted') continue;
+        conf.asked++;
+        if (isApproval(d)) conf.approved++;
         else if (d === 'blocked') conf.blocked++;
         else conf.denied++;
       } else if (s.status === 'error') {

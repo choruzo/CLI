@@ -18,6 +18,7 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { ProtocolGrantMinutes } from '../protocol';
 
 /** Estado de la conexión con el daemon (`ConnectionState` en `dot-link/src/state.rs`). */
 export type ConnectionState =
@@ -236,6 +237,11 @@ export interface NativeBridge {
   routinesRemove(routineId: string): Promise<unknown>;
   /** M16 — dispararla ya, también deshabilitada. */
   routinesRun(routineId: string): Promise<unknown>;
+  /**
+   * M17 — revocar una concesión vigente. Solo resta autoridad: va por la
+   * conexión principal, sin confirmación nativa. Sin respuesta, `unknown`: no se repite.
+   */
+  grantsRevoke(sessionId: string, grantId: string): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
@@ -250,7 +256,11 @@ export interface NativeBridge {
    * frase, se teclea allí. `forSession` = `allow-all` (solo esa sesión).
    * Resuelve cuando el daemon lo acepta: lo que cambie llega por eventos.
    */
-  approve(sessionId: string, approvalId: string, opts: { forSession: boolean }): Promise<void>;
+  approve(
+    sessionId: string,
+    approvalId: string,
+    opts: { forSession: boolean; grantMinutes?: ProtocolGrantMinutes },
+  ): Promise<void>;
   /** Directo, sin confirmación: es lo que pasa cuando nadie contesta. */
   deny(sessionId: string, approvalId: string): Promise<void>;
   /** Con respuestas, confirmación nativa; `null` omite la tanda (directo): el agente sigue con supuestos. */
@@ -305,11 +315,13 @@ export const tauriBridge: NativeBridge = {
   routinesUpdate: (routineId, patch) => invoke<unknown>('dot_routines_update', { routineId, patch }),
   routinesRemove: (routineId) => invoke<unknown>('dot_routines_remove', { routineId }),
   routinesRun: (routineId) => invoke<unknown>('dot_routines_run', { routineId }),
+  grantsRevoke: (sessionId, grantId) => invoke<unknown>('dot_grants_revoke', { sessionId, grantId }),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),
-  approve: (sessionId, approvalId, opts) => invoke('dot_approve', { sessionId, approvalId, forSession: opts.forSession }),
+  approve: (sessionId, approvalId, opts) =>
+    invoke('dot_approve', { sessionId, approvalId, forSession: opts.forSession, grantMinutes: opts.grantMinutes ?? null }),
   deny: (sessionId, approvalId) => invoke('dot_deny', { sessionId, approvalId }),
   answerQuestions: (sessionId, requestId, answers) =>
     invoke('dot_answer_questions', { sessionId, requestId, answers }),

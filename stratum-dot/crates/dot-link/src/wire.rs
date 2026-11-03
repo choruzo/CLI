@@ -69,10 +69,12 @@ pub enum MainMethod {
     RoutinesUpdate,
     RoutinesRemove,
     RoutinesRun,
+    /// M17 (Dot) — revocar una concesión vigente (capacidad `control`, solo resta).
+    GrantsRevoke,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 28] = [
+    pub const ALL: [MainMethod; 29] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -101,6 +103,7 @@ impl MainMethod {
         MainMethod::RoutinesUpdate,
         MainMethod::RoutinesRemove,
         MainMethod::RoutinesRun,
+        MainMethod::GrantsRevoke,
     ];
 }
 
@@ -135,6 +138,7 @@ impl WireMethod for MainMethod {
             MainMethod::RoutinesUpdate => "routines.update",
             MainMethod::RoutinesRemove => "routines.remove",
             MainMethod::RoutinesRun => "routines.run",
+            MainMethod::GrantsRevoke => "grants.revoke",
         }
     }
 }
@@ -324,7 +328,8 @@ mod tests {
                 "routines.add",
                 "routines.update",
                 "routines.remove",
-                "routines.run"
+                "routines.run",
+                "grants.revoke"
             ]
         );
         for forbidden in [

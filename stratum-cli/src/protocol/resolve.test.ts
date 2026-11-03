@@ -27,6 +27,29 @@ describe('qué respuestas valen', () => {
     expect(checkApprovalResolution({ confirmPhrase: 'prod' }, 'approve', 'prod')).toBeNull();
   });
 
+  it('concesión (M17): solo con approve y una solicitud grantable, nunca forzada ni con frase', () => {
+    const grant = { minutes: 30 as const };
+    expect(checkApprovalResolution({ grantable: true }, 'approve', undefined, grant)).toBeNull();
+    expect(checkApprovalResolution({ grantable: true }, 'deny', undefined, grant)?.path).toBe(
+      'grant',
+    );
+    expect(checkApprovalResolution({ grantable: true }, 'allow-all', undefined, grant)?.path).toBe(
+      'grant',
+    );
+    expect(checkApprovalResolution({}, 'approve', undefined, grant)?.path).toBe('grant');
+    expect(checkApprovalResolution({ grantable: false }, 'approve', undefined, grant)?.path).toBe(
+      'grant',
+    );
+    expect(
+      checkApprovalResolution({ grantable: true, forced: true }, 'approve', undefined, grant)?.path,
+    ).toBe('grant');
+    expect(
+      checkApprovalResolution({ grantable: true, confirmPhrase: 'p' }, 'approve', 'p', grant)?.path,
+    ).toBe('grant');
+    // Sin concesión, nada cambia aunque la solicitud la admita.
+    expect(checkApprovalResolution({ grantable: true }, 'approve', undefined)).toBeNull();
+  });
+
   it('preguntas: una por pregunta, del dominio de la pregunta, y nada se aproxima', () => {
     const questions = [
       {

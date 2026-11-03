@@ -104,6 +104,40 @@ describe('parámetros: estrictos', () => {
     expect(PARAMS['sessions.list'].safeParse({ limit: 100_000 }).success).toBe(false);
   });
 
+  it('approvals.resolve admite grant con 10, 30 o 60 minutos; grants.revoke es estricto (M17)', () => {
+    const base = { approvalId: 'a', decision: 'approve' };
+    for (const minutes of [10, 30, 60]) {
+      expect(PARAMS['approvals.resolve'].safeParse({ ...base, grant: { minutes } }).success).toBe(
+        true,
+      );
+      expect(
+        PARAMS['host.resolveApproval'].safeParse({
+          sessionId: 's',
+          ...base,
+          grant: { minutes },
+          by: { kind: 'remote', client: 'cli', at: 1 },
+        }).success,
+      ).toBe(true);
+    }
+    for (const minutes of [15, 0, -10, '30']) {
+      expect(PARAMS['approvals.resolve'].safeParse({ ...base, grant: { minutes } }).success).toBe(
+        false,
+      );
+    }
+    expect(
+      PARAMS['approvals.resolve'].safeParse({ ...base, grant: { minutes: 10, extra: 1 } }).success,
+    ).toBe(false);
+    expect(PARAMS['grants.revoke'].safeParse({ sessionId: 's', grantId: 'g' }).success).toBe(true);
+    expect(PARAMS['grants.revoke'].safeParse({ sessionId: 's' }).success).toBe(false);
+    expect(PARAMS['grants.revoke'].safeParse({ sessionId: 's', grantId: 'g', x: 1 }).success).toBe(
+      false,
+    );
+    expect(PARAMS['host.revokeGrant'].safeParse({ sessionId: 's', grantId: 'g' }).success).toBe(
+      true,
+    );
+    expect(METHODS['grants.revoke'].capability).toBe('control');
+  });
+
   it('runs.start, runs.steer y host.steer: images son de 1 a 5 rutas', () => {
     const paths = (k: number) => Array.from({ length: k }, (_, i) => `/p/${i}.png`);
     const base = {
@@ -178,12 +212,71 @@ describe('eventos', () => {
   };
 
   it('hay schema de datos para cada tipo de evento', () => {
-    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(34);
+    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(36);
   });
 
   it('valida los de estado y los volátiles', () => {
     expect(eventSchema.parse(state)).toEqual(state);
     expect(eventSchema.parse(volatile)).toEqual(volatile);
+  });
+
+  it('los eventos grant.* validan y no admiten razones inventadas (M17)', () => {
+    const grant = {
+      id: 'g1',
+      sessionId: 's1',
+      tool: 'exec',
+      target: 'local',
+      minutes: 10,
+      grantedAt: 1,
+      expiresAt: 600_001,
+      grantedBy: { kind: 'remote', client: 'cli', at: 1 },
+    };
+    const created = { type: 'grant.created', sessionId: 's1', at: 10, seq: 5, data: { grant } };
+    expect(eventSchema.parse(created)).toEqual(created);
+    for (const reason of ['expired', 'revoked', 'host-changed']) {
+      const ended = {
+        type: 'grant.ended',
+        sessionId: 's1',
+        at: 10,
+        seq: 6,
+        data: { grantId: 'g1', reason },
+      };
+      expect(eventSchema.parse(ended)).toEqual(ended);
+    }
+    expect(
+      eventSchema.safeParse({ ...created, data: { grant: { ...grant, minutes: 15 } } }).success,
+    ).toBe(false);
+    expect(
+      eventSchema.safeParse({
+        type: 'grant.ended',
+        sessionId: 's1',
+        at: 10,
+        seq: 6,
+        data: { grantId: 'g1', reason: 'because' },
+      }).success,
+    ).toBe(false);
+  });
+
+  it('la foto lleva grants opcionales y la aprobación, grantable', () => {
+    expect(sessionSnapshotSchema.parse(sampleSnapshot()).grants).toBeUndefined();
+    const withGrants = {
+      ...sampleSnapshot(),
+      grants: [
+        {
+          id: 'g1',
+          sessionId: 's1',
+          tool: 'exec',
+          minutes: 60,
+          grantedAt: 1,
+          expiresAt: 2,
+          grantedBy: { kind: 'remote', client: 'dot', at: 1 },
+        },
+      ],
+    };
+    expect(sessionSnapshotSchema.parse(withGrants).grants).toHaveLength(1);
+    expect(schemas.approvalSchema.parse({ ...sampleApproval(), grantable: true }).grantable).toBe(
+      true,
+    );
   });
 
   it('un evento de estado necesita seq ≥ 1 y no admite after', () => {

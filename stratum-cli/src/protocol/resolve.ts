@@ -1,3 +1,4 @@
+import type { ProtocolGrantRequest } from './methods.js';
 import type {
   ProtocolApprovalDecision,
   ProtocolQuestion,
@@ -24,19 +25,32 @@ export interface ApprovalRules {
   forced?: boolean;
   /** Texto que hay que teclear para aprobar. */
   confirmPhrase?: string;
+  /** M17 — admite una concesión temporal. Lo decide el anfitrión. */
+  grantable?: boolean;
 }
 
 /**
- * - Denegar vale siempre, sin frase.
+ * - Denegar vale siempre, sin frase (y sin concesión).
  * - `allow-all` no vale para una solicitud forzada ni para una con frase: esas
  *   se aprueban de una en una.
  * - Con `confirmPhrase`, aprobar exige la frase exacta.
+ * - Una concesión (M17) solo acompaña a `approve`, y solo si la solicitud es
+ *   `grantable`; nunca a una forzada ni a una con frase, aunque lo diga.
  */
 export function checkApprovalResolution(
   rules: ApprovalRules,
   decision: ProtocolApprovalDecision,
   phrase: string | undefined,
+  grant?: ProtocolGrantRequest,
 ): ResolutionIssue | null {
+  if (grant !== undefined) {
+    if (decision !== 'approve') {
+      return { path: 'grant', message: 'a grant can only come with decision "approve"' };
+    }
+    if (rules.grantable !== true || rules.forced || rules.confirmPhrase !== undefined) {
+      return { path: 'grant', message: 'this request cannot be approved with a grant' };
+    }
+  }
   if (decision === 'deny') return null;
   if (decision === 'allow-all' && (rules.forced || rules.confirmPhrase !== undefined)) {
     return {

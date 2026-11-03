@@ -1,6 +1,7 @@
 import type { RefObject } from 'react';
 import { useRunActions } from '../app/actions';
 import { ActivityPanel } from '../components/ActivityPanel';
+import { GrantsPanel } from '../components/GrantsPanel';
 import { Composer } from '../components/Composer';
 import { RunControls } from '../components/RunControls';
 import { StatusBadge } from '../components/StatusBadge';
@@ -117,6 +118,8 @@ export function SessionDetail({ sessionId, entry, now, canControl, connected, co
             {notice.text}
           </p>
         ) : null}
+
+        <GrantsPanel snapshot={snapshot} canControl={enabled} />
 
         <div className="tabs" role="tablist" aria-label="Session views">
           {TABS.map((t) => (

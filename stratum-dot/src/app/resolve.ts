@@ -21,6 +21,7 @@
 import { useCallback } from 'react';
 import { useNative } from '../bridge/context';
 import { toCommandError, type CommandError, type QuestionAnswerInput } from '../bridge/native';
+import type { ProtocolGrantMinutes } from '../protocol';
 import type { HumanInputItem } from '../protocol/interactions';
 import { useUi } from '../stores/uiStore';
 
@@ -67,7 +68,7 @@ function needsPhoto(error: CommandError): boolean {
 }
 
 export interface ResolveActions {
-  approve(opts: { forSession: boolean }): Promise<boolean>;
+  approve(opts: { forSession: boolean; grantMinutes?: ProtocolGrantMinutes }): Promise<boolean>;
   deny(): Promise<boolean>;
   answer(answers: QuestionAnswerInput[] | null): Promise<boolean>;
   decide(decision: 'approve' | 'reject'): Promise<boolean>;
@@ -104,10 +105,11 @@ export function useResolve(item: HumanInputItem): ResolveActions {
   );
 
   return {
-    approve: ({ forSession }) =>
+    approve: ({ forSession, grantMinutes }) =>
       send(
-        forSession ? 'Allow for this session' : 'Approve',
-        () => native.approve(sessionId, id, { forSession }),
+        forSession ? 'Allow for this session' : grantMinutes ? `Allow for ${grantMinutes} minutes` : 'Approve',
+        // Sin `grantMinutes` el pedido es el de siempre: la concesión solo viaja si se eligió.
+        () => native.approve(sessionId, id, grantMinutes ? { forSession, grantMinutes } : { forSession }),
         true,
       ),
     deny: () => send('Deny', () => native.deny(sessionId, id)),

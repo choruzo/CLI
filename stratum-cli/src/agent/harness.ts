@@ -2184,6 +2184,7 @@ export class ReactLoop {
           destructivePolicy:
             opts?.destructivePolicy ?? (opts?.allowDestructive === true ? 'allow' : 'ask'),
           confirmDestructive: opts?.onConfirmDestructive,
+          approvalGrants: opts?.approvalGrants,
           readOnly,
           trace: opts?.trace,
           jobs: opts?.jobs,

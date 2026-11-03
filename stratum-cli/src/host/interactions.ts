@@ -39,11 +39,13 @@ import {
   checkQuestionAnswers,
   type ClientKind,
   type ProtocolApprovalDecision,
+  type ProtocolGrantRequest,
   type ProtocolInteractionStatus,
   type ProtocolPlan,
   type ProtocolQuestionAnswer,
   type ProtocolResolver,
 } from '../protocol/index.js';
+import { ApprovalGrants } from './approval-grants.js';
 
 const log = getLogger('host').child('interactions');
 
@@ -123,6 +125,11 @@ export interface PendingInteractionsOptions {
   timeoutMs?: number | null;
   /** ¿Puede contestar ahora un cliente remoto? Sin esto, nunca. */
   remote?: () => boolean;
+  /**
+   * M17 — las concesiones temporales de la sesión. Sin esto, ninguna: una
+   * aprobación con `grant` no vale (falla cerrado).
+   */
+  grants?: ApprovalGrants;
   now?: () => number;
 }
 
@@ -167,10 +174,13 @@ export class PendingInteractions {
   /** Solicitudes ya resueltas, para contestar `ALREADY_RESOLVED` y no `NOT_FOUND`. */
   private readonly recent = new Map<string, string>();
   private readonly listeners = new Set<(change: InteractionChange) => void>();
+  /** M17 — concesiones temporales de la sesión: las abre `resolveApproval`. */
+  readonly grants: ApprovalGrants;
 
   constructor(opts: PendingInteractionsOptions = {}) {
     this.local = opts.local ?? {};
     this.remote = opts.remote ?? (() => false);
+    this.grants = opts.grants ?? new ApprovalGrants('', { enabled: false });
     this.timeoutMs = opts.timeoutMs && opts.timeoutMs > 0 ? opts.timeoutMs : null;
     this.now = opts.now ?? Date.now;
   }
@@ -376,10 +386,12 @@ export class PendingInteractions {
 
   /**
    * Cancela todo lo pendiente (cierre de la sesión). Cada puerta devuelve su
-   * respuesta negativa: ninguna promesa queda colgada.
+   * respuesta negativa: ninguna promesa queda colgada. Las concesiones se
+   * retiran con la sesión.
    */
   cancelAll(): void {
     for (const entry of [...this.entries.values()]) this.settle(entry, entry.negative, 'cancelled');
+    this.grants.clear();
   }
 
   // ---------------------------------------------------------------------------
@@ -413,6 +425,10 @@ export class PendingInteractions {
   }
 
   /**
+   * Con `grant` (M17), además de aprobar esta llamada abre una concesión para
+   * su tool y target, antes de devolverle la respuesta al runtime: la siguiente
+   * llamada igual ya no pregunta.
+   *
    * @throws ProtocolError `ALREADY_RESOLVED` si otro llegó antes; `NOT_FOUND`;
    *   `INVALID_PARAMS` si la respuesta no vale (la solicitud sigue pendiente).
    */
@@ -421,11 +437,27 @@ export class PendingInteractions {
     decision: ProtocolApprovalDecision,
     phrase: string | undefined,
     by: RemoteResolver,
+    grant?: ProtocolGrantRequest,
   ): void {
     const entry = this.take<'approval', DestructiveDecision>(id, 'approval');
-    const issue = checkApprovalResolution(entry.interaction.request, decision, phrase);
+    const { request } = entry.interaction;
+    // Lo que admite la solicitud lo dijo el dispatcher; si la sesión no admite
+    // concesiones, no vale aunque el cliente las pida.
+    const rules = { ...request, grantable: request.grantable === true && this.grants.enabled };
+    const issue = checkApprovalResolution(rules, decision, phrase, grant);
     if (issue) throw invalid(issue.path, issue.message);
-    this.settle(entry, decision, 'resolved', this.remoteBy(by));
+    const resolver = this.remoteBy(by);
+    if (grant) {
+      this.grants.create(
+        {
+          tool: request.toolName,
+          ...(request.target !== undefined ? { target: request.target } : {}),
+        },
+        grant.minutes,
+        resolver,
+      );
+    }
+    this.settle(entry, decision, 'resolved', resolver);
   }
 
   /** `answers: null` = omitir la tanda. */

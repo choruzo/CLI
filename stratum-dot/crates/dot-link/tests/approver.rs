@@ -35,6 +35,7 @@ fn approve(session: &str, id: &str) -> ApproverAction {
         approval_id: id.into(),
         phrase: None,
         for_session: false,
+        grant_minutes: None,
     }
 }
 
@@ -531,6 +532,7 @@ async fn la_clave_no_sale_por_ningun_lado() {
                 approval_id: "apr_2".into(),
                 phrase: None,
                 for_session: false,
+                grant_minutes: None,
             },
         ),
         async {

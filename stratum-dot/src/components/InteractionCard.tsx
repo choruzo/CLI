@@ -1,6 +1,13 @@
 import { forwardRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { useResolve } from '../app/resolve';
-import type { ProtocolApproval, ProtocolPlanRequest, ProtocolQuestionRequest, ProtocolSessionSnapshot } from '../protocol';
+import {
+  GRANT_MINUTES,
+  type ProtocolApproval,
+  type ProtocolGrantMinutes,
+  type ProtocolPlanRequest,
+  type ProtocolQuestionRequest,
+  type ProtocolSessionSnapshot,
+} from '../protocol';
 import {
   approvalChoices,
   draftToAnswers,
@@ -167,6 +174,7 @@ function ApprovalBody({
 }) {
   const choices = approvalChoices(approval);
   const approve = (forSession: boolean) => void actions.approve({ forSession });
+  const grant = (grantMinutes: ProtocolGrantMinutes) => void actions.approve({ forSession: false, grantMinutes });
 
   return (
     <>
@@ -225,7 +233,25 @@ function ApprovalBody({
           Approve
         </button>
       </div>
+      {choices.grant ? (
+        <div className="decision grant-choice" role="group" aria-label="Allow for a while" aria-describedby={`grant-${approval.id}`}>
+          <span className="muted small">Allow for…</span>
+          {GRANT_MINUTES.map((minutes) => (
+            <button key={minutes} type="button" className="btn small" disabled={off} onClick={() => grant(minutes)}>
+              {minutes} min
+            </button>
+          ))}
+        </div>
+      ) : null}
       <p className="muted small">Approving opens a confirmation window. Deny is sent right away.</p>
+      {choices.grant ? (
+        <p id={`grant-${approval.id}`} className="muted small">
+          “Allow for…” approves this and later calls of {approval.tool}
+          {approval.target ? ` on ${approval.target}` : ''} in this session, without asking, for that long. The
+          confirmation window shows the duration; you can revoke it from the session. Requests required by policy
+          keep asking.
+        </p>
+      ) : null}
       {choices.allowSession ? (
         <p id={`allow-${approval.id}`} className="muted small">
           “Allow for this session” approves this and later requests of this session only. It does not change any

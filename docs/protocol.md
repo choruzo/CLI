@@ -1032,23 +1032,70 @@ persona) tendrá que pedirlo con una opción explícita, que hoy no existe. Lo f
 
 Cliente de texto del centro de aprobaciones.
 
-| Comando                                  | Rol        | Qué hace                                                                         |
-| ---------------------------------------- | ---------- | -------------------------------------------------------------------------------- |
-| `stratum approvals [list] [--json]`      | `observer` | Lo pendiente de todas las sesiones                                               |
-| `stratum approvals approve <id> [--all]` | `approver` | Aprueba una aprobación o un plan; pide la frase si la hay. `--all` = `allow-all` |
-| `stratum approvals deny <id>`            | `approver` | Deniega, rechaza el plan u omite las preguntas                                   |
-| `stratum approvals answer <id>`          | `approver` | Contesta una tanda de preguntas                                                  |
-| `stratum approvals set-key`              | —          | Fija la clave de aprobador (hay que reiniciar el daemon)                         |
+| Comando                                              | Rol        | Qué hace                                                                         |
+| ---------------------------------------------------- | ---------- | -------------------------------------------------------------------------------- |
+| `stratum approvals [list] [--json]`                  | `observer` | Lo pendiente de todas las sesiones                                               |
+| `stratum approvals approve <id> [--all]`             | `approver` | Aprueba una aprobación o un plan; pide la frase si la hay. `--all` = `allow-all` |
+| `stratum approvals approve <id> --for 10\|30\|60`    | `approver` | Aprueba y abre una concesión (§15.11); no se combina con `--all`                 |
+| `stratum approvals grants [--session <id>] [--json]` | `observer` | Concesiones vigentes: sesión, tool, target, minutos que quedan, id               |
+| `stratum approvals revoke <grantId> --session <id>`  | `operator` | Retira una concesión; no pide la clave de aprobador                              |
+| `stratum approvals deny <id>`                        | `approver` | Deniega, rechaza el plan u omite las preguntas                                   |
+| `stratum approvals answer <id>`                      | `approver` | Contesta una tanda de preguntas                                                  |
+| `stratum approvals set-key`                          | —          | Fija la clave de aprobador (hay que reiniciar el daemon)                         |
 
 ### 15.9 Tests
 
-`host/interactions.test.ts` (la carrera, sin daemon), `daemon/approvals.test.ts` (daemon real,
+`host/interactions.test.ts` (la carrera, sin daemon), `host/approval-grants.test.ts` (concesiones, M17), `daemon/approvals.test.ts` (daemon real,
 sesiones alojadas y pares: roles, doble resolución, local contra remoto, cancelación, cierre,
 desconexión, plazo, `confirm-always`, lo que no sale en los logs, y el mismo ciclo visto desde
 fuera en los dos anfitriones), `daemon/architecture.test.ts` (el centro no ejecuta ni numera;
 `pid` y `claim` no cuentan; `approve` se concede en un solo sitio) y
 `scripts/tui/daemon-approvals.mjs` (`npm run tui:approvals`: `chat` y `run` en un terminal real
 contra un aprobador externo).
+
+### 15.11 Concesiones con caducidad (M17)
+
+Una tercera respuesta a una aprobación, entre «una vez» y `allow-all`: **«permitir 10, 30 o 60
+minutos»**. Durante ese tiempo la sesión no vuelve a preguntar por esa pareja **tool + target**
+(sin target, por la tool). Nunca «todo»: para eso está `allow-all`.
+
+| Pieza                | Forma                                                                                                                                                       |
+| -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Pedirla              | `approvals.resolve { approvalId, decision: 'approve', grant: { minutes: 10 \| 30 \| 60 } }` (`approve`). El mismo `grant` en `host.resolveApproval`         |
+| Ofrecerla            | `ProtocolApproval.grantable?: true`: lo decide el anfitrión. Un cliente solo la ofrece si está y si el servidor anuncia la _feature_ `approval-grants`      |
+| Verla                | `ProtocolSessionSnapshot.grants?: ProtocolApprovalGrant[]` (`id`, `sessionId`, `tool`, `target?`, `minutes`, `grantedAt`, `expiresAt`, `grantedBy`)         |
+| Eventos de estado    | `grant.created { grant }` (renovar la de la misma tool + target la sustituye) y `grant.ended { grantId, reason: 'expired' \| 'revoked' \| 'host-changed' }` |
+| Revocarla            | `grants.revoke { sessionId, grantId }` → `{ grant }` (**`control`**, no `approve`); `NOT_FOUND` si ya no está. Hacia el anfitrión par: `host.revokeGrant`   |
+| _Feature_ en `hello` | `approval-grants` (`FEATURE_APPROVAL_GRANTS`), solo con aprobador configurado, junto a `remote-approvals`                                                   |
+
+**Qué no la admite** (`INVALID_PARAMS` y la solicitud **sigue pendiente**; lo comprueba
+`checkApprovalResolution`, igual que `allow-all`):
+
+- `grant` con `deny` o `allow-all`: solo acompaña a `approve`;
+- una solicitud que no es `grantable`: **forzada** (`confirm-always`, `gitPushForce`), con
+  `confirmPhrase` (entorno `typed`), cuya llamada cambia **más de un target**, o de una sesión que
+  no las admite (la de una **rutina**: programado no rebaja ninguna política, §23.5);
+- minutos que no sean 10, 30 o 60 (el schema los rechaza).
+
+Los vetos (entorno, read-only, `onlyTarget`, plugins) y la política `deny` no se levantan con una
+concesión: se evalúan antes o aparte.
+
+**Dónde vive.** En memoria del **anfitrión** de la sesión (`host/approval-grants.ts`,
+`ApprovalGrants`, junto a `PendingInteractions`). La caducidad la decide un **reloj monotónico**,
+comprobado en cada consulta: cambiar la hora del sistema no la alarga (`expiresAt` es orientativo).
+**No se guarda en disco, no sobrevive a un reinicio y no viaja en un traspaso** (M10): quien
+continúa una sesión desde una foto con `grants` publica un `grant.ended { reason: 'host-changed' }`
+por cada una, y empieza sin ninguna. Cerrar la sesión las retira sin avisar.
+
+**Autoridad.** Concederla es resolver una aprobación: exige `approve` (la clave de aprobador). Quitarla
+solo resta: basta `control`. En Stratum Dot, además, la confirmación nativa enseña la duración.
+
+**Traza.** `confirmation` con `decision: 'granted'` (más `grantId` y `grantExpiresAt`) en cada llamada
+que pasa por una concesión, y el evento runtime `grant` (`created`·`revoked`·`expired`) al abrirla y
+cerrarla.
+
+**CLI.** `stratum approvals approve <id> --for 10|30|60`, `stratum approvals grants [--session] [--json]`
+y `stratum approvals revoke <grantId> --session <id>` (§15.8).
 
 ### 15.10 Cambios en el contrato respecto a M1
 
@@ -1063,6 +1110,10 @@ Se cambian dentro de la v1, que aún no está congelada (§17):
    que aparezca un `tool.started`.
 5. (M8) `approvals.resolve`, `questions.answer` y `plans.decide` admiten `sessionId` opcional
    (§15.2). Aditivo.
+
+6. (M17) Concesiones con caducidad: `grant` en `approvals.resolve`/`host.resolveApproval`, `grants.revoke`/
+   `host.revokeGrant`, eventos `grant.*`, `snapshot.grants`, `ProtocolApproval.grantable` y la _feature_
+   `approval-grants` (§15.11). Aditivo.
 
 Desde M8, Stratum Dot resuelve con una conexión de aprobador propia, separada de la que observa
 y controla, y sin que la clave pase por su webview: `docs/dot.md` §13.
@@ -1252,7 +1303,8 @@ Correcciones hechas a la v1 antes de congelarla:
 | M13             | Métodos `box.status` (`observe`) y `box.start`/`box.stop`/`box.reset` (`control`); DTO `ProtocolBoxStatus`. `data.reason` de `UNAVAILABLE` admite `no-runtime` y `box-failed`, y el de `BUSY`, `box-busy`                                                                                                                                                                                                                                       | Aditivo                                                                                                                                                                                                                                                      |
 | M14             | `sessions.open { agent: 'companion' }` abre (o devuelve, si ya existe) la sesión del agente embebido de Stratum Dot, sin `cwd`; `agents.list` lo ofrece tras `assistant`; `ProtocolSkill.presets` admite `companion`; un traspaso con `agent: 'companion'` → `NOT_TRANSFERABLE` (`context`)                                                                                                                                                     | Aditivo para quien no lo pide. Un cliente que valide la unión de `presets` tiene que aceptar el valor nuevo; los del árbol validan con `schemas.ts`, que ya lo incluye                                                                                       |
 | M16             | Métodos `routines.list` (`observe`) y `routines.add`/`update`/`remove`/`run` (`control`); DTOs `ProtocolRoutine*`; `ProtocolSession.routineId` (solo procedencia). `data.reason` de `UNAVAILABLE` admite `routines-disabled` y `read-only`                                                                                                                                                                                                      | Aditivo                                                                                                                                                                                                                                                      |
-| Imágenes        | `runs.start`, `runs.steer` y `host.steer` admiten `images?: string[]` (1 a `LIMITS.imagesPerMessage` = 5 rutas). Quien atiende las lee confinadas al `cwd` de la sesión y a `~/.stratum/images`; una que no vale (fuera, no es imagen, >5 MB) rechaza el mensaje entero con `INVALID_PARAMS`, sin arrancar ni encolar nada | Aditivo: quien no lo envía sigue igual |
+| M17             | Concesiones con caducidad (§15.11): `approvals.resolve`/`host.resolveApproval` admiten `grant: { minutes: 10 \| 30 \| 60 }`; método `grants.revoke` (`control`) y `host.revokeGrant`; eventos de estado `grant.created` y `grant.ended`; `ProtocolSessionSnapshot.grants?`; `ProtocolApproval.grantable?`; _feature_ `approval-grants`                                                                                                          | Aditivo: quien no lo usa sigue igual. Un cliente que valide la unión de eventos tiene que aceptar los dos nuevos; los del árbol validan con `schemas.ts`, que ya los incluye                                                                                 |
+| Imágenes        | `runs.start`, `runs.steer` y `host.steer` admiten `images?: string[]` (1 a `LIMITS.imagesPerMessage` = 5 rutas). Quien atiende las lee confinadas al `cwd` de la sesión y a `~/.stratum/images`; una que no vale (fuera, no es imagen, >5 MB) rechaza el mensaje entero con `INVALID_PARAMS`, sin arrancar ni encolar nada                                                                                                                      | Aditivo: quien no lo envía sigue igual                                                                                                                                                                                                                       |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1783,7 +1835,7 @@ Tests: `stratum-cli/src/daemon/daemon-box.test.ts`, `src/box/*.test.ts` y, contr
                 "screenWidth": 1280, "screenHeight": 800, "takenAt": 1793000000000 } }
 ```
 
-- Para **enseñar** la pantalla de la caja en solo lectura (la vista *Asistente* de Dot la pide cada
+- Para **enseñar** la pantalla de la caja en solo lectura (la vista _Asistente_ de Dot la pide cada
   poco mientras se ve). Capacidad `observe`, como `box.status`: quien ve la conversación del
   asistente puede ver lo que hace en su pantalla. No hay forma de actuar en ella desde un cliente.
 - La toma el servidor con una orden fija (`BOX_SCREEN_CAPTURE` en `src/box/manager.ts`): ningún
@@ -1797,7 +1849,7 @@ Tests: `stratum-cli/src/daemon/daemon-box.test.ts`, `src/box/*.test.ts` y, contr
 - `ProtocolBoxStatus.desktop`: la caja tiene escritorio (`box.desktop`; por defecto sí con la imagen
   de Stratum y no con una propia). Ausente en un servidor anterior.
 - **Visión del modelo**: `ProtocolModel.vision` (`models.list`) es `{ coordinates: 'pixels' |
-  'norm1000' }` solo si la config del servidor la declara (`models.<id>.vision`); nunca se descubre.
+'norm1000' }` solo si la config del servidor la declara (`models.<id>.vision`); nunca se descubre.
   Un cliente la usa para marcar en su selector qué modelos pueden usar la pantalla y para avisar si el
   del `companion` no puede.
 - **Saber que el asistente está usando la pantalla** no necesita nada nuevo: un `tool.started` de una

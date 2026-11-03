@@ -526,8 +526,15 @@ export class PeerHostBridge implements PublisherSink {
           params.decision,
           params.phrase,
           remoteResolver(params.by),
+          params.grant,
         );
         return {};
+      },
+      // M17 — revocar solo resta; la concesión vive aquí, con la sesión.
+      'host.revokeGrant': (params) => {
+        const grant = this.pending(params.sessionId).grants.revoke(params.grantId);
+        if (!grant) throw new ProtocolError('NOT_FOUND', 'No such grant.');
+        return { grant };
       },
       'host.answerQuestions': (params) => {
         this.pending(params.sessionId).answerQuestions(

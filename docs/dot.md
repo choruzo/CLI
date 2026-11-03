@@ -1396,3 +1396,23 @@ daemon: Dot solo las ve y las gobierna.
 Tests: `src/app/Routines.test.tsx`, `src/protocol/routine-notices.test.ts`, `link.rs` (unidad) y
 `las_rutinas_solo_salen_por_dot_y_las_mutaciones_llevan_operation_id` (`tests/link.rs`),
 `wire.rs` y `tests/architecture.test.ts` (el webview no tiene permiso de notificaciones).
+
+## 20. Concesiones con caducidad (M17)
+
+«Permitir 10, 30 o 60 minutos» al aprobar: el anfitrión no vuelve a preguntar por esa tool sobre ese target
+durante ese tiempo (`docs/protocol.md`; reglas en `protocol/resolve.ts`).
+
+- **Dónde se ofrece**: la tarjeta de aprobación (`InteractionCard`) enseña «Allow for… 10 / 30 / 60 min» solo si
+  `ProtocolApproval.grantable` y la regla compartida lo admite (`approvalChoices(...).grant`, que usa
+  `checkApprovalResolution(..., { minutes })`): nunca en lo forzado, con frase ni junto a «toda la sesión».
+- **Pasa por la confirmación nativa**: `dot_approve` admite `grant_minutes`; `dot-link` valida la duración y la
+  ventana nativa la enseña («Allow for 30 minutes» y qué abarca) antes de enviar `approvals.resolve` con
+  `grant: { minutes }`. El webview solo pide; la autoridad sigue siendo el broker.
+- **Lista y revocar**: `GrantsPanel` (en `SessionDetail`, también en la vista *Asistente*) pinta
+  `snapshot.grants`: tool, target y minutos que quedan (hacia arriba; se refresca cada 30 s). Una concesión con
+  `expiresAt` pasado se oculta aunque no haya llegado su `grant.ended`. *Revoke* llama a `grants.revoke`
+  (`dot_grants_revoke`, `MainMethod::GrantsRevoke`, solo en `DOT_METHODS`): **va por la conexión principal con la
+  capacidad `control`**, sin broker ni confirmación nativa, porque solo resta autoridad. Sin optimismo: la fila
+  la retira la foto (`grant.ended`); un error se enseña y un «sin respuesta» no se repite.
+- Tests: `src/app/Grants.test.tsx`, `link.rs` (unidad), `revocar_una_concesion_sale_por_dot_con_operation_id_y_no_por_desktop`
+  (`tests/link.rs`), `wire.rs` y `tests/architecture.test.ts`.

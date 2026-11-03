@@ -245,6 +245,8 @@ export async function* executeDelegations(
             parentDestructivePolicy: parentPolicy,
             sessionId: opts?.sessionId,
             onConfirmDestructive: wrappedConfirm,
+            // M17: las concesiones son de la sesión, no del agente que preguntó.
+            approvalGrants: opts?.approvalGrants,
             // Hito 17: el hijo hereda el modo read-only y el plan aprobado del padre.
             readOnly: opts?.readOnly,
             planApproved: opts?.planApproved,

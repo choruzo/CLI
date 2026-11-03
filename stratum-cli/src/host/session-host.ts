@@ -22,7 +22,8 @@ import { getLogger } from '../logging/index.js';
 import { findWorktreeRoot } from '../config/paths.js';
 import { PluginHost, loadPlugins, type PluginLoadRequest } from '../plugins/index.js';
 import { PendingInteractions, type HostGates, type InteractionChange } from './interactions.js';
-import { recordResolution } from './resolution-audit.js';
+import { recordGrant, recordResolution } from './resolution-audit.js';
+import { ApprovalGrants } from './approval-grants.js';
 import {
   assistantDataDir,
   assistantWorkspace,
@@ -69,6 +70,11 @@ export interface SessionHostOptions {
   interactionTimeoutMs?: number;
   /** ¿Puede contestar ahora un cliente remoto? Ver `PendingInteractions`. */
   remoteApprovals?: () => boolean;
+  /**
+   * M17 — `false`: la sesión no admite concesiones temporales (la de una
+   * rutina: programado no rebaja ninguna política). Por defecto, sí.
+   */
+  approvalGrants?: boolean;
   /** Opciones del agente (reanudación, read-only, perfil de sesión…). `env` lo pone el host. */
   agent?: Omit<StratumAgentOptions, 'env' | 'promptPreset' | 'workspace' | 'plugins'>;
   /**
@@ -183,6 +189,7 @@ export class SessionHost {
       ...(opts.gates ? { local: opts.gates } : {}),
       ...(opts.interactionTimeoutMs ? { timeoutMs: opts.interactionTimeoutMs } : {}),
       ...(opts.remoteApprovals ? { remote: opts.remoteApprovals } : {}),
+      grants: new ApprovalGrants(this.sessionId, { enabled: opts.approvalGrants !== false }),
     });
     this.basePolicy = opts.destructivePolicy ?? 'ask';
     this.allowDestructive = opts.allowDestructive;
@@ -195,6 +202,7 @@ export class SessionHost {
     });
     this.traceScope = this.trace?.scope();
     this.interactions.subscribe((change) => this.traceResolution(change));
+    this.interactions.grants.subscribe((change) => recordGrant({ trace: this.traceScope }, change));
     this.agent = new StratumAgent(this.config, this.router, this.registry, {
       ...opts.agent,
       // UX-1: misma clave de sesión para snapshots que para trazas y store.
@@ -315,6 +323,7 @@ export class SessionHost {
       allowDestructive: this.allowDestructive,
       destructivePolicy: this.destructivePolicy,
       onConfirmDestructive: gates.confirm,
+      approvalGrants: this.interactions.grants,
       onAskQuestions: gates.askQuestions,
       onApprovePlan: gates.approvePlan,
       onSubagentPersist: (rec) => this.subagentStore.persist(rec),

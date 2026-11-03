@@ -945,3 +945,23 @@ pre.action {
 .pending-box li .btn {
   margin-left: 0.25rem;
 }
+.grant-choice {
+  flex-wrap: wrap;
+}
+.grant-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
+}
+.grant-list li {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.grant-list li .btn {
+  margin-left: auto;
+}

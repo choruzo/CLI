@@ -8,6 +8,7 @@ import {
   checkApprovalResolution,
   checkQuestionAnswers,
   type ProtocolApproval,
+  type ProtocolApprovalGrant,
   type ProtocolPlanRequest,
   type ProtocolQuestionAnswer,
   type ProtocolQuestionRequest,
@@ -66,13 +67,32 @@ export interface ApprovalChoices {
   allowSession: boolean;
   /** Para aprobar hay que teclear esta frase (no es la clave de aprobador). */
   phrase: string | null;
+  /** M17: «permitir durante 10/30/60 min». Solo si el anfitrión la ofrece (`grantable`), y nunca en lo forzado ni con frase. */
+  grant: boolean;
 }
 
 export function approvalChoices(approval: ProtocolApproval): ApprovalChoices {
   return {
     allowSession: checkApprovalResolution(approval, 'allow-all', undefined) === null,
     phrase: approval.confirmPhrase ?? null,
+    grant: checkApprovalResolution(approval, 'approve', undefined, { minutes: 10 }) === null,
   };
+}
+
+/**
+ * M17 — las concesiones vigentes de una foto. Una cuyo `expiresAt` ya pasó se
+ * oculta aunque su `grant.ended` aún no haya llegado (el reloj del anfitrión es
+ * orientativo; quien la termina es él). Las de otra sesión no se le atribuyen.
+ */
+export function activeGrants(snapshot: ProtocolSessionSnapshot, now: number): ProtocolApprovalGrant[] {
+  return (snapshot.grants ?? [])
+    .filter((g) => g.sessionId === snapshot.session.id && g.expiresAt > now)
+    .sort((a, b) => a.expiresAt - b.expiresAt || (a.id < b.id ? -1 : a.id > b.id ? 1 : 0));
+}
+
+/** Minutos que quedan, redondeados hacia arriba (nunca «0 min» con una concesión viva). */
+export function grantMinutesLeft(grant: ProtocolApprovalGrant, now: number): number {
+  return Math.max(1, Math.ceil((grant.expiresAt - now) / 60_000));
 }
 
 /** ¿Vale aprobar con lo tecleado? La frase, exacta: sin recortar ni aproximar. */

@@ -4,6 +4,7 @@ import type {
   ProtocolSkill,
   ProtocolApproval,
   ProtocolApprovalDecision,
+  ProtocolApprovalGrant,
   ProtocolBoxStatus,
   ProtocolBoxScreen,
   ProtocolRoutine,
@@ -11,6 +12,7 @@ import type {
   ProtocolRoutineLimits,
   ProtocolContextReport,
   ProtocolDecision,
+  ProtocolGrantMinutes,
   ProtocolHistoryPage,
   ProtocolJob,
   ProtocolMemoryStatus,
@@ -75,6 +77,17 @@ export interface HelloParams {
  * pendiente puede resolverse desde otro cliente.
  */
 export const FEATURE_REMOTE_APPROVALS = 'remote-approvals';
+
+/**
+ * M17 — el servidor entiende `approvals.resolve` con `grant` y `grants.revoke`.
+ * Un cliente no ofrece concesiones a un servidor que no lo anuncia.
+ */
+export const FEATURE_APPROVAL_GRANTS = 'approval-grants';
+
+/** M17 — pedir, al aprobar, una concesión temporal para esa tool y target. */
+export interface ProtocolGrantRequest {
+  minutes: ProtocolGrantMinutes;
+}
 
 export interface HelloResult {
   protocol: number;
@@ -273,6 +286,8 @@ export interface HostResolveApprovalParams {
   decision: ProtocolApprovalDecision;
   /** Frase tecleada, si la solicitud lleva `confirmPhrase`. El anfitrión la comprueba. */
   phrase?: string;
+  /** M17 — solo con `decision: 'approve'` y una solicitud `grantable`. */
+  grant?: ProtocolGrantRequest;
   by: ProtocolResolver;
 }
 
@@ -391,8 +406,21 @@ export interface ProtocolMethods {
       approvalId: string;
       decision: ProtocolApprovalDecision;
       phrase?: string;
+      /**
+       * M17 — aprobar y no volver a preguntar por esa tool y target durante
+       * `minutes`. Solo con `decision: 'approve'` y una solicitud `grantable`.
+       */
+      grant?: ProtocolGrantRequest;
     },
     Empty
+  >;
+  /**
+   * M17 — retira una concesión vigente. Solo resta autoridad: basta `control`.
+   * `NOT_FOUND` si ya no está (caducó, se revocó o la sesión cambió de anfitrión).
+   */
+  'grants.revoke': Spec<
+    Mutation & { sessionId: string; grantId: string },
+    { grant: ProtocolApprovalGrant }
   >;
   'questions.answer': Spec<
     Mutation & { sessionId?: string; requestId: string; answers: ProtocolQuestionAnswer[] | null },
@@ -511,6 +539,10 @@ export interface ProtocolMethods {
     { status: SteerStatus }
   >;
   'host.resolveApproval': Spec<HostResolveApprovalParams, Empty>;
+  'host.revokeGrant': Spec<
+    { sessionId: string; grantId: string },
+    { grant: ProtocolApprovalGrant }
+  >;
   'host.answerQuestions': Spec<
     {
       sessionId: string;
@@ -596,6 +628,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'approvals.list': read('observe'),
   'approvals.resolve': write('approve'),
+  // Revocar solo resta: no exige la autoridad de aprobar.
+  'grants.revoke': write('control'),
   'questions.answer': write('approve'),
   'plans.decide': write('approve'),
 
@@ -636,6 +670,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'host.resume': toHost,
   'host.steer': toHost,
   'host.resolveApproval': toHost,
+  'host.revokeGrant': toHost,
   'host.answerQuestions': toHost,
   'host.decidePlan': toHost,
   'host.detach': toHost,

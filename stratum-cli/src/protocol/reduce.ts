@@ -161,6 +161,20 @@ export function applySessionEvent(
     case 'approval.resolved':
       next.approvals = next.approvals.filter((a) => a.id !== event.data.approvalId);
       break;
+    case 'grant.created': {
+      // Renovar la de esa tool y target la sustituye: misma pareja, una concesión.
+      const { grant } = event.data;
+      next.grants = [
+        ...(next.grants ?? []).filter(
+          (g) => g.id !== grant.id && !(g.tool === grant.tool && g.target === grant.target),
+        ),
+        grant,
+      ];
+      break;
+    }
+    case 'grant.ended':
+      next.grants = (next.grants ?? []).filter((g) => g.id !== event.data.grantId);
+      break;
     case 'question.requested':
       next.questions = [...next.questions, event.data.request];
       break;

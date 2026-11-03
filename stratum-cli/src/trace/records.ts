@@ -104,8 +104,12 @@ export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlm
  * de tipo `notice` con estos campos en `data` (el visor las pinta como un aviso
  * más; `stratum eval` y `stratum stats` las cuentan por `data.event`).
  *  - `confirmation` — una confirmación destructiva o de entorno: `approved` /
- *    `allow-all` / `denied` las contesta el usuario; `blocked` es que nadie
- *    podía contestar (sin TTY, `--deny-destructive`)
+ *    `allow-all` / `denied` las contesta el usuario; `granted` es que no se
+ *    preguntó porque una concesión temporal de la sesión la cubría (M17, con
+ *    su `grantId`); `blocked` es que nadie podía contestar (sin TTY,
+ *    `--deny-destructive`)
+ *  - `grant` — ciclo de vida de una concesión temporal (M17): `created` (con
+ *    duración, caducidad y quién la dio), `revoked` o `expired`
  *  - `veto` — la llamada se rechazó sin preguntar: `preflight` de la tool, modo
  *    read-only, política de entorno que no se pudo evaluar, tool fuera del
  *    toolset de la sesión (`toolset`), cambio fuera de un plan aprobado (`plan`)
@@ -128,13 +132,29 @@ export type TraceRuntimeEvent =
   | TraceInboxEvent
   | {
       event: 'confirmation';
-      decision: 'approved' | 'allow-all' | 'denied' | 'blocked';
+      decision: 'approved' | 'allow-all' | 'granted' | 'denied' | 'blocked';
       tool: string;
       callId: string;
       description: string;
       /** Entorno cuya política forzó la pregunta. */
       environment?: string;
       forced?: boolean;
+      /** Con `granted`: la concesión que la cubrió y cuándo caduca (reloj de pared). */
+      grantId?: string;
+      grantExpiresAt?: number;
+    }
+  | {
+      event: 'grant';
+      phase: 'created' | 'revoked' | 'expired';
+      grantId: string;
+      tool: string;
+      target?: string;
+      minutes: number;
+      expiresAt: number;
+      /** Con `created`: por dónde llegó (siempre `remote` hoy) y su conexión. */
+      by?: 'local' | 'remote';
+      client?: string;
+      connectionId?: number;
     }
   | {
       event: 'veto';

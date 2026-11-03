@@ -128,6 +128,8 @@ export function useAgentStream(
           runOptions.onConfirmDestructive = gates.confirm;
           runOptions.onAskQuestions = gates.askQuestions;
           runOptions.onApprovePlan = gates.approvePlan;
+          // M17: las concesiones que haya abierto un aprobador remoto.
+          runOptions.approvalGrants = interactions.grants;
         }
         onTurn?.({
           input: extra?.displayText ?? input,

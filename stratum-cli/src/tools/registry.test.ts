@@ -1,7 +1,16 @@
 import { describe, it, expect, vi } from 'vitest';
 import { ToolRegistry, ToolDispatcher, PARALLEL_READ_LIMIT } from './registry.js';
 import { z } from 'zod';
-import type { ToolDefinition, ToolContext, ToolResult } from '../agent/types.js';
+import type {
+  ApprovalGrantLookup,
+  ConfirmRequest,
+  DestructiveDecision,
+  ToolDefinition,
+  ToolContext,
+  ToolResult,
+} from '../agent/types.js';
+import type { TraceRuntimeEvent } from '../trace/records.js';
+import type { TraceScope } from '../trace/recorder.js';
 import { StratumConfigSchema } from '../config/schema.js';
 
 const config = StratumConfigSchema.parse({});
@@ -537,5 +546,169 @@ describe('ToolDispatcher — Hito 16', () => {
     expect(results[0]!.result).toMatchObject({ ok: false, error: 'no', blocked: 'preflight' });
     expect(results[1]!.result).toMatchObject({ ok: false, error: 'falló' });
     expect(results[1]!.result).not.toHaveProperty('blocked');
+  });
+});
+
+describe('ToolDispatcher — concesiones temporales (M17)', () => {
+  const GRANT = { id: 'grt_1', minutes: 10, expiresAt: 1_760_000_600_000 };
+
+  /** Una `exec` falsa: lo que importa es qué se pregunta, no ejecutar nada. */
+  function setup(grantFor: (tool: string, target: string | undefined) => boolean = () => true) {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, output: 'ran' }));
+    const reg = new ToolRegistry();
+    reg.register({
+      name: 'exec',
+      description: 'fake',
+      schema: z.object({ command: z.string(), target: z.string().optional() }),
+      isDestructive: () => true,
+      execute: run,
+    });
+    const asked: ConfirmRequest[] = [];
+    const confirm = vi.fn(async (req: ConfirmRequest): Promise<DestructiveDecision> => {
+      asked.push(req);
+      return 'approve';
+    });
+    const matches: Array<[string, string | undefined]> = [];
+    const events: TraceRuntimeEvent[] = [];
+    const grants: ApprovalGrantLookup = {
+      enabled: true,
+      match: (tool, target) => {
+        matches.push([tool, target]);
+        return grantFor(tool, target) ? GRANT : null;
+      },
+    };
+    const trace = { runtime: (ev: TraceRuntimeEvent) => events.push(ev) } as unknown as TraceScope;
+    const baseCtx = (over: Partial<ToolContext> = {}): ToolContext => ({
+      ...ctx,
+      config: StratumConfigSchema.parse({
+        environments: {
+          stg: { match: ['ssh:stg-*'], tier: 'staging' },
+          prod: { match: ['ssh:prod-*'], tier: 'production' },
+          typed: { match: ['ssh:typ-*'], confirmation: 'typed' },
+        },
+      }),
+      approvalGrants: grants,
+      confirmDestructive: confirm,
+      trace,
+      ...over,
+    });
+    const dispatch = (input: Record<string, unknown>, c: ToolContext) =>
+      new ToolDispatcher(reg).dispatch([{ id: 'c1', name: 'exec', input }], c);
+    return { run, asked, confirm, matches, events, baseCtx, dispatch };
+  }
+
+  it('una concesión que cubre la pareja ejecuta sin preguntar y lo traza como granted', async () => {
+    const t = setup();
+    const [res] = await t.dispatch({ command: 'touch x', target: 'ssh:stg-1' }, t.baseCtx());
+    expect(res!.result.ok).toBe(true);
+    expect(t.run).toHaveBeenCalledTimes(1);
+    expect(t.confirm).not.toHaveBeenCalled();
+    expect(t.matches).toEqual([['exec', 'ssh:stg-1']]);
+    expect(t.events).toEqual([
+      expect.objectContaining({
+        event: 'confirmation',
+        decision: 'granted',
+        tool: 'exec',
+        grantId: 'grt_1',
+        grantExpiresAt: GRANT.expiresAt,
+      }),
+    ]);
+  });
+
+  it('sin entorno el target es el único mutante de callEffects', async () => {
+    const t = setup();
+    await t.dispatch({ command: 'touch x' }, t.baseCtx());
+    expect(t.matches).toEqual([['exec', 'local']]);
+    expect(t.confirm).not.toHaveBeenCalled();
+  });
+
+  it('si no hay concesión se pregunta, y la solicitud lleva grantable y target', async () => {
+    const t = setup(() => false);
+    await t.dispatch({ command: 'touch x', target: 'ssh:stg-1' }, t.baseCtx());
+    expect(t.asked[0]).toMatchObject({ grantable: true, target: 'ssh:stg-1' });
+    expect(t.run).toHaveBeenCalledTimes(1);
+    expect(t.events[0]).toMatchObject({ event: 'confirmation', decision: 'approved' });
+
+    // Sin entorno, el target es el de callEffects.
+    const bare = setup(() => false);
+    await bare.dispatch({ command: 'touch x' }, bare.baseCtx());
+    expect(bare.asked[0]).toMatchObject({ grantable: true, target: 'local' });
+  });
+
+  it('con política deny la concesión no vale', async () => {
+    const t = setup();
+    const [res] = await t.dispatch(
+      { command: 'touch x', target: 'ssh:stg-1' },
+      t.baseCtx({ destructivePolicy: 'deny' }),
+    );
+    expect(res!.result.ok).toBe(false);
+    expect(t.run).not.toHaveBeenCalled();
+    expect(t.confirm).not.toHaveBeenCalled();
+    expect(t.matches).toEqual([]);
+    expect(t.events[0]).toMatchObject({ event: 'confirmation', decision: 'blocked' });
+  });
+
+  it('una llamada forzada (confirm-always) no usa la concesión y no se ofrece', async () => {
+    const t = setup();
+    await t.dispatch({ command: 'touch x', target: 'ssh:prod-db' }, t.baseCtx());
+    expect(t.matches).toEqual([]);
+    expect(t.confirm).toHaveBeenCalledTimes(1);
+    expect(t.asked[0]).toMatchObject({ forced: true, confirmPhrase: 'prod-db' });
+    expect(t.asked[0]).not.toHaveProperty('grantable');
+  });
+
+  it('con confirmation typed tampoco vale ni se ofrece', async () => {
+    const t = setup();
+    await t.dispatch({ command: 'touch x', target: 'ssh:typ-1' }, t.baseCtx());
+    expect(t.matches).toEqual([]);
+    expect(t.confirm).toHaveBeenCalledTimes(1);
+    expect(t.asked[0]!.confirmPhrase).toBeDefined();
+    expect(t.asked[0]).not.toHaveProperty('grantable');
+  });
+
+  it('una tool que confirmAlways fuerza no usa la concesión', async () => {
+    const t = setup();
+    const reg = new ToolRegistry();
+    reg.register({
+      name: 'exec',
+      description: 'fake',
+      schema: z.object({ command: z.string() }),
+      confirmAlways: () => true,
+      execute: t.run,
+    });
+    await new ToolDispatcher(reg).dispatch(
+      [{ id: 'c1', name: 'exec', input: { command: 'git push --force' } }],
+      t.baseCtx(),
+    );
+    expect(t.matches).toEqual([]);
+    expect(t.asked[0]).toMatchObject({ forced: true });
+    expect(t.asked[0]).not.toHaveProperty('grantable');
+  });
+
+  it('una sesión sin concesiones (enabled: false) pregunta y no ofrece grantable', async () => {
+    const t = setup();
+    const off: ApprovalGrantLookup = { enabled: false, match: () => GRANT };
+    await t.dispatch(
+      { command: 'touch x', target: 'ssh:stg-1' },
+      t.baseCtx({ approvalGrants: off }),
+    );
+    expect(t.confirm).toHaveBeenCalledTimes(1);
+    expect(t.asked[0]).not.toHaveProperty('grantable');
+  });
+
+  it('si match lanza, se pregunta como siempre', async () => {
+    const t = setup();
+    const broken: ApprovalGrantLookup = {
+      enabled: true,
+      match: () => {
+        throw new Error('boom');
+      },
+    };
+    const [res] = await t.dispatch(
+      { command: 'touch x', target: 'ssh:stg-1' },
+      t.baseCtx({ approvalGrants: broken }),
+    );
+    expect(t.confirm).toHaveBeenCalledTimes(1);
+    expect(res!.result.ok).toBe(true);
   });
 });

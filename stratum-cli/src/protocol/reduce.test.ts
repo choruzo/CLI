@@ -142,4 +142,73 @@ describe('applySessionEvent', () => {
     });
     expect(closed.session).toMatchObject({ state: 'closed', currentRunId: null, seq: 4 });
   });
+
+  describe('concesiones (M17)', () => {
+    const grant = (id: string, tool: string, target?: string) => ({
+      id,
+      sessionId: ID,
+      tool,
+      ...(target !== undefined ? { target } : {}),
+      minutes: 10 as const,
+      grantedAt: at(1),
+      expiresAt: at(1) + 600_000,
+      grantedBy: { kind: 'remote' as const, client: 'cli' as const, at: at(1) },
+    });
+    const created = (seq: number, g: ReturnType<typeof grant>): ProtocolEvent => ({
+      type: 'grant.created',
+      sessionId: ID,
+      at: at(seq),
+      seq,
+      data: { grant: g },
+    });
+
+    it('grant.created añade, y renovar la misma tool y target sustituye', () => {
+      const withOne = reduce(idle(), [created(2, grant('g1', 'exec', 'local'))]);
+      expect(withOne.grants?.map((g) => g.id)).toEqual(['g1']);
+      const both = reduce(withOne, [created(3, grant('g2', 'exec', 'ssh:prod'))]);
+      expect(both.grants?.map((g) => g.id)).toEqual(['g1', 'g2']);
+      const renewed = reduce(both, [created(4, grant('g3', 'exec', 'local'))]);
+      expect(renewed.grants?.map((g) => g.id)).toEqual(['g2', 'g3']);
+      // Sin target es otra pareja.
+      const bare = reduce(renewed, [created(5, grant('g4', 'exec'))]);
+      expect(bare.grants?.map((g) => g.id)).toEqual(['g2', 'g3', 'g4']);
+    });
+
+    it('grant.ended la quita, y una que no estaba no rompe nada', () => {
+      const start = reduce(idle(), [created(2, grant('g1', 'exec', 'local'))]);
+      const ended = reduce(start, [
+        {
+          type: 'grant.ended',
+          sessionId: ID,
+          at: at(3),
+          seq: 3,
+          data: { grantId: 'g1', reason: 'revoked' },
+        },
+        {
+          type: 'grant.ended',
+          sessionId: ID,
+          at: at(4),
+          seq: 4,
+          data: { grantId: 'nope', reason: 'expired' },
+        },
+      ]);
+      expect(ended.grants).toEqual([]);
+      expect(ended.seq).toBe(4);
+    });
+
+    it('una foto sin grants funciona: el campo aparece con el primer evento', () => {
+      const start = idle();
+      expect(start.grants).toBeUndefined();
+      const next = reduce(start, [
+        {
+          type: 'grant.ended',
+          sessionId: ID,
+          at: at(2),
+          seq: 2,
+          data: { grantId: 'g', reason: 'host-changed' },
+        },
+      ]);
+      expect(next.grants).toEqual([]);
+    });
+  });
 });

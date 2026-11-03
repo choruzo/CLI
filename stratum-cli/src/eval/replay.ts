@@ -121,7 +121,9 @@ export function scriptFromTrace(records: readonly TraceRecord[]): ReplayScript {
     if (
       s.kind === 'notice' &&
       s.data.event === 'confirmation' &&
-      (s.data.decision === 'approved' || s.data.decision === 'allow-all')
+      (s.data.decision === 'approved' ||
+        s.data.decision === 'allow-all' ||
+        s.data.decision === 'granted')
     ) {
       problems.push(`paso ${s.n}: confirmación aprobada por el usuario (${String(s.data.tool)})`);
     }

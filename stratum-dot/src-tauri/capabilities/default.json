@@ -29,6 +29,7 @@
     "allow-dot-routines-update",
     "allow-dot-routines-remove",
     "allow-dot-routines-run",
+    "allow-dot-grants-revoke",
     "allow-dot-notify-routine",
     "allow-dot-approver-status",
     "allow-dot-approver-unlock",

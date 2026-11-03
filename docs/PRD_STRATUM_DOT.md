@@ -2006,6 +2006,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   seleccionada, también comprobado con Dot instalado (`docs/dot.md` §19).
 - **M17 — Conectores e inspector de memoria.** MCP del asistente desde la capa global con
   `callEffects`; concesiones con caducidad (§23.13 A3); inspector de memoria en Dot.
+  *Concesiones hechas 2026-11-03* (`docs/protocol.md` §15.11, `docs/dot.md` §20): `approvals.resolve`
+  con `grant`, `grants.revoke`, `grant.*` y `grants` en la foto; Dot las ofrece con la duración en la
+  confirmación nativa y las lista con un botón de revocar; en la CLI, `stratum approvals approve --for`,
+  `approvals grants` y `approvals revoke`. Sin sesión ni target de entorno, la pareja es el único target
+  mutante de `callEffects` (decidido al implementar; más estrecho que «solo la tool»).
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
   confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
 

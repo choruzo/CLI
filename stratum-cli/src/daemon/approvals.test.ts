@@ -1129,3 +1129,211 @@ describe('M4 — búsqueda de fugas', () => {
     }
   }, 40_000);
 });
+
+// ---------------------------------------------------------------------------
+// M17 — concesiones con caducidad
+// ---------------------------------------------------------------------------
+
+describe('M17 — concesiones con caducidad', () => {
+  /** Tres borrados en tres runs distintos: el tercero prueba que, revocada, vuelve a preguntar. */
+  const threeRuns = (): Round[] => [
+    makeToolCallRound('c1', 'exec', { command: RM }),
+    makeTextRound('uno'),
+    makeToolCallRound('c2', 'exec', { command: 'rm other.txt' }),
+    makeTextRound('dos'),
+    makeToolCallRound('c3', 'exec', { command: 'rm third.txt' }),
+    makeTextRound('tres'),
+  ];
+  const completedRuns = (w: Watcher): number => w.states().filter(isType('run.completed')).length;
+  const untilRuns = (w: Watcher, n: number): Promise<void> =>
+    until(() => completedRuns(w) >= n, 15_000);
+
+  it('el daemon anuncia la función con aprobador configurado', async () => {
+    t = await startTestDaemon();
+    const approver = await t.connect(['approver'], 'appr');
+    expect(approver.server!.features).toContain('approval-grants');
+  });
+
+  it('alojada en el daemon: aprobar con grant evita preguntar de nuevo; revocar la retira', async () => {
+    t = await startTestDaemon();
+    const s = await hosted(t, threeRuns());
+    for (const name of ['other.txt', 'third.txt']) writeFileSync(join(s.cwd, name), 'x');
+
+    // Run 1: la solicitud se ofrece como concesión; se aprueba por 10 minutos.
+    await s.operator.request('runs.start', { sessionId: s.sessionId, input: 'borra' });
+    const first = await requested(s.w);
+    expect(first).toMatchObject({ forced: false, grantable: true, target: 'local' });
+    await s.approver.request('approvals.resolve', {
+      approvalId: first.id,
+      decision: 'approve',
+      grant: { minutes: 10 },
+    });
+    const created = await untilType(s.w, 'grant.created');
+    expect(created.data.grant).toMatchObject({
+      sessionId: s.sessionId,
+      tool: 'exec',
+      target: 'local',
+      minutes: 10,
+      grantedBy: { kind: 'remote', client: 'cli', connectionId: s.approver.server!.connectionId },
+    });
+    await untilRuns(s.w, 1);
+    expect(existsSync(s.file)).toBe(false);
+    const grantId = created.data.grant.id;
+    expect(
+      (await s.operator.request('sessions.get', { sessionId: s.sessionId })).snapshot.grants,
+    ).toEqual([created.data.grant]);
+
+    // Run 2: misma pareja, no hay solicitud y la tool se ejecuta.
+    await s.operator.request('runs.start', { sessionId: s.sessionId, input: 'borra otro' });
+    await untilRuns(s.w, 2);
+    expect(s.w.states().filter(isType('approval.requested'))).toHaveLength(1);
+    expect(existsSync(join(s.cwd, 'other.txt'))).toBe(false);
+    expect((await s.operator.request('approvals.list', {})).approvals).toEqual([]);
+
+    // Revocar solo exige `control`: el operador, que no puede aprobar, puede.
+    expect(
+      await code(
+        s.operator.request('approvals.resolve', { approvalId: first.id, decision: 'approve' }),
+      ),
+    ).toBe('FORBIDDEN');
+    const revoked = await s.operator.request('grants.revoke', {
+      sessionId: s.sessionId,
+      grantId,
+    });
+    expect(revoked.grant.id).toBe(grantId);
+    expect((await untilType(s.w, 'grant.ended')).data).toEqual({ grantId, reason: 'revoked' });
+    expect(
+      (await s.operator.request('sessions.get', { sessionId: s.sessionId })).snapshot.grants,
+    ).toEqual([]);
+    expect(
+      await code(s.operator.request('grants.revoke', { sessionId: s.sessionId, grantId })),
+    ).toBe('NOT_FOUND');
+
+    // Run 3: vuelve a preguntar.
+    await s.operator.request('runs.start', { sessionId: s.sessionId, input: 'borra el tercero' });
+    const third = await s.w.until(
+      (e) => e.type === 'approval.requested' && e.data.approval.id !== first.id,
+    );
+    expect(existsSync(join(s.cwd, 'third.txt'))).toBe(true);
+    await s.approver.request('approvals.resolve', {
+      approvalId: (third as Extract<ProtocolStateEvent, { type: 'approval.requested' }>).data
+        .approval.id,
+      decision: 'deny',
+    });
+    await untilRuns(s.w, 3);
+  }, 60_000);
+
+  it('un observador no puede revocar, y una concesión que no existe es NOT_FOUND', async () => {
+    t = await startTestDaemon();
+    const s = await hosted(t, threeRuns());
+    const observer = await t.connect(['observer'], 'obs');
+    expect(
+      await code(observer.request('grants.revoke', { sessionId: s.sessionId, grantId: 'grt_x' })),
+    ).toBe('FORBIDDEN');
+    expect(
+      await code(s.operator.request('grants.revoke', { sessionId: s.sessionId, grantId: 'grt_x' })),
+    ).toBe('NOT_FOUND');
+  });
+
+  it('una solicitud forzada no admite grant: INVALID_PARAMS y sigue pendiente', async () => {
+    t = await startTestDaemon();
+    const s = await hosted(t, destructive(), {
+      environments: { prod: { match: ['local'], tier: 'production', confirmation: 'simple' } },
+    });
+    await s.operator.request('runs.start', { sessionId: s.sessionId, input: 'borra' });
+    const approval = await requested(s.w);
+    expect(approval).toMatchObject({ forced: true });
+    expect(approval.grantable).toBeUndefined();
+    expect(
+      await code(
+        s.approver.request('approvals.resolve', {
+          approvalId: approval.id,
+          decision: 'approve',
+          grant: { minutes: 10 },
+        }),
+      ),
+    ).toBe('INVALID_PARAMS');
+    expect((await s.approver.request('approvals.list', {})).approvals.map((a) => a.id)).toEqual([
+      approval.id,
+    ]);
+    expect(existsSync(s.file)).toBe(true);
+    await s.approver.request('approvals.resolve', { approvalId: approval.id, decision: 'deny' });
+    await s.w.until((e) => e.type === 'run.completed');
+  }, 30_000);
+
+  it('grant con deny no vale', async () => {
+    t = await startTestDaemon();
+    const s = await hosted(t);
+    await s.operator.request('runs.start', { sessionId: s.sessionId, input: 'borra' });
+    const approval = await requested(s.w);
+    expect(
+      await code(
+        s.approver.request('approvals.resolve', {
+          approvalId: approval.id,
+          decision: 'deny',
+          grant: { minutes: 10 },
+        }),
+      ),
+    ).toBe('INVALID_PARAMS');
+    expect((await s.approver.request('approvals.list', {})).approvals).toHaveLength(1);
+    await s.approver.request('approvals.resolve', { approvalId: approval.id, decision: 'deny' });
+    await s.w.until((e) => e.type === 'run.completed');
+  }, 30_000);
+
+  it('sesión de la CLI (anfitrión par): grant desde el aprobador y revocación desde el operador', async () => {
+    t = await startTestDaemon();
+    const threePeer: Round[] = threeRuns();
+    const { p, prompt, file, approver, w } = await peerWithPrompt(t, threePeer);
+    for (const name of ['other.txt', 'third.txt']) writeFileSync(join(p.host.env.cwd, name), 'x');
+    const operator = await t.connect(['operator'], 'op');
+
+    const running = p.run('borra');
+    const first = await requested(w);
+    expect(first).toMatchObject({ grantable: true, target: 'local' });
+    await until(() => prompt.seen.length === 1);
+    // El prompt local recibe la misma solicitud, con la posibilidad de conceder.
+    expect(prompt.seen[0]!.req).toMatchObject({ grantable: true });
+    await approver.request('approvals.resolve', {
+      approvalId: first.id,
+      decision: 'approve',
+      grant: { minutes: 30 },
+    });
+    const created = await untilType(w, 'grant.created');
+    expect(created.data.grant).toMatchObject({ tool: 'exec', target: 'local', minutes: 30 });
+    await running;
+    expect(existsSync(file)).toBe(false);
+    expect(p.host.interactions.grants.list().map((g) => g.id)).toEqual([created.data.grant.id]);
+
+    // La segunda llamada igual no pide nada ni abre el prompt local.
+    await p.run('borra otro');
+    expect(existsSync(join(p.host.env.cwd, 'other.txt'))).toBe(false);
+    expect(w.states().filter(isType('approval.requested'))).toHaveLength(1);
+    expect(prompt.seen).toHaveLength(1);
+
+    // Revocar llega al anfitrión par por `host.revokeGrant`.
+    await operator.request('grants.revoke', {
+      sessionId: p.sessionId,
+      grantId: created.data.grant.id,
+    });
+    expect((await untilType(w, 'grant.ended')).data).toEqual({
+      grantId: created.data.grant.id,
+      reason: 'revoked',
+    });
+    expect(p.host.interactions.grants.list()).toEqual([]);
+    expect(
+      await code(
+        operator.request('grants.revoke', {
+          sessionId: p.sessionId,
+          grantId: created.data.grant.id,
+        }),
+      ),
+    ).toBe('NOT_FOUND');
+
+    // La tercera vuelve a preguntar.
+    const third = p.run('borra el tercero');
+    await until(() => prompt.seen.length === 2);
+    prompt.answer('deny');
+    await third;
+    expect(existsSync(join(p.host.env.cwd, 'third.txt'))).toBe(true);
+  }, 60_000);
+});

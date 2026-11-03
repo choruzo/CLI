@@ -277,6 +277,23 @@ pub async fn dot_routines_run(
         .await
 }
 
+/// M17 — revocar una concesión vigente. Solo resta autoridad: va por la
+/// conexión principal (capacidad `control`), sin broker ni confirmación nativa.
+#[tauri::command]
+pub async fn dot_grants_revoke(
+    state: State<'_, DotState>,
+    session_id: String,
+    grant_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::GrantsRevoke {
+            session_id,
+            grant_id,
+        })
+        .await
+}
+
 /// M16 — avisa al sistema de que una rutina terminó. El texto es plano y
 /// acotado aquí, no en el webview; la notificación no lleva acciones. Pulsarla
 /// (Windows) o dar el foco a la ventana poco después (resto) abre esa sesión
@@ -405,8 +422,9 @@ async fn resolve<R: Runtime>(
 }
 
 /// Pide aprobar una solicitud: abre la confirmación nativa, y solo si la
-/// persona confirma allí se envía. `for_session` = `allow-all`. La frase de
-/// una confirmación con nombre **no** viaja por aquí: se teclea en la ventana.
+/// persona confirma allí se envía. `for_session` = `allow-all`; `grant_minutes`
+/// (M17) = una concesión de 10, 30 o 60 minutos, que la ventana enseña. La frase
+/// de una confirmación con nombre **no** viaja por aquí: se teclea en la ventana.
 #[tauri::command]
 pub async fn dot_approve<R: Runtime>(
     app: AppHandle<R>,
@@ -415,6 +433,7 @@ pub async fn dot_approve<R: Runtime>(
     session_id: String,
     approval_id: String,
     for_session: bool,
+    grant_minutes: Option<u8>,
 ) -> Result<(), CommandError> {
     main_window(&window)?;
     resolve(
@@ -425,6 +444,7 @@ pub async fn dot_approve<R: Runtime>(
             approval_id,
             phrase: None,
             for_session,
+            grant_minutes,
         },
     )
     .await

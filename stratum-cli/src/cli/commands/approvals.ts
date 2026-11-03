@@ -5,11 +5,15 @@ import { defaultEndpointDir, fileDiscovery } from '../../client/discovery.js';
 import type { ClientIdentity } from '../../client/handshake.js';
 import { APPROVER_KEY_MIN_CHARS, writeApproverKey } from '../../daemon/approver-key.js';
 import { ProtocolError } from '../../ipc/codec.js';
-import type {
-  ProtocolApproval,
-  ProtocolPlanRequest,
-  ProtocolQuestionAnswer,
-  ProtocolQuestionRequest,
+import {
+  FEATURE_APPROVAL_GRANTS,
+  GRANT_MINUTES,
+  type ProtocolApproval,
+  type ProtocolApprovalGrant,
+  type ProtocolGrantMinutes,
+  type ProtocolPlanRequest,
+  type ProtocolQuestionAnswer,
+  type ProtocolQuestionRequest,
 } from '../../protocol/index.js';
 import { askLine } from '../readline-prompt.js';
 import { cliVersion } from '../version.js';
@@ -25,6 +29,11 @@ import { cliVersion } from '../version.js';
  * el eco apagado; no hay flag ni variable de entorno que la sustituya, a
  * propósito: un comando lanzado por el agente no tiene terminal en la que
  * teclearla.
+ *
+ * **Concesiones (M17)**: `approve --for 10|30|60` aprueba y no vuelve a preguntar
+ * por esa tool y target durante ese tiempo (también exige la clave).
+ * `grants` las lista y `revoke` las retira: revocar solo resta autoridad, así
+ * que basta la capacidad `control` y no se pide la clave.
  */
 
 type Pending = {
@@ -101,6 +110,44 @@ export function formatPendingTable(pending: Pending, now: number = Date.now()): 
 }
 
 /**
+ * M17 — `--for <minutos>`: solo 10, 30 o 60, escritos como número entero.
+ * `null` si no vale: no se redondea ni se acerca a nada.
+ */
+export function parseGrantMinutes(raw: string): ProtocolGrantMinutes | null {
+  if (!/^\d+$/.test(raw.trim())) return null;
+  const n = Number(raw.trim());
+  return GRANT_MINUTES.find((m) => m === n) ?? null;
+}
+
+/** Minutos que le quedan a una concesión: hacia arriba, nunca negativo. */
+function minutesLeft(grant: ProtocolApprovalGrant, now: number): number {
+  return Math.max(0, Math.ceil((grant.expiresAt - now) / 60_000));
+}
+
+/** Tabla de concesiones vigentes. Pura: los datos son DTOs del protocolo. */
+export function formatGrantTable(
+  grants: ProtocolApprovalGrant[],
+  now: number = Date.now(),
+): string {
+  if (grants.length === 0) return 'No active grants.\n';
+  const table = [
+    ['SESSION', 'TOOL', 'TARGET', 'LEFT', 'ID'],
+    ...grants.map((g) => [g.sessionId, g.tool, g.target ?? '-', `${minutesLeft(g, now)}m`, g.id]),
+  ];
+  const widths = table[0]!.map((_, col) => Math.max(...table.map((r) => r[col]!.length)));
+  return (
+    table
+      .map((r) =>
+        r
+          .map((cell, col) => (col === r.length - 1 ? cell : cell.padEnd(widths[col]!)))
+          .join('  ')
+          .trimEnd(),
+      )
+      .join('\n') + '\n'
+  );
+}
+
+/**
  * Lee una línea de la terminal sin eco. `null` si se cancela (Ctrl+C, Ctrl+D)
  * o si no hay terminal: una clave nunca se lee de una tubería.
  */
@@ -159,14 +206,16 @@ function explain(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
-async function observe(): Promise<StratumClient> {
+async function observe(
+  roles: Array<'observer' | 'operator'> = ['observer'],
+): Promise<StratumClient> {
   const client = new StratumClient({
     discovery: fileDiscovery(),
     identity: {
       kind: 'cli',
       name: 'stratum approvals',
       version: cliVersion(),
-      roles: ['observer'],
+      roles,
     },
     reconnect: false,
     requestTimeoutMs: 10_000,
@@ -286,7 +335,7 @@ async function askAnswers(
 async function resolve(
   id: string,
   action: 'approve' | 'deny' | 'answer',
-  opts: { all?: boolean },
+  opts: { all?: boolean; grantMinutes?: ProtocolGrantMinutes },
 ): Promise<void> {
   const client = await approver();
   if (!client) return;
@@ -306,6 +355,16 @@ async function resolve(
       if (opts.all && (item.forced || item.confirmPhrase !== undefined)) {
         return fail('This request must be approved on its own: --all does not apply to it.');
       }
+      if (opts.grantMinutes !== undefined) {
+        if (item.grantable !== true) {
+          return fail(
+            'This request cannot be approved with a grant (--for): it has to be approved on its own.',
+          );
+        }
+        if (!client.server?.features.includes(FEATURE_APPROVAL_GRANTS)) {
+          return fail('This daemon does not support grants: approve without --for.');
+        }
+      }
       let phrase: string | undefined;
       if (item.confirmPhrase !== undefined) {
         // Confirmación con nombre: hay que teclear el texto exacto.
@@ -322,13 +381,23 @@ async function resolve(
         approvalId: id,
         decision: opts.all ? 'allow-all' : 'approve',
         ...(phrase !== undefined ? { phrase } : {}),
+        ...(opts.grantMinutes !== undefined ? { grant: { minutes: opts.grantMinutes } } : {}),
       });
-      process.stdout.write(opts.all ? 'Approved (and the rest of this session).\n' : 'Approved.\n');
+      if (opts.grantMinutes !== undefined) {
+        process.stdout.write(
+          `Approved, and ${item.tool}${item.target ? ` @${item.target}` : ''} will not ask again for ${opts.grantMinutes} minutes.\n`,
+        );
+      } else {
+        process.stdout.write(
+          opts.all ? 'Approved (and the rest of this session).\n' : 'Approved.\n',
+        );
+      }
       return;
     }
 
     if (found.kind === 'plan') {
       if (action === 'answer') return fail('That is a plan: use approve or deny.');
+      if (opts.grantMinutes !== undefined) return fail('--for only applies to approvals.');
       await client.request('plans.decide', {
         requestId: id,
         decision: action === 'approve' ? 'approve' : 'reject',
@@ -385,7 +454,22 @@ const approve = new Command('approve')
   .description('Approve a pending approval or plan (asks for the approver key)')
   .argument('<id>', 'id of the pending request')
   .option('--all', 'also allow the rest of the destructive operations of that session')
-  .action((id: string, opts: { all?: boolean }) => resolve(id, 'approve', opts));
+  .option(
+    '--for <minutes>',
+    'approve and do not ask again for that tool and target for 10, 30 or 60 minutes',
+  )
+  .action((id: string, opts: { all?: boolean; for?: string }) => {
+    if (opts.for === undefined) {
+      return resolve(id, 'approve', { ...(opts.all ? { all: true } : {}) });
+    }
+    // Antes de pedir la clave y de enviar nada.
+    if (opts.all) return fail('--for and --all cannot be combined: pick one.');
+    const grantMinutes = parseGrantMinutes(opts.for);
+    if (grantMinutes === null) {
+      return fail(`--for takes ${GRANT_MINUTES.join(', ')} (minutes), not "${opts.for}".`);
+    }
+    return resolve(id, 'approve', { grantMinutes });
+  });
 
 const deny = new Command('deny')
   .description('Deny an approval, reject a plan or skip a batch of questions')
@@ -420,10 +504,95 @@ const setKey = new Command('set-key')
     }
   });
 
+/** Las concesiones vigentes de una sesión, o `null` si ya no está. */
+async function grantsOf(
+  client: StratumClient,
+  sessionId: string,
+): Promise<ProtocolApprovalGrant[] | null> {
+  try {
+    return (await client.request('sessions.get', { sessionId })).snapshot.grants ?? [];
+  } catch (err) {
+    if (err instanceof ProtocolError && err.code === 'NOT_FOUND') return null;
+    throw err;
+  }
+}
+
+const grants = new Command('grants')
+  .description(
+    'List the active approval grants ("do not ask again for N minutes") of the live sessions',
+  )
+  .option('--session <id>', 'only that session')
+  .option('--json', 'machine-readable output: protocol DTOs')
+  .action(async (opts: { session?: string; json?: boolean }) => {
+    let client: StratumClient;
+    try {
+      client = await observe();
+    } catch (err) {
+      if (opts.json) process.stdout.write(JSON.stringify({ running: false, grants: [] }) + '\n');
+      else process.stderr.write(`${explain(err)}\n`);
+      process.exitCode = 1;
+      return;
+    }
+    try {
+      const ids = opts.session
+        ? [opts.session]
+        : (await client.request('sessions.list', { live: true })).sessions.map((s) => s.id);
+      const all: ProtocolApprovalGrant[] = [];
+      for (const id of ids) {
+        const found = await grantsOf(client, id);
+        if (found === null) {
+          // Una sesión que se fue entre el listado y la lectura no es un error;
+          // la que se pidió por id, sí.
+          if (opts.session) return fail('No such session.');
+          continue;
+        }
+        all.push(...found);
+      }
+      process.stdout.write(
+        opts.json ? JSON.stringify({ running: true, grants: all }) + '\n' : formatGrantTable(all),
+      );
+    } catch (err) {
+      fail(explain(err));
+    } finally {
+      client.close();
+    }
+  });
+
+const revoke = new Command('revoke')
+  .description('Revoke an active grant (needs no approver key: revoking only removes permission)')
+  .argument('<grantId>', 'id of the grant (see "approvals grants")')
+  .requiredOption('--session <id>', 'the session that holds the grant')
+  .action(async (grantId: string, opts: { session: string }) => {
+    let client: StratumClient;
+    try {
+      client = await observe(['operator']);
+    } catch (err) {
+      return fail(explain(err));
+    }
+    try {
+      const { grant } = await client.request('grants.revoke', {
+        sessionId: opts.session,
+        grantId,
+      });
+      process.stdout.write(
+        `Revoked: ${grant.tool}${grant.target ? ` @${grant.target}` : ''} will ask again.\n`,
+      );
+    } catch (err) {
+      if (err instanceof ProtocolError && err.code === 'NOT_FOUND') {
+        return fail('No such grant (it may have expired or been revoked already).');
+      }
+      fail(explain(err));
+    } finally {
+      client.close();
+    }
+  });
+
 export const approvalsCommand = new Command('approvals')
   .description('See and resolve what the live sessions are waiting on')
   .addCommand(list, { isDefault: true })
   .addCommand(approve)
   .addCommand(deny)
   .addCommand(answer)
+  .addCommand(grants)
+  .addCommand(revoke)
   .addCommand(setKey);

@@ -1519,8 +1519,22 @@ export class Stratumd {
           ...(params.sessionId !== undefined ? { sessionId: params.sessionId } : {}),
           decision: params.decision,
           ...(params.phrase !== undefined ? { phrase: params.phrase } : {}),
+          ...(params.grant ? { grant: params.grant } : {}),
         });
         return {};
+      },
+      // M17 — revocar una concesión solo resta autoridad: basta `control`. La
+      // concesión está en memoria de quien aloja la sesión.
+      'grants.revoke': async (params) => {
+        if (this.peers.has(params.sessionId)) {
+          return { grant: await this.peers.revokeGrant(params.sessionId, params.grantId) };
+        }
+        if (this.dormant.has(params.sessionId)) {
+          throw new ProtocolError('NOT_FOUND', 'No such grant.');
+        }
+        const grant = this.need(params.sessionId).host.interactions.grants.revoke(params.grantId);
+        if (!grant) throw new ProtocolError('NOT_FOUND', 'No such grant.');
+        return { grant };
       },
       'questions.answer': async (params) => {
         await this.approvals.resolve(conn, {

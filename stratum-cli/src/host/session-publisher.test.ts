@@ -339,6 +339,77 @@ describe('SessionPublisher — pausa', () => {
   });
 });
 
+describe('SessionPublisher — concesiones (M17)', () => {
+  const by = { kind: 'remote' as const, client: 'cli' as const, connectionId: 4, at: 1 };
+
+  it('publica grant.created / grant.ended y la foto las lleva; el reductor llega a la misma foto', async () => {
+    const { host } = await realHost('grants-live', [makeTextRound('x')]);
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+    });
+    publisher.start();
+    const before = publisher.snapshot();
+    const { grants } = host.interactions;
+    const first = grants.create({ tool: 'exec', target: 'local' }, 10, by);
+    // Renovar la misma pareja sustituye en la foto.
+    const second = grants.create({ tool: 'exec', target: 'local' }, 30, by);
+    expect(publisher.snapshot().grants).toEqual([second]);
+    grants.revoke(second.id);
+    expect(publisher.snapshot().grants).toEqual([]);
+    await tick();
+
+    expect(sink.states().map((e) => e.type)).toEqual(
+      expect.arrayContaining(['grant.created', 'grant.ended']),
+    );
+    const ended = sink.states().filter((e) => e.type === 'grant.ended');
+    expect(ended.map((e) => e.data)).toEqual([{ grantId: second.id, reason: 'revoked' }]);
+    expect(first.id).not.toBe(second.id);
+    const reduced = sink.states().reduce(applySessionEvent, before);
+    expect(reduced.grants).toEqual(publisher.snapshot().grants);
+    expect(sessionSnapshotSchema.safeParse(publisher.snapshot()).success).toBe(true);
+  });
+
+  it('al continuar desde una foto con concesiones, publica host-changed por cada una y no las hereda', async () => {
+    const { host } = await realHost('grants-continue', [makeTextRound('x')]);
+    const grant = (id: string, tool: string) => ({
+      id,
+      sessionId: host.sessionId,
+      tool,
+      minutes: 10 as const,
+      grantedAt: 1,
+      expiresAt: 2,
+      grantedBy: by,
+    });
+    const from = sampleSnapshot({
+      session: sampleSession({ id: host.sessionId, state: 'idle', currentRunId: null }),
+      run: null,
+      toolCalls: [],
+      approvals: [],
+      grants: [grant('grt_a', 'exec'), grant('grt_b', 'write_file')],
+    });
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+      continueFrom: from,
+    });
+    publisher.start();
+    await tick();
+    const ended = sink.states().filter((e) => e.type === 'grant.ended');
+    expect(ended.map((e) => e.data)).toEqual([
+      { grantId: 'grt_a', reason: 'host-changed' },
+      { grantId: 'grt_b', reason: 'host-changed' },
+    ]);
+    expect(publisher.snapshot().grants).toEqual([]);
+    expect(host.interactions.grants.list()).toEqual([]);
+    // Y quien reduce desde la foto vieja acaba sin ninguna.
+    expect(sink.states().reduce(applySessionEvent, from).grants).toEqual([]);
+  });
+});
 describe('SessionPublisher — cola local acotada', () => {
   it('agrupa los fragmentos seguidos y cierra cada bloque con el texto entero', async () => {
     const { host, emit } = fakeHost('s-coalesce', testConfig('coalesce'));

@@ -48,7 +48,7 @@ use tokio::time::Instant;
 
 use crate::approver::{
     ApproverAction, ApproverHandle, ApproverStatus, ConfirmedAction, LockReason, QuestionAnswer,
-    MAX_ANSWER_CHARS, MAX_PHRASE_CHARS,
+    GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS,
 };
 use crate::link::LinkHandle;
 use crate::log::Logger;
@@ -442,7 +442,11 @@ pub fn build_view(
         arm_ms,
     };
     match action {
-        ApproverAction::Approve { for_session, .. } => {
+        ApproverAction::Approve {
+            for_session,
+            grant_minutes,
+            ..
+        } => {
             if item.get("resolvable").and_then(Value::as_str) == Some("origin") {
                 return Err(CommandError {
                     kind: CommandErrorKind::Rejected,
@@ -473,6 +477,22 @@ pub fn build_view(
                     "“Allow for this session” is not available for this request.",
                 ));
             }
+            // M17 — una concesión solo si el anfitrión la ofrece (`grantable`), y
+            // nunca en lo forzado, con frase ni junto a «toda la sesión».
+            let grantable = item.get("grantable").and_then(Value::as_bool) == Some(true);
+            if let Some(minutes) = grant_minutes {
+                if *for_session
+                    || !grantable
+                    || forced
+                    || confirm_phrase.is_some()
+                    || !GRANT_MINUTES.contains(minutes)
+                {
+                    return Err(CommandError::new(
+                        CommandErrorKind::Invalid,
+                        "“Allow for a while” is not available for this request.",
+                    ));
+                }
+            }
             let environment = item.get("environment").and_then(|e| {
                 let name = field(e, "name", MAX_FIELD_CHARS)?;
                 Some(match field(e, "tier", 64) {
@@ -480,10 +500,26 @@ pub fn build_view(
                     None => name,
                 })
             });
+            let tool = field(item, "tool", MAX_FIELD_CHARS).unwrap_or_else(|| "?".into());
+            let target = field(item, "target", MAX_FIELD_CHARS);
+            if let Some(minutes) = grant_minutes {
+                view.action = match minutes {
+                    10 => "Allow for 10 minutes",
+                    30 => "Allow for 30 minutes",
+                    _ => "Allow for 60 minutes",
+                };
+                let scope = match &target {
+                    Some(target) => format!("{tool} on {target}"),
+                    None => format!("{tool} (any target)"),
+                };
+                view.notes.push(format!(
+                    "This approves this request and, for the next {minutes} minutes, every later call of {scope} in this session, without asking. You can revoke it before then. Requests required by policy keep asking."
+                ));
+            }
             view.approval = Some(ApprovalFacts {
-                tool: field(item, "tool", MAX_FIELD_CHARS).unwrap_or_else(|| "?".into()),
+                tool,
                 description: field(item, "description", MAX_DESCRIPTION_CHARS).unwrap_or_default(),
-                target: field(item, "target", MAX_FIELD_CHARS),
+                target,
                 environment,
                 reason: field(item, "reason", MAX_FIELD_CHARS),
                 forced,
@@ -972,6 +1008,7 @@ mod tests {
             approval_id: id.into(),
             phrase: None,
             for_session,
+            grant_minutes: None,
         }
     }
 
@@ -1033,6 +1070,58 @@ mod tests {
         assert_eq!(approval.target.as_deref(), Some("prod-db"));
         assert_eq!(approval.environment.as_deref(), Some("prod (production)"));
         assert_eq!(view.expires_at, 9);
+    }
+
+    fn grant(id: &str, minutes: u8, for_session: bool) -> ApproverAction {
+        ApproverAction::Approve {
+            session_id: "ses_a".into(),
+            approval_id: id.into(),
+            phrase: None,
+            for_session,
+            grant_minutes: Some(minutes),
+        }
+    }
+
+    /// `apr_1` del listado, ofrecida por el anfitrión como `grantable`.
+    fn grantable_listing() -> Value {
+        let mut l = listing();
+        l["approvals"][0]["grantable"] = json!(true);
+        l
+    }
+
+    #[test]
+    fn una_concesion_ensena_su_duracion_y_lo_que_abarca() {
+        let view = build_view(
+            &grant("apr_1", 30, false),
+            &grantable_listing(),
+            &snapshot(),
+            9,
+            800,
+        )
+        .unwrap()
+        .0;
+        assert_eq!(view.action, "Allow for 30 minutes");
+        let note = view.notes.join("\n");
+        assert!(note.contains("next 30 minutes"), "{note}");
+        assert!(note.contains("exec on prod-db"), "{note}");
+    }
+
+    #[test]
+    fn sin_grantable_ni_en_lo_forzado_no_hay_concesion() {
+        // El anfitrión no la ofreció: aunque el webview la pida, no se enseña.
+        let err =
+            build_view(&grant("apr_1", 10, false), &listing(), &snapshot(), 9, 800).unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::Invalid);
+        // Forzada y con frase: tampoco, aunque diga `grantable`.
+        let mut l = listing();
+        l["approvals"][1]["grantable"] = json!(true);
+        let err = build_view(&grant("apr_2", 10, false), &l, &snapshot(), 9, 800).unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::Invalid);
+        // Ni junto a «toda la sesión», ni con una duración que no existe.
+        for action in [grant("apr_1", 10, true), grant("apr_1", 15, false)] {
+            let err = build_view(&action, &grantable_listing(), &snapshot(), 9, 800).unwrap_err();
+            assert_eq!(err.kind, CommandErrorKind::Invalid);
+        }
     }
 
     #[test]

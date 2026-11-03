@@ -229,4 +229,15 @@ describe('SessionHost', () => {
     await host.dispose();
     expect(screenLocks.holderOf('box-test')).toBeNull();
   });
+
+  it('concesiones (M17): una sesión las admite por defecto y la de una rutina no', async () => {
+    const normal = await makeHost([makeTextRound('x')]);
+    expect(normal.interactions.grants.enabled).toBe(true);
+    expect(normal.runOptions().approvalGrants).toBe(normal.interactions.grants);
+
+    const routine = await makeHost([makeTextRound('x')], { approvalGrants: false });
+    expect(routine.interactions.grants.enabled).toBe(false);
+    expect(routine.runOptions().approvalGrants?.enabled).toBe(false);
+    expect(routine.interactions.grants.match('exec', 'local')).toBeNull();
+  });
 });

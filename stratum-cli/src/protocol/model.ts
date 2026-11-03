@@ -365,6 +365,11 @@ export interface ProtocolApproval {
    * texto (el alias del target). Un cliente que no sepa pedirlo debe denegar.
    */
   confirmPhrase?: string;
+  /**
+   * M17 — se puede aprobar con una concesión temporal (`approvals.resolve` con
+   * `grant`). Lo decide el anfitrión; ausente = no.
+   */
+  grantable?: boolean;
   /** Dónde se puede resolver: `origin` = solo en el cliente que aloja la sesión. */
   resolvable: 'anywhere' | 'origin';
   requestedAt: Timestamp;
@@ -373,6 +378,28 @@ export interface ProtocolApproval {
   status: 'pending' | 'approved' | 'denied' | 'expired' | 'cancelled';
   decision?: ProtocolApprovalDecision;
   resolvedBy?: ProtocolResolver;
+}
+
+/** M17 — duraciones posibles de una concesión, en minutos. Fijas, no libres. */
+export const GRANT_MINUTES = [10, 30, 60] as const;
+export type ProtocolGrantMinutes = (typeof GRANT_MINUTES)[number];
+
+/**
+ * M17 — concesión temporal: durante `minutes`, la sesión no vuelve a preguntar
+ * por esa tool sobre ese target (sin `target`, por la tool). Vive en memoria
+ * del anfitrión: no se guarda, no sobrevive a un reinicio ni viaja en un
+ * traspaso. `expiresAt` es orientativo (reloj del anfitrión); quien decide la
+ * caducidad es el anfitrión, con un reloj monotónico.
+ */
+export interface ProtocolApprovalGrant {
+  id: string;
+  sessionId: string;
+  tool: string;
+  target?: string;
+  minutes: ProtocolGrantMinutes;
+  grantedAt: Timestamp;
+  expiresAt: Timestamp;
+  grantedBy: ProtocolResolver;
 }
 
 export interface ProtocolQuestionOption {

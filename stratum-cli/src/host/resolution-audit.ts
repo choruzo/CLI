@@ -11,6 +11,7 @@ import type { StratumConfig } from '../config/schema.js';
 import { redactText } from '../security/redact-output.js';
 import { getExecAuditLog } from '../tools/exec/runtime.js';
 import type { TraceScope } from '../trace/recorder.js';
+import type { GrantChange } from './approval-grants.js';
 import type { InteractionChange } from './interactions.js';
 
 export interface ResolutionAuditTarget {
@@ -60,4 +61,33 @@ export function recordResolution(target: ResolutionAuditTarget, change: Interact
   } catch {
     /* la auditoría nunca tumba una decisión */
   }
+}
+
+/**
+ * M17 — una concesión temporal se abrió, se revocó o caducó: un aviso en la
+ * traza, para que el `/auditor` distinga «aprobada por concesión» (en cada
+ * `confirmation` con `granted`) de quién y cuándo la dio.
+ */
+export function recordGrant(
+  target: Pick<ResolutionAuditTarget, 'trace'>,
+  change: GrantChange,
+): void {
+  const { grant } = change;
+  const by = grant.grantedBy;
+  target.trace?.runtime({
+    event: 'grant',
+    phase: change.type === 'created' ? 'created' : change.reason,
+    grantId: grant.id,
+    tool: grant.tool,
+    ...(grant.target !== undefined ? { target: grant.target } : {}),
+    minutes: grant.minutes,
+    expiresAt: grant.expiresAt,
+    ...(change.type === 'created' && (by.kind === 'local' || by.kind === 'remote')
+      ? {
+          by: by.kind,
+          ...(by.client ? { client: by.client } : {}),
+          ...(by.connectionId !== undefined ? { connectionId: by.connectionId } : {}),
+        }
+      : {}),
+  });
 }

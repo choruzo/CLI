@@ -57,6 +57,9 @@ use crate::transport::{self, Stream};
 use crate::wire::{self, ApproverMethod, Incoming, WireError};
 use crate::{MAX_ID_CHARS, MAX_MESSAGE_BYTES, PROTOCOL_VERSION};
 
+/// M17 — duraciones de una concesión que admite el protocolo (`GRANT_MINUTES`).
+pub const GRANT_MINUTES: [u8; 3] = [10, 30, 60];
+
 /// Lo que se le dice a quien no pudo desbloquear, sea cual sea el motivo de autenticación.
 pub const UNLOCK_FAILED: &str = "Could not unlock approval authority.";
 
@@ -156,11 +159,14 @@ pub struct QuestionAnswer {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum ApproverAction {
     /// `for_session` = `allow-all`: el resto de **esa** sesión, nunca lo forzado.
+    /// `grant_minutes` (M17) = aprobar y no volver a preguntar por esa tool y
+    /// target durante 10, 30 o 60 minutos. Nunca con `for_session`.
     Approve {
         session_id: String,
         approval_id: String,
         phrase: Option<String>,
         for_session: bool,
+        grant_minutes: Option<u8>,
     },
     Deny {
         session_id: String,
@@ -187,6 +193,10 @@ impl ApproverAction {
             ApproverAction::Approve {
                 for_session: true, ..
             } => "allow-session",
+            ApproverAction::Approve {
+                grant_minutes: Some(_),
+                ..
+            } => "allow-for",
             ApproverAction::Approve { .. } => "approve",
             ApproverAction::Deny { .. } => "deny",
             ApproverAction::AnswerQuestions { answers: None, .. } => "skip-questions",
@@ -595,6 +605,7 @@ fn resolve_request(
             approval_id,
             phrase,
             for_session,
+            grant_minutes,
         } => {
             ids(session_id, approval_id)?;
             let mut params = json!({
@@ -602,6 +613,12 @@ fn resolve_request(
                 "decision": if *for_session { "allow-all" } else { "approve" },
                 "operationId": operation_id,
             });
+            if let Some(minutes) = grant_minutes {
+                if *for_session || !GRANT_MINUTES.contains(minutes) {
+                    return Err(invalid("Invalid grant."));
+                }
+                params["grant"] = json!({ "minutes": minutes });
+            }
             if let Some(phrase) = phrase {
                 if phrase.chars().count() > MAX_PHRASE_CHARS {
                     return Err(invalid("The confirmation phrase is too long."));
@@ -1231,6 +1248,7 @@ mod tests {
                 approval_id: "apr_1".into(),
                 phrase: Some("prod".into()),
                 for_session: false,
+                grant_minutes: None,
             },
             "op-1",
         )
@@ -1247,11 +1265,27 @@ mod tests {
                 approval_id: "apr_1".into(),
                 phrase: None,
                 for_session: true,
+                grant_minutes: None,
             },
             "op-2",
         )
         .unwrap();
         assert_eq!(params["decision"], "allow-all");
+
+        // M17: una concesión es `approve` con `grant`; con «toda la sesión» o una
+        // duración que no existe no sale nada.
+        let with_grant = |minutes: u8, for_session: bool| ApproverAction::Approve {
+            session_id: "ses_a".into(),
+            approval_id: "apr_1".into(),
+            phrase: None,
+            for_session,
+            grant_minutes: Some(minutes),
+        };
+        let (_, params) = resolve_request(&with_grant(60, false), "op-g").unwrap();
+        assert_eq!(params["decision"], "approve");
+        assert_eq!(params["grant"], json!({ "minutes": 60 }));
+        assert!(resolve_request(&with_grant(60, true), "op-g").is_err());
+        assert!(resolve_request(&with_grant(5, false), "op-g").is_err());
 
         let (method, params) = resolve_request(
             &ApproverAction::Deny {
@@ -1328,6 +1362,7 @@ mod tests {
                 approval_id: "a".into(),
                 phrase: Some("x".repeat(MAX_PHRASE_CHARS + 1)),
                 for_session: false,
+                grant_minutes: None,
             },
             ApproverAction::AnswerQuestions {
                 session_id: "s".into(),
@@ -1368,12 +1403,14 @@ mod tests {
             approval_id: "a".into(),
             phrase: None,
             for_session: false,
+            grant_minutes: None,
         };
         let allow_all = ApproverAction::Approve {
             session_id: "s".into(),
             approval_id: "a".into(),
             phrase: None,
             for_session: true,
+            grant_minutes: None,
         };
         let deny = ApproverAction::Deny {
             session_id: "s".into(),
@@ -1426,6 +1463,7 @@ mod tests {
                 approval_id: "a".into(),
                 phrase: None,
                 for_session: false,
+                grant_minutes: None,
             })
             .await
             .unwrap_err();

@@ -206,6 +206,10 @@ async fn main() {
                     .get("forSession")
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
+                grant_minutes: msg
+                    .get("grantMinutes")
+                    .and_then(Value::as_u64)
+                    .and_then(|m| u8::try_from(m).ok()),
             }),
             "deny" => Some(ApproverAction::Deny {
                 session_id: session_id.clone(),

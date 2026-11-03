@@ -1,6 +1,7 @@
 import type {
   ProtocolApproval,
   ProtocolApprovalDecision,
+  ProtocolApprovalGrant,
   ProtocolInteractionStatus,
   ProtocolJob,
   ProtocolMemoryEvent,
@@ -98,6 +99,13 @@ export interface StateEventData {
     decision?: ProtocolApprovalDecision;
     resolvedBy?: ProtocolResolver;
   };
+  /** M17 — una aprobación abrió una concesión temporal (o renovó la de esa tool y target). */
+  'grant.created': { grant: ProtocolApprovalGrant };
+  /**
+   * M17 — la concesión dejó de valer: caducó, se revocó, o la sesión cambió de
+   * anfitrión (las concesiones no viajan en un traspaso ni sobreviven a un reinicio).
+   */
+  'grant.ended': { grantId: string; reason: 'expired' | 'revoked' | 'host-changed' };
   'question.requested': { request: ProtocolQuestionRequest };
   'question.resolved': {
     requestId: string;
@@ -155,6 +163,8 @@ export const EVENT_CLASS: Readonly<Record<ProtocolEventType, 'state' | 'volatile
   'steering.delivered': 'state',
   'approval.requested': 'state',
   'approval.resolved': 'state',
+  'grant.created': 'state',
+  'grant.ended': 'state',
   'question.requested': 'state',
   'question.resolved': 'state',
   warning: 'state',
@@ -237,6 +247,8 @@ export interface ProtocolSessionSnapshot {
   approvals: ProtocolApproval[];
   questions: ProtocolQuestionRequest[];
   plans: ProtocolPlanRequest[];
+  /** M17 — concesiones vigentes. Ausente en la foto de un anfitrión anterior a M17. */
+  grants?: ProtocolApprovalGrant[];
   /**
    * La conversación de la sesión, **de todos sus runs**, acotada
    * (`TRANSCRIPT_LIMITS`): lo más antiguo se descarta primero. El bloque que

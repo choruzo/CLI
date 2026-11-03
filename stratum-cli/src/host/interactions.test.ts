@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ConfirmRequest, DestructiveDecision, Plan, QuestionItem } from '../agent/types.js';
 import { ProtocolError } from '../ipc/codec.js';
+import { ApprovalGrants } from './approval-grants.js';
 import { PendingInteractions, type GateContext, type InteractionChange } from './interactions.js';
 
 const request = (over: Partial<ConfirmRequest> = {}): ConfirmRequest => ({
@@ -273,5 +274,103 @@ describe('PendingInteractions', () => {
     );
     center.cancelAll();
     await third;
+  });
+
+  describe('concesiones (M17)', () => {
+    const grantable = (over: Partial<ConfirmRequest> = {}): ConfirmRequest =>
+      request({ grantable: true, target: 'local', ...over });
+    const withGrants = (enabled = true): PendingInteractions =>
+      new PendingInteractions({
+        remote: () => true,
+        timeoutMs: 60_000,
+        grants: new ApprovalGrants('ses_1', { enabled }),
+      });
+
+    it('aprobar con grant abre la concesión de esa tool y target, y resuelve approve', async () => {
+      const center = withGrants();
+      const decision = center.gatesFor().confirm!(grantable());
+      const { id } = center.pending()[0]!;
+      center.resolveApproval(id, 'approve', undefined, by, { minutes: 30 });
+      expect(await decision).toBe('approve');
+      expect(center.size).toBe(0);
+      const [grant] = center.grants.list();
+      expect(grant).toMatchObject({
+        sessionId: 'ses_1',
+        tool: 'exec',
+        target: 'local',
+        minutes: 30,
+        grantedBy: { kind: 'remote', client: 'cli', connectionId: 7 },
+      });
+      expect(center.grants.match('exec', 'local')?.id).toBe(grant!.id);
+      center.cancelAll();
+    });
+
+    it('sin target, la concesión es de la tool entera', async () => {
+      const center = withGrants();
+      const decision = center.gatesFor().confirm!(grantable({ target: undefined }));
+      center.resolveApproval(center.pending()[0]!.id, 'approve', undefined, by, { minutes: 10 });
+      await decision;
+      expect(center.grants.list()[0]).not.toHaveProperty('target');
+      expect(center.grants.match('exec', undefined)).not.toBeNull();
+      center.cancelAll();
+    });
+
+    it('una solicitud no grantable, forzada, con frase, o con deny/allow-all, no vale y sigue pendiente', async () => {
+      const center = withGrants();
+      const gates = center.gatesFor();
+      const plain = gates.confirm!(request({ target: 'local' }));
+      const forced = gates.confirm!(grantable({ forced: true }));
+      const phrased = gates.confirm!(grantable({ confirmPhrase: 'prod-1' }));
+      const ok = gates.confirm!(grantable());
+      const [a, b, c, d] = center.pending().map((p) => p.id) as [string, string, string, string];
+      const grant = { minutes: 10 as const };
+      expect(code(() => center.resolveApproval(a, 'approve', undefined, by, grant))).toBe(
+        'INVALID_PARAMS',
+      );
+      expect(code(() => center.resolveApproval(b, 'approve', undefined, by, grant))).toBe(
+        'INVALID_PARAMS',
+      );
+      expect(code(() => center.resolveApproval(c, 'approve', 'prod-1', by, grant))).toBe(
+        'INVALID_PARAMS',
+      );
+      expect(code(() => center.resolveApproval(d, 'deny', undefined, by, grant))).toBe(
+        'INVALID_PARAMS',
+      );
+      expect(code(() => center.resolveApproval(d, 'allow-all', undefined, by, grant))).toBe(
+        'INVALID_PARAMS',
+      );
+      expect(center.size).toBe(4);
+      expect(center.grants.list()).toEqual([]);
+      center.cancelAll();
+      await Promise.all([plain, forced, phrased, ok]);
+    });
+
+    it('sin grants en las opciones (o deshabilitadas) una solicitud grantable no admite concesión', async () => {
+      for (const center of [
+        new PendingInteractions({ remote: () => true, timeoutMs: 60_000 }),
+        withGrants(false),
+      ]) {
+        const decision = center.gatesFor().confirm!(grantable());
+        const { id } = center.pending()[0]!;
+        expect(
+          code(() => center.resolveApproval(id, 'approve', undefined, by, { minutes: 10 })),
+        ).toBe('INVALID_PARAMS');
+        expect(center.size).toBe(1);
+        expect(center.grants.list()).toEqual([]);
+        // Sin concesión sí se aprueba.
+        center.resolveApproval(id, 'approve', undefined, by);
+        expect(await decision).toBe('approve');
+      }
+    });
+
+    it('cancelAll retira las concesiones con la sesión', async () => {
+      const center = withGrants();
+      const decision = center.gatesFor().confirm!(grantable());
+      center.resolveApproval(center.pending()[0]!.id, 'approve', undefined, by, { minutes: 10 });
+      await decision;
+      expect(center.grants.list()).toHaveLength(1);
+      center.cancelAll();
+      expect(center.grants.list()).toEqual([]);
+    });
   });
 });

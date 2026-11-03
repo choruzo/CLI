@@ -967,3 +967,48 @@ async fn las_rutinas_solo_salen_por_dot_y_las_mutaciones_llevan_operation_id() {
     desktop.quit().await;
     rig.quit().await;
 }
+
+/// M17: revocar una concesión sale por la conexión principal de Dot, con
+/// `operationId`, y Desktop no la tiene.
+#[tokio::test(flavor = "multi_thread")]
+async fn revocar_una_concesion_sale_por_dot_con_operation_id_y_no_por_desktop() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    rig.link
+        .call(CallAction::GrantsRevoke {
+            session_id: "ses_1".into(),
+            grant_id: "grt_1".into(),
+        })
+        .await
+        .unwrap();
+    let requests = fake.requests();
+    let sent = requests
+        .iter()
+        .find(|r| r["method"] == "grants.revoke")
+        .unwrap();
+    assert_eq!(sent["params"]["sessionId"], "ses_1");
+    assert_eq!(sent["params"]["grantId"], "grt_1");
+    assert!(sent["params"]["operationId"]
+        .as_str()
+        .unwrap()
+        .starts_with("dot-"));
+
+    let before = requests.len();
+    let err = desktop
+        .link
+        .call(CallAction::GrantsRevoke {
+            session_id: "ses_1".into(),
+            grant_id: "grt_1".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, CommandErrorKind::Invalid);
+    assert_eq!(fake.requests().len(), before);
+    desktop.quit().await;
+    rig.quit().await;
+}

@@ -241,6 +241,11 @@ pub enum CallAction {
     RoutinesRemove { routine_id: String },
     /// M16 — `routines.run`: dispararla ya, también deshabilitada.
     RoutinesRun { routine_id: String },
+    /// M17 — `grants.revoke`: quitar una concesión vigente de una sesión.
+    GrantsRevoke {
+        session_id: String,
+        grant_id: String,
+    },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -294,6 +299,7 @@ impl CallAction {
             CallAction::RoutinesUpdate { .. } => "routines-update",
             CallAction::RoutinesRemove { .. } => "routines-remove",
             CallAction::RoutinesRun { .. } => "routines-run",
+            CallAction::GrantsRevoke { .. } => "grants-revoke",
         }
     }
 
@@ -311,6 +317,7 @@ impl CallAction {
                 | CallAction::RoutinesUpdate { .. }
                 | CallAction::RoutinesRemove { .. }
                 | CallAction::RoutinesRun { .. }
+                | CallAction::GrantsRevoke { .. }
         )
     }
 }

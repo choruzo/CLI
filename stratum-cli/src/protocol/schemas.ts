@@ -50,6 +50,7 @@ import type {
   ProtocolAgent,
   ProtocolSkill,
   ProtocolApproval,
+  ProtocolApprovalGrant,
   ProtocolDecision,
   ProtocolJob,
   ProtocolMemoryEvent,
@@ -77,7 +78,7 @@ import type {
   ProtocolRoutineLimits,
   ProtocolRoutineResult,
 } from './model.js';
-import { BOX_SCREEN_LIMITS, HISTORY_LIMITS } from './model.js';
+import { BOX_SCREEN_LIMITS, GRANT_MINUTES, HISTORY_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
 
@@ -362,12 +363,31 @@ export const approvalSchema: z.ZodType<ProtocolApproval> = z.object({
   environment: environmentRef.optional(),
   forced: z.boolean(),
   confirmPhrase: z.string().optional(),
+  grantable: z.boolean().optional(),
   resolvable: z.enum(['anywhere', 'origin']),
   requestedAt: timestamp,
   expiresAt: timestamp.nullable(),
   status: z.enum(['pending', 'approved', 'denied', 'expired', 'cancelled']),
   decision: approvalDecision.optional(),
   resolvedBy: resolver.optional(),
+});
+
+const grantMinutes = z.union([
+  z.literal(GRANT_MINUTES[0]),
+  z.literal(GRANT_MINUTES[1]),
+  z.literal(GRANT_MINUTES[2]),
+]);
+const grantRequest = z.object({ minutes: grantMinutes }).strict();
+
+export const grantSchema: z.ZodType<ProtocolApprovalGrant> = z.object({
+  id,
+  sessionId: id,
+  tool: z.string(),
+  target: z.string().optional(),
+  minutes: grantMinutes,
+  grantedAt: timestamp,
+  expiresAt: timestamp,
+  grantedBy: resolver,
 });
 
 const questionAnswer: z.ZodType<ProtocolQuestionAnswer> = z.object({
@@ -664,6 +684,8 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
     decision: approvalDecision.optional(),
     resolvedBy: resolver.optional(),
   }),
+  'grant.created': z.object({ grant: grantSchema }),
+  'grant.ended': z.object({ grantId: id, reason: z.enum(['expired', 'revoked', 'host-changed']) }),
   'question.requested': z.object({ request: questionRequestSchema }),
   'question.resolved': z.object({
     requestId: id,
@@ -757,6 +779,7 @@ export const sessionSnapshotSchema: z.ZodType<ProtocolSessionSnapshot> = z.objec
   approvals: z.array(approvalSchema),
   questions: z.array(questionRequestSchema),
   plans: z.array(planRequestSchema),
+  grants: z.array(grantSchema).optional(),
   messages: z.array(messageSchema),
   messagesTruncated: z.boolean(),
 });
@@ -964,9 +987,11 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       approvalId: id,
       decision: approvalDecision,
       phrase: z.string().max(LIMITS.phraseChars).optional(),
+      grant: grantRequest.optional(),
       operationId,
     })
     .strict(),
+  'grants.revoke': z.object({ sessionId: id, grantId: id, operationId }).strict(),
   'questions.answer': z
     .object({ sessionId: id.optional(), requestId: id, answers, operationId })
     .strict(),
@@ -1097,9 +1122,11 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       approvalId: id,
       decision: approvalDecision,
       phrase: z.string().max(LIMITS.phraseChars).optional(),
+      grant: grantRequest.optional(),
       by: resolver,
     })
     .strict(),
+  'host.revokeGrant': z.object({ sessionId: id, grantId: id }).strict(),
   'host.answerQuestions': z
     .object({ sessionId: id, requestId: id, answers, by: resolver })
     .strict(),
@@ -1163,6 +1190,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
     plans: z.array(planRequestSchema),
   }),
   'approvals.resolve': emptyResult,
+  'grants.revoke': z.object({ grant: grantSchema }),
   'questions.answer': emptyResult,
   'plans.decide': emptyResult,
 
@@ -1205,6 +1233,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'host.resume': resumeResult,
   'host.steer': z.object({ status: steerStatus }),
   'host.resolveApproval': emptyResult,
+  'host.revokeGrant': z.object({ grant: grantSchema }),
   'host.answerQuestions': emptyResult,
   'host.decidePlan': emptyResult,
   'host.detach': z.object({ status: z.literal('detached') }),

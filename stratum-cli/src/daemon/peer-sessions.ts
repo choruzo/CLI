@@ -55,6 +55,8 @@ import {
   type MethodResult,
   type PauseStatus,
   type ProtocolApprovalDecision,
+  type ProtocolApprovalGrant,
+  type ProtocolGrantRequest,
   type ProtocolEvent,
   type ProtocolHandoffContext,
   type ProtocolPlan,
@@ -166,6 +168,7 @@ type ForwardedMethod =
   | 'host.pause'
   | 'host.resume'
   | 'host.resolveApproval'
+  | 'host.revokeGrant'
   | 'host.answerQuestions'
   | 'host.decidePlan';
 
@@ -878,6 +881,9 @@ export class PeerSessions {
             resolution: typeof how === 'string' ? how.slice(0, 32) : 'resolved',
           });
         }
+        if (err.code === 'NOT_FOUND' && method === 'host.revokeGrant') {
+          throw new ProtocolError('NOT_FOUND', 'No such grant.');
+        }
         if (err.code === 'NOT_FOUND' && !RUN_CONTROL.has(method)) {
           throw new ProtocolError('NOT_FOUND', 'No such pending request.');
         }
@@ -893,6 +899,11 @@ export class PeerSessions {
       log.warn('host did not answer a control request', { sessionId, method });
       throw hostUnavailable();
     }
+  }
+
+  /** M17 — retira una concesión: la tiene en memoria el anfitrión de la sesión. */
+  async revokeGrant(sessionId: string, grantId: string): Promise<ProtocolApprovalGrant> {
+    return (await this.forward('host.revokeGrant', sessionId, { sessionId, grantId })).grant;
   }
 
   async cancel(sessionId: string, runId?: string): Promise<CancelStatus> {
@@ -940,6 +951,7 @@ export class PeerSessions {
       decision: ProtocolApprovalDecision,
       phrase: string | undefined,
       by: ProtocolResolver,
+      grant?: ProtocolGrantRequest,
     ): Promise<void>;
     answerQuestions(
       id: string,
@@ -954,12 +966,13 @@ export class PeerSessions {
     ): Promise<void>;
   } {
     return {
-      resolveApproval: async (approvalId, decision, phrase, by) => {
+      resolveApproval: async (approvalId, decision, phrase, by, grant) => {
         await this.forward('host.resolveApproval', sessionId, {
           sessionId,
           approvalId,
           decision,
           ...(phrase !== undefined ? { phrase } : {}),
+          ...(grant ? { grant } : {}),
           by,
         });
       },

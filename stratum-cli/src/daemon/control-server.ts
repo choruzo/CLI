@@ -15,6 +15,7 @@
 import { createHash, timingSafeEqual } from 'crypto';
 import { createServer, type Server, type Socket } from 'net';
 import {
+  FEATURE_APPROVAL_GRANTS,
   FEATURE_REMOTE_APPROVALS,
   HANDSHAKE_TIMEOUT_MS,
   MAX_MESSAGE_BYTES,
@@ -439,7 +440,7 @@ export class ControlServer {
       server: this.opts.server,
       connectionId: conn.id,
       capabilities,
-      features: this.opts.approver ? [FEATURE_REMOTE_APPROVALS] : [],
+      features: this.opts.approver ? [FEATURE_REMOTE_APPROVALS, FEATURE_APPROVAL_GRANTS] : [],
     };
   }
 

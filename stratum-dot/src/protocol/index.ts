@@ -13,6 +13,8 @@ export type {
   ClassifiedEvent,
   FollowResult,
   ProtocolAgent,
+  ProtocolApprovalGrant,
+  ProtocolGrantMinutes,
   ProtocolApproval,
   ProtocolBoxScreen,
   ProtocolBoxStatus,
@@ -40,6 +42,7 @@ export type {
 } from '../../../stratum-cli/src/protocol/index';
 export {
   EVENT_CLASS,
+  GRANT_MINUTES,
   LIMITS,
   STRATUM_PROTOCOL_VERSION,
   applySessionEvent,

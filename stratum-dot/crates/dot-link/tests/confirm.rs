@@ -24,6 +24,7 @@ fn approve(session: &str, id: &str) -> ApproverAction {
         approval_id: id.into(),
         phrase: None,
         for_session: false,
+        grant_minutes: None,
     }
 }
 
@@ -128,6 +129,7 @@ async fn un_webview_comprometido_no_resuelve_nada_sensible_sin_la_confirmacion()
             approval_id: "apr_1".into(),
             phrase: None,
             for_session: true,
+            grant_minutes: None,
         },
         ApproverAction::AnswerQuestions {
             session_id: "ses_a".into(),
@@ -535,6 +537,7 @@ async fn la_frase_se_teclea_en_la_ventana_y_allow_all_no_vale_con_politica() {
             approval_id: "apr_1".into(),
             phrase: None,
             for_session: true,
+            grant_minutes: None,
         })
         .await
         .unwrap()
@@ -548,6 +551,7 @@ async fn la_frase_se_teclea_en_la_ventana_y_allow_all_no_vale_con_politica() {
         approval_id: "apr_1".into(),
         phrase: Some("prod-db".into()),
         for_session: false,
+        grant_minutes: None,
     });
     let nonce = w.person.nth(1).await;
     let view = w.gate.view(&nonce).unwrap();

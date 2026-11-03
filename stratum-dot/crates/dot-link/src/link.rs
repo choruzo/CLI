@@ -163,6 +163,8 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::RoutinesUpdate,
     MainMethod::RoutinesRemove,
     MainMethod::RoutinesRun,
+    // M17: revocar una concesión (solo resta autoridad; Desktop no la ofrece).
+    MainMethod::GrantsRevoke,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -995,6 +997,25 @@ fn call_request(
             Ok((
                 MainMethod::RoutinesRun,
                 json!({ "routineId": routine_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::GrantsRevoke {
+            session_id,
+            grant_id,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            if !valid_id(grant_id) {
+                return Err(invalid("Invalid grant id."));
+            }
+            Ok((
+                MainMethod::GrantsRevoke,
+                json!({
+                    "sessionId": session_id,
+                    "grantId": grant_id,
+                    "operationId": operation_id,
+                }),
             ))
         }
     }
@@ -2305,6 +2326,29 @@ mod tests {
             params,
             json!({ "routineId": "rt_1", "operationId": "op-4" })
         );
+
+        // M17: revocar una concesión lleva sesión, id y operationId.
+        let revoke = CallAction::GrantsRevoke {
+            session_id: "ses_1".into(),
+            grant_id: "grt_1".into(),
+        };
+        let (method, params) = call_request(&revoke, "op-5").unwrap();
+        assert_eq!(method, MainMethod::GrantsRevoke);
+        assert_eq!(
+            params,
+            json!({ "sessionId": "ses_1", "grantId": "grt_1", "operationId": "op-5" })
+        );
+        assert!(revoke.mutating());
+        let long = "x".repeat(MAX_ID_CHARS + 1);
+        for (session_id, grant_id) in [("", "grt_1"), ("ses_1", ""), ("ses_1", long.as_str())] {
+            let bad = CallAction::GrantsRevoke {
+                session_id: session_id.into(),
+                grant_id: grant_id.into(),
+            };
+            assert!(call_request(&bad, "op").is_err());
+        }
+        assert!(DOT_METHODS.contains(&MainMethod::GrantsRevoke));
+        assert!(!DESKTOP_METHODS.contains(&MainMethod::GrantsRevoke));
 
         // Solo la consulta no cambia nada.
         assert!(!CallAction::RoutinesList.mutating());

@@ -42,7 +42,7 @@ pub mod wire;
 
 pub use approver::{
     spawn_broker, ApproverAction, ApproverConfig, ApproverHandle, ApproverStatus, ConfirmedAction,
-    QuestionAnswer,
+    QuestionAnswer, GRANT_MINUTES,
 };
 pub use confirm::{
     CancelReason, ConfirmFailure, ConfirmGate, ConfirmTimings, ConfirmationView, Presenter,

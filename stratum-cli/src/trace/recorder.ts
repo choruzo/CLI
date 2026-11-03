@@ -308,8 +308,15 @@ export class TraceRecorder {
 const CONFIRMATION_LABEL = {
   approved: 'aprobada',
   'allow-all': 'aprobada (permitir todo)',
+  granted: 'aprobada por concesión',
   denied: 'denegada',
   blocked: 'bloqueada (nadie puede aprobar)',
+} as const;
+
+const GRANT_PHASE_LABEL = {
+  created: 'abierta',
+  revoked: 'revocada',
+  expired: 'caducada',
 } as const;
 
 const VETO_LABEL = {
@@ -766,6 +773,9 @@ class Scope implements TraceScope {
         this.point('notice', `Inbox: ${what} ${INBOX_PHASE_LABEL[ev.phase]}`, data);
       } else if (ev.event === 'pause') {
         this.point('notice', `Pausa: ${PAUSE_PHASE_LABEL[ev.phase]}`, data);
+      } else if (ev.event === 'grant') {
+        const what = ev.target ? `${ev.tool} · ${ev.target}` : ev.tool;
+        this.point('notice', `Concesión ${GRANT_PHASE_LABEL[ev.phase]}: ${what}`, data);
       } else if (ev.event === 'resolution') {
         this.point('notice', `Resolución (${ev.kind}): ${ev.status} · ${ev.by}`, data);
       } else if (ev.event === 'job') {

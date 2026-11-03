@@ -166,6 +166,7 @@ export class HostedSession {
       },
       preset,
       opts.routineId ? undefined : opts.routineProposals,
+      opts.routineId !== undefined,
     );
     if (opts.agent && !preset) {
       const applied = host.agent.setPrimaryProfile(opts.agent);
@@ -273,6 +274,7 @@ export class HostedSession {
       },
       preset,
       meta.routineId ? undefined : opts.routineProposals,
+      meta.routineId !== undefined,
     );
     if (meta.agent && !preset && host.agent.getActiveProfile()?.name !== meta.agent) {
       await host.dispose({ cancelBackground: true });
@@ -355,6 +357,8 @@ export class HostedSession {
     agent: NonNullable<SessionHostOptions['agent']>,
     preset: SessionHostOptions['preset'] | null = null,
     routineProposals?: RoutineProposals,
+    /** M16/M17 — la sesión de una rutina: sin concesiones temporales. */
+    routine = false,
   ): Promise<SessionHost> {
     const host = await SessionHost.create({
       ...(preset ? { preset } : {}),
@@ -377,6 +381,7 @@ export class HostedSession {
       destructivePolicy: opts.remoteApprovals() ? 'ask' : 'deny',
       remoteApprovals: opts.remoteApprovals,
       interactionTimeoutMs: opts.approvalTimeoutMs,
+      ...(routine ? { approvalGrants: false } : {}),
       agent: opts.snapshotsHome ? { ...agent, snapshotsHome: opts.snapshotsHome } : agent,
     });
     for (const warning of host.mcpWarnings) {

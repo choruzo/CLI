@@ -36,6 +36,7 @@ import {
   type ProtocolApproval,
   type ProtocolApprovalDecision,
   type ProtocolEvent,
+  type ProtocolGrantRequest,
   type ProtocolPlan,
   type ProtocolPlanRequest,
   type ProtocolQuestionAnswer,
@@ -53,6 +54,7 @@ export interface InteractionRoute {
     decision: ProtocolApprovalDecision,
     phrase: string | undefined,
     by: ProtocolResolver,
+    grant?: ProtocolGrantRequest,
   ): void | Promise<void>;
   answerQuestions(
     id: string,
@@ -79,7 +81,14 @@ export interface ApproverLink {
  * que pertenece la solicitud: si no es la suya, no se resuelve nada.
  */
 export type Resolution = { sessionId?: string } & (
-  | { kind: 'approval'; id: string; decision: ProtocolApprovalDecision; phrase?: string }
+  | {
+      kind: 'approval';
+      id: string;
+      decision: ProtocolApprovalDecision;
+      phrase?: string;
+      /** M17 — aprobar abriendo una concesión temporal. */
+      grant?: ProtocolGrantRequest;
+    }
   | { kind: 'question'; id: string; answers: ProtocolQuestionAnswer[] | null }
   | { kind: 'plan'; id: string; decision: 'approve' | 'reject'; plan?: ProtocolPlan }
 );
@@ -301,7 +310,12 @@ export class ApprovalCenter {
   /** Lo que no puede valer no se entrega: la solicitud sigue pendiente. */
   private check(entry: Entry, resolution: Resolution): void {
     if (entry.kind === 'approval' && resolution.kind === 'approval') {
-      const issue = checkApprovalResolution(entry.dto, resolution.decision, resolution.phrase);
+      const issue = checkApprovalResolution(
+        entry.dto,
+        resolution.decision,
+        resolution.phrase,
+        resolution.grant,
+      );
       if (issue) throw invalid(issue.path, issue.message);
     } else if (entry.kind === 'question' && resolution.kind === 'question') {
       const checked = checkQuestionAnswers(entry.dto.questions, resolution.answers);
@@ -346,7 +360,13 @@ export class ApprovalCenter {
     let outcome: string;
     try {
       if (resolution.kind === 'approval') {
-        await route.resolveApproval(id, resolution.decision, resolution.phrase, by);
+        await route.resolveApproval(
+          id,
+          resolution.decision,
+          resolution.phrase,
+          by,
+          resolution.grant,
+        );
         outcome = resolution.decision === 'deny' ? 'denied' : 'approved';
       } else if (resolution.kind === 'question') {
         await route.answerQuestions(id, resolution.answers, by);
@@ -372,6 +392,9 @@ export class ApprovalCenter {
       sessionId: entry.sessionId,
       outcome,
       ...(resolution.kind !== 'question' ? { decision: resolution.decision } : {}),
+      ...(resolution.kind === 'approval' && resolution.grant
+        ? { grantMinutes: resolution.grant.minutes }
+        : {}),
       connectionId: link.id,
       client: link.client?.kind,
       clientName: link.client?.name,

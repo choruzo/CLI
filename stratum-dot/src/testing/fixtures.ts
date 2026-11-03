@@ -204,6 +204,7 @@ export function fakeNative(): FakeNative {
         routine: sampleRoutine({ running: true }),
       }),
     ),
+    grantsRevoke: vi.fn(async (): Promise<unknown> => ({ grant: {} })),
     notifyRoutine: vi.fn(async () => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),

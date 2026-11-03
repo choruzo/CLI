@@ -184,6 +184,30 @@ export interface ConfirmRequest {
    * allow-all no se ofrece (y si se devuelve, cuenta solo para esta llamada).
    */
   forced?: boolean;
+  /**
+   * M17 — se puede aprobar con una concesión temporal: lo decide el dispatcher
+   * (ni forzada, ni con frase, ni más de un target, y la sesión las admite).
+   */
+  grantable?: boolean;
+}
+
+/** M17 — concesión vigente que cubre una llamada (`host/approval-grants.ts`). */
+export interface GrantMatch {
+  id: string;
+  minutes: number;
+  /** Reloj de pared del anfitrión: orientativo. */
+  expiresAt: number;
+}
+
+/**
+ * M17 — las concesiones temporales de la sesión, vistas desde el dispatcher.
+ * Las crea y las guarda el anfitrión; el runtime solo pregunta.
+ */
+export interface ApprovalGrantLookup {
+  /** `false`: la sesión no admite concesiones (la de una rutina). */
+  readonly enabled: boolean;
+  /** La concesión vigente para esa tool y target, o `null`. Nunca lanza. */
+  match(tool: string, target: string | undefined): GrantMatch | null;
 }
 
 /**
@@ -211,6 +235,11 @@ export interface ToolContext {
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   confirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
+  /**
+   * M17 — concesiones temporales de la sesión. Ausente = ninguna: la llamada
+   * se pregunta como siempre.
+   */
+  approvalGrants?: ApprovalGrantLookup;
   /**
    * Hito 17 — sesión read-only (§12.18): toda llamada que cambie algo se veta en
    * el dispatcher antes de confirmar, y ninguna política la levanta.
@@ -382,6 +411,8 @@ export interface RunOptions {
   allowDestructive?: boolean;
   destructivePolicy?: DestructivePolicy;
   onConfirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
+  /** M17 — concesiones temporales de la sesión; se propagan a los subagentes. */
+  approvalGrants?: ApprovalGrantLookup;
   /**
    * Hito 17 — modo read-only (`--read-only`, `/readonly`). Se propaga al
    * `ToolContext` y a los subagentes: un hijo nunca puede escribir por el padre.

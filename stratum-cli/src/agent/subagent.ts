@@ -12,6 +12,7 @@ import type { ToolRegistry } from '../tools/registry.js';
 import type {
   AgentEvent,
   AgentProfile,
+  ApprovalGrantLookup,
   ConfirmRequest,
   DestructiveDecision,
   DiagnosticsProvider,
@@ -60,6 +61,8 @@ export interface RunSubagentOptions {
   sessionId?: string;
   /** Callback de confirmación del padre: el subagente nunca posee la TTY (§12.16). */
   onConfirmDestructive?: (req: ConfirmRequest) => Promise<DestructiveDecision>;
+  /** M17 — las concesiones temporales de la sesión del padre. */
+  approvalGrants?: ApprovalGrantLookup;
   /**
    * Factory del router del hijo. Si se omite, se construye un `ProviderRouter`
    * propio desde la config. Punto de inyección para tests.
@@ -265,6 +268,7 @@ async function runSubagentWithin(
       profile.destructivePolicy,
     ),
     onConfirmDestructive: opts.onConfirmDestructive,
+    approvalGrants: opts.approvalGrants,
     readOnly: opts.readOnly,
     planApproved: opts.planApproved,
     // Jobs en segundo plano: el mismo manager de la sesión, con scope propio.
