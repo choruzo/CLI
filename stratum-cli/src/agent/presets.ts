@@ -110,8 +110,11 @@ export const COMPANION_TOOLS: readonly string[] = [
   'propose_routine',
 ];
 
+/** M17 — sus conectores: tools de los servers de `companion.mcp.servers`, y ningún otro. */
+export const COMPANION_CONNECTOR_TOOLS = 'mcp__*';
+
 export function companionToolsetFilter(): ToolsetFilter {
-  return { allowedTools: COMPANION_TOOLS };
+  return { allowedTools: [...COMPANION_TOOLS, COMPANION_CONNECTOR_TOOLS] };
 }
 
 /** M14 — cómo aparece el `companion` en `agents.list`. */
@@ -123,7 +126,7 @@ export function companionAgentInfo(): ProtocolAgent {
       'It never runs commands on this machine.',
     mode: 'primary',
     origin: 'builtin',
-    allowedTools: [...COMPANION_TOOLS],
+    allowedTools: [...COMPANION_TOOLS, COMPANION_CONNECTOR_TOOLS],
   };
 }
 

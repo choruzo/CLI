@@ -2011,6 +2011,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   confirmación nativa y las lista con un botón de revocar; en la CLI, `stratum approvals approve --for`,
   `approvals grants` y `approvals revoke`. Sin sesión ni target de entorno, la pareja es el único target
   mutante de `callEffects` (decidido al implementar; más estrecho que «solo la tool»).
+  *Conectores hechos 2026-11-04*: lista propia y aislada `companion.mcp.servers` (solo de la config
+  global; el `companion` nunca carga `mcp.servers`), `readOnlyTools` por server, que pasan a
+  `mcp.readOnlyTools` y a `callEffects`; lo no declarado se confirma (y admite concesión). E2E
+  `stratum-dot/e2e/connectors.e2e.mjs` contra NaN (`glm5.3-flash`): aprobar con «30 min» en la
+  confirmación nativa, la segunda llamada sin preguntar, `list_notes` sin preguntar, revocar.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
   confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
 

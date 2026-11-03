@@ -12,6 +12,7 @@ import { formatTarget, parseTarget } from './exec/target.js';
 import { readOnlyCommandVerdict } from './readonly-commands.js';
 import { JOB_TOOLS } from '../jobs/types.js';
 import { isScreenTool, SCREEN_READ_TOOLS } from './screen/names.js';
+import { mcpToolName } from './mcp/names.js';
 
 export type EnvironmentTier = 'production' | 'staging' | 'development';
 export type EnvironmentPolicy = 'allow' | 'ask' | 'confirm-always';
@@ -155,11 +156,30 @@ function str(v: unknown): string | undefined {
   return typeof v === 'string' ? v : undefined;
 }
 
+/**
+ * M17 — ¿es esta tool MCP una de las declaradas de solo lectura
+ * (`mcp.readOnlyTools`, solo de la config global)? Se compara con el nombre
+ * registrado exacto (`mcpToolName`), también cuando lleva hash o va recortado.
+ */
+function isDeclaredReadOnlyMcp(
+  name: string,
+  config?: Partial<Pick<StratumConfig, 'mcp'>>,
+): boolean {
+  if (!name.startsWith('mcp__')) return false;
+  const declared = config?.mcp?.readOnlyTools;
+  if (!declared) return false;
+  return Object.entries(declared).some(([server, tools]) =>
+    tools.some((tool) => mcpToolName(server, tool) === name),
+  );
+}
+
 export function callEffects(
   name: string,
   input: Record<string, unknown>,
-  config?: Pick<StratumConfig, 'box'>,
+  config?: Pick<StratumConfig, 'box'> & Partial<Pick<StratumConfig, 'mcp'>>,
 ): CallEffects {
+  // M17 — una tool MCP declarada de solo lectura no cambia nada en ningún target.
+  if (isDeclaredReadOnlyMcp(name, config)) return { known: true, mutating: false, targets: [] };
   // M15 — la pantalla de la caja: capturar (y esperar) observa; el resto
   // actúa dentro de ella. El target es la caja configurada (sin config, la de
   // por defecto: solo lo usa el reparto de lecturas en paralelo).

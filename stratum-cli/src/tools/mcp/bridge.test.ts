@@ -320,3 +320,34 @@ describe('buildMcpTool', () => {
     expect(tool.description).toContain('(MCP tool "filesystem/read.file")');
   });
 });
+
+describe('buildMcpTool — confirmMutating (M17)', () => {
+  const declared = StratumConfigSchema.parse({
+    memory: { autoExtract: false },
+    mcp: { readOnlyTools: { filesystem: ['read_file'] } },
+  });
+
+  it('sin la opción no hay isDestructive: las sesiones de código no cambian', () => {
+    expect(buildMcpTool(makeClient(), sampleTool).isDestructive).toBeUndefined();
+    expect(
+      buildMcpTool(makeClient(), sampleTool, { confirmMutating: false }).isDestructive,
+    ).toBeUndefined();
+  });
+
+  it('con la opción, lo declarado de solo lectura no es destructivo y lo demás sí', () => {
+    const read = buildMcpTool(makeClient(), sampleTool, { confirmMutating: true });
+    const write = buildMcpTool(
+      makeClient(),
+      { ...sampleTool, name: 'write_file' },
+      { confirmMutating: true },
+    );
+    const ctx = { ...baseCtx, config: declared };
+    expect(read.isDestructive?.({ path: 'a' }, ctx)).toBe(false);
+    expect(write.isDestructive?.({ path: 'a' }, ctx)).toBe(true);
+  });
+
+  it('sin ninguna declaración todo es destructivo', () => {
+    const read = buildMcpTool(makeClient(), sampleTool, { confirmMutating: true });
+    expect(read.isDestructive?.({}, baseCtx)).toBe(true);
+  });
+});

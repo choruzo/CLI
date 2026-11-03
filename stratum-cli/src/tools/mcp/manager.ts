@@ -50,6 +50,12 @@ export interface McpManagerOptions {
    * manager. Sin él nacen en el directorio del proceso.
    */
   cwd?: string;
+  /**
+   * M17 — las tools que no estén declaradas de solo lectura
+   * (`mcp.readOnlyTools`) se confirman cada vez (o con una concesión). Lo pide
+   * el `companion`: sus conectores actúan fuera de la caja.
+   */
+  confirmMutating?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -62,6 +68,7 @@ export class McpManager {
   private registry: ToolRegistry | null = null;
   private onWarn: ((w: McpManagerWarning) => void) | undefined;
   private readonly reconnectDelays: number[];
+  private readonly confirmMutating: boolean;
 
   /** Nombres registrados por cada cliente, para retirarlos al cambiar. */
   private readonly registered = new Map<McpServerClient, Set<string>>();
@@ -89,6 +96,7 @@ export class McpManager {
     options: McpManagerOptions = {},
   ) {
     this.reconnectDelays = options.reconnectDelaysMs ?? RECONNECT_DELAYS_MS;
+    this.confirmMutating = options.confirmMutating === true;
     const runtime: McpRuntimeOptions = {
       installDir: expandHome(config.mcp.installDir),
       autoInstall: config.mcp.autoInstall,
@@ -273,7 +281,7 @@ export class McpManager {
     const warnings: McpManagerWarning[] = [];
 
     for (const mcpTool of client.tools) {
-      const def = buildMcpTool(client, mcpTool);
+      const def = buildMcpTool(client, mcpTool, { confirmMutating: this.confirmMutating });
       const owner = this.owners.get(def.name);
       const takenByOther = owner !== undefined && owner !== client;
       const takenByBuiltin = owner === undefined && registry.get(def.name) !== undefined;

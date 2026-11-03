@@ -266,10 +266,20 @@ export class SessionHost {
     }
 
     // Los servers MCP nacen en el directorio de la sesión, no en el del proceso.
-    // Los agentes embebidos no tienen: sus tools son las suyas y nada más.
-    const mcp = new McpManager(config, undefined, { cwd: opts.env.cwd });
+    // El asistente no tiene: sus tools son las suyas y nada más. M17: el
+    // `companion` tiene sus conectores (su config ya solo lleva los suyos), y
+    // lo que no declaren de solo lectura se confirma: actúa fuera de la caja.
+    const companion = opts.preset === 'companion';
+    const mcp = new McpManager(config, undefined, {
+      cwd: opts.env.cwd,
+      ...(companion ? { confirmMutating: true } : {}),
+    });
     const mcpWarnings: McpManagerWarning[] = [];
-    if (!embedded && (opts.mcp ?? 'eager') === 'eager' && config.mcp.servers.length > 0) {
+    if (
+      (!embedded || companion) &&
+      (opts.mcp ?? 'eager') === 'eager' &&
+      config.mcp.servers.length > 0
+    ) {
       mcpWarnings.push(...(await mcp.connectAll()));
       mcpWarnings.push(...mcp.registerInto(registry));
       // Un server que se cuelga durante una sesión larga se detecta y se relanza.

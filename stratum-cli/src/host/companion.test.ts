@@ -1,7 +1,8 @@
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
 import { mkdirSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
-import { join } from 'path';
+import { dirname, join } from 'path';
+import { fileURLToPath } from 'url';
 import { SessionHost, type SessionHostOptions } from './session-host.js';
 import {
   buildCompanionConfig,
@@ -79,13 +80,18 @@ async function companionHost(
   opts: {
     box?: boolean;
     boxConfig?: Record<string, unknown>;
+    /** Secciones extra de la config (p. ej. `companion.mcp`). */
+    config?: Record<string, unknown>;
     vision?: 'pixels' | 'norm1000';
     extra?: Partial<SessionHostOptions>;
   } = {},
 ): Promise<{ host: SessionHost; dataDir: string }> {
   const dataDir = join(root, `data-${++n}`);
   const config = makeConfig(
-    opts.box === false ? {} : { box: { enabled: true, name: 'box', ...opts.boxConfig } },
+    {
+      ...(opts.box === false ? {} : { box: { enabled: true, name: 'box', ...opts.boxConfig } }),
+      ...opts.config,
+    },
     opts.vision,
   );
   const router = new ProviderRouter(config);
@@ -452,4 +458,174 @@ describe('companion — skills de serie', () => {
     expect(prompt).not.toContain('stratum-global-memory');
     expect(prompt).not.toContain('stratum-project-memory');
   });
+});
+
+// ---------------------------------------------------------------------------
+// M17 — conectores MCP
+// ---------------------------------------------------------------------------
+
+const MCP_FIXTURE = join(
+  dirname(fileURLToPath(import.meta.url)),
+  '..',
+  'tools',
+  'mcp',
+  'fixtures',
+  'test-mcp-server.mjs',
+);
+const fixtureServer = (name: string, extra: Record<string, unknown> = {}) => ({
+  name,
+  command: process.execPath,
+  args: [MCP_FIXTURE],
+  ...extra,
+});
+
+describe('companion — buildCompanionConfig y conectores (M17)', () => {
+  it('sus servers MCP son solo los de companion.mcp.servers, nunca los globales', () => {
+    const base = makeConfig({
+      mcp: { servers: [fixtureServer('global')], readOnlyTools: { global: ['echo'] } },
+      companion: {
+        mcp: {
+          servers: [
+            fixtureServer('agenda', { readOnlyTools: ['echo', 'cwd'] }),
+            fixtureServer('notas'),
+          ],
+        },
+      },
+    });
+    const config = buildCompanionConfig(base, join(root, 'cfg'));
+    expect(config.mcp.servers.map((s) => s.name)).toEqual(['agenda', 'notas']);
+    // `readOnlyTools` es de la config, no del arranque del server.
+    for (const s of config.mcp.servers) expect(s).not.toHaveProperty('readOnlyTools');
+    // Sustituye al global: lo declarado para `global` no cuenta, y `notas` no declara nada.
+    expect(config.mcp.readOnlyTools).toEqual({ agenda: ['echo', 'cwd'] });
+    // La config de partida no se toca.
+    expect(base.mcp.servers.map((s) => s.name)).toEqual(['global']);
+  });
+
+  it('sin conectores: ni servers ni tools declaradas, aunque haya MCP global', () => {
+    const base = makeConfig({
+      mcp: { servers: [fixtureServer('global')], readOnlyTools: { global: ['echo'] } },
+    });
+    const config = buildCompanionConfig(base, join(root, 'cfg2'));
+    expect(config.mcp.servers).toEqual([]);
+    expect(config.mcp.readOnlyTools).toEqual({});
+  });
+});
+
+describe('companion — prompt de conectores (M17)', () => {
+  it('con connectors el prompt los presenta; sin ellos no los menciona', () => {
+    const withConnectors = buildCompanionPrompt(undefined, { box: 'box', connectors: true });
+    expect(withConnectors).toContain('# Your connectors');
+    expect(withConnectors).toContain('mcp__');
+    expect(buildCompanionPrompt(undefined, { box: 'box' })).not.toContain('# Your connectors');
+    expect(buildCompanionPrompt(undefined, {})).not.toContain('# Your connectors');
+  });
+});
+
+describe('companion — conectores MCP en la sesión (M17)', () => {
+  const connectors = {
+    companion: { mcp: { servers: [fixtureServer('fix', { readOnlyTools: ['echo'] })] } },
+  };
+
+  it('registra las tools de sus conectores y su prompt los presenta', async () => {
+    const provider = new RecordingProvider([makeTextRound('hola')]);
+    const { host } = await companionHost(provider, { config: connectors });
+    await collect(host.run('hola'));
+    const tools = offered(provider);
+    expect(tools).toContain('mcp__fix__echo');
+    expect(tools).toContain('mcp__fix__cwd');
+    // Siguen estando las suyas y sigue sin haber nada de código.
+    expect(tools).toContain('exec');
+    expect(tools).not.toContain('read_file');
+    expect(host.agent.getMessages()[0]?.content).toContain('# Your connectors');
+  }, 30_000);
+
+  it('un MCP global (mcp.servers) no llega al companion', async () => {
+    const provider = new RecordingProvider([makeTextRound('hola')]);
+    const { host } = await companionHost(provider, {
+      config: { mcp: { servers: [fixtureServer('global')] } },
+    });
+    await collect(host.run('hola'));
+    expect(offered(provider).filter((t) => t.startsWith('mcp__'))).toEqual([]);
+    expect(host.agent.getMessages()[0]?.content).not.toContain('# Your connectors');
+  });
+
+  it('el asistente nunca tiene MCP, ni el global ni el del companion', async () => {
+    const config = makeConfig({ mcp: { servers: [fixtureServer('global')] }, ...connectors });
+    const provider = new RecordingProvider([makeTextRound('hola')]);
+    const router = new ProviderRouter(config);
+    vi.spyOn(router, 'getActive').mockReturnValue(provider);
+    const dir = join(root, 'assistant-mcp');
+    mkdirSync(dir, { recursive: true });
+    const assistant = await SessionHost.create({
+      env: createSessionEnv({ cwd: dir, env: {} }),
+      config,
+      router,
+      preset: 'assistant',
+      assistantData: { dir: join(root, 'assistant'), legacyMemoryDir: null },
+    });
+    hosts.push(assistant);
+    await collect(assistant.run('hola'));
+    expect(offered(provider).filter((t) => t.startsWith('mcp__'))).toEqual([]);
+  });
+
+  it('lo no declarado de solo lectura pide confirmación; lo declarado, no', async () => {
+    const confirm = vi.fn(async () => 'approve' as const);
+    const { host } = await companionHost(
+      new MockProvider([
+        makeToolCallRound('c1', 'mcp__fix__echo', { text: 'a' }),
+        makeToolCallRound('c2', 'mcp__fix__cwd', {}),
+        makeTextRound('hecho'),
+      ]),
+      { config: connectors, extra: { destructivePolicy: 'ask', gates: { confirm } } },
+    );
+    const events = await collect(host.run('usa los conectores'));
+    expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(2);
+    expect(events.some((e) => e.type === 'tool_error')).toBe(false);
+    // Solo `cwd` (no declarada) llegó a preguntar; `echo` pasó sin ruido.
+    expect(confirm).toHaveBeenCalledTimes(1);
+    const [asked] = confirm.mock.calls[0] as unknown as [{ toolName: string }];
+    expect(asked.toolName).toBe('mcp__fix__cwd');
+  }, 30_000);
+
+  it('una denegación impide que la tool MCP no declarada llegue al server', async () => {
+    const confirm = vi.fn(async () => 'deny' as const);
+    const { host } = await companionHost(
+      new MockProvider([makeToolCallRound('c1', 'mcp__fix__cwd', {}), makeTextRound('vale')]),
+      { config: connectors, extra: { destructivePolicy: 'ask', gates: { confirm } } },
+    );
+    const events = await collect(host.run('dónde estás'));
+    expect(confirm).toHaveBeenCalledTimes(1);
+    expect(events.some((e) => e.type === 'tool_result')).toBe(false);
+  }, 30_000);
+
+  it('con la sesión en ask, la solicitud de una tool MCP es concedible y sin target', async () => {
+    const confirm = vi.fn(async () => 'approve' as const);
+    const { host } = await companionHost(
+      new MockProvider([makeToolCallRound('c1', 'mcp__fix__cwd', {}), makeTextRound('hecho')]),
+      { config: connectors, extra: { destructivePolicy: 'ask', gates: { confirm } } },
+    );
+    await collect(host.run('dónde estás'));
+    const [request] = confirm.mock.calls[0] as unknown as [Record<string, unknown>];
+    expect(request.grantable).toBe(true);
+    expect(request.target).toBeUndefined();
+    expect(request.forced).toBeUndefined();
+  }, 30_000);
+
+  it('una concesión vigente cubre la tool MCP: no vuelve a preguntar', async () => {
+    const confirm = vi.fn(async () => 'deny' as const);
+    const { host } = await companionHost(
+      new MockProvider([makeToolCallRound('c1', 'mcp__fix__cwd', {}), makeTextRound('hecho')]),
+      { config: connectors, extra: { destructivePolicy: 'ask', gates: { confirm } } },
+    );
+    host.interactions.grants.create({ tool: 'mcp__fix__cwd' }, 10, {
+      kind: 'remote',
+      client: 'cli',
+      connectionId: 1,
+      at: 1,
+    });
+    const events = await collect(host.run('dónde estás'));
+    expect(confirm).not.toHaveBeenCalled();
+    expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(1);
+  }, 30_000);
 });

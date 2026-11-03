@@ -1304,6 +1304,11 @@ gobierna el daemon.
   `dot_box_status`, `dot_box_start` y `dot_box_stop`, registrados como el resto (`lib.rs`,
   `build.rs`, `capabilities/default.json`, test de arquitectura).
 
+- **Conectores (M17)**: el asistente puede tener servers MCP propios, los de `companion.mcp.servers`
+  de la config global de la CLI (`~/.stratum/.stratumrc.json`); Dot no los configura ni los ve aparte. Lo que un
+  conector no declare de solo lectura (`readOnlyTools`) pide aprobación cada vez, y esa aprobación
+  sale en Dot como cualquier otra (con la concesión temporal si la sesión la admite).
+
 Pendiente (fuera de M14): que *Asistente* sea la vista de inicio y el modo compacto (PRD §23.8),
 y empezar desde Dot una conversación nueva del asistente (el perfil de Dot no tiene
 `sessions.close`).

@@ -78,11 +78,15 @@ interface ConfigLayer {
  * Secciones que solo cuentan en la config global. `box` (M13): la imagen, la
  * red y el nombre de la caja no pueden depender de un repo clonado.
  * `trace.screenshots` (M15): guardar en disco capturas sin redactar de la caja
- * lo decide la persona, no un repo. Una capa de proyecto que las declare se
+ * lo decide la persona, no un repo. `companion` y `mcp.readOnlyTools` (M17):
+ * qué conecta el asistente de Dot y qué cuenta como inocuo. Una capa de proyecto que las declare se
  * carga sin ellas, con un aviso.
  */
 const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
   ['box'],
+  // M17: los conectores del `companion` y qué tools MCP son inocuas.
+  ['companion'],
+  ['mcp', 'readOnlyTools'],
   ['trace', 'screenshots'],
   ['imageGeneration'],
 ];

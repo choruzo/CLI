@@ -207,6 +207,60 @@ describe('secciones solo globales (M13: box)', () => {
   });
 });
 
+describe('secciones solo globales (M17: conectores del companion)', () => {
+  const server = { name: 'calendar', command: 'node', readOnlyTools: ['list_events'] };
+
+  it('companion y mcp.readOnlyTools de un proyecto se ignoran; los de la global cuentan', () => {
+    const globalFile = join(dir, 'global.json');
+    const projectFile = join(dir, 'project.json');
+    writeJson(globalFile, {});
+    const project = {
+      companion: { mcp: { servers: [server] } },
+      mcp: { readOnlyTools: { fs: ['read'] }, installDir: '~/otro' },
+    };
+
+    const merged = validateConfigLayer(projectFile, project, globalFile);
+    expect(merged.companion.mcp.servers).toEqual([]);
+    expect(merged.mcp.readOnlyTools).toBeUndefined();
+    // El resto de `mcp` sí cuenta; la capa de entrada no se toca.
+    expect(merged.mcp.installDir).toBe('~/otro');
+    expect(project.companion.mcp.servers).toHaveLength(1);
+
+    const own = validateConfigLayer(
+      globalFile,
+      { companion: { mcp: { servers: [server] } }, mcp: { readOnlyTools: { fs: ['read'] } } },
+      globalFile,
+    );
+    expect(own.companion.mcp.servers).toHaveLength(1);
+    expect(own.mcp.readOnlyTools).toEqual({ fs: ['read'] });
+  });
+
+  it('loadConfig no aplica los conectores de un repo clonado, y avisa', () => {
+    writeJson(join(dir, '.stratumrc.json'), {
+      companion: { mcp: { servers: [server] } },
+      mcp: { readOnlyTools: { fs: ['read'] } },
+    });
+    const config = loadConfig(dir);
+    expect(config.companion.mcp.servers).toEqual([]);
+    expect(config.mcp.readOnlyTools).toBeUndefined();
+    const warnings = takeConfigDeprecations().join('\n');
+    expect(warnings).toMatch(/"companion" solo se lee de la config global/);
+    expect(warnings).toMatch(/"mcp\.readOnlyTools" solo se lee de la config global/);
+  });
+
+  it('un conector pide command o package, como mcp.servers; readOnlyTools vale [] por defecto', () => {
+    expect(() =>
+      validateConfigLayer('g.json', { companion: { mcp: { servers: [{ name: 'x' }] } } }, 'g.json'),
+    ).toThrow(ConfigError);
+    const ok = validateConfigLayer(
+      'g.json',
+      { companion: { mcp: { servers: [{ name: 'x', package: 'pkg' }] } } },
+      'g.json',
+    );
+    expect(ok.companion.mcp.servers[0]?.readOnlyTools).toEqual([]);
+  });
+});
+
 describe('setConfigValue', () => {
   it('escribe en el .stratumrc.json del proyecto aunque tenga BOM', () => {
     const file = join(dir, '.stratumrc.json');

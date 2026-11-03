@@ -1426,6 +1426,10 @@ export class StratumAgent {
         skills: this.skillsBlock,
         ...(box ? { box } : {}),
         ...(screen ? { boxScreen: true } : {}),
+        // M17: tiene conectores (tools MCP de `companion.mcp.servers`).
+        ...(this.registry.list().some((t) => t.name.startsWith('mcp__'))
+          ? { connectors: true }
+          : {}),
       };
     }
     const active = this._activeProfile;

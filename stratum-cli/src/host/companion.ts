@@ -63,8 +63,10 @@ export function companionExecTarget(config: StratumConfig): ExecutionTarget | nu
 
 /**
  * Config de una sesión del `companion`. Su memoria es la suya: decisiones,
- * índice y `STRATUM.md` bajo `dataDir`. Sin inventario SSH ni servers MCP:
- * no puede alcanzar nada fuera de la caja aunque se colase una tool.
+ * índice y `STRATUM.md` bajo `dataDir`. Sin inventario SSH. M17: sus servers
+ * MCP son **solo** sus conectores (`companion.mcp.servers`, de la config
+ * global), nunca los de `mcp.servers`; lo que declaran de solo lectura pasa a
+ * `mcp.readOnlyTools` (y sustituye al global: no hereda declaraciones ajenas).
  */
 export function buildCompanionConfig(base: StratumConfig, dataDir: string): StratumConfig {
   return {
@@ -76,7 +78,15 @@ export function buildCompanionConfig(base: StratumConfig, dataDir: string): Stra
       globalFile: join(dataDir, 'STRATUM.md'),
     },
     ...(base.ssh ? { ssh: { ...base.ssh, hosts: {} } } : {}),
-    mcp: { ...base.mcp, servers: [] },
+    mcp: {
+      ...base.mcp,
+      servers: base.companion.mcp.servers.map(({ readOnlyTools: _ro, ...server }) => server),
+      readOnlyTools: Object.fromEntries(
+        base.companion.mcp.servers
+          .filter((s) => s.readOnlyTools.length > 0)
+          .map((s) => [s.name, [...s.readOnlyTools]]),
+      ),
+    },
     // Como el asistente: sin guías materializadas (presuponen un proyecto).
     prompt: { ...base.prompt, guides: 'inline' },
   };

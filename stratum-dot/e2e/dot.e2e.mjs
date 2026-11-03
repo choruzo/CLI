@@ -150,7 +150,7 @@ try {
     assert.ok(await hasText('No live sessions'));
     // El pie dice con qué habla.
     const body = await session.bodyText();
-    assert.match(body, /Dot 0\.1\.0 · daemon \d+\.\d+\.\d+.* · protocol 1/);
+    assert.match(body, /Dot \d+\.\d+\.\d+ · daemon \d+\.\d+\.\d+.* · protocol 1/);
     await shot('conectado-sin-sesiones');
   });
 

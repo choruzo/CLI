@@ -129,35 +129,49 @@ const ProviderConfigSchema = z.object({
   pricing: PricingSchema.optional(),
 });
 
-const McpServerSchema = z
-  .object({
-    name: z.string(),
-    /** Requerido cuando no se define `package`; ignorado como ejecutable cuando `package` sí se define. */
-    command: z.string().optional(),
-    args: z.array(z.string()).default([]),
-    env: z.record(z.string()).optional(),
-    /**
-     * Paquete npm a instalar en la carpeta gestionada (`mcp.installDir`).
-     * Cuando se define, Stratum instala el paquete una sola vez en
-     * `<installDir>/<server>/` y lanza el binario resuelto con `node`
-     * directamente, evitando el coste de resolución de `npx` en cada arranque
-     * (§12.8). `command`/`args` se ignoran como ejecutable: `args` se conserva
-     * y se pasa al binario resuelto. Formato: `nombre`, `nombre@version` o
-     * `@scope/nombre@version` (pinear versión es lo recomendado).
-     */
-    package: z.string().optional(),
-    /** Timeout de arranque por server en ms (§12.8, opción 3). */
-    startupTimeout: z.number().int().positive().default(15000),
-    /**
-     * Timeout de cada llamada a una tool de este server en ms. Antes mandaba el
-     * default del dispatcher (30 s) y cortaba las tools MCP lentas.
-     */
-    toolTimeout: z.number().int().positive().default(120000),
-  })
-  .refine((s) => s.package !== undefined || (s.command !== undefined && s.command.length > 0), {
-    message: "Se requiere 'command' cuando no se define 'package'",
-    path: ['command'],
-  });
+const McpServerObject = z.object({
+  name: z.string(),
+  /** Requerido cuando no se define `package`; ignorado como ejecutable cuando `package` sí se define. */
+  command: z.string().optional(),
+  args: z.array(z.string()).default([]),
+  env: z.record(z.string()).optional(),
+  /**
+   * Paquete npm a instalar en la carpeta gestionada (`mcp.installDir`).
+   * Cuando se define, Stratum instala el paquete una sola vez en
+   * `<installDir>/<server>/` y lanza el binario resuelto con `node`
+   * directamente, evitando el coste de resolución de `npx` en cada arranque
+   * (§12.8). `command`/`args` se ignoran como ejecutable: `args` se conserva
+   * y se pasa al binario resuelto. Formato: `nombre`, `nombre@version` o
+   * `@scope/nombre@version` (pinear versión es lo recomendado).
+   */
+  package: z.string().optional(),
+  /** Timeout de arranque por server en ms (§12.8, opción 3). */
+  startupTimeout: z.number().int().positive().default(15000),
+  /**
+   * Timeout de cada llamada a una tool de este server en ms. Antes mandaba el
+   * default del dispatcher (30 s) y cortaba las tools MCP lentas.
+   */
+  toolTimeout: z.number().int().positive().default(120000),
+});
+
+const needsCommand = {
+  message: "Se requiere 'command' cuando no se define 'package'",
+  path: ['command'],
+};
+const hasCommand = (s: { package?: string; command?: string }): boolean =>
+  s.package !== undefined || (s.command !== undefined && s.command.length > 0);
+
+const McpServerSchema = McpServerObject.refine(hasCommand, needsCommand);
+
+/**
+ * M17 — un conector del `companion` (`companion.mcp.servers`): un server MCP
+ * como cualquier otro, más las tools que **solo leen** (`readOnlyTools`, por
+ * su nombre en el server). Esas no piden confirmación; el resto actúa fuera de
+ * la caja y se confirma cada vez (o con una concesión temporal).
+ */
+const CompanionMcpServerSchema = McpServerObject.extend({
+  readOnlyTools: z.array(z.string().min(1)).default([]),
+}).refine(hasCommand, needsCommand);
 
 /**
  * Host del inventario SSH (Hito 9, §12.14). Un alias del `ssh.hosts` de
@@ -829,6 +843,24 @@ export const StratumConfigSchema = z.object({
        * ejecutar `stratum mcp install` manualmente.
        */
       autoInstall: z.boolean().default(true),
+      /**
+       * M17 — tools MCP declaradas de solo lectura, por server: `{ "<server>":
+       * ["<tool>", …] }`. Las lee `callEffects` (read-only, modo plan,
+       * confirmación): sin declarar, una tool MCP cuenta como mutante sin
+       * target. Solo de la config global: un repo no decide qué es inocuo.
+       */
+      readOnlyTools: z.record(z.array(z.string().min(1))).optional(),
+    })
+    .default({}),
+
+  /**
+   * M17 — conectores del agente embebido `companion` (el de Stratum Dot): su
+   * propia lista de servers MCP, aislada de `mcp.servers` (que el `companion`
+   * nunca carga). Solo de la config global.
+   */
+  companion: z
+    .object({
+      mcp: z.object({ servers: z.array(CompanionMcpServerSchema).default([]) }).default({}),
     })
     .default({}),
 

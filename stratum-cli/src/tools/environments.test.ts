@@ -11,6 +11,7 @@ import {
 } from './environments.js';
 import { environmentGate, readOnlyVeto, requirePlanViolation } from './call-policy.js';
 import { ToolRegistry, ToolDispatcher } from './registry.js';
+import { mcpToolName } from './mcp/names.js';
 import type {
   ConfirmRequest,
   DestructiveDecision,
@@ -430,5 +431,55 @@ describe('callEffects — pantalla de la caja (M15)', () => {
     expect(environmentGate('screen_click', {}, ctx)?.env.policy).toBe('allow');
     expect(readOnlyVeto('screen_click', {}, { ...ctx, readOnly: true })).not.toBeNull();
     expect(readOnlyVeto('screen_screenshot', {}, { ...ctx, readOnly: true })).toBeNull();
+  });
+});
+
+describe('callEffects — tools MCP declaradas de solo lectura (M17)', () => {
+  const declared = cfg({
+    mcp: { readOnlyTools: { calendar: ['list_events'], 'mi server.x': ['leer tool'] } },
+  });
+
+  it('una tool declarada no muta ni toca ningún target; sin declarar, es mutante desconocida', () => {
+    expect(callEffects('mcp__calendar__list_events', {}, declared)).toEqual({
+      known: true,
+      mutating: false,
+      targets: [],
+    });
+    expect(callEffects('mcp__calendar__create_event', {}, declared)).toMatchObject({
+      known: false,
+      mutating: true,
+      targets: [],
+    });
+    // Sin config (o sin la sección), como antes.
+    expect(callEffects('mcp__calendar__list_events', {})).toMatchObject({ mutating: true });
+    expect(callEffects('mcp__calendar__list_events', {}, cfg())).toMatchObject({ mutating: true });
+  });
+
+  it('el nombre con hash o recortado también casa con su declaración', () => {
+    const odd = mcpToolName('mi server.x', 'leer tool');
+    expect(odd).toMatch(/_[0-9a-f]{6}__/);
+    expect(callEffects(odd, {}, declared)).toMatchObject({ known: true, mutating: false });
+
+    const longTool = 'get_' + 'x'.repeat(80);
+    const long = cfg({ mcp: { readOnlyTools: { 'chrome-devtools': [longTool] } } });
+    const longName = mcpToolName('chrome-devtools', longTool);
+    expect(longName).toHaveLength(64);
+    expect(callEffects(longName, {}, long)).toMatchObject({ known: true, mutating: false });
+    // Otra tool larga con el mismo principio no cuenta.
+    expect(callEffects(mcpToolName('chrome-devtools', longTool + '_2'), {}, long)).toMatchObject({
+      mutating: true,
+    });
+  });
+
+  it('lo declarado para un server no vale para otro server con una tool del mismo nombre', () => {
+    expect(callEffects('mcp__otro__list_events', {}, declared)).toMatchObject({
+      known: false,
+      mutating: true,
+    });
+  });
+
+  it('declarar un nombre no convierte en inocua una tool que no es MCP', () => {
+    const odd = cfg({ mcp: { readOnlyTools: { calendar: ['list_events'] } } });
+    expect(callEffects('store_decision', {}, odd).mutating).toBe(true);
   });
 });

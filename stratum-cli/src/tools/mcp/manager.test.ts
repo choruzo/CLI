@@ -25,6 +25,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     session: DEFAULTS.session,
     plugins: DEFAULTS.plugins,
     box: DEFAULTS.box,
+    companion: DEFAULTS.companion,
     provider: undefined,
     memory: {
       projectFile: '',
