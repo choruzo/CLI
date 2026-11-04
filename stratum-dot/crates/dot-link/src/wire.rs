@@ -75,10 +75,16 @@ pub enum MainMethod {
     MemoryDecisions,
     /// M17 (Dot) — olvidar una decisión del asistente (`control`, solo resta).
     MemoryForget,
+    /// M18 (Dot) — el canal de Telegram: estado (sin token ni código), pedir un
+    /// código de emparejamiento y desemparejar (solo resta). Emparejar de verdad
+    /// (`channels.pairConfirm`) da autoridad: va por [`ApproverMethod`].
+    ChannelsStatus,
+    ChannelsPairBegin,
+    ChannelsUnpair,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 31] = [
+    pub const ALL: [MainMethod; 34] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -110,6 +116,9 @@ impl MainMethod {
         MainMethod::GrantsRevoke,
         MainMethod::MemoryDecisions,
         MainMethod::MemoryForget,
+        MainMethod::ChannelsStatus,
+        MainMethod::ChannelsPairBegin,
+        MainMethod::ChannelsUnpair,
     ];
 }
 
@@ -147,6 +156,9 @@ impl WireMethod for MainMethod {
             MainMethod::GrantsRevoke => "grants.revoke",
             MainMethod::MemoryDecisions => "memory.decisions",
             MainMethod::MemoryForget => "memory.forget",
+            MainMethod::ChannelsStatus => "channels.status",
+            MainMethod::ChannelsPairBegin => "channels.pairBegin",
+            MainMethod::ChannelsUnpair => "channels.unpair",
         }
     }
 }
@@ -161,14 +173,19 @@ pub enum ApproverMethod {
     ApprovalsResolve,
     QuestionsAnswer,
     PlansDecide,
+    /// M18 — emparejar el candidato de Telegram: da autoridad (hablar con el
+    /// asistente y aprobar desde el chat), así que exige `approve` y la
+    /// confirmación nativa, como aprobar.
+    ChannelsPairConfirm,
 }
 
 impl ApproverMethod {
-    pub const ALL: [ApproverMethod; 4] = [
+    pub const ALL: [ApproverMethod; 5] = [
         ApproverMethod::CoreHello,
         ApproverMethod::ApprovalsResolve,
         ApproverMethod::QuestionsAnswer,
         ApproverMethod::PlansDecide,
+        ApproverMethod::ChannelsPairConfirm,
     ];
 }
 
@@ -179,6 +196,7 @@ impl WireMethod for ApproverMethod {
             ApproverMethod::ApprovalsResolve => "approvals.resolve",
             ApproverMethod::QuestionsAnswer => "questions.answer",
             ApproverMethod::PlansDecide => "plans.decide",
+            ApproverMethod::ChannelsPairConfirm => "channels.pairConfirm",
         }
     }
 }
@@ -339,7 +357,10 @@ mod tests {
                 "routines.run",
                 "grants.revoke",
                 "memory.decisions",
-                "memory.forget"
+                "memory.forget",
+                "channels.status",
+                "channels.pairBegin",
+                "channels.unpair"
             ]
         );
         for forbidden in [
@@ -347,6 +368,9 @@ mod tests {
             "approvals.resolve",
             "questions.answer",
             "plans.decide",
+            // Emparejar da autoridad: solo por la conexión de aprobador.
+            "channels.pairConfirm",
+            "channels.reload",
             "sessions.setAgent",
             "sessions.setReadOnly",
             "sessions.detach",
@@ -377,7 +401,8 @@ mod tests {
                 "core.hello",
                 "approvals.resolve",
                 "questions.answer",
-                "plans.decide"
+                "plans.decide",
+                "channels.pairConfirm"
             ]
         );
         // Separación en los dos sentidos: lo que una tiene, la otra no (salvo el saludo).

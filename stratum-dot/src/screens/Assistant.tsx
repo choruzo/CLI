@@ -3,6 +3,7 @@ import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
 import { MemoryPanel } from '../components/MemoryPanel';
 import { RoutinesPanel } from '../components/RoutinesPanel';
+import { TelegramPanel } from '../components/TelegramPanel';
 import { useNative } from '../bridge/context';
 import { toCommandError } from '../bridge/native';
 import type {
@@ -188,6 +189,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
       onOpenSession={onOpenSession}
     />
   );
+  const telegram = <TelegramPanel connected={connected} canControl={canControl} />;
   const chat = (
     <div className="assistant-chat">
       {companionId ? (
@@ -215,7 +217,15 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
       <main className="body assistant narrow" data-tab={tab}>
         <AssistantTabs tab={tab} waiting={waiting} onSelect={(t) => useUi.getState().setAssistantTab(t)} />
         <div className="assistant-pane">
-          {tab === 'chat' ? chat : tab === 'box' ? box : tab === 'routines' ? routines : memory}
+          {tab === 'chat'
+            ? chat
+            : tab === 'box'
+              ? box
+              : tab === 'routines'
+                ? routines
+                : tab === 'telegram'
+                  ? telegram
+                  : memory}
         </div>
       </main>
     );
@@ -226,6 +236,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
         {box}
         {routines}
         {memory}
+        {telegram}
       </div>
       {chat}
     </main>
@@ -257,6 +268,7 @@ const TABS: Array<{ id: AssistantTab; label: string }> = [
   { id: 'box', label: 'Box' },
   { id: 'routines', label: 'Routines' },
   { id: 'memory', label: 'Memory' },
+  { id: 'telegram', label: 'Telegram' },
 ];
 
 function AssistantTabs({

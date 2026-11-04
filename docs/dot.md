@@ -1490,3 +1490,38 @@ decisiones.
   test de `wire.rs` que vetaba el prefijo `memory.` admite exactamente estos dos.
 - Tests: `src/app/Memory.test.tsx`, `link.rs` (unidad), `la_memoria_del_asistente_sale_por_dot_con_el_agente_fijado_y_no_por_desktop`
   (`tests/link.rs`), `wire.rs` y `tests/architecture.test.ts`.
+
+## 22. Telegram (M18)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.11; contrato en `docs/protocol.md` §24. Dot no configura
+el bot (el secreto se teclea en una terminal, `stratum channels telegram setup`): enseña el canal,
+empareja chats y los desempareja.
+
+- **Panel *Telegram*** en la vista *Asistente* (junto a la caja, las rutinas y la memoria; a 440 px,
+  su pestaña). Pinta lo que contesta `channels.status`, que se consulta al abrir el panel, cada 2 s
+  **solo** mientras se está emparejando y tras cada orden: sin estado optimista. Por estado:
+  sin configurar, apagado, fichero que no vale, de un Stratum más nuevo o bot rechazado (cada uno
+  dice qué hacer); escuchando, con el bot, el último fallo del sondeo y los emparejados.
+- **Emparejar** (dos pasos): *Pair a chat* → `channels.pairBegin` (conexión principal, `control`)
+  enseña el enlace `t.me/<bot>?start=<código>` y el código. Cuando alguien lo manda al bot, el panel
+  enseña el candidato (nombre, `@usuario`, id) y *Pair…* llama a `dot_channels_pair_confirm`: el lado
+  nativo abre la **confirmación nativa** (`ApproverAction::PairTelegram`), que lee el candidato **del
+  daemon** (`channels.status`, no del webview), avisa de lo que da (hablar con el asistente y
+  aprobar desde Telegram) y, confirmado, vuelve a comprobar que el candidato sigue siendo ese antes
+  de enviar `channels.pairConfirm` por la **conexión de aprobador** (`ApproverMethod`, `approve`).
+  Sin la autoridad desbloqueada el botón está apagado y se ofrece *Unlock…*. Sin respuesta, «Result
+  unknown» y no se repite.
+- **Desemparejar** solo resta: confirmación en la página y `channels.unpair` por la conexión
+  principal, sin broker.
+- **Marca en la conversación**: un mensaje del usuario con `via: 'telegram'` lleva «From Telegram».
+  Solo procedencia.
+- **Resolver desde Telegram** se ve en lo resuelto como «from Telegram» (`resolverLabel`,
+  `ProtocolResolver.kind: 'channel'`).
+- Nativo: `MainMethod::ChannelsStatus|ChannelsPairBegin|ChannelsUnpair` solo en `DOT_METHODS`
+  (Desktop no), `ApproverMethod::ChannelsPairConfirm`, `CallAction::Channels*`,
+  `dot_channels_status|pair_begin|pair_confirm|unpair`. La ventana de confirmación (`confirm.js`)
+  pinta `pairing` en vez de la sesión.
+
+Tests: `src/app/Telegram.test.tsx`, `crates/dot-link/tests/confirm.rs`
+(`emparejar_telegram_se_confirma_con_lo_que_dice_el_daemon`), unidad en `confirm.rs`, `approver.rs`
+y `link.rs`, y el de arquitectura.

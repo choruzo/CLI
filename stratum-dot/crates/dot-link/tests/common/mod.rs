@@ -120,6 +120,9 @@ struct State {
     resolved: Vec<String>,
     /// El pid que se publica en el endpoint (`None` = el de este proceso).
     endpoint_pid: Option<u32>,
+    /// M18 — el candidato de Telegram (id, nombre) y los emparejados.
+    telegram_candidate: Option<(i64, String)>,
+    telegram_paired: Vec<i64>,
     next_sub: u64,
     next_conn: u64,
     tasks: Vec<JoinHandle<()>>,
@@ -203,6 +206,8 @@ impl Fake {
                     pending: Vec::new(),
                     resolved: Vec::new(),
                     endpoint_pid: None,
+                    telegram_candidate: None,
+                    telegram_paired: Vec::new(),
                     next_sub: 1,
                     next_conn: 1,
                     tasks: Vec::new(),
@@ -234,6 +239,15 @@ impl Fake {
     /// Publica en el endpoint otro pid que el del proceso que atiende el canal.
     pub fn set_endpoint_pid(&self, pid: Option<u32>) {
         self.lock().endpoint_pid = pid;
+    }
+
+    /// M18 — alguien mandó el código al bot: queda como candidato.
+    pub fn set_telegram_candidate(&self, candidate: Option<(i64, &str)>) {
+        self.lock().telegram_candidate = candidate.map(|(id, name)| (id, name.to_string()));
+    }
+
+    pub fn telegram_paired(&self) -> Vec<i64> {
+        self.lock().telegram_paired.clone()
     }
 
     pub fn add_pending(&self, req: PendingReq) {
@@ -755,6 +769,43 @@ impl Fake {
                 "provider": "local", "id": "mock-model", "contextWindow": null, "default": true
             }] }))],
             // M16: el daemon de pruebas solo contesta; lo que importa es lo que le llega.
+            // M18: el canal de Telegram, con un candidato que pone el test.
+            "channels.status" => {
+                let candidate = state
+                    .telegram_candidate
+                    .as_ref()
+                    .map(|(id, name)| json!({ "userId": id, "name": name, "username": "ana" }));
+                vec![ok(json!({ "telegram": {
+                    "state": "running", "bot": { "id": 7, "username": "mi_dot_bot" },
+                    "paired": state.telegram_paired.iter().map(|id| json!({ "userId": id, "name": "?", "pairedAt": 1 })).collect::<Vec<_>>(),
+                    "pairing": candidate.map(|c| json!({ "expiresAt": 9_999_999_999_999u64, "candidate": c })),
+                    "lastError": null, "lastPollAt": null
+                }}))]
+            }
+            "channels.pairConfirm" => {
+                let can = state
+                    .conns
+                    .iter()
+                    .find(|c| c.id == conn_id)
+                    .is_some_and(|c| c.capabilities.iter().any(|k| k == "approve"));
+                if !can {
+                    return vec![err("FORBIDDEN", json!({ "capability": "approve" }))];
+                }
+                let user = params["userId"].as_i64();
+                match state.telegram_candidate.take() {
+                    Some((id, name)) if Some(id) == user => {
+                        state.telegram_paired.push(id);
+                        vec![ok(
+                            json!({ "paired": { "userId": id, "name": name, "pairedAt": 1 } }),
+                        )]
+                    }
+                    other => {
+                        state.telegram_candidate = other;
+                        vec![err("NOT_FOUND", json!({ "reason": "no-candidate" }))]
+                    }
+                }
+            }
+            "channels.pairBegin" | "channels.unpair" => vec![ok(json!({ "echo": method }))],
             "routines.list" => vec![ok(json!({ "routines": [], "readOnly": false }))],
             "routines.add" | "routines.update" | "routines.remove" | "routines.run"
             | "grants.revoke" | "memory.decisions" | "memory.forget" => {

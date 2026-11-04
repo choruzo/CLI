@@ -255,6 +255,13 @@ pub enum CallAction {
     /// `agent: 'companion'` y `fresh: true`, fijados aquí. El daemon compacta y
     /// archiva la actual; el webview no elige agente ni puede cerrar otra sesión.
     NewCompanionConversation,
+    /// M18 — `channels.status`: el canal de Telegram (sin token ni código). Solo lectura.
+    ChannelsStatus,
+    /// M18 — `channels.pairBegin`: un código de un solo uso y su enlace. No da
+    /// autoridad por sí solo: el candidato se confirma por la conexión de aprobador.
+    ChannelsPairBegin,
+    /// M18 — `channels.unpair`: quitar un chat emparejado (solo resta).
+    ChannelsUnpair { user_id: i64 },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -312,6 +319,9 @@ impl CallAction {
             CallAction::MemoryDecisions { .. } => "memory-decisions",
             CallAction::MemoryForget { .. } => "memory-forget",
             CallAction::NewCompanionConversation => "new-companion-conversation",
+            CallAction::ChannelsStatus => "channels-status",
+            CallAction::ChannelsPairBegin => "channels-pair-begin",
+            CallAction::ChannelsUnpair { .. } => "channels-unpair",
         }
     }
 
@@ -332,6 +342,8 @@ impl CallAction {
                 | CallAction::GrantsRevoke { .. }
                 | CallAction::MemoryForget { .. }
                 | CallAction::NewCompanionConversation
+                | CallAction::ChannelsPairBegin
+                | CallAction::ChannelsUnpair { .. }
         )
     }
 }

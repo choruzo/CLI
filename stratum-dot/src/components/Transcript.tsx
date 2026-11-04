@@ -37,7 +37,9 @@ const Entry = memo(function Entry({
   switch (message.kind) {
     case 'user':
       return (
-        <li className="msg user" data-kind="user">
+        <li className="msg user" data-kind="user" data-via={message.via}>
+          {/* M18 — llegó por un canal externo. Solo procedencia: no cambia nada. */}
+          {message.via === 'telegram' ? <span className="via-badge small">From Telegram</span> : null}
           <p className="bubble">{message.text}</p>
           {message.truncated ? <p className="muted small">Shortened: the message was longer than this.</p> : null}
         </li>

@@ -184,7 +184,14 @@ pub enum ApproverAction {
         request_id: String,
         approve: bool,
     },
+    /// M18 — emparejar el candidato de Telegram con ese id (el que se enseñó en
+    /// la confirmación, leído del daemon). Da autoridad: hablar con el asistente
+    /// y aprobar desde el chat. No es de una sesión.
+    PairTelegram { user_id: i64 },
 }
+
+/// El `request_id` de un emparejamiento (no es una solicitud de una sesión).
+pub const PAIRING_REQUEST: &str = "telegram-pairing";
 
 impl ApproverAction {
     /// Para el log: qué tipo de resolución, sin contenido.
@@ -203,6 +210,7 @@ impl ApproverAction {
             ApproverAction::AnswerQuestions { .. } => "answer-questions",
             ApproverAction::DecidePlan { approve: true, .. } => "approve-plan",
             ApproverAction::DecidePlan { .. } => "reject-plan",
+            ApproverAction::PairTelegram { .. } => "pair-telegram",
         }
     }
 
@@ -216,7 +224,13 @@ impl ApproverAction {
             ApproverAction::Deny { .. } => false,
             ApproverAction::AnswerQuestions { answers, .. } => answers.is_some(),
             ApproverAction::DecidePlan { approve, .. } => *approve,
+            ApproverAction::PairTelegram { .. } => true,
         }
+    }
+
+    /// M18 — ¿es un emparejamiento (sin sesión ni solicitud pendiente)?
+    pub fn is_pairing(&self) -> bool {
+        matches!(self, ApproverAction::PairTelegram { .. })
     }
 
     pub fn session_id(&self) -> &str {
@@ -225,6 +239,7 @@ impl ApproverAction {
             | ApproverAction::Deny { session_id, .. }
             | ApproverAction::AnswerQuestions { session_id, .. }
             | ApproverAction::DecidePlan { session_id, .. } => session_id,
+            ApproverAction::PairTelegram { .. } => "",
         }
     }
 
@@ -234,6 +249,7 @@ impl ApproverAction {
             | ApproverAction::Deny { approval_id, .. } => approval_id,
             ApproverAction::AnswerQuestions { request_id, .. }
             | ApproverAction::DecidePlan { request_id, .. } => request_id,
+            ApproverAction::PairTelegram { .. } => PAIRING_REQUEST,
         }
     }
 }
@@ -671,6 +687,15 @@ fn resolve_request(
             Ok((
                 ApproverMethod::QuestionsAnswer,
                 json!({ "sessionId": session_id, "requestId": request_id, "answers": answers, "operationId": operation_id }),
+            ))
+        }
+        ApproverAction::PairTelegram { user_id } => {
+            if !crate::link::valid_telegram_id(*user_id) {
+                return Err(invalid("Invalid Telegram id."));
+            }
+            Ok((
+                ApproverMethod::ChannelsPairConfirm,
+                json!({ "userId": user_id, "operationId": operation_id }),
             ))
         }
         ApproverAction::DecidePlan {
@@ -1436,7 +1461,10 @@ mod tests {
             request_id: "p".into(),
             approve: false,
         };
-        for sensitive in [&approve, &allow_all, &answers, &plan] {
+        // M18: emparejar un chat da autoridad: siempre con confirmación.
+        let pair = ApproverAction::PairTelegram { user_id: 42 };
+        assert!(pair.is_pairing());
+        for sensitive in [&approve, &allow_all, &answers, &plan, &pair] {
             assert!(sensitive.needs_confirmation(), "{}", sensitive.name());
         }
         for negative in [&deny, &skip, &reject] {
@@ -1469,6 +1497,23 @@ mod tests {
             .unwrap_err();
         assert_eq!(err.kind, CommandErrorKind::NotConfirmed);
         assert_eq!(err.reason.as_deref(), Some(NEEDS_CONFIRMATION));
+        // M18: emparejar sin confirmar, tampoco.
+        let err = handle
+            .resolve(ApproverAction::PairTelegram { user_id: 42 })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::NotConfirmed);
+    }
+
+    #[test]
+    fn emparejar_va_por_la_conexion_de_aprobador_con_solo_el_id() {
+        let (method, params) =
+            resolve_request(&ApproverAction::PairTelegram { user_id: 42 }, "op-1").unwrap();
+        assert_eq!(method, ApproverMethod::ChannelsPairConfirm);
+        assert_eq!(params, json!({ "userId": 42, "operationId": "op-1" }));
+        assert!(
+            resolve_request(&ApproverAction::PairTelegram { user_id: i64::MIN }, "op").is_err()
+        );
     }
 
     #[tokio::test]

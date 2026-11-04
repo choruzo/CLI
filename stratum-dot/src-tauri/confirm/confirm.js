@@ -87,11 +87,20 @@
       fact(facts, 'Environment', v.approval.environment);
       fact(facts, 'Reason', v.approval.reason);
     }
-    fact(facts, 'Session', session.title || session.agent || session.id);
-    fact(facts, 'Directory', session.cwd, true);
-    fact(facts, 'Agent', [session.agent, session.model].filter(Boolean).join(' · '));
-    fact(facts, 'Host', session.host);
-    fact(facts, 'Run', v.runId, true);
+    if (v.pairing) {
+      // M18 — emparejar un chat de Telegram: no es de ninguna sesión.
+      fact(facts, 'Telegram account', v.pairing.name);
+      fact(facts, 'Username', v.pairing.username ? '@' + v.pairing.username : null, true);
+      fact(facts, 'Telegram id', v.pairing.userId, true);
+      fact(facts, 'Bot', v.pairing.bot ? '@' + v.pairing.bot : null, true);
+      document.body.classList.add('danger');
+    } else {
+      fact(facts, 'Session', session.title || session.agent || session.id);
+      fact(facts, 'Directory', session.cwd, true);
+      fact(facts, 'Agent', [session.agent, session.model].filter(Boolean).join(' · '));
+      fact(facts, 'Host', session.host);
+      fact(facts, 'Run', v.runId, true);
+    }
 
     if (v.answers && v.answers.length > 0) {
       const list = $('answer-list');

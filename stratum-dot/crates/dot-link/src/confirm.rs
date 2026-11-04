@@ -48,7 +48,7 @@ use tokio::time::Instant;
 
 use crate::approver::{
     ApproverAction, ApproverHandle, ApproverStatus, ConfirmedAction, LockReason, QuestionAnswer,
-    GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS,
+    GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS, PAIRING_REQUEST,
 };
 use crate::link::LinkHandle;
 use crate::log::Logger;
@@ -190,6 +190,17 @@ pub struct PlanFacts {
     pub more_steps: usize,
 }
 
+/// M18 — quién se va a emparejar, como lo dice el daemon (`channels.status`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PairingFacts {
+    pub user_id: i64,
+    pub name: String,
+    pub username: Option<String>,
+    /// El bot (`@usuario`) con el que se empareja.
+    pub bot: Option<String>,
+}
+
 /// Lo que enseña la ventana de confirmación. Sale del daemon (salvo las
 /// respuestas, que son lo que la persona va a enviar). Sin credenciales.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -205,6 +216,8 @@ pub struct ConfirmationView {
     pub approval: Option<ApprovalFacts>,
     pub answers: Vec<AnswerFacts>,
     pub plan: Option<PlanFacts>,
+    /// M18 — con `kind: 'telegram-pairing'`.
+    pub pairing: Option<PairingFacts>,
     /// Avisos que la persona tiene que leer (qué abarca `allow-all`, etc.).
     pub notes: Vec<String>,
     /// Hasta cuándo vale (ms Unix, reloj local).
@@ -310,7 +323,82 @@ fn kind_of(action: &ApproverAction) -> (&'static str, &'static str) {
         ApproverAction::Approve { .. } | ApproverAction::Deny { .. } => ("approvals", "approval"),
         ApproverAction::AnswerQuestions { .. } => ("questions", "question"),
         ApproverAction::DecidePlan { .. } => ("plans", "plan"),
+        ApproverAction::PairTelegram { .. } => ("", "telegram-pairing"),
     }
+}
+
+fn no_candidate() -> CommandError {
+    CommandError {
+        kind: CommandErrorKind::Rejected,
+        code: Some("NOT_FOUND".into()),
+        reason: Some("no-candidate".into()),
+        message: "No Telegram chat is waiting to be paired with that id. Nothing was sent.".into(),
+    }
+}
+
+/// M18 — el candidato de `channels.status`, si es `user_id` y el canal escucha.
+fn find_candidate(status: &Value, user_id: i64) -> Option<(&Value, Option<String>)> {
+    let telegram = status.get("telegram")?;
+    if telegram.get("state").and_then(Value::as_str) != Some("running") {
+        return None;
+    }
+    let candidate = telegram.pointer("/pairing/candidate")?;
+    (candidate.get("userId").and_then(Value::as_i64) == Some(user_id)).then(|| {
+        (
+            candidate,
+            telegram
+                .pointer("/bot/username")
+                .and_then(Value::as_str)
+                .map(|s| clip(s, 64)),
+        )
+    })
+}
+
+/// M18 — la confirmación de un emparejamiento, con lo que dice el daemon. Puro.
+pub fn build_pairing_view(
+    action: &ApproverAction,
+    status: &Value,
+    expires_at: u64,
+    arm_ms: u64,
+) -> Result<ConfirmationView, CommandError> {
+    let ApproverAction::PairTelegram { user_id } = action else {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "This is not a pairing.",
+        ));
+    };
+    let (candidate, bot) = find_candidate(status, *user_id).ok_or_else(no_candidate)?;
+    let name = field(candidate, "name", MAX_FIELD_CHARS).unwrap_or_else(|| "?".into());
+    let username = field(candidate, "username", 64);
+    Ok(ConfirmationView {
+        kind: "telegram-pairing",
+        action: "Pair this Telegram chat",
+        request_id: PAIRING_REQUEST.into(),
+        run_id: None,
+        session: SessionFacts {
+            id: String::new(),
+            title: None,
+            agent: None,
+            model: None,
+            cwd: None,
+            host: None,
+        },
+        approval: None,
+        answers: Vec::new(),
+        plan: None,
+        pairing: Some(PairingFacts {
+            user_id: *user_id,
+            name,
+            username,
+            bot,
+        }),
+        notes: vec![
+            "Check that this is your own Telegram account: whoever it is will be able to talk to the assistant and approve its requests from Telegram (approve once or deny; requests a policy reserves for Dot still need Dot).".into(),
+            "You can unpair it at any time, from Dot or by sending /unpair in that chat.".into(),
+        ],
+        expires_at,
+        arm_ms,
+    })
 }
 
 /// La solicitud de `action` en un resultado de `approvals.list` (o en una foto,
@@ -437,6 +525,7 @@ pub fn build_view(
         approval: None,
         answers: Vec::new(),
         plan: None,
+        pairing: None,
         notes: Vec::new(),
         expires_at,
         arm_ms,
@@ -695,7 +784,7 @@ impl ConfirmGate {
     /// Se llama con cada [`DotEvent`] (de la conexión principal y del broker);
     /// solo mira, sin esperar a nada.
     pub fn on_event(&self, event: &DotEvent) {
-        let (session_id, request_id, list) = {
+        let (session_id, request_id, list, pairing) = {
             let state = self.lock();
             let Some(ticket) = state.ticket.as_ref() else {
                 return;
@@ -704,9 +793,17 @@ impl ConfirmGate {
                 ticket.action.session_id().to_string(),
                 ticket.view.request_id.clone(),
                 kind_of(&ticket.action).0,
+                ticket.action.is_pairing(),
             )
         };
         let reason = match event {
+            // Un emparejamiento no es de una sesión: no lo cancela nada de ellas
+            // (`channels.*` no tiene eventos; se vuelve a comprobar al confirmar).
+            DotEvent::Sessions { .. } | DotEvent::Snapshot { .. } | DotEvent::Events { .. }
+                if pairing =>
+            {
+                None
+            }
             DotEvent::Approver { status } => match status {
                 ApproverStatus::Ready { .. } => None,
                 ApproverStatus::Locked {
@@ -774,6 +871,20 @@ impl ConfirmGate {
                 "Could not read the request from the Stratum daemon. Nothing was sent.",
             )
         };
+        let expires_at = now_ms() + self.timings.ttl.as_millis() as u64;
+        if action.is_pairing() {
+            let status = link
+                .call(CallAction::ChannelsStatus)
+                .await
+                .map_err(unreadable)?;
+            let view = build_pairing_view(
+                action,
+                &status,
+                expires_at,
+                self.timings.arm_delay.as_millis() as u64,
+            )?;
+            return Ok((view, action.clone()));
+        }
         let listing = link
             .call(CallAction::ListPending {
                 session_id: session_id.clone(),
@@ -785,7 +896,6 @@ impl ConfirmGate {
             .await
             .map_err(unreadable)?;
         let snapshot = session.get("snapshot").cloned().unwrap_or(Value::Null);
-        let expires_at = now_ms() + self.timings.ttl.as_millis() as u64;
         build_view(
             action,
             &listing,
@@ -954,19 +1064,28 @@ impl ConfirmGate {
             self.end(nonce, Some(Outcome::Cancelled(CancelReason::Locked)));
             return Err(closed(CancelReason::Locked.message()));
         }
-        let listing = match link
-            .call(CallAction::ListPending {
+        // Lo que se confirma sigue ahí: la solicitud pendiente o, al emparejar, el mismo candidato.
+        let check = if action.is_pairing() {
+            CallAction::ChannelsStatus
+        } else {
+            CallAction::ListPending {
                 session_id: action.session_id().to_string(),
-            })
-            .await
-        {
+            }
+        };
+        let listing = match link.call(check).await {
             Ok(listing) => listing,
             Err(_) => {
                 self.end(nonce, Some(Outcome::Cancelled(CancelReason::Disconnected)));
                 return Err(closed(CancelReason::Disconnected.message()));
             }
         };
-        if find_request(&listing, &action).is_none() {
+        let still = match &action {
+            ApproverAction::PairTelegram { user_id } => {
+                find_candidate(&listing, *user_id).is_some()
+            }
+            _ => find_request(&listing, &action).is_some(),
+        };
+        if !still {
             self.end(
                 nonce,
                 Some(Outcome::Cancelled(CancelReason::ResolvedElsewhere)),
@@ -1047,6 +1166,47 @@ mod tests {
             "id": "ses_a", "title": "tarea", "agent": "general", "model": "m",
             "cwd": "/work/proj", "host": { "kind": "peer" }
         }})
+    }
+
+    fn channels(state: &str, candidate: Value) -> Value {
+        json!({ "telegram": {
+            "state": state, "bot": { "id": 7, "username": "mi_dot_bot" }, "paired": [],
+            "pairing": { "expiresAt": 9, "candidate": candidate },
+            "lastError": null, "lastPollAt": null
+        }})
+    }
+
+    #[test]
+    fn emparejar_ensena_el_candidato_que_dice_el_daemon() {
+        let pair = ApproverAction::PairTelegram { user_id: 42 };
+        let status = channels(
+            "running",
+            json!({ "userId": 42, "name": "Ana", "username": "ana" }),
+        );
+        let view = build_pairing_view(&pair, &status, 9, 800).unwrap();
+        assert_eq!(view.kind, "telegram-pairing");
+        assert_eq!(view.request_id, PAIRING_REQUEST);
+        let facts = view.pairing.unwrap();
+        assert_eq!(facts.user_id, 42);
+        assert_eq!(facts.name, "Ana");
+        assert_eq!(facts.username.as_deref(), Some("ana"));
+        assert_eq!(facts.bot.as_deref(), Some("mi_dot_bot"));
+        assert!(view
+            .notes
+            .iter()
+            .any(|n| n.contains("approve its requests")));
+        // Otro id, ningún candidato o el canal parado: no hay nada que emparejar.
+        for status in [
+            channels("running", json!({ "userId": 7, "name": "Otro" })),
+            channels("running", Value::Null),
+            channels("unauthorized", json!({ "userId": 42, "name": "Ana" })),
+            json!({}),
+        ] {
+            let err = build_pairing_view(&pair, &status, 9, 800).unwrap_err();
+            assert_eq!(err.reason.as_deref(), Some("no-candidate"));
+        }
+        // Una aprobación no se arma como emparejamiento.
+        assert!(build_pairing_view(&approve("s", "a", false), &status, 9, 800).is_err());
     }
 
     #[test]

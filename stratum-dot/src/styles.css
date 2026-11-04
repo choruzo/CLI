@@ -244,7 +244,8 @@ p {
   flex: 1;
 }
 .assistant-pane > .overview,
-.assistant-pane > .memory-panel {
+.assistant-pane > .memory-panel,
+.assistant-pane > .telegram-panel {
   border-right: 0;
   border-top: 0;
 }
@@ -260,9 +261,37 @@ p {
   overflow: visible;
   border-right: 0;
 }
-.memory-panel {
+.memory-panel,
+.telegram-panel {
   padding: 0.75rem;
   border-top: 1px solid var(--line);
+}
+/* M18 — el canal de Telegram. */
+.telegram-paired {
+  list-style: none;
+  margin: 0.5rem 0;
+  padding: 0;
+}
+.telegram-paired li {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.3rem 0;
+}
+.telegram-pairing {
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  padding: 0.6rem;
+  margin: 0.5rem 0;
+}
+.telegram-pairing .mono {
+  user-select: all;
+  word-break: break-all;
+}
+.via-badge {
+  display: inline-block;
+  color: var(--accent);
+  margin-bottom: 0.15rem;
 }
 .memory-search {
   display: flex;

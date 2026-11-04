@@ -41,6 +41,8 @@ export type {
   ProtocolSessionSnapshot,
   ProtocolSessionState,
   ProtocolStateEvent,
+  ProtocolTelegramPaired,
+  ProtocolTelegramStatus,
   ProtocolToolCall,
 } from '../../../stratum-cli/src/protocol/index';
 export {

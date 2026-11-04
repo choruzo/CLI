@@ -261,6 +261,17 @@ export interface NativeBridge {
    * archiva la actual. Agente y `fresh` los fija el nativo. Sin respuesta, `unknown`.
    */
   newCompanionConversation(): Promise<unknown>;
+  /** M18 — el canal de Telegram: estado, emparejados y candidato (nunca el secreto del bot ni el código). */
+  channelsStatus(): Promise<unknown>;
+  /** M18 — un código de emparejamiento de un solo uso y su enlace. Sin respuesta, `unknown`. */
+  channelsPairBegin(): Promise<unknown>;
+  /**
+   * M18 — emparejar al candidato con ese id. Da autoridad: abre la confirmación
+   * nativa, que lee el candidato del daemon, y sale por la autoridad de aprobar.
+   */
+  channelsPairConfirm(userId: number): Promise<void>;
+  /** M18 — desemparejar un chat. Solo resta: sin confirmación nativa. */
+  channelsUnpair(userId: number): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
@@ -339,6 +350,10 @@ export const tauriBridge: NativeBridge = {
   memoryForget: (decisionId) => invoke<unknown>('dot_memory_forget', { decisionId }),
   sessionMemory: (sessionId) => invoke<unknown>('dot_session_memory', { sessionId }),
   newCompanionConversation: () => invoke<unknown>('dot_new_companion_conversation'),
+  channelsStatus: () => invoke<unknown>('dot_channels_status'),
+  channelsPairBegin: () => invoke<unknown>('dot_channels_pair_begin'),
+  channelsPairConfirm: (userId) => invoke('dot_channels_pair_confirm', { userId }),
+  channelsUnpair: (userId) => invoke<unknown>('dot_channels_unpair', { userId }),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),

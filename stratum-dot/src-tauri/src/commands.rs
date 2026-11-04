@@ -327,6 +327,46 @@ pub async fn dot_new_companion_conversation(
     state.link.call(CallAction::NewCompanionConversation).await
 }
 
+/// M18 — el canal de Telegram: estado, emparejados y el candidato, si lo hay.
+/// Nunca el token ni el código. El `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_channels_status(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::ChannelsStatus).await
+}
+
+/// M18 — un código de emparejamiento de un solo uso y su enlace (para enseñarlo).
+/// No da autoridad: quien lo mande al bot queda como candidato, sin emparejar.
+#[tauri::command]
+pub async fn dot_channels_pair_begin(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::ChannelsPairBegin).await
+}
+
+/// M18 — emparejar el candidato con ese id: da autoridad (hablar con el asistente
+/// y aprobar desde Telegram), así que pasa por la confirmación nativa, que lee
+/// el candidato **del daemon**, y sale por el broker de aprobador.
+#[tauri::command]
+pub async fn dot_channels_pair_confirm<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+    user_id: i64,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    resolve(app, &state, ApproverAction::PairTelegram { user_id }).await
+}
+
+/// M18 — desemparejar un chat. Solo resta: conexión principal, sin broker.
+#[tauri::command]
+pub async fn dot_channels_unpair(
+    state: State<'_, DotState>,
+    user_id: i64,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ChannelsUnpair { user_id })
+        .await
+}
+
 /// M17 — la memoria de sesión (M11) de una conversación, en solo lectura.
 #[tauri::command]
 pub async fn dot_session_memory(

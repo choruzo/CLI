@@ -8,6 +8,7 @@ import type {
   ProtocolAgent,
   ProtocolBoxScreen,
   ProtocolBoxStatus,
+  ProtocolTelegramStatus,
   ProtocolDecision,
   ProtocolModel,
   ProtocolRoutine,
@@ -105,4 +106,22 @@ export function parseForget(raw: unknown): boolean | null {
 export function parseSessionMemory(raw: unknown): ProtocolSessionMemory | null {
   const parsed = RESULTS['sessions.memory'].safeParse(raw);
   return parsed.success ? parsed.data.memory : null;
+}
+
+/** M18 — `channels.status`: el canal de Telegram (sin el secreto del bot ni el código). */
+export function parseChannelsStatus(raw: unknown): ProtocolTelegramStatus | null {
+  const parsed = RESULTS['channels.status'].safeParse(raw);
+  return parsed.success ? parsed.data.telegram : null;
+}
+
+/** M18 — `channels.pairBegin`: el código de un solo uso, su enlace y hasta cuándo vale. */
+export function parsePairBegin(raw: unknown): { code: string; link: string; expiresAt: number } | null {
+  const parsed = RESULTS['channels.pairBegin'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** M18 — `channels.unpair`: `removed: false` si ya no estaba (no es un error). */
+export function parseUnpair(raw: unknown): boolean | null {
+  const parsed = RESULTS['channels.unpair'].safeParse(raw);
+  return parsed.success ? parsed.data.removed : null;
 }

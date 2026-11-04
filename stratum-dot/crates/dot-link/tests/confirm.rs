@@ -631,3 +631,59 @@ async fn pausa_y_aprobacion_no_se_mezclan() {
     }
     w.quit().await;
 }
+
+/// M18 — emparejar un chat de Telegram: la ventana enseña el candidato que dice
+/// el daemon, sale por la conexión de aprobador y, si el candidato cambió
+/// mientras estaba abierta, no se envía nada.
+#[tokio::test]
+async fn emparejar_telegram_se_confirma_con_lo_que_dice_el_daemon() {
+    let dir = tempfile::tempdir().unwrap();
+    let w = World::new(dir.path()).await;
+    // Sin candidato, ni se abre.
+    let err = w
+        .ask(ApproverAction::PairTelegram { user_id: 42 })
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(err.reason.as_deref(), Some("no-candidate"));
+    assert_eq!(w.person.count(), 0);
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+    // Con el candidato: la ventana lo enseña y, confirmado, queda emparejado.
+    w.fake.set_telegram_candidate(Some((42, "Ana")));
+    let task = w.ask(ApproverAction::PairTelegram { user_id: 42 });
+    let nonce = w.person.nth(1).await;
+    let view = w.gate.view(&nonce).unwrap();
+    assert_eq!(view.kind, "telegram-pairing");
+    let pairing = view.pairing.unwrap();
+    assert_eq!((pairing.user_id, pairing.name.as_str()), (42, "Ana"));
+    armed().await;
+    w.confirm(&nonce, None).await.unwrap();
+    task.await.unwrap().unwrap();
+    assert_eq!(w.fake.telegram_paired(), vec![42]);
+    // El emparejamiento salió por la conexión de aprobador, nunca por la principal.
+    assert_eq!(w.fake.count("channels.pairConfirm"), 1);
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+    // El candidato cambia mientras la ventana está abierta: nada sale.
+    w.fake.set_telegram_candidate(Some((7, "Otro")));
+    let err = w
+        .ask(ApproverAction::PairTelegram { user_id: 42 })
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(err.reason.as_deref(), Some("no-candidate"));
+    w.fake.set_telegram_candidate(Some((9, "Bea")));
+    let task = w.ask(ApproverAction::PairTelegram { user_id: 9 });
+    let nonce = w.person.nth(2).await;
+    w.fake.set_telegram_candidate(Some((7, "Otro")));
+    armed().await;
+    assert!(w.confirm(&nonce, None).await.is_err());
+    let err = task.await.unwrap().unwrap_err();
+    assert_eq!(
+        err.reason.as_deref(),
+        Some(CancelReason::ResolvedElsewhere.name())
+    );
+    assert_eq!(w.fake.telegram_paired(), vec![42]);
+    w.quit().await;
+}

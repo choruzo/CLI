@@ -28,6 +28,16 @@ import {
 
 export { sampleApproval, sampleRun, sampleSession, sampleToolCall } from '../../../stratum-cli/src/protocol/protocol.fixtures';
 
+/** M18 — el canal de Telegram sin configurar (lo que contesta un daemon recién instalado). */
+export const TELEGRAM_OFF = {
+  state: 'not-configured',
+  bot: null,
+  paired: [],
+  pairing: null,
+  lastError: null,
+  lastPollAt: null,
+};
+
 export const SID = 'ses_20261012_abc123';
 /** La sesión que «abre» el lado nativo de mentira. */
 export const NEW_SID = 'ses_20261013_new001';
@@ -207,6 +217,14 @@ export function fakeNative(): FakeNative {
     grantsRevoke: vi.fn(async (): Promise<unknown> => ({ grant: {} })),
     memoryDecisions: vi.fn(async (_query?: string): Promise<unknown> => ({ decisions: [] })),
     memoryForget: vi.fn(async (_decisionId: string): Promise<unknown> => ({ removed: true })),
+    channelsStatus: vi.fn(async (): Promise<unknown> => ({ telegram: TELEGRAM_OFF })),
+    channelsPairBegin: vi.fn(async (): Promise<unknown> => ({
+      code: 'ABCDEFGHJK',
+      link: 'https://t.me/mi_dot_bot?start=ABCDEFGHJK',
+      expiresAt: Date.now() + 600_000,
+    })),
+    channelsPairConfirm: vi.fn(async (_userId: number): Promise<void> => undefined),
+    channelsUnpair: vi.fn(async (_userId: number): Promise<unknown> => ({ removed: true })),
     newCompanionConversation: vi.fn(async (): Promise<unknown> => ({})),
     sessionMemory: vi.fn(
       async (_sessionId: string): Promise<unknown> => ({

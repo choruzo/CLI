@@ -173,6 +173,10 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
     MainMethod::SessionsMemory,
+    // M18: el canal de Telegram (emparejar de verdad va por el broker de aprobador).
+    MainMethod::ChannelsStatus,
+    MainMethod::ChannelsPairBegin,
+    MainMethod::ChannelsUnpair,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -1046,6 +1050,20 @@ fn call_request(
             MainMethod::SessionsOpen,
             json!({ "agent": "companion", "fresh": true, "operationId": operation_id }),
         )),
+        CallAction::ChannelsStatus => Ok((MainMethod::ChannelsStatus, json!({}))),
+        CallAction::ChannelsPairBegin => Ok((
+            MainMethod::ChannelsPairBegin,
+            json!({ "operationId": operation_id }),
+        )),
+        CallAction::ChannelsUnpair { user_id } => {
+            if !valid_telegram_id(*user_id) {
+                return Err(invalid("Invalid Telegram id."));
+            }
+            Ok((
+                MainMethod::ChannelsUnpair,
+                json!({ "userId": user_id, "operationId": operation_id }),
+            ))
+        }
         CallAction::MemoryForget { decision_id } => {
             if !valid_id(decision_id) {
                 return Err(invalid("Invalid decision id."));
@@ -1060,6 +1078,11 @@ fn call_request(
             ))
         }
     }
+}
+
+/// M18 — un id de usuario de Telegram: entero y dentro de lo que JSON representa exacto.
+pub(crate) fn valid_telegram_id(id: i64) -> bool {
+    id.unsigned_abs() < (1u64 << 53)
 }
 
 /// Consulta de la memoria (`LIMITS.queryChars`).
@@ -2448,6 +2471,35 @@ mod tests {
         }
         assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryDecisions));
         assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryForget));
+
+        // M18: el canal de Telegram. Estado sin parámetros; pedir código y
+        // desemparejar cambian algo; emparejar de verdad no está en la principal.
+        let (method, params) = call_request(&CallAction::ChannelsStatus, "op").unwrap();
+        assert_eq!(method, MainMethod::ChannelsStatus);
+        assert_eq!(params, json!({}));
+        assert!(!CallAction::ChannelsStatus.mutating());
+        let (method, params) = call_request(&CallAction::ChannelsPairBegin, "op-10").unwrap();
+        assert_eq!(method, MainMethod::ChannelsPairBegin);
+        assert_eq!(params, json!({ "operationId": "op-10" }));
+        assert!(CallAction::ChannelsPairBegin.mutating());
+        let unpair = CallAction::ChannelsUnpair { user_id: 42 };
+        let (method, params) = call_request(&unpair, "op-11").unwrap();
+        assert_eq!(method, MainMethod::ChannelsUnpair);
+        assert_eq!(params, json!({ "userId": 42, "operationId": "op-11" }));
+        assert!(unpair.mutating());
+        let huge = CallAction::ChannelsUnpair { user_id: i64::MAX };
+        assert!(call_request(&huge, "op").is_err());
+        for method in [
+            MainMethod::ChannelsStatus,
+            MainMethod::ChannelsPairBegin,
+            MainMethod::ChannelsUnpair,
+        ] {
+            assert!(DOT_METHODS.contains(&method));
+            assert!(!DESKTOP_METHODS.contains(&method));
+        }
+        assert!(!MainMethod::ALL
+            .iter()
+            .any(|m| crate::wire::WireMethod::name(*m) == "channels.pairConfirm"));
 
         // Cierre de M14: la conversación nueva fija agente y `fresh`, y cambia algo.
         let fresh = CallAction::NewCompanionConversation;
