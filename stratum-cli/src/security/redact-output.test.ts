@@ -52,6 +52,14 @@ describe('redactSecrets — núcleo (Hito 16)', () => {
     expect(text).toBe('[redacted: Slack token] [redacted: GitHub token] [redacted: GitHub token]');
   });
 
+  it('redacta el token de un bot de Telegram', () => {
+    const token = '123456789:AA' + 'b'.repeat(33);
+    const { text } = redactSecrets(`url https://api.telegram.org/bot${token}/getMe`);
+    expect(text).toBe('url https://api.telegram.org/bot[redacted: Telegram bot token]/getMe');
+    // Una hora o un id corto no tienen esa forma.
+    expect(redactSecrets('12:30:45 build 123456789:abc').text).toBe('12:30:45 build 123456789:abc');
+  });
+
   it('no toca identificadores corrientes', () => {
     const benign = [
       'commit 3f786850e387550fdab836ed7e6dc881de23001b',

@@ -1040,6 +1040,22 @@ export const StratumConfigSchema = z.object({
   imageGeneration: ImageGenerationSchema.optional(),
 
   /**
+   * M18 — canales externos del `companion`. Aquí solo se enciende: el token y
+   * los chats emparejados viven en `~/.stratum/daemon/telegram.json`, en la
+   * carpeta privada del daemon (`channels/telegram/store.ts`). Solo de la
+   * config global.
+   */
+  channels: z
+    .object({
+      telegram: z
+        .object({ enabled: z.boolean().default(false) })
+        .strict()
+        .default({}),
+    })
+    .strict()
+    .default({}),
+
+  /**
    * Diagnósticos LSP tras editar (encargo UX-2b). `enabled: false` por defecto:
    * sin opt-in no se arranca ningún language server y `edit_file`/`write_file`
    * se comportan como siempre.

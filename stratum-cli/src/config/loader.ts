@@ -89,6 +89,8 @@ const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
   ['mcp', 'readOnlyTools'],
   ['trace', 'screenshots'],
   ['imageGeneration'],
+  // M18: un repo clonado no enciende un canal externo.
+  ['channels'],
 ];
 
 function isRecord(v: unknown): v is Record<string, unknown> {

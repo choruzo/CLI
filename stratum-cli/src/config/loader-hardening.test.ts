@@ -261,6 +261,33 @@ describe('secciones solo globales (M17: conectores del companion)', () => {
   });
 });
 
+describe('secciones solo globales (M18: canales)', () => {
+  it('channels de un proyecto se ignora y avisa; el de la global cuenta', () => {
+    const globalFile = join(dir, 'global.json');
+    const projectFile = join(dir, 'project.json');
+    writeJson(globalFile, {});
+    const project = { channels: { telegram: { enabled: true } } };
+    expect(validateConfigLayer(projectFile, project, globalFile).channels.telegram.enabled).toBe(
+      false,
+    );
+    expect(validateConfigLayer(globalFile, project, globalFile).channels.telegram.enabled).toBe(
+      true,
+    );
+
+    writeJson(join(dir, '.stratumrc.json'), project);
+    expect(loadConfig(dir).channels.telegram.enabled).toBe(false);
+    expect(takeConfigDeprecations().join('\n')).toMatch(
+      /"channels" solo se lee de la config global/,
+    );
+  });
+
+  it('el token no cabe en la config: channels.telegram solo admite enabled', () => {
+    expect(() =>
+      validateConfigLayer('g.json', { channels: { telegram: { token: 'x' } } }, 'g.json'),
+    ).toThrow(ConfigError);
+  });
+});
+
 describe('setConfigValue', () => {
   it('escribe en el .stratumrc.json del proyecto aunque tenga BOM', () => {
     const file = join(dir, '.stratumrc.json');

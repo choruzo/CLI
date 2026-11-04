@@ -73,6 +73,14 @@ export const SECRET_PATTERNS: readonly SecretPattern[] = [
     reason: 'GitHub token',
     re: /\b(?:gh[pousr]_[A-Za-z0-9]{36,}|github_pat_[A-Za-z0-9_]{22,})/g,
   },
+  {
+    // M18: `<id del bot>:<35 caracteres>`, el formato de BotFather. Sin `\b`
+    // delante: en una URL de la API va pegado a `bot` (`/bot123:AA…/getMe`).
+    id: 'telegram_bot_token',
+    reason: 'Telegram bot token',
+    hint: ':',
+    re: /(?<!\d)\d{6,12}:[A-Za-z0-9_-]{35}(?![A-Za-z0-9_-])/g,
+  },
 ];
 
 export function redactionMarker(reason: string): string {

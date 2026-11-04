@@ -2032,15 +2032,110 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   se ve en la conversación (las llamadas a `recall_decisions`); no hay vista aparte. Con esto M17 queda cerrado.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
   confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
-  *Decidido por el usuario el 2026-11-04* (sin diseño de detalle aún):
+  *Decidido por el usuario el 2026-11-04*:
   - **Primer canal: Telegram.**
-  - **Quién habla**: el chat se **empareja con un código que enseña Dot**; los ids permitidos se
-    guardan **solo en la config global** (un proyecto no puede añadir ninguno).
+  - **Quién habla**: el chat se **empareja con un código que enseña Dot**; los ids permitidos son
+    **solo globales** (un proyecto no puede añadir ninguno).
   - **La misma sesión** que Dot: el canal es otra puerta a la conversación del `companion`, no una
     sesión aparte.
   - **Vive dentro del daemon** (como el `RoutineScheduler`), no como un cliente más.
   - **Aprobaciones por Telegram**, como formularios (botones del mensaje), con la misma autoridad
     que Dot en el equipo: §23.13 A9.
+
+  *Diseño de detalle, 2026-11-04.* Decidido por el usuario: token e ids en un **fichero privado**
+  del daemon, no en `.stratumrc.json`; **espejo completo** de la conversación del `companion`; las
+  aprobaciones de **todas** las sesiones del daemon, como Dot; un mensaje con el turno en curso es
+  **steering**. El resto lo propuso Claude y se puede cambiar.
+
+  - **Transporte**: *long polling* (`getUpdates`, 30 s), sin webhook: el daemon no abre ningún
+    puerto. Es la primera salida a internet del proceso del daemon fuera de las llamadas al LLM, y
+    vive en `src/channels/telegram/`, **fuera de `src/daemon/`**. La regla de `architecture.test.ts`
+    («el canal de control es local, sin TCP ni HTTP») no cambia; se añade otra: solo
+    `channels/telegram/api.ts` hace peticiones (`fetch` global, sin dependencia nueva), y siempre
+    a `api.telegram.org`. Un fallo de red o un 429 (`retry_after`) es un reintento con espera, que
+    queda en `lastError` del estado y nunca es un error de la sesión.
+  - **Dónde vive la configuración**: `~/.stratum/daemon/telegram.json`, en la carpeta privada del
+    daemon (`ensurePrivateDir`, como `approver.json`), con `schemaVersion`, escrito de forma atómica y
+    validado con Zod: `{ token, bot: { id, username }, paired: [{ userId, chatId, name, pairedAt }] }`.
+    En la `.stratumrc.json` global solo hay `channels.telegram.enabled` (`GLOBAL_ONLY_KEYS`). El
+    token **nunca** sale del fichero: ni a logs, traza ni protocolo, ni `channels.status`; va a la
+    lista de secretos que redacta `src/security/`. `stratum channels telegram setup` lo pide sin eco
+    y **solo** por TTY (como la clave de aprobador), lo comprueba con `getMe` y avisa al daemon con
+    `channels.reload` (`control`: un token no da autoridad; el emparejamiento, sí).
+    `PATH_RULES` ya bloquea `.stratum/daemon/` a las tools del agente.
+  - **Quién habla**: solo chats **privados** (`chat.type === 'private'`) de un `userId` emparejado.
+    A cualquier otro no se le contesta nada (que el bot no sirva para comprobar si existe un
+    emparejamiento), y en el log solo queda un recuento, nunca el texto ni el id.
+  - **Emparejar** (añade autoridad, así que pide `approve`):
+    1. Dot, *Ajustes → Telegram → Emparejar*: `channels.pairBegin` (`control`) devuelve un código
+       de un solo uso (10 caracteres sin ambigüedades, 10 min) y el enlace `t.me/<bot>?start=<código>`.
+    2. El usuario lo abre y el bot recibe `/start <código>`. Con un código válido, el daemon guarda
+       un **candidato** (`userId`, `chatId`, nombre y `@usuario` de Telegram) **sin emparejar** y
+       contesta «Confírmalo en Dot». Un código falso o caducado no da pistas, y cinco fallos anulan
+       el código.
+    3. Dot enseña el candidato (`channels.status`, consultado mientras el diálogo está abierto) y,
+       antes de enviar `channels.pairConfirm` (`approve`), pide la **confirmación nativa**
+       (`ConfirmedAction`): «Emparejar a *Nombre* (@usuario, id N). Podrá hablar con el asistente
+       y aprobar desde Telegram». Solo entonces se escribe en `paired`. La CLI hace lo mismo con
+       `stratum channels telegram pair`, pidiendo la clave de aprobador.
+    - **Desemparejar solo resta**: `channels.unpair` (`control`), desde Dot o la CLI, o `/unpair`
+      desde el propio chat.
+  - **Entrada (Telegram → `companion`)**: un texto del chat emparejado va a la sesión principal
+    del `companion` (`companionSessionId()`; si no la hay, la abre como `sessions.open`). Si no hay
+    turno, abre un run, que pasa por `waitAtSafePoint`. Si lo hay, es steering
+    (`enqueueUserMessage`), y con `not-accepting` abre un turno al terminar el actual, como Enter en
+    el Dot compacto. `too-large` se contesta en el chat y no se recorta. Los mensajes que llegan
+    fechados antes de que arrancara el canal (Telegram reentrega lo no confirmado durante 24 h)
+    **no se ejecutan**: el bot contesta que llegaron con el daemon apagado. Como una rutina, un
+    vencimiento perdido no se recupera. Por ahora solo texto: fotos, ficheros y voz se contestan
+    como «aún no».
+  - **Procedencia**: el mensaje de usuario de la conversación lleva `via: 'telegram'`
+    (`ProtocolTranscriptEntry`, `applyTranscriptEvent`, `schemas.ts`), que Dot enseña como una
+    marca y el espejo usa para no devolverle a Telegram lo que vino de allí. Como `origin`, **no
+    decide nada**.
+  - **Salida (espejo)**: todo lo que entra en la conversación del `companion` principal llega al
+    chat emparejado. Lo escrito en Dot llega como «En Dot: …», y cada respuesta del asistente,
+    entera cuando termina (sin streaming editando el mensaje: los límites de Telegram no lo
+    permiten). Las tools no se reflejan: mientras trabaja, el chat ve `typing`. Además, el aviso de
+    rutina terminada (nombre, estado y el `summary` ya redactado). Todo en texto plano (sin
+    `parse_mode`, para que el texto del modelo no se interprete como formato), pasado otra vez por
+    la redacción, en trozos de menos de 4096 caracteres y en una cola por chat (≤ 1 msg/s). Nunca
+    capturas de la caja, imágenes ni ficheros de `/exchange`: la regla de M15 se mantiene.
+  - **Aprobaciones**: cada pendiente del `ApprovalCenter`, **de cualquier sesión**, se envía como un
+    mensaje con lo que enseña la tarjeta de Dot (sesión con su `origin` y la carpeta, tool, target,
+    resumen y riesgo), y con dos botones: **Aprobar una vez** y **Denegar**. No hay `allow-all` desde
+    Telegram, porque sería una concesión sin plazo. Lo `forced` (también `propose_routine` y
+    `confirm-always`), lo que pide `confirmPhrase` y las concesiones se enseñan **sin botón de
+    aprobar** («resuélvelo en Dot»), aunque denegar sigue valiendo. Las preguntas con opciones,
+    como botones; las de texto libre y los planes, «en Dot». El botón llama a
+    `ApprovalCenter.resolve` con un `ApproverLink` del canal (capacidad `approve` y
+    `limits: 'button'`). **El centro** rechaza por su cuenta, con `INVALID_PARAMS`, cualquier
+    decisión de ese enlace que no sea `approve`/`deny` simple sobre una solicitud permitida, así
+    que A9 no depende del renderizado. La carrera la decide `settle` como siempre. Resuelta en
+    cualquier sitio, el mensaje se edita («Aprobada en Dot», «Caducó») y pierde los botones.
+    `ProtocolResolver` gana `kind: 'channel'` con `channel: 'telegram'`, y la traza, `exec-audit` y
+    Dot lo distinguen de `remote`. El `callback_data` lleva un id corto que se busca en memoria,
+    nunca el id de la solicitud ni la decisión en claro, y un botón de un mensaje viejo (otro
+    arranque) no resuelve nada.
+  - **Estado y protocolo** (`docs/protocol.md` §24, nuevo): `channels.status` (`observe`: activo,
+    bot, emparejados sin token, candidato, `lastError`, último sondeo), `channels.reload` y
+    `channels.pairBegin` (`control`), `channels.pairConfirm` (`approve`) y `channels.unpair`
+    (`control`). **Sin eventos nuevos**: Dot consulta el estado. Con un canal activo y algún
+    emparejado, `isIdle` es falso (como `routines.hasEnabled`).
+  - **Piezas**: `channels/telegram/api.ts` (`TelegramApi`: `getMe`, `getUpdates`, `sendMessage`,
+    `editMessageText`, `answerCallbackQuery`, `sendChatAction`; una interfaz que los tests
+    sustituyen sin HTTP), `store.ts` (el fichero), `render.ts` (texto y botones, puro), `channel.ts`
+    (`TelegramChannel`: sondeo, emparejamiento, colas). En el daemon, `daemon/channel-host.ts`, que
+    como el planificador no importa `daemon.ts` y recibe por constructor `companionSession`,
+    `approvals`, la suscripción a eventos y `now`. CLI: `stratum channels telegram
+    setup|status|pair|unpair`. En Dot, el panel *Telegram* en Ajustes y la marca en la conversación.
+  - **Partes** (un commit cada una): (1) `api`, `store`, `setup`/`status` en la CLI; (2) canal en el
+    daemon, `channels.*` y emparejamiento; (3) entrada, steering, `via` y espejo; (4) aprobaciones y
+    preguntas, límites en el centro y `ProtocolResolver.channel`; (5) Dot (panel, confirmación
+    nativa del emparejamiento, marca); (6) docs y prueba real con un bot de BotFather, que crea el
+    usuario.
+  - **Fuera de M18**: códigos o un segundo paso para aprobar (A9), fotos y ficheros, voz, grupos,
+    varios bots y otros canales.
 
 ### 23.12 Fuera, por ahora
 
