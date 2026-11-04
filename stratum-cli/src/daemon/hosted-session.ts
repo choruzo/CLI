@@ -131,6 +131,8 @@ export class HostedSession {
    * a medias).
    */
   private reverting: Promise<unknown> | null = null;
+  /** Cierre de M14 — compactándose para archivarse: nada arranca mientras. */
+  private archiving: { job: Promise<unknown>; abort: AbortController } | null = null;
 
   private constructor(
     readonly host: SessionHost,
@@ -432,6 +434,7 @@ export class HostedSession {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'The session already has a run in progress.');
     if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
+    if (this.archiving) throw new ProtocolError('BUSY', 'The conversation is being archived.');
     const images = this.loadImages(options.images);
 
     this.publisher.expectRun({ mode, input });
@@ -527,6 +530,25 @@ export class HostedSession {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'Not while a run is in progress.');
     if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
+    if (this.archiving) throw new ProtocolError('BUSY', 'The conversation is being archived.');
+  }
+
+  /**
+   * Cierre de M14 — antes de archivar esta conversación (una conversación nueva
+   * del `companion`): solo en reposo, y nada arranca mientras se compacta.
+   *
+   * @throws ProtocolError `BUSY`, `UNAVAILABLE` (cerrándose).
+   */
+  async compactForArchive(): ReturnType<SessionHost['agent']['compactForArchive']> {
+    this.assertIdle();
+    const abort = new AbortController();
+    const job = this.host.agent.compactForArchive(abort.signal);
+    this.archiving = { job, abort };
+    try {
+      return await job;
+    } finally {
+      this.archiving = null;
+    }
   }
 
   /**
@@ -682,6 +704,12 @@ export class HostedSession {
       this.host.cancel();
       // Un revert no se corta a medias: termina antes de desmontar.
       if (this.reverting) await this.reverting.catch(() => undefined);
+      // Compactar para archivar sí se corta (no guarda nada a medias), pero se
+      // espera: nada escribe en los ficheros de la sesión tras cerrarlos.
+      if (this.archiving) {
+        this.archiving.abort.abort();
+        await this.archiving.job.catch(() => undefined);
+      }
       const pump = this.pump;
       if (pump) {
         let timer: NodeJS.Timeout | undefined;

@@ -130,11 +130,27 @@ export interface SessionsOpenParams extends Mutation {
    * ya existe su sesión, se devuelve esa (§22 de `docs/protocol.md`).
    */
   agent?: string;
+  /**
+   * Solo con `agent: 'companion'`: empezar una conversación **nueva** del
+   * asistente. La actual (que debe estar en reposo) se compacta entera a su
+   * memoria de sesión y se archiva; la nueva hereda esa memoria (§22.1 de
+   * `docs/protocol.md`). Sin conversación actual, es como no pasarlo.
+   */
+  fresh?: boolean;
   /** Ausentes: los de la configuración que aplique a `cwd`. */
   provider?: string;
   model?: string;
   readOnly?: boolean;
   sessionProfile?: string;
+}
+
+export interface SessionsOpenResult {
+  session: ProtocolSession;
+  /**
+   * Con `fresh`: la conversación que se archivó y si su memoria pasó a la nueva
+   * (`false` si la sesión no tenía memoria de sesión o no había nada que pasar).
+   */
+  archived?: { sessionId: string; memoryCarried: boolean };
 }
 
 /**
@@ -339,7 +355,7 @@ export interface ProtocolMethods {
   'sessions.context': Spec<{ sessionId: string }, { report: ProtocolContextReport }>;
   /** M11 — la memoria de sesión, con su procedencia. */
   'sessions.memory': Spec<{ sessionId: string }, { memory: ProtocolSessionMemory }>;
-  'sessions.open': Spec<SessionsOpenParams, { session: ProtocolSession }>;
+  'sessions.open': Spec<SessionsOpenParams, SessionsOpenResult>;
   'sessions.close': Spec<Mutation & { sessionId: string }, Empty>;
   /** `provider`: otro alias de la config para la sesión; sin él, el modelo es del provider actual. */
   'sessions.setModel': Spec<

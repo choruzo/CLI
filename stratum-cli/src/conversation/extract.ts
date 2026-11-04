@@ -37,7 +37,7 @@ const TEXT_CHARS = 4_000;
 const TOOL_CHARS = 1_500;
 const ARGS_CHARS = 600;
 /** Tope del trozo entero en la petición. */
-const CHUNK_CHARS = 48_000;
+export const CHUNK_CHARS = 48_000;
 
 /** El trozo como lo ve el modelo de memoria: cada mensaje con su id. */
 export function renderChunk(entries: ChunkEntry[]): string {
@@ -225,8 +225,15 @@ export async function runSummarizer(
   memory: SessionMemory,
   entries: ChunkEntry[],
   opts: MemoryCallOptions,
+  /** Sin resumen propio aún: el de la conversación anterior, del que se parte. */
+  seed?: string,
 ): Promise<string> {
-  const previous = memory.summary?.text ?? '(none yet)';
+  const previous =
+    memory.summary?.text ??
+    (seed
+      ? `(from the previous conversation)
+${seed}`
+      : '(none yet)');
   const prompt =
     `${SUMMARIZER_PROMPT}\n\n<previous_summary>\n${previous}\n</previous_summary>\n\n` +
     `<conversation>\n${renderChunk(entries)}\n</conversation>`;

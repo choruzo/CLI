@@ -5,6 +5,8 @@
  *  - `context.json` — qué entradas forman el contexto activo y el registro de
  *    compactaciones (`ContextState`): con esto y el store, el contexto del
  *    agente se reconstruye tras un reinicio.
+ *  - `inherited.json` — lo heredado de la conversación anterior, si la hubo
+ *    (`InheritedMemory`); no cambia una vez escrito.
  *
  * Como todo el estado en disco: escritura atómica, validación con Zod al leer
  * y un fichero de una versión más nueva no se toca (`SchemaVersionError`).
@@ -18,6 +20,7 @@ import {
   emptySessionMemory,
   type SessionMemory,
 } from './session-memory.js';
+import { INHERITED_SCHEMA_VERSION, type InheritedMemory } from './inherited.js';
 
 export const CONTEXT_STATE_SCHEMA_VERSION = 1;
 
@@ -163,4 +166,38 @@ export function loadContextState(path: string, sessionId: string): ContextState 
 
 export function saveContextState(path: string, state: ContextState): void {
   writeFileAtomic(path, `${JSON.stringify(state)}\n`);
+}
+
+const inheritedSchema = z.object({
+  schemaVersion: z.literal(INHERITED_SCHEMA_VERSION),
+  sessionId: z.string(),
+  fromSessionId: z.string().min(1),
+  archivedAt: z.string(),
+  summary: z.string().nullable(),
+  items: z.array(
+    z.object({
+      kind: z.enum(MEMORY_ITEM_KINDS),
+      key: z.string(),
+      text: z.string(),
+      conflict: z.boolean().optional(),
+      origin: z.object({ sessionId: z.string().min(1), sources: z.array(z.string()) }),
+    }),
+  ),
+});
+
+/** Lo heredado de la conversación anterior (`inherited.json`), o `null` si no hay. */
+export function loadInherited(path: string, sessionId: string): InheritedMemory | null {
+  const raw = readVersioned(path, INHERITED_SCHEMA_VERSION);
+  if (raw === null) return null;
+  const parsed = inheritedSchema.safeParse(raw);
+  if (!parsed.success)
+    throw new StateFileError(path, 'corrupt', parsed.error.message.slice(0, 300));
+  if (parsed.data.sessionId !== sessionId) {
+    throw new StateFileError(path, 'other-session', 'belongs to another session');
+  }
+  return parsed.data as InheritedMemory;
+}
+
+export function saveInherited(path: string, inherited: InheritedMemory): void {
+  writeFileAtomic(path, `${JSON.stringify(inherited)}\n`);
 }

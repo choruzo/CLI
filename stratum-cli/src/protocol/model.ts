@@ -722,4 +722,24 @@ export interface ProtocolSessionMemory {
   } | null;
   items: ProtocolMemoryItem[];
   sourceCursor: string | null;
+  /**
+   * Lo heredado de la conversación anterior, archivada al empezar esta (cierre
+   * de M14). Ausente o `null`: nada. No cambia durante la sesión.
+   */
+  inherited?: ProtocolInheritedMemory | null;
+}
+
+/** Lo que una conversación heredó de la anterior: de solo lectura, con procedencia. */
+export interface ProtocolInheritedMemory {
+  fromSessionId: string;
+  archivedAt: Timestamp | null;
+  summary: string | null;
+  items: Array<{
+    kind: ProtocolMemoryItem['kind'];
+    key: string;
+    text: string;
+    conflict?: boolean;
+    /** La sesión de la que salió la entrada y cuántas entradas de su conversación la sostienen. */
+    origin: { sessionId: string; sourceCount: number };
+  }>;
 }

@@ -626,6 +626,23 @@ export const sessionMemorySchema: z.ZodType<ProtocolSessionMemory> = z.object({
     }),
   ),
   sourceCursor: z.string().nullable(),
+  inherited: z
+    .object({
+      fromSessionId: z.string(),
+      archivedAt: timestamp.nullable(),
+      summary: z.string().nullable(),
+      items: z.array(
+        z.object({
+          kind: memoryItemKind,
+          key: z.string(),
+          text: z.string(),
+          conflict: z.boolean().optional(),
+          origin: z.object({ sessionId: z.string(), sourceCount: count }),
+        }),
+      ),
+    })
+    .nullable()
+    .optional(),
 });
 
 // ---------------------------------------------------------------------------
@@ -941,6 +958,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
         .optional(),
       resume: id.optional(),
       agent: name.optional(),
+      fresh: z.boolean().optional(),
       provider: name.optional(),
       model: name.optional(),
       readOnly: z.boolean().optional(),
@@ -1181,7 +1199,9 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'sessions.history': historyPageSchema,
   'sessions.context': z.object({ report: contextReportSchema }),
   'sessions.memory': z.object({ memory: sessionMemorySchema }),
-  'sessions.open': sessionResult,
+  'sessions.open': sessionResult.extend({
+    archived: z.object({ sessionId: id, memoryCarried: z.boolean() }).optional(),
+  }),
   'sessions.close': emptyResult,
   'sessions.setModel': sessionResult,
   'sessions.setAgent': sessionResult,

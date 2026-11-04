@@ -1306,6 +1306,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M16             | Métodos `routines.list` (`observe`) y `routines.add`/`update`/`remove`/`run` (`control`); DTOs `ProtocolRoutine*`; `ProtocolSession.routineId` (solo procedencia). `data.reason` de `UNAVAILABLE` admite `routines-disabled` y `read-only`                                                                                                                                                                                                      | Aditivo                                                                                                                                                                                                                                                      |
 | M17             | Concesiones con caducidad (§15.11): `approvals.resolve`/`host.resolveApproval` admiten `grant: { minutes: 10 \| 30 \| 60 }`; método `grants.revoke` (`control`) y `host.revokeGrant`; eventos de estado `grant.created` y `grant.ended`; `ProtocolSessionSnapshot.grants?`; `ProtocolApproval.grantable?`; _feature_ `approval-grants`                                                                                                          | Aditivo: quien no lo usa sigue igual. Un cliente que valide la unión de eventos tiene que aceptar los dos nuevos; los del árbol validan con `schemas.ts`, que ya los incluye                                                                                 |
 | M17             | Inspector de memoria: `memory.status`/`memory.decisions` admiten `agent: 'assistant' \| 'companion'` (exclusivo con `cwd`); `ProtocolDecision` gana `content?` (redactado), `source?` y `sessionId?`; método `memory.forget` (`control`)| Aditivo: sin `agent`, lo de antes; un servidor anterior rechaza `agent` y `memory.forget` (`INVALID_PARAMS`/`METHOD_NOT_FOUND`) y no manda los campos nuevos|
+| Cierre M14      | `sessions.open` admite `fresh?: boolean` (solo con `agent: 'companion'`: conversación nueva, §22.1) y su resultado, `archived?: { sessionId, memoryCarried }`; `ProtocolSessionMemory.inherited?`. `data.reason` de `UNAVAILABLE` admite `compaction` | Aditivo: quien no lo envía sigue igual; un servidor anterior rechaza `fresh` (`INVALID_PARAMS`) |
 | Imágenes        | `runs.start`, `runs.steer` y `host.steer` admiten `images?: string[]` (1 a `LIMITS.imagesPerMessage` = 5 rutas). Quien atiende las lee confinadas al `cwd` de la sesión y a `~/.stratum/images`; una que no vale (fuera, no es imagen, >5 MB) rechaza el mensaje entero con `INVALID_PARAMS`, sin arrancar ni encolar nada                                                                                                                      | Aditivo: quien no lo envía sigue igual                                                                                                                                                                                                                       |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
@@ -1873,8 +1874,8 @@ como `assistant` (§20.2), con su propia memoria y un ordenador propio, la caja 
 - **Una sesión, de larga vida.** Si el servidor ya tiene una sesión del `companion` (montada, o
   guardada y sin montar tras un reinicio, M11), `sessions.open` devuelve **esa**, con sus ajustes:
   `provider`, `model` y `readOnly` solo se aplican al crearla. Dos peticiones a la vez reciben la
-  misma. Una conversación nueva es explícita: se cierra la actual (`sessions.close`) y se abre otra;
-  la memoria del `companion` no es de la sesión y se conserva.
+  misma. Una conversación nueva es explícita (§22.1); la memoria del `companion` no es de la sesión y
+  se conserva.
 - **Sin `cwd`.** Su directorio lo fija el servidor (`~/.stratum/companion/workspace`); pedir uno →
   `INVALID_PARAMS` (`cwd`). No tiene tools de fichero: ese directorio no se le ofrece.
 - **`exec` solo en su caja.** Con `box.enabled` en la config global, tiene `exec` atado a
@@ -1889,7 +1890,38 @@ como `assistant` (§20.2), con su propia memoria y un ordenador propio, la caja 
   daemon (`host.handoffCommit` con `agent: 'companion'` → `NOT_TRANSFERABLE`, `context`).
 - Sin aprobadores acreditados se comporta como cualquier sesión del daemon (§13.7).
 
-Tests: `stratum-cli/src/daemon/daemon-companion.test.ts`, `src/host/companion.test.ts` y el escenario
+### 22.1 Conversación nueva (`fresh`)
+
+```json
+{ "method": "sessions.open", "params": { "agent": "companion", "fresh": true } }
+→ { "session": { "id": "sess_B", "agent": "companion", … },
+    "archived": { "sessionId": "sess_A", "memoryCarried": true } }
+```
+
+- **Solo en reposo.** Con un run en curso (o la sesión revirtiendo) → `BUSY`; mientras dura, la
+  sesión no acepta `runs.start` (`BUSY`). Otra apertura del asistente a la vez → `BUSY`. `fresh` sin
+  `agent: 'companion'`, o junto a `resume` o `cwd` → `INVALID_PARAMS`. Sin conversación todavía, es
+  como abrirla (sin `archived`).
+- **Compactar, abrir, archivar, en ese orden.** Todo lo que sigue en el contexto activo de la actual
+  se compacta a su memoria de sesión (§19, por lotes que caben en el modelo de memoria). Si falla →
+  `UNAVAILABLE` (`reason: 'compaction'`) y **no cambia nada**: la actual sigue siendo la del asistente.
+  Después se abre la nueva (mismo `provider` y `model` salvo que se pidan otros) y solo entonces la
+  actual se cierra (`session.closed`, `reason: 'closed'`) y se **archiva**: su carpeta pasa entera a
+  `sessions/archived/<id>/`. No se borra, pero no se recupera al arrancar ni se puede abrir (por ahora
+  no hay método para leerla).
+- **Lo heredado.** La nueva arranca con una capa aparte, de solo lectura: el resumen y lo vigente de la
+  memoria de la anterior, con lo que esta había heredado (gana lo suyo por clase y clave; hasta 80
+  entradas). Su memoria de sesión propia empieza vacía, y su primer resumen parte del heredado. Llega
+  al modelo dentro del bloque de memoria de sesión, detrás de la propia, con lo que esta deje libre y
+  al menos el 40 % del presupuesto; como ella, **no es autoridad** y no se promociona a ninguna
+  memoria. `memoryCarried: false` si no había nada que pasar o la sesión no tiene memoria de sesión
+  (`memory.session.enabled: false`).
+- **`sessions.memory`** gana `inherited?: ProtocolInheritedMemory | null`: `fromSessionId`,
+  `archivedAt`, `summary` y `items` (`kind`, `key`, `text`, `conflict?`, `origin: { sessionId,
+  sourceCount }`). No cambia durante la sesión; está en `inherited.json`, junto a su conversación.
+
+Tests: `stratum-cli/src/daemon/daemon-companion.test.ts`, `daemon-companion-fresh.test.ts`,
+`src/conversation/inherited.test.ts`, `src/host/companion.test.ts` y el escenario
 `evals/scenarios/safety/safety-companion-exec-confined.json`.
 
 ## 23. Rutinas (M16)

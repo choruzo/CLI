@@ -614,6 +614,54 @@ export class StratumAgent {
   }
 
   /**
+   * Cierre de M14 — antes de archivar la conversación (una conversación nueva
+   * del `companion`): compacta a la memoria de sesión **todo** lo que sigue en
+   * el contexto activo (`SessionConversation.compactAll`: por lotes que caben
+   * enteros, guardando solo si salen todos). No quita nada del contexto: la
+   * sesión se va a archivar tal cual. Con `ok: false`, memoria y estado siguen
+   * como estaban y quien llama no debe archivar. Sin memoria de sesión no hay
+   * nada que hacer.
+   */
+  async compactForArchive(
+    signal?: AbortSignal,
+  ): Promise<
+    | { ok: true; enabled: boolean; compacted: number }
+    | { ok: false; cancelled: boolean; error: string }
+  > {
+    const conversation = this.conversation;
+    if (!conversation || !this.sessionMemoryEnabled) {
+      return { ok: true, enabled: false, compacted: 0 };
+    }
+    const messages = this.messages.slice(1);
+    // Nada sale del contexto: antes y después son lo mismo, estimado como en el loop.
+    const active = charsToTokens(
+      messages.reduce(
+        (n, m) => n + (m.content ?? '').length + JSON.stringify(m.tool_calls ?? []).length,
+        0,
+      ),
+    );
+    try {
+      const outcome = await conversation.compactAll({
+        messages,
+        models: resolveMemoryModels(this.config, this.router),
+        timeoutMs: this.config.memory.session.timeoutMs,
+        tokensBefore: active,
+        tokensAfter: active,
+        ...(signal ? { signal } : {}),
+      });
+      if (!outcome.ok) return { ok: false, cancelled: outcome.cancelled, error: outcome.error };
+      return { ok: true, enabled: true, compacted: outcome.compacted ?? 0 };
+    } catch (err) {
+      // Un fallo del store (disco) al registrar: nada se ha guardado de la memoria.
+      return {
+        ok: false,
+        cancelled: false,
+        error: `conversation store failed: ${err instanceof Error ? err.message : String(err)}`,
+      };
+    }
+  }
+
+  /**
    * M11 — presupuesto, desglose del contexto que se enviaría ahora (tokens
    * **estimados**) y estado de la conversación. Para la observabilidad
    * (`sessions.context`): no decide nada.

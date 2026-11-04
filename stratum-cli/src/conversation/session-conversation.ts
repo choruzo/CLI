@@ -14,7 +14,14 @@
 import type { Message } from '../agent/types.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { getLogger } from '../logging/index.js';
-import { MemoryCallError, runExtractor, runSummarizer, type ChunkEntry } from './extract.js';
+import {
+  CHUNK_CHARS,
+  MemoryCallError,
+  renderChunk,
+  runExtractor,
+  runSummarizer,
+  type ChunkEntry,
+} from './extract.js';
 import {
   MAX_COMPACTION_RECORDS,
   emptyContextState,
@@ -33,6 +40,7 @@ import {
   type UpdateReport,
 } from './session-memory.js';
 import type { ConversationStore } from './store.js';
+import { renderInherited, type InheritedMemory } from './inherited.js';
 
 const log = getLogger('conversation');
 
@@ -48,6 +56,8 @@ export interface SessionConversationOptions {
   memory?: SessionMemory;
   state?: ContextState;
   persistence?: ConversationPersistence;
+  /** Lo heredado de la conversación anterior (cierre de M14), si la hubo. */
+  inherited?: InheritedMemory | null;
   now?: () => number;
 }
 
@@ -69,6 +79,9 @@ export interface CompactionCall {
   tokensBefore: number;
   tokensAfter: number;
 }
+
+/** `compactAll`: todo el contexto activo, sin trozo elegido. */
+export type CompactAllCall = Omit<CompactionCall, 'chunk'> & { messages: readonly Message[] };
 
 export interface ConversationStats {
   /** Mensajes del historial del agente guardados. */
@@ -101,6 +114,7 @@ export class SessionConversation {
   private memoryValue: SessionMemory;
   private stateValue: ContextState;
   private readonly persistence: ConversationPersistence | undefined;
+  private readonly inheritedValue: InheritedMemory | null;
   private readonly now: () => number;
   /** Qué objeto del historial es qué entrada del store, y con qué contenido se guardó. */
   private readonly recorded = new WeakMap<Message, Recorded>();
@@ -112,7 +126,13 @@ export class SessionConversation {
     this.memoryValue = opts.memory ?? emptySessionMemory(opts.sessionId);
     this.stateValue = opts.state ?? emptyContextState(opts.sessionId);
     this.persistence = opts.persistence;
+    this.inheritedValue = opts.inherited ?? null;
     this.now = opts.now ?? Date.now;
+  }
+
+  /** Lo heredado de la conversación anterior, o `null`. No cambia. */
+  get inherited(): InheritedMemory | null {
+    return this.inheritedValue;
   }
 
   get memory(): SessionMemory {
@@ -220,31 +240,127 @@ export class SessionConversation {
     if (!call.models.ok) {
       return this.fail('models', call.models.message);
     }
-    const { extractor, summarizer } = call.models;
     // Cada mensaje del trozo tiene que tener ya su id: la procedencia apunta ahí.
     this.record(call.chunk);
-    const entries: ChunkEntry[] = call.chunk.map((m) => ({
-      id: this.recorded.get(m)!.id,
-      message: toStoredMessage(m),
-    }));
+    const step = await this.update(this.memoryValue, this.entries(call.chunk), call);
+    if (!step.ok) return step.outcome;
+    return this.commit(step.memory, [step.record], step.report);
+  }
+
+  /**
+   * Cierre de M14 — antes de archivar la conversación: compacta **todo** el
+   * contexto activo (`messages`, sin el system), por lotes que caben enteros en
+   * la petición del modelo de memoria (`CHUNK_CHARS`, medido ya renderizado).
+   * Los lotes se encadenan en memoria y solo se guarda al final: un fallo de
+   * cualquiera deja memoria y estado como estaban. No quita nada del contexto.
+   */
+  compactAll(call: CompactAllCall): Promise<CompactionOutcome & { compacted?: number }> {
+    if (this.inFlight) {
+      return Promise.resolve({
+        ok: false,
+        cancelled: false,
+        reason: 'busy',
+        error: 'a compaction is already running',
+      });
+    }
+    const run = this.runCompactAll(call).finally(() => {
+      this.inFlight = null;
+    });
+    this.inFlight = run;
+    return run;
+  }
+
+  private async runCompactAll(
+    call: CompactAllCall,
+  ): Promise<CompactionOutcome & { compacted?: number }> {
+    const messages = call.messages.filter((m) => m.role !== 'system');
+    if (messages.length === 0) {
+      return {
+        ok: true,
+        memoryVersion: this.memoryValue.version,
+        report: emptyReport(),
+        compacted: 0,
+      };
+    }
+    if (!call.models.ok) return this.fail('models', call.models.message);
+    this.record(messages);
+    const entries = this.entries(messages);
+    // Por lo que de verdad se envía: `renderChunk` recorta el trozo entero a
+    // `CHUNK_CHARS`, y un lote más grande perdería su parte central.
+    const batches: ChunkEntry[][] = [];
+    let batch: ChunkEntry[] = [];
+    let size = 0;
+    for (const entry of entries) {
+      const own = renderChunk([entry]).length + 2;
+      if (own > CHUNK_CHARS) {
+        return this.fail('extractor', `entry ${entry.id} is too large to compact whole`);
+      }
+      if (batch.length > 0 && size + own > CHUNK_CHARS) {
+        batches.push(batch);
+        batch = [];
+        size = 0;
+      }
+      batch.push(entry);
+      size += own;
+    }
+    if (batch.length > 0) batches.push(batch);
+
+    let memory = this.memoryValue;
+    const records: CompactionRecord[] = [];
+    const report = emptyReport();
+    for (const chunk of batches) {
+      const step = await this.update(memory, chunk, call);
+      if (!step.ok) return step.outcome;
+      memory = step.memory;
+      records.push(step.record);
+      for (const key of Object.keys(report) as Array<keyof UpdateReport>) {
+        report[key] += step.report[key];
+      }
+    }
+    const outcome = this.commit(memory, records, report);
+    if (!outcome.ok) return outcome;
+    this.persistState();
+    return { ...outcome, compacted: entries.length };
+  }
+
+  private entries(chunk: readonly Message[]): ChunkEntry[] {
+    return chunk.map((m) => ({ id: this.recorded.get(m)!.id, message: toStoredMessage(m) }));
+  }
+
+  /** Extrae y resume un trozo sobre `before`, sin guardar ni adoptar nada. */
+  private async update(
+    before: SessionMemory,
+    entries: ChunkEntry[],
+    call: Omit<CompactionCall, 'chunk'>,
+  ): Promise<
+    | { ok: true; memory: SessionMemory; report: UpdateReport; record: CompactionRecord }
+    | { ok: false; outcome: CompactionOutcome }
+  > {
+    if (!call.models.ok) return { ok: false, outcome: this.fail('models', call.models.message) };
+    const { extractor, summarizer } = call.models;
     const opts = {
       timeoutMs: call.timeoutMs,
       sessionId: this.sessionId,
       ...(call.signal ? { signal: call.signal } : {}),
       ...(call.trace ? { trace: call.trace } : {}),
     };
-    const before = this.memoryValue;
     let extraction;
     let summary: string;
     try {
       extraction = await runExtractor(extractor, before, entries, opts);
     } catch (err) {
-      return this.callFailed('extractor', err);
+      return { ok: false, outcome: this.callFailed('extractor', err) };
     }
     try {
-      summary = await runSummarizer(summarizer, before, entries, opts);
+      summary = await runSummarizer(
+        summarizer,
+        before,
+        entries,
+        opts,
+        this.inheritedValue?.summary ?? undefined,
+      );
     } catch (err) {
-      return this.callFailed('summarizer', err);
+      return { ok: false, outcome: this.callFailed('summarizer', err) };
     }
     const ids = entries.map((e) => e.id);
     const { memory, report } = applyMemoryUpdate(before, {
@@ -254,13 +370,6 @@ export class SessionConversation {
       order: (id) => this.store.orderOf(id),
       now: new Date(this.now()).toISOString(),
     });
-    try {
-      this.persistence?.saveMemory(memory);
-    } catch (err) {
-      // La memoria anterior sigue siendo la buena: no se ha cambiado nada.
-      return this.fail('persist', `session memory not saved: ${errorText(err)}`);
-    }
-    this.memoryValue = memory;
     const record: CompactionRecord = {
       at: this.now(),
       ids,
@@ -270,18 +379,35 @@ export class SessionConversation {
       extractor: `${extractor.providerName}/${extractor.model}`,
       summarizer: `${summarizer.providerName}/${summarizer.model}`,
     };
+    return { ok: true, memory, report, record };
+  }
+
+  /** Guarda la memoria nueva y, solo entonces, la adopta y anota las compactaciones. */
+  private commit(
+    memory: SessionMemory,
+    records: CompactionRecord[],
+    report: UpdateReport,
+  ): CompactionOutcome {
+    try {
+      this.persistence?.saveMemory(memory);
+    } catch (err) {
+      // La memoria anterior sigue siendo la buena: no se ha cambiado nada.
+      return this.fail('persist', `session memory not saved: ${errorText(err)}`);
+    }
+    this.memoryValue = memory;
+    const last = records.at(-1)!;
     this.stateValue = {
       ...this.stateValue,
-      compactions: [...this.stateValue.compactions, record].slice(-MAX_COMPACTION_RECORDS),
-      compactionCount: this.stateValue.compactionCount + 1,
-      lastCompactionAt: record.at,
+      compactions: [...this.stateValue.compactions, ...records].slice(-MAX_COMPACTION_RECORDS),
+      compactionCount: this.stateValue.compactionCount + records.length,
+      lastCompactionAt: last.at,
       lastCompactionError: null,
     };
     const version = memory.version;
     // Solo recuentos: ni el texto de la memoria ni el de la conversación.
     log.info('conversation compacted', {
       sessionId: this.sessionId,
-      entries: ids.length,
+      entries: records.reduce((n, r) => n + r.ids.length, 0),
       memoryVersion: version,
       ...report,
     });
@@ -306,9 +432,23 @@ export class SessionConversation {
     return { ok: false, cancelled: false, reason, error };
   }
 
-  /** El bloque de memoria para el system prompt, dentro de su presupuesto. */
+  /**
+   * El bloque de memoria para el system prompt, dentro de su presupuesto: la
+   * memoria de sesión y, detrás, lo heredado de la conversación anterior. Lo
+   * heredado usa lo que la propia deje libre y, si no cabe todo, se queda con
+   * el 40 % del presupuesto.
+   */
   renderMemory(maxChars: number): string {
-    return renderSessionMemory(this.memoryValue, maxChars);
+    const ownFull = renderSessionMemory(this.memoryValue, maxChars);
+    if (!this.inheritedValue) return ownFull;
+    const share = ownFull
+      ? Math.max(Math.floor(maxChars * 0.4), maxChars - ownFull.length - 2)
+      : maxChars;
+    const carried = renderInherited(this.inheritedValue, share);
+    if (!carried) return ownFull;
+    if (!ownFull) return carried;
+    const own = renderSessionMemory(this.memoryValue, maxChars - carried.length - 2);
+    return own ? `${own}\n\n${carried}` : carried;
   }
 
   stats(activeMessages?: number): ConversationStats {
@@ -330,6 +470,10 @@ export class SessionConversation {
       },
     };
   }
+}
+
+function emptyReport(): UpdateReport {
+  return { added: 0, superseded: 0, completed: 0, conflicts: 0, rejected: 0 };
 }
 
 function errorText(err: unknown): string {

@@ -94,6 +94,7 @@ import {
   liveContextReport,
   protocolMemory,
 } from './conversation-dto.js';
+import { buildInherited, type InheritedMemory } from '../conversation/inherited.js';
 import {
   SessionArchive,
   restorableSnapshot,
@@ -210,6 +211,7 @@ export interface StratumdOptions {
 const RESUME_EXCLUSIVE = [
   'cwd',
   'agent',
+  'fresh',
   'provider',
   'model',
   'readOnly',
@@ -822,6 +824,9 @@ export class Stratumd {
   ): Promise<HostedSession> {
     if (this.shuttingDown) throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
     if (params.resume !== undefined) return this.resumeSession(params);
+    if (params.fresh !== undefined && params.agent !== COMPANION_AGENT) {
+      throw invalid('fresh', 'only the companion starts a fresh conversation');
+    }
     if (params.agent === COMPANION_AGENT) return this.openCompanion(params, origin);
     return this.openNewSession(params, origin);
   }
@@ -858,6 +863,95 @@ export class Stratumd {
     });
     this.companionOpening = opening;
     return opening;
+  }
+
+  /**
+   * Cierre de M14 — `sessions.open { agent: 'companion', fresh: true }`: una
+   * conversación **nueva** del asistente. La actual, en reposo, se compacta
+   * entera a su memoria de sesión; se abre la nueva heredando esa memoria (con
+   * lo que la actual había heredado), y solo entonces la actual se cierra y se
+   * archiva (`archived/<id>/`, no se borra). Cualquier fallo antes de abrir la
+   * nueva deja la actual como estaba y siendo la del asistente.
+   *
+   * @throws ProtocolError `INVALID_PARAMS` (`cwd`, `fresh` sin `companion`),
+   *   `BUSY` (un run en curso, u otra apertura del asistente), `UNAVAILABLE`
+   *   (no se pudo compactar), y los de `openNewSession`/`wake`.
+   */
+  private freshCompanion(
+    params: Parameters<NonNullable<RequestHandlers['sessions.open']>>[0],
+    origin?: ClientKind,
+  ): Promise<{
+    session: HostedSession;
+    archived: { sessionId: string; memoryCarried: boolean } | null;
+  }> {
+    if (this.shuttingDown) throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+    if (params.agent !== COMPANION_AGENT) {
+      throw invalid('fresh', 'only the companion starts a fresh conversation');
+    }
+    if (params.cwd !== undefined) {
+      throw invalid('cwd', 'the companion works in its own directory; do not pass cwd');
+    }
+    if (this.companionOpening) {
+      throw new ProtocolError('BUSY', 'The companion conversation is already being opened.');
+    }
+    const { fresh: _fresh, ...rest } = params;
+    let archived: { sessionId: string; memoryCarried: boolean } | null = null;
+    const opening = (async (): Promise<HostedSession> => {
+      const cwd = ensureCompanionWorkspace(this.companionDir);
+      const existing = this.companionSessionId();
+      if (!existing) return this.openNewSession({ ...rest, cwd }, origin);
+
+      const current = await this.wake(existing, 'Starting a new conversation');
+      const compacted = await current.compactForArchive();
+      if (!compacted.ok) {
+        throw new ProtocolError(
+          'UNAVAILABLE',
+          `The current conversation could not be compacted, so it was kept: ${compacted.error}`,
+          { reason: 'compaction' },
+        );
+      }
+      const conversation = current.conversation;
+      let inherited: InheritedMemory | null = null;
+      const next = await this.openNewSession(
+        {
+          ...rest,
+          cwd,
+          provider: rest.provider ?? current.host.agent.providerName,
+          model: rest.model ?? current.host.agent.model,
+        },
+        origin,
+        undefined,
+        (sessionId) =>
+          (inherited = buildInherited({
+            sessionId,
+            from: conversation.memory,
+            previous: conversation.inherited,
+            now: new Date(this.now()).toISOString(),
+          })),
+      );
+      // Desde aquí la nueva es la del asistente: la anterior se cierra y se archiva.
+      this.sessions.delete(existing);
+      await this.closeSession(current, 'closed');
+      try {
+        this.archive.archiveAway(existing);
+      } catch (err) {
+        // Sigue en disco con su conversación; al arrancar volverá como una sesión
+        // guardada más antigua que la nueva, que es la que se elige.
+        log.error('archived conversation not moved', { sessionId: existing, err });
+      }
+      archived = { sessionId: existing, memoryCarried: inherited !== null };
+      log.info('companion conversation archived', {
+        sessionId: existing,
+        next: next.sessionId,
+        compacted: compacted.compacted,
+        memoryCarried: inherited !== null,
+      });
+      return next;
+    })().finally(() => {
+      this.companionOpening = null;
+    });
+    this.companionOpening = opening;
+    return opening.then((session) => ({ session, archived }));
   }
 
   /** La sesión del `companion` que ya tiene el daemon (la más reciente), o `null`. */
@@ -954,6 +1048,8 @@ export class Stratumd {
     origin?: ClientKind,
     /** M16 — solo el planificador de rutinas; `sessions.open` no puede pedirlo. */
     routineId?: string,
+    /** Cierre de M14 — lo que hereda la sesión nueva, a partir de su id. */
+    inherit?: (sessionId: string) => InheritedMemory | null,
   ): Promise<HostedSession> {
     if (this.sessions.size + this.opening >= this.maxSessions) {
       throw new ProtocolError('UNAVAILABLE', 'Too many live sessions.');
@@ -1003,7 +1099,8 @@ export class Stratumd {
       ) {
         sessionId = generateSessionId();
       }
-      const files = this.archive.open(sessionId);
+      const inherited = inherit?.(sessionId) ?? null;
+      const files = this.archive.open(sessionId, inherited ? { inherited } : {});
       let session: HostedSession;
       try {
         session = await HostedSession.open({
@@ -1411,17 +1508,25 @@ export class Stratumd {
       'sessions.memory': (params) => {
         if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its session memory');
         const live = this.sessions.get(params.sessionId);
-        if (live) return { memory: protocolMemory(live.conversation.memory) };
+        if (live) {
+          return {
+            memory: protocolMemory(live.conversation.memory, live.conversation.inherited),
+          };
+        }
         if (!this.dormant.has(params.sessionId)) {
           throw new ProtocolError('NOT_FOUND', 'Session not found.');
         }
         return this.readArchived(params.sessionId, (files) => ({
-          memory: protocolMemory(files.memory),
+          memory: protocolMemory(files.memory, files.inherited),
         }));
       },
-      'sessions.open': async (params) => ({
-        session: (await this.openSession(params, conn.client?.kind)).session(),
-      }),
+      'sessions.open': async (params) => {
+        if (params.fresh === true && params.resume === undefined) {
+          const { session, archived } = await this.freshCompanion(params, conn.client?.kind);
+          return { session: session.session(), ...(archived ? { archived } : {}) };
+        }
+        return { session: (await this.openSession(params, conn.client?.kind)).session() };
+      },
       'sessions.close': async (params) => {
         if (this.dormant.has(params.sessionId) && !this.waking.has(params.sessionId)) {
           this.closeDormant(params.sessionId);

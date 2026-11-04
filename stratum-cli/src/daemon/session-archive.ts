@@ -8,6 +8,9 @@
  *   <id>/conversation.jsonl  la conversación entera (`ConversationStore`)
  *   <id>/memory.json         la memoria de sesión
  *   <id>/context.json        qué forma el contexto activo y las compactaciones
+ *   <id>/inherited.json      lo heredado de la conversación anterior (si la hubo)
+ *   archived/<id>/           una conversación archivada (conversación nueva del
+ *                            `companion`): no se recupera al arrancar ni se monta
  *
  * **Nunca** se guardan claves (`apiKey`, el token del endpoint, la clave de
  * aprobador), el entorno, handles, procesos ni conexiones vivas (jobs, SSH,
@@ -15,7 +18,7 @@
  * una traspasada. Lo que contiene la conversación (y su memoria) sí está:
  * mismas reglas que el transcript, en una carpeta solo de este usuario.
  */
-import { existsSync, readdirSync, readFileSync, rmSync } from 'fs';
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync } from 'fs';
 import { homedir } from 'os';
 import { join } from 'path';
 import { defaultEndpointDir } from '../client/discovery.js';
@@ -23,11 +26,14 @@ import { z } from 'zod';
 import { writeFileAtomic } from '../config/writer.js';
 import {
   loadContextState,
+  loadInherited,
   loadSessionMemory,
   saveContextState,
+  saveInherited,
   saveSessionMemory,
   type ContextState,
 } from '../conversation/files.js';
+import type { InheritedMemory } from '../conversation/inherited.js';
 import {
   SessionConversation,
   type ConversationPersistence,
@@ -119,7 +125,11 @@ const FILES = {
   conversation: 'conversation.jsonl',
   memory: 'memory.json',
   context: 'context.json',
+  inherited: 'inherited.json',
 } as const;
+
+/** Subcarpeta de las conversaciones archivadas (no es un id: `list()` no la ve). */
+const ARCHIVED_DIR = 'archived';
 
 /** Archivo de sesiones en `root`, o en memoria (`root: null`: nada sobrevive al proceso). */
 export class SessionArchive {
@@ -187,13 +197,15 @@ export class SessionArchive {
   /**
    * Abre la conversación de una sesión para escribirla (la crea si no hay).
    * Sin `root`, todo en memoria. Lanza si los ficheros no se pueden leer o son
-   * de un Stratum más nuevo: una sesión así no se monta ni se toca.
+   * de un Stratum más nuevo: una sesión así no se monta ni se toca. Con
+   * `inherited` (solo una sesión nueva), se guarda antes de abrirla.
    */
-  open(sessionId: string): SessionFiles {
+  open(sessionId: string, opts: { inherited?: InheritedMemory } = {}): SessionFiles {
     if (!this.root) {
       const conversation = new SessionConversation({
         sessionId,
         store: new MemoryConversationStore(sessionId),
+        inherited: opts.inherited ?? null,
       });
       return {
         conversation,
@@ -207,6 +219,9 @@ export class SessionArchive {
     ensurePrivateDirSync(dir);
     const memoryPath = join(dir, FILES.memory);
     const contextPath = join(dir, FILES.context);
+    const inheritedPath = join(dir, FILES.inherited);
+    if (opts.inherited) saveInherited(inheritedPath, opts.inherited);
+    const inherited = loadInherited(inheritedPath, sessionId);
     const memory: SessionMemory = loadSessionMemory(memoryPath, sessionId);
     const state: ContextState = loadContextState(contextPath, sessionId);
     const store: ConversationStore = FileConversationStore.open(
@@ -217,7 +232,14 @@ export class SessionArchive {
       saveMemory: (m) => saveSessionMemory(memoryPath, m),
       saveState: (s) => saveContextState(contextPath, s),
     };
-    const conversation = new SessionConversation({ sessionId, store, memory, state, persistence });
+    const conversation = new SessionConversation({
+      sessionId,
+      store,
+      memory,
+      state,
+      persistence,
+      inherited,
+    });
     let closed = false;
     return {
       conversation,
@@ -239,9 +261,12 @@ export class SessionArchive {
    * Lectura sin montar la sesión (una recuperada que aún no tiene turno): la
    * conversación, en solo lectura, y su memoria y estado.
    */
-  read(
-    sessionId: string,
-  ): { store: FileConversationStore; memory: SessionMemory; state: ContextState } | null {
+  read(sessionId: string): {
+    store: FileConversationStore;
+    memory: SessionMemory;
+    state: ContextState;
+    inherited: InheritedMemory | null;
+  } | null {
     if (!this.has(sessionId)) return null;
     const dir = this.dir(sessionId);
     const path = join(dir, FILES.conversation);
@@ -250,7 +275,21 @@ export class SessionArchive {
       store: FileConversationStore.open(path, sessionId, { readOnly: true }),
       memory: loadSessionMemory(join(dir, FILES.memory), sessionId),
       state: loadContextState(join(dir, FILES.context), sessionId),
+      inherited: loadInherited(join(dir, FILES.inherited), sessionId),
     };
+  }
+
+  /**
+   * Archiva una sesión ya cerrada (sus ficheros, sin cerrojo): pasa entera a
+   * `archived/<id>/` y deja de recuperarse al arrancar. No borra nada.
+   *
+   * @throws si no se pudo mover: la sesión sigue donde estaba.
+   */
+  archiveAway(sessionId: string): void {
+    if (!this.root || !this.has(sessionId)) return;
+    const target = join(this.root, ARCHIVED_DIR);
+    ensurePrivateDirSync(target);
+    renameSync(this.dir(sessionId), join(target, sessionId));
   }
 
   /** Borra la sesión (`sessions.close`: se cierra de verdad, no se recupera). */

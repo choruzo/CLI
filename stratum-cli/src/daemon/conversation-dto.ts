@@ -7,6 +7,7 @@ import type { ContextBreakdown, ContextBudget } from '../agent/context-builder.j
 import type { ContextState } from '../conversation/files.js';
 import type { ConversationStats } from '../conversation/session-conversation.js';
 import { memoryCounts, type SessionMemory } from '../conversation/session-memory.js';
+import type { InheritedMemory } from '../conversation/inherited.js';
 import type { ConversationStore } from '../conversation/store.js';
 import { ProtocolError } from '../ipc/codec.js';
 import {
@@ -14,6 +15,7 @@ import {
   type ProtocolContextReport,
   type ProtocolConversationStats,
   type ProtocolHistoryPage,
+  type ProtocolInheritedMemory,
   type ProtocolSessionMemory,
   type ProtocolSessionMemoryStats,
 } from '../protocol/index.js';
@@ -144,7 +146,10 @@ export function archivedContextReport(
   };
 }
 
-export function protocolMemory(memory: SessionMemory): ProtocolSessionMemory {
+export function protocolMemory(
+  memory: SessionMemory,
+  inherited: InheritedMemory | null = null,
+): ProtocolSessionMemory {
   const summary = memory.summary;
   return {
     version: memory.version,
@@ -169,5 +174,21 @@ export function protocolMemory(memory: SessionMemory): ProtocolSessionMemory {
       updatedAt: ms(i.updatedAt) ?? 0,
     })),
     sourceCursor: memory.sourceCursor,
+    inherited: inherited ? protocolInherited(inherited) : null,
+  };
+}
+
+function protocolInherited(inherited: InheritedMemory): ProtocolInheritedMemory {
+  return {
+    fromSessionId: inherited.fromSessionId,
+    archivedAt: ms(inherited.archivedAt),
+    summary: inherited.summary,
+    items: inherited.items.map((i) => ({
+      kind: i.kind,
+      key: i.key,
+      text: i.text,
+      ...(i.conflict ? { conflict: true } : {}),
+      origin: { sessionId: i.origin.sessionId, sourceCount: i.origin.sources.length },
+    })),
   };
 }

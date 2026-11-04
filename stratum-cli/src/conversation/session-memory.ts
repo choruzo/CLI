@@ -143,11 +143,11 @@ export function normalizeKey(key: string): string {
 }
 
 const MAX_ITEM_TEXT = 600;
-const MAX_SUMMARY_TEXT = 6_000;
+export const MAX_SUMMARY_TEXT = 6_000;
 /** Entradas que se conservan (vigentes o no). Lo superado más antiguo sale primero. */
 export const MAX_MEMORY_ITEMS = 400;
 
-function clip(text: string, max: number): string {
+export function clip(text: string, max: number): string {
   const t = text.trim().replace(/\s+\n/g, '\n');
   if (t.length <= max) return t;
   let end = max - 1;
