@@ -255,6 +255,7 @@ export function resetStores(): void {
     notices: {},
     view: 'sessions',
     assistantTab: 'chat',
+    pendingAsk: null,
     companionId: null,
     focusItem: null,
     resolutions: {},

@@ -489,6 +489,26 @@ describe('el lado nativo', () => {
     expect(unlock).toMatch(/ctx\.webview_label\(\) != WINDOW/);
   });
 
+  it('el Dot compacto: sin IPC ni capacidad, y solo entrega texto a la ventana principal', () => {
+    const ask = rustCode(join(DOT, 'src-tauri', 'src', 'ask.rs'));
+    // Solo acepta lo que viene de su ventana, con el nonce de la página servida.
+    expect(ask).toMatch(/ctx\.webview_label\(\) != WINDOW/);
+    expect(ask).toMatch(/authentic/);
+    // No conoce el protocolo: ni el enlace, ni métodos, ni la autoridad de aprobar.
+    expect(ask).not.toMatch(/dot_link|CallAction|MainMethod|broker|ApproverSecret/);
+    // Lo escrito va solo a «main».
+    expect(ask).toMatch(/emit_to\(\s*"main"/);
+    // Ninguna capacidad incluye su ventana, y el webview no recibe el permiso del atajo.
+    const capability = read(join(DOT, 'src-tauri', 'capabilities', 'default.json'));
+    expect(capability).not.toMatch(/"ask"|global-shortcut/);
+    expect(read(join(DOT, 'package.json'))).not.toMatch(/plugin-global-shortcut/);
+    // Su página no carga nada de fuera ni llama a Tauri.
+    for (const file of ['index.html', 'ask.js']) {
+      const page = read(join(DOT, 'src-tauri', 'ask', file));
+      expect(page).not.toMatch(/https?:\/\/|__TAURI|invoke\(/);
+    }
+  });
+
   it('sin TCP ni HTTP: el canal es el pipe que publica el daemon', () => {
     const hits = rustShipped.filter((f) => /TcpStream|TcpListener|127\.0\.0\.1|localhost:|reqwest|hyper::/.test(rustCode(f)));
     expect(hits.map(rel)).toEqual([]);

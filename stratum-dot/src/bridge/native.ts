@@ -76,7 +76,12 @@ export type DotEvent =
    * M16 — la ventana recibió el foco poco después de la notificación de una
    * rutina: abrir la sesión de esa rutina (solo se selecciona). Nunca resuelve nada.
    */
-  | { type: 'open-session'; sessionId: string };
+  | { type: 'open-session'; sessionId: string }
+  /**
+   * Lo que la persona escribió en el Dot compacto (PRD §8.2). Lo entrega el lado
+   * nativo tal cual; esta ventana es la que lo envía al asistente.
+   */
+  | { type: 'ask'; text: string };
 
 export interface AppInfo {
   dotVersion: string;

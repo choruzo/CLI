@@ -21,6 +21,7 @@
 //!    entonces sale (`dot_link::confirm`). Cada cambio del enlace o del broker
 //!    pasa por la puerta de confirmación, que se cancela si deja de tener sentido.
 
+mod ask;
 mod commands;
 mod confirm;
 mod notify;
@@ -60,6 +61,8 @@ pub struct DotState {
     pub logger: Logger,
     /// `None` si el escritorio no tiene bandeja: entonces cerrar la ventana sale de Dot.
     pub tray: Option<tray::Tray>,
+    /// El Dot compacto abierto ahora (su `nonce`) y lo que espera a la persona.
+    pub ask: ask::AskPrompt,
 }
 
 /// Trae la ventana al frente (desde la bandeja, o al abrir Dot por segunda vez).
@@ -88,9 +91,20 @@ pub fn run() {
         // M16: notificaciones del sistema. El webview no tiene el permiso del plugin
         // (`capabilities/default.json`): solo `dot_notify_routine`, que valida el texto.
         .plugin(tauri_plugin_notification::init())
+        // El Dot compacto: el atajo lo abre o lo cierra. Se registra en `setup`.
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
+                        ask::toggle(app);
+                    }
+                })
+                .build(),
+        )
         // Las páginas de desbloqueo y de confirmación, cada una en su origen y sin IPC.
         .register_asynchronous_uri_scheme_protocol(unlock::SCHEME, unlock::handle)
         .register_asynchronous_uri_scheme_protocol(confirm::SCHEME, confirm::handle)
+        .register_asynchronous_uri_scheme_protocol(ask::SCHEME, ask::handle)
         .invoke_handler(tauri::generate_handler![
             commands::dot_attach,
             commands::dot_retry,
@@ -138,6 +152,10 @@ pub fn run() {
                         state.confirm_windows.closed(window.label(), &state.confirm);
                     }
                 }
+                return;
+            }
+            if window.label() == ask::WINDOW {
+                ask::on_window_event(window, event);
                 return;
             }
             if window.label() == unlock::WINDOW {
@@ -245,9 +263,17 @@ pub fn run() {
                 confirm: gate,
                 confirm_windows: Arc::new(confirm::ConfirmWindows::default()),
                 notice: notify::PendingNotice::default(),
-                logger,
+                logger: logger.clone(),
                 tray,
+                ask: ask::AskPrompt::default(),
             });
+            // Si otra aplicación ya tiene el atajo, se dice en el log y la bandeja sigue sirviendo.
+            {
+                use tauri_plugin_global_shortcut::GlobalShortcutExt;
+                if let Err(error) = handle.global_shortcut().register(ask::SHORTCUT) {
+                    logger.warn(&format!("ask: shortcut {} not registered ({error})", ask::SHORTCUT));
+                }
+            }
             tauri::async_runtime::spawn(task);
             tauri::async_runtime::spawn(broker_task);
             Ok(())

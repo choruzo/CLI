@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="dot-ask" content="{{NONCE}}" />
+    <title>Ask your assistant — Stratum Dot</title>
+    <link rel="stylesheet" href="unlock.css" />
+    <link rel="stylesheet" href="ask.css" />
+    <script src="ask.js" defer></script>
+  </head>
+  <body class="ask">
+    <main>
+      <header>
+        <span class="brand"><span class="dot" aria-hidden="true"></span> Stratum · your assistant</span>
+        <span id="waiting" class="waiting" hidden></span>
+      </header>
+      <form id="ask" autocomplete="off" novalidate>
+        <label for="text" class="visually-hidden">Ask your assistant</label>
+        <textarea
+          id="text"
+          name="text"
+          rows="2"
+          maxlength="{{MAX_CHARS}}"
+          placeholder="Ask your assistant…"
+          spellcheck="true"
+          aria-describedby="status hint"
+        ></textarea>
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+      </form>
+      <p id="hint" class="small muted">Enter sends and opens Stratum Dot · Shift+Enter, new line · Esc closes</p>
+    </main>
+  </body>
+</html>

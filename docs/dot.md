@@ -1326,7 +1326,24 @@ gobierna el daemon.
   su memoria (`docs/protocol.md` §22.1). Dot sigue sin `sessions.close`: no puede cerrar ninguna
   sesión. Sin respuesta, «Result unknown» y se vuelve a pedir la del asistente (la que haya), sin
   repetir la orden. El panel *Memory* enseña lo heredado aparte, en «This conversation».
-- Pendiente: el Dot compacto flotante (PRD §8.2).
+- **Dot compacto** (PRD §8.2): `Ctrl+Alt+Space` (`Cmd+Alt+Space` en macOS) o *Ask your
+  assistant…* en la bandeja abren una ventana flotante sin marco, siempre encima y sin icono en la
+  barra de tareas. Se cierra con `Esc`, con el atajo otra vez o al perder el foco. Enseña cuántas
+  solicitudes esperan (solo el número). `Enter` entrega el texto y abre la principal en el
+  asistente, que lo envía: un run nuevo o, si está trabajando, steering. Si no sale, se queda en su
+  campo. `Shift+Enter` es una línea nueva. Si otra aplicación ya tiene el atajo, se anota en el log
+  de Dot y la bandeja sigue sirviendo.
+- **Cómo está hecho**: igual que las ventanas de desbloqueo y de confirmación (§13). La página
+  es propia y estática (`src-tauri/ask/`), se sirve por el esquema `dot-ask` en su propio origen y
+  **no tiene IPC**: no está en ninguna capacidad. Solo acepta peticiones de la ventana `ask` y con el
+  `nonce` de la página servida (`src-tauri/src/ask.rs`; ventana y `nonce` nuevos en cada apertura). El
+  lado nativo no conoce los DTOs: valida el texto (UTF-8, no vacío, ≤ 16 000 caracteres, sin
+  recortar), lo entrega a `main` como `dot://event` `{ type: 'ask', text }` y no lo registra en el
+  log. La principal lo guarda en `uiStore.pendingAsk` y la vista *Asistente* lo envía una vez, en
+  cuanto tiene la sesión y su foto. El plugin `tauri-plugin-global-shortcut` solo lo usa el lado
+  nativo: el webview no tiene su permiso. Tests: `src-tauri/src/ask.rs`, `tests/architecture.test.ts`,
+  `src/app/AssistantHome.test.tsx` y, en la ventana real, `e2e/ask.e2e.mjs` (`npm run e2e:ask`,
+  solo Windows: pulsa el atajo con `keybd_event`, así que no hay que tocar el teclado mientras corre).
 
 Tests: `src/app/Assistant.test.tsx`, `src/app/AssistantHome.test.tsx` (inicio, pestañas y
 conversación nueva), `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`

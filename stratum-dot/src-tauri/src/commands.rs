@@ -583,6 +583,9 @@ pub fn dot_set_attention<R: Runtime>(
         return;
     }
     crate::tray::set_pending(&app, &state, approvals, questions, plans);
+    state
+        .ask
+        .set_waiting(approvals.saturating_add(questions).saturating_add(plans));
 }
 
 /// `Esc`: quita la ventana de en medio. Con bandeja se oculta; sin ella se

@@ -205,3 +205,32 @@ describe('ventana estrecha: pestañas', () => {
     expect(screen.getByRole('textbox', { name: 'Ask Stratum' })).toBeTruthy();
   });
 });
+
+describe('Dot compacto (PRD §8.2)', () => {
+  it('lo escrito llega como un run del asistente, una vez, y lleva a su vista', async () => {
+    const native = await withAssistant();
+    act(() => useUi.getState().setView('sessions'));
+    act(() => native.push({ type: 'ask', text: 'recuérdame comprar pan' }));
+    expect(useUi.getState().view).toBe('assistant');
+    await waitFor(() => expect(native.calls.startRun).toHaveBeenCalledWith(NEW_SID, 'recuérdame comprar pan'));
+    expect(native.calls.startRun).toHaveBeenCalledTimes(1);
+    expect(useUi.getState().pendingAsk).toBeNull();
+  });
+
+  it('con el asistente trabajando es steering; si no sale, se queda en su campo', async () => {
+    const native = await withAssistant(fakeNative(), true);
+    native.calls.steerRun.mockRejectedValue({ kind: 'not-sent', code: null, reason: null, message: 'x' });
+    act(() => native.push({ type: 'ask', text: 'y leche' }));
+    await waitFor(() => expect(native.calls.steerRun).toHaveBeenCalledWith(NEW_SID, 'y leche'));
+    expect(native.calls.startRun).not.toHaveBeenCalled();
+    await waitFor(() => expect(useUi.getState().drafts[NEW_SID]).toBe('y leche'));
+  });
+
+  it('sin la sesión del asistente aún, espera a tenerla', async () => {
+    const native = fakeNative();
+    mount(native);
+    act(() => native.push({ type: 'ask', text: 'hola' }));
+    expect(useUi.getState()).toMatchObject({ view: 'assistant', pendingAsk: 'hola' });
+    expect(native.calls.startRun).not.toHaveBeenCalled();
+  });
+});

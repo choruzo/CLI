@@ -1974,7 +1974,9 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   inicio; a 440 px va en pestañas; y una conversación nueva es explícita desde Dot
   (`sessions.open { fresh: true }`): la actual se compacta a su memoria de sesión y se archiva, y la
   nueva hereda esa memoria (decidido por el usuario: «compactarla y archivarla, para que no empiece
-  de cero»; solo la inmediata, que ya incluye lo que esta había heredado).
+  de cero»; solo la inmediata, que ya incluye lo que esta había heredado). Y el Dot compacto de §8.2:
+  `Ctrl+Alt+Space` o la bandeja; `Enter` envía al asistente (o steering si trabaja) y abre la
+  principal, que es la que envía; la compacta no pinta la conversación (decidido por el usuario).
 - **M15 — Computer use en la caja.** Tools `screen_*`, formato de coordenadas por modelo, poda de
   capturas, capturas fuera de traza y logs, pantalla en vivo en Dot con indicador. *Hecho cuando*:
   las tres tareas de §23.9, ejecutadas por las tools reales, salen al menos 8 de 10 veces cada una

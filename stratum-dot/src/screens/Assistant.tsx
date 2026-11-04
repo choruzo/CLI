@@ -53,6 +53,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
   const openedAt = useUi((s) => (s.companionId ? s.opening[s.companionId] : undefined));
   const entry = useSessions((s) => (companionId ? s.sessions[companionId] : undefined));
   const listed = useSessions((s) => s.listed);
+  useCompactAsk(companionId, entry?.snapshot ?? null, canControl && connected);
   const [openError, setOpenError] = useState<string | null>(null);
   const [attempt, setAttempt] = useState(0);
   const opening = useRef(false);
@@ -229,6 +230,26 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
       {chat}
     </main>
   );
+}
+
+/**
+ * Lo escrito en el Dot compacto (PRD §8.2): en cuanto hay sesión del asistente
+ * y su foto, se le envía una vez —un run nuevo o, si está trabajando,
+ * steering—. Si no sale, se queda en su campo para que no se pierda.
+ */
+function useCompactAsk(companionId: string | null, snapshot: ProtocolSessionSnapshot | null, canControl: boolean) {
+  const pending = useUi((s) => s.pendingAsk);
+  const { steer, send } = useRunActions(companionId ?? '');
+  useEffect(() => {
+    if (pending === null || !companionId || !snapshot || !canControl) return;
+    const ui = useUi.getState();
+    ui.setPendingAsk(null);
+    const run = activeRun(snapshot);
+    const sent = run ? steer(pending, run.status === 'paused') : send(pending, snapshot.run?.id ?? null);
+    void sent.then((ok) => {
+      if (!ok) useUi.getState().setDraft(companionId, pending);
+    });
+  }, [pending, companionId, snapshot, canControl, steer, send]);
 }
 
 const TABS: Array<{ id: AssistantTab; label: string }> = [

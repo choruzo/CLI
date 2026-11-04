@@ -38,6 +38,10 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       // La bandeja pide el centro de aprobaciones: se abre, sin resolver nada.
       if (event.view === 'human-input') useUi.getState().openHumanInput();
       break;
+    case 'ask':
+      // El Dot compacto: el mensaje va al asistente (lo envía su vista al tener su sesión).
+      if (typeof event.text === 'string' && event.text.trim()) useUi.getState().askAssistant(event.text);
+      break;
     case 'open-session':
       // M16: se pulsó el aviso de una rutina. Solo se selecciona su sesión: nada se resuelve.
       useUi.getState().select(event.sessionId);

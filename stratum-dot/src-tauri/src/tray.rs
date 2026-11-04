@@ -145,6 +145,13 @@ pub fn build(app: &AppHandle<Wry>, logger: &Logger) -> Option<Tray> {
 
 fn create(app: &AppHandle<Wry>) -> tauri::Result<Tray> {
     let open = MenuItem::with_id(app, "open", "Open Stratum Dot", true, None::<&str>)?;
+    let ask = MenuItem::with_id(
+        app,
+        "ask",
+        "Ask your assistant…",
+        true,
+        Some(crate::ask::SHORTCUT),
+    )?;
     let sessions = MenuItem::with_id(app, "sessions", sessions_label(0), false, None::<&str>)?;
     let pending = MenuItem::with_id(app, "pending", pending_label(0, 0, 0), false, None::<&str>)?;
     let center = MenuItem::with_id(app, "approvals", "Open Approval Center", true, None::<&str>)?;
@@ -153,6 +160,7 @@ fn create(app: &AppHandle<Wry>) -> tauri::Result<Tray> {
         app,
         &[
             &open,
+            &ask,
             &sessions,
             &pending,
             &center,
@@ -167,6 +175,7 @@ fn create(app: &AppHandle<Wry>) -> tauri::Result<Tray> {
         .tooltip(tooltip(&ConnectionState::Starting, 0))
         .on_menu_event(|app, event| match event.id.as_ref() {
             "open" => show_main(app),
+            "ask" => crate::ask::toggle(app),
             "approvals" => open_approval_center(app),
             // Cierra Dot. El daemon no se entera.
             "quit" => app.exit(0),

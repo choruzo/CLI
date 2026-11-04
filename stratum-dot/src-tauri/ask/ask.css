@@ -1,0 +1,53 @@
+/* Dot compacto: lo que cambia respecto a la hoja común de las páginas nativas. */
+body.ask main {
+  padding: 0.6rem 0.8rem 0.5rem;
+  max-width: none;
+}
+body.ask header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem;
+  margin-bottom: 0.4rem;
+  font-size: 0.85rem;
+}
+body.ask .brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+}
+body.ask .dot {
+  width: 0.55rem;
+  height: 0.55rem;
+  border-radius: 50%;
+  background: #4caf7a;
+}
+body.ask .waiting {
+  font-weight: 600;
+  color: #d9a441;
+}
+body.ask textarea {
+  width: 100%;
+  box-sizing: border-box;
+  resize: none;
+  font: inherit;
+  padding: 0.45rem 0.55rem;
+}
+body.ask .status {
+  min-height: 0;
+  margin: 0.25rem 0 0;
+}
+body.ask .status:empty {
+  display: none;
+}
+body.ask .small {
+  margin: 0.3rem 0 0;
+}
+.visually-hidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}

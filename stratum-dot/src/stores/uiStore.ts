@@ -119,6 +119,11 @@ interface UiStore {
   /** La pestaña de la vista *Asistente* en estrecho. Solo en memoria. */
   assistantTab: AssistantTab;
   /**
+   * Lo escrito en el Dot compacto que aún no se ha enviado al asistente: la
+   * vista *Asistente* lo envía en cuanto tiene su sesión. Solo en memoria.
+   */
+  pendingAsk: string | null;
+  /**
    * M14 — la sesión del asistente (`companion`) que dio el daemon al abrirla.
    * Solo en memoria: al volver a abrir Dot se pide otra vez, y el daemon
    * devuelve la misma si sigue existiendo.
@@ -133,6 +138,9 @@ interface UiStore {
   openHumanInput(itemId?: string | null): void;
   setView(view: MainView): void;
   setAssistantTab(tab: AssistantTab): void;
+  /** El Dot compacto: ir al asistente con ese mensaje para enviárselo. */
+  askAssistant(text: string): void;
+  setPendingAsk(text: string | null): void;
   setCompanionId(id: string | null): void;
   setResolution(id: string, resolution: Omit<Resolution, 'at'> | null): void;
   setTab(tab: SessionTab): void;
@@ -164,12 +172,15 @@ export const useUi = create<UiStore>((set) => ({
   notices: {},
   view: HOME_VIEW,
   assistantTab: 'chat',
+  pendingAsk: null,
   companionId: null,
   focusItem: null,
   resolutions: {},
   openHumanInput: (itemId = null) => set({ view: 'human-input', focusItem: itemId }),
   setView: (view) => set({ view, focusItem: null }),
   setAssistantTab: (assistantTab) => set({ assistantTab }),
+  askAssistant: (text) => set({ view: 'assistant', assistantTab: 'chat', focusItem: null, pendingAsk: text }),
+  setPendingAsk: (pendingAsk) => set({ pendingAsk }),
   setCompanionId: (id) => set({ companionId: id }),
   setResolution: (id, resolution) =>
     set((prev) => ({
