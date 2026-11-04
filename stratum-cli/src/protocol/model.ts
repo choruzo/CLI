@@ -345,13 +345,17 @@ export interface ProtocolTodo {
  *
  *  - `local`: la persona delante del proceso que aloja la sesión (su terminal).
  *  - `remote`: un cliente con la capacidad `approve`, a través del servidor.
+ *  - `channel`: M18 — un chat emparejado de un canal externo (`channel`), con
+ *    los botones que permite ese canal (`checkChannelResolution`).
  *  - `timeout`: nadie contestó a tiempo. Equivale a denegar / omitir / rechazar.
  *  - `policy`: no había a quién preguntar, y se resolvió sin preguntar.
  */
 export interface ProtocolResolver {
-  kind: 'local' | 'remote' | 'timeout' | 'policy';
+  kind: 'local' | 'remote' | 'channel' | 'timeout' | 'policy';
   /** Solo con `remote`. No es una identidad verificada. */
   client?: ClientKind;
+  /** Solo con `channel`: cuál. */
+  channel?: 'telegram';
   /** Solo con `remote`: la conexión del servidor que la resolvió. */
   connectionId?: number;
   at: Timestamp;

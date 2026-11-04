@@ -2040,6 +2040,27 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
   (nombre, estado y `summary`). Texto plano, pasado otra vez por la redacción, en trozos de menos de
   4096 caracteres y con una cola por chat (≤ 1 mensaje/s). Nunca capturas de la caja, imágenes ni
   ficheros.
+- **Aprobaciones y preguntas** (§23.13 A9). Cada solicitud pendiente del centro de aprobaciones,
+  **de cualquier sesión** (también las pares), llega a los chats emparejados como una tarjeta con
+  lo que enseña Dot (sesión, `origin`, carpeta, tool, target, descripción ya redactada y motivo) y,
+  como mucho, dos botones: **Approve once** y **Deny**. Lo que `channelApprovable` no admite
+  (`forced`, que incluye `confirm-always` y `propose_routine`; con `confirmPhrase`; una host key)
+  llega solo con **Deny** y diciendo por qué hay que aprobarlo en Dot. Una tanda de **una**
+  pregunta con opciones, con un botón por opción (`channelAnswerable`); el texto libre, varias
+  preguntas y los planes, como aviso («en Dot»). Nunca `allow-all` ni concesiones.
+  - **El servidor aplica los límites por su cuenta** (`checkChannelResolution` en
+    `protocol/resolve.ts`, desde `ApprovalCenter.resolve` para el enlace del canal), sin fiarse
+    de qué botones se enseñaron: cualquier otra cosa es `INVALID_PARAMS` y la solicitud sigue
+    pendiente. La carrera la decide el anfitrión como siempre.
+  - **`ProtocolResolver.kind: 'channel'`** con `channel: 'telegram'` (sin `client` ni
+    `connectionId`): así lo ven `*.resolved`, la traza (`resolution`, `by: 'channel'`) y
+    `exec-audit.jsonl`, distinto de `remote`.
+  - Un botón lleva un token aleatorio que el daemon busca **en memoria**: ni el id de la
+    solicitud ni la decisión viajan en claro, y el de un mensaje de otro arranque o de antes de un
+    `channels.reload` no resuelve nada («ya no vale»). Resuelta en cualquier sitio, la tarjeta se
+    edita (cómo y dónde: «Approved in Dot», «Expired»…) y pierde los botones.
+  - Que una sesión del daemon pregunte en vez de denegar sigue dependiendo de que haya clave de
+    aprobador (§15); emparejar ya la exige.
 - **Sin eventos nuevos**: un cliente consulta `channels.status` (Dot, mientras enseña el panel o el
   diálogo de emparejar). Con el canal escuchando y alguien emparejado (o un emparejamiento en curso),
   el daemon no se apaga por inactividad.

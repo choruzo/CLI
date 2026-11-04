@@ -16,6 +16,7 @@ import type {
 export interface SentMessage {
   chatId: number;
   text: string;
+  messageId: number;
   keyboard?: InlineKeyboard;
 }
 
@@ -63,6 +64,19 @@ export class FakeTelegramApi implements TelegramApi {
       hasMedia: false,
     };
     return { updateId: this.nextUpdateId++, message };
+  }
+
+  /** Un botón pulsado por `userId` en el mensaje `messageId` de su chat. */
+  press(userId: number, messageId: number, data: string): TelegramUpdate {
+    return {
+      updateId: this.nextUpdateId++,
+      callbackQuery: {
+        id: `cb${this.nextUpdateId}`,
+        from: { id: userId, isBot: false, firstName: 'Ana' },
+        data,
+        message: { messageId, chatId: userId },
+      },
+    };
   }
 
   update(partial: Omit<TelegramUpdate, 'updateId'>): TelegramUpdate {
@@ -120,13 +134,37 @@ export class FakeTelegramApi implements TelegramApi {
     text: string,
     opts: SendOptions = {},
   ): Promise<{ messageId: number }> {
-    this.sent.push({ chatId, text, ...(opts.keyboard ? { keyboard: opts.keyboard } : {}) });
-    return { messageId: this.nextMessageId++ };
+    const messageId = this.nextMessageId++;
+    this.sent.push({
+      chatId,
+      text,
+      messageId,
+      ...(opts.keyboard ? { keyboard: opts.keyboard } : {}),
+    });
+    return { messageId };
   }
 
-  async editMessageText(): Promise<void> {}
+  readonly edits: { chatId: number; messageId: number; text: string; keyboard?: InlineKeyboard }[] =
+    [];
+  readonly callbackAnswers: { id: string; text?: string }[] = [];
 
-  async answerCallbackQuery(): Promise<void> {}
+  async editMessageText(
+    chatId: number,
+    messageId: number,
+    text: string,
+    opts: SendOptions = {},
+  ): Promise<void> {
+    this.edits.push({
+      chatId,
+      messageId,
+      text,
+      ...(opts.keyboard ? { keyboard: opts.keyboard } : {}),
+    });
+  }
+
+  async answerCallbackQuery(id: string, text?: string): Promise<void> {
+    this.callbackAnswers.push({ id, ...(text !== undefined ? { text } : {}) });
+  }
 
   async sendChatAction(): Promise<void> {}
 }

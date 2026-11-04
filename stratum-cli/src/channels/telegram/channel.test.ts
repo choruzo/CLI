@@ -80,7 +80,7 @@ describe('TelegramChannel (M18)', () => {
     api.push(api.text({ id: 9, firstName: 'Bea', username: 'bea' }, '/start GOODCODE23'));
     const sent = await api.waitSent(1);
     expect(offers).toEqual([{ code: 'GOODCODE23', userId: 9 }]);
-    expect(sent[0]).toEqual({ chatId: 9, text: TEXT.candidate });
+    expect(sent[0]).toMatchObject({ chatId: 9, text: TEXT.candidate });
   });
 
   it('un código falso no da pistas', async () => {
@@ -96,7 +96,7 @@ describe('TelegramChannel (M18)', () => {
     api.push(api.text({ id: 42 }, '/unpair', 1));
     const sent = await api.waitSent(1);
     expect(paired.has(42)).toBe(false);
-    expect(sent[0]).toEqual({ chatId: 42, text: TEXT.unpaired });
+    expect(sent[0]).toMatchObject({ chatId: 42, text: TEXT.unpaired });
     expect(texts).toEqual([]);
   });
 
@@ -105,7 +105,7 @@ describe('TelegramChannel (M18)', () => {
     api.push(api.text({ id: 42 }, 'de ayer', Math.floor(Date.now() / 1000) - 3600));
     const sent = await api.waitSent(1);
     expect(texts).toEqual([]);
-    expect(sent[0]).toEqual({ chatId: 42, text: TEXT.stale });
+    expect(sent[0]).toMatchObject({ chatId: 42, text: TEXT.stale });
   });
 
   it('un fallo de red se reintenta y queda en lastError hasta el siguiente sondeo bueno', async () => {

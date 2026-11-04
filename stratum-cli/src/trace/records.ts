@@ -181,9 +181,11 @@ export type TraceRuntimeEvent =
       kind: 'approval' | 'question' | 'plan';
       id: string;
       status: 'resolved' | 'expired' | 'cancelled';
-      by: 'local' | 'remote' | 'timeout' | 'policy' | 'none';
+      by: 'local' | 'remote' | 'channel' | 'timeout' | 'policy' | 'none';
       /** Con `remote`: lo que el cliente declaró ser y su conexión en el servidor. */
       client?: string;
+      /** M18 — con `channel`: cuál (`telegram`). */
+      channel?: string;
       connectionId?: number;
       tool?: string;
       callId?: string;

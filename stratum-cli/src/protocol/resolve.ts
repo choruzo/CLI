@@ -115,3 +115,75 @@ export function checkQuestionAnswers(
   }
   return { ok: true, answers: out };
 }
+
+// ---------------------------------------------------------------------------
+// M18 — lo que se puede resolver desde un canal externo (§23.13 A9)
+// ---------------------------------------------------------------------------
+
+/**
+ * Desde un canal (Telegram) solo hay dos botones: **aprobar una vez** y
+ * **denegar**. Aprobar ahí solo vale para una aprobación de una tool que no
+ * sea forzada (política `confirm-always`, `propose_routine`), no pida frase y
+ * no sea una host key. Nunca `allow-all` ni una concesión. Denegar vale
+ * siempre. Lo aplica el centro de aprobaciones por su cuenta, sin fiarse de qué
+ * botones se enseñaron.
+ */
+export function channelApprovable(approval: {
+  kind: 'tool' | 'host-key';
+  forced: boolean;
+  confirmPhrase?: string;
+}): boolean {
+  return approval.kind === 'tool' && !approval.forced && approval.confirmPhrase === undefined;
+}
+
+/** Una tanda de preguntas que se contesta con botones: una pregunta, con opciones. */
+export function channelAnswerable(questions: readonly ProtocolQuestion[]): boolean {
+  return questions.length === 1 && (questions[0]!.options?.length ?? 0) > 0;
+}
+
+/**
+ * Qué puede llegar de un canal, además de lo que ya exige cada solicitud
+ * (`checkApprovalResolution`, `checkQuestionAnswers`). `null` = vale.
+ */
+export function checkChannelResolution(
+  request:
+    | { kind: 'approval'; approval: Parameters<typeof channelApprovable>[0] }
+    | { kind: 'question'; questions: readonly ProtocolQuestion[] }
+    | { kind: 'plan' },
+  resolution:
+    | {
+        kind: 'approval';
+        decision: ProtocolApprovalDecision;
+        phrase?: string;
+        grant?: ProtocolGrantRequest;
+      }
+    | { kind: 'question'; answers: readonly ProtocolQuestionAnswer[] | null }
+    | { kind: 'plan' },
+): ResolutionIssue | null {
+  if (request.kind === 'plan' || resolution.kind === 'plan') {
+    return { path: 'decision', message: 'a plan cannot be decided from a channel' };
+  }
+  if (request.kind === 'approval' && resolution.kind === 'approval') {
+    if (resolution.grant !== undefined || resolution.phrase !== undefined) {
+      return { path: 'decision', message: 'only approve once or deny from a channel' };
+    }
+    if (resolution.decision === 'deny') return null;
+    if (resolution.decision !== 'approve') {
+      return { path: 'decision', message: 'only approve once or deny from a channel' };
+    }
+    return channelApprovable(request.approval)
+      ? null
+      : { path: 'decision', message: 'this request can only be approved in Dot' };
+  }
+  if (request.kind === 'question' && resolution.kind === 'question') {
+    const answers = resolution.answers;
+    if (!channelAnswerable(request.questions) || answers === null) {
+      return { path: 'answers', message: 'answer this in Dot' };
+    }
+    if (!answers.every((a) => a.optionId !== undefined)) {
+      return { path: 'answers', message: 'only the offered options can be chosen from a channel' };
+    }
+    return null;
+  }
+  return { path: 'kind', message: 'the answer does not match the request' };
+}

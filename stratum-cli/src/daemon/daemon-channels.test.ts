@@ -4,7 +4,7 @@
  * candidato → `pairConfirm` con `approve`), desemparejar, recargar, y que un
  * canal con alguien emparejado no deja que el daemon se apague solo.
  */
-import { mkdtempSync, realpathSync, rmSync } from 'fs';
+import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -17,6 +17,7 @@ import {
 } from '../channels/telegram/store.js';
 import { FakeTelegramApi } from '../channels/telegram/api.fixtures.js';
 import type { StratumdOptions } from './daemon.js';
+import { makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { startTestDaemon, textRound, type TestDaemon } from './daemon.fixtures.js';
 import { fromDot } from '../channels/telegram/render.js';
 
@@ -91,7 +92,7 @@ describe('channels.* (M18)', () => {
 
     api.push(api.text({ id: 9, firstName: 'Bea', username: 'bea' }, `/start ${begin.code}`));
     await api.waitSent(1);
-    expect(api.sent[0]).toEqual({ chatId: 9, text: TEXT.candidate });
+    expect(api.sent[0]).toMatchObject({ chatId: 9, text: TEXT.candidate });
     const { telegram } = await operator.request('channels.status', {});
     expect(telegram.pairing?.candidate).toEqual({ userId: 9, name: 'Bea', username: 'bea' });
     // Aún no habla con nadie.
@@ -108,7 +109,7 @@ describe('channels.* (M18)', () => {
     const { paired } = await approver.request('channels.pairConfirm', { userId: 9 });
     expect(paired).toMatchObject({ userId: 9, name: 'Bea', username: 'bea' });
     await api.waitSent(2);
-    expect(api.sent[1]).toEqual({ chatId: 9, text: TEXT.paired });
+    expect(api.sent[1]).toMatchObject({ chatId: 9, text: TEXT.paired });
 
     // En disco, y el candidato gastado.
     const file = readTelegramFile(dir);
@@ -140,7 +141,7 @@ describe('channels.* (M18)', () => {
 
     api.push(api.text({ id: 42 }, '/unpair'));
     await api.waitSent(1);
-    expect(api.sent[0]).toEqual({ chatId: 42, text: TEXT.unpaired });
+    expect(api.sent[0]).toMatchObject({ chatId: 42, text: TEXT.unpaired });
     const file = readTelegramFile(dir);
     expect(file.state === 'ok' && file.file.paired).toEqual([]);
     expect((await operator.request('channels.status', {})).telegram.paired).toEqual([]);
@@ -244,5 +245,81 @@ describe('channels.* (M18)', () => {
       'telegram',
       null,
     ]);
+  });
+
+  describe('aprobaciones desde el chat (parte 4)', () => {
+    const ana: TelegramPaired = {
+      userId: 42,
+      chatId: 42,
+      name: 'Ana',
+      pairedAt: new Date().toISOString(),
+    };
+
+    /** Una sesión de código del daemon que pide borrar un fichero. */
+    async function pending(t: TestDaemon, api: FakeTelegramApi) {
+      const cwd = t.project('proyecto', [
+        makeToolCallRound('c1', 'exec', { command: 'rm victim.txt' }),
+        makeTextRound('hecho'),
+      ]);
+      const file = join(cwd, 'victim.txt');
+      writeFileSync(file, 'no me borres\n');
+      const operator = await t.connect(['operator'], 'op');
+      const { session } = await operator.request('sessions.open', { cwd });
+      await operator.request('runs.start', { sessionId: session.id, input: 'limpia' });
+      await vi.waitFor(() => expect(api.sent.some((m) => m.keyboard)).toBe(true), {
+        timeout: 10_000,
+      });
+      const card = api.sent.find((m) => m.keyboard)!;
+      return { operator, session, file, card };
+    }
+
+    it('aprobar una vez desde Telegram ejecuta y edita la tarjeta', async () => {
+      const { t, api } = await start({ paired: [ana] });
+      const { operator, session, file, card } = await pending(t, api);
+      expect(card.text).toContain('Approval needed');
+      expect(card.text).toContain('exec');
+      const [approve, deny] = card.keyboard![0]!;
+      expect(approve!.text).toBe('Approve once');
+      expect(deny!.text).toBe('Deny');
+
+      api.push(api.press(42, card.messageId, approve!.callbackData));
+      await vi.waitFor(() => expect(existsSync(file)).toBe(false), { timeout: 10_000 });
+      await vi.waitFor(() =>
+        expect(api.edits.map((e) => e.text).join('\n')).toContain('Approved from Telegram'),
+      );
+      expect(api.callbackAnswers.at(-1)?.text).toBe('Approved.');
+      const { snapshot } = await operator.request('sessions.get', { sessionId: session.id });
+      expect(snapshot.approvals).toEqual([]);
+    });
+
+    it('resuelta en otro cliente: la tarjeta lo dice y su botón ya no vale', async () => {
+      const { t, api } = await start({ paired: [ana] });
+      const { file, card } = await pending(t, api);
+      const approver = await t.connect(['approver'], 'dot', { kind: 'dot' });
+      const { approvals } = await approver.request('approvals.list', {});
+      await approver.request('approvals.resolve', {
+        approvalId: approvals[0]!.id,
+        decision: 'deny',
+      });
+      await vi.waitFor(() =>
+        expect(api.edits.map((e) => e.text).join('\n')).toContain('Denied in Dot'),
+      );
+      api.push(api.press(42, card.messageId, card.keyboard![0]![0]!.callbackData));
+      await vi.waitFor(() => expect(api.callbackAnswers.at(-1)?.text).toContain('no longer valid'));
+      expect(existsSync(file)).toBe(true);
+    });
+
+    it('un botón inventado o de un chat no emparejado no resuelve nada', async () => {
+      const { t, api } = await start({ paired: [ana] });
+      const { file, card } = await pending(t, api);
+      api.push(api.press(42, card.messageId, 'b:inventado'));
+      api.push(api.press(7, card.messageId, card.keyboard![0]![0]!.callbackData));
+      await api.drained();
+      await vi.waitFor(() => expect(api.callbackAnswers.length).toBe(1));
+      expect(api.callbackAnswers[0]!.text).toContain('no longer valid');
+      expect(existsSync(file)).toBe(true);
+      const observer = await t.connect(['observer']);
+      expect((await observer.request('approvals.list', {})).approvals).toHaveLength(1);
+    });
   });
 });

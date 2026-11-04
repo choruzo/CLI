@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { checkApprovalResolution, checkQuestionAnswers } from './resolve.js';
+import {
+  channelAnswerable,
+  channelApprovable,
+  checkApprovalResolution,
+  checkChannelResolution,
+  checkQuestionAnswers,
+} from './resolve.js';
 
 describe('qué respuestas valen', () => {
   it('aprobación: denegar vale siempre; allow-all no en forzadas ni con frase; la frase, exacta', () => {
@@ -93,5 +99,70 @@ describe('qué respuestas valen', () => {
     ]) {
       expect(checkQuestionAnswers(questions, bad).ok, JSON.stringify(bad)).toBe(false);
     }
+  });
+});
+
+describe('M18 (A9) — qué vale desde un canal', () => {
+  const tool = { kind: 'tool' as const, forced: false };
+  const approval = (a: Parameters<typeof channelApprovable>[0]) => ({
+    kind: 'approval' as const,
+    approval: a,
+  });
+
+  it('aprobar una vez solo una tool sin forzar, sin frase y que no sea host key', () => {
+    expect(channelApprovable(tool)).toBe(true);
+    expect(channelApprovable({ ...tool, forced: true })).toBe(false);
+    expect(channelApprovable({ ...tool, confirmPhrase: 'prod' })).toBe(false);
+    expect(channelApprovable({ kind: 'host-key', forced: false })).toBe(false);
+  });
+
+  it('denegar vale siempre; allow-all, frase y concesión nunca', () => {
+    const forced = approval({ ...tool, forced: true });
+    expect(checkChannelResolution(forced, { kind: 'approval', decision: 'deny' })).toBeNull();
+    expect(
+      checkChannelResolution(forced, { kind: 'approval', decision: 'approve' }),
+    ).not.toBeNull();
+    expect(
+      checkChannelResolution(approval(tool), { kind: 'approval', decision: 'approve' }),
+    ).toBeNull();
+    expect(
+      checkChannelResolution(approval(tool), { kind: 'approval', decision: 'allow-all' }),
+    ).not.toBeNull();
+    expect(
+      checkChannelResolution(approval({ ...tool, confirmPhrase: 'x' }), {
+        kind: 'approval',
+        decision: 'approve',
+        phrase: 'x',
+      }),
+    ).not.toBeNull();
+    expect(
+      checkChannelResolution(approval(tool), {
+        kind: 'approval',
+        decision: 'approve',
+        grant: { minutes: 10 },
+      }),
+    ).not.toBeNull();
+  });
+
+  it('preguntas: una sola, con opciones, eligiendo una opción; planes, nunca', () => {
+    const one = [{ question: '¿Cuál?', options: [{ id: 'a', label: 'A' }] }];
+    expect(channelAnswerable(one)).toBe(true);
+    expect(channelAnswerable([{ question: '¿Qué?' }])).toBe(false);
+    expect(channelAnswerable([...one, ...one])).toBe(false);
+    const q = { kind: 'question' as const, questions: one };
+    expect(
+      checkChannelResolution(q, {
+        kind: 'question',
+        answers: [{ question: '¿Cuál?', answer: '', optionId: 'a' }],
+      }),
+    ).toBeNull();
+    expect(
+      checkChannelResolution(q, {
+        kind: 'question',
+        answers: [{ question: '¿Cuál?', answer: 'A' }],
+      }),
+    ).not.toBeNull();
+    expect(checkChannelResolution(q, { kind: 'question', answers: null })).not.toBeNull();
+    expect(checkChannelResolution({ kind: 'plan' }, { kind: 'plan' })).not.toBeNull();
   });
 });

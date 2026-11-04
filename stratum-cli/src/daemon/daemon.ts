@@ -114,6 +114,7 @@ import {
 import { RoutineStore, routinesFile, type Routine } from '../routines/store.js';
 import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
 import type { CompanionTurns } from './channel-companion.js';
+import type { SessionLabel } from '../channels/telegram/render.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
@@ -390,28 +391,6 @@ export class Stratumd {
               if (name) this.channels?.routineFinished(name, done.run.status, done.summary);
             },
           });
-    this.channels =
-      opts.channels === null
-        ? null
-        : new ChannelHost({
-            dir: opts.dir ?? defaultEndpointDir(),
-            // `channels` es solo de la capa global: un repo no enciende el canal.
-            enabled: () => loadConfig(opts.home ?? homedir()).channels.telegram.enabled,
-            now: this.now,
-            // La misma conversación que Dot: la sesión principal del `companion`.
-            companion: {
-              currentId: () => this.companionSessionId(),
-              open: async () => {
-                if (this.shuttingDown) {
-                  throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
-                }
-                return asCompanionTurns(await this.openCompanion({ agent: COMPANION_AGENT }));
-              },
-            },
-            // Lo que sale al chat vuelve a pasar por la redacción.
-            redact: (text) => redactText(text, opts.config),
-            ...opts.channels,
-          });
     // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
     this.box =
       opts.box ??
@@ -444,6 +423,32 @@ export class Stratumd {
         this.lastActivity = this.now();
       },
     });
+    // Tras el centro de aprobaciones: el canal se suscribe a él al crearse.
+    this.channels =
+      opts.channels === null
+        ? null
+        : new ChannelHost({
+            dir: opts.dir ?? defaultEndpointDir(),
+            // `channels` es solo de la capa global: un repo no enciende el canal.
+            enabled: () => loadConfig(opts.home ?? homedir()).channels.telegram.enabled,
+            now: this.now,
+            // La misma conversación que Dot: la sesión principal del `companion`.
+            companion: {
+              currentId: () => this.companionSessionId(),
+              open: async () => {
+                if (this.shuttingDown) {
+                  throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+                }
+                return asCompanionTurns(await this.openCompanion({ agent: COMPANION_AGENT }));
+              },
+            },
+            // Lo pendiente de todas las sesiones (también las pares), con su tarjeta.
+            approvals: this.approvals,
+            sessionLabel: (sessionId) => this.sessionLabel(sessionId),
+            // Lo que sale al chat vuelve a pasar por la redacción.
+            redact: (text) => redactText(text, opts.config),
+            ...opts.channels,
+          });
     this.closed = new Promise<ShutdownReason>((r) => (this.resolveClosed = r));
   }
 
@@ -1974,6 +1979,20 @@ export class Stratumd {
       });
     }
     return this.routines;
+  }
+
+  /** M18 — lo que una tarjeta de Telegram enseña de una sesión (como Dot). */
+  private sessionLabel(sessionId: string): SessionLabel | null {
+    const s = this.registry.session(sessionId);
+    if (!s) return null;
+    const routine = s.routineId ? this.routines?.get(s.routineId)?.routine.name : undefined;
+    return {
+      ...(s.title ? { title: s.title } : {}),
+      ...(s.agent ? { agent: s.agent } : {}),
+      ...(s.origin ? { origin: s.origin } : {}),
+      ...(s.cwd ? { cwd: s.cwd } : {}),
+      ...(routine ? { routine } : {}),
+    };
   }
 
   /** Los canales externos, o `UNAVAILABLE` si el daemon corre sin ellos. */

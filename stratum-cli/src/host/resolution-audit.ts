@@ -27,6 +27,8 @@ export function recordResolution(target: ResolutionAuditTarget, change: Interact
   const who = {
     ...(outcome.by?.client ? { client: outcome.by.client } : {}),
     ...(outcome.by?.connectionId !== undefined ? { connectionId: outcome.by.connectionId } : {}),
+    // M18 — aprobada desde un canal externo: se distingue de `remote`.
+    ...(outcome.by?.channel ? { channel: outcome.by.channel } : {}),
   };
   target.trace?.runtime({
     event: 'resolution',

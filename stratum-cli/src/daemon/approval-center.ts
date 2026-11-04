@@ -30,6 +30,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import { getLogger } from '../logging/index.js';
 import {
   checkApprovalResolution,
+  checkChannelResolution,
   checkQuestionAnswers,
   type Capability,
   type ClientKind,
@@ -74,7 +75,28 @@ export interface ApproverLink {
   readonly id: number;
   readonly client: { kind: ClientKind; name: string } | null;
   readonly capabilities: readonly Capability[];
+  /**
+   * M18 — un chat emparejado de un canal externo: resuelve con la autoridad de
+   * aprobar, pero **solo con botones** (aprobar una vez o denegar;
+   * `checkChannelResolution`). El centro lo aplica por su cuenta, sin fiarse de
+   * qué botones se enseñaron.
+   */
+  readonly channel?: 'telegram';
 }
+
+/** M18 — lo pendiente que entra o sale, para quien lo refleje fuera (un canal). */
+export type PendingChange =
+  | { type: 'added'; kind: 'approval'; dto: ProtocolApproval }
+  | { type: 'added'; kind: 'question'; dto: ProtocolQuestionRequest }
+  | { type: 'added'; kind: 'plan'; dto: ProtocolPlanRequest }
+  | {
+      type: 'closed';
+      id: string;
+      sessionId: string;
+      /** `approved` · `denied` · `expired` · `cancelled` · `resolved`. */
+      resolution: string;
+      by?: ProtocolResolver;
+    };
 
 /**
  * Lo que contesta un cliente. `sessionId`, si lo da, es la sesión a la que cree
@@ -133,9 +155,26 @@ export class ApprovalCenter {
   /** Lo ya resuelto —cómo y de qué sesión—: para contestar `ALREADY_RESOLVED` y no volver a darlo por pendiente. */
   private readonly recent = new Map<string, { resolution: string; sessionId: string }>();
   private readonly now: () => number;
+  private readonly listeners = new Set<(change: PendingChange) => void>();
 
   constructor(private readonly opts: ApprovalCenterOptions) {
     this.now = opts.now ?? Date.now;
+  }
+
+  /** M18 — avisa de lo que entra y sale. Un oyente que lanza no afecta a nada. */
+  subscribe(listener: (change: PendingChange) => void): () => void {
+    this.listeners.add(listener);
+    return () => this.listeners.delete(listener);
+  }
+
+  private notify(change: PendingChange): void {
+    for (const listener of this.listeners) {
+      try {
+        listener(change);
+      } catch (err) {
+        log.warn('pending listener failed', { err });
+      }
+    }
   }
 
   /** Solicitudes pendientes, de los tres tipos. */
@@ -163,25 +202,31 @@ export class ApprovalCenter {
       return;
     }
     if (entry.dto.sessionId !== entry.sessionId) return;
+    const isNew = !known;
     this.pending.set(id, entry);
+    if (isNew) this.notify({ type: 'added', kind: entry.kind, dto: entry.dto } as PendingChange);
   }
 
   /** Cierra una solicitud **de esa sesión**. */
-  private close(sessionId: string, id: string, resolution: string): void {
+  private close(sessionId: string, id: string, resolution: string, by?: ProtocolResolver): void {
     const known = this.pending.get(id);
     // Solo se cierra lo que estaba pendiente y era de esa sesión. Un id ajeno,
     // ya resuelto o que nunca existió no cambia nada: ni lo pendiente ni el
     // recuerdo de cómo acabó cada solicitud.
     if (!known || known.sessionId !== sessionId) return;
-    this.done(id, resolution);
+    this.done(id, resolution, by);
   }
 
-  private done(id: string, resolution: string): void {
+  private done(id: string, resolution: string, by?: ProtocolResolver): void {
     const sessionId = this.pending.get(id)?.sessionId ?? this.recent.get(id)?.sessionId ?? '';
+    const wasPending = this.pending.has(id);
     this.pending.delete(id);
     this.recent.delete(id);
     this.recent.set(id, { resolution, sessionId });
     if (this.recent.size > RECENT) this.recent.delete(this.recent.keys().next().value as string);
+    if (wasPending) {
+      this.notify({ type: 'closed', id, sessionId, resolution, ...(by ? { by } : {}) });
+    }
   }
 
   /** Un evento publicado por el anfitrión de una sesión. */
@@ -196,10 +241,20 @@ export class ApprovalCenter {
       case 'plan.proposed':
         return this.add({ kind: 'plan', sessionId, dto: event.data.request, chain });
       case 'approval.resolved':
-        return this.close(sessionId, event.data.approvalId, event.data.status);
+        return this.close(
+          sessionId,
+          event.data.approvalId,
+          event.data.status,
+          event.data.resolvedBy,
+        );
       case 'question.resolved':
       case 'plan.resolved':
-        return this.close(sessionId, event.data.requestId, event.data.status ?? 'resolved');
+        return this.close(
+          sessionId,
+          event.data.requestId,
+          event.data.status ?? 'resolved',
+          event.data.resolvedBy,
+        );
       default:
         return;
     }
@@ -307,6 +362,18 @@ export class ApprovalCenter {
     }
   }
 
+  /** M18 (A9) — desde un canal, solo los botones: lo demás no se entrega. */
+  private checkChannel(entry: Entry, resolution: Resolution): void {
+    const request =
+      entry.kind === 'approval'
+        ? { kind: 'approval' as const, approval: entry.dto }
+        : entry.kind === 'question'
+          ? { kind: 'question' as const, questions: entry.dto.questions }
+          : { kind: 'plan' as const };
+    const issue = checkChannelResolution(request, resolution);
+    if (issue) throw invalid(issue.path, issue.message);
+  }
+
   /** Lo que no puede valer no se entrega: la solicitud sigue pendiente. */
   private check(entry: Entry, resolution: Resolution): void {
     if (entry.kind === 'approval' && resolution.kind === 'approval') {
@@ -333,6 +400,7 @@ export class ApprovalCenter {
   resolve(link: ApproverLink, resolution: Resolution): Promise<void> {
     const entry = this.find(resolution);
     this.authorize(link, entry);
+    if (link.channel) this.checkChannel(entry, resolution);
     this.check(entry, resolution);
     // De uno en uno por solicitud: el segundo espera a saber cómo acabó el primero.
     const attempt = entry.chain.then(() => this.deliver(link, entry, resolution));
@@ -351,12 +419,14 @@ export class ApprovalCenter {
     const route = this.opts.routeOf(entry.sessionId);
     if (!route) throw hostUnavailable();
 
-    const by: ProtocolResolver = {
-      kind: 'remote',
-      ...(link.client ? { client: link.client.kind } : {}),
-      connectionId: link.id,
-      at: this.now(),
-    };
+    const by: ProtocolResolver = link.channel
+      ? { kind: 'channel', channel: link.channel, at: this.now() }
+      : {
+          kind: 'remote',
+          ...(link.client ? { client: link.client.kind } : {}),
+          connectionId: link.id,
+          at: this.now(),
+        };
     let outcome: string;
     try {
       if (resolution.kind === 'approval') {
@@ -384,7 +454,7 @@ export class ApprovalCenter {
       }
       throw err;
     }
-    this.done(id, outcome);
+    this.done(id, outcome, by);
     // Rastro de quién resolvió qué. Sin la descripción, las respuestas ni la frase.
     log.info('pending request resolved', {
       id,
@@ -398,6 +468,7 @@ export class ApprovalCenter {
       connectionId: link.id,
       client: link.client?.kind,
       clientName: link.client?.name,
+      ...(link.channel ? { channel: link.channel } : {}),
     });
   }
 }

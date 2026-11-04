@@ -58,7 +58,9 @@ export interface ApprovalAuditRecord {
   status: 'resolved' | 'expired' | 'cancelled';
   decision: 'approve' | 'deny' | 'allow-all';
   /** Por qué vía llegó la decisión. `none` = se canceló sin que nadie decidiese. */
-  by: 'local' | 'remote' | 'timeout' | 'policy' | 'none';
+  by: 'local' | 'remote' | 'channel' | 'timeout' | 'policy' | 'none';
+  /** M18 — con `channel`: cuál (`telegram`). */
+  channel?: string;
   /** Con `remote`: lo que el cliente declaró ser y su conexión en el daemon. */
   client?: string;
   connectionId?: number;

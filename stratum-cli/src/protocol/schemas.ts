@@ -155,8 +155,9 @@ const environmentRef = z.object({
 });
 
 const resolver: z.ZodType<ProtocolResolver> = z.object({
-  kind: z.enum(['local', 'remote', 'timeout', 'policy']),
+  kind: z.enum(['local', 'remote', 'channel', 'timeout', 'policy']),
   client: clientKind.optional(),
+  channel: z.enum(['telegram']).optional(),
   connectionId: z.number().int().optional(),
   at: z.number().int().nonnegative(),
 });

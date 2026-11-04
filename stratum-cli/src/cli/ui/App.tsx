@@ -1568,9 +1568,11 @@ export function App({
   useEffect(() => {
     if (!interactions) return;
     return interactions.subscribe((change) => {
-      if (change.type !== 'resolved' || change.outcome.by?.kind !== 'remote') return;
+      const kind = change.type === 'resolved' ? change.outcome.by?.kind : undefined;
+      // M18 — también desde un chat emparejado de un canal externo.
+      if (change.type !== 'resolved' || (kind !== 'remote' && kind !== 'channel')) return;
       const { outcome } = change;
-      const who = outcome.by?.client ?? 'otro cliente';
+      const who = outcome.by?.channel ?? outcome.by?.client ?? 'otro cliente';
       if (outcome.kind === 'approval') {
         confirmResolverRef.current = null;
         if (outcome.decision === 'allow-all') allowAllRef.current = true;

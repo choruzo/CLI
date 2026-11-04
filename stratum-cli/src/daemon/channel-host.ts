@@ -30,6 +30,8 @@ import {
   type TelegramPaired,
 } from '../channels/telegram/store.js';
 import { CompanionLink, type CompanionPort } from './channel-companion.js';
+import { ChannelApprovals, type PendingSource } from './channel-approvals.js';
+import type { SessionLabel } from '../channels/telegram/render.js';
 
 const log = getLogger('channels');
 
@@ -49,6 +51,13 @@ export interface ChannelHostOptions {
    * chat y de dónde sale el espejo. Sin ella, el canal solo empareja.
    */
   companion?: CompanionPort;
+  /**
+   * Lo pendiente de todas las sesiones (parte 4): el `ApprovalCenter`. Sin él,
+   * el canal no enseña ni resuelve aprobaciones.
+   */
+  approvals?: PendingSource;
+  /** Lo que se enseña de una sesión en una tarjeta. */
+  sessionLabel?: (sessionId: string) => SessionLabel | null;
   /** Redacción de lo que sale al chat. Por defecto, ninguna (tests). */
   redact?: (text: string) => string;
   /** Ajustes del sondeo y de la salida (tests). */
@@ -78,6 +87,7 @@ export class ChannelHost {
   private channel: TelegramChannel | null = null;
   private readonly pairing: TelegramPairing;
   private readonly link: CompanionLink | null;
+  private readonly cards: ChannelApprovals | null;
 
   constructor(private readonly opts: ChannelHostOptions) {
     this.pairing = new TelegramPairing(opts.now);
@@ -92,6 +102,16 @@ export class ChannelHost {
             : {}),
         })
       : null;
+    this.cards = opts.approvals
+      ? new ChannelApprovals({
+          approvals: opts.approvals,
+          target: () => (this.channel?.state === 'running' ? this.channel : null),
+          chats: () => this.paired().map((p) => p.chatId),
+          redact: opts.redact ?? ((text) => text),
+          sessionLabel: opts.sessionLabel ?? (() => null),
+        })
+      : null;
+    this.cards?.start();
   }
 
   /** Un evento de una sesión del daemon: el espejo de la conversación del `companion`. */
@@ -113,12 +133,15 @@ export class ChannelHost {
   async reload(): Promise<ProtocolChannelsStatus> {
     await this.stopChannel();
     this.pairing.cancel();
+    // Los botones ya enviados dejan de resolver nada.
+    this.cards?.reset();
     this.load();
     return this.status();
   }
 
   async stop(): Promise<void> {
     this.link?.stop();
+    this.cards?.stop();
     this.pairing.cancel();
     await this.stopChannel();
   }
@@ -218,6 +241,7 @@ export class ChannelHost {
       offerCode: (code, who: PairingCandidate) => this.pairing.offer(code, who),
       unpair: async (userId) => this.unpair(userId),
       onText: (from, message) => this.link?.input(from.chatId, message),
+      onCallback: (_from, query) => this.cards?.onCallback(query),
       ...(this.opts.pollTimeoutSec !== undefined
         ? { pollTimeoutSec: this.opts.pollTimeoutSec }
         : {}),

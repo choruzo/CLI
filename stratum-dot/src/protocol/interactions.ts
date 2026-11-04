@@ -269,6 +269,8 @@ export function resolverLabel(resolvedBy: ProtocolResolver | null, status: strin
       return 'in its terminal';
     case 'remote':
       return resolvedBy.client === 'dot' ? 'from Stratum Dot' : `remotely (${resolvedBy.client ?? 'client'})`;
+    case 'channel':
+      return 'from Telegram';
     case 'timeout':
       return 'nobody answered in time';
     case 'policy':

@@ -141,6 +141,18 @@ export class TelegramChannel {
     this.outbox.send(chatId, message);
   }
 
+  /** Cambia el texto de un mensaje ya enviado y le quita los botones. Un fallo se registra. */
+  edit(chatId: number, messageId: number, text: string): void {
+    this.deps.api.editMessageText(chatId, messageId, text).catch((err: unknown) => {
+      log.warn('telegram edit failed', { kind: kindOf(err) });
+    });
+  }
+
+  /** Contesta a un botón pulsado (quita el reloj del botón y enseña `text`). */
+  answerCallback(id: string, text?: string): void {
+    this.deps.api.answerCallbackQuery(id, text).catch(() => undefined);
+  }
+
   /** «Escribiendo…» en el chat (dura ~5 s). Sin cola: si falla, da igual. */
   typing(chatId: number): void {
     this.deps.api.sendChatAction(chatId, 'typing').catch(() => undefined);
