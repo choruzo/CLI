@@ -2032,6 +2032,15 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   se ve en la conversación (las llamadas a `recall_decisions`); no hay vista aparte. Con esto M17 queda cerrado.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
   confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
+  *Decidido por el usuario el 2026-11-04* (sin diseño de detalle aún):
+  - **Primer canal: Telegram.**
+  - **Quién habla**: el chat se **empareja con un código que enseña Dot**; los ids permitidos se
+    guardan **solo en la config global** (un proyecto no puede añadir ninguno).
+  - **La misma sesión** que Dot: el canal es otra puerta a la conversación del `companion`, no una
+    sesión aparte.
+  - **Vive dentro del daemon** (como el `RoutineScheduler`), no como un cliente más.
+  - **Aprobaciones por Telegram**, como formularios (botones del mensaje), con la misma autoridad
+    que Dot en el equipo: §23.13 A9.
 
 ### 23.12 Fuera, por ahora
 
@@ -2106,3 +2115,16 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
   en píxeles), y declarar `vision` en otro modelo sigue funcionando, bajo la responsabilidad de
   quien lo declara. La medición de M15 se repitió quitando un artefacto del bucle: tras cada
   `pkill`, Chromium abría con la burbuja «Restore pages?» encima de la esquina superior derecha.
+- **A9. Aprobar desde Telegram** (M18). *Resuelta 2026-11-04*:
+  - **Autoridad**: el canal tiene **la misma que Dot en el equipo** (decidido por el usuario). Es un
+    aprobador: la autoridad la tiene el daemon por el canal emparejado, no el mensaje ni el bot. La
+    carrera con otro aprobador se decide igual, solo en `PendingInteractions.settle`.
+  - **De momento basta con el botón** (decidido por el usuario); los códigos o un segundo paso
+    llegan después.
+  - **Lo que nunca se aprueba desde Telegram** (decidido por Claude, por ser solo un botón, sin
+    confirmación nativa ni frase): las solicitudes `forced` (también `propose_routine`), las
+    `confirm-always` (`git push --force`), las que piden `confirmPhrase` (entornos de producción) y
+    las concesiones con caducidad (§23.13 A3). El mensaje las enseña y dice que se resuelven en Dot.
+    Denegar sí vale siempre: solo resta.
+  - **Qué enseña el mensaje**: lo mismo que la tarjeta de Dot, redactado (tool, target, resumen,
+    riesgo), sin secretos ni la salida de las tools.
