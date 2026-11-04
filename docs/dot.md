@@ -1309,11 +1309,27 @@ gobierna el daemon.
   conector no declare de solo lectura (`readOnlyTools`) pide aprobación cada vez, y esa aprobación
   sale en Dot como cualquier otra (con la concesión temporal si la sesión la admite).
 
-Pendiente (fuera de M14): que *Asistente* sea la vista de inicio y el modo compacto (PRD §23.8),
-y empezar desde Dot una conversación nueva del asistente (el perfil de Dot no tiene
-`sessions.close`).
+**Cierre de M14** (2026-11-04):
 
-Tests: `src/app/Assistant.test.tsx`, `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
+- **Vista de inicio.** Dot abre en *Asistente* (`HOME_VIEW`); la cabina es el botón *Sessions* de
+  la cabecera. Fuera del inicio, `Esc` vuelve a él y, en el inicio, oculta la ventana. `Ctrl/Cmd+N`
+  (chat nuevo) lleva a la cabina. Al conectar, la vista pide la sesión del asistente, así que
+  abrir Dot la abre en el daemon si aún no existía.
+- **Ventana estrecha** (< 720 px; la de 440 px por defecto): la vista va en pestañas
+  *Conversation · Box · Routines · Memory*, una a la vez y con la altura entera. Lo que no se ve no se
+  monta (tampoco la pantalla de la caja). *Conversation* enseña cuántas solicitudes esperan si
+  se está en otra pestaña. En ancho, todo a la vez, como antes.
+- **Conversación nueva**: botón *New conversation* sobre la conversación, con confirmación en la
+  página y solo en reposo. El nativo envía `sessions.open { agent: 'companion', fresh: true }`
+  (`dot_new_companion_conversation`, `CallAction::NewCompanionConversation`; agente y `fresh` fijos,
+  `Timings.fresh_timeout` 10 min). El daemon compacta la actual, la archiva y abre otra que hereda
+  su memoria (`docs/protocol.md` §22.1). Dot sigue sin `sessions.close`: no puede cerrar ninguna
+  sesión. Sin respuesta, «Result unknown» y se vuelve a pedir la del asistente (la que haya), sin
+  repetir la orden. El panel *Memory* enseña lo heredado aparte, en «This conversation».
+- Pendiente: el Dot compacto flotante (PRD §8.2).
+
+Tests: `src/app/Assistant.test.tsx`, `src/app/AssistantHome.test.tsx` (inicio, pestañas y
+conversación nueva), `la_caja_solo_se_consulta_arranca_o_para_y_solo_desde_dot`
 (`crates/dot-link/src/link.rs`), `tests/architecture.test.ts` y, en la ventana real,
 `e2e/assistant.e2e.mjs`: abre al asistente sin directorio del cliente, enseña la caja tal como la
 contesta el daemon (con un nombre propio y sin arrancarla), conversa con el prompt y las tools del

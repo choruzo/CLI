@@ -359,6 +359,23 @@ function ConversationMemory({ connected, sessionId }: { connected: boolean; sess
               </>
             )
           ) : null}
+          {memory?.inherited && !error ? (
+            <div className="memory-inherited" data-e2e="memory-inherited">
+              <h4 className="small">Carried over from the previous conversation</h4>
+              <p className="muted small">
+                Archived when this conversation started; read only.{' '}
+                <span className="mono">{memory.inherited.fromSessionId}</span>
+              </p>
+              {memory.inherited.summary ? <p className="memory-content small">{memory.inherited.summary}</p> : null}
+              <ul className="memory-list">
+                {memory.inherited.items.map((item) => (
+                  <li key={`${item.kind}:${item.key}`} className="memory-item small">
+                    <span className="muted">{item.kind}</span> · {item.text}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </>
       ) : null}
     </div>

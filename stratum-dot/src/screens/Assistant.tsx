@@ -12,10 +12,16 @@ import type {
   ProtocolRun,
   ProtocolSessionSnapshot,
 } from '../protocol';
-import { parseBoxScreen, parseBoxStatus, parseModels, parseOpenedSession } from '../protocol/results';
+import {
+  parseBoxScreen,
+  parseBoxStatus,
+  parseFreshConversation,
+  parseModels,
+  parseOpenedSession,
+} from '../protocol/results';
 import { activeRun, usingScreen } from '../protocol/view';
 import { useSessions } from '../stores/sessionStore';
-import { OPENING_TTL_MS, useUi } from '../stores/uiStore';
+import { OPENING_TTL_MS, useUi, type AssistantTab } from '../stores/uiStore';
 import { SessionDetail } from './SessionDetail';
 
 /** El agente embebido de Dot (M14, `docs/protocol.md` §22). */
@@ -42,6 +48,8 @@ interface Props {
 export function Assistant({ now, canControl, connected, composerRef, onBack, onOpenSession }: Props) {
   const native = useNative();
   const companionId = useUi((s) => s.companionId);
+  const tab = useUi((s) => s.assistantTab);
+  const narrow = useNarrow();
   const openedAt = useUi((s) => (s.companionId ? s.opening[s.companionId] : undefined));
   const entry = useSessions((s) => (companionId ? s.sessions[companionId] : undefined));
   const listed = useSessions((s) => s.listed);
@@ -165,26 +173,247 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
     );
   }
 
+  const snapshot = entry?.snapshot ?? null;
+  const box = (
+    <BoxPanel connected={connected} canControl={canControl} sessionId={companionId} snapshot={snapshot} />
+  );
+  const routines = <RoutinesPanel connected={connected} canControl={canControl} onOpenSession={onOpenSession} />;
+  const memory = (
+    <MemoryPanel
+      connected={connected}
+      canControl={canControl}
+      companionId={companionId}
+      snapshot={snapshot}
+      onOpenSession={onOpenSession}
+    />
+  );
+  const chat = (
+    <div className="assistant-chat">
+      {companionId ? (
+        <NewConversation
+          canControl={canControl && connected}
+          // Sin la foto de la sesión (recién abierta) no se sabe si está en reposo.
+          busy={snapshot ? activeRun(snapshot) !== null : true}
+          onOpened={(id) => {
+            const ui = useUi.getState();
+            ui.setOpening(id, Date.now());
+            ui.setCompanionId(id);
+          }}
+          onUnknown={startOver}
+        />
+      ) : null}
+      {conversation}
+    </div>
+  );
+
+  // Estrecho (la ventana de 440 px): una pestaña a la vez, para que la
+  // conversación tenga la altura entera. Lo que no se ve no se monta.
+  if (narrow) {
+    const waiting = snapshot ? snapshot.approvals.length + snapshot.questions.length + snapshot.plans.length : 0;
+    return (
+      <main className="body assistant narrow" data-tab={tab}>
+        <AssistantTabs tab={tab} waiting={waiting} onSelect={(t) => useUi.getState().setAssistantTab(t)} />
+        <div className="assistant-pane">
+          {tab === 'chat' ? chat : tab === 'box' ? box : tab === 'routines' ? routines : memory}
+        </div>
+      </main>
+    );
+  }
   return (
     <main className="body split assistant">
       <div className="assistant-side">
-        <BoxPanel
-          connected={connected}
-          canControl={canControl}
-          sessionId={companionId}
-          snapshot={entry?.snapshot ?? null}
-        />
-        <RoutinesPanel connected={connected} canControl={canControl} onOpenSession={onOpenSession} />
-        <MemoryPanel
-          connected={connected}
-          canControl={canControl}
-          companionId={companionId}
-          snapshot={entry?.snapshot ?? null}
-          onOpenSession={onOpenSession}
-        />
+        {box}
+        {routines}
+        {memory}
       </div>
-      {conversation}
+      {chat}
     </main>
+  );
+}
+
+const TABS: Array<{ id: AssistantTab; label: string }> = [
+  { id: 'chat', label: 'Conversation' },
+  { id: 'box', label: 'Box' },
+  { id: 'routines', label: 'Routines' },
+  { id: 'memory', label: 'Memory' },
+];
+
+function AssistantTabs({
+  tab,
+  waiting,
+  onSelect,
+}: {
+  tab: AssistantTab;
+  /** Lo que el asistente espera de la persona: se avisa en *Conversation* aunque no se vea. */
+  waiting: number;
+  onSelect(tab: AssistantTab): void;
+}) {
+  return (
+    <nav className="tabs assistant-tabs" role="tablist" aria-label="Assistant">
+      {TABS.map((t) => (
+        <button
+          key={t.id}
+          type="button"
+          role="tab"
+          aria-selected={tab === t.id}
+          className="tab"
+          onClick={() => onSelect(t.id)}
+        >
+          {t.label}
+          {t.id === 'chat' && waiting > 0 && tab !== 'chat' ? (
+            <span className="count" aria-label={`${waiting} waiting for you`}>
+              {' '}
+              {waiting}
+            </span>
+          ) : null}
+        </button>
+      ))}
+    </nav>
+  );
+}
+
+/** Por debajo de este ancho no caben la conversación y los paneles a la vez (como en `styles.css`). */
+export const NARROW_QUERY = '(max-width: 719px)';
+
+/** ¿La ventana es estrecha? Sin `matchMedia` (tests), ancha. */
+function useNarrow(): boolean {
+  const [narrow, setNarrow] = useState(() => mediaQuery()?.matches ?? false);
+  useEffect(() => {
+    const query = mediaQuery();
+    if (!query) return;
+    const update = () => setNarrow(query.matches);
+    update();
+    query.addEventListener('change', update);
+    return () => query.removeEventListener('change', update);
+  }, []);
+  return narrow;
+}
+
+function mediaQuery(): MediaQueryList | null {
+  return typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+    ? window.matchMedia(NARROW_QUERY)
+    : null;
+}
+
+/**
+ * Cierre de M14 — empezar una conversación nueva con el asistente (§22.1 del
+ * protocolo). Explícito y confirmado en la página: el daemon compacta la actual
+ * a su memoria, la archiva y abre otra que hereda lo que recordaba. Solo en
+ * reposo. Sin estado optimista: lo que se pinta es lo que contesta el daemon.
+ */
+function NewConversation({
+  canControl,
+  busy,
+  onOpened,
+  onUnknown,
+}: {
+  canControl: boolean;
+  /** Hay un run en curso: el daemon lo rechazaría. */
+  busy: boolean;
+  onOpened(sessionId: string): void;
+  /** Sin respuesta: se vuelve a pedir la del asistente, que es la que haya. */
+  onUnknown(): void;
+}) {
+  const native = useNative();
+  const [confirming, setConfirming] = useState(false);
+  const [sending, setSending] = useState(false);
+  const [message, setMessage] = useState<{ text: string; tone: 'info' | 'error' } | null>(null);
+  const alive = useRef(true);
+  useEffect(() => {
+    alive.current = true;
+    return () => {
+      alive.current = false;
+    };
+  }, []);
+
+  const start = async () => {
+    setSending(true);
+    setMessage(null);
+    try {
+      const result = parseFreshConversation(await native.newCompanionConversation());
+      if (!alive.current) return;
+      if (!result) {
+        setMessage({ text: 'The daemon answered in a way this version of Dot cannot read.', tone: 'error' });
+        return;
+      }
+      setConfirming(false);
+      setMessage({
+        text: result.archived
+          ? result.archived.memoryCarried
+            ? 'New conversation. The previous one was archived, and what it remembered was carried over.'
+            : 'New conversation. The previous one was archived; there was nothing to carry over.'
+          : 'New conversation.',
+        tone: 'info',
+      });
+      onOpened(result.session.id);
+    } catch (err) {
+      if (!alive.current) return;
+      const error = toCommandError(err);
+      if (error.kind === 'unknown') {
+        setConfirming(false);
+        setMessage({
+          text: 'Result unknown: the daemon did not answer in time. Showing whichever conversation is current.',
+          tone: 'error',
+        });
+        onUnknown();
+        return;
+      }
+      setMessage({ text: describeCommandError(error), tone: 'error' });
+    } finally {
+      if (alive.current) setSending(false);
+    }
+  };
+
+  return (
+    <div className="new-conversation" data-e2e="new-conversation">
+      {confirming ? (
+        <div className="confirm-inline" role="group" aria-label="Start a new conversation">
+          <p className="small">
+            Start a new conversation? This one is summarized into the assistant&apos;s memory and archived; the new one
+            starts with what it remembered. What the assistant remembers for good is not affected.
+          </p>
+          <div className="controls">
+            <button
+              type="button"
+              className="btn primary small"
+              disabled={!canControl || busy || sending}
+              onClick={() => void start()}
+            >
+              {sending ? 'Summarizing…' : 'Start new conversation'}
+            </button>
+            <button type="button" className="btn ghost small" disabled={sending} onClick={() => setConfirming(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : (
+        <button
+          type="button"
+          className="btn ghost small"
+          disabled={!canControl || busy}
+          title={busy ? 'Wait until the assistant finishes' : 'Archive this conversation and start another'}
+          onClick={() => {
+            setMessage(null);
+            setConfirming(true);
+          }}
+        >
+          New conversation
+        </button>
+      )}
+      {sending ? (
+        <p className="pending small" role="status">
+          Summarizing this conversation… This calls the memory model and can take a minute.
+        </p>
+      ) : null}
+      {message ? (
+        <p
+          className={`note small ${message.tone === 'error' ? 'bad' : ''}`}
+          role={message.tone === 'error' ? 'alert' : 'status'}
+        >
+          {message.text}
+        </p>
+      ) : null}
+    </div>
   );
 }
 

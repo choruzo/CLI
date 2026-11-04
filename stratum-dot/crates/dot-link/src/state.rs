@@ -251,6 +251,10 @@ pub enum CallAction {
     MemoryDecisions { query: Option<String> },
     /// M17 — `memory.forget` del asistente: borrar una decisión por su id.
     MemoryForget { decision_id: String },
+    /// Cierre de M14 — conversación nueva del asistente: `sessions.open` con
+    /// `agent: 'companion'` y `fresh: true`, fijados aquí. El daemon compacta y
+    /// archiva la actual; el webview no elige agente ni puede cerrar otra sesión.
+    NewCompanionConversation,
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -307,6 +311,7 @@ impl CallAction {
             CallAction::GrantsRevoke { .. } => "grants-revoke",
             CallAction::MemoryDecisions { .. } => "memory-decisions",
             CallAction::MemoryForget { .. } => "memory-forget",
+            CallAction::NewCompanionConversation => "new-companion-conversation",
         }
     }
 
@@ -326,6 +331,7 @@ impl CallAction {
                 | CallAction::RoutinesRun { .. }
                 | CallAction::GrantsRevoke { .. }
                 | CallAction::MemoryForget { .. }
+                | CallAction::NewCompanionConversation
         )
     }
 }

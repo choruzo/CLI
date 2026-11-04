@@ -145,6 +145,8 @@ try {
     assert.equal(daemonRunning(), false);
     session = await Session.create(`http://127.0.0.1:${port}`, APP);
     await session.waitForElement('.top', { timeout: 30_000 });
+    // Dot abre en el asistente (su inicio): esta prueba es de la cabina.
+    await session.clickButton('Sessions');
     await until('conectado', async () => (await connection()) === 'connected', 40_000);
     assert.equal(daemonRunning(), true);
     assert.ok(await hasText('No live sessions'));
@@ -164,7 +166,8 @@ try {
     assert.match(row, /mock-model/);
     assert.match(row, /cli \(peer\)/);
     assert.ok(row.toLowerCase().includes(project.toLowerCase()), row);
-    assert.ok(await hasText('1 session'));
+    // El contador de la cabecera (a 440 px no se pinta: la lista ya lo dice).
+    assert.equal(await session.execute(`return document.querySelector('.top-count')?.textContent`), '1 session');
     await shot('sesion-en-marcha');
   });
 

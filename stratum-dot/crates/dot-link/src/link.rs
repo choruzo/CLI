@@ -87,6 +87,9 @@ pub struct Timings {
     pub open_timeout: Duration,
     /// M14 — arrancar la caja: la primera vez construye su imagen (minutos).
     pub box_timeout: Duration,
+    /// Cierre de M14 — conversación nueva del asistente: compactar la actual
+    /// llama al modelo de memoria, una o varias veces.
+    pub fresh_timeout: Duration,
     pub handshake_timeout: Duration,
     /// Cuánto se espera a que el daemon recién arrancado atienda.
     pub daemon_start_wait: Duration,
@@ -103,6 +106,7 @@ impl Default for Timings {
             request_timeout: Duration::from_secs(10),
             open_timeout: Duration::from_secs(90),
             box_timeout: Duration::from_secs(20 * 60),
+            fresh_timeout: Duration::from_secs(10 * 60),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
             idle_poll: Duration::from_secs(2),
@@ -1038,6 +1042,10 @@ fn call_request(
             }
             Ok((MainMethod::MemoryDecisions, Value::Object(params)))
         }
+        CallAction::NewCompanionConversation => Ok((
+            MainMethod::SessionsOpen,
+            json!({ "agent": "companion", "fresh": true, "operationId": operation_id }),
+        )),
         CallAction::MemoryForget { decision_id } => {
             if !valid_id(decision_id) {
                 return Err(invalid("Invalid decision id."));
@@ -2112,6 +2120,7 @@ impl Actor {
                             CallAction::BoxStart | CallAction::BoxStop => {
                                 self.cfg.timings.box_timeout
                             }
+                            CallAction::NewCompanionConversation => self.cfg.timings.fresh_timeout,
                             _ => self.cfg.timings.request_timeout,
                         };
                         conn.request_within(
@@ -2439,6 +2448,16 @@ mod tests {
         }
         assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryDecisions));
         assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryForget));
+
+        // Cierre de M14: la conversación nueva fija agente y `fresh`, y cambia algo.
+        let fresh = CallAction::NewCompanionConversation;
+        let (method, params) = call_request(&fresh, "op-9").unwrap();
+        assert_eq!(method, MainMethod::SessionsOpen);
+        assert_eq!(
+            params,
+            json!({ "agent": "companion", "fresh": true, "operationId": "op-9" })
+        );
+        assert!(fresh.mutating());
 
         // Solo la consulta no cambia nada.
         assert!(!CallAction::RoutinesList.mutating());

@@ -207,6 +207,7 @@ export function fakeNative(): FakeNative {
     grantsRevoke: vi.fn(async (): Promise<unknown> => ({ grant: {} })),
     memoryDecisions: vi.fn(async (_query?: string): Promise<unknown> => ({ decisions: [] })),
     memoryForget: vi.fn(async (_decisionId: string): Promise<unknown> => ({ removed: true })),
+    newCompanionConversation: vi.fn(async (): Promise<unknown> => ({})),
     sessionMemory: vi.fn(
       async (_sessionId: string): Promise<unknown> => ({
         memory: { version: 1, updatedAt: null, summary: null, items: [], sourceCursor: null },
@@ -233,7 +234,10 @@ export function fakeNative(): FakeNative {
   return native;
 }
 
-/** Deja los stores como al arrancar. */
+/**
+ * Deja los stores como al arrancar, salvo la vista: los tests parten de la
+ * cabina (`sessions`); que Dot arranque en el asistente lo prueba `App.test`.
+ */
 export function resetStores(): void {
   useConnection.setState({ state: { kind: 'starting' }, info: null, lastServerVersion: null });
   useSessions.getState().reset();
@@ -250,6 +254,7 @@ export function resetStores(): void {
     opening: {},
     notices: {},
     view: 'sessions',
+    assistantTab: 'chat',
     companionId: null,
     focusItem: null,
     resolutions: {},

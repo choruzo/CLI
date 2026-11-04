@@ -34,6 +34,7 @@ export function SessionRow({ sessionId, entry, selected, now, onSelect }: Props)
     <button
       type="button"
       className="row"
+      data-agent={session.agent ?? undefined}
       aria-current={selected || undefined}
       aria-label={`Session ${session.title || session.id}, ${status}`}
       onClick={onSelect}

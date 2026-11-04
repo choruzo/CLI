@@ -20,6 +20,15 @@ export type SessionTab = 'chat' | 'activity';
  */
 export type MainView = 'assistant' | 'sessions' | 'human-input';
 
+/** La pantalla de inicio (PRD de Dot §23.8): el asistente. La cabina es la otra. */
+export const HOME_VIEW: MainView = 'assistant';
+
+/**
+ * Qué se enseña de la vista *Asistente* en una ventana estrecha (< 720 px),
+ * donde no caben a la vez la conversación y los paneles. En ancho, todo.
+ */
+export type AssistantTab = 'chat' | 'box' | 'routines' | 'memory';
+
 /**
  * Lo que la interfaz sabe de una resolución que **ella** envió. No es el
  * estado de la solicitud —ese es la foto y su `*.resolved`—: sirve para decir
@@ -107,6 +116,8 @@ interface UiStore {
   opening: Record<string, number>;
   notices: Record<string, Notice>;
   view: MainView;
+  /** La pestaña de la vista *Asistente* en estrecho. Solo en memoria. */
+  assistantTab: AssistantTab;
   /**
    * M14 — la sesión del asistente (`companion`) que dio el daemon al abrirla.
    * Solo en memoria: al volver a abrir Dot se pide otra vez, y el daemon
@@ -121,6 +132,7 @@ interface UiStore {
   /** Abre el centro de aprobaciones, opcionalmente en esa solicitud. */
   openHumanInput(itemId?: string | null): void;
   setView(view: MainView): void;
+  setAssistantTab(tab: AssistantTab): void;
   setCompanionId(id: string | null): void;
   setResolution(id: string, resolution: Omit<Resolution, 'at'> | null): void;
   setTab(tab: SessionTab): void;
@@ -150,12 +162,14 @@ export const useUi = create<UiStore>((set) => ({
   sends: {},
   opening: {},
   notices: {},
-  view: 'sessions',
+  view: HOME_VIEW,
+  assistantTab: 'chat',
   companionId: null,
   focusItem: null,
   resolutions: {},
   openHumanInput: (itemId = null) => set({ view: 'human-input', focusItem: itemId }),
   setView: (view) => set({ view, focusItem: null }),
+  setAssistantTab: (assistantTab) => set({ assistantTab }),
   setCompanionId: (id) => set({ companionId: id }),
   setResolution: (id, resolution) =>
     set((prev) => ({

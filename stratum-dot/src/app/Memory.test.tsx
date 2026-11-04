@@ -312,6 +312,30 @@ describe('This conversation', () => {
     expect(native.calls.sessionMemory).toHaveBeenCalledTimes(1);
   });
 
+  it('lo heredado de la conversación anterior, aparte y en solo lectura', async () => {
+    const native = fakeNative();
+    native.calls.sessionMemory.mockResolvedValue({
+      memory: {
+        ...memory,
+        inherited: {
+          fromSessionId: 'ses_20261101_old001',
+          archivedAt: 1,
+          summary: 'Earlier we talked about the trip.',
+          items: [
+            { kind: 'fact', key: 'pet', text: 'The dog is Toby', origin: { sessionId: 'ses_20261101_old001', sourceCount: 1 } },
+          ],
+        },
+      },
+    });
+    await withPanel(native, { companion: true });
+    await waitFor(() => expect(useUi.getState().companionId).toBe(NEW_SID));
+    fireEvent.click(within(panel()).getByRole('button', { name: 'Show' }));
+    await waitFor(() => expect(panel().textContent).toContain('Carried over from the previous conversation'));
+    expect(panel().textContent).toContain('Earlier we talked about the trip.');
+    expect(panel().textContent).toContain('The dog is Toby');
+    expect(panel().textContent).toContain('ses_20261101_old001');
+  });
+
   it('una respuesta inválida se avisa', async () => {
     const native = fakeNative();
     native.calls.sessionMemory.mockResolvedValue({ memory: 7 });

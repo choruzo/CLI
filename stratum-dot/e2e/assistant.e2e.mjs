@@ -6,6 +6,10 @@
  *             → un exec fuera de la caja se veta sin pedir aprobación
  *             → panel de la caja con lo que contesta el daemon
  *             → Quit Dot → reiniciar el daemon → abrir Dot → la misma conversación
+ *             → New conversation: la actual se compacta y archiva, la nueva hereda
+ *
+ * Dot arranca en el asistente (su vista de inicio) y, a 440 px, enseña la
+ * conversación y los paneles en pestañas.
  *
  *   (en stratum-cli)  npm run build
  *   (en stratum-dot)  npx tauri build --debug --no-bundle
@@ -80,6 +84,15 @@ if (WINDOWS) {
 delete env.STRATUM_NO_DAEMON;
 
 const mock = await startMockLlm(({ said, last }) => {
+  // El modelo de memoria de sesión (M11), al compactar para archivar (`said` va en minúsculas).
+  if (said.startsWith('you maintain the structured memory')) {
+    const id = /\[(e\d+) user\]\n¿quién eres\?/.exec(said)?.[1];
+    return text(
+      JSON.stringify({ items: id ? [{ kind: 'fact', key: 'asked-identity', text: 'The user asked who the assistant is.', sources: [id] }] : [] }),
+      400,
+    );
+  }
+  if (said.startsWith('you keep the running summary')) return text('The user met the assistant and asked it to look at their files.', 400);
   if (last.role === 'tool') return text('No puedo salir de mi caja.', 60);
   if (said.includes('mira mis ficheros')) return toolCall('exec', { command: 'dir C:\\Users', target: 'local' });
   if (said.includes('quién eres')) return text('Soy tu asistente.', 60);
@@ -164,9 +177,15 @@ const sessionIds = () => {
   return JSON.parse(r.stdout || '{}').sessions ?? [];
 };
 
+/** A 440 px la vista va en pestañas: enseña la que se pide (sin pestañas, ya se ve todo). */
+async function showTab(label) {
+  const tabbed = await session.execute(`return !!document.querySelector('.assistant-tabs')`);
+  if (tabbed) await session.clickButton(label);
+}
+
 async function openAssistant() {
   await session.clickButton('Assistant');
-  await session.waitForElement('.box-panel');
+  await showTab('Conversation');
   await session.waitForElement('.assistant .messages', { timeout: 40_000 });
 }
 
@@ -182,11 +201,13 @@ const lastRequest = () => mock.requests.at(-1);
 let companionPs;
 
 try {
-  await check('la vista Asistente abre la sesión del companion en el daemon, sin directorio del cliente', async () => {
+  await check('Dot abre en el asistente, que abre la sesión del companion en el daemon, sin directorio del cliente', async () => {
     assert.equal(daemonRunning(), false);
     assert.equal(cli(['daemon', 'start']).status, 0);
     await openDot();
-    await openAssistant();
+    // La vista de inicio: sin pulsar nada.
+    await session.waitForElement('.assistant .messages', { timeout: 40_000 });
+    assert.equal(await session.execute(`return document.querySelector('.top button[aria-pressed="true"]')?.textContent`), 'Assistant');
     assert.equal(await session.execute(`return document.querySelector('.assistant .detail.session')?.getAttribute('data-host')`), 'daemon');
     const listed = await until('el daemon publica la sesión', async () => {
       const all = sessionIds();
@@ -200,6 +221,7 @@ try {
   });
 
   await check('el panel de la caja enseña lo que contesta el daemon', async () => {
+    await showTab('Box');
     await until('estado de la caja', async () => (await boxState()) !== 'unknown', 30_000);
     const state = await boxState();
     // Con Docker o Podman, la caja no existe aún; sin runtime, no está disponible.
@@ -211,6 +233,7 @@ try {
       assert.equal(await session.execute(`return [...document.querySelectorAll('.box-panel button')].some((b) => b.textContent === 'Start box' && !b.disabled)`), true);
     }
     await shot('caja');
+    await showTab('Conversation');
   });
 
   await check('conversar: responde, con el prompt y las tools del companion', async () => {
@@ -242,7 +265,7 @@ try {
   });
 
   await check('volver a la cabina y al asistente: la misma conversación', async () => {
-    await session.clickButton('Assistant');
+    await session.clickButton('Sessions');
     await session.waitForElement('.row[aria-label^="Session"]');
     await openAssistant();
     assert.equal((await transcript()).filter(([kind]) => kind === 'user').length, 2);
@@ -266,6 +289,35 @@ try {
     await until('otro turno', async () => (await transcript()).at(-1)?.[1] === 'Vale.', 30_000);
     assert.match(JSON.stringify(lastRequest().messages), /quién eres/);
     await shot('reabierto');
+  });
+
+  await check('conversación nueva: la actual se compacta y archiva, y la nueva hereda lo que recordaba', async () => {
+    await session.clickButton('New conversation');
+    // Nada sale sin confirmar en la página.
+    assert.equal(sessionIds()[0].id, companionPs.id);
+    await session.clickButton('Start new conversation');
+    await session.waitForText('what it remembered was carried over', { timeout: 60_000 });
+    const now = await until('la sesión nueva', async () => {
+      const all = sessionIds();
+      return all.length === 1 && all[0].id !== companionPs.id ? all : null;
+    }, 30_000);
+    assert.match(JSON.stringify(now[0]), /companion/);
+    // La archivada sigue en disco, fuera de la lista.
+    assert.ok(existsSync(join(home, '.stratum', 'daemon', 'sessions', 'archived', companionPs.id, 'conversation.jsonl')));
+    await until('la conversación vacía', async () => (await transcript()).length === 0, 20_000);
+    await say('hola de nuevo');
+    await until('respuesta en la nueva', async () => (await idle()) && (await transcript()).at(-1)?.[1] === 'Vale.', 30_000);
+    const system = JSON.stringify(lastRequest().messages.filter((m) => m.role === 'system'));
+    assert.match(system, /From the previous conversation/);
+    assert.match(system, /asked it to look at their files/);
+    // La conversación vieja ya no va literal.
+    assert.doesNotMatch(JSON.stringify(lastRequest().messages.filter((m) => m.role === 'user')), /quién eres/);
+    // El panel de memoria lo enseña aparte.
+    await showTab('Memory');
+    await session.clickButton('Show');
+    await session.waitForText('Carried over from the previous conversation', { timeout: 20_000 });
+    await shot('conversacion-nueva');
+    await showTab('Conversation');
   });
 
   await check('la memoria del companion es la suya, aparte de la global', async () => {

@@ -317,6 +317,16 @@ pub async fn dot_memory_forget(
         .await
 }
 
+/// Cierre de M14 — conversación nueva del asistente: el daemon compacta la
+/// actual, la archiva y abre otra que hereda su memoria. Agente y `fresh` los
+/// fija el nativo; sin respuesta queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn dot_new_companion_conversation(
+    state: State<'_, DotState>,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::NewCompanionConversation).await
+}
+
 /// M17 — la memoria de sesión (M11) de una conversación, en solo lectura.
 #[tauri::command]
 pub async fn dot_session_memory(

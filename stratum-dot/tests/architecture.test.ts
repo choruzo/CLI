@@ -165,6 +165,7 @@ const COMMANDS = [
   'dot_list_models',
   'dot_memory_decisions',
   'dot_memory_forget',
+  'dot_new_companion_conversation',
   'dot_notify_routine',
   'dot_open_session',
   'dot_pause_run',

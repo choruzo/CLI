@@ -1970,6 +1970,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   `ssh:` se veta en `preflight` (escenario adversarial en `evals/`); lo que recuerda no aparece
   en Desktop ni lo de Desktop en él (test de memoria por preset); el `assistant` de Desktop no
   cambia; y la documentación de decisiones está actualizada.
+  *Cierre 2026-11-04* (`docs/dot.md` §17, `docs/protocol.md` §22.1): *Asistente* es la vista de
+  inicio; a 440 px va en pestañas; y una conversación nueva es explícita desde Dot
+  (`sessions.open { fresh: true }`): la actual se compacta a su memoria de sesión y se archiva, y la
+  nueva hereda esa memoria (decidido por el usuario: «compactarla y archivarla, para que no empiece
+  de cero»; solo la inmediata, que ya incluye lo que esta había heredado).
 - **M15 — Computer use en la caja.** Tools `screen_*`, formato de coordenadas por modelo, poda de
   capturas, capturas fuera de traza y logs, pantalla en vivo en Dot con indicador. *Hecho cuando*:
   las tres tareas de §23.9, ejecutadas por las tools reales, salen al menos 8 de 10 veces cada una

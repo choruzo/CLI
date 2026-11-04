@@ -116,6 +116,7 @@ pub fn run() {
             commands::dot_grants_revoke,
             commands::dot_memory_decisions,
             commands::dot_memory_forget,
+            commands::dot_new_companion_conversation,
             commands::dot_session_memory,
             commands::dot_notify_routine,
             commands::dot_approver_status,

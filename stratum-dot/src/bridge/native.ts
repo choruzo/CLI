@@ -251,6 +251,11 @@ export interface NativeBridge {
   memoryForget(decisionId: string): Promise<unknown>;
   /** M17 — la memoria de sesión de una conversación (solo lectura). */
   sessionMemory(sessionId: string): Promise<unknown>;
+  /**
+   * Cierre de M14 — conversación nueva del asistente: el daemon compacta y
+   * archiva la actual. Agente y `fresh` los fija el nativo. Sin respuesta, `unknown`.
+   */
+  newCompanionConversation(): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
@@ -328,6 +333,7 @@ export const tauriBridge: NativeBridge = {
   memoryDecisions: (query) => invoke<unknown>('dot_memory_decisions', { query: query ?? null }),
   memoryForget: (decisionId) => invoke<unknown>('dot_memory_forget', { decisionId }),
   sessionMemory: (sessionId) => invoke<unknown>('dot_session_memory', { sessionId }),
+  newCompanionConversation: () => invoke<unknown>('dot_new_companion_conversation'),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),

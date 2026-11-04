@@ -32,6 +32,7 @@
     "allow-dot-grants-revoke",
     "allow-dot-memory-decisions",
     "allow-dot-memory-forget",
+    "allow-dot-new-companion-conversation",
     "allow-dot-session-memory",
     "allow-dot-notify-routine",
     "allow-dot-approver-status",

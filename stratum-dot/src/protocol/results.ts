@@ -22,6 +22,17 @@ export function parseOpenedSession(raw: unknown): ProtocolSession | null {
   return parsed.success ? parsed.data.session : null;
 }
 
+/**
+ * Cierre de M14 — conversación nueva del asistente: la sesión nueva y, si la
+ * hubo, la que se archivó (y si su memoria pasó a la nueva).
+ */
+export function parseFreshConversation(
+  raw: unknown,
+): { session: ProtocolSession; archived: { sessionId: string; memoryCarried: boolean } | null } | null {
+  const parsed = RESULTS['sessions.open'].safeParse(raw);
+  return parsed.success ? { session: parsed.data.session, archived: parsed.data.archived ?? null } : null;
+}
+
 export function parseStartedRun(raw: unknown): ProtocolRun | null {
   const parsed = RESULTS['runs.start'].safeParse(raw);
   return parsed.success ? parsed.data.run : null;

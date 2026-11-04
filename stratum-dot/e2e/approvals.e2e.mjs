@@ -190,6 +190,10 @@ async function openDot() {
   await startDriver();
   session = await Session.create(driverUrl, APP);
   await session.waitForElement('.top', { timeout: 30_000 });
+  // Dot abre en el asistente (su inicio), que abre su sesión al conectar.
+  // Estas pruebas son de la cabina: se pasa a ella, y las filas que cuentan
+  // dejan fuera la del asistente (`data-agent="companion"`).
+  await session.clickButton('Sessions');
   mainHandle = await wd('GET', '/window');
   await until('conectado', async () => (await session.execute(`return document.querySelector('[data-connection]')?.getAttribute('data-connection')`)) === 'connected', 40_000);
 }
@@ -225,7 +229,7 @@ async function openCenter() {
 
 async function backToSession() {
   await session.clickButton('Back to sessions');
-  if (!(await session.execute(`return !!document.querySelector('.detail.session')`))) await session.click(await session.find('.row'));
+  if (!(await session.execute(`return !!document.querySelector('.detail.session')`))) await session.click(await session.find('.row:not([data-agent="companion"])'));
   await session.waitForElement('.messages');
 }
 
@@ -342,7 +346,7 @@ try {
     await session.type(await session.find('input[aria-label="Working directory"]'), project);
     await session.type(await session.find('textarea[aria-label="First message"]'), 'borra el fichero');
     await session.clickButton('Start chat');
-    await session.waitForElement('.row[aria-label^="Session"]', { timeout: 40_000 });
+    await session.waitForElement('.row:not([data-agent="companion"])[aria-label^="Session"]', { timeout: 40_000 });
     await session.waitForElement('section[aria-label="Waiting for you"]', { timeout: 40_000 });
     assert.match(await session.execute(`return document.querySelector('section[aria-label="Waiting for you"]').innerText`), /rm victim\.txt/);
     await until('la cabecera lo cuenta', async () => (await waiting()) === 1);
@@ -497,7 +501,7 @@ try {
     // Ventana compacta: a la lista, y de ahí a la sesión del proyecto (la del plan también está).
     await session.clickButton('Back to sessions');
     await session.execute(
-      `[...document.querySelectorAll('.row')].find((r) => r.innerText.toLowerCase().includes(arguments[0].toLowerCase()))?.setAttribute('data-e2e-target', '1')`,
+      `[...document.querySelectorAll('.row:not([data-agent="companion"])')].find((r) => r.innerText.toLowerCase().includes(arguments[0].toLowerCase()))?.setAttribute('data-e2e-target', '1')`,
       project,
     );
     await session.click(await session.find('[data-e2e-target="1"]'));

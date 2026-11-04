@@ -12,7 +12,7 @@ import { Overview } from '../screens/Overview';
 import { SessionDetail } from '../screens/SessionDetail';
 import { canControl, useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
-import { OPENING_TTL_MS, useUi } from '../stores/uiStore';
+import { HOME_VIEW, OPENING_TTL_MS, useUi } from '../stores/uiStore';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useNow } from './useNow';
 
@@ -54,7 +54,11 @@ export function App() {
     [native, select],
   );
   const retry = useCallback(() => void native.retry().catch(() => undefined), [native]);
-  const newChat = useCallback(() => setComposingNew(true), [setComposingNew]);
+  // Un chat nuevo es de la cabina: desde el asistente (el inicio) también se va allí.
+  const newChat = useCallback(() => {
+    setComposingNew(true);
+    setView('sessions');
+  }, [setComposingNew, setView]);
 
   // Lo que espera a una persona, de todas las sesiones: sale de sus fotos.
   const counts = useMemo(() => {
@@ -96,8 +100,9 @@ export function App() {
         active.blur();
         return;
       }
-      if (useUi.getState().view !== 'sessions') {
-        setView('sessions');
+      // Fuera del inicio, Esc vuelve a él; en el inicio, oculta la ventana.
+      if (useUi.getState().view !== HOME_VIEW) {
+        setView(HOME_VIEW);
         return;
       }
       void native.hideWindow().catch(() => undefined);
@@ -193,9 +198,18 @@ export function App() {
           className="btn small"
           aria-pressed={view === 'assistant'}
           title="Talk to your assistant and manage its box"
-          onClick={() => setView(view === 'assistant' ? 'sessions' : 'assistant')}
+          onClick={() => setView('assistant')}
         >
           Assistant
+        </button>
+        <button
+          type="button"
+          className="btn small"
+          aria-pressed={view === 'sessions'}
+          title="Every live session of the daemon"
+          onClick={() => setView('sessions')}
+        >
+          Sessions
         </button>
         <button
           type="button"

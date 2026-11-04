@@ -140,6 +140,10 @@ async function openDot() {
   await startDriver();
   session = await Session.create(driverUrl, APP);
   await session.waitForElement('.top', { timeout: 30_000 });
+  // Dot abre en el asistente (su inicio), que abre su sesión al conectar.
+  // Estas pruebas son de la cabina: se pasa a ella, y las filas que cuentan
+  // dejan fuera la del asistente (`data-agent="companion"`).
+  await session.clickButton('Sessions');
   await until('conectado', async () => (await connection()) === 'connected', 40_000);
 }
 
@@ -166,7 +170,7 @@ try {
     assert.equal(cli(['daemon', 'start']).status, 0);
     await openDot();
     assert.equal(daemonRunning(), true);
-    assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 0);
+    assert.equal(await session.execute(`return document.querySelectorAll('.row:not([data-agent="companion"])').length`), 0);
     await shot('sin-sesiones');
   });
 
@@ -183,8 +187,8 @@ try {
     await session.clickButton('Start chat');
 
     // La sesión aparece en la lista porque el daemon la publica: alojada en el daemon.
-    await session.waitForElement('.row[aria-label^="Session"]', { timeout: 40_000 });
-    const row = await session.execute(`return document.querySelector('.row').innerText`);
+    await session.waitForElement('.row:not([data-agent="companion"])[aria-label^="Session"]', { timeout: 40_000 });
+    const row = await session.execute(`return document.querySelector('.row:not([data-agent="companion"])').innerText`);
     assert.match(row, /daemon/);
     assert.ok(row.toLowerCase().includes(project.toLowerCase()), row);
     assert.equal(await session.execute(`return document.querySelector('.detail.session')?.getAttribute('data-host')`), 'daemon');
@@ -215,7 +219,7 @@ try {
   await check('segundo mensaje: misma sesión, mismo contexto', async () => {
     await say('¿qué dice el fichero?', 'Send message');
     await until('la respuesta', async () => (await transcript()).at(-1)?.[1] === 'Dice hola.', 30_000);
-    assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 1);
+    assert.equal(await session.execute(`return document.querySelectorAll('.row:not([data-agent="companion"])').length`), 1);
     const context = JSON.stringify(mock.requests.at(-1).messages);
     assert.match(context, /crea hello\.txt con hola/);
     assert.match(context, /qué dice el fichero/);
@@ -254,10 +258,10 @@ try {
 
   await check('abrir Dot otra vez: la sesión aparece y el chat se reconstruye entero', async () => {
     await openDot();
-    await session.waitForElement('.row[aria-label^="Session"]', { timeout: 40_000 });
+    await session.waitForElement('.row:not([data-agent="companion"])[aria-label^="Session"]', { timeout: 40_000 });
     // La última sesión seleccionada se recuerda; si no, se elige.
     if (!(await session.execute(`return !!document.querySelector('.detail.session')`))) {
-      await session.click(await session.find('.row'));
+      await session.click(await session.find('.row:not([data-agent="companion"])'));
     }
     await session.waitForElement('.messages');
     await until('el run que seguía solo termina', async () => (await idle()) && (await transcript()).at(-1)?.[1] === SLOW_WORDS, 60_000);
@@ -274,7 +278,7 @@ try {
     await say('gracias', 'Send message');
     await until('otro turno', async () => (await transcript()).at(-1)?.[1] === 'Vale.', 30_000);
     assert.match(JSON.stringify(mock.requests.at(-1).messages), /crea hello\.txt con hola/);
-    assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 1);
+    assert.equal(await session.execute(`return document.querySelectorAll('.row:not([data-agent="companion"])').length`), 1);
   });
 
   await check('el daemon se reinicia: sin él no se escribe; al volver, el chat sigue (M11)', async () => {
@@ -292,7 +296,7 @@ try {
     await until('conectado otra vez', async () => (await connection()) === 'connected');
     assert.notEqual(endpoint().pid, pid);
     await until('se puede escribir', async () => (await composer())?.disabled === false, 40_000);
-    assert.equal(await session.execute(`return document.querySelectorAll('.row').length`), 1);
+    assert.equal(await session.execute(`return document.querySelectorAll('.row:not([data-agent="companion"])').length`), 1);
     await until('la conversación vuelve', async () =>
       (await transcript()).filter(([kind]) => kind === 'user').map(([, t]) => t).includes('crea hello.txt con hola'),
     );

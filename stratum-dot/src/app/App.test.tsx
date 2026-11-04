@@ -1,6 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NativeProvider } from '../bridge/context';
+import { useUi } from '../stores/uiStore';
 import { App } from './App';
 import { ErrorBoundary } from './ErrorBoundary';
 import {
@@ -280,13 +281,16 @@ describe('conexión', () => {
 });
 
 describe('teclado y resistencia', () => {
-  it('Ctrl+K lleva al campo de steering; Esc lo suelta y, después, oculta la ventana', () => {
+  it('Ctrl+K lleva al campo de steering; Esc lo suelta, vuelve al inicio y, después, oculta la ventana', () => {
     const native = running();
     const input = screen.getByRole('textbox', { name: /Steer this run/ });
     fireEvent.keyDown(window, { key: 'k', ctrlKey: true });
     expect(document.activeElement).toBe(input);
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(document.activeElement).not.toBe(input);
+    // Desde la cabina, Esc vuelve al inicio (el asistente); ahí, oculta.
+    fireEvent.keyDown(window, { key: 'Escape' });
+    expect(useUi.getState().view).toBe('assistant');
     expect(native.calls.hideWindow).not.toHaveBeenCalled();
     fireEvent.keyDown(window, { key: 'Escape' });
     expect(native.calls.hideWindow).toHaveBeenCalledTimes(1);

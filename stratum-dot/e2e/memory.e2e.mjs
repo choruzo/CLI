@@ -225,7 +225,14 @@ async function openAssistant() {
   );
 }
 
+/** A 440 px la vista Asistente va en pestañas: enseña la que se pide (sin pestañas, ya se ve todo). */
+async function showTab(label) {
+  const tabbed = await session.execute(`return !!document.querySelector('.assistant-tabs')`);
+  if (tabbed) await session.clickButton(label);
+}
+
 async function say(textToSend) {
+  await showTab('Conversation');
   const before = await userMessages();
   const field = await session.find('.assistant .composer textarea');
   await session.type(field, textToSend);
@@ -248,6 +255,7 @@ try {
     assert.equal(cli(['daemon', 'start']).status, 0);
     await openDot();
     await openAssistant();
+    await showTab('Memory');
     const [seeded] = await until('la decisión sembrada', async () => {
       const r = await rows();
       return r.length === 1 ? r : null;
@@ -269,6 +277,7 @@ try {
     await until('fin del turno', async () => await idle(), TURN_MS);
     const tools = (await transcript()).filter(([kind]) => kind === 'tool').map(([, t]) => t).join('\n');
     assert.match(tools, /store_decision/, `el modelo no llamó a store_decision: ${JSON.stringify(await transcript())}`);
+    await showTab('Memory');
     const fresh = await until('la decisión nueva en el panel', async () => {
       const r = await rows();
       return r.find((x) => x.id !== 'dec_20261101_seed01') ?? null;

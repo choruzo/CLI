@@ -27,6 +27,7 @@ const COMMANDS: &[&str] = &[
     "dot_grants_revoke",
     "dot_memory_decisions",
     "dot_memory_forget",
+    "dot_new_companion_conversation",
     "dot_session_memory",
     "dot_notify_routine",
     "dot_approver_status",

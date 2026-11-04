@@ -123,6 +123,24 @@ p {
   color: var(--muted);
   white-space: nowrap;
 }
+.top h1 {
+  white-space: nowrap;
+}
+/* En estrecho no cabe todo: la versión del daemon ya está en el pie y las
+   sesiones, en *Sessions*. Los botones se quedan a la derecha. */
+@media (max-width: 719px) {
+  .top {
+    gap: 0.5rem;
+  }
+  .top-status {
+    margin-right: auto;
+    white-space: nowrap;
+  }
+  .top-status .muted,
+  .top-count {
+    display: none;
+  }
+}
 
 .body {
   flex: 1;
@@ -168,26 +186,70 @@ p {
   }
 }
 
-/* M14 — el asistente: su caja a la izquierda; en compacto, encima de la conversación. */
-@media (max-width: 719px) {
-  .body.split.assistant {
-    grid-template-rows: auto 1fr;
-  }
-  .shell[data-detail] .assistant-side {
-    display: block;
-    max-height: 40vh;
-    border-bottom: 1px solid var(--line);
-  }
-}
-
-/* M16 — a la izquierda del asistente, su caja y sus rutinas, una debajo de otra. */
+/* M14/M16 — a la izquierda del asistente, su caja, sus rutinas y su memoria. */
 .body.split.assistant {
   grid-template-columns: minmax(300px, 400px) 1fr;
 }
-@media (max-width: 719px) {
-  .body.split.assistant {
-    grid-template-columns: 1fr;
-  }
+.assistant-chat {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  overflow: hidden;
+}
+.assistant-chat > .detail {
+  flex: 1;
+  min-height: 0;
+}
+.new-conversation {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.4rem;
+  padding: 0.4rem 0.75rem 0;
+}
+.new-conversation .confirm-inline {
+  flex: 1 1 100%;
+}
+.new-conversation .note,
+.new-conversation .pending {
+  flex: 1 1 100%;
+  margin: 0;
+}
+
+/* Cierre de M14 — en estrecho, una pestaña a la vez: la conversación tiene la altura entera. */
+.body.assistant.narrow {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.assistant-tabs {
+  margin: 0;
+  padding: 0 0.5rem;
+  flex: none;
+}
+.assistant-tabs .count {
+  color: var(--accent);
+  font-weight: 600;
+}
+.assistant-pane {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+}
+.assistant-pane > .assistant-chat {
+  flex: 1;
+}
+.assistant-pane > .overview,
+.assistant-pane > .memory-panel {
+  border-right: 0;
+  border-top: 0;
+}
+.body.assistant.narrow .detail .back {
+  display: none;
 }
 .assistant-side {
   overflow: auto;
