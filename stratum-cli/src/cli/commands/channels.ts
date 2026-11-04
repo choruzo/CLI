@@ -77,7 +77,7 @@ export function formatTelegramStatus(state: TelegramFileState, enabled: boolean)
       lines.push(`Telegram: bot @${pub.bot.username} — ${enabled ? 'enabled' : 'disabled'}`);
       if (pub.paired.length === 0) {
         lines.push(
-          '  paired:  none yet (pair a chat from Dot → Settings → Telegram, or "stratum channels telegram pair")',
+          '  paired:  none yet (pair a chat from Dot → Assistant → Telegram, or "stratum channels telegram pair")',
         );
       } else {
         for (const p of pub.paired) {
@@ -153,7 +153,7 @@ export async function runTelegramSetup(deps: SetupDeps): Promise<boolean> {
     );
   }
   deps.out(
-    'Next: pair your chat from Dot → Settings → Telegram, or with "stratum channels telegram pair".\n',
+    'Next: pair your chat from Dot → Assistant → Telegram, or with "stratum channels telegram pair".\n',
   );
   return true;
 }
@@ -161,7 +161,10 @@ export async function runTelegramSetup(deps: SetupDeps): Promise<boolean> {
 type Requester = Pick<StratumClient, 'request'>;
 
 export interface PairDeps {
+  /** Conexión de operador: pedir el código y mirar el estado (`control`/`observe`). */
   client: Requester;
+  /** Conexión de aprobador: solo para confirmar (`approve`). */
+  approver: Requester;
   /** Pregunta sí/no; `false` también si se cancela. */
   confirm: (question: string) => Promise<boolean>;
   out: (text: string) => void;
@@ -172,8 +175,9 @@ export interface PairDeps {
 
 /**
  * El cuerpo de `pair`: pide un código, espera a que alguien lo mande al bot y
- * pregunta antes de emparejarlo. La conexión ya es de aprobador
- * (`channels.pairConfirm` exige `approve`).
+ * pregunta antes de emparejarlo. Como en Dot, son dos conexiones: la de
+ * operador pide y mira, y la de aprobador solo confirma (`channels.pairConfirm`
+ * exige `approve`, y una conexión de aprobador no tiene `control`).
  * @returns `true` si quedó emparejado.
  */
 export async function runTelegramPair(deps: PairDeps): Promise<boolean> {
@@ -203,7 +207,7 @@ export async function runTelegramPair(deps: PairDeps): Promise<boolean> {
         deps.out('Not paired.\n');
         return false;
       }
-      const { paired } = await deps.client.request('channels.pairConfirm', { userId: c.userId });
+      const { paired } = await deps.approver.request('channels.pairConfirm', { userId: c.userId });
       deps.out(`Paired with ${paired.name}. Send /unpair in that chat to stop.\n`);
       return true;
     }
@@ -289,12 +293,20 @@ const pair = new Command('pair')
       fail('stratumd is not running: start it with "stratum daemon start" first.');
       return;
     }
-    // Emparejar da autoridad de aprobar: la conexión es de aprobador.
-    const client = await approver('stratum channels');
-    if (!client) return;
+    // Emparejar da autoridad de aprobar: la clave se pide antes de nada, para
+    // no pedir un código que luego no se pueda confirmar.
+    const authority = await approver('stratum channels');
+    if (!authority) return;
+    let client: StratumClient | null = null;
     try {
+      client = await operator();
+      if (!client) {
+        fail('stratumd is not running any more.');
+        return;
+      }
       const ok = await runTelegramPair({
         client,
+        approver: authority,
         confirm: async (question) => {
           // El readline solo mientras se pregunta: abierto, se quedaría con el Ctrl+C.
           const rl = createInterface({ input: process.stdin, output: process.stderr });
@@ -313,7 +325,8 @@ const pair = new Command('pair')
     } catch (err) {
       fail(describeError(err));
     } finally {
-      client.close();
+      client?.close();
+      authority.close();
     }
   });
 

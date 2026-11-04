@@ -19,7 +19,8 @@ export function pairingLink(botUsername: string, code: string): string {
 
 export const TEXT = {
   candidate:
-    'Code accepted. To finish, confirm the pairing in Dot (Settings → Telegram). ' +
+    'Code accepted. To finish, confirm the pairing in Dot (Assistant → Telegram) ' +
+    'or in the terminal where you ran "stratum channels telegram pair". ' +
     'Until then this chat cannot talk to the assistant.',
   paired:
     'Paired. You can talk to the Dot assistant here, and approve its requests. ' +

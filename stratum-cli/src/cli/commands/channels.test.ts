@@ -3,6 +3,8 @@ import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { TelegramApiError, type TelegramApi } from '../../channels/telegram/api.js';
+import { ProtocolError } from '../../ipc/codec.js';
+import { METHODS } from '../../protocol/index.js';
 import {
   readTelegramFile,
   TELEGRAM_SCHEMA_VERSION,
@@ -165,13 +167,22 @@ describe('stratum channels', () => {
 
 const bea = { userId: 9, name: 'Bea', username: 'bea' };
 
-/** Un daemon de mentira que contesta `channels.*` según un guion. */
+/**
+ * Un daemon de mentira que contesta `channels.*` según un guion y, como el de
+ * verdad, por capacidades: la conexión de operador no empareja y la de
+ * aprobador no pide códigos ni mira el estado.
+ */
 function fakeClient(statuses: Array<{ expiresAt: number; candidate: typeof bea | null } | null>) {
-  const calls: { method: string; params: unknown }[] = [];
+  const calls: { method: string; params: unknown; via: string }[] = [];
   let polls = 0;
-  const client = {
+  const connection = (via: 'operator' | 'approver') => ({
     request: async (method: string, params: unknown) => {
-      calls.push({ method, params });
+      calls.push({ method, params, via });
+      const needs = METHODS[method as keyof typeof METHODS].capability;
+      const has = via === 'operator' ? ['observe', 'control'] : ['approve'];
+      if (!has.includes(needs as string)) {
+        throw new ProtocolError('FORBIDDEN', `Missing capability: ${needs}.`);
+      }
       if (method === 'channels.pairBegin') {
         return {
           code: 'ABCDEFGHJK',
@@ -188,17 +199,22 @@ function fakeClient(statuses: Array<{ expiresAt: number; candidate: typeof bea |
       }
       throw new Error(`unexpected ${method}`);
     },
+  });
+  return {
+    client: connection('operator') as never,
+    approver: connection('approver') as never,
+    calls,
   };
-  return { client: client as never, calls };
 }
 
 describe('runTelegramPair', () => {
-  function deps(client: never, answer: boolean, clock = { t: 0 }) {
+  function deps(fake: { client: never; approver: never }, answer: boolean, clock = { t: 0 }) {
     const questions: string[] = [];
     return {
       questions,
       deps: {
-        client,
+        client: fake.client,
+        approver: fake.approver,
         confirm: async (q: string) => {
           questions.push(q);
           return answer;
@@ -214,31 +230,41 @@ describe('runTelegramPair', () => {
   }
 
   it('espera al candidato, pregunta con quién y para qué, y empareja ese id', async () => {
-    const { client, calls } = fakeClient([
+    const fake = fakeClient([
       { expiresAt: 10_000, candidate: null },
       { expiresAt: 10_000, candidate: bea },
     ]);
-    const { deps: d, questions } = deps(client, true);
+    const { calls } = fake;
+    const { deps: d, questions } = deps(fake, true);
     expect(await runTelegramPair(d)).toBe(true);
     expect(out.join('')).toContain('https://t.me/test_bot?start=ABCDEFGHJK');
     expect(questions[0]).toContain('Bea @bea (Telegram id 9)');
     expect(questions[0]).toContain('approve');
-    expect(calls.at(-1)).toEqual({ method: 'channels.pairConfirm', params: { userId: 9 } });
+    // El código y el estado por la de operador; emparejar, solo por la de aprobador.
+    expect(calls.at(-1)).toEqual({
+      method: 'channels.pairConfirm',
+      params: { userId: 9 },
+      via: 'approver',
+    });
+    expect(
+      calls.filter((c) => c.method !== 'channels.pairConfirm').every((c) => c.via === 'operator'),
+    ).toBe(true);
   });
 
   it('decir que no no empareja', async () => {
-    const { client, calls } = fakeClient([{ expiresAt: 10_000, candidate: bea }]);
-    const { deps: d } = deps(client, false);
+    const fake = fakeClient([{ expiresAt: 10_000, candidate: bea }]);
+    const { calls } = fake;
+    const { deps: d } = deps(fake, false);
     expect(await runTelegramPair(d)).toBe(false);
     expect(calls.map((c) => c.method)).not.toContain('channels.pairConfirm');
   });
 
   it('caducado o anulado: no empareja', async () => {
     const expired = fakeClient([{ expiresAt: 10_000, candidate: null }]);
-    expect(await runTelegramPair(deps(expired.client, true).deps)).toBe(false);
+    expect(await runTelegramPair(deps(expired, true).deps)).toBe(false);
     expect(out.join('')).toContain('expired');
     const cancelled = fakeClient([null]);
-    expect(await runTelegramPair(deps(cancelled.client, true).deps)).toBe(false);
+    expect(await runTelegramPair(deps(cancelled, true).deps)).toBe(false);
     expect(out.join('')).toContain('cancelled');
   });
 });

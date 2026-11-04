@@ -2137,6 +2137,85 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **Fuera de M18**: códigos o un segundo paso para aprobar (A9), fotos y ficheros, voz, grupos,
     varios bots y otros canales.
 
+  *Estado, 2026-11-04.* Partes 1–5 hechas, cada una en su commit (10362849c, c5dae88ff, c1b54c3e2,
+  15c87b72e y 8e8845591; sin push). Dos cambios sobre el diseño de arriba, decididos al implementar:
+  Dot no tiene pantalla de Ajustes, así que el panel *Telegram* vive en la vista *Asistente*, junto a
+  la caja, las rutinas y la memoria; y una host key tampoco se aprueba desde Telegram, solo se deniega.
+
+  *Prueba real, 2026-11-04* (bot de BotFather del usuario, chat privado emparejado con
+  `stratum channels telegram pair`):
+  - **Funciona**: `setup`, emparejar en dos pasos, conversación en los dos sentidos, `via:
+    'telegram'` en la conversación, steering y la tarjeta de una pregunta. El token no aparece en
+    el log.
+  - **Fallo de `pair`, arreglado y sin commit todavía**: usaba una sola conexión de aprobador, que
+    no tiene `control` («Missing capability: control»). Ahora son dos conexiones, como en Dot: la de
+    operador pide el código y mira el estado, y la de aprobador solo confirma. El test simula ahora
+    las capacidades. También se corrigieron los textos «Settings → Telegram» → «Assistant → Telegram».
+  - **Sesión del companion que no monta**: la sesión guardada usaba un provider (`ollama`) que ya no
+    existe en la config. El daemon no la monta (`archived session startup failed`, etapa
+    `provider`), y ni el canal ni Dot pueden abrir el asistente. Para seguir probando se cambió a
+    mano a `nan`. Ver el punto B de la parte 6.
+  - **Markdown crudo**: el modelo escribe markdown (17 de 36 bloques en un turno) y Telegram lo
+    enseña tal cual, porque se envía en texto plano.
+  - **Imágenes**: el asistente dejó capturas en `/exchange`, pero no llegan ni al chat ni a la
+    conversación de Dot.
+  - **Ruido**: se refleja cada bloque intermedio del asistente (36 mensajes en un turno).
+  - **Contestar fuera de casa**: una pregunta de texto libre (o varias a la vez) y los planes dicen
+    «en Dot»; sin Dot a mano, el turno se queda esperando hasta que caduca.
+  - **Herramientas de pantalla, diagnóstico**: con `glm5.3-flash` y la caja encendida, el modelo no
+    llamó a ninguna `screen_*`. Hizo 74 `exec` con un Chromium sin ventana y guardó los PNG en
+    `/exchange`. La traza muestra que recibió **9 tools en vez de 16**: las `screen_*` estaban
+    ocultas porque `router.vision` no encontraba visión. La causa es de configuración: la visión se
+    declaró en una clave `models` de **primer nivel**, que no existe (va en
+    `provider.providers.<alias>.models.<id>.vision`), y el schema raíz, que no es estricto, la
+    **descartó sin avisar**. La caja estaba bien: Xvfb en `:99`, captura comprobada. Lo que hay que
+    arreglar en el producto: (1) avisar de las claves desconocidas al cargar la config, en vez de
+    descartarlas en silencio; (2) escribir siempre la ruta completa en la documentación
+    (`models.<id>.vision` se lee como si fuera de primer nivel); (3) que Dot o `stratum box status`
+    digan cuándo el modelo del asistente no tiene visión, aunque haya caja con escritorio.
+    **Repetida con la visión en su sitio**, el modelo recibió las 16 tools, pero tampoco usó las
+    `screen_*`: para «abre el navegador y captura esta página» volvió a usar Chromium sin ventana
+    por `exec` (`--screenshot` a `/exchange` y OCR con `tesseract`), y la tarea salió bien. Ya no es
+    configuración: lo eligió el modelo. Probablemente lo empujan la conversación (en el turno de
+    Renfe le funcionó así durante 74 `exec`) y lo que la memoria extrajo de aquello, y además es el
+    camino corto cuando no hace falta ver ni pulsar nada. Queda por probar con una tarea que obligue
+    a ver y actuar en el escritorio y, si no basta, en una conversación nueva. Si sigue sin usarlas,
+    revisar la guía `# Your box screen` del prompt: cuándo usar la pantalla y cuándo basta `exec`.
+
+  *Parte 6, acordada con el usuario el 2026-11-04* (amplía la «docs y prueba real» original):
+  - **A. Cierre**: documentación, este estado y el commit del arreglo de `pair`.
+  - **B. Fallback de provider/modelo**: si el provider o el modelo guardados de una sesión ya no
+    existen en la config, el daemon la monta con el que esté disponible (el por defecto) y lo dice:
+    un aviso en la sesión y en el log, nunca en silencio. No debe fallar como hoy.
+  - **C. Contestar desde Telegram lo que hoy es «en Dot»**:
+    - Preguntas de texto libre, o varias en una tanda: la tarjeta dice «Responde en este chat» y el
+      siguiente mensaje de ese chat es la respuesta, no un mensaje nuevo para el asistente. Si son
+      varias, una a una, con un botón *Saltar*.
+    - Planes: botones *Aprobar plan* y *Rechazar*. Aprobar un plan no aprueba ninguna acción: cada
+      una sigue pidiendo su aprobación.
+    - Siguen **solo en Dot** lo forzado por política, lo que pide frase, `allow-all` y las
+      concesiones. Hacerlos posibles desde fuera exigiría un segundo paso (A9) y es otra decisión.
+    - El centro de aprobaciones sigue aplicando los límites por su cuenta
+      (`checkChannelResolution` se amplía con lo nuevo).
+  - **D. Markdown en Telegram**: convertir el markdown del modelo al formato de Telegram,
+    **escapando todo** lo demás para que el texto del modelo no se interprete como otra cosa. Las
+    tablas van como bloque de texto fijo y los encabezados en negrita. Si Telegram rechaza el
+    formato, se reenvía ese mensaje en texto plano. Al trocear no se parte una marca de formato.
+  - **E. Imágenes en el chat (Telegram y Dot): cualquier imagen** (decidido por el usuario). Esto
+    **sustituye** la regla de M15 para el canal y para la conversación de Dot («nunca capturas,
+    imágenes ni ficheros de `/exchange`»). Entran las capturas de la pantalla de la caja, las
+    imágenes generadas y las que el asistente deja en `/exchange`. Lo que queda por decidir al
+    diseñarlo:
+    - **Riesgo aceptado**: una imagen no se puede redactar como el texto, así que un secreto que
+      salga en pantalla llega al chat.
+    - **Topes**: tamaño y tipo de imagen (firma de imagen; nada que no lo sea).
+    - **Cómo llegan a Dot**: hoy las capturas no viajan por el protocolo (M15) y habría que
+      definir cómo (una referencia a `/exchange` o una ruta de lectura acotada). Es un cambio de
+      contrato que va en `docs/protocol.md`.
+    - Siguen fuera de la traza y de los logs (`trace.screenshots` no cambia).
+  - **F. Verbosidad del espejo**: se queda como está, con cada bloque del asistente. Del diagnóstico
+    de `screen_*` (arriba) entran los tres arreglos de producto.
+
 ### 23.12 Fuera, por ahora
 
 Proactividad libre, voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
