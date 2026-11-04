@@ -174,6 +174,9 @@ export interface ProtocolRunCounters {
 }
 
 /** Un turno: de una entrada del usuario a su final. */
+/** M18 — por dónde llegó una entrada del usuario, si no fue un cliente del protocolo. */
+export type ProtocolVia = 'telegram';
+
 export interface ProtocolRun {
   id: string;
   sessionId: string;
@@ -182,6 +185,8 @@ export interface ProtocolRun {
   input: string;
   /** `input` es solo el principio: la entrada era más larga. */
   inputTruncated?: boolean;
+  /** M18 — llegó por un canal externo. Solo procedencia: no decide nada. */
+  via?: ProtocolVia;
   mode: 'normal' | 'plan' | 'execute';
   status: ProtocolRunStatus;
   stopReason?: ProtocolStopReason;
@@ -219,7 +224,7 @@ interface MessageBase {
  */
 export type ProtocolChatMessage =
   /** Entrada de un turno. `truncated`: el texto es solo el principio. */
-  | (MessageBase & { kind: 'user'; text: string; truncated?: boolean })
+  | (MessageBase & { kind: 'user'; text: string; truncated?: boolean; via?: ProtocolVia })
   /** Un bloque de texto cerrado del asistente. */
   | (MessageBase & { kind: 'assistant'; text: string; truncated?: boolean })
   /** Una llamada a una tool del agente principal. Sin su salida. */

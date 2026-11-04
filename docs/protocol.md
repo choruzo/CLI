@@ -2023,6 +2023,23 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
 - **Quién habla.** Solo chats privados de un usuario emparejado; a cualquier otro el bot no le
   contesta nada (salvo al que manda un código válido). Lo que llega fechado antes de que arrancara el
   canal no se pasa al asistente: el bot avisa de que llegó con Stratum parado.
+- **Entrada.** Un texto de un chat emparejado va a la sesión principal del `companion` (si no la
+  hay, el daemon la abre como `sessions.open { agent: 'companion' }`). Sin turno en curso, abre un
+  run; con turno, es steering (como `runs.steer`), y si ese turno ya no acepta mensajes
+  (`not-accepting`) se abre otro al terminar, con lo que se haya juntado. Un mensaje demasiado
+  largo para el steering (`too-large`) se contesta en el chat y no se recorta. Fotos, ficheros y voz
+  aún no: el bot lo dice.
+- **`ProtocolRun.via` y `ProtocolChatMessage.via`** (`'telegram'`, opcionales): el run, y la
+  entrada de usuario que abre en la conversación, llegaron por un canal. **Solo procedencia**:
+  nadie lo lee para decidir nada. El steering no lleva texto en los eventos (`steering.queued`),
+  así que tampoco marca.
+- **Espejo.** Lo que entra en la conversación de esa sesión llega a los chats emparejados: la
+  entrada de un run abierto por un cliente («In Dot: …»; la que llevaba `via`, no), cada
+  `message.completed` del agente principal y cómo acabó un turno que falló o se canceló. Las tools
+  no; mientras el run está `running`, «escribiendo…». También el aviso de una rutina terminada
+  (nombre, estado y `summary`). Texto plano, pasado otra vez por la redacción, en trozos de menos de
+  4096 caracteres y con una cola por chat (≤ 1 mensaje/s). Nunca capturas de la caja, imágenes ni
+  ficheros.
 - **Sin eventos nuevos**: un cliente consulta `channels.status` (Dot, mientras enseña el panel o el
   diálogo de emparejar). Con el canal escuchando y alguien emparejado (o un emparejamiento en curso),
   el daemon no se apaga por inactividad.

@@ -113,6 +113,7 @@ import {
 } from './routines-dto.js';
 import { RoutineStore, routinesFile, type Routine } from '../routines/store.js';
 import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
+import type { CompanionTurns } from './channel-companion.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
@@ -266,6 +267,20 @@ function asRoutineSession(s: HostedSession): RoutineSession {
   };
 }
 
+/** La sesión principal del `companion`, tal como la ve un canal externo (M18). */
+function asCompanionTurns(s: HostedSession): CompanionTurns {
+  return {
+    sessionId: s.sessionId,
+    get running() {
+      return s.running;
+    },
+    startRun: (input) => s.startRun(input, 'normal', { via: 'telegram' }),
+    steer: (text) => s.steer(text),
+    waitAtSafePoint: () => s.host.agent.pause.waitAtSafePoint(),
+    idle: () => s.idle(),
+  };
+}
+
 export class Stratumd {
   readonly endpoint: Endpoint;
   /** M16 — el planificador de rutinas, o `null` con `routines: null`. */
@@ -363,13 +378,17 @@ export class Stratumd {
                 manual: fire.manual,
                 ...(fire.runId ? { runId: fire.runId } : {}),
               }),
-            onFinished: (done) =>
+            onFinished: (done) => {
               log.info('routine run finished', {
                 routineId: done.routineId,
                 sessionId: done.sessionId,
                 runId: done.run.id,
                 status: done.run.status,
-              }),
+              });
+              // M18 — el aviso llega también a los chats emparejados.
+              const name = this.routines?.get(done.routineId)?.routine.name;
+              if (name) this.channels?.routineFinished(name, done.run.status, done.summary);
+            },
           });
     this.channels =
       opts.channels === null
@@ -379,6 +398,18 @@ export class Stratumd {
             // `channels` es solo de la capa global: un repo no enciende el canal.
             enabled: () => loadConfig(opts.home ?? homedir()).channels.telegram.enabled,
             now: this.now,
+            // La misma conversación que Dot: la sesión principal del `companion`.
+            companion: {
+              currentId: () => this.companionSessionId(),
+              open: async () => {
+                if (this.shuttingDown) {
+                  throw new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.');
+                }
+                return asCompanionTurns(await this.openCompanion({ agent: COMPANION_AGENT }));
+              },
+            },
+            // Lo que sale al chat vuelve a pasar por la redacción.
+            redact: (text) => redactText(text, opts.config),
             ...opts.channels,
           });
     // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
@@ -811,6 +842,17 @@ export class Stratumd {
           this.approvals.apply(event);
         }
         this.hub.ingest(sessionId, events);
+        // M18 — el espejo de los canales. Un fallo suyo no toca el reparto.
+        const channels = this.channels;
+        if (channels) {
+          for (const event of events) {
+            try {
+              channels.observe(event);
+            } catch (err) {
+              log.warn('channel mirror failed', { err });
+            }
+          }
+        }
       },
       onOverflow: () => {
         log.warn('session queue overflow, resync forced', { sessionId });

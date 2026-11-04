@@ -218,12 +218,16 @@ export const sessionSchema: z.ZodType<ProtocolSession> = z.object({
   updatedAt: timestamp,
 });
 
+/** M18 — por dónde llegó una entrada. Solo procedencia. */
+const via = z.enum(['telegram']).optional();
+
 export const runSchema: z.ZodType<ProtocolRun> = z.object({
   id,
   sessionId: id,
   kind: z.enum(['run', 'delegate']),
   input: z.string(),
   inputTruncated: z.boolean().optional(),
+  via,
   mode: z.enum(['normal', 'plan', 'execute']),
   status: z.enum([
     'queued',
@@ -272,7 +276,7 @@ const messageBase = { id, runId: z.string(), at: timestamp };
 const messageText = { text: z.string(), truncated: z.boolean().optional() };
 
 export const messageSchema: z.ZodType<ProtocolChatMessage> = z.discriminatedUnion('kind', [
-  z.object({ ...messageBase, kind: z.literal('user'), ...messageText }),
+  z.object({ ...messageBase, kind: z.literal('user'), ...messageText, via }),
   z.object({ ...messageBase, kind: z.literal('assistant'), ...messageText }),
   z.object({
     ...messageBase,

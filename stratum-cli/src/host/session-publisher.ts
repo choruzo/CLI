@@ -437,6 +437,8 @@ export class SessionPublisher {
   private runActive = false;
   private nextMode: ProtocolRun['mode'] = 'normal';
   private nextInput: string | null = null;
+  /** M18 — por dónde llegó la entrada del próximo run (solo procedencia). */
+  private nextVia: ProtocolRun['via'] = undefined;
   private lastFatal: string | null = null;
   private readonly main: TextScope = { text: '', reasoning: '' };
   private readonly subText = new Map<string, TextScope>();
@@ -633,9 +635,10 @@ export class SessionPublisher {
    * la entrada tal como la escribió el usuario (en modo plan, lo que llega al
    * agente es la plantilla del plan con la tarea dentro).
    */
-  expectRun(next: { mode?: ProtocolRun['mode']; input?: string }): void {
+  expectRun(next: { mode?: ProtocolRun['mode']; input?: string; via?: ProtocolRun['via'] }): void {
     this.nextMode = next.mode ?? 'normal';
     this.nextInput = next.input ?? null;
+    this.nextVia = next.via;
   }
 
   /** Algo del resumen cambió fuera de un turno (modelo, perfil, read-only). */
@@ -1001,6 +1004,7 @@ export class SessionPublisher {
       kind,
       input: clip(text, INPUT_CHARS),
       ...(text.length > INPUT_CHARS ? { inputTruncated: true } : {}),
+      ...(this.nextVia ? { via: this.nextVia } : {}),
       mode: this.nextMode,
       status: 'running',
       startedAt: this.now(),
@@ -1016,6 +1020,7 @@ export class SessionPublisher {
       },
     };
     this.nextMode = 'normal';
+    this.nextVia = undefined;
     this.runActive = true;
     this.state('run.started', () => ({ run: this.runCopy() }));
     this.state('session.updated', () => ({ session: this.session() }));

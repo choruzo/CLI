@@ -142,6 +142,7 @@ export function applyTranscriptEvent(
         at: event.at,
         text,
         ...(truncated || run.inputTruncated ? { truncated: true } : {}),
+        ...(run.via ? { via: run.via } : {}),
       });
     }
     case 'message.completed': {

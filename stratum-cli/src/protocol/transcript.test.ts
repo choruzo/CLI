@@ -157,6 +157,16 @@ describe('applyTranscriptEvent', () => {
     expect(short).not.toHaveProperty('truncated');
   });
 
+  it('M18 — la entrada que llegó por un canal lleva `via`; la de un cliente, no', () => {
+    const t = reduce([
+      ev(2, 'run.started', { run: sampleRun({ input: 'del móvil', via: 'telegram' }) }),
+      ev(3, 'run.started', { run: sampleRun({ id: 'run_2', input: 'de Dot' }) }),
+    ]);
+    const [tg, dot] = t.messages;
+    expect(tg).toMatchObject({ kind: 'user', text: 'del móvil', via: 'telegram' });
+    expect(dot).not.toHaveProperty('via');
+  });
+
   it('está acotada en número y en tamaño, y dice cuándo ha descartado', () => {
     let t = EMPTY_TRANSCRIPT;
     for (let seq = 1; seq <= TRANSCRIPT_LIMITS.messages + 25; seq++) {

@@ -429,7 +429,7 @@ export class HostedSession {
   startRun(
     input: string,
     mode: 'normal' | 'plan' = 'normal',
-    options: { maxIterations?: number; images?: readonly string[] } = {},
+    options: { maxIterations?: number; images?: readonly string[]; via?: ProtocolRun['via'] } = {},
   ): ProtocolRun {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'The session already has a run in progress.');
@@ -437,7 +437,7 @@ export class HostedSession {
     if (this.archiving) throw new ProtocolError('BUSY', 'The conversation is being archived.');
     const images = this.loadImages(options.images);
 
-    this.publisher.expectRun({ mode, input });
+    this.publisher.expectRun({ mode, input, ...(options.via ? { via: options.via } : {}) });
     const turn = this.host.run(
       mode === 'plan' ? PLAN_MODE_PROMPT.replaceAll('$ARGUMENTS', input) : input,
       {

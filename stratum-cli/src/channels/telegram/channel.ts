@@ -24,8 +24,9 @@ import type {
   TelegramUpdate,
 } from './api.js';
 import { TelegramApiError } from './api.js';
+import { TelegramOutbox, type OutgoingMessage } from './outbox.js';
 import type { OfferResult, PairingCandidate } from './pairing.js';
-import { TEXT, displayName, parseCommand } from './render.js';
+import { TEXT, chunkText, displayName, parseCommand } from './render.js';
 import type { TelegramPaired } from './store.js';
 
 const log = getLogger('channels');
@@ -49,6 +50,8 @@ export interface TelegramChannelDeps {
   onCallback?(from: TelegramPaired, query: TelegramCallbackQuery): void | Promise<void>;
   pollTimeoutSec?: number;
   retry?: { initialMs: number; maxMs: number };
+  /** Espacio mínimo entre mensajes a un chat (1 s). Tests: menos. */
+  sendIntervalMs?: number;
 }
 
 export interface TelegramChannelError {
@@ -89,9 +92,14 @@ export class TelegramChannel {
   private ignored = 0;
   /** Cuándo empezó a escuchar: lo fechado antes llegó con el daemon apagado. */
   readonly startedAt: number;
+  private readonly outbox: TelegramOutbox;
 
   constructor(private readonly deps: TelegramChannelDeps) {
     this.startedAt = deps.now();
+    this.outbox = new TelegramOutbox({
+      api: deps.api,
+      ...(deps.sendIntervalMs !== undefined ? { minIntervalMs: deps.sendIntervalMs } : {}),
+    });
   }
 
   get state(): TelegramChannelState {
@@ -112,20 +120,35 @@ export class TelegramChannel {
     this.loop = this.run();
   }
 
-  /** Para el sondeo (aborta el `getUpdates` en curso) y espera a que termine. */
+  /** Para el sondeo (aborta el `getUpdates` en curso) y espera a que termine. Lo no enviado se descarta. */
   async stop(): Promise<void> {
     this.abort.abort();
+    this.outbox.stop();
     if (this._state === 'running') this._state = 'stopped';
     await this.loop;
   }
 
-  /** Un mensaje al chat. Un fallo se registra y no se propaga: el canal es auxiliar. */
-  async send(chatId: number, text: string): Promise<void> {
-    try {
-      await this.deps.api.sendMessage(chatId, text);
-    } catch (err) {
-      log.warn('telegram send failed', { kind: kindOf(err) });
-    }
+  /**
+   * Un texto al chat, en trozos que caben, por su cola. Un fallo se registra y
+   * no se propaga: el canal es auxiliar.
+   */
+  send(chatId: number, text: string): void {
+    for (const piece of chunkText(text)) this.outbox.send(chatId, { text: piece });
+  }
+
+  /** Un mensaje con botones (o que se editará luego), por la misma cola. */
+  sendMessage(chatId: number, message: OutgoingMessage): void {
+    this.outbox.send(chatId, message);
+  }
+
+  /** «Escribiendo…» en el chat (dura ~5 s). Sin cola: si falla, da igual. */
+  typing(chatId: number): void {
+    this.deps.api.sendChatAction(chatId, 'typing').catch(() => undefined);
+  }
+
+  /** Espera a que la cola de salida se vacíe (tests). */
+  flush(): Promise<void> {
+    return this.outbox.flush();
   }
 
   private async run(): Promise<void> {

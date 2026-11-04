@@ -14,6 +14,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import { getLogger } from '../logging/index.js';
 import type {
   ProtocolChannelsStatus,
+  ProtocolEvent,
   ProtocolTelegramPaired,
   ProtocolTelegramStatus,
 } from '../protocol/index.js';
@@ -28,6 +29,7 @@ import {
   type TelegramFileState,
   type TelegramPaired,
 } from '../channels/telegram/store.js';
+import { CompanionLink, type CompanionPort } from './channel-companion.js';
 
 const log = getLogger('channels');
 
@@ -42,9 +44,18 @@ export interface ChannelHostOptions {
   /** El cliente de la API para un token. Por defecto, el de HTTP. Tests: uno falso. */
   api?: (token: string) => TelegramApi;
   now: () => number;
-  /** Ajustes del sondeo (tests). */
+  /**
+   * La conversación del `companion` (parte 3): adónde va lo que se escribe en el
+   * chat y de dónde sale el espejo. Sin ella, el canal solo empareja.
+   */
+  companion?: CompanionPort;
+  /** Redacción de lo que sale al chat. Por defecto, ninguna (tests). */
+  redact?: (text: string) => string;
+  /** Ajustes del sondeo y de la salida (tests). */
   pollTimeoutSec?: number;
   retry?: { initialMs: number; maxMs: number };
+  sendIntervalMs?: number;
+  typingIntervalMs?: number;
 }
 
 function channelOff(message: string): ProtocolError {
@@ -66,9 +77,31 @@ export class ChannelHost {
   private enabled = false;
   private channel: TelegramChannel | null = null;
   private readonly pairing: TelegramPairing;
+  private readonly link: CompanionLink | null;
 
   constructor(private readonly opts: ChannelHostOptions) {
     this.pairing = new TelegramPairing(opts.now);
+    this.link = opts.companion
+      ? new CompanionLink({
+          companion: opts.companion,
+          target: () => (this.channel?.state === 'running' ? this.channel : null),
+          chats: () => this.paired().map((p) => p.chatId),
+          redact: opts.redact ?? ((text) => text),
+          ...(opts.typingIntervalMs !== undefined
+            ? { typingIntervalMs: opts.typingIntervalMs }
+            : {}),
+        })
+      : null;
+  }
+
+  /** Un evento de una sesión del daemon: el espejo de la conversación del `companion`. */
+  observe(event: ProtocolEvent): void {
+    this.link?.observe(event);
+  }
+
+  /** M16 — aviso de rutina terminada a los chats emparejados. */
+  routineFinished(name: string, status: string, summary: string | null): void {
+    this.link?.routineFinished(name, status, summary);
   }
 
   /** Lee el fichero y la config y, si toca, empieza a escuchar. */
@@ -85,6 +118,7 @@ export class ChannelHost {
   }
 
   async stop(): Promise<void> {
+    this.link?.stop();
     this.pairing.cancel();
     await this.stopChannel();
   }
@@ -183,10 +217,14 @@ export class ChannelHost {
       pairedUser: (userId) => this.paired().find((p) => p.userId === userId) ?? null,
       offerCode: (code, who: PairingCandidate) => this.pairing.offer(code, who),
       unpair: async (userId) => this.unpair(userId),
+      onText: (from, message) => this.link?.input(from.chatId, message),
       ...(this.opts.pollTimeoutSec !== undefined
         ? { pollTimeoutSec: this.opts.pollTimeoutSec }
         : {}),
       ...(this.opts.retry ? { retry: this.opts.retry } : {}),
+      ...(this.opts.sendIntervalMs !== undefined
+        ? { sendIntervalMs: this.opts.sendIntervalMs }
+        : {}),
     });
     this.channel.start();
     log.info('telegram channel started', { bot: this.file.file.bot.username });
