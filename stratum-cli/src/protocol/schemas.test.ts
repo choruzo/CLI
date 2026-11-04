@@ -480,6 +480,43 @@ describe('env es de solo entrada', () => {
   });
 });
 
+describe('channels.* (M18)', () => {
+  it('capacidades: emparejar exige approve; el resto, observe o control', () => {
+    expect(METHODS['channels.status']).toMatchObject({ capability: 'observe', mutating: false });
+    expect(METHODS['channels.pairConfirm']).toMatchObject({
+      capability: 'approve',
+      mutating: true,
+    });
+    for (const m of ['reload', 'pairBegin', 'unpair'] as const) {
+      expect(METHODS[`channels.${m}`]).toMatchObject({ capability: 'control', mutating: true });
+    }
+  });
+
+  it('parámetros estrictos: solo userId entero', () => {
+    expect(PARAMS['channels.status'].safeParse({}).success).toBe(true);
+    expect(PARAMS['channels.pairBegin'].safeParse({ code: 'x' }).success).toBe(false);
+    expect(PARAMS['channels.pairConfirm'].safeParse({ userId: 42 }).success).toBe(true);
+    expect(PARAMS['channels.pairConfirm'].safeParse({ userId: '42' }).success).toBe(false);
+    expect(PARAMS['channels.pairConfirm'].safeParse({ userId: 4.2 }).success).toBe(false);
+    expect(PARAMS['channels.unpair'].safeParse({}).success).toBe(false);
+  });
+
+  it('el estado descarta lo que no es del contrato (un token no pasa)', () => {
+    const parsed = RESULTS['channels.status'].parse({
+      telegram: {
+        state: 'running',
+        bot: { id: 1, username: 'b' },
+        paired: [{ userId: 2, name: 'Ana', pairedAt: 1 }],
+        pairing: { expiresAt: 5, candidate: null },
+        lastError: null,
+        lastPollAt: 3,
+        token: 'secreto',
+      },
+    });
+    expect(JSON.stringify(parsed)).not.toContain('secreto');
+  });
+});
+
 describe('routines.* (M16)', () => {
   const add = PARAMS['routines.add'];
   const base = { name: 'n', schedule: '1h', prompt: 'p' };

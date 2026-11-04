@@ -10,6 +10,9 @@ import type {
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
+  ProtocolChannelsStatus,
+  ProtocolTelegramPaired,
+  Timestamp,
   ProtocolContextReport,
   ProtocolDecision,
   ProtocolGrantMinutes,
@@ -534,6 +537,21 @@ export interface ProtocolMethods {
     { fire: ProtocolRoutineFire; routine: ProtocolRoutine }
   >;
 
+  /**
+   * M18 — canales externos (`docs/protocol.md` §24). Nada de lo que devuelven
+   * lleva el token del bot. `reload` vuelve a leer `telegram.json` y
+   * `channels.telegram.enabled` (tras `stratum channels telegram setup`).
+   * `pairBegin` da un código de un solo uso; quien lo manda al bot queda como
+   * candidato, y solo `pairConfirm` (que exige `approve`: emparejar da autoridad)
+   * lo empareja. Canal apagado: `UNAVAILABLE` (`channel-off`).
+   */
+  'channels.status': Spec<Empty, ProtocolChannelsStatus>;
+  'channels.reload': Spec<Mutation, ProtocolChannelsStatus>;
+  'channels.pairBegin': Spec<Mutation, { code: string; link: string; expiresAt: Timestamp }>;
+  'channels.pairConfirm': Spec<Mutation & { userId: number }, { paired: ProtocolTelegramPaired }>;
+  /** Desemparejar solo resta. Un id que no está: `removed: false`. */
+  'channels.unpair': Spec<Mutation & { userId: number }, { removed: boolean }>;
+
   'events.subscribe': Spec<{ scope: SubscriptionScope }, EventsSubscribeResult>;
   'events.unsubscribe': Spec<{ subscriptionId: string }, Empty>;
   'trace.subscribe': Spec<{ sessionId: string }, { subscriptionId: string }>;
@@ -680,6 +698,14 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'routines.update': write('control'),
   'routines.remove': write('control'),
   'routines.run': write('control'),
+
+  'channels.status': read('observe'),
+  'channels.reload': write('control'),
+  'channels.pairBegin': write('control'),
+  // Emparejar da autoridad (hablar con el asistente y aprobar desde el chat).
+  'channels.pairConfirm': write('approve'),
+  // Desemparejar solo resta.
+  'channels.unpair': write('control'),
 
   // Suscribirse solo cambia el estado de la propia conexión: se puede repetir.
   'events.subscribe': read('observe'),

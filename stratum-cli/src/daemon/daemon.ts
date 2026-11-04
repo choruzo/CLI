@@ -112,6 +112,7 @@ import {
   toRoutinePatch,
 } from './routines-dto.js';
 import { RoutineStore, routinesFile, type Routine } from '../routines/store.js';
+import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
@@ -201,6 +202,12 @@ export interface StratumdOptions {
    * los datos del `companion`; `null` desactiva las rutinas (sin planificador).
    */
   routines?: RoutineStore | null;
+  /**
+   * M18 — canales externos (Telegram). `telegram.json` está en `dir`; por
+   * defecto, `enabled` se lee de la config global en cada `channels.reload`.
+   * `null`: sin canales (`channels.*` → `UNAVAILABLE`). Tests: API falsa.
+   */
+  channels?: Partial<Omit<ChannelHostOptions, 'dir' | 'now'>> | null;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -263,6 +270,8 @@ export class Stratumd {
   readonly endpoint: Endpoint;
   /** M16 — el planificador de rutinas, o `null` con `routines: null`. */
   readonly routines: RoutineScheduler | null;
+  /** M18 — los canales externos, o `null` con `channels: null`. */
+  readonly channels: ChannelHost | null;
   /** Se resuelve cuando el daemon ha terminado de apagarse, con el motivo. */
   readonly closed: Promise<ShutdownReason>;
 
@@ -361,6 +370,16 @@ export class Stratumd {
                 runId: done.run.id,
                 status: done.run.status,
               }),
+          });
+    this.channels =
+      opts.channels === null
+        ? null
+        : new ChannelHost({
+            dir: opts.dir ?? defaultEndpointDir(),
+            // `channels` es solo de la capa global: un repo no enciende el canal.
+            enabled: () => loadConfig(opts.home ?? homedir()).channels.telegram.enabled,
+            now: this.now,
+            ...opts.channels,
           });
     // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
     this.box =
@@ -465,6 +484,8 @@ export class Stratumd {
     daemon.recoverArchived();
     // Las sesiones guardadas de rutinas ya están en `dormant`: el planificador las encuentra.
     daemon.routines?.start();
+    // M18 — el canal empieza a escuchar con el daemon ya publicado.
+    daemon.channels?.start();
     log.info('daemon started', {
       pid: process.pid,
       version: opts.version,
@@ -543,6 +564,8 @@ export class Stratumd {
     return (
       // Una rutina habilitada tiene que poder vencer: el daemon no se apaga solo.
       !this.routines?.hasEnabled &&
+      // Un chat emparejado tiene que poder hablarle al asistente.
+      !this.channels?.keepsAlive &&
       this.sessions.size === 0 &&
       this.peers.size === 0 &&
       this.closingSessions.size === 0 &&
@@ -563,6 +586,8 @@ export class Stratumd {
       log.info('daemon shutting down', { reason, sessions: this.sessions.size });
       // Lo primero: ninguna rutina vence mientras se apaga.
       this.routines?.stop();
+      // Y ningún mensaje de un canal entra: deja de escuchar antes de cerrar sesiones.
+      await this.settle('channels', () => this.channels?.stop());
       if (this.idleTimer) clearInterval(this.idleTimer);
       const sessions = [...this.sessions.values()];
       this.sessions.clear();
@@ -1786,6 +1811,17 @@ export class Stratumd {
           };
         }),
 
+      // M18 — canales externos. Nada de esto devuelve ni registra el token.
+      'channels.status': () => this.channelsOrThrow().status(),
+      'channels.reload': () => this.channelsOrThrow().reload(),
+      'channels.pairBegin': () => this.channelsOrThrow().pairBegin(),
+      'channels.pairConfirm': (params) => {
+        const paired = this.channelsOrThrow().pairConfirm(params.userId);
+        log.info('telegram pairing confirmed', { connectionId: conn.id });
+        return { paired };
+      },
+      'channels.unpair': (params) => ({ removed: this.channelsOrThrow().unpair(params.userId) }),
+
       'events.subscribe': (params) => this.hub.subscribe(conn, params.scope),
       'events.unsubscribe': (params) => {
         this.hub.unsubscribe(conn, params.subscriptionId);
@@ -1896,6 +1932,16 @@ export class Stratumd {
       });
     }
     return this.routines;
+  }
+
+  /** Los canales externos, o `UNAVAILABLE` si el daemon corre sin ellos. */
+  private channelsOrThrow(): ChannelHost {
+    if (!this.channels) {
+      throw new ProtocolError('UNAVAILABLE', 'External channels are disabled in this daemon.', {
+        reason: 'channels-disabled',
+      });
+    }
+    return this.channels;
   }
 
   /**

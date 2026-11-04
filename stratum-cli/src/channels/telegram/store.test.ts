@@ -7,6 +7,7 @@ import {
   TelegramFileNewerError,
   publicTelegramState,
   readTelegramFile,
+  removeTelegramPaired,
   saveTelegramBot,
   telegramFilePath,
   writeTelegramFile,
@@ -110,5 +111,24 @@ describe('saveTelegramBot', () => {
     writeFileSync(telegramFilePath(dir), 'roto');
     saveTelegramBot(dir, TOKEN, { id: 123456789, username: 'dot_bot' });
     expect(readTelegramFile(dir).state).toBe('ok');
+  });
+});
+
+describe('removeTelegramPaired', () => {
+  it('quita solo a ese, conserva el token, y sin fichero o sin él no toca nada', () => {
+    expect(removeTelegramPaired(dir, 5)).toBe(false);
+    const bea = { ...ana, userId: 9, chatId: 9, name: 'Bea' };
+    writeTelegramFile(dir, file([ana, bea]));
+    expect(removeTelegramPaired(dir, 5)).toBe(true);
+    expect(removeTelegramPaired(dir, 5)).toBe(false);
+    const after = readTelegramFile(dir);
+    expect(after.state === 'ok' && after.file.paired.map((p) => p.userId)).toEqual([9]);
+    expect(after.state === 'ok' && after.file.token).toBe(TOKEN);
+  });
+
+  it('un fichero de un Stratum más nuevo no se toca', () => {
+    writeTelegramFile(dir, file([ana]));
+    writeFileSync(telegramFilePath(dir), JSON.stringify({ schemaVersion: 99 }));
+    expect(() => removeTelegramPaired(dir, 5)).toThrow(TelegramFileNewerError);
   });
 });

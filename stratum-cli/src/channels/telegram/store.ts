@@ -128,6 +128,24 @@ export class TelegramFileNewerError extends Error {
 }
 
 /**
+ * Quita un emparejado del fichero. Para cuando no hay daemon que lo haga: con
+ * él en marcha va por `channels.unpair`, o el daemon seguiría escuchándolo.
+ * Quitar solo resta autoridad, así que no pide nada más.
+ *
+ * @returns `false` si no estaba (o no hay fichero que tocar).
+ * @throws TelegramFileNewerError si el fichero es de un Stratum más nuevo.
+ */
+export function removeTelegramPaired(dir: string, userId: number, now: Date = new Date()): boolean {
+  const current = readTelegramFile(dir);
+  if (current.state === 'newer') throw new TelegramFileNewerError(current.schemaVersion);
+  if (current.state !== 'ok') return false;
+  const rest = current.file.paired.filter((p) => p.userId !== userId);
+  if (rest.length === current.file.paired.length) return false;
+  writeTelegramFile(dir, { ...current.file, paired: rest, updatedAt: now.toISOString() });
+  return true;
+}
+
+/**
  * Guarda el token de un bot ya comprobado con `getMe`. Los emparejamientos se
  * conservan si es **el mismo bot**; con otro bot se descartan, porque un chat
  * privado es con un bot concreto y la autoridad se dio para ese.

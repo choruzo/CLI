@@ -344,6 +344,8 @@ export async function startTestDaemon(
     processTeardown: async () => {
       teardowns++;
     },
+    // M18 — nunca la config del usuario: sin canal salvo que el test lo monte.
+    channels: { enabled: () => false },
     startup: async (opts: SessionStartupOptions) => {
       await holdStartup?.(opts.cwd);
       const script = scripts.get(opts.cwd);

@@ -11,6 +11,8 @@ import {
 import {
   channelsCommand,
   formatTelegramStatus,
+  resolvePaired,
+  runTelegramPair,
   runTelegramSetup,
   type SetupDeps,
 } from './channels.js';
@@ -146,10 +148,112 @@ describe('formatTelegramStatus', () => {
 });
 
 describe('stratum channels', () => {
-  it('telegram tiene status (por defecto), setup y disable, y setup no admite el token por flag', () => {
+  it('telegram tiene status (por defecto), setup, pair, unpair y disable; ni setup ni pair admiten un secreto por flag', () => {
     const telegram = channelsCommand.commands.find((c) => c.name() === 'telegram')!;
-    expect(telegram.commands.map((c) => c.name())).toEqual(['status', 'setup', 'disable']);
-    const setup = telegram.commands.find((c) => c.name() === 'setup')!;
-    expect(setup.options).toEqual([]);
+    expect(telegram.commands.map((c) => c.name())).toEqual([
+      'status',
+      'setup',
+      'pair',
+      'unpair',
+      'disable',
+    ]);
+    for (const name of ['setup', 'pair']) {
+      expect(telegram.commands.find((c) => c.name() === name)!.options).toEqual([]);
+    }
+  });
+});
+
+const bea = { userId: 9, name: 'Bea', username: 'bea' };
+
+/** Un daemon de mentira que contesta `channels.*` según un guion. */
+function fakeClient(statuses: Array<{ expiresAt: number; candidate: typeof bea | null } | null>) {
+  const calls: { method: string; params: unknown }[] = [];
+  let polls = 0;
+  const client = {
+    request: async (method: string, params: unknown) => {
+      calls.push({ method, params });
+      if (method === 'channels.pairBegin') {
+        return {
+          code: 'ABCDEFGHJK',
+          link: 'https://t.me/test_bot?start=ABCDEFGHJK',
+          expiresAt: 10_000,
+        };
+      }
+      if (method === 'channels.status') {
+        const pairing = statuses[Math.min(polls++, statuses.length - 1)] ?? null;
+        return { telegram: { pairing } };
+      }
+      if (method === 'channels.pairConfirm') {
+        return { paired: { ...bea, pairedAt: 1 } };
+      }
+      throw new Error(`unexpected ${method}`);
+    },
+  };
+  return { client: client as never, calls };
+}
+
+describe('runTelegramPair', () => {
+  function deps(client: never, answer: boolean, clock = { t: 0 }) {
+    const questions: string[] = [];
+    return {
+      questions,
+      deps: {
+        client,
+        confirm: async (q: string) => {
+          questions.push(q);
+          return answer;
+        },
+        out: (text: string) => out.push(text),
+        sleep: async (ms: number) => {
+          clock.t += ms;
+        },
+        now: () => clock.t,
+        pollMs: 1_000,
+      },
+    };
+  }
+
+  it('espera al candidato, pregunta con quién y para qué, y empareja ese id', async () => {
+    const { client, calls } = fakeClient([
+      { expiresAt: 10_000, candidate: null },
+      { expiresAt: 10_000, candidate: bea },
+    ]);
+    const { deps: d, questions } = deps(client, true);
+    expect(await runTelegramPair(d)).toBe(true);
+    expect(out.join('')).toContain('https://t.me/test_bot?start=ABCDEFGHJK');
+    expect(questions[0]).toContain('Bea @bea (Telegram id 9)');
+    expect(questions[0]).toContain('approve');
+    expect(calls.at(-1)).toEqual({ method: 'channels.pairConfirm', params: { userId: 9 } });
+  });
+
+  it('decir que no no empareja', async () => {
+    const { client, calls } = fakeClient([{ expiresAt: 10_000, candidate: bea }]);
+    const { deps: d } = deps(client, false);
+    expect(await runTelegramPair(d)).toBe(false);
+    expect(calls.map((c) => c.method)).not.toContain('channels.pairConfirm');
+  });
+
+  it('caducado o anulado: no empareja', async () => {
+    const expired = fakeClient([{ expiresAt: 10_000, candidate: null }]);
+    expect(await runTelegramPair(deps(expired.client, true).deps)).toBe(false);
+    expect(out.join('')).toContain('expired');
+    const cancelled = fakeClient([null]);
+    expect(await runTelegramPair(deps(cancelled.client, true).deps)).toBe(false);
+    expect(out.join('')).toContain('cancelled');
+  });
+});
+
+describe('resolvePaired', () => {
+  const paired = [
+    { userId: 9, chatId: 9, name: 'Bea', username: 'Bea_T', pairedAt: 'x' },
+    { userId: 42, chatId: 42, name: 'Ana', pairedAt: 'x' },
+  ];
+
+  it('por id o por @usuario (sin mayúsculas); el nombre no basta', () => {
+    expect(resolvePaired(paired, '42')?.name).toBe('Ana');
+    expect(resolvePaired(paired, '@bea_t')?.userId).toBe(9);
+    expect(resolvePaired(paired, 'bea_t')?.userId).toBe(9);
+    expect(resolvePaired(paired, 'Ana')).toBeNull();
+    expect(resolvePaired(paired, '7')).toBeNull();
   });
 });

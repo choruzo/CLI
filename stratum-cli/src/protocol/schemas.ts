@@ -77,6 +77,9 @@ import type {
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
   ProtocolRoutineResult,
+  ProtocolChannelsStatus,
+  ProtocolTelegramPaired,
+  ProtocolTelegramUser,
 } from './model.js';
 import { BOX_SCREEN_LIMITS, GRANT_MINUTES, HISTORY_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
@@ -530,6 +533,41 @@ export const routineSchema: z.ZodType<ProtocolRoutine> = z.object({
   lastResult: routineResultSchema.nullable(),
 });
 const routineResult = z.object({ routine: routineSchema });
+
+// ---------------------------------------------------------------------------
+// M18 — canales externos (Telegram)
+// ---------------------------------------------------------------------------
+
+const telegramUserId = z.number().int().safe();
+const telegramUserSchema: z.ZodType<ProtocolTelegramUser> = z.object({
+  userId: telegramUserId,
+  name: z.string().max(200),
+  username: z.string().max(64).optional(),
+});
+export const telegramPairedSchema: z.ZodType<ProtocolTelegramPaired> = z.object({
+  userId: telegramUserId,
+  name: z.string().max(200),
+  username: z.string().max(64).optional(),
+  pairedAt: timestamp,
+});
+export const channelsStatusSchema: z.ZodType<ProtocolChannelsStatus> = z.object({
+  telegram: z.object({
+    state: z.enum(['not-configured', 'disabled', 'invalid', 'newer', 'running', 'unauthorized']),
+    bot: z.object({ id: telegramUserId, username: z.string().min(1).max(64) }).nullable(),
+    paired: z.array(telegramPairedSchema).max(16),
+    pairing: z
+      .object({ expiresAt: timestamp, candidate: telegramUserSchema.nullable() })
+      .nullable(),
+    lastError: z
+      .object({
+        kind: z.string().max(LIMITS.nameChars),
+        message: z.string().max(LIMITS.answerChars),
+        at: timestamp,
+      })
+      .nullable(),
+    lastPollAt: timestamp.nullable(),
+  }),
+});
 
 // ---------------------------------------------------------------------------
 // M11 — conversación guardada, contexto y memoria de sesión
@@ -1091,6 +1129,12 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'routines.remove': z.object({ routineId: id, operationId }).strict(),
   'routines.run': z.object({ routineId: id, operationId }).strict(),
 
+  'channels.status': empty,
+  'channels.reload': z.object({ operationId }).strict(),
+  'channels.pairBegin': z.object({ operationId }).strict(),
+  'channels.pairConfirm': z.object({ userId: telegramUserId, operationId }).strict(),
+  'channels.unpair': z.object({ userId: telegramUserId, operationId }).strict(),
+
   'events.subscribe': z.object({ scope }).strict(),
   'events.unsubscribe': subscriptionRef,
   'trace.subscribe': sessionRef,
@@ -1251,6 +1295,16 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'routines.update': routineResult,
   'routines.remove': routineResult,
   'routines.run': z.object({ fire: routineFireSchema, routine: routineSchema }),
+
+  'channels.status': channelsStatusSchema,
+  'channels.reload': channelsStatusSchema,
+  'channels.pairBegin': z.object({
+    code: z.string().min(1).max(64),
+    link: z.string().url().max(256),
+    expiresAt: timestamp,
+  }),
+  'channels.pairConfirm': z.object({ paired: telegramPairedSchema }),
+  'channels.unpair': z.object({ removed: z.boolean() }),
 
   'events.subscribe': z.object({ subscriptionId: id, mode: z.enum(['replay', 'snapshot']) }),
   'events.unsubscribe': emptyResult,

@@ -225,7 +225,7 @@ async function observe(
 }
 
 /** Conexión de aprobador: pide la clave por la terminal. `null` si no se pudo. */
-async function approver(): Promise<StratumClient | null> {
+export async function approver(name = 'stratum approvals'): Promise<StratumClient | null> {
   if (!process.stdin.isTTY || !process.stderr.isTTY) {
     fail('Resolving a pending request needs an interactive terminal: the approver key is typed.');
     return null;
@@ -237,7 +237,7 @@ async function approver(): Promise<StratumClient | null> {
   }
   const identity: ClientIdentity = {
     kind: 'cli',
-    name: 'stratum approvals',
+    name,
     version: cliVersion(),
     roles: ['approver'],
     approverKey,

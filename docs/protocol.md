@@ -1981,3 +1981,54 @@ en ella. El planificador vive en el daemon: sin daemon no hay rutinas.
 
 Tests: `stratum-cli/src/daemon/daemon-routines-protocol.test.ts`, `routine-scheduler.test.ts`,
 `src/protocol/schemas.test.ts` y `src/cli/commands/routines.test.ts`.
+
+## 24. Canales externos: Telegram (M18)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.11. Un canal es otra puerta a la conversación del
+asistente (`companion`, §22): la misma sesión que Dot, no una aparte. Vive **dentro del daemon** y
+escucha por *long polling* (`getUpdates`): el daemon no abre ningún puerto. El token del bot y los
+chats emparejados están en `~/.stratum/daemon/telegram.json` (privado, `0600`), nunca en la config ni
+en el protocolo; en la config global solo hay `channels.telegram.enabled`.
+
+```json
+{ "method": "channels.status", "params": {} }
+→ { "telegram": { "state": "running", "bot": { "id": 7000000001, "username": "mi_dot_bot" },
+                  "paired": [{ "userId": 42, "name": "Ana", "username": "ana", "pairedAt": 1762250000000 }],
+                  "pairing": null, "lastError": null, "lastPollAt": 1762251000000 } }
+```
+
+- **Métodos.** `channels.status` (`observe`) → `ProtocolChannelsStatus`. `channels.reload`
+  (`control`): vuelve a leer `telegram.json` y `channels.telegram.enabled`, anula el emparejamiento en
+  curso y devuelve el estado (lo llama `stratum channels telegram setup|disable`).
+  `channels.pairBegin` (`control`) → `{ code, link, expiresAt }`. `channels.pairConfirm { userId }`
+  (**`approve`**) → `{ paired }`. `channels.unpair { userId }` (`control`) → `{ removed }`. Todos los
+  que mutan admiten `operationId`.
+- **Estado** (`state`): `not-configured` (sin `setup`), `disabled` (configurado y apagado en la
+  config), `invalid` (`telegram.json` no valida: apagado, falla cerrado), `newer` (de un Stratum más
+  nuevo: ni se lee ni se toca), `running` o `unauthorized` (Telegram rechaza el token: el sondeo se
+  para hasta rehacer `setup`). `lastError` es el último fallo del sondeo (red, `rate-limited`,
+  `conflict`…), que se reintenta con espera y se borra con el siguiente sondeo bueno; nunca es un
+  error de una sesión. **Nada lleva el token**, ni el código de emparejamiento.
+- **Emparejar** da autoridad (hablar con el asistente y aprobar desde el chat), así que va en dos
+  pasos. `pairBegin` da un código de un solo uso (10 caracteres sin ambigüedades, 10 minutos) y el
+  enlace `https://t.me/<bot>?start=<código>`; uno nuevo anula el anterior. Quien manda el código al
+  bot desde un **chat privado** queda como `pairing.candidate`, **sin emparejar**, y el bot le dice
+  que lo confirme en Dot. Un código falso no tiene respuesta, y cinco fallos anulan el código. Solo
+  `pairConfirm` con el `userId` del candidato lo añade a `paired` (otro id → `NOT_FOUND`
+  `no-candidate`); Dot pide antes la confirmación nativa y la CLI (`stratum channels telegram pair`),
+  la clave de aprobador. Como mucho 16 emparejados (`UNAVAILABLE` `paired-limit`). El código y el
+  candidato viven en memoria: un reinicio los anula.
+- **Desemparejar solo resta**: `channels.unpair`, `/unpair` desde el propio chat o, sin daemon,
+  `stratum channels telegram unpair <id|@usuario>` sobre el fichero.
+- **Quién habla.** Solo chats privados de un usuario emparejado; a cualquier otro el bot no le
+  contesta nada (salvo al que manda un código válido). Lo que llega fechado antes de que arrancara el
+  canal no se pasa al asistente: el bot avisa de que llegó con Stratum parado.
+- **Sin eventos nuevos**: un cliente consulta `channels.status` (Dot, mientras enseña el panel o el
+  diálogo de emparejar). Con el canal escuchando y alguien emparejado (o un emparejamiento en curso),
+  el daemon no se apaga por inactividad.
+- **Errores.** Canal apagado o sin configurar → `UNAVAILABLE` (`channel-off`); daemon sin canales →
+  `UNAVAILABLE` (`channels-disabled`); `telegram.json` cambiado en disco por `setup` (otro bot) desde
+  que se leyó → `UNAVAILABLE` (`channel-changed`): hay que recargar.
+
+Tests: `stratum-cli/src/daemon/daemon-channels.test.ts`, `src/channels/telegram/*.test.ts`,
+`src/protocol/schemas.test.ts` y `src/cli/commands/channels.test.ts`.

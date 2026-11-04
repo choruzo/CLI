@@ -596,6 +596,50 @@ export interface ProtocolRoutine {
 }
 
 // ---------------------------------------------------------------------------
+// M18 — canales externos (Telegram)
+// ---------------------------------------------------------------------------
+
+/** Un usuario de Telegram tal como lo dice Telegram. El nombre no identifica: el id, sí. */
+export interface ProtocolTelegramUser {
+  userId: number;
+  name: string;
+  username?: string;
+}
+
+export interface ProtocolTelegramPaired extends ProtocolTelegramUser {
+  pairedAt: Timestamp;
+}
+
+export type ProtocolTelegramState =
+  /** Sin `stratum channels telegram setup`. */
+  | 'not-configured'
+  /** Configurado, con `channels.telegram.enabled: false`. */
+  | 'disabled'
+  /** `telegram.json` no valida: apagado hasta rehacer `setup`. */
+  | 'invalid'
+  /** `telegram.json` de un Stratum más nuevo: no se lee. */
+  | 'newer'
+  | 'running'
+  /** Telegram rechaza el token: el sondeo está parado. */
+  | 'unauthorized';
+
+/** El canal de Telegram. **Nunca** lleva el token ni el código de emparejamiento. */
+export interface ProtocolTelegramStatus {
+  state: ProtocolTelegramState;
+  bot: { id: number; username: string } | null;
+  paired: ProtocolTelegramPaired[];
+  /** Emparejamiento en curso (`channels.pairBegin`), o `null`. */
+  pairing: { expiresAt: Timestamp; candidate: ProtocolTelegramUser | null } | null;
+  /** Último fallo del sondeo; se borra con el siguiente que sale bien. */
+  lastError: { kind: string; message: string; at: Timestamp } | null;
+  lastPollAt: Timestamp | null;
+}
+
+export interface ProtocolChannelsStatus {
+  telegram: ProtocolTelegramStatus;
+}
+
+// ---------------------------------------------------------------------------
 // M11 — conversación duradera, contexto activo y memoria de sesión
 // ---------------------------------------------------------------------------
 
