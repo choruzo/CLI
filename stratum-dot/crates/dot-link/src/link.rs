@@ -165,6 +165,10 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::RoutinesRun,
     // M17: revocar una concesión (solo resta autoridad; Desktop no la ofrece).
     MainMethod::GrantsRevoke,
+    // M17: inspector de memoria del companion (Desktop no lo tiene).
+    MainMethod::MemoryDecisions,
+    MainMethod::MemoryForget,
+    MainMethod::SessionsMemory,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -1018,8 +1022,40 @@ fn call_request(
                 }),
             ))
         }
+        CallAction::MemoryDecisions { query } => {
+            // El agente lo fija el nativo: el webview no elige qué memoria ve.
+            let mut params = serde_json::Map::new();
+            params.insert("agent".into(), json!("companion"));
+            params.insert("limit".into(), json!(200));
+            if let Some(query) = query {
+                let query = query.trim();
+                if query.chars().count() > MAX_MEMORY_QUERY_CHARS {
+                    return Err(invalid("Search text is too long."));
+                }
+                if !query.is_empty() {
+                    params.insert("query".into(), json!(query));
+                }
+            }
+            Ok((MainMethod::MemoryDecisions, Value::Object(params)))
+        }
+        CallAction::MemoryForget { decision_id } => {
+            if !valid_id(decision_id) {
+                return Err(invalid("Invalid decision id."));
+            }
+            Ok((
+                MainMethod::MemoryForget,
+                json!({
+                    "agent": "companion",
+                    "decisionId": decision_id,
+                    "operationId": operation_id,
+                }),
+            ))
+        }
     }
 }
+
+/// Consulta de la memoria (`LIMITS.queryChars`).
+const MAX_MEMORY_QUERY_CHARS: usize = 2_000;
 
 // Topes de una rutina (`docs/protocol.md` §23): los mismos que valida el
 // daemon, comprobados antes de salir para que lo que no cabe no se envíe.
@@ -2062,7 +2098,13 @@ impl Actor {
                     Ok((method, params)) => {
                         // Sin el contenido: ni el mensaje ni la ruta van al log. La
                         // pantalla de la caja se pide cada poco: no llena el log.
-                        if !matches!(action, CallAction::BoxScreen) {
+                        // Tampoco la memoria: ni la consulta ni lo recordado.
+                        if !matches!(
+                            action,
+                            CallAction::BoxScreen
+                                | CallAction::Memory { .. }
+                                | CallAction::MemoryDecisions { .. }
+                        ) {
                             self.cfg.logger.info(&format!("call: {}", action.name()));
                         }
                         let timeout = match action {
@@ -2349,6 +2391,54 @@ mod tests {
         }
         assert!(DOT_METHODS.contains(&MainMethod::GrantsRevoke));
         assert!(!DESKTOP_METHODS.contains(&MainMethod::GrantsRevoke));
+
+        // M17: el inspector de memoria fija el agente y recorta la consulta.
+        let latest = CallAction::MemoryDecisions { query: None };
+        let (method, params) = call_request(&latest, "op-6").unwrap();
+        assert_eq!(method, MainMethod::MemoryDecisions);
+        assert_eq!(params, json!({ "agent": "companion", "limit": 200 }));
+        assert!(!latest.mutating());
+        let blank = CallAction::MemoryDecisions {
+            query: Some("   ".into()),
+        };
+        assert_eq!(
+            call_request(&blank, "op").unwrap().1,
+            json!({ "agent": "companion", "limit": 200 })
+        );
+        let searched = CallAction::MemoryDecisions {
+            query: Some("  postgres  ".into()),
+        };
+        assert_eq!(
+            call_request(&searched, "op").unwrap().1,
+            json!({ "agent": "companion", "limit": 200, "query": "postgres" })
+        );
+        let too_long = CallAction::MemoryDecisions {
+            query: Some("x".repeat(MAX_MEMORY_QUERY_CHARS + 1)),
+        };
+        assert!(call_request(&too_long, "op").is_err());
+        let forget = CallAction::MemoryForget {
+            decision_id: "dec_1".into(),
+        };
+        let (method, params) = call_request(&forget, "op-7").unwrap();
+        assert_eq!(method, MainMethod::MemoryForget);
+        assert_eq!(
+            params,
+            json!({ "agent": "companion", "decisionId": "dec_1", "operationId": "op-7" })
+        );
+        assert!(forget.mutating());
+        for bad in ["".to_string(), "x".repeat(MAX_ID_CHARS + 1)] {
+            let bad = CallAction::MemoryForget { decision_id: bad };
+            assert!(call_request(&bad, "op").is_err());
+        }
+        for method in [
+            MainMethod::MemoryDecisions,
+            MainMethod::MemoryForget,
+            MainMethod::SessionsMemory,
+        ] {
+            assert!(DOT_METHODS.contains(&method));
+        }
+        assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryDecisions));
+        assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryForget));
 
         // Solo la consulta no cambia nada.
         assert!(!CallAction::RoutinesList.mutating());

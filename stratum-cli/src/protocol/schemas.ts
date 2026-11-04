@@ -310,6 +310,9 @@ export const decisionSchema: z.ZodType<ProtocolDecision> = z.object({
   tags: z.array(z.string()),
   importance: z.string(),
   timestamp: z.string(),
+  content: z.string().optional(),
+  source: z.enum(['agent', 'auto']).optional(),
+  sessionId: z.string().optional(),
 });
 
 export const memoryEventSchema: z.ZodType<ProtocolMemoryEvent> = z.object({
@@ -860,6 +863,13 @@ const imagePaths = z
   .min(1)
   .max(LIMITS.imagesPerMessage);
 const limit = z.number().int().positive().max(LIMITS.listLimit);
+const memoryAgent = z.enum(['assistant', 'companion']);
+/** `memory.*`: la del proyecto de `cwd` o la de un agente embebido, nunca las dos. */
+function memoryRef<T extends z.ZodRawShape>(shape: z.ZodObject<T>) {
+  return shape.strict().refine((p) => !(p['cwd'] !== undefined && p['agent'] !== undefined), {
+    message: 'cwd y agent no se combinan: son memorias distintas',
+  });
+}
 const steerStatus = z.enum(['accepted', 'not-accepting', 'empty', 'too-large']);
 const cancelResult = z.object({ status: z.enum(['cancelled', 'not-running']) });
 const pauseResult = z.object({
@@ -1008,14 +1018,23 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'jobs.list': sessionRef,
   'jobs.cancel': z.object({ sessionId: id, jobId: id, operationId }).strict(),
 
-  'memory.status': z.object({ cwd: cwd.optional() }).strict(),
-  'memory.decisions': z
-    .object({
+  'memory.status': memoryRef(z.object({ cwd: cwd.optional(), agent: memoryAgent.optional() })),
+  'memory.decisions': memoryRef(
+    z.object({
       cwd: cwd.optional(),
+      agent: memoryAgent.optional(),
       query: z.string().max(LIMITS.queryChars).optional(),
       limit: limit.optional(),
-    })
-    .strict(),
+    }),
+  ),
+  'memory.forget': memoryRef(
+    z.object({
+      cwd: cwd.optional(),
+      agent: memoryAgent.optional(),
+      decisionId: id,
+      operationId,
+    }),
+  ),
 
   'box.status': empty,
   'box.screen': empty,
@@ -1199,6 +1218,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'memory.status': memoryStatusSchema,
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),
+  'memory.forget': z.object({ removed: z.boolean() }),
 
   'box.status': boxResult,
   'box.screen': z.object({ screen: boxScreenSchema }),

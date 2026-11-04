@@ -8,11 +8,13 @@ import type {
   ProtocolAgent,
   ProtocolBoxScreen,
   ProtocolBoxStatus,
+  ProtocolDecision,
   ProtocolModel,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRun,
   ProtocolSession,
+  ProtocolSessionMemory,
 } from './index';
 
 export function parseOpenedSession(raw: unknown): ProtocolSession | null {
@@ -74,4 +76,22 @@ export function parseRoutine(raw: unknown): ProtocolRoutine | null {
 export function parseRoutineRun(raw: unknown): { fire: ProtocolRoutineFire; routine: ProtocolRoutine } | null {
   const parsed = RESULTS['routines.run'].safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+/** M17 — `memory.decisions`: lo que recuerda el asistente (las últimas, o la búsqueda). */
+export function parseDecisions(raw: unknown): ProtocolDecision[] | null {
+  const parsed = RESULTS['memory.decisions'].safeParse(raw);
+  return parsed.success ? parsed.data.decisions : null;
+}
+
+/** M17 — `memory.forget`: `removed: false` si ya no estaba (no es un error). */
+export function parseForget(raw: unknown): boolean | null {
+  const parsed = RESULTS['memory.forget'].safeParse(raw);
+  return parsed.success ? parsed.data.removed : null;
+}
+
+/** M17 — `sessions.memory`: la memoria de sesión (M11), solo lectura. */
+export function parseSessionMemory(raw: unknown): ProtocolSessionMemory | null {
+  const parsed = RESULTS['sessions.memory'].safeParse(raw);
+  return parsed.success ? parsed.data.memory : null;
 }

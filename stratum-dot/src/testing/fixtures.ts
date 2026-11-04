@@ -205,6 +205,13 @@ export function fakeNative(): FakeNative {
       }),
     ),
     grantsRevoke: vi.fn(async (): Promise<unknown> => ({ grant: {} })),
+    memoryDecisions: vi.fn(async (_query?: string): Promise<unknown> => ({ decisions: [] })),
+    memoryForget: vi.fn(async (_decisionId: string): Promise<unknown> => ({ removed: true })),
+    sessionMemory: vi.fn(
+      async (_sessionId: string): Promise<unknown> => ({
+        memory: { version: 1, updatedAt: null, summary: null, items: [], sourceCursor: null },
+      }),
+    ),
     notifyRoutine: vi.fn(async () => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),

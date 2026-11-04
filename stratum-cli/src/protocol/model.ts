@@ -276,7 +276,19 @@ export interface ProtocolDecision {
   tags: string[];
   importance: string;
   timestamp: string;
+  /** M17 — el texto guardado, redactado. Un servidor anterior no lo manda. */
+  content?: string;
+  /** Procedencia: `agent` (lo guardó el agente) o `auto` (extracción en segundo plano). */
+  source?: 'agent' | 'auto';
+  /** La sesión en la que se guardó, si se sabe. */
+  sessionId?: string;
 }
+
+/**
+ * M17 — qué memoria de decisiones mira `memory.*` sin `cwd`: la de un agente
+ * embebido. Sin `cwd` ni `agent`, la del asistente (`assistant`).
+ */
+export type ProtocolMemoryAgent = 'assistant' | 'companion';
 
 export interface ProtocolMemoryEvent {
   kind: 'read' | 'write' | 'forget';

@@ -15,6 +15,7 @@ import type {
   ProtocolGrantMinutes,
   ProtocolHistoryPage,
   ProtocolJob,
+  ProtocolMemoryAgent,
   ProtocolMemoryStatus,
   ProtocolModel,
   ProtocolPlan,
@@ -440,13 +441,24 @@ export interface ProtocolMethods {
   'jobs.cancel': Spec<Mutation & { sessionId: string; jobId: string }, Empty>;
 
   /**
-   * Memoria de decisiones: la del proyecto de `cwd` o, sin `cwd`, la global
-   * (la del asistente). Nunca las dos a la vez.
+   * Memoria de decisiones: la del proyecto de `cwd` o, sin `cwd`, la de un
+   * agente embebido (`agent`; por defecto el asistente). Nunca dos a la vez:
+   * `cwd` y `agent` juntos son `INVALID_PARAMS`.
    */
-  'memory.status': Spec<{ cwd?: string }, ProtocolMemoryStatus>;
+  'memory.status': Spec<{ cwd?: string; agent?: ProtocolMemoryAgent }, ProtocolMemoryStatus>;
   'memory.decisions': Spec<
-    { cwd?: string; query?: string; limit?: number },
+    { cwd?: string; agent?: ProtocolMemoryAgent; query?: string; limit?: number },
     { decisions: ProtocolDecision[] }
+  >;
+  /**
+   * M17 — olvidar una decisión (y su entrada del índice). Lo pide una persona
+   * desde un inspector; nada de lo recordado decide permisos, así que basta
+   * `control`. Un id que ya no está contesta `removed: false`, no un error: un
+   * reintento tras un resultado desconocido es inocuo.
+   */
+  'memory.forget': Spec<
+    Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; decisionId: string },
+    { removed: boolean }
   >;
 
   /**
@@ -638,6 +650,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'memory.status': read('observe'),
   'memory.decisions': read('observe'),
+  // Olvidar solo resta, y lo recordado no es autoridad: no exige `approve`.
+  'memory.forget': write('control'),
 
   'box.status': read('observe'),
   'box.screen': read('observe'),

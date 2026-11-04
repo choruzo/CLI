@@ -1421,3 +1421,33 @@ durante ese tiempo (`docs/protocol.md`; reglas en `protocol/resolve.ts`).
   la retira la foto (`grant.ended`); un error se enseña y un «sin respuesta» no se repite.
 - Tests: `src/app/Grants.test.tsx`, `link.rs` (unidad), `revocar_una_concesion_sale_por_dot_con_operation_id_y_no_por_desktop`
   (`tests/link.rs`), `wire.rs` y `tests/architecture.test.ts`.
+
+## 21. Inspector de memoria (M17)
+
+Ver, buscar y olvidar lo que recuerda el asistente (`companion`), con su procedencia (PRD §23.6). **Nada de lo
+recordado decide permisos, aprobaciones ni guardas**: el panel lo dice y no hay ningún camino de la memoria a esas
+decisiones.
+
+- **Qué enseña**: `MemoryPanel` (vista *Asistente*, tras *Routines*) pide `memory.decisions` al abrir con conexión
+  y cuando termina el run activo del asistente (`activeRun` pasa de no nulo a nulo); no hay sondeo. Cada decisión:
+  título, tipo, importancia, fecha local y tags; al desplegarla, el contenido (texto plano, ya redactado por el
+  daemon; puede faltar en un daemon anterior) y la procedencia: «Saved by the assistant» (`source: 'agent'`),
+  «Extracted automatically from a conversation» (`'auto'`) u «Origin not recorded». Con `sessionId` se nombra la
+  conversación y, si Dot la conoce, *Open* la abre. Sin consulta salen las últimas; con consulta, la búsqueda
+  semántica del daemon; vaciarla vuelve a las últimas.
+- **El nativo fija la memoria**: `CallAction::MemoryDecisions { query }` y `MemoryForget { decision_id }` mandan
+  siempre `"agent": "companion"`; el webview no elige de quién es la memoria (superficie mínima). La consulta se
+  recorta y se acota a 2000 caracteres (`LIMITS.queryChars`); el límite es 200. Ni la consulta ni lo recordado
+  llegan a una línea de log nativa (`memory-decisions` y `sessions.memory` no se registran; `memory-forget` solo
+  deja su nombre).
+- **Olvidar** (`memory.forget`, capacidad `control`, `operationId` propio): confirmación **en la página** («Forget
+  “…”? The assistant will no longer recall it.»), conexión principal, sin broker ni confirmación nativa porque solo
+  resta (no es autoridad). **Sin optimismo**: la fila no se quita a mano; tras la respuesta se vuelve a pedir la
+  lista. `removed: false` → «It was already gone.»; sin respuesta → «Result unknown…», no se repite.
+- **Memoria de sesión** (M11), en solo lectura: sección plegada «This conversation» (con la sesión del asistente);
+  pide `sessions.memory` al abrirla y con *Refresh*, y enseña el resumen y los items `active`.
+- **Métodos y comandos**: `MainMethod::MemoryDecisions|MemoryForget` y, para Dot, `SessionsMemory`, solo en
+  `DOT_METHODS` (Desktop no gana nada); `dot_memory_decisions`, `dot_memory_forget`, `dot_session_memory`. El
+  test de `wire.rs` que vetaba el prefijo `memory.` admite exactamente estos dos.
+- Tests: `src/app/Memory.test.tsx`, `link.rs` (unidad), `la_memoria_del_asistente_sale_por_dot_con_el_agente_fijado_y_no_por_desktop`
+  (`tests/link.rs`), `wire.rs` y `tests/architecture.test.ts`.

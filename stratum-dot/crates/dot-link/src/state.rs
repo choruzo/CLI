@@ -246,6 +246,11 @@ pub enum CallAction {
         session_id: String,
         grant_id: String,
     },
+    /// M17 — `memory.decisions` del asistente: las últimas, o la búsqueda si hay
+    /// consulta. El nativo fija el agente (`companion`); la consulta no se registra.
+    MemoryDecisions { query: Option<String> },
+    /// M17 — `memory.forget` del asistente: borrar una decisión por su id.
+    MemoryForget { decision_id: String },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -300,6 +305,8 @@ impl CallAction {
             CallAction::RoutinesRemove { .. } => "routines-remove",
             CallAction::RoutinesRun { .. } => "routines-run",
             CallAction::GrantsRevoke { .. } => "grants-revoke",
+            CallAction::MemoryDecisions { .. } => "memory-decisions",
+            CallAction::MemoryForget { .. } => "memory-forget",
         }
     }
 
@@ -318,6 +325,7 @@ impl CallAction {
                 | CallAction::RoutinesRemove { .. }
                 | CallAction::RoutinesRun { .. }
                 | CallAction::GrantsRevoke { .. }
+                | CallAction::MemoryForget { .. }
         )
     }
 }

@@ -71,10 +71,14 @@ pub enum MainMethod {
     RoutinesRun,
     /// M17 (Dot) — revocar una concesión vigente (capacidad `control`, solo resta).
     GrantsRevoke,
+    /// M17 (Dot) — inspector de memoria del asistente: las decisiones (`observe`).
+    MemoryDecisions,
+    /// M17 (Dot) — olvidar una decisión del asistente (`control`, solo resta).
+    MemoryForget,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 29] = [
+    pub const ALL: [MainMethod; 31] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -104,6 +108,8 @@ impl MainMethod {
         MainMethod::RoutinesRemove,
         MainMethod::RoutinesRun,
         MainMethod::GrantsRevoke,
+        MainMethod::MemoryDecisions,
+        MainMethod::MemoryForget,
     ];
 }
 
@@ -139,6 +145,8 @@ impl WireMethod for MainMethod {
             MainMethod::RoutinesRemove => "routines.remove",
             MainMethod::RoutinesRun => "routines.run",
             MainMethod::GrantsRevoke => "grants.revoke",
+            MainMethod::MemoryDecisions => "memory.decisions",
+            MainMethod::MemoryForget => "memory.forget",
         }
     }
 }
@@ -329,7 +337,9 @@ mod tests {
                 "routines.update",
                 "routines.remove",
                 "routines.run",
-                "grants.revoke"
+                "grants.revoke",
+                "memory.decisions",
+                "memory.forget"
             ]
         );
         for forbidden in [
@@ -346,11 +356,13 @@ mod tests {
             assert!(!names.contains(&forbidden), "{forbidden}");
         }
         for name in names {
-            // Ni alojar, ni gobernar jobs, ni la memoria global: eso no es de un cliente.
+            // Ni alojar, ni gobernar jobs, ni la memoria global: eso no es de un
+            // cliente. Única excepción (M17): ver y olvidar la del asistente.
+            let companion_memory = name == "memory.decisions" || name == "memory.forget";
             assert!(
                 !name.starts_with("host.")
                     && !name.starts_with("jobs.")
-                    && !name.starts_with("memory."),
+                    && (!name.starts_with("memory.") || companion_memory),
                 "{name}"
             );
         }

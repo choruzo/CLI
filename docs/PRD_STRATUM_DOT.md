@@ -2016,6 +2016,13 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   `mcp.readOnlyTools` y a `callEffects`; lo no declarado se confirma (y admite concesión). E2E
   `stratum-dot/e2e/connectors.e2e.mjs` contra NaN (`glm5.3-flash`): aprobar con «30 min» en la
   confirmación nativa, la segunda llamada sin preguntar, `list_notes` sin preguntar, revocar.
+  *Inspector de memoria hecho 2026-11-04* (`docs/dot.md` §21, `docs/protocol.md` §17): `memory.status|decisions`
+  con `agent: 'companion'` (exclusivo con `cwd`), `content` redactado y procedencia (`source`, `sessionId`) en
+  cada decisión, y `memory.forget` (`control`: olvidar solo resta y lo recordado no es autoridad). Panel
+  *Memory* en la vista *Asistente*: últimas o búsqueda, procedencia con enlace a la conversación, olvidar con
+  confirmación en la página y sin estado optimista, y la memoria de sesión de su conversación en solo lectura.
+  El nativo fija `agent: 'companion'`: el webview no elige qué memoria ve. «Qué se recuperó en cada run» ya
+  se ve en la conversación (las llamadas a `recall_decisions`); no hay vista aparte. Con esto M17 queda cerrado.
 - **M18 — Canales externos (Telegram, etc.).** Solo después de distinguir quién habla (dueño, de
   confianza, desconocido): otro canal es otra puerta de entrada. Se decide con datos de M13–M17.
 

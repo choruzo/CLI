@@ -242,6 +242,15 @@ export interface NativeBridge {
    * conexión principal, sin confirmación nativa. Sin respuesta, `unknown`: no se repite.
    */
   grantsRevoke(sessionId: string, grantId: string): Promise<unknown>;
+  /**
+   * M17 — lo que recuerda el asistente: las últimas decisiones, o la búsqueda si hay
+   * consulta. El lado nativo fija de quién es la memoria (`companion`).
+   */
+  memoryDecisions(query?: string): Promise<unknown>;
+  /** M17 — olvidar una decisión del asistente. Sin respuesta, `unknown`: no se repite. */
+  memoryForget(decisionId: string): Promise<unknown>;
+  /** M17 — la memoria de sesión de una conversación (solo lectura). */
+  sessionMemory(sessionId: string): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
@@ -316,6 +325,9 @@ export const tauriBridge: NativeBridge = {
   routinesRemove: (routineId) => invoke<unknown>('dot_routines_remove', { routineId }),
   routinesRun: (routineId) => invoke<unknown>('dot_routines_run', { routineId }),
   grantsRevoke: (sessionId, grantId) => invoke<unknown>('dot_grants_revoke', { sessionId, grantId }),
+  memoryDecisions: (query) => invoke<unknown>('dot_memory_decisions', { query: query ?? null }),
+  memoryForget: (decisionId) => invoke<unknown>('dot_memory_forget', { decisionId }),
+  sessionMemory: (sessionId) => invoke<unknown>('dot_session_memory', { sessionId }),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),

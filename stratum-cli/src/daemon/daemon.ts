@@ -54,7 +54,11 @@ import {
   buildAssistantConfig,
   type AssistantData,
 } from '../host/assistant.js';
-import { companionDataDir, ensureCompanionWorkspace } from '../host/companion.js';
+import {
+  buildCompanionConfig,
+  companionDataDir,
+  ensureCompanionWorkspace,
+} from '../host/companion.js';
 import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
@@ -66,6 +70,7 @@ import {
   type ClientKind,
   type MethodName,
   type ProtocolEvent,
+  type ProtocolMemoryAgent,
   type ProtocolModel,
   type ProtocolOverviewSnapshot,
   type ProtocolServerInfo,
@@ -110,6 +115,7 @@ import { ensurePrivateDir, restrictSocket } from './private-dir.js';
 import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
 import { traceFilePath } from '../trace/store.js';
+import { redactText } from '../security/redact-output.js';
 
 const log = getLogger('daemon');
 
@@ -1572,7 +1578,7 @@ export class Stratumd {
       },
 
       'memory.status': async (params) => {
-        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd));
+        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd, params.agent));
         const backend = await memory.vectors.backendName().catch(() => 'none');
         return {
           decisions: memory.list().length,
@@ -1582,21 +1588,39 @@ export class Stratumd {
         };
       },
       'memory.decisions': async (params) => {
-        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd));
+        const config = this.memoryConfigFor(params.cwd, params.agent);
+        const memory = getDecisionMemory(config);
         const limit = params.limit ?? 50;
         const records = params.query
           ? (await memory.search(params.query, limit)).map((r) => r.record)
           : memory.list().slice(-limit).reverse();
+        // Lo guardado puede llevar lo que llevaba la conversación: sale redactado.
+        const redact = (text: string) => redactText(text, config);
         return {
           decisions: records.map((r) => ({
             id: r.id,
-            title: r.title,
+            title: redact(r.title),
             type: r.type,
             tags: r.tags,
             importance: r.importance,
             timestamp: r.timestamp,
+            content: redact(r.content),
+            ...(r.source ? { source: r.source } : {}),
+            ...(r.session_id ? { sessionId: r.session_id } : {}),
           })),
         };
+      },
+      'memory.forget': async (params) => {
+        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd, params.agent));
+        const removed = await memory.remove(params.decisionId);
+        // Ninguna línea de log lleva el título ni el contenido.
+        log.info('memory decision forgotten', {
+          decisionId: params.decisionId,
+          memory: params.cwd !== undefined ? 'project' : (params.agent ?? 'assistant'),
+          removed,
+          connectionId: conn.id,
+        });
+        return { removed };
       },
 
       'box.status': async () => ({ box: await this.box.status() }),
@@ -1697,11 +1721,13 @@ export class Stratumd {
 
   /**
    * La memoria de decisiones que miran `memory.*`: la del proyecto de `cwd`
-   * (la del agente de código) o, sin `cwd`, la del asistente, que es la única
-   * global. Nunca la que resultaría del directorio del proceso del daemon.
+   * (la del agente de código) o, sin `cwd`, la de un agente embebido: el
+   * `companion` (M17, su carpeta) o, por defecto, el asistente. Nunca la que
+   * resultaría del directorio del proceso del daemon.
    */
-  private memoryConfigFor(cwd: string | undefined): StratumConfig {
+  private memoryConfigFor(cwd: string | undefined, agent?: ProtocolMemoryAgent): StratumConfig {
     if (cwd) return this.configFor(cwd);
+    if (agent === 'companion') return buildCompanionConfig(this.opts.config, this.companionDir);
     return buildAssistantConfig(
       this.opts.config,
       this.opts.assistantData?.dir ?? assistantDataDir(),

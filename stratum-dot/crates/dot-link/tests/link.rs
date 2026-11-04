@@ -1012,3 +1012,57 @@ async fn revocar_una_concesion_sale_por_dot_con_operation_id_y_no_por_desktop() 
     desktop.quit().await;
     rig.quit().await;
 }
+
+/// M17: el inspector de memoria sale por Dot con el agente fijado por el nativo;
+/// olvidar lleva `operationId`; Desktop no tiene `memory.*`.
+#[tokio::test(flavor = "multi_thread")]
+async fn la_memoria_del_asistente_sale_por_dot_con_el_agente_fijado_y_no_por_desktop() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    rig.link
+        .call(CallAction::MemoryDecisions {
+            query: Some("  postgres ".into()),
+        })
+        .await
+        .unwrap();
+    rig.link
+        .call(CallAction::MemoryForget {
+            decision_id: "dec_1".into(),
+        })
+        .await
+        .unwrap();
+    let requests = fake.requests();
+    let list = requests
+        .iter()
+        .find(|r| r["method"] == "memory.decisions")
+        .unwrap();
+    assert_eq!(list["params"]["agent"], "companion");
+    assert_eq!(list["params"]["query"], "postgres");
+    assert_eq!(list["params"]["limit"], 200);
+    let forget = requests
+        .iter()
+        .find(|r| r["method"] == "memory.forget")
+        .unwrap();
+    assert_eq!(forget["params"]["agent"], "companion");
+    assert_eq!(forget["params"]["decisionId"], "dec_1");
+    assert!(forget["params"]["operationId"]
+        .as_str()
+        .unwrap()
+        .starts_with("dot-"));
+
+    let before = requests.len();
+    let err = desktop
+        .link
+        .call(CallAction::MemoryDecisions { query: None })
+        .await
+        .unwrap_err();
+    assert_eq!(err.kind, CommandErrorKind::Invalid);
+    assert_eq!(fake.requests().len(), before);
+    desktop.quit().await;
+    rig.quit().await;
+}

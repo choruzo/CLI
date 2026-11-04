@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
+import { MemoryPanel } from '../components/MemoryPanel';
 import { RoutinesPanel } from '../components/RoutinesPanel';
 import { useNative } from '../bridge/context';
 import { toCommandError } from '../bridge/native';
@@ -174,6 +175,13 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
           snapshot={entry?.snapshot ?? null}
         />
         <RoutinesPanel connected={connected} canControl={canControl} onOpenSession={onOpenSession} />
+        <MemoryPanel
+          connected={connected}
+          canControl={canControl}
+          companionId={companionId}
+          snapshot={entry?.snapshot ?? null}
+          onOpenSession={onOpenSession}
+        />
       </div>
       {conversation}
     </main>

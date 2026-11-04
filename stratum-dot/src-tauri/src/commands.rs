@@ -294,6 +294,38 @@ pub async fn dot_grants_revoke(
         .await
 }
 
+/// M17 — las decisiones que recuerda el asistente: las últimas, o la búsqueda si
+/// hay consulta. El agente lo fija el lado nativo, no el webview.
+#[tauri::command]
+pub async fn dot_memory_decisions(
+    state: State<'_, DotState>,
+    query: Option<String>,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::MemoryDecisions { query }).await
+}
+
+/// M17 — olvidar una decisión del asistente. Solo resta: conexión principal
+/// (capacidad `control`), sin broker; sin respuesta queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn dot_memory_forget(
+    state: State<'_, DotState>,
+    decision_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryForget { decision_id })
+        .await
+}
+
+/// M17 — la memoria de sesión (M11) de una conversación, en solo lectura.
+#[tauri::command]
+pub async fn dot_session_memory(
+    state: State<'_, DotState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::Memory { session_id }).await
+}
+
 /// M16 — avisa al sistema de que una rutina terminó. El texto es plano y
 /// acotado aquí, no en el webview; la notificación no lleva acciones. Pulsarla
 /// (Windows) o dar el foco a la ventana poco después (resto) abre esa sesión
