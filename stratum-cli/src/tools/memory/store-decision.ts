@@ -35,8 +35,9 @@ export const storeDecisionTool: ToolDefinition = {
     const input = schema.parse(params);
     try {
       const memory = getDecisionMemory(ctx.config);
+      // Procedencia (M17): en qué conversación se guardó, como la extracción automática.
       const result = await memory.save(
-        { ...input, source: 'agent' },
+        { ...input, source: 'agent', ...(ctx.sessionId ? { session_id: ctx.sessionId } : {}) },
         { source: 'tool', ...(ctx.sessionId ? { sessionId: ctx.sessionId } : {}) },
       );
       if (result.deduped) {

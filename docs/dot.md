@@ -1421,6 +1421,12 @@ durante ese tiempo (`docs/protocol.md`; reglas en `protocol/resolve.ts`).
   la retira la foto (`grant.ended`); un error se enseña y un «sin respuesta» no se repite.
 - Tests: `src/app/Grants.test.tsx`, `link.rs` (unidad), `revocar_una_concesion_sale_por_dot_con_operation_id_y_no_por_desktop`
   (`tests/link.rs`), `wire.rs` y `tests/architecture.test.ts`.
+- *Probado en real 2026-11-04*: `npm run e2e:memory` (`e2e/memory.e2e.mjs`, la ventana con tauri-driver, un `stratumd`
+  real y un modelo real de NaN, `NAN_API_KEY`): una decisión sembrada sale con «Extracted automatically» y el secreto
+  tapado; el companion guarda con `store_decision` y el panel la enseña al terminar el turno con «Saved by the
+  assistant in conversation …» y *Open*; buscar la encuentra (embeddings reales); *Keep* no borra y *Forget* la quita
+  del panel y de `decisions.json`; «This conversation» responde. El E2E destapó que `store_decision` no guardaba la
+  sesión (solo lo hacía la extracción automática): ahora guarda `session_id` (`tools/memory/store-decision.test.ts`).
 
 ## 21. Inspector de memoria (M17)
 

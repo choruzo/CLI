@@ -21,6 +21,7 @@
     "e2e:build": "tauri build --debug --no-bundle",
     "e2e": "node e2e/dot.e2e.mjs && node e2e/chat.e2e.mjs && node e2e/approvals.e2e.mjs && node e2e/assistant.e2e.mjs",
     "e2e:connectors": "node e2e/connectors.e2e.mjs",
+    "e2e:memory": "node e2e/memory.e2e.mjs",
     "tauri": "tauri"
   },
   "dependencies": {
