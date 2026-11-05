@@ -2189,6 +2189,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **B. Fallback de provider/modelo**: si el provider o el modelo guardados de una sesión ya no
     existen en la config, el daemon la monta con el que esté disponible (el por defecto) y lo dice:
     un aviso en la sesión y en el log, nunca en silencio. No debe fallar como hoy.
+    *Hecho 2026-11-05*: `resolveSessionStartup({ restoring: true })` devuelve `fallback`
+    (`provider-missing`, o `model-missing` si `/models` responde con una lista sin el modelo; si no
+    responde, se conserva el guardado). El daemon lo registra, publica un `warning` en la sesión y
+    guarda ya el provider nuevo, así que el aviso sale una vez. Solo al restaurar: abrir una sesión
+    nueva o traspasarla siguen fallando con un provider inexistente.
   - **C. Contestar desde Telegram lo que hoy es «en Dot»**:
     - Preguntas de texto libre, o varias en una tanda: la tarjeta dice «Responde en este chat» y el
       siguiente mensaje de ese chat es la respuesta, no un mensaje nuevo para el asistente. Si son

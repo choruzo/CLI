@@ -638,6 +638,12 @@ export class HostedSession {
     }
   }
 
+  /** Un aviso de la sesión (`warning`) que el daemon quiere que vean los clientes. */
+  warn(message: string): void {
+    this.publisher.warn(message);
+    this.publisher.flush();
+  }
+
   private changed(): ProtocolSession {
     this.publisher.sessionChanged();
     this.publisher.flush();

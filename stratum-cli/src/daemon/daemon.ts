@@ -47,7 +47,11 @@ import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
 import type { StratumConfig } from '../config/schema.js';
-import { resolveSessionStartup, type SessionStartup } from '../host/session-startup.js';
+import {
+  resolveSessionStartup,
+  type SessionStartup,
+  type StartupFallback,
+} from '../host/session-startup.js';
 import {
   assistantCwdProblem,
   assistantDataDir,
@@ -226,6 +230,22 @@ const RESUME_EXCLUSIVE = [
   'readOnly',
   'sessionProfile',
 ] as const;
+
+/** El aviso de una sesión guardada que se montó con otro provider o modelo. */
+function fallbackMessage(fallback: StartupFallback): string {
+  const { saved, using } = fallback;
+  if (fallback.reason === 'provider-missing') {
+    const model = saved.model ? ` (model "${saved.model}")` : '';
+    return (
+      `This session used provider "${saved.provider}"${model}, which is no longer configured. ` +
+      `It now uses "${using.provider}" / "${using.model}".`
+    );
+  }
+  return (
+    `Model "${saved.model}" is no longer offered by provider "${using.provider}". ` +
+    `This session now uses "${using.model}".`
+  );
+}
 
 function invalid(path: string, message: string): ProtocolError {
   return new ProtocolError('INVALID_PARAMS', message, { issues: [{ path, message }] });
@@ -739,6 +759,7 @@ export class Stratumd {
     this.opening++;
     let files: SessionFiles | null = null;
     let session: HostedSession | null = null;
+    let fallbackNotice: string | null = null;
     try {
       const unusable = await this.unusableCwd(meta.cwd);
       if (unusable) {
@@ -751,7 +772,20 @@ export class Stratumd {
         provider: meta.provider,
         model: meta.model,
         sessionProfile: meta.sessionProfile,
+        restoring: true,
       });
+      if (startup.ok && startup.fallback) {
+        const { fallback } = startup;
+        fallbackNotice = fallbackMessage(fallback);
+        log.warn('archived session started with another provider', {
+          sessionId,
+          reason: fallback.reason,
+          savedProvider: fallback.saved.provider,
+          savedModel: fallback.saved.model,
+          provider: fallback.using.provider,
+          model: fallback.using.model,
+        });
+      }
       if (!startup.ok) {
         log.warn('archived session startup failed', { sessionId, stage: startup.stage });
         throw new ProtocolError(
@@ -802,6 +836,9 @@ export class Stratumd {
     this.sessions.set(sessionId, session);
     session.publisher.start();
     session.publisher.flush();
+    // Con otro provider/modelo del guardado: se avisa en la sesión y se persiste
+    // ya el nuevo, para que el aviso no se repita en cada arranque.
+    if (fallbackNotice) session.warn(fallbackNotice);
     session.persist();
     log.info('archived session restored', { sessionId });
     return session;

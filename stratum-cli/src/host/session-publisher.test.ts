@@ -434,6 +434,24 @@ describe('SessionPublisher — cola local acotada', () => {
     expect(publisher.snapshot().partial.text).toBe('');
   });
 
+  it('warn publica un warning de estado, redactado', async () => {
+    const { host } = fakeHost('s-warn', testConfig('warn'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+    });
+    publisher.start();
+    publisher.warn('Uses key sk-abcdefghijklmnopqrstuvwxyz123456 now');
+    publisher.flush();
+    const warning = sink.states().find((e) => e.type === 'warning');
+    expect(warning).toBeDefined();
+    const message = (warning!.data as { message: string }).message;
+    expect(message).toContain('Uses key');
+    expect(message).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
+  });
+
   it('al llenarse descarta primero lo volátil: los eventos de estado llegan todos', async () => {
     const { host, emit } = fakeHost('s-volatile', testConfig('volatile'));
     const sink = recorder();

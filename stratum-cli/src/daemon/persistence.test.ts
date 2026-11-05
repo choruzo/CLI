@@ -15,11 +15,15 @@ import { join } from 'path';
 import type { StratumClient } from '../client/client.js';
 import { ProtocolError } from '../ipc/codec.js';
 import { makeTextRound } from '../providers/mock.js';
+import { ProviderRouter } from '../providers/router.js';
+import { resolveSessionStartup } from '../host/session-startup.js';
 import type { ProtocolChatMessage, ProtocolEvent } from '../protocol/index.js';
 import { SESSION_MEMORY_START } from '../agent/context-builder.js';
 import {
+  ScriptedProvider,
   startPeer,
   startTestDaemon,
+  testConfig,
   watch,
   type Round,
   type TestDaemon,
@@ -364,5 +368,63 @@ describe('M11 — compatibilidad con M10 (traspaso)', () => {
     expect(inputs).toEqual(
       expect.arrayContaining(['dato: equipo=rojo', '¿de qué color era el equipo?']),
     );
+  });
+});
+
+describe('M18 — una sesión guardada con un provider que ya no existe', () => {
+  it('se monta con el de la config, avisa en la sesión y guarda ya el nuevo', async () => {
+    const base = newBase();
+    const two = (name: string) => ({
+      type: 'openai-compatible',
+      baseUrl: 'http://127.0.0.1:1/v1',
+      apiKey: '',
+      model: name,
+      contextWindow: 1_000_000,
+    });
+
+    // Primer daemon: la sesión se abre con `ghost`, que existe.
+    const first = await daemonAt(base);
+    const cwd = first.project('p', [], {
+      provider: { default: 'test', providers: { test: two('test-model'), ghost: two('ghost-m') } },
+    });
+    const dot = await first.connect(['operator'], 'dot');
+    const { session } = await dot.request('sessions.open', { cwd, provider: 'ghost' });
+    await first.stop();
+    daemons.splice(daemons.indexOf(first), 1);
+    const metaPath = join(base, 'daemon', 'sessions', session.id, 'session.json');
+    expect(JSON.parse(readFileSync(metaPath, 'utf8')).provider).toBe('ghost');
+
+    // Segundo daemon: la config ya no tiene `ghost`. Arranque real con `restoring`.
+    const second = await startTestDaemon({
+      base,
+      sessionsDir: join(base, 'daemon', 'sessions'),
+      startup: (opts) =>
+        resolveSessionStartup({
+          ...opts,
+          config: testConfig(base),
+          makeRouter: (config, provider) => {
+            const router = new ProviderRouter(config, provider);
+            router.getActive = () => new ScriptedProvider([]);
+            return router;
+          },
+        }),
+    });
+    daemons.push(second);
+    const client = await second.connect(['operator'], 'dot');
+    const live = watch(client, session.id);
+    await live.untilSnapshot();
+
+    const { session: woken } = await client.request('sessions.open', { resume: session.id });
+    expect(woken.id).toBe(session.id);
+    const warning = await live.until((e) => e.type === 'warning', 10_000);
+    expect((warning.data as { message: string }).message).toBe(
+      'This session used provider "ghost" (model "ghost-m"), which is no longer configured. ' +
+        'It now uses "test" / "test-model".',
+    );
+    // `session.json` ya guarda el provider nuevo: el aviso no se repite.
+    expect(JSON.parse(readFileSync(metaPath, 'utf8'))).toMatchObject({
+      provider: 'test',
+      model: 'test-model',
+    });
   });
 });

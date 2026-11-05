@@ -1223,7 +1223,7 @@ export class SessionPublisher {
         }));
         return;
       case 'warning':
-        this.state('warning', () => ({ message: clip(this.redact(event.message), INPUT_CHARS) }));
+        this.warn(event.message);
         return;
       case 'error': {
         const message = clip(this.redact(event.message), INPUT_CHARS);
@@ -1361,6 +1361,11 @@ export class SessionPublisher {
       this.flushScheduled = true;
       setImmediate(() => this.flush());
     }
+  }
+
+  /** Publica un aviso de la sesión (`warning`), redactado y recortado. */
+  warn(message: string): void {
+    this.state('warning', () => ({ message: clip(this.redact(message), INPUT_CHARS) }));
   }
 
   /** Entrega al sink lo que haya en la cola. Nunca lanza. */
