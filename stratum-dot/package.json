@@ -1,7 +1,7 @@
 {
   "name": "stratum-dot",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "Stratum Dot — cockpit nativo (Tauri v2) de stratumd, cliente del Stratum Protocol",
   "type": "module",
   "license": "Apache-2.0",

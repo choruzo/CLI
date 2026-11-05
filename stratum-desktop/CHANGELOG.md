@@ -4,6 +4,13 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.9.0] — 2026-11-05
+
+Acompaña a **Stratum CLI 0.13.0**, que es la que conviene tener instalada.
+
+### Cambiado
+- Usa el Stratum Protocol de la CLI 0.13.0 (concesiones de aprobación, procedencia `via` de los mensajes, mensajes de imagen y la memoria por agente), para entenderse con su `stratumd`.
+
 ## [0.8.0] — 2026-11-03
 
 Acompaña a **Stratum CLI 0.12.0**, que es la que conviene tener instalada (las imágenes pegadas y `/imagen` la necesitan).

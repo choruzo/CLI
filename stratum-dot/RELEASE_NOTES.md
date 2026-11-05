@@ -3,19 +3,24 @@
 
 Stratum Dot es el cockpit de escritorio de `stratumd` y, desde la 0.2.0, también tu **asistente**: una ventana pequeña y un icono en la bandeja para ver las sesiones vivas de Stratum —las que aloja el daemon y las que publican `stratum chat` y `stratum run` desde una terminal—, conversar con el agente, contestar lo que te pide y dejarle tareas a su asistente, que trabaja en una caja aislada.
 
-## Novedades de la 0.2.0
+## Novedades de la 0.3.0
 
-- **Vista *Asistente***: el agente `companion`, con su propia memoria y una sola conversación de larga vida en el daemon, que sobrevive a cerrar Dot y a reiniciar el daemon.
-- **La caja**: el asistente solo ejecuta dentro de un contenedor de Podman (preferido) o Docker que gestiona Stratum. Desde Dot ves su estado y la arrancas, paras o recreas.
-- **La pantalla de la caja en vivo**, en solo lectura, mientras el asistente usa su escritorio virtual (computer use), con Stop para pararlo.
-- **Rutinas**: tareas programadas del asistente, cada una en su propia sesión, con panel para crearlas, ejecutarlas ya o desactivarlas y una notificación del sistema al terminar. El asistente puede proponerte una, pero solo existe si la apruebas viendo su prompt entero.
+- **Dot abre en el asistente**, y por debajo de 720 px la vista va en pestañas (*Conversation*, *Box*, *Routines*, *Memory*, *Telegram*). La cabina de sesiones sigue en *Sessions*.
+- **Dot compacto**: `Ctrl+Alt+Space` (o la bandeja) abre una ventana flotante para escribirle al asistente sin abrir la principal; `Esc` la cierra.
+- **Conversación nueva** del asistente: la actual se compacta a su memoria, se archiva, y la nueva hereda esa memoria.
+- **Inspector de memoria**: lo que recuerda el asistente, con su procedencia, búsqueda y *Forget*.
+- **Concesiones con caducidad**: al aprobar, «Allow for…» 10, 30 o 60 minutos para esa tool y ese target, confirmado en la ventana nativa; panel para revocarlas.
+- **Conectores MCP del asistente** (`companion.mcp.servers` en la config global de la CLI): lo declarado de solo lectura no pregunta, lo demás se confirma.
+- **Telegram**: empareja un chat privado desde el panel *Telegram* (con confirmación nativa) y habla con el asistente desde el móvil —la misma conversación que en Dot—, con aprobaciones, preguntas y planes por botones, fotos de entrada y las imágenes que te enseñe el asistente. Lo forzado, con frase o las concesiones siguen solo en Dot.
+- **Imágenes del asistente** en la conversación (`send_image`: un fichero de la carpeta compartida o la pantalla de la caja).
 
 ## Requisitos
 
-- **Stratum CLI 0.12.0 o posterior**, con `stratum` en el `PATH`: `npm install -g stratum-cli`. Dot arranca el daemon con `stratum daemon start` si no hay uno en marcha; sin la CLI solo puede observar un daemon que arranque otro.
+- **Stratum CLI 0.13.0 o posterior**, con `stratum` en el `PATH`: `npm install -g stratum-cli`. Dot arranca el daemon con `stratum daemon start` si no hay uno en marcha; sin la CLI solo puede observar un daemon que arranque otro.
 - Un provider configurado en la CLI (`stratum provider add …`): Dot no tiene ajustes propios.
 - Para la caja del asistente: **Podman** o Docker instalado y `"box": { "enabled": true }` en la config global de la CLI. La primera vez, arrancarla construye la imagen (tarda unos minutos). Sin caja, el asistente conversa pero no ejecuta nada.
-- Para que use la pantalla de la caja: un modelo con visión declarada en `models.<id>.vision` de la config de la CLI.
+- Para que use la pantalla de la caja: un modelo con visión declarada en `provider.providers.<alias>.models.<id>.vision` de la config de la CLI.
+- Para Telegram: un bot de BotFather, `stratum channels telegram setup` y emparejar desde el panel *Telegram*.
 - Para aprobar desde Dot, una clave de aprobador: `stratum approvals set-key`.
 - Para que las rutinas venzan sin abrir nada: `stratum daemon autostart on`.
 

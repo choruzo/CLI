@@ -4,6 +4,22 @@ Cambios de cada versión de Stratum Dot, el cockpit de escritorio de `stratumd`,
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.3.0] — 2026-11-05
+
+Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.13.0** o posterior. Instaladores sin firmar y sin auto-update.
+
+### Añadido
+- **Dot compacto**: `Ctrl+Alt+Space` o la bandeja abren una ventana flotante, sin marco y siempre encima, para escribirle al asistente (un turno, o steering si está trabajando). Se cierra con `Esc`, con el atajo o al perder el foco.
+- **Conversación nueva** del asistente (*New conversation*, confirmada): la actual se compacta entera a su memoria de sesión, se archiva y la nueva la hereda en solo lectura. Si algo falla, la actual se queda como estaba.
+- **Panel *Memory***: lo que recuerda el asistente, con procedencia (*Open* lleva a la conversación donde se guardó), búsqueda y *Forget* con confirmación; aparte, lo heredado de la conversación anterior.
+- **Concesiones de aprobación** de 10, 30 o 60 minutos para una tool y un target («Allow for…»), con la duración en la confirmación nativa y un panel para revocarlas. Nunca en lo forzado, con frase ni en una rutina.
+- **Conectores MCP del asistente**, solo de `companion.mcp.servers` en la config global de la CLI.
+- **Panel *Telegram***: el bot y su estado, emparejar un chat (código y enlace, confirmado en la ventana nativa) y desemparejar. Los mensajes y resoluciones que llegan desde Telegram se marcan «From Telegram».
+- **Imágenes del asistente** en la conversación (`send_image`), traídas del daemon por trozos.
+
+### Cambiado
+- Dot abre en la vista *Asistente*; la cabina de sesiones pasa a *Sessions* (`Esc` vuelve al asistente). Por debajo de 720 px los paneles del asistente van en pestañas.
+
 ## [0.2.0] — 2026-11-03
 
 Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.12.0** o posterior (`npm install -g stratum-cli`). Instaladores sin firmar y sin auto-update.

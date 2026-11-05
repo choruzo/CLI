@@ -6,6 +6,22 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.13.0] — 2026-11-05
+
+Es la versión de la CLI que necesitan **Stratum Desktop 0.9.0** y **Stratum Dot 0.3.0**.
+
+### Añadido
+- **Telegram** (M18): el daemon habla con un bot tuyo por *long polling* (sin puertos ni webhook). `stratum channels telegram setup|status|disable|pair|unpair`; el token va solo en `~/.stratum/daemon/telegram.json` (privado), nunca en la config, los logs ni el protocolo. Un chat privado emparejado (código de un solo uso y confirmación con la clave de aprobador) habla con la misma sesión del `companion` que Dot, con espejo completo, steering mientras trabaja, fotos de entrada y el markdown del asistente como formato de Telegram. Las aprobaciones de todas las sesiones llegan como tarjetas con «Approve once» y «Deny», las preguntas y los planes con botones; lo forzado, con frase, allow-all y las concesiones nunca se resuelven desde Telegram, y el daemon lo comprueba por su cuenta.
+- **Concesiones de aprobación** (M17): 10, 30 o 60 minutos sin volver a preguntar por una pareja tool + target en una sesión, solo con la clave de aprobador; en memoria, sin disco ni traspaso. `stratum approvals approve --for`, `approvals grants` y `approvals revoke`; en el protocolo, `grant` en `approvals.resolve`, `grants.revoke` y eventos `grant.*`.
+- **Conectores MCP del `companion`**: solo de `companion.mcp.servers` en la config global, con `readOnlyTools` declaradas; lo demás se confirma.
+- **Memoria del `companion` por el protocolo**: `memory.status|decisions` con `agent`, `memory.forget`; cada decisión con su procedencia. `store_decision` apunta la sesión.
+- **Conversación nueva del `companion`**: `sessions.open { agent: 'companion', fresh: true }` compacta la actual a su memoria, la archiva y la nueva hereda esa memoria.
+- Tool **`send_image`** del `companion`: enseña en el chat (Dot y Telegram) un fichero de `/exchange` o la pantalla de la caja; en el protocolo, evento `image.shared` y método `images.get` por trozos.
+- **`stratum config` sin argumentos abre un menú interactivo**: fichero de proyecto o global, secciones con nombre, «Avanzado» sobre todo el schema, la capa de cada clave y quitar para heredar; valida como el loader y deja `.bak`. `init` escribe una config de proyecto mínima (sin provider) y `chat` la ofrece una vez por carpeta.
+
+### Corregido
+- Una sesión guardada del daemon cuyo provider o modelo ya no existe se monta con el de por defecto y avisa una vez, en vez de no montarse (y dejar a Dot y Telegram sin asistente).
+
 ## [0.12.0] — 2026-11-03
 
 Es la versión de la CLI que necesitan **Stratum Desktop 0.8.0** y **Stratum Dot 0.2.0**.
