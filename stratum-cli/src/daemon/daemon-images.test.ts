@@ -1,69 +1,80 @@
 /**
- * M18 parte 6E — `images.get` contra el daemon real: las imágenes que el
- * asistente envió se sirven del almacén de compartidas, por trozos (una imagen
- * no cabe en un mensaje del protocolo), con `observe`.
+ * Imágenes adjuntas por el protocolo (`runs.start`/`runs.steer`): el daemon las
+ * lee del `cwd` de la sesión (o de `~/.stratum/images`) y rechaza el mensaje
+ * entero con `INVALID_PARAMS`, sin arrancar nada, si una no vale.
  */
-import { join } from 'path';
 import { afterEach, describe, expect, it } from 'vitest';
+import { mkdirSync, writeFileSync } from 'fs';
+import { join } from 'path';
 import { ProtocolError } from '../ipc/codec.js';
-import { saveSharedImage, sharedImagesDir } from '../images/shared.js';
-import { SHARED_IMAGE_LIMITS, type MethodResult } from '../protocol/index.js';
-import { startTestDaemon, type TestDaemon } from './daemon.fixtures.js';
+import { makeTextRound } from '../providers/mock.js';
+import type { ProtocolEvent } from '../protocol/index.js';
+import { startTestDaemon, watch, type TestDaemon } from './daemon.fixtures.js';
 
-let t: TestDaemon | null = null;
+const daemons: TestDaemon[] = [];
 afterEach(async () => {
-  await t?.stop();
-  t = null;
+  for (const d of daemons.splice(0)) await d.stop().catch(() => undefined);
 });
 
-const code = async (p: Promise<unknown>): Promise<string> => {
+/** PNG mínimo: el daemon solo mira la firma. */
+const PNG = Buffer.concat([
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+  Buffer.from('x'),
+]);
+
+const failure = async (p: Promise<unknown>): Promise<ProtocolError | null> => {
   try {
     await p;
-    return 'ok';
-  } catch (err) {
-    return err instanceof ProtocolError ? err.code : String(err);
+    return null;
+  } catch (e) {
+    return e instanceof ProtocolError ? e : null;
   }
 };
 
-describe('images.get (6E)', () => {
-  it('por trozos de chunkBytes hasta next null; los trozos juntos son la imagen', async () => {
-    t = await startTestDaemon();
-    const png = Buffer.alloc(SHARED_IMAGE_LIMITS.chunkBytes * 2 + 100, 7);
-    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(png);
-    const { id } = saveSharedImage(png, { dir: sharedImagesDir(join(t.base, 'companion')) });
+describe('imágenes por el protocolo', () => {
+  it('una fuera del cwd es INVALID_PARAMS y no arranca ningún run; una dentro arranca', async () => {
+    const t = await startTestDaemon();
+    daemons.push(t);
+    const cwd = t.project('con-imagenes', [makeTextRound('listo')]);
+    const outside = join(t.base, 'fuera');
+    mkdirSync(outside, { recursive: true });
+    writeFileSync(join(outside, 'secreta.png'), PNG);
+    writeFileSync(join(cwd, 'dentro.png'), PNG);
 
-    const observer = await t.connect(['observer']);
-    const parts: Buffer[] = [];
-    let offset: number | null = 0;
-    let calls = 0;
-    while (offset !== null) {
-      const r: MethodResult<'images.get'> = await observer.request('images.get', {
-        imageId: id,
-        offset,
-      });
-      expect(r.image).toEqual({ id, mime: 'image/png', bytes: png.length });
-      expect(r.offset).toBe(offset);
-      parts.push(Buffer.from(r.data, 'base64'));
-      offset = r.next;
-      calls++;
-    }
-    expect(calls).toBe(3);
-    expect(Buffer.concat(parts).equals(png)).toBe(true);
-  });
+    const client = await t.connect(['operator']);
+    const { session } = await client.request('sessions.open', { cwd });
+    const live = watch(client, session.id);
 
-  it('un id que no existe es NOT_FOUND; uno con otra forma, INVALID_PARAMS; pasado el final, también', async () => {
-    t = await startTestDaemon();
-    const observer = await t.connect(['observer']);
-    expect(
-      await code(observer.request('images.get', { imageId: '20261105T093012Z-0123456789abcdef' })),
-    ).toBe('NOT_FOUND');
-    expect(await code(observer.request('images.get', { imageId: '../../etc/passwd' }))).toBe(
-      'INVALID_PARAMS',
+    const err = await failure(
+      client.request('runs.start', {
+        sessionId: session.id,
+        input: 'mira',
+        images: [join(outside, 'secreta.png')],
+      }),
     );
-    const png = Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1]);
-    const { id } = saveSharedImage(png, { dir: sharedImagesDir(join(t.base, 'companion')) });
-    expect(await code(observer.request('images.get', { imageId: id, offset: 100 }))).toBe(
-      'INVALID_PARAMS',
+    expect(err?.code).toBe('INVALID_PARAMS');
+    const none = await client.request('runs.list', { sessionId: session.id });
+    expect(none.runs).toHaveLength(0);
+
+    // Todo o nada: una buena y una mala rechazan el mensaje.
+    const mixed = await failure(
+      client.request('runs.start', {
+        sessionId: session.id,
+        input: 'mira',
+        images: ['dentro.png', join(outside, 'secreta.png')],
+      }),
+    );
+    expect(mixed?.code).toBe('INVALID_PARAMS');
+
+    const { run } = await client.request('runs.start', {
+      sessionId: session.id,
+      input: 'mira',
+      images: ['dentro.png'],
+    });
+    await live.until(
+      (e: ProtocolEvent) =>
+        e.type === 'run.completed' && (e.data as { run: { id: string } }).run.id === run.id,
+      20_000,
     );
   });
 });
