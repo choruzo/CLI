@@ -1,8 +1,9 @@
 /**
  * M18 — lo que el bot escribe en Telegram: textos y botones, sin E/S.
  *
- * Todo es texto plano (`sendMessage` nunca usa `parse_mode`), así que aquí no
- * se escapa nada: lo que se escribe es lo que se ve.
+ * Todo esto es texto plano (sin `parse_mode`), así que aquí no se escapa nada:
+ * lo que se escribe es lo que se ve. Solo la respuesta del asistente va con
+ * formato, y la convierte `markdown.ts`.
  */
 import {
   channelApprovable,

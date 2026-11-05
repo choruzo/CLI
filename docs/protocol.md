@@ -2038,8 +2038,11 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
   entrada de un run abierto por un cliente («In Dot: …»; la que llevaba `via`, no), cada
   `message.completed` del agente principal y cómo acabó un turno que falló o se canceló. Las tools
   no; mientras el run está `running`, «escribiendo…». También el aviso de una rutina terminada
-  (nombre, estado y `summary`). Texto plano, pasado otra vez por la redacción, en trozos de menos de
-  4096 caracteres y con una cola por chat (≤ 1 mensaje/s). Nunca capturas de la caja, imágenes ni
+  (nombre, estado y `summary`). Todo pasa otra vez por la redacción. La respuesta del asistente
+  convierte su markdown al HTML de Telegram (`parse_mode: 'HTML'`), escapando todo lo demás: las
+  tablas van como texto fijo, los encabezados en negrita y solo los enlaces `http(s)` son enlaces.
+  Si Telegram rechaza el formato, ese mensaje se reenvía en texto plano. Lo demás va en texto
+  plano. Se envía en trozos de menos de 4096 caracteres, sin partir ninguna marca, y con una cola por chat (≤ 1 mensaje/s). Nunca capturas de la caja, imágenes ni
   ficheros.
 - **Aprobaciones y preguntas** (§23.13 A9). Cada solicitud pendiente del centro de aprobaciones,
   **de cualquier sesión** (también las pares), llega a los chats emparejados como una tarjeta con

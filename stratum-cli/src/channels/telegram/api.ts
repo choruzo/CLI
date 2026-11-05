@@ -102,6 +102,8 @@ export type InlineKeyboard = readonly (readonly InlineButton[])[];
 
 export interface SendOptions {
   keyboard?: InlineKeyboard;
+  /** Formato del texto. Sin él, texto plano: solo se pide de forma explícita. */
+  parseMode?: 'HTML';
 }
 
 /** Lo que el canal necesita de la API. Los tests la sustituyen sin HTTP. */
@@ -365,7 +367,8 @@ export class HttpTelegramApi implements TelegramApi {
     const result = await this.call('sendMessage', {
       chat_id: chatId,
       text,
-      // Texto plano: lo que escribe el modelo no se interpreta como formato.
+      // Texto plano salvo que se pida `parseMode` (el HTML ya escapado por `markdown.ts`).
+      ...(opts.parseMode ? { parse_mode: opts.parseMode } : {}),
       link_preview_options: { is_disabled: true },
       ...(opts.keyboard ? replyMarkup(opts.keyboard) : {}),
     });

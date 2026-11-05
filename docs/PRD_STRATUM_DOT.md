@@ -2203,6 +2203,9 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     **escapando todo** lo demás para que el texto del modelo no se interprete como otra cosa. Las
     tablas van como bloque de texto fijo y los encabezados en negrita. Si Telegram rechaza el
     formato, se reenvía ese mensaje en texto plano. Al trocear no se parte una marca de formato.
+    *Hecho 2026-11-05* (`channels/telegram/markdown.ts`): HTML de Telegram (`parse_mode: 'HTML'`),
+    solo para la respuesta del asistente; lo demás sigue en texto plano. Solo son enlaces los
+    `http(s)`, y un `*`/`_` en mitad de una palabra no se lee como cursiva.
   - **E. Imágenes en el chat (Telegram y Dot): cualquier imagen** (decidido por el usuario). Esto
     **sustituye** la regla de M15 para el canal y para la conversación de Dot («nunca capturas,
     imágenes ni ficheros de `/exchange`»). Entran las capturas de la pantalla de la caja, las

@@ -66,6 +66,40 @@ describe('TelegramOutbox (M18)', () => {
     expect(waits).toContain(1000);
   });
 
+  it('un formato rechazado (api) se reenvía una vez en plano; 429 con formato sigue con formato; red no reenvía', async () => {
+    const api = new FakeTelegramApi();
+    api.rejectFormatting(1);
+    const outbox = new TelegramOutbox({ api, minIntervalMs: 0, sleep: async () => {} });
+    outbox.send(1, { text: '<b>hola</b>', parseMode: 'HTML', plain: '**hola**' });
+    await outbox.flush();
+    expect(api.sent).toHaveLength(1);
+    expect(api.sent[0]).toMatchObject({ text: '**hola**' });
+    expect(api.sent[0]!.parseMode).toBeUndefined();
+
+    // 429 con formato: reintenta con el mismo formato.
+    const failures = [new TelegramApiError('rate-limited', 'Too Many Requests', 429, 0)];
+    const send = api.sendMessage.bind(api);
+    api.sendMessage = async (chatId, text, opts) => {
+      const err = failures.shift();
+      if (err) throw err;
+      return send(chatId, text, opts);
+    };
+    outbox.send(1, { text: '<i>x</i>', parseMode: 'HTML', plain: '*x*' });
+    await outbox.flush();
+    expect(api.sent[1]).toMatchObject({ text: '<i>x</i>', parseMode: 'HTML' });
+
+    // Un error de red no se reenvía.
+    let calls = 0;
+    api.sendMessage = async () => {
+      calls++;
+      throw new TelegramApiError('network', 'down');
+    };
+    outbox.send(1, { text: '<b>y</b>', parseMode: 'HTML', plain: 'y' });
+    await outbox.flush();
+    expect(calls).toBe(1);
+    expect(api.sent).toHaveLength(2);
+  });
+
   it('con la cola llena se descartan los más antiguos; stop descarta lo pendiente', async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox({ api, minIntervalMs: 0, maxQueue: 2 });

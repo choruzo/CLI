@@ -53,18 +53,20 @@ function message(text: string | undefined, hasMedia = false): TelegramMessage {
 function setup(opts: { open?: () => Promise<CompanionTurns>; chats?: number[] } = {}) {
   const turns = new FakeTurns();
   const sent: { chatId: number; text: string }[] = [];
+  const markdown: { chatId: number; text: string }[] = [];
   const typing: number[] = [];
   const link = new CompanionLink({
     companion: { open: opts.open ?? (async () => turns), currentId: () => turns.sessionId },
     target: () => ({
       send: (chatId, text) => sent.push({ chatId, text }),
+      sendMarkdown: (chatId, text) => markdown.push({ chatId, text }),
       typing: (chatId) => typing.push(chatId),
     }),
     chats: () => opts.chats ?? [42],
     redact: (text) => text.replaceAll('sk-secreto1', '[redacted]'),
     typingIntervalMs: 10,
   });
-  return { turns, sent, typing, link };
+  return { turns, sent, markdown, typing, link };
 }
 
 let seq = 0;
@@ -154,7 +156,7 @@ describe('CompanionLink: espejo (M18)', () => {
   });
 
   it('cada bloque del asistente, redactado; los de subagentes y otras sesiones, no', () => {
-    const { link, sent } = setup();
+    const { link, sent, markdown } = setup();
     link.observe(ev('message.completed', { text: 'la clave es sk-secreto1' }));
     link.observe(ev('message.completed', { text: 'del hijo' }, { subagentId: 'sub1' }));
     link.observe({
@@ -162,7 +164,9 @@ describe('CompanionLink: espejo (M18)', () => {
       sessionId: 'ses_otra',
     } as ProtocolEvent);
     link.observe(ev('message.completed', { text: '  ' }));
-    expect(sent.map((s) => s.text)).toEqual(['la clave es [redacted]']);
+    // La respuesta del asistente va con formato (redactada); por `send`, nada.
+    expect(markdown.map((s) => s.text)).toEqual(['la clave es [redacted]']);
+    expect(sent).toEqual([]);
   });
 
   it('un turno que falla o se cancela se cuenta; uno que termina bien, no', () => {

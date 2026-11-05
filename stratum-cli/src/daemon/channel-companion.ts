@@ -9,7 +9,8 @@
  *
  * **Salida (espejo).** Lo que entra en esa conversación llega a los chats
  * emparejados: lo escrito en Dot («In Dot: …»), cada bloque de texto del
- * asistente cuando se cierra y cómo acabó un turno que falló o se canceló. Las
+ * asistente cuando se cierra (con su markdown en el formato de Telegram,
+ * `markdown.ts`) y cómo acabó un turno que falló o se canceló. Las
  * tools no se reflejan: mientras trabaja, el chat ve «escribiendo…». Lo que
  * vino de Telegram (`run.via`) no se devuelve. Todo pasa otra vez por la
  * redacción. Además, el aviso de rutina terminada.
@@ -56,6 +57,8 @@ export interface CompanionPort {
 /** Adónde va el espejo: el canal en marcha, o `null`. */
 export interface MirrorTarget {
   send(chatId: number, text: string): void;
+  /** Markdown del asistente, convertido al formato del canal. */
+  sendMarkdown(chatId: number, markdown: string): void;
   typing(chatId: number): void;
 }
 
@@ -165,7 +168,7 @@ export class CompanionLink {
         return;
       case 'message.completed':
         if (event.subagentId || !event.data.text.trim()) return;
-        this.broadcast(event.data.text);
+        this.broadcastMarkdown(event.data.text);
         return;
       case 'run.completed':
         return this.endRun();
@@ -200,6 +203,14 @@ export class CompanionLink {
     if (!target) return;
     const safe = this.opts.redact(text);
     for (const chatId of this.opts.chats()) target.send(chatId, safe);
+  }
+
+  /** Como `broadcast`, para la respuesta del asistente: con su markdown convertido. */
+  private broadcastMarkdown(markdown: string): void {
+    const target = this.opts.target();
+    if (!target) return;
+    const safe = this.opts.redact(markdown);
+    for (const chatId of this.opts.chats()) target.sendMarkdown(chatId, safe);
   }
 
   private reply(chatId: number, text: string): void {

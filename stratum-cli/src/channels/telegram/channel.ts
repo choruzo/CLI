@@ -26,6 +26,7 @@ import type {
 import { TelegramApiError } from './api.js';
 import { TelegramOutbox, type OutgoingMessage } from './outbox.js';
 import type { OfferResult, PairingCandidate } from './pairing.js';
+import { renderTelegramMarkdown } from './markdown.js';
 import { TEXT, chunkText, displayName, parseCommand } from './render.js';
 import type { TelegramPaired } from './store.js';
 
@@ -134,6 +135,16 @@ export class TelegramChannel {
    */
   send(chatId: number, text: string): void {
     for (const piece of chunkText(text)) this.outbox.send(chatId, { text: piece });
+  }
+
+  /**
+   * Markdown del modelo, como HTML de Telegram (`markdown.ts`), en trozos que caben.
+   * Cada trozo lleva su respaldo en plano por si Telegram rechaza el formato.
+   */
+  sendMarkdown(chatId: number, markdown: string): void {
+    for (const chunk of renderTelegramMarkdown(markdown)) {
+      this.outbox.send(chatId, { text: chunk.html, parseMode: 'HTML', plain: chunk.plain });
+    }
   }
 
   /** Un mensaje con botones (o que se editará luego), por la misma cola. */

@@ -19,6 +19,10 @@ const MAX_ATTEMPTS = 3;
 export interface OutgoingMessage {
   text: string;
   keyboard?: InlineKeyboard;
+  /** `'HTML'`: `text` ya viene escapado para Telegram. */
+  parseMode?: 'HTML';
+  /** El respaldo en texto plano, si Telegram rechaza el formato. */
+  plain?: string;
   /** Con el id del mensaje ya enviado (para editarlo después). */
   onSent?: (messageId: number) => void;
 }
@@ -100,12 +104,15 @@ export class TelegramOutbox {
   private async drain(chatId: number, chat: ChatQueue): Promise<void> {
     while (!this.stopped && chat.items.length > 0) {
       const message = chat.items.shift()!;
+      let text = message.text;
+      let parseMode = message.parseMode;
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !this.stopped; attempt++) {
         const wait = chat.lastSentAt + this.minIntervalMs - Date.now();
         if (wait > 0) await this.sleep(wait);
         try {
-          const { messageId } = await this.opts.api.sendMessage(chatId, message.text, {
+          const { messageId } = await this.opts.api.sendMessage(chatId, text, {
             ...(message.keyboard ? { keyboard: message.keyboard } : {}),
+            ...(parseMode ? { parseMode } : {}),
           });
           chat.lastSentAt = Date.now();
           message.onSent?.(messageId);
@@ -114,6 +121,13 @@ export class TelegramOutbox {
           chat.lastSentAt = Date.now();
           if (err instanceof TelegramApiError && err.kind === 'rate-limited') {
             await this.sleep(Math.max(1, err.retryAfterSec ?? 1) * 1000);
+            continue;
+          }
+          if (parseMode && err instanceof TelegramApiError && err.kind === 'api') {
+            // Telegram no entendió el formato: ese mismo mensaje, una vez, en plano.
+            log.warn('telegram format rejected, sent as plain text');
+            text = message.plain ?? text;
+            parseMode = undefined;
             continue;
           }
           log.warn('telegram send failed', {

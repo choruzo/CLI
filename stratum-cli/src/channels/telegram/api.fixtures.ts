@@ -3,14 +3,14 @@
  * el test empuja (y espera, como el *long polling*, si no hay nada), y lo que el
  * bot envía queda en `sent`.
  */
-import type {
-  InlineKeyboard,
-  SendOptions,
-  TelegramApi,
+import {
   TelegramApiError,
-  TelegramMessage,
-  TelegramUpdate,
-  TelegramUser,
+  type InlineKeyboard,
+  type SendOptions,
+  type TelegramApi,
+  type TelegramMessage,
+  type TelegramUpdate,
+  type TelegramUser,
 } from './api.js';
 
 export interface SentMessage {
@@ -18,12 +18,15 @@ export interface SentMessage {
   text: string;
   messageId: number;
   keyboard?: InlineKeyboard;
+  /** Solo si el envío pidió formato. */
+  parseMode?: 'HTML';
 }
 
 export class FakeTelegramApi implements TelegramApi {
   readonly sent: SentMessage[] = [];
   readonly polls: { offset?: number }[] = [];
   private queue: (TelegramUpdate[] | TelegramApiError)[] = [];
+  private rejectFormatted = 0;
   private waiter: (() => void) | null = null;
   private nextUpdateId = 1;
   private nextMessageId = 1;
@@ -42,6 +45,11 @@ export class FakeTelegramApi implements TelegramApi {
   fail(err: TelegramApiError): void {
     this.queue.push(err);
     this.wake();
+  }
+
+  /** Los `n` siguientes `sendMessage` con `parseMode` los rechaza Telegram (400, no se registran). */
+  rejectFormatting(n = 1): void {
+    this.rejectFormatted = n;
   }
 
   /** Un texto de un chat privado, fechado ahora (o en `dateSec`). */
@@ -134,11 +142,20 @@ export class FakeTelegramApi implements TelegramApi {
     text: string,
     opts: SendOptions = {},
   ): Promise<{ messageId: number }> {
+    if (opts.parseMode && this.rejectFormatted > 0) {
+      this.rejectFormatted--;
+      throw new TelegramApiError(
+        'api',
+        "Bad Request: can't parse entities: unsupported start tag",
+        400,
+      );
+    }
     const messageId = this.nextMessageId++;
     this.sent.push({
       chatId,
       text,
       messageId,
+      ...(opts.parseMode ? { parseMode: opts.parseMode } : {}),
       ...(opts.keyboard ? { keyboard: opts.keyboard } : {}),
     });
     return { messageId };
