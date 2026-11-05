@@ -21,13 +21,21 @@
 import { ProtocolError } from '../ipc/codec.js';
 import { getLogger } from '../logging/index.js';
 import type { ProtocolEvent, ProtocolRun, SteerStatus } from '../protocol/index.js';
-import type { TelegramMessage } from '../channels/telegram/api.js';
+import { USER_IMAGE_LIMITS, type UserImage } from '../agent/user-images.js';
+import { userImageFromBytes } from '../images/store.js';
+import {
+  TelegramApiError,
+  type TelegramImageRef,
+  type TelegramMessage,
+} from '../channels/telegram/api.js';
 import {
   TEXT,
   fromDot,
+  imageRejected,
   routineFinished,
   turnFailed,
   unavailable,
+  warningLine,
 } from '../channels/telegram/render.js';
 
 const log = getLogger('channels');
@@ -40,8 +48,8 @@ export interface CompanionTurns {
   readonly sessionId: string;
   readonly running: boolean;
   /** Abre un turno con esta entrada, marcada `via: 'telegram'`. `BUSY` si ya hay uno. */
-  startRun(input: string): ProtocolRun;
-  steer(text: string): SteerStatus;
+  startRun(input: string, images?: readonly UserImage[]): ProtocolRun;
+  steer(text: string, images?: readonly UserImage[]): SteerStatus;
   waitAtSafePoint(): Promise<void>;
   /** Resuelve al terminar el turno en curso (o ya, sin turno). Nunca rechaza. */
   idle(): Promise<void>;
@@ -65,6 +73,11 @@ export interface MirrorTarget {
 export interface CompanionLinkOptions {
   companion: CompanionPort;
   target: () => MirrorTarget | null;
+  /**
+   * Parte 6E — descarga la imagen de un mensaje, como mucho `maxBytes`. Sin
+   * ella, una foto se contesta como cualquier otro adjunto.
+   */
+  download?: (image: TelegramImageRef, maxBytes: number) => Promise<Uint8Array>;
   /** Los chats emparejados ahora. */
   chats: () => readonly number[];
   redact: (text: string) => string;
@@ -78,7 +91,7 @@ function reasonOf(err: unknown): string {
 
 export class CompanionLink {
   /** Textos que esperan al final del turno en curso (llegaron con `not-accepting`). */
-  private deferred: { text: string; chatId: number }[] = [];
+  private deferred: { text: string; chatId: number; images: readonly UserImage[] }[] = [];
   private waitingIdle = false;
   private typingTimer: NodeJS.Timeout | null = null;
   /** El run en curso de la sesión principal y si está trabajando (no en pausa ni esperando). */
@@ -95,15 +108,32 @@ export class CompanionLink {
 
   /** Un mensaje de un chat emparejado. */
   async input(chatId: number, message: TelegramMessage): Promise<void> {
-    const text = message.text?.trim();
-    if (!text) {
+    const text = (message.text ?? message.caption)?.trim() ?? '';
+    let images: UserImage[] = [];
+    if (message.image && this.opts.download) {
+      try {
+        const bytes = await this.opts.download(message.image, USER_IMAGE_LIMITS.maxBytes);
+        images = [userImageFromBytes(bytes, `telegram-${message.messageId}`)];
+      } catch (err) {
+        log.info('telegram image not passed on', {
+          kind: err instanceof TelegramApiError ? err.kind : 'image',
+        });
+        this.reply(chatId, imageRejected(err));
+        return;
+      }
+    } else if (!text) {
       if (message.hasMedia) this.reply(chatId, TEXT.textOnly);
       return;
     }
-    await this.deliver(text, chatId);
+    // Sin texto, una foto lleva una marca: un mensaje vacío no entra en la conversación.
+    await this.deliver(text || TEXT.photoInput, chatId, images);
   }
 
-  private async deliver(text: string, chatId: number): Promise<void> {
+  private async deliver(
+    text: string,
+    chatId: number,
+    images: readonly UserImage[] = [],
+  ): Promise<void> {
     if (this.stopped) return;
     let session: CompanionTurns;
     try {
@@ -113,29 +143,34 @@ export class CompanionLink {
       this.reply(chatId, unavailable(reasonOf(err)));
       return;
     }
-    if (session.running) return this.steerOrDefer(session, text, chatId);
+    if (session.running) return this.steerOrDefer(session, text, chatId, images);
     // Como cualquier trabajo nuevo del agente: antes, su punto seguro (la pausa).
     await session.waitAtSafePoint();
     try {
-      session.startRun(text);
+      session.startRun(text, images);
     } catch (err) {
       // Otro (Dot, una aprobación que reanudó) abrió turno entretanto: steering.
       if (err instanceof ProtocolError && err.code === 'BUSY') {
-        return this.steerOrDefer(session, text, chatId);
+        return this.steerOrDefer(session, text, chatId, images);
       }
       this.reply(chatId, unavailable(reasonOf(err)));
     }
   }
 
-  private steerOrDefer(session: CompanionTurns, text: string, chatId: number): void {
-    const status = session.steer(text);
+  private steerOrDefer(
+    session: CompanionTurns,
+    text: string,
+    chatId: number,
+    images: readonly UserImage[],
+  ): void {
+    const status = session.steer(text, images);
     if (status === 'accepted' || status === 'empty') return;
     if (status === 'too-large') {
       this.reply(chatId, TEXT.tooLarge);
       return;
     }
     // `not-accepting`: el turno ya está cerrándose. Se abre otro al terminar.
-    this.deferred.push({ text, chatId });
+    this.deferred.push({ text, chatId, images });
     if (this.waitingIdle) return;
     this.waitingIdle = true;
     void session.idle().then(() => {
@@ -143,7 +178,9 @@ export class CompanionLink {
       const pending = this.deferred.splice(0);
       if (pending.length === 0) return;
       const joined = pending.map((p) => p.text).join('\n\n');
-      void this.deliver(joined, pending.at(-1)!.chatId);
+      // Las imágenes de lo juntado, hasta el tope de un mensaje (las últimas).
+      const images = pending.flatMap((p) => p.images).slice(-USER_IMAGE_LIMITS.perMessage);
+      void this.deliver(joined, pending.at(-1)!.chatId, images);
     });
   }
 
@@ -182,6 +219,11 @@ export class CompanionLink {
         return;
       case 'session.closed':
         return this.endRun();
+      case 'warning':
+        // Lo que la sesión avisa (un modelo sin visión para una foto, otro provider
+        // al restaurarla) también llega al chat.
+        if (!event.subagentId) this.broadcast(warningLine(event.data.message));
+        return;
       default:
         return;
     }

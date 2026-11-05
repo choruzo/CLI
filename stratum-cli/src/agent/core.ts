@@ -845,7 +845,7 @@ export class StratumAgent {
         const warning: AgentEvent = {
           type: 'warning',
           message:
-            'The active model has no declared vision (models.<id>.vision): the attached images are not sent to it.',
+            'The active model has no declared vision (provider.providers.<alias>.models.<id>.vision): the attached images are not sent to it.',
         };
         trace?.event(warning);
         yield warning;

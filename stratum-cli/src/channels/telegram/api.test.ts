@@ -167,5 +167,86 @@ describe('parseUpdate', () => {
     });
     expect(u?.message?.hasMedia).toBe(true);
     expect(u?.message?.text).toBeUndefined();
+    expect(u?.message?.image).toBeUndefined();
+  });
+
+  it('6E: la foto más grande que cabe en 5 MB, el pie de foto y un fichero image/*', () => {
+    const chat = { id: 1, type: 'private' };
+    const u = parseUpdate({
+      update_id: 1,
+      message: {
+        message_id: 1,
+        date: 1,
+        chat,
+        caption: 'mira',
+        photo: [
+          { file_id: 'small', file_size: 1_000 },
+          { file_id: 'mid', file_size: 900_000 },
+          { file_id: 'huge', file_size: 9_000_000 },
+        ],
+      },
+    });
+    expect(u?.message).toMatchObject({ caption: 'mira', image: { fileId: 'mid', size: 900_000 } });
+    const doc = (mime: string) =>
+      parseUpdate({
+        update_id: 2,
+        message: { message_id: 2, date: 1, chat, document: { file_id: 'd', mime_type: mime } },
+      })?.message?.image;
+    expect(doc('image/png')).toEqual({ fileId: 'd' });
+    expect(doc('application/pdf')).toBeUndefined();
+  });
+});
+
+describe('downloadFile (6E)', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
+
+  function files(
+    file: { path?: string; size?: number },
+    body: Uint8Array | Error,
+    headers: Record<string, string> = {},
+  ) {
+    const urls: string[] = [];
+    const impl = (async (url: string | URL) => {
+      urls.push(String(url));
+      if (String(url).includes('/getFile')) {
+        return new Response(
+          JSON.stringify({
+            ok: true,
+            result: {
+              file_id: 'x',
+              ...(file.path ? { file_path: file.path } : {}),
+              ...(file.size !== undefined ? { file_size: file.size } : {}),
+            },
+          }),
+        );
+      }
+      if (body instanceof Error) throw body;
+      return new Response(new Blob([new Uint8Array(body)]), { headers });
+    }) as typeof fetch;
+    return { api: new HttpTelegramApi({ token: TOKEN, fetch: impl }), urls };
+  }
+
+  it('getFile y luego la URL de ficheros, bajo api.telegram.org', async () => {
+    const { api, urls } = files({ path: 'photos/file_1.png' }, PNG);
+    expect(await api.downloadFile('x', 1_000)).toEqual(PNG);
+    expect(urls[1]).toBe(`https://api.telegram.org/file/bot${TOKEN}/photos/file_1.png`);
+  });
+
+  it('pasa del límite: too-large, por el tamaño declarado o al leer', async () => {
+    expect((await caught(files({ path: 'a', size: 50 }, PNG).api.downloadFile('x', 10))).kind).toBe(
+      'too-large',
+    );
+    expect((await caught(files({ path: 'a' }, PNG).api.downloadFile('x', 10))).kind).toBe(
+      'too-large',
+    );
+  });
+
+  it('sin ruta es bad-response; un fallo de red no lleva el token', async () => {
+    expect((await caught(files({}, PNG).api.downloadFile('x', 10))).kind).toBe('bad-response');
+    const err = await caught(
+      files({ path: 'a' }, new Error(`boom bot${TOKEN}`)).api.downloadFile('x', 1_000),
+    );
+    expect(err.kind).toBe('network');
+    expect(err.message).not.toContain(TOKEN);
   });
 });

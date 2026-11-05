@@ -20,6 +20,7 @@ import type {
   TelegramApi,
   TelegramCallbackQuery,
   TelegramErrorKind,
+  TelegramImageRef,
   TelegramMessage,
   TelegramUpdate,
 } from './api.js';
@@ -162,6 +163,11 @@ export class TelegramChannel {
   /** Contesta a un botón pulsado (quita el reloj del botón y enseña `text`). */
   answerCallback(id: string, text?: string): void {
     this.deps.api.answerCallbackQuery(id, text).catch(() => undefined);
+  }
+
+  /** Parte 6E — los bytes de la imagen de un mensaje, como mucho `maxBytes`. Se para con el canal. */
+  download(image: TelegramImageRef, maxBytes: number): Promise<Uint8Array> {
+    return this.deps.api.downloadFile(image.fileId, maxBytes, this.abort.signal);
   }
 
   /** «Escribiendo…» en el chat (dura ~5 s). Sin cola: si falla, da igual. */

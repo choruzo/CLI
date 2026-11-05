@@ -184,4 +184,31 @@ export class FakeTelegramApi implements TelegramApi {
   }
 
   async sendChatAction(): Promise<void> {}
+
+  /** Ficheros que se pueden descargar, por `fileId` (parte 6E). */
+  readonly files = new Map<string, Uint8Array>();
+
+  /** Una foto (con `caption` opcional) de un chat privado; sus bytes, en `files`. */
+  photo(user: { id: number }, bytes: Uint8Array, caption?: string): TelegramUpdate {
+    const fileId = `f${this.nextMessageId}`;
+    this.files.set(fileId, bytes);
+    const update = this.text(user, '');
+    const { text: _t, ...message } = update.message!;
+    return {
+      ...update,
+      message: {
+        ...message,
+        ...(caption !== undefined ? { caption } : {}),
+        image: { fileId, size: bytes.length },
+        hasMedia: true,
+      },
+    };
+  }
+
+  async downloadFile(fileId: string, maxBytes: number): Promise<Uint8Array> {
+    const bytes = this.files.get(fileId);
+    if (!bytes) throw new TelegramApiError('api', 'Bad Request: file not found', 400);
+    if (bytes.length > maxBytes) throw new TelegramApiError('too-large', 'too large');
+    return bytes;
+  }
 }

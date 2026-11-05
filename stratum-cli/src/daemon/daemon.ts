@@ -295,8 +295,9 @@ function asCompanionTurns(s: HostedSession): CompanionTurns {
     get running() {
       return s.running;
     },
-    startRun: (input) => s.startRun(input, 'normal', { via: 'telegram' }),
-    steer: (text) => s.steer(text),
+    startRun: (input, images = []) =>
+      s.startRun(input, 'normal', { via: 'telegram', imageData: images }),
+    steer: (text, images = []) => s.steer(text, undefined, images),
     waitAtSafePoint: () => s.host.agent.pause.waitAtSafePoint(),
     idle: () => s.idle(),
   };

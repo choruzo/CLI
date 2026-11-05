@@ -95,6 +95,10 @@ export class ChannelHost {
       ? new CompanionLink({
           companion: opts.companion,
           target: () => (this.channel?.state === 'running' ? this.channel : null),
+          download: (image, maxBytes) => {
+            if (!this.channel) return Promise.reject(channelOff('The Telegram channel stopped.'));
+            return this.channel.download(image, maxBytes);
+          },
           chats: () => this.paired().map((p) => p.chatId),
           redact: opts.redact ?? ((text) => text),
           ...(opts.typingIntervalMs !== undefined

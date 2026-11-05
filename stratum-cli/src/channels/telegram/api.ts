@@ -40,7 +40,9 @@ export type TelegramErrorKind =
   /** La API contestó, pero no con lo esperado. */
   | 'bad-response'
   /** Cualquier otro `ok: false` (400, 403…). */
-  | 'api';
+  | 'api'
+  /** Un fichero que pasa del límite que se pidió. */
+  | 'too-large';
 
 export class TelegramApiError extends Error {
   override readonly name = 'TelegramApiError';
@@ -68,6 +70,13 @@ export interface TelegramChat {
   type: 'private' | 'group' | 'supergroup' | 'channel';
 }
 
+/** Parte 6E — una imagen que llega en un mensaje: una foto, o un fichero `image/*`. */
+export interface TelegramImageRef {
+  fileId: string;
+  /** Lo que dice Telegram que pesa, si lo dice. */
+  size?: number;
+}
+
 export interface TelegramMessage {
   messageId: number;
   /** Segundos desde epoch, como lo da Telegram. */
@@ -75,6 +84,10 @@ export interface TelegramMessage {
   chat: TelegramChat;
   from?: TelegramUser;
   text?: string;
+  /** El texto que acompaña a una foto o un fichero. */
+  caption?: string;
+  /** La imagen del mensaje (la foto más grande que cabe en el límite), si la hay. */
+  image?: TelegramImageRef;
   /** Lleva algo que no es texto (foto, fichero, voz…). */
   hasMedia: boolean;
 }
@@ -122,6 +135,11 @@ export interface TelegramApi {
   ): Promise<void>;
   answerCallbackQuery(id: string, text?: string): Promise<void>;
   sendChatAction(chatId: number, action: 'typing'): Promise<void>;
+  /**
+   * Parte 6E — descarga un fichero de un mensaje (`getFile` y la URL de
+   * ficheros). Lanza `too-large` sin leer de más si pasa de `maxBytes`.
+   */
+  downloadFile(fileId: string, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array>;
 }
 
 // ---------------------------------------------------------------------------
@@ -154,6 +172,10 @@ const MEDIA_KEYS = [
   'contact',
 ] as const;
 
+const photoSizeSchema = z
+  .object({ file_id: z.string(), file_size: z.number().int().optional() })
+  .passthrough();
+
 const messageSchema = z
   .object({
     message_id: z.number().int(),
@@ -161,8 +183,40 @@ const messageSchema = z
     chat: chatSchema,
     from: userSchema.optional(),
     text: z.string().optional(),
+    caption: z.string().optional(),
+    // Se validan aparte (`imageOf`): una foto con otra forma no tumba el mensaje.
+    photo: z.unknown().optional(),
+    document: z.unknown().optional(),
   })
   .passthrough();
+
+const documentSchema = z
+  .object({
+    file_id: z.string(),
+    mime_type: z.string().optional(),
+    file_size: z.number().int().optional(),
+  })
+  .passthrough();
+
+/** Una imagen de un mensaje lo pesa como mucho: se elige la foto más grande que cabe. */
+export const TELEGRAM_IMAGE_MAX_BYTES = 5 * 1024 * 1024;
+
+function imageOf(m: z.infer<typeof messageSchema>): TelegramImageRef | undefined {
+  const ref = (p: { file_id: string; file_size?: number | undefined }): TelegramImageRef => ({
+    fileId: p.file_id,
+    ...(p.file_size !== undefined ? { size: p.file_size } : {}),
+  });
+  const photos = z.array(photoSizeSchema).safeParse(m.photo);
+  if (photos.success && photos.data.length > 0) {
+    // Telegram las da de menor a mayor. Sin tamaño declarado, se intenta igual:
+    // la descarga corta en el límite.
+    const fits = photos.data.filter((p) => (p.file_size ?? 0) <= TELEGRAM_IMAGE_MAX_BYTES);
+    return ref(fits.at(-1) ?? photos.data[0]!);
+  }
+  const doc = documentSchema.safeParse(m.document);
+  if (doc.success && doc.data.mime_type?.startsWith('image/')) return ref(doc.data);
+  return undefined;
+}
 
 const callbackSchema = z.object({
   id: z.string(),
@@ -202,12 +256,15 @@ function toUser(u: z.infer<typeof userSchema>): TelegramUser {
 
 function toMessage(m: z.infer<typeof messageSchema>): TelegramMessage {
   const raw = m as Record<string, unknown>;
+  const image = imageOf(m);
   return {
     messageId: m.message_id,
     date: m.date,
     chat: { id: m.chat.id, type: m.chat.type },
     ...(m.from ? { from: toUser(m.from) } : {}),
     ...(m.text !== undefined ? { text: m.text } : {}),
+    ...(m.caption !== undefined ? { caption: m.caption } : {}),
+    ...(image ? { image } : {}),
     hasMedia: MEDIA_KEYS.some((k) => raw[k] !== undefined),
   };
 }
@@ -403,5 +460,61 @@ export class HttpTelegramApi implements TelegramApi {
 
   async sendChatAction(chatId: number, action: 'typing'): Promise<void> {
     await this.call('sendChatAction', { chat_id: chatId, action });
+  }
+
+  async downloadFile(fileId: string, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array> {
+    const parsed = z
+      .object({ file_path: z.string().optional(), file_size: z.number().int().optional() })
+      .passthrough()
+      .safeParse(await this.call('getFile', { file_id: fileId }, { signal }));
+    if (!parsed.success || !parsed.data.file_path) {
+      throw new TelegramApiError('bad-response', 'Telegram getFile: no file path');
+    }
+    if ((parsed.data.file_size ?? 0) > maxBytes) {
+      throw new TelegramApiError('too-large', 'The file is larger than the limit.');
+    }
+    const timeout = AbortSignal.timeout(this.timeoutMs * 4);
+    const both = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    // La ruta la da Telegram; se codifica por si acaso y siempre bajo su origen.
+    const path = parsed.data.file_path.split('/').map(encodeURIComponent).join('/');
+    let res: Response;
+    try {
+      res = await this.fetchImpl(`${TELEGRAM_API_ORIGIN}/file/bot${this.token}/${path}`, {
+        signal: both,
+      });
+    } catch (err) {
+      if (signal?.aborted) throw err;
+      const why = err instanceof Error ? err.message : String(err);
+      throw new TelegramApiError('network', this.scrub(`Telegram file download: ${why}`));
+    }
+    if (!res.ok || !res.body) {
+      throw new TelegramApiError('api', `Telegram file download: HTTP ${res.status}`, res.status);
+    }
+    const declared = Number(res.headers.get('content-length') ?? '0');
+    if (declared > maxBytes) {
+      await res.body.cancel().catch(() => undefined);
+      throw new TelegramApiError('too-large', 'The file is larger than the limit.');
+    }
+    // Se lee por trozos y se corta en cuanto pasa del límite: nunca entero en memoria.
+    const chunks: Uint8Array[] = [];
+    let total = 0;
+    const reader = res.body.getReader();
+    for (;;) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      total += value.byteLength;
+      if (total > maxBytes) {
+        await reader.cancel().catch(() => undefined);
+        throw new TelegramApiError('too-large', 'The file is larger than the limit.');
+      }
+      chunks.push(value);
+    }
+    const out = new Uint8Array(total);
+    let at = 0;
+    for (const c of chunks) {
+      out.set(c, at);
+      at += c.byteLength;
+    }
+    return out;
   }
 }

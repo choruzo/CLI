@@ -173,6 +173,27 @@ export function loadUserImage(
 }
 
 /**
+ * M18 parte 6E — una imagen que llega en memoria (una foto de Telegram), con
+ * las mismas comprobaciones que una leída de disco: firma de imagen admitida y
+ * `USER_IMAGE_LIMITS.maxBytes`. No se guarda en ningún sitio.
+ *
+ * @throws UserImageError si no es una imagen admitida o pesa demasiado.
+ */
+export function userImageFromBytes(bytes: Uint8Array, name: string): UserImage {
+  const mime = checkBytes(bytes, name);
+  const buf = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+  const sha256 = createHash('sha256').update(buf).digest('hex');
+  return {
+    id: `img-${sha256.slice(0, 12)}`,
+    name,
+    mime,
+    data: buf.toString('base64'),
+    bytes: buf.length,
+    sha256,
+  };
+}
+
+/**
  * Carga las imágenes de un mensaje. Todas o ninguna: una que falla rechaza el
  * mensaje entero (el usuario las adjuntó a ese texto). Purga de paso lo caducado.
  */

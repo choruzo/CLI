@@ -429,13 +429,19 @@ export class HostedSession {
   startRun(
     input: string,
     mode: 'normal' | 'plan' = 'normal',
-    options: { maxIterations?: number; images?: readonly string[]; via?: ProtocolRun['via'] } = {},
+    options: {
+      maxIterations?: number;
+      images?: readonly string[];
+      /** M18 parte 6E — imágenes ya cargadas dentro del daemon (una foto de Telegram). */
+      imageData?: readonly UserImage[];
+      via?: ProtocolRun['via'];
+    } = {},
   ): ProtocolRun {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'The session already has a run in progress.');
     if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
     if (this.archiving) throw new ProtocolError('BUSY', 'The conversation is being archived.');
-    const images = this.loadImages(options.images);
+    const images = [...this.loadImages(options.images), ...(options.imageData ?? [])];
 
     this.publisher.expectRun({ mode, input, ...(options.via ? { via: options.via } : {}) });
     const turn = this.host.run(
@@ -507,8 +513,12 @@ export class HostedSession {
     return this.host.resume();
   }
 
-  steer(text: string, imagePaths?: readonly string[]): SteerStatus {
-    return this.host.steer(text, this.loadImages(imagePaths)).status;
+  steer(
+    text: string,
+    imagePaths?: readonly string[],
+    imageData: readonly UserImage[] = [],
+  ): SteerStatus {
+    return this.host.steer(text, [...this.loadImages(imagePaths), ...imageData]).status;
   }
 
   /**

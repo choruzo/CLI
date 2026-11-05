@@ -2229,6 +2229,22 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       definir cómo (una referencia a `/exchange` o una ruta de lectura acotada). Es un cambio de
       contrato que va en `docs/protocol.md`.
     - Siguen fuera de la traza y de los logs (`trace.screenshots` no cambia).
+    *Decidido por el usuario, 2026-11-05*:
+    - **Salida por una tool explícita** (`send_image`, solo del `companion`): una imagen de
+      `/exchange` o la pantalla actual de la caja. El modelo elige qué enseña; las capturas de
+      `screen_*` no salen solas.
+    - **Entrada desde Telegram**: las fotos del chat llegan al asistente como las imágenes adjuntas
+      en Dot (`~/.stratum/images`, firma de imagen, ≤ 5 MB, solo a un modelo con visión; sin
+      visión, el bot lo dice).
+    - **A Dot, por una copia en el daemon**: al enviarla se copia a `~/.stratum/companion/shared`
+      (caduca a los 15 días, como lo pegado). La conversación lleva solo la referencia, y Dot lee
+      los bytes con un método acotado (`observe`, ≤ 5 MB). Que `/exchange` cambie luego no altera
+      el historial.
+    *Entrada hecha 2026-11-05*: la foto (o un fichero `image/*`) se descarga con `getFile`,
+    cortando en 5 MB, y entra **en memoria**, sin pasar por `~/.stratum/images`: es más estricto
+    que lo decidido y, como cualquier imagen adjunta, no sobrevive a un reinicio. El pie de foto
+    es el texto. Además, cada `warning` de la sesión del `companion` llega ahora al chat: así se
+    ve el aviso de un modelo sin visión y el del fallback de B.
   - **F. Verbosidad del espejo**: se queda como está, con cada bloque del asistente. Del diagnóstico
     de `screen_*` (arriba) entran los tres arreglos de producto.
 

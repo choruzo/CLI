@@ -1,8 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ProtocolError } from '../ipc/codec.js';
 import type { ProtocolEvent, ProtocolRun, SteerStatus } from '../protocol/index.js';
-import type { TelegramMessage } from '../channels/telegram/api.js';
-import { TEXT, fromDot, turnFailed } from '../channels/telegram/render.js';
+import type { UserImage } from '../agent/user-images.js';
+import { TelegramApiError, type TelegramMessage } from '../channels/telegram/api.js';
+import {
+  TEXT,
+  fromDot,
+  imageRejected,
+  turnFailed,
+  warningLine,
+} from '../channels/telegram/render.js';
 import { CompanionLink, type CompanionTurns } from './channel-companion.js';
 
 /** Una sesión del companion de mentira: registra lo que se le pide. */
@@ -11,22 +18,26 @@ class FakeTurns implements CompanionTurns {
   running = false;
   started: string[] = [];
   steered: string[] = [];
+  /** Las imágenes de cada `startRun`/`steer`, en orden. */
+  images: (readonly UserImage[])[] = [];
   steerStatus: SteerStatus = 'accepted';
   busyOnce = false;
   private idleWaiters: (() => void)[] = [];
 
-  startRun(input: string): ProtocolRun {
+  startRun(input: string, images: readonly UserImage[] = []): ProtocolRun {
     if (this.busyOnce) {
       this.busyOnce = false;
       this.running = true;
       throw new ProtocolError('BUSY', 'busy');
     }
     this.started.push(input);
+    this.images.push(images);
     this.running = true;
     return { id: `run${this.started.length}` } as ProtocolRun;
   }
-  steer(text: string): SteerStatus {
+  steer(text: string, images: readonly UserImage[] = []): SteerStatus {
     this.steered.push(text);
+    this.images.push(images);
     return this.steerStatus;
   }
   async waitAtSafePoint(): Promise<void> {}
@@ -50,13 +61,26 @@ function message(text: string | undefined, hasMedia = false): TelegramMessage {
   };
 }
 
-function setup(opts: { open?: () => Promise<CompanionTurns>; chats?: number[] } = {}) {
+function setup(
+  opts: {
+    open?: () => Promise<CompanionTurns>;
+    chats?: number[];
+    files?: Map<string, Uint8Array | Error>;
+  } = {},
+) {
   const turns = new FakeTurns();
   const sent: { chatId: number; text: string }[] = [];
   const markdown: { chatId: number; text: string }[] = [];
   const typing: number[] = [];
   const link = new CompanionLink({
     companion: { open: opts.open ?? (async () => turns), currentId: () => turns.sessionId },
+    download: async (image, maxBytes) => {
+      const file = opts.files?.get(image.fileId);
+      if (!file) throw new TelegramApiError('api', 'not found');
+      if (file instanceof Error) throw file;
+      if (file.length > maxBytes) throw new TelegramApiError('too-large', 'too large');
+      return file;
+    },
     target: () => ({
       send: (chatId, text) => sent.push({ chatId, text }),
       sendMarkdown: (chatId, text) => markdown.push({ chatId, text }),
@@ -80,6 +104,64 @@ function ev<T extends ProtocolEvent['type']>(
 
 const run = (over: Partial<ProtocolRun> = {}): ProtocolRun =>
   ({ id: 'r1', kind: 'run', input: 'hola', status: 'running', ...over }) as ProtocolRun;
+
+describe('CompanionLink: fotos del chat (6E)', () => {
+  const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+  const photo = (fileId: string, caption?: string): TelegramMessage => ({
+    ...message(undefined, true),
+    ...(caption !== undefined ? { caption } : {}),
+    image: { fileId },
+  });
+
+  it('con pie de foto: abre un turno con ese texto y la imagen en memoria', async () => {
+    const { turns, link } = setup({ files: new Map([['f1', PNG]]) });
+    await link.input(42, photo('f1', ' ¿qué es esto? '));
+    expect(turns.started).toEqual(['¿qué es esto?']);
+    expect(turns.images[0]).toHaveLength(1);
+    expect(turns.images[0]![0]).toMatchObject({ mime: 'image/png', bytes: PNG.length });
+  });
+
+  it('sin texto lleva una marca; con turno en curso, es steering con la imagen', async () => {
+    const { turns, link } = setup({ files: new Map([['f1', PNG]]) });
+    turns.running = true;
+    await link.input(42, photo('f1'));
+    expect(turns.steered).toEqual([TEXT.photoInput]);
+    expect(turns.images[0]).toHaveLength(1);
+  });
+
+  it('demasiado grande, no es una imagen o no se descarga: se dice y no llega nada', async () => {
+    const { turns, link, sent } = setup({
+      files: new Map<string, Uint8Array | Error>([
+        ['big', new Uint8Array(6 * 1024 * 1024)],
+        ['pdf', new TextEncoder().encode('%PDF-1.7 ...')],
+        ['net', new TelegramApiError('network', 'boom')],
+      ]),
+    });
+    await link.input(42, photo('big', 'a'));
+    await link.input(42, photo('pdf', 'b'));
+    await link.input(42, photo('net', 'c'));
+    expect(turns.started).toEqual([]);
+    expect(sent.map((s) => s.text)).toEqual([
+      imageRejected(new TelegramApiError('too-large', '')),
+      expect.stringContaining('not a PNG, JPEG, WebP or GIF'),
+      expect.stringContaining('could not be downloaded'),
+    ]);
+  });
+
+  it('otros adjuntos siguen sin pasar', async () => {
+    const { turns, link, sent } = setup();
+    await link.input(42, message(undefined, true));
+    expect(turns.started).toEqual([]);
+    expect(sent).toEqual([{ chatId: 42, text: TEXT.textOnly }]);
+  });
+
+  it('un aviso de la sesión (p. ej., modelo sin visión) llega al chat; el de un subagente, no', () => {
+    const { link, sent } = setup();
+    link.observe(ev('warning', { message: 'no vision' }));
+    link.observe(ev('warning', { message: 'del hijo' }, { subagentId: 'sub1' }));
+    expect(sent).toEqual([{ chatId: 42, text: warningLine('no vision') }]);
+  });
+});
 
 describe('CompanionLink: entrada (M18)', () => {
   it('sin turno, abre uno con el texto', async () => {

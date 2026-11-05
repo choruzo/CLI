@@ -32,7 +32,10 @@ export const TEXT = {
   stale:
     'This message arrived while Stratum was not running, so it was not passed on. ' +
     'Send it again if it still matters.',
-  textOnly: 'Only text for now: photos, files and voice messages are not passed to the assistant.',
+  textOnly:
+    'Only text and images for now: files, voice messages and the like are not passed to the assistant.',
+  /** La entrada de una foto que llega sin texto. */
+  photoInput: '(photo)',
   tooLarge:
     'That message is too long to pass while the assistant is working. ' +
     'Send it shorter, or again when it finishes.',
@@ -42,6 +45,21 @@ export const TEXT = {
 /** Lo que alguien escribió en Dot, reflejado en el chat. */
 export function fromDot(text: string): string {
   return `In Dot: ${text}`;
+}
+
+/** Un aviso de la sesión del asistente. */
+export function warningLine(message: string): string {
+  return `Warning: ${message}`;
+}
+
+/** Por qué una foto del chat no se pasó al asistente (parte 6E). */
+export function imageRejected(err: unknown): string {
+  const kind = (err as { kind?: unknown } | null)?.kind;
+  if (kind === 'too-large') return 'That image is larger than 5 MB: it was not passed on.';
+  if (err instanceof Error && err.name === 'UserImageError') {
+    return 'That file is not a PNG, JPEG, WebP or GIF image of up to 5 MB: it was not passed on.';
+  }
+  return 'That image could not be downloaded from Telegram: it was not passed on. Try again.';
 }
 
 export function turnFailed(error: string | undefined): string {

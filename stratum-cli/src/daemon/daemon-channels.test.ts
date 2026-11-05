@@ -247,6 +247,32 @@ describe('channels.* (M18)', () => {
     ]);
   });
 
+  it('6E: una foto del chat entra en la conversación del companion; sin visión, el aviso llega al chat', async () => {
+    const ana: TelegramPaired = {
+      userId: 42,
+      chatId: 42,
+      name: 'Ana',
+      pairedAt: new Date().toISOString(),
+    };
+    const { t, api } = await start({ paired: [ana] });
+    t.project(join('companion', 'workspace'), [textRound(['Veo una foto.'])]);
+    const png = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0, 0, 0]);
+    api.push(api.photo({ id: 42 }, png, 'mira esto'));
+    await vi.waitFor(() => expect(api.sent.map((m) => m.text)).toContain('Veo una foto.'), {
+      timeout: 10_000,
+    });
+    expect(api.sent.map((m) => m.text).join('\n')).toContain(
+      'Warning: The active model has no declared vision',
+    );
+    const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    const { session } = await dot.request('sessions.open', { agent: 'companion' });
+    const { snapshot } = await dot.request('sessions.get', { sessionId: session.id });
+    expect(snapshot.messages.find((m) => m.kind === 'user')).toMatchObject({
+      text: 'mira esto',
+      via: 'telegram',
+    });
+  });
+
   describe('aprobaciones desde el chat (parte 4)', () => {
     const ana: TelegramPaired = {
       userId: 42,

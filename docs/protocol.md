@@ -2028,16 +2028,21 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
   hay, el daemon la abre como `sessions.open { agent: 'companion' }`). Sin turno en curso, abre un
   run; con turno, es steering (como `runs.steer`), y si ese turno ya no acepta mensajes
   (`not-accepting`) se abre otro al terminar, con lo que se haya juntado. Un mensaje demasiado
-  largo para el steering (`too-large`) se contesta en el chat y no se recorta. Fotos, ficheros y voz
-  aún no: el bot lo dice.
+  largo para el steering (`too-large`) se contesta en el chat y no se recorta. **Una foto** (parte
+  6E; también un fichero `image/*`) entra con su pie de foto como texto (sin él, «(photo)») y la
+  imagen adjunta, como las de `runs.start { images }`: firma PNG, JPEG, WebP o GIF y ≤ 5 MB, solo a
+  un modelo con visión declarada. El daemon la descarga y la pasa **en memoria** (no se guarda en
+  disco) y, como cualquier imagen adjunta, no sobrevive a un reinicio. Una que no vale se contesta
+  en el chat y no llega nada. Ficheros de otro tipo y voz, aún no: el bot lo dice.
 - **`ProtocolRun.via` y `ProtocolChatMessage.via`** (`'telegram'`, opcionales): el run, y la
   entrada de usuario que abre en la conversación, llegaron por un canal. **Solo procedencia**:
   nadie lo lee para decidir nada. El steering no lleva texto en los eventos (`steering.queued`),
   así que tampoco marca.
 - **Espejo.** Lo que entra en la conversación de esa sesión llega a los chats emparejados: la
   entrada de un run abierto por un cliente («In Dot: …»; la que llevaba `via`, no), cada
-  `message.completed` del agente principal y cómo acabó un turno que falló o se canceló. Las tools
-  no; mientras el run está `running`, «escribiendo…». También el aviso de una rutina terminada
+  `message.completed` del agente principal, cómo acabó un turno que falló o se canceló y cada
+  `warning` de la sesión (p. ej., un modelo sin visión para una foto). Las tools no; mientras el
+  run está `running`, «escribiendo…». También el aviso de una rutina terminada
   (nombre, estado y `summary`). Todo pasa otra vez por la redacción. La respuesta del asistente
   convierte su markdown al HTML de Telegram (`parse_mode: 'HTML'`), escapando todo lo demás: las
   tablas van como texto fijo, los encabezados en negrita y solo los enlaces `http(s)` son enlaces.
