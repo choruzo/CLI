@@ -63,6 +63,8 @@ pub enum MainMethod {
     BoxStop,
     /// M15 (Dot) — la pantalla de la caja ahora (JPEG), para verla en solo lectura.
     BoxScreen,
+    /// Dot — una imagen que el asistente comparte en la conversación, por trozos (`observe`).
+    ImagesGet,
     /// M16 (Dot) — las rutinas del asistente (`docs/protocol.md` §23).
     RoutinesList,
     RoutinesAdd,
@@ -84,7 +86,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 34] = [
+    pub const ALL: [MainMethod; 35] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -108,6 +110,7 @@ impl MainMethod {
         MainMethod::BoxStart,
         MainMethod::BoxStop,
         MainMethod::BoxScreen,
+        MainMethod::ImagesGet,
         MainMethod::RoutinesList,
         MainMethod::RoutinesAdd,
         MainMethod::RoutinesUpdate,
@@ -148,6 +151,7 @@ impl WireMethod for MainMethod {
             MainMethod::BoxStart => "box.start",
             MainMethod::BoxStop => "box.stop",
             MainMethod::BoxScreen => "box.screen",
+            MainMethod::ImagesGet => "images.get",
             MainMethod::RoutinesList => "routines.list",
             MainMethod::RoutinesAdd => "routines.add",
             MainMethod::RoutinesUpdate => "routines.update",
@@ -350,6 +354,7 @@ mod tests {
                 "box.start",
                 "box.stop",
                 "box.screen",
+                "images.get",
                 "routines.list",
                 "routines.add",
                 "routines.update",

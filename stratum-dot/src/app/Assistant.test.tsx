@@ -1,8 +1,9 @@
 import { act, cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { NativeProvider } from '../bridge/context';
 import { useUi } from '../stores/uiStore';
 import { App } from './App';
+import { clearSharedImageCache } from './sharedImages';
 import {
   CONNECTED,
   NEW_SID,
@@ -10,6 +11,8 @@ import {
   hostedIdle,
   resetStores,
   sampleBox,
+  sampleImageChunk,
+  sampleSharedImage,
   sampleToolCall,
   snapshotOf,
   type FakeNative,
@@ -227,5 +230,143 @@ describe('vista Asistente — la pantalla de la caja (M15)', () => {
     await waitFor(() => expect(seeing.calls.listModels).toHaveBeenCalled());
     await screen.findByRole('img', { name: /box screen/ });
     expect(boxPanel().textContent).not.toContain('not declared with vision');
+  });
+});
+
+describe('vista Asistente — imágenes que envía el asistente', () => {
+  const image = sampleSharedImage({ caption: 'The <b>chart</b> you asked for' });
+  const entry = (img = image) => ({ kind: 'image' as const, id: 'm_img', runId: 'run_1', at: 1_760_000_003_000, image: img });
+  let created: Blob[];
+  let revoked: string[];
+
+  beforeEach(() => {
+    clearSharedImageCache();
+    created = [];
+    revoked = [];
+    URL.createObjectURL = vi.fn((blob: Blob) => {
+      created.push(blob);
+      return `blob:test-${created.length}`;
+    });
+    URL.revokeObjectURL = vi.fn((url: string) => {
+      revoked.push(url);
+    });
+  });
+
+  /** El asistente abierto, con una conversación que ya trae la imagen. */
+  async function withImage(native: FakeNative, img = image) {
+    connected(native);
+    openAssistant();
+    await waitFor(() => expect(useUi.getState().companionId).toBe(NEW_SID));
+    act(() => {
+      native.push({ type: 'sessions', sessionIds: [NEW_SID] });
+      native.push({
+        type: 'snapshot',
+        sessionId: NEW_SID,
+        snapshot: hostedIdle({ messages: [entry(img)] }, { agent: 'companion' }),
+      });
+    });
+  }
+
+  it('pide la imagen por trozos, la junta y la enseña, con el pie como texto', async () => {
+    const big = sampleSharedImage({ bytes: 6, caption: image.caption });
+    const native = fakeNative();
+    native.calls.imagesGet.mockImplementation(async (_id: string, offset?: number) =>
+      offset === 0
+        ? sampleImageChunk({ data: 'AQID', next: 3 })
+        : sampleImageChunk({ offset: 3, data: 'BAUG', next: null }),
+    );
+    await withImage(native, big);
+    const img = await screen.findByRole('img', { name: 'The <b>chart</b> you asked for' });
+    expect(img.getAttribute('src')).toBe('blob:test-1');
+    expect(native.calls.imagesGet.mock.calls).toEqual([
+      [big.id, 0],
+      [big.id, 3],
+    ]);
+    // Los bytes de los dos trozos, en orden, con su mime.
+    expect(created).toHaveLength(1);
+    expect(created[0]!.type).toBe('image/png');
+    expect(created[0]!.size).toBe(6);
+    // El pie es texto: no se interpreta como HTML.
+    expect(screen.getByText('The <b>chart</b> you asked for', { selector: 'figcaption' })).toBeTruthy();
+    expect(document.querySelector('figcaption b')).toBeNull();
+  });
+
+  it('sin pie, el texto alternativo es genérico; y al irse la vista libera la URL', async () => {
+    const native = fakeNative();
+    await withImage(native, sampleSharedImage());
+    await screen.findByRole('img', { name: 'Image from the assistant' });
+    expect(document.querySelector('figcaption')).toBeNull();
+    cleanup();
+    expect(revoked).toEqual(['blob:test-1']);
+  });
+
+  it('no repite la descarga al volver a pintar la misma imagen', async () => {
+    const native = fakeNative();
+    await withImage(native);
+    await screen.findByRole('img');
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant' }));
+    openAssistant();
+    await screen.findByRole('img');
+    expect(native.calls.imagesGet).toHaveBeenCalledTimes(1);
+  });
+
+  it('si caducó (NOT_FOUND), lo dice y no hay imagen', async () => {
+    const native = fakeNative();
+    native.calls.imagesGet.mockRejectedValue({
+      kind: 'rejected',
+      code: 'NOT_FOUND',
+      reason: null,
+      message: 'No such image.',
+    });
+    await withImage(native);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This image has expired.'));
+    expect(screen.queryByRole('img')).toBeNull();
+    // El pie, que es texto de la conversación, sigue ahí.
+    expect(screen.getByText('The <b>chart</b> you asked for', { selector: 'figcaption' })).toBeTruthy();
+  });
+
+  it('cualquier otro fallo se dice corto, sin inventar una imagen', async () => {
+    const native = fakeNative();
+    native.calls.imagesGet.mockRejectedValue({ kind: 'rejected', code: 'INVALID_PARAMS', reason: null, message: 'x' });
+    await withImage(native);
+    await waitFor(() => expect(screen.getByRole('alert').textContent).toBe('This image could not be loaded.'));
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('un trozo que no empieza donde se pidió es un error: no se enseña nada', async () => {
+    const native = fakeNative();
+    native.calls.imagesGet.mockResolvedValue(sampleImageChunk({ offset: 2 }));
+    await withImage(native);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.queryByRole('img')).toBeNull();
+    expect(URL.createObjectURL).not.toHaveBeenCalled();
+  });
+
+  it('si el total no coincide con lo anunciado, tampoco se enseña', async () => {
+    const native = fakeNative();
+    native.calls.imagesGet.mockResolvedValue(sampleImageChunk({ data: 'AQID' }));
+    await withImage(native);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
+  it('un daemon que nunca termina de dar trozos se corta por el tope de llamadas', async () => {
+    const native = fakeNative();
+    const huge = sampleSharedImage({ bytes: 5 * 1024 * 1024 });
+    let at = 0;
+    native.calls.imagesGet.mockImplementation(async () => {
+      const chunk = sampleImageChunk({
+        image: { id: huge.id, mime: huge.mime, bytes: huge.bytes },
+        offset: at,
+        data: 'AQ==',
+        next: at + 1,
+      });
+      at += 1;
+      return chunk;
+    });
+    await withImage(native, huge);
+    await waitFor(() => expect(screen.getByRole('alert')).toBeTruthy());
+    expect(native.calls.imagesGet.mock.calls.length).toBeLessThanOrEqual(11);
+    expect(screen.queryByRole('img')).toBeNull();
   });
 });

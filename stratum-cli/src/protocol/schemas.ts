@@ -65,6 +65,7 @@ import type {
   ProtocolRun,
   ProtocolServerStatus,
   ProtocolSession,
+  ProtocolSharedImage,
   ProtocolSubagent,
   ProtocolTodo,
   ProtocolToolCall,
@@ -81,7 +82,7 @@ import type {
   ProtocolTelegramPaired,
   ProtocolTelegramUser,
 } from './model.js';
-import { BOX_SCREEN_LIMITS, GRANT_MINUTES, HISTORY_LIMITS } from './model.js';
+import { BOX_SCREEN_LIMITS, GRANT_MINUTES, HISTORY_LIMITS, SHARED_IMAGE_LIMITS } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
 
@@ -276,6 +277,17 @@ export const toolCallSchema: z.ZodType<ProtocolToolCall> = z.object({
 const messageBase = { id, runId: z.string(), at: timestamp };
 const messageText = { text: z.string(), truncated: z.boolean().optional() };
 
+/** M18 parte 6E — el id que da el almacén de compartidas (`images/shared.ts`). */
+export const sharedImageId = z.string().regex(/^\d{8}T\d{6}Z-[0-9a-f]{16}$/);
+
+export const sharedImageSchema: z.ZodType<ProtocolSharedImage> = z.object({
+  id: sharedImageId,
+  mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+  bytes: count,
+  caption: z.string().max(1_000).optional(),
+  callId: z.string().optional(),
+});
+
 export const messageSchema: z.ZodType<ProtocolChatMessage> = z.discriminatedUnion('kind', [
   z.object({ ...messageBase, kind: z.literal('user'), ...messageText, via }),
   z.object({ ...messageBase, kind: z.literal('assistant'), ...messageText }),
@@ -294,6 +306,7 @@ export const messageSchema: z.ZodType<ProtocolChatMessage> = z.discriminatedUnio
     status: z.enum(['failed', 'cancelled']),
     text: z.string(),
   }),
+  z.object({ ...messageBase, kind: z.literal('image'), image: sharedImageSchema }),
 ]);
 
 export const subagentSchema: z.ZodType<ProtocolSubagent> = z.object({
@@ -721,6 +734,7 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
   'subagent.completed': z.object({ subagent: subagentSchema }),
   'memory.read': z.object({ memory: memoryEventSchema }),
   'memory.write': z.object({ memory: memoryEventSchema }),
+  'image.shared': z.object({ image: sharedImageSchema }),
   'context.compressed': z.object({
     tokensBefore: count,
     tokensAfter: count,
@@ -1099,6 +1113,12 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
 
   'box.status': empty,
   'box.screen': empty,
+  'images.get': z
+    .object({
+      imageId: sharedImageId,
+      offset: z.number().int().nonnegative().max(SHARED_IMAGE_LIMITS.maxBytes).optional(),
+    })
+    .strict(),
   'box.start': z.object({ operationId }).strict(),
   'box.stop': z.object({ operationId }).strict(),
   'box.reset': z.object({ operationId }).strict(),
@@ -1291,6 +1311,19 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'box.status': boxResult,
   'box.screen': z.object({ screen: boxScreenSchema }),
+  'images.get': z.object({
+    image: z.object({
+      id: sharedImageId,
+      mime: z.enum(['image/png', 'image/jpeg', 'image/webp', 'image/gif']),
+      bytes: count.max(SHARED_IMAGE_LIMITS.maxBytes),
+    }),
+    offset: count,
+    data: z
+      .string()
+      .max(Math.ceil(SHARED_IMAGE_LIMITS.chunkBytes / 3) * 4)
+      .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+    next: count.nullable(),
+  }),
   'box.start': boxResult,
   'box.stop': boxResult,
   'box.reset': boxResult,

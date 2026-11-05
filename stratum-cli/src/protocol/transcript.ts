@@ -12,6 +12,7 @@ import type { ProtocolChatMessage, ProtocolToolCall } from './model.js';
  *  - `run.started` → la entrada del usuario (`run.input`);
  *  - `message.completed` del agente principal → un bloque del asistente;
  *  - `tool.*` del agente principal → una línea por llamada, que cambia de estado;
+ *  - `image.shared` del agente principal → la referencia a una imagen enviada (6E);
  *  - `run.failed` / `run.cancelled` → cómo acabó el turno.
  *
  * Los fragmentos volátiles **no** entran: el texto a medias vive en `partial`
@@ -25,6 +26,8 @@ export const TRANSCRIPT_LIMITS = {
   textChars: 12_000,
   /** Descripción de una tool dentro de la conversación. */
   descriptionChars: 300,
+  /** Pie de una imagen enviada (6E); `send_image` ya no admite más. */
+  captionChars: 1_000,
   /** Suma de los textos: una foto es un solo mensaje del protocolo y tiene que caber. */
   totalChars: 150_000,
 } as const;
@@ -55,7 +58,9 @@ function clipped(text: string, max: number): { text: string; truncated?: true } 
 }
 
 function size(message: ProtocolChatMessage): number {
-  return message.kind === 'tool' ? message.description.length : message.text.length;
+  if (message.kind === 'tool') return message.description.length;
+  if (message.kind === 'image') return message.image.caption?.length ?? 0;
+  return message.text.length;
 }
 
 function bounded(messages: ProtocolChatMessage[], truncated: boolean): ProtocolTranscript {
@@ -161,6 +166,20 @@ export function applyTranscriptEvent(
     case 'tool.blocked':
       if (event.subagentId || event.data.call.subagentId) return transcript;
       return withTool(transcript, id, event.at, event.data.call);
+    case 'image.shared': {
+      if (event.subagentId) return transcript;
+      const { caption, ...rest } = event.data.image;
+      return add({
+        kind: 'image',
+        id,
+        runId: event.runId ?? '',
+        at: event.at,
+        image: {
+          ...rest,
+          ...(caption ? { caption: clipText(caption, TRANSCRIPT_LIMITS.captionChars) } : {}),
+        },
+      });
+    }
     case 'run.failed':
     case 'run.cancelled': {
       const { run } = event.data;

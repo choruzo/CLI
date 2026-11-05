@@ -161,6 +161,8 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::BoxStop,
     // M15: su pantalla, en solo lectura.
     MainMethod::BoxScreen,
+    // Las imágenes que comparte el asistente, por trozos y en solo lectura.
+    MainMethod::ImagesGet,
     // M16: sus rutinas (Desktop no las tiene: son del asistente de Dot).
     MainMethod::RoutinesList,
     MainMethod::RoutinesAdd,
@@ -907,6 +909,20 @@ fn call_request(
         CallAction::BoxStart => Ok((MainMethod::BoxStart, json!({ "operationId": operation_id }))),
         CallAction::BoxStop => Ok((MainMethod::BoxStop, json!({ "operationId": operation_id }))),
         CallAction::BoxScreen => Ok((MainMethod::BoxScreen, json!({}))),
+        CallAction::ImagesGet { image_id, offset } => {
+            if !valid_image_id(image_id) {
+                return Err(invalid("Invalid image id."));
+            }
+            let mut params = serde_json::Map::new();
+            params.insert("imageId".into(), json!(image_id));
+            if let Some(offset) = offset {
+                if *offset > MAX_IMAGE_OFFSET {
+                    return Err(invalid("Invalid image offset."));
+                }
+                params.insert("offset".into(), json!(offset));
+            }
+            Ok((MainMethod::ImagesGet, Value::Object(params)))
+        }
         CallAction::RoutinesList => Ok((MainMethod::RoutinesList, json!({}))),
         CallAction::RoutinesAdd {
             name,
@@ -1078,6 +1094,23 @@ fn call_request(
             ))
         }
     }
+}
+
+/// Tope del desplazamiento de `images.get` (`SHARED_IMAGE_LIMITS`: 5 MB).
+const MAX_IMAGE_OFFSET: u64 = 5 * 1024 * 1024;
+
+/// Un id de imagen compartida: `AAAAMMDDTHHMMSSZ-` y 16 hex en minúscula.
+pub(crate) fn valid_image_id(id: &str) -> bool {
+    let b = id.as_bytes();
+    b.len() == 33
+        && b[..8].iter().all(u8::is_ascii_digit)
+        && b[8] == b'T'
+        && b[9..15].iter().all(u8::is_ascii_digit)
+        && b[15] == b'Z'
+        && b[16] == b'-'
+        && b[17..]
+            .iter()
+            .all(|c| c.is_ascii_digit() || (b'a'..=b'f').contains(c))
 }
 
 /// M18 — un id de usuario de Telegram: entero y dentro de lo que JSON representa exacto.
@@ -2133,6 +2166,7 @@ impl Actor {
                         if !matches!(
                             action,
                             CallAction::BoxScreen
+                                | CallAction::ImagesGet { .. }
                                 | CallAction::Memory { .. }
                                 | CallAction::MemoryDecisions { .. }
                         ) {
@@ -2423,6 +2457,47 @@ mod tests {
         }
         assert!(DOT_METHODS.contains(&MainMethod::GrantsRevoke));
         assert!(!DESKTOP_METHODS.contains(&MainMethod::GrantsRevoke));
+
+        // Las imágenes compartidas: id y desplazamiento validados antes de salir.
+        let image_id = "20261105T101500Z-0123456789abcdef";
+        let first = CallAction::ImagesGet {
+            image_id: image_id.into(),
+            offset: None,
+        };
+        let (method, params) = call_request(&first, "op").unwrap();
+        assert_eq!(method, MainMethod::ImagesGet);
+        assert_eq!(params, json!({ "imageId": image_id }));
+        assert!(!first.mutating());
+        let next = CallAction::ImagesGet {
+            image_id: image_id.into(),
+            offset: Some(MAX_IMAGE_OFFSET),
+        };
+        assert_eq!(
+            call_request(&next, "op").unwrap().1,
+            json!({ "imageId": image_id, "offset": MAX_IMAGE_OFFSET })
+        );
+        let past = CallAction::ImagesGet {
+            image_id: image_id.into(),
+            offset: Some(MAX_IMAGE_OFFSET + 1),
+        };
+        assert!(call_request(&past, "op").is_err());
+        for bad in [
+            "",
+            "../etc/passwd",
+            "20261105T101500Z-0123456789ABCDEF",
+            "20261105T101500Z-0123456789abcde",
+            "20261105T101500Z-0123456789abcdef0",
+            "2026110ST101500Z-0123456789abcdef",
+            "20261105t101500Z-0123456789abcdef",
+        ] {
+            let bad = CallAction::ImagesGet {
+                image_id: bad.into(),
+                offset: Some(0),
+            };
+            assert!(call_request(&bad, "op").is_err());
+        }
+        assert!(DOT_METHODS.contains(&MainMethod::ImagesGet));
+        assert!(!DESKTOP_METHODS.contains(&MainMethod::ImagesGet));
 
         // M17: el inspector de memoria fija el agente y recorta la consulta.
         let latest = CallAction::MemoryDecisions { query: None };

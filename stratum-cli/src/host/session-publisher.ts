@@ -275,7 +275,9 @@ function squeeze(
         ? { ...m, name: c(m.name), description: c(m.description), ...opt('target', m.target) }
         : m.kind === 'outcome'
           ? { ...m, text: c(m.text) }
-          : { ...m, text: c(m.text), ...(m.text.length > text ? { truncated: true } : {}) },
+          : m.kind === 'image'
+            ? { ...m, image: { ...m.image, ...opt('caption', m.image.caption) } }
+            : { ...m, text: c(m.text), ...(m.text.length > text ? { truncated: true } : {}) },
     ),
     messagesTruncated: s.messagesTruncated || messages.length < s.messages.length,
   };
@@ -511,7 +513,11 @@ export class SessionPublisher {
         opts.seedTranscript.map((m) =>
           m.kind === 'tool'
             ? { ...m, description: redact(m.description) }
-            : { ...m, text: redact(m.text) },
+            : m.kind === 'image'
+              ? m.image.caption === undefined
+                ? m
+                : { ...m, image: { ...m.image, caption: redact(m.image.caption) } }
+              : { ...m, text: redact(m.text) },
         ),
       );
       if (opts.seedTitle?.trim())
@@ -1134,6 +1140,11 @@ export class SessionPublisher {
           () => ({ call: { ...call }, recoverable: event.recoverable }),
           subagentId,
         );
+        return;
+      }
+      case 'image_shared': {
+        const image = { ...event.image, callId: event.id };
+        this.state('image.shared', () => ({ image }), subagentId);
         return;
       }
       case 'memory_retrieved': {

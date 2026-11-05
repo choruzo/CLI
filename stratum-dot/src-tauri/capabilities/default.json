@@ -24,6 +24,7 @@
     "allow-dot-box-start",
     "allow-dot-box-stop",
     "allow-dot-box-screen",
+    "allow-dot-images-get",
     "allow-dot-routines-list",
     "allow-dot-routines-add",
     "allow-dot-routines-update",

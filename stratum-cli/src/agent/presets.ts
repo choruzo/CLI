@@ -106,6 +106,8 @@ export const COMPANION_TOOLS: readonly string[] = [
   ...ASSISTANT_TOOLS,
   'exec',
   ...SCREEN_TOOLS,
+  // M18 parte 6E — enseñar una imagen en el chat; solo con la caja, como `exec`.
+  'send_image',
   // M16 — solo en la sesión principal del daemon (`buildCompanionRegistry`).
   'propose_routine',
 ];

@@ -114,6 +114,8 @@ export function formatChatMessage(m: ProtocolChatMessage): string {
       }`;
     case 'outcome':
       return `[run ${m.status}${m.text ? `: ${m.text}` : ''}]`;
+    case 'image':
+      return `  [image${m.image.caption ? `: ${m.image.caption}` : ''}]`;
   }
 }
 

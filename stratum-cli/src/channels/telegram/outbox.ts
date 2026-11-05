@@ -8,7 +8,12 @@
  * mensajes en espera; si se llena, se descartan los más antiguos.
  */
 import { getLogger } from '../../logging/index.js';
-import { TelegramApiError, type InlineKeyboard, type TelegramApi } from './api.js';
+import {
+  TelegramApiError,
+  type InlineKeyboard,
+  type TelegramApi,
+  type TelegramFile,
+} from './api.js';
 
 const log = getLogger('channels');
 
@@ -17,7 +22,13 @@ const MAX_QUEUE = 100;
 const MAX_ATTEMPTS = 3;
 
 export interface OutgoingMessage {
+  /** Con `photo`, su pie (texto plano, ≤ 1024). */
   text: string;
+  /**
+   * Parte 6E — una imagen. Se envía como foto y, si Telegram no la acepta como
+   * tal (formato, proporciones), una vez como fichero.
+   */
+  photo?: TelegramFile;
   keyboard?: InlineKeyboard;
   /** `'HTML'`: `text` ya viene escapado para Telegram. */
   parseMode?: 'HTML';
@@ -106,14 +117,17 @@ export class TelegramOutbox {
       const message = chat.items.shift()!;
       let text = message.text;
       let parseMode = message.parseMode;
+      let as: 'photo' | 'document' = 'photo';
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !this.stopped; attempt++) {
         const wait = chat.lastSentAt + this.minIntervalMs - Date.now();
         if (wait > 0) await this.sleep(wait);
         try {
-          const { messageId } = await this.opts.api.sendMessage(chatId, text, {
-            ...(message.keyboard ? { keyboard: message.keyboard } : {}),
-            ...(parseMode ? { parseMode } : {}),
-          });
+          const { messageId } = message.photo
+            ? await this.opts.api.sendFile(chatId, as, message.photo, text)
+            : await this.opts.api.sendMessage(chatId, text, {
+                ...(message.keyboard ? { keyboard: message.keyboard } : {}),
+                ...(parseMode ? { parseMode } : {}),
+              });
           chat.lastSentAt = Date.now();
           message.onSent?.(messageId);
           break;
@@ -121,6 +135,17 @@ export class TelegramOutbox {
           chat.lastSentAt = Date.now();
           if (err instanceof TelegramApiError && err.kind === 'rate-limited') {
             await this.sleep(Math.max(1, err.retryAfterSec ?? 1) * 1000);
+            continue;
+          }
+          if (
+            message.photo &&
+            as === 'photo' &&
+            err instanceof TelegramApiError &&
+            err.kind === 'api'
+          ) {
+            // No la acepta como foto (formato, proporciones): una vez como fichero.
+            log.warn('telegram photo rejected, sent as a file');
+            as = 'document';
             continue;
           }
           if (parseMode && err instanceof TelegramApiError && err.kind === 'api') {

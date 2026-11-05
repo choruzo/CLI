@@ -20,11 +20,12 @@ import type {
   TelegramApi,
   TelegramCallbackQuery,
   TelegramErrorKind,
+  TelegramFile,
   TelegramImageRef,
   TelegramMessage,
   TelegramUpdate,
 } from './api.js';
-import { TelegramApiError } from './api.js';
+import { TELEGRAM_MAX_CAPTION_CHARS, TelegramApiError } from './api.js';
 import { TelegramOutbox, type OutgoingMessage } from './outbox.js';
 import type { OfferResult, PairingCandidate } from './pairing.js';
 import { renderTelegramMarkdown } from './markdown.js';
@@ -146,6 +147,14 @@ export class TelegramChannel {
     for (const chunk of renderTelegramMarkdown(markdown)) {
       this.outbox.send(chatId, { text: chunk.html, parseMode: 'HTML', plain: chunk.plain });
     }
+  }
+
+  /** Parte 6E — una imagen con su pie (texto plano, ya redactado), por la misma cola. */
+  sendImage(chatId: number, file: TelegramFile, caption: string): void {
+    this.outbox.send(chatId, {
+      text: caption.slice(0, TELEGRAM_MAX_CAPTION_CHARS),
+      photo: file,
+    });
   }
 
   /** Un mensaje con botones (o que se editará luego), por la misma cola. */

@@ -113,6 +113,17 @@ export interface InlineButton {
 /** Filas de botones bajo un mensaje. */
 export type InlineKeyboard = readonly (readonly InlineButton[])[];
 
+/** Parte 6E — un fichero que el bot envía (una imagen del asistente). */
+export interface TelegramFile {
+  data: Uint8Array;
+  mime: string;
+  /** Nombre con el que llega (sin ruta). */
+  name: string;
+}
+
+/** Lo que cabe en el pie de una foto o un fichero. */
+export const TELEGRAM_MAX_CAPTION_CHARS = 1024;
+
 export interface SendOptions {
   keyboard?: InlineKeyboard;
   /** Formato del texto. Sin él, texto plano: solo se pide de forma explícita. */
@@ -140,6 +151,16 @@ export interface TelegramApi {
    * ficheros). Lanza `too-large` sin leer de más si pasa de `maxBytes`.
    */
   downloadFile(fileId: string, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array>;
+  /**
+   * Parte 6E — envía una imagen como foto (`sendPhoto`) o como fichero
+   * (`sendDocument`), con su pie en texto plano.
+   */
+  sendFile(
+    chatId: number,
+    as: 'photo' | 'document',
+    file: TelegramFile,
+    caption: string,
+  ): Promise<{ messageId: number }>;
 }
 
 // ---------------------------------------------------------------------------
@@ -336,7 +357,7 @@ export class HttpTelegramApi implements TelegramApi {
 
   private async call(
     method: string,
-    body: Record<string, unknown>,
+    body: Record<string, unknown> | FormData,
     opts: { signal?: AbortSignal; extraTimeoutMs?: number } = {},
   ): Promise<unknown> {
     const timeout = AbortSignal.timeout(this.timeoutMs + (opts.extraTimeoutMs ?? 0));
@@ -345,8 +366,10 @@ export class HttpTelegramApi implements TelegramApi {
     try {
       res = await this.fetchImpl(`${TELEGRAM_API_ORIGIN}/bot${this.token}/${method}`, {
         method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify(body),
+        // Un formulario (un fichero) pone su propio content-type con el separador.
+        ...(body instanceof FormData
+          ? { body }
+          : { headers: { 'content-type': 'application/json' }, body: JSON.stringify(body) }),
         signal,
       });
     } catch (err) {
@@ -460,6 +483,26 @@ export class HttpTelegramApi implements TelegramApi {
 
   async sendChatAction(chatId: number, action: 'typing'): Promise<void> {
     await this.call('sendChatAction', { chat_id: chatId, action });
+  }
+
+  async sendFile(
+    chatId: number,
+    as: 'photo' | 'document',
+    file: TelegramFile,
+    caption: string,
+  ): Promise<{ messageId: number }> {
+    const form = new FormData();
+    form.set('chat_id', String(chatId));
+    if (caption) form.set('caption', caption.slice(0, TELEGRAM_MAX_CAPTION_CHARS));
+    form.set(as, new Blob([new Uint8Array(file.data)], { type: file.mime }), file.name);
+    const method = as === 'photo' ? 'sendPhoto' : 'sendDocument';
+    // Subir unos megas tarda más que un mensaje.
+    const result = await this.call(method, form, { extraTimeoutMs: 45_000 });
+    const id = (result as { message_id?: unknown } | null)?.message_id;
+    if (typeof id !== 'number') {
+      throw new TelegramApiError('bad-response', `Telegram ${method}: no message_id`);
+    }
+    return { messageId: id };
   }
 
   async downloadFile(fileId: string, maxBytes: number, signal?: AbortSignal): Promise<Uint8Array> {

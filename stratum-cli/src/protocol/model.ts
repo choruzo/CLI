@@ -238,7 +238,34 @@ export type ProtocolChatMessage =
       state: ProtocolToolCall['state'];
     })
   /** Un turno que no terminó bien. `text`: el error, si lo hay. */
-  | (MessageBase & { kind: 'outcome'; status: 'failed' | 'cancelled'; text: string });
+  | (MessageBase & { kind: 'outcome'; status: 'failed' | 'cancelled'; text: string })
+  /**
+   * M18 parte 6E — una imagen que el asistente enseñó (`send_image`). Solo la
+   * referencia: los bytes, con `images.get`. Un cliente que no la conozca la
+   * puede saltar.
+   */
+  | (MessageBase & { kind: 'image'; image: ProtocolSharedImage });
+
+/** M18 parte 6E — límites de `images.get`: cada trozo cabe en un mensaje. */
+export const SHARED_IMAGE_LIMITS = {
+  /** Lo que pesa una imagen enviada, como mucho. */
+  maxBytes: 5 * 1024 * 1024,
+  /** Bytes de un trozo (antes de base64). */
+  chunkBytes: 512 * 1024,
+} as const;
+
+/**
+ * M18 parte 6E — una imagen enviada al chat, copiada al almacén del daemon. El
+ * `id` solo sirve para `images.get`; `caption` es texto del modelo, redactado.
+ */
+export interface ProtocolSharedImage {
+  id: string;
+  mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  bytes: number;
+  caption?: string;
+  /** La llamada a `send_image` que la envió. */
+  callId?: string;
+}
 
 // ---------------------------------------------------------------------------
 // Lo que ocurre dentro de un run

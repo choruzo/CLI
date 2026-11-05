@@ -14,6 +14,8 @@ import { readSkillTool } from '../tools/skills/read-skill.js';
 import { questionTool } from '../tools/question.js';
 import { todoTool } from '../tools/todo.js';
 import { createExecTool, EXEC_TOOL } from '../tools/exec/exec.js';
+import { createSendImageTool, SEND_IMAGE_TOOL } from '../tools/share/send-image.js';
+import { sharedImagesDir } from '../images/shared.js';
 import type { ExecutionTarget } from '../tools/exec/target.js';
 import {
   createProposeRoutineTool,
@@ -100,7 +102,7 @@ export function buildCompanionConfig(base: StratumConfig, dataDir: string): Stra
  */
 export function buildCompanionRegistry(
   config: StratumConfig,
-  opts: { routines?: RoutineProposals } = {},
+  opts: { routines?: RoutineProposals; dataDir?: string } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
   for (const tool of [
@@ -120,10 +122,21 @@ export function buildCompanionRegistry(
   // tenga visión se decide por turno (`makeLoop`): el modelo puede cambiar.
   const screen = box !== null && box.kind === 'container' && boxHasDesktop(config.box);
   if (screen) for (const tool of createScreenTools(box)) registry.register(tool);
+  // M18 parte 6E — enseñar una imagen en el chat: de `/exchange` o de la pantalla.
+  if (box && box.kind === 'container') {
+    const dataDir = opts.dataDir ?? companionDataDir();
+    registry.register(
+      createSendImageTool({
+        exchangeDir: join(dataDir, 'exchange'),
+        sharedDir: sharedImagesDir(dataDir),
+        screen: screen ? box : null,
+      }),
+    );
+  }
   if (opts.routines) registry.register(createProposeRoutineTool(opts.routines));
   const expected = COMPANION_TOOLS.filter(
     (name) =>
-      (box !== null || name !== EXEC_TOOL) &&
+      (box !== null || (name !== EXEC_TOOL && name !== SEND_IMAGE_TOOL)) &&
       (screen || !isScreenTool(name)) &&
       (opts.routines !== undefined || name !== PROPOSE_ROUTINE_TOOL),
   );

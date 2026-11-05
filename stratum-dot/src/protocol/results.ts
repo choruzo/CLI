@@ -67,6 +67,12 @@ export function parseBoxScreen(raw: unknown): ProtocolBoxScreen | null {
   return parsed.success ? parsed.data.screen : null;
 }
 
+/** Una imagen compartida: un trozo de `images.get` (base64 de la parte pedida). */
+export function parseImageChunk(raw: unknown) {
+  const parsed = RESULTS['images.get'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
 /** M16 — `routines.list`: las rutinas y si el almacén está en solo lectura. */
 export interface RoutineList {
   routines: ProtocolRoutine[];

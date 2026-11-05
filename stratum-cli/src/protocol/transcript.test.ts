@@ -30,6 +30,30 @@ function reduce(events: ProtocolStateEvent[], from = EMPTY_TRANSCRIPT): Protocol
 }
 
 describe('applyTranscriptEvent', () => {
+  it('6E: una imagen enviada entra como referencia (sin bytes); la de un subagente, no', () => {
+    const image = {
+      id: '20261105T093012Z-0123456789abcdef',
+      mime: 'image/png' as const,
+      bytes: 10,
+      caption: 'x'.repeat(TRANSCRIPT_LIMITS.captionChars + 50),
+      callId: 'call_9',
+    };
+    const t = reduce([
+      ev(2, 'image.shared', { image }),
+      ev(3, 'image.shared', { image }, { runId: 'run_1', subagentId: 'sub_1' }),
+    ]);
+    expect(t.messages).toHaveLength(1);
+    const m = t.messages[0]!;
+    expect(m).toMatchObject({ kind: 'image', id: 'm2', runId: 'run_1', at: at(2) });
+    if (m.kind !== 'image') return;
+    expect(m.image).toMatchObject({ id: image.id, mime: 'image/png', bytes: 10, callId: 'call_9' });
+    expect(m.image.caption!.length).toBe(TRANSCRIPT_LIMITS.captionChars);
+    // La foto con una imagen valida contra el schema del protocolo.
+    expect(sessionSnapshotSchema.safeParse(sampleSnapshot({ messages: t.messages })).success).toBe(
+      true,
+    );
+  });
+
   it('un turno con tools: usuario, asistente y cada llamada, en orden', () => {
     const run = sampleRun({ input: 'crea hello.txt' });
     const t = reduce([
@@ -181,7 +205,10 @@ describe('applyTranscriptEvent', () => {
     for (let seq = 1; seq <= 40; seq++) {
       big = applyTranscriptEvent(big, ev(seq, 'message.completed', { text: chunk }));
     }
-    const total = big.messages.reduce((n, m) => n + (m.kind === 'tool' ? 0 : m.text.length), 0);
+    const total = big.messages.reduce(
+      (n, m) => n + (m.kind === 'tool' || m.kind === 'image' ? 0 : m.text.length),
+      0,
+    );
     expect(total).toBeLessThanOrEqual(TRANSCRIPT_LIMITS.totalChars);
     expect(big.messagesTruncated).toBe(true);
     expect(big.messages.at(-1)!.id).toBe('m40');

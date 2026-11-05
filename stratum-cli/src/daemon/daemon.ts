@@ -69,6 +69,7 @@ import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
 import {
   BOX_SCREEN_LIMITS,
+  SHARED_IMAGE_LIMITS,
   METHODS,
   STRATUM_PROTOCOL_VERSION,
   type ClientKind,
@@ -124,6 +125,8 @@ import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
 import { traceFilePath } from '../trace/store.js';
 import { redactText } from '../security/redact-output.js';
+import { readSharedImage, sharedImagesDir, type SharedImage } from '../images/shared.js';
+import { UserImageError } from '../images/store.js';
 
 const log = getLogger('daemon');
 
@@ -468,6 +471,15 @@ export class Stratumd {
             sessionLabel: (sessionId) => this.sessionLabel(sessionId),
             // Lo que sale al chat vuelve a pasar por la redacción.
             redact: (text) => redactText(text, opts.config),
+            // 6E: las imágenes que envía el asistente, del almacén de compartidas.
+            readImage: (imageId) => {
+              try {
+                const image = this.sharedImage(imageId);
+                return { data: image.data, mime: image.mime };
+              } catch {
+                return null;
+              }
+            },
             ...opts.channels,
           });
     this.closed = new Promise<ShutdownReason>((r) => (this.resolveClosed = r));
@@ -944,6 +956,24 @@ export class Stratumd {
   /** Dónde guarda lo suyo el `companion` (M14). */
   private get companionDir(): string {
     return this.opts.companionDataDir ?? companionDataDir(this.opts.home ?? homedir());
+  }
+
+  /**
+   * M18 parte 6E — una imagen que el asistente envió al chat, del almacén de
+   * compartidas. `NOT_FOUND` si caducó o nunca existió; lo que ya no es una
+   * imagen admitida, también (no se sirve).
+   */
+  sharedImage(imageId: string): SharedImage {
+    let image: SharedImage | null;
+    try {
+      image = readSharedImage(imageId, sharedImagesDir(this.companionDir));
+    } catch (err) {
+      if (!(err instanceof UserImageError)) throw err;
+      log.warn('shared image not served', { reason: err.message });
+      image = null;
+    }
+    if (!image) throw new ProtocolError('NOT_FOUND', 'No such image (it may have expired).');
+    return image;
   }
 
   /**
@@ -1858,6 +1888,20 @@ export class Stratumd {
       'box.start': () => boxOperation(() => this.box.start()),
       'box.stop': () => boxOperation(() => this.box.stop()),
       'box.reset': () => boxOperation(() => this.box.reset()),
+
+      // M18 parte 6E — una imagen que el asistente envió, por trozos (no cabe en un mensaje).
+      'images.get': ({ imageId, offset = 0 }) => {
+        const image = this.sharedImage(imageId);
+        if (offset > image.bytes)
+          throw new ProtocolError('INVALID_PARAMS', 'offset is past the end.');
+        const end = Math.min(image.bytes, offset + SHARED_IMAGE_LIMITS.chunkBytes);
+        return {
+          image: { id: image.id, mime: image.mime, bytes: image.bytes },
+          offset,
+          data: image.data.subarray(offset, end).toString('base64'),
+          next: end < image.bytes ? end : null,
+        };
+      },
 
       // M16 — rutinas. Ninguna línea de log lleva el `prompt`.
       'routines.list': () => {

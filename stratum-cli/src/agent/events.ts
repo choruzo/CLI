@@ -37,6 +37,21 @@ export type AgentEvent =
     }
   | { type: 'memory_retrieved'; decisions: DecisionEntry[] }
   /**
+   * M18 parte 6E — `send_image` enseñó una imagen en el chat. Solo su id en el
+   * almacén de compartidas y metadatos; los bytes nunca van en un evento.
+   */
+  | {
+      type: 'image_shared';
+      /** La llamada a la tool que la envió. */
+      id: string;
+      image: {
+        id: string;
+        mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+        bytes: number;
+        caption?: string;
+      };
+    }
+  /**
    * Fragmento del razonamiento del modelo (`reasoning_content` o un `<think>`
    * inicial). Llega en streaming como `text_delta`: fragmentos consecutivos
    * forman un bloque. Nunca entra en el historial.

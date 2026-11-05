@@ -342,8 +342,20 @@ export interface ToolImage {
   sha256: string;
 }
 
+/**
+ * M18 parte 6E — una imagen que `send_image` enseña en el chat. Ya copiada al
+ * almacén de compartidas (`images/shared.ts`): aquí solo su id y metadatos. El
+ * `caption` es texto del modelo y se redacta como la salida de la tool.
+ */
+export interface SharedImageRef {
+  id: string;
+  mime: 'image/png' | 'image/jpeg' | 'image/webp' | 'image/gif';
+  bytes: number;
+  caption?: string;
+}
+
 export type ToolResult =
-  | { ok: true; output: string; image?: ToolImage }
+  | { ok: true; output: string; image?: ToolImage; shared?: SharedImageRef }
   | {
       ok: false;
       error: string;

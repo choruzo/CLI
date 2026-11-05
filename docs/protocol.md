@@ -292,7 +292,7 @@ un cliente detecta una pérdida.
 `session.opened` · `session.updated` · `session.closed` ·
 `run.started` · `run.updated` · `run.completed` · `run.failed` · `run.cancelled` ·
 `message.completed` · `tool.started` · `tool.completed` · `tool.failed` · `tool.blocked` ·
-`subagent.started` · `subagent.completed` · `memory.read` · `memory.write` ·
+`subagent.started` · `subagent.completed` · `memory.read` · `memory.write` · `image.shared` ·
 `context.compressed` · `todo.updated` · `plan.proposed` · `plan.resolved` · `plan.step_updated` ·
 `job.started` · `job.ended` · `steering.queued` · `steering.delivered` ·
 `approval.requested` · `approval.resolved` · `question.requested` · `question.resolved` ·
@@ -1307,6 +1307,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M17             | Concesiones con caducidad (§15.11): `approvals.resolve`/`host.resolveApproval` admiten `grant: { minutes: 10 \| 30 \| 60 }`; método `grants.revoke` (`control`) y `host.revokeGrant`; eventos de estado `grant.created` y `grant.ended`; `ProtocolSessionSnapshot.grants?`; `ProtocolApproval.grantable?`; _feature_ `approval-grants`                                                                                                          | Aditivo: quien no lo usa sigue igual. Un cliente que valide la unión de eventos tiene que aceptar los dos nuevos; los del árbol validan con `schemas.ts`, que ya los incluye                                                                                 |
 | M17             | Inspector de memoria: `memory.status`/`memory.decisions` admiten `agent: 'assistant' \| 'companion'` (exclusivo con `cwd`); `ProtocolDecision` gana `content?` (redactado), `source?` y `sessionId?`; método `memory.forget` (`control`)| Aditivo: sin `agent`, lo de antes; un servidor anterior rechaza `agent` y `memory.forget` (`INVALID_PARAMS`/`METHOD_NOT_FOUND`) y no manda los campos nuevos|
 | Cierre M14      | `sessions.open` admite `fresh?: boolean` (solo con `agent: 'companion'`: conversación nueva, §22.1) y su resultado, `archived?: { sessionId, memoryCarried }`; `ProtocolSessionMemory.inherited?`. `data.reason` de `UNAVAILABLE` admite `compaction` | Aditivo: quien no lo envía sigue igual; un servidor anterior rechaza `fresh` (`INVALID_PARAMS`) |
+| M18 (6E)        | Evento de estado `image.shared` (`{ image: ProtocolSharedImage }`); `ProtocolChatMessage` gana `kind: 'image'` (solo la referencia); método `images.get` (`observe`) por trozos (`offset` → `data`, `next`), `SHARED_IMAGE_LIMITS`                                                                                                                                                                                                              | Aditivo para quien emite. Un cliente que valide la unión de eventos o de mensajes tiene que aceptar los nuevos; los del árbol validan con `schemas.ts`, que ya los incluye. Una conversación de un servidor anterior no los trae |
 | Imágenes        | `runs.start`, `runs.steer` y `host.steer` admiten `images?: string[]` (1 a `LIMITS.imagesPerMessage` = 5 rutas). Quien atiende las lee confinadas al `cwd` de la sesión y a `~/.stratum/images`; una que no vale (fuera, no es imagen, >5 MB) rechaza el mensaje entero con `INVALID_PARAMS`, sin arrancar ni encolar nada                                                                                                                      | Aditivo: quien no lo envía sigue igual                                                                                                                                                                                                                       |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
@@ -2047,8 +2048,33 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
   convierte su markdown al HTML de Telegram (`parse_mode: 'HTML'`), escapando todo lo demás: las
   tablas van como texto fijo, los encabezados en negrita y solo los enlaces `http(s)` son enlaces.
   Si Telegram rechaza el formato, ese mensaje se reenvía en texto plano. Lo demás va en texto
-  plano. Se envía en trozos de menos de 4096 caracteres, sin partir ninguna marca, y con una cola por chat (≤ 1 mensaje/s). Nunca capturas de la caja, imágenes ni
-  ficheros.
+  plano. Se envía en trozos de menos de 4096 caracteres, sin partir ninguna marca, y con una cola
+  por chat (≤ 1 mensaje/s). Las **imágenes que envía el asistente** (`image.shared`, abajo) van como
+  foto con su pie (redactado otra vez), leídas del almacén del daemon; si Telegram no la acepta
+  como foto, una vez como fichero. Ninguna otra imagen ni fichero sale: ni las capturas de las
+  `screen_*` ni lo que haya en `/exchange`.
+- **Imágenes del asistente** (parte 6E; decidido por el usuario: sustituye para el chat la regla de
+  M15 de que ninguna imagen sale de la sesión). La única vía es la tool **`send_image`** del
+  `companion` (solo con la caja): un fichero PNG, JPEG, WebP o GIF de **`/exchange`** (confinado por
+  `realpath`; nada más del anfitrión) o **la pantalla actual** de la caja (`screen: true`, con
+  escritorio), de ≤ 5 MB, con un pie opcional (≤ 1000, redactado como la salida de la tool). Las
+  capturas de las `screen_*` siguen siendo solo para el modelo. La imagen se **copia** a
+  `~/.stratum/companion/shared/` (caduca a los 15 días; el id es `<fecha>-<sha256 corto>`), así
+  que lo que el asistente haga luego con el original no cambia el historial.
+  - **Evento de estado `image.shared`** `{ image: ProtocolSharedImage }` (`id`, `mime`, `bytes`,
+    `caption?`, `callId?`) y, en la conversación, **`ProtocolChatMessage` de `kind: 'image'`**: solo
+    la referencia, nunca los bytes. La de un subagente no entra.
+  - **`images.get`** (`observe`) `{ imageId, offset? }` → `{ image: { id, mime, bytes }, offset,
+    data, next }`: los bytes **por trozos** de como mucho `SHARED_IMAGE_LIMITS.chunkBytes` (512 KB,
+    en base64), porque una imagen no cabe en un mensaje (`MAX_MESSAGE_BYTES`). Se pide desde 0 y
+    se sigue con `next` hasta `null`. Un id con otra forma o un `offset` pasado el final →
+    `INVALID_PARAMS`; caducada o inexistente → `NOT_FOUND`. Lo que se sirve se comprueba otra vez
+    (firma de imagen, ≤ 5 MB). En Stratum Dot, el lado nativo valida el id y el `offset` antes de
+    pedirlo (`CallAction::ImagesGet`, conexión de operador) y el webview junta los trozos solo si
+    casan con la conversación (id, tipo, tamaño, orden), en un `Blob` (la CSP admite `blob:` en
+    `img-src`); si algo no casa, no enseña nada.
+  - **Riesgo aceptado**: una imagen no se redacta; lo que salga en ella llega al chat. A la traza,
+    solo metadatos (`image_shared`: id, tipo, tamaño y el pie redactado); a los logs, nada.
 - **Aprobaciones, preguntas y planes** (§23.13 A9). Cada solicitud pendiente del centro de
   aprobaciones, **de cualquier sesión** (también las pares), llega a los chats emparejados como una
   tarjeta con lo que enseña Dot (sesión, `origin`, carpeta y lo propio de cada tipo, ya redactado):

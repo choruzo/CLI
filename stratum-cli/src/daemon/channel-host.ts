@@ -58,6 +58,8 @@ export interface ChannelHostOptions {
   approvals?: PendingSource;
   /** Lo que se enseña de una sesión en una tarjeta. */
   sessionLabel?: (sessionId: string) => SessionLabel | null;
+  /** Parte 6E — los bytes de una imagen que envió el asistente, o `null` si ya no está. */
+  readImage?: (imageId: string) => { data: Uint8Array; mime: string } | null;
   /** Redacción de lo que sale al chat. Por defecto, ninguna (tests). */
   redact?: (text: string) => string;
   /** Ajustes del sondeo y de la salida (tests). */
@@ -101,6 +103,7 @@ export class ChannelHost {
           },
           chats: () => this.paired().map((p) => p.chatId),
           redact: opts.redact ?? ((text) => text),
+          ...(opts.readImage ? { readImage: opts.readImage } : {}),
           ...(opts.typingIntervalMs !== undefined
             ? { typingIntervalMs: opts.typingIntervalMs }
             : {}),

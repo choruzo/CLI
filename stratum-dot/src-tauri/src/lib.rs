@@ -122,6 +122,7 @@ pub fn run() {
             commands::dot_box_start,
             commands::dot_box_stop,
             commands::dot_box_screen,
+            commands::dot_images_get,
             commands::dot_routines_list,
             commands::dot_routines_add,
             commands::dot_routines_update,

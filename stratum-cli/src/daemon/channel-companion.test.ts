@@ -72,8 +72,11 @@ function setup(
   const sent: { chatId: number; text: string }[] = [];
   const markdown: { chatId: number; text: string }[] = [];
   const typing: number[] = [];
+  const images: { chatId: number; name: string; mime: string; caption: string }[] = [];
   const link = new CompanionLink({
     companion: { open: opts.open ?? (async () => turns), currentId: () => turns.sessionId },
+    readImage: (id) =>
+      id === 'img1' ? { data: new Uint8Array([1, 2, 3]), mime: 'image/jpeg' } : null,
     download: async (image, maxBytes) => {
       const file = opts.files?.get(image.fileId);
       if (!file) throw new TelegramApiError('api', 'not found');
@@ -84,13 +87,15 @@ function setup(
     target: () => ({
       send: (chatId, text) => sent.push({ chatId, text }),
       sendMarkdown: (chatId, text) => markdown.push({ chatId, text }),
+      sendImage: (chatId, file, caption) =>
+        images.push({ chatId, name: file.name, mime: file.mime, caption }),
       typing: (chatId) => typing.push(chatId),
     }),
     chats: () => opts.chats ?? [42],
     redact: (text) => text.replaceAll('sk-secreto1', '[redacted]'),
     typingIntervalMs: 10,
   });
-  return { turns, sent, markdown, typing, link };
+  return { turns, sent, markdown, typing, images, link };
 }
 
 let seq = 0;
@@ -153,6 +158,21 @@ describe('CompanionLink: fotos del chat (6E)', () => {
     await link.input(42, message(undefined, true));
     expect(turns.started).toEqual([]);
     expect(sent).toEqual([{ chatId: 42, text: TEXT.textOnly }]);
+  });
+
+  it('una imagen que envía el asistente llega a cada chat, con el pie redactado otra vez', () => {
+    const { link, images } = setup({ chats: [42, 43] });
+    link.observe(
+      ev('image.shared', {
+        image: { id: 'img1', mime: 'image/jpeg', bytes: 3, caption: 'clave sk-secreto1' },
+      }),
+    );
+    // Ya no está en el almacén: no se refleja nada (ni rompe).
+    link.observe(ev('image.shared', { image: { id: 'gone', mime: 'image/png', bytes: 3 } }));
+    expect(images).toEqual([
+      { chatId: 42, name: 'image.jpg', mime: 'image/jpeg', caption: 'clave [redacted]' },
+      { chatId: 43, name: 'image.jpg', mime: 'image/jpeg', caption: 'clave [redacted]' },
+    ]);
   });
 
   it('un aviso de la sesión (p. ej., modelo sin visión) llega al chat; el de un subagente, no', () => {

@@ -240,11 +240,12 @@ export class SessionHost {
     let config: StratumConfig = { ...opts.config };
     let registry: ToolRegistry;
     if (opts.preset === 'companion') {
-      config = buildCompanionConfig(config, opts.companionDataDir ?? companionDataDir());
-      registry = buildCompanionRegistry(
-        config,
-        opts.routineProposals ? { routines: opts.routineProposals } : {},
-      );
+      const dataDir = opts.companionDataDir ?? companionDataDir();
+      config = buildCompanionConfig(config, dataDir);
+      registry = buildCompanionRegistry(config, {
+        dataDir,
+        ...(opts.routineProposals ? { routines: opts.routineProposals } : {}),
+      });
     } else if (opts.preset === 'assistant') {
       const dataDir = opts.assistantData?.dir ?? assistantDataDir();
       const legacy =

@@ -232,6 +232,12 @@ export interface NativeBridge {
   boxStop(): Promise<unknown>;
   /** M15 — la pantalla de la caja ahora, para verla en solo lectura. Sin validar. */
   boxScreen(): Promise<unknown>;
+  /**
+   * Un trozo (≤ 512 KB) de una imagen que el asistente compartió en la
+   * conversación, desde `offset` (0 si falta). El lado nativo valida el id y el
+   * desplazamiento. Sin validar: lo parsea `protocol/results.ts`.
+   */
+  imagesGet(imageId: string, offset?: number): Promise<unknown>;
   /** M16 — las rutinas del asistente. Resultado sin validar. */
   routinesList(): Promise<unknown>;
   /** M16 — crear una rutina. Sin respuesta, `unknown`: no se repite. */
@@ -331,6 +337,7 @@ export const tauriBridge: NativeBridge = {
   boxStart: () => invoke<unknown>('dot_box_start'),
   boxStop: () => invoke<unknown>('dot_box_stop'),
   boxScreen: () => invoke<unknown>('dot_box_screen'),
+  imagesGet: (imageId, offset) => invoke<unknown>('dot_images_get', { imageId, offset: offset ?? null }),
   routinesList: () => invoke<unknown>('dot_routines_list'),
   routinesAdd: (input) =>
     invoke<unknown>('dot_routines_add', {

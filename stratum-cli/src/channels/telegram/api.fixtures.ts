@@ -8,6 +8,7 @@ import {
   type InlineKeyboard,
   type SendOptions,
   type TelegramApi,
+  type TelegramFile,
   type TelegramMessage,
   type TelegramUpdate,
   type TelegramUser,
@@ -203,6 +204,30 @@ export class FakeTelegramApi implements TelegramApi {
         hasMedia: true,
       },
     };
+  }
+
+  /** Lo que el bot envió como imagen (6E). */
+  readonly filesSent: {
+    chatId: number;
+    as: 'photo' | 'document';
+    file: TelegramFile;
+    caption: string;
+  }[] = [];
+  /** Las `n` siguientes fotos las rechaza Telegram como foto (400). */
+  rejectPhotos = 0;
+
+  async sendFile(
+    chatId: number,
+    as: 'photo' | 'document',
+    file: TelegramFile,
+    caption: string,
+  ): Promise<{ messageId: number }> {
+    if (as === 'photo' && this.rejectPhotos > 0) {
+      this.rejectPhotos--;
+      throw new TelegramApiError('api', 'Bad Request: PHOTO_INVALID_DIMENSIONS', 400);
+    }
+    this.filesSent.push({ chatId, as, file, caption });
+    return { messageId: this.nextMessageId++ };
   }
 
   async downloadFile(fileId: string, maxBytes: number): Promise<Uint8Array> {

@@ -725,6 +725,13 @@ class Scope implements TraceScope {
           decisions: ev.decisions.map((d) => ({ id: d.id, title: this.rec.text(d.title) })),
         });
         break;
+      case 'image_shared':
+        // 6E: a la traza, solo metadatos; los bytes nunca.
+        this.point('context', 'Imagen enviada al chat', {
+          image: { id: ev.image.id, mime: ev.image.mime, bytes: ev.image.bytes },
+          ...(ev.image.caption !== undefined ? { caption: this.rec.text(ev.image.caption) } : {}),
+        });
+        break;
       case 'questions_asked':
         this.point('context', `Preguntas al usuario: ${ev.questions.length}`, {
           questions: this.rec.safe(ev.questions),

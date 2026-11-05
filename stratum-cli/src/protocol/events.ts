@@ -14,6 +14,7 @@ import type {
   ProtocolResolver,
   ProtocolRun,
   ProtocolSession,
+  ProtocolSharedImage,
   ProtocolSubagent,
   ProtocolTodo,
   ProtocolToolCall,
@@ -70,6 +71,9 @@ export interface StateEventData {
 
   'memory.read': { memory: ProtocolMemoryEvent };
   'memory.write': { memory: ProtocolMemoryEvent };
+
+  /** M18 parte 6E — el asistente enseñó una imagen en el chat (`send_image`). Los bytes, por `images.get`. */
+  'image.shared': { image: ProtocolSharedImage };
 
   'context.compressed': { tokensBefore: number; tokensAfter: number; roundsCompressed: number };
   'todo.updated': { items: ProtocolTodo[]; stale: number };
@@ -151,6 +155,7 @@ export const EVENT_CLASS: Readonly<Record<ProtocolEventType, 'state' | 'volatile
   'subagent.started': 'state',
   'subagent.completed': 'state',
   'memory.read': 'state',
+  'image.shared': 'state',
   'memory.write': 'state',
   'context.compressed': 'state',
   'todo.updated': 'state',

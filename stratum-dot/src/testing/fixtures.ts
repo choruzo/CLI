@@ -12,6 +12,7 @@ import type {
   ProtocolBoxStatus,
   ProtocolRoutine,
   ProtocolRun,
+  ProtocolSharedImage,
   ProtocolSession,
   ProtocolSessionSnapshot,
 } from '../protocol';
@@ -122,6 +123,28 @@ export function sampleScreen(overrides: Partial<ProtocolBoxScreen> = {}): Protoc
   };
 }
 
+/** Una imagen que el asistente compartió (la referencia que viaja en la conversación). */
+export function sampleSharedImage(overrides: Partial<ProtocolSharedImage> = {}): ProtocolSharedImage {
+  return {
+    id: '20261105T101500Z-0123456789abcdef',
+    mime: 'image/png',
+    bytes: 6,
+    ...overrides,
+  };
+}
+
+/** Un trozo de `images.get` (por defecto, la imagen entera: 6 bytes, `AQIDBAUG`). */
+export function sampleImageChunk(overrides: Record<string, unknown> = {}): unknown {
+  const image = sampleSharedImage();
+  return {
+    image: { id: image.id, mime: image.mime, bytes: image.bytes },
+    offset: 0,
+    data: 'AQIDBAUG',
+    next: null,
+    ...overrides,
+  };
+}
+
 /** M16 — una rutina, como la devuelve `routines.list`. */
 export function sampleRoutine(overrides: Partial<ProtocolRoutine> = {}): ProtocolRoutine {
   return {
@@ -204,6 +227,7 @@ export function fakeNative(): FakeNative {
     boxStart: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'running' }) })),
     boxStop: vi.fn(async (): Promise<unknown> => ({ box: sampleBox({ state: 'stopped' }) })),
     boxScreen: vi.fn(async (): Promise<unknown> => ({ screen: sampleScreen() })),
+    imagesGet: vi.fn(async (_imageId: string, _offset?: number): Promise<unknown> => sampleImageChunk()),
     routinesList: vi.fn(async (): Promise<unknown> => ({ routines: [], readOnly: false })),
     routinesAdd: vi.fn(async (): Promise<unknown> => ({ routine: sampleRoutine() })),
     routinesUpdate: vi.fn(async (): Promise<unknown> => ({ routine: sampleRoutine() })),

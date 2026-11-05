@@ -45,11 +45,22 @@ export const STRUCTURED_CANCEL_GRACE_MS = 5000;
 /** Hito 16 — redacción de secretos (§11.3) sobre la salida o el error de una tool. */
 function redactResult(result: ToolResult, ctx: ToolContext): ToolResult {
   // M15: la captura no es texto y no se redacta; sigue aparte hasta el loop.
+  // 6E: de una imagen enviada, su pie (texto del modelo) sí.
   return result.ok
     ? {
         ok: true,
         output: redactText(result.output, ctx.config),
         ...(result.image ? { image: result.image } : {}),
+        ...(result.shared
+          ? {
+              shared: {
+                ...result.shared,
+                ...(result.shared.caption !== undefined
+                  ? { caption: redactText(result.shared.caption, ctx.config) }
+                  : {}),
+              },
+            }
+          : {}),
       }
     : { ...result, error: redactText(result.error, ctx.config) };
 }
@@ -1017,6 +1028,7 @@ export class ToolDispatcher {
             ok: true,
             output: truncateToolOutput(result.output),
             ...(result.image ? { image: result.image } : {}),
+            ...(result.shared ? { shared: result.shared } : {}),
           }
         : { ...result, error: truncateToolOutput(result.error) };
       const presented = await this.pluginAfter(call, result, durationMs, ctx);

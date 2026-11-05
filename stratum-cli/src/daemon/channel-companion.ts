@@ -20,11 +20,17 @@
  */
 import { ProtocolError } from '../ipc/codec.js';
 import { getLogger } from '../logging/index.js';
-import type { ProtocolEvent, ProtocolRun, SteerStatus } from '../protocol/index.js';
+import type {
+  ProtocolEvent,
+  ProtocolRun,
+  ProtocolSharedImage,
+  SteerStatus,
+} from '../protocol/index.js';
 import { USER_IMAGE_LIMITS, type UserImage } from '../agent/user-images.js';
 import { userImageFromBytes } from '../images/store.js';
 import {
   TelegramApiError,
+  type TelegramFile,
   type TelegramImageRef,
   type TelegramMessage,
 } from '../channels/telegram/api.js';
@@ -67,6 +73,8 @@ export interface MirrorTarget {
   send(chatId: number, text: string): void;
   /** Markdown del asistente, convertido al formato del canal. */
   sendMarkdown(chatId: number, markdown: string): void;
+  /** Parte 6E — una imagen que envió el asistente, con su pie ya redactado. */
+  sendImage(chatId: number, file: TelegramFile, caption: string): void;
   typing(chatId: number): void;
 }
 
@@ -78,6 +86,11 @@ export interface CompanionLinkOptions {
    * ella, una foto se contesta como cualquier otro adjunto.
    */
   download?: (image: TelegramImageRef, maxBytes: number) => Promise<Uint8Array>;
+  /**
+   * Parte 6E — los bytes de una imagen que envió el asistente (`image.shared`),
+   * del almacén del daemon; `null` si ya no está. Sin ella, no se reflejan.
+   */
+  readImage?: (imageId: string) => { data: Uint8Array; mime: string } | null;
   /** Los chats emparejados ahora. */
   chats: () => readonly number[];
   redact: (text: string) => string;
@@ -219,6 +232,9 @@ export class CompanionLink {
         return;
       case 'session.closed':
         return this.endRun();
+      case 'image.shared':
+        if (!event.subagentId) this.broadcastImage(event.data.image);
+        return;
       case 'warning':
         // Lo que la sesión avisa (un modelo sin visión para una foto, otro provider
         // al restaurarla) también llega al chat.
@@ -253,6 +269,27 @@ export class CompanionLink {
     if (!target) return;
     const safe = this.opts.redact(markdown);
     for (const chatId of this.opts.chats()) target.sendMarkdown(chatId, safe);
+  }
+
+  /** Parte 6E — la imagen se lee una vez del almacén y va a cada chat. Su pie, redactado otra vez. */
+  private broadcastImage(image: ProtocolSharedImage): void {
+    const target = this.opts.target();
+    if (!target || !this.opts.readImage) return;
+    let read: { data: Uint8Array; mime: string } | null;
+    try {
+      read = this.opts.readImage(image.id);
+    } catch (err) {
+      log.warn('shared image not mirrored', { err });
+      return;
+    }
+    if (!read) {
+      log.warn('shared image not mirrored: not in the store');
+      return;
+    }
+    const ext = read.mime.split('/')[1] === 'jpeg' ? 'jpg' : read.mime.split('/')[1];
+    const file = { data: read.data, mime: read.mime, name: `image.${ext}` };
+    const caption = this.opts.redact(image.caption ?? '');
+    for (const chatId of this.opts.chats()) target.sendImage(chatId, file, caption);
   }
 
   private reply(chatId: number, text: string): void {

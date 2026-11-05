@@ -2216,6 +2216,10 @@ export class ReactLoop {
             }
             yield o.event;
             this.messages.push(o.message);
+            // 6E: la imagen que `send_image` enseña en el chat (solo su id).
+            if (res.result.shared) {
+              yield { type: 'image_shared', id: res.callId, image: res.result.shared };
+            }
             // Hito 12 — write-log de sesión: alimenta la protección del revisor.
             const originCall = regularCalls.find((c) => c.id === res.callId);
             if (originCall) {

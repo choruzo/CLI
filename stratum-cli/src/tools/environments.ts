@@ -194,6 +194,11 @@ export function callEffects(
           reason: `${name} acts on the box screen`,
         };
   }
+  // M18 parte 6E — `send_image` lee de la caja (`/exchange` o su pantalla) y no cambia nada en ella.
+  if (name === 'send_image') {
+    const target = `container:${config?.box?.name ?? 'box'}`;
+    return { known: true, mutating: false, targets: [{ target, mutating: false }] };
+  }
   if (LOCAL_READERS.has(name)) {
     return { known: true, mutating: false, targets: [{ target: 'local', mutating: false }] };
   }

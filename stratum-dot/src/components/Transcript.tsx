@@ -3,6 +3,7 @@ import type { ProtocolChatMessage, ProtocolSessionSnapshot } from '../protocol';
 import { STATUS_LABEL, activeRun, type Tone } from '../protocol/view';
 import { Markdown } from './Markdown';
 import { PendingSummary } from './PendingSummary';
+import { SharedImage } from './SharedImage';
 import { Dot } from './StatusBadge';
 
 /**
@@ -49,6 +50,12 @@ const Entry = memo(function Entry({
         <li className="msg assistant" data-kind="assistant">
           <Markdown text={message.text} />
           {message.truncated ? <p className="muted small">Shortened: the reply was longer than this.</p> : null}
+        </li>
+      );
+    case 'image':
+      return (
+        <li className="msg assistant" data-kind="image">
+          <SharedImage image={message.image} />
         </li>
       );
     case 'tool': {

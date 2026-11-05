@@ -221,6 +221,12 @@ pub enum CallAction {
     BoxStop,
     /// M15 — `box.screen`: la pantalla de la caja ahora. Solo lectura.
     BoxScreen,
+    /// `images.get`: un trozo de una imagen que el asistente compartió. Solo
+    /// lectura. El lado nativo valida el id y el desplazamiento antes de salir.
+    ImagesGet {
+        image_id: String,
+        offset: Option<u64>,
+    },
     /// M16 — `routines.list`. Solo lectura.
     RoutinesList,
     /// M16 — `routines.add`. Campos uno a uno: no hay un objeto libre.
@@ -310,6 +316,7 @@ impl CallAction {
             CallAction::BoxStart => "box-start",
             CallAction::BoxStop => "box-stop",
             CallAction::BoxScreen => "box-screen",
+            CallAction::ImagesGet { .. } => "images-get",
             CallAction::RoutinesList => "routines-list",
             CallAction::RoutinesAdd { .. } => "routines-add",
             CallAction::RoutinesUpdate { .. } => "routines-update",

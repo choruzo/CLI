@@ -2245,6 +2245,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     que lo decidido y, como cualquier imagen adjunta, no sobrevive a un reinicio. El pie de foto
     es el texto. Además, cada `warning` de la sesión del `companion` llega ahora al chat: así se
     ve el aviso de un modelo sin visión y el del fallback de B.
+    *Salida hecha 2026-11-05* (`docs/protocol.md` §24): la tool `send_image` (de `/exchange` o
+    `screen: true`) copia la imagen al almacén y la anuncia con el evento `image.shared`. En la
+    conversación entra como `kind: 'image'`, con solo la referencia. Dot la lee con `images.get`
+    **por trozos**, porque un mensaje del protocolo no pasa de 1 MB y una imagen puede pesar 5 MB.
+    Telegram la recibe como foto, o como fichero si no la acepta como foto.
   - **F. Verbosidad del espejo**: se queda como está, con cada bloque del asistente. Del diagnóstico
     de `screen_*` (arriba) entran los tres arreglos de producto.
 

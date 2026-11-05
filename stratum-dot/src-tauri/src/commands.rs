@@ -203,6 +203,20 @@ pub async fn dot_box_screen(state: State<'_, DotState>) -> Result<Value, Command
     state.link.call(CallAction::BoxScreen).await
 }
 
+/// Un trozo de una imagen que el asistente compartió en la conversación. El
+/// lado nativo valida el id y el desplazamiento; el `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_images_get(
+    state: State<'_, DotState>,
+    image_id: String,
+    offset: Option<u64>,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ImagesGet { image_id, offset })
+        .await
+}
+
 /// M16 — las rutinas del asistente. El `result` va sin interpretar.
 #[tauri::command]
 pub async fn dot_routines_list(state: State<'_, DotState>) -> Result<Value, CommandError> {

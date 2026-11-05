@@ -25,6 +25,21 @@ describe('chunkText (M18)', () => {
 });
 
 describe('TelegramOutbox (M18)', () => {
+  it('6E: una imagen va como foto con su pie; si no la acepta como foto, una vez como fichero', async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox({ api, minIntervalMs: 0 });
+    const file = { data: new Uint8Array([1, 2]), mime: 'image/webp', name: 'image.webp' };
+    outbox.send(1, { text: 'mira', photo: file });
+    api.rejectPhotos = 1;
+    outbox.send(1, { text: '', photo: file });
+    await outbox.flush();
+    expect(api.filesSent.map((f) => [f.as, f.caption])).toEqual([
+      ['photo', 'mira'],
+      ['document', ''],
+    ]);
+    expect(api.sent).toEqual([]);
+  });
+
   it('espacia los mensajes de un chat y respeta el orden', async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox({ api, minIntervalMs: 60 });

@@ -606,6 +606,23 @@ p {
 .msg.tool .dot {
   align-self: center;
 }
+.shared-image {
+  margin: 0;
+  max-width: 100%;
+}
+.shared-image img {
+  display: block;
+  max-width: 100%;
+  max-height: 24rem;
+  height: auto;
+  object-fit: contain;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+}
+.shared-image figcaption {
+  margin-top: 0.3rem;
+  white-space: pre-wrap;
+}
 .msg.outcome {
   font-size: 0.85rem;
 }

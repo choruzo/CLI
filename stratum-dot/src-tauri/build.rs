@@ -19,6 +19,7 @@ const COMMANDS: &[&str] = &[
     "dot_box_start",
     "dot_box_stop",
     "dot_box_screen",
+    "dot_images_get",
     "dot_routines_list",
     "dot_routines_add",
     "dot_routines_update",

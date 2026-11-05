@@ -197,6 +197,29 @@ describe('parseUpdate', () => {
   });
 });
 
+describe('sendFile (6E)', () => {
+  it('sendPhoto o sendDocument como formulario, con el pie recortado a 1024', async () => {
+    const seen: { url: string; form: FormData }[] = [];
+    const impl = (async (url: string | URL, init?: RequestInit) => {
+      seen.push({ url: String(url), form: init?.body as FormData });
+      return new Response(JSON.stringify({ ok: true, result: { message_id: 9 } }));
+    }) as typeof fetch;
+    const a = new HttpTelegramApi({ token: TOKEN, fetch: impl });
+    const file = { data: new Uint8Array([1, 2, 3]), mime: 'image/png', name: 'image.png' };
+    expect(await a.sendFile(5, 'photo', file, 'x'.repeat(2000))).toEqual({ messageId: 9 });
+    await a.sendFile(5, 'document', file, '');
+    expect(seen.map((s) => s.url.split('/').at(-1))).toEqual(['sendPhoto', 'sendDocument']);
+    const photo = seen[0]!.form;
+    expect(photo.get('chat_id')).toBe('5');
+    expect((photo.get('caption') as string).length).toBe(1024);
+    const blob = photo.get('photo') as File;
+    expect(blob.type).toBe('image/png');
+    expect(new Uint8Array(await blob.arrayBuffer())).toEqual(file.data);
+    expect(seen[1]!.form.get('caption')).toBeNull();
+    expect(seen[1]!.form.get('document')).not.toBeNull();
+  });
+});
+
 describe('downloadFile (6E)', () => {
   const PNG = new Uint8Array([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3]);
 

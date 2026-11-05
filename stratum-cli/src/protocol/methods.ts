@@ -7,6 +7,7 @@ import type {
   ProtocolApprovalGrant,
   ProtocolBoxStatus,
   ProtocolBoxScreen,
+  ProtocolSharedImage,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -495,6 +496,23 @@ export interface ProtocolMethods {
    * parada o ausente: `UNAVAILABLE` (`box-stopped`); sin runtime: `no-runtime`.
    */
   'box.screen': Spec<Empty, { screen: ProtocolBoxScreen }>;
+  /**
+   * M18 parte 6E — los bytes de una imagen que el asistente envió al chat
+   * (`image.shared`, `kind: 'image'` en la conversación), **por trozos**: una
+   * imagen (≤ 5 MB) no cabe en un mensaje. Se pide desde `offset` (0 al
+   * empezar) y se sigue con `next` hasta que sea `null`. `data` es base64 de
+   * como mucho `SHARED_IMAGE_LIMITS.chunkBytes`. Caducada o inexistente:
+   * `NOT_FOUND`.
+   */
+  'images.get': Spec<
+    { imageId: string; offset?: number },
+    {
+      image: Pick<ProtocolSharedImage, 'id' | 'mime' | 'bytes'>;
+      offset: number;
+      data: string;
+      next: number | null;
+    }
+  >;
   'box.start': Spec<Mutation, { box: ProtocolBoxStatus }>;
   'box.stop': Spec<Mutation, { box: ProtocolBoxStatus }>;
   'box.reset': Spec<Mutation, { box: ProtocolBoxStatus }>;
@@ -689,6 +707,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'box.status': read('observe'),
   'box.screen': read('observe'),
+  // Ver lo que ya está en la conversación: como leerla.
+  'images.get': read('observe'),
   'box.start': write('control'),
   'box.stop': write('control'),
   'box.reset': write('control'),

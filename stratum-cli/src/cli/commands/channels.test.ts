@@ -43,6 +43,7 @@ function fakeApi(getMe: TelegramApi['getMe']): TelegramApi {
     answerCallbackQuery: never,
     sendChatAction: never,
     downloadFile: never,
+    sendFile: never,
   };
 }
 
