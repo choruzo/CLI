@@ -121,12 +121,12 @@ export function checkQuestionAnswers(
 // ---------------------------------------------------------------------------
 
 /**
- * Desde un canal (Telegram) solo hay dos botones: **aprobar una vez** y
- * **denegar**. Aprobar ahí solo vale para una aprobación de una tool que no
- * sea forzada (política `confirm-always`, `propose_routine`), no pida frase y
- * no sea una host key. Nunca `allow-all` ni una concesión. Denegar vale
- * siempre. Lo aplica el centro de aprobaciones por su cuenta, sin fiarse de qué
- * botones se enseñaron.
+ * Desde un canal (Telegram), una aprobación solo tiene dos botones: **aprobar
+ * una vez** y **denegar**. Aprobar ahí solo vale para una aprobación de una
+ * tool que no sea forzada (política `confirm-always`, `propose_routine`), no
+ * pida frase y no sea una host key. Nunca `allow-all` ni una concesión. Denegar
+ * vale siempre. Lo aplica el centro de aprobaciones por su cuenta, sin fiarse
+ * de qué botones se enseñaron.
  */
 export function channelApprovable(approval: {
   kind: 'tool' | 'host-key';
@@ -136,14 +136,15 @@ export function channelApprovable(approval: {
   return approval.kind === 'tool' && !approval.forced && approval.confirmPhrase === undefined;
 }
 
-/** Una tanda de preguntas que se contesta con botones: una pregunta, con opciones. */
-export function channelAnswerable(questions: readonly ProtocolQuestion[]): boolean {
-  return questions.length === 1 && (questions[0]!.options?.length ?? 0) > 0;
-}
-
 /**
  * Qué puede llegar de un canal, además de lo que ya exige cada solicitud
  * (`checkApprovalResolution`, `checkQuestionAnswers`). `null` = vale.
+ *
+ * - Aprobaciones: lo de `channelApprovable`.
+ * - Preguntas (parte 6C): cualquier tanda, con opciones o texto libre, u
+ *   omitirla. Contestar no es autoridad sobre ninguna acción.
+ * - Planes (parte 6C): aprobar o rechazar el plan **tal cual**; editarlo, solo
+ *   en Dot. Aprobar un plan no aprueba ninguna de sus acciones.
  */
 export function checkChannelResolution(
   request:
@@ -158,10 +159,12 @@ export function checkChannelResolution(
         grant?: ProtocolGrantRequest;
       }
     | { kind: 'question'; answers: readonly ProtocolQuestionAnswer[] | null }
-    | { kind: 'plan' },
+    | { kind: 'plan'; plan?: unknown },
 ): ResolutionIssue | null {
-  if (request.kind === 'plan' || resolution.kind === 'plan') {
-    return { path: 'decision', message: 'a plan cannot be decided from a channel' };
+  if (request.kind === 'plan' && resolution.kind === 'plan') {
+    return resolution.plan === undefined
+      ? null
+      : { path: 'plan', message: 'a plan can only be edited in Dot' };
   }
   if (request.kind === 'approval' && resolution.kind === 'approval') {
     if (resolution.grant !== undefined || resolution.phrase !== undefined) {
@@ -175,15 +178,6 @@ export function checkChannelResolution(
       ? null
       : { path: 'decision', message: 'this request can only be approved in Dot' };
   }
-  if (request.kind === 'question' && resolution.kind === 'question') {
-    const answers = resolution.answers;
-    if (!channelAnswerable(request.questions) || answers === null) {
-      return { path: 'answers', message: 'answer this in Dot' };
-    }
-    if (!answers.every((a) => a.optionId !== undefined)) {
-      return { path: 'answers', message: 'only the offered options can be chosen from a channel' };
-    }
-    return null;
-  }
+  if (request.kind === 'question' && resolution.kind === 'question') return null;
   return { path: 'kind', message: 'the answer does not match the request' };
 }

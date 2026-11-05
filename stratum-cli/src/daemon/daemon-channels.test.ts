@@ -309,6 +309,40 @@ describe('channels.* (M18)', () => {
       expect(existsSync(file)).toBe(true);
     });
 
+    it('6C: una pregunta de texto libre se contesta escribiendo en el chat, y ese texto no va al asistente', async () => {
+      const { t, api } = await start({ paired: [ana] });
+      t.project(join('companion', 'workspace'), []);
+      const cwd = t.project('proyecto', [
+        makeToolCallRound('q1', 'question', { questions: [{ question: '¿Qué nombre le pongo?' }] }),
+        makeTextRound('anotado'),
+      ]);
+      const operator = await t.connect(['operator'], 'op');
+      const { session } = await operator.request('sessions.open', { cwd });
+      await operator.request('runs.start', { sessionId: session.id, input: 'pregunta' });
+      await vi.waitFor(
+        () => expect(api.sent.some((m) => m.text.includes('¿Qué nombre le pongo?'))).toBe(true),
+        { timeout: 10_000 },
+      );
+      api.push(api.text({ id: 42 }, 'informe-final'));
+      await vi.waitFor(
+        async () => {
+          const { snapshot } = await operator.request('sessions.get', { sessionId: session.id });
+          expect(snapshot.questions).toEqual([]);
+          expect(snapshot.session.state).toBe('idle');
+        },
+        { timeout: 10_000 },
+      );
+      expect(api.sent.map((m) => m.text)).toContain('Answers sent.');
+      await vi.waitFor(() =>
+        expect(api.edits.map((e) => e.text).join('\n')).toContain('Answered from Telegram'),
+      );
+      // El companion no recibió nada: su sesión no tiene ningún mensaje del usuario.
+      const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+      const { session: companion } = await dot.request('sessions.open', { agent: 'companion' });
+      const { snapshot } = await dot.request('sessions.get', { sessionId: companion.id });
+      expect(snapshot.messages.filter((m) => m.kind === 'user')).toEqual([]);
+    });
+
     it('un botón inventado o de un chat no emparejado no resuelve nada', async () => {
       const { t, api } = await start({ paired: [ana] });
       const { file, card } = await pending(t, api);

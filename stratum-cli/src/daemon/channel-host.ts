@@ -240,7 +240,12 @@ export class ChannelHost {
       pairedUser: (userId) => this.paired().find((p) => p.userId === userId) ?? null,
       offerCode: (code, who: PairingCandidate) => this.pairing.offer(code, who),
       unpair: async (userId) => this.unpair(userId),
-      onText: (from, message) => this.link?.input(from.chatId, message),
+      onText: async (from, message) => {
+        // Con una tanda de preguntas abierta en ese chat, el texto es su respuesta.
+        if (message.text !== undefined && (await this.cards?.takeText(from.chatId, message.text)))
+          return;
+        return this.link?.input(from.chatId, message);
+      },
       onCallback: (_from, query) => this.cards?.onCallback(query),
       ...(this.opts.pollTimeoutSec !== undefined
         ? { pollTimeoutSec: this.opts.pollTimeoutSec }

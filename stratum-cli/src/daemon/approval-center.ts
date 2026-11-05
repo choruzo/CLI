@@ -77,9 +77,9 @@ export interface ApproverLink {
   readonly capabilities: readonly Capability[];
   /**
    * M18 — un chat emparejado de un canal externo: resuelve con la autoridad de
-   * aprobar, pero **solo con botones** (aprobar una vez o denegar;
-   * `checkChannelResolution`). El centro lo aplica por su cuenta, sin fiarse de
-   * qué botones se enseñaron.
+   * aprobar, pero con límites (`checkChannelResolution`): una aprobación, solo
+   * aprobar una vez o denegar; un plan, sin editarlo. El centro lo aplica por su
+   * cuenta, sin fiarse de qué botones se enseñaron.
    */
   readonly channel?: 'telegram';
 }

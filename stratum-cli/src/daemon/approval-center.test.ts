@@ -106,7 +106,7 @@ describe('ApprovalCenter con un canal (M18, A9)', () => {
     expect(delivered).toEqual([]);
   });
 
-  it('un plan no se decide desde el canal', async () => {
+  it('un plan (6C) se aprueba o rechaza desde el canal, pero no se edita', async () => {
     const { center } = setup();
     center.apply({
       type: 'plan.proposed',
@@ -126,9 +126,17 @@ describe('ApprovalCenter con un canal (M18, A9)', () => {
     } as unknown as ProtocolEvent);
     await expect(
       attempt(() =>
-        center.resolve(TELEGRAM_LINK, { kind: 'plan', id: 'pl1', decision: 'approve' }),
+        center.resolve(TELEGRAM_LINK, {
+          kind: 'plan',
+          id: 'pl1',
+          decision: 'approve',
+          plan: { summary: 'otro', steps: [] },
+        }),
       ),
     ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    expect(center.list().plans).toHaveLength(1);
+    await center.resolve(TELEGRAM_LINK, { kind: 'plan', id: 'pl1', decision: 'approve' });
+    expect(center.list().plans).toHaveLength(0);
   });
 
   it('resuelta en otro sitio: el aviso de cierre lleva quién', () => {

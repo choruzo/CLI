@@ -2044,25 +2044,34 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
   Si Telegram rechaza el formato, ese mensaje se reenvía en texto plano. Lo demás va en texto
   plano. Se envía en trozos de menos de 4096 caracteres, sin partir ninguna marca, y con una cola por chat (≤ 1 mensaje/s). Nunca capturas de la caja, imágenes ni
   ficheros.
-- **Aprobaciones y preguntas** (§23.13 A9). Cada solicitud pendiente del centro de aprobaciones,
-  **de cualquier sesión** (también las pares), llega a los chats emparejados como una tarjeta con
-  lo que enseña Dot (sesión, `origin`, carpeta, tool, target, descripción ya redactada y motivo) y,
-  como mucho, dos botones: **Approve once** y **Deny**. Lo que `channelApprovable` no admite
-  (`forced`, que incluye `confirm-always` y `propose_routine`; con `confirmPhrase`; una host key)
-  llega solo con **Deny** y diciendo por qué hay que aprobarlo en Dot. Una tanda de **una**
-  pregunta con opciones, con un botón por opción (`channelAnswerable`); el texto libre, varias
-  preguntas y los planes, como aviso («en Dot»). Nunca `allow-all` ni concesiones.
+- **Aprobaciones, preguntas y planes** (§23.13 A9). Cada solicitud pendiente del centro de
+  aprobaciones, **de cualquier sesión** (también las pares), llega a los chats emparejados como una
+  tarjeta con lo que enseña Dot (sesión, `origin`, carpeta y lo propio de cada tipo, ya redactado):
+  - **Aprobación**: como mucho dos botones, **Approve once** y **Deny**. Lo que
+    `channelApprovable` no admite (`forced`, que incluye `confirm-always` y `propose_routine`; con
+    `confirmPhrase`; una host key) llega solo con **Deny** y diciendo por qué hay que aprobarlo en
+    Dot. Nunca `allow-all` ni concesiones.
+  - **Preguntas** (parte 6C): cualquier tanda, **de una en una**. Cada pregunta lleva un botón por
+    opción y **Skip questions**, que omite la tanda entera (`answers: null`). Si admite texto libre
+    (sin opciones, o `allowCustom`), el **siguiente mensaje** de ese chat es la respuesta y no
+    llega al asistente; si solo admite opciones, un texto no cuenta y el bot lo dice. Con varias
+    tandas abiertas en un chat, el texto contesta a la más antigua. Las respuestas se envían
+    juntas al contestar la última.
+  - **Planes** (parte 6C): el resumen y los pasos, con **Approve plan** y **Reject**. El plan se
+    decide tal cual; editarlo, solo en Dot. Aprobar un plan no aprueba ninguna de sus acciones.
   - **El servidor aplica los límites por su cuenta** (`checkChannelResolution` en
     `protocol/resolve.ts`, desde `ApprovalCenter.resolve` para el enlace del canal), sin fiarse
-    de qué botones se enseñaron: cualquier otra cosa es `INVALID_PARAMS` y la solicitud sigue
-    pendiente. La carrera la decide el anfitrión como siempre.
+    de qué botones se enseñaron: una aprobación que no sea aprobar una vez o denegar, o un plan
+    con `plan` editado, es `INVALID_PARAMS` y la solicitud sigue pendiente. Lo que exige cada
+    pregunta lo sigue comprobando `checkQuestionAnswers`. La carrera la decide el anfitrión como
+    siempre.
   - **`ProtocolResolver.kind: 'channel'`** con `channel: 'telegram'` (sin `client` ni
     `connectionId`): así lo ven `*.resolved`, la traza (`resolution`, `by: 'channel'`) y
     `exec-audit.jsonl`, distinto de `remote`.
   - Un botón lleva un token aleatorio que el daemon busca **en memoria**: ni el id de la
     solicitud ni la decisión viajan en claro, y el de un mensaje de otro arranque o de antes de un
-    `channels.reload` no resuelve nada («ya no vale»). Resuelta en cualquier sitio, la tarjeta se
-    edita (cómo y dónde: «Approved in Dot», «Expired»…) y pierde los botones.
+    `channels.reload` no resuelve nada («ya no vale»). Resuelta en cualquier sitio, cada mensaje
+    de la tarjeta se edita (cómo y dónde: «Approved in Dot», «Expired»…) y pierde los botones.
   - Que una sesión del daemon pregunte en vez de denegar sigue dependiendo de que haya clave de
     aprobador (§15); emparejar ya la exige.
 - **Sin eventos nuevos**: un cliente consulta `channels.status` (Dot, mientras enseña el panel o el

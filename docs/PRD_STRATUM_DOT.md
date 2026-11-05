@@ -2204,6 +2204,12 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       concesiones. Hacerlos posibles desde fuera exigiría un segundo paso (A9) y es otra decisión.
     - El centro de aprobaciones sigue aplicando los límites por su cuenta
       (`checkChannelResolution` se amplía con lo nuevo).
+    *Hecho 2026-11-05* (`daemon/channel-approvals.ts`): cualquier tanda de preguntas, de una en
+    una, con un botón por opción y *Skip questions*, que omite la tanda entera porque el protocolo
+    no tiene «omitir una». Con varias tandas abiertas en un chat, el texto contesta a la más
+    antigua. Planes con *Approve plan* y *Reject*, sin editar: `checkChannelResolution` rechaza un
+    `plan` editado y ya no limita las preguntas (lo que exige cada una lo comprueba
+    `checkQuestionAnswers`).
   - **D. Markdown en Telegram**: convertir el markdown del modelo al formato de Telegram,
     **escapando todo** lo demás para que el texto del modelo no se interprete como otra cosa. Las
     tablas van como bloque de texto fijo y los encabezados en negrita. Si Telegram rechaza el

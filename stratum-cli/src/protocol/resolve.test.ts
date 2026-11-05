@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import {
-  channelAnswerable,
   channelApprovable,
   checkApprovalResolution,
   checkChannelResolution,
@@ -144,25 +143,33 @@ describe('M18 (A9) — qué vale desde un canal', () => {
     ).not.toBeNull();
   });
 
-  it('preguntas: una sola, con opciones, eligiendo una opción; planes, nunca', () => {
-    const one = [{ question: '¿Cuál?', options: [{ id: 'a', label: 'A' }] }];
-    expect(channelAnswerable(one)).toBe(true);
-    expect(channelAnswerable([{ question: '¿Qué?' }])).toBe(false);
-    expect(channelAnswerable([...one, ...one])).toBe(false);
-    const q = { kind: 'question' as const, questions: one };
+  it('preguntas (6C): cualquier tanda, con opción, texto libre u omitida', () => {
+    const q = {
+      kind: 'question' as const,
+      questions: [
+        { question: '¿Cuál?', options: [{ id: 'a', label: 'A' }] },
+        { question: '¿Qué?' },
+      ],
+    };
     expect(
       checkChannelResolution(q, {
         kind: 'question',
-        answers: [{ question: '¿Cuál?', answer: '', optionId: 'a' }],
+        answers: [
+          { question: '¿Cuál?', answer: '', optionId: 'a' },
+          { question: '¿Qué?', answer: 'texto' },
+        ],
       }),
     ).toBeNull();
+    expect(checkChannelResolution(q, { kind: 'question', answers: null })).toBeNull();
+    // Lo que exige cada pregunta lo sigue comprobando `checkQuestionAnswers`.
+    expect(checkChannelResolution(q, { kind: 'approval', decision: 'deny' })).not.toBeNull();
+  });
+
+  it('planes (6C): aprobar o rechazar tal cual; editado, nunca', () => {
+    const plan = { kind: 'plan' as const };
+    expect(checkChannelResolution(plan, { kind: 'plan' })).toBeNull();
     expect(
-      checkChannelResolution(q, {
-        kind: 'question',
-        answers: [{ question: '¿Cuál?', answer: 'A' }],
-      }),
+      checkChannelResolution(plan, { kind: 'plan', plan: { summary: 'x', steps: [] } }),
     ).not.toBeNull();
-    expect(checkChannelResolution(q, { kind: 'question', answers: null })).not.toBeNull();
-    expect(checkChannelResolution({ kind: 'plan' }, { kind: 'plan' })).not.toBeNull();
   });
 });

@@ -9,6 +9,7 @@ import {
   channelApprovable,
   clipText,
   type ProtocolApproval,
+  type ProtocolPlan,
   type ProtocolQuestion,
   type ProtocolResolver,
 } from '../../protocol/index.js';
@@ -115,6 +116,9 @@ const CARD_CHARS = 3500;
 export const BUTTON = {
   approve: 'Approve once',
   deny: 'Deny',
+  skip: 'Skip questions',
+  approvePlan: 'Approve plan',
+  rejectPlan: 'Reject',
 } as const;
 
 export function sessionLine(s: SessionLabel | null): string {
@@ -148,19 +152,52 @@ export function approvalCard(a: ProtocolApproval, session: SessionLabel | null):
   return clipText(lines.join('\n'), CARD_CHARS);
 }
 
+/** ¿Se contesta escribiendo? Sin opciones, o con opciones que admiten otra respuesta. */
+export function acceptsText(q: ProtocolQuestion): boolean {
+  return (q.options?.length ?? 0) === 0 || q.allowCustom === true;
+}
+
+/**
+ * Una pregunta de la tanda (6C), de una en una: la `step`-ésima de `total`. Con
+ * texto libre, el siguiente mensaje del chat es la respuesta.
+ */
+export function questionStep(q: ProtocolQuestion, step: number, total: number): string {
+  const head = total > 1 ? `Question ${step + 1} of ${total}: ` : '';
+  const how = acceptsText(q)
+    ? (q.options?.length ?? 0) > 0
+      ? 'Choose an option, or reply in this chat with your own answer.'
+      : 'Reply in this chat with your answer.'
+    : 'Choose an option.';
+  return clipText(`${head}${q.question}\n\n${how}`, CARD_CHARS);
+}
+
 export function questionCard(
   questions: readonly ProtocolQuestion[],
   session: SessionLabel | null,
-  answerable: boolean,
 ): string {
   const lines = ['The assistant asks', sessionLine(session), ''];
-  for (const q of questions) lines.push(q.question);
-  if (!answerable) lines.push('', 'Answer it in Dot.');
+  if (questions.length > 1) lines.push(`${questions.length} questions, one at a time.`, '');
+  lines.push(questionStep(questions[0]!, 0, questions.length));
   return clipText(lines.join('\n'), CARD_CHARS);
 }
 
-export function planCard(session: SessionLabel | null): string {
-  return `A plan is waiting for your decision\n${sessionLine(session)}\n\nReview it in Dot.`;
+/** Lo que queda en el chat cuando la respuesta va escrita. */
+export const QUESTION_TEXT = {
+  chooseOption: 'That question needs one of its options: use the buttons, or Skip questions.',
+  sent: 'Answers sent.',
+  skipped: 'Questions skipped: the assistant continues with its own assumptions.',
+  already: 'Those questions were already resolved elsewhere.',
+  failed: 'Those answers were not passed on. Answer it in Dot.',
+} as const;
+
+export function planCard(plan: ProtocolPlan, session: SessionLabel | null): string {
+  const lines = ['A plan is waiting for your decision', sessionLine(session), '', plan.summary];
+  plan.steps.forEach((s, i) => lines.push(`${i + 1}. ${s.title}`));
+  lines.push(
+    '',
+    'Approving the plan does not approve its actions: each one still asks. To edit it, use Dot.',
+  );
+  return clipText(lines.join('\n'), CARD_CHARS);
 }
 
 /** Etiqueta de un botón de opción, acotada. */
@@ -183,12 +220,16 @@ function where(by: ProtocolResolver | undefined): string {
 }
 
 /** La línea que se añade a la tarjeta cuando se resuelve, en cualquier sitio. */
-export function resolvedLine(resolution: string, by: ProtocolResolver | undefined): string {
+export function resolvedLine(
+  resolution: string,
+  by: ProtocolResolver | undefined,
+  kind: 'approval' | 'question' | 'plan' = 'approval',
+): string {
   if (by?.kind === 'timeout' || resolution === 'expired')
     return '— Expired: nobody answered in time.';
   if (resolution === 'cancelled') return '— Cancelled (the run ended or the session closed).';
   if (by?.kind === 'policy') return '— Resolved by policy.';
   if (resolution === 'approved') return `— Approved${where(by)}.`;
   if (resolution === 'denied') return `— Denied${where(by)}.`;
-  return `— Answered${where(by)}.`;
+  return `— ${kind === 'plan' ? 'Decided' : 'Answered'}${where(by)}.`;
 }
