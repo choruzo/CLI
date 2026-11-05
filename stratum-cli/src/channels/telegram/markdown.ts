@@ -136,16 +136,43 @@ function isTableSep(line: string | undefined): boolean {
   return t.includes('|') && t.includes('-') && TABLE_SEP.test(t);
 }
 
-function splitRow(line: string): string[] {
+/** Las celdas de una fila, en markdown (`\|` ya es una barra). */
+function rowCells(line: string): string[] {
   let t = line.trim();
   if (t.startsWith('|')) t = t.slice(1);
   if (t.endsWith('|') && !t.endsWith('\\|')) t = t.slice(0, -1);
-  return t.split(/(?<!\\)\|/).map((c) =>
-    c
-      .replace(/\\\|/g, '|')
-      .replace(/\*\*|__|`/g, '')
-      .trim(),
-  );
+  return t.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+}
+
+/** Sin marcas de negrita ni de código: para alinear en `<pre>`. */
+const bare = (cell: string): string => cell.replace(/\*\*|__|`/g, '');
+
+/**
+ * Ancho máximo de una línea de tabla en `<pre>`: lo que cabe en la pantalla de
+ * un móvil. Más ancha, Telegram la parte y las columnas dejan de leerse.
+ */
+export const TABLE_PRE_WIDTH = 36;
+
+/** Celda vacía o de relleno: en una ficha no merece línea. */
+const EMPTY_CELL = /^[-—–]?$/;
+
+/**
+ * Una tabla ancha, como fichas: por fila, la primera celda en negrita y debajo
+ * `Columna: valor` por cada otra celda con contenido. Un bloque por fila, para
+ * que el troceo no las parta.
+ */
+function tableCards(sep: Block['sep'], header: string[], rows: string[][], raw: string[]): Block[] {
+  return rows.map((r, n) => {
+    const [first = '', ...rest] = r;
+    const title = first.replace(/\*\*|__/g, '');
+    const lines = EMPTY_CELL.test(title) ? [] : [`<b>${inline(title)}</b>`];
+    rest.forEach((cell, k) => {
+      if (EMPTY_CELL.test(cell)) return;
+      const name = bare(header[k + 1] ?? '').trim();
+      lines.push(name ? `${escapeHtml(name)}: ${inline(cell)}` : inline(cell));
+    });
+    return { sep: n === 0 ? sep : '\n\n', html: lines.join('\n'), plain: raw[n]! };
+  });
 }
 
 /** Las filas de una tabla alineadas por columnas (sin la fila separadora). */
@@ -219,13 +246,21 @@ function parseBlocks(markdown: string): Block[] {
       continue;
     }
     if (line.trim().startsWith('|') && isTableSep(lines[i + 1])) {
-      const rows: string[][] = [splitRow(line)];
+      const rows: string[][] = [rowCells(line)];
       let j = i + 2;
       while (j < lines.length && lines[j]!.trim().startsWith('|')) {
-        rows.push(splitRow(lines[j]!));
+        rows.push(rowCells(lines[j]!));
         j++;
       }
-      push(preBlock(sep, '<pre>', alignTable(rows), lines.slice(i, j).join('\n')));
+      const aligned = alignTable(rows.map((r) => r.map(bare)));
+      if (rows.length === 1 || aligned.every((l) => width(l) <= TABLE_PRE_WIDTH)) {
+        push(preBlock(sep, '<pre>', aligned, lines.slice(i, j).join('\n')));
+      } else {
+        // La cabecera y la separadora van con la primera fila en el respaldo plano.
+        const raw = lines.slice(i + 2, j);
+        raw[0] = lines.slice(i, i + 3).join('\n');
+        for (const card of tableCards(sep, rows[0]!, rows.slice(1), raw)) push(card);
+      }
       i = j;
       continue;
     }

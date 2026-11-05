@@ -68,6 +68,40 @@ describe('markdown de Telegram (M18 6D)', () => {
     expect(out).toBe('<pre>Nombre | N\nab     | 10\nc      | 2</pre>');
   });
 
+  it('tabla ancha: una ficha por fila, primera celda en negrita y Columna: valor', () => {
+    const md = [
+      'Antes:',
+      '| Fichero | Qué hace | Dónde lo ejecutas |',
+      '|---|---|---|',
+      '| `README.md` | Plan completo, fases y mapa hardware | — |',
+      '| 02_entrenar_qlora.py | QLoRA del **Qwen3-4B** con TRL | Server, R9700 |',
+    ].join('\n');
+    expect(html(md)).toBe(
+      'Antes:\n' +
+        '<b><code>README.md</code></b>\nQué hace: Plan completo, fases y mapa hardware\n\n' +
+        '<b>02_entrenar_qlora.py</b>\nQué hace: QLoRA del <b>Qwen3-4B</b> con TRL\n' +
+        'Dónde lo ejecutas: Server, R9700',
+    );
+    const [chunk] = renderTelegramMarkdown(md);
+    // El respaldo es el markdown original, con las fichas separadas por una línea en blanco.
+    expect(chunk!.plain).toBe(md.replace('— |\n', '— |\n\n'));
+    expect(balanced(chunk!.html)).toBe(true);
+  });
+
+  it('tabla ancha que no cabe: se trocea por filas, sin partir una ficha', () => {
+    const row = (n: number): string => `| fila ${n} | ${'x'.repeat(40)} |`;
+    const md = ['| A | B |', '|---|---|', ...Array.from({ length: 6 }, (_, n) => row(n))].join(
+      '\n',
+    );
+    const chunks = renderTelegramMarkdown(md, 120);
+    expect(chunks.length).toBeGreaterThan(1);
+    for (const c of chunks) {
+      expect(c.html.length).toBeLessThanOrEqual(120);
+      expect(c.html.split('<b>').length - 1).toBe(c.html.split('</b>').length - 1);
+    }
+    expect(chunks.map((c) => c.html).join('\n\n')).toContain('<b>fila 5</b>\nB: ' + 'x'.repeat(40));
+  });
+
   it('encabezado, lista, numerada, cita y regla', () => {
     expect(html('## Título **x**')).toBe('<b>Título x</b>');
     expect(html('- uno\n  * sub\n+ tres')).toBe('• uno\n  • sub\n• tres');
