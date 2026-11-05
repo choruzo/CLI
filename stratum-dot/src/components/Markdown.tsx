@@ -5,9 +5,9 @@ import { memo, type ReactNode } from 'react';
  * modelo en ningún momento (ni `innerHTML`, ni un parser que lo deje pasar), así
  * que lo que el modelo escriba como etiqueta se ve como texto.
  *
- * Es un subconjunto a propósito —párrafos, títulos, listas, citas, bloques y
- * trozos de código, negrita, cursiva y enlaces—: lo que no entiende (tablas,
- * imágenes) se queda como texto legible.
+ * Es un subconjunto a propósito —párrafos, títulos, listas, citas, tablas,
+ * bloques y trozos de código, negrita, cursiva y enlaces—: lo que no entiende
+ * (imágenes) se queda como texto legible.
  *
  * Los enlaces **no navegan**: el webview de Dot no abre nada. Se enseña su
  * texto y, al lado, la dirección.
@@ -19,6 +19,7 @@ type Block =
   | { kind: 'list'; ordered: boolean; items: string[] }
   | { kind: 'quote'; text: string }
   | { kind: 'rule' }
+  | { kind: 'table'; header: string[]; rows: string[][] }
   | { kind: 'para'; text: string };
 
 const FENCE = /^\s*(```|~~~)/;
@@ -26,6 +27,20 @@ const HEADING = /^(#{1,6})\s+(.*)$/;
 const ITEM = /^\s*(?:([-*+])|(\d+)[.)])\s+(.*)$/;
 const QUOTE = /^\s*>\s?(.*)$/;
 const RULE = /^\s*(?:-{3,}|\*{3,}|_{3,})\s*$/;
+const TABLE_SEP = /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)*\|?\s*$/;
+
+/** Una línea que abre una tabla: empieza por `|` y la siguiente es la separadora. */
+function opensTable(line: string, next: string | undefined): boolean {
+  return line.trim().startsWith('|') && next !== undefined && next.includes('|') && TABLE_SEP.test(next);
+}
+
+/** Las celdas de una fila (`\|` es una barra dentro de la celda). */
+function cells(line: string): string[] {
+  let t = line.trim();
+  if (t.startsWith('|')) t = t.slice(1);
+  if (t.endsWith('|') && !t.endsWith('\\|')) t = t.slice(0, -1);
+  return t.split(/(?<!\\)\|/).map((c) => c.replace(/\\\|/g, '|').trim());
+}
 
 export function parseBlocks(source: string): Block[] {
   const blocks: Block[] = [];
@@ -49,6 +64,16 @@ export function parseBlocks(source: string): Block[] {
     }
     if (line.trim() === '') {
       flush();
+      continue;
+    }
+    if (opensTable(line, lines[i + 1])) {
+      flush();
+      const header = cells(line);
+      const rows: string[][] = [];
+      i += 2;
+      while (i < lines.length && lines[i]!.trim().startsWith('|')) rows.push(cells(lines[i++]!));
+      i--;
+      blocks.push({ kind: 'table', header, rows });
       continue;
     }
     if (RULE.test(line)) {
@@ -148,6 +173,33 @@ function render(block: Block, index: number): ReactNode {
       return <blockquote key={index}>{inline(block.text)}</blockquote>;
     case 'rule':
       return <hr key={index} />;
+    case 'table': {
+      // Todas las filas con tantas celdas como la cabecera (o la fila más larga).
+      const width = Math.max(block.header.length, ...block.rows.map((r) => r.length));
+      const fill = (r: string[]) => Array.from({ length: width }, (_, c) => r[c] ?? '');
+      return (
+        <div key={index} className="md-table">
+          <table>
+            <thead>
+              <tr>
+                {fill(block.header).map((c, i) => (
+                  <th key={i}>{inline(c)}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {block.rows.map((r, n) => (
+                <tr key={n}>
+                  {fill(r).map((c, i) => (
+                    <td key={i}>{inline(c)}</td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      );
+    }
     case 'para':
       return <p key={index}>{inline(block.text)}</p>;
   }

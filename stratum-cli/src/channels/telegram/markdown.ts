@@ -114,6 +114,8 @@ function inline(s: string): string {
 interface Block {
   /** Lo que separa este bloque del anterior en el original. */
   sep: '\n' | '\n\n';
+  /** Otro separador solo para el HTML (entre fichas); al empezar un trozo no se pone. */
+  htmlSep?: string;
   html: string;
   /** El markdown original del bloque. */
   plain: string;
@@ -151,15 +153,18 @@ const bare = (cell: string): string => cell.replace(/\*\*|__|`/g, '');
  * Ancho máximo de una línea de tabla en `<pre>`: lo que cabe en la pantalla de
  * un móvil. Más ancha, Telegram la parte y las columnas dejan de leerse.
  */
-export const TABLE_PRE_WIDTH = 36;
+export const TABLE_PRE_WIDTH = 32;
+
+/** Lo que separa dos fichas de una tabla. */
+const CARD_RULE = '\n──────\n';
 
 /** Celda vacía o de relleno: en una ficha no merece línea. */
 const EMPTY_CELL = /^[-—–]?$/;
 
 /**
  * Una tabla ancha, como fichas: por fila, la primera celda en negrita y debajo
- * `Columna: valor` por cada otra celda con contenido. Un bloque por fila, para
- * que el troceo no las parta.
+ * `Columna: valor` (el nombre en cursiva) por cada otra celda con contenido,
+ * con una regla entre fichas. Un bloque por fila, para que el troceo no las parta.
  */
 function tableCards(sep: Block['sep'], header: string[], rows: string[][], raw: string[]): Block[] {
   return rows.map((r, n) => {
@@ -169,9 +174,11 @@ function tableCards(sep: Block['sep'], header: string[], rows: string[][], raw: 
     rest.forEach((cell, k) => {
       if (EMPTY_CELL.test(cell)) return;
       const name = bare(header[k + 1] ?? '').trim();
-      lines.push(name ? `${escapeHtml(name)}: ${inline(cell)}` : inline(cell));
+      lines.push(name ? `<i>${escapeHtml(name)}</i>: ${inline(cell)}` : inline(cell));
     });
-    return { sep: n === 0 ? sep : '\n\n', html: lines.join('\n'), plain: raw[n]! };
+    return n === 0
+      ? { sep, html: lines.join('\n'), plain: raw[n]! }
+      : { sep: '\n\n', htmlSep: CARD_RULE, html: lines.join('\n'), plain: raw[n]! };
   });
 }
 
@@ -386,7 +393,7 @@ export function renderTelegramMarkdown(
       continue;
     }
     if (cur) {
-      const html: string = cur.html + block.sep + block.html;
+      const html: string = cur.html + (block.htmlSep ?? block.sep) + block.html;
       const plain: string = cur.plain + block.sep + block.plain;
       if (html.length <= max && plain.length <= max) {
         cur = { html, plain };
