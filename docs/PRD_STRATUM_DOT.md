@@ -2181,6 +2181,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     camino corto cuando no hace falta ver ni pulsar nada. Queda por probar con una tarea que obligue
     a ver y actuar en el escritorio y, si no basta, en una conversación nueva. Si sigue sin usarlas,
     revisar la guía `# Your box screen` del prompt: cuándo usar la pantalla y cuándo basta `exec`.
+    *Cerrada 2026-11-05*: con una tarea que obliga a actuar («repítelo con el navegador, clicando
+    tú»), en la misma conversación y con `glm5.3-flash` (17 tools), usó la pantalla. Lanzó Chromium
+    **con ventana** en la pantalla virtual (un solo `exec`) y lo manejó con `screen_screenshot` (1),
+    `screen_click` (10), `screen_scroll` (14) y `screen_wait` (2): cookies, «Solo ida», búsqueda y
+    entrada en `venta.renfe.com`, que por HTTP le bloqueaba el anti-bot. Sacó los 14 trenes del día
+    con sus precios, los enseñó con `send_image` (`screen: true`), eligió una tarifa y se paró por
+    su cuenta en *Datos del viajero*, sin datos personales ni pago. No hace falta cambiar la guía
+    `# Your box screen`. Dos detalles: el aviso de llamada repetida salta con `screen_scroll` con
+    los mismos argumentos, aunque cada uno mueve la página (falso positivo, sin efecto en el turno);
+    y buscar un botón fuera de la vista le costó seis scrolls de ida y vuelta.
 
   *Parte 6, acordada con el usuario el 2026-11-04* (amplía la «docs y prueba real» original):
   - **A. Cierre**: documentación, este estado y el commit del arreglo de `pair`. *Hecho
