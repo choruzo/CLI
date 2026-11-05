@@ -1852,7 +1852,8 @@ Tests: `stratum-cli/src/daemon/daemon-box.test.ts`, `src/box/*.test.ts` y, contr
 - `ProtocolBoxStatus.desktop`: la caja tiene escritorio (`box.desktop`; por defecto sí con la imagen
   de Stratum y no con una propia). Ausente en un servidor anterior.
 - **Visión del modelo**: `ProtocolModel.vision` (`models.list`) es `{ coordinates: 'pixels' |
-'norm1000' }` solo si la config del servidor la declara (`models.<id>.vision`); nunca se descubre.
+'norm1000' }` solo si la config del servidor la declara (`provider.providers.<alias>.models.<id>.vision`);
+  nunca se descubre.
   Un cliente la usa para marcar en su selector qué modelos pueden usar la pantalla y para avisar si el
   del `companion` no puede.
 - **Saber que el asistente está usando la pantalla** no necesita nada nuevo: un `tool.started` de una

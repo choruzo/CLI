@@ -2147,7 +2147,7 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **Funciona**: `setup`, emparejar en dos pasos, conversación en los dos sentidos, `via:
     'telegram'` en la conversación, steering y la tarjeta de una pregunta. El token no aparece en
     el log.
-  - **Fallo de `pair`, arreglado y sin commit todavía**: usaba una sola conexión de aprobador, que
+  - **Fallo de `pair`, arreglado** (commit 9e97bd9f8): usaba una sola conexión de aprobador, que
     no tiene `control` («Missing capability: control»). Ahora son dos conexiones, como en Dot: la de
     operador pide el código y mira el estado, y la de aprobador solo confirma. El test simula ahora
     las capacidades. También se corrigieron los textos «Settings → Telegram» → «Assistant → Telegram».
@@ -2183,7 +2183,9 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     revisar la guía `# Your box screen` del prompt: cuándo usar la pantalla y cuándo basta `exec`.
 
   *Parte 6, acordada con el usuario el 2026-11-04* (amplía la «docs y prueba real» original):
-  - **A. Cierre**: documentación, este estado y el commit del arreglo de `pair`.
+  - **A. Cierre**: documentación, este estado y el commit del arreglo de `pair`. *Hecho
+    2026-11-05*: docs de área y de decisiones con M18, y la ruta completa de la visión
+    (`provider.providers.<alias>.models.<id>.vision`) en toda la documentación.
   - **B. Fallback de provider/modelo**: si el provider o el modelo guardados de una sesión ya no
     existen en la config, el daemon la monta con el que esté disponible (el por defecto) y lo dice:
     un aviso en la sesión y en el log, nunca en silencio. No debe fallar como hoy.
