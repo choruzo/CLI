@@ -1,8 +1,251 @@
 {
-  "generatedAt": "2026-11-03T20:57:21.9444674+01:00",
+  "generatedAt": "2026-11-05T18:21:24.5316354+01:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "2d4e45524db60c6d38bab90db3b26ecc854e7d24",
+      "date": "2026-11-05T18:20:01+01:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.13.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "41e466f2f45a72b013618d39d54aef5de92bf972",
+      "date": "2026-11-05T18:14:45+01:00",
+      "author": "Javi_1",
+      "subject": "test(config): el test de channels solo global no supone la config del equipo",
+      "add": 4,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "4265c09ef78ae3eb8c7e97d1fe53a9eab773a268",
+      "date": "2026-11-05T18:04:15+01:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.13.0, Desktop 0.9.0 y Dot 0.3.0",
+      "add": 65,
+      "del": 21,
+      "files": 14
+    },
+    {
+      "sha": "3ba380425c1aacb820a67cc1220da946c5e92025",
+      "date": "2026-11-05T17:23:06+01:00",
+      "author": "Javi_1",
+      "subject": "feat(config): menú interactivo de stratum config y config de proyecto mínima",
+      "add": 1586,
+      "del": 43,
+      "files": 15
+    },
+    {
+      "sha": "634d3054a649a54ff2adebc544a5480a58a9af2f",
+      "date": "2026-11-05T14:34:14+01:00",
+      "author": "Javi_1",
+      "subject": "docs(m18): cierra la prueba de las screen_* con una tarea que obliga a actuar",
+      "add": 10,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "dcb7d4c1bdd7693533773b4b93c47dc5a2d6ecd4",
+      "date": "2026-11-05T10:27:15+01:00",
+      "author": "Javi_1",
+      "subject": "test(m18): restaura daemon-images.test.ts y lleva images.get a su fichero",
+      "add": 130,
+      "del": 50,
+      "files": 2
+    },
+    {
+      "sha": "d86c904ea2e79ef9bee241f211b30316e67a9c1c",
+      "date": "2026-11-05T10:26:51+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): parte 6E (salida), el asistente enseña imágenes en el chat",
+      "add": 1453,
+      "del": 93,
+      "files": 54
+    },
+    {
+      "sha": "d3fff11e532e3a485ffd4c311eec3821a69f0f5b",
+      "date": "2026-11-05T09:40:45+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): parte 6E (entrada), fotos de Telegram al asistente",
+      "add": 486,
+      "del": 33,
+      "files": 16
+    },
+    {
+      "sha": "bfb997ff7c14d127a415b3817198d02b1a20fbee",
+      "date": "2026-11-05T09:12:55+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): parte 6C, preguntas y planes desde Telegram",
+      "add": 574,
+      "del": 168,
+      "files": 11
+    },
+    {
+      "sha": "c1e9c639b44515a12b44e5eba6a1160d73aa857e",
+      "date": "2026-11-05T08:10:50+01:00",
+      "author": "Javi_1",
+      "subject": "fix(m18): parte 6B, una sesión guardada con un provider que ya no existe se monta",
+      "add": 339,
+      "del": 9,
+      "files": 8
+    },
+    {
+      "sha": "1640870cdf44ccfe586577c137a9d8c31c5e2ca0",
+      "date": "2026-11-05T08:04:49+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): parte 6D, markdown del asistente en Telegram",
+      "add": 608,
+      "del": 18,
+      "files": 12
+    },
+    {
+      "sha": "6c5d42515521064167a8bb68ddd728d5527cd8e5",
+      "date": "2026-11-05T07:55:52+01:00",
+      "author": "Javi_1",
+      "subject": "docs(m18): parte 6A, cierre de la documentación del canal de Telegram",
+      "add": 6,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "9e97bd9f8e10e80aed500c7aec133c1cc273b18d",
+      "date": "2026-11-04T22:19:18+01:00",
+      "author": "Javi_1",
+      "subject": "fix(m18): pair con dos conexiones y estado de la prueba real en el PRD",
+      "add": 143,
+      "del": 24,
+      "files": 4
+    },
+    {
+      "sha": "8e8845591fc9f7d8de2f436749ef191452f01a5f",
+      "date": "2026-11-04T20:10:22+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): canal de Telegram, parte 5: Dot (panel, emparejar con confirmación nativa, marca)",
+      "add": 1187,
+      "del": 27,
+      "files": 24
+    },
+    {
+      "sha": "15c87b72e51c5b6e674ce0370acdbce8bb9d1af0",
+      "date": "2026-11-04T19:44:39+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): canal de Telegram, parte 4: aprobaciones y preguntas desde el chat",
+      "add": 1191,
+      "del": 52,
+      "files": 21
+    },
+    {
+      "sha": "c1b54c3e24328297e066fa4981ae6d74a2c9d142",
+      "date": "2026-11-04T19:14:49+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): canal de Telegram, parte 3: entrada al companion, steering, via y espejo",
+      "add": 897,
+      "del": 20,
+      "files": 16
+    },
+    {
+      "sha": "c5dae88ffc8ba41e4a9706beebda1491c545d6c1",
+      "date": "2026-11-04T18:39:20+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): canal de Telegram, parte 2: canal en el daemon, channels.* y emparejamiento",
+      "add": 1857,
+      "del": 17,
+      "files": 20
+    },
+    {
+      "sha": "10362849c301a86ec29fe2f2cf2ef937e2ec2c5f",
+      "date": "2026-11-04T17:52:58+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m18): canal de Telegram, parte 1: cliente de la API, fichero privado y setup",
+      "add": 1407,
+      "del": 3,
+      "files": 15
+    },
+    {
+      "sha": "1fee941454a352e112f29a21f7a61834ff535c84",
+      "date": "2026-11-04T11:24:36+01:00",
+      "author": "Javi_1",
+      "subject": "docs(m18): decisiones de canales externos (Telegram) y aprobar desde el canal",
+      "add": 22,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "7e67e082b92a57d416f59effb28b6d30cb07ea1a",
+      "date": "2026-11-04T11:01:39+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m14): Dot compacto, una ventana flotante para hablarle al asistente",
+      "add": 1128,
+      "del": 6,
+      "files": 20
+    },
+    {
+      "sha": "1f50b171ad96f495f5311455dd25556c9aaa6f64",
+      "date": "2026-11-04T10:53:54+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m14): Dot abre en el asistente, con pestañas a 440 px y conversación nueva",
+      "add": 790,
+      "del": 63,
+      "files": 27
+    },
+    {
+      "sha": "78dba5e5dddf964400a8009aa9264731216a62e7",
+      "date": "2026-11-04T10:22:20+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m14): conversación nueva del companion, compactada, archivada y heredada",
+      "add": 1240,
+      "del": 46,
+      "files": 16
+    },
+    {
+      "sha": "0607611514af624d680a3d841d522cf6aa8a996b",
+      "date": "2026-11-04T08:35:18+01:00",
+      "author": "Javi_1",
+      "subject": "test(m17): E2E del inspector de memoria; store_decision guarda la sesión",
+      "add": 426,
+      "del": 1,
+      "files": 5
+    },
+    {
+      "sha": "20d8bb3f70e499aca36e1e642afe57cb03ded16e",
+      "date": "2026-11-04T08:22:44+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m17): inspector de memoria del companion en Dot",
+      "add": 1314,
+      "del": 23,
+      "files": 26
+    },
+    {
+      "sha": "031f17b6845465eaca7377ae550d754e9b813cb5",
+      "date": "2026-11-04T00:21:53+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m17): conectores MCP del companion, con su propia lista",
+      "add": 1005,
+      "del": 96,
+      "files": 22
+    },
+    {
+      "sha": "ddc5210f7ae9948945557c2b5b2b6ccaabebea5a",
+      "date": "2026-11-03T23:28:50+01:00",
+      "author": "Javi_1",
+      "subject": "feat(m17): concesiones de aprobación con caducidad (10/30/60 min)",
+      "add": 2621,
+      "del": 67,
+      "files": 70
+    },
+    {
+      "sha": "faf43fba5833631b919a69c8d2fabaaaf5463bdf",
+      "date": "2026-11-03T20:57:29+01:00",
+      "author": "Javi_1",
+      "subject": "docs(landing): CLI 0.12.0, Desktop 0.8.0 y Dot 0.2.0",
+      "add": 653,
+      "del": 38,
+      "files": 6
+    },
     {
       "sha": "d8d090e1177cf4d374844a280fb781e6eecf7ebb",
       "date": "2026-11-03T20:55:57+01:00",
@@ -3452,6 +3695,18 @@
     }
   ],
   "tags": [
+    {
+      "name": "desktop-v0.9.0",
+      "date": "2026-11-05T18:20:01+01:00"
+    },
+    {
+      "name": "dot-v0.3.0",
+      "date": "2026-11-05T18:20:01+01:00"
+    },
+    {
+      "name": "v0.13.0",
+      "date": "2026-11-05T18:20:01+01:00"
+    },
     {
       "name": "desktop-v0.8.0",
       "date": "2026-11-03T20:55:57+01:00"

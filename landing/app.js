@@ -89,10 +89,10 @@ const MILESTONES = [
     body: ["Confirmación nativa de cada resolución sensible, identidad del par verificada por el SO en el lado de Dot e IPC privado.", "Una sesión viva de chat pasa al daemon con el mismo id y contexto: /detach, stratum detach, stratum attach."] },
   { id: "M11–M12", title: "Conversación duradera y Desktop al protocolo", date: "2026-10-23", track: "dot", status: "done", release: "v0.9.0 · desktop 0.5.0",
     body: ["Las sesiones del daemon guardan su conversación entera, compactan lo antiguo a una memoria de sesión con procedencia y sobreviven a un reinicio.", "Stratum Desktop deja su sidecar: es un cliente de stratumd, hermano de la CLI y de Dot, con el asistente embebido como agente."] },
-  { id: "M13–M16", title: "Dot como asistente: caja, computer use y rutinas", date: "2026-11-03", track: "dot", status: "current", release: "v0.12.0 · dot 0.2.0 β",
+  { id: "M13–M16", title: "Dot como asistente: caja, computer use y rutinas", date: "2026-11-03", track: "dot", status: "done", release: "v0.12.0 · dot 0.2.0 β",
     body: ["companion: el asistente de Dot, con memoria propia y exec solo dentro de su caja (Podman o Docker), vetado fuera antes de cualquier aprobación.", "Computer use en el escritorio virtual de la caja, solo con modelos de visión declarada, y rutinas programadas que el agente propone y tú apruebas."] },
-  { id: "M17–M18", title: "Conectores e inspector de memoria", date: "pendiente", track: "dot", status: "next",
-    body: ["Conectores para el companion y un inspector de lo que recuerda cada agente."] },
+  { id: "M17–M18", title: "Conectores, memoria y Telegram", date: "2026-11-05", track: "dot", status: "current", release: "v0.13.0 · dot 0.3.0 β",
+    body: ["Concesiones de aprobación de 10, 30 o 60 minutos, conectores MCP propios del companion e inspector de su memoria en Dot.", "El asistente en Telegram: la misma conversación que en Dot, por long polling desde el daemon, con aprobaciones por botones y nunca lo forzado."] },
   { id: "H18", title: "Tools de diagnóstico", date: "pendiente", track: "cli", status: "next",
     body: ["net_probe, sys_inspect, log_query y service_status."] },
   { id: "H19", title: "Diagnóstico verificado", date: "pendiente", track: "cli", status: "next",
@@ -105,6 +105,10 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "v0.13 · dot 0.3.0 β", title: "El asistente, también en Telegram", date: "2026-11-05", match: /M1[78]|\((channels|config|dot)\)/, since: "2026-11-03T21:00",
+    text: "Empareja un chat privado y háblale al asistente desde el móvil: la misma conversación que en Dot, con fotos, imágenes de vuelta y aprobaciones, preguntas y planes por botones (lo forzado sigue solo en Dot). Además, concesiones de 10 a 60 minutos, conectores MCP e inspector de memoria del asistente, y Dot compacto con Ctrl+Alt+Space.",
+    pre: "❯ stratum channels telegram setup\n❯ stratum channels telegram pair\nStratum.Dot_0.3.0_x64-setup.exe · necesita stratum-cli ≥ 0.13",
+    href: "#dot", more: "qué hace y cómo instalarla →" },
   { id: "v0.12 · dot 0.2.0 β", title: "Dot estrena asistente, con su caja y sus rutinas", date: "2026-11-03", match: /M1[3-6]|\((companion|box|routines|dot)\)/, since: "2026-10-29T18:00",
     text: "El companion vive en Dot con su propia memoria y solo ejecuta dentro de una caja de Podman o Docker. Maneja el escritorio virtual de la caja con modelos de visión declarada, mientras lo ves en vivo, y corre rutinas programadas que solo existen si las apruebas.",
     pre: "❯ stratum box start\n❯ stratum routines add --name resumen --schedule \"0 8 * * *\" --prompt \"…\"\nStratum.Dot_0.2.0_x64-setup.exe · necesita stratum-cli ≥ 0.12",
@@ -359,7 +363,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.12.0",
+  version: "0.13.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -962,7 +966,7 @@ hito       17 ✓ entornos y read-only · siguiente: 18
 commits    ${fmt(c.length)} <span class="dim">(${state.weekCommits} esta semana)</span>
 líneas     <span class="add">+${fmt(c.reduce((a, x) => a + (x.add || 0), 0))}</span> <span class="del">−${fmt(c.reduce((a, x) => a + (x.del || 0), 0))}</span>
 tests      1587 ✓
-desktop    0.8.0 <span class="dim">(cliente de stratumd)</span>
+desktop    0.9.0 <span class="dim">(cliente de stratumd)</span>
 fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span class="dim">● snapshot</span>`}`;
   },
   hitos: (arg) => {
