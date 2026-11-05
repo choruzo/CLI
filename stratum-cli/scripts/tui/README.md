@@ -37,7 +37,8 @@ try {
 `launch()` crea un HOME y un proyecto temporales (`t.home`, `t.project`): no toca
 `~/.stratum` ni la config real, y `t.close()` los borra. Opciones: `config`
 (`.stratumrc.json` global, `null` para ninguno), `args` (`['chat']`), `cols`,
-`rows`, `files` (ficheros del proyecto) y `env`.
+`rows`, `files` (ficheros del proyecto) y `env`. Pone `STRATUM_NO_PROJECT_PROMPT=1` para que
+`chat` no pregunte si crear la config de proyecto; `env: { STRATUM_NO_PROJECT_PROMPT: '' }` la pide.
 
 | Método | Qué hace |
 |---|---|

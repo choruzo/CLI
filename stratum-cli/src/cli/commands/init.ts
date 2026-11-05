@@ -1,8 +1,7 @@
-import { existsSync, writeFileSync } from 'fs';
-import { join } from 'path';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { loadConfig } from '../../config/loader.js';
+import { projectConfigTarget, writeProjectPreset } from '../../config/project-preset.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { resolveStartupModel } from '../../host/startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
@@ -11,25 +10,6 @@ import { StratumAgent } from '../../agent/core.js';
 import { INITIALIZE_PROMPT } from '../../agent/initialize-prompt.js';
 import { makeCliQuestionAsker } from '../ask-questions.js';
 import { closeExecRuntime } from '../../tools/exec/runtime.js';
-
-// ---------------------------------------------------------------------------
-// Plantilla de .stratumrc.json por defecto
-// ---------------------------------------------------------------------------
-
-const DEFAULT_CONFIG = {
-  provider: {
-    default: 'litellm',
-    providers: {
-      litellm: {
-        type: 'openai-compatible',
-        baseUrl: 'http://localhost:4000/v1',
-        model: 'gpt-oss',
-        apiKey: 'sk-1234',
-        contextWindow: 32768,
-      },
-    },
-  },
-};
 
 // ---------------------------------------------------------------------------
 // Comando init
@@ -53,15 +33,16 @@ export const initCommand = new Command('init')
 
       process.stdout.write('\n  Stratum — Inicializando proyecto\n\n');
 
-      // Crear .stratumrc.json si no existe
-      const configPath = join(cwd, '.stratumrc.json');
-      if (!existsSync(configPath)) {
-        writeFileSync(configPath, JSON.stringify(DEFAULT_CONFIG, null, 2) + '\n', 'utf-8');
-        process.stdout.write('  ✓ .stratumrc.json creado\n\n');
-      }
-
       let config;
       try {
+        // Config de proyecto mínima si no hay ninguna: sin provider, que sigue
+        // saliendo de la global (`config/project-preset.ts`).
+        const target = projectConfigTarget(cwd);
+        if (!target.exists && writeProjectPreset(target.path)) {
+          process.stdout.write(
+            `  ✓ ${target.path} creado (lo demás se hereda de la global; ajústalo con \`stratum config\`)\n\n`,
+          );
+        }
         config = loadConfig(cwd);
       } catch (err) {
         process.stderr.write(

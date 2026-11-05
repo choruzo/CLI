@@ -93,6 +93,14 @@ const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
   ['channels'],
 ];
 
+/** Si la clave dot-path (o la sección que la contiene) solo cuenta en la config global. */
+export function isGlobalOnlyKey(key: string): boolean {
+  const parts = key.split('.');
+  return GLOBAL_ONLY_KEYS.some(
+    (path) => path.length <= parts.length && path.every((p, i) => parts[i] === p),
+  );
+}
+
 function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
 }
@@ -266,7 +274,7 @@ export function mergeConfigs(
   return result;
 }
 
-function samePath(a: string, b: string): boolean {
+export function samePath(a: string, b: string): boolean {
   const norm = (p: string) =>
     process.platform === 'win32' ? resolve(p).toLowerCase() : resolve(p);
   return norm(a) === norm(b);

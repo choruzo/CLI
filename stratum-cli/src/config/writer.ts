@@ -53,10 +53,14 @@ function readRaw(path: string): Record<string, unknown> {
  *
  * @returns ruta del backup creado, o `null` si no había archivo previo.
  */
-export function writeConfigWithBackup(path: string, raw: Record<string, unknown>): string | null {
+export function writeConfigWithBackup(
+  path: string,
+  raw: Record<string, unknown>,
+  globalPath: string = GLOBAL_CONFIG_PATH,
+): string | null {
   // Validar el resultado final antes de tocar el disco, como lo verá el
   // loader (una capa de proyecto, fusionada con la global).
-  validateConfigLayer(path, raw);
+  validateConfigLayer(path, raw, globalPath);
 
   let backupPath: string | null = null;
   if (existsSync(path)) {

@@ -80,6 +80,8 @@ export function launch({
     USERPROFILE: home,
     APPDATA: join(home, 'AppData', 'Roaming'),
     LOCALAPPDATA: join(home, 'AppData', 'Local'),
+    // Sin la pregunta de config de proyecto de `chat`; un escenario la pide con `''`.
+    STRATUM_NO_PROJECT_PROMPT: '1',
     ...env,
   };
   delete childEnv.NO_COLOR;

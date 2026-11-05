@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { getByDotPath, setByDotPath, formatConfigValue } from './dot-path.js';
+import {
+  assignByDotPath,
+  getByDotPath,
+  setByDotPath,
+  unsetByDotPath,
+  formatConfigValue,
+} from './dot-path.js';
 
 describe('getByDotPath', () => {
   const cfg = {
@@ -55,6 +61,39 @@ describe('setByDotPath', () => {
     const obj: Record<string, unknown> = { a: 'escalar' };
     setByDotPath(obj, 'a.b', 'v');
     expect(obj).toEqual({ a: { b: 'v' } });
+  });
+});
+
+describe('assignByDotPath', () => {
+  it('guarda el valor sin coerción', () => {
+    const obj: Record<string, unknown> = {};
+    assignByDotPath(obj, 'tools.testCommand', '42');
+    expect(obj).toEqual({ tools: { testCommand: '42' } });
+  });
+});
+
+describe('unsetByDotPath', () => {
+  it('quita la clave y los objetos que quedan vacíos', () => {
+    const obj: Record<string, unknown> = { agent: { maxIterations: 9 }, tools: { a: { b: 1 } } };
+    expect(unsetByDotPath(obj, 'tools.a.b')).toBe(true);
+    expect(obj).toEqual({ agent: { maxIterations: 9 } });
+  });
+
+  it('deja los hermanos', () => {
+    const obj: Record<string, unknown> = { agent: { maxIterations: 9, maxToolRetries: 2 } };
+    unsetByDotPath(obj, 'agent.maxIterations');
+    expect(obj).toEqual({ agent: { maxToolRetries: 2 } });
+  });
+
+  it('devuelve false si no existía', () => {
+    const obj: Record<string, unknown> = { agent: 'escalar' };
+    expect(unsetByDotPath(obj, 'agent.maxIterations')).toBe(false);
+    expect(unsetByDotPath(obj, 'nada')).toBe(false);
+    expect(obj).toEqual({ agent: 'escalar' });
+  });
+
+  it('rechaza claves peligrosas', () => {
+    expect(() => unsetByDotPath({}, '__proto__.x')).toThrow();
   });
 });
 

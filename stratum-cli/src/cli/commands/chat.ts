@@ -5,6 +5,7 @@ import { Command } from 'commander';
 import React from 'react';
 import { render } from 'ink';
 import { loadConfig } from '../../config/loader.js';
+import { offerProjectConfig } from '../project-config-offer.js';
 import { createAltScreen } from '../alt-screen.js';
 import { applyTerminalBackground } from '../terminal-background.js';
 import { ProviderRouter } from '../../providers/router.js';
@@ -122,6 +123,8 @@ export const chatCommand = new Command('chat')
         process.stderr.write(`Invalid --log-level: ${opts.logLevel}\n`);
         process.exit(1);
       }
+
+      await offerProjectConfig(process.cwd());
 
       let config;
       try {
