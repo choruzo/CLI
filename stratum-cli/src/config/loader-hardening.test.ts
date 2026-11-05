@@ -274,8 +274,11 @@ describe('secciones solo globales (M18: canales)', () => {
       true,
     );
 
+    // loadConfig lee también la global real del equipo: el proyecto no la cambia.
+    const withoutProject = loadConfig(dir).channels.telegram.enabled;
+    takeConfigDeprecations();
     writeJson(join(dir, '.stratumrc.json'), project);
-    expect(loadConfig(dir).channels.telegram.enabled).toBe(false);
+    expect(loadConfig(dir).channels.telegram.enabled).toBe(withoutProject);
     expect(takeConfigDeprecations().join('\n')).toMatch(
       /"channels" solo se lee de la config global/,
     );
