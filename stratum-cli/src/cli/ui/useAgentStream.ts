@@ -4,7 +4,7 @@ import type { AgentEvent, RunOptions } from '../../agent/types.js';
 import type { PendingInteractions } from '../../host/interactions.js';
 import type { AppAction } from './App.js';
 
-const STREAM_FRAME_MS = 40;
+const STREAM_FRAME_MS = 80;
 
 function isBufferedEvent(event: AgentEvent): boolean {
   return (

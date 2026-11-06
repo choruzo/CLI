@@ -40,20 +40,53 @@ export function wrapSynchronized(chunk: string): string {
 }
 
 /**
- * Hace que cada fotograma de Ink salga sincronizado y devuelve la función que
- * deshace el parche. No hace nada sin TTY ni con `STRATUM_NO_SYNC_OUTPUT=1`.
+ * Hace que los fotogramas de Ink salgan sincronizados y devuelve la función que
+ * deshace el parche (y vacía lo pendiente). No hace nada sin TTY ni con
+ * `STRATUM_NO_SYNC_OUTPUT=1`.
+ *
+ * Las escrituras de fotograma de un mismo tick se **fusionan en un solo bloque**:
+ * al commitear a `<Static>` Ink escribe seguidas el borrado de la región viva, el
+ * texto estático y el fotograma nuevo, y en tres bloques el terminal podría pintar
+ * entre ellos. Se vacían en una microtarea, antes de que el proceso ceda al
+ * terminal; una escritura que no es de fotograma, o que lleva callback/codificación,
+ * vacía antes lo pendiente para no cambiar el orden.
  */
-export function installSyncOutput(out: Output, env: NodeJS.ProcessEnv = process.env): () => void {
+export function installSyncOutput(
+  out: Output,
+  env: NodeJS.ProcessEnv = process.env,
+  proc: Pick<NodeJS.Process, 'once' | 'off'> = process,
+): () => void {
   if (!out.isTTY || env['STRATUM_NO_SYNC_OUTPUT'] === '1') return () => undefined;
   const original = out.write;
+  let pending: string | null = null;
+  const flush = (): void => {
+    if (pending === null) return;
+    const data = pending;
+    pending = null;
+    original.call(out, wrapSynchronized(data));
+  };
   out.write = function patched(this: unknown, chunk: unknown, ...rest: unknown[]): boolean {
-    const data = isFrameWrite(chunk) ? wrapSynchronized(chunk) : chunk;
-    return original.call(out, data, ...rest);
+    if (rest.length === 0 && isFrameWrite(chunk)) {
+      if (pending === null) {
+        pending = chunk;
+        queueMicrotask(flush);
+      } else {
+        pending += chunk;
+      }
+      return true;
+    }
+    flush();
+    return original.call(out, chunk, ...rest);
   };
   let restored = false;
-  return (): void => {
+  const restore = (): void => {
     if (restored) return;
     restored = true;
+    proc.off('exit', restore);
+    flush();
     out.write = original;
   };
+  // Un `process.exit()` síncrono tras pintar no deja correr la microtarea.
+  proc.once('exit', restore);
+  return restore;
 }
