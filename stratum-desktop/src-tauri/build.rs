@@ -42,6 +42,7 @@ const COMMANDS: &[&str] = &[
     "output_preview",
     "workspace_export",
     "workspace_files",
+    "workspace_restore",
     "os_notify",
     "logs_open",
     "logs_tail",

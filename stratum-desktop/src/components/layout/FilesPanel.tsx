@@ -5,7 +5,9 @@ import {
   formatBytes,
   listWorkspaceFiles,
   openOutput,
+  restoreWorkspace,
   saveOutput,
+  type FolderState,
   type ListedFile,
 } from '../../ipc/files';
 import { ICON, StrokeIcon } from '../chat/icons';
@@ -70,17 +72,31 @@ export function FilesPanel({
   refreshKey: string;
 }) {
   const [files, setFiles] = useState<ListedFile[] | null>(null);
+  const [folder, setFolder] = useState<FolderState>('active');
   const [error, setError] = useState<string | null>(null);
+  const [restoring, setRestoring] = useState(false);
 
   const load = useCallback(() => {
     setError(null);
     listWorkspaceFiles(cwd)
-      .then(setFiles)
+      .then((listing) => {
+        setFolder(listing.state);
+        setFiles(listing.files);
+      })
       .catch((err) => {
         setFiles([]);
         setError(errorMessage(err));
       });
   }, [cwd]);
+
+  const restore = () => {
+    setRestoring(true);
+    setError(null);
+    restoreWorkspace(cwd)
+      .then(load)
+      .catch((err) => setError(errorMessage(err)))
+      .finally(() => setRestoring(false));
+  };
 
   useEffect(() => {
     setFiles(null);
@@ -104,7 +120,23 @@ export function FilesPanel({
             {error}
           </p>
         )}
-        {files && files.length === 0 && !error && (
+        {folder === 'archived' && (
+          <div className="notice" data-tone="muted" role="status">
+            <p>
+              Los ficheros de esta conversación están archivados por falta de uso. Se restauran
+              solos al escribir o adjuntar.
+            </p>
+            <button type="button" className="button" disabled={restoring} onClick={restore}>
+              {restoring ? 'Restaurando…' : 'Restaurar'}
+            </button>
+          </div>
+        )}
+        {folder === 'purged' && (
+          <p className="notice" data-tone="muted" role="status">
+            Los ficheros de esta conversación se eliminaron por antigüedad.
+          </p>
+        )}
+        {files && files.length === 0 && !error && folder !== 'archived' && folder !== 'purged' && (
           <p className="side-panel__empty">
             Esta conversación no tiene ficheros. Adjunta uno con el botón o soltándolo sobre la
             ventana.

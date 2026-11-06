@@ -64,6 +64,7 @@
     "allow-output-preview",
     "allow-workspace-export",
     "allow-workspace-files",
+    "allow-workspace-restore",
     "allow-os-notify",
     "allow-logs-open",
     "allow-logs-tail",

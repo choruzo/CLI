@@ -4,6 +4,14 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+### Añadido
+- **Retención de las carpetas de conversación**: los ficheros de una conversación sin uso se archivan (`.tar.gz`) a los 7 días y se eliminan a los 5 meses (la conversación sigue legible). Escribir o adjuntar restaura los ficheros archivados solos, y el panel de ficheros avisa de «archivados» / «eliminados por antigüedad» con un botón «Restaurar». Se ajusta con `desktop.workspaces.compressAfterDays` y `deleteAfterDays` (`0` desactiva cada etapa).
+
+### Cambiado
+- `desktop.workspaces.deleteAfterDays` pasa de 30 a 150 días por defecto (hasta ahora no tenía efecto).
+
 ## [0.9.0] — 2026-11-05
 
 Acompaña a **Stratum CLI 0.13.0**, que es la que conviene tener instalada.

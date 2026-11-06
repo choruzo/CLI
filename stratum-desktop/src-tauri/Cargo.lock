@@ -3624,10 +3624,12 @@ name = "stratum-desktop"
 version = "0.9.0"
 dependencies = [
  "dot-link",
+ "flate2",
  "getrandom 0.3.4",
  "serde",
  "serde_json",
  "sha2",
+ "tar",
  "tauri",
  "tauri-build",
  "tauri-plugin-dialog",

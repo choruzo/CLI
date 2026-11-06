@@ -77,8 +77,12 @@ npm run smoke:clients            # Desktop ↔ Dot ↔ CLI contra un stratumd re
   asistente recuerda de una conversación a otra: buscar, ver de dónde salió, abrir su conversación y
   olvidar (con confirmación en la página). Se recarga al terminar cada turno; nada de lo recordado
   decide lo que puede hacer.
-- **Lo que Desktop no hace**: editar la configuración (Ajustes es de solo lectura), retención de
-  carpetas, ver el `STRATUM.md` global, trayectoria.
+- **Retención de carpetas** (`src-tauri/src/retention.rs`): sin uso durante `desktop.workspaces.compressAfterDays`
+  (7) la carpeta de una conversación pasa a `<id>.tar.gz`, y tras `deleteAfterDays` (150, cinco meses) se
+  elimina; la conversación sigue legible. `0` desactiva cada etapa. Escribir o adjuntar restaura la
+  archivada solo; el panel de ficheros también ofrece «Restaurar».
+- **Lo que Desktop no hace**: editar la configuración (Ajustes es de solo lectura), ver el `STRATUM.md`
+  global, trayectoria.
 - **Conversaciones de antes de M12**: `stratum desktop import` (una vez). Desktop avisa si quedan;
   no las lee.
 

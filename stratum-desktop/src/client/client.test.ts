@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { invoke } from '@tauri-apps/api/core';
 import {
   sampleApproval,
   sampleRun,
@@ -168,6 +169,40 @@ describe('acciones: pedir no es aplicar, y lo desconocido no se repite', () => {
 
     const notSent = fakeNative({ startRun: vi.fn(async () => Promise.reject(lost('not-sent'))) });
     expect((await sendMessage(notSent, { sessionId: SID, cwd: null, mode: 'ask', text: 'hola', attachments: [] })).restore).toBe(true);
+  });
+
+  it('antes de un run se restaura la carpeta de la conversación (retención); si falla no se envía', async () => {
+    const CWD = '/home/u/.stratum/desktop/workspaces/0b5b2c7e-5c1a-4f7e-8d3a-000000000001';
+    const order: string[] = [];
+    vi.mocked(invoke).mockImplementation(async (cmd: string) => {
+      order.push(cmd);
+      return cmd === 'workspace_restore' ? 'archived' : undefined;
+    });
+    const native = fakeNative({
+      startRun: vi.fn(async () => {
+        order.push('startRun');
+        return { run: sampleRun({ id: 'run_9' }) };
+      }),
+    });
+    await sendMessage(native, { sessionId: SID, cwd: CWD, mode: 'ask', text: 'hola', attachments: [] });
+    expect(order.slice(0, 2)).toEqual(['workspace_restore', 'startRun']);
+    expect(vi.mocked(invoke)).toHaveBeenCalledWith('workspace_restore', { cwd: CWD });
+
+    // Redirigir un run en marcha no restaura nada: la carpeta está en uso.
+    vi.mocked(invoke).mockClear();
+    await sendMessage(native, { sessionId: SID, cwd: CWD, mode: 'steer', text: 'otra cosa', attachments: [] });
+    expect(vi.mocked(invoke)).not.toHaveBeenCalledWith('workspace_restore', expect.anything());
+
+    // Si no se puede restaurar, el mensaje no sale y vuelve al campo.
+    uiStore.set({ selectedId: null, pending: [], notices: [] });
+    vi.mocked(invoke).mockImplementation(async () => Promise.reject('disco lleno'));
+    const failing = fakeNative();
+    const outcome = await sendMessage(failing, { sessionId: SID, cwd: CWD, mode: 'ask', text: 'hola', attachments: [] });
+    expect(outcome.restore).toBe(true);
+    expect(failing.startRun).not.toHaveBeenCalled();
+    expect(uiStore.get().notices.at(-1)?.text).toMatch(/No se pudieron restaurar los ficheros.*disco lleno/);
+    expect(uiStore.get().pending).toEqual([]);
+    vi.mocked(invoke).mockImplementation(() => Promise.resolve(undefined));
   });
 
   it('enviado y aceptado: queda «enviando» hasta que la foto trae su run', async () => {

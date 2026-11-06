@@ -27,6 +27,7 @@ mod logs;
 mod os;
 mod page;
 mod prefs;
+mod retention;
 mod unlock;
 mod updates;
 mod window_state;
@@ -47,6 +48,11 @@ use workspace::WorkspaceState;
 
 /// Canal único nativo → interfaz: mantiene el orden entre fotos, eventos y estado.
 pub const DESKTOP_EVENT: &str = "desktop://event";
+
+/// Cada cuánto se repite el barrido de retención de las carpetas de conversación
+/// (el primero va justo tras arrancar, con una pequeña espera).
+const RETENTION_EVERY: std::time::Duration = std::time::Duration::from_secs(6 * 3600);
+const RETENTION_FIRST_DELAY: std::time::Duration = std::time::Duration::from_secs(20);
 
 /// `STRATUM_DESKTOP_NO_AUTOSTART=1`: no arrancar el daemon (pruebas).
 const NO_AUTOSTART_ENV: &str = "STRATUM_DESKTOP_NO_AUTOSTART";
@@ -72,6 +78,35 @@ pub struct DesktopState {
 /// (que en Windows sale con `process::exit`). No hay nada más que apagar.
 pub(crate) fn prepare_exit<R: tauri::Runtime>(app: &AppHandle<R>) {
     window_state::save(app);
+}
+
+/// Retención de las carpetas de conversación (`retention.rs`): un barrido al
+/// arrancar y otro cada pocas horas, en un hilo propio. No lo para nada y no
+/// hace falta pararlo: cada paso es seguro de interrumpir (se archiva a un
+/// temporal y solo se retira la carpeta tras verificarlo).
+fn spawn_retention(app: AppHandle, logger: Logger) {
+    // Sin hilo no hay retención; las carpetas se conservan, que es lo seguro.
+    let _ = std::thread::Builder::new()
+        .name("retention".into())
+        .spawn(move || {
+            std::thread::sleep(RETENTION_FIRST_DELAY);
+            loop {
+                let report = app
+                    .state::<WorkspaceState>()
+                    .sweep(std::time::SystemTime::now());
+                if !report.archived.is_empty() || !report.purged.is_empty() {
+                    logger.info(&format!(
+                        "retention: {} archived, {} purged",
+                        report.archived.len(),
+                        report.purged.len()
+                    ));
+                }
+                for (id, reason) in &report.failed {
+                    logger.warn(&format!("retention: {id}: {reason}"));
+                }
+                std::thread::sleep(RETENTION_EVERY);
+            }
+        });
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -131,6 +166,7 @@ pub fn run() {
             files::output_preview,
             files::workspace_export,
             files::workspace_files,
+            files::workspace_restore,
             os::os_notify,
             os::logs_open,
             os::logs_tail,
@@ -188,6 +224,7 @@ pub fn run() {
                 .state::<WorkspaceState>()
                 .set_info(Some(prefs.workspaces()));
             let hotkey_error = os::register_configured(&handle, &prefs.global_hotkey);
+            spawn_retention(handle.clone(), logger.clone());
 
             // El mecanismo oficial de los clientes: descubrir `~/.stratum/daemon/`
             // y, si no hay daemon, `stratum daemon start` (una vez por intento).

@@ -8,7 +8,8 @@
 //! daemon, y Rust decide si es una carpeta de conversación de Desktop
 //! (`WorkspacesInfo::folder_of`): el webview no puede nombrar otra carpeta.
 
-use crate::workspace::{self, Attached, Candidate, ListedFile, Preview, WorkspaceState};
+use crate::retention::FolderState;
+use crate::workspace::{self, Attached, Candidate, Listing, Preview, WorkspaceState};
 use serde::Serialize;
 use std::path::PathBuf;
 use tauri::{AppHandle, DragDropEvent, Emitter, Manager, State, WebviewWindow, Window};
@@ -122,9 +123,14 @@ pub async fn attachments_add(
     ids: Vec<String>,
 ) -> Result<Vec<Attached>, String> {
     let id = folder(&app, &cwd)?;
-    tauri::async_runtime::spawn_blocking(move || app.state::<WorkspaceState>().attach(&id, &ids))
-        .await
-        .map_err(|e| e.to_string())?
+    // Adjuntar es usar la conversación: si estaba archivada, se restaura antes.
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<WorkspaceState>();
+        state.ensure(&id)?;
+        state.attach(&id, &ids)
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 /// El mensaje que los llevaba salió: ya son parte de la conversación.
@@ -236,11 +242,26 @@ pub async fn workspace_export(
     Ok(true)
 }
 
-/// Ficheros de `inputs/` y `outputs/` para el panel del sidebar (D4).
+/// Ficheros de `inputs/` y `outputs/` para el panel del sidebar (D4), con el
+/// estado de la carpeta (`active`, `archived`, `purged`: retención).
 #[tauri::command]
-pub async fn workspace_files(app: AppHandle, cwd: String) -> Result<Vec<ListedFile>, String> {
+pub async fn workspace_files(app: AppHandle, cwd: String) -> Result<Listing, String> {
     let id = folder(&app, &cwd)?;
     tauri::async_runtime::spawn_blocking(move || app.state::<WorkspaceState>().list_files(&id))
+        .await
+        .map_err(|e| e.to_string())?
+}
+
+/// Deja lista la carpeta de la conversación y la marca como en uso: restaura
+/// la archivada (botón «Restaurar» y antes de cada mensaje), o crea una vacía
+/// si se eliminó por antigüedad. Devuelve el estado en que estaba. Para una
+/// sesión que no es de Desktop no hay nada que hacer (`active`).
+#[tauri::command]
+pub async fn workspace_restore(app: AppHandle, cwd: String) -> Result<FolderState, String> {
+    let Ok(id) = folder(&app, &cwd) else {
+        return Ok(FolderState::Active);
+    };
+    tauri::async_runtime::spawn_blocking(move || app.state::<WorkspaceState>().ensure(&id))
         .await
         .map_err(|e| e.to_string())?
 }

@@ -9,7 +9,8 @@
 //! `scratch/` (lo confina el runtime, `host/assistant.ts`). Qué carpeta es la
 //! de una sesión lo dice su `cwd` publicado ([`WorkspacesInfo::folder_of`]): de
 //! una sesión que no vive aquí (una de código, de la terminal) no se toca nada.
-//! Ya no hay `.workspace.json` ni retención (D3): quedan para después de M12.
+//! Ya no hay `.workspace.json`; la retención (D3: archivar y eliminar por
+//! antigüedad) es de `retention.rs` y se reconoce solo por lo que hay en disco.
 //!
 //! Reparto de responsabilidades, y por qué:
 //! - **El diálogo y el drag & drop los recibe Rust.** Lo que el usuario elige
@@ -34,6 +35,9 @@ use std::fs;
 use std::io::{self, Read, Write};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Mutex;
+use std::time::SystemTime;
+
+use crate::retention::{self, FolderState, Retention, SweepReport};
 
 pub const INPUTS: &str = "inputs";
 pub const OUTPUTS: &str = "outputs";
@@ -75,6 +79,8 @@ pub struct WorkspacesInfo {
     pub root: PathBuf,
     pub max_file_bytes: u64,
     pub max_workspace_bytes: u64,
+    /// `desktop.workspaces.{compressAfterDays,deleteAfterDays}`.
+    pub retention: Retention,
 }
 
 impl WorkspacesInfo {
@@ -93,6 +99,8 @@ impl WorkspacesInfo {
                 return Err(format!("no se pudo crear la carpeta: {e}"));
             }
         }
+        // Una conversación recién creada cuenta como en uso (retención).
+        let _ = retention::touch_use(&dir);
         Ok((id, dir))
     }
 
@@ -102,7 +110,10 @@ impl WorkspacesInfo {
         let Ok(dir) = self.conversation_dir(id) else {
             return;
         };
-        if dir_size(&dir) == 0 {
+        // El marcador de uso de la retención no cuenta como contenido.
+        let marker = dir.join(retention::USE_MARKER);
+        let marker_len = fs::metadata(&marker).map(|m| m.len()).unwrap_or(0);
+        if dir_size(&dir) == marker_len {
             let _ = fs::remove_dir_all(&dir);
         }
     }
@@ -121,10 +132,18 @@ impl WorkspacesInfo {
             .map(|n| n.to_string_lossy().into_owned())
             .filter(|n| is_uuid(n))
             .ok_or_else(not_ours)?;
-        let real = fs::canonicalize(path).map_err(|_| not_ours())?;
+        // La carpeta puede no estar (archivada o eliminada por antigüedad): lo
+        // que importa es que cuelgue directamente de la raíz, comparando rutas
+        // reales. Si existe, ni ella misma puede ser un enlace a otro sitio.
         let root = fs::canonicalize(&self.root).map_err(|_| not_ours())?;
-        if real.parent() != Some(root.as_path()) {
+        let parent = path.parent().ok_or_else(not_ours)?;
+        if fs::canonicalize(parent).map_err(|_| not_ours())? != root {
             return Err(not_ours());
+        }
+        if let Ok(real) = fs::canonicalize(path) {
+            if real.parent() != Some(root.as_path()) {
+                return Err(not_ours());
+            }
         }
         Ok(id)
     }
@@ -137,7 +156,16 @@ impl WorkspacesInfo {
         }
         let dir = self.root.join(conversation_id);
         if !dir.is_dir() {
-            return Err("la conversación no tiene carpeta de ficheros (¿está abierta?)".into());
+            return Err(match retention::folder_state(&self.root, conversation_id) {
+                FolderState::Archived => {
+                    "los ficheros de esta conversación están archivados: restáuralos primero"
+                }
+                FolderState::Purged => {
+                    "los ficheros de esta conversación se eliminaron por antigüedad"
+                }
+                _ => "la conversación no tiene carpeta de ficheros (¿está abierta?)",
+            }
+            .into());
         }
         Ok(dir)
     }
@@ -206,6 +234,9 @@ struct Inner {
 #[derive(Default)]
 pub struct WorkspaceState {
     inner: Mutex<Inner>,
+    /// Serializa archivar, eliminar y restaurar (`retention.rs`): una carpeta
+    /// no se retira mientras se restaura o se marca como en uso.
+    gate: Mutex<()>,
 }
 
 impl WorkspaceState {
@@ -375,21 +406,50 @@ impl WorkspaceState {
         resolve_in(&dir, area, rel)
     }
 
-    /// Ficheros de `inputs/` y `outputs/` de una conversación (D4). Vacío si no
-    /// tiene carpeta (archivada, purgada o sin abrir todavía).
-    pub fn list_files(&self, conversation_id: &str) -> Result<Vec<ListedFile>, String> {
+    /// Ficheros de `inputs/` y `outputs/` de una conversación (D4) y el estado
+    /// de su carpeta. Sin ficheros si no está activa (archivada, eliminada por
+    /// antigüedad o sin crear todavía).
+    pub fn list_files(&self, conversation_id: &str) -> Result<Listing, String> {
         let info = self.info()?;
         if !is_uuid(conversation_id) {
             return Err("identificador de conversación no válido".into());
         }
+        let state = retention::folder_state(&info.root, conversation_id);
         let dir = info.root.join(conversation_id);
         let mut files = Vec::new();
-        for area in [INPUTS, OUTPUTS] {
-            let mut budget = MAX_LISTED_FILES;
-            walk_area(&dir.join(area), area, &mut files, &mut budget);
+        if state == FolderState::Active {
+            for area in [INPUTS, OUTPUTS] {
+                let mut budget = MAX_LISTED_FILES;
+                walk_area(&dir.join(area), area, &mut files, &mut budget);
+            }
         }
-        Ok(files)
+        Ok(Listing { state, files })
     }
+
+    /// Deja la carpeta de la conversación lista para usarla y la marca como en
+    /// uso: la restaura si estaba archivada, la crea vacía si se eliminó por
+    /// antigüedad. Devuelve el estado en que estaba (`retention::ensure`).
+    pub fn ensure(&self, conversation_id: &str) -> Result<FolderState, String> {
+        let info = self.info()?;
+        retention::ensure(&info.root, conversation_id, &self.gate)
+    }
+
+    /// Un pase de retención sobre la raíz de conversaciones (al arrancar y cada
+    /// pocas horas). Nunca falla: lo que no se pudo hacer va en el informe.
+    pub fn sweep(&self, now: SystemTime) -> SweepReport {
+        match self.info() {
+            Ok(info) => retention::sweep(&info.root, &info.retention, now, &self.gate),
+            Err(_) => SweepReport::default(),
+        }
+    }
+}
+
+/// Lo que ve el panel de ficheros: el estado de la carpeta y, si está activa,
+/// sus ficheros.
+#[derive(Debug, Clone, Serialize, PartialEq)]
+pub struct Listing {
+    pub state: FolderState,
+    pub files: Vec<ListedFile>,
 }
 
 /// Tope de ficheros listados por carpeta en el panel del sidebar.
@@ -857,6 +917,7 @@ mod tests {
             root,
             max_file_bytes: max_file,
             max_workspace_bytes: max_ws,
+            retention: Retention::default(),
         }));
         (tmp, state, dir)
     }
@@ -1188,7 +1249,9 @@ mod tests {
         fs::create_dir_all(dir.join("outputs").join("sub")).unwrap();
         fs::write(dir.join("outputs").join("sub").join("b.md"), "# b").unwrap();
         fs::write(dir.join("scratch").join("tmp.txt"), "x").unwrap();
-        let files = state.list_files(&cid).unwrap();
+        let listing = state.list_files(&cid).unwrap();
+        assert_eq!(listing.state, FolderState::Active);
+        let files = listing.files;
         let paths: Vec<_> = files.iter().map(|f| (f.path.as_str(), f.area)).collect();
         assert_eq!(
             paths,
@@ -1200,11 +1263,12 @@ mod tests {
         assert!(state.file_path(&cid, "outputs/sub/b.md").is_ok());
         assert!(state.file_path(&cid, "scratch/tmp.txt").is_err());
         assert!(state.file_path(&cid, "inputs/../scratch/tmp.txt").is_err());
-        // Sin carpeta (archivada o purgada): lista vacía, no error.
-        assert!(state
+        // Sin carpeta (nunca creada): lista vacía, no error.
+        let missing = state
             .list_files("0b5b2c7e-5c1a-4f7e-8d3a-0000000000ee")
-            .unwrap()
-            .is_empty());
+            .unwrap();
+        assert_eq!(missing.state, FolderState::Missing);
+        assert!(missing.files.is_empty());
     }
 
     #[test]

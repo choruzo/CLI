@@ -81,8 +81,28 @@ export interface ListedFile {
   modifiedMs: number;
 }
 
-export function listWorkspaceFiles(cwd: string): Promise<ListedFile[]> {
-  return invoke<ListedFile[]>('workspace_files', { cwd });
+/**
+ * Estado de la carpeta de la conversación (retención, `retention.rs`):
+ * `archived` = comprimida por falta de uso, `purged` = eliminada por antigüedad,
+ * `missing` = aún sin carpeta.
+ */
+export type FolderState = 'active' | 'archived' | 'purged' | 'missing';
+
+export interface WorkspaceListing {
+  state: FolderState;
+  files: ListedFile[];
+}
+
+export function listWorkspaceFiles(cwd: string): Promise<WorkspaceListing> {
+  return invoke<WorkspaceListing>('workspace_files', { cwd });
+}
+
+/**
+ * Deja la carpeta lista y la marca como en uso: restaura la archivada y crea
+ * una vacía si se eliminó por antigüedad. Devuelve el estado en que estaba.
+ */
+export function restoreWorkspace(cwd: string): Promise<FolderState> {
+  return invoke<FolderState>('workspace_restore', { cwd });
 }
 
 /** «Descargar todo (.zip)»: `inputs/` y `outputs/`. `false` si el usuario canceló. */

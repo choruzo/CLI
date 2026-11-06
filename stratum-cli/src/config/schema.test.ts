@@ -117,3 +117,37 @@ describe('snapshots en la config (UX-1)', () => {
     expect(SnapshotsConfigSchema.safeParse({ enabled: 'sí' }).success).toBe(false);
   });
 });
+
+describe('retención de carpetas de Desktop (desktop.workspaces)', () => {
+  const parse = (workspaces: Record<string, unknown> = {}) =>
+    StratumConfigSchema.parse({ desktop: { workspaces } }).desktop.workspaces;
+
+  it('por defecto comprime a los 7 días y elimina a los 5 meses (150)', () => {
+    const w = parse();
+    expect(w.compressAfterDays).toBe(7);
+    expect(w.deleteAfterDays).toBe(150);
+    // Sin sección `desktop` entera, igual.
+    expect(StratumConfigSchema.parse({}).desktop.workspaces.deleteAfterDays).toBe(150);
+  });
+
+  it('se configura, y 0 desactiva cada etapa', () => {
+    expect(parse({ compressAfterDays: 3, deleteAfterDays: 60 })).toMatchObject({
+      compressAfterDays: 3,
+      deleteAfterDays: 60,
+    });
+    expect(parse({ compressAfterDays: 0, deleteAfterDays: 5 }).compressAfterDays).toBe(0);
+    expect(parse({ deleteAfterDays: 0 }).deleteAfterDays).toBe(0);
+  });
+
+  it('deleteAfterDays tiene que ser mayor que compressAfterDays salvo con 0', () => {
+    expect(() => parse({ compressAfterDays: 10, deleteAfterDays: 5 })).toThrow(
+      /mayor que compressAfterDays/,
+    );
+    expect(() => parse({ compressAfterDays: 7, deleteAfterDays: 7 })).toThrow(
+      /mayor que compressAfterDays/,
+    );
+    // Con compressAfterDays por defecto (7), un delete de 5 es incoherente.
+    expect(() => parse({ deleteAfterDays: 5 })).toThrow(/mayor que compressAfterDays/);
+    expect(() => parse({ compressAfterDays: 0, deleteAfterDays: 5 })).not.toThrow();
+  });
+});

@@ -11,6 +11,7 @@
 //! defecto (el mismo del schema de `stratum-cli/src/config/schema.ts`), y un
 //! fichero ilegible deja todo por defecto con un aviso. Nunca bloquea la app.
 
+use crate::retention::{self, Retention};
 use crate::workspace::WorkspacesInfo;
 use serde::Serialize;
 use serde_json::Value;
@@ -40,6 +41,10 @@ pub struct DesktopPrefs {
     pub workspaces_root: String,
     pub max_file_bytes: u64,
     pub max_workspace_bytes: u64,
+    /// Retención de las carpetas (`desktop.workspaces.{compress,delete}AfterDays`):
+    /// solo la usa el lado nativo (`retention.rs`).
+    #[serde(skip)]
+    pub retention: Retention,
     /// Ruta del fichero de configuración (para enseñarla y abrirlo).
     pub config_path: String,
     /// Avisos de la lectura (fichero ilegible, raíz no válida…).
@@ -59,6 +64,7 @@ impl DesktopPrefs {
             root: PathBuf::from(&self.workspaces_root),
             max_file_bytes: self.max_file_bytes,
             max_workspace_bytes: self.max_workspace_bytes,
+            retention: self.retention,
         }
     }
 }
@@ -161,6 +167,8 @@ fn from_value(raw: &Value, home: &Path, path: &Path, mut warnings: Vec<String>) 
         .filter(|n| *n > 0.0 && *n <= 65536.0 && *n >= max_file_mb)
         .unwrap_or(DEFAULT_MAX_WORKSPACE_MB.max(max_file_mb));
 
+    let retention = retention_from(ws, &mut warnings);
+
     DesktopPrefs {
         notifications,
         global_hotkey,
@@ -168,6 +176,7 @@ fn from_value(raw: &Value, home: &Path, path: &Path, mut warnings: Vec<String>) 
         workspaces_root: root.to_string_lossy().into_owned(),
         max_file_bytes: (max_file_mb * MB) as u64,
         max_workspace_bytes: (max_workspace_mb * MB) as u64,
+        retention,
         config_path: path.to_string_lossy().into_owned(),
         warnings,
         legacy_conversations: 0,
@@ -175,6 +184,38 @@ fn from_value(raw: &Value, home: &Path, path: &Path, mut warnings: Vec<String>) 
             .as_str()
             .is_some_and(|m| !m.trim().is_empty()),
     }
+}
+
+/// `compressAfterDays` / `deleteAfterDays` con las reglas del schema de la CLI:
+/// cada uno de 0 a 3650 (`0` desactiva la etapa) y, si los dos están activos,
+/// `deleteAfterDays > compressAfterDays`. Un valor que no vale toma su default
+/// sin avisar (como el resto de campos); una pareja incoherente vuelve a los
+/// dos defaults **con aviso**, porque cambia lo que se borra.
+fn retention_from(ws: &Value, warnings: &mut Vec<String>) -> Retention {
+    let days = |key: &str, default: f64| {
+        ws[key]
+            .as_f64()
+            .filter(|n| n.is_finite() && (0.0..=3650.0).contains(n))
+            .unwrap_or(default)
+    };
+    let found = Retention {
+        compress_after_days: days("compressAfterDays", retention::DEFAULT_COMPRESS_DAYS),
+        delete_after_days: days("deleteAfterDays", retention::DEFAULT_DELETE_DAYS),
+    };
+    if found.compress_after_days > 0.0
+        && found.delete_after_days > 0.0
+        && found.delete_after_days <= found.compress_after_days
+    {
+        warnings.push(format!(
+            "desktop.workspaces.deleteAfterDays ({}) tiene que ser mayor que compressAfterDays ({}) o 0; se usan {} y {}",
+            found.delete_after_days,
+            found.compress_after_days,
+            retention::DEFAULT_COMPRESS_DAYS,
+            retention::DEFAULT_DELETE_DAYS
+        ));
+        return Retention::default();
+    }
+    found
 }
 
 /// Las mismas reglas que `resolveWorkspaceSettings` (D2): ruta absoluta, ni la
@@ -267,6 +308,66 @@ mod tests {
         assert_eq!(p.max_file_bytes, 5 * 1024 * 1024);
         // Un tope de workspace menor que el de fichero no vale.
         assert_eq!(p.max_workspace_bytes, 250 * 1024 * 1024);
+    }
+
+    #[test]
+    fn retencion_por_defecto_y_configurada() {
+        let d = prefs(Value::Null).retention;
+        assert_eq!((d.compress_after_days, d.delete_after_days), (7.0, 150.0));
+        let p = prefs(json!({ "desktop": { "workspaces": {
+            "compressAfterDays": 3, "deleteAfterDays": 60
+        }}}));
+        assert_eq!(
+            (
+                p.retention.compress_after_days,
+                p.retention.delete_after_days
+            ),
+            (3.0, 60.0)
+        );
+        assert!(p.warnings.is_empty());
+        // 0 desactiva la etapa; con una desactivada no hay que comparar.
+        let p = prefs(json!({ "desktop": { "workspaces": {
+            "compressAfterDays": 0, "deleteAfterDays": 5
+        }}}));
+        assert_eq!(
+            (
+                p.retention.compress_after_days,
+                p.retention.delete_after_days
+            ),
+            (0.0, 5.0)
+        );
+        assert!(p.warnings.is_empty());
+        let p = prefs(json!({ "desktop": { "workspaces": { "deleteAfterDays": 0 } }}));
+        assert_eq!(
+            (
+                p.retention.compress_after_days,
+                p.retention.delete_after_days
+            ),
+            (7.0, 0.0)
+        );
+        // Un valor suelto que no vale toma su default.
+        let p = prefs(json!({ "desktop": { "workspaces": {
+            "compressAfterDays": -1, "deleteAfterDays": "mucho"
+        }}}));
+        assert_eq!(
+            (
+                p.retention.compress_after_days,
+                p.retention.delete_after_days
+            ),
+            (7.0, 150.0)
+        );
+    }
+
+    #[test]
+    fn retencion_incoherente_vuelve_a_los_defaults_con_aviso() {
+        for (c, d) in [(10, 5), (7, 7)] {
+            let p = prefs(json!({ "desktop": { "workspaces": {
+                "compressAfterDays": c, "deleteAfterDays": d
+            }}}));
+            assert_eq!(p.retention, Retention::default(), "{c}/{d}");
+            assert_eq!(p.warnings.len(), 1, "{c}/{d}");
+            assert!(p.warnings[0].contains("deleteAfterDays"));
+        }
     }
 
     #[test]

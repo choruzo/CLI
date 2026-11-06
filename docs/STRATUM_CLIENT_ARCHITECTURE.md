@@ -182,7 +182,7 @@ Dot      ┘
 | `DesktopSessionStore`, `DesktopConversationStore`, `transcript.ts`, reductor del webview | DELETE DUPLICATE → M11 + contrato | Conversación de la sesión: `ConversationStore` del daemon, foto + `sessions.history`; el webview reduce con `followSession`/`applyOverviewEvent` del contrato |
 | Confirmaciones y preguntas propias | MIGRATE (tras M12) → broker nativo de Dot | Tarjetas en el chat de la sesión que se mira (`PendingRequests`). Resolver usa las mismas piezas que Dot: `dot_link::approver` (otra conexión, `roles: ['approver']`, `client.kind: 'desktop'`), clave en una ventana nativa aparte (`desktop-unlock`) y lo sensible confirmado en otra (`desktop-confirm`, `dot_link::ConfirmGate`). Sin concesiones con caducidad (revocarlas es de Dot) |
 | Carpetas de conversación (D2): subidas, descargas, vista previa, exportar | KEEP UI (Rust) | La carpeta es el `cwd` de la sesión; Desktop la crea al abrir la conversación y Rust solo toca carpetas de su raíz (`folder_of`) |
-| Retención y archivo de carpetas (D3) | DEFER | Las carpetas se conservan; `compressAfterDays`/`deleteAfterDays` quedan sin efecto |
+| Retención y archivo de carpetas (D3) | MIGRATE → hecho en Rust (`retention.rs`) | Sin uso `compressAfterDays` (7) → `<id>.tar.gz`; `deleteAfterDays` (150) → eliminada (queda la marca `<id>.purged`); `0` desactiva cada etapa. Se reconoce por lo que hay en disco, sin registro. Barrido al arrancar y cada 6 h, con cerrojo frente a restaurar. Escribir o adjuntar restaura (`workspace_restore`); extracción confinada (sin `..`, rutas absolutas ni enlaces). Es política de ficheros de Desktop: el daemon no interviene |
 | Ajustes (editor del `.stratumrc.json` global, asistente de providers) | DEFER | Solo lectura (`prefs.rs`): se edita con `stratum config` o abriendo el fichero. El protocolo no expone la configuración (lleva credenciales) |
 | Panel de memoria global (`STRATUM.md`, decisiones) | MIGRATE (tras M12) → `memory.*` | Las decisiones del asistente: sección «Memoria del asistente» del panel *Contexto y memoria* (`memory.decisions`/`memory.forget`, como el inspector de Dot M17). De quién es la memoria lo fija el perfil del enlace (`ClientProfile::memory_agent`: Desktop → `assistant`, Dot → `companion`), nunca el webview. El `STRATUM.md` global no se expone: el protocolo no lo sirve |
 | Panel de trayectoria | DEFER | El daemon no sirve `trace.subscribe` |
@@ -213,5 +213,5 @@ Dot      ┘
 ### 8.3 Lo que M12 deja fuera
 
 Aprobar desde Desktop (hecho después de M12 con la autoridad separada de M8/M9, ver §8.1), retención
-de carpetas, editor de ajustes, memoria global (sus decisiones, hechas después: §8.1), trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
+de carpetas (hecha después, §8.1), editor de ajustes, memoria global (sus decisiones, hechas después: §8.1), trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
 producto entre Dot y Desktop.

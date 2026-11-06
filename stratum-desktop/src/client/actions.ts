@@ -9,7 +9,7 @@
  * sabe si se aplicó y la foto dirá qué pasó (`docs/protocol.md`, «el cliente
  * nunca reenvía»).
  */
-import { attachmentsCommit } from '../ipc/files';
+import { attachmentsCommit, errorMessage, restoreWorkspace } from '../ipc/files';
 import { toCommandError, type CommandError, type NativeBridge } from '../ipc/native';
 import { HISTORY_LIMITS } from '../protocol';
 import {
@@ -164,6 +164,18 @@ export async function sendMessage(
   const request: PendingRequest = { kind: 'send', sessionId, runId: null };
   if (!uiActions.begin(request)) return { restore: true };
   try {
+    // Un mensaje es usar la conversación: si sus ficheros se archivaron por
+    // falta de uso, se restauran antes (si se eliminaron, queda una carpeta
+    // vacía). Sin carpeta de trabajo no se envía: el agente no tendría dónde.
+    if (opts.cwd) {
+      try {
+        await restoreWorkspace(opts.cwd);
+      } catch (err) {
+        uiActions.end(request);
+        uiActions.notify(sessionId, 'error', `No se pudieron restaurar los ficheros de la conversación: ${errorMessage(err)}`);
+        return { restore: true };
+      }
+    }
     const run = parseStartedRun(await native.startRun(sessionId, input, images));
     if (opts.cwd && opts.attachments.length > 0) {
       void attachmentsCommit(opts.cwd, opts.attachments).catch(() => undefined);

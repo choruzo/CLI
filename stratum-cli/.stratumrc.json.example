@@ -272,7 +272,7 @@
       "maxFileMB": 25,
       "maxWorkspaceMB": 250,
       "compressAfterDays": 7,
-      "deleteAfterDays": 30
+      "deleteAfterDays": 150
     }
   },
   "environments": {

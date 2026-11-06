@@ -122,7 +122,7 @@ export function GeneratedImages({ cwd, callId, output }: { cwd: string; callId: 
     if (!needList) return;
     let live = true;
     listWorkspaceFiles(cwd)
-      .then((files) => live && setListed(imagesOfCall(files, callId)))
+      .then((listing) => live && setListed(imagesOfCall(listing.files, callId)))
       .catch(() => live && setListed([]));
     return () => {
       live = false;

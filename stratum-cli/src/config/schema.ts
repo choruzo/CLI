@@ -1228,12 +1228,17 @@ export const StratumConfigSchema = z.object({
           /** Tope de un workspace entero: subidas + lo que genere el agente (16.3). */
           maxWorkspaceMB: z.number().positive().max(65536).default(250),
           /**
-           * **Sin efecto desde M12** (la retención de D3 era del sidecar y queda
-           * para después). Días sin uso tras los que el workspace se comprimía.
+           * Retención de las carpetas de conversación (la aplica Desktop, no el
+           * daemon: `stratum-desktop/src-tauri/src/retention.rs`). Días sin uso
+           * tras los que la carpeta se archiva como `<id>.tar.gz`; `0` no
+           * archiva nunca.
            */
           compressAfterDays: z.number().min(0).max(3650).default(7),
-          /** **Sin efecto desde M12** (ver `compressAfterDays`). */
-          deleteAfterDays: z.number().min(0).max(3650).default(30),
+          /**
+           * Días sin uso tras los que se eliminan los ficheros (la conversación
+           * sigue legible); `0` no elimina nunca. Default: 150 (cinco meses).
+           */
+          deleteAfterDays: z.number().min(0).max(3650).default(150),
         })
         .refine((w) => w.maxWorkspaceMB >= w.maxFileMB, {
           message: 'desktop.workspaces.maxWorkspaceMB no puede ser menor que maxFileMB',

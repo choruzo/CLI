@@ -28,6 +28,10 @@ sha2 = "0.10"
 dot-link = { path = "../../stratum-dot/crates/dot-link" }
 tauri-plugin-opener = "2"
 tauri-plugin-dialog = "2"
+# Retención de carpetas de conversación: archivo `.tar.gz` de las que llevan
+# tiempo sin uso (`retention.rs`).
+tar = { version = "0.4", default-features = false }
+flate2 = "1"
 zip = { version = "4.2.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 tauri-plugin-notification = "2"
 tauri-plugin-global-shortcut = "2"
