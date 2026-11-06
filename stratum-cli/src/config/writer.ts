@@ -6,7 +6,8 @@ import {
   readConfigFile,
   validateConfigLayer,
 } from './loader.js';
-import { getByDotPath, setByDotPath } from './dot-path.js';
+import { assignByDotPath, getByDotPath, setByDotPath } from './dot-path.js';
+import { CONFIG_SCHEMA_VERSION, checkSchemaVersion } from './schema-version.js';
 import type { ProviderConfigInput } from './schema.js';
 
 /**
@@ -252,4 +253,73 @@ export function setConfigValue(key: string, value: string, cwd: string = process
   validateConfigLayer(path, raw);
   writeFileAtomic(path, JSON.stringify(raw, null, 2) + '\n');
   return path;
+}
+
+/**
+ * `stratum config set --global`: como `setConfigValue`, pero SIEMPRE sobre el
+ * `.stratumrc.json` global, nunca sobre uno de proyecto que se encuentre
+ * subiendo desde el `cwd` (Stratum Desktop lo llama desde un directorio que no
+ * controla). Con `json`, `value` es JSON y se guarda tal cual, sin la coerción
+ * de texto: así se fijan valores tipados, listas y objetos enteros (un provider
+ * nuevo necesita `type` y `baseUrl` a la vez). Valida el resultado antes de
+ * escribir; un fichero de un `schemaVersion` más nuevo lanza y no se toca.
+ */
+export function setGlobalConfigValue(
+  key: string,
+  value: string,
+  options: { json?: boolean } = {},
+  globalPath: string = GLOBAL_CONFIG_PATH,
+): string {
+  const raw = readRaw(globalPath);
+  if (options.json) {
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(value);
+    } catch {
+      throw new Error('El valor no es un JSON válido.');
+    }
+    assignByDotPath(raw, key, parsed);
+  } else {
+    setByDotPath(raw, key, value);
+  }
+  validateConfigLayer(globalPath, raw, globalPath);
+  writeFileAtomic(globalPath, JSON.stringify(raw, null, 2) + '\n');
+  return globalPath;
+}
+
+/** Lo que `stratum config list --global --json` imprime (formato 1). */
+export interface GlobalConfigSnapshot {
+  format: 1;
+  path: string;
+  exists: boolean;
+  /** Versión del formato que entiende este Stratum. */
+  supportedSchemaVersion: number;
+  /** `false` si el fichero es de un Stratum más nuevo: no se escribe. */
+  writable: boolean;
+  /** El JSON del fichero tal cual, con `${VAR}` sin expandir. */
+  raw: Record<string, unknown>;
+  /** La config completa con los valores por defecto (sin leer el fichero). */
+  defaults: Record<string, unknown>;
+}
+
+/**
+ * La config global cruda más los valores por defecto del schema, para un
+ * cliente que pinta un formulario y decide qué es herencia y qué está fijado.
+ * No expande variables de entorno: un secreto `${VAR}` sale como se escribió.
+ */
+export function readGlobalConfigSnapshot(
+  globalPath: string = GLOBAL_CONFIG_PATH,
+): GlobalConfigSnapshot {
+  const exists = existsSync(globalPath);
+  const raw = exists ? readConfigFile(globalPath) : {};
+  const check = checkSchemaVersion(raw['schemaVersion'], CONFIG_SCHEMA_VERSION);
+  return {
+    format: 1,
+    path: globalPath,
+    exists,
+    supportedSchemaVersion: CONFIG_SCHEMA_VERSION,
+    writable: check.ok,
+    raw,
+    defaults: validateConfigLayer(globalPath, {}, globalPath) as unknown as Record<string, unknown>,
+  };
 }

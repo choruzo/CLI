@@ -6,6 +6,12 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- **`stratum config get|set --global`**: siempre sobre `~/.stratum/.stratumrc.json`, nunca sobre un `.stratumrc.json` de proyecto que se encuentre subiendo desde el directorio actual. `set` acepta `--json` (el valor se guarda tal cual: tipos, listas y objetos enteros) y `--stdin` (el valor llega por la entrada estándar, sin pasar por la lista de procesos; una clave de API no debe ir en un argumento). Valida el resultado y escribe de forma atómica como siempre; un fichero de un Stratum más nuevo no se toca.
+- **`stratum config list --global --json`**: la config global cruda (con `${VAR}` sin expandir) más los valores por defecto del schema y si es escribible. Es lo que usa Stratum Desktop para su editor de ajustes.
+
 ## [0.13.0] — 2026-11-05
 
 Es la versión de la CLI que necesitan **Stratum Desktop 0.9.0** y **Stratum Dot 0.3.0**.
