@@ -318,6 +318,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   );
   const filesKey = `${selectedId}:${snapshot?.seq ?? 0}:${stream.activeTurnId ?? ''}`;
   const contextKey = `${selectedId}:${stream.activeTurnId ?? 'idle'}`;
+  const knownSessions = useMemo(() => new Set(overview.sessions.map((s) => s.id)), [overview.sessions]);
   const gone = selectedId !== null && protocol.listed && connected && !selected;
 
   const panel = (() => {
@@ -345,7 +346,16 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
           />
         );
       case 'memory':
-        return <SessionContextPanel native={native} sessionId={selected ? selectedId : null} refreshKey={contextKey} />;
+        return (
+          <SessionContextPanel
+            native={native}
+            sessionId={selected ? selectedId : null}
+            refreshKey={contextKey}
+            connected={connected}
+            knownSessions={knownSessions}
+            onOpenSession={(id) => selectSession(native, id)}
+          />
+        );
       case 'files':
         return stream.cwd ? (
           <FilesPanel cwd={stream.cwd} refreshKey={filesKey} />

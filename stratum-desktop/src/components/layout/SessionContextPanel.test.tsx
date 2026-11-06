@@ -15,12 +15,20 @@ function bridge(listSkills: () => Promise<unknown>): NativeBridge {
     context: vi.fn(async () => ({})),
     memory: vi.fn(async () => ({})),
     listSkills: vi.fn(listSkills),
+    memoryDecisions: vi.fn(async () => ({ decisions: [] })),
   } as unknown as NativeBridge;
 }
 
 const mount = (native: NativeBridge) =>
   render(
-    <SessionContextPanel native={native} sessionId="ses_1" refreshKey="k" />,
+    <SessionContextPanel
+      native={native}
+      sessionId="ses_1"
+      refreshKey="k"
+      connected
+      knownSessions={new Set()}
+      onOpenSession={() => undefined}
+    />,
   );
 
 describe("SessionContextPanel: skills", () => {
@@ -65,6 +73,6 @@ describe("SessionContextPanel: skills", () => {
     await waitFor(() =>
       expect(screen.getByText(/No se pudieron leer las skills/)).toBeTruthy(),
     );
-    expect(screen.getByText("Contexto")).toBeTruthy();
+    expect(screen.getByText("Contexto y memoria")).toBeTruthy();
   });
 });

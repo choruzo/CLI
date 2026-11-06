@@ -284,6 +284,30 @@ pub async fn desktop_list_skills(state: State<'_, DesktopState>) -> Result<Value
         .await
 }
 
+/// La memoria global del asistente (`memory.decisions`): las últimas decisiones,
+/// o la búsqueda si hay consulta. De quién es la memoria lo fija el perfil del
+/// enlace (`ClientProfile::DESKTOP` → `assistant`), no el webview.
+#[tauri::command]
+pub async fn desktop_memory_decisions(
+    state: State<'_, DesktopState>,
+    query: Option<String>,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::MemoryDecisions { query }).await
+}
+
+/// Olvidar una decisión del asistente. Solo resta: conexión principal
+/// (capacidad `control`); sin respuesta queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn desktop_memory_forget(
+    state: State<'_, DesktopState>,
+    decision_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryForget { decision_id })
+        .await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrefsView {

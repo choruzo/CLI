@@ -4039,3 +4039,73 @@ kbd {
   margin: 0;
   padding-left: 20px;
 }
+
+/* Memoria global del asistente (`AssistantMemory`), en el panel de contexto. */
+.assistant-memory__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.assistant-memory__search {
+  display: flex;
+  gap: 6px;
+  margin: 6px 0;
+}
+.assistant-memory__search .side-panel__search {
+  flex: 1;
+  min-width: 0;
+  margin: 0;
+}
+.assistant-memory__list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.assistant-memory__item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 8px 10px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 6px;
+  font-size: 13px;
+}
+.assistant-memory__title {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--color-textPrimary);
+  font: inherit;
+  font-weight: 600;
+  text-align: left;
+  cursor: pointer;
+}
+.assistant-memory__title:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+.assistant-memory__meta {
+  font-size: 12px;
+  color: var(--color-textMuted);
+  overflow-wrap: anywhere;
+}
+.assistant-memory__detail {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  align-items: flex-start;
+}
+.assistant-memory__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+.assistant-memory__confirm {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}

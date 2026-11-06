@@ -44,6 +44,8 @@
     "allow-desktop-context",
     "allow-desktop-memory",
     "allow-desktop-list-skills",
+    "allow-desktop-memory-decisions",
+    "allow-desktop-memory-forget",
     "allow-desktop-prefs",
     "allow-desktop-open-config",
     "allow-desktop-approver-status",

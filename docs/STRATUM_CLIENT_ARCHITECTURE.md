@@ -184,7 +184,7 @@ Dot      ┘
 | Carpetas de conversación (D2): subidas, descargas, vista previa, exportar | KEEP UI (Rust) | La carpeta es el `cwd` de la sesión; Desktop la crea al abrir la conversación y Rust solo toca carpetas de su raíz (`folder_of`) |
 | Retención y archivo de carpetas (D3) | DEFER | Las carpetas se conservan; `compressAfterDays`/`deleteAfterDays` quedan sin efecto |
 | Ajustes (editor del `.stratumrc.json` global, asistente de providers) | DEFER | Solo lectura (`prefs.rs`): se edita con `stratum config` o abriendo el fichero. El protocolo no expone la configuración (lleva credenciales) |
-| Panel de memoria global (`STRATUM.md`, decisiones) | DEFER | Sustituido por el panel de contexto y memoria **de la sesión** (`sessions.context`/`sessions.memory`) |
+| Panel de memoria global (`STRATUM.md`, decisiones) | MIGRATE (tras M12) → `memory.*` | Las decisiones del asistente: sección «Memoria del asistente» del panel *Contexto y memoria* (`memory.decisions`/`memory.forget`, como el inspector de Dot M17). De quién es la memoria lo fija el perfil del enlace (`ClientProfile::memory_agent`: Desktop → `assistant`, Dot → `companion`), nunca el webview. El `STRATUM.md` global no se expone: el protocolo no lo sirve |
 | Panel de trayectoria | DEFER | El daemon no sirve `trace.subscribe` |
 | `/clear`, `/compact` | DELETE | Eran del runtime propio; la compactación la decide la sesión (M11) |
 | Ventana, tema, atajo, notificaciones, logs, actualizaciones, componentes de chat y Markdown | KEEP UI | Igual; las notificaciones salen de la foto de conjunto |
@@ -213,5 +213,5 @@ Dot      ┘
 ### 8.3 Lo que M12 deja fuera
 
 Aprobar desde Desktop (hecho después de M12 con la autoridad separada de M8/M9, ver §8.1), retención
-de carpetas, editor de ajustes, memoria global, trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
+de carpetas, editor de ajustes, memoria global (sus decisiones, hechas después: §8.1), trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
 producto entre Dot y Desktop.

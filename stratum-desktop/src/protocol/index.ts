@@ -17,6 +17,7 @@ export type {
   ProtocolApproval,
   ProtocolChatMessage,
   ProtocolContextReport,
+  ProtocolDecision,
   ProtocolEvent,
   ProtocolHistoryPage,
   ProtocolJob,

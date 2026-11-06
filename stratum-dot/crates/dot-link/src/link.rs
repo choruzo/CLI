@@ -139,6 +139,10 @@ pub struct ClientProfile {
     follow: FollowPolicy,
     forward_overview: bool,
     methods: &'static [MainMethod],
+    /// De qué agente embebido es la memoria que ve este cliente (`memory.*`):
+    /// la fija el perfil, no el shell ni el webview. Dot ve la del `companion`
+    /// y Desktop la del `assistant`; ninguno la del otro.
+    memory_agent: &'static str,
 }
 
 const DOT_METHODS: &[MainMethod] = &[
@@ -171,7 +175,7 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::RoutinesRun,
     // M17: revocar una concesión (solo resta autoridad; Desktop no la ofrece).
     MainMethod::GrantsRevoke,
-    // M17: inspector de memoria del companion (Desktop no lo tiene).
+    // M17: inspector de memoria del companion (la del perfil, `memory_agent`).
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
     MainMethod::SessionsMemory,
@@ -201,6 +205,9 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     MainMethod::SessionsClose,
     MainMethod::SessionsSetModel,
     MainMethod::SkillsList,
+    // Panel de memoria global: la del asistente (`memory_agent`).
+    MainMethod::MemoryDecisions,
+    MainMethod::MemoryForget,
 ];
 
 impl ClientProfile {
@@ -212,6 +219,7 @@ impl ClientProfile {
         follow: FollowPolicy::All,
         forward_overview: false,
         methods: DOT_METHODS,
+        memory_agent: "companion",
     };
 
     /// Stratum Desktop (M12): lista por la foto de conjunto, conversación solo
@@ -223,6 +231,7 @@ impl ClientProfile {
         follow: FollowPolicy::Focused,
         forward_overview: true,
         methods: DESKTOP_METHODS,
+        memory_agent: "assistant",
     };
 
     pub fn kind(&self) -> &'static str {
@@ -247,6 +256,10 @@ impl ClientProfile {
 
     pub fn allows(&self, method: MainMethod) -> bool {
         self.methods.contains(&method)
+    }
+
+    pub fn memory_agent(&self) -> &'static str {
+        self.memory_agent
     }
 }
 
@@ -750,7 +763,8 @@ fn optional(
 /// Método y parámetros de una llamada, o por qué no vale. Solo se comprueba
 /// que quepa en el protocolo: si un directorio existe o un perfil vale lo dice
 /// el daemon, que es quien manda.
-fn call_request(
+fn call_request_as(
+    profile: &ClientProfile,
     action: &CallAction,
     operation_id: &str,
 ) -> Result<(MainMethod, Value), CommandError> {
@@ -1047,9 +1061,9 @@ fn call_request(
             ))
         }
         CallAction::MemoryDecisions { query } => {
-            // El agente lo fija el nativo: el webview no elige qué memoria ve.
+            // El agente lo fija el perfil: ni el shell ni el webview eligen qué memoria ven.
             let mut params = serde_json::Map::new();
-            params.insert("agent".into(), json!("companion"));
+            params.insert("agent".into(), json!(profile.memory_agent()));
             params.insert("limit".into(), json!(200));
             if let Some(query) = query {
                 let query = query.trim();
@@ -1087,7 +1101,7 @@ fn call_request(
             Ok((
                 MainMethod::MemoryForget,
                 json!({
-                    "agent": "companion",
+                    "agent": profile.memory_agent(),
                     "decisionId": decision_id,
                     "operationId": operation_id,
                 }),
@@ -2152,7 +2166,7 @@ impl Actor {
                 } else {
                     self.operations += 1;
                     let operation_id = format!("{}-{}", self.operation_prefix, self.operations);
-                    call_request(&action, &operation_id)
+                    call_request_as(&self.cfg.profile, &action, &operation_id)
                         .and_then(|(method, params)| self.allowed(method).map(|_| (method, params)))
                 };
                 match request {
@@ -2206,6 +2220,14 @@ impl Drop for AbortOnDrop {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Lo que pide Dot (casi todo es igual para los dos perfiles).
+    fn call_request(
+        action: &CallAction,
+        operation_id: &str,
+    ) -> Result<(MainMethod, Value), CommandError> {
+        call_request_as(&ClientProfile::DOT, action, operation_id)
+    }
     use crate::state::RoutinePatch;
 
     #[test]
@@ -2544,8 +2566,27 @@ mod tests {
         ] {
             assert!(DOT_METHODS.contains(&method));
         }
-        assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryDecisions));
-        assert!(!DESKTOP_METHODS.contains(&MainMethod::MemoryForget));
+        // Desktop pide las mismas, pero de la memoria del asistente: la fija su perfil.
+        for method in [MainMethod::MemoryDecisions, MainMethod::MemoryForget] {
+            assert!(DESKTOP_METHODS.contains(&method));
+        }
+        let desktop = |action: &CallAction| {
+            call_request_as(&ClientProfile::DESKTOP, action, "op-8")
+                .unwrap()
+                .1
+        };
+        assert_eq!(
+            desktop(&CallAction::MemoryDecisions {
+                query: Some("viaje".into())
+            }),
+            json!({ "agent": "assistant", "limit": 200, "query": "viaje" })
+        );
+        assert_eq!(
+            desktop(&CallAction::MemoryForget {
+                decision_id: "dec_2".into()
+            }),
+            json!({ "agent": "assistant", "decisionId": "dec_2", "operationId": "op-8" })
+        );
 
         // M18: el canal de Telegram. Estado sin parámetros; pedir código y
         // desemparejar cambian algo; emparejar de verdad no está en la principal.

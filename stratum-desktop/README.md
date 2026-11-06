@@ -73,8 +73,12 @@ npm run smoke:clients            # Desktop ↔ Dot ↔ CLI contra un stratumd re
   en esta sesión», enviar respuestas y aprobar un plan se confirman en otra ventana nativa. Denegar,
   omitir y rechazar van directos. El desbloqueo dura 10 minutos, hasta «Bloquear» o hasta cerrar
   Desktop. Sin concesiones con caducidad (son de Dot).
+- **Memoria del asistente**: en el panel *Contexto y memoria* (también sin elegir sesión), lo que el
+  asistente recuerda de una conversación a otra: buscar, ver de dónde salió, abrir su conversación y
+  olvidar (con confirmación en la página). Se recarga al terminar cada turno; nada de lo recordado
+  decide lo que puede hacer.
 - **Lo que Desktop no hace**: editar la configuración (Ajustes es de solo lectura), retención de
-  carpetas, memoria global, trayectoria.
+  carpetas, ver el `STRATUM.md` global, trayectoria.
 - **Conversaciones de antes de M12**: `stratum desktop import` (una vez). Desktop avisa si quedan;
   no las lee.
 

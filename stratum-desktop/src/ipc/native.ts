@@ -165,6 +165,10 @@ export interface NativeBridge {
   memory(sessionId: string): Promise<unknown>;
   /** `skills.list` del asistente (agente fijo en el lado nativo). */
   listSkills(): Promise<unknown>;
+  /** La memoria global del asistente (`memory.decisions`); el agente lo fija el lado nativo. */
+  memoryDecisions(query?: string): Promise<unknown>;
+  /** Olvidar una decisión del asistente (`memory.forget`). */
+  memoryForget(decisionId: string): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
   approverStatus(): Promise<ApproverStatus>;
@@ -206,6 +210,8 @@ export const tauriBridge: NativeBridge = {
   context: (sessionId) => invoke<unknown>('desktop_context', { sessionId }),
   memory: (sessionId) => invoke<unknown>('desktop_memory', { sessionId }),
   listSkills: () => invoke<unknown>('desktop_list_skills'),
+  memoryDecisions: (query) => invoke<unknown>('desktop_memory_decisions', { query: query ?? null }),
+  memoryForget: (decisionId) => invoke<unknown>('desktop_memory_forget', { decisionId }),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
   approverStatus: () => invoke<ApproverStatus>('desktop_approver_status'),

@@ -10,6 +10,7 @@ import type {
 import { parseSkills } from "../../protocol/results";
 import { describeFailure } from "../../client/actions";
 import { ICON, StrokeIcon } from "../chat/icons";
+import { AssistantMemory } from "./AssistantMemory";
 import { formatTokens } from "./StatusBar";
 
 const KIND_LABEL: Record<string, string> = {
@@ -55,16 +56,26 @@ function ContextBar({
  * procedencia). Es una **consulta** al daemon: lo pinta tal cual, no guarda
  * nada y no lee ningún fichero del daemon. La memoria de sesión no es
  * autoridad: es contexto derivado de la conversación.
+ *
+ * Debajo, la memoria **global** del asistente (`AssistantMemory`), que no es
+ * de ninguna sesión: se ve también sin elegir una.
  */
 export function SessionContextPanel({
   native,
   sessionId,
   refreshKey,
+  connected,
+  knownSessions,
+  onOpenSession,
 }: {
   native: NativeBridge;
   sessionId: string | null;
   /** Cambia cuando puede haber cambiado (un run que termina). */
   refreshKey: string;
+  connected: boolean;
+  /** Las sesiones que publica el daemon (para abrir la de una decisión). */
+  knownSessions: ReadonlySet<string>;
+  onOpenSession: (sessionId: string) => void;
 }) {
   const [report, setReport] = useState<ProtocolContextReport | null>(null);
   const [memory, setMemory] = useState<ProtocolSessionMemory | null>(null);
@@ -135,7 +146,7 @@ export function SessionContextPanel({
   return (
     <div className="side-panel">
       <div className="side-panel__header">
-        <h2 className="side-panel__title">Contexto</h2>
+        <h2 className="side-panel__title">Contexto y memoria</h2>
         <button
           type="button"
           className="icon-button"
@@ -148,7 +159,11 @@ export function SessionContextPanel({
         </button>
       </div>
       <div className="side-panel__body">
-        {!sessionId && <p className="side-panel__empty">Elige una sesión.</p>}
+        {!sessionId && (
+          <p className="side-panel__empty">
+            Elige una sesión para ver su contexto.
+          </p>
+        )}
         {error && (
           <p className="notice" data-tone="warning" role="alert">
             {error}
@@ -264,6 +279,13 @@ export function SessionContextPanel({
             )}
           </section>
         )}
+        <AssistantMemory
+          native={native}
+          connected={connected}
+          refreshKey={refreshKey}
+          knownSessions={knownSessions}
+          onOpenSession={onOpenSession}
+        />
       </div>
     </div>
   );

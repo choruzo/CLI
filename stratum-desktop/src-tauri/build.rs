@@ -22,6 +22,8 @@ const COMMANDS: &[&str] = &[
     "desktop_context",
     "desktop_memory",
     "desktop_list_skills",
+    "desktop_memory_decisions",
+    "desktop_memory_forget",
     "desktop_prefs",
     "desktop_open_config",
     "desktop_approver_status",

@@ -11,6 +11,7 @@ import {
 } from '../../../stratum-cli/src/protocol/schemas';
 import type {
   ProtocolContextReport,
+  ProtocolDecision,
   ProtocolHistoryPage,
   ProtocolModel,
   ProtocolRun,
@@ -67,4 +68,16 @@ export function parseSessionMemory(raw: unknown): ProtocolSessionMemory | null {
 export function parseSkills(raw: unknown): ProtocolSkill[] | null {
   const parsed = RESULTS['skills.list'].safeParse(raw);
   return parsed.success ? parsed.data.skills : null;
+}
+
+/** `memory.decisions`: lo que recuerda el asistente (las últimas, o la búsqueda). */
+export function parseDecisions(raw: unknown): ProtocolDecision[] | null {
+  const parsed = RESULTS['memory.decisions'].safeParse(raw);
+  return parsed.success ? parsed.data.decisions : null;
+}
+
+/** `memory.forget`: `removed: false` si ya no estaba (no es un error). */
+export function parseForget(raw: unknown): boolean | null {
+  const parsed = RESULTS['memory.forget'].safeParse(raw);
+  return parsed.success ? parsed.data.removed : null;
 }

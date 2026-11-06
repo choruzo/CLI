@@ -1013,10 +1013,11 @@ async fn revocar_una_concesion_sale_por_dot_con_operation_id_y_no_por_desktop() 
     rig.quit().await;
 }
 
-/// M17: el inspector de memoria sale por Dot con el agente fijado por el nativo;
-/// olvidar lleva `operationId`; Desktop no tiene `memory.*`.
+/// M17: el inspector de memoria sale con el agente que fija el perfil: Dot ve
+/// la del `companion` y Desktop (panel de memoria global) la del `assistant`;
+/// olvidar lleva `operationId`.
 #[tokio::test(flavor = "multi_thread")]
-async fn la_memoria_del_asistente_sale_por_dot_con_el_agente_fijado_y_no_por_desktop() {
+async fn cada_cliente_ve_la_memoria_de_su_agente_y_solo_esa() {
     let dir = tempfile::tempdir().unwrap();
     let fake = Fake::new(dir.path());
     fake.start(TOKEN_A, 1);
@@ -1056,13 +1057,34 @@ async fn la_memoria_del_asistente_sale_por_dot_con_el_agente_fijado_y_no_por_des
         .starts_with("dot-"));
 
     let before = requests.len();
-    let err = desktop
+    desktop
         .link
         .call(CallAction::MemoryDecisions { query: None })
         .await
-        .unwrap_err();
-    assert_eq!(err.kind, CommandErrorKind::Invalid);
-    assert_eq!(fake.requests().len(), before);
+        .unwrap();
+    desktop
+        .link
+        .call(CallAction::MemoryForget {
+            decision_id: "dec_2".into(),
+        })
+        .await
+        .unwrap();
+    let requests = fake.requests();
+    let asked: Vec<_> = requests[before..]
+        .iter()
+        .filter(|r| {
+            r["method"]
+                .as_str()
+                .is_some_and(|m| m.starts_with("memory."))
+        })
+        .collect();
+    assert_eq!(asked.len(), 2);
+    for request in &asked {
+        assert_eq!(request["params"]["agent"], "assistant");
+    }
+    assert_eq!(asked[0]["params"].get("query"), None);
+    assert_eq!(asked[1]["params"]["decisionId"], "dec_2");
+    assert!(asked[1]["params"]["operationId"].is_string());
     desktop.quit().await;
     rig.quit().await;
 }
