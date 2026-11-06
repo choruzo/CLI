@@ -1,23 +1,27 @@
 import { useRef, useState } from 'react';
 import type { Updates } from '../../hooks/useUpdates';
 import { useFocusTrap } from '../../hooks/useFocusTrap';
-import type { DesktopPrefs } from '../../ipc/native';
-import { formatBytes } from '../../ipc/files';
+import type { DesktopPrefs, NativeBridge } from '../../ipc/native';
 import { openLogsDir } from '../../ipc/os';
+import { SettingsEditor } from './SettingsEditor';
 
 /**
- * Ajustes de Desktop (M12): **de solo lectura**. Las preferencias de la app
- * (`desktop.*`) viven en el `.stratumrc.json` global, que se edita con
- * `stratum config` o a mano; los providers y modelos son de Stratum, no de
- * Desktop. Antes de M12 los editaba el sidecar; ahora no hay sidecar, y el
- * daemon no expone la configuración (lleva credenciales).
+ * Ajustes de Desktop. Las preferencias de la app (`desktop.*`) y la
+ * configuración de Stratum viven en el `.stratumrc.json` **global**, que aquí se
+ * edita igual que con `stratum config` (`SettingsEditor`): el lado nativo lo lee
+ * y lo escribe llamando a la CLI instalada, el webview solo ve valores con los
+ * secretos enmascarados y lo que cambia la superficie de riesgo pide confirmar
+ * en una ventana nativa. Por el protocolo no pasa nada de esto: el daemon no
+ * expone la configuración (lleva credenciales).
  */
 export function SettingsPanel({
+  native,
   prefs,
   updates,
   onOpenConfig,
   onClose,
 }: {
+  native: NativeBridge;
   prefs: DesktopPrefs | null;
   updates: Updates;
   onOpenConfig: () => Promise<void>;
@@ -50,8 +54,8 @@ export function SettingsPanel({
         <div className="settings__content">
           <p className="settings__lead">
             Stratum Desktop es un cliente de <code>stratumd</code>: los providers, modelos y permisos
-            son los de tu Stratum. Se configuran con <code>stratum config</code> o editando el
-            fichero de configuración.
+            son los de tu Stratum, los mismos que edita <code>stratum config</code>. Lo que cambia
+            lo que el agente puede hacer te pide confirmarlo en una ventana aparte.
           </p>
           <section className="settings-card" aria-labelledby="settings-config">
             <header className="settings-card__header">
@@ -73,51 +77,19 @@ export function SettingsPanel({
               </p>
             ))}
           </section>
-          {prefs && (
-            <>
-              <section className="settings-card" aria-labelledby="settings-window">
-                <h3 id="settings-window" className="settings-card__title">
-                  Ventana
-                </h3>
-                <dl className="settings-rows">
-                  <dt>Atajo global</dt>
-                  <dd>{prefs.globalHotkey ? <kbd>{prefs.globalHotkey}</kbd> : 'ninguno'}</dd>
-                  <dt>Notificaciones</dt>
-                  <dd>
-                    {prefs.notifications.enabled
-                      ? `sí, tras ${prefs.notifications.minSeconds} s`
-                      : 'no'}
-                  </dd>
-                </dl>
-                {prefs.hotkeyError && (
-                  <p className="notice" data-tone="warning">
-                    {prefs.hotkeyError}
-                  </p>
-                )}
-              </section>
-              <section className="settings-card" aria-labelledby="settings-conversations">
-                <h3 id="settings-conversations" className="settings-card__title">
-                  Conversaciones
-                </h3>
-                <dl className="settings-rows">
-                  <dt>Carpeta</dt>
-                  <dd className="settings-rows__path">{prefs.workspacesRoot}</dd>
-                  <dt>Límites de ficheros</dt>
-                  <dd>
-                    {formatBytes(prefs.maxFileBytes)} por fichero ·{' '}
-                    {formatBytes(prefs.maxWorkspaceBytes)} por conversación
-                  </dd>
-                </dl>
-                {prefs.legacyConversations > 0 && (
-                  <p className="notice" data-tone="info">
-                    Hay {prefs.legacyConversations} conversación(es) de la versión anterior de Desktop
-                    sin importar. Ejecuta <code>stratum desktop import</code> para convertirlas en
-                    sesiones de Stratum (se hace una vez; lo antiguo no se borra).
-                  </p>
-                )}
-              </section>
-            </>
+          {prefs?.hotkeyError && (
+            <p className="notice" data-tone="warning">
+              {prefs.hotkeyError}
+            </p>
           )}
+          {prefs && prefs.legacyConversations > 0 && (
+            <p className="notice" data-tone="info">
+              Hay {prefs.legacyConversations} conversación(es) de la versión anterior de Desktop sin
+              importar. Ejecuta <code>stratum desktop import</code> para convertirlas en sesiones de
+              Stratum (se hace una vez; lo antiguo no se borra).
+            </p>
+          )}
+          <SettingsEditor native={native} />
           <section className="settings-card" aria-labelledby="settings-updates">
             <header className="settings-card__header">
               <h3 id="settings-updates" className="settings-card__title">
@@ -165,8 +137,8 @@ export function SettingsPanel({
             </p>
           )}
           <p className="settings__footnote">
-            Los cambios en el fichero se aplican al volver a abrir Desktop (y, los de Stratum, en
-            las sesiones nuevas).
+            Cada cambio dice si necesita una sesión nueva, reiniciar el daemon o volver a abrir
+            Desktop.
           </p>
         </div>
       </section>

@@ -28,6 +28,9 @@ mod os;
 mod page;
 mod prefs;
 mod retention;
+mod settings;
+mod settings_cli;
+mod settings_gate;
 mod unlock;
 mod updates;
 mod window_state;
@@ -68,6 +71,10 @@ pub struct DesktopState {
     pub confirm: Arc<ConfirmGate>,
     /// Qué ventana de confirmación enseña qué confirmación.
     pub confirm_windows: Arc<confirm::ConfirmWindows>,
+    /// La confirmación nativa de un cambio de ajustes de nivel B (otra puerta, la misma ventana).
+    pub settings_gate: Arc<settings_gate::SettingsGate>,
+    /// Un cambio de ajustes a la vez (leer, confirmar, releer, escribir).
+    pub settings_busy: std::sync::Mutex<()>,
     pub prefs: prefs::DesktopPrefs,
     pub hotkey_error: Option<String>,
     pub logger: Logger,
@@ -151,6 +158,9 @@ pub fn run() {
             commands::desktop_memory_forget,
             commands::desktop_prefs,
             commands::desktop_open_config,
+            commands::desktop_settings_get,
+            commands::desktop_settings_set,
+            commands::desktop_settings_add_provider,
             commands::desktop_approver_status,
             commands::desktop_approver_unlock,
             commands::desktop_approver_lock,
@@ -179,7 +189,10 @@ pub fn run() {
                 // Cerrar la ventana de confirmación es no confirmar.
                 if let WindowEvent::Destroyed = event {
                     if let Some(state) = window.try_state::<DesktopState>() {
-                        state.confirm_windows.closed(window.label(), &state.confirm);
+                        if let Some(nonce) = state.confirm_windows.take(window.label()) {
+                            state.confirm.cancel(&nonce);
+                            state.settings_gate.cancel(&nonce);
+                        }
                     }
                 }
                 return;
@@ -280,6 +293,11 @@ pub fn run() {
                 prompt: unlock::UnlockPrompt::default(),
                 confirm: gate,
                 confirm_windows: Arc::new(confirm::ConfirmWindows::default()),
+                settings_gate: Arc::new(settings_gate::SettingsGate::new(
+                    settings_gate::SettingsTimings::default(),
+                    logger.clone(),
+                )),
+                settings_busy: std::sync::Mutex::new(()),
                 prefs,
                 hotkey_error,
                 logger,
@@ -301,6 +319,7 @@ pub fn run() {
                     state.prompt.clear();
                     // Una confirmación abierta no sobrevive a Desktop: no se envía.
                     state.confirm.invalidate(CancelReason::Closing);
+                    state.settings_gate.invalidate();
                     state.broker.shutdown();
                     state.link.shutdown();
                     state.logger.info("desktop exit");

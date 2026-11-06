@@ -33,6 +33,9 @@ use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::prefs::DesktopPrefs;
+use crate::settings::{self, ChangeOutcome, NewProvider, SettingsView};
+use crate::settings_cli::InstalledCli;
+use crate::settings_gate::WindowConfirmer;
 use crate::workspace::WorkspaceState;
 use crate::DesktopState;
 
@@ -344,6 +347,104 @@ pub fn desktop_open_config(app: AppHandle, state: State<'_, DesktopState>) -> Re
     app.opener()
         .open_path(state.prefs.config_path.clone(), None::<&str>)
         .map_err(|e| format!("no se pudo abrir: {e}"))
+}
+
+/// Un cambio de ajustes a la vez: leer, confirmar, releer y escribir no se mezclan.
+fn settings_guard(state: &DesktopState) -> Result<std::sync::MutexGuard<'_, ()>, CommandError> {
+    match state.settings_busy.try_lock() {
+        Ok(guard) => Ok(guard),
+        Err(std::sync::TryLockError::Poisoned(p)) => Ok(p.into_inner()),
+        Err(std::sync::TryLockError::WouldBlock) => Err(CommandError::new(
+            CommandErrorKind::NotSent,
+            "Ya hay un cambio de ajustes en curso.",
+        )),
+    }
+}
+
+fn settings_task_failed() -> CommandError {
+    CommandError::new(
+        CommandErrorKind::NotSent,
+        "No se pudo atender la petición de ajustes.",
+    )
+}
+
+/// Los ajustes editables, con los secretos enmascarados (`settings.rs`). Lo lee
+/// la CLI instalada; sin una que sirva, la vista es de solo lectura.
+#[tauri::command]
+pub async fn desktop_settings_get<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+) -> Result<SettingsView, CommandError> {
+    main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        settings::load_view(
+            &InstalledCli::from_env(),
+            std::path::Path::new(&state.prefs.config_path),
+        )
+    })
+    .await
+    .map_err(|_| settings_task_failed())
+}
+
+/// Cambia una clave editable del `.stratumrc.json` global. El nivel lo decide
+/// el lado nativo: el B abre la ventana de confirmación y solo escribe si la
+/// persona confirma allí y el valor no cambió mientras tanto.
+#[tauri::command]
+pub async fn desktop_settings_set<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    path: String,
+    value: Value,
+) -> Result<ChangeOutcome, CommandError> {
+    main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let _busy = settings_guard(&state)?;
+        let presenter =
+            crate::confirm::TauriPresenter::new(app.clone(), state.confirm_windows.clone());
+        let confirmer = WindowConfirmer {
+            gate: &state.settings_gate,
+            presenter: &presenter,
+        };
+        settings::apply_set(
+            &InstalledCli::from_env(),
+            &confirmer,
+            std::path::Path::new(&state.prefs.config_path),
+            &path,
+            &value,
+        )
+    })
+    .await
+    .map_err(|_| settings_task_failed())?
+}
+
+/// Añade un provider nuevo (siempre con confirmación nativa: una dirección y una clave).
+#[tauri::command]
+pub async fn desktop_settings_add_provider<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    provider: NewProvider,
+) -> Result<ChangeOutcome, CommandError> {
+    main_window(&window)?;
+    tauri::async_runtime::spawn_blocking(move || {
+        let state = app.state::<DesktopState>();
+        let _busy = settings_guard(&state)?;
+        let presenter =
+            crate::confirm::TauriPresenter::new(app.clone(), state.confirm_windows.clone());
+        let confirmer = WindowConfirmer {
+            gate: &state.settings_gate,
+            presenter: &presenter,
+        };
+        settings::apply_add_provider(
+            &InstalledCli::from_env(),
+            &confirmer,
+            std::path::Path::new(&state.prefs.config_path),
+            &provider,
+        )
+    })
+    .await
+    .map_err(|_| settings_task_failed())?
 }
 
 fn main_window<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), CommandError> {

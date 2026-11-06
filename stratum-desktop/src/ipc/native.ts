@@ -15,6 +15,7 @@
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
+import type { NewProviderInput, SettingsChange, SettingsValue, SettingsView } from './settings';
 
 /** Estado de la conexión con el daemon (`ConnectionState` en `dot-link/src/state.rs`). */
 export type ConnectionState =
@@ -183,6 +184,15 @@ export interface NativeBridge {
   memoryForget(decisionId: string): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
+  /** Los ajustes editables del `.stratumrc.json` global, con los secretos enmascarados. */
+  settingsGet(): Promise<SettingsView>;
+  /**
+   * Cambia una clave. El nivel lo decide el lado nativo (`settings.rs`); el B abre
+   * la ventana de confirmación y solo escribe si la persona confirma allí.
+   */
+  settingsSet(path: string, value: SettingsValue): Promise<SettingsChange>;
+  /** Añade un provider (siempre con confirmación nativa). La clave no vuelve. */
+  settingsAddProvider(provider: NewProviderInput): Promise<SettingsChange>;
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo: la clave se teclea allí, no aquí. */
   unlockApprovals(): Promise<void>;
@@ -227,6 +237,9 @@ export const tauriBridge: NativeBridge = {
   memoryForget: (decisionId) => invoke<unknown>('desktop_memory_forget', { decisionId }),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
+  settingsGet: () => invoke<SettingsView>('desktop_settings_get'),
+  settingsSet: (path, value) => invoke<SettingsChange>('desktop_settings_set', { path, value }),
+  settingsAddProvider: (provider) => invoke<SettingsChange>('desktop_settings_add_provider', { provider }),
   approverStatus: () => invoke<ApproverStatus>('desktop_approver_status'),
   unlockApprovals: () => invoke('desktop_approver_unlock'),
   lockApprovals: () => invoke('desktop_approver_lock'),

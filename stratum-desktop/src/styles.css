@@ -4109,3 +4109,76 @@ kbd {
   flex-direction: column;
   gap: 6px;
 }
+
+/* Ajustes editables: el editor del .stratumrc.json global. Neutros; el ámbar queda para el botón principal. */
+.settings-editor {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.settings-field__head {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.settings-level,
+.settings-tag {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0 6px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 999px;
+  font-size: 11px;
+  line-height: 18px;
+  color: var(--color-textFaint);
+  white-space: nowrap;
+}
+.settings-tag[data-present] {
+  color: var(--color-textResponse);
+}
+.settings-status {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-textMuted);
+}
+.settings-status:empty {
+  display: none;
+}
+.settings-status[data-tone='bad'] {
+  color: var(--color-errorMuted);
+}
+/* Una clave se pinta con puntos aunque sea un campo de texto. */
+.settings-input--secret {
+  -webkit-text-security: disc;
+}
+.settings-secret-block {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.settings-add__actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+.settings-cli-only {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 13px;
+  color: var(--color-textResponse);
+}
+.settings-cli-only li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.settings-cli-only li > span:first-child {
+  flex: 1;
+  min-width: 0;
+}

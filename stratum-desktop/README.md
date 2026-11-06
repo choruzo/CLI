@@ -46,7 +46,7 @@ npm run smoke:clients            # Desktop ↔ Dot ↔ CLI contra un stratumd re
   `ClientProfile::DESKTOP`: `core.hello` como `desktop`, rol `operator`, sigue la foto de conjunto y
   **solo** la sesión que se mira) y reenvía cada evento al webview por `desktop://event`, sin
   interpretarlo. `commands.rs` es la **lista blanca tipada** `desktop_*` (no hay método genérico).
-  `prefs.rs` lee en solo lectura `desktop.*` del `.stratumrc.json` global. `workspace.rs` y
+  `prefs.rs` lee `desktop.*` del `.stratumrc.json` global al arrancar. `settings.rs` (+ `settings_cli.rs`, `settings_gate.rs`) es el editor de Ajustes (ver más abajo). `workspace.rs` y
   `files.rs`: las carpetas de conversación (subidas, descargas, vista previa, exportar); cada
   comando recibe el `cwd` de la sesión y Rust solo toca carpetas de su raíz. `os.rs`
   (atajo, notificaciones, logs), `updates.rs`, `window_state.rs`. Salir suelta el enlace y nada más.
@@ -81,14 +81,21 @@ npm run smoke:clients            # Desktop ↔ Dot ↔ CLI contra un stratumd re
   (7) la carpeta de una conversación pasa a `<id>.tar.gz`, y tras `deleteAfterDays` (150, cinco meses) se
   elimina; la conversación sigue legible. `0` desactiva cada etapa. Escribir o adjuntar restaura la
   archivada solo; el panel de ficheros también ofrece «Restaurar».
-- **Lo que Desktop no hace**: editar la configuración (Ajustes es de solo lectura), ver el `STRATUM.md`
-  global, trayectoria.
+- **Ajustes editables**: el `.stratumrc.json` **global**, igual que `stratum config`. El lado nativo (Rust)
+  lo lee y lo escribe llamando a la CLI instalada (`stratum config list|set --global`, el valor por la
+  entrada estándar): no duplica el esquema ni toca el JSON, y por el protocolo no pasa nada (el daemon no
+  expone la configuración). Una lista cerrada de claves en Rust decide el nivel: **A** libre, **B** (candado:
+  guardas, permisos, providers y claves, memoria remota…) pide la ventana de confirmación nativa, **C** (plugins,
+  MCP, SSH, la caja, canales, comandos y listas) solo desde la CLI. El webview solo ve valores con los secretos
+  enmascarados. Con una CLI sin `--global`, Ajustes queda en solo lectura. Tabla completa en
+  `docs/STRATUM_CLIENT_ARCHITECTURE.md` §8.1.
+- **Lo que Desktop no hace**: ver el `STRATUM.md` global y editar lo que ejecuta código (nivel C).
 - **Conversaciones de antes de M12**: `stratum desktop import` (una vez). Desktop avisa si quedan;
   no las lee.
 
 Tests: `tests/architecture.test.ts` (sin runtime, sin sidecar, solo el contrato, frontera tipada,
 nada que apruebe ni apague el daemon), `src/client/client.test.ts`, `src/view/view.test.ts`,
-`src/App.test.tsx`, `cargo test` (`prefs`, `workspace`…), `scripts/smoke-clients.mjs` y las E2E.
+`src/App.test.tsx`, `src/components/layout/SettingsEditor.test.tsx`, `cargo test` (`prefs`, `workspace`, `settings`…), `scripts/smoke-clients.mjs` y las E2E.
 
 > Las secciones siguientes describen D1–D7. Lo que en ellas dependía del sidecar (protocolo v9,
 > `ConversationHost`, retención, Ajustes editables, onboarding, trayectoria) se retiró en M12; lo

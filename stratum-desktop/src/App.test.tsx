@@ -83,6 +83,15 @@ function rig() {
       throw new Error('sin prefs en el test');
     }),
     openConfig: vi.fn(async () => undefined),
+    settingsGet: vi.fn(async () => {
+      throw new Error('sin ajustes en el test');
+    }),
+    settingsSet: vi.fn(async () => {
+      throw new Error('sin ajustes en el test');
+    }),
+    settingsAddProvider: vi.fn(async () => {
+      throw new Error('sin ajustes en el test');
+    }),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => ({ kind: 'locked', reason: 'initial' })),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),

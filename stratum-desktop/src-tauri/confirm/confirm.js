@@ -148,6 +148,16 @@
       fact(facts, 'Entorno', v.approval.environment);
       fact(facts, 'Motivo', v.approval.reason);
     }
+    if (v.settings) {
+      // Un cambio de ajustes: lo arma el lado nativo, y de un secreto nunca lleva el valor.
+      fact(facts, 'Ajuste', v.settings.label);
+      fact(facts, 'Clave', v.settings.key, true);
+      fact(facts, 'Valor actual', v.settings.old);
+      fact(facts, 'Valor nuevo', v.settings.new);
+      $('lead').textContent =
+        'Stratum Desktop te pide confirmar este cambio de configuración aquí, fuera de su ventana principal. ' +
+        'Se escribe en tu configuración global de Stratum.';
+    }
     fact(facts, 'Sesión', session.title || session.agent || session.id);
     fact(facts, 'Carpeta', session.cwd, true);
     fact(facts, 'Agente', [session.agent, session.model].filter(Boolean).join(' · '));
@@ -210,14 +220,14 @@
     if (ok.disabled || busy) return;
     busy = true;
     refresh();
-    say('Comprobando con el daemon de Stratum…', false);
+    say(view && view.settings ? 'Comprobando…' : 'Comprobando con el daemon de Stratum…', false);
     let message = 'No se pudo confirmar.';
     let keepOpen = false;
     try {
       const response = await post('confirm', phrase.value);
       const answer = await response.json();
       if (answer && answer.ok) {
-        say('Confirmado. Enviando…', false);
+        say(view && view.settings ? 'Confirmado. Escribiendo…' : 'Confirmado. Enviando…', false);
         return; // el lado nativo cierra la ventana
       }
       if (answer && typeof answer.message === 'string') message = tr(answer.message);

@@ -524,6 +524,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
 
         {settingsOpen && (
           <SettingsPanel
+            native={native}
             prefs={prefs}
             updates={updates}
             onOpenConfig={() => native.openConfig()}

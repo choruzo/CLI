@@ -163,6 +163,9 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_retry',
       'desktop_save_pasted_image',
       'desktop_set_model',
+      'desktop_settings_add_provider',
+      'desktop_settings_get',
+      'desktop_settings_set',
       'desktop_start_run',
       'desktop_steer_run',
       'desktop_trace_session',
@@ -190,7 +193,8 @@ describe('el lado nativo es un cliente, no un runtime', () => {
     expect(conf.bundle.externalBin).toBeUndefined();
     expect(conf.bundle.resources).toBeUndefined();
     // Ningún proceso propio: el daemon lo arranca el comando oficial (`dot_link::launcher`).
-    for (const file of rust) {
+    // La única excepción es `settings_cli.rs`, que ejecuta `stratum config …` (ver el test de ajustes).
+    for (const file of rust.filter((f) => !f.endsWith(`${sep}settings_cli.rs`))) {
       expect(/std::process::Command|tokio::process|Command::new/.test(rustCode(file)), rel(file)).toBe(false);
     }
     expect(existsSync(join(CLI_SRC, 'desktop'))).toBe(false);
@@ -320,5 +324,53 @@ describe('memoria global: la del asistente, y solo esa', () => {
       expect(call[1]).not.toMatch(/agent|cwd/);
     }
     expect(commands).not.toMatch(/"companion"/);
+  });
+});
+
+describe('ajustes editables: el lado nativo lee y escribe, el webview solo ve y pide', () => {
+  const tauriSrc = join(TAURI, 'src');
+  const settingsCli = rustCode(join(tauriSrc, 'settings_cli.rs'));
+  const settings = rustCode(join(tauriSrc, 'settings.rs'));
+
+  it('el único proceso que lanza Desktop además del daemon es `stratum config`, con la CLI instalada', () => {
+    const launchers = rust.filter((f) => /Command::new/.test(rustCode(f))).map(rel);
+    expect(launchers).toEqual(['stratum-desktop/src-tauri/src/settings_cli.rs']);
+    // Argumentos llanos (nada que cmd.exe interprete) y el valor por la entrada estándar.
+    expect(settingsCli).toMatch(/fn plain_argument/);
+    expect(settingsCli).toMatch(/Stdio::piped\(\)/);
+    expect(settingsCli).toContain('DESKTOP_CLI_ENV');
+    // Todo lo que escribe es `config set --global --json --stdin`, y lo que lee, `config list --global --json`.
+    expect(settings).toContain('"config", "set", "--global", "--json", "--stdin"');
+    expect(settings).toContain('"config", "list", "--global", "--json"');
+    // Nada de `set` sin `--global`: nunca un `.stratumrc.json` de proyecto.
+    for (const call of settings.matchAll(/&\[\s*"config",\s*"set"[^\]]*\]/g)) expect(call[0]).toContain('"--global"');
+  });
+
+  it('la clasificación vive en Rust: el webview no decide ni conoce el nivel de una clave', () => {
+    // La lista de claves editables no está en ningún fichero del webview.
+    for (const file of shipped) {
+      expect(/SPECS|NEVER_EDITABLE|classify\(/.test(code(file)), rel(file)).toBe(false);
+    }
+    // Y los comandos de ajustes solo se atienden desde la ventana principal.
+    const commands = rustCode(join(tauriSrc, 'commands.rs'));
+    for (const name of ['desktop_settings_get', 'desktop_settings_set', 'desktop_settings_add_provider']) {
+      const body = new RegExp(`pub async fn ${name}[<(][\\s\\S]*?\\{([\\s\\S]*?)\\n\\}`).exec(commands)?.[1] ?? '';
+      expect(body, name).toContain('main_window(&window)?');
+    }
+  });
+
+  it('lo de nivel B solo se escribe tras `confirmer.confirm`, y el nivel C ni se consulta', () => {
+    expect(settings).toMatch(/spec\.level == Level::B[\s\S]*?confirmer\.confirm\(&request\)\?;[\s\S]*?write_value\(/);
+    expect(settings).toMatch(/let Class::Editable\(spec\) = classify\(&segments\) else/);
+    // Nada de lo que viene del webview llega a la CLI sin pasar por `check_value`.
+    expect(settings).toContain('check_value(spec, value)?');
+  });
+
+  it('el webview no pide ajustes por ningún otro camino que `native.ts`', () => {
+    const askers = shipped.filter((f) => /settings(Get|Set|AddProvider)\(/.test(code(f))).map(rel).sort();
+    expect(askers).toEqual([
+      'stratum-desktop/src/components/layout/SettingsEditor.tsx',
+      'stratum-desktop/src/ipc/native.ts',
+    ]);
   });
 });

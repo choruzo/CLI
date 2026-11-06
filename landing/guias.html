@@ -485,7 +485,7 @@ Get-FileHash .\Stratum_0.8.0_x64-setup.exe -Algorithm SHA256</code></pre></div>
             <p>
               Al arrancar, la app busca versiones nuevas en silencio y muestra un aviso con «Instalar y
               reiniciar» o «Más tarde». <b>Nunca instala sin que lo pidas.</b> Se puede desactivar en
-              Ajustes → Sistema.
+              Ajustes → Desktop.
             </p>
 
             <h4>Desde el código fuente</h4>
@@ -514,24 +514,27 @@ npm run tauri build       # instaladores</code></pre></div>
             </div>
 
             <h4>Ajustes</h4>
-            <p>Se abren con <kbd>Ctrl+,</kbd>, con <code>/settings</code> o con el icono ⚙.</p>
+            <p>
+              Se abren con <kbd>Ctrl+,</kbd>, con <code>/settings</code> o con el icono ⚙. Editan el mismo
+              fichero global que <code>stratum config</code> (<code>~/.stratum/.stratumrc.json</code>), con la
+              misma validación: Desktop llama a la CLI instalada para escribirlo, así que necesita una versión
+              de la CLI que sepa <code>stratum config set --global</code>; con una más vieja, Ajustes se queda
+              en solo lectura y te pide actualizar.
+            </p>
             <div class="tscroll">
               <table class="dtable">
-                <thead><tr><th>Pestaña</th><th>Contenido</th></tr></thead>
+                <thead><tr><th>Tipo de ajuste</th><th>Cómo se cambia</th></tr></thead>
                 <tbody>
-                  <tr><td>Providers</td><td>Alta, edición y prueba de conexión. Las API keys se muestran enmascaradas</td></tr>
-                  <tr><td>Modelo activo</td><td>Modelo por defecto y cuántas conversaciones responden a la vez (2 por defecto; el resto espera en cola)</td></tr>
-                  <tr><td>Búsqueda web</td><td>DuckDuckGo, Tavily o ambos</td></tr>
-                  <tr><td>Memoria</td><td>Memoria global del asistente y decisiones guardadas</td></tr>
-                  <tr><td>Espacios de trabajo</td><td>Carpeta raíz, límites de tamaño, retención y espacio ocupado</td></tr>
-                  <tr><td>Sistema</td><td>Notificaciones, atajo global y actualizaciones</td></tr>
-                  <tr><td>Avanzado</td><td>El resto del fichero de configuración</td></tr>
+                  <tr><td>Preferencias (modelo por defecto, límites, interfaz, Desktop…)</td><td>Se guardan al momento</td></tr>
+                  <tr><td>Lo que cambia lo que el agente puede hacer (confirmaciones y permisos, providers y claves, memoria remota, capturas en la traza…), marcado con un candado</td><td>Se abre una ventana aparte para confirmar el cambio; si la cierras, no se escribe nada</td></tr>
+                  <tr><td>Lo que ejecuta código o abre acceso (plugins, servidores MCP, SSH, la caja, canales, comandos, listas de reglas)</td><td>Solo desde la CLI (<code>stratum config</code>); Desktop dice si hay algo definido, nunca qué</td></tr>
                 </tbody>
               </table>
             </div>
             <p>
-              Los cambios se aplican a cada conversación antes de su siguiente mensaje. La carpeta y los
-              límites de los espacios de trabajo, y el logging, piden reiniciar el agente; la app lo ofrece.
+              Las claves de API no se enseñan: Desktop solo dice que hay una guardada (o de qué variable de
+              entorno se lee). Cada cambio avisa de si necesita una sesión nueva, reiniciar el daemon o volver
+              a abrir Desktop.
             </p>
 
             <h4>Claves de <code>desktop</code></h4>
@@ -573,8 +576,7 @@ npm run tauri build       # instaladores</code></pre></div>
             <div class="callout">
               <b>Retención.</b> A los 7 días sin uso, los ficheros de una conversación se comprimen; abrirla
               los restaura. A los 5 meses (150 días) se borran y la conversación conserva solo el texto. Solo los mensajes
-              y las subidas cuentan como uso; abrirla para leer, no. Los plazos se cambian en Ajustes → Espacios
-              de trabajo, y <code>0</code> los desactiva.
+              y las subidas cuentan como uso; abrirla para leer, no. Los plazos se cambian en Ajustes → Desktop, y <code>0</code> los desactiva.
             </div>
 
             <h4>Comandos</h4>

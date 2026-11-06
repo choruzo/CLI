@@ -6,12 +6,18 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
+Necesita una CLI con `stratum config set --global` (la siguiente a la 0.13.0). Con una más vieja, Ajustes se queda en solo lectura y avisa de que hay que actualizarla.
+
 ### Añadido
 - **Retención de las carpetas de conversación**: los ficheros de una conversación sin uso se archivan (`.tar.gz`) a los 7 días y se eliminan a los 5 meses (la conversación sigue legible). Escribir o adjuntar restaura los ficheros archivados solos, y el panel de ficheros avisa de «archivados» / «eliminados por antigüedad» con un botón «Restaurar». Se ajusta con `desktop.workspaces.compressAfterDays` y `deleteAfterDays` (`0` desactiva cada etapa).
 - **Panel de trayectoria** (botón del raíl o `Ctrl+J`): la línea de tiempo de la sesión que miras —llamadas al modelo con su origen, tokens y latencia; herramientas con su duración, bloqueos y concesiones; y las decisiones del runtime— a partir de la traza que escribe la CLI y retransmite `stratumd`. Solo enseña lo que la traza trae (lo que falta, «n/d»); las sesiones que corren en su propia terminal no tienen traza que retransmitir. Necesita un `stratumd` que sirva `trace.subscribe`.
+- **Ajustes editables**: Ajustes edita el `.stratumrc.json` global como `stratum config`, por secciones (providers, memoria, contexto, herramientas, agente, registro, entornos, daemon, Desktop…), con campos tipados, el valor por defecto frente al fijado, un guardado por campo con su estado y el aviso de qué cambio necesita una sesión nueva, reiniciar el daemon o volver a abrir Desktop. Editor de providers (alias, dirección, clave de API o `${VARIABLE}`, modelo) y «Usar por defecto».
+- **Tres niveles**: lo inocuo se guarda al momento; lo que cambia lo que el agente puede hacer (candado: confirmaciones, permisos, providers y claves, memoria remota, capturas en la traza…) abre una ventana nativa aparte con la clave y el valor viejo y nuevo, y no se escribe si la cierras o caduca; lo que ejecuta código o abre acceso (plugins, MCP, SSH, la caja, canales, comandos, listas) es «solo CLI» y Desktop ni muestra su contenido.
+- Las claves de API no llegan nunca a la interfaz (solo «guardada» o el nombre de su variable de entorno), y la nueva viaja por la entrada estándar de la CLI, no por la línea de comandos.
 
 ### Cambiado
 - `desktop.workspaces.deleteAfterDays` pasa de 30 a 150 días por defecto (hasta ahora no tenía efecto).
+- Ajustes ya no es de solo lectura: lo escribe la CLI instalada (validación y escritura atómica de `stratum config`), no Desktop.
 
 ## [0.9.0] — 2026-11-05
 

@@ -183,7 +183,7 @@ Dot      ┘
 | Confirmaciones y preguntas propias | MIGRATE (tras M12) → broker nativo de Dot | Tarjetas en el chat de la sesión que se mira (`PendingRequests`). Resolver usa las mismas piezas que Dot: `dot_link::approver` (otra conexión, `roles: ['approver']`, `client.kind: 'desktop'`), clave en una ventana nativa aparte (`desktop-unlock`) y lo sensible confirmado en otra (`desktop-confirm`, `dot_link::ConfirmGate`). Sin concesiones con caducidad (revocarlas es de Dot) |
 | Carpetas de conversación (D2): subidas, descargas, vista previa, exportar | KEEP UI (Rust) | La carpeta es el `cwd` de la sesión; Desktop la crea al abrir la conversación y Rust solo toca carpetas de su raíz (`folder_of`) |
 | Retención y archivo de carpetas (D3) | MIGRATE → hecho en Rust (`retention.rs`) | Sin uso `compressAfterDays` (7) → `<id>.tar.gz`; `deleteAfterDays` (150) → eliminada (queda la marca `<id>.purged`); `0` desactiva cada etapa. Se reconoce por lo que hay en disco, sin registro. Barrido al arrancar y cada 6 h, con cerrojo frente a restaurar. Escribir o adjuntar restaura (`workspace_restore`); extracción confinada (sin `..`, rutas absolutas ni enlaces). Es política de ficheros de Desktop: el daemon no interviene |
-| Ajustes (editor del `.stratumrc.json` global, asistente de providers) | DEFER | Solo lectura (`prefs.rs`): se edita con `stratum config` o abriendo el fichero. El protocolo no expone la configuración (lleva credenciales) |
+| Ajustes (editor del `.stratumrc.json` global, asistente de providers) | MIGRATE → CLI instalada | Editor equivalente a `stratum config` (`settings.rs`): el lado nativo lee y escribe el fichero global llamando a `stratum config list\|set --global` (valores por la entrada estándar; no duplica el esquema Zod). Niveles A/B/C por clave (tabla en §8.4); el B pide la ventana de confirmación nativa. El protocolo sigue sin exponer la configuración (lleva credenciales) |
 | Panel de memoria global (`STRATUM.md`, decisiones) | MIGRATE (tras M12) → `memory.*` | Las decisiones del asistente: sección «Memoria del asistente» del panel *Contexto y memoria* (`memory.decisions`/`memory.forget`, como el inspector de Dot M17). De quién es la memoria lo fija el perfil del enlace (`ClientProfile::memory_agent`: Desktop → `assistant`, Dot → `companion`), nunca el webview. El `STRATUM.md` global no se expone: el protocolo no lo sirve |
 | Panel de trayectoria | MIGRATE (tras M12) → `trace.subscribe` | Panel anclado a la derecha del chat (raíl o `Ctrl+J`): el daemon retransmite la traza que escribe el runtime de la sesión que se mira (`trace.records`, solo `observe`); el enlace compartido la sigue por `LinkHandle::trace` (solo el perfil `DESKTOP` lo tiene, Dot no) y el webview valida y reduce con `trace/model.ts` del core. La de una sesión de terminal (par) no está: la escribe su proceso |
 | `/clear`, `/compact` | DELETE | Eran del runtime propio; la compactación la decide la sesión (M11) |
@@ -213,5 +213,48 @@ Dot      ┘
 ### 8.3 Lo que M12 deja fuera
 
 Aprobar desde Desktop (hecho después de M12 con la autoridad separada de M8/M9, ver §8.1), retención
-de carpetas (hecha después, §8.1), editor de ajustes, memoria global (sus decisiones, hechas después: §8.1), trayectoria (hecha después: §8.1), Unified Presence, Dot orquestador y cualquier convergencia de
+de carpetas (hecha después, §8.1), memoria global (sus decisiones, hechas después: §8.1), trayectoria (hecha después: §8.1), Unified Presence, Dot orquestador y cualquier convergencia de
 producto entre Dot y Desktop.
+
+### 8.4 Ajustes editables: niveles A, B y C
+
+Desktop edita el `.stratumrc.json` **global** (nunca uno de proyecto) con la misma validación que
+`stratum config`, sin duplicar el esquema:
+
+```
+webview ─ desktop_settings_set(ruta, valor) ─► settings.rs ─ clasifica la ruta (lista cerrada, en Rust)
+                                                  │ nivel B: ventana nativa (settings_gate.rs, la de confirm.rs)
+                                                  ▼
+                       stratum config set --global --json --stdin <ruta>   (settings_cli.rs; el valor por stdin)
+```
+
+- **Lo escribe la CLI instalada** (`STRATUM_DESKTOP_CLI` o `stratum` del `PATH`, como el arranque del
+  daemon): valida con su Zod y escribe de forma atómica; un fichero de un `schemaVersion` más nuevo no se
+  toca. `stratum config list --global --json` da el JSON crudo (con `${VAR}` sin expandir) y los defaults.
+  Por el protocolo no pasa nada: el daemon no expone la configuración.
+- **El nivel lo decide Rust** sobre la ruta normalizada (sin `..`, vacíos, corchetes, barras, prototipos,
+  solo `[A-Za-z0-9_-]` por tramo). Solo se escribe lo que está en la lista cerrada `SPECS`; **lo no
+  clasificado es C**. El webview solo pinta lo que Rust le manda.
+- **Secretos**: el webview no recibe ninguno (llegan como «hay una» o el nombre de su `${VAR}`); la clave
+  nueva sale por stdin, no vuelve, no va a la ventana de confirmación («se cambiará la clave de API de
+  X») ni a los logs. Un valor con `${VAR}` se conserva literal.
+- **Confirmación (B)**: la lee el lado nativo (clave, valor viejo → nuevo), ventana aparte con espera
+  mínima, una a la vez, caduca; ventana cerrada o fallo = no se escribe. Antes de escribir se relee y, si
+  el valor cambió mientras se confirmaba, se aborta. No reutiliza `ConfirmedAction` porque `ConfirmGate`
+  está atado a las solicitudes del daemon (broker de aprobar); es la misma ventana y las mismas reglas.
+- **Fallos**: CLI ausente, sin `--global` o con una salida que no se entiende → editor en solo lectura con
+  «actualiza la CLI»; el error de `config set` se enseña tal cual y el fichero no queda a medias.
+- **Reinicio** (por prefijo): `desktop.*` → volver a abrir Desktop; `daemon.*`, `logging.*`, `trace.*` →
+  reiniciar el daemon; el resto → sesión nueva.
+
+| Nivel | Claves (prefijo de la ruta) | Cómo |
+|---|---|---|
+| **A** (libre) | `provider.default`, `provider.providers.<alias>.model\|contextWindow`; `memory.retrievalTopK\|similarityThreshold\|autoExtract\|embeddingWarmup`, `memory.session.enabled\|compactAt\|targetContext\|timeoutMs`; `context.*`; `tools.bashTimeout\|execMaxBytes`, `tools.webSearch.maxResults`, `tools.jobs.*` (límites); `agent.*`; `agents.*`; `logging.level\|stderr`, `logging.file.enabled\|maxBytes\|maxFiles`; `trace.enabled\|retentionDays\|maxFieldChars`; `skills.enabled`; `prompt.guides`; `snapshots.*`; `tui.*`; `session.planRetentionDays`; `daemon.idleExitMinutes\|eventBuffer\|maxSessions\|detachedTtlMinutes`; `desktop.*` salvo `workspaces.root` | Se guarda al momento |
+| **B** (confirmación nativa) | `provider.providers.<alias>.baseUrl\|apiKey` y alta de un provider; `memory.embeddingModel\|embeddingDimension\|extractionModel`, `memory.embeddingEndpoint.*`, `memory.session.allowRemote\|extractor.*\|summarizer.*`; `tools.confirmDestructive\|auditLog`, `tools.webSearch.backend\|apiKey\|tavilyApiKey`, `tools.jobs.enabled\|subagentAccess`; `logging.redact`; `trace.screenshots`; `environments.<nombre>.tier\|policy\|requirePlan\|readOnly\|confirmation`; `session.profile`; `daemon.autoStart\|approvalTimeoutMinutes\|persistSessions`; `desktop.workspaces.root` | Ventana aparte con clave, valor viejo → nuevo |
+| **C** (solo CLI) | `plugins`, `mcp`, `companion`, `ssh`, `box`, `channels`, `imageGeneration`, `lsp`, `schemaVersion` (cualquier cosa que ejecuta código o abre acceso); `tools.testCommand\|guardedCommands\|destructivePatterns\|sensitivePathAllowlist\|webFetch\|redaction`; `session.profiles`; rutas (`memory.projectFile\|globalFile\|decisionsFile\|vectorDb`, `logging.file.dir`, `trace.dir`, `prompt.guidesDir`, `skills.registryFile\|builtin`); `provider.providers.<alias>.models\|timeouts\|cache\|pricing\|type`; `environments.<nombre>.match`; **toda clave desconocida o no clasificada** | Solo lectura («edítalo con `stratum config`»); Desktop dice si hay algo definido, nunca qué |
+
+Por qué sube de nivel lo dudoso: `desktop.workspaces.root` es B (decide dónde escribe Desktop);
+`memory.extractionModel`, `memory.embeddingModel` y `daemon.persistSessions` son B (mandan texto fuera o
+guardan conversaciones en disco); las listas y los mapas (reglas de guardas, patrones, hosts) son C porque
+`set` por ruta solo escribe valores sueltos, y los ids de modelo llevan puntos (`models.<id>`), que la ruta
+no puede direccionar.

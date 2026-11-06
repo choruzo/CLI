@@ -24,7 +24,7 @@
 //! Cada confirmación tiene su ventana (`confirm-N`): así el cierre tardío de
 //! una anterior no cancela la siguiente.
 
-use dot_link::{ConfirmGate, Presenter};
+use dot_link::Presenter;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
@@ -66,12 +66,10 @@ impl ConfirmWindows {
         label
     }
 
-    /// La ventana `label` se cerró: deja de atenderse, y lo que enseñaba se cancela.
-    pub fn closed(&self, label: &str, gate: &ConfirmGate) {
-        let nonce = self.by_label.lock().ok().and_then(|mut m| m.remove(label));
-        if let Some(nonce) = nonce {
-            gate.cancel(&nonce);
-        }
+    /// La ventana `label` se cerró: deja de atenderse y se devuelve la
+    /// confirmación que enseñaba, para que quien corresponda la cancele.
+    pub fn take(&self, label: &str) -> Option<String> {
+        self.by_label.lock().ok().and_then(|mut m| m.remove(label))
     }
 
     fn labels_for(&self, nonce: &str) -> Vec<String> {
@@ -155,8 +153,10 @@ pub fn handle<R: Runtime>(
             .warn("confirm: request from another window refused");
         return responder.respond(forbidden());
     };
-    // Y tiene que ser la confirmación abierta ahora, no una anterior.
-    if state.confirm.current_nonce().as_deref() != Some(nonce.as_str()) {
+    // Y tiene que ser la confirmación abierta ahora, no una anterior: la de aprobar
+    // (del daemon) o la de un cambio de ajustes (`settings_gate.rs`), nunca las dos.
+    let settings = state.settings_gate.current_nonce().as_deref() == Some(nonce.as_str());
+    if !settings && state.confirm.current_nonce().as_deref() != Some(nonce.as_str()) {
         return responder.respond(not_found());
     }
     let path = request.uri().path().to_string();
@@ -166,7 +166,11 @@ pub fn handle<R: Runtime>(
         let response = match path.as_str() {
             "/" | "/index.html" => {
                 // Desde que se sirve la página empieza a contar la espera antes de poder confirmar.
-                state.confirm.shown(&nonce);
+                if settings {
+                    state.settings_gate.shown(&nonce);
+                } else {
+                    state.confirm.shown(&nonce);
+                }
                 respond(
                     StatusCode::OK,
                     "text/html; charset=utf-8",
@@ -197,6 +201,10 @@ pub fn handle<R: Runtime>(
         return responder.respond(not_found());
     }
     match path.as_str() {
+        "/view" if settings => match state.settings_gate.view(&nonce) {
+            Some(view) => responder.respond(json(&view)),
+            None => responder.respond(not_found()),
+        },
         "/view" => match state.confirm.view(&nonce) {
             Some(view) => responder.respond(json(
                 &serde_json::to_value(&view).unwrap_or(serde_json::Value::Null),
@@ -205,7 +213,18 @@ pub fn handle<R: Runtime>(
         },
         "/cancel" => {
             state.confirm.cancel(&nonce);
+            state.settings_gate.cancel(&nonce);
             responder.respond(json(&serde_json::json!({ "ok": true })));
+        }
+        // Un ajuste no pasa por el daemon: se comprueba la espera mínima y se da el visto bueno.
+        "/confirm" if settings => {
+            let answer = match state.settings_gate.confirm(&nonce) {
+                Ok(()) => serde_json::json!({ "ok": true }),
+                Err(failure) => serde_json::json!({
+                    "ok": false, "keepOpen": failure.keep_open, "message": failure.message
+                }),
+            };
+            responder.respond(json(&answer));
         }
         "/confirm" => {
             let body = request.into_body();
@@ -238,6 +257,7 @@ pub fn handle<R: Runtime>(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use dot_link::ConfirmGate;
 
     #[test]
     fn la_pagina_no_trae_nada_de_fuera_ni_pinta_html() {
@@ -275,7 +295,9 @@ mod tests {
         assert_eq!(windows.nonce_of("main"), None);
         assert_eq!(windows.nonce_of("unlock"), None);
         let gate = ConfirmGate::new(Default::default(), dot_link::Logger::none());
-        windows.closed(&a, &gate);
+        if let Some(nonce) = windows.take(&a) {
+            gate.cancel(&nonce);
+        }
         assert_eq!(windows.nonce_of(&a), None);
         assert_eq!(windows.nonce_of(&b).as_deref(), Some("n2"));
     }
