@@ -4,11 +4,13 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
-## [Sin publicar]
+## [0.10.0] — 2026-11-06
 
-Necesita una CLI con `stratum config set --global` (la siguiente a la 0.13.0). Con una más vieja, Ajustes se queda en solo lectura y avisa de que hay que actualizarla.
+Acompaña a **Stratum CLI 0.14.0**, que es la que conviene tener instalada. Ajustes necesita su `stratum config set --global`: con una CLI más vieja, Ajustes se queda en solo lectura y avisa de que hay que actualizarla.
 
 ### Añadido
+- **Aprobar, contestar y decidir desde Desktop**: las aprobaciones, las preguntas del agente y los planes se resuelven en tarjetas del chat, con la misma autoridad separada que Dot (desbloqueo y confirmación nativa de lo sensible).
+- **Memoria global del asistente**: sección «Memoria del asistente» en el panel *Contexto y memoria*, con sus decisiones y su procedencia, y la opción de olvidarlas.
 - **Retención de las carpetas de conversación**: los ficheros de una conversación sin uso se archivan (`.tar.gz`) a los 7 días y se eliminan a los 5 meses (la conversación sigue legible). Escribir o adjuntar restaura los ficheros archivados solos, y el panel de ficheros avisa de «archivados» / «eliminados por antigüedad» con un botón «Restaurar». Se ajusta con `desktop.workspaces.compressAfterDays` y `deleteAfterDays` (`0` desactiva cada etapa).
 - **Panel de trayectoria** (botón del raíl o `Ctrl+J`): la línea de tiempo de la sesión que miras —llamadas al modelo con su origen, tokens y latencia; herramientas con su duración, bloqueos y concesiones; y las decisiones del runtime— a partir de la traza que escribe la CLI y retransmite `stratumd`. Solo enseña lo que la traza trae (lo que falta, «n/d»); las sesiones que corren en su propia terminal no tienen traza que retransmitir. Necesita un `stratumd` que sirva `trace.subscribe`.
 - **Ajustes editables**: Ajustes edita el `.stratumrc.json` global como `stratum config`, por secciones (providers, memoria, contexto, herramientas, agente, registro, entornos, daemon, Desktop…), con campos tipados, el valor por defecto frente al fijado, un guardado por campo con su estado y el aviso de qué cambio necesita una sesión nueva, reiniciar el daemon o volver a abrir Desktop. Editor de providers (alias, dirección, clave de API o `${VARIABLE}`, modelo) y «Usar por defecto».
