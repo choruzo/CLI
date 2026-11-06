@@ -99,7 +99,37 @@ describe('ProviderRouter — fallback automático por orden (Hito 6)', () => {
     const router = new ProviderRouter(makeMultiConfig());
     expect(router.advanceProvider()?.name).toBe('secondary');
     expect(router.advanceProvider()?.name).toBe('tertiary');
-    expect(router.advanceProvider()).toBeNull(); // sin alternativas
+    // Agotados los alternativos, el primario recibe una segunda oportunidad…
+    expect(router.advanceProvider()).toEqual({
+      name: 'primary',
+      model: 'qwen2.5-coder:32b',
+      primaryRetry: true,
+    });
+    expect(router.providerName).toBe('primary');
+    // …y solo una: si vuelve a fallar, ya no quedan alternativas.
+    expect(router.advanceProvider()).toBeNull();
+  });
+
+  it('el reintento del primario usa el modelo de la sesión (/model), no el del catálogo', () => {
+    const router = new ProviderRouter(makeMultiConfig());
+    router.switchModel('modelo-de-sesion');
+    router.advanceProvider(); // secondary
+    router.advanceProvider(); // tertiary
+    const retry = router.advanceProvider();
+    expect(retry).toMatchObject({ name: 'primary', model: 'modelo-de-sesion', primaryRetry: true });
+    expect(router.model).toBe('modelo-de-sesion');
+  });
+
+  it('resetFallback devuelve la segunda oportunidad del primario al run siguiente', () => {
+    const router = new ProviderRouter(makeMultiConfig());
+    router.advanceProvider();
+    router.advanceProvider();
+    expect(router.advanceProvider()?.primaryRetry).toBe(true);
+    router.resetFallback();
+    router.switchProvider('primary');
+    router.advanceProvider();
+    router.advanceProvider();
+    expect(router.advanceProvider()?.primaryRetry).toBe(true);
   });
 
   it('resetFallback permite reintentar el primario tras un fallback', () => {

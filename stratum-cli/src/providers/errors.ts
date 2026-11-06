@@ -48,6 +48,10 @@ export function isRetryableStatus(status: number): boolean {
 const RETRYABLE_NETWORK_CODES = new Set([
   'ECONNREFUSED',
   'ECONNRESET',
+  // Windows (WSAECONNABORTED): un socket keep-alive que el servidor o un NAT
+  // cerraron durante una pausa larga entre llamadas falla así al reutilizarlo.
+  // Una conexión nueva funciona: un reintento basta.
+  'ECONNABORTED',
   'EPIPE',
   'EAI_AGAIN',
   'EHOSTUNREACH',

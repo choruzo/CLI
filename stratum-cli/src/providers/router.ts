@@ -49,6 +49,13 @@ export class ProviderRouter {
   /** Providers que ya han fallado en el run actual; se reinicia con `resetFallback()`. */
   private readonly failedKeys = new Set<string>();
 
+  /** Provider con el que empezó el run (el primero que falló); lo fija `advanceProvider`. */
+  private runPrimaryKey: string | null = null;
+  /** Su config activa al fallar (incluye un `/model` de la sesión, que el catálogo no tiene). */
+  private runPrimaryConfig: ProviderConfig | null = null;
+  /** ¿Ya se le dio al primario la segunda oportunidad de este run? */
+  private primaryRetried = false;
+
   constructor(config: StratumConfig, providerOverride?: string) {
     if (!config.provider) {
       throw new Error(
@@ -105,7 +112,7 @@ export class ProviderRouter {
     this.provider = makeClient(cfg);
     // El cambio manual reinicia el estado de fallback: el nuevo activo deja de
     // considerarse "fallido" aunque lo hubiera estado antes.
-    this.failedKeys.clear();
+    this.resetFallback();
   }
 
   /**
@@ -138,6 +145,9 @@ export class ProviderRouter {
   /** Reinicia el estado de fallback. Llamar al inicio de cada run del agente. */
   resetFallback(): void {
     this.failedKeys.clear();
+    this.runPrimaryKey = null;
+    this.runPrimaryConfig = null;
+    this.primaryRetried = false;
   }
 
   /** ¿Hay más de un provider configurado? (si no, el fallback es no-op). */
@@ -153,12 +163,41 @@ export class ProviderRouter {
    * Solo debe invocarse cuando el provider activo falla ANTES de emitir tokens
    * (no se puede hacer fallback a mitad de stream).
    */
-  advanceProvider(): { name: string; model: string } | null {
+  advanceProvider(): { name: string; model: string; primaryRetry?: boolean } | null {
+    // El primero que falla en un run es el primario (el que el usuario eligió).
+    if (this.failedKeys.size === 0) {
+      this.runPrimaryKey = this.activeKey;
+      this.runPrimaryConfig = { ...this.activeConfig };
+    }
     this.failedKeys.add(this.activeKey);
     // Un provider sin modelo resuelto no sirve de fallback: no hay a quién
     // preguntar a mitad de turno.
     const next = this.fallbackOrder.find((k) => !this.failedKeys.has(k) && this.providers[k].model);
     if (!next) {
+      // Agotados los alternativos, el primario recibe UNA segunda oportunidad:
+      // su fallo pudo ser transitorio (un socket viejo, un corte breve) y los
+      // alternativos suelen ser máquinas de la LAN que no siempre están. No se
+      // limpia `failedKeys`: si vuelve a fallar, no se prueba nada más.
+      const primary = this.runPrimaryKey;
+      if (
+        primary !== null &&
+        !this.primaryRetried &&
+        primary !== this.activeKey &&
+        this.runPrimaryConfig?.model
+      ) {
+        const cfg = this.runPrimaryConfig;
+        this.primaryRetried = true;
+        log.warn('provider fallback: retrying primary', {
+          from: this.activeKey,
+          to: primary,
+          model: cfg.model,
+          tried: [...this.failedKeys],
+        });
+        this.activeKey = primary;
+        this.activeConfig = { ...cfg };
+        this.provider = makeClient(cfg);
+        return { name: primary, model: cfg.model, primaryRetry: true };
+      }
       log.error('fallback exhausted', { tried: [...this.failedKeys] });
       return null;
     }

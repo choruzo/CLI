@@ -1152,7 +1152,7 @@ export class ReactLoop {
       readonly pricing?: Pricing;
       /** M15 — visión declarada del modelo activo; ausente = sin visión. */
       readonly vision?: ModelVision;
-      advanceProvider(): { name: string; model: string } | null;
+      advanceProvider(): { name: string; model: string; primaryRetry?: boolean } | null;
     },
     /**
      * Extras Hito 8: `profiles` permite al loop padre resolver perfiles al
@@ -1800,9 +1800,11 @@ export class ReactLoop {
               loopLog.warn('provider fallback', { from, to: next.name, model: next.model });
               yield {
                 type: 'warning',
-                message:
-                  `provider_fallback: "${from}" no respondió; ` +
-                  `conmutando a "${next.name}" (modelo ${next.model}).`,
+                message: next.primaryRetry
+                  ? `provider_fallback: ningún alternativo respondió; ` +
+                    `reintentando "${next.name}" (modelo ${next.model}).`
+                  : `provider_fallback: "${from}" no respondió; ` +
+                    `conmutando a "${next.name}" (modelo ${next.model}).`,
               };
               continue streamLoop;
             }

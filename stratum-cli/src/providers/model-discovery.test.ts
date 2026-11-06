@@ -60,6 +60,8 @@ describe('provider solo con baseUrl + apiKey', () => {
     );
     const router = new ProviderRouter(config);
     expect(router.advanceProvider()).toEqual({ name: 'spare', model: 's' });
+    // Agotados los alternativos solo vuelve el primario (segunda oportunidad), nunca `unresolved`.
+    expect(router.advanceProvider()).toEqual({ name: 'main', model: 'm', primaryRetry: true });
     expect(router.advanceProvider()).toBeNull();
   });
 

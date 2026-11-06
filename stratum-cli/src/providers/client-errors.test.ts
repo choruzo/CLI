@@ -267,6 +267,16 @@ describe('OpenAICompatible — errores de red', () => {
     );
   });
 
+  it('ECONNABORTED (socket keep-alive muerto en Windows): reintentable', () => {
+    const err = networkError(
+      Object.assign(new TypeError('fetch failed'), { cause: { code: 'ECONNABORTED' } }),
+      'https://api.nan.builders',
+      'connect',
+    );
+    expect(err.retryable).toBe(true);
+    expect(err.message).toBe('LLM connection failed to https://api.nan.builders: ECONNABORTED');
+  });
+
   it('las credenciales de la baseUrl no aparecen en el mensaje', () => {
     const err = networkError(
       Object.assign(new TypeError('fetch failed'), { cause: { code: 'ENOTFOUND' } }),

@@ -131,7 +131,7 @@ export interface SubagentRouter {
   readonly providerName: string;
   readonly contextWindow: number;
   readonly hasFallback: boolean;
-  advanceProvider(): { name: string; model: string } | null;
+  advanceProvider(): { name: string; model: string; primaryRetry?: boolean } | null;
   switchModel(model: string): void;
 }
 
