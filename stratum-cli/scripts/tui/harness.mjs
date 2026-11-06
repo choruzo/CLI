@@ -103,7 +103,10 @@ export function launch({
   let raw = '';
   let exited = null;
   let closed = false;
+  /** Cada lectura del pty: instante y tamaño (para medir cuánto repinta la TUI). */
+  const chunks = [];
   child.onData((d) => {
+    chunks.push({ at: Date.now(), bytes: Buffer.byteLength(d) });
     raw += d;
     term.write(d);
   });
@@ -137,6 +140,8 @@ export function launch({
     scrollback: () => lines(true).join('\n'),
     /** Bytes crudos emitidos por el proceso (secuencias ANSI incluidas). */
     raw: () => raw,
+    /** Lecturas del pty `{ at, bytes }` desde el arranque. */
+    chunks: () => chunks,
     /** `{ exitCode }` cuando el proceso ha terminado; `null` mientras vive. */
     exited: () => exited,
 

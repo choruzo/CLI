@@ -8,6 +8,7 @@ import { loadConfig } from '../../config/loader.js';
 import { offerProjectConfig } from '../project-config-offer.js';
 import { createAltScreen } from '../alt-screen.js';
 import { applyTerminalBackground } from '../terminal-background.js';
+import { installSyncOutput } from '../sync-output.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { discoverContextWindow } from '../../host/startup-model.js';
 import { ToolRegistry } from '../../tools/registry.js';
@@ -435,6 +436,8 @@ export const chatCommand = new Command('chat')
 
       // La ventana de un subagente va en la pantalla alternativa (no borra el historial).
       const altScreen = createAltScreen(process.stdout);
+      // Cada fotograma de Ink, entre ?2026h y ?2026l: sin parpadeo al repintar la región viva.
+      const restoreSyncOutput = installSyncOutput(process.stdout);
       const { waitUntilExit } = render(
         React.createElement(App, {
           agent,
@@ -480,6 +483,7 @@ export const chatCommand = new Command('chat')
         // exit() was called — normal shutdown
       }
       altScreen.leave();
+      restoreSyncOutput();
       restoreBackground();
       clearInterval(checkpointTimer);
       process.off('SIGTERM', onFatalSignal);
