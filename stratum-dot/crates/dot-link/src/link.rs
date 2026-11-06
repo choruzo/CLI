@@ -208,6 +208,9 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     // Panel de memoria global: la del asistente (`memory_agent`).
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
+    // Panel de trayectoria: la traza de la sesión que se mira (solo lectura).
+    MainMethod::TraceSubscribe,
+    MainMethod::TraceUnsubscribe,
 ];
 
 impl ClientProfile {
@@ -285,6 +288,8 @@ enum Cmd {
     Retry,
     Focus(Option<String>),
     Resync(String),
+    /// Desktop: de qué sesión se sigue la traza (`None`: de ninguna).
+    Trace(Option<String>),
     Control(ControlAction, ControlReply),
     Call(CallAction, CallReply),
     Shutdown,
@@ -299,6 +304,8 @@ struct Flags {
     attach: bool,
     /// `Some(foco)`: el último foco pedido.
     focus: Option<Option<String>>,
+    /// `Some(sesión)`: la última traza pedida (coalescida como el foco).
+    trace: Option<Option<String>>,
 }
 
 struct Shared {
@@ -326,6 +333,9 @@ impl Shared {
         }
         if std::mem::take(&mut flags.attach) {
             return Some(Cmd::Attach);
+        }
+        if let Some(trace) = flags.trace.take() {
+            return Some(Cmd::Trace(trace));
         }
         flags.focus.take().map(Cmd::Focus)
     }
@@ -388,6 +398,13 @@ impl LinkHandle {
         self.shared.flag(|f| f.focus = Some(session_id));
     }
 
+    /// De qué sesión se retransmite la traza (`trace.subscribe`), o ninguna. Solo
+    /// una a la vez; el enlace la reabre al reconectar (el primer `trace.records`
+    /// trae `reset`). Un perfil sin `trace.*` (Dot) no hace nada.
+    pub fn trace(&self, session_id: Option<String>) {
+        self.shared.flag(|f| f.trace = Some(session_id));
+    }
+
     /// Pide una foto nueva de una sesión (la interfaz no pudo aplicar un evento).
     /// Con la cola llena se descarta: es idempotente, y la foto llegará con la
     /// siguiente petición o el siguiente hueco de `seq`.
@@ -441,6 +458,7 @@ pub fn spawn(
         sink: Box::new(sink),
         shared: shared.clone(),
         focus: None,
+        trace: None,
         rejected: None,
         operations: 0,
         operation_prefix: format!(
@@ -485,6 +503,7 @@ enum Next {
 enum Pending {
     SubOverview { generation: u32 },
     SubSession { session_id: String, generation: u32 },
+    SubTrace { session_id: String, generation: u32 },
     Unsub,
     Control { reply: ControlReply },
     Call { reply: CallReply, mutating: bool },
@@ -505,7 +524,20 @@ fn unanswered(mutating: bool, why: &str) -> CommandError {
 enum Route {
     Overview,
     Session(String),
+    Trace(String),
 }
+
+/// La suscripción a la traza de una sesión (`trace.subscribe`).
+struct TraceSub {
+    /// Id que le dio el servidor. `None` mientras se abre.
+    server_id: Option<String>,
+    /// Cambia en cada apertura: la respuesta de una apertura vieja no se enlaza.
+    generation: u32,
+}
+
+/// Registros que se admiten en un solo `trace.records`. El daemon lee por
+/// tramos acotados, así que un lote mayor no es suyo: se rechaza entero.
+pub const MAX_TRACE_RECORDS_PER_BATCH: usize = 5_000;
 
 /// Una conexión viva y todo lo que solo vale mientras dura.
 struct Conn {
@@ -524,6 +556,9 @@ struct Conn {
     /// conjunto (en `order` solo está la seguida).
     live: Vec<String>,
     routes: HashMap<String, Route>,
+    /// Desktop: la traza que se sigue ahora, si alguna.
+    trace: Option<TraceSub>,
+    trace_generation: u32,
     can_control: bool,
     request_timeout: Duration,
 }
@@ -585,6 +620,48 @@ impl Conn {
         self.routes.remove(&server_id);
         self.request(
             MainMethod::EventsUnsubscribe,
+            json!({ "subscriptionId": server_id }),
+            Pending::Unsub,
+        )
+        .await
+    }
+
+    /// Abre la suscripción a la traza de una sesión (la anterior, si la hay, se cierra).
+    async fn open_trace(&mut self, session_id: &str) -> std::io::Result<()> {
+        self.close_trace().await?;
+        self.trace_generation = self.trace_generation.wrapping_add(1);
+        let generation = self.trace_generation;
+        self.trace = Some(TraceSub {
+            server_id: None,
+            generation,
+        });
+        self.request(
+            MainMethod::TraceSubscribe,
+            json!({ "sessionId": session_id }),
+            Pending::SubTrace {
+                session_id: session_id.to_string(),
+                generation,
+            },
+        )
+        .await
+    }
+
+    /// Suelta la traza que se sigue. Una apertura aún en vuelo queda sin dueño:
+    /// su respuesta se desecha (y se cierra) porque ya no coincide la generación.
+    async fn close_trace(&mut self) -> std::io::Result<()> {
+        let Some(sub) = self.trace.take() else {
+            return Ok(());
+        };
+        if let Some(server_id) = sub.server_id {
+            self.unsubscribe_trace(server_id).await?;
+        }
+        Ok(())
+    }
+
+    async fn unsubscribe_trace(&mut self, server_id: String) -> std::io::Result<()> {
+        self.routes.remove(&server_id);
+        self.request(
+            MainMethod::TraceUnsubscribe,
             json!({ "subscriptionId": server_id }),
             Pending::Unsub,
         )
@@ -654,6 +731,8 @@ struct Actor {
     sink: Box<dyn Fn(DotEvent) + Send + Sync>,
     shared: Arc<Shared>,
     focus: Option<String>,
+    /// Desktop: sesión de la que se pide la traza (sobrevive a una reconexión).
+    trace: Option<String>,
     autostart_armed: bool,
     /// El daemon (pid + arranque) que rechazó a este cliente: no se le insiste.
     rejected: Option<(u32, String)>,
@@ -1279,6 +1358,8 @@ impl Actor {
                 state: self.state(),
             }),
             Cmd::Focus(focus) => self.focus = focus,
+            // Se recuerda: al conectar, la traza pedida se abre.
+            Cmd::Trace(session_id) => self.trace = session_id,
             Cmd::Resync(_) => {}
             // No se encola para más tarde: falla en el acto.
             Cmd::Control(_, reply) => {
@@ -1545,6 +1626,8 @@ impl Actor {
             unfollowed: VecDeque::new(),
             live: Vec::new(),
             routes: HashMap::new(),
+            trace: None,
+            trace_generation: 0,
             can_control: false,
             request_timeout: self.cfg.timings.request_timeout,
         };
@@ -1642,7 +1725,10 @@ impl Actor {
         // --- suscripciones y bucle --------------------------------------------
         let end = match conn.open_overview().await {
             Err(_) => End::Lost,
-            Ok(()) => self.pump(&mut conn, &mut lines).await,
+            Ok(()) => match self.start_trace(&mut conn).await {
+                Err(_) => End::Lost,
+                Ok(()) => self.pump(&mut conn, &mut lines).await,
+            },
         };
         conn.fail_pending();
         match &end {
@@ -1707,6 +1793,26 @@ impl Actor {
                     self.cfg
                         .logger
                         .warn(&format!("subscription timed out session={session_id}"));
+                }
+                Some((
+                    Pending::SubTrace {
+                        session_id,
+                        generation,
+                    },
+                    _,
+                )) => {
+                    self.cfg.logger.warn(&format!(
+                        "trace subscription timed out session={session_id}"
+                    ));
+                    if conn.trace.as_ref().map(|t| t.generation) == Some(generation) {
+                        conn.trace = None;
+                        self.trace = None;
+                        self.emit(DotEvent::TraceUnavailable {
+                            session_id,
+                            code: "TIMEOUT".into(),
+                            reason: None,
+                        });
+                    }
                 }
                 Some((Pending::Unsub, _)) | None => {}
             }
@@ -1805,6 +1911,62 @@ impl Actor {
         Ok(true)
     }
 
+    /// Abre la traza pedida, si el perfil la tiene y hay una sesión a la que seguirla.
+    async fn start_trace(&mut self, conn: &mut Conn) -> std::io::Result<()> {
+        let Some(session_id) = self.trace.clone() else {
+            return Ok(());
+        };
+        if self.allowed(MainMethod::TraceSubscribe).is_err() || !valid_id(&session_id) {
+            return Ok(());
+        }
+        conn.open_trace(&session_id).await
+    }
+
+    /// Un `trace.records` de la suscripción de traza. Solo se mira el sobre
+    /// (`sessionId`, `reset`, `format`, `records`): cada registro pasa sin
+    /// interpretar. Si no lo cumple, la traza se suelta y se dice: reabrirla es
+    /// decisión de la interfaz (no hay bucle), y trae `reset`.
+    async fn on_trace_records(
+        &mut self,
+        conn: &mut Conn,
+        session_id: &str,
+        mut params: Value,
+    ) -> std::io::Result<()> {
+        let valid = params.get("sessionId").and_then(Value::as_str) == Some(session_id)
+            && params.get("reset").map(Value::is_boolean).unwrap_or(false)
+            && params.get("format").and_then(Value::as_u64).is_some()
+            && params
+                .get("records")
+                .and_then(Value::as_array)
+                .map(|r| r.len() <= MAX_TRACE_RECORDS_PER_BATCH && r.iter().all(Value::is_object))
+                .unwrap_or(false);
+        if !valid {
+            self.cfg.logger.warn(&format!(
+                "invalid trace batch session={session_id}: trace dropped"
+            ));
+            conn.close_trace().await?;
+            // Ya no se pide: volver a pedirla (otra vez la misma) la reabre.
+            self.trace = None;
+            self.emit(DotEvent::TraceUnavailable {
+                session_id: session_id.to_string(),
+                code: "INVALID_TRACE".into(),
+                reason: None,
+            });
+            return Ok(());
+        }
+        let records = match params.get_mut("records").map(Value::take) {
+            Some(Value::Array(records)) => records,
+            _ => return Ok(()),
+        };
+        self.emit(DotEvent::TraceRecords {
+            session_id: session_id.to_string(),
+            reset: params["reset"].as_bool().unwrap_or(false),
+            format: params["format"].as_u64().unwrap_or(0),
+            records,
+        });
+        Ok(())
+    }
+
     async fn on_line(&mut self, conn: &mut Conn, line: &str) -> std::io::Result<Option<End>> {
         match wire::classify(line) {
             Incoming::Ignored => {}
@@ -1840,6 +2002,14 @@ impl Actor {
                     None => return Ok(None),
                     Some(Route::Overview) => None,
                     Some(Route::Session(id)) => Some(id.clone()),
+                    Some(Route::Trace(id)) => {
+                        // Lo único que el daemon manda por una suscripción de traza
+                        // son sus lotes; el sobre se comprueba dentro (Rust no nombra
+                        // eventos: la ruta ya dice de qué suscripción viene).
+                        let id = id.clone();
+                        self.on_trace_records(conn, &id, params).await?;
+                        return Ok(None);
+                    }
                 };
                 match (method.as_str(), session_id) {
                     ("overview", None) => {
@@ -2040,6 +2210,44 @@ impl Actor {
                     Err(_) => {}
                 }
             }
+            Pending::SubTrace {
+                session_id,
+                generation,
+            } => {
+                let current = conn.trace.as_ref().map(|t| t.generation);
+                match outcome {
+                    Ok(result) => {
+                        let Some(server_id) = subscription_id(&result) else {
+                            return Ok(None);
+                        };
+                        if current == Some(generation) {
+                            conn.routes
+                                .insert(server_id.clone(), Route::Trace(session_id));
+                            if let Some(sub) = conn.trace.as_mut() {
+                                sub.server_id = Some(server_id);
+                            }
+                        } else {
+                            conn.unsubscribe_trace(server_id).await?;
+                        }
+                    }
+                    Err(error) if current == Some(generation) => {
+                        // La traza de una sesión par la escribe su proceso, o la
+                        // sesión ya no existe: se dice, no se reintenta.
+                        self.cfg.logger.warn(&format!(
+                            "cannot follow the trace of session={session_id} ({})",
+                            error.code
+                        ));
+                        conn.trace = None;
+                        self.trace = None;
+                        self.emit(DotEvent::TraceUnavailable {
+                            session_id,
+                            code: error.code,
+                            reason: error.reason,
+                        });
+                    }
+                    Err(_) => {}
+                }
+            }
             Pending::Control { reply } => {
                 let answer = match outcome {
                     Ok(result) => Ok(result
@@ -2090,6 +2298,17 @@ impl Actor {
                 }
                 conn.overview = OverviewSub::default();
                 conn.open_overview().await?;
+                // La interfaz recargó: la traza también vuelve a empezar (con `reset`).
+                conn.close_trace().await?;
+                self.start_trace(conn).await?;
+            }
+            Cmd::Trace(session_id) => {
+                if session_id == self.trace {
+                    return Ok(None);
+                }
+                self.trace = session_id;
+                conn.close_trace().await?;
+                self.start_trace(conn).await?;
             }
             Cmd::Focus(focus) if self.cfg.profile.follow() == FollowPolicy::Focused => {
                 if focus == self.focus {
@@ -2348,6 +2567,16 @@ mod tests {
         )
         .unwrap();
         assert_eq!(params, json!({ "agent": "a", "cwd": "/w" }));
+    }
+
+    #[test]
+    fn la_traza_es_solo_de_desktop() {
+        // Panel de trayectoria: la traza de la sesión que se mira, solo lectura.
+        for method in [MainMethod::TraceSubscribe, MainMethod::TraceUnsubscribe] {
+            assert!(ClientProfile::DESKTOP.allows(method));
+            // El perfil solo resta: Dot no gana nada que no use.
+            assert!(!ClientProfile::DOT.allows(method));
+        }
     }
 
     #[test]

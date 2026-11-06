@@ -30,6 +30,7 @@
     "allow-desktop-retry",
     "allow-desktop-focus-session",
     "allow-desktop-resync-session",
+    "allow-desktop-trace-session",
     "allow-desktop-pause-run",
     "allow-desktop-resume-run",
     "allow-desktop-cancel-run",

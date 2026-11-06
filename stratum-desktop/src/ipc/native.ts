@@ -54,7 +54,14 @@ export type DesktopEvent =
   | { type: 'snapshot'; sessionId: string; snapshot: unknown }
   | { type: 'events'; sessionId: string; events: unknown[] }
   /** Estado de la autoridad de aprobar. Sin datos: ni la clave ni nada derivado. */
-  | { type: 'approver'; status: ApproverStatus };
+  | { type: 'approver'; status: ApproverStatus }
+  /**
+   * Un lote de la traza de la sesión pedida con `traceSession`. Los registros
+   * pasan sin interpretar (`unknown`): `reset` sustituye lo que se tuviera.
+   */
+  | { type: 'trace-records'; sessionId: string; reset: boolean; format: number; records: unknown[] }
+  /** La traza pedida no se puede seguir (`code`/`reason` del daemon o del enlace). */
+  | { type: 'trace-unavailable'; sessionId: string; code: string; reason: string | null };
 
 /** `ApproverStatus` de `dot-link/src/approver.rs`. */
 export type ApproverStatus =
@@ -146,6 +153,11 @@ export interface NativeBridge {
   /** Qué sesión se mira: la única de la que se pide la conversación. */
   focusSession(sessionId: string | null): Promise<void>;
   resyncSession(sessionId: string): Promise<void>;
+  /**
+   * De qué sesión se retransmite la traza (panel de trayectoria), o ninguna.
+   * Solo una a la vez; al reconectar, el lado nativo la pide otra vez.
+   */
+  traceSession(sessionId: string | null): Promise<void>;
   pauseRun(sessionId: string, runId?: string): Promise<string>;
   resumeRun(sessionId: string, runId?: string): Promise<string>;
   cancelRun(sessionId: string, runId?: string): Promise<string>;
@@ -193,6 +205,7 @@ export const tauriBridge: NativeBridge = {
   retry: () => invoke('desktop_retry'),
   focusSession: (sessionId) => invoke('desktop_focus_session', { sessionId }),
   resyncSession: (sessionId) => invoke('desktop_resync_session', { sessionId }),
+  traceSession: (sessionId) => invoke('desktop_trace_session', { sessionId }),
   pauseRun: (sessionId, runId) => invoke<string>('desktop_pause_run', { sessionId, runId: runId ?? null }),
   resumeRun: (sessionId, runId) => invoke<string>('desktop_resume_run', { sessionId, runId: runId ?? null }),
   cancelRun: (sessionId, runId) => invoke<string>('desktop_cancel_run', { sessionId, runId: runId ?? null }),

@@ -83,10 +83,15 @@ pub enum MainMethod {
     ChannelsStatus,
     ChannelsPairBegin,
     ChannelsUnpair,
+    /// Desktop: la traza de una sesión (`trace.records`, `observe`) para el panel
+    /// de trayectoria. Solo lectura; la suscripción la lleva el enlace (sigue lo
+    /// que se le pide con `LinkHandle::trace`), no una llamada suelta.
+    TraceSubscribe,
+    TraceUnsubscribe,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 35] = [
+    pub const ALL: [MainMethod; 37] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -122,6 +127,8 @@ impl MainMethod {
         MainMethod::ChannelsStatus,
         MainMethod::ChannelsPairBegin,
         MainMethod::ChannelsUnpair,
+        MainMethod::TraceSubscribe,
+        MainMethod::TraceUnsubscribe,
     ];
 }
 
@@ -163,6 +170,8 @@ impl WireMethod for MainMethod {
             MainMethod::ChannelsStatus => "channels.status",
             MainMethod::ChannelsPairBegin => "channels.pairBegin",
             MainMethod::ChannelsUnpair => "channels.unpair",
+            MainMethod::TraceSubscribe => "trace.subscribe",
+            MainMethod::TraceUnsubscribe => "trace.unsubscribe",
         }
     }
 }
@@ -365,7 +374,9 @@ mod tests {
                 "memory.forget",
                 "channels.status",
                 "channels.pairBegin",
-                "channels.unpair"
+                "channels.unpair",
+                "trace.subscribe",
+                "trace.unsubscribe"
             ]
         );
         for forbidden in [

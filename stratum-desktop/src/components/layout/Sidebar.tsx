@@ -44,7 +44,8 @@ const Icon = ({ d }: { d: string }) => (
   </svg>
 );
 
-const ICONS: Record<SidebarPanel | 'settings', string> = {
+const ICONS: Record<SidebarPanel | 'settings' | 'trajectory', string> = {
+  trajectory: 'M3 12h4l3-7 4 14 3-7h4',
   conversations: 'M4 5h16v10H8l-4 4z',
   outline: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
   memory: 'M12 4a4 4 0 0 0-4 4v1a3 3 0 0 0-2 5 3 3 0 0 0 3 4h6a3 3 0 0 0 3-4 3 3 0 0 0-2-5V8a4 4 0 0 0-4-4zM12 4v14',
@@ -68,12 +69,19 @@ export function Sidebar({
   state,
   onToggle,
   onSettings,
+  trajectory,
   badges,
   children,
 }: {
   state: SidebarState;
   onToggle: (panel: SidebarPanel) => void;
   onSettings: () => void;
+  /**
+   * Panel de trayectoria: no es uno de los paneles de 280 px (necesita ancho
+   * para el timeline), así que se ancla a la derecha del chat; el raíl solo lo
+   * abre y lo cierra.
+   */
+  trajectory?: { open: boolean; onToggle: () => void };
   /** Marca en el icono de Conversaciones (alguna de fondo espera respuesta). */
   badges?: Partial<Record<SidebarPanel, boolean>>;
   children: ReactNode;
@@ -122,6 +130,19 @@ export function Sidebar({
             {badges?.[p] && <span className="rail-button__badge" aria-hidden="true" />}
           </button>
         ))}
+        {trajectory && (
+          <button
+            type="button"
+            className="rail-button"
+            data-active={trajectory.open || undefined}
+            aria-pressed={trajectory.open}
+            aria-label="Trayectoria (Ctrl+J)"
+            title="Trayectoria de la sesión (Ctrl+J)"
+            onClick={trajectory.onToggle}
+          >
+            <Icon d={ICONS.trajectory} />
+          </button>
+        )}
         <span className="sidebar__spacer" />
         <button
           type="button"

@@ -185,7 +185,7 @@ Dot      ┘
 | Retención y archivo de carpetas (D3) | MIGRATE → hecho en Rust (`retention.rs`) | Sin uso `compressAfterDays` (7) → `<id>.tar.gz`; `deleteAfterDays` (150) → eliminada (queda la marca `<id>.purged`); `0` desactiva cada etapa. Se reconoce por lo que hay en disco, sin registro. Barrido al arrancar y cada 6 h, con cerrojo frente a restaurar. Escribir o adjuntar restaura (`workspace_restore`); extracción confinada (sin `..`, rutas absolutas ni enlaces). Es política de ficheros de Desktop: el daemon no interviene |
 | Ajustes (editor del `.stratumrc.json` global, asistente de providers) | DEFER | Solo lectura (`prefs.rs`): se edita con `stratum config` o abriendo el fichero. El protocolo no expone la configuración (lleva credenciales) |
 | Panel de memoria global (`STRATUM.md`, decisiones) | MIGRATE (tras M12) → `memory.*` | Las decisiones del asistente: sección «Memoria del asistente» del panel *Contexto y memoria* (`memory.decisions`/`memory.forget`, como el inspector de Dot M17). De quién es la memoria lo fija el perfil del enlace (`ClientProfile::memory_agent`: Desktop → `assistant`, Dot → `companion`), nunca el webview. El `STRATUM.md` global no se expone: el protocolo no lo sirve |
-| Panel de trayectoria | DEFER | El daemon no sirve `trace.subscribe` |
+| Panel de trayectoria | MIGRATE (tras M12) → `trace.subscribe` | Panel anclado a la derecha del chat (raíl o `Ctrl+J`): el daemon retransmite la traza que escribe el runtime de la sesión que se mira (`trace.records`, solo `observe`); el enlace compartido la sigue por `LinkHandle::trace` (solo el perfil `DESKTOP` lo tiene, Dot no) y el webview valida y reduce con `trace/model.ts` del core. La de una sesión de terminal (par) no está: la escribe su proceso |
 | `/clear`, `/compact` | DELETE | Eran del runtime propio; la compactación la decide la sesión (M11) |
 | Ventana, tema, atajo, notificaciones, logs, actualizaciones, componentes de chat y Markdown | KEEP UI | Igual; las notificaciones salen de la foto de conjunto |
 
@@ -213,5 +213,5 @@ Dot      ┘
 ### 8.3 Lo que M12 deja fuera
 
 Aprobar desde Desktop (hecho después de M12 con la autoridad separada de M8/M9, ver §8.1), retención
-de carpetas (hecha después, §8.1), editor de ajustes, memoria global (sus decisiones, hechas después: §8.1), trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
+de carpetas (hecha después, §8.1), editor de ajustes, memoria global (sus decisiones, hechas después: §8.1), trayectoria (hecha después: §8.1), Unified Presence, Dot orquestador y cualquier convergencia de
 producto entre Dot y Desktop.

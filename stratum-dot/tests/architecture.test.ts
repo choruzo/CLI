@@ -397,6 +397,9 @@ describe('el lado nativo', () => {
       'sessions.open',
       'sessions.setModel',
       'skills.list',
+      // Panel de trayectoria de Desktop (solo lectura); Dot no la tiene en su perfil.
+      'trace.subscribe',
+      'trace.unsubscribe',
     ]);
     // Lo que Dot puede pedir es su perfil (`ClientProfile::DOT` en `link.rs`): de `sessions.*`
     // solo abrir y leer una; de `runs.*`, iniciar y gobernar; de lo pendiente, solo listarlo

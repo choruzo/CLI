@@ -13,6 +13,7 @@ import {
 import { startBridge } from './client/bridge';
 import { protocolStore } from './client/protocol-store';
 import { useStore } from './client/store';
+import { traceActions, traceStore } from './client/trace-store';
 import { uiActions, uiStore } from './client/ui-store';
 import {
   ConversationView,
@@ -40,6 +41,11 @@ import { StatusBar } from './components/layout/StatusBar';
 import { TitleBar } from './components/layout/TitleBar';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { StartupFailure } from './components/onboarding/StartupFailure';
+import {
+  TrajectoryPanel,
+  loadTrajectoryOpen,
+  saveTrajectoryOpen,
+} from './components/trajectory/TrajectoryPanel';
 import { TurnWatch } from './hooks/turn-notifications';
 import { useUpdates } from './hooks/useUpdates';
 import { tauriBridge, type DesktopPrefs, type NativeBridge } from './ipc/native';
@@ -98,6 +104,11 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   const [sidebar, setSidebar] = useState<SidebarState>(loadSidebarState);
   useEffect(() => saveSidebarState(sidebar), [sidebar]);
   const openPanel = useCallback((panel: SidebarPanel) => setSidebar({ open: true, panel }), []);
+
+  // Panel de trayectoria: se recuerda abierto o cerrado (comodidad de la interfaz).
+  const [trajectoryOpen, setTrajectoryOpen] = useState(loadTrajectoryOpen);
+  useEffect(() => saveTrajectoryOpen(trajectoryOpen), [trajectoryOpen]);
+  const trace = useStore(traceStore, (s) => s);
 
   const viewRef = useRef<ConversationViewHandle>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -300,6 +311,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
     [openPanel],
   );
   useHotkeys('ctrl+comma, meta+comma', () => setSettingsOpen(true), GLOBAL);
+  useHotkeys('ctrl+j, meta+j', () => setTrajectoryOpen((open) => !open), GLOBAL);
   useHotkeys(
     'escape',
     () => {
@@ -320,6 +332,15 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   const contextKey = `${selectedId}:${stream.activeTurnId ?? 'idle'}`;
   const knownSessions = useMemo(() => new Set(overview.sessions.map((s) => s.id)), [overview.sessions]);
   const gone = selectedId !== null && protocol.listed && connected && !selected;
+
+  // La traza solo se pide con el panel abierto, conectado y una sesión que el daemon
+  // conoce. Al perder la conexión se suelta (y se vacía); al volver, la primera tanda
+  // trae `reset` y es la autoridad.
+  const traceTarget = trajectoryOpen && connected && selected ? selectedId : null;
+  useEffect(() => {
+    traceActions.follow(traceTarget);
+    void native.traceSession(traceTarget).catch(() => undefined);
+  }, [native, traceTarget]);
 
   const panel = (() => {
     switch (sidebar.panel) {
@@ -445,6 +466,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             state={sidebar}
             onToggle={(p) => setSidebar((s) => togglePanel(s, p))}
             onSettings={() => setSettingsOpen(true)}
+            trajectory={{ open: trajectoryOpen, onToggle: () => setTrajectoryOpen((open) => !open) }}
             badges={{ conversations: items.some((i) => i.waiting > 0 && i.id !== selectedId) }}
           >
             {panel}
@@ -485,6 +507,15 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
                     }
                   : undefined
               }
+            />
+          )}
+          {trajectoryOpen && (
+            <TrajectoryPanel
+              key={selectedId ?? 'none'}
+              trajectory={trace}
+              hasSession={selected !== null}
+              connected={connected}
+              onClose={() => setTrajectoryOpen(false)}
             />
           )}
         </div>

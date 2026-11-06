@@ -91,6 +91,8 @@ pub enum Hello {
 enum Scope {
     Overview,
     Session(String),
+    /// Desktop: la traza de una sesión (`trace.subscribe`).
+    Trace(String),
 }
 
 struct ConnEntry {
@@ -364,6 +366,40 @@ impl Fake {
                 }
             }
         }
+    }
+
+    /// Envía un `trace.records` a quien siga la traza de esa sesión.
+    pub fn push_trace(&self, session_id: &str, reset: bool, records: Vec<Value>) {
+        self.push_trace_params(session_id, |sub| {
+            json!({
+                "subscriptionId": sub, "sessionId": session_id,
+                "reset": reset, "format": 1, "records": records,
+            })
+        });
+    }
+
+    /// Lo mismo con los parámetros a mano (para un sobre que no cumple).
+    pub fn push_trace_params(&self, session_id: &str, params: impl Fn(&str) -> Value) {
+        let state = self.lock();
+        for conn in &state.conns {
+            for (sub, scope) in &conn.subs {
+                if matches!(scope, Scope::Trace(id) if id == session_id) {
+                    let _ = conn.out.send(line(
+                        json!({ "method": "trace.records", "params": params(sub) }),
+                    ));
+                }
+            }
+        }
+    }
+
+    /// Cuántas suscripciones siguen la traza de esa sesión.
+    pub fn trace_followers(&self, session_id: &str) -> usize {
+        self.lock()
+            .conns
+            .iter()
+            .flat_map(|c| c.subs.iter())
+            .filter(|(_, scope)| matches!(scope, Scope::Trace(id) if id == session_id))
+            .count()
     }
 
     /// Arranca: escucha en un canal nuevo y **después** publica el endpoint.
@@ -643,6 +679,37 @@ impl Fake {
                         json!({ "method": "snapshot", "params": { "subscriptionId": sub, "snapshot": snapshot } }),
                     ),
                 ]
+            }
+            // Como el daemon: la sesión par es `UNAVAILABLE`, una desconocida
+            // `NOT_FOUND`, y el primer lote lleva `reset` (aquí, vacío).
+            "trace.subscribe" => {
+                let session_id = params["sessionId"].as_str().unwrap_or("").to_string();
+                if session_id == "peer" {
+                    return vec![err("UNAVAILABLE", json!({ "reason": "peer-hosted" }))];
+                }
+                if !state.sessions.iter().any(|(id, _)| *id == session_id) {
+                    return vec![err("NOT_FOUND", json!({}))];
+                }
+                let sub = format!("sub_{}", state.next_sub);
+                state.next_sub += 1;
+                if let Some(conn) = state.conns.iter_mut().find(|c| c.id == conn_id) {
+                    conn.subs
+                        .push((sub.clone(), Scope::Trace(session_id.clone())));
+                }
+                vec![
+                    ok(json!({ "subscriptionId": sub })),
+                    line(json!({ "method": "trace.records", "params": {
+                        "subscriptionId": sub, "sessionId": session_id,
+                        "reset": true, "format": 1, "records": [],
+                    } })),
+                ]
+            }
+            "trace.unsubscribe" => {
+                let sub = params["subscriptionId"].as_str().unwrap_or("").to_string();
+                if let Some(conn) = state.conns.iter_mut().find(|c| c.id == conn_id) {
+                    conn.subs.retain(|(known, _)| *known != sub);
+                }
+                vec![ok(json!({}))]
             }
             "events.unsubscribe" => {
                 let sub = params["subscriptionId"].as_str().unwrap_or("").to_string();

@@ -8,6 +8,7 @@ const COMMANDS: &[&str] = &[
     "desktop_retry",
     "desktop_focus_session",
     "desktop_resync_session",
+    "desktop_trace_session",
     "desktop_pause_run",
     "desktop_resume_run",
     "desktop_cancel_run",

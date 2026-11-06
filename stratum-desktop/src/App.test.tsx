@@ -62,6 +62,7 @@ function rig() {
     retry: vi.fn(async () => undefined),
     focusSession: vi.fn(async () => undefined),
     resyncSession: vi.fn(async () => undefined),
+    traceSession: vi.fn(async () => undefined),
     pauseRun: vi.fn(async () => 'requested'),
     resumeRun: vi.fn(async () => 'resumed'),
     cancelRun: vi.fn(async () => 'cancelled'),
@@ -182,6 +183,48 @@ describe('Desktop sobre stratumd (M12)', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Pausar' }));
     await waitFor(() => expect(native.pauseRun).toHaveBeenCalledWith(SID, 'run_9'));
     expect(screen.getByText('Pausa pedida…')).toBeTruthy();
+  });
+
+  it('la trayectoria se pide solo con el panel abierto, conectado y con la sesión elegida', async () => {
+    const { native, emit } = rig();
+    render(<App native={native} />);
+    // Con el panel cerrado (por defecto) no se pide ninguna traza.
+    await emit({ type: 'connection', state: connected() });
+    await emit({ type: 'overview', overview: { sessions: [idleSession()], approvals: [], questions: [], plans: [] } });
+    expect(native.traceSession).toHaveBeenLastCalledWith(null);
+    expect(screen.queryByLabelText('Trayectoria', { selector: 'aside' })).toBeNull();
+
+    // El botón del raíl la abre y se pide la traza de la sesión que se mira.
+    fireEvent.click(screen.getByRole('button', { name: 'Trayectoria (Ctrl+J)' }));
+    await waitFor(() => expect(native.traceSession).toHaveBeenLastCalledWith(SID));
+    expect(screen.getByText('Cargando la trayectoria…')).toBeTruthy();
+
+    // Lo que llega se pinta; lo de otra sesión, no.
+    await emit({
+      type: 'trace-records',
+      sessionId: SID,
+      reset: true,
+      format: 1,
+      records: [
+        { t: 'turn', at: 1000, input: 'lee a.txt' },
+        { t: 'begin', at: 1010, id: 'm1', kind: 'model', name: 'qwen', data: { origin: 'agent' } },
+        { t: 'end', at: 1200, id: 'm1', status: 'ok', data: { text: 'hecho', usage: { promptTokens: 900, completionTokens: 22, totalTokens: 922 } } },
+      ],
+    });
+    await emit({ type: 'trace-records', sessionId: 'otra', reset: true, format: 1, records: [{ t: 'turn', at: 1, input: 'no soy yo' }] });
+    expect(screen.getByText('lee a.txt')).toBeTruthy();
+    expect(screen.queryByText('no soy yo')).toBeNull();
+    expect(screen.getByText('922 tok')).toBeTruthy();
+
+    // Perder la conexión suelta la traza; al volver se pide otra vez.
+    await emit({ type: 'connection', state: { kind: 'reconnecting', attempt: 1 } });
+    await waitFor(() => expect(native.traceSession).toHaveBeenLastCalledWith(null));
+    await emit({ type: 'connection', state: connected() });
+    await waitFor(() => expect(native.traceSession).toHaveBeenLastCalledWith(SID));
+
+    // Ctrl+J la cierra y deja de pedirse.
+    fireEvent.keyDown(document.body, { key: 'j', code: 'KeyJ', ctrlKey: true });
+    await waitFor(() => expect(native.traceSession).toHaveBeenLastCalledWith(null));
   });
 
   it('observar no es conducir: sin `control` se ve todo pero no se escribe', async () => {

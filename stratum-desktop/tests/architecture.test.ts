@@ -93,6 +93,10 @@ describe('el webview solo conoce el contrato', () => {
       'cli/ui/thinking-phrases.ts',
       'protocol/index.ts',
       'protocol/schemas.ts',
+      // El panel de trayectoria: el formato y el modelo de la traza, puros y sin Node
+      // (`trace/records.ts` no importa nada; `trace/model.ts`, solo `providers/cache.ts`).
+      'trace/model.ts',
+      'trace/records.ts',
     ]);
     // Los tests, además, los ejemplos del contrato.
     const inTests = [...coreImports(frontend.filter(isTest))].filter(
@@ -161,6 +165,7 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_set_model',
       'desktop_start_run',
       'desktop_steer_run',
+      'desktop_trace_session',
     ]);
     // Nadie más habla con Rust de sesiones; nadie envía «un método cualquiera».
     for (const file of shipped) {

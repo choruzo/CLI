@@ -244,3 +244,193 @@ async fn cerrar_sin_respuesta_queda_desconocido_y_no_se_reenvia() {
     assert_eq!(fake.count("sessions.close"), 1);
     rig.quit().await;
 }
+
+/// Lotes de traza que ha recibido la «interfaz», en orden: `(sesión, reset, nº de registros)`.
+fn trace_batches(rig: &Rig) -> Vec<(String, bool, usize)> {
+    rig.seen
+        .all()
+        .into_iter()
+        .filter_map(|e| match e {
+            DotEvent::TraceRecords {
+                session_id,
+                reset,
+                records,
+                ..
+            } => Some((session_id, reset, records.len())),
+            _ => None,
+        })
+        .collect()
+}
+
+fn trace_unavailable(rig: &Rig) -> Vec<(String, String, Option<String>)> {
+    rig.seen
+        .all()
+        .into_iter()
+        .filter_map(|e| match e {
+            DotEvent::TraceUnavailable {
+                session_id,
+                code,
+                reason,
+            } => Some((session_id, code, reason)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn invalid_traces(rig: &Rig) -> usize {
+    trace_unavailable(rig)
+        .iter()
+        .filter(|(_, code, _)| code == "INVALID_TRACE")
+        .count()
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn la_traza_se_sigue_de_la_sesion_pedida_y_se_reabre_al_reconectar() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_session(snapshot("s1", 3));
+    fake.set_session(snapshot("s2", 5));
+    fake.start(TOKEN_A, 1);
+
+    let rig = client(dir.path(), None, ClientProfile::DESKTOP);
+    until("conectado", || connected(&rig)).await;
+    // Sin pedirla, no se suscribe a ninguna traza.
+    assert_eq!(fake.count("trace.subscribe"), 0);
+
+    rig.link.trace(Some("s1".into()));
+    until("reset de s1", || {
+        trace_batches(&rig) == [("s1".to_string(), true, 0)]
+    })
+    .await;
+    let sent = fake
+        .requests()
+        .into_iter()
+        .find(|r| r["method"] == "trace.subscribe")
+        .unwrap();
+    assert_eq!(sent["params"], json!({ "sessionId": "s1" }));
+
+    // Lo nuevo llega sin interpretar y sin `reset`.
+    fake.push_trace(
+        "s1",
+        false,
+        vec![
+            json!({ "t": "turn", "at": 1, "input": "hola" }),
+            json!({ "t": "turn_end", "at": 2, "stopReason": "stop" }),
+        ],
+    );
+    until("registros", || trace_batches(&rig).len() == 2).await;
+    assert_eq!(trace_batches(&rig)[1], ("s1".to_string(), false, 2));
+
+    // Pedir otra suelta la anterior y abre la nueva.
+    rig.link.trace(Some("s2".into()));
+    until("reset de s2", || {
+        trace_batches(&rig).contains(&("s2".to_string(), true, 0))
+    })
+    .await;
+    until("baja de s1", || fake.trace_followers("s1") == 0).await;
+    assert_eq!(fake.count("trace.unsubscribe"), 1);
+
+    // El daemon se cae y vuelve: la traza pedida se abre otra vez (con `reset`).
+    fake.kill_connections_with("control");
+    until("reconectado", || {
+        connected(&rig) && fake.count("core.hello") >= 2
+    })
+    .await;
+    until("traza reabierta", || fake.count("trace.subscribe") == 3).await;
+    until("reset tras reconectar", || trace_batches(&rig).len() == 4).await;
+    assert_eq!(
+        trace_batches(&rig).last().unwrap(),
+        &("s2".to_string(), true, 0)
+    );
+
+    // Dejar de mirarla la suelta.
+    rig.link.trace(None);
+    until("sin seguidores", || fake.trace_followers("s2") == 0).await;
+    rig.quit().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn una_traza_que_el_daemon_no_sirve_se_dice_y_no_se_reintenta() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_session(snapshot("s1", 3));
+    fake.start(TOKEN_A, 1);
+
+    let rig = client(dir.path(), None, ClientProfile::DESKTOP);
+    until("conectado", || connected(&rig)).await;
+
+    // La de una sesión par la escribe su proceso: `UNAVAILABLE` / `peer-hosted`.
+    rig.link.trace(Some("peer".into()));
+    until("no disponible", || {
+        trace_unavailable(&rig)
+            == [(
+                "peer".to_string(),
+                "UNAVAILABLE".to_string(),
+                Some("peer-hosted".to_string()),
+            )]
+    })
+    .await;
+    rig.link.trace(Some("no-existe".into()));
+    until("desconocida", || trace_unavailable(&rig).len() == 2).await;
+    assert_eq!(trace_unavailable(&rig)[1].1, "NOT_FOUND");
+    assert_eq!(fake.count("trace.subscribe"), 2);
+    assert!(trace_batches(&rig).is_empty());
+    rig.quit().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn un_lote_que_no_cumple_el_sobre_suelta_la_traza() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_session(snapshot("s1", 3));
+    fake.start(TOKEN_A, 1);
+
+    let rig = client(dir.path(), None, ClientProfile::DESKTOP);
+    until("conectado", || connected(&rig)).await;
+    rig.link.trace(Some("s1".into()));
+    until("reset", || trace_batches(&rig).len() == 1).await;
+
+    // `reset` que no es booleano: ni se reenvía ni se sigue.
+    fake.push_trace_params("s1", |sub| {
+        json!({ "subscriptionId": sub, "sessionId": "s1", "reset": "si", "format": 1, "records": [] })
+    });
+    until("suelta", || invalid_traces(&rig) == 1).await;
+    until("baja", || fake.trace_followers("s1") == 0).await;
+    assert_eq!(trace_batches(&rig).len(), 1);
+
+    // Un registro que no es un objeto, tampoco.
+    rig.link.trace(None);
+    rig.link.trace(Some("s1".into()));
+    until("reabierta", || trace_batches(&rig).len() == 2).await;
+    fake.push_trace("s1", false, vec![json!("no soy un registro")]);
+    until("suelta otra vez", || invalid_traces(&rig) == 2).await;
+
+    // Ni más registros de la cuenta.
+    rig.link.trace(None);
+    rig.link.trace(Some("s1".into()));
+    until("reabierta de nuevo", || trace_batches(&rig).len() == 3).await;
+    let many: Vec<_> = (0..=dot_link::link::MAX_TRACE_RECORDS_PER_BATCH)
+        .map(|i| json!({ "t": "turn", "at": i, "input": "x" }))
+        .collect();
+    fake.push_trace("s1", false, many);
+    until("demasiados", || invalid_traces(&rig) == 3).await;
+    rig.quit().await;
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn dot_no_sigue_trazas_aunque_se_lo_pidan() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.set_session(snapshot("s1", 3));
+    fake.start(TOKEN_A, 1);
+
+    let rig = dot(dir.path(), None);
+    until("conectado", || connected(&rig)).await;
+    rig.link.trace(Some("s1".into()));
+    // Pasa por el bucle: el foco se atiende después de la traza pedida.
+    rig.link.focus(Some("s1".into()));
+    until("foto", || !rig.seen.snapshots("s1").is_empty()).await;
+    assert_eq!(fake.count("trace.subscribe"), 0);
+    assert!(trace_batches(&rig).is_empty());
+    rig.quit().await;
+}

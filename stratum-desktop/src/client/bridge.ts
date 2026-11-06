@@ -7,6 +7,7 @@ import type { DesktopEvent, NativeBridge } from '../ipc/native';
 import { pendingOf } from '../view/interactions';
 import { approvalsActions, resolutionKey } from './approvals';
 import { protocolActions, protocolStore, type ProtocolState } from './protocol-store';
+import { traceActions } from './trace-store';
 import { uiActions, uiStore, type PendingRequest } from './ui-store';
 
 /** ¿Sigue pendiente esta petición, vista la última foto? */
@@ -81,6 +82,12 @@ export function handleDesktopEvent(native: NativeBridge, event: DesktopEvent): v
       break;
     case 'approver':
       approvalsActions.setStatus(event.status);
+      break;
+    case 'trace-records':
+      traceActions.apply(event);
+      break;
+    case 'trace-unavailable':
+      traceActions.unavailable(event.sessionId, event.code, event.reason);
       break;
   }
   settlePending();

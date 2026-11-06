@@ -114,6 +114,22 @@ pub enum DotEvent {
     OverviewEvents {
         events: Vec<Value>,
     },
+    /// Desktop: un lote de la traza de la sesión pedida (`LinkHandle::trace`).
+    /// Los registros pasan **sin interpretar** (ya redactados por quien los
+    /// escribe). Con `reset` sustituye todo lo que se tuviera; sin él, añade.
+    TraceRecords {
+        session_id: String,
+        reset: bool,
+        format: u64,
+        records: Vec<Value>,
+    },
+    /// Desktop: la traza pedida no se puede seguir (`code`/`reason` del daemon:
+    /// `UNAVAILABLE`/`peer-hosted`, `NOT_FOUND`…; o `INVALID_TRACE`, `TIMEOUT`).
+    TraceUnavailable {
+        session_id: String,
+        code: String,
+        reason: Option<String>,
+    },
 }
 
 /// Órdenes que Dot puede dar sobre un run. No hay más: es la lista blanca.
@@ -442,6 +458,35 @@ mod tests {
             })
             .unwrap(),
             json!({ "type": "snapshot", "sessionId": "a", "snapshot": { "seq": 1 } })
+        );
+    }
+
+    #[test]
+    fn la_traza_se_serializa_con_su_sobre() {
+        assert_eq!(
+            serde_json::to_value(DotEvent::TraceRecords {
+                session_id: "a".into(),
+                reset: true,
+                format: 1,
+                records: vec![json!({ "t": "turn", "at": 1, "input": "hola" })],
+            })
+            .unwrap(),
+            json!({
+                "type": "trace-records", "sessionId": "a", "reset": true, "format": 1,
+                "records": [{ "t": "turn", "at": 1, "input": "hola" }]
+            })
+        );
+        assert_eq!(
+            serde_json::to_value(DotEvent::TraceUnavailable {
+                session_id: "a".into(),
+                code: "UNAVAILABLE".into(),
+                reason: Some("peer-hosted".into()),
+            })
+            .unwrap(),
+            json!({
+                "type": "trace-unavailable", "sessionId": "a",
+                "code": "UNAVAILABLE", "reason": "peer-hosted"
+            })
         );
     }
 

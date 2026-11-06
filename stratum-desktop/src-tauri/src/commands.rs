@@ -75,6 +75,14 @@ pub fn desktop_resync_session(state: State<'_, DesktopState>, session_id: String
     state.link.resync_session(session_id);
 }
 
+/// De qué sesión se retransmite la traza al panel de trayectoria (solo
+/// lectura, `observe`), o de ninguna. El enlace la abre y la reabre al
+/// reconectar; llega como `trace-records` / `trace-unavailable`.
+#[tauri::command]
+pub fn desktop_trace_session(state: State<'_, DesktopState>, session_id: Option<String>) {
+    state.link.trace(session_id);
+}
+
 #[tauri::command]
 pub async fn desktop_pause_run(
     state: State<'_, DesktopState>,

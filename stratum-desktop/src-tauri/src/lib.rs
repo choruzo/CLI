@@ -132,6 +132,7 @@ pub fn run() {
             commands::desktop_retry,
             commands::desktop_focus_session,
             commands::desktop_resync_session,
+            commands::desktop_trace_session,
             commands::desktop_pause_run,
             commands::desktop_resume_run,
             commands::desktop_cancel_run,

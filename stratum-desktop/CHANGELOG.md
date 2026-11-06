@@ -8,6 +8,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ### Añadido
 - **Retención de las carpetas de conversación**: los ficheros de una conversación sin uso se archivan (`.tar.gz`) a los 7 días y se eliminan a los 5 meses (la conversación sigue legible). Escribir o adjuntar restaura los ficheros archivados solos, y el panel de ficheros avisa de «archivados» / «eliminados por antigüedad» con un botón «Restaurar». Se ajusta con `desktop.workspaces.compressAfterDays` y `deleteAfterDays` (`0` desactiva cada etapa).
+- **Panel de trayectoria** (botón del raíl o `Ctrl+J`): la línea de tiempo de la sesión que miras —llamadas al modelo con su origen, tokens y latencia; herramientas con su duración, bloqueos y concesiones; y las decisiones del runtime— a partir de la traza que escribe la CLI y retransmite `stratumd`. Solo enseña lo que la traza trae (lo que falta, «n/d»); las sesiones que corren en su propia terminal no tienen traza que retransmitir. Necesita un `stratumd` que sirva `trace.subscribe`.
 
 ### Cambiado
 - `desktop.workspaces.deleteAfterDays` pasa de 30 a 150 días por defecto (hasta ahora no tenía efecto).
