@@ -105,6 +105,10 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "v0.14 · desktop 0.10.0", title: "Desktop edita sus ajustes y vuelve la trayectoria", date: "2026-11-06", match: /\((desktop|config)\)/, since: "2026-11-05T18:00",
+    text: "Ajustes edita el .stratumrc.json global como stratum config, por niveles: lo inocuo se guarda al momento, lo que cambia lo que el agente puede hacer pide una ventana nativa de confirmación y lo que ejecuta código sigue solo en la CLI. Vuelve el panel de trayectoria (Ctrl+J), las carpetas sin uso se archivan a los 7 días y se eliminan a los 5 meses, y se aprueba, se contesta y se decide desde Desktop, con la memoria global del asistente a la vista.",
+    pre: "❯ stratum config list --global --json\nStratum_0.10.0_x64-setup.exe · necesita stratum-cli ≥ 0.14",
+    href: "#desktop", more: "qué hace Desktop →" },
   { id: "v0.13 · dot 0.3.0 β", title: "El asistente, también en Telegram", date: "2026-11-05", match: /M1[78]|\((channels|config|dot)\)/, since: "2026-11-03T21:00",
     text: "Empareja un chat privado y háblale al asistente desde el móvil: la misma conversación que en Dot, con fotos, imágenes de vuelta y aprobaciones, preguntas y planes por botones (lo forzado sigue solo en Dot). Además, concesiones de 10 a 60 minutos, conectores MCP e inspector de memoria del asistente, y Dot compacto con Ctrl+Alt+Space.",
     pre: "❯ stratum channels telegram setup\n❯ stratum channels telegram pair\nStratum.Dot_0.3.0_x64-setup.exe · necesita stratum-cli ≥ 0.13",
@@ -193,6 +197,9 @@ const ROADMAP = [
 ];
 
 const DESK_CARDS = [
+  { t: "Ajustes editables", d: "Edita el .stratumrc.json global como stratum config: lo inocuo se guarda al momento, lo sensible pide una ventana nativa de confirmación y lo que ejecuta código (plugins, MCP, SSH, la caja) solo se toca desde la CLI." },
+  { t: "Trayectoria", d: "Ctrl+J abre la línea de tiempo de la sesión que miras: llamadas al modelo, herramientas, bloqueos y caché, a partir de la traza del daemon." },
+  { t: "Carpetas con retención", d: "Una carpeta sin uso se archiva a los 7 días y se elimina a los 5 meses, configurable; escribir o adjuntar la restaura." },
   { t: "Cliente de stratumd", d: "Sin runtime ni sidecar propios: habla el Stratum Protocol con el daemon de la CLI y, si no hay ninguno, lo arranca. Cerrar la app no para nada." },
   { t: "Asistente embebido", d: "Cada conversación es una sesión del agente assistant: carpeta propia, sin exec y con la memoria global, no la de un proyecto." },
   { t: "Todas tus sesiones", d: "La lista enseña también las de la terminal y las de Dot, con su procedencia; las del daemon se continúan desde la app." },
@@ -363,7 +370,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.13.0",
+  version: "0.14.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -966,7 +973,7 @@ hito       17 ✓ entornos y read-only · siguiente: 18
 commits    ${fmt(c.length)} <span class="dim">(${state.weekCommits} esta semana)</span>
 líneas     <span class="add">+${fmt(c.reduce((a, x) => a + (x.add || 0), 0))}</span> <span class="del">−${fmt(c.reduce((a, x) => a + (x.del || 0), 0))}</span>
 tests      1587 ✓
-desktop    0.9.0 <span class="dim">(cliente de stratumd)</span>
+desktop    0.10.0 <span class="dim">(cliente de stratumd)</span>
 fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span class="dim">● snapshot</span>`}`;
   },
   hitos: (arg) => {

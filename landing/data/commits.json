@@ -1,8 +1,116 @@
 {
-  "generatedAt": "2026-11-05T18:21:24.5316354+01:00",
+  "generatedAt": "2026-11-06T19:57:37.9312018+01:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "336dcdf202072113f66cea9b8a754ab9686da0c1",
+      "date": "2026-11-06T19:04:36+01:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.14.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "20132fa1e6fee3e6edaffd286340e516f12cf06f",
+      "date": "2026-11-06T18:20:32+01:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.14.0 y Desktop 0.10.0",
+      "add": 16,
+      "del": 9,
+      "files": 7
+    },
+    {
+      "sha": "782915b85040fe511ca6a5c381c3e71f1a7ffc4b",
+      "date": "2026-11-06T18:10:59+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): ajustes editables con confirmación nativa",
+      "add": 5572,
+      "del": 91,
+      "files": 23
+    },
+    {
+      "sha": "4c105c5bf435b3c58660f4067cf4773c00f2975d",
+      "date": "2026-11-06T17:39:02+01:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): config get/set/list --global",
+      "add": 302,
+      "del": 9,
+      "files": 4
+    },
+    {
+      "sha": "a19d4caba3806f73a4f095fb8d9a02c6f1979c2e",
+      "date": "2026-11-06T17:21:23+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): panel de trayectoria",
+      "add": 2082,
+      "del": 7,
+      "files": 24
+    },
+    {
+      "sha": "f4b7ac4121b849fdc8956e9b1af08012fde54a11",
+      "date": "2026-11-06T17:13:20+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): retención de carpetas — comprime a los 7 días y elimina a los 5 meses",
+      "add": 1647,
+      "del": 40,
+      "files": 22
+    },
+    {
+      "sha": "2d50e953699e897fbe39d4b23943c22363265bb0",
+      "date": "2026-11-06T13:52:22+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): panel de memoria global del asistente",
+      "add": 767,
+      "del": 26,
+      "files": 22
+    },
+    {
+      "sha": "b5332cc3898962c9d4547147bcd7ec8483eeb246",
+      "date": "2026-11-06T13:38:56+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop): aprobar, contestar preguntas y decidir planes desde Desktop",
+      "add": 3005,
+      "del": 72,
+      "files": 34
+    },
+    {
+      "sha": "9b028e5d42cd8cb59b6e17c2eca4de3589d98a71",
+      "date": "2026-11-06T00:17:28+01:00",
+      "author": "Javi_1",
+      "subject": "fix(dot): las celdas de una tabla no parten palabras",
+      "add": 2,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "5d7bfdaae0ed31b4134999b6cf9dad2c3f576a59",
+      "date": "2026-11-06T00:05:30+01:00",
+      "author": "Javi_1",
+      "subject": "feat: tablas markdown en Dot y fichas más claras en Telegram",
+      "add": 148,
+      "del": 14,
+      "files": 5
+    },
+    {
+      "sha": "92f846f514601fffd6c2d98dad23239fc9eaea46",
+      "date": "2026-11-05T23:57:27+01:00",
+      "author": "Javi_1",
+      "subject": "fix(channels): las tablas anchas salen como fichas en Telegram",
+      "add": 79,
+      "del": 10,
+      "files": 2
+    },
+    {
+      "sha": "1336e39cb2b2e69713f78723dd2e06d518c204f6",
+      "date": "2026-11-05T18:21:25+01:00",
+      "author": "Javi_1",
+      "subject": "docs(landing): CLI 0.13.0, Desktop 0.9.0 y Dot 0.3.0",
+      "add": 536,
+      "del": 22,
+      "files": 6
+    },
     {
       "sha": "2d4e45524db60c6d38bab90db3b26ecc854e7d24",
       "date": "2026-11-05T18:20:01+01:00",
@@ -3695,6 +3803,14 @@
     }
   ],
   "tags": [
+    {
+      "name": "desktop-v0.10.0",
+      "date": "2026-11-06T19:04:36+01:00"
+    },
+    {
+      "name": "v0.14.0",
+      "date": "2026-11-06T19:04:36+01:00"
+    },
     {
       "name": "desktop-v0.9.0",
       "date": "2026-11-05T18:20:01+01:00"
