@@ -180,7 +180,7 @@ Dot      ┘
 | `ConversationHost`/`ConversationSession` (un `StratumAgent` por conversación, sin `SessionHost`), `TurnScheduler` | DELETE DUPLICATE → `SessionHost` en `stratumd` | Cada conversación es una sesión del daemon; un run a la vez por sesión |
 | Modo asistente (preset `assistant`, 12 tools, sin `exec`, ficheros confinados, memoria propia) | MOVE TO STRATUMD | Agente embebido `assistant`: `sessions.open { agent: 'assistant', cwd }`; lo monta `SessionHost` (`host/assistant.ts`). Lo puede abrir cualquier cliente |
 | `DesktopSessionStore`, `DesktopConversationStore`, `transcript.ts`, reductor del webview | DELETE DUPLICATE → M11 + contrato | Conversación de la sesión: `ConversationStore` del daemon, foto + `sessions.history`; el webview reduce con `followSession`/`applyOverviewEvent` del contrato |
-| Confirmaciones y preguntas propias | DEFER (sin autoridad) | Se ven en solo lectura; se resuelven desde Dot o `stratum approvals`. Desktop no aprueba hasta tener broker nativo + confirmación (M8/M9) |
+| Confirmaciones y preguntas propias | MIGRATE (tras M12) → broker nativo de Dot | Tarjetas en el chat de la sesión que se mira (`PendingRequests`). Resolver usa las mismas piezas que Dot: `dot_link::approver` (otra conexión, `roles: ['approver']`, `client.kind: 'desktop'`), clave en una ventana nativa aparte (`desktop-unlock`) y lo sensible confirmado en otra (`desktop-confirm`, `dot_link::ConfirmGate`). Sin concesiones con caducidad (revocarlas es de Dot) |
 | Carpetas de conversación (D2): subidas, descargas, vista previa, exportar | KEEP UI (Rust) | La carpeta es el `cwd` de la sesión; Desktop la crea al abrir la conversación y Rust solo toca carpetas de su raíz (`folder_of`) |
 | Retención y archivo de carpetas (D3) | DEFER | Las carpetas se conservan; `compressAfterDays`/`deleteAfterDays` quedan sin efecto |
 | Ajustes (editor del `.stratumrc.json` global, asistente de providers) | DEFER | Solo lectura (`prefs.rs`): se edita con `stratum config` o abriendo el fichero. El protocolo no expone la configuración (lleva credenciales) |
@@ -212,6 +212,6 @@ Dot      ┘
 
 ### 8.3 Lo que M12 deja fuera
 
-Aprobar desde Desktop (necesita la autoridad separada de M8/M9), retención de carpetas, editor de
-ajustes, memoria global, trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
+Aprobar desde Desktop (hecho después de M12 con la autoridad separada de M8/M9, ver §8.1), retención
+de carpetas, editor de ajustes, memoria global, trayectoria, Unified Presence, Dot orquestador y cualquier convergencia de
 producto entre Dot y Desktop.

@@ -1,3 +1,56 @@
+/// Los comandos de la app, declarados: así cada uno exige un permiso y una
+/// ventana solo puede invocar los que su capacidad le concede
+/// (`capabilities/default.json`, solo `main`). Las ventanas de desbloqueo
+/// (`unlock`) y de confirmación (`confirm-N`) no están en ninguna capacidad: no
+/// pueden invocar nada. Comando nuevo → aquí, en `lib.rs` y en la capacidad.
+const COMMANDS: &[&str] = &[
+    "desktop_attach",
+    "desktop_retry",
+    "desktop_focus_session",
+    "desktop_resync_session",
+    "desktop_pause_run",
+    "desktop_resume_run",
+    "desktop_cancel_run",
+    "desktop_steer_run",
+    "desktop_new_chat",
+    "desktop_start_run",
+    "desktop_save_pasted_image",
+    "desktop_list_models",
+    "desktop_set_model",
+    "desktop_close_session",
+    "desktop_history",
+    "desktop_context",
+    "desktop_memory",
+    "desktop_list_skills",
+    "desktop_prefs",
+    "desktop_open_config",
+    "desktop_approver_status",
+    "desktop_approver_unlock",
+    "desktop_approver_lock",
+    "desktop_approve",
+    "desktop_deny",
+    "desktop_answer_questions",
+    "desktop_decide_plan",
+    "attachments_pick",
+    "attachments_add",
+    "attachments_commit",
+    "attachments_discard",
+    "output_save",
+    "output_open",
+    "output_preview",
+    "workspace_export",
+    "workspace_files",
+    "os_notify",
+    "logs_open",
+    "logs_tail",
+    "update_check",
+    "update_install",
+];
+
 fn main() {
-    tauri_build::build()
+    tauri_build::try_build(
+        tauri_build::Attributes::new()
+            .app_manifest(tauri_build::AppManifest::new().commands(COMMANDS)),
+    )
+    .expect("failed to run the Tauri build script");
 }

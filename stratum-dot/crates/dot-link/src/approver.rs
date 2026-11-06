@@ -49,6 +49,7 @@ use tokio::time::Instant;
 
 use crate::discovery::{self, Discovery};
 use crate::framing::LineDecoder;
+use crate::link::ClientProfile;
 use crate::log::Logger;
 use crate::peer::{self, PeerCheck};
 use crate::secret::ApproverSecret;
@@ -315,6 +316,9 @@ impl Default for ApproverTimings {
 
 pub struct ApproverConfig {
     pub endpoint_dir: PathBuf,
+    /// Qué app aprueba (Dot o Desktop): solo da `client` en `core.hello`, que el
+    /// daemon guarda como procedencia (`resolvedBy.client`). No da autoridad.
+    pub profile: ClientProfile,
     pub client_version: String,
     pub logger: Logger,
     pub timings: ApproverTimings,
@@ -1035,7 +1039,11 @@ impl Broker {
         params.insert("token".into(), json!(endpoint.token.expose()));
         params.insert(
             "client".into(),
-            json!({ "kind": "dot", "name": "stratum-dot-approver", "version": self.cfg.client_version }),
+            json!({
+                "kind": self.cfg.profile.kind(),
+                "name": format!("{}-approver", self.cfg.profile.name()),
+                "version": self.cfg.client_version,
+            }),
         );
         // Solo aprobar: ni `operator`, ni `host`. Observar ya lo hace la otra conexión.
         params.insert("roles".into(), json!(["approver"]));
@@ -1478,6 +1486,7 @@ mod tests {
         let (handle, _task) = spawn_broker(
             ApproverConfig {
                 endpoint_dir: dir.path().to_path_buf(),
+                profile: ClientProfile::DOT,
                 client_version: "t".into(),
                 logger: Logger::none(),
                 timings: ApproverTimings::default(),
@@ -1522,6 +1531,7 @@ mod tests {
         let (handle, task) = spawn_broker(
             ApproverConfig {
                 endpoint_dir: dir.path().to_path_buf(),
+                profile: ClientProfile::DOT,
                 client_version: "t".into(),
                 logger: Logger::none(),
                 timings: ApproverTimings::default(),

@@ -4,6 +4,8 @@
  * (`protocol-store.ts` usa sus funciones).
  */
 import type { DesktopEvent, NativeBridge } from '../ipc/native';
+import { pendingOf } from '../view/interactions';
+import { approvalsActions, resolutionKey } from './approvals';
 import { protocolActions, protocolStore, type ProtocolState } from './protocol-store';
 import { uiActions, uiStore, type PendingRequest } from './ui-store';
 
@@ -41,6 +43,15 @@ export function stillPending(request: PendingRequest, state: ProtocolState): boo
 /** Retira lo pendiente que la foto ya alcanzó. */
 export function settlePending(): void {
   const state = protocolStore.get();
+  // Una solicitud que la foto de su sesión ya no tiene se resolvió (o caducó):
+  // lo que se pidió para ella deja de contarse. Las de otras sesiones se
+  // quedan hasta que se vea su foto.
+  const focused = state.focused?.snapshot ?? null;
+  if (focused) {
+    const prefix = `${focused.session.id}:`;
+    const alive = new Set(pendingOf(focused).map(resolutionKey));
+    approvalsActions.forget((key) => !key.startsWith(prefix) || alive.has(key));
+  }
   if (uiStore.get().pending.length === 0) return;
   uiActions.settle((request) => stillPending(request, state));
 }
@@ -68,6 +79,9 @@ export function handleDesktopEvent(native: NativeBridge, event: DesktopEvent): v
         void native.resyncSession(event.sessionId).catch(() => undefined);
       }
       break;
+    case 'approver':
+      approvalsActions.setStatus(event.status);
+      break;
   }
   settlePending();
 }
@@ -92,5 +106,10 @@ export async function startBridge(native: NativeBridge): Promise<() => void> {
     await native.focusSession(selected).catch(() => undefined);
   }
   await native.attach();
+  // El estado del broker llega por eventos al cambiar; el de ahora se pide.
+  await native
+    .approverStatus()
+    .then(approvalsActions.setStatus)
+    .catch(() => undefined);
   return stop;
 }

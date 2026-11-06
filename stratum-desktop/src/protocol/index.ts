@@ -23,7 +23,9 @@ export type {
   ProtocolModel,
   ProtocolOverviewSnapshot,
   ProtocolPlanRequest,
+  ProtocolQuestionAnswer,
   ProtocolQuestionRequest,
+  ProtocolResolver,
   ProtocolRun,
   ProtocolRunStatus,
   ProtocolSession,
@@ -41,6 +43,8 @@ export {
   LIMITS,
   STRATUM_PROTOCOL_VERSION,
   applyOverviewEvent,
+  checkApprovalResolution,
+  checkQuestionAnswers,
   followSession,
   isStateEvent,
 } from '../../../stratum-cli/src/protocol/index';

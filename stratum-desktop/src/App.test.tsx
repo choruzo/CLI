@@ -6,9 +6,10 @@ import {
   sampleSnapshot,
 } from '../../stratum-cli/src/protocol/protocol.fixtures';
 import { App } from './App';
+import { approvalsStore } from './client/approvals';
 import { initialProtocolState, protocolStore } from './client/protocol-store';
 import { uiStore } from './client/ui-store';
-import type { ConnectionState, DesktopEvent, NativeBridge } from './ipc/native';
+import type { ApproverStatus, ConnectionState, DesktopEvent, NativeBridge } from './ipc/native';
 import type { ProtocolChatMessage, ProtocolSession } from './protocol';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve([])), Channel: class {} }));
@@ -79,6 +80,13 @@ function rig() {
       throw new Error('sin prefs en el test');
     }),
     openConfig: vi.fn(async () => undefined),
+    approverStatus: vi.fn(async (): Promise<ApproverStatus> => ({ kind: 'locked', reason: 'initial' })),
+    unlockApprovals: vi.fn(async () => undefined),
+    lockApprovals: vi.fn(async () => undefined),
+    approve: vi.fn(async () => undefined),
+    deny: vi.fn(async () => undefined),
+    answerQuestions: vi.fn(async () => undefined),
+    decidePlan: vi.fn(async () => undefined),
     onEvent: vi.fn(async (h) => {
       handler = h;
       return () => (handler = null);
@@ -91,6 +99,7 @@ function rig() {
 beforeEach(() => {
   protocolStore.set(initialProtocolState);
   uiStore.set({ selectedId: SID, pending: [], notices: [] });
+  approvalsStore.set({ status: { kind: 'unavailable', reason: 'not-connected' }, resolutions: {} });
   localStorage.clear();
 });
 afterEach(cleanup);
@@ -188,15 +197,71 @@ describe('Desktop sobre stratumd (M12)', () => {
     expect(screen.getByText(/no permite a Desktop conducir/)).toBeTruthy();
   });
 
-  it('lo pendiente de aprobar se ve, pero Desktop no lo resuelve', async () => {
-    const { native, emit } = rig();
-    render(<App native={native} />);
-    await emit({ type: 'connection', state: connected() });
+  async function waitingRig() {
+    const r = rig();
+    render(<App native={r.native} />);
+    await r.emit({ type: 'connection', state: connected() });
     const waiting = sampleSnapshot({ session: idleSession({ state: 'waiting', currentRunId: 'run_1' }) });
-    await emit({ type: 'overview', overview: { sessions: [waiting.session], approvals: waiting.approvals, questions: [], plans: [] } });
-    await emit({ type: 'snapshot', sessionId: SID, snapshot: waiting });
-    expect(screen.getByText(/La sesión espera una aprobación/)).toBeTruthy();
-    expect(screen.queryByRole('button', { name: /Aprobar/ })).toBeNull();
+    await r.emit({
+      type: 'overview',
+      overview: { sessions: [waiting.session], approvals: waiting.approvals, questions: [], plans: [] },
+    });
+    await r.emit({ type: 'snapshot', sessionId: SID, snapshot: waiting });
+    return r;
+  }
+
+  it('lo pendiente se ve con su tarjeta; bloqueado no se resuelve, y desbloquear abre la ventana nativa', async () => {
+    const { native, emit } = await waitingRig();
+    await emit({ type: 'approver', status: { kind: 'locked', reason: 'initial' } });
+    expect(screen.getByText('Necesita tu aprobación')).toBeTruthy();
+    expect(screen.getByText('git push origin main')).toBeTruthy();
+    expect((screen.getByRole('button', { name: 'Aprobar' }) as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByRole('button', { name: 'Denegar' }) as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(/Desbloquea las aprobaciones/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Desbloquear' }));
+    expect(native.unlockApprovals).toHaveBeenCalledTimes(1);
+    expect(native.approve).not.toHaveBeenCalled();
+  });
+
+  it('desbloqueado: aprobar pide la confirmación nativa, una vez, y no marca nada hasta la foto', async () => {
+    const { native, emit } = await waitingRig();
+    let confirm: () => void = () => undefined;
+    vi.mocked(native.approve).mockImplementation(() => new Promise<void>((resolve) => (confirm = resolve)));
+    await emit({ type: 'approver', status: { kind: 'ready', expiresAt: Date.now() + 600_000 } });
+    fireEvent.click(screen.getByRole('button', { name: 'Aprobar' }));
+    expect(native.approve).toHaveBeenCalledWith(SID, 'call_2', { forSession: false });
+    expect(screen.getByText(/confírmalo en la ventana de confirmación/)).toBeTruthy();
+    // Mientras tanto, nada más sale de la tarjeta.
+    expect((screen.getByRole('button', { name: 'Denegar' }) as HTMLButtonElement).disabled).toBe(true);
+    await act(async () => confirm());
+    expect(screen.getByText(/enviado\. Esperando a que la sesión lo confirme/)).toBeTruthy();
+    // La sesión lo publica: la tarjeta desaparece.
+    await emit({
+      type: 'snapshot',
+      sessionId: SID,
+      snapshot: sampleSnapshot({ session: idleSession({ state: 'running', currentRunId: 'run_1' }), approvals: [] }),
+    });
+    expect(screen.queryByText('Necesita tu aprobación')).toBeNull();
+  });
+
+  it('cancelar la confirmación no es un error; un resultado desconocido se dice y pide una foto', async () => {
+    const { native, emit } = await waitingRig();
+    await emit({ type: 'approver', status: { kind: 'ready', expiresAt: Date.now() + 600_000 } });
+    vi.mocked(native.approve).mockRejectedValueOnce({
+      kind: 'not-confirmed',
+      code: null,
+      reason: 'cancelled',
+      message: 'Not confirmed. Nothing was sent.',
+    });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Aprobar' })));
+    expect(screen.queryByRole('alert')).toBeNull();
+    expect((screen.getByRole('button', { name: 'Aprobar' }) as HTMLButtonElement).disabled).toBe(false);
+
+    vi.mocked(native.deny).mockRejectedValueOnce({ kind: 'unknown', code: null, reason: null, message: 'x' });
+    await act(async () => fireEvent.click(screen.getByRole('button', { name: 'Denegar' })));
+    expect(screen.getByText(/Resultado desconocido/)).toBeTruthy();
+    expect(native.resyncSession).toHaveBeenCalledWith(SID);
+    expect(native.deny).toHaveBeenCalledTimes(1);
   });
 
   it('una sesión que se cierra desde otro cliente desaparece mientras se mira', async () => {

@@ -1,4 +1,4 @@
-import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type Ref } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState, type ReactNode, type Ref } from 'react';
 import type { SendOutcome } from '../../client/actions';
 import type { Notice } from '../../client/ui-store';
 import { useAttachments } from '../../hooks/useAttachments';
@@ -31,13 +31,6 @@ export interface ConversationViewHandle {
   jumpTo: (turnId: string) => void;
 }
 
-/** Lo que espera a una persona en esta sesión (de su foto). Solo se enseña. */
-export interface WaitingSummary {
-  approvals: number;
-  questions: number;
-  plans: number;
-}
-
 /**
  * La sesión que se mira, ya derivada de su foto (`view/chat.ts`). Nada de esto
  * es estado propio de Desktop: cambia cuando cambia la foto.
@@ -58,7 +51,6 @@ export interface SessionStream {
   hasOlder: boolean;
   loadingOlder: boolean;
   historyError: string | null;
-  waiting: WaitingSummary;
   /** Órdenes sobre el run pedidas y aún no reflejadas en la foto. */
   controls: Array<'pause' | 'resume' | 'cancel'>;
   notices: Notice[];
@@ -85,6 +77,7 @@ export const ConversationView = forwardRef(function ConversationView(
     onPickModel,
     onCloseModels,
     model,
+    pending,
   }: {
     stream: SessionStream;
     onSend: (text: string, attachments: SentAttachment[]) => Promise<SendOutcome>;
@@ -99,6 +92,8 @@ export const ConversationView = forwardRef(function ConversationView(
     onCloseModels?: () => void;
     /** El botón «provider · modelo» del composer. */
     model?: ComposerModel;
+    /** Lo que la sesión espera de una persona, para resolverlo (`PendingRequests`). */
+    pending?: ReactNode;
   },
   ref: Ref<ConversationViewHandle>,
 ) {
@@ -190,7 +185,6 @@ export const ConversationView = forwardRef(function ConversationView(
   const composer = stream.composer;
   const inputDisabled = composer.kind === 'none' || (stream.sending && composer.kind === 'ask');
   const attachments = useAttachments(stream.cwd, !inputDisabled && composer.kind === 'ask');
-  const waiting = stream.waiting.approvals + stream.waiting.questions + stream.waiting.plans;
 
   const send = (text: string, sent: SentAttachment[]) => {
     void onSend(text, sent).then((outcome) => {
@@ -298,12 +292,7 @@ export const ConversationView = forwardRef(function ConversationView(
           </button>
         </p>
       ))}
-      {waiting > 0 && (
-        <p className="notice" data-tone="warning" role="status">
-          {waitingText(stream.waiting)} Resuélvelo desde Stratum Dot o con <code>stratum approvals</code>:
-          Desktop todavía no tiene la autoridad de aprobar.
-        </p>
-      )}
+      {pending}
       {models && onPickModel && onCloseModels && (
         <ModelPicker offer={models} onPick={onPickModel} onClose={onCloseModels} />
       )}
@@ -378,14 +367,6 @@ function RunControls({
       </button>
     </div>
   );
-}
-
-function waitingText(w: WaitingSummary): string {
-  const parts: string[] = [];
-  if (w.approvals) parts.push(w.approvals === 1 ? 'una aprobación' : `${w.approvals} aprobaciones`);
-  if (w.questions) parts.push(w.questions === 1 ? 'unas preguntas' : `${w.questions} tandas de preguntas`);
-  if (w.plans) parts.push(w.plans === 1 ? 'un plan' : `${w.plans} planes`);
-  return `La sesión espera ${parts.join(' y ')}.`;
 }
 
 function placeholderOf(composer: ComposerMode, sending: boolean): string {

@@ -67,9 +67,14 @@ npm run smoke:clients            # Desktop ↔ Dot ↔ CLI contra un stratumd re
 - **Conversación nueva**: Rust crea `<raíz>/<uuid>/{inputs,outputs,scratch}` y pide
   `sessions.open { agent: 'assistant', cwd }`. El primer mensaje la abre; si abrir no tuvo
   respuesta, no se envía nada.
-- **Lo que Desktop no hace (M12)**: aprobar, contestar preguntas o decidir planes (se ven; se
-  resuelven desde Dot o `stratum approvals`), editar la configuración (Ajustes es de solo lectura),
-  retención de carpetas, memoria global, trayectoria.
+- **Aprobar, contestar preguntas y decidir planes**: en el chat de la sesión que se mira, con las
+  mismas piezas que Stratum Dot. «Desbloquear» abre una ventana nativa aparte donde se teclea la
+  clave de aprobador (`stratum approvals set-key`; la ventana principal no la ve); aprobar, «permitir
+  en esta sesión», enviar respuestas y aprobar un plan se confirman en otra ventana nativa. Denegar,
+  omitir y rechazar van directos. El desbloqueo dura 10 minutos, hasta «Bloquear» o hasta cerrar
+  Desktop. Sin concesiones con caducidad (son de Dot).
+- **Lo que Desktop no hace**: editar la configuración (Ajustes es de solo lectura), retención de
+  carpetas, memoria global, trayectoria.
 - **Conversaciones de antes de M12**: `stratum desktop import` (una vez). Desktop avisa si quedan;
   no las lee.
 

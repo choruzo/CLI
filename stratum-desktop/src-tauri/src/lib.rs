@@ -13,20 +13,32 @@
 //! (D7), el atajo global y las notificaciones (D6), las actualizaciones (D7) y
 //! los ficheros de las conversaciones del asistente (D2: subidas, descargas,
 //! vista previa), confinados a su carpeta.
+//!
+//! La autoridad de aprobar es la de Stratum Dot (M8/M9): otra conexión
+//! (`dot_link::approver`, bajo demanda), cuya clave se teclea en otra ventana
+//! (`unlock.rs`) que el webview principal no ve, y lo sensible solo sale
+//! confirmado en otra más (`confirm.rs`). Cerrar Desktop la suelta.
 
 mod commands;
+mod confirm;
 mod files;
 mod images;
 mod logs;
 mod os;
+mod page;
 mod prefs;
+mod unlock;
 mod updates;
 mod window_state;
 mod workspace;
 
+use dot_link::approver::ApproverTimings;
 use dot_link::discovery::{default_endpoint_dir, home_dir};
 use dot_link::link::Timings;
-use dot_link::{CliLauncher, ClientProfile, DotEvent, LinkConfig, LinkHandle, Logger};
+use dot_link::{
+    ApproverConfig, ApproverHandle, CancelReason, CliLauncher, ClientProfile, ConfirmGate,
+    ConfirmTimings, DotEvent, LinkConfig, LinkHandle, Logger,
+};
 use os::OsState;
 use std::sync::Arc;
 use tauri::{AppHandle, Emitter, Manager, RunEvent, WindowEvent};
@@ -42,6 +54,14 @@ const NO_AUTOSTART_ENV: &str = "STRATUM_DESKTOP_NO_AUTOSTART";
 /// Lo que la app tiene en marcha. Nada de esto es estado de una sesión.
 pub struct DesktopState {
     pub link: LinkHandle,
+    /// La autoridad de aprobar: otra conexión, bajo demanda.
+    pub broker: ApproverHandle,
+    /// La ventana de desbloqueo abierta ahora (su `nonce`), si la hay.
+    pub prompt: unlock::UnlockPrompt,
+    /// La confirmación nativa de lo sensible (una a la vez).
+    pub confirm: Arc<ConfirmGate>,
+    /// Qué ventana de confirmación enseña qué confirmación.
+    pub confirm_windows: Arc<confirm::ConfirmWindows>,
     pub prefs: prefs::DesktopPrefs,
     pub hotkey_error: Option<String>,
     pub logger: Logger,
@@ -69,6 +89,9 @@ pub fn run() {
         .manage(OsState::default())
         .manage(WindowStateStore::default())
         .manage(updates::UpdateState::default())
+        // Las páginas de desbloqueo y de confirmación, cada una en su origen y sin IPC.
+        .register_asynchronous_uri_scheme_protocol(unlock::SCHEME, unlock::handle)
+        .register_asynchronous_uri_scheme_protocol(confirm::SCHEME, confirm::handle)
         .invoke_handler(tauri::generate_handler![
             commands::desktop_attach,
             commands::desktop_retry,
@@ -90,6 +113,13 @@ pub fn run() {
             commands::desktop_list_skills,
             commands::desktop_prefs,
             commands::desktop_open_config,
+            commands::desktop_approver_status,
+            commands::desktop_approver_unlock,
+            commands::desktop_approver_lock,
+            commands::desktop_approve,
+            commands::desktop_deny,
+            commands::desktop_answer_questions,
+            commands::desktop_decide_plan,
             files::attachments_pick,
             files::attachments_add,
             files::attachments_commit,
@@ -106,6 +136,28 @@ pub fn run() {
             updates::update_install,
         ])
         .on_window_event(|window, event| {
+            if window.label().starts_with(confirm::WINDOW_PREFIX) {
+                // Cerrar la ventana de confirmación es no confirmar.
+                if let WindowEvent::Destroyed = event {
+                    if let Some(state) = window.try_state::<DesktopState>() {
+                        state.confirm_windows.closed(window.label(), &state.confirm);
+                    }
+                }
+                return;
+            }
+            if window.label() == unlock::WINDOW {
+                // Cerrar la ventana de desbloqueo la descarta: ya no se acepta nada de ella.
+                if let WindowEvent::Destroyed = event {
+                    if let Some(state) = window.try_state::<DesktopState>() {
+                        state.prompt.clear();
+                        // Cerrada a mitad de la comprobación: no queda nada desbloqueado.
+                        if matches!(state.broker.status(), dot_link::ApproverStatus::Unlocking) {
+                            state.broker.lock();
+                        }
+                    }
+                }
+                return;
+            }
             if let WindowEvent::DragDrop(drag) = event {
                 files::on_drag_drop(window, drag);
             }
@@ -152,29 +204,64 @@ pub fn run() {
                 logger: logger.clone(),
                 timings: Timings::default(),
             };
+            let gate = Arc::new(ConfirmGate::new(ConfirmTimings::default(), logger.clone()));
+            let broker_emitter = handle.clone();
+            let broker_gate = gate.clone();
+            let (broker, broker_task) = dot_link::spawn_broker(
+                ApproverConfig {
+                    endpoint_dir: config.endpoint_dir.clone(),
+                    profile: ClientProfile::DESKTOP,
+                    client_version: env!("CARGO_PKG_VERSION").to_string(),
+                    logger: logger.clone(),
+                    timings: ApproverTimings::default(),
+                },
+                move |event: DotEvent| {
+                    // Bloqueado, caducado o perdido: la confirmación abierta ya no vale.
+                    broker_gate.on_event(&event);
+                    // Solo el estado del broker: nunca la clave ni nada derivado.
+                    let _ = broker_emitter.emit_to("main", DESKTOP_EVENT, &event);
+                },
+            );
             let emitter = handle.clone();
+            let observer = broker.clone();
+            let link_gate = gate.clone();
             let (link, task) = dot_link::spawn(config, move |event: DotEvent| {
+                if let DotEvent::Connection { state } = &event {
+                    observer.observe_main(state);
+                }
+                // Resuelta en otro sitio, sesión que se va, daemon perdido: se cancela.
+                link_gate.on_event(&event);
                 // Lo que se emite es `DotEvent`: por construcción no lleva el token.
                 let _ = emitter.emit_to("main", DESKTOP_EVENT, &event);
             });
             app.manage(DesktopState {
                 link,
+                broker,
+                prompt: unlock::UnlockPrompt::default(),
+                confirm: gate,
+                confirm_windows: Arc::new(confirm::ConfirmWindows::default()),
                 prefs,
                 hotkey_error,
                 logger,
             });
             tauri::async_runtime::spawn(task);
+            tauri::async_runtime::spawn(broker_task);
             Ok(())
         })
         .build(tauri::generate_context!())
         .expect("error al construir la aplicación Tauri")
         .run(|app, event| {
             // `Exit` llega tanto al cerrar la última ventana como al salir por
-            // código. Desktop desaparece: se suelta la conexión y nada más. Ni
-            // `core.shutdown`, ni cancelar runs, ni cerrar sesiones.
+            // código. Desktop desaparece: se sueltan las conexiones y nada más. Ni
+            // `core.shutdown`, ni cancelar runs, ni cerrar sesiones, ni resolver
+            // lo pendiente. La autoridad de aprobar se va con Desktop.
             if let RunEvent::Exit = event {
                 prepare_exit(app);
                 if let Some(state) = app.try_state::<DesktopState>() {
+                    state.prompt.clear();
+                    // Una confirmación abierta no sobrevive a Desktop: no se envía.
+                    state.confirm.invalidate(CancelReason::Closing);
+                    state.broker.shutdown();
                     state.link.shutdown();
                     state.logger.info("desktop exit");
                 }

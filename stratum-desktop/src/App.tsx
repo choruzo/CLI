@@ -21,6 +21,7 @@ import {
 } from './components/chat/ConversationView';
 import type { ModelChoice, ModelsOffer } from './components/chat/ModelPicker';
 import { imageRequest, type CommandName } from './components/chat/commands';
+import { PendingRequests } from './components/chat/PendingRequests';
 import { ConnectionBanner } from './components/layout/ConnectionIndicator';
 import { FilesPanel } from './components/layout/FilesPanel';
 import { OutlinePanel } from './components/layout/OutlinePanel';
@@ -45,6 +46,7 @@ import { tauriBridge, type DesktopPrefs, type NativeBridge } from './ipc/native'
 import { notify } from './ipc/os';
 import type { ModelList } from './protocol/results';
 import { chatMessages, composerMode, draftComposer, hasOlder } from './view/chat';
+import { pendingOf } from './view/interactions';
 import { sessionItems, sessionTitle } from './view/sessions';
 
 /** Preferencia de la interfaz: el aviso de conversaciones antiguas ya se cerró. */
@@ -193,12 +195,10 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
         hasOlder: false,
         loadingOlder: false,
         historyError: null,
-        waiting: { approvals: 0, questions: 0, plans: 0 },
         controls: [],
         notices: sessionNotices,
       };
     }
-    const count = (list: { sessionId: string }[]) => list.filter((r) => r.sessionId === selectedId).length;
     return {
       sessionId: selectedId,
       cwd: snapshot?.session.agent === 'assistant' ? snapshot.session.cwd : null,
@@ -211,15 +211,12 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
       hasOlder: snapshot ? hasOlder(snapshot, history?.sessionId === selectedId ? history.hasMore : null) : false,
       loadingOlder: history?.sessionId === selectedId && history.loading,
       historyError: history?.sessionId === selectedId ? history.error : null,
-      waiting: snapshot
-        ? { approvals: snapshot.approvals.length, questions: snapshot.questions.length, plans: snapshot.plans.length }
-        : { approvals: count(overview.approvals), questions: count(overview.questions), plans: count(overview.plans) },
       controls: pending.flatMap((p) =>
         p.kind === 'control' && p.sessionId === selectedId && p.action !== 'steer' ? [p.action] : [],
       ),
       notices: sessionNotices,
     };
-  }, [selectedId, snapshot, olderMessages, connection, ui.pending, ui.notices, history, overview]);
+  }, [selectedId, snapshot, olderMessages, connection, ui.pending, ui.notices, history]);
 
   // Cambiar de sesión: fuera el selector de modelos y foco al input.
   useEffect(() => {
@@ -466,6 +463,9 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
               models={models}
               onPickModel={pickModel}
               onCloseModels={() => setModels(null)}
+              pending={
+                <PendingRequests items={pendingOf(snapshot)} snapshot={snapshot} connected={connected} native={native} />
+              }
               model={
                 connected
                   ? {

@@ -1030,6 +1030,7 @@ pub fn broker(dir: &Path, timings: ApproverTimings) -> BrokerRig {
     let (broker, task) = dot_link::spawn_broker(
         ApproverConfig {
             endpoint_dir: dir.to_path_buf(),
+            profile: dot_link::ClientProfile::DOT,
             client_version: "0.1.0-test".into(),
             logger: Logger::to_dir(&log_dir),
             timings,

@@ -1,0 +1,42 @@
+<!doctype html>
+<html lang="es">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="desktop-unlock" content="{{NONCE}}" />
+    <title>Desbloquear aprobaciones — Stratum Desktop</title>
+    <link rel="stylesheet" href="unlock.css" />
+    <script src="unlock.js" defer></script>
+  </head>
+  <body>
+    <main>
+      <h1>Desbloquear la autoridad de aprobar</h1>
+      <p class="muted">
+        Escribe la clave de aprobador que fijaste con <code>stratum approvals set-key</code>. Va directa al lado nativo
+        de Stratum Desktop; la ventana principal no la ve.
+      </p>
+      <form id="unlock" autocomplete="off" novalidate>
+        <label for="key">Clave de aprobador</label>
+        <input
+          id="key"
+          name="key"
+          type="password"
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck="false"
+          required
+          aria-describedby="status"
+        />
+        <p id="status" class="status" role="status" aria-live="polite"></p>
+        <div class="actions">
+          <button type="button" id="cancel">Cancelar</button>
+          <button type="submit" id="submit" class="primary">Desbloquear</button>
+        </div>
+      </form>
+      <p class="small muted">
+        Las aprobaciones quedan desbloqueadas {{MINUTES}} minutos, hasta que las bloquees o hasta que cierres Desktop.
+        La clave no se guarda.
+      </p>
+    </main>
+  </body>
+</html>

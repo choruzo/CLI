@@ -7,7 +7,8 @@
  *
  * Que no vuelva a aparecer un runtime de agente, un plano de control propio,
  * un sidecar, un RPC genérico, acceso directo al almacén del daemon ni
- * autoridad de aprobar sin el broker nativo.
+ * autoridad de aprobar fuera del broker nativo y su confirmación (las mismas
+ * piezas que Stratum Dot: `dot_link::approver` y `dot_link::confirm`).
  *
  * @vitest-environment node
  */
@@ -131,10 +132,17 @@ describe('el webview solo conoce el contrato', () => {
     const native = code(join(SRC, 'ipc', 'native.ts'));
     const commands = [...native.matchAll(/invoke(?:<[^>]*>)?\('([a-z_]+)'/g)].map((m) => m[1]!).sort();
     expect(commands).toEqual([
+      'desktop_answer_questions',
+      'desktop_approve',
+      'desktop_approver_lock',
+      'desktop_approver_status',
+      'desktop_approver_unlock',
       'desktop_attach',
       'desktop_cancel_run',
       'desktop_close_session',
       'desktop_context',
+      'desktop_decide_plan',
+      'desktop_deny',
       'desktop_focus_session',
       'desktop_history',
       'desktop_list_models',
@@ -193,16 +201,20 @@ describe('el lado nativo es un cliente, no un runtime', () => {
     expect(lib).toContain('CliLauncher::from_env_var');
   });
 
-  it('cerrar Desktop no apaga el daemon ni cierra sesiones; no hay nada que apruebe', () => {
+  it('cerrar Desktop no apaga el daemon ni cierra sesiones, y suelta la autoridad de aprobar', () => {
     for (const file of rust) {
       const text = rustCode(file);
+      // Los métodos los nombra `dot_link::wire`; aquí ninguno a mano.
       expect(/core\.shutdown|"core\.|"runs\.|"sessions\.|"approvals\./.test(text), rel(file)).toBe(false);
-      expect(/approver|ApproverSecret|spawn_broker|ApproverAction|ConfirmGate/.test(text), rel(file)).toBe(false);
       expect(/"host"|"broker"/.test(text), rel(file)).toBe(false);
     }
-    // En la salida se suelta el enlace, y nada más.
+    // En la salida se sueltan las dos conexiones y se cancela la confirmación abierta, nada más.
     const exit = lib.slice(lib.indexOf('RunEvent::Exit'));
     expect(exit).toContain('link.shutdown()');
+    expect(exit).toContain('broker.shutdown()');
+    expect(exit).toContain('invalidate(CancelReason::Closing)');
+    // El broker se presenta como Desktop (procedencia), con la misma conexión aparte que Dot.
+    expect(lib).toMatch(/spawn_broker\(\s*ApproverConfig \{[\s\S]*?profile: ClientProfile::DESKTOP/);
   });
 
   it('cada comando que pide el webview está registrado y es uno de la lista blanca', () => {
@@ -214,5 +226,76 @@ describe('el lado nativo es un cliente, no un runtime', () => {
     const native = code(join(SRC, 'ipc', 'native.ts'));
     const asked = [...native.matchAll(/'(desktop_[a-z_]+)'/g)].map((m) => m[1]!).sort();
     expect(asked).toEqual(declared);
+  });
+});
+
+describe('aprobar desde Desktop: las mismas piezas que Dot (M8/M9)', () => {
+  const tauriSrc = join(TAURI, 'src');
+  const buildCommands = [...rustCode(join(TAURI, 'build.rs')).matchAll(/"([a-z_]+)",/g)].map((m) => m[1]!).sort();
+
+  it('cada comando está declarado en `build.rs` y solo la ventana principal tiene permiso', () => {
+    const registered = [...rustCode(join(tauriSrc, 'lib.rs')).matchAll(/(?:commands|files|os|updates)::([a-z]+_[a-z_]+),/g)]
+      .map((m) => m[1]!)
+      .sort();
+    expect(buildCommands).toEqual(registered);
+    const dir = join(TAURI, 'capabilities');
+    expect(readdirSync(dir)).toEqual(['default.json']);
+    const capability = JSON.parse(read(join(dir, 'default.json')));
+    expect(capability.windows).toEqual(['main']);
+    const allowed = (capability.permissions as unknown[]).filter((p): p is string => typeof p === 'string' && p.startsWith('allow-'));
+    expect(allowed.sort()).toEqual(buildCommands.map((c) => `allow-${c.replace(/_/g, '-')}`).sort());
+    // Las ventanas de desbloqueo y confirmación no están en ninguna capacidad.
+    expect(JSON.stringify(capability.windows)).not.toMatch(/unlock|confirm/);
+  });
+
+  it('la clave de aprobador solo la recibe la ventana de desbloqueo, nunca un comando ni el webview', () => {
+    const makers = rust.filter((f) => /ApproverSecret::from_bytes/.test(rustCode(f))).map(rel);
+    expect(makers).toEqual(['stratum-desktop/src-tauri/src/unlock.rs']);
+    const commands = rustCode(join(tauriSrc, 'commands.rs'));
+    expect(commands).not.toMatch(/ApproverSecret|\bkey: String|secret|password/i);
+    expect(rustCode(join(tauriSrc, 'unlock.rs'))).toMatch(/ctx\.webview_label\(\) != WINDOW/);
+    // Ningún campo de contraseña en el webview.
+    for (const file of shipped) {
+      expect(/type=["']password["']|type:\s*'password'|passphrase/i.test(code(file)), rel(file)).toBe(false);
+    }
+    // Las páginas nativas no cargan nada de fuera ni llaman a Tauri.
+    for (const page of ['unlock/index.html', 'unlock/unlock.js', 'confirm/index.html', 'confirm/confirm.js']) {
+      expect(read(join(TAURI, page))).not.toMatch(/https?:\/\/|__TAURI|invoke\(|innerHTML|localStorage/);
+    }
+  });
+
+  it('lo sensible solo sale confirmado: un único `broker.resolve`, tras `needs_confirmation`', () => {
+    const commands = rustCode(join(tauriSrc, 'commands.rs'));
+    expect(commands.match(/\bbroker\s*\.resolve\(/g)?.length).toBe(1);
+    expect(commands).toMatch(/if !action\.needs_confirmation\(\) \{\s*return state\.broker\.resolve\(action\)/);
+    expect(commands).toMatch(/\.confirm\s*\.request\(/);
+    expect(commands).toMatch(/resolve_confirmed\(confirmed\)/);
+    // La frase no viaja desde el webview, ni una concesión con caducidad (revocarla es de Dot).
+    const approve = /pub async fn desktop_approve<R: Runtime>\(([\s\S]*?)\) ->/.exec(commands)?.[1] ?? '';
+    expect(approve).not.toMatch(/phrase|grant/);
+    expect(commands).toMatch(/grant_minutes: None/);
+    // Ningún comando confirma; solo la página nativa, y solo para su ventana.
+    expect(commands).not.toMatch(/\.confirm\(&|ConfirmedAction/);
+    const confirmers = rust.filter((f) => /\.confirm\(&link, &broker/.test(rustCode(f))).map(rel);
+    expect(confirmers).toEqual(['stratum-desktop/src-tauri/src/confirm.rs']);
+    const page = rustCode(join(tauriSrc, 'confirm.rs'));
+    expect(page).toMatch(/nonce_of\(&label\)/);
+    expect(page).toMatch(/current_nonce\(\)/);
+    // Cada comando de aprobador se atiende solo desde la ventana principal.
+    for (const name of ['desktop_approver_unlock', 'desktop_approver_lock', 'desktop_approve', 'desktop_deny', 'desktop_answer_questions', 'desktop_decide_plan']) {
+      const body = new RegExp(`pub (?:async )?fn ${name}[<(][\\s\\S]*?\\{([\\s\\S]*?)\\n\\}`).exec(commands)?.[1] ?? '';
+      expect(body, name).toContain('main_window(&window)?');
+    }
+  });
+
+  it('en el webview, solo `client/approvals.ts` pide resolver, y solo desde un clic', () => {
+    const resolvers = shipped.filter((f) => /\bnative\.(approve|deny|answerQuestions|decidePlan)\(/.test(code(f)));
+    expect(resolvers.map(rel)).toEqual(['stratum-desktop/src/client/approvals.ts']);
+    // Nadie resuelve al llegar algo: el puente solo guarda el estado del broker.
+    const bridge = code(join(SRC, 'client', 'bridge.ts'));
+    expect(bridge).not.toMatch(/resolver\(|\.approve\(|\.deny\(/);
+    // Una sola tarjeta que resuelve.
+    const cards = shipped.filter((f) => /\bresolver\(native,/.test(code(f))).map(rel);
+    expect(cards).toEqual(['stratum-desktop/src/components/chat/PendingRequests.tsx']);
   });
 });

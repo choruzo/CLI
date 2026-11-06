@@ -68,8 +68,8 @@ Desktop?). Hay que decidir §15.1.4 *antes* de extraer componentes compartidos, 
   diferencial» y del 20 el documento dice que es «la carrera que se pierde siempre» (no empezar por él).
 - **Plugins** (`CLI-DOC/Plugins-Implementacion.md`): aprobado, nada implementado. Tiene 12 hallazgos de
   revisión, uno **bloqueante** (R1, huella de confianza del proyecto).
-- **Desktop no aprueba** (necesita broker nativo como Dot). Lo aplazado de Desktop: retención de carpetas,
-  editor de ajustes, panel de memoria global y panel de trayectoria.
+- **Desktop**: ya aprueba (broker nativo y confirmación de Dot, 2026-11-06). Lo aplazado: retención de
+  carpetas, editor de ajustes, panel de memoria global y panel de trayectoria.
 - **Dot**: paginación de historial y desglose de contexto (`sessions.history` y `sessions.context` ya existen). **S** cada uno.
 - Notificaciones de bandeja en Linux (Q4/AC-9), promoción explícita de memoria de sesión → proyecto,
   `run --detach`, perfiles de triaje y medir `prompt.guides: 'pointers'`.

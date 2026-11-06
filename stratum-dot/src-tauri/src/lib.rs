@@ -235,6 +235,7 @@ pub fn run() {
             let (broker, broker_task) = dot_link::spawn_broker(
                 ApproverConfig {
                     endpoint_dir: config.endpoint_dir.clone(),
+                    profile: dot_link::ClientProfile::DOT,
                     client_version: env!("CARGO_PKG_VERSION").to_string(),
                     logger: logger.clone(),
                     timings: ApproverTimings::default(),

@@ -112,6 +112,7 @@ async fn main() {
     let (broker, broker_task) = dot_link::spawn_broker(
         ApproverConfig {
             endpoint_dir: endpoint_dir.clone(),
+            profile,
             client_version: env!("CARGO_PKG_VERSION").to_string(),
             logger: logger.clone(),
             timings: ApproverTimings::default(),

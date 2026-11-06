@@ -49,6 +49,8 @@ export function describeFailure(what: string, error: CommandError): string {
       if (error.code === 'BUSY') return `${what}: la sesión ya tiene un run en marcha.`;
       if (error.code === 'FORBIDDEN') return `${what}: el daemon no concede ese permiso a Desktop.`;
       return `${what}: ${error.message}`;
+    case 'not-confirmed':
+      return `${what}: no se confirmó, no se ha enviado nada.`;
   }
 }
 

@@ -1,8 +1,10 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "Permisos de la ventana principal (15.8). El webview no tiene acceso al sistema de ficheros: ni plugin fs, ni permisos de dialog, ni asset protocol. El sidecar se lanza desde Rust con std::process (sin plugin shell). D2: los ficheros de la conversación los manejan comandos propios de Rust (src-tauri/src/files.rs) confinados a la raíz de workspaces que anuncia el sidecar; los diálogos de abrir/guardar los abre Rust con tauri-plugin-dialog desde Rust, así que el webview no recibe rutas del disco del usuario (solo candidatos con id opaco) y no puede abrir un diálogo ni leer un fichero por su cuenta. 'Abrir' un fichero generado lo hace Rust con el opener y solo para tipos inertes. D1: abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto. D7: la ventana es frameless; la TitleBar propia minimiza, maximiza, cierra y arrastra (data-tauri-drag-region, doble clic maximiza) con los permisos core:window justos para eso. El updater lo manejan comandos propios de Rust (updates.rs): el webview no recibe permisos del plugin.",
-  "windows": ["main"],
+  "description": "Permisos de la ventana principal (15.8). El webview no tiene acceso al sistema de ficheros: ni plugin fs, ni permisos de dialog, ni asset protocol. El sidecar se lanza desde Rust con std::process (sin plugin shell). D2: los ficheros de la conversación los manejan comandos propios de Rust (src-tauri/src/files.rs) confinados a la raíz de workspaces que anuncia el sidecar; los diálogos de abrir/guardar los abre Rust con tauri-plugin-dialog desde Rust, así que el webview no recibe rutas del disco del usuario (solo candidatos con id opaco) y no puede abrir un diálogo ni leer un fichero por su cuenta. 'Abrir' un fichero generado lo hace Rust con el opener y solo para tipos inertes. D1: abrir enlaces de las respuestas en el navegador del sistema, limitado a http(s) y mailto. D7: la ventana es frameless; la TitleBar propia minimiza, maximiza, cierra y arrastra (data-tauri-drag-region, doble clic maximiza) con los permisos core:window justos para eso. El updater lo manejan comandos propios de Rust (updates.rs): el webview no recibe permisos del plugin. Los comandos propios están declarados en build.rs (AppManifest) y se conceden uno a uno aquí: las ventanas de desbloqueo (`unlock`) y de confirmación (`confirm-N`) de la autoridad de aprobar no están en ninguna capacidad y no pueden invocar nada; la clave de aprobador se teclea en la de desbloqueo y el webview principal nunca la ve.",
+  "windows": [
+    "main"
+  ],
   "permissions": [
     "core:default",
     "core:window:allow-minimize",
@@ -12,7 +14,58 @@
     "core:window:allow-start-dragging",
     {
       "identifier": "opener:allow-open-url",
-      "allow": [{ "url": "https://*" }, { "url": "http://*" }, { "url": "mailto:*" }]
-    }
+      "allow": [
+        {
+          "url": "https://*"
+        },
+        {
+          "url": "http://*"
+        },
+        {
+          "url": "mailto:*"
+        }
+      ]
+    },
+    "allow-desktop-attach",
+    "allow-desktop-retry",
+    "allow-desktop-focus-session",
+    "allow-desktop-resync-session",
+    "allow-desktop-pause-run",
+    "allow-desktop-resume-run",
+    "allow-desktop-cancel-run",
+    "allow-desktop-steer-run",
+    "allow-desktop-new-chat",
+    "allow-desktop-start-run",
+    "allow-desktop-save-pasted-image",
+    "allow-desktop-list-models",
+    "allow-desktop-set-model",
+    "allow-desktop-close-session",
+    "allow-desktop-history",
+    "allow-desktop-context",
+    "allow-desktop-memory",
+    "allow-desktop-list-skills",
+    "allow-desktop-prefs",
+    "allow-desktop-open-config",
+    "allow-desktop-approver-status",
+    "allow-desktop-approver-unlock",
+    "allow-desktop-approver-lock",
+    "allow-desktop-approve",
+    "allow-desktop-deny",
+    "allow-desktop-answer-questions",
+    "allow-desktop-decide-plan",
+    "allow-attachments-pick",
+    "allow-attachments-add",
+    "allow-attachments-commit",
+    "allow-attachments-discard",
+    "allow-output-save",
+    "allow-output-open",
+    "allow-output-preview",
+    "allow-workspace-export",
+    "allow-workspace-files",
+    "allow-os-notify",
+    "allow-logs-open",
+    "allow-logs-tail",
+    "allow-update-check",
+    "allow-update-install"
   ]
 }

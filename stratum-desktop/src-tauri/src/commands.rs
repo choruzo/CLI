@@ -11,17 +11,25 @@
 //!
 //! Lo que no hay, a propósito: nada que apague el daemon, aloje sesiones,
 //! pase variables de entorno a una sesión o devuelva el token; y nada que
-//! **apruebe**: Desktop todavía no tiene la autoridad de aprobador separada
-//! (broker nativo y confirmación, M8/M9). Las aprobaciones, preguntas y planes
-//! se ven, y se resuelven desde Stratum Dot o `stratum approvals`.
+//! reciba o devuelva la clave de aprobador. Resolver aprobaciones, preguntas y
+//! planes es como en Stratum Dot (`docs/dot.md` §13–§14): el webview pide
+//! **qué** resolver (`desktop_approve`, `desktop_deny`, `desktop_answer_questions`,
+//! `desktop_decide_plan`) y el broker nativo (`dot_link::approver`, otra
+//! conexión) decide con qué autoridad; desbloquear abre otra ventana
+//! (`unlock.rs`) y lo sensible solo sale confirmado en la suya (`confirm.rs`).
+//! Esos comandos solo se atienden desde la ventana principal (además del
+//! manifiesto de `build.rs`, que ya se lo niega a cualquier otra).
 //!
 //! Lo que devuelven las llamadas es el `result` del daemon **sin interpretar**:
 //! un DTO del protocolo que el webview valida contra el contrato antes de usarlo.
 
-use dot_link::{CallAction, CommandError, CommandErrorKind, ControlAction};
-use serde::Serialize;
+use dot_link::{
+    ApproverAction, ApproverStatus, CallAction, CommandError, CommandErrorKind, ControlAction,
+    QuestionAnswer,
+};
+use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Manager, Runtime, State, WebviewWindow};
 use tauri_plugin_opener::OpenerExt;
 
 use crate::prefs::DesktopPrefs;
@@ -304,4 +312,174 @@ pub fn desktop_open_config(app: AppHandle, state: State<'_, DesktopState>) -> Re
     app.opener()
         .open_path(state.prefs.config_path.clone(), None::<&str>)
         .map_err(|e| format!("no se pudo abrir: {e}"))
+}
+
+fn main_window<R: Runtime>(window: &WebviewWindow<R>) -> Result<(), CommandError> {
+    if window.label() == "main" {
+        Ok(())
+    } else {
+        Err(CommandError::new(
+            CommandErrorKind::NotSent,
+            "No disponible desde esta ventana.",
+        ))
+    }
+}
+
+/// Estado de la autoridad de aprobar. Sin datos: ni la clave ni nada derivado.
+#[tauri::command]
+pub fn desktop_approver_status(state: State<'_, DesktopState>) -> ApproverStatus {
+    state.broker.status()
+}
+
+/// Abre la ventana de desbloqueo (o la trae al frente). La clave se teclea
+/// **allí**, no aquí: este comando no la recibe ni la devuelve. Es `async`
+/// porque crear una ventana desde un comando síncrono bloquea en Windows.
+#[tauri::command]
+pub async fn desktop_approver_unlock<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    if matches!(state.broker.status(), ApproverStatus::Ready { .. }) {
+        return Ok(());
+    }
+    crate::unlock::open(&app, &state.prompt).map_err(|_| {
+        CommandError::new(
+            CommandErrorKind::NotSent,
+            "No se pudo abrir la ventana de desbloqueo.",
+        )
+    })
+}
+
+/// Suelta la autoridad. Lo pendiente sigue pendiente.
+#[tauri::command]
+pub fn desktop_approver_lock<R: Runtime>(
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    state.broker.lock();
+    Ok(())
+}
+
+/// Resuelve: lo sensible, solo si la persona lo confirma en la ventana nativa;
+/// lo negativo, directo. Nunca se confirma solo ni se reenvía.
+async fn resolve<R: Runtime>(
+    app: AppHandle<R>,
+    state: &DesktopState,
+    action: ApproverAction,
+) -> Result<(), CommandError> {
+    if !action.needs_confirmation() {
+        return state.broker.resolve(action).await;
+    }
+    let presenter = crate::confirm::TauriPresenter::new(app, state.confirm_windows.clone());
+    let confirmed = state
+        .confirm
+        .request(&state.link, &state.broker, &presenter, action)
+        .await?;
+    state.broker.resolve_confirmed(confirmed).await
+}
+
+/// Pide aprobar una solicitud: abre la confirmación nativa, y solo si la
+/// persona confirma allí se envía. `for_session` = `allow-all`. La frase de una
+/// confirmación con nombre **no** viaja por aquí: se teclea en la ventana.
+/// Desktop no ofrece concesiones con caducidad (M17): revocarlas es de Dot.
+#[tauri::command]
+pub async fn desktop_approve<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+    session_id: String,
+    approval_id: String,
+    for_session: bool,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    resolve(
+        app,
+        &state,
+        ApproverAction::Approve {
+            session_id,
+            approval_id,
+            phrase: None,
+            for_session,
+            grant_minutes: None,
+        },
+    )
+    .await
+}
+
+/// Deniega, directo (sin confirmación): es lo que pasa cuando nadie contesta.
+#[tauri::command]
+pub async fn desktop_deny<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+    session_id: String,
+    approval_id: String,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    resolve(
+        app,
+        &state,
+        ApproverAction::Deny {
+            session_id,
+            approval_id,
+        },
+    )
+    .await
+}
+
+/// Contesta una tanda de preguntas (con confirmación nativa). `None` la omite (directo).
+#[tauri::command]
+pub async fn desktop_answer_questions<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+    session_id: String,
+    request_id: String,
+    answers: Option<Vec<QuestionAnswer>>,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    resolve(
+        app,
+        &state,
+        ApproverAction::AnswerQuestions {
+            session_id,
+            request_id,
+            answers,
+        },
+    )
+    .await
+}
+
+#[derive(Debug, Clone, Copy, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum PlanDecision {
+    Approve,
+    Reject,
+}
+
+/// Aprueba el plan propuesto **tal cual** (con confirmación nativa), o lo
+/// rechaza (directo). Sin edición.
+#[tauri::command]
+pub async fn desktop_decide_plan<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+    session_id: String,
+    request_id: String,
+    decision: PlanDecision,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    resolve(
+        app,
+        &state,
+        ApproverAction::DecidePlan {
+            session_id,
+            request_id,
+            approve: matches!(decision, PlanDecision::Approve),
+        },
+    )
+    .await
 }

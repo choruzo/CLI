@@ -3926,3 +3926,116 @@ kbd {
   font-size: 13px;
   overflow-wrap: anywhere;
 }
+
+/* Lo que la sesión espera de una persona (`PendingRequests`): resolver desde
+   Desktop con el broker nativo. Aprobar se confirma en otra ventana. */
+.pending-requests {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.pending-requests__authority {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+  color: var(--color-textMuted);
+}
+.pending-requests__authority > span {
+  flex: 1;
+}
+.pending-requests__authority[data-state='ready'] > span {
+  color: var(--color-success);
+}
+.pending-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 12px 14px;
+  border: 1px solid var(--color-borderAccent);
+  border-radius: 8px;
+  background: var(--color-bgPanel);
+  font-size: 14px;
+}
+.pending-card[data-danger] {
+  border-color: var(--color-error);
+}
+.pending-card__head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 8px;
+}
+.pending-card__tag {
+  font-size: 12px;
+  color: var(--color-warning);
+}
+.pending-card__muted {
+  margin: 0;
+  font-size: 12px;
+  color: var(--color-textMuted);
+}
+.pending-card__facts {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+.pending-card__facts dt {
+  color: var(--color-textMuted);
+}
+.pending-card__facts dd {
+  margin: 0;
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.pending-card__action {
+  margin: 0;
+  white-space: pre-wrap;
+  font-family: var(--font-mono, monospace);
+  font-size: 13px;
+  max-height: 160px;
+  overflow: auto;
+}
+.pending-card__decision {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.pending-card__spacer {
+  flex: 1;
+}
+.pending-card__question {
+  margin: 0;
+  padding: 0;
+  border: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.pending-card__question legend {
+  padding: 0;
+  margin-bottom: 4px;
+  color: var(--color-textPrimary);
+}
+.pending-card__option {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.pending-card__answer {
+  padding: 6px 8px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--color-textPrimary);
+  font: inherit;
+}
+.pending-card__summary {
+  margin: 0;
+}
+.pending-card__steps {
+  margin: 0;
+  padding-left: 20px;
+}

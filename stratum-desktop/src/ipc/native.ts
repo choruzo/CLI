@@ -7,9 +7,11 @@
  * `endpoint.json`: descubrir, arrancar el daemon, autenticar y suscribirse es
  * cosa de Rust (`dot_link`, el enlace compartido con Stratum Dot).
  *
- * Tampoco hay nada que **apruebe**: Desktop aún no tiene la autoridad de
- * aprobador separada (broker nativo y confirmación). Lo pendiente se ve y se
- * resuelve desde Stratum Dot o `stratum approvals`.
+ * Resolver lo pendiente es como en Stratum Dot: aquí solo se pide **qué**
+ * resolver. La autoridad la pone el broker nativo (otra conexión), la clave se
+ * teclea en otra ventana que este webview no ve, y lo sensible (aprobar,
+ * responder, aprobar un plan) solo sale si la persona lo confirma en una
+ * ventana nativa. Este fichero no recibe ni devuelve la clave.
  */
 import { invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
@@ -50,7 +52,18 @@ export type DesktopEvent =
   | { type: 'overview-events'; events: unknown[] }
   /** Foto de la sesión que se mira (la única que se sigue). */
   | { type: 'snapshot'; sessionId: string; snapshot: unknown }
-  | { type: 'events'; sessionId: string; events: unknown[] };
+  | { type: 'events'; sessionId: string; events: unknown[] }
+  /** Estado de la autoridad de aprobar. Sin datos: ni la clave ni nada derivado. */
+  | { type: 'approver'; status: ApproverStatus };
+
+/** `ApproverStatus` de `dot-link/src/approver.rs`. */
+export type ApproverStatus =
+  | { kind: 'locked'; reason: string }
+  | { kind: 'unlocking' }
+  /** `expiresAt`: ms Unix (reloj local). */
+  | { kind: 'ready'; expiresAt: number }
+  | { kind: 'unavailable'; reason: string }
+  | { kind: 'error'; message: string };
 
 export interface AppInfo {
   desktopVersion: string;
@@ -62,10 +75,26 @@ export interface AppInfo {
  * `unknown`: algo que cambia estado salió y no hubo respuesta —no se sabe si se
  * aplicó, y **no se reenvía**—. `no-answer`: una consulta sin respuesta
  * (repetirla es seguro). `not-sent`: no salió nada (sin conexión).
+ * `not-confirmed`: lo sensible no se confirmó en la ventana nativa (`reason`
+ * dice por qué: `cancelled`, `expired`, `resolved-elsewhere`…); no salió nada.
  */
-export type CommandErrorKind = 'invalid' | 'not-sent' | 'unknown' | 'no-answer' | 'rejected';
+export type CommandErrorKind = 'invalid' | 'not-sent' | 'unknown' | 'no-answer' | 'rejected' | 'not-confirmed';
 
-const ERROR_KINDS: readonly CommandErrorKind[] = ['invalid', 'not-sent', 'unknown', 'no-answer', 'rejected'];
+const ERROR_KINDS: readonly CommandErrorKind[] = [
+  'invalid',
+  'not-sent',
+  'unknown',
+  'no-answer',
+  'rejected',
+  'not-confirmed',
+];
+
+/** Una respuesta a una pregunta, como la espera el lado nativo (`QuestionAnswer`). */
+export interface QuestionAnswerInput {
+  question: string;
+  answer: string;
+  optionId?: string;
+}
 
 export interface CommandError {
   kind: CommandErrorKind;
@@ -138,6 +167,17 @@ export interface NativeBridge {
   listSkills(): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
+  approverStatus(): Promise<ApproverStatus>;
+  /** Abre la ventana nativa de desbloqueo: la clave se teclea allí, no aquí. */
+  unlockApprovals(): Promise<void>;
+  lockApprovals(): Promise<void>;
+  /** Abre la confirmación nativa; resuelve solo si la persona confirma allí. */
+  approve(sessionId: string, approvalId: string, opts: { forSession: boolean }): Promise<void>;
+  deny(sessionId: string, approvalId: string): Promise<void>;
+  /** `null` omite la tanda (directo); con respuestas, confirmación nativa. */
+  answerQuestions(sessionId: string, requestId: string, answers: QuestionAnswerInput[] | null): Promise<void>;
+  /** Aprobar pasa por la confirmación nativa; rechazar va directo. */
+  decidePlan(sessionId: string, requestId: string, decision: 'approve' | 'reject'): Promise<void>;
   onEvent(handler: (event: DesktopEvent) => void): Promise<() => void>;
 }
 
@@ -168,5 +208,13 @@ export const tauriBridge: NativeBridge = {
   listSkills: () => invoke<unknown>('desktop_list_skills'),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
+  approverStatus: () => invoke<ApproverStatus>('desktop_approver_status'),
+  unlockApprovals: () => invoke('desktop_approver_unlock'),
+  lockApprovals: () => invoke('desktop_approver_lock'),
+  approve: (sessionId, approvalId, { forSession }) => invoke('desktop_approve', { sessionId, approvalId, forSession }),
+  deny: (sessionId, approvalId) => invoke('desktop_deny', { sessionId, approvalId }),
+  answerQuestions: (sessionId, requestId, answers) =>
+    invoke('desktop_answer_questions', { sessionId, requestId, answers }),
+  decidePlan: (sessionId, requestId, decision) => invoke('desktop_decide_plan', { sessionId, requestId, decision }),
   onEvent: (handler) => listen<DesktopEvent>(DESKTOP_EVENT, (e) => handler(e.payload)),
 };
