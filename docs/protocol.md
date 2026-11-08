@@ -1001,6 +1001,8 @@ puede valer— y el anfitrión, que es la autoridad. Una respuesta que no vale c
 - **Preguntas.** `answers: null` omite la tanda. Si no, una respuesta por pregunta; con
   opciones, por su `optionId` o por una etiqueta que coincida con una sola. El texto libre
   solo vale si la pregunta no tiene opciones o declara `allowCustom`. Nada se aproxima.
+  El runtime de Stratum declara `allowCustom` en **toda** pregunta con opciones (el usuario
+  siempre puede escribir otra respuesta); un cliente sigue sin suponerlo y lee el campo.
 - **Plan.** `approve` | `reject`. Aprobar sin `plan` aprueba el propuesto; con `plan`, la
   versión editada (al menos un paso).
 

@@ -68,6 +68,20 @@ describe('parseQuestionInput', () => {
     expect(items[0]!.options).toHaveLength(MAX_OPTIONS);
   });
 
+  it('con opciones siempre admite otra respuesta, aunque el modelo diga que no', () => {
+    const items = parseQuestionInput({
+      questions: [
+        { question: 'Con opciones', options: ['a', 'b'] },
+        { question: 'Cerrada a la fuerza', options: ['a'], allowCustom: false },
+        { question: 'Libre' },
+      ],
+    });
+    expect(items[0]!.allowCustom).toBe(true);
+    expect(items[1]!.allowCustom).toBe(true);
+    // Sin opciones ya es texto libre: no hace falta la marca.
+    expect(items[2]!.allowCustom).toBeUndefined();
+  });
+
   it('devuelve lista vacía si no hay preguntas utilizables', () => {
     expect(parseQuestionInput({})).toEqual([]);
     expect(parseQuestionInput({ questions: 'no' })).toEqual([]);
@@ -105,14 +119,29 @@ describe('formatQuestionAnswers', () => {
 });
 
 describe('resolveQuestionAnswers — dominio cerrado y token opaco', () => {
+  // `parseQuestionInput` siempre admite otra respuesta; el dominio cerrado solo
+  // existe en un envelope construido a mano, y `resolveQuestionAnswers` lo sigue
+  // respetando.
   function closed(allowCustom = false): QuestionItem {
     const [item] = parseQuestionInput({
-      questions: [
-        { question: '¿Entrypoint?', options: ['src/index.ts', 'src/cli.ts'], allowCustom },
-      ],
+      questions: [{ question: '¿Entrypoint?', options: ['src/index.ts', 'src/cli.ts'] }],
     });
-    return item!;
+    const { allowCustom: _ignored, ...rest } = item!;
+    return allowCustom ? { ...rest, allowCustom: true } : rest;
   }
+
+  it('con allowCustom, el texto exacto de una opción es esa opción', () => {
+    const q = closed(true);
+    const { answers } = resolveQuestionAnswers(
+      [q],
+      [{ question: q.question, answer: 'SRC/CLI.TS' }],
+    );
+    expect(answers[0]).toEqual({
+      question: q.question,
+      answer: 'src/cli.ts',
+      optionId: q.options![1]!.id,
+    });
+  });
 
   it('acepta el token de una opción y canoniza a su etiqueta', () => {
     const q = closed();

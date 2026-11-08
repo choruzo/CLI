@@ -26,15 +26,8 @@ const schema = z.object({
           .max(MAX_OPTIONS)
           .optional()
           .describe(
-            'Opciones cerradas entre las que elegir. Omítelas para respuesta libre. ' +
-              `Máximo ${MAX_OPTIONS}.`,
-          ),
-        allowCustom: z
-          .boolean()
-          .optional()
-          .describe(
-            'Solo con opciones: permite además una respuesta escrita a mano. ' +
-              'Por defecto false — las opciones son el dominio completo de respuesta.',
+            'Opciones sugeridas entre las que elegir. Omítelas para respuesta libre. ' +
+              `Máximo ${MAX_OPTIONS}. El usuario siempre puede escribir otra respuesta.`,
           ),
       }),
     )
@@ -57,9 +50,8 @@ export const questionTool: ToolDefinition = {
     'Pregunta al usuario cuando algo importante no se puede deducir del repositorio y una decisión ' +
     'equivocada cambiaría el trabajo por completo. Envía TODAS tus dudas en una sola llamada ' +
     `(máximo ${MAX_QUESTIONS}) y solo una vez por turno: no es un chat. ` +
-    'Cada pregunta puede traer opciones cerradas; sin opciones, la respuesta es libre. ' +
-    'Con opciones, solo se acepta una de ellas: añade allowCustom si una respuesta escrita a mano ' +
-    'también sirve. ' +
+    'Cada pregunta puede traer opciones; sin opciones, la respuesta es libre. ' +
+    'Con opciones, el usuario puede elegir una o escribir otra respuesta distinta. ' +
     'No la uses para lo que puedes averiguar leyendo ficheros ni para pedir permiso de ejecución.',
   schema,
   destructive: false,
@@ -118,8 +110,11 @@ export function parseQuestionInput(input: unknown): QuestionItem[] {
       continue;
     }
     const options: QuestionOption[] = unique.map((label) => ({ id: makeOptionId(), label }));
-    const allowCustom = (entry as { allowCustom?: unknown })?.allowCustom === true;
-    items.push({ question: question.trim(), options, ...(allowCustom ? { allowCustom } : {}) });
+    // Siempre se admite otra respuesta escrita: las opciones del agente son una
+    // sugerencia, y el usuario debe poder salirse de ellas. No depende del
+    // modelo (un `allowCustom: false` suyo se ignora); todos los clientes ya
+    // pintan "otra respuesta" cuando el envelope trae `allowCustom`.
+    items.push({ question: question.trim(), options, allowCustom: true });
   }
   return items;
 }
@@ -147,7 +142,8 @@ export interface ResolvedQuestionAnswers {
  *
  * - `optionId` debe casar con **exactamente una** opción de esa pregunta.
  * - Texto libre solo se admite si la pregunta no tiene opciones o declara
- *   `allowCustom`.
+ *   `allowCustom` (lo que `parseQuestionInput` pone siempre; un envelope sin él
+ *   —construido a mano— sigue teniendo dominio cerrado).
  * - Con opciones y sin `allowCustom`, el texto se acepta solo si coincide
  *   exactamente (trim + case-insensitive) con **una** etiqueta. Cero
  *   coincidencias y más de una se rechazan igual.
@@ -198,14 +194,16 @@ export function resolveQuestionAnswers(
 
     if (!text) return;
 
-    if (q.allowCustom) {
-      answers.push({ question: q.question, answer: text });
-      return;
-    }
-
+    // Escribir a mano el texto exacto de una opción es elegirla, también con
+    // `allowCustom`: el agente recibe la etiqueta canónica y su token.
     const byLabel = options.filter((o) => sameLabel(o.label, text));
     if (byLabel.length === 1) {
       answers.push({ question: q.question, answer: byLabel[0]!.label, optionId: byLabel[0]!.id });
+      return;
+    }
+
+    if (q.allowCustom) {
+      answers.push({ question: q.question, answer: text });
       return;
     }
     rejections.push({

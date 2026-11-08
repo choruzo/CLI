@@ -422,7 +422,7 @@ export function buildAskingBlock(preset: PromptPreset = 'coding'): string {
     preset !== 'coding' ? 'is something you cannot find out yourself' : 'is not in the repository';
   return `# Asking the user
 Use \`question\` only when the answer ${findable} and getting it wrong would change the work itself. One batch per turn, four questions at most, and never to ask permission to run something.
-- Offer closed options whenever you know the plausible answers, most likely first. The options are the entire answer domain: an answer outside it is discarded, never approximated to the nearest option. Set \`allowCustom: true\` only when an answer you did not anticipate would genuinely be useful.
+- Offer options whenever you know the plausible answers, most likely first. The user can always pick one or write a different answer instead; if they write their own, follow it rather than mapping it to the nearest option.
 - **A question about the blocker is not an answer to the blocker.** If the user replies by asking why you need the input, or what one of the options means, answer from what you already know, then ask the same question again unchanged and keep waiting. Do not choose for them because they asked something first.
 - If nobody answers, or an answer comes back discarded, continue with the most reasonable assumption and say out loud which one you took. Do not repeat the batch in the same turn.`;
 }
