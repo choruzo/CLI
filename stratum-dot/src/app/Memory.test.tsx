@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NativeProvider } from '../bridge/context';
-import type { ProtocolDecision } from '../protocol';
+import type { ProtocolDecision, ProtocolProposal } from '../protocol';
 import { useUi } from '../stores/uiStore';
 import { App } from './App';
 import {
@@ -290,6 +290,169 @@ describe('olvidar', () => {
     expect(
       (within(row()).getByRole('button', { name: 'Forget Prefers short answers' }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+});
+
+describe('M19 fase 5 — cambios sugeridos', () => {
+  const proposal = (over: Partial<ProtocolProposal> = {}): ProtocolProposal => ({
+    id: 'prop_1',
+    kind: 'correct',
+    createdAt: '2026-11-08T10:00:00.000Z',
+    expiresAt: '2026-11-22T10:00:00.000Z',
+    rationale: 'She said she moved to Seville.',
+    evidence: [{ sessionId: 'sess_20261101_aaaaaa', messageId: 'm1' }],
+    targets: [{ id: 'dec_1', title: 'Lucia lives in Valencia' }],
+    content: 'Her sister Lucia lives in Seville.',
+    ...over,
+  });
+  const section = () => within(panel()).getByRole('region', { name: 'Suggested changes' });
+
+  async function withProposals(list: ProtocolProposal[]): Promise<FakeNative> {
+    const native = fakeNative();
+    native.calls.memoryProposals.mockResolvedValue({ proposals: list });
+    await withPanel(native);
+    await waitFor(() => expect(native.calls.memoryProposals).toHaveBeenCalled());
+    await flush();
+    return native;
+  }
+
+  it('sin propuestas lo dice; con ellas, enseña qué cambiaría, por qué y de dónde sale', async () => {
+    await withProposals([]);
+    expect(section().textContent).toContain('No suggestions right now.');
+    cleanup();
+    await withProposals([
+      proposal(),
+      proposal({ id: 'prop_2', kind: 'create', targets: [], title: 'Cat Miso', content: 'Her cat is Miso.', evidence: [] }),
+      proposal({ id: 'prop_3', kind: 'prune', targets: [{ id: 'dec_9', title: 'Rainy yesterday' }], content: undefined }),
+      proposal({ id: 'prop_4', kind: 'reclassify', type: 'person', content: undefined }),
+      proposal({ id: 'prop_5', kind: 'promote', content: undefined }),
+      proposal({ id: 'prop_6', kind: 'merge', title: 'Coffee, no sugar', targets: [{ id: 'a', title: 'x' }, { id: 'b', title: 'y' }] }),
+    ]);
+    const text = section().textContent ?? '';
+    expect(text).toContain('Update “Lucia lives in Valencia”');
+    expect(text).toContain('Her sister Lucia lives in Seville.');
+    expect(text).toContain('She said she moved to Seville.');
+    expect(text).toContain('From 1 message');
+    expect(text).toContain('Remember “Cat Miso”');
+    expect(text).toContain('Forget “Rainy yesterday”');
+    expect(text).toContain('Move “Lucia lives in Valencia” to People');
+    expect(text).toContain('Mark “Lucia lives in Valencia” as important');
+    expect(text).toContain('Merge 2 memories into “Coffee, no sugar”');
+  });
+
+  it('Apply llama con el id y vuelve a pedir las propuestas y la memoria, sin quitar nada a mano', async () => {
+    const native = await withProposals([proposal()]);
+    const proposalsBefore = native.calls.memoryProposals.mock.calls.length;
+    const decisionsBefore = native.calls.memoryDecisions.mock.calls.length;
+    await act(async () =>
+      fireEvent.click(within(section()).getByRole('button', { name: 'Apply: Update “Lucia lives in Valencia”' })),
+    );
+    expect(native.calls.memoryApplyProposal).toHaveBeenCalledWith('prop_1');
+    await waitFor(() => expect(native.calls.memoryProposals.mock.calls.length).toBe(proposalsBefore + 1));
+    await waitFor(() => expect(native.calls.memoryDecisions.mock.calls.length).toBe(decisionsBefore + 1));
+    // El daemon sigue devolviéndola: manda la lista, no lo que se supone.
+    expect(section().querySelector('[data-proposal="prop_1"]')).toBeTruthy();
+  });
+
+  it('applied: false enseña el motivo y no recarga la memoria', async () => {
+    const native = await withProposals([proposal()]);
+    native.calls.memoryApplyProposal.mockResolvedValue({ applied: false, message: 'La propuesta caducó.' });
+    const decisionsBefore = native.calls.memoryDecisions.mock.calls.length;
+    await act(async () =>
+      fireEvent.click(within(section()).getByRole('button', { name: /^Apply:/ })),
+    );
+    await waitFor(() => expect(section().textContent).toContain('La propuesta caducó.'));
+    expect(native.calls.memoryDecisions.mock.calls.length).toBe(decisionsBefore);
+  });
+
+  it('Dismiss rechaza con el id y vuelve a pedir la lista', async () => {
+    const native = await withProposals([proposal()]);
+    const before = native.calls.memoryProposals.mock.calls.length;
+    await act(async () =>
+      fireEvent.click(within(section()).getByRole('button', { name: /^Dismiss:/ })),
+    );
+    expect(native.calls.memoryRejectProposal).toHaveBeenCalledWith('prop_1');
+    await waitFor(() => expect(native.calls.memoryProposals.mock.calls.length).toBe(before + 1));
+  });
+
+  it('sin respuesta: resultado desconocido, sin reintento', async () => {
+    const native = await withProposals([proposal()]);
+    native.calls.memoryApplyProposal.mockRejectedValue({ kind: 'unknown', code: null, reason: null, message: 'x' });
+    await act(async () =>
+      fireEvent.click(within(section()).getByRole('button', { name: /^Apply:/ })),
+    );
+    await waitFor(() => expect(section().textContent).toContain('Result unknown'));
+    await flush();
+    expect(native.calls.memoryApplyProposal).toHaveBeenCalledTimes(1);
+  });
+
+  it('Review now pide una pasada (sin force), cuenta lo que propuso y vuelve a pedir la lista', async () => {
+    const native = await withProposals([]);
+    native.calls.memoryDream.mockResolvedValue({
+      status: 'done',
+      message: 'ok',
+      proposals: [proposal(), proposal({ id: 'prop_2' })],
+      discarded: 1,
+      tokens: 1234,
+    });
+    const before = native.calls.memoryProposals.mock.calls.length;
+    await act(async () => fireEvent.click(within(section()).getByRole('button', { name: 'Review the memory now' })));
+    expect(native.calls.memoryDream).toHaveBeenCalledWith(false);
+    await waitFor(() => expect(section().textContent).toContain('Reviewed: 2 suggested changes.'));
+    expect(native.calls.memoryProposals.mock.calls.length).toBe(before + 1);
+  });
+
+  it('cuenta lo que no se pudo: nada nuevo, tope diario, sin modelo, fallo del modelo', async () => {
+    const native = await withProposals([]);
+    const ask = async (result: Record<string, unknown>) => {
+      native.calls.memoryDream.mockResolvedValue({ message: 'm', proposals: [], discarded: 0, tokens: null, ...result });
+      await act(async () => fireEvent.click(within(section()).getByRole('button', { name: 'Review the memory now' })));
+    };
+    await ask({ status: 'skipped', reason: 'nothing-new' });
+    await waitFor(() => expect(section().textContent).toContain('No new conversations since the last review.'));
+    await ask({ status: 'skipped', reason: 'budget' });
+    await waitFor(() => expect(section().textContent).toContain('limit for memory reviews'));
+    await ask({ status: 'skipped', reason: 'no-model' });
+    await waitFor(() => expect(section().textContent).toContain('No model is available'));
+    await ask({ status: 'failed', reason: 'model-failed', message: 'The model failed: boom' });
+    await waitFor(() => expect(within(section()).getByRole('alert').textContent).toContain('boom'));
+    await ask({ status: 'done' });
+    await waitFor(() => expect(section().textContent).toContain('Reviewed: nothing to change.'));
+  });
+
+  it('una revisión sin respuesta es resultado desconocido y no se repite', async () => {
+    const native = await withProposals([]);
+    native.calls.memoryDream.mockRejectedValue({ kind: 'unknown', code: null, reason: null, message: 'x' });
+    await act(async () => fireEvent.click(within(section()).getByRole('button', { name: 'Review the memory now' })));
+    await waitFor(() => expect(section().textContent).toContain('Result unknown'));
+    await flush();
+    expect(native.calls.memoryDream).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin control, los botones están deshabilitados; una respuesta ilegible se dice', async () => {
+    const native = fakeNative();
+    native.calls.memoryProposals.mockResolvedValue({ proposals: [proposal()] });
+    render(
+      <NativeProvider value={native}>
+        <App />
+      </NativeProvider>,
+    );
+    act(() => {
+      native.push({ type: 'connection', state: { ...CONNECTED, capabilities: ['observe'] } as typeof CONNECTED });
+      native.push({ type: 'sessions', sessionIds: [] });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant' }));
+    await waitFor(() => expect(section().textContent).toContain('Update “Lucia lives in Valencia”'));
+    for (const name of ['Review the memory now', /^Apply:/, /^Dismiss:/]) {
+      expect((within(section()).getByRole('button', { name }) as HTMLButtonElement).disabled).toBe(true);
+    }
+    cleanup();
+    const broken = fakeNative();
+    broken.calls.memoryProposals.mockResolvedValue({ proposals: [{ id: 3 }] });
+    await withPanel(broken);
+    await waitFor(() =>
+      expect(section().textContent).toContain('The daemon answered in a way this version of Dot cannot read.'),
+    );
   });
 });
 

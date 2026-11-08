@@ -18,6 +18,8 @@ export type {
   ProtocolChatMessage,
   ProtocolContextReport,
   ProtocolDecision,
+  ProtocolDreamResult,
+  ProtocolProposal,
   ProtocolMemorySection,
   ProtocolEvent,
   ProtocolHistoryPage,

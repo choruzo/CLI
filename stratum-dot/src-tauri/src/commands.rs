@@ -331,6 +331,52 @@ pub async fn dot_memory_forget(
         .await
 }
 
+/// M19 fase 5 — las propuestas de dreaming pendientes del asistente. Solo lectura.
+#[tauri::command]
+pub async fn dot_memory_proposals(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::MemoryProposals).await
+}
+
+/// M19 fase 5 — pedir una pasada de dreaming: **solo propone**, no escribe la
+/// memoria. Gasta modelo; sin respuesta queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn dot_memory_dream(
+    state: State<'_, DotState>,
+    force: Option<bool>,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryDream {
+            force: force.unwrap_or(false),
+        })
+        .await
+}
+
+/// M19 fase 5 — aplicar una propuesta (lo que cambia la memoria): conexión
+/// principal (`control`), sin broker, como olvidar.
+#[tauri::command]
+pub async fn dot_memory_apply_proposal(
+    state: State<'_, DotState>,
+    proposal_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryApplyProposal { proposal_id })
+        .await
+}
+
+/// M19 fase 5 — rechazar una propuesta: la memoria no se toca.
+#[tauri::command]
+pub async fn dot_memory_reject_proposal(
+    state: State<'_, DotState>,
+    proposal_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryRejectProposal { proposal_id })
+        .await
+}
+
 /// M19 — mover un recuerdo del asistente a otra sección. Conexión principal
 /// (capacidad `control`), sin broker: no cambia lo que el agente puede hacer. La
 /// sección la valida `dot-link` contra la lista cerrada; sin respuesta queda

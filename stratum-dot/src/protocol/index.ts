@@ -19,6 +19,8 @@ export type {
   ProtocolBoxScreen,
   ProtocolBoxStatus,
   ProtocolDecision,
+  ProtocolDreamResult,
+  ProtocolProposal,
   ProtocolMemorySection,
   ProtocolMemoryItem,
   ProtocolChatMessage,

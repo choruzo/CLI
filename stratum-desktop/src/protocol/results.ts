@@ -12,6 +12,8 @@ import {
 import type {
   ProtocolContextReport,
   ProtocolDecision,
+  ProtocolDreamResult,
+  ProtocolProposal,
   ProtocolHistoryPage,
   ProtocolModel,
   ProtocolRun,
@@ -86,4 +88,28 @@ export function parseForget(raw: unknown): boolean | null {
 export function parseMoved(raw: unknown): boolean | null {
   const parsed = RESULTS['memory.reclassify'].safeParse(raw);
   return parsed.success ? parsed.data.updated : null;
+}
+
+/** M19 fase 5 — `memory.proposals`: las propuestas de dreaming pendientes. */
+export function parseProposals(raw: unknown): ProtocolProposal[] | null {
+  const parsed = RESULTS['memory.proposals'].safeParse(raw);
+  return parsed.success ? parsed.data.proposals : null;
+}
+
+/** M19 fase 5 — `memory.dream`: cómo terminó una pasada (solo propone). */
+export function parseDream(raw: unknown): ProtocolDreamResult | null {
+  const parsed = RESULTS['memory.dream'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** M19 fase 5 — `memory.applyProposal`: `applied: false` con el motivo si ya no se puede. */
+export function parseApplied(raw: unknown): { applied: boolean; message: string } | null {
+  const parsed = RESULTS['memory.applyProposal'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** M19 fase 5 — `memory.rejectProposal`. */
+export function parseRejected(raw: unknown): { rejected: boolean; message: string } | null {
+  const parsed = RESULTS['memory.rejectProposal'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }

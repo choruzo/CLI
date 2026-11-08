@@ -152,9 +152,13 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_list_models',
       'desktop_list_skills',
       'desktop_memory',
+      'desktop_memory_apply_proposal',
       'desktop_memory_decisions',
+      'desktop_memory_dream',
       'desktop_memory_forget',
+      'desktop_memory_proposals',
       'desktop_memory_reclassify',
+      'desktop_memory_reject_proposal',
       'desktop_new_chat',
       'desktop_open_config',
       'desktop_pause_run',
@@ -315,13 +319,21 @@ describe('aprobar desde Desktop: las mismas piezas que Dot (M8/M9)', () => {
 describe('memoria global: la del asistente, y solo esa', () => {
   it('ni el webview ni un comando eligen de quién es la memoria: la fija el perfil del enlace', () => {
     const commands = rustCode(join(TAURI, 'src', 'commands.rs'));
-    for (const name of ['desktop_memory_decisions', 'desktop_memory_forget', 'desktop_memory_reclassify']) {
+    for (const name of [
+      'desktop_memory_decisions',
+      'desktop_memory_forget',
+      'desktop_memory_reclassify',
+      'desktop_memory_proposals',
+      'desktop_memory_dream',
+      'desktop_memory_apply_proposal',
+      'desktop_memory_reject_proposal',
+    ]) {
       const signature = new RegExp(`pub async fn ${name}\\(([\\s\\S]*?)\\) ->`).exec(commands)?.[1] ?? '';
       expect(signature, name).not.toBe('');
       expect(signature, name).not.toMatch(/agent|cwd/);
     }
     const native = code(join(SRC, 'ipc', 'native.ts'));
-    for (const call of native.matchAll(/invoke<unknown>\('desktop_memory_(?:decisions|forget|reclassify)', (\{[^}]*\})\)/g)) {
+    for (const call of native.matchAll(/invoke<unknown>\('desktop_memory_(?:decisions|forget|reclassify|proposals|dream|apply_proposal|reject_proposal)', (\{[^}]*\})\)/g)) {
       expect(call[1]).not.toMatch(/agent|cwd/);
     }
     expect(commands).not.toMatch(/"companion"/);

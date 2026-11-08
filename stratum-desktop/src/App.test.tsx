@@ -80,6 +80,16 @@ function rig() {
     memoryDecisions: vi.fn(async () => ({ decisions: [] })),
     memoryForget: vi.fn(async () => ({ removed: true })),
     memoryMove: vi.fn(async () => ({ updated: true })),
+    memoryProposals: vi.fn(async () => ({ proposals: [] })),
+    memoryDream: vi.fn(async () => ({
+      status: 'done',
+      message: 'ok',
+      proposals: [],
+      discarded: 0,
+      tokens: null,
+    })),
+    memoryApplyProposal: vi.fn(async () => ({ applied: true, message: 'ok' })),
+    memoryRejectProposal: vi.fn(async () => ({ rejected: true, message: 'ok' })),
     prefs: vi.fn(async () => {
       throw new Error('sin prefs en el test');
     }),

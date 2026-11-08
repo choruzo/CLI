@@ -184,6 +184,14 @@ export interface NativeBridge {
   memoryForget(decisionId: string): Promise<unknown>;
   /** M19 — mover un recuerdo a otra sección (`memory.reclassify`); el agente lo fija el lado nativo. */
   memoryMove(decisionId: string, section: string): Promise<unknown>;
+  /** M19 fase 5 — las propuestas de dreaming pendientes (`memory.proposals`). */
+  memoryProposals(): Promise<unknown>;
+  /** M19 fase 5 — pedir una revisión (`memory.dream`): solo propone; gasta modelo. */
+  memoryDream(force: boolean): Promise<unknown>;
+  /** M19 fase 5 — aplicar una propuesta (`memory.applyProposal`): lo que cambia la memoria. */
+  memoryApplyProposal(proposalId: string): Promise<unknown>;
+  /** M19 fase 5 — rechazar una propuesta (`memory.rejectProposal`). */
+  memoryRejectProposal(proposalId: string): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
   /** Los ajustes editables del `.stratumrc.json` global, con los secretos enmascarados. */
@@ -239,6 +247,12 @@ export const tauriBridge: NativeBridge = {
   memoryForget: (decisionId) => invoke<unknown>('desktop_memory_forget', { decisionId }),
   memoryMove: (decisionId, section) =>
     invoke<unknown>('desktop_memory_reclassify', { decisionId, section }),
+  memoryProposals: () => invoke<unknown>('desktop_memory_proposals'),
+  memoryDream: (force) => invoke<unknown>('desktop_memory_dream', { force }),
+  memoryApplyProposal: (proposalId) =>
+    invoke<unknown>('desktop_memory_apply_proposal', { proposalId }),
+  memoryRejectProposal: (proposalId) =>
+    invoke<unknown>('desktop_memory_reject_proposal', { proposalId }),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
   settingsGet: () => invoke<SettingsView>('desktop_settings_get'),

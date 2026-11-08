@@ -244,6 +244,22 @@ export function fakeNative(): FakeNative {
     memoryMove: vi.fn(
       async (_decisionId: string, _section: string): Promise<unknown> => ({ updated: true }),
     ),
+    memoryProposals: vi.fn(async (): Promise<unknown> => ({ proposals: [] })),
+    memoryDream: vi.fn(
+      async (_force: boolean): Promise<unknown> => ({
+        status: 'done',
+        message: 'ok',
+        proposals: [],
+        discarded: 0,
+        tokens: null,
+      }),
+    ),
+    memoryApplyProposal: vi.fn(
+      async (_proposalId: string): Promise<unknown> => ({ applied: true, message: 'ok' }),
+    ),
+    memoryRejectProposal: vi.fn(
+      async (_proposalId: string): Promise<unknown> => ({ rejected: true, message: 'ok' }),
+    ),
     channelsStatus: vi.fn(async (): Promise<unknown> => ({ telegram: TELEGRAM_OFF })),
     channelsPairBegin: vi.fn(async (): Promise<unknown> => ({
       code: 'ABCDEFGHJK',

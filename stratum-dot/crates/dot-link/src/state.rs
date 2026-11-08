@@ -275,7 +275,19 @@ pub enum CallAction {
     MemoryForget { decision_id: String },
     /// M19 — `memory.reclassify` del asistente: mover una decisión a otra sección
     /// (`profile`, `person`, `project`, `topic` o `area`). El nativo fija el agente.
-    MemoryReclassify { decision_id: String, section: String },
+    MemoryReclassify {
+        decision_id: String,
+        section: String,
+    },
+    /// M19 — `memory.proposals` del asistente: las propuestas de dreaming pendientes. Solo lectura.
+    MemoryProposals,
+    /// M19 — `memory.dream` del asistente: una pasada que **propone** (no escribe la memoria).
+    /// Gasta modelo: sin respuesta, su resultado es desconocido y no se repite.
+    MemoryDream { force: bool },
+    /// M19 — `memory.applyProposal`: aplicar una propuesta (lo único que cambia la memoria).
+    MemoryApplyProposal { proposal_id: String },
+    /// M19 — `memory.rejectProposal`: rechazar una propuesta.
+    MemoryRejectProposal { proposal_id: String },
     /// Cierre de M14 — conversación nueva del asistente: `sessions.open` con
     /// `agent: 'companion'` y `fresh: true`, fijados aquí. El daemon compacta y
     /// archiva la actual; el webview no elige agente ni puede cerrar otra sesión.
@@ -345,6 +357,10 @@ impl CallAction {
             CallAction::MemoryDecisions { .. } => "memory-decisions",
             CallAction::MemoryForget { .. } => "memory-forget",
             CallAction::MemoryReclassify { .. } => "memory-reclassify",
+            CallAction::MemoryProposals => "memory-proposals",
+            CallAction::MemoryDream { .. } => "memory-dream",
+            CallAction::MemoryApplyProposal { .. } => "memory-apply-proposal",
+            CallAction::MemoryRejectProposal { .. } => "memory-reject-proposal",
             CallAction::NewCompanionConversation => "new-companion-conversation",
             CallAction::ChannelsStatus => "channels-status",
             CallAction::ChannelsPairBegin => "channels-pair-begin",
@@ -369,6 +385,9 @@ impl CallAction {
                 | CallAction::GrantsRevoke { .. }
                 | CallAction::MemoryForget { .. }
                 | CallAction::MemoryReclassify { .. }
+                | CallAction::MemoryDream { .. }
+                | CallAction::MemoryApplyProposal { .. }
+                | CallAction::MemoryRejectProposal { .. }
                 | CallAction::NewCompanionConversation
                 | CallAction::ChannelsPairBegin
                 | CallAction::ChannelsUnpair { .. }

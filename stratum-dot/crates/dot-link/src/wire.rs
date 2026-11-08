@@ -80,6 +80,14 @@ pub enum MainMethod {
     /// M19 — mover un recuerdo de la memoria del asistente a otra sección
     /// (`control`; no cambia lo que el agente puede hacer).
     MemoryReclassify,
+    /// M19 — las propuestas de dreaming pendientes de la memoria del asistente (`observe`).
+    MemoryProposals,
+    /// M19 — pedir una pasada de dreaming: solo propone (`control`; gasta modelo).
+    MemoryDream,
+    /// M19 — aplicar una propuesta: lo que cambia la memoria (`control`, como olvidar).
+    MemoryApplyProposal,
+    /// M19 — rechazar una propuesta: la memoria no se toca (`control`).
+    MemoryRejectProposal,
     /// M18 (Dot) — el canal de Telegram: estado (sin token ni código), pedir un
     /// código de emparejamiento y desemparejar (solo resta). Emparejar de verdad
     /// (`channels.pairConfirm`) da autoridad: va por [`ApproverMethod`].
@@ -94,7 +102,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 38] = [
+    pub const ALL: [MainMethod; 42] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -128,6 +136,10 @@ impl MainMethod {
         MainMethod::MemoryDecisions,
         MainMethod::MemoryForget,
         MainMethod::MemoryReclassify,
+        MainMethod::MemoryProposals,
+        MainMethod::MemoryDream,
+        MainMethod::MemoryApplyProposal,
+        MainMethod::MemoryRejectProposal,
         MainMethod::ChannelsStatus,
         MainMethod::ChannelsPairBegin,
         MainMethod::ChannelsUnpair,
@@ -172,6 +184,10 @@ impl WireMethod for MainMethod {
             MainMethod::MemoryDecisions => "memory.decisions",
             MainMethod::MemoryForget => "memory.forget",
             MainMethod::MemoryReclassify => "memory.reclassify",
+            MainMethod::MemoryProposals => "memory.proposals",
+            MainMethod::MemoryDream => "memory.dream",
+            MainMethod::MemoryApplyProposal => "memory.applyProposal",
+            MainMethod::MemoryRejectProposal => "memory.rejectProposal",
             MainMethod::ChannelsStatus => "channels.status",
             MainMethod::ChannelsPairBegin => "channels.pairBegin",
             MainMethod::ChannelsUnpair => "channels.unpair",
@@ -378,6 +394,10 @@ mod tests {
                 "memory.decisions",
                 "memory.forget",
                 "memory.reclassify",
+                "memory.proposals",
+                "memory.dream",
+                "memory.applyProposal",
+                "memory.rejectProposal",
                 "channels.status",
                 "channels.pairBegin",
                 "channels.unpair",
@@ -406,7 +426,11 @@ mod tests {
             // cliente. Única excepción (M17, M19): ver, olvidar y reclasificar la del asistente.
             let companion_memory = name == "memory.decisions"
                 || name == "memory.forget"
-                || name == "memory.reclassify";
+                || name == "memory.reclassify"
+                || name == "memory.proposals"
+                || name == "memory.dream"
+                || name == "memory.applyProposal"
+                || name == "memory.rejectProposal";
             assert!(
                 !name.starts_with("host.")
                     && !name.starts_with("jobs.")

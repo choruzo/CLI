@@ -262,6 +262,14 @@ export interface NativeBridge {
   memoryForget(decisionId: string): Promise<unknown>;
   /** M19 — mover un recuerdo a otra sección (`memory.reclassify`); el agente lo fija el nativo. */
   memoryMove(decisionId: string, section: string): Promise<unknown>;
+  /** M19 fase 5 — las propuestas de dreaming pendientes (`memory.proposals`). */
+  memoryProposals(): Promise<unknown>;
+  /** M19 fase 5 — pedir una revisión (`memory.dream`): solo propone; gasta modelo. */
+  memoryDream(force: boolean): Promise<unknown>;
+  /** M19 fase 5 — aplicar una propuesta (`memory.applyProposal`): lo que cambia la memoria. */
+  memoryApplyProposal(proposalId: string): Promise<unknown>;
+  /** M19 fase 5 — rechazar una propuesta (`memory.rejectProposal`). */
+  memoryRejectProposal(proposalId: string): Promise<unknown>;
   /** M17 — la memoria de sesión de una conversación (solo lectura). */
   sessionMemory(sessionId: string): Promise<unknown>;
   /**
@@ -359,6 +367,12 @@ export const tauriBridge: NativeBridge = {
   memoryForget: (decisionId) => invoke<unknown>('dot_memory_forget', { decisionId }),
   memoryMove: (decisionId, section) =>
     invoke<unknown>('dot_memory_reclassify', { decisionId, section }),
+  memoryProposals: () => invoke<unknown>('dot_memory_proposals'),
+  memoryDream: (force) => invoke<unknown>('dot_memory_dream', { force }),
+  memoryApplyProposal: (proposalId) =>
+    invoke<unknown>('dot_memory_apply_proposal', { proposalId }),
+  memoryRejectProposal: (proposalId) =>
+    invoke<unknown>('dot_memory_reject_proposal', { proposalId }),
   sessionMemory: (sessionId) => invoke<unknown>('dot_session_memory', { sessionId }),
   newCompanionConversation: () => invoke<unknown>('dot_new_companion_conversation'),
   channelsStatus: () => invoke<unknown>('dot_channels_status'),

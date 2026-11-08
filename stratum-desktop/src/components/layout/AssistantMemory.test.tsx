@@ -27,6 +27,16 @@ function bridge(overrides: Partial<NativeBridge> = {}): NativeBridge {
     memoryDecisions: vi.fn(async () => ({ decisions: [decision()] })),
     memoryForget: vi.fn(async () => ({ removed: true })),
     memoryMove: vi.fn(async () => ({ updated: true })),
+    memoryProposals: vi.fn(async () => ({ proposals: [] })),
+    memoryDream: vi.fn(async () => ({
+      status: 'done',
+      message: 'ok',
+      proposals: [],
+      discarded: 0,
+      tokens: null,
+    })),
+    memoryApplyProposal: vi.fn(async () => ({ applied: true, message: 'ok' })),
+    memoryRejectProposal: vi.fn(async () => ({ rejected: true, message: 'ok' })),
     ...overrides,
   } as unknown as NativeBridge;
 }

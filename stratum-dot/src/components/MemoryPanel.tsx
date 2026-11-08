@@ -13,6 +13,7 @@ import {
 } from '../protocol';
 import { parseDecisions, parseForget, parseMoved, parseSessionMemory } from '../protocol/results';
 import { activeRun } from '../protocol/view';
+import { MemoryProposals } from './MemoryProposals';
 import { useSessions } from '../stores/sessionStore';
 
 interface Props {
@@ -199,6 +200,11 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
       <p className="muted small">
         What the assistant remembers across conversations. It never decides what the assistant may do.
       </p>
+      <MemoryProposals
+        connected={connected}
+        canControl={canControl}
+        onApplied={() => void load(appliedRef.current)}
+      />
       <form className="memory-search" onSubmit={search} role="search">
         <input
           type="search"

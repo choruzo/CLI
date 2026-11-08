@@ -90,6 +90,8 @@ pub struct Timings {
     /// Cierre de M14 — conversación nueva del asistente: compactar la actual
     /// llama al modelo de memoria, una o varias veces.
     pub fresh_timeout: Duration,
+    /// M19 — una pasada de dreaming llama al modelo (hasta 2 minutos) y no es una orden corta.
+    pub dream_timeout: Duration,
     pub handshake_timeout: Duration,
     /// Cuánto se espera a que el daemon recién arrancado atienda.
     pub daemon_start_wait: Duration,
@@ -107,6 +109,7 @@ impl Default for Timings {
             open_timeout: Duration::from_secs(90),
             box_timeout: Duration::from_secs(20 * 60),
             fresh_timeout: Duration::from_secs(10 * 60),
+            dream_timeout: Duration::from_secs(5 * 60),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
             idle_poll: Duration::from_secs(2),
@@ -179,6 +182,10 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
     MainMethod::MemoryReclassify,
+    MainMethod::MemoryProposals,
+    MainMethod::MemoryDream,
+    MainMethod::MemoryApplyProposal,
+    MainMethod::MemoryRejectProposal,
     MainMethod::SessionsMemory,
     // M18: el canal de Telegram (emparejar de verdad va por el broker de aprobador).
     MainMethod::ChannelsStatus,
@@ -210,6 +217,10 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
     MainMethod::MemoryReclassify,
+    MainMethod::MemoryProposals,
+    MainMethod::MemoryDream,
+    MainMethod::MemoryApplyProposal,
+    MainMethod::MemoryRejectProposal,
     // Panel de trayectoria: la traza de la sesión que se mira (solo lectura).
     MainMethod::TraceSubscribe,
     MainMethod::TraceUnsubscribe,
@@ -1184,6 +1195,44 @@ fn call_request_as(
                 json!({
                     "agent": profile.memory_agent(),
                     "decisionId": decision_id,
+                    "operationId": operation_id,
+                }),
+            ))
+        }
+        CallAction::MemoryProposals => Ok((
+            MainMethod::MemoryProposals,
+            json!({ "agent": profile.memory_agent() }),
+        )),
+        CallAction::MemoryDream { force } => Ok((
+            MainMethod::MemoryDream,
+            json!({
+                "agent": profile.memory_agent(),
+                "force": force,
+                "operationId": operation_id,
+            }),
+        )),
+        CallAction::MemoryApplyProposal { proposal_id } => {
+            if !valid_id(proposal_id) {
+                return Err(invalid("Invalid proposal id."));
+            }
+            Ok((
+                MainMethod::MemoryApplyProposal,
+                json!({
+                    "agent": profile.memory_agent(),
+                    "proposalId": proposal_id,
+                    "operationId": operation_id,
+                }),
+            ))
+        }
+        CallAction::MemoryRejectProposal { proposal_id } => {
+            if !valid_id(proposal_id) {
+                return Err(invalid("Invalid proposal id."));
+            }
+            Ok((
+                MainMethod::MemoryRejectProposal,
+                json!({
+                    "agent": profile.memory_agent(),
+                    "proposalId": proposal_id,
                     "operationId": operation_id,
                 }),
             ))
@@ -2438,6 +2487,7 @@ impl Actor {
                                 self.cfg.timings.box_timeout
                             }
                             CallAction::NewCompanionConversation => self.cfg.timings.fresh_timeout,
+                            CallAction::MemoryDream { .. } => self.cfg.timings.dream_timeout,
                             _ => self.cfg.timings.request_timeout,
                         };
                         conn.request_within(
@@ -2845,6 +2895,64 @@ mod tests {
                 .1["agent"],
             "assistant"
         );
+        // M19 fase 5: dreaming. Proponer y aplicar son órdenes distintas; el agente lo fija el perfil.
+        let proposals = call_request(&CallAction::MemoryProposals, "op-12").unwrap();
+        assert_eq!(proposals.0, MainMethod::MemoryProposals);
+        assert_eq!(proposals.1, json!({ "agent": "companion" }));
+        assert!(!CallAction::MemoryProposals.mutating());
+        let dream = CallAction::MemoryDream { force: true };
+        let (method, params) = call_request(&dream, "op-13").unwrap();
+        assert_eq!(method, MainMethod::MemoryDream);
+        assert_eq!(
+            params,
+            json!({ "agent": "companion", "force": true, "operationId": "op-13" })
+        );
+        assert!(dream.mutating());
+        let apply = CallAction::MemoryApplyProposal {
+            proposal_id: "prop_1".into(),
+        };
+        let (method, params) = call_request(&apply, "op-14").unwrap();
+        assert_eq!(method, MainMethod::MemoryApplyProposal);
+        assert_eq!(
+            params,
+            json!({ "agent": "companion", "proposalId": "prop_1", "operationId": "op-14" })
+        );
+        assert!(apply.mutating());
+        let reject = CallAction::MemoryRejectProposal {
+            proposal_id: "prop_1".into(),
+        };
+        assert_eq!(
+            call_request(&reject, "op-15").unwrap().0,
+            MainMethod::MemoryRejectProposal
+        );
+        assert!(reject.mutating());
+        for bad in ["".to_string(), "x".repeat(MAX_ID_CHARS + 1)] {
+            assert!(call_request(
+                &CallAction::MemoryApplyProposal {
+                    proposal_id: bad.clone()
+                },
+                "op"
+            )
+            .is_err());
+            assert!(
+                call_request(&CallAction::MemoryRejectProposal { proposal_id: bad }, "op").is_err()
+            );
+        }
+        assert_eq!(
+            call_request_as(&ClientProfile::DESKTOP, &dream, "op-16")
+                .unwrap()
+                .1["agent"],
+            "assistant"
+        );
+        for method in [
+            MainMethod::MemoryProposals,
+            MainMethod::MemoryDream,
+            MainMethod::MemoryApplyProposal,
+            MainMethod::MemoryRejectProposal,
+        ] {
+            assert!(DOT_METHODS.contains(&method));
+            assert!(DESKTOP_METHODS.contains(&method));
+        }
         for method in [
             MainMethod::MemoryDecisions,
             MainMethod::MemoryForget,
