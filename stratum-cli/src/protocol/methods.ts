@@ -21,6 +21,8 @@ import type {
   ProtocolJob,
   ProtocolMemoryAgent,
   ProtocolMemorySection,
+  ProtocolDreamResult,
+  ProtocolProposal,
   ProtocolMemoryStatus,
   ProtocolModel,
   ProtocolPlan,
@@ -492,6 +494,39 @@ export interface ProtocolMethods {
     Mutation & { agent: ProtocolMemoryAgent; decisionId: string; type: ProtocolMemorySection },
     { updated: boolean }
   >;
+  /**
+   * M19 fase 5 — las propuestas de *dreaming* pendientes y vigentes de una
+   * memoria (la de `cwd` o la de `agent`, nunca las dos).
+   */
+  'memory.proposals': Spec<
+    { cwd?: string; agent?: ProtocolMemoryAgent },
+    { proposals: ProtocolProposal[] }
+  >;
+  /**
+   * M19 fase 5 — pedir una pasada de *dreaming* ya: revisa la memoria contra las
+   * conversaciones nuevas de su ámbito y **propone** (no escribe la memoria). Gasta
+   * modelo, con los topes de `memory.dreaming`; `force` revisa las notas aunque no
+   * haya conversaciones nuevas. Una a la vez por memoria (`BUSY` si ya hay una).
+   */
+  'memory.dream': Spec<
+    Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; force?: boolean },
+    ProtocolDreamResult
+  >;
+  /**
+   * M19 fase 5 — aplicar una propuesta: es lo que cambia la memoria. Lo pide una
+   * persona desde un inspector (`control`, como `memory.forget`). Si ya no se
+   * puede (caducó, el objetivo cambió) contesta `applied: false` con el motivo y
+   * la propuesta sigue pendiente.
+   */
+  'memory.applyProposal': Spec<
+    Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; proposalId: string },
+    { applied: boolean; message: string }
+  >;
+  /** M19 fase 5 — rechazar una propuesta: la memoria no se toca. */
+  'memory.rejectProposal': Spec<
+    Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; proposalId: string },
+    { rejected: boolean; message: string }
+  >;
 
   /**
    * M13 — la caja del daemon. Las órdenes al runtime son fijas: el cliente
@@ -717,6 +752,10 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   // Olvidar solo resta, y lo recordado no es autoridad: no exige `approve`.
   'memory.forget': write('control'),
   'memory.reclassify': write('control'),
+  'memory.proposals': read('observe'),
+  'memory.dream': write('control'),
+  'memory.applyProposal': write('control'),
+  'memory.rejectProposal': write('control'),
 
   'box.status': read('observe'),
   'box.screen': read('observe'),

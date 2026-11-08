@@ -52,6 +52,8 @@ import type {
   ProtocolApproval,
   ProtocolApprovalGrant,
   ProtocolDecision,
+  ProtocolDreamResult,
+  ProtocolProposal,
   ProtocolJob,
   ProtocolMemoryEvent,
   ProtocolMemoryStatus,
@@ -342,6 +344,33 @@ export const decisionSchema: z.ZodType<ProtocolDecision> = z.object({
   sessionId: z.string().optional(),
   summary: z.string().optional(),
   updatedAt: z.string().optional(),
+});
+
+const proposalText = z.string().max(2400);
+export const proposalSchema: z.ZodType<ProtocolProposal> = z.object({
+  id: z.string(),
+  kind: z.enum(['create', 'correct', 'merge', 'prune', 'reclassify', 'promote']),
+  createdAt: z.string(),
+  expiresAt: z.string(),
+  rationale: proposalText,
+  evidence: z.array(z.object({ sessionId: z.string(), messageId: z.string() })).max(5),
+  targets: z.array(z.object({ id: z.string(), title: z.string() })).max(5),
+  title: z.string().optional(),
+  content: proposalText.optional(),
+  summary: z.string().optional(),
+  type: z.string().optional(),
+  importance: z.string().optional(),
+});
+
+export const dreamResultSchema: z.ZodType<ProtocolDreamResult> = z.object({
+  status: z.enum(['done', 'skipped', 'failed']),
+  reason: z
+    .enum(['budget', 'nothing-new', 'model-failed', 'unparsable', 'state', 'cancelled', 'no-model'])
+    .optional(),
+  message: z.string().max(1000),
+  proposals: z.array(proposalSchema).max(40),
+  discarded: z.number().int().min(0),
+  tokens: z.number().min(0).nullable(),
 });
 
 export const memoryEventSchema: z.ZodType<ProtocolMemoryEvent> = z.object({
@@ -1118,6 +1147,21 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       operationId,
     }),
   ),
+  'memory.proposals': memoryRef(z.object({ cwd: cwd.optional(), agent: memoryAgent.optional() })),
+  'memory.dream': memoryRef(
+    z.object({
+      cwd: cwd.optional(),
+      agent: memoryAgent.optional(),
+      force: z.boolean().optional(),
+      operationId,
+    }),
+  ),
+  'memory.applyProposal': memoryRef(
+    z.object({ cwd: cwd.optional(), agent: memoryAgent.optional(), proposalId: id, operationId }),
+  ),
+  'memory.rejectProposal': memoryRef(
+    z.object({ cwd: cwd.optional(), agent: memoryAgent.optional(), proposalId: id, operationId }),
+  ),
   'memory.reclassify': z
     .object({
       agent: memoryAgent,
@@ -1325,6 +1369,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),
   'memory.forget': z.object({ removed: z.boolean() }),
   'memory.reclassify': z.object({ updated: z.boolean() }),
+  'memory.proposals': z.object({ proposals: z.array(proposalSchema) }),
+  'memory.dream': dreamResultSchema,
+  'memory.applyProposal': z.object({ applied: z.boolean(), message: z.string().max(1000) }),
+  'memory.rejectProposal': z.object({ rejected: z.boolean(), message: z.string().max(1000) }),
 
   'box.status': boxResult,
   'box.screen': z.object({ screen: boxScreenSchema }),

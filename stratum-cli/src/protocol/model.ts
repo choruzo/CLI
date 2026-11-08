@@ -327,6 +327,59 @@ export interface ProtocolDecision {
 export type ProtocolMemoryAgent = 'assistant' | 'companion';
 
 /**
+ * M19 fase 5 — una propuesta de *dreaming*: un cambio a la memoria que una pasada
+ * sugiere y que **una persona** aplica o rechaza. Lo que lleva es lo que un
+ * inspector necesita para enseñarla (ya redactado), no el fichero tal cual.
+ */
+export type ProtocolProposalKind =
+  | 'create'
+  | 'correct'
+  | 'merge'
+  | 'prune'
+  | 'reclassify'
+  | 'promote';
+
+export interface ProtocolProposal {
+  id: string;
+  kind: ProtocolProposalKind;
+  createdAt: string;
+  /** Pasada esta fecha ya no se puede aplicar. */
+  expiresAt: string;
+  rationale: string;
+  /** De qué mensajes sale (sesión + mensaje): su procedencia. */
+  evidence: Array<{ sessionId: string; messageId: string }>;
+  /** Las decisiones a las que afecta, con su título de ahora. Vacío en `create`. */
+  targets: Array<{ id: string; title: string }>;
+  /** Lo que quedaría (según el tipo): `create`, `correct` y `merge` traen texto; `reclassify`, el tipo. */
+  title?: string;
+  content?: string;
+  summary?: string;
+  type?: string;
+  importance?: string;
+}
+
+/** M19 fase 5 — cómo terminó una pasada pedida con `memory.dream`. */
+export interface ProtocolDreamResult {
+  /** `done` = hubo pasada (puede no proponer nada); `skipped` = no hacía falta o no se pudo; `failed` = el modelo falló. */
+  status: 'done' | 'skipped' | 'failed';
+  reason?:
+    | 'budget'
+    | 'nothing-new'
+    | 'model-failed'
+    | 'unparsable'
+    | 'state'
+    | 'cancelled'
+    | 'no-model';
+  message: string;
+  /** Las propuestas nuevas de esta pasada. */
+  proposals: ProtocolProposal[];
+  /** Propuestas del modelo que no valían y se descartaron. */
+  discarded: number;
+  /** Tokens que reportó el backend; `null` si no los reportó (nunca un 0 inventado). */
+  tokens: number | null;
+}
+
+/**
  * M19 — secciones de una memoria con secciones (`assistant`, `companion`). El
  * protocolo es puro: `memory/decisions.ts` (`MEMORY_SECTIONS`) repite la lista y
  * un test las ata.

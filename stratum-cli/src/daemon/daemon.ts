@@ -46,6 +46,7 @@ import {
 import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
+import { findWorktreeRoot } from '../config/paths.js';
 import type { StratumConfig } from '../config/schema.js';
 import {
   resolveSessionStartup,
@@ -67,6 +68,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { DreamingService, type DreamingModelFactory, type DreamTarget } from './memory-dreaming.js';
 import { presentedType, summaryOf } from '../memory/decisions.js';
 import {
   BOX_SCREEN_LIMITS,
@@ -193,6 +195,8 @@ export interface StratumdOptions {
    * mueren con el proceso. La pasa `stratum daemon` según `daemon.persistSessions`.
    */
   sessionsDir?: string | null;
+  /** M19 fase 5 — modelo de las pasadas de dreaming. Inyectable para tests; por defecto, `memory.dreaming.model`. */
+  dreamingModel?: DreamingModelFactory;
   /**
    * M12 — dónde guarda su memoria el agente embebido `assistant` y de dónde la
    * migra. Ausente: `~/.stratum/assistant/` desde la de Stratum Desktop.
@@ -329,6 +333,8 @@ export class Stratumd {
   /** M16 — la sesión de cada rutina que se está abriendo: dos disparos a la vez la abren una vez. */
   private readonly routineOpening = new Map<string, Promise<RoutineSession>>();
   private readonly archive: SessionArchive;
+  /** M19 fase 5 — dreaming por el protocolo. */
+  private readonly dreaming: DreamingService;
   /** Sesiones a medio cerrar: ya no se pueden pedir, pero el apagado las espera. */
   private readonly closingSessions = new Set<Promise<void>>();
   private readonly registry = new RunRegistry();
@@ -375,6 +381,7 @@ export class Stratumd {
     this.idleExitMs = opts.idleExitMs ?? Math.round(opts.config.daemon.idleExitMinutes * 60_000);
     this.operations = new OperationCache({ now: this.now, ...opts.operations });
     this.archive = new SessionArchive(opts.sessionsDir ?? null);
+    this.dreaming = new DreamingService(opts.sessionsDir ?? null, opts.dreamingModel);
     this.hub = new EventHub({
       bufferSize: opts.eventBuffer ?? opts.config.daemon.eventBuffer,
       ...(opts.subscriptionQueue ? { maxQueue: opts.subscriptionQueue } : {}),
@@ -656,6 +663,8 @@ export class Stratumd {
       log.info('daemon shutting down', { reason, sessions: this.sessions.size });
       // Lo primero: ninguna rutina vence mientras se apaga.
       this.routines?.stop();
+      // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
+      this.dreaming.close();
       // Y ningún mensaje de un canal entra: deja de escuchar antes de cerrar sesiones.
       await this.settle('channels', () => this.channels?.stop());
       if (this.idleTimer) clearInterval(this.idleTimer);
@@ -1888,6 +1897,43 @@ export class Stratumd {
         return { updated: updated !== undefined };
       },
 
+      'memory.proposals': (params) => ({
+        proposals: this.dreaming.list(this.dreamTarget(params.cwd, params.agent)),
+      }),
+      'memory.dream': async (params) => {
+        const target = this.dreamTarget(params.cwd, params.agent);
+        if (this.dreaming.isRunning(target)) {
+          throw new ProtocolError('BUSY', 'A dreaming pass is already running for this memory.');
+        }
+        return this.dreaming.run(target, { ...(params.force ? { force: true } : {}) });
+      },
+      'memory.applyProposal': async (params) => {
+        const result = await this.dreaming.apply(
+          this.dreamTarget(params.cwd, params.agent),
+          params.proposalId,
+        );
+        // Sin título ni contenido en el log.
+        log.info('memory proposal applied', {
+          proposalId: params.proposalId,
+          memory: params.cwd !== undefined ? 'project' : (params.agent ?? 'assistant'),
+          applied: result.applied,
+          connectionId: conn.id,
+        });
+        return result;
+      },
+      'memory.rejectProposal': (params) => {
+        const result = this.dreaming.reject(
+          this.dreamTarget(params.cwd, params.agent),
+          params.proposalId,
+        );
+        log.info('memory proposal rejected', {
+          proposalId: params.proposalId,
+          rejected: result.rejected,
+          connectionId: conn.id,
+        });
+        return result;
+      },
+
       'box.status': async () => ({ box: await this.box.status() }),
       'box.screen': async () => {
         try {
@@ -2040,6 +2086,20 @@ export class Stratumd {
     const file = cwd !== undefined ? traceFilePath(this.configFor(cwd), sessionId) : null;
     if (!file) throw new ProtocolError('NOT_FOUND', 'Session not found.');
     return file;
+  }
+
+  /** M19 fase 5 — sobre qué memoria y conversaciones actúa una petición de dreaming. */
+  private dreamTarget(cwd: string | undefined, agent?: ProtocolMemoryAgent): DreamTarget {
+    const memory = this.memoryConfigFor(cwd, agent);
+    return {
+      memory,
+      base: this.opts.config,
+      taxonomy: cwd !== undefined ? 'code' : 'sections',
+      scope:
+        cwd !== undefined
+          ? { cwd: findWorktreeRoot(cwd).worktree }
+          : { agent: agent ?? 'assistant' },
+    };
   }
 
   private configFor(cwd: string | undefined): StratumConfig {

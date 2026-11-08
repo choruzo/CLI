@@ -2285,7 +2285,7 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   3. **Hecha (2026-11-08).** Búsqueda en transcripts: tool de solo lectura sobre el `ConversationStore` (sesiones del daemon).
   4. Capa de representaciones: páginas por persona, proyecto o tema con enlaces, derivadas y
      regenerables; nunca fuente de verdad (lo es `decisions.json`).
-  5. **Hecha en el núcleo y la CLI (2026-11-08)**; faltan la rutina del daemon, el protocolo y el control en los inspectores. Dreaming: llamada auxiliar por `tracedCompletion` (origen nuevo en `LLM_CALL_ORIGINS`), con
+  5. **Hecha (2026-11-08)** en el núcleo, la CLI, el protocolo y los inspectores de Dot y Desktop; falta la rutina del daemon (M16) que lo lance sola. Dreaming: llamada auxiliar por `tracedCompletion` (origen nuevo en `LLM_CALL_ORIGINS`), con
      tope de coste; en el daemon, rutina del `companion`/`assistant` (M16); en la CLI, comando manual
      (`stratum memory dream`). Contrasta las notas con los transcripts de su ámbito.
   *Preguntas B1–B6, resueltas por el usuario el 2026-11-08 (se aceptan las recomendaciones)*:
