@@ -84,7 +84,7 @@ const note = (title: string, extra: Partial<DecisionInput> = {}): DecisionInput 
   ...extra,
 });
 
-async function env(options: { noModel?: boolean } = {}): Promise<Env> {
+async function env(options: { noModel?: boolean; schedule?: boolean } = {}): Promise<Env> {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'stratumd-m19-dream-')));
   bases.push(base);
   const sessions = join(base, 'sessions');
@@ -109,6 +109,16 @@ async function env(options: { noModel?: boolean } = {}): Promise<Env> {
   const t = await startTestDaemon({
     base,
     sessionsDir: sessions,
+    ...(options.schedule
+      ? {
+          config: StratumConfigSchema.parse({
+            tools: { auditLog: join(base, 'audit-sched.jsonl') },
+            memory: {
+              dreaming: { schedule: { enabled: true, every: '1h', targets: ['companion'] } },
+            },
+          }),
+        }
+      : {}),
     dreamingModel: () =>
       options.noModel
         ? { ok: false, message: 'no model for the test' }
@@ -353,5 +363,56 @@ describe('M19 — dreaming por el protocolo', () => {
     const result = await op.request('memory.dream', { agent: 'companion', force: true });
     expect(result.proposals).toHaveLength(1);
     expect(JSON.stringify(result.proposals[0])).not.toContain(secret);
+  });
+  it('la pasada programada solo propone, y sin schedule el daemon no tiene planificador', async () => {
+    const off = await env();
+    expect(off.t.daemon.dreamingSchedule).toBeNull();
+
+    const e = await env({ schedule: true });
+    const sched = e.t.daemon.dreamingSchedule;
+    expect(sched).not.toBeNull();
+    expect(sched!.error).toBeNull();
+    expect(sched!.nextFireAt).not.toBeNull();
+
+    e.reply.text = proposalsReply(e.companionIds);
+    const file = join(e.base, 'companion', 'memory', 'decisions.json');
+    const before = readFileSync(file, 'utf-8');
+    const fires = await sched!.fireAll();
+    expect(fires).toHaveLength(1);
+    expect(fires[0]).toMatchObject({
+      agent: 'companion',
+      outcome: 'ran',
+      status: 'done',
+      proposals: 3,
+    });
+    // Solo propuso: la memoria sigue igual y las propuestas esperan a una persona.
+    expect(readFileSync(file, 'utf-8')).toBe(before);
+    const op = await e.t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    expect((await op.request('memory.proposals', { agent: 'companion' })).proposals).toHaveLength(
+      3,
+    );
+    // Sin conversaciones nuevas, la siguiente pasada programada no llama al modelo.
+    const calls = e.prompts.length;
+    const again = await sched!.fireAll();
+    expect(again[0]).toMatchObject({ outcome: 'ran', status: 'skipped', reason: 'nothing-new' });
+    expect(e.prompts.length).toBe(calls);
+  });
+
+  it('las páginas derivadas siguen a la memoria: al pedir una pasada y al aplicar', async () => {
+    const e = await env();
+    e.reply.text = proposalsReply(e.companionIds);
+    const op = await e.t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    const wiki = join(e.base, 'companion', 'memory', 'wiki');
+    const { proposals } = await op.request('memory.dream', { agent: 'companion' });
+    // Tras la pasada existen las páginas de lo que ya había; nada de lo propuesto.
+    expect(readFileSync(join(wiki, 'lucia-vive-en-valencia.md'), 'utf-8')).toContain(
+      '<!-- stratum:generated',
+    );
+    await op.request('memory.applyProposal', { agent: 'companion', proposalId: proposals[0]!.id });
+    expect(readFileSync(join(wiki, 'lucia-vive-en-valencia.md'), 'utf-8')).toContain(
+      'Su hermana Lucía vive en Sevilla.',
+    );
+    // Aislamiento: el asistente no tiene páginas por lo que hizo el companion.
+    expect(() => readFileSync(join(e.base, 'assistant', 'memory', 'wiki', 'index.md'))).toThrow();
   });
 });

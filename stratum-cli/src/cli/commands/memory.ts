@@ -18,6 +18,7 @@ import { dream } from '../../memory/dreaming/dream.js';
 import { openDreamingFiles } from '../../memory/dreaming/files.js';
 import { formatProposal } from '../../memory/dreaming/format.js';
 import { resolveDreamingModel } from '../../memory/dreaming/model.js';
+import { syncRepresentations } from '../../memory/representations/sync.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { redactText } from '../../security/redact-output.js';
 import { listSources } from '../../transcripts/search.js';
@@ -179,6 +180,35 @@ function dreamingTarget(config: StratumConfig, flags: MemoryScopeFlags) {
   };
 }
 
+const memoryWiki = new Command('wiki')
+  .description(
+    'Regenerate the linked pages derived from the memory (wiki/ next to decisions.json; never the source of truth)',
+  )
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .action((opts: MemoryScopeFlags) => {
+    const target = dreamingTarget(loadConfigOrExit(), opts);
+    const result = syncRepresentations(
+      target.memory,
+      getDecisionMemory(target.memory).list(),
+      target.taxonomy,
+    );
+    if (!result.applicable) {
+      process.stderr.write(
+        'Las páginas enlazadas solo existen en las memorias con secciones: usa --global o --companion.\n',
+      );
+      process.exit(1);
+    }
+    process.stdout.write(
+      `${result.dir}: ${result.written} escritas, ${result.unchanged} sin cambios, ` +
+        `${result.removed} retiradas${result.foreign > 0 ? `, ${result.foreign} ajenas intactas` : ''}.\n`,
+    );
+    if (result.errors > 0) {
+      process.stderr.write(`${result.errors} errores al escribir (mira el log).\n`);
+      process.exit(1);
+    }
+  });
+
 const memoryDream = new Command('dream')
   .description(
     'Review the memory against recent conversations and PROPOSE changes (never writes the memory)',
@@ -312,5 +342,6 @@ export const memoryCommand = new Command('memory')
   .addCommand(memoryForget)
   .addCommand(memoryReclassify)
   .addCommand(memoryDream)
+  .addCommand(memoryWiki)
   .addCommand(memoryProposals)
   .addCommand(memoryShow);

@@ -11,6 +11,7 @@ import { dream } from '../memory/dreaming/dream.js';
 import { openDreamingFiles } from '../memory/dreaming/files.js';
 import { resolveDreamingModel, type DreamingModel } from '../memory/dreaming/model.js';
 import type { Proposal } from '../memory/dreaming/proposals.js';
+import { syncRepresentations } from '../memory/representations/sync.js';
 import type { MemoryTaxonomy } from '../memory/decisions.js';
 import type { StratumConfig } from '../config/schema.js';
 import { getLogger } from '../logging/index.js';
@@ -155,6 +156,8 @@ export class DreamingService {
     const key = this.key(target);
     this.running.add(key);
     try {
+      // Antes de revisar, las páginas derivadas se alinean con lo que hay hoy.
+      this.syncWiki(target);
       const files = openDreamingFiles(target.memory);
       const memory = getDecisionMemory(target.memory);
       const redact = (text: string) => redactText(text, target.memory);
@@ -202,6 +205,15 @@ export class DreamingService {
     }
   }
 
+  /** Las páginas derivadas (fase 4) siguen a la memoria; nunca hacen fallar a quien las pide. */
+  private syncWiki(target: DreamTarget): void {
+    try {
+      syncRepresentations(target.memory, getDecisionMemory(target.memory).list(), target.taxonomy);
+    } catch (err) {
+      log.warn('wiki sync failed', { err: String(err).slice(0, 200) });
+    }
+  }
+
   async apply(
     target: DreamTarget,
     proposalId: string,
@@ -211,6 +223,7 @@ export class DreamingService {
       proposals: openDreamingFiles(target.memory).proposals,
       taxonomy: target.taxonomy,
     });
+    if (result.ok) this.syncWiki(target);
     return { applied: result.ok, message: redactText(result.message, target.memory) };
   }
 
