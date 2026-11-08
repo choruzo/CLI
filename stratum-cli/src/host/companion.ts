@@ -8,8 +8,8 @@ import { COMPANION_TOOLS } from '../agent/presets.js';
 import { ToolRegistry } from '../tools/registry.js';
 import { webSearchTool } from '../tools/web/search.js';
 import { webFetchTool } from '../tools/web/fetch.js';
-import { storeDecisionTool } from '../tools/memory/store-decision.js';
-import { recallDecisionsTool } from '../tools/memory/recall-decisions.js';
+import { storeMemoryTool } from '../tools/memory/store-decision.js';
+import { recallMemoryTool } from '../tools/memory/recall-decisions.js';
 import { readSkillTool } from '../tools/skills/read-skill.js';
 import { questionTool } from '../tools/question.js';
 import { todoTool } from '../tools/todo.js';
@@ -108,8 +108,8 @@ export function buildCompanionRegistry(
   for (const tool of [
     webSearchTool,
     webFetchTool,
-    storeDecisionTool,
-    recallDecisionsTool,
+    storeMemoryTool,
+    recallMemoryTool,
     readSkillTool,
     questionTool,
     todoTool,

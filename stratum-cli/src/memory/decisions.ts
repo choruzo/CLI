@@ -6,15 +6,58 @@ import { getLogger } from '../logging/index.js';
 
 const log = getLogger('memory');
 
-export type DecisionType =
-  | 'architectural'
-  | 'tooling'
-  | 'convention'
-  | 'bug_fix'
-  | 'security'
-  | 'user_preference';
+/** Tipos de la memoria de `coding` (la CLI): no cambian. */
+export const CODE_DECISION_TYPES = [
+  'architectural',
+  'tooling',
+  'convention',
+  'bug_fix',
+  'security',
+  'user_preference',
+] as const;
+
+/**
+ * M19 — secciones de la memoria de `assistant` (Desktop) y `companion` (Dot):
+ * `profile` es «Tú»; el resto agrupa lo que se recuerda de personas, proyectos,
+ * temas y áreas de la vida.
+ */
+export const MEMORY_SECTIONS = ['profile', 'person', 'project', 'topic', 'area'] as const;
+
+export type CodeDecisionType = (typeof CODE_DECISION_TYPES)[number];
+export type MemorySection = (typeof MEMORY_SECTIONS)[number];
+export type DecisionType = CodeDecisionType | MemorySection;
+
+/**
+ * Qué clasificación usa una memoria: `code` (los 6 tipos de siempre) o
+ * `sections` (M19). La fija el preset, nunca el cliente.
+ */
+export type MemoryTaxonomy = 'code' | 'sections';
 
 export type DecisionImportance = 'low' | 'medium' | 'high';
+
+function isSection(type: string): type is MemorySection {
+  return (MEMORY_SECTIONS as readonly string[]).includes(type);
+}
+
+/**
+ * Tipo con el que se **presenta** un recuerdo en una memoria con secciones
+ * (B2/B3). Los 6 tipos antiguos pasan a `topic`, salvo `user_preference`, que
+ * pasa a `profile`. Es una vista al leer: el fichero no se reescribe, así un
+ * Stratum anterior sigue leyendo lo que escribió. En `code` no se cambia nada.
+ */
+export function presentedType(type: string, taxonomy: MemoryTaxonomy): string {
+  if (taxonomy === 'code') return type;
+  if (isSection(type)) return type;
+  return type === 'user_preference' ? 'profile' : 'topic';
+}
+
+/** Resumen de una línea: el guardado o, si falta, el principio del contenido. */
+export function summaryOf(record: Pick<DecisionRecord, 'summary' | 'content'>): string {
+  const own = record.summary?.trim();
+  if (own) return own;
+  const first = record.content.trim().split('\n')[0] ?? '';
+  return first.length > 140 ? `${first.slice(0, 139)}…` : first;
+}
 
 /** Entrada completa persistida en decisions.json (§5, Capa 2). */
 export interface DecisionRecord {
@@ -30,6 +73,10 @@ export interface DecisionRecord {
   /** Origen: 'agent' (tool store_decision) o 'auto' (extracción en background). */
   source?: 'agent' | 'auto';
   session_id?: string;
+  /** M19 — resumen de una línea (solo memorias con secciones). */
+  summary?: string;
+  /** M19 — última vez que se cambió el recuerdo (al crearlo, `timestamp`). */
+  updatedAt?: string;
 }
 
 /** Campos que aporta quien crea la decisión; el resto se deriva. */
@@ -39,6 +86,7 @@ export interface DecisionInput {
   type: DecisionType;
   tags: string[];
   importance: DecisionImportance;
+  summary?: string;
   project?: string;
   source?: 'agent' | 'auto';
   session_id?: string;
@@ -62,14 +110,7 @@ function yyyymmdd(d: Date): string {
 const DecisionRecordSchema = z.object({
   id: z.string().min(1),
   timestamp: z.string(),
-  type: z.enum([
-    'architectural',
-    'tooling',
-    'convention',
-    'bug_fix',
-    'security',
-    'user_preference',
-  ]),
+  type: z.enum([...CODE_DECISION_TYPES, ...MEMORY_SECTIONS]),
   title: z.string(),
   content: z.string(),
   tags: z.array(z.string()),
@@ -78,6 +119,8 @@ const DecisionRecordSchema = z.object({
   project: z.string().optional(),
   source: z.enum(['agent', 'auto']).optional(),
   session_id: z.string().optional(),
+  summary: z.string().optional(),
+  updatedAt: z.string().optional(),
 });
 
 /**
@@ -216,6 +259,8 @@ export class DecisionStore {
       tags: input.tags,
       importance: input.importance,
       embedding_ref: `vec_${id}`,
+      updatedAt: now.toISOString(),
+      ...(input.summary?.trim() ? { summary: input.summary.trim() } : {}),
       ...(input.project ? { project: input.project } : {}),
       ...(input.source ? { source: input.source } : {}),
       ...(input.session_id ? { session_id: input.session_id } : {}),
@@ -241,6 +286,33 @@ export class DecisionStore {
     if (next.length === entries.length) return false;
     this.writeEntries(next);
     return true;
+  }
+
+  /**
+   * M19 — cambia el tipo (reclasificar, B2) y/o el resumen de una decisión
+   * conservando el resto del registro tal cual está en disco, también lo que
+   * esta versión no conoce. Sella `updatedAt`. Devuelve el registro nuevo o
+   * `undefined` si el id no está (o la entrada no valida).
+   */
+  update(
+    id: string,
+    patch: { type?: DecisionType; summary?: string },
+    now: Date = new Date(),
+  ): DecisionRecord | undefined {
+    const entries = this.entriesForWrite();
+    const idx = entries.findIndex((e) => isObject(e) && e.id === id);
+    if (idx < 0) return undefined;
+    const next = {
+      ...(entries[idx] as Record<string, unknown>),
+      ...(patch.type !== undefined ? { type: patch.type } : {}),
+      ...(patch.summary !== undefined ? { summary: patch.summary.trim() } : {}),
+      updatedAt: now.toISOString(),
+    };
+    const parsed = DecisionRecordSchema.safeParse(next);
+    if (!parsed.success) return undefined;
+    entries[idx] = next;
+    this.writeEntries(entries);
+    return parsed.data;
   }
 
   all(): DecisionRecord[] {

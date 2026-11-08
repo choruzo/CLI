@@ -10,6 +10,7 @@ import {
   ensureCompanionWorkspace,
 } from './companion.js';
 import { buildAssistantConfig } from './assistant.js';
+import { DecisionStore } from '../memory/decisions.js';
 import { ProviderRouter } from '../providers/router.js';
 import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
@@ -369,6 +370,76 @@ describe('companion — las capturas que ve el modelo (M15, §23.4)', () => {
     host.agent.switchModel('other-model');
     await collect(host.run('¿y ahora?'));
     expect(provider.requests[2]!.images).toBeUndefined();
+  });
+});
+
+describe('companion — el índice de su memoria (M19 fase 2)', () => {
+  async function again(dataDir: string, extra: Record<string, unknown> = {}): Promise<string> {
+    const config = makeConfig({ box: { enabled: true }, ...extra });
+    const host = await SessionHost.create({
+      env: createSessionEnv({ cwd: ensureCompanionWorkspace(dataDir), env: {} }),
+      config,
+      router: new ProviderRouter(config),
+      preset: 'companion',
+      companionDataDir: dataDir,
+    });
+    hosts.push(host);
+    return host.agent.getMessages()[0]?.content ?? '';
+  }
+
+  it('el prompt lleva el índice de lo que recuerda, por sección, y respeta memory.index', async () => {
+    const { dataDir } = await companionHost(new MockProvider([]));
+    const store = new DecisionStore(join(dataDir, 'memory', 'decisions.json'));
+    store.add({
+      title: 'Respuestas cortas',
+      content: 'Quiere tres líneas.',
+      summary: 'Tres líneas máximo',
+      type: 'profile',
+      tags: [],
+      importance: 'high',
+    });
+    store.add({
+      title: 'Lucía',
+      content: 'Su hermana, en Valencia.',
+      type: 'person',
+      tags: [],
+      importance: 'medium',
+    });
+
+    const prompt = await again(dataDir);
+    expect(prompt).toContain('# Memory index');
+    expect(prompt).toContain('## You\n- Respuestas cortas — Tres líneas máximo');
+    expect(prompt).toContain('## People\n- Lucía');
+    // Va tras el bloque de uso de la memoria y antes de su STRATUM.md.
+    expect(prompt.indexOf('# Long-term memory')).toBeLessThan(prompt.indexOf('# Memory index'));
+
+    // Apagado: ni rastro.
+    expect(await again(dataDir, { memory: { index: { enabled: false } } })).not.toContain(
+      '# Memory index',
+    );
+    // Sin memorias, tampoco hay bloque.
+    const { host: empty } = await companionHost(new MockProvider([]));
+    expect(empty.agent.getMessages()[0]?.content).not.toContain('# Memory index');
+  });
+
+  it('con un tope pequeño el índice lo respeta y cuenta lo que no cabe', async () => {
+    const { dataDir } = await companionHost(new MockProvider([]));
+    const store = new DecisionStore(join(dataDir, 'memory', 'decisions.json'));
+    for (let i = 0; i < 40; i++) {
+      store.add({
+        title: `Recuerdo número ${i} con título largo`,
+        content: 'c',
+        type: 'topic',
+        tags: [],
+        importance: 'medium',
+      });
+    }
+    const prompt = await again(dataDir, { memory: { index: { maxTokens: 120 } } });
+    const block = prompt.slice(prompt.indexOf('# Memory index'));
+    const end = block.indexOf('\n\n');
+    const index = end === -1 ? block : block.slice(0, end);
+    expect(index.length).toBeLessThanOrEqual(Math.floor(120 * 3.5));
+    expect(index).toMatch(/\(\+\d+ more not shown/);
   });
 });
 

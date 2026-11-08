@@ -39,6 +39,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       embeddingWarmup: false,
       autoExtract: false,
       similarityThreshold: 0.9,
+      index: DEFAULTS.memory.index,
       session: DEFAULTS.memory.session,
     },
     tools: {

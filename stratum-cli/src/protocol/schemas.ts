@@ -82,7 +82,13 @@ import type {
   ProtocolTelegramPaired,
   ProtocolTelegramUser,
 } from './model.js';
-import { BOX_SCREEN_LIMITS, GRANT_MINUTES, HISTORY_LIMITS, SHARED_IMAGE_LIMITS } from './model.js';
+import {
+  BOX_SCREEN_LIMITS,
+  GRANT_MINUTES,
+  HISTORY_LIMITS,
+  PROTOCOL_MEMORY_SECTIONS,
+  SHARED_IMAGE_LIMITS,
+} from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
 
@@ -334,6 +340,8 @@ export const decisionSchema: z.ZodType<ProtocolDecision> = z.object({
   content: z.string().optional(),
   source: z.enum(['agent', 'auto']).optional(),
   sessionId: z.string().optional(),
+  summary: z.string().optional(),
+  updatedAt: z.string().optional(),
 });
 
 export const memoryEventSchema: z.ZodType<ProtocolMemoryEvent> = z.object({
@@ -1110,6 +1118,14 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       operationId,
     }),
   ),
+  'memory.reclassify': z
+    .object({
+      agent: memoryAgent,
+      decisionId: id,
+      type: z.enum(PROTOCOL_MEMORY_SECTIONS),
+      operationId,
+    })
+    .strict(),
 
   'box.status': empty,
   'box.screen': empty,
@@ -1308,6 +1324,7 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'memory.status': memoryStatusSchema,
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),
   'memory.forget': z.object({ removed: z.boolean() }),
+  'memory.reclassify': z.object({ updated: z.boolean() }),
 
   'box.status': boxResult,
   'box.screen': z.object({ screen: boxScreenSchema }),

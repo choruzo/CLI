@@ -67,6 +67,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { presentedType, summaryOf } from '../memory/decisions.js';
 import {
   BOX_SCREEN_LIMITS,
   SHARED_IMAGE_LIMITS,
@@ -1841,14 +1842,18 @@ export class Stratumd {
           : memory.list().slice(-limit).reverse();
         // Lo guardado puede llevar lo que llevaba la conversación: sale redactado.
         const redact = (text: string) => redactText(text, config);
+        // M19: la memoria de un agente embebido es con secciones; la de un proyecto, no.
+        const sections = params.cwd === undefined;
         return {
           decisions: records.map((r) => ({
             id: r.id,
             title: redact(r.title),
-            type: r.type,
+            type: sections ? presentedType(r.type, 'sections') : r.type,
             tags: r.tags,
             importance: r.importance,
             timestamp: r.timestamp,
+            ...(r.updatedAt ? { updatedAt: r.updatedAt } : {}),
+            ...(sections ? { summary: redact(summaryOf(r)) } : {}),
             content: redact(r.content),
             ...(r.source ? { source: r.source } : {}),
             ...(r.session_id ? { sessionId: r.session_id } : {}),
@@ -1866,6 +1871,18 @@ export class Stratumd {
           connectionId: conn.id,
         });
         return { removed };
+      },
+      'memory.reclassify': async (params) => {
+        const memory = getDecisionMemory(this.memoryConfigFor(undefined, params.agent));
+        const updated = await memory.reclassify(params.decisionId, { type: params.type });
+        log.info('memory decision reclassified', {
+          decisionId: params.decisionId,
+          memory: params.agent,
+          type: params.type,
+          updated: updated !== undefined,
+          connectionId: conn.id,
+        });
+        return { updated: updated !== undefined };
       },
 
       'box.status': async () => ({ box: await this.box.status() }),

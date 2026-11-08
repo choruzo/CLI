@@ -2,7 +2,14 @@ import { Command } from 'commander';
 import { loadConfig } from '../../config/loader.js';
 import { renderMemoryShow } from '../../memory/show.js';
 import { getDecisionMemory } from '../../memory/decision-memory.js';
-import type { DecisionRecord } from '../../memory/decisions.js';
+import {
+  MEMORY_SECTIONS,
+  presentedType,
+  summaryOf,
+  type DecisionRecord,
+  type MemorySection,
+  type MemoryTaxonomy,
+} from '../../memory/decisions.js';
 import type { StratumConfig } from '../../config/schema.js';
 import {
   assistantDataDir,
@@ -48,13 +55,20 @@ function loadConfigOrExit() {
   }
 }
 
-function formatDecision(d: DecisionRecord, score?: number): string {
+/** `--global` y `--companion` son memorias con secciones (M19); la del proyecto, no. */
+function taxonomyOf(flags: MemoryScopeFlags): MemoryTaxonomy {
+  return flags.global || flags.companion ? 'sections' : 'code';
+}
+
+function formatDecision(d: DecisionRecord, taxonomy: MemoryTaxonomy, score?: number): string {
   const date = d.timestamp.slice(0, 10);
   const head =
-    `${d.id}  [${d.type}/${d.importance}]` +
+    `${d.id}  [${presentedType(d.type, taxonomy)}/${d.importance}]` +
     (score !== undefined ? `  score ${score.toFixed(2)}` : '');
   const tags = d.tags.length ? `\n  tags: ${d.tags.join(', ')}` : '';
-  return `${head}\n  ${date} — ${d.title}\n  ${d.content}${tags}`;
+  // El resumen propio, si lo hay: el de reserva repetiría el contenido justo debajo.
+  const summary = taxonomy === 'sections' && d.summary?.trim() ? `\n  ${summaryOf(d)}` : '';
+  return `${head}\n  ${date} — ${d.title}${summary}\n  ${d.content}${tags}`;
 }
 
 const memoryList = new Command('list')
@@ -69,7 +83,9 @@ const memoryList = new Command('list')
       return;
     }
     const sorted = [...decisions].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
-    process.stdout.write(sorted.map((d) => formatDecision(d)).join('\n\n') + '\n');
+    process.stdout.write(
+      sorted.map((d) => formatDecision(d, taxonomyOf(opts))).join('\n\n') + '\n',
+    );
   });
 
 const memorySearch = new Command('search')
@@ -85,7 +101,9 @@ const memorySearch = new Command('search')
       process.stdout.write('Sin resultados relevantes.\n');
       return;
     }
-    process.stdout.write(results.map((r) => formatDecision(r.record, r.score)).join('\n\n') + '\n');
+    process.stdout.write(
+      results.map((r) => formatDecision(r.record, taxonomyOf(opts), r.score)).join('\n\n') + '\n',
+    );
   });
 
 const memoryForget = new Command('forget')
@@ -98,6 +116,37 @@ const memoryForget = new Command('forget')
     const removed = await getDecisionMemory(config).remove(id);
     if (removed) {
       process.stdout.write(`Decisión ${id} eliminada.\n`);
+    } else {
+      process.stderr.write(`No se encontró la decisión ${id}.\n`);
+      process.exit(1);
+    }
+  });
+
+const memoryReclassify = new Command('reclassify')
+  .description('Move a memory to another section (assistant and companion memories only)')
+  .argument('<id>', 'decision ID')
+  .argument('<section>', `one of: ${MEMORY_SECTIONS.join(', ')}`)
+  .option('-g, --global', "the assistant's global memory")
+  .option('--companion', "the memory of Stratum Dot's assistant (companion)")
+  .action(async (id: string, section: string, opts: MemoryScopeFlags) => {
+    if (!opts.global && !opts.companion) {
+      process.stderr.write(
+        'Solo las memorias con secciones se reclasifican: usa --global o --companion.\n',
+      );
+      process.exit(1);
+    }
+    if (!(MEMORY_SECTIONS as readonly string[]).includes(section)) {
+      process.stderr.write(
+        `Sección desconocida «${section}». Usa: ${MEMORY_SECTIONS.join(', ')}.\n`,
+      );
+      process.exit(1);
+    }
+    const config = memoryConfig(loadConfigOrExit(), opts);
+    const updated = await getDecisionMemory(config).reclassify(id, {
+      type: section as MemorySection,
+    });
+    if (updated) {
+      process.stdout.write(`Decisión ${id} movida a ${section}.\n`);
     } else {
       process.stderr.write(`No se encontró la decisión ${id}.\n`);
       process.exit(1);
@@ -129,4 +178,5 @@ export const memoryCommand = new Command('memory')
   .addCommand(memoryList)
   .addCommand(memorySearch)
   .addCommand(memoryForget)
+  .addCommand(memoryReclassify)
   .addCommand(memoryShow);

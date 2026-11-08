@@ -1,18 +1,17 @@
 import type { IProvider } from '../providers/base.js';
 import type { Message } from '../agent/types.js';
 import type { DecisionMemory } from './decision-memory.js';
-import type { DecisionInput, DecisionImportance, DecisionType } from './decisions.js';
+import {
+  CODE_DECISION_TYPES,
+  MEMORY_SECTIONS,
+  type DecisionInput,
+  type DecisionImportance,
+  type DecisionType,
+  type MemoryTaxonomy,
+} from './decisions.js';
 import { tracedCompletion } from '../trace/llm-call.js';
 import type { TraceScope } from '../trace/recorder.js';
 
-const VALID_TYPES: DecisionType[] = [
-  'architectural',
-  'tooling',
-  'convention',
-  'bug_fix',
-  'security',
-  'user_preference',
-];
 const VALID_IMPORTANCE: DecisionImportance[] = ['low', 'medium', 'high'];
 
 /** Cuántos mensajes recientes se consideran para la extracción. */
@@ -31,6 +30,29 @@ Reglas:
 - Si nada duradero se decidió, devuelve [].
 - Cada decisión es un objeto JSON con: title (string, <100 chars), content (string: contexto, alternativas, razón),
   type (uno de: architectural, tooling, convention, bug_fix, security, user_preference),
+  tags (array de máx 5 strings), importance (low | medium | high).
+
+Devuelve SOLO un array JSON válido, sin texto adicional ni fences markdown.`;
+
+/**
+ * M19 — extracción para las memorias con secciones (`assistant`, `companion`):
+ * recuerdos sobre el usuario y su entorno, no decisiones técnicas.
+ */
+export const EXTRACT_SECTIONS_PROMPT = `Eres un asistente de extracción de memoria para un asistente personal.
+Analiza la conversación y extrae SOLO lo duradero sobre el usuario que convenga recordar en otras conversaciones.
+
+Extrae cuando el usuario: (1) cuenta algo estable sobre sí mismo o su entorno (gustos, rutinas, personas, proyectos),
+(2) fija una preferencia sobre cómo quiere las cosas, (3) corrige cómo hiciste algo, (4) pide que recuerdes algo.
+NO extraigas: detalles pasajeros de la conversación, preguntas, lo que dijo el asistente sin que el usuario aportara nada,
+ni secretos, contraseñas, datos de pago o de salud salvo que lo pida expresamente.
+
+Reglas:
+- MÁXIMO 2 recuerdos por conversación; solo los más importantes.
+- Si nada duradero se dijo, devuelve [].
+- Cada recuerdo es un objeto JSON con: title (string, <100 chars), content (string: el recuerdo con su contexto),
+  summary (string, el recuerdo en una línea, <140 chars),
+  type (uno de: profile = el propio usuario, person = alguien de su entorno, project = algo en lo que trabaja,
+  area = un ámbito estable de su vida o trabajo, topic = cualquier otra cosa; si dudas, topic),
   tags (array de máx 5 strings), importance (low | medium | high).
 
 Devuelve SOLO un array JSON válido, sin texto adicional ni fences markdown.`;
@@ -82,16 +104,26 @@ export function parseDecisionsJson(raw: string): unknown[] {
 }
 
 /** Normaliza un objeto crudo del LLM a un DecisionInput válido, o null. */
-function toDecisionInput(raw: unknown, sessionId?: string): DecisionInput | null {
+function toDecisionInput(
+  raw: unknown,
+  taxonomy: MemoryTaxonomy,
+  sessionId?: string,
+): DecisionInput | null {
   if (typeof raw !== 'object' || raw === null) return null;
   const o = raw as Record<string, unknown>;
   const title = typeof o.title === 'string' ? o.title.trim() : '';
   const content = typeof o.content === 'string' ? o.content.trim() : '';
   if (title.length < 3 || content.length < 5) return null;
 
-  const type = (VALID_TYPES as string[]).includes(String(o.type))
+  // Tipo dudoso: `convention` en código; `topic` en secciones (B2).
+  const valid: readonly string[] = taxonomy === 'sections' ? MEMORY_SECTIONS : CODE_DECISION_TYPES;
+  const type = valid.includes(String(o.type))
     ? (o.type as DecisionType)
-    : 'convention';
+    : taxonomy === 'sections'
+      ? 'topic'
+      : 'convention';
+  const summary =
+    taxonomy === 'sections' && typeof o.summary === 'string' ? o.summary.trim().slice(0, 140) : '';
   const importance = (VALID_IMPORTANCE as string[]).includes(String(o.importance))
     ? (o.importance as DecisionImportance)
     : 'medium';
@@ -105,6 +137,7 @@ function toDecisionInput(raw: unknown, sessionId?: string): DecisionInput | null
     type,
     tags,
     importance,
+    ...(summary ? { summary } : {}),
     source: 'auto',
     ...(sessionId ? { session_id: sessionId } : {}),
   };
@@ -125,6 +158,8 @@ export interface ExtractOptions {
   model: string;
   messages: Message[];
   memory: DecisionMemory;
+  /** Clasificación de la memoria (por preset); sin ella, la de código. */
+  taxonomy?: MemoryTaxonomy;
   sessionId?: string;
   signal?: AbortSignal;
 }
@@ -137,6 +172,7 @@ export interface ExtractOptions {
 export async function extractAndStore(opts: ExtractOptions): Promise<number> {
   try {
     const { memory, sessionId } = opts;
+    const taxonomy = opts.taxonomy ?? 'code';
     const timeout = opts.signal ?? AbortSignal.timeout(30000);
     const signal = opts.cancelSignal ? AbortSignal.any([timeout, opts.cancelSignal]) : timeout;
 
@@ -150,7 +186,10 @@ export async function extractAndStore(opts: ExtractOptions): Promise<number> {
     // modelo la "continúe" en vez de analizarla y devuelve [] sistemáticamente.
     const transcript = recent.map((m) => `${m.role}: ${messageText(m)}`).join('\n\n');
     const extractionMessages: Message[] = [
-      { role: 'system', content: EXTRACT_SYSTEM_PROMPT },
+      {
+        role: 'system',
+        content: taxonomy === 'sections' ? EXTRACT_SECTIONS_PROMPT : EXTRACT_SYSTEM_PROMPT,
+      },
       {
         role: 'user',
         content:
@@ -172,7 +211,7 @@ export async function extractAndStore(opts: ExtractOptions): Promise<number> {
 
     let added = 0;
     for (const cand of candidates.slice(0, 2)) {
-      const input = toDecisionInput(cand, sessionId);
+      const input = toDecisionInput(cand, taxonomy, sessionId);
       if (!input) continue;
       // memory.save aplica dedup semántico contra lo ya almacenado.
       const result = await memory.save(input, {

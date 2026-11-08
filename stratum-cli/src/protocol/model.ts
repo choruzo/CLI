@@ -314,6 +314,10 @@ export interface ProtocolDecision {
   source?: 'agent' | 'auto';
   /** La sesión en la que se guardó, si se sabe. */
   sessionId?: string;
+  /** M19 — resumen de una línea. Solo en las memorias con secciones. */
+  summary?: string;
+  /** M19 — última modificación (ISO). Un servidor anterior no lo manda. */
+  updatedAt?: string;
 }
 
 /**
@@ -321,6 +325,14 @@ export interface ProtocolDecision {
  * embebido. Sin `cwd` ni `agent`, la del asistente (`assistant`).
  */
 export type ProtocolMemoryAgent = 'assistant' | 'companion';
+
+/**
+ * M19 — secciones de una memoria con secciones (`assistant`, `companion`). El
+ * protocolo es puro: `memory/decisions.ts` (`MEMORY_SECTIONS`) repite la lista y
+ * un test las ata.
+ */
+export const PROTOCOL_MEMORY_SECTIONS = ['profile', 'person', 'project', 'topic', 'area'] as const;
+export type ProtocolMemorySection = (typeof PROTOCOL_MEMORY_SECTIONS)[number];
 
 export interface ProtocolMemoryEvent {
   kind: 'read' | 'write' | 'forget';
@@ -822,4 +834,33 @@ export interface ProtocolInheritedMemory {
     /** La sesión de la que salió la entrada y cuántas entradas de su conversación la sostienen. */
     origin: { sessionId: string; sourceCount: number };
   }>;
+}
+
+/** La sección en la que un inspector muestra un `type`: él mismo si lo es, y si no, `topic`. */
+export function memorySectionOf(type: string): ProtocolMemorySection {
+  return (PROTOCOL_MEMORY_SECTIONS as readonly string[]).includes(type)
+    ? (type as ProtocolMemorySection)
+    : 'topic';
+}
+
+/**
+ * M19 — agrupa recuerdos por sección para un inspector, en el orden de
+ * `PROTOCOL_MEMORY_SECTIONS` y sin secciones vacías. Un tipo que no es una
+ * sección (un servidor anterior, un tipo de código) va a `topic`, como en el
+ * daemon (B2). Dentro de cada sección se conserva el orden recibido.
+ */
+export function groupDecisionsBySection<T extends { type: string }>(
+  decisions: readonly T[],
+): Array<{ section: ProtocolMemorySection; items: T[] }> {
+  const groups = new Map<ProtocolMemorySection, T[]>();
+  for (const d of decisions) {
+    const section = memorySectionOf(d.type);
+    const list = groups.get(section);
+    if (list) list.push(d);
+    else groups.set(section, [d]);
+  }
+  return PROTOCOL_MEMORY_SECTIONS.filter((s) => groups.has(s)).map((section) => ({
+    section,
+    items: groups.get(section)!,
+  }));
 }

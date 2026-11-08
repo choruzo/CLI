@@ -164,3 +164,80 @@ describe('M17 — memory.* del companion', () => {
     expect((await observer.request('memory.status', { agent: 'companion' })).decisions).toBe(1);
   });
 });
+
+describe('M19 — secciones en memory.*', () => {
+  it('memory.decisions de un agente trae sección y resumen; los tipos antiguos se migran', async () => {
+    const t = await daemon();
+    seed(join(t.base, 'companion'), [
+      decision('Prefiere café', { type: 'user_preference', summary: 'Café sin azúcar' }),
+      decision('Usa Ansible', { type: 'tooling' }),
+      decision('Lucía', { type: 'person' }),
+    ]);
+    const dot = await t.connect(['observer'], 'stratum-dot', { kind: 'dot' });
+    const { decisions } = await dot.request('memory.decisions', { agent: 'companion' });
+    const by = Object.fromEntries(decisions.map((d) => [d.title, d]));
+    expect(by['Prefiere café']).toMatchObject({ type: 'profile', summary: 'Café sin azúcar' });
+    expect(by['Usa Ansible']).toMatchObject({ type: 'topic', summary: 'Usa Ansible: contenido' });
+    expect(by['Lucía']).toMatchObject({ type: 'person' });
+    expect(by['Lucía']!.updatedAt).toBeTruthy();
+  });
+
+  it('memory.reclassify mueve el recuerdo solo en la memoria pedida y exige control', async () => {
+    const t = await daemon();
+    const [companionId] = seed(join(t.base, 'companion'), [decision('Lucía', { type: 'topic' })]);
+    seed(join(t.base, 'assistant'), [decision('Otra', { type: 'topic' })]);
+    const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+
+    // El id del companion no está en la del asistente: no la toca.
+    expect(
+      await dot.request('memory.reclassify', {
+        agent: 'assistant',
+        decisionId: companionId!,
+        type: 'person',
+      }),
+    ).toEqual({ updated: false });
+    expect(
+      await dot.request('memory.reclassify', {
+        agent: 'companion',
+        decisionId: companionId!,
+        type: 'person',
+      }),
+    ).toEqual({ updated: true });
+    const { decisions } = await dot.request('memory.decisions', { agent: 'companion' });
+    expect(decisions[0]).toMatchObject({ title: 'Lucía', type: 'person' });
+
+    const observer = await t.connect(['observer'], 'stratum-dot', { kind: 'dot' });
+    expect(
+      await failure(
+        observer.request('memory.reclassify', {
+          agent: 'companion',
+          decisionId: companionId!,
+          type: 'area',
+        }),
+      ),
+    ).toBe('FORBIDDEN');
+  });
+
+  it('memory.reclassify rechaza una sección que no existe y un cwd', async () => {
+    const t = await daemon();
+    const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    expect(
+      await failure(
+        dot.request('memory.reclassify', {
+          agent: 'companion',
+          decisionId: 'dec_x',
+          type: 'bug_fix',
+        } as unknown as { agent: 'companion'; decisionId: string; type: 'topic' }),
+      ),
+    ).toBe('INVALID_PARAMS');
+    expect(
+      await failure(
+        dot.request('memory.reclassify', {
+          cwd: t.base,
+          decisionId: 'dec_x',
+          type: 'topic',
+        } as unknown as { agent: 'companion'; decisionId: string; type: 'topic' }),
+      ),
+    ).toBe('INVALID_PARAMS');
+  });
+});

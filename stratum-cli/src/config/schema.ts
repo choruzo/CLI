@@ -602,6 +602,18 @@ export const StratumConfigSchema = z.object({
        */
       similarityThreshold: z.number().min(0).max(1).default(0.9),
       /**
+       * M19 — índice inyectado: lista pequeña y autogenerada de lo que se
+       * recuerda (títulos, y resúmenes en las memorias con secciones) que entra
+       * en el system prompt al empezar la sesión. `maxTokens` es su tope propio,
+       * aparte del de `STRATUM.md`; lo que no cabe se cuenta, no se recorta.
+       */
+      index: z
+        .object({
+          enabled: z.boolean().default(true),
+          maxTokens: z.number().int().min(50).max(4000).default(400),
+        })
+        .default({}),
+      /**
        * M11 — memoria **de sesión**: lo que el agente sabe de turnos antiguos de
        * una conversación que ya no entran literalmente en su contexto. Es de esa
        * conversación y de nadie más: nunca se promociona a `decisions.json` ni a

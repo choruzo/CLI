@@ -2278,10 +2278,10 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     con su procedencia, y las aplica quien tiene autoridad (usuario) desde el inspector o un comando.
     Cada preset consolida solo su propia memoria; ninguno lee la de otro.
   *Fases* (1 y 2 no tocan el modelo de autoridad):
-  1. Taxonomía por preset, `summary`, `updatedAt` y agrupación en los inspectores de Dot y Desktop
+  1. **Hecha (2026-11-08)**, con reclasificar desde los inspectores. Taxonomía por preset, `summary`, `updatedAt` y agrupación en los inspectores de Dot y Desktop
      (`memory.decisions` devuelve tipo y resumen; `DecisionType` pasa a enum por preset; los ficheros
      antiguos siguen leyéndose, sus tipos se migran al leer).
-  2. Índice inyectado pequeño, autogenerado desde las decisiones, con tope propio.
+  2. **Hecha (2026-11-08).** Índice inyectado pequeño, autogenerado desde las decisiones, con tope propio.
   3. Búsqueda en transcripts: tool de solo lectura sobre el `ConversationStore` (sesiones del daemon).
   4. Capa de representaciones: páginas por persona, proyecto o tema con enlaces, derivadas y
      regenerables; nunca fuente de verdad (lo es `decisions.json`).

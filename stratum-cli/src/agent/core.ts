@@ -84,6 +84,8 @@ import {
   type ResolvedEnvironment,
 } from '../tools/environments.js';
 import { extractAndStore } from '../memory/extractor.js';
+import { buildMemoryIndex } from '../memory/index-block.js';
+import { redactText } from '../security/redact-output.js';
 import type { TraceScope } from '../trace/recorder.js';
 import { tracedCompletion } from '../trace/llm-call.js';
 import { processSessionEnv, type SessionEnv } from '../runtime/session-env.js';
@@ -1023,6 +1025,7 @@ export class StratumAgent {
         model: this.config.memory.extractionModel ?? this.router.model,
         messages: this.getMessages(),
         memory: this.memoryManager.getDecisionMemory(),
+        taxonomy: isEmbeddedPreset(this.preset) ? 'sections' : 'code',
         trace,
         cancelSignal: this.backgroundAbort.signal,
       });
@@ -1455,6 +1458,7 @@ export class StratumAgent {
         workspace: this.workspace,
         workspaceFilesExpiredAt: this.workspaceFilesExpiredAt,
         imageGeneration: this.registry.get(GENERATE_IMAGE_TOOL) !== undefined,
+        ...this.memoryIndexEnv(),
       };
     }
     // El companion: lo mismo, sin carpeta, y con su caja si `exec` está registrado.
@@ -1478,6 +1482,7 @@ export class StratumAgent {
         ...(this.registry.list().some((t) => t.name.startsWith('mcp__'))
           ? { connectors: true }
           : {}),
+        ...this.memoryIndexEnv(),
       };
     }
     const active = this._activeProfile;
@@ -1519,7 +1524,32 @@ export class StratumAgent {
         this.env.cwd,
       ),
       cwd: this.env.cwd,
+      ...this.memoryIndexEnv(),
     };
+  }
+
+  /**
+   * M19 — el índice de la memoria para el system prompt (`# Memory index`), o
+   * nada si está apagado, vacío o no se pudo leer: la memoria es auxiliar y un
+   * fallo aquí nunca debe impedir arrancar la sesión. Se calcula cuando se monta
+   * el prompt (inicio, `/model`, `/agent`, recarga), no por turno: no mueve el
+   * prefijo que cachea el backend. Las memorias con secciones (`assistant`,
+   * `companion`) la presentan por sección; la de código, por tipo.
+   */
+  private memoryIndexEnv(): { memoryIndex?: string } {
+    const { enabled, maxTokens } = this.config.memory.index;
+    if (!enabled) return {};
+    try {
+      const index = buildMemoryIndex(this.memoryManager.getDecisionMemory().list(), {
+        taxonomy: isEmbeddedPreset(this.preset) ? 'sections' : 'code',
+        maxChars: tokensToChars(maxTokens),
+        redact: (text) => redactText(text, this.config),
+      });
+      return index ? { memoryIndex: index } : {};
+    } catch (err) {
+      log.warn('memory index not built', { err });
+      return {};
+    }
   }
 
   private buildSystemContent(): string {

@@ -50,6 +50,12 @@ export interface SystemPromptEnv {
    */
   skills?: string;
   /**
+   * M19 — bloque `# Memory index` ya renderizado (`buildMemoryIndex`): los
+   * títulos de lo que recuerda esta sesión. Solo el agente principal; va tras
+   * el bloque `# Long-term memory`. Ausente → no hay bloque.
+   */
+  memoryIndex?: string;
+  /**
    * Preset del prompt (Stratum Desktop D1). Ausente o `coding` → el prompt de
    * la CLI, sin cambios. `assistant` → `buildAssistantPrompt`: el resto de
    * campos de este entorno (perfiles, guías, cwd) se ignoran; `skills` no.
@@ -523,6 +529,7 @@ export function buildSystemPrompt(
   prompt += `\n\n${buildEnvBlock(env ?? {})}`;
   prompt += `\n\n# Shell\n${getShellInstructions()}`;
   prompt += `\n\n${buildMemoryBlock('coding', env ?? {})}`;
+  if (env?.memoryIndex?.trim()) prompt += `\n\n${env.memoryIndex.trim()}`;
 
   prompt += buildSshBlock(config);
   prompt += buildEnvironmentsBlock(config);
@@ -722,6 +729,7 @@ export function buildAssistantPrompt(memory: string | undefined, env: SystemProm
     }
   }
   prompt += `\n\n${buildMemoryBlock('assistant', env)}`;
+  if (env.memoryIndex?.trim()) prompt += `\n\n${env.memoryIndex.trim()}`;
   if (env.skills && env.skills.trim()) {
     // Solo Desktop aloja al asistente y pinta las vallas ```visual; sin la
     // skill (`skills.builtin` puede quitarla) no se anuncian.
@@ -813,6 +821,7 @@ export function buildCompanionPrompt(memory: string | undefined, env: SystemProm
     ASSISTANT_LANGUAGE;
   prompt += `\n\n${buildAssistantEnvBlock(env)}`;
   prompt += `\n\n${buildMemoryBlock('companion', env)}`;
+  if (env.memoryIndex?.trim()) prompt += `\n\n${env.memoryIndex.trim()}`;
   if (env.skills && env.skills.trim()) prompt += `\n\n${env.skills.trim()}`;
   prompt += `\n\n${buildAskingBlock('companion')}`;
   if (memory && memory.trim()) {

@@ -4,7 +4,12 @@ import type { StratumConfig } from '../config/schema.js';
 import { findWorktreeRoot, resolveMemoryPaths } from '../config/paths.js';
 import { writeFileAtomic } from '../config/writer.js';
 import { getLogger } from '../logging/index.js';
-import { DecisionStore, type DecisionInput, type DecisionRecord } from './decisions.js';
+import {
+  DecisionStore,
+  type DecisionInput,
+  type DecisionRecord,
+  type DecisionType,
+} from './decisions.js';
 import { VectorStore } from './vectors.js';
 import { EmbeddingService, type EmbeddingServiceOptions } from './embeddings.js';
 import { Mutex } from '../agent/concurrency.js';
@@ -235,6 +240,18 @@ export class DecisionMemory {
 
   list(): DecisionRecord[] {
     return this.store.all();
+  }
+
+  /**
+   * M19 (B2) — reclasifica una decisión (y, si se da, cambia su resumen). No
+   * toca el índice: el embedding sale del título y el contenido, que no
+   * cambian. Serializada con el resto de escrituras.
+   */
+  reclassify(
+    id: string,
+    patch: { type?: DecisionType; summary?: string },
+  ): Promise<DecisionRecord | undefined> {
+    return this.writeLock.runExclusive(async () => this.store.update(id, patch));
   }
 
   /**

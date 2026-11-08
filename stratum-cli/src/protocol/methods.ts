@@ -20,6 +20,7 @@ import type {
   ProtocolHistoryPage,
   ProtocolJob,
   ProtocolMemoryAgent,
+  ProtocolMemorySection,
   ProtocolMemoryStatus,
   ProtocolModel,
   ProtocolPlan,
@@ -480,6 +481,17 @@ export interface ProtocolMethods {
     Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; decisionId: string },
     { removed: boolean }
   >;
+  /**
+   * M19 (B2) — reclasificar un recuerdo de una memoria con secciones (la de un
+   * agente embebido; con `cwd` no hay secciones: `INVALID_PARAMS`). Lo pide una
+   * persona desde un inspector. Cambiar la sección no cambia lo que el agente
+   * puede hacer, así que basta `control`. Un id que ya no está contesta
+   * `updated: false`.
+   */
+  'memory.reclassify': Spec<
+    Mutation & { agent: ProtocolMemoryAgent; decisionId: string; type: ProtocolMemorySection },
+    { updated: boolean }
+  >;
 
   /**
    * M13 — la caja del daemon. Las órdenes al runtime son fijas: el cliente
@@ -704,6 +716,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'memory.decisions': read('observe'),
   // Olvidar solo resta, y lo recordado no es autoridad: no exige `approve`.
   'memory.forget': write('control'),
+  'memory.reclassify': write('control'),
 
   'box.status': read('observe'),
   'box.screen': read('observe'),
