@@ -358,6 +358,7 @@ que las anota en la traza con el mismo `ModelSpan` del loop y su **origen**:
 | `session-summary` | `SessionStore.save` (`session/store.ts`) | Al salir de `chat`, si la sesión tiene 5 turnos o más. |
 | `session-memory-extraction` | `conversation/extract.ts` | M11: al compactar un trozo de conversación a la memoria de sesión (sesiones del daemon). |
 | `session-memory-summary` | `conversation/extract.ts` | M11: el resumen narrativo de esa memoria de sesión. |
+| `memory-dreaming` | `dream` (`memory/dreaming/dream.ts`) | M19: `stratum memory dream`, una pasada que revisa la memoria contra conversaciones recientes y **propone** cambios; nunca la escribe. |
 | `side-question` | `StratumAgent.askSideQuestion` (`agent/side-question.ts`) | `/btw`: una pregunta lateral sin tools que no entra en la conversación. Lleva el historial, pero sin las definiciones de tools, que van antes en el prompt: su prefijo no coincide con el del loop y no hay que contar con la caché. |
 
 Cada una queda con provider, modelo, inicio, primer token, fin, `usage`, uso de caché y estado, y se

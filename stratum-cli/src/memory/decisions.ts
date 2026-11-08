@@ -79,6 +79,16 @@ export interface DecisionRecord {
   updatedAt?: string;
 }
 
+/** Lo que se puede cambiar de una decisión existente (`DecisionStore.update`). */
+export interface DecisionPatch {
+  type?: DecisionType;
+  summary?: string;
+  title?: string;
+  content?: string;
+  tags?: string[];
+  importance?: DecisionImportance;
+}
+
 /** Campos que aporta quien crea la decisión; el resto se deriva. */
 export interface DecisionInput {
   title: string;
@@ -294,11 +304,7 @@ export class DecisionStore {
    * esta versión no conoce. Sella `updatedAt`. Devuelve el registro nuevo o
    * `undefined` si el id no está (o la entrada no valida).
    */
-  update(
-    id: string,
-    patch: { type?: DecisionType; summary?: string },
-    now: Date = new Date(),
-  ): DecisionRecord | undefined {
+  update(id: string, patch: DecisionPatch, now: Date = new Date()): DecisionRecord | undefined {
     const entries = this.entriesForWrite();
     const idx = entries.findIndex((e) => isObject(e) && e.id === id);
     if (idx < 0) return undefined;
@@ -306,6 +312,10 @@ export class DecisionStore {
       ...(entries[idx] as Record<string, unknown>),
       ...(patch.type !== undefined ? { type: patch.type } : {}),
       ...(patch.summary !== undefined ? { summary: patch.summary.trim() } : {}),
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+      ...(patch.content !== undefined ? { content: patch.content } : {}),
+      ...(patch.tags !== undefined ? { tags: patch.tags } : {}),
+      ...(patch.importance !== undefined ? { importance: patch.importance } : {}),
       updatedAt: now.toISOString(),
     };
     const parsed = DecisionRecordSchema.safeParse(next);

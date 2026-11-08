@@ -7,8 +7,8 @@ import { getLogger } from '../logging/index.js';
 import {
   DecisionStore,
   type DecisionInput,
+  type DecisionPatch,
   type DecisionRecord,
-  type DecisionType,
 } from './decisions.js';
 import { VectorStore } from './vectors.js';
 import { EmbeddingService, type EmbeddingServiceOptions } from './embeddings.js';
@@ -249,9 +249,27 @@ export class DecisionMemory {
    */
   reclassify(
     id: string,
-    patch: { type?: DecisionType; summary?: string },
+    patch: Pick<DecisionPatch, 'type' | 'summary'>,
   ): Promise<DecisionRecord | undefined> {
     return this.writeLock.runExclusive(async () => this.store.update(id, patch));
+  }
+
+  /**
+   * M19 fase 5 — cambia una decisión (título, contenido, etiquetas, importancia,
+   * tipo o resumen). Si cambia lo que se indexa (título o contenido), su entrada
+   * del índice se descarta y se vuelve a calcular: el índice es derivado.
+   * Solo la llama quien aplica una propuesta aprobada.
+   */
+  edit(id: string, patch: DecisionPatch): Promise<DecisionRecord | undefined> {
+    return this.writeLock.runExclusive(async () => {
+      const before = this.store.get(id);
+      const updated = this.store.update(id, patch);
+      if (before && updated && (patch.title !== undefined || patch.content !== undefined)) {
+        await this.vectors.remove(before.embedding_ref);
+        await this.ensureIndexed();
+      }
+      return updated;
+    });
   }
 
   /**

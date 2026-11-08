@@ -67,6 +67,8 @@ export const TRACE_CAP_PAUSE = 'pause';
  *  - `session-memory-extraction` — M11: hechos, decisiones y tareas de un trozo
  *    de conversación que se compacta a la memoria de sesión;
  *  - `session-memory-summary` — M11: el resumen narrativo de esa memoria;
+ *  - `memory-dreaming` — M19: la consolidación que **propone** cambios a la memoria
+ *    (`stratum memory dream`); nunca la escribe;
  *  - `side-question` — UX-4: `/btw`, una pregunta lateral que no entra en la
  *    conversación.
  *
@@ -81,6 +83,7 @@ export const LLM_CALL_ORIGINS = [
   'session-summary',
   'session-memory-extraction',
   'session-memory-summary',
+  'memory-dreaming',
   'side-question',
 ] as const;
 export type LlmCallOrigin = (typeof LLM_CALL_ORIGINS)[number];
@@ -91,6 +94,7 @@ export const AUXILIARY_LLM_ORIGINS = [
   'session-summary',
   'session-memory-extraction',
   'session-memory-summary',
+  'memory-dreaming',
   'side-question',
 ] as const satisfies readonly LlmCallOrigin[];
 export type AuxiliaryLlmOrigin = (typeof AUXILIARY_LLM_ORIGINS)[number];

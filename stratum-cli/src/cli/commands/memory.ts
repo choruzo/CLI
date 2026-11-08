@@ -11,6 +11,16 @@ import {
   type MemoryTaxonomy,
 } from '../../memory/decisions.js';
 import type { StratumConfig } from '../../config/schema.js';
+import { findWorktreeRoot } from '../../config/paths.js';
+import { defaultSessionsDir } from '../../daemon/session-archive.js';
+import { applyProposal, rejectProposal } from '../../memory/dreaming/apply.js';
+import { dream } from '../../memory/dreaming/dream.js';
+import { openDreamingFiles } from '../../memory/dreaming/files.js';
+import { formatProposal } from '../../memory/dreaming/format.js';
+import { resolveDreamingModel } from '../../memory/dreaming/model.js';
+import { ProviderRouter } from '../../providers/router.js';
+import { redactText } from '../../security/redact-output.js';
+import { listSources } from '../../transcripts/search.js';
 import {
   assistantDataDir,
   buildAssistantConfig,
@@ -153,6 +163,128 @@ const memoryReclassify = new Command('reclassify')
     }
   });
 
+/** Qué memoria, con qué clasificación y qué conversaciones mira dreaming (M19 fase 5). */
+function dreamingTarget(config: StratumConfig, flags: MemoryScopeFlags) {
+  const memory = memoryConfig(config, flags);
+  if (flags.companion) {
+    return { memory, taxonomy: 'sections' as const, scope: { agent: 'companion' as const } };
+  }
+  if (flags.global) {
+    return { memory, taxonomy: 'sections' as const, scope: { agent: 'assistant' as const } };
+  }
+  return {
+    memory,
+    taxonomy: 'code' as const,
+    scope: { cwd: findWorktreeRoot(process.cwd()).worktree },
+  };
+}
+
+const memoryDream = new Command('dream')
+  .description(
+    'Review the memory against recent conversations and PROPOSE changes (never writes the memory)',
+  )
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .option('--force', 'review the notes even without new conversations')
+  .action(async (opts: MemoryScopeFlags & { force?: boolean }) => {
+    const config = loadConfigOrExit();
+    const target = dreamingTarget(config, opts);
+    let router;
+    try {
+      router = new ProviderRouter(config);
+    } catch (err) {
+      process.stderr.write(`Provider error: ${String(err)}\n`);
+      process.exit(1);
+    }
+    const model = resolveDreamingModel(config, router);
+    if (!model.ok) {
+      process.stderr.write(`${model.message}\n`);
+      process.exit(1);
+    }
+    const files = openDreamingFiles(target.memory);
+    const memory = getDecisionMemory(target.memory);
+    const result = await dream({
+      notes: () => memory.list(),
+      proposals: files.proposals,
+      state: files.state,
+      taxonomy: target.taxonomy,
+      sources: listSources(defaultSessionsDir(), target.scope),
+      provider: model.provider,
+      providerName: model.providerName,
+      model: model.model,
+      config: config.memory.dreaming,
+      redact: (text) => redactText(text, target.memory),
+      ...(opts.force ? { force: true } : {}),
+    });
+    if (!result.ok) {
+      const quiet = result.reason === 'nothing-new' || result.reason === 'budget';
+      process.stderr.write(`${result.message}\n`);
+      process.exit(quiet ? 0 : 1);
+    }
+    const { considered } = result;
+    process.stdout.write(
+      `Pasada ${result.dreamId}: ${considered.notes} notas y ${considered.messages} mensajes de ` +
+        `${considered.sessions} conversaciones → ${result.proposals.length} propuestas` +
+        `${result.discarded > 0 ? ` (${result.discarded} descartadas por no valer)` : ''}` +
+        `${result.tokens !== null ? `, ${result.tokens} tokens` : ''}.\n`,
+    );
+    if (result.proposals.length > 0) {
+      process.stdout.write(`\n${result.proposals.map(formatProposal).join('\n\n')}\n`);
+      process.stdout.write(
+        '\nNada se ha aplicado. Revísalas con `stratum memory proposals apply <id>` o `reject <id>`.\n',
+      );
+    }
+  });
+
+const proposalsList = new Command('list')
+  .description('List pending dreaming proposals')
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .action((opts: MemoryScopeFlags) => {
+    const files = openDreamingFiles(memoryConfig(loadConfigOrExit(), opts));
+    const pending = files.proposals.pending();
+    process.stdout.write(
+      pending.length === 0
+        ? 'No hay propuestas pendientes.\n'
+        : `${pending.map(formatProposal).join('\n\n')}\n`,
+    );
+  });
+
+const proposalsApply = new Command('apply')
+  .description('Apply a dreaming proposal (this is what changes the memory)')
+  .argument('<id>', 'proposal ID')
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .action(async (id: string, opts: MemoryScopeFlags) => {
+    const target = dreamingTarget(loadConfigOrExit(), opts);
+    const result = await applyProposal(id, {
+      memory: getDecisionMemory(target.memory),
+      proposals: openDreamingFiles(target.memory).proposals,
+      taxonomy: target.taxonomy,
+    });
+    (result.ok ? process.stdout : process.stderr).write(`${result.message}\n`);
+    if (!result.ok) process.exit(1);
+  });
+
+const proposalsReject = new Command('reject')
+  .description('Reject a dreaming proposal (the memory is not touched)')
+  .argument('<id>', 'proposal ID')
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .action((id: string, opts: MemoryScopeFlags) => {
+    const result = rejectProposal(id, {
+      proposals: openDreamingFiles(memoryConfig(loadConfigOrExit(), opts)).proposals,
+    });
+    (result.ok ? process.stdout : process.stderr).write(`${result.message}\n`);
+    if (!result.ok) process.exit(1);
+  });
+
+const memoryProposals = new Command('proposals')
+  .description('Review what dreaming proposed')
+  .addCommand(proposalsList, { isDefault: true })
+  .addCommand(proposalsApply)
+  .addCommand(proposalsReject);
+
 const memoryShow = new Command('show')
   .description('Show the active STRATUM.md content')
   .option('-g, --global', "show the global STRATUM.md (the assistant's) instead of this project's")
@@ -179,4 +311,6 @@ export const memoryCommand = new Command('memory')
   .addCommand(memorySearch)
   .addCommand(memoryForget)
   .addCommand(memoryReclassify)
+  .addCommand(memoryDream)
+  .addCommand(memoryProposals)
   .addCommand(memoryShow);

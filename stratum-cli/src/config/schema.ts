@@ -614,6 +614,25 @@ export const StratumConfigSchema = z.object({
         })
         .default({}),
       /**
+       * M19 fase 5 — *dreaming*: una pasada que revisa la memoria contra las
+       * conversaciones recientes de su ámbito y **propone** cambios
+       * (`proposals.json`); nunca escribe la memoria. Manda contenido de las
+       * conversaciones al modelo, así que un provider distinto del de la sesión
+       * y fuera de esta máquina exige `allowRemote`. Topes: `maxInputTokens`
+       * por pasada y `maxTokensPerDay` por día (los tokens que reporta el
+       * backend; si no los reporta, se cuenta el tope de entrada de la pasada).
+       */
+      dreaming: z
+        .object({
+          model: MemoryModelSchema.default({}),
+          allowRemote: z.boolean().default(false),
+          maxInputTokens: z.number().int().min(500).max(100_000).default(6000),
+          maxTokensPerDay: z.number().int().positive().default(60_000),
+          maxProposals: z.number().int().min(1).max(20).default(8),
+          ttlDays: z.number().int().min(1).max(90).default(14),
+        })
+        .default({}),
+      /**
        * M11 — memoria **de sesión**: lo que el agente sabe de turnos antiguos de
        * una conversación que ya no entran literalmente en su contexto. Es de esa
        * conversación y de nadie más: nunca se promociona a `decisions.json` ni a

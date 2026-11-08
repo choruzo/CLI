@@ -196,6 +196,7 @@ export const ORIGIN_LABEL: Record<LlmCallOrigin, string> = {
   'session-summary': 'resumen de sesión',
   'session-memory-extraction': 'extracción de memoria de sesión',
   'session-memory-summary': 'resumen de memoria de sesión',
+  'memory-dreaming': 'consolidación de memoria (dreaming)',
   'side-question': 'pregunta lateral (/btw)',
 };
 

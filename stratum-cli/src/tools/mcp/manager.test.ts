@@ -40,6 +40,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       autoExtract: false,
       similarityThreshold: 0.9,
       index: DEFAULTS.memory.index,
+      dreaming: DEFAULTS.memory.dreaming,
       session: DEFAULTS.memory.session,
     },
     tools: {

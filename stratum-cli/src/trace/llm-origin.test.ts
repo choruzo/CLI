@@ -155,6 +155,7 @@ describe('origen de una llamada al LLM — contrato', () => {
       'session-summary',
       'session-memory-extraction',
       'session-memory-summary',
+      'memory-dreaming',
       'side-question',
     ]);
     expect(LLM_CALL_ORIGINS.filter(isAuxiliaryOrigin)).toEqual([...AUXILIARY_LLM_ORIGINS]);
@@ -892,6 +893,7 @@ describe('reconstrucción — llamadas por origen', () => {
       'session-summary': 0,
       'session-memory-extraction': 0,
       'session-memory-summary': 0,
+      'memory-dreaming': 0,
       'side-question': 0,
     });
     expect(llm.auxiliary.calls).toBe(2);

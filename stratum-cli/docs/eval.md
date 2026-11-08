@@ -160,7 +160,7 @@ trayectoria es el guion y sí hay que comprobarla. `stratum eval list` avisa de 
 | `runtime_event`               | `event` (`veto`·`confirmation`·`retry`·`job`·`inbox`·`grant`), `tool`, `detail`, `min` (1), `max`                                                                                                           | el runtime registró esos eventos (`detail` = `source` del veto, `decision` de la confirmación o, en un `job`, su fase —`started`, `read`, `cancel`, `notified`— o fase y resultado: `ended:failed`, `ended:session-closed`; en `inbox`, su fase —`enqueue`, `consume`, `drop`— o fase y tipo: `consume:user-message`, `consume:job-failed`)               |
 | `processes_gone`              | `pidFile`                                                                                                                                                                                                   | los procesos cuyos pids dejó el escenario en ese fichero (un JSON: número, lista u objeto de números) ya no existen. Distingue «el job figura como cancelado» de «su árbol murió de verdad»; vale en los dos modos                                                                                                                                        |
 | `cache_break`                 | `cause` (`tools`·`system`·`history`·`compression`·`model`·`backend`·`unknown`), `min` (1), `max`                                                                                                            | la traza tiene ese número de roturas de caché, de esa causa si se indica                                                                                                                                                                                                                                                                                  |
-| `llm_call`                    | `origin` (`agent`·`subagent`·`memory-extraction`·`context-compression`·`session-summary`·`session-memory-extraction`·`session-memory-summary`), `status` (`any`·`ok`·`error`·`cancelled`), `min` (1), `max` | la traza tiene ese número de llamadas al modelo de ese origen. Exigir una (`min` > 0) es trayectoria: va con `mode: "mock"`                                                                                                                                                                                                                               |
+| `llm_call`                    | `origin` (`agent`·`subagent`·`memory-extraction`·`context-compression`·`session-summary`·`session-memory-extraction`·`session-memory-summary`·`memory-dreaming`), `status` (`any`·`ok`·`error`·`cancelled`), `min` (1), `max` | la traza tiene ese número de llamadas al modelo de ese origen. Exigir una (`min` > 0) es trayectoria: va con `mode: "mock"`                                                                                                                                                                                                                               |
 
 Métricas acotables: `tokens`, `durationMs`, `llmCalls`, `llmErrors`, `toolCalls`, `toolErrors`,
 `policyBlocks`, `retries`, `providerFallbacks`, `subagents`, `subagentFailures`, `repeatedCalls`,
@@ -425,7 +425,8 @@ Cada llamada al modelo lleva en la traza quién la hizo (`data.origin`): `agent`
 (el resumen del historial, por umbral o con `/compact`), `session-summary` (el resumen de una
 línea al guardar la sesión de `chat`) y, desde M11, `session-memory-extraction` /
 `session-memory-summary` (el extractor y el resumen de la memoria de sesión de una sesión del
-daemon). Todas menos las dos primeras son **auxiliares**. Un escenario de `stratum eval` corre en
+daemon) y, desde M19, `memory-dreaming` (la pasada que propone cambios a la memoria; solo
+`stratum memory dream`, nunca un escenario). Todas menos las dos primeras son **auxiliares**. Un escenario de `stratum eval` corre en
 el proceso de la CLI, sin conversación duradera, así que las dos de M11 salen a 0 salvo que el
 escenario monte una.
 
@@ -805,7 +806,7 @@ modelo aprovecha mejor el mismo contexto.
 
 El bloque **LLM calls** da el total de llamadas al modelo y una fila por origen (`agent`,
 `subagent`, `memory-extraction`, `context-compression`, `session-summary`, `session-memory-extraction`,
-`session-memory-summary`) con llamadas, tokens de
+`session-memory-summary`, `memory-dreaming`) con llamadas, tokens de
 entrada y de salida, leídos de caché y sin caché, TTFT medio, duración y errores; debajo, cuántas
 llamadas del loop coincidieron con una auxiliar en curso y el TTFT con y sin ella. «Llamadas al
 modelo (loop)», los tokens, la tabla de modelos y el bloque de caché son solo del agente y los
@@ -867,7 +868,7 @@ Para las llamadas auxiliares:
 
 - `data.origin` en cada paso `model`: `agent` · `subagent` · `memory-extraction` ·
   `context-compression` · `session-summary` · `session-memory-extraction` ·
-  `session-memory-summary`. Sin él (traza anterior), el origen sale de la
+  `session-memory-summary` · `memory-dreaming`. Sin él (traza anterior), el origen sale de la
   jerarquía: `subagent` si el paso cuelga de uno, `agent` si no.
 - `meta.caps` incluye `"llm-origin"`: el escritor registra **todas** las llamadas al modelo. Sin el
   cap, las métricas auxiliares son `null`. En una sesión reanudada cuenta solo si lo declaran todas
