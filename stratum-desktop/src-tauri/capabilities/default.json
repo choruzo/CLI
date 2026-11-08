@@ -47,6 +47,7 @@
     "allow-desktop-list-skills",
     "allow-desktop-memory-decisions",
     "allow-desktop-memory-forget",
+    "allow-desktop-memory-reclassify",
     "allow-desktop-prefs",
     "allow-desktop-open-config",
     "allow-desktop-settings-get",

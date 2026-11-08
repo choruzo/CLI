@@ -26,6 +26,7 @@ function bridge(overrides: Partial<NativeBridge> = {}): NativeBridge {
   return {
     memoryDecisions: vi.fn(async () => ({ decisions: [decision()] })),
     memoryForget: vi.fn(async () => ({ removed: true })),
+    memoryMove: vi.fn(async () => ({ updated: true })),
     ...overrides,
   } as unknown as NativeBridge;
 }
@@ -54,6 +55,106 @@ describe('AssistantMemory: la memoria global del asistente', () => {
     expect(screen.getByText('La guardó el asistente')).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: /Abrir la conversación de/ }));
     expect(open).toHaveBeenCalledWith('ses_1');
+  });
+
+  it('M19: agrupa por sección, enseña el resumen plegado y manda lo desconocido a Temas', async () => {
+    const native = bridge({
+      memoryDecisions: vi.fn(async () => ({
+        decisions: [
+          decision({ id: 'd1', title: 'Le gusta el té', type: 'profile', summary: 'Té, sin azúcar' }),
+          decision({ id: 'd2', title: 'Lucía', type: 'person' }),
+          decision({ id: 'd3', title: 'Tipo viejo', type: 'bug_fix' }),
+        ],
+      })),
+    });
+    mount(native);
+    await waitFor(() => expect(screen.getByText('Le gusta el té')).toBeTruthy());
+    const sections = Array.from(document.querySelectorAll('[data-section]')).map((n) =>
+      n.getAttribute('data-section'),
+    );
+    expect(sections).toEqual(['profile', 'person', 'topic']);
+    expect(screen.getByRole('group', { name: 'Tú' }).textContent).toContain('Té, sin azúcar');
+    expect(screen.getByRole('group', { name: 'Temas' }).textContent).toContain('Tipo viejo');
+    fireEvent.click(screen.getByText('Le gusta el té'));
+    expect(screen.getByRole('group', { name: 'Tú' }).textContent).not.toContain('Té, sin azúcar');
+  });
+
+  describe('M19 — reclasificar', () => {
+    const topic = () => ({ decisions: [decision({ type: 'topic' })] });
+    const select = () =>
+      screen.getByRole('combobox', {
+        name: 'Mover Prefiere vuelos de mañana a otra sección',
+      }) as HTMLSelectElement;
+    const moveTo = (section: string) =>
+      act(async () => fireEvent.change(select(), { target: { value: section } }));
+    const calls = (fn: unknown) => (fn as ReturnType<typeof vi.fn>).mock.calls.length;
+
+    it('ofrece las cinco secciones con la actual seleccionada, y mover llama con id y sección', async () => {
+      const native = bridge({ memoryDecisions: vi.fn(async () => topic()) });
+      mount(native);
+      await waitFor(() => expect(screen.getByText('Prefiere vuelos de mañana')).toBeTruthy());
+      expect(Array.from(select().options).map((o) => o.value)).toEqual([
+        'profile',
+        'person',
+        'project',
+        'topic',
+        'area',
+      ]);
+      expect(select().value).toBe('topic');
+      const before = calls(native.memoryDecisions);
+      await moveTo('person');
+      expect(native.memoryMove).toHaveBeenCalledWith('dec_1', 'person');
+      // Sin optimismo: se vuelve a pedir la lista y la fila no se mueve a mano.
+      await waitFor(() => expect(calls(native.memoryDecisions)).toBe(before + 1));
+      expect(
+        document.querySelector('[data-section="topic"] [data-decision="dec_1"]'),
+      ).toBeTruthy();
+    });
+
+    it('elegir la sección actual no llama a nada', async () => {
+      const native = bridge({ memoryDecisions: vi.fn(async () => topic()) });
+      mount(native);
+      await waitFor(() => expect(screen.getByText('Prefiere vuelos de mañana')).toBeTruthy());
+      await moveTo('topic');
+      expect(native.memoryMove).not.toHaveBeenCalled();
+    });
+
+    it('updated: false dice que ya no estaba; sin respuesta, resultado desconocido y sin reintento', async () => {
+      const native = bridge({
+        memoryDecisions: vi.fn(async () => topic()),
+        memoryMove: vi.fn(async () => ({ updated: false })),
+      });
+      mount(native);
+      await waitFor(() => expect(screen.getByText('Prefiere vuelos de mañana')).toBeTruthy());
+      await moveTo('area');
+      await waitFor(() => expect(screen.getByText('Ya no estaba.')).toBeTruthy());
+
+      (native.memoryMove as ReturnType<typeof vi.fn>).mockRejectedValue({
+        kind: 'unknown',
+        code: null,
+        reason: null,
+        message: 'x',
+      });
+      await moveTo('project');
+      await waitFor(() => expect(screen.getByText(/Resultado desconocido/)).toBeTruthy());
+      expect(native.memoryMove).toHaveBeenCalledTimes(2);
+    });
+
+    it('sin conexión, el selector está deshabilitado', async () => {
+      const native = bridge({ memoryDecisions: vi.fn(async () => topic()) });
+      const view = mount(native);
+      await waitFor(() => expect(screen.getByText('Prefiere vuelos de mañana')).toBeTruthy());
+      view.rerender(
+        <AssistantMemory
+          native={native}
+          connected={false}
+          refreshKey="k"
+          knownSessions={new Set(['ses_1'])}
+          onOpenSession={() => undefined}
+        />,
+      );
+      expect(select().disabled).toBe(true);
+    });
   });
 
   it('buscar pide la búsqueda al daemon, recortada', async () => {

@@ -156,6 +156,7 @@ pub fn run() {
             commands::desktop_list_skills,
             commands::desktop_memory_decisions,
             commands::desktop_memory_forget,
+            commands::desktop_memory_reclassify,
             commands::desktop_prefs,
             commands::desktop_open_config,
             commands::desktop_settings_get,

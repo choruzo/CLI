@@ -2,8 +2,16 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { describeCommandError } from '../app/actions';
 import { useNative } from '../bridge/context';
 import { toCommandError } from '../bridge/native';
-import type { ProtocolDecision, ProtocolSessionMemory, ProtocolSessionSnapshot } from '../protocol';
-import { parseDecisions, parseForget, parseSessionMemory } from '../protocol/results';
+import {
+  PROTOCOL_MEMORY_SECTIONS,
+  groupDecisionsBySection,
+  memorySectionOf,
+  type ProtocolDecision,
+  type ProtocolMemorySection,
+  type ProtocolSessionMemory,
+  type ProtocolSessionSnapshot,
+} from '../protocol';
+import { parseDecisions, parseForget, parseMoved, parseSessionMemory } from '../protocol/results';
 import { activeRun } from '../protocol/view';
 import { useSessions } from '../stores/sessionStore';
 
@@ -25,6 +33,15 @@ const PROVENANCE: Record<NonNullable<ProtocolDecision['source']> | 'none', strin
   agent: 'Saved by the assistant',
   auto: 'Extracted automatically from a conversation',
   none: 'Origin not recorded',
+};
+
+/** M19 — las secciones de lo que recuerda, como títulos del inspector. */
+const SECTION_LABEL: Record<ProtocolMemorySection, string> = {
+  profile: 'You',
+  person: 'People',
+  project: 'Projects',
+  topic: 'Topics',
+  area: 'Areas',
 };
 
 const shortId = (id: string) => (id.length > 8 ? id.slice(-8) : id);
@@ -51,6 +68,7 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [confirming, setConfirming] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [note, setNote] = useState<{ tone: 'info' | 'bad'; text: string } | null>(null);
   const alive = useRef(true);
   const requestSeq = useRef(0);
@@ -134,7 +152,33 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
     if (alive.current) void load(appliedRef.current);
   };
 
-  const canChange = connected && canControl && !forgetting;
+  /** M19 — mover un recuerdo a otra sección. Sin estado optimista: se vuelve a pedir la lista. */
+  const moveDecision = async (decision: ProtocolDecision, section: string) => {
+    if (section === memorySectionOf(decision.type)) return;
+    setMoving(true);
+    setNote(null);
+    try {
+      const updated = parseMoved(await native.memoryMove(decision.id, section));
+      if (!alive.current) return;
+      if (updated === null) setNote({ tone: 'bad', text: UNREADABLE });
+      else if (!updated) setNote({ tone: 'info', text: 'It was already gone.' });
+    } catch (err) {
+      if (!alive.current) return;
+      const failure = toCommandError(err);
+      setNote({
+        tone: 'bad',
+        text:
+          failure.kind === 'unknown'
+            ? 'Result unknown: the daemon did not answer in time. Refresh to see whether it moved.'
+            : describeCommandError(failure),
+      });
+    } finally {
+      if (alive.current) setMoving(false);
+    }
+    if (alive.current) void load(appliedRef.current);
+  };
+
+  const canChange = connected && canControl && !forgetting && !moving;
 
   return (
     <section className="memory-panel" aria-label="Memory">
@@ -188,8 +232,13 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
           {applied ? 'Nothing matches.' : 'The assistant does not remember anything yet.'}
         </p>
       ) : null}
-      <ul className="memory-list">
-        {(decisions ?? []).map((decision) => {
+      {groupDecisionsBySection(decisions ?? []).map(({ section, items }) => (
+        <section key={section} className="memory-section" data-section={section} aria-label={SECTION_LABEL[section]}>
+          <h3 className="memory-section-title small">
+            {SECTION_LABEL[section]} <span className="muted">({items.length})</span>
+          </h3>
+          <ul className="memory-list">
+        {items.map((decision) => {
           const open = expanded[decision.id] === true;
           const origin = decision.source ?? 'none';
           const known = decision.sessionId ? sessions[decision.sessionId] !== undefined : false;
@@ -205,8 +254,9 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
                   {decision.title}
                 </button>
               </div>
+              {decision.summary && !open ? <div className="small">{decision.summary}</div> : null}
               <div className="muted small">
-                {decision.type} · {decision.importance} · {when(decision.timestamp)}
+                {decision.importance} · {when(decision.updatedAt ?? decision.timestamp)}
               </div>
               {decision.tags.length > 0 ? <div className="muted small">{decision.tags.join(', ')}</div> : null}
               {open ? (
@@ -246,6 +296,21 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
                 </div>
               ) : (
                 <div className="controls">
+                  <label className="muted small memory-move">
+                    Move to{' '}
+                    <select
+                      value={memorySectionOf(decision.type)}
+                      disabled={!canChange}
+                      aria-label={`Move ${decision.title} to another section`}
+                      onChange={(e) => void moveDecision(decision, e.target.value)}
+                    >
+                      {PROTOCOL_MEMORY_SECTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {SECTION_LABEL[s]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className="btn danger small"
@@ -263,7 +328,9 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
             </li>
           );
         })}
-      </ul>
+          </ul>
+        </section>
+      ))}
       {companionId ? <ConversationMemory connected={connected} sessionId={companionId} /> : null}
     </section>
   );

@@ -317,6 +317,18 @@ p {
   background: var(--panel);
   overflow-wrap: anywhere;
 }
+.memory-section {
+  margin-top: 0.75rem;
+}
+.memory-move select {
+  margin-left: 0.25rem;
+}
+.memory-section-title {
+  margin: 0;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
 .memory-title {
   text-align: left;
   font-weight: 600;

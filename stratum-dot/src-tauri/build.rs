@@ -28,6 +28,7 @@ const COMMANDS: &[&str] = &[
     "dot_grants_revoke",
     "dot_memory_decisions",
     "dot_memory_forget",
+    "dot_memory_reclassify",
     "dot_channels_status",
     "dot_channels_pair_begin",
     "dot_channels_pair_confirm",

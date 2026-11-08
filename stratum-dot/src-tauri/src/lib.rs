@@ -131,6 +131,7 @@ pub fn run() {
             commands::dot_grants_revoke,
             commands::dot_memory_decisions,
             commands::dot_memory_forget,
+            commands::dot_memory_reclassify,
             commands::dot_channels_status,
             commands::dot_channels_pair_begin,
             commands::dot_channels_pair_confirm,

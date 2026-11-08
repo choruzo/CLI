@@ -319,6 +319,24 @@ pub async fn desktop_memory_forget(
         .await
 }
 
+/// M19 — mover un recuerdo del asistente a otra sección. Conexión principal
+/// (capacidad `control`): no cambia lo que el agente puede hacer. La sección la
+/// valida `dot-link`; sin respuesta queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn desktop_memory_reclassify(
+    state: State<'_, DesktopState>,
+    decision_id: String,
+    section: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryReclassify {
+            decision_id,
+            section,
+        })
+        .await
+}
+
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PrefsView {

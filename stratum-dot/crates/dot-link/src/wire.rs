@@ -77,6 +77,9 @@ pub enum MainMethod {
     MemoryDecisions,
     /// M17 (Dot) — olvidar una decisión del asistente (`control`, solo resta).
     MemoryForget,
+    /// M19 — mover un recuerdo de la memoria del asistente a otra sección
+    /// (`control`; no cambia lo que el agente puede hacer).
+    MemoryReclassify,
     /// M18 (Dot) — el canal de Telegram: estado (sin token ni código), pedir un
     /// código de emparejamiento y desemparejar (solo resta). Emparejar de verdad
     /// (`channels.pairConfirm`) da autoridad: va por [`ApproverMethod`].
@@ -91,7 +94,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 37] = [
+    pub const ALL: [MainMethod; 38] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -124,6 +127,7 @@ impl MainMethod {
         MainMethod::GrantsRevoke,
         MainMethod::MemoryDecisions,
         MainMethod::MemoryForget,
+        MainMethod::MemoryReclassify,
         MainMethod::ChannelsStatus,
         MainMethod::ChannelsPairBegin,
         MainMethod::ChannelsUnpair,
@@ -167,6 +171,7 @@ impl WireMethod for MainMethod {
             MainMethod::GrantsRevoke => "grants.revoke",
             MainMethod::MemoryDecisions => "memory.decisions",
             MainMethod::MemoryForget => "memory.forget",
+            MainMethod::MemoryReclassify => "memory.reclassify",
             MainMethod::ChannelsStatus => "channels.status",
             MainMethod::ChannelsPairBegin => "channels.pairBegin",
             MainMethod::ChannelsUnpair => "channels.unpair",
@@ -372,6 +377,7 @@ mod tests {
                 "grants.revoke",
                 "memory.decisions",
                 "memory.forget",
+                "memory.reclassify",
                 "channels.status",
                 "channels.pairBegin",
                 "channels.unpair",
@@ -397,8 +403,10 @@ mod tests {
         }
         for name in names {
             // Ni alojar, ni gobernar jobs, ni la memoria global: eso no es de un
-            // cliente. Única excepción (M17): ver y olvidar la del asistente.
-            let companion_memory = name == "memory.decisions" || name == "memory.forget";
+            // cliente. Única excepción (M17, M19): ver, olvidar y reclasificar la del asistente.
+            let companion_memory = name == "memory.decisions"
+                || name == "memory.forget"
+                || name == "memory.reclassify";
             assert!(
                 !name.starts_with("host.")
                     && !name.starts_with("jobs.")

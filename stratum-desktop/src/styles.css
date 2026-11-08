@@ -4074,6 +4074,23 @@ kbd {
   border-radius: 6px;
   font-size: 13px;
 }
+.assistant-memory__section + .assistant-memory__section {
+  margin-top: 10px;
+}
+.assistant-memory__section-title {
+  margin: 0 0 6px;
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--color-textMuted);
+}
+.assistant-memory__section-title span {
+  font-weight: 400;
+}
+.assistant-memory__summary {
+  font-size: 13px;
+}
 .assistant-memory__title {
   padding: 0;
   border: 0;
@@ -4103,6 +4120,14 @@ kbd {
   display: flex;
   justify-content: flex-end;
   gap: 6px;
+}
+.assistant-memory__move {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-right: auto;
+  font-size: 12px;
+  color: var(--color-textMuted);
 }
 .assistant-memory__confirm {
   display: flex;

@@ -331,6 +331,25 @@ pub async fn dot_memory_forget(
         .await
 }
 
+/// M19 — mover un recuerdo del asistente a otra sección. Conexión principal
+/// (capacidad `control`), sin broker: no cambia lo que el agente puede hacer. La
+/// sección la valida `dot-link` contra la lista cerrada; sin respuesta queda
+/// `unknown` y no se repite.
+#[tauri::command]
+pub async fn dot_memory_reclassify(
+    state: State<'_, DotState>,
+    decision_id: String,
+    section: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryReclassify {
+            decision_id,
+            section,
+        })
+        .await
+}
+
 /// Cierre de M14 — conversación nueva del asistente: el daemon compacta la
 /// actual, la archiva y abre otra que hereda su memoria. Agente y `fresh` los
 /// fija el nativo; sin respuesta queda `unknown` y no se repite.

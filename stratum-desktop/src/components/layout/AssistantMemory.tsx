@@ -2,8 +2,14 @@ import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { describeFailure } from '../../client/actions';
 import type { NativeBridge } from '../../ipc/native';
 import { toCommandError } from '../../ipc/native';
-import type { ProtocolDecision } from '../../protocol';
-import { parseDecisions, parseForget } from '../../protocol/results';
+import {
+  PROTOCOL_MEMORY_SECTIONS,
+  groupDecisionsBySection,
+  memorySectionOf,
+  type ProtocolDecision,
+  type ProtocolMemorySection,
+} from '../../protocol';
+import { parseDecisions, parseForget, parseMoved } from '../../protocol/results';
 
 const UNREADABLE = 'El daemon contestó algo que esta versión de Desktop no entiende.';
 
@@ -11,6 +17,15 @@ const PROVENANCE: Record<NonNullable<ProtocolDecision['source']> | 'none', strin
   agent: 'La guardó el asistente',
   auto: 'Extraída sola de una conversación',
   none: 'Origen sin registrar',
+};
+
+/** M19 — las secciones de lo que recuerda, como títulos del panel. */
+const SECTION_LABEL: Record<ProtocolMemorySection, string> = {
+  profile: 'Tú',
+  person: 'Personas',
+  project: 'Proyectos',
+  topic: 'Temas',
+  area: 'Áreas',
 };
 
 const when = (iso: string) => {
@@ -50,6 +65,7 @@ export function AssistantMemory({
   const [expanded, setExpanded] = useState<Record<string, boolean>>({});
   const [confirming, setConfirming] = useState<string | null>(null);
   const [forgetting, setForgetting] = useState(false);
+  const [moving, setMoving] = useState(false);
   const [note, setNote] = useState<{ tone: 'info' | 'error'; text: string } | null>(null);
   const alive = useRef(true);
   const requestSeq = useRef(0);
@@ -128,7 +144,33 @@ export function AssistantMemory({
     if (alive.current) void load(appliedRef.current);
   };
 
-  const canChange = connected && !forgetting;
+  /** M19 — mover un recuerdo a otra sección. Sin estado optimista: se vuelve a pedir la lista. */
+  const moveDecision = async (decision: ProtocolDecision, section: string) => {
+    if (section === memorySectionOf(decision.type)) return;
+    setMoving(true);
+    setNote(null);
+    try {
+      const updated = parseMoved(await native.memoryMove(decision.id, section));
+      if (!alive.current) return;
+      if (updated === null) setNote({ tone: 'error', text: UNREADABLE });
+      else if (!updated) setNote({ tone: 'info', text: 'Ya no estaba.' });
+    } catch (err) {
+      if (!alive.current) return;
+      const failure = toCommandError(err);
+      setNote({
+        tone: 'error',
+        text:
+          failure.kind === 'unknown'
+            ? 'Resultado desconocido: el daemon no contestó a tiempo. Recarga para ver si se movió.'
+            : describeFailure('No se pudo mover', failure),
+      });
+    } finally {
+      if (alive.current) setMoving(false);
+    }
+    if (alive.current) void load(appliedRef.current);
+  };
+
+  const canChange = connected && !forgetting && !moving;
 
   return (
     <section className="conv-group assistant-memory" aria-label="Memoria del asistente">
@@ -186,8 +228,19 @@ export function AssistantMemory({
           {applied ? 'Nada coincide.' : 'El asistente aún no recuerda nada.'}
         </p>
       )}
-      <ul className="assistant-memory__list">
-        {(decisions ?? []).map((decision) => {
+      {groupDecisionsBySection(decisions ?? []).map(({ section, items }) => (
+        <div
+          key={section}
+          className="assistant-memory__section"
+          role="group"
+          data-section={section}
+          aria-label={SECTION_LABEL[section]}
+        >
+          <h4 className="assistant-memory__section-title">
+            {SECTION_LABEL[section]} <span>({items.length})</span>
+          </h4>
+          <ul className="assistant-memory__list">
+        {items.map((decision) => {
           const open = expanded[decision.id] === true;
           const origin = decision.source ?? 'none';
           const canOpen = decision.sessionId !== undefined && knownSessions.has(decision.sessionId);
@@ -201,8 +254,11 @@ export function AssistantMemory({
               >
                 {decision.title}
               </button>
+              {decision.summary && !open && (
+                <div className="assistant-memory__summary">{decision.summary}</div>
+              )}
               <div className="assistant-memory__meta">
-                {decision.type} · {decision.importance} · {when(decision.timestamp)}
+                {decision.importance} · {when(decision.updatedAt ?? decision.timestamp)}
                 {decision.tags.length > 0 && ` · ${decision.tags.join(', ')}`}
               </div>
               {open && (
@@ -248,6 +304,21 @@ export function AssistantMemory({
                 </div>
               ) : (
                 <div className="assistant-memory__actions">
+                  <label className="assistant-memory__move">
+                    Mover a{' '}
+                    <select
+                      value={memorySectionOf(decision.type)}
+                      disabled={!canChange}
+                      aria-label={`Mover ${decision.title} a otra sección`}
+                      onChange={(e) => void moveDecision(decision, e.target.value)}
+                    >
+                      {PROTOCOL_MEMORY_SECTIONS.map((s) => (
+                        <option key={s} value={s}>
+                          {SECTION_LABEL[s]}
+                        </option>
+                      ))}
+                    </select>
+                  </label>
                   <button
                     type="button"
                     className="button button--small button--danger"
@@ -265,7 +336,9 @@ export function AssistantMemory({
             </li>
           );
         })}
-      </ul>
+          </ul>
+        </div>
+      ))}
     </section>
   );
 }

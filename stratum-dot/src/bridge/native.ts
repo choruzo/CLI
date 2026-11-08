@@ -260,6 +260,8 @@ export interface NativeBridge {
   memoryDecisions(query?: string): Promise<unknown>;
   /** M17 — olvidar una decisión del asistente. Sin respuesta, `unknown`: no se repite. */
   memoryForget(decisionId: string): Promise<unknown>;
+  /** M19 — mover un recuerdo a otra sección (`memory.reclassify`); el agente lo fija el nativo. */
+  memoryMove(decisionId: string, section: string): Promise<unknown>;
   /** M17 — la memoria de sesión de una conversación (solo lectura). */
   sessionMemory(sessionId: string): Promise<unknown>;
   /**
@@ -355,6 +357,8 @@ export const tauriBridge: NativeBridge = {
   grantsRevoke: (sessionId, grantId) => invoke<unknown>('dot_grants_revoke', { sessionId, grantId }),
   memoryDecisions: (query) => invoke<unknown>('dot_memory_decisions', { query: query ?? null }),
   memoryForget: (decisionId) => invoke<unknown>('dot_memory_forget', { decisionId }),
+  memoryMove: (decisionId, section) =>
+    invoke<unknown>('dot_memory_reclassify', { decisionId, section }),
   sessionMemory: (sessionId) => invoke<unknown>('dot_session_memory', { sessionId }),
   newCompanionConversation: () => invoke<unknown>('dot_new_companion_conversation'),
   channelsStatus: () => invoke<unknown>('dot_channels_status'),

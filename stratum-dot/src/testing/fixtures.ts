@@ -241,6 +241,9 @@ export function fakeNative(): FakeNative {
     grantsRevoke: vi.fn(async (): Promise<unknown> => ({ grant: {} })),
     memoryDecisions: vi.fn(async (_query?: string): Promise<unknown> => ({ decisions: [] })),
     memoryForget: vi.fn(async (_decisionId: string): Promise<unknown> => ({ removed: true })),
+    memoryMove: vi.fn(
+      async (_decisionId: string, _section: string): Promise<unknown> => ({ updated: true }),
+    ),
     channelsStatus: vi.fn(async (): Promise<unknown> => ({ telegram: TELEGRAM_OFF })),
     channelsPairBegin: vi.fn(async (): Promise<unknown> => ({
       code: 'ABCDEFGHJK',

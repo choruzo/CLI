@@ -71,17 +71,43 @@ const expand = (title: string) => fireEvent.click(within(panel()).getByRole('but
 const flush = () => act(async () => undefined);
 
 describe('lista de decisiones', () => {
-  it('pide las últimas al abrir (sin consulta) y enseña título, tipo, importancia, fecha y tags', async () => {
+  it('pide las últimas al abrir (sin consulta) y enseña título, importancia, fecha y tags', async () => {
     const native = fakeNative();
     native.calls.memoryDecisions.mockResolvedValue({ decisions: [decision()] });
     await withPanel(native);
     await waitFor(() => expect(panel().textContent).toContain('Prefers short answers'));
     expect(native.calls.memoryDecisions).toHaveBeenCalledWith(undefined);
-    expect(panel().textContent).toContain('preference · high');
+    expect(panel().textContent).toContain('high · ');
     expect(panel().textContent).toContain(new Date('2026-10-20T10:00:00.000Z').toLocaleString());
     expect(panel().textContent).toContain('style, tone');
     // Plegada: ni el contenido ni la procedencia.
     expect(panel().textContent).not.toContain('two lines at most');
+  });
+
+  it('M19: agrupa por sección, enseña el resumen plegado y manda lo desconocido a Topics', async () => {
+    const native = fakeNative();
+    native.calls.memoryDecisions.mockResolvedValue({
+      decisions: [
+        decision({ id: 'd1', title: 'Likes tea', type: 'profile', summary: 'Tea, no sugar' }),
+        decision({ id: 'd2', title: 'Lucia', type: 'person' }),
+        decision({ id: 'd3', title: 'Old kind', type: 'bug_fix' }),
+        decision({ id: 'd4', title: 'Newer kind', type: 'something-new' }),
+      ],
+    });
+    await withPanel(native);
+    await waitFor(() => expect(panel().textContent).toContain('Likes tea'));
+    const sections = Array.from(panel().querySelectorAll('[data-section]')).map((n) =>
+      n.getAttribute('data-section'),
+    );
+    // En el orden del contrato, sin secciones vacías.
+    expect(sections).toEqual(['profile', 'person', 'topic']);
+    const topics = panel().querySelector('[data-section="topic"]')!;
+    expect(topics.textContent).toContain('Old kind');
+    expect(topics.textContent).toContain('Newer kind');
+    expect(within(panel()).getByRole('region', { name: 'You' }).textContent).toContain('Tea, no sugar');
+    // Desplegado, el resumen no se repite (lo cubre el contenido).
+    expand('Likes tea');
+    expect(within(panel()).getByRole('region', { name: 'You' }).textContent).not.toContain('Tea, no sugar');
   });
 
   it('al desplegar enseña el contenido como texto plano y la procedencia de cada caso', async () => {
@@ -264,6 +290,93 @@ describe('olvidar', () => {
     expect(
       (within(row()).getByRole('button', { name: 'Forget Prefers short answers' }) as HTMLButtonElement).disabled,
     ).toBe(true);
+  });
+});
+
+describe('M19 — reclasificar', () => {
+  async function withOne(): Promise<FakeNative> {
+    const native = fakeNative();
+    native.calls.memoryDecisions.mockResolvedValue({ decisions: [decision({ type: 'topic' })] });
+    await withPanel(native);
+    await waitFor(() => expect(panel().textContent).toContain('Prefers short answers'));
+    return native;
+  }
+  const select = () =>
+    within(row()).getByRole('combobox', {
+      name: 'Move Prefers short answers to another section',
+    }) as HTMLSelectElement;
+  const moveTo = (section: string) => act(async () => fireEvent.change(select(), { target: { value: section } }));
+
+  it('ofrece las cinco secciones, con la actual seleccionada (un tipo desconocido es Topics)', async () => {
+    await withOne();
+    expect(Array.from(select().options).map((o) => o.value)).toEqual([
+      'profile',
+      'person',
+      'project',
+      'topic',
+      'area',
+    ]);
+    expect(select().value).toBe('topic');
+  });
+
+  it('mover llama con el id y la sección, y vuelve a pedir la lista sin mover la fila a mano', async () => {
+    const native = await withOne();
+    const before = native.calls.memoryDecisions.mock.calls.length;
+    await moveTo('person');
+    expect(native.calls.memoryMove).toHaveBeenCalledWith('dec_1', 'person');
+    await waitFor(() => expect(native.calls.memoryDecisions.mock.calls.length).toBe(before + 1));
+    // El daemon sigue diciendo `topic`: manda la lista, no lo que se supone.
+    expect(panel().querySelector('[data-section="topic"] [data-decision="dec_1"]')).toBeTruthy();
+    expect(panel().querySelector('[data-section="person"]')).toBeNull();
+  });
+
+  it('elegir la sección actual no llama a nada', async () => {
+    const native = await withOne();
+    await moveTo('topic');
+    expect(native.calls.memoryMove).not.toHaveBeenCalled();
+  });
+
+  it('updated: false dice que ya no estaba', async () => {
+    const native = await withOne();
+    native.calls.memoryMove.mockResolvedValue({ updated: false });
+    await moveTo('area');
+    await waitFor(() => expect(panel().textContent).toContain('It was already gone.'));
+  });
+
+  it('sin respuesta: resultado desconocido, sin reintento', async () => {
+    const native = await withOne();
+    native.calls.memoryMove.mockRejectedValue({ kind: 'unknown', code: null, reason: null, message: 'x' });
+    await moveTo('project');
+    await waitFor(() => expect(panel().textContent).toContain('Result unknown'));
+    expect(panel().textContent).toContain('Refresh to see whether it moved.');
+    await flush();
+    expect(native.calls.memoryMove).toHaveBeenCalledTimes(1);
+  });
+
+  it('una respuesta que no se entiende se dice', async () => {
+    const native = await withOne();
+    native.calls.memoryMove.mockResolvedValue({ nope: 1 });
+    await moveTo('project');
+    await waitFor(() =>
+      expect(panel().textContent).toContain('The daemon answered in a way this version of Dot cannot read.'),
+    );
+  });
+
+  it('sin control, el selector está deshabilitado', async () => {
+    const native = fakeNative();
+    native.calls.memoryDecisions.mockResolvedValue({ decisions: [decision()] });
+    render(
+      <NativeProvider value={native}>
+        <App />
+      </NativeProvider>,
+    );
+    act(() => {
+      native.push({ type: 'connection', state: { ...CONNECTED, capabilities: ['observe'] } as typeof CONNECTED });
+      native.push({ type: 'sessions', sessionIds: [] });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant' }));
+    await waitFor(() => expect(panel().textContent).toContain('Prefers short answers'));
+    expect(select().disabled).toBe(true);
   });
 });
 

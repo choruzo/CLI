@@ -178,6 +178,7 @@ const DOT_METHODS: &[MainMethod] = &[
     // M17: inspector de memoria del companion (la del perfil, `memory_agent`).
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
+    MainMethod::MemoryReclassify,
     MainMethod::SessionsMemory,
     // M18: el canal de Telegram (emparejar de verdad va por el broker de aprobador).
     MainMethod::ChannelsStatus,
@@ -208,6 +209,7 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     // Panel de memoria global: la del asistente (`memory_agent`).
     MainMethod::MemoryDecisions,
     MainMethod::MemoryForget,
+    MainMethod::MemoryReclassify,
     // Panel de trayectoria: la traza de la sesión que se mira (solo lectura).
     MainMethod::TraceSubscribe,
     MainMethod::TraceUnsubscribe,
@@ -1186,8 +1188,33 @@ fn call_request_as(
                 }),
             ))
         }
+        CallAction::MemoryReclassify {
+            decision_id,
+            section,
+        } => {
+            if !valid_id(decision_id) {
+                return Err(invalid("Invalid decision id."));
+            }
+            if !MEMORY_SECTIONS.contains(&section.as_str()) {
+                return Err(invalid("Unknown memory section."));
+            }
+            Ok((
+                MainMethod::MemoryReclassify,
+                json!({
+                    "agent": profile.memory_agent(),
+                    "decisionId": decision_id,
+                    "type": section,
+                    "operationId": operation_id,
+                }),
+            ))
+        }
     }
 }
+
+/// M19 — las secciones de la memoria del asistente, las mismas que
+/// `PROTOCOL_MEMORY_SECTIONS`. El nativo conoce el sobre, no los DTOs, pero este
+/// parámetro lo fija él: el daemon rechazaría cualquier otro valor.
+const MEMORY_SECTIONS: [&str; 5] = ["profile", "person", "project", "topic", "area"];
 
 /// Tope del desplazamiento de `images.get` (`SHARED_IMAGE_LIMITS`: 5 MB).
 const MAX_IMAGE_OFFSET: u64 = 5 * 1024 * 1024;
@@ -2788,15 +2815,50 @@ mod tests {
             let bad = CallAction::MemoryForget { decision_id: bad };
             assert!(call_request(&bad, "op").is_err());
         }
+        // M19: reclasificar manda una sección conocida de la memoria del perfil.
+        let reclassify = CallAction::MemoryReclassify {
+            decision_id: "dec_1".into(),
+            section: "person".into(),
+        };
+        let (method, params) = call_request(&reclassify, "op-9").unwrap();
+        assert_eq!(method, MainMethod::MemoryReclassify);
+        assert_eq!(
+            params,
+            json!({
+                "agent": "companion",
+                "decisionId": "dec_1",
+                "type": "person",
+                "operationId": "op-9"
+            })
+        );
+        assert!(reclassify.mutating());
+        for (id, section) in [("", "person"), ("dec_1", "bug_fix"), ("dec_1", "")] {
+            let bad = CallAction::MemoryReclassify {
+                decision_id: id.into(),
+                section: section.into(),
+            };
+            assert!(call_request(&bad, "op").is_err(), "{id}/{section}");
+        }
+        assert_eq!(
+            call_request_as(&ClientProfile::DESKTOP, &reclassify, "op-11")
+                .unwrap()
+                .1["agent"],
+            "assistant"
+        );
         for method in [
             MainMethod::MemoryDecisions,
             MainMethod::MemoryForget,
+            MainMethod::MemoryReclassify,
             MainMethod::SessionsMemory,
         ] {
             assert!(DOT_METHODS.contains(&method));
         }
         // Desktop pide las mismas, pero de la memoria del asistente: la fija su perfil.
-        for method in [MainMethod::MemoryDecisions, MainMethod::MemoryForget] {
+        for method in [
+            MainMethod::MemoryDecisions,
+            MainMethod::MemoryForget,
+            MainMethod::MemoryReclassify,
+        ] {
             assert!(DESKTOP_METHODS.contains(&method));
         }
         let desktop = |action: &CallAction| {

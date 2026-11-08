@@ -108,6 +108,12 @@ export function parseForget(raw: unknown): boolean | null {
   return parsed.success ? parsed.data.removed : null;
 }
 
+/** M19 — `memory.reclassify`: `updated: false` si ya no estaba (no es un error). */
+export function parseMoved(raw: unknown): boolean | null {
+  const parsed = RESULTS['memory.reclassify'].safeParse(raw);
+  return parsed.success ? parsed.data.updated : null;
+}
+
 /** M17 — `sessions.memory`: la memoria de sesión (M11), solo lectura. */
 export function parseSessionMemory(raw: unknown): ProtocolSessionMemory | null {
   const parsed = RESULTS['sessions.memory'].safeParse(raw);

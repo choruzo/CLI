@@ -79,6 +79,7 @@ function rig() {
     listSkills: vi.fn(async () => ({ skills: [] })),
     memoryDecisions: vi.fn(async () => ({ decisions: [] })),
     memoryForget: vi.fn(async () => ({ removed: true })),
+    memoryMove: vi.fn(async () => ({ updated: true })),
     prefs: vi.fn(async () => {
       throw new Error('sin prefs en el test');
     }),

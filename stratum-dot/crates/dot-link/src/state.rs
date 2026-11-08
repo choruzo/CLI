@@ -273,6 +273,9 @@ pub enum CallAction {
     MemoryDecisions { query: Option<String> },
     /// M17 — `memory.forget` del asistente: borrar una decisión por su id.
     MemoryForget { decision_id: String },
+    /// M19 — `memory.reclassify` del asistente: mover una decisión a otra sección
+    /// (`profile`, `person`, `project`, `topic` o `area`). El nativo fija el agente.
+    MemoryReclassify { decision_id: String, section: String },
     /// Cierre de M14 — conversación nueva del asistente: `sessions.open` con
     /// `agent: 'companion'` y `fresh: true`, fijados aquí. El daemon compacta y
     /// archiva la actual; el webview no elige agente ni puede cerrar otra sesión.
@@ -341,6 +344,7 @@ impl CallAction {
             CallAction::GrantsRevoke { .. } => "grants-revoke",
             CallAction::MemoryDecisions { .. } => "memory-decisions",
             CallAction::MemoryForget { .. } => "memory-forget",
+            CallAction::MemoryReclassify { .. } => "memory-reclassify",
             CallAction::NewCompanionConversation => "new-companion-conversation",
             CallAction::ChannelsStatus => "channels-status",
             CallAction::ChannelsPairBegin => "channels-pair-begin",
@@ -364,6 +368,7 @@ impl CallAction {
                 | CallAction::RoutinesRun { .. }
                 | CallAction::GrantsRevoke { .. }
                 | CallAction::MemoryForget { .. }
+                | CallAction::MemoryReclassify { .. }
                 | CallAction::NewCompanionConversation
                 | CallAction::ChannelsPairBegin
                 | CallAction::ChannelsUnpair { .. }

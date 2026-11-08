@@ -182,6 +182,8 @@ export interface NativeBridge {
   memoryDecisions(query?: string): Promise<unknown>;
   /** Olvidar una decisión del asistente (`memory.forget`). */
   memoryForget(decisionId: string): Promise<unknown>;
+  /** M19 — mover un recuerdo a otra sección (`memory.reclassify`); el agente lo fija el lado nativo. */
+  memoryMove(decisionId: string, section: string): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
   /** Los ajustes editables del `.stratumrc.json` global, con los secretos enmascarados. */
@@ -235,6 +237,8 @@ export const tauriBridge: NativeBridge = {
   listSkills: () => invoke<unknown>('desktop_list_skills'),
   memoryDecisions: (query) => invoke<unknown>('desktop_memory_decisions', { query: query ?? null }),
   memoryForget: (decisionId) => invoke<unknown>('desktop_memory_forget', { decisionId }),
+  memoryMove: (decisionId, section) =>
+    invoke<unknown>('desktop_memory_reclassify', { decisionId, section }),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
   settingsGet: () => invoke<SettingsView>('desktop_settings_get'),
