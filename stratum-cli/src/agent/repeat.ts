@@ -22,6 +22,7 @@ export const OBSERVING_TOOLS: ReadonlySet<string> = new Set([
   'web_search',
   'web_fetch',
   'recall_decisions',
+  'search_conversations',
 ]);
 
 /** La ventana de un agente en un turno. */

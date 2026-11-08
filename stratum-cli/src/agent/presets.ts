@@ -1,6 +1,7 @@
 import type { ToolsetFilter } from '../tools/registry.js';
 import type { ProtocolAgent } from '../protocol/index.js';
 import { SCREEN_TOOLS } from '../tools/screen/names.js';
+import { SEARCH_CONVERSATIONS_TOOL } from '../transcripts/names.js';
 
 /**
  * Presets de prompt (Stratum Desktop D1, punto ciego 16.6).
@@ -68,7 +69,9 @@ export const ASSISTANT_FILE_TOOLS: readonly string[] = [
 
 export function assistantToolsetFilter(opts: { workspace?: boolean } = {}): ToolsetFilter {
   return {
-    allowedTools: opts.workspace ? [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS] : ASSISTANT_TOOLS,
+    allowedTools: opts.workspace
+      ? [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL, ...ASSISTANT_FILE_TOOLS]
+      : [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL],
   };
 }
 
@@ -116,7 +119,9 @@ export const COMPANION_TOOLS: readonly string[] = [
 export const COMPANION_CONNECTOR_TOOLS = 'mcp__*';
 
 export function companionToolsetFilter(): ToolsetFilter {
-  return { allowedTools: [...COMPANION_TOOLS, COMPANION_CONNECTOR_TOOLS] };
+  return {
+    allowedTools: [...COMPANION_TOOLS, SEARCH_CONVERSATIONS_TOOL, COMPANION_CONNECTOR_TOOLS],
+  };
 }
 
 /** M14 — cómo aparece el `companion` en `agents.list`. */
@@ -128,7 +133,7 @@ export function companionAgentInfo(): ProtocolAgent {
       'It never runs commands on this machine.',
     mode: 'primary',
     origin: 'builtin',
-    allowedTools: [...COMPANION_TOOLS, COMPANION_CONNECTOR_TOOLS],
+    allowedTools: [...COMPANION_TOOLS, SEARCH_CONVERSATIONS_TOOL, COMPANION_CONNECTOR_TOOLS],
   };
 }
 
@@ -140,6 +145,6 @@ export function assistantAgentInfo(): ProtocolAgent {
       'Conversational assistant: web, its own decisions memory and files confined to the session directory. No shell.',
     mode: 'primary',
     origin: 'builtin',
-    allowedTools: [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS],
+    allowedTools: [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL, ...ASSISTANT_FILE_TOOLS],
   };
 }

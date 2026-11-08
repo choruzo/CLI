@@ -22,6 +22,7 @@ export const PLAN_ALLOWLIST: ReadonlySet<string> = new Set([
   'web_search',
   'web_fetch',
   'recall_decisions',
+  'search_conversations',
   // `question` es de control (no toca disco) y en Fase 1 es cuando más valor
   // tiene: resolver una ambigüedad antes de proponer el plan (Hito 2.5, F7).
   'question',

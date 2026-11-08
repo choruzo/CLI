@@ -102,6 +102,8 @@ export interface HostedSessionOptions {
   assistantData?: AssistantData;
   /** M14 — dónde guarda el `companion` lo suyo (`SessionHostOptions.companionDataDir`). */
   companionDataDir?: string;
+  /** M19 fase 3 — carpeta de sesiones donde busca `search_conversations` (solo agentes embebidos). */
+  transcriptsDir?: string;
   /** Home de los snapshots de deshacer (UX-1). Ausente: el del usuario. Tests. */
   snapshotsHome?: string;
   /** ¿Hay quien pueda resolver en remoto lo que la sesión pida? */
@@ -353,6 +355,7 @@ export class HostedSession {
       | 'remoteApprovals'
       | 'approvalTimeoutMs'
       | 'assistantData'
+      | 'transcriptsDir'
       | 'companionDataDir'
       | 'snapshotsHome'
     >,
@@ -365,6 +368,7 @@ export class HostedSession {
     const host = await SessionHost.create({
       ...(preset ? { preset } : {}),
       ...(preset === 'companion' && routineProposals ? { routineProposals } : {}),
+      ...(preset && opts.transcriptsDir ? { transcriptsDir: opts.transcriptsDir } : {}),
       ...(preset === 'assistant' && opts.assistantData
         ? { assistantData: opts.assistantData }
         : {}),

@@ -36,6 +36,7 @@ import {
   type AssistantData,
 } from './assistant.js';
 import { buildCompanionConfig, buildCompanionRegistry, companionDataDir } from './companion.js';
+import { createSearchConversationsTool } from '../transcripts/tool.js';
 
 export type { GateContext, HostGates } from './interactions.js';
 
@@ -97,6 +98,12 @@ export interface SessionHostOptions {
    * sin esto la tool no existe.
    */
   routineProposals?: RoutineProposals;
+  /**
+   * M19 fase 3 — carpeta de sesiones del daemon, donde `search_conversations`
+   * busca (solo lectura, solo las conversaciones del propio agente embebido).
+   * Solo el daemon la da; sin ella la tool no existe.
+   */
+  transcriptsDir?: string;
   /**
    * Datos del asistente: `dir` (su memoria; por defecto `~/.stratum/assistant/`)
    * y `legacyMemoryDir`, de dónde se migra una vez (por defecto la de Stratum
@@ -264,6 +271,14 @@ export class SessionHost {
     } else {
       registry = new ToolRegistry();
       registerBuiltinTools(registry, config);
+    }
+    if (opts.preset !== undefined && opts.transcriptsDir) {
+      registry.register(
+        createSearchConversationsTool({
+          sessionsDir: opts.transcriptsDir,
+          scope: { agent: opts.preset },
+        }),
+      );
     }
 
     // Los servers MCP nacen en el directorio de la sesión, no en el del proceso.

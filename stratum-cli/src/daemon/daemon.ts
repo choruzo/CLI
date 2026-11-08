@@ -822,6 +822,7 @@ export class Stratumd {
         archived,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
         companionDataDir: this.companionDir,
+        ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
         ...this.routineProposals(),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
@@ -1256,6 +1257,7 @@ export class Stratumd {
           files,
           ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
           companionDataDir: this.companionDir,
+          ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
           ...this.routineProposals(),
           ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
@@ -1416,6 +1418,7 @@ export class Stratumd {
         snapshot,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
         companionDataDir: this.companionDir,
+        ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
       });
       if (this.shuttingDown) {

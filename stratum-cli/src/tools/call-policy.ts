@@ -30,6 +30,8 @@ export const READ_ONLY_SESSION_TOOLS: readonly string[] = [
   'web_search',
   'web_fetch',
   'recall_decisions',
+  // M19: leer conversaciones pasadas no cambia nada.
+  'search_conversations',
   'read_skill',
   'exec',
   // M15 — mirar la pantalla de la caja; actuar en ella se veta.

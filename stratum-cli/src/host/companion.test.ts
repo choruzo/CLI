@@ -373,6 +373,22 @@ describe('companion — las capturas que ve el modelo (M15, §23.4)', () => {
   });
 });
 
+describe('companion — buscar en sus conversaciones (M19 fase 3)', () => {
+  it('search_conversations solo existe si quien lo aloja da la carpeta de sesiones', async () => {
+    const without = new RecordingProvider([makeTextRound('hola')]);
+    const a = await companionHost(without);
+    await collect(a.host.run('hola'));
+    expect(offered(without)).not.toContain('search_conversations');
+
+    const withDir = new RecordingProvider([makeTextRound('hola')]);
+    const b = await companionHost(withDir, {
+      extra: { transcriptsDir: join(root, 'sessions') },
+    });
+    await collect(b.host.run('hola'));
+    expect(offered(withDir)).toContain('search_conversations');
+  });
+});
+
 describe('companion — el índice de su memoria (M19 fase 2)', () => {
   async function again(dataDir: string, extra: Record<string, unknown> = {}): Promise<string> {
     const config = makeConfig({ box: { enabled: true }, ...extra });
