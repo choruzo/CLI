@@ -2263,6 +2263,46 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **F. Verbosidad del espejo**: se queda como está, con cada bloque del asistente. Del diagnóstico
     de `screen_*` (arriba) entran los tres arreglos de producto.
 
+- **M19 — Memoria estructurada y dreaming** [decidido 2026-11-07; hito general: CLI, Desktop y Dot].
+  Origen: la organización por tipo de los recuerdos que usan Claude y ChatGPT (Personas, Proyectos,
+  Temas, Áreas, «Tú») y *Components of agent memory* (Anthropic Engineering, 2026-11-06: transcripts →
+  memory notes → memory representations (wiki con enlaces) → injected context, unidas por *dreaming*,
+  la consolidación offline). Hoy la memoria es una lista plana (`decisions.json`) con 6 tipos de
+  código; no hay representaciones, índice inyectado pequeño, búsqueda en transcripts ni consolidación.
+  *Decidido por el usuario, 2026-11-07*:
+  - **Taxonomía por preset solo en `assistant` (Desktop) y `companion` (Dot).** `coding` (la CLI)
+    conserva sus 6 tipos. Secciones de usuario: `profile` (Tú), `person`, `project`, `topic`, `area`;
+    cada recuerdo gana `summary` de una línea y `updatedAt`. Es por preset, nunca por cliente.
+  - **Dreaming aplica a los tres** (CLI, Desktop y Dot) y **solo propone**: nunca escribe en la
+    memoria. Produce propuestas (corregir, fusionar, podar, crear, reclasificar, promover al índice)
+    con su procedencia, y las aplica quien tiene autoridad (usuario) desde el inspector o un comando.
+    Cada preset consolida solo su propia memoria; ninguno lee la de otro.
+  *Fases* (1 y 2 no tocan el modelo de autoridad):
+  1. Taxonomía por preset, `summary`, `updatedAt` y agrupación en los inspectores de Dot y Desktop
+     (`memory.decisions` devuelve tipo y resumen; `DecisionType` pasa a enum por preset; los ficheros
+     antiguos siguen leyéndose, sus tipos se migran al leer).
+  2. Índice inyectado pequeño, autogenerado desde las decisiones, con tope propio.
+  3. Búsqueda en transcripts: tool de solo lectura sobre el `ConversationStore` (sesiones del daemon).
+  4. Capa de representaciones: páginas por persona, proyecto o tema con enlaces, derivadas y
+     regenerables; nunca fuente de verdad (lo es `decisions.json`).
+  5. Dreaming: llamada auxiliar por `tracedCompletion` (origen nuevo en `LLM_CALL_ORIGINS`), con
+     tope de coste; en el daemon, rutina del `companion`/`assistant` (M16); en la CLI, comando manual
+     (`stratum memory dream`). Contrasta las notas con los transcripts de su ámbito.
+  *Preguntas B1–B6, resueltas por el usuario el 2026-11-08 (se aceptan las recomendaciones)*:
+  - **B1. *Resuelta.* Dónde viven las propuestas.** Recomendado: un fichero `proposals.json` junto a
+    `decisions.json` (atómico, Zod, caduca), no en `decisions.json`. Para la fase 5.
+  - **B2. *Resuelta.* Taxonomía, qué pasa con un tipo dudoso.** Recomendado: `topic` por defecto y reclasificar
+    desde el inspector, porque un modelo pequeño clasifica mal. Para la fase 1.
+  - **B3. *Resuelta.* Migración de los 6 tipos antiguos** (`architectural`…`user_preference`) en `assistant` y
+    `companion`: recomendado, todo a `topic` salvo `user_preference` → `profile`. Para la fase 1.
+  - **B4. *Resuelta.* Modelo y tope de dreaming.** Recomendado: `memory.dreaming.model` aparte, tope de tokens por
+    pasada y por día, y nunca con memoria de otro preset. Para la fase 5.
+  - **B5. *Resuelta.* Guía de escritura.** El artículo mide que reglas rígidas empeoran a los modelos fuertes;
+    medir con una ablación de `buildMemoryBlock` (eval) antes de endurecer disparadores. Fase 2.
+  - **B6. *Resuelta.* Aislamiento al consolidar y a las propuestas.** Una propuesta nunca cita contenido de otro
+    preset ni de la memoria de sesión sin procedencia; la memoria de sesión no se promociona sola
+    (M11): promover exige aprobar la propuesta.
+
 ### 23.12 Fuera, por ahora
 
 Proactividad libre, voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
