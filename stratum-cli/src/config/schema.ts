@@ -630,6 +630,23 @@ export const StratumConfigSchema = z.object({
           maxTokensPerDay: z.number().int().positive().default(60_000),
           maxProposals: z.number().int().min(1).max(20).default(8),
           ttlDays: z.number().int().min(1).max(90).default(14),
+          /**
+           * Pasada automática del daemon (apagada por defecto). `every` usa el
+           * horario de las rutinas (`6h`, `1d` o cron en hora local); `targets`
+           * son las memorias globales a revisar (la de un proyecto no tiene
+           * quien la lance). Solo propone, como una pasada manual; el daemon
+           * ocioso no se mantiene vivo por ella.
+           */
+          schedule: z
+            .object({
+              enabled: z.boolean().default(false),
+              every: z.string().min(2).default('1d'),
+              targets: z
+                .array(z.enum(['companion', 'assistant']))
+                .min(1)
+                .default(['companion']),
+            })
+            .default({}),
         })
         .default({}),
       /**

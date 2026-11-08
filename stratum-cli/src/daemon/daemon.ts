@@ -68,6 +68,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { DreamingScheduler } from './dreaming-scheduler.js';
 import { DreamingService, type DreamingModelFactory, type DreamTarget } from './memory-dreaming.js';
 import { presentedType, summaryOf } from '../memory/decisions.js';
 import {
@@ -315,6 +316,8 @@ export class Stratumd {
   readonly endpoint: Endpoint;
   /** M16 — el planificador de rutinas, o `null` con `routines: null`. */
   readonly routines: RoutineScheduler | null;
+  /** M19 — pasada automática de dreaming (`memory.dreaming.schedule`), o `null` si está apagada. */
+  readonly dreamingSchedule: DreamingScheduler | null;
   /** M18 — los canales externos, o `null` con `channels: null`. */
   readonly channels: ChannelHost | null;
   /** Se resuelve cuando el daemon ha terminado de apagarse, con el motivo. */
@@ -382,6 +385,24 @@ export class Stratumd {
     this.operations = new OperationCache({ now: this.now, ...opts.operations });
     this.archive = new SessionArchive(opts.sessionsDir ?? null);
     this.dreaming = new DreamingService(opts.sessionsDir ?? null, opts.dreamingModel);
+    const dreamSchedule = opts.config.memory.dreaming.schedule;
+    this.dreamingSchedule = dreamSchedule.enabled
+      ? new DreamingScheduler({
+          every: dreamSchedule.every,
+          targets: dreamSchedule.targets,
+          now: this.now,
+          run: (agent) => this.dreaming.run(this.dreamTarget(undefined, agent)),
+          isRunning: (agent) => this.dreaming.isRunning(this.dreamTarget(undefined, agent)),
+          onFire: (fire) =>
+            log.info('scheduled dreaming', {
+              agent: fire.agent,
+              outcome: fire.outcome,
+              ...(fire.status ? { status: fire.status } : {}),
+              ...(fire.reason ? { reason: fire.reason } : {}),
+              ...(fire.proposals !== undefined ? { proposals: fire.proposals } : {}),
+            }),
+        })
+      : null;
     this.hub = new EventHub({
       bufferSize: opts.eventBuffer ?? opts.config.daemon.eventBuffer,
       ...(opts.subscriptionQueue ? { maxQueue: opts.subscriptionQueue } : {}),
@@ -561,6 +582,7 @@ export class Stratumd {
     daemon.recoverArchived();
     // Las sesiones guardadas de rutinas ya están en `dormant`: el planificador las encuentra.
     daemon.routines?.start();
+    daemon.dreamingSchedule?.start();
     // M18 — el canal empieza a escuchar con el daemon ya publicado.
     daemon.channels?.start();
     log.info('daemon started', {
@@ -663,6 +685,7 @@ export class Stratumd {
       log.info('daemon shutting down', { reason, sessions: this.sessions.size });
       // Lo primero: ninguna rutina vence mientras se apaga.
       this.routines?.stop();
+      this.dreamingSchedule?.stop();
       // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
       this.dreaming.close();
       // Y ningún mensaje de un canal entra: deja de escuchar antes de cerrar sesiones.
