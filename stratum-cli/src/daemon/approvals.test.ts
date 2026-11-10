@@ -544,8 +544,8 @@ describe('M4 — sesión alojada en el daemon', () => {
 
     const answer = (answers: Array<{ question: string; answer: string; optionId?: string }>) =>
       code(s.approver.request('questions.answer', { requestId: request.id, answers }));
-    // Una pregunta de opciones no admite texto libre, ni otro número de respuestas.
-    expect(await answer([{ question: 'x', answer: 'la que yo quiera' }])).toBe('INVALID_PARAMS');
+    // Otro número de respuestas no vale. (El texto libre sí: toda pregunta con
+    // opciones admite otra respuesta escrita; lo cubre `tools/question.test.ts`.)
     expect(await answer([])).toBe('INVALID_PARAMS');
     expect(
       await code(s.operator.request('questions.answer', { requestId: request.id, answers: null })),
