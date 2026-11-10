@@ -1,6 +1,8 @@
 import { describe, it, expect } from 'vitest';
 import {
   BUSY_COMMANDS,
+  COMMAND_GROUPS,
+  helpText,
   filterCommands,
   isBusyCommand,
   matchCommand,
@@ -169,5 +171,40 @@ describe('comandos con el agente trabajando', () => {
       '/jobs',
       '/jobs cancel',
     ]);
+  });
+});
+
+describe('/help agrupado (helpText)', () => {
+  it('todo comando pertenece a un grupo, y solo a uno', () => {
+    const grouped = COMMAND_GROUPS.flatMap((g) => g.commands);
+    expect(new Set(grouped).size).toBe(grouped.length);
+    expect([...grouped].sort()).toEqual(SESSION_COMMANDS.map((c) => c.name).sort());
+  });
+
+  it('pinta un bloque por grupo, con su título y sus comandos', () => {
+    const text = helpText(100);
+    const blocks = text.split('\n\n');
+    expect(blocks).toHaveLength(COMMAND_GROUPS.length);
+    expect(blocks[0]?.split('\n')[0]).toBe('**Conversación**');
+    expect(text).not.toContain('**Otros**');
+    for (const c of SESSION_COMMANDS) {
+      expect(text, c.name).toMatch(new RegExp(`^  ${c.name.replace('/', '\\/')} {2,}\\S`, 'm'));
+    }
+  });
+
+  it('ninguna línea pasa del ancho y lo que no cabe sigue bajo la descripción', () => {
+    const text = helpText(60);
+    const lines = text.split('\n');
+    expect(Math.max(...lines.map((l) => l.length))).toBeLessThanOrEqual(60);
+    const column = lines.find((l) => l.startsWith('  /help'))!.indexOf('Lista');
+    const continuations = lines.filter((l) => l.startsWith('   '));
+    expect(continuations.length).toBeGreaterThan(0);
+    for (const l of continuations) expect(l.search(/\S/), l).toBe(column);
+  });
+
+  it('un comando sin grupo no se pierde: sale en «Otros»', () => {
+    const extra = { name: '/nuevo', description: 'Algo nuevo', hasArgs: false };
+    const text = helpText(100, [...SESSION_COMMANDS, extra]);
+    expect(text).toMatch(/\*\*Otros\*\*\n {2}\/nuevo +Algo nuevo$/);
   });
 });

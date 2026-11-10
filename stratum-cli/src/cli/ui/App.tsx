@@ -83,7 +83,9 @@ import {
   isBusyCommand,
   filterProfiles,
   slashCommandName,
+  helpText,
 } from './session-commands.js';
+import { resolveLayout } from './layout.js';
 import { describeProfile, strictestPolicy } from '../../agent/profiles.js';
 import { formatProfilesReport } from '../../agent/profiles-report.js';
 import { listSessionProfiles } from '../../agent/session-profile.js';
@@ -2412,9 +2414,12 @@ export function App({
 
       if (cmd === '/help') {
         dispatch({ type: 'INPUT_CHANGE', value: '' });
-        const width = Math.max(...SESSION_COMMANDS.map((c) => c.name.length)) + 2;
-        const lines = SESSION_COMMANDS.map((c) => `  ${c.name.padEnd(width)} ${c.description}`);
-        dispatch({ type: 'SYSTEM_MESSAGE', text: `Comandos disponibles:\n\n${lines.join('\n')}` });
+        // El ancho útil del mensaje: el de la conversación menos su `paddingX`.
+        const { contentWidth } = resolveLayout(
+          process.stdout.columns ?? 80,
+          process.stdout.rows ?? 24,
+        );
+        dispatch({ type: 'SYSTEM_MESSAGE', text: helpText(contentWidth - 2) });
         return;
       }
 

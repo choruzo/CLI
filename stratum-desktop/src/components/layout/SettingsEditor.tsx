@@ -523,7 +523,20 @@ function AddProvider({
   );
 }
 
-export function SettingsEditor({ native }: { native: NativeBridge }) {
+/** Una sección del editor, para el índice de Ajustes: el `id` es el de su título. */
+export interface SettingsSectionLink {
+  id: string;
+  title: string;
+}
+
+export function SettingsEditor({
+  native,
+  onSections,
+}: {
+  native: NativeBridge;
+  /** Qué secciones pinta el editor, en orden: se avisa cuando llega o cambia la vista. */
+  onSections?: (sections: SettingsSectionLink[]) => void;
+}) {
   const [view, setView] = useState<SettingsView | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [restarts, setRestarts] = useState<SettingsRestart[]>([]);
@@ -564,6 +577,22 @@ export function SettingsEditor({ native }: { native: NativeBridge }) {
     },
     [native, apply],
   );
+
+  // El índice solo depende de qué secciones hay, no de sus valores.
+  const sectionKey = view ? JSON.stringify(view.sections.map((s) => [s.id, s.title])) : null;
+  useEffect(() => {
+    if (!onSections) return;
+    if (sectionKey === null) {
+      onSections([{ id: 'settings-editor', title: 'Configuración de Stratum' }]);
+      return;
+    }
+    const sections = JSON.parse(sectionKey) as Array<[string, string]>;
+    onSections([
+      { id: 'settings-providers', title: 'Providers' },
+      ...sections.map(([id, title]) => ({ id: `settings-s-${id}`, title })),
+      { id: 'settings-cli-only', title: 'Solo desde la CLI' },
+    ]);
+  }, [onSections, sectionKey]);
 
   if (!view) {
     return (

@@ -269,10 +269,17 @@ export function SessionContextPanel({
               <p className="side-panel__empty">Sin skills disponibles.</p>
             )}
             {skills && skills.length > 0 && (
-              <ul className="memory-items">
+              <ul className="skill-list">
                 {skills.map((skill) => (
-                  <li key={`${skill.scope}:${skill.name}`}>
-                    <strong>{skill.name}</strong> · {skill.description}
+                  <li
+                    key={`${skill.scope}:${skill.name}`}
+                    className="skill-list__item"
+                    title={skill.description}
+                  >
+                    <strong className="skill-list__name">{skill.name}</strong>
+                    <span className="skill-list__description">
+                      {skill.description}
+                    </span>
                   </li>
                 ))}
               </ul>

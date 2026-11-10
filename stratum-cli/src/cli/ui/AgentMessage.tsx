@@ -238,7 +238,7 @@ export function AgentMessage({
 function ThinkingLine({ text, live, debug }: { text: string; live: boolean; debug: boolean }) {
   if (debug) {
     return (
-      <Box marginLeft={2}>
+      <Box>
         <Text color={theme.textDisabled} dimColor wrap="wrap">
           ⊙ thinking {text.replace(/\s+/g, ' ').trim()}
         </Text>
@@ -249,7 +249,7 @@ function ThinkingLine({ text, live, debug }: { text: string; live: boolean; debu
   const head = live ? '⊙ razonando' : '⊙ razonó';
   const count = `${words} palabra${words === 1 ? '' : 's'}`;
   return (
-    <Box marginLeft={2}>
+    <Box>
       <Text color={theme.textDisabled} wrap="truncate-end">
         <Text color={live ? theme.textFaint : theme.textDisabled}>{head}</Text>
         <Text dimColor> · {count}</Text>
@@ -291,7 +291,7 @@ function ActionSummaryLine({ calls }: { calls: ToolCallState[] }) {
 function ThinkingSummaryLine({ blocks }: { blocks: string[] }) {
   const words = blocks.reduce((sum, b) => sum + countWords(b), 0);
   return (
-    <Box marginLeft={2}>
+    <Box>
       <Text color={theme.textDisabled} wrap="truncate-end">
         ⊙ razonó
         <Text dimColor>

@@ -316,3 +316,89 @@ export function filterProfiles(
 export function slashCommandName(input: string): string | null {
   return /^(\/[A-Za-z][\w-]*)(\s|$)/.exec(input.trimStart())?.[1] ?? null;
 }
+
+/**
+ * Grupos de `/help`: los comandos por lo que hacen, no en el orden en que se
+ * fueron añadiendo. Un comando que no esté en ninguno sale al final, en
+ * «Otros» (y el test lo delata).
+ */
+export const COMMAND_GROUPS: ReadonlyArray<{ title: string; commands: readonly string[] }> = [
+  {
+    title: 'Conversación',
+    commands: ['/help', '/clear', '/compact', '/context', '/btw', '/verbosity', '/debug', '/todo'],
+  },
+  {
+    title: 'Planificar y delegar',
+    commands: ['/plan', '/init', '/agents', '/agent', '/subagents'],
+  },
+  { title: 'Modelo y provider', commands: ['/model', '/provider', '/config_provider'] },
+  {
+    title: 'Cambios y procesos',
+    commands: ['/changes', '/undo', '/rewind', '/jobs', '/jobs cancel'],
+  },
+  { title: 'Permisos y entornos', commands: ['/readonly', '/profile', '/env'] },
+  {
+    title: 'Memoria',
+    commands: ['/memory show', '/memory list', '/memory search', '/memory forget'],
+  },
+  {
+    title: 'Herramientas',
+    commands: ['/tools', '/plugins', '/mcp reload', '/auditor', '/auditor stop'],
+  },
+  {
+    title: 'Sesión y configuración',
+    commands: [
+      '/sessions list',
+      '/sessions resume',
+      '/sessions delete',
+      '/detach',
+      '/config get',
+      '/config set',
+      '/quit',
+      '/exit',
+    ],
+  },
+];
+
+/** Parte `text` en líneas de `width` columnas como mucho, sin cortar palabras. */
+function wrapWords(text: string, width: number): string[] {
+  const lines: string[] = [];
+  let line = '';
+  for (const word of text.split(/\s+/).filter(Boolean)) {
+    if (line && line.length + 1 + word.length > width) {
+      lines.push(line);
+      line = word;
+    } else {
+      line = line ? `${line} ${word}` : word;
+    }
+  }
+  if (line) lines.push(line);
+  return lines.length > 0 ? lines : [''];
+}
+
+/**
+ * Texto de `/help` para una pantalla de `columns` columnas: un bloque por grupo
+ * (título en negrita, markdown) y cada comando con su descripción en una
+ * columna propia; lo que no cabe sigue debajo, alineado con la descripción y no
+ * con el margen. Puro.
+ */
+export function helpText(columns: number, commands: SessionCommand[] = SESSION_COMMANDS): string {
+  const nameWidth = Math.max(...commands.map((c) => c.name.length)) + 2;
+  const indent = ' '.repeat(2 + nameWidth);
+  const room = Math.max(24, columns - indent.length);
+  const row = (c: SessionCommand): string =>
+    wrapWords(c.description, room)
+      .map((part, i) => (i === 0 ? `  ${c.name.padEnd(nameWidth)}${part}` : `${indent}${part}`))
+      .join('\n');
+  const byName = new Map(commands.map((c) => [c.name, c]));
+  const grouped = new Set(COMMAND_GROUPS.flatMap((g) => g.commands));
+  const groups = [
+    ...COMMAND_GROUPS,
+    { title: 'Otros', commands: commands.filter((c) => !grouped.has(c.name)).map((c) => c.name) },
+  ];
+  return groups
+    .map((g) => ({ title: g.title, rows: g.commands.flatMap((n) => byName.get(n) ?? []).map(row) }))
+    .filter((g) => g.rows.length > 0)
+    .map((g) => `**${g.title}**\n${g.rows.join('\n')}`)
+    .join('\n\n');
+}

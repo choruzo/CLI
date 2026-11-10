@@ -1437,15 +1437,7 @@ body {
 /* D5: Ajustes (overlay a pantalla completa, §7.4) y ProviderWizard (modal).  */
 /* ------------------------------------------------------------------------- */
 
-.settings {
-  position: fixed;
-  inset: 0;
-  z-index: 50;
-  display: flex;
-  flex-direction: column;
-  background: var(--color-bgApp);
-  outline: none;
-}
+/* `.settings` (la ventana flotante de cristal) vive al final del fichero. */
 .settings__header {
   display: flex;
   align-items: flex-start;
@@ -2461,7 +2453,7 @@ kbd {
 }
 /* Las capas a pantalla completa dejan la TitleBar a la vista: la ventana se
    sigue pudiendo mover y cerrar con Ajustes o el onboarding abiertos. */
-.settings,
+.settings-layer,
 .wizard-backdrop,
 .onboarding {
   top: var(--titlebar-height);
@@ -2584,10 +2576,27 @@ kbd {
   -webkit-font-smoothing: antialiased;
 }
 
-/* Barras de desplazamiento finas y en la paleta, en vez de las del sistema. */
-* {
-  scrollbar-width: thin;
-  scrollbar-color: var(--color-borderMedium) transparent;
+/* Barras de desplazamiento finas y en la paleta, en vez de las del sistema:
+   solo el pulgar, redondeado y sin flechas. (Con `scrollbar-width` Chromium
+   ignora estos pseudo-elementos y vuelve a pintar las flechas.) */
+*::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+*::-webkit-scrollbar-track,
+*::-webkit-scrollbar-corner {
+  background: transparent;
+}
+*::-webkit-scrollbar-button {
+  display: none;
+}
+*::-webkit-scrollbar-thumb {
+  border: 3px solid transparent;
+  border-radius: 999px;
+  background: var(--color-borderMedium) padding-box;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background-color: var(--color-textDisabled);
 }
 
 ::selection {
@@ -4206,4 +4215,475 @@ kbd {
 .settings-cli-only li > span:first-child {
   flex: 1;
   min-width: 0;
+}
+
+/* ------------------------------------------------------------------------ */
+/* Jerarquía visual (2026-11). Misma paleta; lo que cambia es el orden en    */
+/* que se lee cada pantalla. Ajustes pasa de capa a pantalla completa a una  */
+/* ventana flotante de cristal sobre el chat: es el único `backdrop-filter`  */
+/* de la app (una superficie, quieta, que no hace scroll), la excepción a la */
+/* regla de MEJORAS_VISUALES.md.                                             */
+/* ------------------------------------------------------------------------ */
+
+:root {
+  --glass-bg: color-mix(in srgb, var(--color-bgDropdown) 54%, transparent);
+  --glass-border: color-mix(in srgb, var(--color-textPrimary) 14%, transparent);
+  --glass-divider: color-mix(in srgb, var(--color-textPrimary) 8%, transparent);
+  --glass-well: color-mix(in srgb, var(--color-bgApp) 45%, transparent);
+  --glass-raise: color-mix(in srgb, var(--color-textPrimary) 4%, transparent);
+}
+
+/* Ajustes: la capa ocupa la ventana (bajo la TitleBar) y centra el cristal. */
+.settings-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  padding: 26px;
+}
+.settings-layer__scrim {
+  position: absolute;
+  inset: 0;
+  background: rgb(0 0 0 / 0.3);
+  animation: settings-scrim-in var(--dur-med) ease both;
+}
+/* El desenfoque va en la ventana, no en el velo: un `backdrop-filter` en un
+   ancestro dejaría al cristal sin nada que desenfocar. */
+.settings {
+  position: relative;
+  width: min(900px, 100%);
+  height: min(680px, 100%);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--glass-border);
+  border-radius: 16px;
+  background:
+    linear-gradient(
+      150deg,
+      color-mix(in srgb, var(--color-textPrimary) 7%, transparent),
+      transparent 42%
+    ),
+    var(--glass-bg);
+  -webkit-backdrop-filter: blur(22px) saturate(170%);
+  backdrop-filter: blur(22px) saturate(170%);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--color-textPrimary) 10%, transparent),
+    0 28px 80px rgb(0 0 0 / 0.6);
+  outline: none;
+  animation: settings-in var(--dur-med) var(--ease-out) both;
+}
+@keyframes settings-scrim-in {
+  from {
+    opacity: 0;
+  }
+}
+@keyframes settings-in {
+  from {
+    opacity: 0;
+    transform: translateY(8px) scale(0.985);
+  }
+}
+.settings__header {
+  flex-shrink: 0;
+  align-items: center;
+  padding: 14px 14px 14px 22px;
+  border-bottom: 1px solid var(--glass-divider);
+}
+.settings__heading {
+  min-width: 0;
+}
+.settings__title {
+  font-size: 16px;
+  letter-spacing: -0.005em;
+  color: var(--color-textPrimary);
+}
+.settings__path {
+  margin: 2px 0 0;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  font-size: 11.5px;
+}
+.settings__header .icon-button {
+  width: 30px;
+  height: 30px;
+  font-size: 16px;
+}
+
+/* Índice de secciones: sigue al scroll y salta a cada una. */
+.settings__nav {
+  width: 196px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 14px 10px;
+  overflow-y: auto;
+  border-right: 1px solid var(--glass-divider);
+  background: color-mix(in srgb, var(--color-bgApp) 28%, transparent);
+}
+.settings__nav-item {
+  padding: 7px 10px;
+  border: 0;
+  border-radius: 8px;
+  background: none;
+  color: var(--color-textMuted);
+  font: inherit;
+  font-size: 13px;
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    color var(--dur-fast) ease;
+}
+.settings__nav-item:hover {
+  background: var(--glass-raise);
+  color: var(--color-textPrimary);
+}
+.settings__nav-item[aria-current] {
+  background: color-mix(in srgb, var(--color-textPrimary) 9%, transparent);
+  color: var(--color-textPrimary);
+  font-weight: 600;
+}
+.settings__nav-item:focus-visible {
+  outline-offset: -2px;
+}
+
+/* Secciones: sin caja, separadas por una línea; el título manda. */
+.settings__content {
+  min-width: 0;
+  max-width: none;
+  gap: 24px;
+  padding: 22px 26px 28px;
+  overflow-x: hidden;
+  overflow-y: auto;
+}
+.settings-editor {
+  gap: 24px;
+}
+:is(.settings__content, .settings-editor) > .settings-card {
+  gap: 10px;
+  padding: 0 0 24px;
+  border: 0;
+  border-bottom: 1px solid var(--glass-divider);
+  border-radius: 0;
+  background: none;
+}
+.settings__content > .settings-card:last-of-type {
+  padding-bottom: 0;
+  border-bottom: 0;
+}
+:is(.settings__content, .settings-editor) > .settings-card > .settings-card__title,
+:is(.settings__content, .settings-editor) > .settings-card > .settings-card__header > .settings-card__title {
+  font-size: 15px;
+  letter-spacing: -0.005em;
+}
+.settings__lead {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.6;
+}
+.settings .settings-card__hint {
+  line-height: 1.5;
+}
+.settings :is(.notice code, .settings-card code, .settings__lead code) {
+  border-color: var(--glass-divider);
+  background: var(--glass-well);
+}
+
+/* Un provider (o el formulario de añadir): la única caja dentro de una sección. */
+.settings .settings-card .settings-card {
+  gap: 0;
+  padding: 2px 16px 4px;
+  border: 1px solid var(--glass-divider);
+  border-radius: 12px;
+  background: var(--glass-raise);
+}
+.settings .settings-card .settings-card > .settings-card__header {
+  min-height: 46px;
+}
+.settings .settings-card .settings-card > .settings-card__header .settings-card__title {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);
+  font-size: 13px;
+}
+.settings .settings-card__title .settings-tag {
+  font-family: 'IBM Plex Sans', system-ui, sans-serif;
+  font-weight: 400;
+}
+.settings .settings-add > .settings-card__header .settings-card__title {
+  font-family: inherit;
+}
+.settings .settings-add {
+  padding-bottom: 14px;
+}
+.settings .settings-add > .settings-card__hint {
+  padding-bottom: 10px;
+}
+.settings .settings-add > .settings-check {
+  padding: 10px 0;
+  border-top: 1px solid var(--glass-divider);
+}
+.settings .settings-add__actions {
+  padding-top: 4px;
+}
+
+/* Cada ajuste es una fila: a la izquierda qué es (nombre, etiquetas, ayuda) y
+   a la derecha, en una columna de ancho fijo, su control. */
+.settings .settings-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 300px;
+  align-items: start;
+  /* Sin hueco entre filas: el control abarca varias y las vacías no deben medir. */
+  gap: 0 24px;
+  padding: 10px 0;
+  border-top: 1px solid var(--glass-divider);
+}
+.settings .settings-field > * {
+  grid-column: 1;
+}
+.settings .settings-field > :nth-child(2) {
+  grid-column: 2;
+  grid-row: 1 / span 5;
+  min-width: 0;
+}
+.settings .settings-field__head {
+  min-height: 30px;
+}
+.settings .settings-field__label {
+  font-weight: 500;
+  color: var(--color-textPrimary);
+}
+.settings .settings-field__hint,
+.settings .settings-field > .settings-status {
+  margin-top: 2px;
+  line-height: 1.45;
+}
+.settings .settings-input {
+  max-width: none;
+  border-color: var(--glass-border);
+  border-radius: 8px;
+  background: var(--glass-well);
+}
+.settings .settings-input:focus-visible {
+  outline: 0;
+  border-color: color-mix(in srgb, var(--color-accent) 60%, var(--color-borderMedium));
+}
+.settings .settings-number {
+  display: flex;
+}
+.settings .settings-number .settings-input {
+  flex: 1;
+  min-width: 0;
+}
+.settings .settings-number .settings-input--number {
+  flex: 0 1 132px;
+}
+.settings .settings-number .button {
+  align-self: center;
+}
+/* «Guardar» solo aparece cuando hay algo que guardar; su hueco no se mueve. */
+.settings .settings-number .button:disabled {
+  visibility: hidden;
+}
+.settings .settings-secret {
+  display: flex;
+  flex-wrap: wrap;
+  min-height: 30px;
+}
+.settings .settings-secret__stored {
+  flex: 1;
+  min-width: 0;
+  font-family: inherit;
+  font-size: 12.5px;
+}
+.settings .settings-secret .settings-input {
+  flex-basis: 100%;
+}
+
+/* Sí/No como interruptor: el estado se lee sin leer la etiqueta. */
+.settings .settings-check {
+  min-height: 30px;
+  color: var(--color-textMuted);
+}
+.settings .settings-check input {
+  position: relative;
+  width: 34px;
+  height: 20px;
+  flex-shrink: 0;
+  margin: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  border: 1px solid var(--glass-border);
+  border-radius: 999px;
+  background: var(--glass-well);
+  cursor: pointer;
+  transition:
+    background-color var(--dur-fast) ease,
+    border-color var(--dur-fast) ease;
+}
+.settings .settings-check input::after {
+  content: '';
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--color-textMuted);
+  transition:
+    transform var(--dur-fast) var(--ease-out),
+    background-color var(--dur-fast) ease;
+}
+.settings .settings-check input:checked {
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+.settings .settings-check input:checked::after {
+  background: var(--color-bgApp);
+  transform: translateX(14px);
+}
+.settings .settings-check input:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.settings .settings-cli-only {
+  gap: 0;
+}
+.settings .settings-cli-only li {
+  padding: 9px 0;
+  border-top: 1px solid var(--glass-divider);
+}
+
+.settings__footer {
+  flex-shrink: 0;
+  padding: 10px 22px;
+  border-top: 1px solid var(--glass-divider);
+  background: color-mix(in srgb, var(--color-bgApp) 28%, transparent);
+}
+.settings__footnote {
+  margin: 0;
+}
+.settings__version {
+  flex-shrink: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+/* Ventana estrecha: el índice sobra y cada ajuste se apila. */
+@media (max-width: 720px) {
+  .settings-layer {
+    padding: 12px;
+  }
+  .settings__body {
+    flex-direction: row;
+  }
+  .settings__nav {
+    display: none;
+  }
+  .settings .settings-field {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .settings .settings-field > :nth-child(2) {
+    grid-column: 1;
+    grid-row: auto;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .settings,
+  .settings-layer__scrim {
+    animation: none;
+  }
+}
+
+/* Tablas del markdown: un marco redondeado, filas separadas por una línea y
+   la cabecera como rótulo, no como otra fila más. */
+.markdown table {
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
+  border-collapse: separate;
+  border-spacing: 0;
+  overflow: hidden;
+  font-size: 0.94em;
+}
+.markdown th,
+.markdown td {
+  padding: 7px 14px;
+  border: 0;
+  border-bottom: 1px solid var(--color-borderSubtle);
+  text-align: left;
+}
+.markdown tr:last-child > td {
+  border-bottom: 0;
+}
+.markdown th {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  color: var(--color-textMuted);
+}
+
+/* Estado vacío: las sugerencias en una rejilla de dos, no una fila que parte. */
+.conversation__suggestions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  width: min(440px, 100%);
+  max-width: none;
+}
+.conversation__suggestions .chip {
+  padding: 10px 14px;
+  border-radius: 10px;
+  text-align: left;
+}
+
+/* Skills del panel de contexto: nombre y, debajo, dos líneas de descripción. */
+.skill-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+.skill-list__item {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+}
+.skill-list__item:hover {
+  background: var(--color-bgStatusbar);
+}
+.skill-list__name {
+  font-family: var(--font-mono);
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--color-textPrimary);
+  overflow-wrap: anywhere;
+}
+.skill-list__description {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  font-size: 12px;
+  line-height: 1.4;
+  color: var(--color-textFaint);
+}
+
+/* Composer estrecho (con la trayectoria abierta): el modelo cede sitio al texto. */
+.input-area {
+  container-type: inline-size;
+}
+@container (max-width: 440px) {
+  .composer-model {
+    max-width: 84px;
+  }
 }

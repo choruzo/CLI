@@ -71,10 +71,15 @@ export function renderInline(tokens: Token[] | undefined, keyPrefix = 'i'): Reac
 }
 
 function HeadingBlock({ token, k }: { token: Tokens.Heading; k: string }) {
-  const color = token.depth <= 2 ? theme.accent : theme.textMuted;
+  // Tres escalones que no se confunden con el rótulo «Stratum» del turno (ámbar
+  // y negrita): solo el h1 lleva ámbar; el h2 es blanco con una marca; el resto,
+  // apagado.
+  const color =
+    token.depth === 1 ? theme.accent : token.depth === 2 ? theme.textPrimary : theme.textMuted;
   return (
     <Box flexDirection="column" marginBottom={1}>
       <Text bold color={color}>
+        {token.depth === 2 && <Text color={theme.accent}>▍ </Text>}
         {renderInline(token.tokens, k)}
       </Text>
       {token.depth === 1 && <Text color={theme.textDisabled}>{'─'.repeat(ruleWidth())}</Text>}
@@ -179,7 +184,7 @@ function TableBlock({ token, k }: { token: Tokens.Table; k: string }) {
           marginRight={c < widths.length - 1 ? TABLE_GAP : 0}
           justifyContent={JUSTIFY[token.align[c] ?? 'left']}
         >
-          <Text wrap="wrap" bold={header} color={header ? theme.accent : theme.textResponse}>
+          <Text wrap="wrap" bold={header} color={header ? theme.textPrimary : theme.textResponse}>
             {renderInline(cells[c]?.tokens, `${rk}-${c}`)}
           </Text>
         </Box>

@@ -3,7 +3,7 @@
 Revisión del frontend (`src/styles.css`, `src/components/**`) con una restricción: **ninguna mejora puede costar rendimiento**. En la práctica eso significa:
 
 - Animar solo `transform`, `opacity` y colores; nunca `width`/`height`/`top` en elementos que se repiten.
-- Nada de `backdrop-filter` ni `filter: blur()` sobre zonas grandes o que hagan scroll (WebView2 repinta la capa entera en cada frame).
+- Nada de `backdrop-filter` ni `filter: blur()` sobre zonas grandes o que hagan scroll (WebView2 repinta la capa entera en cada frame). Única excepción, pedida expresamente (2026-11): la ventana de Ajustes, un cristal flotante sobre el chat; el desenfoque va en la ventana (no en el velo ni en su zona de scroll) y solo existe mientras está abierta.
 - Sombras grandes solo en elementos pequeños o flotantes (menú `/`, diálogos), nunca en cada mensaje.
 - Ninguna animación en bucle nueva: las que ya existen (cursor, estratos, spinner) bastan.
 - Todo respeta `prefers-reduced-motion`, que ya neutraliza animaciones y transiciones de forma global.
@@ -64,6 +64,20 @@ Tras una ronda de capturas de todas las pantallas, el naranja estaba en todos lo
 - **Ajustes**: columna centrada de tarjetas (Configuración, Ventana, Conversaciones, Actualizaciones, Diagnóstico), rutas en monoespaciada, atajo en `<kbd>`, título en neutro. Mismos datos y mismos botones; el scroll queda en el borde de la ventana (la columna se centra con `padding`).
 
 **Verificación**: `tsc`, 108 tests de Vitest, `test:native` y la suite E2E (12) pasan; capturas antes/después con el arnés E2E.
+
+### 5. Jerarquía visual de 2026-11 (sección «Jerarquía visual» al final de `styles.css`)
+
+Misma paleta; cambia el orden en que se lee cada pantalla.
+
+- **Ajustes, ventana flotante de cristal** (`SettingsPanel.tsx`): deja de tapar la ventana. `.settings-layer` (velo que atenúa el chat, pulsar fuera cierra) + `.settings` (el cristal: fondo translúcido, `backdrop-filter`, borde claro y sombra). A la izquierda, un **índice de secciones** que sigue al scroll (`aria-current`) y salta a cada una; `SettingsEditor` le dice qué secciones pinta (`onSections`). Todas siguen en una sola columna, así que nada se desmonta al navegar. El foco entra en el diálogo al abrirlo (Esc cierra sin pulsar dentro) y el pie lleva la versión.
+- **Cada ajuste es una fila**: nombre, etiquetas y ayuda a la izquierda; el control en una columna fija a la derecha. Las secciones pierden la caja (título de 15 px y una línea entre ellas); la única caja que queda es la de cada provider. Sí/No es un interruptor, y «Guardar» solo se ve cuando hay algo que guardar (`visibility`, su hueco no se mueve).
+- **Tablas del markdown**: marco redondeado, filas separadas por una línea, cabecera como rótulo pequeño.
+- **Estado vacío**: las cuatro sugerencias en rejilla de 2 × 2 (antes 3 + 1).
+- **Skills** del panel de contexto: nombre en monoespaciada y dos líneas de descripción (la entera, en `title`), en vez de una lista de viñetas con párrafos.
+- **Barras de desplazamiento**: solo el pulgar redondeado (`::-webkit-scrollbar`), sin las flechas que dejaba `scrollbar-width: thin`.
+- **Composer estrecho** (con la trayectoria abierta): el botón del modelo se recorta antes de comerse el campo (`@container`).
+
+**Verificación**: `tsc`, los 206 tests de Vitest, capturas antes/después con el arnés E2E y un guion sobre la app real (foco al abrir, índice, Esc, clic fuera).
 
 ## Sugerencias pendientes
 
