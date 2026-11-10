@@ -192,6 +192,8 @@ export const CONFIG_SECTIONS: readonly SectionInfo[] = [
       { key: 'tools.jobs.maxRunning', label: 'Jobs a la vez' },
       { key: 'tools.webSearch.backend', label: 'Buscador web' },
       { key: 'tools.webSearch.maxResults', label: 'Resultados por búsqueda' },
+      { key: 'tools.browser.enabled', label: 'Navegador del agente' },
+      { key: 'tools.browser.idleMinutes', label: 'Minutos sin uso antes de cerrar el navegador' },
     ],
   },
   {

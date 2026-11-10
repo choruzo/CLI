@@ -49,7 +49,7 @@ export const EMPTY_SUMMARY: ChangesSummary = {
 };
 
 /** Tope de tamaño al contar líneas de un untracked. Por encima, se marca binario. */
-const UNTRACKED_MAX_BYTES = 2 * 1024 * 1024;
+export const UNTRACKED_MAX_BYTES = 2 * 1024 * 1024;
 
 /** Tope de untracked a los que se les cuentan líneas: un `git add` masivo no debe colgar la UI. */
 const UNTRACKED_COUNT_LIMIT = 200;
@@ -225,6 +225,27 @@ export function formatChangesReport(summary: ChangesSummary): string {
     '',
     ...rows,
   ].join('\n');
+}
+
+/**
+ * Modo código de Desktop (`git.changes`): el resumen recortado para que quepa
+ * en un mensaje. Como mucho `files` entradas y `bytes` de rutas; lo que sobra
+ * se quita (`truncated`). Los totales (`files`, `added`, `deleted`) son los del
+ * resumen entero: recortar la lista no cambia lo que hay.
+ */
+export function boundedChanges(
+  summary: ChangesSummary,
+  limits: { files: number; bytes: number },
+): ChangesSummary & { truncated: boolean } {
+  const changes: WorkingTreeChange[] = [];
+  let bytes = 0;
+  for (const change of summary.changes) {
+    if (changes.length >= limits.files) break;
+    bytes += Buffer.byteLength(change.path);
+    if (bytes > limits.bytes) break;
+    changes.push(change);
+  }
+  return { ...summary, changes, truncated: changes.length < summary.changes.length };
 }
 
 // ---------------------------------------------------------------------------

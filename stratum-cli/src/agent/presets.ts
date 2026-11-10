@@ -1,6 +1,7 @@
 import type { ToolsetFilter } from '../tools/registry.js';
 import type { ProtocolAgent } from '../protocol/index.js';
 import { SCREEN_TOOLS } from '../tools/screen/names.js';
+import { BROWSER_TOOLS } from '../tools/browser/names.js';
 import { SEARCH_CONVERSATIONS_TOOL } from '../transcripts/names.js';
 
 /**
@@ -68,10 +69,12 @@ export const ASSISTANT_FILE_TOOLS: readonly string[] = [
 ];
 
 export function assistantToolsetFilter(opts: { workspace?: boolean } = {}): ToolsetFilter {
+  // El navegador del agente (solo si hay uno instalado y el asistente lo tiene
+  // registrado). No va en `ASSISTANT_TOOLS`: el `companion` hereda esa lista.
   return {
     allowedTools: opts.workspace
-      ? [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL, ...ASSISTANT_FILE_TOOLS]
-      : [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL],
+      ? [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL, ...ASSISTANT_FILE_TOOLS, ...BROWSER_TOOLS]
+      : [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL, ...BROWSER_TOOLS],
   };
 }
 
@@ -145,6 +148,11 @@ export function assistantAgentInfo(): ProtocolAgent {
       'Conversational assistant: web, its own decisions memory and files confined to the session directory. No shell.',
     mode: 'primary',
     origin: 'builtin',
-    allowedTools: [...ASSISTANT_TOOLS, SEARCH_CONVERSATIONS_TOOL, ...ASSISTANT_FILE_TOOLS],
+    allowedTools: [
+      ...ASSISTANT_TOOLS,
+      SEARCH_CONVERSATIONS_TOOL,
+      ...ASSISTANT_FILE_TOOLS,
+      ...BROWSER_TOOLS,
+    ],
   };
 }

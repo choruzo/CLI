@@ -1318,6 +1318,8 @@ Correcciones hechas a la v1 antes de congelarla:
 | Cierre M14      | `sessions.open` admite `fresh?: boolean` (solo con `agent: 'companion'`: conversación nueva, §22.1) y su resultado, `archived?: { sessionId, memoryCarried }`; `ProtocolSessionMemory.inherited?`. `data.reason` de `UNAVAILABLE` admite `compaction` | Aditivo: quien no lo envía sigue igual; un servidor anterior rechaza `fresh` (`INVALID_PARAMS`) |
 | M18 (6E)        | Evento de estado `image.shared` (`{ image: ProtocolSharedImage }`); `ProtocolChatMessage` gana `kind: 'image'` (solo la referencia); método `images.get` (`observe`) por trozos (`offset` → `data`, `next`), `SHARED_IMAGE_LIMITS`                                                                                                                                                                                                              | Aditivo para quien emite. Un cliente que valide la unión de eventos o de mensajes tiene que aceptar los nuevos; los del árbol validan con `schemas.ts`, que ya los incluye. Una conversación de un servidor anterior no los trae |
 | Imágenes        | `runs.start`, `runs.steer` y `host.steer` admiten `images?: string[]` (1 a `LIMITS.imagesPerMessage` = 5 rutas). Quien atiende las lee confinadas al `cwd` de la sesión y a `~/.stratum/images`; una que no vale (fuera, no es imagen, >5 MB) rechaza el mensaje entero con `INVALID_PARAMS`, sin arrancar ni encolar nada                                                                                                                      | Aditivo: quien no lo envía sigue igual                                                                                                                                                                                                                       |
+| Modo código     | Métodos `git.changes` y `git.diff` (`observe`, §25); DTOs `ProtocolChangesSummary`, `ProtocolWorkingTreeChange`, `ProtocolFileDiff`; `GIT_CHANGES_LIMITS`, `GIT_DIFF_LIMITS`. `data.reason` de `UNAVAILABLE` admite `embedded-agent` y `not-a-repo` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
+| Navegador       | Métodos `browser.screen` (`observe`) y `browser.navigate` (`control`, §26); DTOs `ProtocolBrowserStatus`, `ProtocolBrowserScreen`, `ProtocolBrowserState`, `ProtocolBrowserAction`; `BROWSER_SCREEN_LIMITS`, `BROWSER_NAVIGATE_LIMITS`, `BROWSER_NAVIGATE_ACTIONS`. `data.reason` de `UNAVAILABLE` admite `failed` y `browser-closed`; el de `INVALID_PARAMS`, `needs-approval` y `blocked-url`. Sin eventos ni campos nuevos en la foto | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -1677,7 +1679,8 @@ mismo almacén de snapshots y la misma lógica (`StratumAgent.planRevert` / `rev
 - **Autoridad: `approve`.** Revertir pisa o borra ficheros del proyecto sin pasar por las
   aprobaciones del agente, así que exige la misma autoridad que resolverlas: la clave de
   aprobador (§15.2). `control` no basta (`FORBIDDEN`). En Dot pasaría por su conexión de
-  aprobador y su confirmación nativa, como cualquier resolución (todavía no lo llama).
+  aprobador y su confirmación nativa, como cualquier resolución: así lo llama Desktop en su modo
+  código (§25); Dot todavía no.
 - **Parámetros**: `turns` (los últimos N turnos con cambios, 1 por defecto, hasta
   `REVERT_LIMITS.turns`), `dryRun` (solo el plan) y `force` (pisar los conflictos).
 - **Resultado**: `{ status, plan }`. `planned` (era `dryRun`), `reverted`, `conflicts` (hay
@@ -2123,3 +2126,77 @@ en el protocolo; en la config global solo hay `channels.telegram.enabled`.
 
 Tests: `stratum-cli/src/daemon/daemon-channels.test.ts`, `src/channels/telegram/*.test.ts`,
 `src/protocol/schemas.test.ts` y `src/cli/commands/channels.test.ts`.
+
+## 25. Modo código de Desktop: cambios del working tree (`git.*`)
+
+Desktop puede abrir y conducir sesiones del agente de código en una carpeta de proyecto. Para
+enseñar qué ha cambiado, dos métodos de **solo lectura** (`observe`). El servidor solo lee el
+disco del `cwd` de la sesión: vale para una sesión montada, guardada sin montar (no se monta) o
+par. La lógica de git vive en `stratum-cli/src/git/` (`changes.ts`, `diff.ts`).
+
+- **`git.changes { sessionId }` → `{ changes: ProtocolChangesSummary }`**: `isRepo` (`false`
+  fuera de un repo o sin git; nunca es un error), `files`/`added`/`deleted` (totales reales),
+  `changes` (`path` relativa a la raíz del repo, `added`, `deleted`, `status`, `binary?`) y
+  `truncated`. La lista se recorta a `GIT_CHANGES_LIMITS.files` (500) entradas y
+  `GIT_CHANGES_LIMITS.bytes` (512 KiB) de rutas, para que la respuesta quepa en un mensaje.
+- **`git.diff { sessionId, path }` → `ProtocolFileDiff` (`{ diff, truncated, binary }`)**: el diff
+  unificado de ese fichero frente a `HEAD`; un untracked (o un repo sin commits) sale entero como
+  añadido. Binario, con un byte NUL o de más de 2 MB → `binary: true`, `diff: ''`. git va con
+  argumentos fijos, `--` antes de la ruta, sin diff externo ni `textconv`, sin color, sin
+  `core.fsmonitor` y con el entorno de enrutado saneado. El texto **se redacta antes de recortarse**
+  (núcleo + `tools.redaction.extraPatterns` de la config de la sesión) y se recorta en un límite de
+  línea a `GIT_DIFF_LIMITS.bytes` (256 KiB, medidos como viajan: escapados en JSON).
+- **`path` se confina y falla cerrado**: vacía, absoluta, con `..`, con NUL o cuya ruta real queda
+  fuera de la raíz del repo (`confinePath`, también por un enlace) → `INVALID_PARAMS`.
+- Errores: sesión desconocida → `NOT_FOUND`; sesión de un agente embebido (`assistant`,
+  `companion`) → `UNAVAILABLE` (`embedded-agent`); `git.diff` fuera de un repo → `UNAVAILABLE`
+  (`not-a-repo`).
+- Deshacer turnos desde Desktop no es un método nuevo: es `sessions.revert` (§19.8, `approve`), que
+  Desktop solo envía por su conexión de aprobador y con confirmación nativa del plan (`docs/dot.md`).
+
+Tests: `stratum-cli/src/git/diff.test.ts`, `src/daemon/daemon-git.test.ts` y
+`src/protocol/schemas.test.ts`.
+
+## 26. El navegador del agente de una sesión (`browser.*`)
+
+El agente de código y el asistente (no el `companion` ni los subagentes) tienen un navegador para
+verificar su trabajo: un Edge/Chrome/Chromium **ya instalado**, headless, que el proceso que aloja
+la sesión lanza la primera vez que hace falta y maneja por CDP sobre `--remote-debugging-pipe`
+(sin puerto TCP). Una pestaña, perfil efímero (sin cookies ni sesiones de la persona) que se borra
+al cerrar; se cierra al desmontar la sesión, tras `tools.browser.idleMinutes` sin uso o al salir el
+proceso. El agente lo usa con sus tools `browser_*`; un cliente puede **verlo** y **moverlo**:
+
+- **`browser.screen { sessionId }` → `{ browser: ProtocolBrowserStatus, screen: ProtocolBrowserScreen | null }`**
+  (`observe`). `browser.state`: `open` (con `url` sin credenciales y redactada, `title`, `loading`,
+  `canGoBack`, `canGoForward`), `closed` o `unavailable` con `reason` (`disabled`, `not-found`,
+  `not-supported` —el `companion`—, `failed` —el navegador cayó y no vuelve en esta sesión—).
+  `screen` es **otra captura**, tomada por el servidor con orden fija (`Page.captureScreenshot`
+  JPEG, a menos calidad o a la mitad si no cabe en `BROWSER_SCREEN_LIMITS.maxBytes`, 512 KiB): no
+  es la que ve el agente, no toca su `ScreenshotBuffer`, no se guarda ni se registra. `null` si no
+  está abierto. **Nunca arranca el navegador** ni monta una sesión guardada (de una dormida:
+  `closed`, o `unavailable`/`not-supported` si es del `companion`). El cliente la sondea mientras
+  enseña el panel: no hay eventos ni campos nuevos en la foto.
+- **`browser.navigate { sessionId, action, url?, operationId? }` → `{ browser }`** (`control`). La
+  persona mueve el navegador: `goto` (exige `url`, ≤ `BROWSER_NAVIGATE_LIMITS.urlChars` = 2048),
+  `back`, `forward`, `reload`. Solo con la sesión **en reposo** (`BUSY` con un run: el navegador es
+  del agente). `goto` solo admite lo que clasifica `local` o `approved`: `control` **no aprueba
+  orígenes** —eso lo hace la persona en la confirmación de `browser_navigate`, con la autoridad de
+  aprobar—, así que otro sitio → `INVALID_PARAMS` con `reason: 'needs-approval'` y lo vetado →
+  `INVALID_PARAMS` con `reason: 'blocked-url'`. `goto` puede arrancar el navegador; `back`,
+  `forward` y `reload` con el navegador cerrado → `UNAVAILABLE` (`browser-closed`). Un navegador que
+  no arranca o cae → `UNAVAILABLE` (`failed`): es un fallo auxiliar, la sesión sigue.
+- Sesión par (alojada por una terminal): `UNAVAILABLE` (`peer-hosted`) en los dos: el navegador
+  vive en ese proceso y el servidor solo tiene la proyección. Sesión desconocida: `NOT_FOUND`.
+- **Alcance** (`stratum-cli/src/browser/policy.ts`): `local` = loopback (`localhost`,
+  `*.localhost`, `127.0.0.0/8`, `[::1]`), los hosts de `tools.browser.allowHosts` (solo de la
+  config global), `file:` cuya ruta real queda dentro del `cwd` de la sesión y `about:blank`;
+  `blocked` (nunca, ninguna aprobación lo levanta) = otros esquemas, `file:` fuera, link-local y
+  metadatos de nube, URLs con credenciales o que no parsean; `approved` = un origen confirmado en
+  esta sesión (en memoria del anfitrión: no sobrevive a un reinicio ni a un traspaso); `external` =
+  el resto, también la red local. La política se aplica **en la red** (dominio `Fetch`): una
+  navegación del documento principal que no sea local ni aprobada se falla, así que un clic o una
+  redirección no se saltan la confirmación. Limitaciones conocidas: se clasifica por nombre, no por
+  la IP a la que resuelve (DNS rebinding), y los WebSocket no pasan por `Fetch`.
+
+Tests: `stratum-cli/src/daemon/daemon-browser.test.ts`, `src/browser/*.test.ts`,
+`src/tools/browser/browser.test.ts`.

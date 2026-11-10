@@ -640,6 +640,55 @@ export interface ProtocolBoxScreen {
 }
 
 // ---------------------------------------------------------------------------
+// Navegador del agente de una sesión
+// ---------------------------------------------------------------------------
+
+/**
+ * `unavailable`: la sesión no tiene navegador (o murió); `closed`: lo tiene y
+ * no está abierto; `open`: abierto.
+ */
+export type ProtocolBrowserState = 'unavailable' | 'closed' | 'open';
+
+export interface ProtocolBrowserStatus {
+  state: ProtocolBrowserState;
+  /**
+   * Solo con `unavailable`: `disabled`, `not-found`, `peer-hosted`,
+   * `not-supported` o `failed` (el navegador cayó y no vuelve en esta sesión).
+   */
+  reason?: string;
+  /** Solo con `open`. La URL va sin credenciales y redactada. */
+  url?: string;
+  title?: string;
+  loading?: boolean;
+  canGoBack?: boolean;
+  canGoForward?: boolean;
+}
+
+/** Límites de `browser.screen`: una captura cabe siempre en un mensaje. */
+export const BROWSER_SCREEN_LIMITS = { maxBytes: 512 * 1024 } as const;
+
+/** Límites de `browser.navigate`. */
+export const BROWSER_NAVIGATE_LIMITS = { urlChars: 2048 } as const;
+
+/** Lo que una persona pide al navegador de una sesión desde un cliente. */
+export const BROWSER_NAVIGATE_ACTIONS = ['goto', 'back', 'forward', 'reload'] as const;
+export type ProtocolBrowserAction = (typeof BROWSER_NAVIGATE_ACTIONS)[number];
+
+/**
+ * La pestaña del navegador de una sesión, en JPEG, para enseñarla. La toma el
+ * servidor con orden fija: no es la captura que ve el agente.
+ */
+export interface ProtocolBrowserScreen {
+  mime: 'image/jpeg';
+  /** JPEG en base64. */
+  data: string;
+  width: number;
+  height: number;
+  /** Cuándo se tomó, en ms desde la época. */
+  takenAt: number;
+}
+
+// ---------------------------------------------------------------------------
 // M16 — rutinas del asistente
 // ---------------------------------------------------------------------------
 
@@ -916,4 +965,63 @@ export function groupDecisionsBySection<T extends { type: string }>(
     section,
     items: groups.get(section)!,
   }));
+}
+
+// ---------------------------------------------------------------------------
+// Modo código de Desktop — cambios del working tree de una sesión (`git.*`)
+// ---------------------------------------------------------------------------
+
+/**
+ * Topes de `git.changes`: como mucho `files` entradas y `bytes` de rutas en
+ * total (una respuesta cabe siempre en un mensaje). Lo que no cabe se recorta
+ * (`truncated`); los totales siguen siendo los reales.
+ */
+export const GIT_CHANGES_LIMITS = {
+  files: 500,
+  bytes: 512 * 1024,
+} as const;
+
+/**
+ * Tope de `git.diff`: bytes del diff tal como viaja (texto ya escapado en
+ * JSON). Por encima se recorta en un límite de línea (`truncated`).
+ */
+export const GIT_DIFF_LIMITS = {
+  bytes: 256 * 1024,
+} as const;
+
+export type ProtocolChangeStatus = 'modified' | 'added' | 'deleted' | 'renamed' | 'untracked';
+
+/** Un fichero cambiado respecto a `HEAD`. `path`, relativa a la raíz del repo. */
+export interface ProtocolWorkingTreeChange {
+  path: string;
+  added: number;
+  deleted: number;
+  status: ProtocolChangeStatus;
+  /** Sin líneas que contar (binario, o demasiado grande para leerlo). */
+  binary?: boolean;
+}
+
+/**
+ * El working tree del `cwd` de una sesión, como lo ve git. `isRepo: false` si
+ * no es un repo (o git no está). `files`/`added`/`deleted` son los totales
+ * reales aunque `changes` venga recortada (`truncated`).
+ */
+export interface ProtocolChangesSummary {
+  isRepo: boolean;
+  files: number;
+  added: number;
+  deleted: number;
+  changes: ProtocolWorkingTreeChange[];
+  truncated: boolean;
+}
+
+/**
+ * El diff unificado de un fichero frente a `HEAD` (un untracked, entero como
+ * añadido), con los secretos ya redactados. `binary`: no hay texto que enseñar
+ * (`diff` vacío).
+ */
+export interface ProtocolFileDiff {
+  diff: string;
+  truncated: boolean;
+  binary: boolean;
 }

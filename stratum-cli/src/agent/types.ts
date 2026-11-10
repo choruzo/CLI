@@ -10,6 +10,7 @@ import type { PauseController, SafePointGate } from './pause.js';
 import type { UserImage } from './user-images.js';
 import type { PluginHost } from '../plugins/host.js';
 import type { PluginAgentRef } from '../plugins/api.js';
+import type { BrowserManager } from '../browser/manager.js';
 import type {
   DestructiveDecision,
   Plan,
@@ -309,6 +310,12 @@ export interface ToolContext {
    * Ausente → sin visión: las tools `screen_*` se niegan a ejecutar.
    */
   vision?: ModelVision;
+  /**
+   * Navegador de la sesión (`src/browser/`). Solo el agente principal de una
+   * sesión `coding` o `assistant` lo tiene; ausente → las tools `browser_*` se
+   * vetan en `preflight`.
+   */
+  browser?: BrowserManager;
 }
 
 /** Espacio de trabajo de una conversación del modo Chat (D2). */

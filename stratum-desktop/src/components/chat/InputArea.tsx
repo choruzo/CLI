@@ -11,6 +11,7 @@ import {
 import type { Attachments } from '../../hooks/useAttachments';
 import type { SentAttachment } from '../../view/model';
 import { DraftChips } from './files/AttachmentChips';
+import type { AppMode } from '../../view/mode';
 import { matchCommands, parseCommand, type CommandName, type SlashCommand } from './commands';
 
 /** Trazos de los botones del composer (misma rejilla 24×24 que el sidebar). */
@@ -69,6 +70,8 @@ export const InputArea = forwardRef<
     placeholder?: string;
     /** Sin él, no hay botón de modelo. */
     model?: ComposerModel;
+    /** De qué modo son los slash-commands que se ofrecen. */
+    mode?: AppMode;
   }
 >(function InputArea(
   {
@@ -81,6 +84,7 @@ export const InputArea = forwardRef<
     attachments,
     placeholder = 'Escribe un mensaje…',
     model,
+    mode = 'chat',
   },
   ref,
 ) {
@@ -110,7 +114,7 @@ export const InputArea = forwardRef<
     el.style.height = `${Math.min(el.scrollHeight + border, MAX_HEIGHT)}px`;
   }, [text]);
 
-  const matches = onCommand && !menuClosed ? matchCommands(text) : null;
+  const matches = onCommand && !menuClosed ? matchCommands(text, mode) : null;
   const menu = matches && matches.length > 0 ? matches : null;
   useEffect(() => setSelected(0), [menu?.length]);
 
@@ -118,7 +122,7 @@ export const InputArea = forwardRef<
   // Redirigir lleva solo texto: los adjuntos esperan al siguiente mensaje.
   const ready = steering ? [] : (attachments?.items.filter((a) => a.status === 'ready' && a.path) ?? []);
   const hasContent = text.trim().length > 0 || ready.length > 0;
-  const isCommand = onCommand !== undefined && parseCommand(text) !== null;
+  const isCommand = onCommand !== undefined && parseCommand(text, mode) !== null;
   const canSend =
     !disabled &&
     (isCommand || ((!generating || steering) && !attachments?.busy && hasContent));
@@ -136,7 +140,7 @@ export const InputArea = forwardRef<
 
   const submit = () => {
     if (!canSend) return;
-    const parsed = onCommand ? parseCommand(text) : null;
+    const parsed = onCommand ? parseCommand(text, mode) : null;
     if (parsed) {
       if (!parsed.ok) {
         setCommandError(parsed.error);
@@ -190,7 +194,7 @@ export const InputArea = forwardRef<
         // argumento (`/imagen`) pasa por `parseCommand`, que avisa.
         const whole = text.trim().toLowerCase() === `/${cmd.name}`;
         if (e.key === 'Enter' && whole && cmd.argRequired) {
-          const parsed = parseCommand(text);
+          const parsed = parseCommand(text, mode);
           if (parsed && !parsed.ok) setCommandError(parsed.error);
         } else if (e.key === 'Enter' && whole) runCommand(cmd.name, '');
         else choose(cmd);

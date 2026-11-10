@@ -364,3 +364,36 @@ describe('setByDotPath', () => {
     expect(({} as Record<string, unknown>)['polluted']).toBeUndefined();
   });
 });
+
+describe('secciones solo globales (navegador del agente)', () => {
+  it('tools.browser.executable y allowHosts de un proyecto se ignoran; enabled e idleMinutes cuentan', () => {
+    const globalFile = join(dir, 'global.json');
+    const projectFile = join(dir, 'project.json');
+    writeJson(globalFile, {});
+    const project = {
+      tools: {
+        browser: {
+          enabled: false,
+          idleMinutes: 3,
+          executable: '/tmp/otro-navegador',
+          allowHosts: ['intranet.example'],
+        },
+      },
+    };
+    const merged = validateConfigLayer(projectFile, project, globalFile);
+    expect(merged.tools.browser.executable).toBeUndefined();
+    expect(merged.tools.browser.allowHosts).toEqual([]);
+    expect(merged.tools.browser.enabled).toBe(false);
+    expect(merged.tools.browser.idleMinutes).toBe(3);
+    expect(project.tools.browser.allowHosts).toHaveLength(1);
+
+    const own = validateConfigLayer(globalFile, project, globalFile);
+    expect(own.tools.browser.executable).toBe('/tmp/otro-navegador');
+    expect(own.tools.browser.allowHosts).toEqual(['intranet.example']);
+  });
+
+  it('por defecto: encendido, sin ejecutable fijo, 15 minutos', () => {
+    const config = validateConfigLayer(join(dir, 'g.json'), {}, join(dir, 'g.json'));
+    expect(config.tools.browser).toEqual({ enabled: true, allowHosts: [], idleMinutes: 15 });
+  });
+});

@@ -38,6 +38,11 @@ export const READ_ONLY_SESSION_TOOLS: readonly string[] = [
   'screen_screenshot',
   'screen_zoom',
   'screen_wait',
+  // Navegador: mirar sí; pulsar, escribir y evaluar se vetan.
+  'browser_navigate',
+  'browser_snapshot',
+  'browser_console',
+  'browser_screenshot',
   // El hijo hereda el modo read-only (RunOptions.readOnly).
   'delegate_task',
 ];

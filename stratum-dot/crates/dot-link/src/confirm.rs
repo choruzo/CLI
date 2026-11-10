@@ -38,6 +38,14 @@
 //!
 //! El rechazo (denegar, omitir, rechazar el plan) **no** pasa por aquí
 //! ([`ApproverAction::needs_confirmation`]).
+//!
+//! **Deshacer turnos** (modo código de Desktop, [`ConfirmGate::request_revert`])
+//! no es una solicitud pendiente: lo que se enseña es el plan que calcula el
+//! daemon (`sessions.revert` con `dryRun`, pedido por el broker, que es quien
+//! tiene `approve`), nunca lo que diga el webview. Con conflictos, o sin nada
+//! que deshacer, no se abre ninguna ventana: vuelve la respuesta del daemon tal
+//! cual. Caduca además si la sesión cambia (un run, un evento de estado) y, al
+//! confirmar, se recalcula: si ya no es el mismo plan, no se envía nada.
 
 use serde::Serialize;
 use serde_json::Value;
@@ -48,7 +56,7 @@ use tokio::time::Instant;
 
 use crate::approver::{
     ApproverAction, ApproverHandle, ApproverStatus, ConfirmedAction, LockReason, QuestionAnswer,
-    GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS, PAIRING_REQUEST,
+    GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS, PAIRING_REQUEST, REVERT_REQUEST,
 };
 use crate::link::LinkHandle;
 use crate::log::Logger;
@@ -59,6 +67,10 @@ const MAX_FIELD_CHARS: usize = 512;
 const MAX_DESCRIPTION_CHARS: usize = 4_000;
 const MAX_PATH_CHARS: usize = 4_096;
 const MAX_PLAN_STEPS: usize = 40;
+/// El evento que dice que una sesión se fue: cancela cualquier confirmación suya.
+const SESSION_CLOSED: &str = "session.closed";
+/// Rutas de cada lista de un deshacer turnos que se enseñan; del resto, cuántas.
+const MAX_REVERT_PATHS: usize = 30;
 
 #[derive(Debug, Clone)]
 pub struct ConfirmTimings {
@@ -101,6 +113,8 @@ pub enum CancelReason {
     SessionGone,
     /// Dot se cierra.
     Closing,
+    /// Deshacer turnos: la sesión cambió (o ya no deshace lo mismo) mientras se leía.
+    Changed,
 }
 
 impl CancelReason {
@@ -114,6 +128,7 @@ impl CancelReason {
             CancelReason::ResolvedElsewhere => "resolved-elsewhere",
             CancelReason::SessionGone => "session-gone",
             CancelReason::Closing => "closing",
+            CancelReason::Changed => "changed",
         }
     }
 
@@ -135,6 +150,9 @@ impl CancelReason {
             }
             CancelReason::SessionGone => "The session ended before you confirmed. Nothing was sent.",
             CancelReason::Closing => "Stratum Dot is closing. Nothing was sent.",
+            CancelReason::Changed => {
+                "The session changed before you confirmed. Nothing was changed."
+            }
         }
     }
 }
@@ -201,6 +219,31 @@ pub struct PairingFacts {
     pub bot: Option<String>,
 }
 
+/// Modo código — lo que haría deshacer turnos, como lo calcula el daemon. Cada
+/// lista, recortada a [`MAX_REVERT_PATHS`] (`more_*`: cuántas no se enseñan).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct RevertFacts {
+    /// Cuántos de los últimos turnos se pidió deshacer.
+    pub turns: u8,
+    /// Los turnos que el daemon va a deshacer.
+    pub turn_numbers: Vec<u64>,
+    /// Existían antes: se restauran.
+    pub restore: Vec<String>,
+    pub more_restore: usize,
+    /// No existían: se borran.
+    pub remove: Vec<String>,
+    pub more_remove: usize,
+    /// Cambiados después del último turno (con alguno no se abre la confirmación).
+    pub conflicts: Vec<String>,
+    pub more_conflicts: usize,
+    /// Sin copia (demasiado grandes): se quedan como están.
+    pub skipped: Vec<String>,
+    pub more_skipped: usize,
+    /// El daemon ya recortó las listas.
+    pub truncated: bool,
+}
+
 /// Lo que enseña la ventana de confirmación. Sale del daemon (salvo las
 /// respuestas, que son lo que la persona va a enviar). Sin credenciales.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -218,6 +261,8 @@ pub struct ConfirmationView {
     pub plan: Option<PlanFacts>,
     /// M18 — con `kind: 'telegram-pairing'`.
     pub pairing: Option<PairingFacts>,
+    /// Modo código — con `kind: 'revert'`.
+    pub revert: Option<RevertFacts>,
     /// Avisos que la persona tiene que leer (qué abarca `allow-all`, etc.).
     pub notes: Vec<String>,
     /// Hasta cuándo vale (ms Unix, reloj local).
@@ -246,10 +291,22 @@ enum Outcome {
     Cancelled(CancelReason),
 }
 
+/// Cómo acaba pedir deshacer turnos ([`ConfirmGate::request_revert`]).
+#[derive(Debug)]
+pub enum RevertStep {
+    /// La persona confirmó: falta enviarla por el broker.
+    Confirmed(ConfirmedAction),
+    /// No había nada que confirmar (conflictos, nada que deshacer, o el daemon no
+    /// lo planificó): la respuesta del daemon al plan, sin interpretar.
+    Answer(Value),
+}
+
 struct Ticket {
     nonce: String,
     view: ConfirmationView,
     action: ApproverAction,
+    /// Deshacer turnos: el plan que se enseñó, para comprobar al confirmar que sigue siendo ese.
+    shown_plan: Option<Value>,
     epoch: u64,
     shown_at: Option<Instant>,
     deadline: Instant,
@@ -324,6 +381,7 @@ fn kind_of(action: &ApproverAction) -> (&'static str, &'static str) {
         ApproverAction::AnswerQuestions { .. } => ("questions", "question"),
         ApproverAction::DecidePlan { .. } => ("plans", "plan"),
         ApproverAction::PairTelegram { .. } => ("", "telegram-pairing"),
+        ApproverAction::RevertPlan { .. } | ApproverAction::Revert { .. } => ("", "revert"),
     }
 }
 
@@ -392,6 +450,7 @@ pub fn build_pairing_view(
             username,
             bot,
         }),
+        revert: None,
         notes: vec![
             "Check that this is your own Telegram account: whoever it is will be able to talk to the assistant and approve its requests from Telegram (approve once or deny; requests a policy reserves for Dot still need Dot).".into(),
             "You can unpair it at any time, from Dot or by sending /unpair in that chat.".into(),
@@ -526,6 +585,7 @@ pub fn build_view(
         answers: Vec::new(),
         plan: None,
         pairing: None,
+        revert: None,
         notes: Vec::new(),
         expires_at,
         arm_ms,
@@ -679,6 +739,119 @@ pub fn build_view(
     Ok((view, send))
 }
 
+/// Modo código — ¿hay que pedir confirmación para esta respuesta del daemon al
+/// plan? Solo si lo planificó (`planned`), con plan y **sin** conflictos: con
+/// conflictos, nada que deshacer o un fallo, la respuesta vuelve tal cual.
+pub fn revert_wants_confirmation(result: &Value) -> bool {
+    result.get("status").and_then(Value::as_str) == Some("planned")
+        && result
+            .pointer("/plan/conflicts")
+            .and_then(Value::as_array)
+            .is_some_and(Vec::is_empty)
+}
+
+/// Una lista de rutas del plan, recortada para enseñarla, y cuántas no caben.
+fn revert_paths(plan: &Value, key: &str) -> (Vec<String>, usize) {
+    let all: Vec<&str> = plan
+        .get(key)
+        .and_then(Value::as_array)
+        .map(|list| list.iter().filter_map(Value::as_str).collect())
+        .unwrap_or_default();
+    let shown = all
+        .iter()
+        .take(MAX_REVERT_PATHS)
+        .map(|p| clip(p, MAX_PATH_CHARS))
+        .collect();
+    (shown, all.len().saturating_sub(MAX_REVERT_PATHS))
+}
+
+/// Modo código — la confirmación de deshacer turnos, con el plan que calculó
+/// el daemon (`result` de `sessions.revert` con `dryRun`) y la foto de la
+/// sesión (su directorio). Puro.
+pub fn build_revert_view(
+    action: &ApproverAction,
+    result: &Value,
+    snapshot: &Value,
+    expires_at: u64,
+    arm_ms: u64,
+) -> Result<ConfirmationView, CommandError> {
+    let ApproverAction::Revert { session_id, turns } = action else {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "This is not a revert.",
+        ));
+    };
+    if !revert_wants_confirmation(result) {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "There is nothing to confirm for this revert.",
+        ));
+    }
+    let plan = result.get("plan").unwrap_or(&Value::Null);
+    let session = snapshot.get("session").unwrap_or(&Value::Null);
+    let (restore, more_restore) = revert_paths(plan, "restore");
+    let (remove, more_remove) = revert_paths(plan, "remove");
+    let (conflicts, more_conflicts) = revert_paths(plan, "conflicts");
+    let (skipped, more_skipped) = revert_paths(plan, "skipped");
+    let truncated = plan.get("truncated").and_then(Value::as_bool) == Some(true);
+    let mut notes = vec![
+        "This puts the listed files back as they were before those turns: it restores some and deletes the ones those turns created. Nothing else in the project changes.".to_string(),
+        "It does not undo SSH commands, other directories or processes.".to_string(),
+    ];
+    if !skipped.is_empty() {
+        notes.push("Some files have no copy (too large): they stay as they are.".into());
+    }
+    if truncated {
+        notes.push("The daemon cut the lists: more files are affected than shown.".into());
+    }
+    Ok(ConfirmationView {
+        kind: "revert",
+        action: "Revert files",
+        request_id: REVERT_REQUEST.into(),
+        run_id: None,
+        session: SessionFacts {
+            id: session_id.clone(),
+            title: field(session, "title", MAX_FIELD_CHARS),
+            agent: field(session, "agent", MAX_FIELD_CHARS),
+            model: field(session, "model", MAX_FIELD_CHARS),
+            cwd: field(session, "cwd", MAX_PATH_CHARS),
+            host: session
+                .pointer("/host/kind")
+                .and_then(Value::as_str)
+                .map(|s| clip(s, 32)),
+        },
+        approval: None,
+        answers: Vec::new(),
+        plan: None,
+        pairing: None,
+        revert: Some(RevertFacts {
+            turns: *turns,
+            turn_numbers: plan
+                .get("turns")
+                .and_then(Value::as_array)
+                .map(|list| {
+                    list.iter()
+                        .filter_map(Value::as_u64)
+                        .take(MAX_PLAN_STEPS)
+                        .collect()
+                })
+                .unwrap_or_default(),
+            restore,
+            more_restore,
+            remove,
+            more_remove,
+            conflicts,
+            more_conflicts,
+            skipped,
+            more_skipped,
+            truncated,
+        }),
+        notes,
+        expires_at,
+        arm_ms,
+    })
+}
+
 /// Quita la confirmación si sigue siendo la suya y cierra lo que se enseñaba,
 /// también si quien esperaba se fue (el comando se canceló).
 struct Guard<'a> {
@@ -784,7 +957,7 @@ impl ConfirmGate {
     /// Se llama con cada [`DotEvent`] (de la conexión principal y del broker);
     /// solo mira, sin esperar a nada.
     pub fn on_event(&self, event: &DotEvent) {
-        let (session_id, request_id, list, pairing) = {
+        let (session_id, request_id, list, pairing, revert) = {
             let state = self.lock();
             let Some(ticket) = state.ticket.as_ref() else {
                 return;
@@ -794,6 +967,7 @@ impl ConfirmGate {
                 ticket.view.request_id.clone(),
                 kind_of(&ticket.action).0,
                 ticket.action.is_pairing(),
+                ticket.action.is_revert(),
             )
         };
         let reason = match event {
@@ -816,6 +990,32 @@ impl ConfirmGate {
             }
             DotEvent::Sessions { session_ids, .. } if !session_ids.contains(&session_id) => {
                 Some(CancelReason::SessionGone)
+            }
+            // Deshacer turnos no tiene solicitud que resolverse en otro sitio: lo
+            // que lo invalida es que la sesión cambie. Una foto con un run en
+            // curso, o cualquier evento de estado de la sesión, la cancela.
+            DotEvent::Snapshot {
+                session_id: id,
+                snapshot,
+            } if revert && *id == session_id => snapshot
+                .pointer("/session/currentRunId")
+                .is_some_and(|run| !run.is_null())
+                .then_some(CancelReason::Changed),
+            DotEvent::Events {
+                session_id: id,
+                events,
+            } if revert && *id == session_id => {
+                if events
+                    .iter()
+                    .any(|e| e.get("type").and_then(Value::as_str) == Some(SESSION_CLOSED))
+                {
+                    Some(CancelReason::SessionGone)
+                } else {
+                    events
+                        .iter()
+                        .any(|e| e.get("seq").is_some())
+                        .then_some(CancelReason::Changed)
+                }
             }
             DotEvent::Snapshot {
                 session_id: id,
@@ -847,7 +1047,7 @@ impl ConfirmGate {
                     {
                         Some(CancelReason::ResolvedElsewhere)
                     }
-                    "session.closed" => Some(CancelReason::SessionGone),
+                    SESSION_CLOSED => Some(CancelReason::SessionGone),
                     _ => None,
                 }
             }),
@@ -921,6 +1121,13 @@ impl ConfirmGate {
                 "This does not need a confirmation.",
             ));
         }
+        // Deshacer turnos lee otra cosa (el plan, por el broker): su propia entrada.
+        if action.is_revert() {
+            return Err(CommandError::new(
+                CommandErrorKind::Invalid,
+                "A revert is confirmed with request_revert.",
+            ));
+        }
         let epoch = broker.ready_epoch().ok_or_else(locked)?;
         self.free()?;
         // Lo que se enseña y lo que se enviará salen de lo mismo (respuestas canónicas).
@@ -929,6 +1136,76 @@ impl ConfirmGate {
         if broker.ready_epoch() != Some(epoch) {
             return Err(not_confirmed(CancelReason::Locked));
         }
+        self.present(presenter, view, action, None, epoch).await
+    }
+
+    /// Modo código — pide a la persona que confirme deshacer los últimos turnos
+    /// de una sesión (`ApproverAction::Revert`). Lo que se enseña es el plan que
+    /// calcula **el daemon** (por el broker, que tiene `approve`) y la foto de la
+    /// sesión. Si el daemon no lo planifica (nada que deshacer, conflictos, un
+    /// fallo), no se abre nada y vuelve su respuesta: desde aquí nunca se fuerza.
+    pub async fn request_revert(
+        &self,
+        link: &LinkHandle,
+        broker: &ApproverHandle,
+        presenter: &dyn Presenter,
+        action: ApproverAction,
+    ) -> Result<RevertStep, CommandError> {
+        let ApproverAction::Revert { session_id, turns } = &action else {
+            return Err(CommandError::new(
+                CommandErrorKind::Invalid,
+                "This is not a revert.",
+            ));
+        };
+        let epoch = broker.ready_epoch().ok_or_else(locked)?;
+        self.free()?;
+        let result = broker
+            .query(ApproverAction::RevertPlan {
+                session_id: session_id.clone(),
+                turns: *turns,
+            })
+            .await?;
+        if !revert_wants_confirmation(&result) {
+            return Ok(RevertStep::Answer(result));
+        }
+        let session = link
+            .call(CallAction::GetSession {
+                session_id: session_id.clone(),
+            })
+            .await
+            .map_err(|_| {
+                CommandError::new(
+                    CommandErrorKind::NotSent,
+                    "Could not read the session from the Stratum daemon. Nothing was changed.",
+                )
+            })?;
+        let snapshot = session.get("snapshot").cloned().unwrap_or(Value::Null);
+        let expires_at = now_ms() + self.timings.ttl.as_millis() as u64;
+        let view = build_revert_view(
+            &action,
+            &result,
+            &snapshot,
+            expires_at,
+            self.timings.arm_delay.as_millis() as u64,
+        )?;
+        if broker.ready_epoch() != Some(epoch) {
+            return Err(not_confirmed(CancelReason::Locked));
+        }
+        let shown = result.get("plan").cloned();
+        self.present(presenter, view, action, shown, epoch)
+            .await
+            .map(RevertStep::Confirmed)
+    }
+
+    /// Abre la confirmación ya leída y espera a la persona (o al plazo).
+    async fn present(
+        &self,
+        presenter: &dyn Presenter,
+        view: ConfirmationView,
+        action: ApproverAction,
+        shown_plan: Option<Value>,
+        epoch: u64,
+    ) -> Result<ConfirmedAction, CommandError> {
         let nonce = new_nonce().ok_or_else(|| {
             CommandError::new(
                 CommandErrorKind::NotSent,
@@ -950,6 +1227,7 @@ impl ConfirmGate {
                 nonce: nonce.clone(),
                 view,
                 action,
+                shown_plan,
                 epoch,
                 shown_at: None,
                 deadline: Instant::now() + self.timings.ttl,
@@ -1012,7 +1290,7 @@ impl ConfirmGate {
             message: message.into(),
             keep_open: false,
         };
-        let (action, epoch) = {
+        let (action, epoch, shown_plan) = {
             let mut state = self.lock();
             let Some(ticket) = state.ticket.as_mut().filter(|t| t.nonce == nonce) else {
                 return Err(closed("This confirmation is no longer open."));
@@ -1057,12 +1335,44 @@ impl ConfirmGate {
                 }
             }
             ticket.confirming = true;
-            (action, ticket.epoch)
+            (action, ticket.epoch, ticket.shown_plan.clone())
         };
         // Lo que pudo cambiar mientras la ventana estaba abierta.
         if broker.ready_epoch() != Some(epoch) {
             self.end(nonce, Some(Outcome::Cancelled(CancelReason::Locked)));
             return Err(closed(CancelReason::Locked.message()));
+        }
+        // Deshacer turnos: el daemon lo vuelve a calcular y tiene que ser lo que se enseñó.
+        if let ApproverAction::Revert { session_id, turns } = &action {
+            let again = broker
+                .query(ApproverAction::RevertPlan {
+                    session_id: session_id.clone(),
+                    turns: *turns,
+                })
+                .await;
+            let reason = match again {
+                Ok(result) => (!revert_wants_confirmation(&result)
+                    || result.get("plan") != shown_plan.as_ref())
+                .then_some(CancelReason::Changed),
+                Err(_) if broker.ready_epoch() != Some(epoch) => Some(CancelReason::Locked),
+                Err(_) => Some(CancelReason::Disconnected),
+            };
+            if let Some(reason) = reason {
+                self.end(nonce, Some(Outcome::Cancelled(reason)));
+                return Err(closed(reason.message()));
+            }
+            if broker.ready_epoch() != Some(epoch) {
+                self.end(nonce, Some(Outcome::Cancelled(CancelReason::Locked)));
+                return Err(closed(CancelReason::Locked.message()));
+            }
+            return if self.end(
+                nonce,
+                Some(Outcome::Confirmed(ConfirmedAction::new(action, epoch))),
+            ) {
+                Ok(())
+            } else {
+                Err(closed("This confirmation is no longer open."))
+            };
         }
         // Lo que se confirma sigue ahí: la solicitud pendiente o, al emparejar, el mismo candidato.
         let check = if action.is_pairing() {
@@ -1473,6 +1783,142 @@ mod tests {
         assert_eq!(
             view.approval.unwrap().description.chars().count(),
             MAX_DESCRIPTION_CHARS + 1
+        );
+    }
+
+    fn revert(turns: u8) -> ApproverAction {
+        ApproverAction::Revert {
+            session_id: "ses_a".into(),
+            turns,
+        }
+    }
+
+    fn planned(restore: usize, conflicts: Value, skipped: Value, truncated: bool) -> Value {
+        let restore: Vec<String> = (0..restore).map(|i| format!("src/f{i}.ts")).collect();
+        json!({ "status": "planned", "plan": {
+            "turns": [4, 5], "restore": restore, "remove": ["nuevo.ts"],
+            "conflicts": conflicts, "skipped": skipped, "truncated": truncated
+        }})
+    }
+
+    #[test]
+    fn solo_se_confirma_un_plan_sin_conflictos() {
+        assert!(revert_wants_confirmation(&planned(
+            1,
+            json!([]),
+            json!([]),
+            false
+        )));
+        for result in [
+            planned(1, json!(["a.ts"]), json!([]), false),
+            json!({ "status": "nothing", "plan": null }),
+            json!({ "status": "failed", "plan": { "conflicts": [] } }),
+            json!({ "status": "conflicts", "plan": { "conflicts": [] } }),
+            json!({ "status": "planned", "plan": null }),
+            json!({}),
+        ] {
+            assert!(!revert_wants_confirmation(&result), "{result}");
+        }
+    }
+
+    #[test]
+    fn deshacer_ensena_el_plan_del_daemon_recortado() {
+        let result = planned(MAX_REVERT_PATHS + 5, json!([]), json!(["grande.bin"]), true);
+        let view = build_revert_view(&revert(2), &result, &snapshot(), 9, 800).unwrap();
+        assert_eq!((view.kind, view.action), ("revert", "Revert files"));
+        assert_eq!(view.request_id, REVERT_REQUEST);
+        assert_eq!(view.session.id, "ses_a");
+        assert_eq!(view.session.cwd.as_deref(), Some("/work/proj"));
+        let facts = view.revert.unwrap();
+        assert_eq!(facts.turns, 2);
+        assert_eq!(facts.turn_numbers, vec![4, 5]);
+        assert_eq!(facts.restore.len(), MAX_REVERT_PATHS);
+        assert_eq!(facts.more_restore, 5);
+        assert_eq!(facts.remove, vec!["nuevo.ts".to_string()]);
+        assert_eq!(facts.skipped, vec!["grande.bin".to_string()]);
+        assert!(facts.conflicts.is_empty() && facts.truncated);
+        let notes = view.notes.join("\n");
+        assert!(
+            notes.contains("no copy") && notes.contains("cut the lists"),
+            "{notes}"
+        );
+        // Con conflictos, o con otra acción, no hay vista.
+        let conflicts = planned(1, json!(["a.ts"]), json!([]), false);
+        assert!(build_revert_view(&revert(1), &conflicts, &snapshot(), 9, 800).is_err());
+        let ok = planned(1, json!([]), json!([]), false);
+        assert!(
+            build_revert_view(&approve("ses_a", "apr_1", false), &ok, &snapshot(), 9, 800).is_err()
+        );
+    }
+
+    /// Una confirmación de deshacer abierta, sin ventana (para los eventos).
+    fn open_revert(gate: &ConfirmGate) -> oneshot::Receiver<Outcome> {
+        let (reply, outcome) = oneshot::channel();
+        let view = build_revert_view(
+            &revert(1),
+            &planned(1, json!([]), json!([]), false),
+            &snapshot(),
+            9,
+            800,
+        )
+        .unwrap();
+        gate.lock().ticket = Some(Ticket {
+            nonce: "n".into(),
+            view,
+            action: revert(1),
+            shown_plan: None,
+            epoch: 1,
+            shown_at: None,
+            deadline: Instant::now() + Duration::from_secs(60),
+            reply,
+            confirming: false,
+        });
+        outcome
+    }
+
+    #[tokio::test]
+    async fn deshacer_caduca_si_la_sesion_cambia() {
+        let gate = ConfirmGate::new(ConfirmTimings::default(), Logger::none());
+        // Una foto en reposo, o de otra sesión, no la toca.
+        let _outcome = open_revert(&gate);
+        gate.on_event(&DotEvent::Snapshot {
+            session_id: "ses_a".into(),
+            snapshot: json!({ "session": { "currentRunId": null } }),
+        });
+        gate.on_event(&DotEvent::Events {
+            session_id: "ses_b".into(),
+            events: vec![json!({ "type": "x", "seq": 3 })],
+        });
+        assert!(gate.is_open());
+        // Un run en curso la cancela.
+        gate.on_event(&DotEvent::Snapshot {
+            session_id: "ses_a".into(),
+            snapshot: json!({ "session": { "currentRunId": "run_1" } }),
+        });
+        assert!(!gate.is_open());
+        // Y cualquier evento de estado de la sesión.
+        gate.lock().cooldown_until = None;
+        let outcome = open_revert(&gate);
+        gate.on_event(&DotEvent::Events {
+            session_id: "ses_a".into(),
+            events: vec![json!({ "type": "x", "seq": 7 })],
+        });
+        assert!(!gate.is_open());
+        assert!(matches!(
+            outcome.await,
+            Ok(Outcome::Cancelled(CancelReason::Changed))
+        ));
+    }
+
+    #[test]
+    fn que_la_sesion_cambie_es_un_motivo_propio() {
+        assert_eq!(
+            serde_json::to_value(CancelReason::Changed).unwrap(),
+            json!("changed")
+        );
+        assert_eq!(
+            not_confirmed(CancelReason::Changed).reason.as_deref(),
+            Some("changed")
         );
     }
 

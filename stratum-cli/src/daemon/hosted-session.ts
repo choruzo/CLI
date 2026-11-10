@@ -27,6 +27,9 @@ import type {
   PauseStatus,
   ProtocolHandoffContext,
   ProtocolJob,
+  ProtocolBrowserAction,
+  ProtocolBrowserScreen,
+  ProtocolBrowserStatus,
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionHostInfo,
@@ -51,8 +54,19 @@ import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
 import type { RoutineProposals } from '../tools/routines/propose.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
+import { BrowserActionError, BrowserUnavailableError } from '../browser/manager.js';
 
 const log = getLogger('daemon').child('session');
+
+/** Un fallo del navegador de la sesión, como error del protocolo (auxiliar: la sesión sigue). */
+function browserProtocolError(err: unknown): Error {
+  if (err instanceof ProtocolError) return err;
+  if (err instanceof BrowserUnavailableError) {
+    return new ProtocolError('UNAVAILABLE', err.message, { reason: 'failed' });
+  }
+  if (err instanceof BrowserActionError) return new ProtocolError('INVALID_PARAMS', err.message);
+  return err instanceof Error ? err : new Error(String(err));
+}
 
 type RevertParams = { turns?: number; dryRun?: boolean; force?: boolean };
 type RevertOutcome = { status: RevertStatus; plan: ProtocolRevertPlan | null };
@@ -545,6 +559,91 @@ export class HostedSession {
     if (this.pump) throw new ProtocolError('BUSY', 'Not while a run is in progress.');
     if (this.reverting) throw new ProtocolError('BUSY', 'The session is reverting files.');
     if (this.archiving) throw new ProtocolError('BUSY', 'The conversation is being archived.');
+  }
+
+  /** El estado del navegador del agente de la sesión (nunca lo arranca). */
+  async browserStatus(): Promise<ProtocolBrowserStatus> {
+    const browser = this.host.agent.browser;
+    if (!browser) return { state: 'unavailable', reason: this.noBrowserReason() };
+    return browser.status();
+  }
+
+  /**
+   * `browser.screen`: estado y la pestaña en JPEG, otra captura con orden fija
+   * (no la que ve el agente, no toca su `ScreenshotBuffer` y no se guarda).
+   */
+  async browserScreen(
+    maxBytes: number,
+  ): Promise<{ browser: ProtocolBrowserStatus; screen: ProtocolBrowserScreen | null }> {
+    const browser = this.host.agent.browser;
+    const status = await this.browserStatus();
+    if (!browser || status.state !== 'open') return { browser: status, screen: null };
+    try {
+      const shot = await browser.screen(maxBytes);
+      return { browser: status, screen: shot ? { mime: 'image/jpeg', ...shot } : null };
+    } catch (err) {
+      throw browserProtocolError(err);
+    }
+  }
+
+  /**
+   * `browser.navigate`: la persona mueve el navegador. Solo en reposo (con un
+   * run, el navegador es del agente) y solo hacia lo local o ya aprobado:
+   * `control` no aprueba orígenes, eso es de la confirmación de `browser_navigate`.
+   *
+   * @throws ProtocolError `BUSY`, `INVALID_PARAMS` (`needs-approval`, `blocked-url`),
+   *   `UNAVAILABLE` (sin navegador, cerrado o caído).
+   */
+  async browserNavigate(
+    action: ProtocolBrowserAction,
+    url: string | undefined,
+  ): Promise<{ browser: ProtocolBrowserStatus }> {
+    this.assertIdle();
+    const browser = this.host.agent.browser;
+    if (!browser) {
+      throw new ProtocolError('UNAVAILABLE', 'This session has no browser.', {
+        reason: this.noBrowserReason(),
+      });
+    }
+    try {
+      if (action === 'goto') {
+        const verdict = browser.inspect(url ?? '');
+        if (verdict.class === 'blocked') {
+          throw new ProtocolError(
+            'INVALID_PARAMS',
+            `That URL cannot be opened: ${verdict.reason ?? 'blocked'}.`,
+            {
+              reason: 'blocked-url',
+            },
+          );
+        }
+        if (verdict.class === 'external') {
+          throw new ProtocolError(
+            'INVALID_PARAMS',
+            'That site has not been approved in this session: the agent asks for it with browser_navigate.',
+            { reason: 'needs-approval' },
+          );
+        }
+        await browser.navigate(url ?? '');
+      } else {
+        if (browser.state !== 'open') {
+          throw new ProtocolError('UNAVAILABLE', 'The browser is not open.', {
+            reason: 'browser-closed',
+          });
+        }
+        await browser.history(action);
+      }
+    } catch (err) {
+      throw browserProtocolError(err);
+    }
+    return { browser: await browser.status() };
+  }
+
+  /** Por qué una sesión sin navegador no lo tiene. */
+  private noBrowserReason(): string {
+    if (this.host.agent.promptPreset === 'companion') return 'not-supported';
+    if (!this.host.config.tools.browser.enabled) return 'disabled';
+    return 'not-found';
   }
 
   /**

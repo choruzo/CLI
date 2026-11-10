@@ -5,7 +5,21 @@
  * Puro, para los tests.
  */
 
-export type CommandName = 'new' | 'model' | 'context' | 'settings' | 'imagen';
+import type { AppMode } from '../../view/mode';
+
+export type CommandName =
+  | 'new'
+  | 'model'
+  | 'context'
+  | 'settings'
+  | 'imagen'
+  | 'agent'
+  | 'readonly'
+  | 'changes'
+  | 'jobs'
+  | 'undo'
+  | 'plan'
+  | 'browser';
 
 export interface SlashCommand {
   name: CommandName;
@@ -14,6 +28,8 @@ export interface SlashCommand {
   args?: string;
   /** Sin argumento no hace nada útil: se avisa en vez de ejecutarlo. */
   argRequired?: boolean;
+  /** Solo en este modo; sin él, en los dos. */
+  mode?: AppMode;
 }
 
 export const SLASH_COMMANDS: readonly SlashCommand[] = [
@@ -26,8 +42,27 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
     args: '<descripción>',
     argRequired: true,
     description: 'Generar una imagen con el modelo de imágenes',
+    mode: 'chat',
   },
+  {
+    name: 'plan',
+    args: '<tarea>',
+    argRequired: true,
+    description: 'Planificar antes de tocar nada: el agente propone un plan y espera tu aprobación',
+    mode: 'code',
+  },
+  { name: 'agent', args: '[perfil]', description: 'Ver o cambiar el perfil de agente de esta sesión', mode: 'code' },
+  { name: 'readonly', description: 'Poner o quitar el modo de solo lectura de esta sesión', mode: 'code' },
+  { name: 'changes', description: 'Ver los cambios del árbol de trabajo (git)', mode: 'code' },
+  { name: 'jobs', description: 'Ver los procesos en segundo plano de esta sesión', mode: 'code' },
+  { name: 'undo', description: 'Deshacer los ficheros del último turno', mode: 'code' },
+  { name: 'browser', args: '[dirección]', description: 'Abrir el navegador de la sesión' },
 ];
+
+/** Los comandos de un modo, en el orden del menú. */
+export function commandsFor(mode: AppMode): SlashCommand[] {
+  return SLASH_COMMANDS.filter((c) => !c.mode || c.mode === mode);
+}
 
 /**
  * Mensaje que manda `/imagen`: el asistente escribe la petición al modelo de
@@ -44,10 +79,10 @@ export function imageRequest(description: string): string {
  * Comandos que encajan con lo escrito, o `null` si no hay que mostrar el menú:
  * solo mientras se escribe el nombre (empieza por `/` y aún no hay espacio).
  */
-export function matchCommands(input: string): SlashCommand[] | null {
+export function matchCommands(input: string, mode: AppMode = 'chat'): SlashCommand[] | null {
   if (!input.startsWith('/') || /\s/.test(input)) return null;
   const q = input.slice(1).toLowerCase();
-  return SLASH_COMMANDS.filter((c) => c.name.startsWith(q));
+  return commandsFor(mode).filter((c) => c.name.startsWith(q));
 }
 
 export type ParsedCommand =
@@ -55,7 +90,7 @@ export type ParsedCommand =
   | { ok: false; error: string };
 
 /** `null` si no es un comando (no empieza por `/`): se envía como mensaje. */
-export function parseCommand(text: string): ParsedCommand | null {
+export function parseCommand(text: string, mode: AppMode = 'chat'): ParsedCommand | null {
   const trimmed = text.trim();
   if (!trimmed.startsWith('/')) return null;
   const match = /^\/(\S+)\s*([\s\S]*)$/.exec(trimmed);
@@ -64,6 +99,9 @@ export function parseCommand(text: string): ParsedCommand | null {
   if (!/^[a-z][a-z_-]*$/.test(name)) return null;
   const cmd = SLASH_COMMANDS.find((c) => c.name === name);
   if (!cmd) return { ok: false, error: `Comando desconocido: /${name}. Escribe / para ver los disponibles.` };
+  if (cmd.mode && cmd.mode !== mode) {
+    return { ok: false, error: `/${cmd.name} es del modo ${cmd.mode === 'code' ? 'Código' : 'Chat'}.` };
+  }
   const arg = (match?.[2] ?? '').trim();
   if (arg && !cmd.args) return { ok: false, error: `/${cmd.name} no admite argumentos.` };
   if (!arg && cmd.argRequired) {

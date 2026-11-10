@@ -68,6 +68,13 @@ import {
 } from './presets.js';
 import { composeToolsetFilters } from '../tools/registry.js';
 import { SCREEN_SCREENSHOT_TOOL, SCREEN_TOOLS } from '../tools/screen/names.js';
+import {
+  BROWSER_NAVIGATE_TOOL,
+  BROWSER_SCREENSHOT_TOOL,
+  BROWSER_TOOLS,
+} from '../tools/browser/names.js';
+import { browserExecutable } from '../tools/browser/register.js';
+import { BrowserManager } from '../browser/manager.js';
 import { GENERATE_IMAGE_TOOL } from '../tools/images/generate.js';
 import { ScreenshotBuffer } from './screenshots.js';
 import { UserImageBuffer, withImageMarkers, type UserImage } from './user-images.js';
@@ -279,6 +286,13 @@ export class StratumAgent {
   /** Lo que ve `ToolContext.diagnostics`: pide diagnósticos y los formatea. */
   private readonly diagnosticsProvider: DiagnosticsProvider | undefined;
   /**
+   * Navegador de la sesión (`src/browser/`): solo el agente de código y el
+   * asistente, si sus tools están registradas y hay un navegador instalado.
+   * Arranque perezoso; `dispose()` lo cierra. El daemon lo lee para
+   * `browser.screen`/`browser.navigate`.
+   */
+  readonly browser: BrowserManager | undefined;
+  /**
    * Jobs en segundo plano de la sesión (`exec` con `background: true`). De
    * sesión, como la lista de tareas: un job sobrevive al turno que lo lanzó.
    * La UI se suscribe aquí para pintarlos. `undefined` si están desactivados o
@@ -451,6 +465,25 @@ export class StratumAgent {
               });
             },
           };
+    // Navegador: el `companion` no lo tiene (ya tiene la pantalla de su caja);
+    // sin navegador sus tools se quitan de la sesión.
+    const browserTools = BROWSER_TOOLS.filter((name) => registry.get(name) !== undefined);
+    const executable =
+      browserTools.length > 0 && (this.preset === 'coding' || this.preset === 'assistant')
+        ? browserExecutable(config)
+        : null;
+    this.browser =
+      executable === null
+        ? undefined
+        : new BrowserManager({
+            executable,
+            // El `file:` libre es el de la carpeta que el modelo ve como `cwd`.
+            cwd: this.workspace?.root ?? cwd,
+            allowHosts: config.tools.browser.allowHosts,
+            idleMinutes: config.tools.browser.idleMinutes,
+            redact: (text) => redactText(text, config),
+          });
+    if (!this.browser) for (const name of browserTools) registry.disableForSession(name);
     this._readOnly = options?.readOnly === true;
     // Hito 17: el perfil de sesión decide bloques del prompt, así que se
     // resuelve antes de componerlo. El asistente de Desktop no tiene perfil.
@@ -1057,7 +1090,7 @@ export class StratumAgent {
    * resto de subsistemas (§12.12).
    */
   async dispose(): Promise<void> {
-    await this.lsp?.dispose();
+    await Promise.all([this.lsp?.dispose(), this.browser?.dispose()]);
   }
 
   /**
@@ -1458,6 +1491,7 @@ export class StratumAgent {
         workspace: this.workspace,
         workspaceFilesExpiredAt: this.workspaceFilesExpiredAt,
         imageGeneration: this.registry.get(GENERATE_IMAGE_TOOL) !== undefined,
+        ...(this.browser ? { browser: true } : {}),
         ...this.memoryIndexEnv(),
       };
     }
@@ -1497,6 +1531,13 @@ export class StratumAgent {
       (!session || profileAllows(session, DELEGATE_TASK_TOOL));
     // Hito 17: sin `test_evidence` en el toolset, el ciclo TDD no se enseña.
     const testing = !session || profileAllows(session, TEST_EVIDENCE_TOOL);
+    // El navegador, si está y el perfil (de agente o de sesión) no lo quita.
+    const browser =
+      this.browser !== undefined &&
+      (!active ||
+        active.allowedTools === null ||
+        active.allowedTools.includes(BROWSER_NAVIGATE_TOOL)) &&
+      (!session || profileAllows(session, BROWSER_NAVIGATE_TOOL));
     const delegable = canDelegate
       ? this.profiles.delegable().filter((p) => p.name !== active?.name)
       : [];
@@ -1524,6 +1565,7 @@ export class StratumAgent {
         this.env.cwd,
       ),
       cwd: this.env.cwd,
+      ...(browser ? { browser: true } : {}),
       ...this.memoryIndexEnv(),
     };
   }
@@ -1606,6 +1648,7 @@ export class StratumAgent {
         diagnostics: this.diagnosticsProvider,
         screenshots: this.screenshots,
         userImages: this.userImages,
+        ...(this.browser ? { browser: this.browser } : {}),
         plugins: this.plugins,
         workspace: this.workspace,
         env: this.env,
@@ -1623,7 +1666,9 @@ export class StratumAgent {
                   this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
                   active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
                 ),
-          this.router.vision ? undefined : { hiddenTools: SCREEN_TOOLS },
+          this.router.vision
+            ? undefined
+            : { hiddenTools: [...SCREEN_TOOLS, BROWSER_SCREENSHOT_TOOL] },
         ),
       },
     );

@@ -19,6 +19,7 @@
 //! (`unlock.rs`) que el webview principal no ve, y lo sensible solo sale
 //! confirmado en otra más (`confirm.rs`). Cerrar Desktop la suelta.
 
+mod code;
 mod commands;
 mod confirm;
 mod files;
@@ -145,7 +146,17 @@ pub fn run() {
             commands::desktop_cancel_run,
             commands::desktop_steer_run,
             commands::desktop_new_chat,
+            commands::desktop_pick_project_folder,
+            commands::desktop_new_code_session,
+            commands::desktop_list_agents,
+            commands::desktop_set_agent,
+            commands::desktop_set_read_only,
+            commands::desktop_cancel_job,
+            commands::desktop_git_changes,
+            commands::desktop_git_diff,
             commands::desktop_start_run,
+            commands::desktop_browser_screen,
+            commands::desktop_browser_navigate,
             commands::desktop_save_pasted_image,
             commands::desktop_list_models,
             commands::desktop_set_model,
@@ -173,6 +184,8 @@ pub fn run() {
             commands::desktop_deny,
             commands::desktop_answer_questions,
             commands::desktop_decide_plan,
+            commands::desktop_revert_plan,
+            commands::desktop_revert,
             files::attachments_pick,
             files::attachments_add,
             files::attachments_commit,

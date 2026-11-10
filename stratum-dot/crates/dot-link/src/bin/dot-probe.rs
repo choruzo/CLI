@@ -169,6 +169,7 @@ async fn main() {
                 session_id: session_id.clone(),
                 input: text("input").unwrap_or_default(),
                 images: Vec::new(),
+                plan: false,
             }),
             "agents" => Some(CallAction::ListAgents { cwd: text("cwd") }),
             "models" => Some(CallAction::ListModels),

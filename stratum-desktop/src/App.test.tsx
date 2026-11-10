@@ -110,6 +110,20 @@ function rig() {
     deny: vi.fn(async () => undefined),
     answerQuestions: vi.fn(async () => undefined),
     decidePlan: vi.fn(async () => undefined),
+    pickProjectFolder: vi.fn(async () => null),
+    newCodeSession: vi.fn(async () => ({ session: idleSession({ id: 'ses_code', agent: 'general' }) })),
+    listAgents: vi.fn(async () => ({ agents: [] })),
+    setAgent: vi.fn(async () => ({ session: idleSession() })),
+    setReadOnly: vi.fn(async () => ({ session: idleSession() })),
+    cancelJob: vi.fn(async () => ({})),
+    gitChanges: vi.fn(async () => ({
+      changes: { isRepo: false, files: 0, added: 0, deleted: 0, changes: [], truncated: false },
+    })),
+    gitDiff: vi.fn(async () => ({ diff: '', truncated: false, binary: false })),
+    browserScreen: vi.fn(async () => ({ browser: { state: 'closed' }, screen: null })),
+    browserNavigate: vi.fn(async () => ({ browser: { state: 'closed' } })),
+    revertPlan: vi.fn(async () => ({ status: 'nothing', plan: null })),
+    revert: vi.fn(async () => ({ status: 'nothing', plan: null })),
     onEvent: vi.fn(async (h) => {
       handler = h;
       return () => (handler = null);
@@ -400,5 +414,96 @@ describe('elegir provider y modelo desde el composer', () => {
     fireEvent.change(box, { target: { value: 'Hola' } });
     fireEvent.keyDown(box, { key: 'Enter' });
     await waitFor(() => expect(native.newChat).toHaveBeenCalledWith({ provider: 'nube', model: 'grande' }));
+  });
+});
+
+describe('modo Chat | Código', () => {
+  const CODE = 'ses_code';
+  const codeSession = (over: Partial<ProtocolSession> = {}) =>
+    idleSession({ id: CODE, title: 'Arreglar el carrito', agent: 'general', cwd: '/src/tienda', ...over });
+  const radio = (name: string) => screen.getByRole('radio', { name });
+  const overview = (sessions: ProtocolSession[]) =>
+    ({ type: 'overview', overview: { sessions, approvals: [], questions: [], plans: [] } }) as const;
+
+  it('cada modo lista sus sesiones; cambiar de modo deja de mirar la del otro', async () => {
+    const { native, emit } = rig();
+    render(<App native={native} />);
+    await emit({ type: 'connection', state: connected() });
+    await emit(overview([idleSession(), codeSession()]));
+    await emit({ type: 'snapshot', sessionId: SID, snapshot: sampleSnapshot({ session: idleSession(), run: null, messages: [] }) });
+
+    expect(radio('Chat').getAttribute('aria-checked')).toBe('true');
+    expect(screen.getAllByText('Plan de viaje').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Arreglar el carrito')).toBeNull();
+
+    fireEvent.click(radio('Código'));
+    expect(radio('Código').getAttribute('aria-checked')).toBe('true');
+    expect(native.focusSession).toHaveBeenLastCalledWith(null);
+    expect(screen.getByText('Arreglar el carrito')).toBeTruthy();
+    expect(screen.queryByText('Plan de viaje')).toBeNull();
+    // Sin sesión elegida, el modo código pide la carpeta antes de nada.
+    expect(screen.getByText('Elige la carpeta del proyecto para empezar')).toBeTruthy();
+
+    // De vuelta, se retoma la conversación que se miraba.
+    fireEvent.click(radio('Chat'));
+    expect(native.focusSession).toHaveBeenLastCalledWith(SID);
+  });
+
+  it('una sesión de código abierta al arrancar pone el modo Código', async () => {
+    uiStore.set({ selectedId: CODE, pending: [], notices: [] });
+    const { native, emit } = rig();
+    render(<App native={native} />);
+    await emit({ type: 'connection', state: connected() });
+    await emit(overview([idleSession(), codeSession()]));
+    await emit({ type: 'snapshot', sessionId: CODE, snapshot: sampleSnapshot({ session: codeSession(), run: null, messages: [] }) });
+    await waitFor(() => expect(radio('Código').getAttribute('aria-checked')).toBe('true'));
+    expect(screen.getByRole('combobox', { name: 'Perfil de agente' })).toBeTruthy();
+    await waitFor(() => expect(native.gitChanges).toHaveBeenCalledWith(CODE));
+  });
+
+  it('el primer mensaje abre la sesión en la carpeta elegida; sin carpeta no se envía', async () => {
+    uiStore.set({ selectedId: null, pending: [], notices: [] });
+    const { native, emit } = rig();
+    native.pickProjectFolder = vi.fn(async () => '/src/tienda');
+    render(<App native={native} />);
+    await emit({ type: 'connection', state: connected() });
+    await emit(overview([]));
+    fireEvent.click(radio('Código'));
+
+    const box = screen.getByLabelText('Mensaje para el asistente');
+    fireEvent.change(box, { target: { value: 'arregla el carrito' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    expect(await screen.findByText(/Elige primero la carpeta del proyecto/)).toBeTruthy();
+    expect(native.newCodeSession).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole('button', { name: 'Elegir carpeta…' }));
+    expect(await screen.findByText('/src/tienda')).toBeTruthy();
+    fireEvent.change(box, { target: { value: 'arregla el carrito' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(native.newCodeSession).toHaveBeenCalledWith({ cwd: '/src/tienda' }));
+    await waitFor(() => expect(native.startRun).toHaveBeenCalledWith(CODE, 'arregla el carrito', []));
+    expect(native.newChat).not.toHaveBeenCalled();
+  });
+
+  it('/plan arranca el turno en modo plan; en Chat ese comando no existe', async () => {
+    uiStore.set({ selectedId: CODE, pending: [], notices: [] });
+    const { native, emit } = rig();
+    render(<App native={native} />);
+    await emit({ type: 'connection', state: connected() });
+    await emit(overview([idleSession(), codeSession()]));
+    await emit({ type: 'snapshot', sessionId: CODE, snapshot: sampleSnapshot({ session: codeSession(), run: null, messages: [] }) });
+    await waitFor(() => expect(radio('Código').getAttribute('aria-checked')).toBe('true'));
+
+    const box = screen.getByLabelText('Mensaje para el asistente');
+    fireEvent.change(box, { target: { value: '/plan migrar a pnpm' } });
+    fireEvent.keyDown(box, { key: 'Enter' });
+    await waitFor(() => expect(native.startRun).toHaveBeenCalledWith(CODE, 'migrar a pnpm', [], { plan: true }));
+
+    fireEvent.click(radio('Chat'));
+    const chat = screen.getByLabelText('Mensaje para el asistente');
+    fireEvent.change(chat, { target: { value: '/plan otra cosa' } });
+    fireEvent.keyDown(chat, { key: 'Enter' });
+    expect(await screen.findByText(/\/plan es del modo Código/)).toBeTruthy();
+    expect(native.startRun).toHaveBeenCalledTimes(1);
   });
 });

@@ -10,7 +10,12 @@ import {
   parseSessionSnapshot,
 } from '../../../stratum-cli/src/protocol/schemas';
 import type {
+  ProtocolAgent,
+  ProtocolBrowserScreen,
+  ProtocolBrowserStatus,
+  ProtocolChangesSummary,
   ProtocolContextReport,
+  ProtocolFileDiff,
   ProtocolDecision,
   ProtocolDreamResult,
   ProtocolProposal,
@@ -18,8 +23,10 @@ import type {
   ProtocolModel,
   ProtocolRun,
   ProtocolSession,
+  ProtocolRevertPlan,
   ProtocolSessionMemory,
   ProtocolSkill,
+  RevertStatus,
 } from './index';
 
 export { classifyEvent, parseOverviewSnapshot, parseSessionSnapshot };
@@ -111,5 +118,44 @@ export function parseApplied(raw: unknown): { applied: boolean; message: string 
 /** M19 fase 5 — `memory.rejectProposal`. */
 export function parseRejected(raw: unknown): { rejected: boolean; message: string } | null {
   const parsed = RESULTS['memory.rejectProposal'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Modo código — `agents.list`: los perfiles que se pueden elegir (el asistente, el primero). */
+export function parseAgents(raw: unknown): ProtocolAgent[] | null {
+  const parsed = RESULTS['agents.list'].safeParse(raw);
+  return parsed.success ? parsed.data.agents : null;
+}
+
+/** Modo código — `git.changes`: el working tree del proyecto (`isRepo: false` si no es un repo). */
+export function parseChanges(raw: unknown): ProtocolChangesSummary | null {
+  const parsed = RESULTS['git.changes'].safeParse(raw);
+  return parsed.success ? parsed.data.changes : null;
+}
+
+/**
+ * Modo código — `browser.screen`: el estado del navegador del agente de la
+ * sesión y su pestaña en JPEG (`screen: null` si no está abierto).
+ */
+export function parseBrowserView(
+  raw: unknown,
+): { browser: ProtocolBrowserStatus; screen: ProtocolBrowserScreen | null } | null {
+  const parsed = RESULTS['browser.screen'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Modo código — `git.diff`: el diff de un fichero, ya redactado (`binary`: sin texto). */
+export function parseDiff(raw: unknown): ProtocolFileDiff | null {
+  const parsed = RESULTS['git.diff'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/**
+ * Modo código — `sessions.revert` (el plan o lo que se hizo). `planned`: era el
+ * plan; `conflicts`: no se tocó nada; `nothing`: no había turnos que deshacer;
+ * `failed`: falló a medias y `plan` dice lo que sí se deshizo.
+ */
+export function parseRevert(raw: unknown): { status: RevertStatus; plan: ProtocolRevertPlan | null } | null {
+  const parsed = RESULTS['sessions.revert'].safeParse(raw);
   return parsed.success ? parsed.data : null;
 }

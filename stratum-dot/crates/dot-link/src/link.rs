@@ -224,6 +224,17 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     // Panel de trayectoria: la traza de la sesión que se mira (solo lectura).
     MainMethod::TraceSubscribe,
     MainMethod::TraceUnsubscribe,
+    // Modo código: conducir una sesión del agente de código en un proyecto
+    // (perfil, solo lectura, jobs) y ver sus cambios. Deshacer turnos no está
+    // aquí: exige `approve` y va por el broker de aprobador.
+    MainMethod::SessionsSetAgent,
+    MainMethod::SessionsSetReadOnly,
+    MainMethod::JobsCancel,
+    MainMethod::GitChanges,
+    MainMethod::GitDiff,
+    // El navegador del agente de la sesión: mirarlo y moverlo (sin aprobar orígenes).
+    MainMethod::BrowserScreen,
+    MainMethod::BrowserNavigate,
 ];
 
 impl ClientProfile {
@@ -890,6 +901,7 @@ fn call_request_as(
             session_id,
             input,
             images,
+            plan,
         } => {
             if !valid_id(session_id) {
                 return Err(invalid("Invalid session id."));
@@ -904,6 +916,10 @@ fn call_request_as(
             let mut params =
                 json!({ "sessionId": session_id, "input": input, "operationId": operation_id });
             add_images(&mut params, images)?;
+            // Modo plan (Desktop): omitido si no se pide; Dot pasa siempre `false`.
+            if *plan {
+                params["mode"] = Value::String("plan".into());
+            }
             Ok((MainMethod::RunsStart, params))
         }
         CallAction::ListAgents { cwd } => Ok((
@@ -1237,6 +1253,101 @@ fn call_request_as(
                 }),
             ))
         }
+        CallAction::SetAgent { session_id, agent } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            // `None` quita el perfil; un nombre en blanco no es «ninguno».
+            let agent = match agent {
+                None => Value::Null,
+                Some(_) => Value::String(
+                    optional(agent, MAX_NAME_CHARS, "agent name")?
+                        .ok_or_else(|| invalid("Choose an agent profile."))?,
+                ),
+            };
+            Ok((
+                MainMethod::SessionsSetAgent,
+                json!({ "sessionId": session_id, "agent": agent, "operationId": operation_id }),
+            ))
+        }
+        CallAction::SetReadOnly {
+            session_id,
+            read_only,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::SessionsSetReadOnly,
+                json!({ "sessionId": session_id, "readOnly": read_only, "operationId": operation_id }),
+            ))
+        }
+        CallAction::CancelJob { session_id, job_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            if !valid_id(job_id) {
+                return Err(invalid("Invalid job id."));
+            }
+            Ok((
+                MainMethod::JobsCancel,
+                json!({ "sessionId": session_id, "jobId": job_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::GitChanges { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((MainMethod::GitChanges, json!({ "sessionId": session_id })))
+        }
+        CallAction::GitDiff { session_id, path } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            // Tal cual (sin recortar espacios): la valida y la confina el daemon.
+            if path.is_empty() || path.chars().count() > MAX_PATH_CHARS {
+                return Err(invalid("Invalid file path."));
+            }
+            Ok((
+                MainMethod::GitDiff,
+                json!({ "sessionId": session_id, "path": path }),
+            ))
+        }
+        CallAction::BrowserScreen { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((MainMethod::BrowserScreen, json!({ "sessionId": session_id })))
+        }
+        CallAction::BrowserNavigate {
+            session_id,
+            action,
+            url,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            if !BROWSER_ACTIONS.contains(&action.as_str()) {
+                return Err(invalid("Unknown browser action."));
+            }
+            let mut params = json!({
+                "sessionId": session_id,
+                "action": action,
+                "operationId": operation_id,
+            });
+            match url {
+                // Tal cual: qué se abre lo decide el daemon (lo local o ya aprobado).
+                Some(url) => {
+                    if url.is_empty() || url.chars().count() > MAX_BROWSER_URL_CHARS {
+                        return Err(invalid("Invalid URL."));
+                    }
+                    params["url"] = Value::String(url.clone());
+                }
+                None if action == "goto" => return Err(invalid("goto needs a URL.")),
+                None => {}
+            }
+            Ok((MainMethod::BrowserNavigate, params))
+        }
         CallAction::MemoryReclassify {
             decision_id,
             section,
@@ -1264,6 +1375,12 @@ fn call_request_as(
 /// `PROTOCOL_MEMORY_SECTIONS`. El nativo conoce el sobre, no los DTOs, pero este
 /// parámetro lo fija él: el daemon rechazaría cualquier otro valor.
 const MEMORY_SECTIONS: [&str; 5] = ["profile", "person", "project", "topic", "area"];
+
+/// Lo que una persona pide al navegador de una sesión (`BROWSER_NAVIGATE_ACTIONS`).
+const BROWSER_ACTIONS: [&str; 4] = ["goto", "back", "forward", "reload"];
+
+/// Tope de la URL de `browser.navigate` (`BROWSER_NAVIGATE_LIMITS.urlChars`).
+const MAX_BROWSER_URL_CHARS: usize = 2048;
 
 /// Tope del desplazamiento de `images.get` (`SHARED_IMAGE_LIMITS`: 5 MB).
 const MAX_IMAGE_OFFSET: u64 = 5 * 1024 * 1024;
@@ -2471,13 +2588,18 @@ impl Actor {
                     Ok((method, params)) => {
                         // Sin el contenido: ni el mensaje ni la ruta van al log. La
                         // pantalla de la caja se pide cada poco: no llena el log.
-                        // Tampoco la memoria: ni la consulta ni lo recordado.
+                        // Tampoco la memoria: ni la consulta ni lo recordado. Los
+                        // cambios del proyecto se piden tras cada turno (y el diff
+                        // nombra un fichero): tampoco.
                         if !matches!(
                             action,
                             CallAction::BoxScreen
                                 | CallAction::ImagesGet { .. }
                                 | CallAction::Memory { .. }
                                 | CallAction::MemoryDecisions { .. }
+                                | CallAction::GitChanges { .. }
+                                | CallAction::GitDiff { .. }
+                                | CallAction::BrowserScreen { .. }
                         ) {
                             self.cfg.logger.info(&format!("call: {}", action.name()));
                         }
@@ -2591,6 +2713,7 @@ mod tests {
                 session_id: "ses_1".into(),
                 input: "hola\nmundo".into(),
                 images: Vec::new(),
+                plan: false,
             },
             "op-3",
         )
@@ -2654,6 +2777,182 @@ mod tests {
             // El perfil solo resta: Dot no gana nada que no use.
             assert!(!ClientProfile::DOT.allows(method));
         }
+    }
+
+    #[test]
+    fn el_modo_codigo_es_solo_de_desktop_y_cada_llamada_va_a_su_metodo() {
+        let desktop = |action: &CallAction, op: &str| {
+            call_request_as(&ClientProfile::DESKTOP, action, op).unwrap()
+        };
+        // Perfil de agente: un nombre, o `null` para quitarlo; en blanco no es «ninguno».
+        let set = |agent: Option<&str>| CallAction::SetAgent {
+            session_id: "ses_1".into(),
+            agent: agent.map(str::to_string),
+        };
+        assert_eq!(
+            desktop(&set(Some(" revisor ")), "op-1"),
+            (
+                MainMethod::SessionsSetAgent,
+                json!({ "sessionId": "ses_1", "agent": "revisor", "operationId": "op-1" })
+            )
+        );
+        assert_eq!(
+            desktop(&set(None), "op-2").1,
+            json!({ "sessionId": "ses_1", "agent": null, "operationId": "op-2" })
+        );
+        assert_eq!(
+            call_request(&set(Some("  ")), "op").unwrap_err().kind,
+            CommandErrorKind::Invalid
+        );
+        let long = "x".repeat(MAX_NAME_CHARS + 1);
+        assert!(call_request(&set(Some(&long)), "op").is_err());
+        let read_only = CallAction::SetReadOnly {
+            session_id: "ses_1".into(),
+            read_only: true,
+        };
+        assert_eq!(
+            desktop(&read_only, "op-3"),
+            (
+                MainMethod::SessionsSetReadOnly,
+                json!({ "sessionId": "ses_1", "readOnly": true, "operationId": "op-3" })
+            )
+        );
+        let cancel = CallAction::CancelJob {
+            session_id: "ses_1".into(),
+            job_id: "job_1".into(),
+        };
+        assert_eq!(
+            desktop(&cancel, "op-4"),
+            (
+                MainMethod::JobsCancel,
+                json!({ "sessionId": "ses_1", "jobId": "job_1", "operationId": "op-4" })
+            )
+        );
+        for bad in [
+            CallAction::CancelJob {
+                session_id: "ses_1".into(),
+                job_id: String::new(),
+            },
+            CallAction::CancelJob {
+                session_id: "x".repeat(MAX_ID_CHARS + 1),
+                job_id: "job".into(),
+            },
+        ] {
+            assert!(call_request(&bad, "op").is_err());
+        }
+        // Lo de git solo lee: sin `operationId`, y el diff con la ruta tal cual.
+        let changes = CallAction::GitChanges {
+            session_id: "ses_1".into(),
+        };
+        assert_eq!(
+            desktop(&changes, "op"),
+            (MainMethod::GitChanges, json!({ "sessionId": "ses_1" }))
+        );
+        let diff = |path: String| CallAction::GitDiff {
+            session_id: "ses_1".into(),
+            path,
+        };
+        assert_eq!(
+            desktop(&diff("src/a b.ts".into()), "op"),
+            (
+                MainMethod::GitDiff,
+                json!({ "sessionId": "ses_1", "path": "src/a b.ts" })
+            )
+        );
+        for bad in [String::new(), "x".repeat(MAX_PATH_CHARS + 1)] {
+            assert!(call_request(&diff(bad), "op").is_err());
+        }
+        assert!(set(None).mutating() && read_only.mutating() && cancel.mutating());
+        assert!(!changes.mutating() && !diff("a".into()).mutating());
+        for m in [
+            MainMethod::SessionsSetAgent,
+            MainMethod::SessionsSetReadOnly,
+            MainMethod::JobsCancel,
+            MainMethod::GitChanges,
+            MainMethod::GitDiff,
+        ] {
+            assert!(DESKTOP_METHODS.contains(&m), "{m:?}");
+            // El perfil solo resta: Dot no conduce sesiones de código.
+            assert!(!DOT_METHODS.contains(&m), "{m:?}");
+        }
+    }
+
+    #[test]
+    fn el_navegador_es_solo_de_desktop_con_acciones_cerradas() {
+        let desktop = |action: &CallAction, op: &str| {
+            call_request_as(&ClientProfile::DESKTOP, action, op).unwrap()
+        };
+        let screen = CallAction::BrowserScreen {
+            session_id: "ses_1".into(),
+        };
+        assert_eq!(
+            desktop(&screen, "op"),
+            (MainMethod::BrowserScreen, json!({ "sessionId": "ses_1" }))
+        );
+        assert!(!screen.mutating());
+        let nav = |action: &str, url: Option<&str>| CallAction::BrowserNavigate {
+            session_id: "ses_1".into(),
+            action: action.into(),
+            url: url.map(String::from),
+        };
+        assert_eq!(
+            desktop(&nav("goto", Some("http://localhost:3000/")), "op-1"),
+            (
+                MainMethod::BrowserNavigate,
+                json!({
+                    "sessionId": "ses_1",
+                    "action": "goto",
+                    "url": "http://localhost:3000/",
+                    "operationId": "op-1"
+                })
+            )
+        );
+        assert_eq!(
+            desktop(&nav("back", None), "op-2"),
+            (
+                MainMethod::BrowserNavigate,
+                json!({ "sessionId": "ses_1", "action": "back", "operationId": "op-2" })
+            )
+        );
+        assert!(nav("reload", None).mutating());
+        let long = format!("http://localhost/{}", "x".repeat(MAX_BROWSER_URL_CHARS));
+        for bad in [
+            nav("open", Some("http://localhost/")),
+            nav("GOTO", Some("http://localhost/")),
+            nav("goto", None),
+            nav("goto", Some("")),
+            nav("goto", Some(&long)),
+            CallAction::BrowserNavigate {
+                session_id: String::new(),
+                action: "reload".into(),
+                url: None,
+            },
+        ] {
+            assert_eq!(
+                call_request(&bad, "op").unwrap_err().kind,
+                CommandErrorKind::Invalid
+            );
+        }
+        for m in [MainMethod::BrowserScreen, MainMethod::BrowserNavigate] {
+            assert!(DESKTOP_METHODS.contains(&m), "{m:?}");
+            // El perfil solo resta: Dot no tiene el navegador del agente.
+            assert!(!DOT_METHODS.contains(&m), "{m:?}");
+            assert!(!ClientProfile::DOT.allows(m), "{m:?}");
+        }
+    }
+
+    #[test]
+    fn el_modo_plan_solo_viaja_si_se_pide() {
+        let start = |plan: bool| CallAction::StartRun {
+            session_id: "ses_1".into(),
+            input: "planea".into(),
+            images: Vec::new(),
+            plan,
+        };
+        let (_, params) = call_request(&start(false), "op").unwrap();
+        assert!(params.get("mode").is_none());
+        let (_, params) = call_request(&start(true), "op").unwrap();
+        assert_eq!(params["mode"], json!("plan"));
     }
 
     #[test]
@@ -3116,6 +3415,7 @@ mod tests {
             session_id: "ses_1".into(),
             input: "mira".into(),
             images,
+            plan: false,
         };
         let (_, params) = call_request(&start(vec![]), "op").unwrap();
         assert!(params.get("images").is_none());
@@ -3142,16 +3442,19 @@ mod tests {
                 session_id: String::new(),
                 input: "hola".into(),
                 images: Vec::new(),
+                plan: false,
             },
             CallAction::StartRun {
                 session_id: "ses".into(),
                 input: "   ".into(),
                 images: Vec::new(),
+                plan: false,
             },
             CallAction::StartRun {
                 session_id: "ses".into(),
                 input: "x".repeat(MAX_INPUT_CHARS + 1),
                 images: Vec::new(),
+                plan: false,
             },
             CallAction::OpenSession {
                 cwd: Some("x".repeat(MAX_PATH_CHARS + 1)),

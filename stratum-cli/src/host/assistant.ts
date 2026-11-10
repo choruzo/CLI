@@ -24,6 +24,7 @@ import {
   GENERATE_IMAGE_TOOL,
   resolveImageEndpoint,
 } from '../tools/images/generate.js';
+import { registerBrowserTools } from '../tools/browser/register.js';
 import { getLogger } from '../logging/index.js';
 import { DecisionStore } from '../memory/decisions.js';
 
@@ -194,6 +195,8 @@ export function buildAssistantRegistry(config?: StratumConfig): ToolRegistry {
   // Generar imágenes solo si la config declara con qué modelo y provider.
   const images = config !== undefined && resolveImageEndpoint(config) !== null;
   if (images) registry.register(createGenerateImageTool());
+  // El navegador, si hay uno instalado (su `file:` queda en la carpeta de la conversación).
+  if (config !== undefined) registerBrowserTools(registry, config);
   const missing = [...ASSISTANT_TOOLS, ...ASSISTANT_FILE_TOOLS].filter(
     (name) => (images || name !== GENERATE_IMAGE_TOOL) && !registry.get(name),
   );

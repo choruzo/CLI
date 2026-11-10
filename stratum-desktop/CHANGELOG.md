@@ -4,6 +4,19 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [Sin publicar]
+
+Necesita un `stratumd` con `git.changes`, `git.diff`, `browser.screen` y `browser.navigate` (la CLI de esta misma rama).
+
+### Añadido
+- **Modo código**: un conmutador **Chat | Código** centrado en la barra de título (`Ctrl+1` / `Ctrl+2`). En Código, Desktop abre sesiones del agente de código de la CLI en la carpeta de proyecto que elijas (con las recientes a mano), con su perfil de agente y el modo de solo lectura en una barra sobre la conversación. Cada modo lista sus propias sesiones.
+- **Cambios del proyecto**: panel con los ficheros cambiados del árbol de trabajo (git) y su diff, que se actualiza al acabar cada turno.
+- **Deshacer turnos**: desde el panel de cambios se ve primero qué ficheros se restaurarían o borrarían, y deshacer pide desbloquear las aprobaciones y confirmarlo en la ventana nativa. Si algún fichero cambió después, Desktop no lo fuerza: se hace desde la terminal.
+- **Procesos en segundo plano**: panel con los jobs de la sesión, su estado y tiempo, y cancelar.
+- **Navegador de la sesión** (botón del raíl o `Ctrl+Mayús+B`, en Chat y en Código): lo que el agente ve cuando abre su navegador para comprobar su trabajo, en vivo y de solo lectura. Con la sesión en reposo puedes ir tú a una dirección local, recargar y moverte por el historial; las direcciones externas las pide el agente y se confirman.
+- **Paneles redimensionables**: el panel lateral, la trayectoria y el navegador se ensanchan o encogen arrastrando su borde (o con las flechas; doble clic vuelve al ancho por defecto), y el ancho se recuerda.
+- Comandos del modo código: `/plan <tarea>`, `/agent`, `/readonly`, `/changes`, `/jobs`, `/undo`; y `/browser [dirección]` en los dos modos.
+
 ## [0.10.0] — 2026-11-06
 
 Acompaña a **Stratum CLI 0.14.0**, que es la que conviene tener instalada. Ajustes necesita su `stratum config set --global`: con una CLI más vieja, Ajustes se queda en solo lectura y avisa de que hay que actualizarla.

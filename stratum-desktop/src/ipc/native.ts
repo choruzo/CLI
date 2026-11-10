@@ -166,7 +166,13 @@ export interface NativeBridge {
   steerRun(sessionId: string, text: string, images: string[]): Promise<string>;
   /** Conversación nueva con el asistente; sin elección, provider y modelo de la config. Resultado sin validar. */
   newChat(choice?: { provider: string; model: string }): Promise<unknown>;
-  startRun(sessionId: string, input: string, images: string[]): Promise<unknown>;
+  /** `opts.plan`: el run en modo plan (`runs.start` con `mode: 'plan'`). */
+  startRun(
+    sessionId: string,
+    input: string,
+    images: string[],
+    opts?: { plan?: boolean },
+  ): Promise<unknown>;
   /** Guarda una imagen pegada (bytes) en `~/.stratum/images/` y devuelve su ruta absoluta. */
   savePastedImage(bytes: number[]): Promise<string>;
   listModels(): Promise<unknown>;
@@ -214,6 +220,49 @@ export interface NativeBridge {
   answerQuestions(sessionId: string, requestId: string, answers: QuestionAnswerInput[] | null): Promise<void>;
   /** Aprobar pasa por la confirmación nativa; rechazar va directo. */
   decidePlan(sessionId: string, requestId: string, decision: 'approve' | 'reject'): Promise<void>;
+  /** Modo código: el diálogo nativo de elegir una carpeta de proyecto; `null` si se cancela. */
+  pickProjectFolder(): Promise<string | null>;
+  /**
+   * Modo código: una sesión del agente de código en `cwd` (absoluta y existente).
+   * `agent` es un perfil de código (`assistant`/`companion` se rechazan sin enviar).
+   * Resultado sin validar (`sessions.open`).
+   */
+  newCodeSession(opts: { cwd: string; agent?: string; provider?: string; model?: string }): Promise<unknown>;
+  /** Modo código: los perfiles de agente (`agents.list`), con los del proyecto de `cwd`. */
+  listAgents(cwd?: string): Promise<unknown>;
+  /** Modo código: el perfil de agente de código de una sesión parada; `null` lo quita. */
+  setAgent(sessionId: string, agent: string | null): Promise<unknown>;
+  /** Modo código: solo lectura de una sesión parada (`sessions.setReadOnly`). */
+  setReadOnly(sessionId: string, readOnly: boolean): Promise<unknown>;
+  /** Modo código: parar un job en segundo plano (`jobs.cancel`). */
+  cancelJob(sessionId: string, jobId: string): Promise<unknown>;
+  /** Modo código: los cambios del working tree del proyecto (`git.changes`). */
+  gitChanges(sessionId: string): Promise<unknown>;
+  /** Modo código: el diff de un fichero de `gitChanges` (`git.diff`), ya redactado. */
+  gitDiff(sessionId: string, path: string): Promise<unknown>;
+  /** Modo código: el navegador del agente de la sesión y su pestaña en JPEG (`browser.screen`). */
+  browserScreen(sessionId: string): Promise<unknown>;
+  /**
+   * Modo código: mover ese navegador (`browser.navigate`), con la sesión en
+   * reposo; `goto` solo a lo local o ya aprobado (aprobar no es de aquí).
+   */
+  browserNavigate(
+    sessionId: string,
+    action: 'goto' | 'back' | 'forward' | 'reload',
+    url?: string,
+  ): Promise<unknown>;
+  /**
+   * Modo código: qué haría deshacer los últimos `turns` (1–20) turnos
+   * (`sessions.revert` con `dryRun`). No toca nada, pero exige las aprobaciones
+   * desbloqueadas: el daemon solo lo calcula con la autoridad de aprobar.
+   */
+  revertPlan(sessionId: string, turns: number): Promise<unknown>;
+  /**
+   * Modo código: deshacer los ficheros de los últimos `turns` turnos. Abre la
+   * confirmación nativa con el plan que lee el lado nativo del daemon; con
+   * conflictos o sin nada que deshacer, no se abre y vuelve esa respuesta. Nunca fuerza.
+   */
+  revert(sessionId: string, turns: number): Promise<unknown>;
   onEvent(handler: (event: DesktopEvent) => void): Promise<() => void>;
 }
 
@@ -232,7 +281,8 @@ export const tauriBridge: NativeBridge = {
   steerRun: (sessionId, text, images) => invoke<string>('desktop_steer_run', { sessionId, text, images }),
   newChat: (choice) =>
     invoke<unknown>('desktop_new_chat', { provider: choice?.provider ?? null, model: choice?.model ?? null }),
-  startRun: (sessionId, input, images) => invoke<unknown>('desktop_start_run', { sessionId, input, images }),
+  startRun: (sessionId, input, images, opts) =>
+    invoke<unknown>('desktop_start_run', { sessionId, input, images, plan: opts?.plan ?? null }),
   savePastedImage: (bytes) => invoke<string>('desktop_save_pasted_image', { bytes }),
   listModels: () => invoke<unknown>('desktop_list_models'),
   setModel: (sessionId, model, provider) =>
@@ -266,5 +316,24 @@ export const tauriBridge: NativeBridge = {
   answerQuestions: (sessionId, requestId, answers) =>
     invoke('desktop_answer_questions', { sessionId, requestId, answers }),
   decidePlan: (sessionId, requestId, decision) => invoke('desktop_decide_plan', { sessionId, requestId, decision }),
+  pickProjectFolder: () => invoke<string | null>('desktop_pick_project_folder'),
+  newCodeSession: ({ cwd, agent, provider, model }) =>
+    invoke<unknown>('desktop_new_code_session', {
+      cwd,
+      agent: agent ?? null,
+      provider: provider ?? null,
+      model: model ?? null,
+    }),
+  listAgents: (cwd) => invoke<unknown>('desktop_list_agents', { cwd: cwd ?? null }),
+  setAgent: (sessionId, agent) => invoke<unknown>('desktop_set_agent', { sessionId, agent }),
+  setReadOnly: (sessionId, readOnly) => invoke<unknown>('desktop_set_read_only', { sessionId, readOnly }),
+  cancelJob: (sessionId, jobId) => invoke<unknown>('desktop_cancel_job', { sessionId, jobId }),
+  gitChanges: (sessionId) => invoke<unknown>('desktop_git_changes', { sessionId }),
+  gitDiff: (sessionId, path) => invoke<unknown>('desktop_git_diff', { sessionId, path }),
+  browserScreen: (sessionId) => invoke<unknown>('desktop_browser_screen', { sessionId }),
+  browserNavigate: (sessionId, action, url) =>
+    invoke<unknown>('desktop_browser_navigate', { sessionId, action, url: url ?? null }),
+  revertPlan: (sessionId, turns) => invoke<unknown>('desktop_revert_plan', { sessionId, turns }),
+  revert: (sessionId, turns) => invoke<unknown>('desktop_revert', { sessionId, turns }),
   onEvent: (handler) => listen<DesktopEvent>(DESKTOP_EVENT, (e) => handler(e.payload)),
 };

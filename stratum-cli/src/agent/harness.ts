@@ -1,5 +1,6 @@
 import type { ModelVision, StratumConfig } from '../config/schema.js';
 import type { ScreenshotBuffer } from './screenshots.js';
+import type { BrowserManager } from '../browser/manager.js';
 import type { UserImageBuffer } from './user-images.js';
 import type { SkillRegistry } from '../skills/registry.js';
 import type { IProvider, CompletionRequest } from '../providers/base.js';
@@ -1225,6 +1226,11 @@ export class ReactLoop {
        */
       userImages?: UserImageBuffer;
       /**
+       * Navegador de la sesión (`src/browser/`). Solo el agente principal: los
+       * subagentes no lo reciben (y su filtro oculta las `browser_*`).
+       */
+      browser?: BrowserManager;
+      /**
        * PL1 — plugins de la sesión (los aporta `StratumAgent`). Llegan al
        * `ToolContext` y los heredan los subagentes: una guarda no se salta
        * delegando.
@@ -2196,6 +2202,7 @@ export class ReactLoop {
           supersededBySteering: () => (steeringPending() ? SUPERSEDED_BY_STEERING : null),
           // M15: la del modelo que atendió esta petición (un fallback la cambia).
           vision: this.router?.vision,
+          browser: this.extras?.browser,
         };
 
         const dispatchStart = performance.now();

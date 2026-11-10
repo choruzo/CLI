@@ -76,6 +76,10 @@ import type {
   ProtocolSessionMemory,
   ProtocolBoxStatus,
   ProtocolBoxScreen,
+  ProtocolBrowserScreen,
+  ProtocolBrowserStatus,
+  ProtocolChangesSummary,
+  ProtocolFileDiff,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -86,6 +90,11 @@ import type {
 } from './model.js';
 import {
   BOX_SCREEN_LIMITS,
+  BROWSER_NAVIGATE_ACTIONS,
+  BROWSER_NAVIGATE_LIMITS,
+  BROWSER_SCREEN_LIMITS,
+  GIT_CHANGES_LIMITS,
+  GIT_DIFF_LIMITS,
   GRANT_MINUTES,
   HISTORY_LIMITS,
   PROTOCOL_MEMORY_SECTIONS,
@@ -529,6 +538,31 @@ export const boxScreenSchema: z.ZodType<ProtocolBoxScreen> = z.object({
   takenAt: z.number().int().nonnegative(),
 });
 
+/** Navegador del agente de una sesión — `browser.screen` / `browser.navigate`. */
+export const browserStatusSchema: z.ZodType<ProtocolBrowserStatus> = z.object({
+  state: z.enum(['unavailable', 'closed', 'open']),
+  reason: z.string().max(LIMITS.nameChars).optional(),
+  url: z
+    .string()
+    .max(BROWSER_NAVIGATE_LIMITS.urlChars * 2)
+    .optional(),
+  title: z.string().max(LIMITS.answerChars).optional(),
+  loading: z.boolean().optional(),
+  canGoBack: z.boolean().optional(),
+  canGoForward: z.boolean().optional(),
+});
+
+export const browserScreenSchema: z.ZodType<ProtocolBrowserScreen> = z.object({
+  mime: z.literal('image/jpeg'),
+  data: z
+    .string()
+    .max(Math.ceil(BROWSER_SCREEN_LIMITS.maxBytes / 3) * 4)
+    .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+  width: screenDimension,
+  height: screenDimension,
+  takenAt: z.number().int().nonnegative(),
+});
+
 // ---------------------------------------------------------------------------
 // M16 — rutinas del asistente (topes iguales a los de `routines/store.ts`)
 // ---------------------------------------------------------------------------
@@ -736,6 +770,33 @@ export const sessionMemorySchema: z.ZodType<ProtocolSessionMemory> = z.object({
     })
     .nullable()
     .optional(),
+});
+
+/** Modo código de Desktop — `git.changes`. */
+export const changesSummarySchema: z.ZodType<ProtocolChangesSummary> = z.object({
+  isRepo: z.boolean(),
+  files: count,
+  added: count,
+  deleted: count,
+  changes: z
+    .array(
+      z.object({
+        path: z.string().min(1).max(LIMITS.pathChars),
+        added: count,
+        deleted: count,
+        status: z.enum(['modified', 'added', 'deleted', 'renamed', 'untracked']),
+        binary: z.boolean().optional(),
+      }),
+    )
+    .max(GIT_CHANGES_LIMITS.files),
+  truncated: z.boolean(),
+});
+
+/** Modo código de Desktop — `git.diff`. */
+export const fileDiffSchema: z.ZodType<ProtocolFileDiff> = z.object({
+  diff: z.string().max(GIT_DIFF_LIMITS.bytes),
+  truncated: z.boolean(),
+  binary: z.boolean(),
 });
 
 // ---------------------------------------------------------------------------
@@ -1130,6 +1191,23 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'jobs.list': sessionRef,
   'jobs.cancel': z.object({ sessionId: id, jobId: id, operationId }).strict(),
 
+  'git.changes': sessionRef,
+  'git.diff': z.object({ sessionId: id, path: z.string().min(1).max(LIMITS.pathChars) }).strict(),
+
+  'browser.screen': sessionRef,
+  'browser.navigate': z
+    .object({
+      sessionId: id,
+      action: z.enum(BROWSER_NAVIGATE_ACTIONS),
+      url: z.string().min(1).max(BROWSER_NAVIGATE_LIMITS.urlChars).optional(),
+      operationId,
+    })
+    .strict()
+    .refine((p) => p.action !== 'goto' || p.url !== undefined, {
+      message: 'goto needs a url',
+      path: ['url'],
+    }),
+
   'memory.status': memoryRef(z.object({ cwd: cwd.optional(), agent: memoryAgent.optional() })),
   'memory.decisions': memoryRef(
     z.object({
@@ -1364,6 +1442,14 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'jobs.list': z.object({ jobs: z.array(jobSchema) }),
   'jobs.cancel': emptyResult,
+
+  'git.changes': z.object({ changes: changesSummarySchema }),
+  'git.diff': fileDiffSchema,
+  'browser.screen': z.object({
+    browser: browserStatusSchema,
+    screen: browserScreenSchema.nullable(),
+  }),
+  'browser.navigate': z.object({ browser: browserStatusSchema }),
 
   'memory.status': memoryStatusSchema,
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),

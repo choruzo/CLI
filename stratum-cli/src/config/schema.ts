@@ -741,6 +741,25 @@ export const StratumConfigSchema = z.object({
           allowHosts: z.array(z.string()).default([]),
         })
         .default({}),
+      /**
+       * Navegador del agente (`src/browser/`): un Edge/Chrome/Chromium ya
+       * instalado, headless, manejado por CDP. Solo lo tienen el agente de
+       * código y el asistente. `executable` y `allowHosts` solo cuentan en la
+       * config global: un repo no apunta el navegador a otro binario ni amplía
+       * lo que se abre sin preguntar.
+       */
+      browser: z
+        .object({
+          /** `false` retira las tools `browser_*`. */
+          enabled: z.boolean().default(true),
+          /** Ruta del navegador; sin ella se busca en las rutas conocidas. */
+          executable: z.string().min(1).optional(),
+          /** Hosts (`host` o `host:puerto`, `*.` comodín) que cuentan como locales. */
+          allowHosts: z.array(z.string()).default([]),
+          /** Minutos sin uso antes de cerrar el navegador (se vuelve a abrir al usarlo). */
+          idleMinutes: z.number().int().positive().max(1440).default(15),
+        })
+        .default({}),
       destructivePatterns: z
         .array(z.string())
         .default([

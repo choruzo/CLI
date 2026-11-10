@@ -581,3 +581,42 @@ describe('routines.* (M16)', () => {
     expect(sessionSchema.safeParse({ ...session, routineId: 'rt_abc' }).success).toBe(true);
   });
 });
+
+describe('modo código de Desktop: git.changes / git.diff', () => {
+  it('solo leen (observe) y sus parámetros son estrictos', () => {
+    expect(METHODS['git.changes']).toMatchObject({ capability: 'observe', mutating: false });
+    expect(METHODS['git.diff']).toMatchObject({ capability: 'observe', mutating: false });
+    expect(PARAMS['git.changes'].safeParse({ sessionId: 's' }).success).toBe(true);
+    expect(PARAMS['git.changes'].safeParse({ sessionId: 's', cwd: '/x' }).success).toBe(false);
+    expect(PARAMS['git.diff'].safeParse({ sessionId: 's', path: 'a.ts' }).success).toBe(true);
+    expect(PARAMS['git.diff'].safeParse({ sessionId: 's', path: '' }).success).toBe(false);
+    expect(PARAMS['git.diff'].safeParse({ sessionId: 's' }).success).toBe(false);
+  });
+
+  it('resultados: el resumen recortado y el diff con su tope', () => {
+    const changes = {
+      isRepo: true,
+      files: 2,
+      added: 3,
+      deleted: 1,
+      changes: [
+        { path: 'a.ts', added: 3, deleted: 1, status: 'modified' },
+        { path: 'b.png', added: 0, deleted: 0, status: 'untracked', binary: true },
+      ],
+      truncated: false,
+    };
+    expect(RESULTS['git.changes'].safeParse({ changes }).success).toBe(true);
+    const bad = { ...changes, changes: [{ ...changes.changes[0], status: 'otro' }] };
+    expect(RESULTS['git.changes'].safeParse({ changes: bad }).success).toBe(false);
+    expect(
+      RESULTS['git.diff'].safeParse({ diff: '+x\n', truncated: false, binary: false }).success,
+    ).toBe(true);
+    expect(
+      RESULTS['git.diff'].safeParse({
+        diff: 'x'.repeat(256 * 1024 + 1),
+        truncated: true,
+        binary: false,
+      }).success,
+    ).toBe(false);
+  });
+});

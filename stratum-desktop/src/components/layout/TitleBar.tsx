@@ -30,7 +30,9 @@ const Glyph = ({ d }: { d: string }) => (
  * un control arrastra la ventana; el doble clic maximiza. Los controles son
  * botones de verdad (Tab, Enter, nombre accesible), no zonas pintadas.
  *
- * `modes` es el hueco del conmutador Chat | Code de D8.
+ * `modes` es el conmutador Chat | Código (`ModeSwitch`), centrado en la
+ * ventana: la barra es una rejilla de tres columnas (marca y título · modos ·
+ * controles) para que el centro no dependa de lo que midan los lados.
  */
 export function TitleBar({ title, modes }: { title?: string | null; modes?: ReactNode }) {
   const [maximized, setMaximized] = useState(false);
@@ -61,16 +63,18 @@ export function TitleBar({ title, modes }: { title?: string | null; modes?: Reac
 
   return (
     <header className="titlebar" data-tauri-drag-region>
-      <div className="titlebar__brand" data-tauri-drag-region>
-        <AppLogo className="titlebar__logo" />
-        <span className="titlebar__name" data-tauri-drag-region>
-          Stratum
-        </span>
+      <div className="titlebar__lead" data-tauri-drag-region>
+        <div className="titlebar__brand" data-tauri-drag-region>
+          <AppLogo className="titlebar__logo" />
+          <span className="titlebar__name" data-tauri-drag-region>
+            Stratum
+          </span>
+        </div>
+        <div className="titlebar__title" data-tauri-drag-region title={title ?? undefined}>
+          {title}
+        </div>
       </div>
       <div className="titlebar__modes">{modes}</div>
-      <div className="titlebar__title" data-tauri-drag-region title={title ?? undefined}>
-        {title}
-      </div>
       <div className="titlebar__controls" role="group" aria-label="Ventana">
         <button
           type="button"

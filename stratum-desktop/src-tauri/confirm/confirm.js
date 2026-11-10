@@ -33,6 +33,7 @@
     'Allow for 60 minutes': 'Permitir 60 minutos',
     'Send answers': 'Enviar respuestas',
     'Approve plan': 'Aprobar el plan',
+    'Revert files': 'Deshacer los cambios',
   };
 
   const TEXTS = {
@@ -61,6 +62,17 @@
       'Esta solicitud ya no está pendiente en esta sesión. No se ha enviado nada.',
     'Approval authority is locked. Unlock it to resolve requests from Dot.':
       'Las aprobaciones están bloqueadas. Desbloquéalas para resolver desde Desktop.',
+    // Deshacer turnos (modo código).
+    'This puts the listed files back as they were before those turns: it restores some and deletes the ones those turns created. Nothing else in the project changes.':
+      'Deja los ficheros de la lista como estaban antes de esos turnos: restaura unos y borra los que crearon esos turnos. Nada más del proyecto cambia.',
+    'It does not undo SSH commands, other directories or processes.':
+      'No deshace órdenes por SSH, otros directorios ni procesos.',
+    'Some files have no copy (too large): they stay as they are.':
+      'Algunos ficheros no tienen copia (son demasiado grandes): se quedan como están.',
+    'The daemon cut the lists: more files are affected than shown.':
+      'El daemon recortó las listas: hay más ficheros afectados de los que se ven.',
+    'The session changed before you confirmed. Nothing was changed.':
+      'La sesión cambió antes de confirmar. No se ha cambiado nada.',
   };
 
   const GRANT_NOTE =
@@ -158,6 +170,13 @@
         'Stratum Desktop te pide confirmar este cambio de configuración aquí, fuera de su ventana principal. ' +
         'Se escribe en tu configuración global de Stratum.';
     }
+    if (v.revert) {
+      const turns = v.revert.turns === 1 ? 'el último turno' : 'los últimos ' + v.revert.turns + ' turnos';
+      fact(facts, 'Deshacer', turns);
+      $('lead').textContent =
+        'Stratum Desktop te pide confirmar aquí, fuera de su ventana principal, que se deshagan estos cambios. ' +
+        'La lista la ha calculado el daemon de Stratum.';
+    }
     fact(facts, 'Sesión', session.title || session.agent || session.id);
     fact(facts, 'Carpeta', session.cwd, true);
     fact(facts, 'Agente', [session.agent, session.model].filter(Boolean).join(' · '));
@@ -187,6 +206,11 @@
       }
       $('plan').hidden = false;
     }
+    if (v.revert) {
+      renderRevert(v.revert);
+      // Pisa y borra ficheros: se pinta como lo peligroso.
+      document.body.classList.add('danger');
+    }
     const notes = $('notes');
     (v.notes || []).forEach(function (n) {
       const li = document.createElement('li');
@@ -204,6 +228,42 @@
       new Date(v.expiresAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' }) +
       '. No se envía nada hasta que pulses el botón.';
     arm();
+  }
+
+  // Las listas de un deshacer turnos, cada una recortada por el lado nativo ("y N más").
+  function renderRevert(r) {
+    const groups = [
+      ['Se restauran', r.restore, r.moreRestore],
+      ['Se borran', r.remove, r.moreRemove],
+      ['Cambiados después (conflictos)', r.conflicts, r.moreConflicts],
+      ['Sin copia: se quedan como están', r.skipped, r.moreSkipped],
+    ];
+    const anchor = $('notes');
+    groups.forEach(function (g) {
+      const paths = g[1] || [];
+      const more = g[2] || 0;
+      if (paths.length === 0 && more === 0) return;
+      const section = document.createElement('section');
+      section.className = 'block';
+      const h2 = document.createElement('h2');
+      h2.textContent = g[0];
+      section.appendChild(h2);
+      const list = document.createElement('ul');
+      paths.forEach(function (p) {
+        const li = document.createElement('li');
+        li.className = 'mono';
+        li.textContent = p;
+        list.appendChild(li);
+      });
+      if (more > 0) {
+        const li = document.createElement('li');
+        li.className = 'muted';
+        li.textContent = '…y ' + more + ' más';
+        list.appendChild(li);
+      }
+      section.appendChild(list);
+      anchor.parentNode.insertBefore(section, anchor);
+    });
   }
 
   async function load() {

@@ -6,6 +6,16 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [Sin publicar]
+
+### Añadido
+- **Navegador del agente**: tools `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_press`, `browser_console`, `browser_eval` y `browser_screenshot` (esta, solo con un modelo con visión declarada) para que el agente de código y el asistente comprueben su trabajo en la app real. Usa un Edge, Chrome o Chromium ya instalado, sin interfaz, con un perfil efímero (sin tus cookies ni sesiones) y sin abrir ningún puerto. Las direcciones locales (`localhost`, `127.0.0.1`, ficheros de la carpeta de la sesión) se abren sin preguntar; cualquier otro sitio pide confirmación y queda aprobado para esa sesión; los metadatos de nube, las direcciones link-local y otros esquemas no se abren nunca. Una página no puede saltarse la confirmación navegando por su cuenta.
+- `tools.browser` en la config: `enabled`, `idleMinutes` (se cierra solo tras 15 minutos sin uso) y, solo en la config global, `executable` y `allowHosts`.
+- Protocolo: `git.changes` y `git.diff` (los cambios del árbol de trabajo de una sesión y el diff de un fichero), `browser.screen` y `browser.navigate` (ver y mover el navegador de una sesión; `navigate` no aprueba orígenes).
+
+### Limitaciones conocidas
+- La política del navegador se aplica por nombre de host, no por la IP a la que resuelve, y las conexiones WebSocket de una página no pasan por ella.
+
 ## [0.14.0] — 2026-11-06
 
 Es la versión de la CLI que necesita **Stratum Desktop 0.10.0**.

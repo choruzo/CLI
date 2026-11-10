@@ -9,6 +9,9 @@ export default defineConfig({
     // reactivan a propósito, contra un daemon de pruebas.
     // Tampoco carga los plugins del desarrollador (`~/.stratum/plugins/`, config
     // global): solo los que el test pida con `paths` o con un directorio propio.
-    env: { STRATUM_NO_DAEMON: '1', STRATUM_NO_PLUGINS: '1' },
+    // Ni el navegador instalado en la máquina (`tools.browser`): el toolset de
+    // un test no depende de si hay un Edge o un Chrome. Los del navegador usan
+    // uno falso, o `locateBrowser` directo (el de integración).
+    env: { STRATUM_NO_DAEMON: '1', STRATUM_NO_PLUGINS: '1', STRATUM_NO_BROWSER: '1' },
   },
 });

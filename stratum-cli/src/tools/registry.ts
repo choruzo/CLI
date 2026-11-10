@@ -26,6 +26,7 @@ import { TEST_EVIDENCE_TOOL } from './tdd.js';
 import { READ_SKILL_TOOL } from './skills/read-skill.js';
 import { describeRoutineProposal, PROPOSE_ROUTINE_TOOL } from './routines/propose.js';
 import { isJobTool } from '../jobs/types.js';
+import { BROWSER_NAVIGATE_TOOL, isBrowserTool } from './browser/names.js';
 import { getLogger } from '../logging/index.js';
 import { redactText } from '../security/redact-output.js';
 import { environmentGate, readOnlyVeto, type EnvironmentGate } from './call-policy.js';
@@ -178,9 +179,13 @@ export function isToolVisibleForProfile(name: string, filter?: ToolsetFilter): b
   if (filter.controlTools === 'keep' && CONTROL_TOOLS.has(name)) return true;
   // Hito 11: `todo` también queda fuera. La lista es del padre y se reinyecta
   // en SU system prompt; un hijo con contexto aislado no comparte ese estado.
+  // El navegador es de la sesión y del agente principal: un hijo no lo maneja.
   if (
     filter.isSubagent &&
-    (name === DELEGATE_TASK_TOOL || name === QUESTION_TOOL || name === TODO_TOOL)
+    (name === DELEGATE_TASK_TOOL ||
+      name === QUESTION_TOOL ||
+      name === TODO_TOOL ||
+      isBrowserTool(name))
   ) {
     return false;
   }
@@ -1088,6 +1093,10 @@ export function describeCall(call: ToolCallReady): string {
   }
   // M16 — aprobar una rutina es aprobar su prompt: entero, nunca el resumen de 120.
   if (call.name === PROPOSE_ROUTINE_TOOL) return describeRoutineProposal(call.input);
+  // Aprobar una navegación es aprobar su URL: entera, nunca el resumen de 120.
+  if (call.name === BROWSER_NAVIGATE_TOOL && typeof call.input.url === 'string') {
+    return `${BROWSER_NAVIGATE_TOOL}: ${call.input.url}`;
+  }
   // Redacción estructural antes de serializar: `redactText` (que el dispatcher
   // aplica después) solo reconoce formas de secreto, no un `{"password": "…"}`
   // cualquiera. La descripción viaja al usuario — a la terminal y, en Stratum

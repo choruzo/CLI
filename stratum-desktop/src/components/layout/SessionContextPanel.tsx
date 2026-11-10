@@ -67,6 +67,7 @@ export function SessionContextPanel({
   connected,
   knownSessions,
   onOpenSession,
+  assistant = true,
 }: {
   native: NativeBridge;
   sessionId: string | null;
@@ -76,6 +77,11 @@ export function SessionContextPanel({
   /** Las sesiones que publica el daemon (para abrir la de una decisión). */
   knownSessions: ReadonlySet<string>;
   onOpenSession: (sessionId: string) => void;
+  /**
+   * Enseñar también lo del asistente (sus skills y su memoria global). En el
+   * modo código no: la sesión es del agente de código, que no ve esa memoria.
+   */
+  assistant?: boolean;
 }) {
   const [report, setReport] = useState<ProtocolContextReport | null>(null);
   const [memory, setMemory] = useState<ProtocolSessionMemory | null>(null);
@@ -105,6 +111,13 @@ export function SessionContextPanel({
       .finally(() => {
         if (current) setLoading(false);
       });
+    if (!assistant) {
+      setSkills(null);
+      setSkillsError(null);
+      return () => {
+        current = false;
+      };
+    }
     native
       .listSkills()
       .then((raw) => {
@@ -128,7 +141,7 @@ export function SessionContextPanel({
     return () => {
       current = false;
     };
-  }, [native, sessionId]);
+  }, [native, sessionId, assistant]);
 
   useEffect(() => {
     setReport(null);
@@ -257,7 +270,7 @@ export function SessionContextPanel({
             </ul>
           </section>
         )}
-        {(skills || skillsError) && (
+        {assistant && (skills || skillsError) && (
           <section className="conv-group" aria-label="Skills">
             <h3 className="conv-group__title">Skills</h3>
             {skillsError && (
@@ -286,13 +299,15 @@ export function SessionContextPanel({
             )}
           </section>
         )}
-        <AssistantMemory
-          native={native}
-          connected={connected}
-          refreshKey={refreshKey}
-          knownSessions={knownSessions}
-          onOpenSession={onOpenSession}
-        />
+        {assistant && (
+          <AssistantMemory
+            native={native}
+            connected={connected}
+            refreshKey={refreshKey}
+            knownSessions={knownSessions}
+            onOpenSession={onOpenSession}
+          />
+        )}
       </div>
     </div>
   );

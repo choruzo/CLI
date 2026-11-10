@@ -10,12 +10,24 @@ import {
   setModel,
   startConversation,
 } from './client/actions';
+import { moveBrowser, normalizeAddress } from './client/browser';
 import { startBridge } from './client/bridge';
+import {
+  cancelJob,
+  listProfiles,
+  pickProjectFolder,
+  setAgent,
+  setReadOnly,
+  startCodeConversation,
+  type AgentProfile,
+} from './client/code-actions';
 import { protocolStore } from './client/protocol-store';
 import { useStore } from './client/store';
 import { traceActions, traceStore } from './client/trace-store';
 import { uiActions, uiStore } from './client/ui-store';
 import {
+  CHAT_INTRO,
+  CODE_INTRO,
   ConversationView,
   type ConversationViewHandle,
   type SessionStream,
@@ -23,13 +35,24 @@ import {
 import type { ModelChoice, ModelsOffer } from './components/chat/ModelPicker';
 import { imageRequest, type CommandName } from './components/chat/commands';
 import { PendingRequests } from './components/chat/PendingRequests';
+import { BrowserPanel, loadRightPanel, saveRightPanel, type RightPanel } from './components/browser/BrowserPanel';
+import { ChangesPanel } from './components/code/ChangesPanel';
+import { CodeBar, GENERAL_AGENT } from './components/code/CodeBar';
+import { JobsPanel } from './components/code/JobsPanel';
+import { ProjectPicker } from './components/code/ProjectPicker';
 import { ConnectionBanner } from './components/layout/ConnectionIndicator';
 import { FilesPanel } from './components/layout/FilesPanel';
+import { ModeSwitch } from './components/layout/ModeSwitch';
+import { MIN_CONVERSATION_WIDTH, ResizeHandle, useStoredWidth } from './components/layout/ResizeHandle';
 import { OutlinePanel } from './components/layout/OutlinePanel';
 import { SessionContextPanel } from './components/layout/SessionContextPanel';
 import { SessionsPanel } from './components/layout/SessionsPanel';
 import { SettingsPanel } from './components/layout/SettingsPanel';
 import {
+  CHAT_PANELS,
+  CODE_PANELS,
+  SIDEBAR_PANEL_MAX,
+  SIDEBAR_PANEL_MIN,
   Sidebar,
   loadSidebarState,
   saveSidebarState,
@@ -41,22 +64,35 @@ import { StatusBar } from './components/layout/StatusBar';
 import { TitleBar } from './components/layout/TitleBar';
 import { UpdateBanner } from './components/layout/UpdateBanner';
 import { StartupFailure } from './components/onboarding/StartupFailure';
-import {
-  TrajectoryPanel,
-  loadTrajectoryOpen,
-  saveTrajectoryOpen,
-} from './components/trajectory/TrajectoryPanel';
+import { TrajectoryPanel } from './components/trajectory/TrajectoryPanel';
 import { TurnWatch } from './hooks/turn-notifications';
+import { useChanges } from './hooks/useChanges';
 import { useUpdates } from './hooks/useUpdates';
 import { tauriBridge, type DesktopPrefs, type NativeBridge } from './ipc/native';
 import { notify } from './ipc/os';
 import type { ModelList } from './protocol/results';
 import { chatMessages, composerMode, draftComposer, hasOlder } from './view/chat';
 import { pendingOf } from './view/interactions';
+import {
+  loadLastProject,
+  loadMode,
+  modeOfAgent,
+  modeOfSession,
+  recentProjects,
+  saveLastProject,
+  saveMode,
+  type AppMode,
+} from './view/mode';
 import { sessionItems, sessionTitle } from './view/sessions';
 
 /** Preferencia de la interfaz: el aviso de conversaciones antiguas ya se cerró. */
 const LEGACY_NOTICE_KEY = 'stratum.desktop.legacyNoticeHidden';
+
+/** Límites del ancho del panel de trayectoria (por defecto, el 40 % del CSS). */
+const TRAJECTORY_MIN = 320;
+const TRAJECTORY_MAX = 1400;
+/** Ancho del raíl de iconos del sidebar (`.sidebar__rail`). */
+const RAIL_WIDTH = 44;
 
 /** Los atajos también funcionan con el foco en el textarea o en un buscador. */
 const GLOBAL = { enableOnFormTags: true, preventDefault: true } as const;
@@ -106,9 +142,34 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   const openPanel = useCallback((panel: SidebarPanel) => setSidebar({ open: true, panel }), []);
 
   // Panel de trayectoria: se recuerda abierto o cerrado (comodidad de la interfaz).
-  const [trajectoryOpen, setTrajectoryOpen] = useState(loadTrajectoryOpen);
-  useEffect(() => saveTrajectoryOpen(trajectoryOpen), [trajectoryOpen]);
+  // Paneles de la derecha (trayectoria, navegador): uno a la vez, para que a la
+  // conversación le quede sitio. Se recuerda cuál estaba abierto.
+  const [rightPanel, setRightPanel] = useState<RightPanel | null>(loadRightPanel);
+  useEffect(() => saveRightPanel(rightPanel), [rightPanel]);
+  const toggleRight = useCallback((panel: RightPanel) => setRightPanel((open) => (open === panel ? null : panel)), []);
+  const trajectoryOpen = rightPanel === 'trajectory';
+  const browserOpen = rightPanel === 'browser';
   const trace = useStore(traceStore, (s) => s);
+
+  // Anchos de los paneles laterales, a gusto del usuario (comodidad de la interfaz).
+  // El tope real depende de la ventana: a la conversación siempre le queda sitio.
+  const [sidebarWidth, setSidebarWidth] = useStoredWidth('stratum.sidebar.width', SIDEBAR_PANEL_MIN, SIDEBAR_PANEL_MAX);
+  const [trajectoryWidth, setTrajectoryWidth] = useStoredWidth(
+    'stratum.trajectory.width',
+    TRAJECTORY_MIN,
+    TRAJECTORY_MAX,
+  );
+  const [browserWidth, setBrowserWidth] = useStoredWidth('stratum.browser.width', TRAJECTORY_MIN, TRAJECTORY_MAX);
+  const bodyRef = useRef<HTMLDivElement>(null);
+  /** Hasta dónde puede crecer un panel sin dejar a la conversación por debajo de su mínimo. */
+  const roomFor = useCallback((selector: string, hardMax: number) => {
+    const body = bodyRef.current;
+    if (!body) return hardMax;
+    const others = Array.from(body.children)
+      .filter((el) => !el.matches(`${selector}, .conversation, .resize-handle`))
+      .reduce((sum, el) => sum + el.getBoundingClientRect().width, 0);
+    return Math.min(hardMax, body.getBoundingClientRect().width - others - MIN_CONVERSATION_WIDTH);
+  }, []);
 
   const viewRef = useRef<ConversationViewHandle>(null);
   const searchRef = useRef<HTMLInputElement>(null);
@@ -128,10 +189,57 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
 
   const updates = useUpdates(connected && prefs !== null, prefs?.updatesAutoCheck ?? false);
 
-  const items = useMemo(() => sessionItems(overview), [overview]);
+  const allItems = useMemo(() => sessionItems(overview), [overview]);
   const selectedId = ui.selectedId;
   const selected = selectedId ? (overview.sessions.find((s) => s.id === selectedId) ?? null) : null;
   const snapshot = focused?.sessionId === selectedId ? (focused?.snapshot ?? null) : null;
+
+  // Modo de la interfaz (Chat | Código). Con una sesión a la vista manda ella
+  // (su agente dice de qué modo es); sin sesión, lo que eligió la persona.
+  const [mode, setMode] = useState<AppMode>(loadMode);
+  useEffect(() => saveMode(mode), [mode]);
+  const lastByMode = useRef<Record<AppMode, string | null>>({ chat: null, code: null });
+  const selectedMode = selected ? modeOfSession(selected) : null;
+  useEffect(() => {
+    if (!selectedMode || !selectedId) return;
+    lastByMode.current[selectedMode] = selectedId;
+    setMode(selectedMode);
+  }, [selectedMode, selectedId]);
+  const items = useMemo(() => allItems.filter((i) => modeOfAgent(i.agent) === mode), [allItems, mode]);
+  const otherWaiting = useMemo(
+    () => allItems.some((i) => modeOfAgent(i.agent) !== mode && i.waiting > 0),
+    [allItems, mode],
+  );
+
+  // Sesión de código nueva: carpeta del proyecto y perfil, hasta el primer mensaje.
+  const [project, setProject] = useState<string | null>(loadLastProject);
+  const [draftAgent, setDraftAgent] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  const [profiles, setProfiles] = useState<AgentProfile[] | null>(null);
+  const recent = useMemo(() => recentProjects(overview), [overview]);
+  const chooseProject = useCallback((cwd: string) => {
+    setProject(cwd);
+    saveLastProject(cwd);
+  }, []);
+  const pickProject = useCallback(() => {
+    setPicking(true);
+    void pickProjectFolder(native)
+      .then((cwd) => cwd && chooseProject(cwd))
+      .finally(() => setPicking(false));
+  }, [native, chooseProject]);
+
+  /** La sesión de código que se mira (su foto, o la de conjunto mientras llega). */
+  const codeSession = mode === 'code' && selected && selectedMode === 'code' ? (snapshot?.session ?? selected) : null;
+  const profilesCwd = mode === 'code' ? (codeSession?.cwd ?? (selectedId ? null : project)) : null;
+  useEffect(() => {
+    setProfiles(null);
+    if (!connected || mode !== 'code') return;
+    let alive = true;
+    void listProfiles(native, profilesCwd).then((list) => alive && setProfiles(list));
+    return () => {
+      alive = false;
+    };
+  }, [native, connected, mode, profilesCwd]);
   const olderMessages = history?.sessionId === selectedId ? history.older : [];
 
   useEffect(() => {
@@ -241,20 +349,46 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
     viewRef.current?.focusInput();
   }, [native]);
 
+  const switchMode = useCallback(
+    (next: AppMode) => {
+      if (next === mode) return;
+      setMode(next);
+      // Vuelve a lo último que se miraba en ese modo, si sigue existiendo.
+      const last = lastByMode.current[next];
+      const known = last !== null && overview.sessions.some((s) => s.id === last && modeOfSession(s) === next);
+      selectSession(native, known ? last : null);
+      const panels = next === 'code' ? CODE_PANELS : CHAT_PANELS;
+      setSidebar((s) => (panels.includes(s.panel) ? s : { ...s, panel: 'conversations' }));
+    },
+    [native, mode, overview.sessions],
+  );
+
   const onSend = useCallback(
-    (text: string, attachments: { path: string; pasted?: boolean }[]) => {
+    (text: string, attachments: { path: string; pasted?: boolean }[], opts: { plan?: boolean } = {}) => {
+      if (!selectedId && mode === 'code') {
+        if (!project) {
+          uiActions.notify(null, 'warning', 'Elige primero la carpeta del proyecto en la que trabajará el agente.');
+          return Promise.resolve({ restore: true });
+        }
+        return startCodeConversation(native, text, {
+          cwd: project,
+          ...(draftAgent ? { agent: draftAgent } : {}),
+          ...(draftModel ?? {}),
+        }, opts);
+      }
       if (!selectedId) return startConversation(native, text, draftModel ?? undefined);
-      const mode = stream.composer.kind === 'steer' ? 'steer' : 'ask';
+      const sendMode = stream.composer.kind === 'steer' ? 'steer' : 'ask';
       return sendMessage(native, {
         sessionId: selectedId,
         cwd: stream.cwd,
-        mode,
+        mode: sendMode,
+        ...(opts.plan && sendMode === 'ask' ? { plan: true } : {}),
         text,
         attachments: attachments.filter((a) => !a.pasted).map((a) => a.path),
         pasted: attachments.filter((a) => a.pasted).map((a) => a.path),
       });
     },
-    [native, selectedId, stream.composer.kind, stream.cwd, draftModel],
+    [native, selectedId, stream.composer.kind, stream.cwd, draftModel, mode, project, draftAgent],
   );
 
   const runControl = useCallback(
@@ -265,6 +399,29 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
     [native, selectedId, stream.activeTurnId],
   );
   const cancel = useCallback(() => runControl('cancel'), [runControl]);
+
+  // Reconfigurar una sesión de código (perfil, solo lectura) y deshacer piden
+  // que esté en reposo y alojada en el daemon.
+  const codeLock: string | null = !codeSession
+    ? null
+    : !connected
+      ? 'Sin conexión con Stratum.'
+      : codeSession.host.kind === 'peer'
+        ? 'Esta sesión la aloja una terminal: se configura desde ella.'
+        : stream.activeTurnId !== null
+          ? 'Se podrá cambiar cuando acabe el turno en marcha.'
+          : ui.pending.some((p) => p.kind === 'set-model' && p.sessionId === selectedId)
+            ? 'Aplicando el cambio…'
+            : null;
+  // Los cambios del proyecto se releen al empezar y al acabar cada turno.
+  const changesState = useChanges(
+    native,
+    connected && codeSession ? selectedId : null,
+    `${stream.activeTurnId ?? 'idle'}:${snapshot?.run?.id ?? ''}`,
+  );
+  const changesSummary = changesState.changes?.ok ? changesState.changes.value : null;
+  const jobs = useMemo(() => (codeSession ? (snapshot?.jobs ?? []) : []), [codeSession, snapshot]);
+  const runningJobs = jobs.filter((j) => j.status === 'running').length;
 
   const onCommand = useCallback(
     (name: CommandName, arg: string) => {
@@ -294,9 +451,65 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
           }
           void onSend(imageRequest(arg), []);
           return;
+        case 'plan':
+          if (stream.activeTurnId) return 'Hay un turno en marcha: pide el plan cuando acabe.';
+          if (!selectedId && !project) return 'Elige primero la carpeta del proyecto.';
+          void onSend(arg, [], { plan: true });
+          return;
+        case 'agent': {
+          if (!arg) {
+            const names = [GENERAL_AGENT, ...(profiles ?? []).map((p) => p.name).filter((n) => n !== GENERAL_AGENT)];
+            return `Perfiles: ${names.join(', ')}. Escribe /agent y el nombre, o usa el selector «Perfil».`;
+          }
+          const agent = arg === GENERAL_AGENT ? null : arg;
+          if (!selectedId) setDraftAgent(agent);
+          else if (codeLock) return codeLock;
+          else void setAgent(native, selectedId, agent);
+          return;
+        }
+        case 'readonly':
+          if (!codeSession || !selectedId) return 'Abre primero una sesión de código.';
+          if (codeLock) return codeLock;
+          void setReadOnly(native, selectedId, !codeSession.readOnly);
+          return;
+        case 'changes':
+        case 'undo':
+          openPanel('changes');
+          return;
+        case 'jobs':
+          openPanel('jobs');
+          return;
+        case 'browser': {
+          // Con dirección, además de abrir el panel se va a ella (solo local: lo dice el daemon).
+          const target = arg ? normalizeAddress(arg) : null;
+          if (arg && !target) return 'Escribe una dirección http(s), por ejemplo /browser localhost:3000.';
+          if (target && !selectedId) return 'Abre primero una sesión: el navegador es de la sesión.';
+          if (target && stream.activeTurnId) return 'El agente está trabajando: el navegador es suyo hasta que acabe el turno.';
+          setRightPanel('browser');
+          if (target && selectedId) {
+            void moveBrowser(native, selectedId, 'goto', target).then(
+              (r) => !r.ok && uiActions.notify(selectedId, 'warning', r.message),
+            );
+          }
+          return;
+        }
       }
     },
-    [native, newConversation, openPanel, selectedId, openModels, currentModel, prefs, onSend],
+    [
+      native,
+      newConversation,
+      openPanel,
+      selectedId,
+      openModels,
+      currentModel,
+      prefs,
+      onSend,
+      profiles,
+      codeSession,
+      codeLock,
+      stream.activeTurnId,
+      project,
+    ],
   );
 
   useHotkeys('ctrl+n, meta+n', newConversation, GLOBAL, [newConversation]);
@@ -311,7 +524,10 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
     [openPanel],
   );
   useHotkeys('ctrl+comma, meta+comma', () => setSettingsOpen(true), GLOBAL);
-  useHotkeys('ctrl+j, meta+j', () => setTrajectoryOpen((open) => !open), GLOBAL);
+  useHotkeys('ctrl+1, meta+1', () => switchMode('chat'), GLOBAL, [switchMode]);
+  useHotkeys('ctrl+2, meta+2', () => switchMode('code'), GLOBAL, [switchMode]);
+  useHotkeys('ctrl+j, meta+j', () => toggleRight('trajectory'), GLOBAL, [toggleRight]);
+  useHotkeys('ctrl+shift+b, meta+shift+b', () => toggleRight('browser'), GLOBAL, [toggleRight]);
   useHotkeys(
     'escape',
     () => {
@@ -342,8 +558,10 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
     void native.traceSession(traceTarget).catch(() => undefined);
   }, [native, traceTarget]);
 
+  const panels = mode === 'code' ? CODE_PANELS : CHAT_PANELS;
+  const activePanel = panels.includes(sidebar.panel) ? sidebar.panel : 'conversations';
   const panel = (() => {
-    switch (sidebar.panel) {
+    switch (activePanel) {
       case 'conversations':
         return (
           <SessionsPanel
@@ -356,6 +574,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             onSelect={(id) => selectSession(native, id)}
             onNew={newConversation}
             onClose={(id) => void closeSession(native, id)}
+            mode={mode}
           />
         );
       case 'outline':
@@ -375,6 +594,29 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             connected={connected}
             knownSessions={knownSessions}
             onOpenSession={(id) => selectSession(native, id)}
+            assistant={mode === 'chat'}
+          />
+        );
+      case 'changes':
+        return (
+          <ChangesPanel
+            native={native}
+            sessionId={codeSession ? selectedId : null}
+            state={changesState}
+            connected={connected}
+            undoBlocked={codeLock}
+          />
+        );
+      case 'jobs':
+        return (
+          <JobsPanel
+            jobs={jobs}
+            hasSession={codeSession !== null}
+            onCancel={
+              connected && selectedId && codeSession?.host.kind === 'daemon'
+                ? (jobId) => void cancelJob(native, selectedId, jobId)
+                : undefined
+            }
           />
         );
       case 'files':
@@ -421,7 +663,14 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
       >
         Ir al mensaje
       </a>
-      <TitleBar title={selected ? sessionTitle(selected) : selectedId ? null : 'Conversación nueva'} />
+      <TitleBar
+        title={
+          selected ? sessionTitle(selected) : selectedId ? null : mode === 'code' ? 'Sesión de código nueva' : 'Conversación nueva'
+        }
+        modes={
+          <ModeSwitch mode={mode} onChange={switchMode} badges={{ [mode === 'chat' ? 'code' : 'chat']: otherWaiting }} />
+        }
+      />
       <main className="app">
         <ConnectionBanner state={connection} onRetry={() => void native.retry()} />
         <UpdateBanner updates={updates} />
@@ -461,13 +710,21 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             </p>
           ))}
 
-        <div className="app__body">
+        <div className="app__body" ref={bodyRef}>
           <Sidebar
-            state={sidebar}
-            onToggle={(p) => setSidebar((s) => togglePanel(s, p))}
+            state={{ ...sidebar, panel: activePanel }}
+            panels={panels}
+            onToggle={(p) => setSidebar((s) => togglePanel({ ...s, panel: activePanel }, p))}
             onSettings={() => setSettingsOpen(true)}
-            trajectory={{ open: trajectoryOpen, onToggle: () => setTrajectoryOpen((open) => !open) }}
+            trajectory={{ open: trajectoryOpen, onToggle: () => toggleRight('trajectory') }}
+            browser={{ open: browserOpen, onToggle: () => toggleRight('browser') }}
             badges={{ conversations: items.some((i) => i.waiting > 0 && i.id !== selectedId) }}
+            resize={{
+              width: sidebarWidth,
+              // El raíl es del propio sidebar: se descuenta del sitio que queda.
+              max: () => roomFor('.sidebar', SIDEBAR_PANEL_MAX + RAIL_WIDTH) - RAIL_WIDTH,
+              onResize: setSidebarWidth,
+            }}
           >
             {panel}
           </Sidebar>
@@ -492,6 +749,38 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
               onDismissNotice={uiActions.dismiss}
               onCommand={onCommand}
               onVisibleTurn={setVisibleTurn}
+              mode={mode}
+              intro={mode === 'code' ? CODE_INTRO : CHAT_INTRO}
+              header={
+                mode !== 'code' ? undefined : codeSession && selectedId ? (
+                  <CodeBar
+                    cwd={codeSession.cwd}
+                    agent={codeSession.agent}
+                    readOnly={codeSession.readOnly}
+                    profiles={profiles}
+                    changes={changesSummary}
+                    runningJobs={runningJobs}
+                    locked={codeLock !== null}
+                    lockedReason={codeLock ?? undefined}
+                    onAgent={(agent) => void setAgent(native, selectedId, agent)}
+                    onReadOnly={(readOnly) => void setReadOnly(native, selectedId, readOnly)}
+                    onOpenChanges={() => openPanel('changes')}
+                    onOpenJobs={() => openPanel('jobs')}
+                  />
+                ) : !selectedId ? (
+                  <ProjectPicker
+                    project={project}
+                    recent={recent}
+                    profiles={profiles}
+                    agent={draftAgent ?? GENERAL_AGENT}
+                    picking={picking}
+                    disabled={!connected || ui.pending.some((p) => p.kind === 'new-chat')}
+                    onPick={pickProject}
+                    onProject={chooseProject}
+                    onAgent={setDraftAgent}
+                  />
+                ) : undefined
+              }
               models={models}
               onPickModel={pickModel}
               onCloseModels={() => setModels(null)}
@@ -510,12 +799,45 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             />
           )}
           {trajectoryOpen && (
+            <ResizeHandle
+              edge="left"
+              label="Ancho del panel de trayectoria"
+              min={TRAJECTORY_MIN}
+              max={() => roomFor('.trajectory', TRAJECTORY_MAX)}
+              width={trajectoryWidth}
+              onResize={setTrajectoryWidth}
+              onReset={() => setTrajectoryWidth(null)}
+            />
+          )}
+          {trajectoryOpen && (
             <TrajectoryPanel
               key={selectedId ?? 'none'}
+              width={trajectoryWidth}
               trajectory={trace}
               hasSession={selected !== null}
               connected={connected}
-              onClose={() => setTrajectoryOpen(false)}
+              onClose={() => setRightPanel(null)}
+            />
+          )}
+          {browserOpen && (
+            <ResizeHandle
+              edge="left"
+              label="Ancho del panel del navegador"
+              min={TRAJECTORY_MIN}
+              max={() => roomFor('.browser', TRAJECTORY_MAX)}
+              width={browserWidth}
+              onResize={setBrowserWidth}
+              onReset={() => setBrowserWidth(null)}
+            />
+          )}
+          {browserOpen && (
+            <BrowserPanel
+              native={native}
+              sessionId={selected ? selectedId : null}
+              connected={connected}
+              running={stream.activeTurnId !== null}
+              width={browserWidth}
+              onClose={() => setRightPanel(null)}
             />
           )}
         </div>

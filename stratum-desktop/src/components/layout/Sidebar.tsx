@@ -1,7 +1,8 @@
-import { useEffect, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
+import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from 'react';
 import { inertProps } from '../chat/Collapse';
+import { ResizeHandle } from './ResizeHandle';
 
-export type SidebarPanel = 'conversations' | 'outline' | 'memory' | 'files';
+export type SidebarPanel = 'conversations' | 'outline' | 'memory' | 'files' | 'changes' | 'jobs';
 
 export interface SidebarState {
   open: boolean;
@@ -9,13 +10,16 @@ export interface SidebarState {
 }
 
 const STORAGE_KEY = 'stratum.sidebar';
-const PANELS: SidebarPanel[] = ['conversations', 'outline', 'memory', 'files'];
+/** Los paneles de cada modo, en el orden del raíl. */
+export const CHAT_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'files'];
+export const CODE_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'changes', 'jobs'];
+const ALL_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'files', 'changes', 'jobs'];
 
 /** Estado del sidebar recordado por usuario (comodidad: sin él, abierto en Conversaciones). */
 export function loadSidebarState(): SidebarState {
   try {
     const raw = JSON.parse(localStorage.getItem(STORAGE_KEY) ?? 'null') as Partial<SidebarState> | null;
-    if (raw && typeof raw.open === 'boolean' && PANELS.includes(raw.panel as SidebarPanel)) {
+    if (raw && typeof raw.open === 'boolean' && ALL_PANELS.includes(raw.panel as SidebarPanel)) {
       return { open: raw.open, panel: raw.panel as SidebarPanel };
     }
   } catch {
@@ -44,12 +48,15 @@ const Icon = ({ d }: { d: string }) => (
   </svg>
 );
 
-const ICONS: Record<SidebarPanel | 'settings' | 'trajectory', string> = {
+const ICONS: Record<SidebarPanel | 'settings' | 'trajectory' | 'browser', string> = {
+  browser: 'M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zM3 12h18M12 3c3 3 3 15 0 18M12 3c-3 3-3 15 0 18',
   trajectory: 'M3 12h4l3-7 4 14 3-7h4',
   conversations: 'M4 5h16v10H8l-4 4z',
   outline: 'M8 6h12M8 12h12M8 18h12M4 6h.01M4 12h.01M4 18h.01',
   memory: 'M12 4a4 4 0 0 0-4 4v1a3 3 0 0 0-2 5 3 3 0 0 0 3 4h6a3 3 0 0 0 3-4 3 3 0 0 0-2-5V8a4 4 0 0 0-4-4zM12 4v14',
   files: 'M6 3h8l4 4v14H6zM14 3v4h4',
+  changes: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9c0 5-12 2-12 6',
+  jobs: 'M4 5h16v14H4zM7 9l3 3-3 3M12 15h5',
   settings:
     'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4',
 };
@@ -59,6 +66,8 @@ const LABELS: Record<SidebarPanel, string> = {
   outline: 'Índice de la conversación',
   memory: 'Contexto y memoria',
   files: 'Ficheros de la conversación',
+  changes: 'Cambios del proyecto (git)',
+  jobs: 'Procesos en segundo plano',
 };
 
 /**
@@ -67,13 +76,18 @@ const LABELS: Record<SidebarPanel, string> = {
  */
 export function Sidebar({
   state,
+  panels = CHAT_PANELS,
   onToggle,
   onSettings,
   trajectory,
+  browser,
   badges,
+  resize,
   children,
 }: {
   state: SidebarState;
+  /** Qué paneles ofrece el raíl (dependen del modo). */
+  panels?: readonly SidebarPanel[];
   onToggle: (panel: SidebarPanel) => void;
   onSettings: () => void;
   /**
@@ -82,8 +96,12 @@ export function Sidebar({
    * abre y lo cierra.
    */
   trajectory?: { open: boolean; onToggle: () => void };
+  /** Navegador de la sesión: como la trayectoria, un panel ancho a la derecha del chat. */
+  browser?: { open: boolean; onToggle: () => void };
   /** Marca en el icono de Conversaciones (alguna de fondo espera respuesta). */
   badges?: Partial<Record<SidebarPanel, boolean>>;
+  /** Ancho del panel elegido por el usuario (`null`: el del CSS) y cómo cambiarlo. */
+  resize?: { width: number | null; max: () => number; onResize: (width: number | null) => void };
   children: ReactNode;
 }) {
   const present = usePresence(state.open, PANEL_TRANSITION_MS);
@@ -107,7 +125,14 @@ export function Sidebar({
   };
 
   return (
-    <aside className="sidebar" data-open={state.open || undefined} aria-label="Barra lateral">
+    <aside
+      className="sidebar"
+      data-open={state.open || undefined}
+      aria-label="Barra lateral"
+      style={
+        resize?.width != null ? ({ '--sidebar-panel-width': `${resize.width}px` } as CSSProperties) : undefined
+      }
+    >
       <nav
         ref={railRef}
         className="sidebar__rail"
@@ -115,14 +140,14 @@ export function Sidebar({
         aria-orientation="vertical"
         onKeyDown={onRailKey}
       >
-        {PANELS.map((p) => (
+        {panels.map((p) => (
           <button
             key={p}
             type="button"
             className="rail-button"
             data-active={(state.open && state.panel === p) || undefined}
             aria-pressed={state.open && state.panel === p}
-            aria-label={LABELS[p] + (badges?.[p] ? ' — hay una respuesta esperando' : '')}
+            aria-label={LABELS[p] + (badges?.[p] ? (p === 'conversations' ? ' — hay una respuesta esperando' : ' — hay novedades') : '')}
             title={LABELS[p]}
             onClick={() => onToggle(p)}
           >
@@ -141,6 +166,19 @@ export function Sidebar({
             onClick={trajectory.onToggle}
           >
             <Icon d={ICONS.trajectory} />
+          </button>
+        )}
+        {browser && (
+          <button
+            type="button"
+            className="rail-button"
+            data-active={browser.open || undefined}
+            aria-pressed={browser.open}
+            aria-label="Navegador (Ctrl+Mayús+B)"
+            title="Navegador de la sesión (Ctrl+Mayús+B)"
+            onClick={browser.onToggle}
+          >
+            <Icon d={ICONS.browser} />
           </button>
         )}
         <span className="sidebar__spacer" />
@@ -163,9 +201,24 @@ export function Sidebar({
           <div className="sidebar__panel-inner">{children}</div>
         </div>
       )}
+      {resize && state.open && present && (
+        <ResizeHandle
+          edge="right"
+          label="Ancho del panel lateral"
+          min={SIDEBAR_PANEL_MIN}
+          max={resize.max}
+          width={resize.width}
+          onResize={resize.onResize}
+          onReset={() => resize.onResize(null)}
+        />
+      )}
     </aside>
   );
 }
+
+/** Límites del ancho del panel (el de por defecto, 280 px, está en el CSS). */
+export const SIDEBAR_PANEL_MIN = 220;
+export const SIDEBAR_PANEL_MAX = 640;
 
 /** Lo que dura la transición de anchura del panel (`--dur-med`). */
 export const PANEL_TRANSITION_MS = 220;

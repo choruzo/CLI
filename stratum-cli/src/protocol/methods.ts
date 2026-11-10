@@ -7,6 +7,11 @@ import type {
   ProtocolApprovalGrant,
   ProtocolBoxStatus,
   ProtocolBoxScreen,
+  ProtocolBrowserAction,
+  ProtocolBrowserScreen,
+  ProtocolBrowserStatus,
+  ProtocolChangesSummary,
+  ProtocolFileDiff,
   ProtocolSharedImage,
   ProtocolRoutine,
   ProtocolRoutineFire,
@@ -464,6 +469,40 @@ export interface ProtocolMethods {
   'jobs.cancel': Spec<Mutation & { sessionId: string; jobId: string }, Empty>;
 
   /**
+   * Modo código de Desktop — los cambios del working tree del `cwd` de una
+   * sesión (de cualquier anfitrión: el servidor solo lee el disco). Sesión de un
+   * agente embebido: `UNAVAILABLE` (`embedded-agent`).
+   */
+  'git.changes': Spec<{ sessionId: string }, { changes: ProtocolChangesSummary }>;
+  /**
+   * El diff de un fichero de `git.changes` (`path` relativa a la raíz del repo,
+   * confinada a ella: fuera, absoluta o con `..` → `INVALID_PARAMS`). Fuera de
+   * un repo: `UNAVAILABLE` (`not-a-repo`).
+   */
+  'git.diff': Spec<{ sessionId: string; path: string }, ProtocolFileDiff>;
+
+  /**
+   * El navegador del agente de una sesión, para enseñarlo: su estado y la
+   * pestaña en JPEG (otra captura, del servidor, con orden fija; `screen: null`
+   * si no está abierto). Nunca lo arranca. Sesión par: `UNAVAILABLE`
+   * (`peer-hosted`); del `companion` o sin navegador: `browser.state: 'unavailable'`.
+   */
+  'browser.screen': Spec<
+    { sessionId: string },
+    { browser: ProtocolBrowserStatus; screen: ProtocolBrowserScreen | null }
+  >;
+  /**
+   * La persona mueve el navegador de la sesión: solo en reposo (`BUSY` con un
+   * run: el navegador es del agente). `goto` exige `url` y solo lo local o ya
+   * aprobado (`control` no aprueba orígenes: `INVALID_PARAMS` con `reason`
+   * `needs-approval` o `blocked-url`); puede arrancar el navegador.
+   */
+  'browser.navigate': Spec<
+    Mutation & { sessionId: string; action: ProtocolBrowserAction; url?: string },
+    { browser: ProtocolBrowserStatus }
+  >;
+
+  /**
    * Memoria de decisiones: la del proyecto de `cwd` o, sin `cwd`, la de un
    * agente embebido (`agent`; por defecto el asistente). Nunca dos a la vez:
    * `cwd` y `agent` juntos son `INVALID_PARAMS`.
@@ -746,6 +785,14 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'jobs.list': read('observe'),
   'jobs.cancel': write('control'),
+
+  // Solo leen el disco del proyecto de la sesión.
+  'git.changes': read('observe'),
+  'git.diff': read('observe'),
+
+  // Mirar el navegador de la sesión; moverlo (sin aprobar orígenes) es control.
+  'browser.screen': read('observe'),
+  'browser.navigate': write('control'),
 
   'memory.status': read('observe'),
   'memory.decisions': read('observe'),

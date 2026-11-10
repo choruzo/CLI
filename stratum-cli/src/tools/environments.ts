@@ -13,6 +13,7 @@ import { readOnlyCommandVerdict } from './readonly-commands.js';
 import { JOB_TOOLS } from '../jobs/types.js';
 import { isScreenTool, SCREEN_READ_TOOLS } from './screen/names.js';
 import { mcpToolName } from './mcp/names.js';
+import { BROWSER_READ_TOOLS, isBrowserTool } from './browser/names.js';
 
 export type EnvironmentTier = 'production' | 'staging' | 'development';
 export type EnvironmentPolicy = 'allow' | 'ask' | 'confirm-always';
@@ -193,6 +194,14 @@ export function callEffects(
           targets: [{ target, mutating: true }],
           reason: `${name} acts on the box screen`,
         };
+  }
+  // Navegador del agente: mirar (navegar, leer, la consola, capturar) no cambia
+  // nada en ningún target; pulsar, escribir y evaluar JS actúan en la página
+  // (que puede escribir en la app): en read-only se vetan.
+  if (isBrowserTool(name)) {
+    return BROWSER_READ_TOOLS.includes(name)
+      ? { known: true, mutating: false, targets: [] }
+      : { known: true, mutating: true, targets: [], reason: `${name} acts on the browser page` };
   }
   // M18 parte 6E — `send_image` lee de la caja (`/exchange` o su pantalla) y no cambia nada en ella.
   if (name === 'send_image') {

@@ -4,6 +4,7 @@ import type { Notice } from '../../client/ui-store';
 import { useAttachments } from '../../hooks/useAttachments';
 import type { ProtocolTodo } from '../../protocol';
 import type { ComposerMode } from '../../view/chat';
+import type { AppMode } from '../../view/mode';
 import type { ChatMessage, SentAttachment } from '../../view/model';
 import { InputArea, type ComposerModel, type InputAreaHandle } from './InputArea';
 import { MessageList } from './MessageList';
@@ -21,6 +22,30 @@ export const SUGGESTIONS = [
   { label: 'Explícame un concepto', text: 'Explícame, paso a paso, ' },
   { label: 'Planifica una tarea', text: 'Ayúdame a planificar ' },
 ] as const;
+
+/** Estado vacío de una conversación: qué se ofrece antes del primer mensaje. */
+export interface ConversationIntro {
+  title: string;
+  hint: string;
+  suggestions: ReadonlyArray<{ label: string; text: string }>;
+}
+
+export const CHAT_INTRO: ConversationIntro = {
+  title: '¿En qué puedo ayudarte?',
+  hint: 'Adjunta ficheros con el botón + o soltándolos sobre la ventana. Escribe / para ver los comandos.',
+  suggestions: SUGGESTIONS,
+};
+
+export const CODE_INTRO: ConversationIntro = {
+  title: '¿Qué hacemos en este proyecto?',
+  hint: 'El agente trabaja en la carpeta del proyecto: lee, edita y ejecuta con tus confirmaciones. Escribe / para ver los comandos.',
+  suggestions: [
+    { label: 'Explica el proyecto', text: 'Explícame cómo está organizado este proyecto y por dónde empezar a leerlo.' },
+    { label: 'Arregla un fallo', text: 'Hay un fallo: ' },
+    { label: 'Añade una función', text: 'Quiero añadir ' },
+    { label: 'Revisa mis cambios', text: 'Revisa los cambios sin commitear y dime qué mejorarías.' },
+  ],
+};
 
 /** Distancia al fondo por debajo de la cual se sigue el stream automáticamente. */
 const STICK_PX = 80;
@@ -78,6 +103,9 @@ export const ConversationView = forwardRef(function ConversationView(
     onCloseModels,
     model,
     pending,
+    header,
+    intro = CHAT_INTRO,
+    mode = 'chat',
   }: {
     stream: SessionStream;
     onSend: (text: string, attachments: SentAttachment[]) => Promise<SendOutcome>;
@@ -94,6 +122,11 @@ export const ConversationView = forwardRef(function ConversationView(
     model?: ComposerModel;
     /** Lo que la sesión espera de una persona, para resolverlo (`PendingRequests`). */
     pending?: ReactNode;
+    /** Barra propia del modo, encima de los mensajes (la de la sesión de código). */
+    header?: ReactNode;
+    intro?: ConversationIntro;
+    /** De qué modo son los slash-commands del campo. */
+    mode?: AppMode;
   },
   ref: Ref<ConversationViewHandle>,
 ) {
@@ -197,6 +230,7 @@ export const ConversationView = forwardRef(function ConversationView(
       <p className="sr-only" role="status" aria-live="polite">
         {announcement}
       </p>
+      {header}
       <div className="conversation__viewport">
         <div
           className="conversation__scroll"
@@ -229,13 +263,10 @@ export const ConversationView = forwardRef(function ConversationView(
           ) : empty ? (
             <div className="conversation__empty">
               <AppLogo className="conversation__empty-logo" />
-              <p className="conversation__empty-title">¿En qué puedo ayudarte?</p>
-              <p className="conversation__empty-hint">
-                Adjunta ficheros con el botón + o soltándolos sobre la ventana. Escribe / para ver los
-                comandos.
-              </p>
+              <p className="conversation__empty-title">{intro.title}</p>
+              <p className="conversation__empty-hint">{intro.hint}</p>
               <div className="conversation__suggestions" role="group" aria-label="Sugerencias">
-                {SUGGESTIONS.map((s) => (
+                {intro.suggestions.map((s) => (
                   <button
                     key={s.label}
                     type="button"
@@ -316,6 +347,7 @@ export const ConversationView = forwardRef(function ConversationView(
         onCancel={onCancel}
         placeholder={placeholderOf(composer, stream.sending)}
         model={model}
+        mode={mode}
       />
     </section>
   );

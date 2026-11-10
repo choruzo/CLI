@@ -189,10 +189,24 @@ pub enum ApproverAction {
     /// la confirmación, leído del daemon). Da autoridad: hablar con el asistente
     /// y aprobar desde el chat. No es de una sesión.
     PairTelegram { user_id: i64 },
+    /// Desktop (modo código) — qué haría deshacer los últimos `turns` turnos de
+    /// la sesión (`sessions.revert` con `dryRun`). No toca nada y no se confirma,
+    /// pero el daemon exige `approve` para calcularlo: va por esta conexión.
+    RevertPlan { session_id: String, turns: u8 },
+    /// Desktop (modo código) — deshacer los ficheros de los últimos `turns`
+    /// turnos (`sessions.revert`). Pisa ficheros: solo con confirmación nativa,
+    /// que enseña lo que leyó del daemon. Nunca con `force`.
+    Revert { session_id: String, turns: u8 },
 }
 
 /// El `request_id` de un emparejamiento (no es una solicitud de una sesión).
 pub const PAIRING_REQUEST: &str = "telegram-pairing";
+
+/// El `request_id` de un deshacer turnos (no es una solicitud pendiente).
+pub const REVERT_REQUEST: &str = "session-revert";
+
+/// Turnos que Desktop deshace de una vez, como mucho (el protocolo admite más).
+pub const MAX_REVERT_TURNS: u8 = 20;
 
 impl ApproverAction {
     /// Para el log: qué tipo de resolución, sin contenido.
@@ -212,6 +226,8 @@ impl ApproverAction {
             ApproverAction::DecidePlan { approve: true, .. } => "approve-plan",
             ApproverAction::DecidePlan { .. } => "reject-plan",
             ApproverAction::PairTelegram { .. } => "pair-telegram",
+            ApproverAction::RevertPlan { .. } => "revert-preview",
+            ApproverAction::Revert { .. } => "revert",
         }
     }
 
@@ -226,6 +242,9 @@ impl ApproverAction {
             ApproverAction::AnswerQuestions { answers, .. } => answers.is_some(),
             ApproverAction::DecidePlan { approve, .. } => *approve,
             ApproverAction::PairTelegram { .. } => true,
+            // Calcular no toca nada; deshacer pisa ficheros.
+            ApproverAction::RevertPlan { .. } => false,
+            ApproverAction::Revert { .. } => true,
         }
     }
 
@@ -234,12 +253,24 @@ impl ApproverAction {
         matches!(self, ApproverAction::PairTelegram { .. })
     }
 
+    /// Modo código — ¿es deshacer turnos (sin solicitud pendiente que resolver)?
+    pub fn is_revert(&self) -> bool {
+        matches!(self, ApproverAction::Revert { .. })
+    }
+
+    /// ¿Es una consulta cuyo resultado se devuelve (y no una resolución)?
+    pub fn is_query(&self) -> bool {
+        matches!(self, ApproverAction::RevertPlan { .. })
+    }
+
     pub fn session_id(&self) -> &str {
         match self {
             ApproverAction::Approve { session_id, .. }
             | ApproverAction::Deny { session_id, .. }
             | ApproverAction::AnswerQuestions { session_id, .. }
-            | ApproverAction::DecidePlan { session_id, .. } => session_id,
+            | ApproverAction::DecidePlan { session_id, .. }
+            | ApproverAction::RevertPlan { session_id, .. }
+            | ApproverAction::Revert { session_id, .. } => session_id,
             ApproverAction::PairTelegram { .. } => "",
         }
     }
@@ -251,6 +282,7 @@ impl ApproverAction {
             ApproverAction::AnswerQuestions { request_id, .. }
             | ApproverAction::DecidePlan { request_id, .. } => request_id,
             ApproverAction::PairTelegram { .. } => PAIRING_REQUEST,
+            ApproverAction::RevertPlan { .. } | ApproverAction::Revert { .. } => REVERT_REQUEST,
         }
     }
 }
@@ -325,12 +357,14 @@ pub struct ApproverConfig {
 }
 
 type Reply = oneshot::Sender<Result<(), CommandError>>;
+/// La respuesta de una resolución: el `result` del daemon, sin interpretar.
+type ResultReply = oneshot::Sender<Result<Value, CommandError>>;
 
 /// Lo que va por la cola (acotada): lo que espera respuesta.
 enum Cmd {
     Unlock(ApproverSecret, Reply),
     /// `epoch`: el desbloqueo en el que se confirmó; `None` = no necesitaba confirmación.
-    Resolve(ApproverAction, Option<u64>, Reply),
+    Resolve(ApproverAction, Option<u64>, ResultReply),
 }
 
 /// Lo que no puede perderse aunque la cola esté llena. Se coalesce.
@@ -444,6 +478,19 @@ impl ApproverHandle {
         }
         let (reply, answer) = oneshot::channel();
         enqueue(&self.tx, Cmd::Resolve(action, None, reply))?;
+        answer.await.unwrap_or_else(|_| Err(gone())).map(|_| ())
+    }
+
+    /// Una **consulta** por esta conexión ([`ApproverAction::is_query`]: lo que
+    /// haría deshacer turnos, que el daemon solo calcula con `approve`). No
+    /// cambia nada ni se confirma, pero exige el broker desbloqueado. Devuelve
+    /// el `result` del daemon sin interpretar. Lo demás se rechaza sin enviar.
+    pub async fn query(&self, action: ApproverAction) -> Result<Value, CommandError> {
+        if !action.is_query() {
+            return Err(invalid("This is not a query."));
+        }
+        let (reply, answer) = oneshot::channel();
+        enqueue(&self.tx, Cmd::Resolve(action, None, reply))?;
         answer.await.unwrap_or_else(|_| Err(gone()))
     }
 
@@ -451,6 +498,15 @@ impl ApproverHandle {
     /// desbloqueo sigue siendo aquel en el que se confirmó. `Ok` = el daemon (y
     /// el anfitrión de la sesión) la aceptaron; lo que cambie se ve por eventos.
     pub async fn resolve_confirmed(&self, confirmed: ConfirmedAction) -> Result<(), CommandError> {
+        self.resolve_confirmed_value(confirmed).await.map(|_| ())
+    }
+
+    /// Como [`Self::resolve_confirmed`], con el `result` del daemon sin
+    /// interpretar (deshacer turnos dice qué se hizo).
+    pub async fn resolve_confirmed_value(
+        &self,
+        confirmed: ConfirmedAction,
+    ) -> Result<Value, CommandError> {
         let (reply, answer) = oneshot::channel();
         let ConfirmedAction { action, epoch } = confirmed;
         enqueue(&self.tx, Cmd::Resolve(action, Some(epoch), reply))?;
@@ -546,7 +602,7 @@ struct Conn {
     /// El desbloqueo de esta conexión (ver [`ApproverHandle::ready_epoch`]).
     epoch: u64,
     next_id: u64,
-    pending: HashMap<u64, (Reply, Instant)>,
+    pending: HashMap<u64, (ResultReply, Instant)>,
 }
 
 struct Broker {
@@ -701,6 +757,22 @@ fn resolve_request(
                 ApproverMethod::ChannelsPairConfirm,
                 json!({ "userId": user_id, "operationId": operation_id }),
             ))
+        }
+        ApproverAction::RevertPlan { session_id, turns }
+        | ApproverAction::Revert { session_id, turns } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            if *turns == 0 || *turns > MAX_REVERT_TURNS {
+                return Err(invalid("Invalid number of turns."));
+            }
+            // Nunca `force`: con conflictos no se pisa nada desde aquí.
+            let mut params =
+                json!({ "sessionId": session_id, "turns": turns, "operationId": operation_id });
+            if matches!(action, ApproverAction::RevertPlan { .. }) {
+                params["dryRun"] = Value::Bool(true);
+            }
+            Ok((ApproverMethod::SessionsRevert, params))
         }
         ApproverAction::DecidePlan {
             session_id,
@@ -1076,7 +1148,12 @@ impl Broker {
         });
     }
 
-    async fn resolve(&mut self, action: ApproverAction, epoch: Option<u64>, reply: Reply) -> Step {
+    async fn resolve(
+        &mut self,
+        action: ApproverAction,
+        epoch: Option<u64>,
+        reply: ResultReply,
+    ) -> Step {
         // Segunda barrera (la primera es el mango): lo sensible, solo confirmado.
         if action.needs_confirmation() && epoch.is_none() {
             let _ = reply.send(Err(needs_confirmation_error()));
@@ -1187,7 +1264,7 @@ impl Broker {
             }
             Incoming::Response { id, outcome } => {
                 if let Some((reply, _)) = conn.pending.remove(&id) {
-                    let _ = reply.send(outcome.map(|_| ()).map_err(|error| CommandError {
+                    let _ = reply.send(outcome.map_err(|error| CommandError {
                         kind: CommandErrorKind::Rejected,
                         code: Some(error.code),
                         reason: error.reason,
@@ -1512,6 +1589,86 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(err.kind, CommandErrorKind::NotConfirmed);
+    }
+
+    #[test]
+    fn deshacer_turnos_va_por_la_conexion_de_aprobador_y_nunca_fuerza() {
+        let plan = ApproverAction::RevertPlan {
+            session_id: "ses_a".into(),
+            turns: 2,
+        };
+        let revert = ApproverAction::Revert {
+            session_id: "ses_a".into(),
+            turns: 2,
+        };
+        let (method, params) = resolve_request(&plan, "op-1").unwrap();
+        assert_eq!(method, ApproverMethod::SessionsRevert);
+        assert_eq!(
+            params,
+            json!({ "sessionId": "ses_a", "turns": 2, "dryRun": true, "operationId": "op-1" })
+        );
+        let (method, params) = resolve_request(&revert, "op-2").unwrap();
+        assert_eq!(method, ApproverMethod::SessionsRevert);
+        assert_eq!(
+            params,
+            json!({ "sessionId": "ses_a", "turns": 2, "operationId": "op-2" })
+        );
+        // Calcular no se confirma; deshacer, sí. Ninguno es de una solicitud pendiente.
+        assert!(!plan.needs_confirmation() && plan.is_query());
+        assert!(revert.needs_confirmation() && revert.is_revert() && !revert.is_query());
+        assert_eq!(revert.request_id(), REVERT_REQUEST);
+        assert_eq!(revert.session_id(), "ses_a");
+        for bad in [
+            ApproverAction::Revert {
+                session_id: "ses_a".into(),
+                turns: 0,
+            },
+            ApproverAction::RevertPlan {
+                session_id: "ses_a".into(),
+                turns: MAX_REVERT_TURNS + 1,
+            },
+            ApproverAction::Revert {
+                session_id: String::new(),
+                turns: 1,
+            },
+        ] {
+            assert_eq!(
+                resolve_request(&bad, "op").unwrap_err().kind,
+                CommandErrorKind::Invalid
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn deshacer_sin_confirmar_ni_una_consulta_que_no_lo_es_llegan_a_la_cola() {
+        let dir = tempfile::tempdir().unwrap();
+        let (handle, _task) = spawn_broker(
+            ApproverConfig {
+                endpoint_dir: dir.path().to_path_buf(),
+                profile: ClientProfile::DESKTOP,
+                client_version: "t".into(),
+                logger: Logger::none(),
+                timings: ApproverTimings::default(),
+            },
+            |_| {},
+        );
+        // Sin lanzar la tarea: si algo se encolase, la llamada no volvería nunca.
+        let err = handle
+            .resolve(ApproverAction::Revert {
+                session_id: "s".into(),
+                turns: 1,
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::NotConfirmed);
+        let err = handle
+            .query(ApproverAction::Deny {
+                session_id: "s".into(),
+                approval_id: "a".into(),
+            })
+            .await
+            .unwrap_err();
+        assert_eq!(err.kind, CommandErrorKind::Invalid);
     }
 
     #[test]

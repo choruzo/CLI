@@ -79,7 +79,9 @@ interface ConfigLayer {
  * red y el nombre de la caja no pueden depender de un repo clonado.
  * `trace.screenshots` (M15): guardar en disco capturas sin redactar de la caja
  * lo decide la persona, no un repo. `companion` y `mcp.readOnlyTools` (M17):
- * qué conecta el asistente de Dot y qué cuenta como inocuo. Una capa de proyecto que las declare se
+ * qué conecta el asistente de Dot y qué cuenta como inocuo. `tools.browser.executable` y
+ * `allowHosts`: qué binario lanza el navegador del agente y qué abre sin preguntar.
+ * Una capa de proyecto que las declare se
  * carga sin ellas, con un aviso.
  */
 const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
@@ -91,6 +93,9 @@ const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
   ['imageGeneration'],
   // M18: un repo clonado no enciende un canal externo.
   ['channels'],
+  // Navegador del agente: qué binario se lanza y qué cuenta como local.
+  ['tools', 'browser', 'executable'],
+  ['tools', 'browser', 'allowHosts'],
 ];
 
 /** Si la clave dot-path (o la sección que la contiene) solo cuenta en la config global. */

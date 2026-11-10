@@ -41,8 +41,11 @@ import {
   EMBEDDED_AGENTS,
   assistantAgentInfo,
   companionAgentInfo,
+  embeddedAgentName,
   embeddedPresetOf,
 } from '../agent/presets.js';
+import { boundedChanges, collectWorkingTreeChanges } from '../git/changes.js';
+import { collectFileDiff } from '../git/diff.js';
 import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
@@ -73,6 +76,9 @@ import { DreamingService, type DreamingModelFactory, type DreamTarget } from './
 import { presentedType, summaryOf } from '../memory/decisions.js';
 import {
   BOX_SCREEN_LIMITS,
+  BROWSER_SCREEN_LIMITS,
+  GIT_CHANGES_LIMITS,
+  GIT_DIFF_LIMITS,
   SHARED_IMAGE_LIMITS,
   METHODS,
   STRATUM_PROTOCOL_VERSION,
@@ -1858,6 +1864,51 @@ export class Stratumd {
         return {};
       },
 
+      // Modo código de Desktop: el working tree del proyecto de la sesión. Solo
+      // lee el disco (la lógica de git está en `git/`), también de una par o de
+      // una guardada sin montar, que no se monta para esto.
+      'git.changes': async (params) => {
+        const cwd = this.projectCwdOf(params.sessionId);
+        const summary = await collectWorkingTreeChanges(cwd);
+        return { changes: boundedChanges(summary, GIT_CHANGES_LIMITS) };
+      },
+      'git.diff': async (params) => {
+        const cwd = this.projectCwdOf(params.sessionId);
+        // Los literales extra de la sesión se redactan como en su salida.
+        const extraRedactions = this.configFor(cwd).tools?.redaction?.extraPatterns ?? [];
+        const result = await collectFileDiff(cwd, params.path, {
+          maxBytes: GIT_DIFF_LIMITS.bytes,
+          extraRedactions,
+        });
+        if (!result.ok) {
+          if (result.reason === 'invalid-path') throw invalid('path', result.message);
+          throw new ProtocolError('UNAVAILABLE', result.message, { reason: 'not-a-repo' });
+        }
+        return { diff: result.diff, truncated: result.truncated, binary: result.binary };
+      },
+
+      // El navegador del agente de una sesión: vive en el proceso que la aloja,
+      // así que de una par solo hay proyección. Mirarlo nunca lo arranca ni
+      // monta una sesión guardada.
+      'browser.screen': async (params) => {
+        if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its browser');
+        const live = this.sessions.get(params.sessionId);
+        if (live) return live.browserScreen(BROWSER_SCREEN_LIMITS.maxBytes);
+        const dormant = this.dormant.get(params.sessionId);
+        if (!dormant) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+        return {
+          browser:
+            embeddedPresetOf(dormant.archived.meta.agent) === 'companion'
+              ? { state: 'unavailable' as const, reason: 'not-supported' }
+              : { state: 'closed' as const },
+          screen: null,
+        };
+      },
+      'browser.navigate': async (params) => {
+        const session = await this.wake(params.sessionId, 'Its browser');
+        return session.browserNavigate(params.action, params.url);
+      },
+
       'memory.status': async (params) => {
         const memory = getDecisionMemory(this.memoryConfigFor(params.cwd, params.agent));
         const backend = await memory.vectors.backendName().catch(() => 'none');
@@ -2109,6 +2160,42 @@ export class Stratumd {
     const file = cwd !== undefined ? traceFilePath(this.configFor(cwd), sessionId) : null;
     if (!file) throw new ProtocolError('NOT_FOUND', 'Session not found.');
     return file;
+  }
+
+  /**
+   * Modo código — el directorio de proyecto de una sesión, para `git.*`:
+   * montada, guardada sin montar o par (el daemon solo lee su disco, no la
+   * monta). La de un agente embebido no es de un proyecto.
+   *
+   * @throws ProtocolError `NOT_FOUND`, `UNAVAILABLE` (`embedded-agent`).
+   */
+  private projectCwdOf(sessionId: string): string {
+    const live = this.sessions.get(sessionId);
+    const dormant = this.dormant.get(sessionId);
+    const peer = this.peers.snapshotOf(sessionId)?.session;
+    let found: { cwd: string; embedded: boolean } | null = null;
+    if (live) {
+      found = {
+        cwd: live.session().cwd,
+        embedded: embeddedAgentName(live.host.agent.promptPreset) !== null,
+      };
+    } else if (dormant) {
+      found = {
+        cwd: dormant.archived.meta.cwd,
+        embedded: embeddedPresetOf(dormant.archived.meta.agent) !== null,
+      };
+    } else if (peer) {
+      found = { cwd: peer.cwd, embedded: embeddedPresetOf(peer.agent) !== null };
+    }
+    if (!found) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+    if (found.embedded) {
+      throw new ProtocolError(
+        'UNAVAILABLE',
+        'An embedded agent (assistant, companion) does not work on a project.',
+        { reason: 'embedded-agent' },
+      );
+    }
+    return found.cwd;
   }
 
   /** M19 fase 5 — sobre qué memoria y conversaciones actúa una petición de dreaming. */

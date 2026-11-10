@@ -6,6 +6,7 @@ import {
   relativeDate,
   type SessionItem,
 } from '../../view/sessions';
+import type { AppMode } from '../../view/mode';
 
 function SessionRow({
   item,
@@ -111,8 +112,13 @@ export const SessionsPanel = forwardRef<
     onSelect: (id: string) => void;
     onNew: () => void;
     onClose: (id: string) => void;
+    /** De qué modo son las sesiones que se listan (solo cambia los textos). */
+    mode?: AppMode;
   }
->(function SessionsPanel({ items, listed, selectedId, creating, closing, onSelect, onNew, onClose }, searchRef) {
+>(function SessionsPanel(
+  { items, listed, selectedId, creating, closing, onSelect, onNew, onClose, mode = 'chat' },
+  searchRef,
+) {
   const [query, setQuery] = useState('');
   const [now, setNow] = useState(() => new Date());
   useEffect(() => {
@@ -129,13 +135,13 @@ export const SessionsPanel = forwardRef<
   return (
     <div className="side-panel">
       <div className="side-panel__header">
-        <h2 className="side-panel__title">Sesiones</h2>
+        <h2 className="side-panel__title">{mode === 'code' ? 'Sesiones de código' : 'Conversaciones'}</h2>
         <button
           type="button"
           className="button button--primary button--small"
           onClick={onNew}
           disabled={creating}
-          title="Nueva conversación (Ctrl+N)"
+          title={mode === 'code' ? 'Nueva sesión de código (Ctrl+N)' : 'Nueva conversación (Ctrl+N)'}
         >
           {creating ? 'Abriendo…' : 'Nueva'}
         </button>
@@ -159,9 +165,11 @@ export const SessionsPanel = forwardRef<
         {!listed && <p className="side-panel__empty">Esperando a Stratum…</p>}
         {listed && items.length === 0 && !query && (
           <p className="side-panel__empty">
-            No hay sesiones.
+            {mode === 'code' ? 'No hay sesiones de código.' : 'No hay conversaciones.'}
             <br />
-            Empieza una conversación nueva.
+            {mode === 'code'
+              ? 'Elige la carpeta de un proyecto y escribe el primer mensaje.'
+              : 'Empieza una conversación nueva.'}
           </p>
         )}
         {query && filtered.length === 0 && (

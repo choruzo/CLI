@@ -61,6 +61,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
       },
       webSearch: { backend: 'meta', apiKey: '', tavilyApiKey: '', maxResults: 10 },
       webFetch: { allowHosts: [] },
+      browser: DEFAULTS.tools.browser,
       destructivePatterns: [],
       guardedCommands: {},
       sensitivePathAllowlist: [],

@@ -42,10 +42,11 @@ pub mod wire;
 
 pub use approver::{
     spawn_broker, ApproverAction, ApproverConfig, ApproverHandle, ApproverStatus, ConfirmedAction,
-    QuestionAnswer, GRANT_MINUTES,
+    QuestionAnswer, GRANT_MINUTES, MAX_REVERT_TURNS,
 };
 pub use confirm::{
     CancelReason, ConfirmFailure, ConfirmGate, ConfirmTimings, ConfirmationView, Presenter,
+    RevertStep,
 };
 pub use launcher::{CliLauncher, DaemonLauncher, NoLauncher};
 pub use link::{spawn, ClientProfile, FollowPolicy, LinkConfig, LinkHandle};

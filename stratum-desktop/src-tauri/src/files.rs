@@ -110,6 +110,40 @@ pub async fn attachments_pick(
     Ok(app.state::<WorkspaceState>().grant(paths))
 }
 
+/// Modo código: el diálogo nativo de elegir carpeta de proyecto (lo abre Rust:
+/// el webview no tiene permisos del plugin). La ruta absoluta elegida, o `None`
+/// si se cancela. En la suite E2E, la primera de `STRATUM_E2E_PICK`.
+pub(crate) async fn pick_project_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<Option<String>, String> {
+    let picked = match e2e_dialogs::pick() {
+        Some(paths) => paths.into_iter().next(),
+        None => {
+            let handle = app.clone();
+            tauri::async_runtime::spawn_blocking(move || {
+                handle
+                    .dialog()
+                    .file()
+                    .set_title("Abrir carpeta de proyecto")
+                    .set_parent(&window)
+                    .blocking_pick_folder()
+            })
+            .await
+            .map_err(|e| e.to_string())?
+            .and_then(|p| p.into_path().ok())
+        }
+    };
+    match picked {
+        None => Ok(None),
+        // Una ruta que no es UTF-8 no se puede pedir al daemon tal cual: mejor decirlo.
+        Some(path) => path
+            .to_str()
+            .map(|p| Some(p.to_string()))
+            .ok_or_else(|| "La ruta de esa carpeta no se puede usar (no es UTF-8).".to_string()),
+    }
+}
+
 /// La carpeta de conversación de una sesión, por su `cwd`.
 fn folder(app: &AppHandle, cwd: &str) -> Result<String, String> {
     app.state::<WorkspaceState>().info()?.folder_of(cwd)

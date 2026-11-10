@@ -4687,3 +4687,651 @@ kbd {
     max-width: 84px;
   }
 }
+
+/* --- Paneles laterales de ancho ajustable (ResizeHandle) ------------------- */
+
+.sidebar__panel,
+.sidebar__panel-inner {
+  width: var(--sidebar-panel-width, 280px);
+}
+.sidebar__panel[data-state='closed'] {
+  width: 0;
+}
+/* Ventana estrecha: un ancho guardado no se come la conversación. */
+.sidebar__panel {
+  max-width: 45vw;
+}
+.trajectory[data-sized] {
+  max-width: 62vw;
+}
+.conversation {
+  min-width: 280px;
+}
+
+/* El tirador no ocupa sitio: una franja de agarre a caballo del borde del panel. */
+.resize-handle {
+  position: relative;
+  z-index: 5;
+  width: 0;
+  flex-shrink: 0;
+  align-self: stretch;
+  cursor: col-resize;
+  touch-action: none;
+  outline: none;
+}
+.resize-handle::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  width: 9px;
+}
+.resize-handle::after {
+  content: '';
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -1px;
+  width: 2px;
+  background: var(--color-accent);
+  opacity: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+.resize-handle:hover::after {
+  opacity: 1;
+  transition-delay: 120ms;
+}
+.resize-handle:focus-visible::after,
+.resize-handle[data-dragging]::after {
+  opacity: 1;
+}
+/* Arrastrando: el cursor manda en toda la ventana y nada se selecciona ni se anima. */
+body[data-resizing],
+body[data-resizing] * {
+  cursor: col-resize !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+body[data-resizing] .sidebar__panel {
+  transition: none;
+}
+body[data-resizing] iframe {
+  pointer-events: none;
+}
+
+/* --- Conmutador Chat | Código, centrado en la barra de título --------------- */
+
+.titlebar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+  gap: 12px;
+  /* El margen izquierdo va en la primera columna: en la barra descentraría el conmutador. */
+  padding-left: 0;
+}
+.titlebar__lead {
+  min-width: 0;
+  padding-left: 10px;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+.titlebar__title {
+  flex: 1;
+  justify-content: flex-start;
+  display: block;
+  line-height: var(--titlebar-height);
+  color: var(--color-textFaint);
+}
+.titlebar__modes,
+.titlebar__modes:empty {
+  display: flex;
+  align-items: center;
+}
+.titlebar__controls {
+  justify-self: end;
+  align-self: stretch;
+}
+
+.mode-switch {
+  position: relative;
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  height: 22px;
+  padding: 2px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 7px;
+  background: var(--color-bgApp);
+}
+.mode-switch__thumb {
+  position: absolute;
+  top: 2px;
+  bottom: 2px;
+  left: 2px;
+  width: calc(50% - 2px);
+  border-radius: 5px;
+  background: var(--color-bgStatusbar);
+  box-shadow: inset 0 0 0 1px var(--color-borderAccent);
+  transition: transform var(--dur-med) var(--ease-out);
+}
+.mode-switch[data-mode='code'] .mode-switch__thumb {
+  transform: translateX(100%);
+}
+.mode-switch__option {
+  position: relative;
+  min-width: 68px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 5px;
+  background: none;
+  color: var(--color-textMuted);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1;
+  cursor: default;
+  transition: color var(--dur-fast) ease;
+}
+.mode-switch__option:hover {
+  color: var(--color-textPrimary);
+}
+.mode-switch__option[aria-checked='true'] {
+  color: var(--color-accentBright);
+}
+.mode-switch__option:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.mode-switch__badge {
+  position: absolute;
+  top: 3px;
+  right: 5px;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--color-warning);
+}
+
+/* --- Modo código: barra de la sesión, proyecto, cambios, procesos ----------- */
+
+.code-bar,
+.project-picker {
+  flex-shrink: 0;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
+  background: var(--color-bgPanel);
+  font-size: 12px;
+  color: var(--color-textMuted);
+}
+.code-bar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 34px;
+  padding: 4px 6px 4px 10px;
+  container-type: inline-size;
+}
+.code-bar__project {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-textPrimary);
+}
+.code-bar__project-name {
+  overflow: hidden;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+.code-bar__field {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+.code-bar__label {
+  color: var(--color-textFaint);
+}
+.code-bar__select,
+.undo__turns select {
+  max-width: 160px;
+  height: 24px;
+  padding: 0 6px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 6px;
+  background: var(--color-bgApp);
+  color: var(--color-textPrimary);
+  font: inherit;
+}
+.code-bar__select:disabled,
+.undo__turns select:disabled {
+  color: var(--color-textDisabled);
+}
+.code-bar__select:focus-visible,
+.undo__turns select:focus-visible,
+.code-bar__toggle:focus-visible,
+.code-bar__chip:focus-visible,
+.change-row__main:focus-visible,
+.diff:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 1px;
+}
+.code-bar__toggle,
+.code-bar__chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+  height: 24px;
+  padding: 0 9px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 6px;
+  background: none;
+  color: var(--color-textMuted);
+  font: inherit;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.code-bar__toggle:hover:not(:disabled),
+.code-bar__chip:hover {
+  color: var(--color-textPrimary);
+  background: var(--color-bgStatusbar);
+}
+.code-bar__toggle:disabled {
+  color: var(--color-textDisabled);
+  cursor: default;
+}
+.code-bar__toggle-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+}
+.code-bar__toggle[aria-checked='true'] {
+  border-color: var(--color-warning);
+  color: var(--color-warning);
+}
+.code-bar__toggle[aria-checked='true'] .code-bar__toggle-dot {
+  background: currentColor;
+}
+.code-bar__spacer {
+  flex: 1;
+}
+.code-bar__chip {
+  font-family: var(--font-mono);
+}
+.code-bar__added {
+  color: var(--color-success);
+}
+.code-bar__deleted {
+  color: var(--color-errorMuted);
+}
+@container (max-width: 520px) {
+  .code-bar__label {
+    display: none;
+  }
+  .code-bar__select {
+    max-width: 104px;
+  }
+}
+
+.project-picker {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px 10px;
+}
+.project-picker__row,
+.project-picker__recent {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.project-picker__current {
+  flex: 1;
+  min-width: 160px;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  overflow: hidden;
+  white-space: nowrap;
+}
+.project-picker__name {
+  color: var(--color-textPrimary);
+  font-family: var(--font-mono);
+  font-weight: 600;
+}
+.project-picker__path {
+  overflow: hidden;
+  color: var(--color-textFaint);
+  text-overflow: ellipsis;
+}
+.project-picker__current[data-empty] .project-picker__path {
+  color: var(--color-textMuted);
+}
+.project-picker__label {
+  color: var(--color-textFaint);
+}
+.project-picker__recent .chip {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+/* Panel de cambios */
+.changes__summary {
+  margin: 4px 2px 6px;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-textMuted);
+}
+.change-list,
+.job-list {
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+.change-row__main {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 6px;
+  border: 0;
+  border-radius: 6px;
+  background: none;
+  color: var(--color-textResponse);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.change-row__main:hover,
+.change-row[data-open] > .change-row__main {
+  background: var(--color-bgStatusbar);
+}
+.change-row__status {
+  flex-shrink: 0;
+  width: 12px;
+  font-family: var(--font-mono);
+  font-weight: 600;
+  color: var(--color-warning);
+}
+.change-row__status[data-status='added'],
+.change-row__status[data-status='untracked'] {
+  color: var(--color-success);
+}
+.change-row__status[data-status='deleted'] {
+  color: var(--color-errorMuted);
+}
+.change-row__path {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  font-family: var(--font-mono);
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  /* Lo que importa es el nombre: si no cabe, se recorta la carpeta. */
+  direction: rtl;
+  text-align: left;
+}
+.change-row__path > * {
+  unicode-bidi: plaintext;
+}
+.change-row__dir {
+  color: var(--color-textFaint);
+}
+.change-row__count {
+  flex-shrink: 0;
+  font-family: var(--font-mono);
+  color: var(--color-textFaint);
+}
+.diff {
+  margin: 4px 0 8px;
+  padding: 6px 0;
+  max-height: 60vh;
+  overflow: auto;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 6px;
+  background: var(--color-bgApp);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.5;
+  tab-size: 4;
+}
+.diff__line {
+  display: block;
+  min-width: max-content;
+  padding: 0 10px;
+  white-space: pre;
+  color: var(--color-textMuted);
+}
+.diff__line[data-kind='add'] {
+  color: var(--color-success);
+  background: color-mix(in srgb, var(--color-success) 10%, transparent);
+}
+.diff__line[data-kind='del'] {
+  color: var(--color-errorMuted);
+  background: color-mix(in srgb, var(--color-error) 10%, transparent);
+}
+.diff__line[data-kind='hunk'] {
+  color: var(--color-accentBright);
+}
+.diff__line[data-kind='meta'] {
+  color: var(--color-textFaint);
+}
+.diff__note,
+.undo__hint {
+  margin: 4px 2px;
+  font-size: 12px;
+  line-height: 1.45;
+  color: var(--color-textFaint);
+}
+.undo__hint[data-tone='warning'] {
+  color: var(--color-warning);
+}
+
+/* Deshacer turnos */
+.undo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 10px;
+  padding: 8px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
+  font-size: 12px;
+}
+.undo__row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.undo__turns {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  color: var(--color-textMuted);
+}
+.undo-plan {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.undo-plan__title {
+  color: var(--color-textMuted);
+}
+.undo-plan__group[data-tone='warning'] .undo-plan__title {
+  color: var(--color-warning);
+}
+.undo-plan__group ul {
+  margin: 2px 0 0;
+  padding: 0 0 0 12px;
+  list-style: none;
+  font-family: var(--font-mono);
+  color: var(--color-textFaint);
+  overflow-wrap: anywhere;
+}
+
+/* Procesos en segundo plano */
+.job-row {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  padding: 7px 8px;
+  border-radius: 6px;
+}
+.job-row:hover {
+  background: var(--color-bgStatusbar);
+}
+.job-row__command {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 3;
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--color-textResponse);
+  overflow-wrap: anywhere;
+}
+.job-row__meta {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  font-size: 12px;
+  color: var(--color-textFaint);
+}
+.job-row__status[data-status='running'] {
+  color: var(--color-accentBright);
+}
+.job-row__status[data-status='failed'] {
+  color: var(--color-errorMuted);
+}
+.job-row__status[data-status='completed'] {
+  color: var(--color-success);
+}
+
+/* --- Navegador de la sesión (panel derecho, como la trayectoria) ------------ */
+
+.browser {
+  width: 44%;
+  min-width: 320px;
+  max-width: min(900px, 62vw);
+  flex-shrink: 0;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  border-left: 1px solid var(--color-borderSubtle);
+  background: var(--color-bgPanel);
+  font-size: 13px;
+}
+.browser[data-sized] {
+  max-width: 62vw;
+}
+.browser__head {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--color-borderSubtle);
+}
+.browser__address {
+  flex: 1;
+  min-width: 0;
+  margin: 0 4px;
+}
+.browser__address input {
+  width: 100%;
+  height: 26px;
+  padding: 0 10px;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 13px;
+  background: var(--color-bgApp);
+  color: var(--color-textPrimary);
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+.browser__address input:focus-visible {
+  outline: none;
+  border-color: var(--color-accent);
+}
+.browser__address input:disabled {
+  color: var(--color-textDisabled);
+}
+.browser__status {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 0;
+  padding: 4px 12px;
+  border-bottom: 1px solid var(--color-borderSubtle);
+  font-size: 12px;
+  color: var(--color-textFaint);
+  white-space: nowrap;
+}
+.browser__title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--color-textMuted);
+  text-overflow: ellipsis;
+}
+.browser__notice {
+  margin: 8px 10px 0;
+}
+.browser__body {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  background: var(--color-bgApp);
+}
+.browser__empty {
+  max-width: 420px;
+  margin: 0 auto;
+  padding: 48px 20px;
+  font-size: 13px;
+  line-height: 1.55;
+  text-align: center;
+  color: var(--color-textFaint);
+}
+.browser__viewport {
+  margin: 0;
+  transition: opacity var(--dur-fast) ease;
+}
+.browser__viewport[data-loading] {
+  opacity: 0.7;
+}
+.browser__viewport img {
+  display: block;
+  width: 100%;
+  height: auto;
+  /* Es una captura: nada que arrastrar ni seleccionar. */
+  user-select: none;
+  -webkit-user-select: none;
+}
+
+/* --- Ventana estrecha con varios paneles abiertos --------------------------- */
+
+/* Los paneles de la derecha ceden antes de que la fila se salga de la ventana:
+   la conversación conserva su mínimo y el panel se estrecha hasta el suyo. */
+.trajectory,
+.trajectory[data-sized],
+.browser,
+.browser[data-sized] {
+  flex-shrink: 1;
+  min-width: 280px;
+}
+/* La barra del modo código pasa a dos líneas en vez de recortar el proyecto. */
+.code-bar {
+  flex-wrap: wrap;
+  row-gap: 4px;
+}
+.code-bar__project {
+  flex: 1 1 140px;
+}

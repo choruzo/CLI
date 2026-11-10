@@ -160,6 +160,7 @@ pub async fn dot_start_run(
             session_id,
             input,
             images: Vec::new(),
+            plan: false,
         })
         .await
 }

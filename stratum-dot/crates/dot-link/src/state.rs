@@ -194,6 +194,8 @@ pub enum CallAction {
         input: String,
         /// Rutas de imágenes que acompañan al mensaje (1..5; vacío = ninguna).
         images: Vec<String>,
+        /// Modo plan (`mode: 'plan'`); `false` lo omite. Dot pasa siempre `false`.
+        plan: bool,
     },
     /// `agents.list`, con los perfiles de proyecto de ese directorio.
     ListAgents { cwd: Option<String> },
@@ -299,6 +301,32 @@ pub enum CallAction {
     ChannelsPairBegin,
     /// M18 — `channels.unpair`: quitar un chat emparejado (solo resta).
     ChannelsUnpair { user_id: i64 },
+    /// Desktop (modo código) — `sessions.setAgent`: el perfil de agente de código
+    /// de una sesión parada; `None` lo quita (`agent: null`).
+    SetAgent {
+        session_id: String,
+        agent: Option<String>,
+    },
+    /// Desktop (modo código) — `sessions.setReadOnly` de una sesión parada.
+    SetReadOnly { session_id: String, read_only: bool },
+    /// Desktop (modo código) — `jobs.cancel`: parar un job en segundo plano.
+    CancelJob { session_id: String, job_id: String },
+    /// Desktop (modo código) — `git.changes`: el working tree del proyecto de la
+    /// sesión. Solo lectura.
+    GitChanges { session_id: String },
+    /// Desktop (modo código) — `git.diff` de un fichero de `git.changes` (ruta
+    /// relativa a la raíz del repo; la confina el daemon). Solo lectura.
+    GitDiff { session_id: String, path: String },
+    /// Desktop (modo código) — `browser.screen`: el navegador del agente de la
+    /// sesión, su estado y la pestaña en JPEG. Solo lectura; nunca lo arranca.
+    BrowserScreen { session_id: String },
+    /// Desktop (modo código) — `browser.navigate`: la persona mueve ese
+    /// navegador (`goto`, `back`, `forward`, `reload`; `url` solo con `goto`).
+    BrowserNavigate {
+        session_id: String,
+        action: String,
+        url: Option<String>,
+    },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -365,6 +393,13 @@ impl CallAction {
             CallAction::ChannelsStatus => "channels-status",
             CallAction::ChannelsPairBegin => "channels-pair-begin",
             CallAction::ChannelsUnpair { .. } => "channels-unpair",
+            CallAction::SetAgent { .. } => "set-agent",
+            CallAction::SetReadOnly { .. } => "set-read-only",
+            CallAction::CancelJob { .. } => "cancel-job",
+            CallAction::GitChanges { .. } => "git-changes",
+            CallAction::GitDiff { .. } => "git-diff",
+            CallAction::BrowserScreen { .. } => "browser-screen",
+            CallAction::BrowserNavigate { .. } => "browser-navigate",
         }
     }
 
@@ -391,6 +426,10 @@ impl CallAction {
                 | CallAction::NewCompanionConversation
                 | CallAction::ChannelsPairBegin
                 | CallAction::ChannelsUnpair { .. }
+                | CallAction::SetAgent { .. }
+                | CallAction::SetReadOnly { .. }
+                | CallAction::CancelJob { .. }
+                | CallAction::BrowserNavigate { .. }
         )
     }
 }
@@ -526,6 +565,7 @@ mod tests {
             session_id: "s".into(),
             input: "hola".into(),
             images: Vec::new(),
+            plan: false,
         };
         assert!(open.mutating() && start.mutating());
         assert!(!CallAction::ListModels.mutating());

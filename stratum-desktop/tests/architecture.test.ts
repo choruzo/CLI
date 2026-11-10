@@ -142,13 +142,19 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_approver_status',
       'desktop_approver_unlock',
       'desktop_attach',
+      'desktop_browser_navigate',
+      'desktop_browser_screen',
+      'desktop_cancel_job',
       'desktop_cancel_run',
       'desktop_close_session',
       'desktop_context',
       'desktop_decide_plan',
       'desktop_deny',
       'desktop_focus_session',
+      'desktop_git_changes',
+      'desktop_git_diff',
       'desktop_history',
+      'desktop_list_agents',
       'desktop_list_models',
       'desktop_list_skills',
       'desktop_memory',
@@ -160,14 +166,20 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_memory_reclassify',
       'desktop_memory_reject_proposal',
       'desktop_new_chat',
+      'desktop_new_code_session',
       'desktop_open_config',
       'desktop_pause_run',
+      'desktop_pick_project_folder',
       'desktop_prefs',
       'desktop_resume_run',
       'desktop_resync_session',
       'desktop_retry',
+      'desktop_revert',
+      'desktop_revert_plan',
       'desktop_save_pasted_image',
+      'desktop_set_agent',
       'desktop_set_model',
+      'desktop_set_read_only',
       'desktop_settings_add_provider',
       'desktop_settings_get',
       'desktop_settings_set',
@@ -298,10 +310,40 @@ describe('aprobar desde Desktop: las mismas piezas que Dot (M8/M9)', () => {
     expect(page).toMatch(/nonce_of\(&label\)/);
     expect(page).toMatch(/current_nonce\(\)/);
     // Cada comando de aprobador se atiende solo desde la ventana principal.
-    for (const name of ['desktop_approver_unlock', 'desktop_approver_lock', 'desktop_approve', 'desktop_deny', 'desktop_answer_questions', 'desktop_decide_plan']) {
+    for (const name of [
+      'desktop_approver_unlock',
+      'desktop_approver_lock',
+      'desktop_approve',
+      'desktop_deny',
+      'desktop_answer_questions',
+      'desktop_decide_plan',
+      'desktop_revert_plan',
+      'desktop_revert',
+    ]) {
       const body = new RegExp(`pub (?:async )?fn ${name}[<(][\\s\\S]*?\\{([\\s\\S]*?)\\n\\}`).exec(commands)?.[1] ?? '';
       expect(body, name).toContain('main_window(&window)?');
     }
+  });
+
+  it('deshacer turnos (modo código): el otro y último punto de entrada al broker, con confirmación nativa', () => {
+    const commands = rustCode(join(tauriSrc, 'commands.rs'));
+    // Un solo sitio llama al broker para deshacer, y es `revert`.
+    const revert = /async fn revert<R: Runtime>\(([\s\S]*?)\n\}/.exec(commands)?.[0] ?? '';
+    expect(revert).not.toBe('');
+    const outside = commands.replace(revert, '');
+    for (const call of [/\bbroker\s*\.query\(/g, /\.request_revert\(/g, /\bresolve_confirmed_value\(/g]) {
+      expect(revert.match(call)?.length, String(call)).toBe(1);
+      expect(outside.match(call), String(call)).toBeNull();
+    }
+    // Calcular va directo (no toca nada); deshacer solo con lo que la persona confirmó.
+    expect(revert).toMatch(/if dry_run \{\s*return state\s*\.broker\s*\.query\(ApproverAction::RevertPlan/);
+    expect(revert).toMatch(/RevertStep::Confirmed\(confirmed\) => state\.broker\.resolve_confirmed_value\(confirmed\)/);
+    // Nunca se fuerza ni se pide `dryRun` a mano: los arma `dot_link`.
+    expect(revert).not.toMatch(/\bforce\b|dryRun/);
+    expect(commands).not.toMatch(/dryRun|force: true/);
+    // Y ningún otro comando llega al broker más que `resolve` y `revert`.
+    const brokerCalls = [...commands.matchAll(/\bbroker\s*\.\s*([a-z_]+)\(/g)].map((m) => m[1]!).sort();
+    expect(brokerCalls).toEqual(['lock', 'query', 'resolve', 'resolve_confirmed', 'resolve_confirmed_value', 'status', 'status']);
   });
 
   it('en el webview, solo `client/approvals.ts` pide resolver, y solo desde un clic', () => {

@@ -691,6 +691,7 @@ async fn abrir_una_sesion_y_enviarle_un_mensaje() {
             session_id: id.clone(),
             input: "hola".into(),
             images: Vec::new(),
+            plan: false,
         })
         .await
         .unwrap();
@@ -772,6 +773,7 @@ async fn lo_que_el_daemon_rechaza_no_crea_nada() {
             session_id: "s1".into(),
             input: "ocupada".into(),
             images: Vec::new(),
+            plan: false,
         })
         .await
         .unwrap_err();
@@ -783,6 +785,7 @@ async fn lo_que_el_daemon_rechaza_no_crea_nada() {
             session_id: "ya-no".into(),
             input: "hola".into(),
             images: Vec::new(),
+            plan: false,
         })
         .await
         .unwrap_err();
@@ -796,6 +799,7 @@ async fn lo_que_el_daemon_rechaza_no_crea_nada() {
             session_id: "s1".into(),
             input: "   ".into(),
             images: Vec::new(),
+            plan: false,
         })
         .await
         .unwrap_err();
@@ -838,6 +842,7 @@ async fn un_mensaje_sin_respuesta_no_se_reenvia() {
             session_id: "s1".into(),
             input: "despliega".into(),
             images: Vec::new(),
+            plan: false,
         })
         .await
     });

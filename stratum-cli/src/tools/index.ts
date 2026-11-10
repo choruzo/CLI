@@ -20,6 +20,7 @@ import { questionTool } from './question.js';
 import { todoTool } from './todo.js';
 import { registerSshTools } from './ssh/index.js';
 import { registerTddTools } from './tdd.js';
+import { registerBrowserTools } from './browser/register.js';
 
 export function registerBuiltinTools(registry: ToolRegistry, config: StratumConfig): void {
   registry.register(readFileTool);
@@ -54,4 +55,6 @@ export function registerBuiltinTools(registry: ToolRegistry, config: StratumConf
   registerSshTools(registry, config);
   // Hito 13 — evidencia TDD: solo si hay `tools.testCommand` configurado.
   registerTddTools(registry, config);
+  // Navegador del agente: solo con un Edge/Chrome/Chromium instalado.
+  registerBrowserTools(registry, config);
 }

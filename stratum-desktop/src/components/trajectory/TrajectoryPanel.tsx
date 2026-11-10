@@ -464,6 +464,7 @@ export function TrajectoryPanel({
   trajectory,
   hasSession,
   connected,
+  width,
   onClose,
 }: {
   trajectory: Pick<TraceState, 'model' | 'loaded' | 'truncated' | 'rejected' | 'unavailable'>;
@@ -471,6 +472,8 @@ export function TrajectoryPanel({
   hasSession: boolean;
   /** Hay conexión con el daemon (sin ella, lo que se ve puede estar atrasado). */
   connected: boolean;
+  /** Ancho elegido por el usuario (`null` o ausente: el del CSS, 40 %). */
+  width?: number | null;
   onClose: () => void;
 }) {
   const { model, loaded, truncated, rejected, unavailable } = trajectory;
@@ -495,7 +498,12 @@ export function TrajectoryPanel({
   }, [model.steps.length, selected]);
 
   return (
-    <aside className="trajectory" aria-label="Trayectoria">
+    <aside
+      className="trajectory"
+      aria-label="Trayectoria"
+      data-sized={width != null || undefined}
+      style={width != null ? { width } : undefined}
+    >
       <header className="trajectory__head">
         <h2 className="trajectory__title">Trayectoria</h2>
         <div className="trajectory__modes" role="group" aria-label="Eje del timeline">

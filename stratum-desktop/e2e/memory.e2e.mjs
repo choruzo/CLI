@@ -18,7 +18,7 @@ const script = ({ last, said }) => {
     return toolCall('store_decision', {
       title: TITLE,
       content: 'El usuario prefiere salir antes de las 10.',
-      type: 'user_preference',
+      type: 'profile',
       tags: ['viajes'],
       importance: 'medium',
     });

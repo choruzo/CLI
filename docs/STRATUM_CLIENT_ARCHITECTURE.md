@@ -195,7 +195,13 @@ Dot      ┘
   compartido; cada app usa su `ClientProfile` (`DOT`, `DESKTOP`): tipo y nombre en `core.hello`, qué
   sesiones sigue y qué métodos puede pedir. El perfil solo **resta**: la autorización sigue siendo
   del daemon. Dot sigue sin poder cerrar ni reconfigurar sesiones; Desktop sí (`sessions.close`,
-  `sessions.setModel`) y además lee `sessions.history|context|memory`.
+  `sessions.setModel`) y además lee `sessions.history|context|memory`. Con el **modo código**
+  (sesiones del agente de código en una carpeta de proyecto que la persona elige en un diálogo
+  nativo), Desktop pide también `sessions.setAgent|setReadOnly`, `jobs.cancel` y `git.changes|diff`
+  (solo lectura) por su conexión principal; Dot no los tiene en su perfil. Deshacer turnos
+  (`sessions.revert`, `approve`) va solo por el broker de aprobador, con el plan leído del daemon
+  por el lado nativo y confirmado en la ventana nativa (`ConfirmGate::request_revert`); nunca con
+  `force`.
 - **Estado operativo, contexto y transcript, por capas (§4).** Desktop sigue la foto de conjunto
   (`overview`) para la lista y **solo** la sesión que se mira para su conversación
   (`FollowPolicy::Focused`); lo anterior a la foto se pide bajo demanda (`sessions.history`).
@@ -249,9 +255,9 @@ webview ─ desktop_settings_set(ruta, valor) ─► settings.rs ─ clasifica l
 
 | Nivel | Claves (prefijo de la ruta) | Cómo |
 |---|---|---|
-| **A** (libre) | `provider.default`, `provider.providers.<alias>.model\|contextWindow`; `memory.retrievalTopK\|similarityThreshold\|autoExtract\|embeddingWarmup`, `memory.session.enabled\|compactAt\|targetContext\|timeoutMs`; `context.*`; `tools.bashTimeout\|execMaxBytes`, `tools.webSearch.maxResults`, `tools.jobs.*` (límites); `agent.*`; `agents.*`; `logging.level\|stderr`, `logging.file.enabled\|maxBytes\|maxFiles`; `trace.enabled\|retentionDays\|maxFieldChars`; `skills.enabled`; `prompt.guides`; `snapshots.*`; `tui.*`; `session.planRetentionDays`; `daemon.idleExitMinutes\|eventBuffer\|maxSessions\|detachedTtlMinutes`; `desktop.*` salvo `workspaces.root` | Se guarda al momento |
+| **A** (libre) | `provider.default`, `provider.providers.<alias>.model\|contextWindow`; `memory.retrievalTopK\|similarityThreshold\|autoExtract\|embeddingWarmup`, `memory.session.enabled\|compactAt\|targetContext\|timeoutMs`; `context.*`; `tools.bashTimeout\|execMaxBytes`, `tools.webSearch.maxResults`, `tools.jobs.*` (límites), `tools.browser.enabled\|idleMinutes`; `agent.*`; `agents.*`; `logging.level\|stderr`, `logging.file.enabled\|maxBytes\|maxFiles`; `trace.enabled\|retentionDays\|maxFieldChars`; `skills.enabled`; `prompt.guides`; `snapshots.*`; `tui.*`; `session.planRetentionDays`; `daemon.idleExitMinutes\|eventBuffer\|maxSessions\|detachedTtlMinutes`; `desktop.*` salvo `workspaces.root` | Se guarda al momento |
 | **B** (confirmación nativa) | `provider.providers.<alias>.baseUrl\|apiKey` y alta de un provider; `memory.embeddingModel\|embeddingDimension\|extractionModel`, `memory.embeddingEndpoint.*`, `memory.session.allowRemote\|extractor.*\|summarizer.*`; `tools.confirmDestructive\|auditLog`, `tools.webSearch.backend\|apiKey\|tavilyApiKey`, `tools.jobs.enabled\|subagentAccess`; `logging.redact`; `trace.screenshots`; `environments.<nombre>.tier\|policy\|requirePlan\|readOnly\|confirmation`; `session.profile`; `daemon.autoStart\|approvalTimeoutMinutes\|persistSessions`; `desktop.workspaces.root` | Ventana aparte con clave, valor viejo → nuevo |
-| **C** (solo CLI) | `plugins`, `mcp`, `companion`, `ssh`, `box`, `channels`, `imageGeneration`, `lsp`, `schemaVersion` (cualquier cosa que ejecuta código o abre acceso); `tools.testCommand\|guardedCommands\|destructivePatterns\|sensitivePathAllowlist\|webFetch\|redaction`; `session.profiles`; rutas (`memory.projectFile\|globalFile\|decisionsFile\|vectorDb`, `logging.file.dir`, `trace.dir`, `prompt.guidesDir`, `skills.registryFile\|builtin`); `provider.providers.<alias>.models\|timeouts\|cache\|pricing\|type`; `environments.<nombre>.match`; **toda clave desconocida o no clasificada** | Solo lectura («edítalo con `stratum config`»); Desktop dice si hay algo definido, nunca qué |
+| **C** (solo CLI) | `plugins`, `mcp`, `companion`, `ssh`, `box`, `channels`, `imageGeneration`, `lsp`, `schemaVersion` (cualquier cosa que ejecuta código o abre acceso); `tools.testCommand\|guardedCommands\|destructivePatterns\|sensitivePathAllowlist\|webFetch\|redaction`; `tools.browser.executable\|allowHosts` (qué binario se lanza y qué se abre sin preguntar; además solo de la config global); `session.profiles`; rutas (`memory.projectFile\|globalFile\|decisionsFile\|vectorDb`, `logging.file.dir`, `trace.dir`, `prompt.guidesDir`, `skills.registryFile\|builtin`); `provider.providers.<alias>.models\|timeouts\|cache\|pricing\|type`; `environments.<nombre>.match`; **toda clave desconocida o no clasificada** | Solo lectura («edítalo con `stratum config`»); Desktop dice si hay algo definido, nunca qué |
 
 Por qué sube de nivel lo dudoso: `desktop.workspaces.root` es B (decide dónde escribe Desktop);
 `memory.extractionModel`, `memory.embeddingModel` y `daemon.persistSessions` son B (mandan texto fuera o

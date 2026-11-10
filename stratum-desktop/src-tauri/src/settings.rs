@@ -582,6 +582,24 @@ pub const SPECS: &[Spec] = &[
         Int(1, 20),
         A,
     ),
+    // Navegador del agente. El ejecutable y los hosts que cuentan como locales
+    // (`tools.browser.executable|allowHosts`) no están aquí: son C (solo CLI).
+    spec(
+        "tools.browser.enabled",
+        "tools",
+        "Navegador del agente",
+        "Deja al agente abrir y probar la app en un Edge o Chrome instalado (headless).",
+        Bool,
+        A,
+    ),
+    spec(
+        "tools.browser.idleMinutes",
+        "tools",
+        "Minutos sin uso antes de cerrar el navegador",
+        "",
+        Int(1, 1440),
+        A,
+    ),
     spec(
         "tools.jobs.enabled",
         "tools",

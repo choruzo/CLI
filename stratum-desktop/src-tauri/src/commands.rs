@@ -22,10 +22,17 @@
 //!
 //! Lo que devuelven las llamadas es el `result` del daemon **sin interpretar**:
 //! un DTO del protocolo que el webview valida contra el contrato antes de usarlo.
+//!
+//! **Modo código**: además de las conversaciones con el asistente, el webview
+//! puede abrir y conducir sesiones del agente de código (las de la CLI) en una
+//! carpeta de proyecto que elige la persona en un diálogo nativo
+//! (`desktop_new_code_session`, perfil, solo lectura, jobs, cambios y diff de
+//! git). Deshacer turnos (`sessions.revert`, exige `approve`) va por el broker
+//! como resolver, con su propio punto de entrada documentado (`revert`).
 
 use dot_link::{
     ApproverAction, ApproverStatus, CallAction, CommandError, CommandErrorKind, ControlAction,
-    QuestionAnswer,
+    QuestionAnswer, RevertStep,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -174,6 +181,120 @@ pub async fn desktop_new_chat(
     opened
 }
 
+/// Modo código: el diálogo nativo de elegir la carpeta de un proyecto. La ruta
+/// absoluta, o `None` si se cancela. El webview no recibe permisos del diálogo.
+#[tauri::command]
+pub async fn desktop_pick_project_folder(
+    app: AppHandle,
+    window: WebviewWindow,
+) -> Result<Option<String>, CommandError> {
+    main_window(&window)?;
+    crate::files::pick_project_folder(app, window)
+        .await
+        .map_err(|message| CommandError::new(CommandErrorKind::NotSent, message))
+}
+
+/// Modo código: una sesión del agente de código en la carpeta de un proyecto.
+/// `agent` es un **perfil** de código (un agente embebido no vale). No crea la
+/// carpeta ni la registra: es del usuario, y el daemon la vuelve a comprobar.
+#[tauri::command]
+pub async fn desktop_new_code_session(
+    state: State<'_, DesktopState>,
+    cwd: String,
+    agent: Option<String>,
+    provider: Option<String>,
+    model: Option<String>,
+) -> Result<Value, CommandError> {
+    crate::code::check_code_agent(&agent)?;
+    crate::code::check_project_dir(&cwd)?;
+    state
+        .link
+        .call(CallAction::OpenSession {
+            cwd: Some(cwd),
+            agent,
+            provider,
+            model,
+        })
+        .await
+}
+
+/// Modo código: los perfiles de agente que se pueden elegir (con los del
+/// proyecto de `cwd`, si se da).
+#[tauri::command]
+pub async fn desktop_list_agents(
+    state: State<'_, DesktopState>,
+    cwd: Option<String>,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::ListAgents { cwd }).await
+}
+
+/// Modo código: otro perfil de agente de código para una sesión parada, o
+/// ninguno (`None`). Un agente embebido no se elige así.
+#[tauri::command]
+pub async fn desktop_set_agent(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    agent: Option<String>,
+) -> Result<Value, CommandError> {
+    crate::code::check_code_agent(&agent)?;
+    state
+        .link
+        .call(CallAction::SetAgent { session_id, agent })
+        .await
+}
+
+/// Modo código: solo lectura de una sesión parada.
+#[tauri::command]
+pub async fn desktop_set_read_only(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    read_only: bool,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::SetReadOnly {
+            session_id,
+            read_only,
+        })
+        .await
+}
+
+/// Modo código: parar un job en segundo plano de una sesión (solo resta).
+#[tauri::command]
+pub async fn desktop_cancel_job(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    job_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::CancelJob { session_id, job_id })
+        .await
+}
+
+/// Modo código: los cambios del working tree del proyecto de la sesión.
+#[tauri::command]
+pub async fn desktop_git_changes(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::GitChanges { session_id }).await
+}
+
+/// Modo código: el diff de un fichero de `desktop_git_changes` (la ruta la
+/// confina el daemon; sale con los secretos redactados).
+#[tauri::command]
+pub async fn desktop_git_diff(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    path: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::GitDiff { session_id, path })
+        .await
+}
+
 /// Un mensaje: un run nuevo de esa sesión.
 #[tauri::command]
 pub async fn desktop_start_run(
@@ -181,6 +302,7 @@ pub async fn desktop_start_run(
     session_id: String,
     input: String,
     images: Vec<String>,
+    plan: Option<bool>,
 ) -> Result<Value, CommandError> {
     state
         .link
@@ -188,6 +310,37 @@ pub async fn desktop_start_run(
             session_id,
             input,
             images,
+            plan: plan.unwrap_or(false),
+        })
+        .await
+}
+
+/// Modo código: el navegador del agente de la sesión, su estado y la pestaña en
+/// JPEG (solo lectura; el daemon nunca lo arranca por esto).
+#[tauri::command]
+pub async fn desktop_browser_screen(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state.link.call(CallAction::BrowserScreen { session_id }).await
+}
+
+/// Modo código: la persona mueve ese navegador (`goto`, `back`, `forward`,
+/// `reload`). Solo lo local o ya aprobado: aprobar un sitio es del agente, por
+/// su confirmación; `dot-link` valida la acción y el tope de la URL.
+#[tauri::command]
+pub async fn desktop_browser_navigate(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    action: String,
+    url: Option<String>,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::BrowserNavigate {
+            session_id,
+            action,
+            url,
         })
         .await
 }
@@ -578,6 +731,70 @@ async fn resolve<R: Runtime>(
         .request(&state.link, &state.broker, &presenter, action)
         .await?;
     state.broker.resolve_confirmed(confirmed).await
+}
+
+/// El **otro** punto de entrada al broker, y el único además de [`resolve`]:
+/// deshacer turnos (`sessions.revert`, que exige `approve`). Calcular el plan
+/// (`dry_run`) no toca nada y va directo, pero con el broker desbloqueado.
+/// Deshacer solo sale si la persona lo confirma en la ventana nativa, que enseña
+/// el plan que leyó la puerta del daemon; con conflictos o sin nada que deshacer
+/// no se abre nada y vuelve la respuesta del daemon. Nunca con `force`, nunca se
+/// reenvía, y el resultado vuelve sin interpretar.
+async fn revert<R: Runtime>(
+    app: AppHandle<R>,
+    state: &DesktopState,
+    session_id: String,
+    turns: u8,
+    dry_run: bool,
+) -> Result<Value, CommandError> {
+    if dry_run {
+        return state
+            .broker
+            .query(ApproverAction::RevertPlan { session_id, turns })
+            .await;
+    }
+    let presenter = crate::confirm::TauriPresenter::new(app, state.confirm_windows.clone());
+    match state
+        .confirm
+        .request_revert(
+            &state.link,
+            &state.broker,
+            &presenter,
+            ApproverAction::Revert { session_id, turns },
+        )
+        .await?
+    {
+        RevertStep::Answer(result) => Ok(result),
+        RevertStep::Confirmed(confirmed) => state.broker.resolve_confirmed_value(confirmed).await,
+    }
+}
+
+/// Modo código: qué haría deshacer los últimos `turns` turnos (no toca nada).
+/// Exige el broker desbloqueado: el daemon solo lo calcula con `approve`.
+#[tauri::command]
+pub async fn desktop_revert_plan<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+    session_id: String,
+    turns: u8,
+) -> Result<Value, CommandError> {
+    main_window(&window)?;
+    revert(app, &state, session_id, turns, true).await
+}
+
+/// Modo código: deshacer los ficheros de los últimos `turns` turnos, con
+/// confirmación nativa. Devuelve el `result` del daemon sin interpretar.
+#[tauri::command]
+pub async fn desktop_revert<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DesktopState>,
+    session_id: String,
+    turns: u8,
+) -> Result<Value, CommandError> {
+    main_window(&window)?;
+    revert(app, &state, session_id, turns, false).await
 }
 
 /// Pide aprobar una solicitud: abre la confirmación nativa, y solo si la

@@ -99,10 +99,28 @@ pub enum MainMethod {
     /// que se le pide con `LinkHandle::trace`), no una llamada suelta.
     TraceSubscribe,
     TraceUnsubscribe,
+    /// Desktop (modo código) — el perfil de agente de código de una sesión parada
+    /// (`null` lo quita). No elige un agente embebido: eso es al abrirla.
+    SessionsSetAgent,
+    /// Desktop (modo código) — solo lectura de una sesión parada (`control`).
+    SessionsSetReadOnly,
+    /// Desktop (modo código) — cancelar un job en segundo plano de una sesión
+    /// (`control`; solo resta: para un proceso).
+    JobsCancel,
+    /// Desktop (modo código) — los cambios del working tree del proyecto de una
+    /// sesión, y el diff de uno de sus ficheros (`observe`, solo lectura).
+    GitChanges,
+    GitDiff,
+    /// Desktop (modo código) — el navegador del agente de una sesión: su estado
+    /// y la pestaña en JPEG (`observe`, solo lectura; nunca lo arranca).
+    BrowserScreen,
+    /// Desktop (modo código) — la persona mueve ese navegador (`control`): solo
+    /// lo local o ya aprobado; aprobar orígenes no es de un cliente.
+    BrowserNavigate,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 42] = [
+    pub const ALL: [MainMethod; 49] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -145,6 +163,13 @@ impl MainMethod {
         MainMethod::ChannelsUnpair,
         MainMethod::TraceSubscribe,
         MainMethod::TraceUnsubscribe,
+        MainMethod::SessionsSetAgent,
+        MainMethod::SessionsSetReadOnly,
+        MainMethod::JobsCancel,
+        MainMethod::GitChanges,
+        MainMethod::GitDiff,
+        MainMethod::BrowserScreen,
+        MainMethod::BrowserNavigate,
     ];
 }
 
@@ -193,6 +218,13 @@ impl WireMethod for MainMethod {
             MainMethod::ChannelsUnpair => "channels.unpair",
             MainMethod::TraceSubscribe => "trace.subscribe",
             MainMethod::TraceUnsubscribe => "trace.unsubscribe",
+            MainMethod::SessionsSetAgent => "sessions.setAgent",
+            MainMethod::SessionsSetReadOnly => "sessions.setReadOnly",
+            MainMethod::JobsCancel => "jobs.cancel",
+            MainMethod::GitChanges => "git.changes",
+            MainMethod::GitDiff => "git.diff",
+            MainMethod::BrowserScreen => "browser.screen",
+            MainMethod::BrowserNavigate => "browser.navigate",
         }
     }
 }
@@ -211,15 +243,21 @@ pub enum ApproverMethod {
     /// asistente y aprobar desde el chat), así que exige `approve` y la
     /// confirmación nativa, como aprobar.
     ChannelsPairConfirm,
+    /// Desktop (modo código) — deshacer los ficheros de los últimos turnos de una
+    /// sesión (`sessions.revert`): pisa ficheros sin pasar por las aprobaciones,
+    /// así que exige `approve`. El plan (`dryRun`) también va por aquí: el
+    /// daemon pide la misma capacidad para calcularlo.
+    SessionsRevert,
 }
 
 impl ApproverMethod {
-    pub const ALL: [ApproverMethod; 5] = [
+    pub const ALL: [ApproverMethod; 6] = [
         ApproverMethod::CoreHello,
         ApproverMethod::ApprovalsResolve,
         ApproverMethod::QuestionsAnswer,
         ApproverMethod::PlansDecide,
         ApproverMethod::ChannelsPairConfirm,
+        ApproverMethod::SessionsRevert,
     ];
 }
 
@@ -231,6 +269,7 @@ impl WireMethod for ApproverMethod {
             ApproverMethod::QuestionsAnswer => "questions.answer",
             ApproverMethod::PlansDecide => "plans.decide",
             ApproverMethod::ChannelsPairConfirm => "channels.pairConfirm",
+            ApproverMethod::SessionsRevert => "sessions.revert",
         }
     }
 }
@@ -402,7 +441,14 @@ mod tests {
                 "channels.pairBegin",
                 "channels.unpair",
                 "trace.subscribe",
-                "trace.unsubscribe"
+                "trace.unsubscribe",
+                "sessions.setAgent",
+                "sessions.setReadOnly",
+                "jobs.cancel",
+                "git.changes",
+                "git.diff",
+                "browser.screen",
+                "browser.navigate"
             ]
         );
         for forbidden in [
@@ -413,9 +459,10 @@ mod tests {
             // Emparejar da autoridad: solo por la conexión de aprobador.
             "channels.pairConfirm",
             "channels.reload",
-            "sessions.setAgent",
-            "sessions.setReadOnly",
             "sessions.detach",
+            // Deshacer turnos exige `approve`: solo por la conexión de aprobador.
+            "sessions.revert",
+            "jobs.list",
             // Borra el home de la caja: lo hace la persona desde la CLI, que pide su nombre.
             "box.reset",
         ] {
@@ -423,7 +470,8 @@ mod tests {
         }
         for name in names {
             // Ni alojar, ni gobernar jobs, ni la memoria global: eso no es de un
-            // cliente. Única excepción (M17, M19): ver, olvidar y reclasificar la del asistente.
+            // cliente. Excepciones: ver, olvidar y reclasificar la del asistente
+            // (M17, M19) y cancelar un job (modo código de Desktop: solo resta).
             let companion_memory = name == "memory.decisions"
                 || name == "memory.forget"
                 || name == "memory.reclassify"
@@ -433,7 +481,7 @@ mod tests {
                 || name == "memory.rejectProposal";
             assert!(
                 !name.starts_with("host.")
-                    && !name.starts_with("jobs.")
+                    && (!name.starts_with("jobs.") || name == "jobs.cancel")
                     && (!name.starts_with("memory.") || companion_memory),
                 "{name}"
             );
@@ -450,15 +498,17 @@ mod tests {
                 "approvals.resolve",
                 "questions.answer",
                 "plans.decide",
-                "channels.pairConfirm"
+                "channels.pairConfirm",
+                "sessions.revert"
             ]
         );
         // Separación en los dos sentidos: lo que una tiene, la otra no (salvo el saludo).
+        // De `sessions.*`, solo deshacer turnos, que exige `approve`.
         for method in ApproverMethod::ALL {
             let name = method.name();
             assert!(
                 !name.starts_with("runs.")
-                    && !name.starts_with("sessions.")
+                    && (!name.starts_with("sessions.") || name == "sessions.revert")
                     && !name.starts_with("events.")
                     && !name.starts_with("host.")
                     && name != "core.shutdown",

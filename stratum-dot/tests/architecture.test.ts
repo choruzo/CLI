@@ -228,7 +228,14 @@ describe('la frontera con el lado nativo', () => {
     // Lo que el webview puede pedir al abrir: cuatro textos opcionales, y ninguno es un `env`.
     expect(params).toEqual(['cwd', 'agent', 'provider', 'model']);
     for (const file of rustShipped) {
-      const text = rustCode(file);
+      let text = rustCode(file);
+      // Modo código de Desktop: `sessions.setReadOnly` lleva `readOnly`, y solo esa
+      // llamada; abrir una sesión, nunca (se comprueba con el resto del fichero).
+      if (file.endsWith(`${sep}link.rs`)) {
+        const setReadOnly = /CallAction::SetReadOnly \{[\s\S]*?\n {8}\}\n/.exec(text)?.[0] ?? '';
+        expect(setReadOnly).toContain('MainMethod::SessionsSetReadOnly');
+        text = text.replace(setReadOnly, '');
+      }
       expect(/"env"|"resume"\s*:|"readOnly"|"sessionProfile"/.test(text), rel(file)).toBe(false);
       // El directorio viaja como texto: Dot no lo abre, no lo lista y no lo comprueba.
       if (!file.endsWith(`${sep}discovery.rs`) && !file.endsWith(`${sep}log.rs`) && !file.endsWith(`${sep}launcher.rs`)) {
@@ -365,7 +372,8 @@ describe('el lado nativo', () => {
     };
     const main = block('MainMethod');
     const approver = block('ApproverMethod');
-    // Principal (compartida con Desktop desde M12): ni apagar, ni aprobar, ni alojar, ni jobs.
+    // Principal (compartida con Desktop desde M12): ni apagar, ni aprobar, ni alojar. De los
+    // jobs, solo cancelar uno (modo código de Desktop: solo resta); Dot no lo tiene en su perfil.
     expect(main).toEqual([
       'agents.list',
       'approvals.list',
@@ -373,14 +381,21 @@ describe('el lado nativo', () => {
       'box.start',
       'box.status',
       'box.stop',
+      // Navegador del agente (modo código de Desktop: mirarlo y moverlo); Dot no lo tiene en su perfil.
+      'browser.navigate',
+      'browser.screen',
       'channels.pairBegin',
       'channels.status',
       'channels.unpair',
       'core.hello',
       'events.subscribe',
       'events.unsubscribe',
+      // Modo código de Desktop (solo lectura); Dot no los tiene en su perfil.
+      'git.changes',
+      'git.diff',
       'grants.revoke',
       'images.get',
+      'jobs.cancel',
       'memory.applyProposal',
       'memory.decisions',
       'memory.dream',
@@ -405,7 +420,9 @@ describe('el lado nativo', () => {
       'sessions.history',
       'sessions.memory',
       'sessions.open',
+      'sessions.setAgent',
       'sessions.setModel',
+      'sessions.setReadOnly',
       'skills.list',
       // Panel de trayectoria de Desktop (solo lectura); Dot no la tiene en su perfil.
       'trace.subscribe',
@@ -458,22 +475,26 @@ describe('el lado nativo', () => {
       'SessionsMemory',
       'SessionsOpen',
     ]);
+    // El navegador del agente es de Desktop: Dot no lo mira ni lo mueve.
+    expect(dotMethods.some((m) => m.startsWith('Browser'))).toBe(false);
     // La app de Dot se presenta con su perfil, y solo con él.
     const dotApp = rustCode(join(DOT, 'src-tauri', 'src', 'lib.rs'));
     expect(dotApp).toContain('ClientProfile::DOT');
     expect(dotApp).not.toContain('ClientProfile::DESKTOP');
-    // Aprobador: saludar y resolver (y, M18, emparejar un chat: da autoridad). Ni observar, ni conducir, ni apagar.
+    // Aprobador: saludar y resolver (y, M18, emparejar un chat: da autoridad; y deshacer
+    // turnos, que exige `approve`: modo código de Desktop). Ni observar, ni conducir, ni apagar.
     expect(approver).toEqual([
       'approvals.resolve',
       'channels.pairConfirm',
       'core.hello',
       'plans.decide',
       'questions.answer',
+      'sessions.revert',
     ]);
     const all = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!);
     expect(all.length).toBe(main.length + approver.length);
     // Fuera de `wire.rs` nadie escribe un método a mano.
-    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box|routines|channels)\.[a-zA-Z]+"/;
+    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box|routines|channels|browser|git)\.[a-zA-Z]+"/;
     const strays = rustShipped.filter((f) => !f.endsWith(`${sep}wire.rs`) && method.test(rustCode(f)));
     expect(strays.map(rel)).toEqual([]);
   });
@@ -487,9 +508,8 @@ describe('el lado nativo', () => {
       // Cerrar Dot (o una vista) no cierra sesiones: fuera de la lista de `wire.rs` (que
       // comparte con Desktop) el método no se nombra, y el perfil de Dot no lo lleva.
       if (!file.endsWith(`${sep}wire.rs`)) {
-        expect(/"(sessions\.close|sessions\.set\w*|jobs\.cancel)"/.test(text), rel(file)).toBe(false);
+        expect(/"(sessions\.close|sessions\.set\w*|sessions\.revert|jobs\.cancel)"/.test(text), rel(file)).toBe(false);
       }
-      expect(/"jobs\.cancel"/.test(text), rel(file)).toBe(false);
       // Ni `host` ni `broker`, en ninguna conexión.
       expect(/"host"|"broker"/.test(text), rel(file)).toBe(false);
       // El rol de aprobador y la clave, solo en la pieza del aprobador.

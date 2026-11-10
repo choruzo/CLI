@@ -135,7 +135,16 @@ export function pickImages(attachments: string[], pasted: string[]): { images: s
  */
 export async function sendMessage(
   native: NativeBridge,
-  opts: { sessionId: string; cwd: string | null; mode: 'ask' | 'steer'; text: string; attachments: string[]; pasted?: string[] },
+  opts: {
+    sessionId: string;
+    cwd: string | null;
+    mode: 'ask' | 'steer';
+    text: string;
+    attachments: string[];
+    pasted?: string[];
+    /** Solo `ask`: el run en modo plan (el agente propone un plan y espera a que se apruebe). */
+    plan?: boolean;
+  },
 ): Promise<SendOutcome> {
   const { sessionId, mode } = opts;
   const input = composeInput(opts.text, opts.attachments);
@@ -176,7 +185,9 @@ export async function sendMessage(
         return { restore: true };
       }
     }
-    const run = parseStartedRun(await native.startRun(sessionId, input, images));
+    const run = parseStartedRun(
+      opts.plan ? await native.startRun(sessionId, input, images, { plan: true }) : await native.startRun(sessionId, input, images),
+    );
     if (opts.cwd && opts.attachments.length > 0) {
       void attachmentsCommit(opts.cwd, opts.attachments).catch(() => undefined);
     }
