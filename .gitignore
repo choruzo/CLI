@@ -30,3 +30,5 @@ opencode-dev/
 .claude/skills/delegar/SKILL.md
 .claude/agents/implementer.md
 launch-video/*
+# Memoria de decisiones del proyecto (Stratum la crea en la raíz del repo)
+/.stratum/
