@@ -1,8 +1,224 @@
 {
-  "generatedAt": "2026-11-06T19:57:37.9312018+01:00",
+  "generatedAt": "2026-11-11T16:19:33.8943568+01:00",
   "repository": "choruzo/CLI",
   "branch": "main",
   "commits": [
+    {
+      "sha": "7b617350c86a969a417e2f30bdc8160e7336b9b9",
+      "date": "2026-11-11T14:50:36+01:00",
+      "author": "Javi_1",
+      "subject": "test(browser): saltar el navegador real en CI con Linux",
+      "add": 6,
+      "del": 1,
+      "files": 1
+    },
+    {
+      "sha": "9ec2f96fb6b73126337150de6f36f0a48d055ccb",
+      "date": "2026-11-11T14:43:32+01:00",
+      "author": "Javi_1",
+      "subject": "chore: release v0.15.0",
+      "add": 3,
+      "del": 3,
+      "files": 2
+    },
+    {
+      "sha": "a335c6fb85bd1f5296c8afe42df44dbba5f0121f",
+      "date": "2026-11-11T14:37:53+01:00",
+      "author": "Javi_1",
+      "subject": "test(browser): plazos del BrowserManager que aguantan la suite cargada",
+      "add": 6,
+      "del": 2,
+      "files": 1
+    },
+    {
+      "sha": "b47c13ef293935e90e0960a997fe98f5f91b1c23",
+      "date": "2026-11-11T14:22:16+01:00",
+      "author": "Javi_1",
+      "subject": "chore: CHANGELOG de la CLI 0.15.0 y Desktop 0.11.0",
+      "add": 30,
+      "del": 9,
+      "files": 7
+    },
+    {
+      "sha": "ddc3df3baa41510ac9d480b3799e785ea97c76ac",
+      "date": "2026-11-11T13:46:21+01:00",
+      "author": "Javi_1",
+      "subject": "chore: ignorar la memoria de decisiones del proyecto (/.stratum/)",
+      "add": 2,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "2200910e4a4f10734fbf786120746f5a234e7a02",
+      "date": "2026-11-11T13:33:46+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop,protocol): /btw, segundo plano, /rewind y memoria del proyecto en el modo código",
+      "add": 2096,
+      "del": 47,
+      "files": 36
+    },
+    {
+      "sha": "ad1d583c48bf8bd82ed3fc9076511d7b6340a9fe",
+      "date": "2026-11-11T08:41:15+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop,protocol): montaje de la sesión en el modo código (perfil, tools, entornos, plugins)",
+      "add": 1413,
+      "del": 25,
+      "files": 34
+    },
+    {
+      "sha": "1b01932e9801158676deb7fc79715033c8a905c0",
+      "date": "2026-11-11T00:07:34+01:00",
+      "author": "Javi_1",
+      "subject": "feat(desktop,cli): modo código en Desktop, navegador del agente y paneles redimensionables",
+      "add": 11193,
+      "del": 115,
+      "files": 101
+    },
+    {
+      "sha": "9a49a0b43d880f57712df4437be160fd5afc1355",
+      "date": "2026-11-11T00:07:26+01:00",
+      "author": "Javi_1",
+      "subject": "test(daemon): el test de preguntas ya no espera vetar el texto libre",
+      "add": 2,
+      "del": 2,
+      "files": 1
+    },
+    {
+      "sha": "d220cd078d60bb93123ebbdc07db63168814d55e",
+      "date": "2026-11-10T11:21:28+01:00",
+      "author": "Javi_1",
+      "subject": "feat(ui): jerarquia visual en Desktop y CLI; Ajustes como ventana de cristal",
+      "add": 853,
+      "del": 110,
+      "files": 10
+    },
+    {
+      "sha": "8ea00053453c9c078c4f9a003634269ad3d14dcc",
+      "date": "2026-11-08T22:21:19+01:00",
+      "author": "Javi_1",
+      "subject": "feat(question): siempre se admite otra respuesta escrita por el usuario",
+      "add": 54,
+      "del": 25,
+      "files": 4
+    },
+    {
+      "sha": "d1f2fb061794b92c50fc877939bae621922e36c7",
+      "date": "2026-11-08T17:14:15+01:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): M19 fase 4, representaciones con enlaces derivadas de la memoria",
+      "add": 640,
+      "del": 4,
+      "files": 7
+    },
+    {
+      "sha": "1789d8cdc9228f3e7d60370af001d6f2832d0665",
+      "date": "2026-11-08T17:14:14+01:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): M19 pasada automatica de dreaming (memory.dreaming.schedule)",
+      "add": 347,
+      "del": 0,
+      "files": 4
+    },
+    {
+      "sha": "582819d31839d5f498191efbfb5f3f4d3212d7a5",
+      "date": "2026-11-08T16:40:22+01:00",
+      "author": "Javi_1",
+      "subject": "feat(dot,desktop): M19 seccion de cambios sugeridos en los inspectores de memoria",
+      "add": 1258,
+      "del": 6,
+      "files": 29
+    },
+    {
+      "sha": "8a72b431bf6079b9330a434d22b15c11a6329326",
+      "date": "2026-11-08T16:40:19+01:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): M19 dreaming por el protocolo (memory.proposals, dream, applyProposal, rejectProposal)",
+      "add": 786,
+      "del": 1,
+      "files": 8
+    },
+    {
+      "sha": "40e42a9f561589771c90e2b5299fbb1fc1ebe962",
+      "date": "2026-11-08T13:24:14+01:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): M19 fase 5, dreaming que solo propone",
+      "add": 1963,
+      "del": 14,
+      "files": 20
+    },
+    {
+      "sha": "22f2615120513dc4796a718756573bc5f3e4b58a",
+      "date": "2026-11-08T13:24:11+01:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): M19 fase 3, search_conversations sobre las conversaciones del daemon",
+      "add": 852,
+      "del": 6,
+      "files": 15
+    },
+    {
+      "sha": "a9ed92e5f9d087b1559797490d5771f44bd8e53b",
+      "date": "2026-11-08T12:42:06+01:00",
+      "author": "Javi_1",
+      "subject": "feat(dot,desktop): M19 inspectores de memoria por secciones y reclasificar",
+      "add": 567,
+      "del": 22,
+      "files": 27
+    },
+    {
+      "sha": "027fa53e3f0575edeaa1d75e063f7834eaf2ea7a",
+      "date": "2026-11-08T12:42:03+01:00",
+      "author": "Javi_1",
+      "subject": "feat(memory): M19 fases 1 y 2, secciones por preset e indice inyectado",
+      "add": 1280,
+      "del": 144,
+      "files": 26
+    },
+    {
+      "sha": "beaf79a4c87cbf47fe2972de6f45c1dc4f495aaf",
+      "date": "2026-11-08T11:47:20+01:00",
+      "author": "Javi_1",
+      "subject": "docs(prd): M19 memoria estructurada y dreaming (B1-B6 resueltas)",
+      "add": 40,
+      "del": 0,
+      "files": 1
+    },
+    {
+      "sha": "637f151da0826a48b111f8b4da2c2dd2ab8d040d",
+      "date": "2026-11-06T23:31:22+01:00",
+      "author": "Javi_1",
+      "subject": "perf(cli): fusionar escrituras del tick en un bloque ?2026 y frames de stream a 80 ms",
+      "add": 73,
+      "del": 15,
+      "files": 3
+    },
+    {
+      "sha": "1ebafaf9fcfe24e9914c71ef41c19840236003d1",
+      "date": "2026-11-06T23:20:17+01:00",
+      "author": "Javi_1",
+      "subject": "feat(cli): synchronized output (?2026) en los fotogramas de Ink",
+      "add": 129,
+      "del": 0,
+      "files": 4
+    },
+    {
+      "sha": "2c6cac52a101b9db9402897769c3a657b70f72b4",
+      "date": "2026-11-06T21:05:53+01:00",
+      "author": "Javi_1",
+      "subject": "fix(providers): reintentar ECONNABORTED y dar al primario una segunda oportunidad",
+      "add": 95,
+      "del": 8,
+      "files": 7
+    },
+    {
+      "sha": "48b2c01833abf70add2b0585dfd9b8e2a059272b",
+      "date": "2026-11-06T19:57:46+01:00",
+      "author": "Javi_1",
+      "subject": "docs(landing): CLI 0.14.0 y Desktop 0.10.0",
+      "add": 254,
+      "del": 15,
+      "files": 6
+    },
     {
       "sha": "336dcdf202072113f66cea9b8a754ab9686da0c1",
       "date": "2026-11-06T19:04:36+01:00",
@@ -3803,6 +4019,14 @@
     }
   ],
   "tags": [
+    {
+      "name": "v0.15.0",
+      "date": "2026-11-11T16:00:34+01:00"
+    },
+    {
+      "name": "desktop-v0.11.0",
+      "date": "2026-11-11T14:43:57+01:00"
+    },
     {
       "name": "desktop-v0.10.0",
       "date": "2026-11-06T19:04:36+01:00"

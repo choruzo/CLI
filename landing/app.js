@@ -105,6 +105,10 @@ const MILESTONES = [
 
 // `match` elige los commits que se cuentan en la tarjeta; sin él, los del hito (`Hito N`).
 const NEWS = [
+  { id: "v0.15 · desktop 0.11.0", title: "Desktop programa, y la memoria del asistente se ordena", date: "2026-11-11", match: /M19|\((desktop|memory|cli|ui|question|providers)/, since: "2026-11-06T19:00",
+    text: "Desktop estrena el modo código: sesiones del agente de código en una carpeta de proyecto, con perfil, solo lectura, cambios git, deshacer turnos, procesos en segundo plano y /btw. El agente tiene su propio navegador, sin interfaz y sin puertos, para comprobar su trabajo en la app real. La memoria del asistente va por secciones, busca en sus conversaciones y el dreaming propone cambios que solo se aplican si tú quieres.",
+    pre: "❯ stratum memory dream\n❯ stratum memory proposals list\nStratum_0.11.0_x64-setup.exe · necesita stratum-cli ≥ 0.15",
+    href: "#desktop", more: "qué hace Desktop →" },
   { id: "v0.14 · desktop 0.10.0", title: "Desktop edita sus ajustes y vuelve la trayectoria", date: "2026-11-06", match: /\((desktop|config)\)/, since: "2026-11-05T18:00",
     text: "Ajustes edita el .stratumrc.json global como stratum config, por niveles: lo inocuo se guarda al momento, lo que cambia lo que el agente puede hacer pide una ventana nativa de confirmación y lo que ejecuta código sigue solo en la CLI. Vuelve el panel de trayectoria (Ctrl+J), las carpetas sin uso se archivan a los 7 días y se eliminan a los 5 meses, y se aprueba, se contesta y se decide desde Desktop, con la memoria global del asistente a la vista.",
     pre: "❯ stratum config list --global --json\nStratum_0.10.0_x64-setup.exe · necesita stratum-cli ≥ 0.14",
@@ -197,6 +201,9 @@ const ROADMAP = [
 ];
 
 const DESK_CARDS = [
+  { t: "Modo código", d: "Chat | Código en la barra de título: sesiones del agente de código en una carpeta de proyecto, con perfil, solo lectura, cambios git, deshacer turnos y procesos en segundo plano." },
+  { t: "Navegador del agente", d: "Lo que ve el agente cuando abre su navegador para comprobar su trabajo, en vivo y de solo lectura; lo externo lo pide el agente y se confirma." },
+  { t: "Memoria por secciones", d: "Los recuerdos del asistente agrupados por perfil, personas, proyectos, temas y áreas, con los cambios que propone el dreaming listos para aplicar o descartar." },
   { t: "Ajustes editables", d: "Edita el .stratumrc.json global como stratum config: lo inocuo se guarda al momento, lo sensible pide una ventana nativa de confirmación y lo que ejecuta código (plugins, MCP, SSH, la caja) solo se toca desde la CLI." },
   { t: "Trayectoria", d: "Ctrl+J abre la línea de tiempo de la sesión que miras: llamadas al modelo, herramientas, bloqueos y caché, a partir de la traza del daemon." },
   { t: "Carpetas con retención", d: "Una carpeta sin uso se archiva a los 7 días y se elimina a los 5 meses, configurable; escribir o adjuntar la restaura." },
@@ -370,7 +377,7 @@ const state = {
   commits: [],
   tags: [],
   prs: [],
-  version: "0.14.0",
+  version: "0.15.0",
   live: false,
   liveNew: 0,
   weekCommits: 0,
@@ -973,7 +980,7 @@ hito       17 ✓ entornos y read-only · siguiente: 18
 commits    ${fmt(c.length)} <span class="dim">(${state.weekCommits} esta semana)</span>
 líneas     <span class="add">+${fmt(c.reduce((a, x) => a + (x.add || 0), 0))}</span> <span class="del">−${fmt(c.reduce((a, x) => a + (x.del || 0), 0))}</span>
 tests      1587 ✓
-desktop    0.10.0 <span class="dim">(cliente de stratumd)</span>
+desktop    0.11.0 <span class="dim">(cliente de stratumd)</span>
 fuente     ${state.live ? `<span class="ok">● api.github.com</span>` : `<span class="dim">● snapshot</span>`}`;
   },
   hitos: (arg) => {
