@@ -2283,3 +2283,41 @@ Lo que `chat` da con `/btw`, Ctrl+B, `/rewind` y `/memory`, para un cliente del 
   `MEMORY_DOCUMENT_LIMITS.chars`, o `null` si no existe. Sin rutas.
 
 Tests: `stratum-cli/src/daemon/daemon-code-mode.test.ts`.
+
+## 29. Conectores del asistente (M20)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.11 (M20). Un conector es un server MCP **propio** de este
+repo (`stratum-cli/connectors/<id>/`: manifiesto `connector.json` y skill) cuyo código va dentro de
+la imagen de la caja y corre en la **caja de conectores** (`stratum-box-<n>-connectors`), nunca en
+el anfitrión ni en la caja del agente. Lo activo vive en `~/.stratum/companion/connectors.json`, que
+solo escribe el daemon; la sesión del `companion` lo mira al empezar cada turno.
+
+```json
+{ "method": "connectors.list", "params": {} }
+→ { "connectors": [{ "id": "open-meteo", "version": "1.0.0", "name": "Open-Meteo",
+                     "description": "Tiempo actual y previsión…",
+                     "hosts": ["geocoding-api.open-meteo.com", "api.open-meteo.com"], "needs": [],
+                     "tools": [{ "name": "tiempo_actual", "readOnly": true, "summary": "…" }],
+                     "enabled": true, "enabledAt": 1762870000000 }],
+    "box": { "state": "running", "reason": null }, "readOnly": false }
+```
+
+- **Métodos.** `connectors.list` (`observe`) → `ProtocolConnectorsList`: el catálogo de **este**
+  Stratum con su estado, el de la caja de conectores (`unavailable|absent|stopped|running`, con
+  `reason`) y `readOnly` (`connectors.json` de un Stratum más nuevo o dañado: ni se lee ni se
+  reescribe, y no activa nada). `connectors.enable { connectorId }` (**`approve`**) y
+  `connectors.disable { connectorId }` (`control`) → `{ connector, changed }`; los dos son
+  idempotentes (`changed: false`) y admiten `operationId`. Id fuera del catálogo → `NOT_FOUND`;
+  fichero en solo lectura → `UNAVAILABLE` (`read-only`).
+- **Activar suma capacidad**: por eso `approve` (la CLI pide la clave de aprobador tras enseñar las
+  tools; Dot, en la fase 3, la confirmación nativa). **Desactivar solo resta.** Con la caja ya en
+  marcha, `enable` arranca también la de conectores; si no, arranca con el siguiente `box.start`.
+- **`needs`**: lo que el conector pide además (claves, tokens; fase 4). Solo nombre y para qué:
+  nunca un valor.
+- **Sin eventos nuevos.** El cambio se ve en `connectors.list` y en las tools del siguiente turno
+  del asistente. Un conector activo que no conecta (caja parada, sin runtime) no ofrece sus tools, y
+  la sesión lo cuenta con un `warning` en ese turno.
+- **Tools.** `mcp__<id>__<tool>`. Las que el manifiesto declara `readOnly` no piden confirmación;
+  el resto se confirma cada vez (o con una concesión, §M17), como cualquier conector del `companion`.
+
+Tests: `stratum-cli/src/daemon/daemon-connectors.test.ts`.

@@ -233,6 +233,11 @@ export class ToolRegistry {
     this.disabledTools.add(name);
   }
 
+  /** Deshace `disableForSession` (M20: `read_skill` cuando un conector trae la primera skill). */
+  enableForSession(name: string): void {
+    this.disabledTools.delete(name);
+  }
+
   list(): ToolDefinition[] {
     return Array.from(this.tools.values());
   }

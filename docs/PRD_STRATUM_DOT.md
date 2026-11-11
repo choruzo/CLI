@@ -2338,7 +2338,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **Qué es un conector**: `stratum-cli/connectors/<id>/` con un manifiesto `connector.json` (Zod;
     `id`, `version`, nombre y descripción, `tools` con `readOnly` por tool, `hosts` a los que se
     conecta, `secrets` que pide y `agents: ["companion"]`) y un server MCP en TypeScript que se
-    empaqueta en **un único `.mjs`** sin `node_modules` en tiempo de ejecución. Cada conector trae
+    empaqueta en **un único `.mjs`** sin `node_modules` en tiempo de ejecución (su código fuente vive en
+    `stratum-cli/src/connector-servers/<id>/`, y nunca importa el runtime de Stratum). Cada conector trae
     además una **skill pequeña** (`connectors/<id>/SKILL.md`; ver *Pensado para el agente*).
   - **Dónde corre: la caja de conectores** (A10, *decidido por el usuario 2026-11-11*). Es un
     contenedor aparte, `stratum-box-<n>-connectors`:
@@ -2474,11 +2475,12 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
 
   *Fases* (cada una se demuestra sin interfaz antes de pintarla en Dot):
   1. Manifiesto, catálogo, Node en la imagen, conectores dentro de ella, lanzamiento por la caja,
-     `connectors.json` y `stratum connectors`, con **Open-Meteo**. Prueba real con
-     `stratum run --agent companion`.
+     `connectors.json`, `connectors.*` en el protocolo y `stratum connectors` (cliente del daemon:
+     el protocolo sube aquí desde la fase 3), con **Open-Meteo**. Prueba real con
+     `stratum run --agent companion`. *Hecha el 2026-11-11* (`.claude/docs/connectors.md`).
   2. **Renfe Cercanías** (la capa de datos y sus tools, con tests sobre un recorte del GTFS real),
      y después la larga distancia.
-  3. `connectors.*` en el protocolo, confirmación nativa y panel en Dot.
+  3. Confirmación nativa y panel en Dot (el protocolo ya está desde la fase 1).
   4. Secretos y **Home Assistant**. Su conector necesita llegar a la red local desde la caja de
      conectores, que se comprueba en esta fase.
 

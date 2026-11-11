@@ -281,3 +281,57 @@ describe('SkillRegistry — de serie, presets y ámbitos (contrato builtin)', ()
     }
   });
 });
+
+describe('SkillRegistry.setExtra (M20)', () => {
+  const extra = (name: string): SkillEntry => ({
+    name,
+    description: `d ${name}`,
+    path: `/pkg/connectors/${name}/SKILL.md`,
+    scope: 'builtin',
+    source: `connectors/${name}`,
+    presets: ['companion'],
+  });
+
+  it('suma skills que resolve y el índice ven', () => {
+    const reg = new SkillRegistry([root], { home, builtinDir: null });
+    expect(reg.entries).toEqual([]);
+    reg.setExtra([extra('connector-uno'), extra('connector-dos')]);
+    expect(reg.entries.map((e) => e.name)).toEqual(['connector-dos', 'connector-uno']);
+    expect(reg.resolve('connector-uno')?.path).toBe('/pkg/connectors/connector-uno/SKILL.md');
+    expect(reg.promptBlock()).toContain('connector-uno');
+  });
+
+  it('sustituye las extra de la llamada anterior y con [] las retira', () => {
+    const reg = new SkillRegistry([root], { home, builtinDir: null });
+    reg.setExtra([extra('connector-uno'), extra('connector-dos')]);
+    reg.setExtra([extra('connector-dos'), extra('connector-tres')]);
+    expect(reg.entries.map((e) => e.name)).toEqual(['connector-dos', 'connector-tres']);
+    expect(reg.resolve('connector-uno')).toBeUndefined();
+    reg.setExtra([]);
+    expect(reg.entries).toEqual([]);
+  });
+
+  it('nunca pisa una skill descubierta con el mismo nombre, ni al retirarlas la borra', () => {
+    writeSkill(
+      root,
+      '.stratum/skills',
+      'connector-uno',
+      '---\nname: connector-uno\ndescription: la del usuario\n---\ncuerpo',
+    );
+    const reg = new SkillRegistry([root], { home, builtinDir: null });
+    reg.setExtra([extra('connector-uno'), extra('connector-dos')]);
+    expect(reg.resolve('connector-uno')?.description).toBe('la del usuario');
+    expect(reg.resolve('connector-uno')?.scope).toBe('project');
+    expect(reg.resolve('connector-dos')).toBeDefined();
+    reg.setExtra([]);
+    expect(reg.resolve('connector-uno')?.description).toBe('la del usuario');
+    expect(reg.resolve('connector-dos')).toBeUndefined();
+  });
+
+  it('no cambia el fingerprint (la tabla en disco es solo de coding)', () => {
+    const reg = new SkillRegistry([root], { home, builtinDir: null });
+    const before = reg.fingerprint;
+    reg.setExtra([extra('connector-uno')]);
+    expect(reg.fingerprint).toBe(before);
+  });
+});

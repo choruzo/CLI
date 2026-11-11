@@ -197,6 +197,25 @@ export class SkillRegistry {
     return this.byName.get(normalizeName(name));
   }
 
+  /** M20 — nombres que puso `setExtra` (para retirarlos en la siguiente llamada). */
+  private extraNames = new Set<string>();
+
+  /**
+   * M20 — las skills de los conectores activos del `companion`, que pueden
+   * cambiar entre turnos (`connectors.enable|disable`). Sustituye a las de la
+   * llamada anterior; nunca pisa una skill descubierta con el mismo nombre. No
+   * cambia el fingerprint: la tabla en disco es solo de `coding`.
+   */
+  setExtra(entries: readonly SkillEntry[]): void {
+    for (const name of this.extraNames) this.byName.delete(name);
+    this.extraNames = new Set();
+    for (const entry of entries) {
+      if (this.byName.has(entry.name)) continue;
+      this.byName.set(entry.name, entry);
+      this.extraNames.add(entry.name);
+    }
+  }
+
   /** Bloque `# Skills` del system prompt. Cadena vacía si no hay skills. */
   promptBlock(): string {
     return buildSkillsBlock(this.entries);

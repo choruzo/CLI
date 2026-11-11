@@ -20,7 +20,8 @@ function fakeRunner(): RuntimeRunner {
   return async (_bin, args) => {
     const [a, b] = args;
     if (a === 'container' && b === 'inspect') {
-      return state.exists
+      // M20: la caja de conectores (`…-connectors`) no existe en este runtime falso.
+      return state.exists && args[2] === 'stratum-box-box'
         ? {
             exitCode: 0,
             stdout: JSON.stringify([
@@ -28,7 +29,7 @@ function fakeRunner(): RuntimeRunner {
             ]),
             stderr: '',
           }
-        : { exitCode: 1, stdout: '', stderr: 'Error: No such container: stratum-box-box' };
+        : { exitCode: 1, stdout: '', stderr: `Error: No such container: ${args[2]}` };
     }
     if (a === 'create') state.exists = true;
     if (a === 'start') state.running = true;

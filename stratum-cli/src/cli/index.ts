@@ -25,6 +25,7 @@ import { pluginCommand } from './commands/plugin.js';
 import { boxCommand } from './commands/box.js';
 import { routinesCommand } from './commands/routines.js';
 import { channelsCommand } from './commands/channels.js';
+import { connectorsCommand } from './commands/connectors.js';
 import { cliVersion } from './version.js';
 import { ConfigError } from '../config/loader.js';
 import { SchemaVersionError } from '../config/schema-version.js';
@@ -61,6 +62,7 @@ program.addCommand(pluginCommand);
 program.addCommand(boxCommand);
 program.addCommand(routinesCommand);
 program.addCommand(channelsCommand);
+program.addCommand(connectorsCommand);
 
 // Una config rota se explica con su mensaje (fichero, línea o clave), no con
 // la traza: los comandos que no capturan `loadConfig()` llegan aquí.

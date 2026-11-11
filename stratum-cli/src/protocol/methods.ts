@@ -21,6 +21,8 @@ import type {
   ProtocolRoutineLimits,
   ProtocolChannelsStatus,
   ProtocolTelegramPaired,
+  ProtocolConnector,
+  ProtocolConnectorsList,
   Timestamp,
   ProtocolContextReport,
   ProtocolDecision,
@@ -729,6 +731,24 @@ export interface ProtocolMethods {
   /** Desemparejar solo resta. Un id que no está: `removed: false`. */
   'channels.unpair': Spec<Mutation & { userId: number }, { removed: boolean }>;
 
+  /**
+   * M20 — conectores del asistente (`docs/protocol.md` §29). `list`: el
+   * catálogo de este Stratum con su estado y el de la caja de conectores.
+   * Activar suma capacidad (`approve`; en Dot, con confirmación nativa);
+   * desactivar solo resta (`control`). Los dos son idempotentes (`changed`).
+   * Id fuera del catálogo: `NOT_FOUND`; `connectors.json` en solo lectura:
+   * `UNAVAILABLE` (`read-only`). El cambio llega al siguiente turno del asistente.
+   */
+  'connectors.list': Spec<Empty, ProtocolConnectorsList>;
+  'connectors.enable': Spec<
+    Mutation & { connectorId: string },
+    { connector: ProtocolConnector; changed: boolean }
+  >;
+  'connectors.disable': Spec<
+    Mutation & { connectorId: string },
+    { connector: ProtocolConnector; changed: boolean }
+  >;
+
   'events.subscribe': Spec<{ scope: SubscriptionScope }, EventsSubscribeResult>;
   'events.unsubscribe': Spec<{ subscriptionId: string }, Empty>;
   'trace.subscribe': Spec<{ sessionId: string }, { subscriptionId: string }>;
@@ -904,6 +924,12 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'channels.pairConfirm': write('approve'),
   // Desemparejar solo resta.
   'channels.unpair': write('control'),
+
+  'connectors.list': read('observe'),
+  // Activar un conector suma capacidad al asistente.
+  'connectors.enable': write('approve'),
+  // Desactivar solo resta.
+  'connectors.disable': write('control'),
 
   // Suscribirse solo cambia el estado de la propia conexión: se puede repetir.
   'events.subscribe': read('observe'),

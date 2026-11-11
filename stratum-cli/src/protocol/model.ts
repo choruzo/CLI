@@ -790,6 +790,48 @@ export interface ProtocolChannelsStatus {
 }
 
 // ---------------------------------------------------------------------------
+// M20 — conectores del asistente (`companion`)
+// ---------------------------------------------------------------------------
+
+export interface ProtocolConnectorTool {
+  name: string;
+  /** Solo lee: no pide confirmación. El resto se confirma cada vez (o con una concesión). */
+  readOnly: boolean;
+  summary: string;
+}
+
+/** Un conector del catálogo de este Stratum, con su estado. */
+export interface ProtocolConnector {
+  id: string;
+  version: string;
+  name: string;
+  description: string;
+  /** A qué se conecta. Informativo: la caja de conectores tiene salida a internet. */
+  hosts: string[];
+  /**
+   * Lo que pide además (claves, tokens: fase 4). Solo el nombre y para qué;
+   * nunca un valor.
+   */
+  needs: { name: string; description: string }[];
+  tools: ProtocolConnectorTool[];
+  enabled: boolean;
+  enabledAt: Timestamp | null;
+}
+
+/** La caja de conectores (`stratum-box-<n>-connectors`). */
+export interface ProtocolConnectorsBox {
+  state: 'unavailable' | 'absent' | 'stopped' | 'running';
+  reason: string | null;
+}
+
+export interface ProtocolConnectorsList {
+  connectors: ProtocolConnector[];
+  box: ProtocolConnectorsBox;
+  /** `connectors.json` no se puede reescribir (de un Stratum más nuevo, o dañado). */
+  readOnly: boolean;
+}
+
+// ---------------------------------------------------------------------------
 // M11 — conversación duradera, contexto activo y memoria de sesión
 // ---------------------------------------------------------------------------
 

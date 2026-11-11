@@ -94,12 +94,15 @@ async function requireRunningBox(name: string, config: StratumConfig): Promise<C
   }
   let running = false;
   let label: string | undefined;
+  let role: string | undefined;
   try {
-    ({ running, label } = parseInspect(r.stdout));
+    ({ running, label, role } = parseInspect(r.stdout));
   } catch {
     throw new ExecConnectError(`Could not read the state of the box "${name}".`);
   }
-  if (label !== name) {
+  // M20: la caja de conectores no lleva `io.stratum.box` y además se marca con
+  // un papel; cualquiera de las dos cosas basta para no entrar en ella.
+  if (label !== name || role !== undefined) {
     throw new ExecConnectError(
       `The container for box "${name}" was not created by Stratum (no ${BOX_LABEL} label).`,
     );

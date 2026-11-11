@@ -10,7 +10,7 @@
  * server pise una tool de otro (o una built-in) con un nombre que colisiona.
  */
 
-import type { StratumConfig } from '../../config/schema.js';
+import type { McpServer, StratumConfig } from '../../config/schema.js';
 import type { ToolRegistry } from '../registry.js';
 import { McpClosedError, McpServerClient } from './client.js';
 import { buildMcpTool } from './bridge.js';
@@ -58,6 +58,15 @@ export interface McpManagerOptions {
   confirmMutating?: boolean;
 }
 
+/**
+ * M20 — un server que se suma o se quita en vida de la sesión (los conectores
+ * del `companion`), con su comprobación previa a cada conexión.
+ */
+export interface DynamicMcpServer {
+  config: McpServer;
+  beforeConnect?: () => Promise<void>;
+}
+
 // ---------------------------------------------------------------------------
 // McpManager
 // ---------------------------------------------------------------------------
@@ -83,6 +92,12 @@ export class McpManager {
    * una reconexión relance un server después de cerrar.
    */
   private lifecycle = new AbortController();
+  private readonly runtime: McpRuntimeOptions;
+  private readonly onLog: (line: string) => void;
+  /** M20 — servers dinámicos por nombre, con la huella de su config. */
+  private readonly dynamic = new Map<string, { client: McpServerClient; key: string }>();
+  /** M20 — `setDynamicServers` en serie: dos sincronizaciones nunca se solapan. */
+  private dynamicChain: Promise<unknown> = Promise.resolve();
 
   /**
    * @param config configuración de Stratum
@@ -97,23 +112,102 @@ export class McpManager {
   ) {
     this.reconnectDelays = options.reconnectDelaysMs ?? RECONNECT_DELAYS_MS;
     this.confirmMutating = options.confirmMutating === true;
-    const runtime: McpRuntimeOptions = {
+    this.runtime = {
       installDir: expandHome(config.mcp.installDir),
       autoInstall: config.mcp.autoInstall,
       ...(options.cwd ? { cwd: options.cwd } : {}),
     };
+    this.onLog = onLog;
     for (const serverCfg of config.mcp.servers) {
-      const client = new McpServerClient(serverCfg, runtime, onLog);
-      client.onConnectionLost = () => {
-        log.warn('connection lost, reconnecting', { server: client.name });
-        void this._reconnectWithBackoff(client);
-      };
-      client.onToolsChanged = () => {
-        log.info('tool list changed', { server: client.name, tools: client.tools.length });
-        this._emit(this._syncClientTools(client));
-      };
-      this.clients.push(client);
+      this.clients.push(this._newClient(serverCfg));
     }
+  }
+
+  private _newClient(serverCfg: McpServer, beforeConnect?: () => Promise<void>): McpServerClient {
+    const client = new McpServerClient(serverCfg, this.runtime, this.onLog, beforeConnect);
+    client.onConnectionLost = () => {
+      log.warn('connection lost, reconnecting', { server: client.name });
+      void this._reconnectWithBackoff(client);
+    };
+    client.onToolsChanged = () => {
+      log.info('tool list changed', { server: client.name, tools: client.tools.length });
+      this._emit(this._syncClientTools(client));
+    };
+    return client;
+  }
+
+  /**
+   * M20 — deja los servers dinámicos en `servers`: quita (cierra y retira sus
+   * tools) los que ya no están o cambiaron, añade los nuevos y conecta los que
+   * no estén conectados. Un nombre que ya usa un server de la config se omite
+   * con aviso. Devuelve los avisos (conexión fallida, colisiones). Necesita un
+   * registry (`registerInto`); tras `shutdownAll` no hace nada.
+   */
+  setDynamicServers(servers: readonly DynamicMcpServer[]): Promise<McpManagerWarning[]> {
+    const next = this.dynamicChain.then(() => this._setDynamic(servers));
+    this.dynamicChain = next.catch(() => undefined);
+    return next;
+  }
+
+  private async _setDynamic(servers: readonly DynamicMcpServer[]): Promise<McpManagerWarning[]> {
+    if (this.lifecycle.signal.aborted || !this.registry) return [];
+    const warnings: McpManagerWarning[] = [];
+    const staticNames = new Set(this.clients.filter((c) => !this._isDynamic(c)).map((c) => c.name));
+    const wanted = new Map<string, DynamicMcpServer>();
+    for (const s of servers) {
+      if (staticNames.has(s.config.name) || wanted.has(s.config.name)) {
+        warnings.push({
+          serverName: s.config.name,
+          message: `MCP server '${s.config.name}' skipped: another server already uses that name.`,
+        });
+        continue;
+      }
+      wanted.set(s.config.name, s);
+    }
+    for (const [name, entry] of [...this.dynamic]) {
+      const want = wanted.get(name);
+      if (want && JSON.stringify(want.config) === entry.key) continue;
+      this._dropClient(entry.client);
+      this.dynamic.delete(name);
+      await entry.client.close();
+    }
+    for (const [name, s] of wanted) {
+      if (this.dynamic.has(name)) continue;
+      const client = this._newClient(s.config, s.beforeConnect);
+      this.clients.push(client);
+      this.dynamic.set(name, { client, key: JSON.stringify(s.config) });
+    }
+    const pending = [...this.dynamic.values()]
+      .map((e) => e.client)
+      .filter((c) => c.status !== 'connected' && !this.reconnecting.has(c));
+    const results = await Promise.allSettled(pending.map((c) => c.connect()));
+    results.forEach((r, i) => {
+      const client = pending[i]!;
+      if (r.status === 'rejected') {
+        if (r.reason instanceof McpClosedError) return;
+        log.warn('connect failed (dynamic)', { server: client.name, err: r.reason });
+        warnings.push(connectWarning(client, r.reason));
+      } else {
+        warnings.push(...this._syncClientTools(client));
+      }
+    });
+    if (this.dynamic.size > 0) this.startHeartbeat();
+    return warnings;
+  }
+
+  private _isDynamic(client: McpServerClient): boolean {
+    return this.dynamic.get(client.name)?.client === client;
+  }
+
+  /** Retira las tools de un cliente y lo saca de la lista. */
+  private _dropClient(client: McpServerClient): void {
+    for (const name of this.registered.get(client) ?? []) {
+      this.registry?.unregister(name);
+      this.owners.delete(name);
+    }
+    this.registered.delete(client);
+    const i = this.clients.indexOf(client);
+    if (i >= 0) this.clients.splice(i, 1);
   }
 
   /**

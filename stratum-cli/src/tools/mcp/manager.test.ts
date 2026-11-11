@@ -1,5 +1,9 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { McpManager } from './manager.js';
+import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { McpManager, type DynamicMcpServer } from './manager.js';
 import { ToolRegistry } from '../registry.js';
 import type { McpServerClient } from './client.js';
 import { StratumConfigSchema, type StratumConfig } from '../../config/schema.js';
@@ -315,5 +319,190 @@ describe('McpManager heartbeat y reconexión', () => {
 
     expect(fake.reconnect).toHaveBeenCalled();
     await manager.shutdownAll();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// M20 — servers dinámicos (los conectores del companion), contra el server real
+// ---------------------------------------------------------------------------
+
+describe('McpManager.setDynamicServers (M20)', () => {
+  const FIXTURE = fileURLToPath(new URL('./fixtures/test-mcp-server.mjs', import.meta.url));
+  let tmp: string;
+  let managers: McpManager[] = [];
+
+  beforeEach(() => {
+    tmp = mkdtempSync(join(tmpdir(), 'stratum-mcp-dyn-'));
+  });
+  afterEach(async () => {
+    await Promise.allSettled(managers.map((m) => m.shutdownAll()));
+    managers = [];
+    rmSync(tmp, { recursive: true, force: true });
+  });
+
+  const spawnLog = (): string => join(tmp, 'spawns.log');
+  const spawns = (): number =>
+    existsSync(spawnLog())
+      ? readFileSync(spawnLog(), 'utf8').split('\n').filter(Boolean).length
+      : 0;
+
+  function dyn(
+    name: string,
+    over: { env?: Record<string, string>; beforeConnect?: () => Promise<void> } = {},
+  ): DynamicMcpServer {
+    const [config] = StratumConfigSchema.parse({
+      mcp: {
+        autoInstall: false,
+        servers: [
+          {
+            name,
+            command: process.execPath,
+            args: [FIXTURE],
+            env: { MCP_TEST_SPAWN_LOG: spawnLog(), ...over.env },
+          },
+        ],
+      },
+    }).mcp.servers;
+    return {
+      config: config!,
+      ...(over.beforeConnect ? { beforeConnect: over.beforeConnect } : {}),
+    };
+  }
+
+  function make(configServers: string[] = []): { m: McpManager; registry: ToolRegistry } {
+    const config = StratumConfigSchema.parse({
+      mcp: {
+        autoInstall: false,
+        servers: configServers.map((name) => ({
+          name,
+          command: process.execPath,
+          args: [FIXTURE],
+        })),
+      },
+    });
+    const m = new McpManager(config, () => {}, { reconnectDelaysMs: [50, 100, 200] });
+    managers.push(m);
+    const registry = new ToolRegistry();
+    m.registerInto(registry);
+    return { m, registry };
+  }
+
+  const mcpTools = (registry: ToolRegistry): string[] =>
+    registry
+      .list()
+      .map((t) => t.name)
+      .filter((n) => n.startsWith('mcp__'));
+
+  it('añade, conecta y registra las tools del server', async () => {
+    const { m, registry } = make();
+    expect(await m.setDynamicServers([dyn('uno-dos')])).toEqual([]);
+    expect(registry.get('mcp__uno-dos__echo')).toBeDefined();
+    expect(m.getClients().map((c) => [c.name, c.status])).toEqual([['uno-dos', 'connected']]);
+  });
+
+  it('con la misma config no relanza el server', async () => {
+    const { m } = make();
+    await m.setDynamicServers([dyn('uno-dos')]);
+    await m.setDynamicServers([dyn('uno-dos')]);
+    expect(spawns()).toBe(1);
+  });
+
+  it('retira (cierra y quita sus tools) el que desaparece', async () => {
+    const { m, registry } = make();
+    await m.setDynamicServers([dyn('uno-dos'), dyn('tres-cuatro')]);
+    const closing = m.getClients().find((c) => c.name === 'uno-dos')!;
+    expect(mcpTools(registry).some((n) => n.startsWith('mcp__uno-dos__'))).toBe(true);
+    await m.setDynamicServers([dyn('tres-cuatro')]);
+    expect(closing.status).toBe('disconnected');
+    expect(mcpTools(registry).some((n) => n.startsWith('mcp__uno-dos__'))).toBe(false);
+    expect(mcpTools(registry).some((n) => n.startsWith('mcp__tres-cuatro__'))).toBe(true);
+    expect(m.getClients().map((c) => c.name)).toEqual(['tres-cuatro']);
+    await m.setDynamicServers([]);
+    expect(mcpTools(registry)).toEqual([]);
+    expect(m.getClients()).toEqual([]);
+  });
+
+  it('si cambia la config, lo cierra y lo lanza de nuevo', async () => {
+    const { m, registry } = make();
+    await m.setDynamicServers([dyn('uno-dos')]);
+    const first = m.getClients()[0]!;
+    await m.setDynamicServers([dyn('uno-dos', { env: { MCP_TEST_EXTRA_TOOLS: 'extra_a' } })]);
+    expect(first.status).toBe('disconnected');
+    expect(spawns()).toBe(2);
+    expect(m.getClients()).toHaveLength(1);
+    expect(registry.get('mcp__uno-dos__extra_a')).toBeDefined();
+  });
+
+  it('un beforeConnect que lanza: aviso, ningún proceso lanzado y ninguna tool', async () => {
+    const { m, registry } = make();
+    const warnings = await m.setDynamicServers([
+      dyn('uno-dos', {
+        beforeConnect: async () => {
+          throw new Error('the connectors box is stopped');
+        },
+      }),
+    ]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.serverName).toBe('uno-dos');
+    expect(warnings[0]!.message).toMatch(/connectors box is stopped/);
+    expect(spawns()).toBe(0);
+    expect(mcpTools(registry)).toEqual([]);
+  });
+
+  it('reintenta en la siguiente sincronización el que no estaba conectado', async () => {
+    const { m, registry } = make();
+    let ready = false;
+    const beforeConnect = async (): Promise<void> => {
+      if (!ready) throw new Error('not yet');
+    };
+    expect(await m.setDynamicServers([dyn('uno-dos', { beforeConnect })])).toHaveLength(1);
+    ready = true;
+    expect(await m.setDynamicServers([dyn('uno-dos', { beforeConnect })])).toEqual([]);
+    expect(spawns()).toBe(1);
+    expect(registry.get('mcp__uno-dos__echo')).toBeDefined();
+  });
+
+  it('un nombre que ya usa un server de la config se omite con aviso', async () => {
+    const { m } = make(['ocupado']);
+    await m.connectAll();
+    const warnings = await m.setDynamicServers([dyn('ocupado'), dyn('libre-uno')]);
+    expect(warnings).toHaveLength(1);
+    expect(warnings[0]!.message).toMatch(/'ocupado' skipped.*already uses that name/);
+    const byName = new Map(m.getClients().map((c) => [c.name, c.status]));
+    expect(byName.get('ocupado')).toBe('connected');
+    expect(byName.get('libre-uno')).toBe('connected');
+    expect(m.getClients()).toHaveLength(2);
+    // El de la config no es dinámico: quitarlo de la lista no lo cierra.
+    await m.setDynamicServers([]);
+    expect(m.getClients().map((c) => c.name)).toEqual(['ocupado']);
+    expect(m.getClients()[0]!.status).toBe('connected');
+  });
+
+  it('un nombre repetido en la misma lista se omite con aviso', async () => {
+    const { m } = make();
+    const warnings = await m.setDynamicServers([dyn('uno-dos'), dyn('uno-dos')]);
+    expect(warnings).toHaveLength(1);
+    expect(m.getClients()).toHaveLength(1);
+  });
+
+  it('tras shutdownAll no hace nada', async () => {
+    const { m, registry } = make();
+    await m.shutdownAll();
+    expect(await m.setDynamicServers([dyn('uno-dos')])).toEqual([]);
+    expect(spawns()).toBe(0);
+    expect(m.getClients()).toEqual([]);
+    expect(mcpTools(registry)).toEqual([]);
+  });
+
+  it('dos sincronizaciones a la vez no se solapan', async () => {
+    const { m } = make();
+    const [a, b] = await Promise.all([
+      m.setDynamicServers([dyn('uno-dos')]),
+      m.setDynamicServers([dyn('uno-dos')]),
+    ]);
+    expect(a).toEqual([]);
+    expect(b).toEqual([]);
+    expect(spawns()).toBe(1);
+    expect(m.getClients()).toHaveLength(1);
   });
 });

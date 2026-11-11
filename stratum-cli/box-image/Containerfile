@@ -24,6 +24,15 @@ RUN useradd --create-home --uid 1000 --shell /bin/bash stratum \
  && chmod 0440 /etc/sudoers.d/stratum \
  && mkdir -p /exchange && chown stratum:stratum /exchange
 
+# M20 — Node para los conectores (node:sqlite exige ≥ 22), sin npm: los
+# conectores van ya empaquetados en un único .mjs cada uno.
+COPY --from=docker.io/library/node:24-bookworm-slim /usr/local/bin/node /usr/local/bin/node
+
+# M20 — el código de los conectores (`npm run build` lo deja en connectors/),
+# de root y de solo lectura: corren en la caja de conectores, nunca en esta.
+COPY connectors/ /opt/stratum/connectors/
+RUN chmod -R a+rX,go-w /opt/stratum/connectors
+
 COPY entrypoint.sh /usr/local/bin/stratum-box-entrypoint
 RUN chmod 0755 /usr/local/bin/stratum-box-entrypoint
 

@@ -420,6 +420,12 @@ export interface ToolCallReady {
 export interface RunOptions {
   signal?: AbortSignal;
   /**
+   * M20 — lo que quien aloja la sesión prepara al empezar el turno, ya
+   * anunciado (`turn_started`) y antes de la primera petición al modelo: el
+   * `companion` monta ahí sus conectores. No debe lanzar.
+   */
+  beforeTurn?: () => Promise<void>;
+  /**
    * Imágenes que el usuario adjuntó a la entrada de este turno, ya cargadas
    * (`images/store.ts`). Solo las lee `StratumAgent.run`: deja su marca en el
    * mensaje y las guarda en el buffer de la sesión.

@@ -41,6 +41,7 @@
     "dist/",
     "evals/scenarios/",
     "skills/",
+    "connectors/",
     "box-image/",
     "STRATUM.md",
     ".stratumrc.json.example",

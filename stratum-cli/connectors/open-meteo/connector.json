@@ -1,0 +1,15 @@
+{
+  "schemaVersion": 1,
+  "id": "open-meteo",
+  "version": "1.0.0",
+  "name": "Open-Meteo",
+  "description": "Tiempo actual y previsión de cualquier lugar, con datos de Open-Meteo (sin cuenta ni clave).",
+  "agents": ["companion"],
+  "hosts": ["geocoding-api.open-meteo.com", "api.open-meteo.com"],
+  "secrets": [],
+  "tools": [
+    { "name": "buscar_lugar", "readOnly": true, "summary": "Busca un lugar por su nombre y devuelve candidatos con su id." },
+    { "name": "tiempo_actual", "readOnly": true, "summary": "El tiempo que hace ahora en un lugar." },
+    { "name": "prevision", "readOnly": true, "summary": "La previsión de los próximos días, o por horas." }
+  ]
+}

@@ -1,6 +1,8 @@
 import { existsSync } from 'fs';
 import { createInterface } from 'readline';
 import { Command } from 'commander';
+import { connectorsFile, enabledConnectorIds } from '../../connectors/store.js';
+import { companionDataDir } from '../../host/companion.js';
 import { askLine } from '../readline-prompt.js';
 import { GLOBAL_CONFIG_PATH, readConfigFile, validateConfigLayer } from '../../config/loader.js';
 import { BoxConfigSchema, type BoxConfig } from '../../config/schema.js';
@@ -10,6 +12,7 @@ import {
   BoxManager,
   BoxUnavailableError,
   type BoxStatus,
+  type ConnectorsBoxStatus,
 } from '../../box/manager.js';
 import { BOX_EXCHANGE } from '../../box/spec.js';
 
@@ -29,6 +32,8 @@ function manager(): BoxManager {
   return new BoxManager({
     config: globalBoxConfig(),
     onProgress: (line) => process.stderr.write(`  ${line}\n`),
+    // M20: con algún conector activo, `start` arranca también la caja de conectores.
+    connectorsWanted: () => enabledConnectorIds(connectorsFile(companionDataDir())).length > 0,
   });
 }
 
@@ -56,6 +61,22 @@ export function formatBoxStatus(s: BoxStatus): string {
       '  outdated: created with another image or settings; "stratum box start" recreates it (its home is kept)',
     );
   }
+  return lines.join('\n');
+}
+
+/**
+ * M20 — la línea de la caja de conectores en `status`. Solo aparece si esa caja
+ * existe o hay algún conector activo (sin conectores no es ruido).
+ */
+export function formatConnectorsBoxLine(
+  s: ConnectorsBoxStatus,
+  anyEnabled: boolean,
+): string | null {
+  if (s.state === 'absent' && !anyEnabled) return null;
+  const lines = [
+    `  connectors box: ${STATE_LABEL[s.state]}${s.outdated ? ', outdated (recreated on next start)' : ''}`,
+  ];
+  if (s.reason) lines.push(`    ${s.reason}`);
   return lines.join('\n');
 }
 
@@ -97,9 +118,33 @@ async function confirmReset(name: string): Promise<boolean> {
 }
 
 const boxStatus = new Command('status')
-  .description('Show the state of the box')
+  .description('Show the state of the box (and the connectors box, if there is one)')
   .option('--json', 'output as JSON')
-  .action((opts: { json?: boolean }) => runOperation(opts, (m) => m.status()));
+  .action(async (opts: { json?: boolean }) => {
+    try {
+      const m = manager();
+      const status = await m.status();
+      const connectors = await m.connectorsStatus();
+      const anyEnabled = enabledConnectorIds(connectorsFile(companionDataDir())).length > 0;
+      if (opts.json) {
+        process.stdout.write(`${JSON.stringify({ ...status, connectors }, null, 2)}\n`);
+        return;
+      }
+      const line = formatConnectorsBoxLine(connectors, anyEnabled);
+      process.stdout.write(`${formatBoxStatus(status)}${line ? `\n${line}` : ''}\n`);
+    } catch (err) {
+      if (
+        err instanceof BoxUnavailableError ||
+        err instanceof BoxCommandError ||
+        err instanceof BoxBusyError
+      ) {
+        process.stderr.write(`${err.message}\n`);
+        process.exitCode = 1;
+        return;
+      }
+      throw err;
+    }
+  });
 
 const boxStart = new Command('start')
   .description('Start the box, creating it (and building its image) if needed')

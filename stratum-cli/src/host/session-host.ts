@@ -37,6 +37,8 @@ import {
 } from './assistant.js';
 import { buildCompanionConfig, buildCompanionRegistry, companionDataDir } from './companion.js';
 import { createSearchConversationsTool } from '../transcripts/tool.js';
+import { activeConnectorsSource, type ActiveConnectorsSource } from '../connectors/active.js';
+import type { SkillEntry } from '../skills/registry.js';
 
 export type { GateContext, HostGates } from './interactions.js';
 
@@ -98,6 +100,12 @@ export interface SessionHostOptions {
    * sin esto la tool no existe.
    */
   routineProposals?: RoutineProposals;
+  /**
+   * M20 — de dónde salen los conectores activos del `companion` (se miran al
+   * empezar cada turno). Ausente: los de `connectors.json` en sus datos;
+   * `false`: ninguno. Solo cuenta con `preset: 'companion'`.
+   */
+  connectors?: ActiveConnectorsSource | false;
   /**
    * M19 fase 3 — carpeta de sesiones del daemon, donde `search_conversations`
    * busca (solo lectura, solo las conversaciones del propio agente embebido).
@@ -173,6 +181,12 @@ export class SessionHost {
   /** Cancelación del turno en curso, cuando la creó el host. */
   private turnAbort: AbortController | null = null;
   private disposed = false;
+  /** M20 — conectores del `companion`; `null` en las demás sesiones. */
+  private readonly connectors: ActiveConnectorsSource | null;
+  /** M20 — `mcp.readOnlyTools` de la config, a la que se suman los conectores. */
+  private readonly baseReadOnlyTools: Record<string, string[]>;
+  /** M20 — los avisos del último turno, para no repetirlos en cada uno. */
+  private lastConnectorWarnings = '';
 
   private constructor(
     opts: SessionHostOptions,
@@ -182,8 +196,11 @@ export class SessionHost {
       mcp: McpManager;
       mcpWarnings: McpManagerWarning[];
       plugins: PluginHost;
+      connectors: ActiveConnectorsSource | null;
     },
   ) {
+    this.connectors = parts.connectors;
+    this.baseReadOnlyTools = { ...(parts.config.mcp.readOnlyTools ?? {}) };
     this.env = opts.env;
     this.config = parts.config;
     this.router = opts.router;
@@ -246,9 +263,13 @@ export class SessionHost {
     const embedded = opts.preset !== undefined;
     let config: StratumConfig = { ...opts.config };
     let registry: ToolRegistry;
+    let connectors: ActiveConnectorsSource | null = null;
     if (opts.preset === 'companion') {
       const dataDir = opts.companionDataDir ?? companionDataDir();
       config = buildCompanionConfig(config, dataDir);
+      if (opts.connectors !== false) {
+        connectors = opts.connectors ?? activeConnectorsSource({ dataDir, box: config.box });
+      }
       registry = buildCompanionRegistry(config, {
         dataDir,
         ...(opts.routineProposals ? { routines: opts.routineProposals } : {}),
@@ -301,6 +322,9 @@ export class SessionHost {
       // Un server que se cuelga durante una sesión larga se detecta y se relanza.
       mcp.startHeartbeat();
     }
+    // M20: los conectores se suman en cada turno (`syncConnectors`), y el
+    // manager necesita el registry aunque la config no traiga servers.
+    if (connectors) mcp.registerInto(registry);
     // PL1: los agentes embebidos no cargan plugins (su toolset es cerrado); el
     // resto, los globales más lo que pidan los flags de quien aloja.
     const plugins = embedded
@@ -312,7 +336,7 @@ export class SessionHost {
           ...(opts.plugins?.disabled ? { disabled: true } : {}),
           ...(opts.plugins?.paths ? { paths: opts.plugins.paths } : {}),
         });
-    return new SessionHost(opts, { config, registry, mcp, mcpWarnings, plugins });
+    return new SessionHost(opts, { config, registry, mcp, mcpWarnings, plugins, connectors });
   }
 
   /** Sustituye los prompts locales (p. ej. cuando dependen de la política ya resuelta). */
@@ -358,6 +382,8 @@ export class SessionHost {
       ...(turn.compressionMode ? { compressionMode: turn.compressionMode } : {}),
       ...(turn.maxIterations ? { maxIterations: turn.maxIterations } : {}),
       ...(turn.images?.length ? { images: turn.images } : {}),
+      // M20: los conectores del `companion`, como estén al empezar el turno.
+      ...(this.connectors ? { beforeTurn: () => this.syncConnectors() } : {}),
     };
   }
 
@@ -399,6 +425,57 @@ export class SessionHost {
       if (own && this.turnAbort === own) this.turnAbort = null;
       // La pantalla de la caja es de un turno: la siguiente rutina no espera al lease.
       screenLocks.release(this.sessionId);
+    }
+  }
+
+  /**
+   * M20 — deja los conectores del `companion` como dice `connectors.json`:
+   * monta los activos en la caja de conectores, retira los que se
+   * desactivaron, declara sus tools de solo lectura y suma las skills de los
+   * que conectaron. Lo llama cada turno antes de empezar; sus avisos salen en
+   * ese turno (una vez mientras no cambien). Un fallo deja la sesión sin
+   * conectores: falla cerrado.
+   */
+  async syncConnectors(): Promise<void> {
+    if (!this.connectors) return;
+    try {
+      await this.applyConnectors();
+    } catch (err) {
+      // No debe tumbar el turno: el turno sigue sin conectores nuevos.
+      log.warn('connector sync failed', { sessionId: this.sessionId, err });
+    }
+  }
+
+  private async applyConnectors(): Promise<void> {
+    if (!this.connectors) return;
+    const warnings: string[] = [];
+    let readOnly: Record<string, string[]> = {};
+    let skills: { id: string; skill: SkillEntry }[] = [];
+    try {
+      const active = await this.connectors.resolve();
+      warnings.push(...active.warnings);
+      readOnly = active.readOnlyTools;
+      skills = active.skills;
+      // Lo de solo lectura se declara antes de registrar sus tools.
+      this.config.mcp.readOnlyTools = { ...this.baseReadOnlyTools, ...readOnly };
+      for (const w of await this.mcp.setDynamicServers(active.servers)) warnings.push(w.message);
+    } catch (err) {
+      warnings.push(`Connectors are off for this turn: ${(err as Error).message}`);
+      this.config.mcp.readOnlyTools = { ...this.baseReadOnlyTools };
+      skills = [];
+      await this.mcp.setDynamicServers([]).catch(() => undefined);
+    }
+    const connected = new Set(
+      this.mcp
+        .getClients()
+        .filter((c) => c.status === 'connected')
+        .map((c) => c.name),
+    );
+    this.agent.setExtraSkills(skills.filter((s) => connected.has(s.id)).map((s) => s.skill));
+    const key = JSON.stringify(warnings);
+    if (key !== this.lastConnectorWarnings) {
+      this.lastConnectorWarnings = key;
+      for (const w of warnings) this.agent.addTurnWarning(w);
     }
   }
 

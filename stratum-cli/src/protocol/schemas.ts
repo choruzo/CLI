@@ -89,6 +89,8 @@ import type {
   ProtocolRoutineResult,
   ProtocolChannelsStatus,
   ProtocolTelegramPaired,
+  ProtocolConnector,
+  ProtocolConnectorsList,
   ProtocolTelegramUser,
 } from './model.js';
 import {
@@ -664,6 +666,36 @@ export const channelsStatusSchema: z.ZodType<ProtocolChannelsStatus> = z.object(
     lastPollAt: timestamp.nullable(),
   }),
 });
+
+// ---------------------------------------------------------------------------
+// M20 — conectores del asistente
+// ---------------------------------------------------------------------------
+
+const connectorId = z.string().regex(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/);
+export const connectorSchema: z.ZodType<ProtocolConnector> = z.object({
+  id: connectorId,
+  version: z.string().max(32),
+  name: z.string().max(60),
+  description: z.string().max(300),
+  hosts: z.array(z.string().max(253)).max(32),
+  needs: z.array(z.object({ name: z.string().max(64), description: z.string().max(200) })).max(16),
+  tools: z
+    .array(
+      z.object({ name: z.string().max(64), readOnly: z.boolean(), summary: z.string().max(200) }),
+    )
+    .max(64),
+  enabled: z.boolean(),
+  enabledAt: timestamp.nullable(),
+});
+export const connectorsListSchema: z.ZodType<ProtocolConnectorsList> = z.object({
+  connectors: z.array(connectorSchema).max(64),
+  box: z.object({
+    state: z.enum(['unavailable', 'absent', 'stopped', 'running']),
+    reason: z.string().max(LIMITS.answerChars).nullable(),
+  }),
+  readOnly: z.boolean(),
+});
+const connectorChange = z.object({ connector: connectorSchema, changed: z.boolean() });
 
 // ---------------------------------------------------------------------------
 // M11 — conversación guardada, contexto y memoria de sesión
@@ -1400,6 +1432,10 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'channels.pairConfirm': z.object({ userId: telegramUserId, operationId }).strict(),
   'channels.unpair': z.object({ userId: telegramUserId, operationId }).strict(),
 
+  'connectors.list': empty,
+  'connectors.enable': z.object({ connectorId, operationId }).strict(),
+  'connectors.disable': z.object({ connectorId, operationId }).strict(),
+
   'events.subscribe': z.object({ scope }).strict(),
   'events.unsubscribe': subscriptionRef,
   'trace.subscribe': sessionRef,
@@ -1611,6 +1647,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   }),
   'channels.pairConfirm': z.object({ paired: telegramPairedSchema }),
   'channels.unpair': z.object({ removed: z.boolean() }),
+
+  'connectors.list': connectorsListSchema,
+  'connectors.enable': connectorChange,
+  'connectors.disable': connectorChange,
 
   'events.subscribe': z.object({ subscriptionId: id, mode: z.enum(['replay', 'snapshot']) }),
   'events.unsubscribe': emptyResult,

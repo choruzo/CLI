@@ -86,6 +86,8 @@ import {
   STRATUM_PROTOCOL_VERSION,
   type ClientKind,
   type MethodName,
+  type ProtocolConnector,
+  type ProtocolConnectorsList,
   type ProtocolEvent,
   type ProtocolMemoryAgent,
   type ProtocolModel,
@@ -95,6 +97,17 @@ import {
   type ProtocolSessionSnapshot,
   type StateEventData,
 } from '../protocol/index.js';
+import { bundledCatalog } from '../connectors/active.js';
+import type { ConnectorCatalog } from '../connectors/catalog.js';
+import {
+  ConnectorsStoreError,
+  connectorsFile,
+  disableConnector,
+  enableConnector,
+  enabledConnectorIds,
+  readConnectorsFile,
+} from '../connectors/store.js';
+import { toProtocolConnector, toProtocolConnectorsBox } from './connectors-dto.js';
 import { fetchModelInfos } from '../providers/utils.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { generateSessionId } from '../session/store.js';
@@ -220,6 +233,8 @@ export interface StratumdOptions {
   companionDataDir?: string;
   /** M13 — la caja (`box.*`). Por defecto, la de `config.box`. Inyectable para tests. */
   box?: BoxManager;
+  /** M20 — el catálogo de conectores. Por defecto, el del paquete. Inyectable para tests. */
+  connectorCatalog?: ConnectorCatalog;
   /**
    * M16 — almacén de las rutinas del asistente. Por defecto, `routines.json` en
    * los datos del `companion`; `null` desactiva las rutinas (sin planificador).
@@ -458,6 +473,8 @@ export class Stratumd {
       new BoxManager({
         config: opts.config.box,
         onProgress: (line) => log.debug('box build', { line }),
+        // M20: con algún conector activo, `start` arranca también su caja.
+        connectorsWanted: () => enabledConnectorIds(connectorsFile(this.companionDir)).length > 0,
       });
     this.approvalTimeoutMs =
       opts.approvalTimeoutMs ?? Math.round(opts.config.daemon.approvalTimeoutMinutes * 60_000);
@@ -2126,6 +2143,24 @@ export class Stratumd {
           };
         }),
 
+      // M20 — conectores del asistente. Lo activo vive en `connectors.json`,
+      // que solo escribe el daemon; la sesión lo lee al empezar cada turno.
+      'connectors.list': () => this.connectorsList(),
+      'connectors.enable': async (params) => {
+        const result = this.changeConnector(params.connectorId, true);
+        // Con la caja ya en marcha, la de conectores arranca ahora; si no, con
+        // el siguiente `box.start`. Un fallo aquí no deshace la activación:
+        // el conector no conecta y la sesión lo avisa.
+        if (result.changed) await this.box.ensureConnectors().catch(() => undefined);
+        log.info('connector enabled', { connectorId: params.connectorId, connectionId: conn.id });
+        return result;
+      },
+      'connectors.disable': (params) => {
+        const result = this.changeConnector(params.connectorId, false);
+        log.info('connector disabled', { connectorId: params.connectorId, connectionId: conn.id });
+        return result;
+      },
+
       // M18 — canales externos. Nada de esto devuelve ni registra el token.
       'channels.status': () => this.channelsOrThrow().status(),
       'channels.reload': () => this.channelsOrThrow().reload(),
@@ -2315,6 +2350,49 @@ export class Stratumd {
   }
 
   /** El planificador de rutinas, o `UNAVAILABLE` si el daemon corre sin él. */
+  private get connectorCatalog(): ConnectorCatalog {
+    return this.opts.connectorCatalog ?? bundledCatalog();
+  }
+
+  /** M20 — `connectors.list`. */
+  private async connectorsList(): Promise<ProtocolConnectorsList> {
+    const state = readConnectorsFile(connectorsFile(this.companionDir));
+    const enabled = new Map(state.state === 'ok' ? state.enabled.map((e) => [e.id, e]) : []);
+    return {
+      connectors: this.connectorCatalog.entries.map((e) =>
+        toProtocolConnector(e.manifest, enabled.get(e.manifest.id)),
+      ),
+      box: toProtocolConnectorsBox(await this.box.connectorsStatus()),
+      readOnly: state.state !== 'ok' && state.state !== 'absent',
+    };
+  }
+
+  /** M20 — activa o desactiva un conector del catálogo en `connectors.json`. */
+  private changeConnector(
+    id: string,
+    enable: boolean,
+  ): { connector: ProtocolConnector; changed: boolean } {
+    const entry = this.connectorCatalog.get(id);
+    if (!entry) {
+      throw new ProtocolError('NOT_FOUND', `There is no connector "${id}" in this Stratum.`);
+    }
+    const file = connectorsFile(this.companionDir);
+    let changed: boolean;
+    try {
+      changed = enable
+        ? enableConnector(file, id, new Date(this.now()))
+        : disableConnector(file, id);
+    } catch (err) {
+      if (err instanceof ConnectorsStoreError) {
+        throw new ProtocolError('UNAVAILABLE', err.message, { reason: 'read-only' });
+      }
+      throw err;
+    }
+    const state = readConnectorsFile(file);
+    const current = state.state === 'ok' ? state.enabled.find((e) => e.id === id) : undefined;
+    return { connector: toProtocolConnector(entry.manifest, current), changed };
+  }
+
   private routinesOrThrow(): RoutineScheduler {
     if (!this.routines) {
       throw new ProtocolError('UNAVAILABLE', 'Routines are disabled in this daemon.', {

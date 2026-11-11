@@ -91,6 +91,11 @@ export class McpServerClient {
       autoInstall: true,
     },
     private readonly onLog?: (line: string) => void,
+    /**
+     * M20 — comprobación antes de cada conexión (la caja de conectores en
+     * marcha). Si lanza, no se lanza el proceso y la conexión falla.
+     */
+    private readonly beforeConnect?: () => Promise<void>,
   ) {
     this.name = serverConfig.name;
   }
@@ -122,6 +127,10 @@ export class McpServerClient {
     const client = this.newClient();
     let transport: StdioClientTransport | null = null;
     try {
+      if (this.beforeConnect) {
+        await this.beforeConnect();
+        this.assertCurrent(gen);
+      }
       // Resuelve el ejecutable: con `package`, instala en la carpeta gestionada
       // (si procede) y devuelve `node <entry>`, evitando npx (§12.8, opción 2).
       const resolved = await resolveServerCommand(this.serverConfig, this.runtime, this.onLog);

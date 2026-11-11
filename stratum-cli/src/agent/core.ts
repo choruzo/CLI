@@ -37,7 +37,7 @@ import { DELEGATE_TASK_TOOL } from '../tools/agent/delegate.js';
 import { ChangeTracker } from './risk.js';
 import { FileStateTracker } from '../tools/fs/file-state.js';
 import { JobManager } from '../jobs/manager.js';
-import { sessionSkills, type SkillRegistry } from '../skills/registry.js';
+import { sessionSkills, type SkillEntry, type SkillRegistry } from '../skills/registry.js';
 import { READ_SKILL_TOOL } from '../tools/skills/read-skill.js';
 import { TodoList, rehydrateTodos } from './todo.js';
 import { closeDanglingToolCalls, pushUserInput } from './cancel.js';
@@ -330,8 +330,17 @@ export class StratumAgent {
    * mismo registro. Es además el conjunto cerrado que `read_skill` sirve.
    */
   private readonly skills: SkillRegistry | undefined;
-  /** Índice `# Skills` del system prompt, renderizado de `skills`. */
-  private readonly skillsBlock: string;
+  /**
+   * Índice `# Skills` del system prompt, renderizado de `skills`. M20: se
+   * rehace con `setExtraSkills` (las skills de los conectores del `companion`).
+   */
+  private skillsBlock: string;
+  /** `read_skill` se apagó por no haber skills (no por fallos): una extra lo enciende. */
+  private readSkillOffForEmpty = false;
+  /** M20 — `connectorPromptKey` del último system prompt compuesto. */
+  private promptConnectorKey: string | null = null;
+  /** M20 — avisos que se emiten al empezar el próximo turno (`addTurnWarning`). */
+  private readonly pendingTurnWarnings: string[] = [];
   /**
    * Contabilidad de tokens de la sesión (Hito 13). El `ReactLoop` vive un turno,
    * así que el acumulado se suma aquí. El estado se guarda aparte del número:
@@ -528,6 +537,7 @@ export class StratumAgent {
     // contexto en cada petición.
     if (!this.skills || this.skills.entries.length === 0) {
       registry.disableForSession(READ_SKILL_TOOL);
+      this.readSkillOffForEmpty = this.skills !== undefined;
     }
 
     if (options?.usage) this.restoreUsage(options.usage);
@@ -767,6 +777,49 @@ export class StratumAgent {
   }
 
   /**
+   * M20 — las skills de los conectores activos (`SessionHost` del `companion`,
+   * al empezar cada turno). Sustituyen a las anteriores, y el system prompt se
+   * recompone solo si cambió lo que dice de los conectores.
+   */
+  setExtraSkills(entries: readonly SkillEntry[]): void {
+    // Lo que el prompt dice de los conectores: el índice `# Skills` y si hay
+    // tools `mcp__` (`# Your connectors`). Solo se recompone si cambió desde
+    // que se compuso, para no romper la caché de prefijo en cada turno.
+    if (this.skills) {
+      this.skills.setExtra(entries);
+      this.skillsBlock = this.skills.promptBlock();
+      this.syncReadSkill();
+    }
+    if (this.connectorPromptKey() !== this.promptConnectorKey) this.rebuildSystemPrompt();
+  }
+
+  private connectorPromptKey(): string {
+    const mcp = this.registry.list().some((t) => t.name.startsWith('mcp__'));
+    return `${mcp ? 1 : 0}
+${this.skillsBlock}`;
+  }
+
+  private syncReadSkill(): void {
+    if (!this.skills) return;
+    if (this.readSkillOffForEmpty && this.skills.entries.length > 0) {
+      this.registry.enableForSession(READ_SKILL_TOOL);
+      this.readSkillOffForEmpty = false;
+    } else if (this.skills.entries.length === 0 && !this.readSkillOffForEmpty) {
+      this.registry.disableForSession(READ_SKILL_TOOL);
+      this.readSkillOffForEmpty = true;
+    }
+  }
+
+  /**
+   * M20 — un aviso de quien aloja la sesión (p. ej. un conector que no
+   * conectó) que sale como `warning` al empezar el próximo turno, por el
+   * mismo camino que los del agente: llega a la traza, a Dot y a Telegram.
+   */
+  addTurnWarning(message: string): void {
+    this.pendingTurnWarnings.push(message);
+  }
+
+  /**
    * Observa la actividad del agente: el principio y el final de cada turno y
    * todos los `AgentEvent` que emiten `run()` y `runDelegate()`, **además** de
    * devolverlos a quien consume el generador. Es el punto único por el que un
@@ -882,6 +935,7 @@ export class StratumAgent {
     trace?.turnStart(input, this.messages);
     this.inbox.beginTurn(trace);
     try {
+      if (opts?.beforeTurn) await opts.beforeTurn();
       if (images.length > 0 && !this.router.vision) {
         const warning: AgentEvent = {
           type: 'warning',
@@ -895,6 +949,12 @@ export class StratumAgent {
       if (noVision) {
         trace?.event(noVision);
         yield noVision;
+      }
+      // M20 — avisos de quien aloja la sesión para este turno (conectores).
+      for (const message of this.pendingTurnWarnings.splice(0)) {
+        const warning: AgentEvent = { type: 'warning', message };
+        trace?.event(warning);
+        yield warning;
       }
       for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
         if (event.type === 'tool_result') this._toolCallCount++;
@@ -1615,6 +1675,7 @@ export class StratumAgent {
   }
 
   private buildSystemContent(): string {
+    this.promptConnectorKey = this.connectorPromptKey();
     // Modo Chat: solo el `STRATUM.md` global (su `MemoryManager` tiene scope
     // `global`). El agente de código, solo el del proyecto.
     const memory = isEmbeddedPreset(this.preset)

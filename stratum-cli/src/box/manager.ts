@@ -19,15 +19,21 @@ import { dirname, join } from 'path';
 import { fileURLToPath } from 'url';
 import { boxHasDesktop, type BoxConfig } from '../config/schema.js';
 import {
+  BOX_CONNECTORS_LABEL,
   BOX_LABEL,
   DEFAULT_BOX_IMAGE,
   boxContainerName,
   boxCreateArgs,
   boxSpecHash,
   boxVolumeName,
+  connectorsContainerName,
+  connectorsCreateArgs,
+  connectorsSpecHash,
+  connectorsVolumeName,
   isNoSuchObject,
   parseInspect,
   type BoxSpec,
+  type ConnectorsBoxSpec,
   type InspectedBox,
   type RuntimeKind,
 } from './spec.js';
@@ -57,6 +63,14 @@ export interface BoxStatus {
   exchangeDir: string;
   /** M15 — tiene escritorio virtual (`box.desktop`, `boxHasDesktop`). */
   desktop: boolean;
+}
+
+/** M20 — la caja de conectores (`stratum-box-<n>-connectors`). */
+export interface ConnectorsBoxStatus {
+  state: BoxState;
+  /** Con `unavailable`, o si falló su último arranque: por qué. */
+  reason?: string;
+  outdated: boolean;
 }
 
 /** M15 — la pantalla de la caja en un momento dado (JPEG en base64). */
@@ -121,6 +135,11 @@ export interface BoxManagerOptions {
   platform?: NodeJS.Platform;
   /** Líneas de progreso (construcción de la imagen). */
   onProgress?: (line: string) => void;
+  /**
+   * M20 — si hay algún conector activo: entonces `start` arranca también la
+   * caja de conectores. Sin esto (o `false`), la caja de conectores no se crea.
+   */
+  connectorsWanted?: () => boolean;
 }
 
 export function defaultExchangeDir(home: string = homedir()): string {
@@ -158,6 +177,8 @@ export class BoxManager {
   private readonly detect: () => Promise<RuntimeDetection>;
   private readonly exchangeDir: string;
   private busy = false;
+  /** M20 — el último arranque de la caja de conectores falló: por qué. */
+  private connectorsError: string | null = null;
 
   constructor(private readonly opts: BoxManagerOptions) {
     this.run = opts.run ?? defaultRunner;
@@ -303,13 +324,129 @@ export class BoxManager {
       if (!found?.running) {
         await this.must(rt, ['start', boxContainerName(this.name)], 'start the box');
       }
+      // M20: la de conectores acompaña a la principal, si hay conectores. Un
+      // fallo suyo no tumba la caja del agente: sus tools no se ofrecerán.
+      if (this.opts.connectorsWanted?.()) await this.startConnectorsQuietly(rt);
       return this.describe(rt, await this.inspect(rt));
     });
+  }
+
+  /**
+   * M20 — arranca la caja de conectores si la principal está en marcha (al
+   * activar un conector con la caja ya arrancada). No arranca la principal.
+   */
+  ensureConnectors(): Promise<ConnectorsBoxStatus> {
+    return this.exclusive(async () => {
+      const rt = await this.requireRuntime();
+      const main = await this.inspect(rt);
+      if (main?.running) await this.startConnectorsQuietly(rt);
+      return this.describeConnectors(rt, await this.inspectConnectors(rt));
+    });
+  }
+
+  /** M20 — estado de la caja de conectores. Nunca lanza. */
+  async connectorsStatus(): Promise<ConnectorsBoxStatus> {
+    const detected = await this.detect();
+    if (!detected.ok) return { state: 'unavailable', reason: detected.reason, outdated: false };
+    try {
+      return this.describeConnectors(
+        detected.runtime,
+        await this.inspectConnectors(detected.runtime),
+      );
+    } catch (err) {
+      return { state: 'unavailable', reason: (err as Error).message, outdated: false };
+    }
+  }
+
+  private async startConnectorsQuietly(rt: ContainerRuntime): Promise<void> {
+    try {
+      await this.startConnectorsBox(rt);
+      this.connectorsError = null;
+    } catch (err) {
+      this.connectorsError = (err as Error).message;
+    }
+  }
+
+  private connectorsSpec(rt: ContainerRuntime): ConnectorsBoxSpec {
+    return {
+      name: this.name,
+      image: DEFAULT_BOX_IMAGE,
+      network: this.opts.config.network,
+      runtime: rt.kind,
+      platform: this.opts.platform ?? process.platform,
+    };
+  }
+
+  private async startConnectorsBox(rt: ContainerRuntime): Promise<void> {
+    const container = connectorsContainerName(this.name);
+    let found = await this.inspectConnectors(rt);
+    if (found && found.spec !== connectorsSpecHash(this.connectorsSpec(rt))) {
+      await this.must(rt, ['rm', '-f', container], 'remove the old connectors box');
+      found = null;
+    }
+    if (!found) {
+      await this.ensureStratumImage(rt);
+      await this.must(
+        rt,
+        connectorsCreateArgs(this.connectorsSpec(rt)),
+        'create the connectors box',
+      );
+    }
+    if (!found?.running) await this.must(rt, ['start', container], 'start the connectors box');
+  }
+
+  private describeConnectors(
+    rt: ContainerRuntime,
+    found: InspectedBox | null,
+  ): ConnectorsBoxStatus {
+    const reason = this.connectorsError ? { reason: this.connectorsError } : {};
+    if (!found) return { state: 'absent', outdated: false, ...reason };
+    return {
+      state: found.running ? 'running' : 'stopped',
+      outdated: found.spec !== connectorsSpecHash(this.connectorsSpec(rt)),
+      ...(found.running ? {} : reason),
+    };
+  }
+
+  /** `null` si no existe. Lanza si existe pero no es la caja de conectores de esta caja. */
+  private async inspectConnectors(rt: ContainerRuntime): Promise<InspectedBox | null> {
+    const container = connectorsContainerName(this.name);
+    const r = await this.run(rt.bin, ['container', 'inspect', container], {
+      timeoutMs: COMMAND_TIMEOUT_MS,
+    });
+    if (r.exitCode !== 0) {
+      if (isNoSuchObject(r.stderr)) return null;
+      throw new BoxCommandError(
+        `Could not inspect the connectors box: ${clip(r.stderr) || 'no output'}`,
+      );
+    }
+    let found: InspectedBox;
+    try {
+      found = parseInspect(r.stdout);
+    } catch {
+      throw new BoxCommandError(`Unexpected output from "${rt.bin} container inspect".`);
+    }
+    if (found.role !== 'connectors' || found.connectorsOf !== this.name || found.label) {
+      throw new BoxCommandError(
+        `A container named "${container}" exists but is not a Stratum connectors box ` +
+          `(no ${BOX_CONNECTORS_LABEL} label). Stratum will not touch it.`,
+      );
+    }
+    return found;
   }
 
   stop(): Promise<BoxStatus> {
     return this.exclusive(async () => {
       const rt = await this.requireRuntime();
+      // M20: la de conectores se para con la principal.
+      const connectors = await this.inspectConnectors(rt);
+      if (connectors?.running) {
+        await this.must(
+          rt,
+          ['stop', '-t', String(STOP_GRACE_S), connectorsContainerName(this.name)],
+          'stop the connectors box',
+        );
+      }
       const found = await this.inspect(rt);
       if (found?.running) {
         await this.must(
@@ -326,15 +463,27 @@ export class BoxManager {
   reset(): Promise<BoxStatus> {
     return this.exclusive(async () => {
       const rt = await this.requireRuntime();
-      // `inspect` primero: no se borra un contenedor que no sea de Stratum.
-      if (await this.inspect(rt)) {
+      // `inspect` primero, de las dos: no se borra nada si alguna no es de Stratum.
+      const main = await this.inspect(rt);
+      const connectors = await this.inspectConnectors(rt);
+      if (main) {
         await this.must(rt, ['rm', '-f', boxContainerName(this.name)], 'remove the box');
       }
-      const vol = await this.run(rt.bin, ['volume', 'rm', '-f', boxVolumeName(this.name)], {
-        timeoutMs: COMMAND_TIMEOUT_MS,
-      });
-      if (vol.exitCode !== 0 && !isNoSuchObject(vol.stderr)) {
-        throw new BoxCommandError(`Could not remove the box volume: ${clip(vol.stderr)}`);
+      // M20: también la caja de conectores y sus cachés.
+      if (connectors) {
+        await this.must(
+          rt,
+          ['rm', '-f', connectorsContainerName(this.name)],
+          'remove the connectors box',
+        );
+      }
+      for (const volume of [boxVolumeName(this.name), connectorsVolumeName(this.name)]) {
+        const vol = await this.run(rt.bin, ['volume', 'rm', '-f', volume], {
+          timeoutMs: COMMAND_TIMEOUT_MS,
+        });
+        if (vol.exitCode !== 0 && !isNoSuchObject(vol.stderr)) {
+          throw new BoxCommandError(`Could not remove the box volume: ${clip(vol.stderr)}`);
+        }
       }
       return this.describe(rt, null);
     });
@@ -405,16 +554,22 @@ export class BoxManager {
   /** La imagen de Stratum se construye en local si falta; una propia la descarga `create`. */
   private async ensureImage(rt: ContainerRuntime): Promise<void> {
     if (this.opts.config.image !== undefined) return;
-    const has = await this.run(rt.bin, ['image', 'inspect', this.image], {
+    await this.ensureStratumImage(rt);
+  }
+
+  /** La imagen de Stratum (la de la caja de conectores siempre lo es). */
+  private async ensureStratumImage(rt: ContainerRuntime): Promise<void> {
+    const image = DEFAULT_BOX_IMAGE;
+    const has = await this.run(rt.bin, ['image', 'inspect', image], {
       timeoutMs: COMMAND_TIMEOUT_MS,
     });
     if (has.exitCode === 0) return;
     const dir = this.opts.imageDir === undefined ? bundledBoxImageDir() : this.opts.imageDir;
     if (!dir) throw new BoxCommandError('The box image definition is missing from this install.');
-    this.opts.onProgress?.(`Building ${this.image} (first start only; this takes a few minutes)…`);
+    this.opts.onProgress?.(`Building ${image} (first start only; this takes a few minutes)…`);
     const built = await this.run(
       rt.bin,
-      ['build', '-t', this.image, '-f', join(dir, 'Containerfile'), dir],
+      ['build', '-t', image, '-f', join(dir, 'Containerfile'), dir],
       { timeoutMs: BUILD_TIMEOUT_MS, onOutput: this.opts.onProgress },
     );
     if (built.exitCode !== 0) {
