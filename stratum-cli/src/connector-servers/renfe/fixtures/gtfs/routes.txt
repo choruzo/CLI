@@ -1,0 +1,9 @@
+route_id,route_short_name,route_long_name,route_type,route_color,route_text_color
+10T0001C1  ,C1  ,Chamartín - Clara Campoamor      -Aeropuerto-T4   ,2,75B6E0,FFFFFF
+10T0002C1  ,C1  ,Aeropuerto-T4                    -Chamartín       ,2,75B6E0,FFFFFF
+10T0005C2  ,C2  ,Alcala de Henares                -Atocha          ,2,00943D,FFFFFF
+10T0006C2  ,C2  ,Atocha                           -Alcala de Henares,2,00943D,FFFFFF
+10T0007C3  ,C3  ,Chamartín                       -Aranjuez        ,2,952585,FFFFFF
+10T0008C3  ,C3  ,Aranjuez                        -Chamartín       ,2,952585,FFFFFF
+30T0001C1  ,C1  ,Santa Justa                     -Sol             ,2,AAAAAA,FFFFFF
+99T0001X1  ,X1  ,Núcleo desconocido               -Nada            ,2,000000,FFFFFF

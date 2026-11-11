@@ -1,0 +1,12 @@
+stop_id,stop_name,stop_lat,stop_lon,wheelchair_boarding
+17000,Madrid-Chamartín-Clara Campoamor,40.0,-3.0,1
+18002,Madrid-Nuevos Ministerios,40.0,-3.0,1
+18101,Sol,40.0,-3.0,1
+18000,Madrid-Atocha Cercanías,40.0,-3.0,1
+60200,Aranjuez,40.0,-3.0,1
+70103,Alcalá de Henares,40.0,-3.0,1
+70107,Alcalá de Henares-Universidad,40.0,-3.0,1
+98305,Madrid-Aeropuerto T4,40.0,-3.0,1
+51100,Sevilla-Santa Justa,40.0,-3.0,1
+51105,Sol,40.0,-3.0,1
+99999,Estación sin servicio,40.0,-3.0,1

@@ -1,0 +1,4784 @@
+{
+  "header": {
+    "gtfsRealtimeVersion": "2.0",
+    "timestamp": "1794424442"
+  },
+  "entity": [
+    {
+      "id": "AVISO_525546",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794399900"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "10T0001C1"
+          },
+          {
+            "routeId": "10T0002C1"
+          },
+          {
+            "routeId": "10T0005C2"
+          },
+          {
+            "routeId": "10T0006C2"
+          },
+          {
+            "routeId": "10T0037C2"
+          },
+          {
+            "routeId": "10T0007C3"
+          },
+          {
+            "routeId": "10T0008C3"
+          },
+          {
+            "routeId": "10T0011C4"
+          },
+          {
+            "routeId": "10T0012C4"
+          },
+          {
+            "routeId": "10T0013C4a"
+          },
+          {
+            "routeId": "10T0014C4a"
+          },
+          {
+            "routeId": "10T0015C4b"
+          },
+          {
+            "routeId": "10T0016C4b"
+          },
+          {
+            "routeId": "10T0017C5"
+          },
+          {
+            "routeId": "10T0018C5"
+          },
+          {
+            "routeId": "10T0035C5"
+          },
+          {
+            "routeId": "10T0047C5"
+          },
+          {
+            "routeId": "10T0048C5"
+          },
+          {
+            "routeId": "10T0053C7"
+          },
+          {
+            "routeId": "10T0054C7"
+          },
+          {
+            "routeId": "10T0060C7"
+          },
+          {
+            "routeId": "10T0059C7"
+          },
+          {
+            "routeId": "10T0051C7"
+          },
+          {
+            "routeId": "10T0052C7"
+          },
+          {
+            "routeId": "10T0026C9"
+          },
+          {
+            "routeId": "10T0111C9"
+          },
+          {
+            "routeId": "10T0025C9"
+          },
+          {
+            "routeId": "10T0112C9"
+          },
+          {
+            "routeId": "10T0075C10"
+          },
+          {
+            "routeId": "10T0064C10"
+          },
+          {
+            "routeId": "10T0071C10"
+          },
+          {
+            "routeId": "10T0004C10"
+          },
+          {
+            "routeId": "10T0076C10"
+          },
+          {
+            "routeId": "10T0003C10"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF, para el 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525498",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794386580"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "10T0005C2"
+          },
+          {
+            "routeId": "10T0006C2"
+          },
+          {
+            "routeId": "10T0037C2"
+          },
+          {
+            "routeId": "10T0053C7"
+          },
+          {
+            "routeId": "10T0054C7"
+          },
+          {
+            "routeId": "10T0060C7"
+          },
+          {
+            "routeId": "10T0059C7"
+          },
+          {
+            "routeId": "10T0051C7"
+          },
+          {
+            "routeId": "10T0052C7"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "#MadC2 #MadC7 #MadC8 Debido a la acumulación de trenes en la estación de Chamartín, los trenes están sufriendo demoras y detenciones a su llegada a la estación.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525483",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794372180"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "10T0001C1"
+          },
+          {
+            "routeId": "10T0002C1"
+          },
+          {
+            "routeId": "10T0005C2"
+          },
+          {
+            "routeId": "10T0006C2"
+          },
+          {
+            "routeId": "10T0037C2"
+          },
+          {
+            "routeId": "10T0007C3"
+          },
+          {
+            "routeId": "10T0008C3"
+          },
+          {
+            "routeId": "10T0011C4"
+          },
+          {
+            "routeId": "10T0012C4"
+          },
+          {
+            "routeId": "10T0013C4a"
+          },
+          {
+            "routeId": "10T0014C4a"
+          },
+          {
+            "routeId": "10T0015C4b"
+          },
+          {
+            "routeId": "10T0016C4b"
+          },
+          {
+            "routeId": "10T0017C5"
+          },
+          {
+            "routeId": "10T0018C5"
+          },
+          {
+            "routeId": "10T0035C5"
+          },
+          {
+            "routeId": "10T0047C5"
+          },
+          {
+            "routeId": "10T0048C5"
+          },
+          {
+            "routeId": "10T0053C7"
+          },
+          {
+            "routeId": "10T0054C7"
+          },
+          {
+            "routeId": "10T0060C7"
+          },
+          {
+            "routeId": "10T0059C7"
+          },
+          {
+            "routeId": "10T0051C7"
+          },
+          {
+            "routeId": "10T0052C7"
+          },
+          {
+            "routeId": "10T0026C9"
+          },
+          {
+            "routeId": "10T0111C9"
+          },
+          {
+            "routeId": "10T0025C9"
+          },
+          {
+            "routeId": "10T0112C9"
+          },
+          {
+            "routeId": "10T0075C10"
+          },
+          {
+            "routeId": "10T0064C10"
+          },
+          {
+            "routeId": "10T0071C10"
+          },
+          {
+            "routeId": "10T0004C10"
+          },
+          {
+            "routeId": "10T0076C10"
+          },
+          {
+            "routeId": "10T0003C10"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525129",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794219780"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "10T0017C5"
+          },
+          {
+            "routeId": "10T0018C5"
+          },
+          {
+            "routeId": "10T0035C5"
+          },
+          {
+            "routeId": "10T0047C5"
+          },
+          {
+            "routeId": "10T0048C5"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "#MadC5 Por obras de mejora en la infraestructura, los días 14, 15, 21 y 22 de noviembre, entre las 00:30h y las 08:30h, los trenes de la línea C-5 circularán con frecuencias de paso modificadas. Se recomienda consultar los horarios antes de viajar.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_483553",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1774611420"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "10T0026C9"
+          },
+          {
+            "routeId": "10T0111C9"
+          },
+          {
+            "routeId": "10T0025C9"
+          },
+          {
+            "routeId": "10T0112C9"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "#MadC9 Por obras de reforma integral en la línea C-9, se encuentra suspendido el servicio de trenes entre las estaciones de Cercedilla-Puerto de Navacerrada-Los Cotos. Se ha establecido un servicio especial de autobuses con reserva de plaza.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_467462",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1765528080"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "10T0026C9"
+          },
+          {
+            "routeId": "10T0111C9"
+          },
+          {
+            "routeId": "10T0025C9"
+          },
+          {
+            "routeId": "10T0112C9"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "#MadC9 Debido a las obras que se están realizando en la línea C-9, los aseos públicos de la estación de Cercedilla permanecen temporalmente inoperativos. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525389",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794486480"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "37010"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "La estación de Las Margaritas, en estos momentos, se encuentran inaccesibles.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525373",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794400080"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "35010"
+          },
+          {
+            "stopId": "37010"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Las estaciones de Las Margaritas y La Serna, en estos momentos, se encuentran inaccesibles.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525570",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794398640"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "18005"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Pirámides, con acceso desde el exterior a vestíbulo, se encuentra fuera de servicio. La estación se encuentra inaccesible. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525525",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794388620"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "35009"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Zarzaquemada, con acceso desde la avenida de Gran Bretaña, se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525524",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794388500"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "17005"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Colmenar Viejo, con acceso a vías 2 y 4, sentido Parla, se encuentra fuera de servicio. La estación se encuentra inaccesible. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525469",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794342120"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "10007"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación Majadahonda que da acceso a la vía 2 sentido Villalba / Alcalá de Henares, se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525079",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794214200"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "17005"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Colmenar Viejo, con acceso a vía 3, sentido Parla, se encuentra fuera de servicio. La estación se encuentra inaccesible. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_524808",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794119880"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "18000"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Atocha con acceso a las vías 5 y 6, sentido Alcobendas-San Sebastián de los Reyes y Colmenar Viejo, fuera de servicio. Como alternativa, puede utilizarse el otro ascensor de acceso a estas vías, situado al final de la pasarela.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_524807",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794119640"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "10200"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de Villalba que da acceso a las vías 2 y 3 sentido Cercedilla y El Escorial, se encuentran fuera de servicio. La estación queda inaccesible. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_523736",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793705520"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "70002"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Por trabajos de mantenimiento, ascensor de Asamblea de Madrid-Entrevías que da acceso a vía 2, sentido Alcalá de Henares y Guadalajara, se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_523608",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793629740"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "10103"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Plataforma de la estación de Torrelodones, con acceso a paso inferior conexión con andenes, se encuentra fuera de servicio. La estación se encuentra inaccesible. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_521805",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792911540"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "35009"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Zarzaquemada, con acceso a la vía 2 sentido Humanes, se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_520876",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792575240"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "18002"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de Nuevos Ministerios que da acceso del vestíbulo nuevo, Raimundo, a la vía 6 sentido Alcobendas y Colmenar, se encuentra fuera de servicio por mantenimiento.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_520666",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792473600"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "35009"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Zarzaquemada, con acceso desde la calle María Moliner, se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_520370",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792387440"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "35009"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Zarzaquemada, con acceso a vía 1 sentido Móstoles-El Soto, se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_519283",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1791788580"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "18002"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Nuevos Ministerios, con acceso desde el exterior a vestíbulo de Cercanías y Metro, se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525587",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794419280"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "30T0036C3"
+          },
+          {
+            "routeId": "30T0034C3"
+          },
+          {
+            "routeId": "30T0035C3"
+          },
+          {
+            "routeId": "30T0005C3"
+          },
+          {
+            "routeId": "30T0006C3"
+          },
+          {
+            "routeId": "30T0039C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C-3 \r\nTren con salida a las 18:12h de la estación de CAZALLA-CONSTANTINA y con destino SEVILLA SANTA JUSTA, circula con una demora de 38 minutos a su paso por PEDROSO. \r\nSentimos las molestias. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_512188",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1788837720"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "30T0036C3"
+          },
+          {
+            "routeId": "30T0034C3"
+          },
+          {
+            "routeId": "30T0035C3"
+          },
+          {
+            "routeId": "30T0005C3"
+          },
+          {
+            "routeId": "30T0006C3"
+          },
+          {
+            "routeId": "30T0039C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "ATENCIÓN Línea C3:\r\nPor obras de mejora en la infraestructura y para los trenes con origen/destino Madrid:\r\nSe establece un Plan Alternativo de Transporte por carretera entre las estaciones de Los Rosales y Cazalla-Constantina.\r\nEntre Los Rosales y Sevilla Santa Justa el recorrido se realiza con trenes de la línea C1.  (Consulta nuevos horarios por obras en canales oficiales y App).\r\nGracias por tu comprensión.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_442950",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1749487440"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "30T0036C3"
+          },
+          {
+            "routeId": "30T0034C3"
+          },
+          {
+            "routeId": "30T0035C3"
+          },
+          {
+            "routeId": "30T0005C3"
+          },
+          {
+            "routeId": "30T0006C3"
+          },
+          {
+            "routeId": "30T0039C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Para los trenes de la línea C3 con origen o destino MÉRIDA, CÁCERES, PLASENCIA y MADRID son válidos los títulos de viaje de Cercanías sin reserva de plaza asignada. Desde el día 3 de febrero, el transporte de bicicletas y otros elementos de movilidad individual y el viaje con animales de compañía, se rige por las condiciones generales de Media Distancia Convencional.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525476",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794350400"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "30T0001C1"
+          },
+          {
+            "routeId": "30T0002C1"
+          },
+          {
+            "routeId": "30T0003C2"
+          },
+          {
+            "routeId": "30T0004C2"
+          },
+          {
+            "routeId": "30T0036C3"
+          },
+          {
+            "routeId": "30T0034C3"
+          },
+          {
+            "routeId": "30T0035C3"
+          },
+          {
+            "routeId": "30T0005C3"
+          },
+          {
+            "routeId": "30T0006C3"
+          },
+          {
+            "routeId": "30T0039C3"
+          },
+          {
+            "routeId": "30T0007C4"
+          },
+          {
+            "routeId": "30T0009C5"
+          },
+          {
+            "routeId": "30T0029C5"
+          },
+          {
+            "routeId": "30T0010C5"
+          },
+          {
+            "routeId": "30T0030C5"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Cercanías Sevilla informa: Con motivo de la huelga general convocada para hoy, 11 de noviembre de 2026, la oferta habitual de trenes podrá verse afectada. Se recomienda planificar los desplazamientos con antelación y consultar la información actualizada sobre el estado del servicio a través de nuestros canales oficiales. Agradecemos su comprensión.\r\nMás información: https://grupo.renfe.com/es/es/sala-de-prensa/noticias/2026/11/establecidos-los-servicios-minimos-para-la-huelga-general-convocada-el-11n",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525014",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794202680"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "50600"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Actualmente, por motivos técnicos, el ascensor de la vía 4-6 de la estación de Lora del Río se encuentra fuera de servicio. Si tiene Movilidad Reducida y origen o destino en esta estación, contacte a través de los puntos de información en estaciones, máquinas auto venta o en el 954 485 672. Disculpe las molestias.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525594",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794422760"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "51405"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": " Línea C-1  \r\n\r\nTren con salida a las 19:20h de la estación de AEROPUERTO DE JEREZ y con destino CÁDIZ, efectúa dicha salida con una demora de 15 minutos. \r\n\r\nSentimos las molestias. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525590",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794421680"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "51405"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C-1 \r\n\r\n Por avería en el propio tren, entre las estaciones de CÁDIZ y JEREZ DE LA FRONTERA, el tren con salida a las 19:30h con destino JEREZ DE LA FRONTERA, no presta servicio. \r\n\r\n Los viajeros serán encaminados al siguiente tren con salida de CÁDIZ a las 21:50h. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525586",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794415920"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "31T0001C1"
+          },
+          {
+            "routeId": "31T0002C1"
+          },
+          {
+            "routeId": "31T0007C1"
+          },
+          {
+            "routeId": "31T0008C1"
+          },
+          {
+            "routeId": "31T0005T1"
+          },
+          {
+            "routeId": "31T0006T1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Por una incidencia técnica derivada del temporal, la estación de Cortadura se encuentra cerrada. Rogamos planifiquen sus desplazamientos evitando esta estación ya que el acceso a ella permanecerá imposibilitado hasta nuevo aviso. Disculpen las molestias",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525558",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794412800"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "51407"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Por una incidencia técnica derivada del temporal, la estación de Cortadura se encuentra cerrada. Rogamos planifiquen sus desplazamientos evitando esta estación ya que el acceso a ella permanecerá imposibilitado hasta nuevo aviso. Disculpen las molestias.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525575",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794403980"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "31T0001C1"
+          },
+          {
+            "routeId": "31T0002C1"
+          },
+          {
+            "routeId": "31T0007C1"
+          },
+          {
+            "routeId": "31T0008C1"
+          },
+          {
+            "routeId": "31T0005T1"
+          },
+          {
+            "routeId": "31T0006T1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Cercanías Cádiz informa: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual. Consulta la información actualizada sobre el estado del servicio a través de nuestros canales oficiales. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525472",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794346920"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "31T0001C1"
+          },
+          {
+            "routeId": "31T0002C1"
+          },
+          {
+            "routeId": "31T0007C1"
+          },
+          {
+            "routeId": "31T0008C1"
+          },
+          {
+            "routeId": "31T0005T1"
+          },
+          {
+            "routeId": "31T0006T1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Cercanías Cádiz y Trambahía informa: Con motivo de la huelga general convocada para hoy, 11 de noviembre de 2026, la oferta habitual de trenes podrá verse afectada. Se recomienda planificar los desplazamientos con antelación y consultar la información actualizada sobre el estado del servicio a través de nuestros canales oficiales. Agradecemos su comprensión.\r\nMás información: https://grupo.renfe.com/es/es/sala-de-prensa/noticias/2026/11/establecidos-los-servicios-minimos-para-la-huelga-general-convocada-el-11n",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525574",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794403920"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "32T0001C1"
+          },
+          {
+            "routeId": "32T0002C1"
+          },
+          {
+            "routeId": "32T0019C2"
+          },
+          {
+            "routeId": "32T0020C2"
+          },
+          {
+            "routeId": "32T0004C2"
+          },
+          {
+            "routeId": "32T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Cercanías Málaga informa\r\n\r\nDebido a la manifestación prevista para hoy a las 18:00 horas, el servicio podría verse puntualmente afectado y producirse modificaciones en la circulación habitual de algunos trenes.\r\n\r\nSe recomienda planificar los desplazamientos con antelación y consultar la información actualizada sobre el estado del servicio a través de nuestros canales oficiales.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525548",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794402420"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "32T0001C1"
+          },
+          {
+            "routeId": "32T0002C1"
+          },
+          {
+            "routeId": "32T0019C2"
+          },
+          {
+            "routeId": "32T0020C2"
+          },
+          {
+            "routeId": "32T0004C2"
+          },
+          {
+            "routeId": "32T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Cercanías Málaga informa\r\nDesconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026.\r\nEl servicio ferroviario se prestará conforme a la programación habitual.\r\nConsulta la información actualizada sobre el estado del servicio a través de nuestros canales oficiales.\r\n",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525487",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794376140"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "32T0001C1"
+          },
+          {
+            "routeId": "32T0002C1"
+          },
+          {
+            "routeId": "32T0019C2"
+          },
+          {
+            "routeId": "32T0020C2"
+          },
+          {
+            "routeId": "32T0004C2"
+          },
+          {
+            "routeId": "32T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.\r\n\r\n",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_523760",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793716140"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "32T0001C1"
+          },
+          {
+            "routeId": "32T0002C1"
+          },
+          {
+            "routeId": "32T0019C2"
+          },
+          {
+            "routeId": "32T0020C2"
+          },
+          {
+            "routeId": "32T0004C2"
+          },
+          {
+            "routeId": "32T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Renfe Cercanías Málaga informa que el andén 1 de la estación de Los Álamos no es accesible temporalmente para PMR. Rogamos disculpen las molestias",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_516966",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1790850060"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "32T0001C1"
+          },
+          {
+            "routeId": "32T0002C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Renfe Cercanías Málaga informa que la estación de TORREBLANCA no es accesible temporalmente para PMR, por motivos de mejora de la estación. Rogamos disculpen las molestias(-)",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_465103",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1763538000"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "32T0001C1"
+          },
+          {
+            "routeId": "32T0002C1"
+          },
+          {
+            "routeId": "32T0019C2"
+          },
+          {
+            "routeId": "32T0020C2"
+          },
+          {
+            "routeId": "32T0004C2"
+          },
+          {
+            "routeId": "32T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Renfe Cercanías Málaga informa que la estación de Plaza Mayor no es accesible temporalmente para PMR. Rogamos disculpen las molestias",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525624",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794423660"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0016C6"
+          },
+          {
+            "routeId": "40T0015C6"
+          },
+          {
+            "routeId": "40T0021C6"
+          },
+          {
+            "routeId": "40T0022C6"
+          },
+          {
+            "routeId": "40T0014C6"
+          },
+          {
+            "routeId": "40T0013C6"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C6. Tren con salida prevista a las 22:15h de la estación de Castelló con destino València Nord, hoy no circula. Se establece transporte alternativo por carretera.",
+              "language": "es"
+            },
+            {
+              "text": "Línia C6. Tren amb eixida prevista a les 22:15h de l\u0027estació de Castelló amb destinació València Nord, hui no circula. S\u0027establix transport alternatiu per carretera.\t",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525623",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794422880"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0002C1"
+          },
+          {
+            "routeId": "40T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C1. Tren con salida prevista a las 19:21h de la estación de València Nord con destino Gandia, circula por Alfafar-Benetússer con 15 minutos de retraso. \t\t\t\t",
+              "language": "es"
+            },
+            {
+              "text": "Línia C1. Tren amb eixida prevista a les 19:21h de l\u0027estació de València Nord amb destinació Gandia, circula per Alfafar-Benetússer amb 15 minuts de retard. \t\t\t",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525592",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794421920"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0016C6"
+          },
+          {
+            "routeId": "40T0015C6"
+          },
+          {
+            "routeId": "40T0021C6"
+          },
+          {
+            "routeId": "40T0022C6"
+          },
+          {
+            "routeId": "40T0014C6"
+          },
+          {
+            "routeId": "40T0013C6"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C6. Tren con salida prevista a las 19:20h de la estación de València Nord con destino Castelló, hoy no circula. \t\t\t\t",
+              "language": "es"
+            },
+            {
+              "text": "Línia C6. Tren amb eixida prevista a les 19:20h de l\u0027estació de València Nord amb destinació Castelló, hui no circula. \t\t\t",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525589",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794421260"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0054C3"
+          },
+          {
+            "routeId": "40T0026C3"
+          },
+          {
+            "routeId": "40T0044C3"
+          },
+          {
+            "routeId": "40T0043C3"
+          },
+          {
+            "routeId": "40T0055C3"
+          },
+          {
+            "routeId": "40T0017C3"
+          },
+          {
+            "routeId": "40T0046C3"
+          },
+          {
+            "routeId": "40T0008C3"
+          },
+          {
+            "routeId": "40T0045C3"
+          },
+          {
+            "routeId": "40T0007C3"
+          },
+          {
+            "routeId": "40T0025C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C3. Tren con salida prevista a las 18:43h de la estación de València Sant Isidre con destino Buñol, efectúa su salida con 34 minutos de retraso. \t\t\t\t",
+              "language": "es"
+            },
+            {
+              "text": "Línia C3. Tren amb eixida prevista a les 18:43h de l\u0027estació de València Sant Isidre amb destinació Buñol, efectua la seua eixida amb 34 minuts de retard. \t\t\t",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525583",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794412620"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0002C1"
+          },
+          {
+            "routeId": "40T0001C1"
+          },
+          {
+            "routeId": "40T0049C2"
+          },
+          {
+            "routeId": "40T0030C2"
+          },
+          {
+            "routeId": "40T0006C2"
+          },
+          {
+            "routeId": "40T0029C2"
+          },
+          {
+            "routeId": "40T0005C2"
+          },
+          {
+            "routeId": "40T0050C2"
+          },
+          {
+            "routeId": "40T0052C2"
+          },
+          {
+            "routeId": "40T0051C2"
+          },
+          {
+            "routeId": "40T0054C3"
+          },
+          {
+            "routeId": "40T0026C3"
+          },
+          {
+            "routeId": "40T0044C3"
+          },
+          {
+            "routeId": "40T0043C3"
+          },
+          {
+            "routeId": "40T0055C3"
+          },
+          {
+            "routeId": "40T0017C3"
+          },
+          {
+            "routeId": "40T0046C3"
+          },
+          {
+            "routeId": "40T0008C3"
+          },
+          {
+            "routeId": "40T0045C3"
+          },
+          {
+            "routeId": "40T0007C3"
+          },
+          {
+            "routeId": "40T0025C3"
+          },
+          {
+            "routeId": "40T0053C5"
+          },
+          {
+            "routeId": "40T0056C5"
+          },
+          {
+            "routeId": "40T0020C5"
+          },
+          {
+            "routeId": "40T0012C5"
+          },
+          {
+            "routeId": "40T0011C5"
+          },
+          {
+            "routeId": "40T0019C5"
+          },
+          {
+            "routeId": "40T0016C6"
+          },
+          {
+            "routeId": "40T0015C6"
+          },
+          {
+            "routeId": "40T0021C6"
+          },
+          {
+            "routeId": "40T0022C6"
+          },
+          {
+            "routeId": "40T0014C6"
+          },
+          {
+            "routeId": "40T0013C6"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            },
+            {
+              "text": "Desconvocats els aturs parcials previstos pel sindicat de maquinistes SEMAF per a demà, 12 de novembre de 2026. El servici ferroviari es prestarà conforme a la programació habitual.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525582",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794412140"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0002C1"
+          },
+          {
+            "routeId": "40T0001C1"
+          },
+          {
+            "routeId": "40T0049C2"
+          },
+          {
+            "routeId": "40T0030C2"
+          },
+          {
+            "routeId": "40T0006C2"
+          },
+          {
+            "routeId": "40T0029C2"
+          },
+          {
+            "routeId": "40T0005C2"
+          },
+          {
+            "routeId": "40T0050C2"
+          },
+          {
+            "routeId": "40T0052C2"
+          },
+          {
+            "routeId": "40T0051C2"
+          },
+          {
+            "routeId": "40T0054C3"
+          },
+          {
+            "routeId": "40T0026C3"
+          },
+          {
+            "routeId": "40T0044C3"
+          },
+          {
+            "routeId": "40T0043C3"
+          },
+          {
+            "routeId": "40T0055C3"
+          },
+          {
+            "routeId": "40T0017C3"
+          },
+          {
+            "routeId": "40T0046C3"
+          },
+          {
+            "routeId": "40T0008C3"
+          },
+          {
+            "routeId": "40T0045C3"
+          },
+          {
+            "routeId": "40T0007C3"
+          },
+          {
+            "routeId": "40T0025C3"
+          },
+          {
+            "routeId": "40T0053C5"
+          },
+          {
+            "routeId": "40T0056C5"
+          },
+          {
+            "routeId": "40T0020C5"
+          },
+          {
+            "routeId": "40T0012C5"
+          },
+          {
+            "routeId": "40T0011C5"
+          },
+          {
+            "routeId": "40T0019C5"
+          },
+          {
+            "routeId": "40T0016C6"
+          },
+          {
+            "routeId": "40T0015C6"
+          },
+          {
+            "routeId": "40T0021C6"
+          },
+          {
+            "routeId": "40T0022C6"
+          },
+          {
+            "routeId": "40T0014C6"
+          },
+          {
+            "routeId": "40T0013C6"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Debido a la manifestación prevista para hoy a las 18:00 horas, el servicio podría verse puntualmente afectado y producirse modificaciones en la circulación habitual de algunos trenes.\r\nSe recomienda planificar los desplazamientos con antelación y consultar la información actualizada sobre el estado del servicio a través de nuestros canales oficiales.",
+              "language": "es"
+            },
+            {
+              "text": "A causa de la manifestació prevista per a hui a les 18.00 hores, el servici podria veure\u0027s puntualment afectat i produir-se modificacions en la circulació habitual d\u0027alguns trens.Es recomana planificar els desplaçaments amb antelació i consultar la informació actualitzada sobre l\u0027estat del servici a través dels nostres canals oficials.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525457",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794351600"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0002C1"
+          },
+          {
+            "routeId": "40T0001C1"
+          },
+          {
+            "routeId": "40T0049C2"
+          },
+          {
+            "routeId": "40T0030C2"
+          },
+          {
+            "routeId": "40T0006C2"
+          },
+          {
+            "routeId": "40T0029C2"
+          },
+          {
+            "routeId": "40T0005C2"
+          },
+          {
+            "routeId": "40T0050C2"
+          },
+          {
+            "routeId": "40T0052C2"
+          },
+          {
+            "routeId": "40T0051C2"
+          },
+          {
+            "routeId": "40T0054C3"
+          },
+          {
+            "routeId": "40T0026C3"
+          },
+          {
+            "routeId": "40T0044C3"
+          },
+          {
+            "routeId": "40T0043C3"
+          },
+          {
+            "routeId": "40T0055C3"
+          },
+          {
+            "routeId": "40T0017C3"
+          },
+          {
+            "routeId": "40T0046C3"
+          },
+          {
+            "routeId": "40T0008C3"
+          },
+          {
+            "routeId": "40T0045C3"
+          },
+          {
+            "routeId": "40T0007C3"
+          },
+          {
+            "routeId": "40T0025C3"
+          },
+          {
+            "routeId": "40T0053C5"
+          },
+          {
+            "routeId": "40T0056C5"
+          },
+          {
+            "routeId": "40T0020C5"
+          },
+          {
+            "routeId": "40T0012C5"
+          },
+          {
+            "routeId": "40T0011C5"
+          },
+          {
+            "routeId": "40T0019C5"
+          },
+          {
+            "routeId": "40T0016C6"
+          },
+          {
+            "routeId": "40T0015C6"
+          },
+          {
+            "routeId": "40T0021C6"
+          },
+          {
+            "routeId": "40T0022C6"
+          },
+          {
+            "routeId": "40T0014C6"
+          },
+          {
+            "routeId": "40T0013C6"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            },
+            {
+              "text": "Amb motiu de la vaga general convocada per a hui, 11 de novembre, el servici podria veure\u0027s afectat. Consulta tota la informació en els nostres canals oficials. Gràcies per la teua comprensió.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_524423",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793955420"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "69110"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Gandía, sentido València de vía 2, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Gandía, sentit València de via 2, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_523570",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793620860"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "65007"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de El Puig, sentido València de vía 1, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de El Puig , sentit València de via 1, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_523139",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793449020"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "69104"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Cullera, sentido Gandia de vías 1-3, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Cullera, sentit Gandia de vias 1-3, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_520678",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792484160"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64105"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "En estos momentos Renfe no garantiza accesibilidad a la estación de Algemesí para usuarios con movilidad reducida. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "En estos moments Renfe no garantix accessibilitat a l\u0027estació de Algemesí per a usuaris amb mobilitat reduïda. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_520656",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792483920"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64105"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Algmesí, sentido  Xátiva de vía 1, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Algemesí, sentit Xátiva de via 1, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_519967",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792213740"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64103"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Carcaixent, sentido Xàtiva de vía 1, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Carcaixent, sentit Xàtiva de via 1, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_519640",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1791992220"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64203"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "En estos momentos Renfe no garantiza accesibilidad a la estación de Alfafar -  Bentússer para usuarios con movilidad reducida. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "En estos moments Renfe no garantix accessibilitat a l\u0027estació de Alfafar -  Bentússer  per a usuaris amb mobilitat reduïda. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_519639",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1791992160"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64103"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "En estos momentos Renfe no garantiza accesibilidad a la estación de Carcaixent para usuarios con movilidad reducida. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "En estos moments Renfe no garantix accessibilitat a l\u0027estació de Carcaixent per a usuaris amb mobilitat reduïda. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_519596",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1791974520"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "69103"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Sueca , sentido Gandia de vía 1, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Sueca, sentit Gandía de via 1, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_519517",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1791900240"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64203"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Alfafar, sentido València de vía 2, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Alfafar, sentit València de via 2, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_512648",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1789039200"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0054C3"
+          },
+          {
+            "routeId": "40T0026C3"
+          },
+          {
+            "routeId": "40T0044C3"
+          },
+          {
+            "routeId": "40T0043C3"
+          },
+          {
+            "routeId": "40T0055C3"
+          },
+          {
+            "routeId": "40T0017C3"
+          },
+          {
+            "routeId": "40T0046C3"
+          },
+          {
+            "routeId": "40T0008C3"
+          },
+          {
+            "routeId": "40T0045C3"
+          },
+          {
+            "routeId": "40T0007C3"
+          },
+          {
+            "routeId": "40T0025C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "#LÍNEA C3. SERVICIO ALTERNATIVO POR AUTOBÚS entre las estaciones de Valencia Font de Sant Lluis y Valencia Sant Isidre por obras de mejora en la infraestructura desde el 13 de septiembre. Los viajeros con título de transporte SUMA y destino València, también pueden realizar transbordo en València Sant Isidre con Metro. Consulte los horarios en: https://renfe.com/es/es/cercanias/cercanias-valencia/horarios#/buscar",
+              "language": "es"
+            },
+            {
+              "text": "#LÍNIA C3. SERVEI ALTERNATIU PER AUTOBÚS entre les estacions de València Font de Sant Lluis i València Sant Isidre per obres de millora en la infraestructura des de el 13 de setembre. Els viatgers amb títol de transport SUMA i destí València, també poden realitzar transbord a València Sant Isidre amb Metro. Consulte els horaris en: https://renfe.com/es/es/cercanias/cercanias-valencia/horarios#/buscar",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_505428",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1785751440"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64203"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Alfafar- Benetusser paso urbano, acceso a paso inferior, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Alfafar- Benetusser, pas urbà, accés a pas inferior, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_505463",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1785751260"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "64203"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Ascensor de la estación de Alfafar- Benetusser, sentido Gandia y Xàtiva de vía 1, se encuentra fuera de servicio. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Ascensor de l\u0027estació de Alfafar- Benetusser, sentit Gandia i Xàtiva de via 1, es troba fora de servei. Disculpen les molèsties.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_470390",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1767421620"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0053C5"
+          },
+          {
+            "routeId": "40T0056C5"
+          },
+          {
+            "routeId": "40T0020C5"
+          },
+          {
+            "routeId": "40T0012C5"
+          },
+          {
+            "routeId": "40T0011C5"
+          },
+          {
+            "routeId": "40T0019C5"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "SERVICIO POR AUTOBÚS C-5: Plan alternativo de transporte por carretera. Más información: https://www.renfe.com/es/es/grupo-renfe/comunicacion/renfe-al-dia/avisos/plan-alternativo-carretera-zaragoza-teruel-sagunto-valencia-obras",
+              "language": "es"
+            },
+            {
+              "text": "SERVEI PER AUTOBÚS C-5: Pla alternatiu de transport per carretera. Més informació: https://www.renfe.com/es/es/grupo-renfe/comunicacion/renfe-al-dia/avisos/plan-alternativo-carretera-zaragoza-teruel-sagunto-valencia-obras",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_442947",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1749469860"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "40T0054C3"
+          },
+          {
+            "routeId": "40T0026C3"
+          },
+          {
+            "routeId": "40T0044C3"
+          },
+          {
+            "routeId": "40T0043C3"
+          },
+          {
+            "routeId": "40T0055C3"
+          },
+          {
+            "routeId": "40T0017C3"
+          },
+          {
+            "routeId": "40T0046C3"
+          },
+          {
+            "routeId": "40T0008C3"
+          },
+          {
+            "routeId": "40T0045C3"
+          },
+          {
+            "routeId": "40T0007C3"
+          },
+          {
+            "routeId": "40T0025C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "SERVICIO POR AUTOBÚS C-3: Plan alternativo de transporte por carretera. Más información: https://grupo.renfe.com/es/es/sala-de-prensa/noticias/2025/12/plan-transporte-c3-valencia",
+              "language": "es"
+            },
+            {
+              "text": "SERVEI PER AUTOBÚS C-3: Pla alternatiu de transport per carretera. Més informació: https://grupo.renfe.com/es/es/sala-de-prensa/noticias/2025/12/plan-transporte-c3-valencia\r\n",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525579",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794438000"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "41T0002C1"
+          },
+          {
+            "routeId": "41T0013C1"
+          },
+          {
+            "routeId": "41T0001C1"
+          },
+          {
+            "routeId": "41T0027C1"
+          },
+          {
+            "routeId": "41T0030C1"
+          },
+          {
+            "routeId": "41T0026C1"
+          },
+          {
+            "routeId": "41T0031C1"
+          },
+          {
+            "routeId": "41T0023C2"
+          },
+          {
+            "routeId": "41T0025C2"
+          },
+          {
+            "routeId": "41T0024C2"
+          },
+          {
+            "routeId": "41T0029C2"
+          },
+          {
+            "routeId": "41T0028C2"
+          },
+          {
+            "routeId": "41T0011C3"
+          },
+          {
+            "routeId": "41T0006C3"
+          },
+          {
+            "routeId": "41T0005C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para hoy, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual",
+              "language": "es"
+            },
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para hoy, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525591",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794421860"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "41T0002C1"
+          },
+          {
+            "routeId": "41T0013C1"
+          },
+          {
+            "routeId": "41T0001C1"
+          },
+          {
+            "routeId": "41T0027C1"
+          },
+          {
+            "routeId": "41T0030C1"
+          },
+          {
+            "routeId": "41T0026C1"
+          },
+          {
+            "routeId": "41T0031C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Línea C1. Tren con salida prevista a las 19:10h de la estación de Alacant Terminal con destino Murcia del Carmen, hace su salida con 16 minutos de retraso. Incidencia operativa.",
+              "language": "es"
+            },
+            {
+              "text": "Línea C1. Tren con salida prevista a las 19:10h de la estación de Alacant Terminal con destino Murcia del Carmen, hace su salida con 16 minutos de retraso. Incidencia operativa.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525556",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794409500"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "41T0002C1"
+          },
+          {
+            "routeId": "41T0013C1"
+          },
+          {
+            "routeId": "41T0001C1"
+          },
+          {
+            "routeId": "41T0027C1"
+          },
+          {
+            "routeId": "41T0030C1"
+          },
+          {
+            "routeId": "41T0026C1"
+          },
+          {
+            "routeId": "41T0031C1"
+          },
+          {
+            "routeId": "41T0023C2"
+          },
+          {
+            "routeId": "41T0025C2"
+          },
+          {
+            "routeId": "41T0024C2"
+          },
+          {
+            "routeId": "41T0029C2"
+          },
+          {
+            "routeId": "41T0028C2"
+          },
+          {
+            "routeId": "41T0011C3"
+          },
+          {
+            "routeId": "41T0006C3"
+          },
+          {
+            "routeId": "41T0005C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            },
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525572",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794400800"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "41T0002C1"
+          },
+          {
+            "routeId": "41T0013C1"
+          },
+          {
+            "routeId": "41T0001C1"
+          },
+          {
+            "routeId": "41T0027C1"
+          },
+          {
+            "routeId": "41T0030C1"
+          },
+          {
+            "routeId": "41T0026C1"
+          },
+          {
+            "routeId": "41T0031C1"
+          },
+          {
+            "routeId": "41T0023C2"
+          },
+          {
+            "routeId": "41T0025C2"
+          },
+          {
+            "routeId": "41T0024C2"
+          },
+          {
+            "routeId": "41T0029C2"
+          },
+          {
+            "routeId": "41T0028C2"
+          },
+          {
+            "routeId": "41T0011C3"
+          },
+          {
+            "routeId": "41T0006C3"
+          },
+          {
+            "routeId": "41T0005C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            },
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525451",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794351540"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "41T0002C1"
+          },
+          {
+            "routeId": "41T0013C1"
+          },
+          {
+            "routeId": "41T0001C1"
+          },
+          {
+            "routeId": "41T0027C1"
+          },
+          {
+            "routeId": "41T0030C1"
+          },
+          {
+            "routeId": "41T0026C1"
+          },
+          {
+            "routeId": "41T0031C1"
+          },
+          {
+            "routeId": "41T0011C3"
+          },
+          {
+            "routeId": "41T0006C3"
+          },
+          {
+            "routeId": "41T0005C3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            },
+            {
+              "text": "Con motivo de la huelga general de hoy, 11 de noviembre, el servicio podría verse afectado. Mañana día 12 de noviembre se establecen paros parciales en las franjas de 6:20 a 9:20, de 14:20 a 17:20 y de 21:20 a 23:20 convocados por el sindicato de maquinistas SEMAF. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_446239",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1751362440"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "41T0023C2"
+          },
+          {
+            "routeId": "41T0025C2"
+          },
+          {
+            "routeId": "41T0024C2"
+          },
+          {
+            "routeId": "41T0029C2"
+          },
+          {
+            "routeId": "41T0028C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Plan alternativo de transporte para la Línea C2 de Cercanías por obras de Adif en la Región de Murcia. Consulte Horarios: https://www.renfe.com/es/es/grupo-renfe/comunicacion/renfe-al-dia/avisos/plan-alternativo-transporte-derovadp-obras-adif-ave-region-murcia",
+              "language": "es"
+            },
+            {
+              "text": "Plan alternativo de transporte para la Línea C2 de Cercanías por obras de Adif en la Región de Murcia. Consulte Horarios: https://www.renfe.com/es/es/grupo-renfe/comunicacion/renfe-al-dia/avisos/plan-alternativo-transporte-derovadp-obras-adif-ave-region-murcia",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525608",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794417960"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0002R1"
+          },
+          {
+            "routeId": "51T0001R1"
+          },
+          {
+            "routeId": "51T0025R2"
+          },
+          {
+            "routeId": "51T0013R2"
+          },
+          {
+            "routeId": "51T0026R2"
+          },
+          {
+            "routeId": "51T0014R2"
+          },
+          {
+            "routeId": "51T0027R2"
+          },
+          {
+            "routeId": "51T0028R2"
+          },
+          {
+            "routeId": "51T0095R2"
+          },
+          {
+            "routeId": "51T0004R2N"
+          },
+          {
+            "routeId": "51T0003R2N"
+          },
+          {
+            "routeId": "51T0012R2S"
+          },
+          {
+            "routeId": "51T0008R2S"
+          },
+          {
+            "routeId": "51T0007R2S"
+          },
+          {
+            "routeId": "51T0011R2S"
+          },
+          {
+            "routeId": "51T0040R3"
+          },
+          {
+            "routeId": "51T0195R3"
+          },
+          {
+            "routeId": "51T0015R3"
+          },
+          {
+            "routeId": "51T0196R3"
+          },
+          {
+            "routeId": "51T0016R3"
+          },
+          {
+            "routeId": "51T0039R3"
+          },
+          {
+            "routeId": "51T0197R3"
+          },
+          {
+            "routeId": "51T0186R3"
+          },
+          {
+            "routeId": "51T0190R3"
+          },
+          {
+            "routeId": "51T0198R3"
+          },
+          {
+            "routeId": "51T0201R3"
+          },
+          {
+            "routeId": "51T0187R3"
+          },
+          {
+            "routeId": "51T0202R3"
+          },
+          {
+            "routeId": "51T0191R3"
+          },
+          {
+            "routeId": "51T0199R3"
+          },
+          {
+            "routeId": "51T0127R3"
+          },
+          {
+            "routeId": "51T0188R3"
+          },
+          {
+            "routeId": "51T0203R3"
+          },
+          {
+            "routeId": "51T0045R3"
+          },
+          {
+            "routeId": "51T0192R3"
+          },
+          {
+            "routeId": "51T0033R3"
+          },
+          {
+            "routeId": "51T0128R3"
+          },
+          {
+            "routeId": "51T0189R3"
+          },
+          {
+            "routeId": "51T0204R3"
+          },
+          {
+            "routeId": "51T0046R3"
+          },
+          {
+            "routeId": "51T0193R3"
+          },
+          {
+            "routeId": "51T0034R3"
+          },
+          {
+            "routeId": "51T0194R3"
+          },
+          {
+            "routeId": "51T0020R4"
+          },
+          {
+            "routeId": "51T0031R4"
+          },
+          {
+            "routeId": "51T0032R4"
+          },
+          {
+            "routeId": "51T0019R4"
+          },
+          {
+            "routeId": "51T0030R7"
+          },
+          {
+            "routeId": "51T0029R7"
+          },
+          {
+            "routeId": "51T0023R8"
+          },
+          {
+            "routeId": "51T0024R8"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Debido a los problemas de movilidad en las carreteras por la huelga general, el personal de conducción no puede llegar a las estaciones y no se están cumpliendo los servicios mínimos programados. Recomendamos buscar medios alternativos de transporte: https://mou-te.gencat.cat/itinerary.",
+              "language": "es"
+            },
+            {
+              "text": "Degut als problemes de mobilitat a les carreteres per la vaga general, el personal de conducció no pot arribar a les estacions i no sestan complint els serveis mínims programats. Recomanem buscar mitjans alternatius de transport: https://mou-te.gencat.cat/itinerary.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525563",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794396000"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0025R2"
+          },
+          {
+            "routeId": "51T0013R2"
+          },
+          {
+            "routeId": "51T0026R2"
+          },
+          {
+            "routeId": "51T0014R2"
+          },
+          {
+            "routeId": "51T0027R2"
+          },
+          {
+            "routeId": "51T0028R2"
+          },
+          {
+            "routeId": "51T0095R2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Por obras de Adif en el entorno de Castelldefels, del 12 de noviembre al 14 de diciembre se modifica temporalmente el servicio de la línea R2. Los trenes Granollers Centre - Castelldefels iniciarán y finalizarán su recorrido en Gavà.",
+              "language": "es"
+            },
+            {
+              "text": "Per obres d\u0027Adif a l\u0027entorn de Castelldefels, del 12 de novembre al 14 de desembre es modifica temporalment el servei de la línia R2. Els trens Granollers Centre - Castelldefels iniciaran i finalitzaran el seu recorregut a Gavà.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525504",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794376500"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0040R3"
+          },
+          {
+            "routeId": "51T0195R3"
+          },
+          {
+            "routeId": "51T0015R3"
+          },
+          {
+            "routeId": "51T0196R3"
+          },
+          {
+            "routeId": "51T0016R3"
+          },
+          {
+            "routeId": "51T0039R3"
+          },
+          {
+            "routeId": "51T0197R3"
+          },
+          {
+            "routeId": "51T0186R3"
+          },
+          {
+            "routeId": "51T0190R3"
+          },
+          {
+            "routeId": "51T0198R3"
+          },
+          {
+            "routeId": "51T0201R3"
+          },
+          {
+            "routeId": "51T0187R3"
+          },
+          {
+            "routeId": "51T0202R3"
+          },
+          {
+            "routeId": "51T0191R3"
+          },
+          {
+            "routeId": "51T0199R3"
+          },
+          {
+            "routeId": "51T0127R3"
+          },
+          {
+            "routeId": "51T0188R3"
+          },
+          {
+            "routeId": "51T0203R3"
+          },
+          {
+            "routeId": "51T0045R3"
+          },
+          {
+            "routeId": "51T0192R3"
+          },
+          {
+            "routeId": "51T0033R3"
+          },
+          {
+            "routeId": "51T0128R3"
+          },
+          {
+            "routeId": "51T0189R3"
+          },
+          {
+            "routeId": "51T0204R3"
+          },
+          {
+            "routeId": "51T0046R3"
+          },
+          {
+            "routeId": "51T0193R3"
+          },
+          {
+            "routeId": "51T0034R3"
+          },
+          {
+            "routeId": "51T0194R3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Debido a manifestaciones en el entorno de Fabra i Puig, se están produciendo demoras en el servicio alternativo por carretera de la línea.",
+              "language": "es"
+            },
+            {
+              "text": "A causa de manifestacions a l\u0027entorn de Fabra i Puig, s\u0027estan produint demores en el servei alternatiu per carretera de la línia.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_521806",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792911840"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0030R7"
+          },
+          {
+            "routeId": "51T0029R7"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Servicio ferroviario entre Montcada Bifurcació y Cerdanyola Universitat. El tramo entre Fabra i Puig y Montcada Bifurcació se realiza mediante los servicios de la línea R4.",
+              "language": "es"
+            },
+            {
+              "text": "Servei ferroviari entre Montcada Bifurcació i Cerdanyola Universitat. El tram entre Fabra i Puig i Montcada Bifurcació es realitza mitjançant els serveis de la línia R4.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_521823",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792911720"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0040R3"
+          },
+          {
+            "routeId": "51T0195R3"
+          },
+          {
+            "routeId": "51T0015R3"
+          },
+          {
+            "routeId": "51T0196R3"
+          },
+          {
+            "routeId": "51T0016R3"
+          },
+          {
+            "routeId": "51T0039R3"
+          },
+          {
+            "routeId": "51T0197R3"
+          },
+          {
+            "routeId": "51T0186R3"
+          },
+          {
+            "routeId": "51T0190R3"
+          },
+          {
+            "routeId": "51T0198R3"
+          },
+          {
+            "routeId": "51T0201R3"
+          },
+          {
+            "routeId": "51T0187R3"
+          },
+          {
+            "routeId": "51T0202R3"
+          },
+          {
+            "routeId": "51T0191R3"
+          },
+          {
+            "routeId": "51T0199R3"
+          },
+          {
+            "routeId": "51T0127R3"
+          },
+          {
+            "routeId": "51T0188R3"
+          },
+          {
+            "routeId": "51T0203R3"
+          },
+          {
+            "routeId": "51T0045R3"
+          },
+          {
+            "routeId": "51T0192R3"
+          },
+          {
+            "routeId": "51T0033R3"
+          },
+          {
+            "routeId": "51T0128R3"
+          },
+          {
+            "routeId": "51T0189R3"
+          },
+          {
+            "routeId": "51T0204R3"
+          },
+          {
+            "routeId": "51T0046R3"
+          },
+          {
+            "routeId": "51T0193R3"
+          },
+          {
+            "routeId": "51T0034R3"
+          },
+          {
+            "routeId": "51T0194R3"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Circulación ferroviaria entre La Garriga - Puigcerdà/La Tor de Querol. Servicio alternativo por carretera entre Fabra i Puig - La Garriga. Servicio complementario por carretera entre La Garriga - Puigcerdà/La Tor de Querol.",
+              "language": "es"
+            },
+            {
+              "text": "Circulació ferroviària entre la Garriga i Puigcerdà/La Tor de Querol. Servei alternatiu per carretera entre Fabra i Puig - La Garriga. Servei complementari per carretera entre La Garriga - Puigcerdà/La Tor de Querol.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525503",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794376560"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Gaurko, azaroak 11, deitutako greba orokorra dela eta, zerbitzuan eragina izan dezake. Kontsultatu informazio guztia gure kanal ofizialetan. Eskerrik asko zure ulermenagatik. // Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            },
+            {
+              "text": "Gaurko, azaroak 11, deitutako greba orokorra dela eta, zerbitzuan eragina izan dezake. Kontsultatu informazio guztia gure kanal ofizialetan. Eskerrik asko zure ulermenagatik. // Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_523425",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793544360"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "13208"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "SAN MAMES. Torres Quevedo irtenbidea: 2 trenbideko eskailera mekanikoak zerbitzuz kanpo daude. // Salida Torres Quevedo: escaleras mecánicas de vía 2 se encuentran fuera de servicio.",
+              "language": "es"
+            },
+            {
+              "text": "SAN MAMES. Torres Quevedo irtenbidea: 2 trenbideko eskailera mekanikoak zerbitzuz kanpo daude. // Salida Torres Quevedo: escaleras mecánicas de vía 2 se encuentran fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_518804",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1791568740"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "13120"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "MIRIBILLA: Lau igogailu zerbitzuz kanpo daude. // Cuatro de los ascensores se encuentran fuera de servicio.",
+              "language": "es"
+            },
+            {
+              "text": "MIRIBILLA: igogailu batek zerbitzuz kanpo dago. // Uno de los ascensores se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525249",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794259080"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "AMETZOLA. 2. trenbideko igogailua zerbitzuz kanpo daude. // AMETZOLA. Ascensor de vía 2 se encuentra fuera de servicio. ",
+              "language": "es"
+            },
+            {
+              "text": "AMETZOLA. 2. trenbideko igogailua zerbitzuz kanpo daude. // AMETZOLA. Ascensor de vía 2 se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_524436",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793965080"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "LA PEÑA. Kanpoko eskailerak mekanikoak zerbitzuz kanpo daude. //  LA PEÑA. Escaleras mecánicas exteriores se encuentran fuera de servicio. ",
+              "language": "es"
+            },
+            {
+              "text": "LA PEÑA. Kanpoko eskailerak mekanikoak zerbitzuz kanpo daude. //  LA PEÑA. Escaleras mecánicas exteriores se encuentran fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_524427",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793957280"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "AMURRIO. 1. trenbideko igogailua zerbitzuz kanpo daude. // AMURRIO. Ascensor de vía 1 se encuentra fuera de servicio. ",
+              "language": "es"
+            },
+            {
+              "text": "AMURRIO. 1. trenbideko igogailua zerbitzuz kanpo daude. // AMURRIO. Ascensor de vía 1 se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_512463",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1788967440"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "GÜEÑES. Matxura baten ondorioz, Güeneseko geltokiko sarbide nagusia itxita dago aldi baterako. Geltokiaren eraikinaren ondoko burdin hesi batetik sartzeko aukera ezarri da. //  El acceso principal de la estación de Güenes se encuentra temporalmente cerrado debido a una avería. Se ha habilitado un acceso por una verja colindante al edificio de la estación.",
+              "language": "es"
+            },
+            {
+              "text": "#BilboAldiriakC4 Matxura baten ondorioz, Güeneseko geltokiko sarbide nagusia itxita dago aldi baterako. Geltokiaren eraikinaren ondoko burdin hesi batetik sartzeko aukera ezarri da. // #BilbaoC4 El acceso principal de la estación de Güenes se encuentra temporalmente cerrado debido a una avería. Se ha habilitado un acceso por una verja colindante al edificio de la estación.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_509499",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1787645340"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "BALMASEDA. Ekainaren 29tik aurrera, Balmasedako geltokia itxita egongo da hobekuntza lanak direla eta. Nasara sartzeko. Justizia Jauregiaren ondoko kale beretik joan zaitezkete. // Desde el día 29 de junio, el acceso al vestíbulo de la estación de Balmaseda por la Calle Estación permanecerá cerrado temporalmente por obras de mejora. Para acceder al andén, utilicen el acceso situado en la misma calle, junto al Palacio de Justicia.",
+              "language": "es"
+            },
+            {
+              "text": "BALMASEDA. Ekainaren 29tik aurrera, Balmasedako geltokia itxita egongo da hobekuntza lanak direla eta. Nasara sartzeko. Justizia Jauregiaren ondoko kale beretik joan zaitezkete. // Desde el día 29 de junio, el acceso al vestíbulo de la estación de Balmaseda por la Calle Estación permanecerá cerrado temporalmente por obras de mejora. Para acceder al andén, utilicen el acceso situado en la misma calle, junto al Palacio de Justicia.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_508393",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1787041860"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "BIDEBIETA-BASAURI. Azpiegiturako lanak direla eta, sarbide berria egongo da, Agirre Lehendakaria etorbidearen eta Fauste kalearen artean dagoen plazatik. // BIDEBIETA-BASAURI. Debido a obras en la infraestructura, el acceso a la estación se realizará por la plaza situada entre Av. Agirre Lehendariak y Calle Fauste. ",
+              "language": "es"
+            },
+            {
+              "text": "BIDEBIETA-BASAURI. Azpiegiturako lanak direla eta, sarbide berria egongo da, Agirre Lehendakaria etorbidearen eta Fauste kalearen artean dagoen plazatik. // BIDEBIETA-BASAURI. Debido a obras en la infraestructura, el acceso a la estación se realizará por la plaza situada entre Av. Agirre Lehendariak y Calle Fauste. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_510941",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1778830380"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "60T0002C1"
+          },
+          {
+            "routeId": "60T0001C1"
+          },
+          {
+            "routeId": "60T0008C4"
+          },
+          {
+            "routeId": "60T0007C4"
+          },
+          {
+            "routeId": "60T0019C5"
+          },
+          {
+            "routeId": "60T0006C3"
+          },
+          {
+            "routeId": "60T0018C5"
+          },
+          {
+            "routeId": "60T0005C3"
+          },
+          {
+            "routeId": "60T0020C5"
+          },
+          {
+            "routeId": "60T0017C5"
+          },
+          {
+            "routeId": "60T0004C2"
+          },
+          {
+            "routeId": "60T0003C2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Desertu-Barakaldoko geltokia hobetzeko obrak direla eta, eraikin zaharra aldi baterako itxita egongo da. Jarduketek irauten duten bitartean, eraikinaren ondoan egokitutako sarbide batetik egingo da sarrera eta irteera. Irisgarritasuna eta instalazioak hobetzeko lanean jarraitzen dugu. Barkatu eragozpenak. // Debido a las obras de mejora en la estación de Desertu-Barakaldo, el edificio antiguo permanecerá cerrado temporalmente. Mientras duren las actuaciones, la entrada y salida se realizará por un acceso habilitado junto al edificio. Seguimos trabajando para mejorar la accesibilidad y las instalaciones. Disculpen las molestias.",
+              "language": "es"
+            },
+            {
+              "text": "Desertu-Barakaldoko geltokia hobetzeko obrak direla eta, eraikin zaharra aldi baterako itxita egongo da. Jarduketek irauten duten bitartean, eraikinaren ondoan egokitutako sarbide batetik egingo da sarrera eta irteera. Irisgarritasuna eta instalazioak hobetzeko lanean jarraitzen dugu. Barkatu eragozpenak. // Debido a las obras de mejora en la estación de Desertu-Barakaldo, el edificio antiguo permanecerá cerrado temporalmente. Mientras duren las actuaciones, la entrada y salida se realizará por un acceso habilitado junto al edificio. Seguimos trabajando para mejorar la accesibilidad y las instalaciones. Disculpen las molestias.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525478",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794369540"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "61T0006C1"
+          },
+          {
+            "routeId": "61T0005C1"
+          },
+          {
+            "routeId": "61T0002C1"
+          },
+          {
+            "routeId": "61T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Gaurko, azaroak 11, deitutako greba orokorra dela eta, zerbitzuan eragina izan dezake. Kontsultatu informazio guztia gure kanal ofizialetan. Eskerrik asko zure ulermenagatik.      //     Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            },
+            {
+              "text": "Gaurko, azaroak 11, deitutako greba orokorra dela eta, zerbitzuan eragina izan dezake. Kontsultatu informazio guztia gure kanal ofizialetan. Eskerrik asko zure ulermenagatik.      //     Con motivo de la huelga general convocada para hoy, 11 de noviembre, el servicio podría verse afectado. Consulta toda la información en nuestros canales oficiales. Gracias por tu comprensión.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_525499",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794389040"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "61T0006C1"
+          },
+          {
+            "routeId": "61T0005C1"
+          },
+          {
+            "routeId": "61T0002C1"
+          },
+          {
+            "routeId": "61T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "INTXAURRONDO. 1. trenbideko igogailua zerbitzuz kanpo dago. // INTXAURRONDO. Ascensor de vía 1 se encuentra fuera de servicio.",
+              "language": "es"
+            },
+            {
+              "text": "INTXAURRONDO. 1. trenbideko igogailua zerbitzuz kanpo dago. // INTXAURRONDO. Ascensor de vía 1 se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_524688",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794046560"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "11510"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "LOIOLA. 1. trenbideko igogailua zerbitzuz kanpo dago. // LOIOLA. Ascensor de vía 1 se encuentra fuera de servicio.",
+              "language": "es"
+            },
+            {
+              "text": "LOIOLA. 1. trenbideko igogailua zerbitzuz kanpo dago. // LOIOLA. Ascensor de vía 1 se encuentra fuera de servicio.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_524203",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793868960"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "61T0006C1"
+          },
+          {
+            "routeId": "61T0005C1"
+          },
+          {
+            "routeId": "61T0002C1"
+          },
+          {
+            "routeId": "61T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "ORDIZIA. 1. trenbideko igogailua zerbitzuz kanpo daude. // ORDIZIA. Ascensor de vía 1 se encuentra fuera de servicio. ",
+              "language": "es"
+            },
+            {
+              "text": "ORDIZIA. 1. trenbideko igogailua zerbitzuz kanpo daude. // ORDIZIA. Ascensor de vía 1 se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_523929",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793792640"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "61T0006C1"
+          },
+          {
+            "routeId": "61T0005C1"
+          },
+          {
+            "routeId": "61T0002C1"
+          },
+          {
+            "routeId": "61T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "LOIOLA. 1. trenbideko igogailua zerbitzuz kanpo daude. // LOIOLA. Ascensor de vía 1 se encuentra fuera de servicio. ",
+              "language": "es"
+            },
+            {
+              "text": "LOIOLA. 1. trenbideko igogailua zerbitzuz kanpo daude. // LOIOLA. Ascensor de vía 1 se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "INFO_522958",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1793360340"
+          }
+        ],
+        "informedEntity": [
+          {
+            "stopId": "11400"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "ZUMARRAGA. 1 eta 2. trenbideko igogailuak zerbitzuz kanpo daude. // ZUMARRAGA. Ascensor de vía 1 y 2 se encuentra fuera de servicio. ",
+              "language": "es"
+            },
+            {
+              "text": "ZUMARRAGA. 1 eta 2. trenbideko igogailuak zerbitzuz kanpo daude. // ZUMARRAGA. Ascensor de vía 1 y 2 se encuentra fuera de servicio. ",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525608",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794417960"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0094R11"
+          },
+          {
+            "routeId": "51T0093R11"
+          },
+          {
+            "routeId": "51T0120R11"
+          },
+          {
+            "routeId": "51T0139R13"
+          },
+          {
+            "routeId": "51T0140R13"
+          },
+          {
+            "routeId": "51T0175R13"
+          },
+          {
+            "routeId": "51T0185R13"
+          },
+          {
+            "routeId": "51T0200R13"
+          },
+          {
+            "routeId": "51T0176R13"
+          },
+          {
+            "routeId": "51T0101R14"
+          },
+          {
+            "routeId": "51T0102R14"
+          },
+          {
+            "routeId": "51T0123R15"
+          },
+          {
+            "routeId": "51T0164R15"
+          },
+          {
+            "routeId": "51T0098R15"
+          },
+          {
+            "routeId": "51T0113R15"
+          },
+          {
+            "routeId": "51T0163R15"
+          },
+          {
+            "routeId": "51T0124R15"
+          },
+          {
+            "routeId": "51T0097R15"
+          },
+          {
+            "routeId": "51T0114R15"
+          },
+          {
+            "routeId": "51T0105R16"
+          },
+          {
+            "routeId": "51T0106R16"
+          },
+          {
+            "routeId": "51T0103R16"
+          },
+          {
+            "routeId": "51T0104R16"
+          },
+          {
+            "routeId": "51T0107R17"
+          },
+          {
+            "routeId": "51T0108R17"
+          },
+          {
+            "routeId": "51T0111RG1"
+          },
+          {
+            "routeId": "51T0112RG1"
+          },
+          {
+            "routeId": "51T0099RL3"
+          },
+          {
+            "routeId": "51T0100RL3"
+          },
+          {
+            "routeId": "51T0048RL4"
+          },
+          {
+            "routeId": "51T0047RL4"
+          },
+          {
+            "routeId": "51T0138RT1"
+          },
+          {
+            "routeId": "51T0137RT1"
+          },
+          {
+            "routeId": "51T0110RT2"
+          },
+          {
+            "routeId": "51T0109RT2"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Debido a los problemas de movilidad en las carreteras por la huelga general, el personal de conducción no puede llegar a las estaciones y no se están cumpliendo los servicios mínimos programados. Recomendamos buscar medios alternativos de transporte: https://mou-te.gencat.cat/itinerary.",
+              "language": "es"
+            },
+            {
+              "text": "Degut als problemes de mobilitat a les carreteres per la vaga general, el personal de conducció no pot arribar a les estacions i no sestan complint els serveis mínims programats. Recomanem buscar mitjans alternatius de transport: https://mou-te.gencat.cat/itinerary.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525563",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794396000"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0110RT2"
+          },
+          {
+            "routeId": "51T0139R13"
+          },
+          {
+            "routeId": "51T0040R3"
+          },
+          {
+            "routeId": "51T0025R2"
+          },
+          {
+            "routeId": "51T0002R1"
+          },
+          {
+            "routeId": "51T0195R3"
+          },
+          {
+            "routeId": "51T0094R11"
+          },
+          {
+            "routeId": "51T0138RT1"
+          },
+          {
+            "routeId": "51T0140R13"
+          },
+          {
+            "routeId": "51T0105R16"
+          },
+          {
+            "routeId": "51T0013R2"
+          },
+          {
+            "routeId": "51T0015R3"
+          },
+          {
+            "routeId": "51T0026R2"
+          },
+          {
+            "routeId": "51T0123R15"
+          },
+          {
+            "routeId": "51T0012R2S"
+          },
+          {
+            "routeId": "51T0196R3"
+          },
+          {
+            "routeId": "51T0014R2"
+          },
+          {
+            "routeId": "51T0164R15"
+          },
+          {
+            "routeId": "51T0106R16"
+          },
+          {
+            "routeId": "51T0016R3"
+          },
+          {
+            "routeId": "51T0039R3"
+          },
+          {
+            "routeId": "51T0048RL4"
+          },
+          {
+            "routeId": "51T0197R3"
+          },
+          {
+            "routeId": "51T0098R15"
+          },
+          {
+            "routeId": "51T0008R2S"
+          },
+          {
+            "routeId": "51T0030R7"
+          },
+          {
+            "routeId": "51T0101R14"
+          },
+          {
+            "routeId": "51T0027R2"
+          },
+          {
+            "routeId": "51T0175R13"
+          },
+          {
+            "routeId": "51T0093R11"
+          },
+          {
+            "routeId": "51T0186R3"
+          },
+          {
+            "routeId": "51T0185R13"
+          },
+          {
+            "routeId": "51T0007R2S"
+          },
+          {
+            "routeId": "51T0020R4"
+          },
+          {
+            "routeId": "51T0190R3"
+          },
+          {
+            "routeId": "51T0198R3"
+          },
+          {
+            "routeId": "51T0113R15"
+          },
+          {
+            "routeId": "51T0163R15"
+          },
+          {
+            "routeId": "51T0107R17"
+          },
+          {
+            "routeId": "51T0031R4"
+          },
+          {
+            "routeId": "51T0124R15"
+          },
+          {
+            "routeId": "51T0028R2"
+          },
+          {
+            "routeId": "51T0201R3"
+          },
+          {
+            "routeId": "51T0111RG1"
+          },
+          {
+            "routeId": "51T0187R3"
+          },
+          {
+            "routeId": "51T0202R3"
+          },
+          {
+            "routeId": "51T0102R14"
+          },
+          {
+            "routeId": "51T0191R3"
+          },
+          {
+            "routeId": "51T0199R3"
+          },
+          {
+            "routeId": "51T0004R2N"
+          },
+          {
+            "routeId": "51T0032R4"
+          },
+          {
+            "routeId": "51T0047RL4"
+          },
+          {
+            "routeId": "51T0029R7"
+          },
+          {
+            "routeId": "51T0200R13"
+          },
+          {
+            "routeId": "51T0099RL3"
+          },
+          {
+            "routeId": "51T0127R3"
+          },
+          {
+            "routeId": "51T0188R3"
+          },
+          {
+            "routeId": "51T0097R15"
+          },
+          {
+            "routeId": "51T0114R15"
+          },
+          {
+            "routeId": "51T0108R17"
+          },
+          {
+            "routeId": "51T0003R2N"
+          },
+          {
+            "routeId": "51T0019R4"
+          },
+          {
+            "routeId": "51T0203R3"
+          },
+          {
+            "routeId": "51T0045R3"
+          },
+          {
+            "routeId": "51T0192R3"
+          },
+          {
+            "routeId": "51T0112RG1"
+          },
+          {
+            "routeId": "51T0176R13"
+          },
+          {
+            "routeId": "51T0033R3"
+          },
+          {
+            "routeId": "51T0103R16"
+          },
+          {
+            "routeId": "51T0120R11"
+          },
+          {
+            "routeId": "51T0128R3"
+          },
+          {
+            "routeId": "51T0189R3"
+          },
+          {
+            "routeId": "51T0137RT1"
+          },
+          {
+            "routeId": "51T0204R3"
+          },
+          {
+            "routeId": "51T0046R3"
+          },
+          {
+            "routeId": "51T0193R3"
+          },
+          {
+            "routeId": "51T0095R2"
+          },
+          {
+            "routeId": "51T0034R3"
+          },
+          {
+            "routeId": "51T0023R8"
+          },
+          {
+            "routeId": "51T0100RL3"
+          },
+          {
+            "routeId": "51T0011R2S"
+          },
+          {
+            "routeId": "51T0104R16"
+          },
+          {
+            "routeId": "51T0001R1"
+          },
+          {
+            "routeId": "51T0194R3"
+          },
+          {
+            "routeId": "51T0109RT2"
+          },
+          {
+            "routeId": "51T0024R8"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Por obras de Adif en el entorno de Castelldefels, del 12 de noviembre al 14 de diciembre se modifica temporalmente el servicio de la línea R2. Los trenes Granollers Centre - Castelldefels iniciarán y finalizarán su recorrido en Gavà.",
+              "language": "es"
+            },
+            {
+              "text": "Per obres d\u0027Adif a l\u0027entorn de Castelldefels, del 12 de novembre al 14 de desembre es modifica temporalment el servei de la línia R2. Els trens Granollers Centre - Castelldefels iniciaran i finalitzaran el seu recorregut a Gavà.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525504",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794376500"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0110RT2"
+          },
+          {
+            "routeId": "51T0139R13"
+          },
+          {
+            "routeId": "51T0040R3"
+          },
+          {
+            "routeId": "51T0025R2"
+          },
+          {
+            "routeId": "51T0002R1"
+          },
+          {
+            "routeId": "51T0195R3"
+          },
+          {
+            "routeId": "51T0094R11"
+          },
+          {
+            "routeId": "51T0138RT1"
+          },
+          {
+            "routeId": "51T0140R13"
+          },
+          {
+            "routeId": "51T0105R16"
+          },
+          {
+            "routeId": "51T0013R2"
+          },
+          {
+            "routeId": "51T0015R3"
+          },
+          {
+            "routeId": "51T0026R2"
+          },
+          {
+            "routeId": "51T0123R15"
+          },
+          {
+            "routeId": "51T0012R2S"
+          },
+          {
+            "routeId": "51T0196R3"
+          },
+          {
+            "routeId": "51T0014R2"
+          },
+          {
+            "routeId": "51T0164R15"
+          },
+          {
+            "routeId": "51T0106R16"
+          },
+          {
+            "routeId": "51T0016R3"
+          },
+          {
+            "routeId": "51T0039R3"
+          },
+          {
+            "routeId": "51T0048RL4"
+          },
+          {
+            "routeId": "51T0197R3"
+          },
+          {
+            "routeId": "51T0098R15"
+          },
+          {
+            "routeId": "51T0008R2S"
+          },
+          {
+            "routeId": "51T0030R7"
+          },
+          {
+            "routeId": "51T0101R14"
+          },
+          {
+            "routeId": "51T0027R2"
+          },
+          {
+            "routeId": "51T0175R13"
+          },
+          {
+            "routeId": "51T0093R11"
+          },
+          {
+            "routeId": "51T0186R3"
+          },
+          {
+            "routeId": "51T0185R13"
+          },
+          {
+            "routeId": "51T0007R2S"
+          },
+          {
+            "routeId": "51T0020R4"
+          },
+          {
+            "routeId": "51T0190R3"
+          },
+          {
+            "routeId": "51T0198R3"
+          },
+          {
+            "routeId": "51T0113R15"
+          },
+          {
+            "routeId": "51T0163R15"
+          },
+          {
+            "routeId": "51T0107R17"
+          },
+          {
+            "routeId": "51T0031R4"
+          },
+          {
+            "routeId": "51T0124R15"
+          },
+          {
+            "routeId": "51T0028R2"
+          },
+          {
+            "routeId": "51T0201R3"
+          },
+          {
+            "routeId": "51T0111RG1"
+          },
+          {
+            "routeId": "51T0187R3"
+          },
+          {
+            "routeId": "51T0202R3"
+          },
+          {
+            "routeId": "51T0102R14"
+          },
+          {
+            "routeId": "51T0191R3"
+          },
+          {
+            "routeId": "51T0199R3"
+          },
+          {
+            "routeId": "51T0004R2N"
+          },
+          {
+            "routeId": "51T0032R4"
+          },
+          {
+            "routeId": "51T0047RL4"
+          },
+          {
+            "routeId": "51T0029R7"
+          },
+          {
+            "routeId": "51T0200R13"
+          },
+          {
+            "routeId": "51T0099RL3"
+          },
+          {
+            "routeId": "51T0127R3"
+          },
+          {
+            "routeId": "51T0188R3"
+          },
+          {
+            "routeId": "51T0097R15"
+          },
+          {
+            "routeId": "51T0114R15"
+          },
+          {
+            "routeId": "51T0108R17"
+          },
+          {
+            "routeId": "51T0003R2N"
+          },
+          {
+            "routeId": "51T0019R4"
+          },
+          {
+            "routeId": "51T0203R3"
+          },
+          {
+            "routeId": "51T0045R3"
+          },
+          {
+            "routeId": "51T0192R3"
+          },
+          {
+            "routeId": "51T0112RG1"
+          },
+          {
+            "routeId": "51T0176R13"
+          },
+          {
+            "routeId": "51T0033R3"
+          },
+          {
+            "routeId": "51T0103R16"
+          },
+          {
+            "routeId": "51T0120R11"
+          },
+          {
+            "routeId": "51T0128R3"
+          },
+          {
+            "routeId": "51T0189R3"
+          },
+          {
+            "routeId": "51T0137RT1"
+          },
+          {
+            "routeId": "51T0204R3"
+          },
+          {
+            "routeId": "51T0046R3"
+          },
+          {
+            "routeId": "51T0193R3"
+          },
+          {
+            "routeId": "51T0095R2"
+          },
+          {
+            "routeId": "51T0034R3"
+          },
+          {
+            "routeId": "51T0023R8"
+          },
+          {
+            "routeId": "51T0100RL3"
+          },
+          {
+            "routeId": "51T0011R2S"
+          },
+          {
+            "routeId": "51T0104R16"
+          },
+          {
+            "routeId": "51T0001R1"
+          },
+          {
+            "routeId": "51T0194R3"
+          },
+          {
+            "routeId": "51T0109RT2"
+          },
+          {
+            "routeId": "51T0024R8"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Debido a manifestaciones en el entorno de Fabra i Puig, se están produciendo demoras en el servicio alternativo por carretera de la línea.",
+              "language": "es"
+            },
+            {
+              "text": "A causa de manifestacions a l\u0027entorn de Fabra i Puig, s\u0027estan produint demores en el servei alternatiu per carretera de la línia.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_521807",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792911960"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0048RL4"
+          },
+          {
+            "routeId": "51T0047RL4"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Circulación ferroviaria entre Lleida Pirineus y Manresa. El tramo entre Manresa y Terrassa Estació del Nord se realiza mediante los servicios de la línea R4.",
+              "language": "es"
+            },
+            {
+              "text": "Circulació ferroviària entre Lleida Pirineus i Manresa. El tram entre Manresa i Terrassa Estació del Nord es realitza mitjançant els serveis de la línia R4.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_521824",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1792911900"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "51T0139R13"
+          },
+          {
+            "routeId": "51T0140R13"
+          },
+          {
+            "routeId": "51T0175R13"
+          },
+          {
+            "routeId": "51T0185R13"
+          },
+          {
+            "routeId": "51T0200R13"
+          },
+          {
+            "routeId": "51T0176R13"
+          },
+          {
+            "routeId": "51T0101R14"
+          },
+          {
+            "routeId": "51T0102R14"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Servicio ferroviario entre Lleida Pirineus - Les Borges Blanques y entre La Plana Picamoixons - Barcelona Estació de França. Servicio alternativo por carretera entre Lleida Pirineus - La Plana Picamoixons.",
+              "language": "es"
+            },
+            {
+              "text": "Servei ferroviari entre Lleida Pirineus i les Borges Blanques, i entre la Plana Picamoixons i Barcelona Estació de França. Servei alternatiu per carretera entre Lleida Pirineus i La Plana Picamoixons.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525557",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794438000"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "45T0002C1"
+          },
+          {
+            "routeId": "45T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para hoy, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_525571",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1794400740"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "45T0002C1"
+          },
+          {
+            "routeId": "45T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Atención: Desconvocados los paros parciales previstos por el sindicato de maquinistas SEMAF para mañana, 12 de noviembre de 2026. El servicio ferroviario se prestará conforme a la programación habitual.",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    },
+    {
+      "id": "AVISO_516334",
+      "alert": {
+        "activePeriod": [
+          {
+            "start": "1790585520"
+          }
+        ],
+        "informedEntity": [
+          {
+            "routeId": "45T0002C1"
+          },
+          {
+            "routeId": "45T0001C1"
+          }
+        ],
+        "descriptionText": {
+          "translation": [
+            {
+              "text": "Pruebas, disculpen las molestias",
+              "language": "es"
+            }
+          ]
+        }
+      }
+    }
+  ]
+}

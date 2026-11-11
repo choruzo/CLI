@@ -1,2 +1,4 @@
 # Un script de shell con CRLF no arranca (`/bin/sh^M`), y se sirve tal cual por curl.
 *.sh text eol=lf
+# Fixtures protobuf de GTFS-RT (M20): binarios, sin conversión de fin de línea.
+*.pb binary

@@ -1,0 +1,19 @@
+{
+  "schemaVersion": 1,
+  "id": "renfe",
+  "version": "1.0.0",
+  "name": "Renfe Cercanías",
+  "description": "Cercanías y Rodalies: salidas, trayectos, trenes en tiempo real y avisos, con datos abiertos de Renfe.",
+  "agents": ["companion"],
+  "hosts": ["ssl.renfe.com", "gtfsrt.renfe.com"],
+  "secrets": [],
+  "tools": [
+    { "name": "cercanias_nucleos", "readOnly": true, "summary": "Núcleos de Cercanías y Rodalies por comunidad autónoma." },
+    { "name": "cercanias_lineas", "readOnly": true, "summary": "Líneas de un núcleo con sus extremos y número de estaciones." },
+    { "name": "cercanias_estaciones", "readOnly": true, "summary": "Estaciones de una línea o búsqueda de una estación por nombre." },
+    { "name": "cercanias_salidas", "readOnly": true, "summary": "Próximas salidas desde una estación, con retraso, cancelación y vía." },
+    { "name": "cercanias_trayecto", "readOnly": true, "summary": "Cómo ir de una estación a otra: directo o con un transbordo." },
+    { "name": "cercanias_tren", "readOnly": true, "summary": "Estado de un tren: dónde está, retraso, vía y próximas paradas." },
+    { "name": "cercanias_avisos", "readOnly": true, "summary": "Avisos e incidencias activos por núcleo, línea o estación." }
+  ]
+}

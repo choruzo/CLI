@@ -22,11 +22,14 @@ export default defineConfig([
       __VERSION__: JSON.stringify(pkg.version),
     },
   },
-  // Conector Open-Meteo (M20): un único .mjs autocontenido (zod incluido) que corre
+  // Conectores (M20): Open-Meteo y Renfe: un único .mjs autocontenido (zod incluido) que corre
   // en un contenedor sin node_modules. Nunca importa el runtime de Stratum
   // (lo vigila src/connector-servers/architecture.test.ts).
   {
-    entry: { 'open-meteo/server': 'src/connector-servers/open-meteo/server.ts' },
+    entry: {
+      'open-meteo/server': 'src/connector-servers/open-meteo/server.ts',
+      'renfe/server': 'src/connector-servers/renfe/server.ts',
+    },
     outDir: 'box-image/connectors',
     format: ['esm'],
     outExtension: () => ({ js: '.mjs' }),
