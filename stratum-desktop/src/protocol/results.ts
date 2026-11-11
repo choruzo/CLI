@@ -15,6 +15,8 @@ import type {
   ProtocolBrowserStatus,
   ProtocolChangesSummary,
   ProtocolSessionInspection,
+  ProtocolUndoableTurn,
+  ProtocolMemoryDocument,
   ProtocolContextReport,
   ProtocolFileDiff,
   ProtocolDecision,
@@ -126,6 +128,32 @@ export function parseRejected(raw: unknown): { rejected: boolean; message: strin
 export function parseAgents(raw: unknown): ProtocolAgent[] | null {
   const parsed = RESULTS['agents.list'].safeParse(raw);
   return parsed.success ? parsed.data.agents : null;
+}
+
+/** Modo código — `sessions.ask`: la respuesta lateral, entera. */
+export function parseAnswer(raw: unknown): { answer: string; truncated: boolean } | null {
+  const parsed = RESULTS['sessions.ask'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Modo código — `sessions.turns`: los turnos deshacibles, el más reciente primero. */
+export function parseTurns(raw: unknown): ProtocolUndoableTurn[] | null {
+  const parsed = RESULTS['sessions.turns'].safeParse(raw);
+  return parsed.success ? parsed.data.turns : null;
+}
+
+/** Modo código — `jobs.background`: cuántos comandos pasaron a job y cuáles no pudieron. */
+export function parseBackgrounded(raw: unknown): { moved: number; errors: string[] } | null {
+  const parsed = RESULTS['jobs.background'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** Modo código — `memory.documents`: los `STRATUM.md` del proyecto y global (`null` si no hay). */
+export function parseMemoryDocuments(
+  raw: unknown,
+): { project: ProtocolMemoryDocument | null; global: ProtocolMemoryDocument | null } | null {
+  const parsed = RESULTS['memory.documents'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }
 
 /** Modo código — `sessions.inspect`: perfil de sesión, tools, MCP, plugins y entornos. */

@@ -2,12 +2,14 @@ import { useEffect, useState } from 'react';
 import { approvalsStore, canResolve } from '../../client/approvals';
 import {
   loadDiff,
+  loadTurns,
   revert,
   revertPlan,
   type Changes,
   type FileDiff,
   type Loaded,
   type RevertResult,
+  type UndoableTurn,
 } from '../../client/code-actions';
 import { useStore } from '../../client/store';
 import type { ChangesState } from '../../hooks/useChanges';
@@ -24,8 +26,39 @@ const STATUS_MARK: Record<Change['status'], { mark: string; label: string }> = {
   untracked: { mark: 'U', label: 'sin seguimiento' },
 };
 
-/** Cuántos turnos se pueden deshacer de una vez desde aquí. */
+/** Cuántos turnos se ofrecen si no se sabe cuáles hay (una sesión sin montar). */
 const MAX_UNDO_TURNS = 5;
+/** Tope de `desktop_revert` (y de `sessions.turns`). */
+const MAX_REWIND_TURNS = 20;
+
+const clock = (iso: string): string => {
+  const ms = Date.parse(iso);
+  return Number.isNaN(ms) ? iso : new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+};
+
+/**
+ * Las opciones de «deshacer hasta»: una por turno con cambios, la más reciente
+ * primero; elegir la n-ésima deshace ese turno y los posteriores (`/rewind`).
+ * Sin la lista (`null`), los últimos N a ciegas.
+ */
+export function rewindOptions(known: UndoableTurn[] | null): { turns: number; label: string }[] {
+  if (!known) {
+    return Array.from({ length: MAX_UNDO_TURNS }, (_, i) => ({
+      turns: i + 1,
+      label: i === 0 ? 'el último turno' : `los últimos ${i + 1} turnos`,
+    }));
+  }
+  return known.slice(0, MAX_REWIND_TURNS).map((turn, i) => {
+    const files = `${turn.totalFiles} ${turn.totalFiles === 1 ? 'fichero' : 'ficheros'}`;
+    return {
+      turns: i + 1,
+      label:
+        i === 0
+          ? `el último turno · ${clock(turn.endedAt)} · ${files}`
+          : `desde el turno de las ${clock(turn.startedAt)} · ${i + 1} turnos`,
+    };
+  });
+}
 
 export type DiffLineKind = 'add' | 'del' | 'hunk' | 'meta' | 'context';
 
@@ -150,11 +183,14 @@ type UndoState =
 function UndoSection({
   native,
   sessionId,
+  known,
   blocked,
   onDone,
 }: {
   native: NativeBridge;
   sessionId: string;
+  /** Los turnos deshacibles de la sesión; `null` si no se pudieron leer. */
+  known: UndoableTurn[] | null;
   /** Por qué no se puede ahora (turno en marcha, sesión de una terminal…). */
   blocked: string | null;
   onDone: () => void;
@@ -164,6 +200,12 @@ function UndoSection({
   const [state, setState] = useState<UndoState>({ step: 'idle' });
   const ready = canResolve(status);
   const busy = state.step === 'planning' || state.step === 'confirming';
+  const options = rewindOptions(known);
+  const nothing = known !== null && known.length === 0;
+  // La lista cambió y lo elegido ya no existe: vuelve al último turno.
+  useEffect(() => {
+    if (options.length > 0 && turns > options.length) setTurns(1);
+  }, [options.length, turns]);
 
   const plan = async () => {
     setState({ step: 'planning' });
@@ -197,15 +239,20 @@ function UndoSection({
               setState({ step: 'idle' });
             }}
           >
-            {Array.from({ length: MAX_UNDO_TURNS }, (_, i) => i + 1).map((n) => (
-              <option key={n} value={n}>
-                {n === 1 ? 'el último turno' : `los últimos ${n} turnos`}
+            {(nothing ? rewindOptions(null).slice(0, 1) : options).map((option) => (
+              <option key={option.turns} value={option.turns}>
+                {option.label}
               </option>
             ))}
           </select>
         </label>
         {ready ? (
-          <button type="button" className="button button--small" disabled={busy || blocked !== null} onClick={() => void plan()}>
+          <button
+            type="button"
+            className="button button--small"
+            disabled={busy || blocked !== null || nothing}
+            onClick={() => void plan()}
+          >
             {state.step === 'planning' ? 'Calculando…' : 'Ver qué se desharía'}
           </button>
         ) : (
@@ -221,6 +268,7 @@ function UndoSection({
         )}
       </div>
       {blocked && <p className="undo__hint">{blocked}</p>}
+      {nothing && <p className="undo__hint">Ningún turno de esta sesión ha cambiado ficheros todavía.</p>}
       {state.step === 'failed' && (
         <p className="notice" data-tone="warning" role="alert">
           {state.message}
@@ -292,6 +340,18 @@ export function ChangesPanel({
   const [open, setOpen] = useState<string | null>(null);
   const [diffs, setDiffs] = useState<Record<string, Loaded<FileDiff>>>({});
 
+  // Los turnos deshacibles se releen con los cambios (al acabar cada turno y tras deshacer).
+  const [known, setKnown] = useState<UndoableTurn[] | null>(null);
+  useEffect(() => {
+    setKnown(null);
+    if (!sessionId || !connected) return;
+    let alive = true;
+    void loadTurns(native, sessionId).then((result) => alive && setKnown(result.ok ? result.value : null));
+    return () => {
+      alive = false;
+    };
+  }, [native, sessionId, connected, changes]);
+
   // Lista nueva: los diffs que se tenían pueden ser de antes.
   useEffect(() => setDiffs({}), [changes]);
   useEffect(() => setOpen(null), [sessionId]);
@@ -323,7 +383,7 @@ export function ChangesPanel({
     }
     return (
       <>
-        <UndoSection native={native} sessionId={sessionId} blocked={undoBlocked} onDone={refresh} />
+        <UndoSection native={native} sessionId={sessionId} known={known} blocked={undoBlocked} onDone={refresh} />
         {summary.files === 0 ? (
           <p className="side-panel__empty">El árbol de trabajo está limpio.</p>
         ) : (

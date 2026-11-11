@@ -190,6 +190,10 @@ host ownership  !=  operator control  !=  approver authority
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly`  | control     | ✓   |                                                                                                                                                                                                                                                                                                                                                                          |
 | `sessions.setProfile` | control | ✓ | El perfil de sesión de una sesión parada: `{ sessionId, profile }` (§27) |
 | `sessions.inspect` | observe | | Cómo está montada una sesión viva del daemon: perfil, tools, MCP, plugins y entornos (§27) |
+| `sessions.ask` | control | ✓ | Pregunta lateral (`/btw`): `{ sessionId, question }` → `{ answer, truncated }`; no entra en la conversación (§28) |
+| `sessions.turns` | observe | | Los turnos con cambios que se pueden deshacer, el más reciente primero (§28) |
+| `jobs.background` | control | ✓ | Pasa a jobs los `exec` en primer plano de la sesión: `{ moved, errors }` (§28) |
+| `memory.documents` | observe | | Los `STRATUM.md` (proyecto y global) que ve una sesión de código (§28) |
 | `sessions.revert`                                                                      | **approve** | ✓   | Deshace los ficheros de los últimos turnos de una sesión del daemon: `{ sessionId, turns?, dryRun?, force? }` → `{ status, plan }` (§19.8). Exige la clave de aprobador                                                                                                                                                                                                  |
 | `sessions.detach`                                                                      | control     | ✓   | Traspasa una sesión par al daemon, mismo id y contexto (§18). Devuelve `{ status: 'detached' \| 'already-daemon', session }`; `BUSY`/`NOT_TRANSFERABLE` con `data.reason`                                                                                                                                                                                                |
 | `runs.list` · `runs.get`                                                               | observe     |     |                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1323,6 +1327,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | Modo código     | Métodos `git.changes` y `git.diff` (`observe`, §25); DTOs `ProtocolChangesSummary`, `ProtocolWorkingTreeChange`, `ProtocolFileDiff`; `GIT_CHANGES_LIMITS`, `GIT_DIFF_LIMITS`. `data.reason` de `UNAVAILABLE` admite `embedded-agent` y `not-a-repo` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 | Navegador       | Métodos `browser.screen` (`observe`) y `browser.navigate` (`control`, §26); DTOs `ProtocolBrowserStatus`, `ProtocolBrowserScreen`, `ProtocolBrowserState`, `ProtocolBrowserAction`; `BROWSER_SCREEN_LIMITS`, `BROWSER_NAVIGATE_LIMITS`, `BROWSER_NAVIGATE_ACTIONS`. `data.reason` de `UNAVAILABLE` admite `failed` y `browser-closed`; el de `INVALID_PARAMS`, `needs-approval` y `blocked-url`. Sin eventos ni campos nuevos en la foto | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 | Modo código     | Métodos `sessions.setProfile` (`control`) y `sessions.inspect` (`observe`, §27); DTOs `ProtocolSessionInspection`, `ProtocolSessionProfileInfo`, `ProtocolInspectedEnvironment`, `ProtocolInspectedMcpServer`, `ProtocolInspectedPlugin`; `INSPECT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `not-loaded` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
+| Modo código     | Métodos `sessions.ask` (`control`), `sessions.turns` (`observe`), `jobs.background` (`control`) y `memory.documents` (`observe`, §28); `memory.status|decisions|forget` admiten `sessionId` (la memoria del proyecto de esa sesión; no se combina con `cwd` ni `agent`). DTOs `ProtocolUndoableTurn`, `ProtocolMemoryDocument`; `ASK_LIMITS`, `TURNS_LIMITS`, `MEMORY_DOCUMENT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `provider-failed` | Aditivo: métodos y un parámetro opcional nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` o `INVALID_PARAMS` |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -2240,3 +2245,41 @@ Lo que `chat` da con `/profile`, `/tools`, `/env` y `/plugins`, para un cliente 
 
 Tests: `stratum-cli/src/daemon/daemon-sessions.test.ts` («perfil de sesión e inspección»),
 `src/protocol/schemas.test.ts`.
+
+## 28. Modo código de Desktop: pregunta lateral, segundo plano, turnos y memoria del proyecto
+
+Lo que `chat` da con `/btw`, Ctrl+B, `/rewind` y `/memory`, para un cliente del protocolo.
+
+- **`sessions.ask { sessionId, question, operationId }` → `{ answer, truncated }`** (`control`,
+  mutante: gasta modelo y un resultado desconocido no se repite). El modelo de la sesión contesta
+  sobre la conversación **sin tools** (llamada auxiliar, origen de traza `side-question`). Ni la
+  pregunta ni la respuesta entran en el historial, la conversación guardada, la memoria ni el uso
+  de la sesión, y no se publica ningún evento. Vale con un turno en curso. Una a la vez por sesión
+  (`BUSY`); una sesión guardada se monta para contestar; si el modelo falla, `UNAVAILABLE`
+  (`provider-failed`, con el mensaje redactado); par, `UNAVAILABLE` (`peer-hosted`). La respuesta
+  llega entera (no en streaming), redactada y recortada a `ASK_LIMITS.answerChars`; el plazo es el
+  de la pregunta lateral del agente (120 s). Cerrar la sesión la corta.
+- **`sessions.turns { sessionId }` → `{ turns: ProtocolUndoableTurn[] }`** (`observe`). Los turnos
+  que cambiaron ficheros, el más reciente primero (hasta `TURNS_LIMITS.turns`), cada uno con su
+  `turn`, `startedAt`/`endedAt`, sus `files` (hasta `TURNS_LIMITS.paths`; `totalFiles` dice
+  cuántos son) y `skipped`. **La posición en la lista más uno es el `turns` de `sessions.revert`**
+  (§19.8) que deshace desde ese turno hasta ahora. Solo lee y nunca monta: guardada sin montar,
+  `UNAVAILABLE` (`not-loaded`); par, `UNAVAILABLE` (`peer-hosted`). Deshacer sigue exigiendo
+  `approve`.
+- **`jobs.background { sessionId, operationId }` → `{ moved, errors }`** (`control`). Pasa a jobs
+  los `exec` locales que estén corriendo en primer plano en esa sesión: el agente recibe su `jobId`
+  y sigue con el turno. Lo pide una persona, no el modelo, y **no relaja ninguna guarda**: esas
+  llamadas ya pasaron por `preflight`, entornos y confirmaciones. `moved` dice cuántos; los jobs
+  nuevos llegan por `job.started`. `errors` (redactados) son los que no se pudieron adoptar (límite
+  de jobs), que siguen en primer plano. Sin nada corriendo, o con la sesión guardada sin montar,
+  `{ moved: 0, errors: [] }`.
+- **`memory.status|decisions|forget` con `sessionId`**: la memoria de decisiones **del proyecto de
+  esa sesión**. El daemon resuelve el directorio a partir de la sesión (montada, guardada o par) y
+  carga su config: es la misma memoria que ve el agente, también si la config la guarda fuera del
+  proyecto. `sessionId`, `cwd` y `agent` no se combinan (`INVALID_PARAMS`); la sesión de un agente
+  embebido es `UNAVAILABLE` (`embedded-agent`). Sin secciones (como con `cwd`).
+- **`memory.documents { sessionId }` → `{ project, global }`** (`observe`). Los `STRATUM.md` que
+  ve esa sesión, cada uno `{ content, truncated }` redactado y recortado a
+  `MEMORY_DOCUMENT_LIMITS.chars`, o `null` si no existe. Sin rutas.
+
+Tests: `stratum-cli/src/daemon/daemon-code-mode.test.ts`.

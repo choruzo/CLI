@@ -68,9 +68,15 @@ export function JobsPanel({
   jobs,
   hasSession,
   onCancel,
+  onBackground,
 }: {
   jobs: ProtocolJob[];
   hasSession: boolean;
+  /**
+   * Pasar a segundo plano el comando que el agente tiene en marcha (el Ctrl+B
+   * de la terminal). Solo con un turno en curso en una sesión del daemon.
+   */
+  onBackground?: () => void;
   /** Sin él, no se ofrece cancelar (sesión de una terminal, sin conexión). */
   onCancel?: (jobId: string) => void;
 }) {
@@ -81,6 +87,16 @@ export function JobsPanel({
     <div className="side-panel">
       <div className="side-panel__header">
         <h2 className="side-panel__title">Procesos</h2>
+        {onBackground && (
+          <button
+            type="button"
+            className="button button--small"
+            title="Si el agente está esperando a un comando largo, lo deja corriendo como proceso y sigue"
+            onClick={onBackground}
+          >
+            A segundo plano
+          </button>
+        )}
       </div>
       <div className="side-panel__body">
         {!hasSession ? (

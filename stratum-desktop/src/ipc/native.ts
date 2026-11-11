@@ -238,6 +238,18 @@ export interface NativeBridge {
   setSessionProfile(sessionId: string, profile: string): Promise<unknown>;
   /** Modo código: cómo está montada la sesión (`sessions.inspect`); solo lectura. */
   inspectSession(sessionId: string): Promise<unknown>;
+  /** Modo código: pregunta lateral (`sessions.ask`); nada entra en la conversación. */
+  askSession(sessionId: string, question: string): Promise<unknown>;
+  /** Modo código: los turnos que se pueden deshacer (`sessions.turns`); solo lectura. */
+  sessionTurns(sessionId: string): Promise<unknown>;
+  /** Modo código: pasa a job el comando en primer plano (`jobs.background`). */
+  backgroundJobs(sessionId: string): Promise<unknown>;
+  /** Modo código: las decisiones de la memoria del proyecto de esa sesión. */
+  projectMemoryDecisions(sessionId: string, query?: string): Promise<unknown>;
+  /** Modo código: olvidar una decisión de la memoria del proyecto de esa sesión. */
+  projectMemoryForget(sessionId: string, decisionId: string): Promise<unknown>;
+  /** Modo código: los `STRATUM.md` que ve esa sesión (`memory.documents`). */
+  projectMemoryDocuments(sessionId: string): Promise<unknown>;
   /** Modo código: parar un job en segundo plano (`jobs.cancel`). */
   cancelJob(sessionId: string, jobId: string): Promise<unknown>;
   /** Modo código: los cambios del working tree del proyecto (`git.changes`). */
@@ -334,6 +346,14 @@ export const tauriBridge: NativeBridge = {
   setSessionProfile: (sessionId, profile) =>
     invoke<unknown>('desktop_set_session_profile', { sessionId, profile }),
   inspectSession: (sessionId) => invoke<unknown>('desktop_inspect_session', { sessionId }),
+  askSession: (sessionId, question) => invoke<unknown>('desktop_ask_session', { sessionId, question }),
+  sessionTurns: (sessionId) => invoke<unknown>('desktop_session_turns', { sessionId }),
+  backgroundJobs: (sessionId) => invoke<unknown>('desktop_background_jobs', { sessionId }),
+  projectMemoryDecisions: (sessionId, query) =>
+    invoke<unknown>('desktop_project_memory_decisions', { sessionId, query: query ?? null }),
+  projectMemoryForget: (sessionId, decisionId) =>
+    invoke<unknown>('desktop_project_memory_forget', { sessionId, decisionId }),
+  projectMemoryDocuments: (sessionId) => invoke<unknown>('desktop_project_memory_documents', { sessionId }),
   cancelJob: (sessionId, jobId) => invoke<unknown>('desktop_cancel_job', { sessionId, jobId }),
   gitChanges: (sessionId) => invoke<unknown>('desktop_git_changes', { sessionId }),
   gitDiff: (sessionId, path) => invoke<unknown>('desktop_git_diff', { sessionId, path }),

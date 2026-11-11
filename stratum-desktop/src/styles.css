@@ -5153,6 +5153,11 @@ body[data-resizing] iframe {
   gap: 8px;
   flex-wrap: wrap;
 }
+/* La etiqueta de un turno (hora y ficheros) es más larga que «los últimos N». */
+.undo__turns select {
+  min-width: 0;
+  max-width: 220px;
+}
 .undo__turns {
   display: inline-flex;
   align-items: center;
@@ -5355,7 +5360,7 @@ body[data-resizing] iframe {
   font: inherit;
   color: inherit;
   background: transparent;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-borderSubtle);
   border-radius: 8px;
   cursor: pointer;
 }
@@ -5389,7 +5394,7 @@ body[data-resizing] iframe {
 .setup-option__detail,
 .setup-row__meta {
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--color-textMuted);
   overflow-wrap: anywhere;
 }
 .setup-row {
@@ -5397,7 +5402,7 @@ body[data-resizing] iframe {
   flex-direction: column;
   gap: 2px;
   padding: 6px 2px;
-  border-bottom: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-borderSubtle);
 }
 .setup-row:last-child {
   border-bottom: 0;
@@ -5406,14 +5411,14 @@ body[data-resizing] iframe {
   color: var(--color-accent);
 }
 .setup-row[data-skipped] strong {
-  color: var(--color-text-muted);
+  color: var(--color-textMuted);
 }
 .setup-tag {
   padding: 0 6px;
   font-size: 11px;
   font-weight: 500;
-  color: var(--color-text-muted);
-  border: 1px solid var(--color-border);
+  color: var(--color-textMuted);
+  border: 1px solid var(--color-borderSubtle);
   border-radius: 999px;
 }
 .setup-tag[data-tier='production'] {
@@ -5436,7 +5441,7 @@ body[data-resizing] iframe {
   display: inline-block;
   padding: 1px 6px;
   font-size: 12px;
-  border: 1px solid var(--color-border);
+  border: 1px solid var(--color-borderSubtle);
   border-radius: 6px;
 }
 .setup-block {
@@ -5447,5 +5452,62 @@ body[data-resizing] iframe {
 }
 .setup-block__title {
   font-size: 12px;
-  color: var(--color-text-muted);
+  color: var(--color-textMuted);
+}
+
+/* Pregunta lateral (/btw): aparte de la conversación, encima del campo. */
+.side-answer {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin: 0 0 8px;
+  padding: 10px 12px;
+  border: 1px dashed var(--color-borderSubtle);
+  border-radius: 10px;
+  max-height: 40vh;
+  overflow-y: auto;
+}
+.side-answer__head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.side-answer__label,
+.side-answer__note {
+  font-size: 12px;
+  color: var(--color-textMuted);
+}
+.side-answer__question {
+  margin: 0;
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.side-answer__body {
+  margin: 0;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+/* Memoria del proyecto (modo código): los STRATUM.md de la sesión. */
+.project-memory__docs {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.project-memory__doc {
+  align-self: stretch;
+}
+.project-memory__text {
+  margin: 4px 0 0;
+  padding: 8px;
+  max-height: 320px;
+  overflow: auto;
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  border: 1px solid var(--color-borderSubtle);
+  border-radius: 8px;
 }

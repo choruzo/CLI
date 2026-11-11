@@ -23,6 +23,10 @@ export type CommandName =
   | 'tools'
   | 'env'
   | 'plugins'
+  | 'btw'
+  | 'bg'
+  | 'rewind'
+  | 'memory'
   | 'browser';
 
 export interface SlashCommand {
@@ -67,8 +71,25 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   { name: 'env', description: 'Ver los entornos definidos, sus reglas y el contexto activo', mode: 'code' },
   { name: 'plugins', description: 'Ver los plugins de esta sesión y los omitidos', mode: 'code' },
   { name: 'changes', description: 'Ver los cambios del árbol de trabajo (git)', mode: 'code' },
+  {
+    name: 'rewind',
+    description: 'Elegir un turno y deshacer los ficheros desde él hasta ahora',
+    mode: 'code',
+  },
+  {
+    name: 'bg',
+    description: 'Pasar a segundo plano el comando que el agente tiene en marcha',
+    mode: 'code',
+  },
+  { name: 'memory', description: 'Ver la memoria del proyecto: decisiones y STRATUM.md', mode: 'code' },
   { name: 'jobs', description: 'Ver los procesos en segundo plano de esta sesión', mode: 'code' },
   { name: 'undo', description: 'Deshacer los ficheros del último turno', mode: 'code' },
+  {
+    name: 'btw',
+    args: '<pregunta>',
+    argRequired: true,
+    description: 'Pregunta lateral sobre la conversación: se contesta sin tools y no entra en ella',
+  },
   { name: 'browser', args: '[dirección]', description: 'Abrir el navegador de la sesión' },
 ];
 

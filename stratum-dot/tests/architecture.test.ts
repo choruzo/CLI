@@ -395,9 +395,13 @@ describe('el lado nativo', () => {
       'git.diff',
       'grants.revoke',
       'images.get',
+      // Modo código de Desktop: pasar a job el comando en primer plano; Dot no lo tiene.
+      'jobs.background',
       'jobs.cancel',
       'memory.applyProposal',
       'memory.decisions',
+      // Modo código de Desktop: los STRATUM.md del proyecto de la sesión; Dot no lo tiene.
+      'memory.documents',
       'memory.dream',
       'memory.forget',
       'memory.proposals',
@@ -414,6 +418,8 @@ describe('el lado nativo', () => {
       'runs.resume',
       'runs.start',
       'runs.steer',
+      // Modo código de Desktop: pregunta lateral (/btw); Dot no la tiene en su perfil.
+      'sessions.ask',
       'sessions.close',
       'sessions.context',
       'sessions.get',
@@ -427,6 +433,8 @@ describe('el lado nativo', () => {
       // Modo código de Desktop: el perfil de sesión; Dot no lo tiene en su perfil.
       'sessions.setProfile',
       'sessions.setReadOnly',
+      // Modo código de Desktop: los turnos deshacibles (solo lectura); Dot no lo tiene.
+      'sessions.turns',
       'skills.list',
       // Panel de trayectoria de Desktop (solo lectura); Dot no la tiene en su perfil.
       'trace.subscribe',

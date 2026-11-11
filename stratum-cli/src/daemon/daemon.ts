@@ -71,12 +71,14 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { MemoryManager } from '../memory/manager.js';
 import { DreamingScheduler } from './dreaming-scheduler.js';
 import { DreamingService, type DreamingModelFactory, type DreamTarget } from './memory-dreaming.js';
 import { presentedType, summaryOf } from '../memory/decisions.js';
 import {
   BOX_SCREEN_LIMITS,
   BROWSER_SCREEN_LIMITS,
+  MEMORY_DOCUMENT_LIMITS,
   GIT_CHANGES_LIMITS,
   GIT_DIFF_LIMITS,
   SHARED_IMAGE_LIMITS,
@@ -1743,18 +1745,16 @@ export class Stratumd {
           params.profile,
         ),
       }),
-      // Solo lee y nunca monta: de una sesión guardada no hay nada montado que enseñar.
-      'sessions.inspect': (params) => {
-        if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its setup');
-        const live = this.sessions.get(params.sessionId);
-        if (live) return { inspection: live.inspect() };
-        if (!this.dormant.has(params.sessionId)) {
-          throw new ProtocolError('NOT_FOUND', 'Session not found.');
-        }
-        throw new ProtocolError('UNAVAILABLE', 'The session is saved but not loaded yet.', {
-          reason: 'not-loaded',
-        });
-      },
+      // Solo leen y nunca montan: de una sesión guardada no hay nada montado que enseñar.
+      'sessions.inspect': (params) => ({
+        inspection: this.mounted(params.sessionId, 'Its setup').inspect(),
+      }),
+      'sessions.turns': async (params) => ({
+        turns: await this.mounted(params.sessionId, 'Its undoable turns').undoableTurns(),
+      }),
+      // La pregunta lateral usa el contexto de la sesión: una guardada se monta.
+      'sessions.ask': async (params) =>
+        (await this.wake(params.sessionId, 'Asking a side question')).ask(params.question),
       'sessions.detach': (params) => this.detachSession(params.sessionId),
       // `approve` lo comprueba `authorize` antes de llegar aquí. Una sesión par
       // deshace en su terminal (`/undo`); una guardada se monta para hacerlo.
@@ -1880,6 +1880,13 @@ export class Stratumd {
         await this.local(params.sessionId, 'Cancelling a job').cancelJob(params.jobId);
         return {};
       },
+      'jobs.background': (params) => {
+        // Una sesión guardada sin montar no tiene nada corriendo.
+        if (this.dormant.has(params.sessionId) && !this.sessions.has(params.sessionId)) {
+          return { moved: 0, errors: [] };
+        }
+        return this.local(params.sessionId, 'Backgrounding a command').backgroundJobs();
+      },
 
       // Modo código de Desktop: el working tree del proyecto de la sesión. Solo
       // lee el disco (la lógica de git está en `git/`), también de una par o de
@@ -1926,8 +1933,28 @@ export class Stratumd {
         return session.browserNavigate(params.action, params.url);
       },
 
+      'memory.documents': (params) => {
+        const cwd = this.projectCwdOf(params.sessionId);
+        const config = this.configFor(cwd);
+        const { projectContent, globalContent } = new MemoryManager(
+          config,
+          cwd,
+          'project',
+        ).getProjectMemory();
+        const document = (content: string) => {
+          if (!content) return null;
+          const text = redactText(content, config);
+          return {
+            content: text.slice(0, MEMORY_DOCUMENT_LIMITS.chars),
+            truncated: text.length > MEMORY_DOCUMENT_LIMITS.chars,
+          };
+        };
+        return { project: document(projectContent), global: document(globalContent) };
+      },
       'memory.status': async (params) => {
-        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd, params.agent));
+        const memory = getDecisionMemory(
+          this.memoryConfigFor(this.memoryCwd(params), params.agent),
+        );
         const backend = await memory.vectors.backendName().catch(() => 'none');
         return {
           decisions: memory.list().length,
@@ -1937,7 +1964,8 @@ export class Stratumd {
         };
       },
       'memory.decisions': async (params) => {
-        const config = this.memoryConfigFor(params.cwd, params.agent);
+        const projectCwd = this.memoryCwd(params);
+        const config = this.memoryConfigFor(projectCwd, params.agent);
         const memory = getDecisionMemory(config);
         const limit = params.limit ?? 50;
         const records = params.query
@@ -1946,7 +1974,7 @@ export class Stratumd {
         // Lo guardado puede llevar lo que llevaba la conversación: sale redactado.
         const redact = (text: string) => redactText(text, config);
         // M19: la memoria de un agente embebido es con secciones; la de un proyecto, no.
-        const sections = params.cwd === undefined;
+        const sections = projectCwd === undefined;
         return {
           decisions: records.map((r) => ({
             id: r.id,
@@ -1964,12 +1992,13 @@ export class Stratumd {
         };
       },
       'memory.forget': async (params) => {
-        const memory = getDecisionMemory(this.memoryConfigFor(params.cwd, params.agent));
+        const projectCwd = this.memoryCwd(params);
+        const memory = getDecisionMemory(this.memoryConfigFor(projectCwd, params.agent));
         const removed = await memory.remove(params.decisionId);
         // Ninguna línea de log lleva el título ni el contenido.
         log.info('memory decision forgotten', {
           decisionId: params.decisionId,
-          memory: params.cwd !== undefined ? 'project' : (params.agent ?? 'assistant'),
+          memory: projectCwd !== undefined ? 'project' : (params.agent ?? 'assistant'),
           removed,
           connectionId: conn.id,
         });
@@ -2152,6 +2181,31 @@ export class Stratumd {
    * `companion` (M17, su carpeta) o, por defecto, el asistente. Nunca la que
    * resultaría del directorio del proceso del daemon.
    */
+  /**
+   * El directorio de proyecto de una petición `memory.*`: el `cwd` dado o, con
+   * `sessionId` (modo código), el de esa sesión; `undefined` si es la memoria
+   * de un agente embebido.
+   */
+  private memoryCwd(params: { cwd?: string; sessionId?: string }): string | undefined {
+    if (params.cwd !== undefined) return params.cwd;
+    return params.sessionId !== undefined ? this.projectCwdOf(params.sessionId) : undefined;
+  }
+
+  /**
+   * Una sesión del daemon ya montada, para una lectura que no debe montarla.
+   *
+   * @throws ProtocolError `UNAVAILABLE` (`peer-hosted`, `not-loaded`), `NOT_FOUND`.
+   */
+  private mounted(sessionId: string, what: string): HostedSession {
+    if (this.peers.has(sessionId)) throw peerHostedOnly(what);
+    const live = this.sessions.get(sessionId);
+    if (live) return live;
+    if (!this.dormant.has(sessionId)) throw new ProtocolError('NOT_FOUND', 'Session not found.');
+    throw new ProtocolError('UNAVAILABLE', 'The session is saved but not loaded yet.', {
+      reason: 'not-loaded',
+    });
+  }
+
   private memoryConfigFor(cwd: string | undefined, agent?: ProtocolMemoryAgent): StratumConfig {
     if (cwd) return this.configFor(cwd);
     if (agent === 'companion') return buildCompanionConfig(this.opts.config, this.companionDir);

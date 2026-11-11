@@ -43,6 +43,7 @@ function makeProject() {
   const dir = realpathSync(mkdtempSync(join(tmpdir(), 'stratum-e2e-proj-')));
   const git = (...args) => execFileSync('git', args, { cwd: dir, stdio: 'ignore' });
   writeFileSync(join(dir, 'app.txt'), 'version 1\n');
+  writeFileSync(join(dir, 'STRATUM.md'), '# Tienda E2E\n\nRegla del proyecto: usar pnpm.\n');
   git('init', '-q');
   git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', 'add', '.');
   git('-c', 'user.name=e2e', '-c', 'user.email=e2e@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'inicio');
@@ -94,6 +95,8 @@ describe('modo código, paneles y navegador (E2E)', () => {
   };
 
   const script = ({ last, said }) => {
+    // La pregunta lateral (/btw) llega sin tools: se contesta con texto.
+    if (said.includes('lateral')) return text('Respuesta lateral.', 20);
     if (last.role === 'tool') {
       const out = typeof last.content === 'string' ? last.content : JSON.stringify(last.content);
       if (said.includes('verifica')) return text(out.includes(PAGE_TITLE) ? 'La página carga: Tienda E2E.' : `No cargó: ${out.slice(0, 200)}`, 20);
@@ -233,6 +236,56 @@ describe('modo código, paneles y navegador (E2E)', () => {
     // De vuelta a los cambios, de donde se deshace.
     await send(s(), '/changes');
     await s().waitFor(() => s().execute(`return !!document.querySelector('.change-row__main')`), { message: 'la lista de cambios' });
+  });
+
+  it('/btw contesta aparte, sin entrar en la conversación', async () => {
+    const [before] = await cliSessions(app.home);
+    await send(s(), '/btw pregunta lateral: ¿qué cambiaste?');
+    await s().waitFor(
+      () => s().execute(`return (document.querySelector('.side-answer')?.innerText ?? '').includes('Respuesta lateral.')`),
+      { timeout: 60_000, message: 'la respuesta lateral' },
+    );
+    // Ni la pregunta ni la respuesta son parte de la conversación.
+    const outside = await s().execute(`
+      const card = document.querySelector('.side-answer');
+      const clone = document.body.cloneNode(true);
+      clone.querySelector('.side-answer').remove();
+      clone.querySelector('#chat-input')?.remove();
+      return { inCard: card.innerText.includes('¿qué cambiaste?'), elsewhere: clone.innerText.includes('Respuesta lateral.') };
+    `);
+    assert.deepEqual(outside, { inCard: true, elsewhere: false });
+    const [after] = await cliSessions(app.home);
+    assert.equal(after.currentRunId, null);
+    assert.equal(after.seq, before.seq, 'la pregunta lateral no publica nada en la sesión');
+    await shot('04c-btw');
+    await s().execute(`document.querySelector('.side-answer [aria-label="Cerrar la pregunta lateral"]').click()`);
+    await s().waitFor(async () => !(await s().execute(`return !!document.querySelector('.side-answer')`)), { message: 'la tarjeta se cierra' });
+  });
+
+  it('/memory enseña la memoria del proyecto de la sesión y su STRATUM.md', async () => {
+    await send(s(), '/memory');
+    await s().waitFor(
+      () => s().execute(`return !!document.querySelector('[aria-label="Memoria del proyecto"]')`),
+      { timeout: 20_000, message: 'la memoria del proyecto' },
+    );
+    await s().waitFor(() => s().button('Ver STRATUM.md'), { timeout: 20_000, message: 'el STRATUM.md del proyecto' });
+    await s().clickButton('Ver STRATUM.md');
+    await s().waitFor(
+      () => s().execute(`return (document.querySelector('.project-memory__text')?.textContent ?? '').includes('usar pnpm')`),
+      { message: 'el contenido del STRATUM.md' },
+    );
+    await shot('04d-memory');
+  });
+
+  it('/rewind ofrece los turnos que cambiaron ficheros', async () => {
+    await send(s(), '/rewind');
+    const options = () =>
+      s().execute(`return [...(document.querySelector('[aria-label="Cuántos turnos deshacer"]')?.options ?? [])].map((o) => o.textContent)`);
+    await s().waitFor(async () => /el último turno · .+ · 1 fichero/.test((await options())[0] ?? ''), {
+      timeout: 20_000,
+      message: 'el turno deshacible',
+    });
+    assert.equal((await options()).length, 1);
   });
 
   it('el agente abre su navegador contra el servidor local y Desktop lo enseña', async (t) => {

@@ -81,6 +81,8 @@ import type {
   ProtocolChangesSummary,
   ProtocolFileDiff,
   ProtocolSessionInspection,
+  ProtocolUndoableTurn,
+  ProtocolMemoryDocument,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -97,6 +99,9 @@ import {
   GIT_CHANGES_LIMITS,
   GIT_DIFF_LIMITS,
   INSPECT_LIMITS,
+  ASK_LIMITS,
+  TURNS_LIMITS,
+  MEMORY_DOCUMENT_LIMITS,
   GRANT_MINUTES,
   HISTORY_LIMITS,
   PROTOCOL_MEMORY_SECTIONS,
@@ -801,6 +806,29 @@ export const fileDiffSchema: z.ZodType<ProtocolFileDiff> = z.object({
   binary: z.boolean(),
 });
 
+export const undoableTurnSchema: z.ZodType<ProtocolUndoableTurn> = z.object({
+  turn: count,
+  startedAt: z.string().max(64),
+  endedAt: z.string().max(64),
+  files: z
+    .array(
+      z.object({
+        path: z.string().min(1).max(LIMITS.pathChars),
+        status: z.enum(['added', 'modified', 'deleted']),
+        additions: count.optional(),
+        deletions: count.optional(),
+      }),
+    )
+    .max(TURNS_LIMITS.paths),
+  totalFiles: count,
+  skipped: count,
+});
+
+export const memoryDocumentSchema: z.ZodType<ProtocolMemoryDocument> = z.object({
+  content: z.string().max(MEMORY_DOCUMENT_LIMITS.chars),
+  truncated: z.boolean(),
+});
+
 const toolPattern = z.string().min(1).max(LIMITS.nameChars);
 const inspectText = z.string().max(INSPECT_LIMITS.reasonChars);
 
@@ -1093,9 +1121,12 @@ const limit = z.number().int().positive().max(LIMITS.listLimit);
 const memoryAgent = z.enum(['assistant', 'companion']);
 /** `memory.*`: la del proyecto de `cwd` o la de un agente embebido, nunca las dos. */
 function memoryRef<T extends z.ZodRawShape>(shape: z.ZodObject<T>) {
-  return shape.strict().refine((p) => !(p['cwd'] !== undefined && p['agent'] !== undefined), {
-    message: 'cwd y agent no se combinan: son memorias distintas',
-  });
+  return shape
+    .strict()
+    .refine(
+      (p) => [p['cwd'], p['agent'], p['sessionId']].filter((v) => v !== undefined).length <= 1,
+      { message: 'cwd, agent y sessionId no se combinan: son memorias distintas' },
+    );
 }
 const steerStatus = z.enum(['accepted', 'not-accepting', 'empty', 'too-large']);
 const cancelResult = z.object({ status: z.enum(['cancelled', 'not-running']) });
@@ -1184,6 +1215,14 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'sessions.setReadOnly': z.object({ sessionId: id, readOnly: z.boolean(), operationId }).strict(),
   'sessions.setProfile': z.object({ sessionId: id, profile: name, operationId }).strict(),
   'sessions.inspect': sessionRef,
+  'sessions.ask': z
+    .object({
+      sessionId: id,
+      question: z.string().trim().min(1).max(ASK_LIMITS.questionChars),
+      operationId,
+    })
+    .strict(),
+  'sessions.turns': sessionRef,
   'sessions.detach': sessionMutation,
   'sessions.revert': z
     .object({
@@ -1247,6 +1286,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
 
   'jobs.list': sessionRef,
   'jobs.cancel': z.object({ sessionId: id, jobId: id, operationId }).strict(),
+  'jobs.background': z.object({ sessionId: id, operationId }).strict(),
 
   'git.changes': sessionRef,
   'git.diff': z.object({ sessionId: id, path: z.string().min(1).max(LIMITS.pathChars) }).strict(),
@@ -1265,11 +1305,15 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       path: ['url'],
     }),
 
-  'memory.status': memoryRef(z.object({ cwd: cwd.optional(), agent: memoryAgent.optional() })),
+  'memory.status': memoryRef(
+    z.object({ cwd: cwd.optional(), agent: memoryAgent.optional(), sessionId: id.optional() }),
+  ),
+  'memory.documents': sessionRef,
   'memory.decisions': memoryRef(
     z.object({
       cwd: cwd.optional(),
       agent: memoryAgent.optional(),
+      sessionId: id.optional(),
       query: z.string().max(LIMITS.queryChars).optional(),
       limit: limit.optional(),
     }),
@@ -1278,6 +1322,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
     z.object({
       cwd: cwd.optional(),
       agent: memoryAgent.optional(),
+      sessionId: id.optional(),
       decisionId: id,
       operationId,
     }),
@@ -1472,6 +1517,11 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'sessions.setReadOnly': sessionResult,
   'sessions.setProfile': sessionResult,
   'sessions.inspect': z.object({ inspection: sessionInspectionSchema }),
+  'sessions.ask': z.object({
+    answer: z.string().max(ASK_LIMITS.answerChars),
+    truncated: z.boolean(),
+  }),
+  'sessions.turns': z.object({ turns: z.array(undoableTurnSchema).max(TURNS_LIMITS.turns) }),
   'sessions.detach': z.object({
     status: z.enum(['detached', 'already-daemon']),
     session: sessionSchema,
@@ -1501,6 +1551,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'jobs.list': z.object({ jobs: z.array(jobSchema) }),
   'jobs.cancel': emptyResult,
+  'jobs.background': z.object({
+    moved: count,
+    errors: z.array(z.string().max(INSPECT_LIMITS.reasonChars)).max(64),
+  }),
 
   'git.changes': z.object({ changes: changesSummarySchema }),
   'git.diff': fileDiffSchema,
@@ -1512,6 +1566,10 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'memory.status': memoryStatusSchema,
   'memory.decisions': z.object({ decisions: z.array(decisionSchema) }),
+  'memory.documents': z.object({
+    project: memoryDocumentSchema.nullable(),
+    global: memoryDocumentSchema.nullable(),
+  }),
   'memory.forget': z.object({ removed: z.boolean() }),
   'memory.reclassify': z.object({ updated: z.boolean() }),
   'memory.proposals': z.object({ proposals: z.array(proposalSchema) }),

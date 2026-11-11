@@ -123,10 +123,19 @@ pub enum MainMethod {
     /// Desktop (modo código) — cómo está montada una sesión: perfil, tools,
     /// servers MCP, plugins y entornos (`observe`, solo lectura; no monta nada).
     SessionsInspect,
+    /// Desktop (modo código) — pregunta lateral (`/btw`): el modelo contesta sin
+    /// tools y nada entra en la conversación (`control`: gasta modelo).
+    SessionsAsk,
+    /// Desktop (modo código) — los turnos que se pueden deshacer (`observe`).
+    SessionsTurns,
+    /// Desktop (modo código) — pasar a job el comando en primer plano (`control`).
+    JobsBackground,
+    /// Desktop (modo código) — los `STRATUM.md` que ve la sesión (`observe`).
+    MemoryDocuments,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 51] = [
+    pub const ALL: [MainMethod; 55] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -178,6 +187,10 @@ impl MainMethod {
         MainMethod::BrowserNavigate,
         MainMethod::SessionsSetProfile,
         MainMethod::SessionsInspect,
+        MainMethod::SessionsAsk,
+        MainMethod::SessionsTurns,
+        MainMethod::JobsBackground,
+        MainMethod::MemoryDocuments,
     ];
 }
 
@@ -235,6 +248,10 @@ impl WireMethod for MainMethod {
             MainMethod::BrowserNavigate => "browser.navigate",
             MainMethod::SessionsSetProfile => "sessions.setProfile",
             MainMethod::SessionsInspect => "sessions.inspect",
+            MainMethod::SessionsAsk => "sessions.ask",
+            MainMethod::SessionsTurns => "sessions.turns",
+            MainMethod::JobsBackground => "jobs.background",
+            MainMethod::MemoryDocuments => "memory.documents",
         }
     }
 }
@@ -460,7 +477,11 @@ mod tests {
                 "browser.screen",
                 "browser.navigate",
                 "sessions.setProfile",
-                "sessions.inspect"
+                "sessions.inspect",
+                "sessions.ask",
+                "sessions.turns",
+                "jobs.background",
+                "memory.documents"
             ]
         );
         for forbidden in [
@@ -484,16 +505,22 @@ mod tests {
             // Ni alojar, ni gobernar jobs, ni la memoria global: eso no es de un
             // cliente. Excepciones: ver, olvidar y reclasificar la del asistente
             // (M17, M19) y cancelar un job (modo código de Desktop: solo resta).
+            // Modo código de Desktop, lo que la persona hace en `chat` con Ctrl+B y
+            // `/memory show`: pasar a job el comando en primer plano (no lanza nada
+            // ni relaja ninguna guarda) y leer los `STRATUM.md` de la sesión.
             let companion_memory = name == "memory.decisions"
                 || name == "memory.forget"
                 || name == "memory.reclassify"
                 || name == "memory.proposals"
                 || name == "memory.dream"
                 || name == "memory.applyProposal"
-                || name == "memory.rejectProposal";
+                || name == "memory.rejectProposal"
+                || name == "memory.documents";
             assert!(
                 !name.starts_with("host.")
-                    && (!name.starts_with("jobs.") || name == "jobs.cancel")
+                    && (!name.starts_with("jobs.")
+                        || name == "jobs.cancel"
+                        || name == "jobs.background")
                     && (!name.starts_with("memory.") || companion_memory),
                 "{name}"
             );

@@ -993,6 +993,15 @@ export class StratumAgent {
   }
 
   /**
+   * Como `getUndoableTurns`, pero espera a que el almacén esté abierto: para
+   * quien puede esperar (un cliente del protocolo) y no quiere un [] en falso.
+   */
+  async listUndoableTurns(): Promise<TurnRecord[]> {
+    const store = await this.openSnapshots();
+    return store ? store.getUndoableTurns() : [];
+  }
+
+  /**
    * Ficheros que cambió el último turno terminado, según su snapshot. `null` si
    * no cambió nada o no hay dato (sin snapshots, o fallaron): la UI no pinta
    * nada antes que un «0 ficheros» que no ha medido.

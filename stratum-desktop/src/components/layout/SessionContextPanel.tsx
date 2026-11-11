@@ -11,6 +11,7 @@ import { parseSkills } from "../../protocol/results";
 import { describeFailure } from "../../client/actions";
 import { ICON, StrokeIcon } from "../chat/icons";
 import { AssistantMemory } from "./AssistantMemory";
+import { ProjectMemory } from "../code/ProjectMemory";
 import { formatTokens } from "./StatusBar";
 
 const KIND_LABEL: Record<string, string> = {
@@ -68,6 +69,7 @@ export function SessionContextPanel({
   knownSessions,
   onOpenSession,
   assistant = true,
+  project = false,
 }: {
   native: NativeBridge;
   sessionId: string | null;
@@ -82,6 +84,11 @@ export function SessionContextPanel({
    * modo código no: la sesión es del agente de código, que no ve esa memoria.
    */
   assistant?: boolean;
+  /**
+   * La sesión es del agente de código: enseñar la memoria de su proyecto
+   * (decisiones y `STRATUM.md`), que el daemon resuelve a partir de la sesión.
+   */
+  project?: boolean;
 }) {
   const [report, setReport] = useState<ProtocolContextReport | null>(null);
   const [memory, setMemory] = useState<ProtocolSessionMemory | null>(null);
@@ -298,6 +305,14 @@ export function SessionContextPanel({
               </ul>
             )}
           </section>
+        )}
+        {project && sessionId && (
+          <ProjectMemory
+            native={native}
+            sessionId={sessionId}
+            connected={connected}
+            refreshKey={refreshKey}
+          />
         )}
         {assistant && (
           <AssistantMemory

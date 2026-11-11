@@ -17,6 +17,8 @@ import {
   listProfiles,
   pickProjectFolder,
   setAgent,
+  askSideQuestion,
+  backgroundCommand,
   setReadOnly,
   setSessionProfile,
   startCodeConversation,
@@ -41,6 +43,7 @@ import { ChangesPanel } from './components/code/ChangesPanel';
 import { CodeBar, GENERAL_AGENT } from './components/code/CodeBar';
 import { JobsPanel } from './components/code/JobsPanel';
 import { SetupPanel } from './components/code/SetupPanel';
+import { SideAnswer, type SideQuestion } from './components/code/SideAnswer';
 import { ProjectPicker } from './components/code/ProjectPicker';
 import { ConnectionBanner } from './components/layout/ConnectionIndicator';
 import { FilesPanel } from './components/layout/FilesPanel';
@@ -425,9 +428,48 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   const jobs = useMemo(() => (codeSession ? (snapshot?.jobs ?? []) : []), [codeSession, snapshot]);
   const runningJobs = jobs.filter((j) => j.status === 'running').length;
 
+  // La pregunta lateral (`/btw`) vive solo aquí: no es parte de la conversación.
+  const [side, setSide] = useState<SideQuestion | null>(null);
+  const canBackground =
+    connected && codeSession !== null && codeSession.host.kind === 'daemon' && stream.activeTurnId !== null;
+
   const onCommand = useCallback(
     (name: CommandName, arg: string) => {
       switch (name) {
+        case 'btw': {
+          if (!selectedId) return 'Abre primero una sesión: la pregunta lateral es sobre su conversación.';
+          if (!connected) return 'Sin conexión con Stratum.';
+          if (side?.status === 'pending') return 'Ya hay una pregunta lateral en curso: espera a su respuesta.';
+          const sessionId = selectedId;
+          const asked: SideQuestion = { sessionId, question: arg, status: 'pending' };
+          setSide(asked);
+          void askSideQuestion(native, sessionId, arg).then((reply) =>
+            // Si se cerró o se preguntó otra cosa entretanto, esta respuesta ya no es la que se espera.
+            setSide((current) =>
+              current !== asked
+                ? current
+                : reply.ok
+                  ? { sessionId, question: arg, status: 'done', ...reply.value }
+                  : { sessionId, question: arg, status: 'failed', message: reply.message },
+            ),
+          );
+          return;
+        }
+        case 'bg':
+          if (!codeSession || !selectedId) return 'Abre primero una sesión de código.';
+          if (!canBackground) {
+            return codeSession.host.kind === 'peer'
+              ? 'Esta sesión la aloja una terminal: usa Ctrl+B en ella.'
+              : 'No hay ningún turno en marcha.';
+          }
+          void backgroundCommand(native, selectedId);
+          return;
+        case 'rewind':
+          openPanel('changes');
+          return;
+        case 'memory':
+          openPanel('memory');
+          return;
         case 'new':
           newConversation();
           return;
@@ -525,6 +567,9 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
       codeLock,
       stream.activeTurnId,
       project,
+      side,
+      connected,
+      canBackground,
     ],
   );
 
@@ -622,6 +667,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             knownSessions={knownSessions}
             onOpenSession={(id) => selectSession(native, id)}
             assistant={mode === 'chat'}
+            project={codeSession !== null}
           />
         );
       case 'changes':
@@ -657,6 +703,7 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
                 ? (jobId) => void cancelJob(native, selectedId, jobId)
                 : undefined
             }
+            onBackground={canBackground && selectedId ? () => void backgroundCommand(native, selectedId) : undefined}
           />
         );
       case 'files':
@@ -825,7 +872,10 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
               onPickModel={pickModel}
               onCloseModels={() => setModels(null)}
               pending={
-                <PendingRequests items={pendingOf(snapshot)} snapshot={snapshot} connected={connected} native={native} />
+                <>
+                  {side && side.sessionId === selectedId && <SideAnswer side={side} onClose={() => setSide(null)} />}
+                  <PendingRequests items={pendingOf(snapshot)} snapshot={snapshot} connected={connected} native={native} />
+                </>
               }
               model={
                 connected

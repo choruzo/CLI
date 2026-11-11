@@ -289,6 +289,91 @@ pub async fn desktop_inspect_session(
         .await
 }
 
+/// Modo código: pregunta lateral (`/btw`). El modelo de la sesión contesta sin
+/// tools y nada entra en la conversación; la pregunta no se registra.
+#[tauri::command]
+pub async fn desktop_ask_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    question: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::AskSession {
+            session_id,
+            question,
+        })
+        .await
+}
+
+/// Modo código: los turnos con cambios que se pueden deshacer. Solo lectura
+/// (deshacer de verdad va por `desktop_revert`, con la autoridad de aprobar).
+#[tauri::command]
+pub async fn desktop_session_turns(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::SessionTurns { session_id })
+        .await
+}
+
+/// Modo código: pasa a job el comando que el agente tiene en primer plano. No
+/// lanza nada ni relaja ninguna guarda: esa llamada ya pasó por todas.
+#[tauri::command]
+pub async fn desktop_background_jobs(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::BackgroundJobs { session_id })
+        .await
+}
+
+/// Modo código: las decisiones de la memoria **del proyecto de esa sesión**. El
+/// daemon resuelve el directorio a partir de la sesión: aquí no entra una ruta.
+#[tauri::command]
+pub async fn desktop_project_memory_decisions(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    query: Option<String>,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ProjectMemoryDecisions { session_id, query })
+        .await
+}
+
+/// Modo código: olvidar una decisión de la memoria del proyecto de esa sesión.
+#[tauri::command]
+pub async fn desktop_project_memory_forget(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    decision_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ProjectMemoryForget {
+            session_id,
+            decision_id,
+        })
+        .await
+}
+
+/// Modo código: los `STRATUM.md` (proyecto y global) que ve esa sesión, redactados.
+#[tauri::command]
+pub async fn desktop_project_memory_documents(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ProjectMemoryDocuments { session_id })
+        .await
+}
+
 /// Modo código: parar un job en segundo plano de una sesión (solo resta).
 #[tauri::command]
 pub async fn desktop_cancel_job(

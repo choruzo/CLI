@@ -13,6 +13,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 - `tools.browser` en la config: `enabled`, `idleMinutes` (se cierra solo tras 15 minutos sin uso) y, solo en la config global, `executable` y `allowHosts`.
 - Protocolo: `git.changes` y `git.diff` (los cambios del árbol de trabajo de una sesión y el diff de un fichero), `browser.screen` y `browser.navigate` (ver y mover el navegador de una sesión; `navigate` no aprueba orígenes).
 - Protocolo: `sessions.setProfile` (cambiar el perfil de sesión de una sesión en reposo) y `sessions.inspect` (cómo está montada una sesión: perfil, tools que se ofrecen, servers MCP, plugins y entornos; solo lectura).
+- Protocolo: `sessions.ask` (pregunta lateral sobre la conversación, sin tools y sin entrar en ella), `sessions.turns` (los turnos que se pueden deshacer), `jobs.background` (pasar a segundo plano el comando en primer plano) y `memory.documents` (los `STRATUM.md` que ve una sesión); `memory.status`, `memory.decisions` y `memory.forget` admiten `sessionId` para la memoria del proyecto de esa sesión.
 
 ### Limitaciones conocidas
 - La política del navegador se aplica por nombre de host, no por la IP a la que resuelve, y las conexiones WebSocket de una página no pasan por ella.

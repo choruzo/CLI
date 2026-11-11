@@ -997,6 +997,7 @@ pub fn fast() -> Timings {
         box_timeout: Duration::from_millis(900),
         fresh_timeout: Duration::from_millis(900),
         dream_timeout: Duration::from_millis(900),
+        ask_timeout: Duration::from_millis(900),
         handshake_timeout: Duration::from_millis(400),
         daemon_start_wait: Duration::from_millis(800),
         idle_poll: Duration::from_millis(40),

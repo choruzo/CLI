@@ -11,11 +11,14 @@
 import { toCommandError, type CommandError, type NativeBridge } from '../ipc/native';
 import {
   parseAgents,
+  parseAnswer,
+  parseBackgrounded,
   parseChanges,
   parseDiff,
   parseInspection,
   parseOpenedSession,
   parseRevert,
+  parseTurns,
 } from '../protocol/results';
 import { describeFailure, selectSession, sendMessage, type SendOutcome } from './actions';
 import { uiActions, type PendingRequest } from './ui-store';
@@ -25,6 +28,8 @@ export type FileDiff = NonNullable<ReturnType<typeof parseDiff>>;
 export type RevertResult = NonNullable<ReturnType<typeof parseRevert>>;
 export type AgentProfile = NonNullable<ReturnType<typeof parseAgents>>[number];
 export type Inspection = NonNullable<ReturnType<typeof parseInspection>>;
+export type UndoableTurn = NonNullable<ReturnType<typeof parseTurns>>[number];
+export type SideReply = NonNullable<ReturnType<typeof parseAnswer>>;
 
 export interface CodeSessionChoice {
   cwd: string;
@@ -162,6 +167,78 @@ export async function loadInspection(native: NativeBridge, sessionId: string): P
       return { ok: false, message: 'Esta sesión la aloja una terminal: se consulta desde ella (/tools, /env, /profile).' };
     }
     return failed('No se pudo leer cómo está montada la sesión', err);
+  }
+}
+
+/**
+ * Pregunta lateral (`/btw`, `sessions.ask`): el modelo contesta sobre la
+ * conversación sin tools y nada entra en ella. Gasta modelo: sin respuesta no
+ * se repite sola.
+ */
+export async function askSideQuestion(
+  native: NativeBridge,
+  sessionId: string,
+  question: string,
+): Promise<Loaded<SideReply>> {
+  try {
+    const reply = parseAnswer(await native.askSession(sessionId, question));
+    return reply ? { ok: true, value: reply } : { ok: false, message: 'La respuesta que llegó no se entiende.' };
+  } catch (err) {
+    const error = toCommandError(err);
+    if (error.kind === 'unknown') {
+      return { ok: false, message: 'No hubo respuesta a tiempo. No se ha vuelto a preguntar.' };
+    }
+    if (error.kind === 'rejected' && error.code === 'BUSY') {
+      return { ok: false, message: 'Ya hay una pregunta lateral en curso en esta sesión.' };
+    }
+    if (error.kind === 'rejected' && error.reason === 'peer-hosted') {
+      return { ok: false, message: 'Esta sesión la aloja una terminal: pregunta desde ella con /btw.' };
+    }
+    return failed('No se pudo contestar la pregunta', err);
+  }
+}
+
+/** Los turnos con cambios que se pueden deshacer, el más reciente primero (`sessions.turns`). */
+export async function loadTurns(native: NativeBridge, sessionId: string): Promise<Loaded<UndoableTurn[]>> {
+  try {
+    const turns = parseTurns(await native.sessionTurns(sessionId));
+    return turns ? { ok: true, value: turns } : { ok: false, message: 'La lista de turnos que llegó no se entiende.' };
+  } catch (err) {
+    return failed('No se pudieron leer los turnos', err);
+  }
+}
+
+/**
+ * Pasa a segundo plano el comando que el agente tiene en marcha (el Ctrl+B de
+ * la terminal). El job nuevo se ve cuando el anfitrión lo publica.
+ */
+export async function backgroundCommand(native: NativeBridge, sessionId: string): Promise<void> {
+  try {
+    const result = parseBackgrounded(await native.backgroundJobs(sessionId));
+    if (!result) {
+      uiActions.notify(sessionId, 'warning', 'La respuesta al pasar a segundo plano no se entiende.');
+    } else if (result.errors.length > 0) {
+      uiActions.notify(sessionId, 'warning', `No se pudo pasar a segundo plano: ${result.errors.join('; ')}`);
+    } else if (result.moved === 0) {
+      uiActions.notify(sessionId, 'info', 'No hay ningún comando en primer plano que pasar a segundo plano.');
+    } else {
+      uiActions.notify(
+        sessionId,
+        'info',
+        result.moved === 1
+          ? 'El comando sigue en segundo plano; el agente continúa.'
+          : `${result.moved} comandos siguen en segundo plano; el agente continúa.`,
+      );
+    }
+  } catch (err) {
+    const error = toCommandError(err);
+    uiActions.notify(
+      sessionId,
+      'warning',
+      error.kind === 'unknown'
+        ? 'No hubo respuesta al pasar a segundo plano: mira los procesos de la sesión.'
+        : describeFailure('No se pudo pasar a segundo plano', error),
+    );
   }
 }
 

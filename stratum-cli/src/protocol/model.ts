@@ -1105,3 +1105,45 @@ export interface ProtocolSessionInspection {
   /** Algo se recortó a `INSPECT_LIMITS`. */
   truncated: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Modo código de Desktop — pregunta lateral, turnos deshacibles y STRATUM.md
+// ---------------------------------------------------------------------------
+
+/** Topes de `sessions.ask` (la pregunta lateral, `/btw`). */
+export const ASK_LIMITS = { questionChars: 4_000, answerChars: 64_000 } as const;
+
+/** Topes de `sessions.turns`: los turnos que `sessions.revert` admite y sus rutas. */
+export const TURNS_LIMITS = { turns: 20, paths: 50 } as const;
+
+/** Tope de cada documento de `memory.documents`. */
+export const MEMORY_DOCUMENT_LIMITS = { chars: 64_000 } as const;
+
+/**
+ * Un turno con cambios de ficheros que se puede deshacer (`/rewind`). Su
+ * posición en la lista (el más reciente primero) más uno es el `turns` de
+ * `sessions.revert` que deshace desde él hasta ahora.
+ */
+export interface ProtocolUndoableTurn {
+  /** Contador por sesión: solo cuentan los turnos con cambios. */
+  turn: number;
+  /** ISO 8601. */
+  startedAt: string;
+  endedAt: string;
+  /** Hasta `TURNS_LIMITS.paths`; `totalFiles` dice cuántos son. */
+  files: {
+    path: string;
+    status: 'added' | 'modified' | 'deleted';
+    additions?: number;
+    deletions?: number;
+  }[];
+  totalFiles: number;
+  /** Ficheros sin copia (demasiado grandes): no se pueden restaurar. */
+  skipped: number;
+}
+
+/** Un `STRATUM.md`, redactado y recortado a `MEMORY_DOCUMENT_LIMITS.chars`. */
+export interface ProtocolMemoryDocument {
+  content: string;
+  truncated: boolean;
+}

@@ -21,6 +21,8 @@ export type {
   ProtocolChangeStatus,
   ProtocolChangesSummary,
   ProtocolSessionInspection,
+  ProtocolUndoableTurn,
+  ProtocolMemoryDocument,
   ProtocolChatMessage,
   ProtocolContextReport,
   ProtocolDecision,

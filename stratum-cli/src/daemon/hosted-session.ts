@@ -34,6 +34,7 @@ import type {
   ProtocolSession,
   ProtocolSessionHostInfo,
   ProtocolSessionInspection,
+  ProtocolUndoableTurn,
   ProtocolRevertPlan,
   ProtocolSessionSnapshot,
   ResumeStatus,
@@ -41,7 +42,8 @@ import type {
   StateEventData,
   SteerStatus,
 } from '../protocol/index.js';
-import { REVERT_LIMITS } from '../protocol/index.js';
+import { ASK_LIMITS, INSPECT_LIMITS, REVERT_LIMITS, TURNS_LIMITS } from '../protocol/index.js';
+import { redactText } from '../security/redact-output.js';
 import type { RevertPlan } from '../snapshots/store.js';
 import type { SessionEnv } from '../runtime/session-env.js';
 import { handoffAgentOptions } from '../host/handoff.js';
@@ -556,6 +558,9 @@ export class HostedSession {
     }
   }
 
+  /** La pregunta lateral en curso (`sessions.ask`), si la hay. */
+  private asking: AbortController | null = null;
+
   private assertIdle(): void {
     if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
     if (this.pump) throw new ProtocolError('BUSY', 'Not while a run is in progress.');
@@ -829,6 +834,85 @@ export class HostedSession {
     return inspectSession(this.host);
   }
 
+  /**
+   * Pregunta lateral (`/btw`): llamada auxiliar sin tools que no toca el
+   * historial, la memoria ni el uso. Una a la vez; se corta al cerrar la sesión.
+   */
+  async ask(question: string): Promise<{ answer: string; truncated: boolean }> {
+    if (this.closing) throw new ProtocolError('UNAVAILABLE', 'Session is closing.');
+    if (this.asking) throw new ProtocolError('BUSY', 'A side question is already in progress.');
+    const controller = new AbortController();
+    this.asking = controller;
+    try {
+      let answer = '';
+      for await (const chunk of this.host.agent.askSideQuestion(question, {
+        trace: this.host.trace?.scope(),
+        signal: controller.signal,
+      })) {
+        answer += chunk;
+        // Con margen: la redacción puede acortar; más no hace falta leer.
+        if (answer.length > ASK_LIMITS.answerChars * 2) {
+          controller.abort();
+          break;
+        }
+      }
+      const text = redactText(answer.trim(), this.host.config);
+      return {
+        answer: text.slice(0, ASK_LIMITS.answerChars),
+        truncated: text.length > ASK_LIMITS.answerChars,
+      };
+    } catch (err) {
+      if (err instanceof ProtocolError) throw err;
+      // Un fallo auxiliar: la sesión sigue. El mensaje del provider, redactado.
+      const message = redactText(
+        err instanceof Error ? err.message : String(err),
+        this.host.config,
+      );
+      throw new ProtocolError(
+        'UNAVAILABLE',
+        `The side question failed: ${message.slice(0, INSPECT_LIMITS.reasonChars)}`,
+        { reason: this.closing ? 'closing' : 'provider-failed' },
+      );
+    } finally {
+      this.asking = null;
+    }
+  }
+
+  /** Los turnos con cambios que se pueden deshacer, el más reciente primero. */
+  async undoableTurns(): Promise<ProtocolUndoableTurn[]> {
+    const turns = await this.host.agent.listUndoableTurns();
+    return turns.slice(0, TURNS_LIMITS.turns).map((t) => ({
+      turn: t.turn,
+      startedAt: t.startedAt,
+      endedAt: t.endedAt,
+      files: t.files.slice(0, TURNS_LIMITS.paths).map((f) => ({
+        path: f.path,
+        status: f.status,
+        ...(f.additions !== undefined ? { additions: f.additions } : {}),
+        ...(f.deletions !== undefined ? { deletions: f.deletions } : {}),
+      })),
+      totalFiles: t.files.length,
+      skipped: t.skipped.length,
+    }));
+  }
+
+  /**
+   * Pasa a jobs los `exec` en primer plano (el Ctrl+B de `chat`). No relaja
+   * ninguna guarda: esas llamadas ya pasaron por todas. Los jobs nuevos los
+   * publica el anfitrión como cualquier otro.
+   */
+  backgroundJobs(): { moved: number; errors: string[] } {
+    const jobs = this.host.agent.jobs;
+    if (!jobs) return { moved: 0, errors: [] };
+    const result = jobs.backgroundForeground();
+    return {
+      moved: result.jobs.length,
+      errors: result.errors
+        .slice(0, 64)
+        .map((e) => redactText(e, this.host.config).slice(0, INSPECT_LIMITS.reasonChars)),
+    };
+  }
+
   async cancelJob(jobId: string): Promise<void> {
     const jobs = this.host.agent.jobs;
     if (!jobs?.get(jobId)) throw new ProtocolError('NOT_FOUND', 'Job not found.');
@@ -844,6 +928,7 @@ export class HostedSession {
   close(reason: StateEventData['session.closed']['reason']): Promise<void> {
     this.closing ??= (async () => {
       this.host.cancel();
+      this.asking?.abort();
       // Un revert no se corta a medias: termina antes de desmontar.
       if (this.reverting) await this.reverting.catch(() => undefined);
       // Compactar para archivar sí se corta (no guarda nada a medias), pero se

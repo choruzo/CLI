@@ -333,6 +333,30 @@ pub enum CallAction {
     /// Desktop (modo código) — `sessions.inspect`: cómo está montada la sesión.
     /// Solo lectura; nunca la monta.
     InspectSession { session_id: String },
+    /// Desktop (modo código) — `sessions.ask`: pregunta lateral sobre la
+    /// conversación. La pregunta no se registra.
+    AskSession {
+        session_id: String,
+        question: String,
+    },
+    /// Desktop (modo código) — `sessions.turns`: los turnos deshacibles. Solo lectura.
+    SessionTurns { session_id: String },
+    /// Desktop (modo código) — `jobs.background`: el comando en primer plano pasa a job.
+    BackgroundJobs { session_id: String },
+    /// Desktop (modo código) — `memory.decisions` del **proyecto de esa sesión**:
+    /// la memoria la fija la sesión (el daemon resuelve su directorio), no una
+    /// ruta que elija el webview. La consulta no se registra.
+    ProjectMemoryDecisions {
+        session_id: String,
+        query: Option<String>,
+    },
+    /// Desktop (modo código) — `memory.forget` en la memoria del proyecto de esa sesión.
+    ProjectMemoryForget {
+        session_id: String,
+        decision_id: String,
+    },
+    /// Desktop (modo código) — `memory.documents`: los `STRATUM.md` de esa sesión.
+    ProjectMemoryDocuments { session_id: String },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -408,6 +432,12 @@ impl CallAction {
             CallAction::BrowserNavigate { .. } => "browser-navigate",
             CallAction::SetSessionProfile { .. } => "set-session-profile",
             CallAction::InspectSession { .. } => "inspect-session",
+            CallAction::AskSession { .. } => "ask-session",
+            CallAction::SessionTurns { .. } => "session-turns",
+            CallAction::BackgroundJobs { .. } => "background-jobs",
+            CallAction::ProjectMemoryDecisions { .. } => "project-memory-decisions",
+            CallAction::ProjectMemoryForget { .. } => "project-memory-forget",
+            CallAction::ProjectMemoryDocuments { .. } => "project-memory-documents",
         }
     }
 
@@ -439,6 +469,9 @@ impl CallAction {
                 | CallAction::CancelJob { .. }
                 | CallAction::BrowserNavigate { .. }
                 | CallAction::SetSessionProfile { .. }
+                | CallAction::AskSession { .. }
+                | CallAction::BackgroundJobs { .. }
+                | CallAction::ProjectMemoryForget { .. }
         )
     }
 }

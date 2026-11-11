@@ -6,7 +6,7 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 ## [Sin publicar]
 
-Necesita un `stratumd` con `git.changes`, `git.diff`, `browser.screen`, `browser.navigate`, `sessions.setProfile` y `sessions.inspect` (la CLI de esta misma rama).
+Necesita un `stratumd` con `git.changes`, `git.diff`, `browser.screen`, `browser.navigate`, `sessions.setProfile`, `sessions.inspect`, `sessions.ask`, `sessions.turns`, `jobs.background` y `memory.documents` (la CLI de esta misma rama).
 
 ### Añadido
 - **Modo código**: un conmutador **Chat | Código** centrado en la barra de título (`Ctrl+1` / `Ctrl+2`). En Código, Desktop abre sesiones del agente de código de la CLI en la carpeta de proyecto que elijas (con las recientes a mano), con su perfil de agente y el modo de solo lectura en una barra sobre la conversación. Cada modo lista sus propias sesiones.
@@ -16,7 +16,11 @@ Necesita un `stratumd` con `git.changes`, `git.diff`, `browser.screen`, `browser
 - **Navegador de la sesión** (botón del raíl o `Ctrl+Mayús+B`, en Chat y en Código): lo que el agente ve cuando abre su navegador para comprobar su trabajo, en vivo y de solo lectura. Con la sesión en reposo puedes ir tú a una dirección local, recargar y moverte por el historial; las direcciones externas las pide el agente y se confirman.
 - **Paneles redimensionables**: el panel lateral, la trayectoria y el navegador se ensanchan o encogen arrastrando su borde (o con las flechas; doble clic vuelve al ancho por defecto), y el ancho se recuerda.
 - **Montaje de la sesión** (modo código): panel con el perfil de sesión (`code`, `infra`, `full`, `auto` o los de tu config), que se cambia desde ahí con la sesión en reposo; las tools que recibe el modelo, agrupadas por server MCP; los servers MCP y su estado; los entornos con sus reglas y el contexto activo; y los plugins cargados y omitidos. Es lo que `/profile`, `/tools`, `/env` y `/plugins` enseñan en la terminal, y esos mismos comandos lo abren.
-- Comandos del modo código: `/plan <tarea>`, `/agent`, `/readonly`, `/changes`, `/jobs`, `/undo`; y `/browser [dirección]` en los dos modos.
+- **Pregunta lateral** (`/btw <pregunta>`, en Chat y en Código): el modelo contesta sobre la conversación sin tocar nada y sin que la pregunta ni la respuesta entren en ella; también con el agente trabajando. La respuesta sale en una tarjeta aparte, encima del campo.
+- **Pasar a segundo plano** (modo código): con el agente esperando a un comando largo, el botón «A segundo plano» del panel de procesos (o `/bg`) lo deja corriendo como proceso y el agente sigue. Es el Ctrl+B de la terminal.
+- **Deshacer desde un turno** (modo código): el panel de cambios lista los turnos que cambiaron ficheros, con su hora y cuántos, y deshace desde el que elijas hasta ahora (`/rewind`). Sigue pidiendo desbloqueo y confirmación en la ventana nativa.
+- **Memoria del proyecto** (modo código): en *Contexto y memoria*, las decisiones que el agente recuerda del proyecto de la sesión —ver, buscar y olvidar— y su `STRATUM.md` (`/memory`). Es la misma memoria que usa la CLI en esa carpeta.
+- Comandos del modo código: `/plan <tarea>`, `/agent`, `/readonly`, `/profile`, `/tools`, `/env`, `/plugins`, `/changes`, `/rewind`, `/undo`, `/jobs`, `/bg`, `/memory`; y `/btw <pregunta>` y `/browser [dirección]` en los dos modos.
 
 ## [0.10.0] — 2026-11-06
 

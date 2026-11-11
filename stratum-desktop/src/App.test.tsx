@@ -137,6 +137,12 @@ function rig() {
         truncated: false,
       },
     })),
+    askSession: vi.fn(async () => ({ answer: 'respuesta lateral', truncated: false })),
+    sessionTurns: vi.fn(async () => ({ turns: [] })),
+    backgroundJobs: vi.fn(async () => ({ moved: 0, errors: [] })),
+    projectMemoryDecisions: vi.fn(async () => ({ decisions: [] })),
+    projectMemoryForget: vi.fn(async () => ({ removed: true })),
+    projectMemoryDocuments: vi.fn(async () => ({ project: null, global: null })),
     cancelJob: vi.fn(async () => ({})),
     gitChanges: vi.fn(async () => ({
       changes: { isRepo: false, files: 0, added: 0, deleted: 0, changes: [], truncated: false },

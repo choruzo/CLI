@@ -13,6 +13,8 @@ import type {
   ProtocolChangesSummary,
   ProtocolFileDiff,
   ProtocolSessionInspection,
+  ProtocolUndoableTurn,
+  ProtocolMemoryDocument,
   ProtocolSharedImage,
   ProtocolRoutine,
   ProtocolRoutineFire,
@@ -401,6 +403,24 @@ export interface ProtocolMethods {
    */
   'sessions.inspect': Spec<{ sessionId: string }, { inspection: ProtocolSessionInspection }>;
   /**
+   * Modo código — pregunta lateral (`/btw`): el modelo de la sesión contesta
+   * sobre la conversación **sin tools**, y ni la pregunta ni la respuesta entran
+   * en el historial, la memoria ni el uso de la sesión. Vale con un turno en
+   * curso. Una a la vez por sesión (`BUSY`); si el modelo falla, `UNAVAILABLE`
+   * (`provider-failed`). La respuesta llega entera, redactada y recortada a
+   * `ASK_LIMITS.answerChars`.
+   */
+  'sessions.ask': Spec<
+    Mutation & { sessionId: string; question: string },
+    { answer: string; truncated: boolean }
+  >;
+  /**
+   * Modo código — los turnos con cambios que se pueden deshacer, el más
+   * reciente primero (`/rewind`). Solo lee y nunca monta: guardada sin montar,
+   * `UNAVAILABLE` (`not-loaded`); par, `UNAVAILABLE` (`peer-hosted`).
+   */
+  'sessions.turns': Spec<{ sessionId: string }, { turns: ProtocolUndoableTurn[] }>;
+  /**
    * Pasa una sesión de su anfitrión par al daemon, sin cambiar de id ni perder
    * contexto (M10). Lo hace el par: el servidor se lo pide y comprueba el
    * resultado. `BUSY`/`NOT_TRANSFERABLE` con el motivo si no se puede.
@@ -485,6 +505,14 @@ export interface ProtocolMethods {
 
   'jobs.list': Spec<{ sessionId: string }, { jobs: ProtocolJob[] }>;
   'jobs.cancel': Spec<Mutation & { sessionId: string; jobId: string }, Empty>;
+  /**
+   * Modo código — pasa a jobs los `exec` locales que estén corriendo en primer
+   * plano (el Ctrl+B de `chat`): el agente recibe su `jobId` y sigue. Lo pide
+   * una persona y no relaja ninguna guarda: la llamada ya pasó por todas.
+   * `moved`: cuántos; los nuevos jobs llegan por `job.*`. `errors`: los que no
+   * se pudieron adoptar (siguen en primer plano), redactados.
+   */
+  'jobs.background': Spec<Mutation & { sessionId: string }, { moved: number; errors: string[] }>;
 
   /**
    * Modo código de Desktop — los cambios del working tree del `cwd` de una
@@ -525,10 +553,32 @@ export interface ProtocolMethods {
    * agente embebido (`agent`; por defecto el asistente). Nunca dos a la vez:
    * `cwd` y `agent` juntos son `INVALID_PARAMS`.
    */
-  'memory.status': Spec<{ cwd?: string; agent?: ProtocolMemoryAgent }, ProtocolMemoryStatus>;
+  'memory.status': Spec<
+    { cwd?: string; agent?: ProtocolMemoryAgent; sessionId?: string },
+    ProtocolMemoryStatus
+  >;
+  /**
+   * `sessionId` (modo código): la memoria del proyecto de esa sesión, sin que el
+   * cliente nombre un directorio. No se combina con `cwd` ni con `agent`; la
+   * sesión de un agente embebido es `UNAVAILABLE` (`embedded-agent`).
+   */
   'memory.decisions': Spec<
-    { cwd?: string; agent?: ProtocolMemoryAgent; query?: string; limit?: number },
+    {
+      cwd?: string;
+      agent?: ProtocolMemoryAgent;
+      sessionId?: string;
+      query?: string;
+      limit?: number;
+    },
     { decisions: ProtocolDecision[] }
+  >;
+  /**
+   * Modo código — los `STRATUM.md` que ve la sesión (`/memory show`): el del
+   * proyecto y el global, cada uno `null` si no existe. Sin rutas.
+   */
+  'memory.documents': Spec<
+    { sessionId: string },
+    { project: ProtocolMemoryDocument | null; global: ProtocolMemoryDocument | null }
   >;
   /**
    * M17 — olvidar una decisión (y su entrada del índice). Lo pide una persona
@@ -537,7 +587,12 @@ export interface ProtocolMethods {
    * reintento tras un resultado desconocido es inocuo.
    */
   'memory.forget': Spec<
-    Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; decisionId: string },
+    Mutation & {
+      cwd?: string;
+      agent?: ProtocolMemoryAgent;
+      sessionId?: string;
+      decisionId: string;
+    },
     { removed: boolean }
   >;
   /**
@@ -784,6 +839,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'sessions.setReadOnly': write('control'),
   'sessions.setProfile': write('control'),
   'sessions.inspect': read('observe'),
+  'sessions.ask': write('control'),
+  'sessions.turns': read('observe'),
   'sessions.detach': write('control'),
   // Pisa ficheros sin pasar por las aprobaciones: la autoridad es la de aprobar.
   'sessions.revert': write('approve'),
@@ -805,6 +862,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'jobs.list': read('observe'),
   'jobs.cancel': write('control'),
+  'jobs.background': write('control'),
 
   // Solo leen el disco del proyecto de la sesión.
   'git.changes': read('observe'),
@@ -816,6 +874,7 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
 
   'memory.status': read('observe'),
   'memory.decisions': read('observe'),
+  'memory.documents': read('observe'),
   // Olvidar solo resta, y lo recordado no es autoridad: no exige `approve`.
   'memory.forget': write('control'),
   'memory.reclassify': write('control'),

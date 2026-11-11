@@ -92,6 +92,8 @@ pub struct Timings {
     pub fresh_timeout: Duration,
     /// M19 — una pasada de dreaming llama al modelo (hasta 2 minutos) y no es una orden corta.
     pub dream_timeout: Duration,
+    /// Modo código — la pregunta lateral llama al modelo (el daemon la corta a los 2 minutos).
+    pub ask_timeout: Duration,
     pub handshake_timeout: Duration,
     /// Cuánto se espera a que el daemon recién arrancado atienda.
     pub daemon_start_wait: Duration,
@@ -110,6 +112,7 @@ impl Default for Timings {
             box_timeout: Duration::from_secs(20 * 60),
             fresh_timeout: Duration::from_secs(10 * 60),
             dream_timeout: Duration::from_secs(5 * 60),
+            ask_timeout: Duration::from_secs(150),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
             idle_poll: Duration::from_secs(2),
@@ -239,6 +242,12 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     // `/profile`, `/tools`, `/env` y `/plugins`).
     MainMethod::SessionsSetProfile,
     MainMethod::SessionsInspect,
+    // Modo código: pregunta lateral (`/btw`), turnos deshacibles (`/rewind`),
+    // pasar a segundo plano (Ctrl+B) y los `STRATUM.md` del proyecto.
+    MainMethod::SessionsAsk,
+    MainMethod::SessionsTurns,
+    MainMethod::JobsBackground,
+    MainMethod::MemoryDocuments,
 ];
 
 impl ClientProfile {
@@ -1350,6 +1359,90 @@ fn call_request_as(
                 json!({ "sessionId": session_id }),
             ))
         }
+        CallAction::AskSession {
+            session_id,
+            question,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            let question = question.trim();
+            if question.is_empty() {
+                return Err(invalid("Write a question."));
+            }
+            if question.chars().count() > MAX_ASK_CHARS {
+                return Err(invalid("The question is too long."));
+            }
+            Ok((
+                MainMethod::SessionsAsk,
+                json!({ "sessionId": session_id, "question": question, "operationId": operation_id }),
+            ))
+        }
+        CallAction::SessionTurns { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::SessionsTurns,
+                json!({ "sessionId": session_id }),
+            ))
+        }
+        CallAction::BackgroundJobs { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::JobsBackground,
+                json!({ "sessionId": session_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::ProjectMemoryDecisions { session_id, query } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            // La memoria es la del proyecto de esa sesión: ni `cwd` ni `agent`.
+            let mut params = serde_json::Map::new();
+            params.insert("sessionId".into(), json!(session_id));
+            params.insert("limit".into(), json!(200));
+            if let Some(query) = query {
+                let query = query.trim();
+                if query.chars().count() > MAX_MEMORY_QUERY_CHARS {
+                    return Err(invalid("Search text is too long."));
+                }
+                if !query.is_empty() {
+                    params.insert("query".into(), json!(query));
+                }
+            }
+            Ok((MainMethod::MemoryDecisions, Value::Object(params)))
+        }
+        CallAction::ProjectMemoryForget {
+            session_id,
+            decision_id,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            if !valid_id(decision_id) {
+                return Err(invalid("Invalid decision id."));
+            }
+            Ok((
+                MainMethod::MemoryForget,
+                json!({
+                    "sessionId": session_id,
+                    "decisionId": decision_id,
+                    "operationId": operation_id,
+                }),
+            ))
+        }
+        CallAction::ProjectMemoryDocuments { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::MemoryDocuments,
+                json!({ "sessionId": session_id }),
+            ))
+        }
         CallAction::BrowserNavigate {
             session_id,
             action,
@@ -1437,6 +1530,8 @@ pub(crate) fn valid_telegram_id(id: i64) -> bool {
 
 /// Consulta de la memoria (`LIMITS.queryChars`).
 const MAX_MEMORY_QUERY_CHARS: usize = 2_000;
+/// `ASK_LIMITS.questionChars` del protocolo.
+const MAX_ASK_CHARS: usize = 4_000;
 
 // Topes de una rutina (`docs/protocol.md` §23): los mismos que valida el
 // daemon, comprobados antes de salir para que lo que no cabe no se envíe.
@@ -2641,6 +2736,7 @@ impl Actor {
                             }
                             CallAction::NewCompanionConversation => self.cfg.timings.fresh_timeout,
                             CallAction::MemoryDream { .. } => self.cfg.timings.dream_timeout,
+                            CallAction::AskSession { .. } => self.cfg.timings.ask_timeout,
                             _ => self.cfg.timings.request_timeout,
                         };
                         conn.request_within(
@@ -2922,6 +3018,100 @@ mod tests {
         )
         .is_err());
         assert!(profile("code").mutating() && !inspect.mutating());
+        // La pregunta lateral: recortada, con `operationId` (gasta modelo).
+        let ask = |q: &str| CallAction::AskSession {
+            session_id: "ses_1".into(),
+            question: q.into(),
+        };
+        assert_eq!(
+            desktop(&ask("  ¿qué hiciste?  "), "op-6"),
+            (
+                MainMethod::SessionsAsk,
+                json!({ "sessionId": "ses_1", "question": "¿qué hiciste?", "operationId": "op-6" })
+            )
+        );
+        assert!(call_request(&ask("   "), "op").is_err());
+        assert!(call_request(&ask(&"x".repeat(MAX_ASK_CHARS + 1)), "op").is_err());
+        let turns = CallAction::SessionTurns {
+            session_id: "ses_1".into(),
+        };
+        assert_eq!(
+            desktop(&turns, "op"),
+            (MainMethod::SessionsTurns, json!({ "sessionId": "ses_1" }))
+        );
+        let background = CallAction::BackgroundJobs {
+            session_id: "ses_1".into(),
+        };
+        assert_eq!(
+            desktop(&background, "op-7"),
+            (
+                MainMethod::JobsBackground,
+                json!({ "sessionId": "ses_1", "operationId": "op-7" })
+            )
+        );
+        // La memoria del proyecto va por la sesión: nunca con `agent` ni con una ruta.
+        let decisions = |query: Option<&str>| CallAction::ProjectMemoryDecisions {
+            session_id: "ses_1".into(),
+            query: query.map(str::to_string),
+        };
+        assert_eq!(
+            desktop(&decisions(None), "op"),
+            (
+                MainMethod::MemoryDecisions,
+                json!({ "sessionId": "ses_1", "limit": 200 })
+            )
+        );
+        assert_eq!(
+            desktop(&decisions(Some(" pnpm ")), "op").1,
+            json!({ "sessionId": "ses_1", "limit": 200, "query": "pnpm" })
+        );
+        let forget = CallAction::ProjectMemoryForget {
+            session_id: "ses_1".into(),
+            decision_id: "dec_1".into(),
+        };
+        assert_eq!(
+            desktop(&forget, "op-8"),
+            (
+                MainMethod::MemoryForget,
+                json!({ "sessionId": "ses_1", "decisionId": "dec_1", "operationId": "op-8" })
+            )
+        );
+        let documents = CallAction::ProjectMemoryDocuments {
+            session_id: "ses_1".into(),
+        };
+        assert_eq!(
+            desktop(&documents, "op"),
+            (MainMethod::MemoryDocuments, json!({ "sessionId": "ses_1" }))
+        );
+        for bad in [
+            CallAction::ProjectMemoryDecisions {
+                session_id: String::new(),
+                query: None,
+            },
+            CallAction::ProjectMemoryForget {
+                session_id: "ses_1".into(),
+                decision_id: String::new(),
+            },
+            CallAction::SessionTurns {
+                session_id: String::new(),
+            },
+            CallAction::BackgroundJobs {
+                session_id: String::new(),
+            },
+        ] {
+            assert!(call_request(&bad, "op").is_err());
+        }
+        assert!(ask("x").mutating() && background.mutating() && forget.mutating());
+        assert!(!turns.mutating() && !decisions(None).mutating() && !documents.mutating());
+        for m in [
+            MainMethod::SessionsAsk,
+            MainMethod::SessionsTurns,
+            MainMethod::JobsBackground,
+            MainMethod::MemoryDocuments,
+        ] {
+            assert!(DESKTOP_METHODS.contains(&m), "{m:?}");
+            assert!(!DOT_METHODS.contains(&m), "{m:?}");
+        }
         assert!(set(None).mutating() && read_only.mutating() && cancel.mutating());
         assert!(!changes.mutating() && !diff("a".into()).mutating());
         for m in [
