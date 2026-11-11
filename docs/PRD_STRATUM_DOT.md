@@ -2480,7 +2480,10 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      `stratum run --agent companion`. *Hecha el 2026-11-11* (`.claude/docs/connectors.md`).
   2. **Renfe Cercanías** (la capa de datos y sus tools, con tests sobre un recorte del GTFS real),
      y después la larga distancia. *Cercanías hecha el 2026-11-11* (2a): índice de 1,79 M horas de
-     paso en ≈ 11 s; el `fetch` de Node pasa la verificación TLS de `ssl.renfe.com`.
+     paso en ≈ 11 s; el `fetch` de Node pasa la verificación TLS de `ssl.renfe.com`. *Larga distancia
+     hecha el 2026-11-11* (2b): horarios con fecha y tiempo real tal como llega, salvo las paradas
+     `SKIPPED`, contradictorias en ese feed; medido en día de huelga general, falta medirlo en uno
+     normal.
   3. Confirmación nativa y panel en Dot (el protocolo ya está desde la fase 1).
   4. Secretos y **Home Assistant**. Su conector necesita llegar a la red local desde la caja de
      conectores, que se comprueba en esta fase.

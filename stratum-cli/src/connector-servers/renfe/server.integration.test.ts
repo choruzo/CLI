@@ -12,7 +12,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { McpServerClient } from '../../tools/mcp/client.js';
-import { PREPARING_MESSAGE } from './static-feed.js';
+import { PREPARING_LD_MESSAGE, PREPARING_MESSAGE } from './static-feed.js';
 
 const ENTRY = fileURLToPath(new URL('./server.ts', import.meta.url));
 const MANIFEST = fileURLToPath(
@@ -77,6 +77,11 @@ describe('server de Renfe empaquetado', () => {
       expect(client.tools.map((t) => t.name).sort()).toEqual(
         manifest.tools.map((t) => t.name).sort(),
       );
+      // Cercanías (7) y larga y media distancia (3).
+      expect(client.tools).toHaveLength(10);
+      expect(client.tools.map((t) => t.name)).toEqual(
+        expect.arrayContaining(['trenes_salidas', 'trenes_trayecto', 'trenes_tren']),
+      );
     } finally {
       await client.close();
     }
@@ -116,6 +121,13 @@ describe('server de Renfe empaquetado', () => {
       });
       expect(res.result.isError).toBe(true);
       expect(res.result.content[0].text).toBe(PREPARING_MESSAGE);
+      // Larga distancia tiene su propio índice y su propio mensaje.
+      const ld = await rpc(3, 'tools/call', {
+        name: 'trenes_salidas',
+        arguments: { estacion: 'Atocha' },
+      });
+      expect(ld.result.isError).toBe(true);
+      expect(ld.result.content[0].text).toBe(PREPARING_LD_MESSAGE);
       expect(stderr).not.toMatch(/ExperimentalWarning|SQLite/);
     } finally {
       p.stdin.end();

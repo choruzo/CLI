@@ -52,7 +52,7 @@ const DEFAULT_TRANSFER_SEC = 180;
 
 // --- Argumentos --------------------------------------------------------------
 
-function text(name: string, max = 100) {
+export function text(name: string, max = 100) {
   const msg = `${name} debe ser un texto de 1 a ${max} caracteres`;
   return z.string({ message: msg }).trim().min(1, msg).max(max, msg);
 }
@@ -64,7 +64,7 @@ const desde = z
   .regex(/^\d{1,2}:\d{2}$/, CLOCK_MSG)
   .optional();
 
-function intRange(name: string, lo: number, hi: number) {
+export function intRange(name: string, lo: number, hi: number) {
   const msg = `${name} debe ser un entero entre ${lo} y ${hi}`;
   return z.number({ message: msg }).int(msg).min(lo, msg).max(hi, msg).optional();
 }
@@ -96,7 +96,7 @@ const AvisosSchema = z.object({
   estacion: text('estacion').optional(),
 });
 
-function parseArgs<T>(schema: z.ZodType<T>, args: unknown): T {
+export function parseArgs<T>(schema: z.ZodType<T>, args: unknown): T {
   const r = schema.safeParse(args ?? {});
   if (r.success) return r.data;
   const issue = r.error.issues[0];
@@ -120,7 +120,7 @@ export function delayText(sec: number, kind: 'informed' | 'propagated' | null): 
   return kind === 'propagated' ? `${base}, estimado` : base;
 }
 
-function minutesUntil(estSecs: number, nowSecs: number): string | null {
+export function minutesUntil(estSecs: number, nowSecs: number): string | null {
   const m = Math.round((estSecs - nowSecs) / 60);
   if (m < 0) return null;
   return m === 0 ? 'ahora' : `en ${m} min`;

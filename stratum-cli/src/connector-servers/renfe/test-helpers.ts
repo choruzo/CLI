@@ -8,10 +8,13 @@ import { join } from 'node:path';
 import { deflateRawSync } from 'node:zlib';
 import { fileURLToPath } from 'node:url';
 import { buildIndex } from './index-build.js';
+import { buildLdIndex } from './index-ld-build.js';
 import { RenfeIndex } from './queries.js';
+import { LdIndex } from './queries-ld.js';
 import { RealtimeSource } from './realtime.js';
 import { ToolUserError } from '../lib/mcp-stdio.js';
 import type { RenfeContext } from './tools.js';
+import type { TrenesContext } from './tools-ld.js';
 
 export const FIXTURES = fileURLToPath(new URL('./fixtures/', import.meta.url));
 
@@ -255,7 +258,7 @@ export interface FakeFeeds {
 export function fakeFeedFetch(feeds: FakeFeeds): typeof fetch {
   return (async (input: string | URL | Request) => {
     const url = String(input);
-    const m = /(trip_updates|vehicle_positions|alerts)\.pb$/.exec(url);
+    const m = /(trip_updates|vehicle_positions|alerts)(?:_LD)?\.pb$/.exec(url);
     const body = m ? feeds[m[1] as keyof FakeFeeds] : undefined;
     if (!body) return new Response('no', { status: 404 });
     return new Response(new Uint8Array(body), { status: 200 });
@@ -289,4 +292,83 @@ export function fixtureContext(
 
 export function fakeRealtime(feeds: FakeFeeds, now: Date = NOW): RealtimeSource {
   return new RealtimeSource({ fetch: fakeFeedFetch(feeds), now: () => now.getTime() });
+}
+
+// --- Larga y media distancia ---------------------------------------------------
+
+/** Fixtures de larga distancia: un recorte del GTFS AV/LD/MD real y de sus `.pb` reales. */
+export const FIXTURES_LD = join(FIXTURES, 'ld');
+
+const GTFS_LD_FILES = [
+  'routes.txt',
+  'stops.txt',
+  'trips.txt',
+  'stop_times.txt',
+  'calendar.txt',
+  'calendar_dates.txt',
+];
+
+/** El GTFS de larga distancia recortado de `fixtures/ld/gtfs/` empaquetado en un zip. */
+export function ldFixtureZip(method: 0 | 8 = 8): Buffer {
+  const entries: Record<string, string> = {};
+  for (const f of GTFS_LD_FILES) entries[f] = readFileSync(join(FIXTURES_LD, 'gtfs', f), 'utf8');
+  return makeZip(entries, method);
+}
+
+/** Construye el índice de larga distancia de las fixtures en `dir` y devuelve su ruta. */
+export async function buildLdFixtureIndex(dir: string): Promise<string> {
+  mkdirSync(dir, { recursive: true });
+  const zipPath = join(dir, 'fixture-ld.zip');
+  writeFileSync(zipPath, ldFixtureZip());
+  const r = await buildLdIndex({
+    zipPath,
+    dir,
+    sourceUrl: 'test://fixture-ld',
+    feedDate: '20261111',
+    now: () => new Date('2026-11-11T17:00:00Z'),
+  });
+  return r.path;
+}
+
+/** Los `.pb` reales de larga distancia de `fixtures/ld/realtime/`. */
+export function ldRealtimeFeeds(): FakeFeeds {
+  const read = (f: string) => readFileSync(join(FIXTURES_LD, 'realtime', f));
+  return {
+    trip_updates: read('trip_updates_LD.pb'),
+    vehicle_positions: read('vehicle_positions_LD.pb'),
+  };
+}
+
+/** 2026-11-11 07:36 en Madrid (UTC+1): la mañana de la huelga general, antes de las salidas de las 08:00. */
+export const NOW_LD = new Date('2026-11-11T06:36:00Z');
+
+export function ldFixtureContext(
+  indexPath: string,
+  realtime: RealtimeSource | null,
+  now: Date = NOW_LD,
+): TrenesContext {
+  return {
+    realtime,
+    now: () => now,
+    async withIndex(fn) {
+      const ix = await LdIndex.open(indexPath);
+      if (!ix) throw new ToolUserError('sin índice');
+      try {
+        return await fn(ix);
+      } finally {
+        ix.close();
+      }
+    },
+  };
+}
+
+export function ldFakeRealtime(
+  feeds: FakeFeeds = ldRealtimeFeeds(),
+  now: Date = NOW_LD,
+): RealtimeSource {
+  return new RealtimeSource({
+    fetch: fakeFeedFetch(feeds),
+    now: () => now.getTime(),
+    suffix: '_LD',
+  });
 }

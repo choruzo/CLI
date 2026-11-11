@@ -330,6 +330,8 @@ export interface RealtimeOptions {
   fetch: typeof fetch;
   now?: () => number;
   baseUrl?: string;
+  /** Sufijo del nombre del feed (`_LD`: `trip_updates_LD.pb`); por defecto, ninguno. */
+  suffix?: string;
 }
 
 interface CacheSlot {
@@ -363,10 +365,13 @@ export class RealtimeSource {
     const timeout = AbortSignal.timeout(TIMEOUT_MS);
     const sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
     try {
-      const res = await this.opts.fetch(`${this.opts.baseUrl ?? RT_BASE_URL}/${kind}.pb`, {
-        signal: sig,
-        headers: { 'User-Agent': USER_AGENT },
-      });
+      const res = await this.opts.fetch(
+        `${this.opts.baseUrl ?? RT_BASE_URL}/${kind}${this.opts.suffix ?? ''}.pb`,
+        {
+          signal: sig,
+          headers: { 'User-Agent': USER_AGENT },
+        },
+      );
       if (!res.ok) return null;
       return decodeFeed(new Uint8Array(await res.arrayBuffer()));
     } catch {
@@ -401,6 +406,24 @@ export class RealtimeUse {
     return map;
   }
 
+  /**
+   * Como `tripUpdates`, pero fundiendo las entidades repetidas de un mismo viaje
+   * (el feed de larga distancia las repite): ver `mergeTripUpdates`.
+   */
+  async mergedTripUpdates(signal?: AbortSignal): Promise<Map<string, TripUpdate> | null> {
+    const feed = await this.feed('trip_updates', signal);
+    if (!feed) return null;
+    const groups = new Map<string, TripUpdate[]>();
+    for (const e of feed.entities) {
+      const u = e.tripUpdate;
+      if (!u?.tripId) continue;
+      const list = groups.get(u.tripId);
+      if (list) list.push(u);
+      else groups.set(u.tripId, [u]);
+    }
+    return new Map([...groups].map(([id, list]) => [id, mergeTripUpdates(list)]));
+  }
+
   async vehicles(signal?: AbortSignal): Promise<Map<string, VehiclePosition> | null> {
     const feed = await this.feed('vehicle_positions', signal);
     if (!feed) return null;
@@ -414,6 +437,37 @@ export class RealtimeUse {
     if (!feed) return null;
     return feed.entities.flatMap((e) => (e.alert ? [e.alert] : []));
   }
+}
+
+/** ¿Trae el `TripUpdate` algún dato de retraso (el del viaje o el de una parada)? */
+function hasDelayData(u: TripUpdate): boolean {
+  return (
+    u.delay !== undefined ||
+    u.stops.some(
+      (s) =>
+        s.relationship !== 'SKIPPED' &&
+        (s.arrival?.delay !== undefined ||
+          s.arrival?.time !== undefined ||
+          s.departure?.delay !== undefined ||
+          s.departure?.time !== undefined),
+    )
+  );
+}
+
+/**
+ * Funde las actualizaciones repetidas de un mismo viaje en una. Gana la que trae
+ * datos de retraso (la de `timestamp` más reciente si hay varias): en el feed de
+ * larga distancia un viaje con retraso y posición de vehículo trae además una
+ * entidad `CANCELED` residual, y el tren circula. Sin datos de retraso, gana una
+ * `CANCELED` (cancelado); si no hay ninguna, la última.
+ */
+export function mergeTripUpdates(updates: TripUpdate[]): TripUpdate {
+  let best: TripUpdate | undefined;
+  for (const u of updates) {
+    if (u.relationship === 'CANCELED' || !hasDelayData(u)) continue;
+    if (!best || (u.timestamp ?? 0) >= (best.timestamp ?? 0)) best = u;
+  }
+  return best ?? updates.find((u) => u.relationship === 'CANCELED') ?? updates[updates.length - 1]!;
 }
 
 // --- Semántica del retraso ---------------------------------------------------
@@ -459,6 +513,7 @@ export function estimateStops(
   stops: ScheduledStop[],
   upd: TripUpdate | undefined,
   dayEpoch: number,
+  opts: { ignoreSkipped?: boolean } = {},
 ): Estimate[] {
   if (!upd) return stops.map(() => NONE);
   if (upd.relationship === 'CANCELED') {
@@ -467,7 +522,12 @@ export function estimateStops(
   // Cada actualización se resuelve al índice de parada al que se refiere.
   const resolved: Array<{ idx: number; stu: StopTimeUpdate }> = [];
   let from = 0;
-  for (const stu of upd.stops) {
+  // En larga distancia el feed marca `SKIPPED` paradas que a la vez informa con
+  // retraso: no es fiable, y con `ignoreSkipped` esas actualizaciones no cuentan.
+  const updates = opts.ignoreSkipped
+    ? upd.stops.filter((s) => s.relationship !== 'SKIPPED')
+    : upd.stops;
+  for (const stu of updates) {
     let idx = -1;
     if (stu.seq !== undefined) idx = stops.findIndex((s) => s.seq === stu.seq);
     if (idx < 0 && stu.stopId !== undefined) {

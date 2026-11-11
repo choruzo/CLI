@@ -1,0 +1,40 @@
+stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,location_type,parent_station,stop_timezone,wheelchair_boarding        
+17000,,Madrid-Chamartín-Clara Campoamor,,40.4711789,-3.6829524,,,,,Europe/Madrid,1        
+37606,,Badajoz,,38.8906960,-6.9817530,,,,,Europe/Madrid,1        
+37603,,Montijo,,38.9135390,-6.5985770,,,,,Europe/Madrid,2        
+37500,,Mérida,,38.9215030,-6.3437940,,,,,Europe/Madrid,1        
+35400,,Cáceres,,39.4611310,-6.3856790,,,,,Europe/Madrid,1        
+30000,,Monfragüe,,39.9374640,-6.1009100,,,,,Europe/Madrid,2        
+35206,,Navalmoral de la Mata,,39.8949130,-5.5456070,,,,,Europe/Madrid,2        
+35203,,Oropesa de Toledo,,39.9217460,-5.1861370,,,,,Europe/Madrid,2        
+35200,,Talavera de la Reina,,39.9706740,-4.8265120,,,,,Europe/Madrid,2        
+35105,,Torrijos,,39.9790030,-4.2830370,,,,,Europe/Madrid,2        
+18000,,Madrid-Atocha Cercanías,,40.4066191,-3.6894391,,,,,Europe/Madrid,1        
+35001,,Leganés,,40.3286430,-3.7713161,,,,,Europe/Madrid,1        
+30002,,Plasencia,,40.0222820,-6.0993970,,,,,Europe/Madrid,2        
+11511,,San Sebastián-Donostia,,43.3176961,-1.9767172,,,,,Europe/Madrid,2        
+11300,,Altsasu,,42.8948470,-2.1812370,,,,,Europe/Madrid,2        
+11400,,Zumarraga,,43.0870824,-2.3202298,,,,,Europe/Madrid,1        
+71801,,Barcelona-Sants,,41.3798632,2.14101688,,,,,Europe/Madrid,1        
+04104,,Camp de Tarragona,,41.1920660,1.27266600,,,,,Europe/Madrid,1        
+78400,,Lleida-Pirineus,,41.6201300,0.63365328,,,,,Europe/Madrid,1        
+04040,,Zaragoza Delicias,,41.6586576,-0.9112693,,,,,Europe/Madrid,1        
+81202,,Tudela de Navarra,,42.0594340,-1.5979310,,,,,Europe/Madrid,1        
+81200,,Castejón de Ebro,,42.1727190,-1.6921140,,,,,Europe/Madrid,2        
+81108,,Calahorra,,42.3104580,-1.9577550,,,,,Europe/Madrid,2        
+81100,,Logroño,,42.4574590,-2.4421930,,,,,Europe/Madrid,1        
+80100,,Pamplona/Iruña,,42.8248770,-1.6614190,,,,,Europe/Madrid,1        
+80108,,Tafalla,,42.5257560,-1.6714670,,,,,Europe/Madrid,2        
+60000,,Madrid-Puerta de Atocha-Almudena Grandes,,40.4064420,-3.6908860,,,,,Europe/Madrid,1        
+04007,,Guadalajara-Yebes,,40.5873150,-3.1243010,,,,,Europe/Madrid,1        
+70600,,Calatayud,,41.3466920,-1.6386800,,,,,Europe/Madrid,1        
+50500,,Córdoba-Julio Anguita,,37.8882910,-4.7894530,,,,,Europe/Madrid,1        
+81110,,Alfaro,,42.1865250,-1.7479850,,,,,Europe/Madrid,2        
+81109,,Rincón de Soto,,42.2300110,-1.8474730,,,,,Europe/Madrid,2        
+51003,,Sevilla-Santa Justa,,37.3924955,-5.9749269,,,,,Europe/Madrid,1        
+37200,,Ciudad Real,,38.9853000,-3.9136330,,,,,Europe/Madrid,1        
+37300,,Puertollano,,38.6912800,-4.1116550,,,,,Europe/Madrid,1        
+54413,,Málaga María Zambrano,,36.7113388,-4.4313888,,,,,Europe/Madrid,1        
+37704,,Villanueva de Córdoba,,38.2554049,-4.5709520,,,,,Europe/Madrid,2        
+02002,,Puente Genil-Herrera,,37.3579000,-4.8216380,,,,,Europe/Madrid,1        
+02003,,Antequera-Santa Ana,,37.0698810,-4.7190140,,,,,Europe/Madrid,1        

@@ -15,7 +15,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 
 /** Huella de la imagen por versión. Al subir la versión, se añade su fila. */
 const IMAGE_FINGERPRINTS: Record<number, string> = {
-  2: '0ce49fefec2173b8',
+  2: 'bbfe073138d7c0eb',
 };
 
 function files(dir: string): string[] {

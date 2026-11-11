@@ -74,6 +74,46 @@ function qs(n: number): string {
   return Array.from({ length: n }, () => '?').join(',');
 }
 
+/** `service_id` activos un día: `calendar` más las excepciones de `calendar_dates` (las dos tablas existen en ambos índices). */
+export function queryActiveServices(db: DatabaseSync, ymd: string): string[] {
+  const dayCol = `d${weekdayIndex(ymd)}`;
+  const set = new Set(
+    (
+      db
+        .prepare(
+          `SELECT service_id FROM calendar WHERE start_date <= ? AND end_date >= ? AND ${dayCol} = 1`,
+        )
+        .all(ymd, ymd) as Array<{ service_id: string }>
+    ).map((r) => r.service_id),
+  );
+  const ex = db
+    .prepare('SELECT service_id, exception_type FROM calendar_dates WHERE date = ?')
+    .all(ymd) as Array<{ service_id: string; exception_type: number }>;
+  for (const e of ex) {
+    if (e.exception_type === 1) set.add(e.service_id);
+    else if (e.exception_type === 2) set.delete(e.service_id);
+  }
+  return [...set];
+}
+
+/** Candidatos por nombre en un conjunto de estaciones: exacta → prefijo → contiene → todas las palabras. */
+export function searchByNorm(pool: StopInfo[], text: string): StopInfo[] {
+  const q = normalizeName(text);
+  if (!q) return [];
+  const tokens = q.split(' ');
+  const levels: Array<(n: string) => boolean> = [
+    (n) => n === q,
+    (n) => n.startsWith(q),
+    (n) => n.includes(q),
+    (n) => tokens.every((t) => n.includes(t)),
+  ];
+  for (const match of levels) {
+    const hits = pool.filter((s) => match(s.norm));
+    if (hits.length > 0) return hits.sort((a, b) => a.name.localeCompare(b.name, 'es'));
+  }
+  return [];
+}
+
 export class RenfeIndex {
   private stopMap: Map<string, StopInfo> | null = null;
   private stopLineMap: Map<string, string[]> | null = null;
@@ -311,21 +351,7 @@ export class RenfeIndex {
 
   /** Candidatos por nombre: coincidencia exacta → prefijo → contiene → todas las palabras. */
   searchStations(text: string, nucleo?: string): StopInfo[] {
-    const q = normalizeName(text);
-    if (!q) return [];
-    const pool = this.servedStops(nucleo);
-    const tokens = q.split(' ');
-    const levels: Array<(n: string) => boolean> = [
-      (n) => n === q,
-      (n) => n.startsWith(q),
-      (n) => n.includes(q),
-      (n) => tokens.every((t) => n.includes(t)),
-    ];
-    for (const match of levels) {
-      const hits = pool.filter((s) => match(s.norm));
-      if (hits.length > 0) return hits.sort((a, b) => a.name.localeCompare(b.name, 'es'));
-    }
-    return [];
+    return searchByNorm(this.servedStops(nucleo), text);
   }
 
   /** Estación por nombre o por id estable (`est:18000`). */
@@ -348,24 +374,7 @@ export class RenfeIndex {
   activeServices(ymd: string): string[] {
     const cached = this.serviceCache.get(ymd);
     if (cached) return cached;
-    const dayCol = `d${weekdayIndex(ymd)}`;
-    const set = new Set(
-      (
-        this.db
-          .prepare(
-            `SELECT service_id FROM calendar WHERE start_date <= ? AND end_date >= ? AND ${dayCol} = 1`,
-          )
-          .all(ymd, ymd) as Array<{ service_id: string }>
-      ).map((r) => r.service_id),
-    );
-    const ex = this.db
-      .prepare('SELECT service_id, exception_type FROM calendar_dates WHERE date = ?')
-      .all(ymd) as Array<{ service_id: string; exception_type: number }>;
-    for (const e of ex) {
-      if (e.exception_type === 1) set.add(e.service_id);
-      else if (e.exception_type === 2) set.delete(e.service_id);
-    }
-    const list = [...set];
+    const list = queryActiveServices(this.db, ymd);
     this.serviceCache.set(ymd, list);
     return list;
   }
