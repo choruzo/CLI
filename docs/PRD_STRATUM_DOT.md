@@ -2316,6 +2316,171 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **B6. *Resuelta.* Aislamiento al consolidar y a las propuestas.** Una propuesta nunca cita contenido de otro
     preset ni de la memoria de sesión sin procedencia; la memoria de sesión no se promociona sola
     (M11): promover exige aprobar la propuesta.
+- **M20 — Catálogo de conectores del asistente** [decidido 2026-11-11; solo Dot]. Dar capacidades
+  al `companion` con conectores prediseñados que se activan desde Dot, sin que la persona escriba
+  la config de un server MCP. Primeros: **Open-Meteo, Renfe y Home Assistant** (ADIF, fuera).
+  *Decidido por el usuario, 2026-11-11*:
+  - **Dot primero.** Solo el `companion`; el `assistant` de Desktop sigue sin MCP (cambiarlo es
+    revisar esa fila de `decisiones.md`, y queda para después).
+  - **El conector corre dentro de la caja**, no en el anfitrión.
+  - **Solo conectores propios**, que viven en este repo. Ni npm ni terceros en v1.
+
+  *Por qué esto sale sencillo y dónde no.* El agente tiene `exec` y `sudo` en su caja.
+  - Un conector sin secretos que consulta una API pública **no le da autoridad nueva**: lo mismo
+    podría hacer con `curl`. Por eso sus tools se declaran de solo lectura y no piden confirmación,
+    sin rebajar ninguna política.
+  - Por la misma razón, **un secreto en la caja del agente es un secreto que el agente tiene**
+    (`/proc`, `sudo`). Con él, confirmar las tools que actúan sería teatro: `exec` llamaría a la
+    API directamente.
+  - De ahí la caja de conectores aparte (A10).
+
+  *Diseño*:
+  - **Qué es un conector**: `stratum-cli/connectors/<id>/` con un manifiesto `connector.json` (Zod;
+    `id`, `version`, nombre y descripción, `tools` con `readOnly` por tool, `hosts` a los que se
+    conecta, `secrets` que pide y `agents: ["companion"]`) y un server MCP en TypeScript que se
+    empaqueta en **un único `.mjs`** sin `node_modules` en tiempo de ejecución. Cada conector trae
+    además una **skill pequeña** (`connectors/<id>/SKILL.md`; ver *Pensado para el agente*).
+  - **Dónde corre: la caja de conectores** (A10, *decidido por el usuario 2026-11-11*). Es un
+    contenedor aparte, `stratum-box-<n>-connectors`:
+    - Usa la misma imagen y lleva la etiqueta `io.stratum.box.role=connectors`.
+    - Tiene su propio volumen (`…-connectors-data`, para cachés como el índice de Renfe), no monta
+      `/exchange` y tiene salida a la red.
+    - **El agente no lo alcanza**: `exec` resuelve `container:<caja>` solo a la caja principal, y
+      ninguna tool puede apuntar a esta.
+    - Corren ahí **todos** los conectores, con secretos o sin ellos. Así hay un solo modelo de
+      ejecución, y el agente no puede tocar el código ni los datos de un conector desde su caja.
+    - Se arranca y se para con la caja principal (`box start|stop`, `BoxManager`), solo si hay algún
+      conector activo.
+  - **Dónde vive el código**: dentro de la imagen (`/opt/stratum/connectors/<id>/`, de `root`), con
+    Node ≥ 22 añadido al `Containerfile`. Ninguna de las dos cajas suma montajes: la lista cerrada
+    de M13 no cambia. Cambiar un conector sube `BOX_IMAGE_VERSION`, y las cajas se recrean en su
+    siguiente `start`, conservando sus volúmenes.
+  - **Cómo se lanza**: el `McpServerClient` stdio de siempre, con la orden
+    `<runtime> exec -i [-e NOMBRE…] stratum-box-<n>-connectors node /opt/stratum/connectors/<id>/server.mjs`.
+    - **Solo `src/box/` la compone**, con argumentos fijos y el `id` validado contra el catálogo.
+      Nunca sale de la config ni del modelo.
+    - Antes comprueba, como `exec`, que el contenedor existe, lleva la etiqueta y está en marcha.
+    - Si no está en marcha, el conector no conecta y sus tools **no se ofrecen** (falla cerrado, con
+      un `warning`). Al arrancar vuelve con la reconexión del `McpManager`.
+    - **Nunca cae al anfitrión ni a la caja del agente.**
+  - **Secretos** (fase 4):
+    - Se teclean en una ventana nativa de Dot y se guardan en
+      `~/.stratum/companion/connector-secrets.json` (privado, atómico, como `telegram.json`).
+    - Viajan como `-e NOMBRE` **sin valor**: el runtime lo toma del entorno del proceso cliente, así
+      que el secreto nunca aparece en la línea de órdenes.
+    - Nunca pasan por el webview, la config, los logs, la traza, el protocolo ni la caja del agente.
+  - **Qué está activo**: `~/.stratum/companion/connectors.json` (atómico, Zod, `schemaVersion`),
+    que **solo escribe el daemon**, como `routines.json`. Se suma a `companion.mcp.servers`, que no
+    cambia. Si un nombre choca con un server propio de la persona, el conector no se carga y se
+    avisa. Los servers de la persona nunca se pisan.
+  - **Autoridad**: **activar suma capacidad**, así que exige `approve` y, en Dot, la confirmación
+    nativa. La ventana enseña las tools (cuáles actúan fuera de la caja), los hosts y si pide
+    secretos. **Desactivar solo resta**: basta `control`. Un conector activo no rebaja nada: lo que
+    el manifiesto no declare de solo lectura se confirma (`confirmMutating`, M17) y admite
+    concesiones con caducidad. En la sesión de una rutina se aplica lo mismo que en M16.
+  - **`hosts`** es informativo en v1: la caja tiene salida a internet (A2). Hacerlo cumplir es el
+    filtro de red que A2 dejó para más adelante.
+  - **Protocolo**: `connectors.list` (catálogo + estado: activo, caja parada, falta secreto),
+    `connectors.enable` (`approve`) y `connectors.disable` (`control`). Sin eventos nuevos: el
+    cambio se ve en la lista y en las tools del siguiente turno. La CLI tiene
+    `stratum connectors list|enable|disable`, cliente del daemon como `stratum routines`.
+  - **Dot**: panel *Connectors* en la vista *Asistente*, junto a Rutinas y Memoria. Muestra
+    descripción, tools, estado y *Enable*/*Disable*. Sin estado optimista: «Result unknown» no se
+    repite. Nativo: `MainMethod::ConnectorsList|Disable` y `ApproverMethod::ConnectorsEnable`, solo
+    en `DOT_METHODS`. La vista de confirmación se arma desde `connectors.list`, como la del
+    emparejamiento de Telegram.
+
+  *Los conectores*:
+  - **Open-Meteo**: previsión y geocodificación, sin clave. Tools `buscar_lugar`, `tiempo_actual`
+    y `prevision`, todas de solo lectura. Es el primero porque valida la tubería sin dudas sobre los
+    datos.
+  - **Renfe** (datos abiertos de `data.renfe.com`, CC BY 4.0). Larga distancia (AV/LD/MD) con su
+    GTFS y su tiempo real tal como estén (*decidido por el usuario*). Para **Cercanías**, una
+    **capa de datos propia** que deja los datos de GTFS y GTFS-RT ya organizados (ver *Capa de
+    Cercanías*).
+  - **ADIF**: *fuera, decidido por el usuario 2026-11-11* (sin API pública; A11).
+  - **Home Assistant**: estados, y acciones como encender o apagar. Exige un token de larga vida y
+    llegar a la LAN. Las tools que actúan se confirman. Depende de A10 y de que la caja alcance la
+    red local, que A2 dejó abierta. Home Assistant trae su propia integración de servidor MCP: el
+    conector puede ser un puente stdio hacia ella en vez de reimplementar su API.
+
+  *Capa de Cercanías* (medida el 2026-11-11 contra los feeds reales):
+  - **Fuentes**:
+    - GTFS estático `https://ssl.renfe.com/ftransit/Fichero_CER_FOMENTO/fomento_transit.zip`:
+      ~15 MB comprimido y ~277 MB descomprimido, con 1,79 M filas en `stop_times`, 129 k viajes,
+      276 rutas y 1 168 paradas. Se publica a diario con un mes de servicio. Incluye Rodalies.
+    - GTFS-RT `https://gtfsrt.renfe.com/{trip_updates,vehicle_positions,alerts}.pb`, que se
+      actualiza cada 20 s, sin autenticación.
+    - **Se usa el `.pb`, no el `.json`**: la variante JSON llega con los acentos rotos (`d�as`) y el
+      protobuf los trae bien.
+    - El validador de `data.renfe.com` avisa de un certificado TLS dudoso en `ssl.renfe.com`. Nunca
+      se desactiva la verificación: si la descarga falla, se sigue con el último índice bueno y se
+      dice su fecha.
+  - **Cómo se organiza** (el feed no trae núcleo ni comunidad, así que se derivan):
+    - **Núcleo** = los dos primeros dígitos del `route_id`. Hay 15: `10` Madrid, `20` Asturias,
+      `30` Sevilla, `31` Cádiz, `32` Málaga, `40` Valencia, `41` Murcia/Alicante, `45` Cartagena,
+      `46` Ferrol, `47` León, `51` Rodalies de Catalunya, `60` Bilbao, `61` San Sebastián,
+      `62` Santander y `70` Zaragoza.
+    - Una **tabla propia** núcleo → nombre → comunidad autónoma, con un test que falla si aparece
+      un prefijo nuevo.
+    - **Línea** = `route_short_name` dentro de su núcleo (`C1` existe en varios: el id es
+      `madrid/C1`). Cada `route_id` es un sentido y se agrupan los dos.
+    - **Estaciones de una línea**, ordenadas por el recorrido más largo de sus viajes. Una estación
+      sabe a qué núcleos y líneas pertenece (por `stop_times`). Los transbordos salen de
+      `transfers.txt`.
+    - Campos con relleno de espacios: se recortan al leer.
+  - **Tiempo real**:
+    - El 100 % de los `tripId` del tiempo real casan con el estático, en los 15 núcleos.
+    - Lo normal es **una** actualización (la próxima parada) más el `delay` del viaje. El retraso se
+      aplica a las paradas siguientes, como manda la semántica de GTFS-RT, y la salida lo dice.
+    - Viajes `CANCELED`, paradas `SKIPPED` (estación sin servicio), posición del tren, y **vía** en
+      el `label` del vehículo (`C1-23537-PLATF.(3)`).
+    - Avisos por línea, por estación o por viaje.
+  - **Dónde vive**: dentro del conector, en la caja. Un índice SQLite (`node:sqlite`, así que la
+    imagen lleva Node ≥ 22) en el volumen de la caja (`~/.cache/stratum/connectors/renfe/`), que se
+    reconstruye a diario de forma atómica (temporal + rename). El tiempo real se pide bajo demanda,
+    con caché de 20 s.
+  - **Tools** (todas de solo lectura): `cercanias_nucleos` (por comunidad), `cercanias_lineas`,
+    `cercanias_estaciones` (por núcleo y línea, o por nombre), `cercanias_salidas` (estación, línea
+    o destino opcionales; horario + retraso, cancelación y vía), `cercanias_trayecto` (directo o con
+    un transbordo), `cercanias_tren` (posición y próximas paradas) y `cercanias_avisos`.
+  - **Atribución** (condición de la licencia): toda salida lleva «Origen de los datos: Renfe
+    Operadora» y la fecha de los datos. Nunca se insinúa que Renfe respalde el uso.
+
+  *Pensado para el agente* (*decidido por el usuario*: la «API» de un conector es una estructura
+  fácil de usar para un agente, con los datos ya masticados, y una skill pequeña). Reglas para
+  todos los conectores:
+  - **Responde a la pregunta, no vuelca el feed.** Una salida es texto breve y estructurado:
+    «C3 a Aranjuez · sale 18:42 (en 6 min) · +4 min · vía 2». Nunca filas GTFS, ids internos sin
+    nombre ni JSON crudo.
+  - **Nombres de persona en la entrada.** «Atocha», «sol» o «Pza. Catalunya» se resuelven sin
+    acentos ni mayúsculas, por similitud y por alias. Si hay varios candidatos, la tool no adivina:
+    devuelve los candidatos (con su núcleo) para que el agente elija o pregunte. Cada resultado
+    lleva un id estable que la siguiente llamada acepta.
+  - **Tiempo ya calculado**: hora local (`Europe/Madrid`), minutos que faltan, retraso en minutos y
+    estado en palabras («cancelado», «no para en esta estación»). Lo que no se sabe se dice («sin
+    datos de tiempo real»); nunca se rellena con 0.
+  - **Resultados acotados** (p. ej. las 8 próximas salidas) y, si hay más, cómo pedirlos.
+  - **Errores que orientan**: un error dice qué tool o argumento usar a continuación.
+  - **Pocas tools con nombres claros** y descripciones que dicen cuándo usar cada una.
+  - **La skill** (`connectors/<id>/SKILL.md`, unas decenas de líneas) explica qué preguntas cubre
+    el conector, en qué orden encadenar las tools (estación → salidas, origen + destino → trayecto)
+    y sus límites (qué no cubre, la atribución obligatoria).
+    - Se registra en la sesión **solo con el conector activo**, por `sessionSkills()`, y se lee
+      con `read_skill`.
+    - El bloque `# Your connectors` del prompt nombra cada conector con su skill.
+  - **Se mide**: escenarios de eval con preguntas reales («¿cuándo sale el próximo a Alcalá desde
+    Atocha?», «¿hay incidencias en la R2?»), contra un recorte fijo del GTFS y del tiempo real.
+
+  *Fases* (cada una se demuestra sin interfaz antes de pintarla en Dot):
+  1. Manifiesto, catálogo, Node en la imagen, conectores dentro de ella, lanzamiento por la caja,
+     `connectors.json` y `stratum connectors`, con **Open-Meteo**. Prueba real con
+     `stratum run --agent companion`.
+  2. **Renfe Cercanías** (la capa de datos y sus tools, con tests sobre un recorte del GTFS real),
+     y después la larga distancia.
+  3. `connectors.*` en el protocolo, confirmación nativa y panel en Dot.
+  4. Secretos y **Home Assistant**. Su conector necesita llegar a la red local desde la caja de
+     conectores, que se comprueba en esta fase.
 
 ### 23.12 Fuera, por ahora
 
@@ -2403,3 +2568,26 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
     Denegar sí vale siempre: solo resta.
   - **Qué enseña el mensaje**: lo mismo que la tarjeta de Dot, redactado (tool, target, resumen,
     riesgo), sin secretos ni la salida de las tools.
+- **A10. Conectores con secretos** (M20). *Resuelta 2026-11-11 por el usuario: (a), la caja de
+  conectores aparte*, donde corren todos los conectores (M20, *Dónde corre*). En la caja
+  compartida el agente tiene `sudo`, así que leería el token de un conector, y la confirmación de
+  sus acciones no serviría de nada (M20, *Por qué la caja…*). Las opciones eran:
+  - **(a) Una caja de conectores aparte** (`stratum-box-<n>-connectors`): misma imagen, sin `exec`
+    del agente, sin su volumen, con salida a la red y los secretos solo ahí. Los inyecta el daemon
+    al lanzar el conector, desde un fichero privado como `telegram.json`. Mantiene el «dentro de una
+    caja» y deja la autoridad en la confirmación. *Recomendada.*
+  - **(b) En el anfitrión** solo los conectores con secretos: más simple, pero corren con los
+    permisos de la persona.
+  - **(c) Aceptarlo**: el token está al alcance del agente y de cualquier contenido que lo
+    manipule. No lo recomiendo para Home Assistant, que abre puertas y apaga cosas.
+
+  Haga falta o no, el secreto se teclea en una **ventana nativa** de Dot y nunca pasa por el
+  webview, la config, los logs, la traza ni el protocolo.
+- **A11. ADIF sin API pública** (M20). *Resuelta 2026-11-11*: ADIF queda fuera; retrasos, vías y
+  cancelaciones salen del tiempo real de Renfe. Las opciones que había eran:
+  - usar los *endpoints* internos de su web, marcado como no oficial: puede romperse sin aviso y
+    hay que revisar sus condiciones de uso;
+  - posponerlo hasta que ADIF publique una API;
+  - cubrir lo esencial (retrasos y vías) con el tiempo real de Renfe.
+
+  *Recomendado*: verificar primero qué cubre Renfe y decidir después.
