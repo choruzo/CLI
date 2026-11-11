@@ -51,7 +51,12 @@ afterAll(async () => {
   rmSync(cwd, { recursive: true, force: true });
 });
 
-describe.skipIf(!executable)('navegador real', () => {
+// En el runner de Linux de CI (Ubuntu 26.04) Chrome se cierra nada más arrancar;
+// probablemente AppArmor restringe los user namespaces que necesita su sandbox. No se
+// arregla con --no-sandbox (decisión de seguridad pendiente): ver .claude/docs/browser.md.
+const ciLinux = process.env.CI === 'true' && process.platform === 'linux';
+
+describe.skipIf(!executable || ciLinux)('navegador real', () => {
   it('navigate → snapshot → type → click → console, y lo externo bloqueado en la red', async () => {
     const manager = new BrowserManager({ executable: executable!, cwd });
     try {
