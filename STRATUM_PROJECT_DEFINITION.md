@@ -518,7 +518,7 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 
 ## 9. Hitos del Proyecto (Roadmap)
 
-### Hito 0 — Scaffolding del proyecto *(~2 días)*
+### Hito 0 — Scaffolding del proyecto *(~2 días)* ✅
 - [x] Inicializar proyecto TypeScript con tsup
 - [x] CLI entry point con Commander.js
 - [x] Sistema de configuración (`.stratumrc.json` + Zod schema)
@@ -530,7 +530,7 @@ stratum update --check                 # Solo comprueba si hay versión nueva si
 
 ---
 
-### Hito 1 — Core Agent Loop *(~5 días)*
+### Hito 1 — Core Agent Loop *(~5 días)* ✅
 - [x] `ProviderRouter` con cliente OpenAI-compatible
 - [x] Streaming de responses (SSE parser)
 - [x] `ReactLoop` básico (sin tools)
@@ -661,7 +661,7 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 ---
 
-### Hito 4 — MCP Client *(~4 días)*
+### Hito 4 — MCP Client *(~4 días)* ✅ *(cerrado 2026-06-15; 4.1 el 2026-06-16)*
 - [x] Integración `@modelcontextprotocol/sdk`
 - [x] Conexión a MCP servers desde `.stratumrc.json`
 - [x] Auto-registro de MCP tools en `ToolRegistry`
@@ -723,7 +723,7 @@ Comando de sesión que abre el mismo wizard de `stratum provider add` pero pre-r
 
 ---
 
-### Hito 8 — Multi-agent Foundation *(~10 días)*
+### Hito 8 — Multi-agent Foundation *(~10 días)* ✅ *(8C cerrado 2026-08-20)*
 
 Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `CodeAgent`/`ShellAgent`/`ResearchAgent`: un subagente es una instancia del mismo `ReactLoop` con contexto aislado, lanzada por la tool de control `delegate_task` (interceptada por el loop, como `present_plan`); las especializaciones son **perfiles** (ficheros `~/.stratum/agents/<name>.md`), no subclases. Se entrega en tres sub-hitos incrementales:
 
@@ -754,7 +754,7 @@ Diseño completo y vinculante en **§12.16**. No hay `Orchestrator` ni clases `C
 
 ---
 
-### Hito 9 — SSH Nativo *(~7 días)*
+### Hito 9 — SSH Nativo *(~7 días)* ✅ *(cerrado 2026-08-27)*
 
 El diferenciador operacional de Stratum: capacidad SSH integrada en el loop ReAct sin depender del binario `ssh` del sistema. El agente puede administrar infraestructura remota con la misma naturalidad con que maneja archivos locales.
 
@@ -775,7 +775,7 @@ El diferenciador operacional de Stratum: capacidad SSH integrada en el loop ReAc
 
 ### Hito 16 — Ejecución unificada, auditoría universal y redacción de salidas ✅ *(cerrado 2026-09-15)*
 
-Primer bloque de `CLI-DOC/Orientacion-Infraestructura.md` (Hitos 10–15: ver `CLAUDE.md`). Spec vinculante en **§12.17**.
+Primer bloque de `CLI-DOC/Orientacion-Infraestructura.md` (Hitos 10–15 —cierre de la UI base, disciplina operativa, skills y riesgo, TDD y panel de cambios, transversales de prompting, perfiles de agente—: ver `.claude/docs/hitos.md`). Spec vinculante en **§12.17**.
 
 - [x] `ExecutionTarget` (`local` | `ssh:<alias>`; `container`/`pod`/`winrm` reservados) y tool `exec` sobre `IExecBackend` con capacidades declaradas
 - [x] `bash` y `ssh_exec` retirados sin alias; `ssh_upload`/`ssh_download` se mantienen
@@ -798,6 +798,10 @@ Segundo bloque de `CLI-DOC/Orientacion-Infraestructura.md` (§3, §5 y §10.5). 
 - [x] Badges de entorno, `RO` y perfil en `StatusBar`; `/env`
 
 **Entregable:** el mismo comando se trata distinto según dónde cae, y soltar el agente en un sistema real tiene un modo de solo observación que ninguna aprobación puede saltarse.
+
+### Después del Hito 17
+
+El roadmap siguió en el plano de control y en Dot, con hitos M0–M19 (anfitrión de sesión, protocolo, daemon `stratumd`, aprobaciones, pausa, traspaso, conversación duradera, Desktop como cliente, la caja, el `companion`, computer use, rutinas, conectores, canales y memoria estructurada). Su definición y estado están en `docs/PRD_STRATUM_DOT.md` (M0–M12 en sus secciones propias, M13–M19 en §23.11); las specs vinculantes que tocan el runtime, en §12.19–§12.25 de este documento.
 ---
 
 ## 10. Próximos Pasos Inmediatos
