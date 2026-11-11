@@ -20,6 +20,7 @@ export type {
   ProtocolBrowserStatus,
   ProtocolChangeStatus,
   ProtocolChangesSummary,
+  ProtocolSessionInspection,
   ProtocolChatMessage,
   ProtocolContextReport,
   ProtocolDecision,

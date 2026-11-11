@@ -235,6 +235,10 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     // El navegador del agente de la sesión: mirarlo y moverlo (sin aprobar orígenes).
     MainMethod::BrowserScreen,
     MainMethod::BrowserNavigate,
+    // Modo código: el perfil de sesión y cómo está montada (lo que `chat` da con
+    // `/profile`, `/tools`, `/env` y `/plugins`).
+    MainMethod::SessionsSetProfile,
+    MainMethod::SessionsInspect,
 ];
 
 impl ClientProfile {
@@ -1317,7 +1321,34 @@ fn call_request_as(
             if !valid_id(session_id) {
                 return Err(invalid("Invalid session id."));
             }
-            Ok((MainMethod::BrowserScreen, json!({ "sessionId": session_id })))
+            Ok((
+                MainMethod::BrowserScreen,
+                json!({ "sessionId": session_id }),
+            ))
+        }
+        CallAction::SetSessionProfile {
+            session_id,
+            profile,
+        } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            // Qué perfiles existen lo sabe el daemon (los de serie y los de su config).
+            let profile = optional(&Some(profile.clone()), MAX_NAME_CHARS, "session profile")?
+                .ok_or_else(|| invalid("Choose a session profile."))?;
+            Ok((
+                MainMethod::SessionsSetProfile,
+                json!({ "sessionId": session_id, "profile": profile, "operationId": operation_id }),
+            ))
+        }
+        CallAction::InspectSession { session_id } => {
+            if !valid_id(session_id) {
+                return Err(invalid("Invalid session id."));
+            }
+            Ok((
+                MainMethod::SessionsInspect,
+                json!({ "sessionId": session_id }),
+            ))
         }
         CallAction::BrowserNavigate {
             session_id,
@@ -2862,6 +2893,35 @@ mod tests {
         for bad in [String::new(), "x".repeat(MAX_PATH_CHARS + 1)] {
             assert!(call_request(&diff(bad), "op").is_err());
         }
+        // El perfil de sesión se cambia (con `operationId`); inspeccionar solo lee.
+        let profile = |name: &str| CallAction::SetSessionProfile {
+            session_id: "ses_1".into(),
+            profile: name.into(),
+        };
+        assert_eq!(
+            desktop(&profile(" infra "), "op-5"),
+            (
+                MainMethod::SessionsSetProfile,
+                json!({ "sessionId": "ses_1", "profile": "infra", "operationId": "op-5" })
+            )
+        );
+        assert!(call_request(&profile("  "), "op").is_err());
+        assert!(call_request(&profile(&"x".repeat(MAX_NAME_CHARS + 1)), "op").is_err());
+        let inspect = CallAction::InspectSession {
+            session_id: "ses_1".into(),
+        };
+        assert_eq!(
+            desktop(&inspect, "op"),
+            (MainMethod::SessionsInspect, json!({ "sessionId": "ses_1" }))
+        );
+        assert!(call_request(
+            &CallAction::InspectSession {
+                session_id: String::new()
+            },
+            "op"
+        )
+        .is_err());
+        assert!(profile("code").mutating() && !inspect.mutating());
         assert!(set(None).mutating() && read_only.mutating() && cancel.mutating());
         assert!(!changes.mutating() && !diff("a".into()).mutating());
         for m in [
@@ -2870,6 +2930,8 @@ mod tests {
             MainMethod::JobsCancel,
             MainMethod::GitChanges,
             MainMethod::GitDiff,
+            MainMethod::SessionsSetProfile,
+            MainMethod::SessionsInspect,
         ] {
             assert!(DESKTOP_METHODS.contains(&m), "{m:?}");
             // El perfil solo resta: Dot no conduce sesiones de código.

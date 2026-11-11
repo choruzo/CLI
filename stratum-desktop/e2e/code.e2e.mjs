@@ -208,6 +208,33 @@ describe('modo código, paneles y navegador (E2E)', () => {
     await shot('04-changes');
   });
 
+  it('/tools abre el montaje de la sesión y el perfil de sesión se cambia desde él', async () => {
+    await send(s(), '/tools');
+    // El título va en mayúsculas por CSS: `innerText` lo devuelve transformado.
+    await s().waitFor(
+      () => s().execute(`return /Tools · \\d+/i.test(document.querySelector('.side-panel')?.innerText ?? '')`),
+      { timeout: 20_000, message: 'las tools de la sesión' },
+    );
+    const tools = await s().execute(`return [...document.querySelectorAll('.setup-chips code')].map((c) => c.textContent)`);
+    assert.ok(tools.includes('read_file') && tools.includes('exec'), JSON.stringify(tools));
+    const checked = () =>
+      s().execute(`return document.querySelector('.setup-option[aria-checked="true"] .setup-option__name')?.textContent ?? null`);
+    const before = await checked();
+    assert.ok(before, 'hay un perfil de sesión activo');
+    const target = before.startsWith('full') ? 'code' : 'full';
+    await s().execute(
+      `[...document.querySelectorAll('.setup-option')].find((b) => b.querySelector('.setup-option__name').textContent.startsWith(${JSON.stringify(target)})).click()`,
+    );
+    // Sin estado optimista: cambia cuando el daemon lo publica y el panel lo relee.
+    await s().waitFor(async () => ((await checked()) ?? '').startsWith(target), { timeout: 20_000, message: `el perfil ${target}` });
+    const [session] = await cliSessions(app.home);
+    assert.equal(session.sessionProfile, target);
+    await shot('04b-setup');
+    // De vuelta a los cambios, de donde se deshace.
+    await send(s(), '/changes');
+    await s().waitFor(() => s().execute(`return !!document.querySelector('.change-row__main')`), { message: 'la lista de cambios' });
+  });
+
   it('el agente abre su navegador contra el servidor local y Desktop lo enseña', async (t) => {
     await send(s(), 'verifica la página');
     await s().waitFor(async () => /La página carga|No cargó|not available/.test(await s().bodyText()), { timeout: 90_000, message: 'el resultado del navegador' });

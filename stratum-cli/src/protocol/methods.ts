@@ -12,6 +12,7 @@ import type {
   ProtocolBrowserStatus,
   ProtocolChangesSummary,
   ProtocolFileDiff,
+  ProtocolSessionInspection,
   ProtocolSharedImage,
   ProtocolRoutine,
   ProtocolRoutineFire,
@@ -382,6 +383,23 @@ export interface ProtocolMethods {
     Mutation & { sessionId: string; readOnly: boolean },
     { session: ProtocolSession }
   >;
+  /**
+   * Modo código — el perfil de sesión (`code`, `infra`, `full`, `auto` o uno de
+   * la config) de una sesión parada: qué tools ve el modelo desde el próximo
+   * turno. No cambia ninguna guarda ni confirmación. Un nombre que no existe o
+   * una sesión de un agente embebido: `INVALID_PARAMS`.
+   */
+  'sessions.setProfile': Spec<
+    Mutation & { sessionId: string; profile: string },
+    { session: ProtocolSession }
+  >;
+  /**
+   * Modo código — cómo está montada una sesión viva del daemon: perfil de
+   * sesión, tools que se ofrecen, servers MCP, plugins y entornos. Solo lee y
+   * nunca monta nada: una sesión guardada sin montar es `UNAVAILABLE`
+   * (`not-loaded`); una par, `UNAVAILABLE` (`peer-hosted`).
+   */
+  'sessions.inspect': Spec<{ sessionId: string }, { inspection: ProtocolSessionInspection }>;
   /**
    * Pasa una sesión de su anfitrión par al daemon, sin cambiar de id ni perder
    * contexto (M10). Lo hace el par: el servidor se lo pide y comprueba el
@@ -764,6 +782,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'sessions.setModel': write('control'),
   'sessions.setAgent': write('control'),
   'sessions.setReadOnly': write('control'),
+  'sessions.setProfile': write('control'),
+  'sessions.inspect': read('observe'),
   'sessions.detach': write('control'),
   // Pisa ficheros sin pasar por las aprobaciones: la autoridad es la de aprobar.
   'sessions.revert': write('approve'),

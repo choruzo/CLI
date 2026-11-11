@@ -117,10 +117,16 @@ pub enum MainMethod {
     /// Desktop (modo código) — la persona mueve ese navegador (`control`): solo
     /// lo local o ya aprobado; aprobar orígenes no es de un cliente.
     BrowserNavigate,
+    /// Desktop (modo código) — el perfil de sesión (`code`, `infra`, `full`,
+    /// `auto`…) de una sesión parada (`control`): qué tools ve el modelo.
+    SessionsSetProfile,
+    /// Desktop (modo código) — cómo está montada una sesión: perfil, tools,
+    /// servers MCP, plugins y entornos (`observe`, solo lectura; no monta nada).
+    SessionsInspect,
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 49] = [
+    pub const ALL: [MainMethod; 51] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -170,6 +176,8 @@ impl MainMethod {
         MainMethod::GitDiff,
         MainMethod::BrowserScreen,
         MainMethod::BrowserNavigate,
+        MainMethod::SessionsSetProfile,
+        MainMethod::SessionsInspect,
     ];
 }
 
@@ -225,6 +233,8 @@ impl WireMethod for MainMethod {
             MainMethod::GitDiff => "git.diff",
             MainMethod::BrowserScreen => "browser.screen",
             MainMethod::BrowserNavigate => "browser.navigate",
+            MainMethod::SessionsSetProfile => "sessions.setProfile",
+            MainMethod::SessionsInspect => "sessions.inspect",
         }
     }
 }
@@ -448,7 +458,9 @@ mod tests {
                 "git.changes",
                 "git.diff",
                 "browser.screen",
-                "browser.navigate"
+                "browser.navigate",
+                "sessions.setProfile",
+                "sessions.inspect"
             ]
         );
         for forbidden in [

@@ -2,7 +2,7 @@ import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, ty
 import { inertProps } from '../chat/Collapse';
 import { ResizeHandle } from './ResizeHandle';
 
-export type SidebarPanel = 'conversations' | 'outline' | 'memory' | 'files' | 'changes' | 'jobs';
+export type SidebarPanel = 'conversations' | 'outline' | 'memory' | 'files' | 'changes' | 'jobs' | 'setup';
 
 export interface SidebarState {
   open: boolean;
@@ -12,8 +12,8 @@ export interface SidebarState {
 const STORAGE_KEY = 'stratum.sidebar';
 /** Los paneles de cada modo, en el orden del raíl. */
 export const CHAT_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'files'];
-export const CODE_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'changes', 'jobs'];
-const ALL_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'files', 'changes', 'jobs'];
+export const CODE_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'changes', 'jobs', 'setup'];
+const ALL_PANELS: readonly SidebarPanel[] = ['conversations', 'outline', 'memory', 'files', 'changes', 'jobs', 'setup'];
 
 /** Estado del sidebar recordado por usuario (comodidad: sin él, abierto en Conversaciones). */
 export function loadSidebarState(): SidebarState {
@@ -57,6 +57,7 @@ const ICONS: Record<SidebarPanel | 'settings' | 'trajectory' | 'browser', string
   files: 'M6 3h8l4 4v14H6zM14 3v4h4',
   changes: 'M6 3v12M6 15a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 3a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM18 9c0 5-12 2-12 6',
   jobs: 'M4 5h16v14H4zM7 9l3 3-3 3M12 15h5',
+  setup: 'M4 7h10M18 7h2M4 17h2M10 17h10M16 5v4M8 15v4M4 12h16',
   settings:
     'M12 9a3 3 0 1 0 0 6 3 3 0 0 0 0-6zM4 12h2M18 12h2M12 4v2M12 18v2M6.3 6.3l1.4 1.4M16.3 16.3l1.4 1.4M6.3 17.7l1.4-1.4M16.3 7.7l1.4-1.4',
 };
@@ -68,6 +69,7 @@ const LABELS: Record<SidebarPanel, string> = {
   files: 'Ficheros de la conversación',
   changes: 'Cambios del proyecto (git)',
   jobs: 'Procesos en segundo plano',
+  setup: 'Montaje de la sesión: perfil, tools y entornos',
 };
 
 /**

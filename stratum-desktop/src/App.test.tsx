@@ -115,6 +115,28 @@ function rig() {
     listAgents: vi.fn(async () => ({ agents: [] })),
     setAgent: vi.fn(async () => ({ session: idleSession() })),
     setReadOnly: vi.fn(async () => ({ session: idleSession() })),
+    setSessionProfile: vi.fn(async () => ({ session: idleSession() })),
+    inspectSession: vi.fn(async () => ({
+      inspection: {
+        profile: {
+          requested: 'auto',
+          active: 'code',
+          detection: { detected: false, reasons: [] },
+          available: [
+            { name: 'code', description: 'desarrollo', allowedTools: null, hiddenTools: ['ssh_exec'], source: 'builtin' },
+            { name: 'infra', description: 'infraestructura', allowedTools: null, hiddenTools: [], source: 'builtin' },
+          ],
+        },
+        tools: [
+          { name: 'read_file', source: 'builtin' },
+          { name: 'mcp__docs__search', source: 'mcp' },
+        ],
+        mcp: [{ name: 'docs', status: 'connected', tools: 1 }],
+        plugins: { enabled: true, loaded: [], skipped: [] },
+        environments: [],
+        truncated: false,
+      },
+    })),
     cancelJob: vi.fn(async () => ({})),
     gitChanges: vi.fn(async () => ({
       changes: { isRepo: false, files: 0, added: 0, deleted: 0, changes: [], truncated: false },

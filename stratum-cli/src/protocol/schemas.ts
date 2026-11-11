@@ -80,6 +80,7 @@ import type {
   ProtocolBrowserStatus,
   ProtocolChangesSummary,
   ProtocolFileDiff,
+  ProtocolSessionInspection,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -95,6 +96,7 @@ import {
   BROWSER_SCREEN_LIMITS,
   GIT_CHANGES_LIMITS,
   GIT_DIFF_LIMITS,
+  INSPECT_LIMITS,
   GRANT_MINUTES,
   HISTORY_LIMITS,
   PROTOCOL_MEMORY_SECTIONS,
@@ -799,6 +801,59 @@ export const fileDiffSchema: z.ZodType<ProtocolFileDiff> = z.object({
   binary: z.boolean(),
 });
 
+const toolPattern = z.string().min(1).max(LIMITS.nameChars);
+const inspectText = z.string().max(INSPECT_LIMITS.reasonChars);
+
+export const sessionInspectionSchema: z.ZodType<ProtocolSessionInspection> = z.object({
+  profile: z
+    .object({
+      requested: name,
+      active: name,
+      detection: z
+        .object({ detected: z.boolean(), reasons: z.array(inspectText).max(32) })
+        .optional(),
+      available: z
+        .array(
+          z.object({
+            name,
+            description: inspectText,
+            allowedTools: z.array(toolPattern).max(INSPECT_LIMITS.tools).nullable(),
+            hiddenTools: z.array(toolPattern).max(INSPECT_LIMITS.tools),
+            source: z.enum(['builtin', 'config']),
+          }),
+        )
+        .max(INSPECT_LIMITS.profiles),
+    })
+    .nullable(),
+  tools: z
+    .array(z.object({ name: toolPattern, source: z.enum(['builtin', 'mcp']) }))
+    .max(INSPECT_LIMITS.tools),
+  mcp: z.array(z.object({ name, status: name, tools: count })).max(INSPECT_LIMITS.mcpServers),
+  plugins: z.object({
+    enabled: z.boolean(),
+    loaded: z
+      .array(z.object({ id: name, source: name, hooks: z.record(name, count) }))
+      .max(INSPECT_LIMITS.plugins),
+    skipped: z
+      .array(z.object({ id: name.optional(), reason: inspectText }))
+      .max(INSPECT_LIMITS.plugins),
+  }),
+  environments: z
+    .array(
+      z.object({
+        name,
+        tier: z.enum(['production', 'staging', 'development']),
+        policy: z.enum(['allow', 'ask', 'confirm-always']),
+        requirePlan: z.boolean(),
+        readOnly: z.boolean(),
+        confirmation: z.enum(['typed', 'simple']),
+        match: z.array(toolPattern).max(INSPECT_LIMITS.patterns),
+      }),
+    )
+    .max(INSPECT_LIMITS.environments),
+  truncated: z.boolean(),
+});
+
 // ---------------------------------------------------------------------------
 // Eventos y snapshots
 // ---------------------------------------------------------------------------
@@ -1127,6 +1182,8 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
     .strict(),
   'sessions.setAgent': z.object({ sessionId: id, agent: name.nullable(), operationId }).strict(),
   'sessions.setReadOnly': z.object({ sessionId: id, readOnly: z.boolean(), operationId }).strict(),
+  'sessions.setProfile': z.object({ sessionId: id, profile: name, operationId }).strict(),
+  'sessions.inspect': sessionRef,
   'sessions.detach': sessionMutation,
   'sessions.revert': z
     .object({
@@ -1413,6 +1470,8 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'sessions.setModel': sessionResult,
   'sessions.setAgent': sessionResult,
   'sessions.setReadOnly': sessionResult,
+  'sessions.setProfile': sessionResult,
+  'sessions.inspect': z.object({ inspection: sessionInspectionSchema }),
   'sessions.detach': z.object({
     status: z.enum(['detached', 'already-daemon']),
     session: sessionSchema,

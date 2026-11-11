@@ -66,7 +66,8 @@ import {
   isEmbeddedPreset,
   type PromptPreset,
 } from './presets.js';
-import { composeToolsetFilters } from '../tools/registry.js';
+import { composeToolsetFilters, type ToolsetFilter } from '../tools/registry.js';
+import { READ_ONLY_TOOLSET } from '../tools/call-policy.js';
 import { SCREEN_SCREENSHOT_TOOL, SCREEN_TOOLS } from '../tools/screen/names.js';
 import {
   BROWSER_NAVIGATE_TOOL,
@@ -1628,7 +1629,6 @@ export class StratumAgent {
 
   /** `ReactLoop` de un turno del agente principal. */
   private makeLoop(): ReactLoop {
-    const active = this._activeProfile;
     return new ReactLoop(
       this.router.getActive(),
       this.registry,
@@ -1657,21 +1657,46 @@ export class StratumAgent {
         // Hito 17: el perfil de sesión se compone con el del agente principal.
         // M15: un modelo sin visión declarada no ve las `screen_*` (se decide
         // por turno: el modelo de la sesión puede cambiar entre turnos).
-        toolsetFilter: composeToolsetFilters(
-          this.preset === 'assistant'
-            ? assistantToolsetFilter({ workspace: this.workspace !== undefined })
-            : this.preset === 'companion'
-              ? companionToolsetFilter()
-              : composeToolsetFilters(
-                  this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
-                  active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
-                ),
-          this.router.vision
-            ? undefined
-            : { hiddenTools: [...SCREEN_TOOLS, BROWSER_SCREENSHOT_TOOL] },
-        ),
+        toolsetFilter: this.turnToolsetFilter(),
       },
     );
+  }
+
+  /**
+   * El filtro del toolset de un turno del agente principal: preset, perfil de
+   * sesión, perfil de agente y visión del modelo. Único sitio que lo compone:
+   * lo usan el loop y `offeredToolNames`.
+   */
+  private turnToolsetFilter(): ToolsetFilter | undefined {
+    const active = this._activeProfile;
+    return composeToolsetFilters(
+      this.preset === 'assistant'
+        ? assistantToolsetFilter({ workspace: this.workspace !== undefined })
+        : this.preset === 'companion'
+          ? companionToolsetFilter()
+          : composeToolsetFilters(
+              this._sessionProfile ? sessionProfileFilter(this._sessionProfile) : undefined,
+              active ? { allowedTools: active.allowedTools, controlTools: 'keep' } : undefined,
+            ),
+      this.router.vision ? undefined : { hiddenTools: [...SCREEN_TOOLS, BROWSER_SCREENSHOT_TOOL] },
+    );
+  }
+
+  /**
+   * Las tools que el modelo recibiría en un turno normal empezado ahora (con el
+   * perfil, el modo read-only y el modelo actuales). Solo nombres: es para
+   * enseñarlo (`sessions.inspect`), no decide nada.
+   */
+  offeredToolNames(): string[] {
+    return this.registry
+      .toToolSchemas(
+        'normal',
+        composeToolsetFilters(
+          this.turnToolsetFilter(),
+          this._readOnly ? READ_ONLY_TOOLSET : undefined,
+        ),
+      )
+      .map((schema) => schema.function.name);
   }
 
   /**

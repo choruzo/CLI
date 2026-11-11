@@ -197,7 +197,7 @@ Dot      ┘
   del daemon. Dot sigue sin poder cerrar ni reconfigurar sesiones; Desktop sí (`sessions.close`,
   `sessions.setModel`) y además lee `sessions.history|context|memory`. Con el **modo código**
   (sesiones del agente de código en una carpeta de proyecto que la persona elige en un diálogo
-  nativo), Desktop pide también `sessions.setAgent|setReadOnly`, `jobs.cancel` y `git.changes|diff`
+  nativo), Desktop pide también `sessions.setAgent|setReadOnly|setProfile`, `sessions.inspect` (solo lectura), `jobs.cancel` y `git.changes|diff`
   (solo lectura) por su conexión principal; Dot no los tiene en su perfil. Deshacer turnos
   (`sessions.revert`, `approve`) va solo por el broker de aprobador, con el plan leído del daemon
   por el lado nativo y confirmado en la ventana nativa (`ConfirmGate::request_revert`); nunca con

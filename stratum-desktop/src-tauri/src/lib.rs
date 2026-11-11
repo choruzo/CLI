@@ -151,6 +151,8 @@ pub fn run() {
             commands::desktop_list_agents,
             commands::desktop_set_agent,
             commands::desktop_set_read_only,
+            commands::desktop_set_session_profile,
+            commands::desktop_inspect_session,
             commands::desktop_cancel_job,
             commands::desktop_git_changes,
             commands::desktop_git_diff,

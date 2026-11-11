@@ -1738,6 +1738,23 @@ export class Stratumd {
           params.readOnly,
         ),
       }),
+      'sessions.setProfile': async (params) => ({
+        session: (await this.wake(params.sessionId, 'Changing its session profile')).setProfile(
+          params.profile,
+        ),
+      }),
+      // Solo lee y nunca monta: de una sesión guardada no hay nada montado que enseñar.
+      'sessions.inspect': (params) => {
+        if (this.peers.has(params.sessionId)) throw peerHostedOnly('Its setup');
+        const live = this.sessions.get(params.sessionId);
+        if (live) return { inspection: live.inspect() };
+        if (!this.dormant.has(params.sessionId)) {
+          throw new ProtocolError('NOT_FOUND', 'Session not found.');
+        }
+        throw new ProtocolError('UNAVAILABLE', 'The session is saved but not loaded yet.', {
+          reason: 'not-loaded',
+        });
+      },
       'sessions.detach': (params) => this.detachSession(params.sessionId),
       // `approve` lo comprueba `authorize` antes de llegar aquí. Una sesión par
       // deshace en su terminal (`/undo`); una guardada se monta para hacerlo.

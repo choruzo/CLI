@@ -9,7 +9,14 @@
  * conflictos.
  */
 import { toCommandError, type CommandError, type NativeBridge } from '../ipc/native';
-import { parseAgents, parseChanges, parseDiff, parseOpenedSession, parseRevert } from '../protocol/results';
+import {
+  parseAgents,
+  parseChanges,
+  parseDiff,
+  parseInspection,
+  parseOpenedSession,
+  parseRevert,
+} from '../protocol/results';
 import { describeFailure, selectSession, sendMessage, type SendOutcome } from './actions';
 import { uiActions, type PendingRequest } from './ui-store';
 
@@ -17,6 +24,7 @@ export type Changes = NonNullable<ReturnType<typeof parseChanges>>;
 export type FileDiff = NonNullable<ReturnType<typeof parseDiff>>;
 export type RevertResult = NonNullable<ReturnType<typeof parseRevert>>;
 export type AgentProfile = NonNullable<ReturnType<typeof parseAgents>>[number];
+export type Inspection = NonNullable<ReturnType<typeof parseInspection>>;
 
 export interface CodeSessionChoice {
   cwd: string;
@@ -112,6 +120,13 @@ export function setReadOnly(native: NativeBridge, sessionId: string, readOnly: b
   );
 }
 
+/** El perfil de sesión (`code`, `infra`, `full`, `auto`…): qué tools ve el modelo. */
+export function setSessionProfile(native: NativeBridge, sessionId: string, profile: string): Promise<void> {
+  return configure(sessionId, 'No se pudo cambiar el perfil de sesión', () =>
+    native.setSessionProfile(sessionId, profile),
+  );
+}
+
 /** Cancelar un job: el cambio se ve cuando la foto lo publique. */
 export async function cancelJob(native: NativeBridge, sessionId: string, jobId: string): Promise<void> {
   try {
@@ -127,6 +142,28 @@ const failed = (what: string, err: unknown): { ok: false; message: string } => (
   ok: false,
   message: describeFailure(what, toCommandError(err)),
 });
+
+/** Cómo está montada la sesión (`sessions.inspect`, solo lectura; no la monta). */
+export async function loadInspection(native: NativeBridge, sessionId: string): Promise<Loaded<Inspection>> {
+  try {
+    const inspection = parseInspection(await native.inspectSession(sessionId));
+    return inspection
+      ? { ok: true, value: inspection }
+      : { ok: false, message: 'La descripción de la sesión que llegó no se entiende.' };
+  } catch (err) {
+    const error = toCommandError(err);
+    if (error.kind === 'rejected' && error.reason === 'not-loaded') {
+      return {
+        ok: false,
+        message: 'La sesión está guardada y aún no se ha montado: se verá en cuanto le envíes un mensaje.',
+      };
+    }
+    if (error.kind === 'rejected' && error.reason === 'peer-hosted') {
+      return { ok: false, message: 'Esta sesión la aloja una terminal: se consulta desde ella (/tools, /env, /profile).' };
+    }
+    return failed('No se pudo leer cómo está montada la sesión', err);
+  }
+}
 
 /** Los cambios del árbol de trabajo de la sesión (`git.changes`, solo lectura). */
 export async function loadChanges(native: NativeBridge, sessionId: string): Promise<Loaded<Changes>> {

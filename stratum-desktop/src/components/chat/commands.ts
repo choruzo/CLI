@@ -19,6 +19,10 @@ export type CommandName =
   | 'jobs'
   | 'undo'
   | 'plan'
+  | 'profile'
+  | 'tools'
+  | 'env'
+  | 'plugins'
   | 'browser';
 
 export interface SlashCommand {
@@ -53,6 +57,15 @@ export const SLASH_COMMANDS: readonly SlashCommand[] = [
   },
   { name: 'agent', args: '[perfil]', description: 'Ver o cambiar el perfil de agente de esta sesión', mode: 'code' },
   { name: 'readonly', description: 'Poner o quitar el modo de solo lectura de esta sesión', mode: 'code' },
+  {
+    name: 'profile',
+    args: '[perfil]',
+    description: 'Ver o cambiar el perfil de sesión (code, infra, full, auto): qué tools ve el modelo',
+    mode: 'code',
+  },
+  { name: 'tools', description: 'Ver las tools de esta sesión (integradas y MCP)', mode: 'code' },
+  { name: 'env', description: 'Ver los entornos definidos, sus reglas y el contexto activo', mode: 'code' },
+  { name: 'plugins', description: 'Ver los plugins de esta sesión y los omitidos', mode: 'code' },
   { name: 'changes', description: 'Ver los cambios del árbol de trabajo (git)', mode: 'code' },
   { name: 'jobs', description: 'Ver los procesos en segundo plano de esta sesión', mode: 'code' },
   { name: 'undo', description: 'Deshacer los ficheros del último turno', mode: 'code' },

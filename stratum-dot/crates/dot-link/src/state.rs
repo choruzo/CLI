@@ -327,6 +327,12 @@ pub enum CallAction {
         action: String,
         url: Option<String>,
     },
+    /// Desktop (modo código) — `sessions.setProfile`: el perfil de sesión de una
+    /// sesión parada. El nombre lo valida el daemon contra su config.
+    SetSessionProfile { session_id: String, profile: String },
+    /// Desktop (modo código) — `sessions.inspect`: cómo está montada la sesión.
+    /// Solo lectura; nunca la monta.
+    InspectSession { session_id: String },
 }
 
 /// M16 — topes de una rutina (`ProtocolRoutineLimits`). Se validan en
@@ -400,6 +406,8 @@ impl CallAction {
             CallAction::GitDiff { .. } => "git-diff",
             CallAction::BrowserScreen { .. } => "browser-screen",
             CallAction::BrowserNavigate { .. } => "browser-navigate",
+            CallAction::SetSessionProfile { .. } => "set-session-profile",
+            CallAction::InspectSession { .. } => "inspect-session",
         }
     }
 
@@ -430,6 +438,7 @@ impl CallAction {
                 | CallAction::SetReadOnly { .. }
                 | CallAction::CancelJob { .. }
                 | CallAction::BrowserNavigate { .. }
+                | CallAction::SetSessionProfile { .. }
         )
     }
 }

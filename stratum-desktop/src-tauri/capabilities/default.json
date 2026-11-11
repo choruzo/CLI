@@ -41,6 +41,8 @@
     "allow-desktop-list-agents",
     "allow-desktop-set-agent",
     "allow-desktop-set-read-only",
+    "allow-desktop-set-session-profile",
+    "allow-desktop-inspect-session",
     "allow-desktop-cancel-job",
     "allow-desktop-git-changes",
     "allow-desktop-git-diff",

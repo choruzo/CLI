@@ -33,6 +33,7 @@ import type {
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionHostInfo,
+  ProtocolSessionInspection,
   ProtocolRevertPlan,
   ProtocolSessionSnapshot,
   ResumeStatus,
@@ -55,6 +56,7 @@ import type { RoutineProposals } from '../tools/routines/propose.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 import { BrowserActionError, BrowserUnavailableError } from '../browser/manager.js';
+import { inspectSession } from './session-inspection.js';
 
 const log = getLogger('daemon').child('session');
 
@@ -804,6 +806,27 @@ export class HostedSession {
     this.assertIdle();
     this.host.agent.setReadOnly(readOnly);
     return this.changed();
+  }
+
+  /**
+   * El perfil de sesión (`/profile`): qué tools ve el modelo desde el próximo
+   * turno. No toca ninguna guarda: lo que una tool pueda hacer lo siguen
+   * decidiendo `preflight`, los entornos y las confirmaciones.
+   */
+  setProfile(profile: string): ProtocolSession {
+    this.assertIdle();
+    const applied = this.host.agent.setSessionProfile(profile);
+    if (!applied.ok) {
+      throw new ProtocolError('INVALID_PARAMS', applied.error, {
+        issues: [{ path: 'profile', message: 'unknown or unusable session profile' }],
+      });
+    }
+    return this.changed();
+  }
+
+  /** Cómo está montada la sesión ahora (`sessions.inspect`); solo lee. */
+  inspect(): ProtocolSessionInspection {
+    return inspectSession(this.host);
   }
 
   async cancelJob(jobId: string): Promise<void> {

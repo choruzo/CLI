@@ -19,6 +19,8 @@ const COMMANDS: &[&str] = &[
     "desktop_list_agents",
     "desktop_set_agent",
     "desktop_set_read_only",
+    "desktop_set_session_profile",
+    "desktop_inspect_session",
     "desktop_cancel_job",
     "desktop_git_changes",
     "desktop_git_diff",

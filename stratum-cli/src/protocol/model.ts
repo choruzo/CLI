@@ -1025,3 +1025,83 @@ export interface ProtocolFileDiff {
   truncated: boolean;
   binary: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Modo código de Desktop — inspección de una sesión (`sessions.inspect`)
+// ---------------------------------------------------------------------------
+
+/** Topes de `sessions.inspect`: lo que pase de aquí se recorta y se dice. */
+export const INSPECT_LIMITS = {
+  tools: 1_000,
+  profiles: 64,
+  environments: 128,
+  patterns: 64,
+  mcpServers: 128,
+  plugins: 128,
+  reasonChars: 500,
+} as const;
+
+/** Un perfil de sesión (`code`, `infra`, `full` o de la config) y su regla de tools. */
+export interface ProtocolSessionProfileInfo {
+  name: string;
+  description: string;
+  /** `null`: todas. Admite globs (`mcp__*`). */
+  allowedTools: string[] | null;
+  hiddenTools: string[];
+  source: 'builtin' | 'config';
+}
+
+/** Un entorno definido en la config de la sesión, con sus reglas ya resueltas. */
+export interface ProtocolInspectedEnvironment {
+  name: string;
+  tier: 'production' | 'staging' | 'development';
+  policy: 'allow' | 'ask' | 'confirm-always';
+  requirePlan: boolean;
+  readOnly: boolean;
+  confirmation: 'typed' | 'simple';
+  /** Patrones de target (`ssh:prod-*`, `container:caja`). */
+  match: string[];
+}
+
+export interface ProtocolInspectedMcpServer {
+  name: string;
+  status: string;
+  /** Tools que el server anuncia (no todas tienen por qué estar registradas). */
+  tools: number;
+}
+
+export interface ProtocolInspectedPlugin {
+  id: string;
+  source: string;
+  /** Manejadores por hook (`tool.before: 2`). */
+  hooks: Record<string, number>;
+}
+
+/**
+ * Cómo está montada una sesión **ahora**: lo que la CLI enseña con `/profile`,
+ * `/tools`, `/env` y `/plugins`. Solo lectura y solo de una sesión viva del
+ * daemon; no lleva rutas, comandos ni configuración de servers o plugins.
+ */
+export interface ProtocolSessionInspection {
+  /** `null` en una sesión de un agente embebido: no tiene perfil de sesión. */
+  profile: {
+    /** Lo pedido (`auto`, `code`…). */
+    requested: string;
+    /** El resuelto. */
+    active: string;
+    /** Solo con `auto`: qué infraestructura se vio. */
+    detection?: { detected: boolean; reasons: string[] };
+    available: ProtocolSessionProfileInfo[];
+  } | null;
+  /** Las tools que el modelo recibiría en un turno normal empezado ahora, en orden. */
+  tools: { name: string; source: 'builtin' | 'mcp' }[];
+  mcp: ProtocolInspectedMcpServer[];
+  plugins: {
+    enabled: boolean;
+    loaded: ProtocolInspectedPlugin[];
+    skipped: { id?: string; reason: string }[];
+  };
+  environments: ProtocolInspectedEnvironment[];
+  /** Algo se recortó a `INSPECT_LIMITS`. */
+  truncated: boolean;
+}

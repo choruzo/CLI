@@ -188,6 +188,8 @@ host ownership  !=  operator control  !=  approver authority
 | `sessions.list` · `sessions.get`                                                       | observe     |     | `get` devuelve una foto                                                                                                                                                                                                                                                                                                                                                  |
 | `sessions.open`                                                                        | control     | ✓   | `cwd?`, `agent?`, `provider?`, `model?`, `readOnly?`, `sessionProfile?`, `resume?`… y `env?` (reservado, solo entrada). Lo que falte lo decide el servidor (§13.4). `resume`: id de una sesión guardada del daemon, que se monta y se devuelve con sus ajustes (§19.4); no admite `cwd`, `agent`, `provider`, `model`, `readOnly` ni `sessionProfile` (`INVALID_PARAMS`) |
 | `sessions.close` · `sessions.setModel` · `sessions.setAgent` · `sessions.setReadOnly`  | control     | ✓   |                                                                                                                                                                                                                                                                                                                                                                          |
+| `sessions.setProfile` | control | ✓ | El perfil de sesión de una sesión parada: `{ sessionId, profile }` (§27) |
+| `sessions.inspect` | observe | | Cómo está montada una sesión viva del daemon: perfil, tools, MCP, plugins y entornos (§27) |
 | `sessions.revert`                                                                      | **approve** | ✓   | Deshace los ficheros de los últimos turnos de una sesión del daemon: `{ sessionId, turns?, dryRun?, force? }` → `{ status, plan }` (§19.8). Exige la clave de aprobador                                                                                                                                                                                                  |
 | `sessions.detach`                                                                      | control     | ✓   | Traspasa una sesión par al daemon, mismo id y contexto (§18). Devuelve `{ status: 'detached' \| 'already-daemon', session }`; `BUSY`/`NOT_TRANSFERABLE` con `data.reason`                                                                                                                                                                                                |
 | `runs.list` · `runs.get`                                                               | observe     |     |                                                                                                                                                                                                                                                                                                                                                                          |
@@ -1320,6 +1322,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | Imágenes        | `runs.start`, `runs.steer` y `host.steer` admiten `images?: string[]` (1 a `LIMITS.imagesPerMessage` = 5 rutas). Quien atiende las lee confinadas al `cwd` de la sesión y a `~/.stratum/images`; una que no vale (fuera, no es imagen, >5 MB) rechaza el mensaje entero con `INVALID_PARAMS`, sin arrancar ni encolar nada                                                                                                                      | Aditivo: quien no lo envía sigue igual                                                                                                                                                                                                                       |
 | Modo código     | Métodos `git.changes` y `git.diff` (`observe`, §25); DTOs `ProtocolChangesSummary`, `ProtocolWorkingTreeChange`, `ProtocolFileDiff`; `GIT_CHANGES_LIMITS`, `GIT_DIFF_LIMITS`. `data.reason` de `UNAVAILABLE` admite `embedded-agent` y `not-a-repo` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 | Navegador       | Métodos `browser.screen` (`observe`) y `browser.navigate` (`control`, §26); DTOs `ProtocolBrowserStatus`, `ProtocolBrowserScreen`, `ProtocolBrowserState`, `ProtocolBrowserAction`; `BROWSER_SCREEN_LIMITS`, `BROWSER_NAVIGATE_LIMITS`, `BROWSER_NAVIGATE_ACTIONS`. `data.reason` de `UNAVAILABLE` admite `failed` y `browser-closed`; el de `INVALID_PARAMS`, `needs-approval` y `blocked-url`. Sin eventos ni campos nuevos en la foto | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
+| Modo código     | Métodos `sessions.setProfile` (`control`) y `sessions.inspect` (`observe`, §27); DTOs `ProtocolSessionInspection`, `ProtocolSessionProfileInfo`, `ProtocolInspectedEnvironment`, `ProtocolInspectedMcpServer`, `ProtocolInspectedPlugin`; `INSPECT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `not-loaded` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -2200,3 +2203,40 @@ proceso. El agente lo usa con sus tools `browser_*`; un cliente puede **verlo** 
 
 Tests: `stratum-cli/src/daemon/daemon-browser.test.ts`, `src/browser/*.test.ts`,
 `src/tools/browser/browser.test.ts`.
+
+## 27. Modo código de Desktop: perfil de sesión e inspección (`sessions.setProfile`, `sessions.inspect`)
+
+Lo que `chat` da con `/profile`, `/tools`, `/env` y `/plugins`, para un cliente del protocolo.
+
+- **`sessions.setProfile { sessionId, profile, operationId }` → `{ session }`** (`control`,
+  mutante). Cambia el perfil de sesión (`code`, `infra`, `full`, `auto` o uno de
+  `session.profiles` de la config) de una sesión **en reposo**: qué tools recibe el modelo desde el
+  próximo turno. No toca ninguna guarda: lo que una tool puede hacer lo siguen decidiendo
+  `preflight`, los entornos y las confirmaciones. Se publica con `session.updated`
+  (`sessionProfile`) y se guarda con la sesión. Una sesión guardada se monta para aplicarlo, como
+  `sessions.setModel`. `BUSY` con un turno en curso; `INVALID_PARAMS` si el perfil no existe o la
+  sesión es de un agente embebido (no tienen perfil de sesión); `UNAVAILABLE` (`peer-hosted`) en
+  una sesión par.
+- **`sessions.inspect { sessionId }` → `{ inspection: ProtocolSessionInspection }`** (`observe`).
+  Solo lee lo que la sesión tiene en memoria y **nunca monta nada**: una sesión guardada sin montar
+  es `UNAVAILABLE` (`not-loaded`); una par, `UNAVAILABLE` (`peer-hosted`). Vale con un turno en
+  curso. Lleva:
+  - `profile`: `requested` (lo pedido), `active` (el resuelto), `detection` (solo con `auto`) y
+    `available` (cada perfil con su `description`, `allowedTools` —`null` = todas—, `hiddenTools` y
+    `source`). `null` en una sesión de un agente embebido.
+  - `tools`: las que el modelo recibiría en un turno normal empezado ahora, en el orden canónico,
+    con `source: 'builtin' | 'mcp'`. Es el mismo filtro que usa el loop (perfil de sesión, perfil
+    de agente, solo lectura y visión del modelo), no una lista aparte.
+  - `mcp`: cada server con su `status` y cuántas tools anuncia. Sin comando, argumentos ni entorno.
+  - `plugins`: `enabled`, `loaded` (`id`, `source`, manejadores por hook) y `skipped` (`id?`,
+    `reason`). Sin rutas de entrada.
+  - `environments`: los entornos de la config ya resueltos (`tier`, `policy`, `requirePlan`,
+    `readOnly`, `confirmation`, `match`). El contexto activo ya va en la sesión (`activeTarget`,
+    `environment`).
+  - `truncated`: algo pasó de `INSPECT_LIMITS` y se recortó.
+
+  Todo texto libre (descripciones, motivos) sale redactado y recortado a
+  `INSPECT_LIMITS.reasonChars`.
+
+Tests: `stratum-cli/src/daemon/daemon-sessions.test.ts` («perfil de sesión e inspección»),
+`src/protocol/schemas.test.ts`.

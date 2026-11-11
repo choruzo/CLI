@@ -259,6 +259,36 @@ pub async fn desktop_set_read_only(
         .await
 }
 
+/// Modo código: el perfil de sesión (`code`, `infra`, `full`, `auto`…) de una
+/// sesión parada. Qué perfiles existen lo decide el daemon.
+#[tauri::command]
+pub async fn desktop_set_session_profile(
+    state: State<'_, DesktopState>,
+    session_id: String,
+    profile: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::SetSessionProfile {
+            session_id,
+            profile,
+        })
+        .await
+}
+
+/// Modo código: cómo está montada una sesión (perfil, tools, MCP, plugins y
+/// entornos). Solo lectura; no la monta.
+#[tauri::command]
+pub async fn desktop_inspect_session(
+    state: State<'_, DesktopState>,
+    session_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::InspectSession { session_id })
+        .await
+}
+
 /// Modo código: parar un job en segundo plano de una sesión (solo resta).
 #[tauri::command]
 pub async fn desktop_cancel_job(
@@ -322,7 +352,10 @@ pub async fn desktop_browser_screen(
     state: State<'_, DesktopState>,
     session_id: String,
 ) -> Result<Value, CommandError> {
-    state.link.call(CallAction::BrowserScreen { session_id }).await
+    state
+        .link
+        .call(CallAction::BrowserScreen { session_id })
+        .await
 }
 
 /// Modo código: la persona mueve ese navegador (`goto`, `back`, `forward`,

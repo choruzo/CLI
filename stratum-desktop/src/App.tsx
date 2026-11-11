@@ -18,6 +18,7 @@ import {
   pickProjectFolder,
   setAgent,
   setReadOnly,
+  setSessionProfile,
   startCodeConversation,
   type AgentProfile,
 } from './client/code-actions';
@@ -39,6 +40,7 @@ import { BrowserPanel, loadRightPanel, saveRightPanel, type RightPanel } from '.
 import { ChangesPanel } from './components/code/ChangesPanel';
 import { CodeBar, GENERAL_AGENT } from './components/code/CodeBar';
 import { JobsPanel } from './components/code/JobsPanel';
+import { SetupPanel } from './components/code/SetupPanel';
 import { ProjectPicker } from './components/code/ProjectPicker';
 import { ConnectionBanner } from './components/layout/ConnectionIndicator';
 import { FilesPanel } from './components/layout/FilesPanel';
@@ -472,6 +474,20 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
           if (codeLock) return codeLock;
           void setReadOnly(native, selectedId, !codeSession.readOnly);
           return;
+        case 'profile':
+          if (!codeSession || !selectedId) return 'Abre primero una sesión de código.';
+          if (arg) {
+            if (codeLock) return codeLock;
+            void setSessionProfile(native, selectedId, arg.toLowerCase());
+          }
+          openPanel('setup');
+          return;
+        case 'tools':
+        case 'env':
+        case 'plugins':
+          if (!codeSession) return 'Abre primero una sesión de código.';
+          openPanel('setup');
+          return;
         case 'changes':
         case 'undo':
           openPanel('changes');
@@ -546,6 +562,17 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
   );
   const filesKey = `${selectedId}:${snapshot?.seq ?? 0}:${stream.activeTurnId ?? ''}`;
   const contextKey = `${selectedId}:${stream.activeTurnId ?? 'idle'}`;
+  // El montaje se relee cuando cambia algo que lo decide, y al acabar cada turno.
+  const setupKey = codeSession
+    ? [
+        codeSession.sessionProfile,
+        codeSession.agent,
+        codeSession.readOnly,
+        codeSession.model,
+        codeSession.state,
+        stream.activeTurnId ?? 'idle',
+      ].join(':')
+    : '';
   const knownSessions = useMemo(() => new Set(overview.sessions.map((s) => s.id)), [overview.sessions]);
   const gone = selectedId !== null && protocol.listed && connected && !selected;
 
@@ -605,6 +632,19 @@ export function App({ native = tauriBridge }: { native?: NativeBridge }) {
             state={changesState}
             connected={connected}
             undoBlocked={codeLock}
+          />
+        );
+      case 'setup':
+        return (
+          <SetupPanel
+            native={native}
+            sessionId={codeSession ? selectedId : null}
+            refreshKey={setupKey}
+            connected={connected}
+            locked={codeLock}
+            activeTarget={codeSession?.activeTarget ?? null}
+            activeEnvironment={codeSession?.environment?.name ?? null}
+            onProfile={(profile) => selectedId && void setSessionProfile(native, selectedId, profile)}
           />
         );
       case 'jobs':

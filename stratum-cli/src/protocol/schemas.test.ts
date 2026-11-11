@@ -582,6 +582,70 @@ describe('routines.* (M16)', () => {
   });
 });
 
+describe('modo código de Desktop: sessions.setProfile / sessions.inspect', () => {
+  it('inspeccionar solo lee; cambiar el perfil es control y mutante', () => {
+    expect(METHODS['sessions.inspect']).toMatchObject({ capability: 'observe', mutating: false });
+    expect(METHODS['sessions.setProfile']).toMatchObject({ capability: 'control', mutating: true });
+    expect(PARAMS['sessions.inspect'].safeParse({ sessionId: 's' }).success).toBe(true);
+    expect(PARAMS['sessions.inspect'].safeParse({ sessionId: 's', cwd: '/x' }).success).toBe(false);
+    const set = { sessionId: 's', profile: 'infra', operationId: 'op-1' };
+    expect(PARAMS['sessions.setProfile'].safeParse(set).success).toBe(true);
+    expect(PARAMS['sessions.setProfile'].safeParse({ ...set, profile: '' }).success).toBe(false);
+    expect(PARAMS['sessions.setProfile'].safeParse({ ...set, tools: ['exec'] }).success).toBe(
+      false,
+    );
+  });
+
+  it('la inspección: perfil nulo en un agente embebido y enums cerrados', () => {
+    const inspection = {
+      profile: {
+        requested: 'auto',
+        active: 'code',
+        detection: { detected: false, reasons: [] },
+        available: [
+          {
+            name: 'code',
+            description: 'desarrollo',
+            allowedTools: null,
+            hiddenTools: ['ssh_exec'],
+            source: 'builtin',
+          },
+        ],
+      },
+      tools: [
+        { name: 'read_file', source: 'builtin' },
+        { name: 'mcp__docs__search', source: 'mcp' },
+      ],
+      mcp: [{ name: 'docs', status: 'connected', tools: 3 }],
+      plugins: {
+        enabled: true,
+        loaded: [{ id: 'guard', source: 'global', hooks: { 'tool.before': 1 } }],
+        skipped: [{ reason: 'no entry' }],
+      },
+      environments: [
+        {
+          name: 'prod',
+          tier: 'production',
+          policy: 'confirm-always',
+          requirePlan: true,
+          readOnly: false,
+          confirmation: 'typed',
+          match: ['ssh:prod-*'],
+        },
+      ],
+      truncated: false,
+    };
+    const parse = (i: unknown): boolean =>
+      RESULTS['sessions.inspect'].safeParse({ inspection: i }).success;
+    expect(parse(inspection)).toBe(true);
+    expect(parse({ ...inspection, profile: null })).toBe(true);
+    expect(parse({ ...inspection, tools: [{ name: 'x', source: 'otro' }] })).toBe(false);
+    expect(
+      parse({ ...inspection, environments: [{ ...inspection.environments[0], tier: 'otro' }] }),
+    ).toBe(false);
+  });
+});
+
 describe('modo código de Desktop: git.changes / git.diff', () => {
   it('solo leen (observe) y sus parámetros son estrictos', () => {
     expect(METHODS['git.changes']).toMatchObject({ capability: 'observe', mutating: false });

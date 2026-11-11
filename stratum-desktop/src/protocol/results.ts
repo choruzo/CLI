@@ -14,6 +14,7 @@ import type {
   ProtocolBrowserScreen,
   ProtocolBrowserStatus,
   ProtocolChangesSummary,
+  ProtocolSessionInspection,
   ProtocolContextReport,
   ProtocolFileDiff,
   ProtocolDecision,
@@ -125,6 +126,12 @@ export function parseRejected(raw: unknown): { rejected: boolean; message: strin
 export function parseAgents(raw: unknown): ProtocolAgent[] | null {
   const parsed = RESULTS['agents.list'].safeParse(raw);
   return parsed.success ? parsed.data.agents : null;
+}
+
+/** Modo código — `sessions.inspect`: perfil de sesión, tools, MCP, plugins y entornos. */
+export function parseInspection(raw: unknown): ProtocolSessionInspection | null {
+  const parsed = RESULTS['sessions.inspect'].safeParse(raw);
+  return parsed.success ? parsed.data.inspection : null;
 }
 
 /** Modo código — `git.changes`: el working tree del proyecto (`isRepo: false` si no es un repo). */

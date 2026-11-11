@@ -234,6 +234,10 @@ export interface NativeBridge {
   setAgent(sessionId: string, agent: string | null): Promise<unknown>;
   /** Modo código: solo lectura de una sesión parada (`sessions.setReadOnly`). */
   setReadOnly(sessionId: string, readOnly: boolean): Promise<unknown>;
+  /** Modo código: el perfil de sesión de una sesión parada (`sessions.setProfile`). */
+  setSessionProfile(sessionId: string, profile: string): Promise<unknown>;
+  /** Modo código: cómo está montada la sesión (`sessions.inspect`); solo lectura. */
+  inspectSession(sessionId: string): Promise<unknown>;
   /** Modo código: parar un job en segundo plano (`jobs.cancel`). */
   cancelJob(sessionId: string, jobId: string): Promise<unknown>;
   /** Modo código: los cambios del working tree del proyecto (`git.changes`). */
@@ -327,6 +331,9 @@ export const tauriBridge: NativeBridge = {
   listAgents: (cwd) => invoke<unknown>('desktop_list_agents', { cwd: cwd ?? null }),
   setAgent: (sessionId, agent) => invoke<unknown>('desktop_set_agent', { sessionId, agent }),
   setReadOnly: (sessionId, readOnly) => invoke<unknown>('desktop_set_read_only', { sessionId, readOnly }),
+  setSessionProfile: (sessionId, profile) =>
+    invoke<unknown>('desktop_set_session_profile', { sessionId, profile }),
+  inspectSession: (sessionId) => invoke<unknown>('desktop_inspect_session', { sessionId }),
   cancelJob: (sessionId, jobId) => invoke<unknown>('desktop_cancel_job', { sessionId, jobId }),
   gitChanges: (sessionId) => invoke<unknown>('desktop_git_changes', { sessionId }),
   gitDiff: (sessionId, path) => invoke<unknown>('desktop_git_diff', { sessionId, path }),

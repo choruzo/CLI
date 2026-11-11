@@ -301,6 +301,102 @@ describe('stratumd — varias sesiones', () => {
   });
 });
 
+describe('stratumd — perfil de sesión e inspección (modo código)', () => {
+  it('sessions.inspect enseña perfil, tools y entornos; setProfile cambia lo que se ofrece', async () => {
+    t = await startTestDaemon();
+    const cwd = t.project('p', [{ wait: new Promise(() => undefined), then: [] }]);
+    const operator = await t.connect(['operator']);
+    const observer = await t.connect(['observer']);
+    const { session } = await operator.request('sessions.open', { cwd });
+    const live = watch(operator, session.id);
+    await live.untilSnapshot();
+
+    // Leer basta con `observe`.
+    const before = (await observer.request('sessions.inspect', { sessionId: session.id }))
+      .inspection;
+    expect(before.profile).not.toBeNull();
+    expect(before.profile!.available.map((p) => p.name)).toEqual(
+      expect.arrayContaining(['code', 'infra', 'full']),
+    );
+    const names = (i: typeof before): string[] => i.tools.map((x) => x.name);
+    expect(names(before)).toEqual(expect.arrayContaining(['read_file', 'exec']));
+    expect(before.tools.every((x) => x.source === 'builtin')).toBe(true);
+    expect(before.plugins.loaded).toEqual([]);
+    expect(before.truncated).toBe(false);
+
+    // Cambiar el perfil es `control`, se publica y vale desde el próximo turno.
+    expect(
+      await code(
+        observer.request('sessions.setProfile', { sessionId: session.id, profile: 'full' }),
+      ),
+    ).toBe('FORBIDDEN');
+    const changed = await operator.request('sessions.setProfile', {
+      sessionId: session.id,
+      profile: 'full',
+    });
+    expect(changed.session.sessionProfile).toBe('full');
+    await live.until(
+      (e) => e.type === 'session.updated' && e.data.session.sessionProfile === 'full',
+    );
+    const full = (await operator.request('sessions.inspect', { sessionId: session.id })).inspection;
+    expect(full.profile).toMatchObject({ requested: 'full', active: 'full' });
+
+    const back = await operator.request('sessions.setProfile', {
+      sessionId: session.id,
+      profile: 'code',
+    });
+    expect(back.session.sessionProfile).toBe('code');
+    const coded = (await operator.request('sessions.inspect', { sessionId: session.id }))
+      .inspection;
+    // `code` oculta las de infraestructura que `full` ofrece.
+    const hidden = coded.profile!.available.find((p) => p.name === 'code')!.hiddenTools;
+    expect(names(coded).filter((n) => hidden.includes(n))).toEqual([]);
+    expect(names(coded).length).toBeLessThanOrEqual(names(full).length);
+
+    // Solo lectura: lo que no podría ejecutarse deja de ofrecerse.
+    await operator.request('sessions.setReadOnly', { sessionId: session.id, readOnly: true });
+    const ro = (await operator.request('sessions.inspect', { sessionId: session.id })).inspection;
+    expect(names(ro)).toContain('read_file');
+    expect(names(ro)).not.toContain('write_file');
+
+    // Un perfil que no existe no cambia nada.
+    expect(
+      await code(
+        operator.request('sessions.setProfile', { sessionId: session.id, profile: 'no-existe' }),
+      ),
+    ).toBe('INVALID_PARAMS');
+    const { snapshot } = await operator.request('sessions.get', { sessionId: session.id });
+    expect(snapshot.session.sessionProfile).toBe('code');
+
+    // Con un turno en curso el perfil no se toca; inspeccionar sigue valiendo.
+    await operator.request('runs.start', { sessionId: session.id, input: 'no acaba' });
+    expect(
+      await code(
+        operator.request('sessions.setProfile', { sessionId: session.id, profile: 'full' }),
+      ),
+    ).toBe('BUSY');
+    expect(await code(observer.request('sessions.inspect', { sessionId: session.id }))).toBe('OK');
+    expect(await code(observer.request('sessions.inspect', { sessionId: 'no-existe' }))).toBe(
+      'NOT_FOUND',
+    );
+  });
+
+  it('un agente embebido no tiene perfil de sesión', async () => {
+    t = await startTestDaemon();
+    const cwd = t.project('a', [makeTextRound('hola')]);
+    const operator = await t.connect(['operator']);
+    const { session } = await operator.request('sessions.open', { cwd, agent: 'assistant' });
+    const { inspection } = await operator.request('sessions.inspect', { sessionId: session.id });
+    expect(inspection.profile).toBeNull();
+    expect(inspection.tools.map((x) => x.name)).not.toContain('exec');
+    expect(
+      await code(
+        operator.request('sessions.setProfile', { sessionId: session.id, profile: 'full' }),
+      ),
+    ).toBe('INVALID_PARAMS');
+  });
+});
+
 describe('stratumd — servers MCP', () => {
   it('cada sesión lanza sus servers MCP en su propio cwd, no en el del daemon', async () => {
     t = await startTestDaemon();

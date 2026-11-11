@@ -418,10 +418,14 @@ describe('el lado nativo', () => {
       'sessions.context',
       'sessions.get',
       'sessions.history',
+      // Modo código de Desktop: cómo está montada la sesión (solo lectura); Dot no lo tiene.
+      'sessions.inspect',
       'sessions.memory',
       'sessions.open',
       'sessions.setAgent',
       'sessions.setModel',
+      // Modo código de Desktop: el perfil de sesión; Dot no lo tiene en su perfil.
+      'sessions.setProfile',
       'sessions.setReadOnly',
       'skills.list',
       // Panel de trayectoria de Desktop (solo lectura); Dot no la tiene en su perfil.
