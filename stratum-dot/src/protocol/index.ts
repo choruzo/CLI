@@ -40,6 +40,8 @@ export type {
   ProtocolRun,
   ProtocolRunStatus,
   ProtocolSharedImage,
+  ProtocolConnector,
+  ProtocolConnectorsList,
   ProtocolSession,
   ProtocolSessionMemory,
   ProtocolSessionSnapshot,

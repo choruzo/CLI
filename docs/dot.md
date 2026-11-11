@@ -1525,3 +1525,34 @@ empareja chats y los desempareja.
 Tests: `src/app/Telegram.test.tsx`, `crates/dot-link/tests/confirm.rs`
 (`emparejar_telegram_se_confirma_con_lo_que_dice_el_daemon`), unidad en `confirm.rs`, `approver.rs`
 y `link.rs`, y el de arquitectura.
+
+## 23. Conectores del asistente (M20, fase 3)
+
+Dirección en `docs/PRD_STRATUM_DOT.md` §23.11; contrato en `docs/protocol.md` §29
+(`connectors.*`). Dot no escribe ni instala conectores: enseña el catálogo del daemon, activa y
+desactiva.
+
+- **Panel *Connectors*** en la vista *Asistente* (tras Telegram; a 440 px, su pestaña). Pinta lo
+  que contesta `connectors.list`, que se pide al abrir el panel y tras cada orden: sin estado
+  optimista. Por conector: nombre, versión, descripción, estado (*Enabled* / *Disabled*), cada tool
+  con su marca «read-only» o «asks approval», a qué se conecta y lo que necesita. Arriba, el estado
+  de la caja de conectores; con conectores activos y la caja sin correr, el aviso «Enabled
+  connectors are not offered to the assistant until the box is running». Si `readOnly` (fichero
+  dañado o de un Stratum más nuevo), las acciones se apagan con un aviso.
+- **Activar suma capacidad**: *Enable…* llama a `dot_connectors_enable`. El lado nativo abre la
+  **confirmación nativa** (`ApproverAction::EnableConnector`, `is_connector()`, sin sesión), que lee
+  el conector **del daemon** (`connectors.list`, nunca del webview) y enseña nombre, versión,
+  descripción, cada tool con «read-only» o «asks approval» (y «+N more»), «Connects to» y «Needs».
+  Confirmado, vuelve a comprobar que el conector sigue ahí y desactivado y envía
+  `connectors.enable` por la **conexión de aprobador**. Ya activo o fuera del catálogo → `NOT_FOUND`
+  / `no-connector` y no se abre ventana. Sin la autoridad desbloqueada el botón está apagado y se
+  ofrece *Unlock…*. Sin respuesta, «Result unknown» y no se repite. Ningún evento de sesión cancela
+  la ventana.
+- **Desactivar** solo resta: confirmación en la página y `connectors.disable` por la conexión
+  principal (`control`), sin broker.
+- Nativo: `MainMethod::ConnectorsList|ConnectorsDisable` solo en `DOT_METHODS`;
+  `ApproverMethod::ConnectorsEnable`; `valid_connector_id`. Desktop no activa conectores.
+
+Tests: `src/app/Connectors.test.tsx`, `crates/dot-link/tests/confirm.rs`
+(`activar_un_conector_*`), `tests/link.rs` (`los_conectores_se_listan_y_se_desactivan_*`), unidad
+en `confirm.rs`, `approver.rs` y `link.rs`, y el de arquitectura.

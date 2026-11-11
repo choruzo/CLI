@@ -197,10 +197,17 @@ pub enum ApproverAction {
     /// turnos (`sessions.revert`). Pisa ficheros: solo con confirmación nativa,
     /// que enseña lo que leyó del daemon. Nunca con `force`.
     Revert { session_id: String, turns: u8 },
+    /// M20 — activar el conector `connector_id` del asistente (el que se enseñó
+    /// en la confirmación, leído del daemon). Suma capacidad: tools que actúan
+    /// fuera de su caja. No es de una sesión.
+    EnableConnector { connector_id: String },
 }
 
 /// El `request_id` de un emparejamiento (no es una solicitud de una sesión).
 pub const PAIRING_REQUEST: &str = "telegram-pairing";
+
+/// M20 — el `request_id` de activar un conector (no es una solicitud de una sesión).
+pub const CONNECTOR_REQUEST: &str = "connector-enable";
 
 /// El `request_id` de un deshacer turnos (no es una solicitud pendiente).
 pub const REVERT_REQUEST: &str = "session-revert";
@@ -228,6 +235,7 @@ impl ApproverAction {
             ApproverAction::PairTelegram { .. } => "pair-telegram",
             ApproverAction::RevertPlan { .. } => "revert-preview",
             ApproverAction::Revert { .. } => "revert",
+            ApproverAction::EnableConnector { .. } => "enable-connector",
         }
     }
 
@@ -245,12 +253,18 @@ impl ApproverAction {
             // Calcular no toca nada; deshacer pisa ficheros.
             ApproverAction::RevertPlan { .. } => false,
             ApproverAction::Revert { .. } => true,
+            ApproverAction::EnableConnector { .. } => true,
         }
     }
 
     /// M18 — ¿es un emparejamiento (sin sesión ni solicitud pendiente)?
     pub fn is_pairing(&self) -> bool {
         matches!(self, ApproverAction::PairTelegram { .. })
+    }
+
+    /// M20 — ¿es activar un conector (sin sesión ni solicitud pendiente)?
+    pub fn is_connector(&self) -> bool {
+        matches!(self, ApproverAction::EnableConnector { .. })
     }
 
     /// Modo código — ¿es deshacer turnos (sin solicitud pendiente que resolver)?
@@ -271,7 +285,7 @@ impl ApproverAction {
             | ApproverAction::DecidePlan { session_id, .. }
             | ApproverAction::RevertPlan { session_id, .. }
             | ApproverAction::Revert { session_id, .. } => session_id,
-            ApproverAction::PairTelegram { .. } => "",
+            ApproverAction::PairTelegram { .. } | ApproverAction::EnableConnector { .. } => "",
         }
     }
 
@@ -282,6 +296,7 @@ impl ApproverAction {
             ApproverAction::AnswerQuestions { request_id, .. }
             | ApproverAction::DecidePlan { request_id, .. } => request_id,
             ApproverAction::PairTelegram { .. } => PAIRING_REQUEST,
+            ApproverAction::EnableConnector { .. } => CONNECTOR_REQUEST,
             ApproverAction::RevertPlan { .. } | ApproverAction::Revert { .. } => REVERT_REQUEST,
         }
     }
@@ -756,6 +771,15 @@ fn resolve_request(
             Ok((
                 ApproverMethod::ChannelsPairConfirm,
                 json!({ "userId": user_id, "operationId": operation_id }),
+            ))
+        }
+        ApproverAction::EnableConnector { connector_id } => {
+            if !crate::link::valid_connector_id(connector_id) {
+                return Err(invalid("Invalid connector id."));
+            }
+            Ok((
+                ApproverMethod::ConnectorsEnable,
+                json!({ "connectorId": connector_id, "operationId": operation_id }),
             ))
         }
         ApproverAction::RevertPlan { session_id, turns }
@@ -1680,6 +1704,32 @@ mod tests {
         assert!(
             resolve_request(&ApproverAction::PairTelegram { user_id: i64::MIN }, "op").is_err()
         );
+        let (method, params) = resolve_request(
+            &ApproverAction::EnableConnector {
+                connector_id: "renfe".into(),
+            },
+            "op-2",
+        )
+        .unwrap();
+        assert_eq!(method, ApproverMethod::ConnectorsEnable);
+        assert_eq!(
+            params,
+            json!({ "connectorId": "renfe", "operationId": "op-2" })
+        );
+        for bad in [
+            "", "Renfe", "a", "renfe-", "-renfe", "ren fe", "../x", "renfe\n",
+        ] {
+            assert!(
+                resolve_request(
+                    &ApproverAction::EnableConnector {
+                        connector_id: bad.into()
+                    },
+                    "op"
+                )
+                .is_err(),
+                "{bad}"
+            );
+        }
     }
 
     #[tokio::test]

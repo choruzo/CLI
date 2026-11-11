@@ -2484,7 +2484,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      hecha el 2026-11-11* (2b): horarios con fecha y tiempo real tal como llega, salvo las paradas
      `SKIPPED`, contradictorias en ese feed; medido en día de huelga general, falta medirlo en uno
      normal.
-  3. Confirmación nativa y panel en Dot (el protocolo ya está desde la fase 1).
+  3. Confirmación nativa y panel en Dot (el protocolo ya está desde la fase 1). *Hecha el
+     2026-11-11* (`docs/dot.md` §23); falta probarla con la ventana real (E2E).
   4. Secretos y **Home Assistant**. Su conector necesita llegar a la red local desde la caja de
      conectores, que se comprueba en esta fase.
 

@@ -268,6 +268,13 @@ export function fakeNative(): FakeNative {
     })),
     channelsPairConfirm: vi.fn(async (_userId: number): Promise<void> => undefined),
     channelsUnpair: vi.fn(async (_userId: number): Promise<unknown> => ({ removed: true })),
+    connectorsList: vi.fn(async (): Promise<unknown> => ({
+      connectors: [],
+      box: { state: 'absent', reason: null },
+      readOnly: false,
+    })),
+    connectorsEnable: vi.fn(async (_connectorId: string): Promise<void> => undefined),
+    connectorsDisable: vi.fn(async (_connectorId: string): Promise<unknown> => ({})),
     newCompanionConversation: vi.fn(async (): Promise<unknown> => ({})),
     sessionMemory: vi.fn(
       async (_sessionId: string): Promise<unknown> => ({

@@ -9,6 +9,8 @@ import type {
   ProtocolBoxScreen,
   ProtocolBoxStatus,
   ProtocolTelegramStatus,
+  ProtocolConnector,
+  ProtocolConnectorsList,
   ProtocolDecision,
   ProtocolDreamResult,
   ProtocolProposal,
@@ -162,4 +164,16 @@ export function parsePairBegin(raw: unknown): { code: string; link: string; expi
 export function parseUnpair(raw: unknown): boolean | null {
   const parsed = RESULTS['channels.unpair'].safeParse(raw);
   return parsed.success ? parsed.data.removed : null;
+}
+
+/** M20 — `connectors.list`: el catálogo con su estado y el de la caja de conectores. */
+export function parseConnectorsList(raw: unknown): ProtocolConnectorsList | null {
+  const parsed = RESULTS['connectors.list'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** M20 — `connectors.enable|disable`: el conector tal como quedó y si cambió algo (`false`: ya estaba así). */
+export function parseConnectorChange(raw: unknown): { connector: ProtocolConnector; changed: boolean } | null {
+  const parsed = RESULTS['connectors.disable'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
 }

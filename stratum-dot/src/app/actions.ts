@@ -21,6 +21,8 @@ export function describeCommandError(error: CommandError): string {
       return "The session's host is not connected, so it can't be controlled right now.";
     }
     if (error.reason === 'peer-hosted') return 'Only the process hosting this session can do that.';
+    // M20 — el conector ya no está en el catálogo o ya estaba activo.
+    if (error.reason === 'no-connector') return error.message;
     if (error.code === 'STALE_STATE') return 'That run is no longer the current one.';
     if (error.code === 'NOT_FOUND') return 'The session no longer exists.';
     if (error.code === 'FORBIDDEN') return 'This client is not allowed to control runs.';

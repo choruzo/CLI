@@ -51,6 +51,23 @@ pre.action {
   padding-left: 20px;
 }
 
+.tools {
+  margin: 0 0 8px;
+  padding-left: 18px;
+}
+
+.tools li {
+  margin-bottom: 4px;
+}
+
+.tool-ro {
+  color: var(--muted);
+}
+
+.tool-act {
+  color: var(--bad);
+}
+
 .notes {
   margin: 0 0 12px;
   padding-left: 18px;

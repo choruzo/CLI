@@ -94,6 +94,11 @@ pub enum MainMethod {
     ChannelsStatus,
     ChannelsPairBegin,
     ChannelsUnpair,
+    /// M20 (Dot) — los conectores del asistente: el catálogo con su estado, y
+    /// desactivar uno (solo resta). Activar suma capacidad (`connectors.enable`):
+    /// va por [`ApproverMethod`].
+    ConnectorsList,
+    ConnectorsDisable,
     /// Desktop: la traza de una sesión (`trace.records`, `observe`) para el panel
     /// de trayectoria. Solo lectura; la suscripción la lleva el enlace (sigue lo
     /// que se le pide con `LinkHandle::trace`), no una llamada suelta.
@@ -135,7 +140,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 55] = [
+    pub const ALL: [MainMethod; 57] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -176,6 +181,8 @@ impl MainMethod {
         MainMethod::ChannelsStatus,
         MainMethod::ChannelsPairBegin,
         MainMethod::ChannelsUnpair,
+        MainMethod::ConnectorsList,
+        MainMethod::ConnectorsDisable,
         MainMethod::TraceSubscribe,
         MainMethod::TraceUnsubscribe,
         MainMethod::SessionsSetAgent,
@@ -237,6 +244,8 @@ impl WireMethod for MainMethod {
             MainMethod::ChannelsStatus => "channels.status",
             MainMethod::ChannelsPairBegin => "channels.pairBegin",
             MainMethod::ChannelsUnpair => "channels.unpair",
+            MainMethod::ConnectorsList => "connectors.list",
+            MainMethod::ConnectorsDisable => "connectors.disable",
             MainMethod::TraceSubscribe => "trace.subscribe",
             MainMethod::TraceUnsubscribe => "trace.unsubscribe",
             MainMethod::SessionsSetAgent => "sessions.setAgent",
@@ -275,16 +284,20 @@ pub enum ApproverMethod {
     /// así que exige `approve`. El plan (`dryRun`) también va por aquí: el
     /// daemon pide la misma capacidad para calcularlo.
     SessionsRevert,
+    /// M20 — activar un conector del asistente: le suma tools que actúan fuera
+    /// de su caja, así que exige `approve` y la confirmación nativa.
+    ConnectorsEnable,
 }
 
 impl ApproverMethod {
-    pub const ALL: [ApproverMethod; 6] = [
+    pub const ALL: [ApproverMethod; 7] = [
         ApproverMethod::CoreHello,
         ApproverMethod::ApprovalsResolve,
         ApproverMethod::QuestionsAnswer,
         ApproverMethod::PlansDecide,
         ApproverMethod::ChannelsPairConfirm,
         ApproverMethod::SessionsRevert,
+        ApproverMethod::ConnectorsEnable,
     ];
 }
 
@@ -297,6 +310,7 @@ impl WireMethod for ApproverMethod {
             ApproverMethod::PlansDecide => "plans.decide",
             ApproverMethod::ChannelsPairConfirm => "channels.pairConfirm",
             ApproverMethod::SessionsRevert => "sessions.revert",
+            ApproverMethod::ConnectorsEnable => "connectors.enable",
         }
     }
 }
@@ -467,6 +481,8 @@ mod tests {
                 "channels.status",
                 "channels.pairBegin",
                 "channels.unpair",
+                "connectors.list",
+                "connectors.disable",
                 "trace.subscribe",
                 "trace.unsubscribe",
                 "sessions.setAgent",
@@ -495,6 +511,8 @@ mod tests {
             "sessions.detach",
             // Deshacer turnos exige `approve`: solo por la conexión de aprobador.
             "sessions.revert",
+            // Activar un conector suma capacidad: solo por la conexión de aprobador.
+            "connectors.enable",
             "jobs.list",
             // Borra el home de la caja: lo hace la persona desde la CLI, que pide su nombre.
             "box.reset",
@@ -538,7 +556,8 @@ mod tests {
                 "questions.answer",
                 "plans.decide",
                 "channels.pairConfirm",
-                "sessions.revert"
+                "sessions.revert",
+                "connectors.enable"
             ]
         );
         // Separación en los dos sentidos: lo que una tiene, la otra no (salvo el saludo).

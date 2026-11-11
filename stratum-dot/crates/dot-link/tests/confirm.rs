@@ -687,3 +687,87 @@ async fn emparejar_telegram_se_confirma_con_lo_que_dice_el_daemon() {
     assert_eq!(w.fake.telegram_paired(), vec![42]);
     w.quit().await;
 }
+
+/// M20 — activar un conector: la ventana enseña el conector que dice el daemon,
+/// confirmado sale por la conexión de aprobador; cancelar no envía nada y, si
+/// entre tanto ya se activó, tampoco.
+#[tokio::test]
+async fn activar_un_conector_se_confirma_con_lo_que_dice_el_daemon() {
+    let dir = tempfile::tempdir().unwrap();
+    let w = World::new(dir.path()).await;
+    let enable = || ApproverAction::EnableConnector {
+        connector_id: "renfe".into(),
+    };
+    // Fuera del catálogo: ni se abre.
+    let err = w
+        .ask(ApproverAction::EnableConnector {
+            connector_id: "otro".into(),
+        })
+        .await
+        .unwrap()
+        .unwrap_err();
+    assert_eq!(err.reason.as_deref(), Some("no-connector"));
+    assert_eq!(w.person.count(), 0);
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+    // Cancelar: no se envía nada.
+    let task = w.ask(enable());
+    let nonce = w.person.nth(1).await;
+    let view = w.gate.view(&nonce).unwrap();
+    assert_eq!(view.kind, "connector");
+    let facts = view.connector.unwrap();
+    assert_eq!((facts.id.as_str(), facts.name.as_str()), ("renfe", "Renfe"));
+    assert_eq!(facts.hosts, ["ssl.renfe.com"]);
+    assert_eq!(facts.tools.len(), 1);
+    w.gate.cancel(&nonce);
+    let err = task.await.unwrap().unwrap_err();
+    assert_eq!(
+        (err.kind, err.reason.as_deref()),
+        (CommandErrorKind::NotConfirmed, Some("cancelled"))
+    );
+    assert_eq!(w.fake.count("connectors.enable"), 0);
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+    // Confirmar: el daemon recibe `connectors.enable` con ese id.
+    let task = w.ask(enable());
+    let nonce = w.person.nth(2).await;
+    armed().await;
+    w.confirm(&nonce, None).await.unwrap();
+    task.await.unwrap().unwrap();
+    assert_eq!(w.fake.connectors_enabled(), ["renfe"]);
+    assert_eq!(w.fake.count("connectors.enable"), 1);
+    let sent = w
+        .fake
+        .requests()
+        .into_iter()
+        .find(|r| r["method"] == "connectors.enable")
+        .unwrap();
+    assert_eq!(sent["params"]["connectorId"], "renfe");
+    tokio::time::sleep(Duration::from_millis(1_100)).await;
+
+    // Ya activo: no hay nada que activar.
+    let err = w.ask(enable()).await.unwrap().unwrap_err();
+    assert_eq!(err.reason.as_deref(), Some("no-connector"));
+    w.quit().await;
+}
+
+/// M20 — si el conector se activa por otra vía con la ventana abierta, confirmar no envía nada.
+#[tokio::test]
+async fn activar_un_conector_ya_activado_mientras_tanto_no_envia_nada() {
+    let dir = tempfile::tempdir().unwrap();
+    let w = World::new(dir.path()).await;
+    let task = w.ask(ApproverAction::EnableConnector {
+        connector_id: "renfe".into(),
+    });
+    let nonce = w.person.nth(1).await;
+    w.fake.enable_connector("renfe");
+    armed().await;
+    assert!(w.confirm(&nonce, None).await.is_err());
+    let err = task.await.unwrap().unwrap_err();
+    assert_eq!(
+        err.reason.as_deref(),
+        Some(CancelReason::ResolvedElsewhere.name())
+    );
+    assert_eq!(w.fake.count("connectors.enable"), 0);
+    w.quit().await;
+}

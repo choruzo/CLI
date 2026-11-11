@@ -301,6 +301,11 @@ pub enum CallAction {
     ChannelsPairBegin,
     /// M18 — `channels.unpair`: quitar un chat emparejado (solo resta).
     ChannelsUnpair { user_id: i64 },
+    /// M20 — `connectors.list`: el catálogo de conectores con su estado y el de
+    /// la caja de conectores. Solo lectura.
+    ConnectorsList,
+    /// M20 — `connectors.disable`: desactivar un conector (solo resta).
+    ConnectorsDisable { connector_id: String },
     /// Desktop (modo código) — `sessions.setAgent`: el perfil de agente de código
     /// de una sesión parada; `None` lo quita (`agent: null`).
     SetAgent {
@@ -423,6 +428,8 @@ impl CallAction {
             CallAction::ChannelsStatus => "channels-status",
             CallAction::ChannelsPairBegin => "channels-pair-begin",
             CallAction::ChannelsUnpair { .. } => "channels-unpair",
+            CallAction::ConnectorsList => "connectors-list",
+            CallAction::ConnectorsDisable { .. } => "connectors-disable",
             CallAction::SetAgent { .. } => "set-agent",
             CallAction::SetReadOnly { .. } => "set-read-only",
             CallAction::CancelJob { .. } => "cancel-job",
@@ -464,6 +471,7 @@ impl CallAction {
                 | CallAction::NewCompanionConversation
                 | CallAction::ChannelsPairBegin
                 | CallAction::ChannelsUnpair { .. }
+                | CallAction::ConnectorsDisable { .. }
                 | CallAction::SetAgent { .. }
                 | CallAction::SetReadOnly { .. }
                 | CallAction::CancelJob { .. }

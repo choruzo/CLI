@@ -1093,3 +1093,65 @@ async fn cada_cliente_ve_la_memoria_de_su_agente_y_solo_esa() {
     desktop.quit().await;
     rig.quit().await;
 }
+
+/// M20: listar y desactivar conectores van por la conexión principal; activar no
+/// (es del broker de aprobador). Desktop no los tiene.
+#[tokio::test(flavor = "multi_thread")]
+async fn los_conectores_se_listan_y_se_desactivan_por_la_principal() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.enable_connector("renfe");
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    let list = rig.link.call(CallAction::ConnectorsList).await.unwrap();
+    assert_eq!(list["connectors"][0]["enabled"], true);
+    assert_eq!(list["box"]["state"], "running");
+    let off = rig
+        .link
+        .call(CallAction::ConnectorsDisable {
+            connector_id: "renfe".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(off["changed"], true);
+    assert!(fake.connectors_enabled().is_empty());
+    // Otra vez: ya estaba desactivado.
+    let again = rig
+        .link
+        .call(CallAction::ConnectorsDisable {
+            connector_id: "renfe".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(again["changed"], false);
+
+    let requests = fake.requests();
+    let sent = |m: &str| requests.iter().find(|r| r["method"] == m).unwrap().clone();
+    assert!(sent("connectors.list")["params"]
+        .get("operationId")
+        .is_none());
+    assert!(sent("connectors.disable")["params"]["operationId"]
+        .as_str()
+        .unwrap()
+        .starts_with("dot-"));
+    // Un id mal formado no sale.
+    let bad = rig
+        .link
+        .call(CallAction::ConnectorsDisable {
+            connector_id: "../x".into(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(bad.kind, CommandErrorKind::Invalid);
+    // Desktop no tiene conectores.
+    let before = fake.requests().len();
+    assert!(desktop.link.call(CallAction::ConnectorsList).await.is_err());
+    assert_eq!(fake.requests().len(), before);
+    assert_eq!(fake.count("connectors.enable"), 0);
+
+    desktop.quit().await;
+    rig.quit().await;
+}

@@ -160,6 +160,9 @@ const COMMANDS = [
   'dot_channels_pair_confirm',
   'dot_channels_status',
   'dot_channels_unpair',
+  'dot_connectors_disable',
+  'dot_connectors_enable',
+  'dot_connectors_list',
   'dot_decide_plan',
   'dot_deny',
   'dot_focus_session',
@@ -236,6 +239,9 @@ describe('la frontera con el lado nativo', () => {
         expect(setReadOnly).toContain('MainMethod::SessionsSetReadOnly');
         text = text.replace(setReadOnly, '');
       }
+      // M20: la confirmación de un conector LEE `readOnly` de lo que contesta el
+      // daemon (`connectors.list`); no es un parámetro de abrir sesión.
+      if (file.endsWith(`${sep}confirm.rs`)) text = text.replace(/"readOnly"/g, '');
       expect(/"env"|"resume"\s*:|"readOnly"|"sessionProfile"/.test(text), rel(file)).toBe(false);
       // El directorio viaja como texto: Dot no lo abre, no lo lista y no lo comprueba.
       if (!file.endsWith(`${sep}discovery.rs`) && !file.endsWith(`${sep}log.rs`) && !file.endsWith(`${sep}launcher.rs`)) {
@@ -387,6 +393,9 @@ describe('el lado nativo', () => {
       'channels.pairBegin',
       'channels.status',
       'channels.unpair',
+      // M20: los conectores del asistente (listar y desactivar; activar va por el aprobador).
+      'connectors.disable',
+      'connectors.list',
       'core.hello',
       'events.subscribe',
       'events.unsubscribe',
@@ -460,6 +469,8 @@ describe('el lado nativo', () => {
       'ChannelsPairBegin',
       'ChannelsStatus',
       'ChannelsUnpair',
+      'ConnectorsDisable',
+      'ConnectorsList',
       'CoreHello',
       'EventsSubscribe',
       'EventsUnsubscribe',
@@ -498,6 +509,8 @@ describe('el lado nativo', () => {
     expect(approver).toEqual([
       'approvals.resolve',
       'channels.pairConfirm',
+      // M20: activar un conector suma capacidad.
+      'connectors.enable',
       'core.hello',
       'plans.decide',
       'questions.answer',
@@ -506,7 +519,7 @@ describe('el lado nativo', () => {
     const all = [...wire.matchAll(/=> "([a-z]+\.[a-zA-Z]+)"/g)].map((m) => m[1]!);
     expect(all.length).toBe(main.length + approver.length);
     // Fuera de `wire.rs` nadie escribe un método a mano.
-    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box|routines|channels|browser|git)\.[a-zA-Z]+"/;
+    const method = /"(core|sessions|runs|approvals|questions|plans|jobs|host|memory|agents|models|trace|box|routines|channels|connectors|browser|git)\.[a-zA-Z]+"/;
     const strays = rustShipped.filter((f) => !f.endsWith(`${sep}wire.rs`) && method.test(rustCode(f)));
     expect(strays.map(rel)).toEqual([]);
   });

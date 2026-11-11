@@ -56,7 +56,8 @@ use tokio::time::Instant;
 
 use crate::approver::{
     ApproverAction, ApproverHandle, ApproverStatus, ConfirmedAction, LockReason, QuestionAnswer,
-    GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS, PAIRING_REQUEST, REVERT_REQUEST,
+    CONNECTOR_REQUEST, GRANT_MINUTES, MAX_ANSWER_CHARS, MAX_PHRASE_CHARS, PAIRING_REQUEST,
+    REVERT_REQUEST,
 };
 use crate::link::LinkHandle;
 use crate::log::Logger;
@@ -219,6 +220,35 @@ pub struct PairingFacts {
     pub bot: Option<String>,
 }
 
+/// M20 — una tool del conector que se va a activar, como la dice el daemon.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorToolFacts {
+    pub name: String,
+    /// Solo lee: no pide aprobación. El resto la pide cada vez.
+    pub read_only: bool,
+    pub summary: String,
+}
+
+/// M20 — el conector que se va a activar, como lo dice el daemon (`connectors.list`).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ConnectorFacts {
+    pub id: String,
+    pub name: String,
+    pub version: String,
+    pub description: String,
+    pub tools: Vec<ConnectorToolFacts>,
+    /// Tools que no se enseñan (por encima de [`MAX_CONNECTOR_ITEMS`]).
+    pub more_tools: usize,
+    pub hosts: Vec<String>,
+    /// Lo que pide además (claves, tokens): solo el nombre.
+    pub needs: Vec<String>,
+}
+
+/// M20 — cuántas tools, hosts o necesidades de un conector se enseñan, como mucho.
+pub const MAX_CONNECTOR_ITEMS: usize = 24;
+
 /// Modo código — lo que haría deshacer turnos, como lo calcula el daemon. Cada
 /// lista, recortada a [`MAX_REVERT_PATHS`] (`more_*`: cuántas no se enseñan).
 #[derive(Debug, Clone, PartialEq, Eq, Serialize)]
@@ -263,6 +293,8 @@ pub struct ConfirmationView {
     pub pairing: Option<PairingFacts>,
     /// Modo código — con `kind: 'revert'`.
     pub revert: Option<RevertFacts>,
+    /// M20 — con `kind: 'connector'`.
+    pub connector: Option<ConnectorFacts>,
     /// Avisos que la persona tiene que leer (qué abarca `allow-all`, etc.).
     pub notes: Vec<String>,
     /// Hasta cuándo vale (ms Unix, reloj local).
@@ -382,6 +414,7 @@ fn kind_of(action: &ApproverAction) -> (&'static str, &'static str) {
         ApproverAction::DecidePlan { .. } => ("plans", "plan"),
         ApproverAction::PairTelegram { .. } => ("", "telegram-pairing"),
         ApproverAction::RevertPlan { .. } | ApproverAction::Revert { .. } => ("", "revert"),
+        ApproverAction::EnableConnector { .. } => ("", "connector"),
     }
 }
 
@@ -409,6 +442,107 @@ fn find_candidate(status: &Value, user_id: i64) -> Option<(&Value, Option<String
                 .and_then(Value::as_str)
                 .map(|s| clip(s, 64)),
         )
+    })
+}
+
+fn no_connector() -> CommandError {
+    CommandError {
+        kind: CommandErrorKind::Rejected,
+        code: Some("NOT_FOUND".into()),
+        reason: Some("no-connector".into()),
+        message: "That connector cannot be enabled (it is not in the catalog, or it is already enabled). Nothing was sent.".into(),
+    }
+}
+
+/// M20 — el conector `id` de `connectors.list`, si existe y aún no está activo.
+fn find_connector<'a>(list: &'a Value, id: &str) -> Option<&'a Value> {
+    list.get("connectors")?.as_array()?.iter().find(|c| {
+        c.get("id").and_then(Value::as_str) == Some(id)
+            && c.get("enabled").and_then(Value::as_bool) == Some(false)
+    })
+}
+
+/// M20 — la confirmación de activar un conector, con lo que dice el daemon. Puro.
+pub fn build_connector_view(
+    action: &ApproverAction,
+    list: &Value,
+    expires_at: u64,
+    arm_ms: u64,
+) -> Result<ConfirmationView, CommandError> {
+    let ApproverAction::EnableConnector { connector_id } = action else {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "This is not a connector.",
+        ));
+    };
+    let c = find_connector(list, connector_id).ok_or_else(no_connector)?;
+    let empty = Vec::new();
+    let array = |key: &str| c.get(key).and_then(Value::as_array).unwrap_or(&empty);
+    let all_tools = array("tools");
+    let tools: Vec<ConnectorToolFacts> = all_tools
+        .iter()
+        .take(MAX_CONNECTOR_ITEMS)
+        .map(|t| ConnectorToolFacts {
+            name: field(t, "name", 64).unwrap_or_else(|| "?".into()),
+            // Sin el dato, se enseña como una tool que pide aprobación: nunca de menos.
+            read_only: t.get("readOnly").and_then(Value::as_bool) == Some(true),
+            summary: field(t, "summary", 200).unwrap_or_default(),
+        })
+        .collect();
+    let hosts: Vec<String> = array("hosts")
+        .iter()
+        .take(MAX_CONNECTOR_ITEMS)
+        .filter_map(|h| h.as_str().map(|s| clip(s, 253)))
+        .collect();
+    let needs: Vec<String> = array("needs")
+        .iter()
+        .take(MAX_CONNECTOR_ITEMS)
+        .filter_map(|n| field(n, "name", 64))
+        .collect();
+    let acting = tools.iter().filter(|t| !t.read_only).count();
+    let mut notes = vec![
+        "The assistant will have these tools from its next message. Read-only tools run without asking; the others ask you each time (or for a while, if you allow it).".to_string(),
+        "The connector runs in the connectors box, not on this computer, and connects to the hosts listed. You can disable it at any time.".to_string(),
+    ];
+    if acting > 0 {
+        notes.push(format!(
+            "{acting} of its tools act outside the box: they ask for approval before they run."
+        ));
+    }
+    if !needs.is_empty() {
+        notes.push("It needs more setup before it works: see what it needs below.".to_string());
+    }
+    Ok(ConfirmationView {
+        kind: "connector",
+        action: "Enable this connector",
+        request_id: CONNECTOR_REQUEST.into(),
+        run_id: None,
+        session: SessionFacts {
+            id: String::new(),
+            title: None,
+            agent: None,
+            model: None,
+            cwd: None,
+            host: None,
+        },
+        approval: None,
+        answers: Vec::new(),
+        plan: None,
+        pairing: None,
+        revert: None,
+        connector: Some(ConnectorFacts {
+            id: connector_id.clone(),
+            name: field(c, "name", 60).unwrap_or_else(|| connector_id.clone()),
+            version: field(c, "version", 32).unwrap_or_default(),
+            description: field(c, "description", 300).unwrap_or_default(),
+            more_tools: all_tools.len().saturating_sub(MAX_CONNECTOR_ITEMS),
+            tools,
+            hosts,
+            needs,
+        }),
+        notes,
+        expires_at,
+        arm_ms,
     })
 }
 
@@ -451,6 +585,7 @@ pub fn build_pairing_view(
             bot,
         }),
         revert: None,
+        connector: None,
         notes: vec![
             "Check that this is your own Telegram account: whoever it is will be able to talk to the assistant and approve its requests from Telegram (approve once or deny; requests a policy reserves for Dot still need Dot).".into(),
             "You can unpair it at any time, from Dot or by sending /unpair in that chat.".into(),
@@ -586,6 +721,7 @@ pub fn build_view(
         plan: None,
         pairing: None,
         revert: None,
+        connector: None,
         notes: Vec::new(),
         expires_at,
         arm_ms,
@@ -824,6 +960,7 @@ pub fn build_revert_view(
         answers: Vec::new(),
         plan: None,
         pairing: None,
+        connector: None,
         revert: Some(RevertFacts {
             turns: *turns,
             turn_numbers: plan
@@ -957,7 +1094,7 @@ impl ConfirmGate {
     /// Se llama con cada [`DotEvent`] (de la conexión principal y del broker);
     /// solo mira, sin esperar a nada.
     pub fn on_event(&self, event: &DotEvent) {
-        let (session_id, request_id, list, pairing, revert) = {
+        let (session_id, request_id, list, global, revert) = {
             let state = self.lock();
             let Some(ticket) = state.ticket.as_ref() else {
                 return;
@@ -966,7 +1103,8 @@ impl ConfirmGate {
                 ticket.action.session_id().to_string(),
                 ticket.view.request_id.clone(),
                 kind_of(&ticket.action).0,
-                ticket.action.is_pairing(),
+                // Emparejar y activar un conector no son de una sesión.
+                ticket.action.is_pairing() || ticket.action.is_connector(),
                 ticket.action.is_revert(),
             )
         };
@@ -974,7 +1112,7 @@ impl ConfirmGate {
             // Un emparejamiento no es de una sesión: no lo cancela nada de ellas
             // (`channels.*` no tiene eventos; se vuelve a comprobar al confirmar).
             DotEvent::Sessions { .. } | DotEvent::Snapshot { .. } | DotEvent::Events { .. }
-                if pairing =>
+                if global =>
             {
                 None
             }
@@ -1080,6 +1218,19 @@ impl ConfirmGate {
             let view = build_pairing_view(
                 action,
                 &status,
+                expires_at,
+                self.timings.arm_delay.as_millis() as u64,
+            )?;
+            return Ok((view, action.clone()));
+        }
+        if action.is_connector() {
+            let list = link
+                .call(CallAction::ConnectorsList)
+                .await
+                .map_err(unreadable)?;
+            let view = build_connector_view(
+                action,
+                &list,
                 expires_at,
                 self.timings.arm_delay.as_millis() as u64,
             )?;
@@ -1377,6 +1528,8 @@ impl ConfirmGate {
         // Lo que se confirma sigue ahí: la solicitud pendiente o, al emparejar, el mismo candidato.
         let check = if action.is_pairing() {
             CallAction::ChannelsStatus
+        } else if action.is_connector() {
+            CallAction::ConnectorsList
         } else {
             CallAction::ListPending {
                 session_id: action.session_id().to_string(),
@@ -1392,6 +1545,9 @@ impl ConfirmGate {
         let still = match &action {
             ApproverAction::PairTelegram { user_id } => {
                 find_candidate(&listing, *user_id).is_some()
+            }
+            ApproverAction::EnableConnector { connector_id } => {
+                find_connector(&listing, connector_id).is_some()
             }
             _ => find_request(&listing, &action).is_some(),
         };
@@ -1517,6 +1673,77 @@ mod tests {
         }
         // Una aprobación no se arma como emparejamiento.
         assert!(build_pairing_view(&approve("s", "a", false), &status, 9, 800).is_err());
+    }
+
+    fn connectors_list(enabled: bool) -> Value {
+        json!({
+            "connectors": [{
+                "id": "renfe", "version": "1.1.0", "name": "Renfe",
+                "description": "Trenes de Renfe.",
+                "hosts": ["ssl.renfe.com", "gtfsrt.renfe.com"],
+                "needs": [{ "name": "HA_TOKEN", "description": "token" }],
+                "tools": [
+                    { "name": "cercanias_salidas", "readOnly": true, "summary": "Salidas." },
+                    { "name": "encender", "readOnly": false, "summary": "Actúa." },
+                    { "name": "sin_dato", "summary": "Sin readOnly." }
+                ],
+                "enabled": enabled, "enabledAt": null
+            }],
+            "box": { "state": "running", "reason": null },
+            "readOnly": false
+        })
+    }
+
+    #[test]
+    fn activar_un_conector_ensena_lo_que_dice_el_daemon() {
+        let enable = ApproverAction::EnableConnector {
+            connector_id: "renfe".into(),
+        };
+        let view = build_connector_view(&enable, &connectors_list(false), 9, 800).unwrap();
+        assert_eq!(view.kind, "connector");
+        assert_eq!(view.request_id, CONNECTOR_REQUEST);
+        assert!(view.session.id.is_empty());
+        let facts = view.connector.unwrap();
+        assert_eq!(facts.id, "renfe");
+        assert_eq!(facts.name, "Renfe");
+        assert_eq!(facts.hosts, ["ssl.renfe.com", "gtfsrt.renfe.com"]);
+        assert_eq!(facts.needs, ["HA_TOKEN"]);
+        let ro: Vec<bool> = facts.tools.iter().map(|t| t.read_only).collect();
+        // Sin el dato, nunca se enseña como de solo lectura.
+        assert_eq!(ro, [true, false, false]);
+        assert!(view
+            .notes
+            .iter()
+            .any(|n| n.contains("2 of its tools act outside")));
+        assert!(view.notes.iter().any(|n| n.contains("more setup")));
+        // Ya activo, otro id o una lista rota: no hay nada que activar.
+        for (list, id) in [
+            (connectors_list(true), "renfe"),
+            (connectors_list(false), "open-meteo"),
+            (json!({}), "renfe"),
+        ] {
+            let other = ApproverAction::EnableConnector {
+                connector_id: id.into(),
+            };
+            let err = build_connector_view(&other, &list, 9, 800).unwrap_err();
+            assert_eq!(err.reason.as_deref(), Some("no-connector"));
+        }
+        // Una aprobación no se arma como conector.
+        assert!(
+            build_connector_view(&approve("s", "a", false), &connectors_list(false), 9, 800)
+                .is_err()
+        );
+    }
+
+    #[test]
+    fn los_avisos_de_sesion_no_cancelan_activar_un_conector() {
+        let enable = ApproverAction::EnableConnector {
+            connector_id: "renfe".into(),
+        };
+        assert!(enable.is_connector() && enable.needs_confirmation());
+        assert!(enable.session_id().is_empty());
+        assert_eq!(enable.request_id(), CONNECTOR_REQUEST);
+        assert_eq!(kind_of(&enable), ("", "connector"));
     }
 
     #[test]

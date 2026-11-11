@@ -94,6 +94,44 @@
       fact(facts, 'Telegram id', v.pairing.userId, true);
       fact(facts, 'Bot', v.pairing.bot ? '@' + v.pairing.bot : null, true);
       document.body.classList.add('danger');
+    } else if (v.connector) {
+      // M20 — activar un conector: no es de ninguna sesión.
+      fact(facts, 'Connector', v.connector.name + (v.connector.version ? ' ' + v.connector.version : ''));
+      fact(facts, 'Id', v.connector.id, true);
+      fact(facts, 'What it does', v.connector.description);
+      if (v.connector.hosts && v.connector.hosts.length > 0) {
+        fact(facts, 'Connects to', v.connector.hosts.join(', '), true);
+      }
+      if (v.connector.needs && v.connector.needs.length > 0) {
+        fact(facts, 'Needs', v.connector.needs.join(', '), true);
+      }
+      const tools = $('connector-tools');
+      v.connector.tools.forEach(function (t) {
+        const li = document.createElement('li');
+        const mark = document.createElement('strong');
+        mark.className = t.readOnly ? 'tool-ro' : 'tool-act';
+        mark.textContent = t.readOnly ? 'read-only' : 'asks approval';
+        const name = document.createElement('span');
+        name.className = 'mono';
+        name.textContent = ' ' + t.name;
+        li.appendChild(mark);
+        li.appendChild(name);
+        if (t.summary) {
+          const sum = document.createElement('div');
+          sum.className = 'muted small';
+          sum.textContent = t.summary;
+          li.appendChild(sum);
+        }
+        tools.appendChild(li);
+      });
+      if (v.connector.moreTools > 0) {
+        const li = document.createElement('li');
+        li.className = 'muted';
+        li.textContent = '+' + v.connector.moreTools + ' more';
+        tools.appendChild(li);
+      }
+      $('connector').hidden = false;
+      document.body.classList.add('danger');
     } else {
       fact(facts, 'Session', session.title || session.agent || session.id);
       fact(facts, 'Directory', session.cwd, true);

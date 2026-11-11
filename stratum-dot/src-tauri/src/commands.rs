@@ -447,6 +447,39 @@ pub async fn dot_channels_unpair(
         .await
 }
 
+/// M20 — el catálogo de conectores del asistente con su estado y el de la caja
+/// de conectores. Solo lectura; el `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_connectors_list(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::ConnectorsList).await
+}
+
+/// M20 — desactivar un conector. Solo resta: conexión principal, sin broker.
+#[tauri::command]
+pub async fn dot_connectors_disable(
+    state: State<'_, DotState>,
+    connector_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::ConnectorsDisable { connector_id })
+        .await
+}
+
+/// M20 — activar un conector: suma capacidad (tools que actúan fuera de su caja),
+/// así que pasa por la confirmación nativa, que lee el conector **del daemon**, y
+/// sale por el broker de aprobador.
+#[tauri::command]
+pub async fn dot_connectors_enable<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+    connector_id: String,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    resolve(app, &state, ApproverAction::EnableConnector { connector_id }).await
+}
+
 /// M17 — la memoria de sesión (M11) de una conversación, en solo lectura.
 #[tauri::command]
 pub async fn dot_session_memory(

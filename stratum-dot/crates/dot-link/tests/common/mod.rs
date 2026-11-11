@@ -125,6 +125,8 @@ struct State {
     /// M18 — el candidato de Telegram (id, nombre) y los emparejados.
     telegram_candidate: Option<(i64, String)>,
     telegram_paired: Vec<i64>,
+    /// M20 — los conectores activos (el catálogo del daemon de pruebas es fijo: `renfe`).
+    connectors_enabled: Vec<String>,
     next_sub: u64,
     next_conn: u64,
     tasks: Vec<JoinHandle<()>>,
@@ -210,6 +212,7 @@ impl Fake {
                     endpoint_pid: None,
                     telegram_candidate: None,
                     telegram_paired: Vec::new(),
+                    connectors_enabled: Vec::new(),
                     next_sub: 1,
                     next_conn: 1,
                     tasks: Vec::new(),
@@ -250,6 +253,19 @@ impl Fake {
 
     pub fn telegram_paired(&self) -> Vec<i64> {
         self.lock().telegram_paired.clone()
+    }
+
+    /// M20 — los conectores activos, por id.
+    pub fn connectors_enabled(&self) -> Vec<String> {
+        self.lock().connectors_enabled.clone()
+    }
+
+    /// M20 — activa un conector por su cuenta (como si se hiciera desde la CLI).
+    pub fn enable_connector(&self, id: &str) {
+        let mut state = self.lock();
+        if !state.connectors_enabled.iter().any(|c| c == id) {
+            state.connectors_enabled.push(id.to_string());
+        }
     }
 
     pub fn add_pending(&self, req: PendingReq) {
@@ -873,6 +889,42 @@ impl Fake {
                 }
             }
             "channels.pairBegin" | "channels.unpair" => vec![ok(json!({ "echo": method }))],
+            // M20: un catálogo fijo (`renfe`) con estado en memoria.
+            "connectors.list" => vec![ok(connectors_list(&state.connectors_enabled))],
+            "connectors.disable" => {
+                let id = params["connectorId"].as_str().unwrap_or("");
+                if id != "renfe" {
+                    return vec![err("NOT_FOUND", json!({ "reason": "no-connector" }))];
+                }
+                let changed = state.connectors_enabled.iter().any(|c| c == id);
+                state.connectors_enabled.retain(|c| c != id);
+                vec![ok(json!({
+                    "connector": connector_json(&state.connectors_enabled),
+                    "changed": changed
+                }))]
+            }
+            "connectors.enable" => {
+                let can = state
+                    .conns
+                    .iter()
+                    .find(|c| c.id == conn_id)
+                    .is_some_and(|c| c.capabilities.iter().any(|k| k == "approve"));
+                if !can {
+                    return vec![err("FORBIDDEN", json!({ "capability": "approve" }))];
+                }
+                let id = params["connectorId"].as_str().unwrap_or("");
+                if id != "renfe" {
+                    return vec![err("NOT_FOUND", json!({ "reason": "no-connector" }))];
+                }
+                let changed = !state.connectors_enabled.iter().any(|c| c == id);
+                if changed {
+                    state.connectors_enabled.push(id.to_string());
+                }
+                vec![ok(json!({
+                    "connector": connector_json(&state.connectors_enabled),
+                    "changed": changed
+                }))]
+            }
             "routines.list" => vec![ok(json!({ "routines": [], "readOnly": false }))],
             "routines.add" | "routines.update" | "routines.remove" | "routines.run"
             | "grants.revoke" | "memory.decisions" | "memory.forget" => {
@@ -1159,4 +1211,25 @@ pub fn fast_confirm() -> dot_link::ConfirmTimings {
         arm_delay: Duration::from_millis(50),
         cooldown: Duration::from_millis(100),
     }
+}
+
+/// M20 — el conector del daemon de pruebas, como lo cuenta `connectors.list`.
+fn connector_json(enabled: &[String]) -> Value {
+    let on = enabled.iter().any(|c| c == "renfe");
+    json!({
+        "id": "renfe", "version": "1.1.0", "name": "Renfe",
+        "description": "Trenes de Renfe.",
+        "hosts": ["ssl.renfe.com"],
+        "needs": [],
+        "tools": [{ "name": "cercanias_salidas", "readOnly": true, "summary": "Salidas." }],
+        "enabled": on, "enabledAt": if on { json!(1) } else { Value::Null }
+    })
+}
+
+fn connectors_list(enabled: &[String]) -> Value {
+    json!({
+        "connectors": [connector_json(enabled)],
+        "box": { "state": "running", "reason": null },
+        "readOnly": false
+    })
 }

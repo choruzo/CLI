@@ -194,6 +194,9 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::ChannelsStatus,
     MainMethod::ChannelsPairBegin,
     MainMethod::ChannelsUnpair,
+    // M20: los conectores del asistente (activar va por el broker de aprobador).
+    MainMethod::ConnectorsList,
+    MainMethod::ConnectorsDisable,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -785,6 +788,16 @@ fn not_connected() -> CommandError {
     )
 }
 
+/// M20 — el id de un conector, como lo acepta el protocolo (`[a-z][a-z0-9-]{1,30}[a-z0-9]`).
+pub fn valid_connector_id(id: &str) -> bool {
+    let b = id.as_bytes();
+    (3..=32).contains(&b.len())
+        && b[0].is_ascii_lowercase()
+        && (b[b.len() - 1].is_ascii_lowercase() || b[b.len() - 1].is_ascii_digit())
+        && b.iter()
+            .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || *c == b'-')
+}
+
 fn valid_id(id: &str) -> bool {
     !id.is_empty() && id.chars().count() <= MAX_ID_CHARS
 }
@@ -1213,6 +1226,16 @@ fn call_request_as(
             Ok((
                 MainMethod::ChannelsUnpair,
                 json!({ "userId": user_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::ConnectorsList => Ok((MainMethod::ConnectorsList, json!({}))),
+        CallAction::ConnectorsDisable { connector_id } => {
+            if !valid_connector_id(connector_id) {
+                return Err(invalid("Invalid connector id."));
+            }
+            Ok((
+                MainMethod::ConnectorsDisable,
+                json!({ "connectorId": connector_id, "operationId": operation_id }),
             ))
         }
         CallAction::MemoryForget { decision_id } => {
@@ -3540,6 +3563,24 @@ mod tests {
 
         // M18: el canal de Telegram. Estado sin parámetros; pedir código y
         // desemparejar cambian algo; emparejar de verdad no está en la principal.
+        // M20 — listar (solo lectura) y desactivar (solo resta) van por la principal.
+        let (method, _) = call_request(&CallAction::ConnectorsList, "op").unwrap();
+        assert_eq!(method, MainMethod::ConnectorsList);
+        assert!(!CallAction::ConnectorsList.mutating());
+        let disable = CallAction::ConnectorsDisable {
+            connector_id: "renfe".into(),
+        };
+        let (method, params) = call_request(&disable, "op-9").unwrap();
+        assert_eq!(method, MainMethod::ConnectorsDisable);
+        assert_eq!(
+            params,
+            json!({ "connectorId": "renfe", "operationId": "op-9" })
+        );
+        assert!(disable.mutating());
+        let bad = CallAction::ConnectorsDisable {
+            connector_id: "../etc".into(),
+        };
+        assert!(call_request(&bad, "op").is_err());
         let (method, params) = call_request(&CallAction::ChannelsStatus, "op").unwrap();
         assert_eq!(method, MainMethod::ChannelsStatus);
         assert_eq!(params, json!({}));

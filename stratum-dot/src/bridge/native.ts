@@ -288,6 +288,15 @@ export interface NativeBridge {
   channelsPairConfirm(userId: number): Promise<void>;
   /** M18 — desemparejar un chat. Solo resta: sin confirmación nativa. */
   channelsUnpair(userId: number): Promise<unknown>;
+  /** M20 — el catálogo de conectores del asistente con su estado y el de la caja de conectores. */
+  connectorsList(): Promise<unknown>;
+  /**
+   * M20 — activar un conector. Suma capacidad: abre la confirmación nativa, que
+   * lee el conector del daemon, y sale por la autoridad de aprobar.
+   */
+  connectorsEnable(connectorId: string): Promise<void>;
+  /** M20 — desactivar un conector. Solo resta: sin confirmación nativa. */
+  connectorsDisable(connectorId: string): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
@@ -379,6 +388,9 @@ export const tauriBridge: NativeBridge = {
   channelsPairBegin: () => invoke<unknown>('dot_channels_pair_begin'),
   channelsPairConfirm: (userId) => invoke('dot_channels_pair_confirm', { userId }),
   channelsUnpair: (userId) => invoke<unknown>('dot_channels_unpair', { userId }),
+  connectorsList: () => invoke<unknown>('dot_connectors_list'),
+  connectorsEnable: (connectorId) => invoke('dot_connectors_enable', { connectorId }),
+  connectorsDisable: (connectorId) => invoke<unknown>('dot_connectors_disable', { connectorId }),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
