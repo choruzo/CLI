@@ -4,9 +4,9 @@ Cambios de cada versión de la app de escritorio, de la más reciente a la más 
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
-## [Sin publicar]
+## [0.11.0] — 2026-11-11
 
-Necesita un `stratumd` con `git.changes`, `git.diff`, `browser.screen`, `browser.navigate`, `sessions.setProfile`, `sessions.inspect`, `sessions.ask`, `sessions.turns`, `jobs.background` y `memory.documents` (la CLI de esta misma rama).
+Acompaña a **Stratum CLI 0.15.0**, que es la que conviene tener instalada: el modo código, el navegador y los cambios sugeridos de la memoria usan métodos del daemon que una CLI anterior no tiene.
 
 ### Añadido
 - **Modo código**: un conmutador **Chat | Código** centrado en la barra de título (`Ctrl+1` / `Ctrl+2`). En Código, Desktop abre sesiones del agente de código de la CLI en la carpeta de proyecto que elijas (con las recientes a mano), con su perfil de agente y el modo de solo lectura en una barra sobre la conversación. Cada modo lista sus propias sesiones.
@@ -21,6 +21,13 @@ Necesita un `stratumd` con `git.changes`, `git.diff`, `browser.screen`, `browser
 - **Deshacer desde un turno** (modo código): el panel de cambios lista los turnos que cambiaron ficheros, con su hora y cuántos, y deshace desde el que elijas hasta ahora (`/rewind`). Sigue pidiendo desbloqueo y confirmación en la ventana nativa.
 - **Memoria del proyecto** (modo código): en *Contexto y memoria*, las decisiones que el agente recuerda del proyecto de la sesión —ver, buscar y olvidar— y su `STRATUM.md` (`/memory`). Es la misma memoria que usa la CLI en esa carpeta.
 - Comandos del modo código: `/plan <tarea>`, `/agent`, `/readonly`, `/profile`, `/tools`, `/env`, `/plugins`, `/changes`, `/rewind`, `/undo`, `/jobs`, `/bg`, `/memory`; y `/btw <pregunta>` y `/browser [dirección]` en los dos modos.
+- **Memoria del asistente por secciones**: el inspector agrupa los recuerdos (perfil, personas, proyectos, temas, áreas), enseña su resumen y permite moverlos de sección.
+- **Cambios sugeridos**: el inspector de memoria lista lo que propone el *dreaming* de la CLI, con «Revisar ahora», «Aplicar» y «Descartar». Nada cambia en la memoria sin aplicarlo.
+
+### Cambiado
+- **Ajustes** es una ventana flotante de cristal sobre el chat, con índice de secciones que sigue al scroll, un ajuste por fila e interruptores para sí/no.
+- Tablas del markdown con marco y cabecera, sugerencias del estado vacío en rejilla, barras de desplazamiento sin flechas y un composer estrecho que no pierde el campo.
+- Las preguntas del agente con opciones admiten siempre otra respuesta escrita.
 
 ## [0.10.0] — 2026-11-06
 

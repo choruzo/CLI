@@ -6,14 +6,28 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
-## [Sin publicar]
+## [0.15.0] — 2026-11-11
+
+Es la versión de la CLI que necesita **Stratum Desktop 0.11.0**.
 
 ### Añadido
+- **Memoria estructurada** (M19) del asistente (`assistant`) y del `companion`: cada recuerdo va en una sección (`profile`, `person`, `project`, `topic`, `area`) con resumen y fecha; los tipos antiguos se siguen leyendo sin reescribir el fichero. `stratum memory reclassify` y, en el protocolo, `memory.reclassify`. El system prompt lleva un bloque `# Memory index` con tope propio (`memory.index`). La memoria del agente de código (`coding`) no cambia.
+- **`search_conversations`**: tool de solo lectura para que el asistente y el `companion` busquen en sus propias conversaciones del daemon (nunca en las de otro agente ni en las de las rutinas).
+- **Dreaming que solo propone**: `stratum memory dream` repasa la memoria y propone cambios (`stratum memory proposals list|apply|reject`); nada se escribe hasta que una persona aplica una propuesta. Topes por pasada y por día, modelo aparte en `memory.dreaming.model` y pasada programada opcional con `memory.dreaming.schedule` (apagada por defecto). En el protocolo, `memory.proposals`, `memory.dream`, `memory.applyProposal` y `memory.rejectProposal`.
+- **Páginas `wiki/`** derivadas de la memoria (índice, perfil y una página por persona, proyecto, tema o área, con enlaces): deterministas, redactadas y nunca contexto del agente. `stratum memory wiki`.
 - **Navegador del agente**: tools `browser_navigate`, `browser_snapshot`, `browser_click`, `browser_type`, `browser_press`, `browser_console`, `browser_eval` y `browser_screenshot` (esta, solo con un modelo con visión declarada) para que el agente de código y el asistente comprueben su trabajo en la app real. Usa un Edge, Chrome o Chromium ya instalado, sin interfaz, con un perfil efímero (sin tus cookies ni sesiones) y sin abrir ningún puerto. Las direcciones locales (`localhost`, `127.0.0.1`, ficheros de la carpeta de la sesión) se abren sin preguntar; cualquier otro sitio pide confirmación y queda aprobado para esa sesión; los metadatos de nube, las direcciones link-local y otros esquemas no se abren nunca. Una página no puede saltarse la confirmación navegando por su cuenta.
 - `tools.browser` en la config: `enabled`, `idleMinutes` (se cierra solo tras 15 minutos sin uso) y, solo en la config global, `executable` y `allowHosts`.
 - Protocolo: `git.changes` y `git.diff` (los cambios del árbol de trabajo de una sesión y el diff de un fichero), `browser.screen` y `browser.navigate` (ver y mover el navegador de una sesión; `navigate` no aprueba orígenes).
 - Protocolo: `sessions.setProfile` (cambiar el perfil de sesión de una sesión en reposo) y `sessions.inspect` (cómo está montada una sesión: perfil, tools que se ofrecen, servers MCP, plugins y entornos; solo lectura).
 - Protocolo: `sessions.ask` (pregunta lateral sobre la conversación, sin tools y sin entrar en ella), `sessions.turns` (los turnos que se pueden deshacer), `jobs.background` (pasar a segundo plano el comando en primer plano) y `memory.documents` (los `STRATUM.md` que ve una sesión); `memory.status`, `memory.decisions` y `memory.forget` admiten `sessionId` para la memoria del proyecto de esa sesión.
+
+### Cambiado
+- Una pregunta del agente con opciones admite siempre otra respuesta escrita: el modelo ya no puede impedirlo. Un texto que coincide con una sola opción cuenta como esa opción.
+- La TUI envuelve cada fotograma en *synchronized output* (`?2026`) para no enseñar la zona viva a medio repintar, y pinta el streaming cada 80 ms en vez de 40 (`STRATUM_NO_SYNC_OUTPUT=1` lo desactiva).
+- `/help` agrupa los comandos por lo que hacen; en el markdown solo el h1 va en ámbar.
+
+### Corregido
+- `ECONNABORTED` (conexión keep-alive muerta tras una pausa larga, sobre todo en Windows) se reintenta en vez de pasar directa al fallback; y, agotados los providers alternativos, se vuelve una vez al primario antes de dar el error por fatal.
 
 ### Limitaciones conocidas
 - La política del navegador se aplica por nombre de host, no por la IP a la que resuelve, y las conexiones WebSocket de una página no pasan por ella.
