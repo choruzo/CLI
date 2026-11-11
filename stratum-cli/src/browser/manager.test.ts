@@ -71,7 +71,9 @@ function profiles(): string[] {
   );
 }
 
-describe('BrowserManager', () => {
+// Cada test lanza un proceso Node que hace de navegador: con la suite completa cargada,
+// arrancarlo pasa de los 5 s por defecto.
+describe('BrowserManager', { timeout: 30_000 }, () => {
   it('arranca perezosamente: nada hasta la primera acción', async () => {
     const before = liveBrowsers();
     const manager = makeManager();
@@ -191,7 +193,9 @@ describe('BrowserManager', () => {
 
   it('una orden sin respuesta caduca y no cuelga', async () => {
     setEnv('FAKE_BROWSER_SILENT', 'Page.captureScreenshot');
-    const manager = makeManager({ commandTimeoutMs: 200 });
+    // El plazo vale también para las órdenes del arranque: corto, pero no tanto
+    // que un proceso lento en arrancar (suite cargada) no llegue a contestarlas.
+    const manager = makeManager({ commandTimeoutMs: 1500 });
     await manager.snapshot();
     await expect(manager.screenshotPng()).rejects.toThrow(/did not answer/);
     // El navegador sigue vivo para lo demás.
