@@ -284,6 +284,37 @@ describe('companion — la pantalla de su caja (M15, §23.4)', () => {
     for (const t of SCREEN_TOOLS) expect(second).not.toContain(t);
   });
 
+  it('M18: caja con escritorio y modelo sin visión avisa una vez por modelo', async () => {
+    const provider = new RecordingProvider([
+      makeTextRound('uno'),
+      makeTextRound('dos'),
+      makeTextRound('tres'),
+    ]);
+    const { host } = await companionHost(provider);
+    const warnings = (evs: AgentEvent[]) =>
+      evs.filter((e) => e.type === 'warning').map((e) => (e as { message: string }).message);
+    const first = warnings(await collect(host.run('uno')));
+    expect(first).toHaveLength(1);
+    expect(first[0]).toContain('no declared vision');
+    expect(first[0]).toContain('provider.providers["test"].models["test-model"].vision');
+    expect(warnings(await collect(host.run('dos')))).toEqual([]);
+    host.agent.switchModel('other-model');
+    expect(warnings(await collect(host.run('tres')))[0]).toContain('other-model');
+  });
+
+  it('M18: con visión, o sin escritorio en la caja, no hay aviso', async () => {
+    const withVision = await companionHost(new RecordingProvider([makeTextRound('a')]), {
+      vision: 'pixels',
+    });
+    const noDesktop = await companionHost(new RecordingProvider([makeTextRound('b')]), {
+      boxConfig: { image: 'mi/imagen:1' },
+    });
+    for (const { host } of [withVision, noDesktop]) {
+      const events = await collect(host.run('hola'));
+      expect(events.some((e) => e.type === 'warning')).toBe(false);
+    }
+  });
+
   it('un modelo sin visión que la inventa: se veta sin llegar a la caja', async () => {
     const box = vi.spyOn(containerBackend, 'run');
     const { host } = await companionHost(

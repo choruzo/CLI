@@ -4,6 +4,7 @@ import { StratumClient } from '../../client/client.js';
 import { fileDiscovery, type DiscoveryResult } from '../../client/discovery.js';
 import { locateLiveDaemon as locateLive, spawnDaemon } from '../daemon-link.js';
 import { loadConfig } from '../../config/loader.js';
+import { warnConfigDeprecations } from '../../config/deprecation-warning.js';
 import { loadApproverAuth } from '../../daemon/approver-key.js';
 import { defaultEndpointDir } from '../../client/discovery.js';
 import {
@@ -74,6 +75,8 @@ const run = new Command('run')
       level: (opts.logLevel as LogLevel | undefined) ?? 'info',
       debug: opts.debug,
     });
+    // Claves desconocidas, obsoletas o variables sin definir de la config global.
+    warnConfigDeprecations();
 
     // Quién puede aprobar: la clave de aprobador que la persona haya fijado
     // (`stratum approvals set-key`). Se lee aquí, una vez; sin ella —o si el

@@ -2005,8 +2005,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   autoarranque en el registro de Windows y la notificación en una ventana real (el clic se
   aproxima con el foco de la ventana en los 30 s siguientes; `docs/dot.md` §19).
   *Probado en real 2026-11-01*: `daemon autostart on` escribe `HKCU\…\Run\StratumDaemon`, y su
-  línea, lanzada tal cual, arranca el daemon sin ventana y responde por el protocolo (falta solo
-  un inicio de sesión real). Con Dot instalado (NSIS), el aviso de una rutina sale a nombre de
+  línea, lanzada tal cual, arranca el daemon sin ventana y responde por el protocolo; tras un
+  inicio de sesión real de Windows también arranca (probado por el usuario, 2026-11-11). Con Dot instalado (NSIS), el aviso de una rutina sale a nombre de
   `dev.stratum.dot` con su título y su texto (historial de notificaciones de Windows). El clic no
   hacía nada: sin activador COM, Windows no activa la app, y Dot se fiaba del foco. Ahora Dot
   escucha el evento `Activated` del propio aviso, y pulsarlo trae Dot con la sesión de la rutina
@@ -2260,8 +2260,20 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     conversación entra como `kind: 'image'`, con solo la referencia. Dot la lee con `images.get`
     **por trozos**, porque un mensaje del protocolo no pasa de 1 MB y una imagen puede pesar 5 MB.
     Telegram la recibe como foto, o como fichero si no la acepta como foto.
+    *Probado en real* (usuario, 2026-11-11): `send_image` con `screen: true`, además de `/exchange`.
   - **F. Verbosidad del espejo**: se queda como está, con cada bloque del asistente. Del diagnóstico
     de `screen_*` (arriba) entran los tres arreglos de producto.
+  - **G. Avisos de config** (los tres arreglos del diagnóstico de `screen_*`), *hechos 2026-11-11*:
+    (1) al cargar, cada capa se recorre junto al schema (`config/unknown-keys.ts`) y las claves que
+    un objeto no estricto descartaría se avisan, una línea por fichero, con la pista de la ruta de
+    un modelo si la clave es un `models` de primer nivel. Es aviso, nunca rechazo: una config de un
+    Stratum más nuevo sigue cargando. El daemon emite ahora los avisos de la config global al
+    arrancar y los de la carpeta de cada sesión al abrirla (antes solo `chat`/`run`). (2) La ruta
+    completa ya estaba en la documentación (`.claude/docs/config.md`, `docs/dot.md` §18). (3) El
+    `companion` con la caja con escritorio y un modelo sin visión declarada emite un `warning` al
+    empezar el turno, una vez por modelo y sesión, con la ruta exacta que declarar; llega a Dot
+    (además del aviso que ya daba con `models.list`) y a Telegram como cualquier `warning`.
+    **Con esto M18 queda cerrado.**
 
 - **M19 — Memoria estructurada y dreaming** [decidido 2026-11-07; hito general: CLI, Desktop y Dot].
   Origen: la organización por tipo de los recuerdos que usan Claude y ChatGPT (Personas, Proyectos,

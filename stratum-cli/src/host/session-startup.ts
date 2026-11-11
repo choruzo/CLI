@@ -1,5 +1,6 @@
 import type { StratumConfig } from '../config/schema.js';
 import { loadConfig } from '../config/loader.js';
+import { warnConfigDeprecations } from '../config/deprecation-warning.js';
 import { ProviderRouter } from '../providers/router.js';
 import { fetchModelInfos, type FetchModelsOptions } from '../providers/utils.js';
 import { resolveSessionProfile } from '../agent/session-profile.js';
@@ -66,6 +67,8 @@ export async function resolveSessionStartup(opts: SessionStartupOptions): Promis
   else {
     try {
       config = loadConfig(opts.cwd);
+      // La config de la carpeta de la sesión (el daemon solo leyó la global).
+      warnConfigDeprecations();
     } catch (err) {
       return {
         ok: false,

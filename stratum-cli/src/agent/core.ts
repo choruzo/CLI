@@ -262,6 +262,11 @@ export class StratumAgent {
   private readonly profiles: ProfileLoader;
   private _toolCallCount = 0;
   /**
+   * M18 — `provider/modelo` del que ya se avisó de que no tiene visión con la
+   * caja con escritorio (una vez por modelo y sesión, no en cada turno).
+   */
+  private _noVisionWarnedFor: string | undefined;
+  /**
    * Lista de tareas de la sesion (Hito 11). Vive aqui y no en el `ReactLoop`
    * porque el loop dura un solo turno y la deteccion de staleness cuenta turnos.
    */
@@ -885,6 +890,11 @@ export class StratumAgent {
         };
         trace?.event(warning);
         yield warning;
+      }
+      const noVision = this.noVisionScreenWarning();
+      if (noVision) {
+        trace?.event(noVision);
+        yield noVision;
       }
       for await (const event of this.currentLoop.run(this.withSessionOptions(opts))) {
         if (event.type === 'tool_result') this._toolCallCount++;
@@ -1689,6 +1699,28 @@ export class StratumAgent {
             ),
       this.router.vision ? undefined : { hiddenTools: [...SCREEN_TOOLS, BROWSER_SCREENSHOT_TOOL] },
     );
+  }
+
+  /**
+   * M18 — el `companion` tiene la caja con escritorio (sus `screen_*` están
+   * registradas) pero el modelo activo no declara visión: esas tools se le
+   * esconden sin decir nada y el asistente acaba resolviendo por `exec`. Se
+   * avisa una vez por modelo (un `/model` a otro sin visión vuelve a avisar);
+   * el aviso llega a Dot y a Telegram como cualquier `warning` de la sesión.
+   */
+  private noVisionScreenWarning(): AgentEvent | null {
+    if (this.preset !== 'companion' || this.router.vision) return null;
+    if (this.registry.get(SCREEN_SCREENSHOT_TOOL) === undefined) return null;
+    const key = `${this.router.providerName}/${this.router.model}`;
+    if (this._noVisionWarnedFor === key) return null;
+    this._noVisionWarnedFor = key;
+    return {
+      type: 'warning',
+      message:
+        `The assistant's model (${key}) has no declared vision, so the box screen tools are hidden. ` +
+        `Declare it in provider.providers["${this.router.providerName}"].models["${this.router.model}"].vision ` +
+        'in the global config, or switch to a model with vision.',
+    };
   }
 
   /**

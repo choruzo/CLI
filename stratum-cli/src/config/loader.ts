@@ -6,6 +6,7 @@ import { assertSchemaVersion } from './schema-version.js';
 import { jsonErrorPosition, stripBom } from './json-text.js';
 import { expandEnvVars } from './env-vars.js';
 import { anchorMemoryPaths } from './paths.js';
+import { findUnknownKeys, unknownKeyHint } from './unknown-keys.js';
 
 export const CONFIG_FILENAME = '.stratumrc.json';
 export const GLOBAL_CONFIG_PATH = join(homedir(), '.stratum', CONFIG_FILENAME);
@@ -153,7 +154,29 @@ function prepareLayer(input: ConfigLayer, warn: boolean): Record<string, unknown
         'se usa una cadena vacía.',
     );
   });
-  return migrateLegacyKeys(expanded as Record<string, unknown>, layer.path);
+  const migrated = migrateLegacyKeys(expanded as Record<string, unknown>, layer.path);
+  if (warn) warnUnknownKeys(migrated, layer.path);
+  return migrated;
+}
+
+/** Máximo de claves desconocidas que se nombran por fichero. */
+const MAX_LISTED_UNKNOWN = 10;
+
+/**
+ * M18 — avisa de las claves que el schema descartaría sin decir nada (el raíz
+ * no es estricto). Una por fichero, con la ruta de cada clave.
+ */
+function warnUnknownKeys(layer: Record<string, unknown>, source: string): void {
+  const unknown = findUnknownKeys(StratumConfigSchema, layer);
+  if (unknown.length === 0) return;
+  const listed = unknown.slice(0, MAX_LISTED_UNKNOWN).map((p) => `"${p.join('.')}"`);
+  const extra = unknown.length - listed.length;
+  const hint = unknown.map(unknownKeyHint).find((h) => h !== '') ?? '';
+  pushWarning(
+    `${source}: ${unknown.length === 1 ? 'clave desconocida' : 'claves desconocidas'} ` +
+      `${listed.join(', ')}${extra > 0 ? ` y ${extra} más` : ''}; se ignora${unknown.length === 1 ? '' : 'n'}.` +
+      hint,
+  );
 }
 
 /** Máximo de problemas de validación que se listan. */
