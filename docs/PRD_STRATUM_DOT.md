@@ -2492,7 +2492,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      `CANCELED` trenes que circulan (comprobado en renfe.com), así que en larga distancia esa marca se
      ignora y solo se usan retrasos y posición.
   3. Confirmación nativa y panel en Dot (el protocolo ya está desde la fase 1). *Hecha el
-     2026-11-11* (`docs/dot.md` §23); falta probarla con la ventana real (E2E).
+     2026-11-11* (`docs/dot.md` §23); E2E con la ventana real el 2026-11-12
+     (`stratum-dot/e2e/connector-catalog.e2e.mjs`).
   4. Secretos y **Home Assistant**. Su conector necesita llegar a la red local desde la caja de
      conectores, que se comprueba en esta fase. *Hecha el 2026-11-12*: la caja de conectores
      llega a la LAN (Docker Desktop), pero no resuelve un nombre corto que el anfitrión completa con
