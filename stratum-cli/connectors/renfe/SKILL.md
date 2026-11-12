@@ -1,6 +1,6 @@
 ---
 name: connector-renfe
-description: Úsala cuando te pregunten por trenes de Renfe: Cercanías o Rodalies (salidas, trayectos, incidencias) y larga o media distancia (AVE, AVLO, Alvia, Intercity, Euromed, MD, Regional: horarios, retrasos, cancelaciones).
+description: Úsala cuando te pregunten por trenes de Renfe: Cercanías o Rodalies (salidas, trayectos, incidencias) y larga o media distancia (AVE, AVLO, Alvia, Intercity, Euromed, MD, Regional: horarios y retrasos).
 presets: [companion]
 ---
 
@@ -21,7 +21,7 @@ ya resumido, con las horas en hora de Madrid y el retraso calculado.
 - «¿Hay incidencias en la R2?» → `cercanias_avisos`. «¿Qué líneas hay en Valencia?» → `cercanias_nucleos` y `cercanias_lineas`.
 - «¿Qué AVE salen de Atocha hacia Sevilla?» → `trenes_salidas` (`estacion`, `destino`, `producto` opcional).
 - «¿Cómo llego de Madrid a Barcelona mañana?» → `trenes_trayecto` con `fecha: "mañana"`.
-- «¿Dónde va el AVE 3123?» → `trenes_tren` con el número (`3123`, con o sin ceros): cancelación, retraso, posición y recorrido.
+- «¿Dónde va el AVE 3123?» → `trenes_tren` con el número (`3123`, con o sin ceros): retraso, posición y recorrido.
 - Si la ruta es entre ciudades, es larga distancia (`trenes_*`); si es dentro de una ciudad o su área, Cercanías.
 
 ## Cómo encadenarlas
@@ -40,8 +40,11 @@ ya resumido, con las horas en hora de Madrid y el retraso calculado.
 - Sin precios, billetes, reservas ni plazas.
 - Cercanías: hasta un transbordo, y avisos de incidencias. Larga distancia: **solo trenes directos, sin
   transbordos ni avisos**; si no hay directo, dilo y mira `trenes_salidas` en el origen.
-- Las cancelaciones y retrasos de hoy salen del tiempo real de Renfe (en una huelga, muchos trenes
-  salen «cancelado»); no los inventes si dice «sin datos de tiempo real».
+- Los retrasos de hoy salen del tiempo real de Renfe; no los inventes si dice «sin datos de tiempo real».
+- **Larga distancia no dice cancelaciones**: la marca de cancelado del tiempo real de Renfe no es fiable
+  (marca trenes que circulan), así que se ignora. Si preguntan si un AVE, Alvia… está cancelado, di que
+  no lo puedes confirmar y que lo miren en renfe.com, «Estado de tu tren» (o la app de Renfe). En
+  Cercanías sí se dicen las cancelaciones.
 - Horarios de aproximadamente un mes (Cercanías) o varios meses (larga distancia). Un fallo del tiempo real no
   es un error: la respuesta sale con el horario.
 

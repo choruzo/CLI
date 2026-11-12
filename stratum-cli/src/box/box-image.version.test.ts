@@ -17,6 +17,7 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const IMAGE_FINGERPRINTS: Record<number, string> = {
   2: 'bbfe073138d7c0eb',
   3: 'a5504ba322b45ca3',
+  4: '8a8c3d4d83f51880',
 };
 
 function files(dir: string): string[] {

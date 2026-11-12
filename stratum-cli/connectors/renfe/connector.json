@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "renfe",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Renfe",
   "description": "Cercanías y Rodalies, y larga y media distancia (AVE, AVLO, Alvia, Intercity, MD…): salidas, trayectos, trenes en tiempo real y avisos, con datos abiertos de Renfe.",
   "agents": ["companion"],
@@ -15,8 +15,8 @@
     { "name": "cercanias_trayecto", "readOnly": true, "summary": "Cómo ir de una estación a otra: directo o con un transbordo." },
     { "name": "cercanias_tren", "readOnly": true, "summary": "Estado de un tren: dónde está, retraso, vía y próximas paradas." },
     { "name": "cercanias_avisos", "readOnly": true, "summary": "Avisos e incidencias activos por núcleo, línea o estación." },
-    { "name": "trenes_salidas", "readOnly": true, "summary": "Salidas de larga y media distancia desde una estación, de hoy o de otro día, con retraso y cancelaciones." },
+    { "name": "trenes_salidas", "readOnly": true, "summary": "Salidas de larga y media distancia desde una estación, de hoy o de otro día, con su retraso." },
     { "name": "trenes_trayecto", "readOnly": true, "summary": "Trenes directos de larga y media distancia de una estación a otra, con horas y duración." },
-    { "name": "trenes_tren", "readOnly": true, "summary": "Estado de un tren de larga o media distancia: cancelación, retraso, posición y recorrido." }
+    { "name": "trenes_tren", "readOnly": true, "summary": "Estado de un tren de larga o media distancia: retraso, posición y recorrido." }
   ]
 }

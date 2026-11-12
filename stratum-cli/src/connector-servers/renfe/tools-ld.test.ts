@@ -125,9 +125,11 @@ describe('trenes_salidas', () => {
     expect(out).not.toContain('Barcelona'); // solo los que paran después en Sevilla
   });
 
-  it('un tren cancelado sale como «cancelado»; uno con retraso, la hora estimada y la de horario', async () => {
+  it('el CANCELED del feed LD se ignora (no es fiable); uno con retraso, la hora estimada y la de horario', async () => {
     const out = await tools(ldFakeRealtime()).trenes_salidas!({ estacion: CHAMARTIN });
-    expect(out).toContain('Alvia 190 a Badajoz · 08:30 · cancelado');
+    // El feed marca cancelado el 190, pero en LD esa marca no es fiable: sale sin tiempo real.
+    expect(out).toContain('Alvia 190 a Badajoz · sale 08:30');
+    expect(out).not.toContain('cancelado');
     expect(out).toContain(
       'Alvia 194 a Badajoz · sale 18:33 (en 657 min) · +13 min, estimado (horario 18:20)',
     );
@@ -259,21 +261,21 @@ describe('trenes_trayecto', () => {
       desde: '05:00',
     });
     expect(out).toContain('18:33 → 23:25 (4 h 52 min) · Alvia 194 · +13 min, estimado');
-    // El 190 de las 08:30 está cancelado: no es una opción, pero se dice.
-    expect(out).toContain('Cancelados: 08:30 Alvia 190.');
-    expect(out).not.toContain('08:30 →');
+    // El feed marca cancelado el 190 de las 08:30: se ignora y sale con su horario.
+    expect(out).toContain('08:30 → ');
+    expect(out).not.toContain('Cancelados');
   });
 
-  it('si todos los directos están cancelados lo dice y sugiere trenes_salidas', async () => {
+  it('aunque el feed marque cancelados todos los directos, salen con su horario', async () => {
     const out = await tools(ldFakeRealtime()).trenes_trayecto!({
       origen: ATOCHA,
       destino: 'Barcelona',
       desde: '05:00',
     });
-    expect(out).toContain('Todos los trenes directos de');
-    expect(out).toContain('están cancelados.');
-    expect(out).toContain('Cancelados: 06:27 AVE 3063; 06:57 AVE 3071.');
-    expect(out).toContain('trenes_salidas');
+    expect(out).toContain('06:27 → ');
+    expect(out).toContain('AVE 3063');
+    expect(out).toContain('AVE 3071');
+    expect(out).not.toMatch(/cancelad/i);
   });
 
   it('sin directos: no hay transbordos y sugiere trenes_salidas en el origen', async () => {
@@ -343,14 +345,15 @@ describe('trenes_tren', () => {
     expect(await t.trenes_tren!({ tren: '0019412026-11-11' })).toBe(a);
   });
 
-  it('un tren cancelado: «cancelado», sin retraso, y su recorrido con las horas de horario', async () => {
+  it('un tren que el feed marca cancelado: nunca «cancelado», sin tiempo real y su recorrido de horario', async () => {
     const out = await tools(ldFakeRealtime()).trenes_tren!({ tren: '190' });
     const lines = out.split('\n');
     expect(lines[0]).toContain(
       'Alvia 190 · Madrid-Chamartín-Clara Campoamor → Badajoz · sale 08:30, llega 13:38',
     );
-    expect(lines[1]).toBe('Estado: cancelado');
-    expect(out).not.toContain('Retraso');
+    expect(lines[1]).toMatch(/^Estado: /);
+    expect(out).not.toContain('cancelado');
+    expect(out).toContain('Retraso: sin datos de tiempo real');
     expect(out).toContain('Recorrido (12 paradas):');
     expect(out).toContain('· Madrid-Atocha Cercanías · 08:43');
   });
@@ -391,10 +394,8 @@ describe('trenes_tren', () => {
     expect(out).toContain('Tiempo real: solo existe para hoy; las horas son las del horario.');
     expect(out).not.toMatch(/Estado:|Retraso:|cancelado/);
     expect(out).toContain('· Zaragoza Delicias · 08:10');
-    // Hoy el 3063 sí está cancelado.
-    expect(await tools(ldFakeRealtime()).trenes_tren!({ tren: '3063' })).toContain(
-      'Estado: cancelado',
-    );
+    // Hoy el feed lo marca cancelado, y tampoco se dice.
+    expect(await tools(ldFakeRealtime()).trenes_tren!({ tren: '3063' })).not.toContain('cancelado');
   });
 
   it('un tren que no circula ese día, o que no existe, se explica', async () => {

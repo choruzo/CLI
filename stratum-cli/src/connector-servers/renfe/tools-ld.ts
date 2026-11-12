@@ -8,8 +8,12 @@
  * un mismo tren viene como varios viajes (variantes por tramo comercial, con el
  * mismo número y las mismas horas) que aquí se funden por número + hora de paso;
  * el `trip_id` no dice el día de circulación (lo dicen `calendar` y
- * `calendar_dates`); el tiempo real repite entidades por viaje, trae `SKIPPED`
- * contradictorios (se ignoran) y marca como `CANCELED` los viajes cancelados.
+ * `calendar_dates`); el tiempo real repite entidades por viaje y trae `SKIPPED`
+ * contradictorios (se ignoran). Su `CANCELED` **tampoco es fiable** y se ignora
+ * (`withoutLdCancellations`): el 2026-11-12, día sin huelga, marcaba así el 80 %
+ * de los viajes, entre ellos AVE Madrid–Barcelona que circulaban según
+ * «Estado de tu tren» de renfe.com. Un tren así sale «sin datos de tiempo real»:
+ * nunca se dice que está cancelado sin estarlo.
  * Las tools aceptan `fecha`, pero el tiempo real solo se aplica a hoy.
  */
 import { z } from 'zod';
@@ -230,12 +234,24 @@ interface RtData {
 
 const NO_RT_DATA: RtData = { updates: null, vehicles: null };
 
+/**
+ * Quita las actualizaciones que, ya fundidas, dicen `CANCELED`: en larga
+ * distancia esa marca no es fiable (ver la cabecera). Sin actualización, el
+ * viaje queda «sin datos de tiempo real»; los retrasos y la posición siguen.
+ */
+export function withoutLdCancellations(
+  updates: Map<string, TripUpdate> | null,
+): Map<string, TripUpdate> | null {
+  if (!updates) return updates;
+  return new Map([...updates].filter(([, u]) => u.relationship !== 'CANCELED'));
+}
+
 async function loadRt(rt: RealtimeUse, signal?: AbortSignal): Promise<RtData> {
   const [updates, vehicles] = await Promise.all([
     rt.mergedTripUpdates(signal),
     rt.vehicles(signal),
   ]);
-  return { updates, vehicles };
+  return { updates: withoutLdCancellations(updates), vehicles };
 }
 
 /** Estimaciones de un viaje, memorizadas por `tid` + día. */
@@ -269,9 +285,8 @@ class LdEstimates {
 }
 
 /**
- * De las variantes de un mismo tren, la que se enseña: la que tiene tiempo real
- * (una viva antes que una cancelada), luego la de más paradas (el recorrido
- * completo) y, a igualdad, la primera.
+ * De las variantes de un mismo tren, la que se enseña: la que tiene tiempo real,
+ * luego la de más paradas (el recorrido completo) y, a igualdad, la primera.
  */
 function pickVariant<R extends { tid: number; tripId: string; nStops: number }>(
   rows: R[],
@@ -279,7 +294,7 @@ function pickVariant<R extends { tid: number; tripId: string; nStops: number }>(
 ): R {
   const score = (r: R): number => {
     const u = rt.updates?.get(r.tripId);
-    return u ? (u.relationship === 'CANCELED' ? 1 : 2) : 0;
+    return u ? 1 : 0;
   };
   return rows.reduce((best, r) => {
     const a = score(r);
@@ -347,7 +362,7 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
   const fechaProp = {
     type: 'string',
     description:
-      'Día: "YYYY-MM-DD", "hoy" o "mañana"; por defecto, hoy. El tiempo real (retrasos, cancelaciones) solo existe para hoy.',
+      'Día: "YYYY-MM-DD", "hoy" o "mañana"; por defecto, hoy. El tiempo real (retrasos) solo existe para hoy.',
   };
   const desdeProp = {
     type: 'string',
@@ -359,7 +374,7 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
     name: 'trenes_salidas',
     description:
       'Próximas salidas de trenes de larga y media distancia (AVE, AVLO, Alvia, Intercity, Euromed, MD, Regional…) desde una estación, ' +
-      'con retraso o cancelación si es hoy. `destino` deja solo los trenes que después paran en esa estación; `producto` filtra ("AVE", "Alvia"…); ' +
+      'con retraso si es hoy. `destino` deja solo los trenes que después paran en esa estación; `producto` filtra ("AVE", "Alvia"…); ' +
       '`fecha` y `desde` cambian el día y la hora. Si el nombre es ambiguo ("Madrid") devuelve las estaciones con su id "ld:<id>". ' +
       'Para Cercanías o Rodalies usa cercanias_salidas.',
     inputSchema: {
@@ -457,7 +472,6 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
           const to = row.lastStop ? ix.stopName(row.lastStop) : 'destino sin dato';
           const head2 = `${trainName(row)} a ${to}`;
           if (!isToday) return `${head2} · sale ${hhmm(row.dep)}`;
-          if (e?.status === 'cancelled') return `${head2} · ${hhmm(row.dep)} · cancelado`;
           if (e?.status !== 'ok' || e.depDelay === null) {
             const mins = minutesUntil(row.dep, c.secs);
             return `${head2} · sale ${hhmm(row.dep)}${mins ? ` (${mins})` : ''} · ${NO_RT}`;
@@ -538,7 +552,6 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
           row: LdDirectRow;
           dep: number;
           arr: number;
-          cancelled: boolean;
           eo: Estimate | undefined;
         }
         const options: Option[] = [];
@@ -552,51 +565,31 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
           const dep = row.odep + (eo?.status === 'ok' ? (eo.depDelay ?? 0) : 0);
           const arr = row.darr + (ed?.status === 'ok' ? (ed.arrDelay ?? 0) : 0);
           if (dep < from) continue;
-          options.push({
-            row,
-            dep,
-            arr,
-            cancelled: eo?.status === 'cancelled' || ed?.status === 'cancelled',
-            eo,
-          });
+          options.push({ row, dep, arr, eo });
         }
         options.sort((x, y) => x.dep - y.dep);
-        const live = options.filter((x) => !x.cancelled);
-        const cancelled = options.filter((x) => x.cancelled);
 
         const when = isToday ? `hoy (${dateEs(ymd)})` : dateEs(ymd);
         const dayPhrase = isToday ? 'hoy' : `el ${dateEs(ymd)}`;
         const head = `Trenes directos de ${o.value.name} a ${d.value.name} · ${when} desde las ${hhmm(from)}:`;
-        const cancelledNote = (): string[] =>
-          cancelled.length === 0
-            ? []
-            : [
-                `Cancelados: ${cancelled
-                  .slice(0, 5)
-                  .map((x) => `${hhmm(x.row.odep)} ${trainName(x.row)}`)
-                  .join('; ')}${cancelled.length > 5 ? '…' : ''}.`,
-              ];
-        if (live.length === 0) {
+        if (options.length === 0) {
           return [
-            options.length === 0
-              ? `No hay trenes directos de ${o.value.name} a ${d.value.name} ${dayPhrase} desde las ${hhmm(from)}.`
-              : `Todos los trenes directos de ${o.value.name} a ${d.value.name} ${dayPhrase} desde las ${hhmm(from)} están cancelados.`,
-            ...cancelledNote(),
+            `No hay trenes directos de ${o.value.name} a ${d.value.name} ${dayPhrase} desde las ${hhmm(from)}.`,
             'Aquí no hay transbordos: mira con trenes_salidas en el origen a dónde van los trenes, o prueba otra hora (desde) u otro día (fecha).',
           ];
         }
-        const body = live.slice(0, max).map(({ row, dep, arr, eo }) => {
+        const body = options.slice(0, max).map(({ row, dep, arr, eo }) => {
           const base = `${hhmm(dep)} → ${arrText(arr)} (${durText((arr - dep) / 60)}) · ${trainName(row)}`;
           if (!isToday) return base;
           return `${base} · ${eo?.status === 'ok' && eo.depDelay !== null ? delayText(eo.depDelay, eo.kind) : NO_RT}`;
         });
         const lines = [head, ...body];
-        if (live.length > max) {
+        if (options.length > max) {
           lines.push(
-            `Hay más trenes: repite con desde: "${hhmm(live[max - 1]!.dep + 60)}"${isToday ? '' : `, fecha: "${isoOf(ymd)}"`}.`,
+            `Hay más trenes: repite con desde: "${hhmm(options[max - 1]!.dep + 60)}"${isToday ? '' : `, fecha: "${isoOf(ymd)}"`}.`,
           );
         }
-        return [...lines, ...cancelledNote()];
+        return lines;
       }),
   };
 
@@ -604,7 +597,7 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
   const tren: ConnectorTool = {
     name: 'trenes_tren',
     description:
-      'Estado de un tren de larga o media distancia concreto: producto, origen y destino, si está cancelado, retraso, dónde está y su recorrido completo con horas. ' +
+      'Estado de un tren de larga o media distancia concreto: producto, origen y destino, retraso, dónde está y su recorrido completo con horas. ' +
       '`tren` es el número que ve la gente ("3123" o "03123") o el trip_id; `fecha` ("hoy" por defecto) elige el día.',
     inputSchema: {
       type: 'object',
@@ -690,13 +683,11 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
         if (stops.length === 0) {
           throw new ToolUserError(`El tren «${raw}» no tiene paradas en los horarios que tengo.`);
         }
-        const upd = data.updates?.get(t.tripId);
         const veh = data.vehicles?.get(t.tripId);
         const nameAt = (i: number): string => ix.stopName(stops[i]!.stopId);
         const first = stops[0]!;
         const last = stops[stops.length - 1]!;
         const nowRaw = c.secs + day.offset;
-        const cancelled = upd?.relationship === 'CANCELED';
 
         const lines = [
           `${trainName(t)} · ${nameAt(0)} → ${nameAt(stops.length - 1)} · sale ${hhmm(first.dep)}, llega ${arrText(last.arr)} · ${dateEs(day.ymd)}`,
@@ -707,8 +698,7 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
           // Estado
           vi = veh?.stopId ? stops.findIndex((s) => s.stopId === veh.stopId) : -1;
           let estado: string;
-          if (cancelled) estado = 'cancelado';
-          else if (veh) {
+          if (veh) {
             const near = nearest(ix, stops, veh);
             const kmText = (n: number): string => (n >= 2 ? ` (a unos ${Math.round(n)} km)` : '');
             if (veh.status === 'STOPPED_AT' && vi >= 0) estado = `parado en ${nameAt(vi)}`;
@@ -726,18 +716,16 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
           else estado = 'en marcha según el horario, sin posición en tiempo real';
           lines.push(`Estado: ${estado}`);
 
-          if (!cancelled) {
-            // Retraso de la próxima parada.
-            const nextIdx = stops.findIndex((s, i) =>
-              vi >= 0 ? i >= vi : s.arr + delayOf(ests[i]) >= nowRaw - 60,
-            );
-            const ne = nextIdx >= 0 ? ests[nextIdx] : undefined;
-            lines.push(
-              ne?.status === 'ok' && ne.arrDelay !== null
-                ? `Retraso: ${delayText(ne.arrDelay, ne.kind)}`
-                : `Retraso: ${NO_RT}`,
-            );
-          }
+          // Retraso de la próxima parada.
+          const nextIdx = stops.findIndex((s, i) =>
+            vi >= 0 ? i >= vi : s.arr + delayOf(ests[i]) >= nowRaw - 60,
+          );
+          const ne = nextIdx >= 0 ? ests[nextIdx] : undefined;
+          lines.push(
+            ne?.status === 'ok' && ne.arrDelay !== null
+              ? `Retraso: ${delayText(ne.arrDelay, ne.kind)}`
+              : `Retraso: ${NO_RT}`,
+          );
         } else {
           lines.push('Tiempo real: solo existe para hoy; las horas son las del horario.');
         }
@@ -758,9 +746,9 @@ export function createTrenesTools(ctx: TrenesContext): ConnectorTool[] {
           const sched = i === 0 ? s.dep : s.arr;
           const e = ests[i]!;
           const delay = i === 0 ? e.depDelay : e.arrDelay;
-          if (isToday && !cancelled && vi >= 0 && i < vi) {
+          if (isToday && vi >= 0 && i < vi) {
             lines.push(`· ${nameAt(i)} · ${hhmm(sched)} (ya pasó)`);
-          } else if (isToday && !cancelled && e.status === 'ok' && delay !== null) {
+          } else if (isToday && e.status === 'ok' && delay !== null) {
             const late = Math.round(delay / 60) !== 0;
             lines.push(
               `· ${nameAt(i)} · ${hhmm(sched + delay)} (${delayText(delay, e.kind)}${late ? `; horario ${hhmm(sched)}` : ''})`,

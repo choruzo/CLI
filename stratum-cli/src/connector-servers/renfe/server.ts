@@ -32,7 +32,7 @@ manager.start();
 ldManager.start();
 
 serveStdio(
-  createMcpServer({ name: 'renfe', version: '1.1.0' }, [
+  createMcpServer({ name: 'renfe', version: '1.2.0' }, [
     ...createRenfeTools({
       withIndex: (fn) => manager.withIndex(fn),
       realtime: offline ? null : new RealtimeSource({ fetch: globalThis.fetch }),
