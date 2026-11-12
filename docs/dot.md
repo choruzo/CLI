@@ -1557,5 +1557,7 @@ desactiva.
   `ApproverMethod::ConnectorsEnable`; `valid_connector_id`. Desktop no activa conectores.
 
 Tests: `src/app/Connectors.test.tsx`, `crates/dot-link/tests/confirm.rs`
-(`activar_un_conector_*`), `tests/link.rs` (`los_conectores_se_listan_y_se_desactivan_*`), unidad
+(`activar_un_conector_*`), el E2E con la app real `e2e/connector-catalog.e2e.mjs`
+(`npm run e2e:connector-catalog`: desbloquear, cancelar y confirmar en la ventana nativa, Home Assistant
+sin configurar, desactivar; hecho el 2026-11-12), `tests/link.rs` (`los_conectores_se_listan_y_se_desactivan_*`), unidad
 en `confirm.rs`, `approver.rs` y `link.rs`, y el de arquitectura.
