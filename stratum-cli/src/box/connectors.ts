@@ -51,31 +51,52 @@ export class ConnectorsBoxUnavailableError extends Error {
   override readonly name = 'ConnectorsBoxUnavailableError';
 }
 
+/** Un conector que lanzar, con los valores de los secretos que pide. */
+export interface ConnectorToLaunch {
+  manifest: ConnectorManifest;
+  /** Exactamente los nombres de `manifest.secrets`. */
+  secrets: Record<string, string>;
+}
+
 /**
- * Las órdenes de los conectores de `manifests` en la caja de conectores de
+ * Las órdenes de los conectores de `items` en la caja de conectores de
  * `box`. Sin runtime de contenedores no hay ninguna.
+ *
+ * Los secretos van como `-e NOMBRE` **sin valor** en la orden y con su valor
+ * en el entorno del proceso cliente (`config.env`), de donde los toma el
+ * runtime: nunca aparecen en la línea de órdenes.
  */
 export async function connectorLaunches(
   box: BoxConfig,
-  manifests: readonly ConnectorManifest[],
+  items: readonly ConnectorToLaunch[],
   deps: ConnectorLaunchDeps = {},
 ): Promise<ConnectorLaunchResult> {
-  if (manifests.length === 0) return { ok: true, launches: [] };
+  if (items.length === 0) return { ok: true, launches: [] };
   const run = deps.run ?? defaultRunner;
   const detected = await (deps.detect ?? (() => cachedRuntime(box.runtime)))();
   if (!detected.ok) return { ok: false, reason: detected.reason };
   const rt = detected.runtime;
-  const launches = manifests.map((m) => ({
-    config: {
-      name: m.id,
-      command: rt.bin,
-      // Fase 4: los secretos irán como `-e NOMBRE` sin valor.
-      args: connectorExecArgs(box.name, m.id),
-      startupTimeout: STARTUP_TIMEOUT_MS,
-      toolTimeout: TOOL_TIMEOUT_MS,
-    },
-    beforeConnect: () => assertConnectorsBoxRunning(rt, box.name, run),
-  }));
+  const launches = items.map(({ manifest: m, secrets }) => {
+    const names = m.secrets.map((s) => s.name);
+    const env: Record<string, string> = {};
+    for (const name of names) {
+      const value = secrets[name];
+      // Nunca se lanza a medias: quien llama ya dejó fuera al que le falta uno.
+      if (value === undefined) throw new Error(`Missing secret ${name} for connector "${m.id}".`);
+      env[name] = value;
+    }
+    return {
+      config: {
+        name: m.id,
+        command: rt.bin,
+        args: connectorExecArgs(box.name, m.id, names),
+        ...(names.length > 0 ? { env } : {}),
+        startupTimeout: STARTUP_TIMEOUT_MS,
+        toolTimeout: TOOL_TIMEOUT_MS,
+      },
+      beforeConnect: () => assertConnectorsBoxRunning(rt, box.name, run),
+    };
+  });
   return { ok: true, launches };
 }
 

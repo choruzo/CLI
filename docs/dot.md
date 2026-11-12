@@ -1550,6 +1550,9 @@ desactiva.
   la ventana.
 - **Desactivar** solo resta: confirmación en la página y `connectors.disable` por la conexión
   principal (`control`), sin broker.
+- **Lo que pide un conector** (fase 4: tokens, la URL de un servicio) se configura **solo por
+  terminal**, con `stratum connectors setup <id>`. Dot no tiene dónde teclearlo: un secreto no pasa
+  por el webview ni por el protocolo. El panel dice qué falta (`needs[].configured`) y la orden.
 - Nativo: `MainMethod::ConnectorsList|ConnectorsDisable` solo en `DOT_METHODS`;
   `ApproverMethod::ConnectorsEnable`; `valid_connector_id`. Desktop no activa conectores.
 

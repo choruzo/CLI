@@ -35,6 +35,11 @@ const SecretSchema = z
   .object({
     name: z.string().regex(SECRET_NAME_RE),
     description: z.string().min(1).max(200),
+    /**
+     * `false` para un dato que no es secreto pero que se configura igual (la URL
+     * de Home Assistant): se teclea con eco. Por defecto, secreto.
+     */
+    sensitive: z.boolean().optional(),
   })
   .strict();
 

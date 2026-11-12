@@ -1,12 +1,22 @@
 import { createInterface } from 'readline';
 import { Command } from 'commander';
 import { StratumClient } from '../../client/client.js';
-import { fileDiscovery } from '../../client/discovery.js';
+import { defaultEndpointDir, fileDiscovery } from '../../client/discovery.js';
+import { bundledCatalog } from '../../connectors/active.js';
+import type { ConnectorCatalog } from '../../connectors/catalog.js';
+import {
+  ConnectorSecretsError,
+  clearConnectorSecrets,
+  readConnectorSecrets,
+  secretValueProblem,
+  secretsStatusOf,
+  setConnectorSecrets,
+} from '../../connectors/secrets.js';
 import type { ProtocolConnector, ProtocolConnectorsList, Role } from '../../protocol/index.js';
 import { locateLiveDaemon } from '../daemon-link.js';
 import { askLine } from '../readline-prompt.js';
 import { cliVersion } from '../version.js';
-import { approver } from './approvals.js';
+import { approver, askSecret } from './approvals.js';
 import { NOT_RUNNING_MESSAGE, describeError } from './routines.js';
 
 /**
@@ -15,6 +25,11 @@ import { NOT_RUNNING_MESSAGE, describeError } from './routines.js';
  * escribe `connectors.json`. `list` es `observer`; `disable` solo resta
  * (`operator`); `enable` suma capacidad, así que enseña lo que activa, pregunta
  * y solo entonces se conecta como aprobador (la clave, por terminal).
+ *
+ * `setup` (fase 4) es la excepción: no habla con el daemon. Como
+ * `channels telegram setup`, pide los secretos por terminal (sin eco) y los
+ * escribe en `~/.stratum/daemon/connector-secrets.json`; el daemon los lee al
+ * empezar el siguiente turno. Un secreto nunca pasa por el protocolo.
  */
 
 export { describeError };
@@ -30,7 +45,12 @@ function toolLines(c: ProtocolConnector): string[] {
   const lines = c.tools.map(
     (t) => `    ${t.name} [${t.readOnly ? 'read-only' : 'asks approval'}] ${t.summary}`,
   );
-  for (const n of c.needs) lines.push(`    needs: ${n.name} (${n.description})`);
+  for (const n of c.needs) {
+    lines.push(`    needs: ${n.name} (${n.description})${n.configured ? ' [set]' : ' [missing]'}`);
+  }
+  if (c.needs.some((n) => !n.configured)) {
+    lines.push(`    set it up with "stratum connectors setup ${c.id}"`);
+  }
   return lines;
 }
 
@@ -60,7 +80,12 @@ export function formatConnectorPreview(c: ProtocolConnector): string {
   for (const t of c.tools) {
     lines.push(`    ${t.name} [${t.readOnly ? 'read-only' : 'asks approval'}] ${t.summary}`);
   }
-  for (const n of c.needs) lines.push(`  needs: ${n.name} (${n.description})`);
+  for (const n of c.needs) {
+    lines.push(`  needs: ${n.name} (${n.description})${n.configured ? ' [set]' : ' [missing]'}`);
+  }
+  if (c.needs.some((n) => !n.configured)) {
+    lines.push(`  it will not run until you set it up: "stratum connectors setup ${c.id}"`);
+  }
   return lines.join('\n') + '\n';
 }
 
@@ -114,6 +139,105 @@ export async function runEnable(deps: ConnectorDeps, id: string): Promise<boolea
     return true;
   } finally {
     authority.close?.();
+  }
+}
+
+export interface SecretDeps {
+  /** Carpeta privada del daemon (`connector-secrets.json`). */
+  dir: string;
+  catalog: ConnectorCatalog;
+  /** Pide sin eco; `null` si se cancela. */
+  askHidden: (prompt: string) => Promise<string | null>;
+  /** Pide con eco (lo que no es secreto, como una URL); `null` si se cancela. */
+  askVisible: (prompt: string) => Promise<string | null>;
+  isTTY: boolean;
+  out: (text: string) => void;
+  err: (text: string) => void;
+}
+
+/**
+ * El cuerpo de `setup`: pide lo que necesita el conector `id` y lo guarda.
+ * Nunca escribe un valor en la salida. Una respuesta vacía conserva el que
+ * había. Con `clear`, borra los suyos (sin terminal: solo resta).
+ * @returns `false` si no se guardó nada.
+ */
+export async function runSecret(
+  deps: SecretDeps,
+  id: string,
+  opts: { name?: string; clear?: boolean } = {},
+): Promise<boolean> {
+  const entry = deps.catalog.get(id);
+  if (!entry) {
+    deps.err(`Unknown connector "${id}". Run "stratum connectors list".\n`);
+    return false;
+  }
+  const { manifest } = entry;
+  if (manifest.secrets.length === 0) {
+    deps.err(`${manifest.name} does not need any setup.\n`);
+    return false;
+  }
+  const wanted = opts.name
+    ? manifest.secrets.filter((s) => s.name === opts.name)
+    : manifest.secrets;
+  if (wanted.length === 0) {
+    const uses = manifest.secrets.map((s) => s.name).join(', ');
+    deps.err(`${manifest.name} does not use "${opts.name}". It uses: ${uses}.\n`);
+    return false;
+  }
+  try {
+    if (opts.clear) {
+      const removed = clearConnectorSecrets(deps.dir, id, opts.name);
+      deps.out(removed ? `Removed the setup of ${manifest.name}.\n` : 'Nothing to remove.\n');
+      return removed;
+    }
+    if (!deps.isTTY) {
+      deps.err(
+        'Setting up a connector needs an interactive terminal: secrets are never read from a pipe, a flag or the environment.\n',
+      );
+      return false;
+    }
+    const missing = new Set(secretsStatusOf(manifest, readConnectorSecrets(deps.dir)).missing);
+    deps.out(
+      `${manifest.name} needs this. It is stored only in the private daemon folder and never shown again.\n`,
+    );
+    const values: Record<string, string> = {};
+    for (const s of wanted) {
+      const keep = missing.has(s.name) ? '' : ' (empty keeps the current one)';
+      deps.out(`${s.name}: ${s.description}${keep}\n`);
+      const ask = s.sensitive === false ? deps.askVisible : deps.askHidden;
+      const raw = await ask(`${s.name}: `);
+      if (raw === null) {
+        deps.err('Cancelled. Nothing changed.\n');
+        return false;
+      }
+      const value = raw.trim();
+      if (value === '') continue;
+      const problem = secretValueProblem(value);
+      if (problem) {
+        deps.err(`That value of ${s.name} is not valid: ${problem}. Nothing changed.\n`);
+        return false;
+      }
+      values[s.name] = value;
+    }
+    if (Object.keys(values).length === 0) {
+      deps.out('Nothing changed.\n');
+      return false;
+    }
+    const path = setConnectorSecrets(deps.dir, manifest, values);
+    const stillMissing = secretsStatusOf(manifest, readConnectorSecrets(deps.dir)).missing;
+    deps.out(`Saved ${Object.keys(values).join(', ')} in ${path}.\n`);
+    deps.out(
+      stillMissing.length > 0
+        ? `Still missing: ${stillMissing.join(', ')}.\n`
+        : `Ready: if ${manifest.name} is enabled, the assistant uses it from its next message (otherwise, "stratum connectors enable ${id}").\n`,
+    );
+    return true;
+  } catch (err) {
+    if (err instanceof ConnectorSecretsError) {
+      deps.err(`${err.message}\n`);
+      return false;
+    }
+    throw err;
   }
 }
 
@@ -233,8 +357,38 @@ const disable = new Command('disable')
   .argument('<id>', 'connector id, as "list" shows it')
   .action((id: string) => withDeps((deps) => runDisable(deps, id)));
 
+const setup = new Command('setup')
+  .description('Set up what a connector needs (tokens, URLs), asked in the terminal without echo')
+  .argument('<id>', 'connector id, as "list" shows it')
+  .option('--name <NAME>', 'only this one (e.g. HA_TOKEN)')
+  .option('--clear', 'remove what is stored for this connector (or only --name)')
+  .action(async (id: string, opts: { name?: string; clear?: boolean }) => {
+    const ok = await runSecret(
+      {
+        dir: defaultEndpointDir(),
+        catalog: bundledCatalog(),
+        askHidden: askSecret,
+        askVisible: async (prompt) => {
+          const rl = createInterface({ input: process.stdin, output: process.stderr });
+          try {
+            return await askLine(rl, prompt);
+          } finally {
+            rl.close();
+          }
+        },
+        isTTY: Boolean(process.stdin.isTTY && process.stderr.isTTY),
+        out: (text) => process.stderr.write(text),
+        err: (text) => process.stderr.write(text),
+      },
+      id,
+      opts,
+    );
+    if (!ok) process.exitCode = 1;
+  });
+
 export const connectorsCommand = new Command('connectors')
   .description('Manage the connectors of the assistant (services it can reach from its box)')
   .addCommand(list)
   .addCommand(enable)
-  .addCommand(disable);
+  .addCommand(disable)
+  .addCommand(setup);

@@ -8,6 +8,7 @@ import { BoxManager } from '../box/manager.js';
 import type { RunResult, RuntimeRunner } from '../box/runtime.js';
 import { BOX_LABEL } from '../box/spec.js';
 import { loadConnectorCatalog } from '../connectors/catalog.js';
+import { setConnectorSecrets } from '../connectors/secrets.js';
 import { connectorsFile, enabledConnectorIds } from '../connectors/store.js';
 import { connectorsListSchema } from '../protocol/schemas.js';
 import { startTestDaemon, type TestDaemon } from './daemon.fixtures.js';
@@ -136,7 +137,7 @@ describe('connectors.* (M20)', () => {
     expect(list.connectors.find((c) => c.id === 'uno-dos')).toMatchObject({
       name: 'Conector uno-dos',
       hosts: ['api.example.com'],
-      needs: [{ name: SECRET_NAME, description: 'La clave de la API' }],
+      needs: [{ name: SECRET_NAME, description: 'La clave de la API', configured: false }],
       tools: [
         { name: 'leer', readOnly: true, summary: 'Lee' },
         { name: 'escribir', readOnly: false, summary: 'Escribe' },
@@ -279,8 +280,13 @@ describe('connectors.* (M20)', () => {
     expect(list.box.reason).toMatch(/no space left/);
   });
 
-  it('ninguna respuesta lleva valores de secreto, solo su nombre', async () => {
+  it('ninguna respuesta lleva valores de secreto, solo su nombre y si está', async () => {
     await start();
+    // La carpeta privada del daemon de pruebas (`startTestDaemon`).
+    const catalog = loadConnectorCatalog(catalogDir);
+    setConnectorSecrets(join(base, 'daemon'), catalog.get('uno-dos')!.manifest, {
+      [SECRET_NAME]: 'valor-que-no-sale-nunca',
+    });
     const approver = await t!.connect(['operator', 'approver'], 'ap');
     const enabled = await approver.request('connectors.enable', { connectorId: 'uno-dos' });
     const list = await approver.request('connectors.list', {});
@@ -288,7 +294,12 @@ describe('connectors.* (M20)', () => {
       const text = JSON.stringify(payload);
       expect(text).toContain(SECRET_NAME);
       expect(text).not.toMatch(/"(value|secret|token|apiKey)"/i);
+      expect(text).not.toContain('valor-que-no-sale-nunca');
     }
+    expect(enabled.connector.needs).toEqual([
+      { name: SECRET_NAME, description: 'La clave de la API', configured: true },
+    ]);
+    expect(list.connectors.find((c) => c.id === 'tres-cuatro')!.needs[0]!.configured).toBe(false);
     expect(readFileSync(file(), 'utf-8')).not.toContain(SECRET_NAME);
   });
 });

@@ -2312,8 +2312,11 @@ solo escribe el daemon; la sesión del `companion` lo mira al empezar cada turno
 - **Activar suma capacidad**: por eso `approve` (la CLI pide la clave de aprobador tras enseñar las
   tools; Dot, en la fase 3, la confirmación nativa). **Desactivar solo resta.** Con la caja ya en
   marcha, `enable` arranca también la de conectores; si no, arranca con el siguiente `box.start`.
-- **`needs`**: lo que el conector pide además (claves, tokens; fase 4). Solo nombre y para qué:
-  nunca un valor.
+- **`needs`**: lo que el conector pide además (claves, tokens, la URL de un servicio; fase 4): nombre,
+  para qué y `configured`. **Nunca un valor**, y por el protocolo no se configura: solo con
+  `stratum connectors setup <id>` (por terminal y sin eco, como el token de Telegram), que lo guarda
+  en `~/.stratum/daemon/connector-secrets.json`. Un conector activo al que le falta alguno no se
+  lanza, y la sesión lo cuenta con un `warning`.
 - **Sin eventos nuevos.** El cambio se ve en `connectors.list` y en las tools del siguiente turno
   del asistente. Un conector activo que no conecta (caja parada, sin runtime) no ofrece sus tools, y
   la sesión lo cuenta con un `warning` en ese turno.

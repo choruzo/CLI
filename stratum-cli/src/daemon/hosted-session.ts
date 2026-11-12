@@ -120,6 +120,8 @@ export interface HostedSessionOptions {
   assistantData?: AssistantData;
   /** M14 — dónde guarda el `companion` lo suyo (`SessionHostOptions.companionDataDir`). */
   companionDataDir?: string;
+  /** M20 fase 4 — carpeta de `connector-secrets.json` (`SessionHostOptions.connectorSecretsDir`). */
+  connectorSecretsDir?: string;
   /** M19 fase 3 — carpeta de sesiones donde busca `search_conversations` (solo agentes embebidos). */
   transcriptsDir?: string;
   /** Home de los snapshots de deshacer (UX-1). Ausente: el del usuario. Tests. */
@@ -375,6 +377,7 @@ export class HostedSession {
       | 'assistantData'
       | 'transcriptsDir'
       | 'companionDataDir'
+      | 'connectorSecretsDir'
       | 'snapshotsHome'
     >,
     agent: NonNullable<SessionHostOptions['agent']>,
@@ -392,6 +395,9 @@ export class HostedSession {
         : {}),
       ...(preset === 'companion' && opts.companionDataDir
         ? { companionDataDir: opts.companionDataDir }
+        : {}),
+      ...(preset === 'companion' && opts.connectorSecretsDir
+        ? { connectorSecretsDir: opts.connectorSecretsDir }
         : {}),
       env: opts.env,
       config: opts.config,

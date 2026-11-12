@@ -218,6 +218,20 @@ export function ConnectorsPanel({ connected, canControl }: Props) {
                       Needs: {c.needs.map((n) => n.name).join(", ")}
                     </p>
                   ) : null}
+                  {c.needs.some((n) => n.configured !== true) ? (
+                    // M20 fase 4: lo que pide se configura solo por terminal,
+                    // nunca desde aquí: no pasa por el webview.
+                    <p className="note small" role="status">
+                      Not set up yet (
+                      {c.needs
+                        .filter((n) => n.configured !== true)
+                        .map((n) => n.name)
+                        .join(", ")}
+                      ). Run <code>stratum connectors setup {c.id}</code> in a
+                      terminal
+                      {c.enabled ? "; until then the assistant does not have it." : "."}
+                    </p>
+                  ) : null}
                   {c.enabled ? (
                     confirming === c.id ? (
                       <span

@@ -678,7 +678,15 @@ export const connectorSchema: z.ZodType<ProtocolConnector> = z.object({
   name: z.string().max(60),
   description: z.string().max(300),
   hosts: z.array(z.string().max(253)).max(32),
-  needs: z.array(z.object({ name: z.string().max(64), description: z.string().max(200) })).max(16),
+  needs: z
+    .array(
+      z.object({
+        name: z.string().max(64),
+        description: z.string().max(200),
+        configured: z.boolean(),
+      }),
+    )
+    .max(16),
   tools: z
     .array(
       z.object({ name: z.string().max(64), readOnly: z.boolean(), summary: z.string().max(200) }),

@@ -107,6 +107,11 @@ export interface SessionHostOptions {
    */
   connectors?: ActiveConnectorsSource | false;
   /**
+   * M20 fase 4 — carpeta privada del daemon, donde está `connector-secrets.json`.
+   * Ausente: `~/.stratum/daemon`.
+   */
+  connectorSecretsDir?: string;
+  /**
    * M19 fase 3 — carpeta de sesiones del daemon, donde `search_conversations`
    * busca (solo lectura, solo las conversaciones del propio agente embebido).
    * Solo el daemon la da; sin ella la tool no existe.
@@ -268,7 +273,13 @@ export class SessionHost {
       const dataDir = opts.companionDataDir ?? companionDataDir();
       config = buildCompanionConfig(config, dataDir);
       if (opts.connectors !== false) {
-        connectors = opts.connectors ?? activeConnectorsSource({ dataDir, box: config.box });
+        connectors =
+          opts.connectors ??
+          activeConnectorsSource({
+            dataDir,
+            box: config.box,
+            ...(opts.connectorSecretsDir ? { secretsDir: opts.connectorSecretsDir } : {}),
+          });
       }
       registry = buildCompanionRegistry(config, {
         dataDir,

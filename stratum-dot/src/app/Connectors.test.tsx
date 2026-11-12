@@ -63,6 +63,38 @@ describe('panel de conectores', () => {
     expect(panel().textContent).toContain('Connectors box: running');
   });
 
+  it('lo que falta por configurar se dice con la orden de terminal (fase 4)', async () => {
+    const native = fakeNative();
+    native.calls.connectorsList.mockResolvedValue(
+      list([
+        renfe({
+          enabled: true,
+          enabledAt: 1,
+          needs: [
+            { name: 'HA_URL', description: 'url', configured: true },
+            { name: 'HA_TOKEN', description: 'token', configured: false },
+          ],
+        }),
+      ]),
+    );
+    mounted(native);
+    await waitFor(() => expect(panel().textContent).toContain('Not set up yet (HA_TOKEN)'));
+    expect(panel().textContent).toContain('stratum connectors setup renfe');
+    expect(panel().textContent).toContain('the assistant does not have it');
+    // Nada que teclear aquí: no pasa por el webview.
+    expect(panel().querySelector('input')).toBeNull();
+  });
+
+  it('todo configurado: sin aviso', async () => {
+    const native = fakeNative();
+    native.calls.connectorsList.mockResolvedValue(
+      list([renfe({ needs: [{ name: 'HA_TOKEN', description: 'token', configured: true }] })]),
+    );
+    mounted(native);
+    await waitFor(() => expect(panel().textContent).toContain('Needs: HA_TOKEN'));
+    expect(panel().textContent).not.toContain('Not set up');
+  });
+
   it('activar pasa por la vía nativa y vuelve a pedir la lista (sin optimismo)', async () => {
     const native = fakeNative();
     native.calls.connectorsList.mockResolvedValue(list([renfe()]));

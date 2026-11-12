@@ -809,10 +809,11 @@ export interface ProtocolConnector {
   /** A qué se conecta. Informativo: la caja de conectores tiene salida a internet. */
   hosts: string[];
   /**
-   * Lo que pide además (claves, tokens: fase 4). Solo el nombre y para qué;
-   * nunca un valor.
+   * Lo que pide además (claves, tokens, la URL de un servicio: fase 4). Solo el
+   * nombre, para qué y si ya está configurado; nunca un valor. Se configura
+   * solo con `stratum connectors setup <id>` (por terminal, sin eco).
    */
-  needs: { name: string; description: string }[];
+  needs: { name: string; description: string; configured: boolean }[];
   tools: ProtocolConnectorTool[];
   enabled: boolean;
   enabledAt: Timestamp | null;

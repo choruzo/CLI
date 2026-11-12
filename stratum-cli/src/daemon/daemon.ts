@@ -107,6 +107,7 @@ import {
   enabledConnectorIds,
   readConnectorsFile,
 } from '../connectors/store.js';
+import { readConnectorSecrets } from '../connectors/secrets.js';
 import { toProtocolConnector, toProtocolConnectorsBox } from './connectors-dto.js';
 import { fetchModelInfos } from '../providers/utils.js';
 import { createSessionEnv } from '../runtime/session-env.js';
@@ -879,6 +880,7 @@ export class Stratumd {
         archived,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
         companionDataDir: this.companionDir,
+        connectorSecretsDir: this.daemonDir,
         ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
         ...this.routineProposals(),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
@@ -1010,6 +1012,11 @@ export class Stratumd {
     }
     if (params.agent === COMPANION_AGENT) return this.openCompanion(params, origin);
     return this.openNewSession(params, origin);
+  }
+
+  /** La carpeta privada del daemon (`endpoint.json`, `telegram.json`, `connector-secrets.json`). */
+  private get daemonDir(): string {
+    return this.opts.dir ?? defaultEndpointDir();
   }
 
   /** Dónde guarda lo suyo el `companion` (M14). */
@@ -1314,6 +1321,7 @@ export class Stratumd {
           files,
           ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
           companionDataDir: this.companionDir,
+          connectorSecretsDir: this.daemonDir,
           ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
           ...this.routineProposals(),
           ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
@@ -1475,6 +1483,7 @@ export class Stratumd {
         snapshot,
         ...(this.opts.assistantData ? { assistantData: this.opts.assistantData } : {}),
         companionDataDir: this.companionDir,
+        connectorSecretsDir: this.daemonDir,
         ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
       });
@@ -2358,9 +2367,11 @@ export class Stratumd {
   private async connectorsList(): Promise<ProtocolConnectorsList> {
     const state = readConnectorsFile(connectorsFile(this.companionDir));
     const enabled = new Map(state.state === 'ok' ? state.enabled.map((e) => [e.id, e]) : []);
+    // Solo se mira qué nombres hay: ningún valor sale de aquí.
+    const secrets = readConnectorSecrets(this.daemonDir);
     return {
       connectors: this.connectorCatalog.entries.map((e) =>
-        toProtocolConnector(e.manifest, enabled.get(e.manifest.id)),
+        toProtocolConnector(e.manifest, enabled.get(e.manifest.id), secrets),
       ),
       box: toProtocolConnectorsBox(await this.box.connectorsStatus()),
       readOnly: state.state !== 'ok' && state.state !== 'absent',
@@ -2390,7 +2401,10 @@ export class Stratumd {
     }
     const state = readConnectorsFile(file);
     const current = state.state === 'ok' ? state.enabled.find((e) => e.id === id) : undefined;
-    return { connector: toProtocolConnector(entry.manifest, current), changed };
+    return {
+      connector: toProtocolConnector(entry.manifest, current, readConnectorSecrets(this.daemonDir)),
+      changed,
+    };
   }
 
   private routinesOrThrow(): RoutineScheduler {

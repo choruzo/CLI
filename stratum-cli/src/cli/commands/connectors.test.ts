@@ -1,6 +1,18 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { ProtocolConnector, ProtocolConnectorsList } from '../../protocol/index.js';
-import { formatConnectorsList, runDisable, runEnable, type ConnectorDeps } from './connectors.js';
+import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import { tmpdir } from 'os';
+import { join } from 'path';
+import { loadConnectorCatalog } from '../../connectors/catalog.js';
+import { connectorSecretsPath, readConnectorSecrets } from '../../connectors/secrets.js';
+import {
+  formatConnectorsList,
+  runDisable,
+  runEnable,
+  runSecret,
+  type ConnectorDeps,
+  type SecretDeps,
+} from './connectors.js';
 
 function connector(over: Partial<ProtocolConnector> = {}): ProtocolConnector {
   return {
@@ -40,9 +52,14 @@ describe('formatConnectorsList', () => {
 
   it('enseña lo que necesita', () => {
     const out = formatConnectorsList(
-      list([connector({ needs: [{ name: 'GH_TOKEN', description: 'personal token' }] })]),
+      list([
+        connector({
+          needs: [{ name: 'GH_TOKEN', description: 'personal token', configured: false }],
+        }),
+      ]),
     );
-    expect(out).toContain('needs: GH_TOKEN (personal token)');
+    expect(out).toContain('needs: GH_TOKEN (personal token) [missing]');
+    expect(out).toContain('stratum connectors setup github');
   });
 
   it('con un conector activo y la caja parada avisa; con la razón si la hay', () => {
@@ -176,5 +193,100 @@ describe('runDisable', () => {
     const t = makeDeps();
     expect(await runDisable(t.deps, 'nope')).toBe(false);
     expect(t.operatorRequest).not.toHaveBeenCalled();
+  });
+});
+
+describe('runSecret (fase 4)', () => {
+  // El catálogo real: home-assistant pide HA_URL (con eco) y HA_TOKEN (sin eco).
+  const catalog = loadConnectorCatalog();
+
+  function secretDeps(answers: (string | null)[], over: Partial<SecretDeps> = {}) {
+    const dir = join(mkdtempSync(join(tmpdir(), 'stratum-cli-secret-')), 'daemon');
+    const asked: { prompt: string; hidden: boolean }[] = [];
+    let out = '';
+    const next = (prompt: string, hidden: boolean) => {
+      asked.push({ prompt, hidden });
+      return Promise.resolve(answers.shift() ?? null);
+    };
+    const deps: SecretDeps = {
+      dir,
+      catalog,
+      askHidden: (p) => next(p, true),
+      askVisible: (p) => next(p, false),
+      isTTY: true,
+      out: (t) => (out += t),
+      err: (t) => (out += t),
+      ...over,
+    };
+    return {
+      deps,
+      asked,
+      output: () => out,
+      dir,
+      done: () => rmSync(join(dir, '..'), { recursive: true, force: true }),
+    };
+  }
+
+  it('pide la URL con eco y el token sin eco, guarda y nunca escribe un valor', async () => {
+    const t = secretDeps(['http://homeassistant.home:8123', 'eyJ.token.secreto']);
+    try {
+      expect(await runSecret(t.deps, 'home-assistant')).toBe(true);
+      expect(t.asked).toEqual([
+        { prompt: 'HA_URL: ', hidden: false },
+        { prompt: 'HA_TOKEN: ', hidden: true },
+      ]);
+      expect(t.output()).not.toContain('eyJ.token.secreto');
+      expect(t.output()).toContain('Ready');
+      const state = readConnectorSecrets(t.dir);
+      expect(state.state === 'ok' && state.file.connectors['home-assistant']).toEqual({
+        HA_URL: 'http://homeassistant.home:8123',
+        HA_TOKEN: 'eyJ.token.secreto',
+      });
+      // Vacío conserva el que había; --name pide solo ese.
+      t.asked.length = 0;
+      expect(await runSecret(t.deps, 'home-assistant', { name: 'HA_TOKEN' })).toBe(false);
+      expect(t.asked).toEqual([{ prompt: 'HA_TOKEN: ', hidden: true }]);
+      expect(readFileSync(connectorSecretsPath(t.dir), 'utf8')).toContain('eyJ.token.secreto');
+    } finally {
+      t.done();
+    }
+  });
+
+  it('sin terminal no pide nada; cancelar no guarda; --clear borra', async () => {
+    const noTty = secretDeps(['x'], { isTTY: false });
+    try {
+      expect(await runSecret(noTty.deps, 'home-assistant')).toBe(false);
+      expect(noTty.asked).toEqual([]);
+      expect(noTty.output()).toMatch(/interactive terminal/);
+    } finally {
+      noTty.done();
+    }
+    const t = secretDeps(['http://h:8123', null]);
+    try {
+      expect(await runSecret(t.deps, 'home-assistant')).toBe(false);
+      expect(readConnectorSecrets(t.dir)).toEqual({ state: 'absent' });
+      const again = secretDeps(['http://h:8123', 'tok'], { dir: t.dir });
+      expect(await runSecret(again.deps, 'home-assistant')).toBe(true);
+      expect(await runSecret({ ...t.deps, isTTY: false }, 'home-assistant', { clear: true })).toBe(
+        true,
+      );
+      const state = readConnectorSecrets(t.dir);
+      expect(state.state === 'ok' && state.file.connectors).toEqual({});
+    } finally {
+      t.done();
+    }
+  });
+
+  it('un conector desconocido, uno sin nada que configurar o un nombre ajeno', async () => {
+    const t = secretDeps([]);
+    try {
+      expect(await runSecret(t.deps, 'nada')).toBe(false);
+      expect(await runSecret(t.deps, 'open-meteo')).toBe(false);
+      expect(await runSecret(t.deps, 'home-assistant', { name: 'OTRO' })).toBe(false);
+      expect(t.output()).toMatch(/Unknown connector[\s\S]*does not need[\s\S]*does not use "OTRO"/);
+      expect(t.asked).toEqual([]);
+    } finally {
+      t.done();
+    }
   });
 });

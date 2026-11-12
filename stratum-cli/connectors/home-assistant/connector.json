@@ -1,0 +1,48 @@
+{
+  "schemaVersion": 1,
+  "id": "home-assistant",
+  "version": "1.0.0",
+  "name": "Home Assistant",
+  "description": "Consulta y maneja tu casa con Home Assistant, en tu red local.",
+  "agents": ["companion"],
+  "hosts": ["la URL de HA_URL (tu red local)"],
+  "secrets": [
+    {
+      "name": "HA_URL",
+      "description": "URL de tu Home Assistant, con el nombre completo o la IP (p. ej. http://homeassistant.home:8123)",
+      "sensitive": false
+    },
+    {
+      "name": "HA_TOKEN",
+      "description": "Token de acceso de larga duración (Perfil → Seguridad en Home Assistant)"
+    }
+  ],
+  "tools": [
+    { "name": "ha_resumen", "readOnly": true, "summary": "Resumen de la casa: dominios y áreas." },
+    {
+      "name": "ha_buscar",
+      "readOnly": true,
+      "summary": "Busca entidades por texto, dominio o área."
+    },
+    {
+      "name": "ha_estado",
+      "readOnly": true,
+      "summary": "Estado detallado de una o varias entidades."
+    },
+    {
+      "name": "ha_encender",
+      "readOnly": false,
+      "summary": "Enciende luces, enchufes, escenas, persianas…"
+    },
+    {
+      "name": "ha_apagar",
+      "readOnly": false,
+      "summary": "Apaga luces, enchufes, ventiladores, persianas…"
+    },
+    {
+      "name": "ha_accion",
+      "readOnly": false,
+      "summary": "Llama a cualquier servicio de Home Assistant."
+    }
+  ]
+}

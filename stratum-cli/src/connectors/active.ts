@@ -6,11 +6,17 @@
  * turno siguiente (`docs/PRD_STRATUM_DOT.md` §23.11).
  */
 import { BoxConfigSchema, type BoxConfig } from '../config/schema.js';
-import { connectorLaunches, type ConnectorLaunchDeps } from '../box/connectors.js';
+import {
+  connectorLaunches,
+  type ConnectorLaunchDeps,
+  type ConnectorToLaunch,
+} from '../box/connectors.js';
+import { defaultEndpointDir } from '../client/discovery.js';
 import type { DynamicMcpServer } from '../tools/mcp/manager.js';
 import type { SkillEntry } from '../skills/registry.js';
 import { loadConnectorCatalog, type CatalogEntry, type ConnectorCatalog } from './catalog.js';
 import { readOnlyToolsOf } from './manifest.js';
+import { readConnectorSecrets, secretValuesFor, secretsStatusOf } from './secrets.js';
 import { connectorsFile, readConnectorsFile } from './store.js';
 
 export interface ActiveConnectors {
@@ -36,6 +42,8 @@ export interface ActiveConnectorsOptions {
   /** Datos del `companion` (`connectors.json` vive ahí). */
   dataDir: string;
   box: BoxConfig | undefined;
+  /** Carpeta privada del daemon (`connector-secrets.json`); por defecto `~/.stratum/daemon`. */
+  secretsDir?: string;
   catalog?: ConnectorCatalog;
   launch?: ConnectorLaunchDeps;
 }
@@ -62,21 +70,36 @@ export async function resolveActiveConnectors(
   if (state.enabled.length === 0) return out;
   const catalog = opts.catalog ?? bundledCatalog();
   const entries: CatalogEntry[] = [];
+  const toLaunch: ConnectorToLaunch[] = [];
+  // Solo se lee si algún conector activo pide secretos.
+  let secrets: ReturnType<typeof readConnectorSecrets> | null = null;
   for (const { id } of state.enabled) {
     const entry = catalog.get(id);
     if (!entry) {
       out.warnings.push(`Connector "${id}" is enabled but is not in this Stratum's catalog.`);
       continue;
     }
+    const { manifest } = entry;
+    if (manifest.secrets.length > 0) {
+      secrets ??= readConnectorSecrets(opts.secretsDir ?? defaultEndpointDir());
+    }
+    const values = secrets ? secretValuesFor(manifest, secrets) : {};
+    if (!values) {
+      // Falla cerrado: sin todos sus secretos no se lanza (ni se ofrecen sus tools).
+      const status = secretsStatusOf(manifest, secrets!);
+      out.warnings.push(
+        status.unusable
+          ? `Connector "${id}" is off: connector-secrets.json is ${status.unusable === 'newer' ? 'from a newer Stratum' : 'not valid'}.`
+          : `Connector "${id}" needs setup (${status.missing.join(', ')}): run "stratum connectors setup ${id}".`,
+      );
+      continue;
+    }
     entries.push(entry);
+    toLaunch.push({ manifest, secrets: values });
   }
   if (entries.length === 0) return out;
   const box = opts.box ?? BoxConfigSchema.parse({});
-  const launched = await connectorLaunches(
-    box,
-    entries.map((e) => e.manifest),
-    opts.launch,
-  );
+  const launched = await connectorLaunches(box, toLaunch, opts.launch);
   if (!launched.ok) {
     out.warnings.push(`Connectors are unavailable: ${launched.reason}`);
     return out;

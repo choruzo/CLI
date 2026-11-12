@@ -7,6 +7,7 @@ import { connectorExecArgs } from '../box/spec.js';
 import type { RuntimeDetection } from '../box/runtime.js';
 import { resolveActiveConnectors } from './active.js';
 import { loadConnectorCatalog } from './catalog.js';
+import { connectorSecretsPath, setConnectorSecrets } from './secrets.js';
 import { connectorsFile, enableConnector } from './store.js';
 
 let dir: string;
@@ -18,7 +19,12 @@ beforeEach(() => {
 });
 afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
-function addConnector(id: string, tools: { name: string; readOnly: boolean }[], skill = true) {
+function addConnector(
+  id: string,
+  tools: { name: string; readOnly: boolean }[],
+  skill = true,
+  secrets: string[] = [],
+) {
   mkdirSync(join(catalogDir, id), { recursive: true });
   writeFileSync(
     join(catalogDir, id, 'connector.json'),
@@ -30,7 +36,7 @@ function addConnector(id: string, tools: { name: string; readOnly: boolean }[], 
       description: 'x',
       agents: ['companion'],
       hosts: [],
-      secrets: [],
+      secrets: secrets.map((name) => ({ name, description: 'd' })),
       tools: tools.map((t) => ({ ...t, summary: 's' })),
     }),
   );
@@ -152,5 +158,88 @@ describe('resolveActiveConnectors (M20)', () => {
     expect(r.readOnlyTools).toEqual({ 'uno-dos': ['leer'] });
     expect(r.skills.map((s) => s.id)).toEqual(['uno-dos']);
     expect(r.skills[0]!.skill.name).toBe('connector-uno-dos');
+  });
+
+  describe('secretos (fase 4)', () => {
+    function setup() {
+      addConnector('casa', [{ name: 'leer', readOnly: true }], true, ['CASA_URL', 'CASA_TOKEN']);
+      addConnector('libre', [{ name: 'leer', readOnly: true }]);
+      enableConnector(connectorsFile(dir), 'casa');
+      enableConnector(connectorsFile(dir), 'libre');
+      const secretsDir = join(dir, 'daemon');
+      const catalog = loadConnectorCatalog(catalogDir);
+      return { secretsDir, catalog };
+    }
+
+    it('sin sus secretos no se lanza, avisa con la orden y el resto sigue', async () => {
+      const { secretsDir, catalog } = setup();
+      const { deps } = launchDeps(RUNTIME);
+      const r = await resolveActiveConnectors({
+        dataDir: dir,
+        box: undefined,
+        secretsDir,
+        catalog,
+        launch: deps,
+      });
+      expect(r.servers.map((s) => s.config.name)).toEqual(['libre']);
+      expect(r.servers[0]!.config.env).toBeUndefined();
+      expect(r.warnings).toEqual([
+        'Connector "casa" needs setup (CASA_URL, CASA_TOKEN): run "stratum connectors setup casa".',
+      ]);
+      expect(r.skills.map((s) => s.id)).toEqual(['libre']);
+      // A medias tampoco.
+      setConnectorSecrets(secretsDir, catalog.get('casa')!.manifest, { CASA_URL: 'http://x' });
+      const half = await resolveActiveConnectors({
+        dataDir: dir,
+        box: undefined,
+        secretsDir,
+        catalog,
+        launch: deps,
+      });
+      expect(half.servers.map((s) => s.config.name)).toEqual(['libre']);
+      expect(half.warnings[0]).toMatch(/needs setup \(CASA_TOKEN\)/);
+    });
+
+    it('con todos: -e NOMBRE sin valor en la orden y el valor solo en env', async () => {
+      const { secretsDir, catalog } = setup();
+      setConnectorSecrets(secretsDir, catalog.get('casa')!.manifest, {
+        CASA_URL: 'http://casa.home:8123',
+        CASA_TOKEN: 'tok-muy-secreto',
+      });
+      const { deps } = launchDeps(RUNTIME);
+      const r = await resolveActiveConnectors({
+        dataDir: dir,
+        box: BoxConfigSchema.parse({ name: 'mia' }),
+        secretsDir,
+        catalog,
+        launch: deps,
+      });
+      expect(r.warnings).toEqual([]);
+      const casa = r.servers.find((s) => s.config.name === 'casa')!;
+      expect(casa.config.args).toEqual(
+        connectorExecArgs('mia', 'casa', ['CASA_URL', 'CASA_TOKEN']),
+      );
+      expect(casa.config.args.join(' ')).not.toContain('tok-muy-secreto');
+      expect(casa.config.env).toEqual({
+        CASA_URL: 'http://casa.home:8123',
+        CASA_TOKEN: 'tok-muy-secreto',
+      });
+    });
+
+    it('un fichero de secretos roto apaga solo los que los piden', async () => {
+      const { secretsDir, catalog } = setup();
+      mkdirSync(secretsDir, { recursive: true });
+      writeFileSync(connectorSecretsPath(secretsDir), '{ roto');
+      const { deps } = launchDeps(RUNTIME);
+      const r = await resolveActiveConnectors({
+        dataDir: dir,
+        box: undefined,
+        secretsDir,
+        catalog,
+        launch: deps,
+      });
+      expect(r.servers.map((s) => s.config.name)).toEqual(['libre']);
+      expect(r.warnings).toEqual(['Connector "casa" is off: connector-secrets.json is not valid.']);
+    });
   });
 });

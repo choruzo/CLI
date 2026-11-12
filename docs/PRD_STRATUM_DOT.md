@@ -2365,8 +2365,14 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       un `warning`). Al arrancar vuelve con la reconexión del `McpManager`.
     - **Nunca cae al anfitrión ni a la caja del agente.**
   - **Secretos** (fase 4):
-    - Se teclean en una ventana nativa de Dot y se guardan en
-      `~/.stratum/companion/connector-secrets.json` (privado, atómico, como `telegram.json`).
+    - *Decidido por el usuario 2026-11-12*: **solo por la CLI**, como el token de Telegram.
+      `stratum connectors setup <id>` los pide por terminal (sin eco lo sensible) y los guarda en
+      `~/.stratum/daemon/connector-secrets.json`, en la carpeta privada del daemon (atómico, `0600`,
+      Zod; a ella no llegan las tools del agente). Dot no tiene ventana para teclearlos: solo dice
+      qué falta y qué orden ejecutar. Así se cumplen las dos reglas: un secreto nunca pasa por el
+      protocolo, y Dot sigue siendo solo cliente del protocolo.
+    - `connectors.list` dice de cada uno si está configurado (`needs[].configured`), nunca su valor.
+      Un conector activo al que le falta alguno no se lanza.
     - Viajan como `-e NOMBRE` **sin valor**: el runtime lo toma del entorno del proceso cliente, así
       que el secreto nunca aparece en la línea de órdenes.
     - Nunca pasan por el webview, la config, los logs, la traza, el protocolo ni la caja del agente.
@@ -2487,7 +2493,12 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   3. Confirmación nativa y panel en Dot (el protocolo ya está desde la fase 1). *Hecha el
      2026-11-11* (`docs/dot.md` §23); falta probarla con la ventana real (E2E).
   4. Secretos y **Home Assistant**. Su conector necesita llegar a la red local desde la caja de
-     conectores, que se comprueba en esta fase.
+     conectores, que se comprueba en esta fase. *Hecha el 2026-11-12*: la caja de conectores
+     llega a la LAN (Docker Desktop), pero no resuelve un nombre corto que el anfitrión completa con
+     su sufijo DNS (`homeassistant` → `homeassistant.home`): en `HA_URL` va el nombre completo o la
+     IP. Conector propio sobre la API REST (no el puente al servidor MCP de Home Assistant), para
+     declarar cada tool en el manifiesto. Probado de punta a punta contra un Home Assistant real
+     con un token falso (401 visto por el agente); falta la prueba con el token de verdad.
 
 ### 23.12 Fuera, por ahora
 
@@ -2588,8 +2599,9 @@ o en una nube, multiusuario, y tomar el control de la caja desde Dot.
   - **(c) Aceptarlo**: el token está al alcance del agente y de cualquier contenido que lo
     manipule. No lo recomiendo para Home Assistant, que abre puertas y apaga cosas.
 
-  Haga falta o no, el secreto se teclea en una **ventana nativa** de Dot y nunca pasa por el
-  webview, la config, los logs, la traza ni el protocolo.
+  Haga falta o no, el secreto nunca pasa por el webview, la config, los logs, la traza ni el
+  protocolo. *Corregido 2026-11-12 por el usuario*: se teclea solo en la CLI
+  (`stratum connectors setup`), no en una ventana nativa de Dot (M20, *Secretos*).
 - **A11. ADIF sin API pública** (M20). *Resuelta 2026-11-11*: ADIF queda fuera; retrasos, vías y
   cancelaciones salen del tiempo real de Renfe. Las opciones que había eran:
   - usar los *endpoints* internos de su web, marcado como no oficial: puede romperse sin aviso y

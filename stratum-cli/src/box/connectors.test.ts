@@ -68,16 +68,24 @@ describe('connectorLaunches (M20)', () => {
   });
 
   it('sin runtime: no hay lanzamientos y dice por qué', async () => {
-    const r = await connectorLaunches(BoxConfigSchema.parse({}), [manifest()], {
-      detect: async () => ({ ok: false, reason: 'No container runtime available' }),
-    });
+    const r = await connectorLaunches(
+      BoxConfigSchema.parse({}),
+      [{ manifest: manifest(), secrets: {} }],
+      {
+        detect: async () => ({ ok: false, reason: 'No container runtime available' }),
+      },
+    );
     expect(r).toEqual({ ok: false, reason: 'No container runtime available' });
   });
 
   it('compone la orden con el binario del runtime y la caja de conectores', async () => {
-    const r = await connectorLaunches(BoxConfigSchema.parse({ name: 'mia' }), [manifest()], {
-      detect: async () => ({ ok: true, runtime: rt }),
-    });
+    const r = await connectorLaunches(
+      BoxConfigSchema.parse({ name: 'mia' }),
+      [{ manifest: manifest(), secrets: {} }],
+      {
+        detect: async () => ({ ok: true, runtime: rt }),
+      },
+    );
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.launches).toHaveLength(1);
@@ -96,10 +104,14 @@ describe('connectorLaunches (M20)', () => {
 
   it('beforeConnect comprueba la caja de conectores', async () => {
     const { run, calls } = inspectRunner({ labels: { ...OWN, [BOX_ROLE_LABEL]: 'connectors' } });
-    const r = await connectorLaunches(BoxConfigSchema.parse({}), [manifest()], {
-      detect: async () => ({ ok: true, runtime: rt }),
-      run,
-    });
+    const r = await connectorLaunches(
+      BoxConfigSchema.parse({}),
+      [{ manifest: manifest(), secrets: {} }],
+      {
+        detect: async () => ({ ok: true, runtime: rt }),
+        run,
+      },
+    );
     if (!r.ok) throw new Error('unexpected');
     await expect(r.launches[0]!.beforeConnect()).resolves.toBeUndefined();
     expect(calls).toEqual([['container', 'inspect', 'stratum-box-box-connectors']]);
