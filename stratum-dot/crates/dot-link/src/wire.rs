@@ -99,6 +99,10 @@ pub enum MainMethod {
     /// va por [`ApproverMethod`].
     ConnectorsList,
     ConnectorsDisable,
+    /// M21 (Dot) — los recordatorios del asistente: la lista y cancelar uno
+    /// (solo resta). Crear no se puede desde un cliente: los deja el `companion`.
+    RemindersList,
+    RemindersCancel,
     /// Desktop: la traza de una sesión (`trace.records`, `observe`) para el panel
     /// de trayectoria. Solo lectura; la suscripción la lleva el enlace (sigue lo
     /// que se le pide con `LinkHandle::trace`), no una llamada suelta.
@@ -140,7 +144,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 57] = [
+    pub const ALL: [MainMethod; 59] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -183,6 +187,8 @@ impl MainMethod {
         MainMethod::ChannelsUnpair,
         MainMethod::ConnectorsList,
         MainMethod::ConnectorsDisable,
+        MainMethod::RemindersList,
+        MainMethod::RemindersCancel,
         MainMethod::TraceSubscribe,
         MainMethod::TraceUnsubscribe,
         MainMethod::SessionsSetAgent,
@@ -246,6 +252,8 @@ impl WireMethod for MainMethod {
             MainMethod::ChannelsUnpair => "channels.unpair",
             MainMethod::ConnectorsList => "connectors.list",
             MainMethod::ConnectorsDisable => "connectors.disable",
+            MainMethod::RemindersList => "reminders.list",
+            MainMethod::RemindersCancel => "reminders.cancel",
             MainMethod::TraceSubscribe => "trace.subscribe",
             MainMethod::TraceUnsubscribe => "trace.unsubscribe",
             MainMethod::SessionsSetAgent => "sessions.setAgent",
@@ -483,6 +491,8 @@ mod tests {
                 "channels.unpair",
                 "connectors.list",
                 "connectors.disable",
+                "reminders.list",
+                "reminders.cancel",
                 "trace.subscribe",
                 "trace.unsubscribe",
                 "sessions.setAgent",

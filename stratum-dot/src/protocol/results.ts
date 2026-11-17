@@ -17,6 +17,7 @@ import type {
   ProtocolModel,
   ProtocolRoutine,
   ProtocolRoutineFire,
+  ProtocolReminder,
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionMemory,
@@ -98,6 +99,23 @@ export function parseRoutine(raw: unknown): ProtocolRoutine | null {
 export function parseRoutineRun(raw: unknown): { fire: ProtocolRoutineFire; routine: ProtocolRoutine } | null {
   const parsed = RESULTS['routines.run'].safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+/** M21 — `reminders.list`: los recordatorios (cada uno validado con `reminderSchema`) y el solo lectura. */
+export interface ReminderList {
+  reminders: ProtocolReminder[];
+  readOnly: boolean;
+}
+
+export function parseReminders(raw: unknown): ReminderList | null {
+  const parsed = RESULTS['reminders.list'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** M21 — `reminders.cancel`: el recordatorio tal como quedó (ya `cancelled`). */
+export function parseCancelledReminder(raw: unknown): ProtocolReminder | null {
+  const parsed = RESULTS['reminders.cancel'].safeParse(raw);
+  return parsed.success ? parsed.data.reminder : null;
 }
 
 /** M17 — `memory.decisions`: lo que recuerda el asistente (las últimas, o la búsqueda). */

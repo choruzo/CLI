@@ -306,6 +306,11 @@ pub enum CallAction {
     ConnectorsList,
     /// M20 — `connectors.disable`: desactivar un conector (solo resta).
     ConnectorsDisable { connector_id: String },
+    /// M21 — `reminders.list`: los recordatorios pendientes y los terminados de
+    /// los últimos 7 días, por `dueAt`, y si el almacén está en solo lectura.
+    RemindersList,
+    /// M21 — `reminders.cancel`: cancelar un recordatorio pendiente (solo resta).
+    RemindersCancel { reminder_id: String },
     /// Desktop (modo código) — `sessions.setAgent`: el perfil de agente de código
     /// de una sesión parada; `None` lo quita (`agent: null`).
     SetAgent {
@@ -430,6 +435,8 @@ impl CallAction {
             CallAction::ChannelsUnpair { .. } => "channels-unpair",
             CallAction::ConnectorsList => "connectors-list",
             CallAction::ConnectorsDisable { .. } => "connectors-disable",
+            CallAction::RemindersList => "reminders-list",
+            CallAction::RemindersCancel { .. } => "reminders-cancel",
             CallAction::SetAgent { .. } => "set-agent",
             CallAction::SetReadOnly { .. } => "set-read-only",
             CallAction::CancelJob { .. } => "cancel-job",
@@ -472,6 +479,7 @@ impl CallAction {
                 | CallAction::ChannelsPairBegin
                 | CallAction::ChannelsUnpair { .. }
                 | CallAction::ConnectorsDisable { .. }
+                | CallAction::RemindersCancel { .. }
                 | CallAction::SetAgent { .. }
                 | CallAction::SetReadOnly { .. }
                 | CallAction::CancelJob { .. }

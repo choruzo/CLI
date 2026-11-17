@@ -37,6 +37,7 @@ export type {
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
   ProtocolRoutineResult,
+  ProtocolReminder,
   ProtocolRun,
   ProtocolRunStatus,
   ProtocolSharedImage,

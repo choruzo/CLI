@@ -197,6 +197,9 @@ const DOT_METHODS: &[MainMethod] = &[
     // M20: los conectores del asistente (activar va por el broker de aprobador).
     MainMethod::ConnectorsList,
     MainMethod::ConnectorsDisable,
+    // M21: los recordatorios del asistente (cancelar solo resta; crearlos no es de un cliente).
+    MainMethod::RemindersList,
+    MainMethod::RemindersCancel,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -1236,6 +1239,16 @@ fn call_request_as(
             Ok((
                 MainMethod::ConnectorsDisable,
                 json!({ "connectorId": connector_id, "operationId": operation_id }),
+            ))
+        }
+        CallAction::RemindersList => Ok((MainMethod::RemindersList, json!({}))),
+        CallAction::RemindersCancel { reminder_id } => {
+            if !valid_id(reminder_id) {
+                return Err(invalid("Invalid reminder id."));
+            }
+            Ok((
+                MainMethod::RemindersCancel,
+                json!({ "reminderId": reminder_id, "operationId": operation_id }),
             ))
         }
         CallAction::MemoryForget { decision_id } => {
@@ -3581,6 +3594,33 @@ mod tests {
             connector_id: "../etc".into(),
         };
         assert!(call_request(&bad, "op").is_err());
+        // M21: los recordatorios del asistente. Listar es una consulta; cancelar
+        // cambia algo y solo está en el perfil de Dot (crearlos no es de un cliente).
+        let (method, params) = call_request(&CallAction::RemindersList, "op").unwrap();
+        assert_eq!(method, MainMethod::RemindersList);
+        assert_eq!(params, json!({}));
+        assert!(!CallAction::RemindersList.mutating());
+        let cancel = CallAction::RemindersCancel {
+            reminder_id: "rem_abc1234567".into(),
+        };
+        let (method, params) = call_request(&cancel, "op-12").unwrap();
+        assert_eq!(method, MainMethod::RemindersCancel);
+        assert_eq!(
+            params,
+            json!({ "reminderId": "rem_abc1234567", "operationId": "op-12" })
+        );
+        assert!(cancel.mutating());
+        assert!(call_request(
+            &CallAction::RemindersCancel {
+                reminder_id: String::new()
+            },
+            "op"
+        )
+        .is_err());
+        for method in [MainMethod::RemindersList, MainMethod::RemindersCancel] {
+            assert!(DOT_METHODS.contains(&method));
+            assert!(!DESKTOP_METHODS.contains(&method));
+        }
         let (method, params) = call_request(&CallAction::ChannelsStatus, "op").unwrap();
         assert_eq!(method, MainMethod::ChannelsStatus);
         assert_eq!(params, json!({}));

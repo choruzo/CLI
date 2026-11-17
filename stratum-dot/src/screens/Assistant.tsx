@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
 import { MemoryPanel } from '../components/MemoryPanel';
+import { RemindersPanel } from '../components/RemindersPanel';
 import { RoutinesPanel } from '../components/RoutinesPanel';
 import { ConnectorsPanel } from '../components/ConnectorsPanel';
 import { TelegramPanel } from '../components/TelegramPanel';
@@ -181,6 +182,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
     <BoxPanel connected={connected} canControl={canControl} sessionId={companionId} snapshot={snapshot} />
   );
   const routines = <RoutinesPanel connected={connected} canControl={canControl} onOpenSession={onOpenSession} />;
+  const reminders = <RemindersPanel connected={connected} canControl={canControl} now={now} />;
   const memory = (
     <MemoryPanel
       connected={connected}
@@ -225,7 +227,9 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
               ? box
               : tab === 'routines'
                 ? routines
-                : tab === 'telegram'
+                : tab === 'reminders'
+                  ? reminders
+                  : tab === 'telegram'
                   ? telegram
                   : tab === 'connectors'
                     ? connectors
@@ -239,6 +243,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
       <div className="assistant-side">
         {box}
         {routines}
+        {reminders}
         {memory}
         {telegram}
         {connectors}
@@ -272,6 +277,7 @@ const TABS: Array<{ id: AssistantTab; label: string }> = [
   { id: 'chat', label: 'Conversation' },
   { id: 'box', label: 'Box' },
   { id: 'routines', label: 'Routines' },
+  { id: 'reminders', label: 'Reminders' },
   { id: 'memory', label: 'Memory' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'connectors', label: 'Connectors' },

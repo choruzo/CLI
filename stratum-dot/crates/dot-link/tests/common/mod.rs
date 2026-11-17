@@ -926,6 +926,38 @@ impl Fake {
                 }))]
             }
             "routines.list" => vec![ok(json!({ "routines": [], "readOnly": false }))],
+            // M21: un recordatorio pendiente y otro entregado, con el almacén en
+            // solo lectura cuando el test lo pida.
+            "reminders.list" => vec![ok(json!({
+                "reminders": [
+                    {
+                        "id": "rem_aaaaaaaaaa", "text": "Sacar la ropa",
+                        "dueAt": 1_760_000_000_000i64, "createdAt": 1_759_000_000_000i64,
+                        "origin": "agent", "status": "pending"
+                    },
+                    {
+                        "id": "rem_bbbbbbbbbb", "text": "Llamar a Ana",
+                        "dueAt": 1_759_000_000_000i64, "createdAt": 1_758_000_000_000i64,
+                        "origin": "agent", "status": "delivered",
+                        "endedAt": 1_759_000_050_000i64, "late": true
+                    }
+                ],
+                "readOnly": false
+            }))],
+            "reminders.cancel" => {
+                let id = params["reminderId"].as_str().unwrap_or("");
+                if id.is_empty() {
+                    return vec![err("INVALID_PARAMS", json!({ "reason": "invalid" }))];
+                }
+                vec![ok(json!({
+                    "reminder": {
+                        "id": id, "text": "Sacar la ropa",
+                        "dueAt": 1_760_000_000_000i64, "createdAt": 1_759_000_000_000i64,
+                        "origin": "agent", "status": "cancelled",
+                        "endedAt": 1_760_000_000_500i64
+                    }
+                }))]
+            }
             "routines.add" | "routines.update" | "routines.remove" | "routines.run"
             | "grants.revoke" | "memory.decisions" | "memory.forget" => {
                 vec![ok(json!({ "echo": method }))]

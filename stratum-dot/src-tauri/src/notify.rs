@@ -61,22 +61,32 @@ pub fn plain(text: &str, max: usize) -> String {
     out
 }
 
-/// La sesión de la última notificación mostrada, hasta el primer foco.
+/// Qué abre el aviso al pulsarlo (o al dar el foco poco después): la sesión de
+/// una rutina (M16) o la pestaña de recordatorios del asistente (M21). Solo se
+/// selecciona o se abre una vista: nunca se resuelve nada.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum NoticeTarget {
+    Session(String),
+    Reminders,
+}
+
+/// La última notificación mostrada, hasta el primer foco. En Windows el clic se
+/// sabe por el propio aviso, así que allí no se recuerda nada.
 #[derive(Default)]
-pub struct PendingNotice(Mutex<Option<(String, Instant)>>);
+pub struct PendingNotice(Mutex<Option<(NoticeTarget, Instant)>>);
 
 impl PendingNotice {
-    pub fn remember(&self, session_id: String, at: Instant) {
+    pub fn remember(&self, target: NoticeTarget, at: Instant) {
         if let Ok(mut slot) = self.0.lock() {
-            *slot = Some((session_id, at));
+            *slot = Some((target, at));
         }
     }
 
-    /// La sesión a abrir si la ventana recibe el foco ahora. Se consume: un
-    /// solo foco la abre.
-    pub fn take_fresh(&self, now: Instant) -> Option<String> {
-        let (id, at) = self.0.lock().ok()?.take()?;
-        (now.saturating_duration_since(at) <= FOCUS_WINDOW).then_some(id)
+    /// Qué abrir si la ventana recibe el foco ahora. Se consume: un solo foco
+    /// la abre.
+    pub fn take_fresh(&self, now: Instant) -> Option<NoticeTarget> {
+        let (target, at) = self.0.lock().ok()?.take()?;
+        (now.saturating_duration_since(at) <= FOCUS_WINDOW).then_some(target)
     }
 }
 
@@ -151,21 +161,21 @@ mod tests {
     fn la_sesion_recordada_se_usa_una_vez_y_caduca() {
         let pending = PendingNotice::default();
         let t0 = Instant::now();
-        pending.remember("ses_1".into(), t0);
+        pending.remember(NoticeTarget::Session("ses_1".into()), t0);
         assert_eq!(
             pending.take_fresh(t0 + Duration::from_secs(5)),
-            Some("ses_1".into())
+            Some(NoticeTarget::Session("ses_1".into()))
         );
         assert_eq!(pending.take_fresh(t0 + Duration::from_secs(6)), None);
 
-        pending.remember("ses_2".into(), t0);
+        pending.remember(NoticeTarget::Session("ses_2".into()), t0);
         assert_eq!(
             pending.take_fresh(t0 + FOCUS_WINDOW + Duration::from_secs(1)),
             None
         );
         // La última sustituye a la anterior.
-        pending.remember("a".into(), t0);
-        pending.remember("b".into(), t0);
-        assert_eq!(pending.take_fresh(t0), Some("b".into()));
+        pending.remember(NoticeTarget::Session("a".into()), t0);
+        pending.remember(NoticeTarget::Reminders, t0);
+        assert_eq!(pending.take_fresh(t0), Some(NoticeTarget::Reminders));
     }
 }

@@ -1561,3 +1561,37 @@ Tests: `src/app/Connectors.test.tsx`, `crates/dot-link/tests/confirm.rs`
 (`npm run e2e:connector-catalog`: desbloquear, cancelar y confirmar en la ventana nativa, Home Assistant
 sin configurar, desactivar; hecho el 2026-11-12), `tests/link.rs` (`los_conectores_se_listan_y_se_desactivan_*`), unidad
 en `confirm.rs`, `approver.rs` y `link.rs`, y el de arquitectura.
+
+## 24. Recordatorios (M21)
+
+Los avisos que el `companion` deja con su tool (`docs/protocol.md` §30). El daemon los guarda y a su
+hora los **entrega**, sin lanzar ningún run; Dot los enseña y los cancela, y avisa al sistema.
+
+- **Panel *Reminders*** en la vista *Asistente* (tras *Routines*; a 440 px, su pestaña). Pinta lo
+  que contesta `reminders.list`, que se pide **al abrir la vista, tras cancelar y al llegar un
+  `reminder.due`**, nunca por sondeo: sin estado optimista, lo que se ve es la lista o la respuesta
+  de la cancelación. Los pendientes van por hora, con su texto y la hora local («today 21:30»,
+  «tomorrow 18/11 09:00» o la fecha) y *Cancel* (solo con `control`). Lo entregado y cancelado de
+  los últimos 7 días va en una sección plegada *Recent*, con «late` si el daemon lo marca. Con el
+  almacén en solo lectura (`readOnly`), un aviso y sin *Cancel*. Sin conexión o sin capacidad, como
+  los demás paneles.
+- **Cancelar solo resta**: `dot_reminders_cancel` → `reminders.cancel` (`control`) por la conexión
+  principal, sin confirmación nativa. Un resultado desconocido dice «Result unknown» y no se
+  reintenta solo. Crear no se puede desde Dot: no hay `reminders.add`, los pone el `companion`.
+- **El aviso**: `protocol/reminder-notices.ts` (puro) saca los `reminder.due` **válidos** de los
+  eventos sin validar (con `reminderSchema`) y arma el aviso —título «Reminder», el texto y, si se
+  entregó tarde, « (late: was due HH:MM)»—. Un `NoticeLedger` (el de rutinas) lo da una sola vez por
+  id, porque la suscripción puede repetir. Lo muestra el lado nativo por el mismo camino que el
+  aviso de una rutina: `dot_notify_reminder` → `notify.rs` (texto plano y acotado; sin el texto en el
+  log). Pulsarlo abre la vista *Asistente* en la pestaña *Reminders*: `open-view` con
+  `view: 'reminders'` (en Windows, el `Activated` del aviso; en el resto, el foco en los 30 s
+  siguientes, que `PendingNotice` recuerda con `NoticeTarget`). Un aviso **solo informa**: sin
+  acciones y sin resolver nada. Si la persona ya está mirando esa pestaña con la ventana delante,
+  no se avisa.
+- Nativo: `MainMethod::RemindersList|RemindersCancel` solo en `DOT_METHODS`, `CallAction::Reminders*`
+  (cancelar es `mutating`), comandos `dot_reminders_list|cancel` y `dot_notify_reminder`. Desktop no
+  los tiene.
+
+Tests: `src/app/Reminders.test.tsx`, `src/protocol/reminder-notices.test.ts`, `tests/link.rs`
+(`los_recordatorios_se_listan_y_se_cancelan_por_la_principal`), unidad en `link.rs` y `wire.rs`, y el
+de arquitectura.

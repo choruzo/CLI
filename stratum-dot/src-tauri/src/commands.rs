@@ -477,7 +477,85 @@ pub async fn dot_connectors_enable<R: Runtime>(
     connector_id: String,
 ) -> Result<(), CommandError> {
     main_window(&window)?;
-    resolve(app, &state, ApproverAction::EnableConnector { connector_id }).await
+    resolve(
+        app,
+        &state,
+        ApproverAction::EnableConnector { connector_id },
+    )
+    .await
+}
+
+/// M21 — los recordatorios del asistente con su estado, y si el almacén está en
+/// solo lectura. Solo lectura; el `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_reminders_list(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::RemindersList).await
+}
+
+/// M21 — cancelar un recordatorio pendiente. Solo resta: conexión principal,
+/// sin confirmación nativa. Sin respuesta su resultado es desconocido y no se repite.
+#[tauri::command]
+pub async fn dot_reminders_cancel(
+    state: State<'_, DotState>,
+    reminder_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::RemindersCancel { reminder_id })
+        .await
+}
+
+/// M21 — avisa al sistema de que llegó la hora de un recordatorio. El aviso solo
+/// informa (sin acciones): pulsarlo abre la vista *Asistente* en la pestaña de
+/// recordatorios (`notify.rs`), y nada más. Nunca resuelve nada.
+#[tauri::command]
+pub fn dot_notify_reminder<R: Runtime>(
+    app: AppHandle<R>,
+    window: WebviewWindow<R>,
+    state: State<'_, DotState>,
+    title: String,
+    body: String,
+) -> Result<(), CommandError> {
+    main_window(&window)?;
+    let title = notify::plain(&title, notify::MAX_TITLE_CHARS);
+    let body = notify::plain(&body, notify::MAX_BODY_CHARS);
+    if title.is_empty() {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "The notification has no title.",
+        ));
+    }
+    // Sin el texto: ni el título ni el cuerpo van al log.
+    let on_click = {
+        let app = app.clone();
+        move || {
+            crate::show_main(&app);
+            let _ = app.emit_to(
+                "main",
+                crate::DOT_EVENT,
+                serde_json::json!({ "type": "open-view", "view": "reminders" }),
+            );
+        }
+    };
+    match notify::show(&app, &title, &body, on_click) {
+        Ok(()) => {
+            state.logger.info("notify: reminder");
+            // Windows avisa del clic: no hace falta adivinarlo por el foco.
+            if !cfg!(windows) {
+                state
+                    .notice
+                    .remember(notify::NoticeTarget::Reminders, std::time::Instant::now());
+            }
+            Ok(())
+        }
+        Err(_) => {
+            state.logger.warn("notify: the system did not show it");
+            Err(CommandError::new(
+                CommandErrorKind::NotSent,
+                "The system did not show the notification.",
+            ))
+        }
+    }
 }
 
 /// M17 — la memoria de sesión (M11) de una conversación, en solo lectura.
@@ -535,7 +613,10 @@ pub fn dot_notify_routine<R: Runtime>(
             state.logger.info("notify: routine");
             // Windows avisa del clic: no hace falta adivinarlo por el foco.
             if !cfg!(windows) {
-                state.notice.remember(session_id, std::time::Instant::now());
+                state.notice.remember(
+                    notify::NoticeTarget::Session(session_id),
+                    std::time::Instant::now(),
+                );
             }
             Ok(())
         }

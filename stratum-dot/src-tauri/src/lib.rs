@@ -143,9 +143,12 @@ pub fn run() {
             commands::dot_connectors_list,
             commands::dot_connectors_disable,
             commands::dot_connectors_enable,
+            commands::dot_reminders_list,
+            commands::dot_reminders_cancel,
             commands::dot_new_companion_conversation,
             commands::dot_session_memory,
             commands::dot_notify_routine,
+            commands::dot_notify_reminder,
             commands::dot_approver_status,
             commands::dot_approver_unlock,
             commands::dot_approver_lock,
@@ -189,12 +192,16 @@ pub fn run() {
             if let WindowEvent::Focused(true) = event {
                 if window.label() == "main" {
                     if let Some(state) = window.try_state::<DotState>() {
-                        if let Some(session_id) = state.notice.take_fresh(std::time::Instant::now()) {
-                            let _ = window.app_handle().emit_to(
-                                "main",
-                                DOT_EVENT,
-                                serde_json::json!({ "type": "open-session", "sessionId": session_id }),
-                            );
+                        if let Some(target) = state.notice.take_fresh(std::time::Instant::now()) {
+                            let payload = match target {
+                                notify::NoticeTarget::Session(session_id) => {
+                                    serde_json::json!({ "type": "open-session", "sessionId": session_id })
+                                }
+                                notify::NoticeTarget::Reminders => {
+                                    serde_json::json!({ "type": "open-view", "view": "reminders" })
+                                }
+                            };
+                            let _ = window.app_handle().emit_to("main", DOT_EVENT, payload);
                         }
                     }
                 }

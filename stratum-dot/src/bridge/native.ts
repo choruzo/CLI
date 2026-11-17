@@ -57,8 +57,8 @@ export type ApproverStatus =
   | { kind: 'unavailable'; reason: 'not-connected' | 'no-approver-key' }
   | { kind: 'error'; message: string };
 
-/** Vistas que el lado nativo puede pedir que se abran (la bandeja). */
-export type DotView = 'human-input';
+/** Vistas que el lado nativo puede pedir que se abran (la bandeja, el aviso de un recordatorio). */
+export type DotView = 'human-input' | 'reminders';
 
 /**
  * Lo que llega del lado nativo. `snapshot` y `events` traen DTOs del protocolo
@@ -297,8 +297,14 @@ export interface NativeBridge {
   connectorsEnable(connectorId: string): Promise<void>;
   /** M20 — desactivar un conector. Solo resta: sin confirmación nativa. */
   connectorsDisable(connectorId: string): Promise<unknown>;
+  /** M21 — los recordatorios del asistente (pendientes y terminados de 7 días). Sin validar. */
+  remindersList(): Promise<unknown>;
+  /** M21 — cancelar un recordatorio pendiente. Solo resta; sin respuesta, `unknown`: no se repite. */
+  remindersCancel(reminderId: string): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
+  /** M21 — el aviso de un recordatorio: solo informa; pulsarlo abre la pestaña *Reminders*. */
+  notifyReminder(title: string, body: string): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -392,6 +398,9 @@ export const tauriBridge: NativeBridge = {
   connectorsEnable: (connectorId) => invoke('dot_connectors_enable', { connectorId }),
   connectorsDisable: (connectorId) => invoke<unknown>('dot_connectors_disable', { connectorId }),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
+  remindersList: () => invoke<unknown>('dot_reminders_list'),
+  remindersCancel: (reminderId) => invoke<unknown>('dot_reminders_cancel', { reminderId }),
+  notifyReminder: (title, body) => invoke('dot_notify_reminder', { title, body }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

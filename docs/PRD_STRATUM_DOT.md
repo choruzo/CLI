@@ -2608,7 +2608,13 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      - El código de zona Meteoalerta **no** siempre contiene la provincia (Baleares, y Canarias
        compartida), así que la provincia sale de la tabla.
   3. **`google`**: el `setup` OAuth en la CLI, Gmail y Tasks.
-  4. **Recordatorios propios**: daemon, protocolo y panel en Dot.
+  4. **Recordatorios propios**: daemon, protocolo y panel en Dot. *Hecha el 2026-11-17*:
+     - Contrato en `docs/protocol.md` §30; `set_reminder|list_reminders|cancel_reminder`.
+     - Entrega en la sesión principal del `companion`: la abre o la despierta, y solo da el aviso
+       por entregado al publicarlo. Si no puede, reintenta.
+     - Telegram, `stratum reminders list|cancel` y la pestaña *Reminders* de Dot. El aviso del
+       sistema sale siempre, también con la pestaña delante.
+     - Falta probarlo de punta a punta con la ventana real de Dot.
 
 ### 23.12 Fuera, por ahora
 

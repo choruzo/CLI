@@ -6,10 +6,12 @@
 import { vi } from 'vitest';
 import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
+import { resetReminderWatch } from '../app/reminders';
 import { resetRoutineWatch } from '../app/routines';
 import type {
   ProtocolBoxScreen,
   ProtocolBoxStatus,
+  ProtocolReminder,
   ProtocolRoutine,
   ProtocolRun,
   ProtocolSharedImage,
@@ -18,6 +20,7 @@ import type {
 } from '../protocol';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
+import { useReminders } from '../stores/reminderStore';
 import { useRoutines } from '../stores/routineStore';
 import { useSessions } from '../stores/sessionStore';
 import { useUi } from '../stores/uiStore';
@@ -164,6 +167,19 @@ export function sampleRoutine(overrides: Partial<ProtocolRoutine> = {}): Protoco
   };
 }
 
+/** M21 — un recordatorio, como lo devuelve `reminders.list`. */
+export function sampleReminder(overrides: Partial<ProtocolReminder> = {}): ProtocolReminder {
+  return {
+    id: 'rem_abc1234567',
+    text: 'Sacar la ropa',
+    dueAt: 1_760_000_000_000,
+    createdAt: 1_759_000_000_000,
+    origin: 'agent',
+    status: 'pending',
+    ...overrides,
+  };
+}
+
 export const CONNECTED: ConnectionState = {
   kind: 'connected',
   serverVersion: '0.9.0',
@@ -282,6 +298,11 @@ export function fakeNative(): FakeNative {
       }),
     ),
     notifyRoutine: vi.fn(async () => undefined),
+    remindersList: vi.fn(async (): Promise<unknown> => ({ reminders: [], readOnly: false })),
+    remindersCancel: vi.fn(async (reminderId: string): Promise<unknown> => ({
+      reminder: sampleReminder({ id: reminderId, status: 'cancelled', endedAt: 1_760_000_000_500 }),
+    })),
+    notifyReminder: vi.fn(async (_title: string, _body: string) => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),
@@ -311,6 +332,8 @@ export function resetStores(): void {
   useSessions.getState().reset();
   useRoutines.getState().reset();
   resetRoutineWatch();
+  useReminders.getState().reset();
+  resetReminderWatch();
   useUi.setState({
     selectedId: null,
     tab: 'chat',

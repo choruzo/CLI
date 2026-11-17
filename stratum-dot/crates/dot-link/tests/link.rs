@@ -1094,6 +1094,63 @@ async fn cada_cliente_ve_la_memoria_de_su_agente_y_solo_esa() {
     rig.quit().await;
 }
 
+/// M21: los recordatorios del asistente se listan y se cancelan por la conexión
+/// principal. Crear no es de un cliente (los deja el `companion`), y Desktop no los tiene.
+#[tokio::test(flavor = "multi_thread")]
+async fn los_recordatorios_se_listan_y_se_cancelan_por_la_principal() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    let list = rig.link.call(CallAction::RemindersList).await.unwrap();
+    assert_eq!(list["reminders"][0]["id"], "rem_aaaaaaaaaa");
+    assert_eq!(list["reminders"][1]["status"], "delivered");
+    assert_eq!(list["reminders"][1]["late"], true);
+    assert_eq!(list["readOnly"], false);
+
+    let cancelled = rig
+        .link
+        .call(CallAction::RemindersCancel {
+            reminder_id: "rem_aaaaaaaaaa".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(cancelled["reminder"]["status"], "cancelled");
+
+    let requests = fake.requests();
+    let sent = |m: &str| requests.iter().find(|r| r["method"] == m).unwrap().clone();
+    assert!(sent("reminders.list")["params"]
+        .get("operationId")
+        .is_none());
+    assert_eq!(
+        sent("reminders.cancel")["params"]["reminderId"],
+        "rem_aaaaaaaaaa"
+    );
+    assert!(sent("reminders.cancel")["params"]["operationId"]
+        .as_str()
+        .unwrap()
+        .starts_with("dot-"));
+    // Un id vacío no sale.
+    let bad = rig
+        .link
+        .call(CallAction::RemindersCancel {
+            reminder_id: String::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(bad.kind, CommandErrorKind::Invalid);
+    // Desktop no tiene recordatorios.
+    let before = fake.requests().len();
+    assert!(desktop.link.call(CallAction::RemindersList).await.is_err());
+    assert_eq!(fake.requests().len(), before);
+
+    desktop.quit().await;
+    rig.quit().await;
+}
+
 /// M20: listar y desactivar conectores van por la conexión principal; activar no
 /// (es del broker de aprobador). Desktop no los tiene.
 #[tokio::test(flavor = "multi_thread")]

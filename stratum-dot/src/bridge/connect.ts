@@ -2,6 +2,7 @@
  * Une el lado nativo con los stores: cada `DotEvent` va a su sitio, y nada más.
  * Aquí no hay lógica del protocolo: validar y reducir es de `protocol/apply.ts`.
  */
+import { watchReminderDue } from '../app/reminders';
 import { watchRoutineRuns } from '../app/routines';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
@@ -30,6 +31,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       }
       // M16: el inicio o el fin de un run de la sesión de una rutina refresca la lista (y avisa).
       watchRoutineRuns(native, event.sessionId, event.events);
+      // M21: un `reminder.due` refresca la lista de recordatorios (y avisa), una vez por id.
+      watchReminderDue(native, event.events);
       break;
     case 'approver':
       useApprover.getState().setStatus(event.status);
@@ -37,6 +40,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
     case 'open-view':
       // La bandeja pide el centro de aprobaciones: se abre, sin resolver nada.
       if (event.view === 'human-input') useUi.getState().openHumanInput();
+      // M21: se pulsó el aviso de un recordatorio. Solo se abre su pestaña.
+      if (event.view === 'reminders') useUi.getState().openReminders();
       break;
     case 'ask':
       // El Dot compacto: el mensaje va al asistente (lo envía su vista al tener su sesión).
