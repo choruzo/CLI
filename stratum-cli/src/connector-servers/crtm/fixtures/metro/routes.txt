@@ -1,0 +1,3 @@
+﻿route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color
+4__1___,CRTM,1,Pinar de Chamartín-Valdecarros,,1,https://www.crtm.es/4__1___.aspx,2DBEF0,FFFFFF
+4__2___,CRTM,2,Las Rosas-Cuatro Caminos,,1,https://www.crtm.es/4__2___.aspx,ED1C24,FFFFFF

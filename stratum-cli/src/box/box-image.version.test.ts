@@ -19,6 +19,7 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   3: 'a5504ba322b45ca3',
   // Recalculada sin `NOT_IN_IMAGE` (antes '8a8c3d4d83f51880'): misma imagen, otra fórmula.
   4: 'a636c81f91ce4d0a',
+  5: 'af6cd6de4a912786',
 };
 
 /**

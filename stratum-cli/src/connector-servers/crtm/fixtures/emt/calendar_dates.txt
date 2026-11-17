@@ -1,0 +1,6 @@
+service_id,date,exception_type
+LA,20261102,2
+LA,20261109,2
+LA,20261207,2
+LA,20261208,2
+LA,20261225,2

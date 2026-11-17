@@ -1,0 +1,20 @@
+﻿stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,location_type,parent_station,stop_timezone,wheelchair_boarding
+par_10_1,1,PINAR DE CHAMARTIN,Calle de Arturo Soria 330,40.48014,-3.66684,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_2,2,FUENTE DE LA MORA,Calle de Dulce Chacón 15,40.48482,-3.66325,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_3,3,VIRGEN DEL CORTIJO,Avda de Manoteras 54,40.48734,-3.66098,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_4,4,ANTONIO SAURA,Calle del Príncipe Carlos 10,40.48546,-3.65353,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_5,5,ALVAREZ DE VILLAAMIL,Calle del Príncipe Carlos 13 B,40.48905,-3.65136,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_6,6,BLASCO IBAÑEZ,Calle del Príncipe Carlos 50,40.49368,-3.65584,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_7,7,MARIA TUDOR,Calle de María Tudor 15,40.49717,-3.65889,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_8,8,PALAS DE REY,Calle de Palas de Rey 16 A,40.50544,-3.66507,A,http://www.crtm.es,0,,Europe/Madrid,2
+par_10_9,9,LAS TABLAS,Calle de Palas de Rey 30,40.50824,-3.66932,A,http://www.crtm.es,0,,Europe/Madrid,2
+est_10_1,1,PINAR DE CHAMARTIN,Calle de Arturo Soria 330,40.48014,-3.66684,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_2,2,FUENTE DE LA MORA,Calle de Dulce Chacón 15,40.48482,-3.66325,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_3,3,VIRGEN DEL CORTIJO,Avda de Manoteras 54,40.48734,-3.66098,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_4,4,ANTONIO SAURA,Calle del Príncipe Carlos 10,40.48546,-3.65353,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_5,5,ALVAREZ DE VILLAAMIL,Calle del Príncipe Carlos 13 B,40.48905,-3.65136,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_6,6,BLASCO IBAÑEZ,Calle del Príncipe Carlos 50,40.49368,-3.65584,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_7,7,MARIA TUDOR,Calle de María Tudor 15,40.49717,-3.65889,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_8,8,PALAS DE REY,Calle de Palas de Rey 16 A,40.50544,-3.66507,A,http://www.crtm.es,1,,Europe/Madrid,2
+est_10_9,9,LAS TABLAS,Calle de Palas de Rey 30,40.50824,-3.66932,A,http://www.crtm.es,1,,Europe/Madrid,2
+acc_10_1_721,1,Arturo Soria,Calle de Arturo Soria 330,40.48023,-3.66684,,http://www.crtm.es,2,est_10_1,,0

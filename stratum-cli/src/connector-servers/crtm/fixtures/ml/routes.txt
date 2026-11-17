@@ -1,0 +1,2 @@
+﻿route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color
+10__ML1___,CRTM,ML1,Pinar de Chamartín - Las Tablas,,0,https://www.crtm.es/10__51___.aspx,3A7DDA,FFFFFF
