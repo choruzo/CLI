@@ -23,6 +23,7 @@ import {
   type ProtocolPlan,
   type ProtocolPlanRequest,
   type ProtocolQuestionRequest,
+  type ProtocolReminder,
   type ProtocolRun,
   type ProtocolSession,
   type ProtocolSessionHostInfo,
@@ -1293,6 +1294,8 @@ export class SessionPublisher {
     type: T,
     data: () => StateEventData[T],
     subagentId?: string,
+    /** No es del run en curso aunque lo haya (`reminder.due`): sale sin `runId`. */
+    outsideRun = false,
   ): void {
     if (this.released) return;
     this.seqValue++;
@@ -1302,7 +1305,7 @@ export class SessionPublisher {
       sessionId: this.sessionId,
       at: this.updatedAt,
       seq: this.seqValue,
-      ...(this.runActive && this.run ? { runId: this.run.id } : {}),
+      ...(this.runActive && this.run && !outsideRun ? { runId: this.run.id } : {}),
       ...(subagentId ? { subagentId } : {}),
       data: data(),
     } as ProtocolStateEvent;
@@ -1377,6 +1380,15 @@ export class SessionPublisher {
   /** Publica un aviso de la sesión (`warning`), redactado y recortado. */
   warn(message: string): void {
     this.state('warning', () => ({ message: clip(this.redact(message), INPUT_CHARS) }));
+  }
+
+  /**
+   * M21 — un recordatorio que vence (`reminder.due`): se publica **fuera** de
+   * cualquier run. Solo informa: no lleva acciones y no entra en la
+   * conversación (`applyTranscriptEvent` lo ignora).
+   */
+  reminderDue(reminder: ProtocolReminder): void {
+    this.state('reminder.due', () => ({ reminder: { ...reminder } }), undefined, true);
   }
 
   /** Entrega al sink lo que haya en la cola. Nunca lanza. */

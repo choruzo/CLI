@@ -24,6 +24,7 @@ import { approvalsCommand } from './commands/approvals.js';
 import { pluginCommand } from './commands/plugin.js';
 import { boxCommand } from './commands/box.js';
 import { routinesCommand } from './commands/routines.js';
+import { remindersCommand } from './commands/reminders.js';
 import { channelsCommand } from './commands/channels.js';
 import { connectorsCommand } from './commands/connectors.js';
 import { cliVersion } from './version.js';
@@ -61,6 +62,7 @@ program.addCommand(approvalsCommand);
 program.addCommand(pluginCommand);
 program.addCommand(boxCommand);
 program.addCommand(routinesCommand);
+program.addCommand(remindersCommand);
 program.addCommand(channelsCommand);
 program.addCommand(connectorsCommand);
 

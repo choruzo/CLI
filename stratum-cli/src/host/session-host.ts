@@ -11,6 +11,7 @@ import { registerBuiltinTools } from '../tools/index.js';
 import { McpManager, type McpManagerWarning } from '../tools/mcp/manager.js';
 import { screenLocks } from '../tools/screen/lock.js';
 import type { RoutineProposals } from '../tools/routines/propose.js';
+import type { ReminderBook } from '../tools/reminders/reminders.js';
 import { closeSessionExecRuntime } from '../tools/exec/runtime.js';
 import { PlanStore, generatePlanId } from '../session/plan-store.js';
 import { SubagentStore } from '../session/subagent-store.js';
@@ -100,6 +101,11 @@ export interface SessionHostOptions {
    * sin esto la tool no existe.
    */
   routineProposals?: RoutineProposals;
+  /**
+   * M21 — dónde crea y cancela el `companion` sus recordatorios. Solo el
+   * daemon, y solo para su sesión principal: sin esto las tools no existen.
+   */
+  reminders?: ReminderBook;
   /**
    * M20 — de dónde salen los conectores activos del `companion` (se miran al
    * empezar cada turno). Ausente: los de `connectors.json` en sus datos;
@@ -284,6 +290,7 @@ export class SessionHost {
       registry = buildCompanionRegistry(config, {
         dataDir,
         ...(opts.routineProposals ? { routines: opts.routineProposals } : {}),
+        ...(opts.reminders ? { reminders: opts.reminders } : {}),
       });
     } else if (opts.preset === 'assistant') {
       const dataDir = opts.assistantData?.dir ?? assistantDataDir();

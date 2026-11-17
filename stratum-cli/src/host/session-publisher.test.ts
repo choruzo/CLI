@@ -452,6 +452,34 @@ describe('SessionPublisher — cola local acotada', () => {
     expect(message).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
   });
 
+  it('reminderDue sale fuera de cualquier run, aunque haya uno en curso, y no entra en la conversación (M21)', async () => {
+    const { host, emit } = fakeHost('s-reminder', testConfig('reminder'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+    });
+    publisher.start();
+    emit({ type: 'turn_started', kind: 'run', input: 'hola' });
+    const before = publisher.snapshot().messages;
+    publisher.reminderDue({
+      id: 'rem_1',
+      text: 'Llamar al médico',
+      dueAt: 1_000,
+      createdAt: 500,
+      origin: 'agent',
+      status: 'delivered',
+      endedAt: 1_000,
+    });
+    publisher.flush();
+    const due = sink.states().find((e) => e.type === 'reminder.due');
+    expect(due).toBeDefined();
+    expect(due!.runId).toBeUndefined();
+    expect(due!.data).toMatchObject({ reminder: { id: 'rem_1', status: 'delivered' } });
+    expect(publisher.snapshot().messages).toEqual(before);
+  });
+
   it('al llenarse descarta primero lo volátil: los eventos de estado llegan todos', async () => {
     const { host, emit } = fakeHost('s-volatile', testConfig('volatile'));
     const sink = recorder();

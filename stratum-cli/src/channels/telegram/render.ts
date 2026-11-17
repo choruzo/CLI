@@ -70,6 +70,17 @@ export function unavailable(reason: string): string {
   return `The assistant is not available right now (${reason}). Nothing was passed on.`;
 }
 
+/** M21 — un recordatorio que vence: su texto y, si llega tarde, para cuándo era. */
+export function reminderNotice(
+  text: string,
+  late: { hour: number; minute: number } | null,
+): string {
+  const head = `⏰ Recordatorio: ${text}`;
+  if (!late) return head;
+  const clock = `${String(late.hour).padStart(2, '0')}:${String(late.minute).padStart(2, '0')}`;
+  return `${head} (llega tarde: era para ${clock})`;
+}
+
 export function routineFinished(name: string, status: string, summary: string | null): string {
   const head = `Routine "${name}" ${status === 'completed' ? 'finished' : `ended: ${status}`}.`;
   return summary ? `${head}\n\n${summary}` : head;

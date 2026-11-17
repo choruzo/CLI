@@ -15,6 +15,7 @@ import { getLogger } from '../logging/index.js';
 import type {
   ProtocolChannelsStatus,
   ProtocolEvent,
+  ProtocolReminder,
   ProtocolTelegramPaired,
   ProtocolTelegramStatus,
 } from '../protocol/index.js';
@@ -129,6 +130,11 @@ export class ChannelHost {
   /** M16 — aviso de rutina terminada a los chats emparejados. */
   routineFinished(name: string, status: string, summary: string | null): void {
     this.link?.routineFinished(name, status, summary);
+  }
+
+  /** M21 — el aviso de un recordatorio, también a los chats emparejados. */
+  reminderDue(reminder: ProtocolReminder): void {
+    this.link?.reminderDue(reminder);
   }
 
   /** Lee el fichero y la config y, si toca, empieza a escuchar. */

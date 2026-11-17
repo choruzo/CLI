@@ -37,6 +37,7 @@ import type {
   ProtocolUndoableTurn,
   ProtocolRevertPlan,
   ProtocolSessionSnapshot,
+  ProtocolReminder,
   ResumeStatus,
   RevertStatus,
   StateEventData,
@@ -55,6 +56,7 @@ import type { UserImage } from '../agent/user-images.js';
 import { UserImageError } from '../images/store.js';
 import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
 import type { RoutineProposals } from '../tools/routines/propose.js';
+import type { ReminderBook } from '../tools/reminders/reminders.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 import { BrowserActionError, BrowserUnavailableError } from '../browser/manager.js';
@@ -139,6 +141,11 @@ export interface HostedSessionOptions {
    * Solo llega a su sesión principal: una sesión de rutina no propone rutinas.
    */
   routineProposals?: RoutineProposals;
+  /**
+   * M21 — sus recordatorios (`set_reminder`, `list_reminders`,
+   * `cancel_reminder`). Solo llega a la sesión principal del `companion`.
+   */
+  reminders?: ReminderBook;
 }
 
 /** Cuánto se espera a que un turno cancelado termine de cerrarse. */
@@ -190,6 +197,7 @@ export class HostedSession {
       },
       preset,
       opts.routineId ? undefined : opts.routineProposals,
+      opts.routineId ? undefined : opts.reminders,
       opts.routineId !== undefined,
     );
     if (opts.agent && !preset) {
@@ -227,7 +235,7 @@ export class HostedSession {
   static async adopt(
     opts: Omit<
       HostedSessionOptions,
-      'readOnly' | 'sessionProfile' | 'agent' | 'routineId' | 'routineProposals'
+      'readOnly' | 'sessionProfile' | 'agent' | 'routineId' | 'routineProposals' | 'reminders'
     > & {
       context: ProtocolHandoffContext;
       snapshot: ProtocolSessionSnapshot;
@@ -298,6 +306,7 @@ export class HostedSession {
       },
       preset,
       meta.routineId ? undefined : opts.routineProposals,
+      meta.routineId ? undefined : opts.reminders,
       meta.routineId !== undefined,
     );
     if (meta.agent && !preset && host.agent.getActiveProfile()?.name !== meta.agent) {
@@ -383,12 +392,15 @@ export class HostedSession {
     agent: NonNullable<SessionHostOptions['agent']>,
     preset: SessionHostOptions['preset'] | null = null,
     routineProposals?: RoutineProposals,
+    /** M21 — los recordatorios del `companion` (solo su sesión principal). */
+    reminders?: ReminderBook,
     /** M16/M17 — la sesión de una rutina: sin concesiones temporales. */
     routine = false,
   ): Promise<SessionHost> {
     const host = await SessionHost.create({
       ...(preset ? { preset } : {}),
       ...(preset === 'companion' && routineProposals ? { routineProposals } : {}),
+      ...(preset === 'companion' && reminders ? { reminders } : {}),
       ...(preset && opts.transcriptsDir ? { transcriptsDir: opts.transcriptsDir } : {}),
       ...(preset === 'assistant' && opts.assistantData
         ? { assistantData: opts.assistantData }
@@ -767,6 +779,15 @@ export class HostedSession {
   /** Un aviso de la sesión (`warning`) que el daemon quiere que vean los clientes. */
   warn(message: string): void {
     this.publisher.warn(message);
+    this.publisher.flush();
+  }
+
+  /**
+   * M21 — un recordatorio que vence: se publica (`reminder.due`) **fuera** de
+   * cualquier run. Solo informa: no lanza un turno ni entra en la conversación.
+   */
+  reminderDue(reminder: ProtocolReminder): void {
+    this.publisher.reminderDue(reminder);
     this.publisher.flush();
   }
 

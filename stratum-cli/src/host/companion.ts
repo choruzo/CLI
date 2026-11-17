@@ -22,6 +22,11 @@ import {
   PROPOSE_ROUTINE_TOOL,
   type RoutineProposals,
 } from '../tools/routines/propose.js';
+import {
+  createReminderTools,
+  REMINDER_TOOLS,
+  type ReminderBook,
+} from '../tools/reminders/reminders.js';
 
 /**
  * El agente embebido `companion` (M14, PRD de Stratum Dot §23): el asistente
@@ -98,11 +103,12 @@ export function buildCompanionConfig(base: StratumConfig, dataDir: string): Stra
  * Registry del `companion`: solo sus tools. `exec` va atado a su caja
  * (`onlyTarget`: cualquier otro target se veta en `preflight`) y solo existe
  * con la caja habilitada. M16: `propose_routine` solo con `routines` (la
- * sesión principal en el daemon; nunca una sesión de rutina).
+ * sesión principal en el daemon; nunca una sesión de rutina). M21: sus
+ * recordatorios, solo con `reminders` y también solo en esa sesión principal.
  */
 export function buildCompanionRegistry(
   config: StratumConfig,
-  opts: { routines?: RoutineProposals; dataDir?: string } = {},
+  opts: { routines?: RoutineProposals; reminders?: ReminderBook; dataDir?: string } = {},
 ): ToolRegistry {
   const registry = new ToolRegistry();
   for (const tool of [
@@ -134,11 +140,15 @@ export function buildCompanionRegistry(
     );
   }
   if (opts.routines) registry.register(createProposeRoutineTool(opts.routines));
+  if (opts.reminders) {
+    for (const tool of createReminderTools(opts.reminders)) registry.register(tool);
+  }
   const expected = COMPANION_TOOLS.filter(
     (name) =>
       (box !== null || (name !== EXEC_TOOL && name !== SEND_IMAGE_TOOL)) &&
       (screen || !isScreenTool(name)) &&
-      (opts.routines !== undefined || name !== PROPOSE_ROUTINE_TOOL),
+      (opts.routines !== undefined || name !== PROPOSE_ROUTINE_TOOL) &&
+      (opts.reminders !== undefined || !REMINDER_TOOLS.includes(name)),
   );
   const missing = expected.filter((name) => !registry.get(name));
   if (missing.length > 0) throw new Error(`faltan tools del companion: ${missing.join(', ')}`);

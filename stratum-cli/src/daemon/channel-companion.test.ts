@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { ProtocolError } from '../ipc/codec.js';
-import type { ProtocolEvent, ProtocolRun, SteerStatus } from '../protocol/index.js';
+import type {
+  ProtocolEvent,
+  ProtocolReminder,
+  ProtocolRun,
+  SteerStatus,
+} from '../protocol/index.js';
 import type { UserImage } from '../agent/user-images.js';
 import { TelegramApiError, type TelegramMessage } from '../channels/telegram/api.js';
 import {
@@ -300,5 +305,25 @@ describe('CompanionLink: espejo (M18)', () => {
     link.routineFinished('Resumen', 'completed', 'Tres correos.');
     expect(sent[0]!.text).toContain('Routine "Resumen" finished.');
     expect(sent[0]!.text).toContain('Tres correos.');
+  });
+
+  it('recordatorio: su texto, y la hora para la que era si llega tarde (M21)', () => {
+    const { link, sent } = setup();
+    const dueAt = new Date(2026, 10, 18, 9, 0).getTime();
+    const reminder: ProtocolReminder = {
+      id: 'rem_1',
+      text: 'Llamar al médico',
+      dueAt,
+      createdAt: dueAt - 60_000,
+      origin: 'agent',
+      status: 'delivered',
+      endedAt: dueAt,
+    };
+    link.reminderDue(reminder);
+    link.reminderDue({ ...reminder, late: true });
+    expect(sent.map((s) => s.text)).toEqual([
+      '⏰ Recordatorio: Llamar al médico',
+      '⏰ Recordatorio: Llamar al médico (llega tarde: era para 09:00)',
+    ]);
   });
 });

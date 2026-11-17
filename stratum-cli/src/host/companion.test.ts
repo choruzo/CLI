@@ -16,6 +16,7 @@ import { MockProvider, makeTextRound, makeToolCallRound } from '../providers/moc
 import { StratumConfigSchema, type StratumConfig } from '../config/schema.js';
 import { createSessionEnv } from '../runtime/session-env.js';
 import { ASSISTANT_TOOLS, COMPANION_TOOLS } from '../agent/presets.js';
+import { REMINDER_TOOLS } from '../tools/reminders/reminders.js';
 import { buildCompanionPrompt } from '../agent/system-prompt.js';
 import { isScreenTool, SCREEN_TOOLS } from '../tools/screen/names.js';
 import { containerBackend } from '../tools/exec/backends/container.js';
@@ -138,9 +139,12 @@ describe('companion — prompt y toolset', () => {
     const { host } = await companionHost(provider);
     await collect(host.run('hola'));
     // Sin visión declarada, ni rastro de la pantalla.
-    // Sin quien cree rutinas (lo da el daemon), tampoco propose_routine.
+    // Sin quien cree rutinas ni quien guarde recordatorios (lo da el daemon),
+    // ni `propose_routine` ni los recordatorios.
     expect(offered(provider)).toEqual(
-      COMPANION_TOOLS.filter((t) => !isScreenTool(t) && t !== 'propose_routine').sort(),
+      COMPANION_TOOLS.filter(
+        (t) => !isScreenTool(t) && t !== 'propose_routine' && !REMINDER_TOOLS.includes(t),
+      ).sort(),
     );
     expect(host.agent.getMessages()[0]?.content).not.toContain('# Your box screen');
     for (const tool of ['read_file', 'write_file', 'list_directory', 'glob', 'grep']) {
@@ -257,7 +261,7 @@ describe('companion — la pantalla de su caja (M15, §23.4)', () => {
     const { host } = await companionHost(provider, { vision: 'pixels' });
     await collect(host.run('hola'));
     expect(offered(provider)).toEqual(
-      COMPANION_TOOLS.filter((t) => t !== 'propose_routine').sort(),
+      COMPANION_TOOLS.filter((t) => t !== 'propose_routine' && !REMINDER_TOOLS.includes(t)).sort(),
     );
     expect(host.agent.getMessages()[0]?.content).toContain('# Your box screen');
   });

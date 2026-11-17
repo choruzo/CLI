@@ -92,6 +92,7 @@ import {
   type ProtocolMemoryAgent,
   type ProtocolModel,
   type ProtocolOverviewSnapshot,
+  type ProtocolReminder,
   type ProtocolServerInfo,
   type ProtocolSession,
   type ProtocolSessionSnapshot,
@@ -143,6 +144,10 @@ import {
   toRoutinePatch,
 } from './routines-dto.js';
 import { RoutineStore, routinesFile, type Routine } from '../routines/store.js';
+import { ReminderScheduler } from './reminder-scheduler.js';
+import { reminderOperation } from './reminders-dto.js';
+import { ReminderStore, remindersFile } from '../reminders/store.js';
+import type { ReminderBook } from '../tools/reminders/reminders.js';
 import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
 import type { CompanionTurns } from './channel-companion.js';
 import type { SessionLabel } from '../channels/telegram/render.js';
@@ -242,6 +247,12 @@ export interface StratumdOptions {
    */
   routines?: RoutineStore | null;
   /**
+   * M21 — almacén de los recordatorios del asistente. Por defecto,
+   * `reminders.json` en los datos del `companion`; `null` desactiva los
+   * recordatorios (sin planificador).
+   */
+  reminders?: ReminderStore | null;
+  /**
    * M18 — canales externos (Telegram). `telegram.json` está en `dir`; por
    * defecto, `enabled` se lee de la config global en cada `channels.reload`.
    * `null`: sin canales (`channels.*` → `UNAVAILABLE`). Tests: API falsa.
@@ -340,6 +351,8 @@ export class Stratumd {
   readonly endpoint: Endpoint;
   /** M16 — el planificador de rutinas, o `null` con `routines: null`. */
   readonly routines: RoutineScheduler | null;
+  /** M21 — el planificador de los recordatorios del `companion`, o `null`. */
+  readonly reminders: ReminderScheduler | null;
   /** M19 — pasada automática de dreaming (`memory.dreaming.schedule`), o `null` si está apagada. */
   readonly dreamingSchedule: DreamingScheduler | null;
   /** M18 — los canales externos, o `null` con `channels: null`. */
@@ -467,6 +480,17 @@ export class Stratumd {
               const name = this.routines?.get(done.routineId)?.routine.name;
               if (name) this.channels?.routineFinished(name, done.run.status, done.summary);
             },
+          });
+    this.reminders =
+      opts.reminders === null
+        ? null
+        : new ReminderScheduler({
+            store: opts.reminders ?? new ReminderStore(remindersFile(this.companionDir)),
+            // M21 — el aviso sale por el protocolo, en la sesión del `companion`.
+            deliver: (reminder) => this.deliverReminder(reminder),
+            // Solo al log, y sin el texto: el aviso es de la persona.
+            onDelivered: (reminder) => this.reminderDelivered(reminder),
+            now: this.now,
           });
     // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
     this.box =
@@ -608,6 +632,8 @@ export class Stratumd {
     daemon.recoverArchived();
     // Las sesiones guardadas de rutinas ya están en `dormant`: el planificador las encuentra.
     daemon.routines?.start();
+    // M21 — los avisos perdidos se entregan al arrancar, marcados `late`.
+    daemon.reminders?.start();
     daemon.dreamingSchedule?.start();
     // M18 — el canal empieza a escuchar con el daemon ya publicado.
     daemon.channels?.start();
@@ -689,6 +715,8 @@ export class Stratumd {
     return (
       // Una rutina habilitada tiene que poder vencer: el daemon no se apaga solo.
       !this.routines?.hasEnabled &&
+      // Un recordatorio pendiente también tiene que poder avisar.
+      !this.reminders?.hasPending &&
       // Un chat emparejado tiene que poder hablarle al asistente.
       !this.channels?.keepsAlive &&
       this.sessions.size === 0 &&
@@ -711,6 +739,8 @@ export class Stratumd {
       log.info('daemon shutting down', { reason, sessions: this.sessions.size });
       // Lo primero: ninguna rutina vence mientras se apaga.
       this.routines?.stop();
+      // M21 — ni un recordatorio avisa a mitad del apagado.
+      this.reminders?.stop();
       this.dreamingSchedule?.stop();
       // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
       this.dreaming.close();
@@ -883,6 +913,7 @@ export class Stratumd {
         connectorSecretsDir: this.daemonDir,
         ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
         ...this.routineProposals(),
+        ...this.reminderBook(),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
       });
@@ -1324,6 +1355,7 @@ export class Stratumd {
           connectorSecretsDir: this.daemonDir,
           ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
           ...this.routineProposals(),
+          ...this.reminderBook(),
           ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
@@ -2152,6 +2184,17 @@ export class Stratumd {
           };
         }),
 
+      // M21 — sus recordatorios. Sin `reminders.add`: los crea el `companion`
+      // con su tool (crear no se confirma, solo avisa a la persona).
+      'reminders.list': () => {
+        const reminders = this.remindersOrThrow();
+        return { reminders: reminders.list(this.now()), readOnly: reminders.readOnly };
+      },
+      'reminders.cancel': (params) =>
+        reminderOperation(() => ({
+          reminder: this.remindersOrThrow().cancel(params.reminderId, this.now()),
+        })),
+
       // M20 — conectores del asistente. Lo activo vive en `connectors.json`,
       // que solo escribe el daemon; la sesión lo lee al empezar cada turno.
       'connectors.list': () => this.connectorsList(),
@@ -2358,6 +2401,60 @@ export class Stratumd {
     };
   }
 
+  // ---------------------------------------------------------------------------
+  // Recordatorios (M21)
+  // ---------------------------------------------------------------------------
+
+  /**
+   * M21 — `set_reminder` / `list_reminders` / `cancel_reminder` del
+   * `companion`: las tres tools solo existen con planificador, y solo en su
+   * sesión principal (`HostedSession` nunca se las da a la de una rutina).
+   * Crear o cancelar rearma el planificador.
+   */
+  private reminderBook(): { reminders?: ReminderBook } {
+    const reminders = this.reminders;
+    if (!reminders) return {};
+    return {
+      reminders: {
+        now: () => this.now(),
+        readOnly: () => reminders.readOnly,
+        // El `now` entra por parámetro: la antelación se valida una sola vez,
+        // con el mismo instante que se usó para resolver la hora.
+        add: (input, now) => reminders.add(input, now),
+        list: (now) => reminders.list(now),
+        cancel: (id, now) => reminders.cancel(id, now),
+      },
+    };
+  }
+
+  /**
+   * M21 — el aviso a su hora: `reminder.due` en la sesión principal del
+   * `companion`. Un aviso no se pierde, así que **abre** esa sesión si no existe
+   * (lo mismo que `sessions.open`) o despierta la guardada. Si no se puede
+   * publicar, **lanza**: el planificador lo deja pendiente y lo reintenta.
+   */
+  private async deliverReminder(reminder: ProtocolReminder): Promise<void> {
+    // Un aviso no se pierde: si no hay sesión del `companion`, se abre (lo mismo
+    // que `sessions.open { agent: 'companion' }`); si está guardada, se despierta.
+    // Si no se puede publicar, esto lanza y el planificador lo reintenta.
+    const session = await this.openCompanion({ agent: COMPANION_AGENT });
+    session.reminderDue(reminder);
+    log.info('reminder delivered', { reminderId: reminder.id, sessionId: session.sessionId });
+  }
+
+  /** M21 — el aviso ya publicado, también a los chats emparejados (M18). */
+  private reminderDelivered(reminder: ProtocolReminder): void {
+    try {
+      this.channels?.reminderDue(reminder);
+    } catch (err) {
+      // Un canal caído no es un fallo del aviso: ya está publicado y marcado.
+      log.warn('reminder notice not sent to the channels', {
+        reminderId: reminder.id,
+        err,
+      });
+    }
+  }
+
   /** El planificador de rutinas, o `UNAVAILABLE` si el daemon corre sin él. */
   private get connectorCatalog(): ConnectorCatalog {
     return this.opts.connectorCatalog ?? bundledCatalog();
@@ -2414,6 +2511,16 @@ export class Stratumd {
       });
     }
     return this.routines;
+  }
+
+  /** M21 — el planificador de recordatorios, o `UNAVAILABLE` si corre sin él. */
+  private remindersOrThrow(): ReminderScheduler {
+    if (!this.reminders) {
+      throw new ProtocolError('UNAVAILABLE', 'Reminders are disabled in this daemon.', {
+        reason: 'reminders-disabled',
+      });
+    }
+    return this.reminders;
   }
 
   /** M18 — lo que una tarjeta de Telegram enseña de una sesión (como Dot). */

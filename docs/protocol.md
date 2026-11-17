@@ -2357,11 +2357,16 @@ interface ProtocolReminder {
   porque solo avisa a la persona. Por eso van acotados (`REMINDER_LIMITS`): 100 pendientes, entre
   1 minuto y 1 año de antelación, y texto corto.
 - **Entrega**: el evento de estado **`reminder.due`** (`{ reminder }`, ya con `status: 'delivered'`)
-  en la sesión del `companion`, fuera de cualquier run. Está en `OVERVIEW_EVENT_TYPES`, así que
-  Dot lo recibe aunque no tenga la conversación abierta y lo enseña como notificación del sistema.
-  Con Telegram emparejado, el daemon manda además el aviso a los chats emparejados. Solo informa:
-  ni aprueba nada, ni lleva acciones, ni entra en la conversación (`applyTranscriptEvent` lo
-  ignora).
+  en la sesión del `companion`, fuera de cualquier run (sin `runId`, aunque haya un turno en
+  curso). Está en `OVERVIEW_EVENT_TYPES`, así que Dot lo recibe aunque no tenga la conversación
+  abierta y lo enseña como notificación del sistema. Con Telegram emparejado, el daemon manda
+  además el aviso a los chats emparejados. Solo informa: ni aprueba nada, ni lleva acciones, ni
+  entra en la conversación (`applyTranscriptEvent` lo ignora).
+- **Se da por entregado cuando se publica**, no antes: si no hay dónde publicarlo, el daemon
+  **abre** la sesión principal del `companion` (lo mismo que `sessions.open`, sin `cwd`) o
+  **despierta** la guardada, y solo entonces lo marca. Si no pudo publicarlo, el aviso sigue
+  `pending` y se reintenta a los 60 s y, después, cada 5 min. Si publicó pero el fichero no se
+  pudo escribir, no se repite en ese proceso. `late` se mide contra la hora real de la entrega.
 - **Un aviso perdido** con el daemon apagado se entrega al arrancar, con `late: true`. Es lo
   contrario de una rutina (§23), porque un aviso que no llega es peor que uno tarde.
 

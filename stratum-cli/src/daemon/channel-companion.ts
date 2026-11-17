@@ -22,6 +22,7 @@ import { ProtocolError } from '../ipc/codec.js';
 import { getLogger } from '../logging/index.js';
 import type {
   ProtocolEvent,
+  ProtocolReminder,
   ProtocolRun,
   ProtocolSharedImage,
   SteerStatus,
@@ -38,6 +39,7 @@ import {
   TEXT,
   fromDot,
   imageRejected,
+  reminderNotice,
   routineFinished,
   turnFailed,
   unavailable,
@@ -249,6 +251,14 @@ export class CompanionLink {
   routineFinished(name: string, status: string, summary: string | null): void {
     if (this.stopped) return;
     this.broadcast(routineFinished(name, status, summary));
+  }
+
+  /** M21 — un recordatorio que vence. Si llega tarde, la hora para la que era. */
+  reminderDue(reminder: ProtocolReminder): void {
+    if (this.stopped) return;
+    const due = new Date(reminder.dueAt);
+    const late = reminder.late ? { hour: due.getHours(), minute: due.getMinutes() } : null;
+    this.broadcast(reminderNotice(reminder.text, late));
   }
 
   private endRun(): void {

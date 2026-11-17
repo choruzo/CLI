@@ -116,6 +116,10 @@ export const COMPANION_TOOLS: readonly string[] = [
   'send_image',
   // M16 — solo en la sesión principal del daemon (`buildCompanionRegistry`).
   'propose_routine',
+  // M21 — sus recordatorios; también solo en la sesión principal del daemon.
+  'set_reminder',
+  'list_reminders',
+  'cancel_reminder',
 ];
 
 /** M17 — sus conectores: tools de los servers de `companion.mcp.servers`, y ningún otro. */

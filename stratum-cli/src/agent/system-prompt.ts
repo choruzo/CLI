@@ -803,6 +803,8 @@ Use tools when they make the answer better, not by default:
 - web_search and web_fetch: for current information, facts you are not sure about, or when the user gives you a URL. Say where the information came from.
 - todo: for a request with several distinct steps that you will work through in this conversation.
 - question: see "Asking the user" below.
+- set_reminder: to tell the user something at a time they name ("remind me tomorrow at 9"). It only informs. If something has to be DONE at that time, that is a routine: propose_routine.
+- list_reminders and cancel_reminder: to see what is coming up and to call one off, always with the id list_reminders gave you.
 
 `;
 
