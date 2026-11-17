@@ -719,6 +719,42 @@ export interface ProtocolRoutineResult {
   summary: string | null;
 }
 
+/**
+ * M21 — un recordatorio del `companion` (PRD de Dot §23.11, *Recordatorios propios*).
+ * Lo guarda el daemon; a su hora se entrega (`reminder.due` en la sesión del
+ * `companion`, y Telegram si está emparejado) sin lanzar ningún run.
+ */
+export interface ProtocolReminder {
+  id: string;
+  /** El texto del aviso, tal como se escribió (corto; nunca va a los logs). */
+  text: string;
+  /** Cuándo vence. */
+  dueAt: Timestamp;
+  createdAt: Timestamp;
+  /** Quién lo creó: `agent` (tool del `companion`) o `person` (CLI). Solo procedencia. */
+  origin: 'agent' | 'person';
+  status: 'pending' | 'delivered' | 'cancelled';
+  /** Cuándo se entregó o se canceló. */
+  endedAt?: Timestamp;
+  /** Se entregó tarde (más de un minuto después de `dueAt`): el daemon estaba apagado. */
+  late?: boolean;
+}
+
+/**
+ * Topes de los recordatorios. Crear uno no se confirma (solo avisa a la persona),
+ * así que se acota: texto corto, pendientes contados, y entre 1 minuto y 1 año.
+ */
+export const REMINDER_LIMITS = {
+  textChars: 300,
+  pending: 100,
+  minLeadMs: 60_000,
+  maxLeadMs: 366 * 86_400_000,
+  /** Con más retraso que esto, la entrega es `late`. */
+  lateAfterMs: 60_000,
+  /** Lo entregado o cancelado se lista (y se guarda) durante este tiempo. */
+  keepEndedMs: 7 * 86_400_000,
+} as const;
+
 export interface ProtocolRoutine {
   id: string;
   name: string;

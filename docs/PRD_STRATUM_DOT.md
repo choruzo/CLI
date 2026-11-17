@@ -2578,11 +2578,15 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     - **Un correo es contenido no confiable**: la salida lo marca como contenido externo, y la
       skill dice que sus instrucciones nunca se siguen.
 
-  *Recordatorios propios* (propuesto por Claude; se cierra al empezar su fase):
+  *Recordatorios propios* (propuesto por Claude y aceptado por el usuario al empezar la fase, el
+  2026-11-17; contrato en `docs/protocol.md` §30):
   - El daemon guarda los avisos en `~/.stratum/companion/reminders.json` (atómico, Zod,
     `schemaVersion`; solo lo escribe el daemon). Un aviso es texto, una hora y su origen.
-  - Tools del `companion`: `recordatorio_crear` (hora absoluta o relativa, ya resuelta a
-    `Europe/Madrid` en la salida), `recordatorio_listar` y `recordatorio_cancelar`.
+  - Tools del `companion` (en inglés, como sus otras tools propias): `set_reminder`, con hora
+    absoluta o relativa, en la hora local del equipo y ya resuelta en la salida;
+    `list_reminders` y `cancel_reminder`. Solo en la sesión principal del `companion` en el
+    daemon, como `propose_routine`.
+  - El daemon no se apaga por inactividad mientras haya avisos pendientes.
   - **Crear no se confirma**: solo avisa a la persona, no ejecuta nada ni lanza un run. Lleva
     topes: 100 pendientes, entre 1 minuto y 1 año de antelación, y un texto corto.
   - A su hora, el daemon lo **entrega**: notificación del SO en Dot y mensaje en Telegram, si está

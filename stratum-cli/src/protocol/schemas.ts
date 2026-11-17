@@ -83,6 +83,7 @@ import type {
   ProtocolSessionInspection,
   ProtocolUndoableTurn,
   ProtocolMemoryDocument,
+  ProtocolReminder,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -108,6 +109,7 @@ import {
   HISTORY_LIMITS,
   PROTOCOL_MEMORY_SECTIONS,
   SHARED_IMAGE_LIMITS,
+  REMINDER_LIMITS,
 } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
@@ -633,6 +635,21 @@ export const routineSchema: z.ZodType<ProtocolRoutine> = z.object({
 const routineResult = z.object({ routine: routineSchema });
 
 // ---------------------------------------------------------------------------
+// M21 — recordatorios del companion
+// ---------------------------------------------------------------------------
+
+export const reminderSchema: z.ZodType<ProtocolReminder> = z.object({
+  id,
+  text: z.string().min(1).max(REMINDER_LIMITS.textChars),
+  dueAt: timestamp,
+  createdAt: timestamp,
+  origin: z.enum(['agent', 'person']),
+  status: z.enum(['pending', 'delivered', 'cancelled']),
+  endedAt: timestamp.optional(),
+  late: z.boolean().optional(),
+});
+
+// ---------------------------------------------------------------------------
 // M18 — canales externos (Telegram)
 // ---------------------------------------------------------------------------
 
@@ -991,6 +1008,7 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
     status: interactionStatus.optional(),
     resolvedBy: resolver.optional(),
   }),
+  'reminder.due': z.object({ reminder: reminderSchema }),
   warning: z.object({ message: z.string() }),
   error: z.object({ message: z.string(), fatal: z.boolean() }),
 };
@@ -1434,6 +1452,9 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'routines.remove': z.object({ routineId: id, operationId }).strict(),
   'routines.run': z.object({ routineId: id, operationId }).strict(),
 
+  'reminders.list': empty,
+  'reminders.cancel': z.object({ reminderId: id, operationId }).strict(),
+
   'channels.status': empty,
   'channels.reload': z.object({ operationId }).strict(),
   'channels.pairBegin': z.object({ operationId }).strict(),
@@ -1645,6 +1666,9 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'routines.update': routineResult,
   'routines.remove': routineResult,
   'routines.run': z.object({ fire: routineFireSchema, routine: routineSchema }),
+
+  'reminders.list': z.object({ reminders: z.array(reminderSchema), readOnly: z.boolean() }),
+  'reminders.cancel': z.object({ reminder: reminderSchema }),
 
   'channels.status': channelsStatusSchema,
   'channels.reload': channelsStatusSchema,

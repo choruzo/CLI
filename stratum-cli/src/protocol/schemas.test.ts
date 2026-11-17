@@ -1,6 +1,13 @@
 import { describe, it, expect } from 'vitest';
 import { z } from 'zod';
-import { METHODS, NOTIFICATIONS, STRATUM_PROTOCOL_VERSION, type MethodName } from './index.js';
+import {
+  METHODS,
+  NOTIFICATIONS,
+  OVERVIEW_EVENT_TYPES,
+  REMINDER_LIMITS,
+  STRATUM_PROTOCOL_VERSION,
+  type MethodName,
+} from './index.js';
 import * as schemas from './schemas.js';
 import {
   NOTIFICATION_PARAMS,
@@ -212,7 +219,34 @@ describe('eventos', () => {
   };
 
   it('hay schema de datos para cada tipo de evento', () => {
-    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(37);
+    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(38);
+  });
+
+  it('reminder.due valida, va a overview y no admite estados ni textos inventados (M21)', () => {
+    const reminder = {
+      id: 'rem_1',
+      text: 'Llamar al médico',
+      dueAt: 1_794_000_000_000,
+      createdAt: 1_793_990_000_000,
+      origin: 'agent',
+      status: 'delivered',
+      endedAt: 1_794_000_000_500,
+    };
+    const ev = {
+      type: 'reminder.due',
+      sessionId: 's1',
+      at: 1_794_000_000_500,
+      seq: 9,
+      data: { reminder },
+    };
+    expect(eventSchema.parse(ev)).toEqual(ev);
+    expect(OVERVIEW_EVENT_TYPES).toContain('reminder.due');
+    const bad = (r: object) =>
+      eventSchema.safeParse({ ...ev, data: { reminder: { ...reminder, ...r } } }).success;
+    expect(bad({ status: 'snoozed' })).toBe(false);
+    expect(bad({ text: '' })).toBe(false);
+    expect(bad({ text: 'x'.repeat(REMINDER_LIMITS.textChars + 1) })).toBe(false);
+    expect(bad({ origin: 'channel' })).toBe(false);
   });
 
   it('valida los de estado y los volátiles', () => {

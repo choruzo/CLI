@@ -2324,3 +2324,45 @@ solo escribe el daemon; la sesión del `companion` lo mira al empezar cada turno
   el resto se confirma cada vez (o con una concesión, §M17), como cualquier conector del `companion`.
 
 Tests: `stratum-cli/src/daemon/daemon-connectors.test.ts`.
+
+## 30. Recordatorios del asistente (M21)
+
+Los avisos que el `companion` deja con su tool (PRD de Dot §23.11, *Recordatorios propios*). Los
+guarda el daemon en `~/.stratum/companion/reminders.json`, que solo escribe él. A su hora los
+**entrega**, sin lanzar ningún run ni tocar la conversación.
+
+```ts
+interface ProtocolReminder {
+  id: string;
+  text: string; // ≤ REMINDER_LIMITS.textChars (300); nunca va a los logs
+  dueAt: Timestamp;
+  createdAt: Timestamp;
+  origin: 'agent' | 'person'; // solo procedencia
+  status: 'pending' | 'delivered' | 'cancelled';
+  endedAt?: Timestamp; // cuándo se entregó o se canceló
+  late?: boolean; // entregado más de un minuto tarde (el daemon estaba apagado)
+}
+```
+
+| Método             | Capacidad | Qué hace                                                                           |
+| ------------------ | --------- | ---------------------------------------------------------------------------------- |
+| `reminders.list`   | `observe` | Los pendientes y los terminados de los últimos 7 días, por `dueAt`; y `readOnly`.  |
+| `reminders.cancel` | `control` | Cancela uno pendiente (`{ reminderId, operationId }`). Cancelar solo resta.        |
+
+- **Sin planificador** (`reminders: null` en el daemon): los dos métodos, `UNAVAILABLE`
+  (`reminders-disabled`). Con el almacén en solo lectura (fichero de un Stratum más nuevo o
+  dañado), `cancel` es `UNAVAILABLE` (`read-only`). Un id desconocido es `NOT_FOUND`, y uno ya
+  entregado o cancelado, `INVALID_PARAMS`.
+- **No hay `reminders.add`** en v1: los crea el `companion` con su tool, y crear no se confirma
+  porque solo avisa a la persona. Por eso van acotados (`REMINDER_LIMITS`): 100 pendientes, entre
+  1 minuto y 1 año de antelación, y texto corto.
+- **Entrega**: el evento de estado **`reminder.due`** (`{ reminder }`, ya con `status: 'delivered'`)
+  en la sesión del `companion`, fuera de cualquier run. Está en `OVERVIEW_EVENT_TYPES`, así que
+  Dot lo recibe aunque no tenga la conversación abierta y lo enseña como notificación del sistema.
+  Con Telegram emparejado, el daemon manda además el aviso a los chats emparejados. Solo informa:
+  ni aprueba nada, ni lleva acciones, ni entra en la conversación (`applyTranscriptEvent` lo
+  ignora).
+- **Un aviso perdido** con el daemon apagado se entrega al arrancar, con `late: true`. Es lo
+  contrario de una rutina (§23), porque un aviso que no llega es peor que uno tarde.
+
+Tests: `stratum-cli/src/protocol/schemas.test.ts` y `stratum-cli/src/daemon/daemon-reminders.test.ts`.

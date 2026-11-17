@@ -11,6 +11,7 @@ import type {
   ProtocolPlanStep,
   ProtocolQuestionAnswer,
   ProtocolQuestionRequest,
+  ProtocolReminder,
   ProtocolResolver,
   ProtocolRun,
   ProtocolSession,
@@ -120,6 +121,13 @@ export interface StateEventData {
     resolvedBy?: ProtocolResolver;
   };
 
+  /**
+   * M21 — venció un recordatorio del `companion`. Lo publica el daemon en la
+   * sesión del `companion`, fuera de cualquier run, y también llega a `overview`
+   * para que Dot avise aunque no tenga la conversación abierta. Solo informa:
+   * no lanza un run ni entra en la conversación.
+   */
+  'reminder.due': { reminder: ProtocolReminder };
   warning: { message: string };
   error: { message: string; fatal: boolean };
 }
@@ -172,6 +180,7 @@ export const EVENT_CLASS: Readonly<Record<ProtocolEventType, 'state' | 'volatile
   'grant.ended': 'state',
   'question.requested': 'state',
   'question.resolved': 'state',
+  'reminder.due': 'state',
   warning: 'state',
   error: 'state',
   'message.delta': 'volatile',
@@ -197,6 +206,7 @@ export const OVERVIEW_EVENT_TYPES: readonly StateEventType[] = [
   'question.resolved',
   'plan.proposed',
   'plan.resolved',
+  'reminder.due',
 ];
 
 interface EventBase {

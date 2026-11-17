@@ -16,6 +16,7 @@ import type {
   ProtocolUndoableTurn,
   ProtocolMemoryDocument,
   ProtocolSharedImage,
+  ProtocolReminder,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -717,6 +718,17 @@ export interface ProtocolMethods {
   >;
 
   /**
+   * M21 — los recordatorios del `companion` (`docs/protocol.md` §30). Sin
+   * planificador (`reminders: null`): `UNAVAILABLE` (`reminders-disabled`);
+   * almacén en solo lectura (fichero de un Stratum más nuevo o dañado):
+   * `cancel`, `UNAVAILABLE` (`read-only`). `list` da los pendientes y los
+   * terminados de los últimos 7 días, por `dueAt`. Cancelar solo resta. Los
+   * crea el `companion` con su tool: no hay `reminders.add` en v1.
+   */
+  'reminders.list': Spec<Empty, { reminders: ProtocolReminder[]; readOnly: boolean }>;
+  'reminders.cancel': Spec<{ reminderId: string } & Mutation, { reminder: ProtocolReminder }>;
+
+  /**
    * M18 — canales externos (`docs/protocol.md` §24). Nada de lo que devuelven
    * lleva el token del bot. `reload` vuelve a leer `telegram.json` y
    * `channels.telegram.enabled` (tras `stratum channels telegram setup`).
@@ -916,6 +928,10 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'routines.update': write('control'),
   'routines.remove': write('control'),
   'routines.run': write('control'),
+
+  'reminders.list': read('observe'),
+  // Cancelar un aviso solo resta.
+  'reminders.cancel': write('control'),
 
   'channels.status': read('observe'),
   'channels.reload': write('control'),
