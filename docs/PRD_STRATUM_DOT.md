@@ -2509,6 +2509,95 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      con un token falso (401 visto por el agente) y, el 2026-11-12, con el token de verdad:
      las consultas a la casa responden y una acción queda parada hasta que se aprueba.
 
+- **M21 — Más conectores y recordatorios** [decidido 2026-11-17; solo Dot]. Tres conectores más
+  del catálogo de M20, con sus mismas reglas (propios, en la caja de conectores, secretos solo por
+  la CLI, salidas masticadas y una skill por conector), y recordatorios.
+  *Decidido por el usuario, 2026-11-17*:
+  - Conectores: **transporte de Madrid (CRTM)**, **AEMET** y **Google** (Gmail y Google Tasks).
+  - Las tareas que se repiten **ya las cubren las rutinas** de M16: no hay nada nuevo para eso.
+  - Recordatorios de **dos tipos**: avisos propios de Stratum y tareas de Google Tasks.
+  - Google se autentica con **OAuth propio**: un cliente OAuth «de escritorio» en el Google Cloud
+    de la persona.
+  - En Gmail, el `companion` puede **leer y dejar borradores**, nunca enviar.
+
+  *Los conectores*:
+  - **`crtm`** (datos abiertos del Consorcio, medido el 2026-11-17). Los GTFS son públicos y sin
+    registro, en ArcGIS (`https://www.arcgis.com/sharing/rest/content/items/<id>/data`):
+    - Metro (`google_transit_M4.zip`, 1,5 MB). Su calendario va del 27-05-2025 al 27-05-2026 y no
+      se ha renovado, y no hay otra fuente abierta de horarios de Metro. *Decidido por el usuario,
+      2026-11-17*: **Metro sin horarios**. Entran sus estaciones, líneas y correspondencias, y las
+      salidas dicen que el horario publicado por el CRTM caducó. Si el CRTM publica uno vigente,
+      el conector lo usa solo: lo comprueba a diario.
+    - Metro Ligero (M10, 0,4 MB), EMT (M6, 21 MB), autobuses urbanos de otros municipios (M9,
+      9,8 MB) e interurbanos (M89, 76 MB).
+    - Capa propia como la de Cercanías: índice SQLite por modo en el volumen de la caja de
+      conectores, renovado a diario, y tools `transporte_paradas|salidas|trayecto|lineas`, de solo
+      lectura y por horario.
+    - **Sin tiempo real en v1**: el de la EMT (MobilityLabs) exige registrarse, y su API no se ha
+      podido verificar. Para Metro no hay ninguno público confirmado. Las salidas dicen que son
+      «según horario», nunca «en tiempo real».
+    - **Licencia** (LDA del CRTM): citar al CRTM como fuente, «Powered by CRTM» y la fecha de los
+      datos en cada salida, y nunca insinuar su respaldo. La EMT pide además «Powered by EMT de
+      Madrid».
+  - **`aemet`**: previsión por municipio (diaria y horaria) y **avisos de fenómenos adversos**,
+    que Open-Meteo no tiene. **Sin clave** (*propuesto por el usuario, 2026-11-17*: la API de
+    OpenData se queda a veces sin responder). Lo medido ese día:
+    - **Previsión**: los XML públicos de `www.aemet.es`:
+      - `xml/municipios/localidad_<ine>.xml`: diaria a 7 días, por tramos.
+      - `xml/municipios_h/localidad_h_<ine>.xml`: horaria, con orto y ocaso.
+      - Vienen en ISO-8859-15, sin clave y en unos 0,1 s. Su licencia: «autorizado el uso…
+        citando a AEMET como autora».
+    - **Avisos**:
+      - El RSS público `documentos_d/eltiempo/prediccion/avisos/rss/CAP_AFAE_wah_RSS.xml`
+        (España, UTF-8), con un enlace al CAP 1.2 de cada aviso.
+      - Del CAP se usan nivel, fenómeno, umbral, probabilidad, inicio, fin, la zona Meteoalerta
+        (`AEMET-Meteoalerta zona`, p. ej. `722802`) y la descripción.
+      - Hay también un RSS por zona (`CAP_AFAZ<zona>_RSS.xml`).
+    - **Municipios**:
+      - Una tabla recortada del maestro de OpenData (8 122 municipios: código INE, nombre, zona de
+        aviso `zona_comarcal`, coordenadas y habitantes) **va dentro del conector**.
+      - Se regenera de vez en cuando con un script que sí usa la clave (`AEMET_API_KEY` en el
+        entorno de quien lo lanza, nunca en el repo). El conector no tiene secretos.
+      - La API de OpenData responde en dos pasos (`estado` + URL de `datos`), con los datos en
+        ISO-8859-15. Al probarla, la misma clave dio 401 «caducada» en una petición y 200 en las
+        siguientes.
+  - **`google`**: Gmail y Google Tasks, con un solo token.
+    - **OAuth**: `stratum connectors setup google` pide el *client id* y el *secret*, abre el
+      navegador y recoge el código en `127.0.0.1` con un puerto efímero y PKCE (solo mientras dura
+      el `setup`, en la CLI, nunca en el daemon). Guarda el **refresh token** en
+      `connector-secrets.json`. Es un tipo de `setup` nuevo del manifiesto; los secretos siguen
+      sin pasar por el protocolo ni por el webview.
+    - El conector cambia el refresh token por un access token **en memoria**, dentro de la caja.
+    - Ámbitos: `gmail.readonly`, `gmail.compose` y `tasks`. `gmail.compose` permite técnicamente
+      enviar: el conector **no tiene ninguna tool de envío**, y un test lo fija.
+    - Tools:
+      - De solo lectura: `gmail_buscar` y `gmail_leer` (texto plano, recortado, sin adjuntos en
+        v1), y `tareas_listar`.
+      - Se confirman: `gmail_borrador` (destinatarios, asunto y texto en la confirmación),
+        `tareas_crear` y `tareas_completar`.
+    - **Un correo es contenido no confiable**: la salida lo marca como contenido externo, y la
+      skill dice que sus instrucciones nunca se siguen.
+
+  *Recordatorios propios* (propuesto por Claude; se cierra al empezar su fase):
+  - El daemon guarda los avisos en `~/.stratum/companion/reminders.json` (atómico, Zod,
+    `schemaVersion`; solo lo escribe el daemon). Un aviso es texto, una hora y su origen.
+  - Tools del `companion`: `recordatorio_crear` (hora absoluta o relativa, ya resuelta a
+    `Europe/Madrid` en la salida), `recordatorio_listar` y `recordatorio_cancelar`.
+  - **Crear no se confirma**: solo avisa a la persona, no ejecuta nada ni lanza un run. Lleva
+    topes: 100 pendientes, entre 1 minuto y 1 año de antelación, y un texto corto.
+  - A su hora, el daemon lo **entrega**: notificación del SO en Dot y mensaje en Telegram, si está
+    emparejado. No lanza ningún run del agente: lo que necesita al agente es una rutina.
+  - **Un aviso perdido** con el daemon apagado se entrega al arrancar, marcado «tarde». Es lo
+    contrario de una rutina, porque un aviso que no llega es peor que uno tarde.
+  - Protocolo: `reminders.list` y `reminders.cancel` (`control`), más un evento de entrega para
+    Dot. Panel en la vista *Asistente* de Dot.
+
+  *Fases* (en este orden: primero lo que se prueba sin claves):
+  1. **`crtm`**: Metro, Metro Ligero y EMT, después los interurbanos.
+  2. **`aemet`**: previsión y avisos, sin clave en el conector.
+  3. **`google`**: el `setup` OAuth en la CLI, Gmail y Tasks.
+  4. **Recordatorios propios**: daemon, protocolo y panel en Dot.
+
 ### 23.12 Fuera, por ahora
 
 Proactividad libre, voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
