@@ -96,13 +96,14 @@ desconocidas se rechazan.
 | Campo                | Qué es                                                                                                                                                                                                                                                                  |
 | -------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `id`                 | Minúsculas, dígitos y guiones. Único.                                                                                                                                                                                                                                   |
-| `group`              | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` · `replay` · `computer-use`                                                                                                                              |
+| `group`              | `code` · `linux` · `ssh` · `safety` · `recovery` · `multi-agent` · `cache` · `auxiliary` · `jobs` · `steering` · `replay` · `computer-use` · `connectors`                                                                                                               |
 | `difficulty`         | `basic` (por defecto) · `intermediate` · `adversarial`. Ver [Niveles de dificultad](#niveles-de-dificultad).                                                                                                                                                            |
 | `requires`           | Si no se cumple, el escenario queda en **SKIP** (no cuenta como fallo): `platform` y ejecutables en el PATH.                                                                                                                                                            |
 | `setup.files`        | Ficheros de partida, ruta relativa → contenido. No pueden salir del workspace.                                                                                                                                                                                          |
 | `setup.commands`     | Comandos (argv, sin shell) lanzados en el workspace tras escribir los ficheros.                                                                                                                                                                                         |
 | `setup.config`       | Capa de `.stratumrc.json` (entornos, perfiles, `tools.*`…). `provider`, `trace` y `memory.autoExtract` los fija el runner; `skills.builtin` es `false` salvo que el escenario lo fije (las skills de serie cambiarían el tamaño del prompt de todos).                   |
 | `setup.globalConfig` | Capa **global** (`~/.stratum/.stratumrc.json` del HOME del escenario) para lo que solo se lee de ahí, como `box`. `provider` y `trace` se ignoran.                                                                                                                      |
+| `setup.connectors`   | Conectores del `companion` servidos por su server de fixtures (hoy, `renfe`). Ver [Conectores](#conectores-del-companion-grupo-connectors-m20). Solo entra en la huella si se usa.                                                                                       |
 | `setup.ssh.hosts`    | Hosts simulados (ver abajo).                                                                                                                                                                                                                                            |
 | `input`              | **Entrada**: la tarea, tal cual se le pasa a `stratum run`.                                                                                                                                                                                                             |
 | `followUps`          | Turnos siguientes en la **misma sesión**: se lanzan con `stratum run … --then …`, uno tras otro. Un turno que no acaba en `stop` corta la cadena.                                                                                                                       |
@@ -259,6 +260,27 @@ de GitHub llegó a 294 s, y con los 180 s por defecto una pasada lenta pero corr
 Límite conocido del criterio en live: la respuesta de GitHub (`base`, `editor`, `platform`) es
 conocida, y un modelo puede darla sin navegar; los `forbidden` impiden los atajos, no responder de
 memoria. Para saber si navegó, mírese la traza (las `screen_*` y sus capturas).
+
+### Conectores del companion (grupo `connectors`, M20)
+
+Preguntas reales que el `companion` contesta con un conector (`docs/PRD_STRATUM_DOT.md` §23.11,
+_Se mide_): el próximo cercanías de Atocha a Alcalá, las incidencias del C3, el primer AVE de
+Madrid a Sevilla. Con `setup.connectors: ["renfe"]` el runner declara en la config global del
+escenario un server de `companion.mcp.servers` que lanza el **server de fixtures** del conector
+(`src/connector-servers/renfe/fixture-server.ts`; en `dist/`, `eval-connectors/renfe.js`), con las
+tools de solo lectura de su manifiesto. Ese server sirve las mismas tools que el de la caja sobre
+un mundo fijo: el GTFS recortado de `fixtures/`, un tiempo real fabricado que casa con él y el reloj
+parado (Cercanías, 2026-11-11 a las 18:36; larga distancia, a las 07:36 con los `.pb` reales de
+esa mañana). Así la respuesta correcta es siempre la misma, con guion y contra un modelo real: en
+live se puntúa que la respuesta traiga la hora o el tren, y `forbidden` prohíbe `web_fetch` y
+`web_search`.
+
+Qué **no** mide: el lanzamiento en la caja de conectores, la skill del conector y el bloque
+`# Your connectors` del prompt (los suma el runtime solo a los conectores de `connectors.json`, que
+corren en la caja). El runtime no tiene ningún camino propio para los evals: es config normal de la
+persona. Las fixtures viven en el código fuente, así que estos escenarios solo corren desde un
+checkout de Stratum (con tsx, o con `dist/` construido en él); desde un paquete instalado quedan en
+SKIP.
 
 ### Replay de una sesión grabada (`stratum eval import`)
 

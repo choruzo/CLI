@@ -622,8 +622,8 @@ describe('escenarios de caché', () => {
     // La fórmula anterior a `followUps` y `sessions`: los baselines guardados siguen casando.
     const scenario = parseScenario(JSON.stringify({ ...baseScenario, group: 'code' }), 'a.json');
     const { requires, input, run, script, expect: expected } = scenario;
-    // `setup.globalConfig` (M14) tampoco entra si va vacío.
-    const { globalConfig: _unused, ...setup } = scenario.setup;
+    // `setup.globalConfig` (M14) y `setup.connectors` (M20) tampoco entran si van vacíos.
+    const { globalConfig: _unused, connectors: _none, ...setup } = scenario.setup;
     const before = createHash('sha1')
       .update(JSON.stringify({ requires, setup, input, run, script, expect: expected }))
       .digest('hex')

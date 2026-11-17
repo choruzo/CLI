@@ -17,15 +17,24 @@ const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..', '..');
 const IMAGE_FINGERPRINTS: Record<number, string> = {
   2: 'bbfe073138d7c0eb',
   3: 'a5504ba322b45ca3',
-  4: '8a8c3d4d83f51880',
+  // Recalculada sin `NOT_IN_IMAGE` (antes '8a8c3d4d83f51880'): misma imagen, otra fórmula.
+  4: 'a636c81f91ce4d0a',
 };
+
+/**
+ * Lo de `src/connector-servers/` que nunca entra en la imagen: los tests, sus
+ * fixtures y el server de fixtures de los evals (M20), con sus helpers. Cambiarlo
+ * no recrea las cajas; el último test comprueba que la imagen no lo importa.
+ */
+const NOT_IN_IMAGE =
+  /(\.test\.ts|[\\/]test-helpers\.ts|[\\/]fixture-server\.ts)$|[\\/]fixtures[\\/]/;
 
 function files(dir: string): string[] {
   const out: string[] = [];
   for (const name of readdirSync(dir).sort()) {
     const full = join(dir, name);
     if (statSync(full).isDirectory()) out.push(...files(full));
-    else if (!/\.test\.ts$/.test(name)) out.push(full);
+    else if (!NOT_IN_IMAGE.test(full)) out.push(full);
   }
   return out;
 }
@@ -55,5 +64,14 @@ describe('versión de la imagen de la caja', () => {
         `añade { ${BOX_IMAGE_VERSION + 1}: '${actual}' } a IMAGE_FINGERPRINTS; ` +
         'si es la versión en curso sin publicar, actualiza solo su huella.',
     ).toBe(actual);
+  });
+
+  it('lo que queda fuera de la huella no lo importa el código de la imagen', () => {
+    for (const file of files(join(ROOT, 'src', 'connector-servers'))) {
+      const code = readFileSync(file, 'utf-8');
+      expect(code, relative(ROOT, file)).not.toMatch(
+        /['"][^'"]*(test-helpers|fixture-server)(\.js)?['"]/,
+      );
+    }
   });
 });

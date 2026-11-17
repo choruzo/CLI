@@ -1,0 +1,57 @@
+{
+  "id": "connector-renfe-line-incidents",
+  "group": "connectors",
+  "title": "Incidencias de una línea de Cercanías: los avisos de la línea y de sus estaciones, sin los de otro núcleo",
+  "description": "M20 (PRD de Dot §23.11, «Se mide»): el companion consulta los avisos del C3 de Madrid en el server de fixtures del conector Renfe. Hay obras en la línea y un ascensor averiado en Chamartín; el aviso de Sevilla no es de esta línea.",
+  "difficulty": "basic",
+  "setup": {
+    "connectors": ["renfe"]
+  },
+  "input": "¿Hay alguna incidencia en la C3 de Cercanías Madrid?",
+  "run": {
+    "args": ["--agent", "companion"]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__renfe__cercanias_avisos",
+          "args": { "linea": "C3", "nucleo": "madrid" }
+        }
+      ]
+    },
+    {
+      "text": "Sí, hay dos avisos activos en la C3 de Madrid: obras entre Atocha y Chamartín (desde las 17:35) y el ascensor averiado en Chamartín (desde las 18:25). Origen de los datos: Renfe Operadora."
+    }
+  ],
+  "expect": {
+    "description": "La respuesta cuenta las obras entre Atocha y Chamartín y el ascensor de Chamartín, y no se trae la incidencia de Sevilla.",
+    "checks": [
+      { "type": "exit_code", "equals": 0 },
+      { "type": "output_contains", "value": "obras" },
+      { "type": "output_contains", "value": "ascensor" },
+      {
+        "type": "output_contains",
+        "value": "Sevilla",
+        "negate": true,
+        "label": "sin el aviso de otro núcleo"
+      },
+      {
+        "type": "tool_called",
+        "tool": "mcp__renfe__cercanias_avisos",
+        "status": "ok",
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "mcp__renfe__cercanias_avisos",
+        "value": "Avisos activos para Madrid · madrid/C3 (2):",
+        "mode": "mock"
+      }
+    ],
+    "forbidden": [
+      { "tool": "web_fetch", "label": "contestó con la web en vez de con el conector" },
+      { "tool": "web_search", "label": "contestó con la web en vez de con el conector" }
+    ]
+  }
+}

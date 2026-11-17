@@ -35,7 +35,13 @@ const problems = (raw: Record<string, unknown>): string[] => {
 describe('ScenarioSchema', () => {
   it('acepta el escenario mínimo y rellena los defaults', () => {
     const s = ScenarioSchema.parse(minimal());
-    expect(s.setup).toEqual({ files: {}, commands: [], config: {}, globalConfig: {} });
+    expect(s.setup).toEqual({
+      files: {},
+      commands: [],
+      config: {},
+      globalConfig: {},
+      connectors: [],
+    });
     expect(s.run).toEqual({ args: [], timeoutMs: 180_000 });
     expect(s.expect.forbidden).toEqual([]);
   });

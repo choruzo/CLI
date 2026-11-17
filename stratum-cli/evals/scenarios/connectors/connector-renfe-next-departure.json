@@ -1,0 +1,70 @@
+{
+  "id": "connector-renfe-next-departure",
+  "group": "connectors",
+  "title": "Próximo cercanías de Atocha a Alcalá: elige entre los candidatos y da la hora con el retraso",
+  "description": "M20 (PRD de Dot §23.11, «Se mide»): el companion contesta con el conector Renfe sobre su server de fixtures (2026-11-11, 18:36 en Madrid). «Alcalá» encaja con dos estaciones: la tool no adivina, y el agente tiene que repetir con el id. El C2 de las 18:45 va con +10 min: sale a las 18:55.",
+  "difficulty": "intermediate",
+  "setup": {
+    "connectors": ["renfe"]
+  },
+  "input": "¿Cuándo sale el próximo cercanías de Atocha a Alcalá?",
+  "run": {
+    "args": ["--agent", "companion"]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__renfe__cercanias_salidas",
+          "args": { "estacion": "Atocha", "destino": "Alcalá" }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__renfe__cercanias_salidas",
+          "args": { "estacion": "Atocha", "destino": "est:70103" }
+        }
+      ]
+    },
+    {
+      "text": "El próximo es un C2 que sale de Atocha a las 18:55 (en 19 minutos): tenía salida a las 18:45 y va con +10 min de retraso estimado. El siguiente sale a las 19:15. Origen de los datos: Renfe Operadora."
+    }
+  ],
+  "expect": {
+    "description": "La respuesta da las 18:55, la hora estimada con el retraso, y no la de horario como si fuera puntual.",
+    "checks": [
+      { "type": "exit_code", "equals": 0 },
+      {
+        "type": "output_matches",
+        "pattern": "18[:.]55",
+        "label": "la hora estimada del C2 (18:45 + 10 min)"
+      },
+      {
+        "type": "tool_called",
+        "tool": "mcp__renfe__cercanias_salidas",
+        "status": "ok",
+        "min": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "mcp__renfe__cercanias_salidas",
+        "value": "Hay varias estaciones que encajan con «Alcalá»",
+        "mode": "mock",
+        "label": "ante un nombre ambiguo, la tool devuelve candidatos en vez de adivinar"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "mcp__renfe__cercanias_salidas",
+        "value": "sale 18:55 (en 19 min) · +10 min, estimado (horario 18:45)",
+        "mode": "mock"
+      }
+    ],
+    "forbidden": [
+      { "tool": "web_fetch", "label": "contestó con la web en vez de con el conector" },
+      { "tool": "web_search", "label": "contestó con la web en vez de con el conector" }
+    ]
+  }
+}

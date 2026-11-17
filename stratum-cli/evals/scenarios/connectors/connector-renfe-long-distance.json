@@ -1,0 +1,64 @@
+{
+  "id": "connector-renfe-long-distance",
+  "group": "connectors",
+  "title": "Primer AVE de Madrid a Sevilla: «Madrid» es ambiguo, elige la estación y da el tren",
+  "description": "M20 (PRD de Dot §23.11, «Se mide»): larga distancia en el server de fixtures del conector Renfe (2026-11-11, 07:36 en Madrid, con el tiempo real real de esa mañana). «Madrid» encaja con tres estaciones; los trenes a Sevilla salen de Puerta de Atocha. El primero es el AVE 2080 de las 08:00.",
+  "difficulty": "intermediate",
+  "setup": {
+    "connectors": ["renfe"]
+  },
+  "input": "¿Cuál es el primer AVE que sale hoy de Madrid a Sevilla?",
+  "run": {
+    "args": ["--agent", "companion"]
+  },
+  "script": [
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__renfe__trenes_salidas",
+          "args": { "estacion": "Madrid", "destino": "Sevilla" }
+        }
+      ]
+    },
+    {
+      "toolCalls": [
+        {
+          "name": "mcp__renfe__trenes_salidas",
+          "args": { "estacion": "ld:60000", "destino": "Sevilla" }
+        }
+      ]
+    },
+    {
+      "text": "El primero es el AVE 2080, que sale de Madrid-Puerta de Atocha a las 08:00 (en 24 minutos) hacia Sevilla-Santa Justa. No hay datos de tiempo real para él. Origen de los datos: Renfe Operadora."
+    }
+  ],
+  "expect": {
+    "description": "La respuesta da el AVE 2080 de las 08:00 desde Puerta de Atocha.",
+    "checks": [
+      { "type": "exit_code", "equals": 0 },
+      { "type": "output_contains", "value": "2080" },
+      {
+        "type": "output_matches",
+        "pattern": "\\b0?8[:.]00\\b",
+        "label": "la hora de salida (08:00)"
+      },
+      {
+        "type": "tool_called",
+        "tool": "mcp__renfe__trenes_salidas",
+        "status": "ok",
+        "min": 2,
+        "mode": "mock"
+      },
+      {
+        "type": "tool_output_contains",
+        "tool": "mcp__renfe__trenes_salidas",
+        "value": "AVE 2080 a Sevilla-Santa Justa · sale 08:00 (en 24 min)",
+        "mode": "mock"
+      }
+    ],
+    "forbidden": [
+      { "tool": "web_fetch", "label": "contestó con la web en vez de con el conector" },
+      { "tool": "web_search", "label": "contestó con la web en vez de con el conector" }
+    ]
+  }
+}

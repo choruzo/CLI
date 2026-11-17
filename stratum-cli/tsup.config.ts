@@ -5,7 +5,11 @@ const pkg = JSON.parse(readFileSync('./package.json', 'utf-8')) as { version: st
 
 export default defineConfig([
   {
-    entry: ['src/cli/index.ts'],
+    entry: {
+      index: 'src/cli/index.ts',
+      // M20: server de fixtures de Renfe para `stratum eval` (nunca va en la imagen de la caja).
+      'eval-connectors/renfe': 'src/connector-servers/renfe/fixture-server.ts',
+    },
     format: ['esm'],
     target: 'node22',
     clean: true,

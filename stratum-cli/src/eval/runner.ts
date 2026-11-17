@@ -17,6 +17,7 @@ import { buildTraceModel, computeMetrics } from './metrics.js';
 import { MOCK_MODEL, startMockLlm, type MockLlm } from './mock-llm.js';
 import { EVAL_RESULT_VERSION, summarize, type EvalResult, type ScenarioResult } from './result.js';
 import { scenarioFingerprint, type LoadedScenario } from './scenario.js';
+import { connectorFixtureServers, connectorFixturesProblem } from './connector-fixtures.js';
 import { startSshFixture, type SshFixture } from './ssh-fixture.js';
 import { STEER_SCRIPT_ENV } from '../cli/steer-script.js';
 
@@ -95,7 +96,7 @@ export function skipReason(scenario: LoadedScenario, mode: EvalMode): string | n
   }
   const missing = scenario.requires?.commands?.filter((c) => !onPath(c)) ?? [];
   if (missing.length > 0) return `falta en el PATH: ${missing.join(', ')}`;
-  return null;
+  return connectorFixturesProblem(scenario.setup.connectors);
 }
 
 function deepMerge(
@@ -263,6 +264,18 @@ export async function runScenario(
     // La capa global del HOME del escenario: lo que solo se lee de ahí (`box`).
     // Sin `provider` ni `trace`: los fija la capa del proyecto.
     const { provider: _p, trace: _t, ...globalLayer } = scenario.setup.globalConfig;
+    if (scenario.setup.connectors.length > 0) {
+      // M20: los conectores, con su server de fixtures, junto a los del escenario.
+      const companion = (globalLayer.companion ?? {}) as { mcp?: { servers?: unknown[] } };
+      const servers = connectorFixtureServers(scenario.setup.connectors, {
+        command: env.spawn.command,
+        args: env.spawn.args.slice(0, -1),
+      });
+      globalLayer.companion = {
+        ...companion,
+        mcp: { ...companion.mcp, servers: [...(companion.mcp?.servers ?? []), ...servers] },
+      };
+    }
     if (Object.keys(globalLayer).length > 0) {
       mkdirSync(join(home, '.stratum'), { recursive: true });
       writeFileSync(

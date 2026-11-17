@@ -2316,7 +2316,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **B6. *Resuelta.* Aislamiento al consolidar y a las propuestas.** Una propuesta nunca cita contenido de otro
     preset ni de la memoria de sesión sin procedencia; la memoria de sesión no se promociona sola
     (M11): promover exige aprobar la propuesta.
-- **M20 — Catálogo de conectores del asistente** [decidido 2026-11-11; solo Dot]. Dar capacidades
+- **M20 — Catálogo de conectores del asistente** [decidido 2026-11-11; solo Dot; fases 1–4
+  hechas el 2026-11-12]. Dar capacidades
   al `companion` con conectores prediseñados que se activan desde Dot, sin que la persona escriba
   la config de un server MCP. Primeros: **Open-Meteo, Renfe y Home Assistant** (ADIF, fuera).
   *Decidido por el usuario, 2026-11-11*:
@@ -2478,6 +2479,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     - El bloque `# Your connectors` del prompt nombra cada conector con su skill.
   - **Se mide**: escenarios de eval con preguntas reales («¿cuándo sale el próximo a Alcalá desde
     Atocha?», «¿hay incidencias en la R2?»), contra un recorte fijo del GTFS y del tiempo real.
+    *Hechos el 2026-11-17* (grupo `connectors`, `stratum-cli/docs/eval.md`): el próximo cercanías
+    de Atocha a Alcalá, las incidencias del C3 y el primer AVE de Madrid a Sevilla, con el GTFS
+    recortado de las fixtures y el reloj fijo. *Decidido por el usuario*: el conector se sirve con
+    un server de fixtures declarado como server MCP del `companion`, sin ningún camino propio en el
+    runtime. Por eso no miden la caja de conectores ni la skill.
 
   *Fases* (cada una se demuestra sin interfaz antes de pintarla en Dot):
   1. Manifiesto, catálogo, Node en la imagen, conectores dentro de ella, lanzamiento por la caja,
@@ -2500,7 +2506,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      su sufijo DNS (`homeassistant` → `homeassistant.home`): en `HA_URL` va el nombre completo o la
      IP. Conector propio sobre la API REST (no el puente al servidor MCP de Home Assistant), para
      declarar cada tool en el manifiesto. Probado de punta a punta contra un Home Assistant real
-     con un token falso (401 visto por el agente); falta la prueba con el token de verdad.
+     con un token falso (401 visto por el agente) y, el 2026-11-12, con el token de verdad:
+     las consultas a la casa responden y una acción queda parada hasta que se aprueba.
 
 ### 23.12 Fuera, por ahora
 

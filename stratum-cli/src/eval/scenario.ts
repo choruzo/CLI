@@ -26,8 +26,14 @@ export const SCENARIO_GROUPS = [
   'replay',
   // M15: el companion maneja la pantalla de su caja (solo live: caja y modelo con visión reales).
   'computer-use',
+  // M20: el companion contesta con un conector, sobre su server de fixtures.
+  'connectors',
 ] as const;
 export type ScenarioGroup = (typeof SCENARIO_GROUPS)[number];
+
+/** Conectores con server de fixtures para los evals (`setup.connectors`). */
+export const FIXTURE_CONNECTORS = ['renfe'] as const;
+export type FixtureConnector = (typeof FIXTURE_CONNECTORS)[number];
 
 /**
  * Qué pone a prueba el escenario. `basic`: el camino feliz, una capacidad.
@@ -420,6 +426,14 @@ export const ScenarioSchema = z
          * fija el runner en la del proyecto; aquí se ignoran.
          */
         globalConfig: z.record(z.unknown()).default({}),
+        /**
+         * M20 — conectores del `companion` con su **server de fixtures** (datos y
+         * reloj fijos): el runner los declara en `companion.mcp.servers` de la
+         * config global, con las tools de solo lectura de su manifiesto. No pasa
+         * por la caja de conectores, así que no mide su skill ni el bloque
+         * `# Your connectors` del prompt.
+         */
+        connectors: z.array(z.enum(FIXTURE_CONNECTORS)).default([]),
         /** Hosts SSH simulados: alias → respuestas por comando. */
         ssh: z
           .object({
@@ -520,8 +534,10 @@ export interface LoadedScenario extends Scenario {
 export function scenarioFingerprint(scenario: Scenario): string {
   const { requires, input, followUps, sessions, run, script, expect } = scenario;
   // Solo entran si se usan: la huella de los escenarios de siempre no cambia.
-  const { globalConfig, ...baseSetup } = scenario.setup;
-  const setup = Object.keys(globalConfig).length > 0 ? scenario.setup : baseSetup;
+  // (Quitando claves de una copia: el orden de las que quedan, y la huella, no cambian.)
+  const setup: Partial<Scenario['setup']> = { ...scenario.setup };
+  if (Object.keys(scenario.setup.globalConfig).length === 0) delete setup.globalConfig;
+  if (scenario.setup.connectors.length === 0) delete setup.connectors;
   const more = {
     ...(followUps.length > 0 ? { followUps } : {}),
     ...(sessions.length > 0 ? { sessions } : {}),

@@ -1,7 +1,8 @@
 /**
- * Utilidades SOLO para los tests del conector: un zip mínimo (stored o deflate),
- * un codificador protobuf para fabricar feeds GTFS-RT, el índice de las
- * fixtures y un contexto de tools con reloj fijo.
+ * Utilidades para los tests del conector y su server de fixtures de los evals
+ * (`fixture-server.ts`): un zip mínimo (stored o deflate), un codificador
+ * protobuf para fabricar feeds GTFS-RT, el índice de las fixtures y un contexto
+ * de tools con reloj fijo. Nunca entra en el server de la caja (`server.ts`).
  */
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -88,17 +89,21 @@ const GTFS_FILES = [
 ];
 
 /** El GTFS recortado de `fixtures/gtfs/` empaquetado en un zip. */
-export function fixtureZip(method: 0 | 8 = 8): Buffer {
+export function fixtureZip(method: 0 | 8 = 8, fixtures = FIXTURES): Buffer {
   const entries: Record<string, string> = {};
-  for (const f of GTFS_FILES) entries[f] = readFileSync(join(FIXTURES, 'gtfs', f), 'utf8');
+  for (const f of GTFS_FILES) entries[f] = readFileSync(join(fixtures, 'gtfs', f), 'utf8');
   return makeZip(entries, method);
 }
 
 /** Construye el índice de las fixtures en `dir` y devuelve su ruta. */
-export async function buildFixtureIndex(dir: string, warn?: (m: string) => void): Promise<string> {
+export async function buildFixtureIndex(
+  dir: string,
+  warn?: (m: string) => void,
+  fixtures = FIXTURES,
+): Promise<string> {
   mkdirSync(dir, { recursive: true });
   const zipPath = join(dir, 'fixture.zip');
-  writeFileSync(zipPath, fixtureZip());
+  writeFileSync(zipPath, fixtureZip(8, fixtures));
   const r = await buildIndex({
     zipPath,
     dir,
@@ -309,17 +314,19 @@ const GTFS_LD_FILES = [
 ];
 
 /** El GTFS de larga distancia recortado de `fixtures/ld/gtfs/` empaquetado en un zip. */
-export function ldFixtureZip(method: 0 | 8 = 8): Buffer {
+export function ldFixtureZip(method: 0 | 8 = 8, fixtures = FIXTURES): Buffer {
   const entries: Record<string, string> = {};
-  for (const f of GTFS_LD_FILES) entries[f] = readFileSync(join(FIXTURES_LD, 'gtfs', f), 'utf8');
+  for (const f of GTFS_LD_FILES) {
+    entries[f] = readFileSync(join(fixtures, 'ld', 'gtfs', f), 'utf8');
+  }
   return makeZip(entries, method);
 }
 
 /** Construye el índice de larga distancia de las fixtures en `dir` y devuelve su ruta. */
-export async function buildLdFixtureIndex(dir: string): Promise<string> {
+export async function buildLdFixtureIndex(dir: string, fixtures = FIXTURES): Promise<string> {
   mkdirSync(dir, { recursive: true });
   const zipPath = join(dir, 'fixture-ld.zip');
-  writeFileSync(zipPath, ldFixtureZip());
+  writeFileSync(zipPath, ldFixtureZip(8, fixtures));
   const r = await buildLdIndex({
     zipPath,
     dir,
@@ -331,8 +338,8 @@ export async function buildLdFixtureIndex(dir: string): Promise<string> {
 }
 
 /** Los `.pb` reales de larga distancia de `fixtures/ld/realtime/`. */
-export function ldRealtimeFeeds(): FakeFeeds {
-  const read = (f: string) => readFileSync(join(FIXTURES_LD, 'realtime', f));
+export function ldRealtimeFeeds(fixtures = FIXTURES): FakeFeeds {
+  const read = (f: string) => readFileSync(join(fixtures, 'ld', 'realtime', f));
   return {
     trip_updates: read('trip_updates_LD.pb'),
     vehicle_positions: read('vehicle_positions_LD.pb'),

@@ -801,7 +801,7 @@ Segundo bloque de `CLI-DOC/Orientacion-Infraestructura.md` (§3, §5 y §10.5). 
 
 ### Después del Hito 17
 
-El roadmap siguió en el plano de control y en Dot, con hitos M0–M19 (anfitrión de sesión, protocolo, daemon `stratumd`, aprobaciones, pausa, traspaso, conversación duradera, Desktop como cliente, la caja, el `companion`, computer use, rutinas, conectores, canales y memoria estructurada). Su definición y estado están en `docs/PRD_STRATUM_DOT.md` (M0–M12 en sus secciones propias, M13–M19 en §23.11); las specs vinculantes que tocan el runtime, en §12.19–§12.25 de este documento.
+El roadmap siguió en el plano de control y en Dot, con hitos M0–M20 (anfitrión de sesión, protocolo, daemon `stratumd`, aprobaciones, pausa, traspaso, conversación duradera, Desktop como cliente, la caja, el `companion`, computer use, rutinas, conectores, canales, memoria estructurada y el catálogo de conectores propios del `companion`). Su definición y estado están en `docs/PRD_STRATUM_DOT.md` (M0–M12 en sus secciones propias, M13–M20 en §23.11); las specs vinculantes que tocan el runtime, en §12.19–§12.25 de este documento.
 ---
 
 ## 10. Próximos Pasos Inmediatos
