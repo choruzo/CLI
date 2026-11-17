@@ -2593,8 +2593,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     Dot. Panel en la vista *Asistente* de Dot.
 
   *Fases* (en este orden: primero lo que se prueba sin claves):
-  1. **`crtm`**: Metro, Metro Ligero y EMT, después los interurbanos.
-  2. **`aemet`**: previsión y avisos, sin clave en el conector.
+  1. **`crtm`**: Metro, Metro Ligero y EMT, después los interurbanos. *Metro, Metro Ligero y EMT
+     hechos el 2026-11-17*. Medido ese día: el GTFS de Metro Ligero sale una hora antes que la
+     hora local de su `trip_id`, y cada viaje se corrige con su etiqueta. Faltan los autobuses
+     urbanos de otros municipios y los interurbanos.
+  2. **`aemet`**: previsión y avisos, sin clave en el conector. *Hecha el 2026-11-17*:
+     - Tabla de los 8 132 municipios del INE. Los 12 recientes van con su origen, y los que no
+       tienen previsión ofrecen la del municipio del que se segregaron, presentada como de otro.
+     - Los avisos distinguen los activos de los previstos.
+     - El código de zona Meteoalerta **no** siempre contiene la provincia (Baleares, y Canarias
+       compartida), así que la provincia sale de la tabla.
   3. **`google`**: el `setup` OAuth en la CLI, Gmail y Tasks.
   4. **Recordatorios propios**: daemon, protocolo y panel en Dot.
 

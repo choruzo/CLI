@@ -2,3 +2,5 @@
 *.sh text eol=lf
 # Fixtures protobuf de GTFS-RT (M20): binarios, sin conversión de fin de línea.
 *.pb binary
+# Fixtures XML de AEMET (M21): binarios, sin conversión de fin de línea.
+stratum-cli/src/connector-servers/aemet/fixtures/*.xml binary

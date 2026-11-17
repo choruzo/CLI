@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "id": "aemet",
+  "version": "1.0.0",
+  "name": "AEMET",
+  "description": "Tiempo y avisos oficiales de España con los datos abiertos de la Agencia Estatal de Meteorología: previsión diaria y por horas de cualquier municipio y avisos Meteoalerta por zona o provincia.",
+  "agents": ["companion"],
+  "hosts": ["www.aemet.es"],
+  "secrets": [],
+  "tools": [
+    {
+      "name": "aemet_municipios",
+      "readOnly": true,
+      "summary": "Busca el municipio por nombre o código INE, con su provincia, para el resto de tools."
+    },
+    {
+      "name": "aemet_prevision",
+      "readOnly": true,
+      "summary": "Previsión diaria de un municipio (1 a 7 días): cielo, temperaturas, lluvia y viento."
+    },
+    {
+      "name": "aemet_por_horas",
+      "readOnly": true,
+      "summary": "Previsión hora a hora desde ahora (6 a 48 horas), con orto y ocaso."
+    },
+    {
+      "name": "aemet_avisos",
+      "readOnly": true,
+      "summary": "Avisos Meteoalerta vigentes de un municipio, de una provincia o de toda España."
+    }
+  ]
+}

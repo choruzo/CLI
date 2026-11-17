@@ -1,0 +1,689 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rss version="2.0">
+  <channel>
+    <title>AEMET - Avisos de fenómenos meteorológicos adversos - España</title>
+    <link>https://www.aemet.es/es/eltiempo/prediccion/avisos</link>
+    <description>Avisos de fenómenos meteorológicos adversos según el Plan Meteoalerta de la Agencia Estatal de Meteorología (AEMET) para España.</description>
+    <language>es</language>
+    <copyright>https://www.aemet.es/es/nota_legal</copyright>
+    <pubDate>Tue, 17 Nov 2026 18:41:59 +0000</pubDate>
+    <lastBuildDate>Tue, 17 Nov 2026 18:41:59 +0000</lastBuildDate>
+    <image>
+      <title>AEMET - Avisos de fenómenos meteorológicos adversos - España</title>
+      <link>https://www.aemet.es/es/eltiempo/prediccion/avisos</link>
+      <url>https://www.aemet.es/imagenes/gif/logo_AEMET_web.gif</url>
+    </image>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. A Mariña</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117184159_AFAZ712701VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117184159_AFAZ712701VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 18:41:59 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. A Mariña</title>
+      <description>Aviso de costeros de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 21:59 17-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117184159_AFAZ712701COCO1721.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117184159_AFAZ712701COCO1721.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 18:41:59 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Noroeste de A Coruña</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117184159_AFAZ711501VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117184159_AFAZ711501VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 18:41:59 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Oeste de A Coruña</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117184159_AFAZ711502VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117184159_AFAZ711502VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 18:41:59 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Serranía de Cuenca</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 02:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117175308_AFAZ681602PRP21902.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117175308_AFAZ681602PRP21902.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:53:08 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Cazorla y Segura</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117175308_AFAZ612302VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117175308_AFAZ612302VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:53:08 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Alcarria conquense</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 05:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117175308_AFAZ681601VIRM1905.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117175308_AFAZ681601VIRM1905.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:53:08 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Serranía de Cuenca</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117175308_AFAZ681602VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117175308_AFAZ681602VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:53:08 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Alcarria de Guadalajara</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 05:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117175308_AFAZ681903VIRM1905.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117175308_AFAZ681903VIRM1905.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:53:08 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Interior norte de Valencia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117175308_AFAZ774601VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117175308_AFAZ774601VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:53:08 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Ribera del Ebro de La Rioja</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174614_AFAZ762601VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174614_AFAZ762601VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:46:14 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Ibérica riojana</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174614_AFAZ762602VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174614_AFAZ762602VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:46:14 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Norte de Cáceres</title>
+      <description>Aviso de precipitación acumulada en una hora de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 21:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174422_AFAZ701001PRP11821.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174422_AFAZ701001PRP11821.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:44:22 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Villuercas y Montánchez</title>
+      <description>Aviso de precipitación acumulada en una hora de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 21:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174422_AFAZ701004PRP11821.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174422_AFAZ701004PRP11821.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:44:22 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sur de Ávila</title>
+      <description>Aviso de precipitación acumulada en una hora de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 21:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ670503PRP11821.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ670503PRP11821.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sistema Central de Salamanca</title>
+      <description>Aviso de precipitación acumulada en una hora de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 21:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ673702PRP11821.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ673702PRP11821.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sur de Salamanca</title>
+      <description>Aviso de precipitación acumulada en una hora de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 21:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ673703PRP11821.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ673703PRP11821.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Norte de Burgos</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ670902VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ670902VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Meseta de Burgos</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ670904VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ670904VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Ibérica de Burgos</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ670905VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ670905VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Meseta de Palencia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ673402VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ673402VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Ibérica de Soria</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ674201VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ674201VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Meseta de Soria</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117174230_AFAZ674202VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117174230_AFAZ674202VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:42:30 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Alcaraz y Segura</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117173911_AFAZ680202VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117173911_AFAZ680202VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:39:11 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Hellín y Almansa</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117173911_AFAZ680203VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117173911_AFAZ680203VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:39:11 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Alcarria conquense</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117173911_AFAZ681601VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117173911_AFAZ681601VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:39:11 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Serranía de Cuenca</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117173911_AFAZ681602VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117173911_AFAZ681602VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:39:11 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Alcarria de Guadalajara</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117173911_AFAZ681903VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117173911_AFAZ681903VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:39:11 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Montes de Toledo</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117173911_AFAZ684503VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117173911_AFAZ684503VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:39:11 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Noroeste de Murcia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117172942_AFAZ733002VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117172942_AFAZ733002VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:29:42 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Valle del Almanzora y Los Vélez</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117172926_AFAZ610401VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117172926_AFAZ610401VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:29:26 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Cazorla y Segura</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 18:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117172926_AFAZ612302VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117172926_AFAZ612302VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:29:26 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Interior norte de Valencia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 20:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117171517_AFAZ774601VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117171517_AFAZ774601VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:15:17 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Interior sur de Valencia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 20:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117171517_AFAZ774603VIRM1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117171517_AFAZ774603VIRM1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 17:15:17 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Sierra Tramontana</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 23:59 17-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117160334_AFAZ645401VIRM1723.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117160334_AFAZ645401VIRM1723.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 16:03:34 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Norte y nordeste de Mallorca</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 23:59 17-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117160334_AFAZ645402VIRM1723.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117160334_AFAZ645402VIRM1723.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 16:03:34 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Litoral occidental asturiano</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ633301COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ633301COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Litoral oriental asturiano</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ633302COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ633302COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Litoral cántabro</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ663901COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ663901COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Noroeste de A Coruña</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ711501COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ711501COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Oeste de A Coruña</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ711502COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ711502COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Suroeste de A Coruña</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ711504COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ711504COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. A Mariña</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ712701COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ712701COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Rias Baixas</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ713601COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ713601COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Miño de Pontevedra</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ713603COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ713603COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Gipuzkoa litoral</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ752001COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ752001COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Bizkaia litoral</title>
+      <description>Aviso de costeros de nivel naranja de 00:00 19-11-2026 CET (UTC+1) a 23:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ754801COCO1923.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ754801COCO1923.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Valle del Almanzora y Los Vélez</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ610401VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ610401VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Alcaraz y Segura</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ680202VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ680202VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Hellín y Almansa</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ680203VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ680203VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Noroeste de Murcia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ733002VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ733002VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Vientos. Interior sur de Valencia</title>
+      <description>Aviso de rachas máximas de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 08:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ774603VIRM1908.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ774603VIRM1908.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Poniente y Almería Capital</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 17:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ610403COCO1917.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ610403COCO1917.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Costa granadina</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 17:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ611804COCO1917.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ611804COCO1917.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Sierra Tramontana</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 11:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ645401COCO1911.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ645401COCO1911.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Sur de Mallorca</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 11:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ645404COCO1911.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ645404COCO1911.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Menorca</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 19-11-2026 CET (UTC+1) a 11:59 19-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117102800_AFAZ645501COCO1911.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117102800_AFAZ645501COCO1911.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:28:00 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Norte de Cáceres</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101709_AFAZ701001PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101709_AFAZ701001PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:17:09 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Tajo y Alagón</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101709_AFAZ701002PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101709_AFAZ701002PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:17:09 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Meseta cacereña</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101709_AFAZ701003PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101709_AFAZ701003PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:17:09 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Villuercas y Montánchez</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101709_AFAZ701004PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101709_AFAZ701004PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:17:09 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sur de Ávila</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101633_AFAZ670503PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101633_AFAZ670503PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:16:33 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sistema Central de Salamanca</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101633_AFAZ673702PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101633_AFAZ673702PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:16:33 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sur de Salamanca</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117101633_AFAZ673703PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117101633_AFAZ673703PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:16:33 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Sierra de San Vicente</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117100551_AFAZ684501PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117100551_AFAZ684501PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:05:51 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Valle del Tajo</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117100551_AFAZ684502PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117100551_AFAZ684502PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:05:51 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Montes de Toledo</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 09:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117100551_AFAZ684503PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117100551_AFAZ684503PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:05:51 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Serranía de Cuenca</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 12:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117100551_AFAZ681602PRP21823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117100551_AFAZ681602PRP21823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:05:51 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Poniente y Almería Capital</title>
+      <description>Aviso de costeros de nivel amarillo de 18:00 17-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117100143_AFAZ610403COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117100143_AFAZ610403COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:01:43 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Costa granadina</title>
+      <description>Aviso de costeros de nivel amarillo de 18:00 17-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117100143_AFAZ611804COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117100143_AFAZ611804COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 10:01:43 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Litoral cántabro</title>
+      <description>Aviso de costeros de nivel naranja de 13:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117094846_AFAZ663901COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117094846_AFAZ663901COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:48:46 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Gipuzkoa litoral</title>
+      <description>Aviso de costeros de nivel naranja de 21:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117094846_AFAZ752001COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117094846_AFAZ752001COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:48:46 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Bizkaia litoral</title>
+      <description>Aviso de costeros de nivel naranja de 21:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117094846_AFAZ754801COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117094846_AFAZ754801COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:48:46 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Litoral cántabro</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 18-11-2026 CET (UTC+1) a 12:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117094846_AFAZ663901COCO1812.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117094846_AFAZ663901COCO1812.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:48:46 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Gipuzkoa litoral</title>
+      <description>Aviso de costeros de nivel amarillo de 04:00 18-11-2026 CET (UTC+1) a 20:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117094846_AFAZ752001COCO1820.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117094846_AFAZ752001COCO1820.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:48:46 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Bizkaia litoral</title>
+      <description>Aviso de costeros de nivel amarillo de 04:00 18-11-2026 CET (UTC+1) a 20:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117094846_AFAZ754801COCO1820.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117094846_AFAZ754801COCO1820.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:48:46 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Sierra Tramontana</title>
+      <description>Aviso de costeros de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 05:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117093503_AFAZ645401COCO1805.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117093503_AFAZ645401COCO1805.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:35:03 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Norte y nordeste de Mallorca</title>
+      <description>Aviso de costeros de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 05:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117093503_AFAZ645402COCO1805.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117093503_AFAZ645402COCO1805.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:35:03 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Sur de Mallorca</title>
+      <description>Aviso de costeros de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 05:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117093503_AFAZ645404COCO1805.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117093503_AFAZ645404COCO1805.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:35:03 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Levante mallorquín</title>
+      <description>Aviso de costeros de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 05:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117093503_AFAZ645405COCO1805.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117093503_AFAZ645405COCO1805.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:35:03 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Menorca</title>
+      <description>Aviso de costeros de nivel amarillo de 17:00 17-11-2026 CET (UTC+1) a 05:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117093503_AFAZ645501COCO1805.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117093503_AFAZ645501COCO1805.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 09:35:03 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Noroeste de A Coruña</title>
+      <description>Aviso de costeros de nivel naranja de 19:00 17-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ711501COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ711501COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Oeste de A Coruña</title>
+      <description>Aviso de costeros de nivel naranja de 22:00 17-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ711502COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ711502COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. A Mariña</title>
+      <description>Aviso de costeros de nivel naranja de 22:00 17-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ712701COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ712701COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Suroeste de A Coruña</title>
+      <description>Aviso de costeros de nivel naranja de 04:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ711504COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ711504COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Rias Baixas</title>
+      <description>Aviso de costeros de nivel naranja de 04:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ713601COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ713601COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Miño de Pontevedra</title>
+      <description>Aviso de costeros de nivel naranja de 04:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ713603COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ713603COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Litoral occidental asturiano</title>
+      <description>Aviso de costeros de nivel naranja de 10:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ633301COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ633301COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel naranja. Costeros. Litoral oriental asturiano</title>
+      <description>Aviso de costeros de nivel naranja de 10:00 18-11-2026 CET (UTC+1) a 23:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ633302COCO1823.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ633302COCO1823.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Lluvias. Interior de Pontevedra</title>
+      <description>Aviso de precipitación acumulada en 12 horas de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 05:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ713602PRP21805.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ713602PRP21805.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Suroeste de A Coruña</title>
+      <description>Aviso de costeros de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 03:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ711504COCO1803.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ711504COCO1803.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Rias Baixas</title>
+      <description>Aviso de costeros de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 03:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ713601COCO1803.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ713601COCO1803.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Miño de Pontevedra</title>
+      <description>Aviso de costeros de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 03:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ713603COCO1803.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ713603COCO1803.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Litoral occidental asturiano</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 18-11-2026 CET (UTC+1) a 09:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ633301COCO1809.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ633301COCO1809.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Litoral oriental asturiano</title>
+      <description>Aviso de costeros de nivel amarillo de 00:00 18-11-2026 CET (UTC+1) a 09:59 18-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117082229_AFAZ633302COCO1809.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117082229_AFAZ633302COCO1809.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 08:22:29 +0000</pubDate>
+    </item>
+    <item>
+      <title>Aviso. Nivel amarillo. Costeros. Oeste de A Coruña</title>
+      <description>Aviso de costeros de nivel amarillo de 19:00 17-11-2026 CET (UTC+1) a 21:59 17-11-2026 CET (UTC+1).</description>
+      <link>https://www.aemet.es/documentos_d/eltiempo/prediccion/avisos/cap/Z_CAP_C_LEMM_20261117074421_AFAZ711502COCO1721.xml</link>
+      <guid isPermaLink="false">Z_CAP_C_LEMM_20261117074421_AFAZ711502COCO1721.xml</guid>
+      <pubDate>Tue, 17 Nov 2026 07:44:21 +0000</pubDate>
+    </item>
+  </channel>
+</rss>

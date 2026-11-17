@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<alert xmlns = "urn:oasis:names:tc:emergency:cap:1.2">
+  <identifier>2.49.0.0.724.0.ES.20261117184159.712701VIRM18231794940919</identifier>
+  <sender>http://www.aemet.es</sender>
+  <sent>2026-11-17T18:41:59-00:00</sent>
+  <status>Actual</status>
+  <msgType>Update</msgType>
+  <scope>Public</scope>
+  <references>http://www.aemet.es,2.49.0.0.724.0.ES.20261117082229.712701VIRM18231794903749,2026-11-17T08:22:29-00:00</references>
+  <info>
+    <language>es-ES</language>
+    <category>Met</category>
+    <event>Aviso de vientos de nivel amarillo</event>
+    <responseType>Monitor</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <eventCode>
+      <valueName>AEMET-Meteoalerta fenomeno</valueName>
+      <value>VI;Vientos</value>
+    </eventCode>
+    <effective>2026-11-17T19:41:59+01:00</effective>
+    <onset>2026-11-17T19:00:00+01:00</onset>
+    <expires>2026-11-18T23:59:59+01:00</expires>
+    <senderName>AEMET. Agencia Estatal de Meteorología</senderName>
+    <headline>Aviso de vientos de nivel amarillo. A Mariña</headline>
+    <description>Rachas máximas: 80 km/h. Viento de dirección suroeste.</description>
+    <instruction>Esté atento. Manténgase informado de la predicción meteorológica más actualizada. Se pueden producir daños moderados a personas y bienes, especialmente a aquellos vulnerables o en zonas expuestas al fenómeno.</instruction>
+    <web>https://www.aemet.es/es/eltiempo/prediccion/avisos</web>
+    <contact>AEMET</contact>
+    <parameter>
+      <valueName>AEMET-Meteoalerta nivel</valueName>
+      <value>amarillo</value>
+    </parameter>
+    <parameter>
+      <valueName>AEMET-Meteoalerta parametro</valueName>
+      <value>RM;Rachas máximas;80 km/h</value>
+    </parameter>
+    <parameter>
+      <valueName>AEMET-Meteoalerta probabilidad</valueName>
+      <value>40%-70%</value>
+    </parameter>
+    <area>
+      <areaDesc>A Mariña</areaDesc>
+      <polygon>43.56,-7.75 43.58,-7.72 43.62,-7.73 43.66,-7.69 43.67,-7.71 43.74,-7.7 43.75,-7.67 43.73,-7.63 43.68,-7.59 43.73,-7.54 43.73,-7.49 43.7,-7.47 43.67,-7.36 43.63,-7.33 43.6,-7.29 43.56,-7.22 43.55,-7.16 43.56,-7.06 43.55,-7.03 43.54,-7.03 43.47,-7.05 43.42,-7.13 43.43,-7.17 43.4,-7.18 43.3,-7.1 43.3,-7.09 43.27,-7.16 43.26,-7.2 43.29,-7.2 43.29,-7.26 43.39,-7.25 43.38,-7.31 43.38,-7.43 43.42,-7.45 43.46,-7.45 43.45,-7.52 43.47,-7.57 43.52,-7.54 43.54,-7.59 43.53,-7.62 43.52,-7.7 43.56,-7.75</polygon>
+      <geocode>
+        <valueName>AEMET-Meteoalerta zona</valueName>
+        <value>712701</value>
+      </geocode>
+    </area>
+  </info>
+  <info>
+    <language>en-GB</language>
+    <category>Met</category>
+    <event>Moderate wind warning</event>
+    <responseType>Monitor</responseType>
+    <urgency>Immediate</urgency>
+    <severity>Moderate</severity>
+    <certainty>Likely</certainty>
+    <eventCode>
+      <valueName>AEMET-Meteoalerta fenomeno</valueName>
+      <value>VI;Vientos</value>
+    </eventCode>
+    <effective>2026-11-17T19:41:59+01:00</effective>
+    <onset>2026-11-17T19:00:00+01:00</onset>
+    <expires>2026-11-18T23:59:59+01:00</expires>
+    <senderName>AEMET. State Meteorological Agency</senderName>
+    <headline>Moderate wind warning. A Mariña</headline>
+    <description>Maximum gust of wind: 80 km/h. Viento de dirección suroeste.</description>
+    <instruction>Be aware, keep up to date with the latest weather forecast. Moderate damages to people and properties may occur, especially to those vulnerable or in exposed areas.</instruction>
+    <web>https://www.aemet.es/en/eltiempo/prediccion/avisos</web>
+    <contact>AEMET</contact>
+    <parameter>
+      <valueName>AEMET-Meteoalerta nivel</valueName>
+      <value>amarillo</value>
+    </parameter>
+    <parameter>
+      <valueName>AEMET-Meteoalerta parametro</valueName>
+      <value>RM;Maximum gust of wind;80 km/h</value>
+    </parameter>
+    <parameter>
+      <valueName>AEMET-Meteoalerta probabilidad</valueName>
+      <value>40%-70%</value>
+    </parameter>
+    <area>
+      <areaDesc>A Mariña</areaDesc>
+      <polygon>43.56,-7.75 43.58,-7.72 43.62,-7.73 43.66,-7.69 43.67,-7.71 43.74,-7.7 43.75,-7.67 43.73,-7.63 43.68,-7.59 43.73,-7.54 43.73,-7.49 43.7,-7.47 43.67,-7.36 43.63,-7.33 43.6,-7.29 43.56,-7.22 43.55,-7.16 43.56,-7.06 43.55,-7.03 43.54,-7.03 43.47,-7.05 43.42,-7.13 43.43,-7.17 43.4,-7.18 43.3,-7.1 43.3,-7.09 43.27,-7.16 43.26,-7.2 43.29,-7.2 43.29,-7.26 43.39,-7.25 43.38,-7.31 43.38,-7.43 43.42,-7.45 43.46,-7.45 43.45,-7.52 43.47,-7.57 43.52,-7.54 43.54,-7.59 43.53,-7.62 43.52,-7.7 43.56,-7.75</polygon>
+      <geocode>
+        <valueName>AEMET-Meteoalerta zona</valueName>
+        <value>712701</value>
+      </geocode>
+    </area>
+  </info>
+</alert>
