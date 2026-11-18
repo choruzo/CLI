@@ -1,0 +1,3 @@
+route_id,agency_id,route_short_name,route_long_name,route_desc,route_type,route_url,route_color,route_text_color
+8__651___,CRTM,651,MADRID (Moncloa)-MAJADAHONDA (Avda. de España),,3,https://www.crtm.es/8__651___.aspx,8EBF42,FFFFFF
+8__625___,CRTM,625,MADRID (Moncloa)-MONTE ROZAS,,3,https://www.crtm.es/8__625___.aspx,8EBF42,FFFFFF

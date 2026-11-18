@@ -5,17 +5,23 @@
  * español ya masticado para un agente, con la atribución de la licencia como
  * última línea.
  *
- * Sin tiempo real en esta versión: todo es «según horario». Metro Ligero tiene
- * horas exactas; la EMT (y Metro, si vuelve a tener horario vigente) funciona
- * por frecuencia: se dice cada cuánto pasa en la ventana vigente, nunca una hora
- * inventada. Un modo cuyo calendario no cubre hoy no da horas (ni el caducado ni
- * frecuencias de referencia): dice que no hay horario vigente.
+ * Sin tiempo real en esta versión: todo es «según horario». Metro Ligero, los
+ * autobuses urbanos de los municipios y los interurbanos tienen horas exactas; la
+ * EMT (y Metro, si vuelve a tener horario vigente) funciona por frecuencia: se
+ * dice cada cuánto pasa en la ventana vigente, nunca una hora inventada. Un modo
+ * cuyo calendario no cubre hoy no da horas (ni el caducado ni frecuencias de
+ * referencia): dice que no hay horario vigente.
+ *
+ * Las tres redes de autobús comparten números de línea (el 1 circula en la EMT y
+ * en varios municipios), así que una línea se identifica por `modo` y, cuando el
+ * número se repite dentro de la misma red, por su id `modo:<route_id>`. Nunca se
+ * elige por su cuenta entre varios candidatos.
  */
 import { z } from 'zod';
 import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
 import { dateEs, hhmm, madridParts, parseClock } from '../renfe/time.js';
 import { MODE_IDS, feedMode, type ModeId } from './feeds.js';
-import { lineTag, parseStationRef, stationRef } from './names.js';
+import { lineRef, lineTag, parseLineRef, parseStationRef, stationRef } from './names.js';
 import {
   searchStations,
   serviceDays,
@@ -71,7 +77,8 @@ function parseArgs<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, args: unknown
   throw new ToolUserError(`Argumento inválido: ${issue?.message ?? 'argumentos no válidos'}.`);
 }
 
-const MODO_MSG = 'modo debe ser "metro", "ml" (Metro Ligero) o "emt"';
+const MODO_MSG =
+  'modo debe ser "metro", "ml" (Metro Ligero), "emt" (EMT de Madrid), "urbano" (autobuses urbanos de otros municipios) o "interurbano" (autobuses interurbanos)';
 const MODE_ALIASES: Record<string, ModeId> = {
   metro: 'metro',
   'metro ligero': 'ml',
@@ -82,6 +89,17 @@ const MODE_ALIASES: Record<string, ModeId> = {
   bus: 'emt',
   autobus: 'emt',
   autobuses: 'emt',
+  urbano: 'urbano',
+  urbanos: 'urbano',
+  'bus urbano': 'urbano',
+  'autobus urbano': 'urbano',
+  'autobuses urbanos': 'urbano',
+  municipal: 'urbano',
+  interurbano: 'interurbano',
+  interurbanos: 'interurbano',
+  'bus interurbano': 'interurbano',
+  'autobus interurbano': 'interurbano',
+  'autobuses interurbanos': 'interurbano',
 };
 const modo = z.string({ message: MODO_MSG }).transform((raw, ctx): ModeId => {
   const key = raw.trim().toLowerCase().normalize('NFD').replace(/\p{M}/gu, '');
@@ -105,7 +123,7 @@ const ParadasSchema = z.object({
   modo: modo.optional(),
   linea: text('linea', 30).optional(),
 });
-const LineasSchema = z.object({ modo, linea: text('linea', 30).optional() });
+const LineasSchema = z.object({ modo: modo.optional(), linea: text('linea', 30).optional() });
 const SalidasSchema = z.object({
   parada: text('parada'),
   modo: modo.optional(),
@@ -231,38 +249,79 @@ function linesLabel(ix: ModeIndex, stationId: string, max = 8): string {
   return tags.length > max ? `${tags.slice(0, max).join(', ')}…` : tags.join(', ');
 }
 
-interface FoundLine {
+interface LineMatch {
   ix: ModeIndex;
   route: RouteInfo;
+}
+
+interface FoundLine extends LineMatch {
   tag: string;
+}
+
+/**
+ * Líneas que responden a `linea` en los modos abiertos: por nombre corto (`1`,
+ * `ML1`, `625`) o por su id `modo:<route_id>` (`urbano:9__1__040_`), que es como
+ * se pide una concreta cuando varias redes o municipios comparten número.
+ */
+function matchLines(o: Opened, linea: string): LineMatch[] {
+  const ref = parseLineRef(linea);
+  const out: LineMatch[] = [];
+  if (ref) {
+    const ix = o.ixs.get(ref.mode);
+    if (ix) for (const route of ix.findRoutes(ref.lineId)) out.push({ ix, route });
+    return out;
+  }
+  for (const ix of o.ixs.values()) {
+    for (const route of ix.findRoutes(linea)) out.push({ ix, route });
+  }
+  const order = (m: ModeId) => MODE_IDS.indexOf(m);
+  return out.sort(
+    (a, b) =>
+      order(a.ix.mode) - order(b.ix.mode) ||
+      naturalCompare(a.route.shortName, b.route.shortName) ||
+      a.route.id.localeCompare(b.route.id),
+  );
+}
+
+/** «- 625 · Autobús interurbano · MADRID (Moncloa)-MONTE ROZAS · interurbano:8__625___» */
+function lineCandidate(m: LineMatch): string {
+  const label = feedMode(m.ix.mode).label;
+  const long = m.route.longName ? ` · ${m.route.longName}` : '';
+  return `- ${lineTag(m.ix.mode, m.route.shortName)} · ${label}${long} · ${lineRef(m.ix.mode, m.route.id)}`;
 }
 
 /** La línea pedida en los modos abiertos; si no es una sola, `ToolUserError` que dice qué hacer. */
 function findLine(o: Opened, linea: string, tool: string): FoundLine {
-  const found: Array<{ ix: ModeIndex; route: RouteInfo }> = [];
-  for (const ix of o.ixs.values()) {
-    for (const route of ix.findRoutes(linea)) found.push({ ix, route });
-  }
+  const found = matchLines(o, linea);
   if (found.length === 0) {
     const modes = [...o.ixs.keys()].join('" o "');
     throw new ToolUserError(
-      `No encuentro la línea «${linea}». Mira las líneas con transporte_lineas (modo "${modes}") y repite con su nombre corto.`,
+      `No encuentro la línea «${linea}». Mira las líneas con transporte_lineas (modo "${modes}") y repite con su nombre corto o con su id (por ejemplo "metro:1" o "interurbano:8__625___").`,
     );
   }
   if (found.length > 1) {
-    const where = found.map((f) => feedMode(f.ix.mode).label).join(' y ');
-    throw new ToolUserError(
-      `La línea «${linea}» existe en varios modos (${where}). Repite ${tool} indicando modo ("metro", "ml" o "emt").`,
-    );
+    const shown = found.slice(0, MAX_CANDIDATES);
+    const lines = [
+      `La línea «${linea}» no es una sola: hay ${found.length} líneas con ese número. Repite ${tool} indicando modo ("metro", "ml", "emt", "urbano" o "interurbano") o con el id de la que quieras:`,
+      ...shown.map(lineCandidate),
+    ];
+    if (found.length > shown.length) {
+      lines.push(`(y ${found.length - shown.length} más: afina con modo)`);
+    }
+    throw new ToolUserError(lines.join('\n'));
   }
   const f = found[0]!;
-  return { ...f, tag: lineTag(f.ix.mode, f.route.shortName) };
+  return { ix: f.ix, route: f.route, tag: lineTag(f.ix.mode, f.route.shortName) };
 }
 
-/** ¿La estación la sirve alguna de esas líneas (por nombre corto, en su modo)? */
+/** ¿La estación la sirve alguna de esas líneas (por nombre corto o por id `modo:línea`, en su modo)? */
 function servedByLine(o: Opened, station: StationInfo, linea: string): boolean {
   const ix = o.ixs.get(station.mode)!;
-  const ids = new Set(ix.findRoutes(linea).map((r) => r.id));
+  const ids = new Set(
+    matchLines(o, linea)
+      .filter((m) => m.ix.mode === station.mode)
+      .map((m) => m.route.id),
+  );
   return ix.routesAt(station.id).some((r) => ids.has(r.id));
 }
 
@@ -456,10 +515,19 @@ function modeWord(mode: ModeId): string {
 
 // --- Filtros de las tools ----------------------------------------------------
 
-/** Ids de las líneas pedidas en el modo; error que orienta si no existe. */
+/**
+ * Ids de las líneas pedidas en el modo; error que orienta si no existe. `linea`
+ * admite el nombre corto o el id `modo:<route_id>`: con el id se filtra una sola
+ * de las líneas que comparten número.
+ */
 function lineFilter(ix: ModeIndex, linea: string | undefined): string[] | undefined {
   if (!linea) return undefined;
-  const ids = ix.findRoutes(linea).map((r) => r.id);
+  const ref = parseLineRef(linea);
+  const ids = ref
+    ? ref.mode === ix.mode
+      ? ix.findRoutes(ref.lineId).map((r) => r.id)
+      : []
+    : ix.findRoutes(linea).map((r) => r.id);
   if (ids.length === 0) {
     throw new ToolUserError(
       `No encuentro la línea «${linea}» en ${feedMode(ix.mode).label}. Mira las líneas con transporte_lineas (modo "${ix.mode}").`,
@@ -509,8 +577,9 @@ function lineStopsText(line: FoundLine, withIds: boolean, o: Opened): string {
 
 const MODO_PROP = {
   type: 'string',
-  enum: ['metro', 'ml', 'emt'],
-  description: 'Modo: "metro", "ml" (Metro Ligero) o "emt" (autobuses urbanos de Madrid).',
+  enum: ['metro', 'ml', 'emt', 'urbano', 'interurbano'],
+  description:
+    'Modo: "metro", "ml" (Metro Ligero), "emt" (EMT de Madrid), "urbano" (autobuses urbanos de los demás municipios) o "interurbano" (autobuses interurbanos).',
 };
 const DESDE_PROP = {
   type: 'string',
@@ -522,10 +591,10 @@ function buildTools(ctx: CrtmContext): ConnectorTool[] {
   const paradas: ConnectorTool = {
     name: 'transporte_paradas',
     description:
-      'Busca estaciones de Metro, paradas de Metro Ligero y paradas de autobús de la EMT de Madrid por nombre (sin acentos ni mayúsculas), ' +
-      'o lista las paradas de una línea en orden (con `linea` y `modo`, sin `nombre`). Devuelve el modo, las líneas que paran y un id ' +
-      '"modo:id" (por ejemplo "emt:4514", "ml:est_10_1") para usarlo en transporte_salidas y transporte_trayecto. ' +
-      'Si hay varias coincidencias las lista; filtra con `modo` o `linea`.',
+      'Busca estaciones de Metro y Metro Ligero y paradas de autobús (EMT de Madrid, urbanos de los demás municipios e interurbanos) por nombre ' +
+      '(sin acentos ni mayúsculas), o lista las paradas de una línea en orden (con `linea` y `modo`, sin `nombre`). Devuelve el modo, las líneas ' +
+      'que paran y un id "modo:id" (por ejemplo "emt:4514", "ml:est_10_1", "interurbano:par_8_06002") para usarlo en transporte_salidas y ' +
+      'transporte_trayecto. Si hay varias coincidencias las lista; filtra con `modo` o `linea`.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -537,7 +606,8 @@ function buildTools(ctx: CrtmContext): ConnectorTool[] {
         linea: {
           type: 'string',
           description:
-            'Línea ("L1" o "1" con modo metro, "ML1", "27" con modo emt): filtra o, sin nombre, lista sus paradas.',
+            'Línea ("L1" con modo metro, "ML1", "27" con modo emt, "625" interurbana) o su id "modo:línea" ("urbano:9__1__040_") cuando varias ' +
+            'líneas comparten número: filtra o, sin nombre, lista sus paradas.',
         },
       },
       additionalProperties: false,
@@ -581,35 +651,53 @@ function buildTools(ctx: CrtmContext): ConnectorTool[] {
   const lineas: ConnectorTool = {
     name: 'transporte_lineas',
     description:
-      'Líneas de un modo (Metro, Metro Ligero o EMT) con sus extremos. Con `linea`, las paradas en orden de sus dos sentidos. ' +
+      'Líneas de un modo (Metro, Metro Ligero, EMT, autobuses urbanos de los demás municipios o interurbanos) con sus extremos. Con `linea`, las ' +
+      'paradas en orden de sus dos sentidos; si el número está en varias redes y no se da `modo`, devuelve los candidatos con su id. ' +
       'Úsala para saber qué líneas hay o por dónde pasa una; para horarios usa transporte_salidas.',
     inputSchema: {
       type: 'object',
       properties: {
         modo: MODO_PROP,
-        linea: { type: 'string', description: 'Línea concreta ("L1", "ML1", "27"), opcional.' },
+        linea: {
+          type: 'string',
+          description: 'Línea concreta ("L1", "ML1", "27", "625"), o su id "modo:línea", opcional.',
+        },
       },
-      required: ['modo'],
       additionalProperties: false,
     },
     handler: async (args) => {
       const a = parseArgs(LineasSchema, args);
-      return withModes(ctx, [a.modo], (o) => {
-        const ix = o.ixs.get(a.modo)!;
+      if (!a.modo && !a.linea) {
+        throw new ToolUserError(
+          'modo debe ser "metro", "ml" (Metro Ligero), "emt" (EMT de Madrid), "urbano" (autobuses urbanos de otros municipios) o "interurbano" (autobuses interurbanos); o indica `linea` para buscarla en todas las redes.',
+        );
+      }
+      return withModes(ctx, scope(a.modo, a.linea), (o) => {
+        const ix = a.modo ? o.ixs.get(a.modo)! : null;
         if (a.linea) return lineStopsText(findLine(o, a.linea, 'transporte_lineas'), false, o);
-        const routes = ix.routes();
+        const mode = a.modo!;
+        const routes = ix!.routes();
         const shown = routes.slice(0, MAX_LINES);
+        // En los autobuses el número se repite entre municipios: si pasa, se dice el id con el que pedir cada una.
+        const perName = new Map<string, number>();
+        for (const r of routes) perName.set(r.shortName, (perName.get(r.shortName) ?? 0) + 1);
+        const repeated = [...perName.values()].some((n) => n > 1);
         const lines = [
-          `Líneas de ${feedMode(a.modo).label} (${routes.length}):`,
-          ...shown.map(
-            (r) => `- ${lineTag(a.modo, r.shortName)} · ${r.longName || 'sin descripción'}`,
-          ),
+          `Líneas de ${feedMode(mode).label} (${routes.length}):`,
+          ...shown.map((r) => {
+            const id = (perName.get(r.shortName) ?? 0) > 1 ? ` · ${lineRef(mode, r.id)}` : '';
+            return `- ${lineTag(mode, r.shortName)} · ${r.longName || 'sin descripción'}${id}`;
+          }),
         ];
         if (routes.length > shown.length) {
           lines.push(`(y ${routes.length - shown.length} más: pide una con \`linea\`)`);
         }
-        lines.push('Con `linea` ves sus paradas en orden.');
-        return finish(lines, [ix]);
+        lines.push(
+          repeated
+            ? 'Con `linea` ves sus paradas en orden; donde el número se repite (varios municipios con la misma línea), usa el id.'
+            : 'Con `linea` ves sus paradas en orden.',
+        );
+        return finish(lines, [ix!]);
       });
     },
   };
@@ -618,8 +706,9 @@ function buildTools(ctx: CrtmContext): ConnectorTool[] {
   const salidas: ConnectorTool = {
     name: 'transporte_salidas',
     description:
-      'Próximas salidas desde una parada o estación de Madrid según horario (sin tiempo real): Metro Ligero con hora exacta y minutos que faltan; ' +
-      'EMT con la frecuencia vigente ("cada 8 min hasta las 09:00"). Metro no tiene horario vigente publicado: lo dice. ' +
+      'Próximas salidas desde una parada o estación de Madrid según horario (sin tiempo real): Metro Ligero, autobuses urbanos de los municipios y ' +
+      'autobuses interurbanos con hora exacta y minutos que faltan; EMT con la frecuencia vigente ("cada 8 min hasta las 09:00"). Metro no tiene ' +
+      'horario vigente publicado: lo dice. ' +
       '`parada` es un nombre o un id "modo:id"; si el nombre es ambiguo devuelve las candidatas con su id. ' +
       '`linea` y `destino` filtran; `desde` cambia la hora. Para cómo ir de A a B en una línea usa transporte_trayecto.',
     inputSchema: {
@@ -630,7 +719,10 @@ function buildTools(ctx: CrtmContext): ConnectorTool[] {
           description: 'Nombre de la parada o estación, o id "modo:id" ("emt:4514").',
         },
         modo: MODO_PROP,
-        linea: { type: 'string', description: 'Solo esta línea ("ML1", "27"), opcional.' },
+        linea: {
+          type: 'string',
+          description: 'Solo esta línea ("ML1", "27", "625"), o su id "modo:línea", opcional.',
+        },
         destino: {
           type: 'string',
           description: 'Solo los que después paran en este destino (nombre), opcional.',
@@ -720,9 +812,9 @@ function buildTools(ctx: CrtmContext): ConnectorTool[] {
   const trayecto: ConnectorTool = {
     name: 'transporte_trayecto',
     description:
-      'Trayectos DIRECTOS (una sola línea, sin transbordos) de una parada o estación a otra del mismo modo, según horario: ' +
-      'en Metro Ligero, hora de salida y de llegada; en EMT, la frecuencia y "unos N min de viaje". ' +
-      '`origen` y `destino` son nombres o ids "modo:id". Si no hay directo lo dice y sugiere transporte_salidas.',
+      'Trayectos DIRECTOS (una sola línea, sin transbordos) de una parada o estación a otra del mismo modo, según horario: con hora de salida y de ' +
+      'llegada cuando el modo tiene horas exactas (Metro Ligero, urbanos de los municipios e interurbanos); en EMT, la frecuencia y "unos N min de ' +
+      'viaje". `origen` y `destino` son nombres o ids "modo:id". Si no hay directo lo dice y sugiere transporte_salidas.',
     inputSchema: {
       type: 'object',
       properties: {

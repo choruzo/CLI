@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { lineTag, parseStationRef, stationRef, titleCase } from './names.js';
+import { lineRef, lineTag, parseLineRef, parseStationRef, stationRef, titleCase } from './names.js';
 
 describe('titleCase', () => {
   it('pasa las MAYÚSCULAS a formato de título con los artículos en minúscula', () => {
@@ -35,6 +35,8 @@ describe('etiquetas e ids', () => {
     expect(lineTag('metro', 'R')).toBe('R');
     expect(lineTag('ml', 'ML1')).toBe('ML1');
     expect(lineTag('emt', '27')).toBe('27');
+    expect(lineTag('urbano', '1A')).toBe('1A');
+    expect(lineTag('interurbano', '625')).toBe('625');
   });
 
   it('ids estables de estación', () => {
@@ -43,5 +45,13 @@ describe('etiquetas e ids', () => {
     expect(parseStationRef(' EMT:4514 ')).toEqual({ mode: 'emt', stationId: '4514' });
     expect(parseStationRef('plaza de castilla')).toBeNull();
     expect(parseStationRef('foo:1')).toBeNull();
+  });
+
+  it('ids estables de línea, para cuando el número se repite', () => {
+    expect(lineRef('interurbano', '8__625___')).toBe('interurbano:8__625___');
+    expect(parseLineRef('urbano:9__1__040_')).toEqual({ mode: 'urbano', lineId: '9__1__040_' });
+    // Un nombre corto suelto no es una referencia: se resuelve contra el índice.
+    expect(parseLineRef('625')).toBeNull();
+    expect(parseLineRef('ML1')).toBeNull();
   });
 });

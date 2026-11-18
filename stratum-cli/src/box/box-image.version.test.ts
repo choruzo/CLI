@@ -22,6 +22,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   5: 'c1fc3be07bc61789',
   // M21 fase 3: el conector `google`.
   6: '783c9add8bd78f4b',
+  // M21: autobuses urbanos (M9) e interurbanos (M89) en `crtm`.
+  7: 'fa7774e9fede8d3f',
 };
 
 /**

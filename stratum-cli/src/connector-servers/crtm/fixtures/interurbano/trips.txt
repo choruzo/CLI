@@ -1,0 +1,11 @@
+route_id,service_id,trip_id,trip_headsign,trip_short_name,direction_id,block_id,shape_id,wheelchair_accessible
+8__651___,1547988_8__651___,1547988_8__651___-10981697,INTERCAMBIADOR DE MONCLOA,651 MADRID (Moncloa),1,,8__651____2_-_IT_1,0
+8__651___,1547988_8__651___,1547988_8__651___-10981698,AV.ESPAÑA-EL ZOCO,651 MAJADAHONDA (Av. de España) por bus-VAO,0,,8__651____1_b._IT_2,0
+8__651___,1547988_8__651___,1547988_8__651___-10981702,AV.ESPAÑA-EL ZOCO,651 MAJADAHONDA (Av. de España),0,,8__651____1_-_IT_1,0
+8__651___,1547977_8__651___,1547977_8__651___-10979882,INTERCAMBIADOR DE MONCLOA,651 MADRID (Moncloa) por bus-VAO,1,,8__651____2_b._IT_2,0
+8__625___,251_8__625___,251_8__625___-8__625____1_06:30:00_2_-__1_8__625___,INTERCAMBIADOR MONCLOA,625 MADRID (Moncloa),1,,8__625____2_-_IT_1,0
+8__625___,251_8__625___,251_8__625___-8__625____1_07:30:00_1_-__6_8__625___,AV.MARSIL-IGLESIA,625 MONTE ROZAS,0,,8__625____1_-_IT_1,0
+8__625___,251_8__625___,251_8__625___-8__625____1_08:30:00_2_B__13_8__625___,INTERCAMBIADOR MONCLOA,625 MADRID (Moncloa) por bus-VAO,1,,8__625____2_B_IT_2,0
+8__625___,251_8__625___,251_8__625___-8__625____1_15:30:00_1_B__48_8__625___,AV.MARSIL-IGLESIA,625 MONTE ROZAS (por bus VAO),0,,8__625____1_B_IT_2,0
+8__625___,251_8__625___,251_8__625___-8__625____2_07:00:00_2_e.__1_8__625___,INTERCAMBIADOR MONCLOA,sdf 625 MADRID (Moncloa),1,,8__625____2_e._IT_2,0
+8__625___,251_8__625___,251_8__625___-8__625____2_08:00:00_1_e.__4_8__625___,GTA.URGULL-MONTE ULIA,sdf 625 MONTE ROZAS,0,,8__625____1_e._IT_2,0

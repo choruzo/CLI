@@ -20,6 +20,8 @@ export const FIXTURE_MODIFIED: Record<ModeId, string> = {
   metro: String(Date.parse('2025-05-27T08:00:00Z')),
   ml: String(Date.parse('2026-10-28T10:00:00Z')),
   emt: String(Date.parse('2026-10-30T07:00:00Z')),
+  urbano: String(Date.parse('2026-11-05T09:00:00Z')),
+  interurbano: String(Date.parse('2026-11-05T09:00:00Z')),
 };
 
 /** El GTFS recortado de un modo empaquetado en un zip. */

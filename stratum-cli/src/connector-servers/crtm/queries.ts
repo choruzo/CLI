@@ -98,7 +98,11 @@ export interface Hit {
   level: number;
 }
 
-const MODE_ORDER: Record<ModeId, number> = { metro: 0, ml: 1, emt: 2 };
+/**
+ * Orden en el que se enseñan las coincidencias de un mismo nombre: primero los
+ * raíles y la EMT (Madrid capital) y después las redes de autobús comarcales.
+ */
+const MODE_ORDER: Record<ModeId, number> = { metro: 0, ml: 1, emt: 2, urbano: 3, interurbano: 4 };
 
 /** Estaciones que casan con el texto, de mejor a peor coincidencia (luego modo y nombre). */
 export function searchStations(pool: StationInfo[], text: string): Hit[] {
@@ -247,28 +251,42 @@ export class ModeIndex {
     return this.routeList;
   }
 
-  /** Líneas por nombre corto: `1`, `L1` (Metro), `ML1`, `27`, `N1`. */
+  /**
+   * Líneas por nombre corto (`1`, `L1` en Metro, `ML1`, `27`, `N401`) o por su
+   * id de GTFS (`9__1__040_`, que es lo que llevan los ids `modo:línea` de las
+   * tools): en los autobuses un número se repite entre municipios y redes, así
+   * que el id es la única forma de pedir una línea concreta.
+   */
   findRoutes(text: string): RouteInfo[] {
     const t = text.trim().toUpperCase();
     const bare = this.mode === 'metro' ? /^L(\d+|R)$/.exec(t)?.[1] : undefined;
     return this.routes().filter((r) => {
       const s = r.shortName.toUpperCase();
-      return s === t || (bare !== undefined && s === bare);
+      return s === t || r.id.toUpperCase() === t || (bare !== undefined && s === bare);
     });
   }
 
-  /** Paradas en orden de cada sentido (el patrón más largo de cada sentido). */
+  /**
+   * Paradas en orden de cada sentido, con el patrón **que más viajes hace** de
+   * cada sentido (el representativo), no el más largo: los feeds de autobús
+   * traen viajes «9999» que concatenan el día entero de una línea en un solo
+   * viaje de más de mil paradas, y ese no es el recorrido que se quiere enseñar.
+   */
   lineDirections(routeId: string): LineDirection[] {
     const rows = this.db
       .prepare(
-        `SELECT t.direction, t.headsign, p.pid, p.n_stops FROM trips t JOIN patterns p ON p.pid = t.pid
-         WHERE t.route_id = ? ORDER BY p.n_stops DESC, t.tid`,
+        `SELECT t.direction, t.pid, COUNT(*) AS n FROM trips t
+         WHERE t.route_id = ? GROUP BY t.direction, t.pid ORDER BY n DESC, t.pid`,
       )
-      .all(routeId) as Array<{ direction: number; headsign: string; pid: number }>;
-    const best = new Map<number, { headsign: string; pid: number }>();
-    for (const r of rows) if (!best.has(r.direction)) best.set(r.direction, r);
+      .all(routeId) as Array<{ direction: number; pid: number }>;
+    const best = new Map<number, number>();
+    for (const r of rows) if (!best.has(r.direction)) best.set(r.direction, r.pid);
+    const headsignOf = this.db.prepare(
+      `SELECT headsign FROM trips WHERE pid = ? GROUP BY headsign ORDER BY COUNT(*) DESC, headsign LIMIT 1`,
+    );
     const out: LineDirection[] = [];
-    for (const [direction, b] of [...best].sort((x, y) => x[0] - y[0])) {
+    for (const [direction, pid] of [...best].sort((x, y) => x[0] - y[0])) {
+      const head = headsignOf.get(pid) as { headsign: string } | undefined;
       const stops = (
         this.db
           .prepare(
@@ -276,9 +294,9 @@ export class ModeIndex {
              JOIN stops s ON s.stop_id = ps.stop_id JOIN stations st ON st.station_id = s.station_id
              WHERE ps.pid = ? ORDER BY ps.seq`,
           )
-          .all(b.pid) as Array<{ station_id: string; name: string }>
+          .all(pid) as Array<{ station_id: string; name: string }>
       ).map((r) => ({ stationId: r.station_id, name: r.name }));
-      out.push({ direction, headsign: b.headsign, stops });
+      out.push({ direction, headsign: head?.headsign ?? '', stops });
     }
     return out;
   }

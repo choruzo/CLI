@@ -11,6 +11,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { makeZip } from '../renfe/test-helpers.js';
+import type { ModeId } from './feeds.js';
 import { buildModeIndex, indexFile, tripIdShift } from './index-build.js';
 import { ModeIndex } from './queries.js';
 import { buildFixtureIndex, FIXTURE_MODIFIED } from './test-helpers.js';
@@ -23,7 +24,7 @@ afterAll(() => {
   rmSync(tmp, { recursive: true, force: true });
 });
 
-async function open(mode: 'metro' | 'ml' | 'emt', dir: string): Promise<ModeIndex> {
+async function open(mode: ModeId, dir: string): Promise<ModeIndex> {
   const ix = await ModeIndex.open(join(dir, indexFile(mode)));
   if (!ix) throw new Error('no abre');
   return ix;
@@ -127,6 +128,51 @@ describe('índice de Metro Ligero', () => {
   });
 });
 
+describe('índice de los autobuses interurbanos y urbanos', () => {
+  it('el interurbano agrupa los andenes del intercambiador de Moncloa y va por horas exactas', async () => {
+    const dir = join(tmp, 'interurbano');
+    await buildFixtureIndex('interurbano', dir);
+    const ix = await open('interurbano', dir);
+    try {
+      expect(ix.meta.firstDate).toBe('20261028');
+      expect(ix.meta.lastDate).toBe('20271127');
+      expect(ix.covers('20261117')).toBe(true);
+      // `par_8_06002` declara parent_station `est_90_14`: una sola estación para los andenes.
+      expect(ix.station('est_90_14')?.name).toBe('Intercambiador de Moncloa');
+      expect(
+        ix.db.prepare("SELECT station_id FROM stops WHERE stop_id = 'par_8_06002'").get(),
+      ).toEqual({ station_id: 'est_90_14' });
+      // Ni un viaje por frecuencia: todo son horas exactas de `stop_times`.
+      expect(ix.db.prepare('SELECT COUNT(*) AS n FROM trips WHERE freq = 1').get()).toEqual({
+        n: 0,
+      });
+      expect(ix.routes().map((r) => r.shortName)).toEqual(['625', '651']);
+    } finally {
+      ix.close();
+    }
+  });
+
+  it('en el urbano el número se repite entre municipios y el id de GTFS los distingue', async () => {
+    const dir = join(tmp, 'urbano');
+    await buildFixtureIndex('urbano', dir);
+    const ix = await open('urbano', dir);
+    try {
+      // Dos líneas «1»: la de Aranjuez y la de Ciempozuelos (una por municipio).
+      const ones = ix.findRoutes('1');
+      expect(ones).toHaveLength(2);
+      expect(ones.map((r) => r.longName)).toEqual(
+        expect.arrayContaining(['CIRCULAR DE CIEMPOZUELOS', 'L1 CIRCULAR (FFCC-Moreras-FFCC)']),
+      );
+      expect(ix.findRoutes('9__1__040_').map((r) => r.shortName)).toEqual(['1']);
+      expect(ix.covers('20261117')).toBe(true);
+      // El calendario del urbano acaba un día antes que el del interurbano.
+      expect(ix.meta.lastDate).toBe('20271126');
+    } finally {
+      ix.close();
+    }
+  });
+});
+
 describe('tripIdShift', () => {
   it('etiqueta menos primera salida, en horas enteras de zona horaria', () => {
     expect(tripIdShift('10_I12-510_2023I12_06:05:00_1_1_10__51___', 5 * 3600 + 5 * 60)).toBe(3600);
@@ -194,6 +240,48 @@ describe('construcción', () => {
     try {
       expect(ix.meta.lastDate).toBe('20270105'); // una fecha añadida (tipo 1) amplía el rango
       expect(ix.station('A')?.name).toBe('Alfa, Sur');
+    } finally {
+      ix.close();
+    }
+  });
+
+  it('al enseñar una línea manda el recorrido que más viajes hace, no el más largo', async () => {
+    // Los feeds de autobús traen viajes «9999» que concatenan el día entero de la
+    // línea en uno solo (más de mil paradas). Ese no es el recorrido que se enseña.
+    const dir = join(tmp, 'largo');
+    mkdirSync(dir, { recursive: true });
+    const zip = join(dir, 'x.zip');
+    const stops = Array.from({ length: 8 }, (_, i) => `S${i}`);
+    const largo = stops.map((s, i) => `T9,${6 + i}:00:00,${6 + i}:00:00,${s},${i + 1}`).join('\n');
+    writeFileSync(
+      zip,
+      makeZip({
+        'routes.txt': 'route_id,route_short_name,route_long_name\nR1,1,Uno - Dos\n',
+        'stops.txt':
+          'stop_id,stop_name,stop_lat,stop_lon,location_type,parent_station\n' +
+          stops.map((s) => `${s},${s.toUpperCase()},40,-3,0,`).join('\n') +
+          '\n',
+        'trips.txt':
+          'route_id,service_id,trip_id,trip_headsign,direction_id\n' +
+          'R1,S,T1,DOS,0\nR1,S,T2,DOS,0\nR1,S,T3,DOS,0\nR1,S,T9,DOS,0\n',
+        'stop_times.txt':
+          'trip_id,arrival_time,departure_time,stop_id,stop_sequence\n' +
+          'T1,7:00:00,7:00:00,S0,1\nT1,7:10:00,7:10:00,S1,2\n' +
+          'T2,7:30:00,7:30:00,S0,1\nT2,7:40:00,7:40:00,S1,2\n' +
+          'T3,8:00:00,8:00:00,S0,1\nT3,8:10:00,8:10:00,S1,2\n' +
+          `${largo}\n`,
+        'calendar.txt':
+          'service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date\nS,1,1,1,1,1,1,1,20261101,20261231\n',
+      }),
+    );
+    const r = await buildModeIndex({ mode: 'urbano', zipPath: zip, dir, feedModified: '1' });
+    expect(r.trips).toBe(4);
+    const ix = await open('urbano', dir);
+    try {
+      const dirs = ix.lineDirections('R1');
+      expect(dirs).toHaveLength(1);
+      expect(dirs[0]!.headsign).toBe('Dos');
+      expect(dirs[0]!.stops.map((s) => s.stationId)).toEqual(['S0', 'S1']);
     } finally {
       ix.close();
     }

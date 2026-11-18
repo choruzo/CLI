@@ -285,6 +285,135 @@ describe('transporte_trayecto', () => {
   });
 });
 
+describe('autobuses urbanos de los municipios y interurbanos', () => {
+  it('el interurbano da horas exactas con la línea y su destino', async () => {
+    const out = await call('transporte_salidas', {
+      parada: 'interurbano:par_8_15211',
+      desde: '06:45',
+      max: 2,
+    });
+    expect(out).toContain(
+      'Salidas desde Aristóteles-Av.atenas (Autobús interurbano, interurbano:par_8_15211) a partir de las 06:45:',
+    );
+    expect(out).toContain('- 625 a Intercambiador Moncloa · sale 06:51 (en 7 min) · según horario');
+    expect(out).toContain(
+      '- 625 a Intercambiador Moncloa · sale 07:07 (en 23 min) · según horario',
+    );
+    expect(out).not.toMatch(/cada \d+ min/);
+  });
+
+  it('el interurbano también da trayectos con hora de llegada', async () => {
+    const out = await call('transporte_trayecto', {
+      origen: 'interurbano:par_8_15211',
+      destino: 'interurbano:est_90_14',
+      desde: '06:45',
+      max: 1,
+    });
+    expect(out).toContain(
+      'Trayectos directos de Aristóteles-Av.atenas a Intercambiador de Moncloa',
+    );
+    expect(out).toContain(
+      '- 625 hacia Intercambiador Moncloa · sale 06:51 (en 7 min), llega 07:30 (39 min de viaje) · según horario',
+    );
+  });
+
+  it('el urbano de otro municipio da horas exactas y dice de qué red es', async () => {
+    const out = await call('transporte_salidas', {
+      parada: 'urbano:par_8_09568',
+      desde: '00:00',
+      max: 2,
+    });
+    expect(out).toContain('(Autobús urbano, urbano:par_8_09568)');
+    expect(out).toContain('- 1 a Estudios Cinematográficos-Mediodía · sale 00:15 (en 15 min)');
+  });
+
+  it('las líneas del urbano llevan el id cuando el número se repite entre municipios', async () => {
+    const out = await call('transporte_lineas', { modo: 'urbano' });
+    expect(out).toContain('Líneas de Autobús urbano (2):');
+    // El nombre largo es lo único que dice el municipio, y el id desempata.
+    expect(out).toContain('- 1 · CIRCULAR DE CIEMPOZUELOS · urbano:9__1__040_');
+    expect(out).toContain('- 1 · L1 CIRCULAR (FFCC-Moreras-FFCC) · urbano:9__1__013_');
+    expect(out).toContain('donde el número se repite');
+  });
+
+  it('con el id de la línea se resuelve el número repetido', async () => {
+    const out = await call('transporte_paradas', { linea: 'urbano:9__1__040_', modo: 'urbano' });
+    expect(out).toContain('Línea 1 de Autobús urbano: CIRCULAR DE CIEMPOZUELOS.');
+    const detail = await call('transporte_lineas', { modo: 'urbano', linea: '9__1__040_' });
+    expect(detail).toContain('Sentido Urbanización Parque Olimpia-Av.belén (14 paradas):');
+    // El id también filtra por línea al buscar paradas por nombre.
+    const named = await call('transporte_paradas', {
+      nombre: 'av.san juan de dios-est.ciempozuelos',
+      linea: 'urbano:9__1__040_',
+      modo: 'urbano',
+    });
+    expect(named).toContain('urbano:par_8_15830');
+  });
+
+  it('una línea interurbana sin `modo` se resuelve sola: el número no está en otras redes', async () => {
+    const out = await call('transporte_lineas', { modo: 'interurbano', linea: '625' });
+    expect(out).toContain('Línea 625 de Autobús interurbano: MADRID (Moncloa)-MONTE ROZAS.');
+    expect(out).toMatch(/Sentido Intercambiador Moncloa \(\d+ paradas\):/);
+  });
+
+  it('avisa de que el calendario no cubre hoy sin inventar horas', async () => {
+    // Los fixtures del urbano y del interurbano acaban en noviembre de 2027.
+    const out = await call(
+      'transporte_salidas',
+      { parada: 'interurbano:par_8_15211' },
+      '2027-12-01T10:00:00Z',
+    );
+    expect(out).toContain(
+      'El horario de Autobús interurbano publicado por el CRTM no cubre hoy (su calendario acaba el 27/11/2027)',
+    );
+    expect(out).not.toMatch(/\b\d{2}:\d{2}\b/);
+  });
+});
+
+describe('la misma línea en varias redes', () => {
+  it('sin `modo` devuelve los candidatos por red con su id, sin elegir', async () => {
+    const msg = await error('transporte_paradas', { linea: '1' });
+    expect(msg).toContain('La línea «1» no es una sola: hay 4 líneas con ese número');
+    expect(msg).toContain('indicando modo');
+    // Metro, EMT y los dos municipios que numeran su línea como «1».
+    expect(msg).toContain('- L1 · Metro · ');
+    expect(msg).toContain('· metro:');
+    expect(msg).toContain('- 1 · EMT · ');
+    expect(msg).toContain('· emt:001');
+    expect(msg).toContain('- 1 · Autobús urbano · CIRCULAR DE CIEMPOZUELOS · urbano:9__1__040_');
+    expect(msg).toContain(CRTM);
+  });
+
+  it('con `modo` sigue avisando si dentro de la red el número también se repite', async () => {
+    const msg = await error('transporte_lineas', { modo: 'urbano', linea: '1' });
+    expect(msg).toContain('La línea «1» no es una sola: hay 2 líneas con ese número');
+    expect(msg).toContain('urbano:9__1__013_');
+    expect(msg).toContain('urbano:9__1__040_');
+  });
+
+  it('transporte_lineas acepta `linea` sin `modo` para ver las redes que la tienen', async () => {
+    const msg = await error('transporte_lineas', { linea: '1' });
+    expect(msg).toContain('La línea «1» no es una sola');
+    expect(msg).toContain('· Metro · ');
+    expect(msg).toContain('· EMT · ');
+    expect(msg).toContain('· Autobús urbano · ');
+    // Sin `modo` ni `linea` sigue pidiendo el modo.
+    expect(await error('transporte_lineas', {})).toContain('modo debe ser');
+  });
+
+  it('el modo que no tiene esa línea da un error que orienta', async () => {
+    expect(await error('transporte_lineas', { modo: 'interurbano', linea: '1' })).toContain(
+      'No encuentro la línea «1»',
+    );
+  });
+
+  it('una parada del mismo nombre en varias redes se devuelve con su id', async () => {
+    const out = await call('transporte_paradas', { nombre: 'moncloa' });
+    expect(out).toContain('- Moncloa · EMT (1) · emt:3687');
+    expect(out).toContain('· Autobús interurbano (625, 651) · interurbano:est_90_14');
+  });
+});
+
 describe('candidatos ambiguos', () => {
   it('transporte_salidas no adivina: devuelve las candidatas con id y cómo repetir', async () => {
     const out = await call('transporte_salidas', { parada: 'Pinar de Chamartin' });
@@ -367,7 +496,9 @@ describe('índices que faltan', () => {
   it('en una búsqueda general sigue con los modos que hay y avisa de los que faltan', async () => {
     const out = await call('transporte_paradas', { nombre: 'las tablas' }, TUE_1735, ['ml']);
     expect(out).toContain('ml:est_10_9');
-    expect(out).toContain('Nota: los horarios de Metro, EMT aún no están listos');
+    expect(out).toContain(
+      'Nota: los horarios de Metro, EMT, Autobús urbano, Autobús interurbano aún no están listos',
+    );
   });
 
   it('sin ningún índice lo dice', async () => {

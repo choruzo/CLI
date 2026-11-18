@@ -1,0 +1,68 @@
+stop_id,stop_code,stop_name,stop_desc,stop_lat,stop_lon,zone_id,stop_url,location_type,parent_station,stop_timezone,wheelchair_boarding
+par_8_09568,09568,ESTACIÓN-EST.ARANJUEZ,Calle de la Estación 2,40.0345268249512,-3.61783719062805,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09571,09571,GOBERNADOR-MERCADO DE ABASTOS,Calle del Gobernador 55,40.0326385498047,-3.60506820678711,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09572,09572,ABASTOS-FLORIDA,Calle de Abastos 13,40.0320510864258,-3.60703206062317,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09573,09573,GOBERNADOR-VALERAS,Calle del Gobernador 1,40.032772064209,-3.60856199264526,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09576,09576,ABASTOS-AYUNTAMIENTO,Calle de Abastos 52,40.0319328308105,-3.60386633872986,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09577,09577,GTA.NUEVO ARANJUEZ-CUARTELES,Gta del Nuevo Aranjuez 1,40.0324363708496,-3.5931932926178,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09583,09583,REY-AUDITORIO,Calle del Rey 48,40.0323905944824,-3.60051822662354,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09584,09584,FOSO-GOBERNADOR,Calle del Foso 82,40.0323944091797,-3.59809231758118,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09585,09585,FOSO-INFANTAS,Calle del Foso 17,40.0333786010742,-3.59798359870911,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09588,09588,PRÍNCIPE-IGLESIA,Calle del Príncipe 73,40.0357513427734,-3.59848499298096,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09590,09590,MORERAS-LA BARRACA DE FEDERICO GªLORCA,Calle de las Moreras 20,40.0354804992676,-3.59678292274475,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09591,09591,MORERAS-ANCHA,Calle de las Moreras 47,40.035457611084,-3.59477853775024,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09592,09592,MORERAS-ANCHA,Calle de las Moreras 57,40.0353317260742,-3.59467196464539,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09593,09593,MORERAS-PRIMERO DE MAYO,Calle de las Moreras 30,40.035213470459,-3.59281897544861,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09594,09594,MORERAS-PRIMERO DE MAYO,Calle de las Moreras 121,40.0353126525879,-3.59279632568359,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09597,09597,MORERAS-COLEGIO,Calle de las Moreras 46,40.0349349975586,-3.58926510810852,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09602,09602,PRIMERO DE MAYO-POLIDEPORTIVO,Calle del Primero de Mayo 3,40.0340003967285,-3.59256219863892,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09640,09640,ABASTOS-CONCHA,Calle de Abastos 94 A,40.0317115783691,-3.60102796554565,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16102,16102,MORERAS-AUGUSTO MORENO,Calle de las Moreras 219,40.0346069335938,-3.584632396698,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16754,16754,GOBERNADOR-ALMÍBAR,Calle del Gobernador 105,40.0324363708496,-3.60239410400391,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16763,16763,GTA.NUEVO ARANJUEZ-PRIMERO DE MAYO,Gta del Nuevo Aranjuez 11,40.0324859619141,-3.59264302253723,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16768,16768,MORERAS-JULIO VALDEÓN,Calle de las Moreras 219,40.0347328186035,-3.58466863632202,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_17126,17126,PRIMERO DE MAYO-POLIDEPORTIVO,Calle del Primero de Mayo 3,40.0340423583984,-3.59273838996887,C1,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_19407,19407,INFANTAS-CAP.ANGOSTO GÓMEZ CASTRILLÓN,Calle de las Infantas 26,40.0348091125488,-3.60132479667664,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20627,20627,ALVAREZ DE QUINDOS-CUARTELES,Calle de Álvarez de Quindos 40,40.0328063964844,-3.58992648124695,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20630,20630,ÁLVAREZ DE QUINDOS-CÁNDIDO LÓPEZ Y MALTA,Calle de Álvarez de Quindos 2,40.0346527099609,-3.58845376968384,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20631,20631,CARAMILLAR-NORIA,Calle del Caramillar 10,40.0358085632324,-3.57899308204651,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20632,20632,ESTUDIOS CINEMATOGRÁFICOS-MEDIODÍA,Calle de los Estudios Cinematográficos 1,40.037899017334,-3.57871770858765,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20633,20633,CECILIO LÁZARO-VÍCTIMAS DEL TERRORISMO,Calle de Cecilio Lázaro 1,40.0358238220215,-3.58082175254822,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_21327,21327,VALERAS-SAN ANTONIO,Calle de Valeras 1,40.0337181091309,-3.60868763923645,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_21328,21328,VALERAS-SAN ANTONIO,Calle de San Antonio 22,40.0337829589844,-3.60854744911194,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_21433,21433,MORERAS-PºEMILIO GARCÍA GREDIAGA,Calle de las Moreras 60,40.0344505310059,-3.58209943771362,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_21434,21434,MORERAS-Pº EMILIO GARCÍA GREDIAGA,Calle de las Moreras 60,40.0345573425293,-3.58218240737915,C1,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_08020,08020,ESTRELLAS-CASTILLA LA NUEVA,Calle   Estrellas 41 B,40.1598205566406,-3.62319993972778,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_08022,08022,AV.BELÉN-MANUEL DE FALLA,Avda   Belén 39,40.1554489135742,-3.62848949432373,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_08023,08023,AV.BELÉN-VENTURA RODRIGUEZ,Avda   Belén 14,40.1557426452637,-3.62713003158569,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_08025,08025,AV.CONSUELO-LUNA,Avda   Consuelo 28 A,40.1563987731934,-3.62256979942322,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_09539,09539,ESTRELLAS-AV.MADRID,Calle   Estrellas 28,40.1629295349121,-3.62461400032043,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_12496,12496,AV.MADRID-CTRA.M404,Avda de Madrid 32,40.1647033691406,-3.6280357837677,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15825,15825,AV.CONSUELO-CERVANTES,Avda   Consuelo 10 A,40.1577491760254,-3.62131404876709,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_17884,17884,URBANIZACIÓN PARQUE OLIMPIA-AV.BELÉN,Calle de Enrique Granados 12 B,40.1556358337402,-3.63209581375122,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_12502,12502,SAN JOSÉ-DOCTOR ANDRAJO,Calle de San José 19,40.1555252075195,-3.6158926486969,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15823,15823,AV.VENERABLE MADRE MªANTONIA-CERVANTES,Avda de la Venerable Madre María Antonia de la Misericordia 15,40.1599655151367,-3.62265992164612,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15824,15824,AV.MADRE MªANTONIA-JERÓNIMO DEL MORAL,Avda de la Venerable Madre María Antonia de la Misericordia 2,40.1603775024414,-3.61966919898987,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15826,15826,JERÓNIMO DEL MORAL-MIRLO,Calle de Jerónimo del Moral 69,40.1653060913086,-3.62289643287659,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15828,15828,CARETOS-DULCINEA,Calle   Caretos 4,40.1626930236816,-3.61810493469238,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15829,15829,AV.SAN JUAN DE DIOS-PADRE BENITO MENNI,Avda de San Juan de Dios 1 A,40.1601181030273,-3.61585068702698,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15830,15830,AV.SAN JUAN DE DIOS-EST.CIEMPOZUELOS,Avda de San Juan de Dios 9,40.1586570739746,-3.60985016822815,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15833,15833,SAN FRANCISCO-CRUZ VERDE,Calle de San Francisco 2,40.1534118652344,-3.6200532913208,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15834,15834,CALDERA DE TABURIENTE-AV CONSUELO,Calle   Caldera de Taburiente 1,40.1535682678223,-3.62628817558289,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15836,15836,OLIMPIA-ARCHIPIÉLAGO CABRERA,Calle de Olimpia 3 B,40.1542434692383,-3.63268184661865,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15837,15837,AV.CONSUELO-CALDERA DE TABURIENTE,Calle   Caldera de Taburiente 1,40.1537437438965,-3.62579655647278,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_15838,15838,SAN JOSÉ-CRUZ VERDE,Calle de San José 8,40.1552467346191,-3.61931848526001,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16259,16259,LAS PEÑUELAS-CUESTAS,Calle de las Peñuelas 15,40.1562232971191,-3.6146764755249,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16260,16260,VIRGEN-LOS HUERTOS,Calle de la Virgen 1,40.1582145690918,-3.61531662940979,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16261,16261,CºDE BUZANCA-CEMENTERIO,Cmno de Buzanca 2,40.1669883728027,-3.62382793426514,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16262,16262,CºDE BUZANCA-ÁLAMO,Cmno de Buzanca 6,40.1693077087402,-3.62939238548279,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_16263,16263,ÁLAMO-NOGAL,Calle del Álamo 7,40.1666831970215,-3.63022541999817,B3,http://www.crtm.es,0,,Europe/Madrid,2
+par_8_17888,17888,AV.SAN JUAN DE DIOS-PºLA ESTACIÓN,Avda de San Juan de Dios 1,40.1598854064941,-3.61251354217529,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_17891,17891,AV.CIRCUNVALACIÓN-CºPEÑUELAS,Avda de la Circunvalación 21,40.1540412902832,-3.6120867729187,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_17892,17892,AV.CIRCUNVALACIÓN-CAMINO DE VALDINOJOS,Avda de la Circunvalación 21,40.1522407531738,-3.61682558059692,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_18948,18948,CARETOS-POZO,Calle   Caretos 18,40.1636581420898,-3.61939382553101,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20177,20177,AV.TOREROS-ENRIQUE GRANADOS,Avda de los Toreros 2,40.155891418457,-3.63011384010315,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20212,20212,TABLAS DE DAIMIEL-ARCHIPIÉLAGO CABRERA,Calle   Picos de Europa 4,40.154167175293,-3.63016843795776,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20213,20213,ARCHIPIÉLAGO CABRERA-TABLAS DE DAIMIEL,Calle   Archipiélago Cabrera 31,40.1539344787598,-3.63045978546143,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_20318,20318,TRVA.MORERAS-POL.IND.CAMPORROSO,Calle   Moreras 3,40.1756248474121,-3.63743734359741,B3,http://www.crtm.es,0,,Europe/Madrid,0
+par_8_21074,21074,OLMO-CEDRO,Calle del Olmo SN,40.1667251586914,-3.63245701789856,B3,http://www.crtm.es,0,,Europe/Madrid,0

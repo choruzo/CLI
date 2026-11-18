@@ -3,8 +3,9 @@
  * por stdio. Se empaqueta en un único `.mjs` (tsup,
  * `box-image/connectors/crtm/server.mjs`).
  *
- * Cada modo (Metro, Metro Ligero, EMT) tiene su índice y su gestor de
- * actualización, independientes: si uno falla, los demás siguen. Sin tiempo real.
+ * Cada modo (Metro, Metro Ligero, EMT, autobuses urbanos de los demás municipios
+ * e interurbanos) tiene su índice y su gestor de actualización, independientes:
+ * si uno falla, los demás siguen. Sin tiempo real.
  *
  * `STRATUM_CRTM_OFFLINE=1` (solo para tests): no descarga nada.
  * `STRATUM_CONNECTOR_CACHE` cambia el directorio de la caché.

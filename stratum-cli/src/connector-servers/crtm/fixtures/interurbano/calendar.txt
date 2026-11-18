@@ -1,0 +1,4 @@
+service_id,monday,tuesday,wednesday,thursday,friday,saturday,sunday,start_date,end_date
+1547988_8__651___,1,1,1,1,0,0,0,20261028,20271126
+1547977_8__651___,1,1,1,1,0,0,0,20261028,20271126
+251_8__625___,1,1,1,1,1,1,1,20261028,20271127

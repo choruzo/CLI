@@ -2599,8 +2599,13 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   *Fases* (en este orden: primero lo que se prueba sin claves):
   1. **`crtm`**: Metro, Metro Ligero y EMT, después los interurbanos. *Metro, Metro Ligero y EMT
      hechos el 2026-11-17*. Medido ese día: el GTFS de Metro Ligero sale una hora antes que la
-     hora local de su `trip_id`, y cada viaje se corrige con su etiqueta. Faltan los autobuses
-     urbanos de otros municipios y los interurbanos.
+     hora local de su `trip_id`, y cada viaje se corrige con su etiqueta. *Autobuses urbanos de
+     otros municipios (M9) e interurbanos (M89) hechos el 2026-11-18* (`crtm` 1.1.0, imagen v7):
+     - Calendario vigente hasta el 26-11-2027 y todo a hora exacta. M89: 354 líneas, 58 470
+       viajes, índice en 8 s con 264 MB de pico. Los índices se construyen de uno en uno.
+     - Un número de línea se repite entre redes y municipios (26 líneas «1» en M9): sin `modo`,
+       se devuelven los candidatos con su id `modo:<route_id>`, nunca se elige uno.
+     - El GTFS no trae el municipio (una sola agencia): se enseña el nombre largo de la línea.
   2. **`aemet`**: previsión y avisos, sin clave en el conector. *Hecha el 2026-11-17*:
      - Tabla de los 8 132 municipios del INE. Los 12 recientes van con su origen, y los que no
        tienen previsión ofrecen la del municipio del que se segregaron, presentada como de otro.

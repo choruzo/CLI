@@ -246,6 +246,7 @@ p {
 .assistant-pane > .overview,
 .assistant-pane > .memory-panel,
 .assistant-pane > .telegram-panel,
+.assistant-pane > .reminders-panel,
 .assistant-pane > .connectors-panel {
   border-right: 0;
   border-top: 0;
@@ -394,6 +395,66 @@ p {
 .routine-form {
   margin-top: 0.5rem;
   max-width: none;
+}
+/* M21 — los recordatorios del asistente: mismo molde que las rutinas. */
+.reminders-panel {
+  padding: 0.75rem;
+  border-top: 1px solid var(--line);
+}
+.reminders {
+  list-style: none;
+  margin: 0.5rem 0 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.6rem;
+}
+.reminder {
+  padding: 0.5rem 0.65rem;
+  border: 1px solid var(--line);
+  border-radius: 6px;
+  background: var(--panel);
+  min-width: 0;
+}
+.reminder .row-top {
+  align-items: center;
+  flex-wrap: wrap;
+}
+.reminder .spacer {
+  flex: 1;
+}
+.reminder-when {
+  color: var(--accent);
+  white-space: nowrap;
+}
+.reminder-text {
+  margin-top: 0.25rem;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  max-height: 10rem;
+  overflow-y: auto;
+}
+.reminders-recent {
+  margin-top: 0.75rem;
+  padding-top: 0.5rem;
+  border-top: 1px solid var(--line);
+}
+.reminders-recent > summary {
+  cursor: pointer;
+  color: var(--muted);
+  font-size: 0.85rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+.reminders-recent > summary:hover {
+  color: var(--text);
+}
+.reminders-recent .reminder {
+  background: transparent;
+}
+.reminders-recent .reminder-when {
+  color: var(--muted);
 }
 
 

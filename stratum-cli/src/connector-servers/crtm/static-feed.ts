@@ -36,6 +36,22 @@ export function preparingMessage(mode: ModeId): string {
   return `Estoy preparando los horarios de ${feedMode(mode).label} por primera vez (tarda unos segundos). Vuelve a intentarlo en un momento.`;
 }
 
+/**
+ * Los índices se construyen de uno en uno. Cada construcción sostiene a la vez
+ * el `trips.txt` y el `stop_times.txt` de un feed entero: medido el 2026-11-18,
+ * el interurbano (zip de 76 MB) llega a 259 MB de RSS y EMT+M9+M89 en paralelo a
+ * 395 MB. Cinco modos a la vez en la caja no caben, y como la construcción va en
+ * segundo plano nadie nota que vayan en fila (la primera consulta a un modo ya
+ * dice que se están preparando sus horarios).
+ */
+let buildQueue: Promise<unknown> = Promise.resolve();
+
+function buildInQueue<T>(fn: () => Promise<T>): Promise<T> {
+  const run = buildQueue.then(fn, fn);
+  buildQueue = run.catch(() => undefined);
+  return run;
+}
+
 export interface ModeManagerOptions {
   mode: ModeId;
   dir: string;
@@ -143,14 +159,16 @@ export class ModeManager {
         Readable.fromWeb(res.body as unknown as WebReadableStream<Uint8Array>),
         createWriteStream(zipPath),
       );
-      const r = await buildModeIndex({
-        mode: this.opts.mode,
-        zipPath,
-        dir: this.opts.dir,
-        feedModified: modified,
-        now: this.now,
-        warn: this.log,
-      });
+      const r = await buildInQueue(() =>
+        buildModeIndex({
+          mode: this.opts.mode,
+          zipPath,
+          dir: this.opts.dir,
+          feedModified: modified,
+          now: this.now,
+          warn: this.log,
+        }),
+      );
       this.log(
         `${this.opts.mode}: índice listo: ${r.stations} estaciones, ${r.trips} viajes, ${r.patterns} patrones, ${r.ms} ms`,
       );

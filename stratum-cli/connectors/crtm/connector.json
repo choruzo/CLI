@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "crtm",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Transporte de Madrid (CRTM)",
-  "description": "Metro, Metro Ligero y autobuses de la EMT de Madrid según horario, con los datos abiertos del Consorcio Regional de Transportes: paradas, líneas, próximas salidas y trayectos directos.",
+  "description": "Metro, Metro Ligero, EMT y autobuses urbanos de los demás municipios e interurbanos de Madrid según horario, con los datos abiertos del Consorcio Regional de Transportes: paradas, líneas, próximas salidas y trayectos directos.",
   "agents": ["companion"],
   "hosts": ["www.arcgis.com"],
   "secrets": [],
@@ -16,12 +16,12 @@
     {
       "name": "transporte_lineas",
       "readOnly": true,
-      "summary": "Líneas de Metro, Metro Ligero o EMT con sus extremos y paradas."
+      "summary": "Líneas de Metro, Metro Ligero, EMT, autobuses urbanos de los municipios e interurbanos, con sus extremos y paradas."
     },
     {
       "name": "transporte_salidas",
       "readOnly": true,
-      "summary": "Próximas salidas desde una parada: hora exacta en Metro Ligero, frecuencia en EMT."
+      "summary": "Próximas salidas desde una parada: hora exacta en Metro Ligero y en los autobuses urbanos e interurbanos, frecuencia en EMT."
     },
     {
       "name": "transporte_trayecto",
