@@ -18,14 +18,21 @@ import {
  * contesta el daemon; nada de estado supuesto.
  */
 
-beforeEach(resetStores);
-afterEach(() => {
-  cleanup();
-  vi.restoreAllMocks();
-});
-
 /** Aquí son las 10:00 del 17/11/2026, hora local. */
 const NOW = new Date(2026, 10, 17, 10, 0, 0).getTime();
+
+beforeEach(() => {
+  resetStores();
+  // El panel compara con el reloj («today», «tomorrow»): se fija solo `Date`,
+  // sin tocar los timers, para que el test no dependa del día en que corre.
+  vi.useFakeTimers({ toFake: ['Date'] });
+  vi.setSystemTime(NOW);
+});
+afterEach(() => {
+  cleanup();
+  vi.useRealTimers();
+  vi.restoreAllMocks();
+});
 
 function connected(native = fakeNative(), capabilities = ['observe', 'control']): FakeNative {
   render(

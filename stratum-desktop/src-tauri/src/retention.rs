@@ -754,7 +754,10 @@ mod tests {
         dir
     }
 
-    fn gz(entries: &[(&[u8], tar::EntryType, &[u8], Option<&str>)]) -> Vec<u8> {
+    /// Una entrada del tar de prueba: nombre, tipo, contenido y destino del enlace.
+    type TarEntry<'a> = (&'a [u8], tar::EntryType, &'a [u8], Option<&'a str>);
+
+    fn gz(entries: &[TarEntry<'_>]) -> Vec<u8> {
         let mut builder = tar::Builder::new(Vec::new());
         for (name, kind, data, link) in entries {
             let mut h = tar::Header::new_gnu();

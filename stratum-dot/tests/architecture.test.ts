@@ -30,7 +30,8 @@ const frontend = walk(SRC, (f) => /\.tsx?$/.test(f));
 const shipped = frontend.filter((f) => !isTest(f));
 const rust = [...walk(join(DOT, 'crates'), (f) => f.endsWith('.rs')), ...walk(join(DOT, 'src-tauri', 'src'), (f) => f.endsWith('.rs'))];
 const rustShipped = rust.filter((f) => !f.includes(`${sep}tests${sep}`));
-const read = (file: string) => readFileSync(file, 'utf-8');
+// En CRLF (el checkout de Windows de la CI con autocrlf), las expresiones que cortan por `\n` no casan.
+const read = (file: string) => readFileSync(file, 'utf-8').replace(/\r\n/g, '\n');
 const rel = (file: string) => relative(DOT, file).split(sep).join('/');
 
 /** Código sin comentarios: las reglas van sobre lo que se ejecuta, no sobre lo que se explica. */

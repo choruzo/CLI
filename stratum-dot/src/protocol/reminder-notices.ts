@@ -35,8 +35,11 @@ export function reminderDueEvents(raws: readonly unknown[]): ProtocolReminder[] 
   return out;
 }
 
+/** `HH:MM` en hora local, siempre de 24 h: `toLocaleTimeString` daría «09:30 PM» en un sistema en inglés. */
 function clock(ms: number): string {
-  return new Date(ms).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const date = new Date(ms);
+  const pad = (n: number) => String(n).padStart(2, '0');
+  return `${pad(date.getHours())}:${pad(date.getMinutes())}`;
 }
 
 /**
