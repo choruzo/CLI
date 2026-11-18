@@ -113,7 +113,7 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     const code = errorCode(err);
     if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
       return new ToolUserError(
-        `No se resuelve el nombre ${host} desde la caja de conectores: usa el nombre completo con dominio (p. ej. homeassistant.home) o la IP en HA_URL.`,
+        `No se resuelve el nombre ${host} desde la caja de conectores: usa el nombre completo con dominio (p. ej. homeassistant.home) o la IP en HA_URL. La caja sí llega a la red local; lo que no resuelve son los nombres cortos sin dominio. La persona lo cambia con \`stratum connectors setup home-assistant --name HA_URL\`.`,
       );
     }
     if (err instanceof Error && err.name === 'AbortError') {

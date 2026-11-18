@@ -374,4 +374,21 @@ describe('tools de Home Assistant', () => {
     ];
     for (const o of outs) expect(o).not.toContain(TOKEN);
   });
+
+  it('una lista metida en un texto (JSON o con comas) vale como lista; cada id se valida', async () => {
+    const s = setup();
+    const estado = s.get('ha_estado');
+    const asList = await estado.handler({ entity_id: ['light.salon', 'sensor.temp_salon'] });
+    expect(await estado.handler({ entity_id: '["light.salon", "sensor.temp_salon"]' })).toBe(
+      asList,
+    );
+    expect(await estado.handler({ entity_id: 'light.salon, sensor.temp_salon' })).toBe(asList);
+    // Un id malo dentro del texto sigue rechazado, y un JSON roto también.
+    await expect(estado.handler({ entity_id: '["light.salon", "../x"]' })).rejects.toThrow(
+      /dominio\.nombre/,
+    );
+    await expect(estado.handler({ entity_id: '["light.salon",' })).rejects.toThrow(
+      /dominio\.nombre/,
+    );
+  });
 });

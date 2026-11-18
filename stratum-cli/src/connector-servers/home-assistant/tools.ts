@@ -78,9 +78,34 @@ const ENTITY_MSG = 'entity_id debe tener la forma dominio.nombre (p. ej. light.s
 
 const entityId = z.string({ message: ENTITY_MSG }).trim().regex(ENTITY_RE, ENTITY_MSG);
 
+/**
+ * Algunos modelos mandan la lista metida en un texto: `"[\"light.a\", \"light.b\"]"`
+ * o `"light.a, light.b"` (medido el 2026-11-18 desde Dot). Se convierte en la
+ * lista que es; cada id se valida después igual. Un texto que no es ninguna de
+ * las dos formas se queda como está y lo rechaza la regex.
+ */
+export function listFromText(v: unknown): unknown {
+  if (typeof v !== 'string') return v;
+  const t = v.trim();
+  if (t.startsWith('[') && t.endsWith(']')) {
+    try {
+      const parsed: unknown = JSON.parse(t);
+      if (Array.isArray(parsed)) return parsed;
+    } catch {
+      // No es JSON: lo rechaza la validación con su mensaje.
+    }
+    return v;
+  }
+  if (t.includes(',')) return t.split(',').map((s) => s.trim());
+  return v;
+}
+
 function entityIds(max: number) {
   const msg = `entity_id debe ser un id o una lista de hasta ${max} ids con la forma dominio.nombre`;
-  return z.union([entityId, z.array(entityId).min(1, msg).max(max, msg)], { message: msg });
+  return z
+    .unknown()
+    .transform(listFromText)
+    .pipe(z.union([entityId, z.array(entityId).min(1, msg).max(max, msg)], { message: msg }));
 }
 
 const BuscarSchema = z.object({
@@ -127,7 +152,7 @@ const AccionSchema = z.object({
   datos: z.record(z.string(), z.unknown(), { message: 'datos debe ser un objeto' }).optional(),
 });
 
-function parseArgs<T>(schema: z.ZodType<T>, args: unknown): T {
+function parseArgs<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, args: unknown): T {
   const r = schema.safeParse(args ?? {});
   if (r.success) return r.data;
   const issue = r.error.issues[0];
