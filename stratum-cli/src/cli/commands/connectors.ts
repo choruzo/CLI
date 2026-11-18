@@ -1,9 +1,18 @@
+import { readFileSync } from 'fs';
 import { createInterface } from 'readline';
 import { Command } from 'commander';
 import { StratumClient } from '../../client/client.js';
 import { defaultEndpointDir, fileDiscovery } from '../../client/discovery.js';
 import { bundledCatalog } from '../../connectors/active.js';
 import type { ConnectorCatalog } from '../../connectors/catalog.js';
+import type { ConnectorManifest, ConnectorOAuth } from '../../connectors/manifest.js';
+import {
+  OAuthError,
+  authorizeGoogle,
+  parseGoogleClientJson,
+  type GoogleOAuthResult,
+} from '../../connectors/oauth-google.js';
+import { openInBrowser } from '../../trace/open-browser.js';
 import {
   ConnectorSecretsError,
   clearConnectorSecrets,
@@ -153,6 +162,101 @@ export interface SecretDeps {
   isTTY: boolean;
   out: (text: string) => void;
   err: (text: string) => void;
+  /** M21: la autorización OAuth en el navegador (`authorizeGoogle`). */
+  authorize?: (p: {
+    clientId: string;
+    clientSecret: string;
+    scopes: readonly string[];
+  }) => Promise<GoogleOAuthResult>;
+  /** M21: lee el JSON del cliente que descargó la persona (`--client-file`). */
+  readFile?: (path: string) => string;
+}
+
+/**
+ * M21 — el `setup` de un conector OAuth: el cliente (del JSON de Google con
+ * `--client-file`, o tecleado; vacío conserva el guardado), la autorización en
+ * el navegador y, solo si todo sale bien, los tres secretos de una vez. Un
+ * fallo no cambia nada de lo guardado.
+ */
+async function runOAuthSetup(
+  deps: SecretDeps,
+  manifest: ConnectorManifest,
+  oauth: ConnectorOAuth,
+  opts: { clientFile?: string },
+): Promise<boolean> {
+  if (!deps.isTTY || !deps.authorize) {
+    deps.err(
+      `Setting up ${manifest.name} needs an interactive terminal and a browser on this computer.\n`,
+    );
+    return false;
+  }
+  const stored = readConnectorSecrets(deps.dir);
+  const current = stored.state === 'ok' ? (stored.file.connectors[manifest.id] ?? {}) : {};
+  let clientId = current[oauth.clientId] ?? '';
+  let clientSecret = current[oauth.clientSecret] ?? '';
+  if (opts.clientFile !== undefined) {
+    let text: string;
+    try {
+      text = (deps.readFile ?? ((p: string) => readFileSync(p, 'utf8')))(opts.clientFile);
+    } catch {
+      deps.err(`Cannot read ${opts.clientFile}.\n`);
+      return false;
+    }
+    try {
+      ({ clientId, clientSecret } = parseGoogleClientJson(text));
+    } catch (err) {
+      deps.err(`${(err as Error).message}\n`);
+      return false;
+    }
+    deps.out(`OAuth client read from the file: ${clientId}\n`);
+  } else {
+    deps.out(
+      `${manifest.name} uses your own OAuth client ("Desktop app") from Google Cloud. Tip: "--client-file <downloaded JSON>" reads it without typing.\n`,
+    );
+    const keep = (has: string) => (has ? ' (empty keeps the current one)' : '');
+    const id = await deps.askVisible(`${oauth.clientId}${keep(clientId)}: `);
+    if (id === null) {
+      deps.err('Cancelled. Nothing changed.\n');
+      return false;
+    }
+    if (id.trim()) clientId = id.trim();
+    const secret = await deps.askHidden(`${oauth.clientSecret}${keep(clientSecret)}: `);
+    if (secret === null) {
+      deps.err('Cancelled. Nothing changed.\n');
+      return false;
+    }
+    if (secret.trim()) clientSecret = secret.trim();
+  }
+  for (const [name, value] of [
+    [oauth.clientId, clientId],
+    [oauth.clientSecret, clientSecret],
+  ] as const) {
+    const problem = value ? secretValueProblem(value) : 'it is missing';
+    if (problem) {
+      deps.err(`${name} is not valid: ${problem}. Nothing changed.\n`);
+      return false;
+    }
+  }
+  let result: GoogleOAuthResult;
+  try {
+    result = await deps.authorize({ clientId, clientSecret, scopes: oauth.scopes });
+  } catch (err) {
+    if (err instanceof OAuthError) {
+      deps.err(`${err.message} Nothing changed.\n`);
+      return false;
+    }
+    throw err;
+  }
+  const path = setConnectorSecrets(deps.dir, manifest, {
+    [oauth.clientId]: clientId,
+    [oauth.clientSecret]: clientSecret,
+    [oauth.refreshToken]: result.refreshToken,
+  });
+  deps.out(`Authorized. Saved in ${path} (never shown again).\n`);
+  deps.out(
+    `Ready: if ${manifest.name} is enabled, the assistant uses it from its next message (otherwise, "stratum connectors enable ${manifest.id}").\n`,
+  );
+  return true;
 }
 
 /**
@@ -164,7 +268,7 @@ export interface SecretDeps {
 export async function runSecret(
   deps: SecretDeps,
   id: string,
-  opts: { name?: string; clear?: boolean } = {},
+  opts: { name?: string; clear?: boolean; clientFile?: string } = {},
 ): Promise<boolean> {
   const entry = deps.catalog.get(id);
   if (!entry) {
@@ -189,6 +293,17 @@ export async function runSecret(
       const removed = clearConnectorSecrets(deps.dir, id, opts.name);
       deps.out(removed ? `Removed the setup of ${manifest.name}.\n` : 'Nothing to remove.\n');
       return removed;
+    }
+    if (manifest.oauth) {
+      if (opts.name) {
+        deps.err(`${manifest.name} is set up as a whole: run it without --name.\n`);
+        return false;
+      }
+      return await runOAuthSetup(deps, manifest, manifest.oauth, opts);
+    }
+    if (opts.clientFile !== undefined) {
+      deps.err(`${manifest.name} does not use an OAuth client: --client-file does not apply.\n`);
+      return false;
     }
     if (!deps.isTTY) {
       deps.err(
@@ -362,7 +477,12 @@ const setup = new Command('setup')
   .argument('<id>', 'connector id, as "list" shows it')
   .option('--name <NAME>', 'only this one (e.g. HA_TOKEN)')
   .option('--clear', 'remove what is stored for this connector (or only --name)')
-  .action(async (id: string, opts: { name?: string; clear?: boolean }) => {
+  .option(
+    '--client-file <path>',
+    'OAuth connectors (google): read the client from the JSON downloaded from Google Cloud',
+  )
+  .action(async (id: string, opts: { name?: string; clear?: boolean; clientFile?: string }) => {
+    const err = (text: string) => process.stderr.write(text);
     const ok = await runSecret(
       {
         dir: defaultEndpointDir(),
@@ -377,8 +497,9 @@ const setup = new Command('setup')
           }
         },
         isTTY: Boolean(process.stdin.isTTY && process.stderr.isTTY),
-        out: (text) => process.stderr.write(text),
-        err: (text) => process.stderr.write(text),
+        out: err,
+        err,
+        authorize: (p) => authorizeGoogle({ ...p, openBrowser: openInBrowser, out: err }),
       },
       id,
       opts,

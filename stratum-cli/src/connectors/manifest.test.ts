@@ -23,6 +23,40 @@ describe('parseConnectorManifest (M20)', () => {
     expect(m.tools).toHaveLength(2);
   });
 
+  it('oauth (M21): sus tres nombres son secretos distintos y los ámbitos, de Google', () => {
+    const withOAuth = (oauth: Record<string, unknown>) => ({
+      ...valid(),
+      secrets: [
+        { name: 'C_ID', description: 'x' },
+        { name: 'C_SECRET', description: 'x' },
+        { name: 'C_TOKEN', description: 'x' },
+      ],
+      oauth: {
+        provider: 'google',
+        scopes: ['https://www.googleapis.com/auth/tasks'],
+        clientId: 'C_ID',
+        clientSecret: 'C_SECRET',
+        refreshToken: 'C_TOKEN',
+        ...oauth,
+      },
+    });
+    expect(parseConnectorManifest(withOAuth({}), 'x').oauth?.provider).toBe('google');
+    expect(() => parseConnectorManifest(withOAuth({ refreshToken: 'OTRO' }), 'x')).toThrow(
+      /not a secret/,
+    );
+    expect(() => parseConnectorManifest(withOAuth({ refreshToken: 'C_ID' }), 'x')).toThrow(
+      /repeated/,
+    );
+    expect(() =>
+      parseConnectorManifest(withOAuth({ scopes: ['https://evil.example/auth/x'] }), 'x'),
+    ).toThrow();
+    expect(() => parseConnectorManifest(withOAuth({ provider: 'github' }), 'x')).toThrow();
+    // Ni la URL de token ni la de autorización salen del manifiesto.
+    expect(() =>
+      parseConnectorManifest(withOAuth({ tokenUrl: 'https://evil.example/token' }), 'x'),
+    ).toThrow();
+  });
+
   it('readOnlyToolsOf devuelve solo las de lectura', () => {
     expect(readOnlyToolsOf(parseConnectorManifest(valid(), 'x'))).toEqual(['leer']);
   });

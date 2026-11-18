@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "id": "google",
+  "version": "1.0.0",
+  "name": "Google (Gmail y Tasks)",
+  "description": "Lee tu correo de Gmail y deja borradores (nunca envía), y consulta y crea tus tareas de Google Tasks, con un cliente OAuth propio.",
+  "agents": ["companion"],
+  "hosts": ["oauth2.googleapis.com", "gmail.googleapis.com", "tasks.googleapis.com"],
+  "secrets": [
+    {
+      "name": "GOOGLE_CLIENT_ID",
+      "description": "ID de cliente OAuth de tipo «App de escritorio» (Google Cloud → APIs y servicios → Credenciales)",
+      "sensitive": false
+    },
+    {
+      "name": "GOOGLE_CLIENT_SECRET",
+      "description": "Secreto de ese cliente OAuth"
+    },
+    {
+      "name": "GOOGLE_REFRESH_TOKEN",
+      "description": "Autorización de tu cuenta: la obtiene el propio setup al abrir el navegador, no se teclea"
+    }
+  ],
+  "oauth": {
+    "provider": "google",
+    "scopes": [
+      "https://www.googleapis.com/auth/gmail.readonly",
+      "https://www.googleapis.com/auth/gmail.compose",
+      "https://www.googleapis.com/auth/tasks"
+    ],
+    "clientId": "GOOGLE_CLIENT_ID",
+    "clientSecret": "GOOGLE_CLIENT_SECRET",
+    "refreshToken": "GOOGLE_REFRESH_TOKEN"
+  },
+  "tools": [
+    {
+      "name": "gmail_buscar",
+      "readOnly": true,
+      "summary": "Busca correos con la sintaxis de Gmail (no leídos, remitente, asunto…)."
+    },
+    {
+      "name": "gmail_leer",
+      "readOnly": true,
+      "summary": "Lee un correo en texto plano, recortado y sin adjuntos."
+    },
+    {
+      "name": "gmail_borrador",
+      "readOnly": false,
+      "summary": "Deja un borrador en Gmail (nuevo o en respuesta). Nunca lo envía."
+    },
+    {
+      "name": "tareas_listar",
+      "readOnly": true,
+      "summary": "Lista las tareas pendientes de Google Tasks, por lista."
+    },
+    {
+      "name": "tareas_crear",
+      "readOnly": false,
+      "summary": "Crea una tarea en Google Tasks, con fecha si se quiere."
+    },
+    {
+      "name": "tareas_completar",
+      "readOnly": false,
+      "summary": "Marca una tarea de Google Tasks como hecha."
+    }
+  ]
+}

@@ -43,6 +43,29 @@ const SecretSchema = z
   })
   .strict();
 
+/**
+ * M21 — un conector que se autoriza con OAuth (Google). El `setup` de la CLI
+ * pide el cliente (id y secreto, que la persona creó en su Google Cloud), abre
+ * el navegador y recoge el **refresh token** en `127.0.0.1` con PKCE: ese
+ * secreto nunca se teclea. Los tres nombres son secretos del manifiesto y le
+ * llegan al conector como los demás. Los puntos de autorización y de token no
+ * salen del manifiesto: los fija el código del proveedor (`oauth-google.ts`).
+ */
+const OAuthSchema = z
+  .object({
+    provider: z.literal('google'),
+    scopes: z
+      .array(z.string().regex(/^https:\/\/www\.googleapis\.com\/auth\/[a-z][a-z0-9._]{0,63}$/))
+      .min(1)
+      .max(10),
+    clientId: z.string().regex(SECRET_NAME_RE),
+    clientSecret: z.string().regex(SECRET_NAME_RE),
+    refreshToken: z.string().regex(SECRET_NAME_RE),
+  })
+  .strict();
+
+export type ConnectorOAuth = z.infer<typeof OAuthSchema>;
+
 export const ConnectorManifestSchema = z
   .object({
     schemaVersion: z.literal(CONNECTOR_MANIFEST_VERSION),
@@ -55,10 +78,23 @@ export const ConnectorManifestSchema = z
     /** Informativo en v1: la caja tiene salida a internet (A2). */
     hosts: z.array(z.string().min(1).max(253)),
     secrets: z.array(SecretSchema),
+    oauth: OAuthSchema.optional(),
     tools: z.array(ToolSchema).min(1),
   })
   .strict()
   .superRefine((m, ctx) => {
+    if (m.oauth) {
+      const names = new Set(m.secrets.map((s) => s.name));
+      const roles = [m.oauth.clientId, m.oauth.clientSecret, m.oauth.refreshToken];
+      for (const name of roles) {
+        if (!names.has(name)) {
+          ctx.addIssue({ code: 'custom', message: `"${name}" is not a secret`, path: ['oauth'] });
+        }
+      }
+      if (new Set(roles).size !== roles.length) {
+        ctx.addIssue({ code: 'custom', message: 'repeated secret names', path: ['oauth'] });
+      }
+    }
     const seen = new Set<string>();
     for (const t of m.tools) {
       if (seen.has(t.name)) {

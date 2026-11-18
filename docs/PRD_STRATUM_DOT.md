@@ -2607,7 +2607,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
      - Los avisos distinguen los activos de los previstos.
      - El código de zona Meteoalerta **no** siempre contiene la provincia (Baleares, y Canarias
        compartida), así que la provincia sale de la tabla.
-  3. **`google`**: el `setup` OAuth en la CLI, Gmail y Tasks.
+  3. **`google`**: el `setup` OAuth en la CLI, Gmail y Tasks. *Hecha el 2026-11-18*:
+     - `manifest.oauth`, un tipo de `setup` nuevo. Los puntos de Google van fijos en el código.
+     - `stratum connectors setup google --client-file <JSON>` lee el cliente del JSON que descarga
+       Google Cloud, así que no se teclea el secreto. Exige todos los ámbitos y solo guarda si
+       todo sale bien.
+     - `api()` del conector veta cualquier ruta `/send`. Las cabeceras, el snippet y los adjuntos
+       de un correo también se neutralizan.
+     - Probado con una cuenta real: con el cliente en modo «Prueba», Google bloquea la cuenta que
+       no está entre los usuarios de prueba, y su autorización caduca a los 7 días; publicado, no
+       caduca.
   4. **Recordatorios propios**: daemon, protocolo y panel en Dot. *Hecha el 2026-11-17*:
      - Contrato en `docs/protocol.md` §30; `set_reminder|list_reminders|cancel_reminder`.
      - Entrega en la sesión principal del `companion`: la abre o la despierta, y solo da el aviso

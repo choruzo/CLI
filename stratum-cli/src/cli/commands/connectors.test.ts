@@ -4,6 +4,7 @@ import { mkdtempSync, readFileSync, rmSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { loadConnectorCatalog } from '../../connectors/catalog.js';
+import { OAuthError } from '../../connectors/oauth-google.js';
 import { connectorSecretsPath, readConnectorSecrets } from '../../connectors/secrets.js';
 import {
   formatConnectorsList,
@@ -288,5 +289,91 @@ describe('runSecret (fase 4)', () => {
     } finally {
       t.done();
     }
+  });
+
+  describe('google (M21, OAuth)', () => {
+    const CLIENT_ID = '123-abc.apps.googleusercontent.com';
+    const CLIENT_JSON = JSON.stringify({
+      installed: { client_id: CLIENT_ID, client_secret: 'GOCSPX-secreto' },
+    });
+
+    it('con --client-file, autoriza y guarda los tres de una vez, sin enseñar ninguno', async () => {
+      const authorize = vi.fn(async () => ({ refreshToken: '1//refresh-secreto', scopes: [] }));
+      const t = secretDeps([], { authorize, readFile: () => CLIENT_JSON });
+      try {
+        expect(await runSecret(t.deps, 'google', { clientFile: 'c.json' })).toBe(true);
+        expect(t.asked).toEqual([]);
+        expect(authorize).toHaveBeenCalledWith({
+          clientId: CLIENT_ID,
+          clientSecret: 'GOCSPX-secreto',
+          scopes: expect.arrayContaining(['https://www.googleapis.com/auth/gmail.compose']),
+        });
+        expect(t.output()).not.toContain('GOCSPX-secreto');
+        expect(t.output()).not.toContain('refresh-secreto');
+        const state = readConnectorSecrets(t.dir);
+        expect(state.state === 'ok' && state.file.connectors.google).toEqual({
+          GOOGLE_CLIENT_ID: CLIENT_ID,
+          GOOGLE_CLIENT_SECRET: 'GOCSPX-secreto',
+          GOOGLE_REFRESH_TOKEN: '1//refresh-secreto',
+        });
+      } finally {
+        t.done();
+      }
+    });
+
+    it('tecleado: el id con eco y el secreto sin eco; vacío reautoriza con lo guardado', async () => {
+      const authorize = vi.fn(async () => ({ refreshToken: 'rt-1', scopes: [] }));
+      const t = secretDeps([CLIENT_ID, 'sec-1'], { authorize });
+      try {
+        expect(await runSecret(t.deps, 'google')).toBe(true);
+        expect(t.asked.map((a) => a.hidden)).toEqual([false, true]);
+        const again = secretDeps(['', ''], {
+          dir: t.dir,
+          authorize: async () => ({ refreshToken: 'rt-2', scopes: [] }),
+        });
+        expect(await runSecret(again.deps, 'google')).toBe(true);
+        const state = readConnectorSecrets(t.dir);
+        expect(state.state === 'ok' && state.file.connectors.google).toMatchObject({
+          GOOGLE_CLIENT_SECRET: 'sec-1',
+          GOOGLE_REFRESH_TOKEN: 'rt-2',
+        });
+      } finally {
+        t.done();
+      }
+    });
+
+    it('si la autorización falla, no cambia nada', async () => {
+      const t = secretDeps([], {
+        readFile: () => CLIENT_JSON,
+        authorize: async () => {
+          throw new OAuthError('No se concedió el permiso en el navegador.');
+        },
+      });
+      try {
+        expect(await runSecret(t.deps, 'google', { clientFile: 'c.json' })).toBe(false);
+        expect(t.output()).toMatch(/No se concedió[\s\S]*Nothing changed/);
+        expect(readConnectorSecrets(t.dir)).toEqual({ state: 'absent' });
+      } finally {
+        t.done();
+      }
+    });
+
+    it('sin terminal, con --name o con un cliente web, no autoriza', async () => {
+      const authorize = vi.fn();
+      const t = secretDeps([], {
+        authorize,
+        readFile: () => JSON.stringify({ web: { client_id: CLIENT_ID, client_secret: 'x' } }),
+      });
+      try {
+        expect(await runSecret({ ...t.deps, isTTY: false }, 'google')).toBe(false);
+        expect(await runSecret(t.deps, 'google', { name: 'GOOGLE_REFRESH_TOKEN' })).toBe(false);
+        expect(await runSecret(t.deps, 'google', { clientFile: 'c.json' })).toBe(false);
+        expect(await runSecret(t.deps, 'home-assistant', { clientFile: 'c.json' })).toBe(false);
+        expect(t.output()).toMatch(/App de escritorio/);
+        expect(authorize).not.toHaveBeenCalled();
+      } finally {
+        t.done();
+      }
+    });
   });
 });

@@ -36,6 +36,7 @@ export default defineConfig([
       'crtm/server': 'src/connector-servers/crtm/server.ts',
       'aemet/server': 'src/connector-servers/aemet/server.ts',
       'home-assistant/server': 'src/connector-servers/home-assistant/server.ts',
+      'google/server': 'src/connector-servers/google/server.ts',
     },
     outDir: 'box-image/connectors',
     format: ['esm'],

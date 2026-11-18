@@ -20,6 +20,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   // Recalculada sin `NOT_IN_IMAGE` (antes '8a8c3d4d83f51880'): misma imagen, otra fórmula.
   4: 'a636c81f91ce4d0a',
   5: 'c1fc3be07bc61789',
+  // M21 fase 3: el conector `google`.
+  6: '783c9add8bd78f4b',
 };
 
 /**
