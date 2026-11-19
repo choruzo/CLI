@@ -38,6 +38,7 @@ import type {
   ProtocolRevertPlan,
   ProtocolSessionSnapshot,
   ProtocolReminder,
+  ProtocolWatchNotice,
   ResumeStatus,
   RevertStatus,
   StateEventData,
@@ -788,6 +789,15 @@ export class HostedSession {
    */
   reminderDue(reminder: ProtocolReminder): void {
     this.publisher.reminderDue(reminder);
+    this.publisher.flush();
+  }
+
+  /**
+   * M22 — un aviso de un vigilante (`watch.notice`), también fuera de cualquier
+   * run. Solo informa: no lanza un turno ni entra en la conversación.
+   */
+  watchNotice(notice: ProtocolWatchNotice): void {
+    this.publisher.watchNotice(notice);
     this.publisher.flush();
   }
 

@@ -18,6 +18,7 @@ import type {
   ProtocolReminder,
   ProtocolTelegramPaired,
   ProtocolTelegramStatus,
+  ProtocolWatchNotice,
 } from '../protocol/index.js';
 import { HttpTelegramApi, type TelegramApi } from '../channels/telegram/api.js';
 import { TelegramChannel } from '../channels/telegram/channel.js';
@@ -135,6 +136,11 @@ export class ChannelHost {
   /** M21 — el aviso de un recordatorio, también a los chats emparejados. */
   reminderDue(reminder: ProtocolReminder): void {
     this.link?.reminderDue(reminder);
+  }
+
+  /** M22 — el aviso de un vigilante, también a los chats emparejados. */
+  watchNotice(notice: ProtocolWatchNotice): void {
+    this.link?.watchNotice(notice);
   }
 
   /** Lee el fichero y la config y, si toca, empieza a escuchar. */

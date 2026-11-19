@@ -755,6 +755,38 @@ export const REMINDER_LIMITS = {
   keepEndedMs: 7 * 86_400_000,
 } as const;
 
+/** M22 — topes de los vigilantes (PRD de Dot §23.11, M22 parte 1). */
+export const WATCH_LIMITS = {
+  watches: 20,
+  nameChars: 60,
+  /** Valores de una condición `state-is` / `state-is-not`. */
+  stateValues: 10,
+  /** «Durante al menos N minutos». */
+  maxForMinutes: 1440,
+  /** Descanso mínimo entre dos saltos, por defecto y máximo. */
+  defaultCooldownMinutes: 30,
+  maxCooldownMinutes: 7 * 1440,
+  /** Fallos seguidos de la comprobación antes de avisar de que no puede mirar. */
+  failuresBeforeNotice: 3,
+  noticeChars: 500,
+} as const;
+
+/**
+ * M22 — un aviso de un vigilante. El texto lo compone el daemon con una
+ * plantilla (nunca el LLM), con lo que vino del conector ya neutralizado.
+ *  - `fired`: la condición pasó de falsa a verdadera.
+ *  - `resolved`: volvió a falsa (solo si el vigilante lo pidió).
+ *  - `failing`: la comprobación falló varias veces seguidas; no puede mirar.
+ *  - `suspended`: sin caja de conectores, o con el conector desactivado o sin configurar.
+ */
+export interface ProtocolWatchNotice {
+  watchId: string;
+  name: string;
+  kind: 'fired' | 'resolved' | 'failing' | 'suspended';
+  text: string;
+  at: Timestamp;
+}
+
 export interface ProtocolRoutine {
   id: string;
   name: string;

@@ -96,6 +96,7 @@ import {
   type ProtocolServerInfo,
   type ProtocolSession,
   type ProtocolSessionSnapshot,
+  type ProtocolWatchNotice,
   type StateEventData,
 } from '../protocol/index.js';
 import { bundledCatalog } from '../connectors/active.js';
@@ -148,6 +149,9 @@ import { ReminderScheduler } from './reminder-scheduler.js';
 import { reminderOperation } from './reminders-dto.js';
 import { ReminderStore, remindersFile } from '../reminders/store.js';
 import type { ReminderBook } from '../tools/reminders/reminders.js';
+import { WatchScheduler } from './watch-scheduler.js';
+import { WatchStore, watchesFile } from '../watches/store.js';
+import { connectorProbe, type WatchProbe } from '../watches/probe.js';
 import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
 import type { CompanionTurns } from './channel-companion.js';
 import type { SessionLabel } from '../channels/telegram/render.js';
@@ -253,6 +257,19 @@ export interface StratumdOptions {
    */
   reminders?: ReminderStore | null;
   /**
+   * M22 — almacén de los vigilantes del asistente. Por defecto, `watches.json`
+   * en los datos del `companion`; `null` desactiva los vigilantes (sin
+   * planificador).
+   */
+  watches?: WatchStore | null;
+  /**
+   * M22 — cómo mira un vigilante su comprobación. Por defecto, la sonda real
+   * (`watches/probe.ts`) contra la caja de conectores. Inyectable para tests.
+   */
+  watchProbe?: WatchProbe;
+  /** M22 — cada cuánto mira el planificador qué vigilantes tocan. Tests. */
+  watchTickMs?: number;
+  /**
    * M18 — canales externos (Telegram). `telegram.json` está en `dir`; por
    * defecto, `enabled` se lee de la config global en cada `channels.reload`.
    * `null`: sin canales (`channels.*` → `UNAVAILABLE`). Tests: API falsa.
@@ -353,6 +370,8 @@ export class Stratumd {
   readonly routines: RoutineScheduler | null;
   /** M21 — el planificador de los recordatorios del `companion`, o `null`. */
   readonly reminders: ReminderScheduler | null;
+  /** M22 — el planificador de los vigilantes del `companion`, o `null`. */
+  readonly watches: WatchScheduler | null;
   /** M19 — pasada automática de dreaming (`memory.dreaming.schedule`), o `null` si está apagada. */
   readonly dreamingSchedule: DreamingScheduler | null;
   /** M18 — los canales externos, o `null` con `channels: null`. */
@@ -491,6 +510,25 @@ export class Stratumd {
             // Solo al log, y sin el texto: el aviso es de la persona.
             onDelivered: (reminder) => this.reminderDelivered(reminder),
             now: this.now,
+          });
+    // M22 — los vigilantes: se evalúan sin el LLM, cada `watchTickMs`.
+    this.watches =
+      opts.watches === null
+        ? null
+        : new WatchScheduler({
+            store: opts.watches ?? new WatchStore(watchesFile(this.companionDir)),
+            probe:
+              opts.watchProbe ??
+              connectorProbe({
+                dataDir: this.companionDir,
+                box: opts.config.box,
+                secretsDir: this.daemonDir,
+                catalog: this.connectorCatalog,
+              }),
+            // El aviso sale por el protocolo, en la sesión del `companion`.
+            notify: (notice) => this.deliverWatchNotice(notice),
+            now: this.now,
+            ...(opts.watchTickMs ? { tickMs: opts.watchTickMs } : {}),
           });
     // La caja vive fuera del daemon: apagarlo o reiniciarlo no la toca.
     this.box =
@@ -634,6 +672,8 @@ export class Stratumd {
     daemon.routines?.start();
     // M21 — los avisos perdidos se entregan al arrancar, marcados `late`.
     daemon.reminders?.start();
+    // M22 — los vigilantes, con lo que pasó con el daemon apagado olvidado.
+    daemon.watches?.start();
     daemon.dreamingSchedule?.start();
     // M18 — el canal empieza a escuchar con el daemon ya publicado.
     daemon.channels?.start();
@@ -717,6 +757,8 @@ export class Stratumd {
       !this.routines?.hasEnabled &&
       // Un recordatorio pendiente también tiene que poder avisar.
       !this.reminders?.hasPending &&
+      // Y un vigilante activo tiene que poder saltar.
+      !this.watches?.hasActive &&
       // Un chat emparejado tiene que poder hablarle al asistente.
       !this.channels?.keepsAlive &&
       this.sessions.size === 0 &&
@@ -741,6 +783,8 @@ export class Stratumd {
       this.routines?.stop();
       // M21 — ni un recordatorio avisa a mitad del apagado.
       this.reminders?.stop();
+      // M22 — ni un vigilante se evalúa mientras se apaga.
+      this.watches?.stop();
       this.dreamingSchedule?.stop();
       // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
       this.dreaming.close();
@@ -2455,7 +2499,46 @@ export class Stratumd {
     }
   }
 
-  /** El planificador de rutinas, o `UNAVAILABLE` si el daemon corre sin él. */
+  /**
+   * M22 — un vigilante saltó: `watch.notice` en la sesión principal del
+   * `companion` (se abre o se despierta, como `sessions.open`) y, después,
+   * también a los chats emparejados. Un canal caído no impide el aviso, y un
+   * fallo al publicarlo en la sesión **sí lanza**, para que el planificador lo
+   * registre (el aviso ya no se repite: el estado ya cambió).
+   */
+  private async deliverWatchNotice(notice: ProtocolWatchNotice): Promise<void> {
+    let failure: unknown;
+    try {
+      const session = await this.openCompanion({ agent: COMPANION_AGENT });
+      session.watchNotice(notice);
+      log.info('watch notice delivered', {
+        watchId: notice.watchId,
+        kind: notice.kind,
+        sessionId: session.sessionId,
+      });
+    } catch (err) {
+      failure = err;
+      // Ni el nombre ni el texto del aviso: son de la persona.
+      log.warn('watch notice not published in the companion session', {
+        watchId: notice.watchId,
+        kind: notice.kind,
+        reason: err instanceof Error ? err.message : String(err),
+      });
+    }
+    try {
+      this.channels?.watchNotice(notice);
+    } catch (err) {
+      // Un canal caído no es un fallo del aviso.
+      log.warn('watch notice not sent to the channels', {
+        watchId: notice.watchId,
+        kind: notice.kind,
+        err,
+      });
+    }
+    if (failure) throw failure;
+  }
+
+  /** M20 — el catálogo de conectores (el del paquete, salvo en tests). */
   private get connectorCatalog(): ConnectorCatalog {
     return this.opts.connectorCatalog ?? bundledCatalog();
   }

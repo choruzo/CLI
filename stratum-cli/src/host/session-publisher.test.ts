@@ -480,6 +480,55 @@ describe('SessionPublisher — cola local acotada', () => {
     expect(publisher.snapshot().messages).toEqual(before);
   });
 
+  it('watchNotice sale fuera de cualquier run y no entra en la conversación (M22)', async () => {
+    const { host, emit } = fakeHost('s-watch', testConfig('watch'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+    });
+    publisher.start();
+    emit({ type: 'turn_started', kind: 'run', input: 'hola' });
+    const before = publisher.snapshot().messages;
+    publisher.watchNotice({
+      watchId: 'wat_1',
+      name: 'Salón',
+      kind: 'fired',
+      text: '🔔 Vigilante «Salón»: el estado es «on».',
+      at: 1_000,
+    });
+    publisher.flush();
+    const notice = sink.states().find((e) => e.type === 'watch.notice');
+    expect(notice).toBeDefined();
+    expect(notice!.runId).toBeUndefined();
+    expect(notice!.data).toMatchObject({ notice: { watchId: 'wat_1', kind: 'fired' } });
+    expect(publisher.snapshot().messages).toEqual(before);
+  });
+
+  it('el texto de un watchNotice sale redactado: lo que dijo el conector es de fuera', async () => {
+    const { host } = fakeHost('s-watch-redact', testConfig('watch'));
+    const sink = recorder();
+    const publisher = new SessionPublisher({
+      host,
+      hostInfo: { kind: 'daemon', client: 'daemon', connected: true },
+      sink,
+    });
+    publisher.start();
+    publisher.watchNotice({
+      watchId: 'wat_1',
+      name: 'Salón',
+      kind: 'fired',
+      text: 'Ahora: «off» · key sk-abcdefghijklmnopqrstuvwxyz123456',
+      at: 1_000,
+    });
+    publisher.flush();
+    const notice = sink.states().find((e) => e.type === 'watch.notice');
+    const text = (notice!.data as { notice: { text: string } }).notice.text;
+    expect(text).toContain('Ahora: «off»');
+    expect(text).not.toContain('abcdefghijklmnopqrstuvwxyz123456');
+  });
+
   it('al llenarse descarta primero lo volátil: los eventos de estado llegan todos', async () => {
     const { host, emit } = fakeHost('s-volatile', testConfig('volatile'));
     const sink = recorder();

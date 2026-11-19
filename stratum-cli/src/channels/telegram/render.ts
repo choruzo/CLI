@@ -81,6 +81,14 @@ export function reminderNotice(
   return `${head} (llega tarde: era para ${clock})`;
 }
 
+/**
+ * M22 — un aviso de un vigilante. El texto ya viene compuesto y neutralizado
+ * por el daemon (`watches/notice.ts`): aquí no se toca.
+ */
+export function watchNotice(text: string): string {
+  return text;
+}
+
 export function routineFinished(name: string, status: string, summary: string | null): string {
   const head = `Routine "${name}" ${status === 'completed' ? 'finished' : `ended: ${status}`}.`;
   return summary ? `${head}\n\n${summary}` : head;

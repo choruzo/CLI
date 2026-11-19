@@ -326,4 +326,18 @@ describe('CompanionLink: espejo (M18)', () => {
       '⏰ Recordatorio: Llamar al médico (llega tarde: era para 09:00)',
     ]);
   });
+
+  it('vigilante: el texto compuesto por el daemon, tal cual (M22)', () => {
+    const { link, sent } = setup();
+    link.watchNotice({
+      watchId: 'wat_1',
+      name: 'Salón',
+      kind: 'fired',
+      text: '🔔 Vigilante «Salón»: el estado es «on». Ahora: «on».',
+      at: 1_000,
+    });
+    expect(sent.map((s) => s.text)).toEqual([
+      '🔔 Vigilante «Salón»: el estado es «on». Ahora: «on».',
+    ]);
+  });
 });

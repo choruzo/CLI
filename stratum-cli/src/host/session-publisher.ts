@@ -34,6 +34,7 @@ import {
   type ProtocolToolCall,
   type ProtocolTranscript,
   type ProtocolVolatileEvent,
+  type ProtocolWatchNotice,
   type StateEventData,
   type StateEventType,
   type VolatileEventType,
@@ -1389,6 +1390,20 @@ export class SessionPublisher {
    */
   reminderDue(reminder: ProtocolReminder): void {
     this.state('reminder.due', () => ({ reminder: { ...reminder } }), undefined, true);
+  }
+
+  /**
+   * M22 — un aviso de un vigilante (`watch.notice`): también fuera de cualquier
+   * run y sin entrar en la conversación. El texto trae lo que dijo el conector,
+   * así que sale redactado, como todo lo que publica la sesión.
+   */
+  watchNotice(notice: ProtocolWatchNotice): void {
+    this.state(
+      'watch.notice',
+      () => ({ notice: { ...notice, text: this.redact(notice.text) } }),
+      undefined,
+      true,
+    );
   }
 
   /** Entrega al sink lo que haya en la cola. Nunca lanza. */

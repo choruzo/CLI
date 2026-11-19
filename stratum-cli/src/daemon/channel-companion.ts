@@ -25,6 +25,7 @@ import type {
   ProtocolReminder,
   ProtocolRun,
   ProtocolSharedImage,
+  ProtocolWatchNotice,
   SteerStatus,
 } from '../protocol/index.js';
 import { USER_IMAGE_LIMITS, type UserImage } from '../agent/user-images.js';
@@ -44,6 +45,7 @@ import {
   turnFailed,
   unavailable,
   warningLine,
+  watchNotice,
 } from '../channels/telegram/render.js';
 
 const log = getLogger('channels');
@@ -259,6 +261,12 @@ export class CompanionLink {
     const due = new Date(reminder.dueAt);
     const late = reminder.late ? { hour: due.getHours(), minute: due.getMinutes() } : null;
     this.broadcast(reminderNotice(reminder.text, late));
+  }
+
+  /** M22 — un aviso de un vigilante. El texto ya viene compuesto. */
+  watchNotice(notice: ProtocolWatchNotice): void {
+    if (this.stopped) return;
+    this.broadcast(watchNotice(notice.text));
   }
 
   private endRun(): void {

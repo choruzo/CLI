@@ -12,6 +12,7 @@ import type {
   ProtocolQuestionAnswer,
   ProtocolQuestionRequest,
   ProtocolReminder,
+  ProtocolWatchNotice,
   ProtocolResolver,
   ProtocolRun,
   ProtocolSession,
@@ -128,6 +129,11 @@ export interface StateEventData {
    * no lanza un run ni entra en la conversación.
    */
   'reminder.due': { reminder: ProtocolReminder };
+  /**
+   * M22 — aviso de un vigilante, como `reminder.due`: en la sesión principal
+   * del `companion`, fuera de cualquier run, también en `overview`. Solo informa.
+   */
+  'watch.notice': { notice: ProtocolWatchNotice };
   warning: { message: string };
   error: { message: string; fatal: boolean };
 }
@@ -181,6 +187,7 @@ export const EVENT_CLASS: Readonly<Record<ProtocolEventType, 'state' | 'volatile
   'question.requested': 'state',
   'question.resolved': 'state',
   'reminder.due': 'state',
+  'watch.notice': 'state',
   warning: 'state',
   error: 'state',
   'message.delta': 'volatile',
@@ -207,6 +214,7 @@ export const OVERVIEW_EVENT_TYPES: readonly StateEventType[] = [
   'plan.proposed',
   'plan.resolved',
   'reminder.due',
+  'watch.notice',
 ];
 
 interface EventBase {

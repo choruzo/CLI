@@ -2715,6 +2715,17 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       valida los argumentos.
     - `structuredContent` y `outputSchema` en el server propio.
     - `ha_comprobar` (`home-assistant` 1.1.0, imagen v9).
+    *Fase 2* (2026-11-19):
+    - Núcleo en `watches/` (condición, máquina de estados, plantilla del aviso, validación contra
+      el catálogo y `watches.json`), la sonda por la caja de conectores y el `WatchScheduler`.
+    - El aviso es el evento `watch.notice` (`fired`, `resolved`, `failing` y `suspended`), en la
+      sesión principal del `companion` y en Telegram. Dot lo pinta en la fase 3.
+    - Decidido al implementar:
+      - Un vigilante nuevo parte de «falsa», así que si ya se cumple al crearlo, salta.
+      - El descanso entre saltos es de 30 minutos por defecto.
+      - Un aviso que no se pudo entregar no se reintenta, porque el estado ya cambió.
+      - Los saltos y las suspensiones van al log del daemon, sin nombre ni argumentos, y no a la
+        traza de una sesión: no ocurren dentro de ningún run.
 
   *2. Google Calendar*: dentro del conector `google`, con el mismo OAuth.
   - Ámbito nuevo `calendar.events` (crear y mover) o solo `calendar.readonly`. *Pendiente* cuál.

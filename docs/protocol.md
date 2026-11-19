@@ -2371,3 +2371,88 @@ interface ProtocolReminder {
   contrario de una rutina (§23), porque un aviso que no llega es peor que uno tarde.
 
 Tests: `stratum-cli/src/protocol/schemas.test.ts` y `stratum-cli/src/daemon/daemon-reminders.test.ts`.
+
+## 31. Vigilantes del asistente (M22)
+
+Una condición sobre una **comprobación** de un conector, que el daemon evalúa **sin el LLM** y que
+avisa cuando salta (PRD de Dot §23.11, *Vigilantes*). Los guarda el daemon en
+`~/.stratum/companion/watches.json`, que solo escribe él. Aquí está solo lo que ya existe: el aviso
+y su evaluación. Los métodos `watches.*` (crear, listar, pausar) llegan en la fase 3.
+
+```ts
+interface ProtocolWatchNotice {
+  watchId: string;
+  name: string; // ≤ WATCH_LIMITS.nameChars (60)
+  kind: 'fired' | 'resolved' | 'failing' | 'suspended';
+  text: string; // ≤ WATCH_LIMITS.noticeChars (500); ya compuesto y neutralizado
+  at: Timestamp;
+}
+```
+
+- **`fired`**: la condición pasó de falsa a verdadera (sostenida, si pide «durante N minutos»).
+- **`resolved`**: volvió a falsa, **solo** si el vigilante pidió `notifyResolved`.
+- **`failing`**: la comprobación falló `WATCH_LIMITS.failuresBeforeNotice` (3) veces seguidas; no
+  puede mirar. Un éxito reinicia la cuenta.
+- **`suspended`**: no se puede ni intentar (conector desactivado, sin configurar, sin runtime o sin
+  caja de conectores en marcha). Se avisa una sola vez.
+
+**El aviso** es el evento de estado **`watch.notice`** (`{ notice }`), como `reminder.due`: en la
+sesión principal del `companion`, **fuera de cualquier run** (sin `runId`), y en
+`OVERVIEW_EVENT_TYPES`, así que Dot lo recibe aunque no tenga la conversación abierta. El texto lo
+compone el daemon con una plantilla, **nunca el LLM**, y todo lo que viene del conector ya llega
+neutralizado (una línea, sin controles ni marcas de dirección). Solo informa: ni abre turno ni entra
+en la conversación (`applyTranscriptEvent` lo ignora). Con Telegram emparejado, el daemon manda el
+mismo texto al chat.
+
+**Cómo se evalúa** (`src/daemon/watch-scheduler.ts`, `src/watches/engine.ts`):
+
+- Cada `tick` (15 s) mira qué vigilantes activos tocan según su `intervalSec` y los **agrupa por
+  conector**: una conexión por conector y ciclo, por el mismo camino que una sesión (caja de
+  conectores comprobada antes de conectar).
+- Un ciclo a la vez: si uno se alarga, el siguiente espera.
+- Salta **solo en el flanco**, de falsa a verdadera; después espera a que vuelva a falsa
+  (`firing`). Un vigilante nuevo parte de falsa, así que si ya se cumple al crearlo, salta.
+- Entre dos saltos hay un descanso mínimo (`cooldownMinutes`); si se cumple durante el descanso,
+  salta al acabar este si sigue cumpliéndose.
+- `changes` compara con el último estado visto: el primero solo lo anota, y cada salto lo actualiza.
+- Un valor que no se puede saber (un umbral sin `valor` numérico) no cuenta ni como verdadero ni
+  como falso.
+- Un fallo de la comprobación nunca salta; `failing` avisa una vez y no se repite.
+- Al arrancar, lo que pasó con el daemon apagado no se recupera (`stateAfterRestart`): se conserva si
+  estaba saltado y la referencia, pero la cuenta de «durante N minutos» y los fallos empiezan de
+  cero.
+- El estado se guarda solo cuando cambia. Con el fichero en solo lectura (de un Stratum más nuevo o
+  dañado) **no se evalúa nada**: sin poder guardar el estado se repetirían los avisos.
+- Un fallo al entregar un aviso se registra y no se reintenta: el estado ya cambió y la siguiente
+  transición avisará.
+
+**`watches.json`** (`schemaVersion` 1, escritura atómica, Zod al leer, `passthrough` para no perder
+campos de una versión compatible):
+
+```ts
+interface StoredWatch {
+  id: string; // wat_…
+  name: string;
+  connector: string;
+  check: string; // una tool que el manifiesto declare en `checks`
+  args: Record<string, string | number | boolean>; // los fijos, validados al crearlo
+  condition:
+    | { kind: 'state-is' | 'state-is-not'; values: string[]; forMinutes?: number }
+    | { kind: 'above' | 'below'; threshold: number; forMinutes?: number }
+    | { kind: 'changes'; forMinutes?: number };
+  intervalSec: number; // ≥ 60, y ≥ minIntervalSec de la comprobación
+  cooldownMinutes: number; // por defecto 30
+  notifyResolved: boolean; // por defecto false
+  status: 'active' | 'paused';
+  origin: 'agent' | 'person';
+  createdAt: Timestamp;
+  state: WatchState; // firing, pendingSince, reference, lastFiredAt, failures, …
+}
+```
+
+Un vigilante activo impide que el daemon se apague por inactividad, como una rutina habilitada o un
+recordatorio pendiente. `watches: null` en el daemon deja los vigilantes sin planificador.
+
+Tests: `stratum-cli/src/watches/` (`condition`, `engine`, `notice`, `store`, `define`, `probe` y la
+integración con el conector de Home Assistant) y `stratum-cli/src/daemon/watch-scheduler.test.ts` /
+`daemon-watches.test.ts`.

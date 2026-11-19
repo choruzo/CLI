@@ -84,6 +84,7 @@ import type {
   ProtocolUndoableTurn,
   ProtocolMemoryDocument,
   ProtocolReminder,
+  ProtocolWatchNotice,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -110,6 +111,7 @@ import {
   PROTOCOL_MEMORY_SECTIONS,
   SHARED_IMAGE_LIMITS,
   REMINDER_LIMITS,
+  WATCH_LIMITS,
 } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
@@ -650,6 +652,18 @@ export const reminderSchema: z.ZodType<ProtocolReminder> = z.object({
 });
 
 // ---------------------------------------------------------------------------
+// M22 — vigilantes del companion
+// ---------------------------------------------------------------------------
+
+export const watchNoticeSchema: z.ZodType<ProtocolWatchNotice> = z.object({
+  watchId: id,
+  name: z.string().min(1).max(WATCH_LIMITS.nameChars),
+  kind: z.enum(['fired', 'resolved', 'failing', 'suspended']),
+  text: z.string().min(1).max(WATCH_LIMITS.noticeChars),
+  at: timestamp,
+});
+
+// ---------------------------------------------------------------------------
 // M18 — canales externos (Telegram)
 // ---------------------------------------------------------------------------
 
@@ -1009,6 +1023,7 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
     resolvedBy: resolver.optional(),
   }),
   'reminder.due': z.object({ reminder: reminderSchema }),
+  'watch.notice': z.object({ notice: watchNoticeSchema }),
   warning: z.object({ message: z.string() }),
   error: z.object({ message: z.string(), fatal: z.boolean() }),
 };

@@ -6,6 +6,7 @@ import {
   OVERVIEW_EVENT_TYPES,
   REMINDER_LIMITS,
   STRATUM_PROTOCOL_VERSION,
+  WATCH_LIMITS,
   type MethodName,
 } from './index.js';
 import * as schemas from './schemas.js';
@@ -219,7 +220,7 @@ describe('eventos', () => {
   };
 
   it('hay schema de datos para cada tipo de evento', () => {
-    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(38);
+    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(39);
   });
 
   it('reminder.due valida, va a overview y no admite estados ni textos inventados (M21)', () => {
@@ -247,6 +248,35 @@ describe('eventos', () => {
     expect(bad({ text: '' })).toBe(false);
     expect(bad({ text: 'x'.repeat(REMINDER_LIMITS.textChars + 1) })).toBe(false);
     expect(bad({ origin: 'channel' })).toBe(false);
+  });
+
+  it('watch.notice valida, va a overview y no admite tipos ni textos inventados (M22)', () => {
+    const notice = {
+      watchId: 'wat_1',
+      name: 'Salón',
+      kind: 'fired',
+      text: '🔔 Vigilante «Salón»: el estado es «on».',
+      at: 1_794_000_000_000,
+    };
+    const ev = {
+      type: 'watch.notice',
+      sessionId: 's1',
+      at: 1_794_000_000_000,
+      seq: 10,
+      data: { notice },
+    };
+    expect(eventSchema.parse(ev)).toEqual(ev);
+    expect(OVERVIEW_EVENT_TYPES).toContain('watch.notice');
+    const bad = (n: object) =>
+      eventSchema.safeParse({ ...ev, data: { notice: { ...notice, ...n } } }).success;
+    for (const kind of ['fired', 'resolved', 'failing', 'suspended']) {
+      expect(bad({ kind })).toBe(true);
+    }
+    expect(bad({ kind: 'ringing' })).toBe(false);
+    expect(bad({ text: '' })).toBe(false);
+    expect(bad({ text: 'x'.repeat(WATCH_LIMITS.noticeChars + 1) })).toBe(false);
+    expect(bad({ watchId: '' })).toBe(false);
+    expect(bad({ name: 'x'.repeat(WATCH_LIMITS.nameChars + 1) })).toBe(false);
   });
 
   it('valida los de estado y los volátiles', () => {
