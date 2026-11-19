@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "home-assistant",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Home Assistant",
   "description": "Consulta y maneja tu casa con Home Assistant, en tu red local.",
   "agents": ["companion"],
@@ -30,6 +30,11 @@
       "summary": "Estado detallado de una o varias entidades."
     },
     {
+      "name": "ha_comprobar",
+      "readOnly": true,
+      "summary": "Estado estructurado de una entidad, para vigilantes."
+    },
+    {
       "name": "ha_encender",
       "readOnly": false,
       "summary": "Enciende luces, enchufes, escenas, persianas…"
@@ -43,6 +48,31 @@
       "name": "ha_accion",
       "readOnly": false,
       "summary": "Llama a cualquier servicio de Home Assistant."
+    }
+  ],
+  "checks": [
+    {
+      "tool": "ha_comprobar",
+      "summary": "Estado de una entidad (o uno de sus atributos).",
+      "minIntervalSec": 60,
+      "args": [
+        {
+          "name": "entity_id",
+          "type": "string",
+          "required": true,
+          "description": "Entidad, con la forma dominio.nombre (p. ej. light.salon)",
+          "maxLength": 100,
+          "pattern": "[a-z_][a-z0-9_]*\\.[a-z0-9_]+"
+        },
+        {
+          "name": "atributo",
+          "type": "string",
+          "required": false,
+          "description": "Atributo a vigilar en vez del estado (p. ej. current_temperature)",
+          "maxLength": 64,
+          "pattern": "[a-z_][a-z0-9_]{0,63}"
+        }
+      ]
     }
   ]
 }

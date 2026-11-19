@@ -7,11 +7,20 @@
  * `serveStdio` solo lo conecta a la entrada y salida estándar.
  */
 
-export interface ConnectorTool {
+/**
+ * Lo que devuelve una tool: el texto para el modelo y, en las comprobaciones
+ * (M22), también un resultado estructurado que viaja como `structuredContent`.
+ */
+export type ToolOutput = { text: string; structured: Record<string, unknown> };
+
+export interface ConnectorTool<Out extends string | ToolOutput = string> {
   name: string;
   description: string;
   inputSchema: Record<string, unknown>;
-  handler: (args: unknown, signal?: AbortSignal) => Promise<string>;
+  /** Solo las comprobaciones lo declaran: la forma de su `structuredContent`. */
+  outputSchema?: Record<string, unknown>;
+  /** Texto para el modelo; las comprobaciones devuelven además lo estructurado. */
+  handler: (args: unknown, signal?: AbortSignal) => Promise<Out>;
 }
 
 /** Error que se le enseña al agente tal cual (argumento inválido, lugar no hallado…). */
@@ -37,17 +46,22 @@ function isRecord(v: unknown): v is Record<string, unknown> {
 
 export function createMcpServer(
   info: { name: string; version: string },
-  tools: ConnectorTool[],
+  tools: ConnectorTool<string | ToolOutput>[],
 ): McpServer {
-  const byName = new Map(tools.map((t) => [t.name, t]));
+  const byName = new Map<string, ConnectorTool<string | ToolOutput>>(tools.map((t) => [t.name, t]));
 
   async function callTool(id: unknown, params: unknown): Promise<object> {
     const p = isRecord(params) ? params : {};
     const tool = typeof p.name === 'string' ? byName.get(p.name) : undefined;
     if (!tool) return rpcError(id, -32602, `Tool desconocida: ${String(p.name)}`);
     try {
-      const text = await tool.handler(p.arguments ?? {});
-      return rpcResult(id, { content: [{ type: 'text', text }] });
+      const out = await tool.handler(p.arguments ?? {});
+      // Una comprobación (M22) devuelve además su resultado estructurado.
+      if (typeof out === 'string') return rpcResult(id, { content: [{ type: 'text', text: out }] });
+      return rpcResult(id, {
+        content: [{ type: 'text', text: out.text }],
+        structuredContent: out.structured,
+      });
     } catch (err) {
       if (err instanceof ToolUserError) {
         return rpcResult(id, { content: [{ type: 'text', text: err.message }], isError: true });
@@ -88,6 +102,7 @@ export function createMcpServer(
               name: t.name,
               description: t.description,
               inputSchema: t.inputSchema,
+              ...(t.outputSchema !== undefined ? { outputSchema: t.outputSchema } : {}),
             })),
           });
         case 'tools/call':

@@ -2628,11 +2628,135 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        por entregado al publicarlo. Si no puede, reintenta.
      - Telegram, `stratum reminders list|cancel` y la pestaña *Reminders* de Dot. El aviso del
        sistema sale siempre, también con la pestaña delante.
-     - Falta probarlo de punta a punta con la ventana real de Dot.
+     - Probado de punta a punta con la ventana real de Dot (confirmado por el usuario el
+       2026-11-19). **M21 cerrado.**
+
+- **M22 — Vigilantes, calendario y más alcance** [propuesto 2026-11-18; solo Dot]. Sale de la
+  lista de carencias que el propio `companion` escribió ese día, evaluada por Claude y aceptada por
+  el usuario. Cinco partes, en este orden: **vigilantes** (diseñada primero), Google Calendar, MCP
+  por HTTP, historial de Home Assistant y la caja que se para. Queda **fuera** que el `companion`
+  vea la máquina de la persona (pantalla, ventanas, ficheros fuera de `/exchange`): es la frontera
+  de M13–M14, y para diagnosticar se le dan conectores concretos de solo lectura.
+
+  *1. Vigilantes: avisar cuando pasa algo* (diseño propuesto por Claude el 2026-11-18; sus tres
+  pendientes, decididos por el usuario el 2026-11-19):
+  - **El hueco**: las rutinas (M16) y los recordatorios (M21) van por reloj. Nada reacciona a lo que
+    pasa fuera: si el WLED se cae a las 3:00, la persona se entera cuando pregunta.
+  - **Qué es**: una condición declarada sobre un dato de un conector, que el daemon evalúa cada
+    cierto tiempo **sin el LLM**. Cuando la condición pasa de falsa a verdadera, el vigilante
+    «salta»: entrega un aviso como un recordatorio y, si se pidió, lanza una rutina ya aprobada.
+    No es la proactividad libre de §23.12: el agente nunca decide hablar por su cuenta, solo salta
+    lo que la persona aceptó.
+  - **De dónde sale el dato**: **comprobaciones** que declara cada conector en su manifiesto
+    (`checks`). Una comprobación es una tool de solo lectura que devuelve un resultado
+    **estructurado** (`structuredContent` de MCP: `{ estado, valor?, detalle }`), no el texto
+    masticado para el modelo, para que la condición no dependa de leer prosa. Ejemplos de v1:
+    - `home-assistant`: el estado de una entidad (`unavailable`, `off`, un número).
+    - `aemet`: el nivel del aviso vigente en una zona.
+    - `renfe`/`crtm`: incidencias en una línea (Renfe; el CRTM no tiene tiempo real en v1).
+    - `google`: correos nuevos que cumplen una búsqueda y tareas vencidas.
+  - **Condiciones** (cerradas, sin expresiones libres): `estado` igual o distinto de uno o varios
+    valores, `valor` por encima o por debajo de un umbral, y «cambia». Todas admiten «durante al
+    menos N minutos», para no saltar por un parpadeo.
+  - **Cómo se evalúa**: un `WatchScheduler` en el daemon, hermano del `RoutineScheduler`.
+    - Cada intervalo, el daemon abre el conector por el mismo camino que una sesión
+      (`box/connectors.ts`, en la caja de conectores, con sus secretos como `-e NOMBRE`), llama a la
+      comprobación con los argumentos fijos del vigilante y cierra.
+    - Intervalo mínimo de 1 minuto, o el que declare la comprobación (más largo para lo que pesa,
+      como Gmail). Las llamadas a un mismo conector se agrupan en una conexión por ciclo.
+    - Salta solo **en el flanco** (de falsa a verdadera) y luego espera a que vuelva a ser falsa.
+      Hay además un descanso mínimo entre dos saltos. Un aviso puede llevar también «se ha
+      resuelto» al volver a falsa, si se pidió.
+    - El último estado de cada vigilante se guarda, para que reiniciar el daemon con el WLED aún
+      caído no vuelva a avisar. Lo que ocurrió con el daemon apagado no se recupera: la primera
+      evaluación al arrancar compara con lo guardado.
+    - Sin caja de conectores, o con el conector desactivado, el vigilante queda **suspendido** y
+      se avisa una sola vez. Un fallo de la comprobación no salta: tras varios seguidos, se avisa
+      de que el vigilante no puede mirar.
+    - El daemon no se apaga por inactividad mientras haya vigilantes activos, como con los
+      recordatorios.
+  - **Qué hace al saltar**:
+    - **Avisar** (siempre): notificación del SO en Dot y mensaje en Telegram si está emparejado,
+      por el mismo camino que los recordatorios. El texto lo compone el daemon con una plantilla
+      (nombre del vigilante, condición y valor), no el LLM. Lo que venga del conector (el asunto de
+      un correo, el nombre de una entidad) va neutralizado y recortado, porque es contenido no
+      confiable.
+    - **Lanzar una rutina** (opcional): una rutina de M16 que ya existe y está aprobada, con el
+      dato del salto como contexto marcado como no confiable. Corre con sus reglas: su sesión, nada
+      vuelve al chat principal y lo que pida aprobación caduca a `deny`. El vigilante no ejecuta
+      nada que actúe por sí mismo.
+  - **Quién los crea**:
+    - El agente **propone** (`propose_watch`, solo en la sesión principal del `companion`, como
+      `propose_routine`), y la confirmación enseña el vigilante entero: conector, comprobación,
+      argumentos, condición, intervalo y qué hace al saltar. *Decidido, 2026-11-19*: confirmación
+      **forzada si lanza una rutina y normal si solo avisa**.
+    - La persona, por `stratum watches add|list|pause|resume|remove`.
+  - **Dónde vive**: `~/.stratum/companion/watches.json` (atómico, Zod, `schemaVersion`; solo lo
+    escribe el daemon), con el último estado de cada uno.
+  - **Protocolo**: `watches.list`, y `pause|resume|remove` con `control` (solo restan). Crear va
+    por la propuesta confirmada, o por la CLI con `approve`. Un evento `watch.fired` para Dot.
+    Panel *Watches* en la vista *Asistente* de Dot, junto a *Reminders*.
+  - **Topes**: 20 vigilantes; un intervalo mínimo por comprobación; argumentos validados contra el
+    esquema de la comprobación. *Decidido, 2026-11-19*: **sin horas de silencio en v1**. Unas
+    horas globales en las que solo se avisa por Dot, sin Telegram, quedan para cuando el ruido
+    moleste.
+  - **Traza**: cada salto y cada suspensión se trazan; cada evaluación, no (es ruido).
+  - **Más adelante**: eventos empujados en vez de preguntar cada minuto, empezando por el
+    WebSocket de Home Assistant (`subscribe_events` de `state_changed`). Pide un proceso de larga
+    vida en la caja de conectores, que hoy no existe. Para «el WLED se cayó a las 3:00», enterarse
+    en uno o dos minutos basta. *Decidido, 2026-11-19*: **v1 va solo por intervalo**.
+  - *Fases*: (1) `checks` en el manifiesto, la comprobación estructurada y la de Home Assistant,
+    probadas sin daemon. (2) `WatchScheduler`, `watches.json` y avisos, con tests de daemon real y
+    temporizadores reales. (3) `propose_watch`, `stratum watches`, protocolo y panel en Dot.
+    (4) Comprobaciones de `aemet`, `renfe` y `google`, y lanzar una rutina al saltar.
+    *Fase 1 hecha el 2026-11-19*:
+    - `checks` en el manifiesto, con argumentos de esquema cerrado, sobre una tool de solo lectura.
+    - `connectors/checks.ts`: lee el resultado (un fallo nunca es un estado), lo neutraliza y
+      valida los argumentos.
+    - `structuredContent` y `outputSchema` en el server propio.
+    - `ha_comprobar` (`home-assistant` 1.1.0, imagen v9).
+
+  *2. Google Calendar*: dentro del conector `google`, con el mismo OAuth.
+  - Ámbito nuevo `calendar.events` (crear y mover) o solo `calendar.readonly`. *Pendiente* cuál.
+    Cambiar los ámbitos obliga a volver a autorizar con `stratum connectors setup google`, y el
+    `setup` sigue exigiendo todos.
+  - Tools: `calendario_listar` y `calendario_buscar` de solo lectura; con escritura,
+    `calendario_crear` y `calendario_mover`, confirmadas y con los asistentes en la confirmación.
+    Nunca se envían invitaciones (`sendUpdates: none`).
+  - Lo que escriben otros (título, descripción y lugar de una invitación) es contenido no
+    confiable, como un correo. Las horas, en Europe/Madrid.
+  - Con los vigilantes, una comprobación «próximo evento en N minutos» cubre el aviso de antes de
+    una cita.
+
+  *3. MCP por HTTP en `companion.mcp.servers`*: hoy el cliente MCP solo habla stdio
+  (`tools/mcp/client.ts`), así que un servidor MCP remoto no se puede declarar y el `companion`
+  acaba hablando MCP a mano con `curl` desde su caja.
+  - Transporte **Streamable HTTP** para una entrada de `companion.mcp.servers`, solo de la config
+    global. Las reglas son las de M17: lo que no esté en `readOnlyTools` se confirma.
+  - La cabecera de autenticación sale de una variable de entorno del daemon, nunca escrita en la
+    config. Sin seguir redirecciones a otro origen, con plazo por llamada y con veto de
+    loopback y link-local salvo que se declare.
+  - No cambia M20: los conectores del catálogo siguen siendo propios y en la caja de conectores.
+    Esto es para un servidor de terceros que la persona declara a propósito.
+
+  *4. Historial de Home Assistant*: `ha_historial` (`/api/history/period`), de solo lectura, para
+  una o varias entidades y un periodo acotado (máximo 7 días), resumido en cambios de estado con su
+  hora. Crear automatizaciones **queda fuera**: una automatización actúa sola, sin confirmación.
+  Como mucho, el agente escribe una propuesta en YAML para que la persona la pegue en Home
+  Assistant.
+
+  *5. La caja que se para*: el 2026-11-18 el `companion` dijo que la caja se le paró dos veces a
+  mitad de conversación. En Stratum nada para la caja por inactividad: solo `stratum box stop`, y
+  recrearla al subir `BOX_IMAGE_VERSION`. Ese día se desplegaron las imágenes v7 y v8, que
+  probablemente lo explican.
+  - Primero se mide: anotar la hora de cada parada y compararla con los despliegues y con Docker
+    Desktop (ahorro de recursos) y WSL (apagado por inactividad).
+  - Lo que deba seguir vivo es un job, una rutina o un vigilante, no un proceso suelto en la caja.
+    Recrear la caja debe avisar al `companion` de que lo que corría se ha perdido.
 
 ### 23.12 Fuera, por ahora
 
-Proactividad libre, voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
+Proactividad libre (la acotada, condiciones declaradas que solo avisan, es M22), voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
 o en una nube, multiusuario, y tomar el control de la caja desde Dot.
 
 ### 23.13 Preguntas abiertas

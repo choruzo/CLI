@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import { createHomeAssistantTools } from './tools.js';
 
 const TOKEN = 'tok-SECRETO-123';
@@ -108,13 +108,25 @@ function setup(opts: { areasFail?: boolean; services?: (path: string) => unknown
     return new Response('?', { status: 500 });
   }) as typeof fetch;
   const tools = createHomeAssistantTools({ fetch: f, url: 'http://ha.casa:8123', token: TOKEN });
-  const get = (name: string): ConnectorTool => tools.find((t) => t.name === name)!;
+  const get = (name: string): ConnectorTool<string | ToolOutput> =>
+    tools.find((t) => t.name === name)!;
   return {
     tools,
     get,
     calls,
     services: () => calls.filter((c) => c.method === 'POST' && c.path.startsWith('/api/services/')),
   };
+}
+
+/** El texto de una tool (las comprobaciones devuelvan además lo estructurado). */
+function textOf(out: string | ToolOutput): string {
+  return typeof out === 'string' ? out : out.text;
+}
+
+/** Lo estructurado de una comprobación (M22). */
+function structuredOf(out: string | ToolOutput): Record<string, unknown> {
+  if (typeof out === 'string') throw new Error('la tool devolvió solo texto');
+  return out.structured;
 }
 
 async function failure(p: Promise<unknown>): Promise<string> {
@@ -128,18 +140,19 @@ async function failure(p: Promise<unknown>): Promise<string> {
 }
 
 describe('tools de Home Assistant', () => {
-  it('expone las 6 tools con ha_resumen primero', () => {
+  it('expone las 7 tools con ha_resumen primero', () => {
     const { tools } = setup();
     expect(tools.map((t) => t.name)).toEqual([
       'ha_resumen',
       'ha_buscar',
       'ha_estado',
+      'ha_comprobar',
       'ha_encender',
       'ha_apagar',
       'ha_accion',
     ]);
     expect(tools[0]!.description).toMatch(/Primera tool/);
-    expect(tools[5]!.description).toMatch(/aprobación/);
+    expect(tools[6]!.description).toMatch(/aprobación/);
   });
 
   describe('ha_resumen', () => {
@@ -183,7 +196,7 @@ describe('tools de Home Assistant', () => {
       ).toMatch(/áreas/);
     });
     it('trunca con limite y dice cuántos faltan', async () => {
-      const out = await setup().get('ha_buscar').handler({ texto: 'e', limite: 2 });
+      const out = textOf(await setup().get('ha_buscar').handler({ texto: 'e', limite: 2 }));
       expect(out.split('\n').filter((l) => l.includes(' — '))).toHaveLength(2);
       expect(out).toMatch(/faltan \d+ más/);
     });
@@ -228,6 +241,93 @@ describe('tools de Home Assistant', () => {
       expect(await failure(t.handler({}))).toMatch(/entity_id/);
       const many = Array.from({ length: 21 }, (_, i) => `light.l${i}`);
       expect(await failure(t.handler({ entity_id: many }))).toMatch(/hasta 20/);
+    });
+  });
+
+  describe('ha_comprobar', () => {
+    it('on y off: estado tal cual y valor sin dato (nunca 0)', async () => {
+      const t = setup().get('ha_comprobar');
+      const on = structuredOf(await t.handler({ entity_id: 'light.salon' }));
+      expect(on).toEqual({
+        estado: 'on',
+        valor: null,
+        detalle: 'Luz del salón — on',
+      });
+      const off = structuredOf(await t.handler({ entity_id: 'light.cocina' }));
+      expect(off).toMatchObject({ estado: 'off', valor: null });
+    });
+
+    it('un sensor numérico da el número como valor', async () => {
+      const out = await setup().get('ha_comprobar').handler({ entity_id: 'sensor.temp_salon' });
+      expect(structuredOf(out)).toEqual({
+        estado: '21.5',
+        valor: 21.5,
+        detalle: 'Temperatura salón — 21.5 °C',
+      });
+      expect(textOf(out)).toContain('sensor.temp_salon — Temperatura salón — 21.5 °C');
+      expect(textOf(out)).toContain('Para vigilantes: estado «21.5», valor 21.5');
+    });
+
+    it('unavailable es «no disponible» en el texto y null como valor', async () => {
+      const out = await setup().get('ha_comprobar').handler({ entity_id: 'sensor.roto' });
+      expect(structuredOf(out)).toMatchObject({ estado: 'unavailable', valor: null });
+      expect(textOf(out)).toContain('Para vigilantes: estado «unavailable», valor sin dato');
+    });
+
+    it('un atributo numérico presente', async () => {
+      const out = await setup()
+        .get('ha_comprobar')
+        .handler({ entity_id: 'climate.sala', atributo: 'current_temperature' });
+      expect(structuredOf(out)).toEqual({
+        estado: '20.4',
+        valor: 20.4,
+        detalle: 'Termostato — heat — current_temperature: 20.4',
+      });
+    });
+
+    it('un atributo que no existe es sin_dato, nunca 0', async () => {
+      const out = await setup()
+        .get('ha_comprobar')
+        .handler({ entity_id: 'light.salon', atributo: 'battery_level' });
+      expect(structuredOf(out)).toEqual({
+        estado: 'sin_dato',
+        valor: null,
+        detalle: 'Luz del salón — on — battery_level: sin dato',
+      });
+      // Una clave heredada del prototipo no es un atributo.
+      const proto = await setup()
+        .get('ha_comprobar')
+        .handler({ entity_id: 'light.salon', atributo: 'constructor' });
+      expect(structuredOf(proto)).toMatchObject({ estado: 'sin_dato', valor: null });
+    });
+
+    it('una entidad que no existe es un fallo de la comprobación', async () => {
+      const t = setup().get('ha_comprobar');
+      const msg = await failure(t.handler({ entity_id: 'light.nada' }));
+      expect(msg).toMatch(/no existe/);
+    });
+
+    it('una sola entidad: rechaza listas y ids mal formados', async () => {
+      const t = setup().get('ha_comprobar');
+      expect(await failure(t.handler({ entity_id: ['light.salon', 'light.cocina'] }))).toMatch(
+        /entity_id/,
+      );
+      expect(await failure(t.handler({ entity_id: 'Light Salon' }))).toMatch(/entity_id/);
+      expect(await failure(t.handler({ entity_id: '../x' }))).toMatch(/entity_id/);
+      expect(await failure(t.handler({}))).toMatch(/entity_id/);
+      expect(await failure(t.handler({ entity_id: 'light.salon', atributo: 'No Válido' }))).toMatch(
+        /atributo/,
+      );
+    });
+
+    it('sin configurar avisa como las demás tools', async () => {
+      const tools = createHomeAssistantTools({
+        fetch: (async () => new Response('')) as typeof fetch,
+      });
+      const msg = await failure(
+        tools.find((t) => t.name === 'ha_comprobar')!.handler({ entity_id: 'light.salon' }),
+      );
+      expect(msg).toContain('Home Assistant no está configurado');
     });
   });
 
@@ -315,7 +415,7 @@ describe('tools de Home Assistant', () => {
             last_changed: null,
           })),
       });
-      const out = await big.get('ha_apagar').handler({ entity_id: 'light.a' });
+      const out = textOf(await big.get('ha_apagar').handler({ entity_id: 'light.a' }));
       expect(out.split('\n').filter((l) => l.startsWith('·'))).toHaveLength(20);
       expect(out).toContain('… y 5 más.');
     });

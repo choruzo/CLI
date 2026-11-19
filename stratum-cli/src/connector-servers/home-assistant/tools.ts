@@ -1,10 +1,12 @@
 /**
  * Tools del conector Home Assistant: ha_resumen, ha_buscar, ha_estado,
- * ha_encender, ha_apagar y ha_accion. `fetch` inyectable para testear sin red.
- * Las salidas son texto breve en español para un agente, nunca JSON crudo.
+ * ha_comprobar, ha_encender, ha_apagar y ha_accion. `fetch` inyectable para
+ * testear sin red. Las salidas son texto breve en español para un agente,
+ * nunca JSON crudo; `ha_comprobar` (M22) devuelve además lo estructurado que
+ * lee un vigilante.
  */
 import { z } from 'zod';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import {
   createHaClient,
   HaNotFoundError,
@@ -34,6 +36,10 @@ const MAX_DOMAINS = 15;
 const MAX_AREAS = 30;
 const MAX_OTHER_ATTRS = 25;
 const MAX_DATA_BYTES = 2048;
+/** Tope del `detalle` de una comprobación (M22): lo que enseña un aviso. */
+const MAX_DETAIL = 300;
+/** `estado` de una comprobación cuyo atributo no existe: nunca 0. */
+const SIN_DATO = 'sin_dato';
 
 /** Dominios con `<dominio>.turn_on` / `turn_off`. */
 const TURN_DOMAINS = [
@@ -74,7 +80,9 @@ export interface HomeAssistantOptions {
 
 const ENTITY_RE = /^[a-z_][a-z0-9_]*\.[a-z0-9_]+$/;
 const SERVICE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
+const ATTRIBUTE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
 const ENTITY_MSG = 'entity_id debe tener la forma dominio.nombre (p. ej. light.salon)';
+const ATTRIBUTE_MSG = 'atributo no es válido (minúsculas, números y _; p. ej. current_temperature)';
 
 const entityId = z.string({ message: ENTITY_MSG }).trim().regex(ENTITY_RE, ENTITY_MSG);
 
@@ -132,6 +140,14 @@ const BuscarSchema = z.object({
     .optional(),
 });
 const EstadoSchema = z.object({ entity_id: entityIds(MAX_STATE_IDS) });
+const ComprobarSchema = z.object({
+  entity_id: entityId,
+  atributo: z
+    .string({ message: ATTRIBUTE_MSG })
+    .trim()
+    .regex(ATTRIBUTE_RE, ATTRIBUTE_MSG)
+    .optional(),
+});
 const EncenderSchema = z.object({
   entity_id: entityIds(MAX_ACTION_IDS),
   brillo: z
@@ -182,7 +198,28 @@ function changedStates(data: unknown): HaState[] {
   return toStates(data);
 }
 
-export function createHomeAssistantTools(opts: HomeAssistantOptions): ConnectorTool[] {
+// --- Comprobación de una entidad (M22) ---------------------------------------
+
+/** Un número escrito tal cual: es lo que compara una condición. */
+const NUMBER_RE = /^-?\d+(\.\d+)?$/;
+
+/** Un valor de Home Assistant como texto, o `null` si no se puede leer. */
+function attrText(v: unknown): string | null {
+  if (typeof v === 'string') return v.trim() ? v : null;
+  if (typeof v === 'number') return Number.isFinite(v) ? String(v) : null;
+  if (typeof v === 'boolean') return v ? 'true' : 'false';
+  if (Array.isArray(v) || isRecord(v)) return JSON.stringify(v);
+  return null;
+}
+
+/** Recorta el detalle sin partir por la mitad lo que se enseña. */
+function cutDetail(text: string): string {
+  return text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL - 1)}…` : text;
+}
+
+export function createHomeAssistantTools(
+  opts: HomeAssistantOptions,
+): ConnectorTool<string | ToolOutput>[] {
   const client = createHaClient(opts);
 
   function need(): HaClient {
@@ -400,6 +437,84 @@ export function createHomeAssistantTools(opts: HomeAssistantOptions): ConnectorT
     },
   };
 
+  const haComprobar: ConnectorTool<string | ToolOutput> = {
+    name: 'ha_comprobar',
+    description:
+      'Estado de UNA entidad (o de uno de sus atributos), de solo lectura y además en forma estructurada: ' +
+      'es la tool que comprueban los vigilantes, sin el modelo. No admite listas; para varias entidades ' +
+      'usa ha_estado.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: {
+          type: 'string',
+          description: 'La entidad, con la forma dominio.nombre (p. ej. light.salon).',
+        },
+        atributo: {
+          type: 'string',
+          description:
+            'Atributo a comprobar en vez del estado (p. ej. current_temperature, battery_level).',
+        },
+      },
+      required: ['entity_id'],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        estado: { type: 'string' },
+        valor: { type: ['number', 'null'] },
+        detalle: { type: 'string' },
+      },
+      required: ['estado', 'valor', 'detalle'],
+      additionalProperties: false,
+    },
+    async handler(args, signal) {
+      const c = need();
+      const a = parseArgs(ComprobarSchema, args);
+      let raw: unknown;
+      try {
+        raw = await c.getJson(`/api/states/${encodeURIComponent(a.entity_id)}`, signal);
+      } catch (err) {
+        if (err instanceof HaNotFoundError) {
+          throw new ToolUserError(
+            `La entidad ${a.entity_id} no existe, así que no hay nada que comprobar: usa ha_buscar para dar con la que quieres vigilar.`,
+          );
+        }
+        throw err;
+      }
+      const s = toStates([raw])[0];
+      if (!s) throw new ToolUserError(`Respuesta de Home Assistant no válida para ${a.entity_id}.`);
+      // Sin `atributo`, el estado tal cual; con él, su valor como texto (o
+      // `sin_dato`, que nunca es 0: un vigilante distingue «no lo sé» de «cero»).
+      const attrValue =
+        a.atributo !== undefined && Object.hasOwn(s.attributes, a.atributo)
+          ? s.attributes[a.atributo]
+          : undefined;
+      const attr = a.atributo === undefined ? null : attrText(attrValue);
+      const estado = a.atributo === undefined ? s.state : (attr ?? SIN_DATO);
+      const valor =
+        typeof attrValue === 'number' && Number.isFinite(attrValue)
+          ? attrValue
+          : NUMBER_RE.test(estado)
+            ? Number(estado)
+            : null;
+      const detail = a.atributo === undefined ? '' : ` — ${a.atributo}: ${attr ?? NO_DATA}`;
+      const text = [
+        stateLine(s),
+        `Para vigilantes: estado «${estado}», valor ${valor === null ? NO_DATA : String(valor)}`,
+      ].join('\n');
+      return {
+        text,
+        structured: {
+          estado,
+          valor,
+          detalle: cutDetail(`${friendlyName(s)} — ${stateText(s)}${detail}`),
+        },
+      };
+    },
+  };
+
   const haEncender: ConnectorTool = {
     name: 'ha_encender',
     description:
@@ -524,7 +639,7 @@ export function createHomeAssistantTools(opts: HomeAssistantOptions): ConnectorT
     },
   };
 
-  return [haResumen, haBuscar, haEstado, haEncender, haApagar, haAccion];
+  return [haResumen, haBuscar, haEstado, haComprobar, haEncender, haApagar, haAccion];
 }
 
 // --- Detalle de un estado ----------------------------------------------------

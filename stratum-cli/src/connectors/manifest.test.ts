@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { CONNECTOR_ID_RE, parseConnectorManifest, readOnlyToolsOf } from './manifest.js';
+import { CONNECTOR_ID_RE, checksOf, parseConnectorManifest, readOnlyToolsOf } from './manifest.js';
 
 const valid = () => ({
   schemaVersion: 1,
@@ -55,6 +55,41 @@ describe('parseConnectorManifest (M20)', () => {
     expect(() =>
       parseConnectorManifest(withOAuth({ tokenUrl: 'https://evil.example/token' }), 'x'),
     ).toThrow();
+  });
+
+  it('checks (M22): solo sobre una tool de solo lectura, sin repetir, con argumentos cerrados', () => {
+    const arg = { name: 'entity_id', type: 'string', required: true, description: 'Entidad' };
+    const withChecks = (checks: unknown) => ({ ...valid(), checks });
+    const ok = { tool: 'leer', summary: 'Mira', minIntervalSec: 60, args: [arg] };
+    const m = parseConnectorManifest(withChecks([ok]), 'x');
+    expect(checksOf(m)).toHaveLength(1);
+    expect(checksOf(parseConnectorManifest(valid(), 'x'))).toEqual([]);
+
+    expect(() => parseConnectorManifest(withChecks([{ ...ok, tool: 'otra' }]), 'x')).toThrow(
+      /not a tool/,
+    );
+    expect(() => parseConnectorManifest(withChecks([{ ...ok, tool: 'escribir' }]), 'x')).toThrow(
+      /not a read-only tool/,
+    );
+    expect(() => parseConnectorManifest(withChecks([ok, ok]), 'x')).toThrow(/duplicate check/);
+    expect(() => parseConnectorManifest(withChecks([{ ...ok, args: [arg, arg] }]), 'x')).toThrow(
+      /repeats an argument/,
+    );
+    // Nunca menos de un minuto.
+    expect(() =>
+      parseConnectorManifest(withChecks([{ ...ok, minIntervalSec: 30 }]), 'x'),
+    ).toThrow();
+    // Los argumentos son cerrados: sin claves libres ni restricciones de otro tipo.
+    for (const bad of [
+      { ...arg, format: 'uri' },
+      { ...arg, type: 'object' },
+      { ...arg, minimum: 1 },
+      { ...arg, type: 'number', pattern: 'x' },
+      { ...arg, type: 'number', minimum: 5, maximum: 1 },
+      { ...arg, pattern: '(' },
+    ]) {
+      expect(() => parseConnectorManifest(withChecks([{ ...ok, args: [bad] }]), 'x')).toThrow();
+    }
   });
 
   it('readOnlyToolsOf devuelve solo las de lectura', () => {

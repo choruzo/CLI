@@ -6,9 +6,9 @@ presets: [companion]
 
 # Home Assistant: consultar y manejar la casa
 
-Tienes seis tools del conector Home Assistant: `ha_resumen`, `ha_buscar` y
-`ha_estado` (solo lectura) y `ha_encender`, `ha_apagar` y `ha_accion` (actúan en
-la casa y piden aprobación a la persona).
+Tienes siete tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
+`ha_estado` y `ha_comprobar` (solo lectura) y `ha_encender`, `ha_apagar` y
+`ha_accion` (actúan en la casa y piden aprobación a la persona).
 
 ## Qué preguntas cubre
 
@@ -27,6 +27,9 @@ la casa y piden aprobación a la persona).
    `sensor`, `climate`…) o `area`. Sin acentos ni mayúsculas. Si salen varias,
    no adivines: pregunta cuál o actúa sobre todas las que la persona pidió.
 3. `ha_estado` con el `entity_id` (o una lista de hasta 20) para el detalle.
+   `ha_comprobar` es solo lectura y da el estado de UNA entidad (o de un
+   atributo) en forma estructurada: sirve para comprobar justo lo que vigilaría
+   un vigilante.
 4. `ha_encender` y `ha_apagar` aceptan hasta 10 ids a la vez; `brillo` (0-100)
    solo vale con luces. Cubren luces, enchufes, ventiladores, climatización,
    automatizaciones, sirenas, humidificadores y persianas (abrir/cerrar);

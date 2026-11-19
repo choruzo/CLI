@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { ToolUserError, createMcpServer, type ConnectorTool } from './mcp-stdio.js';
+import {
+  ToolUserError,
+  createMcpServer,
+  type ConnectorTool,
+  type ToolOutput,
+} from './mcp-stdio.js';
 
-const tools: ConnectorTool[] = [
+const tools: ConnectorTool<string | ToolOutput>[] = [
   {
     name: 'eco',
     description: 'Devuelve lo recibido.',
@@ -23,6 +28,25 @@ const tools: ConnectorTool[] = [
     handler: async () => {
       throw new Error('boom');
     },
+  },
+  {
+    name: 'comprobacion',
+    description: 'Devuelve texto y resultado estructurado.',
+    inputSchema: { type: 'object' },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        estado: { type: 'string' },
+        valor: { type: ['number', 'null'] },
+        detalle: { type: 'string' },
+      },
+      required: ['estado', 'valor', 'detalle'],
+      additionalProperties: false,
+    },
+    handler: async () => ({
+      text: 'estado: on',
+      structured: { estado: 'on', valor: null, detalle: 'Luz del salón — on' },
+    }),
   },
 ];
 const server = createMcpServer({ name: 'test', version: '1.0.0' }, tools);
@@ -65,8 +89,60 @@ describe('createMcpServer', () => {
     const r = (await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' })) as {
       result: { tools: Array<Record<string, unknown>> };
     };
-    expect(r.result.tools.map((t) => t.name)).toEqual(['eco', 'usuario', 'roto']);
+    expect(r.result.tools.map((t) => t.name)).toEqual(['eco', 'usuario', 'roto', 'comprobacion']);
     expect(Object.keys(r.result.tools[0]!).sort()).toEqual(['description', 'inputSchema', 'name']);
+  });
+
+  it('tools/list incluye outputSchema solo en quien lo declara', async () => {
+    const r = (await server.handle({ jsonrpc: '2.0', id: 2, method: 'tools/list' })) as {
+      result: { tools: Array<Record<string, unknown>> };
+    };
+    expect(Object.keys(r.result.tools[3]!).sort()).toEqual([
+      'description',
+      'inputSchema',
+      'name',
+      'outputSchema',
+    ]);
+    expect(r.result.tools[3]!.outputSchema).toEqual(tools[3]!.outputSchema);
+    expect(r.result.tools[1]!).not.toHaveProperty('outputSchema');
+  });
+
+  it('tools/call de una comprobación devuelve structuredContent', async () => {
+    const r = await server.handle({
+      jsonrpc: '2.0',
+      id: 8,
+      method: 'tools/call',
+      params: { name: 'comprobacion', arguments: {} },
+    });
+    expect(r).toEqual({
+      jsonrpc: '2.0',
+      id: 8,
+      result: {
+        content: [{ type: 'text', text: 'estado: on' }],
+        structuredContent: { estado: 'on', valor: null, detalle: 'Luz del salón — on' },
+      },
+    });
+  });
+
+  it('tools/call de una tool de texto no lleva structuredContent', async () => {
+    const r = (await server.handle({
+      jsonrpc: '2.0',
+      id: 9,
+      method: 'tools/call',
+      params: { name: 'eco', arguments: {} },
+    })) as { result: Record<string, unknown> };
+    expect(r.result).not.toHaveProperty('structuredContent');
+  });
+
+  it('un fallo de la comprobación no lleva structuredContent', async () => {
+    const r = (await server.handle({
+      jsonrpc: '2.0',
+      id: 10,
+      method: 'tools/call',
+      params: { name: 'usuario' },
+    })) as { result: Record<string, unknown> };
+    expect(r.result).not.toHaveProperty('structuredContent');
+    expect(r.result.isError).toBe(true);
   });
 
   it('tools/call devuelve el texto', async () => {

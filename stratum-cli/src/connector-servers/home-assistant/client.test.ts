@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import { createHaClient, parseBaseUrl } from './client.js';
 import { createHomeAssistantTools } from './tools.js';
 
@@ -34,7 +34,7 @@ function withCause(code: string): Error {
   return e;
 }
 
-function estado(tools: ConnectorTool[]): ConnectorTool {
+function estado(tools: ConnectorTool<string | ToolOutput>[]): ConnectorTool<string | ToolOutput> {
   return tools.find((t) => t.name === 'ha_estado')!;
 }
 

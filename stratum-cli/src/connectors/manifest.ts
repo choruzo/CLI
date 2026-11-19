@@ -66,6 +66,75 @@ const OAuthSchema = z
 
 export type ConnectorOAuth = z.infer<typeof OAuthSchema>;
 
+/** Intervalo mínimo de un vigilante (M22): nunca menos de un minuto. */
+export const CHECK_MIN_INTERVAL_SEC = 60;
+const CHECK_MAX_INTERVAL_SEC = 86_400;
+const CHECK_MAX_ARGS = 8;
+const CHECK_MAX = 10;
+
+/**
+ * M22 — un argumento de una comprobación. Es un esquema **cerrado** (no JSON
+ * Schema libre): el daemon valida con él los argumentos fijos de un vigilante
+ * al crearlo, sin conectar con el conector.
+ */
+const CheckArgSchema = z
+  .object({
+    name: z.string().regex(/^[a-z][a-z0-9_]{0,31}$/),
+    type: z.enum(['string', 'number', 'integer', 'boolean']),
+    required: z.boolean(),
+    description: z.string().min(1).max(200),
+    /** Solo `string`. */
+    maxLength: z.number().int().min(1).max(500).optional(),
+    /** Solo `string`; se ancla entera (`^(?:…)$`). */
+    pattern: z.string().min(1).max(200).optional(),
+    /** Solo `string`. */
+    enum: z.array(z.string().min(1).max(64)).min(1).max(20).optional(),
+    /** Solo `number` e `integer`. */
+    minimum: z.number().finite().optional(),
+    maximum: z.number().finite().optional(),
+  })
+  .strict()
+  .superRefine((a, ctx) => {
+    const isString = a.type === 'string';
+    const isNumber = a.type === 'number' || a.type === 'integer';
+    if (!isString && (a.maxLength !== undefined || a.pattern !== undefined || a.enum)) {
+      ctx.addIssue({ code: 'custom', message: 'maxLength/pattern/enum only apply to strings' });
+    }
+    if (!isNumber && (a.minimum !== undefined || a.maximum !== undefined)) {
+      ctx.addIssue({ code: 'custom', message: 'minimum/maximum only apply to numbers' });
+    }
+    if (a.minimum !== undefined && a.maximum !== undefined && a.minimum > a.maximum) {
+      ctx.addIssue({ code: 'custom', message: 'minimum is greater than maximum' });
+    }
+    if (a.pattern !== undefined) {
+      try {
+        new RegExp(`^(?:${a.pattern})$`, 'u');
+      } catch {
+        ctx.addIssue({ code: 'custom', message: 'pattern is not a valid regular expression' });
+      }
+    }
+  });
+
+export type ConnectorCheckArg = z.infer<typeof CheckArgSchema>;
+
+/**
+ * M22 — una comprobación: una tool **de solo lectura** del conector que, además
+ * del texto para el modelo, devuelve un resultado estructurado
+ * (`structuredContent`: `{ estado, valor?, detalle }`, `checks.ts`). Sobre ella
+ * se declaran los vigilantes, que el daemon evalúa sin el LLM.
+ */
+const CheckSchema = z
+  .object({
+    tool: z.string().regex(/^[a-z][a-z0-9_]{0,47}$/),
+    summary: z.string().min(1).max(200),
+    /** Intervalo mínimo entre dos evaluaciones (más largo para lo que pesa). */
+    minIntervalSec: z.number().int().min(CHECK_MIN_INTERVAL_SEC).max(CHECK_MAX_INTERVAL_SEC),
+    args: z.array(CheckArgSchema).max(CHECK_MAX_ARGS),
+  })
+  .strict();
+
+export type ConnectorCheck = z.infer<typeof CheckSchema>;
+
 export const ConnectorManifestSchema = z
   .object({
     schemaVersion: z.literal(CONNECTOR_MANIFEST_VERSION),
@@ -80,9 +149,46 @@ export const ConnectorManifestSchema = z
     secrets: z.array(SecretSchema),
     oauth: OAuthSchema.optional(),
     tools: z.array(ToolSchema).min(1),
+    checks: z.array(CheckSchema).max(CHECK_MAX).optional(),
   })
   .strict()
   .superRefine((m, ctx) => {
+    if (m.checks) {
+      const tools = new Map(m.tools.map((t) => [t.name, t]));
+      const seenChecks = new Set<string>();
+      for (const c of m.checks) {
+        const tool = tools.get(c.tool);
+        if (!tool) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `check "${c.tool}" is not a tool`,
+            path: ['checks'],
+          });
+        } else if (!tool.readOnly) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `check "${c.tool}" is not a read-only tool`,
+            path: ['checks'],
+          });
+        }
+        if (seenChecks.has(c.tool)) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `duplicate check "${c.tool}"`,
+            path: ['checks'],
+          });
+        }
+        seenChecks.add(c.tool);
+        const argNames = c.args.map((a) => a.name);
+        if (new Set(argNames).size !== argNames.length) {
+          ctx.addIssue({
+            code: 'custom',
+            message: `check "${c.tool}" repeats an argument`,
+            path: ['checks'],
+          });
+        }
+      }
+    }
     if (m.oauth) {
       const names = new Set(m.secrets.map((s) => s.name));
       const roles = [m.oauth.clientId, m.oauth.clientSecret, m.oauth.refreshToken];
@@ -117,6 +223,11 @@ export function parseConnectorManifest(raw: unknown, source: string): ConnectorM
     );
   }
   return r.data;
+}
+
+/** Comprobaciones del manifiesto (M22); `[]` si no declara ninguna. */
+export function checksOf(manifest: ConnectorManifest): ConnectorCheck[] {
+  return manifest.checks ?? [];
 }
 
 /** Tools que el manifiesto declara de solo lectura. */

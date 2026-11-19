@@ -26,6 +26,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   7: 'fa7774e9fede8d3f',
   // home-assistant: listas metidas en un texto y mensaje de DNS más claro.
   8: '2559cb0aff8a16e8',
+  // M22: `ha_comprobar` (checks: estado estructurado) en home-assistant.
+  9: 'c3badbb09436f8a6',
 };
 
 /**
