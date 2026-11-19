@@ -247,6 +247,7 @@ p {
 .assistant-pane > .memory-panel,
 .assistant-pane > .telegram-panel,
 .assistant-pane > .reminders-panel,
+.assistant-pane > .watches-panel,
 .assistant-pane > .connectors-panel {
   border-right: 0;
   border-top: 0;
@@ -397,7 +398,8 @@ p {
   max-width: none;
 }
 /* M21 — los recordatorios del asistente: mismo molde que las rutinas. */
-.reminders-panel {
+.reminders-panel,
+.watches-panel {
   padding: 0.75rem;
   border-top: 1px solid var(--line);
 }
@@ -455,6 +457,21 @@ p {
 }
 .reminders-recent .reminder-when {
   color: var(--muted);
+}
+/* M22 — los vigilantes: reutilizan `.reminders` y `.reminder`. */
+.watch-name {
+  font-weight: 600;
+  overflow-wrap: anywhere;
+}
+.watch-meta {
+  margin-top: 0.25rem;
+  overflow-wrap: anywhere;
+}
+.watch-marks {
+  margin-top: 0.25rem;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 0.75rem;
 }
 
 

@@ -25,6 +25,7 @@ import { TODO_TOOL } from './todo.js';
 import { TEST_EVIDENCE_TOOL } from './tdd.js';
 import { READ_SKILL_TOOL } from './skills/read-skill.js';
 import { describeRoutineProposal, PROPOSE_ROUTINE_TOOL } from './routines/propose.js';
+import { describeWatchProposal, PROPOSE_WATCH_TOOL } from './watches/propose.js';
 import { isJobTool } from '../jobs/types.js';
 import { BROWSER_NAVIGATE_TOOL, isBrowserTool } from './browser/names.js';
 import { getLogger } from '../logging/index.js';
@@ -1098,6 +1099,8 @@ export function describeCall(call: ToolCallReady): string {
   }
   // M16 — aprobar una rutina es aprobar su prompt: entero, nunca el resumen de 120.
   if (call.name === PROPOSE_ROUTINE_TOOL) return describeRoutineProposal(call.input);
+  // M22 — aprobar un vigilante es aprobarlo entero: lo enseñado es lo que se guarda.
+  if (call.name === PROPOSE_WATCH_TOOL) return describeWatchProposal(call.input);
   // Aprobar una navegación es aprobar su URL: entera, nunca el resumen de 120.
   if (call.name === BROWSER_NAVIGATE_TOOL && typeof call.input.url === 'string') {
     return `${BROWSER_NAVIGATE_TOOL}: ${call.input.url}`;

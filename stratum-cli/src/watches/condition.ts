@@ -4,24 +4,14 @@
  * pasa por encima o por debajo de un umbral, o el estado cambia. Todas admiten
  * «durante al menos N minutos». Sin I/O.
  */
-import { z } from 'zod';
-import { WATCH_LIMITS } from '../protocol/index.js';
-import { CHECK_STATE_MAX, type CheckResult } from '../connectors/checks.js';
+import type { ProtocolWatchCondition } from '../protocol/index.js';
+import { watchConditionSchema } from '../protocol/schemas.js';
+import type { CheckResult } from '../connectors/checks.js';
 
-const forMinutes = z.number().int().min(0).max(WATCH_LIMITS.maxForMinutes).optional();
-const stateValue = z.string().trim().min(1).max(CHECK_STATE_MAX);
-const stateValues = z.array(stateValue).min(1).max(WATCH_LIMITS.stateValues);
-const threshold = z.number().finite();
+/** La del protocolo (`watchConditionSchema`): una sola definición. */
+export const WatchConditionSchema = watchConditionSchema;
 
-export const WatchConditionSchema = z.discriminatedUnion('kind', [
-  z.object({ kind: z.literal('state-is'), values: stateValues, forMinutes }).strict(),
-  z.object({ kind: z.literal('state-is-not'), values: stateValues, forMinutes }).strict(),
-  z.object({ kind: z.literal('above'), threshold, forMinutes }).strict(),
-  z.object({ kind: z.literal('below'), threshold, forMinutes }).strict(),
-  z.object({ kind: z.literal('changes'), forMinutes }).strict(),
-]);
-
-export type WatchCondition = z.infer<typeof WatchConditionSchema>;
+export type WatchCondition = ProtocolWatchCondition;
 
 /**
  * ¿Se cumple con este resultado? `null` = no se puede saber (un umbral sin

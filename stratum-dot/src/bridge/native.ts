@@ -58,7 +58,7 @@ export type ApproverStatus =
   | { kind: 'error'; message: string };
 
 /** Vistas que el lado nativo puede pedir que se abran (la bandeja, el aviso de un recordatorio). */
-export type DotView = 'human-input' | 'reminders';
+export type DotView = 'human-input' | 'reminders' | 'watches';
 
 /**
  * Lo que llega del lado nativo. `snapshot` y `events` traen DTOs del protocolo
@@ -301,10 +301,18 @@ export interface NativeBridge {
   remindersList(): Promise<unknown>;
   /** M21 — cancelar un recordatorio pendiente. Solo resta; sin respuesta, `unknown`: no se repite. */
   remindersCancel(reminderId: string): Promise<unknown>;
+  /** M22 — los vigilantes del asistente (`watches.list`). Sin validar. */
+  watchesList(): Promise<unknown>;
+  /** M22 — pausar, reanudar o quitar un vigilante. Solo conducen; sin respuesta, `unknown`: no se repite. Crear no está en Dot. */
+  watchesPause(watchId: string): Promise<unknown>;
+  watchesResume(watchId: string): Promise<unknown>;
+  watchesRemove(watchId: string): Promise<unknown>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** M21 — el aviso de un recordatorio: solo informa; pulsarlo abre la pestaña *Reminders*. */
   notifyReminder(title: string, body: string): Promise<void>;
+  /** M22 — el aviso de un vigilante: solo informa; pulsarlo abre la pestaña *Watches*. */
+  notifyWatch(title: string, body: string): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -401,6 +409,11 @@ export const tauriBridge: NativeBridge = {
   remindersList: () => invoke<unknown>('dot_reminders_list'),
   remindersCancel: (reminderId) => invoke<unknown>('dot_reminders_cancel', { reminderId }),
   notifyReminder: (title, body) => invoke('dot_notify_reminder', { title, body }),
+  watchesList: () => invoke<unknown>('dot_watches_list'),
+  watchesPause: (watchId) => invoke<unknown>('dot_watches_pause', { watchId }),
+  watchesResume: (watchId) => invoke<unknown>('dot_watches_resume', { watchId }),
+  watchesRemove: (watchId) => invoke<unknown>('dot_watches_remove', { watchId }),
+  notifyWatch: (title, body) => invoke('dot_notify_watch', { title, body }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

@@ -149,6 +149,11 @@ pub fn run() {
             commands::dot_session_memory,
             commands::dot_notify_routine,
             commands::dot_notify_reminder,
+            commands::dot_notify_watch,
+            commands::dot_watches_list,
+            commands::dot_watches_pause,
+            commands::dot_watches_resume,
+            commands::dot_watches_remove,
             commands::dot_approver_status,
             commands::dot_approver_unlock,
             commands::dot_approver_lock,
@@ -199,6 +204,9 @@ pub fn run() {
                                 }
                                 notify::NoticeTarget::Reminders => {
                                     serde_json::json!({ "type": "open-view", "view": "reminders" })
+                                }
+                                notify::NoticeTarget::Watches => {
+                                    serde_json::json!({ "type": "open-view", "view": "watches" })
                                 }
                             };
                             let _ = window.app_handle().emit_to("main", DOT_EVENT, payload);

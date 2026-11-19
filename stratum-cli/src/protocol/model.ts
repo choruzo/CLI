@@ -769,7 +769,75 @@ export const WATCH_LIMITS = {
   /** Fallos seguidos de la comprobación antes de avisar de que no puede mirar. */
   failuresBeforeNotice: 3,
   noticeChars: 500,
+  /** Un valor de estado (`estado` de una comprobación, o uno de una condición). */
+  stateChars: 64,
+  /** Intervalo entre dos evaluaciones: el mínimo de la comprobación hasta un día. */
+  maxIntervalSec: 86_400,
+  /** Argumentos fijos de un vigilante, y largo de uno de texto. */
+  args: 8,
+  argChars: 500,
 } as const;
+
+/**
+ * M22 — la condición de un vigilante: cerrada, sin expresiones libres. Todas
+ * admiten «durante al menos N minutos» (`forMinutes`).
+ */
+export type ProtocolWatchCondition =
+  | { kind: 'state-is' | 'state-is-not'; values: string[]; forMinutes?: number }
+  | { kind: 'above' | 'below'; threshold: number; forMinutes?: number }
+  | { kind: 'changes'; forMinutes?: number };
+
+export type ProtocolWatchArgs = Record<string, string | number | boolean>;
+
+/**
+ * M22 — un vigilante tal como va por el protocolo (`watches.*`). Lo derivado
+ * del estado guardado:
+ *  - `firing`: saltó y la condición sigue cumpliéndose;
+ *  - `health`: `failing` si avisó de que no puede mirar, `suspended` si avisó
+ *    de que no se puede ni intentar; vuelve a `ok` con la siguiente comprobación
+ *    que responde.
+ */
+export interface ProtocolWatch {
+  id: string;
+  name: string;
+  connector: string;
+  check: string;
+  args: ProtocolWatchArgs;
+  condition: ProtocolWatchCondition;
+  intervalSec: number;
+  cooldownMinutes: number;
+  notifyResolved: boolean;
+  status: 'active' | 'paused';
+  /** Solo procedencia: `agent` (`propose_watch`, aprobado) o `person` (CLI). */
+  origin: 'agent' | 'person';
+  createdAt: Timestamp;
+  firing: boolean;
+  lastFiredAt: Timestamp | null;
+  health: 'ok' | 'failing' | 'suspended';
+}
+
+/**
+ * M22 — una comprobación del catálogo sobre la que se puede declarar un
+ * vigilante (`checks` del manifiesto). `connectorEnabled` es informativo: un
+ * vigilante sobre un conector apagado se crea, pero queda suspendido.
+ */
+export interface ProtocolWatchCheck {
+  connector: string;
+  connectorName: string;
+  connectorEnabled: boolean;
+  tool: string;
+  summary: string;
+  minIntervalSec: number;
+  args: {
+    name: string;
+    type: 'string' | 'number' | 'integer' | 'boolean';
+    required: boolean;
+    description: string;
+    enum?: string[];
+    minimum?: number;
+    maximum?: number;
+  }[];
+}
 
 /**
  * M22 — un aviso de un vigilante. El texto lo compone el daemon con una

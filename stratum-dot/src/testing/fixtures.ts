@@ -7,11 +7,14 @@ import { vi } from 'vitest';
 import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
 import { resetReminderWatch } from '../app/reminders';
+import { resetWatchWatch } from '../app/watches';
 import { resetRoutineWatch } from '../app/routines';
 import type {
   ProtocolBoxScreen,
   ProtocolBoxStatus,
   ProtocolReminder,
+  ProtocolWatch,
+  ProtocolWatchNotice,
   ProtocolRoutine,
   ProtocolRun,
   ProtocolSharedImage,
@@ -21,6 +24,7 @@ import type {
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useReminders } from '../stores/reminderStore';
+import { useWatches } from '../stores/watchStore';
 import { useRoutines } from '../stores/routineStore';
 import { useSessions } from '../stores/sessionStore';
 import { useUi } from '../stores/uiStore';
@@ -180,6 +184,40 @@ export function sampleReminder(overrides: Partial<ProtocolReminder> = {}): Proto
   };
 }
 
+/** M22 — un vigilante, como lo devuelve `watches.list`. */
+export function sampleWatch(overrides: Partial<ProtocolWatch> = {}): ProtocolWatch {
+  return {
+    id: 'wat_abc1234567',
+    name: 'Lluvia en Madrid',
+    connector: 'aemet',
+    check: 'prediccion_municipio',
+    args: { municipio: '28079' },
+    condition: { kind: 'above', threshold: 30 },
+    intervalSec: 1800,
+    cooldownMinutes: 30,
+    notifyResolved: false,
+    status: 'active',
+    origin: 'person',
+    createdAt: 1_759_000_000_000,
+    firing: false,
+    lastFiredAt: null,
+    health: 'ok',
+    ...overrides,
+  };
+}
+
+/** M22 — un aviso de vigilante, como llega en `watch.notice`. */
+export function sampleWatchNotice(overrides: Partial<ProtocolWatchNotice> = {}): ProtocolWatchNotice {
+  return {
+    watchId: 'wat_abc1234567',
+    name: 'Lluvia en Madrid',
+    kind: 'fired',
+    text: 'Value above 30.',
+    at: 1_760_000_000_000,
+    ...overrides,
+  };
+}
+
 export const CONNECTED: ConnectionState = {
   kind: 'connected',
   serverVersion: '0.9.0',
@@ -303,6 +341,13 @@ export function fakeNative(): FakeNative {
       reminder: sampleReminder({ id: reminderId, status: 'cancelled', endedAt: 1_760_000_000_500 }),
     })),
     notifyReminder: vi.fn(async (_title: string, _body: string) => undefined),
+    watchesList: vi.fn(async (): Promise<unknown> => ({ watches: [], checks: [], readOnly: false })),
+    watchesPause: vi.fn(async (watchId: string): Promise<unknown> => ({
+      watch: sampleWatch({ id: watchId, status: 'paused' }),
+    })),
+    watchesResume: vi.fn(async (watchId: string): Promise<unknown> => ({ watch: sampleWatch({ id: watchId }) })),
+    watchesRemove: vi.fn(async (watchId: string): Promise<unknown> => ({ watch: sampleWatch({ id: watchId }) })),
+    notifyWatch: vi.fn(async (_title: string, _body: string) => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),
@@ -334,6 +379,8 @@ export function resetStores(): void {
   resetRoutineWatch();
   useReminders.getState().reset();
   resetReminderWatch();
+  useWatches.getState().reset();
+  resetWatchWatch();
   useUi.setState({
     selectedId: null,
     tab: 'chat',

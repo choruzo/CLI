@@ -27,6 +27,7 @@ import { routinesCommand } from './commands/routines.js';
 import { remindersCommand } from './commands/reminders.js';
 import { channelsCommand } from './commands/channels.js';
 import { connectorsCommand } from './commands/connectors.js';
+import { watchesCommand } from './commands/watches.js';
 import { cliVersion } from './version.js';
 import { ConfigError } from '../config/loader.js';
 import { SchemaVersionError } from '../config/schema-version.js';
@@ -65,6 +66,7 @@ program.addCommand(routinesCommand);
 program.addCommand(remindersCommand);
 program.addCommand(channelsCommand);
 program.addCommand(connectorsCommand);
+program.addCommand(watchesCommand);
 
 // Una config rota se explica con su mensaje (fichero, línea o clave), no con
 // la traza: los comandos que no capturan `loadConfig()` llegan aquí.

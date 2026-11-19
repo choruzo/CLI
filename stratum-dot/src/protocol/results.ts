@@ -18,6 +18,7 @@ import type {
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolReminder,
+  ProtocolWatch,
   ProtocolRun,
   ProtocolSession,
   ProtocolSessionMemory,
@@ -116,6 +117,23 @@ export function parseReminders(raw: unknown): ReminderList | null {
 export function parseCancelledReminder(raw: unknown): ProtocolReminder | null {
   const parsed = RESULTS['reminders.cancel'].safeParse(raw);
   return parsed.success ? parsed.data.reminder : null;
+}
+
+/** M22 — `watches.list`: los vigilantes (validados con `watchSchema`) y el solo lectura. */
+export interface WatchList {
+  watches: ProtocolWatch[];
+  readOnly: boolean;
+}
+
+export function parseWatches(raw: unknown): WatchList | null {
+  const parsed = RESULTS['watches.list'].safeParse(raw);
+  return parsed.success ? { watches: parsed.data.watches, readOnly: parsed.data.readOnly } : null;
+}
+
+/** M22 — `watches.pause|resume|remove`: el vigilante tal como quedó. */
+export function parseWatchResult(raw: unknown): ProtocolWatch | null {
+  const parsed = RESULTS['watches.pause'].safeParse(raw);
+  return parsed.success ? parsed.data.watch : null;
 }
 
 /** M17 — `memory.decisions`: lo que recuerda el asistente (las últimas, o la búsqueda). */

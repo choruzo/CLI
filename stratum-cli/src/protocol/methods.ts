@@ -17,6 +17,10 @@ import type {
   ProtocolMemoryDocument,
   ProtocolSharedImage,
   ProtocolReminder,
+  ProtocolWatch,
+  ProtocolWatchArgs,
+  ProtocolWatchCheck,
+  ProtocolWatchCondition,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -729,6 +733,36 @@ export interface ProtocolMethods {
   'reminders.cancel': Spec<{ reminderId: string } & Mutation, { reminder: ProtocolReminder }>;
 
   /**
+   * M22 — los vigilantes del `companion` (`docs/protocol.md` §31). Sin
+   * planificador (`watches: null`): `UNAVAILABLE` (`watches-disabled`); almacén
+   * en solo lectura: las mutaciones, `UNAVAILABLE` (`read-only`). `list` da
+   * también las comprobaciones del catálogo sobre las que se puede declarar uno.
+   * Crear suma algo que corre solo, así que `add` exige `approve` (la persona,
+   * por la CLI; el agente, con `propose_watch` confirmado); pausar, reanudar y
+   * quitar solo restan o devuelven lo ya aprobado: `control`.
+   */
+  'watches.list': Spec<
+    Empty,
+    { watches: ProtocolWatch[]; checks: ProtocolWatchCheck[]; readOnly: boolean }
+  >;
+  'watches.add': Spec<
+    {
+      name: string;
+      connector: string;
+      check: string;
+      args?: ProtocolWatchArgs;
+      condition: ProtocolWatchCondition;
+      intervalSec?: number;
+      cooldownMinutes?: number;
+      notifyResolved?: boolean;
+    } & Mutation,
+    { watch: ProtocolWatch }
+  >;
+  'watches.pause': Spec<{ watchId: string } & Mutation, { watch: ProtocolWatch }>;
+  'watches.resume': Spec<{ watchId: string } & Mutation, { watch: ProtocolWatch }>;
+  'watches.remove': Spec<{ watchId: string } & Mutation, { watch: ProtocolWatch }>;
+
+  /**
    * M18 — canales externos (`docs/protocol.md` §24). Nada de lo que devuelven
    * lleva el token del bot. `reload` vuelve a leer `telegram.json` y
    * `channels.telegram.enabled` (tras `stratum channels telegram setup`).
@@ -932,6 +966,14 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'reminders.list': read('observe'),
   // Cancelar un aviso solo resta.
   'reminders.cancel': write('control'),
+
+  'watches.list': read('observe'),
+  // Crear un vigilante suma algo que corre solo (y, en la fase 4, lanza rutinas).
+  'watches.add': write('approve'),
+  // Pausar y quitar solo restan; reanudar devuelve lo ya aprobado.
+  'watches.pause': write('control'),
+  'watches.resume': write('control'),
+  'watches.remove': write('control'),
 
   'channels.status': read('observe'),
   'channels.reload': write('control'),

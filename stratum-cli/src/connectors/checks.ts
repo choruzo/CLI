@@ -10,10 +10,11 @@
  * aquí, antes de que nadie lo compare, lo guarde o lo enseñe.
  */
 import { z } from 'zod';
+import { WATCH_LIMITS } from '../protocol/index.js';
 import type { ConnectorCheck, ConnectorCheckArg } from './manifest.js';
 
 /** Tope de `estado` tras neutralizar: lo que compara una condición. */
-export const CHECK_STATE_MAX = 64;
+export const CHECK_STATE_MAX = WATCH_LIMITS.stateChars;
 /** Tope de `detalle` tras neutralizar: lo que enseña un aviso. */
 export const CHECK_DETAIL_MAX = 300;
 /** Tope del motivo de un fallo de la comprobación. */

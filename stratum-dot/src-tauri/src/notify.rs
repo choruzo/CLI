@@ -62,12 +62,13 @@ pub fn plain(text: &str, max: usize) -> String {
 }
 
 /// Qué abre el aviso al pulsarlo (o al dar el foco poco después): la sesión de
-/// una rutina (M16) o la pestaña de recordatorios del asistente (M21). Solo se
+/// una rutina (M16), la pestaña de recordatorios (M21) o la de vigilantes (M22) del asistente. Solo se
 /// selecciona o se abre una vista: nunca se resuelve nada.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum NoticeTarget {
     Session(String),
     Reminders,
+    Watches,
 }
 
 /// La última notificación mostrada, hasta el primer foco. En Windows el clic se

@@ -15,7 +15,7 @@ import {
 import { checksOf, type ConnectorManifest } from '../connectors/manifest.js';
 import { WatchConditionSchema, type WatchCondition } from './condition.js';
 
-const MAX_INTERVAL_SEC = 86_400;
+const MAX_INTERVAL_SEC = WATCH_LIMITS.maxIntervalSec;
 
 /** Lo que pide quien crea un vigilante. */
 export interface WatchRequest {

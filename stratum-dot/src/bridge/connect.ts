@@ -4,6 +4,7 @@
  */
 import { watchReminderDue } from '../app/reminders';
 import { watchRoutineRuns } from '../app/routines';
+import { watchWatchNotices } from '../app/watches';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useSessions } from '../stores/sessionStore';
@@ -33,6 +34,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       watchRoutineRuns(native, event.sessionId, event.events);
       // M21: un `reminder.due` refresca la lista de recordatorios (y avisa), una vez por id.
       watchReminderDue(native, event.events);
+      // M22: un `watch.notice` refresca la lista de vigilantes (y avisa), una vez por aviso.
+      watchWatchNotices(native, event.events);
       break;
     case 'approver':
       useApprover.getState().setStatus(event.status);
@@ -42,6 +45,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       if (event.view === 'human-input') useUi.getState().openHumanInput();
       // M21: se pulsó el aviso de un recordatorio. Solo se abre su pestaña.
       if (event.view === 'reminders') useUi.getState().openReminders();
+      // M22: se pulsó el aviso de un vigilante. Solo se abre su pestaña.
+      if (event.view === 'watches') useUi.getState().openWatches();
       break;
     case 'ask':
       // El Dot compacto: el mensaje va al asistente (lo envía su vista al tener su sesión).

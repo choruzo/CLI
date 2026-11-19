@@ -182,6 +182,7 @@ const COMMANDS = [
   'dot_new_companion_conversation',
   'dot_notify_reminder',
   'dot_notify_routine',
+  'dot_notify_watch',
   'dot_open_session',
   'dot_pause_run',
   'dot_quit',
@@ -199,6 +200,10 @@ const COMMANDS = [
   'dot_set_attention',
   'dot_start_run',
   'dot_steer_run',
+  'dot_watches_list',
+  'dot_watches_pause',
+  'dot_watches_remove',
+  'dot_watches_resume',
 ];
 
 describe('la frontera con el lado nativo', () => {
@@ -454,7 +459,13 @@ describe('el lado nativo', () => {
       // Panel de trayectoria de Desktop (solo lectura); Dot no la tiene en su perfil.
       'trace.subscribe',
       'trace.unsubscribe',
+      // M22: los vigilantes del asistente (listar, pausar, reanudar y quitar). `watches.add` exige `approve` y no va.
+      'watches.list',
+      'watches.pause',
+      'watches.remove',
+      'watches.resume',
     ]);
+    expect(wire).not.toContain('"watches.add"');
     // Lo que Dot puede pedir es su perfil (`ClientProfile::DOT` en `link.rs`): de `sessions.*`
     // solo abrir y leer una; de `runs.*`, iniciar y gobernar; de lo pendiente, solo listarlo
     // (para la confirmación nativa); de la caja del asistente (M14), consultarla, arrancarla y
@@ -505,7 +516,14 @@ describe('el lado nativo', () => {
       'SessionsGet',
       'SessionsMemory',
       'SessionsOpen',
+      'WatchesList',
+      'WatchesPause',
+      'WatchesRemove',
+      'WatchesResume',
     ]);
+    // Crear un vigilante exige `approve`: ni el perfil de Dot ni ningún `CallAction` lo tienen.
+    expect(dotMethods).not.toContain('WatchesAdd');
+    expect(rustCode(join(link, 'src', 'state.rs'))).not.toContain('WatchesAdd');
     // El navegador del agente es de Desktop: Dot no lo mira ni lo mueve.
     expect(dotMethods.some((m) => m.startsWith('Browser'))).toBe(false);
     // La app de Dot se presenta con su perfil, y solo con él.

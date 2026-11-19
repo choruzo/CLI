@@ -140,10 +140,14 @@ describe('companion — prompt y toolset', () => {
     await collect(host.run('hola'));
     // Sin visión declarada, ni rastro de la pantalla.
     // Sin quien cree rutinas ni quien guarde recordatorios (lo da el daemon),
-    // ni `propose_routine` ni los recordatorios.
+    // ni `propose_routine`, ni los recordatorios, ni `propose_watch`.
     expect(offered(provider)).toEqual(
       COMPANION_TOOLS.filter(
-        (t) => !isScreenTool(t) && t !== 'propose_routine' && !REMINDER_TOOLS.includes(t),
+        (t) =>
+          !isScreenTool(t) &&
+          t !== 'propose_routine' &&
+          t !== 'propose_watch' &&
+          !REMINDER_TOOLS.includes(t),
       ).sort(),
     );
     expect(host.agent.getMessages()[0]?.content).not.toContain('# Your box screen');
@@ -261,7 +265,9 @@ describe('companion — la pantalla de su caja (M15, §23.4)', () => {
     const { host } = await companionHost(provider, { vision: 'pixels' });
     await collect(host.run('hola'));
     expect(offered(provider)).toEqual(
-      COMPANION_TOOLS.filter((t) => t !== 'propose_routine' && !REMINDER_TOOLS.includes(t)).sort(),
+      COMPANION_TOOLS.filter(
+        (t) => t !== 'propose_routine' && t !== 'propose_watch' && !REMINDER_TOOLS.includes(t),
+      ).sort(),
     );
     expect(host.agent.getMessages()[0]?.content).toContain('# Your box screen');
   });

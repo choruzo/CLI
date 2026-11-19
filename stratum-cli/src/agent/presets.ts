@@ -120,6 +120,8 @@ export const COMPANION_TOOLS: readonly string[] = [
   'set_reminder',
   'list_reminders',
   'cancel_reminder',
+  // M22 — proponer un vigilante; también solo en la sesión principal del daemon.
+  'propose_watch',
 ];
 
 /** M17 — sus conectores: tools de los servers de `companion.mcp.servers`, y ningún otro. */

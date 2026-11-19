@@ -1094,6 +1094,80 @@ async fn cada_cliente_ve_la_memoria_de_su_agente_y_solo_esa() {
     rig.quit().await;
 }
 
+/// M22: los vigilantes del asistente se listan, se pausan, se reanudan y se quitan
+/// por la conexión principal. Crear exige `approve`: no hay llamada para ello, y
+/// Desktop no los tiene.
+#[tokio::test(flavor = "multi_thread")]
+async fn los_vigilantes_se_listan_pausan_reanudan_y_quitan_por_la_principal() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    let list = rig.link.call(CallAction::WatchesList).await.unwrap();
+    assert_eq!(list["watches"][0]["id"], "wat_aaaaaaaaaa");
+    assert_eq!(list["watches"][1]["status"], "paused");
+    assert_eq!(list["readOnly"], false);
+
+    let paused = rig
+        .link
+        .call(CallAction::WatchesPause {
+            watch_id: "wat_aaaaaaaaaa".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(paused["watch"]["status"], "paused");
+    let resumed = rig
+        .link
+        .call(CallAction::WatchesResume {
+            watch_id: "wat_bbbbbbbbbb".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(resumed["watch"]["status"], "active");
+    let removed = rig
+        .link
+        .call(CallAction::WatchesRemove {
+            watch_id: "wat_aaaaaaaaaa".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(removed["watch"]["id"], "wat_aaaaaaaaaa");
+
+    let requests = fake.requests();
+    let sent = |m: &str| requests.iter().find(|r| r["method"] == m).unwrap().clone();
+    assert!(sent("watches.list")["params"].get("operationId").is_none());
+    for (method, id) in [
+        ("watches.pause", "wat_aaaaaaaaaa"),
+        ("watches.resume", "wat_bbbbbbbbbb"),
+        ("watches.remove", "wat_aaaaaaaaaa"),
+    ] {
+        assert_eq!(sent(method)["params"]["watchId"], id);
+        assert!(sent(method)["params"]["operationId"]
+            .as_str()
+            .unwrap()
+            .starts_with("dot-"));
+    }
+    // Un id vacío no sale.
+    let bad = rig
+        .link
+        .call(CallAction::WatchesPause {
+            watch_id: String::new(),
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(bad.kind, CommandErrorKind::Invalid);
+    // Desktop no tiene vigilantes.
+    let before = fake.requests().len();
+    assert!(desktop.link.call(CallAction::WatchesList).await.is_err());
+    assert_eq!(fake.requests().len(), before);
+
+    desktop.quit().await;
+    rig.quit().await;
+}
+
 /// M21: los recordatorios del asistente se listan y se cancelan por la conexión
 /// principal. Crear no es de un cliente (los deja el `companion`), y Desktop no los tiene.
 #[tokio::test(flavor = "multi_thread")]

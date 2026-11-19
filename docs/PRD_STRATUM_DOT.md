@@ -2726,6 +2726,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       - Un aviso que no se pudo entregar no se reintenta, porque el estado ya cambió.
       - Los saltos y las suspensiones van al log del daemon, sin nombre ni argumentos, y no a la
         traza de una sesión: no ocurren dentro de ningún run.
+    *Fase 3* (2026-11-19):
+    - Protocolo `watches.list` (con las comprobaciones del catálogo), `watches.add` con `approve` y
+      `watches.pause|resume|remove` con `control` (`docs/protocol.md` §31). El evento que aquí se
+      llamaba `watch.fired` es `watch.notice`, que también avisa de resuelto, fallando y suspendido.
+    - `propose_watch` en la sesión principal del `companion`, con confirmación normal: enseña el
+      vigilante entero y exactamente como se guardará. Si no cabe entero, o si validarlo cambiaría
+      algo, se veta antes de preguntar.
+    - `stratum watches list|checks|add|pause|resume|remove`; `add` enseña el vigilante y pide la
+      clave de aprobador.
+    - Panel *Watches* en Dot (sin crear) y aviso del SO de cada `watch.notice`.
 
   *2. Google Calendar*: dentro del conector `google`, con el mismo OAuth.
   - Ámbito nuevo `calendar.events` (crear y mover) o solo `calendar.readonly`. *Pendiente* cuál.

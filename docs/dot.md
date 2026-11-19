@@ -1595,3 +1595,34 @@ hora los **entrega**, sin lanzar ningún run; Dot los enseña y los cancela, y a
 Tests: `src/app/Reminders.test.tsx`, `src/protocol/reminder-notices.test.ts`, `tests/link.rs`
 (`los_recordatorios_se_listan_y_se_cancelan_por_la_principal`), unidad en `link.rs` y `wire.rs`, y el
 de arquitectura.
+
+## 25. Vigilantes (M22)
+
+Condiciones sobre una comprobación de un conector que el daemon evalúa sin el LLM y que avisan
+cuando saltan (`docs/protocol.md` §31). Dot los enseña, los pausa, los reanuda y los quita, y avisa
+al sistema. **No los crea**: `watches.add` exige `approve` y lo usan la propuesta confirmada del
+agente (`propose_watch`) y `stratum watches add`.
+
+- **Panel *Watches*** en la vista *Asistente* (tras *Reminders*; a 440 px, su pestaña). Pinta lo
+  que contesta `watches.list`, que se pide **al abrir la vista, tras cada acción y al llegar un
+  `watch.notice`**, nunca por sondeo y sin estado optimista. Cada vigilante lleva su nombre,
+  `conector · comprobación`, la condición legible, el intervalo, el estado y las marcas *Firing*,
+  *Cannot check* (`health: failing`), *Suspended*, *Last fired HH:MM* y *By the assistant*
+  (`origin: 'agent'`). *Pause*/*Resume* y *Remove* (con confirmación en la página) solo con
+  `control`, sin `readOnly` y con planificador.
+- **Pausar, reanudar y quitar** van por la conexión principal (`watches.pause|resume|remove`,
+  `control`), sin confirmación nativa: solo restan o devuelven lo ya aprobado. Un resultado
+  desconocido dice «Result unknown» y no se reintenta solo.
+- **El aviso**: `protocol/watch-notices.ts` (puro) saca los `watch.notice` **válidos** y arma el
+  título según `kind` (*Watch*, *Watch resolved*, *Watch cannot check*, *Watch paused by Stratum*)
+  con el texto que compuso el daemon. Un `NoticeLedger` lo da una sola vez por
+  `watchId:kind:at`. Lo muestra el lado nativo como el de un recordatorio: `dot_notify_watch` →
+  `notify.rs`, y pulsarlo abre la pestaña *Watches* (`open-view` con `view: 'watches'`,
+  `NoticeTarget::Watches`). Solo informa.
+- Nativo: `MainMethod::WatchesList|WatchesPause|WatchesResume|WatchesRemove` solo en `DOT_METHODS`
+  (nunca `watches.add`, que el test de arquitectura prohíbe), `CallAction::Watches*` (las tres
+  mutaciones son `mutating`), comandos `dot_watches_list|pause|resume|remove` y `dot_notify_watch`.
+
+Tests: `src/app/Watches.test.tsx`, `src/protocol/watch-notices.test.ts`, `tests/link.rs`
+(`los_vigilantes_se_listan_pausan_reanudan_y_quitan_por_la_principal`), unidad en `link.rs` y
+`wire.rs`, y el de arquitectura.

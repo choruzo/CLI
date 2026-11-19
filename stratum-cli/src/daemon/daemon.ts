@@ -98,6 +98,7 @@ import {
   type ProtocolSessionSnapshot,
   type ProtocolWatchNotice,
   type StateEventData,
+  WATCH_LIMITS,
 } from '../protocol/index.js';
 import { bundledCatalog } from '../connectors/active.js';
 import type { ConnectorCatalog } from '../connectors/catalog.js';
@@ -152,6 +153,14 @@ import type { ReminderBook } from '../tools/reminders/reminders.js';
 import { WatchScheduler } from './watch-scheduler.js';
 import { WatchStore, watchesFile } from '../watches/store.js';
 import { connectorProbe, type WatchProbe } from '../watches/probe.js';
+import { defineWatch, type WatchRequest } from '../watches/define.js';
+import {
+  invalidWatch,
+  toProtocolWatch,
+  toProtocolWatchChecks,
+  watchOperation,
+} from './watches-dto.js';
+import type { WatchProposals } from '../tools/watches/propose.js';
 import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
 import type { CompanionTurns } from './channel-companion.js';
 import type { SessionLabel } from '../channels/telegram/render.js';
@@ -958,6 +967,7 @@ export class Stratumd {
         ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
         ...this.routineProposals(),
         ...this.reminderBook(),
+        ...this.watchProposals(),
         ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
         snapshot: restorableSnapshot(archived.snapshot, files.conversation.store, DAEMON_HOST),
       });
@@ -1400,6 +1410,7 @@ export class Stratumd {
           ...(this.opts.sessionsDir ? { transcriptsDir: this.opts.sessionsDir } : {}),
           ...this.routineProposals(),
           ...this.reminderBook(),
+          ...this.watchProposals(),
           ...(this.opts.snapshotsHome ? { snapshotsHome: this.opts.snapshotsHome } : {}),
           ...(params.readOnly !== undefined ? { readOnly: params.readOnly } : {}),
           ...(params.sessionProfile ? { sessionProfile: params.sessionProfile } : {}),
@@ -2239,6 +2250,52 @@ export class Stratumd {
           reminder: this.remindersOrThrow().cancel(params.reminderId, this.now()),
         })),
 
+      // M22 — sus vigilantes. Crear exige `approve` (aquí, la persona; el
+      // agente solo con `propose_watch` confirmado); lo demás solo resta.
+      // Ninguna línea de log lleva el nombre ni los argumentos.
+      'watches.list': () => {
+        const watches = this.watchesOrThrow();
+        return {
+          watches: watches.list().map(toProtocolWatch),
+          checks: this.watchChecks(),
+          readOnly: watches.readOnly,
+        };
+      },
+      'watches.add': (params) =>
+        watchOperation(() => {
+          const watches = this.watchesOrThrow();
+          // Antes que validar: con el almacén en solo lectura no se crea nada.
+          if (watches.readOnly) {
+            throw new ProtocolError('UNAVAILABLE', 'The watches file cannot be modified.', {
+              reason: 'read-only',
+            });
+          }
+          const { operationId: _op, ...request } = params;
+          const outcome = this.defineWatch({ ...request, origin: 'person' });
+          if (!outcome.ok) throw invalidWatch(outcome.error);
+          const watch = watches.add(outcome.definition);
+          log.info('watch added', {
+            watchId: watch.id,
+            connector: watch.connector,
+            connectionId: conn.id,
+          });
+          return { watch: toProtocolWatch(watch) };
+        }),
+      'watches.pause': (params) =>
+        watchOperation(() => ({
+          watch: toProtocolWatch(this.watchesOrThrow().setStatus(params.watchId, 'paused')),
+        })),
+      'watches.resume': (params) =>
+        watchOperation(() => ({
+          watch: toProtocolWatch(this.watchesOrThrow().setStatus(params.watchId, 'active')),
+        })),
+      'watches.remove': (params) =>
+        watchOperation(() => {
+          const watch = this.watchesOrThrow().remove(params.watchId);
+          log.info('watch removed', { watchId: watch.id, connectionId: conn.id });
+          return { watch: toProtocolWatch(watch) };
+        }),
+
       // M20 — conectores del asistente. Lo activo vive en `connectors.json`,
       // que solo escribe el daemon; la sesión lo lee al empezar cada turno.
       'connectors.list': () => this.connectorsList(),
@@ -2604,6 +2661,62 @@ export class Stratumd {
       });
     }
     return this.reminders;
+  }
+
+  /** M22 — el planificador de vigilantes, o `UNAVAILABLE` si corre sin él. */
+  private watchesOrThrow(): WatchScheduler {
+    if (!this.watches) {
+      throw new ProtocolError('UNAVAILABLE', 'Watches are disabled in this daemon.', {
+        reason: 'watches-disabled',
+      });
+    }
+    return this.watches;
+  }
+
+  /** M22 — valida un vigilante contra el catálogo, sin conectar. */
+  private defineWatch(request: WatchRequest): ReturnType<typeof defineWatch> {
+    return defineWatch(request, this.connectorCatalog);
+  }
+
+  /** M22 — las comprobaciones del catálogo, con si su conector está activo. */
+  private watchChecks(): ReturnType<typeof toProtocolWatchChecks> {
+    const state = readConnectorsFile(connectorsFile(this.companionDir));
+    const enabled = new Set(state.state === 'ok' ? state.enabled.map((e) => e.id) : []);
+    return toProtocolWatchChecks(
+      this.connectorCatalog.entries.map((e) => e.manifest),
+      enabled,
+    );
+  }
+
+  /**
+   * M22 — `propose_watch` del `companion`: crea, con `origin: 'agent'`, el
+   * vigilante que una persona ya aprobó. Sin planificador, la tool no existe.
+   * `HostedSession` solo se lo da a la sesión principal.
+   */
+  private watchProposals(): { watchProposals?: WatchProposals } {
+    const watches = this.watches;
+    if (!watches) return {};
+    return {
+      watchProposals: {
+        define: (request) => this.defineWatch({ ...request, origin: 'agent' }),
+        blocked: () => {
+          if (watches.readOnly) return 'the watches file cannot be modified.';
+          if (watches.list().length >= WATCH_LIMITS.watches) {
+            return `there are already ${WATCH_LIMITS.watches} watches; the user has to remove one first.`;
+          }
+          return null;
+        },
+        create: (definition) => {
+          const watch = watches.add(definition);
+          log.info('watch added', {
+            watchId: watch.id,
+            connector: watch.connector,
+            origin: 'agent',
+          });
+          return { id: watch.id, name: watch.name };
+        },
+      },
+    };
   }
 
   /** M18 — lo que una tarjeta de Telegram enseña de una sesión (como Dot). */

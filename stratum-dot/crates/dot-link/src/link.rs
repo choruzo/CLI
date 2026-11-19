@@ -200,6 +200,11 @@ const DOT_METHODS: &[MainMethod] = &[
     // M21: los recordatorios del asistente (cancelar solo resta; crearlos no es de un cliente).
     MainMethod::RemindersList,
     MainMethod::RemindersCancel,
+    // M22: los vigilantes del asistente (pausar, reanudar y quitar; `watches.add` exige `approve`: no va).
+    MainMethod::WatchesList,
+    MainMethod::WatchesPause,
+    MainMethod::WatchesResume,
+    MainMethod::WatchesRemove,
 ];
 
 const DESKTOP_METHODS: &[MainMethod] = &[
@@ -892,6 +897,24 @@ fn optional(
     Ok(Some(text.to_string()))
 }
 
+/// M22 — pausar, reanudar o quitar un vigilante: el id y el `operationId`.
+fn watch_request(
+    method: MainMethod,
+    watch_id: &str,
+    operation_id: &str,
+) -> Result<(MainMethod, Value), CommandError> {
+    if !valid_id(watch_id) {
+        return Err(CommandError::new(
+            CommandErrorKind::Invalid,
+            "Invalid watch id.",
+        ));
+    }
+    Ok((
+        method,
+        json!({ "watchId": watch_id, "operationId": operation_id }),
+    ))
+}
+
 /// Método y parámetros de una llamada, o por qué no vale. Solo se comprueba
 /// que quepa en el protocolo: si un directorio existe o un perfil vale lo dice
 /// el daemon, que es quien manda.
@@ -1250,6 +1273,16 @@ fn call_request_as(
                 MainMethod::RemindersCancel,
                 json!({ "reminderId": reminder_id, "operationId": operation_id }),
             ))
+        }
+        CallAction::WatchesList => Ok((MainMethod::WatchesList, json!({}))),
+        CallAction::WatchesPause { watch_id } => {
+            watch_request(MainMethod::WatchesPause, watch_id, operation_id)
+        }
+        CallAction::WatchesResume { watch_id } => {
+            watch_request(MainMethod::WatchesResume, watch_id, operation_id)
+        }
+        CallAction::WatchesRemove { watch_id } => {
+            watch_request(MainMethod::WatchesRemove, watch_id, operation_id)
         }
         CallAction::MemoryForget { decision_id } => {
             if !valid_id(decision_id) {
@@ -3618,6 +3651,56 @@ mod tests {
         )
         .is_err());
         for method in [MainMethod::RemindersList, MainMethod::RemindersCancel] {
+            assert!(DOT_METHODS.contains(&method));
+            assert!(!DESKTOP_METHODS.contains(&method));
+        }
+        // M22: los vigilantes. Listar es una consulta; pausar, reanudar y quitar
+        // cambian algo (con `operationId`) y solo están en el perfil de Dot.
+        let (method, params) = call_request(&CallAction::WatchesList, "op").unwrap();
+        assert_eq!(method, MainMethod::WatchesList);
+        assert_eq!(params, json!({}));
+        assert!(!CallAction::WatchesList.mutating());
+        for (action, expected) in [
+            (
+                CallAction::WatchesPause {
+                    watch_id: "wat_abc1234567".into(),
+                },
+                MainMethod::WatchesPause,
+            ),
+            (
+                CallAction::WatchesResume {
+                    watch_id: "wat_abc1234567".into(),
+                },
+                MainMethod::WatchesResume,
+            ),
+            (
+                CallAction::WatchesRemove {
+                    watch_id: "wat_abc1234567".into(),
+                },
+                MainMethod::WatchesRemove,
+            ),
+        ] {
+            let (method, params) = call_request(&action, "op-13").unwrap();
+            assert_eq!(method, expected);
+            assert_eq!(
+                params,
+                json!({ "watchId": "wat_abc1234567", "operationId": "op-13" })
+            );
+            assert!(action.mutating());
+        }
+        assert!(call_request(
+            &CallAction::WatchesPause {
+                watch_id: String::new()
+            },
+            "op"
+        )
+        .is_err());
+        for method in [
+            MainMethod::WatchesList,
+            MainMethod::WatchesPause,
+            MainMethod::WatchesResume,
+            MainMethod::WatchesRemove,
+        ] {
             assert!(DOT_METHODS.contains(&method));
             assert!(!DESKTOP_METHODS.contains(&method));
         }

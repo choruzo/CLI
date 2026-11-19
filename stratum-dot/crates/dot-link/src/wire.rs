@@ -103,6 +103,13 @@ pub enum MainMethod {
     /// (solo resta). Crear no se puede desde un cliente: los deja el `companion`.
     RemindersList,
     RemindersCancel,
+    /// M22 (Dot) — los vigilantes del asistente: la lista y pausar, reanudar o
+    /// quitar uno (todo con `control`). Crear (`watches.add`) exige `approve`:
+    /// lo propone el `companion` con confirmación o se hace por la CLI, nunca aquí.
+    WatchesList,
+    WatchesPause,
+    WatchesResume,
+    WatchesRemove,
     /// Desktop: la traza de una sesión (`trace.records`, `observe`) para el panel
     /// de trayectoria. Solo lectura; la suscripción la lleva el enlace (sigue lo
     /// que se le pide con `LinkHandle::trace`), no una llamada suelta.
@@ -144,7 +151,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 59] = [
+    pub const ALL: [MainMethod; 63] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -189,6 +196,10 @@ impl MainMethod {
         MainMethod::ConnectorsDisable,
         MainMethod::RemindersList,
         MainMethod::RemindersCancel,
+        MainMethod::WatchesList,
+        MainMethod::WatchesPause,
+        MainMethod::WatchesResume,
+        MainMethod::WatchesRemove,
         MainMethod::TraceSubscribe,
         MainMethod::TraceUnsubscribe,
         MainMethod::SessionsSetAgent,
@@ -254,6 +265,10 @@ impl WireMethod for MainMethod {
             MainMethod::ConnectorsDisable => "connectors.disable",
             MainMethod::RemindersList => "reminders.list",
             MainMethod::RemindersCancel => "reminders.cancel",
+            MainMethod::WatchesList => "watches.list",
+            MainMethod::WatchesPause => "watches.pause",
+            MainMethod::WatchesResume => "watches.resume",
+            MainMethod::WatchesRemove => "watches.remove",
             MainMethod::TraceSubscribe => "trace.subscribe",
             MainMethod::TraceUnsubscribe => "trace.unsubscribe",
             MainMethod::SessionsSetAgent => "sessions.setAgent",
@@ -493,6 +508,10 @@ mod tests {
                 "connectors.disable",
                 "reminders.list",
                 "reminders.cancel",
+                "watches.list",
+                "watches.pause",
+                "watches.resume",
+                "watches.remove",
                 "trace.subscribe",
                 "trace.unsubscribe",
                 "sessions.setAgent",
@@ -523,6 +542,8 @@ mod tests {
             "sessions.revert",
             // Activar un conector suma capacidad: solo por la conexión de aprobador.
             "connectors.enable",
+            // Crear un vigilante exige `approve`: lo propone el asistente (confirmado) o la CLI.
+            "watches.add",
             "jobs.list",
             // Borra el home de la caja: lo hace la persona desde la CLI, que pide su nombre.
             "box.reset",

@@ -958,6 +958,28 @@ impl Fake {
                     }
                 }))]
             }
+            // M22: un vigilante activo y otro pausado; pausar, reanudar y quitar
+            // devuelven el vigilante tal como quedó.
+            "watches.list" => vec![ok(json!({
+                "watches": [
+                    watch_json("wat_aaaaaaaaaa", "active"),
+                    watch_json("wat_bbbbbbbbbb", "paused")
+                ],
+                "checks": [],
+                "readOnly": false
+            }))],
+            "watches.pause" | "watches.resume" | "watches.remove" => {
+                let id = params["watchId"].as_str().unwrap_or("");
+                if id.is_empty() {
+                    return vec![err("INVALID_PARAMS", json!({ "reason": "invalid" }))];
+                }
+                let status = if method == "watches.pause" {
+                    "paused"
+                } else {
+                    "active"
+                };
+                vec![ok(json!({ "watch": watch_json(id, status) }))]
+            }
             "routines.add" | "routines.update" | "routines.remove" | "routines.run"
             | "grants.revoke" | "memory.decisions" | "memory.forget" => {
                 vec![ok(json!({ "echo": method }))]
@@ -1243,6 +1265,18 @@ pub fn fast_confirm() -> dot_link::ConfirmTimings {
         arm_delay: Duration::from_millis(50),
         cooldown: Duration::from_millis(100),
     }
+}
+
+/// M22 — un vigilante del daemon de pruebas, como lo cuenta `watches.list`.
+fn watch_json(id: &str, status: &str) -> Value {
+    json!({
+        "id": id, "name": "Lluvia en Madrid", "connector": "aemet",
+        "check": "prediccion_municipio", "args": { "municipio": "28079" },
+        "condition": { "kind": "above", "threshold": 30 },
+        "intervalSec": 1800, "cooldownMinutes": 30, "notifyResolved": false,
+        "status": status, "origin": "person", "createdAt": 1_759_000_000_000i64,
+        "firing": false, "lastFiredAt": null, "health": "ok"
+    })
 }
 
 /// M20 — el conector del daemon de pruebas, como lo cuenta `connectors.list`.

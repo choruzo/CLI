@@ -1328,6 +1328,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | Navegador       | Métodos `browser.screen` (`observe`) y `browser.navigate` (`control`, §26); DTOs `ProtocolBrowserStatus`, `ProtocolBrowserScreen`, `ProtocolBrowserState`, `ProtocolBrowserAction`; `BROWSER_SCREEN_LIMITS`, `BROWSER_NAVIGATE_LIMITS`, `BROWSER_NAVIGATE_ACTIONS`. `data.reason` de `UNAVAILABLE` admite `failed` y `browser-closed`; el de `INVALID_PARAMS`, `needs-approval` y `blocked-url`. Sin eventos ni campos nuevos en la foto | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 | Modo código     | Métodos `sessions.setProfile` (`control`) y `sessions.inspect` (`observe`, §27); DTOs `ProtocolSessionInspection`, `ProtocolSessionProfileInfo`, `ProtocolInspectedEnvironment`, `ProtocolInspectedMcpServer`, `ProtocolInspectedPlugin`; `INSPECT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `not-loaded` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 | Modo código     | Métodos `sessions.ask` (`control`), `sessions.turns` (`observe`), `jobs.background` (`control`) y `memory.documents` (`observe`, §28); `memory.status|decisions|forget` admiten `sessionId` (la memoria del proyecto de esa sesión; no se combina con `cwd` ni `agent`). DTOs `ProtocolUndoableTurn`, `ProtocolMemoryDocument`; `ASK_LIMITS`, `TURNS_LIMITS`, `MEMORY_DOCUMENT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `provider-failed` | Aditivo: métodos y un parámetro opcional nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` o `INVALID_PARAMS` |
+| M22             | Evento de estado `watch.notice` (`{ notice: ProtocolWatchNotice }`, en `OVERVIEW_EVENT_TYPES`; fase 2) y, en la fase 3, los métodos `watches.list` (`observe`), `watches.add` (`approve`) y `watches.pause`/`resume`/`remove` (`control`, §31); DTOs `ProtocolWatch`, `ProtocolWatchCheck`, `ProtocolWatchCondition`; `WATCH_LIMITS`. `data.reason` de `UNAVAILABLE` admite `watches-disabled`. El PRD llamaba al evento `watch.fired`: es `watch.notice`, con `kind` `fired`·`resolved`·`failing`·`suspended`, porque un vigilante también avisa de que se resolvió o de que no puede mirar | Aditivo: métodos y evento nuevos; un servidor anterior contesta `METHOD_NOT_FOUND`. Un cliente que valide la unión de eventos tiene que aceptar `watch.notice`; los del árbol validan con `schemas.ts`, que ya lo incluye |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -2376,8 +2377,7 @@ Tests: `stratum-cli/src/protocol/schemas.test.ts` y `stratum-cli/src/daemon/daem
 
 Una condición sobre una **comprobación** de un conector, que el daemon evalúa **sin el LLM** y que
 avisa cuando salta (PRD de Dot §23.11, *Vigilantes*). Los guarda el daemon en
-`~/.stratum/companion/watches.json`, que solo escribe él. Aquí está solo lo que ya existe: el aviso
-y su evaluación. Los métodos `watches.*` (crear, listar, pausar) llegan en la fase 3.
+`~/.stratum/companion/watches.json`, que solo escribe él.
 
 ```ts
 interface ProtocolWatchNotice {
@@ -2403,6 +2403,65 @@ compone el daemon con una plantilla, **nunca el LLM**, y todo lo que viene del c
 neutralizado (una línea, sin controles ni marcas de dirección). Solo informa: ni abre turno ni entra
 en la conversación (`applyTranscriptEvent` lo ignora). Con Telegram emparejado, el daemon manda el
 mismo texto al chat.
+
+**Métodos** (fase 3):
+
+```ts
+interface ProtocolWatch {
+  id: string;
+  name: string;
+  connector: string;
+  check: string; // una tool que el manifiesto del conector declara en `checks`
+  args: Record<string, string | number | boolean>;
+  condition: ProtocolWatchCondition; // la de `watches.json`, abajo
+  intervalSec: number;
+  cooldownMinutes: number;
+  notifyResolved: boolean;
+  status: 'active' | 'paused';
+  origin: 'agent' | 'person'; // solo procedencia
+  createdAt: Timestamp;
+  firing: boolean; // saltó y la condición sigue cumpliéndose
+  lastFiredAt: Timestamp | null;
+  health: 'ok' | 'failing' | 'suspended'; // lo último que avisó; vuelve a `ok` con una respuesta
+}
+
+interface ProtocolWatchCheck {
+  connector: string;
+  connectorName: string;
+  connectorEnabled: boolean; // informativo: sobre uno apagado, el vigilante queda suspendido
+  tool: string;
+  summary: string;
+  minIntervalSec: number;
+  args: { name; type: 'string' | 'number' | 'integer' | 'boolean'; required; description;
+          enum?; minimum?; maximum? }[];
+}
+```
+
+| Método           | Capacidad | Qué hace                                                                                         |
+| ---------------- | --------- | ------------------------------------------------------------------------------------------------ |
+| `watches.list`   | `observe` | Los vigilantes, por creación; las comprobaciones del catálogo (`checks`); y `readOnly`.          |
+| `watches.add`    | `approve` | Crea uno (`origin: 'person'`) validado contra el catálogo. Devuelve `{ watch }`.                  |
+| `watches.pause`  | `control` | Lo pausa (`{ watchId, operationId }`). Solo resta.                                               |
+| `watches.resume` | `control` | Lo reanuda: devuelve lo ya aprobado, con la cuenta de «durante N minutos» y los fallos a cero.   |
+| `watches.remove` | `control` | Lo quita. Solo resta.                                                                            |
+
+- **Crear exige `approve`**: un vigilante corre solo y, en la fase 4, podrá lanzar una rutina. La
+  persona lo crea por la CLI (`stratum watches add`, con la clave de aprobador); el agente solo
+  **propone** (`propose_watch`, en la sesión principal del `companion`), y existe cuando alguien
+  aprueba la confirmación. Esa confirmación enseña el vigilante entero (conector, comprobación,
+  argumentos, condición, intervalo, descanso y qué hace al saltar) y es **normal** mientras solo
+  avisa; será **forzada** cuando lance una rutina. Lo que enseña es exactamente lo que se guarda:
+  si `defineWatch` cambiaría algo (un nombre con controles) o no cabe entero en la solicitud, se veta
+  antes de preguntar. Dot no crea vigilantes.
+- `watches.add` valida sin conectar (`defineWatch`): el conector existe en el catálogo, la
+  comprobación la declara su manifiesto, los argumentos casan con su esquema cerrado (sin
+  conversiones: `"5"` no es un número) y el intervalo va del mínimo de la comprobación a un día. Sin
+  `intervalSec`, el mínimo; sin `cooldownMinutes`, 30. Lo que no vale es `INVALID_PARAMS` con el
+  motivo; pasar de `WATCH_LIMITS.watches` (20), también.
+- **Sin planificador** (`watches: null` en el daemon): todos, `UNAVAILABLE` (`watches-disabled`).
+  Con el almacén en solo lectura, las mutaciones son `UNAVAILABLE` (`read-only`), antes de validar
+  nada. Un id desconocido es `NOT_FOUND`.
+- Ningún log lleva el nombre ni los argumentos de un vigilante.
 
 **Cómo se evalúa** (`src/daemon/watch-scheduler.ts`, `src/watches/engine.ts`):
 
@@ -2454,5 +2513,6 @@ Un vigilante activo impide que el daemon se apague por inactividad, como una rut
 recordatorio pendiente. `watches: null` en el daemon deja los vigilantes sin planificador.
 
 Tests: `stratum-cli/src/watches/` (`condition`, `engine`, `notice`, `store`, `define`, `probe` y la
-integración con el conector de Home Assistant) y `stratum-cli/src/daemon/watch-scheduler.test.ts` /
-`daemon-watches.test.ts`.
+integración con el conector de Home Assistant), `stratum-cli/src/daemon/watch-scheduler.test.ts` /
+`daemon-watches.test.ts` / `daemon-watches-protocol.test.ts` (métodos y `propose_watch` de punta a
+punta) y `stratum-cli/src/tools/watches/propose.test.ts`.

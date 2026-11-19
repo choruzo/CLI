@@ -155,10 +155,17 @@ describe('M22 — WatchScheduler', () => {
     });
     h.scheduler.start();
     await h.at(T0);
-    expect(h.calls.map((c) => c.connector)).toEqual(['casa', 'reloj']);
-    expect(h.calls[0]!.calls.map((c) => c.tool)).toEqual(['estado', 'estado']);
-    expect(h.calls[0]!.calls.map((c) => c.args.entity_id)).toEqual(['light.salon', 'light.salon']);
-    expect(h.calls[1]!.calls).toEqual([{ tool: 'hora', args: {} }]);
+    // Lo que importa es el agrupado, no el orden entre conectores: con el mismo
+    // `createdAt`, el orden de la lista lo decide el id, que es aleatorio.
+    const byConnector = new Map(h.calls.map((c) => [c.connector, c.calls]));
+    expect(h.calls).toHaveLength(2);
+    expect([...byConnector.keys()].sort()).toEqual(['casa', 'reloj']);
+    expect(byConnector.get('casa')!.map((c) => c.tool)).toEqual(['estado', 'estado']);
+    expect(byConnector.get('casa')!.map((c) => c.args.entity_id)).toEqual([
+      'light.salon',
+      'light.salon',
+    ]);
+    expect(byConnector.get('reloj')).toEqual([{ tool: 'hora', args: {} }]);
   });
 
   it('respeta el intervalo: no vuelve a mirar hasta que vence', async () => {

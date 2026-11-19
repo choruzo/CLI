@@ -27,7 +27,7 @@ export const HOME_VIEW: MainView = 'assistant';
  * Qué se enseña de la vista *Asistente* en una ventana estrecha (< 720 px),
  * donde no caben a la vez la conversación y los paneles. En ancho, todo.
  */
-export type AssistantTab = 'chat' | 'box' | 'routines' | 'reminders' | 'memory' | 'telegram' | 'connectors';
+export type AssistantTab = 'chat' | 'box' | 'routines' | 'reminders' | 'watches' | 'memory' | 'telegram' | 'connectors';
 
 /**
  * Lo que la interfaz sabe de una resolución que **ella** envió. No es el
@@ -138,6 +138,8 @@ interface UiStore {
   openHumanInput(itemId?: string | null): void;
   /** M21 — el aviso de un recordatorio: la vista *Asistente*, en su pestaña de recordatorios. */
   openReminders(): void;
+  /** M22 — el aviso de un vigilante: la vista *Asistente*, en su pestaña de vigilantes. */
+  openWatches(): void;
   setView(view: MainView): void;
   setAssistantTab(tab: AssistantTab): void;
   /** El Dot compacto: ir al asistente con ese mensaje para enviárselo. */
@@ -180,6 +182,7 @@ export const useUi = create<UiStore>((set) => ({
   resolutions: {},
   openHumanInput: (itemId = null) => set({ view: 'human-input', focusItem: itemId }),
   openReminders: () => set({ view: 'assistant', assistantTab: 'reminders', focusItem: null }),
+  openWatches: () => set({ view: 'assistant', assistantTab: 'watches', focusItem: null }),
   setView: (view) => set({ view, focusItem: null }),
   setAssistantTab: (assistantTab) => set({ assistantTab }),
   askAssistant: (text) => set({ view: 'assistant', assistantTab: 'chat', focusItem: null, pendingAsk: text }),

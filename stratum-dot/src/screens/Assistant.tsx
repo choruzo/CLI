@@ -3,6 +3,7 @@ import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
 import { MemoryPanel } from '../components/MemoryPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
+import { WatchesPanel } from '../components/WatchesPanel';
 import { RoutinesPanel } from '../components/RoutinesPanel';
 import { ConnectorsPanel } from '../components/ConnectorsPanel';
 import { TelegramPanel } from '../components/TelegramPanel';
@@ -183,6 +184,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
   );
   const routines = <RoutinesPanel connected={connected} canControl={canControl} onOpenSession={onOpenSession} />;
   const reminders = <RemindersPanel connected={connected} canControl={canControl} now={now} />;
+  const watches = <WatchesPanel connected={connected} canControl={canControl} />;
   const memory = (
     <MemoryPanel
       connected={connected}
@@ -229,11 +231,13 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
                 ? routines
                 : tab === 'reminders'
                   ? reminders
-                  : tab === 'telegram'
-                  ? telegram
-                  : tab === 'connectors'
-                    ? connectors
-                    : memory}
+                  : tab === 'watches'
+                    ? watches
+                    : tab === 'telegram'
+                      ? telegram
+                      : tab === 'connectors'
+                        ? connectors
+                        : memory}
         </div>
       </main>
     );
@@ -244,6 +248,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
         {box}
         {routines}
         {reminders}
+        {watches}
         {memory}
         {telegram}
         {connectors}
@@ -278,6 +283,7 @@ const TABS: Array<{ id: AssistantTab; label: string }> = [
   { id: 'box', label: 'Box' },
   { id: 'routines', label: 'Routines' },
   { id: 'reminders', label: 'Reminders' },
+  { id: 'watches', label: 'Watches' },
   { id: 'memory', label: 'Memory' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'connectors', label: 'Connectors' },

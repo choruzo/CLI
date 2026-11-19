@@ -58,6 +58,7 @@ import { UserImageError } from '../images/store.js';
 import { embeddedAgentName, embeddedPresetOf } from '../agent/presets.js';
 import type { RoutineProposals } from '../tools/routines/propose.js';
 import type { ReminderBook } from '../tools/reminders/reminders.js';
+import type { WatchProposals } from '../tools/watches/propose.js';
 import type { ArchivedSession, SessionFiles, SessionMeta } from './session-archive.js';
 import { SESSION_META_SCHEMA_VERSION } from './session-archive.js';
 import { BrowserActionError, BrowserUnavailableError } from '../browser/manager.js';
@@ -147,6 +148,25 @@ export interface HostedSessionOptions {
    * `cancel_reminder`). Solo llega a la sesión principal del `companion`.
    */
   reminders?: ReminderBook;
+  /**
+   * M22 — dónde crea el `companion` un vigilante aprobado (`propose_watch`).
+   * Solo llega a su sesión principal.
+   */
+  watchProposals?: WatchProposals;
+}
+
+/** Lo que solo recibe la sesión principal del `companion` (nunca la de una rutina). */
+type CompanionMainTools = Pick<
+  HostedSessionOptions,
+  'routineProposals' | 'reminders' | 'watchProposals'
+>;
+
+function companionToolsOf(opts: CompanionMainTools): CompanionMainTools {
+  return {
+    ...(opts.routineProposals ? { routineProposals: opts.routineProposals } : {}),
+    ...(opts.reminders ? { reminders: opts.reminders } : {}),
+    ...(opts.watchProposals ? { watchProposals: opts.watchProposals } : {}),
+  };
 }
 
 /** Cuánto se espera a que un turno cancelado termine de cerrarse. */
@@ -197,8 +217,7 @@ export class HostedSession {
         conversation: { conversation: opts.files.conversation },
       },
       preset,
-      opts.routineId ? undefined : opts.routineProposals,
-      opts.routineId ? undefined : opts.reminders,
+      opts.routineId ? {} : companionToolsOf(opts),
       opts.routineId !== undefined,
     );
     if (opts.agent && !preset) {
@@ -236,7 +255,13 @@ export class HostedSession {
   static async adopt(
     opts: Omit<
       HostedSessionOptions,
-      'readOnly' | 'sessionProfile' | 'agent' | 'routineId' | 'routineProposals' | 'reminders'
+      | 'readOnly'
+      | 'sessionProfile'
+      | 'agent'
+      | 'routineId'
+      | 'routineProposals'
+      | 'reminders'
+      | 'watchProposals'
     > & {
       context: ProtocolHandoffContext;
       snapshot: ProtocolSessionSnapshot;
@@ -306,8 +331,7 @@ export class HostedSession {
         conversation: { conversation: opts.files.conversation, restore: true },
       },
       preset,
-      meta.routineId ? undefined : opts.routineProposals,
-      meta.routineId ? undefined : opts.reminders,
+      meta.routineId ? {} : companionToolsOf(opts),
       meta.routineId !== undefined,
     );
     if (meta.agent && !preset && host.agent.getActiveProfile()?.name !== meta.agent) {
@@ -392,16 +416,14 @@ export class HostedSession {
     >,
     agent: NonNullable<SessionHostOptions['agent']>,
     preset: SessionHostOptions['preset'] | null = null,
-    routineProposals?: RoutineProposals,
-    /** M21 — los recordatorios del `companion` (solo su sesión principal). */
-    reminders?: ReminderBook,
+    /** M16/M21/M22 — lo que solo tiene la sesión principal del `companion`. */
+    tools: CompanionMainTools = {},
     /** M16/M17 — la sesión de una rutina: sin concesiones temporales. */
     routine = false,
   ): Promise<SessionHost> {
     const host = await SessionHost.create({
       ...(preset ? { preset } : {}),
-      ...(preset === 'companion' && routineProposals ? { routineProposals } : {}),
-      ...(preset === 'companion' && reminders ? { reminders } : {}),
+      ...(preset === 'companion' ? tools : {}),
       ...(preset && opts.transcriptsDir ? { transcriptsDir: opts.transcriptsDir } : {}),
       ...(preset === 'assistant' && opts.assistantData
         ? { assistantData: opts.assistantData }

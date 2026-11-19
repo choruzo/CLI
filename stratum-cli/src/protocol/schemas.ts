@@ -84,6 +84,10 @@ import type {
   ProtocolUndoableTurn,
   ProtocolMemoryDocument,
   ProtocolReminder,
+  ProtocolWatch,
+  ProtocolWatchArgs,
+  ProtocolWatchCheck,
+  ProtocolWatchCondition,
   ProtocolWatchNotice,
   ProtocolRoutine,
   ProtocolRoutineFire,
@@ -661,6 +665,94 @@ export const watchNoticeSchema: z.ZodType<ProtocolWatchNotice> = z.object({
   kind: z.enum(['fired', 'resolved', 'failing', 'suspended']),
   text: z.string().min(1).max(WATCH_LIMITS.noticeChars),
   at: timestamp,
+});
+
+const watchForMinutes = z.number().int().min(0).max(WATCH_LIMITS.maxForMinutes).optional();
+const watchStateValues = z
+  .array(z.string().trim().min(1).max(WATCH_LIMITS.stateChars))
+  .min(1)
+  .max(WATCH_LIMITS.stateValues);
+const watchThreshold = z.number().finite();
+
+/**
+ * La condición de un vigilante. Es la única definición: `watches/condition.ts`
+ * la reutiliza para validar lo que se guarda en `watches.json`.
+ */
+export const watchConditionSchema = z.discriminatedUnion('kind', [
+  z
+    .object({ kind: z.literal('state-is'), values: watchStateValues, forMinutes: watchForMinutes })
+    .strict(),
+  z
+    .object({
+      kind: z.literal('state-is-not'),
+      values: watchStateValues,
+      forMinutes: watchForMinutes,
+    })
+    .strict(),
+  z
+    .object({ kind: z.literal('above'), threshold: watchThreshold, forMinutes: watchForMinutes })
+    .strict(),
+  z
+    .object({ kind: z.literal('below'), threshold: watchThreshold, forMinutes: watchForMinutes })
+    .strict(),
+  z.object({ kind: z.literal('changes'), forMinutes: watchForMinutes }).strict(),
+]) satisfies z.ZodType<ProtocolWatchCondition>;
+
+const watchArgName = z.string().regex(/^[a-z][a-z0-9_]{0,31}$/);
+export const watchArgsSchema: z.ZodType<ProtocolWatchArgs> = z
+  .record(
+    watchArgName,
+    z.union([z.string().max(WATCH_LIMITS.argChars), z.number().finite(), z.boolean()]),
+  )
+  .refine((a) => Object.keys(a).length <= WATCH_LIMITS.args, {
+    message: `at most ${WATCH_LIMITS.args} arguments`,
+  });
+
+const watchName = z.string().trim().min(1).max(WATCH_LIMITS.nameChars);
+// Como `connectorId` (más abajo) y `CONNECTOR_ID_RE` del manifiesto.
+const watchConnector = z.string().regex(/^[a-z][a-z0-9-]{1,30}[a-z0-9]$/);
+const watchCheckTool = z.string().regex(/^[a-z][a-z0-9_]{0,47}$/);
+const watchInterval = z.number().int().min(60).max(WATCH_LIMITS.maxIntervalSec);
+const watchCooldown = z.number().int().min(0).max(WATCH_LIMITS.maxCooldownMinutes);
+
+export const watchSchema: z.ZodType<ProtocolWatch> = z.object({
+  id,
+  name: z.string().min(1).max(WATCH_LIMITS.nameChars),
+  connector: watchConnector,
+  check: watchCheckTool,
+  args: watchArgsSchema,
+  condition: watchConditionSchema,
+  intervalSec: watchInterval,
+  cooldownMinutes: watchCooldown,
+  notifyResolved: z.boolean(),
+  status: z.enum(['active', 'paused']),
+  origin: z.enum(['agent', 'person']),
+  createdAt: timestamp,
+  firing: z.boolean(),
+  lastFiredAt: timestamp.nullable(),
+  health: z.enum(['ok', 'failing', 'suspended']),
+});
+
+export const watchCheckSchema: z.ZodType<ProtocolWatchCheck> = z.object({
+  connector: watchConnector,
+  connectorName: z.string().min(1).max(LIMITS.nameChars),
+  connectorEnabled: z.boolean(),
+  tool: watchCheckTool,
+  summary: z.string().min(1).max(200),
+  minIntervalSec: watchInterval,
+  args: z
+    .array(
+      z.object({
+        name: watchArgName,
+        type: z.enum(['string', 'number', 'integer', 'boolean']),
+        required: z.boolean(),
+        description: z.string().min(1).max(200),
+        enum: z.array(z.string().min(1).max(64)).max(20).optional(),
+        minimum: z.number().finite().optional(),
+        maximum: z.number().finite().optional(),
+      }),
+    )
+    .max(WATCH_LIMITS.args),
 });
 
 // ---------------------------------------------------------------------------
@@ -1470,6 +1562,24 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'reminders.list': empty,
   'reminders.cancel': z.object({ reminderId: id, operationId }).strict(),
 
+  'watches.list': empty,
+  'watches.add': z
+    .object({
+      name: watchName,
+      connector: watchConnector,
+      check: watchCheckTool,
+      args: watchArgsSchema.optional(),
+      condition: watchConditionSchema,
+      intervalSec: watchInterval.optional(),
+      cooldownMinutes: watchCooldown.optional(),
+      notifyResolved: z.boolean().optional(),
+      operationId,
+    })
+    .strict(),
+  'watches.pause': z.object({ watchId: id, operationId }).strict(),
+  'watches.resume': z.object({ watchId: id, operationId }).strict(),
+  'watches.remove': z.object({ watchId: id, operationId }).strict(),
+
   'channels.status': empty,
   'channels.reload': z.object({ operationId }).strict(),
   'channels.pairBegin': z.object({ operationId }).strict(),
@@ -1684,6 +1794,16 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
 
   'reminders.list': z.object({ reminders: z.array(reminderSchema), readOnly: z.boolean() }),
   'reminders.cancel': z.object({ reminder: reminderSchema }),
+
+  'watches.list': z.object({
+    watches: z.array(watchSchema).max(WATCH_LIMITS.watches),
+    checks: z.array(watchCheckSchema).max(500),
+    readOnly: z.boolean(),
+  }),
+  'watches.add': z.object({ watch: watchSchema }),
+  'watches.pause': z.object({ watch: watchSchema }),
+  'watches.resume': z.object({ watch: watchSchema }),
+  'watches.remove': z.object({ watch: watchSchema }),
 
   'channels.status': channelsStatusSchema,
   'channels.reload': channelsStatusSchema,

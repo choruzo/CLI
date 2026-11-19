@@ -311,6 +311,15 @@ pub enum CallAction {
     RemindersList,
     /// M21 — `reminders.cancel`: cancelar un recordatorio pendiente (solo resta).
     RemindersCancel { reminder_id: String },
+    /// M22 — `watches.list`: los vigilantes, las comprobaciones del catálogo y si
+    /// el almacén está en solo lectura. Solo lectura.
+    WatchesList,
+    /// M22 — `watches.pause`: pausar un vigilante activo.
+    WatchesPause { watch_id: String },
+    /// M22 — `watches.resume`: reanudar un vigilante pausado.
+    WatchesResume { watch_id: String },
+    /// M22 — `watches.remove`: quitar un vigilante.
+    WatchesRemove { watch_id: String },
     /// Desktop (modo código) — `sessions.setAgent`: el perfil de agente de código
     /// de una sesión parada; `None` lo quita (`agent: null`).
     SetAgent {
@@ -437,6 +446,10 @@ impl CallAction {
             CallAction::ConnectorsDisable { .. } => "connectors-disable",
             CallAction::RemindersList => "reminders-list",
             CallAction::RemindersCancel { .. } => "reminders-cancel",
+            CallAction::WatchesList => "watches-list",
+            CallAction::WatchesPause { .. } => "watches-pause",
+            CallAction::WatchesResume { .. } => "watches-resume",
+            CallAction::WatchesRemove { .. } => "watches-remove",
             CallAction::SetAgent { .. } => "set-agent",
             CallAction::SetReadOnly { .. } => "set-read-only",
             CallAction::CancelJob { .. } => "cancel-job",
@@ -480,6 +493,9 @@ impl CallAction {
                 | CallAction::ChannelsUnpair { .. }
                 | CallAction::ConnectorsDisable { .. }
                 | CallAction::RemindersCancel { .. }
+                | CallAction::WatchesPause { .. }
+                | CallAction::WatchesResume { .. }
+                | CallAction::WatchesRemove { .. }
                 | CallAction::SetAgent { .. }
                 | CallAction::SetReadOnly { .. }
                 | CallAction::CancelJob { .. }

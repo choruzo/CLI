@@ -12,6 +12,7 @@ import { McpManager, type McpManagerWarning } from '../tools/mcp/manager.js';
 import { screenLocks } from '../tools/screen/lock.js';
 import type { RoutineProposals } from '../tools/routines/propose.js';
 import type { ReminderBook } from '../tools/reminders/reminders.js';
+import type { WatchProposals } from '../tools/watches/propose.js';
 import { closeSessionExecRuntime } from '../tools/exec/runtime.js';
 import { PlanStore, generatePlanId } from '../session/plan-store.js';
 import { SubagentStore } from '../session/subagent-store.js';
@@ -106,6 +107,11 @@ export interface SessionHostOptions {
    * daemon, y solo para su sesión principal: sin esto las tools no existen.
    */
   reminders?: ReminderBook;
+  /**
+   * M22 — dónde crea el `companion` un vigilante que una persona aprobó
+   * (`propose_watch`). Solo el daemon, y solo para su sesión principal.
+   */
+  watchProposals?: WatchProposals;
   /**
    * M20 — de dónde salen los conectores activos del `companion` (se miran al
    * empezar cada turno). Ausente: los de `connectors.json` en sus datos;
@@ -291,6 +297,7 @@ export class SessionHost {
         dataDir,
         ...(opts.routineProposals ? { routines: opts.routineProposals } : {}),
         ...(opts.reminders ? { reminders: opts.reminders } : {}),
+        ...(opts.watchProposals ? { watches: opts.watchProposals } : {}),
       });
     } else if (opts.preset === 'assistant') {
       const dataDir = opts.assistantData?.dir ?? assistantDataDir();
