@@ -12,7 +12,7 @@
 import { createMcpServer, serveStdio } from '../lib/mcp-stdio.js';
 import { RealtimeSource } from './realtime.js';
 import { IndexManager, LdIndexManager, renfeCacheDir } from './static-feed.js';
-import { createRenfeTools } from './tools.js';
+import { createRenfeCheckTools, createRenfeTools, type RenfeContext } from './tools.js';
 import { createTrenesTools } from './tools-ld.js';
 
 const offline = process.env.STRATUM_RENFE_OFFLINE === '1';
@@ -31,12 +31,15 @@ const ldManager = new LdIndexManager({
 manager.start();
 ldManager.start();
 
+const cercanias: RenfeContext = {
+  withIndex: (fn) => manager.withIndex(fn),
+  realtime: offline ? null : new RealtimeSource({ fetch: globalThis.fetch }),
+};
+
 serveStdio(
-  createMcpServer({ name: 'renfe', version: '1.2.0' }, [
-    ...createRenfeTools({
-      withIndex: (fn) => manager.withIndex(fn),
-      realtime: offline ? null : new RealtimeSource({ fetch: globalThis.fetch }),
-    }),
+  createMcpServer({ name: 'renfe', version: '1.3.0' }, [
+    ...createRenfeTools(cercanias),
+    ...createRenfeCheckTools(cercanias),
     ...createTrenesTools({
       withIndex: (fn) => ldManager.withIndex(fn),
       realtime: offline ? null : new RealtimeSource({ fetch: globalThis.fetch, suffix: '_LD' }),

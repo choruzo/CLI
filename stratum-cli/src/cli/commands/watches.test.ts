@@ -7,6 +7,7 @@ import {
   formatChecks,
   formatWatchesList,
   parseWatchAddOptions,
+  formatWatchPreview,
   runAdd,
   runPause,
   runRemove,
@@ -240,6 +241,14 @@ describe('parseWatchAddOptions', () => {
       'connector',
       'name',
     ]);
+  });
+
+  it('--routine pasa como routineId y la vista previa dice que la lanza', () => {
+    const r = parseWatchAddOptions({ ...base, changes: true, routine: 'rt_1' }, checks);
+    expect(r.ok && r.params.routineId).toBe('rt_1');
+    const preview = formatWatchPreview(r.ok ? r.params : (null as never), check());
+    expect(preview).toContain('AND RUN ROUTINE rt_1');
+    expect(preview).not.toContain('it runs nothing');
   });
 });
 

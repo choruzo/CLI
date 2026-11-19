@@ -51,6 +51,17 @@ AEMET no responda. No mezcles datos de las dos en una misma respuesta.
   «Precipitación inapreciable» es que llueve tan poco que no da litros: ni 0 ni «sin dato».
 - No hay históricos (qué tiempo hizo el año pasado) ni datos de mar, nieve o polen.
 
+## Vigilar avisos (`aemet_comprobar_avisos`)
+
+Comprobación de solo lectura para vigilantes: devuelve el nivel más alto de los avisos **activos** de un
+municipio o una provincia (`estado`: `ninguno`, `amarillo`, `naranja` o `rojo`; `valor`: 0, 1, 2 o 3).
+Se usa con `propose_watch`, y el vigilante la evalúa sin ti cada 15 minutos como mínimo.
+
+- Pide el **código INE** (`municipio` de 5 dígitos o `provincia` de 2, uno de los dos), nunca el nombre:
+  sácalo con `aemet_municipios`. `incluir_previstos: true` cuenta también los avisos que aún no empiezan.
+- Condiciones típicas: `above` con `threshold: 1` (naranja o rojo) o `state-is` con `["rojo"]`.
+- Llama antes a la tool una vez para ver lo que devuelve y confirmar que el código es el que quieres.
+
 ## Atribución
 
 Cita siempre «Fuente: AEMET» al dar los datos, también si vienen de un municipio vecino, y no insinúes que

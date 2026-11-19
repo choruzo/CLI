@@ -182,6 +182,11 @@ export function WatchesPanel({ connected, canControl }: Props) {
               {watch.lastFiredAt !== null ? (
                 <span className="tone-muted">Last fired {when(watch.lastFiredAt)}</span>
               ) : null}
+              {watch.routineId ? (
+                <span className="tone-waiting" title={`Runs routine ${watch.routineId} when it fires`}>
+                  Runs a routine
+                </span>
+              ) : null}
               {watch.origin === 'agent' ? <span className="tone-muted">By the assistant</span> : null}
             </div>
             {confirming === watch.id ? (

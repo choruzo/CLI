@@ -17,6 +17,7 @@
  *  - un fallo de una rutina (abrir, arrancar) nunca afecta a las demás ni
  *    lanza fuera de aquí, y el siguiente vencimiento se arma pase lo que pase.
  */
+import { routinePromptWithTrigger, type WatchTrigger } from '../watches/trigger.js';
 import type { ProtocolRun, ProtocolRunStatus, ProtocolSessionSnapshot } from '../protocol/index.js';
 import { getLogger } from '../logging/index.js';
 import { nextFire, parseSchedule } from '../routines/schedule.js';
@@ -208,6 +209,20 @@ export class RoutineScheduler {
     return this.fire(routine, true);
   }
 
+  /**
+   * M22 fase 4 — un vigilante saltó y lanza esta rutina, con el aviso como
+   * contexto no confiable detrás de su prompt (`routinePromptWithTrigger`).
+   * Corre con sus reglas (su sesión, sin solapes, lo pendiente caduca a `deny`).
+   * A diferencia del disparo manual, **una rutina deshabilitada no se lanza**:
+   * deshabilitarla es como la persona la para. `null` si no existe o está
+   * deshabilitada; nunca lanza.
+   */
+  async runFromWatch(id: string, trigger: WatchTrigger): Promise<RoutineFire | null> {
+    const routine = this.store.get(id);
+    if (!routine || !routine.enabled) return null;
+    return this.fire(routine, false, routinePromptWithTrigger(routine.prompt, trigger));
+  }
+
   // ─── horario ───────────────────────────────────────────────────────────────
 
   private statusOf(routine: Routine): RoutineStatus {
@@ -294,14 +309,18 @@ export class RoutineScheduler {
   }
 
   /** Nunca lanza: todo resultado, también un fallo, es un `RoutineFire`. */
-  private async fire(routine: Routine, manual: boolean): Promise<RoutineFire> {
+  private async fire(
+    routine: Routine,
+    manual: boolean,
+    input: string = routine.prompt,
+  ): Promise<RoutineFire> {
     const base = { routineId: routine.id, at: this.now(), manual };
     if (this.firing.has(routine.id)) {
       return this.record({ ...base, outcome: 'skipped-busy' });
     }
     this.firing.add(routine.id);
     try {
-      return await this.launch(routine, base);
+      return await this.launch(routine, base, input);
     } catch (err) {
       log.warn('routine failed to start', { routineId: routine.id, err });
       return this.record({ ...base, outcome: 'failed-to-start', error: messageOf(err) });
@@ -313,6 +332,7 @@ export class RoutineScheduler {
   private async launch(
     routine: Routine,
     base: { routineId: string; at: number; manual: boolean },
+    input: string,
   ): Promise<RoutineFire> {
     const session = await this.opts.sessionFor(routine);
     const sessionId = session.sessionId;
@@ -334,7 +354,7 @@ export class RoutineScheduler {
     if (routine.model && session.setModel && routine.model !== session.model) {
       session.setModel(routine.model);
     }
-    const run = session.startRun(routine.prompt, 'normal', {
+    const run = session.startRun(input, 'normal', {
       ...(routine.limits?.maxIterations ? { maxIterations: routine.limits.maxIterations } : {}),
     });
     const fire = this.record({ ...base, outcome: 'started', sessionId, runId: run.id });

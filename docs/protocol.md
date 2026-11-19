@@ -2423,6 +2423,7 @@ interface ProtocolWatch {
   firing: boolean; // saltó y la condición sigue cumpliéndose
   lastFiredAt: Timestamp | null;
   health: 'ok' | 'failing' | 'suspended'; // lo último que avisó; vuelve a `ok` con una respuesta
+  routineId?: string; // fase 4: la rutina que lanza al saltar
 }
 
 interface ProtocolWatchCheck {
@@ -2449,8 +2450,9 @@ interface ProtocolWatchCheck {
   persona lo crea por la CLI (`stratum watches add`, con la clave de aprobador); el agente solo
   **propone** (`propose_watch`, en la sesión principal del `companion`), y existe cuando alguien
   aprueba la confirmación. Esa confirmación enseña el vigilante entero (conector, comprobación,
-  argumentos, condición, intervalo, descanso y qué hace al saltar) y es **normal** mientras solo
-  avisa; será **forzada** cuando lance una rutina. Lo que enseña es exactamente lo que se guarda:
+  argumentos, condición, intervalo, descanso y qué hace al saltar) y es **normal** si solo avisa y
+  **forzada** si lanza una rutina (ni allow-all ni concesiones). Con rutina, el agente da su id y
+  su nombre, y el nombre tiene que ser el de esa rutina: quien aprueba ve el que correrá. Lo que enseña es exactamente lo que se guarda:
   si `defineWatch` cambiaría algo (un nombre con controles) o no cabe entero en la solicitud, se veta
   antes de preguntar. Dot no crea vigilantes.
 - `watches.add` valida sin conectar (`defineWatch`): el conector existe en el catálogo, la
@@ -2458,6 +2460,15 @@ interface ProtocolWatchCheck {
   conversiones: `"5"` no es un número) y el intervalo va del mínimo de la comprobación a un día. Sin
   `intervalSec`, el mínimo; sin `cooldownMinutes`, 30. Lo que no vale es `INVALID_PARAMS` con el
   motivo; pasar de `WATCH_LIMITS.watches` (20), también.
+- **Lanzar una rutina** (fase 4, `routineId`): una rutina de §23 que ya existe; `watches.add` la
+  rechaza si no (`INVALID_PARAMS`). Solo al saltar (`fired`), nunca al resolverse, fallar o
+  suspenderse, y aunque el aviso no se pudiera entregar. Corre con sus reglas: su propia sesión,
+  nunca dos runs a la vez (`skipped-busy`), nada vuelve al chat principal y lo que pida aprobación
+  caduca a `deny`. Su prompt va **intacto y primero**, y detrás el aviso dentro de
+  `<watch-event>…</watch-event>`, marcado como dato no confiable (sin saltos de línea y con los
+  ángulos cambiados, para que no pueda cerrar el bloque). Una rutina **deshabilitada o quitada no
+  se lanza** (a diferencia de `routines.run`): deshabilitarla es como la persona la para. El
+  descanso del vigilante acota cuántas veces se lanza.
 - **Sin planificador** (`watches: null` en el daemon): todos, `UNAVAILABLE` (`watches-disabled`).
   Con el almacén en solo lectura, las mutaciones son `UNAVAILABLE` (`read-only`), antes de validar
   nada. Un id desconocido es `NOT_FOUND`.

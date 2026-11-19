@@ -28,6 +28,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   8: '2559cb0aff8a16e8',
   // M22: `ha_comprobar` (checks: estado estructurado) en home-assistant.
   9: 'c3badbb09436f8a6',
+  // M22 fase 4: comprobaciones de aemet, renfe (Cercanías) y google (Gmail y Tasks).
+  10: 'b87f221303e174fd',
 };
 
 /**

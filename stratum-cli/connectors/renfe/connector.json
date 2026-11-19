@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "renfe",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "Renfe",
   "description": "Cercanías y Rodalies, y larga y media distancia (AVE, AVLO, Alvia, Intercity, MD…): salidas, trayectos, trenes en tiempo real y avisos, con datos abiertos de Renfe.",
   "agents": ["companion"],
@@ -15,8 +15,34 @@
     { "name": "cercanias_trayecto", "readOnly": true, "summary": "Cómo ir de una estación a otra: directo o con un transbordo." },
     { "name": "cercanias_tren", "readOnly": true, "summary": "Estado de un tren: dónde está, retraso, vía y próximas paradas." },
     { "name": "cercanias_avisos", "readOnly": true, "summary": "Avisos e incidencias activos por núcleo, línea o estación." },
+    { "name": "cercanias_comprobar_avisos", "readOnly": true, "summary": "Número de avisos activos en un núcleo o línea de Cercanías, en forma estructurada para vigilantes." },
     { "name": "trenes_salidas", "readOnly": true, "summary": "Salidas de larga y media distancia desde una estación, de hoy o de otro día, con su retraso." },
     { "name": "trenes_trayecto", "readOnly": true, "summary": "Trenes directos de larga y media distancia de una estación a otra, con horas y duración." },
     { "name": "trenes_tren", "readOnly": true, "summary": "Estado de un tren de larga o media distancia: retraso, posición y recorrido." }
+  ],
+  "checks": [
+    {
+      "tool": "cercanias_comprobar_avisos",
+      "summary": "Avisos e incidencias activos en un núcleo o línea de Cercanías.",
+      "minIntervalSec": 300,
+      "args": [
+        {
+          "name": "nucleo",
+          "type": "string",
+          "required": true,
+          "description": "Id del núcleo tal como lo da cercanias_nucleos (p. ej. madrid)",
+          "maxLength": 40,
+          "pattern": "[a-z]+(-[a-z]+)*"
+        },
+        {
+          "name": "linea",
+          "type": "string",
+          "required": false,
+          "description": "Nombre corto de la línea en ese núcleo (p. ej. C3)",
+          "maxLength": 12,
+          "pattern": "[A-Za-z0-9]+"
+        }
+      ]
+    }
   ]
 }

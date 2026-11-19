@@ -36,7 +36,7 @@ import {
   tripUpdateEntity,
   vehicleEntity,
 } from './test-helpers.js';
-import { createRenfeTools } from './tools.js';
+import { createRenfeCheckTools, createRenfeTools } from './tools.js';
 import { createTrenesTools } from './tools-ld.js';
 
 /** Hora del tiempo real de Cercanías: 18:35 en Madrid, un minuto antes del reloj. */
@@ -105,9 +105,11 @@ async function main(): Promise<void> {
   const indexPath = await buildFixtureIndex(join(dir, 'cer'), () => undefined, fixtures);
   const ldIndexPath = await buildLdFixtureIndex(join(dir, 'ld'), fixtures);
 
+  const cercanias = fixtureContext(indexPath, cercaniasRealtime(), NOW);
   serveStdio(
-    createMcpServer({ name: 'renfe', version: '1.2.0-fixture' }, [
-      ...createRenfeTools(fixtureContext(indexPath, cercaniasRealtime(), NOW)),
+    createMcpServer({ name: 'renfe', version: '1.3.0-fixture' }, [
+      ...createRenfeTools(cercanias),
+      ...createRenfeCheckTools(cercanias),
       ...createTrenesTools(
         ldFixtureContext(ldIndexPath, ldFakeRealtime(ldRealtimeFeeds(fixtures), NOW_LD), NOW_LD),
       ),

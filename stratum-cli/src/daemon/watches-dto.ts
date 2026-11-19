@@ -29,6 +29,7 @@ export function toProtocolWatch(w: StoredWatch): ProtocolWatch {
     firing: w.state.firing,
     lastFiredAt: w.state.lastFiredAt,
     health: w.state.suspendedNotified ? 'suspended' : w.state.failingNotified ? 'failing' : 'ok',
+    ...(w.routineId ? { routineId: w.routineId } : {}),
   };
 }
 

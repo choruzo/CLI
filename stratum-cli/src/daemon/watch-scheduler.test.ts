@@ -109,6 +109,7 @@ function harness(
   };
   const calls: Array<{ connector: string; calls: ProbeCall[] }> = [];
   const notices: ProtocolWatchNotice[] = [];
+  const launches: Array<{ routineId: string; watchName: string; text: string }> = [];
   const scheduler = new WatchScheduler({
     store,
     probe: {
@@ -122,6 +123,9 @@ function harness(
       if (state.notifyThrows) throw new Error('nadie escucha');
       notices.push(notice);
     },
+    launchRoutine: async (routineId, trigger) => {
+      launches.push({ routineId, ...trigger });
+    },
     now: clock.now,
     tickMs: TICK,
     setTimer: clock.setTimer,
@@ -134,6 +138,7 @@ function harness(
     scheduler,
     calls,
     notices,
+    launches,
     state,
     /** Un ciclo: dispara lo que venza en `at` y espera a que termine. */
     async at(at: number): Promise<void> {
@@ -358,5 +363,50 @@ describe('M22 — WatchScheduler', () => {
     h.scheduler.setStatus(id, 'active');
     await h.at(T0 + 59_000);
     expect(h.calls).toHaveLength(2);
+  });
+
+  describe('fase 4 — lanzar una rutina al saltar', () => {
+    it('al saltar, avisa y lanza la rutina con el texto del aviso', async () => {
+      const h = harness({ defs: [def({ routineId: 'rt_1' })] });
+      h.scheduler.start();
+      await h.at(T0);
+      expect(h.notices.map((n) => n.kind)).toEqual(['fired']);
+      expect(h.launches).toEqual([
+        { routineId: 'rt_1', watchName: 'Salón', text: h.notices[0]!.text },
+      ]);
+    });
+
+    it('sin routineId no lanza nada', async () => {
+      const h = harness();
+      h.scheduler.start();
+      await h.at(T0);
+      expect(h.notices).toHaveLength(1);
+      expect(h.launches).toEqual([]);
+    });
+
+    it('resuelto, fallando o suspendido nunca lanza', async () => {
+      const h = harness({
+        defs: [def({ routineId: 'rt_1', notifyResolved: true })],
+        respond: () => on('on'),
+      });
+      h.scheduler.start();
+      await h.at(T0);
+      expect(h.launches).toHaveLength(1);
+      h.state.respond = () => on('off');
+      await h.at(T0 + MIN);
+      expect(h.notices.map((n) => n.kind)).toEqual(['fired', 'resolved']);
+      h.state.respond = () => ({ kind: 'suspended', reason: 'sin caja' });
+      await h.at(T0 + 2 * MIN);
+      expect(h.notices.map((n) => n.kind)).toEqual(['fired', 'resolved', 'suspended']);
+      expect(h.launches).toHaveLength(1);
+    });
+
+    it('lanza aunque el aviso no se pueda entregar', async () => {
+      const h = harness({ defs: [def({ routineId: 'rt_1' })] });
+      h.state.notifyThrows = true;
+      h.scheduler.start();
+      await h.at(T0);
+      expect(h.launches).toHaveLength(1);
+    });
   });
 });

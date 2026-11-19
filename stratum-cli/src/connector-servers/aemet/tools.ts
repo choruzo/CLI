@@ -1,6 +1,7 @@
 /**
  * Tools del conector AEMET (el tiempo y los avisos oficiales de España):
- * `aemet_municipios`, `aemet_prevision`, `aemet_por_horas` y `aemet_avisos`.
+ * `aemet_municipios`, `aemet_prevision`, `aemet_por_horas`, `aemet_avisos` y la
+ * comprobación `aemet_comprobar_avisos` (M22, con resultado estructurado).
  * Todas de solo lectura; cada salida es texto breve en español ya masticado para
  * un agente, con la atribución de la licencia como última línea.
  *
@@ -15,7 +16,7 @@
  * no la del municipio pedido.
  */
 import { z } from 'zod';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import { addDays, hhmm, madridParts } from '../renfe/time.js';
 import {
   AemetNoDisponible,
@@ -615,6 +616,39 @@ function notaDescargas(noDescargados: number): string[] {
   ];
 }
 
+// --- Comprobación de avisos (M22) --------------------------------------------
+
+const NIVELES = ['ninguno', 'amarillo', 'naranja', 'rojo'] as const;
+type NivelComprobado = (typeof NIVELES)[number];
+
+/**
+ * Nivel de un aviso como posición de `NIVELES` (1 amarillo, 2 naranja, 3 rojo).
+ * Lo que no trae `nivel` se deduce de la severidad CAP; un aviso con una
+ * severidad que no conocemos cuenta como amarillo (existe, y no se esconde).
+ */
+function nivelDe(a: Aviso): 1 | 2 | 3 {
+  const nivel = (a.nivel ?? '').toLowerCase();
+  if (nivel === 'rojo') return 3;
+  if (nivel === 'naranja') return 2;
+  if (nivel === 'amarillo') return 1;
+  const sev = a.severity.toLowerCase();
+  if (sev === 'extreme') return 3;
+  if (sev === 'severe') return 2;
+  return 1;
+}
+
+const ComprobarAvisosSchema = z.object({
+  municipio: z
+    .string({ message: 'municipio debe ser un código INE de 5 dígitos' })
+    .regex(/^[0-9]{5}$/, 'municipio debe ser un código INE de 5 dígitos')
+    .optional(),
+  provincia: z
+    .string({ message: 'provincia debe ser un código INE de 2 dígitos' })
+    .regex(/^[0-9]{2}$/, 'provincia debe ser un código INE de 2 dígitos')
+    .optional(),
+  incluir_previstos: z.boolean({ message: 'incluir_previstos debe ser true o false' }).optional(),
+});
+
 // --- Tools -------------------------------------------------------------------
 
 const MUNICIPIO_PROP = {
@@ -623,7 +657,7 @@ const MUNICIPIO_PROP = {
     'Municipio por nombre (sin acentos ni mayúsculas: "getafe") o por código INE de 5 dígitos ("28065").',
 };
 
-function buildTools(ctx: AemetContext): ConnectorTool[] {
+function buildTools(ctx: AemetContext): ConnectorTool<string | ToolOutput>[] {
   const ahora = (): Date => (ctx.now ?? ((): Date => new Date()))();
 
   // aemet_municipios ------------------------------------------------------------
@@ -873,7 +907,110 @@ function buildTools(ctx: AemetContext): ConnectorTool[] {
     },
   };
 
-  return [municipios, prevision, porHoras, avisosTool];
+  // aemet_comprobar_avisos ------------------------------------------------------
+  const comprobarAvisos: ConnectorTool<string | ToolOutput> = {
+    name: 'aemet_comprobar_avisos',
+    description:
+      'Nivel más alto de los avisos Meteoalerta de un municipio o una provincia, de solo lectura y además en forma estructurada: ' +
+      'es la tool que comprueban los vigilantes, sin el modelo. Solo admite códigos INE (municipio de 5 dígitos o provincia de 2; ' +
+      'búscalos con aemet_municipios), nunca nombres. Cuenta los avisos activos; con `incluir_previstos` también los que aún no empiezan. ' +
+      'Para leer los avisos en detalle usa aemet_avisos.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        municipio: {
+          type: 'string',
+          description:
+            'Código INE del municipio, de 5 dígitos ("28065"). Excluyente con `provincia`.',
+        },
+        provincia: {
+          type: 'string',
+          description:
+            'Código INE de la provincia, de 2 dígitos ("27"). Excluyente con `municipio`.',
+        },
+        incluir_previstos: {
+          type: 'boolean',
+          description: 'Cuenta también los avisos previstos (por defecto, solo los activos).',
+        },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        estado: { type: 'string', enum: [...NIVELES] },
+        valor: { type: ['number', 'null'] },
+        detalle: { type: 'string' },
+      },
+      required: ['estado', 'valor', 'detalle'],
+      additionalProperties: false,
+    },
+    handler: async (args) => {
+      const a = parseArgs(ComprobarAvisosSchema, args);
+      if ((a.municipio === undefined) === (a.provincia === undefined)) {
+        throw new ToolUserError(
+          'Indica exactamente uno de `municipio` (código INE de 5 dígitos) o `provincia` (código INE de 2 dígitos).',
+        );
+      }
+      const ahoraDate = ahora();
+      let zona: string;
+      let lista: Aviso[];
+      if (a.municipio !== undefined) {
+        const m = municipioPorCodigo(a.municipio);
+        if (!m) {
+          throw new ToolUserError(
+            `No existe el municipio con código INE ${a.municipio}; búscalo con aemet_municipios.`,
+          );
+        }
+        zona = etiqueta(m);
+        lista = await conAemet(() => ctx.avisos.avisosPara({ zona: m.zona }));
+      } else {
+        const code = a.provincia!;
+        if (!PROVINCIAS[code]) {
+          throw new ToolUserError(`No existe la provincia con código INE ${code}.`);
+        }
+        zona = `la provincia de ${provinciaNombre(code)}`;
+        lista = await conAemet(() => ctx.avisos.avisosPara({ provincia: code }));
+      }
+      const r = reparto(sinDuplicados(lista), ahoraDate);
+      const previstos = a.incluir_previstos === true;
+      const considerados = previstos ? [...r.activos, ...r.previstos] : r.activos;
+      // Un CAP que no se pudo descargar podría ser el más grave: no se puede saber
+      // el nivel, así que la comprobación falla (nunca se estima).
+      const faltan = ctx.avisos.noDescargados ?? 0;
+      if (faltan > 0) {
+        throw new ToolUserError(
+          `no se pudieron leer ${faltan} de los avisos de AEMET; no se puede saber el nivel.`,
+        );
+      }
+
+      if (considerados.length === 0) {
+        const detalle = `Sin avisos ${previstos ? 'activos ni previstos' : 'activos'} en ${zona}`;
+        return {
+          text: finish([`${detalle}.`]),
+          structured: { estado: 'ninguno', valor: 0, detalle },
+        };
+      }
+      const peor = considerados.reduce((x, y) => (nivelDe(y) > nivelDe(x) ? y : x));
+      const valor = nivelDe(peor);
+      const estado: NivelComprobado = NIVELES[valor];
+      const cuantos = considerados.length === 1 ? '1 aviso' : `${considerados.length} avisos`;
+      const detalle = `Aviso ${estado} de ${fenomenoTexto(peor)} en ${zona}; ${cuantos}`;
+      const lineas = lineasAvisos(
+        {
+          activos: considerados.filter((x) => r.activos.includes(x)),
+          previstos: considerados.filter((x) => r.previstos.includes(x)),
+        },
+        ahoraDate,
+      );
+      return {
+        text: finish([`${detalle}.`, ...lineas]),
+        structured: { estado, valor, detalle },
+      };
+    },
+  };
+
+  return [municipios, prevision, porHoras, avisosTool, comprobarAvisos];
 }
 
 /**
@@ -882,7 +1019,7 @@ function buildTools(ctx: AemetContext): ConnectorTool[] {
  * envuelve aquí para añadírsela: es condición de la licencia de AEMET, no un
  * adorno. No toca los demás errores (un fallo interno no es un dato de AEMET).
  */
-export function createAemetTools(ctx: AemetContext): ConnectorTool[] {
+export function createAemetTools(ctx: AemetContext): ConnectorTool<string | ToolOutput>[] {
   return buildTools(ctx).map((tool) => ({
     ...tool,
     handler: async (args, signal) => {

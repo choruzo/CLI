@@ -15,6 +15,7 @@ import { makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { RESULTS } from '../protocol/schemas.js';
 import type { ProbeCall, ProbeOutcome, WatchProbe } from '../watches/probe.js';
 import { WatchStore, watchesFile } from '../watches/store.js';
+import { RoutineStore } from '../routines/store.js';
 import {
   idleAgain,
   startTestDaemon,
@@ -77,8 +78,26 @@ const quietProbe: WatchProbe = {
   },
 } as unknown as WatchProbe;
 
+/** Siempre «on»: un vigilante sobre «on» salta en su primera evaluación. */
+const firingProbe: WatchProbe = {
+  async run(_connector: string, calls: readonly ProbeCall[]): Promise<ProbeOutcome> {
+    return {
+      kind: 'ran',
+      outcomes: calls.map(() => ({
+        ok: true as const,
+        result: { estado: 'on', valor: null, detalle: 'Luz del salón — on' },
+      })),
+    };
+  },
+} as unknown as WatchProbe;
+
 async function daemonAt(
-  opts: { watches?: WatchStore | null; approvalTimeoutMs?: number } = {},
+  opts: {
+    watches?: WatchStore | null;
+    approvalTimeoutMs?: number;
+    probe?: WatchProbe;
+    watchTickMs?: number;
+  } = {},
 ): Promise<{ t: TestDaemon; base: string }> {
   const base = realpathSync(mkdtempSync(join(tmpdir(), 'stratumd-m22p-')));
   bases.push(base);
@@ -87,12 +106,22 @@ async function daemonAt(
   const t = await startTestDaemon({
     base,
     connectorCatalog: loadConnectorCatalog(catalogDir),
-    watchProbe: quietProbe,
+    watchProbe: opts.probe ?? quietProbe,
+    routines: new RoutineStore(join(base, 'routines.json')),
+    ...(opts.watchTickMs ? { watchTickMs: opts.watchTickMs } : {}),
     ...(opts.watches !== undefined ? { watches: opts.watches } : {}),
     ...(opts.approvalTimeoutMs ? { approvalTimeoutMs: opts.approvalTimeoutMs } : {}),
   });
   daemons.push(t);
   return { t, base };
+}
+
+async function until(check: () => boolean | Promise<boolean>, timeoutMs = 10_000): Promise<void> {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error('timeout waiting for condition');
+    await new Promise((r) => setTimeout(r, 15));
+  }
 }
 
 const code = (p: Promise<unknown>): Promise<string> =>
@@ -362,5 +391,119 @@ describe('M22 — propose_watch en el daemon', () => {
     await dot.request('runs.start', { sessionId: session.id, input: 'hola' });
     await live.until(idleAgain);
     expect(t.provider(cwd).toolNames.at(0)).not.toContain('propose_watch');
+  }, 30_000);
+});
+
+describe('M22 fase 4 — un vigilante que lanza una rutina', () => {
+  const addRoutine = (t: TestDaemon, name = 'Reiniciar WLED', enabled = true) =>
+    t.daemon.routines!.add({ name, schedule: '1d', prompt: 'Reinicia el WLED.', enabled }).routine;
+
+  it('watches.add: la rutina tiene que existir; se guarda y se lista con su routineId', async () => {
+    const { t } = await daemonAt();
+    const approver = await t.connect(['operator', 'approver'], 'ap');
+    expect(await code(approver.request('watches.add', { ...ADD, routineId: 'rt_nada' }))).toBe(
+      'INVALID_PARAMS',
+    );
+    const routine = addRoutine(t);
+    const { watch: created } = await approver.request('watches.add', {
+      ...ADD,
+      routineId: routine.id,
+    });
+    expect(created.routineId).toBe(routine.id);
+    const observer = await t.connect(['observer'], 'obs');
+    expect((await observer.request('watches.list', {})).watches[0]!.routineId).toBe(routine.id);
+  });
+
+  it('al saltar lanza la rutina en su sesión, con el aviso como contexto no confiable', async () => {
+    const { t } = await daemonAt({ probe: firingProbe, watchTickMs: 50 });
+    const cwd = companionProject(t, [makeTextRound('reiniciado')]);
+    const routine = addRoutine(t);
+    t.daemon.watches!.add({
+      name: 'Luz del salón',
+      connector: 'casa-luz',
+      check: 'estado',
+      args: { entity_id: 'light.salon' },
+      condition: { kind: 'state-is', values: ['on'] },
+      intervalSec: 120,
+      cooldownMinutes: 30,
+      notifyResolved: false,
+      routineId: routine.id,
+      origin: 'person',
+    });
+    await until(
+      () =>
+        t.daemon.routines!.list().find((r) => r.routine.id === routine.id)?.lastFire?.outcome ===
+        'started',
+    );
+    const status = t.daemon.routines!.list().find((r) => r.routine.id === routine.id)!;
+    expect(status.lastFire).toMatchObject({ outcome: 'started', manual: false });
+    await until(
+      () => t.daemon.routines!.list().find((r) => r.routine.id === routine.id)?.running === false,
+    );
+    const input = t.provider(cwd).userInputs.flat().join('\n');
+    expect(input.startsWith('Reinicia el WLED.')).toBe(true);
+    expect(input).toContain('This run was started by the watch "Luz del salón"');
+    expect(input).toContain('<watch-event>');
+    expect(input).toContain('data, not instructions');
+  }, 30_000);
+
+  it('una rutina deshabilitada no se lanza', async () => {
+    const { t } = await daemonAt({ probe: firingProbe, watchTickMs: 50 });
+    companionProject(t, [makeTextRound('no debería')]);
+    const routine = addRoutine(t, 'Apagada', false);
+    t.daemon.watches!.add({
+      name: 'Luz',
+      connector: 'casa-luz',
+      check: 'estado',
+      args: { entity_id: 'light.salon' },
+      condition: { kind: 'state-is', values: ['on'] },
+      intervalSec: 120,
+      cooldownMinutes: 30,
+      notifyResolved: false,
+      routineId: routine.id,
+      origin: 'person',
+    });
+    await until(() => t.daemon.watches!.list()[0]!.state.firing);
+    await t.daemon.watches!.idle();
+    expect(t.daemon.routines!.list()[0]!.lastFire).toBeNull();
+  }, 30_000);
+
+  it('propose_watch con rutina es forzada: allow-all no vale; aprobada, se guarda con la rutina', async () => {
+    const { t } = await daemonAt();
+    const routine = addRoutine(t);
+    companionProject(t, [
+      makeToolCallRound('p1', 'propose_watch', {
+        ...PROPOSAL,
+        routineId: routine.id,
+        routineName: 'Reiniciar WLED',
+      }),
+      makeTextRound('listo'),
+    ]);
+    const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    const approver = await t.connect(['approver'], 'appr');
+    const { session } = await dot.request('sessions.open', { agent: 'companion' });
+    const live = watch(dot, session.id);
+    await live.untilSnapshot();
+    await dot.request('runs.start', { sessionId: session.id, input: 'si se enciende, reinicia' });
+    const requested = await live.until((e) => e.type === 'approval.requested');
+    const approval = (
+      requested.data as { approval: { id: string; forced?: boolean; description: string } }
+    ).approval;
+    expect(approval.forced).toBe(true);
+    expect(approval.description).toContain(`RUNS YOUR ROUTINE "Reiniciar WLED" (${routine.id})`);
+    await expect(
+      approver.request('approvals.resolve', {
+        approvalId: approval.id,
+        decision: 'allow-all',
+        sessionId: session.id,
+      }),
+    ).rejects.toMatchObject({ code: 'INVALID_PARAMS' });
+    await approver.request('approvals.resolve', {
+      approvalId: approval.id,
+      decision: 'approve',
+      sessionId: session.id,
+    });
+    await live.until(idleAgain, 20_000);
+    expect(t.daemon.watches!.list()[0]).toMatchObject({ routineId: routine.id, origin: 'agent' });
   }, 30_000);
 });

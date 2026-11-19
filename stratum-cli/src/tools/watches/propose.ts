@@ -7,8 +7,8 @@
  * Es una tool normal con confirmación, no una tool de control del loop: pasa
  * por el mismo `ToolDispatcher` (veto de read-only, `preflight`, confirmación) y
  * por el mismo centro de aprobaciones. *Decidido el 2026-11-19*: confirmación
- * **normal** si solo avisa (lo único que hay en la fase 3) y **forzada** si
- * lanza una rutina (fase 4: entonces `confirmAlways` dependerá de eso).
+ * **normal** si solo avisa y **forzada** (`confirmAlways`: ni allow-all ni
+ * concesiones) si lanza una rutina, porque entonces trabajo autónomo arranca solo.
  *
  * Quien aprueba ve el vigilante **entero** (`describeWatchProposal`): conector,
  * comprobación, argumentos, condición, intervalo y qué hace al saltar. Si no
@@ -43,6 +43,8 @@ export interface WatchProposals {
   define(request: Omit<WatchRequest, 'origin'>): WatchDefinitionOutcome;
   /** Por qué no se puede crear ahora (almacén en solo lectura, tope), o `null`. */
   blocked(): string | null;
+  /** Fase 4 — una rutina por id, para comprobar el nombre que enseña la confirmación. */
+  routine(id: string): { name: string; enabled: boolean } | undefined;
   /** Crea el vigilante. Lanza `WatchStoreError` si no se puede. */
   create(definition: WatchDefinition): { id: string; name: string };
 }
@@ -103,6 +105,23 @@ const schema = z.object({
       `Minimum minutes between two notices (default ${WATCH_LIMITS.defaultCooldownMinutes})`,
     ),
   notifyResolved: z.boolean().optional().describe('Also notify when it goes back to false'),
+  routineId: z
+    .string()
+    .trim()
+    .min(1)
+    .max(64)
+    .optional()
+    .describe(
+      'Optional: the id of an existing, enabled routine to run each time it fires (the id ' +
+        'propose_routine gave you). The routine gets what the watch saw as context',
+    ),
+  routineName: z
+    .string()
+    .trim()
+    .min(1)
+    .max(80)
+    .optional()
+    .describe('Required with routineId: the name of that routine, exactly'),
 });
 
 type Input = z.infer<typeof schema>;
@@ -132,6 +151,7 @@ function requestOf(input: Input): Omit<WatchRequest, 'origin'> {
     ...(input.intervalSec !== undefined ? { intervalSec: input.intervalSec } : {}),
     ...(input.cooldownMinutes !== undefined ? { cooldownMinutes: input.cooldownMinutes } : {}),
     ...(input.notifyResolved !== undefined ? { notifyResolved: input.notifyResolved } : {}),
+    ...(input.routineId !== undefined ? { routineId: input.routineId } : {}),
   };
 }
 
@@ -166,14 +186,19 @@ function conditionText(c: WatchDefinition['condition']): string {
  * Lo que ve quien aprueba: el vigilante **ya validado** (lo que se guardará),
  * entero. Los textos van entre comillas de JSON, que escapa los controles.
  */
-export function describeWatchDefinition(d: WatchDefinition): string {
+export function describeWatchDefinition(d: WatchDefinition, routineName?: string): string {
   const args = Object.keys(d.args).length > 0 ? ` with ${JSON.stringify(d.args)}` : '';
+  const action = d.routineId
+    ? `. When it fires it notifies you (Dot and Telegram) AND RUNS YOUR ROUTINE ` +
+      `${JSON.stringify(routineName ?? '')} (${d.routineId}) on its own, with nobody watching, ` +
+      `with what the watch saw as context; at most once every ${d.cooldownMinutes} min. `
+    : '. When it fires it only notifies you (Dot and Telegram); it runs nothing. ';
   return (
     `${PROPOSE_WATCH_TOOL}: new watch ${JSON.stringify(d.name)} on connector "${d.connector}", ` +
     `check "${d.check}"${args}. It fires when ${conditionText(d.condition)}; checked every ` +
     `${d.intervalSec} s, at most one notice every ${d.cooldownMinutes} min` +
     (d.notifyResolved ? ', and another one when it goes back to normal' : '') +
-    '. When it fires it only notifies you (Dot and Telegram); it runs nothing. ' +
+    action +
     'It keeps checking on its own until you pause or remove it.'
   );
 }
@@ -194,6 +219,7 @@ function shownDefinition(input: Input): WatchDefinition {
     intervalSec: input.intervalSec,
     cooldownMinutes: input.cooldownMinutes ?? WATCH_LIMITS.defaultCooldownMinutes,
     notifyResolved: input.notifyResolved ?? false,
+    ...(input.routineId !== undefined ? { routineId: input.routineId } : {}),
     origin: 'agent',
   };
 }
@@ -216,7 +242,9 @@ function sameDefinition(a: WatchDefinition, b: WatchDefinition): boolean {
  */
 export function describeWatchProposal(input: Record<string, unknown>): string {
   const parsed = schema.safeParse(input);
-  if (parsed.success) return describeWatchDefinition(shownDefinition(parsed.data));
+  if (parsed.success) {
+    return describeWatchDefinition(shownDefinition(parsed.data), parsed.data.routineName);
+  }
   const compact = JSON.stringify(input) ?? '';
   return `${PROPOSE_WATCH_TOOL}: ${compact.length > 300 ? compact.slice(0, 297) + '...' : compact}`;
 }
@@ -226,6 +254,26 @@ function validated(
   proposals: WatchProposals,
   input: Input,
 ): { ok: true; definition: WatchDefinition } | { ok: false; error: string } {
+  if (input.routineId !== undefined) {
+    // Lo que enseña la confirmación es el nombre que puso el agente: tiene que
+    // ser el de esa rutina, o quien aprueba vería una y correría otra.
+    const routine = proposals.routine(input.routineId);
+    if (!routine) return { ok: false, error: `There is no routine "${input.routineId}".` };
+    if (input.routineName !== routine.name) {
+      return {
+        ok: false,
+        error: `routineName must be the name of routine ${input.routineId}: ${JSON.stringify(routine.name)}.`,
+      };
+    }
+    if (!routine.enabled) {
+      return {
+        ok: false,
+        error: `Routine "${routine.name}" is disabled; the user has to enable it first.`,
+      };
+    }
+  } else if (input.routineName !== undefined) {
+    return { ok: false, error: 'routineName goes only with routineId.' };
+  }
   const outcome = proposals.define(requestOf(input));
   if (!outcome.ok) return outcome;
   if (!sameDefinition(outcome.definition, shownDefinition(input))) {
@@ -257,7 +305,12 @@ export function createProposeWatchTool(proposals: WatchProposals): ToolDefinitio
     schema,
     destructive: true,
     serialized: true,
-    // Fase 3: solo avisa → confirmación normal. Fase 4: forzada si lanza una rutina.
+    // Solo avisa → confirmación normal. Lanza una rutina → forzada: trabajo
+    // autónomo que arrancará solo; ni allow-all ni una concesión la saltan.
+    confirmAlways: (params: unknown) => {
+      const p = params as { routineId?: unknown } | null;
+      return typeof p?.routineId === 'string' && p.routineId.trim() !== '';
+    },
     preflight(params: unknown): ToolResult | null {
       const parsed = schema.safeParse(params);
       if (!parsed.success) return null; // el dispatcher ya informa del schema
@@ -266,7 +319,10 @@ export function createProposeWatchTool(proposals: WatchProposals): ToolDefinitio
       const outcome = validated(proposals, parsed.data);
       if (!outcome.ok) return recoverable(outcome.error);
       // Quien aprueba lo ve entero o no se le pregunta.
-      if (describeWatchDefinition(outcome.definition).length > WATCH_PROPOSAL_DESCRIPTION_MAX) {
+      if (
+        describeWatchDefinition(outcome.definition, parsed.data.routineName).length >
+        WATCH_PROPOSAL_DESCRIPTION_MAX
+      ) {
         return recoverable(
           'The watch is too long to show in full for approval: use a shorter name or arguments.',
         );
@@ -284,7 +340,8 @@ export function createProposeWatchTool(proposals: WatchProposals): ToolDefinitio
           ok: true,
           output:
             `Watch "${watch.name}" created (${watch.id}), approved by the user. ` +
-            'Stratum checks it on its own from now on; you will not see its notices.',
+            'Stratum checks it on its own from now on; you will not see its notices' +
+            (outcome.definition.routineId ? ' nor the runs of the routine it launches.' : '.'),
         };
       } catch (err) {
         if (err instanceof WatchStoreError) {

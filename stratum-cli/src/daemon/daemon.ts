@@ -154,6 +154,7 @@ import { WatchScheduler } from './watch-scheduler.js';
 import { WatchStore, watchesFile } from '../watches/store.js';
 import { connectorProbe, type WatchProbe } from '../watches/probe.js';
 import { defineWatch, type WatchRequest } from '../watches/define.js';
+import type { WatchTrigger } from '../watches/trigger.js';
 import {
   invalidWatch,
   toProtocolWatch,
@@ -536,6 +537,7 @@ export class Stratumd {
               }),
             // El aviso sale por el protocolo, en la sesión del `companion`.
             notify: (notice) => this.deliverWatchNotice(notice),
+            launchRoutine: (routineId, trigger) => this.launchWatchRoutine(routineId, trigger),
             now: this.now,
             ...(opts.watchTickMs ? { tickMs: opts.watchTickMs } : {}),
           });
@@ -2673,9 +2675,32 @@ export class Stratumd {
     return this.watches;
   }
 
-  /** M22 — valida un vigilante contra el catálogo, sin conectar. */
+  /** M22 — valida un vigilante contra el catálogo (y sus rutinas), sin conectar. */
   private defineWatch(request: WatchRequest): ReturnType<typeof defineWatch> {
-    return defineWatch(request, this.connectorCatalog);
+    return defineWatch(request, this.connectorCatalog, {
+      get: (id) => this.routineNamed(id),
+    });
+  }
+
+  /** M22 fase 4 — una rutina por id (para validar y enseñar un vigilante). */
+  private routineNamed(id: string): { name: string; enabled: boolean } | undefined {
+    const status = this.routines?.get(id);
+    return status ? { name: status.routine.name, enabled: status.routine.enabled } : undefined;
+  }
+
+  /**
+   * M22 fase 4 — un vigilante saltó y lanza su rutina: con sus reglas (su
+   * sesión, sin solapes, lo pendiente caduca a `deny`) y el aviso como contexto
+   * no confiable. Quitada o deshabilitada, no se lanza.
+   */
+  private async launchWatchRoutine(routineId: string, trigger: WatchTrigger): Promise<void> {
+    if (!this.routines) throw new Error('routines are disabled in this daemon');
+    const fire = await this.routines.runFromWatch(routineId, trigger);
+    if (!fire) {
+      log.warn('watch routine not launched: removed or disabled', { routineId });
+      return;
+    }
+    log.info('watch routine fired', { routineId, outcome: fire.outcome });
   }
 
   /** M22 — las comprobaciones del catálogo, con si su conector está activo. */
@@ -2699,6 +2724,7 @@ export class Stratumd {
     return {
       watchProposals: {
         define: (request) => this.defineWatch({ ...request, origin: 'agent' }),
+        routine: (id) => this.routineNamed(id),
         blocked: () => {
           if (watches.readOnly) return 'the watches file cannot be modified.';
           if (watches.list().length >= WATCH_LIMITS.watches) {

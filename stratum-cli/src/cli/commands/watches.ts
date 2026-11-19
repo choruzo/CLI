@@ -38,6 +38,7 @@ type WatchAddParams = {
   intervalSec?: number;
   cooldownMinutes?: number;
   notifyResolved?: boolean;
+  routineId?: string;
 };
 
 /** Un error del protocolo en una línea clara, con los motivos propios de los vigilantes. */
@@ -95,6 +96,7 @@ export function formatWatchesList(list: { watches: readonly ProtocolWatch[] }): 
     if (w.health === 'failing') parts.push('failing (cannot check)');
     if (w.health === 'suspended') parts.push('suspended');
     if (w.lastFiredAt !== null) parts.push(`last fired ${new Date(w.lastFiredAt).toISOString()}`);
+    if (w.routineId) parts.push(`runs routine ${w.routineId}`);
     if (w.origin === 'agent') parts.push('by the assistant');
     lines.push(`    ${parts.join(' · ')}`);
   }
@@ -136,7 +138,10 @@ export function formatWatchPreview(params: WatchAddParams, check: ProtocolWatchC
     `  every: ${interval}`,
     `  cooldown: ${params.cooldownMinutes ?? WATCH_LIMITS.defaultCooldownMinutes} min`,
     `  notifies when resolved: ${params.notifyResolved ? 'yes' : 'no'}`,
-    'It will check on its own and notify you in Dot and Telegram; it runs nothing.',
+    params.routineId
+      ? `It will check on its own, notify you in Dot and Telegram AND RUN ROUTINE ${params.routineId} ` +
+        'on its own each time it fires, with what it saw as context.'
+      : 'It will check on its own and notify you in Dot and Telegram; it runs nothing.',
   ];
   return lines.join('\n') + '\n';
 }
@@ -157,6 +162,7 @@ export interface WatchAddOptions {
   every?: string;
   cooldown?: string;
   notifyResolved?: boolean;
+  routine?: string;
 }
 
 export type ParsedWatchAdd = { ok: true; params: WatchAddParams } | { ok: false; error: string };
@@ -293,6 +299,8 @@ export function parseWatchAddOptions(
     params.cooldownMinutes = n;
   }
   if (opts.notifyResolved) params.notifyResolved = true;
+  // Que exista y esté habilitada lo dice el daemon (`INVALID_PARAMS`).
+  if (opts.routine !== undefined) params.routineId = opts.routine;
   return { ok: true, params };
 }
 
@@ -505,6 +513,10 @@ const add = new Command('add')
   .option('--every <dur>', 'interval between checks: 90, 90s, 5m, 1h')
   .option('--cooldown <min>', 'minimum minutes between two alerts')
   .option('--notify-resolved', 'also notify when the condition clears')
+  .option(
+    '--routine <id>',
+    'also run this routine each time it fires (see "stratum routines list")',
+  )
   .action((opts: WatchAddOptions) => withDeps((deps) => runAdd(deps, opts)));
 
 const pause = new Command('pause')

@@ -16,5 +16,5 @@ const forecast = new AemetForecast();
 const avisos = new AemetAvisos();
 
 serveStdio(
-  createMcpServer({ name: 'aemet', version: '1.0.0' }, createAemetTools({ forecast, avisos })),
+  createMcpServer({ name: 'aemet', version: '1.1.0' }, createAemetTools({ forecast, avisos })),
 );

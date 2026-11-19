@@ -814,6 +814,11 @@ export interface ProtocolWatch {
   firing: boolean;
   lastFiredAt: Timestamp | null;
   health: 'ok' | 'failing' | 'suspended';
+  /**
+   * Fase 4 — la rutina (M16) que lanza al saltar, con el aviso como contexto no
+   * confiable. Corre con sus reglas; una rutina deshabilitada o quitada no se lanza.
+   */
+  routineId?: string;
 }
 
 /**

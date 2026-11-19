@@ -37,6 +37,12 @@ const MANIFEST = {
   ],
 } as unknown as ConnectorManifest;
 
+const ROUTINE_LIST: Record<string, { name: string; enabled: boolean }> = {
+  rt_1: { name: 'Reiniciar WLED', enabled: true },
+  rt_off: { name: 'Apagada', enabled: false },
+};
+const ROUTINES = { get: (id: string) => ROUTINE_LIST[id] };
+
 const catalog = { get: (id: string) => (id === MANIFEST.id ? { manifest: MANIFEST } : undefined) };
 
 function proposals(over: Partial<WatchProposals> = {}): WatchProposals & {
@@ -45,8 +51,9 @@ function proposals(over: Partial<WatchProposals> = {}): WatchProposals & {
   const created: WatchDefinition[] = [];
   return {
     created,
-    define: (r) => defineWatch({ ...r, origin: 'agent' }, catalog),
+    define: (r) => defineWatch({ ...r, origin: 'agent' }, catalog, ROUTINES),
     blocked: () => null,
+    routine: (id) => ROUTINES.get(id),
     create: (d) => {
       created.push(d);
       return { id: 'wat_1', name: d.name };
@@ -68,7 +75,8 @@ describe('M22 — propose_watch', () => {
   it('solo avisa: confirmación normal (destructiva), no forzada', () => {
     const t = createProposeWatchTool(proposals());
     expect(t.destructive).toBe(true);
-    expect(t.confirmAlways).toBeUndefined();
+    // Sin rutina no es forzada: allow-all y las concesiones valen como en cualquier tool.
+    expect(t.confirmAlways?.(INPUT, ctx)).toBe(false);
   });
 
   it('quien aprueba ve el vigilante entero, con los valores por defecto ya puestos', () => {
@@ -171,5 +179,45 @@ describe('M22 — propose_watch', () => {
 
   it('describeWatchProposal no lanza con una entrada rara', () => {
     expect(() => describeWatchProposal({ name: 3, condition: null })).not.toThrow();
+  });
+
+  describe('fase 4 — lanzar una rutina', () => {
+    const WITH = { ...INPUT, routineId: 'rt_1', routineName: 'Reiniciar WLED' };
+
+    it('con rutina, la confirmación es forzada; sin ella, normal', () => {
+      const t = createProposeWatchTool(proposals());
+      expect(t.confirmAlways?.(WITH, ctx)).toBe(true);
+      expect(t.confirmAlways?.(INPUT, ctx)).toBe(false);
+    });
+
+    it('quien aprueba ve que corre la rutina, con su nombre e id', () => {
+      const text = describeCall({ id: 'c1', name: PROPOSE_WATCH_TOOL, input: WITH });
+      expect(text).toContain('RUNS YOUR ROUTINE "Reiniciar WLED" (rt_1) on its own');
+      expect(text).not.toContain('it runs nothing');
+    });
+
+    it('guarda el routineId', async () => {
+      const p = proposals();
+      const t = createProposeWatchTool(p);
+      expect(t.preflight?.(WITH, ctx)).toBeNull();
+      await t.execute(WITH, ctx);
+      expect(p.created[0]!.routineId).toBe('rt_1');
+    });
+
+    it('un nombre que no es el de esa rutina, una que no existe o una deshabilitada: veto', () => {
+      const t = createProposeWatchTool(proposals());
+      const veto = (input: Record<string, unknown>) => t.preflight?.(input, ctx);
+      expect(veto({ ...WITH, routineName: 'Otra' })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('"Reiniciar WLED"'),
+      });
+      expect(veto({ ...WITH, routineId: 'rt_nada' })).toMatchObject({ ok: false });
+      expect(veto({ ...WITH, routineId: 'rt_off', routineName: 'Apagada' })).toMatchObject({
+        ok: false,
+        error: expect.stringContaining('disabled'),
+      });
+      expect(veto({ ...INPUT, routineName: 'Reiniciar WLED' })).toMatchObject({ ok: false });
+      expect(veto({ ...WITH, routineName: undefined })).toMatchObject({ ok: false });
+    });
   });
 });

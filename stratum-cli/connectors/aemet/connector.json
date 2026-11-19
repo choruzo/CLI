@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "aemet",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "AEMET",
   "description": "Tiempo y avisos oficiales de España con los datos abiertos de la Agencia Estatal de Meteorología: previsión diaria y por horas de cualquier municipio y avisos Meteoalerta por zona o provincia.",
   "agents": ["companion"],
@@ -27,6 +27,42 @@
       "name": "aemet_avisos",
       "readOnly": true,
       "summary": "Avisos Meteoalerta vigentes de un municipio, de una provincia o de toda España."
+    },
+    {
+      "name": "aemet_comprobar_avisos",
+      "readOnly": true,
+      "summary": "Nivel más alto de los avisos de un municipio o provincia (por código INE), para vigilantes."
+    }
+  ],
+  "checks": [
+    {
+      "tool": "aemet_comprobar_avisos",
+      "summary": "Nivel más alto de los avisos Meteoalerta de un municipio o una provincia.",
+      "minIntervalSec": 900,
+      "args": [
+        {
+          "name": "municipio",
+          "type": "string",
+          "required": false,
+          "description": "Código INE del municipio, de 5 dígitos (excluyente con provincia)",
+          "maxLength": 5,
+          "pattern": "[0-9]{5}"
+        },
+        {
+          "name": "provincia",
+          "type": "string",
+          "required": false,
+          "description": "Código INE de la provincia, de 2 dígitos (excluyente con municipio)",
+          "maxLength": 2,
+          "pattern": "[0-9]{2}"
+        },
+        {
+          "name": "incluir_previstos",
+          "type": "boolean",
+          "required": false,
+          "description": "Cuenta también los avisos previstos que aún no empiezan (por defecto, solo los activos)"
+        }
+      ]
     }
   ]
 }

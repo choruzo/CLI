@@ -731,6 +731,7 @@ export const watchSchema: z.ZodType<ProtocolWatch> = z.object({
   firing: z.boolean(),
   lastFiredAt: timestamp.nullable(),
   health: z.enum(['ok', 'failing', 'suspended']),
+  routineId: id.optional(),
 });
 
 export const watchCheckSchema: z.ZodType<ProtocolWatchCheck> = z.object({
@@ -1573,6 +1574,7 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
       intervalSec: watchInterval.optional(),
       cooldownMinutes: watchCooldown.optional(),
       notifyResolved: z.boolean().optional(),
+      routineId: id.optional(),
       operationId,
     })
     .strict(),

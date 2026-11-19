@@ -2736,6 +2736,15 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     - `stratum watches list|checks|add|pause|resume|remove`; `add` enseña el vigilante y pide la
       clave de aprobador.
     - Panel *Watches* en Dot (sin crear) y aviso del SO de cada `watch.notice`.
+    *Fase 4* (2026-11-19):
+    - Lanzar una rutina al saltar (`routineId`), solo con `fired`, con sus reglas de M16. El prompt
+      de la rutina va intacto y primero, y el aviso detrás como dato no confiable. Una rutina
+      deshabilitada o quitada no se lanza. `propose_watch` con rutina tiene confirmación forzada y
+      enseña su nombre, comprobado contra el id.
+    - Comprobaciones `aemet_comprobar_avisos`, `cercanias_comprobar_avisos`, `gmail_comprobar` y
+      `tareas_comprobar_vencidas` (imagen v10). Lo que no se puede leer es fallo, nunca «nada».
+    - Con esto, la parte 1 (vigilantes) queda cerrada. Siguen Google Calendar, MCP por HTTP, el
+      historial de Home Assistant y la caja que se para.
 
   *2. Google Calendar*: dentro del conector `google`, con el mismo OAuth.
   - Ámbito nuevo `calendar.events` (crear y mover) o solo `calendar.readonly`. *Pendiente* cuál.

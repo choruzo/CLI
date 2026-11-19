@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "google",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Google (Gmail y Tasks)",
   "description": "Lee tu correo de Gmail y deja borradores (nunca envía), y consulta y crea tus tareas de Google Tasks, con un cliente OAuth propio.",
   "agents": ["companion"],
@@ -62,6 +62,48 @@
       "name": "tareas_completar",
       "readOnly": false,
       "summary": "Marca una tarea de Google Tasks como hecha."
+    },
+    {
+      "name": "gmail_comprobar",
+      "readOnly": true,
+      "summary": "Comprueba si hay correos que cumplan una búsqueda (para vigilantes)."
+    },
+    {
+      "name": "tareas_comprobar_vencidas",
+      "readOnly": true,
+      "summary": "Cuenta las tareas pendientes ya vencidas (para vigilantes)."
+    }
+  ],
+  "checks": [
+    {
+      "tool": "gmail_comprobar",
+      "summary": "Correos que cumplen una búsqueda de Gmail (estado: id del más reciente).",
+      "minIntervalSec": 300,
+      "args": [
+        {
+          "name": "consulta",
+          "type": "string",
+          "required": true,
+          "description": "Búsqueda de Gmail (p. ej. is:unread from:banco.example.com)",
+          "maxLength": 200,
+          "pattern": "[^\\u0000-\\u001f]+"
+        }
+      ]
+    },
+    {
+      "tool": "tareas_comprobar_vencidas",
+      "summary": "Tareas pendientes con fecha anterior a hoy.",
+      "minIntervalSec": 900,
+      "args": [
+        {
+          "name": "lista",
+          "type": "string",
+          "required": false,
+          "description": "Id de la lista, tal como lo da tareas_listar (por defecto la principal)",
+          "maxLength": 200,
+          "pattern": "[A-Za-z0-9_@-]+"
+        }
+      ]
     }
   ]
 }

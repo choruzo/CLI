@@ -70,7 +70,7 @@ describe('server de AEMET empaquetado', () => {
       expect(client.tools.map((t) => t.name).sort()).toEqual(
         manifest.tools.map((t) => t.name).sort(),
       );
-      expect(client.tools).toHaveLength(4);
+      expect(client.tools).toHaveLength(manifest.tools.length);
       expect(manifest.tools.every((t) => t.readOnly)).toBe(true);
       // Los municipios salen de la tabla empaquetada: nada de red.
       const res = JSON.stringify(await client.callTool('aemet_municipios', { nombre: 'Getafe' }));

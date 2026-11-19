@@ -64,6 +64,8 @@ export interface StoredWatch {
   origin: 'agent' | 'person';
   createdAt: number;
   state: WatchState;
+  /** Fase 4 — la rutina que lanza al saltar (ausente: solo avisa). */
+  routineId?: string;
 }
 
 const nullableTime = z.number().int().nullable();
@@ -95,6 +97,7 @@ const StoredWatchSchema = z
     origin: z.enum(['agent', 'person']),
     createdAt: z.number().int(),
     state: StateSchema,
+    routineId: z.string().min(1).optional(),
   })
   .passthrough();
 

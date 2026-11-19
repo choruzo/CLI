@@ -5,7 +5,7 @@
  * inyectan para testear sin red.
  */
 import { z } from 'zod';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import {
   RealtimeUse,
   estimateStops,
@@ -246,6 +246,86 @@ class TripEstimates {
 async function loadRt(rt: RealtimeUse, signal?: AbortSignal): Promise<RtData> {
   const [updates, vehicles] = await Promise.all([rt.tripUpdates(signal), rt.vehicles(signal)]);
   return { updates, vehicles };
+}
+
+// --- Avisos ------------------------------------------------------------------
+
+type AlertItem = NonNullable<Awaited<ReturnType<RealtimeUse['alerts']>>>[number];
+
+/** ¿Está vigente ahora (`epoch`, en segundos) un aviso? Sin periodos, siempre. */
+function isActiveAlert(al: AlertItem, epoch: number): boolean {
+  return (
+    al.periods.length === 0 ||
+    al.periods.some(
+      (p) =>
+        (p.start === undefined || p.start <= epoch) &&
+        (p.end === undefined || p.end === 0 || p.end >= epoch),
+    )
+  );
+}
+
+/** A qué líneas y estaciones se refiere un aviso (con caché de ruta → línea). */
+function alertRefs(ix: RenfeIndex): (al: AlertItem) => { lines: Set<string>; stops: Set<string> } {
+  const lineOf = new Map<string, string | undefined>();
+  const routeLine = (routeId: string): string | undefined => {
+    if (!lineOf.has(routeId)) lineOf.set(routeId, ix.lineOfRoute(routeId));
+    return lineOf.get(routeId);
+  };
+  return (al) => {
+    const lines = new Set<string>();
+    const stops = new Set<string>();
+    for (const e of al.entities) {
+      if (e.routeId) {
+        const l = routeLine(e.routeId);
+        if (l) lines.add(l);
+      }
+      if (e.tripId) {
+        const l = ix.trip(e.tripId)?.lineId;
+        if (l) lines.add(l);
+      }
+      if (e.stopId) stops.add(e.stopId);
+    }
+    return { lines, stops };
+  };
+}
+
+interface AlertFilter {
+  nucleoRow?: NucleoRow | undefined;
+  lineRow?: LineRow | undefined;
+  station?: StopInfo | undefined;
+}
+
+/** ¿Afecta el aviso (ya resuelto a líneas y estaciones) a lo pedido? */
+function alertMatches(
+  ix: RenfeIndex,
+  { lines, stops }: { lines: Set<string>; stops: Set<string> },
+  { nucleoRow, lineRow, station }: AlertFilter,
+): boolean {
+  if (nucleoRow) {
+    const inNucleo =
+      [...lines].some((l) => ix.line(l)?.nucleo === nucleoRow.id) ||
+      [...stops].some((s) => ix.nucleosAt(s).includes(nucleoRow.id));
+    if (!inNucleo) return false;
+  }
+  if (lineRow) {
+    const lineStops = new Set(ix.lineStops(lineRow.id).map((s) => s.stopId));
+    if (!lines.has(lineRow.id) && ![...stops].some((s) => lineStops.has(s))) return false;
+  }
+  if (station) {
+    const here = new Set(ix.linesAt(station.stopId));
+    if (!stops.has(station.stopId) && ![...lines].some((l) => here.has(l))) return false;
+  }
+  return true;
+}
+
+/** Texto de un aviso en una línea, recortado (viene de Renfe: nunca se fía de su tamaño). */
+function alertText(al: AlertItem, max = 300): string {
+  const head = al.header?.trim();
+  const desc = al.description?.trim();
+  const txt = (
+    head && desc && head !== desc ? `${head}: ${desc}` : (desc ?? head ?? 'Aviso sin texto')
+  ).replace(/\s+/g, ' ');
+  return txt.length > max ? `${txt.slice(0, max - 3)}…` : txt;
 }
 
 // --- Las tools ---------------------------------------------------------------
@@ -917,57 +997,10 @@ export function createRenfeTools(ctx: RenfeContext): ConnectorTool[] {
         if (!alerts) {
           return `Sin datos de tiempo real: ahora mismo no puedo consultar los avisos de Renfe${scope ? ` (${scope})` : ''}.`;
         }
-        const active = alerts.filter(
-          (al) =>
-            al.periods.length === 0 ||
-            al.periods.some(
-              (p) =>
-                (p.start === undefined || p.start <= c.epoch) &&
-                (p.end === undefined || p.end === 0 || p.end >= c.epoch),
-            ),
-        );
-
-        // A qué líneas y estaciones se refiere un aviso.
-        const lineOf = new Map<string, string | undefined>();
-        const routeLine = (routeId: string): string | undefined => {
-          if (!lineOf.has(routeId)) lineOf.set(routeId, ix.lineOfRoute(routeId));
-          return lineOf.get(routeId);
-        };
-        const refs = (al: (typeof active)[number]) => {
-          const lines = new Set<string>();
-          const stops = new Set<string>();
-          for (const e of al.entities) {
-            if (e.routeId) {
-              const l = routeLine(e.routeId);
-              if (l) lines.add(l);
-            }
-            if (e.tripId) {
-              const l = ix.trip(e.tripId)?.lineId;
-              if (l) lines.add(l);
-            }
-            if (e.stopId) stops.add(e.stopId);
-          }
-          return { lines, stops };
-        };
-
-        const filtered = active.filter((al) => {
-          const { lines, stops } = refs(al);
-          if (nucleoRow) {
-            const inNucleo =
-              [...lines].some((l) => ix.line(l)?.nucleo === nucleoRow.id) ||
-              [...stops].some((s) => ix.nucleosAt(s).includes(nucleoRow.id));
-            if (!inNucleo) return false;
-          }
-          if (lineRow) {
-            const lineStops = new Set(ix.lineStops(lineRow.id).map((s) => s.stopId));
-            if (!lines.has(lineRow.id) && ![...stops].some((s) => lineStops.has(s))) return false;
-          }
-          if (station) {
-            const here = new Set(ix.linesAt(station.stopId));
-            if (!stops.has(station.stopId) && ![...lines].some((l) => here.has(l))) return false;
-          }
-          return true;
-        });
+        const refs = alertRefs(ix);
+        const filtered = alerts
+          .filter((al) => isActiveAlert(al, c.epoch))
+          .filter((al) => alertMatches(ix, refs(al), { nucleoRow, lineRow, station }));
 
         if (!nucleoRow && !lineRow && !station) {
           const per = new Map<string, number>();
@@ -1019,15 +1052,7 @@ export function createRenfeTools(ctx: RenfeContext): ConnectorTool[] {
             start > 0
               ? ` (desde ${madridParts(new Date(start * 1000)).ymd === c.ymd ? hhmmOfEpoch(start) : dateEs(madridParts(new Date(start * 1000)).ymd)})`
               : '';
-          const head = al.header?.trim();
-          const desc = al.description?.trim();
-          let txt =
-            head && desc && head !== desc
-              ? `${head}: ${desc}`
-              : (desc ?? head ?? 'Aviso sin texto');
-          txt = txt.replace(/\s+/g, ' ');
-          if (txt.length > 300) txt = `${txt.slice(0, 297)}…`;
-          return `· ${where ? `[${where}] ` : ''}${txt}${when}`;
+          return `· ${where ? `[${where}] ` : ''}${alertText(al)}${when}`;
         });
         if (sorted.length > MAX_ALERTS) {
           body.push(`… y ${sorted.length - MAX_ALERTS} avisos más: afina con linea o estacion.`);
@@ -1037,4 +1062,124 @@ export function createRenfeTools(ctx: RenfeContext): ConnectorTool[] {
   };
 
   return [nucleos, lineas, estaciones, salidas, trayecto, tren, avisos];
+}
+
+// --- Comprobación para vigilantes (M22) --------------------------------------
+
+const ComprobarAvisosSchema = z.object({
+  nucleo: z
+    .string({ message: 'nucleo debe ser el id de un núcleo (cercanias_nucleos)' })
+    .trim()
+    .regex(/^[a-z]+(-[a-z]+)*$/, 'nucleo debe ser el id de un núcleo (cercanias_nucleos)')
+    .max(40),
+  linea: z
+    .string({ message: 'linea debe ser el nombre corto de una línea ("C3")' })
+    .trim()
+    .regex(/^[A-Za-z0-9]{1,12}$/, 'linea debe ser el nombre corto de una línea ("C3")')
+    .optional(),
+});
+
+/** Tope de la línea `detalle` (el de `parseCheckResult` es 300). */
+const CHECK_DETAIL_CHARS = 280;
+
+/**
+ * Comprobaciones de Cercanías que evalúa un vigilante del daemon sin el LLM.
+ * Aparte de `createRenfeTools` porque devuelven `ToolOutput` (texto + resultado
+ * estructurado). Argumentos sin ambigüedad: nunca elige entre candidatos.
+ */
+export function createRenfeCheckTools(ctx: RenfeContext): ConnectorTool<ToolOutput>[] {
+  const nowFn = ctx.now ?? (() => new Date());
+
+  const comprobarAvisos: ConnectorTool<ToolOutput> = {
+    name: 'cercanias_comprobar_avisos',
+    description:
+      'Número de avisos e incidencias activos de Renfe en un núcleo (y, si se indica, en una línea), de solo lectura ' +
+      'y además en forma estructurada: es la tool que comprueban los vigilantes, sin el modelo. ' +
+      'Pide el id exacto del núcleo (cercanias_nucleos) y el nombre corto de la línea ("C3"); no elige entre candidatos.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        nucleo: {
+          type: 'string',
+          description: 'Id del núcleo tal como lo da cercanias_nucleos (p. ej. "madrid").',
+        },
+        linea: {
+          type: 'string',
+          description: 'Nombre corto de la línea en ese núcleo (p. ej. "C3"), opcional.',
+        },
+      },
+      required: ['nucleo'],
+      additionalProperties: false,
+    },
+    outputSchema: {
+      type: 'object',
+      properties: {
+        estado: { type: 'string', enum: ['sin_avisos', 'con_avisos'] },
+        valor: { type: ['number', 'null'] },
+        detalle: { type: 'string' },
+      },
+      required: ['estado', 'valor', 'detalle'],
+      additionalProperties: false,
+    },
+    async handler(args, signal) {
+      const a = parseArgs(ComprobarAvisosSchema, args);
+      return ctx.withIndex(async (ix) => {
+        const nucleoRow = ix.nucleos().find((n) => n.id === a.nucleo);
+        if (!nucleoRow) {
+          throw new ToolUserError(
+            `No existe el núcleo «${a.nucleo}»: usa cercanias_nucleos para dar con su id exacto.`,
+          );
+        }
+        let lineRow: LineRow | undefined;
+        if (a.linea) {
+          const r = ix.resolveLine(a.linea, [nucleoRow.id]);
+          if (r.kind !== 'one') {
+            throw new ToolUserError(
+              `No hay una línea «${a.linea}» única en ${nucleoRow.name}: usa cercanias_lineas con nucleo: "${nucleoRow.id}" para ver sus nombres.`,
+            );
+          }
+          lineRow = r.value;
+        }
+        const rt = new RealtimeUse(ctx.realtime);
+        const alerts = await rt.alerts(signal);
+        // Sin el feed no se sabe nada: es un fallo de la comprobación, nunca «sin avisos».
+        if (!alerts) {
+          throw new ToolUserError(
+            'No pude leer los avisos de Renfe ahora mismo, así que no sé si hay incidencias.',
+          );
+        }
+        const epoch = Math.floor(nowFn().getTime() / 1000);
+        const refs = alertRefs(ix);
+        const hits = alerts
+          .filter((al) => isActiveAlert(al, epoch))
+          .map((al) => ({ al, r: refs(al) }))
+          .filter(({ r }) => alertMatches(ix, r, { nucleoRow, lineRow }));
+
+        const scope = lineRow ? `${nucleoRow.name} ${lineRow.shortName}` : nucleoRow.name;
+        let detalle: string;
+        if (hits.length === 0) {
+          detalle = `Sin avisos en ${scope}`;
+        } else {
+          const first = hits[0]!;
+          const names = [...first.r.lines].map((l) => ix.line(l)?.shortName ?? l).slice(0, 3);
+          const tag = names.length > 0 ? `[${names.join(', ')}] ` : '';
+          const more = hits.length > 1 ? ` (${hits.length} avisos en ${scope})` : '';
+          const room = CHECK_DETAIL_CHARS - tag.length - more.length;
+          const txt = alertText(first.al, Math.max(room, 20));
+          detalle = `${tag}${txt}${more}`;
+        }
+        const estado = hits.length === 0 ? 'sin_avisos' : 'con_avisos';
+        const text = [
+          hits.length === 0
+            ? `Sin avisos activos en ${scope}.`
+            : `${hits.length} ${hits.length === 1 ? 'aviso activo' : 'avisos activos'} en ${scope}: ${detalle}`,
+          `Para vigilantes: estado «${estado}», valor ${hits.length}`,
+          attribution(ix.meta.feedDate, rt.latest),
+        ].join('\n');
+        return { text, structured: { estado, valor: hits.length, detalle } };
+      });
+    },
+  };
+
+  return [comprobarAvisos];
 }

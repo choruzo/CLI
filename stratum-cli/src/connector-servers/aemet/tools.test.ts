@@ -12,7 +12,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import { AemetForecast, DIARIA_URL, HORARIA_URL } from './forecast.js';
 import { ATRIBUCION, createAemetTools } from './tools.js';
 import { AemetAvisos, enlacesCap, RSS_URL } from './warnings.js';
@@ -69,7 +69,7 @@ interface Opciones {
 
 /** Las tools con su `fetch` y su reloj fijos, y lo que se pidió a AEMET. */
 function servidor(opts: Opciones = {}): {
-  tools: Record<string, ConnectorTool>;
+  tools: Record<string, ConnectorTool<string | ToolOutput>>;
   peticiones: string[];
 } {
   const { fetchImpl, peticiones } = fetchFalso(base(opts.respuestas), opts.estado);
@@ -82,12 +82,24 @@ function servidor(opts: Opciones = {}): {
   return { tools: Object.fromEntries(createAemetTools(ctx).map((t) => [t.name, t])), peticiones };
 }
 
-function tools(opts: Opciones = {}): Record<string, ConnectorTool> {
+function tools(opts: Opciones = {}): Record<string, ConnectorTool<string | ToolOutput>> {
   return servidor(opts).tools;
 }
 
+/** Texto de una salida: las comprobaciones devuelven además lo estructurado. */
+function textoDe(out: string | ToolOutput): string {
+  return typeof out === 'string' ? out : out.text;
+}
+
 async function call(name: string, args: object, opts: Opciones = {}): Promise<string> {
-  return tools(opts)[name]!.handler(args);
+  return textoDe(await tools(opts)[name]!.handler(args));
+}
+
+/** Resultado estructurado de una comprobación. */
+async function comprobar(args: object, opts: Opciones = {}): Promise<ToolOutput> {
+  const out = await tools(opts)['aemet_comprobar_avisos']!.handler(args);
+  if (typeof out === 'string') throw new Error('debía devolver un resultado estructurado');
+  return out;
 }
 
 async function error(name: string, args: object, opts: Opciones = {}): Promise<string> {
@@ -505,7 +517,7 @@ describe('flags.from con forecast: true', () => {
     // Játar (18106) viene de un override con `forecast: true`, `from: 18020`
     // (Arenas del Rey): AEMET lo publica con su propio código.
     const s = servidor({ respuestas: { [`${DIARIA_URL}18106.xml`]: locBytes } });
-    const out = await s.tools['aemet_prevision']!.handler({ municipio: 'jatar', dias: 1 });
+    const out = textoDe(await s.tools['aemet_prevision']!.handler({ municipio: 'jatar', dias: 1 }));
     expect(out.split('\n')[0]).toBe('Previsión de Játar (Granada, 18106) para 1 día:');
     expect(out).not.toContain('Arenas del Rey');
     expect(s.peticiones).toEqual([`${DIARIA_URL}18106.xml`]);
@@ -560,5 +572,92 @@ describe('atribución en toda salida y en todo error', () => {
     const msg = await error(name, args);
     expect(msg.split('\n')[0]).not.toContain('Fuente: AEMET');
     expect(ultima(msg)).toBe(ATRIBUCION);
+  });
+});
+
+describe('aemet_comprobar_avisos', () => {
+  const conNivel = (nivel: string): Opciones => ({
+    respuestas: { '*': capXml.replaceAll('<value>amarillo</value>', `<value>${nivel}</value>`) },
+  });
+  /** El mismo CAP empezando mañana: publicado, pero aún no en vigor. */
+  const previsto: Opciones = {
+    respuestas: {
+      '*': capXml
+        .replaceAll('2026-11-17T19:00:00+01:00', '2026-11-18T08:00:00+01:00')
+        .replaceAll('2026-11-18T23:59:59+01:00', '2026-11-19T23:59:59+01:00'),
+    },
+  };
+
+  it('amarillo: valor 1, con la zona, el fenómeno y la cuenta', async () => {
+    const r = await comprobar({ municipio: '27019' });
+    expect(r.structured).toEqual({
+      estado: 'amarillo',
+      valor: 1,
+      detalle: 'Aviso amarillo de Vientos en Foz (Lugo, 27019); 1 aviso',
+    });
+    expect(ultima(r.text)).toBe(ATRIBUCION);
+  });
+
+  it.each([
+    ['naranja', 2],
+    ['rojo', 3],
+  ])('%s: valor %i', async (nivel, valor) => {
+    const r = await comprobar({ provincia: '27' }, conNivel(nivel));
+    expect(r.structured).toEqual({
+      estado: nivel,
+      valor,
+      detalle: `Aviso ${nivel} de Vientos en la provincia de Lugo; 1 aviso`,
+    });
+  });
+
+  it('ninguno: valor 0 (no null) cuando la zona no tiene avisos', async () => {
+    const r = await comprobar({ municipio: '28065' });
+    expect(r.structured).toEqual({
+      estado: 'ninguno',
+      valor: 0,
+      detalle: 'Sin avisos activos en Getafe (Madrid, 28065)',
+    });
+    expect(ultima(r.text)).toBe(ATRIBUCION);
+  });
+
+  it('solo cuenta los activos, salvo con incluir_previstos', async () => {
+    const solo = await comprobar({ provincia: '27' }, previsto);
+    expect(solo.structured).toMatchObject({ estado: 'ninguno', valor: 0 });
+    const con = await comprobar({ provincia: '27', incluir_previstos: true }, previsto);
+    expect(con.structured).toMatchObject({ estado: 'amarillo', valor: 1 });
+    expect(con.text).toContain('Previsto');
+  });
+
+  it('sin argumentos o con los dos: error, no un estado', async () => {
+    for (const args of [{}, { municipio: '27019', provincia: '27' }]) {
+      const msg = await error('aemet_comprobar_avisos', args);
+      expect(msg).toContain('exactamente uno');
+      expect(ultima(msg)).toBe(ATRIBUCION);
+    }
+  });
+
+  it('solo acepta códigos INE que existen', async () => {
+    expect(await error('aemet_comprobar_avisos', { municipio: 'Foz' })).toContain('5 dígitos');
+    expect(await error('aemet_comprobar_avisos', { provincia: 'Lugo' })).toContain('2 dígitos');
+    expect(await error('aemet_comprobar_avisos', { municipio: '99999' })).toContain('No existe');
+    expect(await error('aemet_comprobar_avisos', { provincia: '99' })).toContain('No existe');
+  });
+
+  it('un CAP que no se descarga: error, nunca un nivel', async () => {
+    const [fallido] = enlacesCap(espXml);
+    const msg = await error(
+      'aemet_comprobar_avisos',
+      { provincia: '27' },
+      { respuestas: { [fallido!]: { estado: 503 } } },
+    );
+    expect(msg).toContain(
+      'no se pudieron leer 1 de los avisos de AEMET; no se puede saber el nivel',
+    );
+    expect(ultima(msg)).toBe(ATRIBUCION);
+  });
+
+  it('AEMET caído: error (fallo), nunca «ninguno»', async () => {
+    const msg = await error('aemet_comprobar_avisos', { municipio: '27019' }, { estado: 503 });
+    expect(msg).toContain('AEMET no responde ahora mismo');
   });
 });

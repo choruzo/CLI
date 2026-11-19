@@ -99,6 +99,7 @@ describe('el panel de vigilantes', () => {
     expect(items[1]!.textContent).toContain('paused');
     expect(items[1]!.textContent).toContain('Cannot check');
     expect(items[1]!.textContent).not.toContain('By the assistant');
+    expect(items.some((li) => li.textContent?.includes('Runs a routine'))).toBe(false);
     expect(items[2]!.textContent).toContain('state changes');
     expect(items[2]!.textContent).toContain('Suspended');
   });
@@ -265,4 +266,13 @@ describe('el aviso de un vigilante', () => {
     expect(useUi.getState().assistantTab).toBe('watches');
     expect(useWatches.getState().watches).toEqual([]);
   });
+});
+
+it('M22 fase 4 — un vigilante que lanza una rutina lo dice en el panel', async () => {
+  const native = fakeNative();
+  native.calls.watchesList.mockResolvedValue(list([sampleWatch({ routineId: 'rt_abc1234567' })]));
+  await withPanel(native);
+  await waitFor(() => expect(within(panel()).getAllByRole('listitem')).toHaveLength(1));
+  const item = within(panel()).getByRole('listitem');
+  expect(item.textContent).toContain('Runs a routine');
 });

@@ -7,7 +7,7 @@
  * correo: solo crea borradores que la persona revisa desde Gmail.
  */
 import { z } from 'zod';
-import { ToolUserError, type ConnectorTool } from '../lib/mcp-stdio.js';
+import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import {
   GoogleNotFoundError,
   createGoogleAuth,
@@ -48,6 +48,13 @@ const MAX_ADDRESSES = 20;
 const MAX_ATTACHMENTS = 20;
 const DEFAULT_TASKS = 30;
 const DEFAULT_LIST_ID = '@default';
+
+/** Tope de correos que cuenta `gmail_comprobar` (una página de la API). */
+const CHECK_MAX_MESSAGES = 50;
+/** Detalle de una comprobación: una línea corta. */
+const MAX_DETAIL = 300;
+const MAX_OVERDUE_TITLES = 3;
+const TASK_TITLE_MAX = 60;
 
 const ID_RE = /^[A-Za-z0-9_-]{6,64}$/;
 const TASK_ID_RE = /^[A-Za-z0-9_-]{1,128}$/;
@@ -173,6 +180,37 @@ const CompletarSchema = z.object({
     .max(200, 'lista admite como máximo 200 caracteres')
     .optional(),
 });
+
+const ComprobarCorreoSchema = z.object({
+  consulta: z
+    .string({ message: 'consulta debe ser un texto con la búsqueda de Gmail' })
+    .trim()
+    .min(1, 'consulta no puede estar vacía')
+    .max(200, 'consulta admite como máximo 200 caracteres'),
+});
+
+const ComprobarTareasSchema = z.object({
+  lista: z
+    .string({ message: 'lista debe ser el id o el título de una lista' })
+    .trim()
+    .min(1, 'lista no puede estar vacío')
+    .max(200, 'lista admite como máximo 200 caracteres')
+    .optional(),
+});
+
+/** Hoy en Madrid con la forma AAAA-MM-DD (las fechas de Tasks son días, sin hora). */
+function todayMadrid(now: number): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Madrid',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(now));
+}
+
+function cutDetail(text: string): string {
+  return text.length > MAX_DETAIL ? `${text.slice(0, MAX_DETAIL - 1)}…` : text;
+}
 
 function parseArgs<T>(schema: z.ZodType<T>, args: unknown): T {
   const r = schema.safeParse(args ?? {});
@@ -316,7 +354,7 @@ function taskLine(task: unknown): string {
 
 // --- Tools -------------------------------------------------------------------
 
-export function createGoogleTools(opts: GoogleOptions): ConnectorTool[] {
+export function createGoogleTools(opts: GoogleOptions): ConnectorTool<string | ToolOutput>[] {
   const auth = createGoogleAuth(opts);
 
   function need(): GoogleAuth {
@@ -634,5 +672,142 @@ export function createGoogleTools(opts: GoogleOptions): ConnectorTool[] {
     },
   };
 
-  return [gmailBuscar, gmailLeer, gmailBorrador, tareasListar, tareasCrear, tareasCompletar];
+  const checkOutputSchema = {
+    type: 'object',
+    properties: {
+      estado: { type: 'string' },
+      valor: { type: ['number', 'null'] },
+      detalle: { type: 'string' },
+    },
+    required: ['estado', 'valor', 'detalle'],
+    additionalProperties: false,
+  } as const;
+
+  const gmailComprobar: ConnectorTool<string | ToolOutput> = {
+    name: 'gmail_comprobar',
+    description:
+      'Comprueba si hay correos que cumplan una búsqueda de Gmail, de solo lectura y además en forma ' +
+      'estructurada: es la tool que comprueban los vigilantes, sin el modelo. El estado es «ninguno» o el id ' +
+      'del correo más reciente; el valor, cuántos hay (hasta 50). No lee el cuerpo.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        consulta: {
+          type: 'string',
+          description: 'Búsqueda de Gmail (p. ej. is:unread from:banco.example.com).',
+        },
+      },
+      required: ['consulta'],
+      additionalProperties: false,
+    },
+    outputSchema: checkOutputSchema,
+    async handler(args, signal) {
+      const a = need();
+      const parsed = parseArgs(ComprobarCorreoSchema, args);
+      const url =
+        `${GMAIL}messages?maxResults=${CHECK_MAX_MESSAGES}` +
+        `&q=${encodeURIComponent(parsed.consulta)}`;
+      const listed = await a.api('GET', url, undefined, signal);
+      const ids = messageIds(listed);
+      if (ids.length === 0) {
+        return {
+          text: 'Ningún correo cumple la búsqueda.\nPara vigilantes: estado «ninguno», valor 0',
+          structured: { estado: 'ninguno', valor: 0, detalle: 'Ningún correo cumple la búsqueda.' },
+        };
+      }
+      const latest = ids[0]!;
+      const data = await a.api(
+        'GET',
+        `${GMAIL}messages/${pathId(latest)}?format=metadata&metadataHeaders=From&metadataHeaders=Subject`,
+        undefined,
+        signal,
+      );
+      const headers = payloadHeaders(data);
+      const from = safeField(headerOf(headers, 'From'), 80) || '(remitente no informado)';
+      const subject =
+        safeField(decodeEntities(headerOf(headers, 'Subject')), 100) || '(sin asunto)';
+      const more =
+        ids.length >= CHECK_MAX_MESSAGES ||
+        (isRecord(listed) && typeof listed.nextPageToken === 'string');
+      const valor = Math.min(ids.length, CHECK_MAX_MESSAGES);
+      const count = more
+        ? `${CHECK_MAX_MESSAGES} o más correos (se cuentan hasta ${CHECK_MAX_MESSAGES})`
+        : `${valor} ${valor === 1 ? 'correo' : 'correos'}`;
+      const estado = safeField(latest, 64);
+      const detalle = cutDetail(`${count}. Último: ${from} — ${subject}`);
+      return {
+        text: [EXTERNAL_NOTE, detalle, `Para vigilantes: estado «${estado}», valor ${valor}`].join(
+          '\n',
+        ),
+        structured: { estado, valor, detalle },
+      };
+    },
+  };
+
+  const tareasComprobarVencidas: ConnectorTool<string | ToolOutput> = {
+    name: 'tareas_comprobar_vencidas',
+    description:
+      'Cuenta las tareas pendientes de Google Tasks con fecha anterior a hoy (Europe/Madrid), de solo lectura ' +
+      'y además en forma estructurada: es la tool que comprueban los vigilantes, sin el modelo. El estado es ' +
+      '«ninguna» o «hay_vencidas»; el valor, cuántas.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        lista: {
+          type: 'string',
+          description: 'Id de la lista (el que da tareas_listar). Por defecto la principal.',
+        },
+      },
+      additionalProperties: false,
+    },
+    outputSchema: checkOutputSchema,
+    async handler(args, signal) {
+      const a = need();
+      const parsed = parseArgs(ComprobarTareasSchema, args);
+      const list = resolveFrom(await fetchLists(a, signal), parsed.lista);
+      const data = await a.api(
+        'GET',
+        `${TASKS}lists/${pathId(list.id)}/tasks?showCompleted=false&showHidden=false&maxResults=100`,
+        undefined,
+        signal,
+      );
+      const items = isRecord(data) && Array.isArray(data.items) ? data.items : [];
+      const today = todayMadrid((opts.now ?? Date.now)());
+      const overdue = items.flatMap((item) => {
+        if (!isRecord(item) || item.status === 'completed') return [];
+        const day = typeof item.due === 'string' ? /^\d{4}-\d{2}-\d{2}/.exec(item.due)?.[0] : '';
+        if (!day || day >= today) return [];
+        const title =
+          typeof item.title === 'string' && item.title.trim() !== '' ? item.title : '(sin título)';
+        return [safeField(title, TASK_TITLE_MAX)];
+      });
+      if (overdue.length === 0) {
+        return {
+          text: 'Ninguna tarea vencida.\nPara vigilantes: estado «ninguna», valor 0',
+          structured: { estado: 'ninguna', valor: 0, detalle: 'Ninguna tarea vencida.' },
+        };
+      }
+      const first = overdue.slice(0, MAX_OVERDUE_TITLES).join(' · ');
+      const rest = overdue.length - MAX_OVERDUE_TITLES;
+      const detalle = cutDetail(
+        `${overdue.length} ${overdue.length === 1 ? 'tarea vencida' : 'tareas vencidas'} en «${safeField(list.title, 60)}»: ` +
+          `${first}${rest > 0 ? ` … y ${rest} más` : ''}`,
+      );
+      return {
+        text: `${detalle}\nPara vigilantes: estado «hay_vencidas», valor ${overdue.length}`,
+        structured: { estado: 'hay_vencidas', valor: overdue.length, detalle },
+      };
+    },
+  };
+
+  return [
+    gmailBuscar,
+    gmailLeer,
+    gmailBorrador,
+    gmailComprobar,
+    tareasListar,
+    tareasCrear,
+    tareasCompletar,
+    tareasComprobarVencidas,
+  ];
 }

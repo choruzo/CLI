@@ -27,6 +27,8 @@ export interface WatchRequest {
   intervalSec?: number;
   cooldownMinutes?: number;
   notifyResolved?: boolean;
+  /** Fase 4 — una rutina que ya existe, lanzada al saltar. */
+  routineId?: string;
   origin: 'agent' | 'person';
 }
 
@@ -40,6 +42,7 @@ export interface WatchDefinition {
   intervalSec: number;
   cooldownMinutes: number;
   notifyResolved: boolean;
+  routineId?: string;
   origin: 'agent' | 'person';
 }
 
@@ -52,6 +55,14 @@ export interface WatchCatalog {
   get(id: string): { manifest: ConnectorManifest } | undefined;
 }
 
+/**
+ * Fase 4 — lo justo de las rutinas: si existe. Sin esto, un vigilante que
+ * pide lanzar una rutina no vale (falla cerrado).
+ */
+export interface WatchRoutines {
+  get(id: string): { name: string } | undefined;
+}
+
 const RequestSchema = z
   .object({
     name: z.string(),
@@ -62,6 +73,7 @@ const RequestSchema = z
     intervalSec: z.number().int().optional(),
     cooldownMinutes: z.number().int().min(0).max(WATCH_LIMITS.maxCooldownMinutes).optional(),
     notifyResolved: z.boolean().optional(),
+    routineId: z.string().min(1).max(64).optional(),
     origin: z.enum(['agent', 'person']),
   })
   .strict();
@@ -72,7 +84,11 @@ function zodMessage(err: z.ZodError, what: string): string {
   return `Invalid ${what}${path ? ` (${path})` : ''}: ${issue?.message ?? 'not valid'}`;
 }
 
-export function defineWatch(request: WatchRequest, catalog: WatchCatalog): WatchDefinitionOutcome {
+export function defineWatch(
+  request: WatchRequest,
+  catalog: WatchCatalog,
+  routines?: WatchRoutines,
+): WatchDefinitionOutcome {
   const parsed = RequestSchema.safeParse(request);
   if (!parsed.success) return { ok: false, error: zodMessage(parsed.error, 'watch') };
   const r = parsed.data;
@@ -112,6 +128,10 @@ export function defineWatch(request: WatchRequest, catalog: WatchCatalog): Watch
     };
   }
 
+  if (r.routineId !== undefined && !routines?.get(r.routineId)) {
+    return { ok: false, error: `There is no routine "${r.routineId}".` };
+  }
+
   return {
     ok: true,
     definition: {
@@ -123,6 +143,7 @@ export function defineWatch(request: WatchRequest, catalog: WatchCatalog): Watch
       intervalSec,
       cooldownMinutes: r.cooldownMinutes ?? WATCH_LIMITS.defaultCooldownMinutes,
       notifyResolved: r.notifyResolved ?? false,
+      ...(r.routineId !== undefined ? { routineId: r.routineId } : {}),
       origin: r.origin,
     },
   };

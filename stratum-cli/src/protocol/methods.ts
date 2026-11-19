@@ -755,6 +755,8 @@ export interface ProtocolMethods {
       intervalSec?: number;
       cooldownMinutes?: number;
       notifyResolved?: boolean;
+      /** Fase 4 — una rutina que ya existe, lanzada al saltar. */
+      routineId?: string;
     } & Mutation,
     { watch: ProtocolWatch }
   >;

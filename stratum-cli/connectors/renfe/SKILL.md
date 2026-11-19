@@ -35,6 +35,15 @@ ya resumido, con las horas en hora de Madrid y el retraso calculado.
    El tiempo real solo existe para hoy: otro día devuelve el horario. Si la fecha se sale de los horarios, la tool dice hasta qué día llegan.
 5. «Sin datos de tiempo real» es que Renfe no informa de ese tren: es el horario, no un retraso de 0. «Estimado» es un retraso arrastrado de una parada anterior.
 
+## Vigilar incidencias
+
+Para «avísame si hay incidencias en la C3 de Madrid» usa `propose_watch` sobre la comprobación
+`cercanias_comprobar_avisos` (la evalúa el daemon sin ti cada 5 minutos como mínimo). Pide `nucleo` con el id
+exacto de `cercanias_nucleos` (`madrid`, `rodalies`…) y, si quieren una línea, `linea` con su nombre corto
+(`C3`). La condición típica es `state-is` con `["con_avisos"]`, o `above` con `threshold: 0` sobre el número
+de avisos. Si el núcleo o la línea no existen, la comprobación falla (no es «sin avisos»): corrige el id.
+En esta versión solo se vigila Cercanías; larga y media distancia no tiene vigilancia.
+
 ## Límites
 
 - Sin precios, billetes, reservas ni plazas.

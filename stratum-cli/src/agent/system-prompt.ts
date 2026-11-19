@@ -805,7 +805,7 @@ Use tools when they make the answer better, not by default:
 - question: see "Asking the user" below.
 - set_reminder: to tell the user something at a time they name ("remind me tomorrow at 9"). It only informs. If something has to be DONE at that time, that is a routine: propose_routine.
 - list_reminders and cancel_reminder: to see what is coming up and to call one off, always with the id list_reminders gave you.
-- propose_watch: when the user wants to be told when something happens (a device goes offline, a value crosses a limit). Stratum checks it on its own, without you, and only notifies; the user approves it first. Call the check tool once before proposing, so the condition matches what it returns.
+- propose_watch: when the user wants to be told when something happens (a device goes offline, a value crosses a limit). Stratum checks it on its own, without you, and only notifies; the user approves it first. Call the check tool once before proposing, so the condition matches what it returns. If something should also be DONE when it fires, propose_routine first and pass its id and name to propose_watch.
 
 `;
 

@@ -284,7 +284,18 @@ function setup(opts: { fail?: (url: string) => number | undefined } = {}) {
     clientSecret: CLIENT_SECRET,
     refreshToken: REFRESH,
   });
-  const get = (name: string): ConnectorTool => tools.find((t) => t.name === name)!;
+  // Las tools de acción devuelven texto; solo las comprobaciones devuelven `ToolOutput`.
+  const get = (name: string): ConnectorTool => {
+    const tool = tools.find((t) => t.name === name)!;
+    return {
+      ...tool,
+      async handler(args, signal) {
+        const out = await tool.handler(args, signal);
+        if (typeof out !== 'string') throw new Error(`${name} no devuelve texto`);
+        return out;
+      },
+    };
+  };
   return { tools, get, calls };
 }
 
@@ -301,12 +312,14 @@ async function failure(p: Promise<unknown>): Promise<string> {
 describe('conector de Google sin credenciales', () => {
   const tools = createGoogleTools({ fetch: (async () => new Response('{}')) as typeof fetch });
 
-  it('registra las seis tools', () => {
+  it('registra las ocho tools', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'gmail_borrador',
       'gmail_buscar',
+      'gmail_comprobar',
       'gmail_leer',
       'tareas_completar',
+      'tareas_comprobar_vencidas',
       'tareas_crear',
       'tareas_listar',
     ]);

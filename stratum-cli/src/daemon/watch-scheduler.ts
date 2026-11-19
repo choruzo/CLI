@@ -23,6 +23,7 @@ import type { ProtocolWatchNotice } from '../protocol/index.js';
 import { getLogger } from '../logging/index.js';
 import { stateAfterRestart, stepWatch, type WatchInput } from '../watches/engine.js';
 import { watchNoticeText } from '../watches/notice.js';
+import type { WatchTrigger } from '../watches/trigger.js';
 import type { ProbeOutcome, WatchProbe } from '../watches/probe.js';
 import type { WatchDefinition } from '../watches/define.js';
 import type { StoredWatch, WatchStatus, WatchStore } from '../watches/store.js';
@@ -41,6 +42,11 @@ export interface WatchSchedulerOptions {
   probe: WatchProbe;
   /** Publica el aviso (la sesión del `companion` y los canales). Puede lanzar. */
   notify(notice: ProtocolWatchNotice): void | Promise<void>;
+  /**
+   * Fase 4 — lanza la rutina de un vigilante que saltó, con el aviso como
+   * contexto. Solo con `fired`, y después de avisar. Puede lanzar.
+   */
+  launchRoutine?(routineId: string, trigger: WatchTrigger): Promise<void>;
   now?: () => number;
   tickMs?: number;
   setTimer?: (fn: () => void, ms: number) => unknown;
@@ -69,6 +75,8 @@ export class WatchScheduler {
   /** Cuándo se evaluó por última vez cada vigilante (solo en memoria). */
   private readonly checkedAt = new Map<string, number>();
   private cycle: Promise<void> | null = null;
+  /** Rutinas que se están lanzando (fase 4); `idle()` también las espera. */
+  private readonly launches = new Set<Promise<void>>();
   private abort: AbortController | null = null;
   private started = false;
   private stopped = false;
@@ -151,9 +159,10 @@ export class WatchScheduler {
     return watch;
   }
 
-  /** Espera al ciclo en curso (tests y apagado). */
+  /** Espera al ciclo en curso y a las rutinas que lanzó (tests y apagado). */
   async idle(): Promise<void> {
     await this.cycle;
+    await Promise.all([...this.launches]);
   }
 
   // ─── internos ──────────────────────────────────────────────────────────────
@@ -285,5 +294,23 @@ export class WatchScheduler {
     } catch (err) {
       log.warn('watch notice not delivered', { watchId: id, reason: messageOf(err) });
     }
+    // Fase 4 — solo al saltar, y aunque el aviso no se entregara: la persona
+    // aprobó que esa rutina corriera cuando esto pasase. Lo resuelto, lo que
+    // falla o lo suspendido nunca lanza nada.
+    // Sin esperarla dentro del ciclo: lanzar pasa por el punto seguro de su
+    // sesión, y los demás vigilantes no deben esperar a eso.
+    if (notice.kind !== 'fired' || !watch.routineId || !this.opts.launchRoutine) return;
+    const routineId = watch.routineId;
+    const launch = this.opts
+      .launchRoutine(routineId, { watchName: watch.name, text: notice.text })
+      .catch((err: unknown) => {
+        log.warn('watch routine not launched', {
+          watchId: id,
+          routineId,
+          reason: messageOf(err),
+        });
+      })
+      .finally(() => this.launches.delete(launch));
+    this.launches.add(launch);
   }
 }

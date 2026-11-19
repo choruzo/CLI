@@ -77,8 +77,8 @@ describe('server de Renfe empaquetado', () => {
       expect(client.tools.map((t) => t.name).sort()).toEqual(
         manifest.tools.map((t) => t.name).sort(),
       );
-      // Cercanías (7) y larga y media distancia (3).
-      expect(client.tools).toHaveLength(10);
+      // Cercanías (7 + 1 comprobación) y larga y media distancia (3).
+      expect(client.tools).toHaveLength(11);
       expect(client.tools.map((t) => t.name)).toEqual(
         expect.arrayContaining(['trenes_salidas', 'trenes_trayecto', 'trenes_tren']),
       );
