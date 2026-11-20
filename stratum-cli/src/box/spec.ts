@@ -17,7 +17,7 @@ import { CONNECTOR_ID_RE } from '../connectors/manifest.js';
  * cambiar el código de un conector también exige subirla (lo fija
  * `box-image.version.test.ts`).
  */
-export const BOX_IMAGE_VERSION = 10;
+export const BOX_IMAGE_VERSION = 11;
 export const DEFAULT_BOX_IMAGE = `stratum-box:${BOX_IMAGE_VERSION}`;
 
 export const BOX_USER = 'stratum';

@@ -1,7 +1,8 @@
 /**
- * Tools del conector de Google (Gmail + Tasks) para el `companion`:
- * gmail_buscar, gmail_leer, gmail_borrador, tareas_listar, tareas_crear y
- * tareas_completar. `fetch` inyectable para testear sin red.
+ * Tools del conector de Google (Gmail, Tasks y Calendar) para el `companion`:
+ * gmail_buscar, gmail_leer, gmail_borrador, tareas_listar, tareas_crear,
+ * tareas_completar, las comprobaciones de los vigilantes y las de calendario
+ * (`calendar.ts`). `fetch` inyectable para testear sin red.
  *
  * Salidas en texto breve en español, nunca JSON crudo. El conector jamás envía
  * correo: solo crea borradores que la persona revisa desde Gmail.
@@ -32,6 +33,7 @@ import {
   type Attachment,
   type GmailHeader,
 } from './gmail.js';
+import { createCalendarTools } from './calendar.js';
 
 const GMAIL = 'https://gmail.googleapis.com/gmail/v1/users/me/';
 const TASKS = 'https://tasks.googleapis.com/tasks/v1/';
@@ -809,5 +811,6 @@ export function createGoogleTools(opts: GoogleOptions): ConnectorTool<string | T
     tareasCrear,
     tareasCompletar,
     tareasComprobarVencidas,
+    ...createCalendarTools(need, opts.now ?? Date.now),
   ];
 }

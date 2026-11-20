@@ -2757,6 +2757,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     confiable, como un correo. Las horas, en Europe/Madrid.
   - Con los vigilantes, una comprobación «próximo evento en N minutos» cubre el aviso de antes de
     una cita.
+  *Hecha el 2026-11-20* (`google` 1.2.0, imagen v11):
+  - Ámbito `calendar.events` (decidido por Claude, con permiso del usuario para decidir), más
+    `calendar.calendarlist.readonly`: sin él, la lista de calendarios da 403 (medido con la cuenta
+    real).
+  - `calendario_listar|buscar|crear|mover` y la comprobación `calendario_comprobar_proximo` (el id
+    del próximo evento con hora o «ninguno»; el valor, los minutos que faltan).
+  - Toda escritura lleva `sendUpdates=none`: si no, `auth.api` la rechaza, y solo se permiten las
+    rutas de eventos y la lista de calendarios. Crear no admite asistentes.
+  - Decidido al implementar: mover un evento con otros asistentes, o una serie periódica entera,
+    se veta, porque sin aviso los asistentes no se enterarían. Se hace desde Google Calendar.
 
   *3. MCP por HTTP en `companion.mcp.servers`*: hoy el cliente MCP solo habla stdio
   (`tools/mcp/client.ts`), así que un servidor MCP remoto no se puede declarar y el `companion`

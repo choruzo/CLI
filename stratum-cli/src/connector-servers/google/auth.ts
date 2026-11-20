@@ -1,6 +1,6 @@
 /**
  * Autorización OAuth de Google (refresh token → access token) y helper común de
- * llamadas a Gmail y Tasks. `fetch` y el reloj son inyectables para los tests.
+ * llamadas a Gmail, Tasks y Calendar. `fetch` y el reloj son inyectables para los tests.
  *
  * El access token vive solo en memoria (nunca en disco) y no puede aparecer en
  * un texto de salida ni de error: todo mensaje que incluya texto de una
@@ -23,7 +23,18 @@ const SEND_SEGMENT = 'send';
 const ALLOWED_PREFIXES = [
   'https://gmail.googleapis.com/gmail/v1/users/me/',
   'https://tasks.googleapis.com/tasks/v1/',
+  'https://www.googleapis.com/calendar/v3/',
 ];
+
+const CALENDAR_PREFIX = 'https://www.googleapis.com/calendar/v3/';
+/**
+ * Dentro de Calendar, solo la lista de calendarios y los eventos de uno (o uno
+ * de ellos): nada de `move`, `quickAdd`, `import`, `watch`, ACL ni ajustes.
+ */
+const CALENDAR_PATH_RE =
+  /^\/calendar\/v3\/(?:users\/me\/calendarList|calendars\/[^/]+\/events(?:\/[^/]+)?)$/;
+/** Métodos de `events` que caben en `events/<id>` y no son un evento. */
+const CALENDAR_EVENT_VERBS = new Set(['quickAdd', 'import', 'watch', 'instances']);
 
 function tooBig(): ToolUserError {
   return new ToolUserError('La respuesta de Google es demasiado grande');
@@ -290,14 +301,26 @@ export function createGoogleAuth(opts: GoogleAuthOptions): GoogleAuth | null {
       if (!ALLOWED_PREFIXES.some((p) => url.startsWith(p) && parsed.href.startsWith(p))) {
         throw new ToolUserError('URL de Google no permitida por este conector.');
       }
+      const segments = parsed.pathname.split('/').filter(Boolean);
       // Nada de envíos, ni siquiera dentro de los prefijos permitidos: decide el
       // último segmento de la ruta, y `?` (la query) no forma parte del path, así
       // que también cubre la variante con parámetros.
-      const segments = parsed.pathname.split('/').filter(Boolean);
       if (segments[segments.length - 1] === SEND_SEGMENT) {
         throw new ToolUserError(
           'Este conector no envía correo: se crea un borrador y la persona lo envía desde Gmail.',
         );
+      }
+      if (url.startsWith(CALENDAR_PREFIX)) {
+        const last = segments[segments.length - 1] ?? '';
+        if (!CALENDAR_PATH_RE.test(parsed.pathname) || CALENDAR_EVENT_VERBS.has(last)) {
+          throw new ToolUserError('URL de Google no permitida por este conector.');
+        }
+        // Una escritura en el calendario nunca avisa a los asistentes.
+        if (method !== 'GET' && parsed.searchParams.get('sendUpdates') !== 'none') {
+          throw new ToolUserError(
+            'Este conector no avisa a nadie: toda escritura en el calendario lleva sendUpdates=none.',
+          );
+        }
       }
       let token = await accessToken(signal);
       let usedToken = token;

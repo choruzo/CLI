@@ -312,8 +312,13 @@ async function failure(p: Promise<unknown>): Promise<string> {
 describe('conector de Google sin credenciales', () => {
   const tools = createGoogleTools({ fetch: (async () => new Response('{}')) as typeof fetch });
 
-  it('registra las ocho tools', () => {
+  it('registra las trece tools', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
+      'calendario_buscar',
+      'calendario_comprobar_proximo',
+      'calendario_crear',
+      'calendario_listar',
+      'calendario_mover',
       'gmail_borrador',
       'gmail_buscar',
       'gmail_comprobar',

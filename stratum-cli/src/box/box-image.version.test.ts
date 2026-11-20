@@ -30,6 +30,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   9: 'c3badbb09436f8a6',
   // M22 fase 4: comprobaciones de aemet, renfe (Cercanías) y google (Gmail y Tasks).
   10: 'b87f221303e174fd',
+  // M22 parte 2: Google Calendar en el conector `google`.
+  11: '99734ebc11c4bf07',
 };
 
 /**

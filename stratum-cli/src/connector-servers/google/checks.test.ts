@@ -88,10 +88,11 @@ const server = createMcpServer({ name: manifest.id, version: manifest.version },
 const checks = checksOf(manifest).map((c) => [c.tool, c] as const);
 
 describe('comprobaciones del manifiesto de Google', () => {
-  it('declara las dos con su intervalo mínimo', () => {
+  it('declara las tres con su intervalo mínimo', () => {
     expect(checks.map(([n, c]) => [n, c.minIntervalSec])).toEqual([
       ['gmail_comprobar', 300],
       ['tareas_comprobar_vencidas', 900],
+      ['calendario_comprobar_proximo', 60],
     ]);
   });
 
@@ -119,11 +120,13 @@ describe('comprobaciones del manifiesto de Google', () => {
     );
   });
 
-  it('no pide ámbitos de OAuth nuevos', () => {
+  it('los ámbitos de OAuth son exactamente estos (M22 parte 2 añade calendar.events y calendar.calendarlist.readonly)', () => {
     expect(manifest.oauth?.scopes).toEqual([
       'https://www.googleapis.com/auth/gmail.readonly',
       'https://www.googleapis.com/auth/gmail.compose',
       'https://www.googleapis.com/auth/tasks',
+      'https://www.googleapis.com/auth/calendar.events',
+      'https://www.googleapis.com/auth/calendar.calendarlist.readonly',
     ]);
   });
 

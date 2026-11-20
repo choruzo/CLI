@@ -1,11 +1,11 @@
 {
   "schemaVersion": 1,
   "id": "google",
-  "version": "1.1.0",
-  "name": "Google (Gmail y Tasks)",
-  "description": "Lee tu correo de Gmail y deja borradores (nunca envía), y consulta y crea tus tareas de Google Tasks, con un cliente OAuth propio.",
+  "version": "1.2.0",
+  "name": "Google (Gmail, Tasks y Calendar)",
+  "description": "Lee tu correo de Gmail y deja borradores (nunca envía), consulta y crea tus tareas de Google Tasks y consulta, crea y mueve eventos de Google Calendar sin avisar a nadie, con un cliente OAuth propio.",
   "agents": ["companion"],
-  "hosts": ["oauth2.googleapis.com", "gmail.googleapis.com", "tasks.googleapis.com"],
+  "hosts": ["oauth2.googleapis.com", "gmail.googleapis.com", "tasks.googleapis.com", "www.googleapis.com"],
   "secrets": [
     {
       "name": "GOOGLE_CLIENT_ID",
@@ -26,7 +26,9 @@
     "scopes": [
       "https://www.googleapis.com/auth/gmail.readonly",
       "https://www.googleapis.com/auth/gmail.compose",
-      "https://www.googleapis.com/auth/tasks"
+      "https://www.googleapis.com/auth/tasks",
+      "https://www.googleapis.com/auth/calendar.events",
+      "https://www.googleapis.com/auth/calendar.calendarlist.readonly"
     ],
     "clientId": "GOOGLE_CLIENT_ID",
     "clientSecret": "GOOGLE_CLIENT_SECRET",
@@ -72,6 +74,31 @@
       "name": "tareas_comprobar_vencidas",
       "readOnly": true,
       "summary": "Cuenta las tareas pendientes ya vencidas (para vigilantes)."
+    },
+    {
+      "name": "calendario_listar",
+      "readOnly": true,
+      "summary": "Lista los eventos de Google Calendar de unos días, en hora de Madrid."
+    },
+    {
+      "name": "calendario_buscar",
+      "readOnly": true,
+      "summary": "Busca eventos de Google Calendar por texto."
+    },
+    {
+      "name": "calendario_crear",
+      "readOnly": false,
+      "summary": "Crea un evento en Google Calendar, sin asistentes ni avisos."
+    },
+    {
+      "name": "calendario_mover",
+      "readOnly": false,
+      "summary": "Cambia la hora de un evento propio sin otros asistentes, sin avisar a nadie."
+    },
+    {
+      "name": "calendario_comprobar_proximo",
+      "readOnly": true,
+      "summary": "Comprueba si un evento empieza en los próximos N minutos (para vigilantes)."
     }
   ],
   "checks": [
@@ -102,6 +129,29 @@
           "description": "Id de la lista, tal como lo da tareas_listar (por defecto la principal)",
           "maxLength": 200,
           "pattern": "[A-Za-z0-9_@-]+"
+        }
+      ]
+    },
+    {
+      "tool": "calendario_comprobar_proximo",
+      "summary": "Próximo evento con hora que empieza en N minutos (estado: id del evento o «ninguno»).",
+      "minIntervalSec": 60,
+      "args": [
+        {
+          "name": "minutos",
+          "type": "integer",
+          "required": true,
+          "description": "Ventana en minutos antes del evento (p. ej. 15)",
+          "minimum": 1,
+          "maximum": 1440
+        },
+        {
+          "name": "calendario",
+          "type": "string",
+          "required": false,
+          "description": "Id del calendario, tal como lo da calendario_listar (por defecto el principal)",
+          "maxLength": 200,
+          "pattern": "[A-Za-z0-9._@#-]+"
         }
       ]
     }
