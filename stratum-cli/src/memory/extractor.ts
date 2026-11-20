@@ -1,10 +1,11 @@
 import type { IProvider } from '../providers/base.js';
 import type { Message } from '../agent/types.js';
-import type { DecisionMemory } from './decision-memory.js';
+import type { DecisionMemory, RecallResult } from './decision-memory.js';
 import {
   CODE_DECISION_TYPES,
   MEMORY_SECTIONS,
   type DecisionInput,
+  type DecisionRecord,
   type DecisionImportance,
   type DecisionType,
   type MemoryTaxonomy,
@@ -47,6 +48,8 @@ NO extraigas: detalles pasajeros de la conversación, preguntas, lo que dijo el 
 ni secretos, contraseñas, datos de pago o de salud salvo que lo pida expresamente.
 
 Reglas:
+- Extrae solo de los mensajes nuevos; el contexto anterior ya se analizó y solo sirve para entenderlos.
+- No devuelvas lo que ya está en «Ya recordado», aunque lo digas con otras palabras o con algún detalle más.
 - MÁXIMO 2 recuerdos por conversación; solo los más importantes.
 - Si nada duradero se dijo, devuelve [].
 - Cada recuerdo es un objeto JSON con: title (string, <100 chars), content (string: el recuerdo con su contexto),
@@ -162,6 +165,75 @@ export interface ExtractOptions {
   taxonomy?: MemoryTaxonomy;
   sessionId?: string;
   signal?: AbortSignal;
+  /**
+   * Solo con secciones: los mensajes ya analizados de esta sesión (lo mantiene
+   * quien llama, uno por sesión). En una sesión de larga vida la ventana de un
+   * turno pisa casi entera la del anterior: sin esto, cada turno volvía a
+   * extraer los mismos hechos. Se marca tras una respuesta del modelo, no tras
+   * un fallo, para que el turno siguiente lo reintente.
+   */
+  analyzed?: Set<string>;
+}
+
+/** Cuántos recuerdos parecidos se enseñan al extractor como «Ya recordado». */
+const KNOWN_TOP_K = 8;
+
+/** Tope de claves en `analyzed`: de sobra para la ventana, y acotado en una sesión de larga vida. */
+const ANALYZED_CAP = 512;
+
+function analyzedKey(m: Message): string {
+  return `${m.role}\u0000${messageText(m)}`;
+}
+
+function markAnalyzed(analyzed: Set<string>, messages: Message[]): void {
+  for (const m of messages) {
+    const key = analyzedKey(m);
+    analyzed.delete(key);
+    analyzed.add(key);
+  }
+  for (const key of analyzed) {
+    if (analyzed.size <= ANALYZED_CAP) break;
+    analyzed.delete(key);
+  }
+}
+
+function knownLine(r: DecisionRecord): string {
+  const text = (r.summary ?? r.content).replace(/\s+/g, ' ').trim().slice(0, 160);
+  return `- [${r.type}] ${r.title}: ${text}`;
+}
+
+/**
+ * La petición al extractor con secciones: el contexto ya analizado aparte de
+ * los mensajes nuevos, y lo que ya hay en la memoria parecido a ellos.
+ */
+async function sectionsRequest(
+  recent: Message[],
+  analyzed: Set<string> | undefined,
+  memory: DecisionMemory,
+): Promise<string | null> {
+  const fresh = analyzed ? recent.filter((m) => !analyzed.has(analyzedKey(m))) : recent;
+  // Lo duradero lo aporta el usuario: sin un mensaje suyo nuevo no hay nada que extraer.
+  if (!fresh.some((m) => m.role === 'user')) return null;
+  const context = recent.slice(0, recent.length - fresh.length);
+  const render = (ms: Message[]) => ms.map((m) => `${m.role}: ${messageText(m)}`).join('\n\n');
+
+  let known: RecallResult[] = [];
+  try {
+    known = await memory.nearest(render(fresh), KNOWN_TOP_K);
+  } catch {
+    // Sin índice se extrae igual: el dedup al guardar sigue en su sitio.
+  }
+
+  return [
+    known.length > 0
+      ? `Ya recordado (no lo repitas):\n${known.map((k) => knownLine(k.record)).join('\n')}`
+      : 'Ya recordado: nada parecido.',
+    context.length > 0 ? `Contexto ya analizado (no extraigas de aquí):\n\n${render(context)}` : '',
+    `Mensajes nuevos:\n\n${render(fresh)}`,
+    'Devuelve ahora el array JSON de recuerdos duraderos nuevos (o [] si no hay).',
+  ]
+    .filter(Boolean)
+    .join('\n\n');
 }
 
 /**
@@ -184,19 +256,25 @@ export async function extractAndStore(opts: ExtractOptions): Promise<number> {
 
     // Aplanar a UN mensaje de usuario: pasarlo como conversación hace que el
     // modelo la "continúe" en vez de analizarla y devuelve [] sistemáticamente.
-    const transcript = recent.map((m) => `${m.role}: ${messageText(m)}`).join('\n\n');
+    let request: string;
+    if (taxonomy === 'sections') {
+      const built = await sectionsRequest(recent, opts.analyzed, memory);
+      if (built === null) return 0;
+      request = built;
+    } else {
+      // La de código no cambia (M19): toda la ventana, sin lo ya recordado.
+      const transcript = recent.map((m) => `${m.role}: ${messageText(m)}`).join('\n\n');
+      request =
+        'Conversación a analizar:\n\n' +
+        transcript +
+        '\n\nDevuelve ahora el array JSON de decisiones duraderas (o [] si no hay).';
+    }
     const extractionMessages: Message[] = [
       {
         role: 'system',
         content: taxonomy === 'sections' ? EXTRACT_SECTIONS_PROMPT : EXTRACT_SYSTEM_PROMPT,
       },
-      {
-        role: 'user',
-        content:
-          'Conversación a analizar:\n\n' +
-          transcript +
-          '\n\nDevuelve ahora el array JSON de decisiones duraderas (o [] si no hay).',
-      },
+      { role: 'user', content: request },
     ];
 
     let raw = '';
@@ -205,6 +283,7 @@ export async function extractAndStore(opts: ExtractOptions): Promise<number> {
     } catch {
       return 0;
     }
+    if (taxonomy === 'sections' && opts.analyzed) markAnalyzed(opts.analyzed, recent);
 
     const candidates = parseDecisionsJson(raw);
     if (candidates.length === 0) return 0;

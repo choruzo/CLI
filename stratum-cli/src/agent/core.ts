@@ -257,6 +257,8 @@ export class StratumAgent {
   /** Trabajo en segundo plano en vuelo (extracción de memoria) y su cancelación. */
   private readonly background = new Set<Promise<void>>();
   private backgroundAbort = new AbortController();
+  /** Mensajes que ya pasaron por la extracción automática (solo memorias con secciones). */
+  private readonly extractionAnalyzed = new Set<string>();
   private readonly memoryManager: MemoryManager;
   /** Perfiles de subagente (Hito 8): descubiertos al arrancar, pasados al loop. */
   private readonly profiles: ProfileLoader;
@@ -1139,6 +1141,7 @@ ${this.skillsBlock}`;
         messages: this.getMessages(),
         memory: this.memoryManager.getDecisionMemory(),
         taxonomy: isEmbeddedPreset(this.preset) ? 'sections' : 'code',
+        analyzed: this.extractionAnalyzed,
         trace,
         cancelSignal: this.backgroundAbort.signal,
       });

@@ -1,3 +1,4 @@
+import { homedir } from 'node:os';
 import { Command } from 'commander';
 import { loadConfig } from '../../config/loader.js';
 import { renderMemoryShow } from '../../memory/show.js';
@@ -57,9 +58,14 @@ const GLOBAL_HELP = "use the assistant's global memory instead of this project's
 const COMPANION_HELP =
   "use the memory of Stratum Dot's assistant (companion) instead of this project's";
 
-function loadConfigOrExit() {
+/**
+ * La memoria del asistente y la del `companion` no son de ningún proyecto: su
+ * config es la que ve el daemon (`loadConfig(home)`), no la del directorio
+ * desde el que se lanza el comando, que podría cambiar el provider o la memoria.
+ */
+function loadConfigOrExit(flags: MemoryScopeFlags) {
   try {
-    return loadConfig();
+    return loadConfig(flags.global || flags.companion ? homedir() : undefined);
   } catch (err) {
     process.stderr.write(`Config error: ${err instanceof Error ? err.message : String(err)}\n`);
     process.exit(1);
@@ -87,7 +93,7 @@ const memoryList = new Command('list')
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
   .action((opts: MemoryScopeFlags) => {
-    const config = memoryConfig(loadConfigOrExit(), opts);
+    const config = memoryConfig(loadConfigOrExit(opts), opts);
     const decisions = getDecisionMemory(config).list();
     if (decisions.length === 0) {
       process.stdout.write('No hay decisiones almacenadas.\n');
@@ -106,7 +112,7 @@ const memorySearch = new Command('search')
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
   .action(async (query: string, opts: { top?: number } & MemoryScopeFlags) => {
-    const config = memoryConfig(loadConfigOrExit(), opts);
+    const config = memoryConfig(loadConfigOrExit(opts), opts);
     const results = await getDecisionMemory(config).search(query, opts.top);
     if (results.length === 0) {
       process.stdout.write('Sin resultados relevantes.\n');
@@ -123,7 +129,7 @@ const memoryForget = new Command('forget')
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
   .action(async (id: string, opts: MemoryScopeFlags) => {
-    const config = memoryConfig(loadConfigOrExit(), opts);
+    const config = memoryConfig(loadConfigOrExit(opts), opts);
     const removed = await getDecisionMemory(config).remove(id);
     if (removed) {
       process.stdout.write(`Decisión ${id} eliminada.\n`);
@@ -152,7 +158,7 @@ const memoryReclassify = new Command('reclassify')
       );
       process.exit(1);
     }
-    const config = memoryConfig(loadConfigOrExit(), opts);
+    const config = memoryConfig(loadConfigOrExit(opts), opts);
     const updated = await getDecisionMemory(config).reclassify(id, {
       type: section as MemorySection,
     });
@@ -187,7 +193,7 @@ const memoryWiki = new Command('wiki')
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
   .action((opts: MemoryScopeFlags) => {
-    const target = dreamingTarget(loadConfigOrExit(), opts);
+    const target = dreamingTarget(loadConfigOrExit(opts), opts);
     const result = syncRepresentations(
       target.memory,
       getDecisionMemory(target.memory).list(),
@@ -217,7 +223,7 @@ const memoryDream = new Command('dream')
   .option('--companion', COMPANION_HELP)
   .option('--force', 'review the notes even without new conversations')
   .action(async (opts: MemoryScopeFlags & { force?: boolean }) => {
-    const config = loadConfigOrExit();
+    const config = loadConfigOrExit(opts);
     const target = dreamingTarget(config, opts);
     let router;
     try {
@@ -271,7 +277,7 @@ const proposalsList = new Command('list')
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
   .action((opts: MemoryScopeFlags) => {
-    const files = openDreamingFiles(memoryConfig(loadConfigOrExit(), opts));
+    const files = openDreamingFiles(memoryConfig(loadConfigOrExit(opts), opts));
     const pending = files.proposals.pending();
     process.stdout.write(
       pending.length === 0
@@ -286,7 +292,7 @@ const proposalsApply = new Command('apply')
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
   .action(async (id: string, opts: MemoryScopeFlags) => {
-    const target = dreamingTarget(loadConfigOrExit(), opts);
+    const target = dreamingTarget(loadConfigOrExit(opts), opts);
     const result = await applyProposal(id, {
       memory: getDecisionMemory(target.memory),
       proposals: openDreamingFiles(target.memory).proposals,
@@ -303,7 +309,7 @@ const proposalsReject = new Command('reject')
   .option('--companion', COMPANION_HELP)
   .action((id: string, opts: MemoryScopeFlags) => {
     const result = rejectProposal(id, {
-      proposals: openDreamingFiles(memoryConfig(loadConfigOrExit(), opts)).proposals,
+      proposals: openDreamingFiles(memoryConfig(loadConfigOrExit(opts), opts)).proposals,
     });
     (result.ok ? process.stdout : process.stderr).write(`${result.message}\n`);
     if (!result.ok) process.exit(1);

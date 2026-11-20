@@ -260,3 +260,158 @@ describe('extractAndStore con secciones', () => {
     }
   });
 });
+
+/** Todos los textos con el mismo vector: lo guardado siempre sale como lo más parecido. */
+function sameVectorMemoryAt(dir: string): DecisionMemory {
+  const config = StratumConfigSchema.parse({
+    memory: {
+      decisionsFile: join(dir, 'decisions.json'),
+      vectorDb: join(dir, 'vectors.db'),
+      embeddingDimension: 4,
+    },
+  });
+  return new DecisionMemory(config, {
+    embedding: { embedFn: async (t) => t.map(() => new Float32Array([1, 0, 0, 0])) },
+    forceFallbackVectors: true,
+  });
+}
+
+describe('extractAndStore con secciones: solo lo nuevo y sin repetir lo recordado', () => {
+  const recorder = (seen: string[], reply = '[]', fail = false): IProvider => ({
+    async *complete(req: { messages: Message[] }): AsyncGenerator<OpenAIStreamChunk> {
+      seen.push(String(req.messages[1]?.content));
+      if (fail) throw new Error('caído');
+      yield { choices: [{ delta: { content: reply }, finish_reason: null, index: 0 }] };
+    },
+    async healthCheck() {
+      return true;
+    },
+  });
+  const turn1: Message[] = [
+    { role: 'user', content: 'Vivo en Getafe.' },
+    { role: 'assistant', content: 'Anotado.' },
+  ];
+
+  it('no vuelve a analizar lo ya analizado; lo anterior va como contexto', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stratum-sec-cur-'));
+    const m = memoryAt(dir);
+    const seen: string[] = [];
+    const analyzed = new Set<string>();
+    const run = (messages: Message[]) =>
+      extractAndStore({
+        provider: recorder(seen),
+        model: 'm',
+        messages,
+        memory: m,
+        taxonomy: 'sections',
+        analyzed,
+      });
+    try {
+      await run(turn1);
+      expect(seen).toHaveLength(1);
+      expect(seen[0]).toContain('Mensajes nuevos:\n\nuser: Vivo en Getafe.');
+      expect(seen[0]).not.toContain('Contexto ya analizado');
+
+      // El mismo historial otra vez: nada nuevo del usuario, ni se llama al modelo.
+      await run(turn1);
+      expect(seen).toHaveLength(1);
+
+      const turn2: Message[] = [
+        ...turn1,
+        { role: 'user', content: 'Trabajo en Madrid.' },
+        { role: 'assistant', content: 'Vale.' },
+      ];
+      await run(turn2);
+      expect(seen).toHaveLength(2);
+      const [context, fresh] = seen[1]!.split('Mensajes nuevos:');
+      expect(context).toContain(
+        'Contexto ya analizado (no extraigas de aquí):\n\nuser: Vivo en Getafe.',
+      );
+      expect(fresh).toContain('user: Trabajo en Madrid.');
+      expect(fresh).not.toContain('Getafe');
+    } finally {
+      await m.vectors.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('si el modelo falla, no se marca: el turno siguiente lo reintenta', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stratum-sec-cur-'));
+    const m = memoryAt(dir);
+    const seen: string[] = [];
+    const analyzed = new Set<string>();
+    try {
+      for (const fail of [true, false]) {
+        await extractAndStore({
+          provider: recorder(seen, '[]', fail),
+          model: 'm',
+          messages: turn1,
+          memory: m,
+          taxonomy: 'sections',
+          analyzed,
+        });
+      }
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).toContain('Mensajes nuevos:\n\nuser: Vivo en Getafe.');
+    } finally {
+      await m.vectors.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('enseña lo ya recordado parecido, sin tocar el último recall del agente', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stratum-sec-known-'));
+    const m = sameVectorMemoryAt(dir);
+    const seen: string[] = [];
+    try {
+      await m.save({
+        title: 'Vive en Getafe',
+        content: 'El usuario vive en Getafe (Madrid).',
+        summary: 'Vive en Getafe (Madrid)',
+        type: 'profile',
+        tags: [],
+        importance: 'high',
+      });
+      await extractAndStore({
+        provider: recorder(seen),
+        model: 'm',
+        messages: turn1,
+        memory: m,
+        taxonomy: 'sections',
+        analyzed: new Set(),
+      });
+      expect(seen[0]).toContain(
+        'Ya recordado (no lo repitas):\n- [profile] Vive en Getafe: Vive en Getafe (Madrid)',
+      );
+      expect(m.takeLastRecall()).toEqual([]);
+    } finally {
+      await m.vectors.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it('la de código no cambia: toda la ventana y sin lo ya recordado', async () => {
+    const dir = mkdtempSync(join(tmpdir(), 'stratum-sec-code-'));
+    const m = sameVectorMemoryAt(dir);
+    const seen: string[] = [];
+    const analyzed = new Set<string>();
+    try {
+      await m.save({ ...input, type: 'convention' });
+      for (let i = 0; i < 2; i++) {
+        await extractAndStore({
+          provider: recorder(seen),
+          model: 'm',
+          messages: turn1,
+          memory: m,
+          analyzed,
+        });
+      }
+      expect(seen).toHaveLength(2);
+      expect(seen[1]).toMatch(/^Conversación a analizar:\n\nuser: Vivo en Getafe\./);
+      expect(seen[1]).not.toContain('Ya recordado');
+    } finally {
+      await m.vectors.close();
+      rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});

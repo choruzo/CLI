@@ -207,6 +207,16 @@ export class DecisionMemory {
 
   /** Búsqueda semántica KNN. Devuelve decisiones por encima del umbral de score. */
   async search(query: string, k?: number): Promise<RecallResult[]> {
+    const out = await this.nearest(query, k);
+    this.lastRecall = out;
+    return out;
+  }
+
+  /**
+   * Lo mismo que `search` sin tocar el último recall: para quien mira la
+   * memoria por dentro (la extracción automática), no para el agente.
+   */
+  async nearest(query: string, k?: number): Promise<RecallResult[]> {
     const vec = await this.embedder.embedOne(query);
     if (!vec) return [];
     await this.ensureIndexed();
@@ -218,7 +228,6 @@ export class DecisionMemory {
         out.push({ record, score: m.score });
       }
     }
-    this.lastRecall = out;
     return out;
   }
 
