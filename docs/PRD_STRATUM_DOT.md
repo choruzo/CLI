@@ -2824,8 +2824,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   usuario]. Tras M22 el `companion` ya tiene bastante alcance. Lo que le falta es que se pueda
   contar con él cada día. *Decidido por el usuario*: **local-first**. El runtime, los datos y la
   caja van en el equipo de la persona; el modelo, donde convenga (hoy, NaN). Un modelo local no es
-  requisito, y se mide en M24 en vez de suponerse. Orden propuesto: M23, M24, M25, M26; M27 está en
-  investigación.
+  requisito, y se mide en M24 en vez de suponerse. *Orden* (el usuario lo dejó a Claude): M23, M27,
+  M24, M25, M26. M27 va tras M23 porque es lo que más se usa, y M24 lo medirá también.
 
 - **M23 — Que esté siempre listo** [propuesto 2026-11-20].
   - La caja arranca con el daemon. Es una opción de la config global (`box.autostart`), apagada por
@@ -2859,18 +2859,20 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - Una carpeta del equipo en solo lectura **no** entra: rompe la frontera de M13–M14 y se
     decidiría aparte.
 
-- **M27 — Home Assistant a fondo** [en investigación 2026-11-20; el usuario pidió investigar crear
-  automatizaciones y más]. Lo que hay (`home-assistant` 1.2.0): resumen, búsqueda, estado,
+- **M27 — Home Assistant a fondo** [investigado y aceptado 2026-11-20; el usuario pidió investigar
+  crear automatizaciones y más]. Lo que hay (`home-assistant` 1.2.0): resumen, búsqueda, estado,
   historial, comprobación para vigilantes, y encender, apagar o cualquier servicio con
   confirmación. Lo investigado:
   - **Crear automatizaciones, scripts y escenas.** La API REST oficial no lo documenta. El editor
     de HA usa `/api/config/automation/config/<id>` (también `script` y `scene`) y el WebSocket
     (`config/automation/config`). Es interno, así que puede cambiar entre versiones. M22 lo dejó
-    fuera porque una automatización actúa sola, sin confirmación. Para que entre, la idea es:
+    fuera porque una automatización actúa sola, sin confirmación. *Decidido por el usuario el
+    2026-11-20*: entra, con estas reglas:
     - Solo se **propone** (`propose_ha_automation`), con confirmación forzada que enseña el YAML
       entero.
     - El agente solo toca lo suyo: ids con prefijo `stratum_` y nunca edita ni borra lo demás.
-    - Se crea deshabilitada si así se decide.
+    - Editar o borrar una suya también se propone. *Decidido por Claude, cambiable*: la propuesta
+      dice si se crea habilitada, por defecto deshabilitada.
     - El conector comprueba antes la versión de HA y la forma de la respuesta, y si no la
       reconoce, no escribe.
   - **De solo lectura, sin dilema**:
@@ -2883,8 +2885,11 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - **El MCP oficial de HA** (integración `mcp_server`) ya se puede declarar hoy en
     `companion.mcp.servers` por HTTP (M22 parte 3). Va por la API de Assist: solo lo expuesto a
     Assist, sin historial ni configuración. Sirve como alternativa, no sustituye al conector propio.
-  - *Pendiente del usuario*: si crear automatizaciones entra (y con qué reglas), y el orden
-    respecto a M23–M26.
+  - *Fases*: (1) lo de solo lectura (trazas, logbook, leer automatizaciones), que además enseña
+    cómo responde el HA real; (2) crear, editar y borrar las propias, propuestas. Los eventos
+    empujados quedan para después. Al implementar se decide si la propuesta es una tool del
+    runtime con confirmación forzada, como `propose_routine`, o una tool del conector, cuya
+    confirmación hoy es la normal.
 
 ### 23.12 Fuera, por ahora
 
