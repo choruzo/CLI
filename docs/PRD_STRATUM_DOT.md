@@ -2778,6 +2778,19 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     loopback y link-local salvo que se declare.
   - No cambia M20: los conectores del catálogo siguen siendo propios y en la caja de conectores.
     Esto es para un servidor de terceros que la persona declara a propósito.
+  *Hecha el 2026-11-20*:
+  - `url` en una entrada de `companion.mcp.servers`, con `auth: { env, header, scheme }` y
+    `allowPrivate`. En `mcp.servers` (sesiones de código) no valida. Con `url` no valen `command`,
+    `package`, `env` ni `args`, ni credenciales en la URL.
+  - Todas las peticiones van por un `fetch` propio (`tools/mcp/http-fetch.ts`): un solo origen,
+    ningún 3xx se sigue (ni al mismo origen), la IP se comprueba al conectar y hay un tope de 16 MB
+    por respuesta. La cabecera la pone ese `fetch`, leída del entorno al conectar; sin la variable,
+    no conecta.
+  - Decidido al implementar (más estricto que lo escrito arriba): sin `allowPrivate` solo se
+    alcanzan direcciones públicas, no solo se vetan loopback y link-local, así que también la LAN
+    se declara. Con `allowPrivate`, loopback, LAN, CGNAT e IPv6 de sitio único; link-local y
+    metadatos **nunca**, como en el navegador del agente. `http` solo con `allowPrivate` y solo si
+    resuelve a una dirección local: a internet, la cabecera no viaja en claro.
 
   *4. Historial de Home Assistant*: `ha_historial` (`/api/history/period`), de solo lectura, para
   una o varias entidades y un periodo acotado (máximo 7 días), resumido en cambios de estado con su

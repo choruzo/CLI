@@ -152,6 +152,32 @@ const McpServerObject = z.object({
    * default del dispatcher (30 s) y cortaba las tools MCP lentas.
    */
   toolTimeout: z.number().int().positive().default(120000),
+  /**
+   * M22 — server MCP remoto por Streamable HTTP, en vez de `command`/`package`.
+   * **Solo en `companion.mcp.servers`** (un server de `mcp.servers` con `url`
+   * no valida). `https`, o `http` solo con `allowPrivate`; sin credenciales en
+   * la URL. Ver `tools/mcp/http-fetch.ts`.
+   */
+  url: z.string().optional(),
+  /**
+   * M22 — cabecera de autenticación del server HTTP. El valor sale de la
+   * variable de entorno `env` del proceso que aloja la sesión (el daemon),
+   * nunca de la config: `<header>: <scheme> <valor>` (`scheme: ""` = el valor
+   * tal cual). Sin la variable, el server no conecta.
+   */
+  auth: z
+    .object({
+      env: z.string().regex(/^[A-Za-z_][A-Za-z0-9_]*$/, 'nombre de variable de entorno'),
+      header: z.string().default('Authorization'),
+      scheme: z.string().default('Bearer'),
+    })
+    .strict()
+    .optional(),
+  /**
+   * M22 — el server HTTP vive en la red de la persona (loopback, LAN): sin
+   * esto, solo se alcanzan direcciones públicas. Link-local y metadatos, nunca.
+   */
+  allowPrivate: z.boolean().optional(),
 });
 
 const needsCommand = {
@@ -161,17 +187,118 @@ const needsCommand = {
 const hasCommand = (s: { package?: string; command?: string }): boolean =>
   s.package !== undefined || (s.command !== undefined && s.command.length > 0);
 
-const McpServerSchema = McpServerObject.refine(hasCommand, needsCommand);
+type McpServerShape = z.infer<typeof McpServerObject>;
+
+/** Cabeceras que el transporte o HTTP fijan: la de autenticación no puede ser una. */
+const RESERVED_AUTH_HEADERS = new Set([
+  'host',
+  'content-length',
+  'content-type',
+  'accept',
+  'accept-encoding',
+  'connection',
+  'transfer-encoding',
+  'mcp-session-id',
+  'mcp-protocol-version',
+  'last-event-id',
+]);
+
+/** Valida la parte de transporte de un server del `companion` (stdio o HTTP). */
+function checkCompanionTransport(s: McpServerShape, ctx: z.RefinementCtx): void {
+  if (s.url === undefined) {
+    if (!hasCommand(s)) ctx.addIssue({ code: z.ZodIssueCode.custom, ...needsCommand });
+    for (const key of ['auth', 'allowPrivate'] as const) {
+      if (s[key] !== undefined) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          path: [key],
+          message: `'${key}' solo vale con 'url' (MCP por HTTP)`,
+        });
+      }
+    }
+    return;
+  }
+  for (const key of ['command', 'package', 'env'] as const) {
+    if (s[key] !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: `'${key}' no vale con 'url': un server es por stdio o por HTTP`,
+      });
+    }
+  }
+  if (s.args.length > 0) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['args'],
+      message: "'args' no vale con 'url'",
+    });
+  }
+  let url: URL;
+  try {
+    url = new URL(s.url);
+  } catch {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['url'], message: 'URL no válida' });
+    return;
+  }
+  if (url.protocol !== 'https:' && url.protocol !== 'http:') {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, path: ['url'], message: 'solo http o https' });
+  } else if (url.protocol === 'http:' && s.allowPrivate !== true) {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['url'],
+      message: '\'http\' solo con "allowPrivate": true (un server en tu red); fuera de ella, https',
+    });
+  }
+  if (url.username !== '' || url.password !== '') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['url'],
+      message: "sin credenciales en la URL: usa 'auth' con una variable de entorno",
+    });
+  }
+  if (url.hash !== '') {
+    ctx.addIssue({
+      code: z.ZodIssueCode.custom,
+      path: ['url'],
+      message: 'sin fragmento (#) en la URL',
+    });
+  }
+  if (s.auth) {
+    const header = s.auth.header.toLowerCase();
+    if (!/^[a-z0-9-]+$/.test(header) || RESERVED_AUTH_HEADERS.has(header)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ['auth', 'header'],
+        message: `cabecera no válida para autenticar: ${s.auth.header}`,
+      });
+    }
+  }
+}
+
+const McpServerSchema = McpServerObject.superRefine((s, ctx) => {
+  for (const key of ['url', 'auth', 'allowPrivate'] as const) {
+    if (s[key] !== undefined) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: [key],
+        message: 'MCP por HTTP solo en companion.mcp.servers (config global)',
+      });
+    }
+  }
+  if (!hasCommand(s)) ctx.addIssue({ code: z.ZodIssueCode.custom, ...needsCommand });
+});
 
 /**
  * M17 — un conector del `companion` (`companion.mcp.servers`): un server MCP
  * como cualquier otro, más las tools que **solo leen** (`readOnlyTools`, por
  * su nombre en el server). Esas no piden confirmación; el resto actúa fuera de
- * la caja y se confirma cada vez (o con una concesión temporal).
+ * la caja y se confirma cada vez (o con una concesión temporal). M22: también
+ * por HTTP (`url`, `auth`, `allowPrivate`).
  */
 const CompanionMcpServerSchema = McpServerObject.extend({
   readOnlyTools: z.array(z.string().min(1)).default([]),
-}).refine(hasCommand, needsCommand);
+}).superRefine(checkCompanionTransport);
 
 /**
  * Host del inventario SSH (Hito 9, §12.14). Un alias del `ssh.hosts` de

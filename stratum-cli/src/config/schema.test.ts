@@ -151,3 +151,74 @@ describe('retención de carpetas de Desktop (desktop.workspaces)', () => {
     expect(() => parse({ compressAfterDays: 0, deleteAfterDays: 5 })).not.toThrow();
   });
 });
+
+describe('MCP por HTTP (M22 parte 3)', () => {
+  const companion = (server: Record<string, unknown>) =>
+    StratumConfigSchema.safeParse({ companion: { mcp: { servers: [{ name: 'r', ...server }] } } });
+
+  it('acepta un server https en companion.mcp.servers, con auth de una variable', () => {
+    const r = companion({ url: 'https://mcp.example.com/mcp', auth: { env: 'MI_TOKEN' } });
+    expect(r.success).toBe(true);
+    if (!r.success) return;
+    expect(r.data.companion.mcp.servers[0]?.auth).toEqual({
+      env: 'MI_TOKEN',
+      header: 'Authorization',
+      scheme: 'Bearer',
+    });
+  });
+
+  it('http solo con allowPrivate', () => {
+    expect(companion({ url: 'http://192.168.1.5:8123/mcp' }).success).toBe(false);
+    expect(companion({ url: 'http://192.168.1.5:8123/mcp', allowPrivate: true }).success).toBe(
+      true,
+    );
+  });
+
+  it('rechaza mezclar stdio y HTTP, credenciales en la URL, otros esquemas y cabeceras del transporte', () => {
+    expect(companion({ url: 'https://x.example/mcp', command: 'node' }).success).toBe(false);
+    expect(companion({ url: 'https://x.example/mcp', env: { A: 'b' } }).success).toBe(false);
+    expect(companion({ url: 'https://x.example/mcp', args: ['-v'] }).success).toBe(false);
+    expect(companion({ url: 'https://u:p@x.example/mcp' }).success).toBe(false);
+    expect(companion({ url: 'ftp://x.example/mcp' }).success).toBe(false);
+    expect(
+      companion({ url: 'https://x.example/mcp', auth: { env: 'T', header: 'Mcp-Session-Id' } })
+        .success,
+    ).toBe(false);
+    expect(
+      companion({ url: 'https://x.example/mcp', auth: { env: 'T', value: 'x' } }).success,
+    ).toBe(false);
+    expect(companion({ command: 'node', allowPrivate: true }).success).toBe(false);
+  });
+
+  it('mcp.servers (sesiones de código) no admite url', () => {
+    const r = StratumConfigSchema.safeParse({
+      mcp: { servers: [{ name: 'r', url: 'https://x.example/mcp' }] },
+    });
+    expect(r.success).toBe(false);
+    if (r.success) return;
+    expect(r.error.issues.map((i) => i.message).join(' ')).toMatch(
+      /solo en companion\.mcp\.servers/,
+    );
+  });
+});
+
+describe('MCP por HTTP: claves conocidas (M22 parte 3)', () => {
+  it('url, auth y allowPrivate no salen como claves desconocidas', async () => {
+    const { findUnknownKeys } = await import('./unknown-keys.js');
+    const raw = {
+      companion: {
+        mcp: {
+          servers: [
+            {
+              name: 'r',
+              url: 'http://10.0.0.2/mcp',
+              allowPrivate: true,
+              auth: { env: 'T', scheme: '' },
+            },
+          ],
+        },
+      },
+    };
+    expect(findUnknownKeys(StratumConfigSchema, raw)).toEqual([]);
+  });
+});

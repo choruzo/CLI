@@ -1,5 +1,5 @@
 /**
- * MCP server client wrapper — stdio transport (§12.8).
+ * MCP server client wrapper — stdio (§12.8) o Streamable HTTP (M22, solo `companion`).
  *
  * Un McpServerClient encapsula la conexión a un único MCP server y expone
  * estado observable, el catálogo de tools descubierto y métodos para hacer
@@ -14,8 +14,12 @@
 
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
+import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import type { McpServer } from '../../config/schema.js';
+import { createMcpHttpFetch } from './http-fetch.js';
 import { resolveServerCommand, type McpRuntimeOptions } from './installer.js';
+
+type McpTransport = StdioClientTransport | StreamableHTTPClientTransport;
 
 // ---------------------------------------------------------------------------
 // Tipos públicos
@@ -59,7 +63,7 @@ export class McpClosedError extends Error {
 
 export class McpServerClient {
   private client: Client | null = null;
-  private transport: StdioClientTransport | null = null;
+  private transport: McpTransport | null = null;
   private _status: McpServerStatus = 'connecting';
   private _tools: McpToolInfo[] = [];
   /** Conexión en vuelo, para deduplicar llamadas concurrentes (lazy/§12.8). */
@@ -125,28 +129,14 @@ export class McpServerClient {
     await this.disposeTransport();
 
     const client = this.newClient();
-    let transport: StdioClientTransport | null = null;
+    let transport: McpTransport | null = null;
     try {
       if (this.beforeConnect) {
         await this.beforeConnect();
         this.assertCurrent(gen);
       }
-      // Resuelve el ejecutable: con `package`, instala en la carpeta gestionada
-      // (si procede) y devuelve `node <entry>`, evitando npx (§12.8, opción 2).
-      const resolved = await resolveServerCommand(this.serverConfig, this.runtime, this.onLog);
+      transport = await this.newTransport();
       this.assertCurrent(gen);
-
-      transport = new StdioClientTransport({
-        command: resolved.command,
-        args: resolved.args,
-        env: resolved.env,
-        ...(this.runtime.cwd ? { cwd: this.runtime.cwd } : {}),
-        // Por defecto el SDK usa 'inherit', lo que vuelca el stderr del server
-        // (banners, avisos de telemetría, etc.) directamente a la terminal de
-        // Stratum y ensucia la UI de arranque. Lo capturamos con 'pipe' para que
-        // no llegue a la consola y lo drenamos hacia onLog (diagnóstico).
-        stderr: 'pipe',
-      });
       this.transport = transport;
       this.client = client;
 
@@ -164,7 +154,7 @@ export class McpServerClient {
       const tools = await withTimeout(
         (async () => {
           await client.connect(started);
-          this._drainStderr(started);
+          if (started instanceof StdioClientTransport) this._drainStderr(started);
           return discoverTools(client);
         })(),
         this.serverConfig.startupTimeout,
@@ -246,6 +236,65 @@ export class McpServerClient {
   // ---------------------------------------------------------------------------
   // Privado
   // ---------------------------------------------------------------------------
+
+  /**
+   * El transporte de esta conexión. Con `url` (M22, solo `companion.mcp.servers`):
+   * Streamable HTTP con el `fetch` confinado de `http-fetch.ts`, y la cabecera
+   * de autenticación leída ahora del entorno del proceso. Si falta la variable,
+   * no se conecta (falla cerrado). Si no, stdio con el ejecutable resuelto.
+   */
+  private async newTransport(): Promise<McpTransport> {
+    const cfg = this.serverConfig;
+    if (cfg.url !== undefined) {
+      const url = new URL(cfg.url);
+      let authHeader: { name: string; value: string } | undefined;
+      if (cfg.auth) {
+        const secret = process.env[cfg.auth.env];
+        if (secret === undefined || secret === '') {
+          throw new Error(
+            `MCP server '${this.name}': environment variable ${cfg.auth.env} is not set (it holds the ${cfg.auth.header} header)`,
+          );
+        }
+        authHeader = {
+          name: cfg.auth.header,
+          value: cfg.auth.scheme === '' ? secret : `${cfg.auth.scheme} ${secret}`,
+        };
+      }
+      const transport = new StreamableHTTPClientTransport(url, {
+        fetch: createMcpHttpFetch({
+          url,
+          allowPrivate: cfg.allowPrivate === true,
+          ...(authHeader ? { authHeader } : {}),
+        }),
+        // Pocas reconexiones del stream SSE: si el server cae, el heartbeat
+        // del manager lo detecta y reconecta con su propio backoff.
+        reconnectionOptions: {
+          initialReconnectionDelay: 1000,
+          maxReconnectionDelay: 10_000,
+          reconnectionDelayGrowFactor: 2,
+          maxRetries: 2,
+        },
+      });
+      transport.onerror = (err) => {
+        this.onLog?.(`[${this.name}] http transport: ${err.message}`);
+      };
+      return transport;
+    }
+    // Resuelve el ejecutable: con `package`, instala en la carpeta gestionada
+    // (si procede) y devuelve `node <entry>`, evitando npx (§12.8, opción 2).
+    const resolved = await resolveServerCommand(cfg, this.runtime, this.onLog);
+    return new StdioClientTransport({
+      command: resolved.command,
+      args: resolved.args,
+      env: resolved.env,
+      ...(this.runtime.cwd ? { cwd: this.runtime.cwd } : {}),
+      // Por defecto el SDK usa 'inherit', lo que vuelca el stderr del server
+      // (banners, avisos de telemetría, etc.) directamente a la terminal de
+      // Stratum y ensucia la UI de arranque. Lo capturamos con 'pipe' para que
+      // no llegue a la consola y lo drenamos hacia onLog (diagnóstico).
+      stderr: 'pipe',
+    });
+  }
 
   private newClient(): Client {
     return new Client(
@@ -343,8 +392,14 @@ async function discoverTools(client: Client): Promise<McpToolInfo[]> {
   return tools;
 }
 
-async function closeQuietly(transport: StdioClientTransport): Promise<void> {
+async function closeQuietly(transport: McpTransport): Promise<void> {
   try {
+    // HTTP: cerrar la sesión en el server (DELETE), sin esperar más de 2 s.
+    if (transport instanceof StreamableHTTPClientTransport && transport.sessionId) {
+      await withTimeout(transport.terminateSession(), 2000, 'terminateSession timed out').catch(
+        () => {},
+      );
+    }
     await transport.close();
   } catch {
     // ignorar — el proceso pudo no haber arrancado o ya haber muerto

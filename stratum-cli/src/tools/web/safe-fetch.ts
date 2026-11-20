@@ -153,6 +153,26 @@ export function blockedAddressReason(ip: string): string | null {
   return null;
 }
 
+/**
+ * Motivos de `blockedAddressReason` que son la red de la propia persona
+ * (loopback, LAN, CGNAT, IPv6 de sitio único), no la nube ni lo reservado.
+ */
+const LOCAL_REASONS = new Set(['loopback', 'private network', 'carrier-grade NAT', 'unique local']);
+
+/**
+ * Ámbito de una dirección: `public`, `local` (la red de la persona, ver
+ * `LOCAL_REASONS`, también envuelta en IPv6) o `forbidden` (link-local y
+ * metadatos, multicast, documentación, lo reservado y lo que no es una IP).
+ * Lo usa el transporte HTTP de MCP (M22): lo `local` solo se alcanza si el
+ * server lo declara, lo `forbidden` nunca.
+ */
+export function addressScope(ip: string): 'public' | 'local' | 'forbidden' {
+  const reason = blockedAddressReason(ip);
+  if (reason === null) return 'public';
+  const base = reason.replace(/ \(IPv4 embedded in IPv6\)$/, '');
+  return LOCAL_REASONS.has(base) ? 'local' : 'forbidden';
+}
+
 // ---------------------------------------------------------------------------
 // allowHosts
 // ---------------------------------------------------------------------------

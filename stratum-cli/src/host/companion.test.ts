@@ -757,3 +757,31 @@ describe('companion — conectores MCP en la sesión (M17)', () => {
     expect(events.filter((e) => e.type === 'tool_result')).toHaveLength(1);
   }, 30_000);
 });
+
+describe('buildCompanionConfig con un server MCP por HTTP (M22 parte 3)', () => {
+  it('pasa url, auth y allowPrivate al manager, y readOnlyTools a mcp.readOnlyTools', () => {
+    const base = StratumConfigSchema.parse({
+      companion: {
+        mcp: {
+          servers: [
+            {
+              name: 'remoto',
+              url: 'https://mcp.example.com/mcp',
+              auth: { env: 'REMOTO_TOKEN' },
+              readOnlyTools: ['buscar'],
+            },
+          ],
+        },
+      },
+    });
+    const config = buildCompanionConfig(base, join(tmpdir(), 'stratum-companion-http'));
+    expect(config.mcp.servers).toHaveLength(1);
+    expect(config.mcp.servers[0]).toMatchObject({
+      name: 'remoto',
+      url: 'https://mcp.example.com/mcp',
+      auth: { env: 'REMOTO_TOKEN', header: 'Authorization', scheme: 'Bearer' },
+    });
+    expect(config.mcp.servers[0]).not.toHaveProperty('readOnlyTools');
+    expect(config.mcp.readOnlyTools).toEqual({ remoto: ['buscar'] });
+  });
+});
