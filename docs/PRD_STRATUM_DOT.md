@@ -2815,6 +2815,10 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     Desktop (ahorro de recursos) y WSL (apagado por inactividad).
   - Lo que deba seguir vivo es un job, una rutina o un vigilante, no un proceso suelto en la caja.
     Recrear la caja debe avisar al `companion` de que lo que corría se ha perdido.
+  *Resuelta el 2026-11-20, sin código*: la caja se paraba porque se apagaba el equipo (confirmado
+  por el usuario). No es un fallo de Stratum: ejecutar con la máquina apagada queda fuera (§23.12).
+  Al volver a encender, la caja sigue parada hasta un `box.start` (Dot o `stratum box start`): el
+  daemon no la arranca solo, y mientras tanto los vigilantes quedan suspendidos. **M22 cerrado.**
 
 ### 23.12 Fuera, por ahora
 
