@@ -1,6 +1,6 @@
 /**
  * Tools del conector Home Assistant: ha_resumen, ha_buscar, ha_estado,
- * ha_comprobar, ha_encender, ha_apagar y ha_accion. `fetch` inyectable para
+ * ha_historial, ha_comprobar, ha_encender, ha_apagar y ha_accion. `fetch` inyectable para
  * testear sin red. Las salidas son texto breve en español para un agente,
  * nunca JSON crudo; `ha_comprobar` (M22) devuelve además lo estructurado que
  * lee un vigilante.
@@ -26,6 +26,7 @@ import {
   pct,
   stateText,
 } from './format.js';
+import { describeHistory, localToInstant, parseHistory } from './history.js';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
@@ -36,6 +37,14 @@ const MAX_DOMAINS = 15;
 const MAX_AREAS = 30;
 const MAX_OTHER_ATTRS = 25;
 const MAX_DATA_BYTES = 2048;
+/** Historial (M22 parte 4): periodo acotado a 7 días y pocas entidades. */
+const MAX_HISTORY_HOURS = 168;
+const DEFAULT_HISTORY_HOURS = 24;
+const MAX_HISTORY_IDS = 10;
+/** Cambios enseñados entre todas las entidades, y el mínimo y máximo por entidad. */
+const HISTORY_CHANGES_BUDGET = 60;
+const MIN_CHANGES_PER_ENTITY = 10;
+const MAX_CHANGES_PER_ENTITY = 40;
 /** Tope del `detalle` de una comprobación (M22): lo que enseña un aviso. */
 const MAX_DETAIL = 300;
 /** `estado` de una comprobación cuyo atributo no existe: nunca 0. */
@@ -140,6 +149,26 @@ const BuscarSchema = z.object({
     .optional(),
 });
 const EstadoSchema = z.object({ entity_id: entityIds(MAX_STATE_IDS) });
+const HOURS_MSG = `horas debe ser un entero entre 1 y ${MAX_HISTORY_HOURS} (7 días)`;
+const LOCAL_MSG = (f: string): string =>
+  `${f} debe ser una fecha AAAA-MM-DD o una fecha y hora AAAA-MM-DDTHH:MM en hora de la casa`;
+const localWhen = (f: string) =>
+  z
+    .string({ message: LOCAL_MSG(f) })
+    .trim()
+    .max(16, LOCAL_MSG(f))
+    .optional();
+const HistorialSchema = z.object({
+  entity_id: entityIds(MAX_HISTORY_IDS),
+  horas: z
+    .number({ message: HOURS_MSG })
+    .int(HOURS_MSG)
+    .min(1, HOURS_MSG)
+    .max(MAX_HISTORY_HOURS, HOURS_MSG)
+    .optional(),
+  desde: localWhen('desde'),
+  hasta: localWhen('hasta'),
+});
 const ComprobarSchema = z.object({
   entity_id: entityId,
   atributo: z
@@ -437,6 +466,123 @@ export function createHomeAssistantTools(
     },
   };
 
+  const now = opts.now ?? Date.now;
+
+  const haHistorial: ConnectorTool = {
+    name: 'ha_historial',
+    description:
+      'Historial de una entidad (o de hasta 10) en las últimas N horas (máx. 168, 7 días): estado al empezar, ' +
+      'cambios con su hora, tiempo en cada estado y, en sensores numéricos, mínimo y máximo (por día si pasa de ' +
+      '24 h). Para «¿cuándo se apagó…?», «¿cuánto rato estuvo encendida…?» o «¿qué temperatura hizo anoche?». ' +
+      'Para un rato concreto, desde y hasta en hora de la casa en vez de horas. Solo lectura.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        entity_id: {
+          oneOf: [
+            { type: 'string' },
+            { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: MAX_HISTORY_IDS },
+          ],
+          description: 'Un entity_id (light.salon) o una lista de hasta 10.',
+        },
+        horas: {
+          type: 'integer',
+          minimum: 1,
+          maximum: MAX_HISTORY_HOURS,
+          description: `Las últimas N horas hasta ahora (por defecto ${DEFAULT_HISTORY_HOURS}; máx. ${MAX_HISTORY_HOURS}). No se combina con desde.`,
+        },
+        desde: {
+          type: 'string',
+          description:
+            'Inicio del periodo en hora de la casa: AAAA-MM-DDTHH:MM, o AAAA-MM-DD (desde las 00:00). ' +
+            'P. ej. 2026-11-19T21:00.',
+        },
+        hasta: {
+          type: 'string',
+          description:
+            'Final del periodo en hora de la casa: AAAA-MM-DDTHH:MM, o AAAA-MM-DD (ese día entero incluido). ' +
+            'Por defecto, ahora. Solo con desde; como mucho 7 días después de desde.',
+        },
+      },
+      required: ['entity_id'],
+      additionalProperties: false,
+    },
+    async handler(args, signal) {
+      const c = need();
+      const a = parseArgs(HistorialSchema, args);
+      const ids = idList(a.entity_id);
+      if (a.desde !== undefined && a.horas !== undefined) {
+        throw new ToolUserError(
+          'Argumento inválido: usa horas (las últimas N horas) o desde/hasta (un periodo concreto), no los dos.',
+        );
+      }
+      if (a.hasta !== undefined && a.desde === undefined) {
+        throw new ToolUserError('Argumento inválido: hasta necesita desde.');
+      }
+      const config = await c.getConfig(signal);
+      const tz = config.timeZone;
+      const current = now();
+      let start: number;
+      let end = current;
+      let toNow = true;
+      let label: string;
+      const at = (ms: number): string => localTime(new Date(ms).toISOString(), tz);
+      if (a.desde === undefined) {
+        const hours = a.horas ?? DEFAULT_HISTORY_HOURS;
+        start = current - hours * 3_600_000;
+        label = `las últimas ${hours} h`;
+      } else {
+        const from = localToInstant(a.desde, tz);
+        if (from === null) throw new ToolUserError(`Argumento inválido: ${LOCAL_MSG('desde')}.`);
+        const to = a.hasta === undefined ? current : localToInstant(a.hasta, tz, true);
+        if (to === null) throw new ToolUserError(`Argumento inválido: ${LOCAL_MSG('hasta')}.`);
+        if (from >= current) {
+          throw new ToolUserError(
+            `Argumento inválido: desde (${at(from)}) es posterior a ahora (${at(current)}): no hay historial del futuro.`,
+          );
+        }
+        if (to <= from) {
+          throw new ToolUserError('Argumento inválido: hasta tiene que ser posterior a desde.');
+        }
+        if (to - from > MAX_HISTORY_HOURS * 3_600_000) {
+          throw new ToolUserError(
+            'Argumento inválido: el periodo de desde a hasta admite como máximo 7 días.',
+          );
+        }
+        start = from;
+        // Lo que pase de ahora se recorta: el periodo acaba ahora.
+        end = Math.min(to, current);
+        toNow = to >= current;
+        label = `el periodo de ${at(start)} a ${toNow ? `ahora (${at(end)})` : at(end)}`;
+      }
+      const iso = (ms: number): string => encodeURIComponent(new Date(ms).toISOString());
+      // Los ids ya pasaron ENTITY_RE: no llevan nada que escapar en la query.
+      const path =
+        `/api/history/period/${iso(start)}?filter_entity_id=${ids.join(',')}` +
+        `&end_time=${iso(end)}&minimal_response`;
+      const history = parseHistory(await c.getJson(path, signal));
+      const maxChanges = Math.min(
+        MAX_CHANGES_PER_ENTITY,
+        Math.max(MIN_CHANGES_PER_ENTITY, Math.floor(HISTORY_CHANGES_BUDGET / ids.length)),
+      );
+      const blocks = ids.map((id) => {
+        const h = history.get(id);
+        if (!h) {
+          return `${id}\nSin datos en ${label}: o no existe (usa ha_buscar) o Home Assistant no guarda su historial (recorder).`;
+        }
+        return describeHistory(h, {
+          start,
+          end,
+          label,
+          toNow,
+          tz,
+          maxChanges,
+        });
+      });
+      return blocks.join('\n\n');
+    },
+  };
+
   const haComprobar: ConnectorTool<string | ToolOutput> = {
     name: 'ha_comprobar',
     description:
@@ -639,7 +785,7 @@ export function createHomeAssistantTools(
     },
   };
 
-  return [haResumen, haBuscar, haEstado, haComprobar, haEncender, haApagar, haAccion];
+  return [haResumen, haBuscar, haEstado, haHistorial, haComprobar, haEncender, haApagar, haAccion];
 }
 
 // --- Detalle de un estado ----------------------------------------------------

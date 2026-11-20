@@ -32,6 +32,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   10: 'b87f221303e174fd',
   // M22 parte 2: Google Calendar en el conector `google`.
   11: '99734ebc11c4bf07',
+  // M22 parte 4: `ha_historial` en home-assistant.
+  12: '60652836f162df55',
 };
 
 /**

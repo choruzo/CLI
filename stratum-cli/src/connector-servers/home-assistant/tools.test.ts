@@ -74,15 +74,23 @@ const AREAS = 'light.salon|Salón\nsensor.temp_salon|Salón\nlight.cocina|Cocina
 interface Call {
   method: string;
   path: string;
+  search: string;
   body: unknown;
 }
 
-function setup(opts: { areasFail?: boolean; services?: (path: string) => unknown } = {}) {
+function setup(
+  opts: {
+    areasFail?: boolean;
+    services?: (path: string) => unknown;
+    history?: unknown;
+    now?: () => number;
+  } = {},
+) {
   const calls: Call[] = [];
   const f = (async (input: string | URL | Request, init?: RequestInit) => {
     const url = new URL(String(input));
     const body = init?.body ? JSON.parse(String(init.body)) : undefined;
-    calls.push({ method: init?.method ?? 'GET', path: url.pathname, body });
+    calls.push({ method: init?.method ?? 'GET', path: url.pathname, search: url.search, body });
     const p = url.pathname;
     if (p === '/api/config') {
       return new Response(
@@ -102,12 +110,19 @@ function setup(opts: { areasFail?: boolean; services?: (path: string) => unknown
     if (p === '/api/template') {
       return opts.areasFail ? new Response('no', { status: 400 }) : new Response(AREAS);
     }
+    if (p.startsWith('/api/history/period/'))
+      return new Response(JSON.stringify(opts.history ?? []));
     if (p.startsWith('/api/services/')) {
       return new Response(JSON.stringify(opts.services ? opts.services(p) : []));
     }
     return new Response('?', { status: 500 });
   }) as typeof fetch;
-  const tools = createHomeAssistantTools({ fetch: f, url: 'http://ha.casa:8123', token: TOKEN });
+  const tools = createHomeAssistantTools({
+    fetch: f,
+    url: 'http://ha.casa:8123',
+    token: TOKEN,
+    ...(opts.now ? { now: opts.now } : {}),
+  });
   const get = (name: string): ConnectorTool<string | ToolOutput> =>
     tools.find((t) => t.name === name)!;
   return {
@@ -140,19 +155,20 @@ async function failure(p: Promise<unknown>): Promise<string> {
 }
 
 describe('tools de Home Assistant', () => {
-  it('expone las 7 tools con ha_resumen primero', () => {
+  it('expone las 8 tools con ha_resumen primero', () => {
     const { tools } = setup();
     expect(tools.map((t) => t.name)).toEqual([
       'ha_resumen',
       'ha_buscar',
       'ha_estado',
+      'ha_historial',
       'ha_comprobar',
       'ha_encender',
       'ha_apagar',
       'ha_accion',
     ]);
     expect(tools[0]!.description).toMatch(/Primera tool/);
-    expect(tools[6]!.description).toMatch(/aprobación/);
+    expect(tools[7]!.description).toMatch(/aprobación/);
   });
 
   describe('ha_resumen', () => {
@@ -490,5 +506,277 @@ describe('tools de Home Assistant', () => {
     await expect(estado.handler({ entity_id: '["light.salon",' })).rejects.toThrow(
       /dominio\.nombre/,
     );
+  });
+});
+
+describe('ha_historial', () => {
+  // 2026-11-20 13:00 en Madrid: por defecto, desde el 19 nov 13:00.
+  const NOW = Date.parse('2026-11-20T12:00:00Z');
+  const HISTORY = [
+    [
+      {
+        entity_id: 'light.wled',
+        state: 'on',
+        attributes: { friendly_name: 'WLED' },
+        last_changed: '2026-11-19T12:00:00+00:00',
+      },
+      { state: 'unavailable', last_changed: '2026-11-20T02:00:00+00:00' },
+      { state: 'on', last_changed: '2026-11-20T02:30:00+00:00' },
+    ],
+    [
+      {
+        entity_id: 'sensor.temp',
+        state: '20.5',
+        attributes: { friendly_name: 'Temperatura', unit_of_measurement: '°C' },
+        last_changed: '2026-11-18T10:00:00+00:00',
+      },
+      { state: '18.2', last_changed: '2026-11-20T04:00:00+00:00' },
+      { state: '21', last_changed: '2026-11-20T10:00:00+00:00' },
+    ],
+  ];
+
+  it('pide el periodo con filtro, fin y respuesta mínima', async () => {
+    const s = setup({ history: HISTORY, now: () => NOW });
+    await s.get('ha_historial').handler({ entity_id: ['light.wled', 'sensor.temp'] });
+    const call = s.calls.find((c) => c.path.startsWith('/api/history/period/'))!;
+    expect(decodeURIComponent(call.path)).toBe('/api/history/period/2026-11-19T12:00:00.000Z');
+    const q = new URLSearchParams(call.search);
+    expect(q.get('filter_entity_id')).toBe('light.wled,sensor.temp');
+    expect(q.get('end_time')).toBe('2026-11-20T12:00:00.000Z');
+    expect(q.has('minimal_response')).toBe(true);
+    expect(call.method).toBe('GET');
+  });
+
+  it('resume cambios con su hora local y el tiempo en cada estado', async () => {
+    const out = await setup({ history: HISTORY, now: () => NOW })
+      .get('ha_historial')
+      .handler({ entity_id: 'light.wled' });
+    expect(out).toBe(
+      [
+        'light.wled — WLED',
+        '2 cambios en las últimas 24 h.',
+        'Al empezar (19 nov 13:00): on',
+        'Tiempo en cada estado: on 23 h 30 min · no disponible 30 min',
+        'Ahora: on (desde 20 nov 03:30)',
+        'Cambios:',
+        '· 20 nov 03:00 → no disponible',
+        '· 20 nov 03:30 → on',
+      ].join('\n'),
+    );
+  });
+
+  it('en un sensor numérico da mínimo y máximo con su unidad y hora', async () => {
+    const out = await setup({ history: HISTORY, now: () => NOW })
+      .get('ha_historial')
+      .handler({ entity_id: 'sensor.temp', horas: 24 });
+    expect(out).toContain('Al empezar (19 nov 13:00): 20.5 °C');
+    expect(out).toContain('Mínimo: 18.2 °C (20 nov 05:00) · máximo: 21 °C (20 nov 11:00)');
+    expect(out).not.toContain('Tiempo en cada estado');
+    // 24 h justas: sin resumen por día.
+    expect(out).not.toContain('Por día');
+    expect(out).toContain('Ahora: 21 °C (desde 20 nov 11:00)');
+  });
+
+  it('una entidad sin datos lo dice sin inventar un estado', async () => {
+    const out = await setup({ history: HISTORY, now: () => NOW })
+      .get('ha_historial')
+      .handler({ entity_id: ['light.wled', 'sensor.nada'] });
+    expect(out).toContain(
+      'sensor.nada\nSin datos en las últimas 24 h: o no existe (usa ha_buscar)',
+    );
+    expect(out).toContain('light.wled — WLED');
+  });
+
+  it('sin cambios en el periodo, el estado de partida cubre todo', async () => {
+    const out = await setup({
+      history: [
+        [
+          {
+            entity_id: 'switch.x',
+            state: 'off',
+            attributes: {},
+            last_changed: '2026-11-10T00:00:00+00:00',
+          },
+        ],
+      ],
+      now: () => NOW,
+    })
+      .get('ha_historial')
+      .handler({ entity_id: 'switch.x', horas: 2 });
+    expect(out).toContain('Sin cambios en las últimas 2 h.');
+    expect(out).toContain('Tiempo en cada estado: off 2 h 00 min');
+    expect(out).toContain('Ahora: off (desde 10 nov 01:00)');
+    expect(out).not.toContain('Cambios:');
+  });
+
+  it('sin cambios y con el estado de partida a la hora de inicio, no inventa desde cuándo', async () => {
+    // Así lo devuelve Home Assistant (medido el 2026-11-20 con un HA real).
+    const out = await setup({
+      history: [
+        [
+          {
+            entity_id: 'switch.x',
+            state: 'on',
+            attributes: {},
+            last_changed: '2026-11-19T12:00:00+00:00',
+          },
+        ],
+      ],
+      now: () => NOW,
+    })
+      .get('ha_historial')
+      .handler({ entity_id: 'switch.x' });
+    expect(out).toContain('Ahora: on (desde antes de 19 nov 13:00)');
+  });
+
+  it('una entidad que aparece a mitad del periodo dice desde cuándo hay dato', async () => {
+    const out = await setup({
+      history: [
+        [
+          {
+            entity_id: 'switch.x',
+            state: 'on',
+            attributes: {},
+            last_changed: '2026-11-20T11:00:00+00:00',
+          },
+        ],
+      ],
+      now: () => NOW,
+    })
+      .get('ha_historial')
+      .handler({ entity_id: 'switch.x' });
+    expect(out).toContain('1 cambio en las últimas 24 h (sin dato antes de 20 nov 12:00).');
+    expect(out).not.toContain('Al empezar');
+    expect(out).toContain('Tiempo en cada estado: on 1 h 00 min');
+  });
+
+  it('muchos cambios: enseña los últimos y dice cuántos omite', async () => {
+    const series: unknown[] = [
+      {
+        entity_id: 'binary_sensor.puerta',
+        state: 'off',
+        attributes: {},
+        last_changed: '2026-11-19T12:00:00+00:00',
+      },
+    ];
+    for (let i = 1; i <= 50; i++) {
+      series.push({
+        state: i % 2 ? 'on' : 'off',
+        last_changed: new Date(Date.parse('2026-11-19T12:00:00Z') + i * 60_000 * 10).toISOString(),
+      });
+    }
+    const out = String(
+      await setup({ history: [series], now: () => NOW })
+        .get('ha_historial')
+        .handler({ entity_id: 'binary_sensor.puerta' }),
+    );
+    expect(out).toContain('50 cambios en las últimas 24 h.');
+    expect(out).toContain('Cambios (los 40 últimos):');
+    expect(out).toContain(
+      '… 10 anteriores omitidos: para verlos, pide un periodo más corto con desde y hasta.',
+    );
+    expect(out.split('\n').filter((l) => l.startsWith('· '))).toHaveLength(40);
+  });
+
+  it('con desde y hasta (hora de la casa) pide ese periodo y no habla de «ahora»', async () => {
+    const s = setup({ history: HISTORY, now: () => NOW });
+    const out = String(
+      await s.get('ha_historial').handler({
+        entity_id: 'light.wled',
+        desde: '2026-11-20T01:00',
+        hasta: '2026-11-20T04:00',
+      }),
+    );
+    const call = s.calls.find((c) => c.path.startsWith('/api/history/period/'))!;
+    // 01:00 en Madrid (UTC+1 en noviembre) es 00:00 UTC.
+    expect(decodeURIComponent(call.path)).toBe('/api/history/period/2026-11-20T00:00:00.000Z');
+    expect(new URLSearchParams(call.search).get('end_time')).toBe('2026-11-20T03:00:00.000Z');
+    expect(out).toContain('2 cambios en el periodo de 20 nov 01:00 a 20 nov 04:00.');
+    expect(out).toContain('Al acabar (20 nov 04:00): on (desde 20 nov 03:30)');
+    expect(out).not.toContain('Ahora:');
+    expect(out).toContain('Tiempo en cada estado: on 2 h 30 min · no disponible 30 min');
+  });
+
+  it('desde sin hasta, o un hasta futuro, acaba ahora', async () => {
+    const s = setup({ history: HISTORY, now: () => NOW });
+    const t = s.get('ha_historial');
+    const a = String(await t.handler({ entity_id: 'light.wled', desde: '2026-11-20' }));
+    expect(a).toContain('en el periodo de 20 nov 00:00 a ahora (20 nov 13:00).');
+    expect(a).toContain('Ahora: on');
+    // Un día entero en hasta lo incluye: hasta el 21 a las 00:00, recortado a ahora.
+    const b = String(
+      await t.handler({ entity_id: 'light.wled', desde: '2026-11-20', hasta: '2026-11-20' }),
+    );
+    expect(b).toContain('a ahora (20 nov 13:00).');
+    const ends = s.calls
+      .filter((c) => c.path.startsWith('/api/history/period/'))
+      .map((c) => new URLSearchParams(c.search).get('end_time'));
+    expect(ends).toEqual(['2026-11-20T12:00:00.000Z', '2026-11-20T12:00:00.000Z']);
+  });
+
+  it('un sensor numérico de más de 24 h da mínimo y máximo por día local, y solo 10 cambios', async () => {
+    const series: unknown[] = [
+      {
+        entity_id: 'sensor.t',
+        state: '20.0',
+        attributes: { unit_of_measurement: '°C' },
+        last_changed: '2026-11-18T12:00:00+00:00',
+      },
+    ];
+    // Cada hora desde el 19 nov 00:00 UTC: 20.0, 20.5, 21.0…
+    for (let i = 0; i < 30; i++) {
+      series.push({
+        state: (20 + (i % 6) * 0.5).toFixed(1),
+        last_changed: new Date(Date.parse('2026-11-19T00:00:00Z') + i * 3_600_000).toISOString(),
+      });
+    }
+    const out = String(
+      await setup({ history: [series], now: () => NOW })
+        .get('ha_historial')
+        .handler({ entity_id: 'sensor.t', horas: 48 }),
+    );
+    expect(out).toContain('Por día (mínimo – máximo):');
+    // El 18 nov (desde las 13:00 en Madrid) solo tiene el valor de partida.
+    expect(out).toContain('· 18 nov: 20.0 °C');
+    expect(out).toContain('· 19 nov: 20.0 – 22.5 °C');
+    expect(out).toContain('· 20 nov: 20.0 – 22.5 °C');
+    expect(out).toContain('Cambios (los 10 últimos):');
+    expect(out.split('\n').filter((l) => l.startsWith('· ') && l.includes('→'))).toHaveLength(10);
+  });
+
+  it('valida horas y el número de entidades', async () => {
+    const t = setup().get('ha_historial');
+    expect(await failure(t.handler({ entity_id: 'light.a', horas: 200 }))).toMatch(/168/);
+    expect(await failure(t.handler({ entity_id: 'light.a', horas: 0 }))).toMatch(/entre 1/);
+    expect(await failure(t.handler({ entity_id: 'light.a', horas: 1.5 }))).toMatch(/entero/);
+    const many = Array.from({ length: 11 }, (_, i) => `light.l${i}`);
+    expect(await failure(t.handler({ entity_id: many }))).toMatch(/hasta 10/);
+    expect(await failure(t.handler({ entity_id: '../x' }))).toMatch(/dominio\.nombre/);
+  });
+
+  it('valida desde y hasta', async () => {
+    const t = setup({ now: () => NOW }).get('ha_historial');
+    const bad = (extra: Record<string, unknown>): Promise<string> =>
+      failure(t.handler({ entity_id: 'light.a', ...extra }));
+    expect(await bad({ horas: 5, desde: '2026-11-19T21:00' })).toMatch(/no los dos/);
+    expect(await bad({ hasta: '2026-11-19T21:00' })).toMatch(/hasta necesita desde/);
+    expect(await bad({ desde: 'ayer' })).toMatch(/AAAA-MM-DDTHH:MM/);
+    expect(await bad({ desde: '2026-02-30' })).toMatch(/AAAA-MM-DD/);
+    expect(await bad({ desde: '2026-11-19T25:00' })).toMatch(/AAAA-MM-DD/);
+    expect(await bad({ desde: '2026-11-19T21:00', hasta: 'luego' })).toMatch(/^.*hasta debe ser/);
+    expect(await bad({ desde: '2026-11-21T10:00' })).toMatch(/futuro/);
+    expect(await bad({ desde: '2026-11-19T22:00', hasta: '2026-11-19T21:00' })).toMatch(
+      /posterior a desde/,
+    );
+    expect(await bad({ desde: '2026-11-01', hasta: '2026-11-10' })).toMatch(/7 días/);
+  });
+
+  it('sin configurar pide el setup', async () => {
+    const t = createHomeAssistantTools({
+      fetch: (() => {
+        throw new Error('no debe llamar');
+      }) as unknown as typeof fetch,
+    }).find((x) => x.name === 'ha_historial')!;
+    expect(await failure(t.handler({ entity_id: 'light.a' }))).toMatch(/connectors setup/);
   });
 });

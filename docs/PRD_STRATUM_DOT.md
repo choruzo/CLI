@@ -2797,6 +2797,15 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   hora. Crear automatizaciones **queda fuera**: una automatización actúa sola, sin confirmación.
   Como mucho, el agente escribe una propuesta en YAML para que la persona la pegue en Home
   Assistant.
+  *Hecha el 2026-11-20* (`home-assistant` 1.2.0, imagen v12):
+  - `ha_historial`, hasta 10 entidades. El periodo es `horas` (las últimas N hasta ahora) o
+    `desde`/`hasta` en hora de la casa (`AAAA-MM-DDTHH:MM` o un día entero), de 7 días como máximo.
+  - Devuelve el estado al empezar, los cambios con su hora y el tiempo en cada estado. En un
+    sensor numérico, mínimo y máximo (por día si pasa de 24 h) y solo los últimos cambios.
+  - Decidido al implementar, tras probarlo con el HA real y el `companion`: el periodo en horas
+    relativas obligaba al modelo a restar desde la hora actual y falló dos veces con «ayer de 21:00
+    a 22:00». Con `desde`/`hasta` acierta a la primera. HA da el estado de partida con la hora de
+    inicio del periodo, así que sin cambios la salida dice «desde antes de…» y no inventa la hora.
 
   *5. La caja que se para*: el 2026-11-18 el `companion` dijo que la caja se le paró dos veces a
   mitad de conversación. En Stratum nada para la caja por inactividad: solo `stratum box stop`, y

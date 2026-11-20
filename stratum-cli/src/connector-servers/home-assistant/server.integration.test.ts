@@ -59,7 +59,7 @@ describe('server de Home Assistant empaquetado', () => {
       expect(client.tools.map((t) => t.name).sort()).toEqual(
         manifest.tools.map((t) => t.name).sort(),
       );
-      expect(client.tools).toHaveLength(7);
+      expect(client.tools).toHaveLength(8);
       const res = await client.callTool('ha_resumen', {});
       expect(JSON.stringify(res)).toContain('Home Assistant no está configurado');
     } finally {

@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "home-assistant",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Home Assistant",
   "description": "Consulta y maneja tu casa con Home Assistant, en tu red local.",
   "agents": ["companion"],
@@ -28,6 +28,11 @@
       "name": "ha_estado",
       "readOnly": true,
       "summary": "Estado detallado de una o varias entidades."
+    },
+    {
+      "name": "ha_historial",
+      "readOnly": true,
+      "summary": "Historial de cambios de una o varias entidades (hasta 7 días)."
     },
     {
       "name": "ha_comprobar",
