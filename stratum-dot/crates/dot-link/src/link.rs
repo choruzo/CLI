@@ -189,6 +189,8 @@ const DOT_METHODS: &[MainMethod] = &[
     MainMethod::MemoryDream,
     MainMethod::MemoryApplyProposal,
     MainMethod::MemoryRejectProposal,
+    MainMethod::MemoryChanges,
+    MainMethod::MemoryUndoChange,
     MainMethod::SessionsMemory,
     // M18: el canal de Telegram (emparejar de verdad va por el broker de aprobador).
     MainMethod::ChannelsStatus,
@@ -235,6 +237,8 @@ const DESKTOP_METHODS: &[MainMethod] = &[
     MainMethod::MemoryDream,
     MainMethod::MemoryApplyProposal,
     MainMethod::MemoryRejectProposal,
+    MainMethod::MemoryChanges,
+    MainMethod::MemoryUndoChange,
     // Panel de trayectoria: la traza de la sesión que se mira (solo lectura).
     MainMethod::TraceSubscribe,
     MainMethod::TraceUnsubscribe,
@@ -1331,6 +1335,23 @@ fn call_request_as(
                 json!({
                     "agent": profile.memory_agent(),
                     "proposalId": proposal_id,
+                    "operationId": operation_id,
+                }),
+            ))
+        }
+        CallAction::MemoryChanges => Ok((
+            MainMethod::MemoryChanges,
+            json!({ "agent": profile.memory_agent() }),
+        )),
+        CallAction::MemoryUndoChange { change_id } => {
+            if !valid_id(change_id) {
+                return Err(invalid("Invalid change id."));
+            }
+            Ok((
+                MainMethod::MemoryUndoChange,
+                json!({
+                    "agent": profile.memory_agent(),
+                    "changeId": change_id,
                     "operationId": operation_id,
                 }),
             ))
@@ -3564,11 +3585,43 @@ mod tests {
                 .1["agent"],
             "assistant"
         );
+        // Los cambios del agente en su memoria: la lista no cambia nada; deshacer, sí, y no se repite.
+        let changes = call_request(&CallAction::MemoryChanges, "op-17").unwrap();
+        assert_eq!(changes.0, MainMethod::MemoryChanges);
+        assert_eq!(changes.1, json!({ "agent": "companion" }));
+        assert!(!CallAction::MemoryChanges.mutating());
+        let undo = CallAction::MemoryUndoChange {
+            change_id: "chg_20261120_abc123".into(),
+        };
+        let (method, params) = call_request(&undo, "op-18").unwrap();
+        assert_eq!(method, MainMethod::MemoryUndoChange);
+        assert_eq!(
+            params,
+            json!({
+                "agent": "companion",
+                "changeId": "chg_20261120_abc123",
+                "operationId": "op-18"
+            })
+        );
+        assert!(undo.mutating());
+        for bad in ["".to_string(), "x".repeat(MAX_ID_CHARS + 1)] {
+            assert!(
+                call_request(&CallAction::MemoryUndoChange { change_id: bad }, "op").is_err()
+            );
+        }
+        assert_eq!(
+            call_request_as(&ClientProfile::DESKTOP, &undo, "op-19")
+                .unwrap()
+                .1["agent"],
+            "assistant"
+        );
         for method in [
             MainMethod::MemoryProposals,
             MainMethod::MemoryDream,
             MainMethod::MemoryApplyProposal,
             MainMethod::MemoryRejectProposal,
+            MainMethod::MemoryChanges,
+            MainMethod::MemoryUndoChange,
         ] {
             assert!(DOT_METHODS.contains(&method));
             assert!(DESKTOP_METHODS.contains(&method));

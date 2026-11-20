@@ -38,6 +38,8 @@
     "allow-dot-memory-dream",
     "allow-dot-memory-apply-proposal",
     "allow-dot-memory-reject-proposal",
+    "allow-dot-memory-changes",
+    "allow-dot-memory-undo-change",
     "allow-dot-channels-status",
     "allow-dot-channels-pair-begin",
     "allow-dot-channels-pair-confirm",

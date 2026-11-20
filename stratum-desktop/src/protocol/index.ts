@@ -28,6 +28,7 @@ export type {
   ProtocolDecision,
   ProtocolDreamResult,
   ProtocolProposal,
+  ProtocolMemoryChange,
   ProtocolMemorySection,
   ProtocolEvent,
   ProtocolFileDiff,

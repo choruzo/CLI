@@ -136,6 +136,8 @@ pub fn run() {
             commands::dot_memory_dream,
             commands::dot_memory_apply_proposal,
             commands::dot_memory_reject_proposal,
+            commands::dot_memory_changes,
+            commands::dot_memory_undo_change,
             commands::dot_channels_status,
             commands::dot_channels_pair_begin,
             commands::dot_channels_pair_confirm,

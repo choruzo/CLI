@@ -378,6 +378,25 @@ pub async fn dot_memory_reject_proposal(
         .await
 }
 
+/// Los cambios que el agente hizo en su memoria (corregir, retirar). Solo lectura.
+#[tauri::command]
+pub async fn dot_memory_changes(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::MemoryChanges).await
+}
+
+/// Deshacer uno de esos cambios: conexión principal (`control`), sin broker. Sin
+/// respuesta queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn dot_memory_undo_change(
+    state: State<'_, DotState>,
+    change_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryUndoChange { change_id })
+        .await
+}
+
 /// M19 — mover un recuerdo del asistente a otra sección. Conexión principal
 /// (capacidad `control`), sin broker: no cambia lo que el agente puede hacer. La
 /// sección la valida `dot-link` contra la lista cerrada; sin respuesta queda

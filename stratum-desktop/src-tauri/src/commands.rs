@@ -638,6 +638,25 @@ pub async fn desktop_memory_reject_proposal(
         .await
 }
 
+/// Los cambios que el agente hizo en su memoria (corregir, retirar). Solo lectura.
+#[tauri::command]
+pub async fn desktop_memory_changes(state: State<'_, DesktopState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::MemoryChanges).await
+}
+
+/// Deshacer uno de esos cambios: conexión principal (`control`). Sin respuesta
+/// queda `unknown` y no se repite.
+#[tauri::command]
+pub async fn desktop_memory_undo_change(
+    state: State<'_, DesktopState>,
+    change_id: String,
+) -> Result<Value, CommandError> {
+    state
+        .link
+        .call(CallAction::MemoryUndoChange { change_id })
+        .await
+}
+
 /// M19 — mover un recuerdo del asistente a otra sección. Conexión principal
 /// (capacidad `control`): no cambia lo que el agente puede hacer. La sección la
 /// valida `dot-link`; sin respuesta queda `unknown` y no se repite.

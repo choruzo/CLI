@@ -21,6 +21,7 @@ export type {
   ProtocolDecision,
   ProtocolDreamResult,
   ProtocolProposal,
+  ProtocolMemoryChange,
   ProtocolMemorySection,
   ProtocolMemoryItem,
   ProtocolChatMessage,

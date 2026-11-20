@@ -14,6 +14,7 @@ import type {
   ProtocolDecision,
   ProtocolDreamResult,
   ProtocolProposal,
+  ProtocolMemoryChange,
   ProtocolModel,
   ProtocolRoutine,
   ProtocolRoutineFire,
@@ -175,6 +176,18 @@ export function parseApplied(raw: unknown): { applied: boolean; message: string 
 /** M19 fase 5 — `memory.rejectProposal`. */
 export function parseRejected(raw: unknown): { rejected: boolean; message: string } | null {
   const parsed = RESULTS['memory.rejectProposal'].safeParse(raw);
+  return parsed.success ? parsed.data : null;
+}
+
+/** `memory.changes`: lo que el agente corrigió o retiró de su memoria (el más reciente primero). */
+export function parseMemoryChanges(raw: unknown): ProtocolMemoryChange[] | null {
+  const parsed = RESULTS['memory.changes'].safeParse(raw);
+  return parsed.success ? parsed.data.changes : null;
+}
+
+/** `memory.undoChange`: `undone: false` con el motivo si ya no se puede (no es un error). */
+export function parseUndone(raw: unknown): { undone: boolean; message: string } | null {
+  const parsed = RESULTS['memory.undoChange'].safeParse(raw);
   return parsed.success ? parsed.data : null;
 }
 

@@ -88,6 +88,10 @@ pub enum MainMethod {
     MemoryApplyProposal,
     /// M19 — rechazar una propuesta: la memoria no se toca (`control`).
     MemoryRejectProposal,
+    /// Los cambios que el agente hizo en su memoria (corregir, retirar) (`observe`).
+    MemoryChanges,
+    /// Deshacer un cambio del agente en su memoria (`control`).
+    MemoryUndoChange,
     /// M18 (Dot) — el canal de Telegram: estado (sin token ni código), pedir un
     /// código de emparejamiento y desemparejar (solo resta). Emparejar de verdad
     /// (`channels.pairConfirm`) da autoridad: va por [`ApproverMethod`].
@@ -151,7 +155,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 63] = [
+    pub const ALL: [MainMethod; 65] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -189,6 +193,8 @@ impl MainMethod {
         MainMethod::MemoryDream,
         MainMethod::MemoryApplyProposal,
         MainMethod::MemoryRejectProposal,
+        MainMethod::MemoryChanges,
+        MainMethod::MemoryUndoChange,
         MainMethod::ChannelsStatus,
         MainMethod::ChannelsPairBegin,
         MainMethod::ChannelsUnpair,
@@ -258,6 +264,8 @@ impl WireMethod for MainMethod {
             MainMethod::MemoryDream => "memory.dream",
             MainMethod::MemoryApplyProposal => "memory.applyProposal",
             MainMethod::MemoryRejectProposal => "memory.rejectProposal",
+            MainMethod::MemoryChanges => "memory.changes",
+            MainMethod::MemoryUndoChange => "memory.undoChange",
             MainMethod::ChannelsStatus => "channels.status",
             MainMethod::ChannelsPairBegin => "channels.pairBegin",
             MainMethod::ChannelsUnpair => "channels.unpair",
@@ -501,6 +509,8 @@ mod tests {
                 "memory.dream",
                 "memory.applyProposal",
                 "memory.rejectProposal",
+                "memory.changes",
+                "memory.undoChange",
                 "channels.status",
                 "channels.pairBegin",
                 "channels.unpair",
@@ -564,6 +574,8 @@ mod tests {
                 || name == "memory.dream"
                 || name == "memory.applyProposal"
                 || name == "memory.rejectProposal"
+                || name == "memory.changes"
+                || name == "memory.undoChange"
                 || name == "memory.documents";
             assert!(
                 !name.starts_with("host.")

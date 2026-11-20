@@ -10,6 +10,7 @@ import {
   type ProtocolMemorySection,
 } from '../../protocol';
 import { parseDecisions, parseForget, parseMoved } from '../../protocol/results';
+import { MemoryChanges } from './MemoryChanges';
 import { MemoryProposals } from './MemoryProposals';
 
 const UNREADABLE = 'El daemon contestó algo que esta versión de Desktop no entiende.';
@@ -194,6 +195,11 @@ export function AssistantMemory({
         native={native}
         connected={connected}
         onApplied={() => void load(appliedRef.current)}
+      />
+      <MemoryChanges
+        native={native}
+        connected={connected}
+        onUndone={() => void load(appliedRef.current)}
       />
       <form className="assistant-memory__search" onSubmit={search} role="search">
         <input

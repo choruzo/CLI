@@ -162,12 +162,14 @@ describe('el webview solo conoce el contrato', () => {
       'desktop_list_skills',
       'desktop_memory',
       'desktop_memory_apply_proposal',
+      'desktop_memory_changes',
       'desktop_memory_decisions',
       'desktop_memory_dream',
       'desktop_memory_forget',
       'desktop_memory_proposals',
       'desktop_memory_reclassify',
       'desktop_memory_reject_proposal',
+      'desktop_memory_undo_change',
       'desktop_new_chat',
       'desktop_new_code_session',
       'desktop_open_config',
@@ -377,13 +379,15 @@ describe('memoria global: la del asistente, y solo esa', () => {
       'desktop_memory_dream',
       'desktop_memory_apply_proposal',
       'desktop_memory_reject_proposal',
+      'desktop_memory_changes',
+      'desktop_memory_undo_change',
     ]) {
       const signature = new RegExp(`pub async fn ${name}\\(([\\s\\S]*?)\\) ->`).exec(commands)?.[1] ?? '';
       expect(signature, name).not.toBe('');
       expect(signature, name).not.toMatch(/agent|cwd/);
     }
     const native = code(join(SRC, 'ipc', 'native.ts'));
-    for (const call of native.matchAll(/invoke<unknown>\('desktop_memory_(?:decisions|forget|reclassify|proposals|dream|apply_proposal|reject_proposal)', (\{[^}]*\})\)/g)) {
+    for (const call of native.matchAll(/invoke<unknown>\('desktop_memory_(?:decisions|forget|reclassify|proposals|dream|apply_proposal|reject_proposal|changes|undo_change)', (\{[^}]*\})\)/g)) {
       expect(call[1]).not.toMatch(/agent|cwd/);
     }
     expect(commands).not.toMatch(/"companion"/);

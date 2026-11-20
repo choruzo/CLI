@@ -48,6 +48,8 @@ const COMMANDS: &[&str] = &[
     "desktop_memory_dream",
     "desktop_memory_apply_proposal",
     "desktop_memory_reject_proposal",
+    "desktop_memory_changes",
+    "desktop_memory_undo_change",
     "desktop_prefs",
     "desktop_open_config",
     "desktop_settings_get",

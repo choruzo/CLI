@@ -180,6 +180,8 @@ pub fn run() {
             commands::desktop_memory_dream,
             commands::desktop_memory_apply_proposal,
             commands::desktop_memory_reject_proposal,
+            commands::desktop_memory_changes,
+            commands::desktop_memory_undo_change,
             commands::desktop_prefs,
             commands::desktop_open_config,
             commands::desktop_settings_get,

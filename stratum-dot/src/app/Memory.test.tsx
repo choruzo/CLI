@@ -1,7 +1,7 @@
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { NativeProvider } from '../bridge/context';
-import type { ProtocolDecision, ProtocolProposal } from '../protocol';
+import type { ProtocolDecision, ProtocolMemoryChange, ProtocolProposal } from '../protocol';
 import { useUi } from '../stores/uiStore';
 import { App } from './App';
 import {
@@ -453,6 +453,84 @@ describe('M19 fase 5 — cambios sugeridos', () => {
     await waitFor(() =>
       expect(section().textContent).toContain('The daemon answered in a way this version of Dot cannot read.'),
     );
+  });
+});
+
+describe('cambios del agente en su memoria', () => {
+  const change = (over: Partial<ProtocolMemoryChange> = {}): ProtocolMemoryChange => ({
+    id: 'chg_20261120_abc123',
+    at: '2026-11-20T10:00:00.000Z',
+    action: 'corrected',
+    by: 'agent',
+    decisionId: 'dec_1',
+    title: 'Lucia lives in Valencia',
+    content: 'Her sister Lucia lives in Valencia.',
+    newTitle: 'Lucia lives in Seville',
+    newContent: 'Her sister Lucia lives in Seville.',
+    reason: 'She said she moved.',
+    undone: false,
+    undoable: true,
+    ...over,
+  });
+  const section = () => within(panel()).getByRole('region', { name: 'Recent changes by the assistant' });
+
+  async function withChanges(list: ProtocolMemoryChange[]): Promise<FakeNative> {
+    const native = fakeNative();
+    native.calls.memoryChanges.mockResolvedValue({ changes: list });
+    await withPanel(native);
+    await waitFor(() => expect(native.calls.memoryChanges).toHaveBeenCalled());
+    await flush();
+    return native;
+  }
+
+  it('sin cambios no pinta la sección', async () => {
+    await withChanges([]);
+    expect(within(panel()).queryByRole('region', { name: 'Recent changes by the assistant' })).toBeNull();
+  });
+
+  it('enseña qué hizo, por quién y por qué; Undo solo si se puede', async () => {
+    await withChanges([
+      change(),
+      change({ id: 'chg_2', action: 'retired', by: 'dreaming', newTitle: undefined, newContent: undefined, title: 'Rainy yesterday' }),
+      change({ id: 'chg_3', undone: true, undoable: false, title: 'Old thing', newTitle: undefined }),
+    ]);
+    const text = section().textContent ?? '';
+    expect(text).toContain('Corrected “Lucia lives in Valencia” → “Lucia lives in Seville”');
+    expect(text).toContain('She said she moved.');
+    expect(text).toContain('Retired “Rainy yesterday”');
+    expect(text).toContain('Retired by dreaming');
+    expect(text).toContain('Undone');
+    expect(within(section()).getAllByRole('button', { name: /^Undo:/ })).toHaveLength(2);
+  });
+
+  it('Undo llama con el id y vuelve a pedir la lista y la memoria', async () => {
+    const native = await withChanges([change()]);
+    const before = native.calls.memoryChanges.mock.calls.length;
+    const decisionsBefore = native.calls.memoryDecisions.mock.calls.length;
+    await act(async () => fireEvent.click(within(section()).getByRole('button', { name: /^Undo:/ })));
+    expect(native.calls.memoryUndoChange).toHaveBeenCalledWith('chg_20261120_abc123');
+    await waitFor(() => expect(native.calls.memoryChanges.mock.calls.length).toBe(before + 1));
+    await waitFor(() => expect(native.calls.memoryDecisions.mock.calls.length).toBe(decisionsBefore + 1));
+    // Sin optimismo: la lista manda, no lo que se supone.
+    expect(section().querySelector('[data-change="chg_20261120_abc123"]')).toBeTruthy();
+  });
+
+  it('undone: false enseña el motivo y no recarga la memoria', async () => {
+    const native = await withChanges([change()]);
+    native.calls.memoryUndoChange.mockResolvedValue({ undone: false, message: 'The memory changed since.' });
+    const decisionsBefore = native.calls.memoryDecisions.mock.calls.length;
+    await act(async () => fireEvent.click(within(section()).getByRole('button', { name: /^Undo:/ })));
+    await waitFor(() => expect(section().textContent).toContain('The memory changed since.'));
+    expect(native.calls.memoryDecisions.mock.calls.length).toBe(decisionsBefore);
+  });
+
+  it('sin respuesta: resultado desconocido, sin reintento', async () => {
+    const native = await withChanges([change()]);
+    native.calls.memoryUndoChange.mockRejectedValue({ kind: 'unknown', code: null, reason: null, message: 'x' });
+    await act(async () => fireEvent.click(within(section()).getByRole('button', { name: /^Undo:/ })));
+    await waitFor(() => expect(section().textContent).toContain('Result unknown'));
+    await flush();
+    expect(native.calls.memoryUndoChange).toHaveBeenCalledTimes(1);
   });
 });
 

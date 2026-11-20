@@ -327,6 +327,29 @@ export interface ProtocolDecision {
 export type ProtocolMemoryAgent = 'assistant' | 'companion';
 
 /**
+ * Un cambio que el agente hizo en su memoria: corregir un recuerdo que ya no
+ * era cierto o retirarlo (`memory.changes`). Lo que lleva ya va redactado.
+ */
+export interface ProtocolMemoryChange {
+  id: string;
+  at: string;
+  action: 'corrected' | 'retired';
+  /** Quién lo hizo: el agente en una conversación o una pasada de *dreaming*. */
+  by: 'agent' | 'dreaming';
+  decisionId: string;
+  /** El recuerdo como estaba antes del cambio. */
+  title: string;
+  content: string;
+  /** Solo en `corrected`: como quedó. */
+  newTitle?: string;
+  newContent?: string;
+  reason: string;
+  undone: boolean;
+  /** Se puede deshacer ahora: no está deshecho y nada ha tocado el recuerdo después. */
+  undoable: boolean;
+}
+
+/**
  * M19 fase 5 — una propuesta de *dreaming*: un cambio a la memoria que una pasada
  * sugiere y que **una persona** aplica o rechaza. Lo que lleva es lo que un
  * inspector necesita para enseñarla (ya redactado), no el fichero tal cual.

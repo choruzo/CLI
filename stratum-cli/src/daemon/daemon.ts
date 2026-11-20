@@ -71,6 +71,8 @@ import { ProtocolError } from '../ipc/codec.js';
 import type { RequestHandlers } from '../ipc/peer.js';
 import { getLogger } from '../logging/index.js';
 import { getDecisionMemory } from '../memory/decision-memory.js';
+import { openMemoryHistory } from '../memory/history.js';
+import { isUndoable, undoChange } from '../memory/revision.js';
 import { MemoryManager } from '../memory/manager.js';
 import { DreamingScheduler } from './dreaming-scheduler.js';
 import { DreamingService, type DreamingModelFactory, type DreamTarget } from './memory-dreaming.js';
@@ -2130,6 +2132,59 @@ export class Stratumd {
           connectionId: conn.id,
         });
         return { updated: updated !== undefined };
+      },
+      'memory.changes': (params) => {
+        const config = this.memoryConfigFor(this.memoryCwd(params), params.agent);
+        const memory = getDecisionMemory(config);
+        const redact = (text: string) => redactText(text, config);
+        const text = (value: unknown) => (typeof value === 'string' ? redact(value) : '');
+        return {
+          changes: openMemoryHistory(config)
+            .list()
+            .slice(0, params.limit ?? 50)
+            .map((c) => ({
+              id: c.id,
+              at: c.at,
+              action: c.action,
+              by: c.by,
+              decisionId: c.decisionId,
+              title: text(c.before['title']),
+              content: text(c.before['content']).slice(0, 2400),
+              ...(c.after
+                ? {
+                    newTitle: redact(c.after.title),
+                    newContent: redact(c.after.content).slice(0, 2400),
+                  }
+                : {}),
+              reason: redact(c.reason).slice(0, 1000),
+              undone: c.undoneAt !== undefined,
+              undoable: isUndoable(memory, c),
+            })),
+        };
+      },
+      'memory.undoChange': async (params) => {
+        const projectCwd = this.memoryCwd(params);
+        const config = this.memoryConfigFor(projectCwd, params.agent);
+        const result = await undoChange(
+          getDecisionMemory(config),
+          openMemoryHistory(config),
+          params.changeId,
+        );
+        // Sin título, contenido ni motivo en el log.
+        log.info('memory change undone', {
+          changeId: params.changeId,
+          memory: projectCwd !== undefined ? 'project' : (params.agent ?? 'assistant'),
+          undone: result.ok,
+          connectionId: conn.id,
+        });
+        if (!result.ok) return { undone: false, message: result.error.slice(0, 1000) };
+        return {
+          undone: true,
+          message:
+            result.change.action === 'corrected'
+              ? 'The memory is back as it was before the change.'
+              : 'The memory is back.',
+        };
       },
 
       'memory.proposals': (params) => ({

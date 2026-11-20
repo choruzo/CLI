@@ -270,6 +270,10 @@ export interface NativeBridge {
   memoryApplyProposal(proposalId: string): Promise<unknown>;
   /** M19 fase 5 — rechazar una propuesta (`memory.rejectProposal`). */
   memoryRejectProposal(proposalId: string): Promise<unknown>;
+  /** Los cambios que el agente hizo en su memoria (`memory.changes`). */
+  memoryChanges(): Promise<unknown>;
+  /** Deshacer uno de esos cambios (`memory.undoChange`); el agente lo fija el nativo. */
+  memoryUndoChange(changeId: string): Promise<unknown>;
   /** M17 — la memoria de sesión de una conversación (solo lectura). */
   sessionMemory(sessionId: string): Promise<unknown>;
   /**
@@ -396,6 +400,8 @@ export const tauriBridge: NativeBridge = {
     invoke<unknown>('dot_memory_apply_proposal', { proposalId }),
   memoryRejectProposal: (proposalId) =>
     invoke<unknown>('dot_memory_reject_proposal', { proposalId }),
+  memoryChanges: () => invoke<unknown>('dot_memory_changes'),
+  memoryUndoChange: (changeId) => invoke<unknown>('dot_memory_undo_change', { changeId }),
   sessionMemory: (sessionId) => invoke<unknown>('dot_session_memory', { sessionId }),
   newCompanionConversation: () => invoke<unknown>('dot_new_companion_conversation'),
   channelsStatus: () => invoke<unknown>('dot_channels_status'),

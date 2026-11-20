@@ -15,6 +15,7 @@ import type { StratumConfig } from '../../config/schema.js';
 import { findWorktreeRoot } from '../../config/paths.js';
 import { defaultSessionsDir } from '../../daemon/session-archive.js';
 import { applyProposal, rejectProposal } from '../../memory/dreaming/apply.js';
+import { autoApplyClear } from '../../memory/dreaming/auto-apply.js';
 import { dream } from '../../memory/dreaming/dream.js';
 import { openDreamingFiles } from '../../memory/dreaming/files.js';
 import { formatProposal } from '../../memory/dreaming/format.js';
@@ -266,7 +267,7 @@ const memoryWiki = new Command('wiki')
 
 const memoryDream = new Command('dream')
   .description(
-    'Review the memory against recent conversations and PROPOSE changes (never writes the memory)',
+    'Review the memory against recent conversations and propose changes (clear corrections apply on their own, with undo)',
   )
   .option('-g, --global', GLOBAL_HELP)
   .option('--companion', COMPANION_HELP)
@@ -313,10 +314,25 @@ const memoryDream = new Command('dream')
         `${result.discarded > 0 ? ` (${result.discarded} descartadas por no valer)` : ''}` +
         `${result.tokens !== null ? `, ${result.tokens} tokens` : ''}.\n`,
     );
-    if (result.proposals.length > 0) {
-      process.stdout.write(`\n${result.proposals.map(formatProposal).join('\n\n')}\n`);
+    const applied = config.memory.dreaming.autoApply
+      ? await autoApplyClear(result.proposals, {
+          memory,
+          history: openMemoryHistory(target.memory),
+          proposals: files.proposals,
+        })
+      : [];
+    if (applied.length > 0) {
       process.stdout.write(
-        '\nNada se ha aplicado. Revísalas con `stratum memory proposals apply <id>` o `reject <id>`.\n',
+        `\nAplicadas solas (correcciones claras; se deshacen con \`stratum memory undo\`):\n\n` +
+          `${applied.map(formatProposal).join('\n\n')}\n`,
+      );
+    }
+    const appliedIds = new Set(applied.map((p) => p.id));
+    const pending = result.proposals.filter((p) => !appliedIds.has(p.id));
+    if (pending.length > 0) {
+      process.stdout.write(`\n${pending.map(formatProposal).join('\n\n')}\n`);
+      process.stdout.write(
+        '\nEstas no se han aplicado. Revísalas con `stratum memory proposals apply <id>` o `reject <id>`.\n',
       );
     }
   });

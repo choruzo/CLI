@@ -17,6 +17,8 @@ export type RevisionResult =
 
 export interface CorrectionInput {
   id: string;
+  /** Quién corrige; por defecto, el agente. */
+  by?: 'agent' | 'dreaming';
   title?: string;
   content?: string;
   summary?: string;
@@ -26,6 +28,7 @@ export interface CorrectionInput {
 
 export interface RetirementInput {
   id: string;
+  by?: 'agent' | 'dreaming';
   reason: string;
   sessionId?: string;
 }
@@ -65,7 +68,7 @@ export async function correctMemory(
       const change = history.add({
         action: 'corrected',
         decisionId: input.id,
-        by: 'agent',
+        by: input.by ?? 'agent',
         reason: input.reason,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         before: { ...before },
@@ -110,7 +113,7 @@ export async function retireMemory(
       const change = history.add({
         action: 'retired',
         decisionId: input.id,
-        by: 'agent',
+        by: input.by ?? 'agent',
         reason: input.reason,
         ...(input.sessionId ? { sessionId: input.sessionId } : {}),
         before: { ...before },
@@ -123,6 +126,14 @@ export async function retireMemory(
   } catch (err) {
     return failure(err);
   }
+}
+
+/** ¿Se puede deshacer ya? Lo mismo que comprueba `undoChange`, sin tocar nada. */
+export function isUndoable(memory: DecisionMemory, change: MemoryChange): boolean {
+  if (change.undoneAt) return false;
+  const current = memory.get(change.decisionId);
+  if (change.action === 'retired') return current === undefined;
+  return current !== undefined && current.updatedAt === change.after?.updatedAt;
 }
 
 /**

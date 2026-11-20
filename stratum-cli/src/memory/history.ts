@@ -30,8 +30,8 @@ export const MAX_HISTORY_ENTRIES = 200;
 
 const nano6 = customAlphabet('0123456789abcdefghijklmnopqrstuvwxyz', 6);
 
-/** Quién hizo el cambio. Solo el agente, por ahora; dreaming y la persona vendrán después. */
-const bySchema = z.enum(['agent']);
+/** Quién hizo el cambio: el agente en una conversación o una pasada de dreaming. */
+const bySchema = z.enum(['agent', 'dreaming']);
 
 /** Lo que identifica el estado que dejó un cambio, para saber al deshacer si se ha tocado después. */
 const afterSchema = z.object({

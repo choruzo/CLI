@@ -20,7 +20,10 @@ import {
   DecisionMemory,
   _resetDecisionMemoryCache,
   _setDecisionMemory,
+  getDecisionMemory,
 } from '../memory/decision-memory.js';
+import { openMemoryHistory } from '../memory/history.js';
+import { correctMemory } from '../memory/revision.js';
 import { DecisionStore, type DecisionInput } from '../memory/decisions.js';
 import { startTestDaemon, type TestDaemon } from './daemon.fixtures.js';
 
@@ -239,5 +242,69 @@ describe('M19 — secciones en memory.*', () => {
         } as unknown as { agent: 'companion'; decisionId: string; type: 'topic' }),
       ),
     ).toBe('INVALID_PARAMS');
+  });
+});
+
+describe('Cambios del agente en su memoria: memory.changes y memory.undoChange', () => {
+  async function corrected(t: TestDaemon) {
+    const dir = join(t.base, 'companion');
+    const config = buildCompanionConfig(StratumConfigSchema.parse({}), dir);
+    const memory = getDecisionMemory(config);
+    const secret = 'ghp_' + 'b'.repeat(36);
+    const { record } = await memory.save(decision('Vive en Getafe', { source: 'auto' }));
+    const r = await correctMemory(memory, openMemoryHistory(config), {
+      id: record.id,
+      title: 'Vive en Leganés',
+      content: `Se mudó a Leganés (token ${secret})`,
+      reason: 'lo dice el usuario',
+    });
+    if (!r.ok) throw new Error(r.error);
+    return { change: r.change, id: record.id, secret, memory };
+  }
+
+  it('lista los cambios redactados y deshace con control; un observador no deshace', async () => {
+    const t = await daemon();
+    const { change, id, secret, memory } = await corrected(t);
+    const observer = await t.connect(['observer'], 'stratum-dot', { kind: 'dot' });
+    const { changes } = await observer.request('memory.changes', { agent: 'companion' });
+    expect(changes).toEqual([
+      expect.objectContaining({
+        id: change.id,
+        action: 'corrected',
+        by: 'agent',
+        decisionId: id,
+        title: 'Vive en Getafe',
+        newTitle: 'Vive en Leganés',
+        reason: 'lo dice el usuario',
+        undone: false,
+        undoable: true,
+      }),
+    ]);
+    expect(changes[0]!.newContent).not.toContain(secret);
+    // La del asistente no tiene nada.
+    expect((await observer.request('memory.changes', {})).changes).toEqual([]);
+
+    expect(
+      await failure(
+        observer.request('memory.undoChange', { agent: 'companion', changeId: change.id }),
+      ),
+    ).toBe('FORBIDDEN');
+
+    const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    expect(
+      await dot.request('memory.undoChange', {
+        agent: 'companion',
+        changeId: change.id,
+        operationId: 'op-u',
+      }),
+    ).toMatchObject({ undone: true });
+    expect(memory.get(id)?.title).toBe('Vive en Getafe');
+    const after = await dot.request('memory.changes', { agent: 'companion' });
+    expect(after.changes[0]).toMatchObject({ undone: true, undoable: false });
+
+    // Repetirlo es inocuo: contesta `undone: false` con el motivo.
+    expect(
+      await dot.request('memory.undoChange', { agent: 'companion', changeId: change.id }),
+    ).toMatchObject({ undone: false, message: expect.stringContaining('ya estaba deshecho') });
   });
 });

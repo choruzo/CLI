@@ -38,6 +38,7 @@ import type {
   ProtocolMemorySection,
   ProtocolDreamResult,
   ProtocolProposal,
+  ProtocolMemoryChange,
   ProtocolMemoryStatus,
   ProtocolModel,
   ProtocolPlan,
@@ -614,6 +615,25 @@ export interface ProtocolMethods {
     { updated: boolean }
   >;
   /**
+   * Los cambios que el agente hizo en una memoria (corregir o retirar lo que ya
+   * no era cierto), del más reciente al más antiguo, con un tope. Ya redactados.
+   */
+  'memory.changes': Spec<
+    { cwd?: string; agent?: ProtocolMemoryAgent; sessionId?: string; limit?: number },
+    { changes: ProtocolMemoryChange[] }
+  >;
+  /**
+   * Deshacer un cambio del agente en su memoria: vuelve a dejar el recuerdo como
+   * estaba. Lo pide una persona desde un inspector; solo resta lo que hizo el
+   * agente, así que basta `control`. Si ya no se puede (ya deshecho, o el
+   * recuerdo cambió después) contesta `undone: false` con el motivo: nunca pisa
+   * lo posterior, y repetirlo es inocuo.
+   */
+  'memory.undoChange': Spec<
+    Mutation & { cwd?: string; agent?: ProtocolMemoryAgent; sessionId?: string; changeId: string },
+    { undone: boolean; message: string }
+  >;
+  /**
    * M19 fase 5 — las propuestas de *dreaming* pendientes y vigentes de una
    * memoria (la de `cwd` o la de `agent`, nunca las dos).
    */
@@ -946,6 +966,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   // Olvidar solo resta, y lo recordado no es autoridad: no exige `approve`.
   'memory.forget': write('control'),
   'memory.reclassify': write('control'),
+  'memory.changes': read('observe'),
+  'memory.undoChange': write('control'),
   'memory.proposals': read('observe'),
   'memory.dream': write('control'),
   'memory.applyProposal': write('control'),

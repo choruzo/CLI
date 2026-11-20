@@ -758,6 +758,13 @@ export const StratumConfigSchema = z.object({
           maxProposals: z.number().int().min(1).max(20).default(8),
           ttlDays: z.number().int().min(1).max(90).default(14),
           /**
+           * Aplicar solas, tras la pasada, las correcciones y retiradas claras:
+           * con evidencia y sobre un recuerdo de la extracción automática
+           * (`memory/dreaming/auto-apply.ts`). Quedan en el historial y se
+           * deshacen. Lo demás sigue siendo una propuesta.
+           */
+          autoApply: z.boolean().default(true),
+          /**
            * Pasada automática del daemon (apagada por defecto). `every` usa el
            * horario de las rutinas (`6h`, `1d` o cron en hora local); `targets`
            * son las memorias globales a revisar (la de un proyecto no tiene

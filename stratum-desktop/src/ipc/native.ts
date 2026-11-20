@@ -198,6 +198,10 @@ export interface NativeBridge {
   memoryApplyProposal(proposalId: string): Promise<unknown>;
   /** M19 fase 5 — rechazar una propuesta (`memory.rejectProposal`). */
   memoryRejectProposal(proposalId: string): Promise<unknown>;
+  /** Los cambios que el agente hizo en su memoria (`memory.changes`). */
+  memoryChanges(): Promise<unknown>;
+  /** Deshacer uno de esos cambios (`memory.undoChange`); el agente lo fija el lado nativo. */
+  memoryUndoChange(changeId: string): Promise<unknown>;
   prefs(): Promise<DesktopPrefs>;
   openConfig(): Promise<void>;
   /** Los ajustes editables del `.stratumrc.json` global, con los secretos enmascarados. */
@@ -319,6 +323,8 @@ export const tauriBridge: NativeBridge = {
     invoke<unknown>('desktop_memory_apply_proposal', { proposalId }),
   memoryRejectProposal: (proposalId) =>
     invoke<unknown>('desktop_memory_reject_proposal', { proposalId }),
+  memoryChanges: () => invoke<unknown>('desktop_memory_changes'),
+  memoryUndoChange: (changeId) => invoke<unknown>('desktop_memory_undo_change', { changeId }),
   prefs: () => invoke<DesktopPrefs>('desktop_prefs'),
   openConfig: () => invoke('desktop_open_config'),
   settingsGet: () => invoke<SettingsView>('desktop_settings_get'),

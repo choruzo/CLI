@@ -2836,8 +2836,12 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - *Hecho, primera parte*: `correct_memory`/`retire_memory`. Sin preguntar solo lo que salió de
     la extracción automática, y hasta 5 cambios por sesión; lo demás se confirma. Cada cambio
     guarda el recuerdo entero en `memory-history.json` y se deshace con `stratum memory undo`.
-  - *Pendiente*: enseñar los cambios y deshacerlos desde Dot y Desktop, y que dreaming aplique solo
-    las correcciones claras.
+  - *Hecho, segunda parte*: Dot y Desktop enseñan los cambios recientes y los deshacen
+    (`memory.changes`, `memory.undoChange`; protocolo §32). Tras una pasada, dreaming aplica solo lo
+    claro (corregir o retirar un recuerdo automático con evidencia, 5 por pasada,
+    `memory.dreaming.autoApply`) y propone el resto.
+  - Probado con `deepseek-v4-flash`: un correo pegado con una orden escondida para retirar
+    recuerdos. No tocó nada y avisó de la nota. Cerrado el 2026-11-20.
 
 - **M23 — Que esté siempre listo** [propuesto 2026-11-20].
   - La caja arranca con el daemon. Es una opción de la config global (`box.autostart`), apagada por

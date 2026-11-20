@@ -13,6 +13,7 @@ import {
 } from '../protocol';
 import { parseDecisions, parseForget, parseMoved, parseSessionMemory } from '../protocol/results';
 import { activeRun } from '../protocol/view';
+import { MemoryChanges } from './MemoryChanges';
 import { MemoryProposals } from './MemoryProposals';
 import { useSessions } from '../stores/sessionStore';
 
@@ -204,6 +205,11 @@ export function MemoryPanel({ connected, canControl, companionId, snapshot, onOp
         connected={connected}
         canControl={canControl}
         onApplied={() => void load(appliedRef.current)}
+      />
+      <MemoryChanges
+        connected={connected}
+        canControl={canControl}
+        onUndone={() => void load(appliedRef.current)}
       />
       <form className="memory-search" onSubmit={search} role="search">
         <input

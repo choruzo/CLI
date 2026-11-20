@@ -290,6 +290,12 @@ pub enum CallAction {
     MemoryApplyProposal { proposal_id: String },
     /// M19 — `memory.rejectProposal`: rechazar una propuesta.
     MemoryRejectProposal { proposal_id: String },
+    /// `memory.changes` del asistente: lo que el agente corrigió o retiró de su memoria.
+    /// Solo lectura.
+    MemoryChanges,
+    /// `memory.undoChange`: deshacer uno de esos cambios. Sin respuesta, su resultado es
+    /// desconocido y no se repite.
+    MemoryUndoChange { change_id: String },
     /// Cierre de M14 — conversación nueva del asistente: `sessions.open` con
     /// `agent: 'companion'` y `fresh: true`, fijados aquí. El daemon compacta y
     /// archiva la actual; el webview no elige agente ni puede cerrar otra sesión.
@@ -438,6 +444,8 @@ impl CallAction {
             CallAction::MemoryDream { .. } => "memory-dream",
             CallAction::MemoryApplyProposal { .. } => "memory-apply-proposal",
             CallAction::MemoryRejectProposal { .. } => "memory-reject-proposal",
+            CallAction::MemoryChanges => "memory-changes",
+            CallAction::MemoryUndoChange { .. } => "memory-undo-change",
             CallAction::NewCompanionConversation => "new-companion-conversation",
             CallAction::ChannelsStatus => "channels-status",
             CallAction::ChannelsPairBegin => "channels-pair-begin",
@@ -488,6 +496,7 @@ impl CallAction {
                 | CallAction::MemoryDream { .. }
                 | CallAction::MemoryApplyProposal { .. }
                 | CallAction::MemoryRejectProposal { .. }
+                | CallAction::MemoryUndoChange { .. }
                 | CallAction::NewCompanionConversation
                 | CallAction::ChannelsPairBegin
                 | CallAction::ChannelsUnpair { .. }

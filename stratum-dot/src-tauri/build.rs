@@ -33,6 +33,8 @@ const COMMANDS: &[&str] = &[
     "dot_memory_dream",
     "dot_memory_apply_proposal",
     "dot_memory_reject_proposal",
+    "dot_memory_changes",
+    "dot_memory_undo_change",
     "dot_channels_status",
     "dot_channels_pair_begin",
     "dot_channels_pair_confirm",

@@ -214,6 +214,8 @@ host ownership  !=  operator control  !=  approver authority
 | `memory.dream`                                                                         | control     | ✓   | M19: `{ cwd? o agent?, force? }` → `ProtocolDreamResult`; **solo propone**; `BUSY` si ya hay una pasada de esa memoria                                                                                                                                                                                                                                                   |
 | `memory.applyProposal`                                                                 | control     | ✓   | M19: `{ cwd? o agent?, proposalId }` → `{ applied, message }`; lo único que cambia la memoria; `applied: false` si caducó o el objetivo cambió                                                                                                                                                                                                                           |
 | `memory.rejectProposal`                                                                | control     | ✓   | M19: `{ cwd? o agent?, proposalId }` → `{ rejected, message }`; no toca la memoria                                                                                                                                                                                                                                                                                       |
+| `memory.changes` | observe | ✓ | §32: `{ cwd? o agent? o sessionId?, limit? }` → `{ changes: ProtocolMemoryChange[] }`, redactados, del más reciente al más antiguo |
+| `memory.undoChange` | control | ✓ | §32: `{ cwd? o agent? o sessionId?, changeId }` → `{ undone, message }`; `undone: false` si ya no se puede, sin error |
 | `box.status`                                                                           | observe     |     | Estado de la caja del daemon: `{ box: ProtocolBoxStatus }` (§21)                                                                                                                                                                                                                                                                                                         |
 | `box.start` · `box.stop` · `box.reset`                                                 | control     | ✓   | Ciclo de vida de la caja con órdenes fijas. `reset` borra también su home. `UNAVAILABLE` (`no-runtime` · `box-failed`), `BUSY` (`box-busy`) (§21)                                                                                                                                                                                                                        |
 | `events.subscribe` · `events.unsubscribe`                                              | observe     |     | Solo cambian el estado de la propia conexión                                                                                                                                                                                                                                                                                                                             |
@@ -1320,6 +1322,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M17             | Concesiones con caducidad (§15.11): `approvals.resolve`/`host.resolveApproval` admiten `grant: { minutes: 10 \| 30 \| 60 }`; método `grants.revoke` (`control`) y `host.revokeGrant`; eventos de estado `grant.created` y `grant.ended`; `ProtocolSessionSnapshot.grants?`; `ProtocolApproval.grantable?`; _feature_ `approval-grants`                                                                                                          | Aditivo: quien no lo usa sigue igual. Un cliente que valide la unión de eventos tiene que aceptar los dos nuevos; los del árbol validan con `schemas.ts`, que ya los incluye                                                                                 |
 | M17             | Inspector de memoria: `memory.status`/`memory.decisions` admiten `agent: 'assistant' \| 'companion'` (exclusivo con `cwd`); `ProtocolDecision` gana `content?` (redactado), `source?` y `sessionId?`; método `memory.forget` (`control`)| Aditivo: sin `agent`, lo de antes; un servidor anterior rechaza `agent` y `memory.forget` (`INVALID_PARAMS`/`METHOD_NOT_FOUND`) y no manda los campos nuevos|
 | M19 (5)         | Dreaming: métodos `memory.proposals` (`observe`), `memory.dream`, `memory.applyProposal` y `memory.rejectProposal` (`control`); DTO `ProtocolProposal` (`kind`, `targets` con título de ahora, texto que quedaría, `evidence`, `expiresAt`) y `ProtocolDreamResult` (`status` `done`·`skipped`·`failed`, `reason`, `proposals`, `discarded`, `tokens` o `null`). `memory.dream` solo propone; aplicar es lo que cambia la memoria. Una pasada a la vez por memoria (`BUSY`) | Aditivo: un servidor anterior rechaza los métodos (`METHOD_NOT_FOUND`) |
+| Memoria que se corrige | Métodos `memory.changes` (`observe`) y `memory.undoChange` (`control`, §32); DTO `ProtocolMemoryChange` (`action` `corrected`·`retired`, `by` `agent`·`dreaming`, antes y después redactados, `reason`, `undone`, `undoable`). Config `memory.dreaming.autoApply` (por defecto `true`): `memory.dream` aplica sola las correcciones y retiradas claras y su `proposals` trae solo las que quedan pendientes | Aditivo: un servidor anterior rechaza los métodos (`METHOD_NOT_FOUND`) |
 | M19 (1)         | `ProtocolDecision` gana `summary?` y `updatedAt?`; `memory.decisions` de un agente devuelve `type` como **sección** (los tipos antiguos se presentan como `topic`, `user_preference` como `profile`) y `summary` siempre; método `memory.reclassify` (`control`; los inspectores de Dot y Desktop lo usan para mover un recuerdo de sección) | Aditivo: un servidor anterior no manda los campos y rechaza `memory.reclassify` (`METHOD_NOT_FOUND`); un cliente que no reconoce un `type` lo trata como `topic` (`groupDecisionsBySection`) |
 | Cierre M14      | `sessions.open` admite `fresh?: boolean` (solo con `agent: 'companion'`: conversación nueva, §22.1) y su resultado, `archived?: { sessionId, memoryCarried }`; `ProtocolSessionMemory.inherited?`. `data.reason` de `UNAVAILABLE` admite `compaction` | Aditivo: quien no lo envía sigue igual; un servidor anterior rechaza `fresh` (`INVALID_PARAMS`) |
 | M18 (6E)        | Evento de estado `image.shared` (`{ image: ProtocolSharedImage }`); `ProtocolChatMessage` gana `kind: 'image'` (solo la referencia); método `images.get` (`observe`) por trozos (`offset` → `data`, `next`), `SHARED_IMAGE_LIMITS`                                                                                                                                                                                                              | Aditivo para quien emite. Un cliente que valide la unión de eventos o de mensajes tiene que aceptar los nuevos; los del árbol validan con `schemas.ts`, que ya los incluye. Una conversación de un servidor anterior no los trae |
@@ -2527,3 +2530,42 @@ Tests: `stratum-cli/src/watches/` (`condition`, `engine`, `notice`, `store`, `de
 integración con el conector de Home Assistant), `stratum-cli/src/daemon/watch-scheduler.test.ts` /
 `daemon-watches.test.ts` / `daemon-watches-protocol.test.ts` (métodos y `propose_watch` de punta a
 punta) y `stratum-cli/src/tools/watches/propose.test.ts`.
+
+## 32. La memoria que se corrige sola
+
+El agente de cualquier preset mantiene su memoria verdadera con las tools `correct_memory` y
+`retire_memory`, y tras una pasada de *dreaming* se aplican solas las correcciones y retiradas
+claras. Cada cambio guarda el recuerdo entero como estaba en `memory-history.json`, junto a
+`decisions.json`, y una persona lo deshace desde un inspector.
+
+- **Qué se toca sin preguntar**: solo los recuerdos de la extracción automática (`source: 'auto'`),
+  hasta 5 cambios por sesión en las tools y 5 por pasada en *dreaming*, y en *dreaming* solo con
+  evidencia. Lo que guardó el agente a propósito, lo antiguo sin origen y lo que pase del tope se
+  confirma (en *dreaming* queda como propuesta).
+- `memory.changes` (`observe`): la lista de cambios de una memoria (la de `agent`, o la del
+  proyecto de `cwd` o de `sessionId`, nunca dos), ya redactados. `undoable` dice si se puede
+  deshacer ahora.
+- `memory.undoChange` (`control`): deja el recuerdo como estaba. Solo si nada lo ha tocado después
+  (una corrección: el recuerdo sigue como lo dejó; una retirada: el id no ha vuelto). Si no, contesta
+  `undone: false` con el motivo y no pisa nada, así que repetirlo es inocuo. Basta `control`
+  porque solo deshace lo que hizo el agente y lo recordado no es autoridad.
+
+```ts
+interface ProtocolMemoryChange {
+  id: string; // chg_…
+  at: Timestamp;
+  action: 'corrected' | 'retired';
+  by: 'agent' | 'dreaming';
+  decisionId: string;
+  title: string; // el recuerdo antes del cambio
+  content: string;
+  newTitle?: string; // solo en `corrected`
+  newContent?: string;
+  reason: string;
+  undone: boolean;
+  undoable: boolean;
+}
+```
+
+Ninguna línea de log lleva título, contenido ni motivo. Tests: `stratum-cli/src/memory/revision.test.ts`,
+`memory/dreaming/auto-apply.test.ts` y `daemon/daemon-memory.test.ts`.

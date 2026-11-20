@@ -15,6 +15,8 @@ import { syncRepresentations } from '../memory/representations/sync.js';
 import type { MemoryTaxonomy } from '../memory/decisions.js';
 import type { StratumConfig } from '../config/schema.js';
 import { getLogger } from '../logging/index.js';
+import { autoApplyClear } from '../memory/dreaming/auto-apply.js';
+import { openMemoryHistory } from '../memory/history.js';
 import type { ProtocolDreamResult, ProtocolProposal } from '../protocol/index.js';
 import { ProviderRouter } from '../providers/router.js';
 import { redactText } from '../security/redact-output.js';
@@ -187,16 +189,31 @@ export class DreamingService {
         };
       }
       const titleOf = this.titles(target);
+      const applied = target.base.memory.dreaming.autoApply
+        ? await autoApplyClear(result.proposals, {
+            memory,
+            history: openMemoryHistory(target.memory),
+            proposals: files.proposals,
+          })
+        : [];
+      if (applied.length > 0) this.syncWiki(target);
+      const appliedIds = new Set(applied.map((p) => p.id));
+      const pending = result.proposals.filter((p) => !appliedIds.has(p.id));
       // Ninguna línea de log lleva texto de la memoria ni de las conversaciones.
       log.info('dream requested', {
         proposals: result.proposals.length,
+        autoApplied: applied.length,
         discarded: result.discarded,
         messages: result.considered.messages,
       });
       return {
         status: 'done',
-        message: `${result.proposals.length} proposals from ${result.considered.messages} new messages.`,
-        proposals: result.proposals.map((p) => toProtocolProposal(p, titleOf, redact)),
+        message:
+          `${result.proposals.length} proposals from ${result.considered.messages} new messages` +
+          (applied.length > 0
+            ? `; ${applied.length} clear corrections applied on their own.`
+            : '.'),
+        proposals: pending.map((p) => toProtocolProposal(p, titleOf, redact)),
         discarded: result.discarded,
         tokens: result.tokens,
       };

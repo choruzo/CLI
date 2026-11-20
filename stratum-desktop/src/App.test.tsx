@@ -90,6 +90,8 @@ function rig() {
     })),
     memoryApplyProposal: vi.fn(async () => ({ applied: true, message: 'ok' })),
     memoryRejectProposal: vi.fn(async () => ({ rejected: true, message: 'ok' })),
+    memoryChanges: vi.fn(async () => ({ changes: [] })),
+    memoryUndoChange: vi.fn(async () => ({ undone: true, message: 'ok' })),
     prefs: vi.fn(async () => {
       throw new Error('sin prefs en el test');
     }),

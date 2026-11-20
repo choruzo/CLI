@@ -314,6 +314,10 @@ export function fakeNative(): FakeNative {
     memoryRejectProposal: vi.fn(
       async (_proposalId: string): Promise<unknown> => ({ rejected: true, message: 'ok' }),
     ),
+    memoryChanges: vi.fn(async (): Promise<unknown> => ({ changes: [] })),
+    memoryUndoChange: vi.fn(
+      async (_changeId: string): Promise<unknown> => ({ undone: true, message: 'ok' }),
+    ),
     channelsStatus: vi.fn(async (): Promise<unknown> => ({ telegram: TELEGRAM_OFF })),
     channelsPairBegin: vi.fn(async (): Promise<unknown> => ({
       code: 'ABCDEFGHJK',

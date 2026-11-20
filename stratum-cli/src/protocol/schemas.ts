@@ -54,6 +54,7 @@ import type {
   ProtocolDecision,
   ProtocolDreamResult,
   ProtocolProposal,
+  ProtocolMemoryChange,
   ProtocolJob,
   ProtocolMemoryEvent,
   ProtocolMemoryStatus,
@@ -373,6 +374,20 @@ export const decisionSchema: z.ZodType<ProtocolDecision> = z.object({
 });
 
 const proposalText = z.string().max(2400);
+export const memoryChangeSchema: z.ZodType<ProtocolMemoryChange> = z.object({
+  id: z.string(),
+  at: z.string(),
+  action: z.enum(['corrected', 'retired']),
+  by: z.enum(['agent', 'dreaming']),
+  decisionId: z.string(),
+  title: z.string(),
+  content: proposalText,
+  newTitle: z.string().optional(),
+  newContent: proposalText.optional(),
+  reason: z.string().max(1000),
+  undone: z.boolean(),
+  undoable: z.boolean(),
+});
 export const proposalSchema: z.ZodType<ProtocolProposal> = z.object({
   id: z.string(),
   kind: z.enum(['create', 'correct', 'merge', 'prune', 'reclassify', 'promote']),
@@ -1508,6 +1523,23 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'memory.rejectProposal': memoryRef(
     z.object({ cwd: cwd.optional(), agent: memoryAgent.optional(), proposalId: id, operationId }),
   ),
+  'memory.changes': memoryRef(
+    z.object({
+      cwd: cwd.optional(),
+      agent: memoryAgent.optional(),
+      sessionId: id.optional(),
+      limit: limit.optional(),
+    }),
+  ),
+  'memory.undoChange': memoryRef(
+    z.object({
+      cwd: cwd.optional(),
+      agent: memoryAgent.optional(),
+      sessionId: id.optional(),
+      changeId: id,
+      operationId,
+    }),
+  ),
   'memory.reclassify': z
     .object({
       agent: memoryAgent,
@@ -1764,6 +1796,8 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   }),
   'memory.forget': z.object({ removed: z.boolean() }),
   'memory.reclassify': z.object({ updated: z.boolean() }),
+  'memory.changes': z.object({ changes: z.array(memoryChangeSchema).max(LIMITS.listLimit) }),
+  'memory.undoChange': z.object({ undone: z.boolean(), message: z.string().max(1000) }),
   'memory.proposals': z.object({ proposals: z.array(proposalSchema) }),
   'memory.dream': dreamResultSchema,
   'memory.applyProposal': z.object({ applied: z.boolean(), message: z.string().max(1000) }),

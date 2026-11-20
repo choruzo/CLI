@@ -70,6 +70,8 @@
     "allow-desktop-memory-dream",
     "allow-desktop-memory-apply-proposal",
     "allow-desktop-memory-reject-proposal",
+    "allow-desktop-memory-changes",
+    "allow-desktop-memory-undo-change",
     "allow-desktop-prefs",
     "allow-desktop-open-config",
     "allow-desktop-settings-get",
