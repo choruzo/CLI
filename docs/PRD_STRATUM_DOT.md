@@ -2820,6 +2820,72 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   Al volver a encender, la caja sigue parada hasta un `box.start` (Dot o `stratum box start`): el
   daemon no la arranca solo, y mientras tanto los vigilantes quedan suspendidos. **M22 cerrado.**
 
+- **Hacia un asistente local completo** [propuesto por Claude el 2026-11-20 y aceptado por el
+  usuario]. Tras M22 el `companion` ya tiene bastante alcance. Lo que le falta es que se pueda
+  contar con él cada día. *Decidido por el usuario*: **local-first**. El runtime, los datos y la
+  caja van en el equipo de la persona; el modelo, donde convenga (hoy, NaN). Un modelo local no es
+  requisito, y se mide en M24 en vez de suponerse. Orden propuesto: M23, M24, M25, M26; M27 está en
+  investigación.
+
+- **M23 — Que esté siempre listo** [propuesto 2026-11-20].
+  - La caja arranca con el daemon. Es una opción de la config global (`box.autostart`), apagada por
+    defecto, porque arrancar contenedores sin que se pida cambia el comportamiento. Tras un
+    reinicio del equipo, hoy todo depende de un `box.start` (M22 parte 5).
+  - Diagnóstico del `companion`: `stratum doctor` (y su vista en Dot) para daemon, caja e imagen,
+    caja de conectores, conectores y secretos (el OAuth de Google en modo «Prueba» caduca a los 7
+    días), Telegram y modelo con visión. Solo lee y nunca arregla por su cuenta.
+  - Avisos de degradación por el camino de `watch.notice`/recordatorios: token caducado, conector
+    que falla, imagen desfasada. Se avisa una vez por causa, no en cada intento.
+  - Lo que quedó de M9 sin ser de seguridad: empaquetado e instalación de Dot, y desfase de
+    versiones entre Dot, daemon e imagen (se detecta y se dice, sin conectar a ciegas).
+
+- **M24 — Medir al `companion`** [propuesto 2026-11-20]. Hoy tiene siete escenarios de eval
+  (computer use, Renfe y uno de seguridad). Falta una batería de tareas del día a día:
+  - Tiempo y avisos, transporte, calendario y correo, casa (estado, historial con fechas relativas,
+    acciones confirmadas), recordatorios y vigilantes propuestos, memoria.
+  - Sobre conectores grabados o falsos, para que no dependan de la red ni de la casa real.
+  - Comparar los modelos de NaN y uno local (llama-server). El fallo de `ha_historial` con «ayer de
+    21:00 a 22:00» (M22 parte 4) es el tipo de error que esto debe pillar antes.
+
+- **M25 — Voz, empezando por lo acotado** [propuesto 2026-11-20]. Saca de §23.12 solo la entrada.
+  - Notas de voz de Telegram transcritas **en local** (whisper en ONNX, como los embeddings).
+    El audio no sale del equipo ni se guarda, y al historial va el texto con su marca.
+  - Después, *push-to-talk* en Dot. La respuesta hablada (TTS) y la escucha continua siguen fuera.
+
+- **M26 — Documentos** [propuesto 2026-11-20].
+  - Arrastrar ficheros a Dot o mandarlos por Telegram para que caigan en `/exchange`, con tope de
+    tamaño y sin ejecutar nada.
+  - Leer PDF y documentos de ofimática dentro de la caja. Su texto es contenido no confiable.
+  - Una carpeta del equipo en solo lectura **no** entra: rompe la frontera de M13–M14 y se
+    decidiría aparte.
+
+- **M27 — Home Assistant a fondo** [en investigación 2026-11-20; el usuario pidió investigar crear
+  automatizaciones y más]. Lo que hay (`home-assistant` 1.2.0): resumen, búsqueda, estado,
+  historial, comprobación para vigilantes, y encender, apagar o cualquier servicio con
+  confirmación. Lo investigado:
+  - **Crear automatizaciones, scripts y escenas.** La API REST oficial no lo documenta. El editor
+    de HA usa `/api/config/automation/config/<id>` (también `script` y `scene`) y el WebSocket
+    (`config/automation/config`). Es interno, así que puede cambiar entre versiones. M22 lo dejó
+    fuera porque una automatización actúa sola, sin confirmación. Para que entre, la idea es:
+    - Solo se **propone** (`propose_ha_automation`), con confirmación forzada que enseña el YAML
+      entero.
+    - El agente solo toca lo suyo: ids con prefijo `stratum_` y nunca edita ni borra lo demás.
+    - Se crea deshabilitada si así se decide.
+    - El conector comprueba antes la versión de HA y la forma de la respuesta, y si no la
+      reconoce, no escribe.
+  - **De solo lectura, sin dilema**:
+    - Trazas de automatizaciones (WebSocket `trace/list|get`): «¿por qué no saltó anoche?».
+    - Logbook (`/api/logbook`): «¿quién abrió la puerta?».
+    - Avisos de *Repairs*, calendarios y listas de tareas de HA, y estadísticas de energía.
+    - Leer las automatizaciones existentes para explicarlas.
+  - **Eventos empujados** (WebSocket `subscribe_events`) para vigilantes al instante; ya estaba
+    en M22 como «más adelante». Pide un proceso de larga vida en la caja de conectores.
+  - **El MCP oficial de HA** (integración `mcp_server`) ya se puede declarar hoy en
+    `companion.mcp.servers` por HTTP (M22 parte 3). Va por la API de Assist: solo lo expuesto a
+    Assist, sin historial ni configuración. Sirve como alternativa, no sustituye al conector propio.
+  - *Pendiente del usuario*: si crear automatizaciones entra (y con qué reglas), y el orden
+    respecto a M23–M26.
+
 ### 23.12 Fuera, por ahora
 
 Proactividad libre (la acotada, condiciones declaradas que solo avisan, es M22), voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
