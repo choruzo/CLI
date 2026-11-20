@@ -60,6 +60,8 @@ const BUILTIN: Record<string, Omit<SessionProfile, 'source'>> = {
       'web_fetch',
       'recall_decisions',
       'store_decision',
+      'correct_memory',
+      'retire_memory',
       'delegate_task',
       ...INFRA_TOOLS,
       'mcp__*',

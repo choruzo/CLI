@@ -150,6 +150,15 @@ describe('preset assistant — toolset (16.6)', () => {
     expect(offered).toEqual([...ASSISTANT_TOOLS].sort());
   });
 
+  it('el agente de código también corrige y retira sus recuerdos', async () => {
+    const provider = new RecordingProvider([makeTextRound('hola')]);
+    await collect(newAgent(provider, 'coding').run('hola'));
+    const offered = (provider.requests[0]?.tools ?? []).map((t) => t.function.name);
+    expect(offered).toEqual(
+      expect.arrayContaining(['store_decision', 'correct_memory', 'retire_memory']),
+    );
+  });
+
   it.each(['read_file', 'exec', 'present_plan', 'delegate_task', 'write_file'])(
     'una llamada a %s se rechaza al ejecutar y no llega a ejecutarse',
     async (tool) => {

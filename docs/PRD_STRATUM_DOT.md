@@ -2827,6 +2827,18 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   requisito, y se mide en M24 en vez de suponerse. *Orden* (el usuario lo dejó a Claude): M23, M27,
   M24, M25, M26. M27 va tras M23 porque es lo que más se usa, y M24 lo medirá también.
 
+- **Antes de M23, la memoria** (2026-11-20). La del `companion` tenía 61 recuerdos con el mismo
+  hecho repetido hasta cinco veces y datos desfasados.
+  - *Hecho*: la extracción analiza cada mensaje una vez y ve lo ya recordado.
+  - *Decidido por el usuario*: el agente corrige o retira lo que ya no es cierto, sin esperar a la
+    persona, en los tres presets (`companion`, `assistant` y `coding`). Cambia lo de M19
+    («dreaming solo propone») solo para el agente en la conversación; dreaming sigue proponiendo.
+  - *Hecho, primera parte*: `correct_memory`/`retire_memory`. Sin preguntar solo lo que salió de
+    la extracción automática, y hasta 5 cambios por sesión; lo demás se confirma. Cada cambio
+    guarda el recuerdo entero en `memory-history.json` y se deshace con `stratum memory undo`.
+  - *Pendiente*: enseñar los cambios y deshacerlos desde Dot y Desktop, y que dreaming aplique solo
+    las correcciones claras.
+
 - **M23 — Que esté siempre listo** [propuesto 2026-11-20].
   - La caja arranca con el daemon. Es una opción de la config global (`box.autostart`), apagada por
     defecto, porque arrancar contenedores sin que se pida cambia el comportamiento. Tras un

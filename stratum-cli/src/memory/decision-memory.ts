@@ -251,6 +251,23 @@ export class DecisionMemory {
     return this.store.all();
   }
 
+  get(id: string): DecisionRecord | undefined {
+    return this.store.get(id);
+  }
+
+  /**
+   * Vuelve a poner un recuerdo retirado, con su mismo id (deshacer una
+   * retirada, `memory/revision.ts`). No hace nada si el id ya está. Lo indexa
+   * en el acto si hay embedder; si no, el siguiente `ensureIndexed`.
+   */
+  reinstate(record: DecisionRecord): Promise<boolean> {
+    return this.writeLock.runExclusive(async () => {
+      const added = this.store.importMissing([record]) > 0;
+      if (added) await this.ensureIndexed();
+      return added;
+    });
+  }
+
   /**
    * M19 (B2) — reclasifica una decisión (y, si se da, cambia su resumen). No
    * toca el índice: el embedding sale del título y el contenido, que no

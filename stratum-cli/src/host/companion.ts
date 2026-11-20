@@ -10,6 +10,7 @@ import { webSearchTool } from '../tools/web/search.js';
 import { webFetchTool } from '../tools/web/fetch.js';
 import { storeMemoryTool } from '../tools/memory/store-decision.js';
 import { recallMemoryTool } from '../tools/memory/recall-decisions.js';
+import { correctMemoryTool, retireMemoryTool } from '../tools/memory/revise-memory.js';
 import { readSkillTool } from '../tools/skills/read-skill.js';
 import { questionTool } from '../tools/question.js';
 import { todoTool } from '../tools/todo.js';
@@ -127,6 +128,8 @@ export function buildCompanionRegistry(
     webFetchTool,
     storeMemoryTool,
     recallMemoryTool,
+    correctMemoryTool,
+    retireMemoryTool,
     readSkillTool,
     questionTool,
     todoTool,

@@ -19,6 +19,8 @@ import { dream } from '../../memory/dreaming/dream.js';
 import { openDreamingFiles } from '../../memory/dreaming/files.js';
 import { formatProposal } from '../../memory/dreaming/format.js';
 import { resolveDreamingModel } from '../../memory/dreaming/model.js';
+import { openMemoryHistory, type MemoryChange } from '../../memory/history.js';
+import { undoChange } from '../../memory/revision.js';
 import { syncRepresentations } from '../../memory/representations/sync.js';
 import { ProviderRouter } from '../../providers/router.js';
 import { redactText } from '../../security/redact-output.js';
@@ -102,6 +104,53 @@ const memoryList = new Command('list')
     const sorted = [...decisions].sort((a, b) => b.timestamp.localeCompare(a.timestamp));
     process.stdout.write(
       sorted.map((d) => formatDecision(d, taxonomyOf(opts))).join('\n\n') + '\n',
+    );
+  });
+
+/** Una línea por cambio del agente en su memoria, del más reciente al más antiguo. */
+function formatChange(c: MemoryChange): string {
+  const before = c.before as { title?: unknown };
+  const title = typeof before.title === 'string' ? before.title : c.decisionId;
+  const what = c.action === 'corrected' ? 'corregido' : 'retirado';
+  const after =
+    c.action === 'corrected' && c.after && c.after.title !== title ? ` → «${c.after.title}»` : '';
+  return (
+    `${c.id}  ${c.at.slice(0, 16).replace('T', ' ')}  ${what}${c.undoneAt ? ' (deshecho)' : ''}\n` +
+    `  ${c.decisionId} «${title}»${after}\n` +
+    `  porque: ${c.reason}`
+  );
+}
+
+const memoryChanges = new Command('changes')
+  .description('List the changes the assistant made to its own memory (corrected or retired)')
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .action((opts: MemoryScopeFlags) => {
+    const changes = openMemoryHistory(memoryConfig(loadConfigOrExit(opts), opts)).list();
+    if (changes.length === 0) {
+      process.stdout.write('El asistente no ha cambiado nada de su memoria.\n');
+      return;
+    }
+    process.stdout.write(changes.map(formatChange).join('\n\n') + '\n');
+  });
+
+const memoryUndo = new Command('undo')
+  .description('Undo a change the assistant made to its memory (only if nothing changed it since)')
+  .argument('<id>', 'change ID (chg_…), from `stratum memory changes`')
+  .option('-g, --global', GLOBAL_HELP)
+  .option('--companion', COMPANION_HELP)
+  .action(async (id: string, opts: MemoryScopeFlags) => {
+    const config = memoryConfig(loadConfigOrExit(opts), opts);
+    const result = await undoChange(getDecisionMemory(config), openMemoryHistory(config), id);
+    if (!result.ok) {
+      process.stderr.write(`No se deshizo: ${result.error}.\n`);
+      process.exit(1);
+    }
+    const title = result.record?.title ?? result.change.decisionId;
+    process.stdout.write(
+      result.change.action === 'corrected'
+        ? `Restaurado ${result.change.decisionId} «${title}» como estaba antes del cambio.\n`
+        : `Vuelto a poner ${result.change.decisionId} «${title}».\n`,
     );
   });
 
@@ -346,6 +395,8 @@ export const memoryCommand = new Command('memory')
   .addCommand(memoryList)
   .addCommand(memorySearch)
   .addCommand(memoryForget)
+  .addCommand(memoryChanges)
+  .addCommand(memoryUndo)
   .addCommand(memoryReclassify)
   .addCommand(memoryDream)
   .addCommand(memoryWiki)

@@ -40,6 +40,9 @@ export const ASSISTANT_AGENT = 'assistant';
  * dejaría pasar `present_plan`, `delegate_task` o `test_evidence`, que también
  * son tools de control.
  */
+/** Corregir o retirar recuerdos (`tools/memory/revise-memory.ts`): los tres presets. */
+export const MEMORY_REVISION_TOOLS: readonly string[] = ['correct_memory', 'retire_memory'];
+
 export const ASSISTANT_TOOLS: readonly string[] = [
   'web_search',
   'web_fetch',
@@ -47,6 +50,8 @@ export const ASSISTANT_TOOLS: readonly string[] = [
   'todo',
   'store_decision',
   'recall_decisions',
+  // Corregir o retirar lo que ya no es cierto (`tools/memory/revise-memory.ts`).
+  ...MEMORY_REVISION_TOOLS,
   'read_skill',
 ];
 

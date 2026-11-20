@@ -220,12 +220,12 @@ export function callEffects(
       reason: `${name} writes a file`,
     };
   }
-  if (name === 'store_decision') {
+  if (name === 'store_decision' || name === 'correct_memory' || name === 'retire_memory') {
     return {
       known: true,
       mutating: true,
       targets: [],
-      reason: 'store_decision writes to long-term memory',
+      reason: `${name} writes to long-term memory`,
     };
   }
   if (name === 'exec') {
