@@ -174,9 +174,13 @@ jobs:
           BUNDLE=stratum-dot/target/release/bundle
           shopt -s nullglob
           for f in "$BUNDLE"/nsis/*.exe "$BUNDLE"/deb/*.deb "$BUNDLE"/appimage/*.AppImage; do
-            cp "$f" "$OUT/"
+            # GitHub cambia los espacios de un asset por puntos («Stratum Dot_…» →
+            # «Stratum.Dot_…»): se nombran ya así para que SHA256SUMS y las URLs de
+            # latest.json digan el nombre que de verdad se sirve.
+            name=$(basename "$f" | tr ' ' '.')
+            cp "$f" "$OUT/$name"
             # Firma minisign del updater (M23), si se generó.
-            if [ -f "$f.sig" ]; then cp "$f.sig" "$OUT/"; fi
+            if [ -f "$f.sig" ]; then cp "$f.sig" "$OUT/$name.sig"; fi
           done
           FILES=("$OUT"/*)
           if [ ${#FILES[@]} -eq 0 ]; then
