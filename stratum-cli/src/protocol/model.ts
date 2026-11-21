@@ -1354,3 +1354,43 @@ export interface ProtocolMemoryDocument {
   content: string;
   truncated: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// M23 — diagnóstico del `companion` (`doctor.run`, `docs/protocol.md` §33)
+// ---------------------------------------------------------------------------
+
+/**
+ * `ok`: bien. `warn`: funciona a medias o algo dejará de funcionar. `fail`: no
+ * funciona. `off`: apagado por configuración (no es un fallo).
+ */
+export type ProtocolDoctorStatus = 'ok' | 'warn' | 'fail' | 'off';
+
+export type ProtocolDoctorArea = 'daemon' | 'box' | 'connectors' | 'telegram' | 'model' | 'data';
+
+/**
+ * Una comprobación. Solo describe: nada de lo que dice se ejecuta solo. `fix`
+ * es lo que puede hacer la persona (una orden o un paso), nunca una acción del
+ * servidor. Nunca lleva un secreto, un token ni una URL con credenciales.
+ */
+export interface ProtocolDoctorCheck {
+  /** Estable entre versiones (`box.state`, `connector.google`…). */
+  id: string;
+  area: ProtocolDoctorArea;
+  status: ProtocolDoctorStatus;
+  title: string;
+  detail: string | null;
+  fix: string | null;
+}
+
+export interface ProtocolDoctorReport {
+  checkedAt: Timestamp;
+  checks: ProtocolDoctorCheck[];
+}
+
+/** Límites de `doctor.run`: un informe cabe siempre en un mensaje. */
+export const DOCTOR_LIMITS = {
+  checks: 64,
+  idChars: 80,
+  titleChars: 160,
+  textChars: 600,
+} as const;

@@ -220,3 +220,38 @@ describe('box.screen (M15)', () => {
     expect((await again.request('box.status', {})).box.desktop).toBe(false);
   });
 });
+
+describe('box.autostart (M23)', () => {
+  it('con autostart, el daemon arranca la caja al arrancar él', async () => {
+    t = await startTestDaemon({
+      base,
+      box: new BoxManager({
+        config: BoxConfigSchema.parse({}),
+        exchangeDir: join(base, 'exchange'),
+        imageDir: null,
+        run: fakeRunner(),
+        detect: async () => ({ ok: true, runtime: { kind: 'docker', bin: 'docker' } }),
+      }),
+      boxAutostart: { enabled: true },
+    });
+    await t.daemon.boxAutostart.idle();
+    expect(t.daemon.boxAutostart.state().phase).toBe('started');
+    const observer = await t.connect(['observer'], 'obs');
+    expect((await observer.request('box.status', {})).box.state).toBe('running');
+  });
+
+  it('sin autostart (por defecto), la caja no se toca', async () => {
+    t = await startTestDaemon({
+      base,
+      box: new BoxManager({
+        config: BoxConfigSchema.parse({}),
+        exchangeDir: join(base, 'exchange'),
+        run: fakeRunner(),
+        detect: async () => ({ ok: true, runtime: { kind: 'docker', bin: 'docker' } }),
+      }),
+    });
+    expect(t.daemon.boxAutostart.state().phase).toBe('off');
+    const observer = await t.connect(['observer'], 'obs');
+    expect((await observer.request('box.status', {})).box.state).toBe('absent');
+  });
+});

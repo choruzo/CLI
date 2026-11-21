@@ -99,6 +99,8 @@ import type {
   ProtocolConnector,
   ProtocolConnectorsList,
   ProtocolTelegramUser,
+  ProtocolDoctorCheck,
+  ProtocolDoctorReport,
 } from './model.js';
 import {
   BOX_SCREEN_LIMITS,
@@ -117,6 +119,7 @@ import {
   SHARED_IMAGE_LIMITS,
   REMINDER_LIMITS,
   WATCH_LIMITS,
+  DOCTOR_LIMITS,
 } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
 import { LIMITS } from './version.js';
@@ -554,6 +557,20 @@ export const boxStatusSchema: z.ZodType<ProtocolBoxStatus> = z.object({
   desktop: z.boolean().optional(),
 });
 const boxResult = z.object({ box: boxStatusSchema });
+
+/** M23 — `doctor.run`. */
+export const doctorCheckSchema: z.ZodType<ProtocolDoctorCheck> = z.object({
+  id: z.string().min(1).max(DOCTOR_LIMITS.idChars),
+  area: z.enum(['daemon', 'box', 'connectors', 'telegram', 'model', 'data']),
+  status: z.enum(['ok', 'warn', 'fail', 'off']),
+  title: z.string().min(1).max(DOCTOR_LIMITS.titleChars),
+  detail: z.string().max(DOCTOR_LIMITS.textChars).nullable(),
+  fix: z.string().max(DOCTOR_LIMITS.textChars).nullable(),
+});
+export const doctorReportSchema: z.ZodType<ProtocolDoctorReport> = z.object({
+  checkedAt: timestamp,
+  checks: z.array(doctorCheckSchema).max(DOCTOR_LIMITS.checks),
+});
 
 const screenDimension = z.number().int().positive().max(16_384);
 export const boxScreenSchema: z.ZodType<ProtocolBoxScreen> = z.object({
@@ -1596,6 +1613,8 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'reminders.cancel': z.object({ reminderId: id, operationId }).strict(),
 
   'watches.list': empty,
+
+  'doctor.run': empty,
   'watches.add': z
     .object({
       name: watchName,
@@ -1840,6 +1859,8 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'watches.pause': z.object({ watch: watchSchema }),
   'watches.resume': z.object({ watch: watchSchema }),
   'watches.remove': z.object({ watch: watchSchema }),
+
+  'doctor.run': z.object({ report: doctorReportSchema }),
 
   'channels.status': channelsStatusSchema,
   'channels.reload': channelsStatusSchema,

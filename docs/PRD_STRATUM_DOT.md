@@ -2857,6 +2857,15 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     que falla, imagen desfasada. Se avisa una vez por causa, no en cada intento.
   - Lo que quedó de M9 sin ser de seguridad: empaquetado e instalación de Dot, y desfase de
     versiones entre Dot, daemon e imagen (se detecta y se dice, sin conectar a ciegas).
+  - *Empezado el 2026-11-21* (el usuario pidió empezar por los dos primeros puntos):
+    - **`box.autostart` hecho.** Sin runtime todavía (Docker Desktop tarda tras iniciar sesión),
+      reintenta cada 30 s durante 10 minutos. Si la caja está ocupada o el runtime rechaza la
+      orden, no insiste.
+    - **`stratum doctor`, `doctor.run` y el panel *Health* de Dot hechos** (`docs/protocol.md` §33).
+    - Decisión de Claude, cambiable: el diagnóstico **no prueba** la autorización de Google.
+      Hacerlo desde el anfitrión rompería que los conectores solo hablen desde su caja. Lo dice
+      como nota, y la prueba de verdad queda para los avisos de degradación (tercer punto), desde
+      dentro de la caja.
 
 - **M24 — Medir al `companion`** [propuesto 2026-11-20]. Hoy tiene siete escenarios de eval
   (computer use, Renfe y uno de seguridad). Falta una batería de tareas del día a día:

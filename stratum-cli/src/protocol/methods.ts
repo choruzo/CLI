@@ -25,6 +25,7 @@ import type {
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
   ProtocolChannelsStatus,
+  ProtocolDoctorReport,
   ProtocolTelegramPaired,
   ProtocolConnector,
   ProtocolConnectorsList,
@@ -785,6 +786,13 @@ export interface ProtocolMethods {
   'watches.remove': Spec<{ watchId: string } & Mutation, { watch: ProtocolWatch }>;
 
   /**
+   * M23 — diagnóstico del `companion` (`docs/protocol.md` §33): daemon, caja,
+   * conectores, Telegram, modelo y ficheros de datos. **Solo lee** y nunca
+   * arregla nada; puede tardar unos segundos (prueba el provider).
+   */
+  'doctor.run': Spec<Empty, { report: ProtocolDoctorReport }>;
+
+  /**
    * M18 — canales externos (`docs/protocol.md` §24). Nada de lo que devuelven
    * lleva el token del bot. `reload` vuelve a leer `telegram.json` y
    * `channels.telegram.enabled` (tras `stratum channels telegram setup`).
@@ -998,6 +1006,8 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'watches.pause': write('control'),
   'watches.resume': write('control'),
   'watches.remove': write('control'),
+
+  'doctor.run': read('observe'),
 
   'channels.status': read('observe'),
   'channels.reload': write('control'),

@@ -90,6 +90,7 @@ import {
   type MethodName,
   type ProtocolConnector,
   type ProtocolConnectorsList,
+  type ProtocolDoctorReport,
   type ProtocolEvent,
   type ProtocolMemoryAgent,
   type ProtocolModel,
@@ -168,6 +169,10 @@ import { ChannelHost, type ChannelHostOptions } from './channel-host.js';
 import type { CompanionTurns } from './channel-companion.js';
 import type { SessionLabel } from '../channels/telegram/render.js';
 import { ensurePrivateDir, restrictSocket } from './private-dir.js';
+import { BoxAutostart } from './box-autostart.js';
+import { daemonDoctorReport } from './doctor.js';
+import type { DoctorStoreFacts } from '../doctor/checks.js';
+import { autostartStatus, defaultAutostartDeps } from './autostart.js';
 import { RunRegistry } from './run-registry.js';
 import { TraceFeeds } from './trace-feeds.js';
 import { traceFilePath } from '../trace/store.js';
@@ -255,6 +260,16 @@ export interface StratumdOptions {
   companionDataDir?: string;
   /** M13 — la caja (`box.*`). Por defecto, la de `config.box`. Inyectable para tests. */
   box?: BoxManager;
+  /**
+   * M23 — arrancar la caja con el daemon. Por defecto, `config.box.autostart`.
+   * Los tiempos de reintento, para tests.
+   */
+  boxAutostart?: { enabled?: boolean; retryMs?: number; windowMs?: number };
+  /**
+   * M23 — `doctor.run`: si el daemon arranca al iniciar sesión. Por defecto, lo
+   * que dice `stratum daemon autostart status`; inyectable para tests.
+   */
+  loginAutostart?: () => Promise<{ enabled: boolean; detail: string | null } | null>;
   /** M20 — el catálogo de conectores. Por defecto, el del paquete. Inyectable para tests. */
   connectorCatalog?: ConnectorCatalog;
   /**
@@ -418,6 +433,8 @@ export class Stratumd {
   private readonly approvals: ApprovalCenter;
   /** M13 — la caja: el daemon pide sus órdenes fijas; no es dueño del contenedor. */
   private readonly box: BoxManager;
+  /** M23 — `box.autostart`. */
+  readonly boxAutostart: BoxAutostart;
   private readonly approvalTimeoutMs: number;
   private readonly operations: OperationCache;
   private readonly serverInfo: ProtocolServerInfo;
@@ -552,6 +569,15 @@ export class Stratumd {
         // M20: con algún conector activo, `start` arranca también su caja.
         connectorsWanted: () => enabledConnectorIds(connectorsFile(this.companionDir)).length > 0,
       });
+    const autostart = opts.boxAutostart ?? {};
+    this.boxAutostart = new BoxAutostart({
+      enabled: autostart.enabled ?? opts.config.box.autostart,
+      start: () => this.box.start(),
+      log: (event, data) => log.info(event, data),
+      now: this.now,
+      ...(autostart.retryMs !== undefined ? { retryMs: autostart.retryMs } : {}),
+      ...(autostart.windowMs !== undefined ? { windowMs: autostart.windowMs } : {}),
+    });
     this.approvalTimeoutMs =
       opts.approvalTimeoutMs ?? Math.round(opts.config.daemon.approvalTimeoutMinutes * 60_000);
     this.approvals = new ApprovalCenter({
@@ -690,6 +716,8 @@ export class Stratumd {
     daemon.dreamingSchedule?.start();
     // M18 — el canal empieza a escuchar con el daemon ya publicado.
     daemon.channels?.start();
+    // M23 — la caja, sin esperarla: la primera vez puede construir la imagen.
+    daemon.boxAutostart.start();
     log.info('daemon started', {
       pid: process.pid,
       version: opts.version,
@@ -794,6 +822,8 @@ export class Stratumd {
       log.info('daemon shutting down', { reason, sessions: this.sessions.size });
       // Lo primero: ninguna rutina vence mientras se apaga.
       this.routines?.stop();
+      // M23 — ni un reintento de arrancar la caja (la caja no es del daemon: no se para).
+      this.boxAutostart.stop();
       // M21 — ni un recordatorio avisa a mitad del apagado.
       this.reminders?.stop();
       // M22 — ni un vigilante se evalúa mientras se apaga.
@@ -2310,6 +2340,9 @@ export class Stratumd {
       // M22 — sus vigilantes. Crear exige `approve` (aquí, la persona; el
       // agente solo con `propose_watch` confirmado); lo demás solo resta.
       // Ninguna línea de log lleva el nombre ni los argumentos.
+      'doctor.run': async () => ({
+        report: await this.doctorReport(conn.client?.kind === 'cli' ? conn.client.version : null),
+      }),
       'watches.list': () => {
         const watches = this.watchesOrThrow();
         return {
@@ -2655,6 +2688,48 @@ export class Stratumd {
   /** M20 — el catálogo de conectores (el del paquete, salvo en tests). */
   private get connectorCatalog(): ConnectorCatalog {
     return this.opts.connectorCatalog ?? bundledCatalog();
+  }
+
+  /** M23 — `doctor.run`. Solo lee: nada de aquí arranca, monta ni cambia. */
+  private doctorReport(clientVersion: string | null): Promise<ProtocolDoctorReport> {
+    const companionId = this.companionSessionId();
+    const mounted = companionId ? this.sessions.get(companionId)?.session() : undefined;
+    const meta = companionId ? this.dormant.get(companionId)?.archived.meta : undefined;
+    const model = mounted ?? meta;
+    const stores: DoctorStoreFacts[] = [];
+    if (this.routines) stores.push({ name: 'routines.json', readOnly: this.routines.readOnly });
+    if (this.reminders) stores.push({ name: 'reminders.json', readOnly: this.reminders.readOnly });
+    if (this.watches) stores.push({ name: 'watches.json', readOnly: this.watches.readOnly });
+    const active = this.watches?.list().filter((w) => w.status === 'active') ?? [];
+    return daemonDoctorReport({
+      version: this.opts.version,
+      pid: process.pid,
+      clientVersion,
+      config: this.opts.config,
+      box: this.box,
+      boxAutostart: this.boxAutostart.state(),
+      catalog: this.connectorCatalog,
+      companionDir: this.companionDir,
+      secretsDir: this.daemonDir,
+      channels: () => (this.channels ? this.channels.status() : null),
+      companionModel: model ? { provider: model.provider, model: model.model } : null,
+      stores,
+      watches: this.watches
+        ? {
+            active: active.length,
+            suspended: active.filter((w) => w.state.suspendedNotified).length,
+            failing: active.filter((w) => !w.state.suspendedNotified && w.state.failingNotified)
+              .length,
+          }
+        : null,
+      loginAutostart:
+        this.opts.loginAutostart ??
+        (async () => {
+          const s = await autostartStatus(defaultAutostartDeps());
+          return { enabled: s.enabled, detail: s.method };
+        }),
+      now: this.now(),
+    });
   }
 
   /** M20 — `connectors.list`. */

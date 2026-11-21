@@ -622,6 +622,12 @@ export const BoxConfigSchema = z
      * de Stratum, no con una propia (`image`), que tiene que declararlo.
      */
     desktop: z.boolean().optional(),
+    /**
+     * M23 — el daemon arranca la caja al arrancar él (lo mismo que `box start`,
+     * una vez; sin runtime todavía, reintenta unos minutos). Default `false`:
+     * arrancar contenedores sin que se pida cambia el comportamiento.
+     */
+    autostart: z.boolean().default(false),
   })
   .strict();
 

@@ -2569,3 +2569,51 @@ interface ProtocolMemoryChange {
 
 Ninguna línea de log lleva título, contenido ni motivo. Tests: `stratum-cli/src/memory/revision.test.ts`,
 `memory/dreaming/auto-apply.test.ts` y `daemon/daemon-memory.test.ts`.
+
+## 33. Diagnóstico del asistente (M23)
+
+`doctor.run` (`observe`, sin parámetros) devuelve un informe de cómo está todo lo que necesita el
+`companion`: el daemon, la caja, los conectores, Telegram, el modelo y los ficheros de datos.
+**Solo lee y nunca arregla nada.** Puede tardar unos segundos, porque pregunta a `/models` del
+provider (≤ 3 s).
+
+```ts
+type ProtocolDoctorStatus = 'ok' | 'warn' | 'fail' | 'off'; // off: apagado por config, no es un fallo
+interface ProtocolDoctorCheck {
+  id: string; // estable: daemon.running, box.state, connector.<id>, telegram, model.vision…
+  area: 'daemon' | 'box' | 'connectors' | 'telegram' | 'model' | 'data';
+  status: ProtocolDoctorStatus;
+  title: string;
+  detail: string | null;
+  fix: string | null; // lo que puede hacer la persona; el servidor nunca lo ejecuta
+}
+interface ProtocolDoctorReport {
+  checkedAt: Timestamp;
+  checks: ProtocolDoctorCheck[]; // ≤ DOCTOR_LIMITS.checks (64), en orden por área
+}
+```
+
+- **Qué comprueba**:
+  - si el daemon arranca al iniciar sesión;
+  - el runtime de la caja, su estado e imagen, si está habilitada y qué hizo `box.autostart` en
+    este daemon;
+  - la caja de conectores y, por cada conector activo, si le falta algún secreto (solo el nombre);
+  - el canal de Telegram tal como lo ve el daemon (token rechazado, fallos al recibir, sin chats
+    emparejados);
+  - el provider y el modelo de la sesión principal del `companion` (o el por defecto) y, si la caja
+    tiene pantalla, si ese modelo tiene visión declarada;
+  - los ficheros de rutinas, recordatorios y vigilantes en solo lectura, y los vigilantes
+    suspendidos o que fallan.
+- **Nunca lleva** el valor de un secreto, un token ni la URL de un provider. Los textos que vienen de
+  fuera (el motivo del runtime, el error del canal) se redactan antes de salir.
+- **Versión del cliente**: si el cliente es la CLI (`client.kind: 'cli'`), el daemon compara su
+  versión con la suya y avisa si difieren. Con otros clientes no se compara, porque cada app lleva
+  su propia versión.
+- Un conector OAuth configurado sale `ok` con una nota: si su app de OAuth está en modo «Prueba»,
+  la autorización caduca a los 7 días. El diagnóstico no la prueba: hacerlo sería una llamada desde
+  el anfitrión, y los conectores solo hablan desde su caja.
+- `stratum doctor [--json]` es un cliente más. Sin daemon, la CLI mira lo que puede leer ella
+  misma (la caja, los ficheros, el provider) y lo dice. Sale con código 1 si alguna comprobación
+  falla.
+
+Tests: `stratum-cli/src/doctor/checks.test.ts` y `daemon/daemon-doctor.test.ts`.

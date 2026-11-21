@@ -64,6 +64,13 @@ export function formatBoxStatus(s: BoxStatus): string {
   return lines.join('\n');
 }
 
+/** M23 — si el daemon arranca la caja al arrancar él (`box.autostart`). */
+export function formatAutostartLine(autostart: boolean): string {
+  return autostart
+    ? '  autostart: on (the daemon starts the box when it starts)'
+    : '  autostart: off (set "box.autostart": true in the global config to start it with the daemon)';
+}
+
 /**
  * M20 — la línea de la caja de conectores en `status`. Solo aparece si esa caja
  * existe o hay algún conector activo (sin conectores no es ruido).
@@ -131,7 +138,10 @@ const boxStatus = new Command('status')
         return;
       }
       const line = formatConnectorsBoxLine(connectors, anyEnabled);
-      process.stdout.write(`${formatBoxStatus(status)}${line ? `\n${line}` : ''}\n`);
+      process.stdout.write(
+        `${formatBoxStatus(status)}${line ? `\n${line}` : ''}\n` +
+          `${formatAutostartLine(globalBoxConfig().autostart)}\n`,
+      );
     } catch (err) {
       if (
         err instanceof BoxUnavailableError ||
