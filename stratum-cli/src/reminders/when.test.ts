@@ -6,6 +6,29 @@ import { describe, expect, it } from 'vitest';
 import { REMINDER_LIMITS } from '../protocol/index.js';
 import { describeWhen, resolveWhen, ReminderWhenError, type ReminderWhenInput } from './when.js';
 
+/**
+ * El cambio de hora se prueba con la zona del proceso. `process.env.TZ` surte
+ * efecto en Linux/macOS y, en Windows, según la versión de Node; si no surte
+ * efecto, se detectan las transiciones del año con `getTimezoneOffset()` y se
+ * salta lo que no aplique, diciéndolo.
+ *
+ * Va antes de cualquier constante con fecha: `NOW` y compañía se calculan al
+ * cargar el módulo, y con la zona cambiada después (en CI el proceso está en
+ * UTC) los primeros tests corrían en Madrid con un `NOW` de UTC.
+ */
+const MADRID = ((): boolean => {
+  const previous = process.env.TZ;
+  process.env.TZ = 'Europe/Madrid';
+  const summer = new Date(2026, 6, 1, 12).getTimezoneOffset();
+  const winter = new Date(2026, 0, 1, 12).getTimezoneOffset();
+  const applied = summer === -120 && winter === -60;
+  if (!applied) {
+    if (previous === undefined) delete process.env.TZ;
+    else process.env.TZ = previous;
+  }
+  return applied;
+})();
+
 const LOCAL_2026_11_17 = new Date(2026, 10, 17, 21, 5, 0, 0);
 const NOW = LOCAL_2026_11_17.getTime();
 const MIN = 60_000;
@@ -98,25 +121,6 @@ describe('M21 — resolveWhen', () => {
     expect(describeWhen(NOW + 0, NOW)).toMatchObject({ day: 'today', clock: '21:05' });
   });
 });
-
-/**
- * El cambio de hora se prueba con la zona del proceso. `process.env.TZ` surte
- * efecto en Linux/macOS y, en Windows, según la versión de Node; si no surte
- * efecto, se detectan las transiciones del año con `getTimezoneOffset()` y se
- * salta lo que no aplique, diciéndolo.
- */
-const MADRID = ((): boolean => {
-  const previous = process.env.TZ;
-  process.env.TZ = 'Europe/Madrid';
-  const summer = new Date(2026, 6, 1, 12).getTimezoneOffset();
-  const winter = new Date(2026, 0, 1, 12).getTimezoneOffset();
-  const applied = summer === -120 && winter === -60;
-  if (!applied) {
-    if (previous === undefined) delete process.env.TZ;
-    else process.env.TZ = previous;
-  }
-  return applied;
-})();
 
 interface Transition {
   /** Fecha `YYYY-MM-DD`. */
