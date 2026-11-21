@@ -248,7 +248,8 @@ p {
 .assistant-pane > .telegram-panel,
 .assistant-pane > .reminders-panel,
 .assistant-pane > .watches-panel,
-.assistant-pane > .connectors-panel {
+.assistant-pane > .connectors-panel,
+.assistant-pane > .health-panel {
   border-right: 0;
   border-top: 0;
 }
@@ -399,7 +400,8 @@ p {
 }
 /* M21 — los recordatorios del asistente: mismo molde que las rutinas. */
 .reminders-panel,
-.watches-panel {
+.watches-panel,
+.health-panel {
   padding: 0.75rem;
   border-top: 1px solid var(--line);
 }
@@ -1243,4 +1245,50 @@ pre.action {
 }
 .grant-list li .btn {
   margin-left: auto;
+}
+
+/* M23 — la salud del asistente (`doctor.run`): un indicador de estado por comprobación. */
+.health-area h3 {
+  margin: 0.75rem 0 0.35rem;
+  font-size: 0.9rem;
+}
+.health-checks {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 0.45rem;
+}
+.health-check {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+.health-check .row-top {
+  align-items: center;
+  gap: 0.5rem;
+}
+.health-status {
+  flex: none;
+  width: 0.65rem;
+  height: 0.65rem;
+  border-radius: 50%;
+  background: var(--muted);
+}
+.health-status[data-status='ok'] {
+  background: var(--ok);
+}
+.health-status[data-status='warn'] {
+  background: var(--wait);
+}
+.health-status[data-status='fail'] {
+  background: var(--bad);
+}
+.health-status[data-status='off'] {
+  background: transparent;
+  border: 1px solid var(--muted);
+}
+.health-detail,
+.health-fix {
+  margin-left: 1.15rem;
 }

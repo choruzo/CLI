@@ -147,6 +147,7 @@ pub fn run() {
             commands::dot_connectors_enable,
             commands::dot_reminders_list,
             commands::dot_reminders_cancel,
+            commands::dot_doctor_run,
             commands::dot_new_companion_conversation,
             commands::dot_session_memory,
             commands::dot_notify_routine,

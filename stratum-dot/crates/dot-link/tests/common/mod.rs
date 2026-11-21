@@ -925,6 +925,19 @@ impl Fake {
                     "changed": changed
                 }))]
             }
+            // M23: un informe fijo y pequeño.
+            "doctor.run" => vec![ok(json!({
+                "report": {
+                    "checkedAt": 1_760_000_000_000i64,
+                    "checks": [
+                        { "id": "daemon.up", "area": "daemon", "status": "ok",
+                          "title": "Daemon running", "detail": null, "fix": null },
+                        { "id": "box.state", "area": "box", "status": "warn",
+                          "title": "Box stopped", "detail": "The box is not running.",
+                          "fix": "stratum box start" }
+                    ]
+                }
+            }))],
             "routines.list" => vec![ok(json!({ "routines": [], "readOnly": false }))],
             // M21: un recordatorio pendiente y otro entregado, con el almacén en
             // solo lectura cuando el test lo pida.
@@ -1103,6 +1116,7 @@ pub fn fast() -> Timings {
         box_timeout: Duration::from_millis(900),
         fresh_timeout: Duration::from_millis(900),
         dream_timeout: Duration::from_millis(900),
+        doctor_timeout: Duration::from_millis(900),
         ask_timeout: Duration::from_millis(900),
         handshake_timeout: Duration::from_millis(400),
         daemon_start_wait: Duration::from_millis(800),

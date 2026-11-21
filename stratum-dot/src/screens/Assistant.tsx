@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState, type RefObject } from 'react'
 import { describeCommandError, useRunActions } from '../app/actions';
 import { ErrorBoundary } from '../app/ErrorBoundary';
 import { MemoryPanel } from '../components/MemoryPanel';
+import { HealthPanel } from '../components/HealthPanel';
 import { RemindersPanel } from '../components/RemindersPanel';
 import { WatchesPanel } from '../components/WatchesPanel';
 import { RoutinesPanel } from '../components/RoutinesPanel';
@@ -196,6 +197,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
   );
   const telegram = <TelegramPanel connected={connected} canControl={canControl} />;
   const connectors = <ConnectorsPanel connected={connected} canControl={canControl} />;
+  const health = <HealthPanel connected={connected} />;
   const chat = (
     <div className="assistant-chat">
       {companionId ? (
@@ -237,7 +239,9 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
                       ? telegram
                       : tab === 'connectors'
                         ? connectors
-                        : memory}
+                        : tab === 'health'
+                          ? health
+                          : memory}
         </div>
       </main>
     );
@@ -252,6 +256,7 @@ export function Assistant({ now, canControl, connected, composerRef, onBack, onO
         {memory}
         {telegram}
         {connectors}
+        {health}
       </div>
       {chat}
     </main>
@@ -287,6 +292,7 @@ const TABS: Array<{ id: AssistantTab; label: string }> = [
   { id: 'memory', label: 'Memory' },
   { id: 'telegram', label: 'Telegram' },
   { id: 'connectors', label: 'Connectors' },
+  { id: 'health', label: 'Health' },
 ];
 
 function AssistantTabs({

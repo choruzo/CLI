@@ -1225,6 +1225,32 @@ async fn los_recordatorios_se_listan_y_se_cancelan_por_la_principal() {
     rig.quit().await;
 }
 
+/// M23: el diagnóstico es una consulta de solo lectura, sin parámetros, por la
+/// conexión principal; Desktop no lo tiene.
+#[tokio::test(flavor = "multi_thread")]
+async fn el_diagnostico_se_pide_por_la_principal_y_desktop_no_lo_tiene() {
+    let dir = tempfile::tempdir().unwrap();
+    let fake = Fake::new(dir.path());
+    fake.start(TOKEN_A, 1);
+    let desktop = client(dir.path(), None, ClientProfile::DESKTOP);
+    let rig = dot(dir.path(), None);
+    until("conectados", || connected(&rig) && connected(&desktop)).await;
+
+    let report = rig.link.call(CallAction::DoctorRun).await.unwrap();
+    assert_eq!(report["report"]["checks"][0]["id"], "daemon.up");
+    assert_eq!(report["report"]["checks"][1]["status"], "warn");
+    let requests = fake.requests();
+    let sent = requests.iter().find(|r| r["method"] == "doctor.run").unwrap();
+    assert!(sent["params"].get("operationId").is_none());
+    // Desktop no tiene el diagnóstico.
+    let before = fake.requests().len();
+    assert!(desktop.link.call(CallAction::DoctorRun).await.is_err());
+    assert_eq!(fake.requests().len(), before);
+
+    desktop.quit().await;
+    rig.quit().await;
+}
+
 /// M20: listar y desactivar conectores van por la conexión principal; activar no
 /// (es del broker de aprobador). Desktop no los tiene.
 #[tokio::test(flavor = "multi_thread")]

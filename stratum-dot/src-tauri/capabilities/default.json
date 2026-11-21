@@ -49,6 +49,7 @@
     "allow-dot-connectors-enable",
     "allow-dot-reminders-list",
     "allow-dot-reminders-cancel",
+    "allow-dot-doctor-run",
     "allow-dot-new-companion-conversation",
     "allow-dot-session-memory",
     "allow-dot-notify-routine",

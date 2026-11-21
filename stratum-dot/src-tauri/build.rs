@@ -44,6 +44,7 @@ const COMMANDS: &[&str] = &[
     "dot_connectors_enable",
     "dot_reminders_list",
     "dot_reminders_cancel",
+    "dot_doctor_run",
     "dot_new_companion_conversation",
     "dot_session_memory",
     "dot_notify_routine",

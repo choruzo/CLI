@@ -27,7 +27,7 @@ export const HOME_VIEW: MainView = 'assistant';
  * Qué se enseña de la vista *Asistente* en una ventana estrecha (< 720 px),
  * donde no caben a la vez la conversación y los paneles. En ancho, todo.
  */
-export type AssistantTab = 'chat' | 'box' | 'routines' | 'reminders' | 'watches' | 'memory' | 'telegram' | 'connectors';
+export type AssistantTab = 'chat' | 'box' | 'routines' | 'reminders' | 'watches' | 'memory' | 'telegram' | 'connectors' | 'health';
 
 /**
  * Lo que la interfaz sabe de una resolución que **ella** envió. No es el

@@ -303,6 +303,8 @@ export interface NativeBridge {
   connectorsDisable(connectorId: string): Promise<unknown>;
   /** M21 — los recordatorios del asistente (pendientes y terminados de 7 días). Sin validar. */
   remindersList(): Promise<unknown>;
+  /** M23 — `doctor.run`: el informe de diagnóstico del daemon (solo lectura). */
+  doctorRun(): Promise<unknown>;
   /** M21 — cancelar un recordatorio pendiente. Solo resta; sin respuesta, `unknown`: no se repite. */
   remindersCancel(reminderId: string): Promise<unknown>;
   /** M22 — los vigilantes del asistente (`watches.list`). Sin validar. */
@@ -413,6 +415,7 @@ export const tauriBridge: NativeBridge = {
   connectorsDisable: (connectorId) => invoke<unknown>('dot_connectors_disable', { connectorId }),
   notifyRoutine: (n) => invoke('dot_notify_routine', { title: n.title, body: n.body, sessionId: n.sessionId }),
   remindersList: () => invoke<unknown>('dot_reminders_list'),
+  doctorRun: () => invoke<unknown>('dot_doctor_run'),
   remindersCancel: (reminderId) => invoke<unknown>('dot_reminders_cancel', { reminderId }),
   notifyReminder: (title, body) => invoke('dot_notify_reminder', { title, body }),
   watchesList: () => invoke<unknown>('dot_watches_list'),

@@ -92,6 +92,8 @@ pub struct Timings {
     pub fresh_timeout: Duration,
     /// M19 — una pasada de dreaming llama al modelo (hasta 2 minutos) y no es una orden corta.
     pub dream_timeout: Duration,
+    /// M23 — `doctor.run` prueba el provider (hasta 3 s) y el runtime de contenedores.
+    pub doctor_timeout: Duration,
     /// Modo código — la pregunta lateral llama al modelo (el daemon la corta a los 2 minutos).
     pub ask_timeout: Duration,
     pub handshake_timeout: Duration,
@@ -112,6 +114,7 @@ impl Default for Timings {
             box_timeout: Duration::from_secs(20 * 60),
             fresh_timeout: Duration::from_secs(10 * 60),
             dream_timeout: Duration::from_secs(5 * 60),
+            doctor_timeout: Duration::from_secs(30),
             ask_timeout: Duration::from_secs(150),
             handshake_timeout: Duration::from_secs(5),
             daemon_start_wait: Duration::from_secs(10),
@@ -202,6 +205,8 @@ const DOT_METHODS: &[MainMethod] = &[
     // M21: los recordatorios del asistente (cancelar solo resta; crearlos no es de un cliente).
     MainMethod::RemindersList,
     MainMethod::RemindersCancel,
+    // M23: el diagnóstico del daemon (solo lectura).
+    MainMethod::DoctorRun,
     // M22: los vigilantes del asistente (pausar, reanudar y quitar; `watches.add` exige `approve`: no va).
     MainMethod::WatchesList,
     MainMethod::WatchesPause,
@@ -1269,6 +1274,7 @@ fn call_request_as(
             ))
         }
         CallAction::RemindersList => Ok((MainMethod::RemindersList, json!({}))),
+        CallAction::DoctorRun => Ok((MainMethod::DoctorRun, json!({}))),
         CallAction::RemindersCancel { reminder_id } => {
             if !valid_id(reminder_id) {
                 return Err(invalid("Invalid reminder id."));
@@ -2826,6 +2832,7 @@ impl Actor {
                             }
                             CallAction::NewCompanionConversation => self.cfg.timings.fresh_timeout,
                             CallAction::MemoryDream { .. } => self.cfg.timings.dream_timeout,
+                            CallAction::DoctorRun => self.cfg.timings.doctor_timeout,
                             CallAction::AskSession { .. } => self.cfg.timings.ask_timeout,
                             _ => self.cfg.timings.request_timeout,
                         };
@@ -3707,6 +3714,14 @@ mod tests {
             assert!(DOT_METHODS.contains(&method));
             assert!(!DESKTOP_METHODS.contains(&method));
         }
+        // M23: el diagnóstico es una consulta sin parámetros, solo de Dot.
+        let (method, params) = call_request(&CallAction::DoctorRun, "op").unwrap();
+        assert_eq!(method, MainMethod::DoctorRun);
+        assert_eq!(params, json!({}));
+        assert!(!CallAction::DoctorRun.mutating());
+        assert!(DOT_METHODS.contains(&MainMethod::DoctorRun));
+        assert!(!DESKTOP_METHODS.contains(&MainMethod::DoctorRun));
+        assert!(Timings::default().doctor_timeout >= Duration::from_secs(30));
         // M22: los vigilantes. Listar es una consulta; pausar, reanudar y quitar
         // cambian algo (con `operationId`) y solo están en el perfil de Dot.
         let (method, params) = call_request(&CallAction::WatchesList, "op").unwrap();

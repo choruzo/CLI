@@ -12,6 +12,7 @@ import type {
   ProtocolConnector,
   ProtocolConnectorsList,
   ProtocolDecision,
+  ProtocolDoctorReport,
   ProtocolDreamResult,
   ProtocolProposal,
   ProtocolMemoryChange,
@@ -112,6 +113,12 @@ export interface ReminderList {
 export function parseReminders(raw: unknown): ReminderList | null {
   const parsed = RESULTS['reminders.list'].safeParse(raw);
   return parsed.success ? parsed.data : null;
+}
+
+/** M23 — `doctor.run`: el informe de diagnóstico, validado con el contrato. */
+export function parseDoctorReport(raw: unknown): ProtocolDoctorReport | null {
+  const parsed = RESULTS['doctor.run'].safeParse(raw);
+  return parsed.success ? parsed.data.report : null;
 }
 
 /** M21 — `reminders.cancel`: el recordatorio tal como quedó (ya `cancelled`). */

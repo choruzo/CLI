@@ -166,6 +166,7 @@ const COMMANDS = [
   'dot_connectors_list',
   'dot_decide_plan',
   'dot_deny',
+  'dot_doctor_run',
   'dot_focus_session',
   'dot_grants_revoke',
   'dot_hide',
@@ -408,6 +409,7 @@ describe('el lado nativo', () => {
       'connectors.disable',
       'connectors.list',
       'core.hello',
+      'doctor.run',
       'events.subscribe',
       'events.unsubscribe',
       // Modo código de Desktop (solo lectura); Dot no los tiene en su perfil.
@@ -493,6 +495,7 @@ describe('el lado nativo', () => {
       'ConnectorsDisable',
       'ConnectorsList',
       'CoreHello',
+      'DoctorRun',
       'EventsSubscribe',
       'EventsUnsubscribe',
       'GrantsRevoke',

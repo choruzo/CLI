@@ -317,6 +317,9 @@ pub enum CallAction {
     RemindersList,
     /// M21 — `reminders.cancel`: cancelar un recordatorio pendiente (solo resta).
     RemindersCancel { reminder_id: String },
+    /// M23 — `doctor.run`: el informe de diagnóstico del daemon. Solo lectura, sin
+    /// parámetros; puede tardar unos segundos (prueba el provider y el runtime).
+    DoctorRun,
     /// M22 — `watches.list`: los vigilantes, las comprobaciones del catálogo y si
     /// el almacén está en solo lectura. Solo lectura.
     WatchesList,
@@ -454,6 +457,7 @@ impl CallAction {
             CallAction::ConnectorsDisable { .. } => "connectors-disable",
             CallAction::RemindersList => "reminders-list",
             CallAction::RemindersCancel { .. } => "reminders-cancel",
+            CallAction::DoctorRun => "doctor-run",
             CallAction::WatchesList => "watches-list",
             CallAction::WatchesPause { .. } => "watches-pause",
             CallAction::WatchesResume { .. } => "watches-resume",

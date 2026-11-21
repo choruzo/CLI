@@ -341,6 +341,7 @@ export function fakeNative(): FakeNative {
     ),
     notifyRoutine: vi.fn(async () => undefined),
     remindersList: vi.fn(async (): Promise<unknown> => ({ reminders: [], readOnly: false })),
+    doctorRun: vi.fn(async (): Promise<unknown> => ({ report: { checkedAt: 1_760_000_000_000, checks: [] } })),
     remindersCancel: vi.fn(async (reminderId: string): Promise<unknown> => ({
       reminder: sampleReminder({ id: reminderId, status: 'cancelled', endedAt: 1_760_000_000_500 }),
     })),

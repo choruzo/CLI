@@ -107,6 +107,8 @@ pub enum MainMethod {
     /// (solo resta). Crear no se puede desde un cliente: los deja el `companion`.
     RemindersList,
     RemindersCancel,
+    /// M23 (Dot) — el diagnóstico del daemon (`doctor.run`): solo lectura.
+    DoctorRun,
     /// M22 (Dot) — los vigilantes del asistente: la lista y pausar, reanudar o
     /// quitar uno (todo con `control`). Crear (`watches.add`) exige `approve`:
     /// lo propone el `companion` con confirmación o se hace por la CLI, nunca aquí.
@@ -155,7 +157,7 @@ pub enum MainMethod {
 }
 
 impl MainMethod {
-    pub const ALL: [MainMethod; 65] = [
+    pub const ALL: [MainMethod; 66] = [
         MainMethod::CoreHello,
         MainMethod::EventsSubscribe,
         MainMethod::EventsUnsubscribe,
@@ -202,6 +204,7 @@ impl MainMethod {
         MainMethod::ConnectorsDisable,
         MainMethod::RemindersList,
         MainMethod::RemindersCancel,
+        MainMethod::DoctorRun,
         MainMethod::WatchesList,
         MainMethod::WatchesPause,
         MainMethod::WatchesResume,
@@ -273,6 +276,7 @@ impl WireMethod for MainMethod {
             MainMethod::ConnectorsDisable => "connectors.disable",
             MainMethod::RemindersList => "reminders.list",
             MainMethod::RemindersCancel => "reminders.cancel",
+            MainMethod::DoctorRun => "doctor.run",
             MainMethod::WatchesList => "watches.list",
             MainMethod::WatchesPause => "watches.pause",
             MainMethod::WatchesResume => "watches.resume",
@@ -518,6 +522,7 @@ mod tests {
                 "connectors.disable",
                 "reminders.list",
                 "reminders.cancel",
+                "doctor.run",
                 "watches.list",
                 "watches.pause",
                 "watches.resume",

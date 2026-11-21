@@ -511,6 +511,13 @@ pub async fn dot_reminders_list(state: State<'_, DotState>) -> Result<Value, Com
     state.link.call(CallAction::RemindersList).await
 }
 
+/// M23 — el informe de diagnóstico del daemon (`doctor.run`). Solo lectura, sin
+/// argumentos; el `result` va sin interpretar.
+#[tauri::command]
+pub async fn dot_doctor_run(state: State<'_, DotState>) -> Result<Value, CommandError> {
+    state.link.call(CallAction::DoctorRun).await
+}
+
 /// M21 — cancelar un recordatorio pendiente. Solo resta: conexión principal,
 /// sin confirmación nativa. Sin respuesta su resultado es desconocido y no se repite.
 #[tauri::command]
