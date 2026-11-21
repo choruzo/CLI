@@ -9,7 +9,7 @@ import { createGoogleTools } from './tools.js';
 
 serveStdio(
   createMcpServer(
-    { name: 'google', version: '1.2.0' },
+    { name: 'google', version: '1.3.0' },
     createGoogleTools({
       fetch: globalThis.fetch,
       clientId: process.env.GOOGLE_CLIENT_ID,

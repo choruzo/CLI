@@ -50,6 +50,7 @@ const COMMANDS: &[&str] = &[
     "dot_notify_routine",
     "dot_notify_reminder",
     "dot_notify_watch",
+    "dot_notify_health",
     "dot_watches_list",
     "dot_watches_pause",
     "dot_watches_resume",

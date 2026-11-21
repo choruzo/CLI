@@ -7,6 +7,7 @@ import {
 } from '../../../stratum-cli/src/protocol/protocol.fixtures';
 import type { ConnectionState } from '../ipc/native';
 import type { ProtocolChatMessage } from '../protocol';
+import { STRATUM_PROTOCOL_REVISION } from '../protocol';
 import { chatMessages, composerMode, draftComposer } from './chat';
 import { describeSession, sessionItems } from './sessions';
 
@@ -18,6 +19,7 @@ const connected = (capabilities = ['observe', 'control']): ConnectionState => ({
   kind: 'connected',
   serverVersion: '0',
   serverPlatform: 'x',
+  serverRevision: STRATUM_PROTOCOL_REVISION,
   protocol: 1,
   capabilities,
   features: [],

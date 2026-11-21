@@ -220,7 +220,7 @@ describe('eventos', () => {
   };
 
   it('hay schema de datos para cada tipo de evento', () => {
-    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(39);
+    expect(Object.keys(STATE_EVENT_DATA).length + Object.keys(VOLATILE_EVENT_DATA).length).toBe(40);
   });
 
   it('reminder.due valida, va a overview y no admite estados ni textos inventados (M21)', () => {

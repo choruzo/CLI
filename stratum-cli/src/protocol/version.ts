@@ -26,6 +26,32 @@
  */
 export const STRATUM_PROTOCOL_VERSION = 1;
 
+/**
+ * M23 — **revisión** del protocolo dentro de su versión: sube con cada cambio
+ * aditivo (método, evento o campo nuevo). Cada app lleva su propia versión
+ * (Dot 0.3, Desktop 0.11, la CLI 0.15), así que compararlas no dice nada; esto
+ * sí: el servidor la anuncia en `core.hello` (`server.revision`) y el cliente la
+ * compara con la suya para decir quién se quedó atrás (`compareRevision`).
+ * Nunca decide si se conecta: eso es solo `STRATUM_PROTOCOL_VERSION`.
+ *
+ * Un servidor sin `revision` es anterior a que existiera (cuenta como 0).
+ * `protocol/revision.test.ts` guarda la huella de métodos y eventos de cada
+ * revisión: añadir uno sin subirla hace fallar el test.
+ */
+export const STRATUM_PROTOCOL_REVISION = 1;
+
+export type RevisionSkew = 'same' | 'server-older' | 'server-newer';
+
+/** Quién se quedó atrás. `server` ausente = un servidor de antes de la revisión. */
+export function compareRevision(
+  server: number | undefined,
+  client: number = STRATUM_PROTOCOL_REVISION,
+): RevisionSkew {
+  const s = server ?? 0;
+  if (s === client) return 'same';
+  return s < client ? 'server-older' : 'server-newer';
+}
+
 /** Tiempo máximo para recibir `core.hello` tras aceptar una conexión. */
 export const HANDSHAKE_TIMEOUT_MS = 5_000;
 

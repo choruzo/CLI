@@ -1,4 +1,5 @@
 import type { ConnectionState } from '../bridge/native';
+import { revisionSkewNotice } from '../protocol/revision-skew';
 import type { Tone } from '../protocol/view';
 
 export function connectionLabel(state: ConnectionState): string {
@@ -39,9 +40,25 @@ interface Props {
   onRetry(): void;
 }
 
-/** Aviso bajo la cabecera cuando no hay conexión. Con conexión no se pinta nada. */
+/**
+ * Aviso bajo la cabecera cuando no hay conexión. Con conexión solo se pinta el
+ * desfase de revisión del protocolo con el daemon (M23): persistente y sin
+ * bloquear nada.
+ */
 export function ConnectionBanner({ state, hasStaleSessions, onRetry }: Props) {
-  if (state.kind === 'connected' || state.kind === 'incompatible') return null;
+  if (state.kind === 'connected') {
+    const skew = revisionSkewNotice(state.serverRevision, state.serverVersion);
+    if (!skew) return null;
+    return (
+      <div className="banner warn" role="status" data-skew={skew.kind}>
+        <span>
+          <strong>{skew.title}</strong>
+          <span className="banner-body">{skew.body}</span>
+        </span>
+      </div>
+    );
+  }
+  if (state.kind === 'incompatible') return null;
   // «Starting…» y «Connecting…» ya los dice la cabecera, y duran un instante.
   if (state.kind === 'starting' || state.kind === 'connecting') return null;
   if (state.kind === 'error') {

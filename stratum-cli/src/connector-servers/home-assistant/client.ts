@@ -114,6 +114,7 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
       return new ToolUserError(
         `No se resuelve el nombre ${host} desde la caja de conectores: usa el nombre completo con dominio (p. ej. homeassistant.home) o la IP en HA_URL. La caja sí llega a la red local; lo que no resuelve son los nombres cortos sin dominio. La persona lo cambia con \`stratum connectors setup home-assistant --name HA_URL\`.`,
+        'unreachable',
       );
     }
     if (err instanceof Error && err.name === 'AbortError') {
@@ -122,16 +123,18 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     if (err instanceof Error && err.name === 'TimeoutError') {
       return new ToolUserError(
         `No se llega a Home Assistant en ${host} (tiempo de espera agotado).`,
+        'unreachable',
       );
     }
     const cause = err instanceof Error ? (err as { cause?: unknown }).cause : null;
     if (cause instanceof Error && /redirect/i.test(cause.message)) {
       return new ToolUserError(
         `Home Assistant en ${host} respondió con una redirección, y no se sigue: usa en HA_URL la dirección final.`,
+        'unreachable',
       );
     }
     // ECONNREFUSED, EHOSTUNREACH, ENETUNREACH, ETIMEDOUT y el resto.
-    return new ToolUserError(`No se llega a Home Assistant en ${host}.`);
+    return new ToolUserError(`No se llega a Home Assistant en ${host}.`, 'unreachable');
   }
 
   async function request(
@@ -168,6 +171,7 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     if (res.status === 401 || res.status === 403) {
       throw new ToolUserError(
         `Home Assistant rechazó el token (HTTP ${res.status}): la persona debe renovarlo con \`${SETUP_COMMAND}\`.`,
+        'auth',
       );
     }
     const entity = /^\/api\/states\/(.+)$/.exec(path);

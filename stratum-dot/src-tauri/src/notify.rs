@@ -69,6 +69,7 @@ pub enum NoticeTarget {
     Session(String),
     Reminders,
     Watches,
+    Health,
 }
 
 /// La última notificación mostrada, hasta el primer foco. En Windows el clic se

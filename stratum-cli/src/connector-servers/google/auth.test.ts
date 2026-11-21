@@ -339,3 +339,85 @@ describe('createGoogleAuth: scrub', () => {
     expect((err as Error).message).toContain('***');
   });
 });
+
+describe('verifyAccess (M23)', () => {
+  it('fuerza la renovación aunque haya un token en caché', async () => {
+    const { auth, tokenCalls } = make({
+      tokenResponses: [
+        { body: { access_token: 'at-1', expires_in: 3600 } },
+        { body: { access_token: 'at-2', expires_in: 3600 } },
+      ],
+    });
+    await auth.accessToken();
+    expect(tokenCalls()).toHaveLength(1);
+    await auth.verifyAccess();
+    expect(tokenCalls()).toHaveLength(2);
+  });
+
+  it('invalid_grant → auth', async () => {
+    const { auth } = make({
+      tokenResponses: [{ status: 400, body: { error: 'invalid_grant' } }],
+    });
+    await expect(auth.verifyAccess()).rejects.toMatchObject({ kind: 'auth' });
+  });
+
+  it('sin access_token en la respuesta → auth', async () => {
+    const { auth } = make({ tokenResponses: [{ body: {} }] });
+    await expect(auth.verifyAccess()).rejects.toMatchObject({ kind: 'auth' });
+  });
+
+  it('otro HTTP al renovar no tiene kind', async () => {
+    const { auth } = make({ tokenResponses: [{ status: 500, body: { error: 'x' } }] });
+    const err = await auth.verifyAccess().catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ToolUserError);
+    expect((err as ToolUserError).kind).toBeUndefined();
+  });
+
+  function withFetchError(err: Error): GoogleAuth {
+    return createGoogleAuth({
+      fetch: (async () => {
+        throw err;
+      }) as typeof fetch,
+      clientId: CLIENT_ID,
+      clientSecret: CLIENT_SECRET,
+      refreshToken: REFRESH,
+    }) as GoogleAuth;
+  }
+
+  it('red (no resuelve, no llega, plazo) → unreachable', async () => {
+    const dns = new TypeError('fetch failed');
+    (dns as { cause?: unknown }).cause = Object.assign(new Error('x'), { code: 'ENOTFOUND' });
+    const refused = new TypeError('fetch failed');
+    (refused as { cause?: unknown }).cause = Object.assign(new Error('x'), {
+      code: 'ECONNREFUSED',
+    });
+    const timeout = Object.assign(new Error('t'), { name: 'TimeoutError' });
+    for (const e of [dns, refused, timeout]) {
+      await expect(withFetchError(e).verifyAccess()).rejects.toMatchObject({
+        kind: 'unreachable',
+      });
+    }
+  });
+
+  it('una cancelación del llamante no tiene kind', async () => {
+    const abort = Object.assign(new Error('a'), { name: 'AbortError' });
+    const err = await withFetchError(abort)
+      .verifyAccess()
+      .catch((e: unknown) => e);
+    expect(err).toBeInstanceOf(ToolUserError);
+    expect((err as ToolUserError).kind).toBeUndefined();
+  });
+
+  it('un 401 o 403 de la API es auth', async () => {
+    for (const status of [401, 403]) {
+      const { auth } = make({
+        tokenResponses: [{ body: { access_token: 'at-1' } }, { body: { access_token: 'at-2' } }],
+        apiResponses: [
+          { status, body: {} },
+          { status, body: {} },
+        ],
+      });
+      await expect(auth.api('GET', LIST_URL)).rejects.toMatchObject({ kind: 'auth' });
+    }
+  });
+});

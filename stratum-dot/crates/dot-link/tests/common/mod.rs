@@ -613,7 +613,7 @@ impl Fake {
                         };
                         vec![ok(json!({
                             "protocol": if let Hello::WrongVersion(v) = hello { v } else { 1 },
-                            "server": { "version": "0.9.0-test", "platform": "test" },
+                            "server": { "version": "0.9.0-test", "platform": "test", "revision": 1 },
                             "connectionId": conn_id, "capabilities": caps, "features": features,
                         }))]
                     }

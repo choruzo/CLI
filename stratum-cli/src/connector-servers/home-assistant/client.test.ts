@@ -218,7 +218,8 @@ describe('errores para el agente (y el token nunca sale)', () => {
       { url: 'ftp://ha', token: TOKEN },
     ]) {
       const tools = createHomeAssistantTools({ fetch: f.fetch, ...cfg });
-      for (const t of tools) {
+      // `ha_acceso` no lanza: dice el fallo como resultado (estado `error`).
+      for (const t of tools.filter((x) => x.name !== 'ha_acceso')) {
         const msg = await messageOf(t.handler({}));
         expect(msg).toContain('Home Assistant no está configurado');
         expect(msg).toContain('stratum connectors setup home-assistant');
@@ -226,5 +227,55 @@ describe('errores para el agente (y el token nunca sale)', () => {
       }
     }
     expect(f.calls).toHaveLength(0);
+  });
+});
+
+describe('clasificación de fallos y ha_acceso (M23)', () => {
+  const acceso = (f: typeof fetch, cfg: { url?: string; token?: string } = {}) =>
+    createHomeAssistantTools({
+      fetch: f,
+      url: 'http://ha.casa:8123',
+      token: TOKEN,
+      ...cfg,
+    }).find((t) => t.name === 'ha_acceso')!;
+  const run = async (t: ConnectorTool<string | ToolOutput>) =>
+    ((await t.handler({})) as ToolOutput).structured;
+
+  it('GET /api/ correcto → ok', async () => {
+    const f = fakeFetch(() => new Response(JSON.stringify({ message: 'API running.' })));
+    expect(await run(acceso(f.fetch))).toMatchObject({ estado: 'ok', valor: null });
+    expect(new URL(f.calls[0]!.url).pathname).toBe('/api/');
+  });
+
+  it('401 y 403 → auth', async () => {
+    for (const status of [401, 403]) {
+      const f = fakeFetch(() => new Response('{}', { status }));
+      expect((await run(acceso(f.fetch))).estado).toBe('auth');
+    }
+  });
+
+  it('no resuelve, no llega, plazo o redirección → unreachable', async () => {
+    const errors = [
+      withCause('ENOTFOUND'),
+      withCause('ECONNREFUSED'),
+      Object.assign(new Error('t'), { name: 'TimeoutError' }),
+      Object.assign(new TypeError('fetch failed'), { cause: new Error('unexpected redirect') }),
+    ];
+    for (const e of errors) {
+      expect((await run(acceso(failing(e)))).estado).toBe('unreachable');
+    }
+  });
+
+  it('cancelación del llamante: error, sin kind', async () => {
+    const abort = Object.assign(new Error('a'), { name: 'AbortError' });
+    expect((await run(acceso(failing(abort)))).estado).toBe('error');
+  });
+
+  it('otro HTTP (500) → error; sin configurar → error', async () => {
+    const f = fakeFetch(() => new Response('{}', { status: 500 }));
+    expect((await run(acceso(f.fetch))).estado).toBe('error');
+    const out = await run(acceso(f.fetch, { token: '' }));
+    expect(out.estado).toBe('error');
+    expect(String(out.detalle)).toContain('stratum connectors setup home-assistant');
   });
 });

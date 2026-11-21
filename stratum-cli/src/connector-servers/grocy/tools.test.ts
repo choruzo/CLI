@@ -106,7 +106,7 @@ const MINIMAL_ARGS: Record<string, unknown> = {
 };
 
 describe('el conjunto de tools', () => {
-  it('son las quince (6 de lectura y 9 de escritura), como el manifiesto, con argumentos cerrados', () => {
+  it('son las dieciséis (7 de lectura, con grocy_acceso, y 9 de escritura), como el manifiesto, con argumentos cerrados', () => {
     const { tools } = setup();
     const manifest = JSON.parse(
       readFileSync(
@@ -114,8 +114,8 @@ describe('el conjunto de tools', () => {
         'utf8',
       ),
     ) as { tools: Array<{ name: string }> };
-    expect(tools).toHaveLength(15);
-    expect(tools.map((t) => t.name).slice(0, 6)).toEqual(NAMES);
+    expect(tools).toHaveLength(16);
+    expect(tools.map((t) => t.name).slice(0, 7)).toEqual([...NAMES, 'grocy_acceso']);
     expect(tools.map((t) => t.name).sort()).toEqual(manifest.tools.map((t) => t.name).sort());
     for (const t of tools) {
       expect((t.inputSchema as { additionalProperties?: boolean }).additionalProperties).toBe(

@@ -263,6 +263,26 @@ describe('conexión', () => {
     expect(native.calls.retry).toHaveBeenCalledTimes(1);
   });
 
+  it('desfase de revisión: aviso persistente que no bloquea, y ninguno si coinciden', () => {
+    const native = fakeNative();
+    mount(native);
+    act(() => native.push({ type: 'connection', state: CONNECTED }));
+    expect(document.querySelector('.banner[data-skew]')).toBeNull();
+    act(() =>
+      native.push({ type: 'connection', state: { ...CONNECTED, serverRevision: null, serverVersion: '0.14.0' } }),
+    );
+    const banner = document.querySelector('.banner[data-skew="server-older"]');
+    expect(banner?.textContent).toContain('The Stratum daemon is older than this Dot');
+    expect(banner?.textContent).toContain('It runs Stratum 0.14.0');
+    // No bloquea: la cabecera sigue conectada y no hay botón de reintento.
+    expect(screen.getByRole('button', { name: 'Assistant' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: /Retry/ })).toBeNull();
+    act(() => native.push({ type: 'connection', state: { ...CONNECTED, serverRevision: 99 } }));
+    expect(document.querySelector('.banner[data-skew="server-newer"]')?.textContent).toContain(
+      'This Dot is older than the Stratum daemon',
+    );
+  });
+
   it('error: el mensaje y un Retry', () => {
     const native = fakeNative();
     mount(native);

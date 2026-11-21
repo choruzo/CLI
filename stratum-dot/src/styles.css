@@ -943,6 +943,13 @@ p {
 .banner.bad {
   border-color: var(--bad);
 }
+.banner.warn {
+  border-color: var(--wait);
+}
+.banner .banner-body {
+  display: block;
+  margin-top: 0.15rem;
+}
 .banner {
   display: flex;
   justify-content: space-between;

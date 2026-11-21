@@ -40,6 +40,12 @@ export interface DoctorConnectorFacts {
   /** Nombres de los secretos que faltan, nunca valores. */
   missing: string[];
   oauth: boolean;
+  /**
+   * M23 — lo que dijo su última comprobación de acceso, hecha por el daemon
+   * desde la caja de conectores (`daemon/health-monitor.ts`). Ausente o `null`:
+   * no se sabe aquí (sin daemon, sin comprobación declarada o aún sin pasada).
+   */
+  access?: { status: 'ok' | 'auth' | 'unreachable' | 'error'; detail: string } | null;
 }
 
 export interface DoctorConnectorsFacts {
@@ -366,6 +372,39 @@ function connectorChecks(c: DoctorConnectorsFacts, boxEnabled: boolean): Protoco
           `${k.name}: needs setup`,
           secretsIssue ?? `Missing: ${k.missing.join(', ')}.`,
           `stratum connectors setup ${k.id}`,
+        ),
+      );
+      continue;
+    }
+    if (k.access && k.access.status !== 'ok') {
+      out.push(
+        k.access.status === 'auth'
+          ? check(
+              id,
+              'connectors',
+              'fail',
+              `${k.name}: the authorization was rejected`,
+              k.access.detail || 'It expired or was revoked.',
+              `stratum connectors setup ${k.id}`,
+            )
+          : check(
+              id,
+              'connectors',
+              'warn',
+              `${k.name}: did not answer the last check`,
+              k.access.detail || null,
+            ),
+      );
+      continue;
+    }
+    if (k.access) {
+      out.push(
+        check(
+          id,
+          'connectors',
+          'ok',
+          `${k.name}: configured and answering`,
+          'Its last access check from the connectors box worked.',
         ),
       );
       continue;

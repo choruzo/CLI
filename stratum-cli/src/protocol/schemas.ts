@@ -90,6 +90,7 @@ import type {
   ProtocolWatchCheck,
   ProtocolWatchCondition,
   ProtocolWatchNotice,
+  ProtocolHealthNotice,
   ProtocolRoutine,
   ProtocolRoutineFire,
   ProtocolRoutineLimits,
@@ -119,6 +120,7 @@ import {
   SHARED_IMAGE_LIMITS,
   REMINDER_LIMITS,
   WATCH_LIMITS,
+  HEALTH_LIMITS,
   DOCTOR_LIMITS,
 } from './model.js';
 import { CAPABILITIES, CLIENT_KINDS, ROLES } from './roles.js';
@@ -526,7 +528,11 @@ export const planRequestSchema: z.ZodType<ProtocolPlanRequest> = z.object({
   expiresAt: timestamp.nullable(),
 });
 
-const serverInfo = z.object({ version: z.string(), platform: z.string() });
+const serverInfo = z.object({
+  version: z.string(),
+  platform: z.string(),
+  revision: z.number().int().min(0).optional(),
+});
 
 export const serverStatusSchema: z.ZodType<ProtocolServerStatus> = z.object({
   server: serverInfo,
@@ -696,6 +702,16 @@ export const watchNoticeSchema: z.ZodType<ProtocolWatchNotice> = z.object({
   name: z.string().min(1).max(WATCH_LIMITS.nameChars),
   kind: z.enum(['fired', 'resolved', 'failing', 'suspended']),
   text: z.string().min(1).max(WATCH_LIMITS.noticeChars),
+  at: timestamp,
+});
+
+// M23 — avisos de degradación
+export const healthNoticeSchema: z.ZodType<ProtocolHealthNotice> = z.object({
+  cause: z.string().min(1).max(HEALTH_LIMITS.causeChars),
+  kind: z.enum(['degraded', 'recovered']),
+  area: z.enum(['connectors', 'box']),
+  connector: z.string().min(1).max(64).nullable(),
+  text: z.string().min(1).max(HEALTH_LIMITS.noticeChars),
   at: timestamp,
 });
 
@@ -1149,6 +1165,7 @@ export const STATE_EVENT_DATA: { [T in StateEventType]: z.ZodType<StateEventData
   }),
   'reminder.due': z.object({ reminder: reminderSchema }),
   'watch.notice': z.object({ notice: watchNoticeSchema }),
+  'health.notice': z.object({ notice: healthNoticeSchema }),
   warning: z.object({ message: z.string() }),
   error: z.object({ message: z.string(), fatal: z.boolean() }),
 };

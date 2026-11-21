@@ -11,6 +11,7 @@ import { initialProtocolState, protocolStore } from './client/protocol-store';
 import { uiStore } from './client/ui-store';
 import type { ApproverStatus, ConnectionState, DesktopEvent, NativeBridge } from './ipc/native';
 import type { ProtocolChatMessage, ProtocolSession } from './protocol';
+import { STRATUM_PROTOCOL_REVISION } from './protocol';
 
 vi.mock('@tauri-apps/api/core', () => ({ invoke: vi.fn(() => Promise.resolve([])), Channel: class {} }));
 vi.mock('@tauri-apps/api/event', () => ({ listen: vi.fn(() => Promise.resolve(() => {})) }));
@@ -32,7 +33,7 @@ const SID = 'ses_20261012_abc123';
 const DAEMON = { kind: 'daemon' as const, client: 'daemon' as const, connected: true };
 
 function connected(capabilities = ['observe', 'control']): ConnectionState {
-  return { kind: 'connected', serverVersion: '0.9', serverPlatform: 'x', protocol: 1, capabilities, features: [] };
+  return { kind: 'connected', serverVersion: '0.9', serverPlatform: 'x', serverRevision: STRATUM_PROTOCOL_REVISION, protocol: 1, capabilities, features: [] };
 }
 
 const msg = (seq: number, kind: 'user' | 'assistant', text: string, runId = `run_${seq}`): ProtocolChatMessage => ({

@@ -8,6 +8,7 @@
  * correo: solo crea borradores que la persona revisa desde Gmail.
  */
 import { z } from 'zod';
+import { accessCheckTool } from '../lib/access.js';
 import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import {
   GoogleNotFoundError,
@@ -802,6 +803,12 @@ export function createGoogleTools(opts: GoogleOptions): ConnectorTool<string | T
     },
   };
 
+  const acceso = accessCheckTool(
+    'google_acceso',
+    'Comprobación de acceso para el diagnóstico, de solo lectura y sin argumentos: renueva la autorización de Google y dice si la credencial sigue valiendo (estado «ok», «auth» o «unreachable»). No hace falta usarla salvo que la persona pregunte si la conexión funciona.',
+    (signal) => need().verifyAccess(signal),
+  );
+
   return [
     gmailBuscar,
     gmailLeer,
@@ -811,6 +818,7 @@ export function createGoogleTools(opts: GoogleOptions): ConnectorTool<string | T
     tareasCrear,
     tareasCompletar,
     tareasComprobarVencidas,
+    acceso,
     ...createCalendarTools(need, opts.now ?? Date.now),
   ];
 }

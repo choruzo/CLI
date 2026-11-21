@@ -183,6 +183,7 @@ const COMMANDS = [
   'dot_memory_reject_proposal',
   'dot_memory_undo_change',
   'dot_new_companion_conversation',
+  'dot_notify_health',
   'dot_notify_reminder',
   'dot_notify_routine',
   'dot_notify_watch',

@@ -584,6 +584,11 @@ export interface ProtocolServerInfo {
   /** Versión de Stratum que sirve el protocolo. */
   version: string;
   platform: string;
+  /**
+   * M23 — `STRATUM_PROTOCOL_REVISION` del servidor. Ausente en uno anterior a
+   * que existiera. Solo informa: no decide si se conecta.
+   */
+  revision?: number;
 }
 
 export interface ProtocolServerStatus {
@@ -879,6 +884,32 @@ export interface ProtocolWatchNotice {
   watchId: string;
   name: string;
   kind: 'fired' | 'resolved' | 'failing' | 'suspended';
+  text: string;
+  at: Timestamp;
+}
+
+/** M23 — topes de un aviso de degradación (`health.notice`). */
+export const HEALTH_LIMITS = {
+  causeChars: 80,
+  noticeChars: 500,
+} as const;
+
+/**
+ * M23 — aviso de degradación del asistente: algo de lo que depende dejó de
+ * funcionar sin que nadie mirara, o volvió a funcionar. Lo compone el daemon
+ * con una plantilla (nunca el LLM) tras una comprobación propia, y se avisa una
+ * vez por causa.
+ *  - `cause`: estable para la misma causa (`connector:<id>:auth`,
+ *    `connector:<id>:failing`, `box:image`). Es lo que no se repite.
+ *  - `degraded`: empezó (credencial rechazada, conector que no responde, caja
+ *    con una imagen anterior). `recovered`: una causa ya avisada volvió a ir.
+ */
+export interface ProtocolHealthNotice {
+  cause: string;
+  kind: 'degraded' | 'recovered';
+  area: 'connectors' | 'box';
+  /** El conector, con `area: 'connectors'`; si no, `null`. */
+  connector: string | null;
   text: string;
   at: Timestamp;
 }

@@ -35,6 +35,7 @@ import {
   type ProtocolTranscript,
   type ProtocolVolatileEvent,
   type ProtocolWatchNotice,
+  type ProtocolHealthNotice,
   type StateEventData,
   type StateEventType,
   type VolatileEventType,
@@ -1400,6 +1401,20 @@ export class SessionPublisher {
   watchNotice(notice: ProtocolWatchNotice): void {
     this.state(
       'watch.notice',
+      () => ({ notice: { ...notice, text: this.redact(notice.text) } }),
+      undefined,
+      true,
+    );
+  }
+
+  /**
+   * M23 — un aviso de degradación (`health.notice`), como `watch.notice`:
+   * fuera de cualquier run, sin entrar en la conversación y redactado (el
+   * motivo de un fallo puede traer lo que dijo el conector).
+   */
+  healthNotice(notice: ProtocolHealthNotice): void {
+    this.state(
+      'health.notice',
       () => ({ notice: { ...notice, text: this.redact(notice.text) } }),
       undefined,
       true,

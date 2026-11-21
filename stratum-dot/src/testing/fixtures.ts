@@ -8,6 +8,7 @@ import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge }
 import { handleDotEvent } from '../bridge/connect';
 import { resetReminderWatch } from '../app/reminders';
 import { resetWatchWatch } from '../app/watches';
+import { resetHealthWatch } from '../app/health-notices';
 import { resetRoutineWatch } from '../app/routines';
 import type {
   ProtocolBoxScreen,
@@ -15,12 +16,14 @@ import type {
   ProtocolReminder,
   ProtocolWatch,
   ProtocolWatchNotice,
+  ProtocolHealthNotice,
   ProtocolRoutine,
   ProtocolRun,
   ProtocolSharedImage,
   ProtocolSession,
   ProtocolSessionSnapshot,
 } from '../protocol';
+import { STRATUM_PROTOCOL_REVISION } from '../protocol';
 import { useApprover } from '../stores/approverStore';
 import { useConnection } from '../stores/connectionStore';
 import { useReminders } from '../stores/reminderStore';
@@ -218,10 +221,24 @@ export function sampleWatchNotice(overrides: Partial<ProtocolWatchNotice> = {}):
   };
 }
 
-export const CONNECTED: ConnectionState = {
+/** M23 — un aviso de degradación del asistente, como llega en `health.notice`. */
+export function sampleHealthNotice(overrides: Partial<ProtocolHealthNotice> = {}): ProtocolHealthNotice {
+  return {
+    cause: 'connector:google:credentials',
+    kind: 'degraded',
+    area: 'connectors',
+    connector: 'google',
+    text: 'Google rejected the credentials.',
+    at: 1_760_000_000_000,
+    ...overrides,
+  };
+}
+
+export const CONNECTED: Extract<ConnectionState, { kind: 'connected' }> = {
   kind: 'connected',
   serverVersion: '0.9.0',
   serverPlatform: 'win32',
+  serverRevision: STRATUM_PROTOCOL_REVISION,
   protocol: 1,
   capabilities: ['observe', 'control'],
   features: [],
@@ -353,6 +370,7 @@ export function fakeNative(): FakeNative {
     watchesResume: vi.fn(async (watchId: string): Promise<unknown> => ({ watch: sampleWatch({ id: watchId }) })),
     watchesRemove: vi.fn(async (watchId: string): Promise<unknown> => ({ watch: sampleWatch({ id: watchId }) })),
     notifyWatch: vi.fn(async (_title: string, _body: string) => undefined),
+    notifyHealth: vi.fn(async (_title: string, _body: string) => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),
@@ -386,6 +404,7 @@ export function resetStores(): void {
   resetReminderWatch();
   useWatches.getState().reset();
   resetWatchWatch();
+  resetHealthWatch();
   useUi.setState({
     selectedId: null,
     tab: 'chat',

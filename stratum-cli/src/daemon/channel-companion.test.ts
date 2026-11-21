@@ -340,4 +340,19 @@ describe('CompanionLink: espejo (M18)', () => {
       '🔔 Vigilante «Salón»: el estado es «on». Ahora: «on».',
     ]);
   });
+
+  it('degradación: el texto compuesto por el daemon, tal cual (M23)', () => {
+    const { link, sent } = setup();
+    link.healthNotice({
+      cause: 'connector:google:auth',
+      kind: 'degraded',
+      area: 'connectors',
+      connector: 'google',
+      text: '🔑 Google ha rechazado la autorización del asistente.',
+      at: 1_000,
+    });
+    expect(sent.map((s) => s.text)).toEqual([
+      '🔑 Google ha rechazado la autorización del asistente.',
+    ]);
+  });
 });

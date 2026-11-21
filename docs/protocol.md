@@ -113,7 +113,7 @@ método contesta `UNAUTHORIZED`.
   "client": { "kind": "dot", "name": "stratum-dot", "version": "0.1.0" },
   "roles": ["operator", "approver"], "features": [] }
 // ←
-{ "protocol": 1, "server": { "version": "0.9.0", "platform": "win32" },
+{ "protocol": 1, "server": { "version": "0.15.0", "platform": "win32", "revision": 1 },
   "connectionId": 3, "capabilities": ["observe", "control", "approve"], "features": [] }
 ```
 
@@ -129,6 +129,12 @@ método contesta `UNAUTHORIZED`.
   pendiente se puede resolver desde otro cliente).
 - Dentro de la v1 solo se añade: campos opcionales, métodos y eventos nuevos, anunciados en
   `features` — **a partir de su congelación** (§17): hasta entonces la v1 se puede corregir.
+- `server.revision` (M23, opcional): la `STRATUM_PROTOCOL_REVISION` del servidor, que sube con
+  cada cambio aditivo dentro de la versión (`protocol/revision.test.ts` guarda la huella de
+  métodos y eventos de cada una). Cada app lleva su propia versión, así que lo que se compara es
+  esto (`compareRevision`). Ausente = un servidor anterior a que existiera (cuenta como 0). **Solo
+  informa**: el cliente dice quién se quedó atrás y nunca decide con ello si conecta. El cliente no
+  manda la suya: `client` es estricto, y un servidor anterior rechazaría el handshake.
 
 ### Descubrimiento
 
@@ -1332,6 +1338,8 @@ Correcciones hechas a la v1 antes de congelarla:
 | Modo código     | Métodos `sessions.setProfile` (`control`) y `sessions.inspect` (`observe`, §27); DTOs `ProtocolSessionInspection`, `ProtocolSessionProfileInfo`, `ProtocolInspectedEnvironment`, `ProtocolInspectedMcpServer`, `ProtocolInspectedPlugin`; `INSPECT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `not-loaded` | Aditivo: métodos nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` |
 | Modo código     | Métodos `sessions.ask` (`control`), `sessions.turns` (`observe`), `jobs.background` (`control`) y `memory.documents` (`observe`, §28); `memory.status|decisions|forget` admiten `sessionId` (la memoria del proyecto de esa sesión; no se combina con `cwd` ni `agent`). DTOs `ProtocolUndoableTurn`, `ProtocolMemoryDocument`; `ASK_LIMITS`, `TURNS_LIMITS`, `MEMORY_DOCUMENT_LIMITS`. `data.reason` de `UNAVAILABLE` admite `provider-failed` | Aditivo: métodos y un parámetro opcional nuevos; un servidor anterior contesta `METHOD_NOT_FOUND` o `INVALID_PARAMS` |
 | M22             | Evento de estado `watch.notice` (`{ notice: ProtocolWatchNotice }`, en `OVERVIEW_EVENT_TYPES`; fase 2) y, en la fase 3, los métodos `watches.list` (`observe`), `watches.add` (`approve`) y `watches.pause`/`resume`/`remove` (`control`, §31); DTOs `ProtocolWatch`, `ProtocolWatchCheck`, `ProtocolWatchCondition`; `WATCH_LIMITS`. `data.reason` de `UNAVAILABLE` admite `watches-disabled`. El PRD llamaba al evento `watch.fired`: es `watch.notice`, con `kind` `fired`·`resolved`·`failing`·`suspended`, porque un vigilante también avisa de que se resolvió o de que no puede mirar | Aditivo: métodos y evento nuevos; un servidor anterior contesta `METHOD_NOT_FOUND`. Un cliente que valide la unión de eventos tiene que aceptar `watch.notice`; los del árbol validan con `schemas.ts`, que ya lo incluye |
+| M23 (revisión)  | `ProtocolServerInfo.revision?` en `core.hello` y `core.status` (§4); `STRATUM_PROTOCOL_REVISION` (= 1) y `compareRevision` | Aditivo: un servidor anterior no lo manda y cuenta como revisión 0 |
+| M23             | Evento de estado `health.notice` (`{ notice: ProtocolHealthNotice }`, en `OVERVIEW_EVENT_TYPES`, §34); `HEALTH_LIMITS`. En `doctor.run`, `connector.<id>` refleja la última comprobación de acceso | Aditivo: un servidor anterior no lo emite. Un cliente que valide la unión de eventos tiene que aceptarlo; los del árbol validan con `schemas.ts`, que ya lo incluye |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -2611,9 +2619,47 @@ interface ProtocolDoctorReport {
   su propia versión.
 - Un conector OAuth configurado sale `ok` con una nota: si su app de OAuth está en modo «Prueba»,
   la autorización caduca a los 7 días. El diagnóstico no la prueba: hacerlo sería una llamada desde
-  el anfitrión, y los conectores solo hablan desde su caja.
+  el anfitrión, y los conectores solo hablan desde su caja. Si el conector declara comprobación de
+  acceso y el monitor de degradación (§34) ya pasó, `connector.<id>` lleva lo que dijo la última:
+  `ok` («configured and answering»), `fail` si rechazó la credencial y `warn` si no respondió.
 - `stratum doctor [--json]` es un cliente más. Sin daemon, la CLI mira lo que puede leer ella
   misma (la caja, los ficheros, el provider) y lo dice. Sale con código 1 si alguna comprobación
   falla.
 
 Tests: `stratum-cli/src/doctor/checks.test.ts` y `daemon/daemon-doctor.test.ts`.
+
+## 34. Avisos de degradación (M23)
+
+El daemon mira, sin el LLM, si algo de lo que depende el `companion` dejó de funcionar sin que nadie
+lo viera, y lo avisa **una vez por causa** con el evento de estado **`health.notice`**:
+
+```ts
+interface ProtocolHealthNotice {
+  cause: string; // estable: connector:<id>:auth, connector:<id>:failing, box:image (≤ 80)
+  kind: 'degraded' | 'recovered';
+  area: 'connectors' | 'box';
+  connector: string | null; // con area 'connectors'
+  text: string; // compuesto por el daemon con una plantilla (≤ HEALTH_LIMITS.noticeChars, 500)
+  at: Timestamp;
+}
+```
+
+- **Dónde sale**: como `watch.notice` (§31): en la sesión principal del `companion` (se abre o se
+  despierta), fuera de cualquier run, también en `overview` y en los chats de Telegram emparejados.
+  Solo informa: no lanza un turno ni entra en la conversación.
+- **Qué se mira**, a los 2 minutos de arrancar y luego cada 30:
+  - la **comprobación de acceso** de cada conector activo que la declare (campo `access` del
+    manifiesto, una `check` sin argumentos), por la misma sonda que los vigilantes y desde la caja de
+    conectores. El conector clasifica el resultado en `estado`: `ok`, `auth` (credencial rechazada o
+    caducada), `unreachable` o `error`. `auth` se avisa a la primera; los otros, al segundo fallo
+    seguido. Una causa ya avisada que vuelve a `ok` se avisa una vez con `recovered`.
+  - si la caja del agente o la de conectores existe con otra imagen o ajustes (`box:image`). Se
+    olvida sin aviso cuando deja de estarlo.
+- Sin caja de conectores o sin configurar no cambia nada (lo avisan los vigilantes y `doctor.run`).
+  Un conector desactivado se olvida sin aviso.
+- Lo avisado se guarda en `health.json` (datos del `companion`), así que tampoco se repite tras
+  reiniciar. Un aviso que no se pudo publicar no cuenta como dado y se reintenta en la pasada
+  siguiente.
+
+Tests: `stratum-cli/src/health/*.test.ts`, `daemon/health-monitor.test.ts` y
+`daemon/daemon-health.test.ts`.

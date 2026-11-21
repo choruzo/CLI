@@ -117,6 +117,12 @@ export interface GoogleAuth {
   api(method: ApiMethod, url: string, body?: unknown, signal?: AbortSignal): Promise<unknown>;
   /** Quita de un texto los secretos conocidos (client secret, refresh y access token). */
   scrub(text: string): string;
+  /**
+   * Comprobación de acceso (M23): **fuerza** una renovación (sin mirar la caché
+   * ni compartir la que esté en vuelo) para probar de verdad el refresh token.
+   * Lanza `ToolUserError` con `kind` `auth` o `unreachable`.
+   */
+  verifyAccess(signal?: AbortSignal): Promise<void>;
 }
 
 /** `null` si falta alguna credencial: el server arranca igual y cada tool avisa. */
@@ -140,23 +146,31 @@ export function createGoogleAuth(opts: GoogleAuthOptions): GoogleAuth | null {
   let inflight: Promise<string> | null = null;
 
   function networkError(err: unknown): ToolUserError {
+    // Una cancelación del llamante no dice nada de la red: sin `kind`.
     if (err instanceof Error && err.name === 'AbortError') {
       return new ToolUserError('Petición a Google cancelada.');
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return new ToolUserError('Google no respondió a tiempo (tiempo de espera agotado).');
+      return new ToolUserError(
+        'Google no respondió a tiempo (tiempo de espera agotado).',
+        'unreachable',
+      );
     }
     const cause = err instanceof Error ? (err as { cause?: unknown }).cause : null;
     if (cause instanceof Error && /redirect/i.test(cause.message)) {
-      return new ToolUserError('Google respondió con una redirección, y no se sigue.');
+      return new ToolUserError(
+        'Google respondió con una redirección, y no se sigue.',
+        'unreachable',
+      );
     }
     const code = errorCode(err);
     if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
       return new ToolUserError(
         'No se resuelve el nombre de Google desde la caja de conectores: revisa la red.',
+        'unreachable',
       );
     }
-    return new ToolUserError('No se llega a Google desde la caja de conectores.');
+    return new ToolUserError('No se llega a Google desde la caja de conectores.', 'unreachable');
   }
 
   function timedSignal(signal: AbortSignal | undefined): AbortSignal {
@@ -200,6 +214,7 @@ export function createGoogleAuth(opts: GoogleAuthOptions): GoogleAuth | null {
       if (res.status === 400 && code === 'invalid_grant') {
         throw new ToolUserError(
           `Google rechazó la autorización (revocada o caducada): la persona debe repetir \`${SETUP_COMMAND}\`.`,
+          'auth',
         );
       }
       const detail = code ? `: ${scrub(code).slice(0, MAX_DETAIL)}` : '';
@@ -211,6 +226,7 @@ export function createGoogleAuth(opts: GoogleAuthOptions): GoogleAuth | null {
     if (!token) {
       throw new ToolUserError(
         `Google no devolvió un token al renovar la autorización: la persona debe repetir \`${SETUP_COMMAND}\`.`,
+        'auth',
       );
     }
     const expiresIn =
@@ -257,6 +273,7 @@ export function createGoogleAuth(opts: GoogleAuthOptions): GoogleAuth | null {
     if (status === 401 || status === 403) {
       return new ToolUserError(
         `Google rechazó la autorización (HTTP ${status})${suffix}: la persona debe repetir \`${SETUP_COMMAND}\`.`,
+        'auth',
       );
     }
     return new ToolUserError(`Google respondió HTTP ${status}${suffix}.`);
@@ -288,6 +305,10 @@ export function createGoogleAuth(opts: GoogleAuthOptions): GoogleAuth | null {
   return {
     accessToken,
     scrub,
+
+    async verifyAccess(signal) {
+      await renew(signal);
+    },
 
     async api(method, url, body, signal) {
       // El prefijo se mira sobre la URL ya normalizada (como la verá `fetch`):

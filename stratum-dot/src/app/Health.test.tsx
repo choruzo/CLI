@@ -147,4 +147,26 @@ describe('el panel Health', () => {
     await waitFor(() => expect(again().disabled).toBe(false));
     expect(native.calls.doctorRun).toHaveBeenCalledTimes(2);
   });
+
+  it('con un daemon desfasado pone una fila local al principio, sin pedir nada más', async () => {
+    const native = fakeNative();
+    native.calls.doctorRun.mockResolvedValue(REPORT);
+    connected(native);
+    act(() => {
+      native.push({ type: 'connection', state: { ...CONNECTED, serverRevision: null, serverVersion: '0.14.0' } });
+    });
+    fireEvent.click(screen.getByRole('button', { name: 'Assistant' }));
+    await waitFor(() => expect(panel().textContent).toContain('Box stopped'));
+    const row = panel().querySelector('[data-check="revision.skew"]');
+    expect(row?.textContent).toContain('The Stratum daemon is older than this Dot');
+    expect(row?.textContent).toContain('Stratum 0.14.0');
+    expect(row?.querySelector('[data-status="warn"]')).not.toBeNull();
+    expect(panel().querySelectorAll('.health-check')[0]).toBe(row);
+    expect(native.calls.doctorRun).toHaveBeenCalledTimes(1);
+  });
+
+  it('sin desfase no hay fila de revisión', async () => {
+    await withPanel();
+    expect(panel().querySelector('[data-check="revision.skew"]')).toBeNull();
+  });
 });

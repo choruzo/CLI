@@ -1,3 +1,4 @@
+import { STRATUM_PROTOCOL_REVISION } from '../../protocol';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import { SessionsPanel } from './SessionsPanel';
@@ -101,7 +102,7 @@ describe('StatusBar (M12)', () => {
   it('modelo y contexto de la foto, dónde corre y desde dónde vino', () => {
     render(
       <StatusBar
-        connection={{ kind: 'connected', serverVersion: '1', serverPlatform: 'x', protocol: 1, capabilities: [], features: [] }}
+        connection={{ kind: 'connected', serverVersion: '1', serverPlatform: 'x', serverRevision: STRATUM_PROTOCOL_REVISION, protocol: 1, capabilities: [], features: [] }}
         session={sampleSession({
           model: 'gemma',
           origin: 'desktop',

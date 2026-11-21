@@ -41,6 +41,7 @@ async fn descubre_saluda_y_conecta() {
 
     let ConnectionState::Connected {
         server_version,
+        server_revision,
         capabilities,
         protocol,
         ..
@@ -49,6 +50,7 @@ async fn descubre_saluda_y_conecta() {
         panic!("connected")
     };
     assert_eq!(server_version, "0.9.0-test");
+    assert_eq!(server_revision, Some(1));
     assert_eq!(protocol, 1);
     assert_eq!(capabilities, ["observe", "control"]);
     assert_eq!(rig.seen.last_sessions(), Some(vec!["s1".to_string()]));

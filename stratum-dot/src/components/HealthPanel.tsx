@@ -2,6 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { describeCommandError } from '../app/actions';
 import { useNative } from '../bridge/context';
 import { toCommandError } from '../bridge/native';
+import { useConnection } from '../stores/connectionStore';
+import { revisionSkewNotice } from '../protocol/revision-skew';
 import type { ProtocolDoctorArea, ProtocolDoctorCheck, ProtocolDoctorReport, ProtocolDoctorStatus } from '../protocol';
 import { parseDoctorReport } from '../protocol/results';
 
@@ -95,6 +97,9 @@ export function HealthPanel({ connected }: Props) {
   }, [connected, run]);
 
   const groups = report ? groupChecksByArea(report.checks) : [];
+  // Desfase de revisión con el daemon: una fila local (no la manda el daemon).
+  const connection = useConnection((s) => s.state);
+  const skew = connection.kind === 'connected' ? revisionSkewNotice(connection.serverRevision, connection.serverVersion) : null;
 
   return (
     <section className="health-panel" aria-label="Health" data-health={report ? 'ready' : 'unknown'}>
@@ -131,6 +136,19 @@ export function HealthPanel({ connected }: Props) {
           {healthSummary(report.checks)}{' '}
           <span className="muted">Checked at {new Date(report.checkedAt).toLocaleTimeString()}.</span>
         </p>
+      ) : null}
+      {skew ? (
+        <div className="health-area" data-area="revision">
+          <ul className="health-checks">
+            <li className="health-check" data-check="revision.skew">
+              <div className="row-top">
+                <span className="health-status" data-status="warn" role="img" aria-label={STATUS_LABELS.warn} />
+                <span className="health-title">{skew.title}</span>
+              </div>
+              <div className="muted small health-detail">{skew.body}</div>
+            </li>
+          </ul>
+        </div>
       ) : null}
       {report
         ? groups.map((group) => (

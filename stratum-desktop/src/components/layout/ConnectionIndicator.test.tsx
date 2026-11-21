@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen } from '@testing-library/react';
 import { ConnectionBanner, ConnectionIndicator, describeConnection } from './ConnectionIndicator';
 import type { ConnectionState } from '../../ipc/native';
+import { STRATUM_PROTOCOL_REVISION } from '../../protocol';
 
 afterEach(cleanup);
 
@@ -9,6 +10,7 @@ const connected: ConnectionState = {
   kind: 'connected',
   serverVersion: '0.9.0',
   serverPlatform: 'linux',
+  serverRevision: STRATUM_PROTOCOL_REVISION,
   protocol: 1,
   capabilities: ['observe', 'control'],
   features: [],
@@ -35,6 +37,13 @@ describe('estado de la conexión con stratumd (M12)', () => {
     const onRetry = vi.fn();
     const { container, rerender } = render(<ConnectionBanner state={connected} onRetry={onRetry} />);
     expect(container.textContent).toBe('');
+    rerender(<ConnectionBanner state={{ ...connected, serverRevision: null, serverVersion: '0.14.0' }} onRetry={onRetry} />);
+    const skew = screen.getByRole('status');
+    expect(skew.textContent).toContain('El daemon de Stratum es más antiguo que este Desktop');
+    expect(skew.textContent).toContain('Corre Stratum 0.14.0');
+    expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();
+    rerender(<ConnectionBanner state={{ ...connected, serverRevision: STRATUM_PROTOCOL_REVISION + 1 }} onRetry={onRetry} />);
+    expect(screen.getByRole('status').textContent).toContain('Este Desktop es más antiguo');
     rerender(<ConnectionBanner state={{ kind: 'reconnecting', attempt: 1 }} onRetry={onRetry} />);
     expect(screen.getByRole('alert').textContent).toMatch(/Reconectando/);
     expect(screen.queryByRole('button', { name: 'Reintentar' })).toBeNull();

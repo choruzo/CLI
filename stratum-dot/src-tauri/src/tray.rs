@@ -242,6 +242,7 @@ mod tests {
         let connected = ConnectionState::Connected {
             server_version: "0.9.0".into(),
             server_platform: "win32".into(),
+            server_revision: Some(1),
             protocol: 1,
             capabilities: vec![],
             features: vec![],

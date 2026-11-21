@@ -472,8 +472,21 @@ cambiada por líneas JSON: permite probar contra un daemon real sin automatizar 
 - **Linux**: `dot-link` y sus tests cubren el unix socket; la app (bandeja, instancia única,
   ocultar al cerrar) está comprobada en Windows y pendiente de un escritorio Linux real (Q4).
   macOS queda fuera de v1.
-- **Desfase de versiones** Dot ↔ daemon dentro de la v1: un evento de un tipo que Dot no
-  conoce avanza la secuencia sin aplicarse; el endurecimiento completo es M9.
+- **Desfase de versiones** Dot ↔ daemon dentro de la v1 (M23): cada app lleva su versión
+  (comparar Dot 0.3 con la CLI 0.15 no dice nada), así que lo que se compara es la
+  **revisión del protocolo** (`STRATUM_PROTOCOL_REVISION`, `docs/protocol.md` §4). El daemon la
+  anuncia en `core.hello` (`server.revision`); `dot-link` la lee y la deja en
+  `ConnectionState::Connected.server_revision` (`serverRevision`, `null` si el daemon es de
+  antes de anunciarla: cuenta como revisión 0). Dot no manda la suya (el `client` del `hello`
+  es estricto y un daemon viejo lo rechazaría). `protocol/revision-skew.ts` (puro,
+  `compareRevision` del contrato) da un aviso «The Stratum daemon is older than this Dot»
+  (con cómo reiniciar el daemon) o «This Dot is older than the Stratum daemon»; se pinta como
+  banner persistente bajo la cabecera (`ConnectionBanner`, conectado) y como fila local al
+  principio de *Health* (`revision.skew`, `warn`, sin pedir nada al daemon). **Solo informa**:
+  nunca decide si se conecta, reconecta ni reinicia nada. Un evento de un tipo que Dot no
+  conoce sigue avanzando la secuencia sin aplicarse. Desktop usa el mismo estado con su
+  propio texto, en español. Tests: `protocol/revision-skew.test.ts`, `App.test.tsx`,
+  `Health.test.tsx`, `state.rs` y `tests/link.rs`.
 - **Sin firma ni auto-update**: empaquetado y firma son M9.
 
 ### Deuda menor (no bloquea M6)
@@ -1619,6 +1632,12 @@ agente (`propose_watch`) y `stratum watches add`.
   `watchId:kind:at`. Lo muestra el lado nativo como el de un recordatorio: `dot_notify_watch` →
   `notify.rs`, y pulsarlo abre la pestaña *Watches* (`open-view` con `view: 'watches'`,
   `NoticeTarget::Watches`). Solo informa.
+- **Avisos de degradación** (M23): `protocol/health-notices.ts` (puro) saca los `health.notice`
+  **válidos** (`overview`) y arma el título (*Assistant · a connector needs attention*, *the box needs
+  attention* o *working again*) con el texto del daemon; `app/health-notices.ts` los da una sola vez
+  por `cause:kind:at` y llama a `dot_notify_health` → `notify.rs`. Pulsarlo abre la pestaña *Health*
+  (`open-view` con `view: 'health'`, `NoticeTarget::Health`), que pide su diagnóstico al abrirse.
+  Solo informa.
 - Nativo: `MainMethod::WatchesList|WatchesPause|WatchesResume|WatchesRemove` solo en `DOT_METHODS`
   (nunca `watches.add`, que el test de arquitectura prohíbe), `CallAction::Watches*` (las tres
   mutaciones son `mutating`), comandos `dot_watches_list|pause|resume|remove` y `dot_notify_watch`.

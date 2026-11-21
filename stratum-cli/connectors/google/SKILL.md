@@ -106,3 +106,5 @@ llama tú a la tool de comprobación para ver qué devuelve.
 - Si dice que la autorización no cubre el calendario (HTTP 403), la persona debe
   repetir `stratum connectors setup google`: el permiso de calendario es nuevo.
 - Si falla una consulta, no inventes correos, tareas ni eventos: di que no se pudo.
+- `google_acceso` es para el diagnóstico: no hace falta usarla salvo que la persona
+  pregunte si la conexión funciona.

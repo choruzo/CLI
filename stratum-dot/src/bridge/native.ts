@@ -29,6 +29,8 @@ export type ConnectionState =
       kind: 'connected';
       serverVersion: string;
       serverPlatform: string;
+      /** Revisión del protocolo que anunció el daemon; `null` si es de antes de anunciarla. */
+      serverRevision: number | null;
       protocol: number;
       capabilities: string[];
       features: string[];
@@ -58,7 +60,7 @@ export type ApproverStatus =
   | { kind: 'error'; message: string };
 
 /** Vistas que el lado nativo puede pedir que se abran (la bandeja, el aviso de un recordatorio). */
-export type DotView = 'human-input' | 'reminders' | 'watches';
+export type DotView = 'human-input' | 'reminders' | 'watches' | 'health';
 
 /**
  * Lo que llega del lado nativo. `snapshot` y `events` traen DTOs del protocolo
@@ -319,6 +321,8 @@ export interface NativeBridge {
   notifyReminder(title: string, body: string): Promise<void>;
   /** M22 — el aviso de un vigilante: solo informa; pulsarlo abre la pestaña *Watches*. */
   notifyWatch(title: string, body: string): Promise<void>;
+  /** M23 — el aviso de degradación del asistente: solo informa; pulsarlo abre la pestaña *Health*. */
+  notifyHealth(title: string, body: string): Promise<void>;
   /** Estado de la autoridad de aprobar. Los cambios llegan por `onEvent` (`approver`). */
   approverStatus(): Promise<ApproverStatus>;
   /** Abre la ventana nativa de desbloqueo. La clave se teclea allí: aquí no pasa. */
@@ -423,6 +427,7 @@ export const tauriBridge: NativeBridge = {
   watchesResume: (watchId) => invoke<unknown>('dot_watches_resume', { watchId }),
   watchesRemove: (watchId) => invoke<unknown>('dot_watches_remove', { watchId }),
   notifyWatch: (title, body) => invoke('dot_notify_watch', { title, body }),
+  notifyHealth: (title, body) => invoke('dot_notify_health', { title, body }),
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

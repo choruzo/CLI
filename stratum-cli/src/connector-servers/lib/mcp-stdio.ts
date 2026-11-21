@@ -24,7 +24,18 @@ export interface ConnectorTool<Out extends string | ToolOutput = string> {
 }
 
 /** Error que se le enseña al agente tal cual (argumento inválido, lugar no hallado…). */
-export class ToolUserError extends Error {}
+export class ToolUserError extends Error {
+  /**
+   * Clasificación opcional del fallo, para la comprobación de acceso (M23):
+   * `auth` = la credencial no vale; `unreachable` = no se llega al servicio.
+   */
+  readonly kind: 'auth' | 'unreachable' | undefined;
+
+  constructor(message: string, kind?: 'auth' | 'unreachable') {
+    super(message);
+    this.kind = kind;
+  }
+}
 
 export interface McpServer {
   handle(msg: unknown): Promise<object | null>;

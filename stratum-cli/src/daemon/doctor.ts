@@ -12,6 +12,7 @@ import type { ConnectorCatalog } from '../connectors/catalog.js';
 import type { StratumConfig } from '../config/schema.js';
 import {
   doctorChecks,
+  type DoctorConnectorsFacts,
   type DoctorFacts,
   type DoctorStoreFacts,
   type DoctorWatchFacts,
@@ -38,9 +39,26 @@ export interface DaemonDoctorDeps {
   companionModel: { provider: string; model: string } | null;
   stores: DoctorStoreFacts[];
   watches: DoctorWatchFacts | null;
+  /** M23 — la última comprobación de acceso de cada conector (`HealthMonitor`). */
+  access?: ReadonlyMap<string, { status: 'ok' | 'auth' | 'unreachable' | 'error'; detail: string }>;
   /** Arranque al iniciar sesión; `null` si no se puede saber. */
   loginAutostart: () => Promise<{ enabled: boolean; detail: string | null } | null>;
   now: number;
+}
+
+/** M23 — suma a cada conector lo que dijo su última comprobación de acceso. */
+function withAccess(
+  access: DaemonDoctorDeps['access'],
+  facts: DoctorConnectorsFacts | null,
+): DoctorConnectorsFacts | null {
+  if (!facts || !access) return facts;
+  return {
+    ...facts,
+    enabled: facts.enabled.map((k) => {
+      const a = access.get(k.id);
+      return a ? { ...k, access: { status: a.status, detail: clean(a.detail) ?? '' } } : k;
+    }),
+  };
 }
 
 function clean(text: string | null | undefined): string | null {
@@ -74,16 +92,19 @@ export async function daemonDoctorReport(d: DaemonDoctorDeps): Promise<ProtocolD
       },
       autostartRun: { phase: d.boxAutostart.phase, reason: clean(d.boxAutostart.reason) },
     },
-    connectors: connectorsFacts({
-      catalog: d.catalog,
-      companionDir: d.companionDir,
-      secretsDir: d.secretsDir,
-      box: {
-        state: connectorsBox.state,
-        reason: clean(connectorsBox.reason),
-        outdated: connectorsBox.outdated,
-      },
-    }),
+    connectors: withAccess(
+      d.access,
+      connectorsFacts({
+        catalog: d.catalog,
+        companionDir: d.companionDir,
+        secretsDir: d.secretsDir,
+        box: {
+          state: connectorsBox.state,
+          reason: clean(connectorsBox.reason),
+          outdated: connectorsBox.outdated,
+        },
+      }),
+    ),
     telegram: channels ? telegramFactsFromStatus(channels.telegram) : null,
     model,
     stores: d.stores,

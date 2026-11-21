@@ -8,7 +8,7 @@ import { createHomeAssistantTools } from './tools.js';
 
 serveStdio(
   createMcpServer(
-    { name: 'home-assistant', version: '1.0.0' },
+    { name: 'home-assistant', version: '1.3.0' },
     createHomeAssistantTools({
       fetch: globalThis.fetch,
       url: process.env.HA_URL,

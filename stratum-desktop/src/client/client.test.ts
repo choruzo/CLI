@@ -7,6 +7,7 @@ import {
   sampleSnapshot,
 } from '../../../stratum-cli/src/protocol/protocol.fixtures';
 import type { ProtocolChatMessage, ProtocolSessionSnapshot } from '../protocol';
+import { STRATUM_PROTOCOL_REVISION } from '../protocol';
 import type { ConnectionState, NativeBridge } from '../ipc/native';
 import { carryOver, initialProtocolState, protocolActions, protocolStore } from './protocol-store';
 import { uiStore } from './ui-store';
@@ -282,6 +283,7 @@ export const connected: ConnectionState = {
   kind: 'connected',
   serverVersion: '0',
   serverPlatform: 'x',
+  serverRevision: STRATUM_PROTOCOL_REVISION,
   protocol: 1,
   capabilities: ['observe', 'control'],
   features: [],

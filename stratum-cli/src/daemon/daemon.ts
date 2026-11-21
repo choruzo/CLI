@@ -86,6 +86,7 @@ import {
   SHARED_IMAGE_LIMITS,
   METHODS,
   STRATUM_PROTOCOL_VERSION,
+  STRATUM_PROTOCOL_REVISION,
   type ClientKind,
   type MethodName,
   type ProtocolConnector,
@@ -100,6 +101,7 @@ import {
   type ProtocolSession,
   type ProtocolSessionSnapshot,
   type ProtocolWatchNotice,
+  type ProtocolHealthNotice,
   type StateEventData,
   WATCH_LIMITS,
 } from '../protocol/index.js';
@@ -154,6 +156,9 @@ import { reminderOperation } from './reminders-dto.js';
 import { ReminderStore, remindersFile } from '../reminders/store.js';
 import type { ReminderBook } from '../tools/reminders/reminders.js';
 import { WatchScheduler } from './watch-scheduler.js';
+import { HealthMonitor, type HealthConnector } from './health-monitor.js';
+import { HealthStore, healthFile } from '../health/store.js';
+import { accessCheckOf } from '../connectors/manifest.js';
 import { WatchStore, watchesFile } from '../watches/store.js';
 import { connectorProbe, type WatchProbe } from '../watches/probe.js';
 import { defineWatch, type WatchRequest } from '../watches/define.js';
@@ -297,6 +302,13 @@ export interface StratumdOptions {
   /** M22 — cada cuánto mira el planificador qué vigilantes tocan. Tests. */
   watchTickMs?: number;
   /**
+   * M23 — avisos de degradación. Por defecto, `health.json` en los datos del
+   * `companion`; `null` los desactiva. La sonda es la de los vigilantes.
+   */
+  health?: HealthStore | null;
+  /** M23 — cuándo mira el monitor de degradación. Tests. */
+  healthTiming?: { firstDelayMs?: number; tickMs?: number };
+  /**
    * M18 — canales externos (Telegram). `telegram.json` está en `dir`; por
    * defecto, `enabled` se lee de la config global en cada `channels.reload`.
    * `null`: sin canales (`channels.*` → `UNAVAILABLE`). Tests: API falsa.
@@ -435,6 +447,8 @@ export class Stratumd {
   private readonly box: BoxManager;
   /** M23 — `box.autostart`. */
   readonly boxAutostart: BoxAutostart;
+  /** M23 — avisos de degradación; `null` sin ellos. */
+  readonly health: HealthMonitor | null;
   private readonly approvalTimeoutMs: number;
   private readonly operations: OperationCache;
   private readonly serverInfo: ProtocolServerInfo;
@@ -464,7 +478,11 @@ export class Stratumd {
     this.startedAt = this.now();
     this.lastActivity = this.startedAt;
     this.startup = opts.startup ?? resolveSessionStartup;
-    this.serverInfo = { version: opts.version, platform: process.platform };
+    this.serverInfo = {
+      version: opts.version,
+      platform: process.platform,
+      revision: STRATUM_PROTOCOL_REVISION,
+    };
     this.maxSessions = opts.maxSessions ?? opts.config.daemon.maxSessions;
     this.idleExitMs = opts.idleExitMs ?? Math.round(opts.config.daemon.idleExitMinutes * 60_000);
     this.operations = new OperationCache({ now: this.now, ...opts.operations });
@@ -540,20 +558,22 @@ export class Stratumd {
             onDelivered: (reminder) => this.reminderDelivered(reminder),
             now: this.now,
           });
+    // M22 — la sonda de los conectores (vigilantes y, M23, comprobación de acceso).
+    const probe =
+      opts.watchProbe ??
+      connectorProbe({
+        dataDir: this.companionDir,
+        box: opts.config.box,
+        secretsDir: this.daemonDir,
+        catalog: this.connectorCatalog,
+      });
     // M22 — los vigilantes: se evalúan sin el LLM, cada `watchTickMs`.
     this.watches =
       opts.watches === null
         ? null
         : new WatchScheduler({
             store: opts.watches ?? new WatchStore(watchesFile(this.companionDir)),
-            probe:
-              opts.watchProbe ??
-              connectorProbe({
-                dataDir: this.companionDir,
-                box: opts.config.box,
-                secretsDir: this.daemonDir,
-                catalog: this.connectorCatalog,
-              }),
+            probe,
             // El aviso sale por el protocolo, en la sesión del `companion`.
             notify: (notice) => this.deliverWatchNotice(notice),
             launchRoutine: (routineId, trigger) => this.launchWatchRoutine(routineId, trigger),
@@ -569,6 +589,19 @@ export class Stratumd {
         // M20: con algún conector activo, `start` arranca también su caja.
         connectorsWanted: () => enabledConnectorIds(connectorsFile(this.companionDir)).length > 0,
       });
+    // M23 — avisos de degradación: sin el LLM, por la misma sonda.
+    this.health =
+      opts.health === null
+        ? null
+        : new HealthMonitor({
+            store: opts.health ?? new HealthStore(healthFile(this.companionDir)),
+            probe,
+            connectors: () => this.healthConnectors(),
+            box: opts.config.box.enabled ? this.box : null,
+            notify: (notice) => this.deliverHealthNotice(notice),
+            now: this.now,
+            ...(opts.healthTiming ?? {}),
+          });
     const autostart = opts.boxAutostart ?? {};
     this.boxAutostart = new BoxAutostart({
       enabled: autostart.enabled ?? opts.config.box.autostart,
@@ -718,6 +751,8 @@ export class Stratumd {
     daemon.channels?.start();
     // M23 — la caja, sin esperarla: la primera vez puede construir la imagen.
     daemon.boxAutostart.start();
+    // M23 — la primera pasada, un rato después (deja arrancar la caja).
+    daemon.health?.start();
     log.info('daemon started', {
       pid: process.pid,
       version: opts.version,
@@ -828,6 +863,8 @@ export class Stratumd {
       this.reminders?.stop();
       // M22 — ni un vigilante se evalúa mientras se apaga.
       this.watches?.stop();
+      // M23 — ni una comprobación de acceso más.
+      this.health?.stop();
       this.dreamingSchedule?.stop();
       // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
       this.dreaming.close();
@@ -2685,6 +2722,39 @@ export class Stratumd {
     if (failure) throw failure;
   }
 
+  /**
+   * M23 — un aviso de degradación: `health.notice` en la sesión principal del
+   * `companion` (se abre o se despierta, como un aviso de vigilante) y en los
+   * chats emparejados. Si no se publica en la sesión, **lanza**: el monitor no
+   * lo marca como avisado y lo reintenta en la pasada siguiente.
+   */
+  private async deliverHealthNotice(notice: ProtocolHealthNotice): Promise<void> {
+    const session = await this.openCompanion({ agent: COMPANION_AGENT });
+    session.healthNotice(notice);
+    log.info('health notice delivered', {
+      cause: notice.cause,
+      kind: notice.kind,
+      sessionId: session.sessionId,
+    });
+    try {
+      this.channels?.healthNotice(notice);
+    } catch (err) {
+      // Un canal caído no es un fallo del aviso.
+      log.warn('health notice not sent to the channels', { cause: notice.cause, err });
+    }
+  }
+
+  /** M23 — los conectores activos que declaran comprobación de acceso. */
+  private healthConnectors(): HealthConnector[] {
+    const out: HealthConnector[] = [];
+    for (const id of enabledConnectorIds(connectorsFile(this.companionDir))) {
+      const manifest = this.connectorCatalog.get(id)?.manifest;
+      const tool = manifest ? accessCheckOf(manifest) : null;
+      if (manifest && tool) out.push({ id, name: manifest.name, tool });
+    }
+    return out;
+  }
+
   /** M20 — el catálogo de conectores (el del paquete, salvo en tests). */
   private get connectorCatalog(): ConnectorCatalog {
     return this.opts.connectorCatalog ?? bundledCatalog();
@@ -2714,6 +2784,7 @@ export class Stratumd {
       channels: () => (this.channels ? this.channels.status() : null),
       companionModel: model ? { provider: model.provider, model: model.model } : null,
       stores,
+      ...(this.health ? { access: this.health.accessResults() } : {}),
       watches: this.watches
         ? {
             active: active.length,

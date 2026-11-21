@@ -1,4 +1,5 @@
 import type { ConnectionState } from '../../ipc/native';
+import { revisionSkewNotice } from '../../protocol/revision-skew';
 
 type Tone = 'ok' | 'pending' | 'warn' | 'error';
 
@@ -37,7 +38,8 @@ export function ConnectionIndicator({ state }: { state: ConnectionState }) {
  * Aviso no bloqueante con la app en uso: se perdió el daemon y se reconecta
  * solo, o no hay daemon (Reintentar lo arranca con el comando oficial). Lo que
  * se ve hasta entonces es lo último que contó el daemon; al volver, la foto
- * manda.
+ * manda. Conectado, solo el desfase de revisión del protocolo (M23): persistente
+ * y sin bloquear.
  */
 export function ConnectionBanner({
   state,
@@ -46,7 +48,18 @@ export function ConnectionBanner({
   state: ConnectionState;
   onRetry: () => void;
 }) {
-  if (state.kind === 'connected' || state.kind === 'starting' || state.kind === 'connecting') return null;
+  if (state.kind === 'connected') {
+    const skew = revisionSkewNotice(state.serverRevision, state.serverVersion);
+    if (!skew) return null;
+    return (
+      <section className="alert" role="status" data-skew={skew.kind}>
+        <p>
+          <strong>{skew.title}.</strong> {skew.body}
+        </p>
+      </section>
+    );
+  }
+  if (state.kind === 'starting' || state.kind === 'connecting') return null;
   let text: string;
   switch (state.kind) {
     case 'daemon-starting':

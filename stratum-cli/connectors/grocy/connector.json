@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "grocy",
-  "version": "1.1.0",
+  "version": "1.2.0",
   "name": "Grocy",
   "description": "Despensa, recetas, menú y lista de la compra de tu Grocy, en tu red local. Lo que cambia algo pide aprobación.",
   "agents": ["companion"],
@@ -17,7 +17,13 @@
       "description": "Clave de API de Grocy (Ajustes → Gestionar claves de API)"
     }
   ],
+  "access": "grocy_acceso",
   "tools": [
+    {
+      "name": "grocy_acceso",
+      "readOnly": true,
+      "summary": "Comprueba que la credencial sigue valiendo (para el diagnóstico)."
+    },
     {
       "name": "grocy_despensa",
       "readOnly": true,
@@ -95,6 +101,12 @@
     }
   ],
   "checks": [
+    {
+      "tool": "grocy_acceso",
+      "summary": "Si la credencial sigue valiendo (para el diagnóstico).",
+      "minIntervalSec": 300,
+      "args": []
+    },
     {
       "tool": "grocy_comprobar",
       "summary": "Productos caducados, a punto de caducar o bajo mínimos.",

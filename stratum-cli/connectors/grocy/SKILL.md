@@ -80,3 +80,5 @@ que cambian algo en Grocy y piden aprobación a la persona:
   Tú no puedes hacerlo.
 - No puedes crear ni borrar productos, recetas ni entradas del menú, ni
   editar productos, ubicaciones o unidades: eso se hace en Grocy.
+- `grocy_acceso` es para el diagnóstico: no hace falta usarla salvo que la persona
+  pregunte si la conexión funciona.

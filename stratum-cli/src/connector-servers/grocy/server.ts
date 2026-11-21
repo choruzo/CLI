@@ -8,7 +8,7 @@ import { createGrocyTools } from './tools.js';
 
 serveStdio(
   createMcpServer(
-    { name: 'grocy', version: '1.1.0' },
+    { name: 'grocy', version: '1.2.0' },
     createGrocyTools({
       fetch: globalThis.fetch,
       url: process.env.GROCY_URL,

@@ -312,7 +312,7 @@ async function failure(p: Promise<unknown>): Promise<string> {
 describe('conector de Google sin credenciales', () => {
   const tools = createGoogleTools({ fetch: (async () => new Response('{}')) as typeof fetch });
 
-  it('registra las trece tools', () => {
+  it('registra las catorce tools', () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
       'calendario_buscar',
       'calendario_comprobar_proximo',
@@ -323,6 +323,7 @@ describe('conector de Google sin credenciales', () => {
       'gmail_buscar',
       'gmail_comprobar',
       'gmail_leer',
+      'google_acceso',
       'tareas_completar',
       'tareas_comprobar_vencidas',
       'tareas_crear',
@@ -330,7 +331,7 @@ describe('conector de Google sin credenciales', () => {
     ]);
   });
 
-  it.each(tools.map((t) => [t.name, t] as const))(
+  it.each(tools.filter((t) => t.name !== 'google_acceso').map((t) => [t.name, t] as const))(
     '%s avisa de que falta configurar',
     async (_n, tool) => {
       const message = await failure(
@@ -770,5 +771,41 @@ describe('el conector nunca envía correo', () => {
     for (const tool of tools) {
       expect(tool.name).not.toMatch(/send|enviar/i);
     }
+  });
+});
+
+describe('google_acceso (M23)', () => {
+  const acceso = (fetchFn: typeof fetch, creds = true) =>
+    createGoogleTools({
+      fetch: fetchFn,
+      ...(creds ? { clientId: 'cid', clientSecret: CLIENT_SECRET, refreshToken: REFRESH } : {}),
+    }).find((t) => t.name === 'google_acceso')!;
+
+  it('credencial válida → ok', async () => {
+    const out = (await acceso(
+      (async () =>
+        new Response(
+          JSON.stringify({ access_token: ACCESS_TOKEN, expires_in: 3600 }),
+        )) as typeof fetch,
+    ).handler({})) as { structured: Record<string, unknown> };
+    expect(out.structured).toMatchObject({ estado: 'ok', valor: null });
+  });
+
+  it('refresh token revocado → auth, sin isError', async () => {
+    const out = (await acceso(
+      (async () =>
+        new Response(JSON.stringify({ error: 'invalid_grant' }), {
+          status: 400,
+        })) as typeof fetch,
+    ).handler({})) as { structured: Record<string, unknown> };
+    expect(out.structured.estado).toBe('auth');
+  });
+
+  it('sin configurar → estado error con la orden de setup', async () => {
+    const out = (await acceso((async () => new Response('{}')) as typeof fetch, false).handler(
+      {},
+    )) as { structured: Record<string, unknown> };
+    expect(out.structured.estado).toBe('error');
+    expect(String(out.structured.detalle)).toContain('stratum connectors setup google');
   });
 });

@@ -25,6 +25,9 @@ pub enum ConnectionState {
     Connected {
         server_version: String,
         server_platform: String,
+        /// `STRATUM_PROTOCOL_REVISION` del daemon; `None` si no la anunció (uno
+        /// anterior a que existiera). Solo informa: no decide nada del enlace.
+        server_revision: Option<u64>,
         protocol: u64,
         /// Capacidades **concedidas**: pueden ser menos de las pedidas.
         capabilities: Vec<String>,
@@ -589,6 +592,23 @@ mod tests {
             .unwrap(),
             json!({ "kind": "incompatible", "clientProtocol": 1, "daemonProtocol": 2, "daemonVersion": "1.0.0" })
         );
+    }
+
+    #[test]
+    fn la_revision_del_daemon_se_serializa_y_falta_como_null() {
+        let connected = |server_revision| ConnectionState::Connected {
+            server_version: "0.15.0".into(),
+            server_platform: "win32".into(),
+            server_revision,
+            protocol: 1,
+            capabilities: vec![],
+            features: vec![],
+        };
+        let v = serde_json::to_value(connected(Some(1))).unwrap();
+        assert_eq!(v["serverRevision"], json!(1));
+        let v = serde_json::to_value(connected(None)).unwrap();
+        assert!(v["serverRevision"].is_null());
+        assert!(v.as_object().unwrap().contains_key("serverRevision"));
     }
 
     #[test]

@@ -19,6 +19,7 @@ import type {
   ProtocolTelegramPaired,
   ProtocolTelegramStatus,
   ProtocolWatchNotice,
+  ProtocolHealthNotice,
 } from '../protocol/index.js';
 import { HttpTelegramApi, type TelegramApi } from '../channels/telegram/api.js';
 import { TelegramChannel } from '../channels/telegram/channel.js';
@@ -141,6 +142,11 @@ export class ChannelHost {
   /** M22 — el aviso de un vigilante, también a los chats emparejados. */
   watchNotice(notice: ProtocolWatchNotice): void {
     this.link?.watchNotice(notice);
+  }
+
+  /** M23 — un aviso de degradación, también a los chats emparejados. */
+  healthNotice(notice: ProtocolHealthNotice): void {
+    this.link?.healthNotice(notice);
   }
 
   /** Lee el fichero y la config y, si toca, empieza a escuchar. */

@@ -26,6 +26,7 @@ import type {
   ProtocolRun,
   ProtocolSharedImage,
   ProtocolWatchNotice,
+  ProtocolHealthNotice,
   SteerStatus,
 } from '../protocol/index.js';
 import { USER_IMAGE_LIMITS, type UserImage } from '../agent/user-images.js';
@@ -265,6 +266,12 @@ export class CompanionLink {
 
   /** M22 — un aviso de un vigilante. El texto ya viene compuesto. */
   watchNotice(notice: ProtocolWatchNotice): void {
+    if (this.stopped) return;
+    this.broadcast(watchNotice(notice.text));
+  }
+
+  /** M23 — un aviso de degradación. El texto ya viene compuesto, como el de un vigilante. */
+  healthNotice(notice: ProtocolHealthNotice): void {
     if (this.stopped) return;
     this.broadcast(watchNotice(notice.text));
   }

@@ -13,6 +13,7 @@
  * - los costes vienen a 0 con `prices_incomplete`: «n/d», nunca 0.
  */
 import { z } from 'zod';
+import { accessCheckTool } from '../lib/access.js';
 import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import { createGrocyClient, notConfigured, type GrocyClient } from './client.js';
 import {
@@ -705,5 +706,22 @@ export function createGrocyTools(opts: GrocyOptions): ConnectorTool<string | Too
     },
   };
 
-  return [despensa, recetas, receta, menu, compra, comprobar, ...createGrocyWriteTools(need, now)];
+  const acceso = accessCheckTool(
+    'grocy_acceso',
+    'Comprobación de acceso para el diagnóstico, de solo lectura y sin argumentos: llama a la API de Grocy y dice si la clave sigue valiendo (estado «ok», «auth» o «unreachable»). No hace falta usarla salvo que la persona pregunte si la conexión funciona.',
+    async (signal) => {
+      await need().get('/system/info', undefined, signal);
+    },
+  );
+
+  return [
+    despensa,
+    recetas,
+    receta,
+    menu,
+    compra,
+    comprobar,
+    acceso,
+    ...createGrocyWriteTools(need, now),
+  ];
 }

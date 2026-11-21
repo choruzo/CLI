@@ -2124,14 +2124,19 @@ impl Actor {
                 .unwrap_or("unknown")
                 .to_string()
         };
+        let server_revision = server
+            .and_then(|s| s.get("revision"))
+            .and_then(Value::as_u64);
         self.cfg.logger.info(&format!(
-            "connected: daemon {} capabilities=[{}]",
+            "connected: daemon {} revision={} capabilities=[{}]",
             text("version"),
+            server_revision.map_or("none".to_string(), |r| r.to_string()),
             capabilities.join(",")
         ));
         self.set_state(ConnectionState::Connected {
             server_version: text("version"),
             server_platform: text("platform"),
+            server_revision,
             protocol: PROTOCOL_VERSION,
             capabilities,
             features: strings(hello.get("features")),

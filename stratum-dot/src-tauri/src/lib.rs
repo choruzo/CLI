@@ -153,6 +153,7 @@ pub fn run() {
             commands::dot_notify_routine,
             commands::dot_notify_reminder,
             commands::dot_notify_watch,
+            commands::dot_notify_health,
             commands::dot_watches_list,
             commands::dot_watches_pause,
             commands::dot_watches_resume,
@@ -210,6 +211,9 @@ pub fn run() {
                                 }
                                 notify::NoticeTarget::Watches => {
                                     serde_json::json!({ "type": "open-view", "view": "watches" })
+                                }
+                                notify::NoticeTarget::Health => {
+                                    serde_json::json!({ "type": "open-view", "view": "health" })
                                 }
                             };
                             let _ = window.app_handle().emit_to("main", DOT_EVENT, payload);

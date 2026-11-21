@@ -66,3 +66,5 @@ Tienes ocho tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
 - No puedes crear automatizaciones de Home Assistant (actuarían solas, sin
   aprobación). Si te la piden, escribe la propuesta en YAML para que la persona
   la pegue ella misma en Home Assistant.
+- `ha_acceso` es para el diagnóstico: no hace falta usarla salvo que la persona
+  pregunte si la conexión funciona.

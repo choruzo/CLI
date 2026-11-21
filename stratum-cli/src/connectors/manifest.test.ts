@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { CONNECTOR_ID_RE, checksOf, parseConnectorManifest, readOnlyToolsOf } from './manifest.js';
+import {
+  CONNECTOR_ID_RE,
+  accessCheckOf,
+  checksOf,
+  parseConnectorManifest,
+  readOnlyToolsOf,
+} from './manifest.js';
 
 const valid = () => ({
   schemaVersion: 1,
@@ -90,6 +96,31 @@ describe('parseConnectorManifest (M20)', () => {
     ]) {
       expect(() => parseConnectorManifest(withChecks([{ ...ok, args: [bad] }]), 'x')).toThrow();
     }
+  });
+
+  it('access (M23): una check declarada y sin argumentos', () => {
+    const okCheck = { tool: 'leer', summary: 'Mira', minIntervalSec: 300, args: [] };
+    const base = { ...valid(), checks: [okCheck] };
+    expect(accessCheckOf(parseConnectorManifest({ ...base, access: 'leer' }, 'x'))).toBe('leer');
+    expect(accessCheckOf(parseConnectorManifest(base, 'x'))).toBeNull();
+
+    // No es una check declarada (aunque sea una tool).
+    expect(() => parseConnectorManifest({ ...base, access: 'escribir' }, 'x')).toThrow(
+      /not a declared check/,
+    );
+    expect(() => parseConnectorManifest({ ...valid(), access: 'leer' }, 'x')).toThrow(
+      /not a declared check/,
+    );
+    // Con argumentos no vale.
+    const arg = { name: 'q', type: 'string', required: false, description: 'Algo' };
+    expect(() =>
+      parseConnectorManifest(
+        { ...valid(), checks: [{ ...okCheck, args: [arg] }], access: 'leer' },
+        'x',
+      ),
+    ).toThrow(/no arguments/);
+    // Nombre mal formado.
+    expect(() => parseConnectorManifest({ ...base, access: 'Leer!' }, 'x')).toThrow();
   });
 
   it('readOnlyToolsOf devuelve solo las de lectura', () => {

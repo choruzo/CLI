@@ -141,22 +141,28 @@ export function createGrocyClient(opts: GrocyClientOptions): GrocyClient | null 
     if (code === 'ENOTFOUND' || code === 'EAI_AGAIN') {
       return new ToolUserError(
         `No se resuelve el nombre ${host} desde la caja de conectores: usa el nombre completo con dominio o la IP en GROCY_URL (p. ej. http://192.168.1.10:9283/api). La persona lo cambia con \`${SETUP_COMMAND} --name GROCY_URL\`.`,
+        'unreachable',
       );
     }
     if (err instanceof Error && err.name === 'AbortError') {
       return new ToolUserError('Consulta a Grocy cancelada.');
     }
     if (err instanceof Error && err.name === 'TimeoutError') {
-      return new ToolUserError(`No se llega a Grocy en ${host} (tiempo de espera agotado).`);
+      return new ToolUserError(
+        `No se llega a Grocy en ${host} (tiempo de espera agotado).`,
+        'unreachable',
+      );
     }
     const cause = err instanceof Error ? (err as { cause?: unknown }).cause : null;
     if (cause instanceof Error && /redirect/i.test(cause.message)) {
       return new ToolUserError(
         `Grocy en ${host} respondió con una redirección, y no se sigue: usa en GROCY_URL la dirección de la API (el puerto publicado del add-on, terminada en /api).`,
+        'unreachable',
       );
     }
     return new ToolUserError(
       `No se llega a Grocy en ${host}. Si es el add-on de Home Assistant, su puerto tiene que estar publicado (Ajustes → Complementos → Grocy → Red).`,
+      'unreachable',
     );
   }
 
@@ -205,6 +211,7 @@ export function createGrocyClient(opts: GrocyClientOptions): GrocyClient | null 
         ingress
           ? `Grocy no responde por el Ingress de Home Assistant (HTTP ${res.status}): GROCY_URL tiene que ser el puerto publicado del add-on (p. ej. http://homeassistant.local:9283/api). La persona lo cambia con \`${SETUP_COMMAND} --name GROCY_URL\`.`
           : `Grocy rechazó la clave de API (HTTP ${res.status}): la persona debe crear otra en Grocy (Ajustes → Gestionar claves de API) y guardarla con \`${SETUP_COMMAND}\`.`,
+        'auth',
       );
     }
     if (!res.ok) {

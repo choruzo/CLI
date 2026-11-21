@@ -2866,6 +2866,55 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       Hacerlo desde el anfitrión rompería que los conectores solo hablen desde su caja. Lo dice
       como nota, y la prueba de verdad queda para los avisos de degradación (tercer punto), desde
       dentro de la caja.
+  - *Avisos de degradación, diseño (2026-11-21, el usuario pidió empezar; decisiones de Claude,
+    cambiables)*:
+    - **Solo se sondea, no se escucha.** Un fallo en mitad de una conversación ya lo ven el modelo
+      y la persona. El aviso sirve cuando nadie mira. Además, clasificar el texto de un
+      `tool_error` sería inferir del texto, lo que el repo prohíbe.
+    - **Comprobación de acceso por conector.** Los conectores con cuenta (Google, Home Assistant,
+      Grocy) declaran una comprobación sin argumentos (`google_acceso`, `ha_acceso`,
+      `grocy_acceso`). Es una `check` normal de M22, que va por la misma sonda y desde la caja de
+      conectores, y el manifiesto la señala con `access`. Devuelve `estado` `ok`, `auth` (credencial
+      rechazada o caducada, p. ej. `invalid_grant` de Google), `unreachable` o `error`. El conector
+      lo clasifica con un tipo en `ToolUserError`, no por el texto. Los conectores públicos (tiempo,
+      transporte) no la llevan: una caída suya es pasajera y no la arregla la persona.
+    - **`HealthMonitor` en el daemon**, sin el LLM: una pasada a los 2 minutos de arrancar y luego
+      cada 30 minutos. Con `auth`, avisa a la primera. Con `unreachable` o `error`, avisa al
+      segundo fallo seguido. Cuando una causa ya avisada vuelve a `ok`, avisa una vez de que
+      funciona. Un conector desactivado se olvida sin avisar, y sin caja de conectores no se
+      mira nada (eso ya lo avisan los vigilantes).
+    - **Imagen desfasada**: la caja del agente o la de conectores existe con otra imagen o
+      ajustes (`outdated`). Se avisa una vez, y se olvida sin avisar cuando deja de estarlo.
+    - **Una vez por causa, también tras reiniciar**: lo avisado se guarda en `health.json`, en los
+      datos del `companion` (atómico, Zod, `schemaVersion`; si no se entiende, en memoria y sin
+      reescribirlo). Si el aviso no se entrega, no se marca y se reintenta en la pasada siguiente.
+    - **Entrega**: evento `health.notice` (`docs/protocol.md` §34) en la sesión principal del
+      `companion` y en Telegram, como `watch.notice`. No entra en la conversación. En Dot sale un
+      aviso del SO que abre *Health*. El texto lo compone el daemon con una plantilla.
+    - `doctor.run` enseña además el resultado de la última comprobación de acceso de cada
+      conector, que es la prueba del OAuth de Google desde la caja.
+  - *Empaquetado de Dot, decidido por el usuario el 2026-11-21*: Dot **exige la CLI instalada
+    aparte** (es la que trae el daemon; el instalador no la lleva dentro) y tiene **auto-update**.
+    Queda para después del desfase de versiones. *Decidido también por el usuario (2026-11-21)*:
+    el instalador **se firma** y se publica **en GitHub, como Desktop**. Hoy `dot-release.yml`
+    ya publica una pre-release por tag `dot-vX.Y.Z`, pero sin firma ni auto-update. Falta
+    copiar de `desktop-release.yml` la firma Authenticode (opcional mientras no haya
+    `WINDOWS_CERTIFICATE`; hoy el repo solo tiene la clave del updater), el plugin del updater
+    con su release fija (`dot-updater`, `latest.json`, la misma clave minisign) y, en Dot, que
+    compruebe que la CLI está instalada.
+  - *Desfase de versiones, diseño (2026-11-21, decisiones de Claude, cambiables)*:
+    - Cada app tiene su versión (Dot 0.3, Desktop 0.11, CLI 0.15) y compararlas no dice nada. Lo
+      que se compara es la **revisión del protocolo** (`STRATUM_PROTOCOL_REVISION`). Sube con cada
+      cambio aditivo, y un test con la huella de métodos y eventos obliga a subirla.
+    - Solo la anuncia el servidor (`server.revision` en `core.hello`). El cliente no manda la suya
+      porque el schema de `client` es estricto y un daemon viejo rechazaría la conexión. Un daemon
+      sin revisión cuenta como anterior.
+    - Dot y Desktop comparan y lo dicen con un aviso que no bloquea: «el daemon es más viejo,
+      reinícialo o actualiza la CLI» o «esta app es más vieja, actualízala». También sale como
+      fila en *Health*. Nunca deciden con eso si conectan, ni reinician nada.
+    - La CLI compara la versión de Stratum (es el mismo paquete que el daemon).
+      `stratum daemon start` y `status` avisan si el daemon que corre es de otra versión;
+      `doctor` ya lo hacía.
 
 - **M24 — Medir al `companion`** [propuesto 2026-11-20]. Hoy tiene siete escenarios de eval
   (computer use, Renfe y uno de seguridad). Falta una batería de tareas del día a día:

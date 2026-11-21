@@ -13,6 +13,7 @@ import type {
   ProtocolQuestionRequest,
   ProtocolReminder,
   ProtocolWatchNotice,
+  ProtocolHealthNotice,
   ProtocolResolver,
   ProtocolRun,
   ProtocolSession,
@@ -134,6 +135,12 @@ export interface StateEventData {
    * del `companion`, fuera de cualquier run, también en `overview`. Solo informa.
    */
   'watch.notice': { notice: ProtocolWatchNotice };
+  /**
+   * M23 — aviso de degradación (credencial rechazada, conector que no responde,
+   * caja desfasada), como `watch.notice`: en la sesión principal del
+   * `companion`, fuera de cualquier run, también en `overview`. Solo informa.
+   */
+  'health.notice': { notice: ProtocolHealthNotice };
   warning: { message: string };
   error: { message: string; fatal: boolean };
 }
@@ -188,6 +195,7 @@ export const EVENT_CLASS: Readonly<Record<ProtocolEventType, 'state' | 'volatile
   'question.resolved': 'state',
   'reminder.due': 'state',
   'watch.notice': 'state',
+  'health.notice': 'state',
   warning: 'state',
   error: 'state',
   'message.delta': 'volatile',
@@ -215,6 +223,7 @@ export const OVERVIEW_EVENT_TYPES: readonly StateEventType[] = [
   'plan.resolved',
   'reminder.due',
   'watch.notice',
+  'health.notice',
 ];
 
 interface EventBase {

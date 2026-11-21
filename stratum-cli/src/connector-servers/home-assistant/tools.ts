@@ -6,6 +6,7 @@
  * lee un vigilante.
  */
 import { z } from 'zod';
+import { accessCheckTool } from '../lib/access.js';
 import { ToolUserError, type ConnectorTool, type ToolOutput } from '../lib/mcp-stdio.js';
 import {
   createHaClient,
@@ -785,7 +786,25 @@ export function createHomeAssistantTools(
     },
   };
 
-  return [haResumen, haBuscar, haEstado, haHistorial, haComprobar, haEncender, haApagar, haAccion];
+  const haAcceso = accessCheckTool(
+    'ha_acceso',
+    'Comprobación de acceso para el diagnóstico, de solo lectura y sin argumentos: llama a la API de Home Assistant y dice si el token sigue valiendo (estado «ok», «auth» o «unreachable»). No hace falta usarla salvo que la persona pregunte si la conexión funciona.',
+    async (signal) => {
+      await need().getJson('/api/', signal);
+    },
+  );
+
+  return [
+    haResumen,
+    haBuscar,
+    haEstado,
+    haHistorial,
+    haComprobar,
+    haAcceso,
+    haEncender,
+    haApagar,
+    haAccion,
+  ];
 }
 
 // --- Detalle de un estado ----------------------------------------------------

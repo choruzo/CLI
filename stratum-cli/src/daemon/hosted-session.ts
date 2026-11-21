@@ -39,6 +39,7 @@ import type {
   ProtocolSessionSnapshot,
   ProtocolReminder,
   ProtocolWatchNotice,
+  ProtocolHealthNotice,
   ResumeStatus,
   RevertStatus,
   StateEventData,
@@ -820,6 +821,12 @@ export class HostedSession {
    */
   watchNotice(notice: ProtocolWatchNotice): void {
     this.publisher.watchNotice(notice);
+    this.publisher.flush();
+  }
+
+  /** M23 — un aviso de degradación (`health.notice`), como `watchNotice`. */
+  healthNotice(notice: ProtocolHealthNotice): void {
+    this.publisher.healthNotice(notice);
     this.publisher.flush();
   }
 

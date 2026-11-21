@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "google",
-  "version": "1.2.0",
+  "version": "1.3.0",
   "name": "Google (Gmail, Tasks y Calendar)",
   "description": "Lee tu correo de Gmail y deja borradores (nunca envía), consulta y crea tus tareas de Google Tasks y consulta, crea y mueve eventos de Google Calendar sin avisar a nadie, con un cliente OAuth propio.",
   "agents": ["companion"],
@@ -34,7 +34,13 @@
     "clientSecret": "GOOGLE_CLIENT_SECRET",
     "refreshToken": "GOOGLE_REFRESH_TOKEN"
   },
+  "access": "google_acceso",
   "tools": [
+    {
+      "name": "google_acceso",
+      "readOnly": true,
+      "summary": "Comprueba que la credencial sigue valiendo (para el diagnóstico)."
+    },
     {
       "name": "gmail_buscar",
       "readOnly": true,
@@ -102,6 +108,12 @@
     }
   ],
   "checks": [
+    {
+      "tool": "google_acceso",
+      "summary": "Si la credencial sigue valiendo (para el diagnóstico).",
+      "minIntervalSec": 300,
+      "args": []
+    },
     {
       "tool": "gmail_comprobar",
       "summary": "Correos que cumplen una búsqueda de Gmail (estado: id del más reciente).",

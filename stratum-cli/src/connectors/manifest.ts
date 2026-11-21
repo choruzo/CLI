@@ -150,9 +150,34 @@ export const ConnectorManifestSchema = z
     oauth: OAuthSchema.optional(),
     tools: z.array(ToolSchema).min(1),
     checks: z.array(CheckSchema).max(CHECK_MAX).optional(),
+    /**
+     * M23 — la «comprobación de acceso»: una de las `checks`, sin argumentos,
+     * que dice si la credencial del conector sigue valiendo. La llama el daemon
+     * (sonda de vigilantes) para el diagnóstico.
+     */
+    access: z
+      .string()
+      .regex(/^[a-z][a-z0-9_]{0,47}$/)
+      .optional(),
   })
   .strict()
   .superRefine((m, ctx) => {
+    if (m.access !== undefined) {
+      const check = (m.checks ?? []).find((c) => c.tool === m.access);
+      if (!check) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `access "${m.access}" is not a declared check`,
+          path: ['access'],
+        });
+      } else if (check.args.length > 0) {
+        ctx.addIssue({
+          code: 'custom',
+          message: `access "${m.access}" must take no arguments`,
+          path: ['access'],
+        });
+      }
+    }
     if (m.checks) {
       const tools = new Map(m.tools.map((t) => [t.name, t]));
       const seenChecks = new Set<string>();
@@ -228,6 +253,11 @@ export function parseConnectorManifest(raw: unknown, source: string): ConnectorM
 /** Comprobaciones del manifiesto (M22); `[]` si no declara ninguna. */
 export function checksOf(manifest: ConnectorManifest): ConnectorCheck[] {
   return manifest.checks ?? [];
+}
+
+/** Tool de la comprobación de acceso (M23); `null` si el conector no declara ninguna. */
+export function accessCheckOf(manifest: ConnectorManifest): string | null {
+  return manifest.access ?? null;
 }
 
 /** Tools que el manifiesto declara de solo lectura. */

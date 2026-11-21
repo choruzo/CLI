@@ -55,6 +55,7 @@
     "allow-dot-notify-routine",
     "allow-dot-notify-reminder",
     "allow-dot-notify-watch",
+    "allow-dot-notify-health",
     "allow-dot-watches-list",
     "allow-dot-watches-pause",
     "allow-dot-watches-resume",

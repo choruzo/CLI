@@ -26,6 +26,8 @@ export type ConnectionState =
       kind: 'connected';
       serverVersion: string;
       serverPlatform: string;
+      /** Revisión del protocolo que anunció el daemon; `null` si es de antes de anunciarla. */
+      serverRevision: number | null;
       protocol: number;
       capabilities: string[];
       features: string[];

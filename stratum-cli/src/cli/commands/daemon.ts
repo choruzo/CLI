@@ -123,12 +123,27 @@ const run = new Command('run')
     process.exit(0);
   });
 
+/**
+ * M23 — el daemon que corre es de otra versión de Stratum que esta CLI (se
+ * actualizó la CLI y el daemon sigue con la anterior). Solo se dice: nunca se
+ * reinicia por su cuenta, porque cortaría los runs en curso.
+ */
+export function versionSkewNote(daemonVersion: string, cli: string = cliVersion()): string | null {
+  if (daemonVersion === cli) return null;
+  return (
+    `  note: the daemon runs Stratum ${daemonVersion} and this CLI is ${cli}. ` +
+    'It keeps the old version until restarted: stratum daemon stop, then stratum daemon start.\n'
+  );
+}
+
 const start = new Command('start')
   .description('Start the daemon in the background')
   .action(async () => {
     const before = await locateLive();
     if (before.status === 'found') {
       process.stdout.write(`stratumd is already running (pid ${before.endpoint.pid}).\n`);
+      const note = versionSkewNote(before.endpoint.version);
+      if (note) process.stdout.write(note);
       return;
     }
     if (before.status === 'incompatible') {
@@ -237,7 +252,8 @@ const status = new Command('status')
           `  uptime    ${upSeconds}s\n` +
           `  clients   ${info.clients}\n` +
           `  sessions  ${info.liveSessions}\n` +
-          `  runs      ${info.activeRuns} active\n`,
+          `  runs      ${info.activeRuns} active\n` +
+          (versionSkewNote(info.server.version) ?? ''),
       );
     } finally {
       client.close();

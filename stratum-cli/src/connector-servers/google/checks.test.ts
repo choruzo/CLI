@@ -88,8 +88,9 @@ const server = createMcpServer({ name: manifest.id, version: manifest.version },
 const checks = checksOf(manifest).map((c) => [c.tool, c] as const);
 
 describe('comprobaciones del manifiesto de Google', () => {
-  it('declara las tres con su intervalo mínimo', () => {
+  it('declara las cuatro con su intervalo mínimo', () => {
     expect(checks.map(([n, c]) => [n, c.minIntervalSec])).toEqual([
+      ['google_acceso', 300],
       ['gmail_comprobar', 300],
       ['tareas_comprobar_vencidas', 900],
       ['calendario_comprobar_proximo', 60],

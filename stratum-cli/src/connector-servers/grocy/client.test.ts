@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ToolUserError } from '../lib/mcp-stdio.js';
 import { createGrocyClient, parseBaseUrl } from './client.js';
+import { createGrocyTools } from './tools.js';
 
 const KEY = 'clave-SECRETA-123';
 const URL_OK = 'http://grocy.casa:9283/api';
@@ -322,5 +323,51 @@ describe('escritura (post)', () => {
       const msg = await failure(mk(failing(withCause(cause))).post('/recipes/3/consume', {}));
       expect(msg).not.toContain('No sé si Grocy llegó');
     }
+  });
+});
+
+describe('clasificación de fallos y grocy_acceso (M23)', () => {
+  const acceso = (f: typeof fetch, url = URL_OK, apiKey: string | undefined = KEY) =>
+    createGrocyTools({ fetch: f, url, apiKey }).find((t) => t.name === 'grocy_acceso')!;
+  const run = async (t: ReturnType<typeof acceso>) =>
+    ((await t.handler({})) as { structured: Record<string, unknown> }).structured;
+
+  it('GET /system/info correcto → ok', async () => {
+    const f = fakeFetch(() => json({ grocy_version: { Version: '4.7.1' } }));
+    expect(await run(acceso(f.fetch))).toMatchObject({ estado: 'ok', valor: null });
+    expect(new URL(f.calls[0]!.url).pathname).toBe('/api/system/info');
+  });
+
+  it('401 y 403 → auth, también con una URL de Ingress', async () => {
+    for (const status of [401, 403]) {
+      const f = fakeFetch(() => new Response('{}', { status }));
+      expect((await run(acceso(f.fetch))).estado).toBe('auth');
+    }
+    const f = fakeFetch(() => new Response('{}', { status: 401 }));
+    const out = await run(acceso(f.fetch, 'http://ha.casa:8123/api/hassio_ingress/abc/api'));
+    expect(out.estado).toBe('auth');
+    expect(String(out.detalle)).toContain('Ingress');
+  });
+
+  it('no resuelve, no llega, plazo o redirección → unreachable', async () => {
+    const errors = [
+      withCause(Object.assign(new Error('x'), { code: 'ENOTFOUND' })),
+      withCause(Object.assign(new Error('x'), { code: 'ECONNREFUSED' })),
+      Object.assign(new Error('t'), { name: 'TimeoutError' }),
+      withCause(new Error('unexpected redirect')),
+    ];
+    for (const e of errors) {
+      expect((await run(acceso(failing(e)))).estado).toBe('unreachable');
+    }
+  });
+
+  it('cancelación: error sin kind; HTTP 500 y sin configurar: error', async () => {
+    const abort = Object.assign(new Error('a'), { name: 'AbortError' });
+    expect((await run(acceso(failing(abort)))).estado).toBe('error');
+    const f = fakeFetch(() => new Response('{}', { status: 500 }));
+    expect((await run(acceso(f.fetch))).estado).toBe('error');
+    const out = await run(acceso(f.fetch, URL_OK, ''));
+    expect(out.estado).toBe('error');
+    expect(String(out.detalle)).toContain('stratum connectors setup grocy');
   });
 });

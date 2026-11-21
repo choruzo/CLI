@@ -2,6 +2,7 @@
  * Une el lado nativo con los stores: cada `DotEvent` va a su sitio, y nada más.
  * Aquí no hay lógica del protocolo: validar y reducir es de `protocol/apply.ts`.
  */
+import { watchHealthNotices } from '../app/health-notices';
 import { watchReminderDue } from '../app/reminders';
 import { watchRoutineRuns } from '../app/routines';
 import { watchWatchNotices } from '../app/watches';
@@ -36,6 +37,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       watchReminderDue(native, event.events);
       // M22: un `watch.notice` refresca la lista de vigilantes (y avisa), una vez por aviso.
       watchWatchNotices(native, event.events);
+      // M23: un `health.notice` avisa (una vez) de que el asistente está degradado o volvió.
+      watchHealthNotices(native, event.events);
       break;
     case 'approver':
       useApprover.getState().setStatus(event.status);
@@ -47,6 +50,8 @@ export function handleDotEvent(native: NativeBridge, event: DotEvent): void {
       if (event.view === 'reminders') useUi.getState().openReminders();
       // M22: se pulsó el aviso de un vigilante. Solo se abre su pestaña.
       if (event.view === 'watches') useUi.getState().openWatches();
+      // M23: se pulsó el aviso de degradación. Solo se abre su pestaña.
+      if (event.view === 'health') useUi.getState().openHealth();
       break;
     case 'ask':
       // El Dot compacto: el mensaje va al asistente (lo envía su vista al tener su sesión).

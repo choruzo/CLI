@@ -38,6 +38,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   13: '330dd4b3ac978c27',
   // M28 fase 3: escritura con confirmación en `grocy`.
   14: '05dbc4f20e9386f1',
+  // M23: `google_acceso`, `ha_acceso` y `grocy_acceso` (comprobación de acceso).
+  15: '9362084e78725f1c',
 };
 
 /**
