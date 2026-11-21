@@ -1014,7 +1014,7 @@ impl DaemonLauncher for FakeLauncher {
         Box::pin(async move {
             self.calls.fetch_add(1, Ordering::Relaxed);
             if self.fail {
-                return Err("the `stratum` command was not found.".to_string());
+                return Err(dot_link::LaunchError::CliMissing);
             }
             self.fake.start(TOKEN_A, 1);
             Ok(())

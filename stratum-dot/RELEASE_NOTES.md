@@ -3,20 +3,18 @@
 
 Stratum Dot es el cockpit de escritorio de `stratumd` y, desde la 0.2.0, también tu **asistente**: una ventana pequeña y un icono en la bandeja para ver las sesiones vivas de Stratum —las que aloja el daemon y las que publican `stratum chat` y `stratum run` desde una terminal—, conversar con el agente, contestar lo que te pide y dejarle tareas a su asistente, que trabaja en una caja aislada.
 
-## Novedades de la 0.3.0
+## Novedades de la 0.4.0
 
-- **Dot abre en el asistente**, y por debajo de 720 px la vista va en pestañas (*Conversation*, *Box*, *Routines*, *Memory*, *Telegram*). La cabina de sesiones sigue en *Sessions*.
-- **Dot compacto**: `Ctrl+Alt+Space` (o la bandeja) abre una ventana flotante para escribirle al asistente sin abrir la principal; `Esc` la cierra.
-- **Conversación nueva** del asistente: la actual se compacta a su memoria, se archiva, y la nueva hereda esa memoria.
-- **Inspector de memoria**: lo que recuerda el asistente, con su procedencia, búsqueda y *Forget*.
-- **Concesiones con caducidad**: al aprobar, «Allow for…» 10, 30 o 60 minutos para esa tool y ese target, confirmado en la ventana nativa; panel para revocarlas.
-- **Conectores MCP del asistente** (`companion.mcp.servers` en la config global de la CLI): lo declarado de solo lectura no pregunta, lo demás se confirma.
-- **Telegram**: empareja un chat privado desde el panel *Telegram* (con confirmación nativa) y habla con el asistente desde el móvil —la misma conversación que en Dot—, con aprobaciones, preguntas y planes por botones, fotos de entrada y las imágenes que te enseñe el asistente. Lo forzado, con frase o las concesiones siguen solo en Dot.
-- **Imágenes del asistente** en la conversación (`send_image`: un fichero de la carpeta compartida o la pantalla de la caja).
+- **Auto-update**: Dot avisa cuando hay una versión nueva y la instala cuando le dices (*Install and restart*). Cada paquete va firmado y Dot no instala uno que no lo esté. Es la primera versión que lo trae: desde la 0.3.0 hay que instalarla a mano una vez.
+- **Panel *Health***: el diagnóstico del asistente (caja, conectores, cuentas, Telegram, modelo), con cómo arreglar cada cosa, y **avisos de degradación** (una credencial caducada, un conector caído, una imagen desfasada) que llegan una sola vez como notificación del sistema.
+- **Conectores** del asistente en su panel (tiempo, transporte de Madrid y Renfe, Home Assistant, Google, Grocy…). Activar uno se confirma en la ventana nativa.
+- **Recordatorios** y **vigilantes** del asistente, cada uno con su panel y su notificación del sistema.
+- **Memoria** por secciones, con los cambios sugeridos del *dreaming* y los cambios recientes del asistente, que se pueden deshacer.
+- Si falta la CLI, Dot lo dice y explica cómo instalarla. Si el daemon y Dot no son de la misma época, un aviso dice qué actualizar.
 
 ## Requisitos
 
-- **Stratum CLI 0.13.0 o posterior**, con `stratum` en el `PATH`: `npm install -g stratum-cli`. Dot arranca el daemon con `stratum daemon start` si no hay uno en marcha; sin la CLI solo puede observar un daemon que arranque otro.
+- **Stratum CLI 0.16.0 o posterior**, instalada aparte y con `stratum` en el `PATH`: `npm install -g stratum-cli` (Node.js 22 o posterior). Dot no la lleva dentro: arranca el daemon con `stratum daemon start` si no hay uno en marcha, y sin la CLI solo puede observar un daemon que arranque otro.
 - Un provider configurado en la CLI (`stratum provider add …`): Dot no tiene ajustes propios.
 - Para la caja del asistente: **Podman** o Docker instalado y `"box": { "enabled": true }` en la config global de la CLI. La primera vez, arrancarla construye la imagen (tarda unos minutos). Sin caja, el asistente conversa pero no ejecuta nada.
 - Para que use la pantalla de la caja: un modelo con visión declarada en `provider.providers.<alias>.models.<id>.vision` de la config de la CLI.
@@ -36,7 +34,7 @@ Stratum Dot es el cockpit de escritorio de `stratumd` y, desde la 0.2.0, tambié
 
 ## Limitaciones conocidas
 
-- **Instaladores sin firmar** y **sin auto-update**: Windows SmartScreen avisará al abrir el `.exe` («Más información → Ejecutar de todas formas»). Las versiones nuevas se instalan a mano.
+- **El instalador de Windows no lleva firma Authenticode**: SmartScreen avisará al abrir el `.exe` («Más información → Ejecutar de todas formas»). Los paquetes del auto-update sí van firmados (minisign) y Dot comprueba esa firma antes de instalar nada.
 - Probada sobre todo en **Windows 11**. En Linux compila y pasa sus tests en CI, pero la bandeja, las ventanas nativas y las notificaciones faltan por probar en un escritorio real; en GNOME sin la extensión AppIndicator el icono de la bandeja no aparece (*Quit Dot* está también en la ventana). macOS no está soportado.
 - Si lanzas Dot desde el menú de aplicaciones de Linux, puede no ver `stratum` si lo instalaste con nvm u otra ruta que solo añade tu shell al `PATH`: arranca el daemon tú con `stratum daemon start`.
 - Computer use solo es fiable con modelos medidos (`glm5.3-flash` acierta las tareas de prueba; los de coordenadas `norm1000` fallan bastante más).

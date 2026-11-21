@@ -32,6 +32,9 @@ tauri-plugin-notification = "2"
 # El Dot compacto (PRD §8.2) se abre con un atajo global. Solo lo usa el lado
 # nativo (`ask.rs`): el webview no recibe su permiso.
 tauri-plugin-global-shortcut = "2"
+# M23: auto-update contra GitHub Releases (`updates.rs`). Solo lo usa el lado
+# nativo: el webview no recibe sus permisos.
+tauri-plugin-updater = "2"
 
 # En Windows el aviso se muestra con la misma crate que usa el plugin por debajo,
 # para engancharse a su evento `Activated`: el plugin no avisa del clic en el

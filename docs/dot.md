@@ -467,8 +467,12 @@ cambiada por líneas JSON: permite probar contra un daemon real sin automatizar 
 - **`tool.started` no es «ejecutándose»** (ver §5).
 - **El entorno de una sesión del daemon arrancado por Dot es el de Dot** (el de la sesión
   gráfica, no el de una terminal): es Q1 del PRD, sin cambios en M6.
-- **Dot necesita la CLI instalada** para arrancar el daemon (`stratum` en el `PATH`). Sin ella
-  funciona como observador de un daemon que arranque otro.
+- **Dot necesita la CLI instalada** para arrancar el daemon (`stratum` en el `PATH`, o la de
+  `STRATUM_DOT_CLI`); el instalador no la lleva dentro (decidido en M23). Sin ella funciona
+  como observador de un daemon que arranque otro. Si no había daemon y no encuentra la CLI, el
+  enlace lo dice con un motivo con tipo (`ConnectionState::Error { reason: CliMissing }`, que
+  sale del `LaunchError::CliMissing` del lanzador, no del texto), y Dot enseña cómo instalarla
+  (`npm install -g stratum-cli`, Node.js 22 o posterior) con *Retry*.
 - **Linux**: `dot-link` y sus tests cubren el unix socket; la app (bandeja, instancia única,
   ocultar al cerrar) está comprobada en Windows y pendiente de un escritorio Linux real (Q4).
   macOS queda fuera de v1.
@@ -487,7 +491,18 @@ cambiada por líneas JSON: permite probar contra un daemon real sin automatizar 
   conoce sigue avanzando la secuencia sin aplicarse. Desktop usa el mismo estado con su
   propio texto, en español. Tests: `protocol/revision-skew.test.ts`, `App.test.tsx`,
   `Health.test.tsx`, `state.rs` y `tests/link.rs`.
-- **Sin firma ni auto-update**: empaquetado y firma son M9.
+- **Auto-update y firma (M23)**, como Desktop: `tauri-plugin-updater`, con la misma clave
+  minisign (la pública en `tauri.conf.json`) y el manifiesto en la release fija `dot-updater`
+  (`latest.json`), que escribe `dot-release.yml` al crear la pre-release `dot-vX.Y.Z`, en el
+  mismo job (una release creada con `GITHUB_TOKEN` no dispara `release: published`). El
+  webview no tiene permisos del plugin: pregunta con `dot_update_check` e instala con
+  `dot_update_install` (`src-tauri/src/updates.rs`). Comprueba solo a los 5 s de arrancar y
+  cada 12 h, en silencio; a mano, desde el pie (*Check for updates*). Nunca instala sin que la
+  persona lo pida (*Install and restart*); *Later* aparca esa versión (la única preferencia
+  nueva: `stratum-dot.dismissedUpdate`). Antes de instalar se guarda la geometría de la
+  ventana. El daemon y sus sesiones siguen mientras Dot se reinicia. La firma Authenticode es
+  opcional mientras no haya `WINDOWS_CERTIFICATE`: sin ella, SmartScreen avisa. Tests:
+  `src/app/Updates.test.tsx` y `tests/architecture.test.ts`.
 
 ### Deuda menor (no bloquea M6)
 

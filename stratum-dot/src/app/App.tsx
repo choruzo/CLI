@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { useNative } from '../bridge/context';
 import { ConnectionBanner, connectionLabel, connectionTone } from '../components/ConnectionBanner';
 import { Dot } from '../components/StatusBadge';
+import { UpdateBanner, updateCheckLabel } from '../components/UpdateBanner';
 import { collectPending } from '../protocol/interactions';
 import { countByKind, countsLabel } from '../protocol/view';
 import { Assistant } from '../screens/Assistant';
@@ -15,6 +16,7 @@ import { useSessions } from '../stores/sessionStore';
 import { HOME_VIEW, OPENING_TTL_MS, useUi } from '../stores/uiStore';
 import { ErrorBoundary } from './ErrorBoundary';
 import { useNow } from './useNow';
+import { useUpdates } from './useUpdates';
 
 /**
  * Cabecera (daemon, sesiones, lo que espera a una persona), lista y detalle (una
@@ -25,6 +27,8 @@ export function App() {
   const native = useNative();
   const connection = useConnection((s) => s.state);
   const info = useConnection((s) => s.info);
+  const updates = useUpdates();
+  const updateCheck = updateCheckLabel(updates.phase);
   const lastServerVersion = useConnection((s) => s.lastServerVersion);
   const count = useSessions((s) => s.order.length);
   const listed = useSessions((s) => s.listed);
@@ -225,6 +229,7 @@ export function App() {
       </header>
 
       <ConnectionBanner state={connection} hasStaleSessions={count > 0} onRetry={retry} />
+      <UpdateBanner updates={updates} />
 
       {connection.kind === 'incompatible' ? (
         <main className="body">
@@ -263,6 +268,17 @@ export function App() {
           Dot {info?.dotVersion ?? '…'} · daemon {connected ? connection.serverVersion : (lastServerVersion ?? '—')} ·
           protocol {info?.protocol ?? '…'}
         </span>
+        <button
+          type="button"
+          className="btn ghost small"
+          onClick={updates.check}
+          disabled={updates.phase.kind === 'checking' || updates.phase.kind === 'downloading' || updates.phase.kind === 'installing'}
+          title={updateCheck.title}
+          data-update-check={updates.phase.kind}
+          style={{ marginLeft: 'auto' }}
+        >
+          {updateCheck.label}
+        </button>
         <button
           type="button"
           className="btn ghost small"

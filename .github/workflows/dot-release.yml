@@ -6,11 +6,23 @@ name: Dot release
 #   tests, build y GitHub Release publicada como **pre-release**. Mientras Dot
 #   sea 0.x, toda release suya es pre-release: nunca será el «latest» de GitHub,
 #   que es el de la CLI.
+#   Con la release publicada se escribe `latest.json` en la release fija
+#   `dot-updater`, que es la que consulta el auto-update de Dot (M23). Va en el
+#   mismo job: una release creada con GITHUB_TOKEN no dispara `release:
+#   published`, así que aquí no hay un job aparte como en Desktop.
 # - Manual (workflow_dispatch): solo build; los instaladores quedan como
 #   artefactos del run.
 #
-# Sin firma ni auto-update todavía (ver docs/dot.md §9): los instaladores no
-# llevan Authenticode y Windows SmartScreen avisará al abrirlos.
+# Dot exige la CLI instalada aparte (`npm install -g stratum-cli`): es la que
+# trae el daemon, y el instalador no la lleva dentro.
+#
+# Firma, toda opcional (sin secrets, instaladores sin firmar), como Desktop:
+# - Windows Authenticode: WINDOWS_CERTIFICATE (PFX en base64) +
+#   WINDOWS_CERTIFICATE_PASSWORD. Sin él, SmartScreen avisará al abrirlos.
+# - Clave del updater: TAURI_SIGNING_PRIVATE_KEY +
+#   TAURI_SIGNING_PRIVATE_KEY_PASSWORD (minisign, la misma que Desktop; la
+#   pública está en tauri.conf.json). Sin ella, instaladores sin auto-update y
+#   sin `latest.json`.
 
 on:
   push:
@@ -105,12 +117,54 @@ jobs:
           npm run typecheck
           npm run test:run
 
+      - name: Windows code signing (optional)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE: ${{ secrets.WINDOWS_CERTIFICATE }}
+          WINDOWS_CERTIFICATE_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if (-not $env:WINDOWS_CERTIFICATE) {
+            Write-Host "Sin WINDOWS_CERTIFICATE: instaladores sin firma Authenticode."
+            exit 0
+          }
+          $pfx = Join-Path $env:RUNNER_TEMP 'cert.pfx'
+          [IO.File]::WriteAllBytes($pfx, [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE))
+          $password = ConvertTo-SecureString -String $env:WINDOWS_CERTIFICATE_PASSWORD -Force -AsPlainText
+          $cert = Import-PfxCertificate -FilePath $pfx -CertStoreLocation Cert:\CurrentUser\My -Password $password
+          Remove-Item $pfx
+          $config = @{
+            bundle = @{
+              windows = @{
+                certificateThumbprint = $cert.Thumbprint
+                digestAlgorithm = 'sha256'
+                timestampUrl = 'http://timestamp.digicert.com'
+              }
+            }
+          } | ConvertTo-Json -Depth 5
+          $path = Join-Path $env:RUNNER_TEMP 'tauri.signing.json'
+          Set-Content -Path $path -Value $config -Encoding utf8
+          "TAURI_EXTRA_CONFIG=$path" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "Firma Authenticode activada ($($cert.Subject))"
+
       - name: Build installers
         working-directory: stratum-dot
         env:
           # linuxdeploy es una AppImage: sin FUSE en el runner, se extrae y ejecuta.
           APPIMAGE_EXTRACT_AND_RUN: '1'
-        run: npx tauri build --ci --bundles "${{ matrix.bundles }}"
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: |
+          set -euo pipefail
+          ARGS=(--ci --bundles "${{ matrix.bundles }}")
+          if [ -n "${TAURI_EXTRA_CONFIG:-}" ]; then ARGS+=(--config "$TAURI_EXTRA_CONFIG"); fi
+          # M23: con la clave del updater, además los paquetes firmados (*.sig).
+          if [ -n "${TAURI_SIGNING_PRIVATE_KEY:-}" ]; then
+            ARGS+=(--config '{"bundle":{"createUpdaterArtifacts":true}}')
+          else
+            echo "Sin TAURI_SIGNING_PRIVATE_KEY: instaladores sin auto-update."
+          fi
+          npx tauri build "${ARGS[@]}"
 
       - name: Collect installers
         run: |
@@ -121,6 +175,8 @@ jobs:
           shopt -s nullglob
           for f in "$BUNDLE"/nsis/*.exe "$BUNDLE"/deb/*.deb "$BUNDLE"/appimage/*.AppImage; do
             cp "$f" "$OUT/"
+            # Firma minisign del updater (M23), si se generó.
+            if [ -f "$f.sig" ]; then cp "$f.sig" "$OUT/"; fi
           done
           FILES=("$OUT"/*)
           if [ ${#FILES[@]} -eq 0 ]; then
@@ -153,6 +209,11 @@ jobs:
           path: installers
           merge-multiple: true
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
       - name: Create pre-release
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -166,3 +227,32 @@ jobs:
             --prerelease --latest=false \
             --title "Stratum Dot ${VERSION} (pre-release)" \
             --notes-file stratum-dot/RELEASE_NOTES.md
+
+      # M23: el manifiesto del auto-update, con las firmas de esta release. El
+      # generador es el de Desktop (mismo formato del plugin, mismos nombres).
+      - name: Updater manifest (latest.json)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          SIGS=(installers/*.sig)
+          if [ ${#SIGS[@]} -eq 0 ]; then
+            echo "Sin paquetes firmados (*.sig): no se publica latest.json, sin auto-update."
+            exit 0
+          fi
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#dot-v}"
+          node stratum-desktop/scripts/updater-manifest.mjs installers \
+            --version "$VERSION" \
+            --base-url "https://github.com/${GH_REPO}/releases/download/${TAG}" \
+            --notes-file stratum-dot/RELEASE_NOTES.md > latest.json
+          cat latest.json
+          if ! gh release view dot-updater > /dev/null 2>&1; then
+            gh release create dot-updater --prerelease --latest=false \
+              --target "${{ github.event.repository.default_branch }}" \
+              --title "Stratum Dot · canal de actualizaciones" \
+              --notes "Manifiesto del auto-update de Stratum Dot (latest.json). No es una versión: los instaladores están en las releases dot-v*."
+          fi
+          gh release upload dot-updater latest.json --clobber

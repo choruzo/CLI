@@ -28,6 +28,7 @@ mod notify;
 mod page;
 mod tray;
 mod unlock;
+mod updates;
 
 use dot_link::approver::ApproverTimings;
 use dot_link::discovery::default_endpoint_dir;
@@ -91,6 +92,9 @@ pub fn run() {
         // M16: notificaciones del sistema. El webview no tiene el permiso del plugin
         // (`capabilities/default.json`): solo `dot_notify_routine`, que valida el texto.
         .plugin(tauri_plugin_notification::init())
+        // M23: el auto-update. Solo lo usa Rust (`updates.rs`); el webview no tiene sus permisos.
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .manage(updates::UpdateState::default())
         // El Dot compacto: el atajo lo abre o lo cierra. Se registra en `setup`.
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
@@ -168,6 +172,8 @@ pub fn run() {
             commands::dot_set_attention,
             commands::dot_hide,
             commands::dot_quit,
+            updates::dot_update_check,
+            updates::dot_update_install,
         ])
         .on_window_event(|window, event| {
             if window.label().starts_with(confirm::WINDOW_PREFIX) {

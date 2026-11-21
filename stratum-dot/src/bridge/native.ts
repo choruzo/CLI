@@ -16,7 +16,7 @@
  * webview no controla— y solo se envían si la persona confirma allí. La frase
  * de una confirmación con nombre se teclea en esa ventana, no aquí.
  */
-import { invoke } from '@tauri-apps/api/core';
+import { Channel, invoke } from '@tauri-apps/api/core';
 import { listen } from '@tauri-apps/api/event';
 import type { ProtocolGrantMinutes } from '../protocol';
 
@@ -42,7 +42,23 @@ export type ConnectionState =
       daemonProtocol: number | null;
       daemonVersion: string | null;
     }
-  | { kind: 'error'; message: string };
+  /**
+   * `reason`, solo cuando hay un motivo con tipo: `cli-missing` = no había
+   * daemon y no se encontró la CLI para arrancarlo (Dot la exige instalada).
+   */
+  | { kind: 'error'; message: string; reason?: 'cli-missing' };
+
+/** M23 — una versión nueva de Dot (`UpdateInfo` en `src-tauri/src/updates.rs`). */
+export interface UpdateInfo {
+  version: string;
+  currentVersion: string;
+  notes: string | null;
+  date: string | null;
+}
+
+export type UpdateProgress =
+  | { event: 'progress'; downloaded: number; total: number | null }
+  | { event: 'installing' };
 
 /** Por qué está bloqueada la autoridad de aprobar (`LockReason` en `dot-link/src/approver.rs`). */
 export type ApproverLockReason = 'initial' | 'manual' | 'expired' | 'connection-lost' | 'daemon-changed';
@@ -315,6 +331,14 @@ export interface NativeBridge {
   watchesPause(watchId: string): Promise<unknown>;
   watchesResume(watchId: string): Promise<unknown>;
   watchesRemove(watchId: string): Promise<unknown>;
+  /**
+   * M23 — ¿hay una versión más nueva de Dot? `null` si no. La descarga y la
+   * comprobación de la firma son de Rust (`updates.rs`): el webview no tiene
+   * permisos del plugin.
+   */
+  checkForUpdate(): Promise<UpdateInfo | null>;
+  /** M23 — descarga, instala y reinicia lo que encontró `checkForUpdate`. Si va bien, no vuelve. */
+  installUpdate(onProgress: (progress: UpdateProgress) => void): Promise<void>;
   /** M16 — notificación del sistema (texto plano; sin acciones). */
   notifyRoutine(notification: RoutineNotification): Promise<void>;
   /** M21 — el aviso de un recordatorio: solo informa; pulsarlo abre la pestaña *Reminders*. */
@@ -428,6 +452,12 @@ export const tauriBridge: NativeBridge = {
   watchesRemove: (watchId) => invoke<unknown>('dot_watches_remove', { watchId }),
   notifyWatch: (title, body) => invoke('dot_notify_watch', { title, body }),
   notifyHealth: (title, body) => invoke('dot_notify_health', { title, body }),
+  checkForUpdate: () => invoke<UpdateInfo | null>('dot_update_check'),
+  installUpdate: (onProgress) => {
+    const channel = new Channel<UpdateProgress>();
+    channel.onmessage = onProgress;
+    return invoke('dot_update_install', { onProgress: channel });
+  },
   approverStatus: () => invoke<ApproverStatus>('dot_approver_status'),
   unlockApprovals: () => invoke('dot_approver_unlock'),
   lockApprovals: () => invoke('dot_approver_lock'),

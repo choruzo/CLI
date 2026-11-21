@@ -10,7 +10,34 @@ use std::pin::Pin;
 use std::process::Stdio;
 use std::time::Duration;
 
-pub type LaunchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), String>> + Send + 'a>>;
+pub type LaunchFuture<'a> = Pin<Box<dyn Future<Output = Result<(), LaunchError>> + Send + 'a>>;
+
+/// Por qué no se pudo pedir el daemon. Que falte la CLI va aparte, con tipo:
+/// la interfaz enseña cómo instalarla sin tener que leer el texto del error.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum LaunchError {
+    /// No hay `stratum`: ni en el `PATH` ni en la variable de la app.
+    CliMissing,
+    Failed(String),
+}
+
+/// Lo que se dice cuando falta la CLI (Dot la exige instalada aparte: trae el daemon).
+pub const CLI_MISSING_MESSAGE: &str = "the `stratum` command was not found. Install stratum-cli, or start the daemon yourself with `stratum daemon start`.";
+
+impl LaunchError {
+    pub fn message(&self) -> String {
+        match self {
+            LaunchError::CliMissing => CLI_MISSING_MESSAGE.to_string(),
+            LaunchError::Failed(message) => message.clone(),
+        }
+    }
+}
+
+impl From<String> for LaunchError {
+    fn from(message: String) -> Self {
+        LaunchError::Failed(message)
+    }
+}
 
 pub trait DaemonLauncher: Send + Sync {
     /// Pide que haya un daemon en marcha. `Ok` cuando el comando terminó bien;
@@ -23,7 +50,7 @@ pub struct NoLauncher;
 
 impl DaemonLauncher for NoLauncher {
     fn start(&self) -> LaunchFuture<'_> {
-        Box::pin(async { Err("starting the daemon is disabled".to_string()) })
+        Box::pin(async { Err("starting the daemon is disabled".to_string().into()) })
     }
 }
 
@@ -111,25 +138,30 @@ impl DaemonLauncher for CliLauncher {
             }
             let mut child = command.spawn().map_err(|e| {
                 if e.kind() == std::io::ErrorKind::NotFound {
-                    "the `stratum` command was not found. Install stratum-cli, or start the daemon yourself with `stratum daemon start`.".to_string()
+                    LaunchError::CliMissing
                 } else {
-                    format!("could not run `stratum daemon start` ({:?})", e.kind())
+                    LaunchError::Failed(format!("could not run `stratum daemon start` ({:?})", e.kind()))
                 }
             })?;
             match tokio::time::timeout(self.timeout, child.wait()).await {
                 Ok(Ok(status)) if status.success() => Ok(()),
                 Ok(Ok(status)) => Err(match status.code() {
                     // cmd.exe: «no se reconoce como un comando».
-                    Some(9009) | Some(127) => {
-                        "the `stratum` command was not found. Install stratum-cli, or start the daemon yourself with `stratum daemon start`.".to_string()
+                    Some(9009) | Some(127) => LaunchError::CliMissing,
+                    Some(code) => {
+                        LaunchError::Failed(format!("`stratum daemon start` exited with code {code}"))
                     }
-                    Some(code) => format!("`stratum daemon start` exited with code {code}"),
-                    None => "`stratum daemon start` was terminated".to_string(),
+                    None => LaunchError::Failed("`stratum daemon start` was terminated".to_string()),
                 }),
-                Ok(Err(e)) => Err(format!("`stratum daemon start` failed ({:?})", e.kind())),
+                Ok(Err(e)) => Err(LaunchError::Failed(format!(
+                    "`stratum daemon start` failed ({:?})",
+                    e.kind()
+                ))),
                 Err(_) => {
                     let _ = child.start_kill();
-                    Err("`stratum daemon start` did not finish in time".to_string())
+                    Err(LaunchError::Failed(
+                        "`stratum daemon start` did not finish in time".to_string(),
+                    ))
                 }
             }
         })
@@ -165,6 +197,7 @@ mod tests {
     async fn una_cli_que_no_existe_da_un_error_legible() {
         let launcher = CliLauncher::with_cli(PathBuf::from("definitely-not-a-real-stratum-binary"));
         let err = launcher.start().await.unwrap_err();
-        assert!(err.contains("not found"), "{err}");
+        assert_eq!(err, LaunchError::CliMissing);
+        assert!(err.message().contains("not found"), "{}", err.message());
     }
 }

@@ -4,7 +4,15 @@
  * de mentira que registra lo que se le pide.
  */
 import { vi } from 'vitest';
-import type { AppInfo, ApproverStatus, ConnectionState, DotEvent, NativeBridge } from '../bridge/native';
+import type {
+  AppInfo,
+  ApproverStatus,
+  ConnectionState,
+  DotEvent,
+  NativeBridge,
+  UpdateInfo,
+  UpdateProgress,
+} from '../bridge/native';
 import { handleDotEvent } from '../bridge/connect';
 import { resetReminderWatch } from '../app/reminders';
 import { resetWatchWatch } from '../app/watches';
@@ -371,6 +379,8 @@ export function fakeNative(): FakeNative {
     watchesRemove: vi.fn(async (watchId: string): Promise<unknown> => ({ watch: sampleWatch({ id: watchId }) })),
     notifyWatch: vi.fn(async (_title: string, _body: string) => undefined),
     notifyHealth: vi.fn(async (_title: string, _body: string) => undefined),
+    checkForUpdate: vi.fn(async (): Promise<UpdateInfo | null> => null),
+    installUpdate: vi.fn(async (_onProgress: (p: UpdateProgress) => void) => undefined),
     approverStatus: vi.fn(async (): Promise<ApproverStatus> => useApprover.getState().status),
     unlockApprovals: vi.fn(async () => undefined),
     lockApprovals: vi.fn(async () => undefined),

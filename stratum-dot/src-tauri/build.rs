@@ -65,6 +65,8 @@ const COMMANDS: &[&str] = &[
     "dot_set_attention",
     "dot_hide",
     "dot_quit",
+    "dot_update_check",
+    "dot_update_install",
 ];
 
 fn main() {

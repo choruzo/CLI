@@ -5,8 +5,9 @@ import type { ProtocolRun, ProtocolRunStatus, ProtocolSessionSnapshot } from '..
  * Estado **de la interfaz**: qué sesión se mira, qué pestaña, qué se está
  * escribiendo, qué orden se acaba de dar y qué contestó el daemon. Nada de aquí
  * es estado del runtime ni de la conversación —esa sale de la foto de cada
- * sesión—, y lo único que se guarda entre arranques son dos preferencias: la
- * última sesión seleccionada y el último directorio de un chat nuevo.
+ * sesión—, y lo único que se guarda entre arranques son tres preferencias: la
+ * última sesión seleccionada, el último directorio de un chat nuevo y la
+ * versión de Dot que la persona aparcó con «Later» (M23).
  */
 
 export type ControlKind = 'pause' | 'resume' | 'cancel';
@@ -83,6 +84,7 @@ export const RESOLUTION_TTL_MS = 30_000;
 
 const SELECTED_KEY = 'stratum-dot.selectedSession';
 const LAST_CWD_KEY = 'stratum-dot.lastCwd';
+const DISMISSED_UPDATE_KEY = 'stratum-dot.dismissedUpdate';
 
 function readPreference(key: string): string | null {
   try {
@@ -99,6 +101,15 @@ function writePreference(key: string, value: string | null): void {
   } catch {
     /* sin almacenamiento, la preferencia no se recuerda */
   }
+}
+
+/** M23 — la versión de Dot aparcada con «Later»: esa no se vuelve a ofrecer. */
+export function readDismissedUpdate(): string | null {
+  return readPreference(DISMISSED_UPDATE_KEY);
+}
+
+export function writeDismissedUpdate(version: string): void {
+  writePreference(DISMISSED_UPDATE_KEY, version);
 }
 
 interface UiStore {

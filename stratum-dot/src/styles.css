@@ -1299,3 +1299,21 @@ pre.action {
 .health-fix {
   margin-left: 1.15rem;
 }
+
+/* M23: aviso de una versión nueva de Dot. */
+.banner .banner-actions {
+  display: flex;
+  gap: 0.4rem;
+  flex: none;
+}
+.banner details.banner-body summary {
+  cursor: pointer;
+  color: var(--muted);
+}
+.update-notes {
+  max-height: 10rem;
+  overflow: auto;
+  white-space: pre-wrap;
+  margin: 0.3rem 0 0;
+  font-size: 0.85rem;
+}

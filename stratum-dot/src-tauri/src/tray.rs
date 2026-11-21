@@ -255,9 +255,7 @@ mod tests {
         );
         assert_eq!(
             tooltip(
-                &ConnectionState::Error {
-                    message: "x".into()
-                },
+                &ConnectionState::error("x"),
                 0
             ),
             "Stratum Dot — not connected"

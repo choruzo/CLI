@@ -4,6 +4,24 @@ Cambios de cada versión de Stratum Dot, el cockpit de escritorio de `stratumd`,
 
 El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y las versiones, [SemVer](https://semver.org/lang/es/).
 
+## [0.4.0] — 2026-11-21
+
+Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.16.0** o posterior (`npm install -g stratum-cli`). Es la primera con **auto-update**; quien tenga la 0.3.0 instala esta a mano una vez.
+
+### Añadido
+- **Auto-update**: Dot busca versiones nuevas al arrancar y cada 12 horas, sin molestar si no hay red, y avisa con un banner. Nunca instala solo: *Install and restart* o *Later*, que aparca esa versión. A mano, desde el pie (*Check for updates*). Cada paquete va firmado y Dot no instala uno con una firma que no sea la suya. El daemon y sus sesiones siguen mientras Dot se reinicia.
+- **Sin la CLI**, Dot lo dice y explica cómo instalarla (`npm install -g stratum-cli`, Node.js 22 o posterior), con *Retry*. Dot no la lleva dentro: es la que trae el daemon.
+- **Panel *Connectors***: los conectores del asistente (tiempo, transporte, Home Assistant, Google, Grocy…), con su estado y sus tools. Activar uno se confirma en la ventana nativa con lo que dice el daemon. Desactivar, no.
+- **Panel *Reminders***: los recordatorios del asistente, pendientes y de los últimos 7 días, con *Cancel*. Al vencer, una notificación del sistema que abre el panel.
+- **Panel *Watches***: los vigilantes del asistente (comprobaciones de conectores sin modelo que avisan al cumplirse una condición o lanzan una rutina), con pausar, reanudar y quitar. Sus avisos llegan como notificación del sistema.
+- **Panel *Health***: el diagnóstico del daemon (`stratum doctor`): caja e imagen, caja de conectores, conectores y secretos, acceso a las cuentas, Telegram y modelo con visión, cada fila con cómo arreglarla. Los **avisos de degradación** (una credencial caducada, un conector que no responde, una imagen desfasada) llegan una vez por causa como notificación del sistema que abre *Health*.
+- **Desfase de versiones**: si el daemon es más viejo que Dot, o al revés, un aviso que no bloquea dice qué hacer (reiniciar el daemon, actualizar la CLI o actualizar Dot). También sale en *Health*.
+- **Inspector de memoria por secciones** (perfil, personas, proyectos, temas, áreas), con reclasificar, los **cambios sugeridos** del *dreaming* (aplicar o rechazar) y los **cambios recientes** del asistente en su memoria, con *Undo*.
+- Tablas markdown en la conversación.
+
+### Cambiado
+- Las horas de los avisos van en formato de 24 horas.
+
 ## [0.3.0] — 2026-11-05
 
 Pre-release, sigue siendo experimental. Necesita **Stratum CLI 0.13.0** o posterior. Instaladores sin firmar y sin auto-update.

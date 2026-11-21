@@ -2902,6 +2902,13 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     `WINDOWS_CERTIFICATE`; hoy el repo solo tiene la clave del updater), el plugin del updater
     con su release fija (`dot-updater`, `latest.json`, la misma clave minisign) y, en Dot, que
     compruebe que la CLI está instalada.
+    **Hecho el 2026-11-21** (Dot 0.4.0; decisiones de Claude, cambiables): `updates.rs` con
+    `dot_update_check`/`dot_update_install` (el webview sin permisos del plugin), comprobación
+    silenciosa a los 5 s y cada 12 h, a mano desde el pie, y nunca instalar sin pedirlo. El
+    `latest.json` se escribe en el mismo job que crea la pre-release, porque una release creada
+    con `GITHUB_TOKEN` no dispara `release: published`. Que falte la CLI llega con tipo
+    (`reason: 'cli-missing'`) y Dot enseña cómo instalarla. La primera versión con auto-update
+    es la 0.4.0: quien tenga la 0.3.0 la instala a mano una vez.
   - *Desfase de versiones, diseño (2026-11-21, decisiones de Claude, cambiables)*:
     - Cada app tiene su versión (Dot 0.3, Desktop 0.11, CLI 0.15) y compararlas no dice nada. Lo
       que se compara es la **revisión del protocolo** (`STRATUM_PROTOCOL_REVISION`). Sube con cada

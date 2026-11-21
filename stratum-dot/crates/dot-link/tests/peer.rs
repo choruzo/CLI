@@ -61,7 +61,7 @@ async fn si_el_canal_lo_atiende_otro_proceso_no_se_envia_el_token() {
     assert!(fake.connections() >= 1);
     assert_eq!(fake.count("core.hello"), 0);
     assert!(rig.log().contains("peer identity"), "{}", rig.log());
-    let ConnectionState::Error { message } = rig.link.connection() else {
+    let ConnectionState::Error { message, .. } = rig.link.connection() else {
         unreachable!()
     };
     assert!(message.contains("Nothing was sent"), "{message}");

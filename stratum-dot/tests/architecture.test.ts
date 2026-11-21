@@ -204,6 +204,8 @@ const COMMANDS = [
   'dot_set_attention',
   'dot_start_run',
   'dot_steer_run',
+  'dot_update_check',
+  'dot_update_install',
   'dot_watches_list',
   'dot_watches_pause',
   'dot_watches_remove',
@@ -227,7 +229,8 @@ describe('la frontera con el lado nativo', () => {
     const invoked = [...new Set(calls.map((c) => c.slice(1, -1)))].sort();
 
     const lib = code(join(DOT, 'src-tauri', 'src', 'lib.rs'));
-    const registered = [...lib.matchAll(/commands::(dot_[a-z_]+)/g)].map((m) => m[1]!).sort();
+    // M23: los dos del auto-update viven en `updates.rs`.
+    const registered = [...lib.matchAll(/(?:commands|updates)::(dot_[a-z_]+)/g)].map((m) => m[1]!).sort();
     expect(invoked).toEqual(registered);
     expect(registered).toEqual(COMMANDS);
     // Los mismos, declarados en el manifiesto de `build.rs`: cada uno exige permiso.
@@ -285,10 +288,20 @@ describe('la frontera con el lado nativo', () => {
     // tiene el permiso del plugin de notificaciones ni lo importa.
     expect(JSON.stringify(capability)).not.toMatch(/notification:/);
     expect(read(join(DOT, 'package.json'))).not.toMatch(/plugin-notification/);
+    // M23: el auto-update, igual: solo `dot_update_check`/`dot_update_install` (`updates.rs`).
+    expect(JSON.stringify(capability)).not.toMatch(/updater:/);
+    expect(read(join(DOT, 'package.json'))).not.toMatch(/plugin-updater/);
     const conf = JSON.parse(read(join(DOT, 'src-tauri', 'tauri.conf.json')));
     // Sin red: el webview solo habla con el lado nativo.
     expect(conf.app.security.csp).toContain("default-src 'self'");
     expect(conf.app.security.csp).not.toMatch(/https?:\/\/(?!ipc\.localhost)/);
+    // M23: el auto-update solo lee el manifiesto de su release fija y exige la
+    // firma con la misma clave minisign que Desktop.
+    expect(conf.plugins.updater.endpoints).toEqual([
+      'https://github.com/choruzo/CLI/releases/download/dot-updater/latest.json',
+    ]);
+    const desktopConf = JSON.parse(read(join(DOT, '..', 'stratum-desktop', 'src-tauri', 'tauri.conf.json')));
+    expect(conf.plugins.updater.pubkey).toBe(desktopConf.plugins.updater.pubkey);
     // Sin sidecar ni binarios externos: Dot no empaqueta un runtime.
     expect(conf.bundle.externalBin).toBeUndefined();
     expect(conf.bundle.resources).toBeUndefined();
@@ -323,17 +336,17 @@ describe('la frontera con el lado nativo', () => {
     }
   });
 
-  it('lo único que se guarda entre arranques son dos preferencias de interfaz', () => {
+  it('lo único que se guarda entre arranques son tres preferencias de interfaz', () => {
     const users = shipped.filter((f) => /localStorage|sessionStorage|indexedDB/.test(code(f)));
     expect(users.map(rel)).toEqual(['src/stores/uiStore.ts']);
     const ui = code(join(SRC, 'stores', 'uiStore.ts'));
-    // El almacenamiento solo se toca en dos funciones, y solo con estas dos claves.
+    // El almacenamiento solo se toca en dos funciones, y solo con estas tres claves.
     expect(ui.match(/localStorage/g)).toHaveLength(3);
     const written = [...ui.matchAll(/writePreference\(\s*([A-Z_]+)/g)].map((m) => m[1]);
     const read = [...ui.matchAll(/readPreference\(\s*([A-Z_]+)/g)].map((m) => m[1]);
-    expect(new Set([...written, ...read])).toEqual(new Set(['SELECTED_KEY', 'LAST_CWD_KEY']));
+    expect(new Set([...written, ...read])).toEqual(new Set(['SELECTED_KEY', 'LAST_CWD_KEY', 'DISMISSED_UPDATE_KEY']));
     const names = [...ui.matchAll(/'(stratum-dot\.[A-Za-z]+)'/g)].map((m) => m[1]).sort();
-    expect(names).toEqual(['stratum-dot.lastCwd', 'stratum-dot.selectedSession']);
+    expect(names).toEqual(['stratum-dot.dismissedUpdate', 'stratum-dot.lastCwd', 'stratum-dot.selectedSession']);
   });
 
   it('la conversación no se guarda ni se reconstruye en Dot: sale de la foto', () => {

@@ -1,7 +1,7 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
   "productName": "Stratum Dot",
-  "version": "0.3.0",
+  "version": "0.4.0",
   "identifier": "dev.stratum.dot",
   "build": {
     "beforeDevCommand": "npm run dev",
@@ -23,6 +23,13 @@
     ],
     "security": {
       "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src ipc: http://ipc.localhost"
+    }
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDRFRjY2MkIwRTZCRDNEMUQKUldRZFBiM21zR0wyVHVaS3BOUTZlY05HUElEWTJMUWY5TjNNOFAwemJnTjJ1MlRwcUg4dGFuenUK",
+      "endpoints": ["https://github.com/choruzo/CLI/releases/download/dot-updater/latest.json"],
+      "windows": { "installMode": "passive" }
     }
   },
   "bundle": {

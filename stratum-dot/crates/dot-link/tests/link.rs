@@ -100,13 +100,15 @@ async fn si_el_arranque_falla_queda_en_error_y_se_recupera_solo() {
         matches!(rig.link.connection(), ConnectionState::Error { .. })
     })
     .await;
-    let ConnectionState::Error { message } = rig.link.connection() else {
+    let ConnectionState::Error { message, reason } = rig.link.connection() else {
         panic!()
     };
     assert!(
         message.contains("Could not start the Stratum daemon"),
         "{message}"
     );
+    // Sin CLI, el motivo va con tipo: la interfaz enseña cómo instalarla.
+    assert_eq!(reason, Some(dot_link::ErrorReason::CliMissing));
 
     // Sin que nadie lo pida no se vuelve a lanzar.
     tokio::time::sleep(Duration::from_millis(200)).await;
@@ -539,9 +541,10 @@ async fn token_rechazado_es_un_error_sin_bucle() {
     .await;
     tokio::time::sleep(Duration::from_millis(250)).await;
     assert_eq!(fake.connections(), 1);
-    let ConnectionState::Error { message } = rig.link.connection() else {
+    let ConnectionState::Error { message, reason } = rig.link.connection() else {
         panic!()
     };
+    assert_eq!(reason, None);
     assert!(message.contains("UNAUTHORIZED"), "{message}");
     rig.quit().await;
 }

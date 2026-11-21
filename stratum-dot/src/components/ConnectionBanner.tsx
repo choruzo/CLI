@@ -61,6 +61,24 @@ export function ConnectionBanner({ state, hasStaleSessions, onRetry }: Props) {
   if (state.kind === 'incompatible') return null;
   // «Starting…» y «Connecting…» ya los dice la cabecera, y duran un instante.
   if (state.kind === 'starting' || state.kind === 'connecting') return null;
+  if (state.kind === 'error' && state.reason === 'cli-missing') {
+    // Dot exige la CLI instalada aparte: es la que trae el daemon (M23).
+    return (
+      <div className="banner bad" role="alert" data-reason="cli-missing">
+        <span>
+          <strong>Stratum Dot needs the Stratum CLI</strong>
+          <span className="banner-body">
+            The CLI runs the daemon that Dot talks to, and it is installed on its own. With Node.js 22 or later, run{' '}
+            <code>npm install -g stratum-cli</code>, then press Retry. If the daemon is already running elsewhere, Dot
+            connects by itself.
+          </span>
+        </span>
+        <button type="button" className="btn" onClick={onRetry} aria-label="Retry connecting to the daemon">
+          Retry
+        </button>
+      </div>
+    );
+  }
   if (state.kind === 'error') {
     return (
       <div className="banner bad" role="alert">

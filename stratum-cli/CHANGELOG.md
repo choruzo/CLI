@@ -6,6 +6,25 @@ El formato sigue [Keep a Changelog](https://keepachangelog.com/es-ES/1.1.0/) y l
 
 > Las versiones anteriores a la 0.2.1-beta.0 solo existen como tags de git: la primera publicación en npm fue la 0.2.1-beta.0.
 
+## [0.16.0] — 2026-11-21
+
+Es la versión de la CLI que necesita **Stratum Dot 0.4.0**. Stratum Desktop 0.11.0 sigue funcionando con ella.
+
+### Añadido
+- **Conectores del asistente de Dot** (`companion`), todos propios y dentro de una caja de conectores aparte, que `exec` nunca alcanza: tiempo (Open-Meteo y AEMET, con avisos), Renfe (Cercanías, media y larga distancia), transporte de Madrid (`crtm`: Metro, Metro Ligero, EMT y autobuses urbanos e interurbanos), Home Assistant (estado, historial y acciones confirmadas), Google (Gmail de lectura y borradores, nunca envía; Tasks; Calendar) y Grocy (despensa, recetas, menú y compra; lo que escribe se aprueba). `stratum connectors list|enable|disable|setup`: los secretos solo por la CLI y activar uno exige la clave de aprobador. En el protocolo, `connectors.*`.
+- **Recordatorios** del `companion` (`set_reminder`), entregados en Dot, en Telegram y en `stratum reminders`; en el protocolo, `reminders.*` y el evento `reminder.due`.
+- **Vigilantes** (`stratum watches`, `propose_watch`): el daemon evalúa sin modelo comprobaciones de los conectores y avisa cuando se cumple una condición, o lanza una rutina. El agente solo los propone. En el protocolo, `watches.*`.
+- **MCP por Streamable HTTP** en `companion.mcp.servers`.
+- **Corregir la memoria**: `correct_memory` y `retire_memory` en los tres agentes. Sin preguntar, solo lo que salió de la extracción automática y hasta 5 cambios por sesión; lo demás se confirma. Cada cambio se guarda entero en `memory-history.json` y se deshace con `stratum memory undo` (en el protocolo, `memory.changes` y `memory.undoChange`). Tras una pasada, el *dreaming* aplica solo lo claro (`memory.dreaming.autoApply`) y propone el resto.
+- **`stratum doctor [--json]`** y, en el protocolo, `doctor.run`: daemon, caja e imagen, caja de conectores, conectores y secretos, Telegram, modelo con visión y ficheros de datos. Solo lee y nunca arregla nada.
+- **Avisos de degradación** del asistente (evento `health.notice`): una credencial rechazada o caducada, un conector que no responde o una imagen desfasada se avisan una vez por causa, en Dot y en Telegram, también tras reiniciar el daemon.
+- **`box.autostart`** (config global, apagado por defecto): la caja del asistente arranca con el daemon. Si el runtime aún no está, reintenta cada 30 s durante 10 minutos.
+- **Revisión del protocolo** en `core.hello` (`server.revision`), para que Dot y Desktop detecten un daemon de otra época. `stratum daemon start` y `status` avisan si el daemon que corre es de otra versión.
+- Avisos de config: las claves desconocidas que el schema descartaría sin decir nada se avisan al cargar (sin rechazar la config), y el `companion` con una caja con escritorio avisa si el modelo no tiene visión declarada.
+
+### Cambiado
+- La imagen de la caja sube a la versión 15 (conectores nuevos y comprobaciones de acceso): se construye de nuevo la primera vez que arranca la caja, y tarda unos minutos.
+
 ## [0.15.0] — 2026-11-11
 
 Es la versión de la CLI que necesita **Stratum Desktop 0.11.0**.

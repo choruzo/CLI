@@ -48,13 +48,13 @@ pub use confirm::{
     CancelReason, ConfirmFailure, ConfirmGate, ConfirmTimings, ConfirmationView, Presenter,
     RevertStep,
 };
-pub use launcher::{CliLauncher, DaemonLauncher, NoLauncher};
+pub use launcher::{CliLauncher, DaemonLauncher, LaunchError, NoLauncher};
 pub use link::{spawn, ClientProfile, FollowPolicy, LinkConfig, LinkHandle};
 pub use log::Logger;
 pub use secret::ApproverSecret;
 pub use state::{
     CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
-    RoutineLimits, RoutinePatch,
+    ErrorReason, RoutineLimits, RoutinePatch,
 };
 
 /// Versión del protocolo que habla este cliente (`STRATUM_PROTOCOL_VERSION`).

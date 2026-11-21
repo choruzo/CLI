@@ -48,10 +48,29 @@ pub enum ConnectionState {
     /// conecta solo; `retry` lo vuelve a intentar desde el principio.
     Error {
         message: String,
+        /// Un motivo con tipo, cuando lo hay: la interfaz no deduce nada del texto.
+        #[serde(skip_serializing_if = "Option::is_none")]
+        reason: Option<ErrorReason>,
     },
 }
 
+/// Motivos de `ConnectionState::Error` que la interfaz trata aparte.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum ErrorReason {
+    /// No había daemon y no se encontró la CLI para arrancarlo (Dot la exige instalada).
+    CliMissing,
+}
+
 impl ConnectionState {
+    /// Un error sin motivo con tipo.
+    pub fn error(message: impl Into<String>) -> Self {
+        ConnectionState::Error {
+            message: message.into(),
+            reason: None,
+        }
+    }
+
     pub fn is_connected(&self) -> bool {
         matches!(self, ConnectionState::Connected { .. })
     }

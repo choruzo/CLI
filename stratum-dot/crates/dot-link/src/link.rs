@@ -46,12 +46,12 @@ use tokio::time::Instant;
 
 use crate::discovery::{self, Discovery, Endpoint};
 use crate::framing::LineDecoder;
-use crate::launcher::DaemonLauncher;
+use crate::launcher::{DaemonLauncher, LaunchError};
 use crate::log::Logger;
 use crate::peer::{self, PeerCheck};
 use crate::state::{
     CallAction, CommandError, CommandErrorKind, ConnectionState, ControlAction, DotEvent,
-    RoutineLimits,
+    ErrorReason, RoutineLimits,
 };
 use crate::subscriptions::{Membership, OverviewSub, SessionSub};
 use crate::transport::{self, Stream};
@@ -1872,7 +1872,7 @@ impl Actor {
                                 self.cfg
                                     .logger
                                     .error(&format!("connection refused: {message}"));
-                                self.set_state(ConnectionState::Error { message });
+                                self.set_state(ConnectionState::error(message));
                                 Next::Poll
                             }
                         }
@@ -1911,17 +1911,19 @@ impl Actor {
                         self.autostart_armed = false;
                         match self.start_daemon().await {
                             Ok(()) => Wake::Timeout,
-                            Err(Some(message)) => {
-                                self.cfg
-                                    .logger
-                                    .error(&format!("daemon start failed: {message}"));
-                                self.set_state(ConnectionState::Error { message });
+                            Err(Some(state)) => {
+                                if let ConnectionState::Error { message, .. } = &state {
+                                    self.cfg
+                                        .logger
+                                        .error(&format!("daemon start failed: {message}"));
+                                }
+                                self.set_state(state);
                                 self.idle(self.cfg.timings.idle_poll).await
                             }
                             Err(None) => Wake::Shutdown,
                         }
                     } else {
-                        self.set_state(ConnectionState::Error { message: why });
+                        self.set_state(ConnectionState::error(why));
                         self.idle(self.cfg.timings.idle_poll).await
                     }
                 }
@@ -1944,8 +1946,9 @@ impl Actor {
     }
 
     /// Arranca el daemon con la CLI oficial y espera a que publique un endpoint
-    /// válido. `Err(None)`: Dot se cierra mientras tanto.
-    async fn start_daemon(&mut self) -> Result<(), Option<String>> {
+    /// válido. `Err(Some(estado))`: el `error` que enseñar. `Err(None)`: Dot se
+    /// cierra mientras tanto.
+    async fn start_daemon(&mut self) -> Result<(), Option<ConnectionState>> {
         self.set_state(ConnectionState::DaemonStarting);
         self.cfg
             .logger
@@ -1953,10 +1956,15 @@ impl Actor {
         let launcher = self.cfg.launcher.clone();
         match self.busy(launcher.start()).await {
             Err(_) => return Err(None),
-            Ok(Err(message)) => {
-                return Err(Some(format!(
-                    "Could not start the Stratum daemon: {message}"
-                )))
+            Ok(Err(error)) => {
+                let reason = match error {
+                    LaunchError::CliMissing => Some(ErrorReason::CliMissing),
+                    LaunchError::Failed(_) => None,
+                };
+                return Err(Some(ConnectionState::Error {
+                    message: format!("Could not start the Stratum daemon: {}", error.message()),
+                    reason,
+                }));
             }
             Ok(Ok(())) => {}
         }
@@ -1965,9 +1973,9 @@ impl Actor {
             match discovery::locate(&self.cfg.endpoint_dir) {
                 Discovery::Found(_) | Discovery::Incompatible { .. } => return Ok(()),
                 _ if Instant::now() >= deadline => {
-                    return Err(Some(
-                        "The Stratum daemon was started but did not come up in time.".into(),
-                    ));
+                    return Err(Some(ConnectionState::error(
+                        "The Stratum daemon was started but did not come up in time.",
+                    )));
                 }
                 _ => {}
             }
