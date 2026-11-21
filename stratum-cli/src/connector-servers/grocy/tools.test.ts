@@ -106,9 +106,17 @@ const MINIMAL_ARGS: Record<string, unknown> = {
 };
 
 describe('el conjunto de tools', () => {
-  it('son las seis, todas con argumentos cerrados', () => {
+  it('son las quince (6 de lectura y 9 de escritura), como el manifiesto, con argumentos cerrados', () => {
     const { tools } = setup();
-    expect(tools.map((t) => t.name)).toEqual(NAMES);
+    const manifest = JSON.parse(
+      readFileSync(
+        fileURLToPath(new URL('../../../connectors/grocy/connector.json', import.meta.url)),
+        'utf8',
+      ),
+    ) as { tools: Array<{ name: string }> };
+    expect(tools).toHaveLength(15);
+    expect(tools.map((t) => t.name).slice(0, 6)).toEqual(NAMES);
+    expect(tools.map((t) => t.name).sort()).toEqual(manifest.tools.map((t) => t.name).sort());
     for (const t of tools) {
       expect((t.inputSchema as { additionalProperties?: boolean }).additionalProperties).toBe(
         false,

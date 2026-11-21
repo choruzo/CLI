@@ -3,8 +3,12 @@
  *
  * - La clave solo viaja en la cabecera `GROCY-API-KEY` y se tapa en todo texto
  *   que salga (mensajes de error incluidos).
- * - En esta versión **solo lee**: no hay método de escritura, y `GET` solo
- *   alcanza las rutas de `READ_PATHS`. Una ruta fuera de la lista es un veto.
+ * - `GET` solo alcanza las rutas de `READ_PATHS` y `POST` solo las de
+ *   `WRITE_PATHS` (fase 3: compra, existencias, recetas, menú y deshacer). Una
+ *   ruta fuera de la lista es un veto sin llamar a la red. No hay `PUT` ni
+ *   `DELETE`: nada se edita ni se borra.
+ * - Una escritura cuyo resultado no se sabe (plazo agotado, conexión cortada)
+ *   nunca se reintenta: el error lo dice para que se compruebe antes.
  * - Sin redirecciones (`redirect: 'error'`) y con un plazo de 15 s.
  *
  * Medido el 2026-11-21 contra Grocy 4.7.1 (add-on de HAOS): la API no responde
@@ -33,10 +37,14 @@ const OBJECT_ENTITIES = [
 ] as const;
 export type ObjectEntity = (typeof OBJECT_ENTITIES)[number];
 
-/** Rutas de solo lectura permitidas (sin la base `/api`). */
+/** Rutas de solo lectura permitidas (sin la base `/api`). `stock_log` solo para hallar la transacción de una receta cocinada. */
 const READ_PATHS = new RegExp(
-  `^/(?:system/info|stock|stock/volatile|recipes/fulfillment|objects/(?:${OBJECT_ENTITIES.join('|')}))$`,
+  `^/(?:system/info|stock|stock/volatile|recipes/fulfillment|objects/(?:${OBJECT_ENTITIES.join('|')}|stock_log))$`,
 );
+
+/** Escrituras permitidas (M28 fase 3). Cada una la llama una tool que se confirma. */
+const WRITE_PATHS =
+  /^\/(?:stock\/shoppinglist\/(?:add-product|remove-product)|stock\/products\/[1-9]\d{0,9}\/(?:add|consume|open)|recipes\/[1-9]\d{0,9}\/(?:consume|add-not-fulfilled-products-to-shoppinglist)|stock\/transactions\/[A-Za-z0-9]{1,40}\/undo|objects\/meal_plan)$/;
 
 export function isRecord(v: unknown): v is Record<string, unknown> {
   return typeof v === 'object' && v !== null && !Array.isArray(v);
@@ -91,12 +99,18 @@ export interface GrocyClientOptions {
 export interface GrocyClient {
   readonly host: string;
   /** `path` sin la base (`/stock`, `/objects/recipes`…); `query` sin codificar. */
-  get(path: string, query?: Record<string, string>, signal?: AbortSignal): Promise<unknown>;
+  get(
+    path: string,
+    query?: Record<string, string> | [string, string][],
+    signal?: AbortSignal,
+  ): Promise<unknown>;
   /**
    * `/objects/<entidad>` como lista de registros. Las tablas de catálogo
    * (productos, unidades, ubicaciones…) se guardan 5 min; el resto, nunca.
    */
   objects(entity: ObjectEntity, signal?: AbortSignal): Promise<Record<string, unknown>[]>;
+  /** Escritura: `null` si Grocy no devolvió cuerpo (204). */
+  post(path: string, body: unknown, signal?: AbortSignal): Promise<unknown>;
 }
 
 /** Tablas que cambian poco: se guardan unos minutos. */
@@ -146,25 +160,39 @@ export function createGrocyClient(opts: GrocyClientOptions): GrocyClient | null 
     );
   }
 
-  async function get(
+  async function request(
+    method: 'GET' | 'POST',
     path: string,
-    query: Record<string, string> | undefined,
+    query: Record<string, string> | [string, string][] | undefined,
+    body: unknown,
     signal: AbortSignal | undefined,
   ): Promise<unknown> {
-    if (!READ_PATHS.test(path)) throw new ToolUserError('Ruta de Grocy no permitida.');
+    const allowed = method === 'GET' ? READ_PATHS : WRITE_PATHS;
+    if (!allowed.test(path)) throw new ToolUserError('Ruta de Grocy no permitida.');
     const qs = query ? new URLSearchParams(query).toString() : '';
     const timeout = AbortSignal.timeout(TIMEOUT_MS);
     const sig = signal ? AbortSignal.any([signal, timeout]) : timeout;
+    const headers: Record<string, string> = { 'GROCY-API-KEY': key!, Accept: 'application/json' };
+    const init: RequestInit = { method, headers, redirect: 'error', signal: sig };
+    if (method === 'POST') {
+      // Grocy exige este Content-Type en todo POST, también en los que no leen cuerpo.
+      headers['Content-Type'] = 'application/json';
+      init.body = JSON.stringify(body ?? {});
+    }
     let res: Response;
     try {
-      res = await opts.fetch(prefix + path + (qs ? `?${qs}` : ''), {
-        method: 'GET',
-        headers: { 'GROCY-API-KEY': key!, Accept: 'application/json' },
-        redirect: 'error',
-        signal: sig,
-      });
+      res = await opts.fetch(prefix + path + (qs ? `?${qs}` : ''), init);
     } catch (err) {
-      throw networkError(err);
+      const e = networkError(err);
+      // Si la petición pudo llegar, el resultado de una escritura no se sabe.
+      const code = errorCode(err);
+      const neverSent = code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'ECONNREFUSED';
+      if (method === 'POST' && !neverSent) {
+        throw new ToolUserError(
+          `${e.message} No sé si Grocy llegó a hacer el cambio: compruébalo (con las tools de lectura) antes de repetirlo.`,
+        );
+      }
+      throw e;
     }
     let text: string;
     try {
@@ -191,6 +219,7 @@ export function createGrocyClient(opts: GrocyClientOptions): GrocyClient | null 
       }
       throw new ToolUserError(`Grocy respondió HTTP ${res.status}${detail ? `: ${detail}` : ''}.`);
     }
+    if (method === 'POST' && text.trim() === '') return null;
     try {
       return JSON.parse(text);
     } catch {
@@ -202,11 +231,12 @@ export function createGrocyClient(opts: GrocyClientOptions): GrocyClient | null 
 
   return {
     host,
-    get: (path, query, signal) => get(path, query, signal),
+    get: (path, query, signal) => request('GET', path, query, undefined, signal),
+    post: (path, body, signal) => request('POST', path, undefined, body, signal),
     async objects(entity, signal) {
       const hit = cache.get(entity);
       if (hit && now() - hit.at < CATALOG_CACHE_MS) return hit.rows;
-      const data = await get(`/objects/${entity}`, undefined, signal);
+      const data = await request('GET', `/objects/${entity}`, undefined, undefined, signal);
       if (!Array.isArray(data)) {
         throw new ToolUserError(`Respuesta de Grocy en ${host} no válida (${entity}).`);
       }

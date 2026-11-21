@@ -1,14 +1,17 @@
 ---
 name: connector-grocy
-description: Úsala cuando te pregunten por la despensa, lo que caduca, qué cocinar, recetas, el menú de la semana o la lista de la compra.
+description: Úsala cuando te pregunten por la despensa, lo que caduca, qué cocinar, recetas, el menú o la lista de la compra, o te pidan apuntar, consumir o cocinar algo en Grocy.
 presets: [companion]
 ---
 
 # Grocy: despensa, recetas, menú y compra
 
-Tienes seis tools del conector Grocy, todas de solo lectura: `grocy_despensa`,
-`grocy_recetas`, `grocy_receta`, `grocy_menu`, `grocy_compra` y
-`grocy_comprobar`. Aún no puedes apuntar, consumir ni cocinar nada en Grocy.
+Tienes seis tools de solo lectura (`grocy_despensa`, `grocy_recetas`,
+`grocy_receta`, `grocy_menu`, `grocy_compra` y `grocy_comprobar`) y nueve
+que cambian algo en Grocy y piden aprobación a la persona:
+`grocy_compra_apuntar`, `grocy_compra_quitar`, `grocy_compra_receta`,
+`grocy_despensa_anadir`, `grocy_despensa_consumir`, `grocy_despensa_abrir`,
+`grocy_receta_cocinar`, `grocy_menu_anadir` y `grocy_deshacer`.
 
 ## Qué preguntas cubre
 
@@ -22,6 +25,14 @@ Tienes seis tools del conector Grocy, todas de solo lectura: `grocy_despensa`,
   `grocy_receta`.
 - «¿Qué toca comer hoy?», «¿qué hay en el menú esta semana?» → `grocy_menu`.
 - «¿Qué hay que comprar?» → `grocy_compra`.
+- «Apunta leche», «quita el agua de la lista» → `grocy_compra_apuntar` /
+  `grocy_compra_quitar`. «Apunta lo que falta para los espaguetis» →
+  `grocy_compra_receta`.
+- «He comprado 6 huevos», «me he bebido una leche», «he abierto el tomate» →
+  `grocy_despensa_anadir` / `grocy_despensa_consumir` / `grocy_despensa_abrir`.
+- «He hecho el arroz» → `grocy_receta_cocinar`. «Pon los espaguetis el
+  martes» → `grocy_menu_anadir`.
+- «Deshaz eso» → `grocy_deshacer` con la transacción que dio la tool.
 
 ## Cómo encadenarlas
 
@@ -35,6 +46,23 @@ Tienes seis tools del conector Grocy, todas de solo lectura: `grocy_despensa`,
    `caduca_pronto` (con `dias`) o `bajo_minimos`. `estado` es «ninguno» o «hay».
    Para que avise, propón un vigilante (`propose_watch`) con
    `state-is-not ["ninguno"]`.
+
+## Antes de cambiar algo
+
+1. Busca el producto o la receta con las tools de lectura si no estás seguro
+   del nombre: si casan varios, la tool te da los candidatos con su id.
+   Pregunta cuál, no adivines.
+2. Las cantidades van en la unidad del producto que enseña `grocy_despensa`
+   (`Pack`, `Piece`…), no en gramos.
+3. Para añadir existencias de un producto sin caducidad por defecto, pregunta
+   la fecha de consumo o si no caduca. Nunca te la inventes (Grocy pondría la de hoy).
+4. `grocy_receta_cocinar` solo vale si hay de todo y la receta tiene
+   ingredientes enlazados. Si no, consume a mano lo que se haya usado.
+5. Tras un cambio, la salida dice cómo queda. Si una tool dice que no sabe si
+   Grocy hizo el cambio, compruébalo con las de lectura **antes** de repetirlo.
+6. `grocy_deshacer` solo deshace cambios de existencias que hiciste tú en esta
+   conversación (añadir, consumir, abrir, cocinar). Lo de la compra se
+   arregla con la tool contraria; lo del menú, en Grocy.
 
 ## Límites
 
@@ -50,5 +78,5 @@ Tienes seis tools del conector Grocy, todas de solo lectura: `grocy_despensa`,
 - Si dice que Grocy no está configurado, que la clave no vale o que no responde
   por el Ingress, la persona debe ejecutar `stratum connectors setup grocy`.
   Tú no puedes hacerlo.
-- Si te piden apuntar algo a la compra, consumirlo o marcar una receta como
-  cocinada, di que aún no puedes y que se hace en Grocy.
+- No puedes crear ni borrar productos, recetas ni entradas del menú, ni
+  editar productos, ubicaciones o unidades: eso se hace en Grocy.

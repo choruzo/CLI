@@ -59,7 +59,7 @@ describe('server de Grocy empaquetado', () => {
       expect(client.tools.map((t) => t.name).sort()).toEqual(
         manifest.tools.map((t) => t.name).sort(),
       );
-      expect(client.tools).toHaveLength(6);
+      expect(client.tools).toHaveLength(15);
       const res = await client.callTool('grocy_despensa', {});
       expect(JSON.stringify(res)).toContain('Grocy no está configurado');
     } finally {

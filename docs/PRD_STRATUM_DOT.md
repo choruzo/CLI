@@ -2985,6 +2985,21 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     una lista cerrada de rutas. Probado contra el Grocy real con todas las tools. Los tests usan
     fixtures **sintéticas** con la forma medida, porque las respuestas reales son datos personales.
     Siguiente: fase 3.
+  - *Fase 3 hecha el 2026-11-21* (`grocy` 1.1.0). Nueve tools que piden aprobación:
+    - apuntar y quitar de la compra, y apuntar lo que falta de una receta;
+    - añadir existencias, consumir (o tirar por estropeado) y abrir un producto;
+    - cocinar una receta y añadir una receta al menú;
+    - deshacer.
+
+    Antes de escribir se comprueba que Grocy es la 4.x. Leer el código de Grocy 4.7.1 llevó a
+    cuatro decisiones de Claude, cambiables:
+    - al añadir existencias sin fecha se pregunta la caducidad, porque Grocy pondría la de hoy;
+    - solo se cocina una receta con ingredientes enlazados y de la que hay de todo, porque Grocy
+      descontaría lo que hay sin avisar;
+    - deshacer solo vale para los cambios de existencias que hizo el agente en esa conversación;
+    - nada se borra: quitar algo del menú se hace en Grocy.
+
+    Completar tareas domésticas queda fuera, porque no hay ninguna.
 
 ### 23.12 Fuera, por ahora
 

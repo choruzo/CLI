@@ -14,6 +14,9 @@ export interface Product {
   groupId: number | null;
   minStock: number | null;
   quStock: number | null;
+  /** Días de consumo por defecto al añadir: -1 = no caduca; 0 = Grocy pondría hoy. */
+  defaultDueDays: number | null;
+  canOpen: boolean;
   active: boolean;
 }
 
@@ -43,6 +46,8 @@ export interface Recipe {
   description: unknown;
   baseServings: number | null;
   desiredServings: number | null;
+  /** Producto que produce la receta al cocinarla (eso no se puede deshacer en Grocy). */
+  producesProductId: number | null;
 }
 
 export interface RecipePos {
@@ -131,6 +136,8 @@ export function toProduct(r: Record<string, unknown>): Product | null {
     minStock: numOrNull(r.min_stock_amount),
     quStock: id(r.qu_id_stock),
     active: flag(r.active) !== false,
+    defaultDueDays: numOrNull(r.default_best_before_days),
+    canOpen: flag(r.disable_open) !== true,
   };
 }
 
@@ -186,6 +193,7 @@ export function toRecipe(r: Record<string, unknown>): Recipe | null {
     description: r.description,
     baseServings: numOrNull(r.base_servings),
     desiredServings: numOrNull(r.desired_servings),
+    producesProductId: id(r.product_id),
   };
 }
 

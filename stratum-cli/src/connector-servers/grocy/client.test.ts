@@ -225,3 +225,102 @@ describe('caché del catálogo', () => {
     expect(calls).toHaveLength(4);
   });
 });
+
+describe('escritura (post)', () => {
+  const mk = (f: typeof fetch) => createGrocyClient({ fetch: f, url: URL_OK, apiKey: KEY })!;
+
+  it('post solo alcanza rutas de escritura y no llama a fetch con las demás', async () => {
+    const { fetch: f, calls } = fakeFetch(() => json({}));
+    const c = mk(f);
+    for (const path of [
+      '/stock/products/1/inventory',
+      '/objects/products',
+      '/objects/meal_plan/3',
+      '/stock/products/0/add',
+      '/stock/transactions/a%2Fb/undo',
+      '/stock/transactions/a/b/undo',
+      '/stock',
+      '/system/info',
+    ]) {
+      expect(await failure(c.post(path, {}))).toBe('Ruta de Grocy no permitida.');
+    }
+    expect(calls).toHaveLength(0);
+    // Las permitidas sí pasan.
+    for (const path of [
+      '/stock/shoppinglist/add-product',
+      '/stock/shoppinglist/remove-product',
+      '/stock/products/12/add',
+      '/stock/products/12/consume',
+      '/stock/products/12/open',
+      '/recipes/3/consume',
+      '/recipes/3/add-not-fulfilled-products-to-shoppinglist',
+      '/stock/transactions/abc123/undo',
+      '/objects/meal_plan',
+    ]) {
+      await c.post(path, {});
+    }
+    expect(calls).toHaveLength(9);
+  });
+
+  it('get no alcanza las rutas de escritura', async () => {
+    const { fetch: f, calls } = fakeFetch(() => json({}));
+    const c = mk(f);
+    expect(await failure(c.get('/stock/shoppinglist/add-product'))).toBe(
+      'Ruta de Grocy no permitida.',
+    );
+    expect(await failure(c.get('/stock/products/1/consume'))).toBe('Ruta de Grocy no permitida.');
+    expect(calls).toHaveLength(0);
+  });
+
+  it('manda Content-Type JSON y el cuerpo, o {} si no hay', async () => {
+    const { fetch: f, calls } = fakeFetch(() => json({ ok: true }));
+    const c = mk(f);
+    await c.post('/stock/products/1/add', { amount: 2 });
+    await c.post('/recipes/3/consume', undefined);
+    expect(calls[0]!.init.method).toBe('POST');
+    expect(calls[0]!.init.redirect).toBe('error');
+    expect(calls[0]!.url).toBe('http://grocy.casa:9283/api/stock/products/1/add');
+    const h0 = calls[0]!.init.headers as Record<string, string>;
+    expect(h0['Content-Type']).toBe('application/json');
+    expect(h0['GROCY-API-KEY']).toBe(KEY);
+    expect(calls[0]!.init.body).toBe('{"amount":2}');
+    expect(calls[1]!.init.body).toBe('{}');
+  });
+
+  it('un 204 sin cuerpo da null', async () => {
+    const { fetch: f } = fakeFetch(() => new Response(null, { status: 204 }));
+    expect(await mk(f).post('/recipes/3/consume', {})).toBeNull();
+  });
+
+  it('un 400 enseña el error_message de Grocy', async () => {
+    const { fetch: f } = fakeFetch(() =>
+      json({ error_message: 'Amount to be consumed cannot be > current stock amount' }, 400),
+    );
+    const msg = await failure(mk(f).post('/stock/products/1/consume', { amount: 9 }));
+    expect(msg).toBe(
+      'Grocy respondió HTTP 400: Amount to be consumed cannot be > current stock amount.',
+    );
+  });
+
+  it('un fallo de red en un POST avisa de que no se sabe si se hizo; en un GET, no', async () => {
+    const timeout = Object.assign(new Error('t'), { name: 'TimeoutError' });
+    const c = mk(failing(timeout));
+    const post = await failure(c.post('/recipes/3/consume', {}));
+    expect(post).toContain('tiempo de espera agotado');
+    expect(post).toContain('No sé si Grocy llegó a hacer el cambio');
+    expect(await failure(c.get('/stock'))).not.toContain('No sé si Grocy llegó');
+    // Un fallo de red genérico en POST también.
+    const gen = await failure(
+      mk(failing(new TypeError('fetch failed'))).post('/recipes/3/consume', {}),
+    );
+    expect(gen).toContain('No sé si Grocy llegó a hacer el cambio');
+  });
+
+  it('ENOTFOUND y ECONNREFUSED en un POST: no llegó a salir, no hay aviso', async () => {
+    for (const code of ['ENOTFOUND', 'EAI_AGAIN', 'ECONNREFUSED']) {
+      const cause = Object.assign(new Error(code), { code });
+      const msg = await failure(mk(failing(withCause(cause))).post('/recipes/3/consume', {}));
+      expect(msg).not.toContain('No sé si Grocy llegó');
+    }
+  });
+});

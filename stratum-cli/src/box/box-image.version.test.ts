@@ -36,6 +36,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   12: '60652836f162df55',
   // M28 fase 2: el conector `grocy` (solo lectura).
   13: '330dd4b3ac978c27',
+  // M28 fase 3: escritura con confirmación en `grocy`.
+  14: '05dbc4f20e9386f1',
 };
 
 /**

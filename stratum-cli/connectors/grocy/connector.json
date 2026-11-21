@@ -1,9 +1,9 @@
 {
   "schemaVersion": 1,
   "id": "grocy",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "name": "Grocy",
-  "description": "Despensa, recetas, menú y lista de la compra de tu Grocy, en tu red local.",
+  "description": "Despensa, recetas, menú y lista de la compra de tu Grocy, en tu red local. Lo que cambia algo pide aprobación.",
   "agents": ["companion"],
   "hosts": ["la URL de GROCY_URL (tu red local)"],
   "secrets": [
@@ -47,6 +47,51 @@
       "name": "grocy_comprobar",
       "readOnly": true,
       "summary": "Caducados, a punto de caducar o bajo mínimos, para vigilantes."
+    },
+    {
+      "name": "grocy_compra_apuntar",
+      "readOnly": false,
+      "summary": "Apunta un producto en la lista de la compra."
+    },
+    {
+      "name": "grocy_compra_quitar",
+      "readOnly": false,
+      "summary": "Quita un producto de la lista de la compra."
+    },
+    {
+      "name": "grocy_compra_receta",
+      "readOnly": false,
+      "summary": "Apunta en la compra lo que falta para una receta."
+    },
+    {
+      "name": "grocy_despensa_anadir",
+      "readOnly": false,
+      "summary": "Añade existencias de un producto (una compra hecha)."
+    },
+    {
+      "name": "grocy_despensa_consumir",
+      "readOnly": false,
+      "summary": "Consume o tira por estropeado un producto."
+    },
+    {
+      "name": "grocy_despensa_abrir",
+      "readOnly": false,
+      "summary": "Marca como abierto un producto."
+    },
+    {
+      "name": "grocy_receta_cocinar",
+      "readOnly": false,
+      "summary": "Marca una receta como cocinada y descuenta sus ingredientes."
+    },
+    {
+      "name": "grocy_menu_anadir",
+      "readOnly": false,
+      "summary": "Añade una receta al menú de un día."
+    },
+    {
+      "name": "grocy_deshacer",
+      "readOnly": false,
+      "summary": "Deshace un cambio de existencias hecho en esta conversación."
     }
   ],
   "checks": [
