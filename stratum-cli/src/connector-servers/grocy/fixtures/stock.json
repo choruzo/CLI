@@ -1,0 +1,112 @@
+[
+  {
+    "amount": 4,
+    "amount_aggregated": 4,
+    "amount_opened": 1,
+    "amount_opened_aggregated": 1,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2999-12-31",
+    "due_type": 1,
+    "product_id": 1,
+    "product": { "id": 1, "name": "Leche" }
+  },
+  {
+    "amount": 2,
+    "amount_aggregated": 2,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2026-11-23",
+    "due_type": 2,
+    "product_id": 2,
+    "product": { "id": 2, "name": "Nata_cocina" }
+  },
+  {
+    "amount": 3,
+    "amount_aggregated": 3,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2999-12-31",
+    "due_type": 1,
+    "product_id": 3,
+    "product": { "id": 3, "name": "Cebolla_natural" }
+  },
+  {
+    "amount": 2,
+    "amount_aggregated": 2,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2999-12-31",
+    "due_type": 1,
+    "product_id": 4,
+    "product": { "id": 4, "name": "Pasta" }
+  },
+  {
+    "amount": 6,
+    "amount_aggregated": 6,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2999-12-31",
+    "due_type": 1,
+    "product_id": 5,
+    "product": { "id": 5, "name": "Agua" }
+  },
+  {
+    "amount": 2,
+    "amount_aggregated": 2,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2999-12-31",
+    "due_type": 1,
+    "product_id": 7,
+    "product": { "id": 7, "name": "Pollo" }
+  },
+  {
+    "amount": 1,
+    "amount_aggregated": 1,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2999-12-31",
+    "due_type": 1,
+    "product_id": 8,
+    "product": { "id": 8, "name": "Arroz" }
+  },
+  {
+    "amount": 4,
+    "amount_aggregated": 4,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2026-11-19",
+    "due_type": 2,
+    "product_id": 9,
+    "product": { "id": 9, "name": "Yogur" }
+  },
+  {
+    "amount": 1,
+    "amount_aggregated": 1,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2026-11-20",
+    "due_type": 1,
+    "product_id": 10,
+    "product": { "id": 10, "name": "Queso" }
+  },
+  {
+    "amount": 3,
+    "amount_aggregated": 3,
+    "amount_opened": 0,
+    "amount_opened_aggregated": 0,
+    "is_aggregated_amount": 0,
+    "best_before_date": "2026-11-22",
+    "due_type": 1,
+    "product_id": 11,
+    "product": { "id": 11, "name": "Plátano_maduro" }
+  }
+]

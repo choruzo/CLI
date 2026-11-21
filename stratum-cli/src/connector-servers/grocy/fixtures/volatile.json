@@ -1,0 +1,56 @@
+{
+  "due_products": [
+    {
+      "amount": 2,
+      "amount_aggregated": 2,
+      "amount_opened": 0,
+      "amount_opened_aggregated": 0,
+      "is_aggregated_amount": 0,
+      "best_before_date": "2026-11-23",
+      "due_type": 2,
+      "product_id": 2,
+      "product": { "id": 2, "name": "Nata_cocina" }
+    },
+    {
+      "amount": 3,
+      "amount_aggregated": 3,
+      "amount_opened": 0,
+      "amount_opened_aggregated": 0,
+      "is_aggregated_amount": 0,
+      "best_before_date": "2026-11-22",
+      "due_type": 1,
+      "product_id": 11,
+      "product": { "id": 11, "name": "Plátano_maduro" }
+    }
+  ],
+  "overdue_products": [
+    {
+      "amount": 1,
+      "amount_aggregated": 1,
+      "amount_opened": 0,
+      "amount_opened_aggregated": 0,
+      "is_aggregated_amount": 0,
+      "best_before_date": "2026-11-20",
+      "due_type": 1,
+      "product_id": 10,
+      "product": { "id": 10, "name": "Queso" }
+    }
+  ],
+  "expired_products": [
+    {
+      "amount": 4,
+      "amount_aggregated": 4,
+      "amount_opened": 0,
+      "amount_opened_aggregated": 0,
+      "is_aggregated_amount": 0,
+      "best_before_date": "2026-11-19",
+      "due_type": 2,
+      "product_id": 9,
+      "product": { "id": 9, "name": "Yogur" }
+    }
+  ],
+  "missing_products": [
+    { "id": 6, "name": "Tomate frito", "amount_missing": 1, "is_partly_in_stock": 0 },
+    { "id": 5, "name": "Agua", "amount_missing": 2, "is_partly_in_stock": 1 }
+  ]
+}

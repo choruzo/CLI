@@ -34,6 +34,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   11: '99734ebc11c4bf07',
   // M22 parte 4: `ha_historial` en home-assistant.
   12: '60652836f162df55',
+  // M28 fase 2: el conector `grocy` (solo lectura).
+  13: '330dd4b3ac978c27',
 };
 
 /**

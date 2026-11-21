@@ -2943,15 +2943,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - *Red*: el add-on trae su puerto 80 **sin publicar**. La API desde fuera de HA pide asignarle
     uno en *Ajustes → Complementos → Grocy → Red* (la persona ya lo tenía, ver la medida). La URL y la clave van como secretos
     (`GROCY_URL`, no sensible, y `GROCY_API_KEY`), solo por `stratum connectors setup`.
-  - *Propuesta, por decidir con el usuario*:
+  - *Aceptado por el usuario el 2026-11-21*:
     - **Lectura** (`readOnly`): `grocy_despensa` (existencias y lo urgente), `grocy_recetas`
       (buscar y decir si se pueden hacer y qué falta), `grocy_receta` (ingredientes y pasos),
-      `grocy_menu` (lo planificado para un día o una semana con su receta), `grocy_compra` y
-      `grocy_tareas` (tareas domésticas, tareas y pilas pendientes). También `checks` para
-      vigilantes (M22): algo caduca, bajo mínimos, tarea atrasada.
+      `grocy_menu` (lo planificado para un día o una semana con su receta) y `grocy_compra`.
+      La comprobación para vigilantes (M22) es `grocy_comprobar`: algo caducado, a punto de
+      caducar o bajo mínimos. `grocy_tareas` espera, porque no hay tareas domésticas, tareas ni pilas.
     - **Escritura**, cada una con su confirmación: apuntar o quitar de la compra, añadir lo que
-      falta de una receta, consumir o abrir un producto, cocinar una receta, añadir una comida al
-      menú, y completar una tarea. Los borrados, la edición de productos, ubicaciones y unidades,
+      falta de una receta, añadir existencias (una compra hecha; lo pidió el usuario el
+      2026-11-21), consumir o abrir un producto, cocinar una receta, añadir una comida al menú, y
+      completar una tarea. Los borrados, la edición de productos, ubicaciones y unidades,
       y crear o editar recetas no entran en la primera versión.
     - Deshacer lo último que hizo el agente con los `undo` de la API, también con confirmación.
   - *Medido el 2026-11-21 contra el Grocy real* (4.7.1, solo GET; respuestas en el scratchpad de
@@ -2977,9 +2978,13 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     - El menú tiene solo la sección por defecto (`id` -1, sin nombre). No hay tareas domésticas,
       tareas ni pilas: `grocy_tareas` puede esperar.
   - *Fases*: (1) medir contra el Grocy real con una clave de prueba y grabar respuestas para los
-    tests y para M24; (2) conector de lectura, skill y `checks`; (3) escritura acotada. La medida
-    de la fase 1 está hecha (arriba); falta grabar respuestas anonimizadas para los tests. Va
-    **antes de M23** (decidido el 2026-11-21).
+    tests y para M24; (2) conector de lectura, skill y `checks`; (3) escritura acotada. Va **antes de M23**
+    (decidido el 2026-11-21).
+  - *Fases 1 y 2 hechas el 2026-11-21*. Conector `grocy` 1.0.0 con las seis tools de lectura, su
+    skill y la comprobación. El cliente no tiene ningún método de escritura, y `GET` solo alcanza
+    una lista cerrada de rutas. Probado contra el Grocy real con todas las tools. Los tests usan
+    fixtures **sintéticas** con la forma medida, porque las respuestas reales son datos personales.
+    Siguiente: fase 3.
 
 ### 23.12 Fuera, por ahora
 

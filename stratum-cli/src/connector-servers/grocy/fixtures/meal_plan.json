@@ -1,0 +1,80 @@
+[
+  {
+    "id": 1,
+    "day": "2026-11-21",
+    "type": "recipe",
+    "recipe_id": 1,
+    "recipe_servings": 2,
+    "note": null,
+    "product_id": null,
+    "product_amount": 0,
+    "product_qu_id": null,
+    "section_id": -1,
+    "done": 0
+  },
+  {
+    "id": 2,
+    "day": "2026-11-22",
+    "type": "product",
+    "recipe_id": null,
+    "recipe_servings": 1,
+    "note": null,
+    "product_id": 1,
+    "product_amount": 2,
+    "product_qu_id": 3,
+    "section_id": 5,
+    "done": 0
+  },
+  {
+    "id": 3,
+    "day": "2026-11-22",
+    "type": "note",
+    "recipe_id": null,
+    "recipe_servings": 1,
+    "note": "Cena fuera",
+    "product_id": null,
+    "product_amount": 0,
+    "product_qu_id": null,
+    "section_id": -1,
+    "done": 0
+  },
+  {
+    "id": 4,
+    "day": "2026-11-23",
+    "type": "recipe",
+    "recipe_id": 2,
+    "recipe_servings": 2,
+    "note": null,
+    "product_id": null,
+    "product_amount": 0,
+    "product_qu_id": null,
+    "section_id": -1,
+    "done": 0
+  },
+  {
+    "id": 5,
+    "day": "2026-11-20",
+    "type": "note",
+    "recipe_id": null,
+    "recipe_servings": 1,
+    "note": "FUERA ayer",
+    "product_id": null,
+    "product_amount": 0,
+    "product_qu_id": null,
+    "section_id": -1,
+    "done": 0
+  },
+  {
+    "id": 6,
+    "day": "2026-11-28",
+    "type": "note",
+    "recipe_id": null,
+    "recipe_servings": 1,
+    "note": "FUERA sabado",
+    "product_id": null,
+    "product_amount": 0,
+    "product_qu_id": null,
+    "section_id": -1,
+    "done": 0
+  }
+]

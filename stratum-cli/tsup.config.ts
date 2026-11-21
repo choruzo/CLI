@@ -37,6 +37,7 @@ export default defineConfig([
       'aemet/server': 'src/connector-servers/aemet/server.ts',
       'home-assistant/server': 'src/connector-servers/home-assistant/server.ts',
       'google/server': 'src/connector-servers/google/server.ts',
+      'grocy/server': 'src/connector-servers/grocy/server.ts',
     },
     outDir: 'box-image/connectors',
     format: ['esm'],

@@ -1,0 +1,92 @@
+[
+  {
+    "id": 1,
+    "shopping_list_id": 1,
+    "product_id": 1,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 0
+  },
+  {
+    "id": 2,
+    "shopping_list_id": 1,
+    "product_id": 1,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 0
+  },
+  {
+    "id": 3,
+    "shopping_list_id": 1,
+    "product_id": 1,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 0
+  },
+  {
+    "id": 4,
+    "shopping_list_id": 1,
+    "product_id": 1,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 0
+  },
+  {
+    "id": 5,
+    "shopping_list_id": 1,
+    "product_id": 1,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 0
+  },
+  {
+    "id": 6,
+    "shopping_list_id": 1,
+    "product_id": 5,
+    "amount": 6,
+    "qu_id": 2,
+    "note": "con gas",
+    "done": 0
+  },
+  {
+    "id": 7,
+    "shopping_list_id": 1,
+    "product_id": null,
+    "amount": 0,
+    "qu_id": null,
+    "note": "Pilas AA",
+    "done": 0
+  },
+  {
+    "id": 8,
+    "shopping_list_id": 1,
+    "product_id": 4,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 1
+  },
+  {
+    "id": 9,
+    "shopping_list_id": 1,
+    "product_id": 7,
+    "amount": 1,
+    "qu_id": 2,
+    "note": null,
+    "done": 0
+  },
+  {
+    "id": 10,
+    "shopping_list_id": 1,
+    "product_id": 7,
+    "amount": 1,
+    "qu_id": 3,
+    "note": null,
+    "done": 0
+  }
+]

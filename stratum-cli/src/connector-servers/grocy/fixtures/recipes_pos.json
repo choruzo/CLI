@@ -1,0 +1,74 @@
+[
+  {
+    "recipe_id": 1,
+    "product_id": 4,
+    "amount": 1,
+    "note": "200 gramos",
+    "qu_id": 3,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 1,
+    "product_id": 2,
+    "amount": 1,
+    "note": null,
+    "qu_id": 2,
+    "ingredient_group": "Para la salsa"
+  },
+  {
+    "recipe_id": 2,
+    "product_id": 8,
+    "amount": 1,
+    "note": null,
+    "qu_id": 3,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 2,
+    "product_id": 7,
+    "amount": 1,
+    "note": null,
+    "qu_id": 2,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 2,
+    "product_id": 6,
+    "amount": 1,
+    "note": null,
+    "qu_id": 2,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 4,
+    "product_id": 7,
+    "amount": 1,
+    "note": null,
+    "qu_id": 2,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 4,
+    "product_id": 12,
+    "amount": 3,
+    "note": null,
+    "qu_id": 2,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 5,
+    "product_id": 4,
+    "amount": 1,
+    "note": null,
+    "qu_id": 3,
+    "ingredient_group": null
+  },
+  {
+    "recipe_id": 5,
+    "product_id": 7,
+    "amount": 1,
+    "note": null,
+    "qu_id": 2,
+    "ingredient_group": null
+  }
+]

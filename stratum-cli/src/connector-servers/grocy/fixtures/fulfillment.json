@@ -1,0 +1,62 @@
+[
+  {
+    "id": 1,
+    "recipe_id": 1,
+    "need_fulfilled": 1,
+    "need_fulfilled_with_shopping_list": 1,
+    "missing_products_count": 0,
+    "costs": 0,
+    "costs_per_serving": 0,
+    "prices_incomplete": 1
+  },
+  {
+    "id": 1,
+    "recipe_id": 2,
+    "need_fulfilled": 0,
+    "need_fulfilled_with_shopping_list": 1,
+    "missing_products_count": 1,
+    "costs": 0,
+    "costs_per_serving": 0,
+    "prices_incomplete": 1
+  },
+  {
+    "id": 1,
+    "recipe_id": 3,
+    "need_fulfilled": 1,
+    "need_fulfilled_with_shopping_list": 1,
+    "missing_products_count": 0,
+    "costs": 0,
+    "costs_per_serving": 0,
+    "prices_incomplete": 1
+  },
+  {
+    "id": 1,
+    "recipe_id": 4,
+    "need_fulfilled": 0,
+    "need_fulfilled_with_shopping_list": 0,
+    "missing_products_count": 1,
+    "costs": 0,
+    "costs_per_serving": 0,
+    "prices_incomplete": 1
+  },
+  {
+    "id": 1,
+    "recipe_id": 5,
+    "need_fulfilled": 1,
+    "need_fulfilled_with_shopping_list": 1,
+    "missing_products_count": 0,
+    "costs": 4.5,
+    "costs_per_serving": 2.25,
+    "prices_incomplete": 0
+  },
+  {
+    "id": 1,
+    "recipe_id": 6,
+    "need_fulfilled": 1,
+    "need_fulfilled_with_shopping_list": 1,
+    "missing_products_count": 0,
+    "costs": 0,
+    "costs_per_serving": 0,
+    "prices_incomplete": 1
+  }
+]

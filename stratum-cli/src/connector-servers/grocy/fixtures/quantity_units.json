@@ -1,0 +1,4 @@
+[
+  { "id": 2, "name": "Piece", "name_plural": "Pieces" },
+  { "id": 3, "name": "Pack", "name_plural": "Packs" }
+]

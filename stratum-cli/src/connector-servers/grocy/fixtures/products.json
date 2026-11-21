@@ -1,0 +1,110 @@
+[
+  {
+    "id": 1,
+    "name": "Leche",
+    "product_group_id": 1,
+    "active": 1,
+    "location_id": 2,
+    "qu_id_stock": 3,
+    "min_stock_amount": 2
+  },
+  {
+    "id": 2,
+    "name": "Nata_cocina",
+    "product_group_id": 1,
+    "active": 1,
+    "location_id": 2,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 3,
+    "name": "Cebolla_natural",
+    "product_group_id": 2,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 4,
+    "name": "Pasta",
+    "product_group_id": 2,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 3,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 5,
+    "name": "Agua",
+    "product_group_id": 3,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 2,
+    "min_stock_amount": 6
+  },
+  {
+    "id": 6,
+    "name": "Tomate frito",
+    "product_group_id": 2,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 2,
+    "min_stock_amount": 1
+  },
+  {
+    "id": 7,
+    "name": "Pollo",
+    "product_group_id": 4,
+    "active": 1,
+    "location_id": 2,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 8,
+    "name": "Arroz",
+    "product_group_id": 2,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 3,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 9,
+    "name": "Yogur",
+    "product_group_id": 1,
+    "active": 1,
+    "location_id": 2,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 10,
+    "name": "Queso",
+    "product_group_id": 1,
+    "active": 1,
+    "location_id": 2,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 11,
+    "name": "Plátano_maduro",
+    "product_group_id": 5,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  },
+  {
+    "id": 12,
+    "name": "Patatas",
+    "product_group_id": 5,
+    "active": 1,
+    "location_id": 3,
+    "qu_id_stock": 2,
+    "min_stock_amount": 0
+  }
+]

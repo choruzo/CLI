@@ -1,0 +1,76 @@
+{
+  "schemaVersion": 1,
+  "id": "grocy",
+  "version": "1.0.0",
+  "name": "Grocy",
+  "description": "Despensa, recetas, menú y lista de la compra de tu Grocy, en tu red local.",
+  "agents": ["companion"],
+  "hosts": ["la URL de GROCY_URL (tu red local)"],
+  "secrets": [
+    {
+      "name": "GROCY_URL",
+      "description": "URL de la API de Grocy, con el nombre completo o la IP y el puerto publicado del add-on (p. ej. http://192.168.1.10:9283/api). Por el Ingress de Home Assistant no funciona.",
+      "sensitive": false
+    },
+    {
+      "name": "GROCY_API_KEY",
+      "description": "Clave de API de Grocy (Ajustes → Gestionar claves de API)"
+    }
+  ],
+  "tools": [
+    {
+      "name": "grocy_despensa",
+      "readOnly": true,
+      "summary": "Lo urgente de la despensa, o si hay un producto y cuánto."
+    },
+    {
+      "name": "grocy_recetas",
+      "readOnly": true,
+      "summary": "Recetas: si se pueden hacer con lo que hay y qué falta."
+    },
+    {
+      "name": "grocy_receta",
+      "readOnly": true,
+      "summary": "Ingredientes, existencias y pasos de una receta."
+    },
+    {
+      "name": "grocy_menu",
+      "readOnly": true,
+      "summary": "Lo planificado en el menú para un día o una semana."
+    },
+    {
+      "name": "grocy_compra",
+      "readOnly": true,
+      "summary": "La lista de la compra, agrupada por producto."
+    },
+    {
+      "name": "grocy_comprobar",
+      "readOnly": true,
+      "summary": "Caducados, a punto de caducar o bajo mínimos, para vigilantes."
+    }
+  ],
+  "checks": [
+    {
+      "tool": "grocy_comprobar",
+      "summary": "Productos caducados, a punto de caducar o bajo mínimos.",
+      "minIntervalSec": 900,
+      "args": [
+        {
+          "name": "que",
+          "type": "string",
+          "required": true,
+          "description": "caducado, caduca_pronto o bajo_minimos",
+          "enum": ["caducado", "caduca_pronto", "bajo_minimos"]
+        },
+        {
+          "name": "dias",
+          "type": "integer",
+          "required": false,
+          "description": "Solo con caduca_pronto: días hacia delante (1-30, por defecto 5)",
+          "minimum": 1,
+          "maximum": 30
+        }
+      ]
+    }
+  ]
+}
