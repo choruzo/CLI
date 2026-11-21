@@ -2826,6 +2826,9 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   caja van en el equipo de la persona; el modelo, donde convenga (hoy, NaN). Un modelo local no es
   requisito, y se mide en M24 en vez de suponerse. *Orden* (el usuario lo dejó a Claude): M23, M27,
   M24, M25, M26. M27 va tras M23 porque es lo que más se usa, y M24 lo medirá también.
+  *Actualizado el 2026-11-21* (propuesto por Claude, aceptado por el usuario): **M28, M23, M27,
+  M24, M25, M26**. M28 (Grocy) va primero porque es un conector acotado, ya medido contra el
+  Grocy real, y de uso diario.
 
 - **Antes de M23, la memoria** (2026-11-20). La del `companion` tenía 61 recuerdos con el mismo
   hecho repetido hasta cinco veces y datos desfasados.
@@ -2906,6 +2909,77 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     empujados quedan para después. Al implementar se decide si la propuesta es una tool del
     runtime con confirmación forzada, como `propose_routine`, o una tool del conector, cuya
     confirmación hoy es la normal.
+
+- **M28 — Despensa, recetas y menú con Grocy** [propuesto por el usuario el 2026-11-21]. Que el
+  `companion` conteste «¿qué caduca esta semana?», «¿qué puedo cocinar con lo que hay?», «¿qué
+  falta para la compra?» o «¿qué toca comer hoy?», y que apunte una compra, un consumo o una
+  receta cocinada con confirmación. La persona tiene Grocy 4.7.1 como add-on de HAOS.
+  - *Decidido por el usuario*: **las recetas son importantes**. Eso descarta la integración de
+    Grocy en HA como vía única y lleva a un **conector `grocy` propio contra la API REST de
+    Grocy**, en la caja de conectores, como los demás (M20).
+  - *Por qué no basta la integración de HA* (`custom-components/grocy`, leída el 2026-11-21):
+    expone existencias, compra, menú, tareas domésticas, tareas y pilas como listas en atributos de
+    sensores, todas **deshabilitadas por defecto**, y doce servicios `grocy.*`. Pero **no lista
+    recetas** (solo consumir una por id) ni dice si se pueden cocinar con lo que hay. Además, el
+    repositorio original ya no se mantiene. El conector no la necesita ni la usa.
+  - *Lo que da la API de Grocy* (OpenAPI de `master`, leída el 2026-11-21; se confirma contra
+    4.7.1 en la fase 1):
+    - Autenticación con la cabecera `GROCY-API-KEY`. Versión en `GET /system/info`.
+    - Recetas: lista y detalle por `/objects/recipes`, ingredientes por `/objects/recipes_pos` y
+      recetas anidadas por `recipes_nestings`. Saber si se puede cocinar con `GET
+      /recipes/fulfillment` (`need_fulfilled`, `need_fulfilled_with_shopping_list`,
+      `missing_products_count`, `costs`). Cocinarla con `POST /recipes/{id}/consume` (400 si falta
+      algo) y apuntar lo que falta a la compra con `POST
+      /recipes/{id}/add-not-fulfilled-products-to-shoppinglist`.
+    - Existencias en `GET /stock` y lo urgente en `GET /stock/volatile?due_soon_days=` (a punto de
+      caducar, pasado de fecha, caducado, bajo mínimos). Añadir, consumir, abrir y hacer inventario
+      por producto o por código de barras, con deshacer por transacción.
+    - Compra: `POST /stock/shoppinglist/add-product|remove-product|add-missing-products|clear`.
+    - Menú: `meal_plan` y `meal_plan_sections` por `/objects/`.
+    - Tareas domésticas (`/chores`, `execute`), tareas (`/tasks`, `complete`) y pilas
+      (`/batteries`, `charge`), con deshacer.
+    - `/objects/{entidad}` filtra con `query[]` (`=`, `!=`, `~`, `<`, `>`, regex…), `order` y
+      `limit`; un campo no válido devuelve 500.
+  - *Red*: el add-on trae su puerto 80 **sin publicar**. La API desde fuera de HA pide asignarle
+    uno en *Ajustes → Complementos → Grocy → Red* (la persona ya lo tenía, ver la medida). La URL y la clave van como secretos
+    (`GROCY_URL`, no sensible, y `GROCY_API_KEY`), solo por `stratum connectors setup`.
+  - *Propuesta, por decidir con el usuario*:
+    - **Lectura** (`readOnly`): `grocy_despensa` (existencias y lo urgente), `grocy_recetas`
+      (buscar y decir si se pueden hacer y qué falta), `grocy_receta` (ingredientes y pasos),
+      `grocy_menu` (lo planificado para un día o una semana con su receta), `grocy_compra` y
+      `grocy_tareas` (tareas domésticas, tareas y pilas pendientes). También `checks` para
+      vigilantes (M22): algo caduca, bajo mínimos, tarea atrasada.
+    - **Escritura**, cada una con su confirmación: apuntar o quitar de la compra, añadir lo que
+      falta de una receta, consumir o abrir un producto, cocinar una receta, añadir una comida al
+      menú, y completar una tarea. Los borrados, la edición de productos, ubicaciones y unidades,
+      y crear o editar recetas no entran en la primera versión.
+    - Deshacer lo último que hizo el agente con los `undo` de la API, también con confirmación.
+  - *Medido el 2026-11-21 contra el Grocy real* (4.7.1, solo GET; respuestas en el scratchpad de
+    la sesión, sin copiar al repo porque son datos personales):
+    - La API **no responde por Ingress**: HA devuelve 401 antes de llegar a Grocy, aunque la clave
+      sea buena. Sí responde en el puerto publicado del add-on (`http://homeassistant:9283/api`,
+      `http`). `GROCY_URL` es esa base.
+    - `recipes` trae un campo `type`. Las de la persona son `normal`. Las internas del menú se
+      filtran con `query[]=type=normal`; el menú estaba vacío y no se pudo ver una interna.
+    - En `/recipes/fulfillment` el `id` vale siempre 1: la receta es `recipe_id`.
+    - **Una receta sin ingredientes enlazados sale como que se puede hacer** (`need_fulfilled` 1,
+      0 que faltan). Dos de las tres están así: sus ingredientes solo están en la descripción. La
+      tool debe decir «sin ingredientes enlazados», nunca «tienes todo».
+    - La descripción es **HTML pegado con estilos en línea** (hasta 2,7 kB) y lleva los
+      ingredientes y los pasos. Se pasa a texto plano y es contenido no confiable.
+    - Las unidades son pocas («Piece», «Pack») y la cantidad real va en la `note` del ingrediente
+      («200 gramos»): la nota se enseña siempre.
+    - `best_before_date` `2999-12-31` significa «no caduca» (94 de 95 existencias).
+    - La lista de la compra tiene **filas repetidas** del mismo producto (26 filas, 3 productos):
+      se agrupan por producto al leer.
+    - Muchos nombres de producto usan `_` en vez de espacio (32 de 126): se buscan sin distinguir
+      `_` de espacio. Los costes vienen a 0 con `prices_incomplete`: sin precios, «n/d».
+    - El menú tiene solo la sección por defecto (`id` -1, sin nombre). No hay tareas domésticas,
+      tareas ni pilas: `grocy_tareas` puede esperar.
+  - *Fases*: (1) medir contra el Grocy real con una clave de prueba y grabar respuestas para los
+    tests y para M24; (2) conector de lectura, skill y `checks`; (3) escritura acotada. La medida
+    de la fase 1 está hecha (arriba); falta grabar respuestas anonimizadas para los tests. Va
+    **antes de M23** (decidido el 2026-11-21).
 
 ### 23.12 Fuera, por ahora
 
