@@ -21,7 +21,7 @@ afterEach(() => rmSync(dir, { recursive: true, force: true }));
 
 function addConnector(
   id: string,
-  tools: { name: string; readOnly: boolean }[],
+  tools: { name: string; readOnly: boolean; forced?: boolean }[],
   skill = true,
   secrets: string[] = [],
 ) {
@@ -158,6 +158,27 @@ describe('resolveActiveConnectors (M20)', () => {
     expect(r.readOnlyTools).toEqual({ 'uno-dos': ['leer'] });
     expect(r.skills.map((s) => s.id)).toEqual(['uno-dos']);
     expect(r.skills[0]!.skill.name).toBe('connector-uno-dos');
+  });
+
+  it('M27: un server lleva sus tools forzadas; uno sin ninguna, nada', async () => {
+    addConnector('uno-dos', [
+      { name: 'leer', readOnly: true },
+      { name: 'proponer', readOnly: false, forced: true },
+    ]);
+    addConnector('tres-cuatro', [{ name: 'escribir', readOnly: false }]);
+    const file = connectorsFile(dir);
+    enableConnector(file, 'uno-dos');
+    enableConnector(file, 'tres-cuatro');
+    const { deps } = launchDeps(RUNTIME);
+    const r = await resolveActiveConnectors({
+      dataDir: dir,
+      box: undefined,
+      catalog: loadConnectorCatalog(catalogDir),
+      launch: deps,
+    });
+    const byName = new Map(r.servers.map((s) => [s.config.name, s]));
+    expect(byName.get('uno-dos')!.forcedTools).toEqual(['proponer']);
+    expect(byName.get('tres-cuatro')).not.toHaveProperty('forcedTools');
   });
 
   describe('secretos (fase 4)', () => {

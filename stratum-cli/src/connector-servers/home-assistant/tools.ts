@@ -1,7 +1,8 @@
 /**
  * Tools del conector Home Assistant: ha_resumen, ha_buscar, ha_estado,
  * ha_historial, ha_comprobar, ha_encender, ha_apagar y ha_accion, y (M27, solo
- * lectura) ha_automatizaciones, ha_trazas, ha_registro y ha_avisos. `fetch` y
+ * lectura) ha_automatizaciones, ha_trazas, ha_registro y ha_avisos, y (M27 fase 2,
+ * escritura forzada de lo propio) ha_proponer_automatizacion y ha_borrar_automatizacion. `fetch` y
  * `WebSocket` inyectables para testear sin red. Las salidas son texto breve en español para un agente,
  * nunca JSON crudo; `ha_comprobar` (M22) devuelve además lo estructurado que
  * lee un vigilante.
@@ -43,6 +44,7 @@ import {
   type HaToolContext,
 } from './args.js';
 import { createAutomationTools } from './automations.js';
+import { createConfigWriteTools } from './config-writes.js';
 import { createLogbookTool } from './logbook.js';
 import { createRepairsTool } from './repairs.js';
 import { createHaWs, type WebSocketCtor } from './ws.js';
@@ -102,6 +104,8 @@ export interface HomeAssistantOptions {
   url?: string;
   token?: string;
   now?: () => number;
+  /** Espera (ms) entre intentos de ver lo recién escrito (M27 fase 2); por defecto `setTimeout`. */
+  sleep?: (ms: number) => Promise<void>;
 }
 
 // --- Argumentos --------------------------------------------------------------
@@ -720,6 +724,7 @@ export function createHomeAssistantTools(
       return ws;
     },
     now,
+    sleep: opts.sleep ?? ((ms) => new Promise<void>((resolve) => setTimeout(resolve, ms))),
   };
 
   return [
@@ -735,6 +740,7 @@ export function createHomeAssistantTools(
     ...createAutomationTools(ctx),
     createLogbookTool(ctx),
     createRepairsTool(ctx),
+    ...createConfigWriteTools(ctx),
   ];
 }
 

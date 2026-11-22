@@ -23,7 +23,7 @@ import {
   normalizeName,
   safeField,
 } from './format.js';
-import { toYaml } from './yaml.js';
+import { toYaml } from '../lib/yaml.js';
 
 /** `attributes.id` de una automatización: lo que admite la API de configuración. */
 const ITEM_ID_RE = /^[A-Za-z0-9_-]{1,64}$/;
@@ -193,7 +193,7 @@ async function deviceNames(
 
 // --- Descripción de lo que hay ----------------------------------------------------
 
-function stateLabel(a: Automation): string {
+export function stateLabel(a: Pick<Automation, 'kind' | 'state'>): string {
   const s = a.state.state;
   if (s === 'on' || s === 'off') {
     if (a.kind === 'script') return 'script';
@@ -499,7 +499,7 @@ export function createAutomationTools(ctx: HaToolContext): ConnectorTool[] {
           `Automatizaciones: ${autos.length} (${on} activadas, ${autos.length - on} desactivadas) · Scripts: ${scripts}`,
           ...shown.map(
             (x) =>
-              `${x.entityId} — ${safeField(nameOf(x), 80)} — ${stateLabel(x)} — última vez: ${lastTime(x, tz, ctx.now())}`,
+              `${x.entityId} — ${safeField(nameOf(x), 80)} — ${stateLabel(x)}${x.itemId?.startsWith('stratum_') ? ' · de Stratum' : ''} — última vez: ${lastTime(x, tz, ctx.now())}`,
           ),
         ];
         if (found.length > shown.length) {

@@ -27,9 +27,19 @@ const ToolSchema = z
     name: z.string().regex(/^[a-z][a-z0-9_]{0,47}$/),
     /** Solo lee: no pide confirmación (no da más autoridad que `curl` en la caja). */
     readOnly: z.boolean(),
+    /**
+     * M27 — se confirma **siempre**, como `propose_routine`. Ni allow-all ni
+     * concesiones lo saltan, no se aprueba desde Telegram, y la confirmación
+     * enseña los argumentos enteros. Solo en una tool que no es de solo lectura.
+     */
+    forced: z.boolean().optional(),
     summary: z.string().min(1).max(200),
   })
-  .strict();
+  .strict()
+  .refine((t) => !(t.forced === true && t.readOnly), {
+    message: 'a read-only tool cannot be forced',
+    path: ['forced'],
+  });
 
 const SecretSchema = z
   .object({
@@ -261,6 +271,11 @@ export function accessCheckOf(manifest: ConnectorManifest): string | null {
 }
 
 /** Tools que el manifiesto declara de solo lectura. */
+/** M27 — las tools cuya confirmación es forzada (`forced`). */
+export function forcedToolsOf(manifest: ConnectorManifest): string[] {
+  return manifest.tools.filter((t) => t.forced === true).map((t) => t.name);
+}
+
 export function readOnlyToolsOf(manifest: ConnectorManifest): string[] {
   return manifest.tools.filter((t) => t.readOnly).map((t) => t.name);
 }

@@ -6,10 +6,12 @@ presets: [companion]
 
 # Home Assistant: consultar y manejar la casa
 
-Tienes doce tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
+Tienes catorce tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
 `ha_estado`, `ha_historial`, `ha_comprobar`, `ha_automatizaciones`,
-`ha_trazas`, `ha_registro` y `ha_avisos` (solo lectura) y `ha_encender`,
-`ha_apagar` y `ha_accion` (actúan en la casa y piden aprobación a la persona).
+`ha_trazas`, `ha_registro` y `ha_avisos` (solo lectura), `ha_encender`,
+`ha_apagar` y `ha_accion` (actúan en la casa y piden aprobación a la persona) y
+`ha_proponer_automatizacion` y `ha_borrar_automatizacion` (escriben en la
+configuración de Home Assistant, solo lo propio, con aprobación forzada).
 (`ha_acceso`, la comprobación de acceso, es para el diagnóstico.)
 
 ## Qué preguntas cubre
@@ -31,6 +33,9 @@ Tienes doce tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
   `ha_encender` / `ha_apagar`.
 - «Cierra la puerta con llave», «activa la alarma», «manda una notificación» →
   `ha_accion`.
+- «Créame una automatización que encienda la luz del pasillo al detectar
+  movimiento de noche», «modifica esa automatización», «bórrala» →
+  `ha_proponer_automatizacion` / `ha_borrar_automatizacion`.
 
 ## Cómo encadenarlas
 
@@ -77,6 +82,29 @@ Tienes doce tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
 8. Tras una acción, la salida lista lo que cambió. Si dice que no hubo cambios,
    puede tardar unos segundos: comprueba con `ha_estado` antes de dar por fallida
    la orden.
+9. `ha_proponer_automatizacion` crea o modifica (`accion`: `crear` |
+   `modificar`) una automatización, un script o una escena (`tipo`:
+   `automatizacion` | `script` | `escena`) con un `id` propio que empieza por
+   `stratum_` (`stratum_luz_pasillo`; solo minúsculas, números y `_`). Solo
+   puedes tocar lo tuyo: las demás no se editan ni se borran, y si la persona
+   quiere cambiar una suya, explícale el cambio o escríbelo en YAML para que lo
+   pegue ella. `config` lleva la configuración sin `id` ni `initial_state`:
+   automatización (`alias`, `description`, `triggers`, `conditions`,
+   `actions`, `mode`, `max`, `variables`), script (`alias`, `description`,
+   `sequence`, `mode`, `max`, `fields`, `variables`) o escena (`name`,
+   `entities`). Antes de proponer, comprueba los `entity_id` con `ha_buscar`
+   (y, si cambias una existente, mira la actual con `ha_automatizaciones`).
+   Lo nuevo se crea **desactivada**: `habilitada: true` solo si la persona lo pide
+   expresamente, y solo vale al crear una automatización. Una que se modifica
+   conserva su estado. Para activarla, `ha_encender` con su `entity_id` (pide
+   aprobación). Cada propuesta la aprueba la persona entera, **solo desde Dot**
+   (desde Telegram no se aprueba): si la deniega, no insistas ni la repitas con
+   otros argumentos; pregúntale qué quiere cambiar. Mantén los argumentos
+   breves (como mucho unos 1 800 caracteres en YAML; si no, la llamada se veta):
+   divide lo grande en varias automatizaciones pequeñas.
+   `ha_borrar_automatizacion` (`tipo`, `id`) borra una propia, también con
+   aprobación. Si dice «No sé si llegó», no repitas: comprueba con
+   `ha_automatizaciones` (o `ha_buscar` para una escena) qué quedó.
 
 ## Límites
 
@@ -99,8 +127,8 @@ Tienes doce tools del conector Home Assistant: `ha_resumen`, `ha_buscar`,
   lo parezcan.
 - El registro es muy ruidoso: no lo pidas sin `entity_id` esperando ver cada
   cambio de un sensor; con `entity_id` sí sale todo lo suyo.
-- No puedes crear automatizaciones de Home Assistant (actuarían solas, sin
-  aprobación). Si te la piden, escribe la propuesta en YAML para que la persona
-  la pegue ella misma en Home Assistant.
+- Una automatización actúa sola, sin aprobación: por eso solo la propones, nace
+  desactivada y solo tocas las tuyas (`stratum_…`). No escribes en una versión de
+  Home Assistant que no conozcas: lo dirá la tool.
 - `ha_acceso` es para el diagnóstico: no hace falta usarla salvo que la persona
   pregunte si la conexión funciona.

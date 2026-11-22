@@ -19,10 +19,32 @@ export class HaHttpError extends ToolUserError {
   constructor(
     message: string,
     readonly status: number,
+    /** El `message` que dio HA (sin el token, recortado); vacío si no vino. */
+    readonly detail = '',
   ) {
     super(message);
   }
 }
+
+/**
+ * Fallo de red en una escritura (M27 fase 2). `maybeSent` es `false` solo si la
+ * petición no pudo salir (nombre sin resolver o conexión rechazada); en cualquier
+ * otro caso (plazo, conexión cortada, redirección) HA pudo llegar a aplicarla.
+ */
+export class HaNetworkError extends ToolUserError {
+  constructor(
+    message: string,
+    kind: 'auth' | 'unreachable' | undefined,
+    readonly maybeSent: boolean,
+  ) {
+    super(message, kind);
+  }
+}
+
+/** Lo único que se escribe en la configuración de HA: cosas propias, con prefijo `stratum_`. */
+export type HaConfigKind = 'automation' | 'script' | 'scene';
+const CONFIG_WRITE_PATH_RE =
+  /^\/api\/config\/(automation|script|scene)\/config\/stratum_[a-z0-9_]{1,50}$/;
 
 export interface HaState {
   entity_id: string;
@@ -57,6 +79,19 @@ export interface HaClient {
   /** `entity_id` → área. `null` si no se pudieron obtener (sin dato, nunca un error). */
   getAreas(signal?: AbortSignal): Promise<Map<string, string> | null>;
   getStates(signal?: AbortSignal): Promise<HaState[]>;
+  /**
+   * Escribe la configuración de una automatización, script o escena propia
+   * (`stratum_…`). Devuelve el JSON de la respuesta, o `undefined` si no era JSON.
+   * Una ruta ajena es un veto sin tocar la red.
+   */
+  writeConfig(
+    kind: HaConfigKind,
+    id: string,
+    body: Record<string, unknown>,
+    signal?: AbortSignal,
+  ): Promise<unknown>;
+  /** Borra una de las propias (`stratum_…`); misma forma de respuesta que `writeConfig`. */
+  deleteConfig(kind: HaConfigKind, id: string, signal?: AbortSignal): Promise<unknown>;
 }
 
 export function notConfigured(): ToolUserError {
@@ -150,10 +185,11 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
   }
 
   async function request(
-    method: 'GET' | 'POST',
+    method: 'GET' | 'POST' | 'DELETE',
     path: string,
     body: unknown,
     signal: AbortSignal | undefined,
+    write = false,
   ): Promise<string> {
     if (!path.startsWith('/api/')) throw new ToolUserError('Ruta no permitida.');
     const timeout = AbortSignal.timeout(TIMEOUT_MS);
@@ -171,13 +207,19 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     try {
       res = await opts.fetch(prefix + path, init);
     } catch (err) {
-      throw networkError(err);
+      const e = networkError(err);
+      if (!write) throw e;
+      const code = errorCode(err);
+      const neverSent = code === 'ENOTFOUND' || code === 'EAI_AGAIN' || code === 'ECONNREFUSED';
+      throw new HaNetworkError(e.message, e.kind, !neverSent);
     }
     let text: string;
     try {
       text = await res.text();
     } catch {
-      throw new ToolUserError(`Respuesta de Home Assistant en ${host} no válida.`);
+      const msg = `Respuesta de Home Assistant en ${host} no válida.`;
+      // En una escritura, la petición ya salió: no se sabe si se aplicó.
+      throw write ? new HaNetworkError(msg, undefined, true) : new ToolUserError(msg);
     }
     if (res.ok) return text;
     if (res.status === 401 || res.status === 403) {
@@ -202,6 +244,7 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     throw new HaHttpError(
       `Home Assistant respondió HTTP ${res.status}${detail ? `: ${detail}` : ''}.`,
       res.status,
+      detail,
     );
   }
 
@@ -210,6 +253,22 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
       return JSON.parse(text);
     } catch {
       throw new ToolUserError(`Respuesta de Home Assistant en ${host} no válida.`);
+    }
+  }
+
+  function configPath(kind: HaConfigKind, id: string): string {
+    const path = `/api/config/${kind}/config/${id}`;
+    if (!CONFIG_WRITE_PATH_RE.test(path)) {
+      throw new ToolUserError('Solo se escribe en lo propio: ids con prefijo stratum_.');
+    }
+    return path;
+  }
+
+  function parseLoose(text: string): unknown {
+    try {
+      return JSON.parse(text);
+    } catch {
+      return undefined;
     }
   }
 
@@ -260,6 +319,12 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     },
     async getStates(signal) {
       return toStates(await client.getJson('/api/states', signal));
+    },
+    async writeConfig(kind, id, body, signal) {
+      return parseLoose(await request('POST', configPath(kind, id), body, signal, true));
+    },
+    async deleteConfig(kind, id, signal) {
+      return parseLoose(await request('DELETE', configPath(kind, id), undefined, signal, true));
     },
   };
   return client;

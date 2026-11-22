@@ -9,7 +9,7 @@ import { nodeWebSocket } from './ws-node.js';
 
 serveStdio(
   createMcpServer(
-    { name: 'home-assistant', version: '1.4.0' },
+    { name: 'home-assistant', version: '1.5.0' },
     createHomeAssistantTools({
       fetch: globalThis.fetch,
       url: process.env.HA_URL,

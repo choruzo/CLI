@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "home-assistant",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "name": "Home Assistant",
   "description": "Consulta y maneja tu casa con Home Assistant, en tu red local.",
   "agents": ["companion"],
@@ -79,6 +79,18 @@
       "name": "ha_accion",
       "readOnly": false,
       "summary": "Llama a cualquier servicio de Home Assistant."
+    },
+    {
+      "name": "ha_proponer_automatizacion",
+      "readOnly": false,
+      "forced": true,
+      "summary": "Propone crear o modificar una automatización, script o escena propia (stratum_…); la aprueba la persona entera."
+    },
+    {
+      "name": "ha_borrar_automatizacion",
+      "readOnly": false,
+      "forced": true,
+      "summary": "Borra una automatización, script o escena propia (stratum_…), con aprobación."
     }
   ],
   "checks": [

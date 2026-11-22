@@ -314,6 +314,13 @@ export class ToolRegistry {
  * lleva quién la vetó (`blocked`), que viaja hasta el `tool_error`. El motivo
  * ya llega redactado.
  */
+/**
+ * M27 — tope del texto de una confirmación que se aprueba entera
+ * (`describeConfirmation`): lo que el publicador manda sin recortar
+ * (`INPUT_CHARS` de `host/session-publisher.ts`).
+ */
+const CONFIRMATION_TEXT_MAX = 2_000;
+
 function vetoed(
   ctx: ToolContext,
   call: ToolCallReady,
@@ -677,7 +684,36 @@ export class ToolDispatcher {
 
     // Hito 16: la descripción cita el comando (puede llevar un secreto) y va al
     // log y al prompt de confirmación: redactada con el núcleo y los extras.
-    const description = redactText(describeCall(call), ctx.config);
+    // M27 — una tool que da su propio texto (lo forzado de un conector, que se
+    // aprueba entero) lo recibe con los argumentos ya redactados.
+    let described: string;
+    try {
+      described = tool.describeConfirmation
+        ? tool.describeConfirmation(redact(call.input))
+        : describeCall(call);
+    } catch (err) {
+      // Falla cerrado: lo que se aprueba entero no se pregunta con un resumen.
+      log.warn('describeConfirmation threw', { tool: call.name, err });
+      return vetoed(ctx, call, 'preflight', {
+        ok: false,
+        error: `Tool "${call.name}": its confirmation could not be described, so it was not executed.`,
+        recoverable: true,
+        countsAsFailure: false,
+      });
+    }
+    const description = redactText(described, ctx.config);
+    // Lo que da su propio texto se aprueba entero: si al redactarlo ya no cabe
+    // en lo que publica el anfitrión (se recortaría), no se pregunta.
+    if (tool.describeConfirmation && description.length > CONFIRMATION_TEXT_MAX) {
+      return vetoed(ctx, call, 'preflight', {
+        ok: false,
+        error:
+          `Tool "${call.name}": its confirmation is too long to be shown in full ` +
+          `(${description.length} characters; at most ${CONFIRMATION_TEXT_MAX}), so it was not executed.`,
+        recoverable: true,
+        countsAsFailure: false,
+      });
+    }
     const traceDecision = (
       decision: 'approved' | 'allow-all' | 'granted' | 'denied' | 'blocked',
       grant?: GrantMatch,

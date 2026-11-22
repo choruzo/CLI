@@ -2993,6 +2993,25 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       automatización sin `id` (YAML).
     - *Repairs* no trae el texto traducido, solo `translation_key` y los placeholders. En esta casa
       había un aviso real: una automatización que llama a un servicio `notify.*` que ya no existe.
+  - *Fase 2, hecha el 2026-11-22* (`home-assistant` 1.5.0, imagen v17; probada en el HA real con una automatización de prueba creada, modificada y borrada).
+    `ha_proponer_automatizacion` (crear o modificar) y `ha_borrar_automatizacion`, para
+    automatizaciones, scripts y escenas con id `stratum_…`.
+    - *Decidido por Claude (cambiable)*: es una **tool del conector** con confirmación forzada,
+      no una del runtime. El manifiesto la marca `forced: true` y el runtime la trata como
+      `propose_routine`: ni allow-all ni concesiones, no se aprueba desde Telegram, y la
+      confirmación enseña los argumentos enteros en YAML. Si no caben (1 900 caracteres), se veta
+      en vez de recortarlos. Así el token sigue solo en la caja de conectores, y el mecanismo vale
+      para cualquier otro conector.
+    - *Medido el 2026-11-22* con una automatización, un script y una escena de prueba, creados y
+      borrados:
+      - Con `initial_state: false` la automatización nace apagada, sin ventana en la que pueda
+        saltar. Reescrita sin esa clave, sigue apagada (HA restaura el último estado), así que no
+        queda guardado nada que la apague en cada reinicio.
+      - Una configuración inválida da un 400 con su motivo y no toca la anterior.
+      - Borrar algo que no existe da un 400.
+    - La versión de HA se comprueba antes de escribir (de 2024.10 a 2027). Una respuesta que no
+      sea `{"result":"ok"}`, o un fallo de red que pudo llegar, se dice como «no sé» y nunca se
+      reintenta.
 
 - **M28 — Despensa, recetas y menú con Grocy** [propuesto por el usuario el 2026-11-21]. Que el
   `companion` conteste «¿qué caduca esta semana?», «¿qué puedo cocinar con lo que hay?», «¿qué

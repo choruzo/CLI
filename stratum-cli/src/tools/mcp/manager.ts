@@ -65,6 +65,22 @@ export interface McpManagerOptions {
 export interface DynamicMcpServer {
   config: McpServer;
   beforeConnect?: () => Promise<void>;
+  /**
+   * M27 — tools de este server con confirmación **forzada** (`forced` en el
+   * manifiesto de un conector): ni allow-all ni concesiones, y la confirmación
+   * enseña los argumentos enteros (`buildMcpTool`).
+   */
+  forcedTools?: readonly string[];
+}
+
+const NO_FORCED: ReadonlySet<string> = new Set();
+
+/**
+ * Huella de un server dinámico: su config y sus tools forzadas. Si cambian las
+ * forzadas, el server se relanza y sus tools se registran otra vez.
+ */
+function dynamicKey(s: DynamicMcpServer): string {
+  return JSON.stringify({ config: s.config, forced: [...(s.forcedTools ?? [])].sort() });
 }
 
 // ---------------------------------------------------------------------------
@@ -95,7 +111,10 @@ export class McpManager {
   private readonly runtime: McpRuntimeOptions;
   private readonly onLog: (line: string) => void;
   /** M20 — servers dinámicos por nombre, con la huella de su config. */
-  private readonly dynamic = new Map<string, { client: McpServerClient; key: string }>();
+  private readonly dynamic = new Map<
+    string,
+    { client: McpServerClient; key: string; forced: ReadonlySet<string> }
+  >();
   /** M20 — `setDynamicServers` en serie: dos sincronizaciones nunca se solapan. */
   private dynamicChain: Promise<unknown> = Promise.resolve();
 
@@ -166,7 +185,7 @@ export class McpManager {
     }
     for (const [name, entry] of [...this.dynamic]) {
       const want = wanted.get(name);
-      if (want && JSON.stringify(want.config) === entry.key) continue;
+      if (want && dynamicKey(want) === entry.key) continue;
       this._dropClient(entry.client);
       this.dynamic.delete(name);
       await entry.client.close();
@@ -175,7 +194,11 @@ export class McpManager {
       if (this.dynamic.has(name)) continue;
       const client = this._newClient(s.config, s.beforeConnect);
       this.clients.push(client);
-      this.dynamic.set(name, { client, key: JSON.stringify(s.config) });
+      this.dynamic.set(name, {
+        client,
+        key: dynamicKey(s),
+        forced: new Set(s.forcedTools ?? []),
+      });
     }
     const pending = [...this.dynamic.values()]
       .map((e) => e.client)
@@ -193,6 +216,12 @@ export class McpManager {
     });
     if (this.dynamic.size > 0) this.startHeartbeat();
     return warnings;
+  }
+
+  /** M27 — las tools forzadas de un server dinámico; ninguna en uno de la config. */
+  private _forcedOf(client: McpServerClient): ReadonlySet<string> {
+    const entry = this.dynamic.get(client.name);
+    return entry?.client === client ? entry.forced : NO_FORCED;
   }
 
   private _isDynamic(client: McpServerClient): boolean {
@@ -375,7 +404,10 @@ export class McpManager {
     const warnings: McpManagerWarning[] = [];
 
     for (const mcpTool of client.tools) {
-      const def = buildMcpTool(client, mcpTool, { confirmMutating: this.confirmMutating });
+      const def = buildMcpTool(client, mcpTool, {
+        confirmMutating: this.confirmMutating,
+        forced: this._forcedOf(client).has(mcpTool.name),
+      });
       const owner = this.owners.get(def.name);
       const takenByOther = owner !== undefined && owner !== client;
       const takenByBuiltin = owner === undefined && registry.get(def.name) !== undefined;

@@ -1,6 +1,6 @@
 /**
- * Emisor YAML mínimo y determinista para valores JSON (M27): lo que la API de
- * Home Assistant devuelve de una automatización, para enseñarla legible. Solo
+ * Emisor YAML mínimo y determinista para valores JSON (M27). Lo usan el conector de Home Assistant (lo que la API de
+ * Home Assistant devuelve de una automatización) y el runtime (la confirmación forzada de una tool de conector, `tools/mcp/bridge.ts`). Sin imports. Solo
  * emite; no lee YAML. Las claves salen en el orden en que vienen.
  *
  * Una cadena va entre comillas (`JSON.stringify`) cuando un lector de YAML la

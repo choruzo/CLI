@@ -13,6 +13,7 @@ import type { ToolDefinition, ToolResult } from '../../agent/types.js';
 import type { McpServerClient, McpToolInfo } from './client.js';
 import type { StratumConfig } from '../../config/schema.js';
 import { callEffects } from '../environments.js';
+import { toYaml } from '../../connector-servers/lib/yaml.js';
 
 import { mcpToolName } from './names.js';
 
@@ -84,6 +85,22 @@ export function flattenContent(content: unknown, structuredContent?: unknown): s
 // ---------------------------------------------------------------------------
 
 /**
+ * M27 — tope de lo que enseña la confirmación de una tool forzada. El
+ * publicador recorta la descripción a 2 000 caracteres (`INPUT_CHARS`), y lo
+ * forzado se aprueba entero o no se aprueba: si no cabe, se veta.
+ */
+export const FORCED_DESCRIPTION_MAX = 1_900;
+
+/**
+ * M27 — lo que enseña la confirmación de una tool forzada de un conector: la
+ * tool y sus argumentos **enteros**, en YAML. Nunca el resumen de 120.
+ */
+export function describeForcedMcpCall(displayName: string, input: unknown): string {
+  return `${displayName} (confirmación forzada):
+${toYaml(input ?? {})}`;
+}
+
+/**
  * Crea un ToolDefinition para una tool MCP concreta.
  *
  * El schema Zod es permisivo (Record<string,unknown>) porque el MCP server
@@ -93,7 +110,7 @@ export function flattenContent(content: unknown, structuredContent?: unknown): s
 export function buildMcpTool(
   serverClient: McpServerClient,
   mcpTool: McpToolInfo,
-  opts: { confirmMutating?: boolean } = {},
+  opts: { confirmMutating?: boolean; forced?: boolean } = {},
 ): ToolDefinition {
   const registeredName = mcpToolName(serverClient.name, mcpTool.name);
   const displayName = `${serverClient.name}/${mcpTool.name}`;
@@ -122,6 +139,29 @@ export function buildMcpTool(
           isDestructive: (input: unknown, ctx: { config: StratumConfig }) =>
             callEffects(registeredName, (input as Record<string, unknown>) ?? {}, ctx.config)
               .mutating,
+        }
+      : {}),
+    // M27 — confirmación forzada: siempre se pregunta (ni allow-all ni
+    // concesiones), con los argumentos enteros. Si no caben, se veta antes de
+    // preguntar: nunca se aprueba algo recortado.
+    ...(opts.forced
+      ? {
+          destructive: true,
+          confirmAlways: () => true,
+          describeConfirmation: (input: unknown) => describeForcedMcpCall(displayName, input),
+          preflight: (input: unknown): ToolResult | null => {
+            const text = describeForcedMcpCall(displayName, input);
+            if (text.length <= FORCED_DESCRIPTION_MAX) return null;
+            return {
+              ok: false,
+              error:
+                `Tool "${displayName}" needs a forced confirmation that shows its arguments in full, ` +
+                `and they are too long (${text.length} characters; at most ${FORCED_DESCRIPTION_MAX}). ` +
+                'It was not executed: make the arguments shorter.',
+              recoverable: true,
+              countsAsFailure: false,
+            };
+          },
         }
       : {}),
 

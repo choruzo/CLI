@@ -15,7 +15,7 @@ import { defaultEndpointDir } from '../client/discovery.js';
 import type { DynamicMcpServer } from '../tools/mcp/manager.js';
 import type { SkillEntry } from '../skills/registry.js';
 import { loadConnectorCatalog, type CatalogEntry, type ConnectorCatalog } from './catalog.js';
-import { readOnlyToolsOf } from './manifest.js';
+import { forcedToolsOf, readOnlyToolsOf } from './manifest.js';
 import { readConnectorSecrets, secretValuesFor, secretsStatusOf } from './secrets.js';
 import { connectorsFile, readConnectorsFile } from './store.js';
 
@@ -104,7 +104,13 @@ export async function resolveActiveConnectors(
     out.warnings.push(`Connectors are unavailable: ${launched.reason}`);
     return out;
   }
-  out.servers = launched.launches;
+  // M27 — cada server lleva sus tools forzadas: las registra con confirmación
+  // forzada (`buildMcpTool`). El nombre del server es el id del manifiesto.
+  const forcedById = new Map(entries.map(({ manifest }) => [manifest.id, forcedToolsOf(manifest)]));
+  out.servers = launched.launches.map((l) => {
+    const forced = forcedById.get(l.config.name) ?? [];
+    return forced.length > 0 ? { ...l, forcedTools: forced } : l;
+  });
   for (const { manifest, skill } of entries) {
     const ro = readOnlyToolsOf(manifest);
     if (ro.length > 0) out.readOnlyTools[manifest.id] = ro;

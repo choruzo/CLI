@@ -348,7 +348,11 @@ describe('McpManager.setDynamicServers (M20)', () => {
 
   function dyn(
     name: string,
-    over: { env?: Record<string, string>; beforeConnect?: () => Promise<void> } = {},
+    over: {
+      env?: Record<string, string>;
+      beforeConnect?: () => Promise<void>;
+      forcedTools?: string[];
+    } = {},
   ): DynamicMcpServer {
     const [config] = StratumConfigSchema.parse({
       mcp: {
@@ -366,6 +370,7 @@ describe('McpManager.setDynamicServers (M20)', () => {
     return {
       config: config!,
       ...(over.beforeConnect ? { beforeConnect: over.beforeConnect } : {}),
+      ...(over.forcedTools ? { forcedTools: over.forcedTools } : {}),
     };
   }
 
@@ -398,6 +403,17 @@ describe('McpManager.setDynamicServers (M20)', () => {
     expect(await m.setDynamicServers([dyn('uno-dos')])).toEqual([]);
     expect(registry.get('mcp__uno-dos__echo')).toBeDefined();
     expect(m.getClients().map((c) => [c.name, c.status])).toEqual([['uno-dos', 'connected']]);
+  });
+
+  it('M27: las tools forzadas se registran forzadas; cambiarlas relanza el server', async () => {
+    const { m, registry } = make();
+    await m.setDynamicServers([dyn('uno-dos', { forcedTools: ['echo'] })]);
+    const forced = registry.get('mcp__uno-dos__echo')!;
+    expect(forced.confirmAlways?.({}, {} as never)).toBe(true);
+    expect(forced.describeConfirmation).toBeDefined();
+    await m.setDynamicServers([dyn('uno-dos')]);
+    expect(spawns()).toBe(2);
+    expect(registry.get('mcp__uno-dos__echo')!.confirmAlways).toBeUndefined();
   });
 
   it('con la misma config no relanza el server', async () => {

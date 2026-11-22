@@ -403,6 +403,13 @@ export interface ToolDefinition {
    */
   confirmAlways?(params: unknown, ctx: ToolContext): boolean;
   /**
+   * M27 — el texto de su confirmación, en vez de `describeCall` (el resumen de
+   * 120). Lo usa una tool forzada de un conector para enseñar sus argumentos
+   * enteros. Recibe los argumentos ya redactados estructuralmente; el
+   * dispatcher redacta además el texto.
+   */
+  describeConfirmation?(params: unknown): string;
+  /**
    * Hito 16 — la tool resuelve por sí misma cuando se cancela (mata su proceso
    * y devuelve un resultado `cancelled`). El dispatcher no compite con el abort
    * y solo impone una red de seguridad de unos segundos.

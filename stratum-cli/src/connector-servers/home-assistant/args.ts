@@ -163,4 +163,6 @@ export interface HaToolContext {
   /** El cliente WebSocket (solo lectura); `what` dice qué no se podría leer sin él. */
   needWs(what: string): HaWs;
   now(): number;
+  /** Espera entre los intentos de ver una entidad recién creada (inyectable en los tests). */
+  sleep(ms: number): Promise<void>;
 }

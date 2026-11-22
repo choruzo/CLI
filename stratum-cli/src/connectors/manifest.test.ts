@@ -4,6 +4,7 @@ import {
   accessCheckOf,
   checksOf,
   parseConnectorManifest,
+  forcedToolsOf,
   readOnlyToolsOf,
 } from './manifest.js';
 
@@ -121,6 +122,16 @@ describe('parseConnectorManifest (M20)', () => {
     ).toThrow(/no arguments/);
     // Nombre mal formado.
     expect(() => parseConnectorManifest({ ...base, access: 'Leer!' }, 'x')).toThrow();
+  });
+
+  it('forced (M27): solo en una tool que no es de solo lectura', () => {
+    const m = valid();
+    m.tools[1] = { ...m.tools[1]!, forced: true } as (typeof m.tools)[number];
+    expect(forcedToolsOf(parseConnectorManifest(m, 'x'))).toEqual(['escribir']);
+    expect(forcedToolsOf(parseConnectorManifest(valid(), 'x'))).toEqual([]);
+    const bad = valid();
+    bad.tools[0] = { ...bad.tools[0]!, forced: true } as (typeof bad.tools)[number];
+    expect(() => parseConnectorManifest(bad, 'x')).toThrow(/cannot be forced/);
   });
 
   it('readOnlyToolsOf devuelve solo las de lectura', () => {

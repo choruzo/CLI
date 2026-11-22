@@ -42,6 +42,8 @@ const IMAGE_FINGERPRINTS: Record<number, string> = {
   15: '9362084e78725f1c',
   // M27 fase 1: `ha_automatizaciones`, `ha_trazas`, `ha_registro` y `ha_avisos` (solo lectura).
   16: '333620189ae20cba',
+  // M27 fase 2: `ha_proponer_automatizacion` y `ha_borrar_automatizacion` (escritura forzada).
+  17: '165030975fbd5cfb',
 };
 
 /**

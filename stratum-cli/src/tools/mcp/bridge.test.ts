@@ -1,14 +1,24 @@
 import { describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import {
   sanitizeSegment,
   mcpToolName,
   parseMcpToolName,
   flattenContent,
   buildMcpTool,
+  describeForcedMcpCall,
+  FORCED_DESCRIPTION_MAX,
   MCP_TOOL_NAME_MAX,
 } from './bridge.js';
 import type { McpServerClient, McpToolInfo } from './client.js';
-import { ToolRegistry } from '../registry.js';
+import { ToolDispatcher, ToolRegistry } from '../registry.js';
+import type {
+  ApprovalGrantLookup,
+  ConfirmRequest,
+  DestructiveDecision,
+  ToolContext,
+  ToolResult,
+} from '../../agent/types.js';
 import { ErrorCode, McpError } from '@modelcontextprotocol/sdk/types.js';
 import { StratumConfigSchema } from '../../config/schema.js';
 
@@ -349,5 +359,142 @@ describe('buildMcpTool — confirmMutating (M17)', () => {
   it('sin ninguna declaración todo es destructivo', () => {
     const read = buildMcpTool(makeClient(), sampleTool, { confirmMutating: true });
     expect(read.isDestructive?.({}, baseCtx)).toBe(true);
+  });
+});
+
+describe('buildMcpTool — confirmación forzada (M27)', () => {
+  const proposal = {
+    accion: 'crear',
+    id: 'stratum_luz_pasillo',
+    config: {
+      alias: 'Luz del pasillo',
+      triggers: [{ trigger: 'state', entity_id: 'binary_sensor.pasillo', to: 'on' }],
+      actions: [{ action: 'light.turn_on', target: { entity_id: 'light.pasillo' } }],
+    },
+    habilitada: false,
+  };
+
+  function setupForced() {
+    const client = makeClient('connected');
+    vi.mocked(client.callTool).mockResolvedValue({ content: [{ type: 'text', text: 'hecho' }] });
+    const tool = buildMcpTool(
+      client,
+      { ...sampleTool, name: 'ha_proponer_automatizacion' },
+      { confirmMutating: true, forced: true },
+    );
+    const reg = new ToolRegistry();
+    reg.register(tool);
+    const asked: ConfirmRequest[] = [];
+    const confirm = vi.fn(async (req: ConfirmRequest): Promise<DestructiveDecision> => {
+      asked.push(req);
+      return 'approve';
+    });
+    const grants: ApprovalGrantLookup = {
+      enabled: true,
+      match: () => ({ id: 'g', expiresAt: 1, minutes: 10 }),
+    };
+    // Todo lo que rebaja una confirmación, puesto a la vez: allow-all de la
+    // política, `confirmDestructive: false` y una concesión que cubriría la pareja.
+    const ctx: ToolContext = {
+      ...baseCtx,
+      destructivePolicy: 'allow',
+      allowDestructive: true,
+      approvalGrants: grants,
+      confirmDestructive: confirm,
+    };
+    const dispatch = (input: Record<string, unknown>) =>
+      new ToolDispatcher(reg).dispatch([{ id: 'c1', name: tool.name, input }], ctx);
+    return { client, tool, asked, confirm, dispatch };
+  }
+
+  it('sin la opción no hay nada forzado', () => {
+    const tool = buildMcpTool(makeClient(), sampleTool, { confirmMutating: true });
+    expect(tool.confirmAlways).toBeUndefined();
+    expect(tool.describeConfirmation).toBeUndefined();
+  });
+
+  it('se pregunta siempre, sin concesión, con los argumentos enteros en YAML', async () => {
+    const t = setupForced();
+    const [res] = await t.dispatch(proposal);
+    expect(res!.result.ok).toBe(true);
+    expect(t.confirm).toHaveBeenCalledTimes(1);
+    expect(t.asked[0]).toMatchObject({ forced: true });
+    expect(t.asked[0]).not.toHaveProperty('grantable');
+    const text = t.asked[0]!.description;
+    expect(text).toContain('filesystem/ha_proponer_automatizacion (confirmación forzada):');
+    expect(text).toContain('id: stratum_luz_pasillo');
+    expect(text).toContain('habilitada: false');
+    expect(text).toContain('config:\n  alias: Luz del pasillo\n  triggers:\n    - trigger: state');
+    expect(text).toContain('entity_id: light.pasillo');
+    expect(t.client.callTool).toHaveBeenCalledTimes(1);
+  });
+
+  it('denegar no la ejecuta', async () => {
+    const t = setupForced();
+    t.confirm.mockResolvedValueOnce('deny');
+    const [res] = await t.dispatch(proposal);
+    expect(res!.result.ok).toBe(false);
+    expect(t.client.callTool).not.toHaveBeenCalled();
+  });
+
+  it('si los argumentos no caben enteros, se veta sin preguntar', async () => {
+    const t = setupForced();
+    const long = { ...proposal, config: { ...proposal.config, description: 'x'.repeat(2_000) } };
+    expect(describeForcedMcpCall('filesystem/x', long).length).toBeGreaterThan(
+      FORCED_DESCRIPTION_MAX,
+    );
+    const [res] = await t.dispatch(long);
+    expect(res!.result.ok).toBe(false);
+    if (!res!.result.ok) expect(res!.result.error).toMatch(/too long/);
+    expect(t.confirm).not.toHaveBeenCalled();
+    expect(t.client.callTool).not.toHaveBeenCalled();
+  });
+
+  it('un secreto en los argumentos se redacta en la confirmación', async () => {
+    const t = setupForced();
+    await t.dispatch({ ...proposal, password: 'hunter2-muy-secreta' });
+    expect(t.asked[0]!.description).not.toContain('hunter2-muy-secreta');
+  });
+});
+
+describe('ToolDispatcher — describeConfirmation (M27)', () => {
+  function dispatchWith(describe: () => string) {
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, output: 'ran' }));
+    const reg = new ToolRegistry();
+    reg.register({
+      name: 'propia',
+      description: 'x',
+      schema: z.record(z.unknown()),
+      destructive: true,
+      confirmAlways: () => true,
+      describeConfirmation: describe,
+      execute: run,
+    });
+    const confirm = vi.fn(async (): Promise<DestructiveDecision> => 'approve');
+    const ctx: ToolContext = { ...baseCtx, confirmDestructive: confirm };
+    return {
+      run,
+      confirm,
+      result: new ToolDispatcher(reg).dispatch([{ id: 'c1', name: 'propia', input: {} }], ctx),
+    };
+  }
+
+  it('un texto que no cabe entero en lo publicado se veta sin preguntar', async () => {
+    const t = dispatchWith(() => 'x'.repeat(2_001));
+    const [res] = await t.result;
+    expect(res!.result.ok).toBe(false);
+    if (!res!.result.ok) expect(res!.result.error).toMatch(/too long to be shown in full/);
+    expect(t.confirm).not.toHaveBeenCalled();
+    expect(t.run).not.toHaveBeenCalled();
+  });
+
+  it('si describeConfirmation lanza, se veta en vez de preguntar con el resumen', async () => {
+    const t = dispatchWith(() => {
+      throw new Error('boom');
+    });
+    const [res] = await t.result;
+    expect(res!.result.ok).toBe(false);
+    expect(t.confirm).not.toHaveBeenCalled();
+    expect(t.run).not.toHaveBeenCalled();
   });
 });
