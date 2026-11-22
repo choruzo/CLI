@@ -155,7 +155,7 @@ async function failure(p: Promise<unknown>): Promise<string> {
 }
 
 describe('tools de Home Assistant', () => {
-  it('expone las 9 tools con ha_resumen primero', () => {
+  it('expone las 13 tools con ha_resumen primero', () => {
     const { tools } = setup();
     expect(tools.map((t) => t.name)).toEqual([
       'ha_resumen',
@@ -167,6 +167,10 @@ describe('tools de Home Assistant', () => {
       'ha_encender',
       'ha_apagar',
       'ha_accion',
+      'ha_automatizaciones',
+      'ha_trazas',
+      'ha_registro',
+      'ha_avisos',
     ]);
     expect(tools[0]!.description).toMatch(/Primera tool/);
     expect(tools[8]!.description).toMatch(/aprobación/);

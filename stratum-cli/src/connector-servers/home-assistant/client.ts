@@ -14,6 +14,16 @@ const AREAS_TEMPLATE =
 /** La entidad pedida no existe (404): las tools deciden cómo decirlo. */
 export class HaNotFoundError extends ToolUserError {}
 
+/** HA contestó con otro estado HTTP de error: las tools miran `status`, nunca el texto. */
+export class HaHttpError extends ToolUserError {
+  constructor(
+    message: string,
+    readonly status: number,
+  ) {
+    super(message);
+  }
+}
+
 export interface HaState {
   entity_id: string;
   state: string;
@@ -41,6 +51,8 @@ export interface HaClient {
   readonly host: string;
   getJson(path: string, signal?: AbortSignal): Promise<unknown>;
   postJson(path: string, body: unknown, signal?: AbortSignal): Promise<unknown>;
+  /** Un POST cuya respuesta es texto llano, no JSON (`/api/template`). */
+  postText(path: string, body: unknown, signal?: AbortSignal): Promise<string>;
   getConfig(signal?: AbortSignal): Promise<HaConfig>;
   /** `entity_id` → área. `null` si no se pudieron obtener (sin dato, nunca un error). */
   getAreas(signal?: AbortSignal): Promise<Map<string, string> | null>;
@@ -187,8 +199,9 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     } catch {
       // un cuerpo que no es JSON no se enseña
     }
-    throw new ToolUserError(
+    throw new HaHttpError(
       `Home Assistant respondió HTTP ${res.status}${detail ? `: ${detail}` : ''}.`,
+      res.status,
     );
   }
 
@@ -210,6 +223,9 @@ export function createHaClient(opts: HaClientOptions): HaClient | null {
     },
     async postJson(path, body, signal) {
       return parse(await request('POST', path, body, signal));
+    },
+    async postText(path, body, signal) {
+      return request('POST', path, body, signal);
     },
     async getConfig(signal) {
       if (configCache && now() - configCache.at < CACHE_MS) return configCache.value;

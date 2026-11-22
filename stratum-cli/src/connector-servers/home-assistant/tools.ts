@@ -1,7 +1,8 @@
 /**
  * Tools del conector Home Assistant: ha_resumen, ha_buscar, ha_estado,
- * ha_historial, ha_comprobar, ha_encender, ha_apagar y ha_accion. `fetch` inyectable para
- * testear sin red. Las salidas son texto breve en español para un agente,
+ * ha_historial, ha_comprobar, ha_encender, ha_apagar y ha_accion, y (M27, solo
+ * lectura) ha_automatizaciones, ha_trazas, ha_registro y ha_avisos. `fetch` y
+ * `WebSocket` inyectables para testear sin red. Las salidas son texto breve en español para un agente,
  * nunca JSON crudo; `ha_comprobar` (M22) devuelve además lo estructurado que
  * lee un vigilante.
  */
@@ -27,7 +28,24 @@ import {
   pct,
   stateText,
 } from './format.js';
-import { describeHistory, localToInstant, parseHistory } from './history.js';
+import { describeHistory, parseHistory } from './history.js';
+import {
+  DEFAULT_HISTORY_HOURS,
+  MAX_HISTORY_HOURS,
+  assertPeriodArgs,
+  entityId,
+  entityIds,
+  idList,
+  isoParam,
+  parseArgs,
+  periodFields,
+  resolvePeriod,
+  type HaToolContext,
+} from './args.js';
+import { createAutomationTools } from './automations.js';
+import { createLogbookTool } from './logbook.js';
+import { createRepairsTool } from './repairs.js';
+import { createHaWs, type WebSocketCtor } from './ws.js';
 
 const DEFAULT_LIMIT = 30;
 const MAX_LIMIT = 100;
@@ -39,8 +57,6 @@ const MAX_AREAS = 30;
 const MAX_OTHER_ATTRS = 25;
 const MAX_DATA_BYTES = 2048;
 /** Historial (M22 parte 4): periodo acotado a 7 días y pocas entidades. */
-const MAX_HISTORY_HOURS = 168;
-const DEFAULT_HISTORY_HOURS = 24;
 const MAX_HISTORY_IDS = 10;
 /** Cambios enseñados entre todas las entidades, y el mínimo y máximo por entidad. */
 const HISTORY_CHANGES_BUDGET = 60;
@@ -81,6 +97,8 @@ function offService(domain: string): string | null {
 
 export interface HomeAssistantOptions {
   fetch: typeof fetch;
+  /** `WebSocket` global (Node 24); sin él no se leen trazas ni avisos (M27). */
+  WebSocket?: WebSocketCtor;
   url?: string;
   token?: string;
   now?: () => number;
@@ -88,43 +106,9 @@ export interface HomeAssistantOptions {
 
 // --- Argumentos --------------------------------------------------------------
 
-const ENTITY_RE = /^[a-z_][a-z0-9_]*\.[a-z0-9_]+$/;
 const SERVICE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
 const ATTRIBUTE_RE = /^[a-z_][a-z0-9_]{0,63}$/;
-const ENTITY_MSG = 'entity_id debe tener la forma dominio.nombre (p. ej. light.salon)';
 const ATTRIBUTE_MSG = 'atributo no es válido (minúsculas, números y _; p. ej. current_temperature)';
-
-const entityId = z.string({ message: ENTITY_MSG }).trim().regex(ENTITY_RE, ENTITY_MSG);
-
-/**
- * Algunos modelos mandan la lista metida en un texto: `"[\"light.a\", \"light.b\"]"`
- * o `"light.a, light.b"` (medido el 2026-11-18 desde Dot). Se convierte en la
- * lista que es; cada id se valida después igual. Un texto que no es ninguna de
- * las dos formas se queda como está y lo rechaza la regex.
- */
-export function listFromText(v: unknown): unknown {
-  if (typeof v !== 'string') return v;
-  const t = v.trim();
-  if (t.startsWith('[') && t.endsWith(']')) {
-    try {
-      const parsed: unknown = JSON.parse(t);
-      if (Array.isArray(parsed)) return parsed;
-    } catch {
-      // No es JSON: lo rechaza la validación con su mensaje.
-    }
-    return v;
-  }
-  if (t.includes(',')) return t.split(',').map((s) => s.trim());
-  return v;
-}
-
-function entityIds(max: number) {
-  const msg = `entity_id debe ser un id o una lista de hasta ${max} ids con la forma dominio.nombre`;
-  return z
-    .unknown()
-    .transform(listFromText)
-    .pipe(z.union([entityId, z.array(entityId).min(1, msg).max(max, msg)], { message: msg }));
-}
 
 const BuscarSchema = z.object({
   texto: z
@@ -150,25 +134,9 @@ const BuscarSchema = z.object({
     .optional(),
 });
 const EstadoSchema = z.object({ entity_id: entityIds(MAX_STATE_IDS) });
-const HOURS_MSG = `horas debe ser un entero entre 1 y ${MAX_HISTORY_HOURS} (7 días)`;
-const LOCAL_MSG = (f: string): string =>
-  `${f} debe ser una fecha AAAA-MM-DD o una fecha y hora AAAA-MM-DDTHH:MM en hora de la casa`;
-const localWhen = (f: string) =>
-  z
-    .string({ message: LOCAL_MSG(f) })
-    .trim()
-    .max(16, LOCAL_MSG(f))
-    .optional();
 const HistorialSchema = z.object({
   entity_id: entityIds(MAX_HISTORY_IDS),
-  horas: z
-    .number({ message: HOURS_MSG })
-    .int(HOURS_MSG)
-    .min(1, HOURS_MSG)
-    .max(MAX_HISTORY_HOURS, HOURS_MSG)
-    .optional(),
-  desde: localWhen('desde'),
-  hasta: localWhen('hasta'),
+  ...periodFields,
 });
 const ComprobarSchema = z.object({
   entity_id: entityId,
@@ -197,17 +165,6 @@ const AccionSchema = z.object({
   entity_id: entityIds(MAX_ACTION_IDS).optional(),
   datos: z.record(z.string(), z.unknown(), { message: 'datos debe ser un objeto' }).optional(),
 });
-
-function parseArgs<T>(schema: z.ZodType<T, z.ZodTypeDef, unknown>, args: unknown): T {
-  const r = schema.safeParse(args ?? {});
-  if (r.success) return r.data;
-  const issue = r.error.issues[0];
-  throw new ToolUserError(`Argumento inválido: ${issue?.message ?? 'argumentos no válidos'}.`);
-}
-
-function idList(v: string | string[]): string[] {
-  return [...new Set(typeof v === 'string' ? [v] : v)];
-}
 
 // --- Salida ------------------------------------------------------------------
 
@@ -251,6 +208,7 @@ export function createHomeAssistantTools(
   opts: HomeAssistantOptions,
 ): ConnectorTool<string | ToolOutput>[] {
   const client = createHaClient(opts);
+  const ws = createHaWs({ WebSocket: opts.WebSocket, url: opts.url, token: opts.token });
 
   function need(): HaClient {
     if (!client) throw notConfigured();
@@ -512,55 +470,14 @@ export function createHomeAssistantTools(
       const c = need();
       const a = parseArgs(HistorialSchema, args);
       const ids = idList(a.entity_id);
-      if (a.desde !== undefined && a.horas !== undefined) {
-        throw new ToolUserError(
-          'Argumento inválido: usa horas (las últimas N horas) o desde/hasta (un periodo concreto), no los dos.',
-        );
-      }
-      if (a.hasta !== undefined && a.desde === undefined) {
-        throw new ToolUserError('Argumento inválido: hasta necesita desde.');
-      }
+      assertPeriodArgs(a);
       const config = await c.getConfig(signal);
       const tz = config.timeZone;
-      const current = now();
-      let start: number;
-      let end = current;
-      let toNow = true;
-      let label: string;
-      const at = (ms: number): string => localTime(new Date(ms).toISOString(), tz);
-      if (a.desde === undefined) {
-        const hours = a.horas ?? DEFAULT_HISTORY_HOURS;
-        start = current - hours * 3_600_000;
-        label = `las últimas ${hours} h`;
-      } else {
-        const from = localToInstant(a.desde, tz);
-        if (from === null) throw new ToolUserError(`Argumento inválido: ${LOCAL_MSG('desde')}.`);
-        const to = a.hasta === undefined ? current : localToInstant(a.hasta, tz, true);
-        if (to === null) throw new ToolUserError(`Argumento inválido: ${LOCAL_MSG('hasta')}.`);
-        if (from >= current) {
-          throw new ToolUserError(
-            `Argumento inválido: desde (${at(from)}) es posterior a ahora (${at(current)}): no hay historial del futuro.`,
-          );
-        }
-        if (to <= from) {
-          throw new ToolUserError('Argumento inválido: hasta tiene que ser posterior a desde.');
-        }
-        if (to - from > MAX_HISTORY_HOURS * 3_600_000) {
-          throw new ToolUserError(
-            'Argumento inválido: el periodo de desde a hasta admite como máximo 7 días.',
-          );
-        }
-        start = from;
-        // Lo que pase de ahora se recorta: el periodo acaba ahora.
-        end = Math.min(to, current);
-        toNow = to >= current;
-        label = `el periodo de ${at(start)} a ${toNow ? `ahora (${at(end)})` : at(end)}`;
-      }
-      const iso = (ms: number): string => encodeURIComponent(new Date(ms).toISOString());
+      const { start, end, toNow, label } = resolvePeriod(a, tz, now());
       // Los ids ya pasaron ENTITY_RE: no llevan nada que escapar en la query.
       const path =
-        `/api/history/period/${iso(start)}?filter_entity_id=${ids.join(',')}` +
-        `&end_time=${iso(end)}&minimal_response`;
+        `/api/history/period/${isoParam(start)}?filter_entity_id=${ids.join(',')}` +
+        `&end_time=${isoParam(end)}&minimal_response`;
       const history = parseHistory(await c.getJson(path, signal));
       const maxChanges = Math.min(
         MAX_CHANGES_PER_ENTITY,
@@ -794,6 +711,17 @@ export function createHomeAssistantTools(
     },
   );
 
+  // M27 fase 1: automatizaciones, trazas, registro y avisos, todo de solo lectura.
+  const ctx: HaToolContext = {
+    need,
+    needWs(what) {
+      need();
+      if (!ws) throw new ToolUserError(`Esta versión no puede leer ${what} (falta WebSocket).`);
+      return ws;
+    },
+    now,
+  };
+
   return [
     haResumen,
     haBuscar,
@@ -804,6 +732,9 @@ export function createHomeAssistantTools(
     haEncender,
     haApagar,
     haAccion,
+    ...createAutomationTools(ctx),
+    createLogbookTool(ctx),
+    createRepairsTool(ctx),
   ];
 }
 

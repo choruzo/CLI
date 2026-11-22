@@ -2974,6 +2974,25 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     empujados quedan para después. Al implementar se decide si la propuesta es una tool del
     runtime con confirmación forzada, como `propose_routine`, o una tool del conector, cuya
     confirmación hoy es la normal.
+  - *Fase 1, empezada el 2026-11-22* (`home-assistant` 1.4.0, imagen v16). Cuatro tools de solo
+    lectura: `ha_automatizaciones` (lista, o la configuración de una en YAML con los nombres de sus
+    dispositivos), `ha_trazas` (las últimas ejecuciones con por qué se paró, o el detalle de una),
+    `ha_registro` (logbook con la causa: persona, automatización, servicio o entidad) y
+    `ha_avisos` (*Repairs*). El WebSocket va en un cliente aparte (`ws.ts`), que solo sabe mandar
+    `trace/list`, `trace/get` y `repairs/list_issues`, con una conexión por orden.
+    *Medido el 2026-11-22 contra el HA de la persona (2026.11.2)*:
+    - `trace/list` exige `domain`, y HA solo guarda las **5 últimas** ejecuciones de cada
+      automatización. Con una que salta cada pocos minutos, «anoche» ya no está, y la respuesta lo
+      remite al logbook.
+    - El logbook es muy ruidoso: 5 367 entradas en 48 h, el 71 % de un solo sensor de presencia.
+      Sin entidad, `ha_registro` enseña solo lo que tiene causa y resume el resto por entidad.
+    - `entity=` con un valor sin punto da un 500, así que se valida antes.
+    - El `context_user_id` se traduce a persona con `person.*.attributes.user_id`. Nunca se usa
+      `config/auth/list`, que es de administrador.
+    - La configuración por REST (`/api/config/automation/config/<attributes.id>`) da un 404 a una
+      automatización sin `id` (YAML).
+    - *Repairs* no trae el texto traducido, solo `translation_key` y los placeholders. En esta casa
+      había un aviso real: una automatización que llama a un servicio `notify.*` que ya no existe.
 
 - **M28 — Despensa, recetas y menú con Grocy** [propuesto por el usuario el 2026-11-21]. Que el
   `companion` conteste «¿qué caduca esta semana?», «¿qué puedo cocinar con lo que hay?», «¿qué

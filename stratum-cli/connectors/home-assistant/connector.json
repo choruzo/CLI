@@ -1,7 +1,7 @@
 {
   "schemaVersion": 1,
   "id": "home-assistant",
-  "version": "1.3.0",
+  "version": "1.4.0",
   "name": "Home Assistant",
   "description": "Consulta y maneja tu casa con Home Assistant, en tu red local.",
   "agents": ["companion"],
@@ -44,6 +44,26 @@
       "name": "ha_comprobar",
       "readOnly": true,
       "summary": "Estado estructurado de una entidad, para vigilantes."
+    },
+    {
+      "name": "ha_automatizaciones",
+      "readOnly": true,
+      "summary": "Lista las automatizaciones y scripts, o explica qué hace una."
+    },
+    {
+      "name": "ha_trazas",
+      "readOnly": true,
+      "summary": "Últimas ejecuciones de una automatización: por qué saltó o no."
+    },
+    {
+      "name": "ha_registro",
+      "readOnly": true,
+      "summary": "Registro de la casa: qué pasó y quién o qué lo hizo."
+    },
+    {
+      "name": "ha_avisos",
+      "readOnly": true,
+      "summary": "Avisos pendientes de Home Assistant (lo que está roto)."
     },
     {
       "name": "ha_encender",

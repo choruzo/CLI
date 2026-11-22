@@ -5,14 +5,16 @@
  */
 import { createMcpServer, serveStdio } from '../lib/mcp-stdio.js';
 import { createHomeAssistantTools } from './tools.js';
+import { nodeWebSocket } from './ws-node.js';
 
 serveStdio(
   createMcpServer(
-    { name: 'home-assistant', version: '1.3.0' },
+    { name: 'home-assistant', version: '1.4.0' },
     createHomeAssistantTools({
       fetch: globalThis.fetch,
       url: process.env.HA_URL,
       token: process.env.HA_TOKEN,
+      WebSocket: nodeWebSocket(),
     }),
   ),
 );
