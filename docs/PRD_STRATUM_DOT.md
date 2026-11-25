@@ -2931,10 +2931,114 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - Comparar los modelos de NaN y uno local (llama-server). El fallo de `ha_historial` con «ayer de
     21:00 a 22:00» (M22 parte 4) es el tipo de error que esto debe pillar antes.
 
-- **M25 — Voz, empezando por lo acotado** [propuesto 2026-11-20]. Saca de §23.12 solo la entrada.
-  - Notas de voz de Telegram transcritas **en local** (whisper en ONNX, como los embeddings).
-    El audio no sale del equipo ni se guarda, y al historial va el texto con su marca.
+- **M25 — Voz, empezando por lo acotado** [propuesto 2026-11-20; diseño del 2026-11-25]. Saca de
+  §23.12 solo la entrada.
+  - Notas de voz de Telegram transcritas **en local**. El audio no sale del equipo ni se guarda, y
+    al historial va el texto con su marca.
   - Después, *push-to-talk* en Dot. La respuesta hablada (TTS) y la escucha continua siguen fuera.
+  - *Decidido por el usuario el 2026-11-25*: el modelo se **descarga la primera vez que hace
+    falta**. Antes de elegirlo pidió buscar algo más preciso que whisper `small` y que use la GPU,
+    empezando por lo que usa Hex (Parakeet TDT v3 por defecto, y WhisperKit).
+  - *Medido el 2026-11-25* (scripts y resultados clip a clip en el scratchpad de esa sesión, sin
+    copiar al repo). La batería:
+    - 20 clips del test en español de Multilingual LibriSpeech: 308 s, 17 voces.
+    - Con una **tele** de fondo (un locutor en alemán de MLS más música de UrbanSound8K, 6 dB por
+      debajo) o una **radio** (lo mismo a 300–3400 Hz y con siseo).
+    - A una relación señal/ruido de 10, 5 y 0 dB. Todo, también lo limpio, pasa por Opus a
+      32 kbit/s, como una nota de voz de Telegram.
+    - En un Ryzen 5 5600G y una RTX 5060 Ti. Las cifras son WER sin puntuación ni mayúsculas.
+
+    | Modelo | Limpio | Tele 10 dB | Radio 10 dB | Tele 5 dB | RTF |
+    |---|---|---|---|---|---|
+    | Parakeet TDT 0.6B v3, fp32, CPU | 5,0 % | 21,2 % | 17,7 % | 34,1 % | 0,068 |
+    | Parakeet TDT 0.6B v3, int8, CPU | 10,1 % | 13,4 % | 12,7 % | 31,3 % | 0,049 |
+    | Whisper large-v3-turbo, `es`, CPU | 4,0 % | 8,7 % | sin medir* | 17,1 % | 0,65 |
+    | **Canary-1B-v2**, `es`, fp32, CPU | 4,3 % | 8,1 % | 8,1 % | 19,9 % | 0,32 |
+    | Canary-1B-v2, `es`, int8, CPU | 4,0 % | 12,7 % | 12,5 % | 28,2 % | 0,20 |
+    | **Canary-1B-v2**, `es`, fp32, **WebGPU** (port en JS) | 4,3 % | 8,0 % | 8,3 % | 20,0 % | **0,09** |
+
+    \* El equipo se quedó sin memoria y el proceso se cortó antes de las radios.
+
+    Lo que decide:
+    - **Parakeet v3 no deja fijar el idioma**. Con ruido, a veces **traduce al inglés** («And the
+      corridor of the columns…») o salta al alemán del fondo. Ya pasa a 10 dB, en 2 o 3 clips de
+      20. Una orden que llega traducida es peor que un error de palabras, y eso lo descarta.
+    - Canary y Whisper, con el idioma fijado, no traducen nunca. A 10 dB empatan, y Canary va el
+      doble de rápido en CPU.
+    - **int8 no compensa**. Con ruido falla un 50 % más y a 0 dB entra en **bucles de
+      repetición** («en la cárcel, en la cárcel…», WER > 100 %). Solo ahorra disco.
+    - **DirectML no sirve con Canary**. El encoder falla en el `Reshape` `node_view_189`, tanto con
+      `onnxruntime-directml` 1.23 como con `onnxruntime-node` 1.31. Con otro `device_id`,
+      ONNX Runtime **cae a la CPU sin avisar**.
+    - **WebGPU de `onnxruntime-node` 1.31 sí funciona**, con los mismos WER que en CPU. El encoder
+      va 8× más rápido, y el decoder pasa de 54 a ~17 ms por token. Dejar las salidas en
+      `gpu-buffer` colgó el proceso, así que no se usa.
+    - A 0 dB (el fondo tan alto como quien habla) ningún modelo sirve. Es el extremo de la batería,
+      no un uso normal.
+  - *Diseño, propuesto por Claude el 2026-11-25 y pendiente de que lo revise el usuario*:
+    - **Modelo**: **Canary-1B-v2 fp32** (CC-BY-4.0), en la exportación ONNX de
+      `istupakov/canary-1b-v2-onnx` con su revisión fijada (`5ebc1520…`), con el idioma `es` y
+      puntuación (`<|pnc|>`). Ocupa unos 4 GB. Se descarga la primera vez a
+      `~/.stratum/models/canary-1b-v2/`:
+      - a una carpeta temporal y con un `rename` atómico;
+      - con el SHA-256 de cada fichero fijado en el código; si alguno no coincide, no se carga;
+      - como **ficheros reales**, porque ONNX Runtime 1.31 rechaza los datos externos que son un
+        enlace («escapes model directory»), como los de la caché de Hugging Face.
+
+      El preprocesador es el `nemo128.onnx` de la misma exportación. El idioma sale de la config
+      (`voice.language`, `es` por defecto) y nunca se detecta solo.
+    - **Dónde corre**: en el **anfitrión, en un proceso hijo del daemon** (`voice-worker`). No va en
+      la caja, porque no ve la GPU, ni dentro del daemon, por tres motivos:
+      - con 4 GB cargados, un fallo nativo de ONNX Runtime tumbaría todas las sesiones;
+      - matar el proceso es la única forma segura de devolver la memoria de la GPU;
+      - el proceso se arranca solo al llegar audio y se cierra tras **10 min sin uso**
+        (`voice.idleUnloadMinutes`). Así lo pide la falta de memoria de la prueba.
+
+      Lo lanza `execa` con IPC. Recibe PCM en memoria y devuelve texto. No abre ficheros fuera de
+      `~/.stratum/models/` y no tiene red: la descarga la hace el daemon.
+    - **Dependencia**: `onnxruntime-node@^1.31` como opcional, cargada con `importOptional()`, igual
+      que los embeddings. `@xenova/transformers` sigue con su 1.14 anidada, sin tocarla. La
+      decodificación de Canary es propia, unas 70 líneas portadas de `onnx-asr`; ya se probó en JS
+      con los mismos WER.
+    - **GPU**: `voice.device` acepta `auto` (por defecto), `gpu` o `cpu`.
+      - Con `auto`, se intenta WebGPU y, si no se puede crear la sesión, se usa la CPU con un
+        `warning`.
+      - Como ONNX Runtime puede caer a la CPU sin avisar, el worker mide el primer encoder. Si no
+        se confirma la GPU, el dispositivo se da como `cpu`, nunca como `gpu`.
+      - El dispositivo real se ve en `stratum doctor` y en la traza. DirectML no se usa.
+    - **Audio**: entran las notas de voz de Telegram (`voice`, OGG/Opus), con un máximo de **5 min**
+      y 10 MB.
+      - Opus se decodifica sin ffmpeg, con un decodificador en WASM (`ogg-opus-decoder` o similar,
+        se elige al implementar), y se pasa de 48 a 16 kHz con un FIR por 3.
+      - Lo que pase de ~25 s se trocea en ventanas cortadas por el silencio, por energía, sin otro
+        modelo. Está **sin medir con notas largas**: se mide en la fase 1.
+      - Los `audio` (ficheros de música), las `video_note` y los documentos de audio no entran.
+    - **Tope de salida**: como mucho 12 tokens por segundo de audio, más el prefijo. Corta los
+      bucles de repetición. Si llega al tope, el texto lleva la marca de recortado.
+    - **Privacidad**: el audio solo vive en memoria del daemon y del worker, y se suelta al
+      transcribir. Nunca va a disco, a la traza, a los logs, al protocolo ni a la sesión.
+      - A la conversación va el texto como un mensaje de la persona, con la marca
+        `[nota de voz, 0:42]` y `via: 'telegram'`.
+      - A la traza solo los metadatos: duración, dispositivo, modelo, ms y si se recortó.
+    - **Eco de lo entendido**: el bot contesta en el chat con la transcripción (`🎙 «…»`) antes de
+      que el agente responda. Así la persona ve qué se entendió, y también si se coló la voz de la
+      tele. La transcripción no da autoridad nueva: es lo mismo que si la persona lo hubiera
+      escrito, y lo sensible sigue pasando por las aprobaciones de siempre.
+    - **Primera vez**: el bot avisa de que descarga el modelo de voz (unos 4 GB, una vez) y da el
+      progreso. La nota se guarda en memoria y se transcribe al terminar; como mucho 3 en espera,
+      y las demás se rechazan con un aviso. Si la descarga falla, se dice y se reintenta con la
+      siguiente nota. Hay `stratum voice status|download|remove` para descargarlo antes o
+      borrarlo.
+    - **Fallos**: no poder transcribir es un fallo **auxiliar**. El bot dice que no pudo, no corre
+      ningún turno y la sesión sigue. Un worker que se cae se relanza con la siguiente nota.
+    - **Config**: `voice.enabled` (apagado por defecto), `voice.language`, `voice.device` y
+      `voice.idleUnloadMinutes`, **solo de la config global**, como `box` y `channels`.
+  - *Fases*:
+    1. Medir notas largas (de 1 a 5 min) y el troceo, y fijar las sumas del modelo.
+    2. Worker, descarga y `stratum voice`, con tests sobre un modelo falso.
+    3. Notas de Telegram en el `companion`, con su eco, su marca y su traza.
+    4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
+       Se diseña aparte.
 
 - **M26 — Documentos** [propuesto 2026-11-20].
   - Arrastrar ficheros a Dot o mandarlos por Telegram para que caigan en `/exchange`, con tope de
