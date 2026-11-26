@@ -2975,6 +2975,54 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       `gpu-buffer` colgó el proceso, así que no se usa.
     - A 0 dB (el fondo tan alto como quien habla) ningún modelo sirve. Es el extremo de la batería,
       no un uso normal.
+  - *Medido el 2026-11-26 (fase 1)*. Lo midió un agente DeepSeek (opencode) y lo revisó Codex
+    `gpt-6.2-sol`, que rehízo los cálculos sobre los resultados guardados sin repetir el banco.
+    Scripts, informe y resultados nota a nota están en el scratchpad de la sesión, sin copiar al
+    repo. La batería:
+    - 8 notas de 1 a 5 min (23 min en total, 8 hablantes y 88 enunciados distintos), hechas
+      uniendo enunciados seguidos de un mismo hablante del test español de MLS, con pausas de 0,3 a
+      1,2 s.
+    - Las mismas condiciones de antes: limpio, tele a 10 dB y radio a 10 dB, todo por Opus a
+      32 kbit/s.
+    - Canary fp32 en WebGPU.
+
+    | Configuración | Limpio | Tele 10 dB | Radio 10 dB | RTF | RSS máx. |
+    |---|---|---|---|---|---|
+    | Nota entera | 86,8 % | 80,3 % | 82,5 % | 0,20–0,26 | 5 216 MB |
+    | Ventanas de 15 s | 2,67 % | 5,49 % | 4,58 % | 0,078–0,082 | 431 MB |
+    | **Ventanas de 25 s** (`maxSec` 30) | **2,48 %** | **5,62 %** | **4,77 %** | 0,083–0,088 | 454 MB |
+    | Ventanas de 30 s | 7,34 % | 11,46 % | 13,47 % | 0,076–0,083 | 474 MB |
+    | Ventanas de 25 s en CPU | 2,48 % | 5,62 % | 4,77 % | 0,39–0,41 | 4 894 MB |
+
+    Lo que decide:
+    - **Hay que trocear todo lo que pase de una ventana.** Entera, una nota de 1 min ya pierde un
+      28–35 %, y una de ~2 min da un 60–69 % sin llegar a ningún tope. Una lectura continua de 313 s (del split
+      `train`) da un 87,2 % entera y un 5,1 % troceada.
+      - La causa no es el techo de 1024 tokens del decodificador, que solo alarga el bucle una vez
+        empezado. Sigue sin aclarar; NVIDIA también documenta que Canary transcribe lo largo por
+        segmentos.
+      - Aparte, el encoder falla en un `Reshape` con 409 s de audio, más allá del máximo de 5 min.
+    - **Ventanas de 25 s con corte forzado a los 30 s** como punto de partida. Las de 15 s empatan
+      (menos de 0,2 puntos) con un 18 % más de llamadas al modelo. Las de 30 s empeoran porque
+      casi todos sus cortes caen al final de la ventana: 40 de 44 a partir de 29,9 s, un recuento
+      que puede incluir alguno hecho en un silencio.
+    - **El tope de 12 tokens por segundo no corta nada legítimo** en los 508 trozos. Contando
+      solo el texto, sin prefijo ni margen, el trozo más cercano usó 8 de 15 (53 %). El banco
+      sumaba 10 tokens de prefijo y 8 de margen a `ceil(12 × segundos)`; el runtime fija su
+      redondeo y su marca de recortado con esa misma fórmula.
+    - Ventanas sin huecos ni solapes, y ninguna repetición literal de 1 a 5 palabras en las 436
+      uniones. La métrica de errores junto a los cortes es aproximada (supone un ritmo uniforme):
+      con tele y radio hay 86 palabras omitidas cerca de un corte, 2,7 puntos sobre 3 186.
+    - **Un trozo casi en silencio inventa texto**. En un control con silencio añadido, el error
+      pasó del 0 % entero al 17,1 % troceado (47 palabras para 41). Lo atiende la fase 2.
+    - La CPU da las mismas 24 transcripciones que WebGPU, palabra por palabra.
+    - *Sin medir*:
+      - la memoria de la GPU;
+      - si los resultados se repiten de una pasada a otra;
+      - la memoria en frío y en caliente (un control de 313 s llegó a 1 696 MB en un proceso que
+        antes había hecho la nota entera);
+      - notas reales de Telegram decodificadas con WASM y el FIR de 48 a 16 kHz;
+      - notas de 300 s justos (las de «5 min» del banco duraban 309 y 315 s).
   - *Diseño, propuesto por Claude el 2026-11-25 y pendiente de que lo revise el usuario*:
     - **Modelo**: **Canary-1B-v2 fp32** (CC-BY-4.0), en la exportación ONNX de
       `istupakov/canary-1b-v2-onnx` con su revisión fijada (`5ebc1520…`), con el idioma `es` y
@@ -2985,7 +3033,24 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       - como **ficheros reales**, porque ONNX Runtime 1.31 rechaza los datos externos que son un
         enlace («escapes model directory»), como los de la caché de Hugging Face.
 
-      El preprocesador es el `nemo128.onnx` de la misma exportación. El idioma sale de la config
+      Las sumas, comprobadas en la fase 1 contra Hugging Face (3 966 054 682 bytes en total):
+
+      | Fichero | Bytes | SHA-256 |
+      |---|---|---|
+      | `encoder-model.onnx` | 4 762 393 | `c8352f7adf033ad4dfcdc42e665eaacb1ee93e1acf6b168e4f1dfc57c26b0195` |
+      | `encoder-model.onnx.data` | 3 284 660 224 | `a1711a0b88dc1bda0ff94178f2f8c66b1450990599856982ddc8cc6e155384ec` |
+      | `decoder-model.onnx` | 676 284 211 | `962dc77709f31c1ed8a55a7518ff4bed7316a87c442e7c79aa3573c4bbc39a72` |
+      | `vocab.txt` | 208 022 | `2c9efe6104fd29522ea27ce0e3aef5d37c690af4e5a4232e643e23ca403ffea3` |
+      | `config.json` | 68 | `f90ace8e35326dcd47c7330b230644fa0835083ed1e89e2f59aa08ba10d74f54` |
+      | `nemo128.onnx` | 139 764 | `a9fde1486ebfcc08f328d75ad4610c67835fea58c73ba57e3209a6f6cf019e9f` |
+
+      Los cinco primeros son de `istupakov/canary-1b-v2-onnx` en
+      `5ebc1520cef7b6b318b3526ad17adbfe00bc1bfc`. El preprocesador **no está en ese repo**:
+      `onnx-asr` lo genera al construir su paquete. Se trae de `istupakov/parakeet-tdt-0.6b-v3-onnx`
+      en `8f23f0c03c8761650bdb5b40aaf3e40d2c15f1ce`, que es el fichero con el que se midió todo.
+      Saca 128 bandas, pero no es idéntico al que lleva hoy el paquete de `onnx-asr` (`5b4a84c5…`):
+      sus valores difieren y la longitud declarada varía en una trama. Se fija como «el
+      preprocesador validado por este banco», sin afirmar que equivalga al de NeMo. El idioma sale de la config
       (`voice.language`, `es` por defecto) y nunca se detecta solo.
     - **Dónde corre**: en el **anfitrión, en un proceso hijo del daemon** (`voice-worker`). No va en
       la caja, porque no ve la GPU, ni dentro del daemon, por tres motivos:
@@ -3010,11 +3075,17 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       y 10 MB.
       - Opus se decodifica sin ffmpeg, con un decodificador en WASM (`ogg-opus-decoder` o similar,
         se elige al implementar), y se pasa de 48 a 16 kHz con un FIR por 3.
-      - Lo que pase de ~25 s se trocea en ventanas cortadas por el silencio, por energía, sin otro
-        modelo. Está **sin medir con notas largas**: se mide en la fase 1.
+      - Lo que pase de 25 s se trocea en ventanas cortadas por el silencio, por energía, sin otro
+        modelo: `targetSec` 25 y `maxSec` 30, como se midió en la fase 1. Sin silencio antes de
+        los 30 s, corte forzado. Las ventanas cubren todo el audio, sin huecos ni solapes, y el
+        máximo se comprueba en muestras, no en tramas.
+      - Los trozos casi mudos no llegan al decoder, porque inventan texto. El filtro se mide en la
+        fase 2, también con voz baja, para no tirar voz de verdad. Se registra por qué se hizo
+        cada corte (silencio o forzado).
       - Los `audio` (ficheros de música), las `video_note` y los documentos de audio no entran.
-    - **Tope de salida**: como mucho 12 tokens por segundo de audio, más el prefijo. Corta los
-      bucles de repetición. Si llega al tope, el texto lleva la marca de recortado.
+    - **Tope de salida**: como mucho 12 tokens por segundo de audio de cada trozo, redondeado hacia
+      arriba, más el prefijo. Corta los bucles de repetición. Si llega al tope, el texto lleva la
+      marca de recortado. En la fase 1, el trozo más cercano usó el 53 %.
     - **Privacidad**: el audio solo vive en memoria del daemon y del worker, y se suelta al
       transcribir. Nunca va a disco, a la traza, a los logs, al protocolo ni a la sesión.
       - A la conversación va el texto como un mensaje de la persona, con la marca
@@ -3034,8 +3105,14 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     - **Config**: `voice.enabled` (apagado por defecto), `voice.language`, `voice.device` y
       `voice.idleUnloadMinutes`, **solo de la config global**, como `box` y `channels`.
   - *Fases*:
-    1. Medir notas largas (de 1 a 5 min) y el troceo, y fijar las sumas del modelo.
-    2. Worker, descarga y `stratum voice`, con tests sobre un modelo falso.
+    1. ~~Medir notas largas (de 1 a 5 min) y el troceo, y fijar las sumas del modelo.~~ Hecha el
+       2026-11-26.
+    2. Worker, descarga y `stratum voice`, con tests sobre un modelo falso. Además:
+       - el troceador, con tests de silencio al principio y al final, voz breve y fondo
+         continuo;
+       - el filtro de trozos casi mudos;
+       - medir la memoria de la GPU, la RSS en frío y en caliente con varias notas seguidas y la
+         repetibilidad, con el dispositivo real confirmado.
     3. Notas de Telegram en el `companion`, con su eco, su marca y su traza.
     4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
        Se diseña aparte.
