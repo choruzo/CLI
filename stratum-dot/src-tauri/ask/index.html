@@ -24,10 +24,14 @@
           maxlength="{{MAX_CHARS}}"
           placeholder="Ask your assistant…"
           spellcheck="true"
-          aria-describedby="status hint"
+          aria-describedby="voice status hint"
         ></textarea>
         <p id="status" class="status" role="status" aria-live="polite"></p>
       </form>
+      <p id="voice" class="voice" role="status" aria-live="polite" hidden>
+        <span id="voice-label" class="voice-label"></span>
+        <span class="voice-bar" aria-hidden="true"><span id="voice-level"></span></span>
+      </p>
       <p id="hint" class="small muted">Enter sends and opens Stratum Dot · Shift+Enter, new line · Esc closes</p>
     </main>
   </body>

@@ -19,6 +19,12 @@
 //!  - **Menos de 0,5 s no se transcribe**: se tira con `voice.cancel`.
 //!  - Lo que contesta el daemon vuelve **sin interpretar** (`serde_json::Value`):
 //!    quien lo usa es el webview, con los schemas del contrato.
+//!  - **Cada nota sabe quién la empezó** ([`Origin`]): el botón del chat
+//!    (`Main`) o el atajo del Dot compacto (`Shortcut`). Perder el foco de la
+//!    ventana principal tira solo las suyas; la del atajo se graba con el
+//!    compacto delante.
+//!  - La del atajo **no sabe de qué sesión es**: se resuelve dentro de la tarea,
+//!    con el micrófono ya abierto, pidiendo la del asistente (`Session::Companion`).
 //!
 //! El remuestreo es el mismo de la CLI (`stratum-cli/src/voice/resample.ts`),
 //! portado tal cual: FIR de fase lineal (sinc enventanado con Blackman, 63
@@ -61,6 +67,12 @@ const CANCEL_WAIT: Duration = Duration::from_secs(5);
 
 /// Ni micrófono ni permiso.
 const NO_MICROPHONE: &str = "No microphone available.";
+
+/// El agente que pide una nota del atajo (`docs/protocol.md` §22).
+const COMPANION_AGENT: &str = "companion";
+
+/// El fondo de la escala del nivel: por debajo de esto, silencio.
+const MIN_DBFS: f32 = -100.0;
 
 /// Candado de un `Mutex` que no se envenena: aquí no hay estado a medio escribir.
 fn lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -418,6 +430,37 @@ fn pcm_bytes(samples: &[i16]) -> Vec<u8> {
 
 // ------------------------------------------------------------------- la nota
 
+/// Quién empezó la nota. Es lo que decide qué tira perder el foco: la del botón
+/// del chat se graba con la ventana principal delante; la del atajo, con el Dot
+/// compacto, y sigue aunque la principal pierda el foco.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Origin {
+    /// El botón del micro de la ventana principal (`dot_voice_start`).
+    Main,
+    /// El atajo global mantenido (`hold.rs`), con el Dot compacto delante.
+    Shortcut,
+}
+
+/// De qué sesión es la nota.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Session {
+    /// La sabe quien la pide: el botón del chat manda la del campo.
+    Known(String),
+    /// La del asistente: se resuelve **dentro de la tarea**, con el micrófono ya
+    /// abierto, así el atajo no espera a nadie para empezar a grabar.
+    Companion,
+}
+
+/// Lo que la página del compacto enseña mientras se graba: cuánto lleva y el
+/// nivel de lo último capturado. Del audio, solo este número.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Progress {
+    /// Segundos de audio capturados (a 16 kHz).
+    pub seconds: u64,
+    /// RMS del último bloque, en dBFS (−100..0).
+    pub level: Option<f32>,
+}
+
 /// Los topes de una nota (`VOICE_UPLOAD_LIMITS` del protocolo), a 16 kHz.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct Limits {
@@ -483,6 +526,9 @@ struct Tape {
     full: bool,
     /// El micrófono ya está parado.
     stopped: bool,
+    /// RMS del último bloque capturado, en dBFS. Solo el número: las muestras no
+    /// salen de aquí.
+    level: Option<f32>,
 }
 
 impl Shared {
@@ -491,6 +537,11 @@ impl Shared {
         let mut tape = lock(&self.tape);
         if tape.finish.is_some() || tape.full {
             return;
+        }
+        // El nivel se mide de lo que llega del micrófono, antes de remuestrear:
+        // es lo que la barra del compacto enseña.
+        if let Some(level) = level_dbfs(frames) {
+            tape.level = Some(level);
         }
         let mut resampled = Vec::new();
         let samples: &[f32] = match tape.resampler.as_mut() {
@@ -549,6 +600,15 @@ impl Shared {
         lock(&self.tape).captured
     }
 
+    /// Cuánto lleva y qué nivel trae lo último capturado.
+    fn progress(&self) -> Progress {
+        let tape = lock(&self.tape);
+        Progress {
+            seconds: (tape.captured / TARGET_SAMPLE_RATE as usize) as u64,
+            level: tape.level,
+        }
+    }
+
     /// Lo siguiente que hay que hacer, sin soltar el candado mientras se actúa.
     fn step(&self) -> Step {
         let mut tape = lock(&self.tape);
@@ -585,11 +645,29 @@ fn append_capped(limits: &Limits, tape: &mut Tape, samples: &[f32]) {
     }
 }
 
+/// El RMS de un bloque, en dBFS (−100..0). Es lo único que sale de las muestras
+/// hacia la interfaz: el número, nunca las muestras.
+fn level_dbfs(frames: &[f32]) -> Option<f32> {
+    if frames.is_empty() {
+        return None;
+    }
+    let sum: f32 = frames.iter().map(|sample| sample * sample).sum();
+    let rms = (sum / frames.len() as f32).sqrt();
+    // 1e-5 es el fondo de la escala: −100 dBFS, y de ahí no se baja (log10(0)
+    // no existe y un «−inf» no se puede pintar).
+    Some((20.0 * rms.max(1e-5).log10()).clamp(MIN_DBFS, 0.0))
+}
+
 // ------------------------------------------------------------------ el enlace
 
-/// Lo único que la grabación necesita del enlace: los cuatro métodos de voz. Se
-/// implementa para [`LinkHandle`] y, en los tests, para un subidor falso.
+/// Lo único que la grabación necesita del enlace: los cuatro métodos de voz y la
+/// sesión del asistente. Se implementa para [`LinkHandle`] y, en los tests, para
+/// un subidor falso.
 pub trait VoiceUploads: Clone + Send + Sync + 'static {
+    /// La sesión del asistente (`sessions.open { agent: 'companion' }`): si ya
+    /// existe, el daemon devuelve la que hay. Es lo que resuelve el atajo sin
+    /// que el lado nativo conozca el DTO.
+    fn companion_session(&self) -> impl Future<Output = Result<String, CommandError>> + Send;
     fn voice_begin(
         &self,
         session_id: String,
@@ -615,6 +693,24 @@ pub trait VoiceUploads: Clone + Send + Sync + 'static {
 // mismo motivo por el que no se usa `async fn` en la declaración de arriba.
 #[allow(clippy::manual_async_fn)]
 impl VoiceUploads for LinkHandle {
+    fn companion_session(&self) -> impl Future<Output = Result<String, CommandError>> + Send {
+        let action = CallAction::OpenSession {
+            cwd: None,
+            agent: Some(COMPANION_AGENT.to_string()),
+            provider: None,
+            model: None,
+        };
+        async move {
+            let opened = self.call(action).await?;
+            opened
+                .get("session")
+                .and_then(|session| session.get("id"))
+                .and_then(Value::as_str)
+                .map(str::to_string)
+                .ok_or_else(|| not_sent("The assistant session could not be opened."))
+        }
+    }
+
     fn voice_begin(
         &self,
         session_id: String,
@@ -660,6 +756,8 @@ impl VoiceUploads for LinkHandle {
 struct Active {
     shared: Arc<Shared>,
     pump: tokio::task::JoinHandle<Result<Value, CommandError>>,
+    /// Quién la empezó: decide qué tira perder el foco.
+    origin: Origin,
 }
 
 /// La grabación de una nota (`DotState`). Una a la vez.
@@ -703,10 +801,35 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
         lock(&self.active).is_some()
     }
 
-    /// Empieza una nota de esa sesión: **abre el micrófono ya** y pide
-    /// `voice.begin` a la vez. Lo grabado antes de tener el `uploadId` no se
-    /// pierde: espera en memoria y se sube primero.
+    /// Quién empezó la nota en curso, si hay alguna.
+    pub fn origin(&self) -> Option<Origin> {
+        lock(&self.active).as_ref().map(|active| active.origin)
+    }
+
+    /// Lo que la página del compacto enseña mientras se graba: segundos y nivel.
+    /// `None` si no hay nota (ni grabando ni esperando a que se la lleven).
+    pub fn progress(&self) -> Option<Progress> {
+        let slot = lock(&self.active);
+        let active = slot.as_ref()?;
+        Some(active.shared.progress())
+    }
+
+    /// Empieza una nota de esa sesión, para el botón del chat: **abre el
+    /// micrófono ya** y pide `voice.begin` a la vez. Lo grabado antes de tener el
+    /// `uploadId` no se pierde: espera en memoria y se sube primero.
     pub async fn start(&self, session_id: &str) -> Result<(), CommandError> {
+        self.start_with(Session::Known(session_id.to_string()), Origin::Main)
+            .await
+    }
+
+    /// Empieza la nota del **atajo**: la misma prisa por abrir el micrófono, pero
+    /// la sesión es la del asistente y se resuelve dentro de la tarea, ya con el
+    /// micrófono abierto. Si falla, el error llega por `stop()` como los demás.
+    pub async fn start_companion(&self) -> Result<(), CommandError> {
+        self.start_with(Session::Companion, Origin::Shortcut).await
+    }
+
+    async fn start_with(&self, session: Session, origin: Origin) -> Result<(), CommandError> {
         // El candado se tiene hasta apuntar la nota (aquí no hay ningún `await`):
         // dos `start` a la vez no pueden abrir el micrófono dos veces.
         let mut slot = lock(&self.active);
@@ -732,6 +855,7 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
                 finish: None,
                 full: false,
                 stopped: false,
+                level: None,
             }),
             capture: Mutex::new(source),
             limits: self.limits,
@@ -749,14 +873,19 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
             listener(true);
         }
         self.logger.info("voice: recording");
-        // `voice.begin` a la vez que el micrófono ya graba.
+        // `voice.begin` (y, en el atajo, la sesión del asistente) a la vez que el
+        // micrófono ya graba.
         let pump = tokio::spawn(run(
             self.uploads.clone(),
             shared.clone(),
-            session_id.to_string(),
+            session,
             self.logger.clone(),
         ));
-        *slot = Some(Active { shared, pump });
+        *slot = Some(Active {
+            shared,
+            pump,
+            origin,
+        });
         Ok(())
     }
 
@@ -784,8 +913,8 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
         Ok(())
     }
 
-    /// Para el micrófono en el acto y tira lo grabado, sin esperar: perder el
-    /// foco de la ventana, cerrar Dot. El `voice.cancel` sale cuando puede.
+    /// Para el micrófono en el acto y tira lo grabado, sin esperar: cerrar Dot.
+    /// El `voice.cancel` sale cuando puede.
     pub fn abort(&self) {
         let Some(active) = self.take() else {
             return;
@@ -794,8 +923,27 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
         drop(active.pump);
     }
 
+    /// Lo mismo, pero solo si la nota la empezó `origin`: perder el foco de la
+    /// ventana principal tira las suyas y **no** la del atajo, que se graba con
+    /// el Dot compacto delante.
+    pub fn abort_from(&self, origin: Origin) {
+        let Some(active) = self.take_if(origin) else {
+            return;
+        };
+        active.shared.discard();
+        drop(active.pump);
+    }
+
     fn take(&self) -> Option<Active> {
         lock(&self.active).take()
+    }
+
+    fn take_if(&self, origin: Origin) -> Option<Active> {
+        let mut slot = lock(&self.active);
+        if slot.as_ref().map(|active| active.origin) != Some(origin) {
+            return None;
+        }
+        slot.take()
     }
 }
 
@@ -809,15 +957,30 @@ async fn join(
     })
 }
 
-/// El bucle de una nota: espera el `uploadId`, sube el audio troceado y, al
-/// terminar, pide `voice.end` (o `voice.cancel`). Lo que contesta el daemon
-/// vuelve sin interpretar.
+/// El bucle de una nota: resuelve la sesión (si hay que resolverla), espera el
+/// `uploadId`, sube el audio troceado y, al terminar, pide `voice.end` (o
+/// `voice.cancel`). Lo que contesta el daemon vuelve sin interpretar.
 async fn run<U: VoiceUploads>(
     uploads: U,
     shared: Arc<Shared>,
-    session_id: String,
+    session: Session,
     logger: Logger,
 ) -> Result<Value, CommandError> {
+    let session_id = match session {
+        Session::Known(session_id) => session_id,
+        // El atajo no sabe de qué sesión es la nota: se pregunta aquí, con el
+        // micrófono ya grabando, y lo grabado mientras tanto no se pierde.
+        Session::Companion => match uploads.companion_session().await {
+            Ok(session_id) => session_id,
+            Err(error) => {
+                // Igual que si `voice.begin` falla: sin sesión no hay a dónde
+                // mandar el audio, así que se tira.
+                shared.discard();
+                logger.warn("voice: the assistant session did not open");
+                return Err(error);
+            }
+        },
+    };
     let begun = match uploads.voice_begin(session_id).await {
         Ok(begun) => begun,
         Err(error) => {
@@ -975,6 +1138,8 @@ mod tests {
 
     #[derive(Default)]
     struct Seen {
+        /// Lo que se pidió, en orden: `session`, `begin`, `append`, `end` o `cancel`.
+        order: Vec<&'static str>,
         sessions: Vec<String>,
         /// Cada `voice.append`, en orden: su `seq` y sus bytes.
         appends: Vec<(u64, Vec<u8>)>,
@@ -988,6 +1153,8 @@ mod tests {
         seen: Arc<Mutex<Seen>>,
         /// Si está, `voice.begin` espera a que la prueba le dé paso.
         gate: Option<Arc<Notify>>,
+        /// Si está, la sesión del asistente espera a que la prueba le dé paso.
+        session_gate: Option<Arc<Notify>>,
         /// Si es verdad, el primer `voice.append` falla.
         fail_append: bool,
         /// Lo que contesta `voice.end`.
@@ -999,6 +1166,7 @@ mod tests {
             Self {
                 seen: Arc::new(Mutex::new(Seen::default())),
                 gate: None,
+                session_gate: None,
                 fail_append: false,
                 transcript: json!({
                     "transcript": { "text": "hola", "durationSec": 2.0, "capped": false, "device": "cpu" }
@@ -1012,6 +1180,18 @@ mod tests {
             (
                 Self {
                     gate: Some(gate.clone()),
+                    ..Self::new()
+                },
+                gate,
+            )
+        }
+
+        /// La sesión del asistente no se resuelve hasta que la prueba le dé paso.
+        fn companion_gated() -> (Self, Arc<Notify>) {
+            let gate = Arc::new(Notify::new());
+            (
+                Self {
+                    session_gate: Some(gate.clone()),
                     ..Self::new()
                 },
                 gate,
@@ -1032,6 +1212,18 @@ mod tests {
 
     #[allow(clippy::manual_async_fn)]
     impl VoiceUploads for FakeUploads {
+        fn companion_session(&self) -> impl Future<Output = Result<String, CommandError>> + Send {
+            let gate = self.session_gate.clone();
+            let seen = self.seen.clone();
+            async move {
+                if let Some(gate) = gate {
+                    gate.notified().await;
+                }
+                lock(&seen).order.push("session");
+                Ok("ses_companion".to_string())
+            }
+        }
+
         fn voice_begin(
             &self,
             session_id: String,
@@ -1042,7 +1234,9 @@ mod tests {
                 if let Some(gate) = gate {
                     gate.notified().await;
                 }
-                lock(&seen).sessions.push(session_id);
+                let mut seen = lock(&seen);
+                seen.order.push("begin");
+                seen.sessions.push(session_id);
                 Ok(json!({
                     "uploadId": "upl_1",
                     "sampleRate": TARGET_SAMPLE_RATE,
@@ -1064,7 +1258,9 @@ mod tests {
                 if fail {
                     return Err(CommandError::new(CommandErrorKind::Rejected, "voice-seq"));
                 }
-                lock(&seen).appends.push((seq, pcm));
+                let mut seen = lock(&seen);
+                seen.order.push("append");
+                seen.appends.push((seq, pcm));
                 Ok(json!({ "seconds": 0.0 }))
             }
         }
@@ -1076,7 +1272,9 @@ mod tests {
             let seen = self.seen.clone();
             let transcript = self.transcript.clone();
             async move {
-                lock(&seen).ends += 1;
+                let mut seen = lock(&seen);
+                seen.order.push("end");
+                seen.ends += 1;
                 Ok(transcript)
             }
         }
@@ -1087,7 +1285,9 @@ mod tests {
         ) -> impl Future<Output = Result<Value, CommandError>> + Send {
             let seen = self.seen.clone();
             async move {
-                lock(&seen).cancels += 1;
+                let mut seen = lock(&seen);
+                seen.order.push("cancel");
+                seen.cancels += 1;
                 Ok(json!({}))
             }
         }
@@ -1425,6 +1625,11 @@ mod tests {
         struct NoDaemon;
         #[allow(clippy::manual_async_fn)]
         impl VoiceUploads for NoDaemon {
+            fn companion_session(
+                &self,
+            ) -> impl Future<Output = Result<String, CommandError>> + Send {
+                async { Ok("ses_1".to_string()) }
+            }
             fn voice_begin(
                 &self,
                 _session_id: String,
@@ -1474,6 +1679,198 @@ mod tests {
         let error = recorder.start("ses_1").await.unwrap_err();
         assert_eq!(error.kind, CommandErrorKind::Invalid);
         recorder.cancel().await.unwrap();
+    }
+
+    // ------------------------------------------------------------- el atajo
+
+    #[tokio::test]
+    async fn la_nota_del_atajo_resuelve_la_sesion_dentro_de_la_tarea() {
+        let source = FakeSource::new(TARGET_SAMPLE_RATE);
+        let (uploads, session_gate) = FakeUploads::companion_gated();
+        let recorder = VoiceRecorder::new(uploads.clone(), Logger::none(), None)
+            .with_source(source.factory())
+            .with_limits(Limits::default());
+        recorder.start_companion().await.unwrap();
+        assert_eq!(recorder.origin(), Some(Origin::Shortcut));
+        // El micrófono ya graba aunque la sesión aún no se sepa.
+        let early = tone(300.0, TARGET_SAMPLE_RATE, 16_000);
+        source.feed(&early);
+        session_gate.notify_one();
+        let late = tone(900.0, TARGET_SAMPLE_RATE, 16_000);
+        source.feed(&late);
+        recorder.stop().await.unwrap();
+        let seen = uploads.seen();
+        // Primero la sesión del asistente, y `voice.begin` con la que contestó.
+        assert_eq!(seen.order[..2], ["session", "begin"][..]);
+        assert_eq!(seen.sessions, vec!["ses_companion".to_string()]);
+        // Y lo grabado antes de saberla llega entero y primero.
+        let mut expected = Vec::new();
+        push_pcm16(&early, &mut expected);
+        push_pcm16(&late, &mut expected);
+        let sent: Vec<u8> = seen
+            .appends
+            .iter()
+            .flat_map(|(_, pcm)| pcm.clone())
+            .collect();
+        assert_eq!(sent, pcm_bytes(&expected));
+        assert_eq!(seen.order.last().copied(), Some("end"));
+    }
+
+    #[tokio::test]
+    async fn el_boton_del_chat_no_pide_la_sesion_del_asistente() {
+        let (recorder, source, uploads) = setup(TARGET_SAMPLE_RATE, Limits::default());
+        recorder.start("ses_1").await.unwrap();
+        assert_eq!(recorder.origin(), Some(Origin::Main));
+        source.feed(&tone(440.0, TARGET_SAMPLE_RATE, 16_000));
+        recorder.stop().await.unwrap();
+        let seen = uploads.seen();
+        assert_eq!(seen.order.first(), Some(&"begin"));
+        assert!(!seen.order.contains(&"session"));
+    }
+
+    #[tokio::test]
+    async fn si_la_sesion_del_asistente_no_abre_se_tira_y_el_error_llega_al_parar() {
+        let source = FakeSource::new(TARGET_SAMPLE_RATE);
+        #[derive(Clone)]
+        struct NoSession;
+        #[allow(clippy::manual_async_fn)]
+        impl VoiceUploads for NoSession {
+            fn companion_session(
+                &self,
+            ) -> impl Future<Output = Result<String, CommandError>> + Send {
+                async {
+                    Err(CommandError::new(
+                        CommandErrorKind::Rejected,
+                        "no-companion",
+                    ))
+                }
+            }
+            fn voice_begin(
+                &self,
+                _s: String,
+            ) -> impl Future<Output = Result<Value, CommandError>> + Send {
+                async { Ok(Value::Null) }
+            }
+            fn voice_append(
+                &self,
+                _u: String,
+                _q: u64,
+                _p: Vec<u8>,
+            ) -> impl Future<Output = Result<Value, CommandError>> + Send {
+                async { Ok(Value::Null) }
+            }
+            fn voice_end(
+                &self,
+                _u: String,
+            ) -> impl Future<Output = Result<Value, CommandError>> + Send {
+                async { Ok(Value::Null) }
+            }
+            fn voice_cancel(
+                &self,
+                _u: String,
+            ) -> impl Future<Output = Result<Value, CommandError>> + Send {
+                async { Ok(Value::Null) }
+            }
+        }
+        let recorder = VoiceRecorder::new(NoSession, Logger::none(), None)
+            .with_source(source.factory())
+            .with_limits(Limits::default());
+        recorder.start_companion().await.unwrap();
+        source.feed(&tone(440.0, TARGET_SAMPLE_RATE, 16_000));
+        let error = recorder.stop().await.unwrap_err();
+        assert_eq!(error.message, "no-companion");
+        assert_eq!(source.stops(), 1, "el micrófono se paró");
+        assert!(!recorder.is_recording());
+    }
+
+    #[tokio::test]
+    async fn perder_el_foco_de_la_principal_no_tira_la_nota_del_atajo() {
+        let (recorder, _source, _uploads) = setup(TARGET_SAMPLE_RATE, Limits::default());
+        recorder.start_companion().await.unwrap();
+        recorder.abort_from(Origin::Main);
+        assert!(
+            recorder.is_recording(),
+            "la del atajo se graba con el compacto delante"
+        );
+        recorder.abort_from(Origin::Shortcut);
+        assert!(!recorder.is_recording());
+
+        // Y al revés: la del botón del chat no la tira el atajo.
+        recorder.start("ses_1").await.unwrap();
+        recorder.abort_from(Origin::Shortcut);
+        assert!(recorder.is_recording());
+        recorder.abort_from(Origin::Main);
+        assert!(!recorder.is_recording());
+
+        // Cerrar Dot las tira todas, sin mirar de quién son.
+        recorder.start_companion().await.unwrap();
+        recorder.abort();
+        assert!(!recorder.is_recording());
+    }
+
+    #[tokio::test]
+    async fn el_atajo_no_empieza_otra_nota_si_el_chat_ya_graba() {
+        let (recorder, _source, _uploads) = setup(TARGET_SAMPLE_RATE, Limits::default());
+        recorder.start("ses_1").await.unwrap();
+        let error = recorder.start_companion().await.unwrap_err();
+        assert_eq!(error.kind, CommandErrorKind::Invalid);
+        assert_eq!(
+            recorder.origin(),
+            Some(Origin::Main),
+            "la del chat sigue siendo suya"
+        );
+        recorder.cancel().await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn la_bandeja_dice_listening_tambien_con_el_atajo() {
+        let heard: Arc<Mutex<Vec<bool>>> = Arc::new(Mutex::new(Vec::new()));
+        let listener = {
+            let heard = heard.clone();
+            Arc::new(move |listening: bool| lock(&heard).push(listening)) as Listener
+        };
+        let source = FakeSource::new(TARGET_SAMPLE_RATE);
+        let recorder = VoiceRecorder::new(FakeUploads::new(), Logger::none(), Some(listener))
+            .with_source(source.factory())
+            .with_limits(Limits::default());
+        recorder.start_companion().await.unwrap();
+        assert_eq!(*lock(&heard), vec![true], "la bandeja dice «listening…»");
+        recorder.cancel().await.unwrap();
+        assert_eq!(*lock(&heard), vec![true, false]);
+    }
+
+    #[tokio::test]
+    async fn el_nivel_es_el_rms_de_lo_ultimo_capturado_y_los_segundos_lo_grabado() {
+        let (recorder, source, _uploads) = setup(TARGET_SAMPLE_RATE, Limits::default());
+        assert_eq!(
+            recorder.progress(),
+            None,
+            "sin nota no hay nada que enseñar"
+        );
+        recorder.start("ses_1").await.unwrap();
+        let start = recorder.progress().unwrap();
+        assert_eq!(start.seconds, 0);
+        assert_eq!(start.level, None, "aún no ha llegado ninguna muestra");
+
+        // Medio de fondo de escala (−6,02 dBFS) durante 1 s.
+        source.feed(&[0.5f32; 16_000]);
+        let loud = recorder.progress().unwrap();
+        assert_eq!(loud.seconds, 1);
+        let dbfs = loud.level.expect("hay nivel");
+        assert!((dbfs + 6.02).abs() < 0.1, "{dbfs}");
+
+        // Silencio: la barra se va al fondo de la escala, nunca a −inf.
+        source.feed(&[0.0f32; 8_000]);
+        let quiet = recorder.progress().unwrap();
+        assert_eq!(quiet.seconds, 1);
+        assert!(
+            quiet.level.expect("hay nivel") <= -99.0,
+            "{:?}",
+            quiet.level
+        );
+
+        recorder.cancel().await.unwrap();
+        assert_eq!(recorder.progress(), None);
     }
 
     /// A mano, con el micrófono de verdad: no guarda nada, solo dice lo que oye.

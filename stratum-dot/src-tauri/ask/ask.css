@@ -43,6 +43,37 @@ body.ask .status:empty {
 body.ask .small {
   margin: 0.3rem 0 0;
 }
+/* M25 fase 4: la nota. La fila solo está mientras se escucha o se transcribe. */
+body.ask .voice {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  margin: 0.3rem 0 0;
+  font-size: 0.82rem;
+  color: var(--muted);
+}
+body.ask .voice[hidden] {
+  display: none;
+}
+body.ask .voice-label {
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+body.ask .voice-bar {
+  flex: 1;
+  height: 0.3rem;
+  border-radius: 0.15rem;
+  background: var(--line);
+  overflow: hidden;
+}
+body.ask .voice-bar > span {
+  display: block;
+  width: 0;
+  height: 100%;
+  border-radius: inherit;
+  background: #4caf7a;
+  transition: width 120ms linear;
+}
 .visually-hidden {
   position: absolute;
   width: 1px;

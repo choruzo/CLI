@@ -24,6 +24,7 @@
 mod ask;
 mod commands;
 mod confirm;
+mod hold;
 mod notify;
 mod page;
 mod tray;
@@ -98,13 +99,15 @@ pub fn run() {
         // M23: el auto-update. Solo lo usa Rust (`updates.rs`); el webview no tiene sus permisos.
         .plugin(tauri_plugin_updater::Builder::new().build())
         .manage(updates::UpdateState::default())
-        // El Dot compacto: el atajo lo abre o lo cierra. Se registra en `setup`.
+        // El Dot compacto: el atajo lo abre o lo cierra, y mantenido graba una
+        // nota (M25 fase 4). Se registra en `setup`.
         .plugin(
             tauri_plugin_global_shortcut::Builder::new()
                 .with_handler(|app, _shortcut, event| {
-                    if event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed {
-                        ask::toggle(app);
-                    }
+                    ask::on_shortcut(
+                        app,
+                        event.state() == tauri_plugin_global_shortcut::ShortcutState::Pressed,
+                    );
                 })
                 .build(),
         )
@@ -210,11 +213,12 @@ pub fn run() {
             }
             // M25 fase 4 — perder el foco con una nota en curso la cancela: el
             // micrófono solo se abre con la ventana delante, y así no se queda
-            // escuchando a escondidas (el audio se tira, sin transcribir).
+            // escuchando a escondidas (el audio se tira, sin transcribir). La
+            // nota del atajo no es suya: esa se graba con el compacto delante.
             if let WindowEvent::Focused(false) = event {
                 if window.label() == "main" {
                     if let Some(state) = window.try_state::<DotState>() {
-                        state.voice.abort();
+                        state.voice.abort_from(voice::Origin::Main);
                     }
                 }
             }
