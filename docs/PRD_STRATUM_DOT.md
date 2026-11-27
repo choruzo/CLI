@@ -2936,7 +2936,7 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   - Notas de voz de Telegram transcritas **en local**. El audio no sale del equipo ni se guarda, y
     al historial va el texto con su marca.
   - Después, *push-to-talk* en Dot. La respuesta hablada (TTS) sigue fuera. La escucha continua
-    también, salvo la de la palabra de activación (fase 5, *añadida por el usuario el 2026-11-27*).
+    también, salvo la de la palabra de activación, que va en M29 (*2026-11-27*).
   - *Decidido por el usuario el 2026-11-25*: el modelo se **descarga la primera vez que hace
     falta**. Antes de elegirlo pidió buscar algo más preciso que whisper `small` y que use la GPU,
     empezando por lo que usa Hex (Parakeet TDT v3 por defecto, y WhisperKit).
@@ -3237,33 +3237,9 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        - **Partes**: (1) protocolo y daemon (`voice.*` y `VoiceNotes.transcribePcm`); (2) grabación
          nativa y `dot-link`; (3) el atajo y el Dot compacto; (4) el botón del chat; (5) E2E, docs
          y release (Dot 0.4.1 con la revisión 3).
-    5. *Palabra de activación* (*pedida por el usuario el 2026-11-27*; sin diseñar). Decir el
-       nombre del asistente empieza a escucharle, como si se mantuviera el atajo, sin tocar nada.
-       Primero hay que medir, como se hizo con Canary:
-       - **qué modelo**: uno pequeño que corra siempre en local y en CPU (openWakeWord u otro en
-         ONNX), y si deja entrenar un nombre propio con voces sintéticas;
-       - **falsas activaciones** con la tele y la radio de la batería de la fase 1 (ya se vio que la
-         tele hace inventar frases) y **activaciones perdidas** con voz baja y a distancia;
-       - **coste** de tenerlo siempre encendido (CPU y memoria).
-
-       Reglas que no dependen de lo que se mida:
-       - lo de antes de la palabra **no sale del detector**: no se guarda, no se sube al daemon ni
-         llega a Canary;
-       - se activa y desactiva a la vista (bandeja y ajuste), y está apagado por defecto;
-       - el texto va al campo, como en la fase 4: lo oído nunca se envía solo.
-
-       Falta decidir con el usuario: el nombre (¿«Dot»?), quién escucha (Dot o el daemon) y qué
-       pasa con la ventana cerrada.
-    6. *Distinguir hablantes* (*pedido por el usuario el 2026-11-27*; sin diseñar). Saber quién de
-       casa habla, con una huella de voz por persona (embeddings tipo ECAPA o WeSpeaker en ONNX)
-       que se registra adrede. Hay que medir los aciertos con las voces de MLS y con ruido.
-       - **No es autoridad**: una voz se imita, y una grabación o la tele también suenan. Quién
-         habla puede personalizar (la memoria o el trato de esa persona), pero nunca aprueba nada,
-         no levanta ninguna guarda ni cambia lo que se puede hacer. Es como `origin`: procedencia.
-       - Las huellas de voz son datos biométricos: solo en local, en el directorio del
-         `companion`, se borran desde Dot y la CLI, y nunca van al protocolo ni a la traza.
-       - Falta decidir con el usuario: para qué se usa exactamente (¿marcar el mensaje con la
-         persona? ¿memoria por persona?) y si antes hace falta separar dos voces en una misma nota.
+    5. *Palabra de activación y distinguir hablantes*: pasan a **M29** (*2026-11-27*), porque con
+       varias personas «quién habla» toca la memoria, la conversación, los conectores y las
+       aprobaciones, no solo la voz.
 
 - **M26 — Documentos** [propuesto 2026-11-20].
   - Arrastrar ficheros a Dot o mandarlos por Telegram para que caigan en `/exchange`, con tope de
@@ -3433,10 +3409,60 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
 
     Completar tareas domésticas queda fuera, porque no hay ninguna.
 
+- **M29 — Dot para la casa: varias personas y un satélite de voz** [propuesto por el usuario el
+  2026-11-27; sin diseñar]. Hoy Dot da por hecho una sola persona. M29 lo abre a la familia.
+  - *Lo que pidió el usuario*: un **satélite** (un Linux o una Raspberry Pi con micrófono y
+    altavoz) que escucha **siempre** la palabra de activación. Según **quién** la diga, se recoge
+    la orden y se ejecuta contra las tools de esa persona.
+  - *Decidido por el usuario el 2026-11-27*:
+    - **Personas en la config**: cada una con sus **vías de acceso**, su chat de Telegram, su voz o
+      las dos.
+    - **Una conversación y una memoria por persona**: lo que cuenta A no lo ve B. Además, habrá
+      una memoria común de la casa (despensa, Home Assistant, rutinas).
+    - **Lo personal por voz**: cuando la orden llega por voz desde el satélite (no desde Dot ni
+      Telegram), con la voz reconocida basta para los datos de esa persona, como su correo o su
+      agenda.
+    - **Aprobaciones**: las da siempre el dueño (la clave de aprobador), para todas las personas.
+  - *Lo que propone Claude, pendiente de revisar*:
+    - **La voz no es autoridad**. Elige la persona (su conversación, su memoria y sus conectores),
+      pero nunca aprueba ni levanta una guarda. Escribir sigue pasando por la aprobación del
+      dueño. Riesgo aceptado por el usuario: una voz imitada o grabada puede **leer** los datos de
+      esa persona desde el satélite.
+    - **Voz desconocida = invitado**: solo la memoria común, sin conectores personales y sin
+      conversación propia.
+    - **Huellas de voz**: se registran adrede, cada persona grabando unas frases, y con `approve`.
+      Solo en local, en los datos del `companion`. Se borran desde Dot y la CLI, y nunca van al
+      protocolo, la traza ni los logs.
+    - **El satélite es tonto**: hace la palabra de activación y la detección de voz, sube el audio
+      de la orden al daemon y reproduce la respuesta. La huella, Canary y el agente corren en el
+      equipo del daemon, que tiene la GPU.
+    - **Respuesta hablada (TTS)**: con un altavoz hace falta. Sale de §23.12 para el satélite: un
+      TTS local en español (Piper, Kokoro u otro), que hay que medir.
+    - **Conectores con dueño**: un conector personal (Google) pertenece a una persona y solo se
+      ofrece en su conversación. Los de la casa (Home Assistant, Grocy, AEMET…) son comunes.
+  - *Choca con una decisión*: el daemon es **local y sin TCP** (§3, §5). Un satélite en otra
+    máquina necesita red. Propuesta: un **canal de satélite** dentro del daemon, como Telegram, y
+    no el protocolo de control:
+    - escucha en la LAN y solo para satélites emparejados (código y `approve`, como Telegram);
+    - el tráfico va cifrado y autenticado, con una clave por satélite;
+    - solo lleva audio de entrada y de salida, nunca métodos del protocolo;
+    - el canal de control sigue sin TCP.
+
+    Alternativa que hay que mirar: los satélites de Home Assistant (protocolo Wyoming, Voice PE),
+    que el usuario ya tiene cerca.
+  - *Hay que medir antes*:
+    - la palabra de activación en una Raspberry Pi (openWakeWord u otro), con un nombre propio,
+      las falsas activaciones con la tele y la radio, y las perdidas con voz baja y a distancia;
+    - las huellas de voz (ECAPA, WeSpeaker) con voces parecidas (padre e hijo, hermanos) y con
+      ruido;
+    - el TTS en español: calidad, latencia y dónde corre.
+  - *Falta decidir con el usuario*: el nombre de la palabra de activación, si habrá niños (con
+    límites) y el orden respecto a M24 y M26.
+
 ### 23.12 Fuera, por ahora
 
 Proactividad libre (la acotada, condiciones declaradas que solo avisan, es M22), voz, el escritorio del propio host (§13.6), ejecución con la máquina apagada
-o en una nube, multiusuario, y tomar el control de la caja desde Dot.
+o en una nube, multiusuario (salvo la casa de M29) y tomar el control de la caja desde Dot.
 
 ### 23.13 Preguntas abiertas
 
