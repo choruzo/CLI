@@ -12,6 +12,8 @@ import { STRATUM_PROTOCOL_REVISION, compareRevision } from './version.js';
 
 const FINGERPRINTS: Record<number, string> = {
   1: 'bcaa26ff727e01bd',
+  // M25 — área `voice` en `doctor.run`: misma huella, otro valor de un enum.
+  2: 'bcaa26ff727e01bd',
 };
 
 function fingerprint(): string {

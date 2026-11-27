@@ -17,6 +17,7 @@ const AREA_LABELS: Record<ProtocolDoctorArea, string> = {
   connectors: 'Connectors',
   telegram: 'Telegram',
   model: 'Model',
+  voice: 'Voice',
   data: 'Data',
 };
 

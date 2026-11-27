@@ -1396,7 +1396,15 @@ export interface ProtocolMemoryDocument {
  */
 export type ProtocolDoctorStatus = 'ok' | 'warn' | 'fail' | 'off';
 
-export type ProtocolDoctorArea = 'daemon' | 'box' | 'connectors' | 'telegram' | 'model' | 'data';
+export type ProtocolDoctorArea =
+  | 'daemon'
+  | 'box'
+  | 'connectors'
+  | 'telegram'
+  | 'model'
+  /** M25 — notas de voz (revisión 2). */
+  | 'voice'
+  | 'data';
 
 /**
  * Una comprobación. Solo describe: nada de lo que dice se ejecuta solo. `fix`

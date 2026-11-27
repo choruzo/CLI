@@ -9,7 +9,7 @@ import { loadConfig } from '../../config/loader.js';
 import type { StratumConfig } from '../../config/schema.js';
 import { autostartStatus, defaultAutostartDeps } from '../../daemon/autostart.js';
 import { doctorChecks, worstStatus, type DoctorFacts } from '../../doctor/checks.js';
-import { connectorsFacts, modelFacts } from '../../doctor/collect.js';
+import { connectorsFacts, modelFacts, voiceFacts } from '../../doctor/collect.js';
 import { companionDataDir } from '../../host/companion.js';
 import type {
   ProtocolDoctorArea,
@@ -46,6 +46,7 @@ const AREA_LABEL: Record<ProtocolDoctorArea, string> = {
   connectors: 'Connectors',
   telegram: 'Telegram',
   model: 'Model',
+  voice: 'Voice',
   data: 'Data',
 };
 
@@ -73,7 +74,7 @@ export function formatDoctorReport(report: ProtocolDoctorReport, local: boolean)
   );
   if (local) {
     lines.push(
-      'Checked without the daemon: the Telegram channel, the box autostart and the watches were not checked.',
+      'Checked without the daemon: the Telegram channel, the box autostart, the watches and the voice device were not checked.',
     );
   }
   return lines.join('\n');
@@ -87,13 +88,14 @@ export async function localDoctorReport(opts: {
   daemonRunning: boolean | null;
 }): Promise<ProtocolDoctorReport> {
   const box = new BoxManager({ config: opts.config.box });
-  const [boxStatus, connectorsBox, model, login] = await Promise.all([
+  const [boxStatus, connectorsBox, model, login, voice] = await Promise.all([
     box.status(),
     box.connectorsStatus(),
     modelFacts({ config: opts.config, session: null, probe: true }),
     autostartStatus(defaultAutostartDeps())
       .then((s) => ({ enabled: s.enabled, detail: s.method }))
       .catch(() => null),
+    voiceFacts({ voice: opts.config.voice, live: null }),
   ]);
   const clean = (t: string | undefined): string | null => (t ? redactSecrets(t).text : null);
   const daemonDir = defaultEndpointDir(opts.home);
@@ -136,6 +138,7 @@ export async function localDoctorReport(opts: {
       live: null,
     },
     model,
+    voice,
     stores: null,
     watches: null,
   };
@@ -174,7 +177,7 @@ function unreachableCheck(): ProtocolDoctorCheck {
 
 export const doctorCommand = new Command('doctor')
   .description(
-    "Check the assistant's setup: daemon, box, connectors, Telegram and model (reads only, fixes nothing)",
+    "Check the assistant's setup: daemon, box, connectors, Telegram, model and voice (reads only, fixes nothing)",
   )
   .option('--json', 'output as JSON')
   .action(async (opts: { json?: boolean }) => {

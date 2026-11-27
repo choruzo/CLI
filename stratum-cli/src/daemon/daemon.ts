@@ -2815,6 +2815,7 @@ export class Stratumd {
       companionModel: model ? { provider: model.provider, model: model.model } : null,
       stores,
       ...(this.health ? { access: this.health.accessResults() } : {}),
+      ...(this.voiceNotes ? { voice: () => this.voiceNotes!.health() } : {}),
       watches: this.watches
         ? {
             active: active.length,

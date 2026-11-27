@@ -567,7 +567,7 @@ const boxResult = z.object({ box: boxStatusSchema });
 /** M23 — `doctor.run`. */
 export const doctorCheckSchema: z.ZodType<ProtocolDoctorCheck> = z.object({
   id: z.string().min(1).max(DOCTOR_LIMITS.idChars),
-  area: z.enum(['daemon', 'box', 'connectors', 'telegram', 'model', 'data']),
+  area: z.enum(['daemon', 'box', 'connectors', 'telegram', 'model', 'voice', 'data']),
   status: z.enum(['ok', 'warn', 'fail', 'off']),
   title: z.string().min(1).max(DOCTOR_LIMITS.titleChars),
   detail: z.string().max(DOCTOR_LIMITS.textChars).nullable(),

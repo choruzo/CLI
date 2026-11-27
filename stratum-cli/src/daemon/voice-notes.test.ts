@@ -1,6 +1,10 @@
 import { describe, expect, it } from 'vitest';
 import type { VoiceConfig } from '../config/schema.js';
-import { VoiceQueueFullError } from '../voice/client.js';
+import {
+  VoiceQueueFullError,
+  VoiceRuntimeUnavailableError,
+  VoiceWorkerError,
+} from '../voice/client.js';
 import { VoiceDecodeError } from '../voice/opus.js';
 import { VoiceTooLongError } from '../voice/transcribe.js';
 import type { VoiceTranscript } from '../voice/worker-protocol.js';
@@ -13,6 +17,7 @@ import {
   type VoiceClientPort,
   type VoiceModelDownload,
   type VoiceNotesOptions,
+  voiceFailureKind,
 } from './voice-notes.js';
 
 /**
@@ -477,5 +482,28 @@ describe('VoiceNotes', () => {
       },
     });
     await expect(h.notes.transcribe(h.bytes)).rejects.toBeInstanceOf(VoiceDecodeError);
+  });
+
+  it('health: sin notas no sabe nada; tras una, su dispositivo; un fallo del runtime cuenta', async () => {
+    const h = harness();
+    expect(h.notes.health()).toEqual({ lastNote: null, lastFailure: null });
+    await h.notes.transcribe(h.bytes);
+    expect(h.notes.health()).toEqual({
+      lastNote: { device: 'gpu', at: expect.any(Number) },
+      lastFailure: null,
+    });
+    const broken = harness({ transcript: new VoiceRuntimeUnavailableError('sin ORT') });
+    await expect(broken.notes.transcribe(broken.bytes)).rejects.toThrow('sin ORT');
+    expect(broken.notes.health().lastFailure).toEqual({ kind: 'runtime', at: expect.any(Number) });
+  });
+
+  it('health: un fallo de la propia nota (OGG roto, demasiado larga) no es de salud', async () => {
+    const h = harness({ seconds: 301 });
+    await expect(h.notes.transcribe(h.bytes)).rejects.toBeInstanceOf(VoiceTooLongError);
+    expect(h.notes.health().lastFailure).toBeNull();
+    expect(voiceFailureKind(new VoiceDecodeError('x'))).toBeNull();
+    expect(voiceFailureKind(new VoiceWorkerError('x', 'too_long'))).toBeNull();
+    expect(voiceFailureKind(new VoiceWorkerError('x', 'load_failed'))).toBe('load');
+    expect(voiceFailureKind(new VoiceModelUnavailableError('x'))).toBe('model');
   });
 });

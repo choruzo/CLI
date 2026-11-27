@@ -21,7 +21,14 @@
  */
 
 import type { VoiceConfig } from '../config/schema.js';
-import { VoiceQueueFullError, VoiceWorkerClient } from '../voice/client.js';
+import {
+  VoiceQueueFullError,
+  VoiceRuntimeUnavailableError,
+  VoiceTimeoutError,
+  VoiceWorkerClient,
+  VoiceWorkerCrashedError,
+  VoiceWorkerError,
+} from '../voice/client.js';
 import { decodeOggOpus, type DecodeOggOpus } from '../voice/opus.js';
 import { resampleTo16k } from '../voice/resample.js';
 import {
@@ -146,6 +153,34 @@ export interface VoiceNotesOptions {
   now?: () => number;
 }
 
+/**
+ * Por qué falló la última nota, solo si dice algo de la salud de la voz: el
+ * modelo, el runtime o el worker. Una nota demasiado larga o un OGG roto son
+ * de esa nota y no cuentan.
+ */
+export type VoiceFailureKind = 'model' | 'runtime' | 'load' | 'crashed' | 'timeout' | 'failed';
+
+/** Lo que `doctor.run` sabe de las notas de este daemon. Solo en memoria. */
+export interface VoiceNotesHealth {
+  /** La última nota transcrita: en qué dispositivo y cuándo. */
+  lastNote: { device: VoiceTranscriptDevice; at: number } | null;
+  /** El último fallo de salud (ver {@link VoiceFailureKind}) y cuándo. */
+  lastFailure: { kind: VoiceFailureKind; at: number } | null;
+}
+
+/** El tipo de fallo de salud de un error, o `null` si es de la propia nota. */
+export function voiceFailureKind(err: unknown): VoiceFailureKind | null {
+  if (err instanceof VoiceModelUnavailableError) return 'model';
+  if (err instanceof VoiceRuntimeUnavailableError) return 'runtime';
+  if (err instanceof VoiceWorkerCrashedError) return 'crashed';
+  if (err instanceof VoiceTimeoutError) return 'timeout';
+  if (err instanceof VoiceWorkerError) {
+    if (err.code === 'too_long') return null;
+    return err.code === 'load_failed' || err.code === 'model_not_ready' ? 'load' : 'failed';
+  }
+  return null;
+}
+
 /** Notas que pueden **esperar** detrás de la que está en curso. La siguiente, no. */
 export const VOICE_MAX_WAITING = 3;
 
@@ -178,6 +213,8 @@ export class VoiceNotes {
   /** Las que esperan turno, en orden de llegada. */
   private readonly waiting: QueuedNote[] = [];
   private closed = false;
+  private lastNote: VoiceNotesHealth['lastNote'] = null;
+  private lastFailure: VoiceNotesHealth['lastFailure'] = null;
 
   constructor(private readonly opts: VoiceNotesOptions) {
     this.dir = opts.dir ?? voiceModelDir();
@@ -188,6 +225,11 @@ export class VoiceNotes {
   /** Hay una nota activa, en espera o descargando el modelo (el daemon no se apaga por inactividad). */
   get busy(): boolean {
     return this.active !== undefined || this.waiting.length > 0;
+  }
+
+  /** Para `doctor.run`: la última nota y el último fallo de salud, sin texto ni audio. */
+  health(): VoiceNotesHealth {
+    return { lastNote: this.lastNote, lastFailure: this.lastFailure };
   }
 
   /**
@@ -261,8 +303,12 @@ export class VoiceNotes {
     if (!note) return;
     this.active = note;
     try {
-      note.resolve(await this.run(note));
+      const result = await this.run(note);
+      this.lastNote = { device: result.device, at: this.now() };
+      note.resolve(result);
     } catch (err) {
+      const kind = voiceFailureKind(err);
+      if (kind) this.lastFailure = { kind, at: this.now() };
       note.reject(err);
     } finally {
       // Si `close()` ya la había soltado, esto no pisa nada: no hay nadie más.

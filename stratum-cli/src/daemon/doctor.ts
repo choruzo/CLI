@@ -15,9 +15,15 @@ import {
   type DoctorConnectorsFacts,
   type DoctorFacts,
   type DoctorStoreFacts,
+  type DoctorVoiceFacts,
   type DoctorWatchFacts,
 } from '../doctor/checks.js';
-import { connectorsFacts, modelFacts, telegramFactsFromStatus } from '../doctor/collect.js';
+import {
+  connectorsFacts,
+  modelFacts,
+  telegramFactsFromStatus,
+  voiceFacts,
+} from '../doctor/collect.js';
 import type { ProtocolChannelsStatus, ProtocolDoctorReport } from '../protocol/index.js';
 import { redactSecrets } from '../security/redact-output.js';
 import type { BoxAutostartState } from './box-autostart.js';
@@ -41,6 +47,11 @@ export interface DaemonDoctorDeps {
   watches: DoctorWatchFacts | null;
   /** M23 — la última comprobación de acceso de cada conector (`HealthMonitor`). */
   access?: ReadonlyMap<string, { status: 'ok' | 'auth' | 'unreachable' | 'error'; detail: string }>;
+  /** M25 — lo que vieron las notas de voz de este daemon; ausente sin notas de voz. */
+  voice?: () => DoctorVoiceFacts['live'];
+  /** Para los tests: el directorio del modelo y si el runtime se resuelve. */
+  voiceModelDir?: string;
+  voiceRuntime?: () => boolean;
   /** Arranque al iniciar sesión; `null` si no se puede saber. */
   loginAutostart: () => Promise<{ enabled: boolean; detail: string | null } | null>;
   now: number;
@@ -66,11 +77,17 @@ function clean(text: string | null | undefined): string | null {
 }
 
 export async function daemonDoctorReport(d: DaemonDoctorDeps): Promise<ProtocolDoctorReport> {
-  const [boxStatus, connectorsBox, model, login] = await Promise.all([
+  const [boxStatus, connectorsBox, model, login, voice] = await Promise.all([
     d.box.status(),
     d.box.connectorsStatus(),
     modelFacts({ config: d.config, session: d.companionModel, probe: true }),
     d.loginAutostart().catch(() => null),
+    voiceFacts({
+      voice: d.config.voice,
+      live: d.voice ? d.voice() : null,
+      ...(d.voiceModelDir ? { dir: d.voiceModelDir } : {}),
+      ...(d.voiceRuntime ? { runtime: d.voiceRuntime } : {}),
+    }),
   ]);
   const channels = d.channels();
   const facts: DoctorFacts = {
@@ -107,6 +124,7 @@ export async function daemonDoctorReport(d: DaemonDoctorDeps): Promise<ProtocolD
     ),
     telegram: channels ? telegramFactsFromStatus(channels.telegram) : null,
     model,
+    voice,
     stores: d.stores,
     watches: d.watches,
   };

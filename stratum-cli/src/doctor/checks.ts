@@ -83,6 +83,28 @@ export interface DoctorModelFacts {
   vision: boolean;
 }
 
+/**
+ * M25 — las notas de voz. `model` sale de `voiceModelStatus` sin `verify` (las
+ * sumas de 4 GB son de `stratum voice status --verify`). `live` solo lo sabe el
+ * daemon (`VoiceNotes.health()`): en memoria, desde que arrancó.
+ */
+export interface DoctorVoiceFacts {
+  enabled: boolean;
+  language: string;
+  device: 'auto' | 'gpu' | 'cpu';
+  model: 'missing' | 'incomplete' | 'outdated' | 'corrupt' | 'ready';
+  /** `onnxruntime-node` se resuelve (sin cargarlo). */
+  runtime: boolean;
+  /** `null`: sin daemon. */
+  live: {
+    lastNote: { device: 'gpu' | 'cpu' | 'unconfirmed'; at: number } | null;
+    lastFailure: {
+      kind: 'model' | 'runtime' | 'load' | 'crashed' | 'timeout' | 'failed';
+      at: number;
+    } | null;
+  } | null;
+}
+
 export interface DoctorDaemonFacts {
   /** `null`: no se sabe (la CLI sin poder preguntar). */
   running: { version: string; pid: number | null } | false | null;
@@ -108,6 +130,8 @@ export interface DoctorFacts {
   connectors: DoctorConnectorsFacts | null;
   telegram: DoctorTelegramFacts | null;
   model: DoctorModelFacts | null;
+  /** M25 — ausente o `null`: no se sabe aquí. */
+  voice?: DoctorVoiceFacts | null;
   stores: DoctorStoreFacts[] | null;
   watches: DoctorWatchFacts | null;
 }
@@ -576,6 +600,121 @@ function modelChecks(m: DoctorModelFacts, needsVision: boolean): ProtocolDoctorC
   return out;
 }
 
+const VOICE_FAILURE: Record<
+  NonNullable<NonNullable<DoctorVoiceFacts['live']>['lastFailure']>['kind'],
+  string
+> = {
+  model: 'the speech model could not be downloaded',
+  runtime: 'onnxruntime-node is not installed',
+  load: 'the speech model did not load',
+  crashed: 'the voice worker crashed',
+  timeout: 'the voice worker took too long',
+  failed: 'the transcription failed',
+};
+
+function voiceChecks(v: DoctorVoiceFacts): ProtocolDoctorCheck[] {
+  if (!v.enabled) {
+    return [
+      check(
+        'voice.enabled',
+        'voice',
+        'off',
+        'Voice notes are off',
+        'Telegram voice notes are not transcribed.',
+        'Set "voice.enabled": true in the global config',
+      ),
+    ];
+  }
+  const out: ProtocolDoctorCheck[] = [];
+  if (!v.runtime) {
+    out.push(
+      check(
+        'voice.runtime',
+        'voice',
+        'fail',
+        'onnxruntime-node is not installed',
+        'It is an optional dependency of Stratum; without it no voice note is transcribed.',
+        'Reinstall Stratum: npm install -g stratum-cli',
+      ),
+    );
+  }
+  const lang = `Language: ${v.language}.`;
+  if (v.model === 'ready') {
+    out.push(check('voice.model', 'voice', 'ok', 'Speech model ready (Canary-1B-v2)', lang));
+  } else {
+    const title =
+      v.model === 'missing'
+        ? 'The speech model is not downloaded'
+        : v.model === 'incomplete'
+          ? 'The speech model download is incomplete'
+          : v.model === 'outdated'
+            ? 'The speech model is from another version'
+            : 'The speech model is damaged';
+    out.push(
+      check(
+        'voice.model',
+        'voice',
+        'warn',
+        title,
+        `The next voice note downloads it again (about 4 GB) and waits for it. ${lang}`,
+        'stratum voice download',
+      ),
+    );
+  }
+  if (!v.live) return out;
+  const { lastNote, lastFailure } = v.live;
+  if (lastFailure && (!lastNote || lastFailure.at >= lastNote.at)) {
+    out.push(
+      check(
+        'voice.last',
+        'voice',
+        'fail',
+        `The last voice note failed: ${VOICE_FAILURE[lastFailure.kind]}`,
+        'The next one tries again.',
+        'stratum voice status',
+      ),
+    );
+  }
+  const note = lastNote;
+  if (!note) {
+    out.push(
+      check(
+        'voice.device',
+        'voice',
+        'ok',
+        'No voice note since the daemon started',
+        `The device is decided when the first note loads the model (setting: ${v.device}).`,
+      ),
+    );
+  } else if (note.device === 'gpu') {
+    out.push(check('voice.device', 'voice', 'ok', 'Voice notes run on the GPU (WebGPU)'));
+  } else if (note.device === 'cpu' && v.device === 'cpu') {
+    out.push(check('voice.device', 'voice', 'ok', 'Voice notes run on the CPU, as configured'));
+  } else if (note.device === 'cpu') {
+    out.push(
+      check(
+        'voice.device',
+        'voice',
+        'warn',
+        'Voice notes fell back to the CPU',
+        'WebGPU did not work: each note takes several times longer and the worker uses 4–5 GB of RAM.',
+        'Update the GPU driver, or set "voice.device": "cpu" in the global config',
+      ),
+    );
+  } else {
+    out.push(
+      check(
+        'voice.device',
+        'voice',
+        'warn',
+        'The GPU could not be confirmed for voice notes',
+        'The load probe was slower than expected; the notes may be running on the CPU.',
+      ),
+    );
+  }
+  return out;
+}
+
 function storeChecks(stores: DoctorStoreFacts[]): ProtocolDoctorCheck[] {
   return stores
     .filter((s) => s.readOnly)
@@ -620,7 +759,7 @@ function watchChecks(w: DoctorWatchFacts): ProtocolDoctorCheck[] {
   return out;
 }
 
-/** Las comprobaciones, en orden: daemon, caja, conectores, Telegram, modelo, datos. */
+/** Las comprobaciones, en orden: daemon, caja, conectores, Telegram, modelo, voz, datos. */
 export function doctorChecks(f: DoctorFacts): ProtocolDoctorCheck[] {
   const boxEnabled = f.box?.enabled ?? false;
   const needsVision = Boolean(f.box?.enabled && f.box.desktop);
@@ -630,6 +769,7 @@ export function doctorChecks(f: DoctorFacts): ProtocolDoctorCheck[] {
     ...(f.connectors ? connectorChecks(f.connectors, boxEnabled) : []),
     ...(f.telegram ? telegramChecks(f.telegram) : []),
     ...(f.model ? modelChecks(f.model, needsVision) : []),
+    ...(f.voice ? voiceChecks(f.voice) : []),
     ...(f.stores ? storeChecks(f.stores) : []),
     ...(f.watches ? watchChecks(f.watches) : []),
   ];

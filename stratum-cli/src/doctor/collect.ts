@@ -3,16 +3,19 @@
  * la CLI sin daemon: ficheros del `companion`, secretos (solo sus nombres) y el
  * provider del modelo. Solo lee; nunca escribe ni arregla.
  */
+import { createRequire } from 'module';
 import type { ConnectorCatalog } from '../connectors/catalog.js';
 import { readConnectorSecrets } from '../connectors/secrets.js';
 import { connectorsFile, readConnectorsFile } from '../connectors/store.js';
-import type { StratumConfig } from '../config/schema.js';
+import type { StratumConfig, VoiceConfig } from '../config/schema.js';
+import { voiceModelDir, voiceModelStatus } from '../voice/model-store.js';
 import { fetchModelInfos } from '../providers/utils.js';
 import type { ProtocolTelegramStatus } from '../protocol/index.js';
 import type {
   DoctorConnectorsFacts,
   DoctorModelFacts,
   DoctorTelegramFacts,
+  DoctorVoiceFacts,
   FileState,
 } from './checks.js';
 
@@ -121,5 +124,47 @@ export async function modelFacts(opts: {
     providerKnown: entry !== undefined,
     probe,
     vision: entry?.models?.[model]?.vision !== undefined,
+  };
+}
+
+/** `onnxruntime-node` se resuelve desde aquí. Solo la ruta: no carga el nativo. */
+export function voiceRuntimeResolvable(): boolean {
+  try {
+    createRequire(import.meta.url).resolve('onnxruntime-node');
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * M25 — la voz: la config, el modelo (sin `verify`) y el runtime. `live` lo
+ * pone el daemon con `VoiceNotes.health()`; la CLI sin daemon pasa `null`.
+ */
+export async function voiceFacts(opts: {
+  voice: VoiceConfig;
+  live: DoctorVoiceFacts['live'];
+  dir?: string;
+  runtime?: () => boolean;
+}): Promise<DoctorVoiceFacts> {
+  const base = {
+    enabled: opts.voice.enabled,
+    language: opts.voice.language,
+    device: opts.voice.device,
+  };
+  if (!opts.voice.enabled) {
+    return { ...base, model: 'missing', runtime: true, live: null };
+  }
+  let model: DoctorVoiceFacts['model'];
+  try {
+    model = (await voiceModelStatus({ dir: opts.dir ?? voiceModelDir() })).state;
+  } catch {
+    model = 'corrupt';
+  }
+  return {
+    ...base,
+    model,
+    runtime: (opts.runtime ?? voiceRuntimeResolvable)(),
+    live: opts.live,
   };
 }

@@ -38,7 +38,7 @@ export const STRATUM_PROTOCOL_VERSION = 1;
  * `protocol/revision.test.ts` guarda la huella de métodos y eventos de cada
  * revisión: añadir uno sin subirla hace fallar el test.
  */
-export const STRATUM_PROTOCOL_REVISION = 1;
+export const STRATUM_PROTOCOL_REVISION = 2;
 
 export type RevisionSkew = 'same' | 'server-older' | 'server-newer';
 

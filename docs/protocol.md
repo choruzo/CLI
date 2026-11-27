@@ -1340,6 +1340,7 @@ Correcciones hechas a la v1 antes de congelarla:
 | M22             | Evento de estado `watch.notice` (`{ notice: ProtocolWatchNotice }`, en `OVERVIEW_EVENT_TYPES`; fase 2) y, en la fase 3, los métodos `watches.list` (`observe`), `watches.add` (`approve`) y `watches.pause`/`resume`/`remove` (`control`, §31); DTOs `ProtocolWatch`, `ProtocolWatchCheck`, `ProtocolWatchCondition`; `WATCH_LIMITS`. `data.reason` de `UNAVAILABLE` admite `watches-disabled`. El PRD llamaba al evento `watch.fired`: es `watch.notice`, con `kind` `fired`·`resolved`·`failing`·`suspended`, porque un vigilante también avisa de que se resolvió o de que no puede mirar | Aditivo: métodos y evento nuevos; un servidor anterior contesta `METHOD_NOT_FOUND`. Un cliente que valide la unión de eventos tiene que aceptar `watch.notice`; los del árbol validan con `schemas.ts`, que ya lo incluye |
 | M23 (revisión)  | `ProtocolServerInfo.revision?` en `core.hello` y `core.status` (§4); `STRATUM_PROTOCOL_REVISION` (= 1) y `compareRevision` | Aditivo: un servidor anterior no lo manda y cuenta como revisión 0 |
 | M23             | Evento de estado `health.notice` (`{ notice: ProtocolHealthNotice }`, en `OVERVIEW_EVENT_TYPES`, §34); `HEALTH_LIMITS`. En `doctor.run`, `connector.<id>` refleja la última comprobación de acceso | Aditivo: un servidor anterior no lo emite. Un cliente que valide la unión de eventos tiene que aceptarlo; los del árbol validan con `schemas.ts`, que ya lo incluye |
+| M25 (revisión 2) | `ProtocolDoctorArea` admite `voice` (§33): `voice.enabled`, `voice.runtime`, `voice.model`, `voice.device` y `voice.last`. `STRATUM_PROTOCOL_REVISION` pasa a 2 | **No es aditivo para un cliente que valide**: Dot 0.4.0 rechaza el informe entero de un daemon con voz y su panel *Health* da error; la revisión 2 hace que avise del desfase. Los del árbol validan con `schemas.ts`, que ya lo incluye |
 
 ## 18. Continuidad: traspasar una sesión de la CLI al daemon (M10)
 
@@ -2589,7 +2590,7 @@ provider (≤ 3 s).
 type ProtocolDoctorStatus = 'ok' | 'warn' | 'fail' | 'off'; // off: apagado por config, no es un fallo
 interface ProtocolDoctorCheck {
   id: string; // estable: daemon.running, box.state, connector.<id>, telegram, model.vision…
-  area: 'daemon' | 'box' | 'connectors' | 'telegram' | 'model' | 'data';
+  area: 'daemon' | 'box' | 'connectors' | 'telegram' | 'model' | 'voice' | 'data'; // voice: revisión 2
   status: ProtocolDoctorStatus;
   title: string;
   detail: string | null;
@@ -2610,6 +2611,11 @@ interface ProtocolDoctorReport {
     emparejados);
   - el provider y el modelo de la sesión principal del `companion` (o el por defecto) y, si la caja
     tiene pantalla, si ese modelo tiene visión declarada;
+  - las notas de voz (M25, revisión 2): si están apagadas (`off`), si se resuelve `onnxruntime-node`
+    (sin cargarlo), el estado del modelo sin recalcular las sumas (`stratum voice status --verify`
+    lo hace) y, solo el daemon, el dispositivo de la última nota desde que arrancó (`gpu` bien; `cpu`
+    con `voice.device: auto` o sin confirmar, aviso) y si la última falló por el modelo, el runtime o
+    el worker. Una nota rota o demasiado larga es de esa nota y no cuenta. Nunca lleva texto ni audio;
   - los ficheros de rutinas, recordatorios y vigilantes en solo lectura, y los vigilantes
     suspendidos o que fallan.
 - **Nunca lleva** el valor de un secreto, un token ni la URL de un provider. Los textos que vienen de
@@ -2626,7 +2632,8 @@ interface ProtocolDoctorReport {
   misma (la caja, los ficheros, el provider) y lo dice. Sale con código 1 si alguna comprobación
   falla.
 
-Tests: `stratum-cli/src/doctor/checks.test.ts` y `daemon/daemon-doctor.test.ts`.
+Tests: `stratum-cli/src/doctor/checks.test.ts`, `daemon/daemon-doctor.test.ts` y, la voz,
+`daemon/voice-notes.test.ts`.
 
 ## 34. Avisos de degradación (M23)
 

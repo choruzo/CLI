@@ -3172,8 +3172,10 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
          cola de salida justo antes de enviar.
        - *Decidido por Claude, cambiable*: un texto mandado después de una nota puede llegar antes
          que ella; el steering no lleva `via` (pendiente común con el texto).
-       - *Pendiente*: el dispositivo en `stratum doctor` (toca el contrato del protocolo) y
-         probarlo con una nota grabada en Telegram.
+       - *Probada en real el 2026-11-27* con tres notas de Telegram (1,7, 10,7 y 9,1 s): en GPU,
+         de 1,1 a 1,7 s cada una y con el texto bien.
+       - *El dispositivo en `doctor`*, hecho el 2026-11-27: área `voice` (`voice.enabled|runtime|
+         model|device|last`) y revisión 2 del protocolo, porque Dot 0.4.0 rechaza el área nueva.
     4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
        Se diseña aparte.
 

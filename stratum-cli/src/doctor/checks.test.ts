@@ -239,4 +239,75 @@ describe('doctorChecks (M23)', () => {
     expect(c.map((x) => x.status)).toEqual(['off']);
     expect(worstStatus(c)).toBe('ok');
   });
+
+  describe('voz (M25)', () => {
+    const voice = (over: Partial<NonNullable<DoctorFacts['voice']>> = {}) =>
+      facts({
+        voice: {
+          enabled: true,
+          language: 'es',
+          device: 'auto',
+          model: 'ready',
+          runtime: true,
+          live: { lastNote: null, lastFailure: null },
+          ...over,
+        },
+      });
+
+    it('apagada: una sola comprobación off', () => {
+      const c = doctorChecks(voice({ enabled: false })).filter((x) => x.area === 'voice');
+      expect(c.map((x) => [x.id, x.status])).toEqual([['voice.enabled', 'off']]);
+    });
+
+    it('lista y en GPU: todo ok', () => {
+      const v = byId(voice({ live: { lastNote: { device: 'gpu', at: 1 }, lastFailure: null } }));
+      expect(v.get('voice.model')?.status).toBe('ok');
+      expect(v.get('voice.device')).toMatchObject({
+        status: 'ok',
+        title: expect.stringMatching(/GPU/),
+      });
+      expect(v.has('voice.last')).toBe(false);
+    });
+
+    it('sin nota aún: el dispositivo no se sabe, y no es un problema', () => {
+      expect(byId(voice()).get('voice.device')?.status).toBe('ok');
+    });
+
+    it('CPU con auto es aviso; con cpu configurado, no', () => {
+      const cpu = { lastNote: { device: 'cpu' as const, at: 1 }, lastFailure: null };
+      expect(byId(voice({ live: cpu })).get('voice.device')?.status).toBe('warn');
+      expect(byId(voice({ device: 'cpu', live: cpu })).get('voice.device')?.status).toBe('ok');
+      const unconfirmed = {
+        lastNote: { device: 'unconfirmed' as const, at: 1 },
+        lastFailure: null,
+      };
+      expect(byId(voice({ live: unconfirmed })).get('voice.device')?.status).toBe('warn');
+    });
+
+    it('modelo sin descargar: aviso con la orden; sin runtime: fallo', () => {
+      const v = byId(voice({ model: 'missing', runtime: false }));
+      expect(v.get('voice.model')).toMatchObject({ status: 'warn', fix: 'stratum voice download' });
+      expect(v.get('voice.runtime')?.status).toBe('fail');
+    });
+
+    it('el último fallo solo cuenta si es posterior a la última nota buena', () => {
+      const failed = { kind: 'load' as const, at: 5 };
+      expect(
+        byId(voice({ live: { lastNote: { device: 'gpu', at: 2 }, lastFailure: failed } })).get(
+          'voice.last',
+        )?.status,
+      ).toBe('fail');
+      expect(
+        byId(voice({ live: { lastNote: { device: 'gpu', at: 9 }, lastFailure: failed } })).has(
+          'voice.last',
+        ),
+      ).toBe(false);
+    });
+
+    it('sin daemon (live null) no se habla del dispositivo, y todo valida con el schema', () => {
+      const c = doctorChecks(voice({ live: null }));
+      expect(c.some((x) => x.id === 'voice.device')).toBe(false);
+      for (const x of c) expect(doctorCheckSchema.parse(x)).toEqual(x);
+    });
+  });
 });
