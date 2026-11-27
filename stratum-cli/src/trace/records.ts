@@ -186,8 +186,8 @@ export type TraceRuntimeEvent =
        * texto ni el audio llegan aquí.
        */
       event: 'voice';
-      /** Por dónde entró (hoy, solo el canal de Telegram). */
-      source: 'telegram';
+      /** Por dónde entró: el canal de Telegram o un push-to-talk (`voice.*`) del cliente. */
+      source: 'telegram' | 'dot' | 'desktop' | 'cli';
       /** Duración del audio **decodificado**, en segundos. */
       durationSec: number;
       /** El dispositivo que confirmó la sonda del worker. */

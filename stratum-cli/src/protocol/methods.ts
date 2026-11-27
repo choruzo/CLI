@@ -16,6 +16,7 @@ import type {
   ProtocolUndoableTurn,
   ProtocolMemoryDocument,
   ProtocolSharedImage,
+  ProtocolVoiceTranscript,
   ProtocolReminder,
   ProtocolWatch,
   ProtocolWatchArgs,
@@ -793,6 +794,24 @@ export interface ProtocolMethods {
   'doctor.run': Spec<Empty, { report: ProtocolDoctorReport }>;
 
   /**
+   * M25 fase 4 — push-to-talk (`docs/protocol.md` §35). Una subida de audio
+   * (PCM16 mono a 16 kHz, base64, por trozos) que se transcribe en local; el
+   * texto solo vuelve a quien la pide, sin eventos ni nada en la conversación.
+   * Una subida abierta por conexión: `voice.begin` tira la anterior. La sesión
+   * solo dice en qué traza se anota.
+   */
+  'voice.begin': Spec<
+    { sessionId: string } & Mutation,
+    { uploadId: string; sampleRate: number; maxSeconds: number; chunkBytes: number }
+  >;
+  'voice.append': Spec<
+    { uploadId: string; seq: number; pcm: string } & Mutation,
+    { seconds: number }
+  >;
+  'voice.end': Spec<{ uploadId: string } & Mutation, { transcript: ProtocolVoiceTranscript }>;
+  'voice.cancel': Spec<{ uploadId: string } & Mutation, Empty>;
+
+  /**
    * M18 — canales externos (`docs/protocol.md` §24). Nada de lo que devuelven
    * lleva el token del bot. `reload` vuelve a leer `telegram.json` y
    * `channels.telegram.enabled` (tras `stratum channels telegram setup`).
@@ -1008,6 +1027,13 @@ export const METHODS: Readonly<Record<MethodName, MethodInfo>> = {
   'watches.remove': write('control'),
 
   'doctor.run': read('observe'),
+
+  // Dictar es como escribir en el campo: el texto vuelve a quien lo pide y
+  // enviarlo es otro `runs.start`. Usa la GPU del equipo: `control`.
+  'voice.begin': write('control'),
+  'voice.append': write('control'),
+  'voice.end': write('control'),
+  'voice.cancel': write('control'),
 
   'channels.status': read('observe'),
   'channels.reload': write('control'),

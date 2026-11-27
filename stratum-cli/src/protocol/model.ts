@@ -246,6 +246,32 @@ export type ProtocolChatMessage =
    */
   | (MessageBase & { kind: 'image'; image: ProtocolSharedImage });
 
+/**
+ * M25 fase 4 — límites de `voice.*` (`docs/protocol.md` §35): el audio de un
+ * push-to-talk, PCM16 mono a 16 kHz en base64, por trozos que caben en un mensaje.
+ */
+export const VOICE_UPLOAD_LIMITS = {
+  /** La única frecuencia que se acepta. */
+  sampleRate: 16_000,
+  /** Lo que dura una subida, como mucho (lo mismo que una nota de Telegram). */
+  maxSeconds: 300,
+  /** Menos que esto no se transcribe (`voice-too-short`): un toque sin querer. */
+  minSeconds: 0.5,
+  /** Bytes de PCM de un `voice.append` (antes de base64): 2 s. */
+  chunkBytes: 64 * 1024,
+  /** Una subida sin `append` en este plazo se tira. */
+  idleMs: 30_000,
+} as const;
+
+/** M25 fase 4 — lo que devuelve `voice.end`. Ni el audio ni nada del modelo más allá. */
+export interface ProtocolVoiceTranscript {
+  text: string;
+  durationSec: number;
+  /** Algún trozo llegó al tope de tokens: el texto puede estar cortado. */
+  capped: boolean;
+  device: 'gpu' | 'cpu' | 'unconfirmed';
+}
+
 /** M18 parte 6E — límites de `images.get`: cada trozo cabe en un mensaje. */
 export const SHARED_IMAGE_LIMITS = {
   /** Lo que pesa una imagen enviada, como mucho. */

@@ -118,6 +118,7 @@ import {
   HISTORY_LIMITS,
   PROTOCOL_MEMORY_SECTIONS,
   SHARED_IMAGE_LIMITS,
+  VOICE_UPLOAD_LIMITS,
   REMINDER_LIMITS,
   WATCH_LIMITS,
   HEALTH_LIMITS,
@@ -1632,6 +1633,22 @@ export const PARAMS: { [M in MethodName]: z.ZodType<MethodParams<M>, z.ZodTypeDe
   'watches.list': empty,
 
   'doctor.run': empty,
+  'voice.begin': z.object({ sessionId: id, operationId }).strict(),
+  'voice.append': z
+    .object({
+      uploadId: id,
+      seq: count.max(1_000_000),
+      // PCM16: un número par de bytes, como mucho `chunkBytes`.
+      pcm: z
+        .string()
+        .min(4)
+        .max(Math.ceil(VOICE_UPLOAD_LIMITS.chunkBytes / 3) * 4)
+        .regex(/^[A-Za-z0-9+/]*={0,2}$/),
+      operationId,
+    })
+    .strict(),
+  'voice.end': z.object({ uploadId: id, operationId }).strict(),
+  'voice.cancel': z.object({ uploadId: id, operationId }).strict(),
   'watches.add': z
     .object({
       name: watchName,
@@ -1878,6 +1895,22 @@ export const RESULTS: { [M in MethodName]: z.ZodType<MethodResult<M>, z.ZodTypeD
   'watches.remove': z.object({ watch: watchSchema }),
 
   'doctor.run': z.object({ report: doctorReportSchema }),
+  'voice.begin': z.object({
+    uploadId: id,
+    sampleRate: z.literal(VOICE_UPLOAD_LIMITS.sampleRate),
+    maxSeconds: z.number().positive().max(VOICE_UPLOAD_LIMITS.maxSeconds),
+    chunkBytes: count.max(VOICE_UPLOAD_LIMITS.chunkBytes),
+  }),
+  'voice.append': z.object({ seconds: z.number().nonnegative() }),
+  'voice.end': z.object({
+    transcript: z.object({
+      text: z.string().max(20_000),
+      durationSec: z.number().nonnegative().max(VOICE_UPLOAD_LIMITS.maxSeconds + 1),
+      capped: z.boolean(),
+      device: z.enum(['gpu', 'cpu', 'unconfirmed']),
+    }),
+  }),
+  'voice.cancel': emptyResult,
 
   'channels.status': channelsStatusSchema,
   'channels.reload': channelsStatusSchema,

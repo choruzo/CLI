@@ -14,6 +14,8 @@ const FINGERPRINTS: Record<number, string> = {
   1: 'bcaa26ff727e01bd',
   // M25 — área `voice` en `doctor.run`: misma huella, otro valor de un enum.
   2: 'bcaa26ff727e01bd',
+  // M25 fase 4 — `voice.begin|append|end|cancel` (push-to-talk).
+  3: '563e71f4079c19fd',
 };
 
 function fingerprint(): string {

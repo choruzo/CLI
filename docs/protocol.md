@@ -2670,3 +2670,55 @@ interface ProtocolHealthNotice {
 
 Tests: `stratum-cli/src/health/*.test.ts`, `daemon/health-monitor.test.ts` y
 `daemon/daemon-health.test.ts`.
+
+## 35. Push-to-talk (M25 fase 4, revisión 3)
+
+Un cliente sube el audio que se graba mientras la persona mantiene el atajo o el botón y recibe el
+texto transcrito **en local** con Canary (`stratum-cli/src/voice/`). Sirve para dictar: el texto
+vuelve **solo a quien lo pidió**, no hay eventos y no entra en ninguna conversación hasta que el
+cliente lo envía con `runs.start` o `runs.steer`, como algo escrito.
+
+```ts
+'voice.begin':  { sessionId } → { uploadId, sampleRate: 16000, maxSeconds: 300, chunkBytes: 65536 }
+'voice.append': { uploadId, seq, pcm } → { seconds }   // pcm: base64 de PCM16 LE mono a 16 kHz
+'voice.end':    { uploadId } → { transcript: ProtocolVoiceTranscript }
+'voice.cancel': { uploadId } → {}
+interface ProtocolVoiceTranscript {
+  text: string;
+  durationSec: number;
+  capped: boolean; // algún trozo llegó al tope de tokens
+  device: 'gpu' | 'cpu' | 'unconfirmed';
+}
+```
+
+- **Capacidad**: las cuatro, `control`. Dictar es como escribir en el campo, pero usa la GPU del
+  equipo.
+- **`voice.begin`**:
+  - la sesión tiene que existir (`NOT_FOUND`) y solo dice en qué traza se anota la nota;
+  - `UNAVAILABLE` con `reason`: `voice-disabled` (`voice.enabled` apagado), `voice-model-missing`
+    (el modelo no está `ready`: se descarga con `stratum voice download`; desde aquí **nunca** se
+    descarga) o `voice-closed` (el daemon se apaga);
+  - **una subida abierta por conexión**: abrir otra tira la anterior.
+- **`voice.append`**:
+  - `seq` empieza en 0 y es consecutivo; un hueco o una repetición es `INVALID_PARAMS`
+    (`voice-seq`) y la subida se tira;
+  - `pcm` decodificado tiene un número par de bytes y como mucho `chunkBytes`; si no,
+    `INVALID_PARAMS`;
+  - pasar de `maxSeconds` es `INVALID_PARAMS` (`voice-too-long`) y la subida se tira;
+  - `seconds` es lo acumulado.
+- **`voice.end`**:
+  - menos de `VOICE_UPLOAD_LIMITS.minSeconds` (0,5 s) es `INVALID_PARAMS` (`voice-too-short`);
+  - comparte la cola de las notas de Telegram (una activa y 3 en espera): llena, `UNAVAILABLE`
+    (`voice-busy`);
+  - un fallo del worker o del modelo es `UNAVAILABLE` (`voice-failed`), sin detalle: el detalle va
+    al log del daemon;
+  - la subida se tira al terminar, salga bien o mal.
+- **Un `uploadId` desconocido**, de otra conexión, ya terminado o tirado es `NOT_FOUND`.
+- **Se tira sola** a los 30 s sin `append` (`idleMs`) o al cerrarse la conexión.
+- **Privacidad**: el audio solo vive en la memoria del daemon y del worker hasta que acaba la
+  subida. Nunca va a disco, a un log, a la traza, a un evento ni a la conversación.
+- **Traza**: la nota se anota en la de la sesión de `voice.begin` como una de Telegram
+  (`event: 'voice'`, solo metadatos), con `source` = el `client.kind` de la conexión.
+
+Tests: `stratum-cli/src/daemon/voice-uploads.test.ts` y `daemon/daemon-voice.test.ts`.
+
