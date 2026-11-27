@@ -184,6 +184,8 @@ import { traceFilePath } from '../trace/store.js';
 import { redactText } from '../security/redact-output.js';
 import { readSharedImage, sharedImagesDir, type SharedImage } from '../images/shared.js';
 import { UserImageError } from '../images/store.js';
+import { VoiceNotes } from './voice-notes.js';
+import { VOICE_MODEL_ID } from '../voice/manifest.js';
 
 const log = getLogger('daemon');
 
@@ -314,6 +316,13 @@ export interface StratumdOptions {
    * `null`: sin canales (`channels.*` → `UNAVAILABLE`). Tests: API falsa.
    */
   channels?: Partial<Omit<ChannelHostOptions, 'dir' | 'now'>> | null;
+  /**
+   * M25 fase 3 — las notas de voz de Telegram, transcritas en local. Por
+   * defecto, una `VoiceNotes` con la sección `voice` de la config **global**
+   * (se relee en cada nota). `null`: sin voz, y una nota se contesta como
+   * cualquier otro adjunto. Tests: `null`.
+   */
+  voiceNotes?: VoiceNotes | null;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -400,6 +409,9 @@ function asCompanionTurns(s: HostedSession): CompanionTurns {
     steer: (text, images = []) => s.steer(text, undefined, images),
     waitAtSafePoint: () => s.host.agent.pause.waitAtSafePoint(),
     idle: () => s.idle(),
+    // M25 fase 3 — los metadatos de una nota de voz, solo a la traza de la sesión.
+    traceVoice: (meta) =>
+      s.traceRuntime({ event: 'voice', source: 'telegram', ...meta, model: VOICE_MODEL_ID }),
   };
 }
 
@@ -415,6 +427,8 @@ export class Stratumd {
   readonly dreamingSchedule: DreamingScheduler | null;
   /** M18 — los canales externos, o `null` con `channels: null`. */
   readonly channels: ChannelHost | null;
+  /** M25 fase 3 — las notas de voz, o `null` con `voiceNotes: null`. */
+  readonly voiceNotes: VoiceNotes | null;
   /** Se resuelve cuando el daemon ha terminado de apagarse, con el motivo. */
   readonly closed: Promise<ShutdownReason>;
 
@@ -636,6 +650,14 @@ export class Stratumd {
         this.lastActivity = this.now();
       },
     });
+    // M25 fase 3 — las notas de voz de Telegram: en local, con el modelo de
+    // `~/.stratum/models/`, que se descarga la primera vez que hace falta. Como
+    // `channels`, solo cuenta la sección `voice` de la config **global**.
+    this.voiceNotes =
+      opts.voiceNotes === null
+        ? null
+        : (opts.voiceNotes ??
+          new VoiceNotes({ config: () => loadConfig(opts.home ?? homedir()).voice }));
     // Tras el centro de aprobaciones: el canal se suscribe a él al crearse.
     this.channels =
       opts.channels === null
@@ -645,6 +667,8 @@ export class Stratumd {
             // `channels` es solo de la capa global: un repo no enciende el canal.
             enabled: () => loadConfig(opts.home ?? homedir()).channels.telegram.enabled,
             now: this.now,
+            // M25 fase 3 — las notas de voz, si las hay.
+            ...(this.voiceNotes ? { voiceNotes: this.voiceNotes } : {}),
             // La misma conversación que Dot: la sesión principal del `companion`.
             companion: {
               currentId: () => this.companionSessionId(),
@@ -837,6 +861,8 @@ export class Stratumd {
       !this.watches?.hasActive &&
       // Un chat emparejado tiene que poder hablarle al asistente.
       !this.channels?.keepsAlive &&
+      // M25 fase 3 — ni una nota de voz a medio transcribir.
+      !this.voiceNotes?.busy &&
       this.sessions.size === 0 &&
       this.peers.size === 0 &&
       this.closingSessions.size === 0 &&
@@ -868,6 +894,10 @@ export class Stratumd {
       this.dreamingSchedule?.stop();
       // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
       this.dreaming.close();
+      // M25 fase 3 — la voz lo primero: aborta la descarga del modelo y cierra
+      // el worker, para que el apagado no se quede esperando a una
+      // transcripción (ni a 4 GB). La cola queda cerrada: ni una nota más entra.
+      await this.settle('voice', () => this.voiceNotes?.close());
       // Y ningún mensaje de un canal entra: deja de escuchar antes de cerrar sesiones.
       await this.settle('channels', () => this.channels?.stop());
       if (this.idleTimer) clearInterval(this.idleTimer);

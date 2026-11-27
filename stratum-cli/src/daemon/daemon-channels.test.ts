@@ -4,7 +4,7 @@
  * candidato → `pairConfirm` con `approve`), desemparejar, recargar, y que un
  * canal con alguien emparejado no deja que el daemon se apague solo.
  */
-import { existsSync, mkdtempSync, realpathSync, rmSync, writeFileSync } from 'fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -20,11 +20,26 @@ import type { StratumdOptions } from './daemon.js';
 import { makeTextRound, makeToolCallRound } from '../providers/mock.js';
 import { startTestDaemon, textRound, type TestDaemon } from './daemon.fixtures.js';
 import { fromDot } from '../channels/telegram/render.js';
+import { VoiceNotes } from './voice-notes.js';
 
 const TOKEN = `123456789:${'A'.repeat(35)}`;
 
 let running: TestDaemon | null = null;
 let base: string | null = null;
+
+/** Espera a que algo termine, con plazo: un apagado colgado falla, no cuelga el test. */
+async function withDeadline(work: Promise<unknown>, ms: number, what: string): Promise<void> {
+  let timer: NodeJS.Timeout | undefined;
+  const deadline = new Promise<never>((_resolve, reject) => {
+    timer = setTimeout(() => reject(new Error(`${what} no terminó en ${ms} ms`)), ms);
+    timer.unref?.();
+  });
+  try {
+    await Promise.race([work, deadline]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
 
 afterEach(async () => {
   await running?.stop();
@@ -271,6 +286,154 @@ describe('channels.* (M18)', () => {
       text: 'mira esto',
       via: 'telegram',
     });
+  });
+
+  it('M25 fase 3: una nota de voz se transcribe en local; eco al chat, marca y `via` en la conversación, metadatos en la traza', async () => {
+    const ana: TelegramPaired = {
+      userId: 42,
+      chatId: 42,
+      name: 'Ana',
+      pairedAt: new Date().toISOString(),
+    };
+    const VOICE_TEXT = 'y las almas, buscando algún alivio, se revuelven ansiosas';
+    // La nota de voz, con el worker y el decodificador falsos: ni modelo ni WASM.
+    const clients: {
+      calls: Float32Array[];
+      close: () => void;
+    }[] = [];
+    const done = { closed: false };
+    const notes = new VoiceNotes({
+      // La config que se relee en cada nota: voz encendida.
+      config: () => ({ enabled: true, language: 'es', device: 'auto', idleUnloadMinutes: 10 }),
+      // Nada de esto se toca: el modelo, el decodificador y el cliente son falsos.
+      dir: join(tmpdir(), 'stratumd-channels-voice'),
+      modelStatus: async () => ({ state: 'ready' }),
+      // 16 s de PCM ya a 16 kHz: el resampler solo copia.
+      decode: async () => ({ pcm: new Float32Array(16 * 16_000), sampleRate: 16_000 }),
+      client: () => {
+        const client = {
+          calls: [] as Float32Array[],
+          close: () => {
+            done.closed = true;
+          },
+          transcribe: async (pcm: Float32Array) => {
+            client.calls.push(pcm);
+            return {
+              text: VOICE_TEXT,
+              durationSec: pcm.length / 16_000,
+              capped: false,
+              ms: 900,
+              device: 'gpu' as const,
+              chunks: [{ start: 0, end: pcm.length, reason: 'end' as const, skipped: false }],
+            };
+          },
+        };
+        clients.push(client);
+        return client;
+      },
+    });
+    const { t, api } = await start({ paired: [ana], voiceNotes: notes });
+    t.project(join('companion', 'workspace'), [textRound(['Te escucho.'])], {
+      trace: { enabled: true, dir: join(base!, 'traces') },
+    });
+    const ogg = new Uint8Array([0x4f, 0x67, 0x67, 0x53, 9, 9, 9]);
+    api.push(api.voice({ id: 42 }, ogg, { durationSec: 16 }));
+    await vi.waitFor(() => expect(api.sent.map((m) => m.text)).toContain('Te escucho.'), {
+      timeout: 10_000,
+    });
+    // El eco de lo entendido llega **antes** que la respuesta del agente.
+    const texts = api.sent.map((m) => m.text);
+    const echo = texts.indexOf(`🎙 «${VOICE_TEXT}»`);
+    expect(echo).toBeGreaterThanOrEqual(0);
+    expect(echo).toBeLessThan(texts.indexOf('Te escucho.'));
+    // La nota llegó al transcriptor como PCM de 16 kHz.
+    expect(clients).toHaveLength(1);
+    expect(clients[0]!.calls[0]).toHaveLength(16 * 16_000);
+
+    // En la conversación del companion: la marca y `via: 'telegram'`.
+    const dot = await t.connect(['operator'], 'stratum-dot', { kind: 'dot' });
+    const { session } = await dot.request('sessions.open', { agent: 'companion' });
+    const { snapshot } = await dot.request('sessions.get', { sessionId: session.id });
+    expect(snapshot.messages.find((m) => m.kind === 'user')).toMatchObject({
+      text: `[nota de voz, 0:16] ${VOICE_TEXT}`,
+      via: 'telegram',
+    });
+
+    // Y en la traza de la sesión, solo metadatos: el evento llegó, sin el texto.
+    const traceFile = join(base!, 'traces', `${session.id}.jsonl`);
+    await vi.waitFor(() => {
+      expect(existsSync(traceFile)).toBe(true);
+      const lines = readFileSync(traceFile, 'utf-8')
+        .split('\n')
+        .filter((l) => l.trim() !== '')
+        .map((l) => JSON.parse(l) as Record<string, unknown>);
+      const point = lines.find(
+        (r) =>
+          r.t === 'point' && (r.data as Record<string, unknown> | undefined)?.event === 'voice',
+      );
+      expect(point).toBeDefined();
+      expect(point!.data).toMatchObject({
+        event: 'voice',
+        source: 'telegram',
+        durationSec: 16,
+        device: 'gpu',
+        model: 'canary-1b-v2',
+        chunks: 1,
+        skipped: 0,
+        capped: false,
+      });
+      // Ni el texto ni el audio en el registro del evento.
+      expect(JSON.stringify(point!.data)).not.toContain('almas');
+    });
+  });
+
+  it('M25 fase 3: una nota esperando al modelo no frena los demás mensajes ni el apagado', async () => {
+    const ana: TelegramPaired = {
+      userId: 42,
+      chatId: 42,
+      name: 'Ana',
+      pairedAt: new Date().toISOString(),
+    };
+    let aborted = false;
+    // El modelo no está y su descarga no termina nunca: solo se va al abortar el
+    // cierre. Es el caso que antes dejaba el canal (y el apagado) colgados.
+    const notes = new VoiceNotes({
+      config: () => ({ enabled: true, language: 'es', device: 'auto', idleUnloadMinutes: 10 }),
+      dir: join(tmpdir(), 'stratumd-channels-voice-slow'),
+      modelStatus: async () => ({ state: 'missing' }),
+      downloadModel: ({ signal }) =>
+        new Promise<void>((_resolve, reject) => {
+          signal?.addEventListener(
+            'abort',
+            () => {
+              aborted = true;
+              reject(new Error('abortada'));
+            },
+            { once: true },
+          );
+        }),
+      decode: async () => ({ pcm: new Float32Array(16_000), sampleRate: 16_000 }),
+    });
+    const { t, api } = await start({ paired: [ana], voiceNotes: notes });
+    t.project(join('companion', 'workspace'), [textRound(['Te escucho.'])]);
+
+    api.push(api.voice({ id: 42 }, new Uint8Array([0x4f, 0x67, 0x67, 0x53]), { durationSec: 1 }));
+    // La nota ya está con la descarga del modelo en marcha (y no va a terminar).
+    await vi.waitFor(
+      () => expect(api.sent.map((m) => m.text)).toContain(TEXT.voiceModelDownloading),
+      { timeout: 10_000 },
+    );
+
+    // Aun así, el bucle de mensajes sigue: un texto del mismo chat entra y se contesta.
+    api.push(api.text({ id: 42 }, 'mientras tanto'));
+    await vi.waitFor(() => expect(api.sent.map((m) => m.text)).toContain('Te escucho.'), {
+      timeout: 10_000,
+    });
+
+    // Y el apagado termina: `voiceNotes.close()` aborta la descarga antes de parar
+    // el canal, así que nada espera al modelo.
+    await withDeadline(t.stop(), 5_000, 'el apagado del daemon');
+    expect(aborted).toBe(true);
   });
 
   describe('aprobaciones desde el chat (parte 4)', () => {

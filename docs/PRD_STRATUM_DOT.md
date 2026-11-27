@@ -3090,7 +3090,9 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
       transcribir. Nunca va a disco, a la traza, a los logs, al protocolo ni a la sesión.
       - A la conversación va el texto como un mensaje de la persona, con la marca
         `[nota de voz, 0:42]` y `via: 'telegram'`.
-      - A la traza solo los metadatos: duración, dispositivo, modelo, ms y si se recortó.
+      - Del audio, a la traza solo los metadatos (duración, dispositivo, modelo, ms, si se
+        recortó); el texto transcrito es un mensaje de la persona y se traza como uno escrito.
+        *Decidido por Claude el 2026-11-27, cambiable*.
     - **Eco de lo entendido**: el bot contesta en el chat con la transcripción (`🎙 «…»`) antes de
       que el agente responda. Así la persona ve qué se entendió, y también si se coló la voz de la
       tele. La transcripción no da autoridad nueva: es lo mismo que si la persona lo hubiera
@@ -3154,6 +3156,24 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        - **RSS del worker**: unos 290 MB en el `ready` y de 321 a 442 MB tras 10 notas en GPU.
          En CPU, de 4,1 a 4,9 GB. El proceso padre ocupa 100–250 MB.
     3. Notas de Telegram en el `companion`, con su eco, su marca y su traza.
+
+       *Hecha el 2026-11-27* (`src/voice/opus.ts`, `resample.ts`, `daemon/voice-notes.ts`, entrada
+       en `CompanionLink`). La implementó DeepSeek en dos rondas, Claude hizo dos más y Codex
+       `gpt-6.2-sol` la revisó cuatro veces.
+       - **Decodificador**: `ogg-opus-decoder` (WASM, MIT), bundleado.
+       - **Antes de decodificar** se recorre el OGG: un solo flujo, `OpusHead` y `OpusTags` solas
+         en sus páginas, 2 canales como mucho y paquetes de 64 KiB como mucho. La duración sale
+         del TOC de cada paquete, no del granule, que puede mentir; con más de 301 s no se
+         decodifica. Después se decodifica por páginas, con tope.
+       - **La nota no bloquea el sondeo de Telegram**: cola de 1 nota activa y 3 en espera, con
+         admisión síncrona y la descarga desde Telegram solo cuando le toca.
+       - Una nota en vuelo se **abandona** si el chat se desempareja (también si se desempareja y
+         se vuelve a emparejar) o si el canal se recarga. Se comprueba en cada paso, también en la
+         cola de salida justo antes de enviar.
+       - *Decidido por Claude, cambiable*: un texto mandado después de una nota puede llegar antes
+         que ella; el steering no lleva `via` (pendiente común con el texto).
+       - *Pendiente*: el dispositivo en `stratum doctor` (toca el contrato del protocolo) y
+         probarlo con una nota grabada en Telegram.
     4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
        Se diseña aparte.
 

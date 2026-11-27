@@ -77,6 +77,21 @@ export interface TelegramImageRef {
   size?: number;
 }
 
+/**
+ * M25 fase 3 — una **nota de voz** (`voice`) de un mensaje: audio OGG/Opus.
+ * Solo `voice`: los `audio` (música), las `video_note` y los documentos de audio
+ * no entran y siguen contando como un adjunto cualquiera.
+ */
+export interface TelegramVoiceRef {
+  fileId: string;
+  /** Lo que dice Telegram que dura, en segundos. */
+  duration: number;
+  /** Lo que dice Telegram que pesa, si lo dice. */
+  size?: number;
+  /** Tipo MIME declarado (una nota de voz es `audio/ogg`). */
+  mime?: string;
+}
+
 export interface TelegramMessage {
   messageId: number;
   /** Segundos desde epoch, como lo da Telegram. */
@@ -88,6 +103,8 @@ export interface TelegramMessage {
   caption?: string;
   /** La imagen del mensaje (la foto más grande que cabe en el límite), si la hay. */
   image?: TelegramImageRef;
+  /** M25 fase 3 — la nota de voz del mensaje, si la hay. */
+  voice?: TelegramVoiceRef;
   /** Lleva algo que no es texto (foto, fichero, voz…). */
   hasMedia: boolean;
 }
@@ -205,9 +222,11 @@ const messageSchema = z
     from: userSchema.optional(),
     text: z.string().optional(),
     caption: z.string().optional(),
-    // Se validan aparte (`imageOf`): una foto con otra forma no tumba el mensaje.
+    // Se validan aparte (`imageOf`/`voiceOf`): una foto o una nota de voz con
+    // otra forma no tumban el mensaje.
     photo: z.unknown().optional(),
     document: z.unknown().optional(),
+    voice: z.unknown().optional(),
   })
   .passthrough();
 
@@ -237,6 +256,28 @@ function imageOf(m: z.infer<typeof messageSchema>): TelegramImageRef | undefined
   const doc = documentSchema.safeParse(m.document);
   if (doc.success && doc.data.mime_type?.startsWith('image/')) return ref(doc.data);
   return undefined;
+}
+
+const voiceSchema = z
+  .object({
+    file_id: z.string(),
+    // Telegram la da en segundos enteros.
+    duration: z.number().nonnegative(),
+    file_size: z.number().int().optional(),
+    mime_type: z.string().optional(),
+  })
+  .passthrough();
+
+function voiceOf(m: z.infer<typeof messageSchema>): TelegramVoiceRef | undefined {
+  const parsed = voiceSchema.safeParse(m.voice);
+  if (!parsed.success) return undefined;
+  const v = parsed.data;
+  return {
+    fileId: v.file_id,
+    duration: v.duration,
+    ...(v.file_size !== undefined ? { size: v.file_size } : {}),
+    ...(v.mime_type !== undefined ? { mime: v.mime_type } : {}),
+  };
 }
 
 const callbackSchema = z.object({
@@ -278,6 +319,7 @@ function toUser(u: z.infer<typeof userSchema>): TelegramUser {
 function toMessage(m: z.infer<typeof messageSchema>): TelegramMessage {
   const raw = m as Record<string, unknown>;
   const image = imageOf(m);
+  const voice = voiceOf(m);
   return {
     messageId: m.message_id,
     date: m.date,
@@ -286,6 +328,7 @@ function toMessage(m: z.infer<typeof messageSchema>): TelegramMessage {
     ...(m.text !== undefined ? { text: m.text } : {}),
     ...(m.caption !== undefined ? { caption: m.caption } : {}),
     ...(image ? { image } : {}),
+    ...(voice ? { voice } : {}),
     hasMedia: MEDIA_KEYS.some((k) => raw[k] !== undefined),
   };
 }

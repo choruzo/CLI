@@ -206,6 +206,35 @@ export class FakeTelegramApi implements TelegramApi {
     };
   }
 
+  /**
+   * M25 fase 3 — una nota de voz (con `caption` opcional) de un chat privado;
+   * sus bytes, en `files`. La duración que declara es la de `durationSec` (1 s).
+   */
+  voice(
+    user: { id: number },
+    bytes: Uint8Array,
+    opts: { caption?: string; durationSec?: number } = {},
+  ): TelegramUpdate {
+    const fileId = `v${this.nextMessageId}`;
+    this.files.set(fileId, bytes);
+    const update = this.text(user, '');
+    const { text: _t, ...message } = update.message!;
+    return {
+      ...update,
+      message: {
+        ...message,
+        ...(opts.caption !== undefined ? { caption: opts.caption } : {}),
+        voice: {
+          fileId,
+          duration: opts.durationSec ?? 1,
+          size: bytes.length,
+          mime: 'audio/ogg',
+        },
+        hasMedia: true,
+      },
+    };
+  }
+
   /** Lo que el bot envió como imagen (6E). */
   readonly filesSent: {
     chatId: number;

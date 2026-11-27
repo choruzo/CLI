@@ -131,6 +131,10 @@ export function isAuxiliaryOrigin(origin: LlmCallOrigin): origin is AuxiliaryLlm
  *    argumentos, sin nada que cambie el estado entre medias; `agent/repeat.ts`).
  *    No veta: la llamada ya se ejecutó. `count` = llamadas idénticas anteriores
  *    en la ventana. Sin los argumentos.
+ *  - `voice` — M25 fase 3: una nota de voz transcrita en local desde Telegram.
+ *    Solo **metadatos** (duración, dispositivo confirmado, modelo, milisegundos
+ *    de la transcripción y de la decodificación, trozos, trozos saltados y si el
+ *    texto se recortó). **Nunca** el texto ni el audio.
  */
 export type TraceRuntimeEvent =
   | TraceInboxEvent
@@ -176,6 +180,31 @@ export type TraceRuntimeEvent =
     }
   | { event: 'retry'; attempt: number; error: string }
   | { event: 'repeat'; tool: string; callId: string; count: number }
+  | {
+      /**
+       * M25 fase 3 — una nota de voz transcrita en local. Solo metadatos: ni el
+       * texto ni el audio llegan aquí.
+       */
+      event: 'voice';
+      /** Por dónde entró (hoy, solo el canal de Telegram). */
+      source: 'telegram';
+      /** Duración del audio **decodificado**, en segundos. */
+      durationSec: number;
+      /** El dispositivo que confirmó la sonda del worker. */
+      device: 'gpu' | 'cpu' | 'unconfirmed';
+      /** Modelo de voz (`canary-1b-v2`). */
+      model: string;
+      /** Milisegundos de la transcripción completa (sin la descarga del modelo). */
+      ms: number;
+      /** Milisegundos de decodificar el Opus y bajarlo a 16 kHz. */
+      decodeMs: number;
+      /** Trozos en que se partió el audio. */
+      chunks: number;
+      /** Trozos casi mudos, que no llegaron al modelo. */
+      skipped: number;
+      /** El texto llegó al tope de tokens de algún trozo. */
+      capped: boolean;
+    }
   | {
       /**
        * Quién resolvió una aprobación, una pregunta o un plan. `none` = nadie:

@@ -40,6 +40,35 @@ export const TEXT = {
     'That message is too long to pass while the assistant is working. ' +
     'Send it shorter, or again when it finishes.',
   cancelled: 'The assistant stopped (cancelled).',
+  /** M25 fase 3 — una nota de voz de más de 5 min o 10 MB no se descarga. */
+  voiceTooLong:
+    'That voice message is longer than 5 minutes (or bigger than 10 MB), ' +
+    'so it was not passed on. Send a shorter one.',
+  /** M25 fase 3 — no se pudo transcribir. Es un fallo auxiliar: la sesión sigue. */
+  voiceFailed: (reason: string): string =>
+    `That voice message could not be transcribed (${reason}). Nothing was passed on. ` +
+    'Try again, or write it.',
+  /** M25 fase 3 — el audio no tenía voz (o nada que el modelo entendiera). */
+  voiceEmpty:
+    'I could not make out any speech in that voice message, so nothing was passed on. ' +
+    'Try again, or write it.',
+  /** M25 fase 3 — `voice.enabled` apagado. */
+  voiceOff:
+    'Voice messages are turned off in this Stratum, so nothing was passed on. ' +
+    'Send it as text, or turn voice on.',
+  /** M25 fase 3 — ya hay 3 notas esperando. */
+  voiceQueueFull:
+    'There are already 3 voice messages waiting to be transcribed, so this one was ' +
+    'not passed on. Send it again in a moment.',
+  /** M25 fase 3 — la primera vez: se descarga el modelo (~4 GB, una sola vez). */
+  voiceModelDownloading:
+    'First voice message: downloading the speech model (about 4 GB). ' +
+    'This happens once; your message is transcribed when it finishes.',
+  voiceModelProgress: (percent: number): string => `Downloading the speech model: ${percent}%.`,
+  voiceModelReady: 'The speech model is ready.',
+  voiceModelFailed:
+    'The speech model could not be downloaded, so that voice message was not passed on. ' +
+    'It will be tried again with the next one.',
 } as const;
 
 /** Lo que alguien escribió en Dot, reflejado en el chat. */
@@ -60,6 +89,33 @@ export function imageRejected(err: unknown): string {
     return 'That file is not a PNG, JPEG, WebP or GIF image of up to 5 MB: it was not passed on.';
   }
   return 'That image could not be downloaded from Telegram: it was not passed on. Try again.';
+}
+
+/**
+ * M25 fase 3 — la marca de una nota de voz en la conversación. Va en **español**
+ * a propósito (PRD §23.11): es lo que la persona ve en su propio historial, no
+ * texto del bot.
+ */
+export function voiceMark(durationSec: number, capped: boolean): string {
+  return capped
+    ? `[nota de voz, ${clock(durationSec)}, recortada]`
+    : `[nota de voz, ${clock(durationSec)}]`;
+}
+
+/**
+ * M25 fase 3 — el eco de lo entendido, antes de que el agente responda: así se
+ * ve qué se transcribió (y si se coló la tele de fondo).
+ */
+export function voiceEcho(text: string, capped: boolean): string {
+  return `🎙 «${text}»${capped ? ' (cut off)' : ''}`;
+}
+
+/** `M:SS` de una duración en segundos, redondeada. */
+function clock(durationSec: number): string {
+  const total = Math.max(0, Math.round(durationSec));
+  const minutes = Math.floor(total / 60);
+  const seconds = total % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
 export function turnFailed(error: string | undefined): string {

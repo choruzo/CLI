@@ -33,6 +33,7 @@ import {
   type TelegramPaired,
 } from '../channels/telegram/store.js';
 import { CompanionLink, type CompanionPort } from './channel-companion.js';
+import type { VoiceNotesPort } from './voice-notes.js';
 import { ChannelApprovals, type PendingSource } from './channel-approvals.js';
 import type { SessionLabel } from '../channels/telegram/render.js';
 
@@ -63,6 +64,11 @@ export interface ChannelHostOptions {
   sessionLabel?: (sessionId: string) => SessionLabel | null;
   /** Parte 6E — los bytes de una imagen que envió el asistente, o `null` si ya no está. */
   readImage?: (imageId: string) => { data: Uint8Array; mime: string } | null;
+  /**
+   * M25 fase 3 — las notas de voz, transcritas en local. Sin ellas, una nota de
+   * voz se contesta como cualquier otro adjunto.
+   */
+  voiceNotes?: VoiceNotesPort;
   /** Redacción de lo que sale al chat. Por defecto, ninguna (tests). */
   redact?: (text: string) => string;
   /** Ajustes del sondeo y de la salida (tests). */
@@ -104,7 +110,24 @@ export class ChannelHost {
             if (!this.channel) return Promise.reject(channelOff('The Telegram channel stopped.'));
             return this.channel.download(image, maxBytes);
           },
+          // M25 fase 3 — lo mismo para los bytes de una nota de voz.
+          ...(opts.voiceNotes
+            ? {
+                voiceNotes: opts.voiceNotes,
+                downloadVoice: (voice, maxBytes) => {
+                  if (!this.channel) {
+                    return Promise.reject(channelOff('The Telegram channel stopped.'));
+                  }
+                  return this.channel.download(voice, maxBytes);
+                },
+              }
+            : {}),
           chats: () => this.paired().map((p) => p.chatId),
+          // Cambia si se desempareja y se vuelve a emparejar: una nota vieja no revive.
+          pairedKey: (chatId) => {
+            const p = this.paired().find((entry) => entry.chatId === chatId);
+            return p ? `${p.userId}:${p.pairedAt}` : undefined;
+          },
           redact: opts.redact ?? ((text) => text),
           ...(opts.readImage ? { readImage: opts.readImage } : {}),
           ...(opts.typingIntervalMs !== undefined
@@ -156,6 +179,9 @@ export class ChannelHost {
 
   /** Vuelve a leerlo todo (tras `setup` o `disable`). Anula el emparejamiento en curso. */
   async reload(): Promise<ProtocolChannelsStatus> {
+    // Las notas de voz en vuelo dejan de hablar por este canal **antes** de
+    // esperar a que se pare: nada suyo sale mientras tanto.
+    this.link?.resetVoice();
     await this.stopChannel();
     this.pairing.cancel();
     // Los botones ya enviados dejan de resolver nada.

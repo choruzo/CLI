@@ -422,10 +422,13 @@ describe('secciones solo globales (M25: voz)', () => {
   });
 
   it('loadConfig no aplica la voz de un repo clonado', () => {
+    // `loadConfig` lee también la config **global** de este equipo, así que se
+    // compara con lo que sale en un directorio sin `.stratumrc.json` (como el
+    // test de `channels`): el proyecto no cambia nada.
+    const withoutProject = loadConfig(dir).voice;
+    takeConfigDeprecations();
     writeJson(join(dir, '.stratumrc.json'), { voice: { enabled: true, language: 'uk' } });
-    const config = loadConfig(dir);
-    expect(config.voice.enabled).toBe(false);
-    expect(config.voice.language).toBe('es');
+    expect(loadConfig(dir).voice).toEqual(withoutProject);
     expect(takeConfigDeprecations().join('\n')).toMatch(/"voice" solo se lee de la config global/);
   });
 
@@ -446,8 +449,10 @@ describe('secciones solo globales (M25: voz)', () => {
   });
 
   it('por defecto: apagada, es, auto y 10 minutos', () => {
-    const config = loadConfig(dir);
-    expect(config.voice).toEqual({
+    // Los valores por defecto son los del esquema, no los de la config global de
+    // este equipo (que puede tener la voz encendida): se miran sin `loadConfig`.
+    const globalFile = join(dir, 'global.json');
+    expect(validateConfigLayer(globalFile, {}, globalFile).voice).toEqual({
       enabled: false,
       language: 'es',
       device: 'auto',

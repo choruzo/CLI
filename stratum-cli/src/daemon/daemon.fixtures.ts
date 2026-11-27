@@ -346,6 +346,8 @@ export async function startTestDaemon(
     },
     // M18 — nunca la config del usuario: sin canal salvo que el test lo monte.
     channels: { enabled: () => false },
+    // M25 fase 3 — ni voz: un test nunca lee la config ni el modelo del usuario.
+    voiceNotes: null,
     // M23 — `doctor.run` nunca mira el arranque al iniciar sesión de quien lanza los tests.
     loginAutostart: async () => null,
     startup: async (opts: SessionStartupOptions) => {

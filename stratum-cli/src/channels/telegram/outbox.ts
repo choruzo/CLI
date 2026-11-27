@@ -36,6 +36,12 @@ export interface OutgoingMessage {
   plain?: string;
   /** Con el id del mensaje ya enviado (para editarlo después). */
   onSent?: (messageId: number) => void;
+  /**
+   * M25 fase 3 — si sigue valiendo enviarlo. Se mira **justo antes** de cada
+   * envío (tras la espera de la cola): un mensaje de una nota de voz revocada
+   * (chat desemparejado, canal recargado) se descarta aunque ya estuviera en cola.
+   */
+  valid?: () => boolean;
 }
 
 interface ChatQueue {
@@ -121,6 +127,8 @@ export class TelegramOutbox {
       for (let attempt = 1; attempt <= MAX_ATTEMPTS && !this.stopped; attempt++) {
         const wait = chat.lastSentAt + this.minIntervalMs - Date.now();
         if (wait > 0) await this.sleep(wait);
+        // Tras la espera: `stop()` o la revocación pudieron llegar entretanto.
+        if (this.stopped || (message.valid && !message.valid())) break;
         try {
           const { messageId } = message.photo
             ? await this.opts.api.sendFile(chatId, as, message.photo, text)

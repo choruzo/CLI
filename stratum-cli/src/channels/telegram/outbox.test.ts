@@ -40,6 +40,30 @@ describe('TelegramOutbox (M18)', () => {
     expect(api.sent).toEqual([]);
   });
 
+  it('M25: un mensaje que deja de valer mientras espera en la cola no sale', async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox({ api, minIntervalMs: 40 });
+    let paired = true;
+    outbox.send(1, { text: 'uno' });
+    outbox.send(1, { text: 'eco de la nota', valid: () => paired });
+    outbox.send(1, { text: 'tres' });
+    // Se desempareja mientras «eco de la nota» espera su turno.
+    paired = false;
+    await outbox.flush();
+    expect(api.sent.map((m) => m.text)).toEqual(['uno', 'tres']);
+  });
+
+  it('un `stop()` durante la espera del intervalo no deja salir lo que esperaba', async () => {
+    const api = new FakeTelegramApi();
+    const outbox = new TelegramOutbox({ api, minIntervalMs: 50 });
+    outbox.send(1, { text: 'uno' });
+    outbox.send(1, { text: 'dos' });
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    outbox.stop();
+    await outbox.flush();
+    expect(api.sent.map((m) => m.text)).toEqual(['uno']);
+  });
+
   it('espacia los mensajes de un chat y respeta el orden', async () => {
     const api = new FakeTelegramApi();
     const outbox = new TelegramOutbox({ api, minIntervalMs: 60 });

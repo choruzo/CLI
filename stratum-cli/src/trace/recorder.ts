@@ -794,6 +794,13 @@ class Scope implements TraceScope {
         );
       } else if (ev.event === 'repeat') {
         this.point('notice', `Llamada repetida: ${ev.tool} (${ev.count + 1}.ª vez)`, data);
+      } else if (ev.event === 'voice') {
+        // M25 fase 3 — solo metadatos: ni el texto ni el audio están en `data`.
+        this.point(
+          'notice',
+          `Nota de voz (${ev.source}): ${ev.durationSec.toFixed(1)} s · ${ev.device} · ${ev.chunks} trozo(s)`,
+          data,
+        );
       } else {
         this.point('notice', `Reintento ${ev.attempt} de la llamada al modelo`, data);
       }

@@ -195,6 +195,35 @@ describe('parseUpdate', () => {
     expect(doc('image/png')).toEqual({ fileId: 'd' });
     expect(doc('application/pdf')).toBeUndefined();
   });
+
+  it('M25 fase 3: una nota de voz se lee aparte, y una forma rara no tumba el mensaje', () => {
+    const chat = { id: 1, type: 'private' };
+    const voice = (raw: unknown): unknown =>
+      parseUpdate({
+        update_id: 3,
+        message: { message_id: 3, date: 1, chat, voice: raw, caption: 'mira' },
+      })?.message?.voice;
+    expect(
+      voice({ file_id: 'v', duration: 16, file_size: 64_000, mime_type: 'audio/ogg' }),
+    ).toEqual({ fileId: 'v', duration: 16, size: 64_000, mime: 'audio/ogg' });
+    // Sin `file_id` o sin duración no es una nota de voz: el mensaje sigue.
+    expect(voice({ duration: 16 })).toBeUndefined();
+    expect(voice({ file_id: 'v' })).toBeUndefined();
+    expect(voice('voz')).toBeUndefined();
+    // Lo que no es `voice` (música, una nota en vídeo) no entra por aquí.
+    const audio = parseUpdate({
+      update_id: 4,
+      message: {
+        message_id: 4,
+        date: 1,
+        chat,
+        audio: { file_id: 'a', duration: 200 },
+        video_note: { file_id: 'n', duration: 5 },
+      },
+    });
+    expect(audio?.message?.voice).toBeUndefined();
+    expect(audio?.message?.hasMedia).toBe(true);
+  });
 });
 
 describe('sendFile (6E)', () => {

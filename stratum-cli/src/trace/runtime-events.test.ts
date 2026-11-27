@@ -236,4 +236,61 @@ describe('el recorder los guarda como puntos `notice` y declara el cap', () => {
     });
     expect(computeMetrics(records)).toMatchObject({ warnings: 0, retries: 0 });
   });
+
+  it('una nota de voz deja **solo** metadatos: ni el texto ni el audio (M25 fase 3)', async () => {
+    const file = join(dir, 's3.jsonl');
+    const rec = new TraceRecorder({ file, sessionId: 's3', config });
+    const scope = rec.scope();
+    scope.turnStart('tarea', [{ role: 'user', content: 'tarea' }]);
+    // Lo mismo que escribe `asCompanionTurns(...).traceVoice`.
+    scope.runtime({
+      event: 'voice',
+      source: 'telegram',
+      durationSec: 16.27,
+      device: 'gpu',
+      model: 'canary-1b-v2',
+      ms: 2_180,
+      decodeMs: 63,
+      chunks: 1,
+      skipped: 0,
+      capped: false,
+    });
+    scope.turnEnd('stop');
+    await rec.flush();
+
+    const records = readTraceFile(file);
+    const point = records.find((r) => r.t === 'point' && r.kind === 'notice');
+    expect(point).toMatchObject({ kind: 'notice', name: expect.stringContaining('Nota de voz') });
+    const data = (point as { data: Record<string, unknown> }).data;
+    // Las claves son exactamente los metadatos: no hay ningún hueco para el texto.
+    expect(Object.keys(data).sort()).toEqual(
+      [
+        'capped',
+        'chunks',
+        'decodeMs',
+        'device',
+        'durationSec',
+        'event',
+        'model',
+        'ms',
+        'skipped',
+        'source',
+      ].sort(),
+    );
+    expect(data).toMatchObject({
+      event: 'voice',
+      source: 'telegram',
+      durationSec: 16.27,
+      device: 'gpu',
+      model: 'canary-1b-v2',
+      ms: 2_180,
+      decodeMs: 63,
+      chunks: 1,
+      skipped: 0,
+      capped: false,
+    });
+    // Y el modelo de la traza lo conserva como un aviso más.
+    const model = buildTraceModel(records);
+    expect(model.steps.some((s) => s.data.event === 'voice')).toBe(true);
+  });
 });

@@ -49,6 +49,7 @@ import { ASK_LIMITS, INSPECT_LIMITS, REVERT_LIMITS, TURNS_LIMITS } from '../prot
 import { redactText } from '../security/redact-output.js';
 import type { RevertPlan } from '../snapshots/store.js';
 import type { SessionEnv } from '../runtime/session-env.js';
+import type { TraceRuntimeEvent } from '../trace/records.js';
 import { handoffAgentOptions } from '../host/handoff.js';
 import { SessionHost, type SessionHostOptions } from '../host/session-host.js';
 import type { AssistantData } from '../host/assistant.js';
@@ -828,6 +829,14 @@ export class HostedSession {
   healthNotice(notice: ProtocolHealthNotice): void {
     this.publisher.healthNotice(notice);
     this.publisher.flush();
+  }
+
+  /**
+   * M25 fase 3 — un evento de runtime en la traza de esta sesión (los metadatos
+   * de una nota de voz). No entra en la conversación ni en el protocolo.
+   */
+  traceRuntime(ev: TraceRuntimeEvent): void {
+    this.host.recordRuntime(ev);
   }
 
   private changed(): ProtocolSession {

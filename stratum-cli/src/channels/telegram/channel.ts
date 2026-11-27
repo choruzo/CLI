@@ -135,8 +135,10 @@ export class TelegramChannel {
    * Un texto al chat, en trozos que caben, por su cola. Un fallo se registra y
    * no se propaga: el canal es auxiliar.
    */
-  send(chatId: number, text: string): void {
-    for (const piece of chunkText(text)) this.outbox.send(chatId, { text: piece });
+  send(chatId: number, text: string, valid?: () => boolean): void {
+    for (const piece of chunkText(text)) {
+      this.outbox.send(chatId, { text: piece, ...(valid ? { valid } : {}) });
+    }
   }
 
   /**

@@ -19,6 +19,7 @@ import { SubagentStore } from '../session/subagent-store.js';
 import { generateSessionId } from '../session/store.js';
 import { openSessionTrace } from '../trace/store.js';
 import type { TraceRecorder, TraceScope } from '../trace/recorder.js';
+import type { TraceRuntimeEvent } from '../trace/records.js';
 import type { SessionEnv } from '../runtime/session-env.js';
 import { getLogger } from '../logging/index.js';
 import { findWorktreeRoot } from '../config/paths.js';
@@ -375,6 +376,14 @@ export class SessionHost {
       { config: this.config, sessionId: this.sessionId, trace: this.traceScope },
       change,
     );
+  }
+
+  /**
+   * Una decisión del runtime que no viaja como `AgentEvent` a la traza de esta
+   * sesión (M25 fase 3: los metadatos de una nota de voz).
+   */
+  recordRuntime(ev: TraceRuntimeEvent): void {
+    this.traceScope?.runtime(ev);
   }
 
   /** Política destructiva vigente: la base, endurecida por el perfil principal activo. */
