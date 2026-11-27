@@ -161,6 +161,14 @@ impl AskPrompt {
     }
 
     /// La página ya leyó lo que había.
+    /// Vuelve a `idle` solo desde `listening`: nunca pisa un error ni un texto.
+    fn clear_listening(&self) {
+        let mut view = lock(&self.voice);
+        if matches!(*view, VoiceView::Listening { .. }) {
+            *view = VoiceView::Idle;
+        }
+    }
+
     fn ack(&self) {
         self.set_voice(VoiceView::Idle);
     }
@@ -410,7 +418,9 @@ async fn stop_note(state: &crate::DotState) {
     // Solo la del atajo: si la nota en curso la empezó la ventana principal, no
     // se toca (su dueño es el botón del chat).
     if state.voice.origin() != Some(Origin::Shortcut) {
-        state.ask.set_voice(VoiceView::Idle);
+        // Sin nota del atajo (no llegó a arrancar): solo se limpia el «escuchando».
+        // Un error del arranque se queda para que la página lo enseñe.
+        state.ask.clear_listening();
         return;
     }
     state.ask.set_voice(VoiceView::Transcribing);
@@ -728,6 +738,22 @@ mod tests {
     }
 
     // ------------------------------------------------------------- la voz
+
+    #[test]
+    fn soltar_sin_nota_no_borra_el_error_del_arranque() {
+        let prompt = AskPrompt::default();
+        prompt.set_voice(VoiceView::Error {
+            message: "The voice model is not downloaded.".into(),
+        });
+        prompt.clear_listening();
+        assert!(matches!(prompt.view(None), VoiceView::Error { .. }));
+        prompt.set_voice(VoiceView::Listening {
+            seconds: 0,
+            level: None,
+        });
+        prompt.clear_listening();
+        assert_eq!(prompt.view(None), VoiceView::Idle);
+    }
 
     #[test]
     fn la_voz_sin_nonce_es_404() {
