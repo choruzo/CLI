@@ -21,9 +21,9 @@
  *   `language: 'falla-init'` → contesta un `error` (el modelo no está listo);
  *   `language: 'sin-ready'`  → no manda nunca el `ready` (arranque que se cuelga).
  *
- * El `ready` dice `gpu-unconfirmed` con WebGPU, como el worker de verdad: la GPU
- * no está confirmada hasta el primer encoder real, y es el `result` el que lleva
- * el dispositivo confirmado.
+ * El `ready` dice `gpu-unconfirmed` con WebGPU: es uno de los valores que da el
+ * worker de verdad cuando su sonda de carga no confirma la GPU. Al cliente le
+ * basta con que el dispositivo llegue tal cual en el `ready` y en el `result`.
  */
 
 let readyDevice = 'cpu';
