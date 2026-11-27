@@ -3456,8 +3456,16 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
     - las huellas de voz (ECAPA, WeSpeaker) con voces parecidas (padre e hijo, hermanos) y con
       ruido;
     - el TTS en español: calidad, latencia y dónde corre.
-  - *Falta decidir con el usuario*: el nombre de la palabra de activación, si habrá niños (con
-    límites) y el orden respecto a M24 y M26.
+  - *Decidido por el usuario el 2026-11-27*: **no hay niños**, así que no hay perfiles con
+    límites, y el orden lo pone Claude: **M25 fase 4 (push-to-talk), las mediciones de M29, M29,
+    M24 y M26**. El push-to-talk va primero porque el satélite usa su mismo camino (subir audio y
+    transcribir con la cola de `VoiceNotes`).
+  - *Nombre de la palabra de activación*: el usuario pidió uno poco común y fácil de pronunciar.
+    Se busca el de 3 o 4 sílabas, con unos 6 fonemas o más, con vocales distintas y que no salga en
+    la tele, las noticias ni la conversación de casa. Candidatos de Claude, que se medirán:
+    *Estrato* (lo que significa Stratum), *Calíope*, *Cobalto* y *Amaru*. Se descartan *Dot*
+    (corto y se confunde con «dos»), *Calima* (sale en los avisos de AEMET), *Alexa* y los nombres
+    de la familia. Elige el usuario cuando se mida.
 
 ### 23.12 Fuera, por ahora
 
