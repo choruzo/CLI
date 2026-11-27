@@ -1,6 +1,8 @@
 /**
  * M25 fase 3 — una nota de voz de Telegram, desde los bytes hasta el texto
- * (`docs/PRD_STRATUM_DOT.md` §23.11).
+ * (`docs/PRD_STRATUM_DOT.md` §23.11). Desde la fase 4 es también la cola de un
+ * push-to-talk: `transcribePcm` (el cliente de Dot ya manda PCM16 a 16 kHz, ver
+ * `docs/protocol.md` §35).
  *
  * Une las piezas que ya existen: decodificar el Opus en WASM (`voice/opus.ts`),
  * bajarlo a 16 kHz (`voice/resample.ts`), transcribir en local con el worker
@@ -107,7 +109,11 @@ export interface VoiceNoteResult {
   skipped: number;
 }
 
-/** Lo que el canal necesita de las notas de voz. */
+/**
+ * Lo que el canal necesita de las notas de voz. Desde M25 fase 4 la misma cola
+ * sirve al push-to-talk (`voice.*`, §35) por `transcribePcm`: el audio ya llega
+ * a 16 kHz, así que ahí no hay bytes que bajar ni Opus que decodificar.
+ */
 export interface VoiceNotesPort {
   /**
    * Transcribe una nota. Los bytes se piden con `getBytes` **cuando a la nota le
@@ -191,9 +197,26 @@ function reasonOf(err: unknown): string {
   return err instanceof Error ? err.message : String(err);
 }
 
+/** El audio de una nota ya en el formato del worker, y lo que costó tenerlo. */
+interface NoteAudio {
+  /** PCM mono a 16 kHz. */
+  pcm: Float32Array;
+  /** Milisegundos de decodificar el Opus y bajarlo a 16 kHz (0 si no hubo). */
+  decodeMs: number;
+}
+
 /** Una nota admitida en la cola. */
 interface QueuedNote {
-  getBytes: () => Promise<Uint8Array>;
+  /**
+   * Da el audio **cuando a la nota le toca**: los bytes de Telegram se piden
+   * aquí, así que una nota que espera no descarga nada.
+   */
+  getAudio: () => Promise<NoteAudio>;
+  /**
+   * Solo una nota de un canal **descarga** el modelo; un push-to-talk no lo
+   * hace nunca (lo tenía que tener ya: `voice.begin` lo comprueba).
+   */
+  allowDownload: boolean;
   hooks?: VoiceNoteHooks;
   resolve: (result: VoiceNoteResult) => void;
   reject: (err: unknown) => void;
@@ -248,7 +271,53 @@ export class VoiceNotes {
     const rejection = this.admit();
     if (rejection) return Promise.reject(rejection);
     return new Promise<VoiceNoteResult>((resolve, reject) => {
-      this.waiting.push({ getBytes, ...(hooks ? { hooks } : {}), resolve, reject });
+      this.waiting.push({
+        allowDownload: true,
+        getAudio: async () => {
+          const startedAt = this.now();
+          const audio = await getBytes();
+          this.assertOpen();
+          // Los bytes se sueltan al salir de aquí: nadie más los guarda.
+          const decoded = await this.decode(audio, { maxSeconds: VOICE_MAX_SECONDS });
+          this.assertOpen();
+          return {
+            pcm: resampleTo16k(decoded.pcm, decoded.sampleRate),
+            decodeMs: this.now() - startedAt,
+          };
+        },
+        ...(hooks ? { hooks } : {}),
+        resolve,
+        reject,
+      });
+      void this.pump();
+    });
+  }
+
+  /**
+   * Encola un push-to-talk (`voice.begin|append|end`): el audio ya está a
+   * 16 kHz, mono, así que no hay bytes que bajar ni Opus que decodificar.
+   *
+   * La admisión es la misma que la de `transcribe`, y síncrona: cerrado, voz
+   * apagada y cola llena se rechazan ya. La diferencia es el modelo: aquí
+   * **nunca se descarga**; si no está `ready`, rechaza con
+   * {@link VoiceModelUnavailableError}.
+   *
+   * @throws VoiceNotesClosedError si ya se cerró.
+   * @throws VoiceNotesDisabledError si `voice.enabled` está apagado.
+   * @throws VoiceQueueFullError si ya hay {@link VOICE_MAX_WAITING} notas esperando.
+   * @throws VoiceModelUnavailableError si el modelo no está listo.
+   */
+  transcribePcm(pcm16k: Float32Array): Promise<VoiceNoteResult> {
+    const rejection = this.admit();
+    if (rejection) return Promise.reject(rejection);
+    return new Promise<VoiceNoteResult>((resolve, reject) => {
+      this.waiting.push({
+        allowDownload: false,
+        // El PCM ya es el que el worker quiere: no hay nada que medir.
+        getAudio: () => Promise.resolve({ pcm: pcm16k, decodeMs: 0 }),
+        resolve,
+        reject,
+      });
       void this.pump();
     });
   }
@@ -322,26 +391,23 @@ export class VoiceNotes {
     // La config se lee **al empezar** la nota: un cambio a mitad no la rompe, y
     // la siguiente ya lo ve.
     const cfg = this.opts.config();
-    await this.ensureModel(note.hooks);
+    if (note.allowDownload) await this.ensureModel(note.hooks);
+    else await this.requireModel();
     this.assertOpen();
     const startedAt = this.now();
-    const audio = await note.getBytes();
+    const { pcm, decodeMs } = await note.getAudio();
     this.assertOpen();
-    // Los bytes se sueltan al salir de aquí: nadie más los guarda.
-    const decoded = await this.decode(audio, { maxSeconds: VOICE_MAX_SECONDS });
-    this.assertOpen();
-    const pcm16k = resampleTo16k(decoded.pcm, decoded.sampleRate);
-    const decodeMs = this.now() - startedAt;
-    const durationSec = pcm16k.length / VOICE_SAMPLE_RATE;
-    // El decodificador ya corta en el tope; esto cubre a los que no lo hacen.
-    if (pcm16k.length > VOICE_MAX_SECONDS * VOICE_SAMPLE_RATE) {
+    const durationSec = pcm.length / VOICE_SAMPLE_RATE;
+    // El decodificador ya corta en el tope; esto cubre a los que no lo hacen, y
+    // también a un push-to-talk con más audio del que dice el contrato.
+    if (pcm.length > VOICE_MAX_SECONDS * VOICE_SAMPLE_RATE) {
       throw new VoiceTooLongError(
         `el audio dura ${durationSec.toFixed(1)} s y el máximo son ${VOICE_MAX_SECONDS} s`,
         durationSec,
       );
     }
     const client = this.clientFor(cfg);
-    const transcript = await client.transcribe(pcm16k);
+    const transcript = await client.transcribe(pcm);
     this.assertOpen();
     const chunks = transcript.chunks.length;
     const skipped = transcript.chunks.filter((c) => c.skipped).length;
@@ -376,6 +442,21 @@ export class VoiceNotes {
       if (this.download === abort) this.download = undefined;
     }
     this.assertOpen();
+  }
+
+  /**
+   * El modelo **ya** tiene que estar: un push-to-talk nunca lo descarga (§35, la
+   * descarga es `stratum voice download`). Si falta, la nota rechaza y quien
+   * llama contesta `voice-model-missing`.
+   */
+  private async requireModel(): Promise<void> {
+    this.assertOpen();
+    const status = await (this.opts.modelStatus ?? defaultModelStatus)(this.dir);
+    this.assertOpen();
+    if (status.state === 'ready') return;
+    throw new VoiceModelUnavailableError(
+      'el modelo de voz no está listo; se descarga con «stratum voice download»',
+    );
   }
 
   private async runDownload(

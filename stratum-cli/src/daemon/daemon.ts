@@ -50,7 +50,7 @@ import { sessionSkills } from '../skills/registry.js';
 import { defaultEndpointDir, type Endpoint } from '../client/discovery.js';
 import { loadConfig } from '../config/loader.js';
 import { findWorktreeRoot } from '../config/paths.js';
-import type { StratumConfig } from '../config/schema.js';
+import type { StratumConfig, VoiceConfig } from '../config/schema.js';
 import {
   resolveSessionStartup,
   type SessionStartup,
@@ -184,10 +184,23 @@ import { traceFilePath } from '../trace/store.js';
 import { redactText } from '../security/redact-output.js';
 import { readSharedImage, sharedImagesDir, type SharedImage } from '../images/shared.js';
 import { UserImageError } from '../images/store.js';
-import { VoiceNotes } from './voice-notes.js';
+import {
+  VoiceModelUnavailableError,
+  VoiceNotes,
+  VoiceNotesClosedError,
+  VoiceNotesDisabledError,
+} from './voice-notes.js';
+import { VoiceUploads } from './voice-uploads.js';
+import { VoiceQueueFullError } from '../voice/client.js';
+import { voiceModelDir, voiceModelStatus, type VoiceModelState } from '../voice/model-store.js';
 import { VOICE_MODEL_ID } from '../voice/manifest.js';
 
 const log = getLogger('daemon');
+
+/** M25 fase 4 — el estado del modelo de voz, sin `verify` (4 GB de sumas). */
+function defaultVoiceModelStatus(dir: string): Promise<{ state: VoiceModelState }> {
+  return voiceModelStatus({ dir });
+}
 
 export type ShutdownReason = 'requested' | 'signal' | 'idle';
 
@@ -323,6 +336,17 @@ export interface StratumdOptions {
    * cualquier otro adjunto. Tests: `null`.
    */
   voiceNotes?: VoiceNotes | null;
+  /**
+   * M25 fase 4 — la sección `voice` de la config **global**, releída en cada
+   * `voice.begin` (un cambio no exige reiniciar el daemon). Por defecto,
+   * `loadConfig(opts.home ?? homedir()).voice`. Inyectable para tests.
+   */
+  voiceConfig?: () => VoiceConfig;
+  /**
+   * M25 fase 4 — el estado del modelo de voz para `voice.begin`, sin `verify`
+   * (son 4 GB de sumas). Desde aquí **nunca** se descarga. Inyectable para tests.
+   */
+  voiceModelStatus?: (dir: string) => Promise<{ state: VoiceModelState }>;
   /** Inyectables para tests del endpoint. */
   isAlive?: (pid: number) => boolean;
   probe?: (ipcPath: string) => Promise<boolean>;
@@ -429,6 +453,8 @@ export class Stratumd {
   readonly channels: ChannelHost | null;
   /** M25 fase 3 — las notas de voz, o `null` con `voiceNotes: null`. */
   readonly voiceNotes: VoiceNotes | null;
+  /** M25 fase 4 — las subidas de push-to-talk, o `null` sin voz. */
+  readonly voiceUploads: VoiceUploads | null;
   /** Se resuelve cuando el daemon ha terminado de apagarse, con el motivo. */
   readonly closed: Promise<ShutdownReason>;
 
@@ -658,6 +684,10 @@ export class Stratumd {
         ? null
         : (opts.voiceNotes ??
           new VoiceNotes({ config: () => loadConfig(opts.home ?? homedir()).voice }));
+    // M25 fase 4 — el push-to-talk sube el audio por el protocolo y comparte la
+    // cola de las notas de Telegram: mismo worker, mismo modelo y mismo `busy`.
+    // Nunca descarga el modelo; que esté lo mira `voice.begin`.
+    this.voiceUploads = this.voiceNotes ? new VoiceUploads({ transcriber: this.voiceNotes }) : null;
     // Tras el centro de aprobaciones: el canal se suscribe a él al crearse.
     this.channels =
       opts.channels === null
@@ -725,6 +755,8 @@ export class Stratumd {
         daemon.traces.dropClient(conn);
         // Las sesiones que alojaba quedan sin anfitrión; no se cierran.
         daemon.peers.disconnected(conn);
+        // M25 fase 4 — su push-to-talk a medias se tira con la conexión.
+        daemon.voiceUploads?.dropConnection(conn.id);
       },
       onDrain: (conn) => {
         daemon.hub.pump(conn);
@@ -894,6 +926,9 @@ export class Stratumd {
       this.dreamingSchedule?.stop();
       // Una pasada de dreaming en vuelo se corta: no retiene el apagado.
       this.dreaming.close();
+      // M25 fase 4 — ninguna subida a medias sobrevive al apagado, y sus plazos
+      // se cancelan antes que las notas (que es la cola que usan).
+      await this.settle('voice uploads', () => this.voiceUploads?.close());
       // M25 fase 3 — la voz lo primero: aborta la descarga del modelo y cierra
       // el worker, para que el apagado no se quede esperando a una
       // transcripción (ni a 4 GB). La cola queda cerrada: ni una nota más entra.
@@ -2410,6 +2445,60 @@ export class Stratumd {
       'doctor.run': async () => ({
         report: await this.doctorReport(conn.client?.kind === 'cli' ? conn.client.version : null),
       }),
+
+      // M25 fase 4 — push-to-talk (§35). El texto vuelve solo a quien lo pidió:
+      // sin eventos y sin entrar en ninguna conversación. Ni el audio ni el
+      // texto pasan por el log.
+      'voice.begin': async (params) => {
+        const uploads = this.voiceUploadsOrThrow();
+        // La sesión solo dice en qué traza se anota la nota al final.
+        if (
+          !this.sessions.has(params.sessionId) &&
+          !this.dormant.has(params.sessionId) &&
+          !this.peers.connected(params.sessionId)
+        ) {
+          throw new ProtocolError('NOT_FOUND', 'Session not found.');
+        }
+        const voice = this.voiceConfig();
+        if (!voice.enabled) {
+          throw new ProtocolError('UNAVAILABLE', 'Voice is disabled in the configuration.', {
+            reason: 'voice-disabled',
+          });
+        }
+        // Sin `verify`: son 4 GB de sumas, y desde aquí nunca se descarga.
+        const status = await (this.opts.voiceModelStatus ?? defaultVoiceModelStatus)(
+          voiceModelDir(),
+        );
+        if (status.state !== 'ready') {
+          throw new ProtocolError(
+            'UNAVAILABLE',
+            'The speech model is not downloaded. Run "stratum voice download".',
+            { reason: 'voice-model-missing' },
+          );
+        }
+        return uploads.begin(conn.id, params.sessionId);
+      },
+      'voice.append': (params) =>
+        this.voiceUploadsOrThrow().append(conn.id, params.uploadId, params.seq, params.pcm),
+      'voice.end': async (params) => {
+        const uploads = this.voiceUploadsOrThrow();
+        const done = await uploads.end(conn.id, params.uploadId).catch((err: unknown) => {
+          throw this.voiceEndFailure(err, conn.id);
+        });
+        // La nota se anota en la traza de su sesión como una de Telegram: solo
+        // metadatos. Si no está montada, no hay dónde dejarla y no pasa nada.
+        this.sessions.get(done.sessionId)?.traceRuntime({
+          event: 'voice',
+          source: conn.client?.kind ?? 'other',
+          ...done.meta,
+          model: VOICE_MODEL_ID,
+        });
+        return { transcript: done.transcript };
+      },
+      'voice.cancel': (params) => {
+        this.voiceUploadsOrThrow().cancel(conn.id, params.uploadId);
+        return {};
+      },
       'watches.list': () => {
         const watches = this.watchesOrThrow();
         return {
@@ -2999,6 +3088,55 @@ export class Stratumd {
       });
     }
     return this.channels;
+  }
+
+  /** M25 fase 4 - las subidas de push-to-talk, o `UNAVAILABLE` sin voz. */
+  private voiceUploadsOrThrow(): VoiceUploads {
+    if (!this.voiceUploads) {
+      throw new ProtocolError('UNAVAILABLE', 'Voice is disabled in the configuration.', {
+        reason: 'voice-disabled',
+      });
+    }
+    return this.voiceUploads;
+  }
+
+  /** M25 fase 4 - la sección `voice` de la config **global**, releída en cada `begin`. */
+  private voiceConfig(): VoiceConfig {
+    return (this.opts.voiceConfig ?? (() => loadConfig(this.opts.home ?? homedir()).voice))();
+  }
+
+  /**
+   * Un fallo de `voice.end`, traducido al protocolo. El detalle de lo que no es
+   * del protocolo va **solo al log**: al cliente no se le cuenta nada del worker.
+   */
+  private voiceEndFailure(err: unknown, connectionId: number): unknown {
+    if (err instanceof ProtocolError) return err;
+    if (err instanceof VoiceNotesDisabledError) {
+      return new ProtocolError('UNAVAILABLE', 'Voice is disabled in the configuration.', {
+        reason: 'voice-disabled',
+      });
+    }
+    if (err instanceof VoiceQueueFullError) {
+      return new ProtocolError('UNAVAILABLE', 'The transcriber is busy with other recordings.', {
+        reason: 'voice-busy',
+      });
+    }
+    if (err instanceof VoiceModelUnavailableError) {
+      return new ProtocolError(
+        'UNAVAILABLE',
+        'The speech model is not downloaded. Run "stratum voice download".',
+        { reason: 'voice-model-missing' },
+      );
+    }
+    if (err instanceof VoiceNotesClosedError) {
+      return new ProtocolError('UNAVAILABLE', 'The daemon is shutting down.', {
+        reason: 'voice-closed',
+      });
+    }
+    log.warn('voice.end failed', { connectionId, err });
+    return new ProtocolError('UNAVAILABLE', 'The recording could not be transcribed.', {
+      reason: 'voice-failed',
+    });
   }
 
   /**

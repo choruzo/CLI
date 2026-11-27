@@ -506,4 +506,90 @@ describe('VoiceNotes', () => {
     expect(voiceFailureKind(new VoiceWorkerError('x', 'load_failed'))).toBe('load');
     expect(voiceFailureKind(new VoiceModelUnavailableError('x'))).toBe('model');
   });
+
+  // M25 fase 4 — el push-to-talk (`voice.begin|append|end`) usa esta misma cola,
+  // pero el audio ya le llega a 16 kHz y el modelo **nunca** se descarga aquí.
+  it('transcribePcm va detrás de una nota de Telegram, en la misma cola', async () => {
+    const gate = deferred<void>();
+    const order: string[] = [];
+    const h = harness({
+      decode: async () => {
+        await gate.promise;
+        return { pcm: pcm48(4), sampleRate: 48_000 };
+      },
+    });
+    const ogg = h.notes.transcribe(async () => {
+      order.push('ogg');
+      return OGG;
+    });
+    const spoken = h.notes.transcribePcm(new Float32Array(2 * 16_000));
+    await settle();
+    // La de PCM espera su turno: no adelanta a la que ya está en curso.
+    expect(order).toEqual(['ogg']);
+    expect(h.notes.busy).toBe(true);
+    gate.resolve();
+    const [first, second] = await Promise.all([ogg, spoken]);
+    expect(first.text).toBe('hola');
+    // Sin decodificar ni bajar nada: `decodeMs` es 0 y el PCM llega tal cual.
+    expect(second).toMatchObject({
+      text: 'hola',
+      durationSec: 2,
+      decodeMs: 0,
+      chunks: 1,
+      skipped: 0,
+    });
+    expect(h.clients[0]!.calls[1]).toHaveLength(2 * 16_000);
+    expect(h.notes.busy).toBe(false);
+  });
+
+  it('transcribePcm sin el modelo rechaza con VoiceModelUnavailableError y no descarga nada', async () => {
+    const h = harness({ ready: false });
+    await expect(h.notes.transcribePcm(new Float32Array(16_000))).rejects.toBeInstanceOf(
+      VoiceModelUnavailableError,
+    );
+    // A diferencia de una nota de Telegram: aquí nunca se descarga (son 4 GB).
+    expect(h.downloads).toBe(0);
+    expect(h.clients).toEqual([]);
+  });
+
+  it('transcribePcm comparte la admisión: apagada, cerrada y cola llena se rechazan en el acto', async () => {
+    const gate = deferred<void>();
+    const h = harness({
+      decode: async () => {
+        await gate.promise;
+        return { pcm: pcm48(4), sampleRate: 48_000 };
+      },
+    });
+    const held = h.notes.transcribe(h.bytes);
+    const rest = [
+      h.notes.transcribe(h.bytes),
+      h.notes.transcribe(h.bytes),
+      h.notes.transcribe(h.bytes),
+    ];
+    // La quinta no cabe, venga del canal o de un push-to-talk.
+    await expect(h.notes.transcribePcm(new Float32Array(16_000))).rejects.toBeInstanceOf(
+      VoiceQueueFullError,
+    );
+    gate.resolve();
+    await Promise.all([held, ...rest]);
+    // Con la cola vacía vuelve a entrar, y se anota en `health()` como las demás.
+    await expect(h.notes.transcribePcm(new Float32Array(16_000))).resolves.toMatchObject({
+      text: 'hola',
+    });
+    expect(h.notes.health().lastNote).toEqual({ device: 'gpu', at: expect.any(Number) });
+  });
+
+  it('transcribePcm con la voz apagada o después de cerrar se rechaza sin crear cliente', async () => {
+    const h = harness();
+    h.setConfig(voiceConfig({ enabled: false }));
+    await expect(h.notes.transcribePcm(new Float32Array(16_000))).rejects.toBeInstanceOf(
+      VoiceNotesDisabledError,
+    );
+    h.setConfig(voiceConfig());
+    h.notes.close();
+    await expect(h.notes.transcribePcm(new Float32Array(16_000))).rejects.toBeInstanceOf(
+      VoiceNotesClosedError,
+    );
+    expect(h.clients).toEqual([]);
+  });
 });
