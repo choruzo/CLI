@@ -3113,6 +3113,15 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
        - el filtro de trozos casi mudos;
        - medir la memoria de la GPU, la RSS en frío y en caliente con varias notas seguidas y la
          repetibilidad, con el dispositivo real confirmado.
+
+       *Implementada el 2026-11-27* (`src/voice/`, `stratum voice status|download|remove|transcribe`,
+       config `voice` solo global), revisada en cuatro rondas por Codex `gpt-6.2-sol` y probada
+       con el modelo real (descarga verificada, `es_00` en GPU en ~2,2 s y una nota de 63 s en
+       6,9 s). Decidido por Claude, cambiable: al cargar no se recalcula el SHA-256 (~75 s por
+       arranque); se comprueban tamaño, `mtime` e `ino` frente a la marca y que no haya enlaces,
+       y el SHA completo se calcula al descargar y con `status --verify`. *Falta*: lo de medir
+       (memoria de la GPU, RSS, repetibilidad) y fijar con esa medida `NEAR_SILENT_DBFS` (−50) y
+       `GPU_CONFIRM_MAX_ENCODER_RTF` (0,1), que siguen provisionales.
     3. Notas de Telegram en el `companion`, con su eco, su marca y su traza.
     4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
        Se diseña aparte.

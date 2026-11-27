@@ -9,6 +9,8 @@ export default defineConfig([
       index: 'src/cli/index.ts',
       // M20: server de fixtures de Renfe para `stratum eval` (nunca va en la imagen de la caja).
       'eval-connectors/renfe': 'src/connector-servers/renfe/fixture-server.ts',
+      // M25: el worker de voz, en su propio proceso (lo lanza `client.ts` con IPC).
+      'voice-worker': 'src/voice/worker.ts',
     },
     format: ['esm'],
     target: 'node22',
@@ -21,7 +23,7 @@ export default defineConfig([
     // `ssh2` no es opcional, pero resuelve su binding nativo (`cpu-features`,
     // `sshcrypto.node`) con requires dinámicos y degrada a JS puro: bundlearlo
     // rompe esa resolución.
-    external: ['@xenova/transformers', 'better-sqlite3', 'sqlite-vec', 'ssh2'],
+    external: ['@xenova/transformers', 'better-sqlite3', 'sqlite-vec', 'ssh2', 'onnxruntime-node'],
     define: {
       __VERSION__: JSON.stringify(pkg.version),
     },

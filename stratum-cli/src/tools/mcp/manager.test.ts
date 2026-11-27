@@ -29,6 +29,7 @@ function makeConfig(servers: { name: string }[] = []): StratumConfig {
     session: DEFAULTS.session,
     plugins: DEFAULTS.plugins,
     box: DEFAULTS.box,
+    voice: DEFAULTS.voice,
     companion: DEFAULTS.companion,
     channels: DEFAULTS.channels,
     provider: undefined,

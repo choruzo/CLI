@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { unsafeReasonProblem } from '../security/secrets.js';
 import { LSP_PRESETS } from '../lsp/presets.js';
+import { CANARY_LANGUAGES } from '../voice/manifest.js';
 import { DEFAULT_GLOBAL_HOTKEY, parseAccelerator } from './accelerator.js';
 
 /** Ventana de contexto cuando ni la config ni `/models` dicen otra. */
@@ -636,6 +637,33 @@ export function boxHasDesktop(box: z.infer<typeof BoxConfigSchema>): boolean {
   return box.desktop ?? box.image === undefined;
 }
 
+/**
+ * M25 — voz: notas de voz transcritas en local con Canary-1B-v2 (`src/voice/`).
+ * **Solo cuenta la sección de la config global**, como `box`: el modelo pesa
+ * ~4 GB en `~/.stratum/models/` y el dispositivo lo elige la persona, no un repo.
+ *
+ * El idioma sale de aquí y **nunca se detecta solo**: con el idioma fijado,
+ * Canary no traduce al inglés lo que oye cuando hay ruido de fondo.
+ */
+export const VoiceConfigSchema = z
+  .object({
+    /** Notas de voz del asistente. Apagado por defecto: el modelo se descarga aparte. */
+    enabled: z.boolean().default(false),
+    /** Idioma de Canary (`voice.language`). Nunca se detecta solo. */
+    language: z.enum(CANARY_LANGUAGES).default('es'),
+    /**
+     * `auto` (WebGPU y, si no se puede, CPU con un aviso), `gpu` (sin reserva) o
+     * `cpu`. DirectML no se usa nunca.
+     */
+    device: z.enum(['auto', 'gpu', 'cpu']).default('auto'),
+    /** Minutos sin uso antes de cerrar el worker y devolver la memoria de la GPU. */
+    idleUnloadMinutes: z.number().int().min(1).max(1440).default(10),
+  })
+  .strict();
+
+/** `voice` tal como queda tras el schema. */
+export type VoiceConfig = z.infer<typeof VoiceConfigSchema>;
+
 /** Gramática de un id de plugin (la de los perfiles): minúsculas, dígitos y `-`. */
 export const PLUGIN_ID_RE = /^[a-z0-9][a-z0-9-]{0,31}$/;
 
@@ -1237,6 +1265,12 @@ export const StratumConfigSchema = z.object({
 
   /** M13 — la caja (target `container:<name>`). Solo de la config global. */
   box: BoxConfigSchema.default({}),
+
+  /**
+   * M25 — voz: notas transcritas en local con Canary-1B-v2. Solo de la config
+   * global (el modelo pesa ~4 GB y el dispositivo lo elige la persona).
+   */
+  voice: VoiceConfigSchema.default({}),
 
   /**
    * Generación de imágenes del asistente (tool `generate_image`). Opcional y

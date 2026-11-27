@@ -82,6 +82,7 @@ interface ConfigLayer {
  * lo decide la persona, no un repo. `companion` y `mcp.readOnlyTools` (M17):
  * qué conecta el asistente de Dot y qué cuenta como inocuo. `tools.browser.executable` y
  * `allowHosts`: qué binario lanza el navegador del agente y qué abre sin preguntar.
+ * `voice` (M25): el modelo de voz (~4 GB) y el dispositivo donde corre.
  * Una capa de proyecto que las declare se
  * carga sin ellas, con un aviso.
  */
@@ -94,6 +95,8 @@ const GLOBAL_ONLY_KEYS: readonly (readonly string[])[] = [
   ['imageGeneration'],
   // M18: un repo clonado no enciende un canal externo.
   ['channels'],
+  // M25: la voz descarga un modelo de ~4 GB y elige dispositivo.
+  ['voice'],
   // Navegador del agente: qué binario se lanza y qué cuenta como local.
   ['tools', 'browser', 'executable'],
   ['tools', 'browser', 'allowHosts'],

@@ -397,3 +397,61 @@ describe('secciones solo globales (navegador del agente)', () => {
     expect(config.tools.browser).toEqual({ enabled: true, allowHosts: [], idleMinutes: 15 });
   });
 });
+
+describe('secciones solo globales (M25: voz)', () => {
+  it('la sección voice de un proyecto se ignora, con aviso; la de la global cuenta', () => {
+    const globalFile = join(dir, 'global.json');
+    const projectFile = join(dir, 'project.json');
+    writeJson(globalFile, { voice: { enabled: true, language: 'en', device: 'gpu' } });
+    // Un repo clonado no elige el dispositivo ni enciende lo que baja 4 GB.
+    const project = { voice: { enabled: false, language: 'de', device: 'cpu', idleUnloadMinutes: 2 } };
+
+    const merged = validateConfigLayer(projectFile, project, globalFile);
+    expect(merged.voice).toEqual({
+      enabled: true,
+      language: 'en',
+      device: 'gpu',
+      idleUnloadMinutes: 10,
+    });
+    // La capa de entrada no se toca.
+    expect(project.voice.enabled).toBe(false);
+
+    expect(
+      validateConfigLayer(globalFile, { voice: { device: 'cpu' } }, globalFile).voice,
+    ).toEqual({ enabled: false, language: 'es', device: 'cpu', idleUnloadMinutes: 10 });
+  });
+
+  it('loadConfig no aplica la voz de un repo clonado', () => {
+    writeJson(join(dir, '.stratumrc.json'), { voice: { enabled: true, language: 'uk' } });
+    const config = loadConfig(dir);
+    expect(config.voice.enabled).toBe(false);
+    expect(config.voice.language).toBe('es');
+    expect(takeConfigDeprecations().join('\n')).toMatch(/"voice" solo se lee de la config global/);
+  });
+
+  it('el idioma tiene que ser uno de Canary, y los minutos van de 1 a 1440', () => {
+    const globalFile = join(dir, 'global.json');
+    expect(() =>
+      validateConfigLayer(globalFile, { voice: { language: 'gl' } }, globalFile),
+    ).toThrow(ConfigError);
+    expect(() =>
+      validateConfigLayer(globalFile, { voice: { idleUnloadMinutes: 0 } }, globalFile),
+    ).toThrow(ConfigError);
+    expect(() =>
+      validateConfigLayer(globalFile, { voice: { idleUnloadMinutes: 1441 } }, globalFile),
+    ).toThrow(ConfigError);
+    expect(() =>
+      validateConfigLayer(globalFile, { voice: { device: 'directml' } }, globalFile),
+    ).toThrow(ConfigError);
+  });
+
+  it('por defecto: apagada, es, auto y 10 minutos', () => {
+    const config = loadConfig(dir);
+    expect(config.voice).toEqual({
+      enabled: false,
+      language: 'es',
+      device: 'auto',
+      idleUnloadMinutes: 10,
+    });
+  });
+});
