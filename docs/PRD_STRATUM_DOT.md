@@ -2935,7 +2935,8 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
   §23.12 solo la entrada.
   - Notas de voz de Telegram transcritas **en local**. El audio no sale del equipo ni se guarda, y
     al historial va el texto con su marca.
-  - Después, *push-to-talk* en Dot. La respuesta hablada (TTS) y la escucha continua siguen fuera.
+  - Después, *push-to-talk* en Dot. La respuesta hablada (TTS) sigue fuera. La escucha continua
+    también, salvo la de la palabra de activación (fase 5, *añadida por el usuario el 2026-11-27*).
   - *Decidido por el usuario el 2026-11-25*: el modelo se **descarga la primera vez que hace
     falta**. Antes de elegirlo pidió buscar algo más preciso que whisper `small` y que use la GPU,
     empezando por lo que usa Hex (Parakeet TDT v3 por defecto, y WhisperKit).
@@ -3176,8 +3177,93 @@ Mismo orden que hasta ahora: cada hito se demuestra sin interfaz antes de pintar
          de 1,1 a 1,7 s cada una y con el texto bien.
        - *El dispositivo en `doctor`*, hecho el 2026-11-27: área `voice` (`voice.enabled|runtime|
          model|device|last`) y revisión 2 del protocolo, porque Dot 0.4.0 rechaza el área nueva.
-    4. *Push-to-talk* en Dot: el audio por el protocolo como las imágenes (`images.*`, a trozos).
-       Se diseña aparte.
+    4. *Push-to-talk* en Dot.
+
+       *Decidido por el usuario el 2026-11-27*: graba el **lado nativo**, nunca el webview; se
+       habla **con el atajo global y con un botón del chat**; y el texto **va al campo para
+       revisarlo**, no se envía solo. *Diseño propuesto por Claude el mismo día y aceptado por el
+       usuario* (también el riesgo acotado del botón y que Dot no descargue el modelo):
+       - **Gestos**:
+         - **Atajo** `Ctrl+Alt+Space`. Un toque sigue abriendo el Dot compacto, como hoy.
+           Mantenido más de **300 ms**, abre el compacto en «Listening…» y graba hasta soltarlo.
+           Las repeticiones de tecla del SO no cuentan. `Esc` mientras graba cancela y tira el
+           audio.
+         - **Botón de micro** en el campo de escritura de la ventana principal (asistente y
+           cabina): se mantiene pulsado para grabar y se suelta para terminar. Salir del botón o
+           perder el foco de la ventana cancela.
+         - Menos de 0,5 s de audio no se transcribe: se toma por un toque sin querer.
+       - **Grabación** (`src-tauri/src/voice.rs`, crate `cpal` sobre WASAPI):
+         - se graba del micrófono por defecto del SO, en memoria, se mezcla a mono y se convierte a
+           **PCM16 a 16 kHz** en Rust. Desde 48 kHz se usa el mismo FIR que `resample.ts` (Blackman
+           de 63 coeficientes y diezmado por 3) y desde 16 kHz se pasa tal cual; con otra frecuencia
+           da error («microphone at N Hz not supported») y no se graba nada;
+         - el audio **nunca va a disco, al log ni al webview**: solo se va subiendo al daemon y se
+           suelta al terminar o cancelar;
+         - una grabación a la vez, como mucho 300 s (al llegar se corta y se transcribe lo que hay);
+         - mientras graba, el icono de la bandeja cambia (además del indicador de micrófono de
+           Windows). Si el SO deniega el micrófono, se dice con el paso para permitirlo.
+       - **El botón del chat da al webview poder para empezar a grabar**, aunque nunca recibe el
+         audio. Para acotarlo: el nativo solo graba si lo pide `main` **con la ventana visible y con
+         el foco**, para en cuanto la pierde, y nunca pasa de 300 s. Lo que devuelve al webview es el
+         texto, igual que si se hubiera escrito. El atajo no pasa por el webview.
+       - **Protocolo** (revisión 3, `docs/protocol.md` §35), métodos `control` cuyo resultado solo
+         ve quien los pide; no hay eventos:
+         - `voice.begin { sessionId }` → `{ uploadId, sampleRate: 16000, maxSeconds: 300 }`. La
+           sesión es la del campo y solo sirve para la traza. Falla con `UNAVAILABLE` y el motivo
+           `voice-disabled`, `voice-model-missing` o `voice-busy`;
+         - `voice.append { uploadId, seq, pcm }`, con `pcm` en base64, como mucho 64 KiB (2 s) por
+           llamada y `seq` consecutivo. Se manda **mientras se graba**, así que al soltar solo
+           falta la cola;
+         - `voice.end { uploadId }` → `{ text, durationSec, capped, device }`;
+         - `voice.cancel { uploadId }`.
+
+         Hay una subida abierta por conexión. Se tira si pasa 30 s sin `append`, si se cierra la
+         conexión o con más de 300 s de audio. `voice.end` comparte la cola de `VoiceNotes` con
+         Telegram (1 activa y 3 en espera).
+       - **Sin descarga desde Dot** (*decidido por Claude, cambiable*): si el modelo no está, el
+         botón y el atajo dicen que se descargue con `stratum voice download`. Esperar 4 GB con una
+         tecla pulsada no tiene sentido, y Telegram sigue descargándolo solo.
+       - **El texto**: va al campo del Dot compacto (o del chat), con el foco y el cursor al final.
+         Ahí se corrige, y `Enter` lo envía como siempre: un run nuevo o steering. Si se envía tal
+         cual, lleva la marca `[nota de voz, M:SS]`; si se toca, la pierde (*decidido por el usuario
+         el 2026-11-27*: lo corregido ya es de la persona). Lo que ya hubiera escrito se queda
+         delante.
+       - **Dot compacto**: su página sigue sin IPC. Mientras graba y transcribe, consulta el estado
+         a su esquema (`dot-ask`, con el `nonce`) cada 150 ms: `listening` con el nivel de
+         entrada, `transcribing`, `done` con el texto o `error` con el motivo. Mientras graba no se
+         cierra al perder el foco.
+       - **Traza**: lo mismo que una nota de Telegram, con `source: 'dot'`, en la traza de la sesión
+         de `voice.begin`. Nunca el audio; el texto, solo si se envía, como un mensaje escrito.
+       - **Partes**: (1) protocolo y daemon (`voice.*` y `VoiceNotes.transcribePcm`); (2) grabación
+         nativa y `dot-link`; (3) el atajo y el Dot compacto; (4) el botón del chat; (5) E2E, docs
+         y release (Dot 0.4.1 con la revisión 3).
+    5. *Palabra de activación* (*pedida por el usuario el 2026-11-27*; sin diseñar). Decir el
+       nombre del asistente empieza a escucharle, como si se mantuviera el atajo, sin tocar nada.
+       Primero hay que medir, como se hizo con Canary:
+       - **qué modelo**: uno pequeño que corra siempre en local y en CPU (openWakeWord u otro en
+         ONNX), y si deja entrenar un nombre propio con voces sintéticas;
+       - **falsas activaciones** con la tele y la radio de la batería de la fase 1 (ya se vio que la
+         tele hace inventar frases) y **activaciones perdidas** con voz baja y a distancia;
+       - **coste** de tenerlo siempre encendido (CPU y memoria).
+
+       Reglas que no dependen de lo que se mida:
+       - lo de antes de la palabra **no sale del detector**: no se guarda, no se sube al daemon ni
+         llega a Canary;
+       - se activa y desactiva a la vista (bandeja y ajuste), y está apagado por defecto;
+       - el texto va al campo, como en la fase 4: lo oído nunca se envía solo.
+
+       Falta decidir con el usuario: el nombre (¿«Dot»?), quién escucha (Dot o el daemon) y qué
+       pasa con la ventana cerrada.
+    6. *Distinguir hablantes* (*pedido por el usuario el 2026-11-27*; sin diseñar). Saber quién de
+       casa habla, con una huella de voz por persona (embeddings tipo ECAPA o WeSpeaker en ONNX)
+       que se registra adrede. Hay que medir los aciertos con las voces de MLS y con ruido.
+       - **No es autoridad**: una voz se imita, y una grabación o la tele también suenan. Quién
+         habla puede personalizar (la memoria o el trato de esa persona), pero nunca aprueba nada,
+         no levanta ninguna guarda ni cambia lo que se puede hacer. Es como `origin`: procedencia.
+       - Las huellas de voz son datos biométricos: solo en local, en el directorio del
+         `companion`, se borran desde Dot y la CLI, y nunca van al protocolo ni a la traza.
+       - Falta decidir con el usuario: para qué se usa exactamente (¿marcar el mensaje con la
+         persona? ¿memoria por persona?) y si antes hace falta separar dos voces en una misma nota.
 
 - **M26 — Documentos** [propuesto 2026-11-20].
   - Arrastrar ficheros a Dot o mandarlos por Telegram para que caigan en `/exchange`, con tope de
