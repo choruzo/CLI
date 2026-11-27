@@ -768,6 +768,11 @@ pub struct VoiceRecorder<U: VoiceUploads> {
     listener: Option<Listener>,
     make_source: SourceFactory,
     active: Mutex<Option<Active>>,
+    /// Hay un `start` abriendo el micrófono. Reserva el sitio **sin tener el
+    /// candado de `active`**: abrir el micro tarda y avisar a la bandeja necesita
+    /// el hilo principal, que puede estar esperando ese candado (al perder el foco
+    /// la ventana principal llama a `abort_from`). Tenerlo cogido aquí colgó Dot.
+    starting: AtomicBool,
 }
 
 impl<U: VoiceUploads> VoiceRecorder<U> {
@@ -782,6 +787,7 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
                 CpalSource::open().map(|source| Box::new(source) as Box<dyn AudioSource>)
             }),
             active: Mutex::new(None),
+            starting: AtomicBool::new(false),
         }
     }
 
@@ -798,7 +804,7 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
     }
 
     pub fn is_recording(&self) -> bool {
-        lock(&self.active).is_some()
+        self.starting.load(Ordering::SeqCst) || lock(&self.active).is_some()
     }
 
     /// Quién empezó la nota en curso, si hay alguna.
@@ -830,15 +836,33 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
     }
 
     async fn start_with(&self, session: Session, origin: Origin) -> Result<(), CommandError> {
-        // El candado se tiene hasta apuntar la nota (aquí no hay ningún `await`):
-        // dos `start` a la vez no pueden abrir el micrófono dos veces.
-        let mut slot = lock(&self.active);
-        if slot.is_some() {
-            return Err(CommandError::new(
+        // Una nota a la vez: se reserva el sitio con `starting` y **sin** tener el
+        // candado de `active` mientras se abre el micrófono (ver `starting`).
+        let busy = || {
+            CommandError::new(
                 CommandErrorKind::Invalid,
                 "A note is already being recorded.",
-            ));
+            )
+        };
+        if lock(&self.active).is_some() {
+            return Err(busy());
         }
+        if self
+            .starting
+            .compare_exchange(false, true, Ordering::SeqCst, Ordering::SeqCst)
+            .is_err()
+        {
+            return Err(busy());
+        }
+        let started = self.open_note(session, origin);
+        // `active` se apunta antes de soltar la reserva: entre las dos no cabe otro `start`.
+        let result = started.map(|active| *lock(&self.active) = Some(active));
+        self.starting.store(false, Ordering::SeqCst);
+        result
+    }
+
+    /// Abre el micrófono y lanza el bucle de subida. Sin ningún candado cogido.
+    fn open_note(&self, session: Session, origin: Origin) -> Result<Active, CommandError> {
         let source = (self.make_source)().map_err(not_sent)?;
         let rate = source.sample_rate();
         // El micrófono manda; el resto de frecuencias no están medidas.
@@ -881,12 +905,11 @@ impl<U: VoiceUploads> VoiceRecorder<U> {
             session,
             self.logger.clone(),
         ));
-        *slot = Some(Active {
+        Ok(Active {
             shared,
             pump,
             origin,
-        });
-        Ok(())
+        })
     }
 
     /// Termina la nota: para el micrófono, sube el resto y pide `voice.end`.
@@ -1837,6 +1860,51 @@ mod tests {
         assert_eq!(*lock(&heard), vec![true], "la bandeja dice «listening…»");
         recorder.cancel().await.unwrap();
         assert_eq!(*lock(&heard), vec![true, false]);
+    }
+
+    /// Lo que colgó Dot (2026-11-27): avisar a la bandeja necesita el hilo
+    /// principal, y ese hilo, al perder el foco la ventana principal, llama a
+    /// `abort_from`. Si `start` tenía cogido el candado de la nota mientras
+    /// avisaba, se esperaban el uno al otro para siempre.
+    #[tokio::test(flavor = "multi_thread")]
+    async fn avisar_a_la_bandeja_no_espera_al_candado_de_la_nota() {
+        let cell: Arc<std::sync::OnceLock<Arc<VoiceRecorder<FakeUploads>>>> =
+            Arc::new(std::sync::OnceLock::new());
+        let answered = Arc::new(AtomicBool::new(false));
+        let listener = {
+            let cell = cell.clone();
+            let answered = answered.clone();
+            Arc::new(move |listening: bool| {
+                if !listening {
+                    return;
+                }
+                // El «hilo principal»: al perder el foco, `abort_from`.
+                let recorder = cell.get().expect("recorder").clone();
+                let (done, wait) = std::sync::mpsc::channel();
+                std::thread::spawn(move || {
+                    recorder.abort_from(Origin::Main);
+                    let _ = done.send(());
+                });
+                if wait.recv_timeout(Duration::from_secs(2)).is_ok() {
+                    answered.store(true, Ordering::SeqCst);
+                }
+            }) as Listener
+        };
+        let source = FakeSource::new(TARGET_SAMPLE_RATE);
+        let recorder = Arc::new(
+            VoiceRecorder::new(FakeUploads::new(), Logger::none(), Some(listener))
+                .with_source(source.factory())
+                .with_limits(Limits::default()),
+        );
+        let _ = cell.set(recorder.clone());
+        recorder.start_companion().await.unwrap();
+        assert!(
+            answered.load(Ordering::SeqCst),
+            "abort_from tiene que contestar mientras start avisa a la bandeja"
+        );
+        // La nota del atajo sigue: `abort_from(Main)` no la toca.
+        assert_eq!(recorder.origin(), Some(Origin::Shortcut));
+        recorder.cancel().await.unwrap();
     }
 
     #[tokio::test]
